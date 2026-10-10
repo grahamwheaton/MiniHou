@@ -201,16 +201,22 @@ def scenario():
     mod = bpy.data.objects[proxy.PROXY_OBJECT].modifiers[proxy.MODIFIER]
     ident = proxy.mapping(mod.node_group)["Hill Height"]
     sent0, applied0 = rt.sent_count, rt.applied_count
+    t_drag = time.perf_counter()
     for i in range(30):
         mod[ident] = [0.0, 0.0, 1.2 + 0.04 * (i + 1)]
         mod.id_data.update_tag()
         yield 1 / 60
+    drag_s = time.perf_counter() - t_drag
     final = (0.0, 0.0, float(np.float32(1.2 + 0.04 * 30)))
     yield from wait(lambda: rt.forwarder.known.get("Hill Height", (0, 0, 0))[2] == final[2] and rt.applied_count > applied0,
                     20, "drag reached the engine and came back")
     yield from sleep(1.0)                                    # let the last update land
     sent = rt.sent_count - sent0
-    check("drag was forwarded by the depsgraph handler and coalesced", 1 <= sent < 30, f"{sent} set_param for 30 edits")
+    # Timer granularity (~15.6 ms on Windows) and slow software redraws stretch the "60 Hz" drag, so the
+    # bound is the forwarding rate limit over the drag's real duration, not a fixed count.
+    limit = int(drag_s * 30) + 2
+    check("drag was forwarded by the depsgraph handler and rate limited", 1 <= sent <= min(30, limit),
+          f"{sent} set_param for 30 edits over {drag_s:.2f}s (limit {limit})")
     known = {k: v for k, v in rt.forwarder.known.items()}
     got, want = evaluated_P(), expected_P(known)
     check("evaluated proxy mesh matches the engine after the drag", got.shape == want.shape and np.allclose(got, want, atol=1e-4),
