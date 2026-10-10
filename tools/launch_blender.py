@@ -204,6 +204,8 @@ def gui_test(exe, env, keep_open=False, timeout=600, extra=()):
                 print(f"Blender did not finish within {timeout}s (killed)")
         with open(blender_log, encoding="utf-8", errors="replace") as f:
             console = f.read()
+        os.makedirs(shots, exist_ok=True)
+        _shutil.copyfile(blender_log, os.path.join(shots, "blender_console.txt"))
         problems = [l for l in console.splitlines() if "Traceback" in l or l.startswith(("Error", "ERROR")) or "Exception" in l]
         if not os.path.exists(out):
             print("no results written; Blender console follows:\n" + console[-4000:])

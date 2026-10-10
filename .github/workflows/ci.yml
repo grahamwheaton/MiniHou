@@ -1,0 +1,130 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "ccr-*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BLENDER_VERSION: "5.1.2"
+  BLENDER_SERIES: "5.1"
+  PYTHONWARNDEFAULTENCODING: "1"
+
+jobs:
+  engine:
+    name: tests (${{ matrix.os }}, py${{ matrix.python }}, ${{ matrix.backend }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-latest, python: "3.11", backend: numpy}
+          - {os: ubuntu-latest, python: "3.13", backend: numba}
+          - {os: windows-latest, python: "3.12", backend: numba}
+          - {os: windows-latest, python: "3.13", backend: numpy}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: install
+        run: python -m pip install numpy ${{ matrix.backend == 'numba' && 'numba' || '' }}
+      - name: backend
+        run: python -c "from minihou import accel; print(accel.status())"
+      - name: unit tests (EncodingWarning is an error)
+        run: python -W error::EncodingWarning -m unittest discover -s tests -t .
+
+  blender-windows:
+    name: Blender 5.1 on Windows (selftest + benchmark)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install numpy numba
+      - name: cache Blender
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: blender
+          key: blender-windows-${{ env.BLENDER_VERSION }}
+      - name: download Blender
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $name = "blender-$env:BLENDER_VERSION-windows-x64"
+          $url = "https://download.blender.org/release/Blender$env:BLENDER_SERIES/$name.zip"
+          Write-Host "downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile blender.zip
+          Expand-Archive blender.zip -DestinationPath .
+          Rename-Item $name blender
+      - name: addon selftest in blender --background (via the launcher, as a user would run it)
+        shell: pwsh
+        run: python tools/launch_blender.py --blender blender\blender.exe --selftest 2>&1 | Tee-Object selftest.txt; exit $LASTEXITCODE
+      - name: 1M-point link benchmark
+        shell: pwsh
+        run: |
+          python tools/launch_blender.py --blender blender\blender.exe --bench -- --points 1000000 --iterations 15 2>&1 | Tee-Object bench_raw.txt
+          python tools/launch_blender.py --blender blender\blender.exe --bench -- --mode engine --points 1000000 --iterations 10 2>&1 | Tee-Object bench_engine.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: blender-windows-logs
+          path: |
+            selftest.txt
+            bench_*.txt
+
+  blender-windows-gui:
+    name: Blender 5.1 GUI smoke test on Windows (experimental, software OpenGL)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install numpy numba
+      - name: cache Blender
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: blender
+          key: blender-windows-${{ env.BLENDER_VERSION }}
+      - name: download Blender
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $name = "blender-$env:BLENDER_VERSION-windows-x64"
+          Invoke-WebRequest -Uri "https://download.blender.org/release/Blender$env:BLENDER_SERIES/$name.zip" -OutFile blender.zip
+          Expand-Archive blender.zip -DestinationPath .
+          Rename-Item $name blender
+      - name: software OpenGL (Mesa llvmpipe) next to blender.exe
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo pal1000/mesa-dist-win --pattern "*release-msvc.7z" --output mesa.7z
+          7z x mesa.7z -omesa | Out-Null
+          Copy-Item mesa\x64\*.dll blender\
+          Get-ChildItem blender\*.dll | Where-Object { $_.Name -match "opengl32|gallium|glapi" } | ForEach-Object { $_.Name }
+      - name: GUI smoke test
+        shell: pwsh
+        env:
+          GALLIUM_DRIVER: llvmpipe
+        run: python tools/launch_blender.py --blender blender\blender.exe --gui-test 2>&1 | Tee-Object gui.txt; exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: blender-windows-gui
+          path: |
+            gui.txt
+            gui_test_output/
