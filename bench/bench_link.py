@@ -52,13 +52,20 @@ def script_args():
 
 
 def spawn(cmd):
+    """Start a subprocess and return (process, port) once it prints its "listening ... :PORT" line.
+    Startup may print other lines first (e.g. the compute backend), so scan rather than read one line."""
     p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    line = p.stdout.readline()
-    m = re.search(r"(?:listening |on 127\.0\.0\.1:)(\d+)", line)
-    if not m:
-        p.kill()
-        raise RuntimeError(f"subprocess failed to start: {line}{p.stdout.read()}")
-    return p, int(m.group(1))
+    seen = []
+    for _ in range(50):
+        line = p.stdout.readline()
+        if not line:
+            break
+        seen.append(line)
+        m = re.search(r"(?:listening |on 127\.0\.0\.1:)(\d+)", line)
+        if m:
+            return p, int(m.group(1))
+    p.kill()
+    raise RuntimeError("subprocess failed to start:\n" + "".join(seen))
 
 
 class Receiver:

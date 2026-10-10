@@ -70,11 +70,19 @@ values are recorded as known before they are written to the modifier; (5) forwar
 
 ## Next steps (not started)
 
-1. **Noise speed**: the options, in order of cost: chunked `ThreadPoolExecutor` over point ranges (numpy ufuncs release the GIL; stdlib only; prototype measured
-   2.8x on 4 threads, bit-identical, slower at 8); a cheaper gradient formulation; Numba/Rust for the hot kernels (needs your OK, as it adds a dependency).
+1. ~~Noise speed~~ done: optional Numba backend (see README, "Speed"). Remaining: a wrangle compiler can target the same machinery
+   (`@njit` on generated code, with the numpy fallback); cheaper topology rebuilds in Blender.
 2. Wrangle node (parser + numpy codegen), attribute-flow metadata on node types.
 3. More nodes: delete/blast, group/attribute-from-group, attribute transfer / ray, boolean-free modelling basics, instancing packed prims.
 4. Multiple outputs / several display nodes; detail attributes and normals to Blender; undo-friendly parameter writes.
 5. Time/frame context in the cache key for animated graphs; a `bpy.msgbus`/frame-change hook.
 6. Web editor (explicitly deferred).
 7. Package the add-on as a Blender extension (manifest + licence choice is yours) and add CI that runs the `bpy`-module tests.
+
+## Acceleration design (added after the benchmark)
+
+Profiling at 1M points showed noise (275 ms), scatter (1.2 s: many numpy temporaries) and copy_to_points (570 ms: per-copy rotation matrices) as the
+engine-side costs; the link and the Blender write were already ~8 ms. `minihou/accel.py` + `nodes/_kernels.py` add fused Numba kernels behind the
+existing node functions. Rules: optional; backend chosen by availability only; same algorithm and float32 coordinate math as the numpy code (kernel
+tests mutation-checked); launches serialised by a lock; any kernel exception disables acceleration and re-runs the numpy path; seeds reduced to 32 bits in
+both paths. A thread-pool-over-numpy alternative gave only 2.8x and was not adopted.

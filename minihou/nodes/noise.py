@@ -1,7 +1,27 @@
 import numpy as np
 
+from .. import accel
 from ..sdk import Enum, Float, Int, Str, Vec3, node
 from ._util import fbm3
+
+
+def _noise_fused(geo, attrib, mode, amplitude, frequency, offset, octaves, lacunarity, gain, seed):
+    """One-pass Numba version for the vec3 cases (P displacement, or a vector attribute). Returns None to
+    use the numpy path (acceleration off/failed, or the scalar-attribute case which is not hot)."""
+    k = accel.kernels()
+    vector = mode == "vector"
+    add = attrib == "P"
+    if k is None or not (add or vector):
+        return None
+    P = np.ascontiguousarray(geo.P)
+    out = np.empty_like(P)
+    r = accel.call(k.noise_vec, P, float(frequency), np.asarray(offset, np.float32), np.asarray(amplitude, np.float32),
+                   int(seed) & 0xFFFFFFFF, int(octaves), float(lacunarity), float(gain), vector, add, out)
+    if r is accel.FAILED:
+        return None
+    res = geo.copy()
+    res.point[attrib] = out
+    return res
 
 
 @node("noise", inputs=["geo"], category="modify", params=[
@@ -25,6 +45,9 @@ def noise(geo, attrib, mode, amplitude, frequency, offset, octaves, lacunarity, 
     """
     if not attrib:
         raise ValueError("'attrib' must not be empty")
+    fused = _noise_fused(geo, attrib, mode, amplitude, frequency, offset, octaves, lacunarity, gain, seed)
+    if fused is not None:
+        return fused
     pos = geo.P * np.float32(frequency) + np.asarray(offset, np.float32)
     amp = np.asarray(amplitude, np.float32)
     if mode == "scalar":

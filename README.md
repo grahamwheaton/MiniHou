@@ -16,7 +16,11 @@ Status: **milestone 1**. See [docs/PLAN.md](docs/PLAN.md) for the design and wha
 
 ## Quick start (Windows)
 
-You need Python 3.11+ with numpy 1.26+ (`py -m pip install numpy`) and Blender 5.1.
+You need Python 3.11+, Blender 5.1, and:
+
+```powershell
+py -m pip install numpy numba      # numba is optional but makes big graphs 10-20x faster; see "Speed" below
+```
 
 ```powershell
 cd path\to\BlenderHoudini
@@ -74,7 +78,9 @@ minihou/                  the engine (numpy + stdlib only; never imports bpy)
   sdk.py                  @node decorator, Float/Int/Bool/Str/Vec3/Enum params, Input/Output ports, Registry
   graph.py                Graph model, validation, JSON load/save, exposed parameters
   evaluator.py            pull-based cook, hash-keyed LRU cache, per-cook stats
+  accel.py                optional Numba backend: availability, safe kernel launch, fallback, warm-up
   nodes/                  grid transform noise scatter copy_to_points merge output
+  nodes/_kernels.py       Numba kernels (noise, scatter, copy_to_points); numpy reference lives in each node
   link/protocol.py        wire format  (shared verbatim with the add-on)
   link/client.py          threaded client (shared verbatim with the add-on)
   link/diff.py            per-client "what changed" logic
@@ -145,25 +151,43 @@ the fast paths and falls back to the classic API if Blender changes them.
 Rebuilding topology for a 1M-quad mesh (only needed when connectivity changes): ~300 ms
 (of which ~150 ms is `mesh.update(calc_edges=True)`).
 
-End to end for a slider edit (`set_param` -> engine cook -> diff -> socket -> Blender write) on a grid + noise graph, median of 10
+### Speed
+
+End to end for a slider edit (`set_param` -> engine cook -> diff -> socket -> Blender write) on a grid + noise graph, median of 15
 edits; position-only updates, topology untouched:
 
-| points | end-to-end | engine noise cook | Blender write |
-|---|---|---|---|
-| 10k | 3 ms | 2.4 ms | 0.08 ms |
-| 100k | 28 ms | 26 ms | 0.25 ms |
-| 250k | 75 ms | 71 ms | 0.5 ms |
-| 1M | 285-330 ms | 276-318 ms | 1.7 ms |
+| points | numpy only | **with numba** | of which engine cook | of which Blender write |
+|---|---|---|---|---|
+| 10k | 3 ms | **1.5 ms** | 0.6 ms | 0.08 ms |
+| 100k | 28 ms | **4 ms** | 2.5 ms | 0.14 ms |
+| 250k | 75 ms | **6.6 ms** | 4.5 ms | 0.3 ms |
+| 1M | 326 ms | **29 ms** | 18 ms | 1.5 ms |
 
-So the link is not the bottleneck at any size; the engine's numpy noise is (per-corner gradient lookups are ~80% of its cost). Interactive
-(~30 fps) holds up to roughly 100k points for noise-heavy graphs. A prototype that splits the noise over a stdlib thread pool gave
-**2.8x on 4 threads** with bit-identical output (and was slower at 8 threads); it is not in the engine yet.
+Per node at 1M points (warm, 4 cores): noise 283 -> 12.7 ms (22x), 4 octaves 1106 -> 46 ms (24x), vector noise 767 -> 35 ms (22x),
+scatter 1M points 1012 -> 160 ms (6x), copy_to_points (1M copies of 9 points) 536 -> 134 ms (4x).
+
+How the acceleration stays reliable:
+* **Optional.** Without numba (or with `MINIHOU_NO_NUMBA=1`) the original numpy code runs; the whole test-suite passes both ways.
+  `py -m minihou serve` prints which backend is active.
+* **Same algorithm, checked.** Kernels use the same hash, RNG stream and float32 coordinate arithmetic as the numpy code, and tests
+  compare the two backends (noise to 2e-6, scatter picks identical primitives, including exact cumulative-area boundary draws). The kernel
+  tests were mutation-checked (wrong constants / rules are caught). Results agree to float rounding, not bit-for-bit.
+* **A broken JIT cannot fail a cook.** If a kernel raises, the engine logs it, switches acceleration off for the process and finishes
+  the cook on numpy. A numba import problem of any kind just means numpy.
+* **No timing-dependent results.** The backend is chosen by availability only, never "numpy until the JIT is warm".
+* **Thread-safe.** Kernel launches are serialised (numba's default threading layer aborts the process on concurrent launches), tested with 6
+  threads cooking at once.
+* **Start-up.** The first run compiles the kernels (~4 s, in the background after `serve` starts; a cook that arrives sooner waits).
+  They are cached on disk afterwards (~0.15 s).
+
+What is left at 1M points: the very first frame (40 MB incl. topology: ~320 ms cook, ~240 ms to build the Blender mesh) and topology changes
+(~300 ms to rebuild a 1M-quad mesh, half of it Blender's edge computation).
 
 ## Verified vs not verified
 
 Verified here:
-* 154 tests pass on Python 3.11 (numpy 1.26.4), 3.12 (numpy 2.5) and 3.13 (numpy 2.5). The 18 Blender tests are skipped without `bpy`
-  and pass under Blender 5.1.2 (`bpy` module, headless).
+* 198 tests pass on Python 3.11 (numpy 1.26.4), 3.12 (numpy 2.5) and 3.13 (numpy 2.5), each with numba 0.68 and without it. 18 tests need
+  Blender and are skipped without `bpy`; they pass under Blender 5.1.2 (`bpy` module, headless), with the engine running numba.
 * The Blender tests run the add-on against a real engine subprocess over a real socket and compare results on the *evaluated*
   Geometry Nodes proxy: parameter round trip, no feedback loop, burst coalescing, engine restart/reconnect, hot reload of the graph file.
 * `tools/blender_bootstrap.py` runs; the four operators run; the panel `draw()` runs against a stub layout; the add-on zip installs and
@@ -174,7 +198,7 @@ Not verified:
   bootstrap's deferred connect timer has not fired. The panel has not been rendered by a real UI. This is the biggest remaining unknown.
 * **Windows.** Everything above ran on Linux. Windows-specific code that has never run: exclusive port binding
   (`SO_EXCLUSIVEADDRUSE`), Blender discovery paths in `launch_blender.py`, `blender.exe` console behaviour.
-* Python 3.10 (grammar-checked only), numpy 1.24/1.25, Blender 4.2-5.0 (the add-on declares 4.2+ but was only run on 5.1.2).
+* Python 3.10, numpy 1.24/1.25, numba on Windows (it ships wheels; not tried), Blender 4.2-5.0 (the add-on declares 4.2+ but was only run on 5.1.2).
 * A real `blender` executable: Claude had only the `bpy` PyPI module, not the binary, so `launch_blender.py --selftest/--bench` have
   been run through the `bpy` module equivalents, not through `blender --background`.
 

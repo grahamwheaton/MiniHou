@@ -46,6 +46,9 @@ def _cmd_serve(args) -> int:
     except GraphError as e:
         print("graph error:\n  " + "\n  ".join(e.errors), file=sys.stderr)
         return 2
+    from . import accel
+    print(f"compute backend: {accel.status()}", flush=True)
+    accel.warmup_async()          # compile/load kernels in the background; a cook that arrives early just waits
     session = Session(g, cache_bytes=int(args.cache_mb * 1024 * 1024))
     server = LinkServer(session, args.host, args.port)
     try:

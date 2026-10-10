@@ -5,6 +5,10 @@ description = "Mini Houdini: a standalone procedural geometry engine that live-l
 requires-python = ">=3.11"
 dependencies = ["numpy>=1.26"]
 
+[project.optional-dependencies]
+# Optional accelerator: 4-15x faster noise / scatter / copy_to_points on large inputs. Falls back to numpy.
+accel = ["numba>=0.60"]
+
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"

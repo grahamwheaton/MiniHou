@@ -60,11 +60,19 @@ class Engine:
     def __init__(self, graph_path, port=0):
         self.proc = subprocess.Popen([os.environ.get("MINIHOU_ENGINE_PYTHON", sys.executable), "-u", "-m", "minihou", "serve", str(graph_path), "--port", str(port)],
                                      cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        line = self.proc.stdout.readline()
-        m = re.search(r"on 127\.0\.0\.1:(\d+)", line)
+        seen = []
+        m = None
+        for _ in range(50):                    # startup may print other lines (e.g. compute backend) first
+            line = self.proc.stdout.readline()
+            if not line:
+                break
+            seen.append(line)
+            m = re.search(r"on 127\.0\.0\.1:(\d+)", line)
+            if m:
+                break
         if not m:
             self.proc.kill()
-            raise RuntimeError(f"engine failed to start: {line}{self.proc.stdout.read()}")
+            raise RuntimeError("engine failed to start:\n" + "".join(seen))
         self.port = int(m.group(1))
 
     def stop(self):

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from .. import accel
 from ..geometry import Topology
 
 
@@ -118,7 +119,23 @@ def perlin3(p: np.ndarray, seed: int = 0) -> np.ndarray:
 
 
 def fbm3(p: np.ndarray, seed: int, octaves: int, lacunarity: float, gain: float) -> np.ndarray:
-    """Fractal sum of Perlin octaves, normalised so the amplitude stays near [-1, 1]."""
+    """Fractal sum of Perlin octaves, normalised so the amplitude stays near [-1, 1].
+
+    Uses the Numba kernel when available (same algorithm, parallel), else :func:`fbm3_numpy`. Only the low
+    32 bits of ``seed`` matter to the hash, so it is reduced first (also keeps it in int64 range).
+    """
+    k = accel.kernels()
+    if k is not None:
+        pos = np.ascontiguousarray(p, dtype=np.float32)
+        out = np.empty(pos.shape[0], np.float32)
+        if accel.call(k.fbm3, pos, int(seed) & 0xFFFFFFFF, int(octaves), float(lacunarity), float(gain), out) \
+                is not accel.FAILED:
+            return out
+    return fbm3_numpy(p, seed, octaves, lacunarity, gain)
+
+
+def fbm3_numpy(p: np.ndarray, seed: int, octaves: int, lacunarity: float, gain: float) -> np.ndarray:
+    """Pure-numpy implementation (the reference the kernel is tested against)."""
     total = np.zeros(p.shape[0], np.float32)
     amp, freq, norm = 1.0, 1.0, 0.0
     for o in range(octaves):
