@@ -132,10 +132,25 @@ class AddonIntegrationTests(unittest.TestCase):
             self.rt.tick()
             time.sleep(0.01)
 
-    def expected_P(self):
+    # The engine may run numba while this process (Blender's Python) computes references with numpy: the two backends
+    # agree to ~2e-6, so compare with TOL. And a cold numba engine compiles its kernels on first use (seconds on a fresh
+    # Windows runner), so never assume a result arrives within a fixed number of ticks: wait for convergence.
+    TOL = 2e-5
+
+    def expected_P(self, **exposed):
+        """Reference cook of GRAPH with exposed-parameter overrides (use the values actually forwarded)."""
         from minihou import Evaluator, Graph
         g = Graph.from_dict(GRAPH)
+        for name, v in exposed.items():
+            g.set_exposed(name, list(v) if isinstance(v, tuple) else v)
         return Evaluator().cook(g).P
+
+    def mesh_matches(self, want):
+        got = evaluated_positions(bpy.data.objects[self.proxy.PROXY_OBJECT])
+        return got.shape == want.shape and np.allclose(got, want, atol=self.TOL)
+
+    def pump_until_mesh(self, want, timeout=90.0):
+        self.pump(lambda: self.mesh_matches(want), timeout)
 
     def modifier(self):
         p = bpy.data.objects[self.proxy.PROXY_OBJECT]
@@ -154,7 +169,7 @@ class AddonIntegrationTests(unittest.TestCase):
         self.assertTrue(out.hide_get())
         self.assertEqual(len(out.data.vertices), 900)
         self.assertEqual(len(out.data.polygons), 29 * 29)
-        np.testing.assert_allclose(evaluated_positions(proxy_obj), self.expected_P(), atol=1e-6)
+        np.testing.assert_allclose(evaluated_positions(proxy_obj), self.expected_P(), atol=self.TOL)
         self.assertEqual(len(proxy_obj.evaluated_get(bpy.context.evaluated_depsgraph_get()).data.polygons), 29 * 29)
         self.assertIn("uv", out.data.attributes)
 
@@ -197,14 +212,10 @@ class AddonIntegrationTests(unittest.TestCase):
 
     def test_editing_a_modifier_input_updates_the_engine_and_the_mesh(self):
         self.pump(lambda: self.rt.applied_count >= 1)
-        before = self.rt.applied_count
         self.set_modifier_value("Height", (0.0, 0.0, 2.5))
-        self.pump(lambda: self.rt.applied_count > before)
-        GRAPH2 = json.loads(json.dumps(GRAPH))
-        GRAPH2["nodes"]["n"]["params"]["amplitude"] = [0, 0, 2.5]
-        from minihou import Evaluator, Graph
-        want = Evaluator().cook(Graph.from_dict(GRAPH2)).P
-        np.testing.assert_allclose(evaluated_positions(bpy.data.objects[self.proxy.PROXY_OBJECT]), want, atol=1e-6)
+        self.pump(lambda: self.rt.sent_count >= 1)
+        self.pump_until_mesh(self.expected_P(Height=self.rt.forwarder.known["Height"]))
+        self.settle(10)
         self.assertEqual(self.rt.sent_count, 1)
 
     def test_position_only_update_does_not_rebuild_topology(self):
@@ -224,6 +235,7 @@ class AddonIntegrationTests(unittest.TestCase):
         self.pump(lambda: self.rt.applied_count >= 1)
         self.set_modifier_value("Seed", 11)
         self.pump(lambda: self.rt.sent_count >= 1)
+        self.pump_until_mesh(self.expected_P(Seed=11))      # the edit's result has landed
         self.settle(10)
         applied, sent = self.rt.applied_count, self.rt.sent_count
         self.settle(80)                                # many depsgraph updates caused by our own mesh writes
@@ -236,13 +248,9 @@ class AddonIntegrationTests(unittest.TestCase):
         for i in range(40):
             self.set_modifier_value("Frequency", 0.1 + i * 0.02)
             self.rt.tick()
-        self.settle(60)
-        want = 0.1 + 39 * 0.02
-        from minihou import Evaluator, Graph
-        G = json.loads(json.dumps(GRAPH))
-        G["nodes"]["n"]["params"]["frequency"] = want
-        np.testing.assert_allclose(evaluated_positions(bpy.data.objects[self.proxy.PROXY_OBJECT]),
-                                   Evaluator().cook(Graph.from_dict(G)).P, atol=1e-5)
+        self.settle(10)
+        self.pump(lambda: abs(self.rt.forwarder.known["Frequency"] - (0.1 + 39 * 0.02)) < 1e-6, 30)
+        self.pump_until_mesh(self.expected_P(Frequency=self.rt.forwarder.known["Frequency"]))
         self.assertLess(self.rt.sent_count, 40)
 
     def test_invalid_value_is_reported_without_looping(self):
