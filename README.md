@@ -192,7 +192,9 @@ Not verified:
 * **Your machine**: a real GPU driver, your Python/numba install, Blender 4.2-5.0 (the add-on declares 4.2+).
 * Known Blender behaviour, not reachable through the add-on's UI: showing the MiniHou panel as a *keep-open popover*
   (`wm.call_panel(..., keep_open=True)`, which nothing in the add-on does) during a graph reload crashes Blender 5.1.2 in its UI code
-  (reproducible with `--gui-test -- --popover-during-reload`). The sidebar and the modifier panel are safe across 100+ reloads.
+  (reproducible with `--gui-test -- --popover-during-reload`; seen on Windows CI as well, when an earlier version of the test
+  left its popover open). The sidebar and the modifier panel are safe across 100+ reloads. The GUI test now detects a Blender crash
+  report and stops at once instead of waiting behind the Windows error dialog.
 
 ## Known limits
 

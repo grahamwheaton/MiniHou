@@ -191,17 +191,8 @@ def scenario():
     if os.environ.get("MINIHOU_X11_SHOT"):
         os.system("xdotool key Escape >/dev/null 2>&1")     # close the factory-startup splash
         yield 0.3
-    draws_before = RESULTS["panel_draws"]
-    log(f"call_panel: {show_panel(win, area)}")
-    yield from sleep(1.5)
-    check("Blender's UI drew the MiniHou panel (popover)", RESULTS["panel_draws"] > draws_before,
-          f"{RESULTS['panel_draws'] - draws_before} draws")
-    check("panel draw raised no exceptions", not RESULTS["panel_errors"],
-          RESULTS["panel_errors"][-1][-300:] if RESULTS["panel_errors"] else "")
     SIDEBAR = False
     if os.environ.get("MINIHOU_X11_SHOT"):
-        os.system("xdotool key Escape >/dev/null 2>&1")     # close the popover
-        yield 0.3
         SIDEBAR = yield from open_sidebar_tab(win, area)
         check("sidebar shows the MiniHou tab (clicked like a user)", SIDEBAR)
     screenshot("1_connected")
@@ -306,6 +297,19 @@ def scenario():
             if not ok:
                 break
         check("stress reloads finished without errors", not RESULTS["panel_errors"] and not rt.last_error, rt.last_error)
+
+    # 8. panel drawn by Blender's own UI code, as a popover. Done last on purpose: a keep-open popover that is still open
+    #    while a reload removes inputs crashes Blender 5.1 (README, "Known Blender behaviour"), and on Windows the test
+    #    cannot close it again.
+    if not ARGS.popover_during_reload:
+        d0 = RESULTS["panel_draws"]
+        log(f"call_panel: {show_panel(win, area)}")
+        yield from sleep(1.5)
+        check("Blender's UI drew the MiniHou panel (popover)", RESULTS["panel_draws"] > d0,
+              f"{RESULTS['panel_draws'] - d0} draws")
+        check("panel draw raised no exceptions", not RESULTS["panel_errors"],
+              RESULTS["panel_errors"][-1][-300:] if RESULTS["panel_errors"] else "")
+        screenshot("4_panel_popover")
 
     RESULTS["stats"] = {"applied": rt.applied_count, "sent": rt.sent_count, "counts": rt.counts,
                         "last_timings": {k: v for k, v in rt.last_timings.items() if k != "warnings"},

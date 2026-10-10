@@ -196,16 +196,34 @@ def gui_test(exe, env, keep_open=False, timeout=600, extra=()):
                "--port", str(port), "--graph", graph, "--out", out, "--shots", shots] + (["--keep-open"] if keep_open else []) + list(extra)
         print("launching Blender (window will close by itself when the test ends)...", flush=True)
         with open(blender_log, "w", encoding="utf-8", errors="replace") as logf:
+            crash_file = os.path.join(tempfile.gettempdir(), "blender.crash.txt")
+            started = time.time()
             b = subprocess.Popen(cmd, cwd=ROOT, env=env, stdout=logf, stderr=subprocess.STDOUT)
-            try:
-                b.wait(None if keep_open else timeout)
-            except subprocess.TimeoutExpired:
-                b.kill()
-                print(f"Blender did not finish within {timeout}s (killed)")
+            crashed = False
+            while b.poll() is None:
+                # On Windows a crash leaves the process alive behind an error-report dialog: detect Blender's own crash
+                # report and stop at once instead of waiting for the timeout.
+                if os.path.exists(crash_file) and os.path.getmtime(crash_file) >= started - 1:
+                    time.sleep(1.0)
+                    b.kill()
+                    crashed = True
+                    break
+                if not keep_open and time.time() - started > timeout:
+                    b.kill()
+                    print(f"Blender did not finish within {timeout}s (killed)")
+                    break
+                time.sleep(0.5)
+            if crashed:
+                with open(crash_file, encoding="utf-8", errors="replace") as cf:
+                    report = cf.read()
+                print("BLENDER CRASHED. Crash report:\n" + report[:3000])
+                _shutil.copyfile(crash_file, os.path.join(work, "blender.crash.txt"))
         with open(blender_log, encoding="utf-8", errors="replace") as f:
             console = f.read()
         os.makedirs(shots, exist_ok=True)
         _shutil.copyfile(blender_log, os.path.join(shots, "blender_console.txt"))
+        if os.path.exists(os.path.join(work, "blender.crash.txt")):
+            _shutil.copyfile(os.path.join(work, "blender.crash.txt"), os.path.join(shots, "blender.crash.txt"))
         problems = [l for l in console.splitlines() if "Traceback" in l or l.startswith(("Error", "ERROR")) or "Exception" in l]
         if not os.path.exists(out):
             print("no results written; Blender console follows:\n" + console[-4000:])
