@@ -266,7 +266,7 @@ class FallbackAndSafetyTests(unittest.TestCase):
 
     def test_env_switch_forces_numpy(self):
         out = subprocess.run([sys.executable, "-c", "from minihou import accel; print(accel.AVAILABLE, accel.enabled(), accel.status())"],
-                             cwd=str(ROOT), env={**os.environ, "MINIHOU_NO_NUMBA": "1"}, capture_output=True, text=True)
+                             cwd=str(ROOT), env={**os.environ, "MINIHOU_NO_NUMBA": "1"}, capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertTrue(out.stdout.startswith("False False numpy only"), out.stdout)
 
@@ -282,7 +282,7 @@ class FallbackAndSafetyTests(unittest.TestCase):
                 "g = Graph.from_dict({'version':1,'nodes':{'g':{'type':'grid'},'n':{'type':'noise','inputs':{'geo':'g'}},"
                 "'s':{'type':'scatter','inputs':{'geo':'n'}},'o':{'type':'output','inputs':{'geo':'s'}}}})\n"
                 "print(accel.AVAILABLE, Evaluator().cook(g).npoints, accel.IMPORT_ERROR)\n")
-        out = subprocess.run([sys.executable, "-c", code], cwd=str(ROOT), capture_output=True, text=True)
+        out = subprocess.run([sys.executable, "-c", code], cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertTrue(out.stdout.startswith("False 1000 "), out.stdout)
         self.assertIn("simulated numba/numpy mismatch", out.stdout)

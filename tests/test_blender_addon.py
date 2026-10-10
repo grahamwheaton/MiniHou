@@ -59,7 +59,8 @@ class Engine:
 
     def __init__(self, graph_path, port=0):
         self.proc = subprocess.Popen([os.environ.get("MINIHOU_ENGINE_PYTHON", sys.executable), "-u", "-m", "minihou", "serve", str(graph_path), "--port", str(port)],
-                                     cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                                     cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                     encoding="utf-8", errors="replace")
         seen = []
         m = None
         for _ in range(50):                    # startup may print other lines (e.g. compute backend) first
@@ -104,7 +105,7 @@ class AddonIntegrationTests(unittest.TestCase):
         self.minihou_link, self.proxy, self.runtime = minihou_link, proxy, runtime
         self.tmp = tempfile.TemporaryDirectory()
         self.graph_path = Path(self.tmp.name) / "g.json"
-        self.graph_path.write_text(json.dumps(GRAPH))
+        self.graph_path.write_text(json.dumps(GRAPH), encoding="utf-8")
         self.engine = Engine(self.graph_path)
         self.rt = runtime.get_runtime()
         self.rt.connect("127.0.0.1", self.engine.port)
@@ -259,7 +260,7 @@ class AddonIntegrationTests(unittest.TestCase):
         G["exposed"].append({"name": "Size", "node": "g", "param": "size_x"})
         G["nodes"]["n"]["params"]["frequency"] = 0.8
         time.sleep(0.1)
-        self.graph_path.write_text(json.dumps(G))
+        self.graph_path.write_text(json.dumps(G), encoding="utf-8")
         self.pump(lambda: "Size" in self.proxy.mapping(self.modifier().node_group))
         mod = self.modifier()
         m = self.proxy.mapping(mod.node_group)

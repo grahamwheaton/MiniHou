@@ -25,24 +25,27 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def candidate_paths():
-    env = os.environ
+def candidate_paths(platform=None, env=None, which=shutil.which):
+    """Blender executables to try, best first. ``platform``/``env`` are parameters so this is testable anywhere."""
+    platform = platform or ("windows" if os.name == "nt" else "mac" if sys.platform == "darwin" else "linux")
+    env = os.environ if env is None else env
     if env.get("BLENDER_EXE"):
         yield env["BLENDER_EXE"]
     for name in ("blender", "blender.exe"):
-        p = shutil.which(name)
+        p = which(name)
         if p:
             yield p
     pats = []
-    if os.name == "nt":
+    if platform == "windows":
+        join = lambda *parts: "\\".join(parts) if "\\" in parts[0] else os.path.join(*parts)
         for base in (env.get("ProgramFiles"), env.get("ProgramW6432"), env.get("LOCALAPPDATA")):
             if base:
-                pats.append(os.path.join(base, "Blender Foundation", "Blender *", "blender.exe"))
-                pats.append(os.path.join(base, "Programs", "Blender Foundation", "Blender *", "blender.exe"))
+                pats.append(join(base, "Blender Foundation", "Blender *", "blender.exe"))
+                pats.append(join(base, "Programs", "Blender Foundation", "Blender *", "blender.exe"))
         for base in (env.get("ProgramFiles(x86)"), env.get("ProgramFiles")):
             if base:
-                pats.append(os.path.join(base, "Steam", "steamapps", "common", "Blender", "blender.exe"))
-    elif sys.platform == "darwin":
+                pats.append(join(base, "Steam", "steamapps", "common", "Blender", "blender.exe"))
+    elif platform == "mac":
         pats.append("/Applications/Blender*.app/Contents/MacOS/Blender")
     else:
         pats += ["/usr/bin/blender", "/snap/bin/blender", os.path.expanduser("~/blender*/blender"),
@@ -52,11 +55,14 @@ def candidate_paths():
         found += glob.glob(pat)
 
     def version_key(path):
-        m = re.search(r"(\d+)\.(\d+)", path.replace("Blender Foundation", ""))
+        m = re.search(r"Blender[ -]?(\d+)\.(\d+)", path.replace("Blender Foundation", ""))
         return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
 
+    seen = set()
     for p in sorted(found, key=version_key, reverse=True):      # newest first
-        yield p
+        if p not in seen:
+            seen.add(p)
+            yield p
 
 
 def find_blender(explicit=None):
@@ -68,7 +74,8 @@ def find_blender(explicit=None):
 
 def blender_version(exe):
     try:
-        out = subprocess.run([exe, "--background", "--version"], capture_output=True, text=True, timeout=60).stdout
+        out = subprocess.run([exe, "--background", "--version"], capture_output=True, text=True, timeout=60,
+                             encoding="utf-8", errors="replace").stdout
         m = re.search(r"Blender (\d+)\.(\d+)(?:\.(\d+))?", out)
         return tuple(int(x) for x in m.groups() if x) if m else None
     except (OSError, subprocess.SubprocessError):

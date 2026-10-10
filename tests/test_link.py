@@ -286,7 +286,7 @@ class ErrorAndReloadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "g.json")
             data = {"version": 1, "nodes": json.loads(json.dumps(SIMPLE)), "display": "o", "exposed": EXPOSED[:1]}
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f)
             h = Harness(Graph.load(path), watch_path=path)
             try:
@@ -295,7 +295,7 @@ class ErrorAndReloadTests(unittest.TestCase):
                 data["nodes"]["g"]["params"]["columns"] = 7
                 data["exposed"] = EXPOSED
                 time.sleep(0.1)
-                with open(path, "w") as f:
+                with open(path, "w", encoding="utf-8") as f:
                     json.dump(data, f)
                 iface, _ = wait_for(q, "interface", pred=lambda x: len(x["params"]) == 3)
                 self.assertEqual([p["name"] for p in iface["params"]], ["Height", "Columns", "Freq"])
@@ -303,13 +303,13 @@ class ErrorAndReloadTests(unittest.TestCase):
                 self.assertEqual(hdr["counts"]["point"], 7 * 20)
                 # a broken edit is reported, and the last good geometry keeps being served
                 time.sleep(0.1)
-                with open(path, "w") as f:
+                with open(path, "w", encoding="utf-8") as f:
                     f.write("{ not json")
                 err, _ = wait_for(q, "error")
                 self.assertIn("g.json", err["message"])
                 time.sleep(0.1)
                 data["nodes"]["g"]["params"]["columns"] = 9
-                with open(path, "w") as f:
+                with open(path, "w", encoding="utf-8") as f:
                     json.dump(data, f)
                 hdr, arr = wait_for(q, "geo")
                 self.assertEqual(hdr["counts"]["point"], 9 * 20)

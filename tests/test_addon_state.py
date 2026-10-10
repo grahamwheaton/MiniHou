@@ -22,7 +22,7 @@ class AddonSyncTests(unittest.TestCase):
 
     def test_protocol_module_is_self_contained(self):
         """protocol.py gets copied into Blender, so it may only import stdlib + numpy (no relative imports)."""
-        tree = ast.parse((ROOT / "minihou" / "link" / "protocol.py").read_text())
+        tree = ast.parse((ROOT / "minihou" / "link" / "protocol.py").read_text(encoding="utf-8"))
         allowed = {"__future__", "json", "socket", "struct", "time", "typing", "numpy"}
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
@@ -35,7 +35,7 @@ class AddonSyncTests(unittest.TestCase):
     def test_engine_has_no_bpy_imports(self):
         """The engine must run (and be testable) without Blender: no import of bpy anywhere."""
         for py in (ROOT / "minihou").rglob("*.py"):
-            for node in ast.walk(ast.parse(py.read_text())):
+            for node in ast.walk(ast.parse(py.read_text(encoding="utf-8"))):
                 mods = ([a.name for a in node.names] if isinstance(node, ast.Import)
                         else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
                 for m in mods:
@@ -43,7 +43,7 @@ class AddonSyncTests(unittest.TestCase):
 
     def test_only_listed_addon_modules_import_bpy(self):
         for name in ("state.py", "protocol.py", "client.py"):
-            for node in ast.walk(ast.parse((ADDON_DIR / name).read_text())):
+            for node in ast.walk(ast.parse((ADDON_DIR / name).read_text(encoding="utf-8"))):
                 mods = ([a.name for a in node.names] if isinstance(node, ast.Import)
                         else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
                 for m in mods:

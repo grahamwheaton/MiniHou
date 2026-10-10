@@ -54,7 +54,8 @@ def script_args():
 def spawn(cmd):
     """Start a subprocess and return (process, port) once it prints its "listening ... :PORT" line.
     Startup may print other lines first (e.g. the compute backend), so scan rather than read one line."""
-    p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    p = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                         encoding="utf-8", errors="replace")
     seen = []
     for _ in range(50):
         line = p.stdout.readline()
@@ -155,7 +156,7 @@ def run_engine(a):
         "display": "o", "exposed": [{"name": "Frequency", "node": "n", "param": "frequency"}]}
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "bench_graph.json")
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8") as f:
             json.dump(graph, f)
         eng, port = spawn([a.python, "-u", "-m", "minihou", "serve", path, "--port", "0", "--no-watch"])
         rx = Receiver(port)
