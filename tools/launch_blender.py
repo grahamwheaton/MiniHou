@@ -37,14 +37,13 @@ def candidate_paths(platform=None, env=None, which=shutil.which):
             yield p
     pats = []
     if platform == "windows":
-        join = lambda *parts: "\\".join(parts) if "\\" in parts[0] else os.path.join(*parts)
         for base in (env.get("ProgramFiles"), env.get("ProgramW6432"), env.get("LOCALAPPDATA")):
             if base:
-                pats.append(join(base, "Blender Foundation", "Blender *", "blender.exe"))
-                pats.append(join(base, "Programs", "Blender Foundation", "Blender *", "blender.exe"))
+                pats.append(os.path.join(base, "Blender Foundation", "Blender *", "blender.exe"))
+                pats.append(os.path.join(base, "Programs", "Blender Foundation", "Blender *", "blender.exe"))
         for base in (env.get("ProgramFiles(x86)"), env.get("ProgramFiles")):
             if base:
-                pats.append(join(base, "Steam", "steamapps", "common", "Blender", "blender.exe"))
+                pats.append(os.path.join(base, "Steam", "steamapps", "common", "Blender", "blender.exe"))
     elif platform == "mac":
         pats.append("/Applications/Blender*.app/Contents/MacOS/Blender")
     else:
