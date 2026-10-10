@@ -164,6 +164,8 @@ class Param:
             d["choices"] = list(self.choices)
         if self.ui:
             d["ui"] = self.ui
+        if self.doc:
+            d["doc"] = self.doc
         return d
 
 

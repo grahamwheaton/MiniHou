@@ -86,3 +86,12 @@ engine-side costs; the link and the Blender write were already ~8 ms. `minihou/a
 existing node functions. Rules: optional; backend chosen by availability only; same algorithm and float32 coordinate math as the numpy code (kernel
 tests mutation-checked); launches serialised by a lock; any kernel exception disables acceleration and re-runs the numpy path; seeds reduced to 32 bits in
 both paths. A thread-pool-over-numpy alternative gave only 2.8x and was not adopted.
+
+## Real-Blender verification (added)
+
+No Blender was installable from blender.org in Claude's sandbox; the official 5.1.2 Linux build was taken from the
+`linuxserver/blender:5.1.2` image layer (digest-verified) and run headless and as a GUI on Xvfb with Mesa llvmpipe
+(Blender's bundled Mesa crashed in its LLVM JIT on that CPU, the system Mesa worked). Notes for anyone repeating this:
+`Region.active_panel_category` is read-only (the test clicks the sidebar tab with xdotool, using the panel-draw counter as
+feedback), `bpy.ops.screen.screenshot` returns black on Xvfb (X11 capture is used instead), and the factory-startup splash
+must be dismissed. `tools/gui_smoketest.py` holds the scenario; `launch_blender.py --gui-test` wires engine, display and report.

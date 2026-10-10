@@ -148,9 +148,8 @@ class Runtime:
         out, proxy_obj, mod = proxy.ensure_objects()
         ng = mod.node_group
         if ng.get(proxy.STRUCTURE_KEY) != iface["structure"]:
-            proxy.rebuild_interface(ng, out, params, iface["structure"])
-            mod.node_group = ng                      # make the modifier re-read the group's inputs
-            self._log(f"rebuilt node group inputs: {[p['name'] for p in params]}")
+            proxy.sync_interface(ng, out, params, iface["structure"])
+            self._log(f"synced node group inputs: {[p['name'] for p in params]}")
         values = {p["name"]: proxy.canonical(p["kind"], p["value"]) for p in params}
         self.forwarder.reset(values)                 # guard 4: record as known *before* writing
         self.params = params

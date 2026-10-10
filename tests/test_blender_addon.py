@@ -328,6 +328,136 @@ class AddonIntegrationTests(unittest.TestCase):
 
 
 @unittest.skipIf(bpy is None, "needs Blender / the bpy module")
+class InterfaceSyncTests(unittest.TestCase):
+    """proxy.sync_interface must change the node group incrementally (a full rebuild crashed Blender when a panel
+    showing the modifier inputs was open -- see tools/gui_smoketest.py)."""
+
+    def setUp(self):
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        from minihou_link import proxy
+        self.proxy = proxy
+        self.out, self.obj, self.mod = proxy.ensure_objects()
+        self.ng = self.mod.node_group
+
+    def p(self, name, kind="float", value=1.0, **kw):
+        return dict(name=name, kind=kind, value=value, **kw)
+
+    def inputs(self):
+        return [(i.name, i.socket_type) for i in self.ng.interface.items_tree if i.item_type == "SOCKET" and i.in_out == "INPUT"]
+
+    def test_kept_inputs_keep_identifier_and_value(self):
+        self.proxy.sync_interface(self.ng, self.out, [self.p("A"), self.p("B", "int", 3)], "s1")
+        m1 = self.proxy.mapping(self.ng)
+        self.mod[m1["A"]] = 7.5
+        self.proxy.sync_interface(self.ng, self.out, [self.p("A"), self.p("C", "vec3", [0, 0, 1]), self.p("B", "int", 3)], "s2")
+        m2 = self.proxy.mapping(self.ng)
+        self.assertEqual((m2["A"], m2["B"]), (m1["A"], m1["B"]))
+        self.assertEqual(self.mod[m2["A"]], 7.5)
+        self.assertEqual(self.inputs(), [("Geometry", "NodeSocketGeometry"), ("A", "NodeSocketFloat"),
+                                         ("C", "NodeSocketVector"), ("B", "NodeSocketInt")])
+        self.assertIn(m2["C"], self.mod.keys())
+
+    def test_removed_and_retyped_inputs(self):
+        self.proxy.sync_interface(self.ng, self.out, [self.p("A"), self.p("B"), self.p("C")], "s1")
+        old = self.proxy.mapping(self.ng)
+        self.proxy.sync_interface(self.ng, self.out, [self.p("C"), self.p("B", "bool", True)], "s2")
+        m = self.proxy.mapping(self.ng)
+        self.assertEqual(self.inputs(), [("Geometry", "NodeSocketGeometry"), ("C", "NodeSocketFloat"), ("B", "NodeSocketBool")])
+        self.assertEqual(m["C"], old["C"])
+        self.assertNotEqual(m["B"], old["B"])                       # type changed -> new socket
+        self.assertNotIn(old["A"], self.mod.keys())
+        self.assertNotIn("A", m)
+        self.assertEqual(len([n for n in self.ng.nodes if n.name.startswith(self.proxy.USE_NODE_PREFIX)]), 2)
+        self.assertIsInstance(self.mod[m["B"]], bool)              # the property exists with the new type...
+        sock = next(i for i in self.ng.interface.items_tree if getattr(i, "identifier", "") == m["B"])
+        self.assertIs(sock.default_value, True)                     # ...values themselves are written by the runtime
+
+    def test_keyframes_and_drivers_on_inputs_survive_a_reload(self):
+        """Users animate modifier inputs; a reload that keeps an input must keep its animation working."""
+        self.proxy.sync_interface(self.ng, self.out, [self.p("A"), self.p("B")], "s1")
+        ident = self.proxy.mapping(self.ng)["A"]
+        path = f'modifiers["{self.proxy.MODIFIER}"]["{ident}"]'
+        self.mod[ident] = 1.0
+        self.obj.keyframe_insert(data_path=path, frame=1)
+        self.mod[ident] = 9.0
+        self.obj.keyframe_insert(data_path=path, frame=10)
+        self.proxy.sync_interface(self.ng, self.out, [self.p("C"), self.p("A")], "s2")   # B gone, C added, reordered
+        self.assertEqual(self.proxy.mapping(self.ng)["A"], ident)
+        scene = bpy.context.scene
+        scene.frame_set(10)
+        self.assertAlmostEqual(self.mod[ident], 9.0, places=5)
+        scene.frame_set(1)
+        self.assertAlmostEqual(self.mod[ident], 1.0, places=5)
+
+    def test_reordering_many_inputs(self):
+        names = [f"P{i}" for i in range(8)]
+        self.proxy.sync_interface(self.ng, self.out, [self.p(n) for n in names], "s1")
+        rev = list(reversed(names))
+        self.proxy.sync_interface(self.ng, self.out, [self.p(n) for n in rev], "s2")
+        self.assertEqual([n for n, _ in self.inputs()[1:]], rev)
+
+    def test_limits_and_defaults(self):
+        self.proxy.sync_interface(self.ng, self.out, [self.p("N", "int", 5, min=2, max=50)], "s1")
+        sock = next(i for i in self.ng.interface.items_tree if i.item_type == "SOCKET" and i.name == "N")
+        self.assertEqual((sock.default_value, sock.min_value, sock.max_value), (5, 2, 50))
+
+    def test_repeating_the_same_sync_writes_nothing(self):
+        params = [self.p("A", min=0.0, max=10.0), self.p("V", "vec3", [1, 2, 3])]
+        self.proxy.sync_interface(self.ng, self.out, params, "s1")
+        bpy.context.view_layer.update()
+        seen = []
+
+        def spy(scene, depsgraph):
+            seen.extend(u.id.name for u in depsgraph.updates)
+
+        bpy.app.handlers.depsgraph_update_post.append(spy)
+        try:
+            self.proxy.sync_interface(self.ng, self.out, params, "s1")
+            bpy.context.view_layer.update()
+        finally:
+            bpy.app.handlers.depsgraph_update_post.remove(spy)
+        self.assertEqual(seen, [])
+
+    def test_every_input_feeds_the_output_path_and_output_is_unchanged(self):
+        params = [self.p("A"), self.p("V", "vec3", [0, 0, 1]), self.p("N", "int", 2), self.p("F", "bool", False)]
+        self.proxy.sync_interface(self.ng, self.out, params, "s1")
+        m = self.proxy.mapping(self.ng)
+        gout = next(n for n in self.ng.nodes if n.bl_idname == "NodeGroupOutput")
+        # walk back from the output: Object Info must be reached through one store node per input
+        node, seen = gout.inputs["Geometry"].links[0].from_node, []
+        while node.bl_idname == "GeometryNodeStoreNamedAttribute":
+            seen.append(node.inputs["Value"].links[0].from_socket.identifier)
+            node = node.inputs["Geometry"].links[0].from_node
+        self.assertEqual(node.bl_idname, "GeometryNodeObjectInfo")
+        self.assertEqual(sorted(seen), sorted(m.values()))
+        sock = next(i for i in self.ng.interface.items_tree if getattr(i, "identifier", "") == m["A"])
+        self.assertEqual(sock.structure_type, "SINGLE")
+        # remove one input: its store node goes, chain stays intact
+        self.proxy.sync_interface(self.ng, self.out, [params[0], params[2]], "s2")
+        stores = [n for n in self.ng.nodes if n.name.startswith(self.proxy.USE_NODE_PREFIX)]
+        self.assertEqual(len(stores), 2)
+        # the proxy's evaluated mesh has no extra attributes
+        import numpy as np
+        me = self.out.data
+        me.clear_geometry()
+        me.vertices.add(3)
+        me.attributes["position"].data.foreach_set("vector", np.arange(9, dtype=np.float32))
+        me.update()
+        ev = self.obj.evaluated_get(bpy.context.evaluated_depsgraph_get()).data
+        self.assertEqual(len(ev.vertices), 3)
+        self.assertEqual(sorted(a.name for a in ev.attributes if not a.name.startswith(".")), ["position"])
+
+    def test_object_info_still_wired(self):
+        self.proxy.sync_interface(self.ng, self.out, [self.p("A")], "s1")
+        info = next(n for n in self.ng.nodes if n.bl_idname == "GeometryNodeObjectInfo")
+        self.assertEqual(info.inputs["Object"].default_value.name, self.proxy.OUTPUT_OBJECT)
+        self.assertEqual(sum(1 for l in self.ng.links if l.from_node == info), 1)
+        self.proxy.sync_interface(self.ng, self.out, [], "s0")          # no inputs: Object Info straight to output
+        gout = next(n for n in self.ng.nodes if n.bl_idname == "NodeGroupOutput")
+        self.assertEqual(gout.inputs["Geometry"].links[0].from_node.bl_idname, "GeometryNodeObjectInfo")
+
+
+@unittest.skipIf(bpy is None, "needs Blender / the bpy module")
 class MeshWriterTests(unittest.TestCase):
     """mesh_writer in isolation, with hand-built updates (no engine, no socket)."""
 

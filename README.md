@@ -55,15 +55,22 @@ py -m minihou serve examples\graphs\demo.json
 Other commands: `py -m minihou nodes` (list node types and parameters), `py -m minihou cook graph.json`
 (cook once, print timings and cache behaviour).
 
-### Headless Blender checks (what Claude can run for you)
+### Automated checks in a real Blender (what Claude runs for you)
 
 ```powershell
-py tools\launch_blender.py --selftest                       # addon tests inside Blender, exit code = result
+py tools\launch_blender.py --selftest                       # add-on tests inside `blender --background`; exit code = result
 py tools\launch_blender.py --bench -- --points 1000000      # the 1M-point benchmark inside Blender
+py tools\launch_blender.py --gui-test                       # interactive smoke test in a real Blender window (~30 s)
 ```
 
-These run `blender --background --factory-startup --python ...` and print everything Blender prints, so
-errors are visible in the console. The engine runs as a separate process under the Python that launched it
+`--selftest` and `--bench` run `blender --background --factory-startup --python ...` and print everything Blender prints, so
+errors are visible in the console.
+
+`--gui-test` opens a normal Blender window and lets Blender's own event loop drive the add-on (nothing is ticked by hand): it
+connects through the panel's Connect operator, checks the panel is drawn by the real UI, simulates a 30-step slider drag through the
+real depsgraph handler, idles to prove there is no feedback loop, then edits the graph file twice (adding, removing and reordering
+inputs) while the sidebar and Blender's modifier panel show them. It writes screenshots to `gui_test_output\` and prints PASS/FAIL per
+check; Blender closes itself. `-- --reload-cycles 40` adds a reload stress test. On Linux without a display it starts Xvfb itself. The engine runs as a separate process under the Python that launched it
 (override with `MINIHOU_ENGINE_PYTHON`).
 
 To install the add-on permanently instead of using the launcher: run `py tools\sync_addon.py`, zip the
@@ -185,24 +192,29 @@ What is left at 1M points: the very first frame (40 MB incl. topology: ~320 ms c
 
 ## Verified vs not verified
 
-Verified here:
-* 198 tests pass on Python 3.11 (numpy 1.26.4), 3.12 (numpy 2.5) and 3.13 (numpy 2.5), each with numba 0.68 and without it. 18 tests need
-  Blender and are skipped without `bpy`; they pass under Blender 5.1.2 (`bpy` module, headless), with the engine running numba.
-* The Blender tests run the add-on against a real engine subprocess over a real socket and compare results on the *evaluated*
-  Geometry Nodes proxy: parameter round trip, no feedback loop, burst coalescing, engine restart/reconnect, hot reload of the graph file.
-* `tools/blender_bootstrap.py` runs; the four operators run; the panel `draw()` runs against a stub layout; the add-on zip installs and
-  enables through Blender's own `addon_install` / `addon_enable`.
+Verified (on Linux, in this order of realism):
+* **A real interactive Blender 5.1.2** (the official build, GUI on a virtual X display, software OpenGL): `--gui-test` passes all 20
+  checks, repeatedly, plus a 40-reload stress run (61 checks). Screenshots show the panel, the proxy geometry and Blender's modifier panel.
+* **The real `blender --background`** through `launch_blender.py --selftest`: 41 tests, engine in a separate Python process.
+* The full suite (205 tests) on Python 3.11 (numpy 1.26.4), 3.12 and 3.13 (numpy 2.5), with and without numba, plus all Blender tests
+  under the `bpy` 5.1.2 module.
+
+Found only by the real-GUI test, and fixed:
+* Modifier inputs showed **greyed out** with "use attribute" toggles in Blender's modifier panel (Blender's usage inference saw them as
+  unused, since the engine, not the node tree, consumes them). Each input now feeds a no-op Store Named Attribute on the instance domain
+  (0.08 ms, output unchanged) and is a single-value socket.
+* Interface changes rebuilt every input, freeing all modifier properties (and their keyframes/drivers). The sync is now incremental:
+  unchanged inputs keep their identifiers; tested with keyframes surviving a reload.
+
+Known Blender behaviour (not reachable through the add-on's UI): if the MiniHou panel is shown as a *keep-open popover*
+(`wm.call_panel(..., keep_open=True)`, which nothing in the add-on does) while the engine reloads the graph, Blender 5.1.2 crashes in
+its UI code (3/3; reproducible with `--gui-test -- --popover-during-reload`). The sidebar panel and Blender's modifier panel are safe
+across 100+ reloads. Isolation narrowed it to the popover redrawing the parameter rows during a live session; plain Blender edits under
+the same popover do not crash, so the exact trigger is still open.
 
 Not verified:
-* **An interactive Blender session.** Headless Blender never fires `bpy.app.timers`, so tests call `Runtime.tick()` by hand, and the
-  bootstrap's deferred connect timer has not fired. The panel has not been rendered by a real UI. This is the biggest remaining unknown.
-* **Windows.** Everything above ran on Linux. Windows-specific code that has never run: exclusive port binding
-  (`SO_EXCLUSIVEADDRUSE`), Blender discovery paths in `launch_blender.py`, `blender.exe` console behaviour.
-* Python 3.10, numpy 1.24/1.25, numba on Windows (it ships wheels; not tried), Blender 4.2-5.0 (the add-on declares 4.2+ but was only run on 5.1.2).
-* A real `blender` executable: Claude had only the `bpy` PyPI module, not the binary, so `launch_blender.py --selftest/--bench` have
-  been run through the `bpy` module equivalents, not through `blender --background`.
-
-Please try the quick start and send me whatever the Blender console prints.
+* **Windows itself** (CI with a Windows runner is the next step), numba on Windows, Python 3.10, numpy < 1.26, Blender 4.2-5.0.
+* A real GPU driver (the GUI test uses Mesa's software renderer).
 
 ## Known limits (milestone 1)
 
