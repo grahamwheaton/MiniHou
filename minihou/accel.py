@@ -124,6 +124,9 @@ def warmup() -> float:
     call(k.sample_surface, p, vp, offs, first, tri_prim, np.cumsum(area), r, r, r, np.empty((2, 3), np.float32),
          np.empty((2, 3), np.float32), np.empty(2, np.int32))
     call(k.copy_points, p, p, p, True, np.ones(4, np.float32), True, np.empty((16, 3), np.float32))
+    pn = np.empty((1, 3), np.float64)
+    call(k.prim_normals, p, vp, offs, pn)
+    call(k.accumulate_point_normals, vp, offs, pn, np.empty((4, 3), np.float32))
     return time.perf_counter() - t0
 
 

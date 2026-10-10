@@ -184,6 +184,21 @@ class CopyParityTests(unittest.TestCase):
         np.testing.assert_allclose(fast.P, ref.P, atol=1e-6)
 
 
+@needs_numba
+class NormalParityTests(unittest.TestCase):
+    def test_matches_numpy_point_and_prim(self):
+        from tests.test_nodes_m2 import cube
+        geos = [run("noise", run("grid", columns=40, rows=30), amplitude=(0, 0, 2), frequency=0.5), cube().freeze(),
+                Geometry.from_arrays(np.array([[0, 0, 0], [2, 0, 0], [3, 1, 0], [1, 2, 0], [-1, 1, 0], [5, 5, 5], [5, 5, 5],
+                                               [5, 5, 5], [9, 9, 9]], np.float32), [0, 1, 2, 3, 4, 5, 6, 7], [0, 5, 8]).freeze()]
+        for g in geos:
+            for domain, table in (("point", "point"), ("prim", "prim")):
+                fast = run("normal", g, domain=domain).table(table)["N"]
+                with accel.disabled():
+                    ref = run("normal", g, domain=domain).table(table)["N"]
+                np.testing.assert_allclose(fast, ref, atol=1e-6)
+
+
 class FallbackAndSafetyTests(unittest.TestCase):
     def test_numpy_path_works_with_acceleration_disabled(self):
         with accel.disabled():

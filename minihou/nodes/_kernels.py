@@ -216,3 +216,41 @@ def copy_points(src, tP, tN, orient, pscale, use_pscale, out):
             out[o, 0] = np.float32(r00 * x + r01 * y + r02 * z + tx)
             out[o, 1] = np.float32(r10 * x + r11 * y + r12 * z + ty)
             out[o, 2] = np.float32(r20 * x + r21 * y + r22 * z + tz)
+
+
+@njit(parallel=True, **_OPTS)
+def prim_normals(P, vp, offs, out):
+    """Newell normal per primitive (length = 2 x area), float64. Mirrors ``normal.prim_normals``."""
+    for p in prange(offs.shape[0] - 1):
+        s, e = offs[p], offs[p + 1]
+        nx = ny = nz = 0.0
+        for v in range(s, e):
+            w = v + 1 if v + 1 < e else s
+            ax, ay, az = np.float64(P[vp[v], 0]), np.float64(P[vp[v], 1]), np.float64(P[vp[v], 2])
+            bx, by, bz = np.float64(P[vp[w], 0]), np.float64(P[vp[w], 1]), np.float64(P[vp[w], 2])
+            nx += (ay - by) * (az + bz)
+            ny += (az - bz) * (ax + bx)
+            nz += (ax - bx) * (ay + by)
+        out[p, 0] = nx
+        out[p, 1] = ny
+        out[p, 2] = nz
+
+
+@njit(**_OPTS)
+def accumulate_point_normals(vp, offs, prim_n, out):
+    """Sum each primitive's normal onto its points (serial: no write races), then normalise to float32 ``out``."""
+    npts = out.shape[0]
+    acc = np.zeros((npts, 3), np.float64)
+    for p in range(offs.shape[0] - 1):
+        for v in range(offs[p], offs[p + 1]):
+            q = vp[v]
+            acc[q, 0] += prim_n[p, 0]
+            acc[q, 1] += prim_n[p, 1]
+            acc[q, 2] += prim_n[p, 2]
+    for q in range(npts):
+        ln = np.sqrt(acc[q, 0] ** 2 + acc[q, 1] ** 2 + acc[q, 2] ** 2)
+        if ln < 1e-20:
+            ln = 1.0
+        out[q, 0] = np.float32(acc[q, 0] / ln)
+        out[q, 1] = np.float32(acc[q, 1] / ln)
+        out[q, 2] = np.float32(acc[q, 2] / ln)
