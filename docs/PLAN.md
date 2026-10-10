@@ -68,16 +68,25 @@ values are recorded as known before they are written to the modifier; (5) forwar
   (Blender returns a new Python wrapper per access, so `is` checks are always False; it tagged the depsgraph each time); unmeasured
   performance claims in the README; the benchmark ignoring `MINIHOU_ENGINE_PYTHON`; restarting the engine on a busy port.
 
-## Next steps (not started)
+## Milestone 2 progress (done overnight)
 
-1. ~~Noise speed~~ done: optional Numba backend (see README, "Speed"). Remaining: a wrangle compiler can target the same machinery
-   (`@njit` on generated code, with the numpy fallback); cheaper topology rebuilds in Blender.
-2. Wrangle node (parser + numpy codegen), attribute-flow metadata on node types.
-3. More nodes: delete/blast, group/attribute-from-group, attribute transfer / ray, boolean-free modelling basics, instancing packed prims.
-4. Multiple outputs / several display nodes; detail attributes and normals to Blender; undo-friendly parameter writes.
-5. Time/frame context in the cache key for animated graphs; a `bpy.msgbus`/frame-change hook.
-6. Web editor (explicitly deferred).
-7. Package the add-on as a Blender extension (manifest + licence choice is yours) and add CI that runs the `bpy`-module tests.
+* Numba backend for the heavy nodes, with numpy fallback, parity + golden-value tests.
+* Wrangle node: sandboxed VEX-like snippets compiled to numpy (`minihou/wrangle.py`).
+* New nodes: normal (Newell, numba), delete (expression blast with compaction), box, sphere, circle, fuse.
+* CI on Linux + Windows, including the add-on in real Blender 5.1.2 for Windows (selftest, benchmark, GUI smoke test).
+* Real-Blender GUI smoke test; fixes it found (greyed modifier inputs, interface rebuilds, depsgraph churn).
+
+## Next steps
+
+1. **Topology rebuild cost** in Blender (~0.25-0.4 s for 1M quads, mostly Blender's edge computation): worth it only if users drag
+   topology-changing parameters on huge meshes; options are computing edges in the engine and writing `.edge_verts` directly.
+2. **Wrangle over primitives/vertices**, `@P` reads from a second input (`@opinput1_P`), attribute-flow metadata on node types.
+3. **More nodes**: group / attribute-from-group, attribute transfer and ray, polyextrude, subdivide, packed-prim instancing
+   (Blender instances on points instead of copying geometry).
+4. Multiple outputs / several display nodes; detail attributes, UV maps and normals to Blender.
+5. Time/frame in the cache key for animated graphs (frame-change hook in the add-on).
+6. Web editor (explicitly deferred). Extension packaging (manifest + licence are your call).
+7. Investigate the Blender popover crash further (only reachable via `wm.call_panel(keep_open=True)`), or report it upstream.
 
 ## Acceleration design (added after the benchmark)
 
