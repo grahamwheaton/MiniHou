@@ -1,0 +1,263 @@
+"""Main-thread runtime: connects the socket thread to Blender.
+
+Threading contract
+------------------
+* The socket thread (``LinkClient``) only calls ``Inbox.push`` / ``_on_state`` -- plain Python.
+* **Everything that touches bpy runs in** :meth:`Runtime.tick`, a ``bpy.app.timers`` callback
+  (main thread), or in the depsgraph handler, which only sets a flag.
+
+Feedback-loop guards (engine -> Blender mesh write -> depsgraph update -> param forward -> engine ...)
+-------------------------------------------------------------------------------------------------
+1. The depsgraph handler writes nothing; it sets ``params_dirty``. The timer does the work.
+2. Forwarding is a *diff* against the values the engine is known to have (``ParamForwarder``), so an
+   update caused by the engine's own mesh write forwards nothing.
+3. The engine never echoes parameter changes back to the client that made them.
+4. Values the engine pushes (interface messages) are recorded as known *before* they are written to
+   the modifier.
+5. Forwarding is rate limited (<= 30 Hz) and a circuit breaker trips on > 120 forwarded values/s.
+6. ``tick`` is not re-entrant.
+"""
+from __future__ import annotations
+
+import time
+import traceback
+from collections import deque
+from typing import Dict, List, Optional
+
+import bpy
+from bpy.app.handlers import persistent
+
+from . import mesh_writer, proxy
+from .client import LinkClient
+from .protocol import GeoUpdate, Mirror, ProtocolError
+from .state import Inbox, ParamForwarder
+
+MIN_FORWARD_INTERVAL = 1.0 / 30.0
+BUSY_INTERVAL = 1.0 / 60.0
+IDLE_INTERVAL = 0.05
+
+
+class Runtime:
+    def __init__(self):
+        self.client: Optional[LinkClient] = None
+        self.inbox = Inbox()
+        self.mirror = Mirror()
+        self.forwarder = ParamForwarder()
+        self.params: List[dict] = []
+        self.state = "disconnected"
+        self.detail = ""
+        self.last_error = ""
+        self.params_dirty = False
+        self.forwarding_enabled = True
+        self.sent_count = 0
+        self.applied_count = 0
+        self.last_timings: Dict[str, object] = {}
+        self.last_cook_ms = 0.0
+        self.last_latency_ms = 0.0
+        self.counts = {"point": 0, "vertex": 0, "prim": 0}
+        self.log: deque = deque(maxlen=200)
+        self._in_tick = False
+        self._timer_on = False
+        self._last_forward = 0.0
+        self._ui_dirty = True
+
+    # -- lifecycle ---------------------------------------------------------
+    def connect(self, host: str = "127.0.0.1", port: int = 8765) -> None:
+        mesh_writer.assert_main_thread()
+        self.disconnect()
+        self.client = LinkClient(host, port, on_message=self.inbox.push, on_state=self._on_state,
+                                 client_name=f"blender {bpy.app.version_string}")
+        self.last_error = ""
+        self.client.start()
+        if not self._timer_on:
+            bpy.app.timers.register(timer_entry, first_interval=0.0, persistent=True)
+            self._timer_on = True
+        if _depsgraph_post not in bpy.app.handlers.depsgraph_update_post:
+            bpy.app.handlers.depsgraph_update_post.append(_depsgraph_post)
+        self._log(f"connecting to {host}:{port}")
+
+    def disconnect(self) -> None:
+        if self.client is not None:
+            self.client.stop()
+            self.client = None
+        self.inbox.clear()
+        self.state, self.detail = "disconnected", ""
+        self._ui_dirty = True
+        if _depsgraph_post in bpy.app.handlers.depsgraph_update_post:
+            bpy.app.handlers.depsgraph_update_post.remove(_depsgraph_post)
+
+    def _log(self, msg: str) -> None:
+        line = f"[minihou] {msg}"
+        self.log.append(line)
+        print(line, flush=True)
+
+    # -- socket thread -----------------------------------------------------
+    def _on_state(self, state: str, detail: str) -> None:
+        # Runs on the socket thread: plain attributes only.
+        self.state, self.detail = state, detail
+        self._ui_dirty = True
+
+    # -- main thread -------------------------------------------------------
+    def _timer(self) -> Optional[float]:
+        if self.client is None:
+            self._timer_on = False
+            return None
+        return self.tick()
+
+    def tick(self) -> float:
+        """One main-thread step. Returns the delay until the next step."""
+        if self._in_tick:
+            return IDLE_INTERVAL
+        self._in_tick = True
+        busy = False
+        try:
+            events, geo = self.inbox.take()
+            for e in events:
+                busy = True
+                self._handle_event(e)
+            if geo is not None:
+                busy = True
+                self._apply_geo(geo)
+            if self.params_dirty:
+                busy = self._forward_params() or busy
+            if self._ui_dirty:
+                self._ui_dirty = False
+                _tag_redraw()
+        except Exception as e:  # noqa: BLE001 - the timer must survive anything
+            self.last_error = f"{type(e).__name__}: {e}"
+            self._log("tick failed:\n" + traceback.format_exc())
+            self._ui_dirty = True
+        finally:
+            self._in_tick = False
+        return BUSY_INTERVAL if busy else IDLE_INTERVAL
+
+    def _handle_event(self, e: dict) -> None:
+        t = e.get("type")
+        if t == "interface":
+            self._apply_interface(e)
+        elif t == "error":
+            self.last_error = f"{e.get('where', 'engine')}: {e.get('message', '')}"
+            self._log(self.last_error)
+            self._ui_dirty = True
+        elif t == "welcome":
+            self.last_error = ""
+            self._log(f"connected to engine (protocol {e.get('protocol')})")
+
+    def _apply_interface(self, iface: dict) -> None:
+        params = iface["params"]
+        out, proxy_obj, mod = proxy.ensure_objects()
+        ng = mod.node_group
+        if ng.get(proxy.STRUCTURE_KEY) != iface["structure"]:
+            proxy.rebuild_interface(ng, out, params, iface["structure"])
+            mod.node_group = ng                      # make the modifier re-read the group's inputs
+            self._log(f"rebuilt node group inputs: {[p['name'] for p in params]}")
+        values = {p["name"]: proxy.canonical(p["kind"], p["value"]) for p in params}
+        self.forwarder.reset(values)                 # guard 4: record as known *before* writing
+        self.params = params
+        proxy.write_values(mod, ng, params, values)
+        self.params_dirty = False
+        self._ui_dirty = True
+
+    def _apply_geo(self, u: GeoUpdate) -> None:
+        try:
+            self.mirror.apply(u)
+        except ProtocolError as e:
+            self.last_error = f"out of sync ({e}); requesting full resend"
+            self._log(self.last_error)
+            self.mirror = Mirror()
+            if self.client:
+                self.client.resync()
+            return
+        out, _proxy, _mod = proxy.ensure_objects()
+        t0 = time.perf_counter()
+        timings = mesh_writer.apply_update(out.data, self.mirror, u)
+        timings["total_ms"] = (time.perf_counter() - t0) * 1000
+        self.last_timings = timings
+        self.applied_count += 1
+        self.counts = dict(u.counts)
+        self.last_cook_ms = float(u.cook.get("ms", 0.0))
+        if u.t_sent:
+            self.last_latency_ms = (time.time() - u.t_sent) * 1000
+        for w in timings["warnings"]:
+            self._log(w)
+        if self.last_error.startswith("cook"):
+            self.last_error = ""
+        self._ui_dirty = True
+
+    def _forward_params(self) -> bool:
+        """Forward changed modifier values. Returns True if anything was sent."""
+        if not self.params or not self.forwarding_enabled or self.client is None:
+            self.params_dirty = False
+            return False
+        now = time.monotonic()
+        if now - self._last_forward < MIN_FORWARD_INTERVAL:
+            return False                              # guard 5: stay dirty, try again next tick
+        proxy_obj = bpy.data.objects.get(proxy.PROXY_OBJECT)
+        mod = proxy_obj.modifiers.get(proxy.MODIFIER) if proxy_obj else None
+        if mod is None or mod.node_group is None:
+            self.params_dirty = False
+            return False
+        self.params_dirty = False
+        current = proxy.read_values(mod, mod.node_group, self.params)
+        sent = False
+        for name, v in self.forwarder.changes(current).items():
+            payload = list(v) if isinstance(v, tuple) else v
+            if self.client.set_param(name, payload):
+                self.forwarder.commit(name, v, now)
+                self.sent_count += 1
+                sent = True
+            if self.forwarder.tripped:
+                self.last_error = "parameter forwarding stopped: possible feedback loop (reconnect to reset)"
+                self._log(self.last_error)
+                self._ui_dirty = True
+                break
+        if sent:
+            self._last_forward = now
+        return sent
+
+
+_runtime: Optional[Runtime] = None
+
+
+def timer_entry() -> Optional[float]:
+    """The function registered with ``bpy.app.timers`` (module level, so registration identity is stable)."""
+    return get_runtime()._timer()
+
+
+def get_runtime() -> Runtime:
+    global _runtime
+    if _runtime is None:
+        _runtime = Runtime()
+    return _runtime
+
+
+@persistent
+def _depsgraph_post(scene, depsgraph) -> None:
+    """Guard 1: only flags that the proxy changed. Never writes bpy data."""
+    rt = _runtime
+    if rt is None or rt.client is None:
+        return
+    for u in depsgraph.updates:
+        idb = u.id
+        if isinstance(idb, bpy.types.Object) and idb.name == proxy.PROXY_OBJECT:
+            rt.params_dirty = True
+            return
+
+
+def _tag_redraw() -> None:
+    wm = bpy.context.window_manager
+    if wm is None:
+        return
+    for win in wm.windows:
+        for area in win.screen.areas:
+            if area.type in {"VIEW_3D", "PROPERTIES"}:
+                area.tag_redraw()
+
+
+def shutdown() -> None:
+    global _runtime
+    if _runtime is not None:
+        _runtime.disconnect()
+    if _depsgraph_post in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(_depsgraph_post)
+    _runtime = None
