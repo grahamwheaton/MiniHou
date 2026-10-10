@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "nodes": {
+    "ground": {"type": "grid", "params": {"size_x": 10, "size_y": 10, "columns": 60, "rows": 60}},
+    "hills": {
+      "type": "noise",
+      "params": {"amplitude": [0, 0, 1.2], "frequency": 0.35, "octaves": 3, "seed": 7},
+      "inputs": {"geo": "ground"}
+    },
+    "points": {"type": "scatter", "params": {"count": 150, "seed": 1}, "inputs": {"geo": "hills"}},
+    "spike": {"type": "grid", "params": {"size_x": 0.2, "size_y": 0.2, "columns": 2, "rows": 2}},
+    "spike_up": {"type": "transform", "params": {"translate": [0, 0, 0.25], "scale": [1, 1, 1]}, "inputs": {"geo": "spike"}},
+    "copies": {"type": "copy_to_points", "inputs": {"source": "spike_up", "points": "points"}},
+    "all": {"type": "merge", "inputs": {"geos": ["hills", "copies"]}},
+    "out": {"type": "output", "inputs": {"geo": "all"}}
+  },
+  "display": "out",
+  "exposed": [
+    {"name": "Hill Height", "node": "hills", "param": "amplitude"},
+    {"name": "Hill Frequency", "node": "hills", "param": "frequency"},
+    {"name": "Seed", "node": "hills", "param": "seed"},
+    {"name": "Scatter Count", "node": "points", "param": "count"},
+    {"name": "Grid Columns", "node": "ground", "param": "columns"}
+  ]
+}

@@ -1,0 +1,232 @@
+"""Pull-based, cached graph evaluation.
+
+Cooking a node asks for its inputs, which ask for theirs, and so on -- but only as far
+as needed:
+
+1. Every node's **cache key** is computed first, without cooking anything. It is a hash
+   of (node type, node-type version, canonical params, *keys of its inputs*), a Merkle
+   chain. Changing one parameter changes that node's key and, transitively, every key
+   downstream -- and nothing else.
+2. Cooking walks from the target. A node whose key is already cached is returned as-is
+   and its inputs are never visited (so an unchanged branch costs nothing, even when a
+   sibling branch changed).
+
+Cached geometries are frozen (read-only arrays), so sharing them between cache entries,
+downstream nodes and link clients is safe.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import time
+from collections import OrderedDict
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
+
+from .geometry import Geometry
+from .graph import Graph, GraphError
+from .sdk import REGISTRY, Registry
+
+DEFAULT_CACHE_BYTES = 2 * 1024 ** 3
+
+
+class NodeError(RuntimeError):
+    """A node function raised, or returned something invalid."""
+
+    def __init__(self, node_id: str, node_type: str, cause: BaseException):
+        self.node_id = node_id
+        self.node_type = node_type
+        self.cause = cause
+        super().__init__(f"node {node_id!r} ({node_type}): {type(cause).__name__}: {cause}")
+
+
+@dataclass
+class CookStats:
+    target: str = ""
+    key: str = ""
+    cooked: List[str] = field(default_factory=list)     # nodes whose function actually ran, in order
+    cached: List[str] = field(default_factory=list)     # nodes served from cache
+    node_ms: Dict[str, float] = field(default_factory=dict)
+    total_ms: float = 0.0
+
+    def to_dict(self) -> dict:
+        return {"target": self.target, "cooked": list(self.cooked), "cached": list(self.cached),
+                "node_ms": {k: round(v, 3) for k, v in self.node_ms.items()},
+                "total_ms": round(self.total_ms, 3)}
+
+
+@dataclass
+class _Entry:
+    geo: Geometry
+    arrays: Tuple[int, ...]      # ids of arrays this entry pins (for shared-array byte accounting)
+    node_type: str = ""
+
+
+class Cache:
+    """LRU cache of frozen geometries, bounded by (de-duplicated) array bytes."""
+
+    def __init__(self, max_bytes: int = DEFAULT_CACHE_BYTES):
+        self.max_bytes = max_bytes
+        self._entries: "OrderedDict[str, _Entry]" = OrderedDict()
+        self._array_refs: Dict[int, List[int]] = {}   # id(array) -> [refcount, nbytes]
+        self.total_bytes = 0
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._entries
+
+    def keys(self) -> List[str]:
+        return list(self._entries)
+
+    def get(self, key: str) -> Optional[Geometry]:
+        e = self._entries.get(key)
+        if e is None:
+            return None
+        self._entries.move_to_end(key)
+        return e.geo
+
+    def put(self, key: str, geo: Geometry, node_type: str = "") -> None:
+        if key in self._entries:
+            self._entries.move_to_end(key)
+            return
+        ids = []
+        for a in geo.unique_arrays():
+            ref = self._array_refs.get(id(a))
+            if ref is None:
+                self._array_refs[id(a)] = [1, a.nbytes]
+                self.total_bytes += a.nbytes
+            else:
+                ref[0] += 1
+            ids.append(id(a))
+        self._entries[key] = _Entry(geo, tuple(ids), node_type)
+        self._evict_to_budget(keep=key)
+
+    def _drop(self, key: str) -> None:
+        e = self._entries.pop(key)
+        for aid in e.arrays:
+            ref = self._array_refs[aid]
+            ref[0] -= 1
+            if ref[0] == 0:
+                self.total_bytes -= ref[1]
+                del self._array_refs[aid]
+
+    def _evict_to_budget(self, keep: Optional[str] = None) -> None:
+        while self.total_bytes > self.max_bytes and len(self._entries) > 1:
+            oldest = next(iter(self._entries))
+            if oldest == keep:
+                break
+            self._drop(oldest)
+
+    def retain(self, live_keys) -> int:
+        """Drop every entry not in ``live_keys``. Returns the number dropped."""
+        live = set(live_keys)
+        dead = [k for k in self._entries if k not in live]
+        for k in dead:
+            self._drop(k)
+        return len(dead)
+
+    def clear(self) -> None:
+        for k in list(self._entries):
+            self._drop(k)
+
+
+class Evaluator:
+    """Cooks graphs against a shared cache. Not thread-safe: use one thread per evaluator."""
+
+    def __init__(self, registry: Optional[Registry] = None, cache: Optional[Cache] = None):
+        self.registry = registry or REGISTRY
+        self.cache = cache if cache is not None else Cache()
+        self.last_stats = CookStats()
+
+    # -- keys --------------------------------------------------------------
+    def compute_keys(self, graph: Graph, order: List[str]) -> Dict[str, str]:
+        """Cache key for each node in ``order`` (dependencies first). Cooks nothing."""
+        keys: Dict[str, str] = {}
+        for nid in order:
+            inst = graph.nodes[nid]
+            nt = self.registry.get(inst.type)
+            params = nt.coerce_params(inst.params)
+            in_keys = []
+            for spec in nt.inputs:
+                ref = inst.inputs.get(spec.name)
+                if ref is None:
+                    in_keys.append(None)
+                elif isinstance(ref, list):
+                    in_keys.append([keys[r] for r in ref])
+                else:
+                    in_keys.append(keys[ref])
+            payload = json.dumps(
+                [nt.name, nt.version, [[p.name, p.to_json_value(params[p.name])] for p in nt.params], in_keys],
+                separators=(",", ":"), allow_nan=False)
+            keys[nid] = hashlib.blake2b(payload.encode("utf-8"), digest_size=16).hexdigest()
+        return keys
+
+    # -- cooking -----------------------------------------------------------
+    def cook(self, graph: Graph, target: Optional[str] = None) -> Geometry:
+        t_start = time.perf_counter()
+        target = target or graph.output_node()
+        order = graph.upstream_order(target)
+        errs = graph.validate()
+        if errs:
+            raise GraphError(errs)
+        keys = self.compute_keys(graph, order)
+        stats = CookStats(target=target, key=keys[target])
+        results: Dict[str, Geometry] = {}
+        stack = [target]
+        while stack:
+            nid = stack[-1]
+            if nid in results:
+                stack.pop()
+                continue
+            hit = self.cache.get(keys[nid])
+            if hit is not None:
+                results[nid] = hit
+                stats.cached.append(nid)
+                stack.pop()
+                continue
+            pending = [d for d in graph.input_ids(nid) if d not in results]
+            if pending:
+                stack.extend(pending)
+                continue
+            results[nid] = self._cook_node(graph, nid, keys[nid], results, stats)
+            stack.pop()
+        stats.total_ms = (time.perf_counter() - t_start) * 1000.0
+        self.last_stats = stats
+        return results[target]
+
+    def _cook_node(self, graph: Graph, nid: str, key: str, results: Dict[str, Geometry],
+                   stats: CookStats) -> Geometry:
+        inst = graph.nodes[nid]
+        nt = self.registry.get(inst.type)
+        args = []
+        for spec in nt.inputs:
+            ref = inst.inputs.get(spec.name)
+            if ref is None:
+                args.append(None)
+            elif isinstance(ref, list):
+                args.append([results[r] for r in ref])
+            else:
+                args.append(results[ref])
+        params = nt.coerce_params(inst.params)
+        t0 = time.perf_counter()
+        try:
+            out = nt.fn(*args, **params)
+            if not isinstance(out, Geometry):
+                raise TypeError(f"node function returned {type(out).__name__}, expected Geometry")
+            if not out.frozen:
+                out.validate()
+                out.freeze()
+        except Exception as e:  # noqa: BLE001 - re-raised with node context
+            raise NodeError(nid, inst.type, e) from e
+        stats.node_ms[nid] = (time.perf_counter() - t0) * 1000.0
+        stats.cooked.append(nid)
+        self.cache.put(key, out, nt.name)
+        return out
+
+    def live_keys(self, graph: Graph, target: Optional[str] = None) -> List[str]:
+        """Keys of every node upstream of ``target`` (what a cook of it would use)."""
+        target = target or graph.output_node()
+        order = graph.upstream_order(target)
+        return list(self.compute_keys(graph, order).values())
