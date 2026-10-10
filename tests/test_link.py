@@ -210,6 +210,36 @@ class LiveLinkTests(unittest.TestCase):
         wait_for(self.q, "geo")
 
 
+class PortTests(unittest.TestCase):
+    def test_busy_port_gives_a_readable_error_quickly(self):
+        g = graph_from(SIMPLE, display="o")
+        a = LinkServer(Session(g), "127.0.0.1", 0)
+        port = a.start()
+        try:
+            b = LinkServer(Session(g), "127.0.0.1", port, bind_retry_seconds=0.3)
+            t0 = time.monotonic()
+            with self.assertRaises(OSError) as cm:
+                b.start()
+            self.assertIn("already in use", str(cm.exception))
+            self.assertLess(time.monotonic() - t0, 3.0)
+        finally:
+            a.stop()
+
+    def test_port_can_be_rebound_right_after_stop(self):
+        g = graph_from(SIMPLE, display="o")
+        a = LinkServer(Session(g), "127.0.0.1", 0)
+        port = a.start()
+        s = Session(g)
+        c = LinkClient("127.0.0.1", port, reconnect=False)
+        c.start()
+        time.sleep(0.3)
+        a.stop()
+        c.stop()
+        b = LinkServer(s, "127.0.0.1", port)
+        self.assertEqual(b.start(), port)
+        b.stop()
+
+
 class ErrorAndReloadTests(unittest.TestCase):
     def test_cook_error_is_reported_then_recovers_with_consistent_state(self):
         from minihou.sdk import Float, node

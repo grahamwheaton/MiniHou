@@ -48,7 +48,11 @@ def _cmd_serve(args) -> int:
         return 2
     session = Session(g, cache_bytes=int(args.cache_mb * 1024 * 1024))
     server = LinkServer(session, args.host, args.port)
-    port = server.start()
+    try:
+        port = server.start()
+    except OSError as e:
+        print(f"cannot start server: {e}", file=sys.stderr)
+        return 3
     session.start()
     if not args.no_watch:
         session.watch_file(args.graph)

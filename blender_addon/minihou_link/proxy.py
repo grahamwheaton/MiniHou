@@ -29,7 +29,10 @@ _SOCKET_TYPES = {"float": "NodeSocketFloat", "int": "NodeSocketInt", "bool": "No
 def ensure_objects():
     """Create (or fetch) the collection, output object/mesh, proxy object and modifier.
 
-    Returns ``(output_obj, proxy_obj, modifier)``.
+    Returns ``(output_obj, proxy_obj, modifier)``. Called on every geometry update, so it only *writes*
+    when something is actually missing or different: every bpy write here would tag the depsgraph and
+    force a pointless re-evaluation. (Blender hands out a new Python wrapper on each attribute access,
+    so identity checks such as ``mod.node_group is ng`` are always False; compare names instead.)
     """
     assert_main_thread()
     scene = bpy.context.scene
@@ -45,9 +48,11 @@ def ensure_objects():
         out = bpy.data.objects.new(OUTPUT_OBJECT, mesh)
     if out.name not in col.objects:
         col.objects.link(out)
-    out.hide_render = True
+    if not out.hide_render:
+        out.hide_render = True
     try:
-        out.hide_set(True)          # eye icon: not drawn, but still evaluated because Object Info uses it
+        if not out.hide_get():
+            out.hide_set(True)      # eye icon: not drawn, but still evaluated because Object Info uses it
     except RuntimeError:
         pass                         # object not in the active view layer (e.g. collection excluded)
 
@@ -61,7 +66,7 @@ def ensure_objects():
     mod = proxy.modifiers.get(MODIFIER)
     if mod is None:
         mod = proxy.modifiers.new(MODIFIER, "NODES")
-    if mod.node_group is not ng:
+    if mod.node_group is None or mod.node_group.name != ng.name:
         mod.node_group = ng
     return out, proxy, mod
 
@@ -78,8 +83,10 @@ def ensure_node_group(output_obj):
         _build_nodes(ng, output_obj)
     else:
         info = next((n for n in ng.nodes if n.bl_idname == "GeometryNodeObjectInfo"), None)
-        if info is not None and info.inputs["Object"].default_value is not output_obj:
-            info.inputs["Object"].default_value = output_obj
+        if info is not None:
+            cur = info.inputs["Object"].default_value
+            if cur is None or cur.name != output_obj.name:
+                info.inputs["Object"].default_value = output_obj
     return ng
 
 

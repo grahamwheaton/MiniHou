@@ -8,10 +8,12 @@ The protocol is unauthenticated; bind to loopback only unless you know what you 
 """
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import socket
 import threading
+import time
 from typing import List, Optional
 
 from ..graph import GraphError
@@ -162,8 +164,10 @@ class _Connection:
 
 
 class LinkServer:
-    def __init__(self, session: Session, host: str = "127.0.0.1", port: int = DEFAULT_PORT):
+    def __init__(self, session: Session, host: str = "127.0.0.1", port: int = DEFAULT_PORT,
+                 bind_retry_seconds: float = 5.0):
         self.session, self.host, self.port = session, host, port
+        self.bind_retry_seconds = bind_retry_seconds
         self._listener: Optional[socket.socket] = None
         self._conns: List[_Connection] = []
         self._lock = threading.Lock()
@@ -176,13 +180,28 @@ class LinkServer:
             return list(self._conns)
 
     def start(self) -> int:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        if os.name == "nt":
-            # SO_REUSEADDR on Windows lets a second process steal the port; ask for exclusivity.
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-        else:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind((self.host, self.port))
+        """Bind and start accepting. Retries briefly if the port is still held (restarting the engine
+        right after stopping it); raises ``OSError`` with a readable message if it stays busy."""
+        deadline = time.monotonic() + self.bind_retry_seconds
+        while True:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            if os.name == "nt":
+                # SO_REUSEADDR on Windows lets a second process steal the port; ask for exclusivity.
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            else:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind((self.host, self.port))
+                break
+            except OSError as e:
+                s.close()
+                busy = e.errno in (errno.EADDRINUSE, errno.EACCES) or getattr(e, "winerror", 0) in (10048, 10013)
+                if not busy:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise OSError(e.errno, f"port {self.port} on {self.host} is already in use "
+                                           f"(is another minihou engine running?)") from None
+                time.sleep(0.25)
         s.listen(8)
         s.settimeout(0.5)
         self._listener = s

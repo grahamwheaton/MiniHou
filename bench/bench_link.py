@@ -46,7 +46,8 @@ def script_args():
     ap.add_argument("--shape", choices=["points", "mesh"], default="points")
     ap.add_argument("--points", type=int, default=1_000_000)
     ap.add_argument("--iterations", type=int, default=15)
-    ap.add_argument("--python", default=sys.executable, help="python used to run the sender/engine subprocess")
+    ap.add_argument("--python", default=os.environ.get("MINIHOU_ENGINE_PYTHON", sys.executable),
+                    help="python used to run the sender/engine subprocess (default: $MINIHOU_ENGINE_PYTHON, else this python)")
     return ap.parse_args(argv)
 
 

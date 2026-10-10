@@ -63,11 +63,15 @@ values are recorded as known before they are written to the modifier; (5) forwar
 * `mesh.vertices.foreach_set("co")` is ~170x slower than writing the `position` attribute's data; `loops.foreach_set("vertex_index")`
   is ~250x slower than the `.corner_vert` attribute. Both fast paths are used, with fallbacks.
 * At 1M points the Blender end costs ~1 ms and the socket ~6 ms; the engine's numpy noise (~276 ms) dominates a slider edit.
+  A 100k-point edit is ~28 ms end to end.
+* Review findings fixed after the first push: float32 round-trip phantom edits; `ensure_objects()` re-assigning the modifier node group on every update
+  (Blender returns a new Python wrapper per access, so `is` checks are always False; it tagged the depsgraph each time); unmeasured
+  performance claims in the README; the benchmark ignoring `MINIHOU_ENGINE_PYTHON`; restarting the engine on a busy port.
 
 ## Next steps (not started)
 
-1. **Noise speed**: the options, in order of cost: chunked `ThreadPoolExecutor` over point ranges (numpy ufuncs release the GIL; stdlib only, likely
-   3-4x on 4 cores); a cheaper gradient formulation; Numba/Rust for the hot kernels (needs your OK, as it adds a dependency).
+1. **Noise speed**: the options, in order of cost: chunked `ThreadPoolExecutor` over point ranges (numpy ufuncs release the GIL; stdlib only; prototype measured
+   2.8x on 4 threads, bit-identical, slower at 8); a cheaper gradient formulation; Numba/Rust for the hot kernels (needs your OK, as it adds a dependency).
 2. Wrangle node (parser + numpy codegen), attribute-flow metadata on node types.
 3. More nodes: delete/blast, group/attribute-from-group, attribute transfer / ray, boolean-free modelling basics, instancing packed prims.
 4. Multiple outputs / several display nodes; detail attributes and normals to Blender; undo-friendly parameter writes.

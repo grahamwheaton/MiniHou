@@ -149,6 +149,25 @@ class AddonIntegrationTests(unittest.TestCase):
         self.assertEqual(len(proxy_obj.evaluated_get(bpy.context.evaluated_depsgraph_get()).data.polygons), 29 * 29)
         self.assertIn("uv", out.data.attributes)
 
+    def test_ensure_objects_in_steady_state_does_not_dirty_the_depsgraph(self):
+        """Regression: it runs on every geometry update; any bpy write there forces a re-evaluation."""
+        self.pump(lambda: self.rt.applied_count >= 1)
+        self.settle(5)
+        seen = []
+
+        def spy(scene, depsgraph):
+            seen.extend(u.id.name for u in depsgraph.updates)
+
+        bpy.app.handlers.depsgraph_update_post.append(spy)
+        try:
+            bpy.context.view_layer.update()
+            seen.clear()
+            self.proxy.ensure_objects()
+            bpy.context.view_layer.update()
+        finally:
+            bpy.app.handlers.depsgraph_update_post.remove(spy)
+        self.assertEqual(seen, [])
+
     def test_timer_is_registered_and_stops_itself_when_disconnected(self):
         self.assertTrue(bpy.app.timers.is_registered(self.runtime.timer_entry))
         self.assertIsInstance(self.runtime.timer_entry(), float)         # next delay

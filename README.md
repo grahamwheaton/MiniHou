@@ -16,7 +16,7 @@ Status: **milestone 1**. See [docs/PLAN.md](docs/PLAN.md) for the design and wha
 
 ## Quick start (Windows)
 
-You need Python 3.10+ with numpy (`py -m pip install numpy`) and Blender 5.1.
+You need Python 3.11+ with numpy 1.26+ (`py -m pip install numpy`) and Blender 5.1.
 
 ```powershell
 cd path\to\BlenderHoudini
@@ -145,19 +145,40 @@ the fast paths and falls back to the classic API if Blender changes them.
 Rebuilding topology for a 1M-quad mesh (only needed when connectivity changes): ~300 ms
 (of which ~150 ms is `mesh.update(calc_edges=True)`).
 
-End to end for a slider edit on a 1000x1000 grid + noise (1M points): **~285 ms**, of which the engine's noise
-cook is **~276 ms**. Transport and the Blender write together are under 10 ms. So the link is not the
-bottleneck; the numpy noise is (the per-corner gradient lookups are ~80% of it). At 100k points the same edit
-costs roughly a tenth of that.
+End to end for a slider edit (`set_param` -> engine cook -> diff -> socket -> Blender write) on a grid + noise graph, median of 10
+edits; position-only updates, topology untouched:
+
+| points | end-to-end | engine noise cook | Blender write |
+|---|---|---|---|
+| 10k | 3 ms | 2.4 ms | 0.08 ms |
+| 100k | 28 ms | 26 ms | 0.25 ms |
+| 250k | 75 ms | 71 ms | 0.5 ms |
+| 1M | 285-330 ms | 276-318 ms | 1.7 ms |
+
+So the link is not the bottleneck at any size; the engine's numpy noise is (per-corner gradient lookups are ~80% of its cost). Interactive
+(~30 fps) holds up to roughly 100k points for noise-heavy graphs. A prototype that splits the noise over a stdlib thread pool gave
+**2.8x on 4 threads** with bit-identical output (and was slower at 8 threads); it is not in the engine yet.
 
 ## Verified vs not verified
 
-* Verified here (Blender 5.1.2 via the `bpy` module, headless): engine unit tests; the add-on against a real engine
-  subprocess over a real socket; results compared on the *evaluated* Geometry Nodes proxy; feedback-loop
-  behaviour; engine restart/reconnect; hot reload of the graph file.
-* Not verified: an interactive Blender GUI session (the timer is registered, but headless Blender never ticks it, so
-  tests drive `Runtime.tick()` by hand; the N-panel drawing code has not been rendered), and Windows itself.
-  Please try the quick start and tell me what the Blender console shows.
+Verified here:
+* 154 tests pass on Python 3.11 (numpy 1.26.4), 3.12 (numpy 2.5) and 3.13 (numpy 2.5). The 18 Blender tests are skipped without `bpy`
+  and pass under Blender 5.1.2 (`bpy` module, headless).
+* The Blender tests run the add-on against a real engine subprocess over a real socket and compare results on the *evaluated*
+  Geometry Nodes proxy: parameter round trip, no feedback loop, burst coalescing, engine restart/reconnect, hot reload of the graph file.
+* `tools/blender_bootstrap.py` runs; the four operators run; the panel `draw()` runs against a stub layout; the add-on zip installs and
+  enables through Blender's own `addon_install` / `addon_enable`.
+
+Not verified:
+* **An interactive Blender session.** Headless Blender never fires `bpy.app.timers`, so tests call `Runtime.tick()` by hand, and the
+  bootstrap's deferred connect timer has not fired. The panel has not been rendered by a real UI. This is the biggest remaining unknown.
+* **Windows.** Everything above ran on Linux. Windows-specific code that has never run: exclusive port binding
+  (`SO_EXCLUSIVEADDRUSE`), Blender discovery paths in `launch_blender.py`, `blender.exe` console behaviour.
+* Python 3.10 (grammar-checked only), numpy 1.24/1.25, Blender 4.2-5.0 (the add-on declares 4.2+ but was only run on 5.1.2).
+* A real `blender` executable: Claude had only the `bpy` PyPI module, not the binary, so `launch_blender.py --selftest/--bench` have
+  been run through the `bpy` module equivalents, not through `blender --background`.
+
+Please try the quick start and send me whatever the Blender console prints.
 
 ## Known limits (milestone 1)
 
