@@ -211,6 +211,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `sdf_boolean` | a, b | union / subtract / intersect of closed meshes through distance fields, with smooth fillets |
 | `for_each` | geo | run a node or a system on every piece (connected pieces, an attribute's values, or each primitive) and merge |
 | `solver` | geo | feed each frame's result into the next (simulations, growth): deterministic, incremental playback, substeps |
+| `python` | geo, opinput1..3 | real Python inside the graph: geometry and variables piped in, you set `out`; **off unless the engine runs with `--allow-python`** |
 | `wrangle` | geo | VEX-like snippet over points, primitives or vertices (see below) |
 | `attribute_delete` | geo | delete attributes by name or wildcard (`N uv tmp_*`) |
 | `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |
@@ -364,6 +365,30 @@ mesh.
 | `pcg_debug` | points | each point as its box, coloured by density |
 
 ## Writing a node
+
+### The python node (code inside the graph)
+
+For a quick one-off you do not need a library file: a `python` node holds the code in its **code** box (editor: the code panel,
+same as a wrangle). The geometry you wire in arrives as `geo`, `input1`, `input2`, `input3` (read-only: copy before editing),
+`np` is numpy, and you set `out` to the result, a `Geometry` or an `(n, 3)` array of points (leave it out to pass `geo` through):
+
+```python
+P = geo.P.astype(np.float64)
+P[:, 2] += a * np.sin(P[:, 0] * b) + factor        # a, b: sliders; factor: a named value from the Variables field
+out = geo.copy()
+out.point["P"] = P.astype(np.float32)
+out.detail["bumps"] = int(i)                       # detail attributes reach Blender as custom properties
+```
+
+Variables piped in: `a b c d` (floats), `i j` (ints), `v` (x, y, z), `s` (text), `flag` (bool) are ordinary parameters, so they
+can be exposed to Blender and keyed; the **Variables** field takes any number of `name = value` lines (numbers, text, lists,
+True/False); `Frame`, `Time`, `TimeInc` give the time (tick **animated** so the node recooks on every frame). Treat it as a pure
+function of its inputs and parameters: results are cached like any node. Errors name the line of your code.
+
+**It is off by default.** A graph file can carry code, and a node that runs it would execute whatever a downloaded (or
+AI-written) graph says. Start the engine with `--allow-python` (`py tools\launch_blender.py --engine g.json --allow-python`, or set
+`MINIHOU_PYTHON_NODES=1`) for graphs you trust; nothing inside a graph can switch it on, and without the switch the node
+fails with a message saying so. Wrangles stay sandboxed and are always available.
 
 ### Node libraries (hot-reloaded)
 

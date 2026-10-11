@@ -39,7 +39,10 @@ How to build a system:
    atomic; the reply tells you whether the cook succeeded, which node failed and why, and point/prim counts.
 4. inspect_node to check geometry (counts, bounds, attributes with ranges) at any node, then iterate.
 Use wrangle nodes (wrangle_reference) for custom per-point math; for anything more (new topology, several inputs,
-loops over geometry) write a node-library file (node_library). To make something reusable, build it as a *system*: a graph
+loops over geometry) write a node-library file (node_library). A `python` node (Python code inside the graph, with inputs
+geo/input1..3 and variables a b c d i j v s flag) exists too, but it only runs when the USER started the engine with
+--allow-python; engine_status says whether it is on. Never ask to turn it on yourself, and prefer wrangles or
+node-library files. To make something reusable, build it as a *system*: a graph
 saved in nodes/ (e.g. nodes/rock_scatter.json) with `input` nodes and exposed parameters becomes a node type that any
 graph can use (details in node_library). Houdini-style toolkit: groups (group_create, group_expand; most nodes take a group pattern
 like 'top ^side', '0-9' or '@P.z > 0'), modelling (boolean, polyextrude, polybevel, subdivide, clip, mirror, polyfill, delaunay, convex_hull, dissolve, skin, revolve, bridge;
@@ -348,7 +351,9 @@ class McpServer:
                  f"Graph file: {st.get('path') or '(none)'}  (rev {st['rev']}, {len(st['graph']['nodes'])} nodes)",
                  format_status(st["status"], st["graph"]),
                  f"Blender: {'connected (' + ', '.join(clients) + ')' if clients else 'not connected'}",
-                 f"Editor (for the user): {self.engine.url}"]
+                 f"Editor (for the user): {self.engine.url}",
+                 "Python nodes: " + ("enabled (the user allowed them)" if st["engine"].get("python_nodes")
+                                    else "off (the engine was not started with --allow-python)")]
         if lib:
             lines.append(f"Node library: {sum(len(f['nodes']) for f in lib['files'])} custom node type(s) from "
                          f"{len(lib['files'])} file(s)" + "".join(f"\n  ERROR in {f['file']}: {f['error']}" for f in bad))

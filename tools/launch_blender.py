@@ -96,6 +96,8 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--http-port", type=int, default=8766, help="engine's web editor / API port (-1 = off)")
     ap.add_argument("--editor", action="store_true", help="also open the node editor in a web browser")
+    ap.add_argument("--allow-python", action="store_true",
+                    help="start the engine with python nodes enabled (graphs can then run Python code: trusted graphs only)")
     ap.add_argument("--factory", action="store_true",
                     help="start Blender with factory settings: none of your other add-ons or preferences "
                          "(a clean console when chasing an error)")
@@ -143,7 +145,8 @@ def main():
         graph = os.path.abspath(args.engine)
         root = ROOT if os.path.commonpath([graph, ROOT]) == ROOT else os.path.dirname(graph)   # editor's file menu
         engine = subprocess.Popen([sys.executable, "-u", "-m", "minihou", "serve", graph, "--host", args.host,
-                                   "--port", str(args.port), "--http-port", str(args.http_port), "--root", root], cwd=ROOT)
+                                   "--port", str(args.port), "--http-port", str(args.http_port), "--root", root]
+                                  + (["--allow-python"] if args.allow_python else []), cwd=ROOT)
         time.sleep(1.0)
         if engine.poll() is not None:
             print("engine exited immediately; see its message above", file=sys.stderr)

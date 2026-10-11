@@ -124,6 +124,11 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
    / `box_set` / `box_remove`, cosmetic and outside the cache keys), and a WebGL2 3-D preview of the selected or display node
    (`POST /api/preview`, binary arrays, `minihou/preview.py` + `static/preview.js`).
 
+5. **Python node** (`nodes/python_node.py`): real Python in the graph (inputs `geo`/`input1..3`, variables `a b c d i j v s flag`,
+   named `Variables`, `Frame`/`Time`, you set `out`). Because a graph file can then carry code, it is **off unless the engine is started
+   with `--allow-python`** (or `MINIHOU_PYTHON_NODES=1`); nothing in a graph can turn it on, the MCP instructions tell assistants not
+   to ask, and `engine_status` reports the switch.
+
 Open:
 
 - Extra outputs have no modifier or exposed parameters (only the display branch does).

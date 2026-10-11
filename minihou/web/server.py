@@ -157,7 +157,7 @@ class WebServer:
         out.update(status=s.status(), nodes=[nt.describe() for nt in s.evaluator.registry], library=s.library_status(),
                    ops=OP_NAMES, root=str(self.root), files=self.files(),
                    link={"port": getattr(self.link, "port", None), "clients": self.link_clients()},
-                   engine={"pid": os.getpid(), "version": _version()})
+                   engine={"pid": os.getpid(), "version": _version(), "python_nodes": _python_allowed()})
         return out
 
     def files(self) -> List[str]:
@@ -190,6 +190,11 @@ class WebServer:
         if p != self.root and self.root not in p.parents:
             raise ApiError(403, f"path is outside the workspace root {self.root}")
         return p
+
+
+def _python_allowed() -> bool:
+    from ..nodes import python_node
+    return python_node.allowed()
 
 
 def _version() -> str:
