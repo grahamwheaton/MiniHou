@@ -210,6 +210,7 @@ class Runtime:
         out, _proxy, mod = proxy.ensure_objects()
         t0 = time.perf_counter()
         timings = mesh_writer.apply_update(out.data, self.mirror, u)
+        timings["warnings"].extend(mesh_writer.write_detail(out, self.mirror.detail))
         names = self.mirror.detail.get("instance_objects") or []
         missing = proxy.sync_instances(mod.node_group, [str(n) for n in names] if isinstance(names, list) else [])
         if missing and missing != self._missing_instances:

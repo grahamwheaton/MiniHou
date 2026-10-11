@@ -207,6 +207,22 @@ class AddonIntegrationTests(unittest.TestCase):
         self.assertEqual(len(me.polygons), 6)
         self.assertEqual(sum(e.is_loose for e in me.edges), 29 + 3)
 
+    def test_detail_attributes_from_the_engine_reach_the_output_object(self):
+        graph = {"version": 1, "nodes": {
+            "g": {"type": "grid", "params": {"columns": 4, "rows": 4}},
+            "m": {"type": "measure", "inputs": {"geo": "g"}},
+            "o": {"type": "output", "inputs": {"geo": "m"}}}, "display": "o"}
+        from minihou import Graph, Evaluator
+        detail = Evaluator().cook(Graph.from_dict(graph)).detail
+        self.assertTrue(detail, "the measure node should write detail attributes")
+        self.graph_path.write_text(json.dumps(graph), encoding="utf-8")
+        self.pump(lambda: bpy.data.objects.get(self.proxy.OUTPUT_OBJECT) is not None
+                  and bpy.data.objects[self.proxy.OUTPUT_OBJECT].get("mh_grid_columns") == 4, timeout=60)
+        out = bpy.data.objects[self.proxy.OUTPUT_OBJECT]
+        for name in detail:
+            if isinstance(detail[name], (int, float)):
+                self.assertAlmostEqual(float(out["mh_" + name]), float(detail[name]), places=4)
+
     def test_instance_points_place_blender_objects(self):
         for name, size in (("Tree", 0.2), ("Rock", 0.1)):
             me = bpy.data.meshes.new(name)
@@ -752,6 +768,35 @@ class MeshWriterTests(unittest.TestCase):
         self.assertNotIn("uv", m.attributes)
         self.assertNotIn("Cd", m.attributes)
         self.assertNotIn("N", m.attributes)
+
+    def test_detail_attributes_become_custom_properties_on_the_output_object(self):
+        obj = bpy.data.objects.new("out", self.mesh)
+        detail = {"iteration": 3, "ratio": 0.25, "label": "wall", "flag": True, "size": [1.5, 2.5, 3.5],
+                  "ids": [1, 2, 3], "instance_objects": ["Cube"], "weird": {"a": 1}, "nothing": None, "mixed": [1, "a"]}
+        warnings = self.w.write_detail(obj, detail)
+        self.assertEqual(obj["mh_iteration"], 3)
+        self.assertEqual(obj["mh_ratio"], 0.25)
+        self.assertEqual(obj["mh_label"], "wall")
+        self.assertEqual(obj["mh_flag"], 1)
+        self.assertEqual(obj["mh_size"].to_list(), [1.5, 2.5, 3.5])
+        self.assertEqual(obj["mh_ids"].to_list(), [1, 2, 3])
+        for name in ("instance_objects", "weird", "nothing", "mixed"):
+            self.assertNotIn("mh_" + name, obj.keys())
+        self.assertEqual(sorted(w.split("'")[1] for w in warnings), ["mixed", "nothing", "weird"])
+        # unchanged values are not rewritten; changed ones are; attributes the engine stopped producing go away
+        before = obj.get("mh_ratio")
+        self.w.write_detail(obj, {"iteration": 4, "ratio": 0.25})
+        self.assertEqual((obj["mh_iteration"], obj["mh_ratio"], before), (4, 0.25, 0.25))
+        for gone in ("mh_label", "mh_flag", "mh_size", "mh_ids"):
+            self.assertNotIn(gone, obj.keys())
+        self.w.write_detail(obj, {})
+        self.assertEqual([k for k in obj.keys() if k.startswith("mh_")], [])
+        obj["mine"] = 1                                            # properties we did not write stay untouched
+        self.w.write_detail(obj, {"x": 1})
+        self.assertEqual(obj["mine"], 1)
+        self.assertEqual(list(obj[self.w.DETAIL_KEYS]), ["mh_x"])
+        self.w.write_detail(obj, {"a" * 70: 1})                      # custom property names are limited to 63 bytes
+        self.assertNotIn("mh_" + "a" * 70, obj.keys())
 
     def test_curves_become_loose_edges(self):
         from minihou import Geometry

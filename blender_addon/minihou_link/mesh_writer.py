@@ -90,6 +90,53 @@ def set_edge_verts(mesh, pairs: np.ndarray) -> None:
         mesh.edges.foreach_set("vertices", flat)
 
 
+DETAIL_PREFIX = "mh_"                        # detail attribute "iteration" -> custom property "mh_iteration" on the output object
+DETAIL_KEYS = "minihou_detail_keys"          # which custom properties we wrote, so stale ones can go
+DETAIL_INTERNAL = {"instance_objects"}       # detail data the add-on consumes itself
+
+
+def _detail_value(v):
+    """A custom-property value for a detail attribute, or None if it cannot be one (numbers, text, short number lists)."""
+    if isinstance(v, bool):
+        return int(v)
+    if isinstance(v, (int, float, str)):
+        return v
+    if isinstance(v, (list, tuple)) and 0 < len(v) <= 16 and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in v):
+        return [int(x) for x in v] if all(isinstance(x, int) for x in v) else [float(x) for x in v]
+    return None
+
+
+def write_detail(obj, detail: Dict[str, object]) -> List[str]:
+    """Publish the engine's detail attributes as custom properties ``mh_<name>`` on the output object, so drivers,
+    other add-ons and scripts can read per-geometry values (counts, measurements, an iteration number). Only changed values
+    are written. Returns warnings for values that could not be represented."""
+    assert_main_thread()
+    warnings: List[str] = []
+    wanted = {}
+    for name, v in detail.items():
+        if name in DETAIL_INTERNAL:
+            continue
+        key = DETAIL_PREFIX + str(name)
+        val = _detail_value(v)
+        if val is None or len(key.encode("utf-8")) > 63:
+            warnings.append(f"detail attribute {name!r} cannot be a Blender custom property; skipped")
+            continue
+        wanted[key] = val
+    for key in list(obj.get(DETAIL_KEYS, [])):
+        if key not in wanted and key in obj:
+            del obj[key]
+    for key, val in wanted.items():
+        cur = obj.get(key)
+        if hasattr(cur, "to_list"):
+            cur = cur.to_list()
+        if cur is None or type(cur) is not type(val) or cur != val:
+            obj[key] = val
+    keys = sorted(wanted)
+    if list(obj.get(DETAIL_KEYS, [])) != keys:
+        obj[DETAIL_KEYS] = keys
+    return warnings
+
+
 def _blender_name(engine_name: str) -> str:
     return {"uv": UV_NAME, "Cd": COLOR_NAME, "N": NORMAL_NAME}.get(engine_name, engine_name)
 
