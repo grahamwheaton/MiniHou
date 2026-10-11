@@ -26,6 +26,8 @@ ap.add_argument("--out", required=True)
 ap.add_argument("--shots", required=True)
 ap.add_argument("--keep-open", action="store_true", help="do not quit at the end")
 ap.add_argument("--reload-cycles", type=int, default=0, help="extra remove/add reload cycles (stress test)")
+ap.add_argument("--no-clicks", action="store_true",
+                help="use the no-OS-input sidebar check even where xdotool exists (what Windows/macOS do)")
 ap.add_argument("--popover-during-reload", action="store_true",
                 help="keep the panel open as a popover during reloads. Reproduces a crash inside Blender 5.1 (popup + "
                      "live reload); users cannot reach this state, the add-on never shows its panel as a popover")
@@ -130,6 +132,39 @@ def open_sidebar_tab(win, area):
     return False
 
 
+TEST_PANELS = []
+
+
+def show_in_active_tab(win, area):
+    """Without OS-level clicks (Windows, macOS): the active sidebar tab can be read but not set from Python, so register
+    a copy of the MiniHou panel *in* the active tab. Blender's real UI then draws the add-on's own draw code. Generator;
+    returns True once the panel has been drawn."""
+    ui = next(r for r in area.regions if r.type == "UI")
+    category = getattr(ui, "active_panel_category", "") or "Item"
+    if category == "MiniHou":
+        cls = None                                         # already showing our tab
+    else:
+        # An independent Panel class running the add-on's draw(). Not a subclass: registering a subclass of a
+        # registered panel breaks the original's popover (wm.call_panel stops drawing it), even after unregistering.
+        src = minihou_link.MINIHOU_PT_main
+        attrs = {"bl_idname": "MINIHOU_PT_gui_test_copy", "bl_label": "MiniHou (test copy)", "bl_category": category,
+                 "bl_space_type": src.bl_space_type, "bl_region_type": src.bl_region_type, "bl_order": 0,
+                 "draw": src.draw}
+        if "poll" in src.__dict__:
+            attrs["poll"] = src.__dict__["poll"]
+        cls = type("MINIHOU_PT_gui_test_copy", (bpy.types.Panel,), attrs)
+        bpy.utils.register_class(cls)
+        TEST_PANELS.append(cls)
+    for _ in range(40):
+        before = RESULTS["panel_draws"]
+        area.tag_redraw()
+        yield 0.1
+        if RESULTS["panel_draws"] > before:
+            log(f"sidebar drew the panel in the active tab {category!r}")
+            return True
+    return False
+
+
 def wait(pred, timeout, name):
     t = time.time()
     while not pred():
@@ -191,10 +226,12 @@ def scenario():
     if os.environ.get("MINIHOU_X11_SHOT"):
         os.system("xdotool key Escape >/dev/null 2>&1")     # close the factory-startup splash
         yield 0.3
-    SIDEBAR = False
-    if os.environ.get("MINIHOU_X11_SHOT"):
+    if os.environ.get("MINIHOU_X11_SHOT") and not ARGS.no_clicks:
         SIDEBAR = yield from open_sidebar_tab(win, area)
         check("sidebar shows the MiniHou tab (clicked like a user)", SIDEBAR)
+    else:
+        SIDEBAR = yield from show_in_active_tab(win, area)
+        check("sidebar draws the MiniHou panel (in the active tab; no OS clicks)", SIDEBAR)
     screenshot("1_connected")
 
     # 3. a slider drag: 30 value changes at ~60 Hz. Only the real depsgraph handler forwards them.
@@ -308,7 +345,14 @@ def scenario():
     #    while a reload removes inputs crashes Blender 5.1 (README, "Known Blender behaviour"), and on Windows the test
     #    cannot close it again.
     if not ARGS.popover_during_reload:
+        for cls in TEST_PANELS:                           # only the add-on's own panel from here on
+            bpy.utils.unregister_class(cls)
+        TEST_PANELS.clear()
+        yield 0.2
         d0 = RESULTS["panel_draws"]
+        if os.environ.get("MINIHOU_X11_SHOT"):            # popovers open at the pointer: make sure Blender has seen one
+            os.system(f"xdotool mousemove {area.x + area.width // 3} {win.height - (area.y + area.height // 2)} >/dev/null 2>&1")
+            yield 0.3
         log(f"call_panel: {show_panel(win, area)}")
         yield from sleep(1.5)
         check("Blender's UI drew the MiniHou panel (popover)", RESULTS["panel_draws"] > d0,

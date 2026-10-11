@@ -74,7 +74,16 @@ def apply_ops(graph: Graph, ops: List[dict]) -> Tuple[Graph, List[dict]]:
             raise EditError(i, op, msg) from None
         except (TypeError, ValueError) as e:
             raise EditError(i, op, f"bad op: {e}") from None
-    layout_missing(g)
+    explicit = set()                                   # positions this batch set on purpose survive the auto-layout
+    for op in ops:
+        if op.get("op") == "add" and "pos" in op:
+            explicit.add(op.get("id") or "")
+        elif op.get("op") == "move":
+            explicit.update(op.get("positions") or [op.get("id")])
+        elif op.get("op") == "layout":
+            explicit.clear()
+    explicit.update(r["id"] for r, op in zip(results, ops) if op.get("op") == "add" and "pos" in op and "id" in r)
+    layout_missing(g, keep=explicit)
     return g, results
 
 
@@ -291,7 +300,7 @@ OP_NAMES = sorted(_OPS)
 # ---------------------------------------------------------------------------
 # layout
 # ---------------------------------------------------------------------------
-def layout_missing(g: Graph) -> bool:
+def layout_missing(g: Graph, keep=()) -> bool:
     """Give every node without ``pos`` a position. Returns True if anything changed.
 
     Mostly new nodes (a hand-written file, or a system an AI just built): tidy the whole graph.
@@ -300,7 +309,10 @@ def layout_missing(g: Graph) -> bool:
     if not missing:
         return False
     if 2 * len(missing) >= len(g.nodes):
+        kept = {nid: list(g.nodes[nid].meta["pos"]) for nid in keep if nid in g.nodes and "pos" in g.nodes[nid].meta}
         layout_all(g)
+        for nid, p in kept.items():
+            g.nodes[nid].meta["pos"] = p
         return True
     placed = {nid: tuple(n.meta["pos"]) for nid, n in g.nodes.items() if "pos" in n.meta}
     occupied = set(placed.values())

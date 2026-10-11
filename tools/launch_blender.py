@@ -96,6 +96,9 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--http-port", type=int, default=8766, help="engine's web editor / API port (-1 = off)")
     ap.add_argument("--editor", action="store_true", help="also open the node editor in a web browser")
+    ap.add_argument("--factory", action="store_true",
+                    help="start Blender with factory settings: none of your other add-ons or preferences "
+                         "(a clean console when chasing an error)")
     ap.add_argument("--selftest", action="store_true", help="run the addon tests headless; exit code = result")
     ap.add_argument("--bench", action="store_true", help="run bench/bench_link.py headless (args after --)")
     ap.add_argument("--gui-test", action="store_true",
@@ -151,7 +154,7 @@ def main():
         if args.editor:
             import webbrowser
             webbrowser.open(url)
-    cmd = [exe] + ([args.blend] if args.blend else []) + ["--python", os.path.join(ROOT, "tools", "blender_bootstrap.py"),
+    cmd = [exe] + (["--factory-startup"] if args.factory else []) + ([args.blend] if args.blend else []) + ["--python", os.path.join(ROOT, "tools", "blender_bootstrap.py"),
                                                           "--", "--host", args.host, "--port", str(args.port)]
     print("launching:", " ".join(f'"{c}"' if " " in c else c for c in cmd))
     try:

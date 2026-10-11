@@ -322,10 +322,12 @@ class Graph:
             nt = self.registry.get(inst.type)
             d: Dict[str, Any] = {"type": inst.type}
             if inst.params:
-                d["params"] = {k: nt.param(k).to_json_value(v) for k, v in inst.params.items()}
+                d["params"] = {k: _tidy(nt.param(k).to_json_value(v)) for k, v in inst.params.items()}
             if inst.inputs:
                 d["inputs"] = {k: (list(v) if isinstance(v, list) else v) for k, v in inst.inputs.items()}
             d.update(inst.meta)
+            if isinstance(d.get("pos"), list):
+                d["pos"] = _tidy(d["pos"])
             nodes[nid] = d
         out: Dict[str, Any] = {"version": GRAPH_VERSION, "nodes": nodes}
         if self.display:
@@ -386,7 +388,9 @@ class Graph:
         return cls.from_dict(data, registry, check=check)
 
     def to_json(self, indent: int = 2) -> str:
-        return json.dumps(self.to_dict(), indent=indent) + "\n"
+        """Pretty JSON for hand-editing and diffs: short arrays (vectors, positions, input lists) stay on one line."""
+        return _FLAT_ARRAY.sub(lambda m: "[" + ", ".join(x.strip() for x in m.group(1).split(",\n")) + "]",
+                               json.dumps(self.to_dict(), indent=indent)) + "\n"
 
     @classmethod
     def load(cls, path: Union[str, Path], registry: Optional[Registry] = None, *, check: bool = True) -> "Graph":
@@ -395,6 +399,20 @@ class Graph:
     def save(self, path: Union[str, Path]) -> None:
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(self.to_json())
+
+
+def _tidy(v: Any) -> Any:
+    """Whole-number floats as ints (``10`` stays ``10`` in a saved file, not ``10.0``); loading coerces them back."""
+    if isinstance(v, float) and v.is_integer() and abs(v) < 2 ** 53:
+        return int(v)
+    if isinstance(v, list):
+        return [_tidy(x) for x in v]
+    return v
+
+
+# An array of scalars spread over several lines by json.dumps(indent=...): no nested arrays/objects. JSON strings
+# cannot contain raw newlines, so splitting the items on ",\n" is safe.
+_FLAT_ARRAY = re.compile(r"\[\n\s*((?:[^\[\]{}\n]+,\n\s*)*[^\[\]{}\n]+)\n\s*\]")
 
 
 # Parameter kinds that can become Blender modifier inputs.

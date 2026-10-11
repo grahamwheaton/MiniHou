@@ -17,12 +17,15 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import os
 import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+import numpy as np
 
 from ..edit import apply_ops, layout_missing
 from ..evaluator import Cache, DEFAULT_CACHE_BYTES, Evaluator, NodeError
@@ -39,6 +42,20 @@ MERGE_SECONDS = 1.5          # consecutive edits of the same thing within this w
 NEW_GRAPH = {"version": 1, "nodes": {"grid1": {"type": "grid", "pos": [0, 0]},
                                      "output1": {"type": "output", "inputs": {"geo": "grid1"}, "pos": [0, 110]}},
              "display": "output1"}
+
+
+def snap_float32(v: Any) -> Any:
+    """Values from Blender are float32: 0.22 arrives as 0.2199999988079071. A float that is exactly a float32 becomes
+    the shortest decimal for that float32 (0.22), so graph files don't fill up with float32 noise. Other floats, ints
+    and strings pass through unchanged; lists are handled element-wise."""
+    if isinstance(v, float) and math.isfinite(v):
+        f = np.float32(v)
+        if float(f) == v:
+            return float(str(f))                  # numpy prints the shortest repr that round-trips the float32
+        return v
+    if isinstance(v, (list, tuple)):
+        return [snap_float32(x) for x in v]
+    return v
 
 
 @dataclass
@@ -116,6 +133,8 @@ class Session:
     # -- editing -----------------------------------------------------------
     def set_param(self, name: str, value: Any, origin: str = "link") -> Any:
         """Set an exposed parameter by name. Raises :class:`GraphError` / :class:`ParamError`."""
+        if origin == "link":
+            value = snap_float32(value)
         with self.lock:
             v = self.graph.set_exposed(name, value)
             self._iface = self.interface()            # the link client already has this value: don't echo it
@@ -124,6 +143,8 @@ class Session:
         return v
 
     def set_node_param(self, node: str, param: str, value: Any, origin: str = "link") -> Any:
+        if origin == "link":
+            value = snap_float32(value)
         with self.lock:
             v = self.graph.set_param(node, param, value)
             self._iface = self.interface()

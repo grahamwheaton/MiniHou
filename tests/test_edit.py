@@ -304,3 +304,44 @@ class SessionFileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FileFormatTests(unittest.TestCase):
+    """What a saved graph file looks like: clean numbers, short arrays on one line, lossless round-trips."""
+
+    def test_float32_values_from_blender_are_saved_as_short_decimals(self):
+        import numpy as np
+        from minihou.link.session import snap_float32
+        self.assertEqual(snap_float32(float(np.float32(0.22))), 0.22)
+        self.assertEqual(snap_float32([float(np.float32(0.1)), 0.0, float(np.float32(1.2))]), [0.1, 0.0, 1.2])
+        self.assertEqual(snap_float32(0.1), 0.1)                               # not a float32: untouched
+        self.assertEqual(snap_float32(0.30000000000000004), 0.30000000000000004)
+        self.assertEqual((snap_float32(7), snap_float32(True), snap_float32("x")), (7, True, "x"))
+        for v in (0.22, 1e-8, 123456.79, -3.3, 1e30):                          # always the same float32 afterwards
+            f = float(np.float32(v))
+            self.assertEqual(np.float32(snap_float32(f)), np.float32(f))
+        s = Session(base())
+        s.set_param("Amp", [float(np.float32(0.22)), 0.0, float(np.float32(1.2))])            # from Blender
+        self.assertEqual(s.graph.nodes["n"].params["amplitude"], (0.22, 0.0, 1.2))
+        s.edit([{"op": "set", "id": "n", "params": {"frequency": float(np.float32(0.7))}}])   # editor/AI: exact
+        self.assertEqual(s.graph.nodes["n"].params["frequency"], float(np.float32(0.7)))
+
+    def test_saved_json_is_tidy_and_round_trips(self):
+        g, _ = apply_ops(base(), [
+            {"op": "set", "id": "g", "params": {"size_x": 10.0}},
+            {"op": "set", "id": "n", "params": {"amplitude": [0, 0.5, 2.0]}},
+            {"op": "add", "type": "merge", "id": "m", "inputs": {"geos": ["g", "n"]}},
+            {"op": "add", "type": "wrangle", "id": "w", "inputs": {"geo": "m"},
+             "params": {"snippet": "a = 1, 2\n# [not, an, array]\n@P.z += a"}, "comment": "x, [y]"},
+            {"op": "move", "positions": {"m": [100.0, 220.0]}}])
+        text = g.to_json()
+        self.assertRegex(text, r'"size_x": 10\n')
+        self.assertIn('"amplitude": [0, 0.5, 2]', text)
+        self.assertIn('"geos": ["g", "n"]', text)
+        self.assertIn('"pos": [100, 220]', text)
+        self.assertEqual(json.loads(text), g.to_dict())                         # formatting is lossless
+        g2 = Graph.from_json(text, check=False)
+        self.assertEqual(g2.to_dict(), g.to_dict())
+        self.assertEqual(g2.nodes["g"].params["size_x"], 10.0)                  # ints read back as floats
+        self.assertIsInstance(g2.nodes["g"].params["size_x"], float)
+        self.assertEqual(g2.nodes["w"].params["snippet"], "a = 1, 2\n# [not, an, array]\n@P.z += a")

@@ -137,7 +137,7 @@ Machine: Windows 11, Python 3.14.4, numpy 2.4.4, numba 0.68.0; Blender 4.3, 5.0,
   `TypeError: ... id properties not supported` on every tick and no geometry arrived. Inputs now go through
   `proxy.get_input/set_input/has_input/input_owner/input_data_path`: `mod.properties.inputs.Socket_N.value` on 5.2+, the ID
   property before. Animation paths differ too (`modifiers["MiniHou"].properties.inputs.Socket_N.value` on 5.2).
-  CI only runs 5.1.2: **add 5.2.x to the CI matrix** so this stays covered.
+  CI only runs 5.1.2: **add 5.2.x to the CI matrix** so this stays covered. *Done in 404ed7b: CI runs 5.1.2 and 5.2.1.*
 * `launch_blender.py --find` picks the newest installed Blender (5.2 here), not 5.1, which the docs target. Both work now.
 * At 404ed7b (editor + MCP), everything passes on 5.1.1 and 5.2.1: engine tests 317 OK (36 skipped: 26 bpy, 10 that look like
   the playwright browser tests; playwright is not installed), `--selftest` 41/41, `--gui-test` 18/18, consoles clean. An
@@ -148,10 +148,20 @@ Machine: Windows 11, Python 3.14.4, numpy 2.4.4, numba 0.68.0; Blender 4.3, 5.0,
   saving), snap each float to the shortest decimal that round-trips the same float32 (`float(repr(np.float32(v)))` -> 0.22),
   with a test. The forwarder's float32 tolerance already stops this from causing phantom edits. Saving also rewrites ints as floats
   (`10` -> `10.0`) and adds `pos` per node; those are expected but make diffs of hand-written examples noisy.
+  *Fixed: values arriving over the link are snapped with `session.snap_float32` (only floats that are exactly a float32;
+  editor and AI values stay exact); saved files write whole numbers as ints and keep short arrays (vectors, `pos`, input
+  lists) on one line. Tests in `tests/test_edit.py::FileFormatTests`. Also fixed on the way: an explicit `move`/`pos` in a
+  batch was overwritten by the automatic tidy layout.*
 * **GUI test gaps on Windows:** dismissing the splash screen and clicking the MiniHou sidebar tab use xdotool (Linux only), so on
   Windows the sidebar panel is never drawn ("panel drew without errors (0 draws)" still passes); only the popover draw is
   checked. Could use `ctypes` `SetCursorPos`/`mouse_event` on Windows, or make the check fail when the sidebar is expected.
+  *Fixed without OS input: the test reads the active sidebar tab (`Region.active_panel_category` is readable, not settable)
+  and registers a copy of the panel there, so Blender's real sidebar draws the add-on's draw code on every OS; the reload
+  checks now require real draws everywhere. (`--gui-test -- --no-clicks` runs that path on Linux.) Finding: the copy must be an
+  independent `Panel` class reusing `draw`; registering a subclass of the add-on's registered panel makes
+  `wm.call_panel` stop drawing the original, even after the subclass is unregistered.*
 * Several of the user's own add-ons fail on 5.2 (`imagepaste` hits the same ID-property removal; `smart_fill_1.5.0.py` has a syntax
   error; `sketchup_importer` has a circular import; `BL_add_to_collection` is missing). These are not MiniHou's, but they show up
-  in the console and can be mistaken for its errors.
+  in the console and can be mistaken for its errors. *`launch_blender.py --factory` now starts a clean Blender; README notes
+  that MiniHou's console lines start with `[minihou]`.*
 * The machine has no git identity configured; commits from it were made as `Claude <noreply@anthropic.com>`, as on the branch before.

@@ -46,6 +46,9 @@ Manual launch: `py -m minihou serve graph.json` in one terminal, then
 `blender.exe --python tools\blender_bootstrap.py` (add `-- --port N` for another port). Permanent install:
 `py tools\sync_addon.py`, zip `blender_addon\minihou_link`, *Edit > Preferences > Add-ons > Install from Disk*.
 
+Errors in Blender's console from *other* add-ons (common on a new Blender version) are not MiniHou's; MiniHou's own lines
+start with `[minihou]`. `--factory` starts Blender without your add-ons and preferences for a clean console.
+
 Other commands: `py -m minihou nodes` (all node types and parameters), `py -m minihou cook graph.json` (cook once,
 print timings and cache behaviour), `py -m minihou serve graph.json --open` (engine + editor, no Blender).
 
@@ -160,7 +163,9 @@ so mutating one raises immediately instead of corrupting the cache. Bump `versio
 `exposed` entries become modifier inputs in Blender (float, int, bool and vec3 parameters; the parameter's doc string
 becomes the tooltip). Nodes may also carry editor data (`"pos": [x, y]`, `"comment": "..."`), which never affects cooking.
 The running engine saves every edit (editor, AI, Blender slider) back to the file within a quarter second, and reloads the file
-when something else changes it, so the file and every view stay in sync. Inputs that survive a reload keep their identity, so
+when something else changes it, so the file and every view stay in sync. Saved files stay diff-friendly: short arrays on one
+line, whole numbers as ints, and values from Blender's float32 sliders snapped to their shortest decimal (`0.22`, not
+`0.2199999988079071`). Inputs that survive a reload keep their identity, so
 keyframes and drivers on them keep working. A graph may be unfinished (an unwired node): it still opens, and only the nodes
 feeding the display node have to be valid for it to cook.
 
@@ -208,7 +213,9 @@ py tools\launch_blender.py --gui-test                  # interactive smoke test 
 `--gui-test` opens a normal Blender window and lets Blender's own event loop drive the add-on: Connect operator, panel drawn by the
 real UI, a 30-step slider drag forwarded by the depsgraph handler, an idle period proving there is no feedback loop, and two graph
 reloads (adding, removing, reordering inputs) while the sidebar and Blender's modifier panel show them. It prints PASS/FAIL per check,
-saves screenshots to `gui_test_output\`, and closes Blender. `-- --reload-cycles 40` adds a stress test.
+saves screenshots to `gui_test_output\`, and closes Blender. `-- --reload-cycles 40` adds a stress test. On Linux it clicks the
+sidebar's MiniHou tab with xdotool; elsewhere (no OS input) it shows a copy of the panel in the active sidebar tab, so the
+add-on's draw code always runs in Blender's real sidebar and the "panel drew" checks need real draws on every OS.
 
 The editor is tested in a real headless Chromium (`tests/test_editor_e2e.py`: clicks, Tab menu, wire drags, undo, wrangle
 errors, live updates from other clients, and that text from graph files can never become HTML); install
