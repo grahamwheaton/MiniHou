@@ -136,7 +136,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | ![volumes](docs/images/gallery_volumes.png) sdf_boolean fillet, metaballs | ![lsystem_tree](docs/images/gallery_lsystem_tree.png) lsystem + sweep + leaves | ![eroded_terrain](docs/images/gallery_eroded_terrain.png) heightfield erosion |
 | ![bevel_shapes](docs/images/gallery_bevel_shapes.png) polybevel, tube, torus, cusp normals | ![uv_unwrap](docs/images/gallery_uv_unwrap.png) uv_flatten (LSCM), checker texture | ![fractured_rock](docs/images/gallery_fractured_rock.png) voronoi_fracture, exploded_view, smooth |
 | ![polyreduce_rock](docs/images/gallery_polyreduce_rock.png) polyreduce to 3% (quadric error metrics) | ![spiral_slide](docs/images/gallery_spiral_slide.png) path_deform along a helix (up_vector frames) | ![boolean_part](docs/images/gallery_boolean_part.png) exact boolean: bores, slot, dome |
-| ![pcg_forest](docs/images/gallery_pcg_forest.png) PCG points: sampler, noise filter, house and road differences, self-prune, spawner | | |
+| ![pcg_forest](docs/images/gallery_pcg_forest.png) PCG points: sampler, noise filter, house and road differences, self-prune, spawner | ![surface_toolkit](docs/images/gallery_surface_toolkit.png) skin (loft), delaunay, convex_hull, network boxes | |
 
 ## Nodes
 
