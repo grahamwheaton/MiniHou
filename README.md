@@ -157,6 +157,8 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `noise` | geo | fractal Perlin noise; displaces `P` or writes any attribute (scalar or vector mode); optional group |
 | `group_create` | geo | a named point or primitive group: pattern/expression, bounding box, normal direction, random %, boundary |
 | `group_promote` | geo | convert groups between points and primitives |
+| `group_expand` | geo | grow or shrink a group by rings of neighbours (by points or edges); then `grown ^orig` selects the border ring |
+| `group_expand` | geo | grow or shrink a group by rings of neighbours (points or edges); `^` patterns then select the border ring |
 | `blast` | geo | delete a group of primitives or points (or keep only it) |
 | `polybevel` | geo | chamfer sharp edges (min angle, point group); slides along borders and flat edges so subdivided meshes bevel cleanly; moves are limited where faces would fold; new faces in group `bevel` |
 | `boolean` | a, b | exact union / subtract / intersect of closed meshes: watertight n-gon output, uv and attributes carried across cuts, groups `from_a`/`from_b`; flush faces cut cleanly |

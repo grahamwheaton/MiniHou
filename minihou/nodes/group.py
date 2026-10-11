@@ -88,6 +88,59 @@ def group_promote(geo, name, to):
     return out
 
 
+def _grow(geo, dom, mask, connect):
+    """One step of growth: everything that touches a member (shares a point, or an edge for primitives)."""
+    t = geo.topology
+    vp = t.vertex_point.astype(np.int64)
+    if dom == "point":
+        e = topo.edges(geo).points
+        out = mask.copy()
+        out[e[mask[e[:, 1]], 0]] = True
+        out[e[mask[e[:, 0]], 1]] = True
+        return out
+    pv = topo.prim_of_vertex(geo)
+    if connect == "edges":
+        ed = topo.edges(geo)
+        ok = ed.of_vertex >= 0
+        hit = np.zeros(len(ed.points), bool)
+        hit[ed.of_vertex[ok & mask[pv]]] = True
+        grown = np.zeros(t.nprims, bool)
+        grown[pv[ok & hit[np.where(ok, ed.of_vertex, 0)]]] = True
+        return grown | mask
+    pt = np.zeros(geo.npoints, bool)
+    pt[vp[mask[pv]]] = True
+    grown = np.zeros(t.nprims, bool)
+    grown[pv[pt[vp]]] = True
+    return grown | mask
+
+
+@node("group_expand", inputs=["geo"], category="group", params=[
+    Str("group", "group1", doc="Group (or pattern) to grow or shrink"),
+    Str("name", "", doc="Name for the result (empty: replace the group, if it is a plain group name)"),
+    Enum("domain", ["primitives", "points"], doc="What the group holds"),
+    Enum("mode", ["expand", "contract"], doc="expand: add the neighbours of members; contract: drop members that touch "
+                                              "a non-member"),
+    Int("steps", 1, min=1, max=1000, soft_max=10, doc="How many neighbour rings"),
+    Enum("connectivity", ["points", "edges"], doc="primitives: neighbours share a point, or an edge"),
+])
+def group_expand(geo, group, name, domain, mode, steps, connectivity):
+    """Grow or shrink a group by rings of neighbours (Houdini's Group Expand): select a face, expand once to get its
+    border ring (then subtract the original), contract to pull a selection away from open edges and holes in it."""
+    dom = DOMAIN[domain]
+    n = geo.npoints if dom == "point" else geo.nprims
+    m = groups.mask(geo, dom, group)
+    m = np.ones(n, bool) if m is None else m.copy()
+    for _ in range(int(steps)):
+        if mode == "expand":
+            m = _grow(geo, dom, m, connectivity)
+        else:
+            m = ~_grow(geo, dom, ~m, connectivity)
+    target = name or (group if group.replace("_", "a").isalnum() and not group[0].isdigit() else "")
+    if not target:
+        raise ValueError("give the result a name: the group field is a pattern, not a group name")
+    return groups.write(geo, dom, target, m)
+
+
 def keep_prims(geo: Geometry, pkeep: np.ndarray, remove_unused_points: bool = True) -> Geometry:
     """Keep the primitives where ``pkeep`` is True (and, optionally, only the points they use)."""
     t = geo.topology
