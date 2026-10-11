@@ -253,8 +253,13 @@ class SessionFileTests(unittest.TestCase):
         self.addCleanup(self.s.stop)
 
     def read(self):
-        with open(self.path, encoding="utf-8") as f:
-            return json.load(f)
+        for _ in range(50):
+            try:
+                with open(self.path, encoding="utf-8") as f:
+                    return json.load(f)
+            except PermissionError:      # Windows: the session is replacing the file right now; try again
+                time.sleep(0.01)
+        raise AssertionError(f"{self.path} stayed locked")
 
     def wait(self, pred, timeout=3.0):
         end = time.monotonic() + timeout

@@ -508,11 +508,11 @@ class Session:
             return
         cur = self._file_stamp()
         if cur is not None and cur != self._stamp:
-            self._stamp = cur
             try:
                 text = path.read_text(encoding="utf-8")
             except OSError:
-                text = None
+                return                  # e.g. Windows mid-replace: keep the old stamp so the next poll retries
+            self._stamp = cur
             if text is not None and text != self._file_text:      # not our own write
                 self._file_text = text
                 try:
