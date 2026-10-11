@@ -104,6 +104,13 @@ The same edit operations are available to scripts over HTTP (`POST /api/edit`, s
 
 All examples are cooked by the test-suite, so they keep working as nodes evolve.
 
+Rendered in Blender (Cycles) straight from the engine's output:
+
+| | | |
+|---|---|---|
+| ![scifi_panels](docs/images/gallery_scifi_panels.png) groups + polyextrude | ![subd_pod](docs/images/gallery_subd_pod.png) extrude, clip, mirror, subdivide | ![curves_vine](docs/images/gallery_curves_vine.png) curves: resample, blur, sweep |
+| ![volumes](docs/images/gallery_volumes.png) sdf_boolean fillet, metaballs | ![lsystem_tree](docs/images/gallery_lsystem_tree.png) lsystem + sweep + leaves | ![eroded_terrain](docs/images/gallery_eroded_terrain.png) heightfield erosion |
+
 ## Nodes
 
 | node | inputs | what it does |
