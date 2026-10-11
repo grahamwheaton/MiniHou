@@ -78,6 +78,7 @@ class Runtime:
         self._object_last: Dict[str, float] = {}
         self._object_present: Dict[str, bool] = {}
         self._last_existence = 0.0
+        self._missing_instances: List[str] = []
 
     # -- lifecycle ---------------------------------------------------------
     def connect(self, host: str = "127.0.0.1", port: int = 8765) -> None:
@@ -196,9 +197,14 @@ class Runtime:
             if self.client:
                 self.client.resync()
             return
-        out, _proxy, _mod = proxy.ensure_objects()
+        out, _proxy, mod = proxy.ensure_objects()
         t0 = time.perf_counter()
         timings = mesh_writer.apply_update(out.data, self.mirror, u)
+        names = self.mirror.detail.get("instance_objects") or []
+        missing = proxy.sync_instances(mod.node_group, [str(n) for n in names] if isinstance(names, list) else [])
+        if missing and missing != self._missing_instances:
+            self._log(f"instance objects not found in the Blender file: {', '.join(missing)}")
+        self._missing_instances = missing
         timings["total_ms"] = (time.perf_counter() - t0) * 1000
         self.last_timings = timings
         self.applied_count += 1

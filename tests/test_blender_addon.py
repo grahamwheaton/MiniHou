@@ -207,6 +207,46 @@ class AddonIntegrationTests(unittest.TestCase):
         self.assertEqual(len(me.polygons), 6)
         self.assertEqual(sum(e.is_loose for e in me.edges), 29 + 3)
 
+    def test_instance_points_place_blender_objects(self):
+        for name, size in (("Tree", 0.2), ("Rock", 0.1)):
+            me = bpy.data.meshes.new(name)
+            me.from_pydata([(0, 0, 0), (size, 0, 0), (0, size, 0), (0, 0, size)], [], [(0, 1, 2), (0, 1, 3), (0, 2, 3), (1, 2, 3)])
+            ob = bpy.data.objects.new(name, me)
+            bpy.context.scene.collection.objects.link(ob)
+            ob.location = (50, 50, 50)                      # far away: instances use the object's own geometry
+        graph = {"version": 1, "nodes": {
+            "g": {"type": "grid", "params": {"columns": 5, "rows": 5, "size_x": 4, "size_y": 4}},
+            "pts": {"type": "scatter", "inputs": {"geo": "g"}, "params": {"count": 12, "seed": 1}},
+            "inst": {"type": "instance", "inputs": {"points": "pts"},
+                     "params": {"objects": "Tree Rock", "pick": "cycle", "scale_min": 2, "scale_max": 2}},
+            "m": {"type": "merge", "inputs": {"geos": ["g", "inst"]}},
+            "o": {"type": "output", "inputs": {"geo": "m"}}}, "display": "o"}
+        self.graph_path.write_text(json.dumps(graph), encoding="utf-8")
+
+        def instances():
+            dg = bpy.context.evaluated_depsgraph_get()
+            return [(i.object.original.name if i.object else None, i.matrix_world.copy()) for i in dg.object_instances
+                    if i.is_instance and i.parent and i.parent.original.name == self.proxy.PROXY_OBJECT]
+
+        self.pump(lambda: len(instances()) == 12, timeout=60)
+        got = instances()
+        self.assertEqual(sorted(n for n, _ in got), ["Rock"] * 6 + ["Tree"] * 6)
+        for _, mw in got:
+            self.assertAlmostEqual(mw.to_scale()[0], 2.0, places=4)
+            self.assertLess(abs(mw.translation.z), 1e-4)                 # on the grid, not at the object's location
+        me = bpy.data.objects[self.proxy.PROXY_OBJECT].evaluated_get(bpy.context.evaluated_depsgraph_get()).data
+        self.assertEqual(len(me.vertices), 25)                           # instance points removed from the mesh
+        # renaming the list rebuilds the branch; a missing object is reported, not fatal
+        graph["nodes"]["inst"]["params"]["objects"] = "Rock Nope"
+        self.graph_path.write_text(json.dumps(graph), encoding="utf-8")
+        self.pump(lambda: any("Nope" in line for line in self.rt.log), timeout=60)
+        self.pump(lambda: {n for n, _ in instances()} == {"Rock"}, timeout=30)
+        # no instance points: the branch goes away
+        graph["nodes"]["o"]["inputs"]["geo"] = "g"
+        self.graph_path.write_text(json.dumps(graph), encoding="utf-8")
+        self.pump(lambda: not instances(), timeout=30)
+        self.assertFalse([n for n in bpy.data.node_groups[self.proxy.GROUP].nodes if n.name.startswith("MH_inst_")])
+
     def make_source_object(self, name="Src"):
         """A 2x2-face mesh with native data: UV map, point color, material indices, a vertex group, a float attribute."""
         verts = [(x, y, 0.0) for y in range(3) for x in range(3)]

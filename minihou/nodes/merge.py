@@ -45,4 +45,27 @@ def merge(geos):
     for g in geos:
         for k, v in g.detail.items():
             out.detail.setdefault(k, v)
+    _merge_instances(geos, out)
     return out
+
+
+def _merge_instances(geos, out):
+    """Inputs from different instance nodes: one combined object list, each input's indices remapped into it."""
+    lists = [list(g.detail.get("instance_objects") or []) for g in geos]
+    if sum(1 for lst in lists if lst) < 2:
+        return
+    combined = []
+    for lst in lists:
+        for name in lst:
+            if name not in combined:
+                combined.append(name)
+    parts = []
+    for g, lst in zip(geos, lists):
+        a = g.point.get("instance")
+        if a is None or not lst:
+            parts.append(np.zeros(g.npoints, np.int32))
+            continue
+        lut = np.array([0] + [combined.index(name) + 1 for name in lst], np.int32)   # 0 stays "no instance"
+        parts.append(lut[np.clip(np.asarray(a).reshape(g.npoints, -1)[:, 0], 0, len(lst))])
+    out.point["instance"] = np.concatenate(parts).astype(np.int32)
+    out.detail["instance_objects"] = combined

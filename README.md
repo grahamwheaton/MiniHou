@@ -139,6 +139,7 @@ All examples are cooked by the test-suite, so they keep working as nodes evolve.
 | `sweep` | geo | tubes along curves: rotation-minimising frames, radius x point `width`/`pscale`, caps, twist, uv |
 | `convert_line` | geo | every edge to curves (joined into polylines), e.g. wireframes with `sweep` |
 | `polypath` | geo | join curves that share end points |
+| `instance` | points | points become instances of **Blender objects** (random, cycled or by attribute; aligned to N or upright; random spin and scale) |
 | `wrangle` | geo | VEX-like snippet over points, primitives or vertices (see below) |
 | `attribute_delete` | geo | delete attributes by name or wildcard (`N uv tmp_*`) |
 | `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |
@@ -176,6 +177,15 @@ merge, copy_to_points, attribute_blur, measure `perimeter` = length...) and poly
 polyextrude, clip, polyfill) say so; `blast` with group `@closed == 0` separates them. Deleting points from a curve
 shortens or splits it. In Blender, curves arrive as **loose edges** of the output mesh (use *Mesh to Curve* in Geometry
 Nodes for real curves), and a `blender_object` reads loose edges back as curves. For render geometry, `sweep` them.
+
+### Instancing Blender objects
+
+`instance` turns points into instances of objects in your Blender file (trees, rocks, props): the engine picks the
+object and the rotation and scale per point (`instance`, `rot`, `scale` point attributes, the object list as the detail
+`instance_objects`), and the Geometry Nodes proxy places them with *Instance on Points*, so a million instances cost a
+million points on the wire, not a million copies, and the objects stay editable in Blender (edit the tree, every
+instance follows). Merge instance points with other geometry freely: lists from several `instance` nodes are combined.
+Missing objects are reported in the add-on panel's log and place nothing.
 
 ### Wrangle snippets (the attribute wrangle)
 

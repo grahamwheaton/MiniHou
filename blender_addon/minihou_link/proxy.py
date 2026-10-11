@@ -26,6 +26,8 @@ _SOCKET_TYPES = {"float": "NodeSocketFloat", "int": "NodeSocketInt", "bool": "No
                  "vec3": "NodeSocketVector"}
 _STORE_TYPES = {"float": "FLOAT", "int": "INT", "bool": "BOOLEAN", "vec3": "FLOAT_VECTOR"}
 USE_NODE_PREFIX = "MH_use_"
+INST_PREFIX = "MH_inst_"
+INST_KEY = "minihou_instances"
 
 
 def ensure_objects():
@@ -200,7 +202,7 @@ def _sync_usage_chain(ng, params: List[dict], ids: Dict[str, str]) -> None:
     instances, so the stores write nothing (measured: ~0.08 ms per evaluation, output unchanged).
     """
     nodes = {n.bl_idname: n for n in ng.nodes}
-    gin, gout, info = nodes["NodeGroupInput"], nodes["NodeGroupOutput"], nodes["GeometryNodeObjectInfo"]
+    gin, gout = nodes["NodeGroupInput"], nodes["NodeGroupOutput"]
     wanted = [USE_NODE_PREFIX + ids[p["name"]] for p in params]
     for n in [n for n in ng.nodes if n.name.startswith(USE_NODE_PREFIX)]:
         if n.name not in wanted:
@@ -228,13 +230,106 @@ def _sync_usage_chain(ng, params: List[dict], ids: Dict[str, str]) -> None:
         if not (value_in.is_linked and value_in.links[0].from_socket == src):
             ng.links.new(src, value_in)
         chain.append(node)
-    sockets = [info.outputs["Geometry"]] + [n.outputs["Geometry"] for n in chain]
+    sockets = [_chain_source(ng)] + [n.outputs["Geometry"] for n in chain]
     targets = [n.inputs["Geometry"] for n in chain] + [gout.inputs["Geometry"]]
     for src, dst in zip(sockets, targets):
         if not (dst.is_linked and dst.links[0].from_socket == src):
             ng.links.new(src, dst)
     if gout.location.x < 200.0 + 180.0 * len(chain):
         gout.location = (200.0 + 180.0 * len(chain), 0.0)
+
+
+def _chain_source(ng):
+    """Where the parameter chain starts: the instancing join if there is one, else the Object Info output."""
+    join = ng.nodes.get(INST_PREFIX + "join")
+    if join is not None:
+        return join.outputs["Geometry"]
+    return next(n for n in ng.nodes if n.bl_idname == "GeometryNodeObjectInfo").outputs["Geometry"]
+
+
+def _chain_target(ng):
+    """The socket that takes the engine geometry first (the first parameter store, or the group output)."""
+    stores = sorted((n for n in ng.nodes if n.name.startswith(USE_NODE_PREFIX)), key=lambda n: n.location.x)
+    if stores:
+        return stores[0].inputs["Geometry"]
+    return next(n for n in ng.nodes if n.bl_idname == "NodeGroupOutput").inputs["Geometry"]
+
+
+def sync_instances(ng, names: List[str]) -> List[str]:
+    """Instance Blender objects on the engine's instance points (``instance`` > 0, ``rot``, ``scale``).
+
+    Builds, once per object list: Object Info (as instance) per object -> Geometry to Instance -> Instance on Points
+    (pick by ``instance`` - 1), joined with the rest of the geometry (minus the instance points). Nothing in the user's
+    scene changes. Returns the names of objects that do not exist (they place nothing). Writes nothing when the list
+    is unchanged.
+    """
+    assert_main_thread()
+    key = json.dumps(list(names))
+    missing = [n for n in names if bpy.data.objects.get(n) is None]
+    if ng.get(INST_KEY, "[]") == key and (not names or ng.nodes.get(INST_PREFIX + "join") is not None):
+        _refresh_instance_objects(ng, names)
+        return missing
+    for n in [n for n in ng.nodes if n.name.startswith(INST_PREFIX)]:
+        ng.nodes.remove(n)
+    info = next(n for n in ng.nodes if n.bl_idname == "GeometryNodeObjectInfo")
+    target = _chain_target(ng)
+    if names:
+        def new(idname, name, loc):
+            nd = ng.nodes.new(idname)
+            nd.name = nd.label = INST_PREFIX + name
+            nd.location = loc
+            return nd
+
+        def attr(name, dtype, loc):
+            nd = new("GeometryNodeInputNamedAttribute", "attr_" + name, loc)
+            nd.data_type = dtype
+            nd.inputs["Name"].default_value = name
+            return nd.outputs["Attribute"]
+
+        to_inst = new("GeometryNodeGeometryToInstance", "objects", (-150, -520))
+        for k, name in enumerate(names):
+            oi = new("GeometryNodeObjectInfo", f"obj{k}", (-400, -450 - 160 * k))
+            oi.transform_space = "ORIGINAL"
+            oi.inputs["As Instance"].default_value = True
+            oi.inputs["Object"].default_value = bpy.data.objects.get(name)
+            ng.links.new(oi.outputs["Geometry"], to_inst.inputs["Geometry"])
+        index = new("FunctionNodeIntegerMath", "index", (-150, -380))
+        index.operation = "SUBTRACT"
+        inst_attr = attr("instance", "INT", (-400, -300))
+        ng.links.new(inst_attr, index.inputs[0])
+        index.inputs[1].default_value = 1
+        iop = new("GeometryNodeInstanceOnPoints", "on_points", (50, -300))
+        ng.links.new(info.outputs["Geometry"], iop.inputs["Points"])
+        ng.links.new(inst_attr, iop.inputs["Selection"])                 # int -> bool: instance > 0
+        ng.links.new(to_inst.outputs["Instances"], iop.inputs["Instance"])
+        iop.inputs["Pick Instance"].default_value = True
+        ng.links.new(index.outputs[0], iop.inputs["Instance Index"])
+        ng.links.new(attr("rot", "FLOAT_VECTOR", (-150, -250)), iop.inputs["Rotation"])   # Euler XYZ -> rotation
+        ng.links.new(attr("scale", "FLOAT_VECTOR", (-150, -200)), iop.inputs["Scale"])
+        drop = new("GeometryNodeDeleteGeometry", "drop_points", (50, -120))
+        drop.domain = "POINT"
+        ng.links.new(info.outputs["Geometry"], drop.inputs["Geometry"])
+        ng.links.new(inst_attr, drop.inputs["Selection"])
+        join = new("GeometryNodeJoinGeometry", "join", (250, -150))
+        ng.links.new(drop.outputs["Geometry"], join.inputs["Geometry"])
+        ng.links.new(iop.outputs["Instances"], join.inputs["Geometry"])
+        ng.links.new(join.outputs["Geometry"], target)
+    else:
+        ng.links.new(info.outputs["Geometry"], target)
+    ng[INST_KEY] = key
+    return missing
+
+
+def _refresh_instance_objects(ng, names: List[str]) -> None:
+    """Re-point Object Info nodes whose object was missing (or renamed back) -- only when it differs."""
+    for k, name in enumerate(names):
+        oi = ng.nodes.get(INST_PREFIX + f"obj{k}")
+        if oi is None:
+            continue
+        want = bpy.data.objects.get(name)
+        cur = oi.inputs["Object"].default_value
+        if (cur.name if cur else None) != (want.name if want else None):
+            oi.inputs["Object"].default_value = want
 
 
 def mapping(ng) -> Dict[str, str]:
