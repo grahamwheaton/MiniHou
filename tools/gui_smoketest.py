@@ -41,6 +41,10 @@ try:
 except Exception:  # noqa: BLE001
     pass
 minihou_link.register()
+# No startup splash: it is shown after --python scripts run, and while it is open Blender does not draw the sidebar.
+# (Linux closed it with an X11 Escape key; on Windows it stayed open and the sidebar never drew.) --factory-startup
+# never saves preferences, so this does not stick.
+bpy.context.preferences.view.show_splash = False
 from minihou_link import proxy, runtime  # noqa: E402
 
 RESULTS = {"blender": bpy.app.version_string, "checks": [], "ok": True, "screenshots": [], "panel_draws": 0,
@@ -140,7 +144,17 @@ def show_in_active_tab(win, area):
     a copy of the MiniHou panel *in* the active tab. Blender's real UI then draws the add-on's own draw code. Generator;
     returns True once the panel has been drawn."""
     ui = next(r for r in area.regions if r.type == "UI")
-    category = getattr(ui, "active_panel_category", "") or "Item"
+    # The sidebar's categories exist only after it has drawn once; until then this reads "UNSUPPORTED".
+    category = ""
+    for _ in range(50):
+        category = getattr(ui, "active_panel_category", "") or ""
+        if category and category != "UNSUPPORTED":
+            break
+        area.tag_redraw()
+        yield 0.1
+    if not category or category == "UNSUPPORTED":
+        log(f"sidebar category never resolved ({category!r}); using 'Item'")
+        category = "Item"
     if category == "MiniHou":
         cls = None                                         # already showing our tab
     else:
@@ -223,8 +237,8 @@ def scenario():
         bpy.ops.minihou.select_proxy()
         bpy.ops.view3d.view_selected()
     area.spaces.active.show_region_ui = True
-    if os.environ.get("MINIHOU_X11_SHOT"):
-        os.system("xdotool key Escape >/dev/null 2>&1")     # close the factory-startup splash
+    if os.environ.get("MINIHOU_X11_SHOT") and not os.environ.get("MINIHOU_KEEP_SPLASH_KEY"):
+        os.system("xdotool key Escape >/dev/null 2>&1")     # belt and braces: close any splash
         yield 0.3
     if os.environ.get("MINIHOU_X11_SHOT") and not ARGS.no_clicks:
         SIDEBAR = yield from open_sidebar_tab(win, area)

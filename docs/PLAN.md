@@ -190,9 +190,14 @@ Machine: Windows 11, Python 3.14.4, numpy 2.4.4, numba 0.68.0; Blender 4.3, 5.0,
   checked. Could use `ctypes` `SetCursorPos`/`mouse_event` on Windows, or make the check fail when the sidebar is expected.
   *Fixed without OS input: the test reads the active sidebar tab (`Region.active_panel_category` is readable, not settable)
   and registers a copy of the panel there, so Blender's real sidebar draws the add-on's draw code on every OS; the reload
-  checks now require real draws everywhere. (`--gui-test -- --no-clicks` runs that path on Linux.) Finding: the copy must be an
+  checks now require real draws everywhere. (`--gui-test -- --no-clicks` runs that path on Linux.) Findings: the copy must be an
   independent `Panel` class reusing `draw`; registering a subclass of the add-on's registered panel makes
-  `wm.call_panel` stop drawing the original, even after the subclass is unregistered.*
+  `wm.call_panel` stop drawing the original, even after the subclass is unregistered. Windows CI then showed two more: the
+  factory-startup splash stays open on Windows (Linux closed it with an X11 Escape) and blocks sidebar drawing, so the test
+  sets `preferences.view.show_splash = False` (the splash is shown after `--python` scripts run); and
+  `Region.active_panel_category` reads `"UNSUPPORTED"` until the sidebar has drawn once, so the test waits for a real
+  category. Lesson: the experimental GUI jobs are `continue-on-error`, so a green run can hide them: check their job
+  conclusions, not just the run's.*
 * Several of the user's own add-ons fail on 5.2 (`imagepaste` hits the same ID-property removal; `smart_fill_1.5.0.py` has a syntax
   error; `sketchup_importer` has a circular import; `BL_add_to_collection` is missing). These are not MiniHou's, but they show up
   in the console and can be mistaken for its errors. *`launch_blender.py --factory` now starts a clean Blender; README notes
