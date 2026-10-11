@@ -74,7 +74,7 @@ def group_create(geo, name, domain, method, pattern, box_center, box_size, direc
                                              "a point group: those whose points are all in it"),
 ])
 def group_promote(geo, name, to):
-    """Convert groups between points and primitives (Houdini's Group Promote)."""
+    """Convert the opposite domain to the target, replacing any same-name target group and removing the source."""
     dst = DOMAIN[to]
     src = "prim" if dst == "point" else "point"
     hits = [g for g in groups.names(geo, src) if fnmatch.fnmatchcase(g, name)]
@@ -83,7 +83,7 @@ def group_promote(geo, name, to):
                          f"{groups.names(geo, src) or 'none'}")
     out = geo
     for g in hits:
-        m = groups.member(geo, dst, g)
+        m = groups.convert(geo, groups.member(geo, src, g), src, dst)
         out = groups.write(out, dst, g, m)
     return out
 
