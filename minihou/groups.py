@@ -11,10 +11,16 @@ Group fields on nodes take a **pattern**, like Houdini's group parameter:
   (``^side`` = everything except ``side``)
 * ``0-9 20``        -- element numbers and inclusive ranges (``0-99:2`` = every second one)
 * ``@P.z > 0``      -- an ad-hoc group: a wrangle expression over the domain (the whole field)
-* empty             -- everything (the node acts on all elements)
+* empty             -- everything (the node acts on all elements); comma/whitespace-only fields are also empty
+
+Commas separate pattern tokens; repeated separators are ignored. Range strides must be positive integers.
+Attribute expressions may be parenthesized, e.g. ``(@group_top)`` or ``((@P.z))``.
 
 A pattern naming a group of the *other* domain converts it: points of a primitive group are the points its primitives
-use; primitives of a point group are those whose points are *all* in it.
+use; primitives of a point group are those whose points are *all* in it. If Merge supplies the same name on both
+domains, ordinary selection prefers the requested domain. Merge preserves both attributes; Group Promote explicitly
+converts the opposite (source) domain, replaces the destination group, and removes the source group.
+Blast treats an empty field (including separators only) as selecting nothing rather than everything.
 """
 from __future__ import annotations
 
@@ -25,7 +31,7 @@ from typing import Optional
 import numpy as np
 
 PREFIX = "group_"
-_RANGE = re.compile(r"^(\d+)(?:-(\d+))?(?::(\d+))?$")
+_RANGE = re.compile(r"^(\d+)(?:-(\d+))?(?::(.*))?$")
 _NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -76,9 +82,11 @@ def mask(geo, domain: str, pattern: str) -> Optional[np.ndarray]:
     if not pattern:
         return None
     n = geo.npoints if domain == "point" else geo.nprims
-    if pattern.startswith("@") or any(op in pattern for op in ("<", ">", "==", "!=")):
+    if re.match(r"^(?:\(\s*)*@", pattern) or any(op in pattern for op in ("<", ">", "==", "!=")):
         return expression_mask(geo, domain, pattern)
     tokens = pattern.replace(",", " ").split()
+    if not tokens:
+        return None
     sel = np.full(n, tokens[0].startswith("^"))           # a pattern that starts by excluding starts from everything
     known = set(names(geo, "point")) | set(names(geo, "prim"))
     for tok in tokens:
@@ -96,9 +104,12 @@ def _token(geo, domain, tok, n, known) -> np.ndarray:
     if r:
         lo = int(r.group(1))
         hi = int(r.group(2)) if r.group(2) is not None else lo
-        step = int(r.group(3) or 1)
+        stride = r.group(3)
+        if stride is not None and (not re.fullmatch(r"\d+", stride) or int(stride) <= 0):
+            raise GroupError(f"invalid range stride in {tok!r}; expected a positive integer")
+        step = int(stride) if stride is not None else 1
         m = np.zeros(n, bool)
-        if step > 0 and lo < n:
+        if lo < n:
             m[lo:min(hi, n - 1) + 1:step] = True
         return m
     if tok == "*":

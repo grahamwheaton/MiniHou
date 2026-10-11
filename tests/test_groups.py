@@ -54,6 +54,36 @@ class PatternTests(unittest.TestCase):
             groups.mask(g, "point", "nope")
         self.assertIn("left, rim, top", str(cm.exception))
 
+    def test_empty_and_repeated_separators(self):
+        for pattern in ("", "  ", ",", " , , ", ",\t,\n"):
+            with self.subTest(pattern=pattern):
+                self.assertIsNone(groups.mask(self.geo, "point", pattern))
+        for pattern in (",top,,left,", "top, , left"):
+            np.testing.assert_array_equal(groups.mask(self.geo, "point", pattern),
+                                          groups.mask(self.geo, "point", "top left"))
+        np.testing.assert_array_equal(groups.mask(self.geo, "point", ", ,^top,,"),
+                                      groups.mask(self.geo, "point", "^top"))
+
+    def test_range_strides_must_be_positive_integers(self):
+        for stride in ("0", "-1", "1.5", "abc", "", "2:3"):
+            for base in ("0-9", "100-200", "3"):
+                for prefix in ("", "^"):
+                    with self.subTest(stride=stride, base=base, prefix=prefix):
+                        with self.assertRaisesRegex(groups.GroupError, "stride.*positive integer"):
+                            groups.mask(self.geo, "point", prefix + base + ":" + stride)
+        np.testing.assert_array_equal(np.flatnonzero(groups.mask(self.geo, "point", "0-9:2")),
+                                      [0, 2, 4, 6, 8])
+        np.testing.assert_array_equal(np.flatnonzero(groups.mask(self.geo, "point", "3:2")), [3])
+
+    def test_parenthesized_attribute_expressions(self):
+        for domain, name in (("point", "top"), ("prim", "rim")):
+            expected = self.geo.table(domain)["group_" + name] != 0
+            for expr in (f"(@group_{name})", f"( ( @group_{name} ) )"):
+                with self.subTest(domain=domain, expr=expr):
+                    np.testing.assert_array_equal(groups.mask(self.geo, domain, expr), expected)
+        np.testing.assert_array_equal(groups.mask(self.geo, "point", "((@P.x))"), self.geo.P[:, 0] != 0)
+        np.testing.assert_array_equal(groups.mask(self.geo, "point", "(@P.x > 0)"), self.geo.P[:, 0] > 0)
+
     def test_conversion_between_points_and_primitives(self):
         g = self.geo
         rim_pts = groups.mask(g, "point", "rim")                  # points of the boundary prims: all 25 but the centre
@@ -97,6 +127,43 @@ class GroupCreateTests(unittest.TestCase):
         with self.assertRaises(NodeError):
             cook(nodes, "bad")
 
+    def test_promote_merged_same_name_groups_uses_source_domain(self):
+        nodes = dict(GRID)
+        for branch, domain in (("pt", "points"), ("pr", "primitives")):
+            previous = "g"
+            for name in ("shared_a", "shared_b"):
+                nid = branch + name
+                nodes[nid] = {"type": "group_create", "inputs": {"geo": previous},
+                              "params": {"name": name, "domain": domain, "pattern": "*"}}
+                previous = nid
+        nodes["m"] = {"type": "merge", "inputs": {"geos": ["ptshared_b", "prshared_b"]}}
+        merged = cook(nodes, "m")
+        saved = {dom: {key: value.copy() for key, value in merged.table(dom).items()}
+                 for dom in ("point", "prim", "vertex")}
+        for name in ("shared_a", "shared_b"):
+            np.testing.assert_array_equal(groups.mask(merged, "point", name), np.r_[np.ones(25), np.zeros(25)])
+            np.testing.assert_array_equal(groups.mask(merged, "prim", name), np.r_[np.zeros(16), np.ones(16)])
+        from minihou.nodes.group import group_promote
+        for target, src, dst, expected in (
+                ("points", "prim", "point", np.r_[np.zeros(25), np.ones(25)]),
+                ("primitives", "point", "prim", np.r_[np.ones(16), np.zeros(16)])):
+            for pattern in ("shared_a", "shared_*"):
+                with self.subTest(target=target, pattern=pattern):
+                    out = group_promote(merged, pattern, target)
+                    out.validate()
+                    np.testing.assert_array_equal(out.P, merged.P)
+                    np.testing.assert_array_equal(out.topology.vertex_point, merged.topology.vertex_point)
+                    np.testing.assert_array_equal(out.topology.prim_offsets, merged.topology.prim_offsets)
+                    names = ("shared_a", "shared_b") if pattern.endswith("*") else ("shared_a",)
+                    for name in names:
+                        np.testing.assert_array_equal(out.table(dst)["group_" + name], expected)
+                        self.assertNotIn("group_" + name, out.table(src))
+                    for dom, attrs in saved.items():
+                        for key, value in attrs.items():
+                            np.testing.assert_array_equal(merged.table(dom)[key], value)
+                            if key not in {"group_" + name for name in names}:
+                                np.testing.assert_array_equal(out.table(dom)[key], value)
+
     def test_bad_name(self):
         nodes, last = with_groups({"name": "9lives"})
         with self.assertRaises(NodeError) as cm:
@@ -120,6 +187,12 @@ class BlastTests(unittest.TestCase):
         self.assertEqual((g.npoints, g.nprims), (25, 4))
         g = self.blast(group="rim", delete_non_selected=True)
         self.assertEqual(g.nprims, 12)
+
+    def test_separator_only_pattern_has_empty_field_semantics(self):
+        self.assertEqual(self.blast(group=", ,").nprims, 16)
+        self.assertEqual(self.blast(group=", ,", delete_non_selected=True).nprims, 0)
+        nodes, last = with_groups({"name": "all", "pattern": ", ,"})
+        self.assertEqual(int(cook(nodes, last).point["group_all"].sum()), 25)
 
     def test_points_and_expressions(self):
         g = self.blast(group="corner", domain="points")
