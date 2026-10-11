@@ -1,0 +1,162 @@
+{
+  "version": 1,
+  "doc": "A smooth pod: a box with an extruded, inset top, mirrored fins and Catmull-Clark subdivision.",
+  "nodes": {
+    "body": {
+      "type": "box",
+      "params": {
+        "size": [
+          2.0,
+          1.4,
+          1.0
+        ],
+        "divisions": 2
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "top": {
+      "type": "group_create",
+      "inputs": {
+        "geo": "body"
+      },
+      "pos": [
+        0,
+        100
+      ],
+      "params": {
+        "name": "top",
+        "domain": "primitives",
+        "method": "normal",
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "angle": 10.0
+      }
+    },
+    "dome": {
+      "type": "polyextrude",
+      "inputs": {
+        "geo": "top"
+      },
+      "pos": [
+        0,
+        200
+      ],
+      "params": {
+        "group": "top",
+        "distance": 0.45,
+        "inset": 0.2
+      }
+    },
+    "fin_faces": {
+      "type": "group_create",
+      "inputs": {
+        "geo": "dome"
+      },
+      "pos": [
+        0,
+        300
+      ],
+      "params": {
+        "name": "fin",
+        "domain": "primitives",
+        "method": "pattern",
+        "pattern": "@P.x > 0.9 and @P.z < 0"
+      }
+    },
+    "fin": {
+      "type": "polyextrude",
+      "inputs": {
+        "geo": "fin_faces"
+      },
+      "pos": [
+        0,
+        400
+      ],
+      "params": {
+        "group": "fin",
+        "distance": 0.5
+      }
+    },
+    "half": {
+      "type": "clip",
+      "inputs": {
+        "geo": "fin"
+      },
+      "pos": [
+        0,
+        500
+      ],
+      "params": {
+        "normal": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "whole": {
+      "type": "mirror",
+      "inputs": {
+        "geo": "half"
+      },
+      "pos": [
+        0,
+        600
+      ],
+      "params": {
+        "normal": [
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    "smooth": {
+      "type": "subdivide",
+      "inputs": {
+        "geo": "whole"
+      },
+      "pos": [
+        0,
+        700
+      ],
+      "params": {
+        "depth": 2
+      }
+    },
+    "out": {
+      "type": "output",
+      "inputs": {
+        "geo": "smooth"
+      },
+      "pos": [
+        0,
+        800
+      ]
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Dome",
+      "node": "dome",
+      "param": "distance"
+    },
+    {
+      "name": "Fin",
+      "node": "fin",
+      "param": "distance"
+    },
+    {
+      "name": "Smoothness",
+      "node": "smooth",
+      "param": "depth"
+    }
+  ]
+}

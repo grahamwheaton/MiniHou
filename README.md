@@ -95,6 +95,8 @@ The same edit operations are available to scripts over HTTP (`POST /api/edit`, s
 | `examples/graphs/crater.json` | built by an AI through MCP: dunes, a crater wrangle, boulders kept only on the rim by a `delete` expression |
 | `examples/graphs/spiral_stairs.json` | uses the example library nodes `stairs` (spiral treads around a column) and `twist` |
 | `examples/graphs/rocky_hills.json` | hills plus the `rock_scatter` **system** (`nodes/rock_scatter.json`, a graph used as a node) |
+| `examples/graphs/scifi_panels.json` | random face groups extruded twice with insets, flat-shaded, a second material on the tops |
+| `examples/graphs/subd_pod.json` | box -> extruded dome and fin -> clip + mirror (symmetric, welded) -> Catmull-Clark |
 
 All examples are cooked by the test-suite, so they keep working as nodes evolve.
 
@@ -112,6 +114,14 @@ All examples are cooked by the test-suite, so they keep working as nodes evolve.
 | `group_create` | geo | a named point or primitive group: pattern/expression, bounding box, normal direction, random %, boundary |
 | `group_promote` | geo | convert groups between points and primitives |
 | `blast` | geo | delete a group of primitives or points (or keep only it) |
+| `polyextrude` | geo | extrude faces (a group) along their normals with inset; connected regions or individual faces; groups `extrudeFront`/`extrudeSide` |
+| `subdivide` | geo | Catmull-Clark (smooth, open boundaries stay curves, corners sharp) or linear; uv and groups follow |
+| `mirror` | geo | reflect across a plane, weld the seam, keep or drop the original |
+| `clip` | geo | cut with a plane; keep above, below or both (new points interpolate attributes) |
+| `polyfill` | geo | close holes with n-gons facing outwards |
+| `divide` | geo | triangulate (fans for convex polygons, ear clipping for concave ones) |
+| `reverse` | geo | flip winding (and N) of a group of primitives |
+| `facet` | geo | unique points per face (optionally flat normals) |
 | `wrangle` | geo | VEX-like snippet over points, primitives or vertices (see below) |
 | `attribute_delete` | geo | delete attributes by name or wildcard (`N uv tmp_*`) |
 | `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |

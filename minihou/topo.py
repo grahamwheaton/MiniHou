@@ -65,7 +65,8 @@ def prim_centroids(geo) -> np.ndarray:
 
 def segment_sum(values: np.ndarray, index: np.ndarray, n: int) -> np.ndarray:
     """Sum rows of ``values`` (1-D or 2-D) into ``n`` buckets by ``index`` (float64)."""
-    v = values.reshape(len(values), -1).astype(np.float64)
+    v = values.reshape(len(values), -1 if len(values) else (values.shape[1] if values.ndim == 2 else 1))
+    v = v.astype(np.float64)
     out = np.stack([np.bincount(index, weights=v[:, c], minlength=n) for c in range(v.shape[1])], 1)
     return out[:, 0] if values.ndim == 1 else out
 
