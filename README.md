@@ -147,6 +147,8 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `mirror` | geo | reflect across a plane, weld the seam, keep or drop the original |
 | `clip` | geo | cut with a plane; keep above, below or both (new points interpolate attributes) |
 | `polyfill` | geo | close holes with n-gons facing outwards |
+| `convex_hull` | geo | the smallest convex closed mesh around the points (Qhull via SciPy, or a numpy incremental hull) |
+| `dissolve` | geo | merge neighbouring faces that are flat within `angle` into n-gons (`group` limits it) |
 | `delaunay` | geo | 2-D Delaunay triangulation of the points (`axis`; `max_edge` cuts long triangles); SciPy if installed, else pure Python |
 | `divide` | geo | triangulate (fans for convex polygons, ear clipping for concave ones) |
 | `reverse` | geo | flip winding (and N) of a group of primitives |
