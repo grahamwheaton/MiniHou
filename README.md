@@ -1,5 +1,11 @@
 # MiniHou
 
+**Wired Geometry Nodes groups:** MiniHou can now process the actual mesh wired into a group inside a native GN
+network, including multiple independently configured placements, nested groups and branches. Blender evaluates
+each native input subgraph on a disposable copy; the external engine computes it and publishes a private result
+for downstream nodes. This is a staged interactive bridge, not a synchronous Python GN execution callback.
+See [usage, runnable example and supported limits](docs/GEONODES.md). Cook explicitly before rendering.
+
 A small, standalone **procedural geometry engine** in Python (numpy, optionally numba) that **live-links into Blender 5.1/5.2**.
 You build a node graph in a **browser node editor**, by hand in JSON, or by **asking an AI** (built-in MCP server); the engine cooks
 it and the result streams into Blender as a mesh you can drive with Geometry Nodes. Change anything, anywhere (editor, AI, JSON

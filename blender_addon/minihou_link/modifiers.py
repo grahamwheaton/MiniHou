@@ -102,11 +102,12 @@ def _validate_source(owner, source):
     Cross-object MiniHou evaluation is deliberately unsupported: conservative rejection
     avoids timer feedback, including cycles hidden behind a native GN group or collection.
     """
+    from . import geonodes
     seen, trees, driver_ids = set(), set(), set()
     forbidden_ids = {owner.data.as_pointer()}
     forbidden_ids.update(obj.data.as_pointer() for obj in bpy.data.objects
-                         if obj.data is not None and (CACHE in obj or obj.name == proxy.OUTPUT_OBJECT))
-    forbidden_ids.update(group.as_pointer() for group in bpy.data.node_groups if KEY in group)
+                         if obj.data is not None and (CACHE in obj or geonodes.CACHE in obj or obj.name == proxy.OUTPUT_OBJECT))
+    forbidden_ids.update(group.as_pointer() for group in bpy.data.node_groups if KEY in group or geonodes.KEY in group)
 
     def drivers(value):
         if value is None or not isinstance(value, bpy.types.ID):
@@ -132,13 +133,13 @@ def _validate_source(owner, source):
             for obj in value.all_objects:
                 target(obj)
         elif isinstance(value, bpy.types.Object):
-            if value == owner or CACHE in value or value.name == proxy.OUTPUT_OBJECT:
+            if value == owner or CACHE in value or geonodes.CACHE in value or value.name == proxy.OUTPUT_OBJECT:
                 raise SourceBindingError("Source Object references itself or a MiniHou cache (cycle prevention)")
             ptr = value.as_pointer()
             if ptr in seen:
                 return
             seen.add(ptr)
-            if any(is_modifier(m) for m in value.modifiers):
+            if any(is_modifier(m) or geonodes.contains(getattr(m, "node_group", None)) for m in value.modifiers):
                 raise SourceBindingError("Source Object depends on MiniHou output; cross-object MiniHou dependencies are unsupported")
             drivers(value)
             drivers(value.data)
@@ -352,12 +353,14 @@ def _check_prefix_dependencies(obj, preceding):
     Cross-object MiniHou dependencies require scheduling the complete object graph and
     are deliberately unsupported. Ordinary independent native modifier inputs are fine.
     """
+    from . import geonodes
     def check_target(target):
         if isinstance(target, bpy.types.Collection):
             for member in target.all_objects:
                 check_target(member)
         if isinstance(target, bpy.types.Object):
-            if target == obj or CACHE in target or any(is_modifier(m) for m in target.modifiers):
+            if target == obj or CACHE in target or geonodes.CACHE in target or any(
+                    is_modifier(m) or geonodes.contains(getattr(m, "node_group", None)) for m in target.modifiers):
                 raise ValueError("upstream modifier references a MiniHou output or itself; "
                                  "cross-object MiniHou dependencies are unsupported (feedback prevention)")
 
@@ -374,7 +377,7 @@ def _check_prefix_dependencies(obj, preceding):
                 check_tree(nested)
 
     for modifier in preceding:
-        if is_modifier(modifier) or not modifier.show_viewport:
+        if is_modifier(modifier) or geonodes.contains(getattr(modifier, "node_group", None)) or not modifier.show_viewport:
             continue  # an earlier private MiniHou cache is the intended upstream result
         for prop in modifier.bl_rna.properties:
             if prop.type == "POINTER" and prop.identifier not in {"rna_type", "id_data", "node_group"}:
@@ -464,13 +467,21 @@ def _cleanup(live):
             bpy.data.node_groups.remove(ng)
 
 
-def pump(host=None, port=None, *, force=False):
+def pump(host=None, port=None, *, force=False, _only=None):
     """Synchronously refresh visible instances in stack order. Returns number of engine cooks.
 
     All Blender access occurs here on the main thread. Content hashes suppress engine feedback.
     A failure retains the last successful cache and exposes the error through status(mod).
     """
     global _busy, _last_error, _retry_at
+    if _only is None:
+        from . import geonodes
+        geonodes._cleanup()
+        if any(geonodes.contains(getattr(m, "node_group", None))
+               for o in bpy.context.scene.objects for m in o.modifiers):
+            count = geonodes.pump(host, port, force=force)
+            _last_error = geonodes.last_error()
+            return count
     mesh_writer.assert_main_thread()
     if _rendering or _busy or (not force and time.monotonic() < _retry_at):
         return 0
@@ -496,6 +507,8 @@ def pump(host=None, port=None, *, force=False):
                 continue
             upstream_error = None
             for mod in obj.modifiers:
+                if _only is not None and (obj, mod) != _only:
+                    continue
                 if not is_modifier(mod) or not mod.show_viewport:
                     continue
                 ng = mod.node_group

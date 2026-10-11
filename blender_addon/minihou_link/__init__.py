@@ -12,7 +12,7 @@ import bpy
 from bpy.app.handlers import persistent
 from bpy.props import IntProperty, StringProperty
 
-from . import runtime, modifiers
+from . import runtime, modifiers, geonodes_ui
 from .server_control import ServerController
 from .protocol import DEFAULT_PORT
 
@@ -357,9 +357,11 @@ def register():
     if not bpy.app.timers.is_registered(_restore_endpoint_timer):
         bpy.app.timers.register(_restore_endpoint_timer, first_interval=0.0)
     modifiers.register()
+    geonodes_ui.register()
 
 
 def unregister():
+    geonodes_ui.unregister()
     modifiers.unregister()
     _server.stop(wait=True)
     if bpy.app.timers.is_registered(_server_redraw):
