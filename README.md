@@ -746,3 +746,9 @@ bench/   bench_link.py, raw_sender.py
 tests/   unit, integration, Blender (bpy), golden values, portability
 examples/graphs/  docs/  .github/workflows/
 ```
+
+## RBD physics
+
+Optional real rigid-body dynamics, falling fracture pieces and a projectile/brick-wall
+demo are documented in [docs/RBD.md](docs/RBD.md). Install the `physics` extra or use
+the prepared Windows RBD runtime. Existing geometry workflows do not require it.
