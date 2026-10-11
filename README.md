@@ -97,6 +97,7 @@ The same edit operations are available to scripts over HTTP (`POST /api/edit`, s
 | `examples/graphs/rocky_hills.json` | hills plus the `rock_scatter` **system** (`nodes/rock_scatter.json`, a graph used as a node) |
 | `examples/graphs/scifi_panels.json` | random face groups extruded twice with insets, flat-shaded, a second material on the tops |
 | `examples/graphs/subd_pod.json` | box -> extruded dome and fin -> clip + mirror (symmetric, welded) -> Catmull-Clark |
+| `examples/graphs/curves_vine.json` | helix -> resample -> noise -> blur -> width ramp -> sweep; a wireframe sphere |
 
 All examples are cooked by the test-suite, so they keep working as nodes evolve.
 
@@ -132,6 +133,12 @@ All examples are cooked by the test-suite, so they keep working as nodes evolve.
 | `color` | geo | Cd: constant, random, random per piece, or a ramp along an attribute |
 | `sort` | geo | reorder points or primitives (random, by axis, by attribute, reverse) |
 | `ray` | geo, target | project points along a vector, along N, or to the closest point; imports hit attributes |
+| `line` / `helix` / `curve` | - | open curves: straight, spiral (cone spirals too), or through typed points |
+| `resample` | geo | even spacing along curves (or polygon outlines); adds `curveu` (0 to 1 along each curve) |
+| `carve` | geo | keep part of each curve by length (animate `end` to grow it) |
+| `sweep` | geo | tubes along curves: rotation-minimising frames, radius x point `width`/`pscale`, caps, twist, uv |
+| `convert_line` | geo | every edge to curves (joined into polylines), e.g. wireframes with `sweep` |
+| `polypath` | geo | join curves that share end points |
 | `wrangle` | geo | VEX-like snippet over points, primitives or vertices (see below) |
 | `attribute_delete` | geo | delete attributes by name or wildcard (`N uv tmp_*`) |
 | `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |
@@ -160,6 +167,15 @@ attributes, and Blender gets each as a boolean attribute (use it with *Named Att
 
 A point group used on primitives selects those whose points are all in it; a primitive group used on points selects
 the points its primitives use.
+
+### Curves
+
+Like Houdini's open polygons, a **curve** is a primitive whose points are not closed into a face (`@closed` is 0 in a
+wrangle over primitives). Curves flow through the nodes that make sense for them (transform, noise, wrangle, groups,
+merge, copy_to_points, attribute_blur, measure `perimeter` = length...) and polygon-only nodes (subdivide,
+polyextrude, clip, polyfill) say so; `blast` with group `@closed == 0` separates them. Deleting points from a curve
+shortens or splits it. In Blender, curves arrive as **loose edges** of the output mesh (use *Mesh to Curve* in Geometry
+Nodes for real curves), and a `blender_object` reads loose edges back as curves. For render geometry, `sweep` them.
 
 ### Wrangle snippets (the attribute wrangle)
 
@@ -383,7 +399,8 @@ Not verified:
 ## Known limits
 
 * One output mesh and one exposed-parameter set per engine. Detail attributes are not sent to Blender.
-* Polygons only (no curves/edges-only geometry). No edge-domain attributes (e.g. `sharp_edge`, `crease_edge`), in either
+* Curves reach Blender as loose mesh edges: their point attributes come along, their primitive and vertex attributes
+  do not (Blender has no domain for them). No edge-domain attributes (e.g. `sharp_edge`, `crease_edge`), in either
   direction. A `blender_object` reads meshes (and what Blender can convert to one, e.g. text and curves with geometry).
 * The socket and the HTTP API are unauthenticated and bound to loopback by default. Do not bind them to a public interface.
   The HTTP API refuses requests from other web sites (Host/Origin checks against DNS rebinding and cross-site requests) and

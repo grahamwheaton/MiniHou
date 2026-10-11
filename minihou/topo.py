@@ -1,7 +1,8 @@
 """Vectorised topology queries shared by nodes: per-vertex primitive, half-edges, unique edges, centroids.
 
 All functions take a :class:`~minihou.geometry.Geometry` and return numpy arrays (int64 indices). A half-edge is the
-directed edge from a vertex's point to the next vertex's point in the same primitive (cyclic).
+directed edge from a vertex's point to the next vertex's point in the same primitive (cyclic for closed polygons; the
+last vertex of an open curve has no half-edge, see :func:`has_next`).
 """
 from __future__ import annotations
 
@@ -37,21 +38,35 @@ def prev_vertex(geo) -> np.ndarray:
     return prv
 
 
+def has_next(geo) -> np.ndarray:
+    """Bool per vertex: it starts a half-edge (False only for the last vertex of an open curve)."""
+    t = geo.topology
+    m = np.ones(t.nvertices, bool)
+    if t.has_open:
+        offs = t.prim_offsets.astype(np.int64)
+        open_ne = (~t.closed) & (np.diff(offs) > 0)
+        m[offs[1:][open_ne] - 1] = False
+    return m
+
+
 class Edges(NamedTuple):
     points: np.ndarray        # (E, 2) point indices, sorted within each edge
-    of_vertex: np.ndarray     # (V,) edge id of each half-edge (vertex -> next vertex)
+    of_vertex: np.ndarray     # (V,) edge id of each half-edge (vertex -> next vertex); -1 for the end of an open curve
     count: np.ndarray         # (E,) how many half-edges use the edge (1 = boundary, 2 = manifold interior)
 
 
 def edges(geo) -> Edges:
-    """Unique undirected edges of all primitives."""
+    """Unique undirected edges of all primitives (open curves contribute their segments, not a closing edge)."""
     vp = geo.topology.vertex_point.astype(np.int64)
     a, b = vp, vp[next_vertex(geo)]
-    lo, hi = np.minimum(a, b), np.maximum(a, b)
-    key = lo * max(geo.npoints, 1) + hi
-    uniq, inv, count = np.unique(key, return_inverse=True, return_counts=True)
+    real = has_next(geo)
+    lo, hi = np.minimum(a, b)[real], np.maximum(a, b)[real]
     n = max(geo.npoints, 1)
-    return Edges(np.stack([uniq // n, uniq % n], 1), inv.reshape(-1), count)
+    key = lo * n + hi
+    uniq, inv, count = np.unique(key, return_inverse=True, return_counts=True)
+    of_vertex = np.full(len(vp), -1, np.int64)
+    of_vertex[real] = inv.reshape(-1)
+    return Edges(np.stack([uniq // n, uniq % n], 1), of_vertex, count)
 
 
 def prim_centroids(geo) -> np.ndarray:
@@ -72,15 +87,17 @@ def segment_sum(values: np.ndarray, index: np.ndarray, n: int) -> np.ndarray:
 
 
 def boundary_points(geo) -> np.ndarray:
-    """Bool per point: on an edge used by exactly one primitive."""
+    """Bool per point: on a polygon edge used by exactly one polygon (curve segments are not boundaries)."""
     e = edges(geo)
+    on_poly = (e.of_vertex >= 0) & geo.topology.closed_mask()[prim_of_vertex(geo)]
+    cnt = np.bincount(e.of_vertex[on_poly], minlength=len(e.points))
     m = np.zeros(geo.npoints, bool)
-    m[e.points[e.count == 1].ravel()] = True
+    m[e.points[cnt == 1].ravel()] = True
     return m
 
 
 def boundary_prims(geo) -> np.ndarray:
     """Bool per primitive: has an edge no other primitive shares."""
     e = edges(geo)
-    on = e.count[e.of_vertex] == 1
+    on = (e.of_vertex >= 0) & (e.count[np.maximum(e.of_vertex, 0)] == 1)
     return np.bincount(prim_of_vertex(geo), weights=on, minlength=geo.nprims) > 0

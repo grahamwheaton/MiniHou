@@ -17,7 +17,7 @@ Language
   over primitives, point and vertex attributes averaged over the face (``@P`` is the face centre). Writing such a name
   moves the attribute to the domain being run over (an attribute name lives on one domain, as in Blender).
 * Read-only: ``@ptnum`` (over vertices: the corner's point), ``@primnum``, ``@vtxnum``, ``@numpt``, ``@numprim``,
-  ``@numvtx``.
+  ``@numvtx``, and over primitives or vertices ``@closed`` (1 for a polygon, 0 for an open curve).
 * Names that Blender treats natively: ``@uv`` (UV map), ``@Cd`` (color attribute), ``@N`` (normals),
   ``@material_index``, ``@sharp_face`` (flat shading).
 * Groups are ints named ``group_<name>``, as in VEX: ``@group_top`` reads one (1 or 0), ``i@group_tall = @P.z > 2`` makes one.
@@ -53,7 +53,7 @@ _PREFIX_TYPES = {"f": "float", "v": "vector", "i": "int", "u": "vector2", "p": "
 _WIDTH = {"float": 1, "int": 1, "vector2": 2, "vector": 3, "vector4": 4}
 _ATTR_RE = re.compile(r"(?<![A-Za-z0-9_])([fviup]?)@([A-Za-z_][A-Za-z0-9_]*)")
 _MANGLE = "__attr_"
-_READONLY = {"ptnum", "numpt", "primnum", "numprim", "vtxnum", "numvtx"}
+_READONLY = {"ptnum", "numpt", "primnum", "numprim", "vtxnum", "numvtx", "closed"}
 
 
 # ---------------------------------------------------------------------------

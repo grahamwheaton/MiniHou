@@ -218,7 +218,7 @@ def attribute_transfer(geo, source, names, max_distance, blend_width, group):
     Str("names", "P", doc="Point attributes to smooth along edges (P smooths the shape), space separated"),
     Int("iterations", 5, min=0, soft_max=100),
     Float("strength", 0.5, min=0.0, max=1.0, doc="How far each step moves towards the neighbours' average"),
-    Bool("pin_boundary", True, doc="Keep points on open edges in place"),
+    Bool("pin_boundary", True, doc="Keep points on open edges, and the ends of curves, in place"),
     Str("group", "", doc="Only these points"),
 ])
 def attribute_blur(geo, names, iterations, strength, pin_boundary, group):
@@ -228,8 +228,9 @@ def attribute_blur(geo, names, iterations, strength, pin_boundary, group):
     n = geo.npoints
     deg = np.maximum(np.bincount(np.r_[a, b], minlength=n), 1).astype(np.float64)
     move = np.ones(n, bool) if group == "" else groups.mask(geo, "point", group)
-    if pin_boundary:
+    if pin_boundary:                                     # open polygon edges, and the ends of curves
         move &= ~topo.boundary_points(geo)
+        move &= np.bincount(np.r_[a, b], minlength=n) != 1
     move &= np.bincount(np.r_[a, b], minlength=n) > 0
     out = geo.copy()
     for nm in names.replace(",", " ").split():
@@ -275,7 +276,7 @@ def connectivity(geo, domain, name):
 # -- measure ----------------------------------------------------------------------------------------------------
 @node("measure", inputs=["geo"], category="attribute", params=[
     Enum("measure", ["area", "perimeter", "curvature", "piece_area", "piece_volume"],
-         doc="area / perimeter per primitive; curvature per point (mean curvature, 1/radius: + convex, - concave); piece_area / "
+         doc="area / perimeter per primitive (an open curve's perimeter is its length); curvature per point (mean curvature, 1/radius: + convex, - concave); piece_area / "
              "piece_volume per primitive, summed over its connected piece"),
     Str("name", "", doc="Attribute name (default: the measure's name)"),
 ])
@@ -288,7 +289,7 @@ def measure(geo, measure, name):
     if measure == "perimeter":
         vp = geo.topology.vertex_point.astype(np.int64)
         P = geo.P.astype(np.float64)
-        L = np.linalg.norm(P[vp[topo.next_vertex(geo)]] - P[vp], axis=1)
+        L = np.linalg.norm(P[vp[topo.next_vertex(geo)]] - P[vp], axis=1) * topo.has_next(geo)   # curves: no closing edge
         return _set(geo, "prim", name, topo.segment_sum(L, topo.prim_of_vertex(geo), geo.nprims).astype(np.float32))
     if measure == "curvature":
         e = topo.edges(geo)
@@ -383,10 +384,10 @@ def sort(geo, domain, key, attribute, seed):
         inv = np.empty(n, np.int64)
         inv[order] = np.arange(n)
         return B.make(geo.P[order], inv[t.vertex_point], t.prim_offsets, B.gather(geo.point, order),
-                      dict(geo.vertex.items()), dict(geo.prim.items()), geo.detail)
+                      dict(geo.vertex.items()), dict(geo.prim.items()), geo.detail, t.closed)
     sizes = t.prim_sizes()[order].astype(np.int64)
     offs = t.prim_offsets.astype(np.int64)
     local = np.arange(sizes.sum()) - np.repeat(np.cumsum(sizes) - sizes, sizes)
     verts = np.repeat(offs[order], sizes) + local
     return B.make(geo.P, t.vertex_point[verts], B.offsets_from_sizes(sizes), dict(geo.point.items()),
-                  B.gather(geo.vertex, verts), B.gather(geo.prim, order), geo.detail)
+                  B.gather(geo.vertex, verts), B.gather(geo.prim, order), geo.detail, B.closed_subset(geo, order))

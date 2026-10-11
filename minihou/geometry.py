@@ -126,18 +126,33 @@ class Topology:
 
     ``vertex_point[v]`` is the point used by vertex ``v``.
     Primitive ``i`` owns vertices ``prim_offsets[i] : prim_offsets[i+1]``.
+    ``closed[i]`` says whether primitive ``i`` is a closed polygon (a face) or an open polyline (a curve, like
+    Houdini's open polygons); ``None`` means all closed, which is what most geometry is.
     """
 
-    __slots__ = ("vertex_point", "prim_offsets", "_digest")
+    __slots__ = ("vertex_point", "prim_offsets", "closed", "_digest")
 
-    def __init__(self, vertex_point=None, prim_offsets=None):
+    def __init__(self, vertex_point=None, prim_offsets=None, closed=None):
         vp = np.zeros(0, _INT) if vertex_point is None else np.ascontiguousarray(vertex_point, dtype=_INT)
         po = np.zeros(1, _INT) if prim_offsets is None else np.ascontiguousarray(prim_offsets, dtype=_INT)
         if vp.ndim != 1 or po.ndim != 1:
             raise ValueError("topology arrays must be 1-D")
         self.vertex_point = vp
         self.prim_offsets = po
+        if closed is not None:
+            closed = np.ascontiguousarray(closed, dtype=_BOOL).reshape(-1)
+            if closed.all():
+                closed = None                             # canonical: all-closed is stored as None
+        self.closed: Optional[np.ndarray] = closed
         self._digest: Optional[str] = None
+
+    @property
+    def has_open(self) -> bool:
+        return self.closed is not None
+
+    def closed_mask(self) -> np.ndarray:
+        """Bool per primitive: True for closed polygons, False for open polylines."""
+        return np.ones(self.nprims, _BOOL) if self.closed is None else self.closed
 
     @property
     def nvertices(self) -> int:
@@ -153,9 +168,13 @@ class Topology:
     def freeze(self) -> None:
         self.vertex_point.setflags(write=False)
         self.prim_offsets.setflags(write=False)
+        if self.closed is not None:
+            self.closed.setflags(write=False)
 
     def validate(self, npoints: int) -> None:
         po, vp = self.prim_offsets, self.vertex_point
+        if self.closed is not None and self.closed.shape[0] != po.shape[0] - 1:
+            raise ValueError(f"closed has {self.closed.shape[0]} entries for {po.shape[0] - 1} primitives")
         if po.shape[0] < 1 or po[0] != 0:
             raise ValueError("prim_offsets must start at 0")
         if po[-1] != vp.shape[0]:
@@ -173,17 +192,20 @@ class Topology:
             h.update(self.vertex_point.tobytes())
             h.update(b"|")
             h.update(self.prim_offsets.tobytes())
+            if self.closed is not None:
+                h.update(b"|open|")
+                h.update(self.closed.tobytes())
             self._digest = h.hexdigest()
         return self._digest
 
     @classmethod
-    def from_polys(cls, polys: Iterable[Iterable[int]]) -> "Topology":
+    def from_polys(cls, polys: Iterable[Iterable[int]], closed=None) -> "Topology":
         vp: List[int] = []
         offs = [0]
         for p in polys:
             vp.extend(p)
             offs.append(len(vp))
-        return cls(np.asarray(vp, _INT), np.asarray(offs, _INT))
+        return cls(np.asarray(vp, _INT), np.asarray(offs, _INT), closed)
 
     def polys(self) -> List[List[int]]:
         """Primitives as lists of point indices (slow; for tests/debug)."""
@@ -192,7 +214,7 @@ class Topology:
 
     @property
     def nbytes(self) -> int:
-        return self.vertex_point.nbytes + self.prim_offsets.nbytes
+        return self.vertex_point.nbytes + self.prim_offsets.nbytes + (0 if self.closed is None else self.closed.nbytes)
 
 
 class Geometry:
@@ -210,11 +232,13 @@ class Geometry:
 
     # -- construction ------------------------------------------------------
     @classmethod
-    def from_arrays(cls, P, vertex_point=None, prim_offsets=None) -> "Geometry":
+    def from_arrays(cls, P, vertex_point=None, prim_offsets=None, closed=None) -> "Geometry":
+        """Points, plus primitives as a vertex->point map and CSR offsets; ``closed`` (bool per primitive, default all
+        True) marks open polylines (curves) with False."""
         P = normalize_array(P, "P")
         if P.ndim != 2 or P.shape[1] != 3:
             raise ValueError(f"P must have shape (n, 3), got {P.shape}")
-        g = cls(P.shape[0], Topology(vertex_point, prim_offsets))
+        g = cls(P.shape[0], Topology(vertex_point, prim_offsets, closed))
         g.point["P"] = P
         return g
 

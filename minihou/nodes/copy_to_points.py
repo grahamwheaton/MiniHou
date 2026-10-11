@@ -60,7 +60,7 @@ def copy_to_points(source, points, orient, use_pscale):
     po = np.concatenate([np.tile(source.topology.prim_offsets[:-1], T)
                          + np.repeat(np.arange(T, dtype=np.int32) * np.int32(nv), npr),
                          np.array([T * nv], np.int32)]).astype(np.int32)
-    out = Geometry.from_arrays(P, vp, po)
+    out = Geometry.from_arrays(P, vp, po, np.tile(source.topology.closed, T) if source.topology.has_open else None)
 
     for name, arr in source.point.items():
         if name in _TRANSFORM_ATTRS:

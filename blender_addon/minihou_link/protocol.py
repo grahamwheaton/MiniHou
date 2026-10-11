@@ -50,7 +50,9 @@ DEFAULT_PORT = 8765
 
 TOPO_VERTEX_POINT = "topo/vertex_point"
 TOPO_PRIM_OFFSETS = "topo/prim_offsets"
-TOPO_KEYS = (TOPO_VERTEX_POINT, TOPO_PRIM_OFFSETS)
+TOPO_PRIM_CLOSED = "topo/prim_closed"      # uint8 per primitive: 1 polygon, 0 open curve (absent: all polygons)
+TOPO_REQUIRED = (TOPO_VERTEX_POINT, TOPO_PRIM_OFFSETS)            # always sent when topology changes
+TOPO_KEYS = TOPO_REQUIRED + (TOPO_PRIM_CLOSED,)
 DOMAINS = ("point", "vertex", "prim")
 
 _SUPPORTED_DTYPES = {"<f4", "<f8", "<i4", "<i8", "|u1", "|b1"}
@@ -255,6 +257,14 @@ class Mirror:
     @property
     def prim_offsets(self) -> np.ndarray:
         return self.arrays[TOPO_PRIM_OFFSETS]
+
+    @property
+    def prim_closed(self):
+        """Bool per primitive (False = open curve), or None when every primitive is a polygon."""
+        c = self.arrays.get(TOPO_PRIM_CLOSED)
+        if c is None or c.size == 0 or bool(np.all(c)):
+            return None
+        return c.astype(bool)
 
     def attributes(self) -> Iterable[Tuple[str, str, np.ndarray]]:
         """Yield ``(domain, name, array)`` for every non-topology array."""

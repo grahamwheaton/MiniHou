@@ -189,6 +189,24 @@ class AddonIntegrationTests(unittest.TestCase):
         col = np.empty(len(me.loops) * 4, np.float32); me.color_attributes["Color"].data.foreach_get("color", col)
         self.assertEqual(sorted({tuple(c) for c in col.reshape(-1, 4)[:, :3].round(3).tolist()}), [(0, 0, 1), (1, 0, 0)])
 
+    def test_engine_curves_reach_the_proxy_as_edges(self):
+        graph = {"version": 1, "nodes": {
+            "h": {"type": "helix", "params": {"turns": 1, "points": 30}},
+            "line": {"type": "line", "params": {"origin": [3, 0, 0], "points": 4}},
+            "box": {"type": "box", "params": {"center": [-3, 0, 0]}},
+            "m": {"type": "merge", "inputs": {"geos": ["h", "line", "box"]}},
+            "o": {"type": "output", "inputs": {"geo": "m"}}}, "display": "o"}
+        self.graph_path.write_text(json.dumps(graph), encoding="utf-8")
+        proxy_obj = lambda: bpy.data.objects.get(self.proxy.PROXY_OBJECT)  # noqa: E731
+
+        def evaluated():
+            return proxy_obj().evaluated_get(bpy.context.evaluated_depsgraph_get()).data
+
+        self.pump(lambda: proxy_obj() is not None and len(evaluated().vertices) == 30 + 4 + 8, timeout=60)
+        me = evaluated()
+        self.assertEqual(len(me.polygons), 6)
+        self.assertEqual(sum(e.is_loose for e in me.edges), 29 + 3)
+
     def make_source_object(self, name="Src"):
         """A 2x2-face mesh with native data: UV map, point color, material indices, a vertex group, a float attribute."""
         verts = [(x, y, 0.0) for y in range(3) for x in range(3)]
@@ -676,6 +694,45 @@ class MeshWriterTests(unittest.TestCase):
         self.assertNotIn("uv", m.attributes)
         self.assertNotIn("Cd", m.attributes)
         self.assertNotIn("N", m.attributes)
+
+    def test_curves_become_loose_edges(self):
+        from minihou import Geometry
+        from minihou.link.diff import DiffState
+        P = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [3, 0, 0], [4, 0, 0], [5, 1, 0]], np.float32)
+        g = Geometry.from_arrays(P, [0, 1, 2, 3, 4, 5, 6], [0, 4, 7], closed=[True, False])
+        g.prim["id"] = np.array([10, 20], np.int32)
+        g.vertex["k"] = np.arange(7, dtype=np.float32)
+        g.point["w"] = np.arange(7, dtype=np.float32)
+        d = DiffState()
+        t = self.apply(g.freeze(), d)
+        m = self.mesh
+        self.assertEqual((len(m.vertices), len(m.polygons), len(m.loops), t["loose_edges"]), (7, 1, 4, 2))
+        loose = sorted(tuple(sorted(e.vertices)) for e in m.edges if e.is_loose)
+        self.assertEqual(loose, [(4, 5), (5, 6)])
+        self.assertEqual([d_.value for d_ in m.attributes["id"].data], [10])          # polygon's attribute only
+        self.assertEqual([d_.value for d_ in m.attributes["k"].data], [0, 1, 2, 3])
+        self.assertEqual(len(m.attributes["w"].data), 7)
+        # the curve turns into a polygon: loose edges go away
+        g2 = Geometry.from_arrays(P[:4], [0, 1, 2, 3], [0, 4])
+        self.apply(g2.freeze(), d)
+        self.assertFalse(any(e.is_loose for e in m.edges))
+        self.assertEqual(len(m.edges), 4)
+
+    def test_reader_turns_loose_edges_into_curves(self):
+        import bpy as _bpy
+        from minihou_link import mesh_reader
+        from minihou.link.server import _decode_object
+        me = _bpy.data.meshes.new("wire")
+        me.from_pydata([(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (3, 0, 0), (4, 0, 0)], [(4, 5)], [(0, 1, 2, 3)])
+        me.attributes.new("h", "FLOAT", "FACE").data.foreach_set("value", np.array([7.0], np.float32))
+        obj = _bpy.data.objects.new("wire", me)
+        _bpy.context.scene.collection.objects.link(obj)
+        hdr, arrays = mesh_reader.read_object(obj, _bpy.context.evaluated_depsgraph_get())
+        self.assertEqual(hdr["info"]["loose_edges"], 1)
+        geo = _decode_object(hdr, arrays)
+        self.assertEqual(geo.topology.closed_mask().tolist(), [True, False])
+        self.assertEqual(geo.prim["h"].tolist(), [7.0, 0.0])
+        self.assertEqual(geo.topology.polys()[1], [4, 5])
 
     def test_groups_become_boolean_attributes(self):
         from minihou.link.diff import DiffState

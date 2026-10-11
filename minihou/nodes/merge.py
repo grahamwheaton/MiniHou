@@ -29,7 +29,10 @@ def merge(geos):
     vp = np.concatenate([g.topology.vertex_point.astype(np.int64) + b for g, b in zip(geos, pt_base)]).astype(np.int32)
     po = np.concatenate([g.topology.prim_offsets[:-1].astype(np.int64) + b for g, b in zip(geos, vt_base)]
                         + [np.array([sum(nvs)], np.int64)]).astype(np.int32)
-    out = Geometry(sum(npts), Topology(vp, po))
+    closed = None
+    if any(g.topology.has_open for g in geos):
+        closed = np.concatenate([g.topology.closed_mask() for g in geos])
+    out = Geometry(sum(npts), Topology(vp, po, closed))
     for dom, sizes in (("point", npts), ("vertex", nvs), ("prim", nps)):
         names = []
         for g in geos:

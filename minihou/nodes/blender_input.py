@@ -2,7 +2,7 @@
 import numpy as np
 
 from ..inputs import INPUTS
-from ..sdk import Enum, Str, node
+from ..sdk import Bool, Enum, Str, node
 
 # MiniHou's own objects in Blender: reading them back would feed the output into itself.
 OWN_OBJECTS = ("MiniHou_Output", "MiniHou_Proxy")
@@ -11,12 +11,14 @@ OWN_OBJECTS = ("MiniHou_Output", "MiniHou_Proxy")
 @node("blender_object", category="source", key_extra=lambda p: INPUTS.token(p["object"]), params=[
     Str("object", "", doc="Name of the Blender object to read (mesh, or anything Blender can turn into a mesh)"),
     Enum("space", ["world", "object"], doc="world: where the object is in the scene; object: its own local coordinates"),
+    Bool("join_edges", True, doc="Join loose edges (e.g. a curve object's) into long curves"),
 ])
-def blender_object(object, space):
+def blender_object(object, space, join_edges=True):
     """A Blender object's evaluated mesh (modifiers applied), live: edit it in Blender and the graph recooks.
     Native data arrives as attributes: the render UV map as `uv` and other UV maps by name (vertices), the render color
     attribute as `Cd` (+ `Alpha` if not opaque), `material_index` and `sharp_face` (primitives), vertex groups as point
-    floats named after the group, custom normals as vertex `N`, and every other attribute under its own name."""
+    floats named after the group, custom normals as vertex `N`, and every other attribute under its own name. Loose
+    edges (a curve object, an edge-only mesh) become curves."""
     if not object:
         raise ValueError("set 'object' to the name of a Blender object")
     if object in OWN_OBJECTS:
@@ -27,6 +29,9 @@ def blender_object(object, space):
     if data.geo is None:
         raise ValueError(f"Blender object {object!r}: {data.error}")
     geo = data.geo
+    if join_edges and geo.topology.has_open:
+        from .curves import polypath
+        geo = polypath(geo)
     if space == "object" or data.matrix is None:
         return geo
     M = np.asarray(data.matrix, np.float64).reshape(4, 4)

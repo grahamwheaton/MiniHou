@@ -25,7 +25,8 @@ def compact_points(geo):
         return geo
     remap = (np.cumsum(used) - 1).astype(np.int32)
     return B.make(geo.P[used], remap[geo.topology.vertex_point], geo.topology.prim_offsets,
-                  B.gather(geo.point, np.flatnonzero(used)), dict(geo.vertex.items()), dict(geo.prim.items()), geo.detail)
+                  B.gather(geo.point, np.flatnonzero(used)), dict(geo.vertex.items()), dict(geo.prim.items()), geo.detail,
+                  geo.topology.closed)
 
 
 # -- reverse ----------------------------------------------------------------------------------------------------
@@ -52,7 +53,7 @@ def reverse(geo, group, reverse_normals):
         if "N" in point:
             psel = groups.convert(geo, sel, "prim", "point")
             point["N"] = np.where(psel[:, None], -point["N"], point["N"])
-    return B.make(geo.P, t.vertex_point[order], t.prim_offsets, point, vert, prim, geo.detail)
+    return B.make(geo.P, t.vertex_point[order], t.prim_offsets, point, vert, prim, geo.detail, t.closed)
 
 
 # -- facet ------------------------------------------------------------------------------------------------------
@@ -67,7 +68,7 @@ def facet(geo, unique_points, compute_normals):
     if unique_points:
         vp = geo.topology.vertex_point
         out = B.make(geo.P[vp], np.arange(len(vp)), geo.topology.prim_offsets, B.gather(geo.point, vp),
-                     dict(geo.vertex.items()), dict(geo.prim.items()), geo.detail)
+                     dict(geo.vertex.items()), dict(geo.prim.items()), geo.detail, geo.topology.closed)
     if compute_normals:
         out = out.copy() if out is geo else out
         fn = normalize_rows(prim_normals(out))
@@ -133,7 +134,7 @@ def triangulate(geo, sel):
     fn = prim_normals(geo)
     turn = np.einsum("ij,ij->i", np.cross(pos - pos[prv], pos[nxt] - pos), fn[pv])
     concave = np.bincount(pv, weights=(turn < -1e-12), minlength=t.nprims) > 0
-    work = sel & (sizes > 3)
+    work = sel & (sizes > 3) & t.closed_mask()             # open curves are left as they are
     fan = work & ~concave
     counts = np.where(fan, sizes - 2, 0)
     first = np.repeat(offs[:-1], counts)
@@ -181,8 +182,11 @@ def divide(geo, group):
     piece_sizes, piece_starts = all_sizes[order], starts[order]
     local = np.arange(piece_sizes.sum()) - np.repeat(np.cumsum(piece_sizes) - piece_sizes, piece_sizes)
     verts = src[np.repeat(piece_starts, piece_sizes) + local]
+    closed = None
+    if t.has_open:                                          # whole prims keep their flag; triangles are closed
+        closed = np.concatenate([t.closed[whole_p], np.ones(len(tri_p), bool)])[order]
     return B.make(geo.P, t.vertex_point[verts], B.offsets_from_sizes(piece_sizes), dict(geo.point.items()),
-                  B.gather(geo.vertex, verts), B.gather(geo.prim, owner[order]), geo.detail)
+                  B.gather(geo.vertex, verts), B.gather(geo.prim, owner[order]), geo.detail, closed)
 
 
 # -- mirror -----------------------------------------------------------------------------------------------------
@@ -220,7 +224,7 @@ def mirror(geo, origin, normal, keep_original, consolidate_seam, distance):
     m_vert = {k: a[rev] for k, a in reflect(geo.vertex).items()}
     m_prim = reflect(geo.prim)
     if not keep_original:
-        return B.make(Pm, t.vertex_point[rev], t.prim_offsets, m_point, m_vert, m_prim, geo.detail)
+        return B.make(Pm, t.vertex_point[rev], t.prim_offsets, m_point, m_vert, m_prim, geo.detail, t.closed)
     np_ = geo.npoints
     point_map = np.arange(np_) + np_
     if consolidate_seam:
@@ -230,7 +234,8 @@ def mirror(geo, origin, normal, keep_original, consolidate_seam, distance):
     both = B.make(np.concatenate([geo.P, Pm]), np.concatenate([t.vertex_point, copy_vp]),
                   np.concatenate([offs, offs[1:] + offs[-1]]),
                   B.concat([dict(geo.point.items()), m_point]), B.concat([dict(geo.vertex.items()), m_vert]),
-                  B.concat([dict(geo.prim.items()), m_prim]), geo.detail)
+                  B.concat([dict(geo.prim.items()), m_prim]), geo.detail,
+                  None if t.closed is None else np.concatenate([t.closed, t.closed]))
     return compact_points(both)
 
 
@@ -243,6 +248,7 @@ def mirror(geo, origin, normal, keep_original, consolidate_seam, distance):
 def clip(geo, origin, normal, keep):
     """Cut polygons with a plane (Houdini's Clip). Cut edges get new points with interpolated attributes; faces
     straddling the plane are trimmed, not deleted. Use polyfill to cap the opening."""
+    B.require_polygons(geo, "clip")
     n = np.asarray(normal, np.float64)
     n = n / max(np.linalg.norm(n), 1e-12)
     d = (geo.P.astype(np.float64) - np.asarray(origin, np.float64)) @ n
@@ -326,6 +332,7 @@ def boundary_loops(geo):
 def polyfill(geo, fill_group):
     """Close every hole with one n-gon facing the same way as its surroundings (Houdini's PolyFill, single polygon).
     New faces get zero for primitive and vertex attributes."""
+    B.require_polygons(geo, "polyfill")
     loops = boundary_loops(geo)
     if not loops:
         return geo
@@ -353,6 +360,7 @@ def polyfill(geo, fill_group):
 def polyextrude(geo, group, distance, inset, mode, output_back):
     """Extrude faces along their normals with optional inset (Houdini's PolyExtrude). Side walls are added on the
     region's boundary; groups extrudeFront and extrudeSide hold the new faces."""
+    B.require_polygons(geo, "polyextrude")
     sel = _prim_sel(geo, group)
     if not sel.any():
         return geo

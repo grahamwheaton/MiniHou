@@ -65,9 +65,11 @@ def concat(parts) -> Dict[str, np.ndarray]:
 
 
 def make(P: np.ndarray, vertex_point: np.ndarray, prim_offsets: np.ndarray, point: Optional[dict] = None,
-         vertex: Optional[dict] = None, prim: Optional[dict] = None, detail: Optional[dict] = None) -> Geometry:
-    """A Geometry from raw arrays; ``point`` may contain P (it wins over the ``P`` argument if both given)."""
-    g = Geometry(len(P), Topology(np.asarray(vertex_point, np.int32), np.asarray(prim_offsets, np.int32)))
+         vertex: Optional[dict] = None, prim: Optional[dict] = None, detail: Optional[dict] = None,
+         closed: Optional[np.ndarray] = None) -> Geometry:
+    """A Geometry from raw arrays; ``point`` may contain P (it wins over the ``P`` argument if both given).
+    ``closed`` (bool per primitive) marks open curves; None = all closed polygons."""
+    g = Geometry(len(P), Topology(np.asarray(vertex_point, np.int32), np.asarray(prim_offsets, np.int32), closed))
     g.point["P"] = np.asarray(P, np.float32)
     for name, a in (point or {}).items():
         if name != "P":
@@ -78,6 +80,20 @@ def make(P: np.ndarray, vertex_point: np.ndarray, prim_offsets: np.ndarray, poin
         g.prim[name] = a
     g.detail = dict(detail or {})
     return g
+
+
+def closed_subset(geo, prim_index) -> Optional[np.ndarray]:
+    """The closed flags of the primitives ``prim_index`` (None when the geometry has no open curves)."""
+    c = geo.topology.closed
+    return None if c is None else c[np.asarray(prim_index)]
+
+
+def require_polygons(geo, what: str) -> None:
+    """Raise a clear error for nodes that only work on polygons when the input has open curves."""
+    if geo.topology.has_open:
+        n = int((~geo.topology.closed).sum())
+        raise ValueError(f"{what} works on polygons, but the input has {n} open curve(s); remove them first, e.g. "
+                         f"blast with group '@closed == 0'")
 
 
 def offsets_from_sizes(sizes) -> np.ndarray:

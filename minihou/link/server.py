@@ -20,7 +20,8 @@ from ..graph import GraphError
 from ..sdk import ParamError
 from .diff import DiffState
 from ..geometry import Geometry
-from .protocol import (DEFAULT_PORT, PROTOCOL_VERSION, TOPO_KEYS, TOPO_PRIM_OFFSETS, TOPO_VERTEX_POINT, ProtocolError,
+from .protocol import (DEFAULT_PORT, PROTOCOL_VERSION, TOPO_KEYS, TOPO_PRIM_CLOSED, TOPO_PRIM_OFFSETS, TOPO_VERTEX_POINT,
+                       ProtocolError,
                        attr_key, recv_message, send_message, split_key)
 from .session import Result, Session
 
@@ -183,7 +184,9 @@ class _Connection:
 def _decode_object(h: dict, arrays) -> Geometry:
     """A mesh sent by the add-on (``object_geo``): positions, topology and attributes keyed like ``geo`` messages."""
     P = arrays[attr_key("point", "P")].reshape(-1, 3)
-    geo = Geometry.from_arrays(P, arrays.get(TOPO_VERTEX_POINT), arrays.get(TOPO_PRIM_OFFSETS))
+    closed = arrays.get(TOPO_PRIM_CLOSED)
+    geo = Geometry.from_arrays(P, arrays.get(TOPO_VERTEX_POINT), arrays.get(TOPO_PRIM_OFFSETS),
+                               None if closed is None or closed.size == 0 else closed.astype(bool))
     for key, a in arrays.items():
         if key in TOPO_KEYS or key == attr_key("point", "P"):
             continue

@@ -6,6 +6,7 @@ import numpy as np
 from .. import groups, topo
 from ..geometry import Geometry, Topology
 from ..sdk import Bool, Enum, Float, Int, Str, Vec3, node
+from . import _build as B
 from .delete import keep_points
 from .normal import prim_normals
 from ._util import normalize_rows
@@ -99,11 +100,11 @@ def keep_prims(geo: Geometry, pkeep: np.ndarray, remove_unused_points: bool = Tr
         used = np.zeros(geo.npoints, bool)
         used[vp] = True
         remap = (np.cumsum(used) - 1).astype(np.int32)
-        out = Geometry(int(used.sum()), Topology(remap[vp], offs))
+        out = Geometry(int(used.sum()), Topology(remap[vp], offs, B.closed_subset(geo, pkeep)))
         for name, a in geo.point.items():
             out.point[name] = a[used]
     else:
-        out = Geometry(geo.npoints, Topology(vp.astype(np.int32), offs))
+        out = Geometry(geo.npoints, Topology(vp.astype(np.int32), offs, B.closed_subset(geo, pkeep)))
         for name, a in geo.point.items():
             out.point[name] = a
     for name, a in geo.vertex.items():

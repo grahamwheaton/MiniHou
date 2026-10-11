@@ -81,6 +81,15 @@ def set_corner_verts(mesh, vertex_point: np.ndarray) -> str:
         return "legacy"
 
 
+def set_edge_verts(mesh, pairs: np.ndarray) -> None:
+    """Write edge vertex pairs (the loose edges, added before calc_edges adds the face edges)."""
+    flat = np.ascontiguousarray(pairs, dtype=np.int32).reshape(-1)
+    try:
+        mesh.attributes[".edge_verts"].data.foreach_set("value", flat)
+    except (KeyError, RuntimeError, TypeError, AttributeError):
+        mesh.edges.foreach_set("vertices", flat)
+
+
 def _blender_name(engine_name: str) -> str:
     return {"uv": UV_NAME, "Cd": COLOR_NAME, "N": NORMAL_NAME}.get(engine_name, engine_name)
 
@@ -188,6 +197,37 @@ def set_custom_normals(mesh, domain: str, N: np.ndarray, mirror: Mirror) -> bool
     return True
 
 
+class PolygonView:
+    """A Mirror-like view with only the polygons (closed primitives) and their vertices, plus the open curves as
+    loose edges. Blender faces need 3+ corners; curves become edges, and their primitive/vertex attributes have no
+    Blender domain to live in (their point attributes do)."""
+
+    def __init__(self, mirror: Mirror, closed: np.ndarray):
+        offs = mirror.prim_offsets.astype(np.int64)
+        sizes = np.diff(offs)
+        prim_of_v = np.repeat(np.arange(len(sizes)), sizes)
+        vmask = closed[prim_of_v]
+        self.vertex_point = np.ascontiguousarray(mirror.vertex_point[vmask])
+        self.prim_offsets = np.concatenate([[0], np.cumsum(sizes[closed])]).astype(np.int32)
+        self.counts = {"point": mirror.counts["point"], "vertex": int(vmask.sum()), "prim": int(closed.sum())}
+        self.arrays = {}
+        for k, a in mirror.arrays.items():
+            if k in TOPO_KEYS:
+                continue
+            dom = k.split("/", 1)[0]
+            self.arrays[k] = a[vmask] if dom == "vertex" else a[closed] if dom == "prim" else a
+        # loose edges: consecutive vertices of each open curve
+        open_v = ~vmask
+        nxt_same = np.r_[prim_of_v[1:] == prim_of_v[:-1], False]
+        starts = np.flatnonzero(open_v & nxt_same)
+        self.edges = np.stack([mirror.vertex_point[starts], mirror.vertex_point[starts + 1]], 1).astype(np.int32)
+
+    def attributes(self):
+        for k, a in self.arrays.items():
+            dom, name = split_key(k)
+            yield dom, name, a
+
+
 def apply_update(mesh, mirror: Mirror, u: GeoUpdate) -> Dict[str, object]:
     """Apply an already-mirrored update to ``mesh``. Rebuilds topology only when it changed (or the
     counts no longer match the mesh); otherwise rewrites just the arrays that arrived.
@@ -196,6 +236,11 @@ def apply_update(mesh, mirror: Mirror, u: GeoUpdate) -> Dict[str, object]:
     """
     assert_main_thread()
     pc = time.perf_counter
+    closed = mirror.prim_closed
+    view = PolygonView(mirror, closed) if closed is not None else None
+    loose = view.edges if view is not None else np.zeros((0, 2), np.int32)
+    if view is not None:
+        mirror = view                                    # faces only from here on; curves are the loose edges
     c = mirror.counts
     npts, nv, npr = c["point"], c["vertex"], c["prim"]
     rebuild = (u.full or u.topology_changed or len(mesh.vertices) != npts
@@ -215,6 +260,10 @@ def apply_update(mesh, mirror: Mirror, u: GeoUpdate) -> Dict[str, object]:
         if npr:
             mesh.polygons.add(npr)
             mesh.polygons.foreach_set("loop_start", mirror.prim_offsets[:-1])
+        if len(loose):
+            mesh.edges.add(len(loose))
+            set_edge_verts(mesh, loose)
+        out["loose_edges"] = int(len(loose))
         written = set(mirror.arrays) - set(TOPO_KEYS)
     else:
         written = set(u.arrays) - set(TOPO_KEYS)

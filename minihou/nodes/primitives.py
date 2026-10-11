@@ -22,7 +22,7 @@ def fuse_points(geo: Geometry, distance: float) -> Geometry:
     remap = rank[inverse]
     keep_idx = first[order]
     out = Geometry(keep_idx.shape[0], Topology(remap[geo.topology.vertex_point].astype(np.int32),
-                                                geo.topology.prim_offsets))
+                                                geo.topology.prim_offsets, geo.topology.closed))
     for name, a in geo.point.items():
         out.point[name] = a[keep_idx]
     for name, a in geo.vertex.items():

@@ -6,7 +6,7 @@ import numpy as np
 
 from minihou import Geometry
 from minihou.link.diff import DiffState, arrays_equal
-from minihou.link.protocol import (GeoUpdate, MAGIC, Mirror, ProtocolError, TOPO_KEYS, decode_payload,
+from minihou.link.protocol import (GeoUpdate, MAGIC, Mirror, ProtocolError, TOPO_KEYS, TOPO_REQUIRED, decode_payload,
                                    encode_message, merge_updates, recv_message, send_message)
 from tests.helpers import quad_geo
 
@@ -101,7 +101,7 @@ class DiffTests(unittest.TestCase):
         d = DiffState()
         h, arrays = d.build(self.geo(), 1)
         self.assertTrue(h["full"] and h["topology_changed"])
-        self.assertEqual(set(arrays), {"point/P", "point/Cd", *TOPO_KEYS})
+        self.assertEqual(set(arrays), {"point/P", "point/Cd", *TOPO_REQUIRED})
 
     def test_identical_geometry_sends_nothing(self):
         d = DiffState()
@@ -139,7 +139,7 @@ class DiffTests(unittest.TestCase):
         g2.freeze()
         h, arrays = d.build(g2, 2)
         self.assertTrue(h["topology_changed"])
-        self.assertTrue(set(TOPO_KEYS) <= set(arrays))
+        self.assertTrue(set(TOPO_REQUIRED) <= set(arrays))
         self.assertNotIn("point/P", arrays)                      # points themselves didn't change
 
     def test_removed_attribute_leaves_manifest(self):

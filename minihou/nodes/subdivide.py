@@ -89,6 +89,7 @@ def subdivide(geo, depth, algorithm):
     faces = geo.nvertices * 4 ** max(depth - 1, 0)
     if depth and faces > MAX_FACES:
         raise ValueError(f"depth {depth} would make about {faces:,} faces (limit {MAX_FACES:,}); lower the depth")
+    B.require_polygons(geo, "subdivide")
     out = geo
     for _ in range(depth):
         out = subdivide_once(out, algorithm == "catmull_clark")

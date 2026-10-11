@@ -21,7 +21,7 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 
 from ..geometry import Geometry
-from .protocol import TOPO_PRIM_OFFSETS, TOPO_VERTEX_POINT, attr_key
+from .protocol import TOPO_PRIM_CLOSED, TOPO_PRIM_OFFSETS, TOPO_VERTEX_POINT, attr_key
 
 _HEAD = 4096
 
@@ -72,15 +72,20 @@ class DiffState:
                 current[key] = arr
                 manifest[key] = {"dtype": arr.dtype.str, "shape": list(arr.shape)}
         topo = {TOPO_VERTEX_POINT: geo.topology.vertex_point, TOPO_PRIM_OFFSETS: geo.topology.prim_offsets}
+        if geo.topology.has_open:                       # only geometry with curves pays for the flags
+            topo[TOPO_PRIM_CLOSED] = geo.topology.closed.astype(np.uint8)
 
         send: Dict[str, np.ndarray] = {}
-        topo_changed = full or any(not arrays_equal(self._sent.get(k), v) for k, v in topo.items())
+        topo_changed = (full or any(not arrays_equal(self._sent.get(k), v) for k, v in topo.items())
+                        or (TOPO_PRIM_CLOSED in self._sent) != (TOPO_PRIM_CLOSED in topo))
         if topo_changed:
             send.update(topo)
         for key, arr in current.items():
             if not arrays_equal(self._sent.get(key), arr):
                 send[key] = arr
 
+        if topo_changed and TOPO_PRIM_CLOSED not in topo and TOPO_PRIM_CLOSED in self._sent:
+            send[TOPO_PRIM_CLOSED] = np.ones(0, np.uint8)   # curves gone: tell the client (empty = all polygons)
         # Remember what the client will have after this message.
         new_sent = dict(current)
         new_sent.update(topo)

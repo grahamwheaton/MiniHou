@@ -10,6 +10,8 @@ What is sent (evaluated mesh: modifiers applied), keyed like ``geo`` messages:
 * vertex groups as point floats named after the group (Blender keeps them outside the attribute API; skipped above
   ``MAX_GROUP_POINTS`` points)
 * ``vertex/N`` only when the mesh has *custom* normals (authored data); otherwise Blender recomputes normals anyway
+* loose edges (edges no face uses, e.g. from a curve object) as open 2-point primitives -- curves in the engine; their
+  vertex and primitive attributes are zero
 
 Edge attributes (e.g. ``sharp_edge``) are skipped: the engine has no edge domain.
 """
@@ -20,7 +22,7 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 
-from .protocol import TOPO_PRIM_OFFSETS, TOPO_VERTEX_POINT, attr_key
+from .protocol import TOPO_PRIM_CLOSED, TOPO_PRIM_OFFSETS, TOPO_VERTEX_POINT, attr_key
 
 _DOMAIN = {"POINT": "point", "CORNER": "vertex", "FACE": "prim"}
 # data_type -> (foreach property, components, numpy dtype)
@@ -126,8 +128,41 @@ def _read_mesh(obj, me) -> Tuple[Dict[str, np.ndarray], dict]:
         me.corner_normals.foreach_get("vector", cn)
         arrays[attr_key("vertex", "N")] = cn.reshape(nl, 3)
         names.append("N")
-    return arrays, {"points": n, "vertices": nl, "prims": nf, "attributes": names, "vertex_groups": list(groups),
-                    "skipped": skipped}
+    loose = _loose_edges(me, nl)
+    if len(loose):
+        k = len(loose)
+        arrays[TOPO_VERTEX_POINT] = np.concatenate([vp, loose.reshape(-1)]).astype(np.int32)
+        arrays[TOPO_PRIM_OFFSETS] = np.concatenate([arrays[TOPO_PRIM_OFFSETS], nl + 2 * np.arange(1, k + 1)]).astype(np.int32)
+        arrays[TOPO_PRIM_CLOSED] = np.r_[np.ones(nf, np.uint8), np.zeros(k, np.uint8)]
+        for key in list(arrays):
+            dom = key.split("/", 1)[0]
+            extra = 2 * k if dom == "vertex" else k if dom == "prim" else 0
+            if extra:
+                a = arrays[key]
+                arrays[key] = np.concatenate([a, np.zeros((extra,) + a.shape[1:], a.dtype)])
+    return arrays, {"points": n, "vertices": nl, "prims": nf, "loose_edges": int(len(loose)), "attributes": names,
+                    "vertex_groups": list(groups), "skipped": skipped}
+
+
+def _loose_edges(me, nl) -> np.ndarray:
+    """(k, 2) point pairs of edges that no face uses."""
+    ne = len(me.edges)
+    if ne == 0:
+        return np.zeros((0, 2), np.int32)
+    ev = np.empty(ne * 2, np.int32)
+    try:
+        me.attributes[".edge_verts"].data.foreach_get("value", ev)
+    except (KeyError, RuntimeError, TypeError):
+        me.edges.foreach_get("vertices", ev)
+    used = np.zeros(ne, bool)
+    if nl:
+        ce = np.empty(nl, np.int32)
+        try:
+            me.attributes[".corner_edge"].data.foreach_get("value", ce)
+        except (KeyError, RuntimeError, TypeError):
+            me.loops.foreach_get("edge_index", ce)
+        used[ce] = True
+    return ev.reshape(-1, 2)[~used]
 
 
 def _vertex_groups(obj, me, n: int, taken: set) -> Dict[str, np.ndarray]:

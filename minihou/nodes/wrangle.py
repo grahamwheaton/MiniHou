@@ -102,8 +102,10 @@ class _Domains:
             s["ptnum"] = col(np.arange(g.npoints))
         elif dom == "prim":
             s["primnum"] = col(np.arange(g.nprims))
+            s["closed"] = col(g.topology.closed_mask())
         else:
             s["vtxnum"] = col(np.arange(g.nvertices))
             s["ptnum"] = col(g.topology.vertex_point)
             s["primnum"] = col(self.prim_of_vertex())
+            s["closed"] = col(g.topology.closed_mask()[self.prim_of_vertex()])
         return s

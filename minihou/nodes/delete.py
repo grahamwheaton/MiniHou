@@ -18,7 +18,8 @@ def point_mask(geo: Geometry, expr: str) -> np.ndarray:
 
 
 def keep_points(geo: Geometry, keep: np.ndarray) -> Geometry:
-    """Keep the points where ``keep`` is True; primitives using any removed point are removed. Compacts everything."""
+    """Keep the points where ``keep`` is True and compact everything. A polygon using a removed point is removed; an
+    open curve loses those points instead and splits into the runs that remain (runs of one point are dropped)."""
     topo = geo.topology
     keep = np.asarray(keep, bool)
     remap = np.cumsum(keep) - 1
@@ -26,19 +27,30 @@ def keep_points(geo: Geometry, keep: np.ndarray) -> Geometry:
     offs = topo.prim_offsets.astype(np.int64)
     sizes = np.diff(offs)
     vert_prim = np.repeat(np.arange(topo.nprims), sizes)
-    # a prim survives if none of its vertices lost its point
+    closed = topo.closed_mask()
+    # polygons survive whole or not at all
     dropped_per_prim = np.bincount(vert_prim, weights=(~vkeep_pt).astype(np.float64), minlength=topo.nprims)
-    pkeep = dropped_per_prim == 0
-    vkeep = pkeep[vert_prim]
+    vkeep = np.where(closed[vert_prim], (dropped_per_prim == 0)[vert_prim], vkeep_pt)
+    # every run of kept vertices is a primitive: a new run starts at a prim's first vertex or after a removed one
+    first = np.zeros(len(vert_prim), bool)
+    first[offs[:-1][sizes > 0]] = True
+    starts_run = vkeep & (first | np.r_[True, ~vkeep[:-1]])
+    run = np.cumsum(starts_run) - 1
+    vrun = run[vkeep]
+    run_size = np.bincount(vrun, minlength=int(starts_run.sum()))
+    run_prim = vert_prim[starts_run]
+    good = np.where(closed[run_prim], run_size > 0, run_size >= 2)
+    vkeep[vkeep] = good[vrun]
     new_vp = remap[topo.vertex_point[vkeep]].astype(np.int32)
-    new_offs = np.concatenate([[0], np.cumsum(sizes[pkeep])]).astype(np.int32)
-    out = Geometry(int(keep.sum()), Topology(new_vp, new_offs))
+    new_offs = np.concatenate([[0], np.cumsum(run_size[good])]).astype(np.int32)
+    src_prim = run_prim[good]
+    out = Geometry(int(keep.sum()), Topology(new_vp, new_offs, None if topo.closed is None else closed[src_prim]))
     for name, a in geo.point.items():
         out.point[name] = a[keep]
     for name, a in geo.vertex.items():
         out.vertex[name] = a[vkeep]
     for name, a in geo.prim.items():
-        out.prim[name] = a[pkeep]
+        out.prim[name] = a[src_prim]
     out.detail = dict(geo.detail)
     return out
 

@@ -10,7 +10,7 @@ import numpy as np
 
 from minihou import Evaluator, Graph
 from minihou.link.client import LinkClient
-from minihou.link.protocol import GeoUpdate, Mirror, TOPO_KEYS
+from minihou.link.protocol import GeoUpdate, Mirror, TOPO_KEYS, TOPO_REQUIRED
 from minihou.link.server import LinkServer
 from minihou.link.session import Session
 from tests.helpers import graph_from
@@ -86,7 +86,7 @@ class LiveLinkTests(unittest.TestCase):
         m, u = self.first_full()
         self.assertTrue(u.full and u.topology_changed)
         self.assertEqual(u.counts, {"point": 400, "vertex": 361 * 4, "prim": 361})
-        self.assertTrue(set(TOPO_KEYS) <= set(u.arrays))
+        self.assertTrue(set(TOPO_REQUIRED) <= set(u.arrays))
         expected = Evaluator().cook(self.h.session.graph)
         np.testing.assert_array_equal(m.P, expected.P)
         np.testing.assert_array_equal(m.vertex_point, expected.topology.vertex_point)
@@ -117,7 +117,7 @@ class LiveLinkTests(unittest.TestCase):
         h, a = wait_for(self.q, "geo")
         u = GeoUpdate.from_message(h, a)
         self.assertTrue(u.topology_changed)
-        self.assertTrue(set(TOPO_KEYS) <= set(u.arrays))
+        self.assertTrue(set(TOPO_REQUIRED) <= set(u.arrays))
         m.apply(u)
         self.assertEqual(m.counts["point"], 200)
         np.testing.assert_array_equal(m.P, Evaluator().cook(self.h.session.graph).P)
@@ -163,7 +163,7 @@ class LiveLinkTests(unittest.TestCase):
         self.client.resync()
         h, a = wait_for(self.q, "geo")
         self.assertTrue(h["full"])
-        self.assertTrue(set(TOPO_KEYS) <= set(a))
+        self.assertTrue(set(TOPO_REQUIRED) <= set(a))
 
     def test_second_client_gets_a_full_update_of_current_state(self):
         self.first_full()

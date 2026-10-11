@@ -149,6 +149,27 @@ contents change. Design points:
   downstream of it. Vertex groups have no bulk API (~0.8 us per point) and are skipped above 250k points.
 * `blender_object` is refused inside systems: its data changes outside the graph, and a system's cache key cannot see it.
 
+## Houdini feature sets (milestone 3)
+
+Worked through in order of how often Houdini users reach for them:
+
+1. **Groups** (`minihou/groups.py`): int attributes `group_<name>`; patterns like Houdini's group field; nodes call
+   `groups.restrict()` to limit their changes. Groups reach Blender as booleans.
+2. **Polygon modelling** (`nodes/model.py`, `nodes/subdivide.py`): vectorised over all primitives; attributes follow
+   one rule set (`nodes/_build.py`: floats blend, ints/groups take a source or the minimum). Tests check invariants
+   (closed shells, signed volume, conserved area), not just counts.
+3. **Attribute toolkit and ray** (`nodes/attrib_tools.py`, `nodes/ray.py`, `minihou/spatial.py`, `minihou/raycast.py`):
+   exact nearest-point and closest-point queries (SciPy's KD-tree when installed, else numpy grids with exact
+   ring-search bounds), 3-D DDA ray walks; all tested against brute force. Numpy closest-point queries cost ~45 us
+   each near a surface; a numba kernel is the next speed-up if needed.
+4. **Curves**: `Topology.closed` (None = all polygons, so existing geometry and digests are unchanged); the link sends
+   `topo/prim_closed` only for geometry with curves; Blender gets loose edges (`PolygonView` filters corner/face
+   attributes to the polygons) and loose edges come back as curves. Deleting points splits curves into runs.
+   Sweep uses double-reflection rotation-minimising frames (Wang et al. 2008).
+
+Next: packed instancing (Blender instances on points instead of copies), for-each loops, time-dependent cooks
+(`$F`) and a solver.
+
 ## Systems (graphs as nodes)
 
 A `*.json` graph in a node folder becomes a node type (`library._system_type`): `input` nodes (sorted by `index`) are its
