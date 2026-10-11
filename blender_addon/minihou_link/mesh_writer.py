@@ -137,6 +137,39 @@ def write_detail(obj, detail: Dict[str, object]) -> List[str]:
     return warnings
 
 
+EXTRA_MARK = "minihou_extra"                 # custom property on objects the add-on created for extra outputs
+
+
+def ensure_extra_object(name: str):
+    """The mesh object for an extra output, created if missing. Returns None when ``name`` belongs to an object the
+    add-on did not create (it never takes over someone's object)."""
+    assert_main_thread()
+    obj = bpy.data.objects.get(name)
+    if obj is not None:
+        return obj if obj.get(EXTRA_MARK) and obj.type == "MESH" else None
+    mesh = bpy.data.meshes.new(name)
+    obj = bpy.data.objects.new(name, mesh)
+    obj[EXTRA_MARK] = True
+    scene = bpy.context.scene
+    (scene.collection if scene is not None else bpy.data.collections[0]).objects.link(obj)
+    return obj
+
+
+def remove_extra_objects(keep) -> List[str]:
+    """Delete extra-output objects the add-on created that the engine no longer publishes. Returns their names."""
+    assert_main_thread()
+    keep = set(keep)
+    gone = [o.name for o in bpy.data.objects if o.get(EXTRA_MARK) and o.name not in keep]
+    for name in gone:
+        obj = bpy.data.objects.get(name)
+        mesh = obj.data if obj is not None and obj.type == "MESH" else None
+        if obj is not None:
+            bpy.data.objects.remove(obj, do_unlink=True)
+        if mesh is not None and mesh.users == 0:
+            bpy.data.meshes.remove(mesh)
+    return gone
+
+
 def _blender_name(engine_name: str) -> str:
     return {"uv": UV_NAME, "Cd": COLOR_NAME, "N": NORMAL_NAME}.get(engine_name, engine_name)
 

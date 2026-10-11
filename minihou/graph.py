@@ -171,13 +171,31 @@ class Graph:
                 out.append(ref)
         return out
 
-    def output_node(self) -> str:
+    def _main_output(self) -> Optional[str]:
         if self.display:
             return self.display
-        for nid, n in self.nodes.items():
-            if n.type == "output":
+        outs = [nid for nid, n in self.nodes.items() if n.type == "output"]
+        for nid in outs:                                    # the main output is one without its own Blender object
+            if not self.nodes[nid].params.get("object"):
                 return nid
-        raise GraphError("graph has no display node and no 'output' node")
+        return outs[0] if outs else None
+
+    def extra_outputs(self) -> Dict[str, str]:
+        """``{object name: node id}`` for ``output`` nodes that publish to their own Blender object (the display node is
+        always the main output, whatever its ``object`` says)."""
+        main = self._main_output()
+        out: Dict[str, str] = {}
+        for nid, n in self.nodes.items():
+            name = str(n.params.get("object") or "").strip()[:63] if n.type == "output" else ""
+            if name and nid != main and name not in out:
+                out[name] = nid
+        return out
+
+    def output_node(self) -> str:
+        main = self._main_output()
+        if main is None:
+            raise GraphError("graph has no display node and no 'output' node")
+        return main
 
     def upstream_order(self, target: str, stop=()) -> List[str]:
         """Node ids needed to cook ``target``, dependencies first, ``target`` last (iterative DFS). Nodes in ``stop`` are

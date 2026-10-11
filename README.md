@@ -40,6 +40,12 @@ modifier whose inputs are the same parameters (also editable, keyable and drivab
 graph JSON in any editor and save: the engine hot-reloads it and only the changed nodes recook. `--editor` also opens the
 **node editor** at <http://127.0.0.1:8766/> (the URL is printed either way).
 
+**More than one result**: the display node is the main output (it flows through `MiniHou_Proxy`). Give any other `output` node an
+`object` name (say `Trees`) and its geometry appears as its own mesh object of that name, updated live; remove the name (or the node)
+and the object goes. The add-on only ever touches objects it made: an existing object of the same name is left alone and logged.
+**Detail attributes** (one value per geometry: counts, measurements, a `for_each` iteration) arrive as `mh_<name>` custom properties
+on `MiniHou_Output` (and on each named output's object), ready for drivers and scripts.
+
 ```powershell
 $env:BLENDER_EXE = "C:\Program Files\Blender Foundation\Blender 5.1\blender.exe"   # if auto-detection misses it
 py tools\launch_blender.py --find
@@ -515,7 +521,8 @@ Not verified:
 
 ## Known limits
 
-* One output mesh and one exposed-parameter set per engine. Detail attributes are not sent to Blender.
+* One exposed-parameter set per engine (the display branch); extra outputs are plain mesh objects without a modifier or exposed
+  parameters. Detail attributes reach Blender as custom properties (numbers, text and short number lists only).
 * Curves reach Blender as loose mesh edges: their point attributes come along, their primitive and vertex attributes
   do not (Blender has no domain for them). No edge-domain attributes (e.g. `sharp_edge`, `crease_edge`), in either
   direction. A `blender_object` reads meshes (and what Blender can convert to one, e.g. text and curves with geometry).

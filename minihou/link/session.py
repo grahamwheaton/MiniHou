@@ -23,7 +23,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -68,6 +68,7 @@ class Result:
     cook: Dict[str, Any] = field(default_factory=dict)
     error: Optional[Dict[str, Any]] = None       # {"node": id-or-None, "message": str}
     rev: int = 0                                  # graph revision this result was cooked from
+    extras: Dict[str, Tuple[Geometry, str]] = field(default_factory=dict)   # extra outputs: object name -> (geometry, key)
 
 
 def _merge_key(ops: List[dict]) -> Optional[tuple]:
@@ -97,6 +98,7 @@ class Session:
         self._seq = 0
         self._last_key = None
         self._last_error_msg = None
+        self._extra_errors: Dict[str, str] = {}
         self._wake = threading.Event()
         self._idle = threading.Condition()
         self._stop = threading.Event()
@@ -306,6 +308,16 @@ class Session:
             except Exception:  # noqa: BLE001 - a bad listener must not stop the cook thread
                 log.exception("listener failed")
 
+    def _extra_error(self, name: str, message: str) -> None:
+        """An extra output failed to cook: say so once, keep the main result flowing."""
+        if self._extra_errors.get(name) != message:
+            self._extra_errors[name] = message
+            log.warning("output %r failed: %s", name, message)
+            for l in list(self._listeners):
+                fn = getattr(l, "on_extra_error", None)
+                if fn:
+                    fn(name, message)
+
     def _report_error(self, node: Optional[str], message: str, rev: int = 0) -> None:
         if message == self._last_error_msg:
             return                                           # same failure again: don't spam clients
@@ -322,16 +334,27 @@ class Session:
         t0 = time.perf_counter()
         published: Optional[Result] = None
         try:
+            extras: Dict[str, Tuple[Geometry, str]] = {}
             with self._cook_lock, timectx.at(frame, fps):
                 geo = self.evaluator.cook(snapshot)
                 stats = self.evaluator.last_stats
-                self.evaluator.cache.retain(self.evaluator.live_keys(snapshot))
-            if stats.key != self._last_key or self._last_error_msg is not None:
+                live = self.evaluator.live_keys(snapshot)
+                for name, nid in snapshot.extra_outputs().items():     # more outputs: each its own Blender object
+                    try:
+                        eg = self.evaluator.cook(snapshot, nid)
+                    except (NodeError, GraphError, ParamError) as e:
+                        self._extra_error(name, f"{nid}: {e}")
+                        continue
+                    extras[name] = (eg, self.evaluator.last_stats.key)
+                    live += self.evaluator.live_keys(snapshot, nid)
+                self.evaluator.cache.retain(live)
+            overall = stats.key + "".join(f"|{n}:{k}" for n, (_, k) in sorted(extras.items()))
+            if overall != self._last_key or self._last_error_msg is not None:
                 d = stats.to_dict()
                 cook = {"ms": round((time.perf_counter() - t0) * 1000, 3), "cooked": d["cooked"],
                         "cached": d["cached"], "node_ms": d["node_ms"]}
-                published = Result(0, geo, stats.key, cook, rev=rev)
-                self._last_key, self._last_error_msg = stats.key, None
+                published = Result(0, geo, stats.key, cook, rev=rev, extras=extras)
+                self._last_key, self._last_error_msg = overall, None
                 self._publish(published)
             elif self.latest_good is not None:
                 self.latest_good.rev = rev                   # same geometry, newer graph (e.g. a node was moved)

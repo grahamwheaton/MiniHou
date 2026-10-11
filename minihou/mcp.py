@@ -62,7 +62,8 @@ Each op is an object with "op":
   connect    {"op":"connect","from":src,"to":dst,"port"?:name,"index"?:int}  (port defaults to the first free input)
   disconnect {"op":"disconnect","to":dst,"port"?:name,"from"?:src}
   set        {"op":"set","id":id,"params":{name:value}}  (null resets to default; vec3 = [x,y,z])
-  display    {"op":"display","id":id}  (what Blender shows; usually an "output" node)
+  display    {"op":"display","id":id}  (what Blender shows; usually an "output" node). More results: set an extra "output" node's
+             "object" param (e.g. "Trees") and it appears as its own Blender object, live
   expose     {"op":"expose","id":id,"param":name,"name"?:"Label in Blender"}  (float/int/bool/vec3 only)
   unexpose   {"op":"unexpose","name":label} or {"op":"unexpose","id":id,"param":name}
   move       {"op":"move","id":id,"pos":[x,y]} or {"op":"move","positions":{id:[x,y]}}  (layout is automatic if omitted)

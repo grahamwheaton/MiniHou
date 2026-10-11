@@ -223,6 +223,36 @@ class AddonIntegrationTests(unittest.TestCase):
             if isinstance(detail[name], (int, float)):
                 self.assertAlmostEqual(float(out["mh_" + name]), float(detail[name]), places=4)
 
+    def test_named_outputs_become_their_own_objects_and_clean_up(self):
+        graph = {"version": 1, "nodes": {
+            "g": {"type": "grid", "params": {"columns": 5, "rows": 5}},
+            "b": {"type": "box"},
+            "t": {"type": "tube"},
+            "main": {"type": "output", "inputs": {"geo": "g"}},
+            "trees": {"type": "output", "params": {"object": "Trees"}, "inputs": {"geo": "b"}},
+            "rocks": {"type": "output", "params": {"object": "Rocks"}, "inputs": {"geo": "t"}}}, "display": "main"}
+        user_mesh = bpy.data.meshes.new("Mine")
+        user_obj = bpy.data.objects.new("Rocks", user_mesh)          # not ours: must never be taken over
+        bpy.context.scene.collection.objects.link(user_obj)
+        self.graph_path.write_text(json.dumps(graph), encoding="utf-8")
+        self.pump(lambda: bpy.data.objects.get("Trees") is not None and len(bpy.data.objects["Trees"].data.vertices) == 8,
+                  timeout=60)
+        trees = bpy.data.objects["Trees"]
+        self.assertTrue(trees.get("minihou_extra"))
+        self.assertEqual(len(trees.data.polygons), 6)
+        self.assertIn(trees.name, [o.name for o in bpy.context.scene.collection.objects])
+        self.assertEqual(len(user_obj.data.vertices), 0)             # the user's own "Rocks" object stays untouched
+        self.assertFalse(user_obj.get("minihou_extra"))
+        # edits to the extra output's branch update its mesh in place
+        graph["nodes"]["b"]["params"] = {"size": [4, 4, 4]}
+        self.graph_path.write_text(json.dumps(graph), encoding="utf-8")
+        self.pump(lambda: max(v.co.x for v in bpy.data.objects["Trees"].data.vertices) > 1.9, timeout=60)
+        # dropping the object name removes the object the add-on made
+        graph["nodes"]["trees"]["params"] = {}
+        self.graph_path.write_text(json.dumps(graph), encoding="utf-8")
+        self.pump(lambda: bpy.data.objects.get("Trees") is None, timeout=60)
+        self.assertIsNotNone(bpy.data.objects.get("Rocks"))          # the user's object is never deleted
+
     def test_instance_points_place_blender_objects(self):
         for name, size in (("Tree", 0.2), ("Rock", 0.1)):
             me = bpy.data.meshes.new(name)
@@ -797,6 +827,21 @@ class MeshWriterTests(unittest.TestCase):
         self.assertEqual(list(obj[self.w.DETAIL_KEYS]), ["mh_x"])
         self.w.write_detail(obj, {"a" * 70: 1})                      # custom property names are limited to 63 bytes
         self.assertNotIn("mh_" + "a" * 70, obj.keys())
+
+    def test_extra_output_objects_are_created_marked_and_removed(self):
+        a = self.w.ensure_extra_object("Extra")
+        self.assertTrue(a.get(self.w.EXTRA_MARK))
+        self.assertIs(self.w.ensure_extra_object("Extra"), a)           # idempotent
+        mine = bpy.data.objects.new("Mine", bpy.data.meshes.new("MineMesh"))
+        bpy.context.scene.collection.objects.link(mine)
+        self.assertIsNone(self.w.ensure_extra_object("Mine"))            # someone else's object: not ours
+        self.w.ensure_extra_object("Other")
+        self.assertEqual(self.w.remove_extra_objects(["Other"]), ["Extra"])
+        self.assertIsNone(bpy.data.objects.get("Extra"))
+        self.assertIsNotNone(bpy.data.objects.get("Other"))
+        self.assertIsNotNone(bpy.data.objects.get("Mine"))
+        self.assertEqual(self.w.remove_extra_objects([]), ["Other"])
+        self.assertEqual([m.name for m in bpy.data.meshes if m.name in ("Extra", "Other")], [])    # no orphan meshes
 
     def test_curves_become_loose_edges(self):
         from minihou import Geometry
