@@ -1,6 +1,6 @@
 import numpy as np
 
-from .. import accel
+from .. import accel, groups
 from ..sdk import Enum, Float, Int, Str, Vec3, node
 from ._util import fbm3
 
@@ -35,8 +35,9 @@ def _noise_fused(geo, attrib, mode, amplitude, frequency, offset, octaves, lacun
     Float("lacunarity", 2.0, min=1.0, soft_max=4.0),
     Float("gain", 0.5, min=0.0, max=1.0),
     Int("seed", 0),
+    Str("group", "", doc="Only change these points: group names, ^exclusions, numbers/ranges or '@P.z > 0'. Empty: all"),
 ])
-def noise(geo, attrib, mode, amplitude, frequency, offset, octaves, lacunarity, gain, seed):
+def noise(geo, attrib, mode, amplitude, frequency, offset, octaves, lacunarity, gain, seed, group=""):
     """Fractal Perlin noise sampled at P * frequency + offset.
 
     Output range is roughly [-1, 1] before 'amplitude'. For ``attrib == "P"`` the result is
@@ -47,7 +48,7 @@ def noise(geo, attrib, mode, amplitude, frequency, offset, octaves, lacunarity, 
         raise ValueError("'attrib' must not be empty")
     fused = _noise_fused(geo, attrib, mode, amplitude, frequency, offset, octaves, lacunarity, gain, seed)
     if fused is not None:
-        return fused
+        return groups.restrict(geo, fused, "point", group)
     pos = geo.P * np.float32(frequency) + np.asarray(offset, np.float32)
     amp = np.asarray(amplitude, np.float32)
     if mode == "scalar":
@@ -65,4 +66,4 @@ def noise(geo, attrib, mode, amplitude, frequency, offset, octaves, lacunarity, 
         out.point[attrib] = scalar
     else:
         out.point[attrib] = vec
-    return out
+    return groups.restrict(geo, out, "point", group)

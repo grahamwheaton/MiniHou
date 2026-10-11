@@ -107,8 +107,11 @@ All examples are cooked by the test-suite, so they keep working as nodes evolve.
 | `box` | - | closed box, optional divisions (welded seams) |
 | `sphere` | - | UV sphere (triangle-fan poles), closed and outward-facing |
 | `circle` | - | one filled n-gon |
-| `transform` | geo | scale / rotate (Euler XYZ) / translate about a pivot; rotates `N` |
-| `noise` | geo | fractal Perlin noise; displaces `P` or writes any attribute (scalar or vector mode) |
+| `transform` | geo | scale / rotate (Euler XYZ) / translate about a pivot; rotates `N`; optional group |
+| `noise` | geo | fractal Perlin noise; displaces `P` or writes any attribute (scalar or vector mode); optional group |
+| `group_create` | geo | a named point or primitive group: pattern/expression, bounding box, normal direction, random %, boundary |
+| `group_promote` | geo | convert groups between points and primitives |
+| `blast` | geo | delete a group of primitives or points (or keep only it) |
 | `wrangle` | geo | VEX-like snippet over points, primitives or vertices (see below) |
 | `attribute_delete` | geo | delete attributes by name or wildcard (`N uv tmp_*`) |
 | `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |
@@ -119,6 +122,24 @@ All examples are cooked by the test-suite, so they keep working as nodes evolve.
 | `fuse` | geo | weld points closer than a distance |
 | `merge` | geos (any number) | concatenate; missing attributes are zero-filled |
 | `output` | geo | marks what the live link publishes (validated) |
+
+### Groups
+
+As in Houdini, a group is a named selection of points or primitives, stored as the int attribute `group_<name>` (1 =
+member): a wrangle reads `@group_top` and makes one with `i@group_tall = @P.z > 2`, groups survive every node that carries
+attributes, and Blender gets each as a boolean attribute (use it with *Named Attribute* in Geometry Nodes). Nodes with a
+**group** field (`wrangle`, `transform`, `noise`, `blast`, `group_create`) take a pattern:
+
+| pattern | selects |
+|---|---|
+| `top side`, `rock_*` | union of groups (wildcards) |
+| `top ^side`, `^side` | remove a group (a leading `^` starts from everything) |
+| `0-9 20 30-60:2` | element numbers, ranges, steps |
+| `@P.z > 0` | an ad-hoc group: a wrangle expression |
+| (empty) | everything |
+
+A point group used on primitives selects those whose points are all in it; a primitive group used on points selects
+the points its primitives use.
 
 ### Wrangle snippets (the attribute wrangle)
 

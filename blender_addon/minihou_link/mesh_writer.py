@@ -25,6 +25,9 @@ NATIVE = {
 }
 
 
+GROUP_PREFIX = "group_"
+
+
 def assert_main_thread() -> None:
     if threading.current_thread() is not threading.main_thread():
         raise RuntimeError("bpy must only be used on Blender's main thread")
@@ -84,6 +87,8 @@ def _blender_name(engine_name: str) -> str:
 
 def write_attribute(mesh, domain: str, name: str, arr: np.ndarray) -> bool:
     """Create/replace one generic attribute and fill it. Returns False if it cannot be represented."""
+    if name.startswith(GROUP_PREFIX) and arr.ndim == 1 and arr.dtype.kind in "iub":
+        arr = arr != 0                                    # engine groups (group_<name> ints) become Blender booleans
     spec = attribute_spec(arr)
     if spec is None or name.startswith(".") or name == "position":
         return False

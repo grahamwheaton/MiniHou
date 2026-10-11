@@ -1,6 +1,7 @@
 import numpy as np
 
-from ..sdk import Float, Vec3, node
+from .. import groups
+from ..sdk import Float, Str, Vec3, node
 from ._util import euler_xyz_matrix, normalize_rows
 
 
@@ -10,8 +11,10 @@ from ._util import euler_xyz_matrix, normalize_rows
     Vec3("scale", (1.0, 1.0, 1.0)),
     Float("uniform_scale", 1.0, doc="Multiplies scale"),
     Vec3("pivot", (0.0, 0.0, 0.0)),
+    Str("group", "", doc="Only move these points: group names, ^exclusions, numbers/ranges or '@P.z > 0' (a primitive "
+                         "group moves its points). Empty: all"),
 ])
-def transform(geo, translate, rotate, scale, uniform_scale, pivot):
+def transform(geo, translate, rotate, scale, uniform_scale, pivot, group=""):
     """Scale, then rotate, then translate about ``pivot``. Also rotates ``N`` if present."""
     s = np.asarray(scale, np.float64) * uniform_scale
     R = euler_xyz_matrix(rotate)
@@ -23,4 +26,4 @@ def transform(geo, translate, rotate, scale, uniform_scale, pivot):
     if "N" in geo.point:
         s_safe = np.where(np.abs(s) < 1e-12, 1.0, s)
         out.point["N"] = normalize_rows((geo.point["N"] / s_safe.astype(np.float32)) @ R.T.astype(np.float32))
-    return out
+    return groups.restrict(geo, out, "point", group)

@@ -20,6 +20,8 @@ Language
   ``@numvtx``.
 * Names that Blender treats natively: ``@uv`` (UV map), ``@Cd`` (color attribute), ``@N`` (normals),
   ``@material_index``, ``@sharp_face`` (flat shading).
+* Groups are ints named ``group_<name>``, as in VEX: ``@group_top`` reads one (1 or 0), ``i@group_tall = @P.z > 2`` makes one.
+  The node's ``group`` field limits which elements change (a pattern: ``top ^side``, ``0-9``, ``@P.z > 0``).
 * Operators: ``+ - * / // % **``, comparisons, ``and or not``, ``a if cond else b``; assignment and ``+= -= *= /=``.
 * Functions: see :data:`FUNCTIONS` (``sin``, ``fit``, ``clamp``, ``length``, ``normalize``, ``dot``, ``cross``, ``noise``, ``rand`` ...).
 * A float times a vector works (per-point scalars are kept as ``(n, 1)`` columns internally).

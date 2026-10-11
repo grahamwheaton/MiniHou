@@ -2,7 +2,7 @@ import numpy as np
 
 from ..geometry import Geometry, Topology
 from ..sdk import Bool, Str, node
-from ..wrangle import WrangleError, compile_snippet
+from ..wrangle import WrangleError
 
 _FLAG = "__minihou_delete"
 
@@ -13,9 +13,8 @@ def point_mask(geo: Geometry, expr: str) -> np.ndarray:
         return np.zeros(geo.npoints, bool)
     if ";" in expr or "\n" in expr:
         raise WrangleError("the delete expression must be a single expression, e.g. @P.z < 0")
-    prog = compile_snippet(f"i@{_FLAG} = 1 if ({expr}) else 0")
-    attrs = {name: arr for name, arr in geo.point.items()}
-    return prog.run(attrs, geo.npoints)[_FLAG].astype(bool)
+    from .wrangle import run_snippet
+    return run_snippet(geo, f"i@{_FLAG} = 1 if ({expr}) else 0", "point")[_FLAG].astype(bool)
 
 
 def keep_points(geo: Geometry, keep: np.ndarray) -> Geometry:

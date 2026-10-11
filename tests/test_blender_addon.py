@@ -677,6 +677,18 @@ class MeshWriterTests(unittest.TestCase):
         self.assertNotIn("Cd", m.attributes)
         self.assertNotIn("N", m.attributes)
 
+    def test_groups_become_boolean_attributes(self):
+        from minihou.link.diff import DiffState
+        g = self.native_geo().copy()
+        g.point["group_top"] = np.array([0, 0, 1, 1, 0, 1], np.int32)
+        g.prim["group_left"] = np.array([1, 0], np.int32)
+        self.apply(g.freeze(), DiffState())
+        a = self.mesh.attributes["group_top"]
+        self.assertEqual((a.domain, a.data_type), ("POINT", "BOOLEAN"))
+        self.assertEqual([d.value for d in a.data], [False, False, True, True, False, True])
+        f = self.mesh.attributes["group_left"]
+        self.assertEqual((f.domain, f.data_type, [d.value for d in f.data]), ("FACE", "BOOLEAN", [True, False]))
+
     def test_native_attributes_from_other_domains_and_removal(self):
         from minihou.link.diff import DiffState
         d = DiffState()
