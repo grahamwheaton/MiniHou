@@ -183,3 +183,6 @@ table.attrs td { font: var(--mono); font-size: 11px; }
 .pv-actions button { padding: 2px 10px; }
 .pv-marquee { position: absolute; border: 1px dashed #ffb04d; background: #ffb04d22; pointer-events: none; }
 #preview { flex: 0 0 auto; overflow: visible; }
+.pv-handles { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+.pv-handles .pv-grab { pointer-events: all; }
+.pv-handles .pv-handle:hover line { stroke-width: 4; }

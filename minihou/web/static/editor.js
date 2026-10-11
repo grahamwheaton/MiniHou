@@ -602,6 +602,7 @@
     const empty = !head.points;
     pvMsg(empty ? "No geometry" : head.truncated ? "Showing part of a very large geometry." : "");
     pv.set(head, arrays, pvNode === node && pvPath === S.path);
+    pv.setHandles(head.handles || []);
     pvNode = node; pvPath = S.path;
   }
 
@@ -653,6 +654,26 @@
   }
   function wireSelectionTools() {
     pv.onSelect = renderSelectionTools;
+    // viewport handles: arrows in the view that scrub a parameter of the viewed node
+    const handleValue = (h) => {
+      const n = nodeOf(pvNode);
+      if (!n) return NaN;
+      const spec = (typeOf(pvNode).params || []).find((p) => p.name === h.param);
+      const v = n.params && n.params[h.param] !== undefined ? n.params[h.param] : spec ? spec.default : undefined;
+      return h.comp === null || h.comp === undefined ? Number(v) : Number(Array.isArray(v) ? v[h.comp] : NaN);
+    };
+    let handleBase = null;
+    pv.onHandleStart = (h) => {
+      const n = nodeOf(pvNode), spec = (typeOf(pvNode).params || []).find((p) => p.name === h.param);
+      const cur = n && n.params && n.params[h.param] !== undefined ? n.params[h.param] : spec ? spec.default : undefined;
+      handleBase = Array.isArray(cur) ? cur.slice() : null;               // the other components of a vector stay as they were
+      return handleValue(h);
+    };
+    pv.onHandle = (h, value) => {
+      if (!pvNode) return;
+      if (h.comp === null || h.comp === undefined) queueSet(pvNode, h.param, value);
+      else if (handleBase) { const v = handleBase.slice(); v[h.comp] = value; queueSet(pvNode, h.param, v); }
+    };
     document.querySelectorAll("#preview [data-mode]").forEach((b) => { b.onclick = () => pv.setMode(b.dataset.mode); });
     let over = false;
     $("#pv-canvas").addEventListener("pointerenter", () => { over = true; });

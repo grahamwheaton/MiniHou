@@ -132,11 +132,15 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
 6. **Selection tools in the 3-D view**: `POST /api/preview` sends `tri_prim` (the primitive of each triangle); the viewer picks
    points, edges and faces on the CPU (nearest projected element with a ray test for visibility, box select, thick edge overlay) and the
    editor turns a selection into a node through the new `insert` op (new node fed by `after`, taking over its readers). `polybevel` got
-   an `edges` selection (point pairs) and a check that a bevel does not end inside a surface.
+   an `edges` selection (point pairs) and a check that a bevel does not end inside a surface. **Handles**: `minihou/handles.py` providers
+   per node type (transform, polyextrude, polybevel, box, sphere) return arrows (origin, direction, parameter, scale, limits) with the
+   preview; the viewer draws them as an SVG overlay and a drag becomes a `set` edit (vector parameters keep their other components).
 
 Open:
 
 - Extra outputs have no modifier or exposed parameters (only the display branch does).
+- More handles (rotate and scale rings on transform, bevel segments, copy_to_points scale); handle providers for library nodes.
+- Edge selections are point pairs, so they only stay valid while the geometry upstream keeps its point numbering (as in Houdini).
 
 Not scheduled:
 

@@ -75,6 +75,8 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
 
 ![The editor with the 3-D preview and a network box](docs/images/editor_preview.png)
 
+![A bevel made from an edge selection, with its distance arrow in the 3-D view](docs/images/editor_gizmo.png)
+
 * **3-D preview** (top right): a WebGL2 view of the selected node, or the display node when nothing is selected, so the engine is
   usable without Blender. Drag to orbit (Z is up), **Shift**-drag or right-drag to pan, wheel to zoom, double-click to frame.
   Shaded / edges / points toggles; point colours (`Cd`) are shown; back faces are tinted orange so flipped normals stand out.
@@ -87,6 +89,11 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
   an `edges` list of point pairs; a bevel cannot end in the middle of a surface, so select a loop or edges that meet or reach a border),
   *Extrude*, *Inset*, *Reverse*, *Group*, *Delete* for faces, *Group* and *Delete* for points. The same `insert` edit op is available to AI
   tools (`{"op": "insert", "after": "id", "type": "polybevel"}`).
+* **Handles (gizmos)**: the node you are looking at can show draggable arrows in the 3-D view: grab an arrow head and drag, and the parameter
+  follows live (everything recooks, Blender included). `transform` has three move arrows, `polyextrude` and `polybevel` a distance arrow
+  standing on the selected faces or edges (so the bevel you just made from a selection can be scrubbed straight away), `box` a size
+  arrow per axis and `sphere` a radius arrow. Handles are small provider functions in `minihou/handles.py` (inputs, output, parameters ->
+  arrows); a failing provider just shows none.
 * **Attribute flow**: the inspector lists what the selected node did to its inputs' attributes (`+` added, `~` changed, `→` moved to
   another domain, `−` removed, and whether topology changed); a wrangle also lists the attributes its snippet reads. It is worked out
   by comparing cooked results, so it is right for built-in, library and system nodes alike (also in `inspect_node` for AI tools, as `flow`).

@@ -363,8 +363,76 @@ window.MiniHouPreview = (() => {
       }
       drawSelection(cam);
       gl.bindVertexArray(null);
+      renderHandles(cam);
     }
     function schedule() { if (!raf) raf = requestAnimationFrame(draw); }
+
+    // ---------------------------------------------------------------- handles (gizmos): draggable arrows for node parameters
+    const SVGNS = "http://www.w3.org/2000/svg";
+    const hsvg = document.createElementNS(SVGNS, "svg");
+    hsvg.setAttribute("class", "pv-handles");
+    canvas.parentElement.append(hsvg);
+    let handles = [], pendingHandles = null, handleDrag = null;
+    const AXIS_COLOUR = { 0: "#ff5d5d", 1: "#4cc38a", 2: "#4aa3ff" };
+    const svg = (tag, attrs) => { const el = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); return el; };
+    function handleGeometry(cam, h) {                                // {s0, tip, u, ppu} in canvas pixels, or null when unusable
+      const o = h.origin, s0 = toScreen(cam, o[0], o[1], o[2]);
+      const s1 = toScreen(cam, o[0] + h.dir[0], o[1] + h.dir[1], o[2] + h.dir[2]);
+      if (!s0 || !s1) return null;
+      const dx = s1[0] - s0[0], dy = s1[1] - s0[1], ppu = Math.hypot(dx, dy);
+      if (ppu < 1e-3) return null;                                  // pointing straight into the screen
+      const u = [dx / ppu, dy / ppu];
+      return { s0, tip: [s0[0] + u[0] * 64, s0[1] + u[1] * 64], u, ppu };
+    }
+    function renderHandles(cam) {
+      hsvg.setAttribute("width", cam.w); hsvg.setAttribute("height", cam.h);
+      const kids = [];
+      for (const h of handles) {
+        const g = handleGeometry(cam, h);
+        if (!g) continue;
+        const col = AXIS_COLOUR[h.comp] || "#ffb04d";
+        const grp = svg("g", { class: "pv-handle", "data-id": h.id });
+        const [x0, y0] = g.s0, [x1, y1] = g.tip, nx = -g.u[1], ny = g.u[0];
+        // only the arrow head is grabbable, so a click on the surface under the shaft or the root still selects/orbits
+        grp.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: col, "stroke-width": 3, "stroke-linecap": "round", "pointer-events": "none" }),
+          svg("circle", { cx: x0, cy: y0, r: 4, fill: col, stroke: "#0008", "pointer-events": "none" }),
+          svg("polygon", { points: `${x1 + g.u[0] * 12},${y1 + g.u[1] * 12} ${x1 + nx * 6},${y1 + ny * 6} ${x1 - nx * 6},${y1 - ny * 6}`, fill: col,
+            style: "cursor: ew-resize", class: "pv-grab" }),
+          svg("circle", { class: "pv-grab", cx: x1 + g.u[0] * 4, cy: y1 + g.u[1] * 4, r: 14, fill: "transparent", style: "cursor: ew-resize" }));
+        const tip = svg("title", {});
+        tip.textContent = h.label + " (drag)";
+        grp.append(tip);
+        for (const el of grp.querySelectorAll(".pv-grab")) el.addEventListener("pointerdown", (e) => startHandleDrag(e, h));
+        kids.push(grp);
+      }
+      hsvg.replaceChildren(...kids);
+    }
+    function startHandleDrag(e, h) {
+      e.preventDefault(); e.stopPropagation();
+      const cam = camera(), g = handleGeometry(cam, h);
+      if (!g || !api.onHandleStart) return;
+      const base = api.onHandleStart(h);
+      if (typeof base !== "number" || !Number.isFinite(base)) return;
+      const r = canvas.getBoundingClientRect();
+      handleDrag = { h, base, ppu: g.ppu, u: g.u, x0: e.clientX - r.left, y0: e.clientY - r.top, value: base };
+      const move = (ev) => {
+        const x = ev.clientX - r.left, y = ev.clientY - r.top;
+        const world = ((x - handleDrag.x0) * handleDrag.u[0] + (y - handleDrag.y0) * handleDrag.u[1]) / handleDrag.ppu;
+        let v = handleDrag.base + world * h.scale;
+        if (h.min !== undefined) v = Math.max(h.min, v);
+        if (h.max !== undefined) v = Math.min(h.max, v);
+        v = Math.round(v * 1e5) / 1e5;
+        if (v !== handleDrag.value) { handleDrag.value = v; if (api.onHandle) api.onHandle(h, v, false); }
+      };
+      const up = () => {
+        window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+        const d = handleDrag; handleDrag = null;
+        if (api.onHandle) api.onHandle(d.h, d.value, true);
+        if (pendingHandles) { handles = pendingHandles; pendingHandles = null; }
+        schedule();
+      };
+      window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    }
 
     // ---------------------------------------------------------------- mouse: orbit / pan / select
     const marquee = document.createElement("div");
@@ -421,14 +489,22 @@ window.MiniHouPreview = (() => {
     if (window.ResizeObserver) new ResizeObserver(schedule).observe(canvas);
 
     Object.assign(api, {
-      view, opt, onSelect: null,
+      view, opt, onSelect: null, onHandle: null, onHandleStart: null,
+      setHandles(list) { if (handleDrag) pendingHandles = list || []; else { handles = list || []; schedule(); } },
+      handleTips() {                                                                    // for tests: where each arrow's tip is, in canvas pixels
+        const cam = camera();
+        return handles.map((h) => ({ id: h.id, comp: h.comp, param: h.param, g: handleGeometry(cam, h) })).filter((x) => x.g)
+          .map((x) => ({ id: x.id, comp: x.comp, param: x.param, tip: x.g.tip, ppu: x.g.ppu, u: x.g.u }));
+      },
       set(head, arrays, keepCamera) {
+        const same = keepCamera && data.npoints === arrays.P.length / 3 && data.ntris === arrays.tri.length / 3 &&
+          data.nedges === arrays.edge.length / 2;                                       // same node, same topology: indices still mean the same
         upload(head, arrays);
         if (!keepCamera) frameAll(); else schedule();
-        if (sel.point.size || sel.edge.size || sel.face.size) change({}, "replace");        // the geometry changed: drop the selection
+        if (!same && (sel.point.size || sel.edge.size || sel.face.size)) change({}, "replace");   // other geometry: drop the selection
         else rebuildOverlay();
       },
-      clear() { data.npoints = 0; raw = null; Object.assign(api, { tris: 0, edges: 0, points: 0 }); change({}, "replace"); schedule(); },
+      clear() { handles = []; data.npoints = 0; raw = null; Object.assign(api, { tris: 0, edges: 0, points: 0 }); change({}, "replace"); schedule(); },
       frameAll, redraw: schedule,
       setMode(m) {
         if (!["view", "point", "edge", "face"].includes(m)) return;

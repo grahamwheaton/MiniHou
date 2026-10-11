@@ -322,6 +322,23 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: self.s.status()["ok"], 5))
         self.page.wait_for_function("window.minihou.preview.tris > 12")                      # the bevelled box is shown
 
+    def test_bevel_from_a_selection_then_scrub_its_distance_with_the_arrow(self):
+        self.box_scene()
+        self.page.click('#preview [data-mode="edge"]')
+        for n, e in enumerate(self.top_edges):
+            self.page.keyboard.down("Shift") if n else None
+            self.page.mouse.click(*self.view_xy("edge", list(e)))
+            self.page.keyboard.up("Shift") if n else None
+        self.page.click('#pv-actions button[data-action="Bevel"]')
+        self.assertTrue(until(lambda: "polybevel1" in self.s.graph.nodes))
+        self.page.wait_for_function("minihou.preview.handleTips().some(t => t.id === 'distance')")   # the new node has its arrow
+        tip = self.drag_handle("distance", 30)
+        self.assertTrue(until(lambda: self.s.graph.nodes["polybevel1"].params.get("distance", 0.1) != 0.1))
+        d = self.s.graph.nodes["polybevel1"].params["distance"]
+        self.assertAlmostEqual(d, 0.1 + 30 / tip["ppu"], delta=0.1)
+        self.assertGreaterEqual(d, 0.0)
+        self.assertTrue(until(lambda: self.s.status()["ok"], 5))
+
     def test_a_lone_edge_cannot_be_bevelled_and_the_error_says_why(self):
         self.box_scene()
         self.page.click('#preview [data-mode="edge"]')
@@ -390,6 +407,62 @@ class EditorE2E(unittest.TestCase):
         self.page.keyboard.up("Alt")
         self.assertNotEqual(self.page.evaluate("minihou.preview.view.yaw"), before)
         self.assertEqual(self.selection()["faces"], [])                                       # an orbit selects nothing
+
+    def handle_scene(self, node_type, params, select):
+        if not self.page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+            self.skipTest("this Chromium has no WebGL2")
+        graph = {"version": 1, "nodes": {"b": {"type": "box", "params": {"size": [2, 2, 2]}, "pos": [0, 0]},
+                                         "h": {"type": node_type, "inputs": {"geo": "b"}, "params": params, "pos": [0, 110]},
+                                         "o": {"type": "output", "inputs": {"geo": "h"}, "pos": [0, 220]}}, "display": "o"}
+        self.s.edit([{"op": "replace", "graph": graph}])
+        self.page.wait_for_selector('.node[data-id="h"]')
+        self.node(select).locator(".title").click()
+        self.page.wait_for_function("minihou.preview.handleTips().length > 0")
+
+    def drag_handle(self, hid, pixels):
+        tip = next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == hid)
+        box = self.page.locator("#pv-canvas").bounding_box()
+        x, y = box["x"] + tip["tip"][0], box["y"] + tip["tip"][1]
+        self.page.mouse.move(x, y)
+        self.page.mouse.down()
+        self.page.mouse.move(x + tip["u"][0] * pixels, y + tip["u"][1] * pixels, steps=8)
+        self.page.mouse.up()
+        return tip
+
+    def test_dragging_a_transform_arrow_moves_the_node_and_keeps_the_other_components(self):
+        self.handle_scene("transform", {"translate": [0.5, 1.0, 2.0]}, "h")
+        self.assertEqual(sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()")),
+                         ["translate_x", "translate_y", "translate_z"])
+        tip = self.drag_handle("translate_x", 60)
+        self.assertTrue(until(lambda: self.s.graph.nodes["h"].params.get("translate", [0, 0, 0])[0] > 0.6))
+        t = self.s.graph.nodes["h"].params["translate"]
+        self.assertAlmostEqual(t[0], 0.5 + 60 / tip["ppu"], delta=0.15)                    # 60 px along the arrow, in world units
+        self.assertEqual((t[1], t[2]), (1.0, 2.0))                                          # the other components are untouched
+        self.assertTrue(until(lambda: self.s.status()["ok"]))
+        self.page.wait_for_function("minihou.preview.handleTips().length === 3")             # the arrows follow the moved result
+
+    def test_dragging_an_extrude_arrow_clamps_and_works_for_plain_numbers(self):
+        from minihou import Evaluator
+        graph = Evaluator().cook(self.s.graph) if False else None
+        self.handle_scene("polyextrude", {"group": "0", "distance": 0.2}, "h")
+        tip = self.drag_handle("distance", 50)
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes["h"].params.get("distance", 0.2) - 0.2) > 0.05))
+        d = self.s.graph.nodes["h"].params["distance"]
+        self.assertAlmostEqual(abs(d - 0.2), 50 / tip["ppu"], delta=0.2)
+        self.assertIsInstance(d, float)
+
+    def test_sphere_radius_arrow_clamps_at_zero(self):
+        graph = {"version": 1, "nodes": {"s": {"type": "sphere", "params": {"radius": 0.5}}, "o": {"type": "output", "inputs": {"geo": "s"}}},
+                 "display": "o"}
+        if not self.page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+            self.skipTest("this Chromium has no WebGL2")
+        self.s.edit([{"op": "replace", "graph": graph}])
+        self.page.wait_for_selector('.node[data-id="s"]')
+        self.node("s").locator(".title").click()
+        self.page.wait_for_function("minihou.preview.handleTips().length === 1")
+        self.drag_handle("radius", -400)                                                    # far inwards: the radius cannot go negative
+        self.assertTrue(until(lambda: self.s.graph.nodes["s"].params.get("radius", 0.5) < 0.5))
+        self.assertGreaterEqual(self.s.graph.nodes["s"].params["radius"], 0.0)
 
     def test_frame_slider_scrubs_and_follows_the_frame(self):
         self.page.fill("#frame-slider", "40")                         # fires input events like a drag

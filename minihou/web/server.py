@@ -368,7 +368,7 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": False, "node": node, "rev": r["rev"], "error": r["error"]})
             from .. import preview
             head, arrays = preview.arrays_for(r["geo"])
-            head.update(node=node, rev=r["rev"])
+            head.update(node=node, rev=r["rev"], handles=r.get("handles", []))
             return self._send(200, preview.pack(head, arrays), "application/octet-stream")
         if path == "/api/open":
             p = app.resolve(body.get("path"))

@@ -35,6 +35,7 @@ from .. import timectx
 from ..inputs import INPUTS
 from ..sdk import ParamError, Registry
 from ..flow import attribute_flow
+from ..handles import PROVIDERS as HANDLE_TYPES, handles_for
 from ..summary import summarize
 from ..wrangle import compile_snippet
 
@@ -439,10 +440,15 @@ class Session:
         try:
             with self._cook_lock, timectx.at(frame, fps):
                 geo = self.evaluator.cook(snapshot, node)
+                handles = []
+                inst = snapshot.nodes[node]
+                if inst.type in HANDLE_TYPES:                    # inputs (cached) and parameters for the viewport handles
+                    ins = [self.evaluator.cook(snapshot, src) for src in snapshot.input_ids(node) if src in snapshot.nodes]
+                    handles = handles_for(inst.type, ins, geo, snapshot.effective_params(node))
         except (NodeError, GraphError, ParamError) as e:
             return {"ok": False, "node": node, "rev": rev,
                     "error": {"node": getattr(e, "node_id", None), "message": str(e)}}
-        return {"ok": True, "node": node, "rev": rev, "geo": geo}
+        return {"ok": True, "node": node, "rev": rev, "geo": geo, "handles": handles}
 
     def start(self, cook_immediately: bool = True) -> None:
         if self._thread and self._thread.is_alive():
