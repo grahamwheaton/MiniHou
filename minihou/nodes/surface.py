@@ -1,10 +1,10 @@
-"""Convex hull and dissolve (merging flat faces into n-gons)."""
+"""Convex hull, dissolve (merging flat faces into n-gons), skin (loft) and revolve."""
 import numpy as np
 
 from .. import hull as hl
 from .. import topo
 from ..geometry import Geometry
-from ..sdk import Bool, Float, Int, Str, node
+from ..sdk import Bool, Enum, Float, Int, Str, Vec3, node
 from . import _build as B
 from ._util import normalize_rows
 from .model import _prim_sel, compact_points
@@ -147,3 +147,191 @@ def skin(geo, samples, loop, cap):
     vertex_point = np.concatenate(verts).astype(np.int32)
     out = B.make(pos, vertex_point, B.offsets_from_sizes(sizes_out), {"uv": uv})
     return out
+
+
+# -- revolve ----------------------------------------------------------------------------------------------------
+@node("revolve", inputs=["geo"], category="generate", params=[
+    Vec3("origin", (0.0, 0.0, 0.0), doc="A point on the axis"),
+    Vec3("axis", (0.0, 0.0, 1.0), doc="Direction of the axis of revolution"),
+    Float("angle", 360.0, min=-360.0, max=360.0, soft_min=-360.0, soft_max=360.0,
+          doc="Degrees to sweep (360: a closed surface; negative turns the other way)"),
+    Int("divisions", 32, min=1, max=4096, soft_max=128, doc="Steps around the axis"),
+])
+def revolve(geo, origin, axis, angle, divisions):
+    """Spin curves (or polygon outlines) around an axis into a surface (Houdini's Revolve): a profile of a vase, a wheel
+    or a goblet becomes the solid. Each segment of a profile makes a ring of quads; points on the axis are shared, so a
+    profile that runs from the axis to the axis gives a closed shell with triangles at the poles. Writes corner `uv`
+    (u around the axis, v along the profile by length); point attributes follow their points, primitive attributes
+    their profile."""
+    t = geo.topology
+    ax = np.asarray(axis, np.float64)
+    if not np.linalg.norm(ax):
+        raise ValueError("revolve needs a non-zero axis")
+    ax = ax / np.linalg.norm(ax)
+    o = np.asarray(origin, np.float64)
+    offs = t.prim_offsets.astype(np.int64)
+    vp = t.vertex_point.astype(np.int64)
+    sizes = np.diff(offs)
+    closed = t.closed_mask()
+    usable = np.flatnonzero(sizes >= 2)
+    if not len(usable):
+        return B.make(np.zeros((0, 3), np.float32), np.zeros(0, np.int32), np.zeros(1, np.int32))
+    full = abs(angle) >= 360.0 - 1e-9
+    steps = int(divisions)
+    copies = steps if full else steps + 1                            # distinct rotations of every point
+    P = geo.P.astype(np.float64)
+    rel = P - o
+    along = rel @ ax
+    radial = rel - np.outer(along, ax)
+    on_axis = np.linalg.norm(radial, axis=1) <= 1e-7 * max(float(np.ptp(P, 0).max()) if len(P) else 1.0, 1e-9)
+    th = np.radians(angle) * np.arange(copies) / steps
+    # Rodrigues rotation of every point about the axis for every step: (copies, npoints, 3)
+    cos, sin = np.cos(th)[:, None, None], np.sin(th)[:, None, None]
+    kx = np.cross(ax, radial)
+    rot = radial[None] * cos + kx[None] * sin
+    pos = (o + along[:, None] * ax)[None] + rot
+    n = geo.npoints
+    pos = pos.reshape(copies * n, 3)
+    pid = np.arange(copies * n).reshape(copies, n)
+    pid[:, on_axis] = pid[0, on_axis]                                # poles are single points
+    # profile segments (a -> b along each prim) with their parameter along the profile
+    seg_a, seg_b, seg_p, seg_ta, seg_tb = [], [], [], [], []
+    for p in usable.tolist():
+        v = vp[offs[p]:offs[p + 1]]
+        w = np.concatenate([v, v[:1]]) if closed[p] else v
+        length = np.linalg.norm(np.diff(P[w], axis=0), axis=1)
+        s = np.concatenate([[0.0], np.cumsum(length)])
+        s = s / s[-1] if s[-1] > 0 else np.linspace(0.0, 1.0, len(w))
+        seg_a.append(w[:-1])
+        seg_b.append(w[1:])
+        seg_p.append(np.full(len(w) - 1, p))
+        seg_ta.append(s[:-1])
+        seg_tb.append(s[1:])
+    seg_a, seg_b, seg_p = np.concatenate(seg_a), np.concatenate(seg_b), np.concatenate(seg_p)
+    seg_ta, seg_tb = np.concatenate(seg_ta), np.concatenate(seg_tb)
+    j = np.arange(steps)
+    j1 = j + 1
+    wrap = j1 % copies if full else j1                               # a full turn closes on the first copy
+    # quads (segment, step): (j,a) (j+1,a) (j+1,b) (j,b)
+    A0, A1 = pid[j[None, :], seg_a[:, None]], pid[wrap[None, :], seg_a[:, None]]
+    B1, B0 = pid[wrap[None, :], seg_b[:, None]], pid[j[None, :], seg_b[:, None]]
+    quad = np.stack([A0, A1, B1, B0], -1).reshape(-1, 4)
+    u0, u1 = np.tile(j / steps, len(seg_a)), np.tile(j1 / steps, len(seg_a))
+    va, vb = np.repeat(seg_ta, steps), np.repeat(seg_tb, steps)
+    quad_uv = np.stack([np.stack([u0, va], 1), np.stack([u1, va], 1), np.stack([u1, vb], 1), np.stack([u0, vb], 1)], 1)
+    quad_prim = np.repeat(seg_p, steps)
+    eq01, eq23 = quad[:, 0] == quad[:, 1], quad[:, 2] == quad[:, 3]
+    keep = ~(eq01 & eq23)                                            # both ends on the axis: nothing left
+    quad, quad_uv, quad_prim, eq01, eq23 = quad[keep], quad_uv[keep], quad_prim[keep], eq01[keep], eq23[keep]
+    pick = np.tile(np.arange(4), (len(quad), 1))
+    pick[eq01] = [0, 2, 3, -1]                                       # a on the axis: triangle (j,a) (j+1,b) (j,b)
+    pick[eq23] = [0, 1, 2, -1]                                       # b on the axis: triangle (j,a) (j+1,a) (j+1,b)
+    rows = np.arange(len(quad))[:, None]
+    ok = pick >= 0
+    flat_v = quad[rows, np.where(ok, pick, 0)][ok]
+    flat_uv = quad_uv[rows, np.where(ok, pick, 0)][ok]
+    sizes_out = ok.sum(1)
+    if angle < 0:                                                    # turning the other way: keep the faces facing out
+        starts = np.cumsum(sizes_out) - sizes_out
+        order = np.concatenate([starts[i] + np.arange(sizes_out[i])[::-1] for i in range(len(sizes_out))]) \
+            if len(sizes_out) else np.zeros(0, np.int64)
+        flat_v, flat_uv = flat_v[order], flat_uv[order]
+    point_src = np.tile(np.arange(n), copies)
+    point = B.gather(geo.point, point_src)
+    if "N" in geo.point and geo.point["N"].ndim == 2 and geo.point["N"].shape[1] == 3:   # normals turn with their points
+        N = geo.point["N"].astype(np.float64)
+        Nal = (N @ ax)[:, None] * ax
+        Nrad = N - Nal
+        Nrot = Nal[None] + Nrad[None] * cos + np.cross(ax, Nrad)[None] * sin
+        point["N"] = Nrot.reshape(-1, 3).astype(np.float32)
+    out = B.make(pos, flat_v.astype(np.int32), B.offsets_from_sizes(sizes_out), point, {"uv": flat_uv.astype(np.float32)},
+                 B.gather(geo.prim, quad_prim), geo.detail)
+    return compact_points(out)
+
+
+# -- bridge -----------------------------------------------------------------------------------------------------
+def _bridge_pair(La, Lb, P, align, twist):
+    """Faces joining boundary loop La to Lb (both in polyfill's fill order). Equal lengths give quads, otherwise a strip of
+    triangles that always advances along whichever loop keeps the next rung shorter."""
+    Lb = Lb[::-1]                                         # the two loops run opposite ways around a tube
+    na, nb = len(La), len(Lb)
+    s = 0
+    if align and na == nb:
+        best = None
+        for k in range(nb):
+            d = float(((P[La] - P[np.roll(Lb, -k)]) ** 2).sum())
+            if best is None or d < best[0] - 1e-12:
+                best = (d, k)
+        s = best[1]
+    s = (s + twist) % nb
+    Lb = np.roll(Lb, -s)
+    faces = []
+    if na == nb:
+        for i in range(na):
+            j = (i + 1) % na
+            faces.append([La[i], La[j], Lb[j], Lb[i]])
+        # Lb was reversed: (a_i, a_i+1, b_i+1, b_i) is the fill-order quad (a_i, a_i+1, B_k, B_k+1)
+        return faces
+    i = j = 0
+    while i < na or j < nb:
+        a0, a1 = La[i % na], La[(i + 1) % na]
+        b0, b1 = Lb[j % nb], Lb[(j + 1) % nb]
+        adv_a = i < na and (j >= nb or np.linalg.norm(P[a1] - P[b0]) <= np.linalg.norm(P[a0] - P[b1]))
+        if adv_a:
+            faces.append([a0, a1, b0])
+            i += 1
+        else:
+            faces.append([a0, b1, b0])
+            j += 1
+    return faces
+
+
+@node("bridge", inputs=["geo"], category="modify", params=[
+    Bool("align", True, doc="Rotate the second loop to the position that keeps the rungs shortest (equal-length loops)"),
+    Int("twist", 0, soft_min=-8, soft_max=8, doc="Extra steps to turn the second loop"),
+    Enum("pairing", ["mutual_nearest", "in_order"], doc="mutual_nearest: join two open loops of different pieces when each is "
+                                                        "the other's nearest (centres); in_order: the first two, the next "
+                                                        "two... (a lone loop in a single piece pairs with the next nearest)"),
+])
+def bridge(geo, align, twist, pairing):
+    """Join pairs of open boundary loops with a band of faces (Houdini's Bridge): two pipe ends become one pipe, a hole
+    in a wall and a hole in a floor a corridor. Equal loops get quads; loops of different sizes get triangles. Loops are
+    paired when each is the other's nearest loop among those of other pieces (or in order); a loop with no partner is
+    left open."""
+    from .model import boundary_loops
+    B.require_polygons(geo, "bridge")
+    loops = [np.asarray(l, np.int64) for l in boundary_loops(geo)]
+    if len(loops) < 2:
+        raise ValueError(f"bridge needs at least two open loops, the input has {len(loops)}")
+    P = geo.P.astype(np.float64)
+    cent = np.array([P[l].mean(0) for l in loops])
+    pairs = []
+    if pairing == "in_order":
+        pairs = [(i, i + 1) for i in range(0, len(loops) - 1, 2)]
+    else:
+        from .. import spatial, topo
+        e = topo.edges(geo)
+        comp = spatial.components(geo.npoints, e.points[:, 0], e.points[:, 1])
+        piece = np.array([comp[l[0]] for l in loops])
+        dist = np.linalg.norm(cent[:, None] - cent[None], axis=2)
+        if len(set(piece.tolist())) > 1:
+            dist = np.where(piece[:, None] == piece[None], np.inf, dist)      # never close a pipe on itself
+        else:
+            np.fill_diagonal(dist, np.inf)                                    # one piece: its own loops may be joined
+        nearest = dist.argmin(1)
+        for i in range(len(loops)):
+            j = int(nearest[i])
+            if i < j and np.isfinite(dist[i, j]) and int(nearest[j]) == i:
+                pairs.append((i, j))
+        if not pairs:
+            raise ValueError("bridge found no two loops that are each other's nearest; wire pieces with matching ends")
+    new = []
+    for a, b in pairs:
+        new += _bridge_pair(loops[a], loops[b], P, align, int(twist))
+    sizes = np.array([len(f) for f in new], np.int64)
+    t = geo.topology
+    verts = np.concatenate([np.asarray(f, np.int64) for f in new])
+    offs = np.concatenate([t.prim_offsets.astype(np.int64), t.prim_offsets[-1] + np.cumsum(sizes)])
+    pad = lambda table, k: {n: np.concatenate([a, np.zeros((k,) + a.shape[1:], a.dtype)]) for n, a in table.items()}  # noqa: E731
+    return B.make(geo.P, np.concatenate([t.vertex_point, verts]), offs, dict(geo.point.items()),
+                  pad(geo.vertex, len(verts)), pad(geo.prim, len(new)), geo.detail)
