@@ -43,10 +43,11 @@ loops over geometry) write a node-library file (node_library). To make something
 saved in nodes/ (e.g. nodes/rock_scatter.json) with `input` nodes and exposed parameters becomes a node type that any
 graph can use (details in node_library). Houdini-style toolkit: groups (group_create; most nodes take a group pattern
 like 'top ^side', '0-9' or '@P.z > 0'), modelling (polyextrude, polybevel, subdivide, clip, mirror, polyfill; tube and
-torus sources; smooth, match_size; voronoi_fracture + exploded_view; polyreduce; normal with domain 'vertex' keeps
-hard edges crisp), attributes (attribute_transfer, promote, blur, measure, color, ray; uv_project, uv_flatten), curves
-(line, helix, resample, sweep, path_deform), volumes (remesh, points_to_surface, sdf_boolean), instancing of Blender
-objects (instance), for_each (a system per piece), time (@Frame, solver; set_frame to check).
+torus sources; smooth, peak, match_size, bound, copy_transform, switch; voronoi_fracture + exploded_view; polyreduce;
+normal with domain 'vertex' keeps hard edges crisp), attributes (attribute_transfer, promote, blur, measure, color,
+ray; uv_project, uv_flatten), curves (line, helix, resample, sweep, path_deform), volumes (remesh, points_to_surface,
+sdf_boolean), instancing of Blender objects (instance), for_each (a system per piece), time (@Frame, solver; set_frame
+to check).
 To work on something the user made in Blender, start from a blender_object node
 (the object's name; its UV map, color attribute, vertex groups and material indices arrive as attributes, and it recooks live
 when they edit it); inspect_node on it shows what was read. Z is up; units are Blender metres. The user is

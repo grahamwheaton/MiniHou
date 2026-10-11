@@ -126,6 +126,9 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `torus` | - | torus in XY, outward quads; vertex `uv` |
 | `transform` | geo | scale / rotate (Euler XYZ) / translate about a pivot; rotates `N`; optional group |
 | `match_size` | geo | move (centre, or sit on the ground with justify min) and scale (uniform or per axis) to a target box |
+| `copy_transform` | geo | copies with an accumulating translate/rotate/scale (stairs, spirals, arrays); point `copynum` |
+| `peak` | geo | move points along their normals (optional group) |
+| `bound` | geo | bounding box, world-aligned or fitted to the principal axes; detail `bound_min/max/size` |
 | `noise` | geo | fractal Perlin noise; displaces `P` or writes any attribute (scalar or vector mode); optional group |
 | `group_create` | geo | a named point or primitive group: pattern/expression, bounding box, normal direction, random %, boundary |
 | `group_promote` | geo | convert groups between points and primitives |
@@ -183,6 +186,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `delete` | geo | delete points matching an expression (and primitives that use them), compacting all attributes |
 | `fuse` | geo | weld points closer than a distance |
 | `merge` | geos (any number) | concatenate; missing attributes are zero-filled |
+| `switch` | geos... | pass on one of the inputs by index |
 | `output` | geo | marks what the live link publishes (validated) |
 
 ### Groups

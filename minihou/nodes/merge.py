@@ -1,7 +1,7 @@
 import numpy as np
 
 from ..geometry import Geometry, Topology
-from ..sdk import Input, node
+from ..sdk import Input, Int, node
 
 
 def _concat_table(parts, sizes, name_source):
@@ -69,3 +69,13 @@ def _merge_instances(geos, out):
         parts.append(lut[np.clip(np.asarray(a).reshape(g.npoints, -1)[:, 0], 0, len(lst))])
     out.point["instance"] = np.concatenate(parts).astype(np.int32)
     out.detail["instance_objects"] = combined
+
+
+@node("switch", inputs=[Input("geos", multi=True)], category="combine", params=[
+    Int("index", 0, min=0, soft_max=10, doc="Which input to pass on (0 = the first; clamped to the last)"),
+])
+def switch(geos, index):
+    """Pass on one of several inputs (Houdini's Switch): try variants, or expose the choice as a parameter."""
+    if not geos:
+        raise ValueError("connect at least one input")
+    return geos[min(max(int(index), 0), len(geos) - 1)]
