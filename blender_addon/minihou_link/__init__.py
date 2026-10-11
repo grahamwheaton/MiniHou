@@ -312,6 +312,23 @@ class MINIHOU_PT_main(bpy.types.Panel):
                         col.prop(owner[0], owner[1], text=p.get("label", p["name"]))
 
 
+class MINIHOU_OT_bake_rbd(bpy.types.Operator):
+    bl_idname = 'minihou.bake_rbd'
+    bl_label = 'Bake RBD Frame Range'
+    bl_description = 'Bake scene frame range to native mesh samples for reliable offline animation rendering (512 MiB limit)'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        from .rbd_bake import bake
+        try:
+            col = bake(context.object, context.scene.frame_start, context.scene.frame_end)
+            self.report({'INFO'}, f'Baked {len(col.objects)} frames to {col.name}; source retained and hidden')
+            return {'FINISHED'}
+        except Exception as exc:
+            self.report({'ERROR'}, str(exc))
+            return {'CANCELLED'}
+
+
 class MINIHOU_PT_modifier_sources(bpy.types.Panel):
     bl_label = "MiniHou Source Objects"
     bl_idname = "MINIHOU_PT_modifier_sources"
@@ -324,6 +341,9 @@ class MINIHOU_PT_modifier_sources(bpy.types.Panel):
         return context.object is not None and any(modifiers.is_modifier(m) for m in context.object.modifiers)
 
     def draw(self, context):
+        if any(modifiers.has_rbd(m) for m in context.object.modifiers):
+            self.layout.operator('minihou.bake_rbd', icon='REC')
+            self.layout.label(text='RBD: synchronous timeline; bake before animation render')
         for mod in context.object.modifiers:
             if not modifiers.is_modifier(mod):
                 continue
@@ -338,7 +358,7 @@ class MINIHOU_PT_modifier_sources(bpy.types.Panel):
 _classes = (MINIHOU_Preferences, MINIHOU_OT_start_server, MINIHOU_OT_stop_server, MINIHOU_OT_open_editor,
             MINIHOU_OT_add_modifier, MINIHOU_OT_refresh_modifiers, MINIHOU_OT_reload_modifier,
             MINIHOU_OT_connect, MINIHOU_OT_disconnect, MINIHOU_OT_resync, MINIHOU_OT_select_proxy,
-            MINIHOU_PT_main, MINIHOU_PT_modifier_sources)
+            MINIHOU_PT_main, MINIHOU_PT_modifier_sources, MINIHOU_OT_bake_rbd)
 
 
 def register():

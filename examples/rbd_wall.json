@@ -17,6 +17,16 @@
       },
       "inputs": {}
     },
+    "brick_surface": {
+      "type": "wrangle",
+      "params": {
+        "run_over": "primitives",
+        "snippet": "i@sharp_face = 1; i@material_index = 0"
+      },
+      "inputs": {
+        "geo": "brick"
+      }
+    },
     "row": {
       "type": "copy_transform",
       "params": {
@@ -28,7 +38,7 @@
         ]
       },
       "inputs": {
-        "geo": "brick"
+        "geo": "brick_surface"
       }
     },
     "wall": {
@@ -69,6 +79,16 @@
       },
       "inputs": {}
     },
+    "ball_surface": {
+      "type": "wrangle",
+      "params": {
+        "run_over": "primitives",
+        "snippet": "i@material_index = 1"
+      },
+      "inputs": {
+        "geo": "ball"
+      }
+    },
     "projectile": {
       "type": "rbd_configure",
       "params": {
@@ -87,7 +107,7 @@
         "restitution": 0.15
       },
       "inputs": {
-        "geo": "ball"
+        "geo": "ball_surface"
       }
     },
     "bodies": {
@@ -116,6 +136,16 @@
       },
       "inputs": {}
     },
+    "floor_surface": {
+      "type": "wrangle",
+      "params": {
+        "run_over": "primitives",
+        "snippet": "i@sharp_face = 1; i@material_index = 2"
+      },
+      "inputs": {
+        "geo": "floor"
+      }
+    },
     "ground": {
       "type": "rbd_configure",
       "params": {
@@ -123,7 +153,7 @@
         "friction": 0.8
       },
       "inputs": {
-        "geo": "floor"
+        "geo": "floor_surface"
       }
     },
     "sim": {
