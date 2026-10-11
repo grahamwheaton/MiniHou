@@ -18,6 +18,7 @@ print(f"[selftest] Blender {bpy.app.version_string}, Python {sys.version.split()
 suite = unittest.defaultTestLoader.loadTestsFromNames([
     "tests.test_addon_state", "tests.test_blender_addon", "tests.test_blender_modifiers",
     "tests.test_blender_server_control",
+    "tests.test_blender_source_objects",
 ])
 result = unittest.TextTestRunner(verbosity=2).run(suite)
 sys.stdout.flush()

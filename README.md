@@ -104,6 +104,45 @@ modifiers (including self-references and cache objects) are rejected to avoid cr
 this bridge does not schedule interdependent object stacks. Edit Mode and active renders are skipped. Slow cooks can pause the UI;
 failed cooks retain the last successful cache and report an error. These caches are not a baking/render-farm system.
 
+## Scatter an editable Blender source object
+
+From a fresh Blender file:
+
+1. Install/enable MiniHou Link and configure its external Python runtime and MiniHou project folder as above.
+2. Keep the default cube as a separate source object; move it aside so it is easy to edit. Add a plane and select
+   **only the plane**. Its evaluated surface, including preceding native modifiers, supplies the scatter input.
+3. In the MiniHou sidebar, choose `examples/modifiers/scatter_object.json`, then **Start Server** and
+   **Add MiniHou Modifier**. The initial missing-source message is expected until a source is selected.
+4. Pick the cube in **Source Object**, either in the sidebar's instance box or under **MiniHou Source Objects** in
+   the Properties editor's Modifiers tab. The picker is separate from the native modifier card to keep it editable
+   while pending selections are validated. It stores an actual Blender object reference, not a typed object name.
+5. Adjust **Count**, **Seed**, **Min Scale**, **Max Scale**, and **Random Spin** in the modifier card or sidebar.
+   Edit the cube's mesh, native modifiers or materials: the scattered instances update directly in Blender, without
+   copying its mesh through the engine or recooking the scatter points.
+
+The template is `modifier_input -> scatter -> instance -> output`. The instance node's `objects: "@source"` is a
+binding to that modifier's picker. Each modifier has one independent source binding; rename, reorder, duplication,
+and blend-file save/reload preserve the object references and current parameter values. Reopening reconnects to the
+configured running server and recreates the engine instances from the saved graph snapshots. Ordinary proxy graphs
+retain their existing named-object instancing workflow.
+
+Placement uses the source's evaluated geometry in **local coordinates about its origin**. Source object location,
+rotation and unapplied scale are deliberately ignored; move the original aside freely. Change the mesh in Edit Mode
+or apply its transforms if those changes should affect the copies. The scatter's point rotation/scale controls copy
+placement. Native source modifiers and materials remain live; the original mesh, modifiers and origin are unchanged.
+
+A downstream MiniHou modifier realizes the preceding instances only on its disposable input reader, including their
+materials. The original scatter output stays instanced. Instance-aware native Geometry Nodes operations can follow it
+directly. Mesh-only native modifiers such as Array, Bevel or Triangulate need an explicit Geometry Nodes
+**Realize Instances** step before them in the actual stack; the bridge does not silently change their evaluation order.
+
+Self, private-cache, and transitive MiniHou-dependent sources are rejected, including dependencies through native GN
+groups, object/collection sockets, drivers, constraints and parents. An invalid new selection retains the previous valid source
+and point cache. If a bound source is deleted, or becomes cyclic itself, its geometry cannot remain live: the point cache
+is retained and an unsafe binding is disconnected. Reassign a valid source or repair the dependency to recover without
+recreating the modifier. Source meshes containing MiniHou modifiers are conservatively unsupported, even if no cycle
+would result. Existing interactive-cache and render limitations above still apply.
+
 ## Node editor
 
 ![The node editor showing the AI-built crater graph](docs/images/editor.png)

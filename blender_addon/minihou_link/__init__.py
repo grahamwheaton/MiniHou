@@ -254,7 +254,7 @@ class MINIHOU_PT_main(bpy.types.Panel):
                 box.label(text=line)
         stack = layout.box()
         stack.label(text="Mesh Stack Instances")
-        stack.operator("minihou.add_modifier", icon="MOD_NODES")
+        stack.operator("minihou.add_modifier", icon="MODIFIER")
         stack.operator("minihou.refresh_modifiers", icon="FILE_REFRESH")
         stack.label(text="Interactive caches; cook before still renders.")
         if context.object:
@@ -264,6 +264,9 @@ class MINIHOU_PT_main(bpy.types.Panel):
                 item = stack.box()
                 item.label(text=mod.name)
                 item.label(text=modifiers.status(mod)[:160])
+                source_owner = modifiers.source_owner(mod)
+                if source_owner is not None:
+                    item.prop(source_owner[0], source_owner[1], text="Source Object")
                 item.operator("minihou.reload_modifier").modifier_name = mod.name
                 mapping = proxy.mapping(mod.node_group)
                 for p in modifiers.parameters(mod):
@@ -309,9 +312,33 @@ class MINIHOU_PT_main(bpy.types.Panel):
                         col.prop(owner[0], owner[1], text=p.get("label", p["name"]))
 
 
+class MINIHOU_PT_modifier_sources(bpy.types.Panel):
+    bl_label = "MiniHou Source Objects"
+    bl_idname = "MINIHOU_PT_modifier_sources"
+    bl_space_type = "PROPERTIES"
+    bl_region_type = "WINDOW"
+    bl_context = "modifier"
+
+    @classmethod
+    def poll(cls, context):
+        return context.object is not None and any(modifiers.is_modifier(m) for m in context.object.modifiers)
+
+    def draw(self, context):
+        for mod in context.object.modifiers:
+            if not modifiers.is_modifier(mod):
+                continue
+            owner = modifiers.source_owner(mod)
+            if owner is not None:
+                box = self.layout.box()
+                box.label(text=mod.name, icon="MODIFIER")
+                box.prop(owner[0], owner[1], text="Source Object")
+                box.label(text=modifiers.status(mod)[:160])
+
+
 _classes = (MINIHOU_Preferences, MINIHOU_OT_start_server, MINIHOU_OT_stop_server, MINIHOU_OT_open_editor,
             MINIHOU_OT_add_modifier, MINIHOU_OT_refresh_modifiers, MINIHOU_OT_reload_modifier,
-            MINIHOU_OT_connect, MINIHOU_OT_disconnect, MINIHOU_OT_resync, MINIHOU_OT_select_proxy, MINIHOU_PT_main)
+            MINIHOU_OT_connect, MINIHOU_OT_disconnect, MINIHOU_OT_resync, MINIHOU_OT_select_proxy,
+            MINIHOU_PT_main, MINIHOU_PT_modifier_sources)
 
 
 def register():

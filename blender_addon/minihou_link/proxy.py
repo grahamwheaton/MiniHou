@@ -28,6 +28,7 @@ _STORE_TYPES = {"float": "FLOAT", "int": "INT", "bool": "BOOLEAN", "vec3": "FLOA
 USE_NODE_PREFIX = "MH_use_"
 INST_PREFIX = "MH_inst_"
 INST_KEY = "minihou_instances"
+CACHE_INFO_NODE = "MH_cache_info"
 
 
 def ensure_objects():
@@ -86,12 +87,26 @@ def ensure_node_group(output_obj):
         ng = bpy.data.node_groups.new(GROUP, "GeometryNodeTree")
         _build_nodes(ng, output_obj)
     else:
-        info = next((n for n in ng.nodes if n.bl_idname == "GeometryNodeObjectInfo"), None)
+        info = cache_info(ng)
         if info is not None:
             cur = info.inputs["Object"].default_value
             if cur is None or cur.name != output_obj.name:
                 info.inputs["Object"].default_value = output_obj
     return ng
+
+
+def cache_info(ng):
+    """Return the private cooked-mesh reader, never a source-object instancing node.
+
+    Legacy groups predate its stable name; adopt only a non-instancing Object Info.
+    """
+    info = ng.nodes.get(CACHE_INFO_NODE)
+    if info is None:
+        info = next((n for n in ng.nodes if n.bl_idname == "GeometryNodeObjectInfo"
+                     and not n.name.startswith(INST_PREFIX)), None)
+        if info is not None:
+            info.name = CACHE_INFO_NODE
+    return info
 
 
 def _sockets(ng, in_out: str):
@@ -108,8 +123,10 @@ def _build_nodes(ng, output_obj) -> None:
     nodes = {n.bl_idname: n for n in ng.nodes}
     gin = nodes.get("NodeGroupInput") or ng.nodes.new("NodeGroupInput")
     gout = nodes.get("NodeGroupOutput") or ng.nodes.new("NodeGroupOutput")
-    info = nodes.get("GeometryNodeObjectInfo") or ng.nodes.new("GeometryNodeObjectInfo")
-    if "GeometryNodeObjectInfo" not in nodes:
+    info = cache_info(ng)
+    if info is None:
+        info = ng.nodes.new("GeometryNodeObjectInfo")
+        info.name = CACHE_INFO_NODE
         gin.location, info.location, gout.location = (-400, 0), (-150, -150), (150, 0)
         info.transform_space = "RELATIVE"          # engine output follows the proxy's transform, not its own
         info.inputs["As Instance"].default_value = False
@@ -121,7 +138,7 @@ def _build_nodes(ng, output_obj) -> None:
 
 
 def _active_inputs(ng):
-    return [i for i in _sockets(ng, "INPUT") if i.socket_type != "NodeSocketGeometry"]
+    return [i for i in _sockets(ng, "INPUT") if i.socket_type not in {"NodeSocketGeometry", "NodeSocketObject"}]
 
 
 def _remove_input(ng, item) -> None:
@@ -244,7 +261,7 @@ def _chain_source(ng):
     join = ng.nodes.get(INST_PREFIX + "join")
     if join is not None:
         return join.outputs["Geometry"]
-    return next(n for n in ng.nodes if n.bl_idname == "GeometryNodeObjectInfo").outputs["Geometry"]
+    return cache_info(ng).outputs["Geometry"]
 
 
 def _chain_target(ng):
@@ -255,23 +272,34 @@ def _chain_target(ng):
     return next(n for n in ng.nodes if n.bl_idname == "NodeGroupOutput").inputs["Geometry"]
 
 
-def sync_instances(ng, names: List[str]) -> List[str]:
+def sync_instances(ng, names: List[str], *, objects=None) -> List[str]:
     """Instance Blender objects on the engine's instance points (``instance`` > 0, ``rot``, ``scale``).
 
     Builds, once per object list: Object Info (as instance) per object -> Geometry to Instance -> Instance on Points
     (pick by ``instance`` - 1), joined with the rest of the geometry (minus the instance points). Nothing in the user's
     scene changes. Returns the names of objects that do not exist (they place nothing). Writes nothing when the list
     is unchanged.
+
+    ``objects`` optionally supplies already validated Blender object references in the same order as
+    ``names``. Stack modifiers use this to bind persistent object pickers; legacy proxy calls keep
+    name-based resolution. References are applied only on this explicit successful cook path, so an
+    invalid pending picker selection cannot replace valid output or create a GN dependency cycle.
+    Source geometry is read live in ORIGINAL space: its mesh coordinates (including evaluated native
+    modifiers and materials) retain the local pivot; source object location, rotation and scale do not
+    offset the scattered copies. Point rot/scale attributes control copy transforms.
     """
     assert_main_thread()
+    if objects is not None and len(objects) != len(names):
+        raise ValueError("Instance object references must match instance_objects length")
+    resolved = list(objects) if objects is not None else [bpy.data.objects.get(n) for n in names]
     key = json.dumps(list(names))
-    missing = [n for n in names if bpy.data.objects.get(n) is None]
+    missing = [n for n, obj in zip(names, resolved) if obj is None]
     if ng.get(INST_KEY, "[]") == key and (not names or ng.nodes.get(INST_PREFIX + "join") is not None):
-        _refresh_instance_objects(ng, names)
+        _refresh_instance_objects(ng, names, objects=resolved)
         return missing
     for n in [n for n in ng.nodes if n.name.startswith(INST_PREFIX)]:
         ng.nodes.remove(n)
-    info = next(n for n in ng.nodes if n.bl_idname == "GeometryNodeObjectInfo")
+    info = cache_info(ng)
     target = _chain_target(ng)
     if names:
         def new(idname, name, loc):
@@ -291,7 +319,7 @@ def sync_instances(ng, names: List[str]) -> List[str]:
             oi = new("GeometryNodeObjectInfo", f"obj{k}", (-400, -450 - 160 * k))
             oi.transform_space = "ORIGINAL"
             oi.inputs["As Instance"].default_value = True
-            oi.inputs["Object"].default_value = bpy.data.objects.get(name)
+            oi.inputs["Object"].default_value = resolved[k]
             ng.links.new(oi.outputs["Geometry"], to_inst.inputs["Geometry"])
         index = new("FunctionNodeIntegerMath", "index", (-150, -380))
         index.operation = "SUBTRACT"
@@ -320,15 +348,15 @@ def sync_instances(ng, names: List[str]) -> List[str]:
     return missing
 
 
-def _refresh_instance_objects(ng, names: List[str]) -> None:
+def _refresh_instance_objects(ng, names: List[str], *, objects=None) -> None:
     """Re-point Object Info nodes whose object was missing (or renamed back) -- only when it differs."""
     for k, name in enumerate(names):
         oi = ng.nodes.get(INST_PREFIX + f"obj{k}")
         if oi is None:
             continue
-        want = bpy.data.objects.get(name)
+        want = objects[k] if objects is not None else bpy.data.objects.get(name)
         cur = oi.inputs["Object"].default_value
-        if (cur.name if cur else None) != (want.name if want else None):
+        if cur != want:
             oi.inputs["Object"].default_value = want
 
 
