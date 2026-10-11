@@ -127,6 +127,8 @@ def warmup() -> float:
     pn = np.empty((1, 3), np.float64)
     call(k.prim_normals, p, vp, offs, pn)
     call(k.accumulate_point_normals, vp, offs, pn, np.empty((4, 3), np.float32))
+    one = np.ones(1)
+    call(k.pcg_csr, np.array([0, 1], np.int64), np.zeros(1, np.int64), one, one, np.zeros(1), one, 1e-30, 10)
     return time.perf_counter() - t0
 
 

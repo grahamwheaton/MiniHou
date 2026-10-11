@@ -110,7 +110,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 |---|---|---|
 | ![scifi_panels](docs/images/gallery_scifi_panels.png) groups + polyextrude | ![subd_pod](docs/images/gallery_subd_pod.png) extrude, clip, mirror, subdivide | ![curves_vine](docs/images/gallery_curves_vine.png) curves: resample, blur, sweep |
 | ![volumes](docs/images/gallery_volumes.png) sdf_boolean fillet, metaballs | ![lsystem_tree](docs/images/gallery_lsystem_tree.png) lsystem + sweep + leaves | ![eroded_terrain](docs/images/gallery_eroded_terrain.png) heightfield erosion |
-| ![bevel_shapes](docs/images/gallery_bevel_shapes.png) polybevel, tube, torus, cusp normals | | |
+| ![bevel_shapes](docs/images/gallery_bevel_shapes.png) polybevel, tube, torus, cusp normals | ![uv_unwrap](docs/images/gallery_uv_unwrap.png) uv_flatten (LSCM), checker texture | |
 
 ## Nodes
 
@@ -161,6 +161,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `point_jitter` | geo | random offsets per axis |
 | `clean` | geo | weld, drop repeated corners and degenerate faces/curves, remove unused points |
 | `uv_project` | geo | UVs by box (triplanar), planar, cylindrical or spherical projection; seams and poles handled |
+| `uv_flatten` | geo | unwrap UVs with least-squares conformal maps: islands cut at sharp edges (or where an attribute changes), closed shapes cut into discs automatically, packed into 0-1 at matching texel density; prim `island` |
 | `remesh` | geo | voxel remesh a closed mesh: even watertight quads, offset (grow/shrink), smoothing, attribute transfer |
 | `points_to_surface` | points | metaball surface around points (radius x pscale, blend), e.g. blobs and liquids |
 | `sdf_boolean` | a, b | union / subtract / intersect of closed meshes through distance fields, with smooth fillets |

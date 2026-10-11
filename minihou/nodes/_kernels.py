@@ -254,3 +254,44 @@ def accumulate_point_normals(vp, offs, prim_n, out):
         out[q, 0] = np.float32(acc[q, 0] / ln)
         out[q, 1] = np.float32(acc[q, 1] / ln)
         out[q, 2] = np.float32(acc[q, 2] / ln)
+
+
+@njit(**_OPTS)
+def pcg_csr(indptr, cols, vals, b, x, minv, stop, max_iter):
+    """Jacobi-preconditioned conjugate gradients for the SPD matrix in CSR form (the same iteration as
+    ``lscm._cg_normal``'s numpy loop); solves in place into x and returns the iteration count."""
+    n = b.shape[0]
+    g = np.empty(n)
+    for i in range(n):
+        s = 0.0
+        for j in range(indptr[i], indptr[i + 1]):
+            s += vals[j] * x[cols[j]]
+        g[i] = b[i] - s
+    z = minv * g
+    p = z.copy()
+    gz = 0.0
+    for i in range(n):
+        gz += g[i] * z[i]
+    mp = np.empty(n)
+    it = 0
+    while it < max_iter and gz > stop:
+        pmp = 0.0
+        for i in range(n):
+            s = 0.0
+            for j in range(indptr[i], indptr[i + 1]):
+                s += vals[j] * p[cols[j]]
+            mp[i] = s
+            pmp += p[i] * s
+        alpha = gz / max(pmp, 1e-300)
+        gz_new = 0.0
+        for i in range(n):
+            x[i] += alpha * p[i]
+            g[i] -= alpha * mp[i]
+            z[i] = minv[i] * g[i]
+            gz_new += g[i] * z[i]
+        beta = gz_new / gz
+        for i in range(n):
+            p[i] = z[i] + beta * p[i]
+        gz = gz_new
+        it += 1
+    return it

@@ -186,8 +186,13 @@ Worked through in order of how often Houdini users reach for them:
    or border edges across several), bevelled edges become quads and points with 3+ bevelled edges get corner
    polygons. `normal` domain `vertex` averages only faces within the cusp angle, so Blender (custom normals) shows
    crisp chamfers on smooth surfaces. `tube` and `torus` join the sources.
+9. **UV unwrap** (`minihou/lscm.py`): islands across non-seam edges; non-disc islands (Euler characteristic != 1) are cut
+   by a plane through their centre along whichever principal axis leaves the most discs, repeatedly. One sparse LSCM
+   least-squares system for all islands (two pins each): SciPy's direct solver, else Jacobi-PCG on the assembled
+   normal equations (a Numba loop when available, numpy otherwise) warm-started from planar projections. Islands are
+   scaled to their 3-D area, turned to their smallest bounding box and shelf-packed.
 
-Next candidates: exact mesh booleans, UV unwrap (LSCM), an editor frame slider, numba kernels for
+Next candidates: exact mesh booleans, an editor frame slider, numba kernels for
 closest-point queries and SDF construction (the numpy SDF of a mesh spends most of its time in closest points).
 
 ## Systems (graphs as nodes)
