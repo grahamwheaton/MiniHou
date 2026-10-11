@@ -14,7 +14,7 @@ file, a modifier slider in Blender) and only what changed is recooked and re-sen
 
 ![An AI assistant built this crater-with-boulders system through MCP; it streamed live into Blender](docs/images/blender_ai_crater.png)
 
-Status: milestone 1 complete; milestone 2 well under way (wrangle, normal, delete, primitives, numba backend, node editor, MCP).
+Status: milestone 2 well under way: wrangle, groups, polygon modelling (extrude, subdivide, clip, mirror...), attribute toolkit and ray, numba backend, node editor, MCP, Blender objects as inputs.
 Every push runs CI on Linux and Windows, including the add-on inside a real Blender 5.1.2 on Windows
 (`.github/workflows/ci.yml`). Design notes and next steps: [docs/PLAN.md](docs/PLAN.md).
 
@@ -24,7 +24,7 @@ You need Python 3.11+ and Blender 5.1.
 
 ```powershell
 cd path\to\BlenderHoudini
-py -m pip install numpy numba          # numba is optional: 4-24x faster heavy nodes; everything works without it
+py -m pip install numpy numba scipy    # numba and scipy are optional: faster heavy nodes and nearest-point queries
 
 py -m unittest discover -s tests -t .  # engine tests (no Blender needed)
 py tools\launch_blender.py --engine examples\graphs\demo.json --editor
@@ -122,6 +122,16 @@ All examples are cooked by the test-suite, so they keep working as nodes evolve.
 | `divide` | geo | triangulate (fans for convex polygons, ear clipping for concave ones) |
 | `reverse` | geo | flip winding (and N) of a group of primitives |
 | `facet` | geo | unique points per face (optionally flat normals) |
+| `attribute_create` | geo | a constant attribute on any domain (or detail) |
+| `attribute_randomize` | geo | random floats, vectors, colors or ints per element, or per piece (`by` = `class`) |
+| `attribute_promote` | geo | move attributes between points, primitives, vertices and detail (average/min/max/sum/first) |
+| `attribute_transfer` | geo, source | copy point attributes from the nearest source point, with a distance limit and soft edge |
+| `attribute_blur` | geo | Laplacian smoothing of P or any float point attribute over the edges |
+| `connectivity` | geo | number connected pieces (`class`) on points or primitives |
+| `measure` | geo | area, perimeter, mean curvature (1/radius), piece area / volume |
+| `color` | geo | Cd: constant, random, random per piece, or a ramp along an attribute |
+| `sort` | geo | reorder points or primitives (random, by axis, by attribute, reverse) |
+| `ray` | geo, target | project points along a vector, along N, or to the closest point; imports hit attributes |
 | `wrangle` | geo | VEX-like snippet over points, primitives or vertices (see below) |
 | `attribute_delete` | geo | delete attributes by name or wildcard (`N uv tmp_*`) |
 | `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |

@@ -6,8 +6,9 @@ requires-python = ">=3.11"
 dependencies = ["numpy>=1.26"]
 
 [project.optional-dependencies]
-# Optional accelerator: 4-15x faster noise / scatter / copy_to_points on large inputs. Falls back to numpy.
-accel = ["numba>=0.60"]
+# Optional accelerators: numba makes noise / scatter / copy_to_points 4-15x faster on large inputs; scipy's KD-tree
+# speeds up nearest-point queries (attribute_transfer, ray). Without them the numpy paths give the same results.
+accel = ["numba>=0.60", "scipy>=1.11"]
 # Only for running the node editor's browser tests (tests/test_editor_e2e.py).
 browser-tests = ["playwright>=1.56"]
 
