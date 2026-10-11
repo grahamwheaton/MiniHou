@@ -198,14 +198,14 @@ class CliTests(unittest.TestCase):
         d = tempfile.mkdtemp(prefix="minihou_cli_")
         self.addCleanup(shutil.rmtree, d, True)
         env = dict(os.environ, PYTHONPATH=ROOT)
-        r = subprocess.run([sys.executable, "-m", "minihou", "new-node", "my_lift"], cwd=d, env=env,
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "worktree_cli.py"), "new-node", "my_lift"], cwd=d, env=env,
                            capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(r.returncode, 0, r.stderr)
-        r = subprocess.run([sys.executable, "-m", "minihou", "nodes"], cwd=d, env=env,
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "worktree_cli.py"), "nodes"], cwd=d, env=env,
                            capture_output=True, text=True, encoding="utf-8")
         self.assertIn("my_lift", r.stdout)
         self.assertNotIn("ERROR", r.stdout)
-        r = subprocess.run([sys.executable, "-m", "minihou", "new-node", "my_lift"], cwd=d, env=env,
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "worktree_cli.py"), "new-node", "my_lift"], cwd=d, env=env,
                            capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(r.returncode, 2)                                         # never overwrites
 

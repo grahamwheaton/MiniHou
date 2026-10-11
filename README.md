@@ -1,5 +1,42 @@
 # MiniHou
 
+### Modelling workflows
+
+The modelling additions include edge groups, Poly Bridge, Dissolve, Skin/Loft,
+Poly Expand 2D, Soft Transform, Lattice, Point Deform and subdivision creases.
+See [tool contracts and limits](docs/modeling_tools.md) before applying them to
+production geometry; these initial implementations do not claim Houdini parity.
+
+Run `python examples/modeling_workflows.py` to cook all eight examples. Open an
+individual workflow in the editor with:
+
+```powershell
+python tools/worktree_cli.py serve examples/graphs/modeling_bridge.json --port 0 --http-port 0
+```
+
+Use the printed ports to connect Blender and open the editor. The wrapper loads
+this checkout explicitly, including with an embedded runtime whose `_pth` points
+elsewhere. In the isolated Windows worktree, replace `python` with
+`& 'C:\Users\Graham\Documents\MiniHou\build\runtime\python312\python.exe'`.
+
+* **Bridge:** create two `edge_group` nodes using primitive selections `0` and
+  `1`, then set Poly Bridge source/destination to their group names. Change
+  `segments` for intermediate rings; `twist` changes closed-loop correspondence.
+* **Dissolve:** create an edge group with method `boundary`, then dissolve
+  `^boundary` on a flat grid. UV/material seams are protected by default.
+* **Loft:** merge several equal-count Circle or Curve profiles in order, then
+  append Skin. Poly Expand 2D can offset a convex closed profile upstream.
+* **Deform:** branch a `lattice_grid` into a rest and edited copy, then connect
+  the model/rest/edited branches to Lattice. Point Deform uses the same wiring
+  with a small arbitrary control cloud. Soft Transform edits controls or models.
+* **Crease:** append Crease before Subdivide. Edge sharpness and point corner
+  weights decay one unit per level; `use_creases` compares against smooth output.
+
+The examples are named `examples/graphs/modeling_*.json`. Parameter tooltips and
+node descriptions are supplied by the registry. Run isolated regressions with
+`python tools/test_worktree.py`; actual Blender geometry/protocol smoke tests use
+`blender --background --factory-startup --python-exit-code 1 --python tools/blender_modeling_smoke.py`.
+
 A small, standalone **procedural geometry engine** in Python (numpy, optionally numba) that **live-links into Blender 5.1/5.2**.
 You build a node graph in a **browser node editor**, by hand in JSON, or by **asking an AI** (built-in MCP server); the engine cooks
 it and the result streams into Blender as a mesh you can drive with Geometry Nodes. Change anything, anywhere (editor, AI, JSON
@@ -231,7 +268,16 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `polyreduce` | geo | reduce to a percentage or count of triangles with quadric error metrics; keeps borders, sharp edges and manifold shells; attributes blend along collapses |
 | `exploded_view` | geo | push pieces (a prim attribute) away from a centre |
 | `polyextrude` | geo | extrude faces (a group) along their normals with inset; connected regions or individual faces; groups `extrudeFront`/`extrudeSide` |
-| `subdivide` | geo | Catmull-Clark (smooth, open boundaries stay curves, corners sharp) or linear; uv and groups follow |
+| `subdivide` | geo | Catmull-Clark or linear; optional semi-sharp edge/corner creases; UVs and groups follow |
+| `edge_group`, `edge_group_promote` | geo | Derived edge selections: patterns, endpoint pairs, boundary or point/primitive groups; promote to incident points/primitives |
+| `polybridge` | geo | Linear segmented quad bridge between equal-count boundary chains or loops |
+| `dissolve` | geo | Merge selected manifold interior edges into simple n-gons; angle and UV/material seam protection |
+| `skin` | geo | Skin/Loft through multiple equal-count profiles in primitive order |
+| `polyexpand2d` | geo | Miter offsets of independent convex closed planar profiles; arbitrary plane orientation |
+| `soft_transform` | geo | Pivoted transform with radial smoothstep or linear falloff and point-group restriction |
+| `lattice_grid` / `lattice` | none / geo, rest, deformed | Complete control grid and trilinear lattice deformation |
+| `point_deform` | geo, rest, deformed | Weighted local affine deformation from corresponding control clouds |
+| `crease` | geo | Set edge sharpness or point corner weights for Subdivide; influence decays per level |
 | `mirror` | geo | reflect across a plane, weld the seam, keep or drop the original |
 | `clip` | geo | cut with a plane; keep above, below or both (new points interpolate attributes) |
 | `polyfill` | geo | close holes with n-gons facing outwards |

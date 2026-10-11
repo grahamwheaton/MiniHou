@@ -122,3 +122,36 @@ for fractional junctions/nonmanifold topology. Blender receives corner crease
 metadata; native Blender subdivision modifier crease editing is not implemented.
 
 Reference: [SideFX Crease](https://www.sidefx.com/docs/houdini/nodes/sop/crease.html).
+
+## Validation and integration (2026-10-11)
+
+Baseline: tested `7d55596`; branch: `codex/modeling-tools`.
+
+* Focused geometry suites passed at each stage: edge patterns/groups, open and
+  closed bridge winding, segment interpolation, rigid-transform equivariance,
+  dissolve seam/hole/nonmanifold rejection, profile offsets in rotated planes,
+  capture transforms/rank deficiency, normal transforms, crease decay and UVs.
+* Full engine regression: **575 tests, 464 passed, 111 skipped**, 101.841 seconds.
+  Skips reflect unavailable optional dependencies/host tests in the engine runtime.
+* Blender **5.2.0 LTS**: **3 actual host tests passed**. All eight new workflows
+  traversed protocol serialization and the native mesh writer to evaluated meshes.
+  Bridge UVs/material indices/groups and position-only updates were checked.
+  A separate engine subprocess also served the Bridge graph over TCP; changing
+  Segments through the Geometry Nodes modifier rebuilt the evaluated proxy.
+  These are background host tests, not interactive editor/viewport acceptance.
+* A subsequent focused run of registry/workflow and portability checks passed;
+  the three Blender tests skip under ordinary Python and pass in the host run.
+* No new dependencies. The engine tests and CLI subprocess helpers prepend this
+  worktree to `sys.path`; they do not rely on the bundled runtime's original
+  checkout `_pth`. Source paths are printed by the test/smoke runners.
+
+To repeat the live Blender tests, set `MINIHOU_ENGINE_PYTHON` to the prepared
+external Python executable before running `tools/blender_modeling_smoke.py` in
+Blender. The standalone mesh tests need only Blender's bundled NumPy.
+
+The delivery bundle excludes `7d55596` and requires that prerequisite commit.
+Import/integrate the branch changes without replacing the original checkout's
+concurrent repeat-loop work. Keep the original checkout's extra atomic-library
+reload fix: this branch intentionally does not modify `minihou/library.py` or
+the repeat-loop implementation. `demo.json` and `rock_scatter.json` are untouched.
+No push or merge was performed.

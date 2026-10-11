@@ -106,7 +106,7 @@ def lattice(geo,rest,deformed,group,outside):
     axes = [np.unique(A[:,k]) for k in range(3)]
     dims = tuple(map(len,axes))
     if min(dims)<2 or np.prod(dims)!=len(A):
-        raise ValueError('rest lattice must be a complete axis-aligned 3D Cartesian grid')
+        raise ValueError('rest lattice must form a complete rectangular 3D grid aligned with X, Y and Z')
     coords = tuple(np.searchsorted(axes[k],A[:,k]) for k in range(3))
     flat = np.ravel_multi_index(coords,dims)
     if len(np.unique(flat))!=len(A):

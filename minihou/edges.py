@@ -110,9 +110,10 @@ def chain(geo, selected):
     if len(ends) not in (0, 2):
         raise ValueError('edge chain has invalid endpoints')
     start = ends[0] if ends else min(adj)
-    path, prev, cur = [], None, start
-    while cur not in path:
+    path, seen, prev, cur = [], set(), None, start
+    while cur not in seen:
         path.append(cur)
+        seen.add(cur)
         choices = sorted(p for p in adj[cur] if p != prev)
         if not choices:
             break

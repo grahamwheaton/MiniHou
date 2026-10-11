@@ -237,7 +237,7 @@ def dissolve(geo, group, angle, preserve_seams):
             while cur >= 0 and cur not in face:
                 face.append(cur)
                 cur = by_start.get(int(vp[nxt[cur]]), -1)
-            if len(face) != len(vs) or cur != face[0] or len(face) < 3:
+            if len(face) < 3 or len(face) != len(vs) or cur != face[0]:
                 raise ValueError('dissolve region must have one simple closed boundary')
         faces.append(face)
         sources.append(min(region))

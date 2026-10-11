@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "doc": "Initial modelling workflow; see docs/modeling_tools.md for limits.",
+  "nodes": {
+    "sphere": {
+      "type": "sphere",
+      "inputs": {},
+      "params": {
+        "rows": 8,
+        "columns": 12
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "rest": {
+      "type": "box",
+      "inputs": {},
+      "params": {},
+      "pos": [
+        240,
+        0
+      ]
+    },
+    "edited": {
+      "type": "transform",
+      "inputs": {
+        "geo": "rest"
+      },
+      "params": {
+        "rotate": [
+          20,
+          10,
+          30
+        ],
+        "scale": [
+          1,
+          1,
+          1.5
+        ]
+      },
+      "pos": [
+        480,
+        0
+      ]
+    },
+    "deform": {
+      "type": "point_deform",
+      "inputs": {
+        "geo": "sphere",
+        "rest": "rest",
+        "deformed": "edited"
+      },
+      "params": {},
+      "pos": [
+        0,
+        160
+      ]
+    },
+    "normal": {
+      "type": "normal",
+      "inputs": {
+        "geo": "deform"
+      },
+      "params": {},
+      "pos": [
+        240,
+        160
+      ]
+    }
+  },
+  "display": "normal",
+  "exposed": [
+    {
+      "name": "Rotate",
+      "node": "edited",
+      "param": "rotate"
+    }
+  ]
+}

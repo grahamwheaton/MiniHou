@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "doc": "Initial modelling workflow; see docs/modeling_tools.md for limits.",
+  "nodes": {
+    "low": {
+      "type": "circle",
+      "inputs": {},
+      "params": {
+        "divisions": 16
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "middle": {
+      "type": "circle",
+      "inputs": {},
+      "params": {
+        "divisions": 16,
+        "radius": 0.6,
+        "center": [
+          0,
+          0,
+          1
+        ]
+      },
+      "pos": [
+        240,
+        0
+      ]
+    },
+    "high": {
+      "type": "circle",
+      "inputs": {},
+      "params": {
+        "divisions": 16,
+        "radius": 0.9,
+        "center": [
+          0,
+          0,
+          2
+        ]
+      },
+      "pos": [
+        480,
+        0
+      ]
+    },
+    "profiles": {
+      "type": "merge",
+      "inputs": {
+        "geos": [
+          "low",
+          "middle",
+          "high"
+        ]
+      },
+      "params": {},
+      "pos": [
+        0,
+        160
+      ]
+    },
+    "skin": {
+      "type": "skin",
+      "inputs": {
+        "geo": "profiles"
+      },
+      "params": {},
+      "pos": [
+        240,
+        160
+      ]
+    },
+    "normal": {
+      "type": "normal",
+      "inputs": {
+        "geo": "skin"
+      },
+      "params": {},
+      "pos": [
+        480,
+        160
+      ]
+    }
+  },
+  "display": "normal",
+  "exposed": [
+    {
+      "name": "Radius",
+      "node": "middle",
+      "param": "radius"
+    }
+  ]
+}
