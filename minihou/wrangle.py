@@ -23,6 +23,10 @@ Language
   changes; nothing else does.
 * Names that Blender treats natively: ``@uv`` (UV map), ``@Cd`` (color attribute), ``@N`` (normals),
   ``@material_index``, ``@sharp_face`` (flat shading).
+* Extra inputs (the node's opinput1 .. opinput3 ports): ``@opinput1_P`` is the attribute ``P`` of the element with the same
+  number in input 1 (zero beyond its end), promoted between domains like any other read. ``@near1_Cd`` is the point
+  attribute ``Cd`` of the point of input 1 nearest to this element (a point, a face centre or a corner's point), with
+  ``@near1_dist`` the distance to it and ``@near1_ptnum`` its number. Both are read-only.
 * Detail attributes (one value for the whole geometry, e.g. ``@iteration`` inside a for_each) read as constants.
 * Groups are ints named ``group_<name>``, as in VEX: ``@group_top`` reads one (1 or 0), ``i@group_tall = @P.z > 2`` makes one.
   The node's ``group`` field limits which elements change (a pattern: ``top ^side``, ``0-9``, ``@P.z > 0``).
@@ -60,6 +64,11 @@ _WIDTH = {"float": 1, "int": 1, "vector2": 2, "vector": 3, "vector4": 4}
 _ATTR_RE = re.compile(r"(?<![A-Za-z0-9_])([fviup]?)@([A-Za-z_][A-Za-z0-9_]*)")
 _MANGLE = "__attr_"
 _READONLY = {"ptnum", "numpt", "primnum", "numprim", "vtxnum", "numvtx", "closed", "Frame", "Time", "TimeInc"}
+_OTHER_INPUT = re.compile(r"^(opinput|near)([1-3])_(.+)$")        # reads from the wrangle's extra inputs
+
+
+def is_readonly(name: str) -> bool:
+    return name in _READONLY or _OTHER_INPUT.match(name) is not None
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +286,7 @@ class _Checker(ast.NodeVisitor):
         if isinstance(t, ast.Name):
             if t.id.startswith(_MANGLE):
                 name = t.id[len(_MANGLE):]
-                if name in _READONLY:
+                if is_readonly(name):
                     raise _err(t, f"@{name} is read-only")
                 self.writes.add(name)
                 if aug:
@@ -292,7 +301,7 @@ class _Checker(ast.NodeVisitor):
             if t.attr not in _COMPONENTS:
                 raise _err(t, f"unknown component '.{t.attr}' (use .x .y .z)")
             name = t.value.id[len(_MANGLE):]
-            if name in _READONLY:
+            if is_readonly(name):
                 raise _err(t, f"@{name} is read-only")
             self.writes.add(name)
             self.reads.add(name)           # writing one component keeps the others
