@@ -44,10 +44,12 @@ def from_mesh(tris: np.ndarray, h: float, band_voxels: float = 3.0, pad_voxels: 
     from .raycast import TriGrid
     tris = np.asarray(tris, np.float64)
     band = band_voxels * h
-    if grid is None:
-        lo, dims = grid_for(tris.reshape(-1, 3).min(0), tris.reshape(-1, 3).max(0), h, band + pad_voxels * h)
-    else:
+    if grid is not None:
         lo, dims = np.asarray(grid[0], np.float64), np.asarray(grid[1], np.int64)
+    elif len(tris):
+        lo, dims = grid_for(tris.reshape(-1, 3).min(0), tris.reshape(-1, 3).max(0), h, band + pad_voxels * h)
+    else:                                               # nothing to measure: a tiny all-outside grid
+        lo, dims = np.zeros(3), np.array([2, 2, 2], np.int64)
     if len(tris) == 0:
         return Volume(lo, float(h), np.full(tuple(dims), band, np.float32))
     nx, ny, nz = dims

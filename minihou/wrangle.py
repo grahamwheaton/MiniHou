@@ -47,6 +47,8 @@ from typing import Callable, Dict, List, Set, Tuple
 
 import numpy as np
 
+from .geometry import rows
+
 
 class WrangleError(ValueError):
     pass
@@ -90,7 +92,7 @@ def _set(*parts):
         if a.ndim == 0 or a.size == 1 and a.ndim < 2:
             cols.append(np.full((n, 1), float(a.reshape(-1)[0]), np.float32))
         else:
-            cols.append(a.reshape(n, -1))
+            cols.append(rows(a))
     return np.concatenate(cols, axis=1)
 
 

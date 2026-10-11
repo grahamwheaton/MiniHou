@@ -13,6 +13,7 @@ and the detail attribute ``instance_objects`` (the object names, in order).
 import numpy as np
 
 from .. import groups
+from ..geometry import rows
 from ..sdk import Enum, Float, Int, Str, node
 from ._util import rotation_from_z_to
 
@@ -64,7 +65,7 @@ def instance(points, objects, pick, pick_attrib, seed, align, random_spin, scale
         a = points.point.get(pick_attrib)
         if a is None:
             raise ValueError(f"no point attribute {pick_attrib!r} to pick objects by")
-        idx = np.asarray(a).reshape(n, -1)[:, 0].astype(np.int64) % len(names)
+        idx = rows(a)[:, 0].astype(np.int64) % len(names)
     spin = np.radians(rng.random(n) * random_spin)
     R_spin = np.zeros((n, 3, 3))
     R_spin[:, 0, 0] = R_spin[:, 1, 1] = np.cos(spin)
@@ -78,7 +79,7 @@ def instance(points, objects, pick, pick_attrib, seed, align, random_spin, scale
         R = R_spin
     s = scale_min + rng.random(n) * (scale_max - scale_min)
     if "pscale" in points.point:
-        s = s * points.point["pscale"].reshape(n, -1)[:, 0].astype(np.float64)
+        s = s * rows(points.point["pscale"])[:, 0].astype(np.float64)
     out = points.copy()
     sel = groups.mask(points, "point", group)
     inst = (idx + 1).astype(np.int32)

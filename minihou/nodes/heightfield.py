@@ -70,7 +70,7 @@ def hydraulic(H, cell, iterations, rain, capacity, erode_rate, deposit_rate, eva
     visits accumulate into the flow map, which outlines the channels."""
     h, w = H.shape
     H = H.copy()
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng(int(seed) & 0xFFFFFFFF)
     flow = np.zeros_like(H)
     eroded = np.zeros_like(H)
     deposited = np.zeros_like(H)

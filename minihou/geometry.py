@@ -34,6 +34,12 @@ _INT = np.dtype(np.int32)
 _BOOL = np.dtype(np.bool_)
 
 
+def rows(a) -> np.ndarray:
+    """``a`` as (n, components): like ``a.reshape(len(a), -1)`` but also right for empty arrays."""
+    a = np.asarray(a)
+    return a.reshape(a.shape[0], int(np.prod(a.shape[1:], dtype=np.int64)))
+
+
 def normalize_array(arr, name: str = "<array>") -> np.ndarray:
     """Coerce to a supported dtype (float32/int32/bool) and C-contiguity."""
     a = np.asarray(arr)

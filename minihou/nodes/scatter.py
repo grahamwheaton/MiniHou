@@ -40,7 +40,7 @@ def _scatter_numba(geo, count, seed):
     cdf = np.cumsum(area)
     if cdf[-1] <= 0.0:
         return _empty()
-    rng = np.random.default_rng(seed)                     # same draws, same order as the numpy path
+    rng = np.random.default_rng(int(seed) & 0xFFFFFFFF)   # same draws, same order as the numpy path
     r, r1, r2 = rng.random(count), rng.random(count), rng.random(count)
     pos = np.empty((count, 3), np.float32)
     nrm = np.empty((count, 3), np.float32)
@@ -62,7 +62,7 @@ def _scatter_numpy(geo, count, seed):
     cdf = np.cumsum(area)
     if cdf[-1] <= 0.0:
         return _empty()
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng(int(seed) & 0xFFFFFFFF)
     t = np.minimum(np.searchsorted(cdf, rng.random(count) * cdf[-1], side="right"), area.shape[0] - 1)
     r1, r2 = rng.random(count), rng.random(count)
     flip = r1 + r2 > 1.0

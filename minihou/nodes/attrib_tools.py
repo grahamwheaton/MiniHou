@@ -5,6 +5,7 @@ Houdini's attribute SOPs. Nodes that take a ``group`` change only the selected e
 import numpy as np
 
 from .. import groups, spatial, topo
+from ..geometry import rows
 from ..sdk import Bool, Enum, Float, Int, Str, Vec3, node
 from . import _build as B
 from .normal import prim_normals
@@ -84,7 +85,7 @@ def attribute_randomize(geo, name, domain, type, min, max, distribution, seed, b
         src = geo.table(dom).get(by)
         if src is None:
             raise ValueError(f"no {dom} attribute {by!r} to randomize by")
-        keys = np.asarray(src).reshape(n, -1)[:, 0].astype(np.int64)
+        keys = rows(src)[:, 0].astype(np.int64)
         uniq, inv = np.unique(keys, return_inverse=True)
         rng = np.random.default_rng([int(seed) & 0xFFFFFFFF, 7])
         r = _draw(rng, len(uniq), width, distribution)[inv.reshape(-1)]
@@ -154,7 +155,7 @@ def _reduce(a, idx, n, method):
     if method == "average":
         return B.mean_by({"x": a}, np.arange(len(a)), idx, n)["x"] if a.dtype.kind == "f" else \
             _reduce(a, idx, n, "first")
-    flat = a.reshape(len(a), -1)
+    flat = rows(a)
     out = np.zeros((n, flat.shape[1]), a.dtype if method != "sum" or a.dtype.kind != "b" else np.int32)
     if len(a):
         order = np.argsort(idx, kind="stable")
@@ -239,7 +240,7 @@ def attribute_blur(geo, names, iterations, strength, pin_boundary, group):
             raise ValueError(f"no point attribute {nm!r}")
         if arr.dtype.kind != "f":
             raise ValueError(f"{nm!r} is not a float attribute; only floats can be blurred")
-        v = arr.reshape(n, -1).astype(np.float64)
+        v = rows(arr).astype(np.float64)
         for _ in range(iterations):
             s = np.stack([np.bincount(a, weights=v[b, c], minlength=n) + np.bincount(b, weights=v[a, c], minlength=n)
                           for c in range(v.shape[1])], 1)
@@ -348,7 +349,7 @@ def color(geo, mode, domain, color, color2, ramp_attrib, seed, group):
         a = _Domains(geo).read(dom, nm)
         if a is None:
             raise ValueError(f"no attribute {nm!r} to ramp by")
-        a = np.asarray(a, np.float64).reshape(n, -1)
+        a = rows(np.asarray(a, np.float64))
         v = a[:, "xyzw".index(comp)] if comp else (a[:, 0] if a.shape[1] == 1 else np.linalg.norm(a, axis=1))
         t = (v - v.min()) / max(float(v.max() - v.min()), 1e-12) if len(v) else v
         cd = (c1 * (1 - t[:, None]) + c2 * t[:, None]).astype(np.float32)
@@ -378,7 +379,7 @@ def sort(geo, domain, key, attribute, seed):
         a = geo.table(dom).get(attribute)
         if a is None:
             raise ValueError(f"no {dom} attribute {attribute!r}")
-        order = np.argsort(np.asarray(a).reshape(n, -1)[:, 0], kind="stable")
+        order = np.argsort(rows(a)[:, 0], kind="stable")
     t = geo.topology
     if dom == "point":
         inv = np.empty(n, np.int64)

@@ -1,6 +1,7 @@
 import numpy as np
 
 from .. import groups, timectx
+from ..geometry import rows
 from ..sdk import Enum, Str, node
 from ..wrangle import WrangleError, compile_snippet
 
@@ -73,7 +74,7 @@ class _Domains:
         g = self.geo
         idx = self.prim_of_vertex()
         sizes = np.maximum(g.topology.prim_sizes(), 1).astype(np.float64)
-        v = vertex_values.reshape(len(vertex_values), -1).astype(np.float64)
+        v = rows(vertex_values).astype(np.float64)
         cols = [np.bincount(idx, weights=v[:, c], minlength=g.nprims) / sizes for c in range(v.shape[1])]
         out = np.stack(cols, 1).astype(np.float32)
         return out[:, 0] if vertex_values.ndim == 1 else out

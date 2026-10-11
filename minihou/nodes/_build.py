@@ -10,7 +10,7 @@ from typing import Dict, Optional
 
 import numpy as np
 
-from ..geometry import Geometry, Topology
+from ..geometry import Geometry, Topology, rows
 
 
 def gather(table, index: np.ndarray) -> Dict[str, np.ndarray]:
@@ -37,12 +37,12 @@ def mean_by(table, values_index: np.ndarray, groups: np.ndarray, n: int) -> Dict
     for name, a in table.items():
         v = a[values_index]
         if a.dtype.kind == "f":
-            flat = v.reshape(len(v), -1).astype(np.float64)
+            flat = rows(v).astype(np.float64)
             s = np.stack([np.bincount(groups, weights=flat[:, c], minlength=n) for c in range(flat.shape[1])], 1)
             r = (s / counts[:, None]).astype(np.float32)
             out[name] = r[:, 0] if a.ndim == 1 else r
         else:                                              # sort + reduceat: much faster than np.minimum.at
-            flat = v.reshape(len(v), -1)
+            flat = rows(v)
             r = np.zeros((n, flat.shape[1]), a.dtype)
             if len(flat):
                 order = np.argsort(groups, kind="stable")
