@@ -1,4 +1,4 @@
-﻿"""External-engine contracts for staged Geometry Nodes placements.
+"""External-engine contracts for staged Geometry Nodes placements.
 
 Native operations are represented by explicit array edits here; actual Blender
 socket evaluation is tested separately in test_blender_geonodes.py.

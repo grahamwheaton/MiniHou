@@ -57,6 +57,28 @@ class MINIHOU_OT_reload_group(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class MINIHOU_OT_edit_group_network(bpy.types.Operator):
+    bl_idname = "minihou.edit_group_network"
+    bl_label = "Edit Network"
+    bl_description = "Open this placement's graph template in the shared external editor; save then Reload Group Graph"
+
+    @classmethod
+    def poll(cls, context):
+        return _active(context) is not None
+
+    def execute(self, context):
+        from . import _server, network_ui
+        try:
+            network_ui.router.start(_server.snapshot(), _active(context).node_tree[modifiers.PATH])
+            if not bpy.app.timers.is_registered(network_ui._redraw):
+                bpy.app.timers.register(network_ui._redraw, first_interval=0.1)
+        except Exception as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Opening graph template; save edits, then Reload Group Graph")
+        return {"FINISHED"}
+
+
 class MINIHOU_PT_geonodes(bpy.types.Panel):
     bl_label = "MiniHou Wired Groups"
     bl_idname = "MINIHOU_PT_geonodes"
@@ -83,10 +105,18 @@ class MINIHOU_PT_geonodes(bpy.types.Panel):
             box.alert = text.startswith("Error")
             for offset in range(0, min(len(text), 400), 55):
                 box.label(text=text[offset:offset + 55])
+            box.operator("minihou.edit_group_network", icon="URL")
             box.operator("minihou.reload_group")
+            box.label(text="Template editing; reload to adopt changes.")
+            from . import network_ui
+            state = network_ui.router.snapshot()
+            if state["path"] == node.node_tree[modifiers.PATH]:
+                import textwrap
+                for line in textwrap.wrap(state["detail"], 48):
+                    box.label(text=line)
 
 
-_classes = (MINIHOU_OT_add_group, MINIHOU_OT_reload_group, MINIHOU_PT_geonodes)
+_classes = (MINIHOU_OT_add_group, MINIHOU_OT_reload_group, MINIHOU_OT_edit_group_network, MINIHOU_PT_geonodes)
 
 
 def register():

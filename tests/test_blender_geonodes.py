@@ -537,11 +537,14 @@ class GeometryNodesPlacementTests(unittest.TestCase):
                 self.assertTrue(bpy.ops.minihou.reload_group.poll())
                 self.assertEqual(bpy.ops.minihou.reload_group(), {"FINISHED"})
                 self.assert_x(obj, [3])
+                from unittest.mock import patch
+                from minihou_link import network_ui
+                with patch.object(network_ui.router, "start") as route:
+                    self.assertEqual(bpy.ops.minihou.edit_group_network(), {"FINISHED"})
+                    route.assert_called_once_with(minihou_link._server.snapshot(), str(self.path))
         finally:
             area.type = old_type
             minihou_link.unregister()
 
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]], verbosity=2)
-
-

@@ -1,4 +1,4 @@
-﻿"""Create a wired MiniHou example; run with Blender --python (see docs/GEONODES.md)."""
+"""Create a wired MiniHou example; run with Blender --python (see docs/GEONODES.md)."""
 import argparse
 from pathlib import Path
 import sys

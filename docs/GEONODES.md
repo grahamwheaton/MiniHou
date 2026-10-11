@@ -1,4 +1,4 @@
-﻿# MiniHou inside Geometry Nodes
+# MiniHou inside Geometry Nodes
 
 MiniHou wired groups process the mesh connected to their Geometry input through the external engine. Their output can feed native nodes and further independent MiniHou groups. This is a staged bridge: Blender evaluates the actual upstream socket on disposable object/group copies, the engine computes the result, and a private persistent mesh publishes that result to downstream Geometry Nodes. The saved result is a cache of that computation; it is not a substitute for reading the input.
 
@@ -38,7 +38,7 @@ Change the native scale, A's Scale, or B's Translate independently. The cube car
 2. Open the Geometry Nodes editor's sidebar (`N`), select **MiniHou**, and choose the graph JSON.
 3. Click **Add MiniHou Group**, then wire both Geometry sockets. The engine graph must use `modifier_input` on its output dependency path.
 4. Set each placement's exposed parameters on its group node. Click **Cook Wired Groups / Stack Now** for deterministic refresh.
-5. Select a placement to inspect its status. **Reload Group Graph** adopts the saved graph template for that placement while retaining matching parameter values.
+5. Select a placement to inspect its status. **Edit Network** uses the same safe external-editor routing as stack modifiers (Start/reuse a server first). Save there, then **Reload Group Graph** adopts that template for this placement while retaining matching parameter values. Editing is of the template, not live mutation of the stored snapshot. The editor session is shared with other tabs and the legacy proxy.
 
 Each placement stores a graph snapshot in the blend. Editing a graph file does not silently replace existing snapshots. Duplicate objects/groups receive independent placement identities and caches. Ancestor groups that contain MiniHou placements become private when shared, so independent objects and nested placements cannot overwrite one another's results. Ordinary native groups without placements can remain shared.
 

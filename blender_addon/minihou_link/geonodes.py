@@ -65,7 +65,7 @@ def add_group(tree, graph_path, *, host=None, port=None):
     import os
     path = os.path.abspath(bpy.path.abspath(graph_path))
     header = modifiers._connection(host, port).describe(path)
-    ng = bpy.data.node_groups.new("MiniHou · " + os.path.basename(path), "GeometryNodeTree")
+    ng = bpy.data.node_groups.new("MiniHou - " + os.path.basename(path), "GeometryNodeTree")
     ng[KEY] = uuid.uuid4().hex
     ng[modifiers.PATH] = path
     ng[modifiers.GRAPH] = json.dumps(header["graph"])
