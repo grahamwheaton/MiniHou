@@ -23,6 +23,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from . import timectx
 from .geometry import Geometry
 from .graph import Graph, GraphError
 from .sdk import REGISTRY, Registry
@@ -174,16 +175,23 @@ class Evaluator:
                     in_keys.append(keys[ref])
             payload = json.dumps(
                 [nt.name, nt.version, [[p.name, p.to_json_value(params[p.name])] for p in nt.params], in_keys]
-                + ([nt.code_hash] if nt.code_hash else []) + ([nt.key_extra(params)] if nt.key_extra else []),
+                + ([nt.code_hash] if nt.code_hash else []) + ([nt.key_extra(params)] if nt.key_extra else [])
+                + ([timectx.key()] if timectx.params_use_time(params) else []),
                 separators=(",", ":"), allow_nan=False)
             keys[nid] = hashlib.blake2b(payload.encode("utf-8"), digest_size=16).hexdigest()
         return keys
 
     # -- cooking -----------------------------------------------------------
     def cook(self, graph: Graph, target: Optional[str] = None,
-             feeds: Optional[Dict[str, Tuple[str, Geometry]]] = None) -> Geometry:
+             feeds: Optional[Dict[str, Tuple[str, Geometry]]] = None, frame: Optional[float] = None,
+             fps: Optional[float] = None) -> Geometry:
         """Cook ``target`` (default: the display node). ``feeds`` supplies some nodes' results from outside as
-        ``{node_id: (cache_key, geometry)}``; their upstream is not cooked (how systems receive their inputs)."""
+        ``{node_id: (cache_key, geometry)}``; their upstream is not cooked (how systems receive their inputs).
+        ``frame``/``fps`` set the time for ``@Frame``/``@Time`` (default: the surrounding cook's, else frame 1)."""
+        with timectx.at(frame, fps):
+            return self._cook(graph, target, feeds)
+
+    def _cook(self, graph: Graph, target: Optional[str], feeds) -> Geometry:
         t_start = time.perf_counter()
         feeds = feeds or {}
         target = target or graph.output_node()

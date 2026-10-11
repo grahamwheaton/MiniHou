@@ -363,8 +363,18 @@ def _system_type(name: str, path: Path, graph, text: str, registry: Registry):
             stack.pop()
 
     doc = graph.doc or f"System defined by {path.name}."
+    # time inside the system (its own snippets, or a nested system that uses time) must reach the outer cache key
+    from . import timectx
+    timed = bool(timectx.USES_TIME.search(text)) or any(t in registry and registry.get(t).key_extra is _time_key
+                                                         for t in used)
     return NodeType(name=name, fn=run, inputs=tuple(inputs), params=tuple(params), outputs=(Output("geo"),),
-                    category="system", doc=doc, source=str(path), code_hash=code_hash)
+                    category="system", doc=doc, source=str(path), code_hash=code_hash,
+                    key_extra=_time_key if timed else None)
+
+
+def _time_key(params) -> str:
+    from . import timectx
+    return timectx.key()
 
 
 def _describe_error(e: BaseException, src: str) -> str:

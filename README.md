@@ -140,6 +140,8 @@ All examples are cooked by the test-suite, so they keep working as nodes evolve.
 | `convert_line` | geo | every edge to curves (joined into polylines), e.g. wireframes with `sweep` |
 | `polypath` | geo | join curves that share end points |
 | `instance` | points | points become instances of **Blender objects** (random, cycled or by attribute; aligned to N or upright; random spin and scale) |
+| `for_each` | geo | run a node or a system on every piece (connected pieces, an attribute's values, or each primitive) and merge |
+| `solver` | geo | feed each frame's result into the next (simulations, growth): deterministic, incremental playback, substeps |
 | `wrangle` | geo | VEX-like snippet over points, primitives or vertices (see below) |
 | `attribute_delete` | geo | delete attributes by name or wildcard (`N uv tmp_*`) |
 | `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |
@@ -186,6 +188,16 @@ object and the rotation and scale per point (`instance`, `rot`, `scale` point at
 million points on the wire, not a million copies, and the objects stay editable in Blender (edit the tree, every
 instance follows). Merge instance points with other geometry freely: lists from several `instance` nodes are combined.
 Missing objects are reported in the add-on panel's log and place nothing.
+
+### Time, loops and solvers
+
+Blender's timeline drives the engine: wrangles read `@Frame`, `@Time` (seconds, frame 1 = 0) and `@TimeInc`, as in
+Houdini, and only nodes whose parameters mention them recook when the frame changes (keyframed modifier inputs keep
+working as before). `for_each` runs any node type -- typically a **system** graph -- on each piece, with `@iteration`,
+`@numiterations` and `@value` readable inside (detail attributes read as constants). `solver` applies its body to the
+previous frame's result: e.g. body `wrangle` with params `{"snippet": "v@v += set(0, 0, -9.8) * @TimeInc; @P += @v *
+@TimeInc"}` drops points under gravity. A given frame always gives the same result, playing forward steps once per
+frame, and scrubbing back is served from memory.
 
 ### Wrangle snippets (the attribute wrangle)
 

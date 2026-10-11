@@ -18,8 +18,12 @@ Language
   moves the attribute to the domain being run over (an attribute name lives on one domain, as in Blender).
 * Read-only: ``@ptnum`` (over vertices: the corner's point), ``@primnum``, ``@vtxnum``, ``@numpt``, ``@numprim``,
   ``@numvtx``, and over primitives or vertices ``@closed`` (1 for a polygon, 0 for an open curve).
+* Time: ``@Frame`` (Blender's current frame) and ``@Time`` (seconds, frame 1 = 0), like Houdini's $F and $T, and
+  ``@TimeInc`` (seconds per step: 1/fps, or a solver substep). A node whose snippet uses them recooks when the frame
+  changes; nothing else does.
 * Names that Blender treats natively: ``@uv`` (UV map), ``@Cd`` (color attribute), ``@N`` (normals),
   ``@material_index``, ``@sharp_face`` (flat shading).
+* Detail attributes (one value for the whole geometry, e.g. ``@iteration`` inside a for_each) read as constants.
 * Groups are ints named ``group_<name>``, as in VEX: ``@group_top`` reads one (1 or 0), ``i@group_tall = @P.z > 2`` makes one.
   The node's ``group`` field limits which elements change (a pattern: ``top ^side``, ``0-9``, ``@P.z > 0``).
 * Operators: ``+ - * / // % **``, comparisons, ``and or not``, ``a if cond else b``; assignment and ``+= -= *= /=``.
@@ -53,7 +57,7 @@ _PREFIX_TYPES = {"f": "float", "v": "vector", "i": "int", "u": "vector2", "p": "
 _WIDTH = {"float": 1, "int": 1, "vector2": 2, "vector": 3, "vector4": 4}
 _ATTR_RE = re.compile(r"(?<![A-Za-z0-9_])([fviup]?)@([A-Za-z_][A-Za-z0-9_]*)")
 _MANGLE = "__attr_"
-_READONLY = {"ptnum", "numpt", "primnum", "numprim", "vtxnum", "numvtx", "closed"}
+_READONLY = {"ptnum", "numpt", "primnum", "numprim", "vtxnum", "numvtx", "closed", "Frame", "Time", "TimeInc"}
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +176,10 @@ class Program:
         ``specials`` are the read-only ``@ptnum``-style values (default: a point wrangle's). Returns the written
         attributes (new arrays)."""
         if specials is None:
-            specials = {"ptnum": np.arange(n, dtype=np.int32).reshape(-1, 1), "numpt": np.int32(n)}
+            from . import timectx
+            specials = {"ptnum": np.arange(n, dtype=np.int32).reshape(-1, 1), "numpt": np.int32(n),
+                        "Frame": np.float32(timectx.frame()), "Time": np.float32(timectx.seconds()),
+                        "TimeInc": np.float32(timectx.time_inc())}
         missing = sorted(self.reads - set(attrs) - set(self.writes) - set(specials))
         if missing:
             avail = sorted(set(attrs) | set(specials))

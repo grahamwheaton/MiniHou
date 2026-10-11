@@ -137,6 +137,11 @@ class _Connection:
                 self.post({"type": "error", "where": "object_geo", "message": f"{name}: {e}"})
                 return
             self.session.object_received(name, geo, h.get("matrix"), info=h.get("info") or {})
+        elif t == "set_frame":
+            try:
+                self.session.set_frame(float(h.get("frame", 1.0)), h.get("fps"))
+            except (TypeError, ValueError):
+                self.post({"type": "error", "where": "set_frame", "message": f"bad frame {h.get('frame')!r}"})
         elif t == "object_missing":
             self.session.object_received(str(h.get("object", "")), None, error=str(h.get("reason", "not found")))
         elif t == "ping":

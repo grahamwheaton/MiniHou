@@ -31,6 +31,7 @@ from ..edit import apply_ops, layout_missing
 from ..evaluator import Cache, DEFAULT_CACHE_BYTES, Evaluator, NodeError
 from ..geometry import Geometry
 from ..graph import Graph, GraphError
+from .. import timectx
 from ..inputs import INPUTS
 from ..sdk import ParamError, Registry
 from ..summary import summarize
@@ -109,6 +110,8 @@ class Session:
         self.save_error: Optional[str] = None
         self.library = None                           # minihou.library.NodeLibrary, if attached
         self._watched: List[str] = []
+        self.frame = 1.0                 # current time (Blender's frame), for @Frame / @Time
+        self.fps = timectx.DEFAULT_FPS
         self._save_enabled = False
         self._stamp = None
         self._file_lock = threading.RLock()           # saving vs. noticing external changes
@@ -233,6 +236,17 @@ class Session:
             return sorted({str(inst.params.get("object") or "") for inst in self.graph.nodes.values()
                            if inst.type == "blender_object"} - {""})
 
+    def set_frame(self, frame: float, fps: Optional[float] = None) -> None:
+        """The timeline moved (Blender sends this). Recooks only nodes that use @Frame / @Time; not a graph edit."""
+        frame = float(frame)
+        fps = float(fps) if fps else self.fps
+        with self.lock:
+            if frame == self.frame and fps == self.fps:
+                return
+            self.frame, self.fps = frame, fps
+            self._rev += 1
+            self._wake.set()
+
     def object_received(self, name: str, geo, matrix=None, error: str = "", info: Optional[dict] = None) -> None:
         """New data for a Blender object (or why there is none). Recooks what depends on it; not a graph edit."""
         INPUTS.put(name, geo, matrix, error, info)
@@ -304,10 +318,11 @@ class Session:
         with self.lock:
             rev = self._rev
             snapshot = self.graph.copy()
+            frame, fps = self.frame, self.fps
         t0 = time.perf_counter()
         published: Optional[Result] = None
         try:
-            with self._cook_lock:
+            with self._cook_lock, timectx.at(frame, fps):
                 geo = self.evaluator.cook(snapshot)
                 stats = self.evaluator.last_stats
                 self.evaluator.cache.retain(self.evaluator.live_keys(snapshot))
@@ -342,7 +357,8 @@ class Session:
         """Outcome of the newest cook: ok/error, counts, timings, and whether it is up to date."""
         with self.lock:
             good, err, rev = self.latest_good, self.latest_error, self._rev
-        out: Dict[str, Any] = {"rev": rev, "cooked_rev": self._cooked_rev, "busy": self._cooked_rev < rev}
+        out: Dict[str, Any] = {"rev": rev, "cooked_rev": self._cooked_rev, "busy": self._cooked_rev < rev,
+                               "frame": self.frame}
         if err is not None:
             out.update(ok=False, error=err.error)
         else:
@@ -357,11 +373,12 @@ class Session:
         with self.lock:
             snapshot = self.graph.copy()
             rev = self._rev
+            frame, fps = self.frame, self.fps
         if node not in snapshot.nodes:
             return {"node": node, "rev": rev, "ok": False, "error": {"node": node, "message": f"no such node {node!r}"}}
         t0 = time.perf_counter()
         try:
-            with self._cook_lock:
+            with self._cook_lock, timectx.at(frame, fps):
                 geo = self.evaluator.cook(snapshot, node)
                 stats = self.evaluator.last_stats.to_dict()
         except (NodeError, GraphError, ParamError) as e:

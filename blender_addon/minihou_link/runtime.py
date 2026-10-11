@@ -79,6 +79,8 @@ class Runtime:
         self._object_present: Dict[str, bool] = {}
         self._last_existence = 0.0
         self._missing_instances: List[str] = []
+        self.frame_dirty = True                 # send the current frame after connecting
+        self._sent_frame = None
 
     # -- lifecycle ---------------------------------------------------------
     def connect(self, host: str = "127.0.0.1", port: int = 8765) -> None:
@@ -93,6 +95,9 @@ class Runtime:
             self._timer_on = True
         if _depsgraph_post not in bpy.app.handlers.depsgraph_update_post:
             bpy.app.handlers.depsgraph_update_post.append(_depsgraph_post)
+        if _frame_change not in bpy.app.handlers.frame_change_post:
+            bpy.app.handlers.frame_change_post.append(_frame_change)
+        self.frame_dirty, self._sent_frame = True, None
         self._log(f"connecting to {host}:{port}")
 
     def disconnect(self) -> None:
@@ -104,6 +109,8 @@ class Runtime:
         self._ui_dirty = True
         if _depsgraph_post in bpy.app.handlers.depsgraph_update_post:
             bpy.app.handlers.depsgraph_update_post.remove(_depsgraph_post)
+        if _frame_change in bpy.app.handlers.frame_change_post:
+            bpy.app.handlers.frame_change_post.remove(_frame_change)
 
     def _log(self, msg: str) -> None:
         line = f"[minihou] {msg}"
@@ -141,6 +148,8 @@ class Runtime:
                 busy = self._forward_params() or busy
             if self.watched:
                 busy = self._send_objects() or busy
+            if self.frame_dirty:
+                busy = self._send_frame() or busy
             if self._ui_dirty:
                 self._ui_dirty = False
                 _tag_redraw()
@@ -163,6 +172,7 @@ class Runtime:
         elif t == "welcome":
             self.last_error = ""
             self._log(f"connected to engine (protocol {e.get('protocol')})")
+            self.frame_dirty, self._sent_frame = True, None       # a (re)started engine needs the time
         elif t == "watch_objects":
             self.watched = [str(n) for n in e.get("objects", [])]
             self.dirty_objects = set(self.watched)       # (re)send everything: the engine may have restarted
@@ -248,6 +258,22 @@ class Runtime:
         if sent:
             self._last_forward = now
         return sent
+
+    def _send_frame(self) -> bool:
+        """Tell the engine the current frame (for @Frame / @Time). Latest wins; repeats are not sent."""
+        if self.client is None or self.state != "connected":
+            return False
+        scene = bpy.context.scene
+        frame = float(scene.frame_current) + float(scene.frame_subframe)
+        fps = float(scene.render.fps) / float(scene.render.fps_base or 1.0)
+        self.frame_dirty = False
+        if (frame, fps) == self._sent_frame:
+            return False
+        if self.client.send({"type": "set_frame", "frame": frame, "fps": fps}):
+            self._sent_frame = (frame, fps)
+            return True
+        self.frame_dirty = True
+        return False
 
     def _send_objects(self) -> bool:
         """Send watched objects that changed (main thread). Returns True if anything was sent."""
@@ -341,6 +367,14 @@ def _depsgraph_post(scene, depsgraph) -> None:
                 rt.dirty_objects.add(name)
 
 
+@persistent
+def _frame_change(scene, depsgraph=None) -> None:
+    """The timeline moved: flag it (the timer sends it). Never writes bpy data."""
+    rt = _runtime
+    if rt is not None and rt.client is not None:
+        rt.frame_dirty = True
+
+
 def _tag_redraw() -> None:
     wm = bpy.context.window_manager
     if wm is None:
@@ -357,4 +391,6 @@ def shutdown() -> None:
         _runtime.disconnect()
     if _depsgraph_post in bpy.app.handlers.depsgraph_update_post:
         bpy.app.handlers.depsgraph_update_post.remove(_depsgraph_post)
+    if _frame_change in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.remove(_frame_change)
     _runtime = None

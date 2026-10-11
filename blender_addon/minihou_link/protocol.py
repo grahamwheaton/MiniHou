@@ -19,7 +19,8 @@ The receiver reads header+blob into one ``bytearray`` and exposes arrays as zero
 
 Message types (``header["type"]``)
 ----------------------------------
-client -> server: ``hello``, ``set_param``, ``resync``, ``ping``, ``object_geo``, ``object_missing``
+client -> server: ``hello``, ``set_param``, ``resync``, ``ping``, ``object_geo``, ``object_missing``, ``set_frame``
+(``{frame, fps}``: the timeline moved; nodes using @Frame / @Time recook)
 server -> client: ``welcome``, ``interface``, ``geo``, ``error``, ``status``, ``pong``, ``watch_objects``
 
 ``watch_objects`` lists the Blender objects the graph reads (``blender_object`` nodes). The client answers with

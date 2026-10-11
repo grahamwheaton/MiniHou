@@ -167,8 +167,17 @@ Worked through in order of how often Houdini users reach for them:
    attributes to the polygons) and loose edges come back as curves. Deleting points splits curves into runs.
    Sweep uses double-reflection rotation-minimising frames (Wang et al. 2008).
 
-Next: packed instancing (Blender instances on points instead of copies), for-each loops, time-dependent cooks
-(`$F`) and a solver.
+5. **Instancing**: the engine writes `instance`/`rot`/`scale` point attributes and the detail `instance_objects`; the
+   proxy's Geometry Nodes branch (Object Info as instance -> Geometry to Instance -> Instance on Points) is rebuilt only
+   when the object list changes.
+6. **Time, for-each, solver**: the frame is a context variable set per cook (`minihou/timectx.py`); any string
+   parameter mentioning `@Frame`/`@Time`/`@TimeInc` puts the time in that node's cache key (systems and for_each
+   bodies propagate it). The add-on sends `set_frame` from a `frame_change_post` handler (flag only, sent by the
+   timer). `for_each` calls the body node per piece; `solver` memoises frames per input geometry (weakly) so the result
+   for a frame never depends on the playback path.
+
+Next candidates: VDB-style volumes/SDFs (remesh, boolean), poly bevel, boolean, UV tools (uv project/unwrap), an
+editor frame slider, numba kernels for closest-point queries.
 
 ## Systems (graphs as nodes)
 

@@ -1,6 +1,6 @@
 import numpy as np
 
-from .. import groups
+from .. import groups, timectx
 from ..sdk import Enum, Str, node
 from ..wrangle import WrangleError, compile_snippet
 
@@ -92,12 +92,25 @@ class _Domains:
                 return self.per_prim_mean(g.point[name][g.topology.vertex_point])
             if name in g.vertex:
                 return self.per_prim_mean(g.vertex[name])
+        if name in g.detail:                                   # detail attributes read as constants (VEX's detail())
+            v = g.detail[name]
+            try:
+                a = np.asarray(v, dtype=np.float64)
+            except (TypeError, ValueError):
+                return None
+            if a.ndim > 1 or a.size > 4 or not np.isfinite(a).all():
+                return None
+            n = {"point": g.npoints, "prim": g.nprims, "vertex": g.nvertices}[dom]
+            kind = np.int32 if isinstance(v, (int, bool, np.integer)) else np.float32
+            return np.repeat(a.reshape(1, -1), n, axis=0).astype(kind).reshape((n,) if a.ndim == 0 else (n, a.size))
         return None
 
     def specials(self, dom: str) -> dict:
         g = self.geo
         col = lambda a: np.asarray(a, np.int32).reshape(-1, 1)  # noqa: E731
-        s = {"numpt": np.int32(g.npoints), "numprim": np.int32(g.nprims), "numvtx": np.int32(g.nvertices)}
+        s = {"numpt": np.int32(g.npoints), "numprim": np.int32(g.nprims), "numvtx": np.int32(g.nvertices),
+             "Frame": np.float32(timectx.frame()), "Time": np.float32(timectx.seconds()),
+             "TimeInc": np.float32(timectx.time_inc())}
         if dom == "point":
             s["ptnum"] = col(np.arange(g.npoints))
         elif dom == "prim":

@@ -247,6 +247,24 @@ class AddonIntegrationTests(unittest.TestCase):
         self.pump(lambda: not instances(), timeout=30)
         self.assertFalse([n for n in bpy.data.node_groups[self.proxy.GROUP].nodes if n.name.startswith("MH_inst_")])
 
+    def test_timeline_drives_frame_dependent_nodes(self):
+        graph = {"version": 1, "nodes": {
+            "g": {"type": "grid", "params": {"columns": 3, "rows": 3}},
+            "w": {"type": "wrangle", "inputs": {"geo": "g"}, "params": {"snippet": "@P.z = @Frame * 0.5"}},
+            "o": {"type": "output", "inputs": {"geo": "w"}}}, "display": "o"}
+        self.graph_path.write_text(json.dumps(graph), encoding="utf-8")
+        proxy_obj = lambda: bpy.data.objects.get(self.proxy.PROXY_OBJECT)  # noqa: E731
+
+        def z():
+            o = proxy_obj()
+            return float(evaluated_positions(o)[:, 2].max()) if o is not None and len(o.evaluated_get(
+                bpy.context.evaluated_depsgraph_get()).data.vertices) == 9 else None
+
+        bpy.context.scene.frame_set(10)
+        self.pump(lambda: z() is not None and abs(z() - 5.0) < 1e-5, timeout=60)
+        bpy.context.scene.frame_set(24)
+        self.pump(lambda: abs(z() - 12.0) < 1e-5, timeout=30)
+
     def make_source_object(self, name="Src"):
         """A 2x2-face mesh with native data: UV map, point color, material indices, a vertex group, a float attribute."""
         verts = [(x, y, 0.0) for y in range(3) for x in range(3)]
