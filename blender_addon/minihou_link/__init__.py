@@ -254,7 +254,7 @@ class MINIHOU_PT_main(bpy.types.Panel):
                 box.label(text=line)
         stack = layout.box()
         stack.label(text="Mesh Stack Instances")
-        stack.operator("minihou.add_modifier", icon="MOD_NODES")
+        stack.operator("minihou.add_modifier", icon="MODIFIER")
         stack.operator("minihou.refresh_modifiers", icon="FILE_REFRESH")
         stack.label(text="Interactive caches; cook before still renders.")
         if context.object:
