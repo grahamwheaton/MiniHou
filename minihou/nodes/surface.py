@@ -4,7 +4,7 @@ import numpy as np
 from .. import hull as hl
 from .. import topo
 from ..geometry import Geometry
-from ..sdk import Float, Str, node
+from ..sdk import Bool, Float, Int, Str, node
 from . import _build as B
 from ._util import normalize_rows
 from .model import _prim_sel, compact_points
@@ -92,3 +92,58 @@ def dissolve(geo, group, angle):
     msz, mrep = msz[order], mrep[order]
     return B.make(geo.P, vp[cidx], B.offsets_from_sizes(msz), dict(geo.point.items()),
                   {n: arr[cidx] for n, arr in geo.vertex.items()}, B.gather(geo.prim, mrep), geo.detail)
+
+
+# -- skin -------------------------------------------------------------------------------------------------------
+@node("skin", inputs=["geo"], category="modify", params=[
+    Int("samples", 0, min=0, soft_max=200, doc="Points per curve after resampling by length (0: the most any curve has)"),
+    Bool("loop", False, doc="Join the last curve back to the first (a tube from rings)"),
+    Bool("cap", False, doc="Fill the first and last curve with a face when the curves are closed (ignored with loop)"),
+])
+def skin(geo, samples, loop, cap):
+    """Stretch a surface across a row of curves (Houdini's Skin / loft): every curve is resampled to the same number
+    of points by arclength and consecutive curves are joined with quads, in primitive order. Closed curves give
+    tubes (closed in the other direction too with `loop`). Writes `uv` (u along the curves, v across them)."""
+    t = geo.topology
+    if t.nprims < 2:
+        raise ValueError("skin needs at least two curves (primitives)")
+    offs = t.prim_offsets.astype(np.int64)
+    P = geo.P.astype(np.float64)
+    vp = t.vertex_point.astype(np.int64)
+    closed = t.closed_mask()
+    if closed.any() and not closed.all():
+        raise ValueError("skin: mix of open and closed curves; all curves must be open or all closed")
+    sizes = np.diff(offs)
+    if (sizes < 2).any():
+        raise ValueError("skin: every curve needs at least two points")
+    isclosed = bool(closed[0])
+    n = int(samples) or int(sizes.max())
+    n = max(n, 3 if isclosed else 2)
+    rows = []
+    for p in range(t.nprims):
+        pts = P[vp[offs[p]:offs[p + 1]]]
+        if isclosed:
+            pts = np.concatenate([pts, pts[:1]])
+        seg = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+        s = np.concatenate([[0.0], np.cumsum(seg)])
+        total = s[-1] if s[-1] > 0 else 1.0
+        u = np.arange(n) / n if isclosed else np.linspace(0.0, 1.0, n)
+        rows.append(np.stack([np.interp(u * total, s, pts[:, a]) for a in range(3)], 1))
+    M = len(rows)
+    pos = np.concatenate(rows)
+    nu = n if isclosed else n - 1                           # quads along a curve
+    nv = M if loop else M - 1                               # quads across
+    i, j = np.meshgrid(np.arange(nv), np.arange(nu), indexing="ij")
+    i, j = i.ravel(), j.ravel()
+    i1, j1 = (i + 1) % M, (j + 1) % n
+    quads = np.stack([i * n + j, i * n + j1, i1 * n + j1, i1 * n + j], 1)
+    sizes_out = [4] * len(quads)
+    verts = [quads.reshape(-1)]
+    if cap and isclosed and not loop:
+        verts += [np.arange(n)[::-1], (M - 1) * n + np.arange(n)]
+        sizes_out += [n, n]
+    uv = np.stack([np.tile(np.arange(n) / (n if isclosed else n - 1), M),
+                   np.repeat(np.arange(M) / (M if loop else M - 1), n)], 1).astype(np.float32)
+    vertex_point = np.concatenate(verts).astype(np.int32)
+    out = B.make(pos, vertex_point, B.offsets_from_sizes(sizes_out), {"uv": uv})
+    return out

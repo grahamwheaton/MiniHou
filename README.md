@@ -148,6 +148,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `clip` | geo | cut with a plane; keep above, below or both (new points interpolate attributes) |
 | `polyfill` | geo | close holes with n-gons facing outwards |
 | `convex_hull` | geo | the smallest convex closed mesh around the points (Qhull via SciPy, or a numpy incremental hull) |
+| `skin` | geo | loft: resample the input curves to one point count and join consecutive curves with quads (`loop`, `cap`) |
 | `dissolve` | geo | merge neighbouring faces that are flat within `angle` into n-gons (`group` limits it) |
 | `delaunay` | geo | 2-D Delaunay triangulation of the points (`axis`; `max_edge` cuts long triangles); SciPy if installed, else pure Python |
 | `divide` | geo | triangulate (fans for convex polygons, ear clipping for concave ones) |
