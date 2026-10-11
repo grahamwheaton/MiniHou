@@ -212,3 +212,144 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _system(nodes, display="out", exposed=(), doc=""):
+    d = {"version": 1, "nodes": nodes, "display": display, "exposed": list(exposed)}
+    if doc:
+        d["doc"] = doc
+    return json.dumps(d)
+
+
+LIFTER = {"preview": {"type": "grid", "params": {"columns": 2, "rows": 2}},
+          "inp": {"type": "input", "inputs": {"preview": "preview"}, "params": {"name": "src"}},
+          "move": {"type": "transform", "inputs": {"geo": "inp"}, "params": {"translate": [0, 0, 1]}},
+          "out": {"type": "output", "inputs": {"geo": "move"}}}
+
+
+class SystemTests(unittest.TestCase):
+    """Graph files in a node folder used as node types ("systems", like Houdini digital assets)."""
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix="minihou_sys_"))
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.lib = NodeLibrary([self.dir])
+        self.addCleanup(self.lib.unload)
+        self.tag = f"{os.getpid()}"
+
+    def write(self, name, text):
+        p = self.dir / f"{name}.json"
+        old = p.stat().st_mtime_ns if p.exists() else 0
+        p.write_text(text, encoding="utf-8")
+        if p.stat().st_mtime_ns == old:
+            os.utime(p, ns=(old + 1_000_000, old + 1_000_000))
+        return p
+
+    def error(self, name):
+        return next(f["error"] for f in self.lib.status()["files"] if Path(f["file"]).stem == name)
+
+    def use(self, system, **params):
+        return Graph.from_dict({"nodes": {"g": {"type": "grid", "params": {"columns": 3, "rows": 3}},
+                                          "s": {"type": system, "inputs": {"src": "g"}, "params": params}},
+                                "display": "s"}, check=False)
+
+    def test_inputs_params_and_doc_come_from_the_graph(self):
+        name = f"lifter_{self.tag}"
+        self.write(name, _system(LIFTER, exposed=[{"name": "Lift By", "node": "move", "param": "translate"}],
+                                 doc="Moves things up."))
+        self.lib.refresh()
+        nt = REGISTRY.get(name)
+        self.assertEqual([i.name for i in nt.inputs], ["src"])
+        self.assertEqual([(p.name, p.kind, p.label, p.default) for p in nt.params],
+                         [("lift_by", "vec3", "Lift By", (0.0, 0.0, 1.0))])
+        self.assertEqual((nt.doc, nt.category), ("Moves things up.", "system"))
+        geo = Evaluator().cook(self.use(name, lift_by=[0, 0, 5]))
+        self.assertEqual(geo.npoints, 9)                                     # the outer grid, not the preview
+        self.assertAlmostEqual(float(geo.P[:, 2].max()), 5.0)
+        unwired = Graph.from_dict({"nodes": {"s": {"type": name}}, "display": "s"})
+        self.assertEqual(Evaluator().cook(unwired).npoints, 4)              # unconnected input: the preview
+
+    def test_editing_a_system_updates_graphs_that_use_it(self):
+        name = f"lifter_{self.tag}"
+        self.write(name, _system(LIFTER))
+        self.lib.refresh()
+        ev, g = Evaluator(), self.use(name)
+        self.assertAlmostEqual(float(ev.cook(g).P[:, 2].max()), 1.0)
+        changed = json.loads(json.dumps(LIFTER))
+        changed["move"]["params"]["translate"] = [0, 0, 3]
+        self.write(name, _system(changed))
+        self.assertTrue(self.lib.refresh())
+        self.assertAlmostEqual(float(ev.cook(g).P[:, 2].max()), 3.0)          # not the cached old result
+        self.assertIn("g", ev.last_stats.cached)
+
+    def test_nested_systems_and_dependency_hashes(self):
+        inner, outer = f"zz_inner_{self.tag}", f"aa_outer_{self.tag}"           # outer sorts first: order must not matter
+        self.write(inner, _system(LIFTER))
+        self.write(outer, _system({
+            "inp": {"type": "input", "params": {"name": "src"}},
+            "twice_a": {"type": inner, "inputs": {"src": "inp"}},
+            "twice_b": {"type": inner, "inputs": {"src": "twice_a"}},
+            "out": {"type": "output", "inputs": {"geo": "twice_b"}}}))
+        self.lib.refresh()
+        self.assertIsNone(self.error(outer))
+        ev, g = Evaluator(), self.use(outer)
+        self.assertAlmostEqual(float(ev.cook(g).P[:, 2].max()), 2.0)
+        changed = json.loads(json.dumps(LIFTER))
+        changed["move"]["params"]["translate"] = [0, 0, 10]
+        self.write(inner, _system(changed))                                  # only the inner file changes...
+        self.lib.refresh()
+        self.assertAlmostEqual(float(ev.cook(g).P[:, 2].max()), 20.0)         # ...and the outer system follows
+
+    def test_a_system_that_uses_itself_is_an_error(self):
+        a, b = f"loop_a_{self.tag}", f"loop_b_{self.tag}"
+        self.write(a, _system({"x": {"type": b}, "out": {"type": "output", "inputs": {"geo": "x"}}}))
+        self.write(b, _system({"x": {"type": a}, "out": {"type": "output", "inputs": {"geo": "x"}}}))
+        self.lib.refresh()
+        self.assertIn("uses itself", self.error(a))
+        self.assertIn("uses itself", self.error(b))
+        self.assertNotIn(a, REGISTRY)
+
+    def test_bad_system_files_are_reported(self):
+        self.write("bad-name", _system(LIFTER))
+        self.write(f"broken_{self.tag}", "{not json")
+        self.write("noise", _system(LIFTER))                                  # would shadow a built-in
+        self.write(f"badexpose_{self.tag}", _system(LIFTER, exposed=[{"name": "X", "node": "move", "param": "nope"}]))
+        self.lib.refresh()
+        self.assertIn("valid node name", self.error("bad-name"))
+        self.assertIn("cannot read", self.error(f"broken_{self.tag}"))
+        self.assertIn("already exists (built in)", self.error("noise"))
+        self.assertIn("nope", self.error(f"badexpose_{self.tag}"))
+        self.assertEqual(REGISTRY.get("noise").source, "")
+
+    def test_example_system_and_graph(self):
+        ex = NodeLibrary([os.path.join(ROOT, "nodes")])
+        self.addCleanup(ex.unload)
+        ex.refresh()
+        self.assertEqual({f["error"] for f in ex.status()["files"]}, {None})
+        nt = REGISTRY.get("rock_scatter")
+        self.assertEqual(nt.category, "system")
+        g = Graph.load(os.path.join(ROOT, "examples", "graphs", "rocky_hills.json"))
+        geo = Evaluator().cook(g)
+        self.assertGreater(geo.nprims, 1000)
+
+
+class SystemSessionTests(unittest.TestCase):
+    def test_editing_an_open_system_file_reloads_its_node_type(self):
+        d = Path(tempfile.mkdtemp(prefix="minihou_sys_"))
+        self.addCleanup(shutil.rmtree, d, True)
+        name = f"lifter_s_{os.getpid()}"
+        path = d / f"{name}.json"
+        path.write_text(_system(LIFTER), encoding="utf-8")
+        lib = NodeLibrary([d])
+        self.addCleanup(lib.unload)
+        lib.refresh()
+        s = Session(Graph.load(path, check=False))                          # the system graph itself is open
+        s.start()
+        self.addCleanup(s.stop)
+        s.watch_file(path, interval=0.02)
+        s.attach_library(lib, interval=0.02)
+        h0 = REGISTRY.get(name).code_hash
+        s.edit([{"op": "set", "id": "move", "params": {"translate": [0, 0, 7]}}])     # saved by the session...
+        self.assertTrue(until(lambda: REGISTRY.get(name).code_hash != h0))           # ...reloaded as a node type
+        g = Graph.from_dict({"nodes": {"x": {"type": name}}, "display": "x"})
+        self.assertAlmostEqual(float(Evaluator().cook(g).P[:, 2].max()), 7.0)

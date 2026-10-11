@@ -15,10 +15,14 @@ you trust in a node folder. Opening a graph never executes code; graphs refer to
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+import re
 import threading
 import traceback
 import types
+import uuid
+import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
@@ -88,6 +92,12 @@ Geometry API
   Topology.from_polys([[0, 1, 2, 3], ...]) for small cases; out.set_topology(t) resets vertex/prim tables
 * Faces are counter-clockwise when seen from outside (normals point out). Z is up; units are Blender metres.
 The built-in nodes in minihou/nodes/*.py are complete examples (transform.py and noise.py are short).
+
+Systems (no Python): a graph file saved in the node folder, e.g. nodes/rock_scatter.json, is also a node type, named after
+the file. Inside it, `input` nodes (params: index, name) are the system's inputs (wire a stand-in into an input's `preview`
+port to build it); its exposed parameters become the system node's parameters; its display node is the output; the graph's
+top-level "doc" is the node's description. Build one with open_graph("nodes/<name>.json", create=true) + edit_graph, then
+open the graph that should use it and add a node of type <name>. Systems can use other systems and library nodes.
 """
 
 
@@ -108,17 +118,20 @@ class NodeLibrary:
 
     # -- scanning ----------------------------------------------------------------------------------
     def scan(self) -> List[Path]:
+        """Python node files, then system graphs (*.json), per folder."""
         out = []
-        for d in self.dirs:
-            if d.is_dir():
-                out.extend(sorted(p for p in d.glob("*.py") if not p.name.startswith(("_", "."))))
+        for pattern in ("*.py", "*.json"):
+            for d in self.dirs:
+                if d.is_dir():
+                    out.extend(sorted(p for p in d.glob(pattern) if not p.name.startswith(("_", "."))))
         return out
 
     def refresh(self) -> bool:
         """Load new or changed files, drop deleted ones. Returns True if node types or errors changed."""
-        changed = False
+        changed = systems_changed = False
         current = self.scan()
         for path in [p for p in self.files if p not in current]:
+            systems_changed |= path.suffix == ".json"
             for name in self.files[path].types:
                 self.registry.unregister(name)
             del self.files[path]
@@ -133,6 +146,9 @@ class NodeLibrary:
             entry = self.files.get(path)
             if entry is not None and entry.stamp == stamp:
                 continue
+            if path.suffix == ".json":
+                systems_changed = True                  # (re)built together below, in dependency order
+                continue
             try:
                 text = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as e:
@@ -145,6 +161,11 @@ class NodeLibrary:
                 entry.stamp = stamp                     # touched, not changed
                 continue
             self._load(path, text, h, stamp)
+            changed = True
+        if changed or systems_changed:
+            # A system's cache hash covers the code of every node type inside it, so any change re-derives them all
+            # (cheap: small JSON files). Unchanged results keep their keys and stay cached.
+            self._load_systems([p for p in current if p.suffix == ".json"])
             changed = True
         return changed
 
@@ -177,6 +198,75 @@ class NodeLibrary:
         else:
             log.info("node library: loaded %s (%s)", path.name, ", ".join(new))
 
+    # -- systems: graph files as node types ----------------------------------------------------------------
+    def _load_systems(self, paths: List[Path]) -> None:
+        from .graph import Graph, GraphError
+        for path in paths:                                   # unregister every system first; rebuilt below
+            for n in self.files.get(path, LibraryFile(path)).types:
+                if n in self.registry and self.registry.get(n).source == str(path):
+                    self.registry.unregister(n)
+        texts: Dict[str, tuple] = {}
+        for path in paths:
+            entry = self.files.setdefault(path, LibraryFile(path))
+            entry.types, entry.error = [], None
+            try:
+                st = path.stat()
+                entry.stamp = (st.st_mtime_ns, st.st_size)
+                text = path.read_text(encoding="utf-8")
+                entry.code_hash = hashlib.blake2b(text.encode("utf-8"), digest_size=8).hexdigest()
+                data = json.loads(text)
+            except (OSError, UnicodeDecodeError, ValueError) as e:
+                entry.error = f"cannot read: {e}"
+                continue
+            name = path.stem
+            if not _SYSTEM_NAME.match(name):
+                entry.error = f"file name {name!r} must be a valid node name (letters, digits, _)"
+            elif name in self.registry:
+                other = self.registry.get(name).source
+                entry.error = f"node type {name!r} already exists ({'in ' + other if other else 'built in'})"
+            elif not isinstance(data, dict) or not isinstance(data.get("nodes"), dict):
+                entry.error = "not a graph file (needs a 'nodes' object)"
+            else:
+                texts[name] = (path, text, data)
+        # dependency order between systems; a system that uses itself (directly or not) is an error
+        deps = {n: {nd.get("type") for nd in d["nodes"].values() if isinstance(nd, dict)} & set(texts)
+                for n, (_, _, d) in texts.items()}
+        order, state = [], {}
+
+        def visit(n, chain):
+            if state.get(n) == 2:
+                return True
+            if state.get(n) == 1:
+                for m in chain[chain.index(n):]:
+                    self.files[texts[m][0]].error = f"system uses itself: {' -> '.join(chain[chain.index(n):] + [n])}"
+                return False
+            state[n] = 1
+            ok = all(visit(m, chain + [n]) for m in sorted(deps[n]))
+            state[n] = 2
+            if ok:
+                order.append(n)
+            return ok
+
+        for n in sorted(texts):
+            visit(n, [])
+        for name in order:
+            path, text, data = texts[name]
+            entry = self.files[path]
+            if entry.error:
+                continue
+            try:
+                graph = Graph.from_dict(data, self.registry, check=False)
+                nt = _system_type(name, path, graph, text, self.registry)
+            except (GraphError, ValueError, KeyError) as e:
+                entry.error = str(e)
+                continue
+            self.registry.register(nt)
+            entry.types = [name]
+            log.info("node library: system %s (%s inputs, %d params)", path.name, len(nt.inputs), len(nt.params))
+        for path in paths:
+            if self.files[path].error:
+                log.warning("node library %s: %s", path.name, self.files[path].error)
+
     def status(self) -> dict:
         return {"dirs": [str(d) for d in self.dirs],
                 "files": [{"file": str(f.path), "nodes": list(f.types), "error": f.error}
@@ -187,6 +277,90 @@ class NodeLibrary:
             for name in entry.types:
                 self.registry.unregister(name)
         self.files.clear()
+
+
+_SYSTEM_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SYSTEM_LOCK = threading.RLock()              # one inner cache for all systems; re-entrant for nested systems
+_SYSTEM_STACK = threading.local()
+_TOKENS: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def _token(geo) -> str:
+    """A cache key for geometry handed to a system: geometry is immutable once cooked, so identity is enough."""
+    try:
+        t = _TOKENS.get(geo)
+        if t is None:
+            t = _TOKENS[geo] = "in:" + uuid.uuid4().hex
+        return t
+    except TypeError:                                       # not weak-referenceable: never reuse
+        return "in:" + uuid.uuid4().hex
+
+
+def _system_evaluator(registry: Registry):
+    """One evaluator (and bounded cache) per registry for the inside of systems; call with _SYSTEM_LOCK held."""
+    ev = _SYS_EVALS.get(id(registry))
+    if ev is None:
+        from .evaluator import Cache, Evaluator
+        ev = _SYS_EVALS[id(registry)] = Evaluator(registry, Cache(512 * 1024 ** 2))
+    return ev
+
+
+_SYS_EVALS: Dict[int, object] = {}
+
+
+def _ident(label: str) -> str:
+    s = re.sub(r"[^A-Za-z0-9_]+", "_", label.strip()).strip("_").lower() or "param"
+    return "p_" + s if s[0].isdigit() else s
+
+
+def _system_type(name: str, path: Path, graph, text: str, registry: Registry):
+    """Build the NodeType for a system graph: inputs from its ``input`` nodes, params from its exposed parameters."""
+    from dataclasses import replace
+    from .sdk import GEOMETRY, Input, NodeType, Output
+    ins = sorted((inst.params.get("index", 0), nid) for nid, inst in graph.nodes.items() if inst.type == "input")
+    input_ids, inputs, seen = [], [], set()
+    for idx, nid in ins:
+        pname = str(graph.nodes[nid].params.get("name") or f"geo{idx}")
+        if not _SYSTEM_NAME.match(pname) or pname in seen:
+            raise ValueError(f"input node {nid!r}: port name {pname!r} is invalid or used twice")
+        seen.add(pname)
+        input_ids.append(nid)
+        inputs.append(Input(pname, GEOMETRY, optional=True, doc=f"feeds input node {nid!r} (unconnected: its preview)"))
+    params, pmap = [], {}
+    for e in graph.exposed:
+        if graph.exposed_problem(e):
+            raise ValueError(f"exposed {e.name!r}: {graph.exposed_problem(e)}")
+        inner = registry.get(graph.nodes[e.node].type).param(e.param)
+        pname = _ident(e.name)
+        while pname in seen or pname in pmap:
+            pname += "_"
+        params.append(replace(inner, name=pname, label=e.label or e.name, default=graph.get_param(e.node, e.param)))
+        pmap[pname] = (e.node, e.param)
+    used = sorted({inst.type for inst in graph.nodes.values()})
+    dep = ",".join(f"{t}:{registry.get(t).code_hash or registry.get(t).version}" if t in registry else f"{t}:missing"
+                   for t in used)
+    code_hash = hashlib.blake2b((text + "|" + dep).encode("utf-8"), digest_size=8).hexdigest()
+
+    def run(*geos, **values):
+        stack = getattr(_SYSTEM_STACK, "names", None)
+        if stack is None:
+            stack = _SYSTEM_STACK.names = []
+        if name in stack:
+            raise RuntimeError(f"system {name!r} uses itself: {' -> '.join(stack + [name])}")
+        stack.append(name)
+        try:
+            g = graph.copy()
+            for pname, (nid, param) in pmap.items():
+                g.set_param(nid, param, values[pname])
+            feeds = {nid: (_token(geo), geo) for nid, geo in zip(input_ids, geos) if geo is not None}
+            with _SYSTEM_LOCK:
+                return _system_evaluator(registry).cook(g, feeds=feeds)
+        finally:
+            stack.pop()
+
+    doc = graph.doc or f"System defined by {path.name}."
+    return NodeType(name=name, fn=run, inputs=tuple(inputs), params=tuple(params), outputs=(Output("geo"),),
+                    category="system", doc=doc, source=str(path), code_hash=code_hash)
 
 
 def _describe_error(e: BaseException, src: str) -> str:

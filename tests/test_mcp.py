@@ -200,6 +200,34 @@ class ToolTests(unittest.TestCase):
         self.assertIn("SyntaxError", status)
         self.assertIn("ai.py", call(self.m, "node_library")[0])
 
+    def test_ai_builds_a_system_and_uses_it(self):
+        name = f"ai_pillars_{os.getpid()}"
+        text, err = call(self.m, "open_graph", path=f"nodes/{name}.json", create=True)
+        self.assertFalse(err, text)
+        text, err = call(self.m, "edit_graph", ops=[
+            {"op": "add", "type": "input", "id": "ground", "inputs": {"preview": "grid1"}, "params": {"name": "ground"}},
+            {"op": "add", "type": "scatter", "id": "spots", "inputs": {"geo": "ground"}, "params": {"count": 5}},
+            {"op": "add", "type": "box", "id": "pillar", "params": {"size": [0.2, 0.2, 2]}},
+            {"op": "add", "type": "copy_to_points", "id": "pillars", "inputs": {"source": "pillar", "points": "spots"},
+             "params": {"orient": False}},
+            {"op": "connect", "from": "pillars", "to": "output1"},
+            {"op": "expose", "id": "spots", "param": "count", "name": "Pillar Count"}])
+        self.assertIn("Cook OK", text)
+        deadline = time.monotonic() + 5
+        while name not in call(self.m, "list_node_types")[0] and time.monotonic() < deadline:
+            time.sleep(0.05)
+        text, err = call(self.m, "list_node_types", names=[name])
+        self.assertFalse(err, text)
+        self.assertIn("pillar_count: int = 5", text)
+        self.assertIn("inputs: ground", text)
+        call(self.m, "open_graph", path="graphs/start.json")
+        text, err = call(self.m, "edit_graph", ops=[
+            {"op": "add", "type": name, "id": "colonnade", "inputs": {"ground": "grid1"}, "params": {"pillar_count": 12}},
+            {"op": "connect", "from": "colonnade", "to": "output1"}])
+        self.assertIn("Cook OK", text, text)
+        info = json.loads(call(self.m, "inspect_node", node="colonnade")[0])
+        self.assertEqual(info["prims"], 12 * 6)                               # 12 pillars of 6 faces
+
     def test_ai_edits_reach_blender_clients(self):
         """An expose + value change from the AI is pushed to link clients as an interface update."""
         got = []

@@ -366,7 +366,9 @@
     out.push(h("div", { class: "pactions" },
       h("button", { disabled: isDisp, onclick: () => edit([{ op: "display", id }]), title: "Show this node's output in Blender" }, isDisp ? "Displayed" : "Display"),
       h("button", { onclick: () => duplicate([id]) }, "Duplicate"),
-      h("button", { onclick: () => removeNodes([id]) }, "Delete")));
+      h("button", { onclick: () => removeNodes([id]) }, "Delete"),
+      t.category === "system" && t.source && h("button", { title: "Open this system's graph to edit it (saves reload it everywhere)",
+        onclick: () => openFile(t.source) }, "Edit system")));
     const ins = inputs(id);
     if (ins.length) {
       out.push(h("div", { class: "section" }, "Inputs"));

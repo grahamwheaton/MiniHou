@@ -94,6 +94,7 @@ The same edit operations are available to scripts over HTTP (`POST /api/edit`, s
 | `examples/graphs/terrain_rocks.json` | 200x200 terrain with 5-octave noise, a valley wrangle, rocks scattered only above a height |
 | `examples/graphs/crater.json` | built by an AI through MCP: dunes, a crater wrangle, boulders kept only on the rim by a `delete` expression |
 | `examples/graphs/spiral_stairs.json` | uses the example library nodes `stairs` (spiral treads around a column) and `twist` |
+| `examples/graphs/rocky_hills.json` | hills plus the `rock_scatter` **system** (`nodes/rock_scatter.json`, a graph used as a node) |
 
 All examples are cooked by the test-suite, so they keep working as nodes evolve.
 
@@ -156,6 +157,19 @@ py -m minihou new-node ripple_rings        # writes nodes\ripple_rings.py from a
 
 AI assistants use the same mechanism: the MCP `node_library` tool explains how to write a node and reports load errors, and the
 assistant writes the file with its normal (permission-checked) file tools. There is deliberately no MCP tool that writes code.
+
+### Systems: graphs as nodes
+
+![A system node in the editor: its parameters are the system graph's exposed parameters](docs/images/system_node.png)
+
+A graph file saved in the node folder is itself a node type, named after the file, like a Houdini digital asset:
+`input` nodes inside it are its inputs, its **exposed parameters become the node's parameters**, its display node is the
+output and its top-level `"doc"` is the description. `nodes/rock_scatter.json` is an example (scatter rough rocks of varied
+size over whatever ground you wire in); `examples/graphs/rocky_hills.json` uses it. Build one by opening
+`nodes/<name>.json` in the editor (File > New graph) or asking an AI; while editing, wire a stand-in into an `input` node's
+`preview` port. Select a system node and press **Edit system** to open it; saving re-loads it everywhere. Systems can use
+other systems and Python library nodes; each system's cache key covers the code of everything inside it, so editing a
+nested system or a Python node updates every graph that uses it. A system that uses itself is reported, not looped.
 
 ### The SDK
 
@@ -231,7 +245,7 @@ Blender version changes them. Topology rebuilds (only when connectivity changes)
 ## Automated checks (what Claude runs, what you can run)
 
 ```powershell
-py -m unittest discover -s tests -t .                  # 330 tests; Blender ones skip without bpy, browser ones without playwright
+py -m unittest discover -s tests -t .                  # 339 tests; Blender ones skip without bpy, browser ones without playwright
 py tools\launch_blender.py --selftest                  # add-on tests inside `blender --background`, engine as a separate process
 py tools\launch_blender.py --bench -- --points 1000000 # the 1M-point benchmark inside Blender (add --mode engine for slider edits)
 py tools\launch_blender.py --gui-test                  # interactive smoke test in a real Blender window (~30 s)
@@ -306,7 +320,7 @@ minihou/                  the engine (numpy + stdlib, optional numba; never impo
   web/                    HTTP API + live events (server.py) and the node editor (static/)
   mcp.py                  MCP server for AI assistants (stdio, stdlib only)
   library.py              node libraries: load and hot-reload nodes/*.py, authoring guide
-nodes/                    example node library (twist, stairs); your own node files go here
+nodes/                    example node library: twist.py, stairs.py (Python) and rock_scatter.json (a system)
 blender_addon/minihou_link/
   runtime.py              main-thread timer, depsgraph handler, feedback-loop guards
   mesh_writer.py          foreach_set writer (fast attribute paths)

@@ -198,7 +198,7 @@ class Topology:
 class Geometry:
     """Points, vertices, primitives and detail attributes."""
 
-    __slots__ = ("point", "vertex", "prim", "detail", "topology", "_frozen")
+    __slots__ = ("point", "vertex", "prim", "detail", "topology", "_frozen", "__weakref__")
 
     def __init__(self, npoints: int = 0, topology: Optional[Topology] = None):
         self.topology = topology if topology is not None else Topology()

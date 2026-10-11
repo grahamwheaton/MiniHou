@@ -39,7 +39,9 @@ How to build a system:
    atomic; the reply tells you whether the cook succeeded, which node failed and why, and point/prim counts.
 4. inspect_node to check geometry (counts, bounds, attributes with ranges) at any node, then iterate.
 Use wrangle nodes (wrangle_reference) for custom per-point math; for anything more (new topology, several inputs,
-loops over geometry) write a node-library file (node_library). Z is up; units are Blender metres. The user is
+loops over geometry) write a node-library file (node_library). To make something reusable, build it as a *system*: a graph
+saved in nodes/ (e.g. nodes/rock_scatter.json) with `input` nodes and exposed parameters becomes a node type that any
+graph can use (details in node_library). Z is up; units are Blender metres. The user is
 watching the editor and Blender live and can undo your edits, so prefer small verified steps over huge batches."""
 
 OPS_DOC = """\

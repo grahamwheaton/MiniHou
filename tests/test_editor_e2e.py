@@ -204,6 +204,24 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_selector("#toast.err")
         self.assertIn("SyntaxError", self.page.inner_text("#toast"))
 
+    def test_edit_system_opens_the_system_graph(self):
+        import json as _json
+        name = f"e2e_sys_{os.getpid()}"
+        os.makedirs(os.path.join(self.dir, "nodes"))
+        system = {"version": 1, "doc": "Test system.", "nodes": {
+            "inp": {"type": "input", "params": {"name": "src"}},
+            "out": {"type": "output", "inputs": {"geo": "inp"}}}, "display": "out"}
+        with open(os.path.join(self.dir, "nodes", f"{name}.json"), "w", encoding="utf-8") as f:
+            _json.dump(system, f)
+        self.page.wait_for_function(f"window.minihou.S.types[{name!r}] !== undefined")
+        self.s.edit([{"op": "add", "type": name, "id": "sys1", "inputs": {"src": "ground"}}])
+        self.page.wait_for_selector('.node[data-id="sys1"]')
+        self.node("sys1").locator(".title").click()
+        self.assertIn("Test system.", self.page.inner_text("#params .pdoc"))
+        self.page.locator("#params button", has_text="Edit system").click()
+        self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == f"{name}.json"))
+        self.page.wait_for_selector('.node[data-id="inp"]')
+
     def test_graph_text_is_never_html(self):
         payload = '<img src=x onerror="window.__xss=1"><b>bold</b>'
         self.s.edit([{"op": "meta", "id": "hills", "set": {"comment": payload}},

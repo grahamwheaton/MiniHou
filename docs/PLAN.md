@@ -130,6 +130,21 @@ contents change. Design points:
 * **AI**: no code-writing MCP tool. `node_library` returns the folder, loaded files, errors and an authoring guide; the
   assistant writes files with its own file tools, under its client's permission prompts.
 
+## Systems (graphs as nodes)
+
+A `*.json` graph in a node folder becomes a node type (`library._system_type`): `input` nodes (sorted by `index`) are its
+inputs, exposed parameters become params (`dataclasses.replace` of the inner `Param` with the exposed name, label and the
+graph's current value as default), the display node is the output. Running it copies the inner graph, applies the params and
+cooks it with `Evaluator.cook(feeds=...)`: fed `input` nodes take the outer geometry and their upstream (the preview) is
+not cooked. Fed geometry is keyed by identity (a weakly held token per immutable cooked Geometry), so the inner cache works
+across outer cooks; all systems share one bounded inner cache under a re-entrant lock.
+
+* **Hashes**: a system's `code_hash` covers its file and the hash/version of every node type used inside, so edits to a nested
+  system or a Python node propagate. Any library change re-derives all systems (cheap), in dependency order.
+* **Recursion**: a dependency cycle between system files is reported for each file in it; a runtime guard also refuses
+  re-entering a system already being cooked on the thread.
+* **Unconnected inputs** fall back to the `input` node's preview, which is also what makes a system file editable alone.
+
 ## Acceleration design (added after the benchmark)
 
 Profiling at 1M points showed noise (275 ms), scatter (1.2 s: many numpy temporaries) and copy_to_points (570 ms: per-copy rotation matrices) as the

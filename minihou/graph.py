@@ -68,6 +68,7 @@ class Graph:
         self.nodes: Dict[str, NodeInstance] = {}
         self.display: Optional[str] = None
         self.exposed: List[Exposed] = []
+        self.doc: str = ""                    # what the graph does (systems show it as their node doc)
 
     # -- editing -----------------------------------------------------------
     def add_node(self, node_id: str, type: str, params: Optional[dict] = None,
@@ -151,12 +152,14 @@ class Graph:
                 return nid
         raise GraphError("graph has no display node and no 'output' node")
 
-    def upstream_order(self, target: str) -> List[str]:
-        """Node ids needed to cook ``target``, dependencies first, ``target`` last (iterative DFS)."""
+    def upstream_order(self, target: str, stop=()) -> List[str]:
+        """Node ids needed to cook ``target``, dependencies first, ``target`` last (iterative DFS). Nodes in ``stop`` are
+        included but not descended into (their result is supplied from outside, e.g. a system's inputs)."""
         self._node(target)
         order: List[str] = []
         state: Dict[str, int] = {}  # 1 = in progress, 2 = done
-        stack = [(target, iter(self.input_ids(target)))]
+        kids = lambda n: iter(()) if n in stop else iter(self.input_ids(n))  # noqa: E731
+        stack = [(target, kids(target))]
         state[target] = 1
         while stack:
             nid, it = stack[-1]
@@ -168,7 +171,7 @@ class Graph:
                     raise GraphError(f"cycle detected through {child!r}", child)
                 if st is None:
                     state[child] = 1
-                    stack.append((child, iter(self.input_ids(child))))
+                    stack.append((child, kids(child)))
                     break
             else:
                 state[nid] = 2
@@ -314,6 +317,7 @@ class Graph:
                    for k, v in self.nodes.items()}
         g.display = self.display
         g.exposed = [Exposed(e.name, e.node, e.param, e.label) for e in self.exposed]
+        g.doc = self.doc
         return g
 
     def to_dict(self) -> dict:
@@ -330,7 +334,10 @@ class Graph:
             if isinstance(d.get("pos"), list):
                 d["pos"] = _tidy(d["pos"])
             nodes[nid] = d
-        out: Dict[str, Any] = {"version": GRAPH_VERSION, "nodes": nodes}
+        out: Dict[str, Any] = {"version": GRAPH_VERSION}
+        if self.doc:
+            out["doc"] = self.doc
+        out["nodes"] = nodes
         if self.display:
             out["display"] = self.display
         if self.exposed:
@@ -374,6 +381,7 @@ class Graph:
                 errs.append(f"invalid node id {nid!r}")
             g.nodes[nid] = NodeInstance(nid, nd["type"], params, inputs, meta)
         g.display = data.get("display")
+        g.doc = str(data.get("doc") or "")
         for ed in data.get("exposed", []) or []:
             try:
                 g.exposed.append(Exposed(ed["name"], ed["node"], ed["param"], ed.get("label", "")))

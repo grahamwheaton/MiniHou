@@ -153,10 +153,13 @@ class Evaluator:
         self.last_stats = CookStats()
 
     # -- keys --------------------------------------------------------------
-    def compute_keys(self, graph: Graph, order: List[str]) -> Dict[str, str]:
-        """Cache key for each node in ``order`` (dependencies first). Cooks nothing."""
+    def compute_keys(self, graph: Graph, order: List[str], fixed: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        """Cache key for each node in ``order`` (dependencies first). Cooks nothing. ``fixed`` pins some keys."""
         keys: Dict[str, str] = {}
         for nid in order:
+            if fixed and nid in fixed:
+                keys[nid] = fixed[nid]
+                continue
             inst = graph.nodes[nid]
             nt = self.registry.get(inst.type)
             params = nt.coerce_params(inst.params)
@@ -176,18 +179,22 @@ class Evaluator:
         return keys
 
     # -- cooking -----------------------------------------------------------
-    def cook(self, graph: Graph, target: Optional[str] = None) -> Geometry:
+    def cook(self, graph: Graph, target: Optional[str] = None,
+             feeds: Optional[Dict[str, Tuple[str, Geometry]]] = None) -> Geometry:
+        """Cook ``target`` (default: the display node). ``feeds`` supplies some nodes' results from outside as
+        ``{node_id: (cache_key, geometry)}``; their upstream is not cooked (how systems receive their inputs)."""
         t_start = time.perf_counter()
+        feeds = feeds or {}
         target = target or graph.output_node()
         if target not in graph.nodes:
             raise GraphError(f"display node {target!r} does not exist")
-        order = graph.upstream_order(target)
-        probs = graph.problems(only=order)       # only what this cook needs: a half-built branch elsewhere is fine
+        order = graph.upstream_order(target, stop=feeds)
+        probs = graph.problems(only=[n for n in order if n not in feeds])   # a half-built branch elsewhere is fine
         if probs:
             raise GraphError([m for _, m in probs], probs[0][0])
-        keys = self.compute_keys(graph, order)
+        keys = self.compute_keys(graph, order, {n: k for n, (k, _) in feeds.items()})
         stats = CookStats(target=target, key=keys[target])
-        results: Dict[str, Geometry] = {}
+        results: Dict[str, Geometry] = {n: g for n, (_, g) in feeds.items() if n in keys}
         stack = [target]
         while stack:
             nid = stack[-1]
