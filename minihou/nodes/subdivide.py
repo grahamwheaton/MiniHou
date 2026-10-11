@@ -8,14 +8,14 @@ minimum (ints, so groups stay crisp); vertex attributes such as uv split per fac
 """
 import numpy as np
 
-from .. import topo
-from ..sdk import Enum, Int, node
+from .. import edges, topo
+from ..sdk import Bool, Enum, Int, node
 from . import _build as B
 
 MAX_FACES = 20_000_000
 
 
-def subdivide_once(geo, smooth: bool):
+def subdivide_once(geo, smooth: bool, use_creases: bool = True):
     t = geo.topology
     sizes = t.prim_sizes()
     if np.any(sizes < 3):
@@ -55,6 +55,32 @@ def subdivide_once(geo, smooth: bool):
     else:
         edge_pt, vert_pt = mid, P
 
+    sharp = edges.values(geo, edges.CREASE)
+    corner = np.asarray(geo.point.get('cornerweight', np.zeros(npt)), dtype=float)
+    if corner.shape != (npt,) or not np.isfinite(corner).all() or np.any(corner < 0):
+        raise ValueError('cornerweight must be a finite nonnegative scalar point attribute')
+    if smooth and use_creases and (np.any(sharp) or np.any(corner)):
+        strength = np.clip(sharp, 0, 1)
+        edge_pt = edge_pt*(1-strength[:,None]) + mid*strength[:,None]
+        # Semi-sharp crease rule: two sharp incident edges give a cubic boundary
+        # point; three pin a corner. Fractional strengths blend those rules.
+        incident = [[] for _ in range(npt)]
+        for eid, (a,b) in enumerate(e.points):
+            w = 1.0 if boundary_edge[eid] else strength[eid]
+            if w > 0:
+                incident[a].append((w,int(b)))
+                incident[b].append((w,int(a)))
+        for p, links in enumerate(incident):
+            links.sort(reverse=True)
+            if len(links) >= 2:
+                w = links[1][0]
+                crease_pos = .75*P[p]+.125*(P[links[0][1]]+P[links[1][1]])
+                # Preserve the existing single-face boundary-corner convention.
+                if not (on_boundary[p] and nfaces[p] == 1):
+                    vert_pt[p] = (1-w)*vert_pt[p]+w*crease_pos
+            w = max(min(corner[p],1), links[2][0] if len(links)>=3 else 0)
+            vert_pt[p] = (1-w)*vert_pt[p]+w*P[p]
+
     # new points: [original points | edge points | face points]
     pts_point = dict(geo.point.items())
     e0, e1 = e.points[:, 0], e.points[:, 1]
@@ -76,14 +102,37 @@ def subdivide_once(geo, smooth: bool):
         else:
             vtx[name] = np.repeat(a, 4, axis=0)
     prim = {name: np.repeat(a, t.prim_sizes(), axis=0) for name, a in geo.prim.items()}
-    return B.make(newP, q, np.arange(0, 4 * nv + 1, 4), point, vtx, prim, geo.detail)
+    out = B.make(newP, q, np.arange(0, 4 * nv + 1, 4), point, vtx, prim, geo.detail)
+    edge_names = [name for name in geo.vertex if name.startswith(edges.PREFIX) or name == edges.CREASE]
+    if 'cornerweight' in geo.point:
+        out.point['cornerweight'] = np.r_[np.maximum(corner-1,0),np.zeros(ne+nf)].astype(np.float32)
+    if not edge_names:
+        return out
+    # Only the two children of an original edge inherit edge attributes; face
+    # spokes must not inherit generic corner interpolation.
+    ne_out = topo.edges(out)
+    children = {}
+    for eid,(a,b) in enumerate(e.points):
+        children[tuple(sorted((int(a), npt+eid)))] = eid
+        children[tuple(sorted((int(b), npt+eid)))] = eid
+    source = np.array([children.get(tuple(pair),-1) for pair in ne_out.points])
+    valid = source >= 0
+    for name in edge_names:
+        old = edges.values(geo,name)
+        if name == edges.CREASE:
+            old = np.maximum(old-1,0)
+        data = np.zeros(len(source),geo.vertex[name].dtype)
+        data[valid] = old[source[valid]]
+        out = edges.write(out,name,data)
+    return out
 
 
-@node("subdivide", inputs=["geo"], category="modify", params=[
+@node("subdivide", inputs=["geo"], category="modify", version=2, params=[
     Int("depth", 1, min=0, max=6, doc="Levels; each multiplies the face count by about 4"),
     Enum("algorithm", ["catmull_clark", "linear"], doc="catmull_clark smooths; linear only splits faces"),
+    Bool("use_creases", True, doc="Use outgoing-corner creaseweight and point cornerweight; sharpness decays each level"),
 ])
-def subdivide(geo, depth, algorithm):
+def subdivide(geo, depth, algorithm, use_creases=True):
     """Subdivide polygons into quads (Houdini's Subdivide). Catmull-Clark smooths towards a limit surface and keeps open
     boundaries as smooth curves; linear splits without moving anything. Faces with fewer than 3 points are dropped."""
     faces = geo.nvertices * 4 ** max(depth - 1, 0)
@@ -92,5 +141,5 @@ def subdivide(geo, depth, algorithm):
     B.require_polygons(geo, "subdivide")
     out = geo
     for _ in range(depth):
-        out = subdivide_once(out, algorithm == "catmull_clark")
+        out = subdivide_once(out, algorithm == "catmull_clark", use_creases)
     return out

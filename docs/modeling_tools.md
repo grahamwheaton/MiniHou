@@ -106,3 +106,19 @@ use Normal downstream when geometric face normals are preferable.
 References: [Soft Transform](https://www.sidefx.com/docs/houdini/nodes/sop/softxform.html),
 [Lattice](https://www.sidefx.com/docs/houdini/nodes/sop/lattice.html),
 [Point Deform](https://www.sidefx.com/docs/houdini/nodes/sop/pointdeform.html).
+
+## Subdivision creases
+
+Use `crease` with domain `edges` and an edge group/pattern, or domain `points`
+and a point group. `sharpness` is the number of subdivision levels of influence;
+fractional values blend the smooth and sharp rules. Edge data is stored in vertex
+`creaseweight`, point corners in `cornerweight`. Set zero to clear a selection.
+The existing `subdivide` node now has `use_creases`. Two sharp incident edges use
+a boundary-curve rule; three pin a corner; point corner weights pin explicitly.
+Sharpness decreases by one per level. Only the two child edges inherit each old
+edge's group/crease; new face spokes start at zero. Linear subdivision propagates
+and decays metadata without smoothing positions. No OpenSubdiv parity is claimed
+for fractional junctions/nonmanifold topology. Blender receives corner crease
+metadata; native Blender subdivision modifier crease editing is not implemented.
+
+Reference: [SideFX Crease](https://www.sidefx.com/docs/houdini/nodes/sop/crease.html).
