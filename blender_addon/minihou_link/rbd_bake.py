@@ -1,6 +1,6 @@
 """Native mesh-sequence bake: preserves per-frame attributes/materials/custom normals.
 
-Each sample is an ordinary mesh object with constant visibility keyframes. The baked
+Each sample is an ordinary mesh object with constant scale visibility keys. The baked
 collection needs no MiniHou engine or handlers, including background animation renders.
 Deliberately bounded and more memory-hungry than transform-only caches.
 """
@@ -37,10 +37,20 @@ def bake(obj, start, end, *, max_mb=512):
             created.append(baked)
             collection.objects.link(baked)
             baked.matrix_world = obj.matrix_world.copy()
+            scale = baked.scale.copy()
             for frame, hidden in ((start-1, True), (f, False), (f+1, True)):
-                baked.hide_viewport = baked.hide_render = hidden
-                baked.keyframe_insert('hide_viewport', frame=frame)
-                baked.keyframe_insert('hide_render', frame=frame)
+                # Keep every sample in the render depsgraph. Animated disable flags
+                # can leave future samples excluded throughout an animation render.
+                baked.scale = (0, 0, 0) if hidden else scale
+                baked.keyframe_insert('scale', frame=frame)
+            action = baked.animation_data.action
+            curves = getattr(action, 'fcurves', None)
+            if curves is None:
+                curves = [fc for layer in action.layers for strip in layer.strips
+                          for bag in strip.channelbags for fc in bag.fcurves]
+            for curve in curves:
+                for key in curve.keyframe_points:
+                    key.interpolation = 'CONSTANT'
             baked['minihou_baked_frame'] = f
         collection['minihou_bake_start'] = start
         collection['minihou_bake_end'] = end
