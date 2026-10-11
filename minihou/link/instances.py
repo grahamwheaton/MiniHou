@@ -28,11 +28,15 @@ class InstanceManager:
 
     def clear(self):
         with self.lock:
+            for evaluator in self.instances.values():
+                evaluator.close()
             self.instances.clear()
 
     def remove(self, instance_id):
         with self.lock:
-            self.instances.pop(instance_id, None)
+            evaluator = self.instances.pop(instance_id, None)
+            if evaluator is not None:
+                evaluator.close()
 
     def _graph(self, h):
         data = h.get("graph")

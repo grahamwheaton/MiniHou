@@ -1,0 +1,200 @@
+{
+  "version": 1,
+  "nodes": {
+    "brick": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.9,
+          0.4,
+          0.45
+        ],
+        "center": [
+          -3.5,
+          0,
+          0.225
+        ]
+      },
+      "inputs": {}
+    },
+    "row": {
+      "type": "copy_transform",
+      "params": {
+        "copies": 8,
+        "translate": [
+          1,
+          0,
+          0
+        ]
+      },
+      "inputs": {
+        "geo": "brick"
+      }
+    },
+    "wall": {
+      "type": "copy_transform",
+      "params": {
+        "copies": 6,
+        "translate": [
+          0,
+          0,
+          0.46
+        ]
+      },
+      "inputs": {
+        "geo": "row"
+      }
+    },
+    "bricks": {
+      "type": "rbd_configure",
+      "params": {
+        "mass": 1,
+        "friction": 0.65
+      },
+      "inputs": {
+        "geo": "wall"
+      }
+    },
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "radius": 0.45,
+        "rows": 8,
+        "columns": 16,
+        "center": [
+          0.2,
+          -5,
+          1.4
+        ]
+      },
+      "inputs": {}
+    },
+    "projectile": {
+      "type": "rbd_configure",
+      "params": {
+        "id_offset": 10000,
+        "mass": 12,
+        "velocity": [
+          0,
+          12,
+          0
+        ],
+        "angular_velocity": [
+          2,
+          0,
+          0
+        ],
+        "restitution": 0.15
+      },
+      "inputs": {
+        "geo": "ball"
+      }
+    },
+    "bodies": {
+      "type": "merge",
+      "params": {},
+      "inputs": {
+        "geos": [
+          "bricks",
+          "projectile"
+        ]
+      }
+    },
+    "floor": {
+      "type": "box",
+      "params": {
+        "size": [
+          80,
+          80,
+          0.5
+        ],
+        "center": [
+          0,
+          0,
+          -0.25
+        ]
+      },
+      "inputs": {}
+    },
+    "ground": {
+      "type": "rbd_configure",
+      "params": {
+        "active": false,
+        "friction": 0.8
+      },
+      "inputs": {
+        "geo": "floor"
+      }
+    },
+    "sim": {
+      "type": "rbd_solver",
+      "params": {
+        "substeps": 12
+      },
+      "inputs": {
+        "bodies": "bodies",
+        "colliders": "ground"
+      }
+    },
+    "out": {
+      "type": "output",
+      "params": {},
+      "inputs": {
+        "geo": "sim"
+      }
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Columns",
+      "node": "row",
+      "param": "copies"
+    },
+    {
+      "name": "Rows",
+      "node": "wall",
+      "param": "copies"
+    },
+    {
+      "name": "Projectile velocity",
+      "node": "projectile",
+      "param": "velocity"
+    },
+    {
+      "name": "Projectile mass",
+      "node": "projectile",
+      "param": "mass"
+    },
+    {
+      "name": "Brick mass",
+      "node": "bricks",
+      "param": "mass"
+    },
+    {
+      "name": "Friction",
+      "node": "bricks",
+      "param": "friction"
+    },
+    {
+      "name": "Bounce",
+      "node": "bricks",
+      "param": "restitution"
+    },
+    {
+      "name": "Gravity",
+      "node": "sim",
+      "param": "gravity"
+    },
+    {
+      "name": "Substeps",
+      "node": "sim",
+      "param": "substeps"
+    },
+    {
+      "name": "Reset",
+      "node": "sim",
+      "param": "reset"
+    }
+  ]
+}
