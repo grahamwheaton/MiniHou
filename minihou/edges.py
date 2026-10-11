@@ -19,6 +19,8 @@ def values(geo, name):
     if a is not None:
         if a.ndim != 1 or not np.isfinite(a).all():
             raise ValueError(f'{name} must be a finite scalar vertex attribute')
+        if name == CREASE and np.any(a < 0):
+            raise ValueError('creaseweight must be nonnegative')
         valid = e.of_vertex >= 0
         np.maximum.at(out, e.of_vertex[valid], a[valid])
     return out

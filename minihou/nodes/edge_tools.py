@@ -6,6 +6,27 @@ from ..sdk import Bool, Enum, Float, Int, Str, node
 from . import _build as B
 
 
+@node('crease', inputs=['geo'], category='model', params=[
+    Enum('domain', ['edges', 'points']),
+    Str('group', '', doc='Edge selection or point group; empty selects all'),
+    Float('sharpness', 2, min=0, max=10, doc='Semi-sharp subdivision levels; zero clears selected creases'),
+])
+def crease(geo, domain, group, sharpness):
+    """Set edge creaseweight or point cornerweight for Subdivide; sharpness decays by one per level."""
+    if domain == 'edges':
+        data = edges.values(geo, edges.CREASE)
+        data[edges.mask(geo, group)] = sharpness
+        return edges.write(geo, edges.CREASE, data)
+    sel = groups.mask(geo, 'point', group)
+    data = np.array(geo.point.get('cornerweight', np.zeros(geo.npoints)), dtype=np.float32, copy=True)
+    if data.shape != (geo.npoints,):
+        raise ValueError('cornerweight must be a scalar point attribute')
+    data[np.ones(geo.npoints, bool) if sel is None else sel] = sharpness
+    out = geo.copy()
+    out.point['cornerweight'] = data
+    return out
+
+
 @node('edge_group', inputs=['geo'], category='group', params=[
     Str('name', 'edges'),
     Enum('method', ['pattern', 'boundary', 'points', 'primitives']),
