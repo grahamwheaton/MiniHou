@@ -82,6 +82,14 @@ class WebTests(unittest.TestCase):
         self.assertTrue(d["ok"])
         self.assertEqual(d["clients"], [])
 
+    def test_frame_endpoint(self):
+        st, d = self.req("POST", "/api/frame", {"frame": 12, "fps": 30})
+        self.assertEqual((st, d["frame"], d["fps"]), (200, 12.0, 30.0))
+        st, d = self.req("GET", "/api/status?wait=1")
+        self.assertEqual(d["frame"], 12.0)
+        st, _ = self.req("POST", "/api/frame", {"frame": "soon"})
+        self.assertEqual(st, 400)
+
     def test_open_and_create_inside_root_only(self):
         st, d = self.req("POST", "/api/open", {"path": "graphs/new.json", "create": True})
         self.assertEqual(st, 200)

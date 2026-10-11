@@ -15,6 +15,7 @@ live in the other and in Blender.
 ``POST /api/undo``     also ``/api/redo``
 ``POST /api/inspect``  ``{node, detail?}`` -> geometry summary of any node
 ``POST /api/open``     ``{path, create?}`` switch to (or create) a graph file inside the workspace root
+``POST /api/frame``    ``{frame, fps?}`` set the current frame for @Frame / @Time (Blender's timeline also sets it)
 =====================  =======================================================================================
 
 Hardening, since any web page can try to talk to localhost: the ``Host`` header must be a loopback name (blocks DNS
@@ -343,6 +344,16 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(snap)
         if path == "/api/save":
             return self._json({"saved": s.flush(), "error": s.save_error})
+        if path == "/api/frame":
+            try:
+                frame = float(body.get("frame"))
+                fps = float(body["fps"]) if body.get("fps") is not None else None
+            except (TypeError, ValueError):
+                raise ApiError(400, '"frame" must be a number') from None
+            if not (abs(frame) < 1e7) or (fps is not None and not (0 < fps < 1000)):
+                raise ApiError(400, "frame or fps out of range")
+            s.set_frame(frame, fps)
+            return self._json({"frame": s.frame, "fps": s.fps})
         raise ApiError(404, f"no such endpoint: {path}")
 
     def _static(self, name: str):

@@ -106,6 +106,16 @@ class EditorE2E(unittest.TestCase):
         self.assertIn("display", self.node("out").get_attribute("class"))
         self.page.wait_for_function("document.querySelector('#info-body').innerText.includes('Points')")
 
+    def test_frame_field_sets_the_engine_frame(self):
+        self.page.fill("#frame-input", "7")
+        self.page.press("#frame-input", "Enter")
+        self.page.click("#frame-next")
+        end = time.monotonic() + 5
+        while self.s.frame != 8.0 and time.monotonic() < end:
+            time.sleep(0.02)
+        self.assertEqual(self.s.frame, 8.0)
+        self.assertEqual(self.errors, [])
+
     def test_select_and_edit_a_parameter(self):
         self.node("hills").locator(".title").click()
         self.assertEqual(self.page.input_value("#params input.nid"), "hills")

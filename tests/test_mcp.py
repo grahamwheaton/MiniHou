@@ -233,6 +233,17 @@ class ToolTests(unittest.TestCase):
         info = json.loads(call(self.m, "inspect_node", node="colonnade")[0])
         self.assertEqual(info["prims"], 12 * 6)                               # 12 pillars of 6 faces
 
+    def test_ai_checks_an_animation_with_set_frame(self):
+        text, err = call(self.m, "edit_graph", ops=[
+            {"op": "add", "type": "wrangle", "id": "bob", "inputs": {"geo": "grid1"},
+             "params": {"snippet": "@P.z = @Frame * 0.25"}},
+            {"op": "connect", "from": "bob", "to": "output1"}])
+        self.assertIn("Cook OK", text)
+        text, err = call(self.m, "set_frame", frame=9)
+        self.assertFalse(err, text)
+        self.assertIn("Frame 9", text)
+        self.assertAlmostEqual(json.loads(call(self.m, "inspect_node", node="bob")[0])["bounds"]["max"][2], 2.25)
+
     def test_ai_edits_reach_blender_clients(self):
         """An expose + value change from the AI is pushed to link clients as an interface update."""
         got = []

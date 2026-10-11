@@ -313,6 +313,8 @@
       c.className = "status ok";
       txt.textContent = `${fmt(st.points)} pts · ${fmt(st.prims)} prims` + (st.cook ? ` · ${st.cook.ms.toFixed(1)} ms` : "");
     } else { c.className = "status"; txt.textContent = "idle"; }
+    const fi = $("#frame-input");
+    if (st.frame !== undefined && document.activeElement !== fi && Number(fi.value) !== st.frame) fi.value = st.frame;
     const clients = st.clients || [], blender = clients.filter((n) => /^blender/i.test(n));
     const b = $("#blender-status");
     b.className = "status" + (blender.length ? " ok" : "");
@@ -324,6 +326,16 @@
     document.body.classList.toggle("has-error", !!err);
     if (err) { bar.textContent = (err.node ? err.node + ": " : "") + err.message; bar.dataset.node = err.node || ""; }
   }
+
+  // ---------------------------------------------------------------- frame (time)
+  async function setFrame(f) {
+    if (!Number.isFinite(f)) return;
+    $("#frame-input").value = f;
+    try { await api("/api/frame", { frame: f }); } catch (e) { /* offline: the status refresh will correct it */ }
+  }
+  $("#frame-input").addEventListener("change", (e) => setFrame(Number(e.target.value)));
+  $("#frame-prev").onclick = () => setFrame(Number($("#frame-input").value) - 1);
+  $("#frame-next").onclick = () => setFrame(Number($("#frame-input").value) + 1);
 
   // ---------------------------------------------------------------- parameter panel
   let panelKey = null, scrubbing = false;

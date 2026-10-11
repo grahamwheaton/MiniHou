@@ -41,7 +41,11 @@ How to build a system:
 Use wrangle nodes (wrangle_reference) for custom per-point math; for anything more (new topology, several inputs,
 loops over geometry) write a node-library file (node_library). To make something reusable, build it as a *system*: a graph
 saved in nodes/ (e.g. nodes/rock_scatter.json) with `input` nodes and exposed parameters becomes a node type that any
-graph can use (details in node_library). To work on something the user made in Blender, start from a blender_object node
+graph can use (details in node_library). Houdini-style toolkit: groups (group_create; most nodes take a group pattern
+like 'top ^side', '0-9' or '@P.z > 0'), modelling (polyextrude, subdivide, clip, mirror, polyfill), attributes
+(attribute_transfer, promote, blur, measure, color, ray), curves (line, helix, resample, sweep), volumes (remesh,
+points_to_surface, sdf_boolean), instancing of Blender objects (instance), for_each (a system per piece), time (@Frame,
+solver; set_frame to check). To work on something the user made in Blender, start from a blender_object node
 (the object's name; its UV map, color attribute, vertex groups and material indices arrive as attributes, and it recooks live
 when they edit it); inspect_node on it shows what was read. Z is up; units are Blender metres. The user is
 watching the editor and Blender live and can undo your edits, so prefer small verified steps over huge batches."""
@@ -93,6 +97,11 @@ TOOLS: List[dict] = [
                     "(with min/max/mean and first values when detail is true). Use it to verify each step.",
      "inputSchema": {"type": "object", "required": ["node"], "additionalProperties": False, "properties": {
          "node": {"type": "string"}, "detail": {"type": "boolean", "description": "Attribute value ranges (default true)."}}}},
+    {"name": "set_frame",
+     "description": "Set the current frame (what @Frame / @Time read; Blender's timeline also sets it). Use it to check "
+                    "animated systems (wrangles using @Frame, solvers) at different times, then inspect_node.",
+     "inputSchema": {"type": "object", "required": ["frame"], "additionalProperties": False, "properties": {
+         "frame": {"type": "number"}, "fps": {"type": "number", "exclusiveMinimum": 0}}}},
     {"name": "undo",
      "description": "Undo the last edit(s) (yours or the user's); redo=true goes forward again.",
      "inputSchema": {"type": "object", "additionalProperties": False, "properties": {
@@ -394,6 +403,14 @@ class McpServer:
         st = self.engine.get("/api/status?wait=1&timeout=30")
         word = "Redid" if redo else "Undid"
         return f"{word} {done} step(s)." + (" Nothing (more) to do." if done < steps else "") + "\n" + format_status(st)
+
+    def tool_set_frame(self, frame: float, fps: Optional[float] = None) -> str:
+        body = {"frame": frame}
+        if fps is not None:
+            body["fps"] = fps
+        r = self.engine.post("/api/frame", body)
+        st = self.engine.get("/api/status?wait=1")
+        return f"Frame {r['frame']:g} at {r['fps']:g} fps.\n" + format_status(st)
 
     def tool_list_graphs(self) -> str:
         try:

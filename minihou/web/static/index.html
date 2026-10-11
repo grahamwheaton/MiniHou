@@ -20,6 +20,9 @@
   <button id="redo-btn" title="Redo (Ctrl+Shift+Z)">↷</button>
   <button id="add-btn" title="Add a node (Tab)">+ Node</button>
   <button id="tidy-btn" title="Tidy the layout (L)">Tidy</button>
+  <span class="frame" title="Current frame (@Frame, @Time). Blender's timeline sets it when connected.">
+    <button id="frame-prev" title="Previous frame">◀</button><input id="frame-input" type="number" step="1" value="1" aria-label="Frame"><button id="frame-next" title="Next frame">▶</button>
+  </span>
   <span class="spacer"></span>
   <span id="cook-status" class="status"><span class="dot"></span><span class="text">connecting…</span></span>
   <span id="blender-status" class="status" title="Blender clients connected to the live link"><span class="dot"></span><span class="text">Blender</span></span>
