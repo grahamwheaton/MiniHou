@@ -153,6 +153,13 @@ class Evaluator:
         self.registry = registry or REGISTRY
         self.cache = cache if cache is not None else Cache()
         self.last_stats = CookStats()
+        from .rbd import Manager
+        self.rbd = Manager()
+
+    def close(self):
+        """Release optional physics worlds and all geometry cached by this evaluator."""
+        self.rbd.clear()
+        self.cache.clear()
 
     # -- keys --------------------------------------------------------------
     def compute_keys(self, graph: Graph, order: List[str], fixed: Optional[Dict[str, str]] = None) -> Dict[str, str]:
@@ -203,6 +210,19 @@ class Evaluator:
         probs = graph.problems(only=[n for n in order if n not in feeds])   # a half-built branch elsewhere is fine
         if probs:
             raise GraphError([m for _, m in probs], probs[0][0])
+        for nid in order:
+            if graph.nodes[nid].type == 'rbd_solver':
+                for upstream in graph.upstream_order(nid, stop=feeds):
+                    if upstream == nid:
+                        continue
+                    n = graph.nodes[upstream]
+                    nt = self.registry.get(n.type)
+                    if timectx.params_use_time(nt.coerce_params(n.params)) or n.type in ('solver', 'rbd_solver'):
+                        raise NodeError(nid, 'rbd_solver', ValueError(
+                            'RBD inputs must be static: animated/deforming inputs and nested solvers are unsupported'))
+        for nid in list(self.rbd.worlds):
+            if nid not in graph.nodes or graph.nodes[nid].type != 'rbd_solver':
+                self.rbd.worlds.pop(nid)[1].close()
         keys = self.compute_keys(graph, order, {n: k for n, (k, _) in feeds.items()})
         stats = CookStats(target=target, key=keys[target])
         results: Dict[str, Geometry] = {n: g for n, (_, g) in feeds.items() if n in keys}
@@ -244,7 +264,9 @@ class Evaluator:
         params = nt.coerce_params(inst.params)
         t0 = time.perf_counter()
         try:
-            out = nt.fn(*args, **params)
+            from .rbd import owned
+            with owned(self.rbd, nid):
+                out = nt.fn(*args, **params)
             if not isinstance(out, Geometry):
                 raise TypeError(f"node function returned {type(out).__name__}, expected Geometry")
             if not out.frozen:

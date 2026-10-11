@@ -421,6 +421,9 @@ class Session:
                 t.join(2.0)
         self.flush()
 
+        with self._cook_lock:
+            self.evaluator.rbd.clear()
+
     def wait_idle(self, timeout: float = 10.0) -> bool:
         """Block until every edit made so far has been cooked (for tests, scripts and AI tools)."""
         end = time.monotonic() + timeout
