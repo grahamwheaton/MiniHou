@@ -98,8 +98,9 @@ def _private(tree, seen_ids):
     """Copy only ancestors containing placements, preserving unrelated native groups."""
     if tree.library is not None:
         raise ValueError("MiniHou placements require local node groups")
-    if tree.users > 1:
+    if tree.users - int(tree.use_fake_user) > 1:
         tree = tree.copy()
+        tree.use_fake_user = False
     if KEY in tree:
         if tree[KEY] in seen_ids:
             tree[KEY] = uuid.uuid4().hex
@@ -349,6 +350,18 @@ def _cook_tree(obj, mod, host, port, force):
         node = _tree(root, path[:-1]).nodes[path[-1]]
         tree = node.node_tree
         try:
+            graph = json.loads(tree[modifiers.GRAPH])
+            if any(n.get("type") == "rbd_solver" for n in graph.get("nodes", {}).values()):
+                if (obj.animation_data or obj.data.animation_data or
+                        (obj.data.shape_keys and obj.data.shape_keys.animation_data) or
+                        modifiers._animated_nodes(root)):
+                    raise ValueError("RBD requires static input; animated objects, fields and node trees are unsupported")
+                for preceding in obj.modifiers:
+                    if preceding == mod:
+                        break
+                    if preceding.type in {"CLOTH", "SOFT_BODY", "FLUID", "PARTICLE_SYSTEM", "MESH_SEQUENCE_CACHE"} or (
+                            preceding.type == "NODES" and modifiers._animated_nodes(preceding.node_group)):
+                        raise ValueError("RBD requires static input; animated upstream modifiers are unsupported")
             values = {p["name"]: _value(root, mod, path[:-1], node.inputs[p["name"]])
                       for p in json.loads(tree[modifiers.PARAMS])}
             arrays, materials, info = _probe(obj, mod, path)
@@ -363,7 +376,7 @@ def _cook_tree(obj, mod, host, port, force):
             header, output = modifiers._connection(host, port).cook(
                 tree[KEY], tree[modifiers.PATH], values, arrays,
                 frame=scene.frame_current + scene.frame_subframe,
-                fps=scene.render.fps / scene.render.fps_base, graph=json.loads(tree[modifiers.GRAPH]))
+                fps=scene.render.fps / scene.render.fps_base, graph=graph)
             update = GeoUpdate.from_message(header, output)
             if update.detail.get("instance_objects"):
                 raise ValueError("Wired groups require mesh output; external object instancing is unsupported")
@@ -419,6 +432,15 @@ def _cleanup():
                 bpy.data.meshes.remove(mesh)
 
 
+def _waiting_after(obj, mod):
+    for later in list(obj.modifiers)[list(obj.modifiers).index(mod) + 1:]:
+        if modifiers.is_modifier(later):
+            later.node_group[modifiers.STATUS] = "Waiting: preceding MiniHou computation failed"
+        elif later.type == "NODES" and contains(later.node_group):
+            for _, node in _placements(later.node_group):
+                node.node_tree[modifiers.STATUS] = "Waiting: preceding MiniHou computation failed"
+
+
 def pump(host=None, port=None, *, force=False):
     """Cook GN placements and legacy MiniHou modifiers in object stack order."""
     global _busy, _last_error, _retry_at
@@ -448,6 +470,7 @@ def pump(host=None, port=None, *, force=False):
                     cooked += modifiers.pump(host, port, force=force, _only=(obj, mod))
                     if modifiers.last_error():
                         errors.append(modifiers.last_error())
+                        _waiting_after(obj, mod)
                         break
                 elif mod.type == "NODES" and contains(mod.node_group):
                     try:
@@ -456,6 +479,7 @@ def pump(host=None, port=None, *, force=False):
                         cooked += _cook_tree(obj, mod, host, port, force)
                     except Exception as exc:
                         errors.append(str(exc))
+                        _waiting_after(obj, mod)
                         for _, node in _placements(mod.node_group):
                             if not status(node).startswith(("Error", "Waiting: preceding")):
                                 node.node_tree[modifiers.STATUS] = "Error (last valid output retained): " + str(exc)

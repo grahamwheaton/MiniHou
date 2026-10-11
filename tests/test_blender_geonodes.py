@@ -546,5 +546,125 @@ class GeometryNodesPlacementTests(unittest.TestCase):
             area.type = old_type
             minihou_link.unregister()
 
+    def rbd_path(self):
+        graph = {"version": 1, "nodes": {
+            "i": {"type": "modifier_input"},
+            "c": {"type": "rbd_configure", "inputs": {"geo": "i"}},
+            "s": {"type": "rbd_solver", "inputs": {"bodies": "c"}},
+            "o": {"type": "output", "inputs": {"geo": "s"}},
+        }, "display": "o", "exposed": [
+            {"name": "Velocity", "node": "c", "param": "velocity"},
+            {"name": "Gravity", "node": "s", "param": "gravity"},
+        ]}
+        path = Path(self.tmp.name) / "rbd_wired.json"
+        path.write_text(json.dumps(graph), encoding="utf-8")
+        return path
+
+    def test_rbd_wired_native_mesh_two_independent_placements(self):
+        bpy.ops.mesh.primitive_cube_add()
+        obj = bpy.context.object
+        tree, gin, gout = self.tree("Wired rigid bodies")
+        before = self.native(tree, 0)
+        before.inputs["Translation"].default_value = (0, 0, 4)
+        self.chain(tree, gin, before)
+        path = self.rbd_path()
+        first = self.g.add_group(tree, str(path), port=self.engine.port)
+        second = self.g.add_group(tree, str(path), port=self.engine.port)
+        first.inputs["Velocity"].default_value = (0, 0, 0)
+        second.inputs["Velocity"].default_value = (2, 0, 0)
+        join = tree.nodes.new("GeometryNodeJoinGeometry")
+        self.chain(tree, before, first, self.native(tree, 10), join)
+        self.chain(tree, before, second, self.native(tree, -10), join)
+        self.chain(tree, join, gout)
+        self.attach(obj, tree)
+        bpy.context.scene.frame_set(1)
+        self.assertEqual(self.cook(force=True), 2)
+        initial = evaluated_positions(obj).copy()
+        self.assertEqual(initial.shape, (16, 3))
+        np.testing.assert_allclose(initial[:, 2].mean(), 4, atol=1e-5)
+        bpy.context.scene.frame_set(30)
+        self.assertEqual(self.cook(force=True), 2)
+        final = evaluated_positions(obj)
+        still = final[final[:, 0] > 0]
+        moving = final[final[:, 0] < 0]
+        self.assertEqual((len(still), len(moving)), (8, 8))
+        self.assertLess(still[:, 2].mean(), initial[:, 2].mean() - 1)
+        self.assertLess(moving[:, 2].mean(), initial[:, 2].mean() - 1)
+        self.assertAlmostEqual(still[:, 0].mean(), 10, places=4)
+        self.assertGreater(moving[:, 0].mean(), -9)
+        self.assertEqual(tuple(first.inputs["Velocity"].default_value), (0, 0, 0))
+        self.assertEqual(self.cook(), 0)
+        self.assertEqual(len(obj.data.vertices), 8)
+        np.testing.assert_allclose(sorted(v.co.z for v in obj.data.vertices), [-1] * 4 + [1] * 4)
+        duplicate = obj.copy()
+        duplicate.name = "Independent RBD duplicate"
+        bpy.context.scene.collection.objects.link(duplicate)
+        self.cook(force=True)
+        duplicate_node = duplicate.modifiers[0].node_group.nodes[second.name]
+        duplicate_node.inputs["Velocity"].default_value = (4, 0, 0)
+        self.cook(force=True)
+        np.testing.assert_allclose(evaluated_positions(obj), final, atol=1e-5)
+        duplicate_positions = evaluated_positions(duplicate)
+        duplicate_moving = duplicate_positions[duplicate_positions[:, 0] < 0]
+        self.assertEqual(len(duplicate_moving), 8)
+        self.assertGreater(duplicate_moving[:, 0].mean(), moving[:, 0].mean() + 1)
+        original_node = obj.modifiers[0].node_group.nodes[second.name]
+        self.assertEqual(tuple(original_node.inputs["Velocity"].default_value), (2, 0, 0))
+
+    def test_rbd_rejects_animated_native_input_and_retains_valid_mesh(self):
+        bpy.ops.mesh.primitive_cube_add()
+        obj = bpy.context.object
+        tree, gin, gout = self.tree("Animated rigid body input")
+        before = self.native(tree, 0)
+        translation = before.inputs["Translation"]
+        translation.default_value = (0, 0, 4)
+        mini = self.g.add_group(tree, str(self.rbd_path()), port=self.engine.port)
+        self.chain(tree, gin, before, mini, gout)
+        self.attach(obj, tree)
+        bpy.context.scene.frame_set(1)
+        self.cook(force=True)
+        initial = evaluated_positions(obj).copy()
+        translation.keyframe_insert("default_value", frame=1)
+        translation.default_value = (0, 0, 5)
+        translation.keyframe_insert("default_value", frame=30)
+        bpy.context.scene.frame_set(30)
+        self.g.pump(port=self.engine.port, force=True)
+        self.assertRegex(self.g.last_error().lower(), "animated|static")
+        self.assertIn("Error", self.g.status(mini))
+        np.testing.assert_allclose(evaluated_positions(obj), initial)
+
+    def test_later_modifier_waits_after_earlier_wired_placement_failure(self):
+        obj, first_tree, _, first, _ = self.mixed()
+        tree, gin, gout = self.tree("Later GN modifier")
+        later = self.mini(tree, scale=2)
+        self.chain(tree, gin, later, gout)
+        self.attach(obj, tree)
+        self.cook()
+        self.assert_x(obj, [32])
+        math = first_tree.nodes.new("ShaderNodeMath")
+        first_tree.links.new(math.outputs[0], first.inputs["Scale"])
+        self.g.pump(port=self.engine.port, force=True)
+        self.assertTrue(self.g.last_error())
+        self.assertTrue(self.g.status(later).startswith("Waiting"), self.g.status(later))
+        self.assert_x(obj, [32])
+
+    def test_fake_user_group_does_not_duplicate_on_every_refresh(self):
+        obj = self.mesh()
+        tree, gin, gout = self.tree()
+        mini = self.mini(tree, scale=2)
+        tree.use_fake_user = True
+        mini.node_tree.use_fake_user = True
+        self.chain(tree, gin, mini, gout)
+        mod = self.attach(obj, tree)
+        self.cook()
+        count = len(bpy.data.node_groups)
+        ident = mini.node_tree[self.g.KEY]
+        self.assertEqual(self.cook(), 0)
+        self.assertEqual(len(bpy.data.node_groups), count)
+        self.assertEqual(mod.node_group, tree)
+        self.assertEqual(mini.node_tree[self.g.KEY], ident)
+        self.assert_x(obj, [2])
+
+
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]], verbosity=2)

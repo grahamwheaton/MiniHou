@@ -80,6 +80,17 @@ def main():
     finally:
         evaluated.to_mesh_clear()
     if args.save:
+        workspace = bpy.data.workspaces.get("Geometry Nodes")
+        if workspace and bpy.context.window:
+            bpy.context.window.workspace = workspace
+            for area in bpy.context.screen.areas:
+                region = next((r for r in area.regions if r.type == "WINDOW"), None)
+                if area.type == "NODE_EDITOR" and region:
+                    area.ui_type = "GeometryNodeTree"
+                    area.spaces.active.pin = True
+                    area.spaces.active.path.start(tree)
+                    with bpy.context.temp_override(area=area, region=region):
+                        bpy.ops.node.view_all()
         path = args.save.expanduser().resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
         bpy.ops.wm.save_as_mainfile(filepath=str(path))

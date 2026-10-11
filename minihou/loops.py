@@ -38,6 +38,8 @@ def analyze(graph, order, target=None):
         scope = max(incoming, key=len, default=())
         if any(scope[:len(s)] != s for s in incoming):
             raise GraphError(f"node {nid!r}: crossed loop blocks; close each block before combining results", nid)
+        if node.type == "rbd_solver" and scope:
+            raise GraphError(f"RBD Solver {nid!r} cannot run inside a repeat body; place it before or after the block", nid)
         if node.type == "loop_begin":
             if not isinstance(node.inputs.get("geo"), str):
                 raise GraphError(f"Loop Begin {nid!r}: geo input must be a single initial-geometry node", nid)

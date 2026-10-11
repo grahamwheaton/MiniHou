@@ -52,15 +52,17 @@ Named numeric attributes on POINT, CORNER and FACE domains travel as engine poin
 
 There is no engine edge domain: edge attributes are skipped. String/matrix attributes and internal dot-prefixed attributes are skipped. Vertex groups above 250,000 points are skipped; use Store Named Attribute upstream for those. **Anonymous attributes do not cross this boundary**: store them by name upstream and read that name downstream. Exact Blender storage types/UI metadata are not guaranteed to survive numeric transport.
 
-Parameters support unlinked literal values, Value constants, reroutes, and Group Input bindings. Arbitrary computed expressions and fields connected to MiniHou parameter sockets are rejected. Native nodes can still evaluate fields while building the mesh before/between/after MiniHou groups.
+Parameters support unlinked literal values, Value constants, reroutes, and Group Input bindings in value mode. Modifier attribute mode and arbitrary computed expressions/fields connected to MiniHou parameter sockets are rejected. Native nodes can still evaluate fields while building the mesh before/between/after MiniHou groups.
 
 ## Staging limits
 
 This is not a synchronous Python geometry-node evaluator. Interactive changes propagate through a main-thread timer. Cook explicitly before a still render or save when the latest result matters; animation/background render automation must cook each frame before rendering. The bridge pauses updates during rendering and in edit mode. It does not mutate geometry from a depsgraph callback.
 
-Native simulation/repeat/foreach/bake zones in bridged trees are rejected. Use MiniHou's external repeat-loop graph support where appropriate. Self Object and dependencies that can feed the destination or MiniHou caches back into the probe are rejected. Local editable mesh objects/node groups are required; linked library placements are unsupported. Muted MiniHou placements are rejected; disconnect them instead.
+Native simulation/repeat/foreach/bake zones in bridged trees and preceding GN modifiers are rejected. Use MiniHou's external repeat-loop graph support where appropriate. RBD works with static wired mesh inputs and independent placement worlds; cook explicitly after changing frame. Animated objects/upstream node trees are rejected for RBD. The RBD Solver itself cannot be inside an external repeat body; place it before or after the block. Self Object and dependencies that can feed the destination or MiniHou caches back into the probe are rejected. Local editable mesh objects/node groups are required; linked library placements are unsupported. Muted MiniHou placements or containing groups are rejected; disconnect them instead.
 
 Missing-engine or cook failures retain the last valid result and show an error status; dependent placements wait. Before a first successful cook the result is empty and honestly marked waiting. Saved caches remain displayable without the engine, but do not represent newly edited upstream geometry until a successful cook.
+
+Input probing evaluates a disposable native subgraph for every connected placement on each refresh. Content hashes suppress unchanged engine cooks and mesh writes, but do not eliminate that Blender evaluation cost. Large graphs with many placements can be expensive. Scripted users can unregister only `minihou_link.modifiers._timer` through `bpy.app.timers.unregister` and cook explicitly; keep the addon's render/lifecycle handlers registered.
 
 ## Why this bridge exists
 
