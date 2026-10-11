@@ -111,6 +111,35 @@ class RBDTests(unittest.TestCase):
         self.assertGreater(centers[:, 1].max(), 1.)
         self.assertGreater(result.P[:, 2].min(), -.501)  # includes floor bottom
         self.assertGreater(np.abs(result.prim['rbd_w'][:288]).max(), .1)
+        # A wall with no shot stays upright: the knockdown is caused by impact.
+        quiet = Graph.from_dict(wall())
+        quiet.set_param('projectile', 'velocity', [0, 0, 0])
+        baseline = self.ev.cook(quiet, frame=72).P[:384].reshape(48, 8, 3).mean(1)
+        self.assertLess(np.linalg.norm(baseline-centers0, axis=1).max(), .1)
+
+    def test_mass_damping_and_bounce_controls(self):
+        g = drop(gravity=[0, 0, 0], include_colliders=False)
+        g.set_param('body', 'velocity', [3, 0, 0])
+        g.set_param('body', 'mass', 7)
+        g.set_param('body', 'linear_damping', 0)
+        fast = self.ev.cook(g, frame=25).P.mean(0)[0]
+        world = self.ev.rbd.worlds['sim'][1]
+        self.assertAlmostEqual(world.model.body_mass[world.body_ids[0]], 7)
+        g.set_param('body', 'linear_damping', 2)
+        slow = self.ev.cook(g, frame=25).P.mean(0)[0]
+        self.assertGreater(fast, 2.9)
+        self.assertLess(slow, 1.4)
+        peaks = []
+        for bounce in (0, .8):
+            g = drop(substeps=24)
+            g.set_param('body', 'restitution', bounce)
+            # Floor bounce must match: MuJoCo mixes the contact damping parameters.
+            g.nodes['ground'] = Graph.from_dict({'nodes': {'ground': node('rbd_configure',
+                dict(active=False, restitution=bounce), geo='floor'), 'floor': node('box')}}).nodes['ground']
+            g.nodes['sim'].inputs['colliders'] = 'ground'
+            heights = [self.ev.cook(g, frame=f).P[:8, 2].mean() for f in range(22, 45)]
+            peaks.append(max(heights))
+        self.assertGreater(peaks[1], peaks[0]+.25)
 
     def test_fracture_and_bounded_cache(self):
         g = Graph.from_dict(falling())

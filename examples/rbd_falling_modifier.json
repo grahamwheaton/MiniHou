@@ -1,0 +1,169 @@
+{
+  "version": 1,
+  "nodes": {
+    "shape": {
+      "type": "box",
+      "params": {
+        "size": [
+          2,
+          2,
+          2
+        ],
+        "center": [
+          0,
+          0,
+          4
+        ]
+      },
+      "inputs": {}
+    },
+    "seeds": {
+      "type": "scatter",
+      "params": {
+        "mode": "volume",
+        "count": 25,
+        "seed": 17
+      },
+      "inputs": {
+        "geo": "shape"
+      }
+    },
+    "pieces": {
+      "type": "voronoi_fracture",
+      "params": {
+        "gap": 0.025
+      },
+      "inputs": {
+        "geo": "shape",
+        "points": "seeds"
+      }
+    },
+    "configured": {
+      "type": "rbd_configure",
+      "params": {
+        "piece_attrib": "piece",
+        "angular_velocity": [
+          0.2,
+          0.4,
+          0.1
+        ]
+      },
+      "inputs": {
+        "geo": "pieces"
+      }
+    },
+    "floor": {
+      "type": "box",
+      "params": {
+        "size": [
+          20,
+          20,
+          0.5
+        ],
+        "center": [
+          0,
+          0,
+          -0.25
+        ]
+      },
+      "inputs": {}
+    },
+    "ground": {
+      "type": "rbd_configure",
+      "params": {
+        "active": false
+      },
+      "inputs": {
+        "geo": "floor"
+      }
+    },
+    "sim": {
+      "type": "rbd_solver",
+      "params": {},
+      "inputs": {
+        "bodies": "configured",
+        "colliders": "ground"
+      }
+    },
+    "out": {
+      "type": "output",
+      "params": {},
+      "inputs": {
+        "geo": "with_host"
+      }
+    },
+    "host": {
+      "type": "modifier_input",
+      "params": {},
+      "inputs": {}
+    },
+    "with_host": {
+      "type": "merge",
+      "params": {},
+      "inputs": {
+        "geos": [
+          "sim",
+          "host"
+        ]
+      }
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Pieces",
+      "node": "seeds",
+      "param": "count"
+    },
+    {
+      "name": "Seed",
+      "node": "seeds",
+      "param": "seed"
+    },
+    {
+      "name": "Gap",
+      "node": "pieces",
+      "param": "gap"
+    },
+    {
+      "name": "Mass",
+      "node": "configured",
+      "param": "mass"
+    },
+    {
+      "name": "Friction",
+      "node": "configured",
+      "param": "friction"
+    },
+    {
+      "name": "Velocity",
+      "node": "configured",
+      "param": "velocity"
+    },
+    {
+      "name": "Spin",
+      "node": "configured",
+      "param": "angular_velocity"
+    },
+    {
+      "name": "Bounce",
+      "node": "configured",
+      "param": "restitution"
+    },
+    {
+      "name": "Gravity",
+      "node": "sim",
+      "param": "gravity"
+    },
+    {
+      "name": "Substeps",
+      "node": "sim",
+      "param": "substeps"
+    },
+    {
+      "name": "Reset",
+      "node": "sim",
+      "param": "reset"
+    }
+  ]
+}

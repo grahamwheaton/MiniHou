@@ -3,8 +3,8 @@
 Blender has no Python mesh modifier callback. A main-thread timer evaluates a disposable
 copy containing only the preceding stack, then publishes the result to this modifier's
 private Object Info cache. This is real upstream geometry, not the original datablock.
-Updates are interactive/eventual; call pump(force=True) before deterministic still renders.
-Animation/background rendering needs an explicit per-frame pump (not a render handler).
+Updates are interactive/eventual, except RBD timeline frames which synchronously pump.
+Call cook_frame before scripted renders, or bake an RBD mesh sequence for native rendering.
 """
 from __future__ import annotations
 
@@ -490,7 +490,8 @@ def pump(host=None, port=None, *, force=False, _only=None):
     errors = []
     try:
         entries = [(o, m) for o in bpy.context.scene.objects if o.type == "MESH" and CACHE not in o
-                   and o.library is None for m in o.modifiers if is_modifier(m)]
+                   and o.library is None and not (o.hide_get() and o.hide_render)
+                   for m in o.modifiers if is_modifier(m)]
         all_entries = [(o, m) for o in bpy.data.objects if o.type == "MESH" and CACHE not in o
                        and o.library is None for m in o.modifiers if is_modifier(m)]
         live = _unique(all_entries)  # copied objects in another scene also need fresh identities
@@ -517,6 +518,17 @@ def pump(host=None, port=None, *, force=False, _only=None):
                     continue
                 signature = None
                 try:
+                    if has_rbd(mod):
+                        if (obj.animation_data or obj.data.animation_data or
+                                (obj.data.shape_keys and obj.data.shape_keys.animation_data)):
+                            raise ValueError('RBD requires static input: animated objects/shape keys/drivers are unsupported')
+                        for preceding in obj.modifiers:
+                            if preceding == mod:
+                                break
+                            if preceding.type in {'CLOTH', 'SOFT_BODY', 'FLUID', 'PARTICLE_SYSTEM', 'MESH_SEQUENCE_CACHE'}:
+                                raise ValueError('RBD does not accept deforming/time-dependent upstream modifiers')
+                            if preceding.type == 'NODES' and _animated_nodes(preceding.node_group):
+                                raise ValueError('RBD does not accept animated/simulation Geometry Nodes upstream')
                     # Break invalid active native dependencies before evaluating the prefix.
                     # A changed graph may no longer instance anything, so its old binding
                     # must not prevent cooking and validating the new output.
@@ -614,6 +626,54 @@ def _render_done(_dummy):
     _rendering = False
 
 
+def has_rbd(mod):
+    """Saved graph inspection without importing the engine into Blender."""
+    if not is_modifier(mod):
+        return False
+    try:
+        graph = json.loads(mod.node_group.get(GRAPH, '{}'))
+    except (ValueError, TypeError):
+        return False
+    return any(n.get('type') == 'rbd_solver' for n in graph.get('nodes', {}).values())
+
+
+def _animated_nodes(group, seen=None):
+    if group is None:
+        return False
+    seen = set() if seen is None else seen
+    if group.as_pointer() in seen:
+        return False
+    seen.add(group.as_pointer())
+    return bool(group.animation_data) or any(
+        n.bl_idname in {'GeometryNodeInputSceneTime', 'GeometryNodeSimulationInput', 'GeometryNodeSimulationOutput'}
+        or _animated_nodes(getattr(n, 'node_tree', None), seen) for n in group.nodes)
+
+
+def cook_frame(scene=None, frame=None):
+    """Explicit synchronous barrier before a still render. Never mutate during rendering."""
+    if _rendering:
+        raise RuntimeError('MiniHou cannot cook during a render; bake first or cook each frame before rendering')
+    scene = scene or bpy.context.scene
+    if frame is not None:
+        scene.frame_set(int(frame))
+    host, port = _endpoint or _settings()
+    count = pump(host, port, force=True)
+    if last_error():
+        raise RuntimeError(last_error())
+    bpy.context.view_layer.update()
+    return count
+
+
+@persistent
+def _frame_post(scene, _depsgraph=None):
+    if _busy or _rendering:
+        return
+    if any(has_rbd(m) and m.show_viewport for o in scene.objects if o.type == 'MESH' and not o.hide_get()
+           for m in o.modifiers):
+        host, port = _endpoint or _settings()
+        pump(host, port)
+
+
 @persistent
 def _load_post(_dummy):
     _render_done(None)
@@ -631,6 +691,8 @@ def register():
             handlers.append(callback)
     if _load_post not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_load_post)
+    if _frame_post not in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.append(_frame_post)
     if not bpy.app.timers.is_registered(_timer):
         bpy.app.timers.register(_timer, first_interval=0.2, persistent=True)
 
@@ -648,5 +710,7 @@ def unregister():
         bpy.app.timers.unregister(_timer)
     if _load_post in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.remove(_load_post)
+    if _frame_post in bpy.app.handlers.frame_change_post:
+        bpy.app.handlers.frame_change_post.remove(_frame_post)
     _owners.clear()
     disconnect()

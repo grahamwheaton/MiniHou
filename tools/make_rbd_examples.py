@@ -12,15 +12,18 @@ def node(kind, params=None, **inputs):
 def wall(columns=8, rows=6):
     nodes = {
         'brick': node('box', dict(size=[.9, .4, .45], center=[-(columns-1)*.5, 0, .225])),
-        'row': node('copy_transform', dict(copies=columns, translate=[1, 0, 0]), geo='brick'),
+        'brick_surface': node('wrangle', dict(run_over='primitives', snippet='i@sharp_face = 1; i@material_index = 0'), geo='brick'),
+        'row': node('copy_transform', dict(copies=columns, translate=[1, 0, 0]), geo='brick_surface'),
         'wall': node('copy_transform', dict(copies=rows, translate=[0, 0, .46]), geo='row'),
         'bricks': node('rbd_configure', dict(mass=1, friction=.65), geo='wall'),
         'ball': node('sphere', dict(radius=.45, rows=8, columns=16, center=[.2, -5, 1.4])),
+        'ball_surface': node('wrangle', dict(run_over='primitives', snippet='i@material_index = 1'), geo='ball'),
         'projectile': node('rbd_configure', dict(id_offset=10000, mass=12, velocity=[0, 12, 0],
-                            angular_velocity=[2, 0, 0], restitution=.15), geo='ball'),
+                            angular_velocity=[2, 0, 0], restitution=.15), geo='ball_surface'),
         'bodies': node('merge', geos=['bricks', 'projectile']),
         'floor': node('box', dict(size=[80, 80, .5], center=[0, 0, -.25])),
-        'ground': node('rbd_configure', dict(active=False, friction=.8), geo='floor'),
+        'floor_surface': node('wrangle', dict(run_over='primitives', snippet='i@sharp_face = 1; i@material_index = 2'), geo='floor'),
+        'ground': node('rbd_configure', dict(active=False, friction=.8), geo='floor_surface'),
         'sim': node('rbd_solver', dict(substeps=12), bodies='bodies', colliders='ground'),
         'out': node('output', geo='sim'),
     }
@@ -52,6 +55,18 @@ def falling():
     return g
 
 
+def modifier_graph(graph):
+    """Empty host input keeps demos valid stack graphs without reading Blender scene objects."""
+    import copy
+    graph = copy.deepcopy(graph)
+    graph['nodes']['host'] = node('modifier_input')
+    graph['nodes']['with_host'] = node('merge', geos=['sim', 'host'])
+    graph['nodes']['out']['inputs']['geo'] = 'with_host'
+    return graph
+
+
 if __name__ == '__main__':
-    for name, graph in [('rbd_wall', wall()), ('rbd_falling', falling())]:
+    for name, graph in [('rbd_wall', wall()), ('rbd_falling', falling()),
+                        ('rbd_wall_modifier', modifier_graph(wall())),
+                        ('rbd_falling_modifier', modifier_graph(falling()))]:
         (ROOT / 'examples' / (name + '.json')).write_text(json.dumps(graph, indent=2) + '\n', encoding='utf8')

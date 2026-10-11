@@ -142,6 +142,8 @@ def pieces(geo, static=False):
             values[name] = value
         if values['mass'] <= 0 or not 0 <= values['friction'] <= 10 or not 0 <= values['restitution'] <= 1:
             raise ValueError("RBD mass must be positive; friction 0..10 and restitution 0..1")
+        if values['active'] not in (0, 1):
+            raise ValueError('rbd_active must be 0 or 1')
         if any(not 0 <= values[k] <= 100 for k in ('linear_damping', 'angular_damping')):
             raise ValueError("RBD damping must be 0..100 per second")
         result.append(Piece(geo, int(ident), points, prims, corners, center, local,
@@ -300,7 +302,12 @@ class Manager:
         target = max(settings['start_frame'], math.floor(timectx.frame()))
         if target - settings['start_frame'] > 100000:
             raise ValueError("RBD frame range exceeds 100000 frames")
-        return world.output(target)
+        try:
+            return world.output(target)
+        except Exception:
+            world.close()
+            self.worlds.pop(node_id, None)
+            raise
 
     def clear(self):
         for _, world in self.worlds.values():

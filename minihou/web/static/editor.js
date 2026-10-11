@@ -445,6 +445,10 @@
       }
     }
     if (t.params.length) out.push(h("div", { class: "section" }, "Parameters"));
+    if (n.type === "rbd_solver") out.push(h("button", {
+      onclick: () => queueSet(id, "reset", Number(n.params?.reset || 0) + 1),
+      title: "Discard this simulation and replay from its initial geometry"
+    }, "Reset simulation"));
     for (const p of t.params) out.push(paramRow(id, p));
     out.push(h("div", { class: "section" }, "Note"));
     out.push(h("div", { class: "pw" }, h("input", { type: "text", value: n.comment || "", placeholder: "comment shown above the node",

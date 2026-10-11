@@ -221,7 +221,14 @@ class Evaluator:
                         continue
                     n = graph.nodes[upstream]
                     nt = self.registry.get(n.type)
-                    if timectx.params_use_time(nt.coerce_params(n.params)) or n.type in ('solver', 'rbd_solver'):
+                    values = nt.coerce_params(n.params)
+                    extra_timed = False
+                    if nt.key_extra:
+                        with timectx.at(1):
+                            first = nt.key_extra(values)
+                        with timectx.at(2):
+                            extra_timed = first != nt.key_extra(values)
+                    if timectx.params_use_time(values) or extra_timed or n.type in ('solver', 'rbd_solver'):
                         raise NodeError(nid, 'rbd_solver', ValueError(
                             'RBD inputs must be static: animated/deforming inputs and nested solvers are unsupported'))
         for nid in list(self.rbd.worlds):
