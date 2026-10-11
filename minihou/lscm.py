@@ -3,7 +3,7 @@
 * **Islands**: faces joined across edges that are not seams. Seams are mesh borders, edges sharper than an angle and
   edges where an optional primitive attribute changes. LSCM needs disc-like islands (Euler characteristic 1), so closed
   or ring-shaped islands are cut by planes through their centre until they are discs (a sphere into two cups, a torus
-  into quarters), trying each principal axis and keeping the cut that leaves the most discs.
+  into quarters), trying the world and principal axes and keeping the cut that leaves the most discs.
 * **LSCM** (Levy et al. 2002): per triangle, the map's deviation from a similarity in the triangle's own plane, summed
   as one sparse least-squares problem over all islands with two pinned points each. SciPy's sparse direct solver when
   installed, else conjugate gradients (Jacobi-preconditioned) on the normal equations in numpy, started from each
@@ -85,7 +85,9 @@ def make_discs(geo, twin, seam, label, rounds: int = 6):
             c = cen[f] - np.average(cen[f], axis=0, weights=w)
             _, _, axes = np.linalg.svd(c * np.sqrt(w)[:, None], full_matrices=False)
             best, best_score = None, None
-            for ax in axes:
+            # world axes first, principal axes only when strictly better: symmetric shapes (a cube's principal axes
+            # are arbitrary) then cut the same way on every platform
+            for ax in np.concatenate([np.eye(3), axes]):
                 side = c @ ax > 0
                 if side.all() or not side.any():
                     continue
