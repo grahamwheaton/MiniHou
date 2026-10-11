@@ -12,7 +12,7 @@ import bpy
 from bpy.app.handlers import persistent
 from bpy.props import IntProperty, StringProperty
 
-from . import runtime, modifiers, geonodes_ui
+from . import runtime, modifiers, geonodes_ui, network_ui
 from .server_control import ServerController
 from .protocol import DEFAULT_PORT
 
@@ -267,7 +267,7 @@ class MINIHOU_PT_main(bpy.types.Panel):
                 source_owner = modifiers.source_owner(mod)
                 if source_owner is not None:
                     item.prop(source_owner[0], source_owner[1], text="Source Object")
-                item.operator("minihou.reload_modifier").modifier_name = mod.name
+                network_ui.draw(item, mod)
                 mapping = proxy.mapping(mod.node_group)
                 for p in modifiers.parameters(mod):
                     owner = proxy.input_owner(mod, mapping.get(p["name"], ""))
@@ -327,10 +327,11 @@ class MINIHOU_PT_modifier_sources(bpy.types.Panel):
         for mod in context.object.modifiers:
             if not modifiers.is_modifier(mod):
                 continue
+            box = self.layout.box()
+            box.label(text=mod.name, icon="MODIFIER")
+            network_ui.draw(box, mod)
             owner = modifiers.source_owner(mod)
             if owner is not None:
-                box = self.layout.box()
-                box.label(text=mod.name, icon="MODIFIER")
                 box.prop(owner[0], owner[1], text="Source Object")
                 box.label(text=modifiers.status(mod)[:160])
 
@@ -358,9 +359,11 @@ def register():
         bpy.app.timers.register(_restore_endpoint_timer, first_interval=0.0)
     modifiers.register()
     geonodes_ui.register()
+    network_ui.register()
 
 
 def unregister():
+    network_ui.unregister()
     geonodes_ui.unregister()
     modifiers.unregister()
     _server.stop(wait=True)

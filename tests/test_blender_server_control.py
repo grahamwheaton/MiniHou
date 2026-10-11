@@ -86,6 +86,39 @@ class BlenderServerOperatorTests(unittest.TestCase):
         self.assertIsNotNone(process.poll())
         self.assertFalse(self.addon._server.snapshot()["owned"])
 
+    def test_edit_network_routes_each_modifier_template_and_reports_missing_file(self):
+        import json
+        from urllib.request import urlopen
+        from minihou_link import modifiers, network_ui
+        with tempfile.TemporaryDirectory(dir=ROOT / "build", prefix="edit_network_") as folder:
+            a, b = Path(folder) / "a.json", Path(folder) / "b.json"
+            shutil.copyfile(ROOT / "examples/modifiers/transform.json", a)
+            shutil.copyfile(ROOT / "examples/modifiers/repeat_transform.json", b)
+            self.assertEqual(bpy.ops.minihou.start_server(), {"FINISHED"})
+            ready = self.wait_state("ready")
+            bpy.ops.mesh.primitive_cube_add()
+            obj = bpy.context.object
+            first = modifiers.add_modifier(obj, str(a), port=self.port)
+            second = modifiers.add_modifier(obj, str(b), port=self.port)
+            snapshots = [mod.node_group[modifiers.GRAPH] for mod in (first, second)]
+            with patch("minihou_link.network_editor.webbrowser.open", return_value=True) as browser:
+                for mod, path in ((first, a), (second, b), (first, a)):
+                    self.assertEqual(bpy.ops.minihou.edit_network(modifier_name=mod.name), {"FINISHED"})
+                    network_ui.router._thread.join(5)
+                    self.assertEqual(network_ui.router.snapshot()["state"], "ready", network_ui.router.snapshot())
+                    with urlopen(ready["editor_url"] + "api/graph", timeout=3) as response:
+                        self.assertEqual(Path(json.load(response)["path"]), path)
+                self.assertEqual(browser.call_count, 3)
+                b.unlink()
+                self.assertEqual(bpy.ops.minihou.edit_network(modifier_name=second.name), {"FINISHED"})
+                network_ui.router._thread.join(5)
+                self.assertEqual(network_ui.router.snapshot()["state"], "error")
+                self.assertIn("no such", network_ui.router.snapshot()["detail"])
+                self.assertEqual(browser.call_count, 3)
+            self.assertEqual([mod.node_group[modifiers.GRAPH] for mod in (first, second)], snapshots)
+            for mod in (first, second):
+                obj.modifiers.remove(mod)
+
 
 if __name__ == "__main__":
     unittest.main(argv=[__file__])
