@@ -566,7 +566,51 @@
   function scheduleInspect() {
     clearTimeout(inspectTimer);
     inspectTimer = setTimeout(runInspect, 150);
+    schedulePreview();
   }
+
+  // ---------------------------------------------------------------- 3-D preview of the selected (or display) node
+  const pvMsg = (text) => { const m = $("#pv-msg"); m.textContent = text || ""; m.classList.toggle("hidden", !text); };
+  const pv = window.MiniHouPreview ? window.MiniHouPreview.create($("#pv-canvas"), pvMsg) : null;
+  let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null;
+  function schedulePreview() {
+    if (!pv || !pv.ok) return;
+    clearTimeout(pvTimer);
+    pvTimer = setTimeout(runPreview, 200);
+  }
+  async function runPreview() {
+    const ids = [...S.sel].filter((id) => nodeOf(id));
+    const node = ids.length === 1 ? ids[0] : displayNode();
+    $("#pv-node").textContent = node ? "· " + node : "";
+    if (!node) { pv.clear(); pvMsg(""); pvKey = null; return; }
+    const key = `${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}`;
+    if (key === pvKey) return;
+    pvKey = key;
+    const seq = ++pvSeq;
+    let buf;
+    try {
+      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node }) });
+      buf = await r.arrayBuffer();
+    } catch (e) { pvKey = null; return; }
+    if (seq !== pvSeq) return;
+    const { head, arrays } = window.MiniHouPreview.parse(buf);
+    if (!arrays) {
+      pv.clear();
+      pvMsg(head.error ? (head.error.node && head.error.node !== node ? head.error.node + ": " : "") + head.error.message : "No preview");
+      return;
+    }
+    const empty = !head.points;
+    pvMsg(empty ? "No geometry" : head.truncated ? "Showing part of a very large geometry." : "");
+    pv.set(head, arrays, pvNode === node && pvPath === S.path);
+    pvNode = node; pvPath = S.path;
+  }
+  if (pv && pv.ok) {
+    for (const [id, key] of [["#pv-shaded", "shaded"], ["#pv-edges", "edges"], ["#pv-points", "points"]]) {
+      $(id).checked = pv.opt[key];
+      $(id).onchange = (e) => { pv.opt[key] = e.target.checked; pv.redraw(); };
+    }
+    $("#pv-frame").onclick = () => pv.frameAll();
+  } else { $("#preview .pv-opts").classList.add("hidden"); }
   async function runInspect() {
     const ids = [...S.sel].filter((id) => nodeOf(id));
     const node = ids.length === 1 ? ids[0] : displayNode();
@@ -1111,5 +1155,5 @@
 
   applyView();
   connectEvents();
-  window.minihou = { S, edit, frame, clipboardText, pasteNodes };                  // handy from the browser console
+  window.minihou = { S, edit, frame, clipboardText, pasteNodes, preview: pv };                  // handy from the browser console
 })();

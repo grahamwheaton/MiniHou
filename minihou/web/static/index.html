@@ -46,6 +46,18 @@
   <div id="splitter" title="Drag to resize"></div>
 
   <aside id="side">
+    <section id="preview" class="panel">
+      <div class="panel-title">
+        <span>3D <span id="pv-node" class="muted"></span></span>
+        <span class="pv-opts">
+          <label class="small"><input type="checkbox" id="pv-shaded" checked> shaded</label>
+          <label class="small"><input type="checkbox" id="pv-edges" checked> edges</label>
+          <label class="small"><input type="checkbox" id="pv-points"> points</label>
+          <button id="pv-frame" class="small" title="Frame the geometry (or double-click the view)">⌂</button>
+        </span>
+      </div>
+      <div class="pv-wrap"><canvas id="pv-canvas" aria-label="3D preview"></canvas><div id="pv-msg" class="muted hidden"></div></div>
+    </section>
     <section id="params" class="panel">
       <div class="panel-empty">Select a node to edit its parameters.</div>
     </section>
@@ -85,6 +97,7 @@
   <p class="muted">Edits are saved to the graph file and show up live in Blender and in other editors.</p>
 </div>
 
+<script src="/static/preview.js"></script>
 <script src="/static/editor.js"></script>
 </body>
 </html>

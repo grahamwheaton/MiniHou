@@ -199,6 +199,71 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: '"boxes"' in self.read_file()))
         self.page.wait_for_selector(".netbox")
 
+    def pixels_vary(self, selector="#pv-canvas"):
+        """True when the element's screenshot has more than a couple of distinct colours (something was drawn)."""
+        import io
+        import struct
+        import zlib
+        png = self.page.locator(selector).screenshot()
+        pos, chunks = 8, {}
+        while pos < len(png):
+            (n,) = struct.unpack(">I", png[pos:pos + 4])
+            chunks.setdefault(png[pos + 4:pos + 8], []).append(png[pos + 8:pos + 8 + n])
+            pos += 12 + n
+        w, h, depth, ctype = struct.unpack(">IIBB", chunks[b"IHDR"][0][:10])
+        raw = zlib.decompress(b"".join(chunks[b"IDAT"]))
+        bpp = {2: 3, 6: 4}[ctype]
+        stride = w * bpp
+        colours, prev = set(), bytearray(stride)
+        for y in range(h):
+            row = bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+            ft = raw[y * (stride + 1)]
+            for i in range(stride):                         # undo PNG row filters
+                a = row[i - bpp] if i >= bpp else 0
+                b = prev[i]
+                c = prev[i - bpp] if i >= bpp else 0
+                if ft == 1:
+                    row[i] = (row[i] + a) & 255
+                elif ft == 2:
+                    row[i] = (row[i] + b) & 255
+                elif ft == 3:
+                    row[i] = (row[i] + ((a + b) >> 1)) & 255
+                elif ft == 4:
+                    p = a + b - c
+                    pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                    row[i] = (row[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+            prev = row
+            colours.update(bytes(row[x:x + bpp]) for x in range(0, stride, bpp * 3))
+            if len(colours) > 20:
+                return True
+        return len(colours) > 3
+
+    def test_3d_preview_draws_the_selected_node_and_reports_errors(self):
+        if not self.page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+            self.skipTest("this Chromium has no WebGL2")
+        self.page.wait_for_function("window.minihou.preview && window.minihou.preview.ok && window.minihou.preview.tris > 0")
+        self.assertIn("out", self.page.inner_text("#pv-node"))                          # the display node by default
+        self.assertTrue(until(lambda: self.pixels_vary(), 5))
+        self.node("points").locator(".title").click()                                    # points: scatter output, no faces
+        self.page.wait_for_function("window.minihou.preview.tris === 0 && window.minihou.preview.points > 100")
+        self.assertIn("points", self.page.inner_text("#pv-node"))
+        self.assertTrue(until(lambda: self.pixels_vary(), 5))
+        self.page.click("#pv-edges")                                                     # toggles redraw without errors
+        self.page.click("#pv-shaded")
+        self.page.click("#pv-frame")
+        box = self.page.locator("#pv-canvas").bounding_box()
+        self.page.mouse.move(box["x"] + 60, box["y"] + 60)                               # orbit and zoom
+        self.page.mouse.down()
+        self.page.mouse.move(box["x"] + 120, box["y"] + 90, steps=4)
+        self.page.mouse.up()
+        self.page.mouse.wheel(0, 200)
+        self.page.mouse.dblclick(box["x"] + 100, box["y"] + 100)
+        # a node that cannot cook shows its error instead of stale geometry
+        self.s.edit([{"op": "add", "type": "wrangle", "id": "bad", "inputs": {"geo": "ground"},
+                      "params": {"snippet": "@P.z = @nope"}}])
+        self.node("bad").locator(".title").click()
+        self.page.wait_for_function("document.querySelector('#pv-msg').textContent.includes('nope')")
+
     def test_frame_slider_scrubs_and_follows_the_frame(self):
         self.page.fill("#frame-slider", "40")                         # fires input events like a drag
         end = time.monotonic() + 5

@@ -14,6 +14,8 @@ live in the other and in Blender.
 ``POST /api/edit``     ``{ops: [...], wait?: bool}`` -> ``{rev, results, changed, status?}`` (see :mod:`minihou.edit`)
 ``POST /api/undo``     also ``/api/redo``
 ``POST /api/inspect``  ``{node, detail?}`` -> geometry summary of any node
+``POST /api/preview``  ``{node}`` -> positions, triangles and edges of any node for the 3-D view (binary, see
+                       :mod:`minihou.preview`), or JSON ``{ok: false, error}``
 ``POST /api/open``     ``{path, create?}`` switch to (or create) a graph file inside the workspace root
 ``POST /api/frame``    ``{frame, fps?}`` set the current frame for @Frame / @Time (Blender's timeline also sets it)
 =====================  =======================================================================================
@@ -352,6 +354,17 @@ class _Handler(BaseHTTPRequestHandler):
             if not isinstance(node, str):
                 raise ApiError(400, '"node" must be a node id')
             return self._json(s.inspect(node, bool(body.get("detail"))))
+        if path == "/api/preview":
+            node = body.get("node")
+            if not isinstance(node, str):
+                raise ApiError(400, '"node" must be a node id')
+            r = s.preview(node)
+            if not r["ok"]:
+                return self._json({"ok": False, "node": node, "rev": r["rev"], "error": r["error"]})
+            from .. import preview
+            head, arrays = preview.arrays_for(r["geo"])
+            head.update(node=node, rev=r["rev"])
+            return self._send(200, preview.pack(head, arrays), "application/octet-stream")
         if path == "/api/open":
             p = app.resolve(body.get("path"))
             if not p.exists() and not body.get("create"):

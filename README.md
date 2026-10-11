@@ -67,6 +67,18 @@ parameter to Blender) and an **inspector** with the node's point/prim counts, bo
 the failing node. Everything is live: drag a slider in Blender and the editor follows; edit in the editor and Blender follows.
 Edits are saved to the graph file (and are undoable, including edits made by an AI). Press **?** for all controls.
 
+![The editor with the 3-D preview and a network box](docs/images/editor_preview.png)
+
+* **3-D preview** (top right): a WebGL2 view of the selected node, or the display node when nothing is selected, so the engine is
+  usable without Blender. Drag to orbit (Z is up), **Shift**-drag or right-drag to pan, wheel to zoom, double-click to frame.
+  Shaded / edges / points toggles; point colours (`Cd`) are shown; back faces are tinted orange so flipped normals stand out.
+  Very large geometry is cut to a drawable size and the view says so.
+* **Network boxes**: **O** (or the Box button) draws a titled, coloured rectangle behind the selected nodes. Drag its title to move
+  it with its nodes, its corner to resize, double-click to rename, the dot to change colour. They are saved with the graph and never
+  affect a cook.
+* **Copy / cut / paste** (**Ctrl+C / X / V**): nodes travel as JSON text through the clipboard, so they can move to another graph or
+  another editor window; wires between the copied nodes are kept.
+
 ## Build systems with AI (MCP)
 
 The engine includes an [MCP](https://modelcontextprotocol.io) server, so an AI assistant can build and tweak graphs in the running

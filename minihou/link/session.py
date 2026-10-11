@@ -394,6 +394,22 @@ class Session:
                 out["blender"] = dict(data.info, error=data.error) if data.error else dict(data.info)
         return out
 
+    def preview(self, node: str) -> dict:
+        """Cook ``node`` and return ``{"ok", "node", "rev", "geo"}``, or ``{"ok": False, "error"}`` (never raises)."""
+        with self.lock:
+            snapshot = self.graph.copy()
+            rev = self._rev
+            frame, fps = self.frame, self.fps
+        if node not in snapshot.nodes:
+            return {"ok": False, "node": node, "rev": rev, "error": {"node": node, "message": f"no such node {node!r}"}}
+        try:
+            with self._cook_lock, timectx.at(frame, fps):
+                geo = self.evaluator.cook(snapshot, node)
+        except (NodeError, GraphError, ParamError) as e:
+            return {"ok": False, "node": node, "rev": rev,
+                    "error": {"node": getattr(e, "node_id", None), "message": str(e)}}
+        return {"ok": True, "node": node, "rev": rev, "geo": geo}
+
     def start(self, cook_immediately: bool = True) -> None:
         if self._thread and self._thread.is_alive():
             return

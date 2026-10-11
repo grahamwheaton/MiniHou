@@ -71,6 +71,24 @@ class WebTests(unittest.TestCase):
         self.assertEqual(d["index"], 0)
         self.assertIn("unknown node type", d["error"])
 
+    def test_preview_returns_binary_geometry_or_a_json_error(self):
+        from minihou import preview
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.request("POST", "/api/preview", json.dumps({"node": "ground"}), {"Content-Type": "application/json"})
+        r = c.getresponse()
+        data = r.read()
+        c.close()
+        self.assertEqual((r.status, r.getheader("Content-Type")), (200, "application/octet-stream"))
+        head, arrays = preview.unpack(data)
+        self.assertEqual((head["node"], head["prims"]), ("ground", 3481))
+        self.assertEqual(head["tris"], 2 * 3481)
+        self.assertEqual(len(arrays["P"]), head["points"] * 3)
+        st, d = self.req("POST", "/api/preview", {"node": "nope"})
+        self.assertEqual((st, d["ok"]), (200, False))
+        self.assertIn("no such node", d["error"]["message"])
+        self.assertEqual(self.req("POST", "/api/preview", {"node": 5})[0], 400)
+        self.assertEqual(self.req("POST", "/api/preview", {"node": "ground"}, headers={"Origin": "http://evil.com"})[0], 403)
+
     def test_inspect_undo_and_status(self):
         st, d = self.req("POST", "/api/inspect", {"node": "ground", "detail": True})
         self.assertEqual((st, d["points"]), (200, 3600))
