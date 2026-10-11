@@ -1,0 +1,188 @@
+{
+ "version": 1,
+ "doc": "Exact booleans: a chamfered block with three bored holes and a slot (subtract) and a dome on top (union); crisp vertex normals.",
+ "nodes": {
+  "block": {
+   "type": "box",
+   "params": {
+    "size": [
+     3.0,
+     2.0,
+     1.0
+    ],
+    "center": [
+     0.0,
+     0.0,
+     0.5
+    ]
+   },
+   "pos": [
+    0,
+    0
+   ]
+  },
+  "hole": {
+   "type": "tube",
+   "params": {
+    "radius_bottom": 0.22,
+    "radius_top": 0.22,
+    "height": 3.0,
+    "columns": 40,
+    "center": [
+     -1.0,
+     -0.5,
+     0.5
+    ]
+   },
+   "pos": [
+    250,
+    0
+   ]
+  },
+  "holes": {
+   "type": "copy_transform",
+   "inputs": {
+    "geo": "hole"
+   },
+   "pos": [
+    250,
+    100
+   ],
+   "params": {
+    "copies": 3,
+    "translate": [
+     1.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  "slot": {
+   "type": "box",
+   "params": {
+    "size": [
+     2.4,
+     0.35,
+     0.6
+    ],
+    "center": [
+     0.0,
+     0.55,
+     1.0
+    ]
+   },
+   "pos": [
+    500,
+    0
+   ]
+  },
+  "cutters": {
+   "type": "merge",
+   "inputs": {
+    "geos": [
+     "holes",
+     "slot"
+    ]
+   },
+   "pos": [
+    350,
+    200
+   ]
+  },
+  "cut": {
+   "type": "boolean",
+   "inputs": {
+    "a": "block_bevel",
+    "b": "cutters"
+   },
+   "pos": [
+    0,
+    300
+   ],
+   "params": {
+    "operation": "subtract"
+   }
+  },
+  "dome": {
+   "type": "sphere",
+   "params": {
+    "radius": 0.55,
+    "rows": 24,
+    "columns": 48,
+    "center": [
+     1.05,
+     0.35,
+     0.97
+    ]
+   },
+   "pos": [
+    600,
+    200
+   ]
+  },
+  "joined": {
+   "type": "boolean",
+   "inputs": {
+    "a": "cut",
+    "b": "dome"
+   },
+   "pos": [
+    0,
+    400
+   ],
+   "params": {
+    "operation": "union"
+   }
+  },
+  "shade": {
+   "type": "normal",
+   "inputs": {
+    "geo": "joined"
+   },
+   "pos": [
+    0,
+    600
+   ],
+   "params": {
+    "domain": "vertex",
+    "cusp_angle": 35.0
+   }
+  },
+  "out": {
+   "type": "output",
+   "inputs": {
+    "geo": "shade"
+   },
+   "pos": [
+    0,
+    700
+   ]
+  },
+  "block_bevel": {
+   "type": "polybevel",
+   "inputs": {
+    "geo": "block"
+   },
+   "pos": [
+    0,
+    100
+   ],
+   "params": {
+    "distance": 0.04
+   }
+  }
+ },
+ "display": "out",
+ "exposed": [
+  {
+   "name": "Hole spacing",
+   "node": "holes",
+   "param": "translate"
+  },
+  {
+   "name": "Dome",
+   "node": "dome",
+   "param": "radius"
+  }
+ ]
+}

@@ -1,0 +1,13 @@
+{"version": 1, "doc": "UV unwrapping with uv_flatten (least-squares conformal maps): a noisy rock, a torus and a bevelled box, each cut into disc-shaped islands and packed into 0-1. Shown with a checker texture.",
+ "nodes": {
+  "rock_base": {"type": "sphere", "params": {"radius": 1.0, "rows": 48, "columns": 96, "center": [-2.4, 0.0, 1.0]}, "pos": [0, 0]},
+  "rock": {"type": "noise", "inputs": {"geo": "rock_base"}, "pos": [0, 100], "params": {"amplitude": [0.18, 0.18, 0.18], "frequency": 1.6}},
+  "ring": {"type": "torus", "params": {"radius": 0.9, "thickness": 0.35, "rows": 32, "columns": 96, "center": [0.0, 0.0, 0.35]}, "pos": [250, 0]},
+  "crate": {"type": "box", "params": {"size": [1.4, 1.4, 1.4], "divisions": 4, "center": [2.4, 0.0, 0.7]}, "pos": [500, 0]},
+  "crate_bevel": {"type": "polybevel", "inputs": {"geo": "crate"}, "pos": [500, 100], "params": {"distance": 0.08}},
+  "all": {"type": "merge", "inputs": {"geos": ["rock", "ring", "crate_bevel"]}, "pos": [250, 200]},
+  "unwrap": {"type": "uv_flatten", "inputs": {"geo": "all"}, "pos": [250, 300], "params": {"seam_angle": 40.0}},
+  "shade": {"type": "normal", "inputs": {"geo": "unwrap"}, "pos": [250, 400], "params": {"domain": "vertex", "cusp_angle": 40.0}},
+  "out": {"type": "output", "inputs": {"geo": "shade"}, "pos": [250, 500]}},
+ "display": "out",
+ "exposed": [{"name": "Seam angle", "node": "unwrap", "param": "seam_angle"}, {"name": "Padding", "node": "unwrap", "param": "padding"}]}

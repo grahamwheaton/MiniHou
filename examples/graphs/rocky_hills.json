@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "doc": "Hills with rocks from the rock_scatter system.",
+  "nodes": {
+    "land": {
+      "type": "grid",
+      "params": {
+        "size_x": 30,
+        "size_y": 30,
+        "columns": 120,
+        "rows": 120
+      },
+      "pos": [0, 0]
+    },
+    "hills": {
+      "type": "noise",
+      "params": {
+        "amplitude": [0, 0, 3],
+        "frequency": 0.12,
+        "octaves": 4
+      },
+      "inputs": {
+        "geo": "land"
+      },
+      "pos": [0, 110]
+    },
+    "rocks": {
+      "type": "rock_scatter",
+      "params": {
+        "rock_count": 400,
+        "rock_size": 0.3
+      },
+      "inputs": {
+        "ground": "hills"
+      },
+      "comment": "a system: nodes/rock_scatter.json (open it to edit inside)",
+      "pos": [0, 220]
+    },
+    "out": {
+      "type": "output",
+      "inputs": {
+        "geo": "rocks"
+      },
+      "pos": [0, 330]
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Rocks",
+      "node": "rocks",
+      "param": "rock_count"
+    },
+    {
+      "name": "Hill Height",
+      "node": "hills",
+      "param": "amplitude"
+    }
+  ]
+}

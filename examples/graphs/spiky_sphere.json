@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "nodes": {
+    "ball": {"type": "sphere", "params": {"radius": 1.5, "rows": 48, "columns": 96}},
+    "lumps": {"type": "noise", "params": {"mode": "vector", "amplitude": [0.15, 0.15, 0.15], "frequency": 1.2, "octaves": 2}, "inputs": {"geo": "ball"}},
+    "shaded": {"type": "normal", "inputs": {"geo": "lumps"}},
+    "sites": {"type": "scatter", "params": {"count": 400, "seed": 3}, "inputs": {"geo": "shaded"}},
+    "thin": {"type": "delete", "params": {"expr": "@P.z < -0.5"}, "inputs": {"geo": "sites"}},
+    "sizes": {"type": "wrangle", "params": {"snippet": "f@pscale = fit(rand(@ptnum, 7), 0, 1, 0.5, 1.5)"}, "inputs": {"geo": "thin"}},
+    "spike": {"type": "box", "params": {"size": [0.04, 0.04, 0.35], "center": [0, 0, 0.17]}},
+    "spikes": {"type": "copy_to_points", "inputs": {"source": "spike", "points": "sizes"}},
+    "all": {"type": "merge", "inputs": {"geos": ["shaded", "spikes"]}},
+    "out": {"type": "output", "inputs": {"geo": "all"}}
+  },
+  "display": "out",
+  "exposed": [
+    {"name": "Spike Count", "node": "sites", "param": "count"},
+    {"name": "Lumpiness", "node": "lumps", "param": "amplitude"},
+    {"name": "Seed", "node": "sites", "param": "seed"}
+  ]
+}

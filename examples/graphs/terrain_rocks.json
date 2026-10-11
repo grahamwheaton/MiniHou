@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "nodes": {
+    "ground": {"type": "grid", "params": {"size_x": 20, "size_y": 20, "columns": 200, "rows": 200}},
+    "terrain": {"type": "noise", "params": {"amplitude": [0, 0, 2.5], "frequency": 0.12, "octaves": 5, "seed": 11}, "inputs": {"geo": "ground"}},
+    "valleys": {"type": "wrangle", "params": {"snippet": "@P.z = @P.z * fit(length(set(@P.x, @P.y, 0)), 0, 10, 0.3, 1)"}, "inputs": {"geo": "terrain"}},
+    "shaded": {"type": "normal", "inputs": {"geo": "valleys"}},
+    "sites": {"type": "scatter", "params": {"count": 300, "seed": 5}, "inputs": {"geo": "shaded"}},
+    "high": {"type": "delete", "params": {"expr": "@P.z < 0.4"}, "inputs": {"geo": "sites"}},
+    "rock": {"type": "sphere", "params": {"radius": 0.2, "rows": 6, "columns": 8}},
+    "rough": {"type": "noise", "params": {"mode": "vector", "amplitude": [0.06, 0.06, 0.06], "frequency": 4.0}, "inputs": {"geo": "rock"}},
+    "rocks": {"type": "copy_to_points", "params": {"orient": false}, "inputs": {"source": "rough", "points": "high"}},
+    "all": {"type": "merge", "inputs": {"geos": ["shaded", "rocks"]}},
+    "out": {"type": "output", "inputs": {"geo": "all"}}
+  },
+  "display": "out",
+  "exposed": [
+    {"name": "Height", "node": "terrain", "param": "amplitude"},
+    {"name": "Detail", "node": "terrain", "param": "octaves"},
+    {"name": "Rock Count", "node": "sites", "param": "count"}
+  ]
+}

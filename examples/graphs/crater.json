@@ -1,0 +1,160 @@
+{
+  "version": 1,
+  "nodes": {
+    "ground": {
+      "type": "grid",
+      "params": {
+        "size_x": 12.0,
+        "size_y": 12.0,
+        "columns": 80,
+        "rows": 80
+      },
+      "pos": [
+        166.0,
+        0.0
+      ]
+    },
+    "output1": {
+      "type": "output",
+      "inputs": {
+        "geo": "scene"
+      },
+      "pos": [
+        131.0,
+        770.0
+      ]
+    },
+    "dunes": {
+      "type": "noise",
+      "params": {
+        "amplitude": [
+          0.0,
+          0.0,
+          1.4
+        ],
+        "frequency": 0.25,
+        "octaves": 4,
+        "seed": 3
+      },
+      "inputs": {
+        "geo": "ground"
+      },
+      "comment": "rolling dunes",
+      "pos": [
+        166.0,
+        110.0
+      ]
+    },
+    "crater": {
+      "type": "wrangle",
+      "params": {
+        "snippet": "d = length(set(@P.x, @P.y, 0))\n@P.z -= 1.5 * (1 - smooth(0, 3.5, d))\nf@height = @P.z"
+      },
+      "inputs": {
+        "geo": "dunes"
+      },
+      "comment": "a crater in the middle",
+      "pos": [
+        166.0,
+        220.0
+      ]
+    },
+    "rock_pts": {
+      "type": "scatter",
+      "params": {
+        "count": 500,
+        "seed": 5
+      },
+      "inputs": {
+        "geo": "crater"
+      },
+      "pos": [
+        190.0,
+        330.0
+      ]
+    },
+    "rim_only": {
+      "type": "delete",
+      "params": {
+        "expr": "length(set(@P.x, @P.y, 0)) < 2.2 or length(set(@P.x, @P.y, 0)) > 4.5"
+      },
+      "inputs": {
+        "geo": "rock_pts"
+      },
+      "pos": [
+        190.0,
+        440.0
+      ]
+    },
+    "boulder": {
+      "type": "sphere",
+      "params": {
+        "radius": 0.15,
+        "rows": 8,
+        "columns": 12
+      },
+      "pos": [
+        0.0,
+        330.0
+      ]
+    },
+    "boulder_rough": {
+      "type": "noise",
+      "params": {
+        "amplitude": [
+          0.06,
+          0.06,
+          0.06
+        ],
+        "frequency": 3.0
+      },
+      "inputs": {
+        "geo": "boulder"
+      },
+      "pos": [
+        0.0,
+        440.0
+      ]
+    },
+    "boulders": {
+      "type": "copy_to_points",
+      "params": {
+        "orient": false
+      },
+      "inputs": {
+        "source": "boulder_rough",
+        "points": "rim_only"
+      },
+      "pos": [
+        95.0,
+        550.0
+      ]
+    },
+    "scene": {
+      "type": "merge",
+      "inputs": {
+        "geos": [
+          "crater",
+          "boulders"
+        ]
+      },
+      "pos": [
+        131.0,
+        660.0
+      ]
+    }
+  },
+  "display": "output1",
+  "exposed": [
+    {
+      "name": "Boulder Count",
+      "node": "rock_pts",
+      "param": "count"
+    },
+    {
+      "name": "Dune Height",
+      "node": "dunes",
+      "param": "amplitude"
+    }
+  ]
+}

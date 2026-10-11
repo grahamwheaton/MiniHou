@@ -1,0 +1,149 @@
+{
+  "version": 1,
+  "doc": "Sci-fi panels: random faces extruded twice with insets, flat-shaded, two materials.",
+  "nodes": {
+    "base": {
+      "type": "grid",
+      "params": {
+        "size_x": 8.0,
+        "size_y": 8.0,
+        "columns": 17,
+        "rows": 17
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "pick": {
+      "type": "group_create",
+      "inputs": {
+        "geo": "base"
+      },
+      "pos": [
+        0,
+        100
+      ],
+      "params": {
+        "name": "raise",
+        "domain": "primitives",
+        "method": "random",
+        "percent": 40.0,
+        "seed": 4
+      }
+    },
+    "panels": {
+      "type": "polyextrude",
+      "inputs": {
+        "geo": "pick"
+      },
+      "pos": [
+        0,
+        200
+      ],
+      "params": {
+        "group": "raise",
+        "distance": 0.25,
+        "inset": 0.06,
+        "mode": "individual"
+      }
+    },
+    "tops": {
+      "type": "group_create",
+      "inputs": {
+        "geo": "panels"
+      },
+      "pos": [
+        0,
+        300
+      ],
+      "params": {
+        "name": "tall",
+        "domain": "primitives",
+        "pattern": "extrudeFront",
+        "method": "pattern"
+      }
+    },
+    "thin": {
+      "type": "group_create",
+      "inputs": {
+        "geo": "tops"
+      },
+      "pos": [
+        0,
+        400
+      ],
+      "params": {
+        "name": "tall",
+        "domain": "primitives",
+        "method": "random",
+        "percent": 45.0,
+        "seed": 9,
+        "combine": "intersect"
+      }
+    },
+    "towers": {
+      "type": "polyextrude",
+      "inputs": {
+        "geo": "thin"
+      },
+      "pos": [
+        0,
+        500
+      ],
+      "params": {
+        "group": "tall",
+        "distance": 0.6,
+        "inset": 0.1,
+        "mode": "individual"
+      }
+    },
+    "shade": {
+      "type": "wrangle",
+      "inputs": {
+        "geo": "towers"
+      },
+      "pos": [
+        0,
+        600
+      ],
+      "params": {
+        "snippet": "i@sharp_face = 1\ni@material_index = @group_extrudeFront\nv@Cd = set(0.35, 0.38, 0.42) + @group_extrudeFront * set(0.5, 0.3, 0.05)",
+        "run_over": "primitives"
+      }
+    },
+    "out": {
+      "type": "output",
+      "inputs": {
+        "geo": "shade"
+      },
+      "pos": [
+        0,
+        700
+      ]
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Raised %",
+      "node": "pick",
+      "param": "percent"
+    },
+    {
+      "name": "Seed",
+      "node": "pick",
+      "param": "seed"
+    },
+    {
+      "name": "Panel Height",
+      "node": "panels",
+      "param": "distance"
+    },
+    {
+      "name": "Tower Height",
+      "node": "towers",
+      "param": "distance"
+    }
+  ]
+}

@@ -1,0 +1,180 @@
+{
+  "version": 1,
+  "doc": "Volumes: a box minus a sphere with a smooth fillet (sdf_boolean), and metaball blobs from scattered points (points_to_surface).",
+  "nodes": {
+    "block": {
+      "type": "box",
+      "params": {
+        "size": [
+          2.0,
+          2.0,
+          2.0
+        ],
+        "center": [
+          0,
+          0,
+          1
+        ]
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "radius": 1.15,
+        "rows": 24,
+        "columns": 32,
+        "center": [
+          0.9,
+          -0.9,
+          1.9
+        ]
+      },
+      "pos": [
+        200,
+        0
+      ]
+    },
+    "carve": {
+      "type": "sdf_boolean",
+      "inputs": {
+        "a": "block",
+        "b": "ball"
+      },
+      "params": {
+        "operation": "subtract",
+        "voxel_size": 0.04,
+        "smooth": 0.15
+      },
+      "pos": [
+        100,
+        120
+      ]
+    },
+    "ground": {
+      "type": "grid",
+      "params": {
+        "size_x": 3,
+        "size_y": 3,
+        "columns": 6,
+        "rows": 6,
+        "center": [
+          3.5,
+          0,
+          0
+        ]
+      },
+      "pos": [
+        400,
+        0
+      ]
+    },
+    "seeds": {
+      "type": "scatter",
+      "inputs": {
+        "geo": "ground"
+      },
+      "params": {
+        "count": 40,
+        "seed": 5
+      },
+      "pos": [
+        400,
+        100
+      ]
+    },
+    "lift": {
+      "type": "wrangle",
+      "inputs": {
+        "geo": "seeds"
+      },
+      "params": {
+        "snippet": "@P.z = rand(@ptnum) * 1.2 + 0.2\nf@pscale = fit(rand(@ptnum + 7), 0, 1, 0.5, 1.2)"
+      },
+      "pos": [
+        400,
+        200
+      ]
+    },
+    "blobs": {
+      "type": "points_to_surface",
+      "inputs": {
+        "points": "lift"
+      },
+      "params": {
+        "radius": 0.3,
+        "blend": 1.5,
+        "voxel_size": 0.04,
+        "smooth": 1
+      },
+      "pos": [
+        400,
+        300
+      ]
+    },
+    "goo": {
+      "type": "attribute_create",
+      "inputs": {
+        "geo": "blobs"
+      },
+      "params": {
+        "name": "material_index",
+        "domain": "primitives",
+        "type": "int",
+        "value": [
+          1,
+          0,
+          0
+        ]
+      },
+      "pos": [
+        400,
+        400
+      ]
+    },
+    "both": {
+      "type": "merge",
+      "inputs": {
+        "geos": [
+          "carve",
+          "goo"
+        ]
+      },
+      "pos": [
+        250,
+        500
+      ]
+    },
+    "out": {
+      "type": "output",
+      "inputs": {
+        "geo": "both"
+      },
+      "pos": [
+        250,
+        600
+      ]
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Fillet",
+      "node": "carve",
+      "param": "smooth"
+    },
+    {
+      "name": "Blend",
+      "node": "blobs",
+      "param": "blend"
+    },
+    {
+      "name": "Detail",
+      "node": "blobs",
+      "param": "voxel_size"
+    }
+  ]
+}

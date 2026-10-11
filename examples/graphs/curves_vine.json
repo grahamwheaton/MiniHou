@@ -1,0 +1,221 @@
+{
+  "version": 1,
+  "doc": "Curves: a tapering vine (helix -> resample -> noise -> blur -> width ramp -> sweep) and a wireframe sphere (convert_line -> sweep).",
+  "nodes": {
+    "spiral": {
+      "type": "helix",
+      "params": {
+        "radius": 1.2,
+        "radius_end": 0.3,
+        "height": 4.0,
+        "turns": 3.5,
+        "points": 400
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "even": {
+      "type": "resample",
+      "inputs": {
+        "geo": "spiral"
+      },
+      "params": {
+        "length": 0.05
+      },
+      "pos": [
+        0,
+        100
+      ]
+    },
+    "wiggle": {
+      "type": "noise",
+      "inputs": {
+        "geo": "even"
+      },
+      "params": {
+        "mode": "vector",
+        "amplitude": [
+          0.15,
+          0.15,
+          0.1
+        ],
+        "frequency": 1.5,
+        "seed": 2
+      },
+      "pos": [
+        0,
+        200
+      ]
+    },
+    "taper": {
+      "type": "wrangle",
+      "inputs": {
+        "geo": "relax"
+      },
+      "params": {
+        "snippet": "f@width = fit(@curveu, 0, 1, 1, 0.15)"
+      },
+      "pos": [
+        0,
+        300
+      ]
+    },
+    "vine": {
+      "type": "sweep",
+      "inputs": {
+        "geo": "taper"
+      },
+      "params": {
+        "radius": 0.12,
+        "divisions": 10
+      },
+      "pos": [
+        0,
+        400
+      ]
+    },
+    "green": {
+      "type": "color",
+      "inputs": {
+        "geo": "vine"
+      },
+      "params": {
+        "mode": "ramp",
+        "ramp_attrib": "curveu",
+        "color": [
+          0.1,
+          0.35,
+          0.08
+        ],
+        "color2": [
+          0.6,
+          0.85,
+          0.3
+        ]
+      },
+      "pos": [
+        0,
+        500
+      ]
+    },
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "radius": 1.0,
+        "rows": 10,
+        "columns": 14,
+        "center": [
+          3.5,
+          0,
+          1.5
+        ]
+      },
+      "pos": [
+        300,
+        0
+      ]
+    },
+    "edges": {
+      "type": "convert_line",
+      "inputs": {
+        "geo": "ball"
+      },
+      "pos": [
+        300,
+        100
+      ]
+    },
+    "wire": {
+      "type": "sweep",
+      "inputs": {
+        "geo": "edges"
+      },
+      "params": {
+        "radius": 0.025,
+        "divisions": 6
+      },
+      "pos": [
+        300,
+        200
+      ]
+    },
+    "metal": {
+      "type": "attribute_create",
+      "inputs": {
+        "geo": "wire"
+      },
+      "params": {
+        "name": "material_index",
+        "domain": "primitives",
+        "type": "int",
+        "value": [
+          1,
+          0,
+          0
+        ]
+      },
+      "pos": [
+        300,
+        300
+      ]
+    },
+    "both": {
+      "type": "merge",
+      "inputs": {
+        "geos": [
+          "green",
+          "metal"
+        ]
+      },
+      "pos": [
+        150,
+        600
+      ]
+    },
+    "out": {
+      "type": "output",
+      "inputs": {
+        "geo": "both"
+      },
+      "pos": [
+        150,
+        700
+      ]
+    },
+    "relax": {
+      "type": "attribute_blur",
+      "inputs": {
+        "geo": "wiggle"
+      },
+      "params": {
+        "names": "P",
+        "iterations": 12,
+        "strength": 0.5
+      },
+      "pos": [
+        0,
+        250
+      ]
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Turns",
+      "node": "spiral",
+      "param": "turns"
+    },
+    {
+      "name": "Thickness",
+      "node": "vine",
+      "param": "radius"
+    },
+    {
+      "name": "Wiggle",
+      "node": "wiggle",
+      "param": "amplitude"
+    }
+  ]
+}

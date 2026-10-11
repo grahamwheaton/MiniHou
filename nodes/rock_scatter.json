@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "doc": "Scatters rough rocks of varied size over the ground geometry it is given (and keeps the ground).",
+  "nodes": {
+    "stand_in": {
+      "type": "grid",
+      "params": {
+        "size_x": 8,
+        "size_y": 8,
+        "columns": 30,
+        "rows": 30
+      },
+      "comment": "preview ground: only used when this system is opened on its own",
+      "pos": [95, 0]
+    },
+    "ground": {
+      "type": "input",
+      "params": {
+        "name": "ground"
+      },
+      "inputs": {
+        "preview": "stand_in"
+      },
+      "pos": [95, 110]
+    },
+    "spots": {
+      "type": "scatter",
+      "params": {
+        "count": 60,
+        "seed": 4
+      },
+      "inputs": {
+        "geo": "ground"
+      },
+      "pos": [119, 220]
+    },
+    "sizes": {
+      "type": "wrangle",
+      "params": {
+        "snippet": "f@pscale = fit(rand(@ptnum, 11), 0, 1, 0.5, 1.5)"
+      },
+      "inputs": {
+        "geo": "spots"
+      },
+      "comment": "vary each rock's size",
+      "pos": [119, 330]
+    },
+    "rock": {
+      "type": "sphere",
+      "params": {
+        "radius": 0.25,
+        "rows": 6,
+        "columns": 10
+      },
+      "pos": [-71, 220]
+    },
+    "rough": {
+      "type": "noise",
+      "params": {
+        "mode": "vector",
+        "amplitude": [0.08, 0.08, 0.05],
+        "frequency": 4
+      },
+      "inputs": {
+        "geo": "rock"
+      },
+      "pos": [-71, 330]
+    },
+    "rocks": {
+      "type": "copy_to_points",
+      "params": {
+        "orient": true
+      },
+      "inputs": {
+        "source": "rough",
+        "points": "sizes"
+      },
+      "pos": [24, 440]
+    },
+    "all": {
+      "type": "merge",
+      "inputs": {
+        "geos": ["ground", "rocks"]
+      },
+      "pos": [59, 550]
+    },
+    "out": {
+      "type": "output",
+      "inputs": {
+        "geo": "all"
+      },
+      "pos": [59, 660]
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Rock Count",
+      "node": "spots",
+      "param": "count"
+    },
+    {
+      "name": "Rock Size",
+      "node": "rock",
+      "param": "radius"
+    },
+    {
+      "name": "Seed",
+      "node": "spots",
+      "param": "seed"
+    }
+  ]
+}
