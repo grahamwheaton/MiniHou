@@ -72,3 +72,37 @@ All attributes copy from corresponding source elements (UVs are not reprojected)
 
 References: [SideFX Skin](https://www.sidefx.com/docs/houdini/nodes/sop/skin.html),
 [Poly Expand 2D](https://www.sidefx.com/docs/houdini/nodes/sop/polyexpand2d.html).
+
+## Deformation workflows
+
+`soft_transform` blends a pivoted XYZ rotation/scale/translation with the original
+position using radial linear or smoothstep falloff. The center is both the pivot
+and falloff origin; the group restricts which points may move. No geodesic falloff.
+
+`lattice_grid` makes a complete 3D point grid. Branch it to a Transform, Soft
+Transform or Wrangle and connect the original to `lattice.rest`, the edited copy
+to `lattice.deformed`, and the model to `lattice.geo`. Rest controls must form a
+complete axis-aligned Cartesian grid (nonuniform axis spacing is accepted).
+Deformed point order/topology must match. Interpolation is trilinear displacement,
+not Bezier/NURBS. Outside points either use clamped boundary displacement or stay
+unchanged. An arbitrarily rotated rest grid is not supported.
+
+`point_deform` uses the same three-input arrangement with an arbitrary control
+cloud. A weighted local affine displacement fit reproduces affine transforms
+with at least four noncoplanar neighbours. Rank-deficient control sets constrain
+only their spanned directions; unconstrained displacement gradients are zero.
+Radius zero means nearest `max_points` controls without cutoff; otherwise
+uncaptured points remain unchanged. Point correspondence is by index, not ids.
+There is no persistent capture, topology matching, piece matching or volume
+preservation. NumPy search is bounded to 50 million model/control pairs; use a
+small control cloud. Neighbour/radius transitions can be discontinuous.
+
+All three keep topology, UVs, materials, groups and other attributes. Existing
+point/corner/primitive `N` is adjusted using a finite-difference inverse-transpose
+Jacobian (primitive Jacobians average their corners); collapsed transforms use a
+pseudoinverse. Normals at hard selection/capture boundaries are approximate;
+use Normal downstream when geometric face normals are preferable.
+
+References: [Soft Transform](https://www.sidefx.com/docs/houdini/nodes/sop/softxform.html),
+[Lattice](https://www.sidefx.com/docs/houdini/nodes/sop/lattice.html),
+[Point Deform](https://www.sidefx.com/docs/houdini/nodes/sop/pointdeform.html).
