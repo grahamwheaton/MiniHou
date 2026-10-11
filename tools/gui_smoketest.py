@@ -261,7 +261,20 @@ def scenario():
     final = (0.0, 0.0, float(np.float32(1.2 + 0.04 * 30)))
     yield from wait(lambda: rt.forwarder.known.get("Hill Height", (0, 0, 0))[2] == final[2] and rt.applied_count > applied0,
                     20, "drag reached the engine and came back")
-    yield from sleep(1.0)                                    # let the last update land
+    # Let the last update land: on slow software-GL runners the final cook and apply can take well over a second,
+    # so poll for the result (bounded) instead of sleeping a fixed time, then wait for applies to stop.
+    known = {k: v for k, v in rt.forwarder.known.items()}
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        got, want = evaluated_P(), expected_P(known)
+        if got.shape == want.shape and np.allclose(got, want, atol=1e-4):
+            break
+        yield 0.1
+    quiet_since, last = time.time(), rt.applied_count
+    while time.time() - quiet_since < 1.0 and time.time() < deadline + 10:
+        if rt.applied_count != last:
+            quiet_since, last = time.time(), rt.applied_count
+        yield 0.05
     sent = rt.sent_count - sent0
     # Timer granularity (~15.6 ms on Windows) and slow software redraws stretch the "60 Hz" drag, so the
     # bound is the forwarding rate limit over the drag's real duration, not a fixed count.
