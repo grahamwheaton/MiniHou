@@ -11,7 +11,7 @@ from .. import pcg, spatial
 from ..geometry import Geometry
 from ..sdk import Bool, Enum, Float, Input, Int, Str, Vec3, node
 from . import _build as B
-from ._util import fan_triangulate, fbm3, normalize_rows, rotation_from_z_to
+from ._util import fan_triangulate, fbm3, guard_count, normalize_rows, rotation_from_z_to
 from .instance import matrix_to_euler_xyz
 
 
@@ -210,6 +210,7 @@ def pcg_spline_sampler(curve, mode, spacing, extents, jitter, seed):
     if mode == "on_curve":
         prims, starts, sizes, closed, vert, seg = curve_arrays(curve)
         lengths = np.bincount(np.repeat(np.arange(len(prims)), sizes), weights=seg, minlength=len(prims))
+        guard_count(float(lengths.sum() / spacing), "pcg_spline_sampler")
         s_lists = [np.arange(0.0, L + 1e-9, spacing) if L > 0 else np.zeros(1) for L in lengths]
         s_lists = [s[:-1] if c and len(s) > 1 and abs(s[-1] - L) < 1e-9 else s
                    for s, c, L in zip(s_lists, closed, lengths)]
@@ -248,6 +249,7 @@ def pcg_spline_sampler(curve, mode, spacing, extents, jitter, seed):
             u, w = np.array([1.0, 0, 0]), np.array([0, 1.0, 0]) * np.sign(n[2])
         xy = np.stack([(Q - c) @ u, (Q - c) @ w], 1)
         lo, hi = xy.min(0), xy.max(0)
+        guard_count(float(np.prod(np.maximum((hi - lo) / spacing, 1.0))), "pcg_spline_sampler")
         gx = np.arange(lo[0] + spacing / 2, hi[0], spacing)
         gy = np.arange(lo[1] + spacing / 2, hi[1], spacing)
         G = np.stack(np.meshgrid(gx, gy, indexing="ij"), -1).reshape(-1, 2)
