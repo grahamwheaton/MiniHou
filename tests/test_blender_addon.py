@@ -189,6 +189,80 @@ class AddonIntegrationTests(unittest.TestCase):
         col = np.empty(len(me.loops) * 4, np.float32); me.color_attributes["Color"].data.foreach_get("color", col)
         self.assertEqual(sorted({tuple(c) for c in col.reshape(-1, 4)[:, :3].round(3).tolist()}), [(0, 0, 1), (1, 0, 0)])
 
+    def make_source_object(self, name="Src"):
+        """A 2x2-face mesh with native data: UV map, point color, material indices, a vertex group, a float attribute."""
+        verts = [(x, y, 0.0) for y in range(3) for x in range(3)]
+        faces = [(0, 1, 4, 3), (1, 2, 5, 4), (3, 4, 7, 6), (4, 5, 8, 7)]
+        me = bpy.data.meshes.new(name)
+        me.from_pydata(verts, [], faces)
+        uv = me.uv_layers.new(name="MyUVs")
+        uv.data.foreach_set("uv", np.tile(np.array([0.5, 0.25], np.float32), len(me.loops)))
+        col = me.color_attributes.new("Paint", "FLOAT_COLOR", "POINT")
+        col.data.foreach_set("color", np.tile(np.array([0.5, 0, 0, 1], np.float32), len(me.vertices)))
+        me.color_attributes.render_color_index = me.color_attributes.find("Paint")
+        me.attributes.new("material_index", "INT", "FACE").data.foreach_set("value", np.array([0, 1, 2, 3], np.int32))
+        me.attributes.new("heat", "FLOAT", "POINT").data.foreach_set("value", np.arange(9, dtype=np.float32))
+        obj = bpy.data.objects.new(name, me)
+        bpy.context.scene.collection.objects.link(obj)
+        obj.location = (100.0, 0.0, 0.0)
+        g = obj.vertex_groups.new(name="lift")
+        g.add([4], 1.0, "REPLACE")                       # the centre point
+        bpy.context.view_layer.update()
+        return obj
+
+    def test_blender_objects_feed_graphs_with_their_native_attributes(self):
+        """Blender mesh -> blender_object node -> wrangles reading native data -> proxy; edits in Blender recook."""
+        src = self.make_source_object()
+        graph = {"version": 1, "nodes": {
+            "src": {"type": "blender_object", "params": {"object": "Src", "space": "world"}},
+            "pts": {"type": "wrangle", "inputs": {"geo": "src"}, "params": {
+                "snippet": "@P.z = @lift * 2 + @Cd.x + @heat * 0.0", "run_over": "points"}},
+            "prims": {"type": "wrangle", "inputs": {"geo": "pts"}, "params": {
+                "snippet": "i@material_index = @material_index + 10", "run_over": "primitives"}},
+            "o": {"type": "output", "inputs": {"geo": "prims"}}}, "display": "o"}
+        self.graph_path.write_text(json.dumps(graph), encoding="utf-8")
+        proxy_obj = lambda: bpy.data.objects.get(self.proxy.PROXY_OBJECT)  # noqa: E731
+
+        def proxy_P():
+            o = proxy_obj()
+            return evaluated_positions(o) if o is not None else np.zeros((0, 3))
+
+        def settled(pred, timeout=60):
+            end = time.monotonic() + timeout
+            while time.monotonic() < end:
+                bpy.context.view_layer.update()
+                self.rt.tick()
+                if pred():
+                    return
+                time.sleep(0.01)
+            self.fail(f"timed out; last_error={self.rt.last_error!r} info={self.rt.object_info}")
+
+        settled(lambda: len(proxy_P()) == 9 and np.isclose(proxy_P()[:, 2].max(), 2.5, atol=1e-5))
+        self.assertEqual(self.rt.watched, ["Src"])
+        P = proxy_P()
+        self.assertAlmostEqual(float(P[:, 0].min()), 100.0, places=4)          # world space: the object's location
+        np.testing.assert_allclose(sorted(P[:, 2]), [0.5] * 8 + [2.5], atol=1e-5)  # vertex group + render color
+        me = proxy_obj().evaluated_get(bpy.context.evaluated_depsgraph_get()).data
+        mats = np.empty(len(me.polygons), np.int32); me.polygons.foreach_get("material_index", mats)
+        self.assertEqual(sorted(mats.tolist()), [10, 11, 12, 13])
+        self.assertIn("UVMap", me.uv_layers)                                     # render UV map -> uv -> UV map
+        uv = np.empty(len(me.loops) * 2, np.float32); me.uv_layers["UVMap"].data.foreach_get("uv", uv)
+        np.testing.assert_allclose(uv.reshape(-1, 2)[0], [0.5, 0.25], atol=1e-6)
+
+        sent = self.rt.objects_sent
+        src.select_set(True)                                                     # no data change: nothing is resent
+        self.settle(20)
+        self.assertEqual(self.rt.objects_sent, sent)
+        src.data.vertices[0].co.x = -5.0                                         # an edit in Blender recooks
+        src.data.update()
+        settled(lambda: np.isclose(proxy_P()[:, 0].min(), 95.0, atol=1e-4))
+        self.assertGreater(self.rt.objects_sent, sent)
+        src.location.x = 200.0                                                   # so does moving the object
+        settled(lambda: np.isclose(proxy_P()[:, 0].min(), 195.0, atol=1e-4))
+
+        bpy.data.objects.remove(src)                                             # deleting it is reported
+        settled(lambda: "Src" in self.rt.object_info and "no object" in self.rt.object_info["Src"])
+
     def test_connect_creates_proxy_and_mesh_matches_engine(self):
         self.pump(lambda: self.rt.applied_count >= 1)
         out = bpy.data.objects[self.proxy.OUTPUT_OBJECT]

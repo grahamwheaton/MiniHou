@@ -212,6 +212,7 @@ class NodeType:
     doc: str = ""
     source: str = ""              # file a node library loaded it from ("" for built-ins)
     code_hash: str = ""           # hash of that file: part of the cache key, so editing the code never serves stale results
+    key_extra: Optional[Callable[[Dict[str, Any]], str]] = None   # extra cache-key material from outside the graph
     _param_index: Dict[str, Param] = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self):
@@ -285,8 +286,12 @@ _LOADING: Optional[Dict[str, str]] = None
 
 def node(name: str, *, inputs: Sequence[Union[str, Input]] = (), params: Sequence[Param] = (),
          outputs: Optional[Sequence[Union[str, Output]]] = None, version: int = 1, category: str = "",
-         doc: str = "", registry: Optional[Registry] = None, replace: bool = False):
-    """Decorator: turn a function into a registered node type."""
+         doc: str = "", registry: Optional[Registry] = None, replace: bool = False,
+         key_extra: Optional[Callable[[Dict[str, Any]], str]] = None):
+    """Decorator: turn a function into a registered node type.
+
+    ``key_extra(params) -> str`` is for nodes whose result depends on data outside the graph (e.g. a Blender object
+    streamed over the link): its value joins the cache key, so a new version of that data recooks the node."""
     ins = tuple(Input(i) if isinstance(i, str) else i for i in inputs)
     outs = tuple(Output(o) if isinstance(o, str) else o for o in (outputs if outputs is not None else ["geo"]))
     params = tuple(params)
@@ -313,7 +318,7 @@ def node(name: str, *, inputs: Sequence[Union[str, Input]] = (), params: Sequenc
                              "choose another name")
         nt = NodeType(name=name, fn=fn, inputs=ins, params=params, outputs=outs, version=version,
                       category=category or ("custom" if src else ""), doc=doc or (inspect.getdoc(fn) or ""),
-                      source=src["file"] if src else "", code_hash=src["hash"] if src else "")
+                      source=src["file"] if src else "", code_hash=src["hash"] if src else "", key_extra=key_extra)
         reg.register(nt, replace=replace)
         fn.node_type = nt  # type: ignore[attr-defined]
         return fn

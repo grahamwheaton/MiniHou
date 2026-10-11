@@ -1,3 +1,3 @@
 """Built-in nodes. Importing this package registers them in :data:`minihou.sdk.REGISTRY`."""
-from . import (attribs, copy_to_points, delete, grid, merge, noise, normal, output, primitives, scatter,  # noqa: F401
+from . import (attribs, blender_input, copy_to_points, delete, grid, merge, noise, normal, output, primitives, scatter,  # noqa: F401
                transform, wrangle)

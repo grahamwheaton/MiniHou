@@ -41,7 +41,9 @@ How to build a system:
 Use wrangle nodes (wrangle_reference) for custom per-point math; for anything more (new topology, several inputs,
 loops over geometry) write a node-library file (node_library). To make something reusable, build it as a *system*: a graph
 saved in nodes/ (e.g. nodes/rock_scatter.json) with `input` nodes and exposed parameters becomes a node type that any
-graph can use (details in node_library). Z is up; units are Blender metres. The user is
+graph can use (details in node_library). To work on something the user made in Blender, start from a blender_object node
+(the object's name; its UV map, color attribute, vertex groups and material indices arrive as attributes, and it recooks live
+when they edit it); inspect_node on it shows what was read. Z is up; units are Blender metres. The user is
 watching the editor and Blender live and can undo your edits, so prefer small verified steps over huge batches."""
 
 OPS_DOC = """\
@@ -110,7 +112,8 @@ TOOLS: List[dict] = [
                     "writing a node. Write the file with your own file tools; it is live within a second.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "wrangle_reference",
-     "description": "The wrangle snippet language (VEX-like per-point expressions): syntax, attributes, functions.",
+     "description": "The wrangle snippet language (VEX-like expressions over points, primitives or vertices): syntax, "
+                    "attributes, functions, and which names become native Blender data (uv, Cd, N, material_index).",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
 ]
 

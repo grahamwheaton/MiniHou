@@ -309,6 +309,14 @@ class SystemTests(unittest.TestCase):
         self.assertIn("uses itself", self.error(b))
         self.assertNotIn(a, REGISTRY)
 
+    def test_blender_object_cannot_be_inside_a_system(self):
+        name = f"live_{self.tag}"
+        self.write(name, _system({"b": {"type": "blender_object", "params": {"object": "Cube"}},
+                                  "out": {"type": "output", "inputs": {"geo": "b"}}}))
+        self.lib.refresh()
+        self.assertIn("cannot be inside a system", self.error(name))
+        self.assertNotIn(name, REGISTRY)
+
     def test_bad_system_files_are_reported(self):
         self.write("bad-name", _system(LIFTER))
         self.write(f"broken_{self.tag}", "{not json")

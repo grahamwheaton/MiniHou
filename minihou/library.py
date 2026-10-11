@@ -317,6 +317,10 @@ def _system_type(name: str, path: Path, graph, text: str, registry: Registry):
     """Build the NodeType for a system graph: inputs from its ``input`` nodes, params from its exposed parameters."""
     from dataclasses import replace
     from .sdk import GEOMETRY, Input, NodeType, Output
+    live = sorted(nid for nid, inst in graph.nodes.items() if inst.type == "blender_object")
+    if live:                                                # its data changes outside the graph: the system's cache
+        raise ValueError(f"blender_object node {live[0]!r} cannot be inside a system: give the system an input node "
+                         f"and connect blender_object to it in the main graph")
     ins = sorted((inst.params.get("index", 0), nid) for nid, inst in graph.nodes.items() if inst.type == "input")
     input_ids, inputs, seen = [], [], set()
     for idx, nid in ins:

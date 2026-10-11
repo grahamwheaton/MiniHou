@@ -19,8 +19,13 @@ The receiver reads header+blob into one ``bytearray`` and exposes arrays as zero
 
 Message types (``header["type"]``)
 ----------------------------------
-client -> server: ``hello``, ``set_param``, ``resync``, ``ping``
-server -> client: ``welcome``, ``interface``, ``geo``, ``error``, ``status``, ``pong``
+client -> server: ``hello``, ``set_param``, ``resync``, ``ping``, ``object_geo``, ``object_missing``
+server -> client: ``welcome``, ``interface``, ``geo``, ``error``, ``status``, ``pong``, ``watch_objects``
+
+``watch_objects`` lists the Blender objects the graph reads (``blender_object`` nodes). The client answers with
+``object_geo`` for each (and again whenever one changes): ``{"object", "matrix": 16 floats row-major, "info"}`` plus
+arrays keyed like ``geo`` (``point/P``, the two ``topo/...`` arrays, ``<domain>/<name>``), or ``object_missing``
+``{"object", "reason"}``.
 
 ``geo`` carries only the arrays that changed since the last ``geo`` sent to *that* client,
 plus a manifest of every array that currently exists (so removals are explicit) and, if the

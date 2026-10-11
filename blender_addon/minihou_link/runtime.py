@@ -16,9 +16,17 @@ Feedback-loop guards (engine -> Blender mesh write -> depsgraph update -> param 
    the modifier.
 5. Forwarding is rate limited (<= 30 Hz) and a circuit breaker trips on > 120 forwarded values/s.
 6. ``tick`` is not re-entrant.
+
+Blender objects as graph inputs (``blender_object`` nodes)
+---------------------------------------------------------
+The engine names the objects its graph reads (``watch_objects``). The depsgraph handler flags a watched object when it
+changes; ``tick`` reads it (evaluated mesh) at most every ``OBJECT_INTERVAL`` and sends ``object_geo``, or
+``object_missing`` when it cannot be read. A content digest skips sends of unchanged data, which also ends the loop if a
+watched object depends on MiniHou's output (output write -> object update -> same data -> nothing sent).
 """
 from __future__ import annotations
 
+import hashlib
 import time
 import traceback
 from collections import deque
@@ -27,7 +35,7 @@ from typing import Dict, List, Optional
 import bpy
 from bpy.app.handlers import persistent
 
-from . import mesh_writer, proxy
+from . import mesh_reader, mesh_writer, proxy
 from .client import LinkClient
 from .protocol import GeoUpdate, Mirror, ProtocolError
 from .state import Inbox, ParamForwarder
@@ -35,6 +43,8 @@ from .state import Inbox, ParamForwarder
 MIN_FORWARD_INTERVAL = 1.0 / 30.0
 BUSY_INTERVAL = 1.0 / 60.0
 IDLE_INTERVAL = 0.05
+OBJECT_INTERVAL = 0.1             # seconds between sends of one watched object
+EXISTENCE_INTERVAL = 0.5          # how often watched objects are checked for being added, deleted or renamed
 
 
 class Runtime:
@@ -60,6 +70,14 @@ class Runtime:
         self._timer_on = False
         self._last_forward = 0.0
         self._ui_dirty = True
+        self.watched: List[str] = []
+        self.dirty_objects: set = set()
+        self.objects_sent = 0
+        self.object_info: Dict[str, str] = {}          # name -> what was last sent (shown in the panel)
+        self._object_digest: Dict[str, str] = {}
+        self._object_last: Dict[str, float] = {}
+        self._object_present: Dict[str, bool] = {}
+        self._last_existence = 0.0
 
     # -- lifecycle ---------------------------------------------------------
     def connect(self, host: str = "127.0.0.1", port: int = 8765) -> None:
@@ -120,6 +138,8 @@ class Runtime:
                 self._apply_geo(geo)
             if self.params_dirty:
                 busy = self._forward_params() or busy
+            if self.watched:
+                busy = self._send_objects() or busy
             if self._ui_dirty:
                 self._ui_dirty = False
                 _tag_redraw()
@@ -142,6 +162,15 @@ class Runtime:
         elif t == "welcome":
             self.last_error = ""
             self._log(f"connected to engine (protocol {e.get('protocol')})")
+        elif t == "watch_objects":
+            self.watched = [str(n) for n in e.get("objects", [])]
+            self.dirty_objects = set(self.watched)       # (re)send everything: the engine may have restarted
+            self._object_digest.clear()
+            self._object_present.clear()
+            self.object_info = {n: v for n, v in self.object_info.items() if n in self.watched}
+            if self.watched:
+                self._log(f"engine reads Blender objects: {', '.join(self.watched)}")
+            self._ui_dirty = True
 
     def _apply_interface(self, iface: dict) -> None:
         params = iface["params"]
@@ -214,6 +243,65 @@ class Runtime:
             self._last_forward = now
         return sent
 
+    def _send_objects(self) -> bool:
+        """Send watched objects that changed (main thread). Returns True if anything was sent."""
+        if self.client is None:
+            return False
+        now = time.monotonic()
+        if now - self._last_existence >= EXISTENCE_INTERVAL:           # deletions and renames do not flag the object
+            self._last_existence = now
+            for name in self.watched:
+                present = bpy.data.objects.get(name) is not None
+                if self._object_present.get(name) != present:
+                    self.dirty_objects.add(name)
+        sent = False
+        depsgraph = None
+        for name in sorted(self.dirty_objects):
+            if name not in self.watched:
+                self.dirty_objects.discard(name)
+                continue
+            if now - self._object_last.get(name, -1e9) < OBJECT_INTERVAL:
+                continue                                                # stays dirty: sent on a later tick
+            self.dirty_objects.discard(name)
+            self._object_last[name] = now
+            obj = bpy.data.objects.get(name)
+            self._object_present[name] = obj is not None
+            if obj is None:
+                header, arrays = {"type": "object_missing", "object": name,
+                                  "reason": f"no object named {name!r} in the Blender file"}, None
+            else:
+                if depsgraph is None:
+                    depsgraph = bpy.context.evaluated_depsgraph_get()
+                try:
+                    fields, arrays = mesh_reader.read_object(obj, depsgraph)
+                    header = {"type": "object_geo", "object": name, **fields}
+                except ValueError as e:
+                    header, arrays = {"type": "object_missing", "object": name, "reason": str(e)}, None
+            digest = _digest(header, arrays)
+            if self._object_digest.get(name) == digest:
+                continue                                                # unchanged (e.g. a selection change)
+            if self.client.send(header, arrays):
+                self._object_digest[name] = digest
+                self.objects_sent += 1
+                sent = True
+                info = header.get("info", {})
+                self.object_info[name] = (f"{info.get('points', 0)} pts, {info.get('prims', 0)} prims, "
+                                          f"{info.get('read_ms', 0)} ms" if header["type"] == "object_geo"
+                                          else header["reason"])
+                self._ui_dirty = True
+        return sent
+
+
+def _digest(header: dict, arrays: Optional[dict]) -> str:
+    """Content hash of a message, without the timing info (which changes on every read)."""
+    h = hashlib.blake2b(digest_size=16)
+    h.update(repr((header["type"], header.get("matrix"), header.get("reason"))).encode())
+    for key in sorted(arrays or {}):
+        a = arrays[key]
+        h.update(f"{key}{a.dtype}{a.shape}".encode())
+        h.update(a.tobytes() if not a.flags.c_contiguous else memoryview(a).cast("B"))
+    return h.hexdigest()
+
 
 _runtime: Optional[Runtime] = None
 
@@ -232,15 +320,19 @@ def get_runtime() -> Runtime:
 
 @persistent
 def _depsgraph_post(scene, depsgraph) -> None:
-    """Guard 1: only flags that the proxy changed. Never writes bpy data."""
+    """Guard 1: only flags what changed (the proxy, watched objects). Never writes bpy data."""
     rt = _runtime
     if rt is None or rt.client is None:
         return
+    watched = rt.watched
     for u in depsgraph.updates:
         idb = u.id
-        if isinstance(idb, bpy.types.Object) and idb.name == proxy.PROXY_OBJECT:
-            rt.params_dirty = True
-            return
+        if isinstance(idb, bpy.types.Object):
+            name = idb.name
+            if name == proxy.PROXY_OBJECT:
+                rt.params_dirty = True
+            elif watched and name in watched:
+                rt.dirty_objects.add(name)
 
 
 def _tag_redraw() -> None:

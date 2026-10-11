@@ -174,7 +174,8 @@ class Evaluator:
                     in_keys.append(keys[ref])
             payload = json.dumps(
                 [nt.name, nt.version, [[p.name, p.to_json_value(params[p.name])] for p in nt.params], in_keys]
-                + ([nt.code_hash] if nt.code_hash else []), separators=(",", ":"), allow_nan=False)
+                + ([nt.code_hash] if nt.code_hash else []) + ([nt.key_extra(params)] if nt.key_extra else []),
+                separators=(",", ":"), allow_nan=False)
             keys[nid] = hashlib.blake2b(payload.encode("utf-8"), digest_size=16).hexdigest()
         return keys
 

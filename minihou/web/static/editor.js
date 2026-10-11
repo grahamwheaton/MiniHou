@@ -566,6 +566,15 @@
       h("td", null, a.name, h("span", { class: "muted" }, " " + a.domain)),
       h("td", null, a.domain === "detail" ? String(a.value) : `${a.type}${a.components > 1 ? "×" + a.components : ""}` +
         (a.min ? `  [${a.min.join(",")}] … [${a.max.join(",")}]` : ""))))));
+    if (r.blender) {                     // blender_object: what the add-on read (native data, skips)
+      const b = r.blender, rows = [];
+      if (b.vertex_groups && b.vertex_groups.length) rows.push(["Vertex groups", b.vertex_groups.join(", ")]);
+      if (b.skipped && b.skipped.length) rows.push(["Skipped", b.skipped.join("; ")]);
+      if (b.read_ms !== undefined) rows.push(["Read in Blender", `${b.read_ms} ms`]);
+      if (b.error) rows.push(["Error", b.error]);
+      out.push(h("div", { class: "section" }, "From Blender"));
+      out.push(h("table", { class: "kv" }, rows.map(([k, v]) => h("tr", null, h("td", null, k), h("td", null, String(v))))));
+    }
     return out;
   }
 

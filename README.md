@@ -102,13 +102,16 @@ All examples are cooked by the test-suite, so they keep working as nodes evolve.
 
 | node | inputs | what it does |
 |---|---|---|
+| `blender_object` | - | a Blender object's evaluated mesh, **live**: edit it in Blender and the graph recooks (see below) |
 | `grid` | - | XY grid of quads; `uv` point attribute |
 | `box` | - | closed box, optional divisions (welded seams) |
 | `sphere` | - | UV sphere (triangle-fan poles), closed and outward-facing |
 | `circle` | - | one filled n-gon |
 | `transform` | geo | scale / rotate (Euler XYZ) / translate about a pivot; rotates `N` |
 | `noise` | geo | fractal Perlin noise; displaces `P` or writes any attribute (scalar or vector mode) |
-| `wrangle` | geo | VEX-like snippet over points (see below) |
+| `wrangle` | geo | VEX-like snippet over points, primitives or vertices (see below) |
+| `attribute_delete` | geo | delete attributes by name or wildcard (`N uv tmp_*`) |
+| `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |
 | `normal` | geo | area-weighted point normals or face normals (Newell, n-gon safe) |
 | `scatter` | geo | area-weighted random points on the surface (`P`, `N`, `primnum`) |
 | `copy_to_points` | source, points | stamp `source` on every point: orient +Z to `N`, scale by `pscale`, inherit point attributes |
@@ -151,6 +154,24 @@ just work (and the Geometry Nodes proxy carries them):
 | `material_index` (primitives, int) | each face's material slot |
 | `sharp_face` (primitives) | flat shading for those faces (others smooth) |
 | anything else | a generic attribute of that name: POINT / CORNER / FACE, float, float2, vector, color (4 floats), int, bool; read it with an *Attribute* shader node or Named Attribute in Geometry Nodes |
+
+**Reading Blender objects.** A `blender_object` node streams an object from the open Blender file into the graph: its
+evaluated mesh (modifiers applied), in world or object space, with Blender's own data as attributes. The add-on sends the
+objects the graph names (and only those) whenever they change, at most 10 times a second each; unchanged data is not resent.
+
+| in Blender | engine attribute |
+|---|---|
+| the render UV map | `uv` (vertices); other UV maps keep their names |
+| the render color attribute | `Cd` (3 floats) plus `Alpha` when not opaque, on its own domain |
+| vertex groups | a point float named after the group (`@lift`); skipped above 250k points, where a Geometry Nodes *Store Named Attribute* makes them real attributes |
+| `material_index`, `sharp_face` | primitive ints |
+| custom normals | vertex `N` (only when the mesh has custom normals) |
+| any other attribute | the same name: POINT -> point, CORNER -> vertex, FACE -> primitive |
+
+So a wrangle can do `@P += @N * @lift` with a group painted in Blender, or `i@material_index = @material_index + 1`. The
+inspector (and the MCP `inspect` tool) lists what was read for a `blender_object` node, including anything skipped (edge
+attributes: the engine has no edge domain). MiniHou's own objects cannot be read (that would feed the output back into itself),
+and `blender_object` belongs in the main graph: a system takes geometry through an `input` node instead.
 
 Functions: `sin cos tan asin acos atan atan2 sqrt exp log abs floor ceil frac pow sign min max clamp lerp fit smooth length
 normalize dot cross set noise rand select radians degrees`. A float times a vector works as in VEX. Snippets are compiled once
@@ -320,8 +341,9 @@ Not verified:
 
 ## Known limits
 
-* One output mesh and one exposed-parameter set per engine. Detail attributes are not sent to Blender. Point-domain wrangles only.
-* Polygons only (no curves/edges-only geometry). No edge-domain attributes (e.g. `sharp_edge`, `crease_edge`).
+* One output mesh and one exposed-parameter set per engine. Detail attributes are not sent to Blender.
+* Polygons only (no curves/edges-only geometry). No edge-domain attributes (e.g. `sharp_edge`, `crease_edge`), in either
+  direction. A `blender_object` reads meshes (and what Blender can convert to one, e.g. text and curves with geometry).
 * The socket and the HTTP API are unauthenticated and bound to loopback by default. Do not bind them to a public interface.
   The HTTP API refuses requests from other web sites (Host/Origin checks against DNS rebinding and cross-site requests) and
   only opens `.json` files inside its workspace folder.

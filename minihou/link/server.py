@@ -19,7 +19,9 @@ from typing import List, Optional
 from ..graph import GraphError
 from ..sdk import ParamError
 from .diff import DiffState
-from .protocol import DEFAULT_PORT, PROTOCOL_VERSION, ProtocolError, recv_message, send_message
+from ..geometry import Geometry
+from .protocol import (DEFAULT_PORT, PROTOCOL_VERSION, TOPO_KEYS, TOPO_PRIM_OFFSETS, TOPO_VERTEX_POINT, ProtocolError,
+                       attr_key, recv_message, send_message, split_key)
 from .session import Result, Session
 
 log = logging.getLogger("minihou.server")
@@ -56,6 +58,9 @@ class _Connection:
             self._iface_pending = True
             self.cv.notify_all()
 
+    def on_watch(self, names):
+        self.post({"type": "watch_objects", "objects": list(names)})
+
     # -- helpers -----------------------------------------------------------
     def post(self, header: dict, arrays=None):
         with self.cv:
@@ -83,15 +88,15 @@ class _Connection:
     def _read_loop(self):
         try:
             while not self.closed:
-                header, _arrays = recv_message(self.sock)
-                self._handle(header)
+                header, arrays = recv_message(self.sock)
+                self._handle(header, arrays)
         except (OSError, ConnectionError, ProtocolError) as e:
             if not self.closed:
                 log.info("client %s disconnected (%s)", self.addr, e)
         finally:
             self.close()
 
-    def _handle(self, h: dict):
+    def _handle(self, h: dict, _arrays=None):
         t = h.get("type")
         if t == "hello":
             if h.get("protocol") != PROTOCOL_VERSION:
@@ -101,6 +106,7 @@ class _Connection:
             self.name = str(h.get("client", "?"))
             log.info("client %s connected (%s)", self.addr, self.name)
             self.post({"type": "welcome", "protocol": PROTOCOL_VERSION, "server": "minihou"})
+            self.post({"type": "watch_objects", "objects": self.session.watched_objects()})
             with self.cv:
                 self._iface_pending = True
                 self._want_result = True
@@ -121,6 +127,17 @@ class _Connection:
                 self._iface_pending = True
                 self._want_result = True
                 self.cv.notify_all()
+        elif t == "object_geo":
+            name = str(h.get("object", ""))
+            try:
+                geo = _decode_object(h, _arrays)
+            except Exception as e:  # noqa: BLE001 - bad data from a client must not kill the connection
+                self.session.object_received(name, None, error=f"could not read the mesh: {e}")
+                self.post({"type": "error", "where": "object_geo", "message": f"{name}: {e}"})
+                return
+            self.session.object_received(name, geo, h.get("matrix"), info=h.get("info") or {})
+        elif t == "object_missing":
+            self.session.object_received(str(h.get("object", "")), None, error=str(h.get("reason", "not found")))
         elif t == "ping":
             self.post({"type": "pong", "t": h.get("t")})
         else:
@@ -161,6 +178,21 @@ class _Connection:
             self.bytes_sent += send_message(self.sock, {"type": "error", "where": "cook", "seq": err.seq,
                                                         "node": err.error.get("node"),
                                                         "message": err.error["message"]})
+
+
+def _decode_object(h: dict, arrays) -> Geometry:
+    """A mesh sent by the add-on (``object_geo``): positions, topology and attributes keyed like ``geo`` messages."""
+    P = arrays[attr_key("point", "P")].reshape(-1, 3)
+    geo = Geometry.from_arrays(P, arrays.get(TOPO_VERTEX_POINT), arrays.get(TOPO_PRIM_OFFSETS))
+    for key, a in arrays.items():
+        if key in TOPO_KEYS or key == attr_key("point", "P"):
+            continue
+        dom, name = split_key(key)
+        if dom not in ("point", "vertex", "prim") or not name:
+            raise ProtocolError(f"bad attribute key {key!r}")
+        geo.table(dom)[name] = a
+    geo.validate()
+    return geo
 
 
 class LinkServer:

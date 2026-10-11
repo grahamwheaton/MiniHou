@@ -91,6 +91,11 @@ class MINIHOU_PT_main(bpy.types.Panel):
             t = rt.last_timings
             box.label(text=f"cook {rt.last_cook_ms:.1f} ms   write {t.get('total_ms', 0):.1f} ms")
             box.label(text=f"latency {rt.last_latency_ms:.1f} ms   updates {rt.applied_count}")
+        if rt.client is not None and rt.watched:
+            box = layout.box()
+            box.label(text="Inputs read from Blender", icon="IMPORT")
+            for name in rt.watched:
+                box.label(text=f"{name}: {rt.object_info.get(name, 'waiting')}", icon="OBJECT_DATA")
         if rt.last_error:
             box = layout.box()
             box.alert = True

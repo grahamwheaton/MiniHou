@@ -31,6 +31,7 @@ from ..edit import apply_ops, layout_missing
 from ..evaluator import Cache, DEFAULT_CACHE_BYTES, Evaluator, NodeError
 from ..geometry import Geometry
 from ..graph import Graph, GraphError
+from ..inputs import INPUTS
 from ..sdk import ParamError, Registry
 from ..summary import summarize
 
@@ -107,6 +108,7 @@ class Session:
         self._file_text: Optional[str] = None         # last text read from / written to the file
         self.save_error: Optional[str] = None
         self.library = None                           # minihou.library.NodeLibrary, if attached
+        self._watched: List[str] = []
         self._save_enabled = False
         self._stamp = None
         self._file_lock = threading.RLock()           # saving vs. noticing external changes
@@ -224,7 +226,38 @@ class Session:
                 l.on_interface(iface)
         self._notify_graph(origin)
 
+    # -- Blender objects as inputs ---------------------------------------------------------------------
+    def watched_objects(self) -> List[str]:
+        """Blender objects the graph reads (``blender_object`` nodes): the add-on streams exactly these."""
+        with self.lock:
+            return sorted({str(inst.params.get("object") or "") for inst in self.graph.nodes.values()
+                           if inst.type == "blender_object"} - {""})
+
+    def object_received(self, name: str, geo, matrix=None, error: str = "", info: Optional[dict] = None) -> None:
+        """New data for a Blender object (or why there is none). Recooks what depends on it; not a graph edit."""
+        INPUTS.put(name, geo, matrix, error, info)
+        if name not in self.watched_objects():
+            return                                         # stale (the graph changed meanwhile): stored, no recook
+        with self.lock:
+            self._rev += 1
+            self._wake.set()
+
+    def _check_watch(self) -> None:
+        w = self.watched_objects()
+        if w == self._watched:
+            return
+        self._watched = w
+        INPUTS.retain(w)
+        for l in list(self._listeners):
+            fn = getattr(l, "on_watch", None)
+            if fn:
+                try:
+                    fn(w)
+                except Exception:  # noqa: BLE001
+                    log.exception("listener failed")
+
     def _notify_graph(self, origin: str) -> None:
+        self._check_watch()
         rev = self._rev
         for l in list(self._listeners):
             fn = getattr(l, "on_graph", None)
@@ -337,6 +370,11 @@ class Session:
         out = {"node": node, "rev": rev, "ok": True, "ms": round((time.perf_counter() - t0) * 1000, 3),
                "cooked": stats["cooked"], "cached": stats["cached"]}
         out.update(summarize(geo, detail))
+        n = snapshot.nodes[node]
+        if n.type == "blender_object":                       # what Blender sent: attributes, vertex groups, skips
+            data = INPUTS.get(str(n.params.get("object", "")))
+            if data is not None:
+                out["blender"] = dict(data.info, error=data.error) if data.error else dict(data.info)
         return out
 
     def start(self, cook_immediately: bool = True) -> None:

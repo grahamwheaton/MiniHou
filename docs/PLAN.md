@@ -102,10 +102,11 @@ AI, Blender or the JSON file shows up in all the others.
 
 1. **Topology rebuild cost** in Blender (~0.25-0.4 s for 1M quads, mostly Blender's edge computation): worth it only if users drag
    topology-changing parameters on huge meshes; options are computing edges in the engine and writing `.edge_verts` directly.
-2. **Wrangle over primitives/vertices**, `@P` reads from a second input (`@opinput1_P`), attribute-flow metadata on node types.
+2. **Wrangle**: `@P` reads from a second input (`@opinput1_P`), attribute-flow metadata on node types. (Primitives and
+   vertices: done, see *Attribute wrangle and native Blender data* below.)
 3. **More nodes**: group / attribute-from-group, attribute transfer and ray, polyextrude, subdivide, packed-prim instancing
    (Blender instances on points instead of copying geometry).
-4. Multiple outputs / several display nodes; detail attributes, UV maps and normals to Blender.
+4. Multiple outputs / several display nodes; detail attributes to Blender. (UV maps, colors, normals, materials: done.)
 5. Time/frame in the cache key for animated graphs (frame-change hook in the add-on).
 6. Editor: subnetworks / reusable "systems" (a graph used as a node), network boxes, a 3D preview pane, copy/paste between
    graphs. (User node libraries: done, see below.)
@@ -129,6 +130,24 @@ contents change. Design points:
   that node, and saving round-trips it, so a half-edited library never breaks a graph file.
 * **AI**: no code-writing MCP tool. `node_library` returns the folder, loaded files, errors and an authoring guide; the
   assistant writes files with its own file tools, under its client's permission prompts.
+
+## Attribute wrangle and native Blender data
+
+* **Domains**: `wrangle` runs over points, primitives or vertices. Reads from other domains are promoted (point/prim values
+  gathered to corners; per-face means with `bincount`). An attribute name lives on one domain, as in Blender: writing it moves
+  it to the domain being run over.
+* **Engine -> Blender** (`mesh_writer.write_native`): `uv` becomes the UV map *UVMap*, `Cd` the color attribute *Color* (set as
+  active and render color), `N` custom normals through the `custom_normal` attribute (7 ms for 1M points against 2.1 s for
+  `normals_split_custom_set_from_vertices`; the legacy call is the fallback), `material_index` and `sharp_face` face attributes.
+  Literal uses of the reserved Blender names warn instead of clashing.
+* **Blender -> engine** (`blender_object`): the engine sends `watch_objects` (the names its graph reads) after `welcome` and on
+  every graph change. The add-on's depsgraph handler only flags watched objects; `tick` reads the evaluated mesh
+  (`mesh_reader`, foreach_get on attributes; ~25 ms for 250k points) at most every 0.1 s per object and sends `object_geo`,
+  or `object_missing` with the reason. A blake2b digest of the message skips unchanged data, which also stops a loop when a
+  watched object depends on MiniHou's output. The engine stores each object's newest data in `minihou.inputs.INPUTS` with a
+  fresh token that `blender_object` folds into its cache key (`NodeType.key_extra`), so new data recooks exactly the nodes
+  downstream of it. Vertex groups have no bulk API (~0.8 us per point) and are skipped above 250k points.
+* `blender_object` is refused inside systems: its data changes outside the graph, and a system's cache key cannot see it.
 
 ## Systems (graphs as nodes)
 
