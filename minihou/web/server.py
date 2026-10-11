@@ -221,7 +221,21 @@ class _Handler(BaseHTTPRequestHandler):
         if status >= 400:                       # the request body may be unread: don't reuse this connection
             self.close_connection = True
             extra = {"Connection": "close"}
+            self._drain_body()
         self._send(status, json.dumps(obj, allow_nan=False).encode("utf-8"), "application/json", extra)
+
+    def _drain_body(self) -> None:
+        """Read and discard an unread request body before replying with an error. Closing a socket that still holds
+        unread data makes Windows reset the connection, and the client can then lose the reply (WinError 10053)."""
+        if getattr(self, "_body_read", False):
+            return
+        self._body_read = True
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            if 0 < n <= MAX_BODY:
+                self.rfile.read(n)
+        except (ValueError, OSError):
+            pass
 
     def _host_ok(self) -> bool:
         if self.app.host not in ("127.0.0.1", "localhost", "::1"):
@@ -245,6 +259,7 @@ class _Handler(BaseHTTPRequestHandler):
         if n > MAX_BODY:
             raise ApiError(413, "request too large")
         raw = self.rfile.read(n) if n else b"{}"
+        self._body_read = True
         try:
             data = json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as e:
@@ -254,6 +269,7 @@ class _Handler(BaseHTTPRequestHandler):
         return data
 
     def _guard(self, fn):
+        self._body_read = False
         try:
             if not self._host_ok():
                 raise ApiError(403, "bad Host header")
