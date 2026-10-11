@@ -15,6 +15,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--saved-port", type=int, help="Optional endpoint stored in saved file after validating with --port")
     parser.add_argument("--save", type=Path)
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
     if not hasattr(bpy.types.Scene, "minihou_graph_path"):
@@ -80,6 +81,8 @@ def main():
     finally:
         evaluated.to_mesh_clear()
     if args.save:
+        if args.saved_port is not None:
+            wm.minihou_port = args.saved_port
         workspace = bpy.data.workspaces.get("Geometry Nodes")
         if workspace and bpy.context.window:
             bpy.context.window.workspace = workspace

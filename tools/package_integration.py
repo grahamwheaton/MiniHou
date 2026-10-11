@@ -31,7 +31,9 @@ def main():
         demo = DIST / "MiniHou-Wired-Groups.blend"
         if demo.exists():
             archive.write(demo, "MiniHou/examples/MiniHou-Wired-Groups.blend")
-    subprocess.run(["git", "bundle", "create", str(bundle), "HEAD"], cwd=ROOT, check=True)
+    branch = git("branch", "--show-current")
+    refs = ["HEAD", branch] if branch else ["HEAD"]
+    subprocess.run(["git", "bundle", "create", str(bundle), *refs], cwd=ROOT, check=True)
     subprocess.run(["git", "bundle", "verify", str(bundle)], cwd=ROOT, check=True)
     for path in (addon, source):
         with zipfile.ZipFile(path) as archive:

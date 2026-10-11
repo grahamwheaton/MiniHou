@@ -59,7 +59,8 @@ def main():
     engine = Engine(ROOT / "examples/modifiers/transform.json")
     try:
         run("geonodes-example", base + ["--python", "tools/blender_geonodes_demo.py", "--",
-                                      "--port", str(engine.port), "--save", str(ROOT / "dist/MiniHou-Wired-Groups.blend")])
+                                      "--port", str(engine.port), "--saved-port", "8765",
+                                      "--save", str(ROOT / "dist/MiniHou-Wired-Groups.blend")])
     finally:
         engine.stop()
     print(json.dumps(results, indent=2), flush=True)
