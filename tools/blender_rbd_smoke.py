@@ -129,7 +129,7 @@ def run():
     engine.stop()
     modifiers.unregister()
     scene.frame_set(72)
-    visible = [o for o in collection.objects if not o.hide_render]
+    visible = [o for o in collection.objects if max(abs(v) for v in o.scale) > 0]
     assert len(visible) == 1 and visible[0] == baked
     scene.render.filepath = str(DEST / 'wall_baked_0072.png')
     bpy.ops.render.render(write_still=True)
