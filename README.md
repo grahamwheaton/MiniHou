@@ -1,4 +1,4 @@
-# BlenderHoudini ("MiniHou")
+# MiniHou
 
 A small, standalone **procedural geometry engine** in Python (numpy, optionally numba) that **live-links into Blender 5.1/5.2**.
 You build a node graph in a **browser node editor**, by hand in JSON, or by **asking an AI** (built-in MCP server); the engine cooks
@@ -14,7 +14,9 @@ file, a modifier slider in Blender) and only what changed is recooked and re-sen
 
 ![An AI assistant built this crater-with-boulders system through MCP; it streamed live into Blender](docs/images/blender_ai_crater.png)
 
-Status: milestone 2 well under way: wrangle, groups, polygon modelling (extrude, subdivide, clip, mirror...), attribute toolkit and ray, numba backend, node editor, MCP, Blender objects as inputs.
+Status: 90+ node types covering Houdini's everyday toolkit (wrangle, groups, polygon modelling with exact booleans,
+bevel and reduce, curves, UV unwrapping, volumes, fracture, instancing, for-each and solvers) plus an Unreal-style PCG
+point toolkit; node editor, MCP server, Blender objects as live inputs.
 Every push runs CI on Linux and Windows, including the add-on inside a real Blender 5.1.2 on Windows
 (`.github/workflows/ci.yml`). Design notes and next steps: [docs/PLAN.md](docs/PLAN.md).
 
@@ -23,7 +25,8 @@ Every push runs CI on Linux and Windows, including the add-on inside a real Blen
 You need Python 3.11+ and Blender 5.1.
 
 ```powershell
-cd path\to\BlenderHoudini
+git clone https://github.com/grahamwheaton/MiniHou.git
+cd MiniHou
 py -m pip install numpy numba scipy    # numba and scipy are optional: faster heavy nodes and nearest-point queries
 
 py -m unittest discover -s tests -t .  # engine tests (no Blender needed)

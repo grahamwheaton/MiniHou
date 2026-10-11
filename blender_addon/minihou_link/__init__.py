@@ -1,6 +1,6 @@
 bl_info = {
     "name": "MiniHou Link",
-    "author": "BlenderHoudini",
+    "author": "MiniHou",
     "version": (0, 1, 0),
     "blender": (4, 2, 0),
     "location": "3D Viewport > Sidebar > MiniHou",
