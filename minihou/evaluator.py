@@ -25,6 +25,7 @@ from typing import Dict, List, Optional, Tuple
 
 from . import timectx
 from .geometry import Geometry
+from .inputs import input_cache_scope
 from .graph import Graph, GraphError
 from .sdk import REGISTRY, Registry
 
@@ -176,7 +177,8 @@ class Evaluator:
             payload = json.dumps(
                 [nt.name, nt.version, [[p.name, p.to_json_value(params[p.name])] for p in nt.params], in_keys]
                 + ([nt.code_hash] if nt.code_hash else []) + ([nt.key_extra(params)] if nt.key_extra else [])
-                + ([timectx.key()] if timectx.params_use_time(params) else []),
+                + ([timectx.key()] if timectx.params_use_time(params) else [])
+                + ([input_cache_scope()] if input_cache_scope() else []),
                 separators=(",", ":"), allow_nan=False)
             keys[nid] = hashlib.blake2b(payload.encode("utf-8"), digest_size=16).hexdigest()
         return keys

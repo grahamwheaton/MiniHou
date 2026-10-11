@@ -24,6 +24,7 @@ from .protocol import (DEFAULT_PORT, PROTOCOL_VERSION, TOPO_KEYS, TOPO_PRIM_CLOS
                        ProtocolError,
                        attr_key, recv_message, send_message, split_key)
 from .session import Result, Session
+from .instances import InstanceManager
 
 log = logging.getLogger("minihou.server")
 
@@ -32,6 +33,8 @@ class _Connection:
     def __init__(self, server: "LinkServer", sock: socket.socket, addr):
         self.server, self.session, self.sock, self.addr = server, server.session, sock, addr
         self.diff = DiffState()
+        self.instances = InstanceManager(self.session)
+        self.instance_mode = False
         self.cv = threading.Condition()
         self.closed = False
         self._outbox: List[tuple] = []
@@ -75,6 +78,7 @@ class _Connection:
             self.closed = True
             self.cv.notify_all()
         self.session.remove_listener(self)
+        self.instances.clear()
         try:
             self.sock.shutdown(socket.SHUT_RDWR)
         except OSError:
@@ -106,13 +110,34 @@ class _Connection:
                 return
             self.name = str(h.get("client", "?"))
             log.info("client %s connected (%s)", self.addr, self.name)
-            self.post({"type": "welcome", "protocol": PROTOCOL_VERSION, "server": "minihou"})
+            self.instance_mode = h.get("mode") == "instances"
+            self.post({"type": "welcome", "protocol": PROTOCOL_VERSION, "server": "minihou",
+                       "capabilities": ["instances_v1"], "editor_url": self.server.editor_url,
+                       "graph_path": str(self.session.path.resolve()) if self.session.path else None})
+            if self.instance_mode:
+                return
             self.post({"type": "watch_objects", "objects": self.session.watched_objects()})
             with self.cv:
                 self._iface_pending = True
                 self._want_result = True
                 self.session.add_listener(self)
                 self.cv.notify_all()
+        elif t in ("instance_cook", "instance_describe", "instance_remove"):
+            try:
+                if not self.instance_mode:
+                    raise ValueError("instance requests require hello mode instances")
+                if t == "instance_remove":
+                    self.instances.remove(h["instance_id"])
+                    response, output = {"type": "instance_removed"}, None
+                elif t == "instance_describe":
+                    response, output = self.instances.describe(h), None
+                else:
+                    response, output = self.instances.cook(h, _decode_object(h, _arrays or {}))
+                response.update(request_id=h.get("request_id"), instance_id=h.get("instance_id"))
+                self.post(response, output)
+            except Exception as e:
+                self.post({"type": "instance_error", "request_id": h.get("request_id"),
+                           "instance_id": h.get("instance_id"), "message": str(e)})
         elif t == "set_param":
             try:
                 if "name" in h:
@@ -208,6 +233,7 @@ class LinkServer:
                  bind_retry_seconds: float = 5.0):
         self.session, self.host, self.port = session, host, port
         self.bind_retry_seconds = bind_retry_seconds
+        self.editor_url = None
         self._listener: Optional[socket.socket] = None
         self._conns: List[_Connection] = []
         self._lock = threading.Lock()

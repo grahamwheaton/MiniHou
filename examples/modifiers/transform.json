@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "doc": "Stack-aware transform. Add to a Blender mesh; modifier_input receives the evaluated preceding stack.",
+  "nodes": {
+    "input": {"type": "modifier_input", "pos": [0, 0]},
+    "transform": {"type": "transform", "inputs": {"geo": "input"}, "pos": [0, 110]},
+    "output": {"type": "output", "inputs": {"geo": "transform"}, "pos": [0, 220]}
+  },
+  "display": "output",
+  "exposed": [
+    {"name": "Translate", "node": "transform", "param": "translate"},
+    {"name": "Scale", "node": "transform", "param": "uniform_scale"},
+    {"name": "Rotate", "node": "transform", "param": "rotate"}
+  ]
+}

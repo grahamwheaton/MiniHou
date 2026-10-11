@@ -6,12 +6,36 @@ fresh token; nodes fold it into their cache key, so new data recooks exactly the
 """
 from __future__ import annotations
 
+import contextlib
+from contextvars import ContextVar
 import threading
 import uuid
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .geometry import Geometry
+
+
+_READ_ALLOWED = ContextVar("minihou_object_input_allowed", default=True)
+
+
+def input_cache_scope():
+    """Partition nested shared caches from legacy cooks that may read live input."""
+    return "" if _READ_ALLOWED.get() else "modifier-no-object-inputs"
+
+
+@contextlib.contextmanager
+def without_object_inputs():
+    """Block legacy live geometry access throughout a nested modifier cook.
+
+    Context-local so concurrent legacy proxy cooks continue to work normally.
+    Enforced at get/token, before a nested evaluator can reuse a live-input key.
+    """
+    token = _READ_ALLOWED.set(False)
+    try:
+        yield
+    finally:
+        _READ_ALLOWED.reset(token)
 
 
 @dataclass
@@ -33,6 +57,8 @@ class ObjectInputs:
             self._data[name] = ObjectData(geo.freeze() if geo is not None else None, matrix, error, info=info or {})
 
     def get(self, name: str) -> Optional[ObjectData]:
+        if not _READ_ALLOWED.get():
+            raise ValueError("modifier graphs cannot read legacy Blender object inputs: feedback loop prevention")
         with self._lock:
             return self._data.get(name)
 

@@ -1,0 +1,76 @@
+"""Synchronous instance RPC client shared verbatim with Blender; no engine imports."""
+from __future__ import annotations
+import socket
+import threading
+from .protocol import PROTOCOL_VERSION, ProtocolError, recv_message, send_message
+
+
+class InstanceClient:
+    def __init__(self, host="127.0.0.1", port=8765, timeout=30):
+        self.host, self.port, self.timeout = host, port, timeout
+        self.sock = None
+        self.lock = threading.RLock()
+        self.sequence = 0
+
+    def connect(self):
+        with self.lock:
+            if self.sock is not None:
+                return
+            sock = socket.create_connection((self.host, self.port), self.timeout)
+            self.sock = sock
+            try:
+                send_message(sock, {"type": "hello", "protocol": PROTOCOL_VERSION,
+                                    "mode": "instances", "client": "Blender modifiers"})
+                header, _ = recv_message(sock)
+                if (header.get("type") != "welcome" or header.get("server") != "minihou"
+                        or header.get("protocol") != PROTOCOL_VERSION
+                        or "instances_v1" not in header.get("capabilities", [])):
+                    raise RuntimeError("server does not support independent MiniHou modifier instances")
+                return header
+            except Exception:
+                self.close()
+                raise
+
+    def close(self):
+        with self.lock:
+            if self.sock is not None:
+                try:
+                    self.sock.close()
+                finally:
+                    self.sock = None
+
+    def _request(self, header, arrays=None):
+        with self.lock:
+            self.connect()
+            self.sequence += 1
+            header["request_id"] = self.sequence
+            try:
+                send_message(self.sock, header, arrays)
+                reply, output = recv_message(self.sock)
+                if reply.get("request_id") != self.sequence:
+                    raise ProtocolError("modifier response request ID mismatch")
+                if reply.get("instance_id") != header.get("instance_id"):
+                    raise ProtocolError("modifier response instance ID mismatch")
+                expected = {"instance_cook": "instance_result", "instance_describe": "instance_description",
+                            "instance_remove": "instance_removed"}[header["type"]]
+                if reply.get("type") not in (expected, "instance_error"):
+                    raise ProtocolError("unexpected modifier response type")
+            except Exception:
+                self.close()
+                raise
+            # A correlated engine cook error is a complete valid response; keep this
+            # connection and its other independent instances alive.
+            if reply.get("type") == "instance_error":
+                raise RuntimeError(reply.get("message", "modifier cook failed"))
+            return reply, output
+
+    def describe(self, graph_path, graph=None):
+        return self._request({"type": "instance_describe", "graph_path": graph_path, "graph": graph})[0]
+
+    def cook(self, instance_id, graph_path, params, arrays, *, frame=1, fps=24, graph=None):
+        return self._request({"type": "instance_cook", "instance_id": instance_id,
+                              "graph_path": graph_path, "graph": graph, "params": params,
+                              "frame": frame, "fps": fps}, arrays)
+
+    def remove(self, instance_id):
+        return self._request({"type": "instance_remove", "instance_id": instance_id})[0]

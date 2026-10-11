@@ -55,6 +55,55 @@ start with `[minihou]`. `--factory` starts Blender without your add-ons and pref
 Other commands: `py -m minihou nodes` (all node types and parameters), `py -m minihou cook graph.json` (cook once,
 print timings and cache behaviour), `py -m minihou serve graph.json --open` (engine + editor, no Blender).
 
+## Start the engine from Blender
+
+Install the add-on, then set **External Python / Portable Runtime** and **MiniHou Project Folder** in its preferences
+or the MiniHou sidebar. Choose a prepared Python 3.11+ executable with numpy and access to this checkout's `minihou`
+package. A portable Python distribution works too, provided its import path includes the project (embedded Python
+may require configuring its `_pth` file). The add-on never installs dependencies into Blender and has no dependency
+on an agent's runtime or machine-specific path.
+
+Choose a **Graph**, the link port (default 8765), and **Editor Port** (8766). **Start Server** reports startup,
+readiness, import failures and process errors. It reuses an engine only when its protocol, instance capability,
+graph path and editor address match. A different graph/server on the same port is reported as a conflict;
+choose another port or the existing graph. **Open Editor** opens the ready engine in your external browser.
+**Stop Owned Server** and disabling the add-on only terminate the process started by that add-on, never a reused server.
+**Connect** still enables the original live proxy workflow independently.
+
+## MiniHou modifiers on existing meshes
+
+Select one or more editable mesh objects in Object Mode, choose `examples/modifiers/transform.json`, start the server,
+then click **Add MiniHou Modifier**. Each click adds another independent Geometry Nodes modifier to each selected mesh.
+Its exposed parameters appear in the normal modifier panel and the MiniHou sidebar. One engine serves all instances;
+there is no process per modifier. The original mesh datablock is not replaced.
+
+A modifier graph must have a `modifier_input` node connected upstream of its displayed output. This node receives the
+evaluated mesh immediately before that MiniHou modifier, in object-local coordinates, including preceding native and
+MiniHou modifiers. The cooked result is cached at that position, so subsequent modifiers receive it. For example,
+a point at x=1, a native translation of +2, MiniHou scale of 2, and MiniHou translation of +4 evaluates to x=10.
+Reordering scale and translation changes the result to x=14. A disconnected primitive generator is rejected as a
+stack modifier; existing generator graphs continue to work through the proxy. `blender_object` is rejected in modifier
+graphs to prevent feeding the object's final evaluated output back into its own stack.
+
+Each modifier stores its own graph snapshot, parameters and identity in the blend file. Duplicated objects/modifiers
+receive new identities and private caches on the next update. Edit the graph template in the external browser and click
+**Reload Graph** on an instance to adopt the template while retaining matching parameter overrides. Other instances
+remain unchanged. Saved snapshots continue cooking if the source JSON is moved or unavailable. Removing a modifier
+releases its engine instance and unused cache objects on the next update; disconnecting releases connection-owned
+engine caches. Existing proxy and browser editing workflows remain available.
+The browser edits the template, not a live selected modifier session: its standalone cook has no `modifier_input`
+geometry and reports that missing input. Inspect actual instance results and cook status in Blender.
+
+**Evaluation limits:** this is an interactive stack bridge, not a native synchronous Blender modifier callback.
+A main-thread timer reads a disposable copy of the preceding stack and refreshes private output caches. Results update
+eventually; source meshes and unrelated modifiers are not edited. Use **Cook Stack Now** before a still render.
+For scripted animation/background rendering, explicitly call `minihou_link.modifiers.pump(force=True)` after changing
+each frame and check `last_error()` before rendering; merely rendering or changing the frame does not guarantee fresh
+caches. Prefix evaluation follows viewport modifier settings. Native prefix references to an object with MiniHou
+modifiers (including self-references and cache objects) are rejected to avoid cross-object feedback cycles;
+this bridge does not schedule interdependent object stacks. Edit Mode and active renders are skipped. Slow cooks can pause the UI;
+failed cooks retain the last successful cache and report an error. These caches are not a baking/render-farm system.
+
 ## Node editor
 
 ![The node editor showing the AI-built crater graph](docs/images/editor.png)

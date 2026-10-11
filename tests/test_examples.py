@@ -34,6 +34,22 @@ class ExampleGraphTests(unittest.TestCase):
                 self.assertTrue(g.interface(), "examples should expose at least one parameter")
                 Graph.from_json(g.to_json())                      # round-trips
 
+    def test_modifier_examples_cook_with_upstream_mesh(self):
+        import numpy as np
+        from minihou.link.instances import InstanceManager
+        from minihou.link.session import Session
+        from tests.helpers import quad_geo
+        session = Session(Graph.from_dict({"nodes": {"g": {"type": "grid"}}, "display": "g"}))
+        manager = InstanceManager(session)
+        paths = sorted((ROOT / "examples" / "modifiers").glob("*.json"))
+        self.assertTrue(paths)
+        for path in paths:
+            with self.subTest(example=path.name):
+                geo = quad_geo()
+                _, arrays = manager.cook({"instance_id": path.stem, "graph_path": str(path),
+                                          "params": {"Translate": [3, 0, 0], "Scale": 2}}, geo)
+                np.testing.assert_allclose(arrays["point/P"], geo.P * 2 + [3, 0, 0])
+
 
 if __name__ == "__main__":
     unittest.main()
