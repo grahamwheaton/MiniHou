@@ -128,3 +128,30 @@ No Blender was installable from blender.org in Claude's sandbox; the official 5.
 `Region.active_panel_category` is read-only (the test clicks the sidebar tab with xdotool, using the panel-draw counter as
 feedback), `bpy.ops.screen.screenshot` returns black on Xvfb (X11 capture is used instead), and the factory-startup splash
 must be dismissed. `tools/gui_smoketest.py` holds the scenario; `launch_blender.py --gui-test` wires engine, display and report.
+
+## Findings from a Windows desktop run (2026-10-11)
+
+Machine: Windows 11, Python 3.14.4, numpy 2.4.4, numba 0.68.0; Blender 4.3, 5.0, 5.1.1 and 5.2.1 LTS installed.
+
+* **Blender 5.2 broke the add-on (fixed in 41004fc).** 5.2 removed ID properties from modifiers, so `mod["Socket_N"]` raised
+  `TypeError: ... id properties not supported` on every tick and no geometry arrived. Inputs now go through
+  `proxy.get_input/set_input/has_input/input_owner/input_data_path`: `mod.properties.inputs.Socket_N.value` on 5.2+, the ID
+  property before. Animation paths differ too (`modifiers["MiniHou"].properties.inputs.Socket_N.value` on 5.2).
+  CI only runs 5.1.2: **add 5.2.x to the CI matrix** so this stays covered.
+* `launch_blender.py --find` picks the newest installed Blender (5.2 here), not 5.1, which the docs target. Both work now.
+* At 404ed7b (editor + MCP), everything passes on 5.1.1 and 5.2.1: engine tests 317 OK (36 skipped: 26 bpy, 10 that look like
+  the playwright browser tests; playwright is not installed), `--selftest` 41/41, `--gui-test` 18/18, consoles clean. An
+  interactive session (editor + Blender 5.2, including switching graphs from the editor) logged no MiniHou errors.
+* **Open bug: float32 noise is saved into graph files.** After a modifier edit in Blender the editor saved `demo.json` with
+  `"amplitude": [0.2199999988079071, 0.0, 1.2000000476837158]` (the user set X to 0.22 and did not touch Z = 1.2). Values arriving
+  from Blender are float32 and are stored and saved unrounded. Proposed fix: when a value comes from the Blender link (or when
+  saving), snap each float to the shortest decimal that round-trips the same float32 (`float(repr(np.float32(v)))` -> 0.22),
+  with a test. The forwarder's float32 tolerance already stops this from causing phantom edits. Saving also rewrites ints as floats
+  (`10` -> `10.0`) and adds `pos` per node; those are expected but make diffs of hand-written examples noisy.
+* **GUI test gaps on Windows:** dismissing the splash screen and clicking the MiniHou sidebar tab use xdotool (Linux only), so on
+  Windows the sidebar panel is never drawn ("panel drew without errors (0 draws)" still passes); only the popover draw is
+  checked. Could use `ctypes` `SetCursorPos`/`mouse_event` on Windows, or make the check fail when the sidebar is expected.
+* Several of the user's own add-ons fail on 5.2 (`imagepaste` hits the same ID-property removal; `smart_fill_1.5.0.py` has a syntax
+  error; `sketchup_importer` has a circular import; `BL_add_to_collection` is missing). These are not MiniHou's, but they show up
+  in the console and can be mistaken for its errors.
+* The machine has no git identity configured; commits from it were made as `Claude <noreply@anthropic.com>`, as on the branch before.
