@@ -176,8 +176,13 @@ Worked through in order of how often Houdini users reach for them:
    timer). `for_each` calls the body node per piece; `solver` memoises frames per input geometry (weakly) so the result
    for a frame never depends on the playback path.
 
-Next candidates: VDB-style volumes/SDFs (remesh, boolean), poly bevel, boolean, UV tools (uv project/unwrap), an
-editor frame slider, numba kernels for closest-point queries.
+7. **UVs and volumes**: `uv_project` writes vertex UVs (seams and poles fixed per face). `minihou/sdf.py`: dense SDF
+   grids -- narrow-band exact distances from closed meshes (closest points) signed by flood-filling the outside
+   (SciPy's binary_propagation when available, else iterative dilation), metaball fields from points, box blur, smooth
+   min/max booleans, and surface nets meshing with face-saddle resolution so the result is edge-manifold.
+
+Next candidates: poly bevel, exact mesh booleans, UV unwrap (LSCM), an editor frame slider, numba kernels for
+closest-point queries and SDF construction (the numpy SDF of a mesh spends most of its time in closest points).
 
 ## Systems (graphs as nodes)
 

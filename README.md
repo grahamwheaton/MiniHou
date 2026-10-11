@@ -98,6 +98,7 @@ The same edit operations are available to scripts over HTTP (`POST /api/edit`, s
 | `examples/graphs/scifi_panels.json` | random face groups extruded twice with insets, flat-shaded, a second material on the tops |
 | `examples/graphs/subd_pod.json` | box -> extruded dome and fin -> clip + mirror (symmetric, welded) -> Catmull-Clark |
 | `examples/graphs/curves_vine.json` | helix -> resample -> noise -> blur -> width ramp -> sweep; a wireframe sphere |
+| `examples/graphs/volumes.json` | a box minus a sphere with a smooth fillet (sdf_boolean), metaball blobs (points_to_surface) |
 
 All examples are cooked by the test-suite, so they keep working as nodes evolve.
 
@@ -140,6 +141,10 @@ All examples are cooked by the test-suite, so they keep working as nodes evolve.
 | `convert_line` | geo | every edge to curves (joined into polylines), e.g. wireframes with `sweep` |
 | `polypath` | geo | join curves that share end points |
 | `instance` | points | points become instances of **Blender objects** (random, cycled or by attribute; aligned to N or upright; random spin and scale) |
+| `uv_project` | geo | UVs by box (triplanar), planar, cylindrical or spherical projection; seams and poles handled |
+| `remesh` | geo | voxel remesh a closed mesh: even watertight quads, offset (grow/shrink), smoothing, attribute transfer |
+| `points_to_surface` | points | metaball surface around points (radius x pscale, blend), e.g. blobs and liquids |
+| `sdf_boolean` | a, b | union / subtract / intersect of closed meshes through distance fields, with smooth fillets |
 | `for_each` | geo | run a node or a system on every piece (connected pieces, an attribute's values, or each primitive) and merge |
 | `solver` | geo | feed each frame's result into the next (simulations, growth): deterministic, incremental playback, substeps |
 | `wrangle` | geo | VEX-like snippet over points, primitives or vertices (see below) |
@@ -188,6 +193,14 @@ object and the rotation and scale per point (`instance`, `rot`, `scale` point at
 million points on the wire, not a million copies, and the objects stay editable in Blender (edit the tree, every
 instance follows). Merge instance points with other geometry freely: lists from several `instance` nodes are combined.
 Missing objects are reported in the add-on panel's log and place nothing.
+
+### Volumes
+
+`remesh`, `points_to_surface` and `sdf_boolean` are Houdini's VDB workflow collapsed into mesh-in, mesh-out nodes: the
+input becomes a signed distance field on a voxel grid (exact distances near a closed mesh, the inside found by
+flood-filling the outside), the field is offset, smoothed or combined, and surface nets turn it back into a watertight
+quad mesh (face saddles are resolved, so edges stay manifold). Booleans this way never fail on coplanar or messy input;
+edges are as sharp as the voxel size. Cost grows with (size / voxel size)^3, so start coarse.
 
 ### Time, loops and solvers
 
