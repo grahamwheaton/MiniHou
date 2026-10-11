@@ -127,7 +127,12 @@ class NodeLibrary:
         return out
 
     def refresh(self) -> bool:
-        """Load new or changed files, drop deleted ones. Returns True if node types or errors changed."""
+        """Load new or changed files, drop deleted ones. Returns True if node types or errors changed. Readers on other
+        threads see the node types before or after the whole reload, never partway through."""
+        with self.registry.batch():
+            return self._refresh()
+
+    def _refresh(self) -> bool:
         changed = systems_changed = False
         current = self.scan()
         for path in [p for p in self.files if p not in current]:
@@ -273,9 +278,10 @@ class NodeLibrary:
                           for f in sorted(self.files.values(), key=lambda f: str(f.path))]}
 
     def unload(self) -> None:
-        for entry in self.files.values():
-            for name in entry.types:
-                self.registry.unregister(name)
+        with self.registry.batch():
+            for entry in self.files.values():
+                for name in entry.types:
+                    self.registry.unregister(name)
         self.files.clear()
 
 
