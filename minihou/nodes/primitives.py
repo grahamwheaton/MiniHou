@@ -1,8 +1,9 @@
-"""Source nodes: box, sphere, circle; plus fuse (point welding)."""
+"""Source nodes: box, sphere, circle, tube, torus; plus fuse (point welding)."""
 import numpy as np
 
 from ..geometry import Geometry, Topology
-from ..sdk import Float, Int, Vec3, node
+from ..sdk import Bool, Float, Int, Vec3, node
+from . import _build as B
 from ._util import euler_xyz_matrix
 
 
@@ -113,3 +114,69 @@ def circle(radius, center, rotate, divisions):
     P = np.stack([np.cos(t), np.sin(t), np.zeros_like(t)], 1) * radius
     P = P @ euler_xyz_matrix(rotate).T + np.asarray(center)
     return Geometry.from_arrays(P.astype(np.float32), np.arange(divisions), [0, divisions])
+
+
+def _ring_quads(rows, columns, wrap_rows):
+    """Quads over a (rows+1 or rows) x columns lattice of points (row-major), wrapping around the columns and, for a
+    torus, the rows; plus their vertex uvs (u around the columns, v along the rows, seams get u = 1 / v = 1)."""
+    nr = rows if wrap_rows else rows + 1
+    r, c = np.meshgrid(np.arange(rows), np.arange(columns), indexing="ij")
+    r, c = r.ravel(), c.ravel()
+    r1, c1 = (r + 1) % nr, (c + 1) % columns
+    quads = np.stack([r * columns + c, r * columns + c1, r1 * columns + c1, r1 * columns + c], 1)
+    u = np.stack([c, c + 1, c + 1, c], 1) / columns
+    v = np.stack([r, r, r + 1, r + 1], 1) / rows
+    return quads, np.stack([u, v], -1).reshape(-1, 2)
+
+
+@node("tube", category="source", params=[
+    Float("radius_bottom", 1.0, min=0.0, soft_max=10.0),
+    Float("radius_top", 1.0, min=0.0, soft_max=10.0, doc="0 makes a cone"),
+    Float("height", 2.0, min=0.0, soft_max=20.0),
+    Vec3("center", (0.0, 0.0, 0.0)),
+    Int("rows", 1, min=1, max=4096, soft_max=100, doc="segments along the height"),
+    Int("columns", 24, min=3, max=4096, soft_max=200, doc="segments around"),
+    Bool("caps", True, doc="Close the ends with n-gons (a zero radius ends in a point instead)"),
+])
+def tube(radius_bottom, radius_top, height, center, rows, columns, caps):
+    """Cylinder or cone along +Z (Houdini's Tube), outward-facing, with vertex uvs; closed when ``caps`` is on."""
+    t = np.linspace(0.0, 1.0, rows + 1)
+    rad = radius_bottom + (radius_top - radius_bottom) * t
+    ang = np.linspace(0, 2 * np.pi, columns, endpoint=False)
+    P = np.stack([rad[:, None] * np.cos(ang), rad[:, None] * np.sin(ang),
+                  np.broadcast_to(((t - 0.5) * height)[:, None], (rows + 1, columns))], -1).reshape(-1, 3)
+    quads, uv = _ring_quads(rows, columns, False)
+    polys, uvs = list(quads), list(uv.reshape(-1, 4, 2))
+    if caps:
+        disc = np.stack([np.cos(ang), np.sin(ang)], 1) * 0.5 + 0.5
+        polys.append(np.arange(columns)[::-1])                              # bottom faces -Z
+        uvs.append(disc[::-1])
+        polys.append(rows * columns + np.arange(columns))                   # top faces +Z
+        uvs.append(disc)
+    sizes = [len(p) for p in polys]
+    g = Geometry.from_arrays((P + np.asarray(center)).astype(np.float32), np.concatenate(polys),
+                             B.offsets_from_sizes(sizes))
+    g.vertex["uv"] = np.concatenate(uvs).astype(np.float32)
+    if min(radius_bottom, radius_top) <= 0.0:                              # cone: weld the tip ring into one point
+        g = B.drop_degenerate(fuse_points(g, 1e-7 * max(1.0, radius_bottom, radius_top, height)))
+    return g
+
+
+@node("torus", category="source", params=[
+    Float("radius", 1.0, min=0.0, soft_max=10.0, doc="From the centre to the middle of the tube"),
+    Float("thickness", 0.25, min=0.0, soft_max=5.0, doc="Radius of the tube"),
+    Vec3("center", (0.0, 0.0, 0.0)),
+    Int("rows", 12, min=3, max=4096, soft_max=200, doc="segments around the tube"),
+    Int("columns", 32, min=3, max=4096, soft_max=400, doc="segments around the ring"),
+])
+def torus(radius, thickness, center, rows, columns):
+    """Torus in the XY plane (Houdini's Torus), outward-facing quads with vertex uvs; closed."""
+    phi = np.linspace(0, 2 * np.pi, rows, endpoint=False)[:, None]        # around the tube
+    th = np.linspace(0, 2 * np.pi, columns, endpoint=False)[None, :]       # around the ring
+    w = (radius + thickness * np.cos(phi)) * np.ones_like(th)
+    P = np.stack([w * np.cos(th), w * np.sin(th), np.broadcast_to(thickness * np.sin(phi), w.shape)], -1)
+    quads, uv = _ring_quads(rows, columns, True)
+    g = Geometry.from_arrays((P.reshape(-1, 3) + np.asarray(center)).astype(np.float32), quads.ravel(),
+                             np.arange(len(quads) + 1) * 4)
+    g.vertex["uv"] = uv.astype(np.float32)
+    return g

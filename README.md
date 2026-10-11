@@ -110,6 +110,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 |---|---|---|
 | ![scifi_panels](docs/images/gallery_scifi_panels.png) groups + polyextrude | ![subd_pod](docs/images/gallery_subd_pod.png) extrude, clip, mirror, subdivide | ![curves_vine](docs/images/gallery_curves_vine.png) curves: resample, blur, sweep |
 | ![volumes](docs/images/gallery_volumes.png) sdf_boolean fillet, metaballs | ![lsystem_tree](docs/images/gallery_lsystem_tree.png) lsystem + sweep + leaves | ![eroded_terrain](docs/images/gallery_eroded_terrain.png) heightfield erosion |
+| ![bevel_shapes](docs/images/gallery_bevel_shapes.png) polybevel, tube, torus, cusp normals | | |
 
 ## Nodes
 
@@ -120,11 +121,14 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `box` | - | closed box, optional divisions (welded seams) |
 | `sphere` | - | UV sphere (triangle-fan poles), closed and outward-facing |
 | `circle` | - | one filled n-gon |
+| `tube` | - | cylinder or cone along Z (top radius 0 ends in a point), optional caps; vertex `uv` |
+| `torus` | - | torus in XY, outward quads; vertex `uv` |
 | `transform` | geo | scale / rotate (Euler XYZ) / translate about a pivot; rotates `N`; optional group |
 | `noise` | geo | fractal Perlin noise; displaces `P` or writes any attribute (scalar or vector mode); optional group |
 | `group_create` | geo | a named point or primitive group: pattern/expression, bounding box, normal direction, random %, boundary |
 | `group_promote` | geo | convert groups between points and primitives |
 | `blast` | geo | delete a group of primitives or points (or keep only it) |
+| `polybevel` | geo | chamfer sharp edges (min angle, point group); slides along borders and flat edges so subdivided meshes bevel cleanly; new faces in group `bevel` |
 | `polyextrude` | geo | extrude faces (a group) along their normals with inset; connected regions or individual faces; groups `extrudeFront`/`extrudeSide` |
 | `subdivide` | geo | Catmull-Clark (smooth, open boundaries stay curves, corners sharp) or linear; uv and groups follow |
 | `mirror` | geo | reflect across a plane, weld the seam, keep or drop the original |
@@ -165,7 +169,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `wrangle` | geo | VEX-like snippet over points, primitives or vertices (see below) |
 | `attribute_delete` | geo | delete attributes by name or wildcard (`N uv tmp_*`) |
 | `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |
-| `normal` | geo | area-weighted point normals or face normals (Newell, n-gon safe) |
+| `normal` | geo | area-weighted point normals, face normals (Newell, n-gon safe), or vertex normals with a cusp angle (hard edges stay sharp; Blender gets custom normals) |
 | `scatter` | geo | area-weighted random points on the surface (`P`, `N`, `primnum`) |
 | `copy_to_points` | source, points | stamp `source` on every point, oriented by `orient` (quaternion), `rot`, or `N` + `up`, sized by `scale` x `pscale`; inherits point attributes |
 | `delete` | geo | delete points matching an expression (and primitives that use them), compacting all attributes |
@@ -398,7 +402,7 @@ Blender version changes them. Topology rebuilds (only when connectivity changes)
 ## Automated checks (what Claude runs, what you can run)
 
 ```powershell
-py -m unittest discover -s tests -t .                  # 339 tests; Blender ones skip without bpy, browser ones without playwright
+py -m unittest discover -s tests -t .                  # 470+ tests; Blender ones skip without bpy, browser ones without playwright
 py tools\launch_blender.py --selftest                  # add-on tests inside `blender --background`, engine as a separate process
 py tools\launch_blender.py --bench -- --points 1000000 # the 1M-point benchmark inside Blender (add --mode engine for slider edits)
 py tools\launch_blender.py --gui-test                  # interactive smoke test in a real Blender window (~30 s)

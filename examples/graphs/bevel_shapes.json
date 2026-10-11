@@ -1,0 +1,197 @@
+{
+ "version": 1,
+ "doc": "Hard-surface primitives: a panel block with extruded studs, a cylinder and a cone, all with chamfered sharp edges (polybevel), and a torus. Vertex normals with a 40 degree cusp keep the chamfers crisp and the curved faces smooth.",
+ "nodes": {
+  "block": {
+   "type": "box",
+   "params": {
+    "size": [
+     2.0,
+     2.0,
+     0.6
+    ],
+    "divisions": 4
+   },
+   "pos": [
+    0,
+    0
+   ]
+  },
+  "studs": {
+   "type": "group_create",
+   "inputs": {
+    "geo": "block"
+   },
+   "pos": [
+    0,
+    100
+   ],
+   "params": {
+    "name": "studs",
+    "domain": "primitives",
+    "method": "pattern",
+    "pattern": "@P.z > 0.25 and abs(@P.x) < 0.5 and abs(@P.y) < 0.9"
+   }
+  },
+  "raise": {
+   "type": "polyextrude",
+   "inputs": {
+    "geo": "studs"
+   },
+   "pos": [
+    0,
+    200
+   ],
+   "params": {
+    "group": "studs",
+    "distance": 0.25,
+    "inset": 0.08
+   }
+  },
+  "bevel_block": {
+   "type": "polybevel",
+   "inputs": {
+    "geo": "raise"
+   },
+   "pos": [
+    0,
+    300
+   ],
+   "params": {
+    "distance": 0.04
+   }
+  },
+  "cyl": {
+   "type": "tube",
+   "params": {
+    "radius_bottom": 0.6,
+    "radius_top": 0.6,
+    "height": 1.2,
+    "columns": 48,
+    "center": [
+     2.4,
+     0.0,
+     0.3
+    ]
+   },
+   "pos": [
+    250,
+    0
+   ]
+  },
+  "bevel_cyl": {
+   "type": "polybevel",
+   "inputs": {
+    "geo": "cyl"
+   },
+   "pos": [
+    250,
+    100
+   ],
+   "params": {
+    "distance": 0.06
+   }
+  },
+  "cone": {
+   "type": "tube",
+   "params": {
+    "radius_bottom": 0.7,
+    "radius_top": 0.0,
+    "height": 1.4,
+    "columns": 48,
+    "center": [
+     -2.4,
+     0.0,
+     0.4
+    ]
+   },
+   "pos": [
+    500,
+    0
+   ]
+  },
+  "bevel_cone": {
+   "type": "polybevel",
+   "inputs": {
+    "geo": "cone"
+   },
+   "pos": [
+    500,
+    100
+   ],
+   "params": {
+    "distance": 0.05
+   }
+  },
+  "ring": {
+   "type": "torus",
+   "params": {
+    "radius": 0.7,
+    "thickness": 0.18,
+    "rows": 24,
+    "columns": 64,
+    "center": [
+     0.0,
+     2.4,
+     0.18
+    ]
+   },
+   "pos": [
+    750,
+    0
+   ]
+  },
+  "all": {
+   "type": "merge",
+   "inputs": {
+    "geos": [
+     "bevel_block",
+     "bevel_cyl",
+     "bevel_cone",
+     "ring"
+    ]
+   },
+   "pos": [
+    250,
+    400
+   ]
+  },
+  "out": {
+   "type": "output",
+   "inputs": {
+    "geo": "shade"
+   },
+   "pos": [
+    250,
+    550
+   ]
+  },
+  "shade": {
+   "type": "normal",
+   "inputs": {
+    "geo": "all"
+   },
+   "pos": [
+    250,
+    450
+   ],
+   "params": {
+    "domain": "vertex",
+    "cusp_angle": 40.0
+   }
+  }
+ },
+ "display": "out",
+ "exposed": [
+  {
+   "name": "Bevel",
+   "node": "bevel_block",
+   "param": "distance"
+  },
+  {
+   "name": "Stud height",
+   "node": "raise",
+   "param": "distance"
+  }
+ ]
+}

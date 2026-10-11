@@ -42,8 +42,9 @@ Use wrangle nodes (wrangle_reference) for custom per-point math; for anything mo
 loops over geometry) write a node-library file (node_library). To make something reusable, build it as a *system*: a graph
 saved in nodes/ (e.g. nodes/rock_scatter.json) with `input` nodes and exposed parameters becomes a node type that any
 graph can use (details in node_library). Houdini-style toolkit: groups (group_create; most nodes take a group pattern
-like 'top ^side', '0-9' or '@P.z > 0'), modelling (polyextrude, subdivide, clip, mirror, polyfill), attributes
-(attribute_transfer, promote, blur, measure, color, ray), curves (line, helix, resample, sweep), volumes (remesh,
+like 'top ^side', '0-9' or '@P.z > 0'), modelling (polyextrude, polybevel, subdivide, clip, mirror, polyfill; tube and
+torus sources; normal with domain 'vertex' keeps hard edges crisp), attributes (attribute_transfer, promote, blur,
+measure, color, ray), curves (line, helix, resample, sweep), volumes (remesh,
 points_to_surface, sdf_boolean), instancing of Blender objects (instance), for_each (a system per piece), time (@Frame,
 solver; set_frame to check). To work on something the user made in Blender, start from a blender_object node
 (the object's name; its UV map, color attribute, vertex groups and material indices arrive as attributes, and it recooks live

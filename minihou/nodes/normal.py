@@ -2,7 +2,7 @@ import numpy as np
 
 from .. import accel
 from ..geometry import Geometry
-from ..sdk import Enum, node
+from ..sdk import Enum, Float, node
 from ._util import normalize_rows
 
 
@@ -49,13 +49,44 @@ def _normals_numba(geo, domain):
     return out
 
 
+def vertex_normals(geo: Geometry, cusp_angle: float) -> np.ndarray:
+    """Per vertex: the area-weighted sum of the normals of the faces around its point that meet its own face at no
+    more than ``cusp_angle`` degrees (all pairs of corners at each point; fine for the usual valences)."""
+    t = geo.topology
+    fn = prim_normals(geo).astype(np.float64)
+    unit = normalize_rows(fn).astype(np.float64)
+    pv = np.repeat(np.arange(t.nprims), t.prim_sizes())
+    vp = t.vertex_point.astype(np.int64)
+    order = np.argsort(vp, kind="stable")
+    counts = np.bincount(vp, minlength=geo.npoints)
+    starts = np.concatenate([[0], np.cumsum(counts)])[:-1]
+    c = counts[vp[order]]                                     # valence of each sorted corner's point
+    a = np.repeat(order, c)                                   # every corner paired with every corner at its point
+    first = np.repeat(starts[vp[order]], c)
+    b = order[first + (np.arange(len(a)) - np.repeat(np.cumsum(c) - c, c))]
+    keep = np.einsum("ij,ij->i", unit[pv[a]], unit[pv[b]]) >= np.cos(np.radians(cusp_angle)) - 1e-9
+    a, b = a[keep], b[keep]
+    acc = np.stack([np.bincount(a, weights=fn[pv[b], k], minlength=t.nvertices) for k in range(3)], 1)
+    return normalize_rows(acc).astype(np.float32)
+
+
 @node("normal", inputs=["geo"], category="modify", params=[
-    Enum("domain", ["point", "prim"], "point", doc="point: area-weighted average of adjacent faces; prim: face normals"),
+    Enum("domain", ["point", "prim", "vertex"], "point",
+         doc="point: area-weighted average of adjacent faces; prim: face normals; vertex: averages that stop at "
+             "edges sharper than the cusp angle (hard edges, smooth elsewhere)"),
+    Float("cusp_angle", 60.0, min=0.0, max=180.0, doc="vertex: faces meeting at more than this many degrees stay "
+          "sharp"),
 ])
-def normal(geo, domain):
+def normal(geo, domain, cusp_angle=60.0):
     """Compute ``N`` (unit length). Faces are counter-clockwise when seen from the side N points to.
-    Points not used by any face get N = (0, 0, 0)."""
+    Points not used by any face get N = (0, 0, 0). Vertex normals reach Blender as custom normals."""
     out = geo.copy()
+    if domain == "vertex":
+        out.vertex["N"] = vertex_normals(geo, cusp_angle)
+        for table in (out.point, out.prim):
+            if "N" in table:
+                del table["N"]
+        return out
     fast = _normals_numba(geo, domain)
     if fast is not None:
         if domain == "prim":

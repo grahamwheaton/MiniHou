@@ -130,25 +130,8 @@ def clean(geo, fuse_distance, remove_degenerate, remove_unused_points):
     """Tidy geometry (Houdini's Clean): weld, remove degenerate primitives and unused points."""
     from .primitives import fuse_points
     out = fuse_points(geo, fuse_distance) if fuse_distance > 0 else geo
-    if remove_degenerate and out.nprims:
-        t = out.topology
-        vp = t.vertex_point.astype(np.int64)
-        offs = t.prim_offsets.astype(np.int64)
-        pv = np.repeat(np.arange(t.nprims), t.prim_sizes())
-        nxt_same = np.r_[pv[1:] == pv[:-1], False]
-        # a corner repeating the next one (or, for polygons, the first one when it is the last) is dropped
-        dup = nxt_same & (vp == np.r_[vp[1:], -1])
-        last = ~nxt_same
-        first_of = offs[:-1][pv]
-        closed = t.closed_mask()
-        dup |= last & closed[pv] & (vp == vp[first_of]) & (np.arange(len(vp)) != first_of)
-        keepv = ~dup
-        sizes = np.bincount(pv[keepv], minlength=t.nprims)
-        good = np.where(closed, sizes >= 3, sizes >= 2)
-        keepv &= good[pv]
-        out = B.make(out.P, vp[keepv], B.offsets_from_sizes(sizes[good]), dict(out.point.items()),
-                     B.gather(out.vertex, np.flatnonzero(keepv)), B.gather(out.prim, np.flatnonzero(good)), out.detail,
-                     B.closed_subset(out, np.flatnonzero(good)))
+    if remove_degenerate:
+        out = B.drop_degenerate(out)
     if remove_unused_points:
         out = compact_points(out)
     return out

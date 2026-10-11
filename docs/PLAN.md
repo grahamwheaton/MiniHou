@@ -181,7 +181,13 @@ Worked through in order of how often Houdini users reach for them:
    (SciPy's binary_propagation when available, else iterative dilation), metaball fields from points, box blur, smooth
    min/max booleans, and surface nets meshing with face-saddle resolution so the result is edge-manifold.
 
-Next candidates: poly bevel, exact mesh booleans, UV unwrap (LSCM), an editor frame slider, numba kernels for
+8. **Bevel and shading**: `polybevel` splits the faces around each point into wedges at bevelled edges; each wedge's
+   copy of the point moves `distance` from its bounding bevelled edges (bisector in one face, sliding along unbevelled
+   or border edges across several), bevelled edges become quads and points with 3+ bevelled edges get corner
+   polygons. `normal` domain `vertex` averages only faces within the cusp angle, so Blender (custom normals) shows
+   crisp chamfers on smooth surfaces. `tube` and `torus` join the sources.
+
+Next candidates: exact mesh booleans, UV unwrap (LSCM), an editor frame slider, numba kernels for
 closest-point queries and SDF construction (the numpy SDF of a mesh spends most of its time in closest points).
 
 ## Systems (graphs as nodes)

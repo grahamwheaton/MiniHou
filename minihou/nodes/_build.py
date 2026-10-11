@@ -98,3 +98,27 @@ def require_polygons(geo, what: str) -> None:
 
 def offsets_from_sizes(sizes) -> np.ndarray:
     return np.concatenate([[0], np.cumsum(np.asarray(sizes, np.int64))]).astype(np.int32)
+
+
+def drop_degenerate(out: Geometry) -> Geometry:
+    """Drop repeated corners, then polygons with < 3 corners and curves with < 2 (points are kept)."""
+    if not out.nprims:
+        return out
+    t = out.topology
+    vp = t.vertex_point.astype(np.int64)
+    offs = t.prim_offsets.astype(np.int64)
+    pv = np.repeat(np.arange(t.nprims), t.prim_sizes())
+    nxt_same = np.r_[pv[1:] == pv[:-1], False]
+    # a corner repeating the next one (or, for polygons, the first one when it is the last) is dropped
+    dup = nxt_same & (vp == np.r_[vp[1:], -1])
+    last = ~nxt_same
+    first_of = offs[:-1][pv]
+    closed = t.closed_mask()
+    dup |= last & closed[pv] & (vp == vp[first_of]) & (np.arange(len(vp)) != first_of)
+    keepv = ~dup
+    sizes = np.bincount(pv[keepv], minlength=t.nprims)
+    good = np.where(closed, sizes >= 3, sizes >= 2)
+    keepv &= good[pv]
+    return make(out.P, vp[keepv], offsets_from_sizes(sizes[good]), dict(out.point.items()),
+                gather(out.vertex, np.flatnonzero(keepv)), gather(out.prim, np.flatnonzero(good)), out.detail,
+                closed_subset(out, np.flatnonzero(good)))
