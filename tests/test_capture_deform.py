@@ -68,6 +68,17 @@ class CaptureTests(unittest.TestCase):
             out=run(typ,g,rest,moved,group='0')
             np.testing.assert_allclose(out.P,[[1,0,0],[.5,0,0]])
 
+    def test_point_deform_coplanar_controls_and_nonfinite_validation(self):
+        rest=mesh([[0,0,0],[1,0,0],[1,1,0],[0,1,0]],[[0,1,2,3]])
+        moved=run('transform',rest,rotate=[0,0,45],translate=[0,0,2])
+        g=mesh([[.2,.3,0]],[])
+        out=run('point_deform',g,rest,moved,max_points=4)
+        expected=run('transform',g,rotate=[0,0,45],translate=[0,0,2])
+        np.testing.assert_allclose(out.P,expected.P,atol=1e-6)
+        bad=rest.copy(); bad.point['P']=rest.P.copy(); bad.point['P'][0,0]=np.nan
+        with self.assertRaisesRegex(ValueError,'finite'):
+            run('point_deform',g,bad,moved)
+
 
 if __name__=='__main__':
     unittest.main()

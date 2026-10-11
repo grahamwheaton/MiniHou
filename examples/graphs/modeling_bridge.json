@@ -1,0 +1,122 @@
+{
+  "version": 1,
+  "doc": "Initial modelling workflow; see docs/modeling_tools.md for limits.",
+  "nodes": {
+    "bottom": {
+      "type": "circle",
+      "inputs": {},
+      "params": {
+        "divisions": 12
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "flip": {
+      "type": "reverse",
+      "inputs": {
+        "geo": "bottom"
+      },
+      "params": {},
+      "pos": [
+        240,
+        0
+      ]
+    },
+    "top": {
+      "type": "circle",
+      "inputs": {},
+      "params": {
+        "divisions": 12,
+        "center": [
+          0,
+          0,
+          2
+        ]
+      },
+      "pos": [
+        480,
+        0
+      ]
+    },
+    "merge": {
+      "type": "merge",
+      "inputs": {
+        "geos": [
+          "flip",
+          "top"
+        ]
+      },
+      "params": {},
+      "pos": [
+        0,
+        160
+      ]
+    },
+    "source": {
+      "type": "edge_group",
+      "inputs": {
+        "geo": "merge"
+      },
+      "params": {
+        "name": "bottom",
+        "method": "primitives",
+        "pattern": "0"
+      },
+      "pos": [
+        240,
+        160
+      ]
+    },
+    "target": {
+      "type": "edge_group",
+      "inputs": {
+        "geo": "source"
+      },
+      "params": {
+        "name": "top",
+        "method": "primitives",
+        "pattern": "1"
+      },
+      "pos": [
+        480,
+        160
+      ]
+    },
+    "bridge": {
+      "type": "polybridge",
+      "inputs": {
+        "geo": "target"
+      },
+      "params": {
+        "source": "bottom",
+        "destination": "top",
+        "segments": 4
+      },
+      "pos": [
+        0,
+        320
+      ]
+    },
+    "normal": {
+      "type": "normal",
+      "inputs": {
+        "geo": "bridge"
+      },
+      "params": {},
+      "pos": [
+        240,
+        320
+      ]
+    }
+  },
+  "display": "normal",
+  "exposed": [
+    {
+      "name": "Segments",
+      "node": "bridge",
+      "param": "segments"
+    }
+  ]
+}

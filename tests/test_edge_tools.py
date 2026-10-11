@@ -102,6 +102,34 @@ class EdgeToolsTests(unittest.TestCase):
         b = run('edge_group',a,name='sel',pattern='1',combine='union')
         self.assertEqual(edges.mask(b,'sel').sum(),2)
 
+    def test_dissolve_rejects_closed_shell_holes_and_nonmanifold(self):
+        # Dissolving every edge of a closed shell cannot make one polygon.
+        with self.assertRaisesRegex(ValueError,'simple closed boundary'):
+            run('dissolve',run('box'),group='*',angle=180,preserve_seams=False)
+        ring=mesh([[x,y,0] for x,y in [(0,0),(3,0),(3,3),(0,3),(1,1),(2,1),(2,2),(1,2)]],
+                  [[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]])
+        with self.assertRaisesRegex(ValueError,'simple closed boundary'):
+            run('dissolve',ring,group='p0-4 p1-5 p2-6 p3-7')
+        bad=mesh([[0,0,0],[1,0,0],[0,1,0],[0,-1,0],[0,0,1]],[[0,1,2],[1,0,3],[0,1,4]])
+        with self.assertRaisesRegex(ValueError,'manifold interior'):
+            run('dissolve',bad,group='p0-1',angle=180)
+
+    def test_bridge_open_chains_and_rigid_equivariance(self):
+        g=mesh([[0,0,0],[1,0,0],[2,0,0],[0,0,2],[1,0,2],[2,0,2]],
+               [[0,1,2],[3,4,5]],[False,False])
+        g=run('edge_group',g,name='a',method='primitives',pattern='0')
+        g=run('edge_group',g,name='b',method='primitives',pattern='1')
+        a=run('polybridge',g,source='a',destination='b',segments=2)
+        self.assertEqual(a.nprims,6)
+        self.assertEqual(a.topology.closed_mask().tolist(),[False,False,True,True,True,True])
+        moved=run('transform',g,translate=[3,2,4],rotate=[20,30,40])
+        b=run('polybridge',moved,source='a',destination='b',segments=2)
+        expected=run('transform',a,translate=[3,2,4],rotate=[20,30,40])
+        np.testing.assert_allclose(b.P,expected.P,atol=1e-6)
+        flat=g.copy(); flat.point['P']=g.P.copy(); flat.point['P'][3:]=g.P[:3]
+        with self.assertRaisesRegex(ValueError,'collapsed'):
+            run('polybridge',flat,source='a',destination='b')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,0 +1,60 @@
+{
+  "version": 1,
+  "doc": "Initial modelling workflow; see docs/modeling_tools.md for limits.",
+  "nodes": {
+    "box": {
+      "type": "box",
+      "inputs": {},
+      "params": {},
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "crease": {
+      "type": "crease",
+      "inputs": {
+        "geo": "box"
+      },
+      "params": {
+        "sharpness": 1.5
+      },
+      "pos": [
+        240,
+        0
+      ]
+    },
+    "subdivide": {
+      "type": "subdivide",
+      "inputs": {
+        "geo": "crease"
+      },
+      "params": {
+        "depth": 3
+      },
+      "pos": [
+        480,
+        0
+      ]
+    },
+    "normal": {
+      "type": "normal",
+      "inputs": {
+        "geo": "subdivide"
+      },
+      "params": {},
+      "pos": [
+        0,
+        160
+      ]
+    }
+  },
+  "display": "normal",
+  "exposed": [
+    {
+      "name": "Sharpness",
+      "node": "crease",
+      "param": "sharpness"
+    }
+  ]
+}

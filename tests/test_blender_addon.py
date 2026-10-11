@@ -58,7 +58,7 @@ class Engine:
     """``python -m minihou serve`` in a subprocess."""
 
     def __init__(self, graph_path, port=0):
-        self.proc = subprocess.Popen([os.environ.get("MINIHOU_ENGINE_PYTHON", sys.executable), "-u", "-m", "minihou", "serve", str(graph_path), "--port", str(port), "--http-port", "-1"],
+        self.proc = subprocess.Popen([os.environ.get("MINIHOU_ENGINE_PYTHON", sys.executable), "-u", str(ROOT / "tools" / "worktree_cli.py"), "serve", str(graph_path), "--port", str(port), "--http-port", "-1"],
                                      cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                      encoding="utf-8", errors="replace")
         seen = []
