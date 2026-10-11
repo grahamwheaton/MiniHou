@@ -29,4 +29,6 @@ def grid(size_x, size_y, columns, rows, center):
     prim_offsets = np.arange(base.shape[0] + 1, dtype=np.int32) * 4
     g = Geometry.from_arrays(P, vertex_point, prim_offsets)
     g.point["uv"] = np.stack([uu.ravel(), vv.ravel()], axis=1)
+    g.detail["grid_columns"] = int(columns)          # lets heightfield nodes see the lattice (points row by row)
+    g.detail["grid_rows"] = int(rows)
     return g

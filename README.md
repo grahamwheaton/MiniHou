@@ -99,6 +99,7 @@ The same edit operations are available to scripts over HTTP (`POST /api/edit`, s
 | `examples/graphs/subd_pod.json` | box -> extruded dome and fin -> clip + mirror (symmetric, welded) -> Catmull-Clark |
 | `examples/graphs/curves_vine.json` | helix -> resample -> noise -> blur -> width ramp -> sweep; a wireframe sphere |
 | `examples/graphs/lsystem_tree.json` | an L-system tree: branches swept by width, leaves copied onto the `J` points |
+| `examples/graphs/eroded_terrain.json` | fractal hills -> droplet + thermal erosion; wet basins (flow) get the second material |
 | `examples/graphs/volumes.json` | a box minus a sphere with a smooth fillet (sdf_boolean), metaball blobs (points_to_surface) |
 
 All examples are cooked by the test-suite, so they keep working as nodes evolve.
@@ -143,6 +144,7 @@ All examples are cooked by the test-suite, so they keep working as nodes evolve.
 | `polypath` | geo | join curves that share end points |
 | `lsystem` | - | L-systems: rewriting rules (stochastic too) and a 3-D turtle -> branching curves with `width`, leaf points (`J`) |
 | `instance` | points | points become instances of **Blender objects** (random, cycled or by attribute; aligned to N or upright; random spin and scale) |
+| `heightfield_erode` | geo (a grid) | terrain erosion: thousands of rain droplets carve gullies and drop sediment, then steep slopes slump; writes `flow`, `erosion`, `deposit` masks |
 | `bend` | geo | bend, twist and taper along an axis (capture region; straight beyond it), N follows |
 | `point_relax` | points, surface | push points to an even spacing while keeping them on a surface (blue-noise scatter) |
 | `point_jitter` | geo | random offsets per axis |

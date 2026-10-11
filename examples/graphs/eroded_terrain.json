@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "doc": "Eroded terrain: fractal noise, then hydraulic + thermal erosion; channels (flow > 0.6) get the second material.",
+  "nodes": {
+    "land": {
+      "type": "grid",
+      "params": {
+        "columns": 220,
+        "rows": 220,
+        "size_x": 20,
+        "size_y": 20
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "hills": {
+      "type": "noise",
+      "inputs": {
+        "geo": "land"
+      },
+      "params": {
+        "amplitude": [
+          0,
+          0,
+          3.5
+        ],
+        "frequency": 0.11,
+        "octaves": 6,
+        "seed": 4
+      },
+      "pos": [
+        0,
+        100
+      ]
+    },
+    "erode": {
+      "type": "heightfield_erode",
+      "inputs": {
+        "geo": "hills"
+      },
+      "params": {
+        "iterations": 30
+      },
+      "pos": [
+        0,
+        200
+      ]
+    },
+    "water": {
+      "type": "wrangle",
+      "inputs": {
+        "geo": "erode"
+      },
+      "params": {
+        "snippet": "i@material_index = @flow > 0.6",
+        "run_over": "primitives"
+      },
+      "pos": [
+        0,
+        300
+      ]
+    },
+    "out": {
+      "type": "output",
+      "inputs": {
+        "geo": "water"
+      },
+      "pos": [
+        0,
+        400
+      ]
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Erosion Steps",
+      "node": "erode",
+      "param": "iterations"
+    },
+    {
+      "name": "Rain",
+      "node": "erode",
+      "param": "rain"
+    },
+    {
+      "name": "Talus",
+      "node": "erode",
+      "param": "talus_angle"
+    }
+  ]
+}
