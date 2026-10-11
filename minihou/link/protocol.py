@@ -28,6 +28,21 @@ server -> client: ``welcome``, ``interface``, ``geo``, ``error``, ``status``, ``
 arrays keyed like ``geo`` (``point/P``, the two ``topo/...`` arrays, ``<domain>/<name>``), or ``object_missing``
 ``{"object", "reason"}``.
 
+Modifier RPC (opt in with ``hello`` ``mode: "instances"``) is separate from the legacy
+proxy subscription. ``welcome`` advertises ``capabilities: ["instances_v1"]``, ``graph_path``
+and ``editor_url``. Requests carry a ``request_id`` echoed in replies:
+
+* ``instance_describe``: ``graph_path`` or embedded ``graph`` -> ``instance_description``
+  with graph snapshot and exposed ``interface`` list.
+* ``instance_cook``: ``instance_id``, graph source, complete exposed ``params`` overrides,
+  ``frame``, ``fps``, plus input mesh arrays -> ``instance_result`` (full geometry arrays,
+  the usual geo header and exposed interface). ``modifier_input`` receives these arrays.
+* ``instance_remove`` -> ``instance_removed``. Disconnect releases all owned instances.
+* Errors are ``instance_error`` with ``message`` and matching request/instance IDs.
+
+Instance IDs are scoped to the connection; requests cannot mutate the browser graph.
+``blender_object`` is rejected in modifier graphs to prevent evaluated-output feedback.
+
 ``geo`` carries only the arrays that changed since the last ``geo`` sent to *that* client,
 plus a manifest of every array that currently exists (so removals are explicit) and, if the
 connectivity changed, the two topology arrays. See :class:`GeoUpdate` and :class:`Mirror`.

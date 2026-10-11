@@ -15,7 +15,10 @@ import bpy  # noqa: E402
 
 print(f"[selftest] Blender {bpy.app.version_string}, Python {sys.version.split()[0]}, engine python: "
       f"{os.environ.get('MINIHOU_ENGINE_PYTHON', sys.executable)}", flush=True)
-suite = unittest.defaultTestLoader.loadTestsFromNames(["tests.test_addon_state", "tests.test_blender_addon"])
+suite = unittest.defaultTestLoader.loadTestsFromNames([
+    "tests.test_addon_state", "tests.test_blender_addon", "tests.test_blender_modifiers",
+    "tests.test_blender_server_control",
+])
 result = unittest.TextTestRunner(verbosity=2).run(suite)
 sys.stdout.flush()
 sys.exit(0 if result.wasSuccessful() else 1)

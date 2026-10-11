@@ -38,6 +38,7 @@ from urllib.parse import parse_qs, urlparse
 
 from ..edit import OP_NAMES, EditError
 from ..graph import GraphError
+from ..link.protocol import PROTOCOL_VERSION
 from ..sdk import ParamError
 
 log = logging.getLogger("minihou.web")
@@ -155,7 +156,8 @@ class WebServer:
         out.update(status=s.status(), nodes=[nt.describe() for nt in s.evaluator.registry], library=s.library_status(),
                    ops=OP_NAMES, root=str(self.root), files=self.files(),
                    link={"port": getattr(self.link, "port", None), "clients": self.link_clients()},
-                   engine={"pid": os.getpid(), "version": _version()})
+                   engine={"pid": os.getpid(), "version": _version(), "protocol": PROTOCOL_VERSION,
+                           "capabilities": ["instances_v1"]})
         return out
 
     def files(self) -> List[str]:

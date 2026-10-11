@@ -94,6 +94,7 @@ def _cmd_serve(args) -> int:
             from .web import WebServer
             web = WebServer(session, args.host, args.http_port, link=server, root=args.root)
             web.start()
+            server.editor_url = web.url
     except OSError as e:
         print(f"cannot start server: {e}", file=sys.stderr)
         server.stop()
