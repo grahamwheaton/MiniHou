@@ -363,3 +363,75 @@ def sweep(geo, radius, divisions, caps, twist):
                  B.gather(geo.prim, prims[np.concatenate(prim_parts)]), geo.detail)
     out.point["curveu"] = np.repeat(u, D).astype(np.float32)
     return out
+
+
+# -- path deform ------------------------------------------------------------------------------------------------
+@node("path_deform", inputs=["geo", "curve"], category="deform", params=[
+    Enum("axis", ["x", "y", "z"], doc="The geometry's length axis; it is laid along the curve from its first point"),
+    Enum("frame", ["minimal_rotation", "up_vector"], doc="minimal_rotation: cross-sections turn as little as "
+         "possible (up is matched at the start); up_vector: they keep `up` everywhere (roads, slides, banners)"),
+    Vec3("up", (0.0, 0.0, 1.0), doc="Where the geometry's up (Z, or Y for axis z) points"),
+    Float("offset", 0.0, soft_min=-10.0, soft_max=10.0, doc="Slide along the curve (distance)"),
+    Bool("stretch", False, doc="Scale the length to fit the whole curve"),
+    Float("twist", 0.0, soft_min=-720.0, soft_max=720.0, doc="Degrees of twist over the curve's length"),
+])
+def path_deform(geo, curve, axis, frame, up, offset, stretch, twist):
+    """Bend geometry along a curve (Houdini's Path Deform, Blender's Curve modifier). Cross-sections follow
+    rotation-minimising frames, so nothing twists unless asked; beyond the ends the geometry continues straight.
+    Uses the first primitive of the curve input; rotates N."""
+    if geo.npoints == 0:
+        return geo
+    if curve.nprims == 0:
+        raise ValueError("the curve input is empty")
+    prims, starts, sizes, closed, vert, seg = curve_arrays(curve, [0])
+    if sizes[0] < 2:
+        raise ValueError("the curve needs at least two points")
+    C = curve.P.astype(np.float64)[curve.topology.vertex_point[vert]]
+    if closed[0]:
+        C = np.vstack([C, C[:1]])
+    T, N = _frames(C, np.array([len(C)]), np.array([False]))
+    s = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(C, axis=0), axis=1))])
+    L = float(s[-1])
+    if L <= 0:
+        raise ValueError("the curve has no length")
+    u = np.asarray(up, np.float64)
+    if frame == "up_vector":                                # up projected off each tangent (RMF where T is along up)
+        upp = u[None] - (T @ u)[:, None] * T
+        ok = np.linalg.norm(upp, axis=1) > 1e-6
+        N = np.where(ok[:, None], normalize_rows(upp), N)
+    upp = u - (u @ T[0]) * T[0]                             # align the start frame's normal with `up`
+    if frame == "minimal_rotation" and np.linalg.norm(upp) > 1e-9:
+        upp /= np.linalg.norm(upp)
+        ang = np.arctan2(np.cross(N[0], upp) @ T[0], N[0] @ upp)
+        Bv = np.cross(T, N)
+        N = N * np.cos(ang) + Bv * np.sin(ang)
+    Bv = np.cross(T, N)
+    k = "xyz".index(axis)
+    P = geo.P.astype(np.float64)
+    along = P[:, k] - P[:, k].min()
+    if stretch:
+        along *= L / max(float(np.ptp(P[:, k])), 1e-12)
+    along = along + offset
+    # images of the local axes: the length axis -> T, the up axis -> N, the third keeps the frame right-handed
+    i = np.clip(np.searchsorted(s, along, side="right") - 1, 0, len(s) - 2)
+    f = np.clip((along - s[i]) / np.maximum(s[i + 1] - s[i], 1e-30), 0.0, 1.0)[:, None]
+    base = C[i] * (1 - f) + C[i + 1] * f
+    Tp = normalize_rows(T[i] * (1 - f) + T[i + 1] * f).astype(np.float64)
+    Np = N[i] * (1 - f) + N[i + 1] * f
+    Np = normalize_rows(Np - (Np * Tp).sum(1)[:, None] * Tp).astype(np.float64)
+    extra = np.where(along < 0, along, np.where(along > L, along - L, 0.0))[:, None]
+    base = base + Tp * extra                                  # past the ends: straight on
+    if twist:
+        a = np.radians(twist) * np.clip(along, 0.0, L) / L
+        Bp = np.cross(Tp, Np)
+        Np = Np * np.cos(a)[:, None] + Bp * np.sin(a)[:, None]
+    Bp = np.cross(Tp, Np)
+    cols = {"x": (Tp, -Bp, Np), "y": (Bp, Tp, Np), "z": (-Bp, Np, Tp)}[axis]
+    F = np.stack(cols, 2)                                     # (n, 3, 3): columns = where x, y, z go
+    local = P.copy()
+    local[:, k] = 0.0
+    out = geo.copy()
+    out.point["P"] = (base + np.einsum("nij,nj->ni", F, local)).astype(np.float32)
+    if "N" in geo.point:
+        out.point["N"] = np.einsum("nij,nj->ni", F, geo.point["N"].astype(np.float64)).astype(np.float32)
+    return out

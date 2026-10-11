@@ -1,0 +1,154 @@
+{
+ "version": 1,
+ "doc": "path_deform: a bevelled plank (subdivided along its length so it can bend) laid along a helix with frame up_vector, so it stays level like a slide. A bevelled tube is the post.",
+ "nodes": {
+  "plank": {
+   "type": "box",
+   "params": {
+    "size": [
+     12.0,
+     0.9,
+     0.12
+    ],
+    "divisions": 40,
+    "center": [
+     6.0,
+     0.0,
+     0.0
+    ]
+   },
+   "pos": [
+    0,
+    0
+   ]
+  },
+  "chamfer": {
+   "type": "polybevel",
+   "inputs": {
+    "geo": "plank"
+   },
+   "pos": [
+    0,
+    200
+   ],
+   "params": {
+    "distance": 0.03
+   }
+  },
+  "path": {
+   "type": "helix",
+   "params": {
+    "radius": 1.6,
+    "radius_end": 1.6,
+    "height": 4.0,
+    "turns": 1.25,
+    "points": 200
+   },
+   "pos": [
+    250,
+    0
+   ]
+  },
+  "bend": {
+   "type": "path_deform",
+   "inputs": {
+    "geo": "chamfer",
+    "curve": "path"
+   },
+   "pos": [
+    0,
+    300
+   ],
+   "params": {
+    "stretch": true,
+    "up": [
+     0,
+     0,
+     1
+    ],
+    "frame": "up_vector"
+   }
+  },
+  "post": {
+   "type": "tube",
+   "params": {
+    "radius_bottom": 0.25,
+    "radius_top": 0.25,
+    "height": 5.0,
+    "columns": 32,
+    "center": [
+     0.0,
+     0.0,
+     2.5
+    ]
+   },
+   "pos": [
+    250,
+    300
+   ]
+  },
+  "post_bevel": {
+   "type": "polybevel",
+   "inputs": {
+    "geo": "post"
+   },
+   "pos": [
+    250,
+    400
+   ],
+   "params": {
+    "distance": 0.04
+   }
+  },
+  "all": {
+   "type": "merge",
+   "inputs": {
+    "geos": [
+     "bend",
+     "post_bevel"
+    ]
+   },
+   "pos": [
+    100,
+    500
+   ]
+  },
+  "shade": {
+   "type": "normal",
+   "inputs": {
+    "geo": "all"
+   },
+   "pos": [
+    100,
+    600
+   ],
+   "params": {
+    "domain": "vertex",
+    "cusp_angle": 40.0
+   }
+  },
+  "out": {
+   "type": "output",
+   "inputs": {
+    "geo": "shade"
+   },
+   "pos": [
+    100,
+    700
+   ]
+  }
+ },
+ "display": "out",
+ "exposed": [
+  {
+   "name": "Turns",
+   "node": "path",
+   "param": "turns"
+  },
+  {
+   "name": "Height",
+   "node": "path",
+   "param": "height"
+  }
+ ]
+}

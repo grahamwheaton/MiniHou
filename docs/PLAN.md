@@ -200,6 +200,8 @@ Worked through in order of how often Houdini users reach for them:
     an edge goes when it is the cheapest at both its points (a matching), among the globally cheapest edges, passes
     the link condition and flips no triangle with the round's surviving moves (re-checked until stable). Refused edges
     wait while others go; the cheap set widens only when nothing else can collapse.
+12. **Path deform**: the length axis maps to arc length on the curve; cross-sections use the sweep's rotation-minimising
+    frames (start normal matched to `up`) or `up` projected off each tangent; past the ends the geometry runs straight.
 
 Next candidates: exact mesh booleans, an editor frame slider, numba kernels for
 closest-point queries and SDF construction (the numpy SDF of a mesh spends most of its time in closest points).
