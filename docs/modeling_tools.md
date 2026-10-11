@@ -50,3 +50,25 @@ Implementations are original and intentionally narrower.
 Run isolated-checkout tests with `python tools/test_worktree.py tests.test_edge_tools`.
 The runner prepends its own checkout even when an embedded Python `_pth` points
 at another MiniHou checkout.
+
+## Skin / Loft and Poly Expand 2D
+
+`skin` connects selected profiles in primitive-number order with quads. Use Merge
+in the intended profile order first. Profiles must have equal corner counts,
+matching closure and deliberately aligned corner correspondence; use Resample
+upstream when necessary. `keep_profiles` retains the sources; `close_loft` joins
+last to first. There is no spline fitting, automatic alignment or cap generation.
+Points and their attributes are retained; quad corners inherit their source
+profile UVs, and primitive data comes from the earlier profile. Overlapping or
+crossing profiles are not automatically repaired.
+
+`polyexpand2d` performs a miter offset of independent strictly convex closed loops
+in their fitted planes. Positive distance expands regardless of winding. It
+rejects open, concave, nonplanar, repeated/collinear, self-crossing or collapsed
+profiles and excessive miters. No straight skeleton, hole handling, Boolean
+union, or intersecting-profile cleanup. Selected profiles get independent point
+copies to avoid moving shared unselected geometry; unused original points remain.
+All attributes copy from corresponding source elements (UVs are not reprojected).
+
+References: [SideFX Skin](https://www.sidefx.com/docs/houdini/nodes/sop/skin.html),
+[Poly Expand 2D](https://www.sidefx.com/docs/houdini/nodes/sop/polyexpand2d.html).
