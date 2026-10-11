@@ -203,7 +203,7 @@ def scenario():
     sent0, applied0 = rt.sent_count, rt.applied_count
     t_drag = time.perf_counter()
     for i in range(30):
-        mod[ident] = [0.0, 0.0, 1.2 + 0.04 * (i + 1)]
+        proxy.set_input(mod, ident, (0.0, 0.0, 1.2 + 0.04 * (i + 1)))
         mod.id_data.update_tag()
         yield 1 / 60
     drag_s = time.perf_counter() - t_drag
@@ -256,7 +256,7 @@ def scenario():
                           d["nodes"]["hills"]["params"].__setitem__("frequency", 0.5)))
     yield from wait(lambda: "Spike Size" in proxy.mapping(mod.node_group), 20, "hot reload rebuilt the modifier inputs")
     m = proxy.mapping(mod.node_group)
-    check("engine value pushed into the modifier", abs(mod[m["Hill Frequency"]] - 0.5) < 1e-6, mod[m["Hill Frequency"]])
+    check("engine value pushed into the modifier", abs(proxy.get_input(mod, m["Hill Frequency"]) - 0.5) < 1e-6, proxy.get_input(mod, m["Hill Frequency"]))
     check("unchanged inputs kept their identifiers (no full rebuild)", m["Hill Height"] == ident, f"{ident} -> {m['Hill Height']}")
     s2 = rt.sent_count
     d0 = RESULTS["panel_draws"]

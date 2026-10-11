@@ -158,7 +158,7 @@ class AddonIntegrationTests(unittest.TestCase):
 
     def set_modifier_value(self, name, value):
         mod = self.modifier()
-        mod[self.proxy.mapping(mod.node_group)[name]] = value
+        self.proxy.set_input(mod, self.proxy.mapping(mod.node_group)[name], value)
         bpy.context.view_layer.update()              # fires depsgraph_update_post, like a UI edit
 
     # -- tests -------------------------------------------------------------
@@ -207,8 +207,8 @@ class AddonIntegrationTests(unittest.TestCase):
         sockets = {i.name: i for i in ng.interface.items_tree if i.item_type == "SOCKET" and i.in_out == "INPUT"}
         self.assertEqual(sockets["Columns"].min_value, 2)
         self.assertAlmostEqual(sockets["Frequency"].default_value, 0.4, places=6)
-        self.assertEqual(tuple(mod[m["Height"]]), (0.0, 0.0, 1.0))
-        self.assertEqual(mod[m["Columns"]], 30)
+        self.assertEqual(tuple(self.proxy.get_input(mod, m["Height"])), (0.0, 0.0, 1.0))
+        self.assertEqual(self.proxy.get_input(mod, m["Columns"]), 30)
 
     def test_editing_a_modifier_input_updates_the_engine_and_the_mesh(self):
         self.pump(lambda: self.rt.applied_count >= 1)
@@ -272,8 +272,8 @@ class AddonIntegrationTests(unittest.TestCase):
         self.pump(lambda: "Size" in self.proxy.mapping(self.modifier().node_group))
         mod = self.modifier()
         m = self.proxy.mapping(mod.node_group)
-        self.assertAlmostEqual(mod[m["Frequency"]], 0.8, places=6)       # engine value pushed into the modifier
-        self.assertEqual(mod[m["Size"]], 6.0)
+        self.assertAlmostEqual(self.proxy.get_input(mod, m["Frequency"]), 0.8, places=6)       # engine value pushed into the modifier
+        self.assertEqual(self.proxy.get_input(mod, m["Size"]), 6.0)
         self.pump(lambda: abs(self.rt.forwarder.known.get("Frequency", 0) - 0.8) < 1e-9)
         sent = self.rt.sent_count
         self.settle(20)
@@ -357,14 +357,14 @@ class InterfaceSyncTests(unittest.TestCase):
     def test_kept_inputs_keep_identifier_and_value(self):
         self.proxy.sync_interface(self.ng, self.out, [self.p("A"), self.p("B", "int", 3)], "s1")
         m1 = self.proxy.mapping(self.ng)
-        self.mod[m1["A"]] = 7.5
+        self.proxy.set_input(self.mod, m1["A"], 7.5)
         self.proxy.sync_interface(self.ng, self.out, [self.p("A"), self.p("C", "vec3", [0, 0, 1]), self.p("B", "int", 3)], "s2")
         m2 = self.proxy.mapping(self.ng)
         self.assertEqual((m2["A"], m2["B"]), (m1["A"], m1["B"]))
-        self.assertEqual(self.mod[m2["A"]], 7.5)
+        self.assertEqual(self.proxy.get_input(self.mod, m2["A"]), 7.5)
         self.assertEqual(self.inputs(), [("Geometry", "NodeSocketGeometry"), ("A", "NodeSocketFloat"),
                                          ("C", "NodeSocketVector"), ("B", "NodeSocketInt")])
-        self.assertIn(m2["C"], self.mod.keys())
+        self.assertTrue(self.proxy.has_input(self.mod, m2["C"]))
 
     def test_removed_and_retyped_inputs(self):
         self.proxy.sync_interface(self.ng, self.out, [self.p("A"), self.p("B"), self.p("C")], "s1")
@@ -374,10 +374,10 @@ class InterfaceSyncTests(unittest.TestCase):
         self.assertEqual(self.inputs(), [("Geometry", "NodeSocketGeometry"), ("C", "NodeSocketFloat"), ("B", "NodeSocketBool")])
         self.assertEqual(m["C"], old["C"])
         self.assertNotEqual(m["B"], old["B"])                       # type changed -> new socket
-        self.assertNotIn(old["A"], self.mod.keys())
+        self.assertFalse(self.proxy.has_input(self.mod, old["A"]))
         self.assertNotIn("A", m)
         self.assertEqual(len([n for n in self.ng.nodes if n.name.startswith(self.proxy.USE_NODE_PREFIX)]), 2)
-        self.assertIsInstance(self.mod[m["B"]], bool)              # the property exists with the new type...
+        self.assertIsInstance(self.proxy.get_input(self.mod, m["B"]), bool)              # the property exists with the new type...
         sock = next(i for i in self.ng.interface.items_tree if getattr(i, "identifier", "") == m["B"])
         self.assertIs(sock.default_value, True)                     # ...values themselves are written by the runtime
 
@@ -385,18 +385,18 @@ class InterfaceSyncTests(unittest.TestCase):
         """Users animate modifier inputs; a reload that keeps an input must keep its animation working."""
         self.proxy.sync_interface(self.ng, self.out, [self.p("A"), self.p("B")], "s1")
         ident = self.proxy.mapping(self.ng)["A"]
-        path = f'modifiers["{self.proxy.MODIFIER}"]["{ident}"]'
-        self.mod[ident] = 1.0
+        path = self.proxy.input_data_path(self.mod, ident)
+        self.proxy.set_input(self.mod, ident, 1.0)
         self.obj.keyframe_insert(data_path=path, frame=1)
-        self.mod[ident] = 9.0
+        self.proxy.set_input(self.mod, ident, 9.0)
         self.obj.keyframe_insert(data_path=path, frame=10)
         self.proxy.sync_interface(self.ng, self.out, [self.p("C"), self.p("A")], "s2")   # B gone, C added, reordered
         self.assertEqual(self.proxy.mapping(self.ng)["A"], ident)
         scene = bpy.context.scene
         scene.frame_set(10)
-        self.assertAlmostEqual(self.mod[ident], 9.0, places=5)
+        self.assertAlmostEqual(self.proxy.get_input(self.mod, ident), 9.0, places=5)
         scene.frame_set(1)
-        self.assertAlmostEqual(self.mod[ident], 1.0, places=5)
+        self.assertAlmostEqual(self.proxy.get_input(self.mod, ident), 1.0, places=5)
 
     def test_reordering_many_inputs(self):
         names = [f"P{i}" for i in range(8)]

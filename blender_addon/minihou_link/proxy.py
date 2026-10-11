@@ -159,7 +159,7 @@ def sync_interface(ng, output_obj, params: List[dict], structure: str) -> None:
     """Make the group's inputs match the engine's exposed parameters, *incrementally*.
 
     Inputs whose name and type are unchanged are kept with the same identifier, so the modifier property behind them
-    keeps its value -- and so do keyframes and drivers on it (they address ``modifiers["MiniHou"]["Socket_N"]``).
+    keeps its value -- and so do keyframes and drivers on it (they address the identifier; see ``input_data_path``).
     Only inputs that disappeared are removed and new ones created, then all are put in the engine's order. The modifier
     picks up added/removed sockets by itself; it must not be re-assigned (that would recreate every property).
     Repeating a sync with the same parameters writes nothing (no depsgraph churn).
@@ -254,15 +254,56 @@ def canonical(kind: str, v):
     return float(v)
 
 
+# Modifier input values. Up to Blender 5.1 they are ID properties on the modifier (``mod["Socket_2"]``); Blender 5.2
+# removed ID properties from modifiers and exposes them as RNA (``mod.properties.inputs.Socket_2.value``).
+
+def input_owner(mod, ident: str):
+    """``(struct, property)`` holding the input's value (for ``layout.prop``), or None if the modifier lacks it."""
+    props = getattr(mod, "properties", None)
+    if props is not None and hasattr(props, "inputs"):
+        item = getattr(props.inputs, ident, None)
+        return (item, "value") if item is not None else None
+    return (mod, f'["{ident}"]') if ident in mod.keys() else None
+
+
+def has_input(mod, ident: str) -> bool:
+    return input_owner(mod, ident) is not None
+
+
+def get_input(mod, ident: str):
+    owner = input_owner(mod, ident)
+    if owner is None:
+        raise KeyError(ident)
+    return owner[0].value if owner[1] == "value" else mod[ident]
+
+
+def set_input(mod, ident: str, value) -> None:
+    owner = input_owner(mod, ident)
+    if owner is None:
+        raise KeyError(ident)
+    if owner[1] == "value":
+        owner[0].value = value
+    else:
+        mod[ident] = list(value) if isinstance(value, (tuple, list)) else value
+
+
+def input_data_path(mod, ident: str) -> str:
+    """Animation data path of the input relative to the object (keyframes, drivers)."""
+    owner = input_owner(mod, ident)
+    if owner is None:
+        raise KeyError(ident)
+    return owner[0].path_from_id(owner[1]) if owner[1] == "value" else f'{mod.path_from_id()}["{ident}"]'
+
+
 def write_values(mod, ng, params: List[dict], values: Dict[str, object]) -> None:
     assert_main_thread()
     m = mapping(ng)
     for p in params:
         ident = m.get(p["name"])
-        if ident is None or p["name"] not in values:
+        if ident is None or p["name"] not in values or not has_input(mod, ident):
             continue
         v = values[p["name"]]
-        mod[ident] = list(v) if p["kind"] == "vec3" else v
+        set_input(mod, ident, tuple(v) if p["kind"] == "vec3" else v)
     mod.id_data.update_tag()
 
 
@@ -272,7 +313,7 @@ def read_values(mod, ng, params: List[dict]) -> Dict[str, object]:
     out = {}
     for p in params:
         ident = m.get(p["name"])
-        if ident is None or ident not in mod.keys():
+        if ident is None or not has_input(mod, ident):
             continue
-        out[p["name"]] = canonical(p["kind"], mod[ident])
+        out[p["name"]] = canonical(p["kind"], get_input(mod, ident))
     return out

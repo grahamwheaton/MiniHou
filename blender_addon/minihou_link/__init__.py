@@ -104,9 +104,9 @@ class MINIHOU_PT_main(bpy.types.Panel):
                 m = proxy.mapping(mod.node_group)
                 col = layout.column()
                 for p in rt.params:
-                    ident = m.get(p["name"])
-                    if ident and ident in mod.keys():
-                        col.prop(mod, f'["{ident}"]', text=p.get("label", p["name"]))
+                    owner = proxy.input_owner(mod, m.get(p["name"], ""))
+                    if owner is not None:
+                        col.prop(owner[0], owner[1], text=p.get("label", p["name"]))
 
 
 _classes = (MINIHOU_OT_connect, MINIHOU_OT_disconnect, MINIHOU_OT_resync, MINIHOU_OT_select_proxy, MINIHOU_PT_main)

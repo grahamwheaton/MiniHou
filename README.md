@@ -182,6 +182,10 @@ Verified:
   benchmark, and the interactive GUI smoke test (software OpenGL) all pass in CI.
 * **Linux**: the same, plus repeated GUI runs and a 40-reload stress run in a real Blender window with screenshots; Python 3.11
   (numpy 1.26), 3.12, 3.13.
+* **A Windows 11 desktop** (Python 3.14, numba 0.68): engine tests, `--selftest` and `--gui-test` in Blender 5.1.1 and 5.2.1 LTS.
+  Blender 5.2 removed ID properties from modifiers; the add-on reads/writes Geometry Nodes inputs through
+  `proxy.get_input`/`set_input`, which use `mod.properties.inputs.<Socket>.value` there and `mod["<Socket>"]` before. Keyframe/driver
+  paths differ accordingly (`proxy.input_data_path`).
 * Not fooled by flaky timing: Blender tests wait for convergence; cross-platform determinism is pinned by golden values.
 
 Found by these checks and fixed: float32 round-trips causing phantom parameter edits; depsgraph churn from re-assigning the node group;
