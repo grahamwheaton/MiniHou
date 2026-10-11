@@ -7,3 +7,5 @@ build/
 dist/
 gui_test_output/
 .mcp.json
+*.whl
+*.tar.gz

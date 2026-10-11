@@ -197,7 +197,7 @@
 
   // ---------------------------------------------------------------- rendering
   function render() {
-    renderNodes(); renderTop(); renderStatus(); renderParams(); scheduleInspect();
+    renderBoxes(); renderNodes(); renderTop(); renderStatus(); renderParams(); scheduleInspect();
     $("#empty-hint").classList.toggle("hidden", Object.keys(S.graph.nodes).length > 0);
   }
   function upstreamOfDisplay() {
@@ -637,6 +637,65 @@
     const r = await edit(ops);
     if (r) select(Object.values(map));
   }
+  // ---- copy / cut / paste: nodes travel as JSON text, so they can move between graphs and editor windows
+  const CLIP_KEY = "minihou.clip", CLIP_LIMIT = 500;
+  function clipboardText(ids) {
+    const keep = new Set(ids), nodes = {};
+    for (const id of ids) {
+      const n = nodeOf(id), ins = {};
+      for (const [spec, srcs] of inputs(id)) {
+        const inner = srcs.filter((s) => keep.has(s));
+        if (inner.length) ins[spec.name] = Array.isArray((n.inputs || {})[spec.name]) ? inner : inner[0];
+      }
+      nodes[id] = { type: n.type, params: n.params || {}, inputs: ins, pos: pos(id), comment: n.comment || undefined };
+    }
+    return JSON.stringify({ minihou: "nodes", version: 1, nodes });
+  }
+  function parseClipboard(text) {
+    let d;
+    try { d = JSON.parse(text); } catch (e) { return null; }
+    if (!d || d.minihou !== "nodes" || !d.nodes || typeof d.nodes !== "object" || Array.isArray(d.nodes)) return null;
+    return Object.keys(d.nodes).length <= CLIP_LIMIT ? d : null;
+  }
+  function copySelection(e) {
+    const ids = [...S.sel].filter((id) => nodeOf(id));
+    if (!ids.length) return false;
+    const text = clipboardText(ids);
+    try { localStorage.setItem(CLIP_KEY, text); } catch (err) { /* storage unavailable */ }
+    if (e && e.clipboardData) { e.clipboardData.setData("text/plain", text); e.preventDefault(); }
+    toast(`Copied ${ids.length} node${ids.length > 1 ? "s" : ""}`, false);
+    return true;
+  }
+  async function pasteNodes(text) {
+    const d = parseClipboard(text);
+    if (!d) return false;
+    const ids = Object.keys(d.nodes).filter((id) => d.nodes[id] && typeof d.nodes[id] === "object");
+    const unknown = [...new Set(ids.map((id) => d.nodes[id].type).filter((t) => !S.types[t]))];
+    const ok = ids.filter((id) => S.types[d.nodes[id].type]);
+    if (unknown.length) toast("Not pasted (unknown node type): " + unknown.join(", "));
+    if (!ok.length) return true;
+    const map = {}, taken = new Set(), okSet = new Set(ok);
+    for (const id of ok) { map[id] = uniqueId(id.replace(/\d+$/, "") || d.nodes[id].type, taken); taken.add(map[id]); }
+    const where = canvas.getBoundingClientRect(), inside = S.mouse[0] >= where.left && S.mouse[0] <= where.right &&
+      S.mouse[1] >= where.top && S.mouse[1] <= where.bottom;
+    const poss = ok.map((id) => d.nodes[id].pos).filter((p) => Array.isArray(p) && p.length === 2);
+    const x0 = poss.length ? Math.min(...poss.map((p) => p[0])) : 0, y0 = poss.length ? Math.min(...poss.map((p) => p[1])) : 0;
+    const [mx, my] = inside ? toWorld(...S.mouse) : [x0 + 40, y0 + 40];
+    const ops = ok.map((id) => {
+      const n = d.nodes[id], p = Array.isArray(n.pos) && n.pos.length === 2 ? n.pos : [x0, y0];
+      const op = { op: "add", id: map[id], type: n.type, params: n.params || {}, pos: [Math.round(mx + p[0] - x0), Math.round(my + p[1] - y0)] };
+      if (n.comment) op.comment = String(n.comment);
+      return op;
+    });
+    for (const id of ok) {
+      for (const [port, ref] of Object.entries(d.nodes[id].inputs || {})) {
+        for (const src of Array.isArray(ref) ? ref : [ref]) if (okSet.has(src)) ops.push({ op: "connect", from: map[src], to: map[id], port });
+      }
+    }
+    const r = await edit(ops);
+    if (r) select(Object.values(map));
+    return true;
+  }
   async function deleteSelection() {
     if (S.wireSel) {
       const w = S.wireSel; S.wireSel = null;
@@ -650,6 +709,53 @@
   async function undo(redo) {
     try { const r = await api(redo ? "/api/redo" : "/api/undo", { origin: "editor" }); applySnapshot(r.graph); }
     catch (e) { toast(e.message); }
+  }
+
+  // ---------------------------------------------------------------- network boxes
+  const BOX_COLORS = ["#5b7fb5", "#5aa06e", "#c98f3a", "#b5585b", "#8a63b5", "#4aa3a8"];
+  const boxesEl = $("#boxes");
+  const boxRect = (b) => S.boxDrag && S.boxDrag.id === b.id ? S.boxDrag : { pos: b.pos, size: b.size };
+  function boxMembers(b) {                                    // nodes whose centre is inside the box
+    const [x, y] = b.pos, [w, hh] = b.size;
+    return Object.keys(S.graph.nodes).filter((id) => { const [nx, ny] = pos(id); return nx + W / 2 >= x && nx + W / 2 <= x + w && ny + H / 2 >= y && ny + H / 2 <= y + hh; });
+  }
+  function renderBoxes() {
+    const list = S.graph.boxes || [], keep = new Set();
+    for (const b of list) {
+      keep.add(b.id);
+      let el = boxesEl.querySelector(`.netbox[data-id="${CSS.escape(b.id)}"]`);
+      if (!el) {
+        el = h("div", { class: "netbox", dataset: { id: b.id } },
+          h("div", { class: "hdr" }, h("span", { class: "dot", title: "Change colour" }), h("span", { class: "title" }), h("span", { class: "x", title: "Delete the box (nodes stay)" }, "×")),
+          h("div", { class: "grip", title: "Resize" }));
+        boxesEl.append(el);
+      }
+      const r = boxRect(b);
+      el.style.left = r.pos[0] + "px"; el.style.top = r.pos[1] + "px";
+      el.style.width = r.size[0] + "px"; el.style.height = r.size[1] + "px";
+      el.style.setProperty("--bc", b.color || BOX_COLORS[0]);
+      const t = el.querySelector(".title");
+      if (t.textContent !== (b.title || "")) t.textContent = b.title || "";
+      t.title = "Double-click to rename";
+    }
+    for (const el of [...boxesEl.children]) if (!keep.has(el.dataset.id)) el.remove();
+  }
+  function boxById(id) { return (S.graph.boxes || []).find((b) => b.id === id); }
+  async function addBox() {
+    const ids = [...S.sel].filter((id) => nodeOf(id));
+    let op;
+    if (ids.length) op = { op: "box_add", around: ids, title: "Box" };
+    else {
+      const r = canvas.getBoundingClientRect(), [x, y] = toWorld(r.left + r.width / 2, r.top + r.height / 2);
+      op = { op: "box_add", pos: [Math.round(x - 150), Math.round(y - 100)], size: [300, 200], title: "Box" };
+    }
+    await edit([op]);
+  }
+  async function renameBox(id) {
+    const b = boxById(id);
+    if (!b) return;
+    const t = prompt("Box title:", b.title || "");
+    if (t !== null) await edit([{ op: "box_set", id, title: t }]);
   }
 
   // ---------------------------------------------------------------- Tab menu
@@ -729,6 +835,25 @@
     canvas.focus({ preventScroll: true });
     const t = e.target;
     const port = t.closest(".port"), nodeEl = t.closest(".node");
+    const boxEl = t.closest(".netbox");
+    if (boxEl && e.button === 0 && !port && !nodeEl) {
+      const b = boxById(boxEl.dataset.id);
+      if (b && t.closest(".dot")) {
+        const i = Math.max(0, BOX_COLORS.indexOf(b.color));
+        edit([{ op: "box_set", id: b.id, color: BOX_COLORS[(i + 1) % BOX_COLORS.length] }]);
+        return;
+      }
+      if (b && t.closest(".x")) { edit([{ op: "box_remove", id: b.id }]); return; }
+      if (b && (t.closest(".hdr") || t.closest(".grip"))) {
+        const [wx, wy] = toWorld(e.clientX, e.clientY);
+        const members = t.closest(".grip") ? [] : boxMembers(b);
+        drag = { kind: t.closest(".grip") ? "boxresize" : "boxmove", id: b.id, wx, wy, pos: b.pos.slice(), size: b.size.slice(),
+          ids: members, start: new Map(members.map((i) => [i, pos(i).slice()])), moved: false };
+        e.preventDefault();
+        window.addEventListener("pointermove", onDrag); window.addEventListener("pointerup", onDrop);
+        return;
+      }
+    }
     if (e.button === 1 || (e.button === 0 && !nodeEl && !t.classList.contains("hit") && !e.shiftKey)) {
       drag = { kind: "pan", x0: e.clientX, y0: e.clientY, vx: S.view.x, vy: S.view.y, moved: false };
       canvas.classList.add("panning");
@@ -781,6 +906,16 @@
       for (const id of drag.ids) { const [x, y] = drag.start.get(id); S.dragPos.set(id, [Math.round(x + dx), Math.round(y + dy)]); }
       for (const id of drag.ids) { const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`); if (el) { const [x, y] = pos(id); el.style.left = x + "px"; el.style.top = y + "px"; } }
       renderWires();
+    } else if (drag.kind === "boxmove" || drag.kind === "boxresize") {
+      const [wx, wy] = toWorld(e.clientX, e.clientY), dx = wx - drag.wx, dy = wy - drag.wy;
+      if (Math.abs(dx) + Math.abs(dy) > 1) drag.moved = true;
+      if (drag.kind === "boxmove") {
+        S.boxDrag = { id: drag.id, pos: [Math.round(drag.pos[0] + dx), Math.round(drag.pos[1] + dy)], size: drag.size };
+        for (const id of drag.ids) { const [x, y] = drag.start.get(id); S.dragPos.set(id, [Math.round(x + dx), Math.round(y + dy)]); }
+        for (const id of drag.ids) { const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`); if (el) { const [x, y] = pos(id); el.style.left = x + "px"; el.style.top = y + "px"; } }
+        renderWires();
+      } else S.boxDrag = { id: drag.id, pos: drag.pos, size: [Math.max(80, Math.round(drag.size[0] + dx)), Math.max(60, Math.round(drag.size[1] + dy))] };
+      renderBoxes();
     } else if (drag.kind === "wire" || drag.kind === "wire-rev") {
       const r = canvas.getBoundingClientRect();
       const m = [e.clientX - r.left, e.clientY - r.top];
@@ -812,6 +947,21 @@
     canvas.classList.remove("panning", "wiring");
     document.querySelectorAll(".port.target").forEach((el) => el.classList.remove("target"));
     if (!d) return;
+    if (d.kind === "boxmove" || d.kind === "boxresize") {
+      const fin = S.boxDrag; S.boxDrag = null;
+      if (!d.moved || !fin) { S.dragPos.clear(); renderBoxes(); return; }
+      const ops = [];
+      if (d.kind === "boxmove") {
+        const positions = {};
+        for (const id of d.ids) positions[id] = pos(id);
+        if (d.ids.length) ops.push({ op: "move", positions });
+        ops.push({ op: "box_set", id: d.id, pos: fin.pos });
+      } else ops.push({ op: "box_set", id: d.id, size: fin.size });
+      const r = await edit(ops);
+      S.dragPos.clear();
+      if (!r) { renderBoxes(); renderNodes(); }
+      return;
+    }
     if (d.kind === "pan") {
       if (!d.moved && e.button === 0) { S.sel.clear(); S.wireSel = null; renderNodes(); renderParams(); scheduleInspect(); }
     } else if (d.kind === "move") {
@@ -848,7 +998,11 @@
       select(hits, true);
     }
   }
-  canvas.addEventListener("dblclick", (e) => { if (!e.target.closest(".node")) openMenu(e.clientX, e.clientY, { world: toWorld(e.clientX, e.clientY) }); });
+  canvas.addEventListener("dblclick", (e) => {
+    const hdr = e.target.closest(".netbox .title");
+    if (hdr) { renameBox(hdr.closest(".netbox").dataset.id); e.stopImmediatePropagation(); }
+  });
+  canvas.addEventListener("dblclick", (e) => { if (!e.target.closest(".node") && !e.target.closest(".netbox")) openMenu(e.clientX, e.clientY, { world: toWorld(e.clientX, e.clientY) }); });
   canvas.addEventListener("contextmenu", (e) => { e.preventDefault(); if (!e.target.closest(".node")) openMenu(e.clientX, e.clientY, { world: toWorld(e.clientX, e.clientY) }); });
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
@@ -888,7 +1042,20 @@
     else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelection(); }
     else if (e.key === "f" || e.key === "F") frame(true);
     else if (e.key === "l" || e.key === "L") tidy();
+    else if ((e.key === "o" || e.key === "O") && !mod) addBox();
     else if (e.key === "?") $("#help").classList.toggle("hidden");
+  });
+  const typing = (el) => ["input", "textarea", "select"].includes((el.tagName || "").toLowerCase()) || el.isContentEditable;
+  document.addEventListener("copy", (e) => { if (!typing(e.target)) copySelection(e); });
+  document.addEventListener("cut", (e) => {
+    if (typing(e.target) || !copySelection(e)) return;
+    removeNodes([...S.sel]);
+  });
+  document.addEventListener("paste", (e) => {
+    if (typing(e.target)) return;
+    let text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+    if (!parseClipboard(text)) { try { text = localStorage.getItem(CLIP_KEY) || ""; } catch (err) { text = ""; } }
+    if (parseClipboard(text)) { e.preventDefault(); pasteNodes(text); }
   });
   $("#tab-search").addEventListener("input", (e) => fillMenu(e.target.value));
   $("#tab-search").addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== $("#tab-search")) $("#tabmenu").classList.add("hidden"); }, 100));
@@ -899,6 +1066,7 @@
   $("#add-btn").onclick = (e) => { const r = canvas.getBoundingClientRect(); openMenu(e.clientX, e.clientY + 20, { world: toWorld(r.left + r.width / 2, r.top + r.height / 2) }); };
   $("#help-btn").onclick = () => $("#help").classList.toggle("hidden");
   $("#tidy-btn").onclick = () => tidy();
+  $("#box-btn").onclick = () => addBox();
   $("#info-detail").onchange = () => { inspectKey = null; scheduleInspect(); };
   $("#errorbar").onclick = () => { const id = $("#errorbar").dataset.node; if (id && nodeOf(id)) { select([id]); frame(true); } };
   $("#file-btn").onclick = async (e) => {
@@ -943,5 +1111,5 @@
 
   applyView();
   connectEvents();
-  window.minihou = { S, edit, frame };                  // handy from the browser console
+  window.minihou = { S, edit, frame, clipboardText, pasteNodes };                  // handy from the browser console
 })();

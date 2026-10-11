@@ -41,6 +41,16 @@ body.has-error #main { bottom: 30px; }
   background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px); }
 #canvas.panning { cursor: grabbing; }
 #world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+#boxes { position: absolute; left: 0; top: 0; }
+.netbox { position: absolute; border: 1px solid var(--bc); border-radius: 8px; background: color-mix(in srgb, var(--bc) 14%, transparent); pointer-events: none; }
+.netbox .hdr { position: absolute; left: 0; top: 0; right: 0; height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 8px;
+  background: color-mix(in srgb, var(--bc) 45%, transparent); border-radius: 7px 7px 0 0; cursor: grab; pointer-events: auto; user-select: none; }
+.netbox .hdr .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 12px; }
+.netbox .hdr .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--bc); border: 1px solid #fff6; cursor: pointer; }
+.netbox .hdr .x { cursor: pointer; color: var(--muted); padding: 0 3px; }
+.netbox .hdr .x:hover { color: var(--text); }
+.netbox .grip { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; pointer-events: auto;
+  background: linear-gradient(135deg, transparent 55%, var(--bc) 55%); border-radius: 0 0 7px 0; }
 #wires, #overlay { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
 #overlay { width: 100%; height: 100%; }
 #wires path { fill: none; stroke: var(--wire); stroke-width: 2; }

@@ -106,6 +106,99 @@ class EditorE2E(unittest.TestCase):
         self.assertIn("display", self.node("out").get_attribute("class"))
         self.page.wait_for_function("document.querySelector('#info-body').innerText.includes('Points')")
 
+    def test_copy_and_paste_keeps_wires_between_copied_nodes(self):
+        self.node("hills").locator(".title").click()
+        self.page.keyboard.down("Shift")
+        self.node("ripple").locator(".title").click()
+        self.page.keyboard.up("Shift")
+        self.page.locator("#canvas").focus()
+        self.page.mouse.move(*self.empty_spot())
+        self.page.keyboard.press("Control+c")
+        self.page.keyboard.press("Control+v")
+        self.assertTrue(until(lambda: "hills1" in self.s.graph.nodes and "ripple1" in self.s.graph.nodes))
+        g = self.s.graph.nodes
+        self.assertEqual(g["ripple1"].inputs, {"geo": "hills1"})              # the wire between the copies
+        self.assertNotIn("geo", g["hills1"].inputs)                           # the wire to 'ground' is not copied
+        self.assertEqual(g["hills1"].params, g["hills"].params)
+        self.assertEqual(g["ripple1"].params, g["ripple"].params)
+        self.assertEqual(g["ripple"].inputs, {"geo": "hills"})                # originals untouched
+        self.page.wait_for_selector('.node[data-id="ripple1"].selected')
+
+    def test_cut_removes_and_paste_restores_into_another_graph(self):
+        self.node("spike_up").locator(".title").click()
+        self.page.locator("#canvas").focus()
+        self.page.keyboard.press("Control+x")
+        self.assertTrue(until(lambda: "spike_up" not in self.s.graph.nodes))
+        clip = self.page.evaluate("localStorage.getItem('minihou.clip')")
+        self.assertIn('"minihou":"nodes"', clip)
+        other = os.path.join(self.dir, "other.json")
+        with open(other, "w", encoding="utf-8") as f:
+            f.write('{"version": 1, "nodes": {"b": {"type": "box"}}}')
+        self.page.evaluate("fetch('/api/open', {method: 'POST', headers: {'Content-Type': 'application/json'}, "
+                           "body: JSON.stringify({path: 'other.json'})})")
+        self.page.wait_for_selector('.node[data-id="b"]')
+        self.page.locator("#canvas").focus()
+        self.page.keyboard.press("Control+v")
+        self.assertTrue(until(lambda: any(n.type == "transform" for n in self.s.graph.nodes.values())))
+
+    def test_pasting_junk_or_unknown_types_changes_nothing(self):
+        before = dict(self.s.graph.nodes)
+        for text in ('hello', '{"minihou": "nodes", "nodes": []}', '{"minihou": "nodes", "nodes": {"x": {"type": "nope"}}}'):
+            ok = self.page.evaluate("t => minihou.pasteNodes(t)", text)
+            self.assertIn(ok, (True, False))
+        time.sleep(0.2)
+        self.assertEqual(set(self.s.graph.nodes), set(before))
+        self.errors[:] = [e for e in self.errors if "Failed to load resource" not in e]
+
+    def test_network_box_moves_with_its_nodes_resizes_renames_and_deletes(self):
+        self.node("hills").locator(".title").click()
+        self.page.keyboard.down("Shift")
+        self.node("ripple").locator(".title").click()
+        self.page.keyboard.up("Shift")
+        self.page.locator("#canvas").focus()
+        self.page.keyboard.press("o")
+        self.assertTrue(until(lambda: len(self.s.graph.boxes) == 1))
+        box = self.page.locator(".netbox")
+        box.wait_for(state="visible")
+        before = {k: list(self.s.graph.nodes[k].meta["pos"]) for k in ("hills", "ripple", "points")}
+        b0 = dict(self.s.graph.boxes[0])
+        hdr = box.locator(".hdr")
+        x, y = self.center(hdr.locator(".title"))
+        self.page.mouse.move(x, y)
+        self.page.mouse.down()
+        self.page.mouse.move(x + 60, y + 40, steps=6)
+        self.page.mouse.up()
+        self.assertTrue(until(lambda: self.s.graph.boxes[0]["pos"] != b0["pos"]))
+        db = [self.s.graph.boxes[0]["pos"][i] - b0["pos"][i] for i in (0, 1)]
+        for k in ("hills", "ripple"):                                            # members moved by the same amount
+            self.assertEqual([self.s.graph.nodes[k].meta["pos"][i] - before[k][i] for i in (0, 1)], db)
+        self.assertEqual(self.s.graph.nodes["points"].meta["pos"], before["points"])    # outsiders stay put
+        s0 = list(self.s.graph.boxes[0]["size"])
+        gx, gy = self.center(box.locator(".grip"))
+        self.page.mouse.move(gx, gy)
+        self.page.mouse.down()
+        self.page.mouse.move(gx + 50, gy + 30, steps=5)
+        self.page.mouse.up()
+        self.assertTrue(until(lambda: self.s.graph.boxes[0]["size"][0] > s0[0] and self.s.graph.boxes[0]["size"][1] > s0[1]))
+        self.page.once("dialog", lambda d: d.accept("Terrain"))
+        self.page.locator(".netbox .title").dblclick()
+        self.assertTrue(until(lambda: self.s.graph.boxes[0]["title"] == "Terrain"))
+        self.page.wait_for_function("document.querySelector('.netbox .title').textContent === 'Terrain'")
+        c0 = self.s.graph.boxes[0]["color"]
+        self.page.locator(".netbox .dot").click()
+        self.assertTrue(until(lambda: self.s.graph.boxes[0]["color"] != c0))
+        self.page.locator(".netbox .x").click()
+        self.assertTrue(until(lambda: self.s.graph.boxes == []))
+        self.page.locator("#canvas").focus()
+        self.page.keyboard.press("Control+z")
+        self.assertTrue(until(lambda: len(self.s.graph.boxes) == 1))
+
+    def test_box_button_makes_an_empty_box_and_boxes_are_saved(self):
+        self.page.click("#box-btn")
+        self.assertTrue(until(lambda: len(self.s.graph.boxes) == 1))
+        self.assertTrue(until(lambda: '"boxes"' in self.read_file()))
+        self.page.wait_for_selector(".netbox")
+
     def test_frame_slider_scrubs_and_follows_the_frame(self):
         self.page.fill("#frame-slider", "40")                         # fires input events like a drag
         end = time.monotonic() + 5

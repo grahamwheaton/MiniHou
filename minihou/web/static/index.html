@@ -20,6 +20,7 @@
   <button id="redo-btn" title="Redo (Ctrl+Shift+Z)">↷</button>
   <button id="add-btn" title="Add a node (Tab)">+ Node</button>
   <button id="tidy-btn" title="Tidy the layout (L)">Tidy</button>
+  <button id="box-btn" title="Network box around the selected nodes (O)">Box</button>
   <span class="frame" title="Current frame (@Frame, @Time). Blender's timeline sets it when connected.">
     <button id="frame-prev" title="Previous frame">◀</button><input id="frame-input" type="number" step="1" value="1" aria-label="Frame"><button id="frame-next" title="Next frame">▶</button><input id="frame-slider" type="range" min="1" max="250" step="1" value="1" aria-label="Frame slider" title="Scrub the frame (the range grows if you type a later frame)">
   </span>
@@ -32,6 +33,7 @@
 <main id="main">
   <section id="canvas" tabindex="0" aria-label="Node graph">
     <div id="world">
+      <div id="boxes"></div>
       <svg id="wires" width="1" height="1"></svg>
       <div id="nodes"></div>
     </div>
@@ -74,7 +76,9 @@
     <tr><td>blue bar on a node</td><td>display flag: what Blender shows</td></tr>
     <tr><td>drag background / middle mouse</td><td>pan; wheel zooms; <kbd>Shift</kbd>-drag box-selects</td></tr>
     <tr><td><kbd>F</kbd> / <kbd>L</kbd></td><td>frame selection (or all) / tidy the layout</td></tr>
+    <tr><td><kbd>O</kbd></td><td>network box around the selected nodes: drag its title to move it with them, its corner to resize, double-click the title to rename, the dot to change colour</td></tr>
     <tr><td><kbd>Delete</kbd> / <kbd>Ctrl+D</kbd> / <kbd>Ctrl+A</kbd></td><td>delete / duplicate / select all</td></tr>
+    <tr><td><kbd>Ctrl+C</kbd> / <kbd>Ctrl+X</kbd> / <kbd>Ctrl+V</kbd></td><td>copy / cut / paste nodes (also into another graph or editor window)</td></tr>
     <tr><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd></td><td>undo / redo (also undoes edits made by AI)</td></tr>
     <tr><td>drag a parameter label</td><td>scrub the value; <kbd>B</kbd> button exposes it to Blender</td></tr>
   </table>

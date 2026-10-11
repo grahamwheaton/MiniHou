@@ -156,6 +156,71 @@ class OpsTests(unittest.TestCase):
         self.assertEqual(geo.npoints, 16)
 
 
+class NetworkBoxTests(unittest.TestCase):
+    def test_box_around_nodes_set_and_remove(self):
+        g, res = apply_ops(base(), [{"op": "move", "positions": {"g": [0, 0], "n": [200, 110], "o": [0, 220]}},
+                                    {"op": "box_add", "around": ["g", "n"], "title": "Source", "color": "#335577"}])
+        self.assertEqual(res[1]["id"], "box1")
+        (b,) = g.boxes
+        self.assertEqual((b["title"], b["color"]), ("Source", "#335577"))
+        self.assertLessEqual(b["pos"][0], 0)
+        self.assertGreaterEqual(b["pos"][0] + b["size"][0], 200 + 160)                  # holds both nodes entirely
+        self.assertGreaterEqual(b["pos"][1] + b["size"][1], 110 + 46)
+        g2, _ = apply_ops(g, [{"op": "box_set", "id": "box1", "title": "Renamed", "pos": [5, 6], "size": [300, 200]}])
+        self.assertEqual((g2.boxes[0]["title"], g2.boxes[0]["pos"], g2.boxes[0]["size"]), ("Renamed", [5.0, 6.0], [300.0, 200.0]))
+        self.assertEqual(g.boxes[0]["title"], "Source")                                  # edits work on a copy
+        g3, _ = apply_ops(g2, [{"op": "box_add", "pos": [0, 0], "size": [50, 50]}, {"op": "box_remove", "id": "box1"}])
+        self.assertEqual([b["id"] for b in g3.boxes], ["box2"])
+
+    def test_round_trip_and_bad_boxes(self):
+        g, _ = apply_ops(base(), [{"op": "box_add", "pos": [1, 2], "size": [100, 80], "title": "A, [b]"}])
+        again = Graph.from_json(g.to_json(), check=False)
+        self.assertEqual(again.boxes, g.boxes)
+        self.assertEqual(again.to_dict(), g.to_dict())
+        for bad in ({"op": "box_add", "pos": [0, 0], "size": [10, 10], "color": "red"},
+                    {"op": "box_add", "pos": [0], "size": [10, 10]},
+                    {"op": "box_add", "id": "box 1", "pos": [0, 0], "size": [10, 10]},
+                    {"op": "box_add", "around": ["nope"]},
+                    {"op": "box_set", "id": "missing", "title": "x"},
+                    {"op": "box_remove", "id": "missing"}):
+            with self.assertRaises(EditError, msg=bad):
+                apply_ops(g, [bad])
+        with self.assertRaises(Exception):
+            Graph.from_dict({"nodes": {}, "boxes": [{"id": "b", "pos": "x", "size": [1, 1]}]})
+
+    def test_boxes_do_not_change_what_cooks(self):
+        from minihou import Evaluator
+        g = base()
+        k1 = Evaluator().cook(g)
+        h = apply_ops(g, [{"op": "box_add", "around": ["g", "n"]}])[0]
+        ev = Evaluator()
+        ev.cook(g)
+        ev.cook(h)
+        self.assertEqual(ev.last_stats.cooked, [])                                       # all cached: boxes are cosmetic
+        self.assertEqual(k1.npoints, ev.cook(h).npoints)
+
+    def test_tidy_layout_keeps_boxes_around_their_nodes(self):
+        g, _ = apply_ops(base(), [{"op": "move", "positions": {"g": [0, 0], "n": [500, 20], "o": [900, 0]}},
+                                  {"op": "box_add", "around": ["g", "n"]}])
+        g2, _ = apply_ops(g, [{"op": "layout"}])
+        (b,) = g2.boxes
+        for nid in ("g", "n"):
+            x, y = g2.nodes[nid].meta["pos"]
+            self.assertTrue(b["pos"][0] <= x and x + 160 <= b["pos"][0] + b["size"][0], nid)
+            self.assertTrue(b["pos"][1] <= y and y + 46 <= b["pos"][1] + b["size"][1], nid)
+        x, y = g2.nodes["o"].meta["pos"]
+        self.assertFalse(b["pos"][1] <= y <= b["pos"][1] + b["size"][1] and b["pos"][0] <= x <= b["pos"][0] + b["size"][0])
+
+    def test_session_undo_covers_boxes(self):
+        s = Session(base())
+        s.edit([{"op": "box_add", "pos": [0, 0], "size": [100, 100]}])
+        self.assertEqual(len(s.graph.boxes), 1)
+        self.assertTrue(s.undo())
+        self.assertEqual(s.graph.boxes, [])
+        self.assertTrue(s.redo())
+        self.assertEqual(len(s.snapshot()["graph"]["boxes"]), 1)
+
+
 class SessionEditTests(unittest.TestCase):
     def setUp(self):
         self.s = Session(base())
