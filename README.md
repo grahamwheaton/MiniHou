@@ -145,6 +145,49 @@ would result. Existing interactive-cache and render limitations above still appl
 
 ## Node editor
 
+### Repeat a body with Loop Begin / Loop End
+
+Open `examples/graphs/repeat_transform.json` for a minimal working block: the box moves
+by 0.5 along local X on each of four iterations, for a total translation of 2. Set
+**Repeat Count** on Loop End to 0 to return the original geometry unchanged.
+
+To create a block in the external browser editor:
+
+1. Select the node supplying initial geometry, press **Tab**, and choose **loop_block**.
+   This inserts a connected **Loop Begin**, an identity **Transform** body, and **Loop End**
+   in one undoable edit. Change the Transform parameters or insert more nodes in that body chain.
+2. Keep the dashed pairing wire from Begin to End's **begin** input. Connect the body's last
+   node to End's **geo** input. Select End and choose **Display Loop End**, or connect End to
+   the downstream graph. There is no backward feedback wire; normal graph cycles remain errors.
+3. Set End's **Repeat Count**. The body receives the initial geometry on iteration 0 and
+   the previous result on later iterations. A wrangle can read detail attributes **@iteration**
+   (zero-based) and **@numiterations**, e.g. `@P.x += @iteration + 1;`.
+
+A shaded region and pair label show the block. **Select loop block** selects its members;
+duplicating either boundary copies the complete body and nested blocks with new pair connections.
+External inputs stay connected to their original sources. Rename, save/load, undo and redo retain
+pairing because it is an ordinary graph connection. Deleting one boundary leaves a clear unpaired-block
+error until repaired. Displaying an internal body node is unsupported: display the End to see the result.
+
+Nested blocks close innermost-first. Each inner loop gets its own iteration attributes; finishing it
+restores the outer values. Finishing the outer loop restores any incoming values, or removes those
+bookkeeping attributes. External geometry branches can enter a body and are unchanged by its feedback.
+Crossed blocks, shared Begins, disconnected bodies and escapes through an output inside the body are
+errors, including with zero repeats. Systems can contain repeat blocks or serve as their bodies; existing
+for-each pieces and solver frame feedback are separate operations.
+
+Limits: 0–1000 repeats per End, at most 16 nested blocks in a graph, and at most 10,000 executed repeat
+iterations across one cook (including systems). These bound iteration work, not a single node's runtime
+or geometry growth. A heavy body can still be expensive; Blender's existing synchronous interactive
+cache bridge can pause while it waits for a cook. This feature does not add asynchronous Blender RPC.
+
+For Blender, choose `examples/modifiers/repeat_transform.json`, start the external server and **Add
+MiniHou Modifier** to a mesh. It uses **modifier_input**, so earlier native and MiniHou modifiers feed
+the repeat; each modifier has independent Repeat Count and Step parameters. The browser edits the saved
+graph template: save its changes and use **Reload Graph** on the desired modifier to adopt them. It does
+not edit a selected modifier's private live graph. No Blender add-on update is required for these loop
+nodes; update the external engine/editor and example files together.
+
 ![The node editor showing the AI-built crater graph](docs/images/editor.png)
 
 Served by the engine itself (plain HTML/JS, nothing to install or build). Houdini-style: **Tab** (or double-click) adds a node,

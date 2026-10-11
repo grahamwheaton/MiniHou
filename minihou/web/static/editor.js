@@ -274,6 +274,17 @@
   }
   function renderWires() {
     const kids = [];
+    for (const [end, n] of Object.entries(S.graph.nodes)) {
+      if (n.type !== "loop_end" || nodeOf(n.inputs?.begin)?.type !== "loop_begin") continue;
+      const points = loopRegion(end).map(pos);
+      const x = Math.min(...points.map(p => p[0])) - 22, y = Math.min(...points.map(p => p[1])) - 32;
+      const width = Math.max(...points.map(p => p[0])) + W + 22 - x;
+      const height = Math.max(...points.map(p => p[1])) + H + 22 - y;
+      kids.push(svgEl("rect", { x, y, width, height, rx: 12, class: "loop-region" }));
+      const label = svgEl("text", { x: x + 8, y: y + 15, class: "loop-label" });
+      label.textContent = `${n.inputs.begin} / ${end}: repeat ${n.params?.iterations ?? 3}`;
+      kids.push(label);
+    }
     for (const id of Object.keys(S.graph.nodes)) {
       inputs(id).forEach(([spec, srcs], i) => {
         srcs.forEach((src, k) => {
@@ -281,7 +292,8 @@
           if (drag && drag.pickup && drag.pickup.to === id && drag.pickup.port === spec.name && drag.pickup.from === src) return;
           const d = wirePath(outPortCenter(src), inPortCenter(id, i, k, srcs.length));
           const sel = S.wireSel && S.wireSel.to === id && S.wireSel.port === spec.name && S.wireSel.from === src;
-          kids.push(svgEl("path", { d, class: sel ? "sel" : null }));
+          const pair = nodeOf(id).type === "loop_end" && spec.name === "begin";
+          kids.push(svgEl("path", { d, class: [sel && "sel", pair && "loop-pair"].filter(Boolean).join(" ") }));
           const hit = svgEl("path", { d, class: "hit" });
           hit.dataset.to = id; hit.dataset.port = spec.name; hit.dataset.from = src;
           kids.push(hit);
@@ -373,6 +385,14 @@
     out.push(h("div", { class: "ph" }, nid));
     out.push(h("div", { class: "ptype" }, n.type + (t.category ? " · " + t.category : "") + (t.source ? " · " + relPath(t.source) : "")));
     if (t.doc) out.push(h("div", { class: "pdoc" }, t.doc));
+    if (n.type === "loop_begin" || n.type === "loop_end") {
+      const end = n.type === "loop_end" ? id : Object.keys(S.graph.nodes).find(k => nodeOf(k).type === "loop_end" && nodeOf(k).inputs?.begin === id);
+      const begin = end && nodeOf(end).inputs?.begin;
+      out.push(h("div", { class: "loop-info" }, end && nodeOf(begin)?.type === "loop_begin"
+        ? [h("div", null, `Pair: ${begin} / ${end}`), h("button", { onclick: () => select(loopRegion(end)) }, "Select loop block"),
+           h("button", { onclick: () => { select([end]); edit([{ op: "display", id: end }]); } }, "Display Loop End")]
+        : "Unpaired loop: connect Begin to End's begin port and the body to geo."));
+    }
     out.push(h("div", { class: "perr", dataset: { role: "err" }, style: { display: nodeErrorText(id) ? "" : "none" } }, nodeErrorText(id)));
     const isDisp = displayNode() === id;
     out.push(h("div", { class: "pactions" },
@@ -609,6 +629,15 @@
     if (r) select([]);
   }
   async function duplicate(ids) {
+    // Copying a boundary means copying its complete body, including nested pairs.
+    const expanded = new Set(ids);
+    for (const id of ids) {
+      const n = nodeOf(id);
+      const end = n.type === "loop_end" ? id : n.type === "loop_begin"
+        ? Object.keys(S.graph.nodes).find(k => nodeOf(k).type === "loop_end" && nodeOf(k).inputs?.begin === id) : null;
+      if (end) for (const member of loopRegion(end)) expanded.add(member);
+    }
+    ids = [...expanded];
     const map = {}, taken = new Set(), ops = [];
     for (const id of ids) { map[id] = uniqueId(id.replace(/\d+$/, "") + "_", taken); taken.add(map[id]); }
     for (const id of ids) {
@@ -620,6 +649,26 @@
     }
     const r = await edit(ops);
     if (r) select(Object.values(map));
+  }
+  function loopRegion(end) {
+    const begin = nodeOf(end)?.inputs?.begin;
+    if (!nodeOf(begin)) return [end];
+    const ancestors = new Set(), pending = [end];
+    while (pending.length) {
+      const id = pending.pop();
+      if (ancestors.has(id) || !nodeOf(id)) continue;
+      ancestors.add(id);
+      for (const [, srcs] of inputs(id)) pending.push(...srcs);
+    }
+    const members = new Set([begin]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const id of ancestors) if (!members.has(id) && inputs(id).some(([, srcs]) => srcs.some(s => members.has(s)))) {
+        members.add(id); changed = true;
+      }
+    }
+    return [...members];
   }
   async function deleteSelection() {
     if (S.wireSel) {
@@ -653,7 +702,8 @@
   function closeMenu() { $("#tabmenu").classList.add("hidden"); menuCtx = null; canvas.focus({ preventScroll: true }); }
   function fillMenu(q) {
     q = q.trim().toLowerCase();
-    let list = S.typeList;
+    let list = [{ name: "loop_block", category: "flow", inputs: [{ name: "geo" }],
+      doc: "Insert paired Loop Begin / Transform body / Loop End (repeat N times)" }, ...S.typeList];
     if (menuCtx && (menuCtx.from || menuCtx.fromSel)) list = list.filter((t) => t.inputs.length);   // must accept a wire
     if (q) {
       const score = (t) => (t.name.startsWith(q) ? 0 : t.name.includes(q) ? 1 : (t.category || "").includes(q) ? 2 : (t.doc || "").toLowerCase().includes(q) ? 3 : 9);
@@ -684,6 +734,16 @@
     const id = uniqueId(t.name);
     let [x, y] = ctx.world || toWorld(...S.mouse);
     x -= W / 2; y -= 12;
+    if (t.name === "loop_block") {
+      const source = ctx.from || ctx.fromSel;
+      if (ctx.fromSel) { const p = pos(ctx.fromSel); x = p[0] + 190; y = p[1] + 110; }
+      const r = await edit([{ op: "loop", from: source, to: ctx.feeds?.to, port: ctx.feeds?.port, pos: [x, y] }]);
+      if (r) {
+        const end = r.results[0].end;
+        select([end]);
+      }
+      return;
+    }
     const op = { op: "add", type: t.name, id, pos: [x, y] };
     const ops = [op];
     const first = t.inputs[0] && t.inputs[0].name;

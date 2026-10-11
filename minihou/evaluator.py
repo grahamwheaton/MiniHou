@@ -27,6 +27,7 @@ from . import timectx
 from .geometry import Geometry
 from .inputs import input_cache_scope
 from .graph import Graph, GraphError
+from .loops import analyze as analyze_loops, cook_budget, consume_iteration
 from .sdk import REGISTRY, Registry
 
 DEFAULT_CACHE_BYTES = 2 * 1024 ** 3
@@ -190,10 +191,10 @@ class Evaluator:
         """Cook ``target`` (default: the display node). ``feeds`` supplies some nodes' results from outside as
         ``{node_id: (cache_key, geometry)}``; their upstream is not cooked (how systems receive their inputs).
         ``frame``/``fps`` set the time for ``@Frame``/``@Time`` (default: the surrounding cook's, else frame 1)."""
-        with timectx.at(frame, fps):
+        with timectx.at(frame, fps), cook_budget():
             return self._cook(graph, target, feeds)
 
-    def _cook(self, graph: Graph, target: Optional[str], feeds) -> Geometry:
+    def _cook(self, graph: Graph, target: Optional[str], feeds, *, loop_body=False) -> Geometry:
         t_start = time.perf_counter()
         feeds = feeds or {}
         target = target or graph.output_node()
@@ -203,6 +204,9 @@ class Evaluator:
         probs = graph.problems(only=[n for n in order if n not in feeds])   # a half-built branch elsewhere is fine
         if probs:
             raise GraphError([m for _, m in probs], probs[0][0])
+        if not loop_body and any(graph.nodes[n].type in {"loop_begin", "loop_end"} for n in order):
+            # Validate the logical region before looking in the cache (including zero repeats).
+            analyze_loops(graph, order, target)
         keys = self.compute_keys(graph, order, {n: k for n, (k, _) in feeds.items()})
         stats = CookStats(target=target, key=keys[target])
         results: Dict[str, Geometry] = {n: g for n, (_, g) in feeds.items() if n in keys}
@@ -218,15 +222,64 @@ class Evaluator:
                 stats.cached.append(nid)
                 stack.pop()
                 continue
-            pending = [d for d in graph.input_ids(nid) if d not in results]
+            inst = graph.nodes[nid]
+            if inst.type == "loop_end":
+                begin = inst.inputs["begin"]
+                # The body is a recipe, not an ordinary dependency to cook once up front.
+                deps = [graph.nodes[begin].inputs["geo"]]
+            else:
+                deps = graph.input_ids(nid)
+            pending = [d for d in deps if d not in results]
             if pending:
                 stack.extend(pending)
                 continue
-            results[nid] = self._cook_node(graph, nid, keys[nid], results, stats)
+            if inst.type == "loop_end":
+                results[nid] = self._cook_loop(graph, nid, keys[nid], results, feeds, stats)
+            else:
+                results[nid] = self._cook_node(graph, nid, keys[nid], results, stats)
             stack.pop()
         stats.total_ms = (time.perf_counter() - t_start) * 1000.0
         self.last_stats = stats
         return results[target]
+
+    def _cook_loop(self, graph, nid, key, results, feeds, stats):
+        inst = graph.nodes[nid]
+        begin = inst.inputs["begin"]
+        initial = results[graph.nodes[begin].inputs["geo"]]
+        count = graph.get_param(nid, "iterations")
+        state = initial
+        t0 = time.perf_counter()
+        for iteration in range(count):
+            consume_iteration(nid)
+            incoming = state.copy()
+            incoming.detail.update(iteration=iteration, numiterations=count)
+            incoming.freeze()
+            # The End key includes the whole body recipe, external inputs, initial
+            # geometry and count. Per-iteration keys cannot alias ordinary body cooks.
+            seed = hashlib.blake2b(f"repeat-v1:{key}:{iteration}".encode("utf-8"), digest_size=16).hexdigest()
+            state = self._cook(graph, inst.inputs["geo"], {**feeds, begin: (seed, incoming)}, loop_body=True)
+            body_stats = self.last_stats
+            stats.cooked.extend(body_stats.cooked)
+            stats.cached.extend(body_stats.cached)
+            for body_id, ms in body_stats.node_ms.items():
+                stats.node_ms[body_id] = stats.node_ms.get(body_id, 0.0) + ms
+        if count:
+            state = state.copy()
+            # Restore the containing block's metadata after nested loops, and keep
+            # per-iteration bookkeeping from leaking into normal downstream geometry.
+            for name in ("iteration", "numiterations"):
+                if name in initial.detail:
+                    state.detail[name] = initial.detail[name]
+                else:
+                    state.detail.pop(name, None)
+            state.freeze()
+        if not state.frozen:
+            state.validate()
+            state.freeze()
+        self.cache.put(key, state, "loop_end")
+        stats.cooked.append(nid)
+        stats.node_ms[nid] = (time.perf_counter() - t0) * 1000.0
+        return state
 
     def _cook_node(self, graph: Graph, nid: str, key: str, results: Dict[str, Geometry],
                    stats: CookStats) -> Geometry:

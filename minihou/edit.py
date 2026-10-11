@@ -20,6 +20,7 @@ op              fields
 ``meta``        ``id``, ``set`` ({key: value}; ``null`` deletes) - free editor data such as ``comment``
 ``replace``     ``graph`` (a whole graph JSON object)
 ``layout``      (no fields) tidy all node positions, like Houdini's L key
+``loop``        optional ``from``, ``to``/``port``, ``iterations``, ``pos``; insert paired Begin, Transform and End
 ==============  =============================================================================================
 
 Graphs may be *incomplete* while being edited (a node whose input is not wired yet); the cook reports that,
@@ -138,6 +139,24 @@ def op_remove(g: Graph, op: dict) -> dict:
         _need_node(g, nid)
         g.remove_node(nid)
     return {"removed": ids}
+
+
+def op_loop(g: Graph, op: dict) -> dict:
+    """One undoable insertion. Pairing uses an input edge, so rename/save/duplicate need no side registry."""
+    source = op.get("from")
+    if source is not None:
+        _need_node(g, source)
+    x, y = _pos(op.get("pos", [0, 0]))
+    begin = _new_id(g, "loop_begin")
+    g.add_node(begin, "loop_begin", inputs={"geo": source} if source else {}, pos=[x, y])
+    body = _new_id(g, "transform")
+    g.add_node(body, "transform", inputs={"geo": begin}, pos=[x, y + GRID_Y])
+    end = _new_id(g, "loop_end")
+    g.add_node(end, "loop_end", params={"iterations": op.get("iterations", 3)},
+               inputs={"geo": body, "begin": begin}, pos=[x, y + 2 * GRID_Y])
+    if op.get("to"):
+        _connect(g, end, op["to"], op.get("port"), None)
+    return {"id": end, "begin": begin, "body": body, "end": end}
 
 
 def op_rename(g: Graph, op: dict) -> dict:
@@ -291,7 +310,7 @@ def op_replace(g: Graph, op: dict) -> dict:
     return {"_graph": Graph.from_dict(op["graph"], g.registry, check=False)}
 
 
-_OPS = {"add": op_add, "remove": op_remove, "rename": op_rename, "connect": op_connect,
+_OPS = {"add": op_add, "loop": op_loop, "remove": op_remove, "rename": op_rename, "connect": op_connect,
         "disconnect": op_disconnect, "set": op_set, "display": op_display, "expose": op_expose,
         "unexpose": op_unexpose, "move": op_move, "meta": op_meta, "replace": op_replace}
 OP_NAMES = sorted(_OPS)

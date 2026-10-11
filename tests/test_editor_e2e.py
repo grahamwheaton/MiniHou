@@ -99,6 +99,86 @@ class EditorE2E(unittest.TestCase):
         return b["x"] + 60, b["y"] + b["height"] - 60
 
     # -- tests -------------------------------------------------------------------------
+    def test_repeat_block_insert_edit_duplicate_rename_reload_and_undo(self):
+        self.s.edit([{"op": "replace", "graph": {"nodes": {"box": {"type": "box", "pos": [0, 0]}}, "display": "box"}}])
+        self.page.wait_for_selector('.node[data-id="box"]')
+        self.page.locator("#canvas").focus()
+        self.page.keyboard.press("f")
+        self.node("box").locator(".title").click()
+        self.page.mouse.move(*self.empty_spot())
+        self.page.keyboard.press("Tab")
+        self.page.keyboard.type("loop_block")
+        self.page.keyboard.press("Enter")
+        self.page.wait_for_selector('.node[data-id="loop_end1"].selected')
+        self.assertEqual(self.s.graph.nodes["loop_end1"].inputs, {"geo": "transform1", "begin": "loop_begin1"})
+        self.page.locator("#params button", has_text="Display Loop End").click()
+        count = self.page.locator('.prow[data-param="iterations"] input[type=number]')
+        count.fill("4")
+        count.press("Enter")
+        self.assertTrue(until(lambda: self.s.graph.get_param("loop_end1", "iterations") == 4))
+        self.page.locator("#canvas").focus()
+        self.page.keyboard.press("f")
+        self.node("transform1").locator(".title").click()
+        number = self.page.locator('.prow[data-param="translate"] input[type=number]').first
+        number.fill("0.5")
+        number.press("Enter")
+        self.assertTrue(until(lambda: self.s.graph.get_param("transform1", "translate")[0] == .5))
+        self.page.wait_for_function("document.querySelector('#cook-status').classList.contains('ok')")
+        self.assertEqual(self.page.locator(".loop-region").count(), 1)
+        self.assertEqual(self.page.locator("path.loop-pair").count(), 1)
+        from minihou import Evaluator
+        import numpy as np
+        ev = Evaluator()
+        np.testing.assert_allclose(ev.cook(self.s.graph).P, ev.cook(self.s.graph, "box").P + [2, 0, 0])
+
+        self.node("loop_end1").locator(".title").click()
+        self.page.locator("#params button", has_text="Duplicate").click()
+        self.page.wait_for_selector('.node[data-id="loop_end_1"]')
+        self.assertEqual(len(self.s.graph.nodes), 7)
+        self.assertEqual(self.s.graph.nodes["loop_end_1"].inputs["begin"], "loop_begin_1")
+        self.assertEqual(self.s.graph.nodes["transform_1"].inputs["geo"], "loop_begin_1")
+        self.s.graph.check()
+        self.page.locator("#canvas").focus()
+        self.page.keyboard.press("Control+z")
+        self.assertTrue(until(lambda: len(self.s.graph.nodes) == 4))
+        self.page.keyboard.press("Control+Shift+z")
+        self.assertTrue(until(lambda: len(self.s.graph.nodes) == 7))
+        self.page.keyboard.press("f")
+        self.node("loop_begin_1").locator(".title").click()
+        self.page.fill("#params input.nid", "copy_begin")
+        self.page.press("#params input.nid", "Enter")
+        self.assertTrue(until(lambda: "copy_begin" in self.s.graph.nodes))
+        self.assertEqual(self.s.graph.nodes["loop_end_1"].inputs["begin"], "copy_begin")
+        self.assertTrue(until(lambda: '"copy_begin"' in self.read_file()))
+        disk = Graph.load(self.path)
+        self.assertEqual(disk.nodes["loop_end_1"].inputs["begin"], "copy_begin")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="copy_begin"]')
+        self.assertEqual(self.page.locator(".loop-region").count(), 2)
+        self.assertEqual(self.page.locator("path.loop-pair").count(), 2)
+
+    def test_repeat_nested_duplicate_and_unpaired_error_recovery(self):
+        self.s.edit([{"op": "replace", "graph": {"nodes": {"box": {"type": "box", "pos": [0, 0]}}, "display": "box"}},
+                     {"op": "loop", "from": "box"},
+                     {"op": "loop", "from": "transform1", "to": "loop_end1", "port": "geo", "pos": [200, 120]},
+                     {"op": "display", "id": "loop_end1"}])
+        self.page.wait_for_selector('.node[data-id="loop_end2"]')
+        self.page.locator("#canvas").focus()
+        self.page.keyboard.press("f")
+        self.node("loop_end1").locator(".title").click()
+        self.page.locator("#params button", has_text="Duplicate").click()
+        self.assertTrue(until(lambda: len(self.s.graph.nodes) == 13))
+        self.s.graph.check()
+        copied = [n for nid, n in self.s.graph.nodes.items() if n.type == "loop_end" and "_" in nid[8:]]
+        self.assertEqual(len(copied), 2)
+        for n in copied:
+            self.assertNotIn(n.inputs["begin"], {"loop_begin1", "loop_begin2"})
+        self.s.edit([{"op": "disconnect", "to": "loop_end1", "port": "begin"}])
+        self.page.wait_for_function("document.querySelector('#cook-status').classList.contains('err')")
+        self.assertTrue(self.page.locator('.node[data-id="loop_end1"].error').count())
+        self.s.edit([{"op": "connect", "from": "loop_begin1", "to": "loop_end1", "port": "begin"}])
+        self.page.wait_for_function("document.querySelector('#cook-status').classList.contains('ok')")
+
     def test_renders_graph_status_and_inspector(self):
         self.assertEqual(self.page.locator(".node").count(), 9)
         self.page.wait_for_function("document.querySelector('#cook-status').classList.contains('ok')")
