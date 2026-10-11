@@ -272,6 +272,125 @@ class EditorE2E(unittest.TestCase):
         self.assertRegex(text, r"~\s*P")                                          # and rewrites the positions
         self.assertTrue(self.page.locator("#info-body .flow.mod").count() >= 1)
 
+    # -- selecting in the 3-D view and turning the selection into nodes ------------------------------------------
+    def box_scene(self, **params):
+        """Replace the graph by a single box into an output, select the box node and wait for the 3-D view to show it."""
+        if not self.page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+            self.skipTest("this Chromium has no WebGL2")
+        graph = {"version": 1, "nodes": {"b": {"type": "box", "params": dict({"size": [2, 2, 2]}, **params), "pos": [0, 0]},
+                                         "o": {"type": "output", "inputs": {"geo": "b"}, "pos": [0, 110]}}, "display": "o"}
+        self.s.edit([{"op": "replace", "graph": graph}])
+        self.page.wait_for_selector('.node[data-id="b"]')
+        self.node("b").locator(".title").click()
+        self.page.wait_for_function("window.minihou.preview.tris === 12 && document.querySelector('#pv-node').innerText.includes('b')")
+        from minihou import Evaluator
+        self.box = Evaluator().cook(self.s.graph, "b")
+        vp, offs = self.box.topology.vertex_point.astype(int), self.box.topology.prim_offsets
+        centres = [self.box.P[vp[offs[p]:offs[p + 1]]].mean(0) for p in range(self.box.nprims)]
+        self.top = int(max(range(len(centres)), key=lambda p: centres[p][2]))               # the face looking up at the camera
+        v = vp[offs[self.top]:offs[self.top + 1]]
+        self.top_edges = [(min(a, b), max(a, b)) for a, b in zip(v.tolist(), v.tolist()[1:] + v.tolist()[:1])]
+        self.top_points = sorted(v.tolist())
+
+    def view_xy(self, kind, ident):
+        """Page coordinates of an element of the 3-D view."""
+        box = self.page.locator("#pv-canvas").bounding_box()
+        sx, sy, _ = self.page.evaluate("([k, i]) => minihou.preview.screenOf(k, i)", [kind, ident])
+        return box["x"] + sx, box["y"] + sy
+
+    def selection(self):
+        return self.page.evaluate("minihou.preview.selection()")
+
+    def test_pick_edges_with_shift_and_bevel_inserts_a_node_in_the_chain(self):
+        self.box_scene()
+        self.page.click('#preview [data-mode="edge"]')
+        for n, e in enumerate(self.top_edges):
+            self.page.keyboard.down("Shift") if n else None
+            self.page.mouse.click(*self.view_xy("edge", list(e)))
+            self.page.keyboard.up("Shift") if n else None
+        self.assertEqual(sorted(map(tuple, self.selection()["edges"])), sorted(self.top_edges))
+        self.assertIn("4 edges selected", self.page.inner_text("#pv-selinfo"))
+        self.page.click('#pv-actions button[data-action="Bevel"]')
+        self.assertTrue(until(lambda: "polybevel1" in self.s.graph.nodes))
+        g = self.s.graph.nodes
+        self.assertEqual(g["polybevel1"].inputs, {"geo": "b"})
+        self.assertEqual(g["o"].inputs, {"geo": "polybevel1"})                              # inserted in the chain
+        self.assertEqual(g["polybevel1"].params["edges"], " ".join(f"{a}-{b}" for a, b in sorted(self.top_edges)))
+        self.page.wait_for_selector('.node[data-id="polybevel1"].selected')
+        self.page.wait_for_function("document.querySelector('#pv-node').innerText.includes('polybevel1')")
+        self.assertEqual(self.selection()["edges"], [])                                      # the selection is spent
+        self.assertTrue(until(lambda: self.s.status()["ok"], 5))
+        self.page.wait_for_function("window.minihou.preview.tris > 12")                      # the bevelled box is shown
+
+    def test_a_lone_edge_cannot_be_bevelled_and_the_error_says_why(self):
+        self.box_scene()
+        self.page.click('#preview [data-mode="edge"]')
+        self.page.mouse.click(*self.view_xy("edge", list(self.top_edges[0])))
+        self.assertEqual(len(self.selection()["edges"]), 1)
+        self.page.keyboard.press("b")                                                        # the shortcut, with the mouse over the view
+        self.assertTrue(until(lambda: "polybevel1" in self.s.graph.nodes))
+        self.page.wait_for_selector("#errorbar:not(.hidden)")
+        self.assertIn("cannot end inside the surface", self.page.inner_text("#errorbar"))
+
+    def test_pick_a_face_and_box_select_faces_then_extrude(self):
+        self.box_scene()
+        self.page.click('#preview [data-mode="face"]')
+        self.page.mouse.click(*self.view_xy("face", self.top))
+        self.assertEqual(self.selection()["faces"], [self.top])
+        canvas = self.page.locator("#pv-canvas").bounding_box()
+        self.page.mouse.move(canvas["x"] + 4, canvas["y"] + 4)                                # a drag over everything: all faces
+        self.page.mouse.down()
+        self.page.mouse.move(canvas["x"] + canvas["width"] - 4, canvas["y"] + canvas["height"] - 4, steps=6)
+        self.page.mouse.up()
+        self.assertEqual(self.selection()["faces"], list(range(6)))
+        self.page.keyboard.down("Control")                                                    # Ctrl-click takes one away
+        self.page.mouse.click(*self.view_xy("face", self.top))
+        self.page.keyboard.up("Control")
+        self.assertEqual(len(self.selection()["faces"]), 5)
+        self.page.click('#pv-actions button[data-action="Extrude"]')
+        self.assertTrue(until(lambda: "polyextrude1" in self.s.graph.nodes))
+        n = self.s.graph.nodes["polyextrude1"]
+        self.assertEqual(n.inputs, {"geo": "b"})
+        rest = [f for f in range(6) if f != self.top]
+        expected = {0: "1-5", 5: "0-4"}.get(self.top, f"0-{self.top - 1} {self.top + 1}-5" if self.top > 1 else f"0 {self.top + 1}-5")
+        self.assertEqual(n.params["group"], expected, rest)
+
+    def test_points_select_group_and_delete_and_keys_switch_modes(self):
+        self.box_scene()
+        self.page.mouse.move(*self.view_xy("point", self.top_points[0]))
+        self.page.keyboard.press("1")
+        self.assertEqual(self.page.evaluate("minihou.preview.mode"), "point")
+        self.page.mouse.click(*self.view_xy("point", self.top_points[0]))
+        self.assertEqual(self.selection()["points"], [self.top_points[0]])
+        self.page.keyboard.press("Escape")                                                    # clears the selection first...
+        self.assertEqual(self.selection()["points"], [])
+        self.assertEqual(self.page.evaluate("minihou.preview.mode"), "point")
+        self.page.keyboard.press("Escape")                                                    # ...then leaves the mode
+        self.assertEqual(self.page.evaluate("minihou.preview.mode"), "view")
+        self.page.keyboard.press("2")
+        self.assertEqual(self.page.evaluate("minihou.preview.mode"), "edge")
+        self.page.keyboard.press("1")
+        self.page.keyboard.press("a")                                                         # select all points
+        self.assertEqual(len(self.selection()["points"]), 8)
+        self.page.click('#pv-actions button[data-action="Group"]')
+        self.assertTrue(until(lambda: "group_create1" in self.s.graph.nodes))
+        self.assertEqual(self.s.graph.nodes["group_create1"].params["pattern"], "0-7")
+        self.assertEqual(self.s.graph.nodes["group_create1"].params["domain"], "points")
+
+    def test_orbit_still_works_with_alt_or_middle_mouse_in_a_selection_mode(self):
+        self.box_scene()
+        self.page.click('#preview [data-mode="face"]')
+        before = self.page.evaluate("minihou.preview.view.yaw")
+        box = self.page.locator("#pv-canvas").bounding_box()
+        self.page.mouse.move(box["x"] + 50, box["y"] + 50)
+        self.page.keyboard.down("Alt")
+        self.page.mouse.down()
+        self.page.mouse.move(box["x"] + 110, box["y"] + 60, steps=4)
+        self.page.mouse.up()
+        self.page.keyboard.up("Alt")
+        self.assertNotEqual(self.page.evaluate("minihou.preview.view.yaw"), before)
+        self.assertEqual(self.selection()["faces"], [])                                       # an orbit selects nothing
+
     def test_frame_slider_scrubs_and_follows_the_frame(self):
         self.page.fill("#frame-slider", "40")                         # fires input events like a drag
         end = time.monotonic() + 5

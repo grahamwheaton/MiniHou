@@ -156,6 +156,42 @@ class OpsTests(unittest.TestCase):
         self.assertEqual(geo.npoints, 16)
 
 
+class InsertOpTests(unittest.TestCase):
+    def chain(self):
+        return graph_from({"g": {"type": "grid", "pos": [0, 0]}, "n": {"type": "noise", "inputs": {"geo": "g"}, "pos": [0, 110]},
+                           "m": {"type": "merge", "inputs": {"geos": ["g", "n", "g"]}, "pos": [0, 220]},
+                           "o": {"type": "output", "inputs": {"geo": "n"}}}, display="n")
+
+    def test_the_new_node_takes_over_every_reader_in_place(self):
+        g, res = apply_ops(self.chain(), [{"op": "insert", "after": "n", "type": "transform", "params": {"uniform_scale": 2}}])
+        self.assertEqual(res[0], {"id": "transform1", "rewired": 2})
+        self.assertEqual(g.nodes["transform1"].inputs, {"geo": "n"})
+        self.assertEqual(g.nodes["m"].inputs["geos"], ["g", "transform1", "g"])           # same slot in a multi input
+        self.assertEqual(g.nodes["o"].inputs["geo"], "transform1")
+        self.assertEqual(g.display, "transform1")                                          # the display flag moves along
+        self.assertEqual(g.nodes["transform1"].params, {"uniform_scale": 2.0})
+        self.assertEqual(g.nodes["transform1"].meta["pos"], [190.0, 180.0])                # beside and below the node
+        from minihou import Evaluator
+        self.assertEqual(Evaluator().cook(g).npoints, 100)
+
+    def test_a_leaf_gets_a_plain_append_and_ports_can_be_chosen(self):
+        g, _ = apply_ops(self.chain(), [{"op": "insert", "after": "o", "type": "attribute_delete", "id": "tidy",
+                                         "params": {"names": "uv"}, "pos": [5, 6]}])
+        self.assertEqual((g.nodes["tidy"].inputs, g.nodes["tidy"].meta["pos"]), ({"geo": "o"}, [5.0, 6.0]))
+        two, _ = apply_ops(self.chain(), [{"op": "insert", "after": "g", "type": "copy_to_points", "port": "points"}])
+        self.assertEqual(two.nodes["copy_to_points1"].inputs, {"points": "g"})
+        self.assertEqual(two.nodes["n"].inputs["geo"], "copy_to_points1")
+
+    def test_bad_inserts_change_nothing(self):
+        g = self.chain()
+        for bad in ({"op": "insert", "after": "nope", "type": "transform"}, {"op": "insert", "after": "n", "type": "nope"},
+                    {"op": "insert", "after": "n", "type": "grid"}, {"op": "insert", "after": "n", "type": "transform", "port": "x"},
+                    {"op": "insert", "after": "n", "type": "transform", "id": "g"}):
+            with self.assertRaises(EditError, msg=bad):
+                apply_ops(g, [bad])
+        self.assertEqual(g.nodes["m"].inputs["geos"], ["g", "n", "g"])
+
+
 class NetworkBoxTests(unittest.TestCase):
     def test_box_around_nodes_set_and_remove(self):
         g, res = apply_ops(base(), [{"op": "move", "positions": {"g": [0, 0], "n": [200, 110], "o": [0, 220]}},

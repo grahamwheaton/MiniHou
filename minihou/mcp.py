@@ -60,6 +60,8 @@ watching the editor and Blender live and can undo your edits, so prefer small ve
 OPS_DOC = """\
 Each op is an object with "op":
   add        {"op":"add","type":T,"id"?:str,"params"?:{..},"inputs"?:{port:id or [ids]},"pos"?:[x,y],"display"?:true,"comment"?:str}
+  insert     {"op":"insert","after":id,"type":"polybevel","params"?:{...}}  (a node fed by `after` that takes over everything which
+             read `after`: joins a chain in place, display flag included; "port"? picks its input)
   remove     {"op":"remove","id":id or [ids]}
   rename     {"op":"rename","id":old,"to":new}
   connect    {"op":"connect","from":src,"to":dst,"port"?:name,"index"?:int}  (port defaults to the first free input)
@@ -99,7 +101,7 @@ TOOLS: List[dict] = [
      "inputSchema": {"type": "object", "required": ["ops"], "additionalProperties": False, "properties": {
          "ops": {"type": "array", "minItems": 1, "description": "Edit operations, applied in order.",
                  "items": {"type": "object", "required": ["op"], "properties": {
-                     "op": {"type": "string", "enum": ["add", "remove", "rename", "connect", "disconnect", "set",
+                     "op": {"type": "string", "enum": ["add", "insert", "remove", "rename", "connect", "disconnect", "set",
                                                        "display", "expose", "unexpose", "move", "meta", "replace",
                                                        "layout", "box_add", "box_set", "box_remove"]}}}}}}},
     {"name": "inspect_node",

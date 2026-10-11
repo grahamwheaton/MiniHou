@@ -79,6 +79,14 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
   usable without Blender. Drag to orbit (Z is up), **Shift**-drag or right-drag to pan, wheel to zoom, double-click to frame.
   Shaded / edges / points toggles; point colours (`Cd`) are shown; back faces are tinted orange so flipped normals stand out.
   Very large geometry is cut to a drawable size and the view says so.
+* **Select in the 3-D view and build the network from it**: the **Pts / Edges / Faces** buttons under the view (or **1 / 2 / 3** with the
+  mouse over it) switch to a selection mode: click to pick (only what you can see), **Shift** adds, **Ctrl** removes, drag a box to
+  select everything inside it (X-ray); **Alt**-drag or the middle mouse button orbits, **A** selects all, **Esc** clears then leaves.
+  Selected edges are drawn thick, faces tinted. The buttons that appear then add a node **after the node you are looking at and wire it into
+  the chain in place** (everything that read that node reads the new one; the display flag moves along): *Bevel* for edges (`polybevel` with
+  an `edges` list of point pairs; a bevel cannot end in the middle of a surface, so select a loop or edges that meet or reach a border),
+  *Extrude*, *Inset*, *Reverse*, *Group*, *Delete* for faces, *Group* and *Delete* for points. The same `insert` edit op is available to AI
+  tools (`{"op": "insert", "after": "id", "type": "polybevel"}`).
 * **Attribute flow**: the inspector lists what the selected node did to its inputs' attributes (`+` added, `~` changed, `→` moved to
   another domain, `−` removed, and whether topology changed); a wrangle also lists the attributes its snippet reads. It is worked out
   by comparing cooked results, so it is right for built-in, library and system nodes alike (also in `inspect_node` for AI tools, as `flow`).

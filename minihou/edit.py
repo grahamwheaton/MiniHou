@@ -8,6 +8,9 @@ op              fields
 ==============  =============================================================================================
 ``add``         ``type``; optional ``id`` (default: type + number), ``params``, ``inputs`` ({port: id or [ids]}),
                 ``pos`` ([x, y]), ``display`` (true to make it the display node), ``comment``
+``insert``      ``after`` (a node id) + ``type``; optional ``id``, ``params``, ``port`` (the new node's input, default its
+                first), ``pos``, ``comment``: add a node fed by ``after`` and re-wire everything that read ``after`` to read
+                the new node instead (so it joins the chain in place; the display flag moves with it)
 ``remove``      ``id`` (an id or a list of ids)
 ``rename``      ``id``, ``to``
 ``connect``     ``from``, ``to``; optional ``port`` (default: first free input), ``index`` (multi inputs)
@@ -133,6 +136,48 @@ def op_add(g: Graph, op: dict) -> dict:
     if op.get("display"):
         g.display = nid
     return {"id": nid}
+
+
+def op_insert(g: Graph, op: dict) -> dict:
+    src = op["after"]
+    base = _need_node(g, src)
+    t = op["type"]
+    if t not in g.registry:
+        raise GraphError(f"unknown node type {t!r}; known: {g.registry.names()}")
+    nt = g.registry.get(t)
+    if not nt.inputs:
+        raise GraphError(f"node type {t!r} has no inputs, so it cannot be inserted after {src!r}")
+    port = op.get("port") or nt.inputs[0].name
+    if port not in nt.input_names():
+        raise GraphError(f"node type {t!r} has no input {port!r}; inputs: {nt.input_names()}")
+    nid = op.get("id") or _new_id(g, t)
+    # what reads `src` now: (consumer, port, position in a list input)
+    readers = []
+    for cid, c in g.nodes.items():
+        for p_, ref in c.inputs.items():
+            if isinstance(ref, list):
+                readers += [(cid, p_, k) for k, r in enumerate(ref) if r == src]
+            elif ref == src:
+                readers.append((cid, p_, None))
+    meta: Dict[str, Any] = {}
+    if "pos" in op:
+        meta["pos"] = _pos(op["pos"])
+    elif isinstance(base.meta.get("pos"), list):
+        meta["pos"] = [round(base.meta["pos"][0] + 190, 1), round(base.meta["pos"][1] + 70, 1)]
+    if op.get("comment"):
+        meta["comment"] = str(op["comment"])
+    g.add_node(nid, t, op.get("params") or None, None, **meta)
+    _connect(g, src, nid, port, None)
+    for cid, p_, k in readers:
+        c = g.nodes[cid]
+        ref = c.inputs[p_]
+        if isinstance(ref, list):
+            ref[k] = nid
+        else:
+            c.inputs[p_] = nid
+    if g.display == src:
+        g.display = nid
+    return {"id": nid, "rewired": len(readers)}
 
 
 def op_remove(g: Graph, op: dict) -> dict:
@@ -345,7 +390,7 @@ def op_replace(g: Graph, op: dict) -> dict:
     return {"_graph": Graph.from_dict(op["graph"], g.registry, check=False)}
 
 
-_OPS = {"add": op_add, "remove": op_remove, "rename": op_rename, "connect": op_connect,
+_OPS = {"add": op_add, "insert": op_insert, "remove": op_remove, "rename": op_rename, "connect": op_connect,
         "disconnect": op_disconnect, "set": op_set, "display": op_display, "expose": op_expose,
         "unexpose": op_unexpose, "move": op_move, "meta": op_meta, "replace": op_replace,
         "box_add": op_box_add, "box_set": op_box_set, "box_remove": op_box_remove}

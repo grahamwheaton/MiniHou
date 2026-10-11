@@ -129,6 +129,11 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
    with `--allow-python`** (or `MINIHOU_PYTHON_NODES=1`); nothing in a graph can turn it on, the MCP instructions tell assistants not
    to ask, and `engine_status` reports the switch.
 
+6. **Selection tools in the 3-D view**: `POST /api/preview` sends `tri_prim` (the primitive of each triangle); the viewer picks
+   points, edges and faces on the CPU (nearest projected element with a ray test for visibility, box select, thick edge overlay) and the
+   editor turns a selection into a node through the new `insert` op (new node fed by `after`, taking over its readers). `polybevel` got
+   an `edges` selection (point pairs) and a check that a bevel does not end inside a surface.
+
 Open:
 
 - Extra outputs have no modifier or exposed parameters (only the display branch does).

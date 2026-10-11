@@ -6,8 +6,8 @@ Wire format of ``POST /api/preview`` (``application/octet-stream``)::
 
 The header has ``points``, ``prims``, ``tris``, ``edges``, ``bounds`` ([min, max]), ``truncated`` and ``arrays``: a list of
 ``{name, dtype, count, offset}`` (offset in bytes from the start of the data, every array 4-byte aligned). Arrays:
-``P`` float32 (3 per point), ``tri`` uint32 (3 per triangle, point indices), ``edge`` uint32 (2 per edge) and ``Cd``
-float32 (3 per point) when the geometry has point colours.
+``P`` float32 (3 per point), ``tri`` uint32 (3 per triangle, point indices), ``edge`` uint32 (2 per edge), ``tri_prim`` uint32 (the
+primitive number of each triangle, for picking faces) and ``Cd`` float32 (3 per point) when the geometry has point colours.
 """
 from __future__ import annotations
 
@@ -40,6 +40,7 @@ def arrays_for(geo) -> Tuple[dict, Dict[str, np.ndarray]]:
         truncated = True
     out["P"] = P.reshape(-1)
     tri = np.zeros((0, 3), np.int64)
+    tri_prim = np.zeros(0, np.int64)
     edge = np.zeros((0, 2), np.int64)
     if t.nprims and n <= MAX_POINTS:
         vp = t.vertex_point.astype(np.int64)
@@ -48,18 +49,22 @@ def arrays_for(geo) -> Tuple[dict, Dict[str, np.ndarray]]:
         closed = t.closed_mask()
         small = np.flatnonzero(closed & (sizes == 3))
         parts = [vp[offs[small][:, None] + np.arange(3)]] if len(small) else []
+        owners = [small] if len(small) else []
         if (closed & (sizes > 3)).any():
-            tri_v, _, _ = triangulate(geo, np.ones(t.nprims, bool))
+            tri_v, tri_p, _ = triangulate(geo, np.ones(t.nprims, bool))
             if len(tri_v):
                 parts.append(vp[tri_v])
+                owners.append(tri_p)
         if parts:
             tri = np.concatenate(parts)
+            tri_prim = np.concatenate(owners)
         edge = topo.edges(geo).points.astype(np.int64)
     if len(tri) > MAX_TRIS:
-        tri, truncated = tri[:MAX_TRIS], True
+        tri, tri_prim, truncated = tri[:MAX_TRIS], tri_prim[:MAX_TRIS], True
     if len(edge) > MAX_EDGES:
         edge, truncated = edge[:MAX_EDGES], True
     out["tri"] = np.ascontiguousarray(tri, np.uint32).reshape(-1)
+    out["tri_prim"] = np.ascontiguousarray(tri_prim, np.uint32)
     out["edge"] = np.ascontiguousarray(edge, np.uint32).reshape(-1)
     cd = geo.point.get("Cd")
     if cd is not None and cd.ndim == 2 and cd.shape[1] >= 3 and len(cd) == n:

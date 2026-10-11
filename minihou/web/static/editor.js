@@ -604,12 +604,81 @@
     pv.set(head, arrays, pvNode === node && pvPath === S.path);
     pvNode = node; pvPath = S.path;
   }
+
+  // ---- selecting points, edges and faces in the 3-D view and turning the selection into nodes (inserted after the viewed node)
+  const rangePattern = (nums) => {                                  // [0,1,2,5,7,8] -> "0-2 5 7-8"
+    const out = [];
+    for (let i = 0; i < nums.length; i++) {
+      let j = i;
+      while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
+      out.push(j > i ? `${nums[i]}-${nums[j]}` : String(nums[i]));
+      i = j;
+    }
+    return out.join(" ");
+  };
+  const edgePattern = (edges) => edges.map(([a, b]) => `${a}-${b}`).join(" ");
+  const SELECTION_ACTIONS = {
+    edge: [{ label: "Bevel", key: "b", type: "polybevel", title: "Bevel the selected edges (a loop, or edges that meet or reach a border)",
+      params: (s) => ({ edges: edgePattern(s.edges) }) }],
+    face: [
+      { label: "Extrude", key: "e", type: "polyextrude", params: (s) => ({ group: rangePattern(s.faces), distance: 0.3 }) },
+      { label: "Inset", type: "polyextrude", params: (s) => ({ group: rangePattern(s.faces), distance: 0, inset: 0.15 }) },
+      { label: "Reverse", type: "reverse", params: (s) => ({ group: rangePattern(s.faces) }) },
+      { label: "Group", type: "group_create", params: (s) => ({ name: "faces", domain: "primitives", method: "pattern", pattern: rangePattern(s.faces) }) },
+      { label: "Delete", key: "x", type: "blast", params: (s) => ({ group: rangePattern(s.faces), domain: "primitives" }) }],
+    point: [
+      { label: "Group", type: "group_create", params: (s) => ({ name: "points", domain: "points", method: "pattern", pattern: rangePattern(s.points) }) },
+      { label: "Delete", key: "x", type: "blast", params: (s) => ({ group: rangePattern(s.points), domain: "points" }) }],
+  };
+  const SEL_KEY = { point: "points", edge: "edges", face: "faces" };
+  let pvSelection = { mode: "view", points: [], edges: [], faces: [] };
+  async function applySelectionAction(a) {
+    const s = pvSelection, node = pvNode;
+    if (!node || !nodeOf(node)) { toast("Nothing to attach the new node to."); return; }
+    const params = a.params(s);
+    if ((params.group || params.pattern || params.edges || "").length > 30000) { toast("That selection is too large to write into a node; select fewer elements."); return; }
+    const r = await edit([{ op: "insert", after: node, type: a.type, params }]);
+    if (r) { pv.clearSelection(); select([r.results[0].id]); }
+  }
+  function renderSelectionTools(s) {
+    pvSelection = s;
+    const n = (s[SEL_KEY[s.mode]] || []).length;
+    $("#pv-selinfo").textContent = s.mode === "view" ? "" : `${n} ${SEL_KEY[s.mode].replace(/s$/, "")}${n === 1 ? "" : "s"} selected`;
+    document.querySelectorAll("#preview [data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === s.mode));
+    const box = $("#pv-actions");
+    const acts = n ? SELECTION_ACTIONS[s.mode] || [] : [];
+    box.classList.toggle("hidden", !acts.length);
+    box.replaceChildren(...acts.map((a) => h("button", { title: a.title || `${a.label} the selection: adds a ${a.type} node after ${pvNode || "the viewed node"}`,
+      dataset: { action: a.label }, onclick: () => applySelectionAction(a) }, a.label + (a.key ? ` (${a.key.toUpperCase()})` : ""))));
+  }
+  function wireSelectionTools() {
+    pv.onSelect = renderSelectionTools;
+    document.querySelectorAll("#preview [data-mode]").forEach((b) => { b.onclick = () => pv.setMode(b.dataset.mode); });
+    let over = false;
+    $("#pv-canvas").addEventListener("pointerenter", () => { over = true; });
+    $("#pv-canvas").addEventListener("pointerleave", () => { over = false; });
+    document.addEventListener("keydown", (e) => {
+      const tag = (e.target.tagName || "").toLowerCase();
+      if (!over || tag === "input" || tag === "textarea" || tag === "select" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      const mode = { "1": "point", "2": "edge", "3": "face" }[k];
+      if (mode) { pv.setMode(mode); e.preventDefault(); e.stopImmediatePropagation(); return; }
+      if (k === "escape") {
+        if (pvSelection.mode !== "view" && !(pvSelection[SEL_KEY[pvSelection.mode]] || []).length) pv.setMode("view"); else pv.clearSelection();
+        e.preventDefault(); e.stopImmediatePropagation(); return;
+      }
+      const act = (SELECTION_ACTIONS[pvSelection.mode] || []).find((a) => a.key === k);
+      if (act && (pvSelection[SEL_KEY[pvSelection.mode]] || []).length) { applySelectionAction(act); e.preventDefault(); e.stopImmediatePropagation(); }
+      else if (k === "a" && pvSelection.mode !== "view") { pv.selectAll(); e.preventDefault(); e.stopImmediatePropagation(); }
+    }, true);
+  }
   if (pv && pv.ok) {
     for (const [id, key] of [["#pv-shaded", "shaded"], ["#pv-edges", "edges"], ["#pv-points", "points"]]) {
       $(id).checked = pv.opt[key];
       $(id).onchange = (e) => { pv.opt[key] = e.target.checked; pv.redraw(); };
     }
     $("#pv-frame").onclick = () => pv.frameAll();
+    wireSelectionTools();
   } else { $("#preview .pv-opts").classList.add("hidden"); }
   async function runInspect() {
     const ids = [...S.sel].filter((id) => nodeOf(id));

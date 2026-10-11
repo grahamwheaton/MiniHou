@@ -173,3 +173,13 @@ table.attrs td { font: var(--mono); font-size: 11px; }
 .flow .sign { display: inline-block; width: 1.4em; font-weight: 700; }
 .flow.add .sign { color: var(--ok); } .flow.mod .sign { color: var(--warn); } .flow.del .sign { color: var(--err); } .flow.mov .sign { color: var(--accent); }
 .flow-note { font-size: 11px; padding-top: 2px; }
+
+.pv-tools { display: flex; align-items: center; gap: 8px; margin: 2px 0 6px; }
+.pv-modes { display: inline-flex; }
+.pv-modes button { padding: 1px 8px; border-radius: 0; font-size: 12px; }
+.pv-modes button:first-child { border-radius: 4px 0 0 4px; } .pv-modes button:last-child { border-radius: 0 4px 4px 0; }
+.pv-modes button.on { background: var(--accent); border-color: var(--accent); color: #07121f; }
+.pv-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.pv-actions button { padding: 2px 10px; }
+.pv-marquee { position: absolute; border: 1px dashed #ffb04d; background: #ffb04d22; pointer-events: none; }
+#preview { flex: 0 0 auto; overflow: visible; }

@@ -25,6 +25,8 @@ class PreviewArraysTests(unittest.TestCase):
         area = 0.5 * np.linalg.norm(np.cross(P[tri[:, 1]] - P[tri[:, 0]], P[tri[:, 2]] - P[tri[:, 0]]), axis=1).sum()
         self.assertAlmostEqual(area, 4 * np.pi, delta=0.6)                                # a sphere's surface area
         self.assertEqual(len(a["edge"].reshape(-1, 2)), head["edges"])
+        self.assertEqual(len(a["tri_prim"]), head["tris"])                         # which primitive each triangle belongs to
+        self.assertTrue(a["tri_prim"].max() < sphere.nprims)
         np.testing.assert_allclose(head["bounds"], [[-1, -1, -1], [1, 1, 1]], atol=1e-6)
         self.assertFalse(head["truncated"])
         self.assertNotIn("Cd", a)
@@ -32,10 +34,16 @@ class PreviewArraysTests(unittest.TestCase):
     def test_quads_and_concave_polygons_are_triangulated(self):
         box = run("box", size=[1, 1, 1])
         self.assertEqual(decode(box)[0]["tris"], 12)
+        self.assertEqual(sorted(set(decode(box)[1]["tri_prim"].tolist())), [0, 1, 2, 3, 4, 5])
+        mixed = run("merge", [run("grid", columns=3, rows=3), run("box")])             # triangles, quads and prims in order
+        a = decode(mixed)[1]
+        counts = np.bincount(a["tri_prim"], minlength=mixed.nprims)
+        self.assertTrue(np.all(counts == 2))
         L = np.array([[0, 0, 0], [2, 0, 0], [2, 1, 0], [1, 1, 0], [1, 2, 0], [0, 2, 0]], np.float32)
         lshape = Geometry.from_arrays(L, np.arange(6, dtype=np.int32), np.array([0, 6], np.int32))
         head, a = decode(lshape)
         self.assertEqual(head["tris"], 4)
+        self.assertEqual(a["tri_prim"].tolist(), [0, 0, 0, 0])
         P, tri = a["P"].reshape(-1, 3), a["tri"].reshape(-1, 3)
         area = 0.5 * np.abs(np.cross(P[tri[:, 1]] - P[tri[:, 0]], P[tri[:, 2]] - P[tri[:, 0]])[:, 2]).sum()
         self.assertAlmostEqual(area, 3.0)                                                 # not the convex hull's 3.5
