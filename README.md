@@ -141,6 +141,10 @@ All examples are cooked by the test-suite, so they keep working as nodes evolve.
 | `convert_line` | geo | every edge to curves (joined into polylines), e.g. wireframes with `sweep` |
 | `polypath` | geo | join curves that share end points |
 | `instance` | points | points become instances of **Blender objects** (random, cycled or by attribute; aligned to N or upright; random spin and scale) |
+| `bend` | geo | bend, twist and taper along an axis (capture region; straight beyond it), N follows |
+| `point_relax` | points, surface | push points to an even spacing while keeping them on a surface (blue-noise scatter) |
+| `point_jitter` | geo | random offsets per axis |
+| `clean` | geo | weld, drop repeated corners and degenerate faces/curves, remove unused points |
 | `uv_project` | geo | UVs by box (triplanar), planar, cylindrical or spherical projection; seams and poles handled |
 | `remesh` | geo | voxel remesh a closed mesh: even watertight quads, offset (grow/shrink), smoothing, attribute transfer |
 | `points_to_surface` | points | metaball surface around points (radius x pscale, blend), e.g. blobs and liquids |

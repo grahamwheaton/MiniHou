@@ -168,3 +168,40 @@ def components(n: int, a: np.ndarray, b: np.ndarray) -> np.ndarray:
             parent = pp
     _, labels = np.unique(parent, return_inverse=True)
     return labels.reshape(-1).astype(np.int32)
+
+
+def pairs_within(P: np.ndarray, r: float):
+    """All pairs (i < j) of points closer than ``r``: (i, j, distance). A grid of cell size r, each point checked
+    against the 13 'forward' neighbour cells plus its own (each pair found once)."""
+    P = np.asarray(P, np.float64).reshape(-1, 3)
+    n = len(P)
+    if n < 2 or r <= 0:
+        return np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0)
+    lo = P.min(0)
+    cell = np.floor((P - lo) / r).astype(np.int64)
+    dims = cell.max(0) + 1
+    key = (cell[:, 0] * dims[1] + cell[:, 1]) * dims[2] + cell[:, 2]
+    order = np.argsort(key, kind="stable")
+    ks = key[order]
+    offs = np.array([(dx, dy, dz) for dx in (-1, 0, 1) for dy in (-1, 0, 1) for dz in (-1, 0, 1)])
+    forward = offs[[tuple(o) > (0, 0, 0) for o in offs.tolist()]]         # 13 half-space neighbours
+    out_i, out_j = [], []
+    for off in np.vstack([[0, 0, 0], forward]):
+        c = cell + off
+        ok = np.all((c >= 0) & (c < dims), axis=1)
+        qi = np.flatnonzero(ok)
+        k = (c[ok, 0] * dims[1] + c[ok, 1]) * dims[2] + c[ok, 2]
+        a = np.searchsorted(ks, k, "left")
+        cnt = np.searchsorted(ks, k, "right") - a
+        rep = np.repeat(qi, cnt)
+        local = np.arange(cnt.sum()) - np.repeat(np.cumsum(cnt) - cnt, cnt)
+        cand = order[np.repeat(a, cnt) + local]
+        if not off.any():
+            keep = cand > rep                                              # same cell: each pair once
+            rep, cand = rep[keep], cand[keep]
+        out_i.append(rep)
+        out_j.append(cand)
+    i, j = np.concatenate(out_i), np.concatenate(out_j)
+    d = np.linalg.norm(P[i] - P[j], axis=1)
+    near = d < r
+    return i[near], j[near], d[near]
