@@ -315,6 +315,7 @@
     } else { c.className = "status"; txt.textContent = "idle"; }
     const fi = $("#frame-input");
     if (st.frame !== undefined && document.activeElement !== fi && Number(fi.value) !== st.frame) fi.value = st.frame;
+    if (st.frame !== undefined && document.activeElement !== $("#frame-slider")) syncSlider(st.frame);
     const clients = st.clients || [], blender = clients.filter((n) => /^blender/i.test(n));
     const b = $("#blender-status");
     b.className = "status" + (blender.length ? " ok" : "");
@@ -328,11 +329,26 @@
   }
 
   // ---------------------------------------------------------------- frame (time)
-  async function setFrame(f) {
+  function syncSlider(f) {
+    const sl = $("#frame-slider");
+    if (f > Number(sl.max)) sl.max = Math.ceil(f / 250) * 250;           // the range grows to hold the frame
+    sl.value = Math.max(Number(sl.min), f);
+  }
+  let framePending = null, frameSending = false;
+  async function setFrame(f) {                                          // sends only the latest value while one is in flight
     if (!Number.isFinite(f)) return;
     $("#frame-input").value = f;
-    try { await api("/api/frame", { frame: f }); } catch (e) { /* offline: the status refresh will correct it */ }
+    syncSlider(f);
+    framePending = f;
+    if (frameSending) return;
+    frameSending = true;
+    while (framePending !== null) {
+      const v = framePending; framePending = null;
+      try { await api("/api/frame", { frame: v }); } catch (e) { /* offline: the status refresh will correct it */ }
+    }
+    frameSending = false;
   }
+  $("#frame-slider").addEventListener("input", (e) => setFrame(Number(e.target.value)));
   $("#frame-input").addEventListener("change", (e) => setFrame(Number(e.target.value)));
   $("#frame-prev").onclick = () => setFrame(Number($("#frame-input").value) - 1);
   $("#frame-next").onclick = () => setFrame(Number($("#frame-input").value) + 1);

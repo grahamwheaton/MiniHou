@@ -106,6 +106,18 @@ class EditorE2E(unittest.TestCase):
         self.assertIn("display", self.node("out").get_attribute("class"))
         self.page.wait_for_function("document.querySelector('#info-body').innerText.includes('Points')")
 
+    def test_frame_slider_scrubs_and_follows_the_frame(self):
+        self.page.fill("#frame-slider", "40")                         # fires input events like a drag
+        end = time.monotonic() + 5
+        while self.s.frame != 40.0 and time.monotonic() < end:
+            time.sleep(0.05)
+        self.assertEqual(self.s.frame, 40.0)
+        self.assertEqual(self.page.input_value("#frame-input"), "40")
+        self.page.fill("#frame-input", "600")                         # a later frame widens the slider's range
+        self.page.press("#frame-input", "Enter")
+        self.page.wait_for_function("Number(document.querySelector('#frame-slider').max) >= 600")
+        self.assertEqual(self.page.input_value("#frame-slider"), "600")
+
     def test_frame_field_sets_the_engine_frame(self):
         self.page.fill("#frame-input", "7")
         self.page.press("#frame-input", "Enter")

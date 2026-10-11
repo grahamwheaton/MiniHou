@@ -150,3 +150,4 @@ table.attrs td { font: var(--mono); font-size: 11px; }
 #topbar .frame { display: inline-flex; align-items: center; gap: 2px; }
 #topbar .frame input { width: 56px; text-align: center; background: #0f1112; color: inherit; border: 1px solid var(--line); border-radius: 4px; padding: 3px 2px; }
 #topbar .frame button { padding: 2px 6px; }
+#topbar .frame input[type=range] { width: 110px; padding: 0; margin-left: 4px; accent-color: var(--accent, #6aa9ff); }
