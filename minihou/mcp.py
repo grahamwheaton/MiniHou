@@ -42,7 +42,7 @@ Use wrangle nodes (wrangle_reference) for custom per-point math; for anything mo
 loops over geometry) write a node-library file (node_library). To make something reusable, build it as a *system*: a graph
 saved in nodes/ (e.g. nodes/rock_scatter.json) with `input` nodes and exposed parameters becomes a node type that any
 graph can use (details in node_library). Houdini-style toolkit: groups (group_create; most nodes take a group pattern
-like 'top ^side', '0-9' or '@P.z > 0'), modelling (boolean, polyextrude, polybevel, subdivide, clip, mirror, polyfill;
+like 'top ^side', '0-9' or '@P.z > 0'), modelling (boolean, polyextrude, polybevel, subdivide, clip, mirror, polyfill, delaunay;
 tube and torus sources; smooth, peak, match_size, bound, copy_transform, switch; voronoi_fracture + exploded_view;
 polyreduce; normal with domain 'vertex' keeps hard edges crisp), attributes (attribute_transfer, promote, blur,
 measure, color, ray; uv_project, uv_flatten), curves (line, helix, resample, sweep, path_deform), volumes (remesh,
