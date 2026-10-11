@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "doc": "Scatter the modifier's Source Object on its upstream surface. @source is a persistent Blender picker binding, not an object name.",
+  "nodes": {
+    "surface": {"type": "modifier_input", "pos": [0, 0]},
+    "scatter": {"type": "scatter", "inputs": {"geo": "surface"}, "params": {"count": 24, "seed": 0}, "pos": [0, 120]},
+    "instances": {
+      "type": "instance",
+      "inputs": {"points": "scatter"},
+      "params": {"objects": "@source", "align": "normal", "random_spin": 0, "scale_min": 0.15, "scale_max": 0.15},
+      "pos": [0, 240]
+    },
+    "output": {"type": "output", "inputs": {"geo": "instances"}, "pos": [0, 360]}
+  },
+  "display": "output",
+  "exposed": [
+    {"name": "Count", "node": "scatter", "param": "count"},
+    {"name": "Seed", "node": "scatter", "param": "seed"},
+    {"name": "Min Scale", "node": "instances", "param": "scale_min"},
+    {"name": "Max Scale", "node": "instances", "param": "scale_max"},
+    {"name": "Random Spin", "node": "instances", "param": "random_spin"}
+  ]
+}

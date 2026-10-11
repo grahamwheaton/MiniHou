@@ -46,9 +46,15 @@ class ExampleGraphTests(unittest.TestCase):
         for path in paths:
             with self.subTest(example=path.name):
                 geo = quad_geo()
-                _, arrays = manager.cook({"instance_id": path.stem, "graph_path": str(path),
-                                          "params": {"Translate": [3, 0, 0], "Scale": 2}}, geo)
-                np.testing.assert_allclose(arrays["point/P"], geo.P * 2 + [3, 0, 0])
+                params = {"Translate": [3, 0, 0], "Scale": 2} if path.stem == "transform" else {}
+                header, arrays = manager.cook({"instance_id": path.stem, "graph_path": str(path),
+                                               "params": params}, geo)
+                if path.stem == "transform":
+                    np.testing.assert_allclose(arrays["point/P"], geo.P * 2 + [3, 0, 0])
+                elif path.stem == "scatter_object":
+                    self.assertEqual(header["detail"]["instance_objects"], ["@source"])
+                    self.assertEqual(len(arrays["point/P"]), 24)
+                    np.testing.assert_array_equal(arrays["point/instance"], 1)
 
 
 if __name__ == "__main__":

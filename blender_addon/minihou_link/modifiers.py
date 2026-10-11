@@ -27,6 +27,8 @@ PARAMS = "minihou_parameters"
 STATUS = "minihou_status"
 CACHE = "minihou_cache_id"
 COLLECTION = "MiniHou Modifier Caches"
+SOURCE = "Source Object"
+SOURCE_TOKEN = "@source"
 _client = None
 _endpoint = None
 _owners = {}
@@ -57,6 +59,155 @@ def status(mod):
 
 def parameters(mod):
     return json.loads(mod.node_group.get(PARAMS, "[]"))
+
+
+class SourceBindingError(ValueError):
+    """A live Blender dependency may recover without any engine input changing."""
+
+
+def _source_socket(mod):
+    return next((item for item in proxy._sockets(mod.node_group, "INPUT")
+                 if item.socket_type == "NodeSocketObject" and item.name == SOURCE), None)
+
+
+def _ensure_source(mod):
+    item = _source_socket(mod)
+    if item is None:
+        item = mod.node_group.interface.new_socket(SOURCE, in_out="INPUT", socket_type="NodeSocketObject")
+        if hasattr(item, "hide_in_modifier"):
+            item.hide_in_modifier = True
+        item.description = "Blender object instanced by @source; local geometry around its origin, including native modifiers and materials"
+    return item
+
+
+def source_owner(mod):
+    item = _source_socket(mod)
+    return proxy.input_owner(mod, item.identifier) if item else None
+
+
+def get_source(mod):
+    item = _source_socket(mod)
+    return proxy.get_input(mod, item.identifier) if item and proxy.has_input(mod, item.identifier) else None
+
+
+def set_source(mod, obj):
+    item = _ensure_source(mod)
+    proxy.set_input(mod, item.identifier, obj)
+    mod.id_data.update_tag()
+
+
+def _validate_source(owner, source):
+    """Check transitive native dependencies before connecting a live Object Info node.
+
+    Cross-object MiniHou evaluation is deliberately unsupported: conservative rejection
+    avoids timer feedback, including cycles hidden behind a native GN group or collection.
+    """
+    seen, trees, driver_ids = set(), set(), set()
+    forbidden_ids = {owner.data.as_pointer()}
+    forbidden_ids.update(obj.data.as_pointer() for obj in bpy.data.objects
+                         if obj.data is not None and (CACHE in obj or obj.name == proxy.OUTPUT_OBJECT))
+    forbidden_ids.update(group.as_pointer() for group in bpy.data.node_groups if KEY in group)
+
+    def drivers(value):
+        if value is None or not isinstance(value, bpy.types.ID):
+            return
+        ptr = value.as_pointer()
+        if ptr in driver_ids:
+            return
+        driver_ids.add(ptr)
+        animation = getattr(value, "animation_data", None)
+        for curve in animation.drivers if animation else ():
+            for variable in curve.driver.variables:
+                for binding in variable.targets:
+                    target(binding.id)
+        drivers(getattr(value, "shape_keys", None))
+        nested = getattr(value, "node_tree", None)
+        if nested is not None:
+            tree(nested)
+
+    def target(value):
+        if isinstance(value, bpy.types.ID) and value.as_pointer() in forbidden_ids:
+            raise SourceBindingError("Source Object driver references destination or MiniHou cache data (cycle prevention)")
+        if isinstance(value, bpy.types.Collection):
+            for obj in value.all_objects:
+                target(obj)
+        elif isinstance(value, bpy.types.Object):
+            if value == owner or CACHE in value or value.name == proxy.OUTPUT_OBJECT:
+                raise SourceBindingError("Source Object references itself or a MiniHou cache (cycle prevention)")
+            ptr = value.as_pointer()
+            if ptr in seen:
+                return
+            seen.add(ptr)
+            if any(is_modifier(m) for m in value.modifiers):
+                raise SourceBindingError("Source Object depends on MiniHou output; cross-object MiniHou dependencies are unsupported")
+            drivers(value)
+            drivers(value.data)
+            if value.instance_collection:
+                target(value.instance_collection)
+            for modifier in value.modifiers:
+                if not modifier.show_viewport:
+                    continue
+                for prop in modifier.bl_rna.properties:
+                    if prop.type == "POINTER" and prop.identifier not in {"rna_type", "id_data", "node_group"}:
+                        target(getattr(modifier, prop.identifier, None))
+                if modifier.type == "NODES" and modifier.node_group:
+                    tree(modifier.node_group)
+                    for item in proxy._sockets(modifier.node_group, "INPUT"):
+                        if item.socket_type in {"NodeSocketObject", "NodeSocketCollection"} and proxy.has_input(modifier, item.identifier):
+                            target(proxy.get_input(modifier, item.identifier))
+            # Constraints and parenting may depend on the destination as well.
+            if value.parent:
+                target(value.parent)
+            for constraint in value.constraints:
+                target(getattr(constraint, "target", None))
+        elif isinstance(value, bpy.types.ID):
+            drivers(value)
+
+    def tree(group):
+        if group.as_pointer() in trees:
+            return
+        trees.add(group.as_pointer())
+        drivers(group)
+        for node in group.nodes:
+            for socket in node.inputs:
+                target(getattr(socket, "default_value", None))
+            nested = getattr(node, "node_tree", None)
+            if nested:
+                tree(nested)
+
+    if source is None:
+        raise SourceBindingError("Select a Source Object for this modifier (@source binding is missing)")
+    if source.type != "MESH":
+        raise SourceBindingError("Source Object must be a mesh")
+    target(source)
+
+
+def _instance_objects(obj, mod, names):
+    if any(name != SOURCE_TOKEN for name in names):
+        raise SourceBindingError("Stack instance objects must use @source; select the persistent Source Object picker")
+    if names:
+        source = get_source(mod)
+        _validate_source(obj, source)
+        return [source for _ in names]
+    return []
+
+
+def _disconnect_unsafe_sources(obj, mod):
+    """Break a newly introduced native cycle without discarding cached engine points.
+
+    A bad pending picker selection must not disconnect a still-valid previous source.
+    Only previously connected sources which are now themselves unsafe are detached.
+    """
+    for node in mod.node_group.nodes:
+        if not node.name.startswith(proxy.INST_PREFIX + "obj") or node.bl_idname != "GeometryNodeObjectInfo":
+            continue
+        source = node.inputs["Object"].default_value
+        if source is None:
+            continue
+        try:
+            _validate_source(obj, source)
+        except SourceBindingError:
+            node.inputs["Object"].default_value = None
 
 
 def _settings(host=None, port=None):
@@ -98,7 +249,7 @@ def _collection():
 def _cache(mod):
     ident = instance_id(mod)
     ng = mod.node_group
-    info = next((n for n in ng.nodes if n.bl_idname == "GeometryNodeObjectInfo"), None)
+    info = proxy.cache_info(ng)
     obj = info.inputs["Object"].default_value if info else None
     if obj is not None and obj.get(CACHE) == ident:
         return obj
@@ -109,7 +260,7 @@ def _cache(mod):
     obj.hide_render = True
     obj.hide_set(True)
     proxy._build_nodes(ng, obj)
-    info = next(n for n in ng.nodes if n.bl_idname == "GeometryNodeObjectInfo")
+    info = proxy.cache_info(ng)
     info.transform_space = "ORIGINAL"  # cooked arrays are object local, independent of object transforms
     return obj
 
@@ -123,11 +274,12 @@ def _interface(mod, header, initial=False, activate=False):
     params = header["interface"]
     cache = _cache(mod)
     proxy.sync_interface(ng, cache, params, json.dumps([(p["name"], p["kind"]) for p in params]))
+    _ensure_source(mod)
     ng[PARAMS] = json.dumps(params)
     values = {p["name"]: old.get(p["name"], p["value"]) for p in params}
     proxy.write_values(mod, ng, params, values)
     # sync_interface uses the proxy's relative cache convention; stack caches always stay local.
-    next(n for n in ng.nodes if n.bl_idname == "GeometryNodeObjectInfo").transform_space = "ORIGINAL"
+    proxy.cache_info(ng).transform_space = "ORIGINAL"
     if passthrough and not activate:
         gin = next(n for n in ng.nodes if n.bl_idname == "NodeGroupInput")
         gout = next(n for n in ng.nodes if n.bl_idname == "NodeGroupOutput")
@@ -176,10 +328,14 @@ def _unique(entries):
         owner = (obj.as_pointer(), mod.as_pointer())
         if ident in seen:
             old_cache = _cache(mod)
+            old_source = get_source(mod)
+            old_values = proxy.read_values(mod, mod.node_group, parameters(mod))
             ng = mod.node_group.copy()
             mod.node_group = ng
             ident = uuid.uuid4().hex
             ng[KEY] = ident
+            set_source(mod, old_source)
+            proxy.write_values(mod, ng, parameters(mod), old_values)
             cache = _cache(mod)
             empty = cache.data
             cache.data = old_cache.data.copy()
@@ -239,10 +395,22 @@ def read_prefix(obj, mod, *, with_materials=False):
     temp.name = "__MiniHou_prefix__"
     temp.hide_render = True
     temp.hide_viewport = False
+    realize_group = None
     try:
         for suffix in list(temp.modifiers)[index:]:
             temp.modifiers.remove(suffix)
+        # to_mesh() excludes unrealized GN instances. Realize only this disposable
+        # prefix read; the user's actual output continues to instance shared sources.
+        realize_group = bpy.data.node_groups.new("__MiniHou_prefix_realize__", "GeometryNodeTree")
+        realize_group.interface.new_socket("Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
+        realize_group.interface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+        gin = realize_group.nodes.new("NodeGroupInput")
+        gout = realize_group.nodes.new("NodeGroupOutput")
+        realize = realize_group.nodes.new("GeometryNodeRealizeInstances")
+        realize_group.links.new(gin.outputs["Geometry"], realize.inputs["Geometry"])
+        realize_group.links.new(realize.outputs["Geometry"], gout.inputs["Geometry"])
         bpy.context.scene.collection.objects.link(temp)
+        temp.modifiers.new("MiniHou prefix realization", "NODES").node_group = realize_group
         temp.hide_set(False)
         bpy.context.view_layer.update()
         evaluated = temp.evaluated_get(bpy.context.evaluated_depsgraph_get())
@@ -256,6 +424,8 @@ def read_prefix(obj, mod, *, with_materials=False):
         return (arrays, materials) if with_materials else arrays
     finally:
         bpy.data.objects.remove(temp, do_unlink=True)
+        if realize_group is not None and realize_group.users == 0:
+            bpy.data.node_groups.remove(realize_group)
 
 
 def _digest(mod, arrays, values, materials=()):
@@ -334,16 +504,28 @@ def pump(host=None, port=None, *, force=False):
                     continue
                 signature = None
                 try:
+                    # Break invalid active native dependencies before evaluating the prefix.
+                    # A changed graph may no longer instance anything, so its old binding
+                    # must not prevent cooking and validating the new output.
+                    _disconnect_unsafe_sources(obj, mod)
                     arrays, materials = read_prefix(obj, mod, with_materials=True)
                     values = proxy.read_values(mod, ng, parameters(mod))
                     signature = _digest(mod, arrays, values, materials)
                     ident = instance_id(mod)
                     failed = _failures.get(ident)
-                    if not force and failed and failed[0] == signature:
+                    selected_source = get_source(mod)
+                    source_pointer = selected_source.as_pointer() if selected_source else 0
+                    if not force and failed and failed[0] == signature and failed[2] == source_pointer:
                         upstream_error = failed[1]
                         errors.append(upstream_error)
                         continue
                     if not force and _digests.get(ident) == signature:
+                        # Live geometry/material edits stay native; only pointer changes
+                        # need re-binding when engine inputs have not changed.
+                        existing_names = json.loads(ng.get(proxy.INST_KEY, "[]"))
+                        existing_objects = _instance_objects(obj, mod, existing_names)
+                        if existing_names:
+                            proxy.sync_instances(ng, existing_names, objects=existing_objects)
                         if status(mod) != "Ready":
                             ng[STATUS] = "Ready"
                         continue
@@ -353,6 +535,8 @@ def pump(host=None, port=None, *, force=False):
                                                   fps=scene.render.fps / scene.render.fps_base,
                                                   graph=json.loads(ng[GRAPH]))
                     update = GeoUpdate.from_message(header, output)
+                    names = update.detail.get("instance_objects", [])
+                    objects = _instance_objects(obj, mod, names)
                     mirror = Mirror()
                     mirror.apply(update)
                     cache = _cache(mod)
@@ -363,18 +547,23 @@ def pump(host=None, port=None, *, force=False):
                         cache.data.materials.append(material)
                     mesh_writer.apply_update(cache.data, mirror, update)
                     _interface(mod, header, activate=True)
+                    proxy.sync_instances(ng, names, objects=objects)
                     bpy.context.view_layer.update()
                     _digests[ident] = signature
                     ng[STATUS] = "Ready"
                     _failures.pop(ident, None)
                     cooked += 1
                 except Exception as exc:
+                    if isinstance(exc, SourceBindingError):
+                        _disconnect_unsafe_sources(obj, mod)
                     ng[STATUS] = f"Error (last cache retained): {exc}"
                     upstream_error = str(exc)
                     errors.append(upstream_error)
                     if isinstance(exc, (OSError, ConnectionError)):
                         raise
-                    _failures[instance_id(mod)] = (signature, upstream_error)
+                    selected_source = get_source(mod)
+                    _failures[instance_id(mod)] = (None if isinstance(exc, SourceBindingError) else signature, upstream_error,
+                                                   selected_source.as_pointer() if selected_source else 0)
         _last_error = "; ".join(dict.fromkeys(errors))
         _retry_at = 0.0
     except Exception as exc:
