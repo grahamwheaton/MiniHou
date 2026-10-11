@@ -110,7 +110,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 |---|---|---|
 | ![scifi_panels](docs/images/gallery_scifi_panels.png) groups + polyextrude | ![subd_pod](docs/images/gallery_subd_pod.png) extrude, clip, mirror, subdivide | ![curves_vine](docs/images/gallery_curves_vine.png) curves: resample, blur, sweep |
 | ![volumes](docs/images/gallery_volumes.png) sdf_boolean fillet, metaballs | ![lsystem_tree](docs/images/gallery_lsystem_tree.png) lsystem + sweep + leaves | ![eroded_terrain](docs/images/gallery_eroded_terrain.png) heightfield erosion |
-| ![bevel_shapes](docs/images/gallery_bevel_shapes.png) polybevel, tube, torus, cusp normals | ![uv_unwrap](docs/images/gallery_uv_unwrap.png) uv_flatten (LSCM), checker texture | |
+| ![bevel_shapes](docs/images/gallery_bevel_shapes.png) polybevel, tube, torus, cusp normals | ![uv_unwrap](docs/images/gallery_uv_unwrap.png) uv_flatten (LSCM), checker texture | ![fractured_rock](docs/images/gallery_fractured_rock.png) voronoi_fracture, exploded_view, smooth |
 
 ## Nodes
 
@@ -124,11 +124,14 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `tube` | - | cylinder or cone along Z (top radius 0 ends in a point), optional caps; vertex `uv` |
 | `torus` | - | torus in XY, outward quads; vertex `uv` |
 | `transform` | geo | scale / rotate (Euler XYZ) / translate about a pivot; rotates `N`; optional group |
+| `match_size` | geo | move (centre, or sit on the ground with justify min) and scale (uniform or per axis) to a target box |
 | `noise` | geo | fractal Perlin noise; displaces `P` or writes any attribute (scalar or vector mode); optional group |
 | `group_create` | geo | a named point or primitive group: pattern/expression, bounding box, normal direction, random %, boundary |
 | `group_promote` | geo | convert groups between points and primitives |
 | `blast` | geo | delete a group of primitives or points (or keep only it) |
 | `polybevel` | geo | chamfer sharp edges (min angle, point group); slides along borders and flat edges so subdivided meshes bevel cleanly; new faces in group `bevel` |
+| `voronoi_fracture` | geo, points | break a closed mesh into the exact Voronoi cells of the points; closed pieces, prim `piece`, caps in group `inside`, optional gap |
+| `exploded_view` | geo | push pieces (a prim attribute) away from a centre |
 | `polyextrude` | geo | extrude faces (a group) along their normals with inset; connected regions or individual faces; groups `extrudeFront`/`extrudeSide` |
 | `subdivide` | geo | Catmull-Clark (smooth, open boundaries stay curves, corners sharp) or linear; uv and groups follow |
 | `mirror` | geo | reflect across a plane, weld the seam, keep or drop the original |
@@ -142,6 +145,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `attribute_promote` | geo | move attributes between points, primitives, vertices and detail (average/min/max/sum/first) |
 | `attribute_transfer` | geo, source | copy point attributes from the nearest source point, with a distance limit and soft edge |
 | `attribute_blur` | geo | Laplacian smoothing of P or any float point attribute over the edges |
+| `smooth` | geo | Taubin smoothing (removes noise without shrinking) or Laplacian; borders pinned; optional point group |
 | `connectivity` | geo | number connected pieces (`class`) on points or primitives |
 | `measure` | geo | area, perimeter, mean curvature (1/radius), piece area / volume |
 | `color` | geo | Cd: constant, random, random per piece, or a ramp along an attribute |

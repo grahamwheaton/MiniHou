@@ -191,6 +191,9 @@ Worked through in order of how often Houdini users reach for them:
    least-squares system for all islands (two pins each): SciPy's direct solver, else Jacobi-PCG on the assembled
    normal equations (a Numba loop when available, numpy otherwise) warm-started from planar projections. Islands are
    scaled to their 3-D area, turned to their smallest bounding box and shelf-packed.
+10. **Fracture and clean-up**: `voronoi_fracture` clips the mesh by bisector planes nearest-first per cell and stops once
+    a plane is beyond the piece's farthest corner (exact cells); only loops lying on the cutting plane are capped, so
+    open inputs stay open. `smooth` uses Taubin's lambda|mu steps (no shrinkage); `match_size`, `exploded_view`.
 
 Next candidates: exact mesh booleans, an editor frame slider, numba kernels for
 closest-point queries and SDF construction (the numpy SDF of a mesh spends most of its time in closest points).

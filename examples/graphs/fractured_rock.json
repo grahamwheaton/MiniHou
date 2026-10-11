@@ -1,0 +1,15 @@
+{"version": 1, "doc": "Voronoi fracture: a noisy, Taubin-smoothed rock broken into 40 pieces around points scattered on its surface and pulled inwards, pushed apart with exploded_view; inside faces get the second material.",
+ "nodes": {
+  "ball": {"type": "sphere", "params": {"radius": 1.0, "rows": 32, "columns": 64}, "pos": [0, 0]},
+  "lumpy": {"type": "noise", "inputs": {"geo": "ball"}, "pos": [0, 100], "params": {"amplitude": [0.22, 0.22, 0.22], "frequency": 1.4, "seed": 4}},
+  "rock": {"type": "smooth", "inputs": {"geo": "lumpy"}, "pos": [0, 200], "params": {"iterations": 4}},
+  "seeds_surface": {"type": "scatter", "inputs": {"geo": "rock"}, "pos": [250, 200], "params": {"count": 40, "seed": 7}},
+  "seeds": {"type": "transform", "inputs": {"geo": "seeds_surface"}, "pos": [250, 300], "params": {"uniform_scale": 0.6}},
+  "pieces": {"type": "voronoi_fracture", "inputs": {"geo": "rock", "points": "seeds"}, "pos": [0, 400]},
+  "apart": {"type": "exploded_view", "inputs": {"geo": "pieces"}, "pos": [0, 500], "params": {"scale": 0.35}},
+  "mat": {"type": "wrangle", "inputs": {"geo": "apart"}, "pos": [0, 600], "params": {"snippet": "i@material_index = i@group_inside", "run_over": "primitives"}},
+  "ground": {"type": "match_size", "inputs": {"geo": "mat"}, "pos": [0, 700], "params": {"justify_z": "min"}},
+  "shade": {"type": "normal", "inputs": {"geo": "ground"}, "pos": [0, 800], "params": {"domain": "vertex", "cusp_angle": 35.0}},
+  "out": {"type": "output", "inputs": {"geo": "shade"}, "pos": [0, 900]}},
+ "display": "out",
+ "exposed": [{"name": "Pieces", "node": "seeds_surface", "param": "count"}, {"name": "Explode", "node": "apart", "param": "scale"}]}

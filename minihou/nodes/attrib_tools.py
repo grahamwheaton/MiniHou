@@ -215,6 +215,30 @@ def attribute_transfer(geo, source, names, max_distance, blend_width, group):
 
 
 # -- blur / smooth ----------------------------------------------------------------------------------------------
+def _edge_smoother(geo, pin_boundary, group):
+    """Edges, valences and the mask of points allowed to move, for Laplacian steps over the mesh edges."""
+    e = topo.edges(geo)
+    a, b = e.points[:, 0], e.points[:, 1]
+    n = geo.npoints
+    count = np.bincount(np.r_[a, b], minlength=n)
+    move = np.ones(n, bool) if group == "" else groups.mask(geo, "point", group)
+    if pin_boundary:                                     # open polygon edges, and the ends of curves
+        move &= ~topo.boundary_points(geo)
+        move &= count != 1
+    move &= count > 0
+    return a, b, np.maximum(count, 1).astype(np.float64), move
+
+
+def _laplacian(v, a, b, deg, move, factors):
+    """Steps v += f * (neighbour average - v) for each f in factors (moving points only)."""
+    n = len(v)
+    for f in factors:
+        s = np.stack([np.bincount(a, weights=v[b, c], minlength=n) + np.bincount(b, weights=v[a, c], minlength=n)
+                      for c in range(v.shape[1])], 1)
+        v = np.where(move[:, None], v + f * (s / deg[:, None] - v), v)
+    return v
+
+
 @node("attribute_blur", inputs=["geo"], category="attribute", params=[
     Str("names", "P", doc="Point attributes to smooth along edges (P smooths the shape), space separated"),
     Int("iterations", 5, min=0, soft_max=100),
@@ -223,16 +247,8 @@ def attribute_transfer(geo, source, names, max_distance, blend_width, group):
     Str("group", "", doc="Only these points"),
 ])
 def attribute_blur(geo, names, iterations, strength, pin_boundary, group):
-    """Laplacian smoothing of point attributes over the mesh edges (Houdini's Attribute Blur / Smooth)."""
-    e = topo.edges(geo)
-    a, b = e.points[:, 0], e.points[:, 1]
-    n = geo.npoints
-    deg = np.maximum(np.bincount(np.r_[a, b], minlength=n), 1).astype(np.float64)
-    move = np.ones(n, bool) if group == "" else groups.mask(geo, "point", group)
-    if pin_boundary:                                     # open polygon edges, and the ends of curves
-        move &= ~topo.boundary_points(geo)
-        move &= np.bincount(np.r_[a, b], minlength=n) != 1
-    move &= np.bincount(np.r_[a, b], minlength=n) > 0
+    """Laplacian smoothing of point attributes over the mesh edges (Houdini's Attribute Blur)."""
+    a, b, deg, move = _edge_smoother(geo, pin_boundary, group)
     out = geo.copy()
     for nm in names.replace(",", " ").split():
         arr = geo.point.get(nm)
@@ -240,13 +256,68 @@ def attribute_blur(geo, names, iterations, strength, pin_boundary, group):
             raise ValueError(f"no point attribute {nm!r}")
         if arr.dtype.kind != "f":
             raise ValueError(f"{nm!r} is not a float attribute; only floats can be blurred")
-        v = rows(arr).astype(np.float64)
-        for _ in range(iterations):
-            s = np.stack([np.bincount(a, weights=v[b, c], minlength=n) + np.bincount(b, weights=v[a, c], minlength=n)
-                          for c in range(v.shape[1])], 1)
-            avg = s / deg[:, None]
-            v = np.where(move[:, None], v + strength * (avg - v), v)
+        v = _laplacian(rows(arr).astype(np.float64), a, b, deg, move, [strength] * iterations)
         out.point[nm] = v.astype(np.float32).reshape(arr.shape)
+    return out
+
+
+@node("smooth", inputs=["geo"], category="deform", params=[
+    Int("iterations", 10, min=0, soft_max=200),
+    Float("strength", 0.5, min=0.0, max=1.0),
+    Enum("method", ["taubin", "laplacian"], doc="taubin: alternating shrink/inflate steps that keep the volume; "
+         "laplacian: plain averaging (shrinks)"),
+    Bool("pin_boundary", True, doc="Keep points on open edges, and the ends of curves, in place"),
+    Str("group", "", doc="Only these points"),
+])
+def smooth(geo, iterations, strength, method, pin_boundary, group):
+    """Smooth the shape (Houdini's Smooth). Taubin's lambda|mu filter removes noise without shrinking; N is
+    recomputed if present."""
+    a, b, deg, move = _edge_smoother(geo, pin_boundary, group)
+    if method == "taubin":                               # mu from the pass-band k = 0.1 (Taubin 1995)
+        mu = 1.0 / (0.1 - 1.0 / max(strength, 1e-6))
+        factors = [strength, mu] * iterations
+    else:
+        factors = [strength] * iterations
+    out = geo.copy()
+    out.point["P"] = _laplacian(geo.P.astype(np.float64), a, b, deg, move, factors).astype(np.float32)
+    if "N" in out.point and out.nprims:
+        from .normal import normal
+        out = normal(out, "point")
+    return out
+
+
+# -- match size -------------------------------------------------------------------------------------------------
+@node("match_size", inputs=["geo"], category="modify", params=[
+    Bool("translate", True, doc="Move the bounding box to the target"),
+    Vec3("center", (0.0, 0.0, 0.0), doc="Target position (of the box centre, or its bottom with justify_z = min)"),
+    Enum("justify_z", ["center", "min", "max"], doc="min: sit on the target (e.g. the ground at Z = 0)"),
+    Bool("scale", False, doc="Scale to the target size"),
+    Vec3("size", (1.0, 1.0, 1.0), min=0.0),
+    Bool("uniform", True, doc="Keep proportions: the largest fitting uniform scale"),
+])
+def match_size(geo, translate, center, justify_z, scale, size, uniform):
+    """Fit geometry to a target position and size (Houdini's Match Size)."""
+    if geo.npoints == 0:
+        return geo
+    P = geo.P.astype(np.float64)
+    lo, hi = P.min(0), P.max(0)
+    mid = (lo + hi) / 2.0
+    s = np.ones(3)
+    if scale:
+        ext = hi - lo
+        want = np.asarray(size, np.float64)
+        ok = ext > 1e-12
+        s = np.where(ok, want / np.where(ok, ext, 1.0), 1.0)
+        if uniform:
+            s[:] = float(s[ok].min()) if ok.any() else 1.0
+    anchor = mid.copy()
+    anchor[2] = {"center": mid[2], "min": lo[2], "max": hi[2]}[justify_z]
+    target = np.asarray(center, np.float64) if translate else anchor
+    out = geo.copy()
+    out.point["P"] = ((P - anchor) * s + target).astype(np.float32)
+    if "N" in out.point and not np.allclose(s, s[0]):
+        from ._util import normalize_rows
+        out.point["N"] = normalize_rows(out.point["N"] / s).astype(np.float32)
     return out
 
 
