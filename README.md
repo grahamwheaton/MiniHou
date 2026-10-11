@@ -117,15 +117,28 @@ All examples are cooked by the test-suite, so they keep working as nodes evolve.
 | `merge` | geos (any number) | concatenate; missing attributes are zero-filled |
 | `output` | geo | marks what the live link publishes (validated) |
 
-### Wrangle snippets
+### Wrangle snippets (the attribute wrangle)
 
 ```
-@P.z += sin(@P.x * 2) * 0.5                       # read/modify attributes; .x .y .z components
-v@Cd = set(fit(@P.z, -1, 1, 0, 1), 0, 1)          # f@ v@ i@ create float / vector / int attributes
+@P.z += sin(@P.x * 2) * 0.5                       # read/modify attributes; .x .y .z .w components
+v@Cd = set(fit(@P.z, -1, 1, 0, 1), 0, 1)          # f@ i@ u@ v@ p@: float, int, vector2, vector, vector4
 f@mask = 1 if length(@P) < 3 and @P.z > 0 else 0  # conditionals and boolean logic
 h = noise(@P * 0.3); @P += @N * h                 # locals; several statements (; or new lines)
-i@id = @ptnum                                     # @ptnum, @numpt; constants PI, E
+i@id = @ptnum                                     # @ptnum @primnum @vtxnum @numpt @numprim @numvtx; PI, E
 ```
+
+`run_over` picks the domain: **points**, **primitives** (faces) or **vertices** (face corners, Blender's corners). Other
+domains can be read: over vertices, point and primitive attributes (`@P` is the corner's point); over primitives, point and
+vertex attributes averaged over the face (`@P` is the face centre). Writing a name moves the attribute to the domain being
+run over: an attribute name lives on one domain, as in Blender. Examples:
+
+```
+u@uv = set(@P.x, @P.y) * 0.1                      # over vertices: a planar UV map (Blender: "UVMap")
+i@material_index = 1 if @P.z > 2 else 0           # over primitives: high faces get the second material
+v@Cd = set(rand(@primnum), 0.2, 0.5)              # over primitives: a random colour per face
+```
+
+`attribute_delete` (wildcards) and `attribute_rename` tidy up, e.g. delete `N` to let Blender compute its own normals.
 
 Functions: `sin cos tan asin acos atan atan2 sqrt exp log abs floor ceil frac pow sign min max clamp lerp fit smooth length
 normalize dot cross set noise rand select radians degrees`. A float times a vector works as in VEX. Snippets are compiled once

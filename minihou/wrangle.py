@@ -9,9 +9,17 @@ Examples (run over points)::
 
 Language
 --------
-* ``@name`` reads/writes a point attribute. Prefixes create new attributes with a type: ``f@`` float, ``v@`` vector,
-  ``i@`` int. ``@P.x``/``.y``/``.z`` (also ``.r .g .b`` and ``[0]``-free) address vector components.
-* ``@ptnum`` (point index) and ``@numpt`` (point count) are read-only.
+* The node runs over **points**, **primitives** (faces) or **vertices** (face corners; Blender's "corners"). ``@name``
+  reads/writes an attribute of that domain. Prefixes create new attributes with a type: ``f@`` float, ``i@`` int,
+  ``u@`` vector2 (e.g. UVs), ``v@`` vector, ``p@`` vector4 (e.g. RGBA). ``@P.x``/``.y``/``.z``/``.w`` (also ``.r .g .b
+  .a``) address components.
+* Attributes of other domains can be read: over vertices, point and primitive attributes (``@P`` is the corner's point);
+  over primitives, point and vertex attributes averaged over the face (``@P`` is the face centre). Writing such a name
+  moves the attribute to the domain being run over (an attribute name lives on one domain, as in Blender).
+* Read-only: ``@ptnum`` (over vertices: the corner's point), ``@primnum``, ``@vtxnum``, ``@numpt``, ``@numprim``,
+  ``@numvtx``.
+* Names that Blender treats natively: ``@uv`` (UV map), ``@Cd`` (color attribute), ``@N`` (normals),
+  ``@material_index``, ``@sharp_face`` (flat shading).
 * Operators: ``+ - * / // % **``, comparisons, ``and or not``, ``a if cond else b``; assignment and ``+= -= *= /=``.
 * Functions: see :data:`FUNCTIONS` (``sin``, ``fit``, ``clamp``, ``length``, ``normalize``, ``dot``, ``cross``, ``noise``, ``rand`` ...).
 * A float times a vector works (per-point scalars are kept as ``(n, 1)`` columns internally).
@@ -39,10 +47,11 @@ class WrangleError(ValueError):
 
 
 _COMPONENTS = {"x": 0, "y": 1, "z": 2, "w": 3, "r": 0, "g": 1, "b": 2, "a": 3}
-_PREFIX_TYPES = {"f": "float", "v": "vector", "i": "int", "": None}
-_ATTR_RE = re.compile(r"(?<![A-Za-z0-9_])([fvi]?)@([A-Za-z_][A-Za-z0-9_]*)")
+_PREFIX_TYPES = {"f": "float", "v": "vector", "i": "int", "u": "vector2", "p": "vector4", "": None}
+_WIDTH = {"float": 1, "int": 1, "vector2": 2, "vector": 3, "vector4": 4}
+_ATTR_RE = re.compile(r"(?<![A-Za-z0-9_])([fviup]?)@([A-Za-z_][A-Za-z0-9_]*)")
 _MANGLE = "__attr_"
-_READONLY = {"ptnum", "numpt"}
+_READONLY = {"ptnum", "numpt", "primnum", "numprim", "vtxnum", "numvtx"}
 
 
 # ---------------------------------------------------------------------------
@@ -138,7 +147,8 @@ def reference() -> str:
     lang = __doc__.split("Language\n--------\n", 1)[1].split("Safety\n------", 1)[0].strip()
     funcs = "\n".join(f"* {SIGNATURES[name]}" for name in sorted(FUNCTIONS))
     examples = __doc__.split("Examples (run over points)::", 1)[1].split("Language\n", 1)[0].strip("\n")
-    return ("Wrangle snippets run once over all points (vectorised; no loops needed or allowed).\n\nExamples:\n"
+    return ("Wrangle snippets run over every point, primitive or vertex at once (the node's run_over parameter; "
+            "vectorised, no loops needed or allowed).\n\nExamples:\n"
             f"{examples}\n\n{lang}\n\nFunctions:\n{funcs}\n\nConstants: {', '.join(sorted(CONSTANTS))}\n\n"
             "Statements are separated by newlines or ';'; '#' starts a comment. Errors name the line and column.")
 
@@ -155,32 +165,36 @@ class Program:
     def __init__(self, source: str, reads: Set[str], writes: Dict[str, str], fn: Callable):
         self.source, self.reads, self.writes, self.fn = source, reads, writes, fn
 
-    def run(self, attrs: Dict[str, np.ndarray], n: int) -> Dict[str, np.ndarray]:
-        """Execute over ``n`` elements. ``attrs`` maps name -> array; returns the written attributes (new arrays)."""
-        missing = sorted(self.reads - set(attrs) - set(self.writes))
+    def run(self, attrs: Dict[str, np.ndarray], n: int, specials: Dict[str, object] = None) -> Dict[str, np.ndarray]:
+        """Execute over ``n`` elements. ``attrs`` maps name -> array (of the domain being run over, or promoted to it);
+        ``specials`` are the read-only ``@ptnum``-style values (default: a point wrangle's). Returns the written
+        attributes (new arrays)."""
+        if specials is None:
+            specials = {"ptnum": np.arange(n, dtype=np.int32).reshape(-1, 1), "numpt": np.int32(n)}
+        missing = sorted(self.reads - set(attrs) - set(self.writes) - set(specials))
         if missing:
+            avail = sorted(set(attrs) | set(specials))
             raise WrangleError(f"unknown attribute(s) {', '.join('@' + m for m in missing)}; "
-                               f"available: {', '.join('@' + a for a in sorted(attrs)) or 'none'}")
+                               f"available here: {', '.join('@' + a for a in avail) or 'none'}")
         env: Dict[str, np.ndarray] = {}
         kinds: Dict[str, str] = {}
         for name, declared in self.writes.items():
             if name in attrs:
                 a = np.asarray(attrs[name])
                 kinds[name] = declared or _kind_of(a)
-                if declared and declared != _kind_of(a):
+                if declared and declared != _kind_of(a) and not (declared == "float" and _kind_of(a) == "int"):
                     raise WrangleError(f"@{name} exists as {_kind_of(a)}, not {declared}")
             else:
                 kinds[name] = declared                      # '' = infer from the assigned value
                 if declared:
-                    env[name] = np.zeros((n, 3) if declared == "vector" else (n, 1),
-                                         np.int32 if declared == "int" else np.float32)
+                    env[name] = np.zeros((n, _WIDTH[declared]), np.int32 if declared == "int" else np.float32)
         for name in self.reads | set(self.writes):
             if name in attrs:
                 a = np.asarray(attrs[name])
-                a = a.astype(np.float32) if a.dtype.kind == "f" else a
+                a = a.astype(np.float32) if a.dtype.kind in "fb" else a
                 env[name] = _col(a).copy() if name in self.writes else _col(a)
-        env["ptnum"] = np.arange(n, dtype=np.int32).reshape(-1, 1)
-        env["numpt"] = np.int32(n)
+        for name, v in specials.items():
+            env[name] = v
         try:
             with np.errstate(all="ignore"):
                 self.fn(env, n)
@@ -196,30 +210,36 @@ class Program:
             if v.ndim == 0:
                 v = v.reshape(1, 1)
             if v.ndim == 1:
-                v = v.reshape(1, -1) if v.shape[0] in (3, 4) and kinds[name] == "vector" else v.reshape(-1, 1)
+                # per-element values are (n, 1) columns internally, so a 1-D value is a constant vector (set(1, 0, 0))
+                v = v.reshape(1, -1) if 2 <= v.shape[0] <= 4 else v.reshape(-1, 1)
             if v.shape[0] != n:
                 v = np.broadcast_to(v, (n, v.shape[1]))
-            kind = kinds[name] or ("vector" if v.shape[1] == 3 else "int" if v.dtype.kind in "iu" else "float")
-            if kind == "vector":
-                if v.shape[1] == 1:
-                    v = np.broadcast_to(v, (n, 3))
-                if v.shape[1] != 3:
-                    raise WrangleError(f"@{name} is a vector but the snippet assigned {v.shape[1]} components")
-                v = v.astype(np.float32)
-            else:
-                if v.shape[1] != 1:
-                    raise WrangleError(f"@{name} is a {kind} but the snippet assigned a vector")
+            kind = kinds[name] or _kind_of_width(v.shape[1], v.dtype.kind in "iub")
+            width = _WIDTH.get(kind)
+            if width is None:
+                width = int(kind.split("-")[0])                 # an existing k-component attribute
+            if v.shape[1] == 1 and width > 1:
+                v = np.broadcast_to(v, (n, width))
+            if v.shape[1] != width:
+                raise WrangleError(f"@{name} is a {kind} but the snippet assigned {v.shape[1]} components")
+            if width == 1:
                 v = v[:, 0].astype(np.int32 if kind == "int" else np.float32)
+            else:
+                v = v.astype(np.float32)
             out[name] = np.ascontiguousarray(v)
         return out
 
 
 def _kind_of(a: np.ndarray) -> str:
-    if a.ndim == 2 and a.shape[1] == 3:
-        return "vector"
-    if a.ndim == 1:
+    if a.ndim == 1 or a.shape[1] == 1:
         return "int" if a.dtype.kind in "iub" else "float"
-    return f"{a.shape[1]}-component"
+    return _kind_of_width(a.shape[1], False)
+
+
+def _kind_of_width(width: int, is_int: bool) -> str:
+    if width == 1:
+        return "int" if is_int else "float"
+    return {2: "vector2", 3: "vector", 4: "vector4"}.get(width, f"{width}-component")
 
 
 def _err(node, msg) -> WrangleError:
@@ -447,4 +467,4 @@ def compile_snippet(source: str) -> Program:
     writes = {}
     for name in chk.writes:
         writes[name] = declared.get(name) or ""
-    return Program(source, set(chk.reads) - _READONLY - set(), writes, ns["__wrangle"])
+    return Program(source, set(chk.reads), writes, ns["__wrangle"])

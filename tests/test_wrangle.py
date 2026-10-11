@@ -191,5 +191,87 @@ class WrangleSafetyTests(unittest.TestCase):
         self.assertIn("exists as vector", str(cm.exception))
 
 
+def wd(geo, snippet, run_over):
+    return run("wrangle", geo, snippet=snippet, run_over=run_over)
+
+
+class DomainTests(unittest.TestCase):
+    """Running over primitives and vertices, reading across domains (Blender's FACE / CORNER domains)."""
+
+    def setUp(self):
+        self.g = grid(3)                                     # 9 points, 4 quads, 16 corners; uv on points
+
+    def test_over_primitives_reads_face_centres_and_writes_prim_attributes(self):
+        out = wd(self.g, "f@h = @P.x; i@id = @primnum * 10; i@n = @numprim", "primitives")
+        self.assertEqual(out.prim["h"].shape, (4,))
+        centres = self.g.P[self.g.topology.vertex_point].reshape(4, 4, 3).mean(1)
+        np.testing.assert_allclose(out.prim["h"], centres[:, 0], atol=1e-6)
+        np.testing.assert_array_equal(out.prim["id"], [0, 10, 20, 30])
+        np.testing.assert_array_equal(out.prim["n"], [4, 4, 4, 4])
+        self.assertNotIn("h", out.point)
+
+    def test_over_vertices_reads_point_and_prim_attributes(self):
+        g = wd(self.g, "i@mat = @primnum", "primitives")
+        out = wd(g, "u@uv = set(@P.x, @P.y); i@pt = @ptnum; i@m = @mat; i@v = @vtxnum", "vertices")
+        vp = g.topology.vertex_point
+        self.assertEqual(out.vertex["uv"].shape, (16, 2))
+        np.testing.assert_allclose(out.vertex["uv"], g.P[vp][:, :2], atol=1e-6)
+        np.testing.assert_array_equal(out.vertex["pt"], vp)
+        np.testing.assert_array_equal(out.vertex["m"], np.repeat(np.arange(4), 4))
+        np.testing.assert_array_equal(out.vertex["v"], np.arange(16))
+        self.assertNotIn("uv", out.point)                    # moved from points to vertices (one domain per name)
+
+    def test_writing_a_promoted_name_moves_it(self):
+        g = wd(self.g, "v@Cd = set(@ptnum, 0, 0)", "points")
+        out = wd(g, "@Cd *= 2", "vertices")
+        self.assertNotIn("Cd", out.point)
+        np.testing.assert_allclose(out.vertex["Cd"][:, 0], 2 * g.topology.vertex_point)
+        out2 = wd(g, "@Cd.y = 1", "primitives")             # averaged over each face, then written per face
+        self.assertEqual(out2.prim["Cd"].shape, (4, 3))
+        np.testing.assert_allclose(out2.prim["Cd"][:, 1], 1)
+
+    def test_vector2_and_vector4(self):
+        out = wd(self.g, "p@Cd = set(1, 0.5, 0, 1); u@st = set(@P.x, 0)", "points")
+        self.assertEqual(out.point["Cd"].shape, (9, 4))
+        self.assertEqual(out.point["st"].shape, (9, 2))
+        np.testing.assert_allclose(out.point["Cd"][0], [1, 0.5, 0, 1])
+        out2 = wd(self.g, "@uv.x = 1 - @uv.x", "points")    # an existing 2-component attribute keeps its width
+        self.assertEqual(out2.point["uv"].shape, (9, 2))
+        np.testing.assert_allclose(out2.point["uv"][:, 0], 1 - self.g.point["uv"][:, 0])
+        with self.assertRaises(WrangleError) as cm:
+            wd(self.g, "@uv = set(1, 2, 3)", "points")
+        self.assertIn("vector2", str(cm.exception))
+
+    def test_errors_and_specials_per_domain(self):
+        with self.assertRaises(WrangleError) as cm:
+            wd(self.g, "@P.z = 1", "primitives")
+        self.assertIn("only be written when running over points", str(cm.exception))
+        with self.assertRaises(WrangleError) as cm:
+            wd(self.g, "i@x = @vtxnum", "points")
+        self.assertIn("@vtxnum", str(cm.exception))
+        self.assertIn("@ptnum", str(cm.exception))           # lists what is available here
+        with self.assertRaises(WrangleError):
+            wd(self.g, "@primnum = 1", "primitives")         # read-only
+
+    def test_material_index_and_sharp_face_style_attributes(self):
+        out = wd(self.g, "i@material_index = 1 if @P.x > 0 else 0; i@sharp_face = 1", "primitives")
+        self.assertEqual(out.prim["material_index"].dtype, np.int32)
+        self.assertEqual(sorted(set(out.prim["material_index"].tolist())), [0, 1])
+
+
+class AttributeNodeTests(unittest.TestCase):
+    def test_delete_with_wildcards_and_rename(self):
+        g = wd(grid(3), "f@tmp_a = 1; f@tmp_b = 2; f@keep = 3; v@N = set(0, 0, 1)", "points")
+        out = run("attribute_delete", g, names="tmp_* N P")
+        self.assertEqual(sorted(out.point.names()), ["P", "keep", "uv"])
+        r = run("attribute_rename", g, from_name="keep", to_name="pscale")
+        self.assertIn("pscale", r.point)
+        self.assertNotIn("keep", r.point)
+        np.testing.assert_allclose(r.point["pscale"], 3)
+        self.assertIs(run("attribute_rename", g, from_name="", to_name="x"), g)
+        with self.assertRaises(Exception):
+            run("attribute_rename", g, from_name="missing", to_name="x")
+
+
 if __name__ == "__main__":
     unittest.main()
