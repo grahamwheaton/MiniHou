@@ -105,6 +105,25 @@ class ModifierStackTests(unittest.TestCase):
         mod.node_group = ng
         return mod, trans
 
+    def test_repeat_block_after_native_and_chained_minihou_modifiers(self):
+        path = ROOT / "examples/modifiers/repeat_transform.json"
+        obj = self.mesh(x=1)
+        material = bpy.data.materials.new("Repeat test material")
+        obj.data.materials.append(material)
+        self.native_translate(obj, 4)
+        a = self.m.add_modifier(obj, str(path), port=self.engine.port)
+        b = self.m.add_modifier(obj, str(path), port=self.engine.port)
+        self.set_params(a, **{"Repeat Count": 3, "Step": [2, 0, 0]})
+        self.set_params(b, **{"Repeat Count": 2, "Step": [1, 0, 0]})
+        self.cook()
+        self.assert_x(obj, [13])  # (initial 1 + native 4) + 3*2 + 2*1
+        self.set_params(a, **{"Repeat Count": 0, "Step": [2, 0, 0]})
+        self.cook()
+        self.assert_x(obj, [7])
+        self.assertEqual(obj.data.vertices[0].co.x, 1)
+        evaluated = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+        self.assertEqual(evaluated.data.materials[0].original, material)
+
     def test_native_prefix_and_chained_independent_instances(self):
         obj = self.mesh()
         original = tuple(obj.data.vertices[0].co)

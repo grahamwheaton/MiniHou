@@ -42,6 +42,23 @@ class ModifierInstances(unittest.TestCase):
         self.clients.append(c)
         return c
 
+    def test_repeat_blocks_isolate_count_parameters_and_upstream_mesh(self):
+        from pathlib import Path
+        graph = Graph.load(Path(__file__).resolve().parents[1] / "examples/modifiers/repeat_transform.json").to_dict()
+        c = self.client()
+        _, a = c.cook("repeat-a", "", {"Repeat Count": 3, "Step": [2, 0, 0]}, mesh(), graph=graph)
+        _, b = c.cook("repeat-b", "", {"Repeat Count": 2, "Step": [0, 1, 0]}, a, graph=graph)
+        np.testing.assert_array_equal(a["point/P"][:, 0], [7, 7, 7])
+        np.testing.assert_array_equal(b["point/P"][:, 0], [7, 7, 7])
+        np.testing.assert_array_equal(b["point/P"][:, 1], [2, 3, 2])
+        _, zero = c.cook("repeat-b", "", {"Repeat Count": 0}, mesh(20), graph=graph)
+        np.testing.assert_array_equal(zero["point/P"], mesh(20)["point/P"])
+        _, again = c.cook("repeat-a", "", {"Repeat Count": 3, "Step": [2, 0, 0]}, mesh(), graph=graph)
+        np.testing.assert_array_equal(again["point/P"], a["point/P"])
+        graph["nodes"]["step"]["params"]["translate"] = [5, 0, 0]
+        _, edited = c.cook("repeat-a", "", {"Repeat Count": 2}, mesh(), graph=graph)
+        np.testing.assert_array_equal(edited["point/P"][:, 0], [11, 11, 11])
+
     def test_independent_parameters_defaults_and_chained_input(self):
         c = self.client()
         welcome = c.connect()

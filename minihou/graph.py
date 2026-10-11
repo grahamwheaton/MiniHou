@@ -239,9 +239,11 @@ class Graph:
                     indeg[nid] += 1
                     consumers[src].append(nid)
         queue = [n for n, d in indeg.items() if d == 0]
+        order = []
         seen = 0
         while queue:
             n = queue.pop()
+            order.append(n)
             seen += 1
             for c in consumers[n]:
                 indeg[c] -= 1
@@ -250,6 +252,12 @@ class Graph:
         if seen != len(self.nodes):
             stuck = sorted(n for n, d in indeg.items() if d > 0)
             errs.append((stuck[0], f"graph contains a cycle involving {stuck}"))
+        elif not errs and any(n.type in {"loop_begin", "loop_end"} for n in self.nodes.values()):
+            from .loops import analyze
+            try:
+                analyze(self, order, self.display)
+            except GraphError as exc:
+                errs.append((exc.node_id, str(exc)))
         if self.display is not None and self.display not in self.nodes:
             errs.append((None, f"display node {self.display!r} does not exist"))
         names = set()

@@ -47,6 +47,12 @@ body.has-error #main { bottom: 30px; }
 #wires path.hit { stroke: transparent; stroke-width: 12; pointer-events: stroke; cursor: pointer; }
 #wires path.sel { stroke: var(--node-hi); stroke-width: 3; }
 #wires path.err { stroke: #a85959; }
+#wires path.loop-pair { stroke: #bf91df; stroke-dasharray: 5 4; }
+#wires .loop-region { fill: #bf91df08; stroke: #bf91df55; stroke-width: 1; stroke-dasharray: 7 5; }
+#wires .loop-label { fill: #c5a4dd; font-size: 10px; }
+.node.cat-flow .band { background: #9569b5; }
+.loop-info { border: 1px solid #9569b5; padding: 7px; margin-bottom: 8px; }
+.loop-info button { margin: 5px 4px 0 0; }
 #overlay path { fill: none; stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; }
 
 .node { position: absolute; width: 160px; height: 46px; border-radius: 6px; background: var(--node); border: 1px solid #00000066;

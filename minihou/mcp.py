@@ -69,6 +69,7 @@ Each op is an object with "op":
   meta       {"op":"meta","id":id,"set":{"comment":"..."}}
   replace    {"op":"replace","graph":{...whole graph JSON...}}
   layout     {"op":"layout"}  (tidy all node positions; put it last in a batch that added many nodes)
+  loop       {"op":"loop","from"?:src,"to"?:dst,"port"?:name,"iterations"?:int,"pos"?:[x,y]} (paired Begin/Transform/End)
 Nodes flow top to bottom: each node's single output feeds inputs of nodes below it. Ids: letters, digits, _."""
 
 TOOLS: List[dict] = [
@@ -95,7 +96,7 @@ TOOLS: List[dict] = [
                  "items": {"type": "object", "required": ["op"], "properties": {
                      "op": {"type": "string", "enum": ["add", "remove", "rename", "connect", "disconnect", "set",
                                                        "display", "expose", "unexpose", "move", "meta", "replace",
-                                                       "layout"]}}}}}}},
+                                                       "layout", "loop"]}}}}}}},
     {"name": "inspect_node",
      "description": "Cook any node and summarise its geometry: point/prim/vertex counts, bounds, and attributes "
                     "(with min/max/mean and first values when detail is true). Use it to verify each step.",

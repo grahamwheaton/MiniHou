@@ -55,6 +55,8 @@ class ExampleGraphTests(unittest.TestCase):
                     self.assertEqual(header["detail"]["instance_objects"], ["@source"])
                     self.assertEqual(len(arrays["point/P"]), 24)
                     np.testing.assert_array_equal(arrays["point/instance"], 1)
+                elif path.stem == "repeat_transform":
+                    np.testing.assert_allclose(arrays["point/P"], geo.P + [2, 0, 0])
 
 
 if __name__ == "__main__":
