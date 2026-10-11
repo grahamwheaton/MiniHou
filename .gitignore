@@ -6,3 +6,4 @@ __pycache__/
 build/
 dist/
 gui_test_output/
+.mcp.json

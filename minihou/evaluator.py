@@ -167,10 +167,12 @@ class Evaluator:
     def cook(self, graph: Graph, target: Optional[str] = None) -> Geometry:
         t_start = time.perf_counter()
         target = target or graph.output_node()
+        if target not in graph.nodes:
+            raise GraphError(f"display node {target!r} does not exist")
         order = graph.upstream_order(target)
-        errs = graph.validate()
-        if errs:
-            raise GraphError(errs)
+        probs = graph.problems(only=order)       # only what this cook needs: a half-built branch elsewhere is fine
+        if probs:
+            raise GraphError([m for _, m in probs], probs[0][0])
         keys = self.compute_keys(graph, order)
         stats = CookStats(target=target, key=keys[target])
         results: Dict[str, Geometry] = {}

@@ -94,6 +94,8 @@ def main():
     ap.add_argument("--engine", metavar="GRAPH", help="also start `python -m minihou serve GRAPH`")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
+    ap.add_argument("--http-port", type=int, default=8766, help="engine's web editor / API port (-1 = off)")
+    ap.add_argument("--editor", action="store_true", help="also open the node editor in a web browser")
     ap.add_argument("--selftest", action="store_true", help="run the addon tests headless; exit code = result")
     ap.add_argument("--bench", action="store_true", help="run bench/bench_link.py headless (args after --)")
     ap.add_argument("--gui-test", action="store_true",
@@ -126,13 +128,29 @@ def main():
         return gui_test(exe, env, args.keep_open, extra=passthrough)
 
     engine = None
-    if args.engine:
-        engine = subprocess.Popen([sys.executable, "-u", "-m", "minihou", "serve", args.engine, "--host", args.host,
-                                   "--port", str(args.port)], cwd=ROOT)
+    running = _running_engine(args.http_port)
+    if args.engine and running:
+        # e.g. started by an AI assistant through MCP: reuse it instead of failing on a busy port
+        print(f"an engine is already running ({running.get('path')}); opening {args.engine} in it")
+        try:
+            running = _engine_client(args.http_port).post("/api/open", {"path": os.path.abspath(args.engine)})
+        except Exception as e:  # noqa: BLE001 - still launch Blender against the running engine
+            print(f"  could not open it there: {e}", file=sys.stderr)
+    elif args.engine:
+        graph = os.path.abspath(args.engine)
+        root = ROOT if os.path.commonpath([graph, ROOT]) == ROOT else os.path.dirname(graph)   # editor's file menu
+        engine = subprocess.Popen([sys.executable, "-u", "-m", "minihou", "serve", graph, "--host", args.host,
+                                   "--port", str(args.port), "--http-port", str(args.http_port), "--root", root], cwd=ROOT)
         time.sleep(1.0)
         if engine.poll() is not None:
             print("engine exited immediately; see its message above", file=sys.stderr)
             return engine.returncode or 1
+    if (args.engine or running) and args.http_port >= 0:
+        url = f"http://127.0.0.1:{args.http_port}/"
+        print(f"node editor: {url}")
+        if args.editor:
+            import webbrowser
+            webbrowser.open(url)
     cmd = [exe] + ([args.blend] if args.blend else []) + ["--python", os.path.join(ROOT, "tools", "blender_bootstrap.py"),
                                                           "--", "--host", args.host, "--port", str(args.port)]
     print("launching:", " ".join(f'"{c}"' if " " in c else c for c in cmd))
@@ -141,6 +159,22 @@ def main():
     finally:
         if engine and engine.poll() is None:
             engine.terminate()
+
+
+def _engine_client(http_port):
+    sys.path.insert(0, ROOT)
+    from minihou.mcp import EngineClient
+    return EngineClient(f"http://127.0.0.1:{http_port}")
+
+
+def _running_engine(http_port):
+    """State of a MiniHou engine already serving on ``http_port``, or None."""
+    if http_port < 0:
+        return None
+    try:
+        return _engine_client(http_port).get("/api/graph", timeout=2.0)
+    except Exception:  # noqa: BLE001 - nothing there (or not ours)
+        return None
 
 
 def _free_port():
@@ -152,7 +186,7 @@ def _free_port():
 
 
 def _start_engine(graph, port, env):
-    p = subprocess.Popen([sys.executable, "-u", "-m", "minihou", "serve", graph, "--port", str(port)], cwd=ROOT, env=env,
+    p = subprocess.Popen([sys.executable, "-u", "-m", "minihou", "serve", graph, "--port", str(port), "--http-port", "-1"], cwd=ROOT, env=env,
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
     seen = []
     for _ in range(50):

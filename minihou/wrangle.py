@@ -118,6 +118,30 @@ FUNCTIONS: Dict[str, Callable] = {
 }
 CONSTANTS = {"PI": np.float32(np.pi), "E": np.float32(np.e)}
 
+# One line per function for references shown to people and AI tools (a test keeps this in sync with FUNCTIONS).
+SIGNATURES: Dict[str, str] = {
+    "sin": "sin(x)", "cos": "cos(x)", "tan": "tan(x)", "asin": "asin(x)", "acos": "acos(x)", "atan": "atan(x)",
+    "atan2": "atan2(y, x)", "sqrt": "sqrt(x)", "exp": "exp(x)", "log": "log(x) natural log", "abs": "abs(x)",
+    "floor": "floor(x)", "ceil": "ceil(x)", "frac": "frac(x) = x - floor(x)", "pow": "pow(x, y)", "sign": "sign(x)",
+    "min": "min(a, b) per component", "max": "max(a, b) per component", "clamp": "clamp(x, lo, hi)",
+    "lerp": "lerp(a, b, t) = a + (b - a) * t", "fit": "fit(x, omin, omax, nmin, nmax) remap with clamping",
+    "smooth": "smooth(e0, e1, x) smoothstep 0..1", "length": "length(v) -> float", "normalize": "normalize(v) -> unit vector",
+    "dot": "dot(a, b) -> float", "cross": "cross(a, b) -> vector", "set": "set(x, y, z) -> vector from floats",
+    "noise": "noise(p, seed=0) -> float Perlin noise of a vector position, roughly -1..1",
+    "rand": "rand(x, seed=0) -> float in [0, 1), deterministic hash of a number or vector (e.g. rand(@ptnum))",
+    "select": "select(cond, a, b) per point", "radians": "radians(deg)", "degrees": "degrees(rad)",
+}
+
+
+def reference() -> str:
+    """The snippet language in one page (for the editor's help and for AI tools)."""
+    lang = __doc__.split("Language\n--------\n", 1)[1].split("Safety\n------", 1)[0].strip()
+    funcs = "\n".join(f"* {SIGNATURES[name]}" for name in sorted(FUNCTIONS))
+    examples = __doc__.split("Examples (run over points)::", 1)[1].split("Language\n", 1)[0].strip("\n")
+    return ("Wrangle snippets run once over all points (vectorised; no loops needed or allowed).\n\nExamples:\n"
+            f"{examples}\n\n{lang}\n\nFunctions:\n{funcs}\n\nConstants: {', '.join(sorted(CONSTANTS))}\n\n"
+            "Statements are separated by newlines or ';'; '#' starts a comment. Errors name the line and column.")
+
 _BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)
 _CMPOPS = (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE)
 

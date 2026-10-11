@@ -75,6 +75,28 @@ values are recorded as known before they are written to the modifier; (5) forwar
 * New nodes: normal (Newell, numba), delete (expression blast with compaction), box, sphere, circle, fuse.
 * CI on Linux + Windows, including the add-on in real Blender 5.1.2 for Windows (selftest, benchmark, GUI smoke test).
 * Real-Blender GUI smoke test; fixes it found (greyed modifier inputs, interface rebuilds, depsgraph churn).
+* Blender 5.2 support (modifier inputs moved from ID properties to `mod.properties.inputs`), found on a Windows desktop.
+
+## Node editor + MCP (milestone 2)
+
+One editing model, three front ends. `minihou/edit.py` defines JSON edit operations (add, connect, set, expose, layout...)
+applied atomically to a copy of the graph; `Session.edit` commits a batch, records undo (slider drags merge into one step), bumps
+the revision, pushes interface changes to Blender and notifies listeners. The engine serves an HTTP API with Server-Sent Events
+(`minihou/web/server.py`, stdlib only) that the browser editor and the MCP server both use, so an edit from any of the editor, an
+AI, Blender or the JSON file shows up in all the others.
+
+* **Persistence**: the session saves edits back to the graph file (debounced 0.25 s, atomic replace, Windows-safe) and ignores
+  its own writes when watching for external changes; unfinished graphs save and reopen; cooks validate only what the display
+  node needs.
+* **Editor**: vanilla JS served by the engine (no build, no CDN). Text from graph files is only ever inserted as text (a test
+  feeds it HTML). Node DOM is rebuilt only when a node's content changes, so clicks never land on a node being replaced.
+* **MCP**: newline-delimited JSON-RPC over stdio, protocol revisions 2024-11-05 to 2025-06-18, stdlib only, stdout reserved for
+  protocol messages. Tool replies are written for a model: what was created, whether the cook worked, the failing node and
+  message, nodes not feeding the display. `open_graph` can start an engine (its own console window on Windows).
+* **Localhost hardening**: Host-header check (DNS rebinding), JSON-only POSTs (no simple cross-site forms), Origin check,
+  file access limited to `.json` under the workspace root, connection closed after error replies.
+* **Layout**: layered top-to-bottom layout with barycentre sweeps (fewer crossings, straight chains), applied automatically when
+  most of a graph is new (an AI just built it) and on demand (`layout` op, **L** in the editor).
 
 ## Next steps
 
@@ -85,7 +107,9 @@ values are recorded as known before they are written to the modifier; (5) forwar
    (Blender instances on points instead of copying geometry).
 4. Multiple outputs / several display nodes; detail attributes, UV maps and normals to Blender.
 5. Time/frame in the cache key for animated graphs (frame-change hook in the add-on).
-6. Web editor (explicitly deferred). Extension packaging (manifest + licence are your call).
+6. Editor: subnetworks / reusable "systems" (a graph used as a node), network boxes, a 3D preview pane, copy/paste between
+   graphs. MCP: user node libraries (a `nodes/` folder of Python nodes the AI can write and the engine hot-loads).
+   Extension packaging (manifest + licence are your call).
 7. Investigate the Blender popover crash further (only reachable via `wm.call_panel(keep_open=True)`), or report it upstream.
 
 ## Acceleration design (added after the benchmark)

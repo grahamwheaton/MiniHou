@@ -163,6 +163,13 @@ class WrangleSafetyTests(unittest.TestCase):
         self.assertEqual(prog.fn.__globals__["__builtins__"], {})
         self.assertNotIn("__import__", prog.fn.__globals__)
 
+    def test_reference_covers_every_function(self):
+        from minihou.wrangle import SIGNATURES, reference
+        self.assertEqual(set(SIGNATURES), set(FUNCTIONS))
+        ref = reference()
+        for name in FUNCTIONS:
+            self.assertIn(name + "(", ref)
+
     def test_function_table_is_numeric_only(self):
         for name, fn in FUNCTIONS.items():
             self.assertTrue(callable(fn), name)

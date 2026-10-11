@@ -158,7 +158,7 @@ def run_engine(a):
         path = os.path.join(d, "bench_graph.json")
         with open(path, "w", encoding="utf-8") as f:
             json.dump(graph, f)
-        eng, port = spawn([a.python, "-u", "-m", "minihou", "serve", path, "--port", "0", "--no-watch"])
+        eng, port = spawn([a.python, "-u", "-m", "minihou", "serve", path, "--port", "0", "--no-watch", "--http-port", "-1"])
         rx = Receiver(port)
         try:
             first = rx.next_update(120)

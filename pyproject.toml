@@ -8,6 +8,8 @@ dependencies = ["numpy>=1.26"]
 [project.optional-dependencies]
 # Optional accelerator: 4-15x faster noise / scatter / copy_to_points on large inputs. Falls back to numpy.
 accel = ["numba>=0.60"]
+# Only for running the node editor's browser tests (tests/test_editor_e2e.py).
+browser-tests = ["playwright>=1.56"]
 
 [build-system]
 requires = ["setuptools>=61"]
@@ -15,6 +17,12 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["minihou*"]
+
+[tool.setuptools.package-data]
+"minihou.web" = ["static/*"]                 # the node editor is served from the installed package
+
+[project.scripts]
+minihou = "minihou.__main__:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

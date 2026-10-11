@@ -36,10 +36,12 @@ InputRef = Union[str, List[str], None]
 
 
 class GraphError(ValueError):
-    """The graph is structurally invalid. ``errors`` lists every problem found."""
+    """The graph is structurally invalid. ``errors`` lists every problem found; ``node_id`` names the
+    node the first problem belongs to, when there is one (editors use it to flag the node)."""
 
-    def __init__(self, errors: Union[str, List[str]]):
+    def __init__(self, errors: Union[str, List[str]], node_id: Optional[str] = None):
         self.errors = [errors] if isinstance(errors, str) else list(errors)
+        self.node_id = node_id
         super().__init__("; ".join(self.errors))
 
 
@@ -160,10 +162,10 @@ class Graph:
             nid, it = stack[-1]
             for child in it:
                 if child not in self.nodes:
-                    raise GraphError(f"node {nid!r} references missing node {child!r}")
+                    raise GraphError(f"node {nid!r} references missing node {child!r}", nid)
                 st = state.get(child)
                 if st == 1:
-                    raise GraphError(f"cycle detected through {child!r}")
+                    raise GraphError(f"cycle detected through {child!r}", child)
                 if st is None:
                     state[child] = 1
                     stack.append((child, iter(self.input_ids(child))))
@@ -190,33 +192,41 @@ class Graph:
 
     def validate(self) -> List[str]:
         """Return a list of human-readable problems (empty if the graph is sound)."""
-        errs: List[str] = []
-        for nid, inst in self.nodes.items():
+        return [msg for _, msg in self.problems()]
+
+    def problems(self, only: Optional[List[str]] = None) -> List[tuple]:
+        """``[(node_id or None, message)]`` for every problem. With ``only``, just the node-level checks for
+        those nodes (what a cook of one target needs; an unfinished branch elsewhere doesn't block it)."""
+        errs: List[tuple] = []
+        for nid in (only if only is not None else list(self.nodes)):
+            inst = self.nodes[nid]
             if not _ID_RE.match(nid):
-                errs.append(f"invalid node id {nid!r}")
+                errs.append((nid, f"invalid node id {nid!r}"))
             if inst.type not in self.registry:
-                errs.append(f"node {nid!r}: unknown node type {inst.type!r}")
+                errs.append((nid, f"node {nid!r}: unknown node type {inst.type!r}"))
                 continue
             nt = self.registry.get(inst.type)
             try:
                 nt.coerce_params(inst.params)
             except ParamError as e:
-                errs.append(f"node {nid!r}: {e}")
+                errs.append((nid, f"node {nid!r}: {e}"))
             ports = {i.name: i for i in nt.inputs}
             for port in inst.inputs:
                 if port not in ports:
-                    errs.append(f"node {nid!r}: unknown input port {port!r}")
+                    errs.append((nid, f"node {nid!r}: unknown input port {port!r}"))
             for port, spec in ports.items():
                 ref = inst.inputs.get(port)
                 if ref in (None, []):
                     if not spec.optional and not spec.multi:
-                        errs.append(f"node {nid!r}: input {port!r} is not connected")
+                        errs.append((nid, f"node {nid!r}: input {port!r} is not connected"))
                     elif spec.multi and not spec.optional:
-                        errs.append(f"node {nid!r}: input {port!r} needs at least one connection")
+                        errs.append((nid, f"node {nid!r}: input {port!r} needs at least one connection"))
                     continue
                 for src in ([ref] if isinstance(ref, str) else ref):
                     if src not in self.nodes:
-                        errs.append(f"node {nid!r}: input {port!r} references missing node {src!r}")
+                        errs.append((nid, f"node {nid!r}: input {port!r} references missing node {src!r}"))
+        if only is not None:
+            return errs
         # cycles (Kahn)
         indeg = {n: 0 for n in self.nodes}
         consumers: Dict[str, List[str]] = {n: [] for n in self.nodes}
@@ -236,33 +246,38 @@ class Graph:
                     queue.append(c)
         if seen != len(self.nodes):
             stuck = sorted(n for n, d in indeg.items() if d > 0)
-            errs.append(f"graph contains a cycle involving {stuck}")
+            errs.append((stuck[0], f"graph contains a cycle involving {stuck}"))
         if self.display is not None and self.display not in self.nodes:
-            errs.append(f"display node {self.display!r} does not exist")
+            errs.append((None, f"display node {self.display!r} does not exist"))
         names = set()
         for e in self.exposed:
             if e.name in names:
-                errs.append(f"exposed parameter name {e.name!r} is used twice")
+                errs.append((e.node, f"exposed parameter name {e.name!r} is used twice"))
             names.add(e.name)
-            if e.node not in self.nodes:
-                errs.append(f"exposed {e.name!r}: node {e.node!r} does not exist")
-                continue
-            inst = self.nodes[e.node]
-            if inst.type in self.registry:
-                nt = self.registry.get(inst.type)
-                try:
-                    p = nt.param(e.param)
-                    if p.kind not in EXPOSABLE_KINDS:
-                        errs.append(f"exposed {e.name!r}: parameter kind {p.kind!r} cannot be exposed "
-                                    f"(supported: {sorted(EXPOSABLE_KINDS)})")
-                except ParamError as ex:
-                    errs.append(f"exposed {e.name!r}: {ex}")
+            problem = self.exposed_problem(e)
+            if problem:
+                errs.append((e.node if e.node in self.nodes else None, problem))
         return errs
 
+    def exposed_problem(self, e: "Exposed") -> Optional[str]:
+        if e.node not in self.nodes:
+            return f"exposed {e.name!r}: node {e.node!r} does not exist"
+        inst = self.nodes[e.node]
+        if inst.type not in self.registry:
+            return f"exposed {e.name!r}: node {e.node!r} has unknown type {inst.type!r}"
+        try:
+            p = self.registry.get(inst.type).param(e.param)
+        except ParamError as ex:
+            return f"exposed {e.name!r}: {ex}"
+        if p.kind not in EXPOSABLE_KINDS:
+            return (f"exposed {e.name!r}: parameter kind {p.kind!r} cannot be exposed "
+                    f"(supported: {sorted(EXPOSABLE_KINDS)})")
+        return None
+
     def check(self) -> "Graph":
-        errs = self.validate()
-        if errs:
-            raise GraphError(errs)
+        probs = self.problems()
+        if probs:
+            raise GraphError([m for _, m in probs], probs[0][0])
         return self
 
     # -- exposed parameters ------------------------------------------------
@@ -276,6 +291,8 @@ class Graph:
         """Description of exposed parameters (for the Blender node-group interface)."""
         out = []
         for e in self.exposed:
+            if self.exposed_problem(e):
+                continue                      # an unchecked (editor-saved) graph may hold a stale entry
             inst = self.nodes[e.node]
             p = self.registry.get(inst.type).param(e.param)
             d = p.describe()

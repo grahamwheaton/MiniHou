@@ -1,14 +1,16 @@
 """A live engine session: one graph, one evaluator, one cook thread.
 
-Socket-free on purpose (the :class:`~minihou.link.server.LinkServer` is a thin layer on top),
-so it can be driven and tested directly.
+Socket-free on purpose (the :class:`~minihou.link.server.LinkServer` and the web/MCP API are thin layers on
+top), so it can be driven and tested directly.
 
-* ``set_param`` edits the in-memory graph and wakes the cook thread.
-* The cook thread coalesces: if ten edits arrive during one cook, the next cook sees the
-  latest state once.
-* Results are published to listeners (``on_result`` / ``on_interface``) on the cook thread.
-* ``watch_file`` hot-reloads the graph JSON when it changes on disk. The evaluator cache is
-  content-addressed, so unchanged nodes stay warm across reloads.
+* ``set_param`` (Blender) and ``edit`` (editor, MCP: batches of :mod:`minihou.edit` ops) change the in-memory
+  graph and wake the cook thread. Every change bumps ``rev``.
+* The cook thread coalesces: if ten edits arrive during one cook, the next cook sees the latest state once.
+* Results are published to listeners (``on_result`` / ``on_interface`` / ``on_graph``) on the calling thread.
+* ``watch_file`` binds the session to a graph file: external changes are hot-reloaded, and edits are saved back
+  (debounced, atomically, and without reloading our own writes). The evaluator cache is content-addressed, so
+  unchanged nodes stay warm across reloads.
+* ``undo``/``redo`` cover ``edit`` batches (consecutive edits of the same thing, like a slider drag, merge).
 """
 from __future__ import annotations
 
@@ -22,12 +24,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..edit import apply_ops, layout_missing
 from ..evaluator import Cache, DEFAULT_CACHE_BYTES, Evaluator, NodeError
 from ..geometry import Geometry
 from ..graph import Graph, GraphError
 from ..sdk import ParamError, Registry
+from ..summary import summarize
 
 log = logging.getLogger("minihou.session")
+
+UNDO_LIMIT = 200
+MERGE_SECONDS = 1.5          # consecutive edits of the same thing within this window form one undo step
+
+NEW_GRAPH = {"version": 1, "nodes": {"grid1": {"type": "grid", "pos": [0, 0]},
+                                     "output1": {"type": "output", "inputs": {"geo": "grid1"}, "pos": [0, 110]}},
+             "display": "output1"}
 
 
 @dataclass
@@ -37,17 +48,32 @@ class Result:
     key: str = ""
     cook: Dict[str, Any] = field(default_factory=dict)
     error: Optional[Dict[str, Any]] = None       # {"node": id-or-None, "message": str}
+    rev: int = 0                                  # graph revision this result was cooked from
+
+
+def _merge_key(ops: List[dict]) -> Optional[tuple]:
+    """Edits that should collapse into one undo step when repeated (slider drags, node drags)."""
+    if len(ops) != 1 or not isinstance(ops[0], dict):
+        return None
+    op = ops[0]
+    if op.get("op") == "set" and isinstance(op.get("params"), dict):
+        return ("set", op.get("id"), tuple(sorted(op["params"])))
+    if op.get("op") == "move":
+        return ("move", tuple(sorted(op.get("positions") or [op.get("id")])))
+    return None
 
 
 class Session:
     def __init__(self, graph: Graph, *, registry: Optional[Registry] = None, cache_bytes: int = DEFAULT_CACHE_BYTES):
+        layout_missing(graph)
         self.graph = graph
         self.evaluator = Evaluator(registry or graph.registry, Cache(cache_bytes))
         self.lock = threading.RLock()
+        self._cook_lock = threading.Lock()            # the evaluator is single-threaded
         self.latest_good: Optional[Result] = None     # newest successful cook
         self.latest_error: Optional[Result] = None    # set while the graph is failing
         self._listeners: List[Any] = []
-        self._rev = 0                # bumped on every edit
+        self._rev = 0                # bumped on every change of the graph
         self._cooked_rev = -1        # rev of the last completed cook
         self._seq = 0
         self._last_key = None
@@ -57,7 +83,20 @@ class Session:
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._watch_thread: Optional[threading.Thread] = None
+        self._undo: List[tuple] = []                  # (graph dict, merge key, time)
+        self._redo: List[dict] = []
+        self.path: Optional[Path] = None
+        self._dirty = False                           # in-memory graph differs from the file
+        self._file_text: Optional[str] = None         # last text read from / written to the file
+        self.save_error: Optional[str] = None
+        self._save_enabled = False
+        self._stamp = None
+        self._file_lock = threading.RLock()           # saving vs. noticing external changes
         self._iface = self.interface()
+
+    @property
+    def rev(self) -> int:
+        return self._rev
 
     # -- interface ---------------------------------------------------------
     def interface(self) -> dict:
@@ -67,34 +106,111 @@ class Session:
         h = hashlib.blake2b(json.dumps(structure, sort_keys=True).encode(), digest_size=8).hexdigest()
         return {"type": "interface", "structure": h, "params": params}
 
+    def snapshot(self) -> dict:
+        """The graph as JSON plus its revision (what editors render)."""
+        with self.lock:
+            return {"rev": self._rev, "graph": self.graph.to_dict(),
+                    "path": str(self.path) if self.path else None,
+                    "can_undo": bool(self._undo), "can_redo": bool(self._redo)}
+
     # -- editing -----------------------------------------------------------
-    def set_param(self, name: str, value: Any) -> Any:
+    def set_param(self, name: str, value: Any, origin: str = "link") -> Any:
         """Set an exposed parameter by name. Raises :class:`GraphError` / :class:`ParamError`."""
         with self.lock:
             v = self.graph.set_exposed(name, value)
-            self._bump()
+            self._iface = self.interface()            # the link client already has this value: don't echo it
+            self._changed()
+        self._notify_graph(origin)
         return v
 
-    def set_node_param(self, node: str, param: str, value: Any) -> Any:
+    def set_node_param(self, node: str, param: str, value: Any, origin: str = "link") -> Any:
         with self.lock:
             v = self.graph.set_param(node, param, value)
-            self._bump()
+            self._iface = self.interface()
+            self._changed()
+        self._notify_graph(origin)
         return v
 
-    def replace_graph(self, graph: Graph) -> None:
+    def edit(self, ops: List[dict], origin: str = "api") -> dict:
+        """Apply a batch of :mod:`minihou.edit` ops atomically. Raises :class:`~minihou.edit.EditError`.
+
+        Returns ``{"rev", "results", "changed"}``. Interface changes (including exposed values) are pushed to link
+        clients, so Blender follows edits made in the editor or by an AI."""
+        key = _merge_key(ops)
+        with self.lock:
+            before = self.graph.to_dict()
+            new, results = apply_ops(self.graph, ops)
+            changed = new.to_dict() != before
+            if changed:
+                now = time.monotonic()
+                top = self._undo[-1] if self._undo else None
+                if not (key and top and top[1] == key and now - top[2] < MERGE_SECONDS):
+                    self._undo.append((before, key, now))
+                    del self._undo[:-UNDO_LIMIT]
+                else:
+                    self._undo[-1] = (top[0], key, now)
+                self._redo.clear()
+                self.graph = new
+                self._changed()
+            rev = self._rev
+        if changed:
+            self._after_structural_change(origin)
+        return {"rev": rev, "results": results, "changed": changed}
+
+    def undo(self, origin: str = "api") -> bool:
+        return self._step(self._undo, self._redo, origin)
+
+    def redo(self, origin: str = "api") -> bool:
+        return self._step(self._redo, self._undo, origin)
+
+    def _step(self, src: list, dst: list, origin: str) -> bool:
+        with self.lock:
+            if not src:
+                return False
+            entry = src.pop()
+            data = entry[0] if isinstance(entry, tuple) else entry
+            cur = self.graph.to_dict()
+            dst.append((cur, None, 0.0) if dst is self._undo else cur)
+            self.graph = Graph.from_dict(data, self.graph.registry, check=False)
+            self._changed()
+        self._after_structural_change(origin)
+        return True
+
+    def replace_graph(self, graph: Graph, origin: str = "file", save: bool = False) -> None:
+        layout_missing(graph)
         with self.lock:
             self.graph = graph
-            self._bump()
+            self._rev += 1
+            self._wake.set()
+            if save:
+                self._dirty = True
+        self._after_structural_change(origin)
+
+    def _changed(self) -> None:
+        """Call with the lock held after mutating the graph."""
+        self._rev += 1
+        self._dirty = True
+        self._wake.set()
+
+    def _after_structural_change(self, origin: str) -> None:
+        with self.lock:
             iface = self.interface()
-            changed = iface != self._iface
+            push = iface != self._iface
             self._iface = iface
-        if changed:
+        if push:
             for l in list(self._listeners):
                 l.on_interface(iface)
+        self._notify_graph(origin)
 
-    def _bump(self) -> None:
-        self._rev += 1
-        self._wake.set()
+    def _notify_graph(self, origin: str) -> None:
+        rev = self._rev
+        for l in list(self._listeners):
+            fn = getattr(l, "on_graph", None)
+            if fn:
+                try:
+                    fn(rev, origin)
+                except Exception:  # noqa: BLE001
+                    log.exception("listener failed")
 
     # -- listeners ---------------------------------------------------------
     def add_listener(self, l) -> None:
@@ -121,11 +237,11 @@ class Session:
             except Exception:  # noqa: BLE001 - a bad listener must not stop the cook thread
                 log.exception("listener failed")
 
-    def _report_error(self, node: Optional[str], message: str) -> None:
+    def _report_error(self, node: Optional[str], message: str, rev: int = 0) -> None:
         if message == self._last_error_msg:
             return                                           # same failure again: don't spam clients
         self._last_error_msg = message
-        self._publish(Result(0, error={"node": node, "message": message}))
+        self._publish(Result(0, error={"node": node, "message": message}, rev=rev))
 
     def cook_once(self) -> Optional[Result]:
         """Cook the current graph now and publish if the outcome changed. Returns the result
@@ -136,33 +252,77 @@ class Session:
         t0 = time.perf_counter()
         published: Optional[Result] = None
         try:
-            geo = self.evaluator.cook(snapshot)
-            stats = self.evaluator.last_stats
-            self.evaluator.cache.retain(self.evaluator.live_keys(snapshot))
+            with self._cook_lock:
+                geo = self.evaluator.cook(snapshot)
+                stats = self.evaluator.last_stats
+                self.evaluator.cache.retain(self.evaluator.live_keys(snapshot))
             if stats.key != self._last_key or self._last_error_msg is not None:
                 d = stats.to_dict()
                 cook = {"ms": round((time.perf_counter() - t0) * 1000, 3), "cooked": d["cooked"],
                         "cached": d["cached"], "node_ms": d["node_ms"]}
-                published = Result(0, geo, stats.key, cook)
+                published = Result(0, geo, stats.key, cook, rev=rev)
                 self._last_key, self._last_error_msg = stats.key, None
                 self._publish(published)
+            elif self.latest_good is not None:
+                self.latest_good.rev = rev                   # same geometry, newer graph (e.g. a node was moved)
         except (NodeError, GraphError, ParamError) as e:
-            self._report_error(getattr(e, "node_id", None), str(e))
+            self._report_error(getattr(e, "node_id", None), str(e), rev)
             log.warning("cook failed: %s", e)
         except Exception as e:  # noqa: BLE001 - never let the cook thread die
             log.exception("unexpected cook failure")
-            self._report_error(None, f"internal error: {e!r}")
+            self._report_error(None, f"internal error: {e!r}", rev)
         with self._idle:
             self._cooked_rev = rev
             self._idle.notify_all()
+        for l in list(self._listeners):                      # cook finished (even if nothing new was published)
+            fn = getattr(l, "on_status", None)
+            if fn:
+                try:
+                    fn(rev)
+                except Exception:  # noqa: BLE001
+                    log.exception("listener failed")
         return published
+
+    def status(self) -> dict:
+        """Outcome of the newest cook: ok/error, counts, timings, and whether it is up to date."""
+        with self.lock:
+            good, err, rev = self.latest_good, self.latest_error, self._rev
+        out: Dict[str, Any] = {"rev": rev, "cooked_rev": self._cooked_rev, "busy": self._cooked_rev < rev}
+        if err is not None:
+            out.update(ok=False, error=err.error)
+        else:
+            out["ok"] = good is not None
+        if good is not None and good.geo is not None:
+            g = good.geo
+            out.update(points=g.npoints, prims=g.nprims, vertices=g.nvertices, cook=good.cook)
+        return out
+
+    def inspect(self, node: str, detail: bool = False) -> dict:
+        """Cook ``node`` (usually from cache) and summarise its geometry. Errors are returned, not raised."""
+        with self.lock:
+            snapshot = self.graph.copy()
+            rev = self._rev
+        if node not in snapshot.nodes:
+            return {"node": node, "rev": rev, "ok": False, "error": {"node": node, "message": f"no such node {node!r}"}}
+        t0 = time.perf_counter()
+        try:
+            with self._cook_lock:
+                geo = self.evaluator.cook(snapshot, node)
+                stats = self.evaluator.last_stats.to_dict()
+        except (NodeError, GraphError, ParamError) as e:
+            return {"node": node, "rev": rev, "ok": False,
+                    "error": {"node": getattr(e, "node_id", None), "message": str(e)}}
+        out = {"node": node, "rev": rev, "ok": True, "ms": round((time.perf_counter() - t0) * 1000, 3),
+               "cooked": stats["cooked"], "cached": stats["cached"]}
+        out.update(summarize(geo, detail))
+        return out
 
     def start(self, cook_immediately: bool = True) -> None:
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
         if cook_immediately:
-            self._bump()
+            self._wake.set()
         self._thread = threading.Thread(target=self._run, name="minihou-cook", daemon=True)
         self._thread.start()
 
@@ -182,9 +342,10 @@ class Session:
         for t in (self._thread, self._watch_thread):
             if t and t is not threading.current_thread():
                 t.join(2.0)
+        self.flush()
 
     def wait_idle(self, timeout: float = 10.0) -> bool:
-        """Block until every edit made so far has been cooked (for tests and scripts)."""
+        """Block until every edit made so far has been cooked (for tests, scripts and AI tools)."""
         end = time.monotonic() + timeout
         with self._idle:
             while self._cooked_rev < self._rev:
@@ -194,34 +355,143 @@ class Session:
                 self._idle.wait(left)
         return True
 
-    # -- file watching -----------------------------------------------------
-    def watch_file(self, path, interval: float = 0.25) -> None:
-        path = Path(path)
-
-        def stamp():
-            try:
-                st = path.stat()
-                return (st.st_mtime_ns, st.st_size)
-            except OSError:
-                return None
-
-        last = stamp()
+    # -- the graph file ----------------------------------------------------
+    def watch_file(self, path, interval: float = 0.25, save: bool = True) -> None:
+        """Bind to ``path``: reload it when it changes on disk; with ``save``, write edits back to it."""
+        self.path = Path(path)
+        self._save_enabled = save
+        try:
+            self._file_text = self.path.read_text(encoding="utf-8")
+        except OSError:
+            self._file_text = None
+        with self.lock:
+            self._dirty = False
+        self._stamp = self._file_stamp()
+        if self._watch_thread and self._watch_thread.is_alive():
+            return
 
         def loop():
-            nonlocal last
             while not self._stop.wait(interval):
-                cur = stamp()
-                if cur is None or cur == last:
-                    continue
-                last = cur
                 try:
-                    g = Graph.load(path, self.evaluator.registry)
-                except (GraphError, OSError, ValueError) as e:
-                    log.warning("graph reload failed: %s: %s", path.name, e)
-                    self._report_error(None, f"{path.name}: {e}")
-                    continue
-                log.info("reloaded %s", path.name)
-                self.replace_graph(g)
+                    self._poll_file()
+                except Exception:  # noqa: BLE001 - keep watching
+                    log.exception("file watcher failed")
 
         self._watch_thread = threading.Thread(target=loop, name="minihou-watch", daemon=True)
         self._watch_thread.start()
+
+    def _file_stamp(self):
+        try:
+            st = self.path.stat()
+            return (st.st_mtime_ns, st.st_size)
+        except (OSError, AttributeError):
+            return None
+
+    def _poll_file(self) -> None:
+        with self._file_lock:
+            self._poll_file_locked()
+
+    def _poll_file_locked(self) -> None:
+        path = self.path
+        if path is None:
+            return
+        cur = self._file_stamp()
+        if cur is not None and cur != self._stamp:
+            self._stamp = cur
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError:
+                text = None
+            if text is not None and text != self._file_text:      # not our own write
+                self._file_text = text
+                try:
+                    g = Graph.from_json(text, self.evaluator.registry, check=False)
+                except (GraphError, ValueError) as e:
+                    log.warning("graph reload failed: %s: %s", path.name, e)
+                    self._report_error(None, f"{path.name}: {e}", self._rev)
+                    return
+                log.info("reloaded %s", path.name)
+                with self.lock:
+                    self._undo.append((self.graph.to_dict(), None, 0.0))
+                    del self._undo[:-UNDO_LIMIT]
+                    self._redo.clear()
+                self.replace_graph(g, origin="file")
+                with self.lock:
+                    self._dirty = False
+                return
+        if self._dirty and self._save_enabled:
+            self._flush_locked()
+
+    def flush(self) -> bool:
+        """Write unsaved edits to the graph file now. Returns True if the file is up to date."""
+        with self._file_lock:
+            return self._flush_locked()
+
+    def _flush_locked(self) -> bool:
+        if self.path is None or not self._save_enabled:
+            return False
+        with self.lock:
+            if not self._dirty:
+                return True
+            text = self.graph.to_json()
+            self._dirty = False
+        if text == self._file_text:
+            return True
+        try:
+            _atomic_write(self.path, text)
+        except OSError as e:
+            with self.lock:
+                self._dirty = True
+            if self.save_error != str(e):
+                log.warning("cannot save %s: %s", self.path, e)
+            self.save_error = str(e)
+            return False
+        self.save_error = None
+        self._file_text = text
+        self._stamp = self._file_stamp()
+        return True
+
+    def open_file(self, path, create: bool = False) -> dict:
+        """Switch the session to another graph file (creating a starter graph if asked). The old file is saved
+        first. Raises :class:`GraphError` / ``OSError``."""
+        path = Path(path)
+        if path.exists():
+            text = path.read_text(encoding="utf-8")
+            g = Graph.from_json(text, self.evaluator.registry, check=False)
+        elif create:
+            g = Graph.from_dict(NEW_GRAPH, self.evaluator.registry, check=False)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            text = g.to_json()
+            _atomic_write(path, text)
+        else:
+            raise GraphError(f"no such file: {path}")
+        self.flush()
+        save = True
+        with self.lock:
+            self.path = path
+            self._save_enabled = save
+            self._file_text = text
+            self._stamp = self._file_stamp()
+            self._undo.clear()
+            self._redo.clear()
+        self.replace_graph(g, origin="open")
+        with self.lock:
+            self._dirty = layout_missing(self.graph)      # positions were added: persist them on the next save
+        if self._watch_thread is None or not self._watch_thread.is_alive():
+            self.watch_file(path, save=save)
+        return self.snapshot()
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+    try:
+        os.replace(tmp, path)
+    except PermissionError:                     # Windows: target held open without FILE_SHARE_DELETE
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
