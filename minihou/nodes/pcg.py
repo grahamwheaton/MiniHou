@@ -233,6 +233,7 @@ def pcg_spline_sampler(curve, mode, spacing, extents, jitter, seed):
     prims, starts, sizes, closed, vert, seg = curve_arrays(curve)
     Pc = curve.P.astype(np.float64)[curve.topology.vertex_point[vert]]
     first = np.concatenate([[0], np.cumsum(sizes)])
+    produced = 0.0
     for k in range(len(prims)):
         Q = Pc[first[k]:first[k + 1]]
         if len(Q) < 3:
@@ -249,7 +250,8 @@ def pcg_spline_sampler(curve, mode, spacing, extents, jitter, seed):
             u, w = np.array([1.0, 0, 0]), np.array([0, 1.0, 0]) * np.sign(n[2])
         xy = np.stack([(Q - c) @ u, (Q - c) @ w], 1)
         lo, hi = xy.min(0), xy.max(0)
-        guard_count(float(np.prod(np.maximum((hi - lo) / spacing, 1.0))), "pcg_spline_sampler")
+        produced += float(np.prod(np.maximum((hi - lo) / spacing, 1.0)))
+        guard_count(produced, "pcg_spline_sampler")                 # all the curves together, not each one
         gx = np.arange(lo[0] + spacing / 2, hi[0], spacing)
         gy = np.arange(lo[1] + spacing / 2, hi[1], spacing)
         G = np.stack(np.meshgrid(gx, gy, indexing="ij"), -1).reshape(-1, 2)

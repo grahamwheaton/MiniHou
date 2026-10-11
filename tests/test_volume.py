@@ -92,3 +92,14 @@ class VolumeNodeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WorkGuardTests(unittest.TestCase):
+    def test_metaballs_refuse_hopeless_voxel_size(self):
+        P = np.zeros((10, 3))
+        with self.assertRaises(ValueError):
+            sdf.from_points(P, np.full(10, 50.0), 0.01)
+
+    def test_mesh_work_estimate_grows_with_smaller_voxels(self):
+        tris = np.array([[[0, 0, 0], [1, 0, 0], [0, 1, 0]]], float)
+        self.assertGreater(sdf.mesh_work(tris, 0.01, 1.0), sdf.mesh_work(tris, 0.1, 1.0))
