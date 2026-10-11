@@ -358,6 +358,7 @@ class SystemSessionTests(unittest.TestCase):
         s.attach_library(lib, interval=0.02)
         h0 = REGISTRY.get(name).code_hash
         s.edit([{"op": "set", "id": "move", "params": {"translate": [0, 0, 7]}}])     # saved by the session...
-        self.assertTrue(until(lambda: REGISTRY.get(name).code_hash != h0))           # ...reloaded as a node type
+        # ...reloaded as a node type (it is briefly unregistered while systems rebuild)
+        self.assertTrue(until(lambda: name in REGISTRY.names() and REGISTRY.get(name).code_hash != h0))
         g = Graph.from_dict({"nodes": {"x": {"type": name}}, "display": "x"})
         self.assertAlmostEqual(float(Evaluator().cook(g).P[:, 2].max()), 7.0)

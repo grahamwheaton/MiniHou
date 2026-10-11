@@ -1,0 +1,409 @@
+{
+ "version": 1,
+ "doc": "A PCG-style forest: trees sampled on the terrain, thinned in noisy patches, cleared around a house (difference with a mesh) and along a road (difference with spline points), randomised, pruned so no two overlap, then spawned as trees (4) and rocks (1). Swap the copy_to_points branches for pcg_spawner's Blender instances in a live scene.",
+ "nodes": {
+  "ground": {
+   "type": "grid",
+   "params": {
+    "size_x": 60.0,
+    "size_y": 60.0,
+    "columns": 61,
+    "rows": 61
+   },
+   "pos": [
+    0,
+    0
+   ]
+  },
+  "terrain": {
+   "type": "noise",
+   "inputs": {
+    "geo": "ground"
+   },
+   "pos": [
+    0,
+    100
+   ],
+   "params": {
+    "amplitude": [
+     0.0,
+     0.0,
+     2.5
+    ],
+    "frequency": 0.05
+   }
+  },
+  "house": {
+   "type": "box",
+   "params": {
+    "size": [
+     10.0,
+     7.0,
+     6.0
+    ],
+    "center": [
+     6.0,
+     8.0,
+     2.0
+    ]
+   },
+   "pos": [
+    300,
+    100
+   ]
+  },
+  "road": {
+   "type": "curve",
+   "params": {
+    "points": "-30,-14,0 -10,-6,0 8,-2,0 30,10,0"
+   },
+   "pos": [
+    550,
+    0
+   ]
+  },
+  "road_pts": {
+   "type": "pcg_spline_sampler",
+   "inputs": {
+    "curve": "road"
+   },
+   "pos": [
+    550,
+    100
+   ],
+   "params": {
+    "spacing": 1.0,
+    "extents": [
+     0.6,
+     3.0,
+     6.0
+    ]
+   }
+  },
+  "samples": {
+   "type": "pcg_surface_sampler",
+   "inputs": {
+    "surface": "terrain"
+   },
+   "pos": [
+    0,
+    200
+   ],
+   "params": {
+    "points_per_m2": 0.12,
+    "extents": [
+     1.4,
+     1.4,
+     4.0
+    ],
+    "looseness": 0.4,
+    "seed": 3
+   }
+  },
+  "patches": {
+   "type": "pcg_density_noise",
+   "inputs": {
+    "points": "samples"
+   },
+   "pos": [
+    0,
+    300
+   ],
+   "params": {
+    "noise": "perlin",
+    "frequency": 0.06,
+    "seed": 5
+   }
+  },
+  "thin": {
+   "type": "pcg_density_filter",
+   "inputs": {
+    "points": "patches"
+   },
+   "pos": [
+    0,
+    400
+   ],
+   "params": {
+    "lower": 0.5
+   }
+  },
+  "no_house": {
+   "type": "pcg_difference",
+   "inputs": {
+    "points": "thin",
+    "subtract": "house"
+   },
+   "pos": [
+    0,
+    500
+   ]
+  },
+  "no_road": {
+   "type": "pcg_difference",
+   "inputs": {
+    "points": "no_house",
+    "subtract": "road_pts"
+   },
+   "pos": [
+    0,
+    600
+   ]
+  },
+  "vary": {
+   "type": "pcg_transform",
+   "inputs": {
+    "points": "no_road"
+   },
+   "pos": [
+    0,
+    700
+   ],
+   "params": {
+    "scale_min": [
+     0.6,
+     0.6,
+     0.6
+    ],
+    "scale_max": [
+     1.3,
+     1.3,
+     1.3
+    ],
+    "seed": 2
+   }
+  },
+  "prune": {
+   "type": "pcg_self_prune",
+   "inputs": {
+    "points": "vary"
+   },
+   "pos": [
+    0,
+    800
+   ],
+   "params": {
+    "priority": "large_first"
+   }
+  },
+  "spawn": {
+   "type": "pcg_spawner",
+   "inputs": {
+    "points": "prune"
+   },
+   "pos": [
+    0,
+    900
+   ],
+   "params": {
+    "objects": "Tree:4 Rock:1",
+    "seed": 1
+   }
+  },
+  "tree_pts": {
+   "type": "blast",
+   "inputs": {
+    "geo": "spawn"
+   },
+   "pos": [
+    -150,
+    1000
+   ],
+   "params": {
+    "group": "@variant == 0",
+    "domain": "points",
+    "delete_non_selected": true
+   }
+  },
+  "rock_pts": {
+   "type": "blast",
+   "inputs": {
+    "geo": "spawn"
+   },
+   "pos": [
+    150,
+    1000
+   ],
+   "params": {
+    "group": "@variant == 1",
+    "domain": "points",
+    "delete_non_selected": true
+   }
+  },
+  "crown": {
+   "type": "tube",
+   "params": {
+    "radius_bottom": 1.3,
+    "radius_top": 0.0,
+    "height": 4.5,
+    "columns": 12,
+    "center": [
+     0.0,
+     0.0,
+     3.25
+    ]
+   },
+   "pos": [
+    -400,
+    900
+   ]
+  },
+  "trunk": {
+   "type": "tube",
+   "params": {
+    "radius_bottom": 0.18,
+    "radius_top": 0.14,
+    "height": 1.2,
+    "columns": 8,
+    "center": [
+     0.0,
+     0.0,
+     0.6
+    ]
+   },
+   "pos": [
+    -550,
+    900
+   ]
+  },
+  "tree": {
+   "type": "merge",
+   "inputs": {
+    "geos": [
+     "crown",
+     "trunk"
+    ]
+   },
+   "pos": [
+    -450,
+    1000
+   ]
+  },
+  "rock_ball": {
+   "type": "sphere",
+   "params": {
+    "radius": 0.9,
+    "rows": 8,
+    "columns": 12
+   },
+   "pos": [
+    400,
+    900
+   ]
+  },
+  "rock_lumps": {
+   "type": "noise",
+   "inputs": {
+    "geo": "rock_ball"
+   },
+   "pos": [
+    400,
+    950
+   ],
+   "params": {
+    "amplitude": [
+     0.3,
+     0.3,
+     0.3
+    ],
+    "frequency": 1.5
+   }
+  },
+  "rock": {
+   "type": "transform",
+   "inputs": {
+    "geo": "rock_lumps"
+   },
+   "pos": [
+    400,
+    1000
+   ],
+   "params": {
+    "scale": [
+     1.0,
+     1.0,
+     0.6
+    ]
+   }
+  },
+  "trees": {
+   "type": "copy_to_points",
+   "inputs": {
+    "source": "tree",
+    "points": "tree_pts"
+   },
+   "pos": [
+    -150,
+    1100
+   ]
+  },
+  "rocks": {
+   "type": "copy_to_points",
+   "inputs": {
+    "source": "rock",
+    "points": "rock_pts"
+   },
+   "pos": [
+    150,
+    1100
+   ]
+  },
+  "trees_mat": {
+   "type": "wrangle",
+   "inputs": {
+    "geo": "trees"
+   },
+   "pos": [
+    -150,
+    1200
+   ],
+   "params": {
+    "snippet": "i@material_index = 1",
+    "run_over": "primitives"
+   }
+  },
+  "scene": {
+   "type": "merge",
+   "inputs": {
+    "geos": [
+     "terrain",
+     "house",
+     "trees_mat",
+     "rocks"
+    ]
+   },
+   "pos": [
+    0,
+    1300
+   ]
+  },
+  "out": {
+   "type": "output",
+   "inputs": {
+    "geo": "scene"
+   },
+   "pos": [
+    0,
+    1400
+   ]
+  }
+ },
+ "display": "out",
+ "exposed": [
+  {
+   "name": "Density",
+   "node": "samples",
+   "param": "points_per_m2"
+  },
+  {
+   "name": "Patchiness",
+   "node": "thin",
+   "param": "lower"
+  },
+  {
+   "name": "Seed",
+   "node": "samples",
+   "param": "seed"
+  }
+ ]
+}

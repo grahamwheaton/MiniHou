@@ -112,6 +112,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | ![volumes](docs/images/gallery_volumes.png) sdf_boolean fillet, metaballs | ![lsystem_tree](docs/images/gallery_lsystem_tree.png) lsystem + sweep + leaves | ![eroded_terrain](docs/images/gallery_eroded_terrain.png) heightfield erosion |
 | ![bevel_shapes](docs/images/gallery_bevel_shapes.png) polybevel, tube, torus, cusp normals | ![uv_unwrap](docs/images/gallery_uv_unwrap.png) uv_flatten (LSCM), checker texture | ![fractured_rock](docs/images/gallery_fractured_rock.png) voronoi_fracture, exploded_view, smooth |
 | ![polyreduce_rock](docs/images/gallery_polyreduce_rock.png) polyreduce to 3% (quadric error metrics) | ![spiral_slide](docs/images/gallery_spiral_slide.png) path_deform along a helix (up_vector frames) | ![boolean_part](docs/images/gallery_boolean_part.png) exact boolean: bores, slot, dome |
+| ![pcg_forest](docs/images/gallery_pcg_forest.png) PCG points: sampler, noise filter, house and road differences, self-prune, spawner | | |
 
 ## Nodes
 
@@ -302,6 +303,33 @@ normalize dot cross set noise rand select radians degrees`. A float times a vect
 (cached by text) to numpy and are **sandboxed**: they are parsed and checked against a whitelist, so a shared graph file cannot run
 arbitrary Python (imports, attribute access, strings, builtins... are rejected before anything runs; 42 attack patterns are tested).
 Typical snippets take 20-50 ms on 1M points. The `delete` node takes a wrangle *expression* (`@P.z < 0`).
+
+## PCG points (like Unreal Engine's PCG graph)
+
+PCG nodes treat points as oriented boxes: `P`, `rot` (Euler XYZ radians), `scale`, `bounds_min`/`bounds_max` (the box
+in the point's frame), `density` (0..1) and `seed` (per point, so random choices follow the point). Missing attributes
+take defaults, so any points work. The booleans test exact box overlaps (separating axes), or the inside of a closed
+mesh.
+
+| node | inputs | what it does |
+|---|---|---|
+| `pcg_surface_sampler` | surface | points per square metre, blue-noise spacing (looseness), optional alignment to the surface |
+| `pcg_volume_sampler` | volume | a grid of points inside a closed mesh, each box its voxel |
+| `pcg_spline_sampler` | curve | points along curves (X along the tangent) or filling closed curves |
+| `pcg_points` | geo | any points (a mesh's, a scatter's) as PCG points |
+| `pcg_transform` | points | random offset / rotation / scale ranges, seeded per point |
+| `pcg_bounds` | points | set or scale the boxes |
+| `pcg_density_noise` | points | random or Perlin density (set, multiply, add, min, max) |
+| `pcg_distance` | points, target | density from the distance to a mesh, a curve or points |
+| `pcg_density_filter` | points | keep a density range, or keep each point with probability = density |
+| `pcg_difference` | points, subtract | drop points whose boxes overlap the other input's boxes or a closed mesh (binary), or lower their density by the covered fraction |
+| `pcg_intersection` | points, other | keep the overlapping points (binary) or scale density by the covered fraction |
+| `pcg_union` | inputs... | merge point sets; optionally max/add densities where they overlap |
+| `pcg_self_prune` | points | drop overlapping points: larger, smaller, denser or random first; the same result as a sequential greedy pass |
+| `pcg_projection` | points, surface | drop points onto a surface along a direction, optionally aligned to its normal |
+| `pcg_copy_points` | source, targets | the source points on every target, transforms composed |
+| `pcg_spawner` | points | weighted Blender objects (`Tree:3 Rock:1`) as instances; also `variant` for copy_to_points branches |
+| `pcg_debug` | points | each point as its box, coloured by density |
 
 ## Writing a node
 

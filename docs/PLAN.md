@@ -210,6 +210,11 @@ Worked through in order of how often Houdini users reach for them:
     inside test each. B is grown by 1e-6 of the size along its normals and nudged generically, so flush faces cut
     cleanly; points within 3 epsilon are welded afterwards. Exactly coplanar curved features (a sphere's equator in
     a face) stay closed and exact in volume but can leave tiny folded slivers.
+14. **PCG points** (`minihou/pcg.py`, `nodes/pcg.py`): points are oriented boxes (rot, scale, bounds) with density and
+    seed. Overlaps are exact separating-axis tests on candidate pairs from a grid of bounding boxes (parallel axes
+    are not separating, so boxes turned only about Z work); covered fractions are sampled. Self-pruning keeps the
+    lexicographically first independent set by priority, computed in parallel rounds (proven equal to the sequential
+    greedy pass in the tests). Random values come from hashing each point's seed, so they follow the points.
 
 Next candidates: an editor frame slider, numba kernels for
 closest-point queries and SDF construction (the numpy SDF of a mesh spends most of its time in closest points).
