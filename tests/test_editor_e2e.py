@@ -264,6 +264,14 @@ class EditorE2E(unittest.TestCase):
         self.node("bad").locator(".title").click()
         self.page.wait_for_function("document.querySelector('#pv-msg').textContent.includes('nope')")
 
+    def test_inspector_lists_what_a_node_changed(self):
+        self.node("ripple").locator(".title").click()
+        self.page.wait_for_function("document.querySelector('#info-body').innerText.toLowerCase().includes('changes from inputs')")
+        text = self.page.inner_text("#info-body")
+        self.assertIn("reads @P", text)                                          # the wrangle's snippet reads @P
+        self.assertRegex(text, r"~\s*P")                                          # and rewrites the positions
+        self.assertTrue(self.page.locator("#info-body .flow.mod").count() >= 1)
+
     def test_frame_slider_scrubs_and_follows_the_frame(self):
         self.page.fill("#frame-slider", "40")                         # fires input events like a drag
         end = time.monotonic() + 5

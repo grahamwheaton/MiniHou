@@ -112,7 +112,10 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
    120 ms (writing the arrays 56 ms); computing the edges with numpy takes 1.9 s, so engine-side edges would be slower, not
    faster. Left as it is.
 2. **Wrangle** reads its extra inputs: `@opinput1_P` (same element number in input 1, zero beyond its end), `@near1_Cd`,
-   `@near1_dist`, `@near1_ptnum` (nearest point of input 1). Still open: attribute-flow metadata on node types.
+   `@near1_dist`, `@near1_ptnum` (nearest point of input 1). **Attribute flow** is worked out, not declared: `minihou/flow.py`
+   compares a node's cooked output with its cooked inputs (added / modified / moved / removed, count and topology changes), so it is
+   right for built-in, library and system nodes; `inspect` returns it as `flow` (plus a wrangle's reads and writes) and the editor's
+   inspector lists it.
 3. **Several outputs**: an `output` node with an `object` name that is not the display node becomes a mesh object of that
    name in Blender (`geo` messages carry `output`, an `outputs` message lists the live names, per-output diff state per
    client; the add-on only touches objects it marked). **Detail attributes** arrive as `mh_<name>` custom properties on the
@@ -123,7 +126,6 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
 
 Open:
 
-- Attribute-flow metadata on node types (which attributes a node reads and writes), for graph analysis and the editor.
 - Extra outputs have no modifier or exposed parameters (only the display branch does).
 
 Not scheduled:

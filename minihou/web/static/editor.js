@@ -626,6 +626,19 @@
     if (seq !== inspectSeq) return;
     $("#info-body").replaceChildren(...infoView(r));
   }
+  function flowView(r) {                                   // what this node did to the attributes of its inputs
+    const f = r.flow;
+    if (!f) return [];
+    const row = (sign, cls, a, extra) => h("div", { class: "flow " + cls, title: a.domain + (a.type ? " " + a.type : "") },
+      h("span", { class: "sign" }, sign), a.name, h("span", { class: "muted" }, " " + (extra || a.domain)));
+    const rows = [
+      ...f.added.map((a) => row("+", "add", a)), ...f.modified.map((a) => row("~", "mod", a)),
+      ...f.moved.map((a) => row("→", "mov", a, `${a.from} → ${a.domain}`)), ...f.removed.map((a) => row("−", "del", a))];
+    const reads = r.wrangle && r.wrangle.reads.length ? [h("div", { class: "muted flow-note" }, "reads " + r.wrangle.reads.map((n) => "@" + n).join(" "))] : [];
+    const topo = f.topology === "changed" ? [h("div", { class: "muted flow-note" }, `topology changed (${f.counts.points[0]}→${f.counts.points[1]} points, ${f.counts.prims[0]}→${f.counts.prims[1]} prims)`)] : [];
+    if (!rows.length && !reads.length && !topo.length) return [];
+    return [h("div", { class: "section" }, "Changes from inputs"), ...rows, ...reads, ...topo];
+  }
   function infoView(r) {
     if (!r.ok) return [h("div", { class: "perr" }, (r.error.node && r.error.node !== r.node ? r.error.node + ": " : "") + r.error.message)];
     const rows = [["Points", fmt(r.points)], ["Primitives", fmt(r.prims)], ["Vertices", fmt(r.vertices)]];
@@ -638,6 +651,7 @@
       h("td", null, a.name, h("span", { class: "muted" }, " " + a.domain)),
       h("td", null, a.domain === "detail" ? String(a.value) : `${a.type}${a.components > 1 ? "×" + a.components : ""}` +
         (a.min ? `  [${a.min.join(",")}] … [${a.max.join(",")}]` : ""))))));
+    out.push(...flowView(r));
     if (r.blender) {                     // blender_object: what the add-on read (native data, skips)
       const b = r.blender, rows = [];
       if (b.vertex_groups && b.vertex_groups.length) rows.push(["Vertex groups", b.vertex_groups.join(", ")]);

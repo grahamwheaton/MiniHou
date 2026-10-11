@@ -79,6 +79,9 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
   usable without Blender. Drag to orbit (Z is up), **Shift**-drag or right-drag to pan, wheel to zoom, double-click to frame.
   Shaded / edges / points toggles; point colours (`Cd`) are shown; back faces are tinted orange so flipped normals stand out.
   Very large geometry is cut to a drawable size and the view says so.
+* **Attribute flow**: the inspector lists what the selected node did to its inputs' attributes (`+` added, `~` changed, `→` moved to
+  another domain, `−` removed, and whether topology changed); a wrangle also lists the attributes its snippet reads. It is worked out
+  by comparing cooked results, so it is right for built-in, library and system nodes alike (also in `inspect_node` for AI tools, as `flow`).
 * **Network boxes**: **O** (or the Box button) draws a titled, coloured rectangle behind the selected nodes. Drag its title to move
   it with its nodes, its corner to resize, double-click to rename, the dot to change colour. They are saved with the graph and never
   affect a cook.

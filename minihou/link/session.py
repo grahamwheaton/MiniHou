@@ -34,7 +34,9 @@ from ..graph import Graph, GraphError
 from .. import timectx
 from ..inputs import INPUTS
 from ..sdk import ParamError, Registry
+from ..flow import attribute_flow
 from ..summary import summarize
+from ..wrangle import compile_snippet
 
 log = logging.getLogger("minihou.session")
 
@@ -402,6 +404,8 @@ class Session:
         t0 = time.perf_counter()
         try:
             with self._cook_lock, timectx.at(frame, fps):
+                sources = list(dict.fromkeys(snapshot.input_ids(node)))
+                ins = [self.evaluator.cook(snapshot, src) for src in sources if src in snapshot.nodes]
                 geo = self.evaluator.cook(snapshot, node)
                 stats = self.evaluator.last_stats.to_dict()
         except (NodeError, GraphError, ParamError) as e:
@@ -410,7 +414,14 @@ class Session:
         out = {"node": node, "rev": rev, "ok": True, "ms": round((time.perf_counter() - t0) * 1000, 3),
                "cooked": stats["cooked"], "cached": stats["cached"]}
         out.update(summarize(geo, detail))
+        out["flow"] = attribute_flow(geo, ins)
         n = snapshot.nodes[node]
+        if n.type == "wrangle":                              # which attributes the snippet reads and writes
+            try:
+                prog = compile_snippet(str(snapshot.get_param(node, "snippet")))
+                out["wrangle"] = {"reads": sorted(prog.reads), "writes": sorted(prog.writes)}
+            except Exception:  # noqa: BLE001 - a broken snippet already failed the cook above
+                pass
         if n.type == "blender_object":                       # what Blender sent: attributes, vertex groups, skips
             data = INPUTS.get(str(n.params.get("object", "")))
             if data is not None:
