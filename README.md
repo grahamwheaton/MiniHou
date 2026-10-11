@@ -427,6 +427,9 @@ Measured with `bench/bench_link.py` (1M points, Blender 5.1.2). Windows numbers 
 Smaller graphs on Linux (slider edit, end to end): 10k points 1.5 ms, 100k 4 ms, 250k 6.6 ms (numba); numpy-only is 2-11x slower.
 Per node at 1M points with numba vs numpy: noise 12.7 vs 283 ms, 4-octave noise 46 vs 1106 ms, scatter 160 vs 1012 ms,
 copy_to_points (1M copies) 134 vs 536 ms, normal 63 vs 662 ms.
+Mesh queries (`raycast.TriGrid`: closest point and ray casts, behind `remesh`, `sdf_boolean`, `ray`, scatter-in-volume and the
+PCG samplers) also have compiled kernels: remesh of a 4,800-triangle sphere at 0.03 voxels takes 3.5 s vs 17 s, 20k closest-point
+queries against a 38k-triangle mesh 1.6 s vs 89 s, 5k inside tests 0.02 s vs 0.4 s. Results match to rounding.
 
 Two findings made the Blender side fast: `mesh.vertices.foreach_set("co")` walks per-vertex RNA structs (165 ms for 1M points) while
 `mesh.attributes["position"].data.foreach_set("vector")` is a memcpy (~1 ms); likewise `.corner_vert` (1.3 ms) vs

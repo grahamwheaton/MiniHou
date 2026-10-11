@@ -199,6 +199,91 @@ class NormalParityTests(unittest.TestCase):
                 np.testing.assert_allclose(fast, ref, atol=1e-6)
 
 
+@needs_numba
+class TriGridParityTests(unittest.TestCase):
+    """The compiled ray and closest-point traversals agree with the numpy ones (and so with brute force)."""
+
+    def layouts(self):
+        rng = np.random.default_rng(3)
+        th = rng.random((300, 3)) * np.pi * 2
+        soup = np.stack([np.c_[np.cos(th[:, i]) * 2, np.sin(th[:, i]) * 2, rng.normal(0, 1, 300)] for i in range(3)], 1)
+        plane = np.array([[[-9, -9, -3], [9, -9, -3], [9, 9, -3]], [[-9, -9, -3], [9, 9, -3], [-9, 9, -3]]], float)
+        tiny = rng.random((150, 3, 3)) * 0.1 + rng.random((150, 1, 3)) * 6 - 3
+        line = np.array([[[0, 0, z], [0.4, 0, z], [0, 0.4, z + 0.1]] for z in np.linspace(0, 5, 40)], float)
+        return {"soup": soup, "plane": plane, "mixed": np.concatenate([soup, plane, tiny]), "stack": line,
+                "single": soup[:1]}
+
+    def test_intersect_matches_numpy(self):
+        from minihou.raycast import TriGrid
+        rng = np.random.default_rng(4)
+        for name, tris in self.layouts().items():
+            g = TriGrid(tris)
+            o, d = rng.normal(0, 4, (400, 3)), rng.normal(0, 1, (400, 3))
+            d[::7, 1:] = 0.0                                              # axis-parallel rays: zero direction parts
+            for md in (np.inf, 3.0):
+                with accel.disabled():
+                    ref = g.intersect(o, d, md)
+                got = g.intersect(o, d, md)
+                self.assertTrue(hasattr(g, "_karr"), "the compiled kernel did not run")
+                np.testing.assert_array_equal(np.isinf(got[0]), np.isinf(ref[0]), err_msg=name)
+                hit = np.isfinite(ref[0])
+                np.testing.assert_allclose(got[0][hit], ref[0][hit], atol=1e-9, err_msg=name)
+                np.testing.assert_allclose(got[2][hit], ref[2][hit], atol=1e-7, err_msg=name)
+
+    def test_closest_matches_numpy(self):
+        from minihou.raycast import TriGrid, _closest_on_tri
+        rng = np.random.default_rng(5)
+        for name, tris in self.layouts().items():
+            g = TriGrid(tris)
+            q = rng.normal(0, 5, (300, 3))
+            with accel.disabled():
+                ref_p, ref_d, _ = g.closest(q)
+            p, d, tri = g.closest(q)
+            self.assertTrue(hasattr(g, "_karr"), "the compiled kernel did not run")
+            np.testing.assert_allclose(d, ref_d, atol=1e-9, err_msg=name)
+            np.testing.assert_allclose(p, ref_p, atol=1e-7, err_msg=name)      # equal distances may name another triangle
+            np.testing.assert_allclose(_closest_on_tri(q, tris[tri]), p, atol=1e-9, err_msg=name)
+
+    def test_inside_matches_numpy(self):
+        from minihou.raycast import TriGrid, inside
+        P = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]], float)
+        F = [(0, 3, 2), (0, 2, 1), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4), (2, 3, 7), (2, 7, 6), (1, 2, 6),
+             (1, 6, 5), (3, 0, 4), (3, 4, 7)]
+        g = TriGrid(P[np.array(F)])
+        q = np.random.default_rng(6).uniform(-0.5, 1.5, (500, 3))
+        with accel.disabled():
+            ref = inside(g, q)
+        np.testing.assert_array_equal(inside(g, q), ref)
+        np.testing.assert_array_equal(ref, np.all((q > 0) & (q < 1), axis=1))
+
+    def test_empty_input(self):
+        from minihou.raycast import TriGrid
+        g = TriGrid(self.layouts()["soup"])
+        self.assertEqual(g.closest(np.zeros((0, 3)))[1].shape, (0,))
+        self.assertEqual(g.intersect(np.zeros((0, 3)), np.zeros((0, 3)))[0].shape, (0,))
+
+    def test_failing_kernels_fall_back_to_numpy(self):
+        from minihou.raycast import TriGrid
+        tris = self.layouts()["mixed"]
+        q = np.random.default_rng(7).normal(0, 4, (50, 3))
+        d = np.random.default_rng(8).normal(0, 1, (50, 3))
+        k = accel.kernels()
+        with accel.disabled():
+            ref_c, ref_t = TriGrid(tris).closest(q), TriGrid(tris).intersect(q, d)
+        for name, call, ref in (("grid_closest", lambda g: g.closest(q), ref_c),
+                                ("grid_intersect", lambda g: g.intersect(q, d), ref_t)):
+            orig = getattr(k, name)
+            try:
+                setattr(k, name, lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
+                with self.assertLogs("minihou.accel", level="WARNING"):
+                    out = call(TriGrid(tris))
+                np.testing.assert_allclose(out[1] if name == "grid_closest" else out[0],
+                                           ref[1] if name == "grid_closest" else ref[0], atol=1e-9)
+            finally:
+                setattr(k, name, orig)
+                accel._disabled_reason = None
+
+
 class FallbackAndSafetyTests(unittest.TestCase):
     def test_numpy_path_works_with_acceleration_disabled(self):
         with accel.disabled():
@@ -297,7 +382,9 @@ class FallbackAndSafetyTests(unittest.TestCase):
                 "g = Graph.from_dict({'version':1,'nodes':{'g':{'type':'grid'},'n':{'type':'noise','inputs':{'geo':'g'}},"
                 "'s':{'type':'scatter','inputs':{'geo':'n'}},'o':{'type':'output','inputs':{'geo':'s'}}}})\n"
                 "print(accel.AVAILABLE, Evaluator().cook(g).npoints, accel.IMPORT_ERROR)\n")
-        out = subprocess.run([sys.executable, "-c", code], cwd=str(ROOT), capture_output=True, text=True, encoding="utf-8")
+        env = {k: v for k, v in os.environ.items() if k != "MINIHOU_NO_NUMBA"}      # the import must be attempted
+        out = subprocess.run([sys.executable, "-c", code], cwd=str(ROOT), capture_output=True, text=True,
+                             encoding="utf-8", env=env)
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertTrue(out.stdout.startswith("False 1000 "), out.stdout)
         self.assertIn("simulated numba/numpy mismatch", out.stdout)
