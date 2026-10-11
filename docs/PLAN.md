@@ -108,9 +108,27 @@ AI, Blender or the JSON file shows up in all the others.
 4. Multiple outputs / several display nodes; detail attributes, UV maps and normals to Blender.
 5. Time/frame in the cache key for animated graphs (frame-change hook in the add-on).
 6. Editor: subnetworks / reusable "systems" (a graph used as a node), network boxes, a 3D preview pane, copy/paste between
-   graphs. MCP: user node libraries (a `nodes/` folder of Python nodes the AI can write and the engine hot-loads).
+   graphs. (User node libraries: done, see below.)
    Extension packaging (manifest + licence are your call).
 7. Investigate the Blender popover crash further (only reachable via `wm.call_panel(keep_open=True)`), or report it upstream.
+
+## Node libraries (milestone 2)
+
+`minihou/library.py` loads every `*.py` in the node folders (default `<workspace>/nodes`) and re-executes a file when its
+contents change. Design points:
+
+* **Cache safety**: `NodeType.code_hash` (hash of the file) is appended to the node's cache key, so editing a node's code can
+  never serve a stale cached result, and nodes upstream of it stay cached.
+* **Atomic per file, with rollback**: a file's node types are replaced as a unit; if executing the new version fails (syntax
+  error, exception, a name clash) the previous version is restored and the error is kept with file and line.
+* **No shadowing**: while a library file executes (`sdk._LOADING`), `@node` refuses names that already exist, so a library
+  cannot silently replace `noise`.
+* **Swaps between cooks**: the session refreshes libraries under the cook lock, bumps the revision and sends a `nodes` event
+  (editor Tab menu updates live) before the graph event.
+* **Graphs survive missing types**: unchecked loads keep nodes of unknown types verbatim; the cook reports the missing type on
+  that node, and saving round-trips it, so a half-edited library never breaks a graph file.
+* **AI**: no code-writing MCP tool. `node_library` returns the folder, loaded files, errors and an authoring guide; the
+  assistant writes files with its own file tools, under its client's permission prompts.
 
 ## Acceleration design (added after the benchmark)
 

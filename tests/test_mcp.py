@@ -95,6 +95,10 @@ class ToolTests(unittest.TestCase):
         self.s = Session(Graph.load(self.path, check=False))
         self.s.start()
         self.s.watch_file(self.path, interval=0.05)
+        from minihou.library import NodeLibrary
+        self.lib = NodeLibrary([os.path.join(self.dir, "nodes")])
+        self.addCleanup(self.lib.unload)
+        self.s.attach_library(self.lib, interval=0.05)
         self.link = LinkServer(self.s, "127.0.0.1", 0)
         self.link.start()
         self.web = WebServer(self.s, "127.0.0.1", 0, link=self.link, root=self.dir)
@@ -165,6 +169,36 @@ class ToolTests(unittest.TestCase):
         text, err = call(self.m, "open_graph", path="../outside.json", create=True)
         self.assertTrue(err)
         self.assertIn("outside the workspace", text)
+
+    def test_ai_writes_a_node_library_file_and_uses_it(self):
+        text, _ = call(self.m, "node_library")
+        self.assertIn("(no node files yet)", text)
+        self.assertIn("@node(", text)                                       # the authoring guide comes with it
+        name = f"ai_lift_{os.getpid()}"
+        os.makedirs(os.path.join(self.dir, "nodes"))
+        code = (f"from minihou.sdk import Float, node\n\n@node({name!r}, inputs=['geo'], params=[Float('h', 2.0)])\n"
+                f"def {name}(geo, h):\n    out = geo.copy()\n    P = geo.P.copy()\n    P[:, 2] += h\n"
+                f"    out.point['P'] = P\n    return out\n")
+        with open(os.path.join(self.dir, "nodes", "ai.py"), "w", encoding="utf-8") as f:   # the AI's own file tool
+            f.write(code)
+        deadline = time.monotonic() + 5
+        while name not in call(self.m, "list_node_types")[0] and time.monotonic() < deadline:
+            time.sleep(0.05)
+        text, err = call(self.m, "list_node_types", names=[name])
+        self.assertFalse(err, text)
+        self.assertIn("ai.py", text)
+        text, err = call(self.m, "edit_graph", ops=[{"op": "add", "type": name, "id": "up", "inputs": {"geo": "grid1"}},
+                                                     {"op": "connect", "from": "up", "to": "output1"}])
+        self.assertIn("Cook OK", text)
+        self.assertAlmostEqual(json.loads(call(self.m, "inspect_node", node="up")[0])["bounds"]["max"][2], 2.0)
+        with open(os.path.join(self.dir, "nodes", "ai.py"), "a", encoding="utf-8") as f:
+            f.write("\ndef broken(:\n")
+        deadline = time.monotonic() + 5
+        while "ERROR in" not in call(self.m, "engine_status")[0] and time.monotonic() < deadline:
+            time.sleep(0.05)
+        status = call(self.m, "engine_status")[0]
+        self.assertIn("SyntaxError", status)
+        self.assertIn("ai.py", call(self.m, "node_library")[0])
 
     def test_ai_edits_reach_blender_clients(self):
         """An expose + value change from the AI is pushed to link clients as an interface update."""

@@ -92,9 +92,7 @@
   async function loadState() {
     try {
       const st = await api("/api/state");
-      S.types = {};
-      for (const t of st.nodes) S.types[t.name] = t;
-      S.typeList = st.nodes.slice().sort((a, b) => (a.category || "").localeCompare(b.category || "") || a.name.localeCompare(b.name));
+      setTypes(st.nodes, st.library);
       S.root = st.root;
       S.status = st.status;
       S.status.clients = st.link.clients;
@@ -103,6 +101,17 @@
     } catch (e) {
       setOnline(false);
     }
+  }
+  let libErrors = new Set();
+  function setTypes(nodes, library) {
+    S.types = {};
+    for (const t of nodes) S.types[t.name] = t;
+    S.typeList = nodes.slice().sort((a, b) => (a.category || "").localeCompare(b.category || "") || a.name.localeCompare(b.name));
+    S.library = library || null;
+    const errs = new Set(((library && library.files) || []).filter((f) => f.error).map((f) => relPath(f.file) + ": " + f.error));
+    const fresh = [...errs].filter((e) => !libErrors.has(e));
+    if (fresh.length) toast("Node library: " + fresh.join("\n"));
+    libErrors = errs;
   }
   function applySnapshot(snap) {
     if (!snap || snap.rev < S.rev) return;
@@ -118,6 +127,13 @@
     const es = new EventSource("/api/events");
     es.addEventListener("open", () => { setOnline(true); loadState(); });
     es.addEventListener("graph", (e) => applySnapshot(JSON.parse(e.data)));
+    es.addEventListener("nodes", (e) => {
+      const d = JSON.parse(e.data);
+      setTypes(d.nodes, d.library);
+      panelKey = null;                               // parameter panels may show a reloaded node type
+      for (const el of nodesEl.children) el._struct = null;
+      render();
+    });
     es.addEventListener("status", (e) => {
       S.status = JSON.parse(e.data);
       renderStatus(); renderNodes(); renderParams(true); scheduleInspect();
@@ -343,7 +359,7 @@
         if (r) { S.sel = new Set([to]); panelKey = null; renderParams(); renderNodes(); } else e.target.value = id;
       } });
     out.push(h("div", { class: "ph" }, nid));
-    out.push(h("div", { class: "ptype" }, n.type + (t.category ? " · " + t.category : "")));
+    out.push(h("div", { class: "ptype" }, n.type + (t.category ? " · " + t.category : "") + (t.source ? " · " + relPath(t.source) : "")));
     if (t.doc) out.push(h("div", { class: "pdoc" }, t.doc));
     out.push(h("div", { class: "perr", dataset: { role: "err" }, style: { display: nodeErrorText(id) ? "" : "none" } }, nodeErrorText(id)));
     const isDisp = displayNode() === id;
@@ -499,6 +515,16 @@
         h("div", { class: "pw" }, h("input", { type: "text", value: e.name, title: "Name in Blender",
           onchange: (ev) => { const name = ev.target.value.trim(); if (name && name !== e.name) edit([{ op: "expose", id: e.node, param: e.param, name }]); } })),
         h("button", { class: "pbtn", title: "Remove from Blender", onclick: () => edit([{ op: "unexpose", name: e.name }]) }, "✕"), h("span")));
+    }
+    const lib = S.library;
+    if (lib) {
+      out.push(h("div", { class: "section" }, "Node library"));
+      if (!lib.files.length) out.push(h("div", { class: "hint" }, "No node files yet. Python files in " +
+        lib.dirs.map(relPath).join(", ") + " become node types (python -m minihou new-node NAME writes a starter)."));
+      for (const f of lib.files) {
+        out.push(h("div", { class: "conn" }, h("b", null, relPath(f.file)), " ",
+          f.error ? h("span", { style: { color: "var(--err)" } }, "⚠ " + f.error) : f.nodes.join(", ")));
+      }
     }
     out.push(h("div", { class: "section" }, "Tips"));
     out.push(h("div", { class: "hint" }, "Tab adds a node. Drag from a node's bottom dot to another node to wire it. The blue bar is the display flag. Press ? for all controls."));

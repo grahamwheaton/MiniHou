@@ -319,10 +319,11 @@ class Graph:
     def to_dict(self) -> dict:
         nodes = {}
         for nid, inst in self.nodes.items():
-            nt = self.registry.get(inst.type)
+            nt = self.registry.get(inst.type) if inst.type in self.registry else None
             d: Dict[str, Any] = {"type": inst.type}
             if inst.params:
-                d["params"] = {k: _tidy(nt.param(k).to_json_value(v)) for k, v in inst.params.items()}
+                d["params"] = ({k: _tidy(nt.param(k).to_json_value(v)) for k, v in inst.params.items()} if nt
+                               else dict(inst.params))
             if inst.inputs:
                 d["inputs"] = {k: (list(v) if isinstance(v, list) else v) for k, v in inst.inputs.items()}
             d.update(inst.meta)
@@ -350,13 +351,18 @@ class Graph:
             if not isinstance(nd, dict) or "type" not in nd:
                 errs.append(f"node {nid!r}: expected an object with a 'type'")
                 continue
-            if nd["type"] not in g.registry:
-                errs.append(f"node {nid!r}: unknown node type {nd['type']!r}")
-                continue
             meta = {k: v for k, v in nd.items() if k not in ("type", "params", "inputs")}
             inputs = {}
             for port, ref in (nd.get("inputs") or {}).items():
                 inputs[port] = list(ref) if isinstance(ref, list) else ref
+            if nd["type"] not in g.registry:
+                if check:
+                    errs.append(f"node {nid!r}: unknown node type {nd['type']!r}")
+                    continue
+                # Unchecked (engine, editor): keep it as written. Its node library may be mid-edit; cooks through it
+                # report the missing type, and saving round-trips it unchanged.
+                g.nodes[nid] = NodeInstance(nid, nd["type"], dict(nd.get("params") or {}), inputs, meta)
+                continue
             nt = g.registry.get(nd["type"])
             try:
                 params = nt.coerce_params(nd.get("params"))

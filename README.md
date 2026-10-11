@@ -81,7 +81,8 @@ Then start `claude` in this folder (approve the `minihou` server) and ask, for e
 The assistant gets these tools: `engine_status`, `list_node_types` (every node, input and parameter with ranges and docs),
 `get_graph`, `edit_graph` (atomic batches of edit operations; the reply says whether the cook worked, which node failed and why,
 and point/prim counts), `inspect_node` (counts, bounds and attribute ranges at any node), `undo`, `list_graphs`, `open_graph`
-(also starts the engine if it isn't running) and `wrangle_reference`. The screenshots above are from exactly that loop.
+(also starts the engine if it isn't running), `wrangle_reference` and `node_library` (write brand-new node types in Python,
+see below). The screenshots above are from exactly that loop.
 The same edit operations are available to scripts over HTTP (`POST /api/edit`, see `minihou/edit.py` and `minihou/web/server.py`).
 
 ## Examples
@@ -92,6 +93,7 @@ The same edit operations are available to scripts over HTTP (`POST /api/edit`, s
 | `examples/graphs/spiky_sphere.json` | sphere + vector noise, normals, scatter, delete by expression, per-point `pscale` from a wrangle, box spikes |
 | `examples/graphs/terrain_rocks.json` | 200x200 terrain with 5-octave noise, a valley wrangle, rocks scattered only above a height |
 | `examples/graphs/crater.json` | built by an AI through MCP: dunes, a crater wrangle, boulders kept only on the rim by a `delete` expression |
+| `examples/graphs/spiral_stairs.json` | uses the example library nodes `stairs` (spiral treads around a column) and `twist` |
 
 All examples are cooked by the test-suite, so they keep working as nodes evolve.
 
@@ -131,6 +133,31 @@ arbitrary Python (imports, attribute access, strings, builtins... are rejected b
 Typical snippets take 20-50 ms on 1M points. The `delete` node takes a wrangle *expression* (`@P.z < 0`).
 
 ## Writing a node
+
+### Node libraries (hot-reloaded)
+
+![A spiral staircase from the example library node nodes/stairs.py, live in Blender](docs/images/spiral_stairs.png)
+
+Any `*.py` file in the workspace's `nodes/` folder is loaded by the engine and **re-loaded whenever you save it**: its `@node`
+functions appear in the editor's Tab menu (and to AI tools) within a second, and graphs using them recook. Nothing to restart.
+
+```powershell
+py -m minihou new-node ripple_rings        # writes nodes\ripple_rings.py from a template; edit and save
+```
+
+* Cache-safe: each library node's cache key includes a hash of its file, so editing code never serves stale results.
+* Failure-safe: a syntax error or exception keeps the previous version loaded; the error (file and line) shows in the editor
+  and in AI tool replies. Runtime errors inside a node name the file and line too.
+* A library node cannot take the name of an existing node. Graphs that use a node type which disappeared still open (the
+  cook reports the missing type) and round-trip unchanged.
+* `nodes/twist.py` (a deformer) and `nodes/stairs.py` (a generator that builds topology with numpy; spiral mode above) are
+  examples; `examples/graphs/spiral_stairs.json` uses both. `serve --nodes DIR` adds folders.
+* Library files are Python running inside the engine, trusted like any script you run. Opening a graph never runs code.
+
+AI assistants use the same mechanism: the MCP `node_library` tool explains how to write a node and reports load errors, and the
+assistant writes the file with its normal (permission-checked) file tools. There is deliberately no MCP tool that writes code.
+
+### The SDK
 
 ```python
 from minihou.sdk import node, Float, Vec3
@@ -204,7 +231,7 @@ Blender version changes them. Topology rebuilds (only when connectivity changes)
 ## Automated checks (what Claude runs, what you can run)
 
 ```powershell
-py -m unittest discover -s tests -t .                  # 317 tests; Blender ones skip without bpy, browser ones without playwright
+py -m unittest discover -s tests -t .                  # 330 tests; Blender ones skip without bpy, browser ones without playwright
 py tools\launch_blender.py --selftest                  # add-on tests inside `blender --background`, engine as a separate process
 py tools\launch_blender.py --bench -- --points 1000000 # the 1M-point benchmark inside Blender (add --mode engine for slider edits)
 py tools\launch_blender.py --gui-test                  # interactive smoke test in a real Blender window (~30 s)
@@ -278,6 +305,8 @@ minihou/                  the engine (numpy + stdlib, optional numba; never impo
   link/                   protocol.py + client.py (shared with the add-on), diff.py, session.py, server.py
   web/                    HTTP API + live events (server.py) and the node editor (static/)
   mcp.py                  MCP server for AI assistants (stdio, stdlib only)
+  library.py              node libraries: load and hot-reload nodes/*.py, authoring guide
+nodes/                    example node library (twist, stairs); your own node files go here
 blender_addon/minihou_link/
   runtime.py              main-thread timer, depsgraph handler, feedback-loop guards
   mesh_writer.py          foreach_set writer (fast attribute paths)

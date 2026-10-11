@@ -106,6 +106,7 @@ class Session:
         self._dirty = False                           # in-memory graph differs from the file
         self._file_text: Optional[str] = None         # last text read from / written to the file
         self.save_error: Optional[str] = None
+        self.library = None                           # minihou.library.NodeLibrary, if attached
         self._save_enabled = False
         self._stamp = None
         self._file_lock = threading.RLock()           # saving vs. noticing external changes
@@ -388,6 +389,9 @@ class Session:
         with self.lock:
             self._dirty = False
         self._stamp = self._file_stamp()
+        self._ensure_watcher(interval)
+
+    def _ensure_watcher(self, interval: float = 0.25) -> None:
         if self._watch_thread and self._watch_thread.is_alive():
             return
 
@@ -395,11 +399,42 @@ class Session:
             while not self._stop.wait(interval):
                 try:
                     self._poll_file()
+                    self._poll_library()
                 except Exception:  # noqa: BLE001 - keep watching
                     log.exception("file watcher failed")
 
         self._watch_thread = threading.Thread(target=loop, name="minihou-watch", daemon=True)
         self._watch_thread.start()
+
+    # -- node libraries ------------------------------------------------------
+    def attach_library(self, library, interval: float = 0.25) -> None:
+        """Load a :class:`~minihou.library.NodeLibrary` now and hot-reload it from then on."""
+        self.library = library
+        self._poll_library()
+        self._ensure_watcher(interval)
+
+    def _poll_library(self) -> None:
+        lib = self.library
+        if lib is None:
+            return
+        with self._cook_lock:                         # swap node code between cooks, never during one
+            changed = lib.refresh()
+        if not changed:
+            return
+        with self.lock:
+            self._rev += 1                            # code hashes are in the cache keys: affected nodes recook
+            self._wake.set()
+        for l in list(self._listeners):
+            fn = getattr(l, "on_types", None)
+            if fn:
+                try:
+                    fn()
+                except Exception:  # noqa: BLE001
+                    log.exception("listener failed")
+        self._after_structural_change("library")
+
+    def library_status(self) -> Optional[dict]:
+        return self.library.status() if self.library is not None else None
 
     def _file_stamp(self):
         try:

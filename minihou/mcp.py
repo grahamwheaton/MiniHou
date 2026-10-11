@@ -38,7 +38,8 @@ How to build a system:
    set the display node, expose the parameters an artist should tweak in Blender, add short comments. A batch is
    atomic; the reply tells you whether the cook succeeded, which node failed and why, and point/prim counts.
 4. inspect_node to check geometry (counts, bounds, attributes with ranges) at any node, then iterate.
-Use wrangle nodes (wrangle_reference) for custom per-point math. Z is up; units are Blender metres. The user is
+Use wrangle nodes (wrangle_reference) for custom per-point math; for anything more (new topology, several inputs,
+loops over geometry) write a node-library file (node_library). Z is up; units are Blender metres. The user is
 watching the editor and Blender live and can undo your edits, so prefer small verified steps over huge batches."""
 
 OPS_DOC = """\
@@ -100,6 +101,12 @@ TOOLS: List[dict] = [
                     "create=true. Starts the engine if it is not running. New systems usually go in graphs/<name>.json.",
      "inputSchema": {"type": "object", "required": ["path"], "additionalProperties": False, "properties": {
          "path": {"type": "string"}, "create": {"type": "boolean"}}}},
+    {"name": "node_library",
+     "description": "Node libraries: Python files of @node functions the engine hot-loads as new node types (for "
+                    "anything a wrangle can't do: new topology, multi-input logic, simulations). Lists the node "
+                    "folder, loaded files, their node types and any load errors (file and line), plus a guide to "
+                    "writing a node. Write the file with your own file tools; it is live within a second.",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "wrangle_reference",
      "description": "The wrangle snippet language (VEX-like per-point expressions): syntax, attributes, functions.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
@@ -185,7 +192,8 @@ def format_node_types(types: List[dict]) -> str:
     for t in types:
         ins = ", ".join(i["name"] + (" (any number)" if i.get("multi") else "") + (" (optional)" if i.get("optional") else "")
                         for i in t["inputs"]) or "none (a source)"
-        out.append(f"{t['name']} [{t.get('category') or 'other'}]\n  {' '.join((t.get('doc') or '').split())}\n  inputs: {ins}")
+        src = f" (from {t['source']})" if t.get("source") else ""
+        out.append(f"{t['name']} [{t.get('category') or 'other'}]{src}\n  {' '.join((t.get('doc') or '').split())}\n  inputs: {ins}")
         if t["params"]:
             out.append("  params:\n" + "\n".join(_fmt_param(p) for p in t["params"]))
     return "\n\n".join(out)
@@ -313,11 +321,16 @@ class McpServer:
             return (f"Engine not running ({self.engine.url}). Call open_graph(path) to start it on a graph file, "
                     f"e.g. open_graph('graphs/my_system.json', create=true).\n{e}")
         clients = st["link"]["clients"]
+        lib = st.get("library") or {}
+        bad = [f for f in lib.get("files", []) if f["error"]]
         lines = [f"Engine running (pid {st['engine']['pid']}, minihou {st['engine']['version']}).",
                  f"Graph file: {st.get('path') or '(none)'}  (rev {st['rev']}, {len(st['graph']['nodes'])} nodes)",
                  format_status(st["status"], st["graph"]),
                  f"Blender: {'connected (' + ', '.join(clients) + ')' if clients else 'not connected'}",
                  f"Editor (for the user): {self.engine.url}"]
+        if lib:
+            lines.append(f"Node library: {sum(len(f['nodes']) for f in lib['files'])} custom node type(s) from "
+                         f"{len(lib['files'])} file(s)" + "".join(f"\n  ERROR in {f['file']}: {f['error']}" for f in bad))
         return "\n".join(lines)
 
     def tool_list_node_types(self, names: Optional[List[str]] = None) -> str:
@@ -414,6 +427,22 @@ class McpServer:
         self.engine.post("/api/open", {"path": str(target), "create": bool(create)})
         self.engine.get("/api/status?wait=1&timeout=30")
         return f"Opened {target}.\n" + self.tool_engine_status()
+
+    def tool_node_library(self) -> str:
+        from .library import AUTHORING_GUIDE
+        try:
+            lib = self.engine.get("/api/state").get("library")
+        except EngineDown:
+            lib = None
+        if lib:
+            lines = [f"Node folder(s): {', '.join(lib['dirs'])}"]
+            for f in lib["files"]:
+                lines.append(f"  {f['file']}: " + (f"ERROR {f['error']}" if f["error"] else ", ".join(f["nodes"])))
+            if not lib["files"]:
+                lines.append("  (no node files yet)")
+        else:
+            lines = [f"Engine not running; its node folder will be {self.workspace / 'nodes'}"]
+        return "\n".join(lines) + "\n\n" + AUTHORING_GUIDE
 
     def tool_wrangle_reference(self) -> str:
         from .wrangle import reference

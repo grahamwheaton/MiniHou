@@ -64,6 +64,7 @@ class _EventStream:
         self.cv = threading.Condition()
         self.graph = True          # send the initial state straight away
         self.status = True
+        self.types = False
 
     def on_graph(self, rev, origin):
         with self.cv:
@@ -77,6 +78,11 @@ class _EventStream:
 
     def on_status(self, rev):
         self.on_result(None)
+
+    def on_types(self):
+        with self.cv:
+            self.types = True
+            self.cv.notify_all()
 
     def on_interface(self, iface):
         pass
@@ -145,7 +151,7 @@ class WebServer:
     def state(self) -> dict:
         s = self.session
         out = s.snapshot()
-        out.update(status=s.status(), nodes=[nt.describe() for nt in s.evaluator.registry],
+        out.update(status=s.status(), nodes=[nt.describe() for nt in s.evaluator.registry], library=s.library_status(),
                    ops=OP_NAMES, root=str(self.root), files=self.files(),
                    link={"port": getattr(self.link, "port", None), "clients": self.link_clients()},
                    engine={"pid": os.getpid(), "version": _version()})
@@ -363,14 +369,18 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.flush()
             while not app.stopping.is_set():
                 with stream.cv:
-                    if not (stream.graph or stream.status):
+                    if not (stream.graph or stream.status or stream.types):
                         stream.cv.wait(2.0)
+                    send_types, stream.types = stream.types, False
                     send_graph, stream.graph = stream.graph, False
                     send_status, stream.status = stream.status, False
                 now_clients = app.link_clients()
                 if now_clients != clients:
                     clients, send_status = now_clients, True
                 chunks = []
+                if send_types:                            # before the graph: it may use the new node types
+                    chunks.append(("nodes", {"nodes": [nt.describe() for nt in s.evaluator.registry],
+                                             "library": s.library_status()}))
                 if send_graph:
                     chunks.append(("graph", s.snapshot()))
                 if send_status:

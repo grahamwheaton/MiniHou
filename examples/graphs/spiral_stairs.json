@@ -1,0 +1,79 @@
+{
+  "version": 1,
+  "nodes": {
+    "steps": {
+      "type": "stairs",
+      "params": {
+        "steps": 32,
+        "width": 1.5,
+        "run": 0.45,
+        "rise": 0.24,
+        "spiral": 22.5,
+        "inner_radius": 0.25,
+        "solid": false
+      },
+      "comment": "library node nodes/stairs.py: steps fan around Z",
+      "pos": [0, 110]
+    },
+    "column": {
+      "type": "box",
+      "params": {
+        "size": [0.5, 0.5, 8]
+      },
+      "pos": [190, 0]
+    },
+    "column_up": {
+      "type": "transform",
+      "params": {
+        "translate": [0, 0, 4]
+      },
+      "inputs": {
+        "geo": "column"
+      },
+      "pos": [190, 110]
+    },
+    "tower": {
+      "type": "merge",
+      "inputs": {
+        "geos": ["steps", "column_up"]
+      },
+      "pos": [95, 220]
+    },
+    "wobble": {
+      "type": "twist",
+      "params": {
+        "angle": 0
+      },
+      "inputs": {
+        "geo": "tower"
+      },
+      "comment": "nodes/twist.py; try a few degrees",
+      "pos": [95, 330]
+    },
+    "out": {
+      "type": "output",
+      "inputs": {
+        "geo": "wobble"
+      },
+      "pos": [95, 440]
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Steps",
+      "node": "steps",
+      "param": "steps"
+    },
+    {
+      "name": "Turn per Step",
+      "node": "steps",
+      "param": "spiral"
+    },
+    {
+      "name": "Twist",
+      "node": "wobble",
+      "param": "angle"
+    }
+  ]
+}

@@ -37,7 +37,19 @@ class NodeError(RuntimeError):
         self.node_id = node_id
         self.node_type = node_type
         self.cause = cause
-        super().__init__(f"node {node_id!r} ({node_type}): {type(cause).__name__}: {cause}")
+        where = _library_location(cause)
+        super().__init__(f"node {node_id!r} ({node_type}): {type(cause).__name__}: {cause}{where}")
+
+
+def _library_location(exc: BaseException) -> str:
+    """" (nodes/twist.py, line 12)" when the error comes from a node-library file: tells a person (or an AI) where to look."""
+    import traceback
+    from .sdk import REGISTRY
+    files = {nt.source for nt in REGISTRY if nt.source}
+    for fr in reversed(traceback.extract_tb(exc.__traceback__)):
+        if fr.filename in files:
+            return f" ({fr.filename}, line {fr.lineno})"
+    return ""
 
 
 @dataclass
@@ -158,8 +170,8 @@ class Evaluator:
                 else:
                     in_keys.append(keys[ref])
             payload = json.dumps(
-                [nt.name, nt.version, [[p.name, p.to_json_value(params[p.name])] for p in nt.params], in_keys],
-                separators=(",", ":"), allow_nan=False)
+                [nt.name, nt.version, [[p.name, p.to_json_value(params[p.name])] for p in nt.params], in_keys]
+                + ([nt.code_hash] if nt.code_hash else []), separators=(",", ":"), allow_nan=False)
             keys[nid] = hashlib.blake2b(payload.encode("utf-8"), digest_size=16).hexdigest()
         return keys
 

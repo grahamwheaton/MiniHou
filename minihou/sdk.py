@@ -210,6 +210,8 @@ class NodeType:
     version: int = 1
     category: str = ""
     doc: str = ""
+    source: str = ""              # file a node library loaded it from ("" for built-ins)
+    code_hash: str = ""           # hash of that file: part of the cache key, so editing the code never serves stale results
     _param_index: Dict[str, Param] = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self):
@@ -236,10 +238,13 @@ class NodeType:
         return {p.name: (p.coerce(given[p.name]) if p.name in given else p.default) for p in self.params}
 
     def describe(self) -> dict:
-        return {"name": self.name, "version": self.version, "category": self.category, "doc": self.doc,
-                "inputs": [i.__dict__ for i in self.inputs],
-                "outputs": [o.__dict__ for o in self.outputs],
-                "params": [p.describe() for p in self.params]}
+        d = {"name": self.name, "version": self.version, "category": self.category, "doc": self.doc,
+             "inputs": [i.__dict__ for i in self.inputs],
+             "outputs": [o.__dict__ for o in self.outputs],
+             "params": [p.describe() for p in self.params]}
+        if self.source:
+            d["source"] = self.source
+        return d
 
 
 class Registry:
@@ -251,6 +256,9 @@ class Registry:
             raise ValueError(f"node type {nt.name!r} is already registered")
         self._types[nt.name] = nt
         return nt
+
+    def unregister(self, name: str) -> Optional[NodeType]:
+        return self._types.pop(name, None)
 
     def get(self, name: str) -> NodeType:
         try:
@@ -269,6 +277,10 @@ class Registry:
 
 
 REGISTRY = Registry()
+
+# Set by minihou.library while it executes a node-library file: nodes defined there are stamped with the file and its
+# hash, and may not take the name of an existing (e.g. built-in) node type.
+_LOADING: Optional[Dict[str, str]] = None
 
 
 def node(name: str, *, inputs: Sequence[Union[str, Input]] = (), params: Sequence[Param] = (),
@@ -293,9 +305,16 @@ def node(name: str, *, inputs: Sequence[Union[str, Input]] = (), params: Sequenc
             missing = [n for n in names if n not in sig.parameters]
             if missing:
                 raise ValueError(f"node {name!r}: function {fn.__name__} lacks argument(s) {missing}")
+        src = _LOADING
+        reg = registry or REGISTRY
+        if src is not None and name in reg:
+            other = reg.get(name).source
+            raise ValueError(f"node type {name!r} already exists ({'in ' + other if other else 'built in'}); "
+                             "choose another name")
         nt = NodeType(name=name, fn=fn, inputs=ins, params=params, outputs=outs, version=version,
-                      category=category, doc=doc or (inspect.getdoc(fn) or ""))
-        (registry or REGISTRY).register(nt, replace=replace)
+                      category=category or ("custom" if src else ""), doc=doc or (inspect.getdoc(fn) or ""),
+                      source=src["file"] if src else "", code_hash=src["hash"] if src else "")
+        reg.register(nt, replace=replace)
         fn.node_type = nt  # type: ignore[attr-defined]
         return fn
 

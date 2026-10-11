@@ -54,6 +54,10 @@ class EditorE2E(unittest.TestCase):
         self.s = Session(Graph.load(self.path, check=False))
         self.s.start()
         self.s.watch_file(self.path, interval=0.05)
+        from minihou.library import NodeLibrary
+        self.lib = NodeLibrary([os.path.join(self.dir, "nodes")])
+        self.addCleanup(self.lib.unload)
+        self.s.attach_library(self.lib, interval=0.05)
         self.web = WebServer(self.s, "127.0.0.1", 0, root=self.dir)
         self.web.start()
         self.addCleanup(self.s.stop)
@@ -182,6 +186,23 @@ class EditorE2E(unittest.TestCase):
         self.node("hills").locator(".title").click()
         self.s.set_param("Hill Frequency", 0.9)
         self.page.wait_for_function("document.querySelector('.prow[data-param=\"frequency\"] input[type=number]').value == '0.9'")
+
+    def test_new_library_node_appears_live_in_the_tab_menu(self):
+        name = f"e2e_lift_{os.getpid()}"
+        os.makedirs(os.path.join(self.dir, "nodes"))
+        with open(os.path.join(self.dir, "nodes", "lift.py"), "w", encoding="utf-8") as f:
+            f.write(f"from minihou.sdk import node\n\n@node({name!r}, inputs=['geo'], category='mine')\n"
+                    f"def {name}(geo):\n    return geo.copy()\n")
+        self.page.wait_for_function(f"window.minihou.S.types[{name!r}] !== undefined")
+        self.page.mouse.dblclick(*self.empty_spot())
+        self.page.keyboard.type("e2e_lift")
+        self.page.wait_for_selector(f"#tab-list .it:has-text({name!r})")
+        self.page.keyboard.press("Enter")
+        self.assertTrue(until(lambda: any(n.type == name for n in self.s.graph.nodes.values())))
+        with open(os.path.join(self.dir, "nodes", "lift.py"), "a", encoding="utf-8") as f:
+            f.write("\nbroken(\n")
+        self.page.wait_for_selector("#toast.err")
+        self.assertIn("SyntaxError", self.page.inner_text("#toast"))
 
     def test_graph_text_is_never_html(self):
         payload = '<img src=x onerror="window.__xss=1"><b>bold</b>'
