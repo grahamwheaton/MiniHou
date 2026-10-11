@@ -193,7 +193,13 @@ Worked through in order of how often Houdini users reach for them:
    scaled to their 3-D area, turned to their smallest bounding box and shelf-packed.
 10. **Fracture and clean-up**: `voronoi_fracture` clips the mesh by bisector planes nearest-first per cell and stops once
     a plane is beyond the piece's farthest corner (exact cells); only loops lying on the cutting plane are capped, so
-    open inputs stay open. `smooth` uses Taubin's lambda|mu steps (no shrinkage); `match_size`, `exploded_view`.
+    open inputs stay open. `scatter` mode volume seeds cells inside a closed mesh (`raycast.inside`: crossing parity
+    along three skewed rays, majority vote). `smooth` uses Taubin's lambda|mu steps (no shrinkage); `match_size`,
+    `exploded_view`.
+11. **PolyReduce** (`nodes/reduce.py`): quadric error metrics with stiff border planes, collapsed in vectorised rounds:
+    an edge goes when it is the cheapest at both its points (a matching), among the globally cheapest edges, passes
+    the link condition and flips no triangle with the round's surviving moves (re-checked until stable). Refused edges
+    wait while others go; the cheap set widens only when nothing else can collapse.
 
 Next candidates: exact mesh booleans, an editor frame slider, numba kernels for
 closest-point queries and SDF construction (the numpy SDF of a mesh spends most of its time in closest points).

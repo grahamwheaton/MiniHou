@@ -1,0 +1,146 @@
+{
+ "version": 1,
+ "doc": "PolyReduce: a 24k-triangle rock (left) reduced to 3% of its triangles (right) with quadric error metrics; flat face normals show the triangles the reduction kept.",
+ "nodes": {
+  "ball": {
+   "type": "sphere",
+   "params": {
+    "radius": 1.0,
+    "rows": 80,
+    "columns": 160
+   },
+   "pos": [
+    0,
+    0
+   ]
+  },
+  "lumpy": {
+   "type": "noise",
+   "inputs": {
+    "geo": "ball"
+   },
+   "pos": [
+    0,
+    100
+   ],
+   "params": {
+    "amplitude": [
+     0.3,
+     0.3,
+     0.3
+    ],
+    "frequency": 1.3,
+    "octaves": 5,
+    "seed": 2
+   }
+  },
+  "rock": {
+   "type": "match_size",
+   "inputs": {
+    "geo": "lumpy"
+   },
+   "pos": [
+    0,
+    200
+   ],
+   "params": {
+    "justify_z": "min",
+    "center": [
+     -1.3,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  "low": {
+   "type": "polyreduce",
+   "inputs": {
+    "geo": "lumpy"
+   },
+   "pos": [
+    250,
+    200
+   ],
+   "params": {
+    "percentage": 3.0
+   }
+  },
+  "low_place": {
+   "type": "match_size",
+   "inputs": {
+    "geo": "low"
+   },
+   "pos": [
+    250,
+    300
+   ],
+   "params": {
+    "justify_z": "min",
+    "center": [
+     1.3,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  "low_flat": {
+   "type": "normal",
+   "inputs": {
+    "geo": "low_place"
+   },
+   "pos": [
+    250,
+    400
+   ],
+   "params": {
+    "domain": "vertex",
+    "cusp_angle": 0.0
+   }
+  },
+  "high_smooth": {
+   "type": "normal",
+   "inputs": {
+    "geo": "rock"
+   },
+   "pos": [
+    0,
+    300
+   ],
+   "params": {
+    "domain": "vertex",
+    "cusp_angle": 180.0
+   }
+  },
+  "both": {
+   "type": "merge",
+   "inputs": {
+    "geos": [
+     "high_smooth",
+     "low_flat"
+    ]
+   },
+   "pos": [
+    100,
+    500
+   ]
+  },
+  "out": {
+   "type": "output",
+   "inputs": {
+    "geo": "both"
+   },
+   "pos": [
+    100,
+    600
+   ]
+  }
+ },
+ "display": "out",
+ "exposed": [
+  {
+   "name": "Keep %",
+   "node": "low",
+   "param": "percentage"
+  }
+ ]
+}

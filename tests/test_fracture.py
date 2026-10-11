@@ -77,5 +77,42 @@ class FractureTests(unittest.TestCase):
             cook({"s": {"type": "sphere"}, "e": {"type": "exploded_view", "inputs": {"geo": "s"}}}, "e")
 
 
+def winding(P, tris, q):
+    """Generalised winding number (solid angles, Van Oosterom & Strackee): ~1 inside a closed mesh, ~0 outside."""
+    a, b, c = (P[tris[:, k]][None] - q[:, None] for k in range(3))
+    la, lb, lc = (np.linalg.norm(x, axis=2) for x in (a, b, c))
+    det = np.einsum("qtk,qtk->qt", a, np.cross(b, c))
+    den = la * lb * lc + np.einsum("qtk,qtk->qt", a, b) * lc + np.einsum("qtk,qtk->qt", b, c) * la \
+        + np.einsum("qtk,qtk->qt", c, a) * lb
+    return (2 * np.arctan2(det, den)).sum(1) / (4 * np.pi)
+
+
+class InsideTests(unittest.TestCase):
+    def test_parity_matches_winding_number(self):
+        from minihou.raycast import TriGrid, inside
+        g = cook({"t": {"type": "torus", "params": {"rows": 10, "columns": 20}},
+                  "n": {"type": "noise", "inputs": {"geo": "t"}, "params": {"amplitude": [0.08] * 3}}}, "n")
+        tris, _ = fan_triangulate(g.topology)
+        tv = g.topology.vertex_point[tris]
+        P = g.P.astype(np.float64)
+        q = np.random.default_rng(0).uniform(P.min(0), P.max(0), (3000, 3))
+        w = winding(P, tv, q)
+        clear = np.abs(w - np.round(w)) < 0.2                                 # not on the surface itself
+        got = inside(TriGrid(P[tv]), q, float(np.ptp(P, 0).max()))
+        np.testing.assert_array_equal(got[clear], (np.round(w) > 0.5)[clear])
+
+    def test_scatter_volume(self):
+        g = cook({"s": {"type": "sphere", "params": {"rows": 24, "columns": 48}},
+                  "p": {"type": "scatter", "inputs": {"geo": "s"}, "params": {"count": 4000, "mode": "volume"}}}, "p")
+        r = np.linalg.norm(g.P, axis=1)
+        self.assertEqual(g.npoints, 4000)
+        self.assertTrue(np.all(r <= 1.0 + 1e-6))
+        self.assertAlmostEqual(float((r ** 3).mean()), 0.5, delta=0.03)          # uniform in the ball
+        self.assertTrue(np.all(g.point["primnum"] == -1))
+        with self.assertRaises(NodeError):
+            cook({"c": {"type": "helix"}, "p": {"type": "scatter", "inputs": {"geo": "c"},
+                                                  "params": {"mode": "volume"}}}, "p")
+
+
 if __name__ == "__main__":
     unittest.main()

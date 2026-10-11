@@ -252,3 +252,30 @@ def _closest_on_tri(p, tri):
         v, w = vb * denom, vc * denom
         put(np.ones(len(p), bool), a + ab * v[:, None] + ac * w[:, None])    # inside the face
     return res
+
+
+_PARITY_DIRS = np.array([[0.5774, 0.4122, 0.7046], [-0.3313, 0.8661, 0.3742], [0.7421, -0.5167, -0.4271]])
+
+
+def inside(grid: "TriGrid", pts, scale: float = 1.0) -> np.ndarray:
+    """Bool per point: inside the closed mesh of ``grid``. Counts crossings along three skewed rays (parity) and takes
+    the majority, so a ray grazing an edge or a vertex cannot flip the answer."""
+    pts = np.asarray(pts, np.float64).reshape(-1, 3)
+    votes = np.zeros(len(pts), np.int32)
+    if grid.n == 0 or len(pts) == 0:
+        return votes > 0
+    eps = 1e-7 * max(scale, 1e-12)
+    for d in _PARITY_DIRS / np.linalg.norm(_PARITY_DIRS, axis=1, keepdims=True):
+        parity = np.zeros(len(pts), np.int32)
+        idx = np.arange(len(pts))
+        o = pts.copy()
+        for _ in range(1024):                                # crossings per ray: bounded by the mesh
+            if not len(idx):
+                break
+            t, _, _ = grid.intersect(o[idx], np.broadcast_to(d, (len(idx), 3)))
+            hit = np.isfinite(t)
+            idx, t = idx[hit], t[hit]
+            parity[idx] ^= 1
+            o[idx] += d * (t + eps)[:, None]
+        votes += parity
+    return votes >= 2

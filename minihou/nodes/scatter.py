@@ -2,7 +2,7 @@ import numpy as np
 
 from .. import accel
 from ..geometry import Geometry
-from ..sdk import Int, node
+from ..sdk import Enum, Int, node
 from ._util import fan_triangulate, normalize_rows
 
 
@@ -73,18 +73,50 @@ def _scatter_numpy(geo, count, seed):
                    tri_prim[t].astype(np.int32))
 
 
+def _scatter_volume(geo, count, seed):
+    """Uniform points inside a closed mesh: rejection sampling of its bounding box with a ray-parity inside test."""
+    from ..raycast import TriGrid, inside
+    tris, _ = fan_triangulate(geo.topology)
+    if len(tris) == 0:
+        return _empty()
+    P = geo.P.astype(np.float64)
+    grid = TriGrid(P[geo.topology.vertex_point[tris]])
+    lo, hi = P.min(0), P.max(0)
+    ext = hi - lo
+    rng = np.random.default_rng([int(seed) & 0xFFFFFFFF, 11])
+    found, have, frac = [], 0, 0.5
+    for _ in range(64):
+        if have >= count:
+            break
+        n = int(min(max(1024, (count - have) / max(frac, 0.02) * 1.25), 2_000_000))
+        cand = lo + rng.random((n, 3)) * ext
+        m = inside(grid, cand, float(ext.max()))
+        frac = max(float(m.mean()), 1e-3)
+        found.append(cand[m])
+        have += int(m.sum())
+    pos = np.concatenate(found)[:count] if found else np.zeros((0, 3))
+    if len(pos) == 0:
+        return _empty()
+    return _finish(pos.astype(np.float32), np.zeros((len(pos), 3), np.float32), np.full(len(pos), -1, np.int32))
+
+
 @node("scatter", inputs=["geo"], category="generate", params=[
     Int("count", 1000, min=0, soft_max=1000000),
     Int("seed", 0),
+    Enum("mode", ["surface", "volume"], doc="surface: on the faces (area weighted); volume: inside a closed mesh"),
 ])
-def scatter(geo, count, seed):
-    """Scatter points uniformly over the surface (area weighted).
+def scatter(geo, count, seed, mode="surface"):
+    """Scatter points uniformly over the surface (area weighted), or inside a closed mesh.
 
-    Output is a point cloud with ``P``, ``N`` (face normal) and ``primnum`` (source primitive).
-    Primitives are fan-triangulated for sampling. An input with no area yields an empty cloud.
+    Output is a point cloud with ``P``, ``N`` (face normal; zero in volume mode) and ``primnum`` (source primitive;
+    -1 in volume mode). Primitives are fan-triangulated for sampling. An input with no area yields an empty cloud.
     Uses a Numba kernel when available; the numpy path draws the same random numbers in the same order.
     """
     if count == 0 or geo.nprims == 0:
         return _empty()
+    if mode == "volume":
+        from ._build import require_polygons
+        require_polygons(geo, "scatter in volume mode")
+        return _scatter_volume(geo, count, seed)
     out = _scatter_numba(geo, count, seed)
     return out if out is not None else _scatter_numpy(geo, count, seed)
