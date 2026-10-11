@@ -156,7 +156,7 @@ All examples are cooked by the test-suite, so they keep working as nodes evolve.
 | `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |
 | `normal` | geo | area-weighted point normals or face normals (Newell, n-gon safe) |
 | `scatter` | geo | area-weighted random points on the surface (`P`, `N`, `primnum`) |
-| `copy_to_points` | source, points | stamp `source` on every point: orient +Z to `N`, scale by `pscale`, inherit point attributes |
+| `copy_to_points` | source, points | stamp `source` on every point, oriented by `orient` (quaternion), `rot`, or `N` + `up`, sized by `scale` x `pscale`; inherits point attributes |
 | `delete` | geo | delete points matching an expression (and primitives that use them), compacting all attributes |
 | `fuse` | geo | weld points closer than a distance |
 | `merge` | geos (any number) | concatenate; missing attributes are zero-filled |

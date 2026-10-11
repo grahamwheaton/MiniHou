@@ -67,5 +67,39 @@ class InstanceTests(unittest.TestCase):
         np.testing.assert_allclose(euler_xyz_to_matrix(matrix_to_euler_xyz(R)), R, atol=1e-9)
 
 
+class CopyToPointsAttributeTests(unittest.TestCase):
+    """copy_to_points honours Houdini's instancing attributes: orient, rot, N + up, scale x pscale."""
+
+    def copy(self, snippet, source=None):
+        nodes = {"src": source or {"type": "line", "params": {"origin": [1, 0, 0], "direction": [1, 0, 0], "length": 1,
+                                                             "points": 2}},
+                 "p": {"type": "curve", "params": {"points": "0,0,0 0,0,5"}},
+                 "w": {"type": "wrangle", "inputs": {"geo": "p"}, "params": {"snippet": snippet}},
+                 "c": {"type": "copy_to_points", "inputs": {"source": "src", "points": "w"}}}
+        return cook(nodes, "c")
+
+    def test_orient_quaternion(self):
+        s = 0.7071068
+        g = self.copy(f"p@orient = set(0, 0, {s}, {s})")                  # 90 degrees about +Z
+        np.testing.assert_allclose(g.P[:2], [[0, 1, 0], [0, 2, 0]], atol=1e-5)
+
+    def test_rot_from_the_instance_node_and_scale(self):
+        g = self.copy("v@rot = set(0, 0, 1.5707963); v@scale = set(2, 1, 1); f@pscale = 3")
+        np.testing.assert_allclose(g.P[:2], [[0, 6, 0], [0, 12, 0]], atol=1e-4)   # scaled x6 along X, then turned
+
+    def test_n_and_up_and_source_normals(self):
+        g = self.copy("v@N = set(1, 0, 0); v@up = set(0, 0, 1)")
+        # Z = N = +X, Y = up = +Z, so X = Y x Z = +Y: the source's +X axis lands on +Y
+        np.testing.assert_allclose(g.P[:2], [[0, 1, 0], [0, 2, 0]], atol=1e-5)
+        box = {"type": "box", "params": {"size": [1, 1, 1]}}
+        nb = cook({"b": box, "n": {"type": "normal", "inputs": {"geo": "b"}},
+                   "p": {"type": "curve", "params": {"points": "0,0,0 0,0,5"}},
+                   "w": {"type": "wrangle", "inputs": {"geo": "p"}, "params": {"snippet": "p@orient = set(1, 0, 0, 0)"}},
+                   "c": {"type": "copy_to_points", "inputs": {"source": "n", "points": "w"}}}, "c")
+        # 180 degrees about X: normals flip in Y and Z, and stay unit length
+        src = cook({"b": box, "n": {"type": "normal", "inputs": {"geo": "b"}}}, "n")
+        np.testing.assert_allclose(nb.point["N"][:8], src.point["N"] * [1, -1, -1], atol=1e-5)
+
+
 if __name__ == "__main__":
     unittest.main()
