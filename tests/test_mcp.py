@@ -213,8 +213,13 @@ class ToolTests(unittest.TestCase):
             {"op": "connect", "from": "pillars", "to": "output1"},
             {"op": "expose", "id": "spots", "param": "count", "name": "Pillar Count"}])
         self.assertIn("Cook OK", text)
-        deadline = time.monotonic() + 5
-        while name not in call(self.m, "list_node_types")[0] and time.monotonic() < deadline:
+        # open_graph(create=True) already wrote a starter file, so the type appears at once without inputs or params;
+        # wait for the edited graph (saved with a debounce) to be reloaded
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            text, err = call(self.m, "list_node_types", names=[name])
+            if not err and "pillar_count" in text:
+                break
             time.sleep(0.05)
         text, err = call(self.m, "list_node_types", names=[name])
         self.assertFalse(err, text)
