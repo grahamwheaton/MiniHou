@@ -323,7 +323,7 @@ class _Handler(BaseHTTPRequestHandler):
             ops = body.get("ops")
             if not isinstance(ops, list):
                 raise ApiError(400, '"ops" must be a list of edit operations')
-            out = s.edit(ops, origin=origin)
+            out = s.edit(ops, origin=origin, document_id=body.get("document_id"))
             if body.get("wait"):
                 s.wait_idle(float(body.get("timeout", 30)))
                 out["status"] = s.status()
@@ -331,7 +331,7 @@ class _Handler(BaseHTTPRequestHandler):
             out["graph"] = s.snapshot()
             return self._json(out)
         if path in ("/api/undo", "/api/redo"):
-            ok = (s.undo if path == "/api/undo" else s.redo)(origin=origin)
+            ok = (s.undo if path == "/api/undo" else s.redo)(origin=origin, document_id=body.get("document_id"))
             return self._json({"ok": ok, "graph": s.snapshot()})
         if path == "/api/inspect":
             node = body.get("node")

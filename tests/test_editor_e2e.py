@@ -179,6 +179,33 @@ class EditorE2E(unittest.TestCase):
         self.s.edit([{"op": "connect", "from": "loop_begin1", "to": "loop_end1", "port": "begin"}])
         self.page.wait_for_function("document.querySelector('#cook-status').classList.contains('ok')")
 
+    def test_delayed_slider_edit_is_recovered_after_external_graph_switch(self):
+        import json
+        target = os.path.join(self.dir, "other.json")
+        Graph.load(self.path).save(target)  # same node IDs: a stale edit could silently hit the wrong graph
+        self.node("hills").locator(".title").click()
+        held = []
+        self.page.route("**/api/edit", lambda route: held.append(route))
+        number = self.page.locator('.prow[data-param="frequency"] input[type=number]')
+        number.fill("0.73")
+        number.press("Enter")
+        self.page.wait_for_timeout(100)
+        self.assertEqual(len(held), 1)
+        self.s.open_file(target)
+        self.page.wait_for_function("window.minihou.S.path.endsWith('other.json')")
+        held[0].continue_()
+        self.page.wait_for_selector("#unsent-edits")
+        self.assertNotEqual(self.s.graph.get_param("hills", "frequency"), .73)
+        with self.page.expect_download() as downloading:
+            self.page.click("#unsent-edits")
+        saved = os.path.join(self.dir, "recovery.json")
+        downloading.value.save_as(saved)
+        with open(saved, encoding="utf-8") as f:
+            recovery = json.load(f)
+        self.assertEqual(recovery[-1]["path"], self.path)
+        self.assertEqual(recovery[-1]["ops"][0]["params"]["frequency"], .73)
+        self.errors[:] = [e for e in self.errors if "400 (Bad Request)" not in e]
+
     def test_renders_graph_status_and_inspector(self):
         self.assertEqual(self.page.locator(".node").count(), 9)
         self.page.wait_for_function("document.querySelector('#cook-status').classList.contains('ok')")

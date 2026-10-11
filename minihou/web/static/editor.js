@@ -9,7 +9,7 @@
   const SVGNS = "http://www.w3.org/2000/svg";
 
   const S = {
-    graph: { nodes: {} }, rev: -1, path: null, canUndo: false, canRedo: false,
+    graph: { nodes: {} }, rev: -1, path: null, documentId: null, canUndo: false, canRedo: false,
     types: {}, typeList: [], status: null, root: "",
     sel: new Set(), wireSel: null, view: { x: 80, y: 60, k: 1 },
     online: false, framed: false, dragPos: new Map(), mouse: [200, 200],
@@ -58,21 +58,49 @@
     if (!r.ok) throw new Error(data.error || r.statusText);
     return data;
   }
-  async function edit(ops) {
+  const recoveryKey = "minihou.unsent-edits";
+  let recoveredEdits = [];
+  try {
+    const stored = JSON.parse(localStorage.getItem(recoveryKey) || "[]");
+    if (Array.isArray(stored)) recoveredEdits = stored;
+  } catch (e) { /* Keep an in-memory recovery list when storage is unavailable. */ }
+  function stashEdits(ops, context) {
+    recoveredEdits.push({ path: context.path, document_id: context.documentId, ops });
+    let persisted = true;
     try {
-      const r = await api("/api/edit", { ops, origin: "editor" });
+      localStorage.setItem(recoveryKey, JSON.stringify(recoveredEdits));
+    } catch (e) { persisted = false; }
+    recoveryButton();
+    toast(persisted ? "Graph switched before these edits were submitted. Download Unsent edits to recover them for the original graph."
+      : "Unsent edits are kept in this tab only: browser storage is unavailable. Download Unsent edits before closing it.");
+  }
+  function recoveryButton() {
+    if (!recoveredEdits.length || $("#unsent-edits")) return;
+    $("#topbar").append(h("button", { id: "unsent-edits", title: "Download edits rejected after a graph switch, with their original graph paths",
+      onclick: () => {
+        const url = URL.createObjectURL(new Blob([JSON.stringify(recoveredEdits, null, 2)], { type: "application/json" }));
+        const a = h("a", { href: url, download: "minihou-unsent-edits.json" });
+        a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } }, "Unsent edits"));
+  }
+  async function edit(ops, context = { path: S.path, documentId: S.documentId }) {
+    try {
+      const r = await api("/api/edit", { ops, origin: "editor", document_id: context.documentId });
       applySnapshot(r.graph);
       return r;
     } catch (e) {
-      toast(e.message);
+      if (context.documentId !== S.documentId || e.message.includes("Editor graph changed")) stashEdits(ops, context);
+      else toast(e.message);
       return null;
     }
   }
 
   // Parameter changes are coalesced: one request in flight, the latest values win (smooth slider drags).
   const pendingSet = new Map();
+  let pendingContext = null;
   let setInFlight = false;
   function queueSet(id, name, value) {
+    if (!pendingContext) pendingContext = { path: S.path, documentId: S.documentId };
     const p = pendingSet.get(id) || {};
     p[name] = value;
     pendingSet.set(id, p);
@@ -82,8 +110,10 @@
     if (!pendingSet.size) return;
     setInFlight = true;
     const ops = [...pendingSet].map(([id, params]) => ({ op: "set", id, params }));
+    const context = pendingContext;
     pendingSet.clear();
-    await edit(ops);
+    pendingContext = null;
+    await edit(ops, context);
     setInFlight = false;
     if (pendingSet.size) flushSets();
   }
@@ -115,8 +145,12 @@
   }
   function applySnapshot(snap) {
     if (!snap || snap.rev < S.rev) return;
+    if (S.documentId !== null && snap.document_id !== S.documentId && pendingSet.size) {
+      stashEdits([...pendingSet].map(([id, params]) => ({ op: "set", id, params })), pendingContext);
+      pendingSet.clear(); pendingContext = null;
+    }
     const fileChanged = snap.path !== S.path;
-    S.rev = snap.rev; S.graph = snap.graph; S.path = snap.path;
+    S.rev = snap.rev; S.graph = snap.graph; S.path = snap.path; S.documentId = snap.document_id;
     S.canUndo = snap.can_undo; S.canRedo = snap.can_redo;
     for (const id of [...S.sel]) if (!S.graph.nodes[id]) S.sel.delete(id);
     if (S.wireSel && !wireExists(S.wireSel)) S.wireSel = null;
@@ -681,7 +715,7 @@
     if (r) frame(false);
   }
   async function undo(redo) {
-    try { const r = await api(redo ? "/api/redo" : "/api/undo", { origin: "editor" }); applySnapshot(r.graph); }
+    try { const r = await api(redo ? "/api/redo" : "/api/undo", { origin: "editor", document_id: S.documentId }); applySnapshot(r.graph); }
     catch (e) { toast(e.message); }
   }
 
@@ -986,6 +1020,7 @@
   })();
 
   applyView();
+  try { recoveryButton(); } catch (e) { /* Browser storage may be disabled. */ }
   connectEvents();
   window.minihou = { S, edit, frame };                  // handy from the browser console
 })();

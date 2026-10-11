@@ -93,6 +93,7 @@ class Session:
         self.latest_error: Optional[Result] = None    # set while the graph is failing
         self._listeners: List[Any] = []
         self._rev = 0                # bumped on every change of the graph
+        self._document_id = 0        # fences delayed browser edits across file switches
         self._cooked_rev = -1        # rev of the last completed cook
         self._seq = 0
         self._last_key = None
@@ -132,7 +133,7 @@ class Session:
     def snapshot(self) -> dict:
         """The graph as JSON plus its revision (what editors render)."""
         with self.lock:
-            return {"rev": self._rev, "graph": self.graph.to_dict(),
+            return {"rev": self._rev, "document_id": self._document_id, "graph": self.graph.to_dict(),
                     "path": str(self.path) if self.path else None,
                     "can_undo": bool(self._undo), "can_redo": bool(self._redo)}
 
@@ -158,13 +159,14 @@ class Session:
         self._notify_graph(origin)
         return v
 
-    def edit(self, ops: List[dict], origin: str = "api") -> dict:
+    def edit(self, ops: List[dict], origin: str = "api", document_id=None) -> dict:
         """Apply a batch of :mod:`minihou.edit` ops atomically. Raises :class:`~minihou.edit.EditError`.
 
         Returns ``{"rev", "results", "changed"}``. Interface changes (including exposed values) are pushed to link
         clients, so Blender follows edits made in the editor or by an AI."""
         key = _merge_key(ops)
         with self.lock:
+            self._check_document(document_id)
             before = self.graph.to_dict()
             new, results = apply_ops(self.graph, ops)
             changed = new.to_dict() != before
@@ -184,14 +186,19 @@ class Session:
             self._after_structural_change(origin)
         return {"rev": rev, "results": results, "changed": changed}
 
-    def undo(self, origin: str = "api") -> bool:
-        return self._step(self._undo, self._redo, origin)
+    def _check_document(self, document_id):
+        if document_id is not None and document_id != self._document_id:
+            raise GraphError("Editor graph changed; this edit belongs to the previously open graph")
 
-    def redo(self, origin: str = "api") -> bool:
-        return self._step(self._redo, self._undo, origin)
+    def undo(self, origin: str = "api", document_id=None) -> bool:
+        return self._step(self._undo, self._redo, origin, document_id)
 
-    def _step(self, src: list, dst: list, origin: str) -> bool:
+    def redo(self, origin: str = "api", document_id=None) -> bool:
+        return self._step(self._redo, self._undo, origin, document_id)
+
+    def _step(self, src: list, dst: list, origin: str, document_id=None) -> bool:
         with self.lock:
+            self._check_document(document_id)
             if not src:
                 return False
             entry = src.pop()
@@ -565,32 +572,41 @@ class Session:
     def open_file(self, path, create: bool = False) -> dict:
         """Switch the session to another graph file (creating a starter graph if asked). The old file is saved
         first. Raises :class:`GraphError` / ``OSError``."""
-        path = Path(path)
-        if path.exists():
-            text = path.read_text(encoding="utf-8")
-            g = Graph.from_json(text, self.evaluator.registry, check=False)
-        elif create:
-            g = Graph.from_dict(NEW_GRAPH, self.evaluator.registry, check=False)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            text = g.to_json()
-            _atomic_write(path, text)
-        else:
-            raise GraphError(f"no such file: {path}")
-        self.flush()
-        save = True
-        with self.lock:
+        path = Path(path).resolve()
+        # Same lock order as the watcher. Edits cannot arrive between saving the old
+        # graph and switching it; a failed save leaves graph/path/history untouched.
+        with self._file_lock, self.lock:
+            same = self.path is not None and path == self.path.resolve()
+            if same and path.is_file():
+                if self._dirty and not self._flush_locked():
+                    raise GraphError("Cannot save current graph; editor was not switched: " + (self.save_error or "saving is disabled"))
+                return self.snapshot()  # never reload stale disk data over current edits
+            if path.exists():
+                text = path.read_text(encoding="utf-8")
+                g = Graph.from_json(text, self.evaluator.registry, check=False)
+            elif create:
+                g = Graph.from_dict(NEW_GRAPH, self.evaluator.registry, check=False)
+                text = g.to_json()
+            else:
+                raise GraphError(f"no such file: {path}")
+            if self._dirty and not self._flush_locked():
+                raise GraphError("Cannot save current graph; editor was not switched: " + (self.save_error or "no writable current graph file"))
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                _atomic_write(path, text)
             self.path = path
-            self._save_enabled = save
+            self._save_enabled = True
             self._file_text = text
             self._stamp = self._file_stamp()
+            self.save_error = None
             self._undo.clear()
             self._redo.clear()
-        self.replace_graph(g, origin="open")
-        with self.lock:
-            self._dirty = layout_missing(self.graph)      # positions were added: persist them on the next save
-        if self._watch_thread is None or not self._watch_thread.is_alive():
-            self.watch_file(path, save=save)
-        return self.snapshot()
+            self._document_id += 1
+            self._dirty = layout_missing(g)
+            self.replace_graph(g, origin="open")
+            snapshot = self.snapshot()
+        self._ensure_watcher()
+        return snapshot
 
 
 def _atomic_write(path: Path, text: str) -> None:

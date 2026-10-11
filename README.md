@@ -104,6 +104,34 @@ modifiers (including self-references and cache objects) are rejected to avoid cr
 this bridge does not schedule interdependent object stacks. Edit Mode and active renders are skipped. Slow cooks can pause the UI;
 failed cooks retain the last successful cache and report an error. These caches are not a baking/render-farm system.
 
+### Edit a modifier's network
+
+Each MiniHou modifier has **Edit Network** and **Reload Graph** controls in the MiniHou sidebar
+and in the Properties editor's Modifiers tab, under **MiniHou Source Objects**. Start or reuse the
+external server first. **Edit Network** opens the graph file recorded by that modifier, even when
+the server is currently editing a different file. HTTP routing runs in a background worker; its
+progress or error appears beside that modifier's controls. Update/restart the external engine as
+well as the add-on to enable the safe routing protocol.
+
+There is **one shared editor session**. Selecting another modifier's network switches that session
+and all its browser tabs (and the legacy proxy graph). Submitted edits to the previous graph are
+saved first; a failed save prevents the switch. Finish typing a field before switching. A slider
+request that arrives after a switch is rejected for the new graph and retained in that browser's
+storage: **Unsent edits** downloads the original graph path and edit operations for manual recovery.
+Missing templates, paths outside the server's workspace root, and failed browser launches report
+errors instead of silently opening whichever graph was already active.
+
+This edits the **graph template file**, not the modifier's stored graph snapshot or live parameter
+values. After editing, save in the browser and click **Reload Graph** on each modifier that should
+adopt the changes. Other modifiers keep their saved snapshots until reloaded. A template using
+`modifier_input` can show a missing-input cook error in the browser: its actual upstream geometry
+is supplied when Blender cooks the modifier, not by this template-editing action.
+
+MiniHou's Geometry Nodes group is an **object-stack cache wrapper**. Placing that group inside a
+different native Geometry Nodes group does not send the enclosing group's incoming geometry into
+MiniHou; it reads the cached object-stack result. Use top-level MiniHou modifiers for supported
+ordered stack evaluation. Nested native GN input evaluation is not implemented by this change.
+
 ## Scatter an editable Blender source object
 
 From a fresh Blender file:
