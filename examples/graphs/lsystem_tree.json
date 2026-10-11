@@ -1,0 +1,158 @@
+{
+  "version": 1,
+  "doc": "An L-system tree: branches swept into tubes (width from the L-system), leaves copied onto the J points.",
+  "nodes": {
+    "grow": {
+      "type": "lsystem",
+      "params": {
+        "premise": "FFA",
+        "rules": "A=!\"[&FJA]////[&FJA]////[&FJA]",
+        "generations": 6,
+        "angle": 28.0,
+        "step": 0.35,
+        "step_scale": 0.82,
+        "width": 0.09,
+        "width_scale": 0.72,
+        "seed": 1
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "wood": {
+      "type": "sweep",
+      "inputs": {
+        "geo": "grow"
+      },
+      "params": {
+        "radius": 1.0,
+        "divisions": 8
+      },
+      "pos": [
+        0,
+        120
+      ]
+    },
+    "tips": {
+      "type": "blast",
+      "inputs": {
+        "geo": "grow"
+      },
+      "params": {
+        "group": "leaves",
+        "domain": "points",
+        "delete_non_selected": true
+      },
+      "pos": [
+        250,
+        120
+      ]
+    },
+    "leaf": {
+      "type": "circle",
+      "params": {
+        "radius": 0.12,
+        "divisions": 6
+      },
+      "pos": [
+        450,
+        0
+      ]
+    },
+    "squash": {
+      "type": "transform",
+      "inputs": {
+        "geo": "leaf"
+      },
+      "params": {
+        "scale": [
+          0.6,
+          1.0,
+          1.0
+        ],
+        "translate": [
+          0,
+          0.1,
+          0
+        ]
+      },
+      "pos": [
+        450,
+        100
+      ]
+    },
+    "leaves": {
+      "type": "copy_to_points",
+      "inputs": {
+        "source": "squash",
+        "points": "tips"
+      },
+      "pos": [
+        350,
+        220
+      ]
+    },
+    "green": {
+      "type": "attribute_create",
+      "inputs": {
+        "geo": "leaves"
+      },
+      "params": {
+        "name": "material_index",
+        "domain": "primitives",
+        "type": "int",
+        "value": [
+          1,
+          0,
+          0
+        ]
+      },
+      "pos": [
+        350,
+        320
+      ]
+    },
+    "tree": {
+      "type": "merge",
+      "inputs": {
+        "geos": [
+          "wood",
+          "green"
+        ]
+      },
+      "pos": [
+        150,
+        420
+      ]
+    },
+    "out": {
+      "type": "output",
+      "inputs": {
+        "geo": "tree"
+      },
+      "pos": [
+        150,
+        520
+      ]
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Generations",
+      "node": "grow",
+      "param": "generations"
+    },
+    {
+      "name": "Angle",
+      "node": "grow",
+      "param": "angle"
+    },
+    {
+      "name": "Seed",
+      "node": "grow",
+      "param": "seed"
+    }
+  ]
+}
