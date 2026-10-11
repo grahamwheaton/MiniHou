@@ -162,6 +162,33 @@ class AddonIntegrationTests(unittest.TestCase):
         bpy.context.view_layer.update()              # fires depsgraph_update_post, like a UI edit
 
     # -- tests -------------------------------------------------------------
+    def test_wrangle_attributes_reach_the_proxy_as_native_blender_data(self):
+        """Engine wrangles -> link -> output mesh -> Geometry Nodes proxy: UV map, colors, materials, flat faces."""
+        graph = {"version": 1, "nodes": {
+            "g": {"type": "grid", "params": {"columns": 4, "rows": 4, "size_x": 2, "size_y": 2}},
+            "uv": {"type": "wrangle", "inputs": {"geo": "g"}, "params": {
+                "snippet": "u@uv = set(@P.x, @P.y) * 0.25", "run_over": "vertices"}},
+            "faces": {"type": "wrangle", "inputs": {"geo": "uv"}, "params": {
+                "snippet": "v@Cd = set(1, 0, 0) if @P.x > 0 else set(0, 0, 1); i@material_index = @P.x > 0; "
+                           "i@sharp_face = 1", "run_over": "primitives"}},
+            "o": {"type": "output", "inputs": {"geo": "faces"}}}, "display": "o"}
+        self.graph_path.write_text(json.dumps(graph), encoding="utf-8")
+        proxy_obj = lambda: bpy.data.objects.get(self.proxy.PROXY_OBJECT)  # noqa: E731
+
+        def evaluated():
+            return proxy_obj().evaluated_get(bpy.context.evaluated_depsgraph_get()).data
+
+        self.pump(lambda: proxy_obj() is not None and "Color" in evaluated().color_attributes, timeout=60)
+        me = evaluated()
+        self.assertIn("UVMap", me.uv_layers)
+        uv = np.empty(len(me.loops) * 2, np.float32); me.uv_layers["UVMap"].data.foreach_get("uv", uv)
+        self.assertAlmostEqual(float(np.abs(uv).max()), 0.25, places=4)      # grid size 2 -> P in [-1, 1]
+        mats = np.empty(len(me.polygons), np.int32); me.polygons.foreach_get("material_index", mats)
+        self.assertEqual(sorted(set(mats.tolist())), [0, 1])
+        self.assertFalse(any(p.use_smooth for p in me.polygons))
+        col = np.empty(len(me.loops) * 4, np.float32); me.color_attributes["Color"].data.foreach_get("color", col)
+        self.assertEqual(sorted({tuple(c) for c in col.reshape(-1, 4)[:, :3].round(3).tolist()}), [(0, 0, 1), (1, 0, 0)])
+
     def test_connect_creates_proxy_and_mesh_matches_engine(self):
         self.pump(lambda: self.rt.applied_count >= 1)
         out = bpy.data.objects[self.proxy.OUTPUT_OBJECT]
@@ -171,7 +198,7 @@ class AddonIntegrationTests(unittest.TestCase):
         self.assertEqual(len(out.data.polygons), 29 * 29)
         np.testing.assert_allclose(evaluated_positions(proxy_obj), self.expected_P(), atol=self.TOL)
         self.assertEqual(len(proxy_obj.evaluated_get(bpy.context.evaluated_depsgraph_get()).data.polygons), 29 * 29)
-        self.assertIn("uv", out.data.attributes)
+        self.assertIn("UVMap", out.data.uv_layers)              # the grid's uv arrives as a real UV map
 
     def test_ensure_objects_in_steady_state_does_not_dirty_the_depsgraph(self):
         """Regression: it runs on every geometry update; any bpy write there forces a re-evaluation."""
@@ -528,6 +555,76 @@ class MeshWriterTests(unittest.TestCase):
         self.assertEqual(m.attributes["pf"].domain, "FACE")
         np.testing.assert_array_equal(read("pf", "value", 2), [5, 7])
         self.assertEqual(t["warnings"], [])
+
+    def native_geo(self, cd_domain="point", uv_domain="point", with_n=True):
+        from minihou import Geometry
+        P = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [2, 0, 0], [2, 1, 0]], np.float32)
+        g = Geometry.from_arrays(P, [0, 1, 2, 3, 1, 4, 5, 2], [0, 4, 8])
+        uv = P[:, :2] * 0.5
+        if uv_domain == "point":
+            g.point["uv"] = uv
+        else:
+            g.vertex["uv"] = uv[g.topology.vertex_point]
+        if cd_domain == "point":
+            g.point["Cd"] = np.tile(np.array([1, 0.5, 0.25], np.float32), (6, 1))
+        else:
+            g.prim["Cd"] = np.array([[1, 0, 0], [0, 1, 0]], np.float32)
+        if with_n:
+            n = np.tile(np.array([0.6, 0, 0.8], np.float32), (6, 1))
+            g.point["N"] = n
+        g.prim["material_index"] = np.array([0, 2], np.int32)
+        g.prim["sharp_face"] = np.array([1, 0], np.int32)
+        return g.freeze()
+
+    def test_native_attributes_uv_color_normals_materials_shading(self):
+        from minihou.link.diff import DiffState
+        d = DiffState()
+        g = self.native_geo()
+        t = self.apply(g, d)
+        m = self.mesh
+        self.assertEqual(t["warnings"], [])
+        # uv -> UV map on corners, active for render
+        self.assertEqual(list(m.uv_layers.keys()), ["UVMap"])
+        self.assertTrue(m.uv_layers.active.name == "UVMap" and m.uv_layers["UVMap"].active_render)
+        uv = np.empty(16, np.float32); m.uv_layers["UVMap"].data.foreach_get("uv", uv)
+        np.testing.assert_allclose(uv.reshape(-1, 2), (g.P[:, :2] * 0.5)[g.topology.vertex_point])
+        # Cd -> color attribute 'Color', alpha 1, active
+        self.assertEqual(m.color_attributes.active_color.name, "Color")
+        c = np.empty(24, np.float32); m.color_attributes["Color"].data.foreach_get("color", c)
+        np.testing.assert_allclose(c.reshape(-1, 4)[0], [1, 0.5, 0.25, 1])
+        # N -> custom normals
+        self.assertTrue(m.has_custom_normals)
+        cn = np.empty(24, np.float32); m.corner_normals.foreach_get("vector", cn)
+        np.testing.assert_allclose(cn.reshape(-1, 3), np.tile([0.6, 0, 0.8], (8, 1)), atol=1e-4)
+        # material_index and sharp_face are Blender's own
+        self.assertEqual([p.material_index for p in m.polygons], [0, 2])
+        self.assertEqual([p.use_smooth for p in m.polygons], [False, True])
+        self.assertNotIn("uv", m.attributes)
+        self.assertNotIn("Cd", m.attributes)
+        self.assertNotIn("N", m.attributes)
+
+    def test_native_attributes_from_other_domains_and_removal(self):
+        from minihou.link.diff import DiffState
+        d = DiffState()
+        self.apply(self.native_geo(cd_domain="prim", uv_domain="vertex"), d)
+        m = self.mesh
+        ca = m.color_attributes["Color"]
+        self.assertEqual(ca.domain, "CORNER")                 # face colours expand to corners
+        c = np.empty(32, np.float32); ca.data.foreach_get("color", c)
+        np.testing.assert_allclose(c.reshape(-1, 4)[:, :3], [[1, 0, 0]] * 4 + [[0, 1, 0]] * 4)
+        g2 = self.native_geo(with_n=False).copy()
+        del g2.point["Cd"]
+        self.apply(g2.freeze(), d)
+        self.assertNotIn("Color", m.attributes)               # engine stopped producing Cd / N: gone in Blender
+        self.assertFalse(m.has_custom_normals)
+        self.assertIn("UVMap", m.uv_layers)
+
+    def test_reserved_blender_names_warn(self):
+        from minihou.link.diff import DiffState
+        g = self.native_geo().copy()
+        g.point["Color"] = np.zeros((6, 3), np.float32)
+        t = self.apply(g.freeze(), DiffState())
+        self.assertTrue(any("'Color'" in w for w in t["warnings"]), t["warnings"])
 
     def test_positions_only_update_touches_only_positions(self):
         from minihou.link.diff import DiffState

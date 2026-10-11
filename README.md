@@ -140,6 +140,18 @@ v@Cd = set(rand(@primnum), 0.2, 0.5)              # over primitives: a random co
 
 `attribute_delete` (wildcards) and `attribute_rename` tidy up, e.g. delete `N` to let Blender compute its own normals.
 
+**Blender-native attributes.** Engine attributes reach Blender as real Blender data, so materials, UV tools and modifiers
+just work (and the Geometry Nodes proxy carries them):
+
+| engine attribute | in Blender |
+|---|---|
+| `uv` (any domain, 2+ components) | UV map **UVMap** on face corners, active for render |
+| `Cd` (3 or 4 components; points, vertices or faces) | color attribute **Color** (points or corners), active for render; use it in a shader with a *Color Attribute* node |
+| `N` (points, vertices or faces) | custom normals (Blender 4.5+: the `custom_normal` attribute, 7 ms for 1M points) |
+| `material_index` (primitives, int) | each face's material slot |
+| `sharp_face` (primitives) | flat shading for those faces (others smooth) |
+| anything else | a generic attribute of that name: POINT / CORNER / FACE, float, float2, vector, color (4 floats), int, bool; read it with an *Attribute* shader node or Named Attribute in Geometry Nodes |
+
 Functions: `sin cos tan asin acos atan atan2 sqrt exp log abs floor ceil frac pow sign min max clamp lerp fit smooth length
 normalize dot cross set noise rand select radians degrees`. A float times a vector works as in VEX. Snippets are compiled once
 (cached by text) to numpy and are **sandboxed**: they are parsed and checked against a whitelist, so a shared graph file cannot run
@@ -309,7 +321,7 @@ Not verified:
 ## Known limits
 
 * One output mesh and one exposed-parameter set per engine. Detail attributes are not sent to Blender. Point-domain wrangles only.
-* Polygons only (no curves/edges-only geometry). No UV maps (a `uv` point attribute is sent as a generic attribute).
+* Polygons only (no curves/edges-only geometry). No edge-domain attributes (e.g. `sharp_edge`, `crease_edge`).
 * The socket and the HTTP API are unauthenticated and bound to loopback by default. Do not bind them to a public interface.
   The HTTP API refuses requests from other web sites (Host/Origin checks against DNS rebinding and cross-site requests) and
   only opens `.json` files inside its workspace folder.
