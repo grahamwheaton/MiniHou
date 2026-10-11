@@ -282,6 +282,36 @@ class SystemTests(unittest.TestCase):
         self.assertAlmostEqual(float(ev.cook(g).P[:, 2].max()), 3.0)          # not the cached old result
         self.assertIn("g", ev.last_stats.cached)
 
+    def test_reloading_never_hides_a_node_type_from_other_threads(self):
+        import threading
+        name = f"lifter_{self.tag}"
+        self.write(name, _system(LIFTER))
+        self.lib.refresh()
+        missing, stop = [], threading.Event()
+
+        def reader():
+            while not stop.is_set():
+                if name not in REGISTRY:
+                    missing.append(1)
+                try:
+                    REGISTRY.get(name)
+                except KeyError:
+                    missing.append(1)
+
+        t = threading.Thread(target=reader)
+        t.start()
+        try:
+            for z in range(1, 25):
+                changed = json.loads(json.dumps(LIFTER))
+                changed["move"]["params"]["translate"] = [0, 0, z]
+                self.write(name, _system(changed))
+                self.assertTrue(self.lib.refresh())
+        finally:
+            stop.set()
+            t.join()
+        self.assertEqual(missing, [])
+        self.assertAlmostEqual(float(Evaluator().cook(self.use(name)).P[:, 2].max()), 24.0)
+
     def test_nested_systems_and_dependency_hashes(self):
         inner, outer = f"zz_inner_{self.tag}", f"aa_outer_{self.tag}"           # outer sorts first: order must not matter
         self.write(inner, _system(LIFTER))
