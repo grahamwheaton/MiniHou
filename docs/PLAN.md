@@ -202,8 +202,16 @@ Worked through in order of how often Houdini users reach for them:
     wait while others go; the cheap set widens only when nothing else can collapse.
 12. **Path deform**: the length axis maps to arc length on the curve; cross-sections use the sweep's rotation-minimising
     frames (start normal matched to `up`) or `up` projected off each tangent; past the ends the geometry runs straight.
+13. **Booleans** (`minihou/boolean.py`): intersection points are named by (mesh, edge, pierced triangle), so every
+    triangle touching one uses the same point and the result is watertight without welding by distance. Each cut
+    triangle is split in barycentric coordinates by its chains of segments; closed loops are cut out with two
+    opposite bridges (Eberly visibility; directions tried until neither meets a later hole), so pieces are simple
+    polygons; pieces of a planar source polygon are merged back into n-gons. Regions between cuts get one ray-parity
+    inside test each. B is grown by 1e-6 of the size along its normals and nudged generically, so flush faces cut
+    cleanly; points within 3 epsilon are welded afterwards. Exactly coplanar curved features (a sphere's equator in
+    a face) stay closed and exact in volume but can leave tiny folded slivers.
 
-Next candidates: exact mesh booleans, an editor frame slider, numba kernels for
+Next candidates: an editor frame slider, numba kernels for
 closest-point queries and SDF construction (the numpy SDF of a mesh spends most of its time in closest points).
 
 ## Systems (graphs as nodes)

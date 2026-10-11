@@ -111,7 +111,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | ![scifi_panels](docs/images/gallery_scifi_panels.png) groups + polyextrude | ![subd_pod](docs/images/gallery_subd_pod.png) extrude, clip, mirror, subdivide | ![curves_vine](docs/images/gallery_curves_vine.png) curves: resample, blur, sweep |
 | ![volumes](docs/images/gallery_volumes.png) sdf_boolean fillet, metaballs | ![lsystem_tree](docs/images/gallery_lsystem_tree.png) lsystem + sweep + leaves | ![eroded_terrain](docs/images/gallery_eroded_terrain.png) heightfield erosion |
 | ![bevel_shapes](docs/images/gallery_bevel_shapes.png) polybevel, tube, torus, cusp normals | ![uv_unwrap](docs/images/gallery_uv_unwrap.png) uv_flatten (LSCM), checker texture | ![fractured_rock](docs/images/gallery_fractured_rock.png) voronoi_fracture, exploded_view, smooth |
-| ![polyreduce_rock](docs/images/gallery_polyreduce_rock.png) polyreduce to 3% (quadric error metrics) | ![spiral_slide](docs/images/gallery_spiral_slide.png) path_deform along a helix (up_vector frames) | |
+| ![polyreduce_rock](docs/images/gallery_polyreduce_rock.png) polyreduce to 3% (quadric error metrics) | ![spiral_slide](docs/images/gallery_spiral_slide.png) path_deform along a helix (up_vector frames) | ![boolean_part](docs/images/gallery_boolean_part.png) exact boolean: bores, slot, dome |
 
 ## Nodes
 
@@ -133,7 +133,8 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `group_create` | geo | a named point or primitive group: pattern/expression, bounding box, normal direction, random %, boundary |
 | `group_promote` | geo | convert groups between points and primitives |
 | `blast` | geo | delete a group of primitives or points (or keep only it) |
-| `polybevel` | geo | chamfer sharp edges (min angle, point group); slides along borders and flat edges so subdivided meshes bevel cleanly; new faces in group `bevel` |
+| `polybevel` | geo | chamfer sharp edges (min angle, point group); slides along borders and flat edges so subdivided meshes bevel cleanly; moves are limited where faces would fold; new faces in group `bevel` |
+| `boolean` | a, b | exact union / subtract / intersect of closed meshes: watertight n-gon output, uv and attributes carried across cuts, groups `from_a`/`from_b`; flush faces cut cleanly |
 | `voronoi_fracture` | geo, points | break a closed mesh into the exact Voronoi cells of the points; closed pieces, prim `piece`, caps in group `inside`, optional gap |
 | `polyreduce` | geo | reduce to a percentage or count of triangles with quadric error metrics; keeps borders, sharp edges and manifold shells; attributes blend along collapses |
 | `exploded_view` | geo | push pieces (a prim attribute) away from a centre |

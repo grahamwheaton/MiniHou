@@ -40,7 +40,7 @@ def twins(geo):
     return np.where(ok, twin, -1)
 
 
-def _wedge_points(geo, d, w, vp, pr, nx, pv, twin, bev, bound_in, bound_out):
+def _wedge_points(geo, d, w, vp, pr, nx, pv, twin, bev, bound_in, bound_out, fn):
     """Position of each wedge's copy of its point (see the module docstring)."""
     P = geo.P.astype(np.float64)
     nw = int(w.max()) + 1 if len(w) else 0
@@ -68,7 +68,6 @@ def _wedge_points(geo, d, w, vp, pr, nx, pv, twin, bev, bound_in, bound_out):
     n_inner = np.bincount(w[ii], minlength=nw)
     ang = np.arccos(np.clip(np.einsum("ij,ij->i", a_in, a_out), -1.0, 1.0))
     span = np.bincount(w, weights=ang, minlength=nw)
-    centroids = topo.prim_centroids(geo).astype(np.float64)
     k = np.flatnonzero(nb == 2)
     st = start[k]
     k = k[(bbev[st] | bbev[st + 1]) & (bedge[st] != bedge[st + 1])]   # skip: no bevel, or the end of a bevelled run
@@ -88,13 +87,40 @@ def _wedge_points(geo, d, w, vp, pr, nx, pv, twin, bev, bound_in, bound_out):
     bis = np.linalg.norm(m, axis=1) > 0.2                   # one face: the bisector, d away from both edges
     sign = np.where(span[k] <= np.pi + 1e-6, 1.0, -1.0)
     half = np.sqrt(np.clip((1.0 - np.einsum("ij,ij->i", a, b)) / 2.0, 0.0, 1.0))
-    inward = centroids[pv[corner[k]]] - v                    # a straight corner of one face: step into the face
-    inward = _unit(inward - np.einsum("ij,ij->i", inward, a)[:, None] * a) * d
+    ci = corner[k]                                          # a straight corner of one face: step into the face,
+    inward = _unit(np.cross(fn[pv[ci]], a_out[ci])) * d     # to the left of its outgoing edge (CCW faces)
     off = np.where(border[:, None], slide(c_border, e_border),
                    np.where(has_inner[:, None], slide(_unit(inner_dir[k]), a),
                             np.where(bis[:, None], _unit(m) * (sign * d / np.maximum(half, 0.05))[:, None], inward)))
     out[k] = v + off
     return out, corner
+
+
+def _limit_overlap(geo, pos, w, home, pv, N):
+    """Where moving the wedge points would fold an original face over (its normal turning by more than 90 degrees,
+    e.g. long slivers next to a bevelled edge), halve those points' moves until nothing folds: Houdini's
+    'limit to avoid overlap'."""
+    P = geo.P.astype(np.float64)
+    start = P[home]
+    nv = geo.topology.nvertices
+    for _ in range(12):
+        Q = pos[w]                                          # each original corner at its wedge's new position
+        nxt = np.r_[np.arange(1, nv), 0]
+        offs = geo.topology.prim_offsets.astype(np.int64)
+        last = offs[1:] - 1
+        ok = np.diff(offs) > 0
+        nxt[last[ok]] = offs[:-1][ok]
+        cr = np.cross(Q, Q[nxt])
+        n_new = np.stack([np.bincount(pv, weights=cr[:, k], minlength=geo.nprims) for k in range(3)], 1)
+        folded = np.einsum("ij,ij->i", n_new, N) <= 0.05 * np.linalg.norm(n_new, axis=1)
+        moved = np.linalg.norm(pos - start, axis=1) > 0
+        bad = np.zeros(len(pos), bool)
+        bad[w[folded[pv]]] = True
+        bad &= moved
+        if not bad.any():
+            break
+        pos = np.where(bad[:, None], start + (pos - start) * 0.5, pos)
+    return pos
 
 
 @node("polybevel", inputs=["geo"], category="model", params=[
@@ -129,7 +155,8 @@ def polybevel(geo, distance, min_angle, group, output_group):
     # corners on either side of an unbevelled interior edge share a wedge
     join = np.flatnonzero(~bound_in)
     w = spatial.components(t.nvertices, join, twin[pr[join]])
-    pos, corner = _wedge_points(geo, float(distance), w, vp, pr, nx, pv, twin, bev, bound_in, bound_out)
+    pos, corner = _wedge_points(geo, float(distance), w, vp, pr, nx, pv, twin, bev, bound_in, bound_out, N)
+    pos = _limit_overlap(geo, pos, w, vp[corner], pv, N)
     nw = len(pos)
 
     # bevel quads, one per bevelled edge
