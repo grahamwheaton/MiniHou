@@ -60,7 +60,7 @@
       T("Convex Decomposition", "convex_decomposition", "hull"), T("Assemble", "assemble", "duplicate"), T("RBD Configure", "rbd_configure", "solver"),
       T("RBD Solver", "rbd_solver", "solver"), T("Exploded View", "exploded_view", "fracture")]],
     ["Constraints", "#b0b0e0", [
-      T("Glue Cluster", "glue_cluster", "constraint"), T("RBD Constraint Properties", "rbd_constraint_properties", "constraint"),
+      T("RBD Constraint", "rbd_constraint", "constraint"), T("Glue Cluster", "glue_cluster", "constraint"), T("RBD Constraint Properties", "rbd_constraint_properties", "constraint"),
       T("Voronoi Adjacency", "voronoi_adjacency", "constraint")]],
     ["Terrain FX", "#9c8b6a", [T("Grid", "grid"), T("Mountain", "noise"), T("Heightfield Erode", "heightfield_erode", "terrain"), T("Scatter", "scatter")]],
     ["Volume", "#6ab0e0", [T("Remesh", "remesh"), T("SDF Boolean", "sdf_boolean", "boolean"), T("Points to Surface", "points_to_surface")]],

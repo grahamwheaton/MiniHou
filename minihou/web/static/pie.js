@@ -92,8 +92,9 @@
       T("Convex Decomposition", "convex_decomposition"), T("Glue Cluster", "glue_cluster"), P("»", "fracture2")] },
     fracture2: { title: "Fracture", items: [
       T("RBD Material Fracture", "rbd_material_fracture"), T("Assemble", "assemble"),
-      T("RBD Configure", "rbd_configure"), T("RBD Solver", "rbd_solver", { tip: "Bodies in the first input, then colliders and glue links" }),
-      T("RBD Constraint Properties", "rbd_constraint_properties", { tip: "Set or scale the strength of glue links" }), null, null, null] },
+      T("RBD Configure", "rbd_configure"), T("RBD Solver", "rbd_solver", { tip: "Bodies in the first input, then colliders and constraint links" }),
+      T("RBD Constraint Properties", "rbd_constraint_properties", { tip: "Set or scale constraint breaking strength" }),
+      T("RBD Constraint", "rbd_constraint", { source: true, tip: "Create a glue, pin, hinge or spring link between body IDs" }), null, null] },
 
     edges: { title: "Edges", items: [
       T("Dissolve", "dissolve_edges", { sel: { edge: "group" } }), T("Edge Collapse", "edge_collapse", { sel: { edge: "group" } }),

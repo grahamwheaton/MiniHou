@@ -40,7 +40,7 @@ GROUPS: List[Tuple[str, str, List[str]]] = [
     ("Volumes & Terrain", "Remeshing, signed distance fields and terrain", ["remesh", "sdf_boolean", "heightfield_erode"]),
     ("Fracture & RBD", "Break things and simulate the pieces",
      ["rbd_material_fracture", "voronoi_fracture", "voronoi_fracture_points", "voronoi_split", "voronoi_adjacency",
-      "boolean_fracture", "convex_decomposition", "assemble", "glue_cluster", "rbd_constraint_properties",
+      "boolean_fracture", "convex_decomposition", "assemble", "glue_cluster", "rbd_constraint", "rbd_constraint_properties",
       "rbd_configure", "rbd_solver"]),
     ("Procedural (PCG)", "Rule-based point generation, filtering and placement",
      ["pcg_points", "pcg_surface_sampler", "pcg_volume_sampler", "pcg_spline_sampler", "pcg_spawner", "pcg_density_filter",
@@ -92,7 +92,8 @@ ALIASES: Dict[str, str] = {
     "rbd_material_fracture": "shatter destruction concrete glass wood", "voronoi_fracture": "shatter break cells pieces",
     "voronoi_fracture_points": "scatter seeds shatter", "voronoi_split": "cut cells", "voronoi_adjacency": "neighbours touching",
     "boolean_fracture": "cutters break", "convex_decomposition": "collision proxy hulls", "assemble": "pieces names pivot pack",
-    "glue_cluster": "constraints bond weld", "rbd_constraint_properties": "glue strength", "rbd_configure": "bodies mass friction physics",
+    "glue_cluster": "constraints bond weld", "rbd_constraint": "hinge spring pin glue joint anchor tendon limits break physics",
+    "rbd_constraint_properties": "constraint glue strength break", "rbd_configure": "bodies mass friction physics",
     "rbd_solver": "simulate physics dynamics bullet", "loop_block": "repeat iterate for", "loop_begin": "repeat iterate",
     "loop_end": "repeat iterate", "for_each": "per piece iterate", "solver": "feedback simulation previous frame",
     "null": "named output pass through", "input": "system port", "output": "result display", "box": "cube", "sphere": "ball",
@@ -105,7 +106,7 @@ _TITLES = {"polyextrude": "PolyExtrude", "polybevel": "PolyBevel", "polysplit": 
            "polybridge": "PolyBridge", "polyexpand2d": "PolyExpand2D", "polyreduce": "PolyReduce", "polypath": "PolyPath",
            "uv_project": "UV Project", "uv_flatten": "UV Flatten", "sdf_boolean": "SDF Boolean", "pcg_points": "PCG Points",
            "lsystem": "L-System", "rbd_configure": "RBD Configure", "rbd_solver": "RBD Solver",
-           "rbd_material_fracture": "RBD Material Fracture", "rbd_constraint_properties": "RBD Constraint Properties",
+           "rbd_material_fracture": "RBD Material Fracture", "rbd_constraint": "RBD Constraint", "rbd_constraint_properties": "RBD Constraint Properties",
            "loop_block": "Repeat (Loop Block)", "for_each": "For Each", "points_to_surface": "Points to Surface",
            "copy_to_points": "Copy to Points", "blender_object": "Blender Object", "modifier_input": "Modifier Input"}
 
