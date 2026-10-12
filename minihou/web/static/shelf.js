@@ -65,6 +65,12 @@
     ["Terrain FX", "#9c8b6a", [T("Grid", "grid"), T("Mountain", "noise"), T("Heightfield Erode", "heightfield_erode", "terrain"), T("Scatter", "scatter")]],
     ["Volume", "#6ab0e0", [T("Remesh", "remesh"), T("SDF Boolean", "sdf_boolean", "boolean"), T("Points to Surface", "points_to_surface")]],
     ["PCG", "#79c27a", null],                                                   // every pcg_* node (filled in from the engine's types)
+    ["Procedural", "#79c2ad", [
+      T("Building Rules", "building_rules", "box"), T("Region Identify", "region_identify", "connectivity"),
+      T("Region Transform", "region_transform", "transform"), T("Goal Length", "goal_length", "constraint"),
+      T("Goal Collision", "goal_collision", "constraint"), T("Goal Surface", "goal_surface", "constraint"),
+      T("Goal Gravity", "goal_gravity", "constraint"), T("Goal Pin", "goal_pin", "constraint"),
+      T("Goal Solve", "goal_solve", "solver")]],
     ["Flow", "#c4a35a", [
       T("Repeat", "loop_block", "loop"), T("Loop Begin", "loop_begin", "loop"), T("Loop End", "loop_end", "loop"), T("For Each", "for_each", "loop"),
       T("Solver", "solver", "loop"), T("Switch", "switch")]],

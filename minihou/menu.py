@@ -48,6 +48,9 @@ GROUPS: List[Tuple[str, str, List[str]]] = [
       "pcg_copy_points", "pcg_union", "pcg_intersection", "pcg_difference", "pcg_debug"]),
     ("Flow & Time", "Loops, per-piece work and simulation over time",
      ["loop_block", "loop_begin", "loop_end", "for_each", "solver"]),
+    ("Procedural Systems", "Buildings, connected regions and geometric goal relaxation",
+     ["building_rules", "region_identify", "region_transform", "goal_length", "goal_collision", "goal_surface",
+      "goal_gravity", "goal_pin", "goal_solve"]),
     ("Utility & I/O", "Pass-through, system inputs and the output", ["null", "input", "output"]),
     (LIBRARY, "Your own nodes and saved systems", []),
 ]
@@ -63,6 +66,15 @@ CATEGORY_GROUP: Dict[str, str] = {
 
 # names a node is known by elsewhere (Houdini, Blender, everyday words): a search for any of them finds it
 ALIASES: Dict[str, str] = {
+    "building_rules": "building footprint facade grammar storeys windows balconies roof architecture",
+    "region_identify": "connected islands regions flood fill connectivity",
+    "region_transform": "regions islands random rotate scale extrude paving tiles stones damage",
+    "goal_length": "geometric constraint edge length cable fabric",
+    "goal_collision": "geometric constraint collision separation packing radius",
+    "goal_surface": "geometric constraint project closest surface",
+    "goal_gravity": "geometric constraint gravity load relaxation",
+    "goal_pin": "geometric constraint anchor fixed points",
+    "goal_solve": "geometric constraints relaxation solver goals fabric cable packing",
     "polyextrude": "extrude inset shell thicken", "polybevel": "bevel chamfer round edges", "polysplit": "edge loop insert cut",
     "polyfill": "fill hole cap", "polybridge": "bridge connect loops", "polyexpand2d": "offset outline inset curve expand",
     "subdivide": "catmull clark smooth subsurf subdivision", "mirror": "symmetry reflect flip", "boolean": "union subtract intersect cut csg",
