@@ -360,7 +360,7 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
   **Group**, **Create**, **Build**, **Edges**, **Modify**, each opening a pie of tools (Transform, Soft Transform, Soft Peak, Smooth, Point Weld... /
   Lattice, Mountain, Bend, Linear Taper, Squash and Stretch, Twist... / PolyBevel, PolyFill, PolyExtrude, PolySplit, PolyBridge, Clip, Boolean /
   Group Promote, Group by Range, Group Create, Group Expression / Null, Circle, Tube, Sphere, Curve, Grid, Box / Mirror, Duplicate, Combine, Extract /
-  Dissolve, Edge Collapse, Edge Loop, Edge Cusp, Edge Flip...) with a **»** for a second page. **Hold C, flick towards a slot and let go**, or tap C and
+  Dissolve, Edge Collapse, Edge Loop, Edge Cusp, Edge Flip...) with a **»** for a second page. **Build > Fracture** is Houdini's RBD fracture menu (Voronoi Fracture, Voronoi Fracture Points, Voronoi Split, Voronoi Adjacency, Boolean Fracture, Convex Decomposition, Glue Cluster, RBD Material Fracture, Assemble, RBD Configure and Solver). **Hold C, flick towards a slot and let go**, or tap C and
   click; **1-8** pick a slot, the middle goes back, **Esc** closes. A tool adds its node after the node you are looking at (sources like Grid and Box
   are added unwired) and fills it in from your 3-D selection: faces become the group of an Extrude, edges the edges of a Bevel, Edge Collapse or Edge
   Loop, points the group of a Transform. Tools this engine does not have yet (Sculpt, Group Paint) are greyed out.
@@ -472,7 +472,15 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `blast` | geo | delete a group of primitives or points (or keep only it) |
 | `polybevel` | geo | chamfer sharp edges (min angle, or a point / edge / primitive group); slides along borders and flat edges so subdivided meshes bevel cleanly; moves are limited where faces would fold; new faces in group `bevel`; Houdini's six output groups |
 | `boolean` | a, b | exact union / subtract / intersect of closed meshes: watertight n-gon output, uv and attributes carried across cuts, groups `from_a`/`from_b`; flush faces cut cleanly |
-| `voronoi_fracture` | geo, points | break a closed mesh into the exact Voronoi cells of the points; closed pieces, prim `piece`, caps in group `inside`, optional gap |
+| `voronoi_fracture` | geo, points | break a closed mesh into the exact Voronoi cells of the points; closed pieces, prim `piece`, caps in group `inside`, optional gap; output groups `inside`, `outside`, `cutpoints`, `cutedges` |
+| `voronoi_fracture_points` | geo, points* | fracture points for the above: scattered inside a closed mesh, optional surface share, thinning, Lloyd relaxation, clusters and extra points from the second input; groups `interior`, `surface`, `clustered`, `extrapoints` |
+| `voronoi_split` | geo, points | split any polygon geometry (open sheets, soup) by the Voronoi cells without capping; `piece`, groups `cutpoints`, `cutedges` |
+| `voronoi_adjacency` | geo, points* | which pieces touch: a point per piece and a two-point curve per shared cut face (`piece_a`, `piece_b`, `area`); groups `connected`, `isolated`, `stronglinks` |
+| `boolean_fracture` | geo, cutters | break a closed mesh with cutter meshes: one piece per cutter plus the remainder, `piece`, `cutter`, groups `inside`, `outside`, `cutterpieces`, `remainder`, `cutpoints`, `cutedges` |
+| `convex_decomposition` | geo | cut a closed concave mesh into nearly convex pieces (collision shapes): reflex-edge planes, `max_concavity`, `max_pieces`; `piece`, groups as the fracture |
+| `assemble` | geo | number and name pieces (attribute, connectivity or groups), give each its own points and a pivot; detail `piece_names`; groups `splitpoints`, `sharedpoints` |
+| `glue_cluster` | geo | glue touching pieces: `cluster` (rigid groups of the most firmly stuck pieces) on the pieces, or the links (`rbd_a`, `rbd_b`, `strength` in newtons) for the solver's third input |
+| `rbd_material_fracture` | geo | fracture, assemble, glue and set mass / friction / bounce from a material in one node (`output` pieces or constraints) |
 | `polyreduce` | geo | reduce to a percentage or count of triangles with quadric error metrics; keeps borders, sharp edges and manifold shells; attributes blend along collapses |
 | `exploded_view` | geo | push pieces (a prim attribute) away from a centre |
 | `polyextrude` | geo | extrude faces (a group) along their normals with inset; connected regions or individual faces; output groups front / back / side (`extrudeFront`, `extrudeBack`, `extrudeSide`) |

@@ -176,6 +176,16 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
     Resample, then attribute nodes): compare with Houdini. Houdini's pie tools start an interactive state; here a tool adds the node with sensible
     defaults and the parameters do the rest. Slot positions inside each sub-pie follow the order in the screenshots, clockwise from the top.
 
+14. **RBD fracture toolbox** (Houdini's fracture menu; `nodes/fracture.py`, `nodes/fracture_tools.py`, `rbd.py`, `docs/RBD.md`): Voronoi Fracture got
+    output groups (inside / outside / cut points / cut edges); new `voronoi_split`, `voronoi_fracture_points`, `voronoi_adjacency`,
+    `boolean_fracture`, `convex_decomposition`, `assemble`, `glue_cluster` and `rbd_material_fracture`. The solver gained **compound
+    (cluster) bodies** and a third `constraints` input: **breakable glue** (MuJoCo welds that snap past a strength, glued pieces do not
+    collide until the last link breaks). Honest caveats: no packed primitives or string attributes exist, so Assemble writes an int
+    `piece`, a vector `pivot` and the detail `piece_names`; group sets and the material glue strengths are my own tuning (no panels to
+    copy); glue strength is a break force, not Houdini's constraint-network model (no hinges, springs, glue-to-ground rules or
+    per-piece strength painting); `convex_decomposition` is a plane-cut search (reflex-edge planes), not V-HACD, and cuts along a
+    face plane can leave sliver faces on curved meshes. MuJoCo is now installed in this environment, so the two RBD tests that used to fail run.
+
 Open:
 
 - Output groups other than PolyBevel's are from memory of Houdini's nodes: compare with Houdini and adjust names/sets.

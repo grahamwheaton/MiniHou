@@ -1,0 +1,170 @@
+{
+  "version": 1,
+  "nodes": {
+    "slab": {
+      "type": "box",
+      "params": {
+        "size": [
+          3,
+          0.5,
+          2
+        ],
+        "center": [
+          0,
+          0,
+          1
+        ]
+      },
+      "inputs": {}
+    },
+    "pieces": {
+      "type": "rbd_material_fracture",
+      "params": {
+        "material": "brick",
+        "pieces": 30,
+        "seed": 4,
+        "relax": 3,
+        "strength_scale": 0.5
+      },
+      "inputs": {
+        "geo": "slab"
+      }
+    },
+    "glue": {
+      "type": "rbd_material_fracture",
+      "params": {
+        "material": "brick",
+        "pieces": 30,
+        "seed": 4,
+        "relax": 3,
+        "strength_scale": 0.5,
+        "output": "constraints"
+      },
+      "inputs": {
+        "geo": "slab"
+      }
+    },
+    "ball": {
+      "type": "sphere",
+      "params": {
+        "radius": 0.4,
+        "rows": 10,
+        "columns": 20,
+        "center": [
+          0.3,
+          -6,
+          1.2
+        ]
+      },
+      "inputs": {}
+    },
+    "projectile": {
+      "type": "rbd_configure",
+      "params": {
+        "id_offset": 10000,
+        "mass": 1500,
+        "velocity": [
+          0,
+          16,
+          0
+        ],
+        "restitution": 0.1
+      },
+      "inputs": {
+        "geo": "ball"
+      }
+    },
+    "bodies": {
+      "type": "merge",
+      "params": {},
+      "inputs": {
+        "geos": [
+          "pieces",
+          "projectile"
+        ]
+      }
+    },
+    "floor": {
+      "type": "box",
+      "params": {
+        "size": [
+          80,
+          80,
+          0.5
+        ],
+        "center": [
+          0,
+          0,
+          -0.25
+        ]
+      },
+      "inputs": {}
+    },
+    "ground": {
+      "type": "rbd_configure",
+      "params": {
+        "active": false,
+        "friction": 0.8
+      },
+      "inputs": {
+        "geo": "floor"
+      }
+    },
+    "sim": {
+      "type": "rbd_solver",
+      "params": {
+        "substeps": 12
+      },
+      "inputs": {
+        "bodies": "bodies",
+        "colliders": "ground",
+        "constraints": "glue"
+      }
+    },
+    "out": {
+      "type": "output",
+      "params": {},
+      "inputs": {
+        "geo": "sim"
+      }
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Pieces",
+      "node": "pieces",
+      "param": "pieces"
+    },
+    {
+      "name": "Seed",
+      "node": "pieces",
+      "param": "seed"
+    },
+    {
+      "name": "Glue strength",
+      "node": "glue",
+      "param": "strength_scale"
+    },
+    {
+      "name": "Projectile velocity",
+      "node": "projectile",
+      "param": "velocity"
+    },
+    {
+      "name": "Projectile mass",
+      "node": "projectile",
+      "param": "mass"
+    },
+    {
+      "name": "Gravity",
+      "node": "sim",
+      "param": "gravity"
+    },
+    {
+      "name": "Reset",
+      "node": "sim",
+      "param": "reset"
+    }
+  ]
+}

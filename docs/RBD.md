@@ -73,6 +73,38 @@ visible resting gap. Increase substeps for smaller/faster bodies; there is no CC
 guarantee. The brick demo uses 12 substeps and a large floor so the projectile
 does not leave it during the demonstration.
 
+## Fracture, glue and clusters
+
+The fracture toolbox (Houdini's RBD fracture menu) is made of ordinary nodes; see the README table and `docs/output_groups.md` for
+their output groups.
+
+```
+Mesh -> Voronoi Fracture Points -> Voronoi Fracture -> Assemble -> Configure -> Solver.bodies
+                                                          |
+                                              Glue Cluster (constraints) ------> Solver.constraints
+```
+
+* **Voronoi Fracture Points** scatters points inside a closed mesh (with optional surface points, thinning, relaxation and clusters).
+* **Voronoi Fracture**, **Voronoi Split** (open geometry, no caps), **Boolean Fracture** (cutter meshes) and **Convex Decomposition**
+  (a concave mesh into nearly convex parts) make pieces; each face carries the int `piece`, and the new faces are the group `inside`.
+* **Assemble** numbers and names the pieces and gives each its own points (the solver refuses pieces that share points).
+* **Voronoi Adjacency** and **Glue Cluster** find which pieces touch. **Glue Cluster** can merge the most firmly stuck pieces into a
+  few rigid **clusters** (`cluster`; configure with `rbd_configure` `compound` on, and the cluster is **one body** made of several convex
+  parts, with the pieces' masses summed), and writes **constraints**: two-point lines with `rbd_a` / `rbd_b` (the body ids), `strength`
+  (newtons) and `length`.
+* **RBD Material Fracture** does all of it in one node from a material (density, friction, bounce, glue strength).
+
+The solver's optional third input, `constraints`, welds the two bodies of each line together (a MuJoCo weld, soft with a 30 ms time
+constant, which keeps a stiff network of welds from fighting itself). A weld **breaks** when its force plus its torque over the line's
+`length` passes `strength` (strength 0: never). Glued pieces do not collide with each other until their last link breaks, then they
+do. For the first 0.1 s of a simulation (and after a reset) nothing can break, so touching pieces can settle. `detail.rbd.glue`
+reports `links`, `broken` and `broken_links`. Breakage is part of the simulation state: scrubbing back replays it identically.
+`examples/rbd_glued_wall.json` is a brick wall hit by a heavy ball.
+
+Material glue strengths are tuned so that a wall stands under its own weight and breaks under a hard hit (the order is realistic, the
+numbers are not measured), and the pieces' connections are hyperstatic, so a few of the weakest links can snap while a structure
+settles; raise `strength_scale` for a sturdier result.
+
 ## Time, reset and ownership
 
 Frame 1 is the default initial state. Frame/FPS come from the editor or Blender;
@@ -135,9 +167,11 @@ and transformed/animated source owners are not supported.
 
 Closed, planar-faced, outward-wound **convex solid pieces** only, including the
 static floor (use a box, not an open grid). Concave, non-manifold, inward-wound,
-degenerate or shared-point pieces fail clearly. Do not assume every fracture of
-a concave source is convex. No automatic convex decomposition, glue, constraints,
-fracture-on-impact, joints, animated/kinematic colliders, deforming geometry,
+degenerate or shared-point pieces fail clearly (run `convex_decomposition`
+on a concave source, then `assemble`). A body may be several convex pieces only
+when it is a glue cluster (`rbd_configure` `compound`). Glue is the only
+constraint type (welds that break); no joints, hinges or springs,
+fracture-on-impact, animated/kinematic colliders, deforming geometry,
 changing topology, source-object visual instances or GPU simulation yet.
 
 Time-dependent graph inputs, standard animated Blender objects/drivers/shape keys,

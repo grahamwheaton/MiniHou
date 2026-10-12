@@ -55,6 +55,26 @@ def falling():
     return g
 
 
+def glued_wall():
+    """A concrete slab broken into glued pieces, stood on the floor and hit by a heavy ball."""
+    nodes = {
+        'slab': node('box', dict(size=[3, .5, 2], center=[0, 0, 1])),
+        'pieces': node('rbd_material_fracture', dict(material='brick', pieces=30, seed=4, relax=3, strength_scale=.5), geo='slab'),
+        'glue': node('rbd_material_fracture', dict(material='brick', pieces=30, seed=4, relax=3, strength_scale=.5, output='constraints'), geo='slab'),
+        'ball': node('sphere', dict(radius=.4, rows=10, columns=20, center=[.3, -6, 1.2])),
+        'projectile': node('rbd_configure', dict(id_offset=10000, mass=1500, velocity=[0, 16, 0], restitution=.1), geo='ball'),
+        'bodies': node('merge', geos=['pieces', 'projectile']),
+        'floor': node('box', dict(size=[80, 80, .5], center=[0, 0, -.25])),
+        'ground': node('rbd_configure', dict(active=False, friction=.8), geo='floor'),
+        'sim': node('rbd_solver', dict(substeps=12), bodies='bodies', colliders='ground', constraints='glue'),
+        'out': node('output', geo='sim'),
+    }
+    exposed = [('Pieces', 'pieces', 'pieces'), ('Seed', 'pieces', 'seed'), ('Glue strength', 'glue', 'strength_scale'),
+               ('Projectile velocity', 'projectile', 'velocity'), ('Projectile mass', 'projectile', 'mass'),
+               ('Gravity', 'sim', 'gravity'), ('Reset', 'sim', 'reset')]
+    return dict(version=1, nodes=nodes, display='out', exposed=[dict(name=n, node=i, param=p) for n, i, p in exposed])
+
+
 def modifier_graph(graph):
     """Empty host input keeps demos valid stack graphs without reading Blender scene objects."""
     import copy
@@ -66,7 +86,7 @@ def modifier_graph(graph):
 
 
 if __name__ == '__main__':
-    for name, graph in [('rbd_wall', wall()), ('rbd_falling', falling()),
+    for name, graph in [('rbd_wall', wall()), ('rbd_falling', falling()), ('rbd_glued_wall', glued_wall()),
                         ('rbd_wall_modifier', modifier_graph(wall())),
                         ('rbd_falling_modifier', modifier_graph(falling()))]:
         (ROOT / 'examples' / (name + '.json')).write_text(json.dumps(graph, indent=2) + '\n', encoding='utf8')

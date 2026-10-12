@@ -79,10 +79,21 @@
       T("Combine", "merge", { tip: "Merge geometry" }),
       T("Extract", "blast", { params: { delete_non_selected: true }, sel: { face: { group: "$", domain: "primitives" },
         point: { group: "$", domain: "points" } }, tip: "Keep only the selection" }),
-      null, null, null, P("»", "build2")] },
+      null, null, P("Fracture", "fracture"), P("»", "build2")] },
     build2: { title: "Build", items: [
       T("Copy to Points", "copy_to_points"), T("Instance", "instance"), T("Sweep", "sweep"), T("Skin", "skin"),
       T("Revolve", "revolve"), T("Switch", "switch"), T("Polypath", "polypath"), null] },
+
+    // Houdini's RBD fracture menu: Assemble, Boolean Fracture, Convex Decomposition, Glue Cluster, RBD Material Fracture and the four Voronoi tools
+    fracture: { title: "Fracture", items: [
+      T("Voronoi Fracture", "voronoi_fracture", { tip: "Wire the fracture points into the second input" }),
+      T("Voronoi Fracture Points", "voronoi_fracture_points"), T("Voronoi Split", "voronoi_split"),
+      T("Voronoi Adjacency", "voronoi_adjacency"), T("Boolean Fracture", "boolean_fracture", { tip: "Wire the cutters into the second input" }),
+      T("Convex Decomposition", "convex_decomposition"), T("Glue Cluster", "glue_cluster"), P("»", "fracture2")] },
+    fracture2: { title: "Fracture", items: [
+      T("RBD Material Fracture", "rbd_material_fracture"), T("Assemble", "assemble"),
+      T("RBD Configure", "rbd_configure"), T("RBD Solver", "rbd_solver", { tip: "Bodies in the first input, then colliders and glue links" }),
+      null, null, null, null] },
 
     edges: { title: "Edges", items: [
       T("Dissolve", "dissolve_edges", { sel: { edge: "group" } }), T("Edge Collapse", "edge_collapse", { sel: { edge: "group" } }),
