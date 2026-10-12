@@ -48,6 +48,15 @@ class SourceObjectTests(unittest.TestCase):
         cls.engine.stop()
         cls.tmp.cleanup()
 
+    def test_modal_picker_defers_all_live_update_paths(self):
+        from unittest.mock import patch
+        from minihou_link import mesh_writer, geonodes, runtime
+        with patch.object(mesh_writer, "modal_ui_active", return_value=True):
+            with patch.object(self.m, "_connection", side_effect=AssertionError("Must not connect or rebuild during picker")):
+                self.assertEqual(self.m.pump(force=True), 0)
+                self.assertEqual(geonodes.pump(force=True), 0)
+                self.assertEqual(runtime.Runtime().tick(), runtime.IDLE_INTERVAL)
+
     def test_multiple_imports_native_modifier_pickers_and_materials(self):
         from tests.test_blender_addon import evaluated_positions
         bpy.ops.mesh.primitive_monkey_add()

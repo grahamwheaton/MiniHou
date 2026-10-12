@@ -390,3 +390,9 @@ def apply_update(mesh, mirror: Mirror, u: GeoUpdate) -> Dict[str, object]:
     mesh.update(calc_edges=rebuild)
     out["update_ms"] = (pc() - t) * 1000
     return out
+
+
+def modal_ui_active():
+    """Modal tools retain RNA pointers; do not rebuild modifier data underneath them."""
+    wm = getattr(bpy.context, "window_manager", None)
+    return bool(wm and any(tuple(getattr(window, "modal_operators", ())) for window in wm.windows))

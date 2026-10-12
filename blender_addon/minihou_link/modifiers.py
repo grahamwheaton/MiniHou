@@ -649,6 +649,8 @@ def pump(host=None, port=None, *, force=False, _only=None):
     A failure retains the last successful cache and exposes the error through status(mod).
     """
     global _busy, _last_error, _retry_at
+    if mesh_writer.modal_ui_active():
+        return 0
     if _only is None:
         from . import geonodes
         geonodes._cleanup()
