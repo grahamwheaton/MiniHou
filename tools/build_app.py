@@ -33,6 +33,7 @@ def build(with_accel: bool) -> Path:
            "--collect-submodules", "minihou",
            "--collect-all", "webview",
            "--collect-all", "mujoco",
+           "--collect-all", "pxr",
            "--icon", str(ROOT / "minihou/assets/minihou.ico"),
            "--add-data", f"{ROOT / 'minihou/assets'}{sep}minihou/assets",
            "--add-data", f"{ROOT / 'minihou' / 'web' / 'static'}{sep}minihou/web/static",
