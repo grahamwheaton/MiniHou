@@ -163,19 +163,20 @@ def _transform(ins, out, p):
                 c = (P.min(0) + P.max(0)) / 2.0
         except Exception:  # noqa: BLE001 - a bad group just leaves the arrows at the middle of everything
             pass
+    B = euler_xyz_matrix(p.get("axis_rotation", (0, 0, 0)))
     hs = [{"id": f"translate_{'xyz'[i]}", "label": f"move {'xyz'[i]}", "param": "translate", "comp": i, "origin": c,
-           "dir": AXES[i], "tool": "move"} for i in range(3)]
+           "dir": B[:, i], "tool": "move"} for i in range(3)]
     # rotate and scale sit on the fixed point of the transform (pivot + translate), so they do not run away while dragged
     rot = np.asarray(p.get("rotate", (0, 0, 0)), np.float64)
     R = euler_xyz_matrix(rot)
-    anchor = np.asarray(p.get("pivot", (0, 0, 0)), np.float64) + np.asarray(p.get("translate", (0, 0, 0)), np.float64)
+    anchor = np.asarray(p.get("pivot", (0, 0, 0)), np.float64) + B @ np.asarray(p.get("translate", (0, 0, 0)), np.float64)
     Rz = euler_xyz_matrix([0, 0, rot[2]])
     Ryz = euler_xyz_matrix([0, rot[1], rot[2]])
-    rings = [Ryz @ AXES[0], Rz @ AXES[1], AXES[2]]                 # the axis each Euler angle turns about (X is applied first, Z last)
+    rings = [B @ Ryz @ AXES[0], B @ Rz @ AXES[1], B[:, 2]]       # the axis each Euler angle turns about
     radius = max(_extent(out) * 0.6, 0.05)
     hs += [{"id": f"rotate_{'xyz'[i]}", "label": f"rotate {'xyz'[i]}", "param": "rotate", "comp": i, "origin": anchor, "dir": rings[i],
             "kind": "ring", "radius": radius, "scale": 180.0 / np.pi, "tool": "rotate"} for i in range(3)]
-    hs += [{"id": f"scale_{'xyz'[i]}", "label": f"scale {'xyz'[i]}", "param": "scale", "comp": i, "origin": anchor, "dir": R[:, i],
+    hs += [{"id": f"scale_{'xyz'[i]}", "label": f"scale {'xyz'[i]}", "param": "scale", "comp": i, "origin": anchor, "dir": B @ R[:, i],
             "kind": "scale", "tool": "scale"} for i in range(3)]
     hs.append({"id": "uniform_scale", "label": "uniform scale", "param": "uniform_scale", "comp": None, "origin": anchor, "dir": AXES[2],
                "kind": "uniform", "tool": "scale"})

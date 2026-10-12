@@ -16,7 +16,7 @@ The reference is the user-supplied Houdini PolyBevel viewport screenshot. Behavi
 
 ## Remaining gaps, in suggested order
 
-1. Reference grid, world axes and configurable background; snapping to points, edges and construction planes.
+1. Reference grid, world axes and configurable background. Selection orientations, Bezier editing and snapping are now covered in [Interaction tools](INTERACTION-TOOLS.md), including their remaining Blender-parity gaps.
 2. Tool-specific states and complete parameter ordering rather than the generic first-four parameter strip; help sourced from node handle definitions.
 3. Expanded selection: visible-only versus through selection, loops/rings, lasso/brush, grow/shrink, soft selection and named group visualization.
 4. Smooth/flat/material/wireframe display presets, lights, textures, transparency, clipping and attribute visualizers.

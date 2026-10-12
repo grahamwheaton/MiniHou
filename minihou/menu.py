@@ -14,8 +14,8 @@ LIBRARY = "Library"
 # (group, what it is for, nodes)
 GROUPS: List[Tuple[str, str, List[str]]] = [
     ("Create", "Shapes and curves from nothing, and the doors into a graph",
-     ["box", "sphere", "grid", "tube", "torus", "circle", "line", "curve", "helix", "lsystem", "lattice_grid",
-      "blender_object", "modifier_input"]),
+     ["box", "sphere", "grid", "tube", "torus", "circle", "line", "bezier", "curve", "helix", "lsystem", "lattice_grid",
+      "blender_object", "modifier_input", "object_input"]),
     ("Polygon Modelling", "Build and edit polygon surfaces",
      ["polyextrude", "polybevel", "polysplit", "polyfill", "polybridge", "polyexpand2d", "subdivide", "mirror", "boolean",
       "clip", "dissolve", "divide", "reverse", "facet", "bridge", "skin", "skin_profiles", "revolve", "polyreduce", "clean",
@@ -97,7 +97,7 @@ ALIASES: Dict[str, str] = {
     "loop_end": "repeat iterate", "for_each": "per piece iterate", "solver": "feedback simulation previous frame",
     "null": "named output pass through", "input": "system port", "output": "result display", "box": "cube", "sphere": "ball",
     "grid": "plane floor", "tube": "cylinder cone", "torus": "donut ring", "circle": "disc", "line": "segment",
-    "curve": "spline path", "helix": "spiral coil", "lsystem": "plant tree fractal", "blender_object": "read import mesh",
+    "curve": "polyline path", "bezier": "curve spline tangent handles control points path", "helix": "spiral coil", "lsystem": "plant tree fractal", "blender_object": "read import mesh",
     "modifier_input": "host geometry",
 }
 

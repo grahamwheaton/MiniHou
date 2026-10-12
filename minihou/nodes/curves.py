@@ -6,6 +6,7 @@ polygons count as closed curves where it makes sense (resample/carve walk their 
 In Blender, curves arrive as loose edges of the output mesh (Geometry Nodes' *Mesh to Curve* turns them into real
 curves); sweep them here for render geometry.
 """
+import json
 import numpy as np
 
 from .. import groups, topo
@@ -84,6 +85,69 @@ def chain_segments(npoints, a, b):
 
 
 # -- sources ----------------------------------------------------------------------------------------------------
+BEZIER_DEFAULT = json.dumps([
+    {"p": [-1, 0, 0], "left": [-1.5, 0, 0], "right": [-0.5, 0, 0], "mode": "AUTO"},
+    {"p": [0, 0, 1], "left": [-0.5, 0, 1], "right": [0.5, 0, 1], "mode": "AUTO"},
+    {"p": [1, 0, 0], "left": [0.5, 0, 0], "right": [1.5, 0, 0], "mode": "AUTO"},
+])
+
+
+def bezier_controls(controls, closed=False):
+    """Validated absolute handles. Automatic/vector handles are derived, never trusted from storage."""
+    pts = json.loads(controls) if isinstance(controls, str) else controls
+    if not isinstance(pts, list) or not 2 <= len(pts) <= 10000:
+        raise ValueError("Bezier curves need 2 to 10000 control points")
+    out = []
+    for c in pts:
+        mode = c.get("mode", "FREE")
+        if mode not in {"AUTO", "VECTOR", "ALIGNED", "MIRRORED", "FREE"}:
+            raise ValueError("Unknown Bezier handle mode")
+        xyz = np.asarray([c["p"], c["left"], c["right"]], np.float64)
+        if xyz.shape != (3, 3) or not np.isfinite(xyz).all():
+            raise ValueError("Bezier control points and handles must be finite XYZ vectors")
+        out.append({"p": xyz[0], "left": xyz[1], "right": xyz[2], "mode": mode})
+    for i, c in enumerate(out):
+        p = c["p"]
+        prev = out[(i - 1) % len(out)]["p"] if closed or i else p
+        nxt = out[(i + 1) % len(out)]["p"] if closed or i + 1 < len(out) else p
+        if c["mode"] == "VECTOR":
+            c["left"], c["right"] = p + (prev - p) / 3, p + (nxt - p) / 3
+        elif c["mode"] == "AUTO":
+            d = nxt - prev
+            d /= max(float(np.linalg.norm(d)), 1e-12)
+            c["left"] = p - d * np.linalg.norm(p - prev) / 3
+            c["right"] = p + d * np.linalg.norm(nxt - p) / 3
+        elif c["mode"] in {"ALIGNED", "MIRRORED"}:
+            d = c["right"] - p
+            length = float(np.linalg.norm(d))
+            if length > 1e-12:
+                size = length if c["mode"] == "MIRRORED" else np.linalg.norm(c["left"] - p)
+                c["left"] = p - d * size / length
+    return out
+
+
+@node("bezier", category="source", params=[
+    Str("controls", BEZIER_DEFAULT, doc="Control points edited with the viewport curve tool"),
+    Bool("closed", False),
+    Int("resolution", 24, min=1, max=1024, doc="Samples per Bezier segment"),
+])
+def bezier(controls, closed, resolution):
+    """Editable cubic Bezier curve. Select anchors or tangent handles in the viewport; sweep for a surface."""
+    cs = bezier_controls(controls, closed)
+    segments = len(cs) if closed else len(cs) - 1
+    guard_count(segments * resolution + (not closed), "Bezier samples", "reduce resolution or control points")
+    t = np.arange(resolution, dtype=np.float64)[:, None] / resolution
+    parts = []
+    for i in range(segments):
+        a, b = cs[i], cs[(i + 1) % len(cs)]
+        parts.append((1-t)**3*a["p"] + 3*(1-t)**2*t*a["right"] +
+                     3*(1-t)*t*t*b["left"] + t**3*b["p"])
+    if not closed:
+        parts.append(cs[-1]["p"][None, :])
+    P = np.concatenate(parts).astype(np.float32)
+    return _curves_geometry(P, [len(P)], [closed])
+
+
 @node("line", category="source", params=[
     Vec3("origin", (0.0, 0.0, 0.0)),
     Vec3("direction", (0.0, 0.0, 1.0)),

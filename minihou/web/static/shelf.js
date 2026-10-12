@@ -11,9 +11,9 @@
   const TABS = [
     ["Create", "#6fbf73", [
       T("Box", "box"), T("Sphere", "sphere"), T("Tube", "tube"), T("Torus", "torus"), T("Grid", "grid"), T("Null", "null"),
-      T("Line", "line"), T("Circle", "circle"), T("Curve", "curve"), T("Helix", "helix"), T("L-System", "lsystem"),
+      T("Line", "line"), T("Circle", "circle"), T("Bezier", "bezier", "curve"), T("Polyline", "curve"), T("Helix", "helix"), T("L-System", "lsystem"),
       T("Lattice Grid", "lattice_grid", "lattice"), T("Metaball", "points_to_surface"), T("Blender Object", "blender_object", "file"),
-      T("Host Mesh", "modifier_input", "host")]],
+      T("Host Mesh", "modifier_input", "host"), T("Object Input", "object_input", "host")]],
     ["Modify", "#5ea0e0", [
       T("Transform", "transform"), T("Merge", "merge"), T("Duplicate", "copy_transform", "duplicate"), T("Copy to Points", "copy_to_points"),
       T("Instance", "instance"), T("Switch", "switch"), T("Match Size", "match_size"), T("Bound", "bound"), T("Blast", "blast"),
@@ -48,7 +48,7 @@
       T("Attribute Delete", "attribute_delete", "attr"), T("Measure", "measure"), T("Connectivity", "connectivity"), T("Ray", "ray"),
       T("Python", "python", "code")]],
     ["Curves", "#7fd0a0", [
-      T("Curve", "curve"), T("Line", "line"), T("Helix", "helix"), T("Resample", "resample"), T("Carve", "carve"),
+      T("Bezier", "bezier", "curve"), T("Polyline", "curve"), T("Line", "line"), T("Helix", "helix"), T("Resample", "resample"), T("Carve", "carve"),
       T("Convert Line", "convert_line", "line"), T("PolyPath", "polypath", "curve"), T("Sweep", "sweep"), T("Fillet", "fillet")]],
     ["Points", "#d6d46f", [
       T("Scatter", "scatter"), T("Fuse", "fuse"), T("Delaunay", "delaunay", "hull"), T("Point Jitter", "point_jitter", "scatter"),

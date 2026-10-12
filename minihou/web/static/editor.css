@@ -367,3 +367,20 @@ body.has-bar #work, body.has-bar #side { min-height: 0; }
 .sh-label { overflow-wrap: anywhere; font-size: 10.5px; line-height: 1.15; color: #c3c9d0; text-align: center; max-width: 62px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; pointer-events: none; }
 .sh-empty { color: var(--muted); padding: 18px 8px; font-size: 12px; }
 @media (max-width: 760px) { .sh-tool { width: 58px; } }
+/* Viewport interaction controls and transient feedback. */
+.pv-interaction {display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:5px 8px;background:#252a30;font-size:11px;}
+.pv-interaction select,.pv-interaction button {font-size:11px;max-width:125px;}
+.pv-interaction select,.pv-settings input,.curve-panel input,.curve-panel select {background:#1e2227;color:#dce2eb;border:1px solid #454c55;border-radius:3px;padding:3px;}
+.pv-interaction details {position:relative;}
+.pv-settings {position:absolute;top:22px;right:0;width:310px;padding:12px;background:#292e35;border:1px solid #65717e;z-index:80;box-shadow:0 5px 15px #0008;}
+.pv-settings label {display:block;margin:7px 0;}
+.pv-settings input {width:65px;}
+.pv-curve {position:absolute;inset:0;pointer-events:none;z-index:5;}
+.curve-grab {pointer-events:all;cursor:move;}
+.curve-grab:hover {stroke:#fff;stroke-width:3;}
+.curve-panel button {margin:4px 3px 4px 0;}
+.curve-panel label {display:inline-block;width:32%;}
+.curve-panel input {width:70%;}
+.pv-handle:hover {filter:brightness(1.5) drop-shadow(0 0 3px #fff8);}
+.pv-dragging,.pv-dragging * {cursor:grabbing!important;user-select:none!important;}
+.pv-drag-feedback {position:absolute;bottom:15px;left:50%;transform:translateX(-50%);padding:7px 12px;border:1px solid #e7b364;border-radius:4px;background:#181d24eb;color:#fff2ce;z-index:12;pointer-events:none;white-space:nowrap;font-size:12px;}
