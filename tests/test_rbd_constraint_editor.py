@@ -61,6 +61,7 @@ class ConstraintEditorTests(unittest.TestCase):
     def test_spring_parameters_and_search_discoverability(self):
         node_id = self.create_constraint()
         self.page.select_option('#params [data-param="kind"] select', "spring")
+        self.page.check('#params [data-param="world"] input[type="checkbox"]')
         self.number("stiffness", 120)
         self.number("damping", 4)
         self.number("rest_length", 0.75)
@@ -68,9 +69,11 @@ class ConstraintEditorTests(unittest.TestCase):
             field = self.page.locator(f'#params [data-param="anchor_b"] [data-role="v{i}"]')
             field.fill(str(value))
             field.press("Tab")
+            self.page.wait_for_function('minihou.desktopCanClose()')
         self.page.wait_for_function('minihou.desktopCanClose()')
         params = self.session.graph.nodes[node_id].params
         self.assertEqual(params["kind"], "spring")
+        self.assertTrue(params["world"])
         self.assertEqual(params["stiffness"], 120)
         self.assertEqual(params["damping"], 4)
         self.assertEqual(params["rest_length"], 0.75)
