@@ -40,14 +40,14 @@
       "pos": [95, 220]
     },
     "wobble": {
-      "type": "twist",
+      "type": "twist_height",
       "params": {
         "angle": 0
       },
       "inputs": {
         "geo": "tower"
       },
-      "comment": "nodes/twist.py; try a few degrees",
+      "comment": "nodes/twist_height.py; try a few degrees",
       "pos": [95, 330]
     },
     "out": {

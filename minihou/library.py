@@ -61,11 +61,11 @@ saving and re-loaded on every save; errors are reported with file and line, and 
     from minihou.sdk import node, Float, Int, Bool, Vec3, Enum, Str, Input
     from minihou.geometry import Geometry, Topology
 
-    @node("twist", inputs=["geo"], category="deform", params=[
+    @node("twist_height", inputs=["geo"], category="deform", params=[
         Float("angle", 90.0, soft_min=-360, soft_max=360, doc="Degrees of twist over the height"),
         Vec3("axis_center", (0, 0, 0)),
     ])
-    def twist(geo, angle, axis_center):
+    def twist_height(geo, angle, axis_center):
         \"\"\"Twist points around Z, proportional to height.\"\"\"
         out = geo.copy()                      # shallow copy; untouched arrays stay shared (cheap, not re-sent)
         P = geo.P.astype(np.float64)          # (n, 3) float32, read-only: never modify inputs in place
