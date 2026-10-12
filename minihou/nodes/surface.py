@@ -169,7 +169,7 @@ REVOLVE_OUT = OutGroups(
     Vec3("axis", (0.0, 0.0, 1.0), doc="Direction of the axis of revolution"),
     Float("angle", 360.0, min=-360.0, max=360.0, soft_min=-360.0, soft_max=360.0,
           doc="Degrees to sweep (360: a closed surface; negative turns the other way)"),
-    Int("divisions", 32, min=1, max=4096, soft_max=128, doc="Steps around the axis"),
+    Int("divisions", 32, min=1, max=4096, soft_max=128, doc="Steps around the axis", proxy="count"),
     Float("start_angle", 0.0, soft_min=-360.0, soft_max=360.0, doc="Where the sweep starts, in degrees (the end is start + angle)"),
     Bool("end_caps", False, doc="Close both ends of a partial revolve with a face per profile (nothing to close at 360 degrees)"),
     *REVOLVE_OUT.params(),

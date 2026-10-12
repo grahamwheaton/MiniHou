@@ -116,6 +116,15 @@ TOOLS: List[dict] = [
                     "animated systems (wrangles using @Frame, solvers) at different times, then inspect_node.",
      "inputSchema": {"type": "object", "required": ["frame"], "additionalProperties": False, "properties": {
          "frame": {"type": "number"}, "fps": {"type": "number", "exclusiveMinimum": 0}}}},
+    {"name": "set_proxy",
+     "description": "Work on a very large scene: cook it at a fraction of its size. Node parameters that set the amount of work "
+                    "(grid columns/rows, scatter count, sphere bands, voxel size, spacing...) scale with the level, so a 10% "
+                    "level cooks about a tenth of the points. auto=true cooks the small version first on slow scenes and the "
+                    "real one when edits pause. Remember to set level back to 1 (full) before judging final results. "
+                    "link_tris caps the triangles sent to Blender (0 = everything). No arguments: show the settings.",
+     "inputSchema": {"type": "object", "additionalProperties": False, "properties": {
+         "level": {"type": "number", "minimum": 0.001, "maximum": 1}, "auto": {"type": "boolean"},
+         "link_tris": {"type": "integer", "minimum": 0}}}},
     {"name": "undo",
      "description": "Undo the last edit(s) (yours or the user's); redo=true goes forward again.",
      "inputSchema": {"type": "object", "additionalProperties": False, "properties": {
@@ -252,6 +261,9 @@ def format_status(st: dict, graph: Optional[dict] = None) -> str:
              + (f", {cook.get('ms', 0):.1f} ms" if cook else ""))
     else:
         s = "Not cooked yet."
+    px = (st.get("proxy") or {})
+    if px.get("cooked", 1.0) < 1.0:
+        s += f" [PROXY: cooked at {px['cooked']:.1%} of full size]"
     if st.get("busy"):
         s += " (still cooking newer edits)"
     if graph is not None:
@@ -419,6 +431,18 @@ class McpServer:
         st = self.engine.get("/api/status?wait=1&timeout=30")
         word = "Redid" if redo else "Undid"
         return f"{word} {done} step(s)." + (" Nothing (more) to do." if done < steps else "") + "\n" + format_status(st)
+
+    def tool_set_proxy(self, level: Optional[float] = None, auto: Optional[bool] = None, link_tris: Optional[int] = None) -> str:
+        body = {k: v for k, v in (("level", level), ("auto", auto), ("link_tris", link_tris)) if v is not None}
+        info = self.engine.post("/api/proxy", body) if body else self.engine.get("/api/proxy")
+        if body:
+            self.engine.get("/api/status?wait=1")
+            info = self.engine.get("/api/proxy")
+        what = "full resolution" if info["level"] >= 1 and not info["auto"] else (
+            f"auto (small version at {info['level'] if info['level'] < 1 else 0.1:.0%} first, full when edits pause)" if info["auto"]
+            else f"{info['level']:.1%} of full size")
+        return (f"Proxy: {what}; latest result cooked at {info['cooked']:.1%}. Blender triangle cap: "
+                f"{info['link_tris'] or 'none'}.")
 
     def tool_set_frame(self, frame: float, fps: Optional[float] = None) -> str:
         body = {"frame": frame}

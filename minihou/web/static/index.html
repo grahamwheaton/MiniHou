@@ -31,6 +31,10 @@
     <button id="lay-side" title="Show or hide the parameter panel (the 3-D view and graph then fill the window)">▤</button>
   </span>
   <span class="spacer"></span>
+  <span class="proxy">
+    <button id="proxy-btn" title="Proxy: work on a lighter version of a very large scene">Proxy: <span id="proxy-label">Full</span><span class="caret">▾</span></button>
+    <div id="proxy-menu" class="menu hidden" role="menu"></div>
+  </span>
   <span id="cook-status" class="status"><span class="dot"></span><span class="text">connecting…</span></span>
   <span id="blender-status" class="status clickable" role="button" tabindex="0" title="Blender clients connected to the live link"><span class="dot"></span><span class="text">Blender</span></span>
   <button id="help-btn" title="Keyboard and mouse">?</button>
@@ -106,7 +110,7 @@
           <button data-tool="move" class="on" title="Move arrows (W)">Move</button><button data-tool="rotate" title="Rotation rings (E)">Rotate</button><button data-tool="scale" title="Scale handles (R)">Scale</button>
         </span>
         </div>
-        <div class="pv-wrap"><div id="pv-hints" class="pv-hints"><strong id="pv-hint-title">View</strong><div id="pv-hint-text"></div></div><canvas id="pv-canvas" aria-label="3D preview"></canvas><div id="pv-msg" class="muted hidden"></div></div>
+        <div class="pv-wrap"><div id="pv-hints" class="pv-hints"><strong id="pv-hint-title">View</strong><div id="pv-hint-text"></div></div><canvas id="pv-canvas" aria-label="3D preview"></canvas><div id="pv-msg" class="muted hidden"></div><div id="pv-proxy" class="hidden"><span id="pv-proxy-text"></span><button id="pv-full" class="small">Full res</button></div></div>
         <div class="pv-opts pv-display-strip" role="group" aria-label="Display options">
           <label class="small"><input type="checkbox" id="pv-shaded" checked> shaded</label>
           <label class="small"><input type="checkbox" id="pv-edges" checked> edges</label>

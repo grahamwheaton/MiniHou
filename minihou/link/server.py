@@ -226,7 +226,7 @@ class _Connection:
             return  # Never publish a live modifier back into the legacy proxy.
         good, err = self.session.latest_good, self.session.latest_error
         if good is not None and good.seq > self._sent_good_seq:
-            header, arrays = self.diff.build(good.geo, good.seq, good.cook)
+            header, arrays = self.diff.build(self.session.link_geometry(good), good.seq, good.cook)
             self._sent_good_seq = good.seq
             self.bytes_sent += send_message(self.sock, header, arrays)
             names = sorted(good.extras)

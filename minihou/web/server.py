@@ -14,8 +14,11 @@ live in the other and in Blender.
 ``POST /api/edit``     ``{ops: [...], wait?: bool}`` -> ``{rev, results, changed, status?}`` (see :mod:`minihou.edit`)
 ``POST /api/undo``     also ``/api/redo``
 ``POST /api/inspect``  ``{node, detail?}`` -> geometry summary of any node
-``POST /api/preview``  ``{node}`` -> positions, triangles and edges of any node for the 3-D view (binary, see
-                       :mod:`minihou.preview`), or JSON ``{ok: false, error}``
+``POST /api/preview``  ``{node, full?, tris?}`` -> positions, triangles and edges of any node for the 3-D view (binary, see
+                       :mod:`minihou.preview`; a big one is reduced to the display budget unless ``full``, or to ``tris`` triangles),
+                       or JSON ``{ok: false, error}``
+``POST /api/proxy``    ``{level?, auto?, link_tris?}`` the proxy settings (cook level 0.001..1, auto refine, Blender triangle cap);
+                       also ``GET`` for the current ones
 ``POST /api/open``     ``{path, create?}`` switch to (or create) a graph file inside the workspace root
 ``GET  /api/library``  every graph file with name, age, node count, doc and whether it is a library node (for the file browser)
 ``GET  /api/file``     ``?path=`` one graph file's JSON (to insert its nodes into the open graph)
@@ -63,6 +66,13 @@ CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; c
                  ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
                  ".ico": "image/x-icon", ".json": "application/json"}
 LOOPBACK = ("127.0.0.1", "localhost", "[::1]", "::1")
+
+
+def _budget(v) -> int:
+    """A triangle budget from a request (0: the default)."""
+    if v is None or isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v < 1000:
+        return 0
+    return int(min(v, 5_000_000))
 
 
 class ApiError(Exception):
@@ -493,6 +503,8 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json({"path": p.relative_to(app.root).as_posix(), "graph": json.loads(p.read_text(encoding="utf-8"))})
             except (OSError, ValueError, UnicodeDecodeError) as e:
                 raise ApiError(400, f"cannot read {p.name}: {e}") from None
+        if path == "/api/proxy":
+            return self._json(self.app.session.proxy_info())
         if path == "/api/events":
             return self._events()
         raise ApiError(404, f"no such endpoint: {path}")
@@ -537,7 +549,7 @@ class _Handler(BaseHTTPRequestHandler):
             if not r["ok"]:
                 return self._json({"ok": False, "node": node, "rev": r["rev"], "error": r["error"]})
             from .. import preview
-            head, arrays = preview.arrays_for(r["geo"])
+            head, arrays = preview.arrays_for(r["geo"], full=bool(body.get("full")), tris=_budget(body.get("tris")))
             head.update(node=node, rev=r["rev"], handles=r.get("handles", []))
             return self._send(200, preview.pack(head, arrays), "application/octet-stream")
         if path == "/api/open":
@@ -575,6 +587,20 @@ class _Handler(BaseHTTPRequestHandler):
             except (OSError, FileNotFoundError) as e:
                 return self._json({"ok": False, "message": f"could not start Blender: {e}"})
             return self._json({"ok": True, "message": f"Starting Blender {found[idx]['version'] or ''}; it connects to this engine by itself."})
+        if path == "/api/proxy":
+            try:
+                level = body.get("level")
+                if level is not None and (isinstance(level, bool) or not isinstance(level, (int, float))):
+                    raise ValueError('"level" must be a number between 0.001 and 1')
+                auto = body.get("auto")
+                if auto is not None and not isinstance(auto, bool):
+                    raise ValueError('"auto" must be true or false')
+                cap = body.get("link_tris")
+                if cap is not None and (isinstance(cap, bool) or not isinstance(cap, int) or cap < 0):
+                    raise ValueError('"link_tris" must be a whole number, 0 for no limit')
+                return self._json(s.set_proxy(level, auto, cap))
+            except ValueError as e:
+                raise ApiError(400, str(e)) from None
         if path == "/api/frame":
             try:
                 frame = float(body.get("frame"))

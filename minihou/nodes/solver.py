@@ -4,7 +4,7 @@ import threading
 import weakref
 from collections import OrderedDict
 
-from .. import timectx
+from .. import proxy, timectx
 from ..sdk import REGISTRY, Int, Str, node
 
 MAX_FRAMES = 1000          # frames remembered per solver input (playback steps from the nearest one)
@@ -43,7 +43,7 @@ def solver(geo, body, params, start_frame, substeps):
         overrides = json.loads(params or "{}")
     except ValueError as e:
         raise ValueError(f"params must be JSON: {e}") from None
-    values = nt.coerce_params(overrides if isinstance(overrides, dict) else {})
+    values = proxy.scale_params(nt, nt.coerce_params(overrides if isinstance(overrides, dict) else {}))
     cur = timectx.frame()
     target = int(round(cur))
     if target <= start_frame:

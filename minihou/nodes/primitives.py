@@ -66,7 +66,7 @@ def _face_grid(n):
 @node("box", category="source", params=[
     Vec3("size", (1.0, 1.0, 1.0), min=0.0),
     Vec3("center", (0.0, 0.0, 0.0)),
-    Int("divisions", 1, min=1, max=1000, soft_max=50),
+    Int("divisions", 1, min=1, max=1000, soft_max=50, proxy="res2"),
 ])
 def box(size, center, divisions):
     """Closed box of quads (outward-facing), each face split into ``divisions`` x ``divisions``."""
@@ -90,8 +90,8 @@ def box(size, center, divisions):
 @node("sphere", category="source", params=[
     Float("radius", 1.0, min=0.0),
     Vec3("center", (0.0, 0.0, 0.0)),
-    Int("rows", 16, min=2, max=4096, soft_max=200, doc="latitude bands"),
-    Int("columns", 32, min=3, max=4096, soft_max=400, doc="longitude segments"),
+    Int("rows", 16, min=2, max=4096, soft_max=200, doc="latitude bands", proxy="res2"),
+    Int("columns", 32, min=3, max=4096, soft_max=400, doc="longitude segments", proxy="res2"),
 ])
 def sphere(radius, center, rows, columns):
     """UV sphere: triangle fans at the poles, quads between; outward-facing, closed."""
@@ -122,7 +122,7 @@ def sphere(radius, center, rows, columns):
     Float("radius", 1.0, min=0.0),
     Vec3("center", (0.0, 0.0, 0.0)),
     Vec3("rotate", (0.0, 0.0, 0.0), doc="Euler XYZ degrees; the circle lies in XY facing +Z before rotation"),
-    Int("divisions", 32, min=3, max=100000),
+    Int("divisions", 32, min=3, max=100000, proxy="count"),
 ])
 def circle(radius, center, rotate, divisions):
     """A single filled n-gon."""
@@ -150,8 +150,8 @@ def _ring_quads(rows, columns, wrap_rows):
     Float("radius_top", 1.0, min=0.0, soft_max=10.0, doc="0 makes a cone"),
     Float("height", 2.0, min=0.0, soft_max=20.0),
     Vec3("center", (0.0, 0.0, 0.0)),
-    Int("rows", 1, min=1, max=4096, soft_max=100, doc="segments along the height"),
-    Int("columns", 24, min=3, max=4096, soft_max=200, doc="segments around"),
+    Int("rows", 1, min=1, max=4096, soft_max=100, doc="segments along the height", proxy="res2"),
+    Int("columns", 24, min=3, max=4096, soft_max=200, doc="segments around", proxy="res2"),
     Bool("caps", True, doc="Close the ends with n-gons (a zero radius ends in a point instead)"),
 ], handles=[Handle("radius_bottom", axis="x", at="bottom", reach=True, min=0.0),
             Handle("radius_top", axis="x", at="top", reach=True, min=0.0),
@@ -184,8 +184,8 @@ def tube(radius_bottom, radius_top, height, center, rows, columns, caps):
     Float("radius", 1.0, min=0.0, soft_max=10.0, doc="From the centre to the middle of the tube"),
     Float("thickness", 0.25, min=0.0, soft_max=5.0, doc="Radius of the tube"),
     Vec3("center", (0.0, 0.0, 0.0)),
-    Int("rows", 12, min=3, max=4096, soft_max=200, doc="segments around the tube"),
-    Int("columns", 32, min=3, max=4096, soft_max=400, doc="segments around the ring"),
+    Int("rows", 12, min=3, max=4096, soft_max=200, doc="segments around the tube", proxy="res2"),
+    Int("columns", 32, min=3, max=4096, soft_max=400, doc="segments around the ring", proxy="res2"),
 ])
 def torus(radius, thickness, center, rows, columns):
     """Torus in the XY plane (Houdini's Torus), outward-facing quads with vertex uvs; closed."""

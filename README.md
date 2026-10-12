@@ -839,6 +839,14 @@ line, whole numbers as ints, and values from Blender's float32 sliders snapped t
 keyframes and drivers on them keep working. A graph may be unfinished (an unwired node): it still opens, and only the nodes
 feeding the display node have to be valid for it to cook.
 
+## Very large scenes (proxies)
+
+The 3-D view draws any geometry within a budget (250k triangles / 500k points) by clustering it, so the whole shape stays
+visible and the browser stays responsive; the view says "Reduced view" with a **Full res** button. The **Proxy** menu in the top bar
+cooks a lighter version of the scene (Full, Auto, 50% ... 1%): counts, resolutions and voxel sizes scale, the cache keys follow, and
+**Auto** cooks a small version first on slow scenes and the real one when you pause. A cap on the triangles sent to Blender is in the
+same menu. Details, limits and measurements: [docs/PROXY.md](docs/PROXY.md).
+
 ## Speed
 
 Measured with `bench/bench_link.py` (1M points, Blender 5.1.2). Windows numbers are from the GitHub Actions Windows runner

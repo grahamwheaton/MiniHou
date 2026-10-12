@@ -101,7 +101,7 @@ def _scatter_volume(geo, count, seed):
 
 
 @node("scatter", inputs=["geo"], category="generate", params=[
-    Int("count", 1000, min=0, soft_max=1000000),
+    Int("count", 1000, min=0, soft_max=1000000, proxy="count"),
     Int("seed", 0),
     Enum("mode", ["surface", "volume"], doc="surface: on the faces (area weighted); volume: inside a closed mesh"),
 ])

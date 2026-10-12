@@ -23,7 +23,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from . import timectx
+from . import proxy, timectx
 from .geometry import Geometry
 from .inputs import input_cache_scope
 from .graph import Graph, GraphError
@@ -31,6 +31,10 @@ from .loops import analyze as analyze_loops, cook_budget, consume_iteration
 from .sdk import REGISTRY, Registry
 
 DEFAULT_CACHE_BYTES = 2 * 1024 ** 3
+
+
+class CookCancelled(RuntimeError):
+    """A cook was stopped between nodes because its result was no longer wanted (see ``Evaluator.cancel``)."""
 
 
 class NodeError(RuntimeError):
@@ -154,6 +158,8 @@ class Evaluator:
         self.registry = registry or REGISTRY
         self.cache = cache if cache is not None else Cache()
         self.last_stats = CookStats()
+        self.proxy_level: Optional[float] = None           # cook at this proxy level (None: whatever surrounds the cook)
+        self.cancel = None                                 # callable -> True stops the cook before its next node (CookCancelled)
         from .rbd import Manager
         self.rbd = Manager()
 
@@ -172,7 +178,7 @@ class Evaluator:
                 continue
             inst = graph.nodes[nid]
             nt = self.registry.get(inst.type)
-            params = nt.coerce_params(inst.params)
+            params = proxy.scale_params(nt, nt.coerce_params(inst.params))
             in_keys = []
             for spec in nt.inputs:
                 ref = inst.inputs.get(spec.name)
@@ -186,6 +192,7 @@ class Evaluator:
                 [nt.name, nt.version, [[p.name, p.to_json_value(params[p.name])] for p in nt.params], in_keys]
                 + ([nt.code_hash] if nt.code_hash else []) + ([nt.key_extra(params)] if nt.key_extra else [])
                 + ([timectx.key()] if timectx.params_use_time(params) else [])
+                + ([["proxy", proxy.key_part(nt)]] if proxy.key_part(nt) is not None else [])
                 + ([input_cache_scope()] if input_cache_scope() else []),
                 separators=(",", ":"), allow_nan=False)
             keys[nid] = hashlib.blake2b(payload.encode("utf-8"), digest_size=16).hexdigest()
@@ -198,7 +205,7 @@ class Evaluator:
         """Cook ``target`` (default: the display node). ``feeds`` supplies some nodes' results from outside as
         ``{node_id: (cache_key, geometry)}``; their upstream is not cooked (how systems receive their inputs).
         ``frame``/``fps`` set the time for ``@Frame``/``@Time`` (default: the surrounding cook's, else frame 1)."""
-        with timectx.at(frame, fps), cook_budget():
+        with timectx.at(frame, fps), proxy.using(self.proxy_level), cook_budget():
             return self._cook(graph, target, feeds)
 
     def _cook(self, graph: Graph, target: Optional[str], feeds, *, loop_body=False) -> Geometry:
@@ -243,6 +250,8 @@ class Evaluator:
             if nid in results:
                 stack.pop()
                 continue
+            if self.cancel is not None and self.cancel():
+                raise CookCancelled("cook cancelled: a newer edit replaced it")
             hit = self.cache.get(keys[nid])
             if hit is not None:
                 results[nid] = hit
@@ -321,7 +330,7 @@ class Evaluator:
                 args.append([results[r] for r in ref])
             else:
                 args.append(results[ref])
-        params = nt.coerce_params(inst.params)
+        params = proxy.scale_params(nt, nt.coerce_params(inst.params))
         t0 = time.perf_counter()
         try:
             from .rbd import owned
