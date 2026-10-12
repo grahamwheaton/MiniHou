@@ -61,6 +61,21 @@ class LiveModifierTests(unittest.TestCase):
         other.edit_live("many", graph, {}, mesh())
         self.assertFalse(self.session.preview("monkey")["ok"])
 
+    def test_float32_roundtrip_does_not_overwrite_editor_changes(self):
+        from unittest.mock import patch
+        self.bind()
+        self.client.sync_live("A", {"Move": [0.4, 0, 0]})
+        rounded = float(np.float32(0.4))
+        with patch.object(self.session, "replace_graph", wraps=self.session.replace_graph) as changed:
+            for _ in range(5):
+                self.client.sync_live("A", {"Move": [rounded, 0, 0]})
+            changed.assert_not_called()
+        self.session.edit([{"op": "set", "id": "move", "params": {"translate": [9, 0, 0]}}])
+        result = self.client.sync_live("A", {"Move": [rounded, 0, 0]})
+        self.assertEqual(result["graph"]["nodes"]["move"]["params"]["translate"], [9, 0, 0])
+        result = self.client.sync_live("A", {"Move": [7, 0, 0]})
+        self.assertEqual(result["graph"]["nodes"]["move"]["params"]["translate"], [7, 0, 0])
+
     def test_binding_preserves_blender_time(self):
         self.client.edit_live("timed", GRAPH, {}, mesh(), frame=42, fps=30)
         self.assertEqual((self.session.frame, self.session.fps), (42, 30))

@@ -427,13 +427,14 @@ def _apply_live(mod, header):
     data = json.dumps(header["graph"])
     values = {p["name"]: p["value"] for p in header["interface"]}
     current = proxy.read_values(mod, ng, parameters(mod))
-    if ng[GRAPH] != data or json.loads(json.dumps(current)) != values:
+    if ng[GRAPH] != data or any(not proxy.same_value(current.get(k), v) for k, v in values.items()):
         ng[GRAPH] = data
         _interface(mod, header)
         proxy.write_values(mod, ng, parameters(mod), values)
         _digests.pop(instance_id(mod), None)
         _failures.pop(instance_id(mod), None)
-    ng[PATH] = header["path"]
+    if ng.get(PATH) != header["path"]:
+        ng[PATH] = header["path"]
 
 
 def edit_live(obj, mod):

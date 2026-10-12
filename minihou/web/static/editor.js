@@ -603,9 +603,9 @@
     const panel = $("#params");
     const ids = [...S.sel].filter((id) => nodeOf(id));
     document.body.classList.toggle("no-selection", ids.length === 0);
-    const key = ids.length === 1 ? ids[0] + ":" + nodeOf(ids[0]).type : ids.length ? "multi:" + ids.join(",") : "graph";
+    const key = ids.length === 1 ? ids[0] + ":" + JSON.stringify({ ...nodeOf(ids[0]), params: undefined }) + JSON.stringify(inputMembers(ids[0])) : ids.length ? "multi:" + ids.join(",") : "graph";
     const busy = scrubbing || panel.contains(document.activeElement);
-    if (key === panelKey && (busy || statusOnly)) { syncParams(ids[0]); return; }
+    if (key === panelKey && (ids.length === 1 || busy || statusOnly)) { syncParams(ids[0]); return; }
     panelKey = key;
     if (ids.length === 1) panel.replaceChildren(...nodePanel(ids[0]));
     else if (ids.length > 1) panel.replaceChildren(...multiPanel(ids));

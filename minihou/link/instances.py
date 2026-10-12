@@ -141,7 +141,7 @@ class InstanceManager:
             graph = doc.graph.copy()
             changed = False
             for name, value in incoming.items():
-                if name in doc.sent_params and value != doc.sent_params[name]:
+                if name in doc.sent_params and not _same_parameter(value, doc.sent_params[name]):
                     if any(p["name"] == name for p in graph.interface()):
                         graph.set_exposed(name, value)
                         changed = True
@@ -204,3 +204,16 @@ class InstanceManager:
             header, arrays = DiffState().build(result, 1)
             header.update(type="instance_result", interface=graph.interface())
             return header, arrays
+
+
+def _same_parameter(a, b):
+    """Blender stores scalar/vector controls as float32; ignore transport rounding."""
+    import struct
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(_same_parameter(x, y) for x, y in zip(a, b))
+    if isinstance(a, float) or isinstance(b, float):
+        try:
+            return struct.pack("f", a) == struct.pack("f", b)
+        except (OverflowError, TypeError):
+            return a == b
+    return a == b

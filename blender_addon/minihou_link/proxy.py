@@ -441,13 +441,17 @@ def input_data_path(mod, ident: str) -> str:
 def write_values(mod, ng, params: List[dict], values: Dict[str, object]) -> None:
     assert_main_thread()
     m = mapping(ng)
+    changed = False
     for p in params:
         ident = m.get(p["name"])
         if ident is None or p["name"] not in values or not has_input(mod, ident):
             continue
         v = values[p["name"]]
-        set_input(mod, ident, tuple(v) if p["kind"] == "vec3" else v)
-    mod.id_data.update_tag()
+        if not same_value(canonical(p["kind"], get_input(mod, ident)), v):
+            set_input(mod, ident, tuple(v) if p["kind"] == "vec3" else v)
+            changed = True
+    if changed:
+        mod.id_data.update_tag()
 
 
 def read_values(mod, ng, params: List[dict]) -> Dict[str, object]:
@@ -460,3 +464,16 @@ def read_values(mod, ng, params: List[dict]) -> Dict[str, object]:
             continue
         out[p["name"]] = canonical(p["kind"], get_input(mod, ident))
     return out
+
+
+def same_value(a, b):
+    """Compare using Blender's storage precision, including vector components."""
+    import struct
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(same_value(x, y) for x, y in zip(a, b))
+    if isinstance(a, float) or isinstance(b, float):
+        try:
+            return struct.pack("f", a) == struct.pack("f", b)
+        except (OverflowError, TypeError):
+            return a == b
+    return a == b
