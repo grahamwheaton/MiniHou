@@ -28,6 +28,8 @@ class ProceduralEditorTests(unittest.TestCase):
     def load_example(self, name, node_type):
         path = Path(editor.ROOT) / "examples" / name
         self.session.replace_graph(Graph.load(str(path)))
+        self.page.wait_for_function('ids => JSON.stringify(Object.keys(minihou.S.graph.nodes).sort()) === JSON.stringify(ids)',
+                                    arg=sorted(self.session.graph.nodes))
         node = next(n for n in self.session.graph.nodes.values() if n.type == node_type)
         self.page.locator(f'.node[data-id="{node.id}"] .title').click()
         self.page.wait_for_selector(f'.node[data-id="{node.id}"].selected')
@@ -54,10 +56,22 @@ class ProceduralEditorTests(unittest.TestCase):
         for filename, node_type in [("procedural_cable.json", "goal_solve"),
                                     ("procedural_fabric.json", "goal_solve"),
                                     ("procedural_packing.json", "goal_solve"),
-                                    ("procedural_regions.json", "region_transform")]:
+                                    ("procedural_regions.json", "region_transform"),
+                                    ("procedural_stone_wall.json", "region_transform"),
+                                    ("procedural_roof_tiles.json", "region_transform"),
+                                    ("procedural_damaged_surface.json", "region_transform")]:
             with self.subTest(example=filename):
                 node = self.load_example(filename, node_type)
                 self.assertTrue(self.session.preview(node.id)["ok"])
+                output = self.session.graph.display
+                expected = self.session.preview(output)["geo"].npoints
+                self.page.locator(f'.node[data-id="{output}"] .title').click()
+                self.page.wait_for_function('n => window.minihou.preview?.ok && window.minihou.preview.points === n', arg=expected)
+                self.page.click("#pv-frame")
+                self.page.wait_for_function('window.minihou.preview?.ok && window.minihou.preview.points > 0')
+                path = Path(editor.ROOT) / "build" / "validation" / (Path(filename).stem + ".png")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                self.page.screenshot(path=str(path))
 
     def test_shelf_exposes_all_system_nodes(self):
         self.page.click('#shelf .sh-tab[data-tab="Procedural"]')
