@@ -48,6 +48,10 @@ def prepare_workspace(root: Path) -> Path:
         dst = root / "examples"
         if not dst.exists():
             shutil.copytree(src, dst)
+        else:
+            for example in src.glob("*.json"):
+                if not (dst / example.name).exists():
+                    shutil.copyfile(example, dst / example.name)
         welcome = root / WELCOME
         if not welcome.exists() and (src / "demo.json").is_file():
             shutil.copyfile(src / "demo.json", welcome)

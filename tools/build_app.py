@@ -32,11 +32,14 @@ def build(with_accel: bool) -> Path:
            "--paths", str(ROOT),
            "--collect-submodules", "minihou",
            "--collect-all", "webview",
+           "--collect-all", "mujoco",
            "--icon", str(ROOT / "minihou/assets/minihou.ico"),
            "--add-data", f"{ROOT / 'minihou/assets'}{sep}minihou/assets",
            "--add-data", f"{ROOT / 'minihou' / 'web' / 'static'}{sep}minihou/web/static",
            "--add-data", f"{ROOT / 'blender_addon' / 'minihou_link'}{sep}blender_addon/minihou_link",
            "--add-data", f"{ROOT / 'examples' / 'graphs'}{sep}examples/graphs"]
+    for example in sorted((ROOT / "examples").glob("*.json")):
+        cmd += ["--add-data", f"{example}{sep}examples/graphs"]
     for mod in ("bpy", "tkinter", "matplotlib", "PIL", "IPython", "pytest", "playwright"):
         cmd += ["--exclude-module", mod]
     if with_accel:
