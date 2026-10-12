@@ -1,0 +1,14 @@
+{
+  "version":1,
+  "nodes":{
+    "tray":{"type":"grid","params":{"columns":2,"rows":2,"size_x":4,"size_y":4},"meta":{"pos":[-200,0]}},
+    "seeds":{"type":"scatter","inputs":{"geo":"tray"},"params":{"count":30,"seed":19},"meta":{"pos":[0,120]}},
+    "separate":{"type":"goal_collision","inputs":{"geo":"seeds"},"params":{"radius":0.3},"meta":{"pos":[0,240]}},
+    "on_tray":{"type":"goal_surface","inputs":{"geo":"separate","target":"tray"},"meta":{"pos":[0,360]}},
+    "relax":{"type":"goal_solve","inputs":{"geo":"on_tray"},"params":{"steps":100,"iterations":15,"damping":1},"meta":{"pos":[0,480]}},
+    "ball":{"type":"sphere","params":{"radius":0.3,"rows":8,"columns":12},"meta":{"pos":[-260,480]}},
+    "show_spheres":{"type":"copy_to_points","inputs":{"source":"ball","points":"relax"},"meta":{"pos":[0,600]}},
+    "output":{"type":"output","inputs":{"geo":"show_spheres"},"meta":{"pos":[0,720]}}
+  },
+  "display":"output"
+}

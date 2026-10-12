@@ -1,0 +1,11 @@
+{
+  "version":1,
+  "nodes":{
+    "tile_grid":{"type":"grid","params":{"columns":11,"rows":8,"size_x":5,"size_y":4},"meta":{"pos":[0,0]}},
+    "tile_regions":{"type":"region_identify","inputs":{"geo":"tile_grid"},"params":{"mode":"primitive","seed":7},"meta":{"pos":[0,140]}},
+    "tiles":{"type":"region_transform","inputs":{"geo":"tile_regions"},"params":{"scale":[0.96,0.98,1],"rotate":[3,0,0],"random_rotate":[1,0.5,0.5],"extrude":0.045,"random_extrude":0.01,"seed":17},"meta":{"pos":[0,280]}},
+    "roof_pitch":{"type":"transform","inputs":{"geo":"tiles"},"params":{"rotate":[30,0,0],"translate":[0,0,3]},"meta":{"pos":[0,420]}},
+    "output":{"type":"output","inputs":{"geo":"roof_pitch"},"meta":{"pos":[0,560]}}
+  },
+  "display":"output"
+}

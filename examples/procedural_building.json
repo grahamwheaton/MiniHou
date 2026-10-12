@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "nodes": {
+    "footprint": {"type":"grid","params":{"columns":2,"rows":2,"size_x":12,"size_y":8},"meta":{"pos":[0,0]}},
+    "building": {"type":"building_rules","inputs":{"geo":"footprint"},"params":{"storeys":4,"bay_width":2.4,"roof":"gable","roof_height":2,"seed":12,"balcony_probability":0.45,"rules":"[{\"floor\":\"ground\",\"window_height\":0.8,\"balcony_probability\":0}]"},"meta":{"pos":[0,150]}},
+    "output": {"type":"output","inputs":{"geo":"building"},"meta":{"pos":[0,300]}}
+  },
+  "display":"output"
+}
