@@ -48,6 +48,63 @@ class SourceObjectTests(unittest.TestCase):
         cls.engine.stop()
         cls.tmp.cleanup()
 
+    def test_multiple_imports_native_modifier_pickers_and_materials(self):
+        from tests.test_blender_addon import evaluated_positions
+        bpy.ops.mesh.primitive_monkey_add()
+        monkey = bpy.context.object
+        monkey_mat = bpy.data.materials.new("Monkey material")
+        monkey.data.materials.append(monkey_mat)
+        cube, cube_mat = self.setup_source("Second input", offset=3)
+        graph = {"nodes": {
+            "input": {"type": "modifier_input"},
+            "monkey": {"type": "object_input"},
+            "cube": {"type": "object_input"},
+            "both": {"type": "merge", "inputs": {"geos": ["monkey", "cube"]}},
+            "copies": {"type": "copy_to_points", "inputs": {"source": "both", "points": "input"}}
+        }, "display": "copies"}
+        self.path.write_text(json.dumps(graph), encoding="utf8")
+        bpy.ops.mesh.primitive_plane_add()
+        obj = bpy.context.object
+        mod = self.m.add_modifier(obj, str(self.path), port=self.engine.port)
+        self.m.set_object(mod, "monkey", monkey)
+        self.m.set_object(mod, "cube", cube)
+        for key in ("monkey", "cube"):
+            self.assertFalse(self.m._object_socket(mod, key).hide_in_modifier)
+        self.cook()
+        self.assertEqual(len(evaluated_positions(obj)), 4 * (len(monkey.data.vertices) + 8))
+        self.assertIn(monkey_mat, list(self.m._cache(mod).data.materials))
+        self.assertIn(cube_mat, list(self.m._cache(mod).data.materials))
+        # Source-only edits invalidate the imported mesh without editing the destination.
+        before = evaluated_positions(obj).copy()
+        for v in cube.data.vertices:
+            v.co.x += 2
+        cube.data.update()
+        self.cook()
+        self.assertFalse(np.allclose(before, evaluated_positions(obj)))
+        self.m.set_object(mod, "cube", obj)
+        self.m.pump(port=self.engine.port, force=True)
+        self.assertIn("cycle", self.m.last_error())
+
+    def test_multiple_native_instance_object_pickers(self):
+        import copy
+        first, mat_a = self.setup_source("First")
+        second, mat_b = self.setup_source("Second", offset=3)
+        graph = copy.deepcopy(SCATTER)
+        graph["nodes"]["inst"]["params"].update(objects="@source @second", pick="cycle")
+        self.path.write_text(json.dumps(graph), encoding="utf8")
+        bpy.ops.mesh.primitive_plane_add(size=4)
+        obj = bpy.context.object
+        mod = self.m.add_modifier(obj, str(self.path), port=self.engine.port)
+        self.m.set_source(mod, first)
+        self.m.set_object(mod, "second", second)
+        self.cook()
+        vertices, materials, faces = self.realized(obj)
+        self.assertEqual(len(vertices), 7 * 8)
+        self.assertEqual(set(materials), {mat_a, mat_b})
+        second.name = "Renamed input"
+        self.cook()
+        self.assertEqual(self.m.get_object(mod, "second"), second)
+
     def setup_source(self, name='Source', offset=0):
         bpy.ops.mesh.primitive_cube_add()
         source = bpy.context.object

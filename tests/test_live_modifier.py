@@ -37,6 +37,30 @@ class LiveModifierTests(unittest.TestCase):
     def bind(self, ident="A", client=None, x=1):
         return (client or self.client).edit_live(ident, GRAPH, {"Move": [2, 0, 0]}, mesh(x), label="Cube / " + ident)
 
+    def test_multiple_object_inputs_and_realized_instance_preview(self):
+        graph = {"nodes": {"input": {"type": "modifier_input"},
+            "monkey": {"type": "object_input"}, "tree": {"type": "object_input"},
+            "instances": {"type": "instance", "inputs": {"points": "input"},
+                          "params": {"objects": "@monkey @tree", "pick": "cycle", "random_spin": 0, "align": "up"}}},
+                 "display": "instances"}
+        self.client.set_sources("many", {"monkey": mesh(2), "tree": mesh(7)})
+        self.client.edit_live("many", graph, {}, mesh())
+        preview = self.session.preview("instances")
+        self.assertTrue(preview["ok"], preview)
+        self.assertEqual(preview["geo"].npoints, 9)
+        self.assertEqual(preview["geo"].nprims, 3)
+        np.testing.assert_allclose(self.session.preview("monkey")["geo"].P, mesh(2)["point/P"])
+        self.client.set_sources("many", {"monkey": mesh(5), "tree": mesh(7)})
+        np.testing.assert_allclose(self.session.preview("monkey")["geo"].P, mesh(5)["point/P"])
+        # Imported geometry cooks through the modifier as well as the viewer.
+        graph["nodes"]["copies"] = {"type": "copy_to_points", "inputs": {"source": "monkey", "points": "input"}}
+        graph["display"] = "copies"
+        header, arrays = self.client.cook("many", "", {}, mesh(), graph=graph)
+        self.assertEqual(len(arrays["point/P"]), 9)
+        other = self.connect()
+        other.edit_live("many", graph, {}, mesh())
+        self.assertFalse(self.session.preview("monkey")["ok"])
+
     def test_binding_preserves_blender_time(self):
         self.client.edit_live("timed", GRAPH, {}, mesh(), frame=42, fps=30)
         self.assertEqual((self.session.frame, self.session.fps), (42, 30))

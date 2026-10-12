@@ -31,6 +31,7 @@ SOURCE = "Source Object"
 SOURCE_TOKEN = "@source"
 _client = None
 _live_ids = set()
+_source_digests = {}
 _endpoint = None
 _owners = {}
 _digests = {}
@@ -76,8 +77,10 @@ def _ensure_source(mod):
     if item is None:
         item = mod.node_group.interface.new_socket(SOURCE, in_out="INPUT", socket_type="NodeSocketObject")
         if hasattr(item, "hide_in_modifier"):
-            item.hide_in_modifier = True
+            item.hide_in_modifier = False
         item.description = "Blender object instanced by @source; local geometry around its origin, including native modifiers and materials"
+    if hasattr(item, "hide_in_modifier"):
+        item.hide_in_modifier = False
     return item
 
 
@@ -184,14 +187,88 @@ def _validate_source(owner, source):
     target(source)
 
 
-def _instance_objects(obj, mod, names):
-    if any(name != SOURCE_TOKEN for name in names):
-        raise SourceBindingError("Stack instance objects must use @source; select the persistent Source Object picker")
-    if names:
-        source = get_source(mod)
+def _object_keys(mod):
+    keys = []
+    for nid, node in json.loads(mod.node_group[GRAPH]).get("nodes", {}).items():
+        params = node.get("params", {})
+        if node.get("type") == "object_input":
+            keys.append(params.get("binding") or nid)
+        if node.get("type") == "instance":
+            keys.extend(n[1:] for n in params.get("objects", "").replace(",", " ").split() if n.startswith("@"))
+    return list(dict.fromkeys(keys))
+
+
+def _object_socket(mod, key):
+    if key == "source":
+        return _ensure_source(mod)
+    name = "Object: " + key
+    item = next((s for s in proxy._sockets(mod.node_group, "INPUT") if s.socket_type == "NodeSocketObject" and s.name == name), None)
+    if item is None:
+        item = mod.node_group.interface.new_socket(name, in_out="INPUT", socket_type="NodeSocketObject")
+        item.description = "MiniHou object input: " + key
+    if hasattr(item, "hide_in_modifier"):
+        item.hide_in_modifier = False
+    return item
+
+
+def get_object(mod, key):
+    item = _object_socket(mod, key)
+    return proxy.get_input(mod, item.identifier) if proxy.has_input(mod, item.identifier) else None
+
+
+def set_object(mod, key, obj):
+    proxy.set_input(mod, _object_socket(mod, key).identifier, obj)
+    mod.id_data.update_tag()
+
+
+def _source_meshes(obj, mod, materials=None):
+    sources = {}
+    for key in _object_keys(mod):
+        source = get_object(mod, key)
+        if source is None:
+            continue
         _validate_source(obj, source)
-        return [source for _ in names]
-    return []
+        _, arrays = mesh_reader.read_object(source, bpy.context.evaluated_depsgraph_get())
+        if materials is not None:
+            import numpy as np
+            slots = source.evaluated_get(bpy.context.evaluated_depsgraph_get()).data.materials
+            mapping = []
+            for material in slots:
+                material = material.original if material else None
+                if material not in materials:
+                    materials.append(material)
+                mapping.append(materials.index(material))
+            if mapping and "prim/material_index" in arrays:
+                indices = arrays["prim/material_index"]
+                arrays["prim/material_index"] = np.asarray(mapping, dtype=np.int32)[np.clip(indices, 0, len(mapping) - 1)]
+        sources[key] = arrays
+    return sources
+
+
+def _send_sources(client, obj, mod, materials=None):
+    sources = _source_meshes(obj, mod, materials)
+    digest = hashlib.blake2b(digest_size=16)
+    for name, arrays in sources.items():
+        digest.update(name.encode())
+        for key, array in sorted(arrays.items()):
+            digest.update(key.encode()); digest.update(str((array.dtype, array.shape)).encode()); digest.update(array.tobytes())
+    token = digest.hexdigest()
+    ident = instance_id(mod)
+    if _source_digests.get(ident) != token:
+        client.set_sources(ident, sources)
+        _source_digests[ident] = token
+    return token
+
+
+def _instance_objects(obj, mod, names):
+    objects = []
+    for name in names:
+        if not name.startswith("@"):
+            raise SourceBindingError("Stack instance objects must use @source or another modifier object input")
+        source = get_object(mod, name[1:])
+        _validate_source(obj, source)
+        objects.append(source)
+    return objects
 
 
 def _disconnect_unsafe_sources(obj, mod):
@@ -225,8 +302,11 @@ def _connection(host=None, port=None):
     global _client, _endpoint
     addon = bpy.context.preferences.addons.get(__package__)
     automatic = host is None and port is None and (not addon or addon.preferences.auto_connect)
+    required = {"live_modifier_v1", "object_inputs_v1"}
     if automatic and _client is not None and _client.sock is not None:
-        return _client
+        if required.issubset(_client.welcome.get("capabilities", [])):
+            return _client
+        disconnect()
     endpoint = _settings(host, port)
     if _client is None or endpoint != _endpoint or _client.sock is None:
         disconnect()
@@ -237,7 +317,7 @@ def _connection(host=None, port=None):
             client = InstanceClient(*address, timeout=0.4 if automatic else 30.0)
             try:
                 header = client.connect()
-                if automatic and "live_modifier_v1" not in header.get("capabilities", []):
+                if automatic and not required.issubset(header.get("capabilities", [])):
                     raise RuntimeError("This engine needs updating")
             except (OSError, RuntimeError, ValueError):
                 client.close()
@@ -259,6 +339,7 @@ def disconnect():
         _client.close()
     _client, _endpoint = None, None
     _live_ids.clear()
+    _source_digests.clear()
     _digests.clear()
     _failures.clear()
 
@@ -301,6 +382,8 @@ def _interface(mod, header, initial=False, activate=False):
     cache = _cache(mod)
     proxy.sync_interface(ng, cache, params, json.dumps([(p["name"], p["kind"]) for p in params]))
     _ensure_source(mod)
+    for key in _object_keys(mod):
+        _object_socket(mod, key)
     ng[PARAMS] = json.dumps(params)
     values = {p["name"]: old.get(p["name"], p["value"]) for p in params}
     proxy.write_values(mod, ng, params, values)
@@ -332,8 +415,10 @@ def _apply_live(mod, header):
 def edit_live(obj, mod):
     """Bind actual pre-modifier geometry to the editor without using a legacy proxy."""
     client = _connection()
-    arrays, _ = read_prefix(obj, mod, with_materials=True)
+    arrays, materials = read_prefix(obj, mod, with_materials=True)
+    materials = list(materials)
     scene = bpy.context.scene
+    _send_sources(client, obj, mod, materials)
     header = client.edit_live(instance_id(mod), json.loads(mod.node_group[GRAPH]),
                               proxy.read_values(mod, mod.node_group, parameters(mod)), arrays,
                               label=obj.name + " / " + mod.name,
@@ -602,8 +687,14 @@ def pump(host=None, port=None, *, force=False, _only=None):
                     # must not prevent cooking and validating the new output.
                     _disconnect_unsafe_sources(obj, mod)
                     arrays, materials = read_prefix(obj, mod, with_materials=True)
+                    materials = list(materials)
                     values = proxy.read_values(mod, ng, parameters(mod))
-                    signature = _digest(mod, arrays, values, materials)
+                    source_token = ""
+                    graph_data = json.loads(ng[GRAPH])
+                    has_imports = any(n.get("type") == "object_input" for n in graph_data.get("nodes", {}).values())
+                    if instance_id(mod) in _live_ids or has_imports:
+                        source_token = _send_sources(client, obj, mod, materials)
+                    signature = _digest(mod, arrays, values, materials) + source_token
                     ident = instance_id(mod)
                     failed = _failures.get(ident)
                     selected_source = get_source(mod)

@@ -55,7 +55,7 @@ class InstanceClient:
                     raise ProtocolError("modifier response instance ID mismatch")
                 expected = {"instance_cook": "instance_result", "instance_describe": "instance_description",
                             "instance_remove": "instance_removed", "instance_edit": "instance_synced",
-                            "instance_sync": "instance_synced"}[header["type"]]
+                            "instance_sync": "instance_synced", "instance_sources": "instance_sources_set"}[header["type"]]
                 if reply.get("type") not in (expected, "instance_error"):
                     raise ProtocolError("unexpected modifier response type")
             except Exception:
@@ -84,6 +84,13 @@ class InstanceClient:
             raise RuntimeError("Restart MiniHou with the updated app to enable live modifier editing")
         return self._request({"type": "instance_edit", "instance_id": instance_id,
                               "graph": graph, "params": params, "label": label, "frame": frame, "fps": fps}, arrays)[0]
+
+    def set_sources(self, instance_id, sources):
+        self.connect()
+        if "object_inputs_v1" not in self.welcome.get("capabilities", []):
+            raise RuntimeError("Restart the updated MiniHou app to load object inputs")
+        arrays = {str(i) + "/" + key: value for i, values in enumerate(sources.values()) for key, value in values.items()}
+        return self._request({"type": "instance_sources", "instance_id": instance_id, "sources": list(sources)}, arrays)[0]
 
     def sync_live(self, instance_id, params):
         return self._request({"type": "instance_sync", "instance_id": instance_id, "params": params})[0]

@@ -153,6 +153,25 @@ modifiers (including self-references and cache objects) are rejected to avoid cr
 this bridge does not schedule interdependent object stacks. Edit Mode and active renders are skipped. Slow cooks can pause the UI;
 failed cooks retain the last successful cache and report an error. These caches are not a baking/render-farm system.
 
+### Import multiple Blender objects
+
+Add an **object_input** node for each mesh you want to import. Each node creates an **Object: node-name**
+picker on the MiniHou modifier card in Blender. Choose the mesh there. A blank Binding uses the node name;
+set Binding to share a named input between nodes. Object references survive object renames and blend-file saves.
+Connect these nodes to **copy_to_points**, merge, or other geometry nodes. Keep **modifier_input** in the
+output's upstream network to retain stack-modifier semantics. Source meshes are evaluated in local coordinates;
+source object placement transforms are ignored. Native source modifiers and materials are included.
+
+For native Blender instances, use **instance** with **Objects = @source**, and choose **Source Object** on
+the modifier card. Multiple bindings are supported, for example **@tree @rock** creates separate object pickers.
+The browser preview now shows the actual source geometry at the instance positions. Source mesh edits refresh
+the preview. Blender continues using native instances. Browser previews above two million realized vertices
+report a limit; reduce the scatter count to preview. The viewer shows geometry, not Blender shader materials.
+
+Object pickers live on the modifier itself; the separate MiniHou panel contains network-editing controls.
+Source meshes that depend on MiniHou outputs or the destination object are rejected to prevent feedback loops.
+As before, the MiniHou cook is an interactive bridge, not a fully native Geometry Nodes computation.
+
 ### Edit a modifier's network
 
 Start the updated MiniHou app, install its bundled Blender add-on, and restart Blender after updating.

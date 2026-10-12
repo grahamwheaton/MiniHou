@@ -9,7 +9,7 @@ class DiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, MINIHOU_HOME=root):
             first = discovery.publish("127.0.0.1", 1234, "http://127.0.0.1:1235/")
             second = discovery.publish("127.0.0.1", 4321, "http://127.0.0.1:4322/")
-            (discovery.directory() / "broken.json").write_text("broken")
+            (discovery.directory() / "broken.json").write_text("broken", encoding="utf-8")
             self.assertIsNone(discovery.publish("example.com", 9999, ""))
             self.assertEqual(discovery.candidates(), [("127.0.0.1",4321),("127.0.0.1",1234)])
             second.unlink()

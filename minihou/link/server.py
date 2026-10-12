@@ -119,7 +119,7 @@ class _Connection:
             log.info("client %s connected (%s)", self.addr, self.name)
             self.instance_mode = h.get("mode") == "instances"
             self.post({"type": "welcome", "protocol": PROTOCOL_VERSION, "server": "minihou",
-                       "capabilities": ["instances_v1", "live_modifier_v1"], "editor_url": self.server.editor_url,
+                       "capabilities": ["instances_v1", "live_modifier_v1", "object_inputs_v1"], "editor_url": self.server.editor_url,
                        "graph_path": str(self.session.path.resolve()) if self.session.path else None})
             if self.instance_mode:
                 return
@@ -129,13 +129,20 @@ class _Connection:
                 self._want_result = True
                 self.session.add_listener(self)
                 self.cv.notify_all()
-        elif t in ("instance_cook", "instance_describe", "instance_remove", "instance_edit", "instance_sync"):
+        elif t in ("instance_cook", "instance_describe", "instance_remove", "instance_edit", "instance_sync", "instance_sources"):
             try:
                 if not self.instance_mode:
                     raise ValueError("instance requests require hello mode instances")
                 if t == "instance_remove":
                     self.instances.remove(h["instance_id"])
                     response, output = {"type": "instance_removed"}, None
+                elif t == "instance_sources":
+                    names = h.get("sources", [])
+                    if not isinstance(names, list) or len(names) > 64 or any(not isinstance(n, str) or len(n) > 128 for n in names):
+                        raise ValueError("invalid source inputs")
+                    sources = {name: _decode_object({}, {k.split("/", 1)[1]: v for k, v in (_arrays or {}).items()
+                                                       if k.startswith(str(i) + "/")}) for i, name in enumerate(names)}
+                    response, output = self.instances.set_sources(h.get("instance_id"), sources), None
                 elif t == "instance_edit":
                     response, output = self.instances.edit_live(h, _decode_object(h, _arrays or {})), None
                 elif t == "instance_sync":

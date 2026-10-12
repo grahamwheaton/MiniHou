@@ -1,7 +1,7 @@
 bl_info = {
     "name": "MiniHou Link",
     "author": "MiniHou",
-    "version": (0, 1, 2),
+    "version": (0, 1, 3),
     "blender": (4, 2, 0),
     "location": "Properties > Modifiers > MiniHou",
     "description": "Live link to the MiniHou procedural geometry engine",
@@ -373,10 +373,7 @@ class MINIHOU_PT_modifier_sources(bpy.types.Panel):
             box = self.layout.box()
             box.label(text=mod.name, icon="MODIFIER")
             network_ui.draw(box, mod)
-            owner = modifiers.source_owner(mod)
-            if owner is not None:
-                box.prop(owner[0], owner[1], text="Source Object")
-                box.label(text=modifiers.status(mod)[:160])
+            box.label(text=modifiers.status(mod)[:160])
 
 
 _classes = (MINIHOU_Preferences, MINIHOU_OT_start_server, MINIHOU_OT_stop_server, MINIHOU_OT_open_editor,

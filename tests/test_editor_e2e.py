@@ -97,6 +97,30 @@ class EditorE2E(unittest.TestCase):
         client.remove("browser-test")
         self.page.wait_for_function("document.querySelector('#live-modifier')?.textContent.includes('Disconnected')")
 
+    def test_live_object_instance_meshes_render(self):
+        from minihou.link.server import LinkServer
+        from minihou.link.instance_client import InstanceClient
+        from minihou.link.diff import DiffState
+        from minihou import Evaluator
+        from tests.test_modifier_instances import mesh
+        server = LinkServer(self.s, port=0)
+        server.start()
+        self.web.link = server
+        self.addCleanup(server.stop)
+        client = InstanceClient(port=server.port)
+        self.addCleanup(client.close)
+        source = Evaluator().cook(Graph.from_dict({"nodes": {"box": {"type": "box"}}, "display": "box"}))
+        _, arrays = DiffState().build(source, 1)
+        client.set_sources("preview", {"source": arrays})
+        graph = {"nodes": {"input": {"type": "modifier_input"},
+                 "instances": {"type": "instance", "inputs": {"points": "input"},
+                               "params": {"objects": "@source", "random_spin": 0}}}, "display": "instances"}
+        client.edit_live("preview", graph, {}, mesh(), label="Object mesh preview")
+        self.page.wait_for_function("window.minihou.preview?.ok && window.minihou.preview.points === 24 && window.minihou.preview.tris > 0")
+        self.page.click("#pv-frame")
+        self.assertTrue(until(lambda: self.pixels_vary(), 5))
+        self.page.screenshot(path=os.path.join(ROOT, "build", "validation", "object-preview.png"))
+
     # -- helpers ---------------------------------------------------------------------
     def read_file(self):
         with open(self.path, encoding="utf-8") as f:

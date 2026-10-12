@@ -57,3 +57,9 @@ def modifier_input():
     Supplied by an independent modifier instance. This node cannot cook in the legacy proxy session.
     """
     raise ValueError("modifier_input requires a MiniHou modifier instance and its preceding stack geometry")
+
+
+@node("object_input", category="source", params=[Str("binding", "", doc="Modifier object input name; blank uses this node's name")])
+def object_input(binding):
+    """Import an evaluated Blender mesh from this modifier's own object picker, in source-local coordinates."""
+    raise ValueError("Choose an object in this modifier's Object input picker in Blender")

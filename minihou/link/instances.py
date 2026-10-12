@@ -8,7 +8,7 @@ import math
 import numpy as np
 import threading
 import uuid
-from .live import LiveModifier, input_token
+from .live import LiveModifier, input_token, object_feeds
 from pathlib import Path
 
 from ..evaluator import Cache, Evaluator
@@ -27,6 +27,7 @@ class InstanceManager:
         self.session = session
         self.instances = {}
         self.documents = {}
+        self.sources = {}
         self.owner_id = uuid.uuid4().hex
         self.lock = threading.RLock()
 
@@ -38,9 +39,11 @@ class InstanceManager:
             for doc in self.documents.values():
                 self.session.disconnect_modifier(doc)
             self.documents.clear()
+            self.sources.clear()
 
     def remove(self, instance_id):
         with self.lock:
+            self.sources.pop(instance_id, None)
             doc = self.documents.pop(instance_id, None)
             if doc is not None:
                 self.session.disconnect_modifier(doc)
@@ -80,6 +83,25 @@ class InstanceManager:
             raise ValueError("modifier graphs require a top-level modifier_input node; replacement-only generators are not stack modifiers")
         return graph
 
+    def set_sources(self, ident, sources):
+        if not isinstance(ident, str) or not ident or len(ident) > 256:
+            raise ValueError("invalid modifier identity")
+        if len(sources) > 64 or (ident not in self.sources and len(self.sources) >= 256):
+            raise ValueError("too many object inputs")
+        for geo in sources.values():
+            geo.validate()
+            if not np.isfinite(geo.P).all():
+                raise ValueError("source point positions must be finite")
+        with self.lock, self.session.lock:
+            self.sources[ident] = {k: g.freeze() for k, g in sources.items()}
+            doc = self.documents.get(ident)
+            if doc is not None:
+                doc.sources = self.sources[ident]
+                if self.session.live_modifier is doc:
+                    self.session._rev += 1
+                    self.session._wake.set()
+        return {"type": "instance_sources_set"}
+
     def edit_live(self, h, geometry):
         ident = h.get("instance_id")
         if not isinstance(ident, str) or not ident or len(ident) > 256:
@@ -105,6 +127,7 @@ class InstanceManager:
                                    root / "graphs" / ("Blender-" + key + ".json"))
                 self.documents[ident] = doc
             self.session.modifier_input(doc, geometry, input_token(geometry), frame, fps)
+            doc.sources = self.sources.get(ident, {})
             self.session.bind_modifier(doc)
             return self.sync_live(h)
 
@@ -172,6 +195,7 @@ class InstanceManager:
             token = digest.hexdigest()
             feeds = {nid: (token, geometry.freeze()) for nid, node in graph.nodes.items()
                      if node.type == "modifier_input"}
+            feeds.update(object_feeds(graph, self.sources.get(instance_id, {})))
             with without_object_inputs():
                 result = evaluator.cook(graph, feeds=feeds, frame=frame, fps=fps)
             result.validate()

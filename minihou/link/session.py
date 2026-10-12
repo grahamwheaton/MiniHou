@@ -149,7 +149,10 @@ class Session:
         doc = self.live_modifier
         if doc is None or not doc.connected or doc.geometry is None:
             return {}
-        return {nid: (doc.token, doc.geometry) for nid, n in graph.nodes.items() if n.type == "modifier_input"}
+        from .live import object_feeds
+        feeds = {nid: (doc.token, doc.geometry) for nid, n in graph.nodes.items() if n.type == "modifier_input"}
+        feeds.update(object_feeds(graph, doc.sources))
+        return feeds
 
     def bind_modifier(self, doc):
         # Keep each modifier in its own persisted graph, never overwrite its source template.
@@ -501,6 +504,8 @@ class Session:
             rev = self._rev
             frame, fps = self.frame, self.fps
             feeds = self._modifier_feeds(snapshot)
+            live_preview = self.live_modifier is not None and self.live_modifier.connected
+            sources = dict(self.live_modifier.sources) if live_preview else {}
         if node not in snapshot.nodes:
             return {"ok": False, "node": node, "rev": rev, "error": {"node": node, "message": f"no such node {node!r}"}}
         try:
@@ -511,7 +516,10 @@ class Session:
                 if inst.type in HANDLE_TYPES:                    # inputs (cached) and parameters for the viewport handles
                     ins = [self.evaluator.cook(snapshot, src, feeds=feeds) for src in snapshot.input_ids(node) if src in snapshot.nodes]
                     handles = handles_for(inst.type, ins, geo, snapshot.effective_params(node))
-        except (NodeError, GraphError, ParamError) as e:
+                if live_preview and geo.detail.get("instance_objects"):
+                    from .live import preview_instances
+                    geo = preview_instances(geo, sources)
+        except (NodeError, GraphError, ParamError, ValueError) as e:
             return {"ok": False, "node": node, "rev": rev,
                     "error": {"node": getattr(e, "node_id", None), "message": str(e)}}
         return {"ok": True, "node": node, "rev": rev, "geo": geo, "handles": handles}
