@@ -88,7 +88,7 @@ def chain_segments(npoints, a, b):
     Vec3("origin", (0.0, 0.0, 0.0)),
     Vec3("direction", (0.0, 0.0, 1.0)),
     Float("length", 1.0, soft_min=0.0, soft_max=10.0),
-    Int("points", 10, min=2, soft_max=1000),
+    Int("points", 10, min=2, soft_max=1000, proxy="count"),
 ], handles=[Handle("length", axis="@direction", at="@origin", reach=True)])
 def line(origin, direction, length, points):
     """A straight open curve (Houdini's Line)."""
@@ -104,7 +104,7 @@ def line(origin, direction, length, points):
     Float("radius_end", -1.0, doc="Radius at the top (negative: same as radius) - a cone spiral"),
     Float("height", 2.0, soft_min=0.0, soft_max=10.0),
     Float("turns", 3.0, min=0.0, soft_max=20.0),
-    Int("points", 120, min=2, soft_max=5000),
+    Int("points", 120, min=2, soft_max=5000, proxy="count"),
 ], handles=[Handle("height", axis="z", at="bottom", reach=True), Handle("radius", axis="x", at="bottom", reach=True, min=0.0)])
 def helix(radius, radius_end, height, turns, points):
     """A spiral curve around +Z (springs, vines, stair rails)."""
@@ -214,7 +214,7 @@ def _sample(geo, prims, s_lists):
 
 @node("resample", inputs=["geo"], category="curve", params=[
     Enum("by", ["length", "count"], doc="length: segments of about 'length'; count: exactly 'segments' per curve"),
-    Float("length", 0.1, min=1e-6, soft_max=2.0),
+    Float("length", 0.1, min=1e-6, soft_max=2.0, proxy="step1"),
     Int("segments", 20, min=1, soft_max=1000),
     Str("group", "", doc="Primitives to resample (others are dropped); empty: all"),
 ])

@@ -355,7 +355,7 @@ def _system_type(name: str, path: Path, graph, text: str, registry: Registry):
         pname = _ident(e.name)
         while pname in seen or pname in pmap:
             pname += "_"
-        params.append(replace(inner, name=pname, label=e.label or e.name, default=graph.get_param(e.node, e.param)))
+        params.append(replace(inner, name=pname, label=e.label or e.name, default=graph.get_param(e.node, e.param), proxy=""))
         pmap[pname] = (e.node, e.param)
     used = sorted({inst.type for inst in graph.nodes.values()})
     dep = ",".join(f"{t}:{registry.get(t).code_hash or registry.get(t).version}" if t in registry else f"{t}:missing"

@@ -1599,6 +1599,57 @@ class EditorE2E(unittest.TestCase):
             sx, sy, _ = self.page.evaluate("([k, i]) => minihou.preview.screenOf(k, i)", ["point", i])
             self.assertTrue(0 <= sx <= box["width"] and 0 <= sy <= box["height"], (i, sx, sy, box))
 
+    def test_proxy_menu_sets_the_cook_level_and_the_status_says_so(self):
+        self.page.click("#proxy-btn")
+        self.page.wait_for_selector('#proxy-menu .item[data-proxy="0.1"]')
+        self.page.click('#proxy-menu .item[data-proxy="0.1"]')
+        self.assertTrue(until(lambda: self.s.proxy_level == 0.1))
+        self.assertTrue(until(lambda: self.page.locator("#proxy-label").inner_text() == "10%"))
+        self.assertTrue(until(lambda: "proxy 10%" in self.page.locator("#cook-status .text").inner_text()))
+        self.assertTrue(self.page.locator("#proxy-btn").evaluate("b => b.classList.contains('on')"))
+        self.assertEqual(self.s.latest_good.proxy, 0.1)
+        # Auto, then back to the real thing
+        self.page.click("#proxy-btn")
+        self.page.click('#proxy-menu .item[data-proxy="auto"]')
+        self.assertTrue(until(lambda: self.s.proxy_auto))
+        self.assertTrue(until(lambda: self.page.locator("#proxy-label").inner_text() == "Auto"))
+        self.page.click("#proxy-btn")
+        self.page.click('#proxy-menu .item[data-proxy="full"]')
+        self.assertTrue(until(lambda: self.s.proxy_level == 1.0 and not self.s.proxy_auto))
+        self.assertTrue(until(lambda: "proxy" not in self.page.locator("#cook-status .text").inner_text()))
+        # the Blender cap
+        self.page.click("#proxy-btn")
+        self.page.click('#proxy-menu .item[data-cap="100000"]')
+        self.assertTrue(until(lambda: self.s.link_tris == 100000))
+        self.page.click("#proxy-btn")
+        self.page.click('#proxy-menu .item[data-cap="0"]')
+        self.assertTrue(until(lambda: self.s.link_tris == 0))
+
+    def test_a_big_geometry_is_drawn_reduced_with_full_res_on_request_and_selection_waits(self):
+        from minihou import preview
+        old = preview.DISPLAY_TRIS
+        preview.DISPLAY_TRIS = 3000
+        self.addCleanup(setattr, preview, "DISPLAY_TRIS", old)
+        self.s.edit([{"op": "replace", "graph": {"nodes": {"g": {"type": "grid", "params": {"columns": 100, "rows": 100}, "pos": [0, 0]}},
+                                                 "display": "g"}}])
+        self.page.wait_for_selector('.node[data-id="g"]')
+        banner = self.page.locator("#pv-proxy")
+        banner.wait_for(state="visible")
+        self.assertIn("Reduced view", self.page.locator("#pv-proxy-text").inner_text())
+        self.assertLessEqual(self.page.evaluate("minihou.preview.tris"), 3000)
+        self.assertTrue(self.page.locator('#preview [data-mode="point"]').is_disabled())
+        self.page.locator("#canvas").focus()
+        self.page.mouse.move(*self.center(self.page.locator("#pv-canvas")))
+        self.page.keyboard.press("1")                                                           # asks for point selection
+        self.page.wait_for_function("document.querySelector('#pv-msg').textContent.includes('Selecting needs')")
+        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "view")
+        self.page.click("#pv-full")
+        self.assertTrue(until(lambda: self.page.evaluate("minihou.preview.tris") == 2 * 99 * 99, 8))
+        self.assertTrue(until(lambda: not self.page.locator('#preview [data-mode="point"]').is_disabled()))
+        self.assertEqual(self.page.locator("#pv-proxy-text").inner_text(), "")
+        self.page.click('#preview [data-mode="point"]')
+        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "point")        # selecting works on the real geometry
+
 
 if __name__ == "__main__":
     unittest.main()

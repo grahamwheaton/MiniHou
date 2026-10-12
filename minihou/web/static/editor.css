@@ -194,6 +194,17 @@ table.attrs td { font: var(--mono); font-size: 11px; }
 .pv-wrap { position: relative; }
 #pv-canvas { width: 100%; height: 100%; display: block; background: #212327; border-radius: 4px; cursor: grab; touch-action: none; }
 #pv-msg { position: absolute; left: 10px; right: 10px; top: 10px; pointer-events: none; font-size: 12px; }
+#pv-proxy { position: absolute; left: 10px; bottom: 10px; display: flex; align-items: center; gap: 8px; padding: 3px 8px; border-radius: 6px; background: #000a; border: 1px solid var(--line); font-size: 11px; color: var(--warn); }
+#pv-proxy.hidden { display: none; }
+#pv-proxy button.on { background: var(--accent); color: #111; }
+.proxy { position: relative; }
+#proxy-btn.on { border-color: var(--warn); color: var(--warn); }
+#proxy-menu.menu { left: auto; right: 0; min-width: 300px; padding: 6px 0; }
+#proxy-menu .head { padding: 4px 10px 6px; color: var(--muted); font-size: 11px; white-space: normal; max-width: 330px; }
+#proxy-menu .item { display: flex; gap: 8px; align-items: baseline; }
+#proxy-menu .item .dot { width: 8px; color: var(--accent); }
+#proxy-menu .item .hint { color: var(--muted); font-size: 11px; margin-left: auto; }
+.status.proxy .dot { background: var(--warn); }
 
 .flow { font: var(--mono); padding: 1px 0; }
 .flow .sign { display: inline-block; width: 1.4em; font-weight: 700; }

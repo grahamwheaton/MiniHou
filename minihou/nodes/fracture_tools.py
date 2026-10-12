@@ -160,7 +160,7 @@ def _thin(pts, distance):
 
 
 @node("voronoi_fracture_points", inputs=["geo", Input("points", optional=True)], category="model", params=[
-    Int("count", 20, min=1, soft_max=500, doc="Number of points to scatter (the extra input's points come on top)"),
+    Int("count", 20, min=1, soft_max=500, doc="Number of points to scatter (the extra input's points come on top)", proxy="count"),
     Int("seed", 0),
     Float("surface_fraction", 0.0, min=0.0, max=1.0, doc="Share of the points placed on the surface instead of inside: more, smaller "
                                                          "pieces at the outside, as in a shattering shell"),

@@ -31,6 +31,10 @@
     <button id="lay-side" title="Show or hide the parameter panel (the 3-D view and graph then fill the window)">▤</button>
   </span>
   <span class="spacer"></span>
+  <span class="proxy">
+    <button id="proxy-btn" title="Proxy: work on a lighter version of a very large scene">Proxy: <span id="proxy-label">Full</span><span class="caret">▾</span></button>
+    <div id="proxy-menu" class="menu hidden" role="menu"></div>
+  </span>
   <span id="cook-status" class="status"><span class="dot"></span><span class="text">connecting…</span></span>
   <span id="blender-status" class="status clickable" role="button" tabindex="0" title="Blender clients connected to the live link"><span class="dot"></span><span class="text">Blender</span></span>
   <button id="help-btn" title="Keyboard and mouse">?</button>
@@ -92,7 +96,8 @@
           <button data-view="front" title="Front (Numpad 1, Ctrl for back)">Front</button><button data-view="right" title="Right (Numpad 3, Ctrl for left)">Right</button><button data-view="top" title="Top (Numpad 7, Ctrl for bottom)">Top</button><button id="pv-ortho" title="Perspective / orthographic (Numpad 5)">Persp</button><button id="pv-frame" title="Frame the selection, or everything (Numpad . / Home / double-click the view)">⌂</button>
         </span>
       </div>
-      <div class="pv-wrap"><canvas id="pv-canvas" aria-label="3D preview"></canvas><div id="pv-msg" class="muted hidden"></div></div>
+      <div class="pv-wrap"><canvas id="pv-canvas" aria-label="3D preview"></canvas><div id="pv-msg" class="muted hidden"></div>
+        <div id="pv-proxy" class="hidden"><span id="pv-proxy-text"></span><button id="pv-full" class="small" title="Load the geometry at the highest detail the view can hold (slower for very large scenes)">Full res</button></div></div>
       <div id="pv-actions" class="pv-actions hidden"></div>
       <div id="pv-time" class="pv-time" role="group" aria-label="Timeline">
         <button id="tl-first" title="Go to the start frame (Shift+Left)" aria-label="Start">⏮</button>

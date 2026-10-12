@@ -3,6 +3,7 @@ import json
 
 import numpy as np
 
+from .. import proxy
 from ..sdk import REGISTRY, Enum, Int, Str, node
 from .attrib_tools import piece_labels
 from .group import keep_prims
@@ -48,7 +49,7 @@ def for_each(geo, body, params, piece, attribute, max_pieces):
         raise ValueError(f"params must be JSON: {e}") from None
     if not isinstance(overrides, dict):
         raise ValueError("params must be a JSON object, e.g. {\"distance\": 0.3}")
-    values = nt.coerce_params(overrides)
+    values = proxy.scale_params(nt, nt.coerce_params(overrides))
     if piece == "connectivity":
         _, labels = piece_labels(geo)
     elif piece == "primitive":

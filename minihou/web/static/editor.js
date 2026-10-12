@@ -400,11 +400,14 @@
       c.className = "status err";
       txt.textContent = "error" + (st.error && st.error.node ? " in " + st.error.node : "");
     } else if (st.busy) {
-      c.className = "status busy"; txt.textContent = "cooking…";
+      const rf = st.proxy && st.proxy.refining;
+      c.className = "status busy"; txt.textContent = rf ? "refining to full…" : "cooking…";
     } else if (st.ok) {
-      c.className = "status ok";
-      txt.textContent = `${fmt(st.points)} pts · ${fmt(st.prims)} prims` + (st.cook ? ` · ${st.cook.ms.toFixed(1)} ms` : "");
+      const px = st.proxy && st.proxy.cooked < 1 ? st.proxy.cooked : 0;
+      c.className = "status " + (px ? "proxy" : "ok");
+      txt.textContent = `${fmt(st.points)} pts · ${fmt(st.prims)} prims` + (st.cook ? ` · ${st.cook.ms.toFixed(1)} ms` : "") + (px ? ` · proxy ${pct(px)}` : "");
     } else { c.className = "status"; txt.textContent = "idle"; }
+    renderProxy();
     const fi = $("#frame-input");
     if (st.frame !== undefined && document.activeElement !== fi && Number(fi.value) !== st.frame) fi.value = st.frame;
     if (st.frame !== undefined && document.activeElement !== $("#frame-slider")) syncSlider(st.frame);
@@ -815,7 +818,28 @@
   // ---------------------------------------------------------------- 3-D preview of the selected (or display) node
   const pvMsg = (text) => { const m = $("#pv-msg"); m.textContent = text || ""; m.classList.toggle("hidden", !text); };
   const pv = window.MiniHouPreview ? window.MiniHouPreview.create($("#pv-canvas"), pvMsg) : null;
-  let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false;
+  let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false, pvFull = false, pvReduced = null;
+  const pct = (x) => (x >= 0.1 ? Math.round(x * 100) : Math.round(x * 1000) / 10) + "%";
+  // A big geometry is drawn reduced (clustered to a budget): say so, offer full detail, and keep selection off (the drawn points are not the real ones)
+  function setReducedView(p) {
+    pvReduced = p;
+    $("#pv-proxy").classList.toggle("hidden", !p && !pvFull);
+    $("#pv-proxy-text").textContent = p ? `Reduced view: ${fmt(p.shown_tris)} of ${fmt(p.tris)} triangles` + (p.points > p.shown_points ? `, ${fmt(p.shown_points)} of ${fmt(p.points)} points` : "") : "";
+    $("#pv-full").classList.toggle("on", pvFull);
+    $("#pv-full").textContent = pvFull ? "Full res ✓" : "Full res";
+    document.querySelectorAll("#preview [data-mode]").forEach((b) => {
+      const lock = !!p && b.dataset.mode !== "view";
+      b.disabled = lock; b.title = lock ? "Selecting works on the real geometry: this view is reduced. Use Full res, or lower the proxy level." : b.title;
+    });
+    if (p && pvSelection.mode !== "view") pv.setMode("view");
+  }
+  function blockedByReduced() {
+    if (!pvReduced) return false;
+    pvMsg("Selecting needs the real geometry: this view is reduced. Click Full res, or lower the proxy level.");
+    clearTimeout(blockedByReduced.t); blockedByReduced.t = setTimeout(() => pvMsg(""), 3500);
+    return true;
+  }
+  $("#pv-full").onclick = () => { pvFull = !pvFull; pvKey = null; schedulePreview(); setReducedView(pvReduced); };
   function schedulePreview() {
     if (!pv || !pv.ok) return;
     clearTimeout(pvTimer);
@@ -826,13 +850,13 @@
     const node = ids.length === 1 ? ids[0] : displayNode();
     $("#pv-node").textContent = node ? "· " + node : "";
     if (!node) { pv.clear(); pvMsg(""); pvKey = null; return; }
-    const key = `${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}`;
+    const key = `${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}:${pvFull}`;
     if (key === pvKey) return;
     pvKey = key;
     const seq = ++pvSeq;
     let buf;
     try {
-      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node }) });
+      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full: pvFull }) });
       buf = await r.arrayBuffer();
     } catch (e) { pvKey = null; return; }
     if (seq !== pvSeq) return;
@@ -844,6 +868,7 @@
     }
     const empty = !head.points;
     pvMsg(empty ? "No geometry" : head.truncated ? "Showing part of a very large geometry." : "");
+    setReducedView(head.proxy && head.proxy.active ? head.proxy : null);
     pv.set(head, arrays, pvNode === node && pvPath === S.path);
     pv.setHandles(head.handles || []);
     refreshSelectionHandles();                                                 // a kept selection moved with the geometry: so does its gizmo
@@ -1028,7 +1053,7 @@
       if (h.comp === null || h.comp === undefined) queueSet(node, h.param, value);
       else if (handleBase) { const v = handleBase.slice(); v[h.comp] = value; queueSet(node, h.param, v); }
     };
-    document.querySelectorAll("#preview [data-mode]").forEach((b) => { b.onclick = () => pv.setMode(b.dataset.mode); });
+    document.querySelectorAll("#preview [data-mode]").forEach((b) => { b.onclick = () => { if (b.dataset.mode !== "view" && blockedByReduced()) return; pv.setMode(b.dataset.mode); }; });
     const wrap = $("#pv-canvas").parentElement;                         // the canvas and the overlays on it (gizmo, handles) count as one
     wrap.addEventListener("pointerenter", () => { pvOver = true; });
     wrap.addEventListener("pointerleave", () => { pvOver = false; });
@@ -1049,7 +1074,7 @@
         e.preventDefault(); e.stopImmediatePropagation(); return;
       }
       const mode = { "1": "point", "2": "edge", "3": "face", "4": "piece" }[k];
-      if (mode) { pv.setMode(mode); e.preventDefault(); e.stopImmediatePropagation(); return; }
+      if (mode) { if (!blockedByReduced()) pv.setMode(mode); e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (k === "escape") {
         if (pvSelection.mode !== "view" && !(pvSelection[SEL_KEY[pvSelection.mode]] || []).length) pv.setMode("view"); else pv.clearSelection();
         e.preventDefault(); e.stopImmediatePropagation(); return;
@@ -1794,6 +1819,59 @@
     const el = document.querySelector(`#file-menu .frow[data-i="${FM.active}"]`);
     if (el) el.scrollIntoView({ block: "nearest" });
   }
+  // ---------------------------------------------------------------- proxy: a lighter version of a very large scene
+  const PROXY_ROWS = [
+    { id: "full", label: "Full", level: 1, auto: false, hint: "the real thing" },
+    { id: "auto", label: "Auto", level: 0.1, auto: true, hint: "slow scenes: small first, full when you pause" },
+    { id: "0.5", label: "50%", level: 0.5, auto: false, hint: "about half the points" },
+    { id: "0.25", label: "25%", level: 0.25, auto: false, hint: "" },
+    { id: "0.1", label: "10%", level: 0.1, auto: false, hint: "" },
+    { id: "0.05", label: "5%", level: 0.05, auto: false, hint: "" },
+    { id: "0.01", label: "1%", level: 0.01, auto: false, hint: "a sketch" },
+  ];
+  const LINK_CAPS = [[0, "everything"], [100000, "100 000 triangles"], [500000, "500 000 triangles"], [2000000, "2 million triangles"]];
+  const proxyRow = () => {
+    const p = (S.status && S.status.proxy) || { level: 1, auto: false };
+    if (p.auto) return PROXY_ROWS[1];
+    return PROXY_ROWS.find((r) => !r.auto && Math.abs(r.level - p.level) < 1e-9) || { id: "custom", label: pct(p.level), level: p.level, auto: false };
+  };
+  function renderProxy() {
+    const p = (S.status && S.status.proxy) || { level: 1, auto: false, link_tris: 0 };
+    const row = proxyRow();
+    $("#proxy-label").textContent = row.label;
+    $("#proxy-btn").classList.toggle("on", row.id !== "full" || p.link_tris > 0);
+    $("#proxy-btn").title = row.id === "full" ? "Proxy: work on a lighter version of a very large scene" : `Proxy ${row.label}: nodes cook a smaller version of the scene (counts, resolutions, voxel sizes scale)`;
+    if (!$("#proxy-menu").classList.contains("hidden")) fillProxyMenu();
+  }
+  function fillProxyMenu() {
+    const p = (S.status && S.status.proxy) || { level: 1, auto: false, link_tris: 0 }, cur = proxyRow().id, m = $("#proxy-menu");
+    m.innerHTML = "";
+    const head = document.createElement("div"); head.className = "head";
+    head.textContent = "Cook a lighter version of the scene while you work: grid and scatter counts, sphere bands, voxel sizes and spacings scale down. The viewport always draws within a budget of its own.";
+    m.appendChild(head);
+    for (const r of PROXY_ROWS) {
+      const it = document.createElement("div"); it.className = "item" + (r.id === cur ? " cur" : ""); it.dataset.proxy = r.id;
+      it.innerHTML = `<span class="dot">${r.id === cur ? "●" : ""}</span><span>${r.label}</span><span class="hint">${r.hint}</span>`;
+      it.onclick = async () => { try { S.status = Object.assign(S.status || {}, { proxy: await api("/api/proxy", { level: r.level, auto: r.auto }) }); } catch (e) { toast(e.message); } renderProxy(); $("#proxy-menu").classList.add("hidden"); };
+      m.appendChild(it);
+    }
+    const sep = document.createElement("div"); sep.className = "sep"; m.appendChild(sep);
+    const h2 = document.createElement("div"); h2.className = "head"; h2.textContent = "Send Blender at most:"; m.appendChild(h2);
+    for (const [n, label] of LINK_CAPS) {
+      const it = document.createElement("div"); it.className = "item" + ((p.link_tris || 0) === n ? " cur" : ""); it.dataset.cap = String(n);
+      it.innerHTML = `<span class="dot">${(p.link_tris || 0) === n ? "●" : ""}</span><span>${label}</span>`;
+      it.onclick = async () => { try { S.status = Object.assign(S.status || {}, { proxy: await api("/api/proxy", { link_tris: n }) }); } catch (e) { toast(e.message); } renderProxy(); $("#proxy-menu").classList.add("hidden"); };
+      m.appendChild(it);
+    }
+  }
+  $("#proxy-btn").onclick = (e) => {
+    e.stopPropagation();
+    const m = $("#proxy-menu");
+    if (!m.classList.contains("hidden")) { m.classList.add("hidden"); return; }
+    fillProxyMenu(); m.classList.remove("hidden");
+  };
+  document.addEventListener("click", (e) => { if (!e.target.closest(".proxy")) $("#proxy-menu").classList.add("hidden"); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#proxy-menu").classList.add("hidden"); }, true);
   $("#file-btn").onclick = async (e) => {
     e.stopPropagation();
     if (!$("#file-menu").classList.contains("hidden")) { $("#file-menu").classList.add("hidden"); return; }

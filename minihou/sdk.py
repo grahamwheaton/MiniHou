@@ -88,10 +88,15 @@ class Param:
     doc: str = ""
     choices: Tuple[str, ...] = ()
     ui: str = ""                    # free-form hint, e.g. "code" for expression/snippet text
+    proxy: str = ""                 # how a proxy cook level scales this parameter (see minihou.proxy.KINDS); "" = not at all
 
     def __post_init__(self):
         if not _NAME_RE.match(self.name):
             raise ValueError(f"invalid parameter name {self.name!r}")
+        if self.proxy:
+            from .proxy import KINDS
+            if self.proxy not in KINDS or self.kind not in ("int", "float"):
+                raise ValueError(f"parameter {self.name!r}: proxy must be one of {sorted(KINDS)} on an int or float parameter")
         object.__setattr__(self, "default", self.coerce(self.default))
 
     @property
@@ -166,17 +171,19 @@ class Param:
             d["choices"] = list(self.choices)
         if self.ui:
             d["ui"] = self.ui
+        if self.proxy:
+            d["proxy"] = self.proxy
         if self.doc:
             d["doc"] = self.doc
         return d
 
 
-def Float(name, default=0.0, *, min=None, max=None, soft_min=None, soft_max=None, label="", doc="", ui=""):
-    return Param(name, "float", default, min, max, soft_min, soft_max, label, doc, (), ui)
+def Float(name, default=0.0, *, min=None, max=None, soft_min=None, soft_max=None, label="", doc="", ui="", proxy=""):
+    return Param(name, "float", default, min, max, soft_min, soft_max, label, doc, (), ui, proxy)
 
 
-def Int(name, default=0, *, min=None, max=None, soft_min=None, soft_max=None, label="", doc="", ui=""):
-    return Param(name, "int", default, min, max, soft_min, soft_max, label, doc, (), ui)
+def Int(name, default=0, *, min=None, max=None, soft_min=None, soft_max=None, label="", doc="", ui="", proxy=""):
+    return Param(name, "int", default, min, max, soft_min, soft_max, label, doc, (), ui, proxy)
 
 
 def Bool(name, default=False, *, label="", doc="", ui=""):
@@ -286,9 +293,11 @@ class NodeType:
     key_extra: Optional[Callable[[Dict[str, Any]], str]] = None   # extra cache-key material from outside the graph
     handles: Tuple["Handle", ...] = ()                              # viewport gizmos (cosmetic: never in the cache key)
     _param_index: Dict[str, Param] = field(default_factory=dict, repr=False, compare=False)
+    proxy_params: Tuple[Param, ...] = field(default=(), repr=False, compare=False)    # the parameters a proxy cook level scales
 
     def __post_init__(self):
         object.__setattr__(self, "_param_index", {p.name: p for p in self.params})
+        object.__setattr__(self, "proxy_params", tuple(p for p in self.params if p.proxy))
 
     def param(self, name: str) -> Param:
         try:

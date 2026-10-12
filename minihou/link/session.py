@@ -28,10 +28,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from ..edit import apply_ops, layout_missing
-from ..evaluator import Cache, DEFAULT_CACHE_BYTES, Evaluator, NodeError
+from ..evaluator import Cache, CookCancelled, DEFAULT_CACHE_BYTES, Evaluator, NodeError
 from ..geometry import Geometry
 from ..graph import Graph, GraphError
-from .. import timectx
+from .. import proxy, timectx
 from ..inputs import INPUTS
 from ..sdk import ParamError, Registry
 from ..flow import attribute_flow
@@ -43,6 +43,7 @@ log = logging.getLogger("minihou.session")
 
 UNDO_LIMIT = 200
 MERGE_SECONDS = 1.5          # consecutive edits of the same thing within this window form one undo step
+REFINE_DELAY = 0.3           # auto proxy: how long edits must pause before the full cook starts
 
 NEW_GRAPH = {"version": 1, "nodes": {"grid1": {"type": "grid", "pos": [0, 0]},
                                      "output1": {"type": "output", "inputs": {"geo": "grid1"}, "pos": [0, 110]}},
@@ -71,6 +72,8 @@ class Result:
     cook: Dict[str, Any] = field(default_factory=dict)
     error: Optional[Dict[str, Any]] = None       # {"node": id-or-None, "message": str}
     rev: int = 0                                  # graph revision this result was cooked from
+    proxy: float = 1.0                            # proxy level it was cooked at (1.0: the real thing)
+    link_memo: Any = None                         # (link_tris, reduced geometry) for the Blender link
     extras: Dict[str, Tuple[Geometry, str]] = field(default_factory=dict)   # extra outputs: object name -> (geometry, key)
 
 
@@ -118,6 +121,11 @@ class Session:
         self._watched: List[str] = []
         self.frame = 1.0                 # current time (Blender's frame), for @Frame / @Time
         self.fps = timectx.DEFAULT_FPS
+        self.proxy_level = 1.0           # cook proxy: node parameters marked as proxy-able scale with it (1.0 = full)
+        self.proxy_auto = False          # auto: slow scenes cook at the proxy level first and refine to full when edits pause
+        self.link_tris = 0               # Blender link: reduce geometry above this many triangles (0 = send everything)
+        self._full_ms: Optional[float] = None   # how long the last full-level cook that did work took
+        self._refining = False
         self._save_enabled = False
         self._stamp = None
         self._file_lock = threading.RLock()           # saving vs. noticing external changes
@@ -334,49 +342,90 @@ class Session:
         self._last_error_msg = message
         self._publish(Result(0, error={"node": node, "message": message}, rev=rev))
 
+    # -- the proxy ---------------------------------------------------------
+    def set_proxy(self, level: Optional[float] = None, auto: Optional[bool] = None, link_tris: Optional[int] = None) -> dict:
+        """Change the proxy settings and recook. ``level`` is the cook level (1 = full; ``auto`` cooks that level first when the
+        full cook is slow, then the full one when edits pause); ``link_tris`` caps what Blender receives (0 = everything)."""
+        with self.lock:
+            changed = False
+            if level is not None:
+                lvl = proxy.clamp(level)
+                changed |= lvl != self.proxy_level
+                self.proxy_level = lvl
+            if auto is not None:
+                changed |= bool(auto) != self.proxy_auto
+                self.proxy_auto = bool(auto)
+            if link_tris is not None:
+                n = max(0, int(link_tris))
+                changed |= n != self.link_tris
+                self.link_tris = n
+            if changed:
+                self._rev += 1
+                self._wake.set()
+        return self.proxy_info()
+
+    def proxy_info(self) -> dict:
+        good = self.latest_good
+        return {"level": self.proxy_level, "auto": self.proxy_auto, "link_tris": self.link_tris, "levels": list(proxy.LEVELS),
+                "cooked": good.proxy if good is not None else 1.0, "refining": self._refining,
+                "full_ms": None if self._full_ms is None else round(self._full_ms, 1)}
+
+    def view_level(self) -> float:
+        """The proxy level the editor is looking at: the settings' level, or in auto mode the level of the newest result."""
+        good = self.latest_good
+        return good.proxy if (self.proxy_auto and good is not None) else self.proxy_level
+
+    def link_geometry(self, res: Result) -> Geometry:
+        """What the Blender link sends for ``res``: the geometry, or its reduction when ``link_tris`` is set and it is bigger."""
+        geo = res.geo
+        cap = self.link_tris
+        if not cap or geo is None:
+            return geo
+        memo = res.link_memo
+        if memo is not None and memo[0] == cap:
+            return memo[1]
+        red = proxy.decimate(geo, cap, 2 * cap)
+        res.link_memo = (cap, red.geo)
+        return red.geo
+
+    # -- cooking -----------------------------------------------------------
     def cook_once(self) -> Optional[Result]:
         """Cook the current graph now and publish if the outcome changed. Returns the result
-        that was published (or None if nothing changed)."""
+        that was published (or None if nothing changed). In auto proxy mode a slow scene is cooked at the proxy level first
+        (published at once) and then at full level once edits pause."""
         with self.lock:
             rev = self._rev
             snapshot = self.graph.copy()
             frame, fps = self.frame, self.fps
-        t0 = time.perf_counter()
+            lvl, auto = self.proxy_level, self.proxy_auto
+        if not auto:
+            plan = [lvl]
+        elif self._full_ms is not None and self._full_ms <= proxy.AUTO_SLOW_MS and lvl >= 1.0:
+            plan = [1.0]                                  # a fast scene: nothing to gain from a proxy
+        else:
+            coarse = lvl if lvl < 1.0 else proxy.AUTO_LEVEL
+            plan = [1.0] if self._same_key(snapshot, frame, fps, coarse, 1.0) else [coarse, 1.0]     # nothing scales: one pass
         published: Optional[Result] = None
-        try:
-            extras: Dict[str, Tuple[Geometry, str]] = {}
-            with self._cook_lock, timectx.at(frame, fps):
-                geo = self.evaluator.cook(snapshot)
-                stats = self.evaluator.last_stats
-                live = self.evaluator.live_keys(snapshot)
-                for name, nid in snapshot.extra_outputs().items():     # more outputs: each its own Blender object
-                    try:
-                        eg = self.evaluator.cook(snapshot, nid)
-                    except (NodeError, GraphError, ParamError) as e:
-                        self._extra_error(name, f"{nid}: {e}")
-                        continue
-                    extras[name] = (eg, self.evaluator.last_stats.key)
-                    live += self.evaluator.live_keys(snapshot, nid)
-                self.evaluator.cache.retain(live)
-            overall = stats.key + "".join(f"|{n}:{k}" for n, (_, k) in sorted(extras.items()))
-            if overall != self._last_key or self._last_error_msg is not None:
-                d = stats.to_dict()
-                cook = {"ms": round((time.perf_counter() - t0) * 1000, 3), "cooked": d["cooked"],
-                        "cached": d["cached"], "node_ms": d["node_ms"]}
-                published = Result(0, geo, stats.key, cook, rev=rev, extras=extras)
-                self._last_key, self._last_error_msg = overall, None
-                self._publish(published)
-            elif self.latest_good is not None:
-                self.latest_good.rev = rev                   # same geometry, newer graph (e.g. a node was moved)
-        except (NodeError, GraphError, ParamError) as e:
-            self._report_error(getattr(e, "node_id", None), str(e), rev)
-            log.warning("cook failed: %s", e)
-        except Exception as e:  # noqa: BLE001 - never let the cook thread die
-            log.exception("unexpected cook failure")
-            self._report_error(None, f"internal error: {e!r}", rev)
+        for step, L in enumerate(plan):
+            if step:                                      # refine: only when no edit follows and the proxy was not already full
+                if self._wake.wait(REFINE_DELAY) or self._rev != rev:
+                    break
+                if self._same_key(snapshot, frame, fps, plan[0], L):
+                    break
+                self._refining = True
+                self._notify_status(rev)
+            status, res = self._cook_pass(rev, snapshot, frame, fps, L, cancelable=step > 0)
+            published = res or published
+            if status != "ok":
+                break
+        self._refining = False
         with self._idle:
             self._cooked_rev = rev
             self._idle.notify_all()
+        self._notify_status(rev)
+        return published
+
+    def _notify_status(self, rev: int) -> None:
         for l in list(self._listeners):                      # cook finished (even if nothing new was published)
             fn = getattr(l, "on_status", None)
             if fn:
@@ -384,7 +433,69 @@ class Session:
                     fn(rev)
                 except Exception:  # noqa: BLE001
                     log.exception("listener failed")
-        return published
+
+    def _same_key(self, snapshot: Graph, frame, fps, a: float, b: float) -> bool:
+        """True when the graph's result is the same at proxy levels ``a`` and ``b`` (nothing in it depends on the level)."""
+        try:
+            with self._cook_lock, timectx.at(frame, fps):
+                keys = []
+                for L in (a, b):
+                    with proxy.using(L):
+                        keys.append(self.evaluator.compute_keys(snapshot, snapshot.upstream_order(snapshot.output_node()))[snapshot.output_node()])
+            return keys[0] == keys[1]
+        except Exception:  # noqa: BLE001 - if keys cannot be computed the cook itself will say why
+            return False
+
+    def _cook_pass(self, rev: int, snapshot: Graph, frame, fps, level: float, cancelable: bool = False):
+        """One cook at ``level``. Returns ("ok" | "error" | "cancelled", the Result it published or None)."""
+        t0 = time.perf_counter()
+        published: Optional[Result] = None
+        ev = self.evaluator
+        try:
+            extras: Dict[str, Tuple[Geometry, str]] = {}
+            with self._cook_lock, timectx.at(frame, fps):
+                ev.proxy_level = level
+                ev.cancel = (lambda: self._rev != rev or self._wake.is_set()) if cancelable else None
+                try:
+                    geo = ev.cook(snapshot)
+                    stats = ev.last_stats
+                    live = ev.live_keys(snapshot)
+                    for name, nid in snapshot.extra_outputs().items():     # more outputs: each its own Blender object
+                        try:
+                            eg = ev.cook(snapshot, nid)
+                        except (NodeError, GraphError, ParamError) as e:
+                            self._extra_error(name, f"{nid}: {e}")
+                            continue
+                        extras[name] = (eg, ev.last_stats.key)
+                        live += ev.live_keys(snapshot, nid)
+                    ev.cache.retain(live)
+                finally:
+                    ev.proxy_level, ev.cancel = None, None
+            ms = (time.perf_counter() - t0) * 1000
+            if level >= 1.0 and stats.cooked:
+                self._full_ms = ms
+            overall = stats.key + "".join(f"|{n}:{k}" for n, (_, k) in sorted(extras.items()))
+            if overall != self._last_key or self._last_error_msg is not None:
+                d = stats.to_dict()
+                cook = {"ms": round(ms, 3), "cooked": d["cooked"], "cached": d["cached"], "node_ms": d["node_ms"]}
+                if level < 1.0:
+                    cook["proxy"] = level
+                published = Result(0, geo, stats.key, cook, rev=rev, extras=extras, proxy=level)
+                self._last_key, self._last_error_msg = overall, None
+                self._publish(published)
+            elif self.latest_good is not None:
+                self.latest_good.rev = rev                   # same geometry, newer graph (e.g. a node was moved)
+            return "ok", published
+        except CookCancelled:
+            return "cancelled", None
+        except (NodeError, GraphError, ParamError) as e:
+            self._report_error(getattr(e, "node_id", None), str(e), rev)
+            log.warning("cook failed: %s", e)
+            return "error", None
+        except Exception as e:  # noqa: BLE001 - never let the cook thread die
+            log.exception("unexpected cook failure")
+            self._report_error(None, f"internal error: {e!r}", rev)
+            return "error", None
 
     def status(self) -> dict:
         """Outcome of the newest cook: ok/error, counts, timings, and whether it is up to date."""
@@ -392,6 +503,7 @@ class Session:
             good, err, rev = self.latest_good, self.latest_error, self._rev
         out: Dict[str, Any] = {"rev": rev, "cooked_rev": self._cooked_rev, "busy": self._cooked_rev < rev,
                                "frame": self.frame, "fps": self.fps}
+        out["proxy"] = self.proxy_info()
         if err is not None:
             out.update(ok=False, error=err.error)
         else:
@@ -411,7 +523,7 @@ class Session:
             return {"node": node, "rev": rev, "ok": False, "error": {"node": node, "message": f"no such node {node!r}"}}
         t0 = time.perf_counter()
         try:
-            with self._cook_lock, timectx.at(frame, fps):
+            with self._cook_lock, timectx.at(frame, fps), proxy.using(self.view_level()):
                 sources = list(dict.fromkeys(snapshot.input_ids(node)))
                 if snapshot.nodes[node].type == "loop_end":
                     # A repeat body cannot cook outside its iteration context. Compare
@@ -450,7 +562,7 @@ class Session:
         if node not in snapshot.nodes:
             return {"ok": False, "node": node, "rev": rev, "error": {"node": node, "message": f"no such node {node!r}"}}
         try:
-            with self._cook_lock, timectx.at(frame, fps):
+            with self._cook_lock, timectx.at(frame, fps), proxy.using(self.view_level()):
                 geo = self.evaluator.cook(snapshot, node)
                 handles = []
                 inst = snapshot.nodes[node]

@@ -323,6 +323,11 @@ Worked through in order of how often Houdini users reach for them:
     are not separating, so boxes turned only about Z work); covered fractions are sampled. Self-pruning keeps the
     lexicographically first independent set by priority, computed in parallel rounds (proven equal to the sequential
     greedy pass in the tests). Random values come from hashing each point's seed, so they follow the points.
+18. **Proxies for very large scenes** (`minihou/proxy.py`, `preview.py`, `Session.set_proxy`, details in `docs/PROXY.md`): the
+    viewport and the Blender link reduce geometry by vertex clustering (grid size searched on a sample, checked on all points)
+    instead of truncating; a cook proxy level scales marked parameters (count / res2 / res3 / step kinds), is part of the cache key
+    through the scaled values, and auto mode cooks a small version first and the real one when edits pause (cancellable between
+    nodes). Not yet exercised in a real Blender; the link budget is off by default.
 
 Closest-point and ray queries on triangle grids have numba kernels (`nodes/_kernels.py` `grid_closest`, `grid_intersect`;
 remesh of a 4,800-triangle sphere 17 s -> 3.5 s). Surfaces from points and curves: `delaunay` (SciPy or a pure-Python

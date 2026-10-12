@@ -132,7 +132,7 @@ def pcg_points(geo, extents, density):
 
 
 @node("pcg_surface_sampler", inputs=["surface"], category="pcg", params=[
-    Float("points_per_m2", 1.0, min=0.0, soft_max=100.0, doc="How many points per square metre of surface"),
+    Float("points_per_m2", 1.0, min=0.0, soft_max=100.0, doc="How many points per square metre of surface", proxy="count"),
     Vec3("extents", (0.5, 0.5, 0.5), min=0.0, doc="Half size of each point's box"),
     Float("looseness", 0.3, min=0.0, max=1.0, doc="0: evenly spaced (blue noise); 1: plain random"),
     Bool("align", False, doc="Rotate points so their +Z follows the surface normal (else upright)"),
@@ -196,7 +196,7 @@ def pcg_volume_sampler(volume, voxel_size, jitter, seed):
 @node("pcg_spline_sampler", inputs=["curve"], category="pcg", params=[
     Enum("mode", ["on_curve", "interior"], doc="on_curve: along the curves; interior: filling closed curves (in "
          "their plane, e.g. a lot outline drawn in XY)"),
-    Float("spacing", 1.0, min=0.001, soft_max=20.0, doc="Distance between points"),
+    Float("spacing", 1.0, min=0.001, soft_max=20.0, doc="Distance between points", proxy="step1"),
     Vec3("extents", (0.5, 0.5, 0.5), min=0.0),
     Float("jitter", 0.0, min=0.0, max=1.0, doc="interior: random offset, as a fraction of the spacing"),
     Int("seed", 0),

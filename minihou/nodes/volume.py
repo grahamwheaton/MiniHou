@@ -45,7 +45,7 @@ def _check_h(voxel_size):
 
 
 @node("remesh", inputs=["geo"], category="volume", params=[
-    Float("voxel_size", 0.05, min=1e-4, soft_max=1.0, doc="Detail of the new mesh; cost grows with 1/size^3"),
+    Float("voxel_size", 0.05, min=1e-4, soft_max=1.0, doc="Detail of the new mesh; cost grows with 1/size^3", proxy="step3"),
     Float("offset", 0.0, soft_min=-1.0, soft_max=1.0, doc="Grow (+) or shrink (-) the surface by this distance"),
     Int("smooth", 0, min=0, soft_max=20, doc="Smoothing passes on the distance field (rounds sharp detail)"),
     Str("transfer", "", doc="Point attributes to carry over from the nearest original point, e.g. 'Cd uv'"),
@@ -66,7 +66,7 @@ def remesh(geo, voxel_size, offset, smooth, transfer):
 @node("points_to_surface", inputs=["points"], category="volume", params=[
     Float("radius", 0.2, min=1e-4, soft_max=2.0, doc="Sphere radius per point (times pscale if present)"),
     Float("blend", 1.0, min=0.0, soft_max=4.0, doc="How much neighbouring points melt together (metaballs)"),
-    Float("voxel_size", 0.05, min=1e-4, soft_max=1.0),
+    Float("voxel_size", 0.05, min=1e-4, soft_max=1.0, proxy="step3"),
     Int("smooth", 0, min=0, soft_max=20),
     Str("transfer", "Cd", doc="Point attributes to carry from the nearest point onto the surface"),
 ])
@@ -86,7 +86,7 @@ def points_to_surface(points, radius, blend, voxel_size, smooth, transfer):
 
 @node("sdf_boolean", inputs=["a", "b"], category="volume", params=[
     Enum("operation", ["union", "subtract", "intersect"], doc="subtract: a minus b"),
-    Float("voxel_size", 0.05, min=1e-4, soft_max=1.0),
+    Float("voxel_size", 0.05, min=1e-4, soft_max=1.0, proxy="step3"),
     Float("smooth", 0.0, min=0.0, soft_max=1.0, doc="Fillet radius where the shapes meet (0 = sharp)"),
     Bool("transfer_attribs", True, doc="Carry point attributes from the nearest input point (Cd, uv...)"),
 ])
