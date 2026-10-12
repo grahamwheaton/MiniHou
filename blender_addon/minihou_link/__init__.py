@@ -287,7 +287,7 @@ class MINIHOU_PT_main(bpy.types.Panel):
                 item.label(text=modifiers.status(mod)[:160])
                 source_owner = modifiers.source_owner(mod)
                 if source_owner is not None:
-                    item.prop(source_owner[0], source_owner[1], text="Source Object")
+                    network_ui.draw_objects(item, mod)
                 network_ui.draw(item, mod)
                 mapping = proxy.mapping(mod.node_group)
                 for p in modifiers.parameters(mod):

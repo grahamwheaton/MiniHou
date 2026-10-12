@@ -48,6 +48,23 @@ class SourceObjectTests(unittest.TestCase):
         cls.engine.stop()
         cls.tmp.cleanup()
 
+    def test_safe_object_chooser_sets_and_clears_native_binding(self):
+        from minihou_link import network_ui
+        bpy.utils.register_class(network_ui.MINIHOU_OT_choose_object)
+        self.addCleanup(bpy.utils.unregister_class, network_ui.MINIHOU_OT_choose_object)
+        bpy.ops.mesh.primitive_cube_add()
+        source = bpy.context.object
+        bpy.ops.mesh.primitive_plane_add()
+        owner = bpy.context.object
+        mod = self.m.add_modifier(owner, str(self.path), port=self.engine.port)
+        result = bpy.ops.minihou.choose_object(modifier_name=mod.name, binding="source", object_name=source.name)
+        self.assertEqual(result, {"FINISHED"})
+        self.assertEqual(self.m.get_object(mod, "source"), source)
+        self.assertTrue(self.m._source_socket(mod).hide_in_modifier)
+        result = bpy.ops.minihou.choose_object(modifier_name=mod.name, binding="source", object_name="")
+        self.assertEqual(result, {"FINISHED"})
+        self.assertIsNone(self.m.get_object(mod, "source"))
+
     def test_modal_picker_defers_all_live_update_paths(self):
         from unittest.mock import patch
         from minihou_link import mesh_writer, geonodes, runtime
@@ -78,7 +95,7 @@ class SourceObjectTests(unittest.TestCase):
         self.m.set_object(mod, "monkey", monkey)
         self.m.set_object(mod, "cube", cube)
         for key in ("monkey", "cube"):
-            self.assertFalse(self.m._object_socket(mod, key).hide_in_modifier)
+            self.assertTrue(self.m._object_socket(mod, key).hide_in_modifier)
         self.cook()
         bpy.context.view_layer.update()
         if bpy.app.version >= (5, 2, 0):
