@@ -1737,6 +1737,11 @@
 
   // ---------------------------------------------------------------- keyboard
   document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      api("/api/cancel", {}).catch((err) => toast(err.message));
+    }
+  }, true);
+  document.addEventListener("keydown", (e) => {
     if (e.altKey && e.key === "ArrowUp" && !/^(input|textarea|select)$/i.test(e.target.tagName || "")) { e.preventDefault(); goUp(); return; }   // out of a nested group
     const menuOpen = !$("#tabmenu").classList.contains("hidden");
     if (menuOpen) {

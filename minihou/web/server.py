@@ -504,6 +504,9 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._body()
         app, s = self.app, self.app.session
         origin = str(body.get("origin") or "api")[:32]
+        if path == "/api/cancel":
+            s.cancel_cook()
+            return self._json({"ok": True})
         if path == "/api/desktop/activate":
             activate = getattr(app, "desktop_activate", None)
             return self._json({"desktop": bool(activate and activate(body))})

@@ -32,6 +32,7 @@ from ..evaluator import Cache, DEFAULT_CACHE_BYTES, Evaluator, NodeError
 from ..geometry import Geometry
 from ..graph import Graph, GraphError
 from .. import timectx
+from ..cancellation import cancellable
 from ..inputs import INPUTS
 from ..sdk import ParamError, Registry
 from ..flow import attribute_flow
@@ -100,6 +101,7 @@ class Session:
         self._rev = 0                # bumped on every change of the graph
         self._document_id = 0        # fences delayed browser edits across file switches
         self._cooked_rev = -1        # rev of the last completed cook
+        self._cancel_epoch = 0
         self._seq = 0
         self._last_key = None
         self._last_error_msg = None
@@ -387,6 +389,15 @@ class Session:
         self._last_error_msg = message
         self._publish(Result(0, error={"node": node, "message": message}, rev=rev))
 
+    def cancel_cook(self):
+        self._cancel_epoch += 1
+        self._wake.clear()
+        with self._idle:
+            self._cooked_rev = self._rev
+            self._idle.notify_all()
+        self._report_error(None, "Cook cancelled (Escape)", self._rev)
+
+    @cancellable
     def cook_once(self) -> Optional[Result]:
         """Cook the current graph now and publish if the outcome changed. Returns the result
         that was published (or None if nothing changed)."""
@@ -456,6 +467,7 @@ class Session:
             out.update(points=g.npoints, prims=g.nprims, vertices=g.nvertices, cook=good.cook)
         return out
 
+    @cancellable
     def inspect(self, node: str, detail: bool = False) -> dict:
         """Cook ``node`` (usually from cache) and summarise its geometry. Errors are returned, not raised."""
         with self.lock:
@@ -497,6 +509,7 @@ class Session:
                 out["blender"] = dict(data.info, error=data.error) if data.error else dict(data.info)
         return out
 
+    @cancellable
     def preview(self, node: str) -> dict:
         """Cook ``node`` and return ``{"ok", "node", "rev", "geo"}``, or ``{"ok": False, "error"}`` (never raises)."""
         with self.lock:
