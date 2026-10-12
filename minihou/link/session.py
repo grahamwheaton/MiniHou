@@ -425,6 +425,35 @@ class Session:
                 "cooked": good.proxy if good is not None else 1.0, "refining": self._refining,
                 "full_ms": None if self._full_ms is None else round(self._full_ms, 1)}
 
+    def export_usd(self, path, node: Optional[str] = None, overwrite: bool = False, embed_graph: bool = True) -> dict:
+        """Write the cooked geometry to a USD file at full size, whatever the proxy level: the display output and every extra output
+        (as Blender receives them), or just ``node``. Returns the counts written per output."""
+        from .. import usd_io
+        with self.lock:
+            snapshot = self.graph.copy()
+            frame, fps = self.frame, self.fps
+        if node is not None and node not in snapshot.nodes:
+            raise GraphError(f"no such node {node!r}")
+        if not usd_io.available():
+            raise usd_io.UsdUnavailable("USD support needs the 'usd-core' package: pip install usd-core")
+        outputs: Dict[str, Geometry] = {}
+        with self._cook_lock, timectx.at(frame, fps), proxy.using(1.0):
+            ev = self.evaluator
+            saved, ev.proxy_level = ev.proxy_level, None             # ambient level 1.0: never a proxy cook, never the link's reduction
+            try:
+                if node is not None:
+                    outputs[node] = ev.cook(snapshot, node)
+                else:
+                    outputs[snapshot.output_node()] = ev.cook(snapshot)
+                    for name, nid in snapshot.extra_outputs().items():
+                        outputs[name] = ev.cook(snapshot, nid)
+            finally:
+                ev.proxy_level = saved
+        rep = usd_io.write_stage(path, outputs, graph=snapshot.to_dict() if embed_graph else None, overwrite=overwrite, frame=frame)
+        out = rep.to_dict()
+        out["frame"] = frame
+        return out
+
     def view_level(self) -> float:
         """The proxy level the editor is looking at: the settings' level, or in auto mode the level of the newest result."""
         good = self.latest_good

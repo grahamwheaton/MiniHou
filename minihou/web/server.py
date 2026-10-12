@@ -17,6 +17,9 @@ live in the other and in Blender.
 ``POST /api/preview``  ``{node, full?, tris?}`` -> positions, triangles and edges of any node for the 3-D view (binary, see
                        :mod:`minihou.preview`; a big one is reduced to the display budget unless ``full``, or to ``tris`` triangles),
                        or JSON ``{ok: false, error}``
+``POST /api/export_usd`` ``{path, node?, overwrite?, graph?}`` write the cooked geometry (always at full size, whatever the proxy level)
+                       to a ``.usd`` / ``.usda`` / ``.usdc`` file under the root: the display output and each extra output, or just
+                       ``node``; the graph is stored in the file unless ``graph`` is false (see :mod:`minihou.usd_io`)
 ``POST /api/proxy``    ``{level?, auto?, link_tris?}`` the proxy settings (cook level 0.001..1, auto refine, Blender triangle cap);
                        also ``GET`` for the current ones
 ``POST /api/open``     ``{path, create?}`` switch to (or create) a graph file inside the workspace root
@@ -34,7 +37,8 @@ live in the other and in Blender.
 
 Hardening, since any web page can try to talk to localhost: the ``Host`` header must be a loopback name (blocks DNS
 rebinding), POSTs must be ``application/json`` (cross-site forms can't send that without a CORS preflight, which is
-never granted) and a present ``Origin`` must be this server. File access is limited to ``.json`` under the root.
+never granted) and a present ``Origin`` must be this server. File access is limited to ``.json`` under the root (and ``.usd``,
+``.usda``, ``.usdc`` for the USD export).
 """
 from __future__ import annotations
 
@@ -50,8 +54,9 @@ from pathlib import Path
 from typing import Any, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from .. import blender_setup
+from .. import blender_setup, usd_io
 from ..edit import OP_NAMES, EditError
+from ..evaluator import NodeError
 from ..graph import GraphError
 from ..link.protocol import PROTOCOL_VERSION
 from ..sdk import ParamError
@@ -336,13 +341,13 @@ class WebServer:
             return {"deleted": path}
         raise ApiError(400, 'op must be "rename", "duplicate" or "delete"')
 
-    def resolve(self, path: Any) -> Path:
+    def resolve(self, path: Any, exts: tuple = (".json",)) -> Path:
         if not isinstance(path, str) or not path.strip():
             raise ApiError(400, "path must be a non-empty string")
         p = Path(path)
         p = (p if p.is_absolute() else self.root / p).resolve()
-        if p.suffix.lower() != ".json":
-            raise ApiError(400, "graph files must end in .json")
+        if p.suffix.lower() not in exts:
+            raise ApiError(400, ("graph files must end in .json" if exts == (".json",) else f"the file must end in {', '.join(exts)}"))
         if p != self.root and self.root not in p.parents:
             raise ApiError(403, f"path is outside the workspace root {self.root}")
         return p
@@ -587,6 +592,21 @@ class _Handler(BaseHTTPRequestHandler):
             except (OSError, FileNotFoundError) as e:
                 return self._json({"ok": False, "message": f"could not start Blender: {e}"})
             return self._json({"ok": True, "message": f"Starting Blender {found[idx]['version'] or ''}; it connects to this engine by itself."})
+        if path == "/api/export_usd":
+            p = app.resolve(body.get("path"), usd_io.USD_EXTENSIONS)
+            node = body.get("node")
+            if node is not None and not isinstance(node, str):
+                raise ApiError(400, '"node" must be a node id')
+            try:
+                return self._json(s.export_usd(p, node=node, overwrite=bool(body.get("overwrite")), embed_graph=body.get("graph", True) is not False))
+            except FileExistsError as e:
+                raise ApiError(409, f"{e}; set overwrite to replace it") from None
+            except usd_io.UsdUnavailable as e:
+                raise ApiError(501, str(e)) from None
+            except (GraphError, NodeError, ParamError, ValueError) as e:
+                raise ApiError(400, str(e)) from None
+            except OSError as e:                                  # e.g. the file is open in another program (Windows), or no permission
+                raise ApiError(409, f"cannot write {p.name}: {e.strerror or e}") from None
         if path == "/api/proxy":
             try:
                 level = body.get("level")

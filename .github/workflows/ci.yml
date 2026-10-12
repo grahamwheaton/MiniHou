@@ -32,7 +32,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: install
-        run: python -m pip install numpy ${{ matrix.backend == 'numba' && 'numba scipy' || '' }}
+        run: python -m pip install numpy usd-core ${{ matrix.backend == 'numba' && 'numba scipy' || '' }}   # usd-core: the USD tests skip without it
       - name: physics backend
         if: matrix.physics
         run: python -m pip install "mujoco==3.15.0"

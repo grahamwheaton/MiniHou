@@ -1553,8 +1553,11 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: "box1" in self.s.graph.nodes["all"].inputs.get("geos", [])))
         # pick the wire up from the input and drop it on empty space: disconnect
         self.page.set_viewport_size({"width": 1400, "height": 1200})
-        self.drag(self.node("out").locator(".port.in"), self.page.locator("#canvas"))
-        self.page.mouse.move(*self.empty_spot())
+        for _ in range(3):                                                                       # a drag can land early on a slow machine
+            self.drag(self.node("out").locator(".port.in"), self.page.locator("#canvas"))
+            self.page.mouse.move(*self.empty_spot())
+            if until(lambda: "geo" not in self.s.graph.nodes["out"].inputs, 3):
+                break
         self.assertTrue(until(lambda: "geo" not in self.s.graph.nodes["out"].inputs))
         self.page.wait_for_selector("#errorbar:not(.hidden)")              # the output is now unwired
 
@@ -1653,31 +1656,37 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(self.page.locator("#crumbs .crumb").count(), 1)                       # the root graph alone
         self.node("grp").locator(".title").dblclick()
         self.page.wait_for_selector('.node[data-id="deep"]')
-        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo", b])
+        self.assertTrue(until(lambda: self.page.locator("#crumbs .crumb").all_inner_texts() == ["demo", b], 10),
+                        self.page.locator("#crumbs .crumb").all_inner_texts())
         self.assertTrue(self.page.locator("#crumbs .crumb.cur").inner_text() == b)
         self.node("deep").locator(".title").dblclick()                                         # a group inside a group
         self.page.wait_for_selector('.node[data-id="inp"]')
         self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == f"{a}.json"))
-        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo", b, a])
+        self.assertTrue(until(lambda: self.page.locator("#crumbs .crumb").all_inner_texts() == ["demo", b, a], 10),
+                        self.page.locator("#crumbs .crumb").all_inner_texts())
         self.page.locator('#crumbs .crumb[data-index="1"]').click()                            # back out one level through the crumb
         self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == f"{b}.json"))
         self.page.wait_for_selector('.node[data-id="deep"]')
-        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo", b])
+        self.assertTrue(until(lambda: self.page.locator("#crumbs .crumb").all_inner_texts() == ["demo", b], 10),
+                        self.page.locator("#crumbs .crumb").all_inner_texts())
         self.page.keyboard.press("Alt+ArrowUp")                                                # and out to the root with the keyboard
         self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == "demo.json"))
         self.page.wait_for_selector('.node[data-id="grp"]')
-        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo"])
+        self.assertTrue(until(lambda: self.page.locator("#crumbs .crumb").all_inner_texts() == ["demo"], 10),
+                        self.page.locator("#crumbs .crumb").all_inner_texts())
         self.page.reload()                                                                     # the path survives a reload of the tab
         self.page.wait_for_selector('.node[data-id="grp"]')
         self.node("grp").locator(".title").dblclick()
         self.page.wait_for_selector('.node[data-id="deep"]')
         self.page.reload()
         self.page.wait_for_selector('.node[data-id="deep"]')
-        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo", b])
+        self.assertTrue(until(lambda: self.page.locator("#crumbs .crumb").all_inner_texts() == ["demo", b], 10),
+                        self.page.locator("#crumbs .crumb").all_inner_texts())
         self.page.click("#file-btn")                                                           # opening a file from the menu starts a new path
         self.page.locator('#file-menu .frow[data-path="demo.json"]').click()
         self.page.wait_for_selector('.node[data-id="grp"]')
-        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo"])
+        self.assertTrue(until(lambda: self.page.locator("#crumbs .crumb").all_inner_texts() == ["demo"], 10),
+                        self.page.locator("#crumbs .crumb").all_inner_texts())
 
     def test_graph_text_is_never_html(self):
         payload = '<img src=x onerror="window.__xss=1"><b>bold</b>'
@@ -1703,6 +1712,8 @@ class EditorE2E(unittest.TestCase):
 
     # -- the graph & library browser ------------------------------------------------------
     def open_files(self):
+        # the button toggles, and a menu that is closing (after Save As, say) must not make this click shut it again
+        self.page.evaluate("document.getElementById('file-menu').classList.add('hidden')")
         self.page.click("#file-btn")
         self.page.wait_for_selector("#file-menu:not(.hidden) .fm-list")
 
@@ -1724,9 +1735,10 @@ class EditorE2E(unittest.TestCase):
         self.page.keyboard.press("Enter")                                                       # Enter opens the highlighted file
         self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == "beta_wall.json"))
         self.page.wait_for_selector('.node[data-id="hills"]')
-        self.open_files()
-        recent = self.page.eval_on_selector_all("#file-menu .fm-list .cat", "els => els.map(e => e.textContent)")
-        self.assertEqual(recent[0], "Recent")                                                   # opened files come back at the top
+        def headings():                                                                          # the list is built when the menu opens
+            self.open_files()
+            return self.page.eval_on_selector_all("#file-menu .fm-list .cat", "els => els.map(e => e.textContent)")
+        self.assertTrue(until(lambda: headings()[0] == "Recent", 10), headings())                # opened files come back at the top
         self.page.keyboard.type("zzzz")
         self.page.wait_for_selector("#file-menu .cat:has-text('No graph or library node matches')")
         self.page.keyboard.press("Escape")
@@ -1991,6 +2003,24 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(self.page.locator("#pv-proxy-text").inner_text(), "")
         self.page.click('#preview [data-mode="point"]')
         self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "point")        # selecting works on the real geometry
+
+    def test_export_usd_from_the_file_menu(self):
+        try:
+            from minihou import usd_io
+            usd_io.pxr()
+        except Exception:                                   # noqa: BLE001 - usd-core not installed
+            self.skipTest("usd-core not installed")
+        self.page.click("#file-btn")
+        self.page.wait_for_selector("#file-menu:not(.hidden) .fm-list")
+        answers = iter(["exports/demo_out.usda"])
+        self.page.on("dialog", lambda d: d.accept(next(answers, "")) if d.type == "prompt" else d.accept())
+        self.page.locator("#file-menu button", has_text="Export USD").click()
+        target = os.path.join(self.dir, "exports", "demo_out.usda")
+        self.assertTrue(until(lambda: os.path.isfile(target), 8))
+        self.page.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').textContent.includes('Exported')")
+        back, _ = usd_io.read_geometry(target)
+        self.assertEqual(back.npoints, self.s.latest_good.geo.npoints)
+        self.assertEqual(back.nprims, self.s.latest_good.geo.nprims)
 
 
 if __name__ == "__main__":
