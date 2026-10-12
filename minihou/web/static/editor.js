@@ -9,7 +9,7 @@
   const SVGNS = "http://www.w3.org/2000/svg";
 
   const S = {
-    graph: { nodes: {} }, rev: -1, path: null, canUndo: false, canRedo: false,
+    graph: { nodes: {} }, rev: -1, path: null, documentId: null, canUndo: false, canRedo: false,
     types: {}, typeList: [], status: null, root: "",
     sel: new Set(), wireSel: null, view: { x: 80, y: 60, k: 1 },
     online: false, framed: false, dragPos: new Map(), mouse: [200, 200],
@@ -58,21 +58,49 @@
     if (!r.ok) throw new Error(data.error || r.statusText);
     return data;
   }
-  async function edit(ops) {
+  const recoveryKey = "minihou.unsent-edits";
+  let recoveredEdits = [];
+  try {
+    const stored = JSON.parse(localStorage.getItem(recoveryKey) || "[]");
+    if (Array.isArray(stored)) recoveredEdits = stored;
+  } catch (e) { /* Keep an in-memory recovery list when storage is unavailable. */ }
+  function stashEdits(ops, context) {
+    recoveredEdits.push({ path: context.path, document_id: context.documentId, ops });
+    let persisted = true;
     try {
-      const r = await api("/api/edit", { ops, origin: "editor" });
+      localStorage.setItem(recoveryKey, JSON.stringify(recoveredEdits));
+    } catch (e) { persisted = false; }
+    recoveryButton();
+    toast(persisted ? "Graph switched before these edits were submitted. Download Unsent edits to recover them for the original graph."
+      : "Unsent edits are kept in this tab only: browser storage is unavailable. Download Unsent edits before closing it.");
+  }
+  function recoveryButton() {
+    if (!recoveredEdits.length || $("#unsent-edits")) return;
+    $("#topbar").append(h("button", { id: "unsent-edits", title: "Download edits rejected after a graph switch, with their original graph paths",
+      onclick: () => {
+        const url = URL.createObjectURL(new Blob([JSON.stringify(recoveredEdits, null, 2)], { type: "application/json" }));
+        const a = h("a", { href: url, download: "minihou-unsent-edits.json" });
+        a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } }, "Unsent edits"));
+  }
+  async function edit(ops, context = { path: S.path, documentId: S.documentId }) {
+    try {
+      const r = await api("/api/edit", { ops, origin: "editor", document_id: context.documentId });
       applySnapshot(r.graph);
       return r;
     } catch (e) {
-      toast(e.message);
+      if (context.documentId !== S.documentId || e.message.includes("Editor graph changed")) stashEdits(ops, context);
+      else toast(e.message);
       return null;
     }
   }
 
   // Parameter changes are coalesced: one request in flight, the latest values win (smooth slider drags).
   const pendingSet = new Map();
+  let pendingContext = null;
   let setInFlight = false;
   function queueSet(id, name, value) {
+    if (!pendingContext) pendingContext = { path: S.path, documentId: S.documentId };
     const p = pendingSet.get(id) || {};
     p[name] = value;
     pendingSet.set(id, p);
@@ -82,8 +110,10 @@
     if (!pendingSet.size) return;
     setInFlight = true;
     const ops = [...pendingSet].map(([id, params]) => ({ op: "set", id, params }));
+    const context = pendingContext;
     pendingSet.clear();
-    await edit(ops);
+    pendingContext = null;
+    await edit(ops, context);
     setInFlight = false;
     if (pendingSet.size) flushSets();
   }
@@ -115,8 +145,12 @@
   }
   function applySnapshot(snap) {
     if (!snap || snap.rev < S.rev) return;
+    if (S.documentId !== null && snap.document_id !== S.documentId && pendingSet.size) {
+      stashEdits([...pendingSet].map(([id, params]) => ({ op: "set", id, params })), pendingContext);
+      pendingSet.clear(); pendingContext = null;
+    }
     const fileChanged = snap.path !== S.path;
-    S.rev = snap.rev; S.graph = snap.graph; S.path = snap.path;
+    S.rev = snap.rev; S.graph = snap.graph; S.path = snap.path; S.documentId = snap.document_id;
     S.canUndo = snap.can_undo; S.canRedo = snap.can_redo;
     for (const id of [...S.sel]) if (!S.graph.nodes[id]) S.sel.delete(id);
     if (S.wireSel && !wireExists(S.wireSel)) S.wireSel = null;
@@ -197,7 +231,7 @@
 
   // ---------------------------------------------------------------- rendering
   function render() {
-    renderNodes(); renderTop(); renderStatus(); renderParams(); scheduleInspect();
+    renderBoxes(); renderNodes(); renderTop(); renderStatus(); renderParams(); scheduleInspect();
     $("#empty-hint").classList.toggle("hidden", Object.keys(S.graph.nodes).length > 0);
   }
   function upstreamOfDisplay() {
@@ -274,6 +308,17 @@
   }
   function renderWires() {
     const kids = [];
+    for (const [end, n] of Object.entries(S.graph.nodes)) {
+      if (n.type !== "loop_end" || nodeOf(n.inputs?.begin)?.type !== "loop_begin") continue;
+      const points = loopRegion(end).map(pos);
+      const x = Math.min(...points.map(p => p[0])) - 22, y = Math.min(...points.map(p => p[1])) - 32;
+      const width = Math.max(...points.map(p => p[0])) + W + 22 - x;
+      const height = Math.max(...points.map(p => p[1])) + H + 22 - y;
+      kids.push(svgEl("rect", { x, y, width, height, rx: 12, class: "loop-region" }));
+      const label = svgEl("text", { x: x + 8, y: y + 15, class: "loop-label" });
+      label.textContent = `${n.inputs.begin} / ${end}: repeat ${n.params?.iterations ?? 3}`;
+      kids.push(label);
+    }
     for (const id of Object.keys(S.graph.nodes)) {
       inputs(id).forEach(([spec, srcs], i) => {
         srcs.forEach((src, k) => {
@@ -281,7 +326,8 @@
           if (drag && drag.pickup && drag.pickup.to === id && drag.pickup.port === spec.name && drag.pickup.from === src) return;
           const d = wirePath(outPortCenter(src), inPortCenter(id, i, k, srcs.length));
           const sel = S.wireSel && S.wireSel.to === id && S.wireSel.port === spec.name && S.wireSel.from === src;
-          kids.push(svgEl("path", { d, class: sel ? "sel" : null }));
+          const pair = nodeOf(id).type === "loop_end" && spec.name === "begin";
+          kids.push(svgEl("path", { d, class: [sel && "sel", pair && "loop-pair"].filter(Boolean).join(" ") }));
           const hit = svgEl("path", { d, class: "hit" });
           hit.dataset.to = id; hit.dataset.port = spec.name; hit.dataset.from = src;
           kids.push(hit);
@@ -315,11 +361,13 @@
     } else { c.className = "status"; txt.textContent = "idle"; }
     const fi = $("#frame-input");
     if (st.frame !== undefined && document.activeElement !== fi && Number(fi.value) !== st.frame) fi.value = st.frame;
+    if (st.frame !== undefined && document.activeElement !== $("#frame-slider")) syncSlider(st.frame);
     const clients = st.clients || [], blender = clients.filter((n) => /^blender/i.test(n));
     const b = $("#blender-status");
     b.className = "status" + (blender.length ? " ok" : "");
     b.querySelector(".text").textContent = blender.length ? "Blender" : "Blender —";
     b.title = clients.length ? "Connected: " + clients.join(", ") : "No Blender connected. Run tools/launch_blender.py, or Connect in Blender's MiniHou tab.";
+    updateBlenderBar(blender.length > 0);
     const bar = $("#errorbar");
     const err = st.ok === false && st.error;
     bar.classList.toggle("hidden", !err);
@@ -327,12 +375,88 @@
     if (err) { bar.textContent = (err.node ? err.node + ": " : "") + err.message; bar.dataset.node = err.node || ""; }
   }
 
+  // ---------------------------------------------------------------- Blender bar: install the add-on, open Blender connected
+  const BAR_KEY = "minihou.blenderbar";                             // "hidden" once dismissed
+  const BB = { info: null, connected: false, forced: false, loading: false };
+  const storedHidden = () => { try { return localStorage.getItem(BAR_KEY) === "hidden"; } catch (e) { return false; } };
+  async function loadBlenderInfo() {
+    if (BB.loading || BB.info) return;
+    BB.loading = true;
+    try { BB.info = await (await fetch("/api/blender")).json(); } catch (e) { BB.info = null; }
+    BB.loading = false;
+    renderBlenderBar();
+  }
+  function updateBlenderBar(connected) {
+    if (BB.connected !== connected) { BB.connected = connected; if (connected) BB.forced = false; }
+    renderBlenderBar();
+  }
+  function renderBlenderBar() {
+    const bar = $("#blender-bar");
+    const show = BB.forced || (!BB.connected && !storedHidden() && S.online !== false);
+    bar.classList.toggle("hidden", !show);
+    document.body.classList.toggle("has-bar", show);
+    if (!show) return;
+    if (!BB.info) { loadBlenderInfo(); return; }
+    const { blenders, addon } = BB.info, pick = $("#bb-pick");
+    pick.classList.toggle("hidden", blenders.length < 2);
+    const keep = pick.value;                                           // a re-render must not forget which Blender was chosen
+    pick.replaceChildren(...blenders.map((b, i) => h("option", { value: String(i) }, `Blender ${b.version || "?"}${b.supported ? "" : " (too old)"}`)));
+    if (keep && Number(keep) < blenders.length) pick.value = keep;
+    $("#bb-install").disabled = !blenders.length || !addon.available;
+    $("#bb-open").disabled = !blenders.length || !addon.available;
+    $("#bb-zip").classList.toggle("hidden", !addon.available);
+    $("#bb-text").textContent = BB.connected ? "Blender is connected." :
+      blenders.length ? "Blender is not connected. Install the add-on once, then open Blender:" :
+        "No Blender found here. Drag the zip onto a Blender window (4.2+), or use Preferences > Add-ons > Install from Disk:";
+    if (!BB.msg) $("#bb-msg").textContent = "";
+  }
+  async function blenderAction(kind) {
+    const idx = Number($("#bb-pick").value || 0), msg = $("#bb-msg");
+    $("#bb-install").disabled = $("#bb-open").disabled = true;
+    msg.textContent = kind === "install" ? "Installing… (Blender starts briefly in the background)" : "Starting Blender…";
+    try {
+      const r = await api("/api/blender/" + kind, { index: idx });
+      msg.textContent = r.message || (r.ok ? "Done." : "Failed.");
+      msg.classList.toggle("err", !r.ok);
+    } catch (e) { msg.textContent = e.message; }
+    BB.msg = true;
+    renderBlenderBar();
+  }
+  $("#bb-install").onclick = () => blenderAction("install");
+  $("#bb-open").onclick = () => blenderAction("launch");
+  $("#bb-close").onclick = () => { BB.forced = false; try { localStorage.setItem(BAR_KEY, "hidden"); } catch (e) { /* ignore */ } renderBlenderBar(); };
+  $("#blender-status").onclick = () => {
+    try { localStorage.removeItem(BAR_KEY); } catch (e) { /* ignore */ }
+    BB.forced = true; BB.msg = false; renderBlenderBar();
+  };
+  $("#bb-zip").addEventListener("dragstart", (e) => {                 // Chrome/Edge turn this into a file when dropped on another app
+    const url = new URL($("#bb-zip").getAttribute("href"), location.href).href;
+    e.dataTransfer.setData("DownloadURL", `application/zip:minihou_link.zip:${url}`);
+    e.dataTransfer.setData("text/uri-list", url);
+    e.dataTransfer.effectAllowed = "copy";
+  });
+
   // ---------------------------------------------------------------- frame (time)
-  async function setFrame(f) {
+  function syncSlider(f) {
+    const sl = $("#frame-slider");
+    if (f > Number(sl.max)) sl.max = Math.ceil(f / 250) * 250;           // the range grows to hold the frame
+    sl.value = Math.max(Number(sl.min), f);
+  }
+  let framePending = null, frameSending = false;
+  async function setFrame(f) {                                          // sends only the latest value while one is in flight
     if (!Number.isFinite(f)) return;
     $("#frame-input").value = f;
-    try { await api("/api/frame", { frame: f }); } catch (e) { /* offline: the status refresh will correct it */ }
+    syncSlider(f);
+    framePending = f;
+    if (frameSending) return;
+    frameSending = true;
+    while (framePending !== null) {
+      const v = framePending; framePending = null;
+      try { await api("/api/frame", { frame: v }); } catch (e) { /* offline: the status refresh will correct it */ }
+    }
+    frameSending = false;
   }
+  $("#frame-slider").addEventListener("input", (e) => setFrame(Number(e.target.value)));
   $("#frame-input").addEventListener("change", (e) => setFrame(Number(e.target.value)));
   $("#frame-prev").onclick = () => setFrame(Number($("#frame-input").value) - 1);
   $("#frame-next").onclick = () => setFrame(Number($("#frame-input").value) + 1);
@@ -373,6 +497,14 @@
     out.push(h("div", { class: "ph" }, nid));
     out.push(h("div", { class: "ptype" }, n.type + (t.category ? " · " + t.category : "") + (t.source ? " · " + relPath(t.source) : "")));
     if (t.doc) out.push(h("div", { class: "pdoc" }, t.doc));
+    if (n.type === "loop_begin" || n.type === "loop_end") {
+      const end = n.type === "loop_end" ? id : Object.keys(S.graph.nodes).find(k => nodeOf(k).type === "loop_end" && nodeOf(k).inputs?.begin === id);
+      const begin = end && nodeOf(end).inputs?.begin;
+      out.push(h("div", { class: "loop-info" }, end && nodeOf(begin)?.type === "loop_begin"
+        ? [h("div", null, `Pair: ${begin} / ${end}`), h("button", { onclick: () => select(loopRegion(end)) }, "Select loop block"),
+           h("button", { onclick: () => { select([end]); edit([{ op: "display", id: end }]); } }, "Display Loop End")]
+        : "Unpaired loop: connect Begin to End's begin port and the body to geo."));
+    }
     out.push(h("div", { class: "perr", dataset: { role: "err" }, style: { display: nodeErrorText(id) ? "" : "none" } }, nodeErrorText(id)));
     const isDisp = displayNode() === id;
     out.push(h("div", { class: "pactions" },
@@ -391,6 +523,10 @@
       }
     }
     if (t.params.length) out.push(h("div", { class: "section" }, "Parameters"));
+    if (n.type === "rbd_solver") out.push(h("button", {
+      onclick: () => queueSet(id, "reset", Number(n.params?.reset || 0) + 1),
+      title: "Discard this simulation and replay from its initial geometry"
+    }, "Reset simulation"));
     for (const p of t.params) out.push(paramRow(id, p));
     out.push(h("div", { class: "section" }, "Note"));
     out.push(h("div", { class: "pw" }, h("input", { type: "text", value: n.comment || "", placeholder: "comment shown above the node",
@@ -550,7 +686,165 @@
   function scheduleInspect() {
     clearTimeout(inspectTimer);
     inspectTimer = setTimeout(runInspect, 150);
+    schedulePreview();
   }
+
+  // ---------------------------------------------------------------- 3-D preview of the selected (or display) node
+  const pvMsg = (text) => { const m = $("#pv-msg"); m.textContent = text || ""; m.classList.toggle("hidden", !text); };
+  const pv = window.MiniHouPreview ? window.MiniHouPreview.create($("#pv-canvas"), pvMsg) : null;
+  let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null;
+  function schedulePreview() {
+    if (!pv || !pv.ok) return;
+    clearTimeout(pvTimer);
+    pvTimer = setTimeout(runPreview, 200);
+  }
+  async function runPreview() {
+    const ids = [...S.sel].filter((id) => nodeOf(id));
+    const node = ids.length === 1 ? ids[0] : displayNode();
+    $("#pv-node").textContent = node ? "· " + node : "";
+    if (!node) { pv.clear(); pvMsg(""); pvKey = null; return; }
+    const key = `${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}`;
+    if (key === pvKey) return;
+    pvKey = key;
+    const seq = ++pvSeq;
+    let buf;
+    try {
+      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node }) });
+      buf = await r.arrayBuffer();
+    } catch (e) { pvKey = null; return; }
+    if (seq !== pvSeq) return;
+    const { head, arrays } = window.MiniHouPreview.parse(buf);
+    if (!arrays) {
+      pv.clear();
+      pvMsg(head.error ? (head.error.node && head.error.node !== node ? head.error.node + ": " : "") + head.error.message : "No preview");
+      return;
+    }
+    const empty = !head.points;
+    pvMsg(empty ? "No geometry" : head.truncated ? "Showing part of a very large geometry." : "");
+    pv.set(head, arrays, pvNode === node && pvPath === S.path);
+    pv.setHandles(head.handles || []);
+    updateToolButtons();
+    pvNode = node; pvPath = S.path;
+  }
+
+  // ---- selecting points, edges and faces in the 3-D view and turning the selection into nodes (inserted after the viewed node)
+  const rangePattern = (nums) => {                                  // [0,1,2,5,7,8] -> "0-2 5 7-8"
+    const out = [];
+    for (let i = 0; i < nums.length; i++) {
+      let j = i;
+      while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
+      out.push(j > i ? `${nums[i]}-${nums[j]}` : String(nums[i]));
+      i = j;
+    }
+    return out.join(" ");
+  };
+  const edgePattern = (edges) => edges.map(([a, b]) => `${a}-${b}`).join(" ");
+  const SELECTION_ACTIONS = {
+    edge: [{ label: "Bevel", key: "b", type: "polybevel", title: "Bevel the selected edges (a loop, or edges that meet or reach a border)",
+      params: (s) => ({ edges: edgePattern(s.edges) }) }],
+    face: [
+      { label: "Extrude", key: "e", type: "polyextrude", params: (s) => ({ group: rangePattern(s.faces), distance: 0.3 }) },
+      { label: "Inset", type: "polyextrude", params: (s) => ({ group: rangePattern(s.faces), distance: 0, inset: 0.15 }) },
+      { label: "Reverse", type: "reverse", params: (s) => ({ group: rangePattern(s.faces) }) },
+      { label: "Group", type: "group_create", params: (s) => ({ name: "faces", domain: "primitives", method: "pattern", pattern: rangePattern(s.faces) }) },
+      { label: "Delete", key: "x", type: "blast", params: (s) => ({ group: rangePattern(s.faces), domain: "primitives" }) }],
+    point: [
+      { label: "Group", type: "group_create", params: (s) => ({ name: "points", domain: "points", method: "pattern", pattern: rangePattern(s.points) }) },
+      { label: "Delete", key: "x", type: "blast", params: (s) => ({ group: rangePattern(s.points), domain: "points" }) }],
+  };
+  const SEL_KEY = { point: "points", edge: "edges", face: "faces" };
+  let pvSelection = { mode: "view", points: [], edges: [], faces: [] };
+  async function applySelectionAction(a) {
+    const s = pvSelection, node = pvNode;
+    if (!node || !nodeOf(node)) { toast("Nothing to attach the new node to."); return; }
+    const params = a.params(s);
+    if ((params.group || params.pattern || params.edges || "").length > 30000) { toast("That selection is too large to write into a node; select fewer elements."); return; }
+    const r = await edit([{ op: "insert", after: node, type: a.type, params }]);
+    if (r) { pv.clearSelection(); select([r.results[0].id]); }
+  }
+  function renderSelectionTools(s) {
+    pvSelection = s;
+    const n = (s[SEL_KEY[s.mode]] || []).length;
+    $("#pv-selinfo").textContent = s.mode === "view" ? "" : `${n} ${SEL_KEY[s.mode].replace(/s$/, "")}${n === 1 ? "" : "s"} selected`;
+    document.querySelectorAll("#preview [data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === s.mode));
+    const box = $("#pv-actions");
+    const acts = n ? SELECTION_ACTIONS[s.mode] || [] : [];
+    box.classList.toggle("hidden", !acts.length);
+    box.replaceChildren(...acts.map((a) => h("button", { title: a.title || `${a.label} the selection: adds a ${a.type} node after ${pvNode || "the viewed node"}`,
+      dataset: { action: a.label }, onclick: () => applySelectionAction(a) }, a.label + (a.key ? ` (${a.key.toUpperCase()})` : ""))));
+  }
+  function updateToolButtons() {
+    const has = pv.hasToolHandles();
+    $("#pv-xform").classList.toggle("hidden", !has);
+    document.querySelectorAll("#pv-xform [data-tool]").forEach((b) => b.classList.toggle("on", b.dataset.tool === pv.tool));
+  }
+  function setTool(t) { pv.setTool(t); updateToolButtons(); }
+  function toggleOrtho() {
+    const on = pv.toggleOrtho();
+    $("#pv-ortho").textContent = on ? "Ortho" : "Persp";
+    $("#pv-ortho").classList.toggle("on", on);
+  }
+  function wireSelectionTools() {
+    pv.onSelect = renderSelectionTools;
+    // viewport handles: arrows in the view that scrub a parameter of the viewed node
+    const handleValue = (h) => {
+      const n = nodeOf(pvNode);
+      if (!n) return NaN;
+      const spec = (typeOf(pvNode).params || []).find((p) => p.name === h.param);
+      const v = n.params && n.params[h.param] !== undefined ? n.params[h.param] : spec ? spec.default : undefined;
+      return h.comp === null || h.comp === undefined ? Number(v) : Number(Array.isArray(v) ? v[h.comp] : NaN);
+    };
+    let handleBase = null;
+    pv.onHandleStart = (h) => {
+      const n = nodeOf(pvNode), spec = (typeOf(pvNode).params || []).find((p) => p.name === h.param);
+      const cur = n && n.params && n.params[h.param] !== undefined ? n.params[h.param] : spec ? spec.default : undefined;
+      handleBase = Array.isArray(cur) ? cur.slice() : null;               // the other components of a vector stay as they were
+      return handleValue(h);
+    };
+    pv.onHandle = (h, value) => {
+      if (!pvNode) return;
+      if (h.comp === null || h.comp === undefined) queueSet(pvNode, h.param, value);
+      else if (handleBase) { const v = handleBase.slice(); v[h.comp] = value; queueSet(pvNode, h.param, v); }
+    };
+    document.querySelectorAll("#preview [data-mode]").forEach((b) => { b.onclick = () => pv.setMode(b.dataset.mode); });
+    let over = false;
+    const wrap = $("#pv-canvas").parentElement;                         // the canvas and the overlays on it (gizmo, handles) count as one
+    wrap.addEventListener("pointerenter", () => { over = true; });
+    wrap.addEventListener("pointerleave", () => { over = false; });
+    document.addEventListener("keydown", (e) => {
+      const tag = (e.target.tagName || "").toLowerCase();
+      if (!over || tag === "input" || tag === "textarea" || tag === "select") return;
+      const nav = { Numpad1: ["front"], Numpad3: ["right"], Numpad7: ["top"] }[e.code];          // Blender-style view keys; Ctrl = the opposite side
+      if (nav && !e.altKey && !e.metaKey) { pv.viewAxis(nav[0], e.ctrlKey); e.preventDefault(); e.stopImmediatePropagation(); return; }
+      if (e.code === "Numpad5" || e.code === "NumpadDecimal" || e.key === "Home") {
+        if (e.code === "Numpad5") toggleOrtho(); else pv.frameSelection();
+        e.preventDefault(); e.stopImmediatePropagation(); return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const k = e.key.toLowerCase();
+      const mode = { "1": "point", "2": "edge", "3": "face" }[k];
+      if (mode) { pv.setMode(mode); e.preventDefault(); e.stopImmediatePropagation(); return; }
+      if (k === "escape") {
+        if (pvSelection.mode !== "view" && !(pvSelection[SEL_KEY[pvSelection.mode]] || []).length) pv.setMode("view"); else pv.clearSelection();
+        e.preventDefault(); e.stopImmediatePropagation(); return;
+      }
+      const act = (SELECTION_ACTIONS[pvSelection.mode] || []).find((a) => a.key === k);
+      if (act && (pvSelection[SEL_KEY[pvSelection.mode]] || []).length) { applySelectionAction(act); e.preventDefault(); e.stopImmediatePropagation(); }
+      else if ((k === "w" || k === "e" || k === "r") && pv.hasToolHandles()) { setTool({ w: "move", e: "rotate", r: "scale" }[k]); e.preventDefault(); e.stopImmediatePropagation(); }
+      else if (k === "a" && pvSelection.mode !== "view") { pv.selectAll(); e.preventDefault(); e.stopImmediatePropagation(); }
+    }, true);
+  }
+  if (pv && pv.ok) {
+    for (const [id, key] of [["#pv-shaded", "shaded"], ["#pv-edges", "edges"], ["#pv-points", "points"]]) {
+      $(id).checked = pv.opt[key];
+      $(id).onchange = (e) => { pv.opt[key] = e.target.checked; pv.redraw(); };
+    }
+    $("#pv-frame").onclick = () => pv.frameSelection();
+    document.querySelectorAll("#preview [data-view]").forEach((b) => { b.onclick = () => pv.viewAxis(b.dataset.view, false); });
+    $("#pv-ortho").onclick = () => toggleOrtho();
+    document.querySelectorAll("#pv-xform [data-tool]").forEach((b) => { b.onclick = () => setTool(b.dataset.tool); });
+    wireSelectionTools();
+  } else { $("#preview .pv-opts").classList.add("hidden"); }
   async function runInspect() {
     const ids = [...S.sel].filter((id) => nodeOf(id));
     const node = ids.length === 1 ? ids[0] : displayNode();
@@ -566,6 +860,19 @@
     if (seq !== inspectSeq) return;
     $("#info-body").replaceChildren(...infoView(r));
   }
+  function flowView(r) {                                   // what this node did to the attributes of its inputs
+    const f = r.flow;
+    if (!f) return [];
+    const row = (sign, cls, a, extra) => h("div", { class: "flow " + cls, title: a.domain + (a.type ? " " + a.type : "") },
+      h("span", { class: "sign" }, sign), a.name, h("span", { class: "muted" }, " " + (extra || a.domain)));
+    const rows = [
+      ...f.added.map((a) => row("+", "add", a)), ...f.modified.map((a) => row("~", "mod", a)),
+      ...f.moved.map((a) => row("→", "mov", a, `${a.from} → ${a.domain}`)), ...f.removed.map((a) => row("−", "del", a))];
+    const reads = r.wrangle && r.wrangle.reads.length ? [h("div", { class: "muted flow-note" }, "reads " + r.wrangle.reads.map((n) => "@" + n).join(" "))] : [];
+    const topo = f.topology === "changed" ? [h("div", { class: "muted flow-note" }, `topology changed (${f.counts.points[0]}→${f.counts.points[1]} points, ${f.counts.prims[0]}→${f.counts.prims[1]} prims)`)] : [];
+    if (!rows.length && !reads.length && !topo.length) return [];
+    return [h("div", { class: "section" }, "Changes from inputs"), ...rows, ...reads, ...topo];
+  }
   function infoView(r) {
     if (!r.ok) return [h("div", { class: "perr" }, (r.error.node && r.error.node !== r.node ? r.error.node + ": " : "") + r.error.message)];
     const rows = [["Points", fmt(r.points)], ["Primitives", fmt(r.prims)], ["Vertices", fmt(r.vertices)]];
@@ -578,6 +885,7 @@
       h("td", null, a.name, h("span", { class: "muted" }, " " + a.domain)),
       h("td", null, a.domain === "detail" ? String(a.value) : `${a.type}${a.components > 1 ? "×" + a.components : ""}` +
         (a.min ? `  [${a.min.join(",")}] … [${a.max.join(",")}]` : ""))))));
+    out.push(...flowView(r));
     if (r.blender) {                     // blender_object: what the add-on read (native data, skips)
       const b = r.blender, rows = [];
       if (b.vertex_groups && b.vertex_groups.length) rows.push(["Vertex groups", b.vertex_groups.join(", ")]);
@@ -609,6 +917,15 @@
     if (r) select([]);
   }
   async function duplicate(ids) {
+    // Copying a boundary means copying its complete body, including nested pairs.
+    const expanded = new Set(ids);
+    for (const id of ids) {
+      const n = nodeOf(id);
+      const end = n.type === "loop_end" ? id : n.type === "loop_begin"
+        ? Object.keys(S.graph.nodes).find(k => nodeOf(k).type === "loop_end" && nodeOf(k).inputs?.begin === id) : null;
+      if (end) for (const member of loopRegion(end)) expanded.add(member);
+    }
+    ids = [...expanded];
     const map = {}, taken = new Set(), ops = [];
     for (const id of ids) { map[id] = uniqueId(id.replace(/\d+$/, "") + "_", taken); taken.add(map[id]); }
     for (const id of ids) {
@@ -621,6 +938,85 @@
     const r = await edit(ops);
     if (r) select(Object.values(map));
   }
+  function loopRegion(end) {
+    const begin = nodeOf(end)?.inputs?.begin;
+    if (!nodeOf(begin)) return [end];
+    const ancestors = new Set(), pending = [end];
+    while (pending.length) {
+      const id = pending.pop();
+      if (ancestors.has(id) || !nodeOf(id)) continue;
+      ancestors.add(id);
+      for (const [, srcs] of inputs(id)) pending.push(...srcs);
+    }
+    const members = new Set([begin]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const id of ancestors) if (!members.has(id) && inputs(id).some(([, srcs]) => srcs.some(s => members.has(s)))) {
+        members.add(id); changed = true;
+      }
+    }
+    return [...members];
+  }
+  // ---- copy / cut / paste: nodes travel as JSON text, so they can move between graphs and editor windows
+  const CLIP_KEY = "minihou.clip", CLIP_LIMIT = 500;
+  function clipboardText(ids) {
+    const keep = new Set(ids), nodes = {};
+    for (const id of ids) {
+      const n = nodeOf(id), ins = {};
+      for (const [spec, srcs] of inputs(id)) {
+        const inner = srcs.filter((s) => keep.has(s));
+        if (inner.length) ins[spec.name] = Array.isArray((n.inputs || {})[spec.name]) ? inner : inner[0];
+      }
+      nodes[id] = { type: n.type, params: n.params || {}, inputs: ins, pos: pos(id), comment: n.comment || undefined };
+    }
+    return JSON.stringify({ minihou: "nodes", version: 1, nodes });
+  }
+  function parseClipboard(text) {
+    let d;
+    try { d = JSON.parse(text); } catch (e) { return null; }
+    if (!d || d.minihou !== "nodes" || !d.nodes || typeof d.nodes !== "object" || Array.isArray(d.nodes)) return null;
+    return Object.keys(d.nodes).length <= CLIP_LIMIT ? d : null;
+  }
+  function copySelection(e) {
+    const ids = [...S.sel].filter((id) => nodeOf(id));
+    if (!ids.length) return false;
+    const text = clipboardText(ids);
+    try { localStorage.setItem(CLIP_KEY, text); } catch (err) { /* storage unavailable */ }
+    if (e && e.clipboardData) { e.clipboardData.setData("text/plain", text); e.preventDefault(); }
+    toast(`Copied ${ids.length} node${ids.length > 1 ? "s" : ""}`, false);
+    return true;
+  }
+  async function pasteNodes(text) {
+    const d = parseClipboard(text);
+    if (!d) return false;
+    const ids = Object.keys(d.nodes).filter((id) => d.nodes[id] && typeof d.nodes[id] === "object");
+    const unknown = [...new Set(ids.map((id) => d.nodes[id].type).filter((t) => !S.types[t]))];
+    const ok = ids.filter((id) => S.types[d.nodes[id].type]);
+    if (unknown.length) toast("Not pasted (unknown node type): " + unknown.join(", "));
+    if (!ok.length) return true;
+    const map = {}, taken = new Set(), okSet = new Set(ok);
+    for (const id of ok) { map[id] = uniqueId(id.replace(/\d+$/, "") || d.nodes[id].type, taken); taken.add(map[id]); }
+    const where = canvas.getBoundingClientRect(), inside = S.mouse[0] >= where.left && S.mouse[0] <= where.right &&
+      S.mouse[1] >= where.top && S.mouse[1] <= where.bottom;
+    const poss = ok.map((id) => d.nodes[id].pos).filter((p) => Array.isArray(p) && p.length === 2);
+    const x0 = poss.length ? Math.min(...poss.map((p) => p[0])) : 0, y0 = poss.length ? Math.min(...poss.map((p) => p[1])) : 0;
+    const [mx, my] = inside ? toWorld(...S.mouse) : [x0 + 40, y0 + 40];
+    const ops = ok.map((id) => {
+      const n = d.nodes[id], p = Array.isArray(n.pos) && n.pos.length === 2 ? n.pos : [x0, y0];
+      const op = { op: "add", id: map[id], type: n.type, params: n.params || {}, pos: [Math.round(mx + p[0] - x0), Math.round(my + p[1] - y0)] };
+      if (n.comment) op.comment = String(n.comment);
+      return op;
+    });
+    for (const id of ok) {
+      for (const [port, ref] of Object.entries(d.nodes[id].inputs || {})) {
+        for (const src of Array.isArray(ref) ? ref : [ref]) if (okSet.has(src)) ops.push({ op: "connect", from: map[src], to: map[id], port });
+      }
+    }
+    const r = await edit(ops);
+    if (r) select(Object.values(map));
+    return true;
+  }
   async function deleteSelection() {
     if (S.wireSel) {
       const w = S.wireSel; S.wireSel = null;
@@ -632,8 +1028,55 @@
     if (r) frame(false);
   }
   async function undo(redo) {
-    try { const r = await api(redo ? "/api/redo" : "/api/undo", { origin: "editor" }); applySnapshot(r.graph); }
+    try { const r = await api(redo ? "/api/redo" : "/api/undo", { origin: "editor", document_id: S.documentId }); applySnapshot(r.graph); }
     catch (e) { toast(e.message); }
+  }
+
+  // ---------------------------------------------------------------- network boxes
+  const BOX_COLORS = ["#5b7fb5", "#5aa06e", "#c98f3a", "#b5585b", "#8a63b5", "#4aa3a8"];
+  const boxesEl = $("#boxes");
+  const boxRect = (b) => S.boxDrag && S.boxDrag.id === b.id ? S.boxDrag : { pos: b.pos, size: b.size };
+  function boxMembers(b) {                                    // nodes whose centre is inside the box
+    const [x, y] = b.pos, [w, hh] = b.size;
+    return Object.keys(S.graph.nodes).filter((id) => { const [nx, ny] = pos(id); return nx + W / 2 >= x && nx + W / 2 <= x + w && ny + H / 2 >= y && ny + H / 2 <= y + hh; });
+  }
+  function renderBoxes() {
+    const list = S.graph.boxes || [], keep = new Set();
+    for (const b of list) {
+      keep.add(b.id);
+      let el = boxesEl.querySelector(`.netbox[data-id="${CSS.escape(b.id)}"]`);
+      if (!el) {
+        el = h("div", { class: "netbox", dataset: { id: b.id } },
+          h("div", { class: "hdr" }, h("span", { class: "dot", title: "Change colour" }), h("span", { class: "title" }), h("span", { class: "x", title: "Delete the box (nodes stay)" }, "×")),
+          h("div", { class: "grip", title: "Resize" }));
+        boxesEl.append(el);
+      }
+      const r = boxRect(b);
+      el.style.left = r.pos[0] + "px"; el.style.top = r.pos[1] + "px";
+      el.style.width = r.size[0] + "px"; el.style.height = r.size[1] + "px";
+      el.style.setProperty("--bc", b.color || BOX_COLORS[0]);
+      const t = el.querySelector(".title");
+      if (t.textContent !== (b.title || "")) t.textContent = b.title || "";
+      t.title = "Double-click to rename";
+    }
+    for (const el of [...boxesEl.children]) if (!keep.has(el.dataset.id)) el.remove();
+  }
+  function boxById(id) { return (S.graph.boxes || []).find((b) => b.id === id); }
+  async function addBox() {
+    const ids = [...S.sel].filter((id) => nodeOf(id));
+    let op;
+    if (ids.length) op = { op: "box_add", around: ids, title: "Box" };
+    else {
+      const r = canvas.getBoundingClientRect(), [x, y] = toWorld(r.left + r.width / 2, r.top + r.height / 2);
+      op = { op: "box_add", pos: [Math.round(x - 150), Math.round(y - 100)], size: [300, 200], title: "Box" };
+    }
+    await edit([op]);
+  }
+  async function renameBox(id) {
+    const b = boxById(id);
+    if (!b) return;
+    const t = prompt("Box title:", b.title || "");
+    if (t !== null) await edit([{ op: "box_set", id, title: t }]);
   }
 
   // ---------------------------------------------------------------- Tab menu
@@ -653,7 +1096,8 @@
   function closeMenu() { $("#tabmenu").classList.add("hidden"); menuCtx = null; canvas.focus({ preventScroll: true }); }
   function fillMenu(q) {
     q = q.trim().toLowerCase();
-    let list = S.typeList;
+    let list = [{ name: "loop_block", category: "flow", inputs: [{ name: "geo" }],
+      doc: "Insert paired Loop Begin / Transform body / Loop End (repeat N times)" }, ...S.typeList];
     if (menuCtx && (menuCtx.from || menuCtx.fromSel)) list = list.filter((t) => t.inputs.length);   // must accept a wire
     if (q) {
       const score = (t) => (t.name.startsWith(q) ? 0 : t.name.includes(q) ? 1 : (t.category || "").includes(q) ? 2 : (t.doc || "").toLowerCase().includes(q) ? 3 : 9);
@@ -684,6 +1128,16 @@
     const id = uniqueId(t.name);
     let [x, y] = ctx.world || toWorld(...S.mouse);
     x -= W / 2; y -= 12;
+    if (t.name === "loop_block") {
+      const source = ctx.from || ctx.fromSel;
+      if (ctx.fromSel) { const p = pos(ctx.fromSel); x = p[0] + 190; y = p[1] + 110; }
+      const r = await edit([{ op: "loop", from: source, to: ctx.feeds?.to, port: ctx.feeds?.port, pos: [x, y] }]);
+      if (r) {
+        const end = r.results[0].end;
+        select([end]);
+      }
+      return;
+    }
     const op = { op: "add", type: t.name, id, pos: [x, y] };
     const ops = [op];
     const first = t.inputs[0] && t.inputs[0].name;
@@ -713,6 +1167,25 @@
     canvas.focus({ preventScroll: true });
     const t = e.target;
     const port = t.closest(".port"), nodeEl = t.closest(".node");
+    const boxEl = t.closest(".netbox");
+    if (boxEl && e.button === 0 && !port && !nodeEl) {
+      const b = boxById(boxEl.dataset.id);
+      if (b && t.closest(".dot")) {
+        const i = Math.max(0, BOX_COLORS.indexOf(b.color));
+        edit([{ op: "box_set", id: b.id, color: BOX_COLORS[(i + 1) % BOX_COLORS.length] }]);
+        return;
+      }
+      if (b && t.closest(".x")) { edit([{ op: "box_remove", id: b.id }]); return; }
+      if (b && (t.closest(".hdr") || t.closest(".grip"))) {
+        const [wx, wy] = toWorld(e.clientX, e.clientY);
+        const members = t.closest(".grip") ? [] : boxMembers(b);
+        drag = { kind: t.closest(".grip") ? "boxresize" : "boxmove", id: b.id, wx, wy, pos: b.pos.slice(), size: b.size.slice(),
+          ids: members, start: new Map(members.map((i) => [i, pos(i).slice()])), moved: false };
+        e.preventDefault();
+        window.addEventListener("pointermove", onDrag); window.addEventListener("pointerup", onDrop);
+        return;
+      }
+    }
     if (e.button === 1 || (e.button === 0 && !nodeEl && !t.classList.contains("hit") && !e.shiftKey)) {
       drag = { kind: "pan", x0: e.clientX, y0: e.clientY, vx: S.view.x, vy: S.view.y, moved: false };
       canvas.classList.add("panning");
@@ -765,6 +1238,16 @@
       for (const id of drag.ids) { const [x, y] = drag.start.get(id); S.dragPos.set(id, [Math.round(x + dx), Math.round(y + dy)]); }
       for (const id of drag.ids) { const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`); if (el) { const [x, y] = pos(id); el.style.left = x + "px"; el.style.top = y + "px"; } }
       renderWires();
+    } else if (drag.kind === "boxmove" || drag.kind === "boxresize") {
+      const [wx, wy] = toWorld(e.clientX, e.clientY), dx = wx - drag.wx, dy = wy - drag.wy;
+      if (Math.abs(dx) + Math.abs(dy) > 1) drag.moved = true;
+      if (drag.kind === "boxmove") {
+        S.boxDrag = { id: drag.id, pos: [Math.round(drag.pos[0] + dx), Math.round(drag.pos[1] + dy)], size: drag.size };
+        for (const id of drag.ids) { const [x, y] = drag.start.get(id); S.dragPos.set(id, [Math.round(x + dx), Math.round(y + dy)]); }
+        for (const id of drag.ids) { const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`); if (el) { const [x, y] = pos(id); el.style.left = x + "px"; el.style.top = y + "px"; } }
+        renderWires();
+      } else S.boxDrag = { id: drag.id, pos: drag.pos, size: [Math.max(80, Math.round(drag.size[0] + dx)), Math.max(60, Math.round(drag.size[1] + dy))] };
+      renderBoxes();
     } else if (drag.kind === "wire" || drag.kind === "wire-rev") {
       const r = canvas.getBoundingClientRect();
       const m = [e.clientX - r.left, e.clientY - r.top];
@@ -796,6 +1279,21 @@
     canvas.classList.remove("panning", "wiring");
     document.querySelectorAll(".port.target").forEach((el) => el.classList.remove("target"));
     if (!d) return;
+    if (d.kind === "boxmove" || d.kind === "boxresize") {
+      const fin = S.boxDrag; S.boxDrag = null;
+      if (!d.moved || !fin) { S.dragPos.clear(); renderBoxes(); return; }
+      const ops = [];
+      if (d.kind === "boxmove") {
+        const positions = {};
+        for (const id of d.ids) positions[id] = pos(id);
+        if (d.ids.length) ops.push({ op: "move", positions });
+        ops.push({ op: "box_set", id: d.id, pos: fin.pos });
+      } else ops.push({ op: "box_set", id: d.id, size: fin.size });
+      const r = await edit(ops);
+      S.dragPos.clear();
+      if (!r) { renderBoxes(); renderNodes(); }
+      return;
+    }
     if (d.kind === "pan") {
       if (!d.moved && e.button === 0) { S.sel.clear(); S.wireSel = null; renderNodes(); renderParams(); scheduleInspect(); }
     } else if (d.kind === "move") {
@@ -832,7 +1330,11 @@
       select(hits, true);
     }
   }
-  canvas.addEventListener("dblclick", (e) => { if (!e.target.closest(".node")) openMenu(e.clientX, e.clientY, { world: toWorld(e.clientX, e.clientY) }); });
+  canvas.addEventListener("dblclick", (e) => {
+    const hdr = e.target.closest(".netbox .title");
+    if (hdr) { renameBox(hdr.closest(".netbox").dataset.id); e.stopImmediatePropagation(); }
+  });
+  canvas.addEventListener("dblclick", (e) => { if (!e.target.closest(".node") && !e.target.closest(".netbox")) openMenu(e.clientX, e.clientY, { world: toWorld(e.clientX, e.clientY) }); });
   canvas.addEventListener("contextmenu", (e) => { e.preventDefault(); if (!e.target.closest(".node")) openMenu(e.clientX, e.clientY, { world: toWorld(e.clientX, e.clientY) }); });
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
@@ -872,7 +1374,20 @@
     else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelection(); }
     else if (e.key === "f" || e.key === "F") frame(true);
     else if (e.key === "l" || e.key === "L") tidy();
+    else if ((e.key === "o" || e.key === "O") && !mod) addBox();
     else if (e.key === "?") $("#help").classList.toggle("hidden");
+  });
+  const typing = (el) => ["input", "textarea", "select"].includes((el.tagName || "").toLowerCase()) || el.isContentEditable;
+  document.addEventListener("copy", (e) => { if (!typing(e.target)) copySelection(e); });
+  document.addEventListener("cut", (e) => {
+    if (typing(e.target) || !copySelection(e)) return;
+    removeNodes([...S.sel]);
+  });
+  document.addEventListener("paste", (e) => {
+    if (typing(e.target)) return;
+    let text = e.clipboardData ? e.clipboardData.getData("text/plain") : "";
+    if (!parseClipboard(text)) { try { text = localStorage.getItem(CLIP_KEY) || ""; } catch (err) { text = ""; } }
+    if (parseClipboard(text)) { e.preventDefault(); pasteNodes(text); }
   });
   $("#tab-search").addEventListener("input", (e) => fillMenu(e.target.value));
   $("#tab-search").addEventListener("blur", () => setTimeout(() => { if (document.activeElement !== $("#tab-search")) $("#tabmenu").classList.add("hidden"); }, 100));
@@ -883,6 +1398,7 @@
   $("#add-btn").onclick = (e) => { const r = canvas.getBoundingClientRect(); openMenu(e.clientX, e.clientY + 20, { world: toWorld(r.left + r.width / 2, r.top + r.height / 2) }); };
   $("#help-btn").onclick = () => $("#help").classList.toggle("hidden");
   $("#tidy-btn").onclick = () => tidy();
+  $("#box-btn").onclick = () => addBox();
   $("#info-detail").onchange = () => { inspectKey = null; scheduleInspect(); };
   $("#errorbar").onclick = () => { const id = $("#errorbar").dataset.node; if (id && nodeOf(id)) { select([id]); frame(true); } };
   $("#file-btn").onclick = async (e) => {
@@ -911,21 +1427,94 @@
     if (!name.toLowerCase().endsWith(".json")) name += ".json";
     openFile(name, true);
   }
-  (() => {
-    const side = $("#side");
-    try { const w = +localStorage.getItem("minihou.side"); if (w > 200) side.style.width = w + "px"; } catch (e) { /* storage unavailable */ }
-    $("#splitter").addEventListener("pointerdown", (e) => {
-      const x0 = e.clientX, w0 = side.getBoundingClientRect().width;
-      const move = (ev) => { side.style.width = Math.max(260, Math.min(innerWidth * 0.7, w0 - (ev.clientX - x0))) + "px"; };
-      const up = () => {
-        window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
-        try { localStorage.setItem("minihou.side", parseInt(side.style.width, 10)); } catch (err) { /* ignore */ }
-      };
-      window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  // ---------------------------------------------------------------- layout: graph, 3-D view and parameter panel are resizable panes
+  const layout = (() => {
+    const KEY = "minihou.layout";
+    const work = $("#work"), graphPane = $("#canvas"), viewPane = $("#preview"), side = $("#side"), params = $("#params"), info = $("#info");
+    const L = { viewFrac: 0.5, dir: "row", swap: false, max: null, side: true, sideW: 360, paramsFrac: 0.6 };
+    try { Object.assign(L, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) { /* storage unavailable or damaged */ }
+    L.viewFrac = Math.min(0.92, Math.max(0.08, +L.viewFrac || 0.5));
+    L.paramsFrac = Math.min(0.9, Math.max(0.1, +L.paramsFrac || 0.6));
+    L.sideW = Math.max(220, +L.sideW || 360);
+    if (L.dir !== "col") L.dir = "row";
+    if (L.max !== "graph" && L.max !== "view") L.max = null;
+    const save = () => { try { localStorage.setItem(KEY, JSON.stringify(L)); } catch (e) { /* ignore */ } };
+    let redrawTimer = 0;
+    function apply() {
+      work.classList.toggle("col", L.dir === "col");
+      work.classList.toggle("max-graph", L.max === "graph");
+      work.classList.toggle("max-view", L.max === "view");
+      document.body.classList.toggle("side-hidden", !L.side);
+      const first = L.swap ? viewPane : graphPane, second = L.swap ? graphPane : viewPane;
+      first.style.order = 0; $("#work-split").style.order = 1; second.style.order = 2;
+      const f = L.swap ? L.viewFrac : 1 - L.viewFrac;                                 // share of the first pane
+      first.style.flex = `0 0 calc(${(f * 100).toFixed(3)}% - 2.5px)`;
+      second.style.flex = "1 1 0";
+      for (const p of [graphPane, viewPane]) p.style.flex = L.max ? "1 1 0" : p.style.flex;
+      side.style.width = innerWidth > 760 ? L.sideW + "px" : "";
+      params.style.flex = `0 0 ${(L.paramsFrac * 100).toFixed(2)}%`;
+      info.style.flex = "1 1 0";
+      document.querySelectorAll("#topbar [data-layout]").forEach((b) => {
+        const want = { graph: 0.28, split: 0.5, view: 0.78 }[b.dataset.layout];
+        b.classList.toggle("on", !L.max && Math.abs(L.viewFrac - want) < 0.02);
+      });
+      $("#pv-max").classList.toggle("on", L.max === "view");
+      $("#lay-side").classList.toggle("on", L.side);
+      if (pv) pv.redraw();
+      clearTimeout(redrawTimer); redrawTimer = setTimeout(() => { if (pv) pv.redraw(); }, 60);
+    }
+    function set(patch) {
+      Object.assign(L, patch); apply(); save();
+      if (L.max !== "view") setTimeout(() => frame(false), 30);                         // the graph pane changed shape: show all of it again
+    }
+    function dragSplit(el, onMove, cursorClass) {
+      el.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        document.body.classList.add("dragging-split"); el.classList.add("active");
+        const move = (ev) => { onMove(ev); };
+        const up = () => {
+          window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up);
+          document.body.classList.remove("dragging-split"); el.classList.remove("active"); save();
+        };
+        window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
+      });
+    }
+    dragSplit($("#work-split"), (ev) => {
+      const r = work.getBoundingClientRect();
+      const p = L.dir === "col" ? (ev.clientY - r.top) / r.height : (ev.clientX - r.left) / r.width;      // where the first pane ends
+      const f = Math.min(0.92, Math.max(0.08, p));
+      L.viewFrac = L.swap ? f : 1 - f; apply();
     });
+    dragSplit($("#splitter"), (ev) => { L.sideW = Math.round(Math.max(220, Math.min(innerWidth * 0.7, innerWidth - ev.clientX))); apply(); });
+    dragSplit($("#side-split"), (ev) => {
+      const r = side.getBoundingClientRect();
+      L.paramsFrac = Math.min(0.9, Math.max(0.1, (ev.clientY - r.top) / r.height)); apply();
+    });
+    document.querySelectorAll("#topbar [data-layout]").forEach((b) => {
+      b.onclick = () => set({ viewFrac: { graph: 0.28, split: 0.5, view: 0.78 }[b.dataset.layout], max: null });
+    });
+    $("#lay-dir").onclick = () => set({ dir: L.dir === "row" ? "col" : "row" });
+    $("#lay-swap").onclick = () => set({ swap: !L.swap });
+    $("#lay-side").onclick = () => set({ side: !L.side });
+    $("#pv-max").onclick = () => set({ max: L.max === "view" ? null : "view" });
+    let hover = null;                                                                  // which pane the pointer is over, for Ctrl+Space
+    graphPane.addEventListener("pointerenter", () => { hover = "graph"; });
+    viewPane.addEventListener("pointerenter", () => { hover = "view"; });
+    document.addEventListener("keydown", (e) => {
+      if (e.code !== "Space" || !e.ctrlKey || e.altKey || e.metaKey) return;
+      const tag = (e.target.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      if (L.max) set({ max: null }); else if (hover) set({ max: hover });
+      e.preventDefault(); e.stopImmediatePropagation();
+    }, true);
+    window.addEventListener("resize", apply);
+    apply();
+    return { state: L, set, apply };
   })();
 
   applyView();
+  try { recoveryButton(); } catch (e) { /* Browser storage may be disabled. */ }
   connectEvents();
-  window.minihou = { S, edit, frame };                  // handy from the browser console
+  window.minihou = { S, edit, frame, clipboardText, pasteNodes, preview: pv, layout };                  // handy from the browser console
 })();

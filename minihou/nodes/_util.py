@@ -144,3 +144,12 @@ def fbm3_numpy(p: np.ndarray, seed: int, octaves: int, lacunarity: float, gain: 
         amp *= gain
         freq *= lacunarity
     return total / np.float32(norm) if norm > 0 else total
+
+
+MAX_GENERATED = 20_000_000
+
+
+def guard_count(n, what: str, hint: str = "use a larger spacing") -> None:
+    """Refuse to build absurdly many elements: a tiny spacing would exhaust memory long before it finished."""
+    if not (n <= MAX_GENERATED):                                   # also catches inf and nan
+        raise ValueError(f"{what} would make about {n:,.0f} elements; the limit is {MAX_GENERATED:,} ({hint})")

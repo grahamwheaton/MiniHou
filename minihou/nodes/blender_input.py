@@ -48,3 +48,12 @@ def blender_object(object, space, join_edges=True):
             n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
             out.table(dom)["N"] = n.astype(np.float32)
     return out
+
+
+@node("modifier_input", category="source")
+def modifier_input():
+    """Mesh entering this MiniHou modifier at its stack position, in object coordinates.
+
+    Supplied by an independent modifier instance. This node cannot cook in the legacy proxy session.
+    """
+    raise ValueError("modifier_input requires a MiniHou modifier instance and its preceding stack geometry")

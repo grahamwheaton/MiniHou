@@ -98,20 +98,69 @@ AI, Blender or the JSON file shows up in all the others.
 * **Layout**: layered top-to-bottom layout with barycentre sweeps (fewer crossings, straight chains), applied automatically when
   most of a graph is new (an AI just built it) and on demand (`layout` op, **L** in the editor).
 
-## Next steps
+## Status and next steps
 
-1. **Topology rebuild cost** in Blender (~0.25-0.4 s for 1M quads, mostly Blender's edge computation): worth it only if users drag
-   topology-changing parameters on huge meshes; options are computing edges in the engine and writing `.edge_verts` directly.
-2. **Wrangle**: `@P` reads from a second input (`@opinput1_P`), attribute-flow metadata on node types. (Primitives and
-   vertices: done, see *Attribute wrangle and native Blender data* below.)
-3. **More nodes**: group / attribute-from-group, attribute transfer and ray, polyextrude, subdivide, packed-prim instancing
-   (Blender instances on points instead of copying geometry).
-4. Multiple outputs / several display nodes; detail attributes to Blender. (UV maps, colors, normals, materials: done.)
-5. Time/frame in the cache key for animated graphs (frame-change hook in the add-on).
-6. Editor: subnetworks / reusable "systems" (a graph used as a node), network boxes, a 3D preview pane, copy/paste between
-   graphs. (User node libraries: done, see below.)
-   Extension packaging (manifest + licence are your call).
-7. Investigate the Blender popover crash further (only reachable via `wm.call_panel(keep_open=True)`), or report it upstream.
+Done (milestones 1-3): the engine, live link, Blender add-on, node editor, MCP server, node libraries and systems, attribute
+wrangle with native Blender data, and the Houdini feature sets below (groups, polygon modelling, attributes, curves,
+instancing, time/solver, UVs and volumes, bevel, UV unwrap, fracture, polyreduce, path deform, exact booleans, PCG points).
+Since then: atomic library reloads (`Registry.batch`), compiled kernels for mesh closest-point and ray queries, the editor
+frame slider, and the `delaunay`, `convex_hull`, `dissolve` and `skin` nodes.
+
+Worked through after that (all with tests; the bpy ones run with the `bpy` wheel as well as inside Blender):
+
+1. **Topology rebuild cost** in Blender: measured instead of rewritten. For 1M quads Blender's own edge computation takes about
+   120 ms (writing the arrays 56 ms); computing the edges with numpy takes 1.9 s, so engine-side edges would be slower, not
+   faster. Left as it is.
+2. **Wrangle** reads its extra inputs: `@opinput1_P` (same element number in input 1, zero beyond its end), `@near1_Cd`,
+   `@near1_dist`, `@near1_ptnum` (nearest point of input 1). **Attribute flow** is worked out, not declared: `minihou/flow.py`
+   compares a node's cooked output with its cooked inputs (added / modified / moved / removed, count and topology changes), so it is
+   right for built-in, library and system nodes; `inspect` returns it as `flow` (plus a wrangle's reads and writes) and the editor's
+   inspector lists it.
+3. **Several outputs**: an `output` node with an `object` name that is not the display node becomes a mesh object of that
+   name in Blender (`geo` messages carry `output`, an `outputs` message lists the live names, per-output diff state per
+   client; the add-on only touches objects it marked). **Detail attributes** arrive as `mh_<name>` custom properties on the
+   output objects.
+4. **Editor**: copy/cut/paste of nodes as JSON through the clipboard, network boxes (`boxes` in the graph file, ops `box_add`
+   / `box_set` / `box_remove`, cosmetic and outside the cache keys), and a WebGL2 3-D preview of the selected or display node
+   (`POST /api/preview`, binary arrays, `minihou/preview.py` + `static/preview.js`).
+
+5. **Python node** (`nodes/python_node.py`): real Python in the graph (inputs `geo`/`input1..3`, variables `a b c d i j v s flag`,
+   named `Variables`, `Frame`/`Time`, you set `out`). Because a graph file can then carry code, it is **off unless the engine is started
+   with `--allow-python`** (or `MINIHOU_PYTHON_NODES=1`); nothing in a graph can turn it on, the MCP instructions tell assistants not
+   to ask, and `engine_status` reports the switch.
+
+6. **Selection tools in the 3-D view**: `POST /api/preview` sends `tri_prim` (the primitive of each triangle); the viewer picks
+   points, edges and faces on the CPU (nearest projected element with a ray test for visibility, box select, thick edge overlay) and the
+   editor turns a selection into a node through the new `insert` op (new node fed by `after`, taking over its readers). `polybevel` got
+   an `edges` selection (point pairs) and a check that a bevel does not end inside a surface. **Handles**: `minihou/handles.py` providers
+   per node type (transform, polyextrude, polybevel, box, sphere) return arrows (origin, direction, parameter, scale, limits) with the
+   preview; the viewer draws them as an SVG overlay and a drag becomes a `set` edit (vector parameters keep their other components).
+
+7. **Dockable editor layout**: the 3-D view left the side column and is a pane of its own beside the graph (`#work`), with draggable dividers,
+   Graph / Split / 3D presets, stacked or side by side, swap, a hideable side panel, Ctrl+Space maximise, all saved in the browser. The view
+   got Front/Right/Top buttons, an axis gizmo (built once, so clicks survive redraws), orthographic (a very narrow lens far away, so picking and
+   handles use the same maths), frame selection, Numpad keys, and framing that fits the narrower side of the pane.
+
+8. **Packed app and add-on installer**: `minihou/blender_setup.py` (finding Blenders, the add-on zip, install through a one-off background Blender,
+   launch with a private copy), `minihou/app.py` (workspace in `~/MiniHou`, welcome graph and examples copied once, busy ports fall back to free
+   ones), the editor's Blender bar (draggable zip, Install add-on, Open Blender), `tools/build_app.py` (PyInstaller, numpy-only by default, with a
+   smoke test that starts the built program) and `.github/workflows/app.yml` (Windows, Linux, macOS; zips attached to `v*` releases). The install
+   script is tested for real with the `bpy` module; **not verified**: the Windows/macOS builds (only built on Linux here), and dropping the zip
+   from a browser onto a Blender window (browser and OS dependent; the Install and Open buttons do not depend on it).
+
+Open:
+
+- Extra outputs have no modifier or exposed parameters (only the display branch does).
+- More handles (bevel segments, copy_to_points scale); handle providers for library nodes. (Done: transform Move / Rotate / Scale tools: rings
+  turn about each Euler angle's real axis, scale cubes follow the rotated axes, drags multiply so scale never crosses zero.)
+- Edge selections are point pairs, so they only stay valid while the geometry upstream keeps its point numbering (as in Houdini).
+
+Not scheduled:
+
+5. Investigate the Blender popover crash further (only reachable via `wm.call_panel(keep_open=True)`), or report it upstream.
+6. Extension packaging (manifest + licence are the owner's call).
+7. Booleans with exactly coplanar curved features (a sphere's equator in a box face): closed and exact in volume, but may leave
+   tiny folded slivers.
 
 ## Node libraries (milestone 2)
 
@@ -161,7 +210,7 @@ Worked through in order of how often Houdini users reach for them:
 3. **Attribute toolkit and ray** (`nodes/attrib_tools.py`, `nodes/ray.py`, `minihou/spatial.py`, `minihou/raycast.py`):
    exact nearest-point and closest-point queries (SciPy's KD-tree when installed, else numpy grids with exact
    ring-search bounds), 3-D DDA ray walks; all tested against brute force. Numpy closest-point queries cost ~45 us
-   each near a surface; a numba kernel is the next speed-up if needed.
+   each near a surface; a numba kernel now runs them when numba is installed.
 4. **Curves**: `Topology.closed` (None = all polygons, so existing geometry and digests are unchanged); the link sends
    `topo/prim_closed` only for geometry with curves; Blender gets loose edges (`PolygonView` filters corner/face
    attributes to the polygons) and loose edges come back as curves. Deleting points splits curves into runs.
@@ -216,8 +265,10 @@ Worked through in order of how often Houdini users reach for them:
     lexicographically first independent set by priority, computed in parallel rounds (proven equal to the sequential
     greedy pass in the tests). Random values come from hashing each point's seed, so they follow the points.
 
-Next candidates: an editor frame slider, numba kernels for
-closest-point queries and SDF construction (the numpy SDF of a mesh spends most of its time in closest points).
+Closest-point and ray queries on triangle grids have numba kernels (`nodes/_kernels.py` `grid_closest`, `grid_intersect`;
+remesh of a 4,800-triangle sphere 17 s -> 3.5 s). Surfaces from points and curves: `delaunay` (SciPy or a pure-Python
+Bowyer-Watson), `convex_hull` (Qhull or an incremental numpy hull), `dissolve` (flat faces to n-gons, reusing the boolean
+node's outline merging) and `skin` (loft across curves).
 
 ## Systems (graphs as nodes)
 

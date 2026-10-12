@@ -34,6 +34,30 @@ class ExampleGraphTests(unittest.TestCase):
                 self.assertTrue(g.interface(), "examples should expose at least one parameter")
                 Graph.from_json(g.to_json())                      # round-trips
 
+    def test_modifier_examples_cook_with_upstream_mesh(self):
+        import numpy as np
+        from minihou.link.instances import InstanceManager
+        from minihou.link.session import Session
+        from tests.helpers import quad_geo
+        session = Session(Graph.from_dict({"nodes": {"g": {"type": "grid"}}, "display": "g"}))
+        manager = InstanceManager(session)
+        paths = sorted((ROOT / "examples" / "modifiers").glob("*.json"))
+        self.assertTrue(paths)
+        for path in paths:
+            with self.subTest(example=path.name):
+                geo = quad_geo()
+                params = {"Translate": [3, 0, 0], "Scale": 2} if path.stem == "transform" else {}
+                header, arrays = manager.cook({"instance_id": path.stem, "graph_path": str(path),
+                                               "params": params}, geo)
+                if path.stem == "transform":
+                    np.testing.assert_allclose(arrays["point/P"], geo.P * 2 + [3, 0, 0])
+                elif path.stem == "scatter_object":
+                    self.assertEqual(header["detail"]["instance_objects"], ["@source"])
+                    self.assertEqual(len(arrays["point/P"]), 24)
+                    np.testing.assert_array_equal(arrays["point/instance"], 1)
+                elif path.stem == "repeat_transform":
+                    np.testing.assert_allclose(arrays["point/P"], geo.P + [2, 0, 0])
+
 
 if __name__ == "__main__":
     unittest.main()

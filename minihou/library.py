@@ -127,7 +127,12 @@ class NodeLibrary:
         return out
 
     def refresh(self) -> bool:
-        """Load new or changed files, drop deleted ones. Returns True if node types or errors changed."""
+        """Load new or changed files, drop deleted ones. Returns True if node types or errors changed. Readers on other
+        threads see the node types before or after the whole reload, never partway through."""
+        with self.registry.batch():
+            return self._refresh()
+
+    def _refresh(self) -> bool:
         changed = systems_changed = False
         current = self.scan()
         for path in [p for p in self.files if p not in current]:
@@ -273,9 +278,10 @@ class NodeLibrary:
                           for f in sorted(self.files.values(), key=lambda f: str(f.path))]}
 
     def unload(self) -> None:
-        for entry in self.files.values():
-            for name in entry.types:
-                self.registry.unregister(name)
+        with self.registry.batch():
+            for entry in self.files.values():
+                for name in entry.types:
+                    self.registry.unregister(name)
         self.files.clear()
 
 
@@ -317,6 +323,9 @@ def _system_type(name: str, path: Path, graph, text: str, registry: Registry):
     """Build the NodeType for a system graph: inputs from its ``input`` nodes, params from its exposed parameters."""
     from dataclasses import replace
     from .sdk import GEOMETRY, Input, NodeType, Output
+    if any(inst.type == 'rbd_solver' for inst in graph.nodes.values()):
+        raise ValueError('RBD Solver must be top-level so each modifier/evaluator owns its simulation world; '
+                         'systems may generate/configure its geometry inputs')
     live = sorted(nid for nid, inst in graph.nodes.items() if inst.type == "blender_object")
     if live:                                                # its data changes outside the graph: the system's cache
         raise ValueError(f"blender_object node {live[0]!r} cannot be inside a system: give the system an input node "

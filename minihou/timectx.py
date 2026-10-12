@@ -67,4 +67,5 @@ def key() -> str:
 
 
 def params_use_time(params: dict) -> bool:
-    return any(isinstance(v, str) and USES_TIME.search(v) for v in params.values())
+    """True if a string parameter mentions @Frame/@Time/@TimeInc, or the node says it is ``animated`` (the python node)."""
+    return params.get("animated") is True or any(isinstance(v, str) and USES_TIME.search(v) for v in params.values())

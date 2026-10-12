@@ -295,3 +295,221 @@ def pcg_csr(indptr, cols, vals, b, x, minv, stop, max_iter):
         gz = gz_new
         it += 1
     return it
+
+
+# -- triangle grid queries (minihou.raycast.TriGrid) ---------------------------------------------------------------
+@njit(**_OPTS)
+def _closest_on_tri(px, py, pz, t):
+    """Closest point on triangle t (3, 3) to p (Ericson 5.1.5, the same case analysis as raycast._closest_on_tri);
+    returns the squared distance and the point."""
+    ax, ay, az = t[0, 0], t[0, 1], t[0, 2]
+    abx, aby, abz = t[1, 0] - ax, t[1, 1] - ay, t[1, 2] - az
+    acx, acy, acz = t[2, 0] - ax, t[2, 1] - ay, t[2, 2] - az
+    apx, apy, apz = px - ax, py - ay, pz - az
+    d1 = abx * apx + aby * apy + abz * apz
+    d2 = acx * apx + acy * apy + acz * apz
+    rx, ry, rz = ax, ay, az
+    if d1 <= 0.0 and d2 <= 0.0:
+        pass
+    else:
+        bpx, bpy, bpz = px - t[1, 0], py - t[1, 1], pz - t[1, 2]
+        d3 = abx * bpx + aby * bpy + abz * bpz
+        d4 = acx * bpx + acy * bpy + acz * bpz
+        if d3 >= 0.0 and d4 <= d3:
+            rx, ry, rz = t[1, 0], t[1, 1], t[1, 2]
+        else:
+            vc = d1 * d4 - d3 * d2
+            if vc <= 0.0 and d1 >= 0.0 and d3 <= 0.0:
+                v = d1 / (d1 - d3)
+                rx, ry, rz = ax + abx * v, ay + aby * v, az + abz * v
+            else:
+                cpx, cpy, cpz = px - t[2, 0], py - t[2, 1], pz - t[2, 2]
+                d5 = abx * cpx + aby * cpy + abz * cpz
+                d6 = acx * cpx + acy * cpy + acz * cpz
+                if d6 >= 0.0 and d5 <= d6:
+                    rx, ry, rz = t[2, 0], t[2, 1], t[2, 2]
+                else:
+                    vb = d5 * d2 - d1 * d6
+                    if vb <= 0.0 and d2 >= 0.0 and d6 <= 0.0:
+                        w = d2 / (d2 - d6)
+                        rx, ry, rz = ax + acx * w, ay + acy * w, az + acz * w
+                    else:
+                        va = d3 * d6 - d5 * d4
+                        if va <= 0.0 and (d4 - d3) >= 0.0 and (d5 - d6) >= 0.0:
+                            w = (d4 - d3) / ((d4 - d3) + (d5 - d6))
+                            rx = t[1, 0] + (t[2, 0] - t[1, 0]) * w
+                            ry = t[1, 1] + (t[2, 1] - t[1, 1]) * w
+                            rz = t[1, 2] + (t[2, 2] - t[1, 2]) * w
+                        else:
+                            den = 1.0 / (va + vb + vc)
+                            v = vb * den
+                            w = vc * den
+                            rx = ax + abx * v + acx * w
+                            ry = ay + aby * v + acy * w
+                            rz = az + abz * v + acz * w
+    dx, dy, dz = px - rx, py - ry, pz - rz
+    return dx * dx + dy * dy + dz * dz, rx, ry, rz
+
+
+@njit(parallel=True, **_OPTS)
+def grid_closest(q, tris, cstart, ccount, cell_tris, lo, hv, dims, best_d, best_tri, best_p):
+    """For each query the closest point on the mesh, searching rings of grid cells outward until nothing unsearched
+    can be nearer. best_* hold an upper bound on entry (the nearest triangle corner) and the answer on exit."""
+    m = q.shape[0]
+    n1, n2 = dims[1], dims[2]
+    for i in prange(m):
+        px, py, pz = q[i, 0], q[i, 1], q[i, 2]
+        p = (px, py, pz)
+        qc = np.empty(3, np.int64)
+        o2 = np.empty(3)
+        for a in range(3):
+            c = np.int64(np.floor((p[a] - lo[a]) / hv[a]))
+            qc[a] = min(max(c, 0), dims[a] - 1)
+            gap = max(max(lo[a] - p[a], p[a] - (lo[a] + hv[a] * dims[a])), 0.0)
+            o2[a] = gap * gap
+        o2_total = o2[0] + o2[1] + o2[2]
+        bd2 = best_d[i] * best_d[i]
+        bt = best_tri[i]
+        bx, by, bz = best_p[i, 0], best_p[i, 1], best_p[i, 2]
+        rmax = max(dims[0], max(dims[1], dims[2])) + 1
+        r = 0
+        while True:
+            rx0 = r if dims[0] > 1 else 0
+            ry0 = r if dims[1] > 1 else 0
+            rz0 = r if dims[2] > 1 else 0
+            for dx in range(-rx0, rx0 + 1):
+                cx = qc[0] + dx
+                if cx < 0 or cx >= dims[0]:
+                    continue
+                for dy in range(-ry0, ry0 + 1):
+                    cy = qc[1] + dy
+                    if cy < 0 or cy >= dims[1]:
+                        continue
+                    face = r == 0 or (rx0 > 0 and abs(dx) == r) or (ry0 > 0 and abs(dy) == r)
+                    if not face and rz0 == 0:
+                        continue
+                    zstep = 1 if face else 2 * rz0              # off the x/y faces only the two z faces are on the ring
+                    dz = -rz0
+                    while dz <= rz0:
+                        cz = qc[2] + dz
+                        if cz >= 0 and cz < dims[2]:
+                            # cell box farther than the best so far: skip it
+                            gx = max(max(lo[0] + cx * hv[0] - px, px - (lo[0] + (cx + 1) * hv[0])), 0.0)
+                            gy = max(max(lo[1] + cy * hv[1] - py, py - (lo[1] + (cy + 1) * hv[1])), 0.0)
+                            gz = max(max(lo[2] + cz * hv[2] - pz, pz - (lo[2] + (cz + 1) * hv[2])), 0.0)
+                            if gx * gx + gy * gy + gz * gz < bd2:
+                                k = (cx * n1 + cy) * n2 + cz
+                                s = cstart[k]
+                                for j in range(s, s + ccount[k]):
+                                    ti = cell_tris[j]
+                                    d2, rx, ry, rz = _closest_on_tri(px, py, pz, tris[ti])
+                                    if d2 < bd2:
+                                        bd2, bt, bx, by, bz = d2, ti, rx, ry, rz
+                        dz += zstep
+            # squared lower bound on the distance to anything outside the searched (2r+1)-cube of cells
+            bound = np.inf
+            for a in range(3):
+                if dims[a] <= 1:
+                    continue
+                box_lo = lo[a] + (qc[a] - r) * hv[a]
+                box_hi = lo[a] + (qc[a] + r + 1) * hv[a]
+                below = p[a] - box_lo if qc[a] - r > 0 else np.inf
+                above = box_hi - p[a] if qc[a] + r < dims[a] - 1 else np.inf
+                gap = max(min(below, above), 0.0)
+                cand = gap * gap + (o2_total - o2[a])
+                if cand < bound:
+                    bound = cand
+            if bd2 <= bound or r > rmax:
+                break
+            r += 1
+        best_d[i] = np.sqrt(bd2)
+        best_tri[i] = bt
+        best_p[i, 0], best_p[i, 1], best_p[i, 2] = bx, by, bz
+
+
+@njit(parallel=True, **_OPTS)
+def grid_intersect(o, d, tris, cstart, ccount, cell_tris, lo, hi, hv, dims, max_dist, out_t, out_tri, out_uv):
+    """Nearest hit along each ray: 3-D DDA through the grid with Moller-Trumbore on the triangles of each cell (both
+    faces count). d must be unit length. The same traversal and tolerances as ``TriGrid._intersect_chunk``."""
+    m = o.shape[0]
+    n1, n2 = dims[1], dims[2]
+    hmax = max(hv[0], max(hv[1], hv[2]))
+    eps = 1e-9 * hmax
+    for i in prange(m):
+        oo = (o[i, 0], o[i, 1], o[i, 2])
+        dd = (d[i, 0], d[i, 1], d[i, 2])
+        tmin, tmax = -np.inf, np.inf
+        miss = False
+        for a in range(3):
+            if dd[a] != 0.0:
+                t1, t2 = (lo[a] - oo[a]) / dd[a], (hi[a] - oo[a]) / dd[a]
+                tmin = max(tmin, min(t1, t2))
+                tmax = min(tmax, max(t1, t2))
+            elif oo[a] < lo[a] or oo[a] > hi[a]:
+                miss = True
+        t_enter = max(tmin, 0.0)
+        out_t[i], out_tri[i], out_uv[i, 0], out_uv[i, 1] = np.inf, -1, 0.0, 0.0
+        if miss or t_enter > tmax or t_enter > max_dist:
+            continue
+        cell = np.empty(3, np.int64)
+        step = np.empty(3, np.int64)
+        t_next = np.empty(3)
+        t_delta = np.empty(3)
+        for a in range(3):
+            c = np.int64(np.floor((oo[a] + dd[a] * t_enter - lo[a]) / hv[a]))
+            cell[a] = min(max(c, 0), dims[a] - 1)
+            if dd[a] >= 0:
+                step[a] = 1
+            else:
+                step[a] = -1
+            if dd[a] != 0.0:
+                bound = lo[a] + (cell[a] + (1 if step[a] > 0 else 0)) * hv[a]
+                t_next[a] = (bound - oo[a]) / dd[a]
+                t_delta[a] = hv[a] / abs(dd[a])
+            else:
+                t_next[a] = np.inf
+                t_delta[a] = np.inf
+        bt, btri, bu, bv = np.inf, -1, 0.0, 0.0
+        for _ in range(dims[0] + dims[1] + dims[2] + 3):
+            k = (cell[0] * n1 + cell[1]) * n2 + cell[2]
+            s = cstart[k]
+            for j in range(s, s + ccount[k]):
+                ti = cell_tris[j]
+                v0x, v0y, v0z = tris[ti, 0, 0], tris[ti, 0, 1], tris[ti, 0, 2]
+                e1x, e1y, e1z = tris[ti, 1, 0] - v0x, tris[ti, 1, 1] - v0y, tris[ti, 1, 2] - v0z
+                e2x, e2y, e2z = tris[ti, 2, 0] - v0x, tris[ti, 2, 1] - v0y, tris[ti, 2, 2] - v0z
+                pvx = dd[1] * e2z - dd[2] * e2y
+                pvy = dd[2] * e2x - dd[0] * e2z
+                pvz = dd[0] * e2y - dd[1] * e2x
+                det = e1x * pvx + e1y * pvy + e1z * pvz
+                n1l = np.sqrt(e1x * e1x + e1y * e1y + e1z * e1z)
+                n2l = np.sqrt(e2x * e2x + e2y * e2y + e2z * e2z)
+                if abs(det) <= 1e-14 * max(n1l * n2l, 1e-300):
+                    continue
+                inv = 1.0 / det
+                tvx, tvy, tvz = oo[0] - v0x, oo[1] - v0y, oo[2] - v0z
+                u = (tvx * pvx + tvy * pvy + tvz * pvz) * inv
+                if u < -1e-12 or u > 1.0 + 1e-12:
+                    continue
+                qx = tvy * e1z - tvz * e1y
+                qy = tvz * e1x - tvx * e1z
+                qz = tvx * e1y - tvy * e1x
+                v = (dd[0] * qx + dd[1] * qy + dd[2] * qz) * inv
+                if v < -1e-12 or u + v > 1.0 + 1e-12:
+                    continue
+                t = (e2x * qx + e2y * qy + e2z * qz) * inv
+                if t >= 0.0 and t <= max_dist and t < bt:
+                    bt, btri, bu, bv = t, ti, u, v
+            t_out = min(t_next[0], min(t_next[1], t_next[2]))
+            if bt <= t_out + eps or t_out > max_dist:
+                break
+            axis = 0
+            if t_next[1] < t_next[axis]:
+                axis = 1
+            if t_next[2] < t_next[axis]:
+                axis = 2
+            cell[axis] += step[axis]
+            t_next[axis] += t_delta[axis]
+            if cell[axis] < 0 or cell[axis] >= dims[axis]:
+                break
+        out_t[i], out_tri[i], out_uv[i, 0], out_uv[i, 1] = bt, btri, bu, bv

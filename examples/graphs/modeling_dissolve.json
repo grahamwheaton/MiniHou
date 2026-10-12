@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "doc": "Initial modelling workflow; see docs/modeling_tools.md for limits.",
+  "nodes": {
+    "grid": {
+      "type": "grid",
+      "inputs": {},
+      "params": {
+        "columns": 4,
+        "rows": 4
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "boundary": {
+      "type": "edge_group",
+      "inputs": {
+        "geo": "grid"
+      },
+      "params": {
+        "name": "boundary",
+        "method": "boundary"
+      },
+      "pos": [
+        240,
+        0
+      ]
+    },
+    "dissolve": {
+      "type": "dissolve_edges",
+      "inputs": {
+        "geo": "boundary"
+      },
+      "params": {
+        "group": "^boundary"
+      },
+      "pos": [
+        480,
+        0
+      ]
+    }
+  },
+  "display": "dissolve",
+  "exposed": [
+    {
+      "name": "Angle",
+      "node": "dissolve",
+      "param": "angle"
+    }
+  ]
+}

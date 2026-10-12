@@ -198,14 +198,14 @@ class CliTests(unittest.TestCase):
         d = tempfile.mkdtemp(prefix="minihou_cli_")
         self.addCleanup(shutil.rmtree, d, True)
         env = dict(os.environ, PYTHONPATH=ROOT)
-        r = subprocess.run([sys.executable, "-m", "minihou", "new-node", "my_lift"], cwd=d, env=env,
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "worktree_cli.py"), "new-node", "my_lift"], cwd=d, env=env,
                            capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(r.returncode, 0, r.stderr)
-        r = subprocess.run([sys.executable, "-m", "minihou", "nodes"], cwd=d, env=env,
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "worktree_cli.py"), "nodes"], cwd=d, env=env,
                            capture_output=True, text=True, encoding="utf-8")
         self.assertIn("my_lift", r.stdout)
         self.assertNotIn("ERROR", r.stdout)
-        r = subprocess.run([sys.executable, "-m", "minihou", "new-node", "my_lift"], cwd=d, env=env,
+        r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "worktree_cli.py"), "new-node", "my_lift"], cwd=d, env=env,
                            capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(r.returncode, 2)                                         # never overwrites
 
@@ -281,6 +281,36 @@ class SystemTests(unittest.TestCase):
         self.assertTrue(self.lib.refresh())
         self.assertAlmostEqual(float(ev.cook(g).P[:, 2].max()), 3.0)          # not the cached old result
         self.assertIn("g", ev.last_stats.cached)
+
+    def test_reloading_never_hides_a_node_type_from_other_threads(self):
+        import threading
+        name = f"lifter_{self.tag}"
+        self.write(name, _system(LIFTER))
+        self.lib.refresh()
+        missing, stop = [], threading.Event()
+
+        def reader():
+            while not stop.is_set():
+                if name not in REGISTRY:
+                    missing.append(1)
+                try:
+                    REGISTRY.get(name)
+                except KeyError:
+                    missing.append(1)
+
+        t = threading.Thread(target=reader)
+        t.start()
+        try:
+            for z in range(1, 25):
+                changed = json.loads(json.dumps(LIFTER))
+                changed["move"]["params"]["translate"] = [0, 0, z]
+                self.write(name, _system(changed))
+                self.assertTrue(self.lib.refresh())
+        finally:
+            stop.set()
+            t.join()
+        self.assertEqual(missing, [])
+        self.assertAlmostEqual(float(Evaluator().cook(self.use(name)).P[:, 2].max()), 24.0)
 
     def test_nested_systems_and_dependency_hashes(self):
         inner, outer = f"zz_inner_{self.tag}", f"aa_outer_{self.tag}"           # outer sorts first: order must not matter

@@ -129,6 +129,14 @@ def warmup() -> float:
     call(k.accumulate_point_normals, vp, offs, pn, np.empty((4, 3), np.float32))
     one = np.ones(1)
     call(k.pcg_csr, np.array([0, 1], np.int64), np.zeros(1, np.int64), one, one, np.zeros(1), one, 1e-30, 10)
+    tris = np.array([[[0, 0, 0], [1, 0, 0], [0, 1, 0]]], np.float64)
+    one_i, zero_i = np.zeros(1, np.int64), np.zeros(1, np.int64)
+    lo, hv, dims = np.zeros(3), np.ones(3), np.ones(3, np.int64)
+    call(k.grid_closest, np.zeros((1, 3)), tris, zero_i, np.ones(1, np.int64), one_i, lo, hv, dims,
+         np.full(1, 1.0), np.zeros(1, np.int64), np.zeros((1, 3)))
+    call(k.grid_intersect, np.array([[0.2, 0.2, 1.0]]), np.array([[0.0, 0.0, -1.0]]), tris, zero_i,
+         np.ones(1, np.int64), one_i, lo, hv, hv, dims, np.inf, np.empty(1), np.empty(1, np.int64),
+         np.empty((1, 2)))
     return time.perf_counter() - t0
 
 

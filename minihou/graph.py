@@ -62,6 +62,32 @@ class Exposed:
     label: str = ""
 
 
+_BOX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def clean_box(d: Any) -> Dict[str, Any]:
+    """Validate and normalise a network box: ``{id, title, color, pos: [x, y], size: [w, h]}``."""
+    if not isinstance(d, dict):
+        raise GraphError("a box is an object")
+    bid = d.get("id")
+    if not isinstance(bid, str) or not _ID_RE.match(bid):
+        raise GraphError(f"invalid box id {bid!r} (use letters, digits, underscore)")
+
+    def pair(key, lo=None):
+        v = d.get(key)
+        if (not isinstance(v, (list, tuple)) or len(v) != 2
+                or not all(isinstance(c, (int, float)) and not isinstance(c, bool) and abs(c) < 1e7 for c in v)):
+            raise GraphError(f"{key} must be [x, y]")
+        out = [round(float(c), 1) for c in v]
+        return out if lo is None else [max(lo, c) for c in out]
+
+    color = d.get("color") or ""
+    if color and not (isinstance(color, str) and _BOX_COLOR.match(color)):
+        raise GraphError(f"color must be '#rrggbb', got {color!r}")
+    return {"id": bid, "title": str(d.get("title") or "")[:80], "color": color.lower(),
+            "pos": pair("pos"), "size": pair("size", 40.0)}
+
+
 class Graph:
     def __init__(self, registry: Optional[Registry] = None):
         self.registry = registry or REGISTRY
@@ -69,6 +95,7 @@ class Graph:
         self.display: Optional[str] = None
         self.exposed: List[Exposed] = []
         self.doc: str = ""                    # what the graph does (systems show it as their node doc)
+        self.boxes: List[Dict[str, Any]] = []  # network boxes: coloured, titled rectangles behind the nodes (cosmetic)
 
     # -- editing -----------------------------------------------------------
     def add_node(self, node_id: str, type: str, params: Optional[dict] = None,
@@ -144,13 +171,31 @@ class Graph:
                 out.append(ref)
         return out
 
-    def output_node(self) -> str:
+    def _main_output(self) -> Optional[str]:
         if self.display:
             return self.display
-        for nid, n in self.nodes.items():
-            if n.type == "output":
+        outs = [nid for nid, n in self.nodes.items() if n.type == "output"]
+        for nid in outs:                                    # the main output is one without its own Blender object
+            if not self.nodes[nid].params.get("object"):
                 return nid
-        raise GraphError("graph has no display node and no 'output' node")
+        return outs[0] if outs else None
+
+    def extra_outputs(self) -> Dict[str, str]:
+        """``{object name: node id}`` for ``output`` nodes that publish to their own Blender object (the display node is
+        always the main output, whatever its ``object`` says)."""
+        main = self._main_output()
+        out: Dict[str, str] = {}
+        for nid, n in self.nodes.items():
+            name = str(n.params.get("object") or "").strip()[:63] if n.type == "output" else ""
+            if name and nid != main and name not in out:
+                out[name] = nid
+        return out
+
+    def output_node(self) -> str:
+        main = self._main_output()
+        if main is None:
+            raise GraphError("graph has no display node and no 'output' node")
+        return main
 
     def upstream_order(self, target: str, stop=()) -> List[str]:
         """Node ids needed to cook ``target``, dependencies first, ``target`` last (iterative DFS). Nodes in ``stop`` are
@@ -239,9 +284,11 @@ class Graph:
                     indeg[nid] += 1
                     consumers[src].append(nid)
         queue = [n for n, d in indeg.items() if d == 0]
+        order = []
         seen = 0
         while queue:
             n = queue.pop()
+            order.append(n)
             seen += 1
             for c in consumers[n]:
                 indeg[c] -= 1
@@ -250,6 +297,12 @@ class Graph:
         if seen != len(self.nodes):
             stuck = sorted(n for n, d in indeg.items() if d > 0)
             errs.append((stuck[0], f"graph contains a cycle involving {stuck}"))
+        elif not errs and any(n.type in {"loop_begin", "loop_end"} for n in self.nodes.values()):
+            from .loops import analyze
+            try:
+                analyze(self, order, self.display)
+            except GraphError as exc:
+                errs.append((exc.node_id, str(exc)))
         if self.display is not None and self.display not in self.nodes:
             errs.append((None, f"display node {self.display!r} does not exist"))
         names = set()
@@ -318,6 +371,7 @@ class Graph:
         g.display = self.display
         g.exposed = [Exposed(e.name, e.node, e.param, e.label) for e in self.exposed]
         g.doc = self.doc
+        g.boxes = copy.deepcopy(self.boxes)
         return g
 
     def to_dict(self) -> dict:
@@ -338,6 +392,8 @@ class Graph:
         if self.doc:
             out["doc"] = self.doc
         out["nodes"] = nodes
+        if self.boxes:
+            out["boxes"] = copy.deepcopy(self.boxes)
         if self.display:
             out["display"] = self.display
         if self.exposed:
@@ -382,6 +438,11 @@ class Graph:
             g.nodes[nid] = NodeInstance(nid, nd["type"], params, inputs, meta)
         g.display = data.get("display")
         g.doc = str(data.get("doc") or "")
+        for bd in data.get("boxes", []) or []:
+            try:
+                g.boxes.append(clean_box(bd))
+            except GraphError as e:
+                errs.append(f"bad network box {bd!r}: {e}")
         for ed in data.get("exposed", []) or []:
             try:
                 g.exposed.append(Exposed(ed["name"], ed["node"], ed["param"], ed.get("label", "")))

@@ -7,7 +7,8 @@
 * :meth:`TriGrid.closest` searches rings of cells around each query (like :func:`minihou.spatial.nearest`) with exact
   point-triangle distances, stopping once nothing unsearched can be closer.
 
-Both are exact (tested against brute force); numpy only.
+Both are exact (tested against brute force). With numba installed, :mod:`minihou.nodes._kernels` runs the same two
+traversals per query in compiled code (``grid_intersect``, ``grid_closest``); otherwise the numpy code below runs.
 """
 from __future__ import annotations
 
@@ -85,10 +86,31 @@ class TriGrid:
         best_t, best_tri, best_uv = np.full(m, np.inf), np.full(m, -1, np.int64), np.zeros((m, 2))
         if self.n == 0 or m == 0:
             return best_t, best_tri, best_uv
+        if self._kernel_intersect(orig, d, max_dist, best_t, best_tri, best_uv):
+            return best_t, best_tri, best_uv
         for s in range(0, m, CHUNK):
             sl = slice(s, s + CHUNK)
             self._intersect_chunk(orig[sl], d[sl], max_dist, best_t[sl], best_tri[sl], best_uv[sl])
         return best_t, best_tri, best_uv
+
+    def _arrays(self):
+        """The grid as contiguous arrays for the compiled kernels."""
+        if not hasattr(self, "_karr"):
+            self._karr = (np.ascontiguousarray(self.tris), np.ascontiguousarray(self.cstart, np.int64),
+                          np.ascontiguousarray(self.ccount, np.int64), np.ascontiguousarray(self.cell_tris, np.int64),
+                          np.ascontiguousarray(self.lo, np.float64), np.ascontiguousarray(self.hi, np.float64),
+                          np.ascontiguousarray(self.hv, np.float64), np.ascontiguousarray(self.dims, np.int64))
+        return self._karr
+
+    def _kernel_intersect(self, o, d, max_dist, bt, btri, buv) -> bool:
+        from . import accel
+        k = accel.kernels()
+        if k is None:
+            return False
+        tris, cstart, ccount, cell_tris, lo, hi, hv, dims = self._arrays()
+        r = accel.call(k.grid_intersect, np.ascontiguousarray(o), np.ascontiguousarray(d), tris, cstart, ccount,
+                       cell_tris, lo, hi, hv, dims, float(max_dist), bt, btri, buv)
+        return r is not accel.FAILED
 
     def _intersect_chunk(self, o, d, max_dist, bt, btri, buv):
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -135,6 +157,16 @@ class TriGrid:
             keep = ~(done | out)
             idx, cell, step, t_next, t_delta = idx[keep], cell[keep], step[keep], t_next[keep], t_delta[keep]
 
+    def _kernel_closest(self, q, best_d, best_tri, best_p) -> bool:
+        from . import accel
+        k = accel.kernels()
+        if k is None:
+            return False
+        tris, cstart, ccount, cell_tris, lo, _, hv, dims = self._arrays()
+        r = accel.call(k.grid_closest, np.ascontiguousarray(q), tris, cstart, ccount, cell_tris, lo, hv, dims,
+                       best_d, best_tri, best_p)
+        return r is not accel.FAILED
+
     # -- closest points -----------------------------------------------------------------------------------------
     def closest(self, pts) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Closest point on the mesh for each query: (point (m, 3), distance, triangle index)."""
@@ -143,8 +175,6 @@ class TriGrid:
         best_d, best_tri, best_p = np.full(m, np.inf), np.full(m, -1, np.int64), q.copy()
         if self.n == 0 or m == 0:
             return best_p, best_d, best_tri
-        qc_all = self._cell(q)
-        o_all = np.maximum(np.maximum(self.lo - q, q - self.hi), 0.0)
         active_axes = self.dims > 1
         from .spatial import _shell, nearest, ring_bound
         # the nearest triangle corner bounds the answer from above: searches end as soon as rings pass it
@@ -152,6 +182,10 @@ class TriGrid:
         best_d[:] = vd
         best_tri[:] = vi // 3
         best_p[:] = self.tris.reshape(-1, 3)[vi]
+        if self._kernel_closest(q, best_d, best_tri, best_p):
+            return best_p, best_d, best_tri
+        qc_all = self._cell(q)
+        o_all = np.maximum(np.maximum(self.lo - q, q - self.hi), 0.0)
         if not hasattr(self, "_tlo"):
             self._tlo, self._thi = self.tris.min(1), self.tris.max(1)
         for s in range(0, m, CHUNK):

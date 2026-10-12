@@ -16,6 +16,8 @@ from dataclasses import dataclass
 import numpy as np
 
 MAX_VOXELS = 24_000_000
+MAX_POINT_WORK = 150_000_000          # points x kernel voxels for metaballs
+MAX_MESH_WORK = 15_000_000            # (triangle, voxel) pairs for a mesh SDF: about half a minute of closest-point queries
 
 
 @dataclass
@@ -39,6 +41,16 @@ def grid_for(lo, hi, h, pad):
 
 
 # -- from a mesh ------------------------------------------------------------------------------------------------
+def mesh_work(tris: np.ndarray, h: float, band_voxels: float = 3.0) -> int:
+    """How many (triangle, voxel) pairs from_mesh would have to examine: the bounding boxes of the triangles, grown by the
+    band, in voxels. Cheap, so callers can refuse hopeless voxel sizes before spending time."""
+    tris = np.asarray(tris, np.float64)
+    if not len(tris):
+        return 0
+    span = np.ceil((tris.max(1) - tris.min(1) + 2 * band_voxels * h) / h) + 1
+    return int(span.prod(1).sum())
+
+
 def from_mesh(tris: np.ndarray, h: float, band_voxels: float = 3.0, pad_voxels: int = 2, grid=None) -> Volume:
     """SDF of a closed triangle mesh (T, 3, 3), on its own padded grid or on ``grid`` = (origin, dims)."""
     from .raycast import TriGrid
@@ -122,6 +134,10 @@ def from_points(P: np.ndarray, radius: np.ndarray, h: float, blend: float = 1.0)
     r = np.broadcast_to(np.asarray(radius, np.float64), (len(P),)).astype(np.float64)
     R = r * (1.0 + max(blend, 0.0))                     # kernel support
     lo, dims = grid_for(P.min(0) - R.max(), P.max(0) + R.max(), h, 2 * h)
+    reach = int(np.ceil(R.max() / h)) + 1
+    if len(P) * (2 * reach + 2) ** 3 > MAX_POINT_WORK:
+        raise ValueError(f"{len(P):,} points with kernels {2 * reach} voxels wide is too much work; use a larger voxel_size "
+                         f"or a smaller radius")
     field = np.zeros(int(np.prod(dims)), np.float64)
     # kernel k(q) = (1 - q^2)^3 for q = d / R < 1. A lone point's surface at d = r: threshold = k(r / R)
     thr = (1.0 - (1.0 / (1.0 + max(blend, 0.0))) ** 2) ** 3

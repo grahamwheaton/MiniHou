@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "doc": "Repeat a local X translation: 4 iterations times 0.5 moves the box by 2 units. Set Repeat Count to zero for the original box.",
+  "nodes": {
+    "box": {"type": "box", "pos": [0, 0]},
+    "begin": {"type": "loop_begin", "inputs": {"geo": "box"}, "pos": [0, 110]},
+    "step": {"type": "transform", "params": {"translate": [0.5, 0, 0]}, "inputs": {"geo": "begin"}, "pos": [0, 220]},
+    "end": {"type": "loop_end", "params": {"iterations": 4}, "inputs": {"geo": "step", "begin": "begin"}, "pos": [0, 330]},
+    "out": {"type": "output", "inputs": {"geo": "end"}, "pos": [0, 440]}
+  },
+  "display": "out",
+  "exposed": [
+    {"name": "Repeat Count", "node": "end", "param": "iterations"},
+    {"name": "Step", "node": "step", "param": "translate"}
+  ]
+}

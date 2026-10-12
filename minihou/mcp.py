@@ -39,10 +39,13 @@ How to build a system:
    atomic; the reply tells you whether the cook succeeded, which node failed and why, and point/prim counts.
 4. inspect_node to check geometry (counts, bounds, attributes with ranges) at any node, then iterate.
 Use wrangle nodes (wrangle_reference) for custom per-point math; for anything more (new topology, several inputs,
-loops over geometry) write a node-library file (node_library). To make something reusable, build it as a *system*: a graph
+loops over geometry) write a node-library file (node_library). A `python` node (Python code inside the graph, with inputs
+geo/input1..3 and variables a b c d i j v s flag) exists too, but it only runs when the USER started the engine with
+--allow-python; engine_status says whether it is on. Never ask to turn it on yourself, and prefer wrangles or
+node-library files. To make something reusable, build it as a *system*: a graph
 saved in nodes/ (e.g. nodes/rock_scatter.json) with `input` nodes and exposed parameters becomes a node type that any
-graph can use (details in node_library). Houdini-style toolkit: groups (group_create; most nodes take a group pattern
-like 'top ^side', '0-9' or '@P.z > 0'), modelling (boolean, polyextrude, polybevel, subdivide, clip, mirror, polyfill;
+graph can use (details in node_library). Houdini-style toolkit: groups (group_create, group_expand; most nodes take a group pattern
+like 'top ^side', '0-9' or '@P.z > 0'), modelling (boolean, polyextrude, polybevel, subdivide, clip, mirror, polyfill, delaunay, convex_hull, dissolve, skin, revolve, bridge;
 tube and torus sources; smooth, peak, match_size, bound, copy_transform, switch; voronoi_fracture + exploded_view;
 polyreduce; normal with domain 'vertex' keeps hard edges crisp), attributes (attribute_transfer, promote, blur,
 measure, color, ray; uv_project, uv_flatten), curves (line, helix, resample, sweep, path_deform), volumes (remesh,
@@ -57,18 +60,25 @@ watching the editor and Blender live and can undo your edits, so prefer small ve
 OPS_DOC = """\
 Each op is an object with "op":
   add        {"op":"add","type":T,"id"?:str,"params"?:{..},"inputs"?:{port:id or [ids]},"pos"?:[x,y],"display"?:true,"comment"?:str}
+  insert     {"op":"insert","after":id,"type":"polybevel","params"?:{...}}  (a node fed by `after` that takes over everything which
+             read `after`: joins a chain in place, display flag included; "port"? picks its input)
   remove     {"op":"remove","id":id or [ids]}
   rename     {"op":"rename","id":old,"to":new}
   connect    {"op":"connect","from":src,"to":dst,"port"?:name,"index"?:int}  (port defaults to the first free input)
   disconnect {"op":"disconnect","to":dst,"port"?:name,"from"?:src}
   set        {"op":"set","id":id,"params":{name:value}}  (null resets to default; vec3 = [x,y,z])
-  display    {"op":"display","id":id}  (what Blender shows; usually an "output" node)
+  display    {"op":"display","id":id}  (what Blender shows; usually an "output" node). More results: set an extra "output" node's
+             "object" param (e.g. "Trees") and it appears as its own Blender object, live
   expose     {"op":"expose","id":id,"param":name,"name"?:"Label in Blender"}  (float/int/bool/vec3 only)
   unexpose   {"op":"unexpose","name":label} or {"op":"unexpose","id":id,"param":name}
   move       {"op":"move","id":id,"pos":[x,y]} or {"op":"move","positions":{id:[x,y]}}  (layout is automatic if omitted)
   meta       {"op":"meta","id":id,"set":{"comment":"..."}}
   replace    {"op":"replace","graph":{...whole graph JSON...}}
   layout     {"op":"layout"}  (tidy all node positions; put it last in a batch that added many nodes)
+  loop       {"op":"loop","from"?:src,"to"?:dst,"port"?:name,"iterations"?:int,"pos"?:[x,y]} (paired Begin/Transform/End)
+
+  box_add    {"op":"box_add","around":[ids],"title"?:"Terrain","color"?:"#5b7fb5"} - a labelled network box behind those nodes
+             (or "pos":[x,y],"size":[w,h]); box_set {"op":"box_set","id":"box1","title"?,"color"?,"pos"?,"size"?}; box_remove {"op":"box_remove","id":id}
 Nodes flow top to bottom: each node's single output feeds inputs of nodes below it. Ids: letters, digits, _."""
 
 TOOLS: List[dict] = [
@@ -93,9 +103,9 @@ TOOLS: List[dict] = [
      "inputSchema": {"type": "object", "required": ["ops"], "additionalProperties": False, "properties": {
          "ops": {"type": "array", "minItems": 1, "description": "Edit operations, applied in order.",
                  "items": {"type": "object", "required": ["op"], "properties": {
-                     "op": {"type": "string", "enum": ["add", "remove", "rename", "connect", "disconnect", "set",
+                     "op": {"type": "string", "enum": ["add", "insert", "remove", "rename", "connect", "disconnect", "set",
                                                        "display", "expose", "unexpose", "move", "meta", "replace",
-                                                       "layout"]}}}}}}},
+                                                       "layout", "loop", "box_add", "box_set", "box_remove"]}}}}}}},
     {"name": "inspect_node",
      "description": "Cook any node and summarise its geometry: point/prim/vertex counts, bounds, and attributes "
                     "(with min/max/mean and first values when detail is true). Use it to verify each step.",
@@ -345,7 +355,9 @@ class McpServer:
                  f"Graph file: {st.get('path') or '(none)'}  (rev {st['rev']}, {len(st['graph']['nodes'])} nodes)",
                  format_status(st["status"], st["graph"]),
                  f"Blender: {'connected (' + ', '.join(clients) + ')' if clients else 'not connected'}",
-                 f"Editor (for the user): {self.engine.url}"]
+                 f"Editor (for the user): {self.engine.url}",
+                 "Python nodes: " + ("enabled (the user allowed them)" if st["engine"].get("python_nodes")
+                                    else "off (the engine was not started with --allow-python)")]
         if lib:
             lines.append(f"Node library: {sum(len(f['nodes']) for f in lib['files'])} custom node type(s) from "
                          f"{len(lib['files'])} file(s)" + "".join(f"\n  ERROR in {f['file']}: {f['error']}" for f in bad))

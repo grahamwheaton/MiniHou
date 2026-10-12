@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "doc": "Initial modelling workflow; see docs/modeling_tools.md for limits.",
+  "nodes": {
+    "profile": {
+      "type": "circle",
+      "inputs": {},
+      "params": {
+        "divisions": 6,
+        "rotate": [
+          25,
+          15,
+          0
+        ]
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "offset": {
+      "type": "polyexpand2d",
+      "inputs": {
+        "geo": "profile"
+      },
+      "params": {
+        "distance": 0.25
+      },
+      "pos": [
+        240,
+        0
+      ]
+    }
+  },
+  "display": "offset",
+  "exposed": [
+    {
+      "name": "Distance",
+      "node": "offset",
+      "param": "distance"
+    }
+  ]
+}

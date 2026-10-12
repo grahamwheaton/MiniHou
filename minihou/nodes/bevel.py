@@ -123,14 +123,30 @@ def _limit_overlap(geo, pos, w, home, pv, N):
     return pos
 
 
+def _check_ends(geo, vp, bev, twin):
+    """A bevel cannot stop in the middle of a surface: a selected edge that ends at an interior point where no other
+    selected edge continues it would leave the faces around that point unsplit. Say so, naming the points."""
+    n = geo.npoints
+    count = np.bincount(vp[bev], minlength=n)
+    open_pt = np.zeros(n, bool)
+    open_pt[vp[twin < 0]] = True
+    dangling = np.flatnonzero((count == 1) & ~open_pt)
+    if len(dangling):
+        raise ValueError(f"a bevel cannot end inside the surface (at point{'s' if len(dangling) > 1 else ''} "
+                         f"{', '.join(map(str, dangling[:6].tolist()))}{'...' if len(dangling) > 6 else ''}): select a whole "
+                         f"edge loop, edges that meet other selected edges, or edges that run to an open border")
+
+
 @node("polybevel", inputs=["geo"], category="model", params=[
     Float("distance", 0.1, min=0.0, soft_max=1.0, doc="How far the bevel cuts into the faces on each side"),
     Float("min_angle", 30.0, min=0.0, max=180.0,
           doc="Only bevel edges whose faces meet at least this many degrees off flat (0: every interior edge)"),
     Str("group", "", doc="Points: only edges with both ends in the group are bevelled (empty: all)"),
+    Str("edges", "", doc="Edges to bevel as point pairs, e.g. '12-13 40-41' (the 3-D view's edge selection writes this). "
+                         "When set, exactly these interior edges are bevelled and min_angle is ignored"),
     Str("output_group", "bevel", doc="Primitive group for the new bevel faces (empty: none)"),
 ])
-def polybevel(geo, distance, min_angle, group, output_group):
+def polybevel(geo, distance, min_angle, group, edges, output_group):
     """Chamfer the sharp edges of a polygon mesh (Houdini's PolyBevel with one segment). Keep ``distance`` below half
     the shortest bevelled face edge, or the cuts overlap. N is removed (recompute it with a normal node)."""
     B.require_polygons(geo, "polybevel")
@@ -145,6 +161,12 @@ def polybevel(geo, distance, min_angle, group, output_group):
     two = twin >= 0
     cosang = np.einsum("ij,ij->i", N[pv], N[pv[np.maximum(twin, 0)]])
     bev = two & (cosang <= np.cos(np.radians(min_angle)) + (1e-6 if min_angle > 0 else 2.0))
+    picked = groups.parse_edges(edges, geo.npoints)
+    if len(picked):                                         # an explicit selection replaces the angle test
+        n = max(geo.npoints, 1)
+        want = np.isin(np.minimum(vp, vp[nx]) * n + np.maximum(vp, vp[nx]), picked[:, 0] * n + picked[:, 1])
+        bev = two & want
+        _check_ends(geo, vp, bev, twin)
     sel = groups.mask(geo, "point", group)
     if sel is not None:
         bev &= sel[vp] & sel[vp[nx]]

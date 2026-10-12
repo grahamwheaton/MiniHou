@@ -14,7 +14,7 @@ import os
 import socket
 import threading
 import time
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from ..graph import GraphError
 from ..sdk import ParamError
@@ -24,6 +24,7 @@ from .protocol import (DEFAULT_PORT, PROTOCOL_VERSION, TOPO_KEYS, TOPO_PRIM_CLOS
                        ProtocolError,
                        attr_key, recv_message, send_message, split_key)
 from .session import Result, Session
+from .instances import InstanceManager
 
 log = logging.getLogger("minihou.server")
 
@@ -32,6 +33,12 @@ class _Connection:
     def __init__(self, server: "LinkServer", sock: socket.socket, addr):
         self.server, self.session, self.sock, self.addr = server, server.session, sock, addr
         self.diff = DiffState()
+        self.instances = InstanceManager(self.session)
+        self.instance_mode = False
+
+        self.extra_diffs: Dict[str, DiffState] = {}      # one per extra output (named Blender objects)
+        self._extra_keys: Dict[str, str] = {}
+        self._sent_names: Optional[List[str]] = None
         self.cv = threading.Condition()
         self.closed = False
         self._outbox: List[tuple] = []
@@ -59,6 +66,9 @@ class _Connection:
             self._iface_pending = True
             self.cv.notify_all()
 
+    def on_extra_error(self, name: str, message: str):
+        self.post({"type": "error", "where": "output", "node": None, "message": f"output {name!r}: {message}"})
+
     def on_watch(self, names):
         self.post({"type": "watch_objects", "objects": list(names)})
 
@@ -75,6 +85,7 @@ class _Connection:
             self.closed = True
             self.cv.notify_all()
         self.session.remove_listener(self)
+        self.instances.clear()
         try:
             self.sock.shutdown(socket.SHUT_RDWR)
         except OSError:
@@ -106,13 +117,34 @@ class _Connection:
                 return
             self.name = str(h.get("client", "?"))
             log.info("client %s connected (%s)", self.addr, self.name)
-            self.post({"type": "welcome", "protocol": PROTOCOL_VERSION, "server": "minihou"})
+            self.instance_mode = h.get("mode") == "instances"
+            self.post({"type": "welcome", "protocol": PROTOCOL_VERSION, "server": "minihou",
+                       "capabilities": ["instances_v1"], "editor_url": self.server.editor_url,
+                       "graph_path": str(self.session.path.resolve()) if self.session.path else None})
+            if self.instance_mode:
+                return
             self.post({"type": "watch_objects", "objects": self.session.watched_objects()})
             with self.cv:
                 self._iface_pending = True
                 self._want_result = True
                 self.session.add_listener(self)
                 self.cv.notify_all()
+        elif t in ("instance_cook", "instance_describe", "instance_remove"):
+            try:
+                if not self.instance_mode:
+                    raise ValueError("instance requests require hello mode instances")
+                if t == "instance_remove":
+                    self.instances.remove(h["instance_id"])
+                    response, output = {"type": "instance_removed"}, None
+                elif t == "instance_describe":
+                    response, output = self.instances.describe(h), None
+                else:
+                    response, output = self.instances.cook(h, _decode_object(h, _arrays or {}))
+                response.update(request_id=h.get("request_id"), instance_id=h.get("instance_id"))
+                self.post(response, output)
+            except Exception as e:
+                self.post({"type": "instance_error", "request_id": h.get("request_id"),
+                           "instance_id": h.get("instance_id"), "message": str(e)})
         elif t == "set_param":
             try:
                 if "name" in h:
@@ -123,6 +155,8 @@ class _Connection:
                 self.post({"type": "error", "where": "set_param", "message": str(e).strip("'")})
         elif t == "resync":
             self.diff.reset()
+            self.extra_diffs.clear()
+            self._extra_keys.clear()
             self._sent_good_seq = 0
             with self.cv:
                 self._iface_pending = True
@@ -179,6 +213,20 @@ class _Connection:
             header, arrays = self.diff.build(good.geo, good.seq, good.cook)
             self._sent_good_seq = good.seq
             self.bytes_sent += send_message(self.sock, header, arrays)
+            names = sorted(good.extras)
+            if names != self._sent_names:                    # which extra outputs exist (the add-on removes the others)
+                self._sent_names = names
+                self.bytes_sent += send_message(self.sock, {"type": "outputs", "names": names})
+                for gone in set(self.extra_diffs) - set(names):
+                    self.extra_diffs.pop(gone, None)
+                    self._extra_keys.pop(gone, None)
+            for name in names:
+                geo, key = good.extras[name]
+                if self._extra_keys.get(name) == key:
+                    continue
+                self._extra_keys[name] = key
+                header, arrays = self.extra_diffs.setdefault(name, DiffState()).build(geo, good.seq, good.cook, output=name)
+                self.bytes_sent += send_message(self.sock, header, arrays)
         if err is not None and err.seq > self._sent_error_seq:
             self._sent_error_seq = err.seq
             self.bytes_sent += send_message(self.sock, {"type": "error", "where": "cook", "seq": err.seq,
@@ -208,6 +256,7 @@ class LinkServer:
                  bind_retry_seconds: float = 5.0):
         self.session, self.host, self.port = session, host, port
         self.bind_retry_seconds = bind_retry_seconds
+        self.editor_url = None
         self._listener: Optional[socket.socket] = None
         self._conns: List[_Connection] = []
         self._lock = threading.Lock()

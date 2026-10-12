@@ -71,6 +71,24 @@ class WebTests(unittest.TestCase):
         self.assertEqual(d["index"], 0)
         self.assertIn("unknown node type", d["error"])
 
+    def test_preview_returns_binary_geometry_or_a_json_error(self):
+        from minihou import preview
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.request("POST", "/api/preview", json.dumps({"node": "ground"}), {"Content-Type": "application/json"})
+        r = c.getresponse()
+        data = r.read()
+        c.close()
+        self.assertEqual((r.status, r.getheader("Content-Type")), (200, "application/octet-stream"))
+        head, arrays = preview.unpack(data)
+        self.assertEqual((head["node"], head["prims"]), ("ground", 3481))
+        self.assertEqual(head["tris"], 2 * 3481)
+        self.assertEqual(len(arrays["P"]), head["points"] * 3)
+        st, d = self.req("POST", "/api/preview", {"node": "nope"})
+        self.assertEqual((st, d["ok"]), (200, False))
+        self.assertIn("no such node", d["error"]["message"])
+        self.assertEqual(self.req("POST", "/api/preview", {"node": 5})[0], 400)
+        self.assertEqual(self.req("POST", "/api/preview", {"node": "ground"}, headers={"Origin": "http://evil.com"})[0], 403)
+
     def test_inspect_undo_and_status(self):
         st, d = self.req("POST", "/api/inspect", {"node": "ground", "detail": True})
         self.assertEqual((st, d["points"]), (200, 3600))
@@ -100,6 +118,36 @@ class WebTests(unittest.TestCase):
                 st, d = self.req("POST", "/api/open", {"path": bad, "create": bad != "missing.json"})
                 self.assertEqual(st, code, d)
         self.assertFalse(os.path.exists(os.path.join(os.path.dirname(self.dir), "escape.json")))
+
+    def test_blender_panel_lists_installs_serves_the_zip_and_only_runs_what_was_found(self):
+        import io
+        import zipfile
+        from minihou import blender_setup
+        st, d = self.req("GET", "/api/blender")
+        self.assertEqual(st, 200)
+        self.assertTrue(d["addon"]["available"])
+        self.assertEqual(d["link_port"], self.link.port)
+        st, zdata = self.req("GET", "/addon/minihou_link.zip")
+        self.assertEqual(st, 200)
+        self.assertIn("minihou_link/__init__.py", zipfile.ZipFile(io.BytesIO(zdata)).namelist())
+        calls = []
+        orig = (blender_setup.list_blenders, blender_setup.install_addon, blender_setup.launch_blender)
+        blender_setup.list_blenders = lambda *a, **k: [{"path": "/opt/blender-5.1/blender", "version": "5.1", "supported": True}]
+        blender_setup.install_addon = lambda exe, **k: (calls.append(("install", exe)), {"ok": True, "message": "done"})[1]
+        blender_setup.launch_blender = lambda exe, port, host="127.0.0.1": calls.append(("launch", exe, port))
+        self.addCleanup(lambda: (setattr(blender_setup, "list_blenders", orig[0]), setattr(blender_setup, "install_addon", orig[1]),
+                                 setattr(blender_setup, "launch_blender", orig[2])))
+        st, d = self.req("POST", "/api/blender/install", {"index": 0})
+        self.assertEqual((st, d["ok"]), (200, True))
+        st, d = self.req("POST", "/api/blender/launch", {"index": 0})
+        self.assertEqual((st, d["ok"]), (200, True))
+        self.assertEqual(calls, [("install", "/opt/blender-5.1/blender"), ("launch", "/opt/blender-5.1/blender", self.link.port)])
+        for bad in ({"index": 5}, {"index": -1}, {"index": True}, {"index": "0"}, {"path": "/bin/sh"}, {}):
+            self.assertEqual(self.req("POST", "/api/blender/install", bad)[0], 400, bad)         # a path from the request is never run
+        self.assertEqual(len(calls), 2)
+        st, _ = self.req("POST", "/api/blender/install", {"index": 0}, headers={"Origin": "http://evil.example"})
+        self.assertEqual(st, 403)                                                                # a web page cannot start Blender
+        self.assertEqual(len(calls), 2)
 
     def test_static_editor_is_served(self):
         st, body = self.req("GET", "/")

@@ -29,10 +29,12 @@ attribute arrays.
 """
 from __future__ import annotations
 
+import contextlib
 import inspect
 import math
 import numbers
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -249,32 +251,57 @@ class NodeType:
 
 
 class Registry:
+    """Node types by name. Readers always see a complete table: ``batch()`` stages many changes (a library reload that
+    unregisters and rebuilds types) in a private copy that is published in one step, so a cook running on another
+    thread never sees a type missing halfway through."""
+
     def __init__(self):
         self._types: Dict[str, NodeType] = {}
+        self._tls = threading.local()
+
+    @property
+    def _cur(self) -> Dict[str, NodeType]:
+        pending = getattr(self._tls, "pending", None)
+        return self._types if pending is None else pending
+
+    @contextlib.contextmanager
+    def batch(self):
+        """Changes made by this thread inside the block stay private until it ends (nested blocks join the outer one)."""
+        if getattr(self._tls, "pending", None) is not None:
+            yield
+            return
+        self._tls.pending = dict(self._types)
+        try:
+            yield
+        finally:
+            staged, self._tls.pending = self._tls.pending, None
+            self._types = staged                           # one reference assignment: atomic for readers
 
     def register(self, nt: NodeType, *, replace: bool = False) -> NodeType:
-        if nt.name in self._types and not replace:
+        cur = self._cur
+        if nt.name in cur and not replace:
             raise ValueError(f"node type {nt.name!r} is already registered")
-        self._types[nt.name] = nt
+        cur[nt.name] = nt
         return nt
 
     def unregister(self, name: str) -> Optional[NodeType]:
-        return self._types.pop(name, None)
+        return self._cur.pop(name, None)
 
     def get(self, name: str) -> NodeType:
+        types = self._cur
         try:
-            return self._types[name]
+            return types[name]
         except KeyError:
-            raise KeyError(f"unknown node type {name!r}; known: {sorted(self._types)}") from None
+            raise KeyError(f"unknown node type {name!r}; known: {sorted(types)}") from None
 
     def __contains__(self, name: str) -> bool:
-        return name in self._types
+        return name in self._cur
 
     def names(self) -> List[str]:
-        return sorted(self._types)
+        return sorted(self._cur)
 
     def __iter__(self):
-        return iter(self._types.values())
+        return iter(list(self._cur.values()))
 
 
 REGISTRY = Registry()

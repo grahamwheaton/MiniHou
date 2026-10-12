@@ -60,7 +60,7 @@ class EncodingTests(unittest.TestCase):
         import sys
         env = {**os.environ, "PYTHONIOENCODING": "cp1252:strict", "PYTHONUTF8": "0"}
         for args in (["nodes"], ["cook", str(ROOT / "examples" / "graphs" / "demo.json"), "--repeat", "1"]):
-            out = subprocess.run([sys.executable, "-m", "minihou"] + args, cwd=str(ROOT), env=env, capture_output=True,
+            out = subprocess.run([sys.executable, str(ROOT / "tools" / "worktree_cli.py")] + args, cwd=str(ROOT), env=env, capture_output=True,
                                  text=True, encoding="cp1252", errors="strict")
             self.assertEqual(out.returncode, 0, out.stderr)
 

@@ -23,7 +23,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -34,7 +34,10 @@ from ..graph import Graph, GraphError
 from .. import timectx
 from ..inputs import INPUTS
 from ..sdk import ParamError, Registry
+from ..flow import attribute_flow
+from ..handles import PROVIDERS as HANDLE_TYPES, handles_for
 from ..summary import summarize
+from ..wrangle import compile_snippet
 
 log = logging.getLogger("minihou.session")
 
@@ -68,6 +71,7 @@ class Result:
     cook: Dict[str, Any] = field(default_factory=dict)
     error: Optional[Dict[str, Any]] = None       # {"node": id-or-None, "message": str}
     rev: int = 0                                  # graph revision this result was cooked from
+    extras: Dict[str, Tuple[Geometry, str]] = field(default_factory=dict)   # extra outputs: object name -> (geometry, key)
 
 
 def _merge_key(ops: List[dict]) -> Optional[tuple]:
@@ -93,10 +97,12 @@ class Session:
         self.latest_error: Optional[Result] = None    # set while the graph is failing
         self._listeners: List[Any] = []
         self._rev = 0                # bumped on every change of the graph
+        self._document_id = 0        # fences delayed browser edits across file switches
         self._cooked_rev = -1        # rev of the last completed cook
         self._seq = 0
         self._last_key = None
         self._last_error_msg = None
+        self._extra_errors: Dict[str, str] = {}
         self._wake = threading.Event()
         self._idle = threading.Condition()
         self._stop = threading.Event()
@@ -132,7 +138,7 @@ class Session:
     def snapshot(self) -> dict:
         """The graph as JSON plus its revision (what editors render)."""
         with self.lock:
-            return {"rev": self._rev, "graph": self.graph.to_dict(),
+            return {"rev": self._rev, "document_id": self._document_id, "graph": self.graph.to_dict(),
                     "path": str(self.path) if self.path else None,
                     "can_undo": bool(self._undo), "can_redo": bool(self._redo)}
 
@@ -158,13 +164,14 @@ class Session:
         self._notify_graph(origin)
         return v
 
-    def edit(self, ops: List[dict], origin: str = "api") -> dict:
+    def edit(self, ops: List[dict], origin: str = "api", document_id=None) -> dict:
         """Apply a batch of :mod:`minihou.edit` ops atomically. Raises :class:`~minihou.edit.EditError`.
 
         Returns ``{"rev", "results", "changed"}``. Interface changes (including exposed values) are pushed to link
         clients, so Blender follows edits made in the editor or by an AI."""
         key = _merge_key(ops)
         with self.lock:
+            self._check_document(document_id)
             before = self.graph.to_dict()
             new, results = apply_ops(self.graph, ops)
             changed = new.to_dict() != before
@@ -184,14 +191,19 @@ class Session:
             self._after_structural_change(origin)
         return {"rev": rev, "results": results, "changed": changed}
 
-    def undo(self, origin: str = "api") -> bool:
-        return self._step(self._undo, self._redo, origin)
+    def _check_document(self, document_id):
+        if document_id is not None and document_id != self._document_id:
+            raise GraphError("Editor graph changed; this edit belongs to the previously open graph")
 
-    def redo(self, origin: str = "api") -> bool:
-        return self._step(self._redo, self._undo, origin)
+    def undo(self, origin: str = "api", document_id=None) -> bool:
+        return self._step(self._undo, self._redo, origin, document_id)
 
-    def _step(self, src: list, dst: list, origin: str) -> bool:
+    def redo(self, origin: str = "api", document_id=None) -> bool:
+        return self._step(self._redo, self._undo, origin, document_id)
+
+    def _step(self, src: list, dst: list, origin: str, document_id=None) -> bool:
         with self.lock:
+            self._check_document(document_id)
             if not src:
                 return False
             entry = src.pop()
@@ -306,6 +318,16 @@ class Session:
             except Exception:  # noqa: BLE001 - a bad listener must not stop the cook thread
                 log.exception("listener failed")
 
+    def _extra_error(self, name: str, message: str) -> None:
+        """An extra output failed to cook: say so once, keep the main result flowing."""
+        if self._extra_errors.get(name) != message:
+            self._extra_errors[name] = message
+            log.warning("output %r failed: %s", name, message)
+            for l in list(self._listeners):
+                fn = getattr(l, "on_extra_error", None)
+                if fn:
+                    fn(name, message)
+
     def _report_error(self, node: Optional[str], message: str, rev: int = 0) -> None:
         if message == self._last_error_msg:
             return                                           # same failure again: don't spam clients
@@ -322,16 +344,27 @@ class Session:
         t0 = time.perf_counter()
         published: Optional[Result] = None
         try:
+            extras: Dict[str, Tuple[Geometry, str]] = {}
             with self._cook_lock, timectx.at(frame, fps):
                 geo = self.evaluator.cook(snapshot)
                 stats = self.evaluator.last_stats
-                self.evaluator.cache.retain(self.evaluator.live_keys(snapshot))
-            if stats.key != self._last_key or self._last_error_msg is not None:
+                live = self.evaluator.live_keys(snapshot)
+                for name, nid in snapshot.extra_outputs().items():     # more outputs: each its own Blender object
+                    try:
+                        eg = self.evaluator.cook(snapshot, nid)
+                    except (NodeError, GraphError, ParamError) as e:
+                        self._extra_error(name, f"{nid}: {e}")
+                        continue
+                    extras[name] = (eg, self.evaluator.last_stats.key)
+                    live += self.evaluator.live_keys(snapshot, nid)
+                self.evaluator.cache.retain(live)
+            overall = stats.key + "".join(f"|{n}:{k}" for n, (_, k) in sorted(extras.items()))
+            if overall != self._last_key or self._last_error_msg is not None:
                 d = stats.to_dict()
                 cook = {"ms": round((time.perf_counter() - t0) * 1000, 3), "cooked": d["cooked"],
                         "cached": d["cached"], "node_ms": d["node_ms"]}
-                published = Result(0, geo, stats.key, cook, rev=rev)
-                self._last_key, self._last_error_msg = stats.key, None
+                published = Result(0, geo, stats.key, cook, rev=rev, extras=extras)
+                self._last_key, self._last_error_msg = overall, None
                 self._publish(published)
             elif self.latest_good is not None:
                 self.latest_good.rev = rev                   # same geometry, newer graph (e.g. a node was moved)
@@ -379,6 +412,13 @@ class Session:
         t0 = time.perf_counter()
         try:
             with self._cook_lock, timectx.at(frame, fps):
+                sources = list(dict.fromkeys(snapshot.input_ids(node)))
+                if snapshot.nodes[node].type == "loop_end":
+                    # A repeat body cannot cook outside its iteration context. Compare
+                    # the completed loop against its initial input for attribute flow.
+                    begin = snapshot.nodes[node].inputs.get("begin")
+                    sources = list(snapshot.input_ids(begin)) if begin in snapshot.nodes else []
+                ins = [self.evaluator.cook(snapshot, src) for src in sources if src in snapshot.nodes]
                 geo = self.evaluator.cook(snapshot, node)
                 stats = self.evaluator.last_stats.to_dict()
         except (NodeError, GraphError, ParamError) as e:
@@ -387,12 +427,40 @@ class Session:
         out = {"node": node, "rev": rev, "ok": True, "ms": round((time.perf_counter() - t0) * 1000, 3),
                "cooked": stats["cooked"], "cached": stats["cached"]}
         out.update(summarize(geo, detail))
+        out["flow"] = attribute_flow(geo, ins)
         n = snapshot.nodes[node]
+        if n.type == "wrangle":                              # which attributes the snippet reads and writes
+            try:
+                prog = compile_snippet(str(snapshot.get_param(node, "snippet")))
+                out["wrangle"] = {"reads": sorted(prog.reads), "writes": sorted(prog.writes)}
+            except Exception:  # noqa: BLE001 - a broken snippet already failed the cook above
+                pass
         if n.type == "blender_object":                       # what Blender sent: attributes, vertex groups, skips
             data = INPUTS.get(str(n.params.get("object", "")))
             if data is not None:
                 out["blender"] = dict(data.info, error=data.error) if data.error else dict(data.info)
         return out
+
+    def preview(self, node: str) -> dict:
+        """Cook ``node`` and return ``{"ok", "node", "rev", "geo"}``, or ``{"ok": False, "error"}`` (never raises)."""
+        with self.lock:
+            snapshot = self.graph.copy()
+            rev = self._rev
+            frame, fps = self.frame, self.fps
+        if node not in snapshot.nodes:
+            return {"ok": False, "node": node, "rev": rev, "error": {"node": node, "message": f"no such node {node!r}"}}
+        try:
+            with self._cook_lock, timectx.at(frame, fps):
+                geo = self.evaluator.cook(snapshot, node)
+                handles = []
+                inst = snapshot.nodes[node]
+                if inst.type in HANDLE_TYPES:                    # inputs (cached) and parameters for the viewport handles
+                    ins = [self.evaluator.cook(snapshot, src) for src in snapshot.input_ids(node) if src in snapshot.nodes]
+                    handles = handles_for(inst.type, ins, geo, snapshot.effective_params(node))
+        except (NodeError, GraphError, ParamError) as e:
+            return {"ok": False, "node": node, "rev": rev,
+                    "error": {"node": getattr(e, "node_id", None), "message": str(e)}}
+        return {"ok": True, "node": node, "rev": rev, "geo": geo, "handles": handles}
 
     def start(self, cook_immediately: bool = True) -> None:
         if self._thread and self._thread.is_alive():
@@ -420,6 +488,9 @@ class Session:
             if t and t is not threading.current_thread():
                 t.join(2.0)
         self.flush()
+
+        with self._cook_lock:
+            self.evaluator.rbd.clear()
 
     def wait_idle(self, timeout: float = 10.0) -> bool:
         """Block until every edit made so far has been cooked (for tests, scripts and AI tools)."""
@@ -565,32 +636,41 @@ class Session:
     def open_file(self, path, create: bool = False) -> dict:
         """Switch the session to another graph file (creating a starter graph if asked). The old file is saved
         first. Raises :class:`GraphError` / ``OSError``."""
-        path = Path(path)
-        if path.exists():
-            text = path.read_text(encoding="utf-8")
-            g = Graph.from_json(text, self.evaluator.registry, check=False)
-        elif create:
-            g = Graph.from_dict(NEW_GRAPH, self.evaluator.registry, check=False)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            text = g.to_json()
-            _atomic_write(path, text)
-        else:
-            raise GraphError(f"no such file: {path}")
-        self.flush()
-        save = True
-        with self.lock:
+        path = Path(path).resolve()
+        # Same lock order as the watcher. Edits cannot arrive between saving the old
+        # graph and switching it; a failed save leaves graph/path/history untouched.
+        with self._file_lock, self.lock:
+            same = self.path is not None and path == self.path.resolve()
+            if same and path.is_file():
+                if self._dirty and not self._flush_locked():
+                    raise GraphError("Cannot save current graph; editor was not switched: " + (self.save_error or "saving is disabled"))
+                return self.snapshot()  # never reload stale disk data over current edits
+            if path.exists():
+                text = path.read_text(encoding="utf-8")
+                g = Graph.from_json(text, self.evaluator.registry, check=False)
+            elif create:
+                g = Graph.from_dict(NEW_GRAPH, self.evaluator.registry, check=False)
+                text = g.to_json()
+            else:
+                raise GraphError(f"no such file: {path}")
+            if self._dirty and not self._flush_locked():
+                raise GraphError("Cannot save current graph; editor was not switched: " + (self.save_error or "no writable current graph file"))
+            if not path.exists():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                _atomic_write(path, text)
             self.path = path
-            self._save_enabled = save
+            self._save_enabled = True
             self._file_text = text
             self._stamp = self._file_stamp()
+            self.save_error = None
             self._undo.clear()
             self._redo.clear()
-        self.replace_graph(g, origin="open")
-        with self.lock:
-            self._dirty = layout_missing(self.graph)      # positions were added: persist them on the next save
-        if self._watch_thread is None or not self._watch_thread.is_alive():
-            self.watch_file(path, save=save)
-        return self.snapshot()
+            self._document_id += 1
+            self._dirty = layout_missing(g)
+            self.replace_graph(g, origin="open")
+            snapshot = self.snapshot()
+        self._ensure_watcher()
+        return snapshot
 
 
 def _atomic_write(path: Path, text: str) -> None:

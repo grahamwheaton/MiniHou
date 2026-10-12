@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "doc": "Initial modelling workflow; see docs/modeling_tools.md for limits.",
+  "nodes": {
+    "grid": {
+      "type": "grid",
+      "inputs": {},
+      "params": {
+        "columns": 20,
+        "rows": 20,
+        "size_x": 4,
+        "size_y": 4
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "soft": {
+      "type": "soft_transform",
+      "inputs": {
+        "geo": "grid"
+      },
+      "params": {
+        "radius": 2,
+        "translate": [
+          0,
+          0,
+          1
+        ]
+      },
+      "pos": [
+        240,
+        0
+      ]
+    },
+    "normal": {
+      "type": "normal",
+      "inputs": {
+        "geo": "soft"
+      },
+      "params": {},
+      "pos": [
+        480,
+        0
+      ]
+    }
+  },
+  "display": "normal",
+  "exposed": [
+    {
+      "name": "Translate",
+      "node": "soft",
+      "param": "translate"
+    }
+  ]
+}

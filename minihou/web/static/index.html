@@ -20,18 +20,39 @@
   <button id="redo-btn" title="Redo (Ctrl+Shift+Z)">↷</button>
   <button id="add-btn" title="Add a node (Tab)">+ Node</button>
   <button id="tidy-btn" title="Tidy the layout (L)">Tidy</button>
+  <button id="box-btn" title="Network box around the selected nodes (O)">Box</button>
   <span class="frame" title="Current frame (@Frame, @Time). Blender's timeline sets it when connected.">
-    <button id="frame-prev" title="Previous frame">◀</button><input id="frame-input" type="number" step="1" value="1" aria-label="Frame"><button id="frame-next" title="Next frame">▶</button>
+    <button id="frame-prev" title="Previous frame">◀</button><input id="frame-input" type="number" step="1" value="1" aria-label="Frame"><button id="frame-next" title="Next frame">▶</button><input id="frame-slider" type="range" min="1" max="250" step="1" value="1" aria-label="Frame slider" title="Scrub the frame (the range grows if you type a later frame)">
+  </span>
+  <span class="layout" role="group" aria-label="Layout">
+    <button data-layout="graph" title="Node graph large, 3-D view small">Graph</button><button data-layout="split" title="Graph and 3-D view side by side">Split</button><button data-layout="view" title="3-D view large, graph small">3D</button>
+    <button id="lay-dir" title="Stack the panes or put them side by side">⇆</button>
+    <button id="lay-swap" title="Swap the graph and the 3-D view">⇄</button>
+    <button id="lay-side" title="Show or hide the parameter panel (the 3-D view and graph then fill the window)">▤</button>
   </span>
   <span class="spacer"></span>
   <span id="cook-status" class="status"><span class="dot"></span><span class="text">connecting…</span></span>
-  <span id="blender-status" class="status" title="Blender clients connected to the live link"><span class="dot"></span><span class="text">Blender</span></span>
+  <span id="blender-status" class="status clickable" role="button" tabindex="0" title="Blender clients connected to the live link"><span class="dot"></span><span class="text">Blender</span></span>
   <button id="help-btn" title="Keyboard and mouse">?</button>
 </header>
 
+<div id="blender-bar" class="hidden" role="region" aria-label="Blender">
+  <span class="bb-text" id="bb-text">Blender is not connected.</span>
+  <a id="bb-zip" class="bb-chip" href="/addon/minihou_link.zip" download="minihou_link.zip" draggable="true"
+     title="Drag this onto a Blender window to install the add-on (Blender 4.2+), or click to download the zip">⠿ minihou_link.zip</a>
+  <select id="bb-pick" class="hidden" aria-label="Blender installation"></select>
+  <button id="bb-install" title="Install and enable the add-on in the chosen Blender (starts it once in the background)">Install add-on</button>
+  <button id="bb-open" title="Start Blender with the add-on already connected to this engine">Open Blender</button>
+  <span id="bb-msg" class="muted small"></span>
+  <span class="spacer"></span>
+  <button id="bb-close" title="Hide (click the Blender indicator in the top bar to bring it back)" aria-label="Hide">✕</button>
+</div>
+
 <main id="main">
+  <div id="work">
   <section id="canvas" tabindex="0" aria-label="Node graph">
     <div id="world">
+      <div id="boxes"></div>
       <svg id="wires" width="1" height="1"></svg>
       <div id="nodes"></div>
     </div>
@@ -41,12 +62,44 @@
     <div id="offline" class="hidden">Engine offline — reconnecting… <small>(start it with <code>python -m minihou serve graph.json</code>)</small></div>
   </section>
 
+
+  <div id="work-split" title="Drag to resize"></div>
+
+  <section id="preview" class="panel pane" aria-label="3D view">
+      <div class="panel-title">
+        <span>3D <span id="pv-node" class="muted"></span></span>
+        <span class="pv-opts">
+          <label class="small"><input type="checkbox" id="pv-shaded" checked> shaded</label>
+          <label class="small"><input type="checkbox" id="pv-edges" checked> edges</label>
+          <label class="small"><input type="checkbox" id="pv-points"> points</label>
+          <button id="pv-max" class="small" title="Fill the window with this pane and back (Ctrl+Space over a pane)">⛶</button>
+        </span>
+      </div>
+      <div class="pv-tools">
+        <span class="pv-modes" role="group" aria-label="Selection mode">
+          <button data-mode="view" class="on" title="Orbit only (default)">View</button><button data-mode="point" title="Select points (1)">Pts</button><button data-mode="edge" title="Select edges (2)">Edges</button><button data-mode="face" title="Select faces (3)">Faces</button>
+        </span>
+        <span id="pv-selinfo" class="muted small"></span>
+        <span id="pv-xform" class="pv-nav hidden" role="group" aria-label="Handle tool">
+          <button data-tool="move" class="on" title="Move arrows (W)">Move</button><button data-tool="rotate" title="Rotation rings (E)">Rotate</button><button data-tool="scale" title="Scale handles (R)">Scale</button>
+        </span>
+        <span class="spacer"></span>
+        <span class="pv-nav" role="group" aria-label="View">
+          <button data-view="front" title="Front (Numpad 1, Ctrl for back)">Front</button><button data-view="right" title="Right (Numpad 3, Ctrl for left)">Right</button><button data-view="top" title="Top (Numpad 7, Ctrl for bottom)">Top</button><button id="pv-ortho" title="Perspective / orthographic (Numpad 5)">Persp</button><button id="pv-frame" title="Frame the selection, or everything (Numpad . / Home / double-click the view)">⌂</button>
+        </span>
+      </div>
+      <div class="pv-wrap"><canvas id="pv-canvas" aria-label="3D preview"></canvas><div id="pv-msg" class="muted hidden"></div></div>
+      <div id="pv-actions" class="pv-actions hidden"></div>
+    </section>
+  </div>
+
   <div id="splitter" title="Drag to resize"></div>
 
   <aside id="side">
     <section id="params" class="panel">
       <div class="panel-empty">Select a node to edit its parameters.</div>
     </section>
+    <div id="side-split" title="Drag to resize"></div>
     <section id="info" class="panel">
       <div class="panel-title">
         <span>Geometry <span id="info-node" class="muted"></span></span>
@@ -74,13 +127,20 @@
     <tr><td>blue bar on a node</td><td>display flag: what Blender shows</td></tr>
     <tr><td>drag background / middle mouse</td><td>pan; wheel zooms; <kbd>Shift</kbd>-drag box-selects</td></tr>
     <tr><td><kbd>F</kbd> / <kbd>L</kbd></td><td>frame selection (or all) / tidy the layout</td></tr>
+    <tr><td>3-D view: <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> / <kbd>Esc</kbd></td><td>select points / edges / faces (click or drag a box, <kbd>Shift</kbd> adds, <kbd>Ctrl</kbd> removes; <kbd>Alt</kbd>-drag or middle mouse orbits) / back to view. The buttons under the view add a node after the one you are looking at (Bevel for edges, Extrude, Inset, Delete, Group for faces...)</td></tr>
+    <tr><td>3-D view navigation</td><td>drag orbits, <kbd>Shift</kbd>-drag / right / middle mouse pans, wheel zooms; the axis gizmo (top right) or <kbd>Numpad 1</kbd> <kbd>3</kbd> <kbd>7</kbd> (<kbd>Ctrl</kbd>: opposite side) snap to front / right / top; <kbd>Numpad 5</kbd> perspective or orthographic; <kbd>Numpad .</kbd> / <kbd>Home</kbd> frame the selection or everything</td></tr>
+    <tr><td>handles in the 3-D view</td><td>the node you look at can show arrows to drag; a <b>transform</b> has <b>Move / Rotate / Scale</b> tools (<kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd> with the pointer over the view and nothing selected): move arrows, one ring per rotation axis (drag around it), scale cubes per axis and a square for uniform scale</td></tr>
+    <tr><td>layout</td><td>drag the dividers between the graph, the 3-D view and the parameter panel; <b>Graph / Split / 3D</b> set the balance, <b>⇆</b> stacks or aligns, <b>⇄</b> swaps, <b>▤</b> hides the panel; <kbd>Ctrl+Space</kbd> over a pane fills the window with it (again to go back). Saved in this browser.</td></tr>
+    <tr><td><kbd>O</kbd></td><td>network box around the selected nodes: drag its title to move it with them, its corner to resize, double-click the title to rename, the dot to change colour</td></tr>
     <tr><td><kbd>Delete</kbd> / <kbd>Ctrl+D</kbd> / <kbd>Ctrl+A</kbd></td><td>delete / duplicate / select all</td></tr>
+    <tr><td><kbd>Ctrl+C</kbd> / <kbd>Ctrl+X</kbd> / <kbd>Ctrl+V</kbd></td><td>copy / cut / paste nodes (also into another graph or editor window)</td></tr>
     <tr><td><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd></td><td>undo / redo (also undoes edits made by AI)</td></tr>
     <tr><td>drag a parameter label</td><td>scrub the value; <kbd>B</kbd> button exposes it to Blender</td></tr>
   </table>
   <p class="muted">Edits are saved to the graph file and show up live in Blender and in other editors.</p>
 </div>
 
+<script src="/static/preview.js"></script>
 <script src="/static/editor.js"></script>
 </body>
 </html>
