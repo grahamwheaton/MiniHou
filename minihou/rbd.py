@@ -396,6 +396,14 @@ class World:
         self.joint_initial = {name: getattr(self.model, name).copy() for name in ('jnt_limited', 'dof_damping')}
         self.data = self.mj.MjData(self.model)
         self.body_ids = [self.mj.mj_name2id(self.model, self.mj.mjtObj.mjOBJ_BODY, f'b{i}') for i in range(len(self.pieces))]
+        if any(not link.values['legacy_glue'] for link in self.links):
+            # MuJoCo sorts exclusions by body signature, not XML insertion order.
+            # Hinge helper bodies also mean piece index is not body ID minus one.
+            for pair, (_slot, ids) in list(self.pairs.items()):
+                ba, bb = sorted(self.body_ids[i] for i in pair)
+                signature = (ba << 16) + bb
+                slot = int(np.flatnonzero(self.model.exclude_signature == signature)[0])
+                self.pairs[pair] = (slot, ids)
         self.dofs = []
         for i, p in enumerate(self.pieces):
             if p.active:

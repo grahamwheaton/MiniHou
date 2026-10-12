@@ -267,6 +267,25 @@ class ConstraintPhysicsTests(unittest.TestCase):
         w.restart()
         np.testing.assert_array_equal(w.model.exclude_signature, signature)
 
+    def test_reversed_link_order_and_hinge_helper_restore_the_correct_pair(self):
+        nodes = scene("pin", world=False, strength=.001)
+        nodes["cbox"] = {"type": "box", "params": {"center": [3, 0, 2]}}
+        nodes["c"] = {"type": "rbd_configure", "inputs": {"geo": "cbox"}, "params": {"id_offset": 2}}
+        nodes["bodies"]["inputs"]["geos"].append("c")
+        nodes["weak"] = nodes.pop("link")
+        nodes["strong"] = {"type": "rbd_constraint", "params": {"kind": "hinge", "body_a": 2,
+            "body_b": 1, "anchor": [2, 0, 2]}}
+        nodes["link"] = {"type": "merge", "inputs": {"geos": ["strong", "weak"]}}
+        w = self.world(nodes)
+        strong_slot = w.pairs[(1, 2)][0]
+        weak_slot = w.pairs[(0, 1)][0]
+        strong_signature = w.model.exclude_signature[strong_slot]
+        self.assertNotEqual(strong_slot, weak_slot)
+        w.pose(30)
+        self.assertEqual(w.broken.tolist(), [False, True])
+        self.assertEqual(w.model.exclude_signature[weak_slot], -1)
+        self.assertEqual(w.model.exclude_signature[strong_slot], strong_signature)
+
     def test_examples_show_strong_reference_and_broken_comparison(self):
         root = Path(__file__).resolve().parents[1]
         for kind in ("pin", "hinge", "spring"):
