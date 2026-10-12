@@ -3,7 +3,7 @@ import fnmatch
 
 import numpy as np
 
-from .. import groups, topo
+from .. import edges as edgelib, groups, topo
 from ..geometry import Geometry, Topology
 from ..sdk import Bool, Enum, Float, Int, Str, Vec3, node
 from . import _build as B
@@ -11,7 +11,7 @@ from .delete import keep_points
 from .normal import prim_normals
 from ._util import normalize_rows
 
-DOMAIN = {"points": "point", "primitives": "prim"}
+DOMAIN = {"points": "point", "primitives": "prim", "edges": "edge"}
 
 
 def _positions(geo, dom):
@@ -28,12 +28,138 @@ def _normals(geo, dom):
     return normalize_rows(acc).astype(np.float64)
 
 
+def _hash01(values, seed):
+    """A repeatable pseudo-random number in [0, 1) per value (splitmix64), so a seed *attribute* gives each element its own."""
+    x = (np.asarray(values).astype(np.int64).astype(np.uint64) + np.uint64((int(seed) * 0x9E3779B97F4A7C15) & 0xFFFFFFFFFFFFFFFF))
+    with np.errstate(over="ignore"):
+        x = (x + np.uint64(0x9E3779B97F4A7C15))
+        x = (x ^ (x >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+        x = (x ^ (x >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+        x = x ^ (x >> np.uint64(31))
+    return (x >> np.uint64(11)).astype(np.float64) / float(1 << 53)
+
+
+def _element_points(geo, dom):
+    """The points of each element, as (element index per entry, point index per entry)."""
+    if dom == "point":
+        return np.arange(geo.npoints), np.arange(geo.npoints)
+    if dom == "prim":
+        return topo.prim_of_vertex(geo), geo.topology.vertex_point.astype(np.int64)
+    e = topo.edges(geo).points
+    return np.repeat(np.arange(len(e)), 2), e.reshape(-1)
+
+
+def _edge_normals(geo):
+    """Average unit normal of the faces on each edge, and the angle between them (degrees; 0 for border edges)."""
+    e = topo.edges(geo)
+    pv = topo.prim_of_vertex(geo)
+    ok = e.of_vertex >= 0
+    N = normalize_rows(prim_normals(geo)).astype(np.float64)
+    acc = np.stack([np.bincount(e.of_vertex[ok], weights=N[pv[ok], c], minlength=len(e.points)) for c in range(3)], 1)
+    avg = normalize_rows(acc).astype(np.float64)
+    # the angle between the two faces: the widest pair of normals around the edge
+    first = np.full(len(e.points), -1, np.int64)
+    first[e.of_vertex[ok][::-1]] = pv[ok][::-1]
+    cosmin = np.ones(len(e.points))
+    n_first = N[np.maximum(first, 0)]
+    cos_all = np.einsum("ij,ij->i", N[pv[ok]], n_first[e.of_vertex[ok]])
+    np.minimum.at(cosmin, e.of_vertex[ok], cos_all)
+    return avg, np.degrees(np.arccos(np.clip(cosmin, -1.0, 1.0)))
+
+
+def _filters(geo, dom, name, p):
+    """Houdini's Group Create filters, in its order: a base group, then (each when enabled) a bounding region, normals,
+    edges and random chance keep only what passes all of them."""
+    n = {"point": geo.npoints, "prim": geo.nprims, "edge": len(topo.edges(geo).points)}[dom]
+    m = np.ones(n, bool)
+    if p["base_enable"]:
+        if dom == "edge":
+            m = edgelib.mask(geo, p["pattern"])
+        else:
+            b = groups.mask(geo, dom, p["pattern"])
+            m = np.ones(n, bool) if b is None else b
+    elem, pts = _element_points(geo, dom)
+    P = geo.P.astype(np.float64)
+    if p["bounds_enable"]:
+        c = np.asarray(p["box_center"], np.float64)
+        half = np.maximum(np.abs(np.asarray(p["box_size"], np.float64)) / 2, 1e-12)
+        q = (P[pts] - c) / half
+        inside = (np.all(np.abs(q) <= 1.0 + 1e-9, axis=1) if p["bounds_type"] == "box" else (q * q).sum(1) <= 1.0 + 1e-9)
+        cnt = np.bincount(elem, weights=inside, minlength=n)
+        tot = np.maximum(np.bincount(elem, minlength=n), 1)
+        m &= (cnt > 0) if p["bounds_partial"] else (cnt >= tot)
+    if p["normals_enable"]:
+        if dom == "edge":
+            N, _ = _edge_normals(geo)
+        else:
+            N = _normals(geo, dom)
+        d = np.asarray(p["direction"], np.float64)
+        d = d / max(np.linalg.norm(d), 1e-12)
+        cos = N @ d
+        keep = cos >= np.cos(np.radians(p["angle"])) - 1e-9
+        if p["normals_opposite"]:
+            keep |= -cos >= np.cos(np.radians(p["angle"])) - 1e-9
+        if (p["backface_from"] or "").strip():                      # drop what faces away from a viewpoint
+            try:
+                eye = np.array([float(x) for x in p["backface_from"].replace(",", " ").split()], np.float64)
+                assert eye.shape == (3,)
+            except (ValueError, AssertionError):
+                raise ValueError("backface_from must be a position like '0 5 0'") from None
+            pos = _positions(geo, dom) if dom != "edge" else P[topo.edges(geo).points].mean(1)
+            keep &= np.einsum("ij,ij->i", N, eye - pos) > 0
+        m &= keep
+    if p["edges_enable"]:
+        if dom == "edge":
+            e = topo.edges(geo)
+            _, ang = _edge_normals(geo)
+            length = np.linalg.norm(P[e.points[:, 0]] - P[e.points[:, 1]], axis=1)
+            if p["min_edge_angle_on"]:
+                m &= ang >= p["min_edge_angle"] - 1e-9
+            if p["max_edge_angle_on"]:
+                m &= ang <= p["max_edge_angle"] + 1e-9
+            if p["min_edge_length_on"]:
+                m &= length >= p["min_edge_length"]
+            if p["max_edge_length_on"]:
+                m &= length <= p["max_edge_length"]
+            if p["unshared_edges"]:
+                m &= e.count == 1
+        elif p["unshared_edges"]:                                    # points / primitives on an open border
+            m &= topo.boundary_points(geo) if dom == "point" else topo.boundary_prims(geo)
+    if p["random_enable"]:
+        if (p["seed_attrib"] or "").strip():
+            table = geo.table({"point": "point", "prim": "prim", "edge": "vertex"}[dom])
+            a = table.get(p["seed_attrib"].strip())
+            if a is None or dom == "edge":
+                raise ValueError(f"no {'point' if dom == 'point' else 'primitive'} attribute {p['seed_attrib']!r} to seed the random choice")
+            r = _hash01(a if a.ndim == 1 else a[:, 0], p["seed"])
+        else:
+            r = np.random.default_rng(int(p["seed"]) & 0xFFFFFFFF).random(n)
+        m &= r < p["percent"] / 100.0
+    return m
+
+
+def _boundary_edge_mask(geo, dom, member):
+    """Edges between the group and the rest (or on an open border): the outline of what was selected."""
+    e = topo.edges(geo)
+    if dom == "edge":
+        return member & (e.count == 1)
+    ok = e.of_vertex >= 0
+    side = (member[topo.prim_of_vertex(geo)] if dom == "prim" else member[geo.topology.vertex_point.astype(np.int64)])
+    inside = np.bincount(e.of_vertex[ok & side], minlength=len(e.points))
+    total = np.bincount(e.of_vertex[ok], minlength=len(e.points))
+    if dom == "prim":
+        return (inside > 0) & (inside < total) | ((inside > 0) & (e.count == 1))
+    both = member[e.points].all(axis=1)
+    return both & (e.count == 1)
+
+
 @node("group_create", inputs=["geo"], category="group", params=[
     Str("name", "group1", doc="Group name; wrangles read it as @group_<name>"),
-    Enum("domain", ["points", "primitives"], doc="What the group holds"),
-    Enum("method", ["pattern", "bounding_box", "normal", "random", "boundary"],
+    Enum("domain", ["points", "primitives", "edges"], doc="What the group holds (an edge group is stored like the edge_group node's)"),
+    Enum("method", ["pattern", "bounding_box", "normal", "random", "boundary", "filters"],
          doc="pattern: groups, ranges or an expression like '@P.z > 1'; bounding_box: inside a box; normal: facing a "
-             "direction; random: a percentage; boundary: on open edges"),
+             "direction; random: a percentage; boundary: on open edges; filters: Houdini's combinable sections "
+             "(base group, bounding region, normals, edges, random chance: an element must pass every enabled one)"),
     Str("pattern", "*", doc="pattern method: group names, ^exclusions, numbers/ranges ('0-9'), or '@P.z > 1'"),
     Vec3("box_center", (0.0, 0.0, 0.0), doc="bounding_box method"),
     Vec3("box_size", (1.0, 1.0, 1.0), doc="bounding_box method"),
@@ -41,12 +167,57 @@ def _normals(geo, dom):
     Float("angle", 45.0, min=0.0, max=180.0, doc="normal method, in degrees"),
     Float("percent", 50.0, min=0.0, max=100.0, doc="random method"),
     Int("seed", 0, doc="random method"),
-    Enum("combine", ["replace", "union", "intersect", "subtract"], doc="How to merge with an existing group of the name"),
+    Enum("combine", ["replace", "union", "intersect", "subtract"], doc="How to merge with an existing group of the name (Initial Merge)"),
+    Bool("base_enable", True, doc="filters: start from the base group in 'pattern' (empty: everything)"),
+    Bool("bounds_enable", False, doc="filters: Keep in Bounding Regions"),
+    Enum("bounds_type", ["box", "sphere"], doc="filters: the region's shape; box_size is its full size (a sphere is the ellipsoid inside it)"),
+    Bool("bounds_partial", False, doc="filters: include entities that are only partly inside (otherwise all of their points must be)"),
+    Bool("normals_enable", False, doc="filters: Keep by Normals (direction and angle above)"),
+    Str("backface_from", "", doc="filters: a position 'x y z'; drops what faces away from it"),
+    Bool("normals_opposite", False, doc="filters: also keep normals matching the opposite direction"),
+    Bool("edges_enable", False, doc="filters: Include by Edges (angle and length apply to edge groups; unshared edges to all)"),
+    Bool("min_edge_angle_on", False, doc="filters: only edges at least this many degrees off flat"),
+    Float("min_edge_angle", 20.0, min=0.0, max=180.0),
+    Bool("max_edge_angle_on", False, doc="filters: only edges at most this many degrees off flat"),
+    Float("max_edge_angle", 20.0, min=0.0, max=180.0),
+    Bool("min_edge_length_on", False),
+    Float("min_edge_length", 0.0, min=0.0, soft_max=10.0),
+    Bool("max_edge_length_on", False),
+    Float("max_edge_length", 1.0, min=0.0, soft_max=10.0),
+    Bool("unshared_edges", False, doc="filters: only edges used by one face (open borders); for points and primitives, those on a border"),
+    Bool("boundary_groups", False, doc="filters: also make '<name>_boundary', the edge group around what was selected"),
+    Bool("random_enable", False, doc="filters: Keep by Random Chance (percent and seed above)"),
+    Str("seed_attrib", "", doc="filters: a point or primitive attribute that seeds each element separately (empty: by element number)"),
 ])
-def group_create(geo, name, domain, method, pattern, box_center, box_size, direction, angle, percent, seed, combine):
-    """Make a named group of points or primitives (stored as the int attribute group_<name>, 1 = member). Most nodes
-    take a group field, and Blender gets each group as a boolean attribute."""
+def group_create(geo, name, domain, method, pattern, box_center, box_size, direction, angle, percent, seed, combine,
+                 base_enable=True, bounds_enable=False, bounds_type="box", bounds_partial=False, normals_enable=False,
+                 backface_from="", normals_opposite=False, edges_enable=False, min_edge_angle_on=False, min_edge_angle=20.0,
+                 max_edge_angle_on=False, max_edge_angle=20.0, min_edge_length_on=False, min_edge_length=0.0,
+                 max_edge_length_on=False, max_edge_length=1.0, unshared_edges=False, boundary_groups=False, random_enable=False,
+                 seed_attrib=""):
+    """Make a named group of points, primitives or edges (stored as the int attribute group_<name>, 1 = member; edge
+    groups as edge_group_<name>). Most nodes take a group field, and Blender gets each group as a boolean attribute."""
     dom = DOMAIN[domain]
+    if method == "filters" or dom == "edge":
+        m = _filters(geo, dom, name, dict(
+            pattern=pattern, base_enable=base_enable or method != "filters", bounds_enable=bounds_enable, bounds_type=bounds_type,
+            box_center=box_center, box_size=box_size, bounds_partial=bounds_partial, normals_enable=normals_enable,
+            direction=direction, angle=angle, backface_from=backface_from, normals_opposite=normals_opposite,
+            edges_enable=edges_enable, min_edge_angle_on=min_edge_angle_on, min_edge_angle=min_edge_angle,
+            max_edge_angle_on=max_edge_angle_on, max_edge_angle=max_edge_angle, min_edge_length_on=min_edge_length_on,
+            min_edge_length=min_edge_length, max_edge_length_on=max_edge_length_on, max_edge_length=max_edge_length,
+            unshared_edges=unshared_edges, random_enable=random_enable and method == "filters", percent=percent, seed=seed,
+            seed_attrib=seed_attrib) if method == "filters" else dict(
+            pattern=pattern, base_enable=True, bounds_enable=method == "bounding_box", bounds_type="box", box_center=box_center,
+            box_size=box_size, bounds_partial=False, normals_enable=method == "normal", direction=direction, angle=angle,
+            backface_from="", normals_opposite=False, edges_enable=method == "boundary", min_edge_angle_on=False, min_edge_angle=0,
+            max_edge_angle_on=False, max_edge_angle=0, min_edge_length_on=False, min_edge_length=0, max_edge_length_on=False,
+            max_edge_length=0, unshared_edges=True, random_enable=method == "random", percent=percent, seed=seed, seed_attrib=""))
+        out = _write_group(geo, dom, name, m, combine)
+        if boundary_groups and method == "filters":
+            outline = _boundary_edge_mask(geo, dom, m)
+            out = edgelib.write(out, edgelib.PREFIX + _checked_name(name + "_boundary"), outline.astype(np.int32))
+        return out
     n = geo.npoints if dom == "point" else geo.nprims
     if method == "pattern":
         m = groups.mask(geo, dom, pattern)
@@ -65,7 +236,31 @@ def group_create(geo, name, domain, method, pattern, box_center, box_size, direc
         m = r < percent / 100.0
     else:
         m = topo.boundary_points(geo) if dom == "point" else topo.boundary_prims(geo)
-    return groups.write(geo, dom, name, m, combine)
+    out = groups.write(geo, dom, name, m, combine)
+    if boundary_groups and method == "filters":
+        out = edgelib.write(out, edgelib.PREFIX + _checked_name(name + "_boundary"),
+                            _boundary_edge_mask(geo, dom, m).astype(np.int32))
+    return out
+
+
+def _checked_name(name):
+    groups.attr_name(name)
+    return name
+
+
+def _write_group(geo, dom, name, m, combine):
+    if dom != "edge":
+        return groups.write(geo, dom, name, m, combine)
+    key = edgelib.PREFIX + _checked_name(name)
+    m = np.asarray(m, bool)
+    old = edgelib.values(geo, key) != 0
+    if combine == "union":
+        m = m | old
+    elif combine == "intersect":
+        m = m & old
+    elif combine == "subtract":
+        m = old & ~m
+    return edgelib.write(geo, key, m.astype(np.int32))
 
 
 @node("group_promote", inputs=["geo"], category="group", params=[

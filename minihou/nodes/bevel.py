@@ -8,8 +8,9 @@ a quad between the copies on its two sides, and points where three or more bevel
 """
 import numpy as np
 
-from .. import groups, spatial, topo
-from ..sdk import Float, Str, node
+from .. import edges as edgelib, groups, spatial, topo
+from ..outgroups import OutGroup, OutGroups, edge_mask
+from ..sdk import Enum, Float, Str, node
 from . import _build as B
 from .normal import prim_normals
 
@@ -137,21 +138,39 @@ def _check_ends(geo, vp, bev, twin):
                          f"edge loop, edges that meet other selected edges, or edges that run to an open border")
 
 
+# Houdini's PolyBevel "Output Groups" section: every one off by default, with these names.
+OUT = OutGroups(
+    OutGroup("pointfilletpolys", "Point Fillet Polygons", "pointfilletpolys", "prim",
+             doc="The corner polygons made where three or more bevelled edges meet at a point"),
+    OutGroup("pointfilletedges", "Point Fillet Edges", "pointfilletedges", "edge", doc="The edges of those corner polygons"),
+    OutGroup("edgefilletpolys", "Edge Fillet Polygons", "edgefilletpolys", "prim", doc="The strips (quads) that replace each bevelled edge"),
+    OutGroup("offsetedges", "Offset Edges", "offsetedges", "edge",
+             doc="The new edges where each strip meets the original faces: the offset copies of the bevelled edges"),
+    OutGroup("offsetpoints", "Offset Points", "offsetpoints", "point", doc="The new points created by offsetting the bevelled edges"),
+    OutGroup("mergedpoints", "Merged Points", "mergedpoints", "point",
+             doc="Points merged where offsets collide. This bevel limits an offset instead of merging, so the group is always empty"),
+)
+
+
 @node("polybevel", inputs=["geo"], category="model", params=[
     Float("distance", 0.1, min=0.0, soft_max=1.0, doc="How far the bevel cuts into the faces on each side"),
     Float("min_angle", 30.0, min=0.0, max=180.0,
           doc="Only bevel edges whose faces meet at least this many degrees off flat (0: every interior edge)"),
-    Str("group", "", doc="Points: only edges with both ends in the group are bevelled (empty: all)"),
+    Str("group", "", doc="What to bevel, read as 'group_type' (empty: every sharp edge, see min_angle)"),
+    Enum("group_type", ["points", "edges", "primitives"],
+         doc="points: edges with both ends in the point group; edges: an edge group, edge numbers or pA-B pairs (e.g. the offsetedges "
+             "of an earlier bevel); primitives: every interior edge of those primitives. A group selects exactly those edges"),
     Str("edges", "", doc="Edges to bevel as point pairs, e.g. '12-13 40-41' (the 3-D view's edge selection writes this). "
                          "When set, exactly these interior edges are bevelled and min_angle is ignored"),
-    Str("output_group", "bevel", doc="Primitive group for the new bevel faces (empty: none)"),
+    Str("output_group", "bevel", doc="Primitive group for all the new bevel faces (empty: none)"),
+    *OUT.params(),
 ])
-def polybevel(geo, distance, min_angle, group, edges, output_group):
+def polybevel(geo, distance, min_angle, group, group_type, edges, output_group, **og):
     """Chamfer the sharp edges of a polygon mesh (Houdini's PolyBevel with one segment). Keep ``distance`` below half
     the shortest bevelled face edge, or the cuts overlap. N is removed (recompute it with a normal node)."""
     B.require_polygons(geo, "polybevel")
     if geo.nprims == 0 or distance <= 0.0:
-        return geo
+        return _outputs(geo, og, None)
     t = geo.topology
     vp = t.vertex_point.astype(np.int64)
     nx, pr = topo.next_vertex(geo), topo.prev_vertex(geo)
@@ -167,11 +186,23 @@ def polybevel(geo, distance, min_angle, group, edges, output_group):
         want = np.isin(np.minimum(vp, vp[nx]) * n + np.maximum(vp, vp[nx]), picked[:, 0] * n + picked[:, 1])
         bev = two & want
         _check_ends(geo, vp, bev, twin)
-    sel = groups.mask(geo, "point", group)
-    if sel is not None:
-        bev &= sel[vp] & sel[vp[nx]]
+    if group_type == "points":
+        sel = groups.mask(geo, "point", group)
+        if sel is not None:
+            bev &= sel[vp] & sel[vp[nx]]
+    elif (group or "").strip() and not len(picked):                 # an edge or primitive group selects exactly those edges
+        if group_type == "edges":
+            e = edgelib.mask(geo, group)
+            want = np.zeros(len(vp), bool)
+            have = topo.edges(geo).of_vertex >= 0
+            want[have] = e[topo.edges(geo).of_vertex[have]]
+        else:
+            psel = groups.mask(geo, "prim", group)
+            want = psel[pv] | psel[pv[np.maximum(twin, 0)]]
+        bev = two & want
+        _check_ends(geo, vp, bev, twin)
     if not bev.any():
-        return geo
+        return _outputs(geo, og, None)
     bound_out = bev | ~two
     bound_in = bound_out[pr]
     # corners on either side of an unbevelled interior edge share a wedge
@@ -221,4 +252,38 @@ def polybevel(geo, distance, min_angle, group, edges, output_group):
     if output_group:
         is_new = np.arange(out.nprims) >= t.nprims
         out = groups.write(out, "prim", output_group, is_new)
-    return B.drop_degenerate(out)
+    nq, nr = len(c1), len(roots)
+    npr, npt = out.nprims, out.npoints
+    prim_range = lambda lo, hi: (np.arange(npr) >= lo) & (np.arange(npr) < hi)          # noqa: E731
+    out = OUT.write(out, og, "edgefilletpolys", lambda: prim_range(t.nprims, t.nprims + nq))
+    out = OUT.write(out, og, "pointfilletpolys", lambda: prim_range(t.nprims + nq, t.nprims + nq + nr))
+    off_pts = np.unique(w[q_src.ravel()]) if nq else np.zeros(0, np.int64)
+    out = OUT.write(out, og, "offsetpoints", lambda: np.isin(np.arange(npt), off_pts))
+    out = OUT.write(out, og, "mergedpoints", np.zeros(npt, bool))
+    out = B.drop_degenerate(out)
+    # edge groups last: they are named by point pairs, which survive the removal of degenerate faces
+    qw = w[q_src] if nq else np.zeros((0, 4), np.int64)
+    offset_pairs = np.concatenate([qw[:, [0, 1]], qw[:, [2, 3]]])
+    out = OUT.write(out, og, "offsetedges", lambda: edge_mask(out, offset_pairs))
+    out = OUT.write(out, og, "pointfilletedges", lambda: edge_mask(out, _ring_pairs(walk, rlen)))
+    return out
+
+
+def _ring_pairs(walk, rlen):
+    """Edges (consecutive wedge points, cyclic) of every corner polygon."""
+    if not len(rlen):
+        return np.zeros((0, 2), np.int64)
+    k = np.arange(walk.shape[1])[None, :]
+    live = k < rlen[:, None]
+    nxt = np.take_along_axis(walk, np.where(k + 1 < rlen[:, None], k + 1, 0), axis=1)
+    return np.stack([walk[live], nxt[live]], 1)
+
+
+def _outputs(geo, og, _unused):
+    """Nothing was bevelled: the switched-on groups still exist, empty, so downstream group fields do not fail."""
+    npr, npt = geo.nprims, geo.npoints
+    for key, shape in (("pointfilletpolys", npr), ("edgefilletpolys", npr), ("offsetpoints", npt), ("mergedpoints", npt)):
+        geo = OUT.write(geo, og, key, np.zeros(shape, bool))
+    for key in ("pointfilletedges", "offsetedges"):
+        geo = OUT.write(geo, og, key, lambda: np.zeros(len(topo.edges(geo).points), bool))
+    return geo

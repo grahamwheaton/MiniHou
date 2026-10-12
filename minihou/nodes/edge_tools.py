@@ -2,6 +2,7 @@
 import numpy as np
 from .. import edges, groups, topo
 from ..geometry import Geometry, Topology
+from ..outgroups import OutGroup, OutGroups
 from ..sdk import Bool, Enum, Float, Int, Str, node
 from . import _build as B
 
@@ -107,14 +108,20 @@ def _oriented_chain(geo, path, closed, reverse_boundary):
     return path, bool(signs)
 
 
+BRIDGE_OUT = OutGroups(
+    OutGroup('bridge', 'Bridge Polygons', 'bridgepolys', 'prim', doc='The faces that join the two profiles'),
+)
+
+
 @node('polybridge', inputs=['geo'], category='model', params=[
     Str('source', '', doc='One boundary chain/loop: edge group, ids or pA-B pairs'),
     Str('destination', '', doc='Disjoint chain/loop with the same number of points'),
     Int('segments', 1, min=1, max=256),
     Int('twist', 0, doc='Destination loop cyclic point shift'),
     Bool('reverse', False, doc='Reverse destination correspondence (standalone profiles only)'),
+    *BRIDGE_OUT.params(),
 ])
-def polybridge(geo, source, destination, segments, twist, reverse):
+def polybridge(geo, source, destination, segments, twist, reverse, **og):
     """Linear quad bridge between equal-size boundary chains/loops. No unequal resampling or intersection repair."""
     if not source.strip() or not destination.strip():
         raise ValueError('specify both source and destination edge selections')
@@ -174,7 +181,9 @@ def polybridge(geo, source, destination, segments, twist, reverse):
     vtx = B.concat([dict(geo.vertex.items()), B.lerp(geo.vertex, np.array(ia), np.array(ib), np.array(tt))])
     prim = B.concat([dict(geo.prim.items()), B.gather(geo.prim, np.array(ps))])
     out = B.make(point['P'], t.vertex_point, t.prim_offsets, point, vtx, prim, geo.detail, t.closed)
-    return edges.remap(geo, out)
+    out = edges.remap(geo, out)
+    nold = geo.nprims
+    return BRIDGE_OUT.write(out, og, 'bridge', lambda: np.arange(out.nprims) >= nold)
 
 
 @node('dissolve_edges', inputs=['geo'], category='model', params=[

@@ -4,6 +4,7 @@ import numpy as np
 from .. import hull as hl
 from .. import topo
 from ..geometry import Geometry
+from ..outgroups import OutGroup, OutGroups
 from ..sdk import Bool, Enum, Float, Int, Str, Vec3, node
 from . import _build as B
 from ._util import normalize_rows
@@ -95,12 +96,19 @@ def dissolve(geo, group, angle):
 
 
 # -- skin -------------------------------------------------------------------------------------------------------
+SKIN_OUT = OutGroups(
+    OutGroup("surface", "Surface", "skinsurface", "prim", doc="The lofted quads between the curves"),
+    OutGroup("cap", "Cap Polygons", "skincap", "prim", doc="The faces closing the first and last curve"),
+)
+
+
 @node("skin", inputs=["geo"], category="modify", params=[
     Int("samples", 0, min=0, soft_max=200, doc="Points per curve after resampling by length (0: the most any curve has)"),
     Bool("loop", False, doc="Join the last curve back to the first (a tube from rings)"),
     Bool("cap", False, doc="Fill the first and last curve with a face when the curves are closed (ignored with loop)"),
+    *SKIN_OUT.params(),
 ])
-def skin(geo, samples, loop, cap):
+def skin(geo, samples, loop, cap, **og):
     """Stretch a surface across a row of curves (Houdini's Skin / loft): every curve is resampled to the same number
     of points by arclength and consecutive curves are joined with quads, in primitive order. Closed curves give
     tubes (closed in the other direction too with `loop`). Writes `uv` (u along the curves, v across them)."""
@@ -146,18 +154,27 @@ def skin(geo, samples, loop, cap):
                    np.repeat(np.arange(M) / (M if loop else M - 1), n)], 1).astype(np.float32)
     vertex_point = np.concatenate(verts).astype(np.int32)
     out = B.make(pos, vertex_point, B.offsets_from_sizes(sizes_out), {"uv": uv})
-    return out
+    out = SKIN_OUT.write(out, og, "surface", lambda: np.arange(out.nprims) < len(quads))
+    return SKIN_OUT.write(out, og, "cap", lambda: np.arange(out.nprims) >= len(quads))
 
 
 # -- revolve ----------------------------------------------------------------------------------------------------
+REVOLVE_OUT = OutGroups(
+    OutGroup("endcaps", "End Caps Group", "endcaps", "prim", doc="The faces that close the two ends of a partial revolve"),
+)
+
+
 @node("revolve", inputs=["geo"], category="generate", params=[
     Vec3("origin", (0.0, 0.0, 0.0), doc="A point on the axis"),
     Vec3("axis", (0.0, 0.0, 1.0), doc="Direction of the axis of revolution"),
     Float("angle", 360.0, min=-360.0, max=360.0, soft_min=-360.0, soft_max=360.0,
           doc="Degrees to sweep (360: a closed surface; negative turns the other way)"),
     Int("divisions", 32, min=1, max=4096, soft_max=128, doc="Steps around the axis"),
+    Float("start_angle", 0.0, soft_min=-360.0, soft_max=360.0, doc="Where the sweep starts, in degrees (the end is start + angle)"),
+    Bool("end_caps", False, doc="Close both ends of a partial revolve with a face per profile (nothing to close at 360 degrees)"),
+    *REVOLVE_OUT.params(),
 ])
-def revolve(geo, origin, axis, angle, divisions):
+def revolve(geo, origin, axis, angle, divisions, start_angle=0.0, end_caps=False, **og):
     """Spin curves (or polygon outlines) around an axis into a surface (Houdini's Revolve): a profile of a vase, a wheel
     or a goblet becomes the solid. Each segment of a profile makes a ring of quads; points on the axis are shared, so a
     profile that runs from the axis to the axis gives a closed shell with triangles at the poles. Writes corner `uv`
@@ -184,7 +201,7 @@ def revolve(geo, origin, axis, angle, divisions):
     along = rel @ ax
     radial = rel - np.outer(along, ax)
     on_axis = np.linalg.norm(radial, axis=1) <= 1e-7 * max(float(np.ptp(P, 0).max()) if len(P) else 1.0, 1e-9)
-    th = np.radians(angle) * np.arange(copies) / steps
+    th = np.radians(start_angle) + np.radians(angle) * np.arange(copies) / steps
     # Rodrigues rotation of every point about the axis for every step: (copies, npoints, 3)
     cos, sin = np.cos(th)[:, None, None], np.sin(th)[:, None, None]
     kx = np.cross(ax, radial)
@@ -244,8 +261,31 @@ def revolve(geo, origin, axis, angle, divisions):
         Nrad = N - Nal
         Nrot = Nal[None] + Nrad[None] * cos + np.cross(ax, Nrad)[None] * sin
         point["N"] = Nrot.reshape(-1, 3).astype(np.float32)
+    prim_src = quad_prim
+    ncap = 0
+    if end_caps and not full:
+        cap_v, cap_sizes, cap_prim = [], [], []
+        for p in usable.tolist():
+            v = vp[offs[p]:offs[p + 1]]
+            if len(v) < 3:
+                continue
+            # the side quads of segment a -> b run (j,b) -> (j,a) along the start ring and (j+1,a) -> (j+1,b) along the end ring
+            # (reversed for a negative angle), so the start cap must walk the profile forwards and the end cap backwards
+            for copy, forwards in ((0, angle >= 0), (steps, angle < 0)):
+                ids = pid[copy, v]
+                cap_v.append(ids if forwards else ids[::-1])
+                cap_sizes.append(len(ids))
+                cap_prim.append(p)
+        if cap_v:
+            flat_v = np.concatenate([flat_v] + cap_v)
+            flat_uv = np.concatenate([flat_uv, np.zeros((sum(cap_sizes), 2))])
+            sizes_out = np.concatenate([sizes_out, cap_sizes])
+            prim_src = np.concatenate([quad_prim, cap_prim])
+            ncap = len(cap_sizes)
+    nbody = len(sizes_out) - ncap
     out = B.make(pos, flat_v.astype(np.int32), B.offsets_from_sizes(sizes_out), point, {"uv": flat_uv.astype(np.float32)},
-                 B.gather(geo.prim, quad_prim), geo.detail)
+                 B.gather(geo.prim, prim_src), geo.detail)
+    out = REVOLVE_OUT.write(out, og, "endcaps", lambda: np.arange(out.nprims) >= nbody)
     return compact_points(out)
 
 
@@ -286,14 +326,20 @@ def _bridge_pair(La, Lb, P, align, twist):
     return faces
 
 
+BRIDGE_OUT = OutGroups(
+    OutGroup("bridge", "Bridge Polygons", "bridgepolys", "prim", doc="The faces that join the paired loops"),
+)
+
+
 @node("bridge", inputs=["geo"], category="modify", params=[
     Bool("align", True, doc="Rotate the second loop to the position that keeps the rungs shortest (equal-length loops)"),
     Int("twist", 0, soft_min=-8, soft_max=8, doc="Extra steps to turn the second loop"),
     Enum("pairing", ["mutual_nearest", "in_order"], doc="mutual_nearest: join two open loops of different pieces when each is "
                                                         "the other's nearest (centres); in_order: the first two, the next "
                                                         "two... (a lone loop in a single piece pairs with the next nearest)"),
+    *BRIDGE_OUT.params(),
 ])
-def bridge(geo, align, twist, pairing):
+def bridge(geo, align, twist, pairing, **og):
     """Join pairs of open boundary loops with a band of faces (Houdini's Bridge): two pipe ends become one pipe, a hole
     in a wall and a hole in a floor a corridor. Equal loops get quads; loops of different sizes get triangles. Loops are
     paired when each is the other's nearest loop among those of other pieces (or in order); a loop with no partner is
@@ -333,5 +379,6 @@ def bridge(geo, align, twist, pairing):
     verts = np.concatenate([np.asarray(f, np.int64) for f in new])
     offs = np.concatenate([t.prim_offsets.astype(np.int64), t.prim_offsets[-1] + np.cumsum(sizes)])
     pad = lambda table, k: {n: np.concatenate([a, np.zeros((k,) + a.shape[1:], a.dtype)]) for n, a in table.items()}  # noqa: E731
-    return B.make(geo.P, np.concatenate([t.vertex_point, verts]), offs, dict(geo.point.items()),
-                  pad(geo.vertex, len(verts)), pad(geo.prim, len(new)), geo.detail)
+    out = B.make(geo.P, np.concatenate([t.vertex_point, verts]), offs, dict(geo.point.items()),
+                 pad(geo.vertex, len(verts)), pad(geo.prim, len(new)), geo.detail)
+    return BRIDGE_OUT.write(out, og, "bridge", lambda: np.arange(out.nprims) >= t.nprims)

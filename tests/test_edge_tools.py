@@ -60,6 +60,17 @@ class EdgeToolsTests(unittest.TestCase):
         self.assertEqual(out.detail, g.detail)
         self.assertTrue(np.isfinite(out.P).all())
 
+    def test_bridge_output_group_marks_the_new_faces(self):
+        g = profiles()
+        g = run('edge_group', g, name='bottom', method='primitives', pattern='0')
+        g = run('edge_group', g, name='top', method='primitives', pattern='1')
+        off = run('polybridge', g, source='bottom', destination='top', segments=3)
+        self.assertNotIn('group_bridgepolys', off.prim)                                  # off unless switched on
+        out = run('polybridge', g, source='bottom', destination='top', segments=3, outgrp_bridge=True)
+        m = out.prim['group_bridgepolys'] != 0
+        self.assertEqual((int(m.sum()), out.nprims), (12, 14))
+        self.assertFalse(m[:2].any())                                                    # the two original profile faces are not in it
+
     def test_bridge_invalid(self):
         g = profiles()
         for a,b in [('', ''), ('p0-1','p0-3'), ('p0-1 p1-2','p4-5'), ('p0-1 p2-3','p4-5 p6-7')]:

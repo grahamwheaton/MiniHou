@@ -4,11 +4,11 @@ import numpy as np
 from minihou.sdk import Float, Vec3, node
 
 
-@node("twist", inputs=["geo"], category="deform", params=[
+@node("twist_height", inputs=["geo"], category="deform", params=[
     Float("angle", 90.0, soft_min=-720.0, soft_max=720.0, doc="Degrees of rotation from the bottom to the top"),
     Vec3("center", (0.0, 0.0, 0.0), doc="A point on the twist axis (the axis is vertical, through this point)"),
 ])
-def twist(geo, angle, center):
+def twist_height(geo, angle, center):
     """Twist geometry around a vertical axis: each point rotates in proportion to its height."""
     out = geo.copy()
     if geo.npoints == 0:

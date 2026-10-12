@@ -9,7 +9,8 @@ minimum (ints, so groups stay crisp); vertex attributes such as uv split per fac
 import numpy as np
 
 from .. import edges, topo
-from ..sdk import Bool, Enum, Int, node
+from ..outgroups import OutGroup, OutGroups
+from ..sdk import Bool, Enum, Float, Int, Str, node
 from . import _build as B
 
 MAX_FACES = 20_000_000
@@ -127,12 +128,23 @@ def subdivide_once(geo, smooth: bool, use_creases: bool = True):
     return out
 
 
+SUBDIVIDE_OUT = OutGroups(
+    OutGroup("creases", "Generate Resulting Creases", "creases", "edge",
+             doc="The edges that are still creased after subdividing (sharpness decays by one per level)"),
+)
+
+
 @node("subdivide", inputs=["geo"], category="modify", version=2, params=[
     Int("depth", 1, min=0, max=6, doc="Levels; each multiplies the face count by about 4"),
     Enum("algorithm", ["catmull_clark", "linear"], doc="catmull_clark smooths; linear only splits faces"),
     Bool("use_creases", True, doc="Use outgoing-corner creaseweight and point cornerweight; sharpness decays each level"),
+    Str("creases", "", doc="Edges to crease: an edge group, edge numbers or pA-B pairs. They get their creaseweight (1 where it has none), "
+                           "or 'crease_weight' when 'override_crease_weight' is on"),
+    Bool("override_crease_weight", False, doc="Give the 'creases' edges crease_weight instead of their own creaseweight"),
+    Float("crease_weight", 1.0, min=0.0, soft_max=10.0, doc="Sharpness for the 'creases' edges when overriding"),
+    *SUBDIVIDE_OUT.params(),
 ])
-def subdivide(geo, depth, algorithm, use_creases=True):
+def subdivide(geo, depth, algorithm, use_creases=True, creases="", override_crease_weight=False, crease_weight=1.0, **og):
     """Subdivide polygons into quads (Houdini's Subdivide). Catmull-Clark smooths towards a limit surface and keeps open
     boundaries as smooth curves; linear splits without moving anything. Faces with fewer than 3 points are dropped."""
     faces = geo.nvertices * 4 ** max(depth - 1, 0)
@@ -140,6 +152,12 @@ def subdivide(geo, depth, algorithm, use_creases=True):
         raise ValueError(f"depth {depth} would make about {faces:,} faces (limit {MAX_FACES:,}); lower the depth")
     B.require_polygons(geo, "subdivide")
     out = geo
+    if (creases or "").strip():                                        # the Creases field: crease these edges for this node only
+        w = edges.values(geo, edges.CREASE)
+        pick = edges.mask(geo, creases)
+        w[pick] = crease_weight if override_crease_weight else np.where(w[pick] > 0, w[pick], 1.0)
+        out = edges.write(geo, edges.CREASE, w.astype(np.float32))
+        use_creases = True
     for _ in range(depth):
         out = subdivide_once(out, algorithm == "catmull_clark", use_creases)
-    return out
+    return SUBDIVIDE_OUT.write(out, og, "creases", lambda: edges.values(out, edges.CREASE) > 0)

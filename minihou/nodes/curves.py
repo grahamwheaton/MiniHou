@@ -9,6 +9,7 @@ curves); sweep them here for render geometry.
 import numpy as np
 
 from .. import groups, topo
+from ..outgroups import OutGroup, OutGroups
 from ..sdk import Bool, Enum, Float, Handle, Int, Str, Vec3, node
 from . import _build as B
 from ._util import guard_count, normalize_rows
@@ -386,13 +387,21 @@ def _frames(P, sizes, closed):
     return T, N
 
 
+SWEEP_OUT = OutGroups(
+    OutGroup("sides", "Sides", "sweepsides", "prim", doc="The tube walls (everything except the end caps)"),
+    OutGroup("startcap", "Start Cap", "startcap", "prim", doc="The cap closing the start of each open curve"),
+    OutGroup("endcap", "End Cap", "endcap", "prim", doc="The cap closing the end of each open curve"),
+)
+
+
 @node("sweep", inputs=["geo"], category="curve", params=[
     Float("radius", 0.05, min=0.0, soft_max=1.0, doc="Tube radius; multiplied by point 'width' or 'pscale' if present"),
     Int("divisions", 8, min=3, soft_max=64, doc="Sides around the tube"),
     Bool("caps", True, doc="Close the ends of open curves"),
     Float("twist", 0.0, soft_min=-720.0, soft_max=720.0, doc="Degrees of twist from start to end"),
+    *SWEEP_OUT.params(),
 ])
-def sweep(geo, radius, divisions, caps, twist):
+def sweep(geo, radius, divisions, caps, twist, **og):
     """Tubes along curves (Houdini's Sweep / PolyWire): rotation-minimising frames (no flips), radius scaled by
     point width or pscale, uv along (u) and around (v) the tube, curve point attributes kept on the rings.
     Closed primitives (closed curves, polygon outlines) make closed rings."""
@@ -439,6 +448,7 @@ def sweep(geo, radius, divisions, caps, twist):
     uv = np.stack([np.c_[u0, v0], np.c_[u0, v1], np.c_[u1, v1], np.c_[u1, v0]], 1).reshape(-1, 2)
     prim_src = np.repeat(curve[i0], D)
     polys_vp, sizes_out, uv_parts, prim_parts = [quads.ravel()], [np.full(len(quads), 4)], [uv], [prim_src]
+    ncaps = 0
     if caps:
         open_c = np.flatnonzero(~closed)
         if len(open_c):
@@ -451,12 +461,16 @@ def sweep(geo, radius, divisions, caps, twist):
             cap_uv = np.c_[0.5 + 0.5 * np.cos(j * 2 * np.pi / D), 0.5 + 0.5 * np.sin(j * 2 * np.pi / D)]
             uv_parts += [np.tile(cap_uv[::-1], (len(open_c), 1)), np.tile(cap_uv, (len(open_c), 1))]
             prim_parts += [open_c, open_c]
+            ncaps = len(open_c)
     point = {nm: np.repeat(a_, D, axis=0) for nm, a_ in B.gather(geo.point, vp).items() if nm not in ("P", "N")}
     out = B.make(newP.astype(np.float32), np.concatenate(polys_vp), B.offsets_from_sizes(np.concatenate(sizes_out)),
                  point, {"uv": np.concatenate(uv_parts).astype(np.float32)},
                  B.gather(geo.prim, prims[np.concatenate(prim_parts)]), geo.detail)
     out.point["curveu"] = np.repeat(u, D).astype(np.float32)
-    return out
+    nq = len(quads)
+    out = SWEEP_OUT.write(out, og, "sides", lambda: np.arange(out.nprims) < nq)
+    out = SWEEP_OUT.write(out, og, "startcap", lambda: (np.arange(out.nprims) >= nq) & (np.arange(out.nprims) < nq + ncaps))
+    return SWEEP_OUT.write(out, og, "endcap", lambda: np.arange(out.nprims) >= nq + ncaps)
 
 
 # -- path deform ------------------------------------------------------------------------------------------------
