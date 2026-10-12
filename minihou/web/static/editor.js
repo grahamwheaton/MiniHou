@@ -613,7 +613,8 @@
     const panel = $("#params");
     const ids = [...S.sel].filter((id) => nodeOf(id));
     document.body.classList.toggle("no-selection", ids.length === 0);
-    const key = ids.length === 1 ? ids[0] + ":" + JSON.stringify({ ...nodeOf(ids[0]), params: undefined }) + JSON.stringify(inputMembers(ids[0])) : ids.length ? "multi:" + ids.join(",") : "graph";
+    const bodyKey = ids.length === 1 && nodeOf(ids[0]).type === "for_each" ? effective(ids[0], typeOf(ids[0]).params.find((p) => p.name === "body")) : "";
+    const key = ids.length === 1 ? ids[0] + ":" + bodyKey + JSON.stringify({ ...nodeOf(ids[0]), params: undefined }) + JSON.stringify(inputMembers(ids[0])) : ids.length ? "multi:" + ids.join(",") : "graph";
     const busy = scrubbing || panel.contains(document.activeElement);
     if (key === panelKey && (ids.length === 1 || busy || statusOnly)) { syncParams(ids[0]); return; }
     panelKey = key;
@@ -705,19 +706,90 @@
         if (named) i++;
         continue;
       }
-      out.push(paramRow(id, p));
+      if (n.type === "for_each" && p.name === "params") {
+        const advanced = h("details", null, h("summary", null, "Advanced parameter JSON"), paramRow(id, p));
+        out.push(advanced);
+      } else out.push(paramRow(id, p));
     }
+    if (n.type === "for_each") out.push(...foreachControls(id));
+    if (ins.length) out.push(streamAttributes(id, ins));
     out.push(h("div", { class: "section" }, "Note"));
     out.push(h("div", { class: "pw" }, h("input", { type: "text", value: n.comment || "", placeholder: "comment shown above the node",
       onchange: (e) => edit([{ op: "meta", id, set: { comment: e.target.value.trim() || null } }]) })));
     return out;
   }
+  function foreachControls(id) {
+    const spec = typeOf(id).params;
+    const body = effective(id, spec.find((p) => p.name === "body"));
+    const t = S.types[body];
+    if (!t) return [h("div", { class: "hint" }, "Choose a body node from the suggestions. These are operations, not geometry attributes.")];
+    let values;
+    try { values = JSON.parse(effective(id, spec.find((p) => p.name === "params")) || "{}"); }
+    catch { return [h("div", { class: "err" }, "Fix the advanced parameter JSON to show the body controls.")]; }
+    if (!values || Array.isArray(values) || typeof values !== "object") return [];
+    const out = [h("div", { class: "section" }, (t.label || t.name) + " controls"), h("div", { class: "hint" }, t.doc || "")];
+    const set = (name, value) => {
+      const current = JSON.parse(effective(id, spec.find((p) => p.name === "params")) || "{}");
+      current[name] = value;
+      queueSet(id, "params", JSON.stringify(current));
+    };
+    for (const p of t.params) {
+      const v = values[p.name] ?? p.default;
+      let input;
+      if (p.kind === "bool") input = h("input", { type: "checkbox", checked: v, onchange: (e) => set(p.name, e.target.checked) });
+      else if (p.kind === "enum") input = h("select", { onchange: (e) => set(p.name, e.target.value) }, ...p.choices.map((x) => h("option", { value: x, selected: x === v }, x)));
+      else if (p.kind === "vec3") input = h("div", { class: "pw vec" }, ...v.map((x, i) => h("input", { type: "number", value: x, step: "any", onchange: (e) => { const next = [...v]; next[i] = Number(e.target.value); set(p.name, next); } })));
+      else input = h("input", { type: ["int", "float"].includes(p.kind) ? "number" : "text", value: v, step: p.kind === "int" ? 1 : "any", min: p.min, max: p.max,
+        onchange: (e) => set(p.name, ["int", "float"].includes(p.kind) ? Number(e.target.value) : e.target.value) });
+      out.push(h("div", { class: "prow body-control", dataset: { bodyParam: p.name } }, h("span", { class: "pl", title: p.doc }, p.label || p.name), h("div", { class: "pw" }, input)));
+    }
+    if (!t.params.length) out.push(h("div", { class: "hint" }, "This operation has no parameters."));
+    return out;
+  }
+
+  function streamAttributes(id, ins) {
+    const content = h("div", { class: "stream-tags" });
+    const details = h("details", { class: "stream-attributes" }, h("summary", null, "Incoming geometry attributes"), content);
+    let loaded = false;
+    details.addEventListener("toggle", async () => {
+      if (!details.open || loaded) return;
+      loaded = true;
+      content.replaceChildren(h("div", { class: "hint" }, "Inspecting inputs…"));
+      const documentId = S.documentId;
+      const blocks = [];
+      for (const [input, sources] of ins) for (const source of sources) {
+        try {
+          const r = await api("/api/inspect", { node: source });
+          if (documentId !== S.documentId || !details.isConnected) return;
+          blocks.push(h("div", { class: "hint" }, input.name + " ← " + source));
+          if (!r.ok) { blocks.push(h("div", { class: "err" }, r.error?.message || "Input could not cook")); continue; }
+          for (const a of r.attributes || []) {
+            const target = typeOf(id).params.find((p) => ["attribute", "piece_attrib"].includes(p.name));
+            const usable = a.domain === "prim" && a.components === 1 && !!target;
+            blocks.push(h(usable ? "button" : "span", { class: "stream-tag", title: a.domain + " · " + (a.type || "detail value"),
+              onclick: usable ? () => { queueSet(id, target.name, a.name); if (nodeOf(id).type === "for_each") queueSet(id, "piece", "attribute"); renderParams(); } : null }, a.name + " · " + a.domain));
+          }
+          if (!(r.attributes || []).length) blocks.push(h("div", { class: "hint" }, "No attributes on this input."));
+        } catch (e) { blocks.push(h("div", { class: "err" }, e.message)); }
+      }
+      content.replaceChildren(...blocks);
+    });
+    return details;
+  }
+
   function paramRow(id, p) {
     const v = effective(id, p);
     const label = h("span", { class: "pl" + (isSet(id, p) ? " changed" : ""), title: (p.doc ? p.doc + "\n" : "") + p.name + " (" + p.kind + ")" }, p.label || p.name);
     const row = h("div", { class: "prow " + p.kind + (p.ui === "code" ? " code" : ""), dataset: { param: p.name } });
     let widget;
-    if (p.kind === "float" || p.kind === "int") {
+    if (S.graph.nodes[id].type === "for_each" && p.name === "body") {
+      const listId = "foreach-body-" + id;
+      const choices = S.typeList.filter((t) => t.inputs.length);
+      const input = h("input", { type: "search", value: v, placeholder: "Search nodes…", "aria-label": "Body node",
+        dataset: { role: "str" }, onchange: (e) => { queueSet(id, p.name, e.target.value); renderParams(); } });
+      input.setAttribute("list", listId);
+      widget = h("div", { class: "pw" }, input, h("datalist", { id: listId }, ...choices.map((t) => h("option", { value: t.name, label: (t.label || t.name) + " · " + (t.menu || t.category || "") }))));
+    } else if (p.kind === "float" || p.kind === "int") {
       const [lo, hi] = rangeFor(p, v);
       const isInt = p.kind === "int";
       const num = h("input", { type: "number", step: isInt ? 1 : "any", value: v, dataset: { role: "num" } });
