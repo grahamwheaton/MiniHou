@@ -262,7 +262,7 @@ class SessionToggleTests(unittest.TestCase):
                 return json.loads(r.read())
         r = post({"enabled": True})
         self.assertTrue(r["enabled"])
-        self.assertEqual(r["stats"]["folder"], os.path.join(d, ".minihou_cache"))
+        self.assertEqual(os.path.realpath(r["stats"]["folder"]), os.path.realpath(os.path.join(d, ".minihou_cache")))   # the engine resolves 8.3 names on Windows
         s.disk_cache.min_ms = 0
         s.disk_cache.min_bytes = 0
         s.edit([{"op": "set", "id": "b", "params": {"x": 0.5}}])
