@@ -214,6 +214,18 @@ class SolverGlueTests(unittest.TestCase):
         self.assertEqual(strong.detail["rbd"]["glue"]["broken"], 0)
         self.assertEqual(len(weak.detail["rbd"].keys() & {"glue"}), 1)
 
+    def test_the_glued_wall_example_stands_then_breaks_where_the_ball_hits(self):
+        import json
+        import os
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "examples", "rbd_glued_wall.json")
+        with open(path, encoding="utf-8") as f:
+            g = Graph.from_dict(json.load(f))
+        before = self.ev.cook(g, frame=6).detail["rbd"]["glue"]
+        after = self.ev.cook(g, frame=40).detail["rbd"]["glue"]
+        self.assertEqual(before["broken"], 0)                                              # it stands on its own until the hit
+        self.assertGreater(after["broken"], 3)                                             # the ball broke some links...
+        self.assertLess(after["broken"], after["links"] // 2)                              # ...but the wall is not simply dust
+
 
 if __name__ == "__main__":
     unittest.main()

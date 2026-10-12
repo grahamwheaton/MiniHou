@@ -716,10 +716,10 @@ def cluster_pieces(ids, a, b, area, target):
     return label.reshape(-1).astype(np.int64)
 
 
-def glue_links(geo, pieces, ids, max_gap, min_area, strength, variation, seed):
+def glue_links(geo, pieces, ids, max_gap, min_area, strength, variation, seed, min_share=0.0):
     """Contacts between pieces as glue: (a, b, area, strength in newtons)."""
     a, b, area, _faces = piece_pairs(geo, pieces, max_gap)
-    keep = area >= max(min_area, 1e-300)
+    keep = area >= max(min_area, min_share * float(area.max(initial=0.0)), 1e-300)
     a, b, area = a[keep], b[keep], area[keep]
     noise = np.random.default_rng([int(seed) & 0xFFFFFFFF, 41]).random(len(area)) * 2 - 1
     force = strength * area * np.maximum(1 + variation * noise, 0.01)
@@ -730,18 +730,20 @@ def glue_links(geo, pieces, ids, max_gap, min_area, strength, variation, seed):
     Str("piece_attrib", "piece", doc="Primitive int attribute with each face's piece (empty: connected pieces)"),
     Enum("output", ["pieces", "constraints"], doc="pieces: the input with a 'cluster' attribute; constraints: the glue links, for the "
                                                   "solver's third input"),
-    Float("strength", 50000.0, min=0.0, soft_max=1e6, doc="Newtons per square metre of contact: a link breaks when the force on "
+    Float("strength", 4.0e6, min=0.0, soft_max=1e8, doc="Newtons per square metre of contact: a link breaks when the force on "
                                                           "it passes strength x contact area (0: never breaks)"),
     Float("strength_variation", 0.2, min=0.0, max=1.0, doc="Random spread of each link's strength (0.2: within 20%)"),
     Int("seed", 0),
     Float("max_gap", 0.0, min=0.0, soft_max=0.1, doc="Pieces whose faces are up to this far apart still count as touching"),
     Float("min_area", 0.0, min=0.0, doc="No glue where the contact is smaller than this"),
+    Float("min_share", 0.0, min=0.0, max=1.0, doc="No glue where the contact is smaller than this share of the largest one: "
+                                                  "slivers would otherwise snap at once"),
     Int("clusters", 0, min=0, soft_max=100, doc="Merge the most strongly stuck pieces into this many rigid clusters (0: no clustering)"),
     Float("weak", 0.5, min=0.0, max=1.0, doc="A link is weak when it is below this share of the average strength"),
     *GLUE_PIECE_OUT.params(),
     *GLUE_LINK_OUT.params(),
 ])
-def glue_cluster(geo, piece_attrib, output, strength, strength_variation, seed, max_gap, min_area, clusters, weak, **og):
+def glue_cluster(geo, piece_attrib, output, strength, strength_variation, seed, max_gap, min_area, min_share, clusters, weak, **og):
     """Glue touching pieces together (Houdini's Glue Cluster). Pieces that share a cut face are linked; ``clusters`` can
     merge the most firmly stuck ones into rigid groups (the int ``cluster``: configure it with ``rbd_configure`` ``compound``
     on). ``output = constraints`` gives the remaining links as lines between piece centres with the attributes the solver
@@ -749,7 +751,7 @@ def glue_cluster(geo, piece_attrib, output, strength, strength_variation, seed, 
     B.require_polygons(geo, "glue_cluster")
     pieces = piece_ids(geo, piece_attrib)
     ids = np.unique(pieces)
-    a, b, area, force = glue_links(geo, pieces, ids, max_gap, min_area, strength, strength_variation, seed)
+    a, b, area, force = glue_links(geo, pieces, ids, max_gap, min_area, strength, strength_variation, seed, min_share)
     label = cluster_pieces(ids, a, b, area, clusters)
     slot = {int(p): k for k, p in enumerate(ids)}
     body = label if clusters > 0 else ids
@@ -787,16 +789,17 @@ def glue_cluster(geo, piece_attrib, output, strength, strength_variation, seed, 
 
 # --------------------------------------------------------------------------------------------- rbd material fracture
 
-# density kg/m3, friction, restitution, glue strength N/m2 (tuned for plausible-looking breakage, not measured)
+# density kg/m3, friction, restitution, glue strength N/m2 (tuned so a wall stands under its own weight and breaks under a
+# hard hit; the order is realistic, the numbers are not measured)
 MATERIALS = {
-    "concrete": (2400.0, 0.70, 0.05, 40000.0),
-    "brick": (1900.0, 0.60, 0.05, 15000.0),
-    "stone": (2700.0, 0.70, 0.05, 60000.0),
-    "wood": (700.0, 0.50, 0.20, 30000.0),
-    "glass": (2500.0, 0.40, 0.10, 5000.0),
-    "ceramic": (2300.0, 0.45, 0.15, 8000.0),
-    "ice": (920.0, 0.05, 0.05, 6000.0),
-    "metal": (7800.0, 0.35, 0.20, 200000.0),
+    "concrete": (2400.0, 0.70, 0.05, 1.2e7),
+    "brick": (1900.0, 0.60, 0.05, 6.0e6),
+    "stone": (2700.0, 0.70, 0.05, 2.0e7),
+    "wood": (700.0, 0.50, 0.20, 3.0e7),
+    "glass": (2500.0, 0.40, 0.10, 6.0e6),
+    "ceramic": (2300.0, 0.45, 0.15, 8.0e6),
+    "ice": (920.0, 0.05, 0.05, 4.0e6),
+    "metal": (7800.0, 0.35, 0.20, 8.0e8),
 }
 MAT_OUT = OutGroups(
     OutGroup("inside", "Inside Faces", "inside", "prim", default=True, doc="The new faces made by the fracture"),
@@ -840,11 +843,11 @@ def rbd_material_fracture(geo, material, pieces, seed, surface_fraction, relax, 
     if output == "constraints":
         if not glue:
             raise ValueError("output = constraints needs glue switched on")
-        return glue_cluster(split, "piece", "constraints", glue_strength * strength_scale, 0.25, seed, gap * 1.2 + 0.0, 0.0,
-                            clusters, 0.5, **{})
+        return glue_cluster(split, "piece", "constraints", glue_strength * strength_scale, 0.25, seed, gap * 1.2, 0.0, 0.05,
+                            clusters, 0.5)
     out = split
     if glue and clusters > 0:
-        out = glue_cluster(split, "piece", "pieces", glue_strength * strength_scale, 0.25, seed, gap * 1.2, 0.0, clusters, 0.5)
+        out = glue_cluster(split, "piece", "pieces", glue_strength * strength_scale, 0.25, seed, gap * 1.2, 0.0, 0.05, clusters, 0.5)
     out = out.copy()
     volume = np.array([mesh_volume(part_of(split, ids, k)) for k in range(count)])
     mass = np.maximum(volume * density * mass_scale, 1e-6)

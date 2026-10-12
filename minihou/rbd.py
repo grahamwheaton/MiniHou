@@ -20,6 +20,7 @@ import numpy as np
 from . import timectx
 
 BACKEND_VERSION = "3.15.0"
+SETTLE_TIME = 0.1                      # seconds after a (re)start in which glue cannot break: touching pieces settle first
 _OWNER = ContextVar("minihou_rbd_owner", default=None)
 
 
@@ -241,9 +242,16 @@ class World:
         self.links = link_table(constraints, self.pieces)
         if self.links:
             eq = ET.SubElement(root, 'equality')
+            skip = ET.SubElement(root, 'contact')
+            self.pairs = {}                                    # glued body pair -> (index of its contact exclusion, link ids)
             for k, (a, b, _st, _len) in enumerate(self.links):
                 ET.SubElement(eq, 'weld', name=f'g{k}', body1=f'b{a}', body2=f'b{b}',
-                              solref=numbers([max(.004, 4 * self.dt), 1.]), solimp='.95 .99 .001')
+                              solref=numbers([max(.03, 4 * self.dt), 1.]), solimp='.95 .99 .001')
+                key = (min(a, b), max(a, b))
+                if key not in self.pairs:                      # glued pieces do not collide until the glue lets go
+                    ET.SubElement(skip, 'exclude', body1=f'b{key[0]}', body2=f'b{key[1]}')
+                    self.pairs[key] = (len(self.pairs), [])
+                self.pairs[key][1].append(k)
         self.model = self.mj.MjModel.from_xml_string(ET.tostring(root, encoding='unicode'))
         self.data = self.mj.MjData(self.model)
         self.body_ids = [self.mj.mj_name2id(self.model, self.mj.mjtObj.mjOBJ_BODY, f'b{i}') for i in range(len(self.pieces))]
@@ -257,6 +265,8 @@ class World:
                 self.dofs.append((d, p))
         self.initial_qvel = self.data.qvel.copy()
         self.broken = np.zeros(len(self.links), bool)
+        self.exclusions = self.model.exclude_signature.copy() if self.links else None
+        self.since_start = 0
         extent = [max(float(np.ptp(p.local, axis=0).max()), 1e-6) for p in self.pieces]
         self.reach = [ln if ln > 0 else min(extent[a], extent[b]) for a, b, _st, ln in self.links]
         self.frame = settings['start_frame']
@@ -269,12 +279,15 @@ class World:
         self.mj.mj_resetData(self.model, self.data)
         self.data.qvel[:] = self.initial_qvel
         self.broken[:] = False
+        if self.links:
+            self.model.exclude_signature[:] = self.exclusions
+        self.since_start = 0
         self.mj.mj_forward(self.model, self.data)
         self.frame = self.settings['start_frame']
 
     def snap_links(self):
         """Break every glue link whose constraint force (plus torque over its lever arm) exceeds its strength."""
-        if not self.links:
+        if not self.links or self.since_start * self.dt < SETTLE_TIME:        # the first steps resolve the pieces' initial contacts
             return
         d = self.data
         rows = np.flatnonzero(d.efc_type[:d.nefc] == int(self.mj.mjtConstraint.mjCNSTR_EQUALITY))
@@ -290,6 +303,9 @@ class World:
             if np.linalg.norm(mine[:3]) + np.linalg.norm(mine[3:6]) / self.reach[k] > strength:
                 d.eq_active[k] = 0
                 self.broken[k] = True
+                for key, (slot, ids) in self.pairs.items():
+                    if k in ids and self.broken[ids].all():     # the last link between the pair went: they collide again
+                        self.model.exclude_signature[slot] = -1
 
     def pose(self, target):
         if target in self.frames:
@@ -303,6 +319,7 @@ class World:
                     self.data.qvel[d:d+3] *= math.exp(-float(p.values['linear_damping']) * self.dt)
                     self.data.qvel[d+3:d+6] *= math.exp(-float(p.values['angular_damping']) * self.dt)
                 self.mj.mj_step(self.model, self.data)
+                self.since_start += 1
                 self.snap_links()
                 self.steps += 1
                 if not np.isfinite(self.data.qpos).all() or any(w.number for w in self.data.warning):
