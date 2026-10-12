@@ -14,8 +14,8 @@ LIBRARY = "Library"
 # (group, what it is for, nodes)
 GROUPS: List[Tuple[str, str, List[str]]] = [
     ("Create", "Shapes and curves from nothing, and the doors into a graph",
-     ["box", "sphere", "grid", "tube", "torus", "circle", "line", "curve", "helix", "lsystem", "lattice_grid",
-      "blender_object", "modifier_input"]),
+     ["box", "sphere", "grid", "tube", "torus", "circle", "line", "bezier", "curve", "helix", "lsystem", "lattice_grid",
+      "blender_object", "modifier_input", "object_input"]),
     ("Polygon Modelling", "Build and edit polygon surfaces",
      ["polyextrude", "polybevel", "polysplit", "polyfill", "polybridge", "polyexpand2d", "subdivide", "mirror", "boolean",
       "clip", "dissolve", "divide", "reverse", "facet", "bridge", "skin", "skin_profiles", "revolve", "polyreduce", "clean",
@@ -40,7 +40,7 @@ GROUPS: List[Tuple[str, str, List[str]]] = [
     ("Volumes & Terrain", "Remeshing, signed distance fields and terrain", ["remesh", "sdf_boolean", "heightfield_erode"]),
     ("Fracture & RBD", "Break things and simulate the pieces",
      ["rbd_material_fracture", "voronoi_fracture", "voronoi_fracture_points", "voronoi_split", "voronoi_adjacency",
-      "boolean_fracture", "convex_decomposition", "assemble", "glue_cluster", "rbd_constraint_properties",
+      "boolean_fracture", "convex_decomposition", "assemble", "glue_cluster", "rbd_constraint", "rbd_constraint_properties",
       "rbd_configure", "rbd_solver"]),
     ("Procedural (PCG)", "Rule-based point generation, filtering and placement",
      ["pcg_points", "pcg_surface_sampler", "pcg_volume_sampler", "pcg_spline_sampler", "pcg_spawner", "pcg_density_filter",
@@ -48,6 +48,9 @@ GROUPS: List[Tuple[str, str, List[str]]] = [
       "pcg_copy_points", "pcg_union", "pcg_intersection", "pcg_difference", "pcg_debug"]),
     ("Flow & Time", "Loops, per-piece work and simulation over time",
      ["loop_block", "loop_begin", "loop_end", "for_each", "solver"]),
+    ("Procedural Systems", "Buildings, connected regions and geometric goal relaxation",
+     ["building_rules", "region_identify", "region_transform", "goal_length", "goal_collision", "goal_surface",
+      "goal_gravity", "goal_pin", "goal_solve"]),
     ("Utility & I/O", "Pass-through, system inputs and the output", ["null", "input", "output"]),
     (LIBRARY, "Your own nodes and saved systems", []),
 ]
@@ -63,6 +66,15 @@ CATEGORY_GROUP: Dict[str, str] = {
 
 # names a node is known by elsewhere (Houdini, Blender, everyday words): a search for any of them finds it
 ALIASES: Dict[str, str] = {
+    "building_rules": "building footprint facade grammar storeys windows balconies roof architecture",
+    "region_identify": "connected islands regions flood fill connectivity",
+    "region_transform": "regions islands random rotate scale extrude paving tiles stones damage",
+    "goal_length": "geometric constraint edge length cable fabric",
+    "goal_collision": "geometric constraint collision separation packing radius",
+    "goal_surface": "geometric constraint project closest surface",
+    "goal_gravity": "geometric constraint gravity load relaxation",
+    "goal_pin": "geometric constraint anchor fixed points",
+    "goal_solve": "geometric constraints relaxation solver goals fabric cable packing",
     "polyextrude": "extrude inset shell thicken", "polybevel": "bevel chamfer round edges", "polysplit": "edge loop insert cut",
     "polyfill": "fill hole cap", "polybridge": "bridge connect loops", "polyexpand2d": "offset outline inset curve expand",
     "subdivide": "catmull clark smooth subsurf subdivision", "mirror": "symmetry reflect flip", "boolean": "union subtract intersect cut csg",
@@ -92,12 +104,13 @@ ALIASES: Dict[str, str] = {
     "rbd_material_fracture": "shatter destruction concrete glass wood", "voronoi_fracture": "shatter break cells pieces",
     "voronoi_fracture_points": "scatter seeds shatter", "voronoi_split": "cut cells", "voronoi_adjacency": "neighbours touching",
     "boolean_fracture": "cutters break", "convex_decomposition": "collision proxy hulls", "assemble": "pieces names pivot pack",
-    "glue_cluster": "constraints bond weld", "rbd_constraint_properties": "glue strength", "rbd_configure": "bodies mass friction physics",
+    "glue_cluster": "constraints bond weld", "rbd_constraint": "hinge spring pin glue joint anchor tendon limits break physics",
+    "rbd_constraint_properties": "constraint glue strength break", "rbd_configure": "bodies mass friction physics",
     "rbd_solver": "simulate physics dynamics bullet", "loop_block": "repeat iterate for", "loop_begin": "repeat iterate",
     "loop_end": "repeat iterate", "for_each": "per piece iterate", "solver": "feedback simulation previous frame",
     "null": "named output pass through", "input": "system port", "output": "result display", "box": "cube", "sphere": "ball",
     "grid": "plane floor", "tube": "cylinder cone", "torus": "donut ring", "circle": "disc", "line": "segment",
-    "curve": "spline path", "helix": "spiral coil", "lsystem": "plant tree fractal", "blender_object": "read import mesh",
+    "curve": "polyline path", "bezier": "curve spline tangent handles control points path", "helix": "spiral coil", "lsystem": "plant tree fractal", "blender_object": "read import mesh",
     "modifier_input": "host geometry",
 }
 
@@ -105,7 +118,7 @@ _TITLES = {"polyextrude": "PolyExtrude", "polybevel": "PolyBevel", "polysplit": 
            "polybridge": "PolyBridge", "polyexpand2d": "PolyExpand2D", "polyreduce": "PolyReduce", "polypath": "PolyPath",
            "uv_project": "UV Project", "uv_flatten": "UV Flatten", "sdf_boolean": "SDF Boolean", "pcg_points": "PCG Points",
            "lsystem": "L-System", "rbd_configure": "RBD Configure", "rbd_solver": "RBD Solver",
-           "rbd_material_fracture": "RBD Material Fracture", "rbd_constraint_properties": "RBD Constraint Properties",
+           "rbd_material_fracture": "RBD Material Fracture", "rbd_constraint": "RBD Constraint", "rbd_constraint_properties": "RBD Constraint Properties",
            "loop_block": "Repeat (Loop Block)", "for_each": "For Each", "points_to_surface": "Points to Surface",
            "copy_to_points": "Copy to Points", "blender_object": "Blender Object", "modifier_input": "Modifier Input"}
 

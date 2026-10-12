@@ -1,0 +1,12 @@
+{
+  "version":1,
+  "nodes":{
+    "fabric":{"type":"grid","params":{"columns":9,"rows":9,"size_x":4,"size_y":4,"center":[0,0,3]},"meta":{"pos":[0,0]}},
+    "lengths":{"type":"goal_length","inputs":{"geo":"fabric"},"params":{"scale":1.03},"meta":{"pos":[0,120]}},
+    "gravity":{"type":"goal_gravity","inputs":{"geo":"lengths"},"meta":{"pos":[0,240]}},
+    "corners":{"type":"goal_pin","inputs":{"geo":"gravity"},"params":{"group":"0 8 72 80"},"meta":{"pos":[0,360]}},
+    "relax":{"type":"goal_solve","inputs":{"geo":"corners"},"params":{"steps":180,"iterations":30},"meta":{"pos":[0,480]}},
+    "output":{"type":"output","inputs":{"geo":"relax"},"meta":{"pos":[0,600]}}
+  },
+  "display":"output"
+}

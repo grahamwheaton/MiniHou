@@ -1,0 +1,10 @@
+{
+  "version":1,
+  "nodes":{
+    "paving":{"type":"grid","params":{"columns":9,"rows":7,"size_x":8,"size_y":6},"meta":{"pos":[0,0]}},
+    "regions":{"type":"region_identify","inputs":{"geo":"paving"},"params":{"mode":"primitive","seed":13},"meta":{"pos":[0,140]}},
+    "weathered_stones":{"type":"region_transform","inputs":{"geo":"regions"},"params":{"scale":[0.91,0.91,1],"random_rotate":[3,3,4],"random_translate":[0.02,0.02,0.04],"extrude":0.18,"random_extrude":0.07,"seed":8},"meta":{"pos":[0,280]}},
+    "output":{"type":"output","inputs":{"geo":"weathered_stones"},"meta":{"pos":[0,420]}}
+  },
+  "display":"output"
+}

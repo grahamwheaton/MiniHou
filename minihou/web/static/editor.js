@@ -142,6 +142,7 @@
     for (const t of nodes) S.types[t.name] = t;
     S.typeList = nodes.slice().sort((a, b) => (a.category || "").localeCompare(b.category || "") || a.name.localeCompare(b.name));
     S.library = library || null;
+    if (window.MiniShelf) MiniShelf.refresh();
     const errs = new Set(((library && library.files) || []).filter((f) => f.error).map((f) => relPath(f.file) + ": " + f.error));
     const fresh = [...errs].filter((e) => !libErrors.has(e));
     if (fresh.length) toast("Node library: " + fresh.join("\n"));
@@ -603,6 +604,7 @@
   const EXPOSABLE = new Set(["float", "int", "bool", "vec3"]);
 
   function renderParams(statusOnly) {
+    if(curveTool){const id=S.sel.size===1?[...S.sel][0]:null,n=id&&nodeOf(id),spec=n?.type==='bezier'?typeOf(id).params.find(p=>p.name==='controls'):null;curveTool.update(spec?id:null,spec?effective(id,spec):null,n?.params?.closed,spec?.default);}
     updateViewportHints();
     updateViewportContext();
     const panel = $("#params");
@@ -682,6 +684,7 @@
       }
     }
     if (t.params.length) out.push(h("div", { class: "section" }, "Parameters"));
+    if(n.type==='bezier'&&curveTool)out.push(curveTool.panel());
     if (n.type === "rbd_solver") out.push(h("button", {
       onclick: () => queueSet(id, "reset", Number(n.params?.reset || 0) + 1),
       title: "Discard this simulation and replay from its initial geometry"
@@ -689,6 +692,7 @@
     let ogHeader = false;
     for (let i = 0; i < t.params.length; i++) {
       const p = t.params[i];
+      if(n.type==='bezier'&&p.name==='controls')continue;
       if (p.ui === "outgroup") {                                     // Output Groups: a checkbox and the group's name side by side, like Houdini
         if (!ogHeader) { out.push(h("div", { class: "ogheader" }, "Output Groups")); ogHeader = true; }
         const q = t.params[i + 1], named = q && q.ui === "outgroup_name";
@@ -864,6 +868,7 @@
   // ---------------------------------------------------------------- 3-D preview of the selected (or display) node
   const pvMsg = (text) => { const m = $("#pv-msg"); m.textContent = text || ""; m.classList.toggle("hidden", !text); };
   const pv = window.MiniHouPreview ? window.MiniHouPreview.create($("#pv-canvas"), pvMsg) : null;
+  const curveTool = pv?.ok && window.MiniCurveTool ? MiniCurveTool(pv,$('#pv-canvas'),(id,value)=>queueSet(id,'controls',value)) : null;
   let pvTimer = null, pvKey = null, pvNode = null, pvPath = null, pvOver = false;
   let pvInFlight = false, pvDirty = false;
   function schedulePreview() {
@@ -956,7 +961,7 @@
     pvSelection = s;
     updateViewportHints();
     const n = (s[SEL_KEY[s.mode]] || []).length;
-    $("#pv-selinfo").textContent = s.mode === "view" ? "" : s.mode === "piece" ? `${n} face${n === 1 ? "" : "s"} in the selected pieces` : `${n} ${SEL_KEY[s.mode].replace(/s$/, "")}${n === 1 ? "" : "s"} selected`;
+    $("#pv-selinfo").textContent = s.mode === "view" ? "" : s.mode === "piece" ? `${n} face${n === 1 ? "" : "s"} in the selected objects` : `${n} ${SEL_KEY[s.mode].replace(/s$/, "")}${n === 1 ? "" : "s"} selected`;
     document.querySelectorAll("#preview [data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === s.mode));
     const box = $("#pv-actions");
     const acts = n ? SELECTION_ACTIONS[s.mode] || [] : [];
@@ -968,18 +973,22 @@
   // ---- a selection carries a move / rotate / scale gizmo; the first drag adds a transform node for it (group = the selected points)
   const AXV = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
   function selectionGizmo(info) {
-    const c = info.center, hs = [], reach = Math.max(info.radius * 1.15, 0.05);
+    const c = info.center, hs = [], reach = Math.max(info.radius * 1.15, 0.05), axes=pv.orientationFrame(), axis_rotation=MiniInteraction.euler(axes);
     for (let i = 0; i < 3; i++) {
       const a = "xyz"[i];
-      hs.push({ id: `translate_${a}`, label: `move ${a}`, param: "translate", comp: i, origin: c, dir: AXV[i], scale: 1, kind: "arrow", tool: "move", pending: true });
-      hs.push({ id: `rotate_${a}`, label: `rotate ${a}`, param: "rotate", comp: i, origin: c, dir: AXV[i], scale: 180 / Math.PI, kind: "ring", radius: reach, tool: "rotate", pending: true });
-      hs.push({ id: `scale_${a}`, label: `scale ${a}`, param: "scale", comp: i, origin: c, dir: AXV[i], scale: 1, kind: "scale", tool: "scale", pending: true });
+      hs.push({ id: `translate_${a}`, label: `move ${a}`, param: "translate", comp: i, origin: c, dir: axes[i], axis_rotation, scale: 1, kind: "arrow", tool: "move", pending: true });
+      hs.push({ id: `rotate_${a}`, label: `rotate ${a}`, param: "rotate", comp: i, origin: c, dir: axes[i], axis_rotation, scale: 180 / Math.PI, kind: "ring", radius: reach, tool: "rotate", pending: true });
+      hs.push({ id: `scale_${a}`, label: `scale ${a}`, param: "scale", comp: i, origin: c, dir: axes[i], axis_rotation, scale: 1, kind: "scale", tool: "scale", pending: true });
     }
-    hs.push({ id: "uniform_scale", label: "uniform scale", param: "uniform_scale", comp: null, origin: c, dir: AXV[2], scale: 1, kind: "uniform", tool: "scale", pending: true });
+    hs.push({ id: "uniform_scale", label: "uniform scale", param: "uniform_scale", comp: null, origin: c, dir: axes[2], axis_rotation, scale: 1, kind: "uniform", tool: "scale", pending: true });
+    hs.push({id:'translate_plane',label:'move in view plane',param:'translate',comp:null,origin:c,dir:axes[2],axis_rotation,scale:1,kind:'plane',tool:'move',pending:true});
     return hs;
   }
   function refreshSelectionHandles() {
     if (!pv || !pv.ok) return;
+    const n=nodeOf(pvNode),p=n?.params||{},M=MiniInteraction;
+    const local=n?.type==='transform'?M.frame(p.rotate).map(v=>M.world(M.frame(p.axis_rotation),v)):M.identity();
+    pv.interaction.local=M.euler(local);
     const info = pvSelection.mode === "view" ? null : pv.selectionInfo();
     pv.setSelectionHandles(info ? selectionGizmo(info) : []);
     updateToolButtons();
@@ -1007,10 +1016,12 @@
     if (!state) return;
     const id = [...S.sel].find((id) => nodeOf(id)), node = id && nodeOf(id);
     const mode = pvSelection.mode;
-    const name = mode === "view" ? (node ? node.type + " · " + id : "View") : "Select " + ({ point: "points", edge: "edges", face: "faces", piece: "pieces" }[mode] || mode);
+    const name = mode === "view" ? (node ? node.type + " · " + id : "View") : "Select " + ({ point: "points", edge: "edges", face: "faces", piece: "objects" }[mode] || mode);
     state.textContent = name;
     $("#pv-hint-title").textContent = name;
-    $("#pv-hint-text").textContent = mode === "view"
+    $("#pv-hint-text").textContent = node?.type==='bezier'
+      ? "Drag anchors / tangents: edit curve · X/Y/Z: constrain\nShift: precision · Ctrl: snap · Esc: cancel\nShift-double-click: append · Handle modes in inspector"
+      : mode === "view"
       ? "Drag: orbit · Middle/right drag: pan\nWheel: dolly · Double-click: frame all\nC: modeling tools · 1–4: component selection"
       : "Click / drag box: select · Shift: add · Ctrl: remove\nAlt-drag / middle drag: orbit · Right drag: pan\nW / E / R: move / rotate / scale · C: modeling tools";
   }
@@ -1039,7 +1050,7 @@
     for (const k of Object.keys(spec)) if (spec[k] === "$") spec[k] = pattern;
     return spec;
   }
-  async function pieTool(item, note) {
+  async function pieTool(item, note, opts) {
     if (!item) { if (note) toast(note); return; }
     const t = S.types[item.type];
     if (!t) { toast(`This engine has no ${item.type} node.`); return; }
@@ -1049,7 +1060,8 @@
       if (info) params[item.center] = info.center.map((v) => Math.round(v * 1e5) / 1e5);
     }
     const one = S.sel.size === 1 ? [...S.sel][0] : null;
-    const target = pieFromView && pvNode && nodeOf(pvNode) ? pvNode : one && nodeOf(one) ? one : pvNode && nodeOf(pvNode) ? pvNode : displayNode();
+    const target = opts && opts.floating ? (one && nodeOf(one) ? one : null)                  // the shelf: a tool with nothing selected floats
+      : pieFromView && pvNode && nodeOf(pvNode) ? pvNode : one && nodeOf(one) ? one : pvNode && nodeOf(pvNode) ? pvNode : displayNode();
     if (item.source || !t.inputs.length || !target) {
       const id = uniqueId(item.type);
       let [x, y] = pieFromView || !S.mouse ? toWorld(canvas.getBoundingClientRect().left + canvas.clientWidth / 2, canvas.getBoundingClientRect().top + canvas.clientHeight / 2) : toWorld(...S.mouse);
@@ -1060,19 +1072,46 @@
     const r = await edit([{ op: "insert", after: target, type: item.type, params }]);
     if (r) { if (pv && pv.ok) pv.clearSelection(); select([r.results[0].id]); }
   }
+  // ---- the tool shelf (shelf.js): the same tools as the pie, one click or drag away
+  async function addToolAt(tool, clientX, clientY) {
+    const t = S.types[tool.type];
+    if (!t) { toast(`This engine has no ${tool.type} node.`); return; }
+    const id = uniqueId(tool.type), [x, y] = toWorld(clientX, clientY);
+    const r = await edit([{ op: "add", type: tool.type, id, pos: [Math.round(x - W / 2), Math.round(y - 12)] }]);
+    if (r) select([id]);
+  }
+  if (window.MiniShelf) {
+    MiniShelf.init({ types: () => S.types, typeList: () => S.typeList,
+      onPick: (tool, item) => { pieFromView = false; pieTool(item || { label: tool.label, type: tool.type }, null, { floating: true }); } });
+    canvas.addEventListener("dragover", (e) => { if ([...(e.dataTransfer.types || [])].includes("application/x-minihou-tool")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } });
+    canvas.addEventListener("drop", (e) => {
+      const raw = e.dataTransfer.getData("application/x-minihou-tool");
+      if (!raw) return;
+      e.preventDefault();
+      try { addToolAt(JSON.parse(raw), e.clientX, e.clientY); } catch (err) { /* not ours */ }
+    });
+  }
   if (window.MiniPie) {
     MiniPie.init({ types: () => S.types, onPick: pieTool, onOpen: () => { pieFromView = pvOver; },
       blocked: () => !$("#tabmenu").classList.contains("hidden") || !$("#help").classList.contains("hidden") });
   }
   function wireSelectionTools() {
+    const controls=[['#pv-orientation','orientation'],['#pv-snap','snap'],['#pv-snap-element','element'],['#pv-snap-target','target'],['#pv-move-step','moveStep'],['#pv-angle-step','angleStep'],['#pv-scale-step','scaleStep'],['#pv-snap-backface','backface'],['#pv-snap-selected','includeSelected']];
+    try {const saved=JSON.parse(localStorage.getItem('minihou.interaction')||'{}');for(const [,key]of controls)if(typeof saved[key]===typeof pv.interaction[key])pv.interaction[key]=saved[key];if(saved.cursor?.length===3&&saved.cursor.every(Number.isFinite))pv.interaction.cursor=saved.cursor;}catch{}
+    try {const saved=JSON.parse(localStorage.getItem('minihou.interaction')||'{}');if(saved.custom?.length===3&&saved.custom.every(v=>v.length===3&&v.every(Number.isFinite)))pv.interaction.custom=MiniInteraction.normalFrame(saved.custom[2],saved.custom[0]);}catch{}
+    for(const key of ['moveStep','angleStep','scaleStep'])if(!Number.isFinite(pv.interaction[key])||pv.interaction[key]<=0)pv.interaction[key]=key==='angleStep'?15:0.1;
+    const store=()=>{localStorage.setItem('minihou.interaction',JSON.stringify(pv.interaction));refreshSelectionHandles();pv.redraw();};
+    for(const [selector,key] of controls){const e=$(selector);if(e.type==='checkbox')e.checked=pv.interaction[key];else e.value=pv.interaction[key];e.onchange=()=>{let v=e.type==='checkbox'?e.checked:e.type==='number'?Number(e.value):e.value;if(e.type==='number'&&(!Number.isFinite(v)||v<=0)){e.value=pv.interaction[key];return;}pv.interaction[key]=v;store();};}
+    document.querySelectorAll('.pv-cursor-angle').forEach(e=>{const i=Number(e.dataset.axis);e.value=pv.interaction.cursor[i];e.onchange=()=>{if(Number.isFinite(Number(e.value))){pv.interaction.cursor[i]=Number(e.value);store();}};});
+    $('#pv-custom-frame').onclick=()=>{pv.interaction.orientation='normal';pv.interaction.custom=pv.orientationFrame();pv.interaction.orientation='custom';$('#pv-orientation').value='custom';store();};
     pv.onSelect = renderSelectionTools;
     // viewport handles: arrows in the view that scrub a parameter of the viewed node
-    let handleBase = null, gizmoNode = null;
+    let handleBase = null, gizmoNode = null, createdNode=null, originalGraph=null, originalNode=null;
     const baseFor = (node, h) => {                                                       // the parameter's current value (or default) on that node
       const n = nodeOf(node), spec = ((S.types[(n || {}).type] || {}).params || []).find((p) => p.name === h.param);
       const cur = n && n.params && n.params[h.param] !== undefined ? n.params[h.param] : spec ? spec.default : undefined;
       handleBase = Array.isArray(cur) ? cur.slice() : null;               // the other components of a vector stay as they were
-      return h.comp === null || h.comp === undefined ? Number(cur) : Number(Array.isArray(cur) ? cur[h.comp] : NaN);
+      return h.kind==='plane'?handleBase:h.comp === null || h.comp === undefined ? Number(cur) : Number(Array.isArray(cur) ? cur[h.comp] : NaN);
     };
     async function startSelectionDrag(h) {                                // the first drag on a selection's gizmo creates the transform node
       const info = pv.selectionInfo();
@@ -1080,17 +1119,36 @@
       const pattern = rangePattern(info.points);
       if (pattern.length > 30000) { toast("That selection is too large to write into a node; select fewer elements."); return NaN; }
       const cur = nodeOf(pvNode);
-      if (cur.type === "transform" && (cur.params || {}).group === pattern) gizmoNode = pvNode;     // the same selection again: edit the node already there
+      if (h.tool==='move'&&cur.type === "transform" && (cur.params || {}).group === pattern && JSON.stringify(cur.params.axis_rotation||[0,0,0])===JSON.stringify(h.axis_rotation||[0,0,0])) gizmoNode = pvNode;
       else {
         const pivot = info.center.map((v) => Math.round(v * 1e5) / 1e5);
-        const r = await edit([{ op: "insert", after: pvNode, type: "transform", params: { group: pattern, pivot } }]);
+        const r = await edit([{ op: "insert", after: pvNode, type: "transform", params: { group: pattern, pivot, axis_rotation:h.axis_rotation||[0,0,0] } }]);
         if (!r) return NaN;
         gizmoNode = r.results[0].id;
+        createdNode=gizmoNode;
         select([gizmoNode]);
       }
       return baseFor(gizmoNode, h);
     }
-    pv.onHandleStart = (h) => (h.pending ? startSelectionDrag(h) : baseFor(pvNode, h));
+    pv.onHandleStart = (h) => {createdNode=null;originalGraph=structuredClone(S.graph);originalNode=pvNode;return h.pending ? startSelectionDrag(h) : baseFor(pvNode, h);};
+    pv.onHandleAxis = h => {
+      const node=h.pending?gizmoNode:originalNode,n=originalGraph.nodes[node],spec=typeOf(h.pending?gizmoNode:originalNode).params.find(p=>p.name===h.param),cur=n?.params?.[h.param]??spec?.default;
+      handleBase=Array.isArray(cur)?cur.slice():null;return Number(handleBase?handleBase[h.comp]:cur);
+    };
+    pv.onHandleCancel = async (h,base) => {
+      const created=createdNode,graph=originalGraph,previous=originalNode;
+      if(Number.isFinite(base)||Array.isArray(base))pv.onHandle(h,base,true);
+      while(setInFlight||pendingSet.size)await new Promise(resolve=>setTimeout(resolve,20));
+      if(created&&nodeOf(created)){
+        const ops=[{op:'remove',id:created}];
+        for(const [id,n] of Object.entries(graph.nodes))for(const [port,ref] of Object.entries(n.inputs||{})){
+          const refs=Array.isArray(ref)?ref:[ref];if(!refs.includes(previous))continue;
+          ops.push({op:'disconnect',to:id,port});for(const from of refs)ops.push({op:'connect',from,to:id,port});
+        }
+        if(graph.display)ops.push({op:'display',id:graph.display});
+        await edit(ops);select([previous]);
+      }
+    };
     pv.onHandle = (h, value) => {
       const node = h.pending ? gizmoNode : pvNode;
       if (!node || !nodeOf(node)) return;
@@ -1105,6 +1163,7 @@
     wrap.addEventListener("pointerleave", () => { pvOver = false; });
     document.addEventListener("keydown", (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
+      if(pv.isDragging()||curveTool?.active())return;
       if (!pvOver || tag === "input" || tag === "textarea" || tag === "select") return;
       const nav = { Numpad1: ["front"], Numpad3: ["right"], Numpad7: ["top"] }[e.code];          // Blender-style view keys; Ctrl = the opposite side
       if (nav && !e.altKey && !e.metaKey) { pv.viewAxis(nav[0], e.ctrlKey); e.preventDefault(); e.stopImmediatePropagation(); return; }

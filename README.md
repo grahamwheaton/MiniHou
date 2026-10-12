@@ -356,6 +356,16 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
 
 ![A selected piece with its move gizmo](docs/images/editor_piece.png)
 
+* **The tool shelf** (the ribbon under the top bar, like Houdini's): tabs **Create**, **Modify**, **Model**, **Polygon**, **Edges**, **Deform**, **Texture**,
+  **Groups**, **Attributes**, **Curves**, **Points**, **Rigid Bodies**, **Constraints**, **Terrain FX**, **Volume**, **PCG**, **Flow** and **Library**
+  (your own nodes and saved systems), with only the tools this engine has: **Box, Sphere, Tube, Torus, Grid, Null, Line, Circle, Curve, Helix, L-System...**
+  (yes, there is a **Null**, on Create and Modify). A click does what the same tool does in the C pie menu: a source is added on its own, any other tool is
+  added after the selected node (filled in from your 3-D selection: the selected faces, edges or points); with nothing selected it floats.
+  **Drag** a tool onto the graph to drop it where you want it. **+** chooses which tabs to show, **▴** folds the tools away, and the tab you were on is
+  remembered. Every built-in node is on a tab (`tests/test_shelf.py` checks).
+
+![The tool shelf](docs/images/editor_shelf.png)
+
 * **The Add Node menu** (**Tab**, double-click, right-click or **+ Node**): nodes are grouped the way you think about them: **Create**, **Polygon
   Modelling**, **Edges**, **Transform & Combine**, **Deform**, **Groups & Selection**, **Attributes**, **UV**, **Curves**, **Points**,
   **Volumes & Terrain**, **Fracture & RBD**, **Procedural (PCG)**, **Flow & Time**, **Utility & I/O** and **Library** (your own nodes and

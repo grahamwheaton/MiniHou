@@ -1,0 +1,13 @@
+{
+  "version":1,
+  "nodes":{
+    "cable":{"type":"line","params":{"origin":[-2,0,2],"direction":[1,0,0],"length":4,"points":17},"meta":{"pos":[0,0]}},
+    "lengths":{"type":"goal_length","inputs":{"geo":"cable"},"params":{"scale":1.12},"meta":{"pos":[0,120]}},
+    "gravity":{"type":"goal_gravity","inputs":{"geo":"lengths"},"meta":{"pos":[0,240]}},
+    "endpoints":{"type":"goal_pin","inputs":{"geo":"gravity"},"params":{"group":"0 16"},"meta":{"pos":[0,360]}},
+    "relax":{"type":"goal_solve","inputs":{"geo":"endpoints"},"params":{"steps":200,"iterations":30},"meta":{"pos":[0,480]}},
+    "tube":{"type":"sweep","inputs":{"geo":"relax"},"params":{"radius":0.045},"meta":{"pos":[0,600]}},
+    "output":{"type":"output","inputs":{"geo":"tube"},"meta":{"pos":[0,720]}}
+  },
+  "display":"output"
+}

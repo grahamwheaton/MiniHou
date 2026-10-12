@@ -62,7 +62,7 @@ class EditorE2E(unittest.TestCase):
         self.web.start()
         self.addCleanup(self.s.stop)
         self.addCleanup(self.web.stop)
-        self.page = self.browser.new_page(viewport={"width": 1400, "height": 850})
+        self.page = self.browser.new_page(viewport={"width": 1400, "height": 960})
         self.addCleanup(self.page.close)
         self.errors = []
         self.page.on("pageerror", lambda e: self.errors.append(str(e)))
@@ -338,6 +338,8 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: len(self.s.graph.boxes) == 1))
         box = self.page.locator(".netbox")
         box.wait_for(state="visible")
+        self.page.keyboard.press("f")                                                      # frame the selection so the box's corner is in view
+        self.page.wait_for_timeout(200)
         before = {k: list(self.s.graph.nodes[k].meta["pos"]) for k in ("hills", "ripple", "points")}
         b0 = dict(self.s.graph.boxes[0])
         hdr = box.locator(".hdr")
@@ -706,6 +708,176 @@ class EditorE2E(unittest.TestCase):
         self.assertAlmostEqual(abs(d - 0.2), 50 / tip["ppu"], delta=0.2)
         self.assertIsInstance(d, float)
 
+    def test_bezier_anchor_handles_modes_split_and_cancel(self):
+        import json
+        self.page.evaluate("minihou.edit([{op:'add',id:'bc',type:'bezier'}])")
+        self.node("bc").locator(".title").click()
+        self.page.wait_for_selector('.curve-grab[data-point="1"][data-part="p"]')
+        self.page.wait_for_function("minihou.preview.points === 49")
+        anchor = self.page.locator('.curve-grab[data-point="1"][data-part="p"]')
+        anchor.click()
+        self.page.select_option('[aria-label="Curve handle mode"]', "MIRRORED")
+        self.page.wait_for_function("minihou.desktopCanClose()")
+        self.assertTrue(until(lambda: "controls" in self.s.graph.nodes["bc"].params))
+        before = json.loads(self.s.graph.nodes["bc"].params["controls"])
+        handle = self.page.locator('.curve-grab[data-point="1"][data-part="right"]')
+        handle.wait_for()
+        b = handle.evaluate("e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y};}")
+        self.page.mouse.move(b["x"]+5,b["y"]+5)
+        self.page.mouse.down()
+        self.page.mouse.move(b["x"]+35,b["y"]-25,steps=6)
+        self.page.mouse.up()
+        self.assertTrue(until(lambda: json.loads(self.s.graph.nodes["bc"].params["controls"])[1]["right"] != before[1]["right"]))
+        cs=json.loads(self.s.graph.nodes["bc"].params["controls"])
+        for k in range(3):
+            self.assertAlmostEqual(cs[1]["left"][k]+cs[1]["right"][k],2*cs[1]["p"][k],places=6)
+        # Cancelling a control-point drag restores the curve without a server edit.
+        b=anchor.bounding_box()
+        self.page.mouse.move(b["x"]+5,b["y"]+5);self.page.mouse.down()
+        self.page.mouse.move(b["x"]+40,b["y"]+30,steps=5)
+        self.page.keyboard.press("Escape");self.page.mouse.up()
+        self.assertEqual(json.loads(self.s.graph.nodes["bc"].params["controls"]),cs)
+        self.page.get_by_role("button",name="Split segment",exact=True).click()
+        self.assertTrue(until(lambda: len(json.loads(self.s.graph.nodes["bc"].params["controls"]))==4))
+        self.assertTrue(self.s.wait_idle())
+        self.assertTrue(self.s.status()["ok"])
+
+    def test_transform_cancel_restores_parameter_and_removes_created_node(self):
+        self.handle_scene("transform", {"translate": [0,0,0]}, "h")
+        tip=next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t['id']=='translate_z')
+        box=self.page.locator('#pv-canvas').bounding_box()
+        x,y=box['x']+tip['tip'][0],box['y']+tip['tip'][1]
+        self.page.mouse.move(x,y);self.page.mouse.down();self.page.mouse.move(x+tip['u'][0]*45,y+tip['u'][1]*45,steps=6)
+        self.assertTrue(self.page.locator('.pv-drag-feedback').is_visible())
+        self.assertEqual(self.page.locator('body').evaluate("e=>getComputedStyle(e).cursor"),'grabbing')
+        self.page.keyboard.press('Escape');self.page.mouse.up()
+        self.page.wait_for_function("minihou.desktopCanClose()")
+        self.assertEqual(list(self.s.graph.nodes['h'].params['translate']),[0,0,0])
+        self.two_boxes()
+        self.page.click('#preview [data-mode="piece"]')
+        self.page.mouse.click(*self.view_xy('face',self.second_box_top()))
+        tip=next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t['id']=='translate_z')
+        box=self.page.locator('#pv-canvas').bounding_box();x,y=box['x']+tip['tip'][0],box['y']+tip['tip'][1]
+        self.page.mouse.move(x,y);self.page.mouse.down();self.page.mouse.move(x,y-40,steps=4)
+        self.page.keyboard.press('Escape');self.page.mouse.up()
+        self.assertTrue(until(lambda: not any(n.type=='transform' for n in self.s.graph.nodes.values())))
+        self.assertEqual(self.s.graph.nodes['o'].inputs['geo'],'m')
+
+    def test_orientation_frame_and_increment_snap_reach_engine(self):
+        self.two_boxes()
+        self.page.click('#preview [data-mode="piece"]')
+        self.page.mouse.click(*self.view_xy('face',self.second_box_top()))
+        self.page.select_option('#pv-orientation','cursor')
+        self.page.locator('[aria-label="Cursor rotation Z"]').evaluate("e=>{e.value=90;e.dispatchEvent(new Event('change'));}")
+        self.page.check('#pv-snap')
+        self.page.locator('#pv-move-step').evaluate("e=>{e.value=0.5;e.dispatchEvent(new Event('change'));}")
+        self.drag_handle('translate_x',55)
+        self.assertTrue(until(lambda:any(n.type=='transform' for n in self.s.graph.nodes.values())))
+        self.page.wait_for_function('minihou.desktopCanClose()')
+        n=next(n for n in self.s.graph.nodes.values() if n.type=='transform')
+        self.assertAlmostEqual(n.params['axis_rotation'][2],90,places=5)
+        v=n.params['translate'][0]
+        self.assertNotEqual(v,0)
+        self.assertAlmostEqual(v/0.5,round(v/0.5),places=5)
+        from minihou import Evaluator
+        g=Evaluator().cook(self.s.graph,n.id)
+        self.assertAlmostEqual(float(g.P[8:,1].mean()),v,places=5)
+        self.assertAlmostEqual(float(g.P[:8,1].mean()),0,places=5)
+
+    def test_geometry_snap_targets_and_orientation_math(self):
+        self.two_boxes()
+        results=self.page.evaluate("""() => {
+          const pv=minihou.preview,M=MiniInteraction,origin=[0,0,0];
+          pv.interaction.snap=true;pv.interaction.element='vertex';
+          const p=pv.screenOf('point',8),hit=pv.snapPosition([99,99,99],p[0],p[1],false,origin,null);
+          const off=pv.snapPosition([99,99,99],p[0],p[1],true,origin,null);
+          const frame=M.frame([23,-41,68]),roundtrip=M.frame(M.euler(frame));
+          const edge=pv.screenOf('edge',[8,9]);pv.interaction.element='midpoint';
+          const midpoint=pv.snapPosition([99,99,99],edge[0],edge[1],false,origin,null);
+          return {hit,off,midpoint,frame,roundtrip};
+        }""")
+        import numpy as np
+        np.testing.assert_allclose(results['hit'],self.merged.P[8],atol=1e-5)
+        self.assertEqual(results['off'],[99,99,99])
+        np.testing.assert_allclose(results['midpoint'],(self.merged.P[8]+self.merged.P[9])/2,atol=1e-5)
+        np.testing.assert_allclose(results['frame'],results['roundtrip'],atol=1e-8)
+
+    def test_free_move_vertex_snapping_and_plane_cancel(self):
+        import numpy as np
+        from minihou import Evaluator
+        self.two_boxes()
+        self.page.click('#preview [data-mode="piece"]')
+        self.page.mouse.click(*self.view_xy('face',self.second_box_top()))
+        info=self.page.evaluate('minihou.preview.selectionInfo()')
+        self.page.check('#pv-snap');self.page.select_option('#pv-snap-element','vertex')
+        tips=self.page.evaluate('minihou.preview.handleTips()')
+        tip=next(t for t in tips if t['id']=='translate_plane')
+        box=self.page.locator('#pv-canvas').bounding_box()
+        target=self.view_xy('point',0)
+        self.page.mouse.move(box['x']+tip['tip'][0],box['y']+tip['tip'][1]);self.page.mouse.down()
+        self.page.mouse.move(*target,steps=8);self.page.mouse.up()
+        self.page.wait_for_function('minihou.desktopCanClose()')
+        n=next(n for n in self.s.graph.nodes.values() if n.type=='transform')
+        g=Evaluator().cook(self.s.graph,n.id)
+        np.testing.assert_allclose(g.P[8:].mean(0),self.merged.P[0],atol=1e-4)
+        # A plane move can be cancelled with right-click as well as Escape.
+        self.page.click('#preview [data-mode="piece"]');self.page.evaluate('minihou.preview.selectAll()')
+        tips=self.page.evaluate('minihou.preview.handleTips()');tip=next(t for t in tips if t['id']=='translate_plane')
+        box=self.page.locator('#pv-canvas').bounding_box();count=len(self.s.graph.nodes)
+        self.page.mouse.move(box['x']+tip['tip'][0],box['y']+tip['tip'][1]);self.page.mouse.down()
+        self.page.mouse.move(box['x']+tip['tip'][0]+40,box['y']+tip['tip'][1]+20,steps=5)
+        self.page.mouse.down(button='right');self.page.mouse.up(button='right');self.page.mouse.up()
+        self.assertTrue(until(lambda:len(self.s.graph.nodes)==count))
+
+    def test_edge_face_snap_and_normal_orientation(self):
+        import numpy as np
+        self.two_boxes()
+        face=self.second_box_top()
+        result=self.page.evaluate("""face=>{
+          const p=minihou.preview;p.interaction.snap=true;
+          const target=[2,0,0.5],q=p.project(target);p.interaction.element='face';
+          const hit=p.snapPosition([99,99,99],q[0],q[1],false,[0,0,0],null);
+          p.setMode('face');p.pickAt(q[0],q[1],'replace');p.interaction.orientation='normal';
+          const normal=p.orientationFrame();
+          p.interaction.element='edge';const edgePoint=[1.5,-0.25,-0.5],s=p.project(edgePoint);
+          const edge=p.snapPosition([99,99,99],s[0],s[1],false,[0,0,0],null);
+          p.interaction.element='perpendicular';const perpendicular=p.snapPosition([99,99,99],s[0],s[1],false,[0,-0.25,-0.5],null);
+          return {hit,normal,edge,perpendicular};
+        }""",face)
+        np.testing.assert_allclose(result['hit'],[2,0,0.5],atol=1e-5)
+        np.testing.assert_allclose(result['normal'][2],[0,0,1],atol=1e-5)
+        np.testing.assert_allclose(result['edge'],[1.5,-0.25,-0.5],atol=1e-5)
+        np.testing.assert_allclose(result['perpendicular'],[1.5,-0.25,-0.5],atol=1e-5)
+
+    def test_bezier_split_preserves_sampled_shape(self):
+        import json
+        import numpy as np
+        from minihou.nodes.curves import BEZIER_DEFAULT, bezier
+        split=self.page.evaluate("v=>MiniInteraction.split(MiniInteraction.controls(v,false),0,false)",BEZIER_DEFAULT)
+        original=bezier(BEZIER_DEFAULT,False,32)
+        divided=bezier(json.dumps(split),False,16)
+        np.testing.assert_allclose(divided.P[:33],original.P[:33],atol=1e-6)
+        np.testing.assert_allclose(divided.P[32:],original.P[32::2],atol=1e-6)
+
+    def test_plane_constraint_and_failed_drag_start(self):
+        self.two_boxes()
+        self.page.click('#preview [data-mode="piece"]')
+        self.page.evaluate('minihou.preview.selectAll()')
+        tip=next(t for t in self.page.evaluate('minihou.preview.handleTips()') if t['id']=='translate_plane')
+        box=self.page.locator('#pv-canvas').bounding_box();x,y=box['x']+tip['tip'][0],box['y']+tip['tip'][1]
+        self.page.mouse.move(x,y);self.page.mouse.down();self.page.keyboard.press('Shift+X')
+        self.page.mouse.move(x+35,y-35,steps=6);self.page.mouse.up()
+        self.page.wait_for_function('minihou.desktopCanClose()')
+        n=next(n for n in self.s.graph.nodes.values() if n.type=='transform')
+        self.assertAlmostEqual(n.params['translate'][0],0,places=5)
+        self.assertGreater(abs(n.params['translate'][1])+abs(n.params['translate'][2]),0.01)
+        self.page.click('#preview [data-mode="piece"]');self.page.evaluate('minihou.preview.selectAll()')
+        before=self.s.graph.to_dict()
+        self.page.evaluate('minihou.preview.onHandleStart=()=>Promise.resolve(NaN)')
+        self.drag_handle('translate_plane',30)
+        self.page.wait_for_function('!minihou.preview.isDragging()')
+        self.assertEqual(self.s.graph.to_dict(),before)
+
     def test_transform_tools_rotate_ring_scale_cubes_and_uniform_square(self):
         import math
         self.handle_scene("transform", {"translate": [0.5, 1.0, 2.0], "rotate": [0, 0, 10], "scale": [1, 2, 3]}, "h")
@@ -977,13 +1149,13 @@ class EditorE2E(unittest.TestCase):
         sel = self.selection()
         self.assertEqual(sel["mode"], "piece")
         self.assertEqual(sorted(sel["faces"]), list(range(6, 12)))                              # all six faces of that box, nothing of the other
-        self.assertEqual(self.page.locator("#pv-selinfo").inner_text(), "6 faces in the selected pieces")
+        self.assertEqual(self.page.locator("#pv-selinfo").inner_text(), "6 faces in the selected objects")
         info = self.page.evaluate("minihou.preview.selectionInfo()")
         self.assertEqual(info["points"], list(range(8, 16)))
         self.assertEqual([round(v, 3) for v in info["center"]], [2.0, 0.0, 0.0])
         # a drag on the move gizmo adds the transform: group = the selected points, pivot = their centre
         ids = sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()"))
-        self.assertEqual(ids, ["translate_x", "translate_y", "translate_z"])
+        self.assertEqual(ids, ["translate_plane", "translate_x", "translate_y", "translate_z"])
         ppu = next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == "translate_z")["ppu"]
         self.assertFalse([n for n in self.s.graph.nodes.values() if n.type == "transform"])
         self.drag_handle("translate_z", int(0.75 * ppu))
@@ -1050,7 +1222,7 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(self.selection()["points"], [8])
         info = self.page.evaluate("minihou.preview.selectionInfo()")
         self.assertEqual(info["points"], [8])
-        self.assertEqual(len(self.page.evaluate("minihou.preview.handleTips()")), 3)            # move arrows at the point
+        self.assertEqual(len(self.page.evaluate("minihou.preview.handleTips()")), 4)            # move arrows and plane handle at the point
         self.drag_handle("translate_x", 40)
         self.assertTrue(until(lambda: any(n.type == "transform" and n.params.get("group") == "8" for n in self.s.graph.nodes.values())))
 
@@ -1141,6 +1313,72 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(n.inputs, {"geo": "m"})
         self.assertEqual(n.params["group"], str(face))
         self.assertEqual(n.params["distance"], 0.3)
+
+    # -- the tool shelf ----------------------------------------------------------------------
+    def shelf_tool(self, label):
+        return self.page.locator(f'#shelf .sh-tool[data-label="{label}"]')
+
+    def test_shelf_has_houdini_style_tabs_and_null(self):
+        self.page.evaluate("localStorage.clear()")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        tabs = self.page.eval_on_selector_all("#shelf .sh-tab[data-tab]", "els => els.map(e => e.dataset.tab)")
+        self.assertEqual(tabs[:5], ["Create", "Modify", "Model", "Polygon", "Edges"])
+        self.assertIn("Rigid Bodies", tabs)
+        self.assertIn("Library", tabs)
+        self.assertEqual(self.page.locator("#shelf .sh-tab.on").inner_text(), "Create")
+        labels = self.page.eval_on_selector_all("#shelf .sh-tool", "els => els.map(e => e.dataset.label)")
+        self.assertEqual(labels[:6], ["Box", "Sphere", "Tube", "Torus", "Grid", "Null"])                     # Null is there
+        self.assertGreater(self.page.locator("#shelf .sh-tool svg").count(), 10)
+        # the shelf takes room: the panes start below it
+        self.assertGreater(self.page.locator("#main").bounding_box()["y"], 120)
+
+    def test_shelf_click_adds_sources_unwired_and_inserts_modifiers_after_the_selection(self):
+        before = set(self.s.graph.nodes)
+        self.shelf_tool("Null").click()
+        self.assertTrue(until(lambda: any(n.type == "null" for n in self.s.graph.nodes.values())))
+        nid = next(i for i, n in self.s.graph.nodes.items() if n.type == "null" and i not in before)
+        self.assertEqual(self.s.graph.nodes[nid].inputs, {})                                                 # no input: added on its own
+        self.page.click('#shelf .sh-tab[data-tab="Deform"]')
+        self.node("hills").locator(".title").click()
+        self.shelf_tool("Twist").click()
+        self.assertTrue(until(lambda: any(n.type == "twist" for n in self.s.graph.nodes.values())))
+        tid = next(i for i, n in self.s.graph.nodes.items() if n.type == "twist")
+        self.assertEqual(self.s.graph.nodes[tid].inputs, {"geo": "hills"})                                   # a modifier goes after the selected node
+        self.page.wait_for_selector(f'.node[data-id="{tid}"].selected')
+
+    def test_shelf_drag_drops_a_tool_where_you_want_it(self):
+        self.shelf_tool("Sphere").drag_to(self.page.locator("#canvas"), target_position={"x": 220, "y": 480})
+        self.assertTrue(until(lambda: any(n.type == "sphere" and n.inputs == {} and i != "ground" for i, n in self.s.graph.nodes.items()
+                                          if n.meta.get("pos") and abs(n.meta["pos"][1]) > 0)))
+
+    def test_shelf_remembers_the_tab_folds_and_hides_tabs(self):
+        self.page.evaluate("localStorage.clear()")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.page.click('#shelf .sh-tab[data-tab="Polygon"]')
+        self.page.wait_for_selector('#shelf .sh-tool[data-label="PolyExtrude"]')
+        self.page.reload()
+        self.page.wait_for_selector('#shelf .sh-tab.on[data-tab="Polygon"]')                                 # the tab came back
+        y = self.page.locator("#main").bounding_box()["y"]
+        self.page.click("#shelf .sh-fold")                                                                  # fold the tools away
+        self.page.wait_for_function(f"document.querySelector('#main').getBoundingClientRect().top < {y} - 40")
+        self.page.click("#shelf .sh-fold")
+        self.page.wait_for_selector('#shelf .sh-tool[data-label="PolyExtrude"]')
+        self.page.click("#shelf .sh-tab.plus")                                                              # choose tabs
+        self.page.locator("#sh-tabmenu .item", has_text="Texture").dispatch_event("mousedown")
+        self.page.wait_for_function("!document.querySelector('#shelf .sh-tab[data-tab=\"Texture\"]')")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.assertEqual(self.page.locator('#shelf .sh-tab[data-tab="Texture"]').count(), 0)
+
+    def test_shelf_library_tab_lists_new_library_nodes(self):
+        os.makedirs(os.path.join(self.dir, "nodes"))
+        with open(os.path.join(self.dir, "nodes", "shelved.py"), "w", encoding="utf-8") as f:
+            f.write("from minihou.sdk import node\n\n@node('shelved_thing', inputs=['geo'], category='custom')\ndef shelved_thing(geo):\n    return geo.copy()\n")
+        self.page.wait_for_function("window.minihou.S.types['shelved_thing'] !== undefined")
+        self.page.click('#shelf .sh-tab[data-tab="Library"]')
+        self.page.wait_for_selector('#shelf .sh-tool[data-type="shelved_thing"]')
 
     # -- the Add Node menu -----------------------------------------------------------------
     def open_menu(self):
@@ -1314,6 +1552,7 @@ class EditorE2E(unittest.TestCase):
         self.drag(self.node("box1").locator(".port.out"), self.node("all").locator(".port.in"))
         self.assertTrue(until(lambda: "box1" in self.s.graph.nodes["all"].inputs.get("geos", [])))
         # pick the wire up from the input and drop it on empty space: disconnect
+        self.page.set_viewport_size({"width": 1400, "height": 1200})
         self.drag(self.node("out").locator(".port.in"), self.page.locator("#canvas"))
         self.page.mouse.move(*self.empty_spot())
         self.assertTrue(until(lambda: "geo" not in self.s.graph.nodes["out"].inputs))

@@ -411,6 +411,7 @@ window.MiniHouPreview = (() => {
       gl.clearColor(0.13, 0.14, 0.16, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       api.draws++;
       renderGizmo(camera());
+      if (api.onOverlayDraw) api.onOverlayDraw();
       if (!data.npoints) return;
       const cam = camera(), MV = cam.MV, P = cam.P;
       gl.enable(gl.DEPTH_TEST);
@@ -455,6 +456,56 @@ window.MiniHouPreview = (() => {
     canvas.parentElement.append(hsvg);
     let handles = [], pendingHandles = null, handleDrag = null, selHandles = [], pendingSel = null;   // selHandles: the move/rotate/scale gizmo of a selection (they win while something is selected)
     const AXIS_COLOUR = { 0: "#ff5d5d", 1: "#4cc38a", 2: "#4aa3ff" };
+    const IM = window.MiniInteraction;
+    const interaction = { orientation: 'global', local: [0,0,0], cursor: [0,0,0], custom: IM.identity(), snap: false,
+        element: 'increment', target: 'center', moveStep: 0.1, angleStep: 15, scaleStep: 0.1, backface: false, includeSelected: false };
+    const feedback = document.createElement('div');feedback.className='pv-drag-feedback';feedback.hidden=true;canvas.parentElement.append(feedback);
+    let snapData = null, snapExclude = new Set(), snapMark = null, endingDrag=false;
+    function orientationFrame() {
+      if(interaction.orientation==='local')return IM.frame(interaction.local);
+      if(interaction.orientation==='cursor')return IM.frame(interaction.cursor);
+      if(interaction.orientation==='custom')return interaction.custom;
+      if(interaction.orientation==='view'){const m=camera().MV;return [[m[0],m[4],m[8]],[m[1],m[5],m[9]],[m[2],m[6],m[10]]];}
+      if(interaction.orientation==='normal') {
+        const info=api.selectionInfo();if(!info||!raw)return IM.frame(interaction.local);
+        const ids=new Set(info.points),n=[0,0,0];let tangent=null;
+        for(let i=0;i<raw.tri.length;i+=3){const v=Array.from(raw.tri.slice(i,i+3));if(sel.mode==='face'||sel.mode==='piece'){if(!sel.face.has(raw.triPrim[i/3]))continue;}else if(!v.some(k=>ids.has(k)))continue;
+          const [a,b,c]=v.map(k=>Array.from(raw.P.slice(k*3,k*3+3))),nn=cross(sub(b,a),sub(c,a));nn.forEach((x,j)=>n[j]+=x);}
+        if(sel.mode==='edge'&&sel.edge.size){const [a,b]=[...sel.edge.values()].at(-1);tangent=sub(Array.from(raw.P.slice(b*3,b*3+3)),Array.from(raw.P.slice(a*3,a*3+3)));}
+        return IM.length(n)<1e-9?IM.frame(interaction.local):IM.normalFrame(n,tangent);
+      } return IM.identity();
+    }
+    function planePoint(sx,sy,anchor) {
+      const cam=camera(),n=norm(sub(cam.eye,view.target)),ray=rayAt(cam,sx,sy),den=dot(ray,n);
+      if(Math.abs(den)<1e-8)return null;return IM.add(cam.eye,IM.mul(ray,dot(sub(anchor,cam.eye),n)/den));
+    }
+    function snapHit(sx,sy,anchor=[0,0,0]) {
+      const source=snapData||raw;if(!source)return null;const cam=camera(),P=source.P;
+      const point=i=>Array.from(P.slice(i*3,i*3+3));let best=null,dist=18;
+      const test=p=>{const q=toScreen(cam,...p);if(!q)return;const d=Math.hypot(q[0]-sx,q[1]-sy);if(d<dist){dist=d;best=p;}};
+      const excluded=i=>!interaction.includeSelected&&snapExclude.has(i);
+      if(interaction.element==='vertex')for(let i=0;i<P.length/3;i++){if(!excluded(i))test(point(i));}
+      if(['edge','midpoint','perpendicular'].includes(interaction.element))for(let i=0;i<source.edge.length;i+=2){const a=source.edge[i],b=source.edge[i+1];if(excluded(a)||excluded(b))continue;const p=point(a),q=point(b);
+        if(interaction.element==='midpoint')test(IM.mul(IM.add(p,q),0.5));
+        else if(interaction.element==='perpendicular'){const d=sub(q,p),t=dot(sub(anchor,p),d)/(dot(d,d)||1);if(t>=0&&t<=1)test(IM.add(p,IM.mul(d,t)));}
+        else{const u=toScreen(cam,...p),v=toScreen(cam,...q);if(!u||!v)continue;const d=[v[0]-u[0],v[1]-u[1]],t=Math.max(0,Math.min(1,((sx-u[0])*d[0]+(sy-u[1])*d[1])/(d[0]*d[0]+d[1]*d[1]||1)));
+          // Perspective-correct interpolation of the closest projected edge point.
+          const k=(t/v[2])/((1-t)/u[2]+t/v[2]);test(IM.add(p,IM.mul(sub(q,p),k)));}}
+      if(interaction.element==='face') {const ray=rayAt(cam,sx,sy);let nearest=Infinity;
+        for(let i=0;i<source.tri.length;i+=3){const ids=Array.from(source.tri.slice(i,i+3));if(ids.some(excluded))continue;const [a,b,c]=ids.map(point),ab=sub(b,a),ac=sub(c,a),h=cross(ray,ac),det=dot(ab,h);if(Math.abs(det)<1e-10||(interaction.backface&&det<0))continue;const s=sub(cam.eye,a),u=dot(s,h)/det,q=cross(s,ab),v=dot(ray,q)/det,t=dot(ac,q)/det;
+          if(u>=0&&v>=0&&u+v<=1&&t>0&&t<nearest){nearest=t;best=IM.add(cam.eye,IM.mul(ray,t));}}
+      } return best;
+    }
+    function snapPosition(position,sx,sy,ctrl,anchor,axis,frame=orientationFrame()) {
+      snapMark=null;if(interaction.snap===!!ctrl)return position;
+      let p;
+      if(interaction.element==='increment'||interaction.element==='grid') {
+        const origin=interaction.element==='grid'?[0,0,0]:anchor,delta=sub(position,origin),step=Math.max(1e-8,interaction.moveStep);
+        p=IM.add(origin,IM.world(frame,frame.map(d=>Math.round(dot(delta,d)/step)*step)));
+      } else {p=snapHit(sx,sy,anchor);if(!p)return position;snapMark=p;}
+      if(axis!==null&&axis!==undefined)p=IM.add(anchor,IM.mul(frame[axis],dot(sub(p,anchor),frame[axis])));
+      return p;
+    }
     const svg = (tag, attrs) => { const el = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); return el; };
     function handleGeometry(cam, h) {                                // {s0, tip, u, ppu} in canvas pixels, or null when unusable
       const o = h.origin, s0 = toScreen(cam, o[0], o[1], o[2]);
@@ -475,13 +526,16 @@ window.MiniHouPreview = (() => {
       return [o[0] + u[0] * c + v[0] * d, o[1] + u[1] * c + v[1] * d, o[2] + u[2] * c + v[2] * d];
     }
     const RING_STEPS = 72;
-    const shown = () => (selHandles.length ? selHandles : handles).filter((h) => !h.tool || h.tool === api.tool);
+    const shown = () => (selHandles.length ? selHandles : handles).filter((h) => !h.tool || h.tool === api.tool).map(h=>{
+      if(h.pending&&interaction.orientation==='view'){const frame=handleDrag?.h.axis_rotation?IM.frame(handleDrag.h.axis_rotation):orientationFrame();return {...h,dir:frame[h.comp??2],axis_rotation:IM.euler(frame)};}return h;
+    });
     function renderHandles(cam) {
       hsvg.setAttribute("width", cam.w); hsvg.setAttribute("height", cam.h);
       const kids = [];
       for (const h of shown()) {
-        const col = AXIS_COLOUR[h.comp] || "#ffb04d";
-        const grp = svg("g", { class: "pv-handle", "data-id": h.id });
+        const active=handleDrag?.h.id===h.id;
+        const col = active ? '#fff18c' : AXIS_COLOUR[h.comp] || "#ffb04d";
+        const grp = svg("g", { class: "pv-handle"+(active?' active':''), "data-id": h.id, opacity: handleDrag&&!active?0.3:1 });
         const tip = svg("title", {});
         tip.textContent = h.label + " (drag)";
         if (h.kind === "ring") {
@@ -493,7 +547,7 @@ window.MiniHouPreview = (() => {
           }
           grp.append(svg("path", { d, fill: "none", stroke: col, "stroke-width": 3, "stroke-opacity": 0.9, "pointer-events": "none" }),
             svg("path", { d, class: "pv-grab", fill: "none", stroke: "transparent", "stroke-width": 16, style: "cursor: grab" }), tip);
-        } else if (h.kind === "uniform") {
+        } else if (h.kind === "uniform" || h.kind === "plane") {
           const g = handleGeometry(cam, h);
           const s0 = g ? g.s0 : toScreen(cam, h.origin[0], h.origin[1], h.origin[2]);
           if (!s0) continue;
@@ -515,47 +569,90 @@ window.MiniHouPreview = (() => {
           }
           grp.append(tip);
         }
-        for (const el of grp.querySelectorAll(".pv-grab")) el.addEventListener("pointerdown", (e) => startHandleDrag(e, h));
+        const g=handleGeometry(cam,h),angle=g?Math.atan2(g.u[1],g.u[0])*180/Math.PI:0;
+        const cursor=h.kind==='plane'?'move':h.kind==='ring'?'grab':h.kind==='uniform'?'nwse-resize':['ew-resize','nwse-resize','ns-resize','nesw-resize'][((Math.round(angle/45)%4)+4)%4];
+        for (const el of grp.querySelectorAll(".pv-grab")) {el.style.cursor=cursor;el.addEventListener("pointerdown", (e) => startHandleDrag(e, h));}
         kids.push(grp);
       }
+      if(handleDrag){
+        const h=handleDrag.h,dir=handleDrag.guideDir||(h.kind!=='plane'&&h.kind!=='uniform'?h.dir:null);
+        const p=toScreen(cam,...h.origin),g=dir&&handleGeometry(cam,{...h,dir});
+        if(p&&g)kids.push(svg('line',{x1:p[0]-g.u[0]*2000,y1:p[1]-g.u[1]*2000,x2:p[0]+g.u[0]*2000,y2:p[1]+g.u[1]*2000,stroke:AXIS_COLOUR[h.comp]||'#ffb04d','stroke-dasharray':'5 5',opacity:0.45,'pointer-events':'none'}));
+      }
+      if(snapMark){const p=toScreen(cam,...snapMark);if(p)kids.push(svg('circle',{cx:p[0],cy:p[1],r:8,fill:'none',stroke:'#ffef83','stroke-width':2,'pointer-events':'none'}));}
       hsvg.replaceChildren(...kids);
     }
     function startHandleDrag(e, h) {
+      if(e.button!==0||handleDrag||endingDrag)return;
       // Add/subtract selection must reach geometry even when a handle overlaps it.
       if (sel.mode !== "view" && (e.shiftKey || e.ctrlKey || e.metaKey)) {
         e.stopPropagation(); beginCanvasDrag(e); return;
       }
+      if(h.kind==='plane'){startPlaneDrag(e,h);return;}
       e.preventDefault(); e.stopPropagation();
       const cam = camera();
       if (!api.onHandleStart) return;
       const r = canvas.getBoundingClientRect();
       const x0 = e.clientX - r.left, y0 = e.clientY - r.top;
       const drag = handleDrag = { h, base: NaN, value: NaN, measure: null, last: null, released: false };
+      snapData=raw;const selection=api.selectionInfo();snapExclude=new Set(selection?.points||[]);
+      const candidates=shown().filter(x=>x.param===h.param);
+      document.body.classList.add('pv-dragging');feedback.hidden=false;
+      feedback.textContent=h.label+' · Shift: precise · Ctrl: snap · Esc: cancel';schedule();
       let finished = false;
+      let precise=false,precisionRaw=null,precisionValue=null;
       const move = (ev) => {
         const x = ev.clientX - r.left, y = ev.clientY - r.top;
         if (!drag.measure) { drag.last = [x, y]; return; }                      // the node is still being created: remember where the pointer is
         let v = drag.measure(x, y);
+        if(precisionRaw===null){precisionRaw=drag.base;precisionValue=drag.base;}
+        if(!!ev.shiftKey!==precise){precise=!!ev.shiftKey;precisionRaw=v;precisionValue=drag.value;}
+        v=precisionValue+(v-precisionRaw)*(precise?0.1:1);
+        const snapping=interaction.snap!==!!ev.ctrlKey;
+        if(snapping&&h.kind==='ring')v=drag.base+Math.round((v-drag.base)/interaction.angleStep)*interaction.angleStep;
+        else if(snapping&&(h.kind==='scale'||h.kind==='uniform'))v=drag.base+Math.round((v-drag.base)/interaction.scaleStep)*interaction.scaleStep;
+        else if(h.kind==='arrow') {
+          const unsnappedValue=v;
+          let anchor=h.origin;
+          if(selection&&interaction.target==='median')anchor=selection.median;
+          if(selection&&interaction.target==='active')anchor=selection.active;
+          if(selection&&interaction.target==='closest'&&snapping){const hit=snapHit(x,y);if(hit){let d=Infinity;for(const i of selection.points){const p=Array.from(snapData.P.slice(i*3,i*3+3)),n=IM.length(sub(p,hit));if(n<d){d=n;anchor=p;}}}}
+          const position=IM.add(anchor,IM.mul(h.dir,(v-drag.base)/h.scale));
+          const p=snapPosition(position,x,y,ev.ctrlKey,anchor,null,h.axis_rotation?IM.frame(h.axis_rotation):IM.identity());
+          v=drag.base+dot(sub(p,anchor),h.dir)*h.scale;
+          if(snapping&&interaction.element==='increment'){const step=interaction.moveStep*Math.abs(h.scale);v=drag.base+Math.round((unsnappedValue-drag.base)/step)*step;}
+        }
         if (h.min !== undefined) v = Math.max(h.min, v);
         if (h.max !== undefined) v = Math.min(h.max, v);
         v = Math.round(v * 1e5) / 1e5;
         if (v !== drag.value) { drag.value = v; if (api.onHandle) api.onHandle(h, v, false); }
+        feedback.textContent=`${h.label} · ${v.toFixed(3)}${snapping?' · SNAP '+interaction.element:''}${ev.shiftKey?' · PRECISE':''} · Esc cancels`;schedule();
       };
       const finish = () => {
         if (finished) return;
         finished = true;
-        window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up);
-        if (api.onHandle && Number.isFinite(drag.value)) api.onHandle(drag.h, drag.value, true);
+        window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", cancel);
+        window.removeEventListener('keydown',key,true);window.removeEventListener('contextmenu',cancel,true);
+        window.removeEventListener('pointerdown',right,true);
+        if(drag.cancelled&&api.onHandleCancel){endingDrag=true;Promise.resolve(api.onHandleCancel(drag.h,drag.base)).finally(()=>{endingDrag=false;});}
+        else if (api.onHandle && Number.isFinite(drag.value)) api.onHandle(drag.h, drag.value, true);
         handleDrag = null;
+        snapData=null;snapExclude.clear();snapMark=null;feedback.hidden=true;document.body.classList.remove('pv-dragging');
         if (pendingHandles) { handles = pendingHandles; pendingHandles = null; }
         if (pendingSel) { selHandles = pendingSel; pendingSel = null; }
         schedule();
       };
       const up = () => { drag.released = true; if (drag.measure) finish(); };
-      window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
+      const cancel = ev => {ev.preventDefault();ev.stopImmediatePropagation();drag.cancelled=true;drag.released=true;if(drag.measure)finish();};
+      const right=ev=>{if(ev.button===2)cancel(ev);};
+      const key=ev=>{if(ev.key==='Escape'){cancel(ev);return;}const axis='xyz'.indexOf(ev.key.toLowerCase()),next=candidates.find(x=>x.comp===axis);if(axis>=0&&next&&drag.measure&&api.onHandleAxis){ev.preventDefault();ev.stopImmediatePropagation();api.onHandle(h,drag.base,false);h=next;drag.h=h;begin(api.onHandleAxis(h));schedule();}};
+      window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", cancel);
+      window.addEventListener('keydown',key,true);window.addEventListener('contextmenu',cancel,true);
+      window.addEventListener('pointerdown',right,true);
       const begin = (base) => {                                                 // base: the parameter's value when the drag starts
         if (typeof base !== "number" || !Number.isFinite(base)) { drag.released = true; finish(); handleDrag = null; return; }
         drag.base = base; drag.value = base;
+        precisionRaw=null;precisionValue=null;precise=false;
         if (h.kind === "ring") {                                                // the angle of the pointer around the ring, from where the ray meets its plane
           const { u, v } = ringBasis(h), o = h.origin, n = h.dir;
           const angleAt = (x, y) => {
@@ -581,11 +678,44 @@ window.MiniHouPreview = (() => {
           const along = (x, y) => (x - x0) * g.u[0] + (y - y0) * g.u[1];
           drag.measure = h.kind === "scale" ? (x, y) => base * Math.exp(along(x, y) / 64) : (x, y) => base + (along(x, y) / g.ppu) * h.scale;
         }
-        if (drag.last) { const [lx, ly] = drag.last; drag.last = null; move({ clientX: lx + r.left, clientY: ly + r.top }); }
+        if (drag.last&&!drag.cancelled) { const [lx, ly] = drag.last; drag.last = null; move({ clientX: lx + r.left, clientY: ly + r.top }); }
         if (drag.released) finish();
       };
       const first = api.onHandleStart(h);                                       // a number, or a promise of one (a handle that must create its node first)
       if (first && typeof first.then === "function") first.then(begin, () => begin(NaN)); else begin(first);
+    }
+
+    function startPlaneDrag(e,h) {
+      if(e.button!==0||handleDrag||endingDrag)return;e.preventDefault();e.stopPropagation();
+      const r=canvas.getBoundingClientRect(),frame=h.axis_rotation?IM.frame(h.axis_rotation):IM.identity(),origin=h.origin.slice();
+      const start=planePoint(e.clientX-r.left,e.clientY-r.top,origin),info=api.selectionInfo();if(!start)return;
+      snapData=raw;snapExclude=new Set(info?.points||[]);
+      const drag=handleDrag={h,value:null};let base=null,last=e,axis=null,plane=false,released=false,cancelled=false;
+      let precise=false,rawAnchor=[0,0,0],valueAnchor=[0,0,0],previousDelta=[0,0,0];
+      document.body.classList.add('pv-dragging');feedback.hidden=false;
+      function move(ev){last=ev;if(!base)return;const x=ev.clientX-r.left,y=ev.clientY-r.top,p=planePoint(x,y,origin);if(!p)return;
+        drag.guideDir=axis!==null&&!plane?frame[axis]:null;
+        let d=sub(p,start);if(!!ev.shiftKey!==precise){precise=!!ev.shiftKey;rawAnchor=d;valueAnchor=previousDelta;}
+        d=IM.add(valueAnchor,IM.mul(sub(d,rawAnchor),precise?0.1:1));previousDelta=d;
+        if(axis!==null)d=plane?sub(d,IM.mul(frame[axis],dot(d,frame[axis]))):IM.mul(frame[axis],dot(d,frame[axis]));
+        let anchor=interaction.target==='median'&&info?info.median:interaction.target==='active'&&info?info.active:origin;
+        if(info&&interaction.target==='closest'){const hit=snapHit(x,y,origin);if(hit){let nearest=Infinity;for(const i of info.points){const v=Array.from(snapData.P.slice(i*3,i*3+3)),n=IM.length(sub(v,hit));if(n<nearest){nearest=n;anchor=v;}}}}
+        const snapped=snapPosition(IM.add(anchor,d),x,y,ev.ctrlKey,anchor,axis!==null&&!plane?axis:null,frame);
+        d=sub(snapped,anchor);if(axis!==null&&plane)d=sub(d,IM.mul(frame[axis],dot(d,frame[axis])));
+        drag.value=base.map((v,i)=>Math.round((v+dot(d,frame[i]))*1e5)/1e5);
+        api.onHandle(h,drag.value,false);feedback.textContent=`Move ${axis===null?'view plane':(plane?'plane excluding ':'axis ')+'XYZ'[axis]} · ${drag.value.map(v=>v.toFixed(3)).join(', ')} · Esc cancels`;schedule();
+      }
+      function finish(){if(!base)return;window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);window.removeEventListener('pointercancel',cancel);window.removeEventListener('contextmenu',cancel,true);window.removeEventListener('keydown',key,true);
+        window.removeEventListener('pointerdown',right,true);
+        if(cancelled&&base.length===3){endingDrag=true;Promise.resolve(api.onHandleCancel?.(h,base)).finally(()=>endingDrag=false);}else if(!cancelled)api.onHandle(h,drag.value||base,true);
+        handleDrag=null;snapData=null;snapExclude.clear();snapMark=null;feedback.hidden=true;document.body.classList.remove('pv-dragging');if(pendingHandles){handles=pendingHandles;pendingHandles=null;}if(pendingSel){selHandles=pendingSel;pendingSel=null;}schedule();
+      }
+      function up(){released=true;finish();}function cancel(ev){ev.preventDefault();ev.stopImmediatePropagation();cancelled=true;released=true;finish();}
+      function right(ev){if(ev.button===2)cancel(ev);}
+      function key(ev){if(ev.key==='Escape'){cancel(ev);return;}const k='xyz'.indexOf(ev.key.toLowerCase());if(k>=0){ev.preventDefault();ev.stopImmediatePropagation();axis=axis===k&&plane===ev.shiftKey?null:k;plane=ev.shiftKey;move(last);}}
+      window.addEventListener('pointermove',move);window.addEventListener('pointerup',up);window.addEventListener('pointercancel',cancel);window.addEventListener('contextmenu',cancel,true);window.addEventListener('keydown',key,true);
+      window.addEventListener('pointerdown',right,true);
+      Promise.resolve(api.onHandleStart(h)).then(v=>{base=Array.isArray(v)&&v.length===3&&v.every(Number.isFinite)?v:[];if(base.length!==3)cancelled=released=true;if(!cancelled)move(last);if(released)finish();},()=>{base=[];cancelled=true;finish();});schedule();
     }
 
 
@@ -712,6 +842,9 @@ window.MiniHouPreview = (() => {
     if (window.ResizeObserver) new ResizeObserver(schedule).observe(canvas);
 
     Object.assign(api, {
+      showFeedback(text){feedback.hidden=!text;feedback.textContent=text||'';if(!text)snapMark=null;schedule();},
+      interaction, orientationFrame, snapPosition, planePoint, project: p=>toScreen(camera(),...p),
+      isDragging:()=>!!handleDrag||endingDrag,
       view, opt, onSelect: null, onHandle: null, onHandleStart: null,
       setHandles(list) { if (handleDrag) pendingHandles = list || []; else { handles = list || []; schedule(); } },
       handleTips() {                                                                    // for tests: where each handle's grab point is, in canvas pixels
@@ -722,7 +855,7 @@ window.MiniHouPreview = (() => {
             return sp ? { id: h.id, comp: h.comp, param: h.param, kind: h.kind, tip: [sp[0], sp[1]], ppu: 1, u: [1, 0] } : null;
           }
           const g = handleGeometry(cam, h);
-          if (h.kind === "uniform") { const s0 = g ? g.s0 : toScreen(cam, ...h.origin); return s0 ? { id: h.id, comp: h.comp, param: h.param, kind: h.kind, tip: [s0[0], s0[1]], ppu: 1, u: [1, -1] } : null; }
+          if (h.kind === "uniform" || h.kind === "plane") { const s0 = g ? g.s0 : toScreen(cam, ...h.origin); return s0 ? { id: h.id, comp: h.comp, param: h.param, kind: h.kind, tip: [s0[0], s0[1]], ppu: 1, u: [1, -1] } : null; }
           return g ? { id: h.id, comp: h.comp, param: h.param, kind: h.kind, tip: g.tip, ppu: g.ppu, u: g.u } : null;
         }).filter(Boolean);
       },
@@ -763,9 +896,13 @@ window.MiniHouPreview = (() => {
         }
         if (!ids.size) return null;
         const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+        const median=[0,0,0];for(const i of ids)for(let c=0;c<3;c++)median[c]+=raw.P[i*3+c]/ids.size;
+        let active=Array.from(raw.P.slice([...ids].at(-1)*3,[...ids].at(-1)*3+3));
+        if(sel.mode==='edge'&&sel.edge.size){const [a,b]=[...sel.edge.values()].at(-1);active=[0,1,2].map(c=>(raw.P[a*3+c]+raw.P[b*3+c])/2);}
+        if((sel.mode==='face'||sel.mode==='piece')&&sel.face.size){const f=[...sel.face].at(-1),vertices=new Set();for(let i=0;i<raw.triPrim.length;i++)if(raw.triPrim[i]===f)for(let j=0;j<3;j++)vertices.add(raw.tri[i*3+j]);if(vertices.size)active=[0,1,2].map(c=>[...vertices].reduce((s,i)=>s+raw.P[i*3+c],0)/vertices.size);}
         for (const i of ids) for (let c = 0; c < 3; c++) { const v = raw.P[3 * i + c]; if (v < lo[c]) lo[c] = v; if (v > hi[c]) hi[c] = v; }
         return { points: [...ids].sort((a, b) => a - b), center: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2],
-          radius: Math.max(Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2, 1e-3) };
+          median,active,radius: Math.max(Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2, 1e-3) };
       },
       setSelectionHandles(list) { if (handleDrag) pendingSel = list || []; else { selHandles = list || []; schedule(); } },
       clearSelection() { change({}, "replace"); },

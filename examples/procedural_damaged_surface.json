@@ -1,0 +1,11 @@
+{
+  "version":1,
+  "nodes":{
+    "panels":{"type":"grid","params":{"columns":9,"rows":9,"size_x":6,"size_y":6},"meta":{"pos":[0,0]}},
+    "regions":{"type":"region_identify","inputs":{"geo":"panels"},"params":{"mode":"primitive","seed":42},"meta":{"pos":[0,140]}},
+    "missing_panels":{"type":"blast","inputs":{"geo":"regions"},"params":{"domain":"primitives","group":"@region_random > 0.82"},"meta":{"pos":[0,280]}},
+    "displaced_panels":{"type":"region_transform","inputs":{"geo":"missing_panels"},"params":{"scale":[0.95,0.95,1],"random_rotate":[12,12,6],"random_translate":[0.02,0.02,0.12],"extrude":0.1,"random_extrude":0.04,"seed":21},"meta":{"pos":[0,420]}},
+    "output":{"type":"output","inputs":{"geo":"displaced_panels"},"meta":{"pos":[0,560]}}
+  },
+  "display":"output"
+}

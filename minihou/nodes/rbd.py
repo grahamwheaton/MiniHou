@@ -2,7 +2,7 @@
 import numpy as np
 
 from .. import timectx
-from ..sdk import Bool, Float, Input, Int, Str, Vec3, node
+from ..sdk import Bool, Enum, Float, Input, Int, Str, Vec3, node
 from .attrib_tools import piece_labels
 
 
@@ -48,7 +48,7 @@ def rbd_configure(geo, piece_attrib, id_offset, active, mass, friction, restitut
 
 
 @node("rbd_solver", inputs=["bodies", Input("colliders", optional=True), Input("constraints", optional=True)], category="physics",
-      key_extra=lambda p: "mujoco-3.15.0-rbd1|" + timectx.key(), params=[
+      key_extra=lambda p: "mujoco-3.15.0-rbd2|" + timectx.key(), params=[
     Vec3("gravity", (0, 0, -9.81)),
     Int("start_frame", 1),
     Int("substeps", 10, min=1, max=128),
@@ -64,8 +64,53 @@ def rbd_solver(bodies, colliders, constraints=None, **settings):
     Static geometry only. Integer frames are solved with fixed substeps; fractional frames
     hold the preceding integer frame. One unit = one metre. All inputs share one space.
 
-    ``constraints`` (optional): glue links from ``glue_cluster``: two-point lines whose ``rbd_a`` / ``rbd_b`` name the
-    bodies they hold together. Each is a weld that breaks when the force on it passes its ``strength`` (newtons).
+    ``constraints``: merge links from RBD Constraint or Glue Cluster. Glue welds, ball pins,
+    limited hinges and axial springs are supported. Body IDs come from RBD Configure.
+    See docs/RBD-CONSTRAINTS.md for mechanisms, units, limits and break semantics.
     """
     from ..rbd import solve
     return solve(bodies, colliders, settings, constraints)
+
+
+@node("rbd_constraint", category="physics", params=[
+    Enum("kind", ["glue", "pin", "hinge", "spring"], doc="Glue welds; pin fixes a point with free rotation; hinge rotates about an axis; spring connects two anchors."),
+    Int("body_a", 0, doc="Moving piece's rbd_id from RBD Configure."),
+    Int("body_b", 1, doc="Other piece's rbd_id; ignored when World is enabled. IDs must be unique across bodies and colliders."),
+    Bool("world", False, doc="Attach to fixed simulation space instead of Body B."),
+    Vec3("anchor", (0, 0, 0), doc="Pin/hinge pivot, or spring attachment on A, in initial simulation coordinates (metres). Glue preserves the initial relative pose."),
+    Vec3("anchor_b", (0, 0, 1), doc="Spring attachment on B or the world, in initial simulation coordinates. Ignored by other kinds."),
+    Vec3("axis", (0, 1, 0), doc="Hinge rotation axis in initial simulation coordinates; normalized by the solver."),
+    Bool("limited", False, doc="Hinge: angular stops. Spring: minimum/maximum anchor distance. Not used by pin/glue."),
+    Float("lower", 0, doc="Hinge lower angle in degrees from the initial pose; spring minimum length in metres."),
+    Float("upper", 90, doc="Hinge upper angle in degrees; spring maximum length in metres. Must exceed Lower."),
+    Float("stiffness", 100, min=0, doc="Spring only: axial Hooke stiffness in N/m."),
+    Float("damping", 1, min=0, doc="Spring: axial damping in N s/m. Hinge: angular damping in N m s/rad."),
+    Float("rest_length", -1, min=-1, doc="Spring only: -1 uses initial anchor distance; otherwise metres (zero allowed)."),
+    Float("strength", 0, min=0, soft_max=1000, doc="Break force in newtons; zero disables force breaking. Glue also includes torque/lever length for compatibility. Grace period: first 0.1 seconds."),
+    Float("break_torque", 0, min=0, soft_max=1000, doc="Glue/hinge only: break torque in N m; zero disables torque breaking. Pin and spring transmit no direct torque."),
+    Bool("collide_connected", False, doc="Allow collisions between linked pieces before breaking. They collide after all non-colliding links between them break."),
+])
+def rbd_constraint(kind, body_a, body_b, world, anchor, anchor_b, axis, limited, lower, upper,
+                   stiffness, damping, rest_length, strength, break_torque, collide_connected):
+    """Create one physical link. Merge several links into RBD Solver's constraints input.
+
+    This is constraint geometry, not simulated render geometry. Pin is a ball joint (three
+    free rotations); hinge has one free rotation. All anchors use the initial scene pose.
+    """
+    from .curves import _curves_geometry
+    from ..rbd import CONSTRAINT_KINDS, validate_link_values
+    values = dict(kind=kind, anchor=anchor, anchor_b=anchor_b, axis=axis, limited=limited,
+                  lower=lower, upper=upper, stiffness=stiffness, damping=damping,
+                  rest_length=rest_length, strength=strength, break_torque=break_torque)
+    validate_link_values(values)
+    if not world and body_a == body_b:
+        raise ValueError("a constraint needs two different body IDs (or enable World)")
+    if not all(-(2**31) <= i < 2**31 for i in (body_a, body_b)):
+        raise ValueError("constraint body IDs must fit int32")
+    prim = {name: np.array([value], np.int32) for name, value in dict(
+        rbd_schema=1, rbd_a=body_a, rbd_b=body_b, rbd_constraint=CONSTRAINT_KINDS.index(kind),
+        rbd_world=int(world), limited=int(limited), collide_connected=int(collide_connected)).items()}
+    prim.update({name: np.array([value], np.float32) for name, value in values.items()
+                 if name not in ("kind", "limited")})
+    return _curves_geometry(np.array([anchor, anchor_b if kind == "spring" else anchor], np.float32),
+                            [2], [False], prim=prim)
