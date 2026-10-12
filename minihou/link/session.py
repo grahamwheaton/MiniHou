@@ -391,7 +391,7 @@ class Session:
         with self.lock:
             good, err, rev = self.latest_good, self.latest_error, self._rev
         out: Dict[str, Any] = {"rev": rev, "cooked_rev": self._cooked_rev, "busy": self._cooked_rev < rev,
-                               "frame": self.frame}
+                               "frame": self.frame, "fps": self.fps}
         if err is not None:
             out.update(ok=False, error=err.error)
         else:

@@ -118,11 +118,19 @@ window.MiniHouPreview = (() => {
     }
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sedIdx); gl.bindVertexArray(null);
     const faceIdx = gl.createBuffer();
+    // normals overlay: one line per primitive from its centre along its normal (from the winding), and a dot at the tip
+    const nrmVao = gl.createVertexArray(), nrmBuf = gl.createBuffer(), tipVao = gl.createVertexArray(), tipBuf = gl.createBuffer();
+    for (const [vo, bu] of [[nrmVao, nrmBuf], [tipVao, tipBuf]]) {
+      gl.bindVertexArray(vo); gl.bindBuffer(gl.ARRAY_BUFFER, bu); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+    }
+    gl.bindVertexArray(null);
+    let nrmCount = 0, nrmDirty = true, nrmLines = new Float32Array(0);
+    const MAX_NORMALS = 100000;
     const ov = { points: 0, edgeIdx: 0, faceIdx: 0 };
 
     const view = { yaw: -0.6, pitch: 0.45, dist: 5, target: [0, 0, 0], ortho: false };
     const PITCH_MAX = 1.5707, FOV = Math.PI / 4, ORTHO_FOV = 0.03;     // "orthographic" is a very narrow lens far away: the same maths, so picking and handles keep working
-    const opt = { shaded: true, edges: true, points: false };
+    const opt = { shaded: true, edges: true, points: false, normals: false };
     let data = { npoints: 0, ntris: 0, nedges: 0, hasCd: false, bounds: [[-1, -1, -1], [1, 1, 1]] };
     let raw = null;                                                  // the geometry's typed arrays, for picking
     let raf = 0;
@@ -134,7 +142,7 @@ window.MiniHouPreview = (() => {
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arrays.tri, gl.STATIC_DRAW);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, edgeBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arrays.edge, gl.STATIC_DRAW);
       data.npoints = arrays.P.length / 3; data.ntris = arrays.tri.length / 3; data.nedges = arrays.edge.length / 2;
-      data.bounds = head.bounds;
+      data.bounds = head.bounds; nrmDirty = true;
       raw = { P: arrays.P, tri: arrays.tri, edge: arrays.edge, triPrim: arrays.tri_prim || new Uint32Array(arrays.tri.length / 3) };
       Object.assign(api, { tris: data.ntris, edges: data.nedges, points: data.npoints });
     }
@@ -331,6 +339,47 @@ window.MiniHouPreview = (() => {
       gl.disable(gl.BLEND);
     }
 
+
+    function buildNormals() {
+      nrmDirty = false; nrmCount = 0;
+      if (!raw || !raw.tri.length) return;
+      const T = raw.tri, P = raw.P, TP = raw.triPrim;
+      let np = 0;
+      for (let i = 0; i < TP.length; i++) if (TP[i] >= np) np = TP[i] + 1;
+      const acc = new Float64Array(np * 7);                                  // area-weighted normal sum, centroid sum, weight sum per primitive
+      for (let i = 0, n = T.length / 3; i < n; i++) {
+        const a = T[3 * i] * 3, b = T[3 * i + 1] * 3, c = T[3 * i + 2] * 3;
+        const e1x = P[b] - P[a], e1y = P[b + 1] - P[a + 1], e1z = P[b + 2] - P[a + 2], e2x = P[c] - P[a], e2y = P[c + 1] - P[a + 1], e2z = P[c + 2] - P[a + 2];
+        const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x, w = Math.hypot(nx, ny, nz), k = TP[i] * 7;
+        acc[k] += nx; acc[k + 1] += ny; acc[k + 2] += nz;
+        acc[k + 3] += w * (P[a] + P[b] + P[c]) / 3; acc[k + 4] += w * (P[a + 1] + P[b + 1] + P[c + 1]) / 3; acc[k + 5] += w * (P[a + 2] + P[b + 2] + P[c + 2]) / 3; acc[k + 6] += w;
+      }
+      const [lo, hi] = data.bounds, L = Math.max(Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) * 0.04, 1e-6);
+      const step = Math.max(1, Math.ceil(np / MAX_NORMALS)), lines = [], tips = [];
+      for (let q = 0; q < np; q += step) {
+        const k = q * 7, w = acc[k + 6], len = Math.hypot(acc[k], acc[k + 1], acc[k + 2]);
+        if (w <= 0 || len <= 0) continue;
+        const cx = acc[k + 3] / w, cy = acc[k + 4] / w, cz = acc[k + 5] / w, tx = cx + acc[k] / len * L, ty = cy + acc[k + 1] / len * L, tz = cz + acc[k + 2] / len * L;
+        lines.push(cx, cy, cz, tx, ty, tz); tips.push(tx, ty, tz);
+      }
+      gl.bindBuffer(gl.ARRAY_BUFFER, nrmBuf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lines), gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, tipBuf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(tips), gl.STATIC_DRAW);
+      nrmCount = tips.length / 3;
+      nrmLines = new Float32Array(lines);
+      api.normalCount = nrmCount;
+    }
+    function drawNormals(cam) {
+      if (nrmDirty) buildNormals();
+      if (!nrmCount) return;
+      gl.useProgram(colorProg.p);
+      gl.uniformMatrix4fv(colorProg.u.uMV, false, cam.MV); gl.uniformMatrix4fv(colorProg.u.uP, false, cam.P);
+      gl.uniform1f(colorProg.u.uBias, 0.0006); gl.uniform4f(colorProg.u.uColor, 0.25, 0.85, 0.95, 1);
+      gl.bindVertexArray(nrmVao); gl.drawArrays(gl.LINES, 0, nrmCount * 2);
+      gl.uniform1f(colorProg.u.uPointSize, 5);
+      gl.bindVertexArray(tipVao); gl.drawArrays(gl.POINTS, 0, nrmCount);
+      gl.uniform1f(colorProg.u.uPointSize, 4);
+    }
+
     function draw() {
       raf = 0;
       resize();
@@ -369,6 +418,7 @@ window.MiniHouPreview = (() => {
         gl.drawArrays(gl.POINTS, 0, data.npoints);
       }
       drawSelection(cam);
+      if (opt.normals) { gl.bindVertexArray(null); drawNormals(cam); }
       gl.bindVertexArray(null);
       renderHandles(cam);
     }
@@ -650,7 +700,8 @@ window.MiniHouPreview = (() => {
         else rebuildOverlay();
       },
       clear() { handles = []; data.npoints = 0; raw = null; Object.assign(api, { tris: 0, edges: 0, points: 0 }); change({}, "replace"); schedule(); },
-      frameAll, frameSelection, viewAxis, redraw: schedule,
+      frameAll, frameSelection, viewAxis, redraw: schedule, bounds: () => data.bounds,
+      normalSegments() { if (nrmDirty) buildNormals(); return Array.from(nrmLines); },   // for tests: [cx, cy, cz, tx, ty, tz] per primitive
       setOrtho(on) { view.ortho = !!on; schedule(); return view.ortho; },
       toggleOrtho() { return api.setOrtho(!view.ortho); },
       setMode(m) {

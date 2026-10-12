@@ -310,6 +310,15 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
   **Ctrl** for the opposite side), **Persp / Ortho** (**Numpad 5**), and **Numpad .** / **Home** to frame the selected elements or everything.
   Shaded / edges / points toggles; point colours (`Cd`) are shown; back faces are tinted orange so flipped normals stand out.
   Very large geometry is cut to a drawable size and the view says so.
+* **Timeline under the view**: ▶ plays the graph in real time between a start and an end frame (frames are skipped, never queued, when a cook is
+  slower than the frame rate), with ⏮ ◂ ▸ ⏭ step buttons, a scrub slider, the current frame, range and fps fields (the fps also sets the engine's
+  `@Time`), and ⟲ to loop; **Space** over the view plays or pauses and **←** **→** step (**Shift** jumps to the ends). The range is remembered in the browser,
+  and Blender's own timeline still drives the frame when it is connected.
+* **Normals** toggle (with shaded / edges / points): a short line from the centre of every face along its normal, worked out from the winding, so
+  flipped faces show up pointing inwards.
+* **Groups and the path bar**: a group (a `*.json` graph used as a node) is drawn stacked with a ▣ mark; **double-click** it to open its graph. The path
+  at the top left of the graph (`welcome › rock_scatter › detail`) lists the groups you went through: click a name to step back out, or press
+  **Alt+Up**; it survives a page reload.
 * **Select in the 3-D view and build the network from it**: the **Pts / Edges / Faces** buttons under the view (or **1 / 2 / 3** with the
   mouse over it) switch to a selection mode: click to pick (only what you can see), **Shift** adds, **Ctrl** removes, drag a box to
   select everything inside it (X-ray); **Alt**-drag or the middle mouse button orbits, **A** selects all, **Esc** clears then leaves.

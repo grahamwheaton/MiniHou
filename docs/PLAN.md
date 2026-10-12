@@ -148,6 +148,9 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
    script is tested for real with the `bpy` module; **not verified**: the Windows/macOS builds (only built on Linux here), and dropping the zip
    from a browser onto a Blender window (browser and OS dependent; the Install and Open buttons do not depend on it).
 
+9. **Editor additions (requested)**: a normals overlay toggle, a play/step/loop timeline under the 3-D view (real-time frame skipping,
+   `status.fps` reported by the engine), and a breadcrumb path with double-click to open group (system) nodes.
+
 Open:
 
 - Extra outputs have no modifier or exposed parameters (only the display branch does).

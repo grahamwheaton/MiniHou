@@ -232,3 +232,23 @@ body.has-bar #main { top: 72px; }
 body.has-bar #work, body.has-bar #side { min-height: 0; }
 #blender-status.clickable { cursor: pointer; }
 #topbar button { white-space: nowrap; }
+
+#crumbs { position: absolute; left: 10px; top: 8px; z-index: 6; display: flex; align-items: center; gap: 4px; max-width: calc(100% - 20px);
+  padding: 3px 8px; border-radius: 6px; background: #17191bd9; border: 1px solid var(--line); font-size: 12px; overflow: hidden; white-space: nowrap; }
+#crumbs .sep { color: var(--muted); }
+#crumbs .crumb { padding: 0 4px; border: 0; background: transparent; color: var(--accent); cursor: pointer; border-radius: 3px; }
+#crumbs .crumb:hover { background: #2b3138; text-decoration: underline; }
+#crumbs .crumb.cur { color: var(--text); font-weight: 600; cursor: default; }
+.node .groupmark { position: absolute; right: 6px; top: 4px; font-size: 11px; color: #9fb7d1; pointer-events: none; }
+.node.group { box-shadow: 0 0 0 1px #5a7da1 inset, 3px 3px 0 -1px #2a3a4b, 6px 6px 0 -2px #223040; }
+
+.pv-time { display: flex; align-items: center; gap: 4px; padding: 6px 0 0; flex-wrap: wrap; }
+.pv-time button { padding: 1px 6px; min-width: 26px; }
+.pv-time button.play { min-width: 36px; background: #1f3a2a; border-color: #2f6a47; }
+.pv-time button.play.playing { background: #6a3a1f; border-color: #a8602f; }
+.pv-time button.on { background: var(--accent); border-color: var(--accent); color: #07121f; }
+.pv-time input[type=range] { flex: 1 1 60px; min-width: 40px; accent-color: var(--accent); }
+.pv-time input[type=number] { width: 54px; text-align: center; background: #0f1112; color: inherit; border: 1px solid var(--line); border-radius: 4px; padding: 2px; }
+.pv-time #tl-frame { width: 62px; font-weight: 600; }
+.pv-time .tl-range { display: inline-flex; align-items: center; gap: 3px; }
+.pv-time .tl-range input { width: 42px; }

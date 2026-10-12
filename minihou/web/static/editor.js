@@ -13,6 +13,7 @@
     types: {}, typeList: [], status: null, root: "",
     sel: new Set(), wireSel: null, view: { x: 80, y: 60, k: 1 },
     online: false, framed: false, dragPos: new Map(), mouse: [200, 200],
+    trail: [], nav: null,                       // the path of nested graphs we opened ([{path, via}]) and what the next file switch means
   };
 
   // ---------------------------------------------------------------- DOM helpers (text only, never raw HTML)
@@ -150,6 +151,7 @@
       pendingSet.clear(); pendingContext = null;
     }
     const fileChanged = snap.path !== S.path;
+    if (fileChanged) updateTrail(snap.path);
     S.rev = snap.rev; S.graph = snap.graph; S.path = snap.path; S.documentId = snap.document_id;
     S.canUndo = snap.can_undo; S.canRedo = snap.can_redo;
     for (const id of [...S.sel]) if (!S.graph.nodes[id]) S.sel.delete(id);
@@ -263,13 +265,13 @@
       if (!el) { el = h("div", { class: "node", dataset: { id } }); nodesEl.append(el); }
       const [x, y] = pos(id);
       el.style.left = x + "px"; el.style.top = y + "px";
-      el.className = ["node", "cat-" + (t.category || "other"), S.sel.has(id) && "selected", id === disp && "display",
+      el.className = ["node", "cat-" + (t.category || "other"), t.category === "system" && t.source && "group", S.sel.has(id) && "selected", id === disp && "display",
         id === errNode && "error", !live.has(id) && "unused"].filter(Boolean).join(" ");
       const ex = exposedOf(id);
       // Rebuild a node's DOM only when its structure changes (wiring, comment, flags); status updates touch just the
       // status line. Stable elements keep hover state and never vanish under a click or a drag.
       const subSig = JSON.stringify([id === errNode && st.error.message, nodeMs[id], cached.has(id), n.type]);
-      const structSig = JSON.stringify([n.type, n.inputs, n.comment, ex.map((e) => e.name), t.inputs.length, id === disp]);
+      const structSig = JSON.stringify([n.type, n.inputs, n.comment, ex.map((e) => e.name), t.inputs.length, id === disp, t.category === "system" && !!t.source]);
       if (el._struct === structSig) {
         if (el._sub !== subSig) { el._sub = subSig; el.querySelector(".sub").replaceChildren(...subLine(id, n, st, errNode, nodeMs, cached)); }
         continue;
@@ -288,6 +290,7 @@
       });
       kids.push(h("div", { class: "port out", dataset: { node: id }, title: "output: drag to an input" }));
       if (n.comment) kids.push(h("div", { class: "comment" }, String(n.comment)));
+      if (t.category === "system" && t.source) kids.push(h("div", { class: "groupmark", title: "A group: double-click to open it" }, "▣"));
       if (ex.length) kids.push(h("div", { class: "badge", title: "Exposed to Blender: " + ex.map((e) => e.name).join(", ") }, "B"));
       el.replaceChildren(...kids);
     }
@@ -341,6 +344,45 @@
     $("#file-btn").title = S.path || "";
     $("#undo-btn").disabled = !S.canUndo;
     $("#redo-btn").disabled = !S.canRedo;
+    renderCrumbs();
+  }
+  // ---- breadcrumbs: the chain of nested groups (systems) opened from the root graph; a crumb jumps back out
+  const TRAIL_KEY = "minihou.trail";
+  function updateTrail(path) {
+    const nav = S.nav; S.nav = null;
+    let trail = S.trail;
+    if (!trail.length) { try { trail = JSON.parse(sessionStorage.getItem(TRAIL_KEY) || "[]"); } catch (e) { trail = []; } }
+    if (!Array.isArray(trail)) trail = [];
+    if (nav && nav.mode === "push") {
+      const at = trail.findIndex((c) => c.path === path);                           // opening a graph already on the path just steps back to it
+      trail = at >= 0 ? trail.slice(0, at + 1) : trail.concat([{ path, via: nav.via || "" }]);
+    } else if (nav && nav.mode === "jump") {
+      trail = trail.slice(0, nav.index + 1);
+      if (!trail.length || trail[trail.length - 1].path !== path) trail = [{ path, via: "" }];
+    } else if (!trail.length || trail[trail.length - 1].path !== path) {
+      trail = [{ path, via: "" }];                                                  // a graph opened from the file menu (or elsewhere) starts a new path
+    }
+    S.trail = trail;
+    try { sessionStorage.setItem(TRAIL_KEY, JSON.stringify(trail)); } catch (e) { /* storage unavailable */ }
+  }
+  const crumbName = (p) => relPath(p).split("/").pop().replace(/\.json$/i, "");
+  function renderCrumbs() {
+    const box = $("#crumbs");
+    if (!S.path) { box.classList.add("hidden"); return; }
+    const trail = S.trail.length && S.trail[S.trail.length - 1].path === S.path ? S.trail : [{ path: S.path, via: "" }];
+    const kids = [];
+    trail.forEach((c, i) => {
+      if (i) kids.push(h("span", { class: "sep" }, "›"));
+      const last = i === trail.length - 1;
+      kids.push(h(last ? "span" : "button", { class: "crumb" + (last ? " cur" : ""), dataset: { index: String(i) },
+        title: (c.via ? `opened from node ${c.via}\n` : "") + c.path + (last ? "" : "\nClick to go back to this graph"),
+        onclick: last ? null : () => openFile(c.path, false, { mode: "jump", index: i }) }, crumbName(c.path)));
+    });
+    box.classList.remove("hidden");
+    box.replaceChildren(...kids);
+  }
+  function goUp() {                                                                  // Alt+Up: back out of the current nested graph
+    if (S.trail.length > 1) openFile(S.trail[S.trail.length - 2].path, false, { mode: "jump", index: S.trail.length - 2 });
   }
   function relPath(p) {
     const root = (S.root || "").replace(/\\/g, "/").replace(/\/$/, ""), q = String(p).replace(/\\/g, "/");
@@ -362,6 +404,8 @@
     const fi = $("#frame-input");
     if (st.frame !== undefined && document.activeElement !== fi && Number(fi.value) !== st.frame) fi.value = st.frame;
     if (st.frame !== undefined && document.activeElement !== $("#frame-slider")) syncSlider(st.frame);
+    if (st.frame !== undefined && !PB.playing && PB.frame !== st.frame) { PB.frame = st.frame; tlRender(); }          // Blender's timeline moved it
+    if (st.fps && !PB.playing && PB.fps !== st.fps && document.activeElement !== $("#tl-fps")) { PB.fps = st.fps; tlRender(); }
     const clients = st.clients || [], blender = clients.filter((n) => /^blender/i.test(n));
     const b = $("#blender-status");
     b.className = "status" + (blender.length ? " ok" : "");
@@ -447,6 +491,7 @@
     if (!Number.isFinite(f)) return;
     $("#frame-input").value = f;
     syncSlider(f);
+    if (PB.frame !== f) { PB.frame = f; tlRender(); }
     framePending = f;
     if (frameSending) return;
     frameSending = true;
@@ -456,6 +501,66 @@
     }
     frameSending = false;
   }
+  // ---- timeline under the 3-D view: play / pause in real time, step, range, fps, loop
+  const TL_KEY = "minihou.timeline";
+  const PB = { playing: false, start: 1, end: 96, fps: 24, loop: true, frame: 1, t0: 0, f0: 1, raf: 0 };
+  try { Object.assign(PB, JSON.parse(localStorage.getItem(TL_KEY) || "{}"), { playing: false, raf: 0 }); } catch (e) { /* storage unavailable */ }
+  const tlSave = () => { try { localStorage.setItem(TL_KEY, JSON.stringify({ start: PB.start, end: PB.end, fps: PB.fps, loop: PB.loop })); } catch (e) { /* ignore */ } };
+  function tlRender() {
+    const sl = $("#tl-slider");
+    sl.min = PB.start; sl.max = Math.max(PB.end, PB.start + 1);
+    if (document.activeElement !== sl) sl.value = PB.frame;
+    for (const [id, v] of [["#tl-start", PB.start], ["#tl-end", PB.end], ["#tl-fps", PB.fps]]) if (document.activeElement !== $(id)) $(id).value = v;
+    if (document.activeElement !== $("#tl-frame")) $("#tl-frame").value = PB.frame;
+    const play = $("#tl-play");
+    play.textContent = PB.playing ? "⏸" : "▶"; play.classList.toggle("playing", PB.playing);
+    play.title = PB.playing ? "Pause (Space over the view)" : "Play (Space over the view)";
+    $("#tl-loop").classList.toggle("on", PB.loop);
+  }
+  function tlGoto(f) { PB.frame = f; tlRender(); setFrame(f); }
+  function tlStop() { PB.playing = false; cancelAnimationFrame(PB.raf); PB.raf = 0; tlRender(); scheduleInspect(); }
+  function tlTick(now) {
+    if (!PB.playing) return;
+    PB.raf = requestAnimationFrame(tlTick);
+    const span = PB.end - PB.start + 1;
+    let target = PB.f0 + Math.floor(((now - PB.t0) / 1000) * PB.fps);          // real time, not frame by frame: a slow cook skips frames
+    if (target > PB.end) {
+      if (!PB.loop) { tlGoto(PB.end); tlStop(); return; }
+      target = PB.start + ((target - PB.start) % span);
+      if (target < PB.frame) { PB.t0 = now; PB.f0 = target; }                     // wrapped: restart the clock from the new position
+    }
+    if (target !== PB.frame && !frameSending) tlGoto(target);
+  }
+  function tlPlay() {
+    if (PB.playing) return;
+    if (PB.frame >= PB.end || PB.frame < PB.start) PB.frame = PB.start;
+    PB.playing = true; PB.t0 = performance.now(); PB.f0 = PB.frame;
+    tlRender(); tlGoto(PB.frame);
+    PB.raf = requestAnimationFrame(tlTick);
+  }
+  const tlToggle = () => (PB.playing ? tlStop() : tlPlay());
+  const tlStep = (d) => { tlStop(); tlGoto(Math.min(PB.end, Math.max(PB.start, PB.frame + d))); };
+  $("#tl-play").onclick = tlToggle;
+  $("#tl-first").onclick = () => { tlStop(); tlGoto(PB.start); };
+  $("#tl-last").onclick = () => { tlStop(); tlGoto(PB.end); };
+  $("#tl-back").onclick = () => tlStep(-1);
+  $("#tl-next").onclick = () => tlStep(1);
+  $("#tl-loop").onclick = () => { PB.loop = !PB.loop; tlSave(); tlRender(); };
+  $("#tl-slider").addEventListener("input", (e) => { if (PB.playing) { PB.t0 = performance.now(); PB.f0 = Number(e.target.value); } tlGoto(Number(e.target.value)); });
+  $("#tl-frame").addEventListener("change", (e) => { const v = Math.round(Number(e.target.value)); if (Number.isFinite(v)) { tlStop(); tlGoto(v); } });
+  for (const [id, key, lo] of [["#tl-start", "start", -1e6], ["#tl-end", "end", -1e6]]) {
+    $(id).addEventListener("change", (e) => {
+      const v = Math.round(Number(e.target.value));
+      if (Number.isFinite(v)) { PB[key] = v; if (PB.end <= PB.start) PB.end = PB.start + 1; tlSave(); tlRender(); }
+    });
+  }
+  $("#tl-fps").addEventListener("change", async (e) => {
+    const v = Number(e.target.value);
+    if (!(v >= 1 && v <= 240)) { tlRender(); return; }
+    PB.fps = v; tlSave(); PB.t0 = performance.now(); PB.f0 = PB.frame; tlRender();
+    try { await api("/api/frame", { frame: PB.frame, fps: v }); } catch (err) { /* offline */ }              // @Time = frame / fps in the engine too
+  });
+  tlRender();
   $("#frame-slider").addEventListener("input", (e) => setFrame(Number(e.target.value)));
   $("#frame-input").addEventListener("change", (e) => setFrame(Number(e.target.value)));
   $("#frame-prev").onclick = () => setFrame(Number($("#frame-input").value) - 1);
@@ -512,7 +617,7 @@
       h("button", { onclick: () => duplicate([id]) }, "Duplicate"),
       h("button", { onclick: () => removeNodes([id]) }, "Delete"),
       t.category === "system" && t.source && h("button", { title: "Open this system's graph to edit it (saves reload it everywhere)",
-        onclick: () => openFile(t.source) }, "Edit system")));
+        onclick: () => openFile(t.source, false, { mode: "push", via: id }) }, "Edit system")));
     const ins = inputs(id);
     if (ins.length) {
       out.push(h("div", { class: "section" }, "Inputs"));
@@ -685,7 +790,7 @@
   let inspectTimer = null, inspectSeq = 0, inspectKey = null;
   function scheduleInspect() {
     clearTimeout(inspectTimer);
-    inspectTimer = setTimeout(runInspect, 150);
+    if (!PB.playing) inspectTimer = setTimeout(runInspect, 150);               // no inspector churn while playing
     schedulePreview();
   }
 
@@ -696,7 +801,7 @@
   function schedulePreview() {
     if (!pv || !pv.ok) return;
     clearTimeout(pvTimer);
-    pvTimer = setTimeout(runPreview, 200);
+    pvTimer = setTimeout(runPreview, PB.playing ? 0 : 200);
   }
   async function runPreview() {
     const ids = [...S.sel].filter((id) => nodeOf(id));
@@ -824,6 +929,11 @@
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.key.toLowerCase();
+      if (k === " ") { tlToggle(); e.preventDefault(); e.stopImmediatePropagation(); return; }                        // timeline, with the pointer over the view
+      if (k === "arrowright" || k === "arrowleft") {
+        if (e.shiftKey) { tlStop(); tlGoto(k === "arrowright" ? PB.end : PB.start); } else tlStep(k === "arrowright" ? 1 : -1);
+        e.preventDefault(); e.stopImmediatePropagation(); return;
+      }
       const mode = { "1": "point", "2": "edge", "3": "face" }[k];
       if (mode) { pv.setMode(mode); e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (k === "escape") {
@@ -837,7 +947,7 @@
     }, true);
   }
   if (pv && pv.ok) {
-    for (const [id, key] of [["#pv-shaded", "shaded"], ["#pv-edges", "edges"], ["#pv-points", "points"]]) {
+    for (const [id, key] of [["#pv-shaded", "shaded"], ["#pv-edges", "edges"], ["#pv-points", "points"], ["#pv-normals", "normals"]]) {
       $(id).checked = pv.opt[key];
       $(id).onchange = (e) => { pv.opt[key] = e.target.checked; pv.redraw(); };
     }
@@ -1336,6 +1446,12 @@
     const hdr = e.target.closest(".netbox .title");
     if (hdr) { renameBox(hdr.closest(".netbox").dataset.id); e.stopImmediatePropagation(); }
   });
+  canvas.addEventListener("dblclick", (e) => {                                      // double-click a group (system) node: open it, with a breadcrumb back
+    const el = e.target.closest(".node");
+    if (!el) return;
+    const id = el.dataset.id, t = typeOf(id);
+    if (t.category === "system" && t.source) { e.stopImmediatePropagation(); openFile(t.source, false, { mode: "push", via: id }); }
+  });
   canvas.addEventListener("dblclick", (e) => { if (!e.target.closest(".node") && !e.target.closest(".netbox")) openMenu(e.clientX, e.clientY, { world: toWorld(e.clientX, e.clientY) }); });
   canvas.addEventListener("contextmenu", (e) => { e.preventDefault(); if (!e.target.closest(".node")) openMenu(e.clientX, e.clientY, { world: toWorld(e.clientX, e.clientY) }); });
   canvas.addEventListener("wheel", (e) => {
@@ -1352,6 +1468,7 @@
 
   // ---------------------------------------------------------------- keyboard
   document.addEventListener("keydown", (e) => {
+    if (e.altKey && e.key === "ArrowUp" && !/^(input|textarea|select)$/i.test(e.target.tagName || "")) { e.preventDefault(); goUp(); return; }   // out of a nested group
     const menuOpen = !$("#tabmenu").classList.contains("hidden");
     if (menuOpen) {
       if (e.key === "Escape") { closeMenu(); e.preventDefault(); }
@@ -1417,10 +1534,12 @@
     menu.classList.remove("hidden");
   };
   document.addEventListener("click", (e) => { if (!e.target.closest(".file")) $("#file-menu").classList.add("hidden"); });
-  async function openFile(path, create) {
+  async function openFile(path, create, nav) {
     $("#file-menu").classList.add("hidden");
+    S.nav = nav || null;
     try { const snap = await api("/api/open", { path, create: !!create }); S.sel.clear(); applySnapshot(snap); }
     catch (e) { toast(e.message); }
+    S.nav = null;
   }
   function newFile() {
     let name = prompt("New graph file (inside " + (S.root || "the workspace") + "):", "graphs/my_system.json");
