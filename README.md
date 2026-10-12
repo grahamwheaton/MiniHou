@@ -817,6 +817,13 @@ line, whole numbers as ints, and values from Blender's float32 sliders snapped t
 keyframes and drivers on them keep working. A graph may be unfinished (an unwired node): it still opens, and only the nodes
 feeding the display node have to be valid for it to cook.
 
+## USD export and import
+
+File menu > *Export USD...* (also `POST /api/export_usd`, MCP `export_usd`) writes the cooked geometry, always at full size, as meshes,
+curves and points with attributes as primvars and groups as GeomSubsets; the graph is stored inside the file. The **USD Import** node
+reads USD files from other tools (transforms, Y-up, indexed primvars, subsets) and a MiniHou export comes back exactly. Needs
+`pip install usd-core`. Graphs themselves stay JSON. Details and limits: [docs/USD.md](docs/USD.md).
+
 ## Very large scenes (proxies)
 
 The 3-D view draws any geometry within a budget (250k triangles / 500k points) by clustering it, so the whole shape stays

@@ -328,6 +328,11 @@ Worked through in order of how often Houdini users reach for them:
     instead of truncating; a cook proxy level scales marked parameters (count / res2 / res3 / step kinds), is part of the cache key
     through the scaled values, and auto mode cooks a small version first and the real one when edits pause (cancellable between
     nodes). Not yet exercised in a real Blender; the link budget is off by default.
+19. **USD** (`minihou/usd_io.py`, `nodes/usd_nodes.py`, `Session.export_usd`, details in `docs/USD.md`): a geometry is split into Mesh /
+    BasisCurves / Points under one Xform per output; attribute tables map to vertex / faceVarying / uniform primvars with the domain
+    stored on each primvar, plus `point_index` / `prim_index` primvars that make MiniHou round trips exact. `usd_import` applies world
+    transforms, up axis and units, flips winding for left-handed or mirrored prims, and keys its cache on the file's mtime and size.
+    Not opened in Houdini / Blender / Omniverse here; no PointInstancer yet.
 
 Closest-point and ray queries on triangle grids have numba kernels (`nodes/_kernels.py` `grid_closest`, `grid_intersect`;
 remesh of a 4,800-triangle sphere 17 s -> 3.5 s). Surfaces from points and curves: `delaunay` (SciPy or a pure-Python

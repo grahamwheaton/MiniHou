@@ -1809,6 +1809,7 @@
       h("div", { class: "fm-cur" }, h("div", null, h("b", null, cur || "(unsaved graph)"), h("small", null, curFile ? ` · ${curFile.nodes} nodes · edits save as you make them` : "")),
         h("span", { class: "acts on" },
           h("button", { onclick: saveAs, title: "Write this graph to a new file and switch to it" }, "Save As…"),
+          h("button", { onclick: exportUsd, title: "Write the cooked geometry (full size) to a USD file for Houdini, Blender, Omniverse or usdview" }, "Export USD…"),
           h("button", { onclick: saveSelectionAsNode, disabled: !S.sel.size, title: "Turn the selected nodes into a reusable library node (Ctrl+G)" }, "Save selection as node…"))),
       h("div", { class: "fm-list" }, ...(list.length ? list : [h("div", { class: "cat" }, FM.q ? "No graph or library node matches “" + FM.q + "”" : "No graph files here yet")])),
       h("div", { class: "fm-foot" }, h("button", { onclick: newFile }, "New graph…"),
@@ -1895,6 +1896,26 @@
         try { const snap = await api("/api/save_as", { path: name, overwrite: true }); $("#file-menu").classList.add("hidden"); S.sel.clear(); applySnapshot(snap); } catch (e2) { toast(e2.message); }
       } else toast(err.message);
     }
+  }
+  async function exportUsd() {
+    const cur = S.path ? relPath(S.path) : "exports/scene.json";
+    const single = [...S.sel].filter((id) => nodeOf(id)).length === 1 ? [...S.sel][0] : null;
+    let name = prompt("Export the " + (single ? "node " + single : "display output") + " as USD (inside " + (S.root || "the workspace") + ", full size, .usd .usda or .usdc):",
+      cur.replace(/\.json$/i, "") + ".usdc");
+    if (!name) return;
+    name = name.trim();
+    if (!/\.(usd|usda|usdc)$/i.test(name)) name += ".usdc";
+    const send = (overwrite) => api("/api/export_usd", { path: name, node: single || undefined, overwrite });
+    try {
+      let r;
+      try { r = await send(false); }
+      catch (err) {
+        if (/already exists/.test(err.message) && confirm(name + " already exists. Overwrite it?")) r = await send(true); else throw err;
+      }
+      $("#file-menu").classList.add("hidden");
+      const o = Object.values(r.outputs), n = (k) => o.reduce((a, x) => a + x[k], 0);
+      toast(`Exported ${fmt(n("faces"))} faces, ${fmt(n("curves"))} curves, ${fmt(n("points"))} loose points to ${name}`, false);
+    } catch (err) { toast(err.message); }
   }
   async function fileOp(op, path, to) {
     try { await api("/api/file_op", { op, path, to }); await openFileMenu(); } catch (err) { toast(err.message); }

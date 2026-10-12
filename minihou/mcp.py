@@ -116,6 +116,14 @@ TOOLS: List[dict] = [
                     "animated systems (wrangles using @Frame, solvers) at different times, then inspect_node.",
      "inputSchema": {"type": "object", "required": ["frame"], "additionalProperties": False, "properties": {
          "frame": {"type": "number"}, "fps": {"type": "number", "exclusiveMinimum": 0}}}},
+    {"name": "export_usd",
+     "description": "Write the cooked geometry to a USD file (.usd/.usda/.usdc, inside the MiniHou folder) for Houdini, Blender, "
+                    "Omniverse or usdview. Always full size, whatever the proxy level. The display output and each extra output "
+                    "become prims under /MiniHou (meshes, curves and points, with attributes as primvars and groups as GeomSubsets); "
+                    "the graph is stored in the file. Read a USD file back with the usd_import node.",
+     "inputSchema": {"type": "object", "required": ["path"], "additionalProperties": False, "properties": {
+         "path": {"type": "string"}, "node": {"type": "string", "description": "Export this node instead of the display output."},
+         "overwrite": {"type": "boolean"}, "graph": {"type": "boolean", "description": "Store the graph in the file (default true)."}}}},
     {"name": "set_proxy",
      "description": "Work on a very large scene: cook it at a fraction of its size. Node parameters that set the amount of work "
                     "(grid columns/rows, scatter count, sphere bands, voxel size, spacing...) scale with the level, so a 10% "
@@ -431,6 +439,18 @@ class McpServer:
         st = self.engine.get("/api/status?wait=1&timeout=30")
         word = "Redid" if redo else "Undid"
         return f"{word} {done} step(s)." + (" Nothing (more) to do." if done < steps else "") + "\n" + format_status(st)
+
+    def tool_export_usd(self, path: str, node: Optional[str] = None, overwrite: bool = False, graph: bool = True) -> str:
+        body = {"path": path, "overwrite": overwrite, "graph": graph}
+        if node:
+            body["node"] = node
+        r = self.engine.post("/api/export_usd", body)
+        lines = [f"Wrote {r['path']}"]
+        for name, o in r["outputs"].items():
+            d = o["dropped"]
+            lines.append(f"  {o['prim']}: {o['faces']:,} faces, {o['curves']:,} curves, {o['points']:,} loose points"
+                         + (f" (left out: {d['faces']} faces with under 3 corners, {d['curves']} one-point curves)" if d["faces"] or d["curves"] else ""))
+        return "\n".join(lines)
 
     def tool_set_proxy(self, level: Optional[float] = None, auto: Optional[bool] = None, link_tris: Optional[int] = None) -> str:
         body = {k: v for k, v in (("level", level), ("auto", auto), ("link_tris", link_tris)) if v is not None}

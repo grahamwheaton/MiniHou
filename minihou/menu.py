@@ -15,7 +15,7 @@ LIBRARY = "Library"
 GROUPS: List[Tuple[str, str, List[str]]] = [
     ("Create", "Shapes and curves from nothing, and the doors into a graph",
      ["box", "sphere", "grid", "tube", "torus", "circle", "line", "curve", "helix", "lsystem", "lattice_grid",
-      "blender_object", "modifier_input"]),
+      "blender_object", "usd_import", "modifier_input"]),
     ("Polygon Modelling", "Build and edit polygon surfaces",
      ["polyextrude", "polybevel", "polysplit", "polyfill", "polybridge", "polyexpand2d", "subdivide", "mirror", "boolean",
       "clip", "dissolve", "divide", "reverse", "facet", "bridge", "skin", "skin_profiles", "revolve", "polyreduce", "clean",
@@ -97,7 +97,7 @@ ALIASES: Dict[str, str] = {
     "loop_end": "repeat iterate", "for_each": "per piece iterate", "solver": "feedback simulation previous frame",
     "null": "named output pass through", "input": "system port", "output": "result display", "box": "cube", "sphere": "ball",
     "grid": "plane floor", "tube": "cylinder cone", "torus": "donut ring", "circle": "disc", "line": "segment",
-    "curve": "spline path", "helix": "spiral coil", "lsystem": "plant tree fractal", "blender_object": "read import mesh",
+    "curve": "spline path", "helix": "spiral coil", "lsystem": "plant tree fractal", "blender_object": "read import mesh", "usd_import": "usd usda usdc usdz open load file scene pixar omniverse houdini",
     "modifier_input": "host geometry",
 }
 
@@ -107,7 +107,7 @@ _TITLES = {"polyextrude": "PolyExtrude", "polybevel": "PolyBevel", "polysplit": 
            "lsystem": "L-System", "rbd_configure": "RBD Configure", "rbd_solver": "RBD Solver",
            "rbd_material_fracture": "RBD Material Fracture", "rbd_constraint_properties": "RBD Constraint Properties",
            "loop_block": "Repeat (Loop Block)", "for_each": "For Each", "points_to_surface": "Points to Surface",
-           "copy_to_points": "Copy to Points", "blender_object": "Blender Object", "modifier_input": "Modifier Input"}
+           "copy_to_points": "Copy to Points", "blender_object": "Blender Object", "usd_import": "USD Import", "modifier_input": "Modifier Input"}
 
 _ORDER: Dict[str, Tuple[int, int]] = {}
 for _gi, (_g, _doc, _names) in enumerate(GROUPS):

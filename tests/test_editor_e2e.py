@@ -1650,6 +1650,24 @@ class EditorE2E(unittest.TestCase):
         self.page.click('#preview [data-mode="point"]')
         self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "point")        # selecting works on the real geometry
 
+    def test_export_usd_from_the_file_menu(self):
+        try:
+            from minihou import usd_io
+            usd_io.pxr()
+        except Exception:                                   # noqa: BLE001 - usd-core not installed
+            self.skipTest("usd-core not installed")
+        self.page.click("#file-btn")
+        self.page.wait_for_selector("#file-menu:not(.hidden) .fm-list")
+        answers = iter(["exports/demo_out.usda"])
+        self.page.on("dialog", lambda d: d.accept(next(answers, "")) if d.type == "prompt" else d.accept())
+        self.page.locator("#file-menu button", has_text="Export USD").click()
+        target = os.path.join(self.dir, "exports", "demo_out.usda")
+        self.assertTrue(until(lambda: os.path.isfile(target), 8))
+        self.page.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').textContent.includes('Exported')")
+        back, _ = usd_io.read_geometry(target)
+        self.assertEqual(back.npoints, self.s.latest_good.geo.npoints)
+        self.assertEqual(back.nprims, self.s.latest_good.geo.nprims)
+
 
 if __name__ == "__main__":
     unittest.main()
