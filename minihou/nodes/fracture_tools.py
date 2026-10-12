@@ -37,23 +37,29 @@ def prim_geometry(geo):
 def contacts(geo, pieces, max_gap=0.0):
     """Faces of different pieces that lie against each other (the two sides of a cut): returns
     ``(face_a, face_b, area)`` with ``pieces[face_a] < pieces[face_b]``. Two faces touch when their normals oppose, they
-    are at most ``max_gap`` apart along the normal, line up in the plane of the face, and their areas agree
-    (exactly when there is no gap, within a factor of two when there is one)."""
+    are at most ``max_gap`` apart along the normal and line up in the plane of the face: with no gap their centroids
+    and areas coincide; across a gap (where the two caps are cut differently) the faces' discs have to overlap."""
     c, n, area = prim_geometry(geo)
     size = float(np.ptp(geo.P, axis=0).max()) if geo.npoints else 1.0
     tol = 1e-5 * max(size, 1e-9)
-    # faces are matched through their centroids, which coincide in the plane even when the planes are a gap apart
-    slack = tol * 4 if max_gap <= 0 else 2 * max_gap + tol * 4        # with a gap the two caps are cut differently
-    i, j, _ = spatial.pairs_within(c, max_gap + slack + tol)
+    if max_gap <= 0:                                  # coincident faces: their centroids coincide
+        i, j, _ = spatial.pairs_within(c, tol * 5)
+        slack = tol * 4
+    else:                                             # across a gap the two caps are cut differently: faces touch when their discs overlap
+        rad = np.sqrt(area / np.pi)
+        i, j, _ = spatial.pairs_within(c, max_gap + 2 * float(rad.max(initial=0)) + tol)
     if not len(i):
         return np.zeros(0, np.int64), np.zeros(0, np.int64), np.zeros(0)
     d = c[j] - c[i]
     along = np.einsum("ij,ij->i", d, n[i])
     side = np.linalg.norm(d - along[:, None] * n[i], axis=1)
     ok = (pieces[i] != pieces[j]) & (np.einsum("ij,ij->i", n[i], n[j]) < -0.999)
-    ok &= (np.abs(along) <= max_gap + tol) & (side <= slack)
-    ratio = np.minimum(area[i], area[j]) / np.maximum(np.maximum(area[i], area[j]), 1e-300)
-    ok &= ratio >= (0.5 if max_gap > 0 else 1 - 1e-3)
+    if max_gap <= 0:
+        ok &= (np.abs(along) <= tol) & (side <= slack)
+        ratio = np.minimum(area[i], area[j]) / np.maximum(np.maximum(area[i], area[j]), 1e-300)
+        ok &= ratio >= 1 - 1e-3
+    else:
+        ok &= (np.abs(along) <= max_gap + tol) & (side <= rad[i] + rad[j])
     i, j = i[ok], j[ok]
     swap = pieces[i] > pieces[j]
     i, j = np.where(swap, j, i), np.where(swap, i, j)
@@ -664,3 +670,207 @@ def assemble(geo, source, piece_attrib, groups, output_attrib, renumber, unshare
         out = ASM_OUT.write(out, og, "unshared", copied_mask)
         out = ASM_OUT.write(out, og, "shared", shared_mask)
     return out
+
+
+# ------------------------------------------------------------------------------------------------------ glue cluster
+
+GLUE_PIECE_OUT = OutGroups(
+    OutGroup("glued", "Glued Pieces", "glued", "prim", doc="pieces output: faces of pieces that are glued to at least one other"),
+    OutGroup("loose", "Loose Pieces", "loose", "prim", doc="pieces output: faces of pieces that touch nothing"),
+    OutGroup("interface", "Interface Faces", "interface", "prim", doc="pieces output: the faces that lie against another piece"),
+)
+GLUE_LINK_OUT = OutGroups(
+    OutGroup("internal", "Internal Links", "internal", "prim", doc="constraints output: links inside one cluster (rigid, never break)"),
+    OutGroup("external", "External Links", "external", "prim", doc="constraints output: links between clusters (these can break)"),
+    OutGroup("weak", "Weak Links", "weaklinks", "prim", doc="constraints output: links weaker than the 'weak' share of the average strength"),
+)
+
+
+def cluster_pieces(ids, a, b, area, target):
+    """Cluster number per piece (``ids`` are the sorted piece numbers): pieces joined by the largest contacts merge first
+    until ``target`` clusters are left (0 or at least the piece count: every piece is its own)."""
+    n = len(ids)
+    parent = np.arange(n)
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    clusters = n
+    size = np.ones(n, np.int64)
+    if 0 < target < n:
+        cap = int(np.ceil(1.5 * n / target))                     # first keep the clusters about even in size, then merge on
+        for limit in (cap, n):
+            for k in np.argsort(-area, kind="stable"):
+                if clusters <= target:
+                    break
+                ra, rb = find(int(np.searchsorted(ids, a[k]))), find(int(np.searchsorted(ids, b[k])))
+                if ra != rb and size[ra] + size[rb] <= limit:
+                    lo, hi = min(ra, rb), max(ra, rb)
+                    parent[hi] = lo
+                    size[lo] += size[hi]
+                    clusters -= 1
+    root = np.array([find(i) for i in range(n)])
+    _, label = np.unique(root, return_inverse=True)              # roots are the lowest member: numbered by lowest piece
+    return label.reshape(-1).astype(np.int64)
+
+
+def glue_links(geo, pieces, ids, max_gap, min_area, strength, variation, seed):
+    """Contacts between pieces as glue: (a, b, area, strength in newtons)."""
+    a, b, area, _faces = piece_pairs(geo, pieces, max_gap)
+    keep = area >= max(min_area, 1e-300)
+    a, b, area = a[keep], b[keep], area[keep]
+    noise = np.random.default_rng([int(seed) & 0xFFFFFFFF, 41]).random(len(area)) * 2 - 1
+    force = strength * area * np.maximum(1 + variation * noise, 0.01)
+    return a, b, area, force
+
+
+@node("glue_cluster", inputs=["geo"], category="model", params=[
+    Str("piece_attrib", "piece", doc="Primitive int attribute with each face's piece (empty: connected pieces)"),
+    Enum("output", ["pieces", "constraints"], doc="pieces: the input with a 'cluster' attribute; constraints: the glue links, for the "
+                                                  "solver's third input"),
+    Float("strength", 50000.0, min=0.0, soft_max=1e6, doc="Newtons per square metre of contact: a link breaks when the force on "
+                                                          "it passes strength x contact area (0: never breaks)"),
+    Float("strength_variation", 0.2, min=0.0, max=1.0, doc="Random spread of each link's strength (0.2: within 20%)"),
+    Int("seed", 0),
+    Float("max_gap", 0.0, min=0.0, soft_max=0.1, doc="Pieces whose faces are up to this far apart still count as touching"),
+    Float("min_area", 0.0, min=0.0, doc="No glue where the contact is smaller than this"),
+    Int("clusters", 0, min=0, soft_max=100, doc="Merge the most strongly stuck pieces into this many rigid clusters (0: no clustering)"),
+    Float("weak", 0.5, min=0.0, max=1.0, doc="A link is weak when it is below this share of the average strength"),
+    *GLUE_PIECE_OUT.params(),
+    *GLUE_LINK_OUT.params(),
+])
+def glue_cluster(geo, piece_attrib, output, strength, strength_variation, seed, max_gap, min_area, clusters, weak, **og):
+    """Glue touching pieces together (Houdini's Glue Cluster). Pieces that share a cut face are linked; ``clusters`` can
+    merge the most firmly stuck ones into rigid groups (the int ``cluster``: configure it with ``rbd_configure`` ``compound``
+    on). ``output = constraints`` gives the remaining links as lines between piece centres with the attributes the solver
+    reads: ``rbd_a`` / ``rbd_b`` (body ids: clusters when clustering, else pieces), ``strength`` (newtons) and ``length``."""
+    B.require_polygons(geo, "glue_cluster")
+    pieces = piece_ids(geo, piece_attrib)
+    ids = np.unique(pieces)
+    a, b, area, force = glue_links(geo, pieces, ids, max_gap, min_area, strength, strength_variation, seed)
+    label = cluster_pieces(ids, a, b, area, clusters)
+    slot = {int(p): k for k, p in enumerate(ids)}
+    body = label if clusters > 0 else ids
+    if output == "pieces":
+        out = geo.copy()
+        out.prim["cluster"] = body[np.searchsorted(ids, pieces)].astype(np.int32)
+        linked = np.zeros(len(ids), bool)
+        if len(a):
+            linked[[slot[int(x)] for x in a]] = True
+            linked[[slot[int(x)] for x in b]] = True
+        c, _n, _area = prim_geometry(geo)
+        i, j, _ = contacts(geo, pieces, max_gap)
+        face = np.zeros(geo.nprims, bool)
+        keep = np.isin(pieces[i], a) | np.isin(pieces[i], b)
+        face[i[keep]] = True
+        face[j[keep]] = True
+        per_prim = linked[np.searchsorted(ids, pieces)]
+        out = GLUE_PIECE_OUT.write(out, og, "glued", per_prim)
+        out = GLUE_PIECE_OUT.write(out, og, "loose", ~per_prim)
+        return GLUE_PIECE_OUT.write(out, og, "interface", face)
+    centres = piece_centres(geo, pieces, ids)
+    ba = np.array([body[slot[int(x)]] for x in a], np.int64)
+    bb = np.array([body[slot[int(x)]] for x in b], np.int64)
+    attrs = {"piece_a": a.astype(np.int32), "piece_b": b.astype(np.int32), "rbd_a": ba.astype(np.int32), "rbd_b": bb.astype(np.int32),
+             "area": area.astype(np.float32), "strength": (force if strength > 0 else np.zeros_like(force)).astype(np.float32),
+             "length": np.sqrt(area).astype(np.float32)}
+    out, _ends = link_geometry(centres, ids, a, b, attrs)
+    out.point["cluster"] = label[np.arange(len(ids))].astype(np.int32)
+    internal = (ba == bb) if clusters > 0 else np.zeros(len(a), bool)
+    out = GLUE_LINK_OUT.write(out, og, "internal", internal)
+    out = GLUE_LINK_OUT.write(out, og, "external", ~internal)
+    mean = float(force[~internal].mean()) if (~internal).any() else 0.0
+    return GLUE_LINK_OUT.write(out, og, "weak", lambda: force < weak * mean)
+
+
+# --------------------------------------------------------------------------------------------- rbd material fracture
+
+# density kg/m3, friction, restitution, glue strength N/m2 (tuned for plausible-looking breakage, not measured)
+MATERIALS = {
+    "concrete": (2400.0, 0.70, 0.05, 40000.0),
+    "brick": (1900.0, 0.60, 0.05, 15000.0),
+    "stone": (2700.0, 0.70, 0.05, 60000.0),
+    "wood": (700.0, 0.50, 0.20, 30000.0),
+    "glass": (2500.0, 0.40, 0.10, 5000.0),
+    "ceramic": (2300.0, 0.45, 0.15, 8000.0),
+    "ice": (920.0, 0.05, 0.05, 6000.0),
+    "metal": (7800.0, 0.35, 0.20, 200000.0),
+}
+MAT_OUT = OutGroups(
+    OutGroup("inside", "Inside Faces", "inside", "prim", default=True, doc="The new faces made by the fracture"),
+    OutGroup("outside", "Outside Faces", "outside", "prim", doc="The faces that came from the input's own surface"),
+    OutGroup("cutpoints", "Cut Points", "cutpoints", "point", doc="Points on the cuts"),
+    OutGroup("cutedges", "Cut Edges", "cutedges", "edge", doc="Edges where the inside meets the outside"),
+)
+
+
+@node("rbd_material_fracture", inputs=["geo"], category="physics", params=[
+    Enum("material", list(MATERIALS), doc="Density, friction, bounce and how firmly the pieces are glued"),
+    Int("pieces", 24, min=2, max=2000, soft_max=200, doc="How many pieces to break the shape into"),
+    Int("seed", 0),
+    Float("surface_fraction", 0.15, min=0.0, max=1.0, doc="Share of the fracture points on the surface (finer pieces at the outside)"),
+    Int("relax", 2, min=0, max=20, doc="Relaxation passes: more even pieces"),
+    Float("gap", 0.0, min=0.0, soft_max=0.05, doc="A gap between pieces (needs max_gap in the glue)"),
+    Bool("glue", True, doc="Glue the pieces together (output = constraints gives the links)"),
+    Int("clusters", 0, min=0, soft_max=50, doc="Merge strongly stuck pieces into this many rigid clusters (needs glue; 0: none)"),
+    Float("strength_scale", 1.0, min=0.0, soft_max=10.0, doc="Multiplies the material's glue strength"),
+    Float("mass_scale", 1.0, min=0.0001, soft_max=10.0, doc="Multiplies the pieces' mass (units are metres and kilograms)"),
+    Enum("output", ["pieces", "constraints"], doc="pieces: the fractured, configured bodies for the solver's first input; "
+                                                  "constraints: the glue links for its third"),
+    *MAT_OUT.params(),
+])
+def rbd_material_fracture(geo, material, pieces, seed, surface_fraction, relax, gap, glue, clusters, strength_scale,
+                          mass_scale, output, **og):
+    """A one-node fracture for simulation (Houdini's RBD Material Fracture): scatter fracture points, cut the closed
+    mesh with ``voronoi_fracture``, give each piece its own points, glue the pieces and set mass (density x volume),
+    friction and bounce from the material. Feed ``output = pieces`` to ``rbd_solver`` and ``output = constraints`` to
+    its third input. Pieces are convex when the input is; for a concave input run ``convex_decomposition`` first."""
+    from .fracture import INSIDE_TMP, OUT as FRACTURE_OUT, cut_edge_mask, voronoi_fracture
+    del INSIDE_TMP, cut_edge_mask
+    density, friction, bounce, glue_strength = MATERIALS[material]
+    pts = voronoi_fracture_points(geo, None, pieces, seed, surface_fraction, 0.0, relax, 0.0, 3, 0.25, "piece",
+                                  **{"outgrp_" + k: False for k in ("interior", "surface", "clustered", "extra")})
+    fracture_og = {k: v for k, v in og.items() if k.startswith("outgrp_")}
+    frac = voronoi_fracture(geo, pts, "piece", "inside", gap, **fracture_og)
+    split = assemble(frac, "attribute", "piece", "*", "piece", True, True, "centroid", "piece", False, False)
+    ids = split.prim["piece"].astype(np.int64)
+    count = int(ids.max()) + 1 if len(ids) else 0
+    if output == "constraints":
+        if not glue:
+            raise ValueError("output = constraints needs glue switched on")
+        return glue_cluster(split, "piece", "constraints", glue_strength * strength_scale, 0.25, seed, gap * 1.2 + 0.0, 0.0,
+                            clusters, 0.5, **{})
+    out = split
+    if glue and clusters > 0:
+        out = glue_cluster(split, "piece", "pieces", glue_strength * strength_scale, 0.25, seed, gap * 1.2, 0.0, clusters, 0.5)
+    out = out.copy()
+    volume = np.array([mesh_volume(part_of(split, ids, k)) for k in range(count)])
+    mass = np.maximum(volume * density * mass_scale, 1e-6)
+    body = out.prim["cluster"].astype(np.int64) if "cluster" in out.prim else ids
+    if "cluster" in out.prim:                                # a cluster is one body: its mass is the sum of its pieces'
+        piece_body = np.zeros(count, np.int64)
+        piece_body[ids] = body
+        _, inv = np.unique(piece_body, return_inverse=True)
+        inv = inv.reshape(-1)
+        mass_prim = np.bincount(inv, weights=mass)[inv][ids]
+    else:
+        mass_prim = mass[ids]
+    out.prim["rbd_id"] = body.astype(np.int32)
+    if "cluster" in out.prim:
+        out.prim["rbd_compound"] = np.ones(out.nprims, np.int32)
+    out.prim["rbd_active"] = np.ones(out.nprims, np.int32)
+    out.prim["rbd_mass"] = mass_prim.astype(np.float32)
+    for name, value in (("friction", friction), ("restitution", bounce), ("linear_damping", 0.05), ("angular_damping", 0.1)):
+        out.prim["rbd_" + name] = np.full(out.nprims, value, np.float32)
+    out.prim["rbd_v"] = np.zeros((out.nprims, 3), np.float32)
+    out.prim["rbd_w"] = np.zeros((out.nprims, 3), np.float32)
+    out.detail = dict(out.detail)
+    out.detail["rbd_material"] = material
+    return out
+
+
+def part_of(geo, ids, k):
+    from .group import keep_prims
+    return keep_prims(geo, ids == k)
