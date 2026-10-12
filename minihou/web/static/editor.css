@@ -283,3 +283,29 @@ body.has-bar #work, body.has-bar #side { min-height: 0; }
 #pie .pie-centre.hot circle { fill: #3a3f46; stroke: var(--accent); }
 #pie .pie-title { fill: var(--muted); font: 700 14px system-ui, sans-serif; pointer-events: none; }
 #pie .pie-info { position: absolute; transform: translateX(-50%); max-width: 420px; padding: 3px 10px; border-radius: 10px; background: #14161acc; color: var(--text); font-size: 12px; text-align: center; pointer-events: none; }
+
+/* Viewport tools stay at the edges, leaving geometry and handles unobstructed. */
+.pv-stage { display:flex; flex:1 1 auto; min-height:80px; position:relative; gap:3px; }
+#preview .pv-stage .pv-wrap { min-width:0; }
+.pv-left-tools { display:flex; flex-direction:column; gap:12px; width:46px; flex:none; background:#282c31; padding:4px 2px; }
+.pv-left-tools .pv-modes, .pv-left-tools .pv-nav { display:flex; flex-direction:column; gap:3px; }
+.pv-left-tools button { padding:5px 2px; border-radius:3px !important; font-size:11px; }
+#preview .pv-display-strip { display:flex; flex-direction:column; align-items:start; gap:12px; width:63px; flex:none; background:#282c31; padding:8px 3px; }
+#preview .pv-display-strip label { font-size:10px; white-space:nowrap; cursor:pointer; }
+.pv-hints { position:absolute; top:12px; left:12px; z-index:2; pointer-events:none; max-width:320px; color:#c3c9d2; font-size:11px; text-shadow:0 1px 2px #111; }
+.pv-hints strong { color:#f0f2f5; font-size:13px; }
+#pv-hint-text { white-space:pre-line; line-height:1.65; margin-top:5px; }
+#pv-hints-toggle { position:absolute; bottom:8px; right:18px; width:25px; }
+#pv-state { font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:160px; }
+#pv-view-extra { width:78px; font-size:11px; padding:1px; color:var(--text); background:#30343b; border:1px solid #454a53; }
+@media(max-width:1100px) { #pv-state { max-width:80px; } .pv-hints { max-width:210px; } }
+
+.pv-context { display:flex; gap:14px; padding:5px 6px; background:#282c31; flex:none; overflow-x:auto; }
+.pv-context .prow { display:flex; align-items:center; gap:5px; margin:0; flex:none; }
+.pv-context .pl { width:auto; font-size:11px; }
+.pv-context .pw { display:flex; width:auto; }
+.pv-context input[type=number] { width:70px; }
+.pv-context input[type=range], .pv-context .pbtn { display:none; }
+.pv-context select { max-width:120px; font-size:11px; }
+
+.pv-wrap:has(#pv-msg:not(.hidden)) .pv-hints { display:none; }

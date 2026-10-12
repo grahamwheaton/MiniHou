@@ -69,28 +69,34 @@
   <section id="preview" class="panel pane" aria-label="3D view">
       <div class="panel-title">
         <span>3D <span id="pv-node" class="muted"></span></span>
-        <span class="pv-opts">
+        <button id="pv-max" class="small" title="Maximize viewport (Ctrl+Space)">⛶</button>
+      </div>
+      <div class="pv-tools"><strong id="pv-state">View</strong>
+        <span id="pv-selinfo" class="muted small"></span>
+        <span class="spacer"></span>
+        <span class="pv-nav" role="group" aria-label="View">
+          <button data-view="front" title="Front (Numpad 1, Ctrl for back)">Front</button><button data-view="right" title="Right (Numpad 3, Ctrl for left)">Right</button><button data-view="top" title="Top (Numpad 7, Ctrl for bottom)">Top</button><select id="pv-view-extra" aria-label="More axis views"><option value="">More views…</option><option value="back">Back</option><option value="left">Left</option><option value="bottom">Bottom</option></select><button id="pv-ortho" title="Perspective / orthographic (Numpad 5)">Persp</button><button id="pv-frame-all" title="Frame all geometry">All</button><button id="pv-frame" title="Frame the selection, or everything (Numpad . / Home / double-click the view)">⌂</button>
+        </span>
+      </div>
+      <div id="pv-context" class="pv-context hidden" aria-label="Active node parameters"></div>
+      <div class="pv-stage">
+        <div class="pv-left-tools">
+        <span class="pv-modes pv-tool-strip" role="group" aria-label="Selection mode">
+          <button data-mode="view" class="on" title="Orbit only (default)">View</button><button data-mode="point" title="Select points (1)">Pts</button><button data-mode="edge" title="Select edges (2)">Edges</button><button data-mode="face" title="Select faces (3)">Faces</button><button data-mode="piece" title="Select whole connected pieces (4): drag the gizmo to move, rotate or scale them">Piece</button>
+        </span>
+        <span id="pv-xform" class="pv-nav hidden" role="group" aria-label="Handle tool">
+          <button data-tool="move" class="on" title="Move arrows (W)">Move</button><button data-tool="rotate" title="Rotation rings (E)">Rotate</button><button data-tool="scale" title="Scale handles (R)">Scale</button>
+        </span>
+        </div>
+        <div class="pv-wrap"><div id="pv-hints" class="pv-hints"><strong id="pv-hint-title">View</strong><div id="pv-hint-text"></div></div><canvas id="pv-canvas" aria-label="3D preview"></canvas><div id="pv-msg" class="muted hidden"></div></div>
+        <div class="pv-opts pv-display-strip" role="group" aria-label="Display options">
           <label class="small"><input type="checkbox" id="pv-shaded" checked> shaded</label>
           <label class="small"><input type="checkbox" id="pv-edges" checked> edges</label>
           <label class="small"><input type="checkbox" id="pv-points"> points</label>
           <label class="small" title="Draw each face's normal (from its winding) as a line from its centre"><input type="checkbox" id="pv-normals"> normals</label>
-          <button id="pv-max" class="small" title="Fill the window with this pane and back (Ctrl+Space over a pane)">⛶</button>
-        </span>
+        </div>
+        <button id="pv-hints-toggle" title="Show tool hints" aria-label="Show tool hints" aria-pressed="true">?</button>
       </div>
-      <div class="pv-tools">
-        <span class="pv-modes" role="group" aria-label="Selection mode">
-          <button data-mode="view" class="on" title="Orbit only (default)">View</button><button data-mode="point" title="Select points (1)">Pts</button><button data-mode="edge" title="Select edges (2)">Edges</button><button data-mode="face" title="Select faces (3)">Faces</button><button data-mode="piece" title="Select whole connected pieces (4): drag the gizmo to move, rotate or scale them">Piece</button>
-        </span>
-        <span id="pv-selinfo" class="muted small"></span>
-        <span id="pv-xform" class="pv-nav hidden" role="group" aria-label="Handle tool">
-          <button data-tool="move" class="on" title="Move arrows (W)">Move</button><button data-tool="rotate" title="Rotation rings (E)">Rotate</button><button data-tool="scale" title="Scale handles (R)">Scale</button>
-        </span>
-        <span class="spacer"></span>
-        <span class="pv-nav" role="group" aria-label="View">
-          <button data-view="front" title="Front (Numpad 1, Ctrl for back)">Front</button><button data-view="right" title="Right (Numpad 3, Ctrl for left)">Right</button><button data-view="top" title="Top (Numpad 7, Ctrl for bottom)">Top</button><button id="pv-ortho" title="Perspective / orthographic (Numpad 5)">Persp</button><button id="pv-frame" title="Frame the selection, or everything (Numpad . / Home / double-click the view)">⌂</button>
-        </span>
-      </div>
-      <div class="pv-wrap"><canvas id="pv-canvas" aria-label="3D preview"></canvas><div id="pv-msg" class="muted hidden"></div></div>
       <div id="pv-actions" class="pv-actions hidden"></div>
       <div id="pv-time" class="pv-time" role="group" aria-label="Timeline">
         <button id="tl-first" title="Go to the start frame (Shift+Left)" aria-label="Start">⏮</button>

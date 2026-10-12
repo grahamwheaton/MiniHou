@@ -521,6 +521,10 @@ window.MiniHouPreview = (() => {
       hsvg.replaceChildren(...kids);
     }
     function startHandleDrag(e, h) {
+      // Add/subtract selection must reach geometry even when a handle overlaps it.
+      if (sel.mode !== "view" && (e.shiftKey || e.ctrlKey || e.metaKey)) {
+        e.stopPropagation(); beginCanvasDrag(e); return;
+      }
       e.preventDefault(); e.stopPropagation();
       const cam = camera();
       if (!api.onHandleStart) return;
@@ -657,7 +661,7 @@ window.MiniHouPreview = (() => {
     marquee.className = "pv-marquee hidden";
     canvas.parentElement.append(marquee);
     let dragging = null;
-    canvas.addEventListener("pointerdown", (e) => {
+    function beginCanvasDrag(e) {
       canvas.setPointerCapture(e.pointerId);
       const r = canvas.getBoundingClientRect();
       const selecting = sel.mode !== "view" && e.button === 0 && !e.altKey && raw;
@@ -665,7 +669,8 @@ window.MiniHouPreview = (() => {
       dragging = { x: e.clientX, y: e.clientY, pan, select: !!selecting, x0: e.clientX - r.left, y0: e.clientY - r.top, moved: false,
         how: e.shiftKey ? "add" : (e.ctrlKey || e.metaKey) ? "subtract" : "replace" };
       e.preventDefault();
-    });
+    }
+    canvas.addEventListener("pointerdown", beginCanvasDrag);
     canvas.addEventListener("pointermove", (e) => {
       if (!dragging) return;
       if (dragging.select) {

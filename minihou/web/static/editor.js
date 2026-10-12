@@ -600,6 +600,8 @@
   const EXPOSABLE = new Set(["float", "int", "bool", "vec3"]);
 
   function renderParams(statusOnly) {
+    updateViewportHints();
+    updateViewportContext();
     const panel = $("#params");
     const ids = [...S.sel].filter((id) => nodeOf(id));
     document.body.classList.toggle("no-selection", ids.length === 0);
@@ -793,9 +795,8 @@
       window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
     });
   }
-  function syncParams(id) {
-    // Update values in place (keeps focus and an in-progress drag) when the same node's panel is showing.
-    const panel = $("#params");
+  function syncParams(id, panel = $("#params")) {
+    // Update values in place, keeping focus and in-progress drags.
     if (!id || !nodeOf(id)) return;
     const err = panel.querySelector('[data-role="err"]');
     if (err) { const m = nodeErrorText(id); err.textContent = m; err.style.display = m ? "" : "none"; }
@@ -950,6 +951,7 @@
   }
   function renderSelectionTools(s) {
     pvSelection = s;
+    updateViewportHints();
     const n = (s[SEL_KEY[s.mode]] || []).length;
     $("#pv-selinfo").textContent = s.mode === "view" ? "" : s.mode === "piece" ? `${n} face${n === 1 ? "" : "s"} in the selected pieces` : `${n} ${SEL_KEY[s.mode].replace(/s$/, "")}${n === 1 ? "" : "s"} selected`;
     document.querySelectorAll("#preview [data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === s.mode));
@@ -984,7 +986,32 @@
     $("#pv-xform").classList.toggle("hidden", !has);
     document.querySelectorAll("#pv-xform [data-tool]").forEach((b) => b.classList.toggle("on", b.dataset.tool === pv.tool));
   }
-  function setTool(t) { pv.setTool(t); updateToolButtons(); }
+  function updateViewportContext() {
+    const panel = $("#pv-context");
+    const ids = [...S.sel].filter((id) => nodeOf(id));
+    const id = ids.length === 1 ? ids[0] : "";
+    const key = id ? id + ":" + nodeOf(id).type : "";
+    if (panel.dataset.node !== key) {
+      panel.dataset.node = key;
+      const params = id ? typeOf(id).params.filter((p) => ["float", "int", "enum", "bool"].includes(p.kind) && p.ui !== "outgroup").slice(0, 4) : [];
+      panel.replaceChildren(...params.map((p) => paramRow(id, p)));
+      panel.classList.toggle("hidden", !params.length);
+    }
+    syncParams(id, panel);
+  }
+  function updateViewportHints() {
+    const state = $("#pv-state");
+    if (!state) return;
+    const id = [...S.sel].find((id) => nodeOf(id)), node = id && nodeOf(id);
+    const mode = pvSelection.mode;
+    const name = mode === "view" ? (node ? node.type + " · " + id : "View") : "Select " + ({ point: "points", edge: "edges", face: "faces", piece: "pieces" }[mode] || mode);
+    state.textContent = name;
+    $("#pv-hint-title").textContent = name;
+    $("#pv-hint-text").textContent = mode === "view"
+      ? "Drag: orbit · Middle/right drag: pan\nWheel: dolly · Double-click: frame all\nC: modeling tools · 1–4: component selection"
+      : "Click / drag box: select · Shift: add · Ctrl: remove\nAlt-drag / middle drag: orbit · Right drag: pan\nW / E / R: move / rotate / scale · C: modeling tools";
+  }
+  function setTool(t) { pv.setTool(t); updateToolButtons(); updateViewportHints(); }
   function toggleOrtho() {
     const on = pv.toggleOrtho();
     $("#pv-ortho").textContent = on ? "Ortho" : "Persp";
@@ -1106,6 +1133,12 @@
       $(id).checked = pv.opt[key];
       $(id).onchange = (e) => { pv.opt[key] = e.target.checked; pv.redraw(); };
     }
+    $("#pv-frame-all").onclick = () => pv.frameAll();
+    $("#pv-view-extra").onchange = (e) => { if (e.target.value) pv.viewAxis(e.target.value, false); e.target.value = ""; };
+    $("#pv-hints-toggle").onclick = (e) => {
+      const hidden = $("#pv-hints").classList.toggle("hidden");
+      e.currentTarget.setAttribute("aria-pressed", String(!hidden));
+    };
     $("#pv-frame").onclick = () => pv.frameSelection();
     document.querySelectorAll("#preview [data-view]").forEach((b) => { b.onclick = () => pv.viewAxis(b.dataset.view, false); });
     $("#pv-ortho").onclick = () => toggleOrtho();

@@ -183,14 +183,14 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_selector('.node[data-id="loop_end1"].selected')
         self.assertEqual(self.s.graph.nodes["loop_end1"].inputs, {"geo": "transform1", "begin": "loop_begin1"})
         self.page.locator("#params button", has_text="Display Loop End").click()
-        count = self.page.locator('.prow[data-param="iterations"] input[type=number]')
+        count = self.page.locator('#params .prow[data-param="iterations"] input[type=number]')
         count.fill("4")
         count.press("Enter")
         self.assertTrue(until(lambda: self.s.graph.get_param("loop_end1", "iterations") == 4))
         self.page.locator("#canvas").focus()
         self.page.keyboard.press("f")
         self.node("transform1").locator(".title").click()
-        number = self.page.locator('.prow[data-param="translate"] input[type=number]').first
+        number = self.page.locator('#params .prow[data-param="translate"] input[type=number]').first
         number.fill("0.5")
         number.press("Enter")
         self.assertTrue(until(lambda: self.s.graph.get_param("transform1", "translate")[0] == .5))
@@ -257,7 +257,7 @@ class EditorE2E(unittest.TestCase):
         self.node("hills").locator(".title").click()
         held = []
         self.page.route("**/api/edit", lambda route: held.append(route))
-        number = self.page.locator('.prow[data-param="frequency"] input[type=number]')
+        number = self.page.locator('#params .prow[data-param="frequency"] input[type=number]')
         number.fill("0.73")
         number.press("Enter")
         self.page.wait_for_timeout(100)
@@ -958,7 +958,7 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_selector('.node[data-id="m"]')
         self.node("m").locator(".title").click()
         self.page.wait_for_function("minihou.preview.tris === 24")
-        self.page.wait_for_function("minihou.preview.points === 16")
+        self.page.wait_for_function("minihou.preview.points === 16 && document.querySelector('#pv-node').innerText.includes('m')")
         from minihou import Evaluator
         self.merged = Evaluator().cook(self.s.graph, "m")
 
@@ -1206,7 +1206,7 @@ class EditorE2E(unittest.TestCase):
     def test_select_and_edit_a_parameter(self):
         self.node("hills").locator(".title").click()
         self.assertEqual(self.page.input_value("#params input.nid"), "hills")
-        num = self.page.locator('.prow[data-param="frequency"] input[type=number]')
+        num = self.page.locator('#params .prow[data-param="frequency"] input[type=number]')
         num.fill("0.5")
         num.press("Enter")
         self.assertTrue(until(lambda: self.s.graph.nodes["hills"].params.get("frequency") == 0.5))
@@ -1259,7 +1259,7 @@ class EditorE2E(unittest.TestCase):
 
     def test_wrangle_error_is_shown_on_the_node(self):
         self.node("ripple").locator(".title").click()
-        ta = self.page.locator('.prow[data-param="snippet"] textarea')
+        ta = self.page.locator('#params .prow[data-param="snippet"] textarea')
         ta.fill("@P.z = nope")
         ta.press("Control+Enter")
         self.page.wait_for_selector('.node[data-id="ripple"].error')
@@ -1272,7 +1272,7 @@ class EditorE2E(unittest.TestCase):
     def test_expose_toggle(self):
         self.node("ripple").locator(".title").click()
         self.node("spike_up").locator(".title").click()
-        self.page.locator('.prow[data-param="scale"] .expose').click()
+        self.page.locator('#params .prow[data-param="scale"] .expose').click()
         self.assertTrue(until(lambda: any(e.node == "spike_up" and e.param == "scale" for e in self.s.graph.exposed)))
 
     def test_edits_from_elsewhere_show_up_live(self):
@@ -1457,6 +1457,34 @@ class EditorE2E(unittest.TestCase):
 
     def view_angles(self):
         return self.page.evaluate("[minihou.preview.view.yaw, minihou.preview.view.pitch]")
+
+    def test_viewport_tool_strips_context_and_hints(self):
+        self.box_scene()
+        self.page.click('#preview [data-mode="edge"]')
+        self.assertEqual(self.page.locator('#pv-hint-title').inner_text(), 'Select edges')
+        self.page.click('#pv-hints-toggle')
+        self.assertFalse(self.page.locator('#pv-hints').is_visible())
+        self.page.click('#pv-hints-toggle')
+        self.page.select_option('#pv-view-extra', 'back')
+        self.page.wait_for_function('Math.abs(minihou.preview.view.yaw - Math.PI / 2) < 0.001')
+        self.page.locator('#pv-normals').check()
+        self.assertTrue(self.page.evaluate('minihou.preview.opt.normals'))
+        self.page.locator('#pv-normals').uncheck()
+        self.page.evaluate("async () => { await minihou.edit([{op:'insert',after:'b',type:'polybevel',params:{distance:0.1}}]); }")
+        self.node('polybevel1').click()
+        field = self.page.locator('#pv-context [data-param="distance"] input[type="number"]')
+        field.fill('0.23')
+        field.press('Tab')
+        self.assertTrue(until(lambda: self.s.graph.nodes['polybevel1'].params.get('distance') == 0.23))
+        self.page.wait_for_function("document.querySelector('#params [data-param=distance] input[type=number]').value === '0.23'")
+        field.focus()
+        field.fill('0.31')
+        self.page.wait_for_timeout(700)
+        self.assertEqual(field.input_value(), '0.31')
+        field.press('Tab')
+        self.assertTrue(until(lambda: self.s.graph.nodes['polybevel1'].params.get('distance') == 0.31))
+        self.page.click('#pv-frame-all')
+        self.page.screenshot(path=os.path.join(ROOT, 'build', 'validation', 'viewport-tool-strips.png'))
 
     def test_axis_views_ortho_gizmo_and_frame_selection(self):
         import math
