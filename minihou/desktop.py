@@ -55,7 +55,7 @@ def run(server, workspace):
             else:
                 return
             if not server.session.flush():
-                window.create_confirmation_dialog('MiniHou — save failed',
+                window.create_confirmation_dialog('MiniHou - save failed',
                     'Could not save your graph. Keep MiniHou open and check the workspace folder.')
                 return
             close_state["approved"] = True
