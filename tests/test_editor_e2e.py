@@ -618,6 +618,84 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: self.s.status()["ok"]))
         self.page.wait_for_function("minihou.preview.handleTips().length === 3")             # the arrows follow the moved result
 
+    def test_gizmo_drag_streams_preview_before_release(self):
+        self.handle_scene("transform", {"translate": [0, 1, 2]}, "h")
+        self.page.wait_for_timeout(350)  # finish the initial frame before measuring
+        self.page.evaluate("""() => {
+            window.dragFrames = [];
+            const pv = minihou.preview, original = pv.set.bind(pv);
+            pv.set = (...args) => { original(...args); dragFrames.push({t: performance.now(), bounds: pv.bounds()}); };
+            window.dragStart = performance.now();
+        }""")
+        tip = next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == "translate_x")
+        box = self.page.locator("#pv-canvas").bounding_box()
+        x, y = box["x"] + tip["tip"][0], box["y"] + tip["tip"][1]
+        self.page.mouse.move(x, y)
+        self.page.mouse.down()
+        try:
+            for step in range(1, 41):
+                self.page.mouse.move(x + tip["u"][0] * step * 2, y + tip["u"][1] * step * 2)
+                self.page.wait_for_timeout(25)
+            stats = self.page.evaluate("({frames: dragFrames.length, first_ms: dragFrames.length ? dragFrames[0].t - dragStart : null, duration_ms: performance.now() - dragStart})")
+        finally:
+            self.page.mouse.up()
+        print("Gizmo drag preview benchmark:", stats, flush=True)
+        self.assertGreaterEqual(stats["frames"], 3, "geometry must update during a continuous drag, not only after release")
+        expected = 80 / tip["ppu"]
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes["h"].params["translate"][0] - expected) < 0.15))
+        self.page.wait_for_function("expected => Math.abs(minihou.preview.bounds()[0][0] - (expected - 1)) < 0.15", arg=expected)
+
+    def test_gizmo_preview_slow_cooks_do_not_overlap(self):
+        import threading
+        original = self.s.preview
+        lock = threading.Lock()
+        active = peak = 0
+
+        def slow_preview(node):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            try:
+                time.sleep(0.12)
+                return original(node)
+            finally:
+                with lock:
+                    active -= 1
+
+        self.s.preview = slow_preview
+        self.test_gizmo_drag_streams_preview_before_release()
+        self.assertEqual(peak, 1, "slow cooks must not accumulate parallel preview requests")
+
+    def test_preview_discards_result_after_selecting_another_node(self):
+        import threading
+        self.handle_scene("transform", {"translate": [0, 1, 2]}, "h")
+        self.page.wait_for_timeout(350)
+        started, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        original = self.s.preview
+
+        def delayed_preview(node):
+            result = original(node)
+            if node == "h":
+                started.set()
+                release.wait(5)
+            return result
+
+        self.s.preview = delayed_preview
+        self.page.evaluate("minihou.edit([{op: 'set', id: 'h', params: {translate: [3, 1, 2]}}])")
+        self.page.wait_for_timeout(100)
+        self.assertTrue(started.is_set())
+        self.node("b").locator(".title").click()
+        self.page.evaluate("""() => {
+            window.previewNodes = [];
+            const pv = minihou.preview, original = pv.set.bind(pv);
+            pv.set = (...args) => { previewNodes.push(args[0].node); return original(...args); };
+        }""")
+        release.set()
+        self.page.wait_for_function("window.previewNodes.includes('b')")
+        self.assertNotIn("h", self.page.evaluate("window.previewNodes"))
+
     def test_dragging_an_extrude_arrow_clamps_and_works_for_plain_numbers(self):
         from minihou import Evaluator
         graph = Evaluator().cook(self.s.graph) if False else None

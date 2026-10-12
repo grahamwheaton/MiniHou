@@ -860,27 +860,43 @@
   // ---------------------------------------------------------------- 3-D preview of the selected (or display) node
   const pvMsg = (text) => { const m = $("#pv-msg"); m.textContent = text || ""; m.classList.toggle("hidden", !text); };
   const pv = window.MiniHouPreview ? window.MiniHouPreview.create($("#pv-canvas"), pvMsg) : null;
-  let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false;
+  let pvTimer = null, pvKey = null, pvNode = null, pvPath = null, pvOver = false;
+  let pvInFlight = false, pvDirty = false;
   function schedulePreview() {
     if (!pv || !pv.ok) return;
-    clearTimeout(pvTimer);
-    pvTimer = setTimeout(runPreview, PB.playing ? 0 : 200);
+    // A trailing debounce starves the viewport throughout a continuous gizmo drag.
+    // Keep the first deadline, and at most one geometry request in flight. Changes
+    // during a slow cook collapse into one request for the latest state afterwards.
+    pvDirty = true;
+    if (pvTimer === null && !pvInFlight) pvTimer = setTimeout(runPreview, PB.playing ? 0 : 33);
+  }
+  function previewTarget() {
+    const ids = [...S.sel].filter((id) => nodeOf(id));
+    return ids.length === 1 ? ids[0] : displayNode();
   }
   async function runPreview() {
-    const ids = [...S.sel].filter((id) => nodeOf(id));
-    const node = ids.length === 1 ? ids[0] : displayNode();
+    pvTimer = null; pvDirty = false; pvInFlight = true;
+    try { await loadPreview(); }
+    finally {
+      pvInFlight = false;
+      if (pvDirty) schedulePreview();
+    }
+  }
+  async function loadPreview() {
+    const node = previewTarget(), documentId = S.documentId;
     $("#pv-node").textContent = node ? "· " + node : "";
     if (!node) { pv.clear(); pvMsg(""); pvKey = null; return; }
-    const key = `${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}`;
+    const key = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}`;
     if (key === pvKey) return;
     pvKey = key;
-    const seq = ++pvSeq;
     let buf;
     try {
       const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node }) });
       buf = await r.arrayBuffer();
     } catch (e) { pvKey = null; return; }
-    if (seq !== pvSeq) return;
+    // A completed frame of the same node is useful even if a newer edit arrived.
+    // Never install geometry from the previous selection or document, though.
+    if (documentId !== S.documentId || node !== previewTarget()) { pvKey = null; return; }
     const { head, arrays } = window.MiniHouPreview.parse(buf);
     if (!arrays) {
       pv.clear();
