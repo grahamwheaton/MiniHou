@@ -824,6 +824,16 @@ curves and points with attributes as primvars and groups as GeomSubsets; the gra
 reads USD files from other tools (transforms, Y-up, indexed primvars, subsets) and a MiniHou export comes back exactly. Needs
 `pip install usd-core`. Graphs themselves stay JSON. Details and limits: [docs/USD.md](docs/USD.md).
 
+## Disk cache (reopen big scenes quickly)
+
+`minihou serve graph.json --disk-cache` (or `MINIHOU_DISK_CACHE=1`, or `minihou app --disk-cache`) keeps expensive results in
+`.minihou_cache` (4 GB cap, `--disk-cache-gb`, `--disk-cache DIR` to put it elsewhere). The in-memory cache is keyed by a hash of
+everything a result depends on, and that key is also the file name, so a restarted engine finds its earlier results and skips
+cooking them and everything upstream. Measured: a sphere remeshed at 0.03 voxels cooks in 4.5 s; after a restart the same graph is
+back in 48 ms. Only results that took at least 100 ms and read back in well under half that time are kept; anything that depends on
+a Blender object, a simulation or fed-in system geometry is never stored; the status line and `engine_status` show hits and size.
+Off by default. Details: [docs/PROXY.md](docs/PROXY.md#disk-cache).
+
 ## Very large scenes (proxies)
 
 The 3-D view draws any geometry within a budget (250k triangles / 500k points) by clustering it, so the whole shape stays

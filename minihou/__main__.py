@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import logging
 import sys
 import time
@@ -78,6 +79,18 @@ def _cmd_cook(args) -> int:
     return 0
 
 
+def _disk_cache(args):
+    """The disk cache asked for with --disk-cache (or MINIHOU_DISK_CACHE), else None."""
+    want = getattr(args, "disk_cache", None)
+    if not want:
+        return None
+    from pathlib import Path
+    from .diskcache import DiskCache
+    root = Path(getattr(args, "root", None) or os.getcwd())
+    folder = root / ".minihou_cache" if want in ("auto", "1", "true", "yes") else Path(want)
+    return DiskCache(folder, max_bytes=int(float(getattr(args, "disk_cache_gb", 4.0)) * 1024 ** 3))
+
+
 def _cmd_serve(args) -> int:
     from .link.server import LinkServer
     from .link.session import Session
@@ -95,7 +108,10 @@ def _cmd_serve(args) -> int:
     if python_node.allowed():
         print("python nodes: ENABLED (graphs can run Python code)", flush=True)
     accel.warmup_async()          # compile/load kernels in the background; a cook that arrives early just waits
-    session = Session(g, cache_bytes=int(args.cache_mb * 1024 * 1024))
+    disk = _disk_cache(args)
+    session = Session(g, cache_bytes=int(args.cache_mb * 1024 * 1024), disk_cache=disk)
+    if disk is not None:
+        print(f"disk cache: {disk.folder} (up to {disk.max_bytes / 1024 ** 3:g} GB)", flush=True)
     session.attach_library(library)
     server = LinkServer(session, args.host, args.port)
     web = None
@@ -159,6 +175,10 @@ def main(argv=None) -> int:
     s.add_argument("--nodes", action="append", metavar="DIR",
                    help="node library folder, hot-reloaded (repeatable; default: <root>/nodes)")
     s.add_argument("--cache-mb", type=float, default=2048)
+    s.add_argument("--disk-cache", nargs="?", const="auto", default=os.environ.get("MINIHOU_DISK_CACHE"), metavar="DIR",
+                   help="keep expensive results on disk so a restart (or reopening a big scene) does not cook them again "
+                        "(DIR default: .minihou_cache in the workspace)")
+    s.add_argument("--disk-cache-gb", type=float, default=4.0, help="size cap of the disk cache")
     s.add_argument("--allow-python", action="store_true",
                    help="let `python` nodes run the code stored in graphs (off by default: only for graphs you trust; "
                         "also MINIHOU_PYTHON_NODES=1)")

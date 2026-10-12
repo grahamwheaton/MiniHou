@@ -378,6 +378,10 @@ class McpServer:
                  f"Editor (for the user): {self.engine.url}",
                  "Python nodes: " + ("enabled (the user allowed them)" if st["engine"].get("python_nodes")
                                     else "off (the engine was not started with --allow-python)")]
+        dc = (st.get("status") or {}).get("disk_cache")
+        if dc:
+            lines.append(f"Disk cache: {dc['bytes'] / 1e6:,.0f} MB of {dc['max_bytes'] / 1e9:g} GB in {dc['folder']}; {dc['hits']} hits, "
+                         f"{dc['writes']} results written")
         if lib:
             lines.append(f"Node library: {sum(len(f['nodes']) for f in lib['files'])} custom node type(s) from "
                          f"{len(lib['files'])} file(s)" + "".join(f"\n  ERROR in {f['file']}: {f['error']}" for f in bad))

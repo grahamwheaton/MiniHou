@@ -9,3 +9,4 @@ gui_test_output/
 .mcp.json
 *.whl
 *.tar.gz
+.minihou_cache/
