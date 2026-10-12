@@ -38,11 +38,11 @@
 
 <div id="blender-bar" class="hidden" role="region" aria-label="Blender">
   <span class="bb-text" id="bb-text">Blender is not connected.</span>
-  <a id="bb-zip" class="bb-chip" href="/addon/minihou_link.zip" download="minihou_link.zip" draggable="true"
-     title="Drag this onto a Blender window to install the add-on (Blender 4.2+), or click to download the zip">⠿ minihou_link.zip</a>
   <select id="bb-pick" class="hidden" aria-label="Blender installation"></select>
   <button id="bb-install" title="Install and enable the add-on in the chosen Blender (starts it once in the background)">Install add-on</button>
   <button id="bb-open" title="Start Blender with the add-on already connected to this engine">Open Blender</button>
+  <a id="bb-zip" class="bb-chip" href="/addon/minihou_link.zip" download="minihou_link.zip" draggable="false"
+     title="Download, then use Blender Preferences > Add-ons > Install from Disk">Download ZIP</a>
   <span id="bb-msg" class="muted small"></span>
   <span class="spacer"></span>
   <button id="bb-close" title="Hide (click the Blender indicator in the top bar to bring it back)" aria-label="Hide">✕</button>
@@ -57,6 +57,7 @@
       <div id="nodes"></div>
     </div>
     <svg id="overlay"></svg>
+    <nav id="crumbs" class="hidden" aria-label="Graph path"></nav>
     <div id="boxsel" class="hidden"></div>
     <div id="empty-hint" class="hidden">Press <kbd>Tab</kbd> or double-click to add a node</div>
     <div id="offline" class="hidden">Engine offline — reconnecting… <small>(start it with <code>python -m minihou serve graph.json</code>)</small></div>
@@ -68,28 +69,49 @@
   <section id="preview" class="panel pane" aria-label="3D view">
       <div class="panel-title">
         <span>3D <span id="pv-node" class="muted"></span></span>
-        <span class="pv-opts">
-          <label class="small"><input type="checkbox" id="pv-shaded" checked> shaded</label>
-          <label class="small"><input type="checkbox" id="pv-edges" checked> edges</label>
-          <label class="small"><input type="checkbox" id="pv-points"> points</label>
-          <button id="pv-max" class="small" title="Fill the window with this pane and back (Ctrl+Space over a pane)">⛶</button>
+        <button id="pv-max" class="small" title="Maximize viewport (Ctrl+Space)">⛶</button>
+      </div>
+      <div class="pv-tools"><strong id="pv-state">View</strong>
+        <span id="pv-selinfo" class="muted small"></span>
+        <span class="spacer"></span>
+        <span class="pv-nav" role="group" aria-label="View">
+          <button data-view="front" title="Front (Numpad 1, Ctrl for back)">Front</button><button data-view="right" title="Right (Numpad 3, Ctrl for left)">Right</button><button data-view="top" title="Top (Numpad 7, Ctrl for bottom)">Top</button><select id="pv-view-extra" aria-label="More axis views"><option value="">More views…</option><option value="back">Back</option><option value="left">Left</option><option value="bottom">Bottom</option></select><button id="pv-ortho" title="Perspective / orthographic (Numpad 5)">Persp</button><button id="pv-frame-all" title="Frame all geometry">All</button><button id="pv-frame" title="Frame the selection, or everything (Numpad . / Home / double-click the view)">⌂</button>
         </span>
       </div>
-      <div class="pv-tools">
-        <span class="pv-modes" role="group" aria-label="Selection mode">
-          <button data-mode="view" class="on" title="Orbit only (default)">View</button><button data-mode="point" title="Select points (1)">Pts</button><button data-mode="edge" title="Select edges (2)">Edges</button><button data-mode="face" title="Select faces (3)">Faces</button>
+      <div id="pv-context" class="pv-context hidden" aria-label="Active node parameters"></div>
+      <div class="pv-stage">
+        <div class="pv-left-tools">
+        <span class="pv-modes pv-tool-strip" role="group" aria-label="Selection mode">
+          <button data-mode="view" class="on" title="Orbit only (default)">View</button><button data-mode="point" title="Select points (1)">Pts</button><button data-mode="edge" title="Select edges (2)">Edges</button><button data-mode="face" title="Select faces (3)">Faces</button><button data-mode="piece" title="Select whole connected pieces (4): drag the gizmo to move, rotate or scale them">Piece</button>
         </span>
-        <span id="pv-selinfo" class="muted small"></span>
         <span id="pv-xform" class="pv-nav hidden" role="group" aria-label="Handle tool">
           <button data-tool="move" class="on" title="Move arrows (W)">Move</button><button data-tool="rotate" title="Rotation rings (E)">Rotate</button><button data-tool="scale" title="Scale handles (R)">Scale</button>
         </span>
-        <span class="spacer"></span>
-        <span class="pv-nav" role="group" aria-label="View">
-          <button data-view="front" title="Front (Numpad 1, Ctrl for back)">Front</button><button data-view="right" title="Right (Numpad 3, Ctrl for left)">Right</button><button data-view="top" title="Top (Numpad 7, Ctrl for bottom)">Top</button><button id="pv-ortho" title="Perspective / orthographic (Numpad 5)">Persp</button><button id="pv-frame" title="Frame the selection, or everything (Numpad . / Home / double-click the view)">⌂</button>
-        </span>
+        </div>
+        <div class="pv-wrap"><div id="pv-hints" class="pv-hints"><strong id="pv-hint-title">View</strong><div id="pv-hint-text"></div></div><canvas id="pv-canvas" aria-label="3D preview"></canvas><div id="pv-msg" class="muted hidden"></div></div>
+        <div class="pv-opts pv-display-strip" role="group" aria-label="Display options">
+          <label class="small"><input type="checkbox" id="pv-shaded" checked> shaded</label>
+          <label class="small"><input type="checkbox" id="pv-edges" checked> edges</label>
+          <label class="small"><input type="checkbox" id="pv-points"> points</label>
+          <label class="small" title="Draw each face's normal (from its winding) as a line from its centre"><input type="checkbox" id="pv-normals"> normals</label>
+        </div>
+        <button id="pv-hints-toggle" title="Show tool hints" aria-label="Show tool hints" aria-pressed="true">?</button>
       </div>
-      <div class="pv-wrap"><canvas id="pv-canvas" aria-label="3D preview"></canvas><div id="pv-msg" class="muted hidden"></div></div>
       <div id="pv-actions" class="pv-actions hidden"></div>
+      <div id="pv-time" class="pv-time" role="group" aria-label="Timeline">
+        <button id="tl-first" title="Go to the start frame (Shift+Left)" aria-label="Start">⏮</button>
+        <button id="tl-back" title="Previous frame (Left)" aria-label="Previous frame">◂</button>
+        <button id="tl-play" class="play" title="Play / pause (Space over the view)" aria-label="Play">▶</button>
+        <button id="tl-next" title="Next frame (Right)" aria-label="Next frame">▸</button>
+        <button id="tl-last" title="Go to the end frame (Shift+Right)" aria-label="End">⏭</button>
+        <input id="tl-slider" type="range" min="1" max="96" step="1" value="1" aria-label="Timeline">
+        <input id="tl-frame" type="number" step="1" value="1" title="Current frame" aria-label="Frame">
+        <span class="tl-range" title="Playback range and speed">
+          <input id="tl-start" type="number" step="1" value="1" aria-label="Start frame"> – <input id="tl-end" type="number" step="1" value="96" aria-label="End frame">
+          <input id="tl-fps" type="number" step="1" min="1" max="240" value="24" aria-label="Frames per second"><span class="muted small">fps</span>
+        </span>
+        <button id="tl-loop" class="on" title="Loop at the end" aria-label="Loop">⟲</button>
+      </div>
     </section>
   </div>
 
@@ -127,10 +149,14 @@
     <tr><td>blue bar on a node</td><td>display flag: what Blender shows</td></tr>
     <tr><td>drag background / middle mouse</td><td>pan; wheel zooms; <kbd>Shift</kbd>-drag box-selects</td></tr>
     <tr><td><kbd>F</kbd> / <kbd>L</kbd></td><td>frame selection (or all) / tidy the layout</td></tr>
-    <tr><td>3-D view: <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> / <kbd>Esc</kbd></td><td>select points / edges / faces (click or drag a box, <kbd>Shift</kbd> adds, <kbd>Ctrl</kbd> removes; <kbd>Alt</kbd>-drag or middle mouse orbits) / back to view. The buttons under the view add a node after the one you are looking at (Bevel for edges, Extrude, Inset, Delete, Group for faces...)</td></tr>
+    <tr><td>3-D view: <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> / <kbd>Esc</kbd></td><td>select points / edges / faces / whole pieces (click or drag a box, <kbd>Shift</kbd> adds, <kbd>Ctrl</kbd> removes; <kbd>Alt</kbd>-drag or middle mouse orbits) / back to view. The buttons under the view add a node after the one you are looking at (Bevel for edges, Extrude, Inset, Delete, Group for faces...)</td></tr>
+    <tr><td>timeline (under the 3-D view)</td><td>▶ plays the graph in real time between the start and end frames (frames are skipped, never queued, if a cook is slower than the frame rate); <kbd>Space</kbd> plays or pauses, <kbd>←</kbd> <kbd>→</kbd> step, <kbd>Shift</kbd>+arrow jumps to the ends, ⟲ loops. Blender's own timeline still drives the frame when it is connected</td></tr>
     <tr><td>3-D view navigation</td><td>drag orbits, <kbd>Shift</kbd>-drag / right / middle mouse pans, wheel zooms; the axis gizmo (top right) or <kbd>Numpad 1</kbd> <kbd>3</kbd> <kbd>7</kbd> (<kbd>Ctrl</kbd>: opposite side) snap to front / right / top; <kbd>Numpad 5</kbd> perspective or orthographic; <kbd>Numpad .</kbd> / <kbd>Home</kbd> frame the selection or everything</td></tr>
+    <tr><td><kbd>C</kbd> (pie menu)</td><td>Houdini's modelling tools in a pie at the pointer, over the graph or the 3-D view: <b>Adjust</b> (top), <b>Deform</b>, <b>Polygons</b>, <b>Group</b>, <b>Create</b>, <b>Build</b>, <b>Edges</b>, <b>Modify</b>, each with a page of tools and a <b>»</b> for more. Hold <kbd>C</kbd>, flick towards a slot and let go; or tap <kbd>C</kbd> and click (<kbd>1</kbd>-<kbd>8</kbd> pick a slot, the middle goes back, <kbd>Esc</kbd> closes). A tool adds its node after the one you are looking at, already filled in from the points, edges or faces you selected</td></tr>
+    <tr><td>moving a selection</td><td>whatever you select (points, edges, faces, pieces) shows a <b>Move / Rotate / Scale</b> gizmo at its centre; the first drag adds a <b>transform</b> node after the viewed node (its group is the selected points, its pivot the centre), later drags on the same selection edit that node</td></tr>
     <tr><td>handles in the 3-D view</td><td>the node you look at can show arrows to drag; a <b>transform</b> has <b>Move / Rotate / Scale</b> tools (<kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd> with the pointer over the view and nothing selected): move arrows, one ring per rotation axis (drag around it), scale cubes per axis and a square for uniform scale</td></tr>
     <tr><td>layout</td><td>drag the dividers between the graph, the 3-D view and the parameter panel; <b>Graph / Split / 3D</b> set the balance, <b>⇆</b> stacks or aligns, <b>⇄</b> swaps, <b>▤</b> hides the panel; <kbd>Ctrl+Space</kbd> over a pane fills the window with it (again to go back). Saved in this browser.</td></tr>
+    <tr><td>double-click a group</td><td>open the graph inside a group (system) node; the path at the top left of the graph shows where you are (click a name to go back out, <kbd>Alt</kbd>+<kbd>Up</kbd> goes up one level)</td></tr>
     <tr><td><kbd>O</kbd></td><td>network box around the selected nodes: drag its title to move it with them, its corner to resize, double-click the title to rename, the dot to change colour</td></tr>
     <tr><td><kbd>Delete</kbd> / <kbd>Ctrl+D</kbd> / <kbd>Ctrl+A</kbd></td><td>delete / duplicate / select all</td></tr>
     <tr><td><kbd>Ctrl+C</kbd> / <kbd>Ctrl+X</kbd> / <kbd>Ctrl+V</kbd></td><td>copy / cut / paste nodes (also into another graph or editor window)</td></tr>
@@ -140,6 +166,7 @@
   <p class="muted">Edits are saved to the graph file and show up live in Blender and in other editors.</p>
 </div>
 
+<script src="/static/pie.js"></script>
 <script src="/static/preview.js"></script>
 <script src="/static/editor.js"></script>
 </body>

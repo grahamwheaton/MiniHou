@@ -220,6 +220,19 @@ def _sync_usage_chain(ng, params: List[dict], ids: Dict[str, str]) -> None:
     """
     nodes = {n.bl_idname: n for n in ng.nodes}
     gin, gout = nodes["NodeGroupInput"], nodes["NodeGroupOutput"]
+    params = list(params)
+    ids = dict(ids)
+    # Reference-only comparison is available from Blender 5.2. Older versions
+    # must not evaluate object geometry merely to mark a socket as used.
+    object_ids = ({item.identifier for item in _sockets(ng, "INPUT") if item.socket_type == "NodeSocketObject"}
+                  if bpy.app.version >= (5, 2, 0) else set())
+    compare_prefix = "__MiniHou_object_usage_"
+    for node in list(ng.nodes):
+        if node.name.startswith(compare_prefix) and node.name[len(compare_prefix):] not in object_ids:
+            ng.nodes.remove(node)
+    for identifier in sorted(object_ids):
+        params.append({"name": identifier, "kind": "bool"})
+        ids[identifier] = identifier
     wanted = [USE_NODE_PREFIX + ids[p["name"]] for p in params]
     for n in [n for n in ng.nodes if n.name.startswith(USE_NODE_PREFIX)]:
         if n.name not in wanted:
@@ -243,6 +256,16 @@ def _sync_usage_chain(ng, params: List[dict], ids: Dict[str, str]) -> None:
         if tuple(node.location) != loc:
             node.location = loc
         src = next(o for o in gin.outputs if o.identifier == ids[p["name"]])
+        if src.identifier in object_ids:
+            compare = ng.nodes.get(compare_prefix + src.identifier)
+            if compare is None:
+                compare = ng.nodes.new("FunctionNodeCompare")
+                compare.name = compare_prefix + src.identifier
+                compare.data_type = "OBJECT"
+                compare.operation = "EQUAL"
+            if not compare.inputs["A"].is_linked:
+                ng.links.new(src, compare.inputs["A"])
+            src = compare.outputs["Result"]
         value_in = node.inputs["Value"]
         if not (value_in.is_linked and value_in.links[0].from_socket == src):
             ng.links.new(src, value_in)
@@ -421,13 +444,17 @@ def input_data_path(mod, ident: str) -> str:
 def write_values(mod, ng, params: List[dict], values: Dict[str, object]) -> None:
     assert_main_thread()
     m = mapping(ng)
+    changed = False
     for p in params:
         ident = m.get(p["name"])
         if ident is None or p["name"] not in values or not has_input(mod, ident):
             continue
         v = values[p["name"]]
-        set_input(mod, ident, tuple(v) if p["kind"] == "vec3" else v)
-    mod.id_data.update_tag()
+        if not same_value(canonical(p["kind"], get_input(mod, ident)), v):
+            set_input(mod, ident, tuple(v) if p["kind"] == "vec3" else v)
+            changed = True
+    if changed:
+        mod.id_data.update_tag()
 
 
 def read_values(mod, ng, params: List[dict]) -> Dict[str, object]:
@@ -440,3 +467,16 @@ def read_values(mod, ng, params: List[dict]) -> Dict[str, object]:
             continue
         out[p["name"]] = canonical(p["kind"], get_input(mod, ident))
     return out
+
+
+def same_value(a, b):
+    """Compare using Blender's storage precision, including vector components."""
+    import struct
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(same_value(x, y) for x, y in zip(a, b))
+    if isinstance(a, float) or isinstance(b, float):
+        try:
+            return struct.pack("f", a) == struct.pack("f", b)
+        except (OverflowError, TypeError):
+            return a == b
+    return a == b

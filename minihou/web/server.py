@@ -112,6 +112,7 @@ class WebServer:
                  root=None, bind_retry_seconds: float = 3.0):
         self.session, self.host, self.port, self.link = session, host, port, link
         self.root = Path(root or os.getcwd()).resolve()
+        session.editor_root = self.root
         self.bind_retry_seconds = bind_retry_seconds
         self._httpd: Optional[_HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -361,6 +362,9 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._body()
         app, s = self.app, self.app.session
         origin = str(body.get("origin") or "api")[:32]
+        if path == "/api/desktop/activate":
+            activate = getattr(app, "desktop_activate", None)
+            return self._json({"desktop": bool(activate and activate(body))})
         if path == "/api/edit":
             ops = body.get("ops")
             if not isinstance(ops, list):

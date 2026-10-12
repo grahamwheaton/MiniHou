@@ -27,10 +27,13 @@ NAME = "MiniHou"
 
 def build(with_accel: bool) -> Path:
     sep = os.pathsep
-    cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--console", "--name", NAME,
+    cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--windowed", "--name", NAME,
            "--distpath", str(DIST), "--workpath", str(ROOT / "build" / "pyinstaller"), "--specpath", str(ROOT / "build"),
            "--paths", str(ROOT),
            "--collect-submodules", "minihou",
+           "--collect-all", "webview",
+           "--icon", str(ROOT / "minihou/assets/minihou.ico"),
+           "--add-data", f"{ROOT / 'minihou/assets'}{sep}minihou/assets",
            "--add-data", f"{ROOT / 'minihou' / 'web' / 'static'}{sep}minihou/web/static",
            "--add-data", f"{ROOT / 'blender_addon' / 'minihou_link'}{sep}blender_addon/minihou_link",
            "--add-data", f"{ROOT / 'examples' / 'graphs'}{sep}examples/graphs"]

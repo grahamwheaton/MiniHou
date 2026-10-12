@@ -134,6 +134,8 @@ class Runtime:
 
     def tick(self) -> float:
         """One main-thread step. Returns the delay until the next step."""
+        if mesh_writer.modal_ui_active():
+            return IDLE_INTERVAL
         if self._in_tick:
             return IDLE_INTERVAL
         self._in_tick = True

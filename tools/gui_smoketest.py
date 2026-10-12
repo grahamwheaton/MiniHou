@@ -41,6 +41,12 @@ try:
 except Exception:  # noqa: BLE001
     pass
 minihou_link.register()
+# This smoke test deliberately exercises the optional legacy sidebar.
+addon_preferences = bpy.context.preferences.addons.get("minihou_link")
+if addon_preferences is None:
+    addon_preferences = bpy.context.preferences.addons.new()
+    addon_preferences.module = "minihou_link"
+addon_preferences.preferences.show_sidebar = True
 # No startup splash: it is shown after --python scripts run, and while it is open Blender does not draw the sidebar.
 # (Linux closed it with an X11 Escape key; on Windows it stayed open and the sidebar never drew.) --factory-startup
 # never saves preferences, so this does not stick.

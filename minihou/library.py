@@ -61,11 +61,11 @@ saving and re-loaded on every save; errors are reported with file and line, and 
     from minihou.sdk import node, Float, Int, Bool, Vec3, Enum, Str, Input
     from minihou.geometry import Geometry, Topology
 
-    @node("twist", inputs=["geo"], category="deform", params=[
+    @node("twist_height", inputs=["geo"], category="deform", params=[
         Float("angle", 90.0, soft_min=-360, soft_max=360, doc="Degrees of twist over the height"),
         Vec3("axis_center", (0, 0, 0)),
     ])
-    def twist(geo, angle, axis_center):
+    def twist_height(geo, angle, axis_center):
         \"\"\"Twist points around Z, proportional to height.\"\"\"
         out = geo.copy()                      # shallow copy; untouched arrays stay shared (cheap, not re-sent)
         P = geo.P.astype(np.float64)          # (n, 3) float32, read-only: never modify inputs in place
@@ -81,6 +81,14 @@ Rules
 * Params: Float/Int(name, default, min=, max=, soft_min=, soft_max=, doc=), Bool, Vec3, Enum(name, choices), Str(name,
   default, kind="code"). Float/Int/Bool/Vec3 params can be exposed to Blender.
 * Node names: lower_case, unique, not an existing type. Category is free text (shown in the Tab menu).
+* Output groups (optional): `from minihou.outgroups import OutGroup, OutGroups`; `OUT = OutGroups(OutGroup("top", "Top Polygons", "toppolys", "prim"))`,
+  `params=[..., *OUT.params()]`, a `**og` argument, and `OUT.write(result, og, "top", bool_mask_or_function)`: a checkbox + name per group in the
+  editor, prim / point / edge domains (edge masks over `topo.edges(result)`, or `outgroups.edge_mask(result, point_pairs)`).
+* Viewport handles (optional): `@node(..., handles=[Handle("height", axis="z", at="origin", reach=True)])` draws a draggable
+  arrow in the editor's 3-D view while the node is selected and writes the parameter back. `Handle(param, kind="arrow" | "ring" |
+  "scale", axis="x"/"y"/"z"/"-x"/vector/"@vec3_param", at="center"/"origin"/"top"/"bottom"/vector/"@vec3_param", comp=, scale=,
+  reach=, min=, max=)`: an arrow's `scale` is parameter units per world unit dragged, `reach=True` puts its root at
+  `at + axis * value / scale` so it rides on the dimension it edits, a ring edits an angle in degrees, an Int parameter moves in whole steps.
 
 Geometry API
 * geo.P -> (n, 3) float32 positions; geo.npoints, geo.nprims, geo.nvertices

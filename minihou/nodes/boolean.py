@@ -3,7 +3,8 @@
 import numpy as np
 
 from .. import boolean as BL
-from .. import groups
+from .. import groups, topo
+from ..outgroups import OutGroup, OutGroups
 from ..sdk import Enum, node
 from . import _build as B
 from .model import compact_points
@@ -71,10 +72,20 @@ def _combine(parts, sizes):
     return {n: _concat_table(parts, sizes, n) for n in names}
 
 
+OUT = OutGroups(
+    OutGroup("from_a", "Faces from A", "from_a", "prim", default=True, doc="The result's faces that came from input A"),
+    OutGroup("from_b", "Faces from B", "from_b", "prim", default=True, doc="The result's faces that came from input B"),
+    OutGroup("seam", "Intersection Edges", "intersection", "edge",
+             doc="The edges where the two inputs meet: where a face from A touches a face from B"),
+    OutGroup("seampoints", "Intersection Points", "intersectionpoints", "point", doc="The points on those intersection edges"),
+)
+
+
 @node("boolean", inputs=["a", "b"], category="model", params=[
     Enum("operation", ["union", "subtract", "intersect"], doc="subtract: A minus B"),
+    *OUT.params(),
 ])
-def boolean(a, b, operation):
+def boolean(a, b, operation, **og):
     """Exact boolean of two closed polygon meshes (Houdini's Boolean). The result is watertight; faces keep their
     attributes (vertex attributes such as uv are interpolated across cuts), cut points blend point attributes, and
     faces from each input are in groups ``from_a`` / ``from_b``. Inputs must be closed and consistently wound."""
@@ -164,12 +175,31 @@ def boolean(a, b, operation):
     prim = _combine(parts_prim, [len(x) for x in parts_size])
     side = np.concatenate(part_side)
     out = B.make(point["P"], np.concatenate(parts_v), B.offsets_from_sizes(sizes_o), point, vert, prim, a.detail)
-    out = groups.write(out, "prim", "from_a", side == 0)
-    out = groups.write(out, "prim", "from_b", side == 1)
+    out = OUT.write(out, og, "from_a", side == 0)
+    out = OUT.write(out, og, "from_b", side == 1)
+    if OUT.any_enabled(og, "seam", "seampoints"):
+        seam = _seam_edges(out, side)
+        out = OUT.write(out, og, "seam", seam)
+        e = topo.edges(out)
+        pts = np.zeros(out.npoints, bool)
+        pts[e.points[seam].ravel()] = True
+        out = OUT.write(out, og, "seampoints", pts)
     for table in (out.point, out.vertex, out.prim):
         if "N" in table:
             del table["N"]
     return compact_points(out)
+
+
+def _seam_edges(out, side):
+    """Bool per derived edge: shared by a face from A and a face from B."""
+    e = topo.edges(out)
+    pv = topo.prim_of_vertex(out)
+    ok = e.of_vertex >= 0
+    from_b = (side == 1)[pv] & ok
+    from_a = (side == 0)[pv] & ok
+    nb = np.bincount(e.of_vertex[from_b], minlength=len(e.points))
+    na = np.bincount(e.of_vertex[from_a], minlength=len(e.points))
+    return (na > 0) & (nb > 0)
 
 
 def _planar(geo):

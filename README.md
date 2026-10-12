@@ -137,13 +137,11 @@ stack modifier; existing generator graphs continue to work through the proxy. `b
 graphs to prevent feeding the object's final evaluated output back into its own stack.
 
 Each modifier stores its own graph snapshot, parameters and identity in the blend file. Duplicated objects/modifiers
-receive new identities and private caches on the next update. Edit the graph template in the external browser and click
-**Reload Graph** on an instance to adopt the template while retaining matching parameter overrides. Other instances
-remain unchanged. Saved snapshots continue cooking if the source JSON is moved or unavailable. Removing a modifier
-releases its engine instance and unused cache objects on the next update; disconnecting releases connection-owned
-engine caches. Existing proxy and browser editing workflows remain available.
-The browser edits the template, not a live selected modifier session: its standalone cook has no `modifier_input`
-geometry and reports that missing input. Inspect actual instance results and cook status in Blender.
+receive new identities and private caches on the next update. **Edit Network** opens a live session for that
+modifier, including its actual preceding-stack geometry. Browser changes update the stored snapshot and Blender
+controls automatically; Blender control changes update the browser. Other instances remain unchanged.
+**Reload Graph** explicitly imports a saved JSON file. Save the blend file to retain the modifier snapshot.
+Removing a modifier or disconnecting releases its engine cache and live input.
 
 **Evaluation limits:** this is an interactive stack bridge, not a native synchronous Blender modifier callback.
 A main-thread timer reads a disposable copy of the preceding stack and refreshes private output caches. Results update
@@ -155,28 +153,52 @@ modifiers (including self-references and cache objects) are rejected to avoid cr
 this bridge does not schedule interdependent object stacks. Edit Mode and active renders are skipped. Slow cooks can pause the UI;
 failed cooks retain the last successful cache and report an error. These caches are not a baking/render-farm system.
 
+### Import multiple Blender objects
+
+Select the **modifier_input** node and click **+ Add Object Input** in its inspector. Name the input
+(e.g. Monkey). A named output socket appears on the Input node and a matching object picker appears on
+the Blender modifier. Wire that output into the graph. Rename inputs or remove them in the same inspector;
+renaming preserves the selected Blender object. The original bottom socket remains the modifier's incoming geometry.
+
+
+Add an **object_input** node for each mesh you want to import. Each node creates an **Object: node-name**
+picker on the MiniHou modifier card in Blender. Choose the mesh there. A blank Binding uses the node name;
+set Binding to share a named input between nodes. Object references survive object renames and blend-file saves.
+Connect these nodes to **copy_to_points**, merge, or other geometry nodes. Keep **modifier_input** in the
+output's upstream network to retain stack-modifier semantics. Source meshes are evaluated in local coordinates;
+source object placement transforms are ignored. Native source modifiers and materials are included.
+
+For native Blender instances, use **instance** with **Objects = @source**, and choose **Source Object** on
+the modifier card. Multiple bindings are supported, for example **@tree @rock** creates separate object pickers.
+The browser preview now shows the actual source geometry at the instance positions. Source mesh edits refresh
+the preview. Blender continues using native instances. Browser previews above two million realized vertices
+report a limit; reduce the scatter count to preview. The viewer shows geometry, not Blender shader materials.
+
+Object pickers live on the modifier itself; the separate MiniHou panel contains network-editing controls.
+Source meshes that depend on MiniHou outputs or the destination object are rejected to prevent feedback loops.
+As before, the MiniHou cook is an interactive bridge, not a fully native Geometry Nodes computation.
+
 ### Edit a modifier's network
 
-Each MiniHou modifier has **Edit Network** and **Reload Graph** controls in the MiniHou sidebar
-and in the Properties editor's Modifiers tab, under **MiniHou Source Objects**. Start or reuse the
-external server first. **Edit Network** opens the graph file recorded by that modifier, even when
-the server is currently editing a different file. HTTP routing runs in a background worker; its
-progress or error appears beside that modifier's controls. Update/restart the external engine as
-well as the add-on to enable the safe routing protocol.
+Start the updated MiniHou app, install its bundled Blender add-on, and restart Blender after updating.
+Select a mesh in Blender. In **Properties > Modifiers > MiniHou**, click **Add MiniHou Modifier**,
+then **Edit Network**. New modifiers start with an input/transform/output network.
+Blender discovers the newest compatible running local MiniHou app automatically, including when the
+default port is occupied. Existing connections stay with their current engine. Stale discovery records
+are checked by a protocol handshake and ignored. Start the MiniHou app first; the add-on does not launch it automatically.
+Connection overrides live in **Preferences > Add-ons > MiniHou Link**: turn off **Find MiniHou automatically**
+to select a host and port. The N-panel is hidden by default; **Show legacy sidebar tools** restores the
+advanced template, server-launch and proxy controls.
+The browser shows a **Live: object / modifier** badge and previews its actual input geometry.
+No legacy proxy connection or manual Reload Graph is required for live edits.
 
-There is **one shared editor session**. Selecting another modifier's network switches that session
-and all its browser tabs (and the legacy proxy graph). Submitted edits to the previous graph are
-saved first; a failed save prevents the switch. Finish typing a field before switching. A slider
-request that arrives after a switch is rejected for the new graph and retained in that browser's
-storage: **Unsent edits** downloads the original graph path and edit operations for manual recovery.
-Missing templates, paths outside the server's workspace root, and failed browser launches report
-errors instead of silently opening whichever graph was already active.
-
-This edits the **graph template file**, not the modifier's stored graph snapshot or live parameter
-values. After editing, save in the browser and click **Reload Graph** on each modifier that should
-adopt the changes. Other modifiers keep their saved snapshots until reloaded. A template using
-`modifier_input` can show a missing-input cook error in the browser: its actual upstream geometry
-is supplied when Blender cooks the modifier, not by this template-editing action.
+Each live modifier saves a separate graph under the workspace's `graphs/Blender-*.json`; the source template
+is preserved. There is one shared browser editor session: selecting another modifier switches all browser tabs.
+Pending changes are saved before switching; failed saves prevent the switch. Late edits from the previous
+document are rejected and retained in the browser's **Unsent edits** recovery download.
+Legacy proxy output is suspended while a live modifier is being edited. Disconnecting Blender clears the
+live input and displays a disconnected badge. Update both the app and add-on to use this protocol.
+Native Geometry Nodes group editing remains a separate template workflow.
 
 For native Geometry Nodes networks, use the wired MiniHou groups described in [Geometry Nodes integration](docs/GEONODES.md). They evaluate incoming geometry through staged probes and support native operations before, between and after MiniHou placements.
 
@@ -228,7 +250,7 @@ once and never overwritten. The same thing without packing: `py -m minihou app` 
 
 A bar at the top of the editor handles Blender while none is connected:
 
-* **drag `minihou_link.zip`** from the bar onto a Blender window (Blender 4.2+ installs a dropped zip), or click it to download;
+* **Download ZIP** saves `minihou_link.zip`. In Blender, use **Preferences > Add-ons > menu > Install from Disk**, select the ZIP, then enable MiniHou Link;
 * **Install add-on** runs the Blender you pick once, in the background, unpacks the add-on into its user add-ons folder, enables it and
   saves the preferences (restart Blender if it was already open);
 * **Open Blender** starts it with the add-on registered from a private copy and connected to this engine's port, so nothing is installed at all.
@@ -310,6 +332,15 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
   **Ctrl** for the opposite side), **Persp / Ortho** (**Numpad 5**), and **Numpad .** / **Home** to frame the selected elements or everything.
   Shaded / edges / points toggles; point colours (`Cd`) are shown; back faces are tinted orange so flipped normals stand out.
   Very large geometry is cut to a drawable size and the view says so.
+* **Timeline under the view**: ▶ plays the graph in real time between a start and an end frame (frames are skipped, never queued, when a cook is
+  slower than the frame rate), with ⏮ ◂ ▸ ⏭ step buttons, a scrub slider, the current frame, range and fps fields (the fps also sets the engine's
+  `@Time`), and ⟲ to loop; **Space** over the view plays or pauses and **←** **→** step (**Shift** jumps to the ends). The range is remembered in the browser,
+  and Blender's own timeline still drives the frame when it is connected.
+* **Normals** toggle (with shaded / edges / points): a short line from the centre of every face along its normal, worked out from the winding, so
+  flipped faces show up pointing inwards.
+* **Groups and the path bar**: a group (a `*.json` graph used as a node) is drawn stacked with a ▣ mark; **double-click** it to open its graph. The path
+  at the top left of the graph (`welcome › rock_scatter › detail`) lists the groups you went through: click a name to step back out, or press
+  **Alt+Up**; it survives a page reload.
 * **Select in the 3-D view and build the network from it**: the **Pts / Edges / Faces** buttons under the view (or **1 / 2 / 3** with the
   mouse over it) switch to a selection mode: click to pick (only what you can see), **Shift** adds, **Ctrl** removes, drag a box to
   select everything inside it (X-ray); **Alt**-drag or the middle mouse button orbits, **A** selects all, **Esc** clears then leaves.
@@ -318,6 +349,24 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
   an `edges` list of point pairs; a bevel cannot end in the middle of a surface, so select a loop or edges that meet or reach a border),
   *Extrude*, *Inset*, *Reverse*, *Group*, *Delete* for faces, *Group* and *Delete* for points. The same `insert` edit op is available to AI
   tools (`{"op": "insert", "after": "id", "type": "polybevel"}`).
+* **Piece (object) selection and moving things like Houdini**: the **Piece** button (or **4**) selects a whole connected piece with one click (a copy
+  from `copy_to_points`, one box of a merge...; a box drag takes every piece it touches). Anything you select, whether points, edges, faces or pieces,
+  shows a **Move / Rotate / Scale** gizmo at its centre. The first drag adds a **`transform`** node after the one you are looking at, with its `group` set
+  to the selected points and its `pivot` to their centre, and carries on dragging it; selecting the same thing again edits that node instead of adding another.
+
+![A selected piece with its move gizmo](docs/images/editor_piece.png)
+
+* **The C pie menu**: press **C** (over the graph or the 3-D view) for Houdini's modelling pie at the pointer: **Adjust** (top), **Deform**, **Polygons**,
+  **Group**, **Create**, **Build**, **Edges**, **Modify**, each opening a pie of tools (Transform, Soft Transform, Soft Peak, Smooth, Point Weld... /
+  Lattice, Mountain, Bend, Linear Taper, Squash and Stretch, Twist... / PolyBevel, PolyFill, PolyExtrude, PolySplit, PolyBridge, Clip, Boolean /
+  Group Promote, Group by Range, Group Create, Group Expression / Null, Circle, Tube, Sphere, Curve, Grid, Box / Mirror, Duplicate, Combine, Extract /
+  Dissolve, Edge Collapse, Edge Loop, Edge Cusp, Edge Flip...) with a **»** for a second page. **Build > Fracture** is Houdini's RBD fracture menu (Voronoi Fracture, Voronoi Fracture Points, Voronoi Split, Voronoi Adjacency, Boolean Fracture, Convex Decomposition, Glue Cluster, RBD Material Fracture, Assemble, RBD Configure and Solver). **Hold C, flick towards a slot and let go**, or tap C and
+  click; **1-8** pick a slot, the middle goes back, **Esc** closes. A tool adds its node after the node you are looking at (sources like Grid and Box
+  are added unwired) and fills it in from your 3-D selection: faces become the group of an Extrude, edges the edges of a Bevel, Edge Collapse or Edge
+  Loop, points the group of a Transform. Tools this engine does not have yet (Sculpt, Group Paint) are greyed out.
+
+![The C pie menu over the 3-D view](docs/images/editor_pie.png)
+
 * **Handles (gizmos)**: the node you are looking at can show draggable arrows in the 3-D view: grab an arrow head and drag, and the parameter
   follows live (everything recooks, Blender included). `transform` has **Move / Rotate / Scale** tools (buttons above the view, or **W / E / R**
   with the pointer over it and nothing selected): move arrows, one **ring** per rotation axis (drag around it; the rings turn about the axes
@@ -326,6 +375,9 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
   standing on the selected faces or edges (so the bevel you just made from a selection can be scrubbed straight away), `box` a size
   arrow per axis and `sphere` a radius arrow. Handles are small provider functions in `minihou/handles.py` (inputs, output, parameters ->
   arrows); a failing provider just shows none.
+  Any node type can declare handles without code in the viewer: `@node(..., handles=[Handle("height", axis="z", at="bottom", reach=True)])`
+  (arrows, rings for angles in degrees, scale cubes; `axis` and `at` can be keywords, vectors or `"@parameter"`). `tube`, `helix`, `line`
+  and `bend` use it, and so can the node files in your `nodes/` folder (see the authoring guide the MCP `node_library` tool returns).
 * **Attribute flow**: the inspector lists what the selected node did to its inputs' attributes (`+` added, `~` changed, `→` moved to
   another domain, `−` removed, and whether topology changed); a wrangle also lists the attributes its snippet reads. It is worked out
   by comparing cooked results, so it is right for built-in, library and system nodes alike (also in `inspect_node` for AI tools, as `flow`).
@@ -364,7 +416,7 @@ The same edit operations are available to scripts over HTTP (`POST /api/edit`, s
 | `examples/graphs/spiky_sphere.json` | sphere + vector noise, normals, scatter, delete by expression, per-point `pscale` from a wrangle, box spikes |
 | `examples/graphs/terrain_rocks.json` | 200x200 terrain with 5-octave noise, a valley wrangle, rocks scattered only above a height |
 | `examples/graphs/crater.json` | built by an AI through MCP: dunes, a crater wrangle, boulders kept only on the rim by a `delete` expression |
-| `examples/graphs/spiral_stairs.json` | uses the example library nodes `stairs` (spiral treads around a column) and `twist` |
+| `examples/graphs/spiral_stairs.json` | uses the example library nodes `stairs` (spiral treads around a column) and `twist_height` |
 | `examples/graphs/rocky_hills.json` | hills plus the `rock_scatter` **system** (`nodes/rock_scatter.json`, a graph used as a node) |
 | `examples/graphs/scifi_panels.json` | random face groups extruded twice with insets, flat-shaded, a second material on the tops |
 | `examples/graphs/subd_pod.json` | box -> extruded dome and fin -> clip + mirror (symmetric, welded) -> Catmull-Clark |
@@ -400,6 +452,17 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `match_size` | geo | move (centre, or sit on the ground with justify min) and scale (uniform or per axis) to a target box |
 | `copy_transform` | geo | copies with an accumulating translate/rotate/scale (stairs, spirals, arrays); point `copynum` |
 | `peak` | geo | move points along their normals (optional group) |
+| `soft_peak` | geo | peak with a falloff: the group moves fully, points within `radius` of it follow (smooth, linear or constant) |
+| `twist` | geo | rotate about an axis in proportion to the distance along it (degrees per unit); optional group |
+| `linear_taper` | geo | scale across an axis by a factor reached at `length` (`taper_x`, `taper_y`, `dropoff`, `symmetric`) |
+| `squash_stretch` | geo | scale along an axis, optionally compensating across it to keep the volume |
+| `null` | geo | pass-through with a label: a named place to read or output from |
+| `group_range` | geo | group a range of points or primitives, every Nth, with invert and combine |
+| `edge_collapse` | geo | merge the ends of the selected edges (chains collapse to one point at their average); group `collapsedpoints` |
+| `edge_flip` | geo | swap the diagonal of the two triangles on each selected edge; edge group `flippededges` |
+| `edge_cusp` | geo | per-corner normals that are hard across the selected edges (and angles above `cusp_angle`) and smooth elsewhere |
+| `polysplit` | geo | edge loops through quad strips (position, number of loops; crack-free at triangles and n-gons) or a face cut between two points; groups `splitpoints`, `splitedges` |
+| `blend` | geo, targets* | morph the base towards shapes with the same points (shape keys / Blend Shapes): `amount`, per-target `weights` as numbers or expressions (`smoothstep(1, 49, @Frame)`, `sin(@Time * 3) * 0.5 + 0.5`), which attributes (`P`, `N`, `*`), a per-point `mask`, a `group`; several targets add their offsets |
 | `bound` | geo | bounding box, world-aligned or fitted to the principal axes; detail `bound_min/max/size` |
 | `noise` | geo | fractal Perlin noise; displaces `P` or writes any attribute (scalar or vector mode); optional group |
 | `group_create` | geo | a named point or primitive group: pattern/expression, bounding box, normal direction, random %, boundary |
@@ -407,12 +470,20 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `group_expand` | geo | grow or shrink a group by rings of neighbours (by points or edges); then `grown ^orig` selects the border ring |
 | `group_expand` | geo | grow or shrink a group by rings of neighbours (points or edges); `^` patterns then select the border ring |
 | `blast` | geo | delete a group of primitives or points (or keep only it) |
-| `polybevel` | geo | chamfer sharp edges (min angle, point group); slides along borders and flat edges so subdivided meshes bevel cleanly; moves are limited where faces would fold; new faces in group `bevel` |
+| `polybevel` | geo | chamfer sharp edges (min angle, or a point / edge / primitive group); slides along borders and flat edges so subdivided meshes bevel cleanly; moves are limited where faces would fold; new faces in group `bevel`; Houdini's six output groups |
 | `boolean` | a, b | exact union / subtract / intersect of closed meshes: watertight n-gon output, uv and attributes carried across cuts, groups `from_a`/`from_b`; flush faces cut cleanly |
-| `voronoi_fracture` | geo, points | break a closed mesh into the exact Voronoi cells of the points; closed pieces, prim `piece`, caps in group `inside`, optional gap |
+| `voronoi_fracture` | geo, points | break a closed mesh into the exact Voronoi cells of the points; closed pieces, prim `piece`, caps in group `inside`, optional gap; output groups `inside`, `outside`, `cutpoints`, `cutedges` |
+| `voronoi_fracture_points` | geo, points* | fracture points for the above: scattered inside a closed mesh, optional surface share, thinning, Lloyd relaxation, clusters and extra points from the second input; groups `interior`, `surface`, `clustered`, `extrapoints` |
+| `voronoi_split` | geo, points | split any polygon geometry (open sheets, soup) by the Voronoi cells without capping; `piece`, groups `cutpoints`, `cutedges` |
+| `voronoi_adjacency` | geo, points* | which pieces touch: a point per piece and a two-point curve per shared cut face (`piece_a`, `piece_b`, `area`); groups `connected`, `isolated`, `stronglinks` |
+| `boolean_fracture` | geo, cutters | break a closed mesh with cutter meshes: one piece per cutter plus the remainder, `piece`, `cutter`, groups `inside`, `outside`, `cutterpieces`, `remainder`, `cutpoints`, `cutedges` |
+| `convex_decomposition` | geo | cut a closed concave mesh into nearly convex pieces (collision shapes): reflex-edge planes, `max_concavity`, `max_pieces`; `piece`, groups as the fracture |
+| `assemble` | geo | number and name pieces (attribute, connectivity or groups), give each its own points and a pivot; detail `piece_names`; groups `splitpoints`, `sharedpoints` |
+| `glue_cluster` | geo | glue touching pieces: `cluster` (rigid groups of the most firmly stuck pieces) on the pieces, or the links (`rbd_a`, `rbd_b`, `strength` in newtons) for the solver's third input |
+| `rbd_material_fracture` | geo | fracture, assemble, glue and set mass / friction / bounce from a material in one node (`output` pieces or constraints) |
 | `polyreduce` | geo | reduce to a percentage or count of triangles with quadric error metrics; keeps borders, sharp edges and manifold shells; attributes blend along collapses |
 | `exploded_view` | geo | push pieces (a prim attribute) away from a centre |
-| `polyextrude` | geo | extrude faces (a group) along their normals with inset; connected regions or individual faces; groups `extrudeFront`/`extrudeSide` |
+| `polyextrude` | geo | extrude faces (a group) along their normals with inset; connected regions or individual faces; output groups front / back / side (`extrudeFront`, `extrudeBack`, `extrudeSide`) |
 | `subdivide` | geo | Catmull-Clark or linear; optional semi-sharp edge/corner creases; UVs and groups follow |
 | `edge_group`, `edge_group_promote` | geo | Derived edge selections: patterns, endpoint pairs, boundary or point/primitive groups; promote to incident points/primitives |
 | `polybridge` | geo | Linear segmented quad bridge between equal-count boundary chains or loops |
@@ -449,6 +520,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `line` / `helix` / `curve` | - | open curves: straight, spiral (cone spirals too), or through typed points |
 | `resample` | geo | even spacing along curves (or polygon outlines); adds `curveu` (0 to 1 along each curve) |
 | `carve` | geo | keep part of each curve by length (animate `end` to grow it) |
+| `fillet` | geo | round the corners of curves and polygon outlines with circular arcs (`radius`, `divisions`, `min_angle`, `group`); arcs are tangent to both segments and share short segments (never overlap); attributes blend along the curve; open curves keep their ends |
 | `sweep` | geo | tubes along curves: rotation-minimising frames, radius x point `width`/`pscale`, caps, twist, uv |
 | `path_deform` | geo, curve | bend geometry along a curve (minimal-rotation or up-vector frames), offset, stretch to fit, twist; rotates N |
 | `convert_line` | geo | every edge to curves (joined into polylines), e.g. wireframes with `sweep` |
@@ -495,8 +567,20 @@ attributes, and Blender gets each as a boolean attribute (use it with *Named Att
 | `@P.z > 0` | an ad-hoc group: a wrangle expression |
 | (empty) | everything |
 
+`group_create` also has Houdini's combinable **filter sections** (method `filters`): a base group plus bounding region (box or sphere), normals (direction,
+spread, backface from a point), edges (angle, length, unshared) and random chance (percent, seed or a seed attribute), each enabled separately; it makes point,
+primitive or **edge** groups, merges with an existing group (Initial Merge), and can add `<name>_boundary`, the edge group around the selection.
+
 A point group used on primitives selects those whose points are all in it; a primitive group used on points selects
 the points its primitives use.
+
+### Output groups
+
+The modelling nodes can write groups for what they just made, switched on in an **Output Groups** section of their parameters (a checkbox and a
+name each, like Houdini's): PolyBevel's six (`pointfilletpolys`, `pointfilletedges`, `edgefilletpolys`, `offsetedges`, `offsetpoints`,
+`mergedpoints`), PolyExtrude's front, back and side, and groups on `mirror`, `boolean`, `clip`, `fuse`, `sweep`, `skin` and the bridges. Prim, point
+and **edge** groups are all supported and flow into the next node's group field, e.g. bevel, then `polyextrude` with group `edgefilletpolys`, or `polybevel`
+with *group type* `edges` and group `offsetedges`. `docs/output_groups.md` lists every group, its default name, and how to add them to your own nodes.
 
 ### Curves
 
@@ -662,7 +746,7 @@ py -m minihou new-node ripple_rings        # writes nodes\ripple_rings.py from a
   and in AI tool replies. Runtime errors inside a node name the file and line too.
 * A library node cannot take the name of an existing node. Graphs that use a node type which disappeared still open (the
   cook reports the missing type) and round-trip unchanged.
-* `nodes/twist.py` (a deformer) and `nodes/stairs.py` (a generator that builds topology with numpy; spiral mode above) are
+* `nodes/twist_height.py` (a deformer) and `nodes/stairs.py` (a generator that builds topology with numpy; spiral mode above) are
   examples; `examples/graphs/spiral_stairs.json` uses both. `serve --nodes DIR` adds folders.
 * Library files are Python running inside the engine, trusted like any script you run. Opening a graph never runs code.
 
@@ -837,7 +921,7 @@ minihou/                  the engine (numpy + stdlib, optional numba; never impo
   web/                    HTTP API + live events (server.py) and the node editor (static/)
   mcp.py                  MCP server for AI assistants (stdio, stdlib only)
   library.py              node libraries: load and hot-reload nodes/*.py, authoring guide
-nodes/                    example node library: twist.py, stairs.py (Python) and rock_scatter.json (a system)
+nodes/                    example node library: twist_height.py, stairs.py (Python) and rock_scatter.json (a system)
 blender_addon/minihou_link/
   runtime.py              main-thread timer, depsgraph handler, feedback-loop guards
   mesh_writer.py          foreach_set writer (fast attribute paths)

@@ -148,10 +148,49 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
    script is tested for real with the `bpy` module; **not verified**: the Windows/macOS builds (only built on Linux here), and dropping the zip
    from a browser onto a Blender window (browser and OS dependent; the Install and Open buttons do not depend on it).
 
+9. **Editor additions (requested)**: a normals overlay toggle, a play/step/loop timeline under the 3-D view (real-time frame skipping,
+   `status.fps` reported by the engine), a breadcrumb path with double-click to open group (system) nodes, and a **Piece** selection mode (connected
+   pieces, computed in the viewer by union-find over the triangles) with a move/rotate/scale gizmo on every selection whose first drag inserts a
+   `transform` (group = the selected points, pivot = their centre) and carries the drag over to it; a handle's start may now return a promise.
+
+10. **`fillet` and `blend`**: fillet rounds curve corners exactly (tangent arcs, radius limited to half of each neighbouring segment so arcs never overlap,
+    attributes blended along the curve); blend morphs towards same-point-count targets with additive offsets, expression weights over `@Frame`/`@Time`
+    (a small safe expression evaluator, no `eval`) and a per-point mask. Example graph `fillet_blend`.
+
+11. **Output groups** (`minihou/outgroups.py`, `docs/output_groups.md`): a toggle + name per group as parameter pairs, an "Output Groups" section in the
+    editor, prim/point/edge domains. PolyBevel's six from Houdini's panel, PolyExtrude front/back/side, and groups on mirror, boolean, clip, fuse,
+    sweep, skin and the bridges; `polybevel` got a Group Type (points / edges / primitives) so one bevel's edge groups feed the next.
+
+12. **From the shared Houdini panels**: Revolve (End Caps + End Caps Group, Start Angle), Subdivide (Creases field, crease weight override, Generate
+    Resulting Creases group), PolyExpand2D (inside/outside loops, Keep Input, inside/outside groups, edgedist/edgespeed attributes), Group Create (the
+    filter sections, edge groups, boundary groups).
+
+13. **"C" pie menu with Houdini's modelling tools** (`web/static/pie.js`, wired in `editor.js`): eight categories (Adjust, Deform, Polygons, Group,
+    Create, Build, Edges, Modify), each a sub-pie with a `»` page; hold C and flick, or tap C and click. A tool inserts its node after the node you
+    are looking at, filled in from the 3-D selection. New nodes for the tools that had none (`minihou/nodes/modeling_tools.py`): `null`, `twist`,
+    `linear_taper`, `squash_stretch`, `soft_peak`, `group_range`, `edge_collapse`, `edge_flip`, `edge_cusp`, `polysplit` (edge loops through quad
+    strips, no T-junctions; cut a face between two points). The example library node `twist` became `twist_height`. Mapped onto existing nodes:
+    Duplicate = `copy_transform`, Combine = `merge`, Extract = `blast` (keep selected), Mountain = `noise`, Group Expression = `group_create`,
+    Point Weld = `fuse`, Dissolve = `dissolve_edges`, Edge Loop = `polysplit`. Not built: **Sculpt** and **Group Paint** (interactive brush tools;
+    shown greyed out). The **Modify** page was not in the screenshots, so its tools are a guess (Blast, Fuse, Normal, Reverse, Divide, Subdivide,
+    Resample, then attribute nodes): compare with Houdini. Houdini's pie tools start an interactive state; here a tool adds the node with sensible
+    defaults and the parameters do the rest. Slot positions inside each sub-pie follow the order in the screenshots, clockwise from the top.
+
+14. **RBD fracture toolbox** (Houdini's fracture menu; `nodes/fracture.py`, `nodes/fracture_tools.py`, `rbd.py`, `docs/RBD.md`): Voronoi Fracture got
+    output groups (inside / outside / cut points / cut edges); new `voronoi_split`, `voronoi_fracture_points`, `voronoi_adjacency`,
+    `boolean_fracture`, `convex_decomposition`, `assemble`, `glue_cluster` and `rbd_material_fracture`. The solver gained **compound
+    (cluster) bodies** and a third `constraints` input: **breakable glue** (MuJoCo welds that snap past a strength, glued pieces do not
+    collide until the last link breaks). Honest caveats: no packed primitives or string attributes exist, so Assemble writes an int
+    `piece`, a vector `pivot` and the detail `piece_names`; group sets and the material glue strengths are my own tuning (no panels to
+    copy); glue strength is a break force, not Houdini's constraint-network model (no hinges, springs, glue-to-ground rules or
+    per-piece strength painting); `convex_decomposition` is a plane-cut search (reflex-edge planes), not V-HACD, and cuts along a
+    face plane can leave sliver faces on curved meshes. MuJoCo is now installed in this environment, so the two RBD tests that used to fail run.
+
 Open:
 
+- Output groups other than PolyBevel's are from memory of Houdini's nodes: compare with Houdini and adjust names/sets.
 - Extra outputs have no modifier or exposed parameters (only the display branch does).
-- More handles (bevel segments, copy_to_points scale); handle providers for library nodes. (Done: transform Move / Rotate / Scale tools: rings
+- More handles (bevel segments, copy_to_points scale). (Done: `@node(handles=[Handle(...)])` for any node, library nodes included, used by tube, helix, line and bend; transform Move / Rotate / Scale tools: rings
   turn about each Euler angle's real axis, scale cubes follow the rotated axes, drags multiply so scale never crosses zero.)
 - Edge selections are point pairs, so they only stay valid while the geometry upstream keeps its point numbering (as in Houdini).
 

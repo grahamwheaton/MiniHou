@@ -145,7 +145,7 @@ class LibraryTests(unittest.TestCase):
         ex.refresh()
         self.assertEqual({e["error"] for e in ex.status()["files"]}, {None})
         g = Graph.from_dict({"nodes": {"s": {"type": "stairs", "params": {"steps": 5, "spiral": 25}},
-                                       "t": {"type": "twist", "inputs": {"geo": "s"}},
+                                       "t": {"type": "twist_height", "inputs": {"geo": "s"}},
                                        "n": {"type": "normal", "inputs": {"geo": "t"}, "params": {"domain": "prim"}}},
                              "display": "n"})
         geo = Evaluator().cook(g)

@@ -45,7 +45,7 @@ class NodeError(RuntimeError):
 
 
 def _library_location(exc: BaseException) -> str:
-    """" (nodes/twist.py, line 12)" when the error comes from a node-library file: tells a person (or an AI) where to look."""
+    """" (nodes/twist_height.py, line 12)" when the error comes from a node-library file: tells a person (or an AI) where to look."""
     import traceback
     from .sdk import REGISTRY
     files = {nt.source for nt in REGISTRY if nt.source}

@@ -200,6 +200,75 @@ def Enum(name, choices: Sequence[str], default=None, *, label="", doc=""):
 
 
 # ---------------------------------------------------------------------------
+# Viewport handles (draggable gizmos) declared on a node type
+# ---------------------------------------------------------------------------
+HANDLE_KINDS = ("arrow", "ring", "scale")
+HANDLE_PLACES = ("center", "origin", "top", "bottom")
+HANDLE_AXES = {"x": (1.0, 0.0, 0.0), "y": (0.0, 1.0, 0.0), "z": (0.0, 0.0, 1.0)}
+
+
+@dataclass(frozen=True)
+class Handle:
+    """A draggable gizmo for one parameter, shown in the editor's 3-D view while the node is selected (cosmetic: not part of the
+    cache key). ``kind``: "arrow" (drag along ``axis``: the parameter changes by ``scale`` per world unit), "ring" (a circle
+    round ``axis``; for a parameter in degrees) or "scale" (a cube on ``axis``; dragging multiplies the parameter).
+
+    ``axis``: "x" / "y" / "z", "-x"..., a 3-vector, or "@name" for a Vec3 parameter holding a direction. ``at``: where it
+    stands: "center" (of the node's output bounds), "origin" (the world origin), "top" / "bottom" (middle of the top or bottom
+    of the bounds), a 3-vector, or "@name" for a Vec3 parameter holding a point. ``reach=True`` puts an arrow's root at ``at + axis * value / scale``
+    so it follows the dimension it edits (a radius, a length). ``comp`` picks one component of a Vec3 parameter."""
+    param: str
+    kind: str = "arrow"
+    axis: Any = "z"
+    at: Any = "center"
+    comp: Optional[int] = None
+    scale: float = 1.0
+    reach: bool = False
+    min: Optional[float] = None
+    max: Optional[float] = None
+    label: str = ""
+    id: str = ""
+    radius: Optional[float] = None            # rings: world radius (default: from the output's size)
+    tool: str = ""                            # "move" | "rotate" | "scale": handles under the same tool buttons as transform's
+
+    def key(self) -> str:
+        return self.id or self.param + (f"_{'xyz'[self.comp]}" if self.comp is not None else "")
+
+
+def _check_handle(node_name: str, h: "Handle", params: Sequence[Param]) -> None:
+    by = {p.name: p for p in params}
+    where = f"node {node_name!r} handle {h.key()!r}"
+    if h.param not in by:
+        raise ValueError(f"{where}: no parameter {h.param!r}")
+    p = by[h.param]
+    if h.kind not in HANDLE_KINDS:
+        raise ValueError(f"{where}: kind must be one of {HANDLE_KINDS}")
+    if p.kind not in ("float", "int", "vec3"):
+        raise ValueError(f"{where}: {h.param!r} is a {p.kind} parameter; handles edit numbers and vectors")
+    if p.kind == "vec3" and h.comp not in (0, 1, 2):
+        raise ValueError(f"{where}: {h.param!r} is a vector: say which component (comp=0, 1 or 2)")
+    if p.kind != "vec3" and h.comp is not None:
+        raise ValueError(f"{where}: comp only applies to vector parameters")
+    for what, v in (("axis", h.axis), ("at", h.at)):
+        if isinstance(v, str):
+            if v.startswith("@"):
+                if v[1:] not in by or by[v[1:]].kind != "vec3":
+                    raise ValueError(f"{where}: {what} {v!r} must name a Vec3 parameter")
+            elif not ((what == "axis" and v.lstrip("-") in HANDLE_AXES) or (what == "at" and v in HANDLE_PLACES)):
+                raise ValueError(f"{where}: {what} {v!r} is not a keyword ({'x, y, z, -x...' if what == 'axis' else ', '.join(HANDLE_PLACES)}) "
+                                 "or an @parameter")
+        else:
+            try:
+                ok = len(tuple(v)) == 3
+            except TypeError:
+                ok = False
+            if not ok:
+                raise ValueError(f"{where}: {what} must be a keyword, an @Vec3-parameter or three numbers")
+    if h.kind == "ring" and h.scale == 1.0:
+        object.__setattr__(h, "scale", 180.0 / 3.141592653589793)       # a ring turns a parameter in degrees
+
+
+# ---------------------------------------------------------------------------
 # Node types and registry
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
@@ -215,6 +284,7 @@ class NodeType:
     source: str = ""              # file a node library loaded it from ("" for built-ins)
     code_hash: str = ""           # hash of that file: part of the cache key, so editing the code never serves stale results
     key_extra: Optional[Callable[[Dict[str, Any]], str]] = None   # extra cache-key material from outside the graph
+    handles: Tuple["Handle", ...] = ()                              # viewport gizmos (cosmetic: never in the cache key)
     _param_index: Dict[str, Param] = field(default_factory=dict, repr=False, compare=False)
 
     def __post_init__(self):
@@ -314,7 +384,7 @@ _LOADING: Optional[Dict[str, str]] = None
 def node(name: str, *, inputs: Sequence[Union[str, Input]] = (), params: Sequence[Param] = (),
          outputs: Optional[Sequence[Union[str, Output]]] = None, version: int = 1, category: str = "",
          doc: str = "", registry: Optional[Registry] = None, replace: bool = False,
-         key_extra: Optional[Callable[[Dict[str, Any]], str]] = None):
+         key_extra: Optional[Callable[[Dict[str, Any]], str]] = None, handles: Sequence["Handle"] = ()):
     """Decorator: turn a function into a registered node type.
 
     ``key_extra(params) -> str`` is for nodes whose result depends on data outside the graph (e.g. a Blender object
@@ -322,6 +392,7 @@ def node(name: str, *, inputs: Sequence[Union[str, Input]] = (), params: Sequenc
     ins = tuple(Input(i) if isinstance(i, str) else i for i in inputs)
     outs = tuple(Output(o) if isinstance(o, str) else o for o in (outputs if outputs is not None else ["geo"]))
     params = tuple(params)
+    handles = tuple(handles)
 
     def deco(fn: Callable) -> Callable:
         if not _NAME_RE.match(name):
@@ -343,7 +414,12 @@ def node(name: str, *, inputs: Sequence[Union[str, Input]] = (), params: Sequenc
             other = reg.get(name).source
             raise ValueError(f"node type {name!r} already exists ({'in ' + other if other else 'built in'}); "
                              "choose another name")
-        nt = NodeType(name=name, fn=fn, inputs=ins, params=params, outputs=outs, version=version,
+        for h in handles:
+            _check_handle(name, h, params)
+        keys = [h.key() for h in handles]
+        if len(set(keys)) != len(keys):
+            raise ValueError(f"node {name!r}: handle ids must be unique (give two handles on one parameter an id=)")
+        nt = NodeType(name=name, fn=fn, inputs=ins, params=params, outputs=outs, version=version, handles=handles,
                       category=category or ("custom" if src else ""), doc=doc or (inspect.getdoc(fn) or ""),
                       source=src["file"] if src else "", code_hash=src["hash"] if src else "", key_extra=key_extra)
         reg.register(nt, replace=replace)

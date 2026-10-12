@@ -2,7 +2,7 @@
 import numpy as np
 
 from .. import groups, spatial
-from ..sdk import Bool, Float, Int, Str, Vec3, node
+from ..sdk import Bool, Float, Handle, Int, Str, Vec3, node
 from . import _build as B
 from .model import compact_points
 from ._util import normalize_rows
@@ -29,7 +29,9 @@ def _frame(direction, up):
     Float("twist", 0.0, soft_min=-720.0, soft_max=720.0, doc="Degrees of twist about the axis over the length"),
     Float("taper", 1.0, min=0.0, soft_max=3.0, doc="Scale across the axis at the end of the region"),
     Str("group", "", doc="Only these points"),
-])
+], handles=[Handle("length", axis="@direction", at="@origin", reach=True, min=1e-6),
+            Handle("bend", kind="ring", axis="@up", at="@origin"),
+            Handle("twist", kind="ring", axis="@direction", at="@origin", id="twist_ring")])
 def bend(geo, origin, direction, length, up, bend, twist, taper, group):
     """Bend, twist and taper geometry along an axis (Houdini's Bend SOP). Inside the capture region the shape
     curls into an arc; beyond it, it continues straight along the bent end. N follows the deformation."""

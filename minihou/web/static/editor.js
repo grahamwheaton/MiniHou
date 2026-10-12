@@ -13,6 +13,7 @@
     types: {}, typeList: [], status: null, root: "",
     sel: new Set(), wireSel: null, view: { x: 80, y: 60, k: 1 },
     online: false, framed: false, dragPos: new Map(), mouse: [200, 200],
+    trail: [], nav: null,                       // the path of nested graphs we opened ([{path, via}]) and what the next file switch means
   };
 
   // ---------------------------------------------------------------- DOM helpers (text only, never raw HTML)
@@ -83,7 +84,9 @@
         a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
       } }, "Unsent edits"));
   }
+  let desktopPendingEdits = 0;
   async function edit(ops, context = { path: S.path, documentId: S.documentId }) {
+    desktopPendingEdits++;
     try {
       const r = await api("/api/edit", { ops, origin: "editor", document_id: context.documentId });
       applySnapshot(r.graph);
@@ -92,7 +95,7 @@
       if (context.documentId !== S.documentId || e.message.includes("Editor graph changed")) stashEdits(ops, context);
       else toast(e.message);
       return null;
-    }
+    } finally { desktopPendingEdits--; }
   }
 
   // Parameter changes are coalesced: one request in flight, the latest values win (smooth slider drags).
@@ -150,6 +153,11 @@
       pendingSet.clear(); pendingContext = null;
     }
     const fileChanged = snap.path !== S.path;
+    let liveBadge = $("#live-modifier");
+    if (!liveBadge) { liveBadge = h("span", { id: "live-modifier", class: "status" }); $("#preview").prepend(liveBadge); liveBadge.style.cssText = "flex:none;padding:6px 10px;white-space:normal;color:#8fdbad"; }
+    liveBadge.textContent = snap.live_modifier ? `${snap.live_modifier.connected ? "Live" : "Disconnected"}: ${snap.live_modifier.label}` : "";
+    liveBadge.style.display = snap.live_modifier ? "block" : "none";
+    if (fileChanged && snap.path) updateTrail(snap.path);                           // a snapshot without a file (transient) leaves the path alone
     S.rev = snap.rev; S.graph = snap.graph; S.path = snap.path; S.documentId = snap.document_id;
     S.canUndo = snap.can_undo; S.canRedo = snap.can_redo;
     for (const id of [...S.sel]) if (!S.graph.nodes[id]) S.sel.delete(id);
@@ -183,7 +191,17 @@
   // ---------------------------------------------------------------- geometry of the drawing
   const nodeOf = (id) => S.graph.nodes[id];
   const typeOf = (id) => S.types[(nodeOf(id) || {}).type] || { inputs: [], params: [], category: "" };
+  function inputMembers(id) {
+    return Object.entries(S.graph.nodes).filter(([, n]) => n.type === "object_input" && n.input_owner === id);
+  }
+  function inputOwner(id) {
+    const owner = nodeOf(id)?.input_owner;
+    return nodeOf(id)?.type === "object_input" && nodeOf(owner)?.type === "modifier_input" ? owner : null;
+  }
+  function nodeHeight(id) { return H + inputMembers(id).length * 22; }
   function pos(id) {
+    const owner = inputOwner(id);
+    if (owner) return pos(owner);
     if (S.dragPos.has(id)) return S.dragPos.get(id);
     const p = (nodeOf(id) || {}).pos;
     return Array.isArray(p) ? p : [0, 0];
@@ -201,7 +219,14 @@
     const off = spec && spec.multi && m > 1 ? (k - (m - 1) / 2) * Math.min(7, 26 / (m - 1)) : 0;
     return [x + (W * (portIndex + 1)) / (n + 1) + off, y];
   }
-  const outPortCenter = (id) => { const [x, y] = pos(id); return [x + W / 2, y + H]; };
+  const outPortCenter = (id) => {
+    const owner = inputOwner(id);
+    if (owner) {
+      const [x, y] = pos(owner), i = inputMembers(owner).findIndex(([key]) => key === id);
+      return [x + W, y + H + i * 22];
+    }
+    const [x, y] = pos(id); return [x + W / 2, y + nodeHeight(id)];
+  };
   function wirePath([x1, y1], [x2, y2]) {
     const dy = Math.max(40, Math.abs(y2 - y1) / 2) + (y2 < y1 ? 60 : 0);
     return `M${x1},${y1} C${x1},${y1 + dy} ${x2},${y2 - dy} ${x2},${y2}`;
@@ -222,7 +247,7 @@
     const r = canvas.getBoundingClientRect();
     if (!ids.length) { S.view = { x: r.width / 2 - W / 2, y: r.height / 3, k: 1 }; applyView(); return; }
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const id of ids) { const [x, y] = pos(id); x0 = Math.min(x0, x); y0 = Math.min(y0, y - 30); x1 = Math.max(x1, x + W); y1 = Math.max(y1, y + H + 10); }
+    for (const id of ids) { const [x, y] = pos(id); x0 = Math.min(x0, x); y0 = Math.min(y0, y - 30); x1 = Math.max(x1, x + W); y1 = Math.max(y1, y + nodeHeight(id) + 10); }
     const pad = 60;
     const k = Math.max(0.25, Math.min(1.3, (r.width - 2 * pad) / (x1 - x0), (r.height - 2 * pad) / (y1 - y0)));
     S.view = { k, x: r.width / 2 - ((x0 + x1) / 2) * k, y: r.height / 2 - ((y0 + y1) / 2) * k };
@@ -257,19 +282,20 @@
     const live = upstreamOfDisplay(), disp = displayNode();
     const keep = new Set();
     for (const [id, n] of Object.entries(S.graph.nodes)) {
+      if (inputOwner(id)) continue;
       keep.add(id);
       const t = typeOf(id);
       let el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
       if (!el) { el = h("div", { class: "node", dataset: { id } }); nodesEl.append(el); }
       const [x, y] = pos(id);
-      el.style.left = x + "px"; el.style.top = y + "px";
-      el.className = ["node", "cat-" + (t.category || "other"), S.sel.has(id) && "selected", id === disp && "display",
+      el.style.left = x + "px"; el.style.top = y + "px"; el.style.height = nodeHeight(id) + "px";
+      el.className = ["node", "cat-" + (t.category || "other"), t.category === "system" && t.source && "group", S.sel.has(id) && "selected", id === disp && "display",
         id === errNode && "error", !live.has(id) && "unused"].filter(Boolean).join(" ");
       const ex = exposedOf(id);
       // Rebuild a node's DOM only when its structure changes (wiring, comment, flags); status updates touch just the
       // status line. Stable elements keep hover state and never vanish under a click or a drag.
       const subSig = JSON.stringify([id === errNode && st.error.message, nodeMs[id], cached.has(id), n.type]);
-      const structSig = JSON.stringify([n.type, n.inputs, n.comment, ex.map((e) => e.name), t.inputs.length, id === disp]);
+      const structSig = JSON.stringify([inputMembers(id).map(([key, child]) => [key, child.input_label]), n.type, n.inputs, n.comment, ex.map((e) => e.name), t.inputs.length, id === disp, t.category === "system" && !!t.source]);
       if (el._struct === structSig) {
         if (el._sub !== subSig) { el._sub = subSig; el.querySelector(".sub").replaceChildren(...subLine(id, n, st, errNode, nodeMs, cached)); }
         continue;
@@ -287,7 +313,13 @@
         kids.push(h("div", { class: "port-label", style: { left: cx + "px" } }, spec.name));
       });
       kids.push(h("div", { class: "port out", dataset: { node: id }, title: "output: drag to an input" }));
+      inputMembers(id).forEach(([key, child], i) => {
+        kids.push(h("div", { class: "input-output-label", style: { position: "absolute", right: "14px", top: (H + i * 22 - 8) + "px", fontSize: "11px" } }, child.input_label || key));
+        kids.push(h("div", { class: "port out", dataset: { node: key }, title: child.input_label || key,
+          style: { left: (W - 7) + "px", top: (H + i * 22 - 7) + "px", bottom: "auto" } }));
+      });
       if (n.comment) kids.push(h("div", { class: "comment" }, String(n.comment)));
+      if (t.category === "system" && t.source) kids.push(h("div", { class: "groupmark", title: "A group: double-click to open it" }, "▣"));
       if (ex.length) kids.push(h("div", { class: "badge", title: "Exposed to Blender: " + ex.map((e) => e.name).join(", ") }, "B"));
       el.replaceChildren(...kids);
     }
@@ -341,6 +373,45 @@
     $("#file-btn").title = S.path || "";
     $("#undo-btn").disabled = !S.canUndo;
     $("#redo-btn").disabled = !S.canRedo;
+    renderCrumbs();
+  }
+  // ---- breadcrumbs: the chain of nested groups (systems) opened from the root graph; a crumb jumps back out
+  const TRAIL_KEY = "minihou.trail";
+  function updateTrail(path) {
+    const nav = S.nav; S.nav = null;
+    let trail = S.trail;
+    if (!trail.length) { try { trail = JSON.parse(sessionStorage.getItem(TRAIL_KEY) || "[]"); } catch (e) { trail = []; } }
+    if (!Array.isArray(trail)) trail = [];
+    if (nav && nav.mode === "push") {
+      const at = trail.findIndex((c) => c.path === path);                           // opening a graph already on the path just steps back to it
+      trail = at >= 0 ? trail.slice(0, at + 1) : trail.concat([{ path, via: nav.via || "" }]);
+    } else if (nav && nav.mode === "jump") {
+      trail = trail.slice(0, nav.index + 1);
+      if (!trail.length || trail[trail.length - 1].path !== path) trail = [{ path, via: "" }];
+    } else if (!trail.length || trail[trail.length - 1].path !== path) {
+      trail = [{ path, via: "" }];                                                  // a graph opened from the file menu (or elsewhere) starts a new path
+    }
+    S.trail = trail;
+    try { sessionStorage.setItem(TRAIL_KEY, JSON.stringify(trail)); } catch (e) { /* storage unavailable */ }
+  }
+  const crumbName = (p) => relPath(p).split("/").pop().replace(/\.json$/i, "");
+  function renderCrumbs() {
+    const box = $("#crumbs");
+    if (!S.path) { box.classList.add("hidden"); return; }
+    const trail = S.trail.length && S.trail[S.trail.length - 1].path === S.path ? S.trail : [{ path: S.path, via: "" }];
+    const kids = [];
+    trail.forEach((c, i) => {
+      if (i) kids.push(h("span", { class: "sep" }, "›"));
+      const last = i === trail.length - 1;
+      kids.push(h(last ? "span" : "button", { class: "crumb" + (last ? " cur" : ""), dataset: { index: String(i) },
+        title: (c.via ? `opened from node ${c.via}\n` : "") + c.path + (last ? "" : "\nClick to go back to this graph"),
+        onclick: last ? null : () => openFile(c.path, false, { mode: "jump", index: i }) }, crumbName(c.path)));
+    });
+    box.classList.remove("hidden");
+    box.replaceChildren(...kids);
+  }
+  function goUp() {                                                                  // Alt+Up: back out of the current nested graph
+    if (S.trail.length > 1) openFile(S.trail[S.trail.length - 2].path, false, { mode: "jump", index: S.trail.length - 2 });
   }
   function relPath(p) {
     const root = (S.root || "").replace(/\\/g, "/").replace(/\/$/, ""), q = String(p).replace(/\\/g, "/");
@@ -362,6 +433,8 @@
     const fi = $("#frame-input");
     if (st.frame !== undefined && document.activeElement !== fi && Number(fi.value) !== st.frame) fi.value = st.frame;
     if (st.frame !== undefined && document.activeElement !== $("#frame-slider")) syncSlider(st.frame);
+    if (st.frame !== undefined && !PB.playing && PB.frame !== st.frame) { PB.frame = st.frame; tlRender(); }          // Blender's timeline moved it
+    if (st.fps && !PB.playing && PB.fps !== st.fps && document.activeElement !== $("#tl-fps")) { PB.fps = st.fps; tlRender(); }
     const clients = st.clients || [], blender = clients.filter((n) => /^blender/i.test(n));
     const b = $("#blender-status");
     b.className = "status" + (blender.length ? " ok" : "");
@@ -407,7 +480,7 @@
     $("#bb-zip").classList.toggle("hidden", !addon.available);
     $("#bb-text").textContent = BB.connected ? "Blender is connected." :
       blenders.length ? "Blender is not connected. Install the add-on once, then open Blender:" :
-        "No Blender found here. Drag the zip onto a Blender window (4.2+), or use Preferences > Add-ons > Install from Disk:";
+        "No Blender found here. Download the ZIP, then use Blender Preferences > Add-ons > Install from Disk:";
     if (!BB.msg) $("#bb-msg").textContent = "";
   }
   async function blenderAction(kind) {
@@ -429,12 +502,10 @@
     try { localStorage.removeItem(BAR_KEY); } catch (e) { /* ignore */ }
     BB.forced = true; BB.msg = false; renderBlenderBar();
   };
-  $("#bb-zip").addEventListener("dragstart", (e) => {                 // Chrome/Edge turn this into a file when dropped on another app
-    const url = new URL($("#bb-zip").getAttribute("href"), location.href).href;
-    e.dataTransfer.setData("DownloadURL", `application/zip:minihou_link.zip:${url}`);
-    e.dataTransfer.setData("text/uri-list", url);
-    e.dataTransfer.effectAllowed = "copy";
-  });
+  $("#bb-zip").onclick = () => {
+    BB.msg = true;
+    $("#bb-msg").textContent = "In Blender: Preferences > Add-ons > menu > Install from Disk. Choose the downloaded ZIP, then enable MiniHou Link.";
+  };
 
   // ---------------------------------------------------------------- frame (time)
   function syncSlider(f) {
@@ -447,6 +518,7 @@
     if (!Number.isFinite(f)) return;
     $("#frame-input").value = f;
     syncSlider(f);
+    if (PB.frame !== f) { PB.frame = f; tlRender(); }
     framePending = f;
     if (frameSending) return;
     frameSending = true;
@@ -456,6 +528,66 @@
     }
     frameSending = false;
   }
+  // ---- timeline under the 3-D view: play / pause in real time, step, range, fps, loop
+  const TL_KEY = "minihou.timeline";
+  const PB = { playing: false, start: 1, end: 96, fps: 24, loop: true, frame: 1, t0: 0, f0: 1, raf: 0 };
+  try { Object.assign(PB, JSON.parse(localStorage.getItem(TL_KEY) || "{}"), { playing: false, raf: 0 }); } catch (e) { /* storage unavailable */ }
+  const tlSave = () => { try { localStorage.setItem(TL_KEY, JSON.stringify({ start: PB.start, end: PB.end, fps: PB.fps, loop: PB.loop })); } catch (e) { /* ignore */ } };
+  function tlRender() {
+    const sl = $("#tl-slider");
+    sl.min = PB.start; sl.max = Math.max(PB.end, PB.start + 1);
+    if (document.activeElement !== sl) sl.value = PB.frame;
+    for (const [id, v] of [["#tl-start", PB.start], ["#tl-end", PB.end], ["#tl-fps", PB.fps]]) if (document.activeElement !== $(id)) $(id).value = v;
+    if (document.activeElement !== $("#tl-frame")) $("#tl-frame").value = PB.frame;
+    const play = $("#tl-play");
+    play.textContent = PB.playing ? "⏸" : "▶"; play.classList.toggle("playing", PB.playing);
+    play.title = PB.playing ? "Pause (Space over the view)" : "Play (Space over the view)";
+    $("#tl-loop").classList.toggle("on", PB.loop);
+  }
+  function tlGoto(f) { PB.frame = f; tlRender(); setFrame(f); }
+  function tlStop() { PB.playing = false; cancelAnimationFrame(PB.raf); PB.raf = 0; tlRender(); scheduleInspect(); }
+  function tlTick(now) {
+    if (!PB.playing) return;
+    PB.raf = requestAnimationFrame(tlTick);
+    const span = PB.end - PB.start + 1;
+    let target = PB.f0 + Math.floor(((now - PB.t0) / 1000) * PB.fps);          // real time, not frame by frame: a slow cook skips frames
+    if (target > PB.end) {
+      if (!PB.loop) { tlGoto(PB.end); tlStop(); return; }
+      target = PB.start + ((target - PB.start) % span);
+      if (target < PB.frame) { PB.t0 = now; PB.f0 = target; }                     // wrapped: restart the clock from the new position
+    }
+    if (target !== PB.frame && !frameSending) tlGoto(target);
+  }
+  function tlPlay() {
+    if (PB.playing) return;
+    if (PB.frame >= PB.end || PB.frame < PB.start) PB.frame = PB.start;
+    PB.playing = true; PB.t0 = performance.now(); PB.f0 = PB.frame;
+    tlRender(); tlGoto(PB.frame);
+    PB.raf = requestAnimationFrame(tlTick);
+  }
+  const tlToggle = () => (PB.playing ? tlStop() : tlPlay());
+  const tlStep = (d) => { tlStop(); tlGoto(Math.min(PB.end, Math.max(PB.start, PB.frame + d))); };
+  $("#tl-play").onclick = tlToggle;
+  $("#tl-first").onclick = () => { tlStop(); tlGoto(PB.start); };
+  $("#tl-last").onclick = () => { tlStop(); tlGoto(PB.end); };
+  $("#tl-back").onclick = () => tlStep(-1);
+  $("#tl-next").onclick = () => tlStep(1);
+  $("#tl-loop").onclick = () => { PB.loop = !PB.loop; tlSave(); tlRender(); };
+  $("#tl-slider").addEventListener("input", (e) => { if (PB.playing) { PB.t0 = performance.now(); PB.f0 = Number(e.target.value); } tlGoto(Number(e.target.value)); });
+  $("#tl-frame").addEventListener("change", (e) => { const v = Math.round(Number(e.target.value)); if (Number.isFinite(v)) { tlStop(); tlGoto(v); } });
+  for (const [id, key, lo] of [["#tl-start", "start", -1e6], ["#tl-end", "end", -1e6]]) {
+    $(id).addEventListener("change", (e) => {
+      const v = Math.round(Number(e.target.value));
+      if (Number.isFinite(v)) { PB[key] = v; if (PB.end <= PB.start) PB.end = PB.start + 1; tlSave(); tlRender(); }
+    });
+  }
+  $("#tl-fps").addEventListener("change", async (e) => {
+    const v = Number(e.target.value);
+    if (!(v >= 1 && v <= 240)) { tlRender(); return; }
+    PB.fps = v; tlSave(); PB.t0 = performance.now(); PB.f0 = PB.frame; tlRender();
+    try { await api("/api/frame", { frame: PB.frame, fps: v }); } catch (err) { /* offline */ }              // @Time = frame / fps in the engine too
+  });
+  tlRender();
   $("#frame-slider").addEventListener("input", (e) => setFrame(Number(e.target.value)));
   $("#frame-input").addEventListener("change", (e) => setFrame(Number(e.target.value)));
   $("#frame-prev").onclick = () => setFrame(Number($("#frame-input").value) - 1);
@@ -468,12 +600,14 @@
   const EXPOSABLE = new Set(["float", "int", "bool", "vec3"]);
 
   function renderParams(statusOnly) {
+    updateViewportHints();
+    updateViewportContext();
     const panel = $("#params");
     const ids = [...S.sel].filter((id) => nodeOf(id));
     document.body.classList.toggle("no-selection", ids.length === 0);
-    const key = ids.length === 1 ? ids[0] + ":" + nodeOf(ids[0]).type : ids.length ? "multi:" + ids.join(",") : "graph";
+    const key = ids.length === 1 ? ids[0] + ":" + JSON.stringify({ ...nodeOf(ids[0]), params: undefined }) + JSON.stringify(inputMembers(ids[0])) : ids.length ? "multi:" + ids.join(",") : "graph";
     const busy = scrubbing || panel.contains(document.activeElement);
-    if (key === panelKey && (busy || statusOnly)) { syncParams(ids[0]); return; }
+    if (key === panelKey && (ids.length === 1 || busy || statusOnly)) { syncParams(ids[0]); return; }
     panelKey = key;
     if (ids.length === 1) panel.replaceChildren(...nodePanel(ids[0]));
     else if (ids.length > 1) panel.replaceChildren(...multiPanel(ids));
@@ -512,7 +646,29 @@
       h("button", { onclick: () => duplicate([id]) }, "Duplicate"),
       h("button", { onclick: () => removeNodes([id]) }, "Delete"),
       t.category === "system" && t.source && h("button", { title: "Open this system's graph to edit it (saves reload it everywhere)",
-        onclick: () => openFile(t.source) }, "Edit system")));
+        onclick: () => openFile(t.source, false, { mode: "push", via: id }) }, "Edit system")));
+    if (n.type === "modifier_input") {
+      out.push(h("div", { class: "section" }, "Modifier inputs"));
+      out.push(h("div", { class: "pdoc" }, "Add object inputs here. Pick their Blender objects on the modifier, then wire the named outputs into your graph."));
+      for (const [key, child] of inputMembers(id)) {
+        out.push(h("div", { class: "pw" },
+          h("input", { type: "text", value: child.input_label || key, "aria-label": "Input name", onchange: async (e) => {
+            const label = e.target.value.trim();
+            if (label) await edit([{ op: "meta", id: key, set: { input_label: label } }]);
+          } }),
+          h("button", { title: "Remove this input and its wires", onclick: async () => {
+            await edit([{ op: "remove", id: key }]); panelKey = null; renderParams();
+          } }, "Remove")));
+      }
+      out.push(h("button", { id: "add-modifier-input", onclick: async () => {
+        const label = prompt("Object input name", "Object");
+        if (!label?.trim()) return;
+        const key = uniqueId(id + "_object_");
+        const r = await edit([{ op: "add", id: key, type: "object_input", pos: pos(id) },
+          { op: "meta", id: key, set: { input_owner: id, input_label: label.trim() } }]);
+        if (r) { panelKey = null; render(); }
+      } }, "+ Add Object Input"));
+    }
     const ins = inputs(id);
     if (ins.length) {
       out.push(h("div", { class: "section" }, "Inputs"));
@@ -527,7 +683,20 @@
       onclick: () => queueSet(id, "reset", Number(n.params?.reset || 0) + 1),
       title: "Discard this simulation and replay from its initial geometry"
     }, "Reset simulation"));
-    for (const p of t.params) out.push(paramRow(id, p));
+    let ogHeader = false;
+    for (let i = 0; i < t.params.length; i++) {
+      const p = t.params[i];
+      if (p.ui === "outgroup") {                                     // Output Groups: a checkbox and the group's name side by side, like Houdini
+        if (!ogHeader) { out.push(h("div", { class: "ogheader" }, "Output Groups")); ogHeader = true; }
+        const q = t.params[i + 1], named = q && q.ui === "outgroup_name";
+        const pair = h("div", { class: "ogpair" + (effective(id, p) ? "" : " off") }, paramRow(id, p), named ? paramRow(id, q) : null);
+        pair.addEventListener("change", (e) => { if (e.target.type === "checkbox") pair.classList.toggle("off", !e.target.checked); });
+        out.push(pair);
+        if (named) i++;
+        continue;
+      }
+      out.push(paramRow(id, p));
+    }
     out.push(h("div", { class: "section" }, "Note"));
     out.push(h("div", { class: "pw" }, h("input", { type: "text", value: n.comment || "", placeholder: "comment shown above the node",
       onchange: (e) => edit([{ op: "meta", id, set: { comment: e.target.value.trim() || null } }]) })));
@@ -626,9 +795,8 @@
       window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
     });
   }
-  function syncParams(id) {
-    // Update values in place (keeps focus and an in-progress drag) when the same node's panel is showing.
-    const panel = $("#params");
+  function syncParams(id, panel = $("#params")) {
+    // Update values in place, keeping focus and in-progress drags.
     if (!id || !nodeOf(id)) return;
     const err = panel.querySelector('[data-role="err"]');
     if (err) { const m = nodeErrorText(id); err.textContent = m; err.style.display = m ? "" : "none"; }
@@ -643,6 +811,7 @@
       else if (p.kind === "enum") set("enum", (el) => (el.value = v));
       else if (p.ui === "code") set("code", (el) => { if (!el.classList.contains("dirty")) el.value = v; });
       else set("str", (el) => (el.value = v));
+      if (p.ui === "outgroup") { const pair = row.closest(".ogpair"); if (pair) pair.classList.toggle("off", !v); }
       const lab = row.querySelector(".pl"); if (lab) lab.classList.toggle("changed", isSet(id, p));
       const rb = row.querySelector('[data-role="reset"]'); if (rb) rb.style.visibility = isSet(id, p) ? "visible" : "hidden";
       const eb = row.querySelector('[data-role="expose"]');
@@ -685,34 +854,50 @@
   let inspectTimer = null, inspectSeq = 0, inspectKey = null;
   function scheduleInspect() {
     clearTimeout(inspectTimer);
-    inspectTimer = setTimeout(runInspect, 150);
+    if (!PB.playing) inspectTimer = setTimeout(runInspect, 150);               // no inspector churn while playing
     schedulePreview();
   }
 
   // ---------------------------------------------------------------- 3-D preview of the selected (or display) node
   const pvMsg = (text) => { const m = $("#pv-msg"); m.textContent = text || ""; m.classList.toggle("hidden", !text); };
   const pv = window.MiniHouPreview ? window.MiniHouPreview.create($("#pv-canvas"), pvMsg) : null;
-  let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null;
+  let pvTimer = null, pvKey = null, pvNode = null, pvPath = null, pvOver = false;
+  let pvInFlight = false, pvDirty = false;
   function schedulePreview() {
     if (!pv || !pv.ok) return;
-    clearTimeout(pvTimer);
-    pvTimer = setTimeout(runPreview, 200);
+    // A trailing debounce starves the viewport throughout a continuous gizmo drag.
+    // Keep the first deadline, and at most one geometry request in flight. Changes
+    // during a slow cook collapse into one request for the latest state afterwards.
+    pvDirty = true;
+    if (pvTimer === null && !pvInFlight) pvTimer = setTimeout(runPreview, PB.playing ? 0 : 33);
+  }
+  function previewTarget() {
+    const ids = [...S.sel].filter((id) => nodeOf(id));
+    return ids.length === 1 ? ids[0] : displayNode();
   }
   async function runPreview() {
-    const ids = [...S.sel].filter((id) => nodeOf(id));
-    const node = ids.length === 1 ? ids[0] : displayNode();
+    pvTimer = null; pvDirty = false; pvInFlight = true;
+    try { await loadPreview(); }
+    finally {
+      pvInFlight = false;
+      if (pvDirty) schedulePreview();
+    }
+  }
+  async function loadPreview() {
+    const node = previewTarget(), documentId = S.documentId;
     $("#pv-node").textContent = node ? "· " + node : "";
     if (!node) { pv.clear(); pvMsg(""); pvKey = null; return; }
-    const key = `${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}`;
+    const key = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}`;
     if (key === pvKey) return;
     pvKey = key;
-    const seq = ++pvSeq;
     let buf;
     try {
       const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node }) });
       buf = await r.arrayBuffer();
     } catch (e) { pvKey = null; return; }
-    if (seq !== pvSeq) return;
+    // A completed frame of the same node is useful even if a newer edit arrived.
+    // Never install geometry from the previous selection or document, though.
+    if (documentId !== S.documentId || node !== previewTarget()) { pvKey = null; return; }
     const { head, arrays } = window.MiniHouPreview.parse(buf);
     if (!arrays) {
       pv.clear();
@@ -723,6 +908,7 @@
     pvMsg(empty ? "No geometry" : head.truncated ? "Showing part of a very large geometry." : "");
     pv.set(head, arrays, pvNode === node && pvPath === S.path);
     pv.setHandles(head.handles || []);
+    refreshSelectionHandles();                                                 // a kept selection moved with the geometry: so does its gizmo
     updateToolButtons();
     pvNode = node; pvPath = S.path;
   }
@@ -752,7 +938,8 @@
       { label: "Group", type: "group_create", params: (s) => ({ name: "points", domain: "points", method: "pattern", pattern: rangePattern(s.points) }) },
       { label: "Delete", key: "x", type: "blast", params: (s) => ({ group: rangePattern(s.points), domain: "points" }) }],
   };
-  const SEL_KEY = { point: "points", edge: "edges", face: "faces" };
+  const SEL_KEY = { point: "points", edge: "edges", face: "faces", piece: "faces" };
+  SELECTION_ACTIONS.piece = SELECTION_ACTIONS.face;                          // a piece is a set of faces: the same actions
   let pvSelection = { mode: "view", points: [], edges: [], faces: [] };
   async function applySelectionAction(a) {
     const s = pvSelection, node = pvNode;
@@ -764,56 +951,158 @@
   }
   function renderSelectionTools(s) {
     pvSelection = s;
+    updateViewportHints();
     const n = (s[SEL_KEY[s.mode]] || []).length;
-    $("#pv-selinfo").textContent = s.mode === "view" ? "" : `${n} ${SEL_KEY[s.mode].replace(/s$/, "")}${n === 1 ? "" : "s"} selected`;
+    $("#pv-selinfo").textContent = s.mode === "view" ? "" : s.mode === "piece" ? `${n} face${n === 1 ? "" : "s"} in the selected pieces` : `${n} ${SEL_KEY[s.mode].replace(/s$/, "")}${n === 1 ? "" : "s"} selected`;
     document.querySelectorAll("#preview [data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === s.mode));
     const box = $("#pv-actions");
     const acts = n ? SELECTION_ACTIONS[s.mode] || [] : [];
     box.classList.toggle("hidden", !acts.length);
     box.replaceChildren(...acts.map((a) => h("button", { title: a.title || `${a.label} the selection: adds a ${a.type} node after ${pvNode || "the viewed node"}`,
       dataset: { action: a.label }, onclick: () => applySelectionAction(a) }, a.label + (a.key ? ` (${a.key.toUpperCase()})` : ""))));
+    refreshSelectionHandles();
+  }
+  // ---- a selection carries a move / rotate / scale gizmo; the first drag adds a transform node for it (group = the selected points)
+  const AXV = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  function selectionGizmo(info) {
+    const c = info.center, hs = [], reach = Math.max(info.radius * 1.15, 0.05);
+    for (let i = 0; i < 3; i++) {
+      const a = "xyz"[i];
+      hs.push({ id: `translate_${a}`, label: `move ${a}`, param: "translate", comp: i, origin: c, dir: AXV[i], scale: 1, kind: "arrow", tool: "move", pending: true });
+      hs.push({ id: `rotate_${a}`, label: `rotate ${a}`, param: "rotate", comp: i, origin: c, dir: AXV[i], scale: 180 / Math.PI, kind: "ring", radius: reach, tool: "rotate", pending: true });
+      hs.push({ id: `scale_${a}`, label: `scale ${a}`, param: "scale", comp: i, origin: c, dir: AXV[i], scale: 1, kind: "scale", tool: "scale", pending: true });
+    }
+    hs.push({ id: "uniform_scale", label: "uniform scale", param: "uniform_scale", comp: null, origin: c, dir: AXV[2], scale: 1, kind: "uniform", tool: "scale", pending: true });
+    return hs;
+  }
+  function refreshSelectionHandles() {
+    if (!pv || !pv.ok) return;
+    const info = pvSelection.mode === "view" ? null : pv.selectionInfo();
+    pv.setSelectionHandles(info ? selectionGizmo(info) : []);
+    updateToolButtons();
   }
   function updateToolButtons() {
     const has = pv.hasToolHandles();
     $("#pv-xform").classList.toggle("hidden", !has);
     document.querySelectorAll("#pv-xform [data-tool]").forEach((b) => b.classList.toggle("on", b.dataset.tool === pv.tool));
   }
-  function setTool(t) { pv.setTool(t); updateToolButtons(); }
+  function updateViewportContext() {
+    const panel = $("#pv-context");
+    const ids = [...S.sel].filter((id) => nodeOf(id));
+    const id = ids.length === 1 ? ids[0] : "";
+    const key = id ? id + ":" + nodeOf(id).type : "";
+    if (panel.dataset.node !== key) {
+      panel.dataset.node = key;
+      const params = id ? typeOf(id).params.filter((p) => ["float", "int", "enum", "bool"].includes(p.kind) && p.ui !== "outgroup").slice(0, 4) : [];
+      panel.replaceChildren(...params.map((p) => paramRow(id, p)));
+      panel.classList.toggle("hidden", !params.length);
+    }
+    syncParams(id, panel);
+  }
+  function updateViewportHints() {
+    const state = $("#pv-state");
+    if (!state) return;
+    const id = [...S.sel].find((id) => nodeOf(id)), node = id && nodeOf(id);
+    const mode = pvSelection.mode;
+    const name = mode === "view" ? (node ? node.type + " · " + id : "View") : "Select " + ({ point: "points", edge: "edges", face: "faces", piece: "pieces" }[mode] || mode);
+    state.textContent = name;
+    $("#pv-hint-title").textContent = name;
+    $("#pv-hint-text").textContent = mode === "view"
+      ? "Drag: orbit · Middle/right drag: pan\nWheel: dolly · Double-click: frame all\nC: modeling tools · 1–4: component selection"
+      : "Click / drag box: select · Shift: add · Ctrl: remove\nAlt-drag / middle drag: orbit · Right drag: pan\nW / E / R: move / rotate / scale · C: modeling tools";
+  }
+  function setTool(t) { pv.setTool(t); updateToolButtons(); updateViewportHints(); }
   function toggleOrtho() {
     const on = pv.toggleOrtho();
     $("#pv-ortho").textContent = on ? "Ortho" : "Persp";
     $("#pv-ortho").classList.toggle("on", on);
   }
+  // ---- the "C" pie menu (pie.js): a tool inserts its node after the viewed node, filled in from the 3-D selection
+  let pieFromView = false;
+  function pieSelectionParams(item) {
+    const s = pvSelection;
+    if (!item.sel || !pv || !pv.ok || s.mode === "view" || !(s[SEL_KEY[s.mode]] || []).length) return {};
+    const mode = s.mode === "piece" ? "face" : s.mode;
+    let spec = item.sel[mode];
+    if (!spec) return {};
+    spec = typeof spec === "string" ? { [spec]: "$" } : { ...spec };
+    const from = spec.from || { face: "faces", point: "points", edge: "edges" }[mode];
+    delete spec.from;
+    let pattern;
+    if (from === "points") { const info = pv.selectionInfo(); pattern = info ? rangePattern(info.points) : ""; }
+    else if (from === "edges") pattern = edgePattern(s.edges);
+    else pattern = rangePattern(from === "faces" ? s.faces : s.points);
+    if (!pattern || pattern.length > 30000) return {};
+    for (const k of Object.keys(spec)) if (spec[k] === "$") spec[k] = pattern;
+    return spec;
+  }
+  async function pieTool(item, note) {
+    if (!item) { if (note) toast(note); return; }
+    const t = S.types[item.type];
+    if (!t) { toast(`This engine has no ${item.type} node.`); return; }
+    const params = { ...(item.params || {}), ...pieSelectionParams(item) };
+    if (item.center && pv && pv.ok && pvSelection.mode !== "view" && (pvSelection[SEL_KEY[pvSelection.mode]] || []).length) {
+      const info = pv.selectionInfo();
+      if (info) params[item.center] = info.center.map((v) => Math.round(v * 1e5) / 1e5);
+    }
+    const one = S.sel.size === 1 ? [...S.sel][0] : null;
+    const target = pieFromView && pvNode && nodeOf(pvNode) ? pvNode : one && nodeOf(one) ? one : pvNode && nodeOf(pvNode) ? pvNode : displayNode();
+    if (item.source || !t.inputs.length || !target) {
+      const id = uniqueId(item.type);
+      let [x, y] = pieFromView || !S.mouse ? toWorld(canvas.getBoundingClientRect().left + canvas.clientWidth / 2, canvas.getBoundingClientRect().top + canvas.clientHeight / 2) : toWorld(...S.mouse);
+      const r = await edit([{ op: "add", type: item.type, id, params, pos: [x - W / 2, y - 12] }]);
+      if (r) select([id]);
+      return;
+    }
+    const r = await edit([{ op: "insert", after: target, type: item.type, params }]);
+    if (r) { if (pv && pv.ok) pv.clearSelection(); select([r.results[0].id]); }
+  }
+  if (window.MiniPie) {
+    MiniPie.init({ types: () => S.types, onPick: pieTool, onOpen: () => { pieFromView = pvOver; },
+      blocked: () => !$("#tabmenu").classList.contains("hidden") || !$("#help").classList.contains("hidden") });
+  }
   function wireSelectionTools() {
     pv.onSelect = renderSelectionTools;
     // viewport handles: arrows in the view that scrub a parameter of the viewed node
-    const handleValue = (h) => {
-      const n = nodeOf(pvNode);
-      if (!n) return NaN;
-      const spec = (typeOf(pvNode).params || []).find((p) => p.name === h.param);
-      const v = n.params && n.params[h.param] !== undefined ? n.params[h.param] : spec ? spec.default : undefined;
-      return h.comp === null || h.comp === undefined ? Number(v) : Number(Array.isArray(v) ? v[h.comp] : NaN);
-    };
-    let handleBase = null;
-    pv.onHandleStart = (h) => {
-      const n = nodeOf(pvNode), spec = (typeOf(pvNode).params || []).find((p) => p.name === h.param);
+    let handleBase = null, gizmoNode = null;
+    const baseFor = (node, h) => {                                                       // the parameter's current value (or default) on that node
+      const n = nodeOf(node), spec = ((S.types[(n || {}).type] || {}).params || []).find((p) => p.name === h.param);
       const cur = n && n.params && n.params[h.param] !== undefined ? n.params[h.param] : spec ? spec.default : undefined;
       handleBase = Array.isArray(cur) ? cur.slice() : null;               // the other components of a vector stay as they were
-      return handleValue(h);
+      return h.comp === null || h.comp === undefined ? Number(cur) : Number(Array.isArray(cur) ? cur[h.comp] : NaN);
     };
+    async function startSelectionDrag(h) {                                // the first drag on a selection's gizmo creates the transform node
+      const info = pv.selectionInfo();
+      if (!info || !pvNode || !nodeOf(pvNode)) return NaN;
+      const pattern = rangePattern(info.points);
+      if (pattern.length > 30000) { toast("That selection is too large to write into a node; select fewer elements."); return NaN; }
+      const cur = nodeOf(pvNode);
+      if (cur.type === "transform" && (cur.params || {}).group === pattern) gizmoNode = pvNode;     // the same selection again: edit the node already there
+      else {
+        const pivot = info.center.map((v) => Math.round(v * 1e5) / 1e5);
+        const r = await edit([{ op: "insert", after: pvNode, type: "transform", params: { group: pattern, pivot } }]);
+        if (!r) return NaN;
+        gizmoNode = r.results[0].id;
+        select([gizmoNode]);
+      }
+      return baseFor(gizmoNode, h);
+    }
+    pv.onHandleStart = (h) => (h.pending ? startSelectionDrag(h) : baseFor(pvNode, h));
     pv.onHandle = (h, value) => {
-      if (!pvNode) return;
-      if (h.comp === null || h.comp === undefined) queueSet(pvNode, h.param, value);
-      else if (handleBase) { const v = handleBase.slice(); v[h.comp] = value; queueSet(pvNode, h.param, v); }
+      const node = h.pending ? gizmoNode : pvNode;
+      if (!node || !nodeOf(node)) return;
+      const spec = ((S.types[nodeOf(node).type] || {}).params || []).find((p) => p.name === h.param);
+      if (spec && spec.kind === "int") value = Math.round(value);                       // an integer parameter takes whole steps
+      if (h.comp === null || h.comp === undefined) queueSet(node, h.param, value);
+      else if (handleBase) { const v = handleBase.slice(); v[h.comp] = value; queueSet(node, h.param, v); }
     };
     document.querySelectorAll("#preview [data-mode]").forEach((b) => { b.onclick = () => pv.setMode(b.dataset.mode); });
-    let over = false;
     const wrap = $("#pv-canvas").parentElement;                         // the canvas and the overlays on it (gizmo, handles) count as one
-    wrap.addEventListener("pointerenter", () => { over = true; });
-    wrap.addEventListener("pointerleave", () => { over = false; });
+    wrap.addEventListener("pointerenter", () => { pvOver = true; });
+    wrap.addEventListener("pointerleave", () => { pvOver = false; });
     document.addEventListener("keydown", (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
-      if (!over || tag === "input" || tag === "textarea" || tag === "select") return;
+      if (!pvOver || tag === "input" || tag === "textarea" || tag === "select") return;
       const nav = { Numpad1: ["front"], Numpad3: ["right"], Numpad7: ["top"] }[e.code];          // Blender-style view keys; Ctrl = the opposite side
       if (nav && !e.altKey && !e.metaKey) { pv.viewAxis(nav[0], e.ctrlKey); e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (e.code === "Numpad5" || e.code === "NumpadDecimal" || e.key === "Home") {
@@ -822,7 +1111,12 @@
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.key.toLowerCase();
-      const mode = { "1": "point", "2": "edge", "3": "face" }[k];
+      if (k === " ") { tlToggle(); e.preventDefault(); e.stopImmediatePropagation(); return; }                        // timeline, with the pointer over the view
+      if (k === "arrowright" || k === "arrowleft") {
+        if (e.shiftKey) { tlStop(); tlGoto(k === "arrowright" ? PB.end : PB.start); } else tlStep(k === "arrowright" ? 1 : -1);
+        e.preventDefault(); e.stopImmediatePropagation(); return;
+      }
+      const mode = { "1": "point", "2": "edge", "3": "face", "4": "piece" }[k];
       if (mode) { pv.setMode(mode); e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (k === "escape") {
         if (pvSelection.mode !== "view" && !(pvSelection[SEL_KEY[pvSelection.mode]] || []).length) pv.setMode("view"); else pv.clearSelection();
@@ -835,10 +1129,16 @@
     }, true);
   }
   if (pv && pv.ok) {
-    for (const [id, key] of [["#pv-shaded", "shaded"], ["#pv-edges", "edges"], ["#pv-points", "points"]]) {
+    for (const [id, key] of [["#pv-shaded", "shaded"], ["#pv-edges", "edges"], ["#pv-points", "points"], ["#pv-normals", "normals"]]) {
       $(id).checked = pv.opt[key];
       $(id).onchange = (e) => { pv.opt[key] = e.target.checked; pv.redraw(); };
     }
+    $("#pv-frame-all").onclick = () => pv.frameAll();
+    $("#pv-view-extra").onchange = (e) => { if (e.target.value) pv.viewAxis(e.target.value, false); e.target.value = ""; };
+    $("#pv-hints-toggle").onclick = (e) => {
+      const hidden = $("#pv-hints").classList.toggle("hidden");
+      e.currentTarget.setAttribute("aria-pressed", String(!hidden));
+    };
     $("#pv-frame").onclick = () => pv.frameSelection();
     document.querySelectorAll("#preview [data-view]").forEach((b) => { b.onclick = () => pv.viewAxis(b.dataset.view, false); });
     $("#pv-ortho").onclick = () => toggleOrtho();
@@ -921,6 +1221,7 @@
     const expanded = new Set(ids);
     for (const id of ids) {
       const n = nodeOf(id);
+      for (const [member] of inputMembers(id)) expanded.add(member);
       const end = n.type === "loop_end" ? id : n.type === "loop_begin"
         ? Object.keys(S.graph.nodes).find(k => nodeOf(k).type === "loop_end" && nodeOf(k).inputs?.begin === id) : null;
       if (end) for (const member of loopRegion(end)) expanded.add(member);
@@ -933,6 +1234,8 @@
       ops.push({ op: "add", id: map[id], type: n.type, params: n.params || {}, pos: [x + 40, y + 40], comment: n.comment || undefined });
     }
     for (const id of ids) {
+      const n = nodeOf(id);
+      if (inputOwner(id) && map[n.input_owner]) ops.push({ op: "meta", id: map[id], set: { input_owner: map[n.input_owner], input_label: n.input_label || id } });
       for (const [spec, srcs] of inputs(id)) for (const s of srcs) ops.push({ op: "connect", from: map[s] || s, to: map[id], port: spec.name });
     }
     const r = await edit(ops);
@@ -961,6 +1264,7 @@
   // ---- copy / cut / paste: nodes travel as JSON text, so they can move between graphs and editor windows
   const CLIP_KEY = "minihou.clip", CLIP_LIMIT = 500;
   function clipboardText(ids) {
+    ids = [...new Set(ids.concat(ids.flatMap(id => inputMembers(id).map(([key]) => key))))];
     const keep = new Set(ids), nodes = {};
     for (const id of ids) {
       const n = nodeOf(id), ins = {};
@@ -968,7 +1272,7 @@
         const inner = srcs.filter((s) => keep.has(s));
         if (inner.length) ins[spec.name] = Array.isArray((n.inputs || {})[spec.name]) ? inner : inner[0];
       }
-      nodes[id] = { type: n.type, params: n.params || {}, inputs: ins, pos: pos(id), comment: n.comment || undefined };
+      nodes[id] = { type: n.type, params: n.params || {}, inputs: ins, pos: pos(id), comment: n.comment || undefined, input_owner: keep.has(n.input_owner) ? n.input_owner : undefined, input_label: n.input_label };
     }
     return JSON.stringify({ minihou: "nodes", version: 1, nodes });
   }
@@ -1009,6 +1313,8 @@
       return op;
     });
     for (const id of ok) {
+      const n = d.nodes[id];
+      if (n.type === "object_input" && map[n.input_owner]) ops.push({ op: "meta", id: map[id], set: { input_owner: map[n.input_owner], input_label: n.input_label || id } });
       for (const [port, ref] of Object.entries(d.nodes[id].inputs || {})) {
         for (const src of Array.isArray(ref) ? ref : [ref]) if (okSet.has(src)) ops.push({ op: "connect", from: map[src], to: map[id], port });
       }
@@ -1334,6 +1640,12 @@
     const hdr = e.target.closest(".netbox .title");
     if (hdr) { renameBox(hdr.closest(".netbox").dataset.id); e.stopImmediatePropagation(); }
   });
+  canvas.addEventListener("dblclick", (e) => {                                      // double-click a group (system) node: open it, with a breadcrumb back
+    const el = e.target.closest(".node");
+    if (!el) return;
+    const id = el.dataset.id, t = typeOf(id);
+    if (t.category === "system" && t.source) { e.stopImmediatePropagation(); openFile(t.source, false, { mode: "push", via: id }); }
+  });
   canvas.addEventListener("dblclick", (e) => { if (!e.target.closest(".node") && !e.target.closest(".netbox")) openMenu(e.clientX, e.clientY, { world: toWorld(e.clientX, e.clientY) }); });
   canvas.addEventListener("contextmenu", (e) => { e.preventDefault(); if (!e.target.closest(".node")) openMenu(e.clientX, e.clientY, { world: toWorld(e.clientX, e.clientY) }); });
   canvas.addEventListener("wheel", (e) => {
@@ -1350,6 +1662,7 @@
 
   // ---------------------------------------------------------------- keyboard
   document.addEventListener("keydown", (e) => {
+    if (e.altKey && e.key === "ArrowUp" && !/^(input|textarea|select)$/i.test(e.target.tagName || "")) { e.preventDefault(); goUp(); return; }   // out of a nested group
     const menuOpen = !$("#tabmenu").classList.contains("hidden");
     if (menuOpen) {
       if (e.key === "Escape") { closeMenu(); e.preventDefault(); }
@@ -1415,10 +1728,12 @@
     menu.classList.remove("hidden");
   };
   document.addEventListener("click", (e) => { if (!e.target.closest(".file")) $("#file-menu").classList.add("hidden"); });
-  async function openFile(path, create) {
+  async function openFile(path, create, nav) {
     $("#file-menu").classList.add("hidden");
+    S.nav = nav || null;
     try { const snap = await api("/api/open", { path, create: !!create }); S.sel.clear(); applySnapshot(snap); }
     catch (e) { toast(e.message); }
+    S.nav = null;
   }
   function newFile() {
     let name = prompt("New graph file (inside " + (S.root || "the workspace") + "):", "graphs/my_system.json");
@@ -1516,5 +1831,5 @@
   applyView();
   try { recoveryButton(); } catch (e) { /* Browser storage may be disabled. */ }
   connectEvents();
-  window.minihou = { S, edit, frame, clipboardText, pasteNodes, preview: pv, layout };                  // handy from the browser console
+  window.minihou = { desktopCanClose: () => { document.activeElement?.blur(); return !desktopPendingEdits && !setInFlight && !pendingSet.size; }, S, edit, frame, clipboardText, pasteNodes, preview: pv, layout };                  // handy from the browser console
 })();

@@ -7,6 +7,8 @@ import math
 
 import numpy as np
 import threading
+import uuid
+from .live import LiveModifier, input_token, object_feeds
 from pathlib import Path
 
 from ..evaluator import Cache, Evaluator
@@ -24,6 +26,9 @@ class InstanceManager:
     def __init__(self, session):
         self.session = session
         self.instances = {}
+        self.documents = {}
+        self.sources = {}
+        self.owner_id = uuid.uuid4().hex
         self.lock = threading.RLock()
 
     def clear(self):
@@ -31,9 +36,17 @@ class InstanceManager:
             for evaluator in self.instances.values():
                 evaluator.close()
             self.instances.clear()
+            for doc in self.documents.values():
+                self.session.disconnect_modifier(doc)
+            self.documents.clear()
+            self.sources.clear()
 
     def remove(self, instance_id):
         with self.lock:
+            self.sources.pop(instance_id, None)
+            doc = self.documents.pop(instance_id, None)
+            if doc is not None:
+                self.session.disconnect_modifier(doc)
             evaluator = self.instances.pop(instance_id, None)
             if evaluator is not None:
                 evaluator.close()
@@ -70,6 +83,77 @@ class InstanceManager:
             raise ValueError("modifier graphs require a top-level modifier_input node; replacement-only generators are not stack modifiers")
         return graph
 
+    def set_sources(self, ident, sources):
+        if not isinstance(ident, str) or not ident or len(ident) > 256:
+            raise ValueError("invalid modifier identity")
+        if len(sources) > 64 or (ident not in self.sources and len(self.sources) >= 256):
+            raise ValueError("too many object inputs")
+        for geo in sources.values():
+            geo.validate()
+            if not np.isfinite(geo.P).all():
+                raise ValueError("source point positions must be finite")
+        with self.lock, self.session.lock:
+            self.sources[ident] = {k: g.freeze() for k, g in sources.items()}
+            doc = self.documents.get(ident)
+            if doc is not None:
+                doc.sources = self.sources[ident]
+                if self.session.live_modifier is doc:
+                    self.session._rev += 1
+                    self.session._wake.set()
+        return {"type": "instance_sources_set"}
+
+    def edit_live(self, h, geometry):
+        ident = h.get("instance_id")
+        if not isinstance(ident, str) or not ident or len(ident) > 256:
+            raise ValueError("invalid modifier identity")
+        frame, fps = float(h.get("frame", 1)), float(h.get("fps", 24))
+        if not math.isfinite(frame) or not math.isfinite(fps) or fps <= 0:
+            raise ValueError("frame and fps must be finite, and fps must be positive")
+        graph = self._graph(h)
+        for name, value in (h.get("params") or {}).items():
+            graph.set_exposed(name, value)
+        if not np.isfinite(geometry.P).all():
+            raise ValueError("input point positions must be finite")
+        with self.lock:
+            doc = self.documents.get(ident)
+            if doc is None:
+                if len(self.documents) >= 256:
+                    raise ValueError("maximum 256 live modifier documents per connection")
+                root = getattr(self.session, "editor_root", None)
+                if root is None:
+                    raise ValueError("Start the HTTP editor before editing a modifier")
+                key = hashlib.sha256((self.owner_id + ident).encode()).hexdigest()[:24]
+                doc = LiveModifier(ident, str(h.get("label") or "Blender modifier")[:160], graph,
+                                   root / "graphs" / ("Blender-" + key + ".json"))
+                self.documents[ident] = doc
+            self.session.modifier_input(doc, geometry, input_token(geometry), frame, fps)
+            doc.sources = self.sources.get(ident, {})
+            self.session.bind_modifier(doc)
+            return self.sync_live(h)
+
+    def sync_live(self, h):
+        with self.lock, self.session.lock:
+            doc = self.documents.get(h.get("instance_id"))
+            if doc is None:
+                return {"type": "instance_synced", "live": False}
+            # Only explicitly changed Blender controls override browser edits.
+            incoming = h.get("params") or {}
+            graph = doc.graph.copy()
+            changed = False
+            for name, value in incoming.items():
+                if name in doc.sent_params and not _same_parameter(value, doc.sent_params[name]):
+                    if any(p["name"] == name for p in graph.interface()):
+                        graph.set_exposed(name, value)
+                        changed = True
+            if changed:
+                doc.graph = graph
+                if self.session.live_modifier is doc:
+                    self.session.replace_graph(graph, origin="modifier", save=True)
+            interface = doc.graph.interface()
+            doc.sent_params = {p["name"]: p["value"] for p in interface}
+            return {"type": "instance_synced", "live": True, "graph": doc.graph.to_dict(),
+                    "interface": interface, "path": str(doc.path)}
+
     def describe(self, h):
         graph = self._graph(h)
         return {"type": "instance_description", "interface": graph.interface(), "graph": graph.to_dict()}
@@ -85,6 +169,9 @@ class InstanceManager:
         if not np.isfinite(geometry.P).all():
             raise ValueError("input point positions must be finite")
         with self.lock:
+            doc = self.documents.get(instance_id)
+            if doc is not None:
+                self.session.modifier_input(doc, geometry, input_token(geometry), frame, fps)
             graph = self._graph(h)
             params = h.get("params") or {}
             if not isinstance(params, dict):
@@ -108,6 +195,7 @@ class InstanceManager:
             token = digest.hexdigest()
             feeds = {nid: (token, geometry.freeze()) for nid, node in graph.nodes.items()
                      if node.type == "modifier_input"}
+            feeds.update(object_feeds(graph, self.sources.get(instance_id, {})))
             with without_object_inputs():
                 result = evaluator.cook(graph, feeds=feeds, frame=frame, fps=fps)
             result.validate()
@@ -116,3 +204,16 @@ class InstanceManager:
             header, arrays = DiffState().build(result, 1)
             header.update(type="instance_result", interface=graph.interface())
             return header, arrays
+
+
+def _same_parameter(a, b):
+    """Blender stores scalar/vector controls as float32; ignore transport rounding."""
+    import struct
+    if isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)):
+        return len(a) == len(b) and all(_same_parameter(x, y) for x, y in zip(a, b))
+    if isinstance(a, float) or isinstance(b, float):
+        try:
+            return struct.pack("f", a) == struct.pack("f", b)
+        except (OverflowError, TypeError):
+            return a == b
+    return a == b

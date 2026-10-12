@@ -1,0 +1,150 @@
+{
+ "version": 1,
+ "doc": "fillet + blend. A zig-zag path has its corners rounded by fillet and is swept into a tube; a flat grid morphs towards a noisy copy with blend, its weight an expression of @Time so scrubbing the timeline (or playing it under the 3-D view) grows the hills.",
+ "nodes": {
+  "path": {
+   "type": "curve",
+   "params": {
+    "points": "0,0,0 2,0,0 2,2,0 4,2,0 4,4,0 6,4,0 6,2,1 8,2,1",
+    "closed": false
+   },
+   "pos": [
+    0,
+    0
+   ]
+  },
+  "round": {
+   "type": "fillet",
+   "inputs": {
+    "geo": "path"
+   },
+   "params": {
+    "radius": 0.6,
+    "divisions": 8
+   },
+   "pos": [
+    0,
+    110
+   ]
+  },
+  "pipe": {
+   "type": "sweep",
+   "inputs": {
+    "geo": "round"
+   },
+   "params": {
+    "radius": 0.12,
+    "divisions": 12
+   },
+   "pos": [
+    0,
+    220
+   ]
+  },
+  "flat": {
+   "type": "grid",
+   "params": {
+    "size_x": 8.0,
+    "size_y": 8.0,
+    "rows": 40,
+    "columns": 40
+   },
+   "pos": [
+    300,
+    0
+   ]
+  },
+  "hills": {
+   "type": "noise",
+   "inputs": {
+    "geo": "flat"
+   },
+   "params": {
+    "amplitude": [
+     0.0,
+     0.0,
+     1.2
+    ],
+    "frequency": 0.5
+   },
+   "pos": [
+    420,
+    110
+   ]
+  },
+  "grow": {
+   "type": "blend",
+   "inputs": {
+    "geo": "flat",
+    "targets": [
+     "hills"
+    ]
+   },
+   "params": {
+    "weights": "smoothstep(1, 49, @Frame)"
+   },
+   "pos": [
+    300,
+    220
+   ]
+  },
+  "place": {
+   "type": "transform",
+   "inputs": {
+    "geo": "grow"
+   },
+   "params": {
+    "translate": [
+     0.0,
+     7.0,
+     0.0
+    ]
+   },
+   "pos": [
+    300,
+    330
+   ]
+  },
+  "all": {
+   "type": "merge",
+   "inputs": {
+    "geos": [
+     "pipe",
+     "place"
+    ]
+   },
+   "pos": [
+    150,
+    440
+   ]
+  },
+  "out": {
+   "type": "output",
+   "inputs": {
+    "geo": "all"
+   },
+   "pos": [
+    150,
+    550
+   ]
+  }
+ },
+ "display": "out",
+ "exposed": [
+  {
+   "name": "Corner Radius",
+   "node": "round",
+   "param": "radius"
+  },
+  {
+   "name": "Arc Divisions",
+   "node": "round",
+   "param": "divisions"
+  },
+  {
+   "name": "Hill Strength",
+   "node": "grow",
+   "param": "amount"
+  }
+ ]
+}

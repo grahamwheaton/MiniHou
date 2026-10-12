@@ -3,7 +3,7 @@
 Used by the editor's "Blender" panel and by the packed app, so a user never has to touch ``Preferences > Add-ons``:
 
 * :func:`list_blenders` -- installed Blender executables (newest first).
-* :func:`build_addon_zip` -- the add-on as a zip (``minihou_link/`` at its top level) for dragging into Blender.
+* :func:`build_addon_zip` -- the add-on as a zip (``minihou_link/`` at its top level) for Blender Install from Disk.
 * :func:`install_addon` -- runs the chosen Blender in the background once, unpacks the add-on into its user add-ons folder,
   enables it and saves the preferences.
 * :func:`launch_blender` -- opens Blender with the add-on registered straight from a copy and connected to this engine.
@@ -127,7 +127,7 @@ def addon_files(src: Path) -> List[Path]:
 
 
 def build_addon_zip() -> bytes:
-    """The add-on as a zip with ``minihou_link/`` at the top level (Blender's Install from Disk and drag-and-drop layout)."""
+    """The add-on as a zip with ``minihou_link/`` at the top level (Blender's Install from Disk layout)."""
     src = addon_source()
     if src is None:
         raise FileNotFoundError("the Blender add-on files are not part of this installation")

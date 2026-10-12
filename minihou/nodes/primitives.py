@@ -2,26 +2,32 @@
 import numpy as np
 
 from ..geometry import Geometry, Topology
-from ..sdk import Bool, Float, Int, Vec3, node
+from ..outgroups import OutGroup, OutGroups
+from ..sdk import Bool, Float, Handle, Int, Vec3, node
 from . import _build as B
 from ._util import euler_xyz_matrix
 
 
-def fuse_points(geo: Geometry, distance: float) -> Geometry:
+def fuse_points(geo: Geometry, distance: float, counts_out: list = None) -> Geometry:
     """Weld points closer than ``distance`` (grid-snapped: points in the same cell of size ``distance`` merge).
     The first point of each cluster is kept with its attributes; primitives are re-pointed. Degenerate repeated
-    vertices inside a primitive are left as they are."""
+    vertices inside a primitive are left as they are. ``counts_out`` (a list) receives, per surviving point, how many
+    points it stands for."""
     if geo.npoints == 0:
+        if counts_out is not None:
+            counts_out.append(np.zeros(0, np.int64))
         return geo
     d = max(float(distance), 1e-12)
     key = np.floor(geo.P.astype(np.float64) / d + 0.5).astype(np.int64)
-    _, first, inverse = np.unique(key, axis=0, return_index=True, return_inverse=True)
+    _, first, inverse, cluster = np.unique(key, axis=0, return_index=True, return_inverse=True, return_counts=True)
     inverse = inverse.reshape(-1)
     order = np.argsort(first)                       # keep original point order of the survivors
     rank = np.empty_like(order)
     rank[order] = np.arange(order.shape[0])
     remap = rank[inverse]
     keep_idx = first[order]
+    if counts_out is not None:
+        counts_out.append(cluster[order])
     out = Geometry(keep_idx.shape[0], Topology(remap[geo.topology.vertex_point].astype(np.int32),
                                                 geo.topology.prim_offsets, geo.topology.closed))
     for name, a in geo.point.items():
@@ -34,10 +40,20 @@ def fuse_points(geo: Geometry, distance: float) -> Geometry:
     return out
 
 
-@node("fuse", inputs=["geo"], category="modify", params=[Float("distance", 0.001, min=0.0, soft_max=1.0)])
-def fuse(geo, distance):
+FUSE_OUT = OutGroups(
+    OutGroup("fused", "Fused Points", "fusedpoints", "point", doc="Points that stand for two or more welded points"),
+    OutGroup("unique", "Unique Points", "uniquepoints", "point", doc="Points that were not welded to anything"),
+)
+
+
+@node("fuse", inputs=["geo"], category="modify", params=[Float("distance", 0.001, min=0.0, soft_max=1.0), *FUSE_OUT.params()])
+def fuse(geo, distance, **og):
     """Weld points that lie within ``distance`` of each other (snapped to a grid of that size)."""
-    return fuse_points(geo, distance)
+    counts = []
+    out = fuse_points(geo, distance, counts)
+    c = counts[0] if counts else np.zeros(0, np.int64)
+    out = FUSE_OUT.write(out, og, "fused", lambda: c > 1)
+    return FUSE_OUT.write(out, og, "unique", lambda: c == 1)
 
 
 def _face_grid(n):
@@ -137,7 +153,9 @@ def _ring_quads(rows, columns, wrap_rows):
     Int("rows", 1, min=1, max=4096, soft_max=100, doc="segments along the height"),
     Int("columns", 24, min=3, max=4096, soft_max=200, doc="segments around"),
     Bool("caps", True, doc="Close the ends with n-gons (a zero radius ends in a point instead)"),
-])
+], handles=[Handle("radius_bottom", axis="x", at="bottom", reach=True, min=0.0),
+            Handle("radius_top", axis="x", at="top", reach=True, min=0.0),
+            Handle("height", axis="z", at="top", scale=2.0, min=0.0)])         # the tube grows both ways from its centre
 def tube(radius_bottom, radius_top, height, center, rows, columns, caps):
     """Cylinder or cone along +Z (Houdini's Tube), outward-facing, with vertex uvs; closed when ``caps`` is on."""
     t = np.linspace(0.0, 1.0, rows + 1)

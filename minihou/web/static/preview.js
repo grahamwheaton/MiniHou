@@ -118,11 +118,19 @@ window.MiniHouPreview = (() => {
     }
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sedIdx); gl.bindVertexArray(null);
     const faceIdx = gl.createBuffer();
+    // normals overlay: one line per primitive from its centre along its normal (from the winding), and a dot at the tip
+    const nrmVao = gl.createVertexArray(), nrmBuf = gl.createBuffer(), tipVao = gl.createVertexArray(), tipBuf = gl.createBuffer();
+    for (const [vo, bu] of [[nrmVao, nrmBuf], [tipVao, tipBuf]]) {
+      gl.bindVertexArray(vo); gl.bindBuffer(gl.ARRAY_BUFFER, bu); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+    }
+    gl.bindVertexArray(null);
+    let nrmCount = 0, nrmDirty = true, nrmLines = new Float32Array(0);
+    const MAX_NORMALS = 100000;
     const ov = { points: 0, edgeIdx: 0, faceIdx: 0 };
 
     const view = { yaw: -0.6, pitch: 0.45, dist: 5, target: [0, 0, 0], ortho: false };
     const PITCH_MAX = 1.5707, FOV = Math.PI / 4, ORTHO_FOV = 0.03;     // "orthographic" is a very narrow lens far away: the same maths, so picking and handles keep working
-    const opt = { shaded: true, edges: true, points: false };
+    const opt = { shaded: true, edges: true, points: false, normals: false };
     let data = { npoints: 0, ntris: 0, nedges: 0, hasCd: false, bounds: [[-1, -1, -1], [1, 1, 1]] };
     let raw = null;                                                  // the geometry's typed arrays, for picking
     let raf = 0;
@@ -134,7 +142,7 @@ window.MiniHouPreview = (() => {
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arrays.tri, gl.STATIC_DRAW);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, edgeBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arrays.edge, gl.STATIC_DRAW);
       data.npoints = arrays.P.length / 3; data.ntris = arrays.tri.length / 3; data.nedges = arrays.edge.length / 2;
-      data.bounds = head.bounds;
+      data.bounds = head.bounds; nrmDirty = true;
       raw = { P: arrays.P, tri: arrays.tri, edge: arrays.edge, triPrim: arrays.tri_prim || new Uint32Array(arrays.tri.length / 3) };
       Object.assign(api, { tris: data.ntris, edges: data.nedges, points: data.npoints });
     }
@@ -241,6 +249,30 @@ window.MiniHouPreview = (() => {
       }
       return null;
     }
+    function ensurePieces() {                                        // connected pieces: faces that share points (union-find over the triangles)
+      if (raw.facePiece) return;
+      const np = raw.P.length / 3, parent = new Int32Array(np).map((_, i) => i);
+      const find = (a) => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+      const T = raw.tri, union = (x, y) => { const a = find(x), b = find(y); if (a !== b) parent[b] = a; };
+      for (let i = 0, n = T.length / 3; i < n; i++) { union(T[3 * i], T[3 * i + 1]); union(T[3 * i], T[3 * i + 2]); }
+      let nf = 0;
+      for (let i = 0; i < raw.triPrim.length; i++) if (raw.triPrim[i] >= nf) nf = raw.triPrim[i] + 1;
+      const facePiece = new Int32Array(nf).fill(-1), ids = new Map(), pieces = [];
+      for (let i = 0; i < raw.triPrim.length; i++) {
+        const f = raw.triPrim[i];
+        if (facePiece[f] >= 0) continue;
+        const root = find(T[3 * i]);
+        if (!ids.has(root)) { ids.set(root, pieces.length); pieces.push([]); }
+        facePiece[f] = ids.get(root); pieces[ids.get(root)].push(f);
+      }
+      raw.facePiece = facePiece; raw.pieces = pieces;
+    }
+    function piecesOf(faces) {                                       // every face of every piece that one of these faces belongs to
+      ensurePieces();
+      const hit = new Set(), out = [];
+      for (const f of faces) { const p = raw.facePiece[f]; if (p >= 0 && !hit.has(p)) { hit.add(p); for (const g of raw.pieces[p]) out.push(g); } }
+      return out;
+    }
     function pickFace(cam, sx, sy) {
       const hit = raycast(cam.eye, rayAt(cam, sx, sy));
       return hit ? raw.triPrim[hit.tri] : -1;
@@ -264,7 +296,7 @@ window.MiniHouPreview = (() => {
           if (sp[3 * a + 2] < 0 || sp[3 * b + 2] < 0 || sp[3 * c + 2] < 0) continue;
           if (inside((sp[3 * a] + sp[3 * b] + sp[3 * c]) / 3, (sp[3 * a + 1] + sp[3 * b + 1] + sp[3 * c + 1]) / 3)) faces.add(raw.triPrim[i]);
         }
-        out.faces = [...faces];
+        out.faces = sel.mode === "piece" ? piecesOf(faces) : [...faces];
       }
       return out;
     }
@@ -331,6 +363,47 @@ window.MiniHouPreview = (() => {
       gl.disable(gl.BLEND);
     }
 
+
+    function buildNormals() {
+      nrmDirty = false; nrmCount = 0;
+      if (!raw || !raw.tri.length) return;
+      const T = raw.tri, P = raw.P, TP = raw.triPrim;
+      let np = 0;
+      for (let i = 0; i < TP.length; i++) if (TP[i] >= np) np = TP[i] + 1;
+      const acc = new Float64Array(np * 7);                                  // area-weighted normal sum, centroid sum, weight sum per primitive
+      for (let i = 0, n = T.length / 3; i < n; i++) {
+        const a = T[3 * i] * 3, b = T[3 * i + 1] * 3, c = T[3 * i + 2] * 3;
+        const e1x = P[b] - P[a], e1y = P[b + 1] - P[a + 1], e1z = P[b + 2] - P[a + 2], e2x = P[c] - P[a], e2y = P[c + 1] - P[a + 1], e2z = P[c + 2] - P[a + 2];
+        const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x, w = Math.hypot(nx, ny, nz), k = TP[i] * 7;
+        acc[k] += nx; acc[k + 1] += ny; acc[k + 2] += nz;
+        acc[k + 3] += w * (P[a] + P[b] + P[c]) / 3; acc[k + 4] += w * (P[a + 1] + P[b + 1] + P[c + 1]) / 3; acc[k + 5] += w * (P[a + 2] + P[b + 2] + P[c + 2]) / 3; acc[k + 6] += w;
+      }
+      const [lo, hi] = data.bounds, L = Math.max(Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) * 0.04, 1e-6);
+      const step = Math.max(1, Math.ceil(np / MAX_NORMALS)), lines = [], tips = [];
+      for (let q = 0; q < np; q += step) {
+        const k = q * 7, w = acc[k + 6], len = Math.hypot(acc[k], acc[k + 1], acc[k + 2]);
+        if (w <= 0 || len <= 0) continue;
+        const cx = acc[k + 3] / w, cy = acc[k + 4] / w, cz = acc[k + 5] / w, tx = cx + acc[k] / len * L, ty = cy + acc[k + 1] / len * L, tz = cz + acc[k + 2] / len * L;
+        lines.push(cx, cy, cz, tx, ty, tz); tips.push(tx, ty, tz);
+      }
+      gl.bindBuffer(gl.ARRAY_BUFFER, nrmBuf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(lines), gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ARRAY_BUFFER, tipBuf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(tips), gl.STATIC_DRAW);
+      nrmCount = tips.length / 3;
+      nrmLines = new Float32Array(lines);
+      api.normalCount = nrmCount;
+    }
+    function drawNormals(cam) {
+      if (nrmDirty) buildNormals();
+      if (!nrmCount) return;
+      gl.useProgram(colorProg.p);
+      gl.uniformMatrix4fv(colorProg.u.uMV, false, cam.MV); gl.uniformMatrix4fv(colorProg.u.uP, false, cam.P);
+      gl.uniform1f(colorProg.u.uBias, 0.0006); gl.uniform4f(colorProg.u.uColor, 0.25, 0.85, 0.95, 1);
+      gl.bindVertexArray(nrmVao); gl.drawArrays(gl.LINES, 0, nrmCount * 2);
+      gl.uniform1f(colorProg.u.uPointSize, 5);
+      gl.bindVertexArray(tipVao); gl.drawArrays(gl.POINTS, 0, nrmCount);
+      gl.uniform1f(colorProg.u.uPointSize, 4);
+    }
+
     function draw() {
       raf = 0;
       resize();
@@ -369,6 +442,7 @@ window.MiniHouPreview = (() => {
         gl.drawArrays(gl.POINTS, 0, data.npoints);
       }
       drawSelection(cam);
+      if (opt.normals) { gl.bindVertexArray(null); drawNormals(cam); }
       gl.bindVertexArray(null);
       renderHandles(cam);
     }
@@ -379,7 +453,7 @@ window.MiniHouPreview = (() => {
     const hsvg = document.createElementNS(SVGNS, "svg");
     hsvg.setAttribute("class", "pv-handles");
     canvas.parentElement.append(hsvg);
-    let handles = [], pendingHandles = null, handleDrag = null;
+    let handles = [], pendingHandles = null, handleDrag = null, selHandles = [], pendingSel = null;   // selHandles: the move/rotate/scale gizmo of a selection (they win while something is selected)
     const AXIS_COLOUR = { 0: "#ff5d5d", 1: "#4cc38a", 2: "#4aa3ff" };
     const svg = (tag, attrs) => { const el = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); return el; };
     function handleGeometry(cam, h) {                                // {s0, tip, u, ppu} in canvas pixels, or null when unusable
@@ -401,7 +475,7 @@ window.MiniHouPreview = (() => {
       return [o[0] + u[0] * c + v[0] * d, o[1] + u[1] * c + v[1] * d, o[2] + u[2] * c + v[2] * d];
     }
     const RING_STEPS = 72;
-    const shown = () => handles.filter((h) => !h.tool || h.tool === api.tool);
+    const shown = () => (selHandles.length ? selHandles : handles).filter((h) => !h.tool || h.tool === api.tool);
     function renderHandles(cam) {
       hsvg.setAttribute("width", cam.w); hsvg.setAttribute("height", cam.h);
       const kids = [];
@@ -447,55 +521,71 @@ window.MiniHouPreview = (() => {
       hsvg.replaceChildren(...kids);
     }
     function startHandleDrag(e, h) {
+      // Add/subtract selection must reach geometry even when a handle overlaps it.
+      if (sel.mode !== "view" && (e.shiftKey || e.ctrlKey || e.metaKey)) {
+        e.stopPropagation(); beginCanvasDrag(e); return;
+      }
       e.preventDefault(); e.stopPropagation();
       const cam = camera();
       if (!api.onHandleStart) return;
-      const base = api.onHandleStart(h);
-      if (typeof base !== "number" || !Number.isFinite(base)) return;
       const r = canvas.getBoundingClientRect();
       const x0 = e.clientX - r.left, y0 = e.clientY - r.top;
-      handleDrag = { h, base, value: base };
-      let measure;                                                  // pointer position (canvas pixels) -> the new value
-      if (h.kind === "ring") {                                      // the angle of the pointer around the ring, from where the ray meets its plane
-        const { u, v } = ringBasis(h), o = h.origin, n = h.dir;
-        const angleAt = (x, y) => {
-          const ray = rayAt(cam, x, y), den = dot(ray, n);
-          if (Math.abs(den) < 0.05) return null;                    // looking along the ring's plane: no stable angle
-          const t = dot(sub(o, cam.eye), n) / den, rel = sub([cam.eye[0] + ray[0] * t, cam.eye[1] + ray[1] * t, cam.eye[2] + ray[2] * t], o);
-          return Math.atan2(dot(rel, v), dot(rel, u));
-        };
-        let prev = angleAt(x0, y0), total = 0;
-        measure = (x, y) => {
-          const a = angleAt(x, y);
-          if (a === null || prev === null) { if (a !== null) prev = a; return base + total * h.scale; }
-          let d = a - prev;
-          if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
-          total += d; prev = a;
-          return base + total * h.scale;
-        };
-      } else if (h.kind === "uniform") {
-        measure = (x, y) => base * Math.exp(((x - x0) - (y - y0)) / 120);
-      } else {
-        const g = handleGeometry(cam, h);
-        if (!g) { handleDrag = null; return; }
-        const along = (x, y) => (x - x0) * g.u[0] + (y - y0) * g.u[1];
-        measure = h.kind === "scale" ? (x, y) => base * Math.exp(along(x, y) / 64) : (x, y) => base + (along(x, y) / g.ppu) * h.scale;
-      }
+      const drag = handleDrag = { h, base: NaN, value: NaN, measure: null, last: null, released: false };
+      let finished = false;
       const move = (ev) => {
-        let v = measure(ev.clientX - r.left, ev.clientY - r.top);
+        const x = ev.clientX - r.left, y = ev.clientY - r.top;
+        if (!drag.measure) { drag.last = [x, y]; return; }                      // the node is still being created: remember where the pointer is
+        let v = drag.measure(x, y);
         if (h.min !== undefined) v = Math.max(h.min, v);
         if (h.max !== undefined) v = Math.min(h.max, v);
         v = Math.round(v * 1e5) / 1e5;
-        if (v !== handleDrag.value) { handleDrag.value = v; if (api.onHandle) api.onHandle(h, v, false); }
+        if (v !== drag.value) { drag.value = v; if (api.onHandle) api.onHandle(h, v, false); }
       };
-      const up = () => {
-        window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
-        const d = handleDrag; handleDrag = null;
-        if (api.onHandle) api.onHandle(d.h, d.value, true);
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up);
+        if (api.onHandle && Number.isFinite(drag.value)) api.onHandle(drag.h, drag.value, true);
+        handleDrag = null;
         if (pendingHandles) { handles = pendingHandles; pendingHandles = null; }
+        if (pendingSel) { selHandles = pendingSel; pendingSel = null; }
         schedule();
       };
-      window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+      const up = () => { drag.released = true; if (drag.measure) finish(); };
+      window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
+      const begin = (base) => {                                                 // base: the parameter's value when the drag starts
+        if (typeof base !== "number" || !Number.isFinite(base)) { drag.released = true; finish(); handleDrag = null; return; }
+        drag.base = base; drag.value = base;
+        if (h.kind === "ring") {                                                // the angle of the pointer around the ring, from where the ray meets its plane
+          const { u, v } = ringBasis(h), o = h.origin, n = h.dir;
+          const angleAt = (x, y) => {
+            const ray = rayAt(cam, x, y), den = dot(ray, n);
+            if (Math.abs(den) < 0.05) return null;                              // looking along the ring's plane: no stable angle
+            const t = dot(sub(o, cam.eye), n) / den, rel = sub([cam.eye[0] + ray[0] * t, cam.eye[1] + ray[1] * t, cam.eye[2] + ray[2] * t], o);
+            return Math.atan2(dot(rel, v), dot(rel, u));
+          };
+          let prev = angleAt(x0, y0), total = 0;
+          drag.measure = (x, y) => {
+            const a = angleAt(x, y);
+            if (a === null || prev === null) { if (a !== null) prev = a; return base + total * h.scale; }
+            let d = a - prev;
+            if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
+            total += d; prev = a;
+            return base + total * h.scale;
+          };
+        } else if (h.kind === "uniform") {
+          drag.measure = (x, y) => base * Math.exp(((x - x0) - (y - y0)) / 120);
+        } else {
+          const g = handleGeometry(cam, h);
+          if (!g) { drag.released = true; finish(); handleDrag = null; return; }
+          const along = (x, y) => (x - x0) * g.u[0] + (y - y0) * g.u[1];
+          drag.measure = h.kind === "scale" ? (x, y) => base * Math.exp(along(x, y) / 64) : (x, y) => base + (along(x, y) / g.ppu) * h.scale;
+        }
+        if (drag.last) { const [lx, ly] = drag.last; drag.last = null; move({ clientX: lx + r.left, clientY: ly + r.top }); }
+        if (drag.released) finish();
+      };
+      const first = api.onHandleStart(h);                                       // a number, or a promise of one (a handle that must create its node first)
+      if (first && typeof first.then === "function") first.then(begin, () => begin(NaN)); else begin(first);
     }
 
 
@@ -571,7 +661,7 @@ window.MiniHouPreview = (() => {
     marquee.className = "pv-marquee hidden";
     canvas.parentElement.append(marquee);
     let dragging = null;
-    canvas.addEventListener("pointerdown", (e) => {
+    function beginCanvasDrag(e) {
       canvas.setPointerCapture(e.pointerId);
       const r = canvas.getBoundingClientRect();
       const selecting = sel.mode !== "view" && e.button === 0 && !e.altKey && raw;
@@ -579,7 +669,8 @@ window.MiniHouPreview = (() => {
       dragging = { x: e.clientX, y: e.clientY, pan, select: !!selecting, x0: e.clientX - r.left, y0: e.clientY - r.top, moved: false,
         how: e.shiftKey ? "add" : (e.ctrlKey || e.metaKey) ? "subtract" : "replace" };
       e.preventDefault();
-    });
+    }
+    canvas.addEventListener("pointerdown", beginCanvasDrag);
     canvas.addEventListener("pointermove", (e) => {
       if (!dragging) return;
       if (dragging.select) {
@@ -636,10 +727,10 @@ window.MiniHouPreview = (() => {
         }).filter(Boolean);
       },
       ringScreen(id, t) {                                                               // for tests: a point on a ring at angle t, in canvas pixels
-        const h = handles.find((x) => x.id === id && x.kind === "ring");
+        const h = (selHandles.length ? selHandles : handles).find((x) => x.id === id && x.kind === "ring");
         return h ? toScreen(camera(), ...ringPoint(h, t)) : null;
       },
-      tool: "move", hasToolHandles() { return handles.some((h) => h.tool); },
+      tool: "move", hasToolHandles() { return (selHandles.length ? selHandles : handles).some((h) => h.tool); },
       setTool(t) { if (["move", "rotate", "scale"].includes(t)) { api.tool = t; schedule(); } },
       set(head, arrays, keepCamera) {
         const same = keepCamera && data.npoints === arrays.P.length / 3 && data.ntris === arrays.tri.length / 3 &&
@@ -650,24 +741,40 @@ window.MiniHouPreview = (() => {
         else rebuildOverlay();
       },
       clear() { handles = []; data.npoints = 0; raw = null; Object.assign(api, { tris: 0, edges: 0, points: 0 }); change({}, "replace"); schedule(); },
-      frameAll, frameSelection, viewAxis, redraw: schedule,
+      frameAll, frameSelection, viewAxis, redraw: schedule, bounds: () => data.bounds,
+      normalSegments() { if (nrmDirty) buildNormals(); return Array.from(nrmLines); },   // for tests: [cx, cy, cz, tx, ty, tz] per primitive
       setOrtho(on) { view.ortho = !!on; schedule(); return view.ortho; },
       toggleOrtho() { return api.setOrtho(!view.ortho); },
       setMode(m) {
-        if (!["view", "point", "edge", "face"].includes(m)) return;
+        if (!["view", "point", "edge", "face", "piece"].includes(m)) return;
         sel.mode = m;
         canvas.style.cursor = m === "view" ? "grab" : "crosshair";
         change({}, "replace");                                                          // a new mode starts with nothing selected
         schedule();
       },
       selection: summary,
+      selectionInfo() {                                                                   // the selected points and where they are: the anchor of a move/rotate/scale gizmo
+        if (!raw) return null;
+        const ids = new Set();
+        if (sel.mode === "point") for (const i of sel.point) ids.add(i);
+        else if (sel.mode === "edge") for (const [, e] of sel.edge) { ids.add(e[0]); ids.add(e[1]); }
+        else if (sel.mode === "face" || sel.mode === "piece") {
+          if (sel.face.size) for (let i = 0; i < raw.triPrim.length; i++) if (sel.face.has(raw.triPrim[i])) for (let c = 0; c < 3; c++) ids.add(raw.tri[3 * i + c]);
+        }
+        if (!ids.size) return null;
+        const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+        for (const i of ids) for (let c = 0; c < 3; c++) { const v = raw.P[3 * i + c]; if (v < lo[c]) lo[c] = v; if (v > hi[c]) hi[c] = v; }
+        return { points: [...ids].sort((a, b) => a - b), center: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2],
+          radius: Math.max(Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2, 1e-3) };
+      },
+      setSelectionHandles(list) { if (handleDrag) pendingSel = list || []; else { selHandles = list || []; schedule(); } },
       clearSelection() { change({}, "replace"); },
       pickAt(sx, sy, how) {                                                             // CSS pixels inside the canvas
         if (!raw || sel.mode === "view") return false;
         const cam = camera();
         if (sel.mode === "point") { const i = pickPoint(cam, sx, sy, 12); change({ points: i >= 0 ? [i] : [] }, i < 0 && how === "replace" ? "replace" : how); }
         else if (sel.mode === "edge") { const e = pickEdge(cam, sx, sy, 8); change({ edges: e ? [e] : [] }, !e && how === "replace" ? "replace" : how); }
-        else { const f = pickFace(cam, sx, sy); change({ faces: f >= 0 ? [f] : [] }, f < 0 && how === "replace" ? "replace" : how); }
+        else { const f = pickFace(cam, sx, sy); change({ faces: f < 0 ? [] : sel.mode === "piece" ? piecesOf([f]) : [f] }, f < 0 && how === "replace" ? "replace" : how); }
         return true;
       },
       boxSelect(x0, y0, x1, y1, how) { if (raw && sel.mode !== "view") change(boxPick(camera(), x0, y0, x1, y1), how || "replace"); },

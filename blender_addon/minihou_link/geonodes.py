@@ -444,6 +444,8 @@ def _waiting_after(obj, mod):
 def pump(host=None, port=None, *, force=False):
     """Cook GN placements and legacy MiniHou modifiers in object stack order."""
     global _busy, _last_error, _retry_at
+    if mesh_writer.modal_ui_active():
+        return 0
     if _busy or modifiers._rendering or (not force and time.monotonic() < _retry_at):
         return 0
     mesh_writer.assert_main_thread()

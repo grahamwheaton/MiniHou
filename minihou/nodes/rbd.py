@@ -17,9 +17,10 @@ from .attrib_tools import piece_labels
     Float("angular_damping", 0.1, min=0, max=100),
     Vec3("velocity", (0, 0, 0), doc="Initial linear velocity in simulation space, units/sec."),
     Vec3("angular_velocity", (0, 0, 0), doc="Initial angular velocity in simulation space, radians/sec."),
+    Bool("compound", False, doc="Several separate convex pieces with the same ID (a glue cluster) become one rigid body."),
 ])
 def rbd_configure(geo, piece_attrib, id_offset, active, mass, friction, restitution,
-                  linear_damping, angular_damping, velocity, angular_velocity):
+                  linear_damping, angular_damping, velocity, angular_velocity, compound=False):
     """Configure closed convex polygon pieces; keep all render geometry and attributes intact.
 
     Primitive rbd_* attributes can subsequently be edited per piece with a wrangle.
@@ -36,6 +37,8 @@ def rbd_configure(geo, piece_attrib, id_offset, active, mass, friction, restitut
         raise ValueError("piece IDs exceed int32 range")
     out = geo.copy()
     out.prim["rbd_id"] = ids.astype(np.int32)
+    if compound:
+        out.prim["rbd_compound"] = np.ones(geo.nprims, np.int32)
     for name, value in dict(active=int(active), mass=mass, friction=friction, restitution=restitution,
                             linear_damping=linear_damping, angular_damping=angular_damping,
                             v=velocity, w=angular_velocity).items():
@@ -44,7 +47,7 @@ def rbd_configure(geo, piece_attrib, id_offset, active, mass, friction, restitut
     return out
 
 
-@node("rbd_solver", inputs=["bodies", Input("colliders", optional=True)], category="physics",
+@node("rbd_solver", inputs=["bodies", Input("colliders", optional=True), Input("constraints", optional=True)], category="physics",
       key_extra=lambda p: "mujoco-3.15.0-rbd1|" + timectx.key(), params=[
     Vec3("gravity", (0, 0, -9.81)),
     Int("start_frame", 1),
@@ -55,11 +58,14 @@ def rbd_configure(geo, piece_attrib, id_offset, active, mass, friction, restitut
     Int("cache_mb", 32, min=1, max=1024, doc="Bound on cached body poses; geometry uses evaluator cache."),
     Bool("include_colliders", True),
 ])
-def rbd_solver(bodies, colliders, **settings):
+def rbd_solver(bodies, colliders, constraints=None, **settings):
     """Simulate convex rigid pieces with body-body contacts using optional MuJoCo 3.15.0.
 
     Static geometry only. Integer frames are solved with fixed substeps; fractional frames
-    hold the preceding integer frame. One unit = one metre. Both inputs share one space.
+    hold the preceding integer frame. One unit = one metre. All inputs share one space.
+
+    ``constraints`` (optional): glue links from ``glue_cluster``: two-point lines whose ``rbd_a`` / ``rbd_b`` name the
+    bodies they hold together. Each is a weld that breaks when the force on it passes its ``strength`` (newtons).
     """
     from ..rbd import solve
-    return solve(bodies, colliders, settings)
+    return solve(bodies, colliders, settings, constraints)

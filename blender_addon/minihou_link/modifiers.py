@@ -30,6 +30,8 @@ COLLECTION = "MiniHou Modifier Caches"
 SOURCE = "Source Object"
 SOURCE_TOKEN = "@source"
 _client = None
+_live_ids = set()
+_source_digests = {}
 _endpoint = None
 _owners = {}
 _digests = {}
@@ -75,8 +77,10 @@ def _ensure_source(mod):
     if item is None:
         item = mod.node_group.interface.new_socket(SOURCE, in_out="INPUT", socket_type="NodeSocketObject")
         if hasattr(item, "hide_in_modifier"):
-            item.hide_in_modifier = True
+            item.hide_in_modifier = False
         item.description = "Blender object instanced by @source; local geometry around its origin, including native modifiers and materials"
+    if hasattr(item, "hide_in_modifier"):
+        item.hide_in_modifier = False
     return item
 
 
@@ -183,14 +187,101 @@ def _validate_source(owner, source):
     target(source)
 
 
-def _instance_objects(obj, mod, names):
-    if any(name != SOURCE_TOKEN for name in names):
-        raise SourceBindingError("Stack instance objects must use @source; select the persistent Source Object picker")
-    if names:
-        source = get_source(mod)
+def _object_keys(mod):
+    keys = []
+    for nid, node in json.loads(mod.node_group[GRAPH]).get("nodes", {}).items():
+        params = node.get("params", {})
+        if node.get("type") == "object_input":
+            keys.append(params.get("binding") or nid)
+        if node.get("type") == "instance":
+            keys.extend(n[1:] for n in params.get("objects", "").replace(",", " ").split() if n.startswith("@"))
+    return list(dict.fromkeys(keys))
+
+
+def _object_socket(mod, key):
+    if key == "source":
+        return _ensure_source(mod)
+    ng = mod.node_group
+    saved = json.loads(ng.get("minihou_object_sockets", "{}"))
+    item = next((s for s in proxy._sockets(ng, "INPUT") if s.socket_type == "NodeSocketObject"
+                 and (s.identifier == saved.get(key) or s.name == "Object: " + key)), None)
+    graph = json.loads(ng[GRAPH])
+    label = next((n.get("input_label") for nid, n in graph.get("nodes", {}).items()
+                  if n.get("type") == "object_input" and (n.get("params", {}).get("binding") or nid) == key
+                  and n.get("input_label")), None)
+    if item is None:
+        item = ng.interface.new_socket("Object: " + key, in_out="INPUT", socket_type="NodeSocketObject")
+    if item.name != (label or "Object: " + key):
+        item.name = label or "Object: " + key
+    if item.description != "MiniHou object input: " + key:
+        item.description = "MiniHou object input: " + key
+    saved[key] = item.identifier
+    encoded = json.dumps(saved)
+    if ng.get("minihou_object_sockets") != encoded:
+        ng["minihou_object_sockets"] = encoded
+    if hasattr(item, "hide_in_modifier"):
+        item.hide_in_modifier = False
+    return item
+
+
+def get_object(mod, key):
+    item = _object_socket(mod, key)
+    return proxy.get_input(mod, item.identifier) if proxy.has_input(mod, item.identifier) else None
+
+
+def set_object(mod, key, obj):
+    proxy.set_input(mod, _object_socket(mod, key).identifier, obj)
+    mod.id_data.update_tag()
+
+
+def _source_meshes(obj, mod, materials=None):
+    sources = {}
+    for key in _object_keys(mod):
+        source = get_object(mod, key)
+        if source is None:
+            continue
         _validate_source(obj, source)
-        return [source for _ in names]
-    return []
+        _, arrays = mesh_reader.read_object(source, bpy.context.evaluated_depsgraph_get())
+        if materials is not None:
+            import numpy as np
+            slots = source.evaluated_get(bpy.context.evaluated_depsgraph_get()).data.materials
+            mapping = []
+            for material in slots:
+                material = material.original if material else None
+                if material not in materials:
+                    materials.append(material)
+                mapping.append(materials.index(material))
+            if mapping and "prim/material_index" in arrays:
+                indices = arrays["prim/material_index"]
+                arrays["prim/material_index"] = np.asarray(mapping, dtype=np.int32)[np.clip(indices, 0, len(mapping) - 1)]
+        sources[key] = arrays
+    return sources
+
+
+def _send_sources(client, obj, mod, materials=None):
+    sources = _source_meshes(obj, mod, materials)
+    digest = hashlib.blake2b(digest_size=16)
+    for name, arrays in sources.items():
+        digest.update(name.encode())
+        for key, array in sorted(arrays.items()):
+            digest.update(key.encode()); digest.update(str((array.dtype, array.shape)).encode()); digest.update(array.tobytes())
+    token = digest.hexdigest()
+    ident = instance_id(mod)
+    if _source_digests.get(ident) != token:
+        client.set_sources(ident, sources)
+        _source_digests[ident] = token
+    return token
+
+
+def _instance_objects(obj, mod, names):
+    objects = []
+    for name in names:
+        if not name.startswith("@"):
+            raise SourceBindingError("Stack instance objects must use @source or another modifier object input")
+        source = get_object(mod, name[1:])
+        _validate_source(obj, source)
+        objects.append(source)
+    return objects
 
 
 def _disconnect_unsafe_sources(obj, mod):
@@ -213,21 +304,45 @@ def _disconnect_unsafe_sources(obj, mod):
 
 def _settings(host=None, port=None):
     wm = bpy.context.window_manager
+    addon = bpy.context.preferences.addons.get(__package__)
+    if host is None and port is None and addon and not addon.preferences.auto_connect:
+        return addon.preferences.manual_host, addon.preferences.manual_port
     return (host or getattr(wm, "minihou_host", "127.0.0.1"),
             int(port if port is not None else getattr(wm, "minihou_port", 8765)))
 
 
 def _connection(host=None, port=None):
     global _client, _endpoint
+    addon = bpy.context.preferences.addons.get(__package__)
+    automatic = host is None and port is None and (not addon or addon.preferences.auto_connect)
+    required = {"live_modifier_v1", "object_inputs_v1"}
+    if automatic and _client is not None and _client.sock is not None:
+        if required.issubset(_client.welcome.get("capabilities", [])):
+            return _client
+        disconnect()
     endpoint = _settings(host, port)
-    if _client is None or endpoint != _endpoint:
+    if _client is None or endpoint != _endpoint or _client.sock is None:
         disconnect()
         from .instance_client import InstanceClient
-        # Cold accelerator compilation and large geometry cooks can exceed five
-        # seconds. Use the instance client's normal bounded cook allowance.
-        _client = InstanceClient(*endpoint, timeout=30.0)
-        _client.connect()
-        _endpoint = endpoint
+        from .discovery import candidates
+        choices = list(dict.fromkeys(candidates() + [endpoint])) if automatic else [endpoint]
+        for address in choices:
+            client = InstanceClient(*address, timeout=0.4 if automatic else 30.0)
+            try:
+                header = client.connect()
+                if automatic and not required.issubset(header.get("capabilities", [])):
+                    raise RuntimeError("This engine needs updating")
+            except (OSError, RuntimeError, ValueError):
+                client.close()
+                if not automatic:
+                    raise
+                continue
+            client.sock.settimeout(30.0)
+            client.timeout = 30.0
+            _client, _endpoint = client, address
+            break
+        if _client is None:
+            raise RuntimeError("Open the updated MiniHou app, then try again. Blender connects automatically.")
     return _client
 
 
@@ -236,6 +351,8 @@ def disconnect():
     if _client is not None:
         _client.close()
     _client, _endpoint = None, None
+    _live_ids.clear()
+    _source_digests.clear()
     _digests.clear()
     _failures.clear()
 
@@ -272,12 +389,25 @@ def _interface(mod, header, initial=False, activate=False):
     ng = mod.node_group
     gout = next((n for n in ng.nodes if n.bl_idname == "NodeGroupOutput"), None)
     passthrough = initial or (gout is not None and any(
-        link.from_node.bl_idname == "NodeGroupInput" for link in gout.inputs["Geometry"].links))
+        link.from_node.bl_idname == "NodeGroupInput" for target in (gout.inputs["Geometry"], proxy._chain_target(ng)) for link in target.links))
     old = proxy.read_values(mod, ng, parameters(mod)) if not initial else {}
     params = header["interface"]
     cache = _cache(mod)
     proxy.sync_interface(ng, cache, params, json.dumps([(p["name"], p["kind"]) for p in params]))
     _ensure_source(mod)
+    keys = _object_keys(mod)
+    saved = json.loads(ng.get("minihou_object_sockets", "{}"))
+    for key in list(saved):
+        if key not in keys:
+            item = next((s for s in proxy._sockets(ng, "INPUT") if s.identifier == saved[key]), None)
+            if item is not None:
+                ng.interface.remove(item)
+            del saved[key]
+    ng["minihou_object_sockets"] = json.dumps(saved)
+    for key in keys:
+        _object_socket(mod, key)
+    proxy._sync_usage_chain(ng, params, json.loads(ng.get(proxy.MAP_KEY, "{}")))
+    ng["minihou_object_usage_version"] = 1
     ng[PARAMS] = json.dumps(params)
     values = {p["name"]: old.get(p["name"], p["value"]) for p in params}
     proxy.write_values(mod, ng, params, values)
@@ -286,7 +416,42 @@ def _interface(mod, header, initial=False, activate=False):
     if passthrough and not activate:
         gin = next(n for n in ng.nodes if n.bl_idname == "NodeGroupInput")
         gout = next(n for n in ng.nodes if n.bl_idname == "NodeGroupOutput")
-        ng.links.new(gin.outputs["Geometry"], gout.inputs["Geometry"])
+        ng.links.new(gin.outputs["Geometry"], proxy._chain_target(ng))
+
+
+def _apply_live(mod, header):
+    if not header.get("live"):
+        _live_ids.discard(instance_id(mod))
+        return
+    ng = mod.node_group
+    data = json.dumps(header["graph"])
+    values = {p["name"]: p["value"] for p in header["interface"]}
+    current = proxy.read_values(mod, ng, parameters(mod))
+    if ng[GRAPH] != data or any(not proxy.same_value(current.get(k), v) for k, v in values.items()):
+        ng[GRAPH] = data
+        _interface(mod, header)
+        proxy.write_values(mod, ng, parameters(mod), values)
+        _digests.pop(instance_id(mod), None)
+        _failures.pop(instance_id(mod), None)
+    if ng.get(PATH) != header["path"]:
+        ng[PATH] = header["path"]
+
+
+def edit_live(obj, mod):
+    """Bind actual pre-modifier geometry to the editor without using a legacy proxy."""
+    client = _connection()
+    arrays, materials = read_prefix(obj, mod, with_materials=True)
+    materials = list(materials)
+    scene = bpy.context.scene
+    _send_sources(client, obj, mod, materials)
+    header = client.edit_live(instance_id(mod), json.loads(mod.node_group[GRAPH]),
+                              proxy.read_values(mod, mod.node_group, parameters(mod)), arrays,
+                              label=obj.name + " / " + mod.name,
+                              frame=scene.frame_current + scene.frame_subframe,
+                              fps=scene.render.fps / scene.render.fps_base)
+    _live_ids.add(instance_id(mod))
+    _apply_live(mod, header)
+    return {"state": "ready", "editor_url": client.welcome.get("editor_url", "")}, header["path"]
 
 
 def add_modifier(obj, graph_path, *, host=None, port=None):
@@ -294,8 +459,17 @@ def add_modifier(obj, graph_path, *, host=None, port=None):
     mesh_writer.assert_main_thread()
     if obj.type != "MESH" or obj.library is not None:
         raise ValueError("Select a local editable mesh object")
-    path = os.path.abspath(bpy.path.abspath(graph_path))
-    header = _connection(host, port).describe(path)
+    path = os.path.abspath(bpy.path.abspath(graph_path)) if graph_path.strip() else ""
+    if path and not path.lower().endswith(".json"):
+        raise ValueError("Graph must name a .json file; leave Graph empty to start a new modifier")
+    starter = {"nodes": {"input": {"type": "modifier_input"},
+                           "transform": {"type": "transform", "inputs": {"geo": "input"}},
+                           "output": {"type": "output", "inputs": {"geo": "transform"}}},
+               "display": "output", "exposed": [
+                   {"name": "Translate", "node": "transform", "param": "translate"},
+                   {"name": "Scale", "node": "transform", "param": "uniform_scale"},
+                   {"name": "Rotate", "node": "transform", "param": "rotate"}]}
+    header = _connection(host, port).describe(path, None if path else starter)
     mod = obj.modifiers.new("MiniHou", "NODES")
     ng = bpy.data.node_groups.new("MiniHou " + os.path.basename(path), "GeometryNodeTree")
     ng[KEY], ng[PATH] = uuid.uuid4().hex, path
@@ -306,7 +480,7 @@ def add_modifier(obj, graph_path, *, host=None, port=None):
     # Until the first successful cook, pass upstream geometry through unchanged.
     gin = next(n for n in ng.nodes if n.bl_idname == "NodeGroupInput")
     gout = next(n for n in ng.nodes if n.bl_idname == "NodeGroupOutput")
-    ng.links.new(gin.outputs["Geometry"], gout.inputs["Geometry"])
+    ng.links.new(gin.outputs["Geometry"], proxy._chain_target(ng))
     ng[STATUS] = "Waiting for first cook"
     _owners[instance_id(mod)] = (obj.as_pointer(), mod.as_pointer())
     return mod
@@ -476,6 +650,8 @@ def pump(host=None, port=None, *, force=False, _only=None):
     A failure retains the last successful cache and exposes the error through status(mod).
     """
     global _busy, _last_error, _retry_at
+    if mesh_writer.modal_ui_active():
+        return 0
     if _only is None:
         from . import geonodes
         geonodes._cleanup()
@@ -496,6 +672,9 @@ def pump(host=None, port=None, *, force=False, _only=None):
                    for m in o.modifiers if is_modifier(m)]
         all_entries = [(o, m) for o in bpy.data.objects if o.type == "MESH" and CACHE not in o
                        and o.library is None for m in o.modifiers if is_modifier(m)]
+        for _, modifier in all_entries:
+            if modifier.node_group.get("minihou_object_usage_version", 0) < 1:
+                _interface(modifier, {"interface": parameters(modifier)})
         live = _unique(all_entries)  # copied objects in another scene also need fresh identities
         _cleanup(live)
         if not entries:
@@ -520,6 +699,8 @@ def pump(host=None, port=None, *, force=False, _only=None):
                     continue
                 signature = None
                 try:
+                    if instance_id(mod) in _live_ids:
+                        _apply_live(mod, client.sync_live(instance_id(mod), proxy.read_values(mod, ng, parameters(mod))))
                     if has_rbd(mod):
                         if (obj.animation_data or obj.data.animation_data or
                                 (obj.data.shape_keys and obj.data.shape_keys.animation_data)):
@@ -536,8 +717,14 @@ def pump(host=None, port=None, *, force=False, _only=None):
                     # must not prevent cooking and validating the new output.
                     _disconnect_unsafe_sources(obj, mod)
                     arrays, materials = read_prefix(obj, mod, with_materials=True)
+                    materials = list(materials)
                     values = proxy.read_values(mod, ng, parameters(mod))
-                    signature = _digest(mod, arrays, values, materials)
+                    source_token = ""
+                    graph_data = json.loads(ng[GRAPH])
+                    has_imports = any(n.get("type") == "object_input" for n in graph_data.get("nodes", {}).values())
+                    if instance_id(mod) in _live_ids or has_imports:
+                        source_token = _send_sources(client, obj, mod, materials)
+                    signature = _digest(mod, arrays, values, materials) + source_token
                     ident = instance_id(mod)
                     failed = _failures.get(ident)
                     selected_source = get_source(mod)
