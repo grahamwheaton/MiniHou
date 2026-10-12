@@ -321,12 +321,74 @@
     b.className = "status" + (blender.length ? " ok" : "");
     b.querySelector(".text").textContent = blender.length ? "Blender" : "Blender —";
     b.title = clients.length ? "Connected: " + clients.join(", ") : "No Blender connected. Run tools/launch_blender.py, or Connect in Blender's MiniHou tab.";
+    updateBlenderBar(blender.length > 0);
     const bar = $("#errorbar");
     const err = st.ok === false && st.error;
     bar.classList.toggle("hidden", !err);
     document.body.classList.toggle("has-error", !!err);
     if (err) { bar.textContent = (err.node ? err.node + ": " : "") + err.message; bar.dataset.node = err.node || ""; }
   }
+
+  // ---------------------------------------------------------------- Blender bar: install the add-on, open Blender connected
+  const BAR_KEY = "minihou.blenderbar";                             // "hidden" once dismissed
+  const BB = { info: null, connected: false, forced: false, loading: false };
+  const storedHidden = () => { try { return localStorage.getItem(BAR_KEY) === "hidden"; } catch (e) { return false; } };
+  async function loadBlenderInfo() {
+    if (BB.loading || BB.info) return;
+    BB.loading = true;
+    try { BB.info = await (await fetch("/api/blender")).json(); } catch (e) { BB.info = null; }
+    BB.loading = false;
+    renderBlenderBar();
+  }
+  function updateBlenderBar(connected) {
+    if (BB.connected !== connected) { BB.connected = connected; if (connected) BB.forced = false; }
+    renderBlenderBar();
+  }
+  function renderBlenderBar() {
+    const bar = $("#blender-bar");
+    const show = BB.forced || (!BB.connected && !storedHidden() && S.online !== false);
+    bar.classList.toggle("hidden", !show);
+    document.body.classList.toggle("has-bar", show);
+    if (!show) return;
+    if (!BB.info) { loadBlenderInfo(); return; }
+    const { blenders, addon } = BB.info, pick = $("#bb-pick");
+    pick.classList.toggle("hidden", blenders.length < 2);
+    const keep = pick.value;                                           // a re-render must not forget which Blender was chosen
+    pick.replaceChildren(...blenders.map((b, i) => h("option", { value: String(i) }, `Blender ${b.version || "?"}${b.supported ? "" : " (too old)"}`)));
+    if (keep && Number(keep) < blenders.length) pick.value = keep;
+    $("#bb-install").disabled = !blenders.length || !addon.available;
+    $("#bb-open").disabled = !blenders.length || !addon.available;
+    $("#bb-zip").classList.toggle("hidden", !addon.available);
+    $("#bb-text").textContent = BB.connected ? "Blender is connected." :
+      blenders.length ? "Blender is not connected. Install the add-on once, then open Blender:" :
+        "No Blender found here. Drag the zip onto a Blender window (4.2+), or use Preferences > Add-ons > Install from Disk:";
+    if (!BB.msg) $("#bb-msg").textContent = "";
+  }
+  async function blenderAction(kind) {
+    const idx = Number($("#bb-pick").value || 0), msg = $("#bb-msg");
+    $("#bb-install").disabled = $("#bb-open").disabled = true;
+    msg.textContent = kind === "install" ? "Installing… (Blender starts briefly in the background)" : "Starting Blender…";
+    try {
+      const r = await api("/api/blender/" + kind, { index: idx });
+      msg.textContent = r.message || (r.ok ? "Done." : "Failed.");
+      msg.classList.toggle("err", !r.ok);
+    } catch (e) { msg.textContent = e.message; }
+    BB.msg = true;
+    renderBlenderBar();
+  }
+  $("#bb-install").onclick = () => blenderAction("install");
+  $("#bb-open").onclick = () => blenderAction("launch");
+  $("#bb-close").onclick = () => { BB.forced = false; try { localStorage.setItem(BAR_KEY, "hidden"); } catch (e) { /* ignore */ } renderBlenderBar(); };
+  $("#blender-status").onclick = () => {
+    try { localStorage.removeItem(BAR_KEY); } catch (e) { /* ignore */ }
+    BB.forced = true; BB.msg = false; renderBlenderBar();
+  };
+  $("#bb-zip").addEventListener("dragstart", (e) => {                 // Chrome/Edge turn this into a file when dropped on another app
+    const url = new URL($("#bb-zip").getAttribute("href"), location.href).href;
+    e.dataTransfer.setData("DownloadURL", `application/zip:minihou_link.zip:${url}`);
+    e.dataTransfer.setData("text/uri-list", url);
+    e.dataTransfer.effectAllowed = "copy";
+  });
 
   // ---------------------------------------------------------------- frame (time)
   function syncSlider(f) {

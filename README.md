@@ -61,6 +61,24 @@ start with `[minihou]`. `--factory` starts Blender without your add-ons and pref
 Other commands: `py -m minihou nodes` (all node types and parameters), `py -m minihou cook graph.json` (cook once,
 print timings and cache behaviour), `py -m minihou serve graph.json --open` (engine + editor, no Blender).
 
+## The packed app
+
+For people who just want to run it: **MiniHou** is one program (a PyInstaller folder, built by `tools/build_app.py` and by the `app` workflow on
+Windows, Linux and macOS; tag `v*` to attach the zips to a release). Unzip, run `MiniHou` and the editor opens in the browser with a welcome
+graph. It keeps everything in `~/MiniHou` (or `Documents/MiniHou`): `graphs/` for yours, `nodes/` for your own node files, `examples/` copied in
+once and never overwritten. The same thing without packing: `py -m minihou app` (or no arguments at all).
+
+A bar at the top of the editor handles Blender while none is connected:
+
+* **drag `minihou_link.zip`** from the bar onto a Blender window (Blender 4.2+ installs a dropped zip), or click it to download;
+* **Install add-on** runs the Blender you pick once, in the background, unpacks the add-on into its user add-ons folder, enables it and
+  saves the preferences (restart Blender if it was already open);
+* **Open Blender** starts it with the add-on registered from a private copy and connected to this engine's port, so nothing is installed at all.
+
+The bar only runs Blenders it found itself (Program Files, Steam, per-user installs, `/Applications`, `PATH`, `$BLENDER_EXE`); the web API takes
+an index into that list, never a path, and refuses cross-origin pages. Dismiss it with the x; the **Blender** indicator in the top bar brings it
+back. The default build bundles numpy only (about 35 MB); `--with-accel` adds numba and scipy for the faster heavy nodes (several times larger).
+
 ## Node editor
 
 ![The node editor showing the AI-built crater graph](docs/images/editor.png)

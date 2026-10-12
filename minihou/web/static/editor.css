@@ -211,3 +211,18 @@ body.dragging-split iframe, body.dragging-split canvas { pointer-events: none; }
 .pv-handles { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
 .pv-handles .pv-grab { pointer-events: all; }
 .pv-handles .pv-handle:hover line { stroke-width: 4; }
+
+#blender-bar { position: absolute; top: 38px; left: 0; right: 0; height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 10px;
+  background: #1f3550; border-bottom: 1px solid #335b86; z-index: 12; white-space: nowrap; overflow: hidden; }
+#blender-bar .spacer { flex: 1; }
+#blender-bar select { max-width: 260px; }
+#blender-bar .bb-text { overflow: hidden; text-overflow: ellipsis; }
+#blender-bar #bb-msg { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.bb-chip { display: inline-block; padding: 2px 10px; border: 1px dashed #7fb2e6; border-radius: 12px; color: #dcecff; text-decoration: none; cursor: grab; background: #16283b; }
+.bb-chip:hover { border-color: #b6d6f5; background: #1d3650; }
+.bb-chip:active { cursor: grabbing; }
+body.has-bar #main { top: 72px; }
+#bb-msg.err { color: #ffb4b4; }
+body.has-bar #work, body.has-bar #side { min-height: 0; }
+#blender-status.clickable { cursor: pointer; }
+#topbar button { white-space: nowrap; }

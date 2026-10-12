@@ -141,6 +141,13 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
    got Front/Right/Top buttons, an axis gizmo (built once, so clicks survive redraws), orthographic (a very narrow lens far away, so picking and
    handles use the same maths), frame selection, Numpad keys, and framing that fits the narrower side of the pane.
 
+8. **Packed app and add-on installer**: `minihou/blender_setup.py` (finding Blenders, the add-on zip, install through a one-off background Blender,
+   launch with a private copy), `minihou/app.py` (workspace in `~/MiniHou`, welcome graph and examples copied once, busy ports fall back to free
+   ones), the editor's Blender bar (draggable zip, Install add-on, Open Blender), `tools/build_app.py` (PyInstaller, numpy-only by default, with a
+   smoke test that starts the built program) and `.github/workflows/app.yml` (Windows, Linux, macOS; zips attached to `v*` releases). The install
+   script is tested for real with the `bpy` module; **not verified**: the Windows/macOS builds (only built on Linux here), and dropping the zip
+   from a browser onto a Blender window (browser and OS dependent; the Install and Open buttons do not depend on it).
+
 Open:
 
 - Extra outputs have no modifier or exposed parameters (only the display branch does).

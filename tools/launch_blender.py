@@ -23,45 +23,11 @@ import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
 
-def candidate_paths(platform=None, env=None, which=shutil.which):
-    """Blender executables to try, best first. ``platform``/``env`` are parameters so this is testable anywhere."""
-    platform = platform or ("windows" if os.name == "nt" else "mac" if sys.platform == "darwin" else "linux")
-    env = os.environ if env is None else env
-    if env.get("BLENDER_EXE"):
-        yield env["BLENDER_EXE"]
-    for name in ("blender", "blender.exe"):
-        p = which(name)
-        if p:
-            yield p
-    pats = []
-    if platform == "windows":
-        for base in (env.get("ProgramFiles"), env.get("ProgramW6432"), env.get("LOCALAPPDATA")):
-            if base:
-                pats.append(os.path.join(base, "Blender Foundation", "Blender *", "blender.exe"))
-                pats.append(os.path.join(base, "Programs", "Blender Foundation", "Blender *", "blender.exe"))
-        for base in (env.get("ProgramFiles(x86)"), env.get("ProgramFiles")):
-            if base:
-                pats.append(os.path.join(base, "Steam", "steamapps", "common", "Blender", "blender.exe"))
-    elif platform == "mac":
-        pats.append("/Applications/Blender*.app/Contents/MacOS/Blender")
-    else:
-        pats += ["/usr/bin/blender", "/snap/bin/blender", os.path.expanduser("~/blender*/blender"),
-                 "/opt/blender*/blender"]
-    found = []
-    for pat in pats:
-        found += glob.glob(pat)
-
-    def version_key(path):
-        m = re.search(r"Blender[ -]?(\d+)\.(\d+)", path.replace("Blender Foundation", ""))
-        return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
-
-    seen = set()
-    for p in sorted(found, key=version_key, reverse=True):      # newest first
-        if p not in seen:
-            seen.add(p)
-            yield p
+from minihou.blender_setup import blender_version, candidate_paths  # noqa: E402,F401  (shared with the editor's Blender panel)
 
 
 def find_blender(explicit=None):
@@ -69,16 +35,6 @@ def find_blender(explicit=None):
         if p and os.path.isfile(p):
             return p
     return None
-
-
-def blender_version(exe):
-    try:
-        out = subprocess.run([exe, "--background", "--version"], capture_output=True, text=True, timeout=60,
-                             encoding="utf-8", errors="replace").stdout
-        m = re.search(r"Blender (\d+)\.(\d+)(?:\.(\d+))?", out)
-        return tuple(int(x) for x in m.groups() if x) if m else None
-    except (OSError, subprocess.SubprocessError):
-        return None
 
 
 def main():

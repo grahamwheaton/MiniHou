@@ -488,6 +488,67 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(self.page.locator("#pv-xform").evaluate("e => e.classList.contains('hidden')"))
         self.assertEqual(len(self.page.evaluate("minihou.preview.handleTips()")), 1)         # its arrow is always shown
 
+    # ---- the Blender bar: add-on zip to drag, install, open Blender
+    def stub_blenders(self, found, install=None, launch=None):
+        from minihou import blender_setup
+        orig = (blender_setup.list_blenders, blender_setup.install_addon, blender_setup.launch_blender)
+        blender_setup.list_blenders = lambda *a, **k: found
+        if install:
+            blender_setup.install_addon = install
+        if launch:
+            blender_setup.launch_blender = launch
+        self.addCleanup(lambda: (setattr(blender_setup, "list_blenders", orig[0]), setattr(blender_setup, "install_addon", orig[1]),
+                                 setattr(blender_setup, "launch_blender", orig[2])))
+
+    def test_blender_bar_offers_a_draggable_zip_when_nothing_is_connected(self):
+        self.stub_blenders([])
+        self.page.reload()
+        self.page.wait_for_selector("#blender-bar:not(.hidden)")
+        chip = self.page.locator("#bb-zip")
+        self.assertEqual(chip.get_attribute("href"), "/addon/minihou_link.zip")
+        self.assertEqual(chip.get_attribute("draggable"), "true")
+        got = self.page.evaluate("""() => {
+            const dt = new DataTransfer();
+            document.querySelector('#bb-zip').dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true, cancelable: true }));
+            return [dt.getData('DownloadURL'), dt.getData('text/uri-list')];
+        }""")
+        self.assertTrue(got[0].startswith("application/zip:minihou_link.zip:http://127.0.0.1:"), got)
+        self.assertTrue(got[0].endswith("/addon/minihou_link.zip"))
+        self.assertIn("No Blender found", self.page.inner_text("#bb-text"))
+        self.assertTrue(self.page.locator("#bb-install").is_disabled())                        # nothing to install into: the zip is the way
+        self.assertTrue(self.page.locator("#bb-open").is_disabled())
+        with self.page.expect_download() as dl:
+            chip.click()                                                                       # a click downloads it
+        self.assertEqual(dl.value.suggested_filename, "minihou_link.zip")
+
+    def test_blender_bar_installs_and_launches_and_can_be_hidden_and_recalled(self):
+        import types
+        self.web.link = types.SimpleNamespace(port=4321, clients=[])                           # the harness runs without a live link
+        calls = []
+        self.stub_blenders([{"path": "/b/5.1/blender", "version": "5.1", "supported": True},
+                            {"path": "/b/4.2/blender", "version": "4.2", "supported": True}],
+                           install=lambda exe, **k: (calls.append(("install", exe)), {"ok": True, "message": "Installed and enabled."})[1],
+                           launch=lambda exe, port, host="127.0.0.1": calls.append(("launch", exe, port)))
+        self.page.reload()
+        self.page.wait_for_selector("#blender-bar:not(.hidden)")
+        self.page.wait_for_selector("#bb-pick:not(.hidden)")                                   # two installs: pick one
+        self.page.select_option("#bb-pick", "1")
+        self.page.click("#bb-install")
+        self.page.wait_for_function("document.querySelector('#bb-msg').innerText.includes('Installed')")
+        self.page.click("#bb-open")
+        self.assertTrue(until(lambda: len(calls) == 2))
+        self.assertEqual(calls[0], ("install", "/b/4.2/blender"))
+        self.assertEqual(calls[1], ("launch", "/b/4.2/blender", 4321))
+        # the page content is not pushed below the bar: the graph pane starts under it
+        self.assertGreaterEqual(self.page.locator("#canvas").bounding_box()["y"], self.page.locator("#blender-bar").bounding_box()["y"] + 30)
+        self.page.click("#bb-close")
+        self.assertTrue(self.page.locator("#blender-bar").is_hidden())
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.assertTrue(self.page.locator("#blender-bar").is_hidden())                         # stays hidden after a reload
+        self.page.click("#blender-status")                                                     # the Blender indicator brings it back
+        self.assertFalse(self.page.locator("#blender-bar").is_hidden())
+
     def test_sphere_radius_arrow_clamps_at_zero(self):
         graph = {"version": 1, "nodes": {"s": {"type": "sphere", "params": {"radius": 0.5}}, "o": {"type": "output", "inputs": {"geo": "s"}}},
                  "display": "o"}

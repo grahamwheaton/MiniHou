@@ -17,6 +17,10 @@ live in the other and in Blender.
 ``POST /api/preview``  ``{node}`` -> positions, triangles and edges of any node for the 3-D view (binary, see
                        :mod:`minihou.preview`), or JSON ``{ok: false, error}``
 ``POST /api/open``     ``{path, create?}`` switch to (or create) a graph file inside the workspace root
+``GET  /api/blender``  installed Blenders (by index) and the add-on zip, for the editor's Blender panel
+``GET  /addon/minihou_link.zip``  the Blender add-on, ready to drag into Blender or install from disk
+``POST /api/blender/install``  ``{index}`` install + enable the add-on in that Blender (runs it in the background once)
+``POST /api/blender/launch``   ``{index}`` open that Blender with the add-on connected to this engine
 ``POST /api/frame``    ``{frame, fps?}`` set the current frame for @Frame / @Time (Blender's timeline also sets it)
 =====================  =======================================================================================
 
@@ -38,6 +42,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 from urllib.parse import parse_qs, urlparse
 
+from .. import blender_setup
 from ..edit import OP_NAMES, EditError
 from ..graph import GraphError
 from ..sdk import ParamError
@@ -150,6 +155,12 @@ class WebServer:
         if self.link is None:
             return []
         return [c.name for c in self.link.clients]
+
+    def blender_info(self) -> dict:
+        found = blender_setup.list_blenders()
+        return {"blenders": found, "addon": {"available": blender_setup.addon_source() is not None, "url": "/addon/minihou_link.zip",
+                                              "name": "minihou_link.zip"},
+                "clients": self.link_clients(), "link_port": getattr(self.link, "port", None)}
 
     def state(self) -> dict:
         s = self.session
@@ -326,6 +337,14 @@ class _Handler(BaseHTTPRequestHandler):
             st = s.status()
             st["clients"] = app.link_clients()
             return self._json(st)
+        if path == "/api/blender":
+            return self._json(app.blender_info())
+        if path == "/addon/minihou_link.zip":
+            try:
+                data = blender_setup.build_addon_zip()
+            except FileNotFoundError as e:
+                raise ApiError(404, str(e)) from None
+            return self._send(200, data, "application/zip", {"Content-Disposition": 'attachment; filename="minihou_link.zip"'})
         if path == "/api/files":
             return self._json({"root": str(app.root), "files": app.files(),
                                "current": str(s.path) if s.path else None})
@@ -378,6 +397,22 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(snap)
         if path == "/api/save":
             return self._json({"saved": s.flush(), "error": s.save_error})
+        if path in ("/api/blender/install", "/api/blender/launch"):
+            found = blender_setup.list_blenders()
+            idx = body.get("index")
+            if not isinstance(idx, int) or isinstance(idx, bool) or not 0 <= idx < len(found):
+                raise ApiError(400, '"index" must pick one of the Blenders listed by GET /api/blender')
+            exe = found[idx]["path"]                  # never a path from the request: only what discovery found
+            if path.endswith("install"):
+                return self._json(blender_setup.install_addon(exe))
+            port = getattr(app.link, "port", None)
+            if not port:
+                raise ApiError(409, "the live link is not running, so Blender would have nothing to connect to")
+            try:
+                blender_setup.launch_blender(exe, port)
+            except (OSError, FileNotFoundError) as e:
+                return self._json({"ok": False, "message": f"could not start Blender: {e}"})
+            return self._json({"ok": True, "message": f"Starting Blender {found[idx]['version'] or ''}; it connects to this engine by itself."})
         if path == "/api/frame":
             try:
                 frame = float(body.get("frame"))

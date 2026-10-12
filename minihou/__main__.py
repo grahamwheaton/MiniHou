@@ -144,6 +144,7 @@ def _cmd_serve(args) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="minihou")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("app", help="start the engine and the editor in a workspace folder (what the packed program does)", add_help=False)
     s = sub.add_parser("serve", help="serve a graph to Blender over the live link")
     s.add_argument("graph")
     s.add_argument("--host", default="127.0.0.1")
@@ -183,6 +184,9 @@ def main(argv=None) -> int:
     if argv and argv[0] == "mcp":
         from .mcp import main as mcp_main
         return mcp_main(argv[1:])
+    if not argv or argv[0] == "app":              # double-clicking the packed program (or `python -m minihou`): the app
+        from .app import main as app_main
+        return app_main(argv[1:])
     args = ap.parse_args(argv)
     return args.fn(args)
 
