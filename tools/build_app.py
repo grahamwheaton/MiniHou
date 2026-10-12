@@ -58,8 +58,11 @@ def exe_path(folder: Path) -> Path:
 def smoke(folder: Path, timeout: float = 90.0) -> None:
     """Start the built program in a scratch workspace and check the editor, the add-on zip and the Blender list answer."""
     tmp = Path(tempfile.mkdtemp(prefix="minihou_smoke_"))
-    env = dict(os.environ, MINIHOU_HOME=str(tmp / "home"), PYTHONUNBUFFERED="1")
+    env = dict(os.environ, MINIHOU_HOME=str(tmp / "home"), PYTHONUNBUFFERED="1", LOCALAPPDATA=str(tmp / "local"))
     log = tmp / "out.log"
+    app_log = tmp / "local" / "MiniHou" / "app.log"
+    def output():
+        return log.read_text(encoding="utf-8", errors="replace") + (app_log.read_text(encoding="utf-8", errors="replace") if app_log.exists() else "")
     with open(log, "w", encoding="utf-8") as lf:
         proc = subprocess.Popen([str(exe_path(folder)), "app", "--no-browser", "--workspace", str(tmp / "ws"), "--http-port", "0", "--port", "0"],
                                 stdout=lf, stderr=subprocess.STDOUT, env=env)
@@ -68,13 +71,13 @@ def smoke(folder: Path, timeout: float = 90.0) -> None:
         end = time.monotonic() + timeout
         while time.monotonic() < end and not url:
             if proc.poll() is not None:
-                raise RuntimeError("the program exited early:\n" + log.read_text(encoding="utf-8", errors="replace"))
-            for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
+                raise RuntimeError("the program exited early:\n" + output())
+            for line in output().splitlines():
                 if line.startswith("editor: "):
                     url = line.split("editor: ", 1)[1].strip()
             time.sleep(0.3)
         if not url:
-            raise RuntimeError("no editor URL after %d s:\n%s" % (timeout, log.read_text(encoding="utf-8", errors="replace")))
+            raise RuntimeError("no editor URL after %d s:\n%s" % (timeout, output()))
         get = lambda p: urllib.request.urlopen(url.rstrip("/") + p, timeout=30).read()
         state = json.loads(get("/api/state"))
         assert state["nodes"], "no node types"
