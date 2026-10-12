@@ -189,7 +189,17 @@
   // ---------------------------------------------------------------- geometry of the drawing
   const nodeOf = (id) => S.graph.nodes[id];
   const typeOf = (id) => S.types[(nodeOf(id) || {}).type] || { inputs: [], params: [], category: "" };
+  function inputMembers(id) {
+    return Object.entries(S.graph.nodes).filter(([, n]) => n.type === "object_input" && n.input_owner === id);
+  }
+  function inputOwner(id) {
+    const owner = nodeOf(id)?.input_owner;
+    return nodeOf(id)?.type === "object_input" && nodeOf(owner)?.type === "modifier_input" ? owner : null;
+  }
+  function nodeHeight(id) { return H + inputMembers(id).length * 22; }
   function pos(id) {
+    const owner = inputOwner(id);
+    if (owner) return pos(owner);
     if (S.dragPos.has(id)) return S.dragPos.get(id);
     const p = (nodeOf(id) || {}).pos;
     return Array.isArray(p) ? p : [0, 0];
@@ -207,7 +217,14 @@
     const off = spec && spec.multi && m > 1 ? (k - (m - 1) / 2) * Math.min(7, 26 / (m - 1)) : 0;
     return [x + (W * (portIndex + 1)) / (n + 1) + off, y];
   }
-  const outPortCenter = (id) => { const [x, y] = pos(id); return [x + W / 2, y + H]; };
+  const outPortCenter = (id) => {
+    const owner = inputOwner(id);
+    if (owner) {
+      const [x, y] = pos(owner), i = inputMembers(owner).findIndex(([key]) => key === id);
+      return [x + W, y + H + i * 22];
+    }
+    const [x, y] = pos(id); return [x + W / 2, y + nodeHeight(id)];
+  };
   function wirePath([x1, y1], [x2, y2]) {
     const dy = Math.max(40, Math.abs(y2 - y1) / 2) + (y2 < y1 ? 60 : 0);
     return `M${x1},${y1} C${x1},${y1 + dy} ${x2},${y2 - dy} ${x2},${y2}`;
@@ -228,7 +245,7 @@
     const r = canvas.getBoundingClientRect();
     if (!ids.length) { S.view = { x: r.width / 2 - W / 2, y: r.height / 3, k: 1 }; applyView(); return; }
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const id of ids) { const [x, y] = pos(id); x0 = Math.min(x0, x); y0 = Math.min(y0, y - 30); x1 = Math.max(x1, x + W); y1 = Math.max(y1, y + H + 10); }
+    for (const id of ids) { const [x, y] = pos(id); x0 = Math.min(x0, x); y0 = Math.min(y0, y - 30); x1 = Math.max(x1, x + W); y1 = Math.max(y1, y + nodeHeight(id) + 10); }
     const pad = 60;
     const k = Math.max(0.25, Math.min(1.3, (r.width - 2 * pad) / (x1 - x0), (r.height - 2 * pad) / (y1 - y0)));
     S.view = { k, x: r.width / 2 - ((x0 + x1) / 2) * k, y: r.height / 2 - ((y0 + y1) / 2) * k };
@@ -263,19 +280,20 @@
     const live = upstreamOfDisplay(), disp = displayNode();
     const keep = new Set();
     for (const [id, n] of Object.entries(S.graph.nodes)) {
+      if (inputOwner(id)) continue;
       keep.add(id);
       const t = typeOf(id);
       let el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
       if (!el) { el = h("div", { class: "node", dataset: { id } }); nodesEl.append(el); }
       const [x, y] = pos(id);
-      el.style.left = x + "px"; el.style.top = y + "px";
+      el.style.left = x + "px"; el.style.top = y + "px"; el.style.height = nodeHeight(id) + "px";
       el.className = ["node", "cat-" + (t.category || "other"), t.category === "system" && t.source && "group", S.sel.has(id) && "selected", id === disp && "display",
         id === errNode && "error", !live.has(id) && "unused"].filter(Boolean).join(" ");
       const ex = exposedOf(id);
       // Rebuild a node's DOM only when its structure changes (wiring, comment, flags); status updates touch just the
       // status line. Stable elements keep hover state and never vanish under a click or a drag.
       const subSig = JSON.stringify([id === errNode && st.error.message, nodeMs[id], cached.has(id), n.type]);
-      const structSig = JSON.stringify([n.type, n.inputs, n.comment, ex.map((e) => e.name), t.inputs.length, id === disp, t.category === "system" && !!t.source]);
+      const structSig = JSON.stringify([inputMembers(id).map(([key, child]) => [key, child.input_label]), n.type, n.inputs, n.comment, ex.map((e) => e.name), t.inputs.length, id === disp, t.category === "system" && !!t.source]);
       if (el._struct === structSig) {
         if (el._sub !== subSig) { el._sub = subSig; el.querySelector(".sub").replaceChildren(...subLine(id, n, st, errNode, nodeMs, cached)); }
         continue;
@@ -293,6 +311,11 @@
         kids.push(h("div", { class: "port-label", style: { left: cx + "px" } }, spec.name));
       });
       kids.push(h("div", { class: "port out", dataset: { node: id }, title: "output: drag to an input" }));
+      inputMembers(id).forEach(([key, child], i) => {
+        kids.push(h("div", { class: "input-output-label", style: { position: "absolute", right: "14px", top: (H + i * 22 - 8) + "px", fontSize: "11px" } }, child.input_label || key));
+        kids.push(h("div", { class: "port out", dataset: { node: key }, title: child.input_label || key,
+          style: { left: (W - 7) + "px", top: (H + i * 22 - 7) + "px", bottom: "auto" } }));
+      });
       if (n.comment) kids.push(h("div", { class: "comment" }, String(n.comment)));
       if (t.category === "system" && t.source) kids.push(h("div", { class: "groupmark", title: "A group: double-click to open it" }, "▣"));
       if (ex.length) kids.push(h("div", { class: "badge", title: "Exposed to Blender: " + ex.map((e) => e.name).join(", ") }, "B"));
@@ -620,6 +643,28 @@
       h("button", { onclick: () => removeNodes([id]) }, "Delete"),
       t.category === "system" && t.source && h("button", { title: "Open this system's graph to edit it (saves reload it everywhere)",
         onclick: () => openFile(t.source, false, { mode: "push", via: id }) }, "Edit system")));
+    if (n.type === "modifier_input") {
+      out.push(h("div", { class: "section" }, "Modifier inputs"));
+      out.push(h("div", { class: "pdoc" }, "Add object inputs here. Pick their Blender objects on the modifier, then wire the named outputs into your graph."));
+      for (const [key, child] of inputMembers(id)) {
+        out.push(h("div", { class: "pw" },
+          h("input", { type: "text", value: child.input_label || key, "aria-label": "Input name", onchange: async (e) => {
+            const label = e.target.value.trim();
+            if (label) await edit([{ op: "meta", id: key, set: { input_label: label } }]);
+          } }),
+          h("button", { title: "Remove this input and its wires", onclick: async () => {
+            await edit([{ op: "remove", id: key }]); panelKey = null; renderParams();
+          } }, "Remove")));
+      }
+      out.push(h("button", { id: "add-modifier-input", onclick: async () => {
+        const label = prompt("Object input name", "Object");
+        if (!label?.trim()) return;
+        const key = uniqueId(id + "_object_");
+        const r = await edit([{ op: "add", id: key, type: "object_input", pos: pos(id) },
+          { op: "meta", id: key, set: { input_owner: id, input_label: label.trim() } }]);
+        if (r) { panelKey = null; render(); }
+      } }, "+ Add Object Input"));
+    }
     const ins = inputs(id);
     if (ins.length) {
       out.push(h("div", { class: "section" }, "Inputs"));
@@ -1068,6 +1113,7 @@
     const expanded = new Set(ids);
     for (const id of ids) {
       const n = nodeOf(id);
+      for (const [member] of inputMembers(id)) expanded.add(member);
       const end = n.type === "loop_end" ? id : n.type === "loop_begin"
         ? Object.keys(S.graph.nodes).find(k => nodeOf(k).type === "loop_end" && nodeOf(k).inputs?.begin === id) : null;
       if (end) for (const member of loopRegion(end)) expanded.add(member);
@@ -1080,6 +1126,8 @@
       ops.push({ op: "add", id: map[id], type: n.type, params: n.params || {}, pos: [x + 40, y + 40], comment: n.comment || undefined });
     }
     for (const id of ids) {
+      const n = nodeOf(id);
+      if (inputOwner(id) && map[n.input_owner]) ops.push({ op: "meta", id: map[id], set: { input_owner: map[n.input_owner], input_label: n.input_label || id } });
       for (const [spec, srcs] of inputs(id)) for (const s of srcs) ops.push({ op: "connect", from: map[s] || s, to: map[id], port: spec.name });
     }
     const r = await edit(ops);
@@ -1108,6 +1156,7 @@
   // ---- copy / cut / paste: nodes travel as JSON text, so they can move between graphs and editor windows
   const CLIP_KEY = "minihou.clip", CLIP_LIMIT = 500;
   function clipboardText(ids) {
+    ids = [...new Set(ids.concat(ids.flatMap(id => inputMembers(id).map(([key]) => key))))];
     const keep = new Set(ids), nodes = {};
     for (const id of ids) {
       const n = nodeOf(id), ins = {};
@@ -1115,7 +1164,7 @@
         const inner = srcs.filter((s) => keep.has(s));
         if (inner.length) ins[spec.name] = Array.isArray((n.inputs || {})[spec.name]) ? inner : inner[0];
       }
-      nodes[id] = { type: n.type, params: n.params || {}, inputs: ins, pos: pos(id), comment: n.comment || undefined };
+      nodes[id] = { type: n.type, params: n.params || {}, inputs: ins, pos: pos(id), comment: n.comment || undefined, input_owner: keep.has(n.input_owner) ? n.input_owner : undefined, input_label: n.input_label };
     }
     return JSON.stringify({ minihou: "nodes", version: 1, nodes });
   }
@@ -1156,6 +1205,8 @@
       return op;
     });
     for (const id of ok) {
+      const n = d.nodes[id];
+      if (n.type === "object_input" && map[n.input_owner]) ops.push({ op: "meta", id: map[id], set: { input_owner: map[n.input_owner], input_label: n.input_label || id } });
       for (const [port, ref] of Object.entries(d.nodes[id].inputs || {})) {
         for (const src of Array.isArray(ref) ? ref : [ref]) if (okSet.has(src)) ops.push({ op: "connect", from: map[src], to: map[id], port });
       }

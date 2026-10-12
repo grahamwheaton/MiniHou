@@ -155,6 +155,12 @@ failed cooks retain the last successful cache and report an error. These caches 
 
 ### Import multiple Blender objects
 
+Select the **modifier_input** node and click **+ Add Object Input** in its inspector. Name the input
+(e.g. Monkey). A named output socket appears on the Input node and a matching object picker appears on
+the Blender modifier. Wire that output into the graph. Rename inputs or remove them in the same inspector;
+renaming preserves the selected Blender object. The original bottom socket remains the modifier's incoming geometry.
+
+
 Add an **object_input** node for each mesh you want to import. Each node creates an **Object: node-name**
 picker on the MiniHou modifier card in Blender. Choose the mesh there. A blank Binding uses the node name;
 set Binding to share a named input between nodes. Object references survive object renames and blend-file saves.

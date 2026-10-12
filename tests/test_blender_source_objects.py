@@ -105,6 +105,30 @@ class SourceObjectTests(unittest.TestCase):
         self.cook()
         self.assertEqual(self.m.get_object(mod, "second"), second)
 
+    def test_group_input_labels_preserve_native_object_selection(self):
+        source, mat = self.setup_source("Monkey")
+        graph = {"nodes": {"input": {"type": "modifier_input"},
+            "socket1": {"type": "object_input", "input_owner": "input", "input_label": "Monkey"},
+            "copy": {"type": "copy_to_points", "inputs": {"source": "socket1", "points": "input"}}}, "display": "copy"}
+        self.path.write_text(json.dumps(graph), encoding="utf8")
+        bpy.ops.mesh.primitive_plane_add()
+        mod = self.m.add_modifier(bpy.context.object, str(self.path), port=self.engine.port)
+        self.m.set_object(mod, "socket1", source)
+        identifier = self.m._object_socket(mod, "socket1").identifier
+        self.assertEqual(self.m._object_socket(mod, "socket1").name, "Monkey")
+        graph["nodes"]["socket1"]["input_label"] = "Suzanne"
+        mod.node_group[self.m.GRAPH] = json.dumps(graph)
+        self.cook()
+        self.assertEqual(self.m._object_socket(mod, "socket1").identifier, identifier)
+        self.assertEqual(self.m._object_socket(mod, "socket1").name, "Suzanne")
+        self.assertEqual(self.m.get_object(mod, "socket1"), source)
+        del graph["nodes"]["socket1"]
+        del graph["nodes"]["copy"]
+        graph["display"] = "input"
+        mod.node_group[self.m.GRAPH] = json.dumps(graph)
+        self.cook()
+        self.assertFalse(any(s.identifier == identifier for s in self.proxy._sockets(mod.node_group, "INPUT")))
+
     def setup_source(self, name='Source', offset=0):
         bpy.ops.mesh.primitive_cube_add()
         source = bpy.context.object

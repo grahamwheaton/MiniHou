@@ -201,11 +201,24 @@ def _object_keys(mod):
 def _object_socket(mod, key):
     if key == "source":
         return _ensure_source(mod)
-    name = "Object: " + key
-    item = next((s for s in proxy._sockets(mod.node_group, "INPUT") if s.socket_type == "NodeSocketObject" and s.name == name), None)
+    ng = mod.node_group
+    saved = json.loads(ng.get("minihou_object_sockets", "{}"))
+    item = next((s for s in proxy._sockets(ng, "INPUT") if s.socket_type == "NodeSocketObject"
+                 and (s.identifier == saved.get(key) or s.name == "Object: " + key)), None)
+    graph = json.loads(ng[GRAPH])
+    label = next((n.get("input_label") for nid, n in graph.get("nodes", {}).items()
+                  if n.get("type") == "object_input" and (n.get("params", {}).get("binding") or nid) == key
+                  and n.get("input_label")), None)
     if item is None:
-        item = mod.node_group.interface.new_socket(name, in_out="INPUT", socket_type="NodeSocketObject")
+        item = ng.interface.new_socket("Object: " + key, in_out="INPUT", socket_type="NodeSocketObject")
+    if item.name != (label or "Object: " + key):
+        item.name = label or "Object: " + key
+    if item.description != "MiniHou object input: " + key:
         item.description = "MiniHou object input: " + key
+    saved[key] = item.identifier
+    encoded = json.dumps(saved)
+    if ng.get("minihou_object_sockets") != encoded:
+        ng["minihou_object_sockets"] = encoded
     if hasattr(item, "hide_in_modifier"):
         item.hide_in_modifier = False
     return item
@@ -382,7 +395,16 @@ def _interface(mod, header, initial=False, activate=False):
     cache = _cache(mod)
     proxy.sync_interface(ng, cache, params, json.dumps([(p["name"], p["kind"]) for p in params]))
     _ensure_source(mod)
-    for key in _object_keys(mod):
+    keys = _object_keys(mod)
+    saved = json.loads(ng.get("minihou_object_sockets", "{}"))
+    for key in list(saved):
+        if key not in keys:
+            item = next((s for s in proxy._sockets(ng, "INPUT") if s.identifier == saved[key]), None)
+            if item is not None:
+                ng.interface.remove(item)
+            del saved[key]
+    ng["minihou_object_sockets"] = json.dumps(saved)
+    for key in keys:
         _object_socket(mod, key)
     ng[PARAMS] = json.dumps(params)
     values = {p["name"]: old.get(p["name"], p["value"]) for p in params}

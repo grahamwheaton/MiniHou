@@ -121,6 +121,29 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: self.pixels_vary(), 5))
         self.page.screenshot(path=os.path.join(ROOT, "build", "validation", "object-preview.png"))
 
+    def test_modifier_input_adds_named_outputs_and_wires_them(self):
+        self.s.replace_graph(Graph.from_dict({"nodes": {
+            "input": {"type": "modifier_input", "pos": [20, 20]},
+            "copy": {"type": "copy_to_points", "pos": [20, 260], "inputs": {"points": "input"}}}, "display": "copy"}, check=False))
+        self.node("input").locator(".title").click()
+        self.page.once("dialog", lambda d: d.accept("Monkey"))
+        self.page.click("#add-modifier-input")
+        self.page.wait_for_selector('.node[data-id="input"] .input-output-label')
+        self.assertEqual(self.node("input").locator(".input-output-label").inner_text(), "Monkey")
+        child = next(nid for nid, n in self.s.graph.nodes.items() if n.type == "object_input")
+        self.assertEqual(self.page.locator(f'.node[data-id="{child}"]').count(), 0)
+        self.drag(self.node("input").locator(f'.port.out[data-node="{child}"]'), self.node("copy").locator('.port.in[data-port="source"]'))
+        self.assertTrue(until(lambda: self.s.graph.nodes["copy"].inputs.get("source") == child))
+        self.node("input").locator(".title").click()
+        self.page.get_by_label("Input name", exact=True).fill("Suzanne")
+        self.page.get_by_label("Input name", exact=True).press("Tab")
+        self.assertTrue(until(lambda: self.s.graph.nodes[child].meta.get("input_label") == "Suzanne"))
+        self.assertEqual(self.s.graph.nodes["copy"].inputs["source"], child)
+        self.page.screenshot(path=os.path.join(ROOT, "build", "validation", "group-input.png"))
+        self.page.get_by_role("button", name="Remove", exact=True).click()
+        self.assertTrue(until(lambda: child not in self.s.graph.nodes))
+        self.assertNotIn("source", self.s.graph.nodes["copy"].inputs)
+
     # -- helpers ---------------------------------------------------------------------
     def read_file(self):
         with open(self.path, encoding="utf-8") as f:

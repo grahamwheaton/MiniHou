@@ -184,6 +184,8 @@ def op_insert(g: Graph, op: dict) -> dict:
 
 def op_remove(g: Graph, op: dict) -> dict:
     ids = op["id"] if isinstance(op["id"], list) else [op["id"]]
+    ids = list(dict.fromkeys(ids + [nid for nid, n in g.nodes.items()
+                                   if n.type == "object_input" and n.meta.get("input_owner") in ids]))
     for nid in ids:
         _need_node(g, nid)
         g.remove_node(nid)
@@ -224,6 +226,9 @@ def op_rename(g: Graph, op: dict) -> dict:
             n.inputs[port] = [new if r == old else r for r in ref] if isinstance(ref, list) else (new if ref == old else ref)
     if g.display == old:
         g.display = new
+    for n in g.nodes.values():
+        if n.type == "object_input" and n.meta.get("input_owner") == old:
+            n.meta["input_owner"] = new
     for e in g.exposed:
         if e.node == old:
             e.node = new
