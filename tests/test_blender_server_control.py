@@ -90,6 +90,7 @@ class BlenderServerOperatorTests(unittest.TestCase):
         import json
         from urllib.request import urlopen
         from minihou_link import modifiers, network_ui
+        (ROOT / "build").mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(dir=ROOT / "build", prefix="edit_network_") as folder:
             a, b = Path(folder) / "a.json", Path(folder) / "b.json"
             shutil.copyfile(ROOT / "examples/modifiers/transform.json", a)

@@ -398,7 +398,7 @@ class SessionFileTests(unittest.TestCase):
         other = os.path.join(self.dir.name, "sub", "new.json")
         snap = self.s.open_file(other, create=True)
         self.assertTrue(os.path.exists(other))
-        self.assertEqual(snap["path"], other)
+        self.assertEqual(snap["path"], os.path.realpath(other))
         self.assertFalse(snap["can_undo"])
         self.assertTrue(self.s.wait_idle())
         self.assertTrue(self.s.status()["ok"])

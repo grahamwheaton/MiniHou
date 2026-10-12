@@ -18,7 +18,7 @@ class NetworkRoutingTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()
         self.a, self.b = self.root / "A graph.json", self.root / "B graph.json"
         for path, rows in ((self.a, 2), (self.b, 3)):
             Graph.from_dict({"nodes": {"g": {"type": "grid", "params": {"rows": rows}}}, "display": "g"}).save(path)

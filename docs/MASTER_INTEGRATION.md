@@ -40,3 +40,9 @@ The completed repeat-loop inspector compares against its initial geometry, avoid
 Local evidence: `build/validation/results.json`, `engine-browser.log`, `master-cross-feature.log`, `blender-full.log`, and the RBD logs. These are automated/headless acceptance results, not a fresh manual audit of production scenes.
 
 Reproduce the combined acceptance with `python tools/validate_integration.py` using a prepared external runtime with NumPy, MuJoCo, Playwright and Chromium. See `docs/GEONODES.md`, `docs/RBD.md`, and `docs/modeling_tools.md` for supported behavior and limits. Physics remains optional and external to Blender. CI runs the physics backend in the Windows Python 3.12 engine job.
+
+The merged add-on ZIP also installed/enabled/disabled successfully in an isolated Blender 5.2 profile (`build/validation/package-install.json`). The Windows PyInstaller build completed, but its local smoke launch was blocked with `WinError 5: Access is denied`; the standalone executable is not claimed as launch-validated.
+
+Fresh GitHub runners exposed two validation setup assumptions: the Edit Network test now creates its temporary-file parent directory, and the Blender CI job installs MuJoCo in its external Python so wired-RBD acceptance runs rather than failing for a missing dependency. Nothing is installed into Blender's Python.
+
+Windows CI also exercises 8.3 temporary paths such as `RUNNER~1`. Server reuse now canonicalizes both graph paths before comparison; routing tests compare canonical paths rather than short-versus-long spellings.

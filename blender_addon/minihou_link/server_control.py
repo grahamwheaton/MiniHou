@@ -90,7 +90,7 @@ class ServerController:
         actual = header.get("graph_path")
         if not actual:
             return False
-        if os.path.normcase(os.path.realpath(actual)) != os.path.normcase(str(graph)):
+        if os.path.normcase(os.path.realpath(actual)) != os.path.normcase(os.path.realpath(graph)):
             raise ValueError("Existing engine serves a different graph; use its graph or another port")
         url = urlsplit(header.get("editor_url") or "")
         loopback = {"localhost", "127.0.0.1", "::1"}
