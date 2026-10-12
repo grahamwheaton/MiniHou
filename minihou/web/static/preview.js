@@ -391,24 +391,56 @@ window.MiniHouPreview = (() => {
       const u = [dx / ppu, dy / ppu];
       return { s0, tip: [s0[0] + u[0] * 64, s0[1] + u[1] * 64], u, ppu };
     }
+    // a ring: basis vectors in its plane, and its outline projected to the screen (null where it passes behind the camera)
+    function ringBasis(h) {
+      const n = h.dir, a = Math.abs(n[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0], u = norm(cross(a, n));
+      return { u, v: cross(n, u) };
+    }
+    function ringPoint(h, t) {
+      const { u, v } = ringBasis(h), c = Math.cos(t) * h.radius, d = Math.sin(t) * h.radius, o = h.origin;
+      return [o[0] + u[0] * c + v[0] * d, o[1] + u[1] * c + v[1] * d, o[2] + u[2] * c + v[2] * d];
+    }
+    const RING_STEPS = 72;
+    const shown = () => handles.filter((h) => !h.tool || h.tool === api.tool);
     function renderHandles(cam) {
       hsvg.setAttribute("width", cam.w); hsvg.setAttribute("height", cam.h);
       const kids = [];
-      for (const h of handles) {
-        const g = handleGeometry(cam, h);
-        if (!g) continue;
+      for (const h of shown()) {
         const col = AXIS_COLOUR[h.comp] || "#ffb04d";
         const grp = svg("g", { class: "pv-handle", "data-id": h.id });
-        const [x0, y0] = g.s0, [x1, y1] = g.tip, nx = -g.u[1], ny = g.u[0];
-        // only the arrow head is grabbable, so a click on the surface under the shaft or the root still selects/orbits
-        grp.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: col, "stroke-width": 3, "stroke-linecap": "round", "pointer-events": "none" }),
-          svg("circle", { cx: x0, cy: y0, r: 4, fill: col, stroke: "#0008", "pointer-events": "none" }),
-          svg("polygon", { points: `${x1 + g.u[0] * 12},${y1 + g.u[1] * 12} ${x1 + nx * 6},${y1 + ny * 6} ${x1 - nx * 6},${y1 - ny * 6}`, fill: col,
-            style: "cursor: ew-resize", class: "pv-grab" }),
-          svg("circle", { class: "pv-grab", cx: x1 + g.u[0] * 4, cy: y1 + g.u[1] * 4, r: 14, fill: "transparent", style: "cursor: ew-resize" }));
         const tip = svg("title", {});
         tip.textContent = h.label + " (drag)";
-        grp.append(tip);
+        if (h.kind === "ring") {
+          let d = "", pen = false;
+          for (let k = 0; k <= RING_STEPS; k++) {
+            const p = ringPoint(h, (k / RING_STEPS) * 2 * Math.PI), sp = toScreen(cam, p[0], p[1], p[2]);
+            d += sp ? (pen ? "L" : "M") + sp[0].toFixed(1) + " " + sp[1].toFixed(1) : "";
+            pen = !!sp;
+          }
+          grp.append(svg("path", { d, fill: "none", stroke: col, "stroke-width": 3, "stroke-opacity": 0.9, "pointer-events": "none" }),
+            svg("path", { d, class: "pv-grab", fill: "none", stroke: "transparent", "stroke-width": 16, style: "cursor: grab" }), tip);
+        } else if (h.kind === "uniform") {
+          const g = handleGeometry(cam, h);
+          const s0 = g ? g.s0 : toScreen(cam, h.origin[0], h.origin[1], h.origin[2]);
+          if (!s0) continue;
+          grp.append(svg("rect", { x: s0[0] - 8, y: s0[1] - 8, width: 16, height: 16, fill: "#ffb04d", stroke: "#0008", class: "pv-grab", style: "cursor: nesw-resize" }), tip);
+        } else {
+          const g = handleGeometry(cam, h);
+          if (!g) continue;
+          const [x0, y0] = g.s0, [x1, y1] = g.tip, nx = -g.u[1], ny = g.u[0];
+          // only the end shape is grabbable, so a click on the surface under the shaft or the root still selects/orbits
+          grp.append(svg("line", { x1: x0, y1: y0, x2: x1, y2: y1, stroke: col, "stroke-width": 3, "stroke-linecap": "round", "pointer-events": "none" }),
+            svg("circle", { cx: x0, cy: y0, r: 4, fill: col, stroke: "#0008", "pointer-events": "none" }));
+          if (h.kind === "scale") {
+            grp.append(svg("rect", { x: x1 - 6, y: y1 - 6, width: 12, height: 12, fill: col, stroke: "#0008", class: "pv-grab", style: "cursor: ew-resize" }),
+              svg("circle", { class: "pv-grab", cx: x1, cy: y1, r: 14, fill: "transparent", style: "cursor: ew-resize" }));
+          } else {
+            grp.append(svg("polygon", { points: `${x1 + g.u[0] * 12},${y1 + g.u[1] * 12} ${x1 + nx * 6},${y1 + ny * 6} ${x1 - nx * 6},${y1 - ny * 6}`, fill: col,
+              style: "cursor: ew-resize", class: "pv-grab" }),
+              svg("circle", { class: "pv-grab", cx: x1 + g.u[0] * 4, cy: y1 + g.u[1] * 4, r: 14, fill: "transparent", style: "cursor: ew-resize" }));
+          }
+          grp.append(tip);
+        }
         for (const el of grp.querySelectorAll(".pv-grab")) el.addEventListener("pointerdown", (e) => startHandleDrag(e, h));
         kids.push(grp);
       }
@@ -416,16 +448,41 @@ window.MiniHouPreview = (() => {
     }
     function startHandleDrag(e, h) {
       e.preventDefault(); e.stopPropagation();
-      const cam = camera(), g = handleGeometry(cam, h);
-      if (!g || !api.onHandleStart) return;
+      const cam = camera();
+      if (!api.onHandleStart) return;
       const base = api.onHandleStart(h);
       if (typeof base !== "number" || !Number.isFinite(base)) return;
       const r = canvas.getBoundingClientRect();
-      handleDrag = { h, base, ppu: g.ppu, u: g.u, x0: e.clientX - r.left, y0: e.clientY - r.top, value: base };
+      const x0 = e.clientX - r.left, y0 = e.clientY - r.top;
+      handleDrag = { h, base, value: base };
+      let measure;                                                  // pointer position (canvas pixels) -> the new value
+      if (h.kind === "ring") {                                      // the angle of the pointer around the ring, from where the ray meets its plane
+        const { u, v } = ringBasis(h), o = h.origin, n = h.dir;
+        const angleAt = (x, y) => {
+          const ray = rayAt(cam, x, y), den = dot(ray, n);
+          if (Math.abs(den) < 0.05) return null;                    // looking along the ring's plane: no stable angle
+          const t = dot(sub(o, cam.eye), n) / den, rel = sub([cam.eye[0] + ray[0] * t, cam.eye[1] + ray[1] * t, cam.eye[2] + ray[2] * t], o);
+          return Math.atan2(dot(rel, v), dot(rel, u));
+        };
+        let prev = angleAt(x0, y0), total = 0;
+        measure = (x, y) => {
+          const a = angleAt(x, y);
+          if (a === null || prev === null) { if (a !== null) prev = a; return base + total * h.scale; }
+          let d = a - prev;
+          if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
+          total += d; prev = a;
+          return base + total * h.scale;
+        };
+      } else if (h.kind === "uniform") {
+        measure = (x, y) => base * Math.exp(((x - x0) - (y - y0)) / 120);
+      } else {
+        const g = handleGeometry(cam, h);
+        if (!g) { handleDrag = null; return; }
+        const along = (x, y) => (x - x0) * g.u[0] + (y - y0) * g.u[1];
+        measure = h.kind === "scale" ? (x, y) => base * Math.exp(along(x, y) / 64) : (x, y) => base + (along(x, y) / g.ppu) * h.scale;
+      }
       const move = (ev) => {
-        const x = ev.clientX - r.left, y = ev.clientY - r.top;
-        const world = ((x - handleDrag.x0) * handleDrag.u[0] + (y - handleDrag.y0) * handleDrag.u[1]) / handleDrag.ppu;
-        let v = handleDrag.base + world * h.scale;
+        let v = measure(ev.clientX - r.left, ev.clientY - r.top);
         if (h.min !== undefined) v = Math.max(h.min, v);
         if (h.max !== undefined) v = Math.min(h.max, v);
         v = Math.round(v * 1e5) / 1e5;
@@ -566,11 +623,24 @@ window.MiniHouPreview = (() => {
     Object.assign(api, {
       view, opt, onSelect: null, onHandle: null, onHandleStart: null,
       setHandles(list) { if (handleDrag) pendingHandles = list || []; else { handles = list || []; schedule(); } },
-      handleTips() {                                                                    // for tests: where each arrow's tip is, in canvas pixels
+      handleTips() {                                                                    // for tests: where each handle's grab point is, in canvas pixels
         const cam = camera();
-        return handles.map((h) => ({ id: h.id, comp: h.comp, param: h.param, g: handleGeometry(cam, h) })).filter((x) => x.g)
-          .map((x) => ({ id: x.id, comp: x.comp, param: x.param, tip: x.g.tip, ppu: x.g.ppu, u: x.g.u }));
+        return shown().map((h) => {
+          if (h.kind === "ring") {
+            const sp = toScreen(cam, ...ringPoint(h, 0.6));
+            return sp ? { id: h.id, comp: h.comp, param: h.param, kind: h.kind, tip: [sp[0], sp[1]], ppu: 1, u: [1, 0] } : null;
+          }
+          const g = handleGeometry(cam, h);
+          if (h.kind === "uniform") { const s0 = g ? g.s0 : toScreen(cam, ...h.origin); return s0 ? { id: h.id, comp: h.comp, param: h.param, kind: h.kind, tip: [s0[0], s0[1]], ppu: 1, u: [1, -1] } : null; }
+          return g ? { id: h.id, comp: h.comp, param: h.param, kind: h.kind, tip: g.tip, ppu: g.ppu, u: g.u } : null;
+        }).filter(Boolean);
       },
+      ringScreen(id, t) {                                                               // for tests: a point on a ring at angle t, in canvas pixels
+        const h = handles.find((x) => x.id === id && x.kind === "ring");
+        return h ? toScreen(camera(), ...ringPoint(h, t)) : null;
+      },
+      tool: "move", hasToolHandles() { return handles.some((h) => h.tool); },
+      setTool(t) { if (["move", "rotate", "scale"].includes(t)) { api.tool = t; schedule(); } },
       set(head, arrays, keepCamera) {
         const same = keepCamera && data.npoints === arrays.P.length / 3 && data.ntris === arrays.tri.length / 3 &&
           data.nedges === arrays.edge.length / 2;                                       // same node, same topology: indices still mean the same

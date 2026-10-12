@@ -77,6 +77,8 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
 
 ![A bevel made from an edge selection, with its distance arrow in the 3-D view](docs/images/editor_gizmo.png)
 
+![The transform node's rotation rings](docs/images/editor_rotate.png)
+
 ![The 3-D view as the main window, with the graph small on the left](docs/images/editor_3d_main.png)
 
 * **Resizable panes**: the graph, the 3-D view and the parameter panel are separate panes with draggable dividers (between graph and
@@ -98,7 +100,10 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
   *Extrude*, *Inset*, *Reverse*, *Group*, *Delete* for faces, *Group* and *Delete* for points. The same `insert` edit op is available to AI
   tools (`{"op": "insert", "after": "id", "type": "polybevel"}`).
 * **Handles (gizmos)**: the node you are looking at can show draggable arrows in the 3-D view: grab an arrow head and drag, and the parameter
-  follows live (everything recooks, Blender included). `transform` has three move arrows, `polyextrude` and `polybevel` a distance arrow
+  follows live (everything recooks, Blender included). `transform` has **Move / Rotate / Scale** tools (buttons above the view, or **W / E / R**
+  with the pointer over it and nothing selected): move arrows, one **ring** per rotation axis (drag around it; the rings turn about the axes
+  each Euler angle really uses and sit at pivot + translate, so they stay put while you drag), and **scale cubes** per axis plus a square
+  for uniform scale (a drag multiplies the value, so it never goes through zero). `polyextrude` and `polybevel` have a distance arrow
   standing on the selected faces or edges (so the bevel you just made from a selection can be scrubbed straight away), `box` a size
   arrow per axis and `sphere` a radius arrow. Handles are small provider functions in `minihou/handles.py` (inputs, output, parameters ->
   arrows); a failing provider just shows none.

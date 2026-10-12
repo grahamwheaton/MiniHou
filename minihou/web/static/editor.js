@@ -603,6 +603,7 @@
     pvMsg(empty ? "No geometry" : head.truncated ? "Showing part of a very large geometry." : "");
     pv.set(head, arrays, pvNode === node && pvPath === S.path);
     pv.setHandles(head.handles || []);
+    updateToolButtons();
     pvNode = node; pvPath = S.path;
   }
 
@@ -652,6 +653,12 @@
     box.replaceChildren(...acts.map((a) => h("button", { title: a.title || `${a.label} the selection: adds a ${a.type} node after ${pvNode || "the viewed node"}`,
       dataset: { action: a.label }, onclick: () => applySelectionAction(a) }, a.label + (a.key ? ` (${a.key.toUpperCase()})` : ""))));
   }
+  function updateToolButtons() {
+    const has = pv.hasToolHandles();
+    $("#pv-xform").classList.toggle("hidden", !has);
+    document.querySelectorAll("#pv-xform [data-tool]").forEach((b) => b.classList.toggle("on", b.dataset.tool === pv.tool));
+  }
+  function setTool(t) { pv.setTool(t); updateToolButtons(); }
   function toggleOrtho() {
     const on = pv.toggleOrtho();
     $("#pv-ortho").textContent = on ? "Ortho" : "Persp";
@@ -703,6 +710,7 @@
       }
       const act = (SELECTION_ACTIONS[pvSelection.mode] || []).find((a) => a.key === k);
       if (act && (pvSelection[SEL_KEY[pvSelection.mode]] || []).length) { applySelectionAction(act); e.preventDefault(); e.stopImmediatePropagation(); }
+      else if ((k === "w" || k === "e" || k === "r") && pv.hasToolHandles()) { setTool({ w: "move", e: "rotate", r: "scale" }[k]); e.preventDefault(); e.stopImmediatePropagation(); }
       else if (k === "a" && pvSelection.mode !== "view") { pv.selectAll(); e.preventDefault(); e.stopImmediatePropagation(); }
     }, true);
   }
@@ -714,6 +722,7 @@
     $("#pv-frame").onclick = () => pv.frameSelection();
     document.querySelectorAll("#preview [data-view]").forEach((b) => { b.onclick = () => pv.viewAxis(b.dataset.view, false); });
     $("#pv-ortho").onclick = () => toggleOrtho();
+    document.querySelectorAll("#pv-xform [data-tool]").forEach((b) => { b.onclick = () => setTool(b.dataset.tool); });
     wireSelectionTools();
   } else { $("#preview .pv-opts").classList.add("hidden"); }
   async function runInspect() {

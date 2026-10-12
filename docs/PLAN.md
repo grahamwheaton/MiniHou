@@ -144,7 +144,8 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
 Open:
 
 - Extra outputs have no modifier or exposed parameters (only the display branch does).
-- More handles (rotate and scale rings on transform, bevel segments, copy_to_points scale); handle providers for library nodes.
+- More handles (bevel segments, copy_to_points scale); handle providers for library nodes. (Done: transform Move / Rotate / Scale tools: rings
+  turn about each Euler angle's real axis, scale cubes follow the rotated axes, drags multiply so scale never crosses zero.)
 - Edge selections are point pairs, so they only stay valid while the geometry upstream keeps its point numbering (as in Houdini).
 
 Not scheduled:

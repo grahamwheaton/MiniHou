@@ -15,13 +15,40 @@ def by_id(hs):
 
 
 class ProviderTests(unittest.TestCase):
-    def test_transform_has_three_translate_arrows_at_the_result(self):
+    def test_transform_has_translate_arrows_at_the_result(self):
         src = run("box", size=[2, 2, 2])
         out = run("transform", src, translate=[3, 0, 0])
         hs = by_id(handles.handles_for("transform", [src], out, {"translate": [3, 0, 0]}))
-        self.assertEqual(sorted(hs), ["translate_x", "translate_y", "translate_z"])
+        self.assertEqual(sorted(k for k in hs if k.startswith("translate")), ["translate_x", "translate_y", "translate_z"])
         np.testing.assert_allclose(hs["translate_y"]["origin"], [3, 0, 0], atol=1e-6)    # at the moved box's centre
         self.assertEqual((hs["translate_y"]["param"], hs["translate_y"]["comp"], hs["translate_y"]["dir"]), ("translate", 1, [0.0, 1.0, 0.0]))
+
+    def test_transform_rings_turn_about_the_axes_each_euler_angle_really_uses(self):
+        src = run("box", size=[2, 2, 2])
+        p = {"translate": [1, 0, 0], "rotate": [10, 20, 90], "pivot": [0, 2, 0]}
+        hs = by_id(handles.handles_for("transform", [src], run("transform", src, **p), p))
+        for i in range(3):
+            self.assertEqual((hs[f"rotate_{'xyz'[i]}"]["kind"], hs[f"rotate_{'xyz'[i]}"]["tool"], hs[f"rotate_{'xyz'[i]}"]["comp"]), ("ring", "rotate", i))
+        np.testing.assert_allclose(hs["rotate_x"]["origin"], [1, 2, 0], atol=1e-9)           # pivot + translate: it stays put while dragged
+        self.assertAlmostEqual(hs["rotate_z"]["scale"], 180 / np.pi)                          # radians dragged -> degrees
+        from minihou.nodes._util import euler_xyz_matrix
+        # turning each Euler angle by a little must move points about exactly the ring's axis (right-handed)
+        P = np.array([[1.0, 2.0, 3.0]])
+        for i in range(3):
+            r2 = list(p["rotate"]); r2[i] += 0.01
+            d = (euler_xyz_matrix(r2) @ P.T - euler_xyz_matrix(p["rotate"]) @ P.T).ravel()
+            axis = np.asarray(hs[f"rotate_{'xyz'[i]}"]["dir"])
+            self.assertLess(abs(d @ axis), 1e-6, i)                                           # no movement along the axis
+            np.testing.assert_allclose(d / np.linalg.norm(d), np.cross(axis, euler_xyz_matrix(p["rotate"]) @ P[0]) / np.linalg.norm(np.cross(axis, euler_xyz_matrix(p["rotate"]) @ P[0])), atol=2e-2)
+        self.assertGreater(hs["rotate_x"]["radius"], 0.5)
+
+    def test_transform_scale_handles_follow_the_rotated_axes_and_uniform_scale_is_a_square(self):
+        src = run("box", size=[2, 2, 2])
+        p = {"rotate": [0, 0, 90]}
+        hs = by_id(handles.handles_for("transform", [src], run("transform", src, **p), p))
+        np.testing.assert_allclose(hs["scale_x"]["dir"], [0, 1, 0], atol=1e-9)               # scaling happens before the rotation
+        self.assertEqual((hs["scale_x"]["kind"], hs["scale_x"]["param"], hs["scale_x"]["comp"], hs["scale_x"]["tool"]), ("scale", "scale", 0, "scale"))
+        self.assertEqual((hs["uniform_scale"]["kind"], hs["uniform_scale"]["param"], hs["uniform_scale"]["comp"]), ("uniform", "uniform_scale", None))
 
     def test_box_and_sphere_arrows_sit_on_the_surface_and_scale_correctly(self):
         hs = by_id(handles.handles_for("box", [], run("box"), {"size": [2, 4, 6], "center": [1, 0, 0]}))
@@ -70,7 +97,7 @@ class PreviewHandlesTests(unittest.TestCase):
                                 "n": {"type": "noise", "inputs": {"geo": "t"}},
                                 "o": {"type": "output", "inputs": {"geo": "n"}}}, display="o"))
         t = s.preview("t")
-        self.assertEqual(sorted(h["id"] for h in t["handles"]), ["translate_x", "translate_y", "translate_z"])
+        self.assertEqual(sorted(h["id"] for h in t["handles"]), ["rotate_x", "rotate_y", "rotate_z", "scale_x", "scale_y", "scale_z", "translate_x", "translate_y", "translate_z", "uniform_scale"])
         np.testing.assert_allclose(t["handles"][0]["origin"], [1, 2, 3], atol=1e-5)
         self.assertEqual(s.preview("n")["handles"], [])
         self.assertEqual(len(s.preview("b")["handles"]), 3)
@@ -87,7 +114,7 @@ class PreviewHandlesTests(unittest.TestCase):
             data = c.getresponse().read()
             c.close()
             head, _ = preview.unpack(data)
-            self.assertEqual(sorted(h["id"] for h in head["handles"]), ["translate_x", "translate_y", "translate_z"])
+            self.assertEqual(sorted(h["id"] for h in head["handles"]), ["rotate_x", "rotate_y", "rotate_z", "scale_x", "scale_y", "scale_z", "translate_x", "translate_y", "translate_z", "uniform_scale"])
         finally:
             t.doCleanups()
 

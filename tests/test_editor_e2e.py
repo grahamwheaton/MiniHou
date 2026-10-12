@@ -451,6 +451,43 @@ class EditorE2E(unittest.TestCase):
         self.assertAlmostEqual(abs(d - 0.2), 50 / tip["ppu"], delta=0.2)
         self.assertIsInstance(d, float)
 
+    def test_transform_tools_rotate_ring_scale_cubes_and_uniform_square(self):
+        import math
+        self.handle_scene("transform", {"translate": [0.5, 1.0, 2.0], "rotate": [0, 0, 10], "scale": [1, 2, 3]}, "h")
+        self.assertFalse(self.page.locator("#pv-xform").evaluate("e => e.classList.contains('hidden')"))
+        self.page.click('#pv-xform [data-tool="rotate"]')                                   # the tool buttons swap which handles show
+        self.assertEqual(sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()")), ["rotate_x", "rotate_y", "rotate_z"])
+        box = self.page.locator("#pv-canvas").bounding_box()
+        a = self.page.evaluate("minihou.preview.ringScreen('rotate_z', 0.6)")
+        b = self.page.evaluate("minihou.preview.ringScreen('rotate_z', 1.1)")                # half a radian further round the ring
+        self.page.mouse.move(box["x"] + a[0], box["y"] + a[1])
+        self.page.mouse.down()
+        self.page.mouse.move(box["x"] + b[0], box["y"] + b[1], steps=8)
+        self.page.mouse.up()
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes["h"].params.get("rotate", [0, 0, 10])[2] - (10 + math.degrees(0.5))) < 1.0))   # the angle followed the pointer around the ring
+        r = self.s.graph.nodes["h"].params["rotate"]
+        self.assertEqual((r[0], r[1]), (0.0, 0.0))
+        # scale cubes: a pixel drag multiplies that component only
+        self.page.keyboard.press("Escape")
+        self.page.mouse.move(box["x"] + 20, box["y"] + 20)
+        self.page.keyboard.press("r")                                                        # R: scale tool (nothing is selected in the view)
+        ids = sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()"))
+        self.assertEqual(ids, ["scale_x", "scale_y", "scale_z", "uniform_scale"])
+        self.drag_handle("scale_y", 64)                                                      # +64 px: times e
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes["h"].params.get("scale", [1, 2, 3])[1] - 2 * math.e) < 0.3))   # (the last value arrives after the drag)
+        sc = self.s.graph.nodes["h"].params["scale"]
+        self.assertEqual((sc[0], sc[2]), (1.0, 3.0))
+        self.assertTrue(until(lambda: self.s.status()["ok"]))
+        self.drag_handle("uniform_scale", 60)                                                # the square: drag up and to the right
+        self.assertTrue(until(lambda: self.s.graph.nodes["h"].params.get("uniform_scale", 1.0) > 1.2))
+        self.page.keyboard.press("w")
+        self.assertEqual(len(self.page.evaluate("minihou.preview.handleTips()")), 3)         # W: back to the move arrows
+
+    def test_tool_buttons_are_hidden_for_nodes_without_transform_handles(self):
+        self.handle_scene("polyextrude", {"group": "0", "distance": 0.2}, "h")
+        self.assertTrue(self.page.locator("#pv-xform").evaluate("e => e.classList.contains('hidden')"))
+        self.assertEqual(len(self.page.evaluate("minihou.preview.handleTips()")), 1)         # its arrow is always shown
+
     def test_sphere_radius_arrow_clamps_at_zero(self):
         graph = {"version": 1, "nodes": {"s": {"type": "sphere", "params": {"radius": 0.5}}, "o": {"type": "output", "inputs": {"geo": "s"}}},
                  "display": "o"}
