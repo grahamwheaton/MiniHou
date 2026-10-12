@@ -116,7 +116,7 @@ def subdivide_once(geo, smooth: bool, use_creases: bool = True):
     for eid,(a,b) in enumerate(e.points):
         children[tuple(sorted((int(a), npt+eid)))] = eid
         children[tuple(sorted((int(b), npt+eid)))] = eid
-    source = np.array([children.get(tuple(pair),-1) for pair in ne_out.points])
+    source = np.array([children.get(tuple(pair),-1) for pair in ne_out.points], np.int64)     # int even when there are no edges
     valid = source >= 0
     for name in edge_names:
         old = edges.values(geo,name)
