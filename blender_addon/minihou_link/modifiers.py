@@ -77,10 +77,10 @@ def _ensure_source(mod):
     if item is None:
         item = mod.node_group.interface.new_socket(SOURCE, in_out="INPUT", socket_type="NodeSocketObject")
         if hasattr(item, "hide_in_modifier"):
-            item.hide_in_modifier = False
+            item.hide_in_modifier = True
         item.description = "Blender object instanced by @source; local geometry around its origin, including native modifiers and materials"
     if hasattr(item, "hide_in_modifier"):
-        item.hide_in_modifier = False
+        item.hide_in_modifier = True
     return item
 
 
@@ -220,7 +220,7 @@ def _object_socket(mod, key):
     if ng.get("minihou_object_sockets") != encoded:
         ng["minihou_object_sockets"] = encoded
     if hasattr(item, "hide_in_modifier"):
-        item.hide_in_modifier = False
+        item.hide_in_modifier = True
     return item
 
 
@@ -407,7 +407,7 @@ def _interface(mod, header, initial=False, activate=False):
     for key in keys:
         _object_socket(mod, key)
     proxy._sync_usage_chain(ng, params, json.loads(ng.get(proxy.MAP_KEY, "{}")))
-    ng["minihou_object_usage_version"] = 1
+    ng["minihou_object_usage_version"] = 2
     ng[PARAMS] = json.dumps(params)
     values = {p["name"]: old.get(p["name"], p["value"]) for p in params}
     proxy.write_values(mod, ng, params, values)
@@ -673,7 +673,7 @@ def pump(host=None, port=None, *, force=False, _only=None):
         all_entries = [(o, m) for o in bpy.data.objects if o.type == "MESH" and CACHE not in o
                        and o.library is None for m in o.modifiers if is_modifier(m)]
         for _, modifier in all_entries:
-            if modifier.node_group.get("minihou_object_usage_version", 0) < 1:
+            if modifier.node_group.get("minihou_object_usage_version", 0) < 2:
                 _interface(modifier, {"interface": parameters(modifier)})
         live = _unique(all_entries)  # copied objects in another scene also need fresh identities
         _cleanup(live)
