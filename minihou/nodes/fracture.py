@@ -10,10 +10,59 @@ import numpy as np
 from .. import groups, topo
 from ..geometry import rows
 from ..outgroups import OutGroup, OutGroups
-from ..sdk import Float, Str, Vec3, node
+from ..sdk import Bool, Float, Str, Vec3, node
 from . import _build as B
 from .merge import merge
 from .model import boundary_loops, clip
+
+
+def split_pinched(loop, keys=None):
+    """A loop that touches itself at a point (a bow tie) as separate simple loops: each stretch between two visits of the
+    same point is a loop of its own. ``keys`` (default: the loop itself) says which entries are the same point."""
+    loop = [int(x) for x in loop]
+    keys = loop if keys is None else [int(k) for k in keys]
+    out, stack, at = [], [], {}
+    for item, key in zip(loop, keys):
+        if key in at:
+            cut = at[key]
+            ring = stack[cut:]
+            for q, _k in ring[1:]:
+                at.pop(_k, None)
+            stack = stack[:cut + 1]
+            if len(ring) >= 3:
+                out.append([x for x, _ in ring])
+        else:
+            at[key] = len(stack)
+            stack.append((item, key))
+    if len(stack) >= 3:
+        out.append([x for x, _ in stack])
+    return out
+
+
+def split_repeated_faces(geo):
+    """Faces that visit a point twice (after welding) become simple faces; pieces with fewer than three corners vanish."""
+    t = geo.topology
+    vp = t.vertex_point.astype(np.int64)
+    offs = t.prim_offsets.astype(np.int64)
+    sizes = np.diff(offs)
+    pv = topo.prim_of_vertex(geo)
+    pair = pv * (int(vp.max()) + 1 if len(vp) else 1) + vp
+    _, counts = np.unique(pair, return_counts=True)
+    if not (counts > 1).any():
+        return geo
+    seen = np.unique(pair, return_counts=True)
+    bad_pairs = set((seen[0][seen[1] > 1] // (int(vp.max()) + 1)).tolist())
+    rows, new_sizes, src = [], [], []
+    for p in range(t.nprims):
+        corners = list(range(offs[p], offs[p + 1]))
+        parts = split_pinched(corners, vp[corners].tolist()) if p in bad_pairs else [corners]
+        for part in parts:
+            rows.extend(part)
+            new_sizes.append(len(part))
+            src.append(p)
+    rows = np.array(rows, np.int64)
+    return B.make(geo.P, vp[rows], B.offsets_from_sizes(new_sizes), dict(geo.point.items()), B.gather(geo.vertex, rows),
+                  B.gather(geo.prim, np.array(src, np.int64)), geo.detail)
 
 
 def _cap_plane(geo, origin, normal, eps, group):
@@ -23,7 +72,7 @@ def _cap_plane(geo, origin, normal, eps, group):
     except ValueError:                                     # a pinched boundary: leave it open rather than fail
         return geo
     d = np.abs((geo.P.astype(np.float64) - origin) @ normal)
-    loops = [lp for lp in loops if d[lp].max() <= eps]
+    loops = [piece for lp in loops for piece in split_pinched(lp) if d[piece].max() <= eps]
     if not loops:
         return geo
     t = geo.topology
@@ -50,7 +99,7 @@ OUT = OutGroups(
              doc="The faces the cuts created (the caps): the inside surface of each piece"),
     OutGroup("outside", "Outside Faces", "outside", "prim", doc="The faces that came from the input's own surface"),
     OutGroup("cutpoints", "Cut Points", "cutpoints", "point", doc="The points that lie on a cut plane"),
-    OutGroup("cutedges", "Cut Edges", "cutedges", "edge", doc="The edges that lie on a cut plane: where the inside meets the outside"),
+    OutGroup("cutedges", "Cut Edges", "cutedges", "edge", doc="The edges that lie on a cut plane: the outline of every cut face"),
 )
 SPLIT_OUT = OutGroups(
     OutGroup("cutpoints", "Cut Points", "cutpoints", "point", doc="The points that lie on a cut plane"),
@@ -71,15 +120,15 @@ def cut_edge_mask(geo, inside):
     return has_in & has_out
 
 
-def voronoi_cells(geo, S, gap, cap, eps):
+def voronoi_cells(geo, S, gap, cap, eps, prior=None):
     """Cut ``geo`` into the Voronoi cells of the points ``S``. Yields (cell index, piece, planes) for each non-empty cell;
-    ``planes`` are the (origin, normal) pairs that cut it. With ``cap`` the openings are filled and the new faces are in
-    the working group :data:`INSIDE_TMP`."""
+    ``planes`` are the (origin, normal, other point) triples that cut it. With ``cap`` the openings are filled and the new
+    faces are in the working group :data:`INSIDE_TMP` (``prior``: a bool per face of the input that already counts as inside)."""
     size = float(np.ptp(geo.P, axis=0).max()) if geo.npoints else 1.0
     for i in range(len(S)):
         piece, planes = geo, []
         if cap and groups.attr_name(INSIDE_TMP) not in piece.prim:
-            piece = groups.write(piece, "prim", INSIDE_TMP, np.zeros(piece.nprims, bool))
+            piece = groups.write(piece, "prim", INSIDE_TMP, np.zeros(piece.nprims, bool) if prior is None else prior)
         dist = np.linalg.norm(S - S[i], axis=1)
         reach = float(np.linalg.norm(piece.P.astype(np.float64) - S[i], axis=1).max())
         for j in np.argsort(dist, kind="stable"):
@@ -92,7 +141,7 @@ def voronoi_cells(geo, S, gap, cap, eps):
             piece = clip(piece, origin, normal, "below", outgrp_above=False)     # no output groups wanted here
             if piece.nprims == 0:
                 break
-            planes.append((origin, normal))
+            planes.append((origin, normal, int(j)))
             if cap:
                 piece = _cap_plane(piece, origin, normal, eps, INSIDE_TMP)
             reach = float(np.linalg.norm(piece.P.astype(np.float64) - S[i], axis=1).max())
@@ -106,11 +155,70 @@ def on_planes(piece, planes, eps):
     pts = np.zeros(piece.npoints, bool)
     edg = np.zeros(len(topo.edges(piece).points), bool)
     ends = topo.edges(piece).points
-    for origin, normal in planes:
+    for origin, normal, *_ in planes:
         on = np.abs((P - origin) @ normal) <= eps
         pts |= on
         edg |= on[ends[:, 0]] & on[ends[:, 1]]
     return pts, edg
+
+
+def weld_points(geo, tol):
+    """Merge every pair of points closer than ``tol`` (exactly, by connected groups: no grid edges to straddle)."""
+    from .. import spatial
+    from ..geometry import Geometry, Topology
+    i, j, _ = spatial.pairs_within(geo.P.astype(np.float64), tol)
+    if not len(i):
+        return geo
+    label = spatial.components(geo.npoints, i, j)
+    _, first = np.unique(label, return_index=True)
+    order = np.argsort(first)
+    rank = np.empty(len(order), np.int64)
+    rank[order] = np.arange(len(order))
+    remap = rank[label]
+    keep = first[order]
+    t = geo.topology
+    out = Geometry(len(keep), Topology(remap[t.vertex_point].astype(np.int32), t.prim_offsets, t.closed))
+    for name, a in geo.point.items():
+        out.point[name] = a[keep]
+    for name, a in geo.vertex.items():
+        out.vertex[name] = a
+    for name, a in geo.prim.items():
+        out.prim[name] = a
+    out.detail = dict(geo.detail)
+    return out
+
+
+def merge_clusters(cells, cluster, eps):
+    """Cells whose points share a (non-negative) cluster number become one piece: the cut faces between them are dropped
+    and their points welded. Returns the same kind of list as :func:`voronoi_cells`, the cluster under its first member."""
+    from .fracture_tools import contacts
+    from .group import keep_prims
+    by = {}
+    for i, piece, planes in cells:
+        by.setdefault(int(cluster[i]) if cluster[i] >= 0 else -1 - i, []).append((i, piece, planes))
+    out = []
+    for key, members in by.items():
+        if len(members) == 1:
+            out.append(members[0])
+            continue
+        parts = []
+        for i, piece, _planes in members:
+            piece = piece.copy()
+            piece.prim["vfcell"] = np.full(piece.nprims, i, np.int32)
+            parts.append(piece)
+        merged = merge(parts)
+        inside = groups.member(merged, "prim", INSIDE_TMP).astype(bool)
+        fa, fb, _ = contacts(merged, merged.prim["vfcell"].astype(np.int64))
+        drop = np.zeros(merged.nprims, bool)
+        drop[fa], drop[fb] = True, True
+        drop &= inside                                       # only cut faces can face each other across a cluster
+        merged = keep_prims(merged, ~drop, remove_unused_points=False)
+        merged = weld_points(merged, max(eps * 5, 1e-9))
+        del merged.prim["vfcell"]
+        ids = {m[0] for m in members}
+        planes = [pl for _i, _p, pls in members for pl in pls if pl[2] not in ids]
+        out.append((min(ids), merged, planes))
+    return sorted(out, key=lambda c: c[0])
 
 
 def _finish_piece(piece, planes, i, piece_attrib, eps, og, spec, inside=None):
@@ -140,9 +248,13 @@ def _empty():
     Str("piece_attrib", "piece", doc="Primitive int attribute with each face's cell (the index of its point)"),
     Str("inside_group", "inside", doc="Name of the inside faces group; empty switches it off (the Output Groups entry does the same)"),
     Float("gap", 0.0, min=0.0, soft_max=0.1, doc="Shrink each cut plane towards its point: a gap between pieces"),
+    Bool("create_inside", True, doc="Cap each cut so pieces are closed solids; off leaves them open (like voronoi_split)"),
+    Bool("cluster_pieces", False, doc="Points with the same 'cluster' number (see voronoi_fracture_points) make one piece"),
+    Str("cluster_attrib", "cluster", doc="The point int attribute that numbers the clusters (negative: not clustered)"),
     *OUT.params(),
 ])
-def voronoi_fracture(geo, points, piece_attrib, inside_group, gap, **og):
+def voronoi_fracture(geo, points, piece_attrib, inside_group, gap, create_inside=True, cluster_pieces=False,
+                     cluster_attrib="cluster", **og):
     """Break a closed polygon mesh into the Voronoi cells of the ``points`` input (e.g. scattered inside it). Pieces
     are closed meshes sharing their cut faces; give each a different transform or hand them to a simulation."""
     B.require_polygons(geo, "voronoi_fracture")
@@ -155,9 +267,20 @@ def voronoi_fracture(geo, points, piece_attrib, inside_group, gap, **og):
         og["outgrp_inside_name"] = inside_group             # the older parameter still names the group
     size = float(np.ptp(geo.P, axis=0).max()) if geo.npoints else 1.0
     eps = 1e-6 * max(size, 1e-9)
+    prior = None
+    name = og.get("outgrp_inside_name", "inside")
+    if create_inside and name and groups.attr_name(name) in geo.prim:      # faces already inside (an earlier fracture) stay inside
+        prior = groups.member(geo, "prim", name).astype(bool)
+    cells = list(voronoi_cells(geo, S, gap, bool(create_inside), eps, prior))
+    if cluster_pieces:
+        cl = points.point.get(cluster_attrib)
+        if cl is None:
+            raise ValueError(f"cluster_pieces needs a point attribute {cluster_attrib!r} on the points (voronoi_fracture_points writes it)")
+        if create_inside:
+            cells = merge_clusters(cells, cl.astype(np.int64), eps)
     pieces = []
-    for i, piece, planes in voronoi_cells(geo, S, gap, True, eps):
-        inside = groups.member(piece, "prim", INSIDE_TMP).astype(bool)
+    for i, piece, planes in cells:
+        inside = groups.member(piece, "prim", INSIDE_TMP).astype(bool) if create_inside else None
         pieces.append(_finish_piece(piece, planes, i, piece_attrib, eps, og, OUT, inside))
     return merge(pieces) if pieces else _empty()
 

@@ -186,6 +186,15 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
     per-piece strength painting); `convex_decomposition` is a plane-cut search (reflex-edge planes), not V-HACD, and cuts along a
     face plane can leave sliver faces on curved meshes. MuJoCo is now installed in this environment, so the two RBD tests that used to fail run.
 
+15. **Fracture parity with Houdini's docs** (from search summaries of the SideFX pages; I could not open the site): Voronoi Fracture got Create
+    Inside Surfaces and Cluster Pieces (cells merged by the `cluster` point attribute that Voronoi Fracture Points now writes, with a
+    k-means `merge_clusters`) and keeps inside faces from an earlier fracture; Voronoi Fracture Points got an impacts mode; RBD Material
+    Fracture got Fracture Level, a Custom material, Convex Parts (proxy: compound bodies with `rbd_hull`) and Interior Detail; new
+    `rbd_constraint_properties`. Behind them: `convex_decomposition` now repairs awkward cuts (coincident points welded, bow-tie loops
+    split, candidate cuts that leave a sliver or non-flat face are rejected), and the cap code splits pinched loops. Not done:
+    Houdini's secondary strength, constraints from rules (connection modes beyond touching faces), Edge Detail (boolean noise on
+    the outside edges), packed proxy transfer for detailed pieces.
+
 Open:
 
 - Output groups other than PolyBevel's are from memory of Houdini's nodes: compare with Houdini and adjust names/sets.

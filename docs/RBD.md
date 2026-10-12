@@ -92,7 +92,18 @@ Mesh -> Voronoi Fracture Points -> Voronoi Fracture -> Assemble -> Configure -> 
   few rigid **clusters** (`cluster`; configure with `rbd_configure` `compound` on, and the cluster is **one body** made of several convex
   parts, with the pieces' masses summed), and writes **constraints**: two-point lines with `rbd_a` / `rbd_b` (the body ids), `strength`
   (newtons) and `length`.
-* **RBD Material Fracture** does all of it in one node from a material (density, friction, bounce, glue strength).
+* **RBD Material Fracture** does all of it in one node from a material (density, friction, bounce, glue strength, or `custom`).
+  **Fracture Level** breaks every piece again (the inside faces of earlier levels stay inside). **Convex Parts** is the simulation proxy:
+  a concave piece is split by `convex_decomposition` into nearly convex parts that stay one body (`rbd_compound`) and carry `rbd_hull`,
+  which tells the solver to collide with each part's convex hull instead of refusing a part that is only nearly convex.
+  **Interior Detail** tessellates the new inside faces and roughens them with noise (a function of position, so the two sides of a cut
+  stay matched, and the border does not move); such pieces are render geometry, they are not convex and cannot go to the solver. There
+  is no mechanism yet to drive detailed pieces from simulated proxies.
+* **Voronoi Fracture** can **Cluster Pieces** (cells whose points share a `cluster` number, written by `voronoi_fracture_points`
+  `merge_clusters`, become one piece), and **Voronoi Fracture Points** has an **impacts** mode (points gather round the second
+  input's points, in proportion to their `impulse`).
+* **RBD Constraint Properties** edits the links: set or scale the break strength of a group (for example `internal` / `external`
+  from Glue Cluster), with variation, or make them unbreakable.
 
 The solver's optional third input, `constraints`, welds the two bodies of each line together (a MuJoCo weld, soft with a 30 ms time
 constant, which keeps a stiff network of welds from fighting itself). A weld **breaks** when its force plus its torque over the line's

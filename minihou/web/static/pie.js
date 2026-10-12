@@ -93,7 +93,7 @@
     fracture2: { title: "Fracture", items: [
       T("RBD Material Fracture", "rbd_material_fracture"), T("Assemble", "assemble"),
       T("RBD Configure", "rbd_configure"), T("RBD Solver", "rbd_solver", { tip: "Bodies in the first input, then colliders and glue links" }),
-      null, null, null, null] },
+      T("RBD Constraint Properties", "rbd_constraint_properties", { tip: "Set or scale the strength of glue links" }), null, null, null] },
 
     edges: { title: "Edges", items: [
       T("Dissolve", "dissolve_edges", { sel: { edge: "group" } }), T("Edge Collapse", "edge_collapse", { sel: { edge: "group" } }),

@@ -2,12 +2,12 @@
 Glue Cluster builds on. (Voronoi Fracture and Voronoi Split are in :mod:`fracture`.)"""
 import numpy as np
 
-from .. import spatial, topo
+from .. import groups, spatial, topo
 from ..geometry import Geometry
 from ..outgroups import OutGroup, OutGroups
 from ..sdk import Bool, Enum, Float, Input, Int, Str, node
 from . import _build as B
-from ._util import fan_triangulate
+from ._util import fan_triangulate, fbm3
 from .attrib_tools import piece_labels
 
 
@@ -106,6 +106,7 @@ POINTS_OUT = OutGroups(
     OutGroup("surface", "Surface Points", "surface", "point", doc="Points placed on the shape's surface"),
     OutGroup("clustered", "Clustered Points", "clustered", "point", doc="Points placed around a cluster centre"),
     OutGroup("extra", "Extra Input Points", "extrapoints", "point", doc="Points that came in on the second input"),
+    OutGroup("impact", "Impact Points", "impactpoints", "point", doc="impacts mode: points placed round an impact"),
 )
 
 
@@ -170,10 +171,17 @@ def _thin(pts, distance):
     Int("clusters", 3, min=1, max=64, doc="How many cluster centres"),
     Float("cluster_radius", 0.25, min=1e-6, soft_max=2.0, doc="Spread of each cluster"),
     Str("piece_attrib", "piece", doc="Point int attribute numbering the points (empty: none)"),
+    Enum("source", ["scatter", "impacts"], doc="impacts: the second input holds impact points (optional float 'impulse' = how hard); "
+                                               "the fracture points gather round them"),
+    Float("impact_radius", 0.4, min=1e-6, soft_max=2.0, doc="impacts: spread of the points round each impact"),
+    Float("impact_share", 0.7, min=0.0, max=1.0, doc="impacts: share of the points placed at impacts (the rest are scattered everywhere)"),
+    Int("merge_clusters", 0, min=0, max=1000, doc="Group the points into this many clusters (by distance, a k-means style pass) in the int "
+                                                  "point attribute 'cluster'; voronoi_fracture cluster_pieces merges their cells (0: -1 everywhere)"),
     *POINTS_OUT.params(),
 ])
 def voronoi_fracture_points(geo, points, count, seed, surface_fraction, min_distance, relax, cluster_amount, clusters,
-                            cluster_radius, piece_attrib, **og):
+                            cluster_radius, piece_attrib, source="scatter", impact_radius=0.4, impact_share=0.7,
+                            merge_clusters=0, **og):
     """Fracture points for ``voronoi_fracture`` (Houdini's Voronoi Fracture Points): scattered inside a closed mesh, with
     optional surface points, thinning, relaxation, clustering and points from a second input. Connect the result to
     the fracture's second input."""
@@ -204,17 +212,48 @@ def voronoi_fracture_points(geo, points, count, seed, surface_fraction, min_dist
         mean = np.stack([np.bincount(owner, weights=cloud[:, k], minlength=len(inner)) for k in range(3)], 1)
         inner = np.where(cnt[:, None] > 0, mean / np.maximum(cnt, 1)[:, None], inner)
     surface = _surface_points(geo, rng, n_surf)
-    extra = points.P.astype(np.float64) if points is not None and points.npoints else np.zeros((0, 3))
-    kinds = [("interior", inner), ("surface", surface), ("clustered", clustered), ("extra", extra)]
+    extra = points.P.astype(np.float64) if points is not None and points.npoints and source == "scatter" else np.zeros((0, 3))
+    impacts = np.zeros((0, 3))
+    impact_id = np.zeros(0, np.int32)
+    if source == "impacts":
+        if points is None or not points.npoints:
+            raise ValueError("source = impacts needs the impact points on the second input")
+        centres = points.P.astype(np.float64)
+        weight = points.point["impulse"].astype(np.float64) if "impulse" in points.point else np.ones(len(centres))
+        weight = np.maximum(weight, 0) + 1e-12
+        n_imp = int(round(len(inner) * impact_share))
+        share = np.floor(weight / weight.sum() * n_imp).astype(int)
+        share[np.argsort(-weight)[:n_imp - int(share.sum())]] += 1          # hand out the remainder to the hardest hits
+        got = [sample(int(c), centres[k], impact_radius * scale) if c else np.zeros((0, 3)) for k, c in enumerate(share)]
+        impacts = np.concatenate(got) if got else np.zeros((0, 3))
+        impact_id = np.concatenate([np.full(len(g), k, np.int32) for k, g in enumerate(got)]) if got else np.zeros(0, np.int32)
+        inner = inner[:len(inner) - n_imp] if n_imp <= len(inner) else inner
+    kinds = [("interior", inner), ("surface", surface), ("clustered", clustered), ("extra", extra), ("impact", impacts)]
     P = np.concatenate([k[1] for k in kinds]) if sum(len(k[1]) for k in kinds) else np.zeros((0, 3))
     label = np.concatenate([np.full(len(k[1]), n, np.int8) for n, k in enumerate(kinds)]) if len(P) else np.zeros(0, np.int8)
+    which = np.concatenate([np.full(len(impacts), -1, np.int32)] * 0 + [impact_id]) if len(impacts) else np.zeros(0, np.int32)
     keep = _thin(P, min_distance)
     keep[label == 3] = True                                  # the user's own points always stay
     P, label = P[keep], label[keep]
     out = Geometry.from_arrays(P.astype(np.float32))
     if piece_attrib:
         out.point[piece_attrib] = np.arange(len(P), dtype=np.int32)
-    for n, key in enumerate(("interior", "surface", "clustered", "extra")):
+    if source == "impacts":
+        full = np.full(len(keep), -1, np.int32)
+        full[np.flatnonzero(np.concatenate([np.full(len(k[1]), n, np.int8) for n, k in enumerate(kinds)]) == 4)] = which if len(which) else 0
+        out.point["impact"] = full[keep]
+    cluster = np.full(len(P), -1, np.int32)
+    if merge_clusters and len(P):
+        k = min(int(merge_clusters), len(P))
+        seeds = P[rng.choice(len(P), k, replace=False)].astype(np.float64)
+        for _ in range(5):                                   # a few k-means passes
+            owner, _d = spatial.nearest(seeds, P.astype(np.float64))
+            for c in range(k):
+                if (owner == c).any():
+                    seeds[c] = P[owner == c].mean(0)
+        cluster = spatial.nearest(seeds, P.astype(np.float64))[0].astype(np.int32)
+    out.point["cluster"] = cluster
+    for n, key in enumerate(("interior", "surface", "clustered", "extra", "impact")):
         out = POINTS_OUT.write(out, og, key, label == n)
     return out
 
@@ -442,14 +481,34 @@ CD_OUT = OutGroups(
 )
 
 
-def _half(piece, origin, normal, side, tol):
+def sound_faces(geo):
+    """True when every face is a simple, flat polygon with area: no repeated points, no sliver, no bow tie."""
+    t = geo.topology
+    _, nrm, area = prim_geometry(geo)
+    size = float(np.ptp(geo.P, axis=0).max())
+    if (area <= (1e-6 * size) ** 2).any():
+        return False
+    pv = topo.prim_of_vertex(geo)
+    vp = t.vertex_point.astype(np.int64)
+    pair = pv * (int(vp.max()) + 1) + vp
+    if len(np.unique(pair)) != len(pair):
+        return False
+    P = geo.P.astype(np.float64)
+    off = np.abs(np.einsum("ij,ij->i", P[vp] - P[vp[t.prim_offsets[:-1]][pv]], nrm[pv]))
+    return not (off > 1e-4 * size).any()
+
+
+def _half(piece, origin, normal, side, tol, clean=False):
     """One side of a plane cut. A face lying in the plane belongs to the half it faces away from (its outward normal
     points out of that half), so it is dropped from the other one."""
     from .group import keep_prims
     from .model import clip
+    from .fracture import split_repeated_faces, weld_points
     h = clip(piece, origin, normal, side, outgrp_above=False)
     if h.nprims == 0:
         return h
+    if clean:                                                       # a second try for awkward cuts: coincident points are one point
+        h = B.drop_degenerate(split_repeated_faces(B.drop_degenerate(weld_points(h, tol * 4))))
     d = (h.P.astype(np.float64) - origin) @ normal
     flat = np.zeros(h.nprims, bool)
     off = np.abs(d)[h.topology.vertex_point] > tol
@@ -460,18 +519,26 @@ def _half(piece, origin, normal, side, tol):
 
 
 def _try_split(piece, plane, min_volume, eps):
+    for clean in (False, True):
+        out = _split_once(piece, plane, min_volume, eps, clean)
+        if out is not None:
+            return out
+    return None
+
+
+def _split_once(piece, plane, min_volume, eps, clean):
     from .fracture import INSIDE_TMP, _cap_plane
     origin, normal = plane
     halves = []
     for side in ("above", "below"):
-        h = _half(piece, origin, normal, side, eps)
+        h = _half(piece, origin, normal, side, eps, clean)
         if h.nprims == 0:
             return None
         halves.append(_cap_plane(h, origin, normal, eps, INSIDE_TMP))
     out = []
     for h in halves:
         for comp in _split_connected(h):
-            if mesh_volume(comp) <= 0 or np.any(topo.edges(comp).count != 2):   # the cut did not close properly
+            if mesh_volume(comp) <= 0 or np.any(topo.edges(comp).count != 2) or not sound_faces(comp):   # the cut did not close properly
                 return None
             out.append(comp)
     if min(mesh_volume(c) for c in out) < min_volume:
@@ -502,7 +569,11 @@ def convex_decomposition(geo, max_concavity, max_pieces, min_volume, search, pie
     if np.any(topo.edges(geo).count != 2):
         raise ValueError("convex_decomposition needs a closed mesh (every edge shared by two faces)")
     from .. import groups
-    start = groups.write(geo, "prim", INSIDE_TMP, np.zeros(geo.nprims, bool))
+    prior = np.zeros(geo.nprims, bool)
+    name = og.get("outgrp_inside_name", "inside")
+    if name and groups.attr_name(name) in geo.prim:                 # faces that are already inside (an earlier fracture) stay inside
+        prior = groups.member(geo, "prim", name).astype(bool)
+    start = groups.write(geo, "prim", INSIDE_TMP, prior)
     total = abs(mesh_volume(start))
     if total <= 0:
         raise ValueError("convex_decomposition: the mesh has no volume (faces pointing inwards?)")
@@ -805,17 +876,164 @@ MAT_OUT = OutGroups(
     OutGroup("inside", "Inside Faces", "inside", "prim", default=True, doc="The new faces made by the fracture"),
     OutGroup("outside", "Outside Faces", "outside", "prim", doc="The faces that came from the input's own surface"),
     OutGroup("cutpoints", "Cut Points", "cutpoints", "point", doc="Points on the cuts"),
-    OutGroup("cutedges", "Cut Edges", "cutedges", "edge", doc="Edges where the inside meets the outside"),
+    OutGroup("cutedges", "Cut Edges", "cutedges", "edge", doc="The outline of every cut face (with interior_detail: where the inside meets "
+                                                              "the outside)"),
 )
 
 
+def tessellate(geo, mask, n):
+    """Cut the faces in ``mask`` into triangles and each triangle into n x n smaller ones, sharing the new points along shared
+    edges. Returns ``(geometry, bool per primitive: a new triangle, bool per point: lies on the border of the tessellated
+    area or is used by a face that was not tessellated)``. Point and corner attributes are interpolated."""
+    from .boolean import _blend
+    t = geo.topology
+    tv, tp = fan_triangulate(t)
+    sel = np.asarray(mask, bool)[tp]
+    tv, tp = tv[sel], tp[sel]
+    T = len(tv)
+    if T == 0 or n < 1:
+        return geo, np.zeros(geo.nprims, bool), np.ones(geo.npoints, bool)
+    vp = t.vertex_point.astype(np.int64)
+    cp = vp[tv]                                                     # corner points of each triangle (T, 3)
+    lat = [(i, j) for i in range(n + 1) for j in range(n + 1 - i)]
+    at = {ij: m for m, ij in enumerate(lat)}
+    W = np.array([[(n - i - j) / n, i / n, j / n] for i, j in lat])
+    K = np.array([[n - i - j, i, j] for i, j in lat])
+    keys = np.zeros((T, len(lat), 4), np.int64)
+    for m in range(len(lat)):
+        zero = [c for c in range(3) if K[m, c] == 0]
+        if len(zero) == 2:                                          # a corner of the triangle: its own point
+            keys[:, m, 1] = cp[:, [c for c in range(3) if c not in zero][0]]
+        elif len(zero) == 1:                                        # on an edge: shared with the neighbour by (low point, high point, steps)
+            cu, cv = [c for c in range(3) if c not in zero]
+            pu, pv = cp[:, cu], cp[:, cv]
+            keys[:, m] = np.stack([np.ones(T, np.int64), np.minimum(pu, pv), np.maximum(pu, pv),
+                                   np.where(pu > pv, K[m, cu], K[m, cv])], 1)
+        else:                                                       # inside the triangle
+            keys[:, m] = np.stack([np.full(T, 2), np.arange(T), np.full(T, m), np.zeros(T, np.int64)], 1)
+    flat = keys.reshape(-1, 4)
+    corner = (np.abs(W).max(axis=1) == 1.0)[None, :].repeat(T, 0).reshape(-1)       # lattice points that are corners
+    uniq, first, inv = np.unique(flat[~corner], axis=0, return_index=True, return_inverse=True)
+    inv = inv.reshape(-1)
+    new_index = np.flatnonzero(~corner)[first]                      # (tri * lattice) slot that first made each new point
+    npts = geo.npoints
+    pid = np.empty(len(flat), np.int64)
+    pid[corner] = flat[corner, 1]
+    pid[~corner] = npts + inv
+    pid = pid.reshape(T, len(lat))
+    tri_of, lat_of = new_index // len(lat), new_index % len(lat)
+    newP = np.einsum("mc,mck->mk", W[lat_of], geo.P.astype(np.float64)[cp[tri_of]])
+    newpts = _blend(geo.point, cp[tri_of], W[lat_of])
+    newpts["P"] = newP.astype(np.float32)
+    point = B.concat([dict(geo.point.items()), newpts])
+    tpl = []
+    for i in range(n):
+        for j in range(n - i):
+            tpl.append((at[(i, j)], at[(i + 1, j)], at[(i, j + 1)]))
+            if i + j < n - 1:
+                tpl.append((at[(i + 1, j)], at[(i + 1, j + 1)], at[(i, j + 1)]))
+    tpl = np.array(tpl)
+    ntp = len(tpl)
+    tri_pts = pid[:, tpl].reshape(T * ntp, 3)
+    rows = np.repeat(tv, ntp, axis=0)                               # the parent's three corner rows, per small triangle
+    wts = np.tile(W[tpl.reshape(-1)], (T, 1))
+    vtx = _blend(geo.vertex, np.repeat(rows, 3, axis=0), wts)
+    pv = topo.prim_of_vertex(geo)
+    keepv = ~np.asarray(mask, bool)[pv]
+    keepp = ~np.asarray(mask, bool)
+    sizes = t.prim_sizes()
+    # the border of the tessellated area: edges used by only one of its triangles
+    side = np.concatenate([np.sort(cp[:, [0, 1]], axis=1), np.sort(cp[:, [1, 2]], axis=1), np.sort(cp[:, [2, 0]], axis=1)])
+    big = max(npts, 1)
+    skey = side[:, 0] * big + side[:, 1]
+    ukey, cnt = np.unique(skey, return_counts=True)
+    border = ukey[cnt == 1]
+    # the new points on border edges are also inserted into the untouched faces beside them: no T-junctions
+    flat_pid = pid.reshape(-1)
+    edge_new = (flat[:, 0] == 1) & ~corner
+    on_edge = {}
+    if edge_new.any():
+        ek = flat[edge_new]
+        is_b = np.isin(ek[:, 1] * big + ek[:, 2], border)
+        for (_, lo, hi, kk), q in zip(ek[is_b].tolist(), flat_pid[edge_new][is_b].tolist()):
+            on_edge.setdefault((lo, hi), {})[kk] = q
+    kept = np.flatnonzero(keepv)
+    nxt = topo.next_vertex(geo)[kept]
+    a_pt, b_pt = vp[kept], vp[nxt]
+    ids = np.arange(len(kept))
+    ra, rb, fr, pt, key = [kept], [kept], [np.zeros(len(kept))], [a_pt], [ids * n]
+    if on_edge:
+        ekey = np.minimum(a_pt, b_pt) * big + np.maximum(a_pt, b_pt)
+        have = {lo * big + hi: (lo, hi) for lo, hi in on_edge}
+        for c in np.flatnonzero(np.isin(ekey, list(have))).tolist():
+            lo, hi = have[int(ekey[c])]
+            steps = sorted(on_edge[(lo, hi)].items())
+            forward = a_pt[c] == lo
+            if not forward:
+                steps = steps[::-1]
+            for j, (kk, q) in enumerate(steps):
+                ra.append(np.array([kept[c]]))
+                rb.append(np.array([nxt[c]]))
+                fr.append(np.array([kk / n if forward else 1 - kk / n]))
+                pt.append(np.array([q]))
+                key.append(np.array([c * n + j + 1]))
+    ra, rb, fr, pt, key = (np.concatenate(x) for x in (ra, rb, fr, pt, key))
+    order = np.argsort(key, kind="stable")
+    ra, rb, fr, pt = ra[order], rb[order], fr[order], pt[order]
+    kept_prim = pv[ra]
+    kept_sizes = np.bincount(kept_prim, minlength=t.nprims)[keepp]
+    kvert = B.lerp(geo.vertex, ra, rb, fr)
+    vertex_point = np.concatenate([pt, tri_pts.reshape(-1)])
+    offs = B.offsets_from_sizes(np.concatenate([kept_sizes, np.full(T * ntp, 3)]))
+    vertex = B.concat([kvert, vtx])
+    prim = B.concat([B.gather(geo.prim, np.flatnonzero(keepp)), B.gather(geo.prim, np.repeat(tp, ntp))])
+    out = B.make(point["P"], vertex_point, offs, point, vertex, prim, geo.detail)
+    tess = np.r_[np.zeros(int(keepp.sum()), bool), np.ones(T * ntp, bool)]
+    # points that stay put: the border of the tessellated area, and anything an untouched face uses
+    fixed = np.zeros(out.npoints, bool)
+    fixed[vp[keepv]] = True
+    fixed[side[np.isin(skey, border)].reshape(-1)] = True
+    for pts_ in on_edge.values():
+        fixed[list(pts_.values())] = True
+    return out, tess, fixed
+
+
+def interior_detail(geo, inside, divisions, amplitude, frequency, seed):
+    """Roughen the faces in ``inside``: tessellate them and push the new interior points about with vector noise. The noise is
+    a function of position, so two pieces whose cut faces coincide stay matched to each other; the border does not move."""
+    out, tess, fixed = tessellate(geo, inside, divisions)
+    if not tess.any():
+        return out
+    pos = out.P.astype(np.float64) * float(frequency)
+    shift = np.stack([fbm3(pos.astype(np.float32), int(seed) + 1013 * c, 3, 2.0, 0.5) for c in range(3)], 1) * float(amplitude)
+    free = ~fixed
+    P = out.P.astype(np.float64)
+    P[free] += shift[free]
+    out = out.copy()
+    out.point["P"] = P.astype(np.float32)
+    return out
+
+
 @node("rbd_material_fracture", inputs=["geo"], category="physics", params=[
-    Enum("material", list(MATERIALS), doc="Density, friction, bounce and how firmly the pieces are glued"),
-    Int("pieces", 24, min=2, max=2000, soft_max=200, doc="How many pieces to break the shape into"),
+    Enum("material", [*MATERIALS, "custom"], doc="Density, friction, bounce and how firmly the pieces are glued (custom: the four numbers below)"),
+    Float("density", 1000.0, min=1.0, soft_max=10000.0, doc="custom: kg per cubic metre"),
+    Float("friction", 0.6, min=0.0, max=10.0, doc="custom: friction"),
+    Float("restitution", 0.1, min=0.0, max=1.0, doc="custom: bounce"),
+    Float("glue_strength", 1.0e7, min=0.0, soft_max=1e9, doc="custom: glue strength in newtons per square metre of contact"),
+    Int("pieces", 24, min=2, max=2000, soft_max=200, doc="How many pieces to break the shape into (at the first level)"),
+    Int("fracture_level", 1, min=1, max=4, doc="Fracture each piece again this many times in all (each pass breaks the previous pieces)"),
+    Int("sub_pieces", 4, min=2, max=64, doc="Pieces each piece breaks into at the second level and beyond"),
     Int("seed", 0),
     Float("surface_fraction", 0.15, min=0.0, max=1.0, doc="Share of the fracture points on the surface (finer pieces at the outside)"),
     Int("relax", 2, min=0, max=20, doc="Relaxation passes: more even pieces"),
     Float("gap", 0.0, min=0.0, soft_max=0.05, doc="A gap between pieces (needs max_gap in the glue)"),
+    Bool("convex_parts", False, doc="Split pieces that are not convex (a concave input) into convex parts, so the body still simulates"),
+    Float("max_concavity", 0.05, min=0.0, max=1.0, doc="convex_parts: how concave a piece may stay"),
+    Bool("interior_detail", False, doc="Roughen the new inside faces with noise (render geometry: such pieces are not convex, so "
+                                       "they cannot go to the solver)"),
+    Int("detail_divisions", 4, min=1, max=16, doc="interior_detail: each inside triangle is cut into this many squared pieces"),
+    Float("detail_amplitude", 0.02, min=0.0, soft_max=0.5, doc="interior_detail: how far the noise moves points"),
+    Float("detail_frequency", 4.0, min=0.0, soft_max=20.0, doc="interior_detail: noise frequency"),
     Bool("glue", True, doc="Glue the pieces together (output = constraints gives the links)"),
     Int("clusters", 0, min=0, soft_max=50, doc="Merge strongly stuck pieces into this many rigid clusters (needs glue; 0: none)"),
     Float("strength_scale", 1.0, min=0.0, soft_max=10.0, doc="Multiplies the material's glue strength"),
@@ -824,33 +1042,76 @@ MAT_OUT = OutGroups(
                                                   "constraints: the glue links for its third"),
     *MAT_OUT.params(),
 ])
-def rbd_material_fracture(geo, material, pieces, seed, surface_fraction, relax, gap, glue, clusters, strength_scale,
-                          mass_scale, output, **og):
+def rbd_material_fracture(geo, material, density, friction, restitution, glue_strength, pieces, fracture_level, sub_pieces,
+                          seed, surface_fraction, relax, gap, convex_parts, max_concavity, interior_detail, detail_divisions,
+                          detail_amplitude, detail_frequency, glue, clusters, strength_scale, mass_scale, output, **og):
     """A one-node fracture for simulation (Houdini's RBD Material Fracture): scatter fracture points, cut the closed
-    mesh with ``voronoi_fracture``, give each piece its own points, glue the pieces and set mass (density x volume),
-    friction and bounce from the material. Feed ``output = pieces`` to ``rbd_solver`` and ``output = constraints`` to
-    its third input. Pieces are convex when the input is; for a concave input run ``convex_decomposition`` first."""
-    from .fracture import INSIDE_TMP, OUT as FRACTURE_OUT, cut_edge_mask, voronoi_fracture
-    del INSIDE_TMP, cut_edge_mask
-    density, friction, bounce, glue_strength = MATERIALS[material]
-    pts = voronoi_fracture_points(geo, None, pieces, seed, surface_fraction, 0.0, relax, 0.0, 3, 0.25, "piece",
-                                  **{"outgrp_" + k: False for k in ("interior", "surface", "clustered", "extra")})
+    mesh with ``voronoi_fracture`` (again for each further ``fracture_level``), give each piece its own points, glue the
+    pieces and set mass (density x volume), friction and bounce from the material. Feed ``output = pieces`` to
+    ``rbd_solver`` and ``output = constraints`` to its third input. Pieces are convex when the input is; for a concave
+    input switch on ``convex_parts`` (each concave piece becomes a compound body of convex parts)."""
+    from .fracture import voronoi_fracture
+    from .group import keep_prims
+    from .merge import merge
+    if material != "custom":
+        density, friction, restitution, glue_strength = MATERIALS[material]
+    scatter_off = {"outgrp_" + k: False for k in ("interior", "surface", "clustered", "extra", "impact")}
     fracture_og = {k: v for k, v in og.items() if k.startswith("outgrp_")}
+    inside_name = og.get("outgrp_inside_name", "inside")
+    pts = voronoi_fracture_points(geo, None, pieces, seed, surface_fraction, 0.0, relax, 0.0, 3, 0.25, "piece", **scatter_off)
     frac = voronoi_fracture(geo, pts, "piece", "inside", gap, **fracture_og)
     split = assemble(frac, "attribute", "piece", "*", "piece", True, True, "centroid", "piece", False, False)
+    for level in range(2, int(fracture_level) + 1):                  # each further level breaks every piece again
+        ids = split.prim["piece"].astype(np.int64)
+        parts, offset = [], 0
+        for k in range(int(ids.max()) + 1):
+            part = keep_prims(split, ids == k)
+            sub = voronoi_fracture_points(part, None, sub_pieces, int(seed) + 31 * level + 7 * k, surface_fraction, 0.0, 1, 0.0, 3,
+                                          0.25, "piece", **scatter_off)
+            sub_pieces_geo = voronoi_fracture(part, sub, "piece", "inside", gap, **fracture_og)
+            numbered = assemble(sub_pieces_geo, "attribute", "piece", "*", "piece", True, False, "centroid", "piece", False, False)
+            numbered.prim["piece"] = numbered.prim["piece"] + np.int32(offset)       # unique across all the parts
+            offset += int(numbered.prim["piece"].max()) - offset + 1
+            parts.append(numbered)
+        split = assemble(merge_pieces(parts), "attribute", "piece", "*", "piece", True, True, "centroid", "piece", False, False)
     ids = split.prim["piece"].astype(np.int64)
     count = int(ids.max()) + 1 if len(ids) else 0
+    link_gap = gap * 1.2
     if output == "constraints":
         if not glue:
             raise ValueError("output = constraints needs glue switched on")
-        return glue_cluster(split, "piece", "constraints", glue_strength * strength_scale, 0.25, seed, gap * 1.2, 0.0, 0.05,
+        return glue_cluster(split, "piece", "constraints", glue_strength * strength_scale, 0.25, seed, link_gap, 0.0, 0.05,
                             clusters, 0.5)
     out = split
     if glue and clusters > 0:
-        out = glue_cluster(split, "piece", "pieces", glue_strength * strength_scale, 0.25, seed, gap * 1.2, 0.0, 0.05, clusters, 0.5)
-    out = out.copy()
+        out = glue_cluster(split, "piece", "pieces", glue_strength * strength_scale, 0.25, seed, link_gap, 0.0, 0.05, clusters, 0.5)
     volume = np.array([mesh_volume(part_of(split, ids, k)) for k in range(count)])
     mass = np.maximum(volume * density * mass_scale, 1e-6)
+    compound = False
+    if convex_parts:                                                # concave pieces become several convex parts of one body
+        pieces_out = []
+        for k in range(count):
+            part = keep_prims(out, ids == k)
+            if concave_volume(part)[1] / max(mesh_volume(part), 1e-300) > max_concavity:
+                dec = convex_decomposition(part, max_concavity, 16, 0.001, 8, "part", **{key: val for key, val in fracture_og.items()})
+                dec = dec.copy()
+                for name in ("piece", "cluster"):
+                    if name in part.prim:
+                        dec.prim[name] = np.full(dec.nprims, part.prim[name][0], np.int32)
+                pieces_out.append(dec)
+                compound = True
+            else:
+                pieces_out.append(part)
+        out = merge_pieces(pieces_out)
+        ids = out.prim["piece"].astype(np.int64)
+    if interior_detail:
+        name = inside_name or "inside"
+        if groups.attr_name(name) not in out.prim:
+            raise ValueError("interior_detail needs the inside faces group switched on")
+        inside = groups.member(out, "prim", name).astype(bool)
+        out = interior_detail_pass(out, inside, detail_divisions, detail_amplitude, detail_frequency, seed, og)
+        ids = out.prim["piece"].astype(np.int64)
+    out = out.copy()
     body = out.prim["cluster"].astype(np.int64) if "cluster" in out.prim else ids
     if "cluster" in out.prim:                                # a cluster is one body: its mass is the sum of its pieces'
         piece_body = np.zeros(count, np.int64)
@@ -861,11 +1122,13 @@ def rbd_material_fracture(geo, material, pieces, seed, surface_fraction, relax, 
     else:
         mass_prim = mass[ids]
     out.prim["rbd_id"] = body.astype(np.int32)
-    if "cluster" in out.prim:
+    if "cluster" in out.prim or compound:
         out.prim["rbd_compound"] = np.ones(out.nprims, np.int32)
+    if compound:
+        out.prim["rbd_hull"] = np.ones(out.nprims, np.int32)       # parts are nearly convex: the solver collides with their hulls
     out.prim["rbd_active"] = np.ones(out.nprims, np.int32)
     out.prim["rbd_mass"] = mass_prim.astype(np.float32)
-    for name, value in (("friction", friction), ("restitution", bounce), ("linear_damping", 0.05), ("angular_damping", 0.1)):
+    for name, value in (("friction", friction), ("restitution", restitution), ("linear_damping", 0.05), ("angular_damping", 0.1)):
         out.prim["rbd_" + name] = np.full(out.nprims, value, np.float32)
     out.prim["rbd_v"] = np.zeros((out.nprims, 3), np.float32)
     out.prim["rbd_w"] = np.zeros((out.nprims, 3), np.float32)
@@ -874,6 +1137,63 @@ def rbd_material_fracture(geo, material, pieces, seed, surface_fraction, relax, 
     return out
 
 
+def merge_pieces(parts):
+    from .merge import merge
+    return merge(parts) if len(parts) > 1 else parts[0]
+
+
+def interior_detail_pass(out, inside, divisions, amplitude, frequency, seed, og):
+    """:func:`interior_detail` plus the cut point / cut edge groups, rebuilt for the new faces."""
+    from .fracture import cut_edge_mask
+    out = interior_detail(out, inside, divisions, amplitude, frequency, seed)
+    name = og.get("outgrp_inside_name", "inside")
+    ins = groups.member(out, "prim", name).astype(bool)
+    seam = cut_edge_mask(out, ins)
+    out = MAT_OUT.write(out, og, "cutpoints", lambda: _points_of_edges(out, seam))
+    return MAT_OUT.write(out, og, "cutedges", seam)
+
+
 def part_of(geo, ids, k):
     from .group import keep_prims
     return keep_prims(geo, ids == k)
+
+
+# ------------------------------------------------------------------------------------------- constraint properties
+
+PROPS_OUT = OutGroups(OutGroup("changed", "Edited Links", "editedlinks", "prim", doc="The links this node set or scaled"))
+
+
+@node("rbd_constraint_properties", inputs=["constraints"], category="physics", params=[
+    Str("group", "", doc="Links to edit: group names, ranges or '@area > 0.1' (empty: all). 'internal' / 'external' from glue_cluster work here"),
+    Enum("mode", ["set", "scale"], doc="set: replace the strength; scale: multiply what is there"),
+    Float("strength", 1.0e6, min=0.0, soft_max=1e8, doc="The new strength (set) or the factor (scale)"),
+    Bool("per_area", True, doc="set: newtons per square metre of the link's contact area (off: newtons for the whole link)"),
+    Float("variation", 0.0, min=0.0, max=1.0, doc="Random spread of each link's result (0.2: within 20%)"),
+    Int("seed", 0),
+    Bool("unbreakable", False, doc="Strength 0 on these links: the solver never breaks them"),
+    *PROPS_OUT.params(),
+])
+def rbd_constraint_properties(constraints, group, mode, strength, per_area, variation, seed, unbreakable, **og):
+    """Edit the glue links of ``glue_cluster`` (Houdini's RBD Constraint Properties): set or scale the break strength of a
+    group of links, with random variation, or make them unbreakable. Chain several to give different parts of a structure
+    different strengths."""
+    if constraints.nprims == 0:
+        return constraints
+    if "strength" not in constraints.prim:
+        raise ValueError("these are not glue links: no 'strength' attribute (use glue_cluster output = constraints)")
+    from .. import groups as G
+    sel = G.mask(constraints, "prim", group)
+    sel = np.ones(constraints.nprims, bool) if sel is None else sel
+    cur = constraints.prim["strength"].astype(np.float64)
+    noise = np.random.default_rng([int(seed) & 0xFFFFFFFF, 53]).random(constraints.nprims) * 2 - 1
+    spread = np.maximum(1 + variation * noise, 0.01)
+    if unbreakable:
+        new = np.zeros(constraints.nprims)
+    elif mode == "scale":
+        new = cur * strength * spread
+    else:
+        base = strength * constraints.prim["area"].astype(np.float64) if per_area and "area" in constraints.prim else np.full(constraints.nprims, strength)
+        new = base * spread
+    out = constraints.copy()
+    out.prim["strength"] = np.where(sel, new, cur).astype(np.float32)
+    return PROPS_OUT.write(out, og, "changed", sel)
