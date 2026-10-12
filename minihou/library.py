@@ -81,6 +81,11 @@ Rules
 * Params: Float/Int(name, default, min=, max=, soft_min=, soft_max=, doc=), Bool, Vec3, Enum(name, choices), Str(name,
   default, kind="code"). Float/Int/Bool/Vec3 params can be exposed to Blender.
 * Node names: lower_case, unique, not an existing type. Category is free text (shown in the Tab menu).
+* Viewport handles (optional): `@node(..., handles=[Handle("height", axis="z", at="origin", reach=True)])` draws a draggable
+  arrow in the editor's 3-D view while the node is selected and writes the parameter back. `Handle(param, kind="arrow" | "ring" |
+  "scale", axis="x"/"y"/"z"/"-x"/vector/"@vec3_param", at="center"/"origin"/"top"/"bottom"/vector/"@vec3_param", comp=, scale=,
+  reach=, min=, max=)`: an arrow's `scale` is parameter units per world unit dragged, `reach=True` puts its root at
+  `at + axis * value / scale` so it rides on the dimension it edits, a ring edits an angle in degrees, an Int parameter moves in whole steps.
 
 Geometry API
 * geo.P -> (n, 3) float32 positions; geo.npoints, geo.nprims, geo.nvertices

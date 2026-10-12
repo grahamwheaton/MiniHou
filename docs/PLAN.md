@@ -148,10 +148,19 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
    script is tested for real with the `bpy` module; **not verified**: the Windows/macOS builds (only built on Linux here), and dropping the zip
    from a browser onto a Blender window (browser and OS dependent; the Install and Open buttons do not depend on it).
 
+9. **Editor additions (requested)**: a normals overlay toggle, a play/step/loop timeline under the 3-D view (real-time frame skipping,
+   `status.fps` reported by the engine), a breadcrumb path with double-click to open group (system) nodes, and a **Piece** selection mode (connected
+   pieces, computed in the viewer by union-find over the triangles) with a move/rotate/scale gizmo on every selection whose first drag inserts a
+   `transform` (group = the selected points, pivot = their centre) and carries the drag over to it; a handle's start may now return a promise.
+
+10. **`fillet` and `blend`**: fillet rounds curve corners exactly (tangent arcs, radius limited to half of each neighbouring segment so arcs never overlap,
+    attributes blended along the curve); blend morphs towards same-point-count targets with additive offsets, expression weights over `@Frame`/`@Time`
+    (a small safe expression evaluator, no `eval`) and a per-point mask. Example graph `fillet_blend`.
+
 Open:
 
 - Extra outputs have no modifier or exposed parameters (only the display branch does).
-- More handles (bevel segments, copy_to_points scale); handle providers for library nodes. (Done: transform Move / Rotate / Scale tools: rings
+- More handles (bevel segments, copy_to_points scale). (Done: `@node(handles=[Handle(...)])` for any node, library nodes included, used by tube, helix, line and bend; transform Move / Rotate / Scale tools: rings
   turn about each Euler angle's real axis, scale cubes follow the rotated axes, drags multiply so scale never crosses zero.)
 - Edge selections are point pairs, so they only stay valid while the geometry upstream keeps its point numbering (as in Houdini).
 

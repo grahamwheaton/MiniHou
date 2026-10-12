@@ -57,6 +57,7 @@
       <div id="nodes"></div>
     </div>
     <svg id="overlay"></svg>
+    <nav id="crumbs" class="hidden" aria-label="Graph path"></nav>
     <div id="boxsel" class="hidden"></div>
     <div id="empty-hint" class="hidden">Press <kbd>Tab</kbd> or double-click to add a node</div>
     <div id="offline" class="hidden">Engine offline — reconnecting… <small>(start it with <code>python -m minihou serve graph.json</code>)</small></div>
@@ -72,12 +73,13 @@
           <label class="small"><input type="checkbox" id="pv-shaded" checked> shaded</label>
           <label class="small"><input type="checkbox" id="pv-edges" checked> edges</label>
           <label class="small"><input type="checkbox" id="pv-points"> points</label>
+          <label class="small" title="Draw each face's normal (from its winding) as a line from its centre"><input type="checkbox" id="pv-normals"> normals</label>
           <button id="pv-max" class="small" title="Fill the window with this pane and back (Ctrl+Space over a pane)">⛶</button>
         </span>
       </div>
       <div class="pv-tools">
         <span class="pv-modes" role="group" aria-label="Selection mode">
-          <button data-mode="view" class="on" title="Orbit only (default)">View</button><button data-mode="point" title="Select points (1)">Pts</button><button data-mode="edge" title="Select edges (2)">Edges</button><button data-mode="face" title="Select faces (3)">Faces</button>
+          <button data-mode="view" class="on" title="Orbit only (default)">View</button><button data-mode="point" title="Select points (1)">Pts</button><button data-mode="edge" title="Select edges (2)">Edges</button><button data-mode="face" title="Select faces (3)">Faces</button><button data-mode="piece" title="Select whole connected pieces (4): drag the gizmo to move, rotate or scale them">Piece</button>
         </span>
         <span id="pv-selinfo" class="muted small"></span>
         <span id="pv-xform" class="pv-nav hidden" role="group" aria-label="Handle tool">
@@ -90,6 +92,20 @@
       </div>
       <div class="pv-wrap"><canvas id="pv-canvas" aria-label="3D preview"></canvas><div id="pv-msg" class="muted hidden"></div></div>
       <div id="pv-actions" class="pv-actions hidden"></div>
+      <div id="pv-time" class="pv-time" role="group" aria-label="Timeline">
+        <button id="tl-first" title="Go to the start frame (Shift+Left)" aria-label="Start">⏮</button>
+        <button id="tl-back" title="Previous frame (Left)" aria-label="Previous frame">◂</button>
+        <button id="tl-play" class="play" title="Play / pause (Space over the view)" aria-label="Play">▶</button>
+        <button id="tl-next" title="Next frame (Right)" aria-label="Next frame">▸</button>
+        <button id="tl-last" title="Go to the end frame (Shift+Right)" aria-label="End">⏭</button>
+        <input id="tl-slider" type="range" min="1" max="96" step="1" value="1" aria-label="Timeline">
+        <input id="tl-frame" type="number" step="1" value="1" title="Current frame" aria-label="Frame">
+        <span class="tl-range" title="Playback range and speed">
+          <input id="tl-start" type="number" step="1" value="1" aria-label="Start frame"> – <input id="tl-end" type="number" step="1" value="96" aria-label="End frame">
+          <input id="tl-fps" type="number" step="1" min="1" max="240" value="24" aria-label="Frames per second"><span class="muted small">fps</span>
+        </span>
+        <button id="tl-loop" class="on" title="Loop at the end" aria-label="Loop">⟲</button>
+      </div>
     </section>
   </div>
 
@@ -127,10 +143,13 @@
     <tr><td>blue bar on a node</td><td>display flag: what Blender shows</td></tr>
     <tr><td>drag background / middle mouse</td><td>pan; wheel zooms; <kbd>Shift</kbd>-drag box-selects</td></tr>
     <tr><td><kbd>F</kbd> / <kbd>L</kbd></td><td>frame selection (or all) / tidy the layout</td></tr>
-    <tr><td>3-D view: <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> / <kbd>Esc</kbd></td><td>select points / edges / faces (click or drag a box, <kbd>Shift</kbd> adds, <kbd>Ctrl</kbd> removes; <kbd>Alt</kbd>-drag or middle mouse orbits) / back to view. The buttons under the view add a node after the one you are looking at (Bevel for edges, Extrude, Inset, Delete, Group for faces...)</td></tr>
+    <tr><td>3-D view: <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> / <kbd>Esc</kbd></td><td>select points / edges / faces / whole pieces (click or drag a box, <kbd>Shift</kbd> adds, <kbd>Ctrl</kbd> removes; <kbd>Alt</kbd>-drag or middle mouse orbits) / back to view. The buttons under the view add a node after the one you are looking at (Bevel for edges, Extrude, Inset, Delete, Group for faces...)</td></tr>
+    <tr><td>timeline (under the 3-D view)</td><td>▶ plays the graph in real time between the start and end frames (frames are skipped, never queued, if a cook is slower than the frame rate); <kbd>Space</kbd> plays or pauses, <kbd>←</kbd> <kbd>→</kbd> step, <kbd>Shift</kbd>+arrow jumps to the ends, ⟲ loops. Blender's own timeline still drives the frame when it is connected</td></tr>
     <tr><td>3-D view navigation</td><td>drag orbits, <kbd>Shift</kbd>-drag / right / middle mouse pans, wheel zooms; the axis gizmo (top right) or <kbd>Numpad 1</kbd> <kbd>3</kbd> <kbd>7</kbd> (<kbd>Ctrl</kbd>: opposite side) snap to front / right / top; <kbd>Numpad 5</kbd> perspective or orthographic; <kbd>Numpad .</kbd> / <kbd>Home</kbd> frame the selection or everything</td></tr>
+    <tr><td>moving a selection</td><td>whatever you select (points, edges, faces, pieces) shows a <b>Move / Rotate / Scale</b> gizmo at its centre; the first drag adds a <b>transform</b> node after the viewed node (its group is the selected points, its pivot the centre), later drags on the same selection edit that node</td></tr>
     <tr><td>handles in the 3-D view</td><td>the node you look at can show arrows to drag; a <b>transform</b> has <b>Move / Rotate / Scale</b> tools (<kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd> with the pointer over the view and nothing selected): move arrows, one ring per rotation axis (drag around it), scale cubes per axis and a square for uniform scale</td></tr>
     <tr><td>layout</td><td>drag the dividers between the graph, the 3-D view and the parameter panel; <b>Graph / Split / 3D</b> set the balance, <b>⇆</b> stacks or aligns, <b>⇄</b> swaps, <b>▤</b> hides the panel; <kbd>Ctrl+Space</kbd> over a pane fills the window with it (again to go back). Saved in this browser.</td></tr>
+    <tr><td>double-click a group</td><td>open the graph inside a group (system) node; the path at the top left of the graph shows where you are (click a name to go back out, <kbd>Alt</kbd>+<kbd>Up</kbd> goes up one level)</td></tr>
     <tr><td><kbd>O</kbd></td><td>network box around the selected nodes: drag its title to move it with them, its corner to resize, double-click the title to rename, the dot to change colour</td></tr>
     <tr><td><kbd>Delete</kbd> / <kbd>Ctrl+D</kbd> / <kbd>Ctrl+A</kbd></td><td>delete / duplicate / select all</td></tr>
     <tr><td><kbd>Ctrl+C</kbd> / <kbd>Ctrl+X</kbd> / <kbd>Ctrl+V</kbd></td><td>copy / cut / paste nodes (also into another graph or editor window)</td></tr>

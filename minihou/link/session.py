@@ -35,7 +35,7 @@ from .. import timectx
 from ..inputs import INPUTS
 from ..sdk import ParamError, Registry
 from ..flow import attribute_flow
-from ..handles import PROVIDERS as HANDLE_TYPES, handles_for
+from ..handles import has_handles, handles_for
 from ..summary import summarize
 from ..wrangle import compile_snippet
 
@@ -446,7 +446,7 @@ class Session:
         with self.lock:
             good, err, rev = self.latest_good, self.latest_error, self._rev
         out: Dict[str, Any] = {"rev": rev, "cooked_rev": self._cooked_rev, "busy": self._cooked_rev < rev,
-                               "frame": self.frame}
+                               "frame": self.frame, "fps": self.fps}
         if err is not None:
             out.update(ok=False, error=err.error)
         else:
@@ -513,9 +513,10 @@ class Session:
                 geo = self.evaluator.cook(snapshot, node, feeds=feeds)
                 handles = []
                 inst = snapshot.nodes[node]
-                if inst.type in HANDLE_TYPES:                    # inputs (cached) and parameters for the viewport handles
+                nt = self.evaluator.registry.get(inst.type) if inst.type in self.evaluator.registry else None
+                if has_handles(inst.type, nt):
                     ins = [self.evaluator.cook(snapshot, src, feeds=feeds) for src in snapshot.input_ids(node) if src in snapshot.nodes]
-                    handles = handles_for(inst.type, ins, geo, snapshot.effective_params(node))
+                    handles = handles_for(inst.type, ins, geo, snapshot.effective_params(node), nt)
                 if live_preview and geo.detail.get("instance_objects"):
                     from .live import preview_instances
                     geo = preview_instances(geo, sources)

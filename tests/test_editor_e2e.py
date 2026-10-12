@@ -589,9 +589,8 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()")),
                          ["translate_x", "translate_y", "translate_z"])
         tip = self.drag_handle("translate_x", 60)
-        self.assertTrue(until(lambda: self.s.graph.nodes["h"].params.get("translate", [0, 0, 0])[0] > 0.6))
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes["h"].params.get("translate", [0, 0, 0])[0] - (0.5 + 60 / tip["ppu"])) < 0.15))   # 60 px along the arrow, in world units
         t = self.s.graph.nodes["h"].params["translate"]
-        self.assertAlmostEqual(t[0], 0.5 + 60 / tip["ppu"], delta=0.15)                    # 60 px along the arrow, in world units
         self.assertEqual((t[1], t[2]), (1.0, 2.0))                                          # the other components are untouched
         self.assertTrue(until(lambda: self.s.status()["ok"]))
         self.page.wait_for_function("minihou.preview.handleTips().length === 3")             # the arrows follow the moved result
@@ -698,6 +697,261 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(self.page.locator("#blender-bar").is_hidden())                         # stays hidden after a reload
         self.page.click("#blender-status")                                                     # the Blender indicator brings it back
         self.assertFalse(self.page.locator("#blender-bar").is_hidden())
+
+    def test_a_library_node_can_declare_a_handle_and_dragging_it_edits_the_parameter(self):
+        if not self.page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+            self.skipTest("this Chromium has no WebGL2")
+        name = f"e2e_pole_{os.getpid()}"
+        os.makedirs(os.path.join(self.dir, "nodes"))
+        with open(os.path.join(self.dir, "nodes", "pole.py"), "w", encoding="utf-8") as f:
+            f.write("import numpy as np\nfrom minihou.geometry import Geometry\n"
+                    "from minihou.sdk import Float, Handle, Int, node\n\n"
+                    f"@node({name!r}, params=[Float('height', 2.0, min=0.0), Int('count', 3, min=1)],\n"
+                    "      handles=[Handle('height', axis='z', at='origin', reach=True, min=0.0), Handle('count', axis='x', at='origin', scale=10.0)])\n"
+                    f"def {name}(height, count):\n"
+                    "    P = np.array([[0, 0, 0], [0, 0, height]], np.float32)\n"
+                    "    return Geometry.points_only(P)\n")
+        self.page.wait_for_function(f"window.minihou.S.types[{name!r}] !== undefined")
+        graph = {"version": 1, "nodes": {"p": {"type": name, "pos": [0, 0]}, "o": {"type": "output", "inputs": {"geo": "p"}, "pos": [0, 110]}},
+                 "display": "o"}
+        self.s.edit([{"op": "replace", "graph": graph}])
+        self.page.wait_for_selector('.node[data-id="p"]')
+        self.node("p").locator(".title").click()
+        self.page.wait_for_function("minihou.preview.handleTips().length === 2")
+        ppu = next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == "height")["ppu"]
+        self.drag_handle("height", int(0.5 * ppu))                                           # half a world unit up the arrow
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes["p"].params.get("height", 2.0) - 2.5) < 0.1))   # (the last value arrives after the drag)
+        ppu = next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == "count")["ppu"]
+        self.drag_handle("count", int(0.68 * ppu))                                           # an integer parameter moves in whole steps
+        self.assertTrue(until(lambda: self.s.graph.nodes["p"].params.get("count", 3) != 3))
+        count = self.s.graph.nodes["p"].params["count"]
+        self.assertIsInstance(count, int)
+        self.assertGreater(count, 3)
+
+    def test_normals_overlay_toggle_draws_each_faces_normal_from_its_winding(self):
+        self.box_scene()
+        self.assertFalse(self.page.locator("#pv-normals").is_checked())
+        self.page.check("#pv-normals")
+        self.assertTrue(self.page.evaluate("minihou.preview.opt.normals"))
+        self.page.wait_for_function("minihou.preview.normalCount === 6")
+        seg = self.page.evaluate("minihou.preview.normalSegments()")
+        self.assertEqual(len(seg), 36)
+        outward = 0
+        for i in range(6):
+            c, t = seg[6 * i:6 * i + 3], seg[6 * i + 3:6 * i + 6]
+            d = [t[k] - c[k] for k in range(3)]
+            length = sum(x * x for x in d) ** 0.5
+            self.assertAlmostEqual(length, 0.04 * (12 ** 0.5), delta=1e-3)                  # 4% of the bounds' diagonal
+            outward += sum(c[k] * d[k] for k in range(3)) > 0                                # centre of a box face . normal > 0: pointing out
+        self.assertEqual(outward, 6)
+        self.page.uncheck("#pv-normals")
+        self.assertFalse(self.page.evaluate("minihou.preview.opt.normals"))
+
+    def test_normals_overlay_shows_flipped_faces_pointing_inwards(self):
+        graph = {"version": 1, "nodes": {"b": {"type": "box", "params": {"size": [2, 2, 2]}, "pos": [0, 0]},
+                                         "r": {"type": "reverse", "inputs": {"geo": "b"}, "pos": [0, 110]},
+                                         "o": {"type": "output", "inputs": {"geo": "r"}, "pos": [0, 220]}}, "display": "o"}
+        if not self.page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+            self.skipTest("this Chromium has no WebGL2")
+        self.s.edit([{"op": "replace", "graph": graph}])
+        self.page.wait_for_selector('.node[data-id="r"]')
+        self.node("r").locator(".title").click()
+        self.page.wait_for_function("minihou.preview.tris === 12")
+        self.page.check("#pv-normals")
+        self.page.wait_for_function("minihou.preview.normalCount === 6")
+        seg = self.page.evaluate("minihou.preview.normalSegments()")
+        inward = sum(sum(seg[6 * i + k] * (seg[6 * i + 3 + k] - seg[6 * i + k]) for k in range(3)) < 0 for i in range(6))
+        self.assertEqual(inward, 6)
+
+    # ---- the timeline under the 3-D view
+    def test_timeline_steps_scrubs_and_jumps_within_the_playback_range(self):
+        self.page.fill("#tl-end", "10")
+        self.page.press("#tl-end", "Tab")
+        self.page.click("#tl-next")
+        self.assertTrue(until(lambda: self.s.frame == 2.0))
+        self.page.click("#tl-last")
+        self.assertTrue(until(lambda: self.s.frame == 10.0))
+        self.page.click("#tl-next")                                                              # stays inside the range
+        self.page.click("#tl-back")
+        self.assertTrue(until(lambda: self.s.frame == 9.0))
+        self.page.fill("#tl-slider", "4")
+        self.assertTrue(until(lambda: self.s.frame == 4.0))
+        self.page.click("#tl-first")
+        self.assertTrue(until(lambda: self.s.frame == 1.0))
+        self.page.fill("#tl-frame", "7")
+        self.page.press("#tl-frame", "Enter")
+        self.assertTrue(until(lambda: self.s.frame == 7.0))
+        self.assertEqual(self.page.input_value("#frame-input"), "7")                              # the top bar field follows
+
+    def test_play_runs_in_real_time_loops_and_pauses(self):
+        self.page.fill("#tl-start", "1"); self.page.press("#tl-start", "Tab")
+        self.page.fill("#tl-end", "6"); self.page.press("#tl-end", "Tab")
+        self.page.fill("#tl-fps", "60"); self.page.press("#tl-fps", "Tab")
+        self.assertTrue(until(lambda: self.s.fps == 60.0))                                       # the engine's @Time follows the fps
+        seen = []
+        self.page.click("#tl-play")
+        self.assertEqual(self.page.inner_text("#tl-play"), "⏸")
+        end = time.monotonic() + 6
+        while time.monotonic() < end and not (6.0 in seen and seen[-1] < 6.0 and seen.index(6.0) < len(seen) - 1):
+            if not seen or self.s.frame != seen[-1]:
+                seen.append(self.s.frame)
+            time.sleep(0.005)
+        self.assertIn(6.0, seen, seen)                                                           # reached the end...
+        self.assertLess(seen[-1], 6.0, seen)                                                     # ...and looped back
+        self.assertTrue(all(1.0 <= f <= 6.0 for f in seen), seen)
+        self.page.click("#tl-play")                                                              # pause
+        self.assertEqual(self.page.inner_text("#tl-play"), "▶")
+        stopped = self.page.input_value("#tl-frame")
+        time.sleep(0.4)
+        self.assertEqual(self.page.input_value("#tl-frame"), stopped)
+        self.assertEqual(float(stopped), self.s.frame)
+
+    def test_play_without_loop_stops_at_the_end_and_space_toggles_over_the_view(self):
+        self.page.fill("#tl-end", "5"); self.page.press("#tl-end", "Tab")
+        self.page.fill("#tl-fps", "120"); self.page.press("#tl-fps", "Tab")
+        self.page.click("#tl-loop")                                                              # loop off
+        self.assertFalse(self.page.evaluate("document.querySelector('#tl-loop').classList.contains('on')"))
+        box = self.page.locator("#pv-canvas").bounding_box()
+        self.page.mouse.move(box["x"] + 30, box["y"] + 30)
+        self.page.keyboard.press("Space")
+        self.assertTrue(until(lambda: self.s.frame == 5.0, timeout=6))
+        self.page.wait_for_function("document.querySelector('#tl-play').textContent === '▶'")   # it stopped by itself
+        time.sleep(0.3)
+        self.assertEqual(self.s.frame, 5.0)
+        self.page.keyboard.press("ArrowLeft")
+        self.assertTrue(until(lambda: self.s.frame == 4.0))
+        self.page.keyboard.press("Shift+ArrowLeft")
+        self.assertTrue(until(lambda: self.s.frame == 1.0))
+
+    def test_timeline_range_is_remembered_and_the_preview_follows_the_frame(self):
+        self.page.fill("#tl-end", "48"); self.page.press("#tl-end", "Tab")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.assertEqual(self.page.input_value("#tl-end"), "48")
+        # a time-dependent graph changes the geometry the viewer shows from frame to frame
+        graph = {"version": 1, "nodes": {"b": {"type": "box", "params": {"size": [2, 2, 2]}, "pos": [0, 0]},
+                                         "w": {"type": "wrangle", "inputs": {"geo": "b"}, "pos": [0, 110],
+                                               "params": {"snippet": "@P.z += @Frame * 0.1;", "run_over": "points"}},
+                                         "o": {"type": "output", "inputs": {"geo": "w"}, "pos": [0, 220]}}, "display": "o"}
+        if not self.page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+            self.skipTest("this Chromium has no WebGL2")
+        self.s.edit([{"op": "replace", "graph": graph}])
+        self.page.wait_for_selector('.node[data-id="w"]')
+        self.node("w").locator(".title").click()
+        self.page.wait_for_function("minihou.preview.tris === 12")
+        self.page.click("#tl-last")
+        self.assertTrue(until(lambda: self.s.frame == 48.0))
+        self.page.wait_for_function("Math.abs(minihou.preview.bounds()[1][2] - 5.8) < 0.01")      # frame 48: the box rose by 4.8
+        self.page.click("#tl-first")
+        self.page.wait_for_function("Math.abs(minihou.preview.bounds()[1][2] - 1.1) < 0.01")     # frame 1: by 0.1
+
+    # ---- piece selection and the auto-inserted transform
+    def two_boxes(self):
+        if not self.page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+            self.skipTest("this Chromium has no WebGL2")
+        graph = {"version": 1, "nodes": {"a": {"type": "box", "params": {"size": [1, 1, 1], "center": [-2, 0, 0]}, "pos": [0, 0]},
+                                         "b": {"type": "box", "params": {"size": [1, 1, 1], "center": [2, 0, 0]}, "pos": [150, 0]},
+                                         "m": {"type": "merge", "inputs": {"geos": ["a", "b"]}, "pos": [60, 110]},
+                                         "o": {"type": "output", "inputs": {"geo": "m"}, "pos": [60, 220]}}, "display": "o"}
+        self.s.edit([{"op": "replace", "graph": graph}])
+        self.page.wait_for_selector('.node[data-id="m"]')
+        self.node("m").locator(".title").click()
+        self.page.wait_for_function("minihou.preview.tris === 24")
+        self.page.wait_for_function("minihou.preview.points === 16")
+        from minihou import Evaluator
+        self.merged = Evaluator().cook(self.s.graph, "m")
+
+    def second_box_top(self):
+        g = self.merged
+        vp, offs = g.topology.vertex_point.astype(int), g.topology.prim_offsets
+        return max(range(6, 12), key=lambda p: g.P[vp[offs[p]:offs[p + 1]]].mean(0)[2])
+
+    def test_piece_mode_selects_a_whole_object_and_the_gizmo_adds_a_transform_when_dragged(self):
+        import math
+        from minihou import Evaluator
+        self.two_boxes()
+        self.page.click('#preview [data-mode="piece"]')
+        face = self.second_box_top()
+        self.page.mouse.click(*self.view_xy("face", face))
+        sel = self.selection()
+        self.assertEqual(sel["mode"], "piece")
+        self.assertEqual(sorted(sel["faces"]), list(range(6, 12)))                              # all six faces of that box, nothing of the other
+        self.assertEqual(self.page.locator("#pv-selinfo").inner_text(), "6 faces in the selected pieces")
+        info = self.page.evaluate("minihou.preview.selectionInfo()")
+        self.assertEqual(info["points"], list(range(8, 16)))
+        self.assertEqual([round(v, 3) for v in info["center"]], [2.0, 0.0, 0.0])
+        # a drag on the move gizmo adds the transform: group = the selected points, pivot = their centre
+        ids = sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()"))
+        self.assertEqual(ids, ["translate_x", "translate_y", "translate_z"])
+        ppu = next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == "translate_z")["ppu"]
+        self.assertFalse([n for n in self.s.graph.nodes.values() if n.type == "transform"])
+        self.drag_handle("translate_z", int(0.75 * ppu))
+        self.assertTrue(until(lambda: [n for n in self.s.graph.nodes.values() if n.type == "transform"]))
+        tid = next(i for i, n in self.s.graph.nodes.items() if n.type == "transform")
+        n = self.s.graph.nodes[tid]
+        self.assertEqual(n.inputs, {"geo": "m"})
+        self.assertEqual(n.params["group"], "8-15")
+        self.assertEqual([round(v, 3) for v in n.params["pivot"]], [2.0, 0.0, 0.0])
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes[tid].params.get("translate", [0, 0, 0])[2] - 0.75) < 0.1))
+        self.assertEqual(self.s.graph.display, "o")
+        self.assertEqual(self.s.graph.nodes["o"].inputs["geo"], tid)                            # spliced in before the output
+        out = Evaluator().cook(self.s.graph, tid)
+        self.assertAlmostEqual(float(out.P[8:, 2].mean()), 0.75, delta=0.1)                     # the second box moved up...
+        self.assertAlmostEqual(float(out.P[:8, 2].mean()), 0.0, places=5)                       # ...the first one did not
+        # the new node is now the viewed one and shows its own handles at the moved points; selecting again edits the same node
+        self.page.wait_for_function(f"document.querySelector('#pv-node').innerText.includes({tid!r})")
+        self.page.click('#preview [data-mode="piece"]')
+        self.page.mouse.click(*self.view_xy("face", face))
+        self.assertEqual(sorted(self.selection()["faces"]), list(range(6, 12)))
+        before = self.s.graph.nodes[tid].params["translate"][2]
+        ppu = next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == "translate_z")["ppu"]
+        self.drag_handle("translate_z", int(0.5 * ppu))
+        self.assertTrue(until(lambda: self.s.graph.nodes[tid].params["translate"][2] > before + 0.3))
+        self.assertEqual(len([x for x in self.s.graph.nodes.values() if x.type == "transform"]), 1)   # no second transform
+
+    def test_rotate_and_scale_tools_of_a_selection_create_the_transform_too(self):
+        import math
+        from minihou import Evaluator
+        self.two_boxes()
+        self.page.click('#preview [data-mode="piece"]')
+        self.page.mouse.click(*self.view_xy("face", self.second_box_top()))
+        self.page.click('#pv-xform [data-tool="rotate"]')
+        self.assertEqual(sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()")), ["rotate_x", "rotate_y", "rotate_z"])
+        box = self.page.locator("#pv-canvas").bounding_box()
+        a = self.page.evaluate("minihou.preview.ringScreen('rotate_z', 0.6)")
+        b = self.page.evaluate("minihou.preview.ringScreen('rotate_z', 1.1)")
+        self.page.mouse.move(box["x"] + a[0], box["y"] + a[1])
+        self.page.mouse.down()
+        self.page.mouse.move(box["x"] + b[0], box["y"] + b[1], steps=8)
+        self.page.mouse.up()
+        self.assertTrue(until(lambda: any(n.type == "transform" for n in self.s.graph.nodes.values())))
+        tid = next(i for i, n in self.s.graph.nodes.items() if n.type == "transform")
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes[tid].params.get("rotate", [0, 0, 0])[2] - math.degrees(0.5)) < 1.0))
+        self.assertEqual(self.s.graph.nodes[tid].params["group"], "8-15")
+        out = Evaluator().cook(self.s.graph, tid)
+        np_center = out.P[8:].astype("float64").mean(0)
+        self.assertAlmostEqual(float(np_center[0]), 2.0, delta=1e-4)                            # turned about its own centre, so it stays put
+        self.assertGreater(abs(float(out.P[8, 0]) - float(self.merged.P[8, 0])) + abs(float(out.P[8, 1]) - float(self.merged.P[8, 1])), 0.05)
+
+    def test_a_point_selection_also_gets_the_gizmo_and_piece_box_select_takes_whole_pieces(self):
+        self.two_boxes()
+        self.page.click('#preview [data-mode="piece"]')
+        box = self.page.locator("#pv-canvas").bounding_box()
+        x0, y0 = self.view_xy("point", 8)
+        x1, y1 = self.view_xy("point", 15)
+        self.page.mouse.move(box["x"] + box["width"] / 2 + 5, box["y"] + 15)                    # a box over the right half only
+        self.page.mouse.down()
+        self.page.mouse.move(box["x"] + box["width"] - 15, box["y"] + box["height"] - 15, steps=6)
+        self.page.mouse.up()
+        self.assertEqual(sorted(self.selection()["faces"]), list(range(6, 12)))                 # whole piece, not just the faces inside the box
+        self.page.click('#preview [data-mode="point"]')
+        self.page.mouse.click(*self.view_xy("point", 8))
+        self.assertEqual(self.selection()["points"], [8])
+        info = self.page.evaluate("minihou.preview.selectionInfo()")
+        self.assertEqual(info["points"], [8])
+        self.assertEqual(len(self.page.evaluate("minihou.preview.handleTips()")), 3)            # move arrows at the point
+        self.drag_handle("translate_x", 40)
+        self.assertTrue(until(lambda: any(n.type == "transform" and n.params.get("group") == "8" for n in self.s.graph.nodes.values())))
 
     def test_sphere_radius_arrow_clamps_at_zero(self):
         graph = {"version": 1, "nodes": {"s": {"type": "sphere", "params": {"radius": 0.5}}, "o": {"type": "output", "inputs": {"geo": "s"}}},
@@ -849,6 +1103,51 @@ class EditorE2E(unittest.TestCase):
         self.page.locator("#params button", has_text="Edit system").click()
         self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == f"{name}.json"))
         self.page.wait_for_selector('.node[data-id="inp"]')
+
+    def test_double_click_opens_nested_groups_with_a_breadcrumb_path_back(self):
+        import json as _json
+        from playwright.sync_api import expect
+        a, b = f"e2e_inner_{os.getpid()}", f"e2e_outer_{os.getpid()}"
+        os.makedirs(os.path.join(self.dir, "nodes"))
+        inner = {"version": 1, "doc": "Inner.", "nodes": {"inp": {"type": "input", "params": {"name": "src"}},
+                                                           "out": {"type": "output", "inputs": {"geo": "inp"}}}, "display": "out"}
+        outer = {"version": 1, "doc": "Outer.", "nodes": {"inp": {"type": "input", "params": {"name": "src"}},
+                                                           "deep": {"type": a, "inputs": {"src": "inp"}},
+                                                           "out": {"type": "output", "inputs": {"geo": "deep"}}}, "display": "out"}
+        for n, g in ((a, inner), (b, outer)):
+            with open(os.path.join(self.dir, "nodes", f"{n}.json"), "w", encoding="utf-8") as f:
+                _json.dump(g, f)
+        self.page.wait_for_function(f"window.minihou.S.types[{b!r}] !== undefined && window.minihou.S.types[{a!r}] !== undefined")
+        self.s.edit([{"op": "add", "type": b, "id": "grp", "inputs": {"src": "ground"}}])
+        self.page.wait_for_selector('.node[data-id="grp"].group')                              # a group is marked as one
+        self.assertEqual(self.page.locator("#crumbs .crumb").count(), 1)                       # the root graph alone
+        self.node("grp").locator(".title").dblclick()
+        self.page.wait_for_selector('.node[data-id="deep"]')
+        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo", b])
+        self.assertTrue(self.page.locator("#crumbs .crumb.cur").inner_text() == b)
+        self.node("deep").locator(".title").dblclick()                                         # a group inside a group
+        self.page.wait_for_selector('.node[data-id="inp"]')
+        self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == f"{a}.json"))
+        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo", b, a])
+        self.page.locator('#crumbs .crumb[data-index="1"]').click()                            # back out one level through the crumb
+        self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == f"{b}.json"))
+        self.page.wait_for_selector('.node[data-id="deep"]')
+        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo", b])
+        self.page.keyboard.press("Alt+ArrowUp")                                                # and out to the root with the keyboard
+        self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == "demo.json"))
+        self.page.wait_for_selector('.node[data-id="grp"]')
+        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo"])
+        self.page.reload()                                                                     # the path survives a reload of the tab
+        self.page.wait_for_selector('.node[data-id="grp"]')
+        self.node("grp").locator(".title").dblclick()
+        self.page.wait_for_selector('.node[data-id="deep"]')
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="deep"]')
+        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo", b])
+        self.page.click("#file-btn")                                                           # opening a file from the menu starts a new path
+        self.page.locator("#file-menu .item", has_text="demo.json").click()
+        self.page.wait_for_selector('.node[data-id="grp"]')
+        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo"])
 
     def test_graph_text_is_never_html(self):
         payload = '<img src=x onerror="window.__xss=1"><b>bold</b>'

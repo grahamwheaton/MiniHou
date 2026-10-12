@@ -326,6 +326,15 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
   **Ctrl** for the opposite side), **Persp / Ortho** (**Numpad 5**), and **Numpad .** / **Home** to frame the selected elements or everything.
   Shaded / edges / points toggles; point colours (`Cd`) are shown; back faces are tinted orange so flipped normals stand out.
   Very large geometry is cut to a drawable size and the view says so.
+* **Timeline under the view**: ▶ plays the graph in real time between a start and an end frame (frames are skipped, never queued, when a cook is
+  slower than the frame rate), with ⏮ ◂ ▸ ⏭ step buttons, a scrub slider, the current frame, range and fps fields (the fps also sets the engine's
+  `@Time`), and ⟲ to loop; **Space** over the view plays or pauses and **←** **→** step (**Shift** jumps to the ends). The range is remembered in the browser,
+  and Blender's own timeline still drives the frame when it is connected.
+* **Normals** toggle (with shaded / edges / points): a short line from the centre of every face along its normal, worked out from the winding, so
+  flipped faces show up pointing inwards.
+* **Groups and the path bar**: a group (a `*.json` graph used as a node) is drawn stacked with a ▣ mark; **double-click** it to open its graph. The path
+  at the top left of the graph (`welcome › rock_scatter › detail`) lists the groups you went through: click a name to step back out, or press
+  **Alt+Up**; it survives a page reload.
 * **Select in the 3-D view and build the network from it**: the **Pts / Edges / Faces** buttons under the view (or **1 / 2 / 3** with the
   mouse over it) switch to a selection mode: click to pick (only what you can see), **Shift** adds, **Ctrl** removes, drag a box to
   select everything inside it (X-ray); **Alt**-drag or the middle mouse button orbits, **A** selects all, **Esc** clears then leaves.
@@ -334,6 +343,13 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
   an `edges` list of point pairs; a bevel cannot end in the middle of a surface, so select a loop or edges that meet or reach a border),
   *Extrude*, *Inset*, *Reverse*, *Group*, *Delete* for faces, *Group* and *Delete* for points. The same `insert` edit op is available to AI
   tools (`{"op": "insert", "after": "id", "type": "polybevel"}`).
+* **Piece (object) selection and moving things like Houdini**: the **Piece** button (or **4**) selects a whole connected piece with one click (a copy
+  from `copy_to_points`, one box of a merge...; a box drag takes every piece it touches). Anything you select, whether points, edges, faces or pieces,
+  shows a **Move / Rotate / Scale** gizmo at its centre. The first drag adds a **`transform`** node after the one you are looking at, with its `group` set
+  to the selected points and its `pivot` to their centre, and carries on dragging it; selecting the same thing again edits that node instead of adding another.
+
+![A selected piece with its move gizmo](docs/images/editor_piece.png)
+
 * **Handles (gizmos)**: the node you are looking at can show draggable arrows in the 3-D view: grab an arrow head and drag, and the parameter
   follows live (everything recooks, Blender included). `transform` has **Move / Rotate / Scale** tools (buttons above the view, or **W / E / R**
   with the pointer over it and nothing selected): move arrows, one **ring** per rotation axis (drag around it; the rings turn about the axes
@@ -342,6 +358,9 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
   standing on the selected faces or edges (so the bevel you just made from a selection can be scrubbed straight away), `box` a size
   arrow per axis and `sphere` a radius arrow. Handles are small provider functions in `minihou/handles.py` (inputs, output, parameters ->
   arrows); a failing provider just shows none.
+  Any node type can declare handles without code in the viewer: `@node(..., handles=[Handle("height", axis="z", at="bottom", reach=True)])`
+  (arrows, rings for angles in degrees, scale cubes; `axis` and `at` can be keywords, vectors or `"@parameter"`). `tube`, `helix`, `line`
+  and `bend` use it, and so can the node files in your `nodes/` folder (see the authoring guide the MCP `node_library` tool returns).
 * **Attribute flow**: the inspector lists what the selected node did to its inputs' attributes (`+` added, `~` changed, `→` moved to
   another domain, `−` removed, and whether topology changed); a wrangle also lists the attributes its snippet reads. It is worked out
   by comparing cooked results, so it is right for built-in, library and system nodes alike (also in `inspect_node` for AI tools, as `flow`).
@@ -416,6 +435,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `match_size` | geo | move (centre, or sit on the ground with justify min) and scale (uniform or per axis) to a target box |
 | `copy_transform` | geo | copies with an accumulating translate/rotate/scale (stairs, spirals, arrays); point `copynum` |
 | `peak` | geo | move points along their normals (optional group) |
+| `blend` | geo, targets* | morph the base towards shapes with the same points (shape keys / Blend Shapes): `amount`, per-target `weights` as numbers or expressions (`smoothstep(1, 49, @Frame)`, `sin(@Time * 3) * 0.5 + 0.5`), which attributes (`P`, `N`, `*`), a per-point `mask`, a `group`; several targets add their offsets |
 | `bound` | geo | bounding box, world-aligned or fitted to the principal axes; detail `bound_min/max/size` |
 | `noise` | geo | fractal Perlin noise; displaces `P` or writes any attribute (scalar or vector mode); optional group |
 | `group_create` | geo | a named point or primitive group: pattern/expression, bounding box, normal direction, random %, boundary |
@@ -465,6 +485,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `line` / `helix` / `curve` | - | open curves: straight, spiral (cone spirals too), or through typed points |
 | `resample` | geo | even spacing along curves (or polygon outlines); adds `curveu` (0 to 1 along each curve) |
 | `carve` | geo | keep part of each curve by length (animate `end` to grow it) |
+| `fillet` | geo | round the corners of curves and polygon outlines with circular arcs (`radius`, `divisions`, `min_angle`, `group`); arcs are tangent to both segments and share short segments (never overlap); attributes blend along the curve; open curves keep their ends |
 | `sweep` | geo | tubes along curves: rotation-minimising frames, radius x point `width`/`pscale`, caps, twist, uv |
 | `path_deform` | geo, curve | bend geometry along a curve (minimal-rotation or up-vector frames), offset, stretch to fit, twist; rotates N |
 | `convert_line` | geo | every edge to curves (joined into polylines), e.g. wireframes with `sweep` |

@@ -50,6 +50,21 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual((hs["scale_x"]["kind"], hs["scale_x"]["param"], hs["scale_x"]["comp"], hs["scale_x"]["tool"]), ("scale", "scale", 0, "scale"))
         self.assertEqual((hs["uniform_scale"]["kind"], hs["uniform_scale"]["param"], hs["uniform_scale"]["comp"]), ("uniform", "uniform_scale", None))
 
+    def test_a_grouped_transform_stands_its_arrows_on_the_points_it_moves(self):
+        from minihou import Evaluator
+        g = graph_from({"a": {"type": "box", "params": {"size": [1, 1, 1], "center": [-3, 0, 0]}},
+                        "b": {"type": "box", "params": {"size": [1, 1, 1], "center": [3, 0, 0]}},
+                        "m": {"type": "merge", "inputs": {"geos": ["a", "b"]}},
+                        "t": {"type": "transform", "inputs": {"geo": "m"}, "params": {"group": "8-15", "translate": [0, 2, 0]}},
+                        "o": {"type": "output", "inputs": {"geo": "t"}}}, display="o")
+        ev = Evaluator()
+        merged, out = ev.cook(g, "m"), ev.cook(g, "t")
+        hs = by_id(handles.handles_for("transform", [merged], out, {"group": "8-15", "translate": [0, 2, 0], "pivot": [3, 0, 0]}))
+        np.testing.assert_allclose(hs["translate_x"]["origin"], [3, 2, 0], atol=1e-5)       # the second box, where it ended up
+        np.testing.assert_allclose(hs["rotate_z"]["origin"], [3, 2, 0], atol=1e-5)          # pivot + translate
+        hs = by_id(handles.handles_for("transform", [merged], out, {"group": "no_such_group_xyz", "translate": [0, 2, 0]}))
+        self.assertEqual(len(hs), 10)                                                       # a group that selects nothing: still handles, at the middle
+
     def test_box_and_sphere_arrows_sit_on_the_surface_and_scale_correctly(self):
         hs = by_id(handles.handles_for("box", [], run("box"), {"size": [2, 4, 6], "center": [1, 0, 0]}))
         np.testing.assert_allclose(hs["size_x"]["origin"], [2, 0, 0])
@@ -88,6 +103,74 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(handles.handles_for("noise", [], run("grid"), {}), [])
         self.assertEqual(handles.handles_for("transform", [], None, {}), [])
         self.assertEqual(handles.handles_for("polybevel", [run("box")], run("box"), {"edges": "garbage"}), [])
+
+
+class DeclaredHandleTests(unittest.TestCase):
+    """``@node(handles=[Handle(...)])``: gizmos for any node type, library nodes included."""
+
+    def reg(self):
+        from minihou.sdk import Float, Handle, Registry, Vec3, node
+        r = Registry()
+
+        @node("probe", params=[Float("radius", 2.0, min=0.0), Vec3("origin", (1.0, 2.0, 3.0)), Vec3("dir", (0.0, 0.0, 2.0)),
+                               Float("angle", 30.0), Float("size", 4.0)],
+              registry=r,
+              handles=[Handle("radius", axis="x", at="center", reach=True, min=0.0),
+                       Handle("angle", kind="ring", axis="@dir", at="@origin"),
+                       Handle("size", axis="-y", at="top", scale=2.0, reach=True),
+                       Handle("origin", comp=2, axis=(0, 0, 1), at="origin")])
+        def probe(radius, origin, dir, angle, size):
+            from minihou import Geometry
+            return Geometry.points_only(np.array([[0, 0, 0], [2, 2, 2]], np.float32))
+        return r
+
+    def test_specs_resolve_against_the_parameters_and_the_output(self):
+        r = self.reg()
+        nt = r.get("probe")
+        out = nt.fn(**nt.default_params())
+        hs = by_id(handles.handles_for("probe", [], out, nt.default_params(), nt))
+        self.assertEqual(sorted(hs), ["angle", "origin_z", "radius", "size"])
+        np.testing.assert_allclose(hs["radius"]["origin"], [1 + 2, 1, 1])                 # centre of the bounds, then along x by the radius
+        self.assertEqual(hs["radius"]["min"], 0.0)
+        np.testing.assert_allclose(hs["angle"]["origin"], [1, 2, 3])                      # "@origin": a Vec3 parameter
+        np.testing.assert_allclose(hs["angle"]["dir"], [0, 0, 1])                         # "@dir" is normalised
+        self.assertEqual(hs["angle"]["kind"], "ring")
+        self.assertAlmostEqual(hs["angle"]["scale"], 180 / np.pi)                         # a ring edits degrees
+        self.assertGreater(hs["angle"]["radius"], 0.5)
+        np.testing.assert_allclose(hs["size"]["origin"], [1, 1 - 4 / 2.0, 2])             # top of the bounds, plus value / scale along -y
+        np.testing.assert_allclose(hs["size"]["dir"], [0, -1, 0])
+        self.assertEqual((hs["origin_z"]["param"], hs["origin_z"]["comp"]), ("origin", 2))
+        np.testing.assert_allclose(hs["origin_z"]["origin"], [0, 0, 0])                   # "origin" is the world origin
+
+    def test_bad_specs_are_refused_when_the_node_is_defined(self):
+        from minihou.sdk import Bool, Float, Handle, Registry, Vec3, node
+        base = dict(params=[Float("a", 1.0), Vec3("v", (0, 0, 1)), Bool("flag", False)], registry=Registry())
+        for bad, why in ((Handle("missing"), "no parameter"), (Handle("flag"), "bool"), (Handle("v"), "which component"),
+                         (Handle("a", comp=0), "comp only"), (Handle("a", kind="sphere"), "kind"), (Handle("a", axis="w"), "axis"),
+                         (Handle("a", axis="@a"), "Vec3"), (Handle("a", at="middle"), "at"), (Handle("a", at=(1, 2)), "three numbers")):
+            with self.assertRaisesRegex(ValueError, why, msg=str(bad)):
+                node("n", handles=[bad], **dict(base, registry=Registry()))(lambda a, v, flag: None)
+        with self.assertRaisesRegex(ValueError, "unique"):
+            node("n", handles=[Handle("a"), Handle("a")], **dict(base, registry=Registry()))(lambda a, v, flag: None)
+
+    def test_a_failing_spec_shows_nothing_and_never_breaks_the_preview(self):
+        r = self.reg()
+        nt = r.get("probe")
+        params = nt.default_params()
+        params["dir"] = (0, 0, 0)                                                         # a zero axis: that handle is skipped
+        hs = by_id(handles.handles_for("probe", [], nt.fn(**nt.default_params()), params, nt))
+        self.assertNotIn("angle", hs)
+        self.assertIn("radius", hs)
+        self.assertEqual(handles.handles_for("probe", [], None, params, nt), [])
+
+    def test_built_in_primitives_declare_their_handles_and_the_session_serves_them(self):
+        s = Session(graph_from({"t": {"type": "tube", "params": {"radius_top": 0.5, "height": 3.0}},
+                                "o": {"type": "output", "inputs": {"geo": "t"}}}, display="o"))
+        hs = by_id(s.preview("t")["handles"])
+        self.assertEqual(sorted(hs), ["height", "radius_bottom", "radius_top"])
+        np.testing.assert_allclose(hs["radius_top"]["origin"], [0.5, 0, 1.5], atol=1e-5)  # on the top rim
+        np.testing.assert_allclose(hs["height"]["origin"], [0, 0, 1.5], atol=1e-5)
+        self.assertEqual(hs["height"]["scale"], 2.0)                                      # it grows both ways from the centre
 
 
 class PreviewHandlesTests(unittest.TestCase):
