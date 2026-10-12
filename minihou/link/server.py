@@ -46,6 +46,8 @@ class _Connection:
         self._iface_pending = False
         self._sent_good_seq = 0
         self._sent_error_seq = 0
+        self._scene_keys: Dict[str, str] = {}              # scene_objects node -> key of the manifest this client has
+        self._scene_nodes: Optional[List[str]] = None
         self.name = "?"
         self.bytes_sent = 0
         self.threads = [threading.Thread(target=self._read_loop, name=f"minihou-r-{addr[1]}", daemon=True),
@@ -119,7 +121,7 @@ class _Connection:
             log.info("client %s connected (%s)", self.addr, self.name)
             self.instance_mode = h.get("mode") == "instances"
             self.post({"type": "welcome", "protocol": PROTOCOL_VERSION, "server": "minihou",
-                       "capabilities": ["instances_v1"], "editor_url": self.server.editor_url,
+                       "capabilities": ["instances_v1", "scene_objects_v1"], "editor_url": self.server.editor_url,
                        "graph_path": str(self.session.path.resolve()) if self.session.path else None})
             if self.instance_mode:
                 return
@@ -157,6 +159,8 @@ class _Connection:
             self.diff.reset()
             self.extra_diffs.clear()
             self._extra_keys.clear()
+            self._scene_keys.clear()
+            self._scene_nodes = None
             self._sent_good_seq = 0
             with self.cv:
                 self._iface_pending = True
@@ -207,12 +211,28 @@ class _Connection:
         finally:
             self.close()
 
+    def _send_scene(self, good):
+        """The ``scene_objects`` manifests (real Blender objects), each only when it changed for this client."""
+        scene = good.scene
+        if scene is None:                                    # this pass did not produce them (e.g. the quick pass of auto proxy)
+            return
+        nodes = sorted(scene)
+        if nodes != self._scene_nodes:
+            self._scene_nodes = nodes
+            self.bytes_sent += send_message(self.sock, {"type": "scene_nodes", "nodes": nodes})
+            self._scene_keys = {n: k for n, k in self._scene_keys.items() if n in scene}
+        for nid, manifest in scene.items():
+            if self._scene_keys.get(nid) != manifest["key"]:
+                self._scene_keys[nid] = manifest["key"]
+                self.bytes_sent += send_message(self.sock, manifest)
+
     def _send_results(self):
         good, err = self.session.latest_good, self.session.latest_error
         if good is not None and good.seq > self._sent_good_seq:
             header, arrays = self.diff.build(self.session.link_geometry(good), good.seq, good.cook)
             self._sent_good_seq = good.seq
             self.bytes_sent += send_message(self.sock, header, arrays)
+            self._send_scene(good)
             names = sorted(good.extras)
             if names != self._sent_names:                    # which extra outputs exist (the add-on removes the others)
                 self._sent_names = names

@@ -48,7 +48,7 @@ GROUPS: List[Tuple[str, str, List[str]]] = [
       "pcg_copy_points", "pcg_union", "pcg_intersection", "pcg_difference", "pcg_debug"]),
     ("Flow & Time", "Loops, per-piece work and simulation over time",
      ["loop_block", "loop_begin", "loop_end", "for_each", "solver"]),
-    ("Utility & I/O", "Pass-through, system inputs and the output", ["null", "input", "output"]),
+    ("Utility & I/O", "Pass-through, system inputs and the outputs", ["null", "input", "output", "scene_objects"]),
     (LIBRARY, "Your own nodes and saved systems", []),
 ]
 
@@ -95,6 +95,7 @@ ALIASES: Dict[str, str] = {
     "glue_cluster": "constraints bond weld", "rbd_constraint_properties": "glue strength", "rbd_configure": "bodies mass friction physics",
     "rbd_solver": "simulate physics dynamics bullet", "loop_block": "repeat iterate for", "loop_begin": "repeat iterate",
     "loop_end": "repeat iterate", "for_each": "per piece iterate", "solver": "feedback simulation previous frame",
+    "scene_objects": "realize real objects scene export blender instances scatter",
     "null": "named output pass through", "input": "system port", "output": "result display", "box": "cube", "sphere": "ball",
     "grid": "plane floor", "tube": "cylinder cone", "torus": "donut ring", "circle": "disc", "line": "segment",
     "curve": "spline path", "helix": "spiral coil", "lsystem": "plant tree fractal", "blender_object": "read import mesh", "usd_import": "usd usda usdc usdz open load file scene pixar omniverse houdini",
@@ -107,7 +108,7 @@ _TITLES = {"polyextrude": "PolyExtrude", "polybevel": "PolyBevel", "polysplit": 
            "lsystem": "L-System", "rbd_configure": "RBD Configure", "rbd_solver": "RBD Solver",
            "rbd_material_fracture": "RBD Material Fracture", "rbd_constraint_properties": "RBD Constraint Properties",
            "loop_block": "Repeat (Loop Block)", "for_each": "For Each", "points_to_surface": "Points to Surface",
-           "copy_to_points": "Copy to Points", "blender_object": "Blender Object", "usd_import": "USD Import", "modifier_input": "Modifier Input"}
+           "copy_to_points": "Copy to Points", "blender_object": "Blender Object", "usd_import": "USD Import", "scene_objects": "Scene Objects", "modifier_input": "Modifier Input"}
 
 _ORDER: Dict[str, Tuple[int, int]] = {}
 for _gi, (_g, _doc, _names) in enumerate(GROUPS):

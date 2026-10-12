@@ -193,7 +193,7 @@ class WebServer:
                    ops=OP_NAMES, root=str(self.root), files=self.files(),
                    link={"port": getattr(self.link, "port", None), "clients": self.link_clients()},
                    engine={"pid": os.getpid(), "version": _version(), "python_nodes": _python_allowed(), "protocol": PROTOCOL_VERSION,
-                           "capabilities": ["instances_v1"]})
+                           "capabilities": ["instances_v1", "scene_objects_v1"]})
         return out
 
     def files(self) -> List[str]:

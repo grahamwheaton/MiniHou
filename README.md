@@ -817,6 +817,14 @@ line, whole numbers as ints, and values from Blender's float32 sliders snapped t
 keyframes and drivers on them keep working. A graph may be unfinished (an unwired node): it still opens, and only the nodes
 feeding the display node have to be valid for it to cook.
 
+## Real Blender objects from a graph (Scene Objects)
+
+A **Scene Objects** node turns its points into separate scene objects in Blender: one linked duplicate of the object each point names
+(the Instance node's output, or a `source` object), in their own collection, with the point's position, rotation and scale. Give
+them modifiers, materials or constraints and they keep them: objects are found by marker, a cook only creates, moves, shows and hides,
+and surplus objects are parked (hidden), never deleted, until you press *Delete parked*. Works through the live link and through a
+MiniHou modifier (objects parented to the host object). Details and limits: [docs/SCENE_OBJECTS.md](docs/SCENE_OBJECTS.md).
+
 ## USD export and import
 
 File menu > *Export USD...* (also `POST /api/export_usd`, MCP `export_usd`) writes the cooked geometry, always at full size, as meshes,

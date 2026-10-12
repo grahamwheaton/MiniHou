@@ -12,7 +12,7 @@ import bpy
 from bpy.app.handlers import persistent
 from bpy.props import IntProperty, StringProperty
 
-from . import runtime, modifiers, geonodes_ui, network_ui
+from . import runtime, modifiers, geonodes_ui, network_ui, scene_objects
 from .server_control import ServerController
 from .protocol import DEFAULT_PORT
 
@@ -299,6 +299,13 @@ class MINIHOU_PT_main(bpy.types.Panel):
             box.alert = True
             for line in rt.last_error[:300].split("\n")[:4]:
                 box.label(text=line, icon="ERROR")
+        n = scene_objects.counts()
+        if n["total"]:                                          # objects made by scene_objects nodes
+            box = layout.box()
+            box.label(text=f"Scene objects: {n['total']} ({n['hidden']} parked)", icon="OUTLINER_OB_GROUP_INSTANCE")
+            row = box.row()
+            row.operator("minihou.cleanup_scene_objects", text="Delete parked").everything = False
+            row.operator("minihou.cleanup_scene_objects", text="Delete all").everything = True
         proxy_obj = bpy.data.objects.get(proxy.PROXY_OBJECT)
         if proxy_obj is not None:
             layout.operator("minihou.select_proxy", icon="RESTRICT_SELECT_OFF")
@@ -310,6 +317,20 @@ class MINIHOU_PT_main(bpy.types.Panel):
                     owner = proxy.input_owner(mod, m.get(p["name"], ""))
                     if owner is not None:
                         col.prop(owner[0], owner[1], text=p.get("label", p["name"]))
+
+
+class MINIHOU_OT_cleanup_scene_objects(bpy.types.Operator):
+    bl_idname = "minihou.cleanup_scene_objects"
+    bl_label = "Clean Up Scene Objects"
+    bl_description = ("Delete the objects MiniHou's scene_objects nodes made. Objects the graph no longer asks for are only hidden "
+                      "(they may carry your modifiers); this removes them for good")
+    bl_options = {"REGISTER", "UNDO"}
+    everything: bpy.props.BoolProperty(name="Everything", default=False, description="Delete the visible ones too, not only the parked ones")
+
+    def execute(self, context):
+        gone = scene_objects.cleanup(self.everything)
+        self.report({"INFO"}, f"Deleted {gone} scene object(s)")
+        return {"FINISHED"}
 
 
 class MINIHOU_OT_bake_rbd(bpy.types.Operator):
@@ -359,7 +380,7 @@ class MINIHOU_PT_modifier_sources(bpy.types.Panel):
 _classes = (MINIHOU_Preferences, MINIHOU_OT_start_server, MINIHOU_OT_stop_server, MINIHOU_OT_open_editor,
             MINIHOU_OT_add_modifier, MINIHOU_OT_refresh_modifiers, MINIHOU_OT_reload_modifier,
             MINIHOU_OT_connect, MINIHOU_OT_disconnect, MINIHOU_OT_resync, MINIHOU_OT_select_proxy,
-            MINIHOU_PT_main, MINIHOU_PT_modifier_sources, MINIHOU_OT_bake_rbd)
+            MINIHOU_PT_main, MINIHOU_PT_modifier_sources, MINIHOU_OT_bake_rbd, MINIHOU_OT_cleanup_scene_objects)
 
 
 def register():

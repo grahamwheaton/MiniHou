@@ -17,7 +17,7 @@ import uuid
 import bpy
 from bpy.app.handlers import persistent
 
-from . import mesh_reader, mesh_writer, proxy
+from . import mesh_reader, mesh_writer, proxy, scene_objects
 from .protocol import GeoUpdate, Mirror
 
 KEY = "minihou_modifier_id"
@@ -467,6 +467,7 @@ def _cleanup(live):
     for ng in list(bpy.data.node_groups):
         if KEY in ng and ng.users == 0:
             bpy.data.node_groups.remove(ng)
+    scene_objects.retain_owners(live)            # objects of removed modifiers are parked (hidden), never deleted
 
 
 def pump(host=None, port=None, *, force=False, _only=None):
@@ -575,6 +576,14 @@ def pump(host=None, port=None, *, force=False, _only=None):
                     mesh_writer.apply_update(cache.data, mirror, update)
                     _interface(mod, header, activate=True)
                     proxy.sync_instances(ng, names, objects=objects)
+                    # scene_objects nodes: real objects, parented to this object. Only queued here (pump can run from a
+                    # frame-change handler); the timer makes them.
+                    for m in header.get("scene", []):
+                        scene_objects.queue(ident, m, parent=obj.name)
+                    for e in header.get("scene_errors", []):
+                        scene_objects._log(f"scene_objects {e.get('node')!r} on {obj.name}: {e.get('message')}")
+                    scene_objects.queue_nodes(ident, [m["node"] for m in header.get("scene", [])]
+                                              + [e["node"] for e in header.get("scene_errors", [])])
                     bpy.context.view_layer.update()
                     _digests[ident] = signature
                     ng[STATUS] = "Ready"
@@ -613,6 +622,7 @@ def _timer():
     if not _registered:
         return None
     pump()
+    scene_objects.flush()
     return 0.2
 
 
