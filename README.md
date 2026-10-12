@@ -345,6 +345,18 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
 
 ![The Add Node menu](docs/images/editor_add_menu.png)
 
+* **The graph & library browser** (click the file name, top left): a search box over every graph file and library node in the workspace, **Recent**
+  files, **Library nodes ◆** (systems in the node folder), then your graphs by folder, each with its node count and age. **↑ ↓ Enter** open,
+  and a row's buttons **⤓** insert that graph's nodes into the open one, **+** (library nodes) add the node, **⧉ ✎ 🗑** duplicate, rename or delete
+  it. **Save As…** copies the open graph to a new file and switches to it (edits to the open graph always save as you make them); **New
+  graph…** starts one. **Save selection as node… (Ctrl+G)** turns the selected nodes into a reusable library node and puts it where they
+  were, wired to the same neighbours: nodes it reads become its inputs, the parameters you exposed (the **B** button) become its parameters, and
+  one **Ctrl+Z** brings the original nodes back. It is a normal graph file in `nodes/`, listed in the Add Node menu under **Library**; double-click it
+  to edit what is inside. A selection must lead out through one node, loops must be selected whole, and the RBD Solver and Blender Object nodes
+  must stay in the main graph.
+
+![The graph and library browser](docs/images/editor_file_browser.png)
+
 * **The C pie menu**: press **C** (over the graph or the 3-D view) for Houdini's modelling pie at the pointer: **Adjust** (top), **Deform**, **Polygons**,
   **Group**, **Create**, **Build**, **Edges**, **Modify**, each opening a pie of tools (Transform, Soft Transform, Soft Peak, Smooth, Point Weld... /
   Lattice, Mountain, Bend, Linear Taper, Squash and Stretch, Twist... / PolyBevel, PolyFill, PolyExtrude, PolySplit, PolyBridge, Clip, Boolean /

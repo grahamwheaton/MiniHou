@@ -195,6 +195,13 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
     Houdini's secondary strength, constraints from rules (connection modes beyond touching faces), Edge Detail (boolean noise on
     the outside edges), packed proxy transfer for detailed pieces.
 
+16. **Add Node menu and graph/library browser** (`minihou/menu.py`, `minihou/subgraph.py`, `web/static/nodemenu.js`, `editor.js`): the menu groups every node
+    (one table in `menu.py`, also on `describe()` as `menu`/`label`/`keywords`), ranks a search over names, Houdini/Blender aliases and docs, folds groups,
+    keeps favourites and recent nodes. The file menu became a browser (search, recent, folders, library nodes, Save As, duplicate/rename/delete, insert a
+    graph's nodes) and **Ctrl+G** makes a library node from a selection (`/api/make_system`, one undoable batch). Not done: a selection that leads out through
+    several nodes (a system has one output), exposing parameters automatically when saving, a thumbnail/preview of graphs, tags and a shared (non-workspace)
+    library, renaming the open graph.
+
 Open:
 
 - Output groups other than PolyBevel's are from memory of Houdini's nodes: compare with Houdini and adjust names/sets.
