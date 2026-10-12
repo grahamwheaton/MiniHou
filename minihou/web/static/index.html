@@ -36,6 +36,8 @@
   <button id="help-btn" title="Keyboard and mouse">?</button>
 </header>
 
+<div id="shelf" aria-label="Tool shelf"></div>
+
 <div id="blender-bar" class="hidden" role="region" aria-label="Blender">
   <span class="bb-text" id="bb-text">Blender is not connected.</span>
   <a id="bb-zip" class="bb-chip" href="/addon/minihou_link.zip" download="minihou_link.zip" draggable="true"
@@ -137,6 +139,7 @@
 <div id="help" class="hidden">
   <h3>Editor controls</h3>
   <table>
+    <tr><td>the shelf (under the top bar)</td><td>one-click tools in Houdini-style tabs (Create, Modify, Model, Polygon, Deform...): click to add after the selected node (or on its own), drag onto the graph to drop it; <b>+</b> picks the tabs, <b>▴</b> folds it</td></tr>
     <tr><td><kbd>Tab</kbd> / double-click / right-click</td><td>add a node (wired to the selected node)</td></tr>
     <tr><td>drag from an output ● to an input</td><td>connect; drop on empty space to add a connected node</td></tr>
     <tr><td>drag a connected input</td><td>re-route or (drop on empty space) disconnect</td></tr>
@@ -165,6 +168,7 @@
 
 <script src="/static/nodemenu.js"></script>
 <script src="/static/pie.js"></script>
+<script src="/static/shelf.js"></script>
 <script src="/static/preview.js"></script>
 <script src="/static/editor.js"></script>
 </body>

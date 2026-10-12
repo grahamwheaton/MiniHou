@@ -140,6 +140,7 @@
     for (const t of nodes) S.types[t.name] = t;
     S.typeList = nodes.slice().sort((a, b) => (a.category || "").localeCompare(b.category || "") || a.name.localeCompare(b.name));
     S.library = library || null;
+    if (window.MiniShelf) MiniShelf.refresh();
     const errs = new Set(((library && library.files) || []).filter((f) => f.error).map((f) => relPath(f.file) + ": " + f.error));
     const fresh = [...errs].filter((e) => !libErrors.has(e));
     if (fresh.length) toast("Node library: " + fresh.join("\n"));
@@ -947,7 +948,7 @@
     for (const k of Object.keys(spec)) if (spec[k] === "$") spec[k] = pattern;
     return spec;
   }
-  async function pieTool(item, note) {
+  async function pieTool(item, note, opts) {
     if (!item) { if (note) toast(note); return; }
     const t = S.types[item.type];
     if (!t) { toast(`This engine has no ${item.type} node.`); return; }
@@ -957,7 +958,8 @@
       if (info) params[item.center] = info.center.map((v) => Math.round(v * 1e5) / 1e5);
     }
     const one = S.sel.size === 1 ? [...S.sel][0] : null;
-    const target = pieFromView && pvNode && nodeOf(pvNode) ? pvNode : one && nodeOf(one) ? one : pvNode && nodeOf(pvNode) ? pvNode : displayNode();
+    const target = opts && opts.floating ? (one && nodeOf(one) ? one : null)                  // the shelf: a tool with nothing selected floats
+      : pieFromView && pvNode && nodeOf(pvNode) ? pvNode : one && nodeOf(one) ? one : pvNode && nodeOf(pvNode) ? pvNode : displayNode();
     if (item.source || !t.inputs.length || !target) {
       const id = uniqueId(item.type);
       let [x, y] = pieFromView || !S.mouse ? toWorld(canvas.getBoundingClientRect().left + canvas.clientWidth / 2, canvas.getBoundingClientRect().top + canvas.clientHeight / 2) : toWorld(...S.mouse);
@@ -967,6 +969,25 @@
     }
     const r = await edit([{ op: "insert", after: target, type: item.type, params }]);
     if (r) { if (pv && pv.ok) pv.clearSelection(); select([r.results[0].id]); }
+  }
+  // ---- the tool shelf (shelf.js): the same tools as the pie, one click or drag away
+  async function addToolAt(tool, clientX, clientY) {
+    const t = S.types[tool.type];
+    if (!t) { toast(`This engine has no ${tool.type} node.`); return; }
+    const id = uniqueId(tool.type), [x, y] = toWorld(clientX, clientY);
+    const r = await edit([{ op: "add", type: tool.type, id, pos: [Math.round(x - W / 2), Math.round(y - 12)] }]);
+    if (r) select([id]);
+  }
+  if (window.MiniShelf) {
+    MiniShelf.init({ types: () => S.types, typeList: () => S.typeList,
+      onPick: (tool, item) => { pieFromView = false; pieTool(item || { label: tool.label, type: tool.type }, null, { floating: true }); } });
+    canvas.addEventListener("dragover", (e) => { if ([...(e.dataTransfer.types || [])].includes("application/x-minihou-tool")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } });
+    canvas.addEventListener("drop", (e) => {
+      const raw = e.dataTransfer.getData("application/x-minihou-tool");
+      if (!raw) return;
+      e.preventDefault();
+      try { addToolAt(JSON.parse(raw), e.clientX, e.clientY); } catch (err) { /* not ours */ }
+    });
   }
   if (window.MiniPie) {
     MiniPie.init({ types: () => S.types, onPick: pieTool, onOpen: () => { pieFromView = pvOver; },

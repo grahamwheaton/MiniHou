@@ -257,5 +257,16 @@
     window.addEventListener("blur", close);
   }
 
-  window.MiniPie = { init, open, close, isOpen, PAGES, state: () => st && { page: st.page, hover: st.hover, x: st.x, y: st.y } };
+  /* The pie's definition of a tool (its selection mapping and presets) by node type, preferring the one with this label. */
+  function find(type, label) {
+    let any = null;
+    for (const page of Object.values(PAGES)) for (const it of page.items) {
+      if (!it || it.page || it.type !== type) continue;
+      if (it.label === label) return it;
+      if (!any) any = it;
+    }
+    return any;
+  }
+
+  window.MiniPie = { init, open, close, isOpen, PAGES, find, state: () => st && { page: st.page, hover: st.hover, x: st.x, y: st.y } };
 })();

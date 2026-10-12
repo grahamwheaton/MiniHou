@@ -202,6 +202,10 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
     several nodes (a system has one output), exposing parameters automatically when saving, a thumbnail/preview of graphs, tags and a shared (non-workspace)
     library, renaming the open graph.
 
+17. **Tool shelf** (`web/static/shelf.js`): a Houdini-style ribbon of tabs and icon tools (hand-drawn icons for the common tools, tinted initials for the rest) sharing the
+    pie menu's tool definitions (selection prefill, presets). Drag-and-drop onto the graph; the Library tab follows the engine's library nodes; PCG lists every `pcg_*` node.
+    Not done: user-made tabs and tools (drag a node into a custom tab), shelf tools that run a small graph recipe (Houdini's Quick Shapes, Spray Paint), and icons for every node.
+
 Open:
 
 - Output groups other than PolyBevel's are from memory of Houdini's nodes: compare with Houdini and adjust names/sets.

@@ -62,7 +62,7 @@ class EditorE2E(unittest.TestCase):
         self.web.start()
         self.addCleanup(self.s.stop)
         self.addCleanup(self.web.stop)
-        self.page = self.browser.new_page(viewport={"width": 1400, "height": 850})
+        self.page = self.browser.new_page(viewport={"width": 1400, "height": 960})
         self.addCleanup(self.page.close)
         self.errors = []
         self.page.on("pageerror", lambda e: self.errors.append(str(e)))
@@ -267,6 +267,8 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: len(self.s.graph.boxes) == 1))
         box = self.page.locator(".netbox")
         box.wait_for(state="visible")
+        self.page.keyboard.press("f")                                                      # frame the selection so the box's corner is in view
+        self.page.wait_for_timeout(200)
         before = {k: list(self.s.graph.nodes[k].meta["pos"]) for k in ("hills", "ripple", "points")}
         b0 = dict(self.s.graph.boxes[0])
         hdr = box.locator(".hdr")
@@ -999,6 +1001,72 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(n.params["group"], str(face))
         self.assertEqual(n.params["distance"], 0.3)
 
+    # -- the tool shelf ----------------------------------------------------------------------
+    def shelf_tool(self, label):
+        return self.page.locator(f'#shelf .sh-tool[data-label="{label}"]')
+
+    def test_shelf_has_houdini_style_tabs_and_null(self):
+        self.page.evaluate("localStorage.clear()")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        tabs = self.page.eval_on_selector_all("#shelf .sh-tab[data-tab]", "els => els.map(e => e.dataset.tab)")
+        self.assertEqual(tabs[:5], ["Create", "Modify", "Model", "Polygon", "Edges"])
+        self.assertIn("Rigid Bodies", tabs)
+        self.assertIn("Library", tabs)
+        self.assertEqual(self.page.locator("#shelf .sh-tab.on").inner_text(), "Create")
+        labels = self.page.eval_on_selector_all("#shelf .sh-tool", "els => els.map(e => e.dataset.label)")
+        self.assertEqual(labels[:6], ["Box", "Sphere", "Tube", "Torus", "Grid", "Null"])                     # Null is there
+        self.assertGreater(self.page.locator("#shelf .sh-tool svg").count(), 10)
+        # the shelf takes room: the panes start below it
+        self.assertGreater(self.page.locator("#main").bounding_box()["y"], 120)
+
+    def test_shelf_click_adds_sources_unwired_and_inserts_modifiers_after_the_selection(self):
+        before = set(self.s.graph.nodes)
+        self.shelf_tool("Null").click()
+        self.assertTrue(until(lambda: any(n.type == "null" for n in self.s.graph.nodes.values())))
+        nid = next(i for i, n in self.s.graph.nodes.items() if n.type == "null" and i not in before)
+        self.assertEqual(self.s.graph.nodes[nid].inputs, {})                                                 # no input: added on its own
+        self.page.click('#shelf .sh-tab[data-tab="Deform"]')
+        self.node("hills").locator(".title").click()
+        self.shelf_tool("Twist").click()
+        self.assertTrue(until(lambda: any(n.type == "twist" for n in self.s.graph.nodes.values())))
+        tid = next(i for i, n in self.s.graph.nodes.items() if n.type == "twist")
+        self.assertEqual(self.s.graph.nodes[tid].inputs, {"geo": "hills"})                                   # a modifier goes after the selected node
+        self.page.wait_for_selector(f'.node[data-id="{tid}"].selected')
+
+    def test_shelf_drag_drops_a_tool_where_you_want_it(self):
+        self.shelf_tool("Sphere").drag_to(self.page.locator("#canvas"), target_position={"x": 220, "y": 480})
+        self.assertTrue(until(lambda: any(n.type == "sphere" and n.inputs == {} and i != "ground" for i, n in self.s.graph.nodes.items()
+                                          if n.meta.get("pos") and abs(n.meta["pos"][1]) > 0)))
+
+    def test_shelf_remembers_the_tab_folds_and_hides_tabs(self):
+        self.page.evaluate("localStorage.clear()")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.page.click('#shelf .sh-tab[data-tab="Polygon"]')
+        self.page.wait_for_selector('#shelf .sh-tool[data-label="PolyExtrude"]')
+        self.page.reload()
+        self.page.wait_for_selector('#shelf .sh-tab.on[data-tab="Polygon"]')                                 # the tab came back
+        y = self.page.locator("#main").bounding_box()["y"]
+        self.page.click("#shelf .sh-fold")                                                                  # fold the tools away
+        self.page.wait_for_function(f"document.querySelector('#main').getBoundingClientRect().top < {y} - 40")
+        self.page.click("#shelf .sh-fold")
+        self.page.wait_for_selector('#shelf .sh-tool[data-label="PolyExtrude"]')
+        self.page.click("#shelf .sh-tab.plus")                                                              # choose tabs
+        self.page.locator("#sh-tabmenu .item", has_text="Texture").dispatch_event("mousedown")
+        self.page.wait_for_function("!document.querySelector('#shelf .sh-tab[data-tab=\"Texture\"]')")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.assertEqual(self.page.locator('#shelf .sh-tab[data-tab="Texture"]').count(), 0)
+
+    def test_shelf_library_tab_lists_new_library_nodes(self):
+        os.makedirs(os.path.join(self.dir, "nodes"))
+        with open(os.path.join(self.dir, "nodes", "shelved.py"), "w", encoding="utf-8") as f:
+            f.write("from minihou.sdk import node\n\n@node('shelved_thing', inputs=['geo'], category='custom')\ndef shelved_thing(geo):\n    return geo.copy()\n")
+        self.page.wait_for_function("window.minihou.S.types['shelved_thing'] !== undefined")
+        self.page.click('#shelf .sh-tab[data-tab="Library"]')
+        self.page.wait_for_selector('#shelf .sh-tool[data-type="shelved_thing"]')
+
     # -- the Add Node menu -----------------------------------------------------------------
     def open_menu(self):
         self.page.mouse.move(*self.empty_spot())
@@ -1171,6 +1239,7 @@ class EditorE2E(unittest.TestCase):
         self.drag(self.node("box1").locator(".port.out"), self.node("all").locator(".port.in"))
         self.assertTrue(until(lambda: "box1" in self.s.graph.nodes["all"].inputs.get("geos", [])))
         # pick the wire up from the input and drop it on empty space: disconnect
+        self.page.set_viewport_size({"width": 1400, "height": 1200})
         self.drag(self.node("out").locator(".port.in"), self.page.locator("#canvas"))
         self.page.mouse.move(*self.empty_spot())
         self.assertTrue(until(lambda: "geo" not in self.s.graph.nodes["out"].inputs))
