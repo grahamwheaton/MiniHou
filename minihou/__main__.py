@@ -137,8 +137,12 @@ def _cmd_serve(args) -> int:
             except (OSError, ValueError):
                 pass
     try:
-        while True:
-            time.sleep(0.5)
+        if web and getattr(args, "desktop", False):
+            from .desktop import run
+            run(web, args.root)
+        else:
+            while True:
+                time.sleep(0.5)
     except KeyboardInterrupt:
         print("shutting down")
     finally:

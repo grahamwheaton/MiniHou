@@ -362,6 +362,9 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._body()
         app, s = self.app, self.app.session
         origin = str(body.get("origin") or "api")[:32]
+        if path == "/api/desktop/activate":
+            activate = getattr(app, "desktop_activate", None)
+            return self._json({"desktop": bool(activate and activate(body))})
         if path == "/api/edit":
             ops = body.get("ops")
             if not isinstance(ops, list):

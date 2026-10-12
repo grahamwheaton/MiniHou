@@ -84,11 +84,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT, help="live-link port Blender connects to (another is used if busy)")
     ap.add_argument("--http-port", type=int, default=DEFAULT_HTTP_PORT, help="editor port (another is used if busy)")
+    ap.add_argument("--browser", action="store_true", help="open in a browser instead of the desktop window")
     ap.add_argument("--no-browser", action="store_true", help="do not open the editor in a browser")
     ap.add_argument("--allow-python", action="store_true", help="let python nodes run code stored in graphs (trusted graphs only)")
     args = ap.parse_args(argv)
 
     root = Path(args.workspace).expanduser() if args.workspace else default_workspace()
+    desktop = not args.no_browser and not args.browser
+    if desktop:
+        from .desktop import reuse
+        if not args.graph and reuse(root):
+            return 0
+        try:
+            import webview
+        except ImportError:
+            ap.error("Desktop support is missing. Install minihou[desktop], or use --browser.")
     graph = Path(args.graph).expanduser() if args.graph else prepare_workspace(root)
     if args.graph:
         root.mkdir(parents=True, exist_ok=True)
@@ -100,7 +110,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not _port_free(args.host, args.http_port):
         args.http_port = 0
     ns = argparse.Namespace(graph=str(graph), host=args.host, port=args.port, http_port=args.http_port, root=str(root),
-                            open=not args.no_browser, nodes=[str(root / "nodes")], cache_mb=2048.0, no_watch=False, no_save=False,
+                            desktop=desktop, open=args.browser and not args.no_browser, nodes=[str(root / "nodes")], cache_mb=2048.0, no_watch=False, no_save=False,
                             allow_python=args.allow_python)
     print(f"MiniHou workspace: {root}", flush=True)
     return _cmd_serve(ns)

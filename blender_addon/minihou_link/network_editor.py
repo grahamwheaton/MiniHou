@@ -63,7 +63,11 @@ class NetworkEditor:
             if not actual or os.path.normcase(os.path.realpath(actual)) != os.path.normcase(path):
                 raise ValueError("Editor did not confirm the requested graph; browser was not opened")
             selected = True
-            if not webbrowser.open(editor_url):
+            connection.request("POST", "/api/desktop/activate", "{}", {"Content-Type": "application/json"})
+            activation = connection.getresponse()
+            payload = activation.read()
+            desktop = activation.status == 200 and json.loads(payload).get("desktop", False)
+            if not desktop and not webbrowser.open(editor_url):
                 raise ValueError("Graph template selected, but the OS could not open the browser; open " + editor_url)
             self._set("ready", path, "Live editing: changes update this modifier." if live else
                       "Template opened. Save edits, then Reload Graph on this modifier.")

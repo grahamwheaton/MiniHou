@@ -84,7 +84,9 @@
         a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
       } }, "Unsent edits"));
   }
+  let desktopPendingEdits = 0;
   async function edit(ops, context = { path: S.path, documentId: S.documentId }) {
+    desktopPendingEdits++;
     try {
       const r = await api("/api/edit", { ops, origin: "editor", document_id: context.documentId });
       applySnapshot(r.graph);
@@ -93,7 +95,7 @@
       if (context.documentId !== S.documentId || e.message.includes("Editor graph changed")) stashEdits(ops, context);
       else toast(e.message);
       return null;
-    }
+    } finally { desktopPendingEdits--; }
   }
 
   // Parameter changes are coalesced: one request in flight, the latest values win (smooth slider drags).
@@ -1723,5 +1725,5 @@
   applyView();
   try { recoveryButton(); } catch (e) { /* Browser storage may be disabled. */ }
   connectEvents();
-  window.minihou = { S, edit, frame, clipboardText, pasteNodes, preview: pv, layout };                  // handy from the browser console
+  window.minihou = { desktopCanClose: () => { document.activeElement?.blur(); return !desktopPendingEdits && !setInFlight && !pendingSet.size; }, S, edit, frame, clipboardText, pasteNodes, preview: pv, layout };                  // handy from the browser console
 })();
