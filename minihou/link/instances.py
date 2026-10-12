@@ -110,11 +110,12 @@ class InstanceManager:
                      if node.type == "modifier_input"}
             with without_object_inputs():
                 result = evaluator.cook(graph, feeds=feeds, frame=frame, fps=fps)
-                scene, scene_errors = self._scene(graph, evaluator, feeds, frame, fps)
+                scene, scene_errors, scene_arrays = self._scene(graph, evaluator, feeds, frame, fps)
             result.validate()
             if not np.isfinite(result.P).all():
                 raise ValueError("cooked point positions must be finite")
             header, arrays = DiffState().build(result, 1)
+            arrays.update(scene_arrays)
             header.update(type="instance_result", interface=graph.interface())
             if scene or scene_errors:
                 header["scene"] = scene                            # real objects for the add-on to realise (see scene_objects)
@@ -126,11 +127,13 @@ class InstanceManager:
         """Manifests of the graph's ``scene_objects`` nodes, cooked with the same inputs as the modifier's result."""
         from ..evaluator import NodeError
         from ..nodes.scene_objects import build_manifest
-        out, errors = [], []
+        out, errors, arrays = [], [], {}
         for nid in graph.scene_sinks():
             try:
                 geo = evaluator.cook(graph, nid, feeds=feeds, frame=frame, fps=fps)
-                out.append(build_manifest(nid, graph.effective_params(nid), geo, evaluator.last_stats.key))
+                header, extra = build_manifest(nid, graph.effective_params(nid), geo, evaluator.last_stats.key)
+                out.append(header)
+                arrays.update({f"scene:{nid}:{k}": v for k, v in extra.items()})     # prefixed: the reply's own arrays are the mesh
             except (NodeError, ValueError) as e:                     # a bad sink must not take the modifier's own result down
                 errors.append({"node": nid, "message": str(e)})
-        return out, errors
+        return out, errors, arrays

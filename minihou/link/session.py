@@ -75,6 +75,7 @@ class Result:
     proxy: float = 1.0                            # proxy level it was cooked at (1.0: the real thing)
     link_memo: Any = None                         # (link_tris, reduced geometry) for the Blender link
     scene: Optional[Dict[str, dict]] = None       # scene_objects manifests by node id (None: not produced by this pass; keep the old ones)
+    scene_arrays: Dict[str, dict] = field(default_factory=dict)   # their binary arrays (pieces mode), by node id
     extras: Dict[str, Tuple[Geometry, str]] = field(default_factory=dict)   # extra outputs: object name -> (geometry, key)
 
 
@@ -486,6 +487,7 @@ class Session:
         try:
             extras: Dict[str, Tuple[Geometry, str]] = {}
             scene: Optional[Dict[str, dict]] = {} if emit_scene else None
+            scene_arrays: Dict[str, dict] = {}
             with self._cook_lock, timectx.at(frame, fps):
                 ev.proxy_level = level
                 ev.cancel = (lambda: self._rev != rev or self._wake.is_set()) if cancelable else None
@@ -506,7 +508,7 @@ class Session:
                         for nid in snapshot.scene_sinks():                  # results that become real Blender objects
                             try:
                                 sg = ev.cook(snapshot, nid)
-                                scene[nid] = build_manifest(nid, snapshot.effective_params(nid), sg, ev.last_stats.key)
+                                scene[nid], scene_arrays[nid] = build_manifest(nid, snapshot.effective_params(nid), sg, ev.last_stats.key)
                                 live += ev.live_keys(snapshot, nid)
                                 self._extra_errors.pop("scene:" + nid, None)
                             except (NodeError, GraphError, ParamError, ValueError) as e:
@@ -526,7 +528,8 @@ class Session:
                     cook["disk"] = d["disk"]                  # which results came back from the disk cache
                 if level < 1.0:
                     cook["proxy"] = level
-                published = Result(0, geo, stats.key, cook, rev=rev, extras=extras, proxy=level, scene=scene)
+                published = Result(0, geo, stats.key, cook, rev=rev, extras=extras, proxy=level, scene=scene,
+                                   scene_arrays=scene_arrays)
                 self._last_key, self._last_error_msg = overall, None
                 self._publish(published)
             elif self.latest_good is not None:

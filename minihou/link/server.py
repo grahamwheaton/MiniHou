@@ -224,7 +224,7 @@ class _Connection:
         for nid, manifest in scene.items():
             if self._scene_keys.get(nid) != manifest["key"]:
                 self._scene_keys[nid] = manifest["key"]
-                self.bytes_sent += send_message(self.sock, manifest)
+                self.bytes_sent += send_message(self.sock, manifest, good.scene_arrays.get(nid) or None)
 
     def _send_results(self):
         good, err = self.session.latest_good, self.session.latest_error

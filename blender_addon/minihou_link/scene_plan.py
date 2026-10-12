@@ -70,6 +70,7 @@ class Plan:
 def items(manifest: dict) -> List[Item]:
     sources = [str(s) for s in manifest.get("sources", [])]
     prefix = str(manifest.get("prefix") or "MiniHou")
+    pieces = manifest.get("mode") == "pieces"
     out: List[Item] = []
     seen = set()
     for i, ident in enumerate(manifest.get("id", [])):
@@ -77,6 +78,9 @@ def items(manifest: dict) -> List[Item]:
         if ident in seen:                                   # the engine refuses repeated ids; be safe anyway
             continue
         seen.add(ident)
+        if pieces:                                          # a piece is placed at its centre; its mesh carries the shape
+            out.append(Item(ident, object_name(prefix, ident), "", manifest["loc"][i], (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)))
+            continue
         s = int(manifest["src"][i])
         out.append(Item(ident, object_name(prefix, ident), sources[s] if 0 <= s < len(sources) else "",
                         manifest["loc"][i], manifest["rot"][i], manifest["scale"][i]))
@@ -101,7 +105,7 @@ def plan(manifest: dict, existing: Dict[int, Existing], present_sources: Sequenc
     wanted = items(manifest)
     wanted_ids = {it.ident for it in wanted}
     for it in wanted:
-        if it.src not in have and it.src not in p.missing_sources:
+        if it.src and it.src not in have and it.src not in p.missing_sources:
             p.missing_sources.append(it.src)
         ex = existing.get(it.ident)
         if ex is None:

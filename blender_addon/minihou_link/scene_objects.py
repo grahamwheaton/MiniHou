@@ -10,13 +10,15 @@ timer calls :func:`flush`.
 """
 from __future__ import annotations
 
+import hashlib
 from typing import Callable, Dict, List, Optional, Tuple
 
 import bpy
 import mathutils
+import numpy as np
 
 from . import scene_plan as sp
-from .mesh_writer import assert_main_thread
+from .mesh_writer import assert_main_thread, set_corner_verts, set_positions
 
 SESSION = "session"
 _pending: Dict[Tuple[str, str], Tuple[dict, str]] = {}      # (owner, node) -> (manifest, parent object name)
@@ -55,7 +57,7 @@ def flush() -> int:
             _log(f"scene_objects {node!r}: {type(e).__name__}: {e}")
             continue
         last_summary[f"{owner}:{node}"] = s
-        touched += s["created"] + s["moved"] + s["hidden"] + s["shown"]
+        touched += s["created"] + s["moved"] + s["hidden"] + s["shown"] + s["rewritten"]
     for owner, names in nodes.items():
         touched += hide_removed_nodes(owner, names)
     return touched
@@ -151,6 +153,45 @@ def _make(name: str, src_name: str, tag: str, ident: int, col, placeholder_log: 
     return obj
 
 
+DIGEST = "minihou_digest"        # on a piece's mesh: hash of the shape last written, so an unchanged piece is not rewritten
+
+
+def _make_piece(name: str, ident: int, col):
+    obj = bpy.data.objects.new(name, bpy.data.meshes.new(name))      # each piece has its own mesh
+    obj[sp.MARK_ID] = int(ident)
+    obj[sp.MARK_SRC] = ""
+    obj.rotation_mode = "XYZ"
+    col.objects.link(obj)
+    return obj
+
+
+def _write_piece(mesh, P: np.ndarray, vp: np.ndarray, sizes: np.ndarray) -> None:
+    mesh.clear_geometry()
+    if len(P):
+        mesh.vertices.add(len(P))
+    if len(vp):
+        mesh.loops.add(len(vp))
+        set_corner_verts(mesh, vp)
+    if len(sizes):
+        mesh.polygons.add(len(sizes))
+        mesh.polygons.foreach_set("loop_start", (np.cumsum(sizes) - sizes).astype(np.int32))
+    if len(P):
+        set_positions(mesh, P)
+    mesh.update(calc_edges=True)
+
+
+def _piece_slices(manifest: dict, arrays: dict):
+    """Per manifest entry: (id, P, vp, sizes) views into the arrays."""
+    pb = np.concatenate([[0], np.cumsum(manifest["npts"])]).astype(np.int64)
+    cb = np.concatenate([[0], np.cumsum(manifest["ncorner"])]).astype(np.int64)
+    fb = np.concatenate([[0], np.cumsum(manifest["nprim"])]).astype(np.int64)
+    P, vp, sizes = arrays["P"].reshape(-1, 3), arrays["vp"], arrays["sizes"]
+    if pb[-1] != len(P) or cb[-1] != len(vp) or fb[-1] != len(sizes):
+        raise ValueError("the piece arrays do not match the counts in the manifest")
+    for k, ident in enumerate(manifest["id"]):
+        yield int(ident), P[pb[k]:pb[k + 1]], vp[cb[k]:cb[k + 1]], sizes[fb[k]:fb[k + 1]]
+
+
 def _retarget(obj, item: sp.Item, tag: str, col, placeholder_log: List[str]):
     """Make ``obj`` duplicate another source. Same kind of data: swap it in place (modifiers stay). Otherwise rebuild."""
     src = bpy.data.objects.get(item.src) if item.src else None
@@ -173,9 +214,14 @@ def _retarget(obj, item: sp.Item, tag: str, col, placeholder_log: List[str]):
     return new
 
 
-def apply(manifest: dict, owner: str = SESSION, parent: str = "") -> dict:
-    """Make the objects the manifest describes. Returns counts."""
+def apply(manifest: dict, owner: str = SESSION, parent: str = "", arrays: Optional[dict] = None) -> dict:
+    """Make the objects the manifest describes. ``arrays``: the binary part (pieces mode; session manifests carry it as
+    ``_arrays``). Returns counts."""
     assert_main_thread()
+    pieces = manifest.get("mode") == "pieces"
+    arrays = arrays if arrays is not None else manifest.get("_arrays")
+    if pieces and not arrays:
+        raise ValueError("a pieces manifest arrived without its mesh arrays")
     node = str(manifest["node"])
     tag = sp.owner_tag(owner, node)
     by_id, extras = _existing(tag)
@@ -187,7 +233,7 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "") -> dict:
     missing_log: List[str] = []
     objs: Dict[int, "bpy.types.Object"] = dict(by_id)
     for item in plan.create:
-        obj = _make(item.name, item.src, tag, item.ident, col, missing_log)
+        obj = _make_piece(item.name, item.ident, col) if pieces else _make(item.name, item.src, tag, item.ident, col, missing_log)
         obj[sp.MARK] = tag
         objs[item.ident] = obj
     rebuilt = set()
@@ -210,6 +256,20 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "") -> dict:
             obj = objs[ident]
             obj.parent = parent_obj
             obj.matrix_parent_inverse = mathutils.Matrix.Identity(4)
+    rewritten = 0
+    if pieces:                                            # shapes: only the pieces whose shape really changed are rewritten
+        for ident, P, vp, sizes in _piece_slices(manifest, arrays):
+            obj = objs.get(ident)
+            if obj is None or obj.type != "MESH":
+                continue
+            h = hashlib.blake2b(digest_size=12)
+            for a in (P, vp, sizes):
+                h.update(np.ascontiguousarray(a).tobytes())
+            digest = h.hexdigest()
+            if obj.data.get(DIGEST) != digest:
+                _write_piece(obj.data, P, vp, sizes)
+                obj.data[DIGEST] = digest
+                rewritten += 1
     for ident in plan.hide:
         _hide(objs[ident])
     for name in plan.duplicates:
@@ -220,7 +280,8 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "") -> dict:
         if name and name in missing_log:
             _log(f"scene_objects {node!r}: the Blender object {name!r} was not found; empties stand in for it")
     return {"created": len(plan.create), "moved": len(plan.update), "retargeted": len(plan.retarget), "hidden": len(plan.hide),
-            "shown": len(plan.unhide), "total": len(manifest.get("id", [])), "missing": list(plan.missing_sources)}
+            "shown": len(plan.unhide), "total": len(manifest.get("id", [])), "missing": list(plan.missing_sources),
+            "rewritten": rewritten}
 
 
 def hide_removed_nodes(owner: str, nodes: List[str]) -> int:
@@ -261,6 +322,9 @@ def cleanup(everything: bool = False) -> int:
     gone = 0
     for obj in list(marked()):
         if everything or obj.get(sp.MARK_HIDDEN):
+            mesh = obj.data if obj.type == "MESH" and obj.data is not None and obj.data.get(DIGEST) else None   # a piece's own mesh
             bpy.data.objects.remove(obj, do_unlink=True)
+            if mesh is not None and mesh.users == 0:
+                bpy.data.meshes.remove(mesh)
             gone += 1
     return gone

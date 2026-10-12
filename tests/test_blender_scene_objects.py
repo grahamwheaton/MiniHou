@@ -36,8 +36,9 @@ def scene_objs(tag="session:so"):
     return sorted((o for o in bpy.data.objects if o.get("minihou_scene") == tag), key=lambda o: o.get("minihou_id", 0))
 
 
-@unittest.skipIf(bpy is None, "needs Blender / the bpy module")
-class SceneObjectsLiveTests(unittest.TestCase):
+class LiveHarness:
+    """A running engine, the add-on connected to it, and helpers (mixed into the test cases below)."""
+
     def setUp(self):
         bpy.ops.wm.read_factory_settings(use_empty=True)
         import minihou_link
@@ -46,7 +47,7 @@ class SceneObjectsLiveTests(unittest.TestCase):
         self.minihou_link, self.so = minihou_link, scene_objects
         self.tmp = tempfile.TemporaryDirectory()
         self.path = Path(self.tmp.name) / "g.json"
-        self.write(forest())
+        self.write(self.initial_graph())
         self.engine = Engine(self.path)
         self.rt = runtime.get_runtime()
         self.tree = self.source("Tree")
@@ -56,6 +57,9 @@ class SceneObjectsLiveTests(unittest.TestCase):
         self.minihou_link.unregister()
         self.engine.stop()
         self.tmp.cleanup()
+
+    def initial_graph(self):
+        return forest()
 
     def write(self, graph):
         self.path.write_text(json.dumps(graph), encoding="utf-8")
@@ -80,6 +84,10 @@ class SceneObjectsLiveTests(unittest.TestCase):
     def shown(self):
         return [o for o in scene_objs() if not o.get("minihou_hidden")]
 
+
+
+@unittest.skipIf(bpy is None, "needs Blender / the bpy module")
+class SceneObjectsLiveTests(LiveHarness, unittest.TestCase):
     def test_points_become_real_linked_duplicates_in_their_own_collection(self):
         self.pump(lambda: len(scene_objs()) == 6)
         objs = scene_objs()
@@ -189,6 +197,76 @@ class SceneObjectsLiveTests(unittest.TestCase):
         self.assertEqual(len(self.shown()), 6)
 
 
+def chunks(count=6, seed=4, **so):
+    return {"version": 1, "display": "main", "nodes": {
+        "b": {"type": "box", "params": {"size": [2, 2, 2]}},
+        "pts": {"type": "voronoi_fracture_points", "inputs": {"geo": "b"}, "params": {"count": count, "seed": seed}},
+        "f": {"type": "voronoi_fracture", "inputs": {"geo": "b", "points": "pts"}, "params": {}},
+        "a": {"type": "assemble", "inputs": {"geo": "f"}, "params": {}},
+        "so": {"type": "scene_objects", "inputs": {"geo": "a"}, "params": dict({"mode": "pieces", "prefix": "Chunk"}, **so)},
+        "g": {"type": "grid", "params": {"columns": 3, "rows": 3}},
+        "main": {"type": "output", "inputs": {"geo": "g"}}}}
+
+
+@unittest.skipIf(bpy is None, "needs Blender / the bpy module")
+class ScenePiecesTests(LiveHarness, unittest.TestCase):
+    """Pieces mode through the live link."""
+
+    def initial_graph(self):
+        return chunks()
+
+    def piece_count(self):
+        from minihou import Evaluator, Graph
+        return int(Evaluator().cook(Graph.from_dict(chunks()), "a").prim["piece"].max()) + 1
+
+    def test_each_piece_is_its_own_mesh_object_at_its_centre(self):
+        n = self.piece_count()
+        self.pump(lambda: len(scene_objs()) == n and all(len(o.data.polygons) for o in scene_objs()))
+        objs = scene_objs()
+        from minihou import Evaluator, Graph
+        geo = Evaluator().cook(Graph.from_dict(chunks()), "a")
+        self.assertEqual(sum(len(o.data.polygons) for o in objs), geo.nprims)
+        self.assertEqual(len({o.data.name for o in objs}), n)                          # a mesh of its own each
+        self.assertEqual([o.name for o in objs], [f"Chunk_{i:04d}" for i in range(n)])
+        bpy.context.view_layer.update()                                                # matrix_world follows the new locations
+        world = np.vstack([np.array([tuple(o.matrix_world @ v.co) for v in o.data.vertices]) for o in objs])
+        self.assertAlmostEqual(float(world.min()), -1.0, places=3)                     # the pieces together fill the box
+        self.assertAlmostEqual(float(world.max()), 1.0, places=3)
+        for o in objs:
+            self.assertGreater(len(o.data.vertices), 3)
+            local = np.array([tuple(v.co) for v in o.data.vertices])
+            np.testing.assert_allclose(local.mean(0), 0, atol=1e-4)                    # origin at the centre of the piece
+        self.assertIn("Chunk", bpy.data.collections)
+
+    def test_the_users_work_on_pieces_survives_and_unchanged_pieces_are_not_rewritten(self):
+        n = self.piece_count()
+        self.pump(lambda: len(scene_objs()) == n and all(len(o.data.polygons) for o in scene_objs()))
+        mine = scene_objs()[1]
+        mine.modifiers.new("Mine", "SOLIDIFY")
+        self.so.last_summary.clear()
+        self.write(chunks(max_objects=300))                                            # a new manifest, but the same shapes
+        self.pump(lambda: "session:so" in self.so.last_summary)
+        self.assertEqual(self.so.last_summary["session:so"]["rewritten"], 0)           # nothing was rewritten
+        self.assertEqual(self.so.last_summary["session:so"]["created"], 0)
+        self.write(chunks(count=3))
+        self.pump(lambda: len(self.shown()) == self.count_for(3))
+        self.assertIn("Mine", [m.name for m in mine.modifiers])
+        self.write(chunks(count=6))
+        self.pump(lambda: len(self.shown()) == n)
+        self.assertIs(scene_objs()[1], mine)
+        self.assertIn("Mine", [m.name for m in mine.modifiers])
+
+    def count_for(self, c):
+        from minihou import Evaluator, Graph
+        return int(Evaluator().cook(Graph.from_dict(chunks(count=c)), "a").prim["piece"].max()) + 1
+
+    def settle_for(self, seconds):
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            self.rt.tick()
+            time.sleep(0.01)
+
+
 @unittest.skipIf(bpy is None, "needs Blender / the bpy module")
 class SceneObjectsModifierTests(unittest.TestCase):
     def setUp(self):
@@ -257,6 +335,40 @@ class SceneObjectsModifierTests(unittest.TestCase):
         bpy.data.objects.remove(ground, do_unlink=True)
         self.m.pump(port=self.engine.port, force=True)
         self.assertTrue(all(o.get("minihou_hidden") for o in objs))
+
+    def test_pieces_of_the_host_mesh_become_objects_parented_to_it(self):
+        graph = {"version": 1, "display": "out", "nodes": {
+            "m": {"type": "modifier_input"},
+            "pts": {"type": "voronoi_fracture_points", "inputs": {"geo": "m"}, "params": {"count": 5, "seed": 2}},
+            "f": {"type": "voronoi_fracture", "inputs": {"geo": "m", "points": "pts"}, "params": {}},
+            "a": {"type": "assemble", "inputs": {"geo": "f"}, "params": {}},
+            "so": {"type": "scene_objects", "inputs": {"geo": "a"}, "params": {"mode": "pieces", "prefix": "Shard"}},
+            "out": {"type": "output", "inputs": {"geo": "m"}}},
+            "exposed": [{"name": "Count", "node": "pts", "param": "count"}]}
+        shards = Path(self.tmp.name) / "shards.json"                      # not the engine's own session file: read from disk as written
+        shards.write_text(json.dumps(graph), encoding="utf-8")
+        verts = [(x, y, z) for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)]
+        faces = [(0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)]
+        me = bpy.data.meshes.new("Slab")
+        me.from_pydata(verts, [], faces)
+        slab = bpy.data.objects.new("Slab", me)
+        bpy.context.scene.collection.objects.link(slab)
+        self.m.add_modifier(slab, str(shards), port=self.engine.port)
+        self.m.pump(port=self.engine.port, force=True)
+        self.assertEqual(self.m.last_error(), "")
+        self.assertGreater(self.so.flush(), 0)
+        objs = sorted((o for o in bpy.data.objects if o.get("minihou_scene")), key=lambda o: o["minihou_id"])
+        self.assertGreaterEqual(len(objs), 4)
+        self.assertEqual([o.name for o in objs], [f"Shard_{o['minihou_id']:04d}" for o in objs])
+        for o in objs:
+            self.assertIs(o.parent, slab)
+            self.assertGreater(len(o.data.polygons), 3)
+            self.assertNotEqual(o.data.name, slab.data.name)
+        self.assertEqual(len({o.data.name for o in objs}), len(objs))
+        bpy.context.view_layer.update()
+        world = np.vstack([np.array([tuple(o.matrix_world @ v.co) for v in o.data.vertices]) for o in objs])
+        self.assertAlmostEqual(float(world.min()), -1.0, places=3)
+        self.assertAlmostEqual(float(world.max()), 1.0, places=3)
 
 
 if __name__ == "__main__":

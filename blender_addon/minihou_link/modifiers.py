@@ -562,6 +562,8 @@ def pump(host=None, port=None, *, force=False, _only=None):
                                                   frame=scene.frame_current + scene.frame_subframe,
                                                   fps=scene.render.fps / scene.render.fps_base,
                                                   graph=json.loads(ng[GRAPH]))
+                    scene_arrays = {k: v for k, v in output.items() if k.startswith("scene:")}     # pieces' meshes, by node
+                    output = {k: v for k, v in output.items() if not k.startswith("scene:")}
                     update = GeoUpdate.from_message(header, output)
                     names = update.detail.get("instance_objects", [])
                     objects = _instance_objects(obj, mod, names)
@@ -579,7 +581,9 @@ def pump(host=None, port=None, *, force=False, _only=None):
                     # scene_objects nodes: real objects, parented to this object. Only queued here (pump can run from a
                     # frame-change handler); the timer makes them.
                     for m in header.get("scene", []):
-                        scene_objects.queue(ident, m, parent=obj.name)
+                        prefix = f"scene:{m['node']}:"
+                        scene_objects.queue(ident, dict(m, _arrays={k[len(prefix):]: v for k, v in scene_arrays.items()
+                                                                   if k.startswith(prefix)}), parent=obj.name)
                     for e in header.get("scene_errors", []):
                         scene_objects._log(f"scene_objects {e.get('node')!r} on {obj.name}: {e.get('message')}")
                     scene_objects.queue_nodes(ident, [m["node"] for m in header.get("scene", [])]

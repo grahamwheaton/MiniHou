@@ -819,8 +819,9 @@ feeding the display node have to be valid for it to cook.
 
 ## Real Blender objects from a graph (Scene Objects)
 
-A **Scene Objects** node turns its points into separate scene objects in Blender: one linked duplicate of the object each point names
-(the Instance node's output, or a `source` object), in their own collection, with the point's position, rotation and scale. Give
+A **Scene Objects** node turns its input into separate scene objects in Blender: one linked duplicate of the object each point names
+(the Instance node's output, or a `source` object) with the point's position, rotation and scale, or, in `pieces` mode, one mesh
+object per piece (fracture pieces, say) with its origin at the piece's centre. They go in their own collection. Give
 them modifiers, materials or constraints and they keep them: objects are found by marker, a cook only creates, moves, shows and hides,
 and surplus objects are parked (hidden), never deleted, until you press *Delete parked*. Works through the live link and through a
 MiniHou modifier (objects parented to the host object). Details and limits: [docs/SCENE_OBJECTS.md](docs/SCENE_OBJECTS.md).
