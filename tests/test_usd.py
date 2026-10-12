@@ -196,12 +196,35 @@ class UsdRoundTripTests(unittest.TestCase):
         p = self.path("two.usda")
         rep = usd_io.write_stage(p, {"main": run("box"), "second out!": run("sphere", rows=6, columns=8)})
         self.assertEqual(rep.outputs["second out!"]["prim"], "/MiniHou/second_out_")
+        box, sphere = run("box"), run("sphere", rows=6, columns=8)
         back, _ = usd_io.read_geometry(p)
-        self.assertEqual(back.nprims, run("box").nprims + run("sphere", rows=6, columns=8).nprims)
+        # each output keeps its own points and primitives: joined, not merged into each other
+        self.assertEqual((back.npoints, back.nprims), (box.npoints + sphere.npoints, box.nprims + sphere.nprims))
+        np.testing.assert_allclose(back.P[:box.npoints], box.P, atol=1e-6)
+        np.testing.assert_allclose(back.P[box.npoints:], sphere.P, atol=1e-6)
+        np.testing.assert_array_equal(back.topology.vertex_point[:box.nvertices], box.topology.vertex_point)
+        np.testing.assert_array_equal(back.topology.vertex_point[box.nvertices:], sphere.topology.vertex_point + box.npoints)
         only, _ = usd_io.read_geometry(p, prim_path="/MiniHou/second_out_")
-        self.assertEqual(only.nprims, run("sphere", rows=6, columns=8).nprims)
+        same(self, sphere, only)
         with self.assertRaises(ValueError):
             usd_io.read_geometry(p, prim_path="/Nope")
+
+    def test_reading_one_child_makes_no_phantom_points(self):
+        p = self.path("part.usda")
+        usd_io.write_stage(p, {"out": mixed()})
+        curves, _ = usd_io.read_geometry(p, prim_path="/MiniHou/out/curves")
+        self.assertEqual((curves.npoints, curves.nprims), (3, 1))                         # not 8 points with five zero-filled at the origin
+        np.testing.assert_allclose(curves.P, mixed().P[[3, 4, 5]])
+        points, _ = usd_io.read_geometry(p, prim_path="/MiniHou/out/points")
+        np.testing.assert_allclose(points.P, mixed().P[[6, 7]])
+
+    def test_points_of_dropped_primitives_are_not_lost(self):
+        g = Geometry.from_arrays(np.arange(18, dtype=np.float32).reshape(6, 3), [0, 1, 2, 3, 4, 5], [0, 2, 3, 6], closed=[True, False, True])
+        p = self.path("d.usda")
+        usd_io.write_stage(p, {"d": g.freeze()})
+        back, _ = usd_io.read_geometry(p)
+        self.assertEqual(back.npoints, 6)                                                  # the dropped 2-corner face and 1-point curve
+        np.testing.assert_allclose(back.P, g.P)                                            # leave their points behind, as loose points
 
 
 @needs_usd
@@ -288,6 +311,61 @@ class UsdForeignFileTests(unittest.TestCase):
         self.assertFalse(g.topology.closed_mask().any())
         self.assertTrue(any("Cube" in x for x in rep.skipped))
         self.assertTrue(any("control polygon" in n for n in rep.notes))
+
+    def test_point_instancer_prototypes_are_not_imported_as_scene_geometry(self):
+        p, s = self.stage(up="Z")
+        inst = UsdGeom.PointInstancer.Define(s, "/Scatter")
+        proto = UsdGeom.Mesh.Define(s, "/Scatter/Prototypes/Tree")
+        proto.CreatePointsAttr([(0, 0, 0), (1, 0, 0), (0, 1, 0)])
+        proto.CreateFaceVertexCountsAttr([3])
+        proto.CreateFaceVertexIndicesAttr([0, 1, 2])
+        inst.CreatePrototypesRel().AddTarget(proto.GetPath())
+        ground = UsdGeom.Mesh.Define(s, "/Ground")
+        ground.CreatePointsAttr([(0, 0, 0), (9, 0, 0), (0, 9, 0)])
+        ground.CreateFaceVertexCountsAttr([3])
+        ground.CreateFaceVertexIndicesAttr([0, 1, 2])
+        s.GetRootLayer().Save()
+        g, rep = usd_io.read_geometry(p)
+        self.assertEqual(g.nprims, 1)                                                      # only the ground
+        self.assertAlmostEqual(float(g.P[:, 0].max()), 9.0)
+        self.assertTrue(any("PointInstancer" in x for x in rep.skipped))
+
+    def test_files_with_only_time_samples_read_their_first_sample(self):
+        p, s = self.stage(up="Z")
+        m = UsdGeom.Mesh.Define(s, "/M")
+        m.CreateFaceVertexCountsAttr([3])
+        m.CreateFaceVertexIndicesAttr([0, 1, 2])
+        m.CreatePointsAttr().Set([(0, 0, 0), (1, 0, 0), (0, 1, 0)], 5)
+        m.CreatePointsAttr().Set([(0, 0, 3), (1, 0, 3), (0, 1, 3)], 9)
+        m.AddTranslateOp().Set((10.0, 0.0, 0.0), 5)                                         # the transform is sampled too
+        s.GetRootLayer().Save()
+        g, rep = usd_io.read_geometry(p)
+        self.assertEqual(g.nprims, 1)
+        self.assertAlmostEqual(float(g.P[:, 0].min()), 10.0)
+        self.assertAlmostEqual(float(g.P[:, 2].max()), 0.0)
+        self.assertAlmostEqual(float(usd_io.read_geometry(p, time=9)[0].P[:, 2].max()), 3.0)
+
+    def test_a_prim_without_points_is_reported_not_silently_dropped(self):
+        p, s = self.stage(up="Z")
+        UsdGeom.Mesh.Define(s, "/Empty")
+        s.GetRootLayer().Save()
+        g, rep = usd_io.read_geometry(p)
+        self.assertEqual(g.npoints, 0)
+        self.assertTrue(any("/Empty" in n and "no points" in n for n in rep.notes))
+
+    def test_several_uv_sets_keep_their_names(self):
+        p, s = self.stage(up="Z")
+        m = UsdGeom.Mesh.Define(s, "/M")
+        m.CreatePointsAttr([(0, 0, 0), (1, 0, 0), (0, 1, 0)])
+        m.CreateFaceVertexCountsAttr([3])
+        m.CreateFaceVertexIndicesAttr([0, 1, 2])
+        api = UsdGeom.PrimvarsAPI(m.GetPrim())
+        for name, shift in (("st", 0.0), ("st1", 0.5)):
+            api.CreatePrimvar(name, Sdf.ValueTypeNames.TexCoord2fArray, "faceVarying").Set(Vt.Vec2fArray([(shift, 0), (shift + 0.25, 0), (shift, 0.25)]))
+        s.GetRootLayer().Save()
+        g, _ = usd_io.read_geometry(p)
+        self.assertEqual(sorted(n for n in g.vertex.names()), ["st1", "uv"])
+        self.assertAlmostEqual(float(g.vertex["st1"][0, 0]), 0.5)
 
     def test_guide_and_proxy_purposes_are_left_out(self):
         p, s = self.stage(up="Z")

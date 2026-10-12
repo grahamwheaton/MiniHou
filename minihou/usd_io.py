@@ -216,9 +216,6 @@ def write_geometry(stage, path: str, geo: Geometry) -> dict:
     curve_prims = np.flatnonzero(~closed & (sizes >= 2))
     dropped = {"faces": int((closed & (sizes < 3)).sum()), "curves": int((~closed & (sizes < 2)).sum())}
     used = np.zeros(n, bool)
-    if len(vp):
-        used[vp] = True
-    loose = np.flatnonzero(~used)
     out = {"faces": 0, "curves": 0, "points": 0, "dropped": dropped}
 
     def corners_of(prims: np.ndarray) -> np.ndarray:
@@ -230,6 +227,9 @@ def write_geometry(stage, path: str, geo: Geometry) -> dict:
         k = np.arange(int(s.sum()), dtype=np.int64) - np.repeat(np.cumsum(s) - s, s)
         return first + k
 
+    written = np.concatenate([vp[corners_of(mesh_prims)], vp[corners_of(curve_prims)]]) if (len(mesh_prims) or len(curve_prims)) else vp[:0]
+    used[written] = True
+    loose = np.flatnonzero(~used)                                     # includes points only dropped primitives used: the table stays whole
     point_t = geo.point
     # -- mesh ---------------------------------------------------------------------------------------------------------
     if len(mesh_prims):
@@ -387,6 +387,17 @@ class Part:
     corner_attrs: Dict[str, np.ndarray] = field(default_factory=dict)
     prim_attrs: Dict[str, np.ndarray] = field(default_factory=dict)
     prim_index: Optional[np.ndarray] = None
+    group: Optional[str] = None                      # the MiniHou output Xform it was exported under (None: a foreign prim)
+
+
+def _output_of(prim) -> Optional[str]:
+    """Path of the MiniHou output Xform (the one with ``minihou:counts``) above ``prim``, if any."""
+    p = prim.GetParent()
+    while p and p.IsValid() and not p.IsPseudoRoot():
+        if p.GetCustomDataByKey("minihou:counts") is not None:
+            return str(p.GetPath())
+        p = p.GetParent()
+    return None
 
 
 def _read_primvars(prim, tm, kind: str, npoints: int, ncorner: int, nprim: int, n_expand: Optional[np.ndarray] = None):
@@ -431,7 +442,7 @@ def _read_primvars(prim, tm, kind: str, npoints: int, ncorner: int, nprim: int, 
         tn = str(pv.GetTypeName())
         name = orig
         if not name:
-            name = {"displayColor": "Cd", "displayOpacity": "Alpha"}.get(raw, "uv" if raw == "st" or tn.startswith("texCoord2") else raw)
+            name = {"displayColor": "Cd", "displayOpacity": "Alpha", "st": "uv"}.get(raw, raw)
         interp = pv.GetInterpolation()
         if tn.startswith("double"):
             arr = arr.astype(np.float32)
@@ -484,7 +495,8 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
         raise ValueError(f"cannot open {os.path.basename(path)} as USD: {e}") from None
     if stage is None:
         raise ValueError(f"cannot open {os.path.basename(path)} as USD")
-    tm = Usd.TimeCode.Default() if time is None else Usd.TimeCode(float(time))
+    # no time given: the un-animated values, which for a file with only time samples means its first sample
+    tm = Usd.TimeCode.EarliestTime() if time is None else Usd.TimeCode(float(time))
     mpu = float(UsdGeom.GetStageMetersPerUnit(stage) or 1.0) if stage.HasAuthoredMetadata("metersPerUnit") else 1.0   # USD's own fallback is cm; unauthored: take it as metres
     rep = ReadReport(up_axis=str(UsdGeom.GetStageUpAxis(stage)), meters_per_unit=mpu)
     meta = (stage.GetRootLayer().customLayerData or {}).get("minihou", {})
@@ -501,13 +513,15 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
     if unit != 1.0:
         rep.notes.append(f"scaled by metersPerUnit {unit:g}")
     parts: List[Part] = []
-    for prim in Usd.PrimRange(start, Usd.TraverseInstanceProxies(Usd.PrimDefaultPredicate)):
+    it = iter(Usd.PrimRange(start, Usd.TraverseInstanceProxies(Usd.PrimDefaultPredicate)))
+    for prim in it:
         if not prim.IsA(UsdGeom.Imageable):
             continue
         purpose = UsdGeom.Imageable(prim).ComputePurpose()
         if purpose not in purposes:
             if prim.IsA(UsdGeom.Gprim):
                 rep.skipped.append(f"{prim.GetPath()} ({purpose} purpose)")
+            it.PruneChildren()
             continue
         kind = None
         if prim.IsA(UsdGeom.Mesh):
@@ -518,12 +532,14 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
             kind = "points"
         elif prim.IsA(UsdGeom.Gprim) or prim.IsA(UsdGeom.PointInstancer):
             rep.skipped.append(f"{prim.GetPath()} ({prim.GetTypeName()})")
+            it.PruneChildren()                                       # an instancer's children are its prototypes, not scene geometry
             continue
         else:
             continue
         pb = UsdGeom.PointBased(prim)
         pts = pb.GetPointsAttr().Get(tm)
         if pts is None or not len(pts):
+            rep.notes.append(f"{prim.GetPath()}: no points at this time; skipped")
             continue
         P = np.asarray(pts, np.float64).reshape(-1, 3)
         M = np.array(xcache.GetLocalToWorldTransform(prim), np.float64).reshape(4, 4)
@@ -562,6 +578,7 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
         part.corner_attrs = {k: v for k, v in ca.items() if len(v) == nc_}
         part.prim_attrs = {k: v for k, v in qa.items() if len(v) == nq_}
         part.point_index = pidx if pidx is not None and len(pidx) == np_ else None
+        part.group = _output_of(prim) if part.point_index is not None else None
         part.prim_index = qidx if qidx is not None and len(qidx) == nq_ else None
         for dropped in set(pa) | set(ca) | set(qa):
             if dropped not in part.point_attrs and dropped not in part.corner_attrs and dropped not in part.prim_attrs:
@@ -582,7 +599,16 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
             part = _reverse_winding(part)
         parts.append(part)
         rep.prims += 1
-    geo = assemble(parts)
+    # each MiniHou output is rebuilt on its own (its point and primitive numbers start at 0), then they are joined
+    groups: Dict[Optional[str], List[Part]] = {}
+    for part in parts:
+        groups.setdefault(part.group, []).append(part)
+    geos = [assemble(ps) for ps in groups.values()]
+    if len(geos) > 1:
+        from .nodes.merge import merge
+        geo = merge(geos).freeze()
+    else:
+        geo = geos[0] if geos else assemble([])
     detail = _read_detail(stage)
     if detail:
         geo.detail.update(detail)
@@ -672,8 +698,13 @@ def assemble(parts: List[Part]) -> Geometry:
     exact = all(p.point_index is not None for p in parts)
     sizes_pts = [len(p.P) for p in parts]
     if exact:
-        idx = [p.point_index for p in parts]
-        N = int(max((i.max() for i in idx if len(i)), default=-1)) + 1
+        raw = [p.point_index for p in parts]
+        allidx = np.concatenate(raw) if raw else np.zeros(0, np.int64)
+        uniq, inv = np.unique(allidx, return_inverse=True)           # only the points that were read: no phantom ones when reading part
+        inv = inv.astype(np.int64).reshape(-1)
+        N = len(uniq)
+        cuts = np.cumsum([len(r) for r in raw])[:-1]
+        idx = np.split(inv, cuts) if len(raw) > 1 else [inv]
         mapping = idx
         P = np.zeros((N, 3), np.float32)
         have = np.zeros(N, bool)

@@ -1899,7 +1899,7 @@
   }
   async function exportUsd() {
     const cur = S.path ? relPath(S.path) : "exports/scene.json";
-    const single = [...S.sel].filter((id) => nodeOf(id)).length === 1 ? [...S.sel][0] : null;
+    const picked = [...S.sel].filter((id) => nodeOf(id)), single = picked.length === 1 ? picked[0] : null;
     let name = prompt("Export the " + (single ? "node " + single : "display output") + " as USD (inside " + (S.root || "the workspace") + ", full size, .usd .usda or .usdc):",
       cur.replace(/\.json$/i, "") + ".usdc");
     if (!name) return;

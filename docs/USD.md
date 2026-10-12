@@ -29,7 +29,7 @@ one prim:
 | points no primitive uses | `Points` `points` |
 
 Closed primitives with fewer than 3 corners and open ones with fewer than 2 cannot be USD prims. They are left out and counted
-(`customData minihou:dropped`, and in the export's report).
+(`customData minihou:dropped`, and in the export's report); the points they used are written as loose points, so the point table stays whole.
 
 **Attributes** are primvars: point attributes `vertex`, corner (vertex) attributes `faceVarying` (`vertex` on curves), primitive
 attributes `uniform`. `N` is written as `normals`, `Cd` as `displayColor`, `Alpha` as `displayOpacity`, `uv` as `primvars:st`, so other
@@ -53,9 +53,10 @@ The **USD Import** node (`usd_import`, in the Create group) reads any USD file:
   indexed primvars are flattened; GeomSubsets become groups when the file has no group primvar of that name;
 * `up_axis` (z: turn a Y-up file to Z-up, the default; keep) and `apply_units` (scale by an *authored* `metersPerUnit`; an unauthored
   one is taken as metres, although USD's own fallback is centimetres);
-* `prim_path` to read part of a stage; `time` = frame reads the file's animation at the current frame;
+* `prim_path` to read part of a stage (only the points that were read come in); `time` = frame reads the file's animation at the current frame (the default reads the un-animated values, or the first sample of a file that has only samples);
 * guide and proxy purposes, and prim types it cannot use (cubes, spheres, point instancers, ...), are skipped and listed in the detail
-  attribute `usd_skipped`;
+  attribute `usd_skipped`; a point instancer's children (its prototypes) are skipped with it; a prim with no points at the read time is noted in `usd_notes`;
+* a file with several MiniHou outputs comes back as the outputs joined in order (each keeps its own points and primitives);
 * the cache key includes the file's modification time and size, so saving the file in another tool recooks the node.
 
 `usd_io.read_graph(path)` returns the graph stored in a MiniHou file, if any.
