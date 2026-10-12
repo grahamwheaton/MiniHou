@@ -5,7 +5,7 @@ import numpy as np
 from .. import spatial, topo
 from ..geometry import Geometry
 from ..outgroups import OutGroup, OutGroups
-from ..sdk import Float, Input, Int, Str, node
+from ..sdk import Bool, Enum, Float, Input, Int, Str, node
 from . import _build as B
 from ._util import fan_triangulate
 from .attrib_tools import piece_labels
@@ -254,3 +254,413 @@ def voronoi_adjacency(geo, points, piece_attrib, max_gap, min_area, strong_area,
     out = ADJ_OUT.write(out, og, "connected", degree > 0)
     out = ADJ_OUT.write(out, og, "isolated", degree == 0)
     return ADJ_OUT.write(out, og, "strong", lambda: area >= strong_area * (area.max() if len(area) else 0))
+
+
+# -------------------------------------------------------------------------------------------------- boolean fracture
+
+BF_OUT = OutGroups(
+    OutGroup("inside", "Inside Faces", "inside", "prim", default=True,
+             doc="The faces the cutters created: the new inside surface of every piece"),
+    OutGroup("outside", "Outside Faces", "outside", "prim", doc="The faces that came from the input's own surface"),
+    OutGroup("cutter", "Cutter Pieces", "cutterpieces", "prim", doc="All faces of the pieces that were inside a cutter"),
+    OutGroup("remainder", "Remainder Piece", "remainder", "prim", doc="All faces of what was left outside every cutter"),
+    OutGroup("cutpoints", "Cut Points", "cutpoints", "point", doc="The points where the inside meets the outside"),
+    OutGroup("cutedges", "Cut Edges", "cutedges", "edge", doc="The edges where the inside meets the outside"),
+)
+_FROM_B = "vfcutter"
+
+
+def _split_connected(geo):
+    """The connected pieces of ``geo`` as separate geometries (points not shared)."""
+    from .group import keep_prims
+    labels = piece_labels(geo)[1]
+    return [keep_prims(geo, labels == k) for k in range(int(labels.max()) + 1)] if geo.nprims else []
+
+
+def _bool(a, b, operation):
+    """a (op) b with the faces that came from b marked; returns (geometry, bool per prim: from b)."""
+    from .boolean import boolean
+    r = boolean(a, b, operation, outgrp_from_a=False, outgrp_from_b=True, outgrp_from_b_name=_FROM_B,
+                outgrp_seam=False, outgrp_seampoints=False)
+    key = "group_" + _FROM_B
+    mark = r.prim[key].astype(bool) if key in r.prim else np.zeros(r.nprims, bool)
+    if key in r.prim:
+        r = r.copy()
+        del r.prim[key]
+    return r, mark
+
+
+@node("boolean_fracture", inputs=["geo", "cutters"], category="model", params=[
+    Enum("keep", ["both", "inside", "outside"], doc="inside: only the pieces cut out by the cutters; outside: only what is left"),
+    Enum("mode", ["each_cutter", "union"], doc="each_cutter: one piece per cutter (earlier cutters win where they overlap); "
+                                               "union: one inside piece for all of them"),
+    Str("piece_attrib", "piece", doc="Primitive int attribute numbering the connected pieces (empty: none)"),
+    Str("cutter_attrib", "cutter", doc="Primitive int attribute: which cutter made the piece (-1: the remainder; empty: none)"),
+    *BF_OUT.params(),
+])
+def boolean_fracture(geo, cutters, keep, mode, piece_attrib, cutter_attrib, **og):
+    """Break a closed mesh with other closed meshes (Houdini's Boolean Fracture): every connected body of the cutters
+    carves out a piece (the input intersected with it) and what no cutter touched is the remainder. The new surface of
+    each piece (the cutter's) is the ``inside`` group; the input's own surface is ``outside``. Pieces are closed solids, ready for
+    ``rbd_configure``."""
+    for g, nm in ((geo, "input"), (cutters, "cutters")):
+        B.require_polygons(g, f"boolean_fracture {nm}")
+    if geo.nprims == 0 or cutters.nprims == 0:
+        return geo
+    bodies = _split_connected(cutters)
+    if mode == "union":
+        bodies = [cutters]
+    base = geo.copy()
+    base.prim["vf_inside"] = np.zeros(base.nprims, np.int32)
+    rem, parts = base, []
+
+    def inside_of(g, mark):
+        return (g.prim["vf_inside"] != 0) | mark if "vf_inside" in g.prim else mark
+
+    for k, body in enumerate(bodies):
+        if rem.nprims == 0:
+            break
+        cut, mark = _bool(rem, body, "intersect")
+        if cut.nprims:
+            cut = cut.copy()
+            ins = inside_of(cut, mark)
+            cut.prim["vf_inside"] = ins.astype(np.int32)
+            parts.append((cut, k, True))
+        rem, mark = _bool(rem, body, "subtract")
+        if rem.nprims:
+            rem = rem.copy()
+            rem.prim["vf_inside"] = inside_of(rem, mark).astype(np.int32)
+    if rem.nprims:
+        parts.append((rem, -1, False))
+    out = []
+    for g, k, is_cutter in parts:
+        if (keep == "inside" and not is_cutter) or (keep == "outside" and is_cutter):
+            continue
+        ins = g.prim["vf_inside"].astype(bool)
+        g = g.copy()
+        del g.prim["vf_inside"]
+        if cutter_attrib:
+            g.prim[cutter_attrib] = np.full(g.nprims, k, np.int32)
+        seam = cut_edge_mask_for(g, ins)
+        g = BF_OUT.write(g, og, "inside", ins)
+        g = BF_OUT.write(g, og, "outside", ~ins)
+        g = BF_OUT.write(g, og, "cutter", np.full(g.nprims, is_cutter))
+        g = BF_OUT.write(g, og, "remainder", np.full(g.nprims, not is_cutter))
+        g = BF_OUT.write(g, og, "cutpoints", lambda g=g, seam=seam: _points_of_edges(g, seam))
+        out.append(BF_OUT.write(g, og, "cutedges", seam))
+    if not out:
+        return B.make(np.zeros((0, 3), np.float32), np.zeros(0, np.int64), np.zeros(1, np.int64))
+    from .merge import merge
+    res = merge(out)
+    if piece_attrib:
+        res = res.copy()
+        res.prim[piece_attrib] = piece_labels(res)[1].astype(np.int32)
+    return res
+
+
+def cut_edge_mask_for(geo, inside):
+    from .fracture import cut_edge_mask
+    return cut_edge_mask(geo, inside)
+
+
+def _points_of_edges(geo, edge_mask):
+    m = np.zeros(geo.npoints, bool)
+    m[topo.edges(geo).points[np.asarray(edge_mask, bool)].ravel()] = True
+    return m
+
+
+# ---------------------------------------------------------------------------------------------- convex decomposition
+
+def mesh_volume(geo):
+    """Signed volume of a closed mesh (positive when faces point outwards)."""
+    tris, _ = fan_triangulate(geo.topology)
+    if not len(tris):
+        return 0.0
+    T = geo.P.astype(np.float64)[geo.topology.vertex_point[tris]]
+    return float(np.einsum("ij,ij->i", T[:, 0], np.cross(T[:, 1], T[:, 2])).sum() / 6.0)
+
+
+def hull_volume(geo):
+    from .. import hull as hl
+    P = geo.P.astype(np.float64)
+    tri = hl.convex_hull(P)
+    if not len(tri):
+        return 0.0
+    T = P[tri]
+    return float(np.einsum("ij,ij->i", T[:, 0], np.cross(T[:, 1], T[:, 2])).sum() / 6.0)
+
+
+def concave_volume(geo):
+    """(volume, how much of the convex hull is not filled by the mesh)."""
+    v = mesh_volume(geo)
+    return v, max(hull_volume(geo) - v, 0.0)
+
+
+def split_planes(piece, limit):
+    """Candidate cutting planes, best first: the planes of the faces on each reflex (concave) edge, which is how a
+    polyhedron is taken apart into convex parts. Falls back to the three axes through the centre."""
+    from .bevel import twins
+    c, n, area = prim_geometry(piece)
+    size = float(np.ptp(piece.P, axis=0).max())
+    pv = topo.prim_of_vertex(piece)
+    tw = twins(piece)
+    he = np.flatnonzero((tw >= 0))
+    he = he[he < tw[he]]
+    p, q = pv[he], pv[tw[he]]
+    out_p = np.einsum("ij,ij->i", c[q] - c[p], n[p])            # the neighbour sits in front of this face: a reflex edge
+    out_q = np.einsum("ij,ij->i", c[p] - c[q], n[q])
+    reflex = (out_p > 1e-6 * size) | (out_q > 1e-6 * size)
+    score = np.zeros(piece.nprims)
+    np.add.at(score, p[reflex], np.maximum(out_p[reflex], 0) + 1e-12)
+    np.add.at(score, q[reflex], np.maximum(out_q[reflex], 0) + 1e-12)
+    score *= area
+    planes, seen = [], set()
+    for f in np.argsort(-score, kind="stable"):
+        if score[f] <= 0 or len(planes) >= limit:
+            break
+        key = tuple(np.round(np.r_[n[f], n[f] @ c[f] / max(size, 1e-12)], 4))
+        if key in seen:
+            continue
+        seen.add(key)
+        planes.append((c[f], n[f]))
+    mid = piece.P.astype(np.float64).mean(0)                    # always also the planes through the middle: they take a ring in half
+    centred = [(mid, np.eye(3)[k]) for k in range(3)]
+    return planes + centred
+
+
+CD_OUT = OutGroups(
+    OutGroup("inside", "Inside Faces", "inside", "prim", default=True, doc="The faces the cuts created"),
+    OutGroup("outside", "Outside Faces", "outside", "prim", doc="The faces that came from the input's own surface"),
+    OutGroup("cutpoints", "Cut Points", "cutpoints", "point", doc="The points where the inside meets the outside"),
+    OutGroup("cutedges", "Cut Edges", "cutedges", "edge", doc="The edges where the inside meets the outside"),
+)
+
+
+def _half(piece, origin, normal, side, tol):
+    """One side of a plane cut. A face lying in the plane belongs to the half it faces away from (its outward normal
+    points out of that half), so it is dropped from the other one."""
+    from .group import keep_prims
+    from .model import clip
+    h = clip(piece, origin, normal, side, outgrp_above=False)
+    if h.nprims == 0:
+        return h
+    d = (h.P.astype(np.float64) - origin) @ normal
+    flat = np.zeros(h.nprims, bool)
+    off = np.abs(d)[h.topology.vertex_point] > tol
+    flat = np.bincount(topo.prim_of_vertex(h), weights=off, minlength=h.nprims) == 0
+    _, nrm, _ = prim_geometry(h)
+    wrong = flat & ((nrm @ normal) * (1 if side == "above" else -1) > 0)       # 'above' keeps flat faces that face down
+    return keep_prims(h, ~wrong) if wrong.any() else h
+
+
+def _try_split(piece, plane, min_volume, eps):
+    from .fracture import INSIDE_TMP, _cap_plane
+    origin, normal = plane
+    halves = []
+    for side in ("above", "below"):
+        h = _half(piece, origin, normal, side, eps)
+        if h.nprims == 0:
+            return None
+        halves.append(_cap_plane(h, origin, normal, eps, INSIDE_TMP))
+    out = []
+    for h in halves:
+        for comp in _split_connected(h):
+            if mesh_volume(comp) <= 0 or np.any(topo.edges(comp).count != 2):   # the cut did not close properly
+                return None
+            out.append(comp)
+    if min(mesh_volume(c) for c in out) < min_volume:
+        return None
+    return out
+
+
+@node("convex_decomposition", inputs=["geo"], category="model", params=[
+    Float("max_concavity", 0.02, min=0.0, max=1.0, doc="A piece is convex enough when its convex hull holds at most this share "
+                                                       "more volume than it does"),
+    Int("max_pieces", 32, min=1, max=1000, doc="Stop splitting at this many pieces"),
+    Float("min_volume", 0.001, min=0.0, max=0.5, doc="No cut may leave a piece smaller than this share of the whole shape"),
+    Int("search", 16, min=1, max=200, doc="Cutting planes tried for each split (more is slower and finds better cuts)"),
+    Str("piece_attrib", "piece", doc="Primitive int attribute numbering the pieces (empty: none)"),
+    *CD_OUT.params(),
+])
+def convex_decomposition(geo, max_concavity, max_pieces, min_volume, search, piece_attrib, **og):
+    """Cut a closed concave mesh into nearly convex pieces (Houdini's Convex Decomposition, for simulation collision shapes).
+    The piece with the most volume missing from its convex hull is cut next, along the plane of a face beside one of its
+    reflex edges (the cut that removes the most concavity wins), until every piece is within ``max_concavity`` or there are
+    ``max_pieces``. Each cut is capped, so the pieces are closed solids; the caps are the ``inside`` group."""
+    from .fracture import INSIDE_TMP, cut_edge_mask
+    from .group import keep_prims
+    from .merge import merge
+    B.require_polygons(geo, "convex_decomposition")
+    if geo.nprims == 0:
+        return geo
+    if np.any(topo.edges(geo).count != 2):
+        raise ValueError("convex_decomposition needs a closed mesh (every edge shared by two faces)")
+    from .. import groups
+    start = groups.write(geo, "prim", INSIDE_TMP, np.zeros(geo.nprims, bool))
+    total = abs(mesh_volume(start))
+    if total <= 0:
+        raise ValueError("convex_decomposition: the mesh has no volume (faces pointing inwards?)")
+    size = float(np.ptp(geo.P, axis=0).max())
+    eps = 5e-7 * max(size, 1e-9) + 1e-7
+    work = []                                                       # (missing volume, tiebreak, geometry)
+    done = []
+    counter = 0
+
+    def add(g):
+        nonlocal counter
+        v, missing = concave_volume(g)
+        counter += 1
+        (work if missing / max(v, 1e-300) > max_concavity else done).append((missing, counter, g))
+    for comp in _split_connected(start):
+        add(comp)
+    while work and len(work) + len(done) < max_pieces:
+        work.sort(key=lambda w: (-w[0], w[1]))
+        missing, _, piece = work.pop(0)
+        best = None
+        parent = missing / max(mesh_volume(piece), 1e-300)
+        for plane in split_planes(piece, search):
+            parts = _try_split(piece, plane, min_volume * total, eps)
+            if parts is None:
+                continue
+            stats = [concave_volume(p) for p in parts]
+            left = sum(m for _v, m in stats)
+            worst = max(m / max(v, 1e-300) for v, m in stats)
+            if best is None or (left, worst) < best[0]:
+                best = ((left, worst), parts, worst)
+            if left <= 1e-9 * total:
+                break
+        # a cut is worth making when it removes concavity, or at least leaves no part more concave than the whole (a ring
+        # needs two cuts before it gets better)
+        if best is None or (best[0][0] >= missing * (1 - 1e-6) and best[2] > parent * (1 + 1e-3)):
+            done.append((missing, counter, piece))
+            continue
+        for p in best[1]:
+            add(p)
+    pieces = [g for _m, _c, g in sorted(work + done, key=lambda w: w[1])]
+    out = []
+    for i, p in enumerate(pieces):
+        ins = groups.member(p, "prim", INSIDE_TMP).astype(bool)
+        p = p.copy()
+        del p.prim[groups.attr_name(INSIDE_TMP)]
+        if piece_attrib:
+            p.prim[piece_attrib] = np.full(p.nprims, i, np.int32)
+        seam = cut_edge_mask(p, ins)
+        p = CD_OUT.write(p, og, "inside", ins)
+        p = CD_OUT.write(p, og, "outside", ~ins)
+        p = CD_OUT.write(p, og, "cutpoints", lambda p=p, seam=seam: _points_of_edges(p, seam))
+        out.append(CD_OUT.write(p, og, "cutedges", seam))
+    return merge(out)
+
+
+# ------------------------------------------------------------------------------------------------------------ assemble
+
+ASM_OUT = OutGroups(
+    OutGroup("unshared", "Split Points", "splitpoints", "point",
+             doc="The points that were copied so that each piece has its own (every copy after the first)"),
+    OutGroup("shared", "Shared Points", "sharedpoints", "point", doc="The points that two or more pieces used before they were split"),
+)
+
+
+@node("assemble", inputs=["geo"], category="model", params=[
+    Enum("source", ["attribute", "connectivity", "groups"], doc="How pieces are told apart: an integer primitive attribute, the "
+                                                                "connected parts, or each primitive group matching 'groups'"),
+    Str("piece_attrib", "piece", doc="attribute: the primitive int attribute to read"),
+    Str("groups", "*", doc="groups: group names or wildcards (each group is a piece; faces in none become a last piece)"),
+    Str("output_attrib", "piece", doc="Primitive int attribute to write"),
+    Bool("renumber", True, doc="Number the pieces 0, 1, 2... in order of first appearance"),
+    Bool("unshare_points", True, doc="Give every piece its own points (copy the ones pieces share); simulation needs this"),
+    Enum("pivot", ["centroid", "origin", "bounds_bottom"], doc="Where each piece's pivot is: written as the primitive vector 'pivot'"),
+    Str("name_prefix", "piece", doc="Pieces are named prefix0, prefix1...: the list is the detail attribute 'piece_names'"),
+    Bool("piece_groups", False, doc="Also make a primitive group per piece, named like the piece"),
+    Bool("remove_source_groups", False, doc="groups: delete the groups the pieces came from"),
+    *ASM_OUT.params(),
+])
+def assemble(geo, source, piece_attrib, groups, output_attrib, renumber, unshare_points, pivot, name_prefix,
+             piece_groups, remove_source_groups, **og):
+    """Turn pieces into a clean set of separate bodies (Houdini's Assemble): number them, name them, give each its own
+    points and a pivot, ready for ``rbd_configure``. MiniHou has no packed primitives or string attributes, so instead
+    of packing, each piece's faces carry the int ``piece`` and its vector ``pivot``, and the names are the detail
+    attribute ``piece_names``."""
+    from .. import groups as G
+    B.require_polygons(geo, "assemble")
+    if geo.nprims == 0:
+        return geo
+    if source == "attribute":
+        ids = piece_ids(geo, piece_attrib)
+        used_groups = []
+    elif source == "connectivity":
+        ids, used_groups = piece_ids(geo, ""), []
+    else:
+        import fnmatch
+        names = []
+        for pat in (groups or "*").split():                        # in the order they are written
+            names += [n for n in G.names(geo, "prim") if fnmatch.fnmatchcase(n, pat) and n not in names]
+        if not names:
+            raise ValueError(f"no primitive group matches {groups!r}; have {G.names(geo, 'prim')}")
+        ids = np.full(geo.nprims, -1, np.int64)
+        for k, name in enumerate(names):
+            m = G.member(geo, "prim", name).astype(bool)
+            ids[m & (ids < 0)] = k                          # a face in several groups goes to the first
+        if (ids < 0).any():
+            ids[ids < 0] = len(names)
+        used_groups = names
+    if renumber:
+        uniq, first_at, inv = np.unique(ids, return_index=True, return_inverse=True)
+        rank = np.empty(len(uniq), np.int64)
+        rank[np.argsort(first_at, kind="stable")] = np.arange(len(uniq))      # numbered in order of first appearance
+        ids = rank[inv.reshape(-1)]
+    ids32 = ids.astype(np.int32)
+    count = int(ids.max()) + 1
+    t = geo.topology
+    out = geo
+    shared_mask = copied_mask = None
+    if unshare_points:
+        vp = t.vertex_point.astype(np.int64)
+        pv = topo.prim_of_vertex(geo)
+        slot = ids[pv]
+        npieces = int(ids.max()) + 1
+        key = vp * (npieces + 1) + slot
+        loose = np.setdiff1d(np.arange(geo.npoints), vp)
+        keys = np.concatenate([key, loose * (npieces + 1) + npieces])
+        uniq, inv = np.unique(keys, return_inverse=True)
+        inv = inv.reshape(-1)
+        src = uniq // (npieces + 1)
+        copies = np.bincount(src, minlength=geo.npoints)
+        first = np.r_[True, src[1:] != src[:-1]]
+        point = B.gather(geo.point, src)
+        out = B.make(point["P"], inv[:len(vp)], t.prim_offsets, point, dict(geo.vertex.items()), dict(geo.prim.items()),
+                     geo.detail, t.closed)
+        shared_mask = copies[src] > 1
+        copied_mask = ~first
+    out = out.copy()
+    if output_attrib:
+        out.prim[output_attrib] = ids32
+    P = out.P.astype(np.float64)
+    vp2 = out.topology.vertex_point.astype(np.int64)
+    pv2 = topo.prim_of_vertex(out)
+    cnt = np.maximum(np.bincount(ids[pv2], minlength=count), 1)
+    if pivot == "origin":
+        pv_arr = np.zeros((count, 3))
+    else:
+        pv_arr = np.stack([np.bincount(ids[pv2], weights=P[vp2, k], minlength=count) for k in range(3)], 1) / cnt[:, None]
+        if pivot == "bounds_bottom":
+            low = np.full(count, np.inf)
+            np.minimum.at(low, ids[pv2], P[vp2, 2])
+            pv_arr[:, 2] = np.where(np.isfinite(low), low, 0.0)
+    out.prim["pivot"] = pv_arr[ids].astype(np.float32)
+    out.detail = dict(out.detail)
+    out.detail["piece_names"] = [f"{name_prefix}{k}" for k in range(count)]
+    if piece_groups:
+        if count > 1000:
+            raise ValueError("piece_groups is limited to 1000 pieces")
+        for k in range(count):
+            out = G.write(out, "prim", f"{name_prefix}{k}", ids == k)
+    if remove_source_groups:
+        out = out.copy()
+        for name in used_groups:
+            if G.attr_name(name) in out.prim:
+                del out.prim[G.attr_name(name)]
+    if shared_mask is not None:
+        out = ASM_OUT.write(out, og, "unshared", copied_mask)
+        out = ASM_OUT.write(out, og, "shared", shared_mask)
+    return out
