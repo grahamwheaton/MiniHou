@@ -598,6 +598,8 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ApiError(501, str(e)) from None
             except (GraphError, NodeError, ParamError, ValueError) as e:
                 raise ApiError(400, str(e)) from None
+            except OSError as e:                                  # e.g. the file is open in another program (Windows), or no permission
+                raise ApiError(409, f"cannot write {p.name}: {e.strerror or e}") from None
         if path == "/api/proxy":
             try:
                 level = body.get("level")

@@ -547,6 +547,12 @@ class UsdNodeAndExportTests(unittest.TestCase):
         self.assertEqual(post(web, "/api/export_usd", {"path": "notes.txt"})[0], 400)
         self.assertEqual(post(web, "/api/export_usd", {"path": "x.usda", "node": "nope"})[0], 400)
         self.assertEqual(post(web, "/api/export_usd", {"path": "x.usda", "node": 5})[0], 400)
+        import unittest.mock as mock
+        with mock.patch("os.replace", side_effect=PermissionError(13, "Permission denied")):       # e.g. open in another program on Windows
+            code, r = post(web, "/api/export_usd", {"path": "locked.usda"})
+        self.assertEqual(code, 409)
+        self.assertIn("cannot write", r["error"])
+        self.assertEqual([f for f in os.listdir(self.dir) if "locked" in f], [])                    # no half file left behind
         self.assertFalse(os.path.exists(os.path.join(self.dir, "x.usda")))
 
     def test_what_the_graph_made_comes_back_through_usd_import(self):
