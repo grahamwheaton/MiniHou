@@ -1,0 +1,278 @@
+{
+  "version": 1,
+  "nodes": {
+    "strong_box": {
+      "type": "box",
+      "params": {
+        "center": [
+          1,
+          -1,
+          3
+        ],
+        "size": [
+          2,
+          0.25,
+          0.25
+        ]
+      },
+      "meta": {
+        "pos": [
+          0,
+          0
+        ]
+      }
+    },
+    "strong_body": {
+      "type": "rbd_configure",
+      "inputs": {
+        "geo": "strong_box"
+      },
+      "params": {
+        "id_offset": 0,
+        "mass": 1,
+        "linear_damping": 0.02,
+        "angular_damping": 0.05
+      },
+      "meta": {
+        "pos": [
+          0,
+          130
+        ]
+      }
+    },
+    "strong_link": {
+      "type": "rbd_constraint",
+      "params": {
+        "kind": "pin",
+        "body_a": 0,
+        "world": true,
+        "anchor": [
+          0,
+          -1,
+          3
+        ],
+        "strength": 0
+      },
+      "meta": {
+        "pos": [
+          650,
+          130
+        ],
+        "comment": "Unbreakable reference"
+      }
+    },
+    "strong_support": {
+      "type": "box",
+      "params": {
+        "center": [
+          -0.25,
+          -1,
+          3
+        ],
+        "size": [
+          0.2,
+          0.2,
+          0.2
+        ]
+      },
+      "meta": {
+        "pos": [
+          1000,
+          0
+        ]
+      }
+    },
+    "breakable_box": {
+      "type": "box",
+      "params": {
+        "center": [
+          1,
+          1,
+          3
+        ],
+        "size": [
+          2,
+          0.25,
+          0.25
+        ]
+      },
+      "meta": {
+        "pos": [
+          320,
+          0
+        ]
+      }
+    },
+    "breakable_body": {
+      "type": "rbd_configure",
+      "inputs": {
+        "geo": "breakable_box"
+      },
+      "params": {
+        "id_offset": 1,
+        "mass": 1,
+        "linear_damping": 0.02,
+        "angular_damping": 0.05
+      },
+      "meta": {
+        "pos": [
+          320,
+          130
+        ]
+      }
+    },
+    "breakable_link": {
+      "type": "rbd_constraint",
+      "params": {
+        "kind": "pin",
+        "body_a": 1,
+        "world": true,
+        "anchor": [
+          0,
+          1,
+          3
+        ],
+        "strength": 5
+      },
+      "meta": {
+        "pos": [
+          970,
+          130
+        ],
+        "comment": "Breaks after the 0.1 s settling grace period"
+      }
+    },
+    "breakable_support": {
+      "type": "box",
+      "params": {
+        "center": [
+          -0.25,
+          1,
+          3
+        ],
+        "size": [
+          0.2,
+          0.2,
+          0.2
+        ]
+      },
+      "meta": {
+        "pos": [
+          1260,
+          0
+        ]
+      }
+    },
+    "bodies": {
+      "type": "merge",
+      "inputs": {
+        "geos": [
+          "strong_body",
+          "breakable_body"
+        ]
+      },
+      "meta": {
+        "pos": [
+          180,
+          300
+        ]
+      }
+    },
+    "constraints": {
+      "type": "merge",
+      "inputs": {
+        "geos": [
+          "strong_link",
+          "breakable_link"
+        ]
+      },
+      "meta": {
+        "pos": [
+          720,
+          300
+        ]
+      }
+    },
+    "floor": {
+      "type": "box",
+      "params": {
+        "center": [
+          0,
+          0,
+          -0.25
+        ],
+        "size": [
+          10,
+          7,
+          0.5
+        ]
+      },
+      "meta": {
+        "pos": [
+          1520,
+          0
+        ]
+      }
+    },
+    "colliders": {
+      "type": "merge",
+      "inputs": {
+        "geos": [
+          "strong_support",
+          "breakable_support",
+          "floor"
+        ]
+      },
+      "meta": {
+        "pos": [
+          1200,
+          300
+        ]
+      }
+    },
+    "sim": {
+      "type": "rbd_solver",
+      "inputs": {
+        "bodies": "bodies",
+        "colliders": "colliders",
+        "constraints": "constraints"
+      },
+      "params": {
+        "substeps": 20,
+        "iterations": 100
+      },
+      "meta": {
+        "pos": [
+          400,
+          480
+        ],
+        "comment": "Play frames 1-120. y=-1 stays attached; y=+1 breaks. One metre / one kg."
+      }
+    },
+    "out": {
+      "type": "output",
+      "inputs": {
+        "geo": "sim"
+      },
+      "meta": {
+        "pos": [
+          400,
+          650
+        ]
+      }
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Break threshold",
+      "node": "breakable_link",
+      "param": "strength"
+    },
+    {
+      "name": "Reset",
+      "node": "sim",
+      "param": "reset"
+    }
+  ]
+}
