@@ -541,9 +541,8 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()")),
                          ["translate_x", "translate_y", "translate_z"])
         tip = self.drag_handle("translate_x", 60)
-        self.assertTrue(until(lambda: self.s.graph.nodes["h"].params.get("translate", [0, 0, 0])[0] > 0.6))
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes["h"].params.get("translate", [0, 0, 0])[0] - (0.5 + 60 / tip["ppu"])) < 0.15))   # 60 px along the arrow, in world units
         t = self.s.graph.nodes["h"].params["translate"]
-        self.assertAlmostEqual(t[0], 0.5 + 60 / tip["ppu"], delta=0.15)                    # 60 px along the arrow, in world units
         self.assertEqual((t[1], t[2]), (1.0, 2.0))                                          # the other components are untouched
         self.assertTrue(until(lambda: self.s.status()["ok"]))
         self.page.wait_for_function("minihou.preview.handleTips().length === 3")             # the arrows follow the moved result
@@ -656,6 +655,36 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(self.page.locator("#blender-bar").is_hidden())                         # stays hidden after a reload
         self.page.click("#blender-status")                                                     # the Blender indicator brings it back
         self.assertFalse(self.page.locator("#blender-bar").is_hidden())
+
+    def test_a_library_node_can_declare_a_handle_and_dragging_it_edits_the_parameter(self):
+        if not self.page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+            self.skipTest("this Chromium has no WebGL2")
+        name = f"e2e_pole_{os.getpid()}"
+        os.makedirs(os.path.join(self.dir, "nodes"))
+        with open(os.path.join(self.dir, "nodes", "pole.py"), "w", encoding="utf-8") as f:
+            f.write("import numpy as np\nfrom minihou.geometry import Geometry\n"
+                    "from minihou.sdk import Float, Handle, Int, node\n\n"
+                    f"@node({name!r}, params=[Float('height', 2.0, min=0.0), Int('count', 3, min=1)],\n"
+                    "      handles=[Handle('height', axis='z', at='origin', reach=True, min=0.0), Handle('count', axis='x', at='origin', scale=10.0)])\n"
+                    f"def {name}(height, count):\n"
+                    "    P = np.array([[0, 0, 0], [0, 0, height]], np.float32)\n"
+                    "    return Geometry.points_only(P)\n")
+        self.page.wait_for_function(f"window.minihou.S.types[{name!r}] !== undefined")
+        graph = {"version": 1, "nodes": {"p": {"type": name, "pos": [0, 0]}, "o": {"type": "output", "inputs": {"geo": "p"}, "pos": [0, 110]}},
+                 "display": "o"}
+        self.s.edit([{"op": "replace", "graph": graph}])
+        self.page.wait_for_selector('.node[data-id="p"]')
+        self.node("p").locator(".title").click()
+        self.page.wait_for_function("minihou.preview.handleTips().length === 2")
+        ppu = next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == "height")["ppu"]
+        self.drag_handle("height", int(0.5 * ppu))                                           # half a world unit up the arrow
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes["p"].params.get("height", 2.0) - 2.5) < 0.1))   # (the last value arrives after the drag)
+        ppu = next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == "count")["ppu"]
+        self.drag_handle("count", int(0.68 * ppu))                                           # an integer parameter moves in whole steps
+        self.assertTrue(until(lambda: self.s.graph.nodes["p"].params.get("count", 3) != 3))
+        count = self.s.graph.nodes["p"].params["count"]
+        self.assertIsInstance(count, int)
+        self.assertGreater(count, 3)
 
     def test_sphere_radius_arrow_clamps_at_zero(self):
         graph = {"version": 1, "nodes": {"s": {"type": "sphere", "params": {"radius": 0.5}}, "o": {"type": "output", "inputs": {"geo": "s"}}},

@@ -9,7 +9,7 @@ curves); sweep them here for render geometry.
 import numpy as np
 
 from .. import groups, topo
-from ..sdk import Bool, Enum, Float, Int, Str, Vec3, node
+from ..sdk import Bool, Enum, Float, Handle, Int, Str, Vec3, node
 from . import _build as B
 from ._util import guard_count, normalize_rows
 
@@ -88,7 +88,7 @@ def chain_segments(npoints, a, b):
     Vec3("direction", (0.0, 0.0, 1.0)),
     Float("length", 1.0, soft_min=0.0, soft_max=10.0),
     Int("points", 10, min=2, soft_max=1000),
-])
+], handles=[Handle("length", axis="@direction", at="@origin", reach=True)])
 def line(origin, direction, length, points):
     """A straight open curve (Houdini's Line)."""
     d = np.asarray(direction, np.float64)
@@ -104,7 +104,7 @@ def line(origin, direction, length, points):
     Float("height", 2.0, soft_min=0.0, soft_max=10.0),
     Float("turns", 3.0, min=0.0, soft_max=20.0),
     Int("points", 120, min=2, soft_max=5000),
-])
+], handles=[Handle("height", axis="z", at="bottom", reach=True), Handle("radius", axis="x", at="bottom", reach=True, min=0.0)])
 def helix(radius, radius_end, height, turns, points):
     """A spiral curve around +Z (springs, vines, stair rails)."""
     t = np.linspace(0.0, 1.0, points)

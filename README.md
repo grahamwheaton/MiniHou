@@ -326,6 +326,9 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
   standing on the selected faces or edges (so the bevel you just made from a selection can be scrubbed straight away), `box` a size
   arrow per axis and `sphere` a radius arrow. Handles are small provider functions in `minihou/handles.py` (inputs, output, parameters ->
   arrows); a failing provider just shows none.
+  Any node type can declare handles without code in the viewer: `@node(..., handles=[Handle("height", axis="z", at="bottom", reach=True)])`
+  (arrows, rings for angles in degrees, scale cubes; `axis` and `at` can be keywords, vectors or `"@parameter"`). `tube`, `helix`, `line`
+  and `bend` use it, and so can the node files in your `nodes/` folder (see the authoring guide the MCP `node_library` tool returns).
 * **Attribute flow**: the inspector lists what the selected node did to its inputs' attributes (`+` added, `~` changed, `→` moved to
   another domain, `−` removed, and whether topology changed); a wrangle also lists the attributes its snippet reads. It is worked out
   by comparing cooked results, so it is right for built-in, library and system nodes alike (also in `inspect_node` for AI tools, as `flow`).

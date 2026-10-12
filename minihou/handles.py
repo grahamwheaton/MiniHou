@@ -28,14 +28,83 @@ def provider(node_type: str):
     return deco
 
 
-def handles_for(node_type: str, inputs: list, output, params: dict) -> List[dict]:
+def has_handles(node_type: str, nt=None) -> bool:
+    """Whether a node type shows handles: a built-in provider and/or ``Handle`` specs declared with ``@node(handles=...)``."""
+    return node_type in PROVIDERS or bool(getattr(nt, "handles", ()))
+
+
+def handles_for(node_type: str, inputs: list, output, params: dict, nt=None) -> List[dict]:
     fn = PROVIDERS.get(node_type)
-    if fn is None or output is None:
+    specs = tuple(getattr(nt, "handles", ()) or ())
+    if (fn is None and not specs) or output is None:
         return []
-    try:
-        return [_clean(h) for h in fn(inputs, output, params)]
-    except Exception:  # noqa: BLE001 - a gizmo must never break the preview
-        return []
+    out: List[dict] = []
+    for make in ([lambda: fn(inputs, output, params)] if fn else []) + ([lambda: declared(specs, output, params)] if specs else []):
+        try:                                      # each source on its own: a failing one just shows nothing
+            out += [_clean(h) for h in make()]
+        except Exception:  # noqa: BLE001 - a gizmo must never break the preview
+            continue
+    return out
+
+
+def _bounds(geo):
+    if not geo.npoints:
+        return np.zeros(3), np.zeros(3), np.zeros(3)
+    P = geo.P.astype(np.float64)
+    lo, hi = P.min(0), P.max(0)
+    return (lo + hi) / 2.0, lo, hi
+
+
+def declared(specs, out, params) -> List[dict]:
+    """Handles for the ``Handle`` specs of a node type (see :class:`minihou.sdk.Handle`), resolved against the current
+    parameters and the node's output."""
+    from .sdk import HANDLE_AXES
+    c, lo, hi = _bounds(out)
+    extent = float(np.linalg.norm(hi - lo) / 2.0)
+
+    def vec(v, sign=1.0):
+        return sign * np.asarray(v, np.float64).reshape(3)
+
+    res = []
+    for h in specs:
+        value = params.get(h.param)
+        if h.comp is not None:
+            value = value[h.comp] if value is not None else None
+        a = h.axis
+        if isinstance(a, str):
+            d = vec(params[a[1:]]) if a.startswith("@") else vec(HANDLE_AXES[a.lstrip("-")], -1.0 if a.startswith("-") else 1.0)
+        else:
+            d = vec(a)
+        if float(np.linalg.norm(d)) < 1e-12:
+            continue
+        d = d / np.linalg.norm(d)
+        at = h.at
+        if isinstance(at, str):
+            if at == "center":
+                o = c
+            elif at == "origin":
+                o = np.zeros(3)
+            elif at == "top":
+                o = np.array([c[0], c[1], hi[2]])
+            elif at == "bottom":
+                o = np.array([c[0], c[1], lo[2]])
+            else:
+                o = vec(params[at[1:]])                 # "@name": a Vec3 parameter
+        else:
+            o = vec(at)
+        if h.reach and h.kind == "arrow" and value is not None and h.scale:
+            o = o + d * (float(value) / h.scale)
+        item = {"id": h.key(), "label": h.label or h.key().replace("_", " "), "param": h.param, "comp": h.comp, "origin": o, "dir": d,
+                "scale": h.scale, "kind": h.kind}
+        if h.kind == "ring":
+            item["radius"] = float(h.radius) if h.radius else max(extent * 0.6, 0.05)
+        for k in ("min", "max"):
+            if getattr(h, k) is not None:
+                item[k] = getattr(h, k)
+        if h.tool:
+            item["tool"] = h.tool
+        res.append(item)
+    return res
 
 
 def _clean(h: dict) -> dict:

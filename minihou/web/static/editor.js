@@ -803,6 +803,8 @@
     };
     pv.onHandle = (h, value) => {
       if (!pvNode) return;
+      const spec = (typeOf(pvNode).params || []).find((p) => p.name === h.param);
+      if (spec && spec.kind === "int") value = Math.round(value);                       // an integer parameter takes whole steps
       if (h.comp === null || h.comp === undefined) queueSet(pvNode, h.param, value);
       else if (handleBase) { const v = handleBase.slice(); v[h.comp] = value; queueSet(pvNode, h.param, v); }
     };

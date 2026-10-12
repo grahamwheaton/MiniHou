@@ -2,7 +2,7 @@
 import numpy as np
 
 from ..geometry import Geometry, Topology
-from ..sdk import Bool, Float, Int, Vec3, node
+from ..sdk import Bool, Float, Handle, Int, Vec3, node
 from . import _build as B
 from ._util import euler_xyz_matrix
 
@@ -137,7 +137,9 @@ def _ring_quads(rows, columns, wrap_rows):
     Int("rows", 1, min=1, max=4096, soft_max=100, doc="segments along the height"),
     Int("columns", 24, min=3, max=4096, soft_max=200, doc="segments around"),
     Bool("caps", True, doc="Close the ends with n-gons (a zero radius ends in a point instead)"),
-])
+], handles=[Handle("radius_bottom", axis="x", at="bottom", reach=True, min=0.0),
+            Handle("radius_top", axis="x", at="top", reach=True, min=0.0),
+            Handle("height", axis="z", at="top", scale=2.0, min=0.0)])         # the tube grows both ways from its centre
 def tube(radius_bottom, radius_top, height, center, rows, columns, caps):
     """Cylinder or cone along +Z (Houdini's Tube), outward-facing, with vertex uvs; closed when ``caps`` is on."""
     t = np.linspace(0.0, 1.0, rows + 1)
