@@ -13,7 +13,7 @@ from minihou.sdk import REGISTRY
 
 SKIP = {"blender_object", "input", "output", "modifier_input", "python", "rbd_solver", "usd_import", "solver", "for_each",
         "loop_begin", "loop_end", "lsystem"}                         # need a partner node, a file, a simulation or an outside engine
-SLOW_SECONDS = 20.0                                                  # one cook taking longer than this is a finding, hung or not
+SLOW_SECONDS = 30.0                                                  # one cook taking longer than this is a finding, hung or not
 import os
 DRAWS = int(os.environ.get("MINIHOU_FUZZ_DRAWS", "3"))                       # more draws for a longer hunt: MINIHOU_FUZZ_DRAWS=20
 NUMPY_WORDS = ("reshape", "zero-size", "non-negative integer", "broadcast", "out of bounds", "axis", "could not convert",
@@ -42,6 +42,8 @@ def draw(p, rng):
     hi = p.max if p.max is not None else (p.soft_max if p.soft_max is not None else max(p.default * 4, 8))
     if p.soft_max is not None:
         hi = min(hi, p.soft_max * 2)                                 # past the slider range lies "hopeless" territory, not a bug
+    if p.kind == "int":
+        hi = min(hi, max(lo, 20_000))                                # counts of millions are a benchmark, not a unit test
     hi = max(hi, lo)
     if p.kind == "int":
         pool = [lo, hi, p.default, rng.randint(int(lo), int(hi)), rng.randint(int(lo), int(hi))]

@@ -202,7 +202,7 @@ class EditorE2E(unittest.TestCase):
         downloading.value.save_as(saved)
         with open(saved, encoding="utf-8") as f:
             recovery = json.load(f)
-        self.assertEqual(recovery[-1]["path"], self.path)
+        self.assertEqual(os.path.realpath(recovery[-1]["path"]), os.path.realpath(self.path))      # the engine reports the resolved path
         self.assertEqual(recovery[-1]["ops"][0]["params"]["frequency"], .73)
         self.errors[:] = [e for e in self.errors if "400 (Bad Request)" not in e]
 
