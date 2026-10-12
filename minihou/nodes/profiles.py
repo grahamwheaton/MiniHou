@@ -2,7 +2,8 @@
 import numpy as np
 from .. import edges, groups
 from ..geometry import Topology
-from ..sdk import Bool, Float, Str, node
+from ..outgroups import OutGroup, OutGroups
+from ..sdk import Bool, Enum, Float, Str, node
 from . import _build as B
 from .edge_tools import _rebuild
 
@@ -87,33 +88,85 @@ def _offset(P, distance, tolerance, miter_limit):
     return center + result@axes[:2]
 
 
+EXPAND_OUT = OutGroups(
+    OutGroup('inside', 'Inside Group', 'inside', 'prim', doc='The offset loops that lie inside the input loop'),
+    OutGroup('outside', 'Outside Group', 'outside', 'prim', doc='The offset loops that lie outside the input loop'),
+)
+EXPAND_ATTRS = (('edgedist', 'Edge Distance Attribute', 'edgedist'), ('edgespeed', 'Edge Speed Attribute', 'edgespeed'))
+
+
+def _attribute_pairs(items):
+    """Houdini-style attribute outputs: a checkbox and a name, drawn like the Output Groups section."""
+    out = []
+    for key, label, name in items:
+        out.append(Bool('outattr_' + key, False, label=label, doc=f'Write the point attribute {name!r} on the offset points'))
+        out.append(Str('outattr_' + key + '_name', name, label=label + ' name'))
+    for p in out:
+        object.__setattr__(p, 'ui', 'outgroup' if p.kind == 'bool' else 'outgroup_name')
+    return out
+
+
 @node('polyexpand2d', inputs=['geo'], category='model', params=[
-    Float('distance', 0.1, doc='Positive expands, negative insets; winding-independent'),
+    Float('distance', 0.1, doc='Positive expands, negative insets; winding-independent. With mode inside_outside it is the offset '
+                               'amount (its absolute value)'),
     Str('group', '', doc='Closed convex planar profile primitives'),
+    Enum('mode', ['single', 'inside_outside'], doc='single: one offset loop, outwards for a positive distance and inwards for a negative '
+                                                  'one. inside_outside: the outside loop and the inside loop, as Houdini outputs them'),
+    Bool('output_inside', True, doc='inside_outside: make the inside loop'),
+    Bool('output_outside', True, doc='inside_outside: make the outside loop'),
+    Bool('keep_input', False, doc='Keep the input loops as well as the offset ones'),
     Float('tolerance', 1e-6, min=1e-10, max=0.01, doc='Planarity tolerance relative to profile extent'),
     Float('miter_limit', 10, min=1, doc='Maximum corner displacement / absolute offset'),
+    *EXPAND_OUT.params(),
+    *_attribute_pairs(EXPAND_ATTRS),
 ])
-def polyexpand2d(geo, distance, group, tolerance, miter_limit):
+def polyexpand2d(geo, distance, group, tolerance, miter_limit, mode='single', output_inside=True, output_outside=True,
+                 keep_input=False, **og):
     """Offset independent convex closed planar loops in their own planes. Reject concavity, holes/union requests and collapse."""
     sel = groups.mask(geo,'prim',group)
     sel = np.ones(geo.nprims,bool) if sel is None else sel
-    if not sel.any() or distance == 0:
+    if mode == 'single':
+        jobs = [(float(distance), 'outside' if distance > 0 else 'inside')]
+    else:
+        jobs = ([(abs(float(distance)), 'outside')] if output_outside else []) + ([(-abs(float(distance)), 'inside')] if output_inside else [])
+    if not sel.any() or distance == 0 or not jobs:
         return geo
     t = geo.topology
     if np.any(~t.closed_mask()[sel]):
         raise ValueError('initial polyexpand2d requires closed convex profiles')
     polys = t.polys()
+    offs = t.prim_offsets.astype(np.int64)
     positions, source = [geo.P], list(range(geo.npoints))
+    dist_attr, speed_attr = [np.zeros(geo.npoints)], [np.zeros(geo.npoints)]
     count = geo.npoints
-    for p in np.flatnonzero(sel):
+    out_polys, src_prim, src_vert, kind = [], [], [], []              # per output primitive; kind 1 inside, 2 outside
+    for p in range(geo.nprims):
         ids = polys[p]
-        positions.append(_offset(geo.P[ids],distance,tolerance,miter_limit))
-        source.extend(ids)
-        polys[p] = list(range(count,count+len(ids)))
-        count += len(ids)
-    newtopo = Topology.from_polys(polys,t.closed)
+        if not sel[p] or keep_input:
+            out_polys.append(list(ids)), src_prim.append(p), kind.append(0)
+            src_vert.extend(range(offs[p], offs[p + 1]))
+        if not sel[p]:
+            continue
+        for d, which in jobs:
+            moved = _offset(geo.P[ids],d,tolerance,miter_limit)
+            positions.append(moved)
+            source.extend(ids)
+            dist_attr.append(np.full(len(ids), d))
+            speed_attr.append(np.linalg.norm(moved - geo.P[ids].astype(np.float64), axis=1) / max(abs(d), 1e-30))
+            out_polys.append(list(range(count,count+len(ids)))), src_prim.append(p), kind.append(1 if which == 'inside' else 2)
+            src_vert.extend(range(offs[p], offs[p + 1]))
+            count += len(ids)
+    closed = t.closed_mask()[np.array(src_prim)]
+    newtopo = Topology.from_polys(out_polys,closed)
     point = B.gather(geo.point,np.array(source))
     P = np.concatenate(positions).astype(np.float32)
-    out = B.make(P,newtopo.vertex_point,newtopo.prim_offsets,point,dict(geo.vertex.items()),
-                 dict(geo.prim.items()),geo.detail,newtopo.closed)
-    return edges.remap(geo,out,source)
+    out = B.make(P,newtopo.vertex_point,newtopo.prim_offsets,point,B.gather(geo.vertex,np.array(src_vert)),
+                 B.gather(geo.prim,np.array(src_prim)),geo.detail,newtopo.closed)
+    out = edges.remap(geo,out,source)
+    kind = np.array(kind)
+    out = EXPAND_OUT.write(out, og, 'inside', lambda: kind == 1)
+    out = EXPAND_OUT.write(out, og, 'outside', lambda: kind == 2)
+    for key, arr in (('edgedist', np.concatenate(dist_attr)), ('edgespeed', np.concatenate(speed_attr))):
+        if og.get('outattr_' + key) and str(og.get('outattr_' + key + '_name', key)).strip():
+            out.point[str(og['outattr_' + key + '_name']).strip()] = arr.astype(np.float32)
+    return out

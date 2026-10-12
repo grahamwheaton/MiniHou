@@ -161,6 +161,10 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
     editor, prim/point/edge domains. PolyBevel's six from Houdini's panel, PolyExtrude front/back/side, and groups on mirror, boolean, clip, fuse,
     sweep, skin and the bridges; `polybevel` got a Group Type (points / edges / primitives) so one bevel's edge groups feed the next.
 
+12. **From the shared Houdini panels**: Revolve (End Caps + End Caps Group, Start Angle), Subdivide (Creases field, crease weight override, Generate
+    Resulting Creases group), PolyExpand2D (inside/outside loops, Keep Input, inside/outside groups, edgedist/edgespeed attributes), Group Create (the
+    filter sections, edge groups, boundary groups).
+
 Open:
 
 - Output groups other than PolyBevel's are from memory of Houdini's nodes: compare with Houdini and adjust names/sets.

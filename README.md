@@ -516,6 +516,10 @@ attributes, and Blender gets each as a boolean attribute (use it with *Named Att
 | `@P.z > 0` | an ad-hoc group: a wrangle expression |
 | (empty) | everything |
 
+`group_create` also has Houdini's combinable **filter sections** (method `filters`): a base group plus bounding region (box or sphere), normals (direction,
+spread, backface from a point), edges (angle, length, unshared) and random chance (percent, seed or a seed attribute), each enabled separately; it makes point,
+primitive or **edge** groups, merges with an existing group (Initial Merge), and can add `<name>_boundary`, the edge group around the selection.
+
 A point group used on primitives selects those whose points are all in it; a primitive group used on points selects
 the points its primitives use.
 

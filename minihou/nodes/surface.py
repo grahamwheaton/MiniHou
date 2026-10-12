@@ -159,14 +159,22 @@ def skin(geo, samples, loop, cap, **og):
 
 
 # -- revolve ----------------------------------------------------------------------------------------------------
+REVOLVE_OUT = OutGroups(
+    OutGroup("endcaps", "End Caps Group", "endcaps", "prim", doc="The faces that close the two ends of a partial revolve"),
+)
+
+
 @node("revolve", inputs=["geo"], category="generate", params=[
     Vec3("origin", (0.0, 0.0, 0.0), doc="A point on the axis"),
     Vec3("axis", (0.0, 0.0, 1.0), doc="Direction of the axis of revolution"),
     Float("angle", 360.0, min=-360.0, max=360.0, soft_min=-360.0, soft_max=360.0,
           doc="Degrees to sweep (360: a closed surface; negative turns the other way)"),
     Int("divisions", 32, min=1, max=4096, soft_max=128, doc="Steps around the axis"),
+    Float("start_angle", 0.0, soft_min=-360.0, soft_max=360.0, doc="Where the sweep starts, in degrees (the end is start + angle)"),
+    Bool("end_caps", False, doc="Close both ends of a partial revolve with a face per profile (nothing to close at 360 degrees)"),
+    *REVOLVE_OUT.params(),
 ])
-def revolve(geo, origin, axis, angle, divisions):
+def revolve(geo, origin, axis, angle, divisions, start_angle=0.0, end_caps=False, **og):
     """Spin curves (or polygon outlines) around an axis into a surface (Houdini's Revolve): a profile of a vase, a wheel
     or a goblet becomes the solid. Each segment of a profile makes a ring of quads; points on the axis are shared, so a
     profile that runs from the axis to the axis gives a closed shell with triangles at the poles. Writes corner `uv`
@@ -193,7 +201,7 @@ def revolve(geo, origin, axis, angle, divisions):
     along = rel @ ax
     radial = rel - np.outer(along, ax)
     on_axis = np.linalg.norm(radial, axis=1) <= 1e-7 * max(float(np.ptp(P, 0).max()) if len(P) else 1.0, 1e-9)
-    th = np.radians(angle) * np.arange(copies) / steps
+    th = np.radians(start_angle) + np.radians(angle) * np.arange(copies) / steps
     # Rodrigues rotation of every point about the axis for every step: (copies, npoints, 3)
     cos, sin = np.cos(th)[:, None, None], np.sin(th)[:, None, None]
     kx = np.cross(ax, radial)
@@ -253,8 +261,31 @@ def revolve(geo, origin, axis, angle, divisions):
         Nrad = N - Nal
         Nrot = Nal[None] + Nrad[None] * cos + np.cross(ax, Nrad)[None] * sin
         point["N"] = Nrot.reshape(-1, 3).astype(np.float32)
+    prim_src = quad_prim
+    ncap = 0
+    if end_caps and not full:
+        cap_v, cap_sizes, cap_prim = [], [], []
+        for p in usable.tolist():
+            v = vp[offs[p]:offs[p + 1]]
+            if len(v) < 3:
+                continue
+            # the side quads of segment a -> b run (j,b) -> (j,a) along the start ring and (j+1,a) -> (j+1,b) along the end ring
+            # (reversed for a negative angle), so the start cap must walk the profile forwards and the end cap backwards
+            for copy, forwards in ((0, angle >= 0), (steps, angle < 0)):
+                ids = pid[copy, v]
+                cap_v.append(ids if forwards else ids[::-1])
+                cap_sizes.append(len(ids))
+                cap_prim.append(p)
+        if cap_v:
+            flat_v = np.concatenate([flat_v] + cap_v)
+            flat_uv = np.concatenate([flat_uv, np.zeros((sum(cap_sizes), 2))])
+            sizes_out = np.concatenate([sizes_out, cap_sizes])
+            prim_src = np.concatenate([quad_prim, cap_prim])
+            ncap = len(cap_sizes)
+    nbody = len(sizes_out) - ncap
     out = B.make(pos, flat_v.astype(np.int32), B.offsets_from_sizes(sizes_out), point, {"uv": flat_uv.astype(np.float32)},
-                 B.gather(geo.prim, quad_prim), geo.detail)
+                 B.gather(geo.prim, prim_src), geo.detail)
+    out = REVOLVE_OUT.write(out, og, "endcaps", lambda: np.arange(out.nprims) >= nbody)
     return compact_points(out)
 
 

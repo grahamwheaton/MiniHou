@@ -13,7 +13,8 @@ attributes of `minihou/edges.py`, readable by every node that takes an edge sele
 
 ## What is there
 
-PolyBevel is taken exactly from the Houdini parameter panel (labels, names and "all off by default"). The other nodes follow what Houdini's
+PolyBevel, Revolve, Subdivide, PolyExpand2D and Group Create are taken from the Houdini parameter panels you shared (labels, names and
+defaults). The other nodes follow what Houdini's
 nodes of the same name offer **as far as I remember them**, adapted to what each node here actually builds; where I was not sure, the group
 is named after what it holds. Check them against your Houdini and tell me which differ: renaming or adding one is a line each.
 
@@ -28,6 +29,15 @@ is named after what it holds. Check them against your Houdini and tell me which 
 | `sweep` | **Sides** `sweepsides`, **Start Cap** `startcap`, **End Cap** `endcap` (prim) | off |
 | `skin` | **Surface** `skinsurface`, **Cap Polygons** `skincap` | off |
 | `bridge`, `polybridge` | **Bridge Polygons** `bridgepolys` | off |
+| `revolve` | **End Caps Group** `endcaps` (prim; from your Revolve panel). New **End Caps** option closes both ends of a partial revolve; **Start Angle** added | off |
+| `subdivide` | **Generate Resulting Creases** `creases` (edge; the panel's "New Group"). New **Creases** field (an edge selection to crease), **Override Crease Weight** and **Crease Weight** | off |
+| `polyexpand2d` | **Inside Group** `inside`, **Outside Group** `outside` (prim), and the point attributes **Edge Distance** `edgedist` / **Edge Speed** `edgespeed` (each its own checkbox + name). New **mode** `inside_outside` makes the outside and the inside loop (**Output Inside / Outside**) and **Keep Input** keeps the original | off |
+
+`group_create` now has Houdini's **filter sections** (method `filters`): the base group, **Keep in Bounding Regions** (box or sphere, include partial),
+**Keep by Normals** (direction, spread angle, opposite, backface from a position), **Include by Edges** (min/max angle, min/max length, unshared edges) and
+**Keep by Random Chance** (percent, seed, seed attribute) each switched on separately, and an element must pass every enabled one. It also makes
+**edge groups** (`domain = edges`), keeps **Initial Merge** (`combine`), and **Create Boundary Groups** (`boundary_groups`) adds `<name>_boundary`, the edge
+group around the selection. The older single methods (pattern, bounding box, normal, random, boundary) are unchanged.
 
 Already had their own group parameter, unchanged: `polyfill` (`fill_group`), `voronoi_fracture` (`inside_group`), `polybevel`
 (`output_group`), `group_create`, `edge_group`.
@@ -40,8 +50,8 @@ edge of those primitives). A group selects exactly those edges and ignores `min_
 
 ## Not done (no output groups here, or not applicable)
 
-`divide`, `subdivide`, `dissolve`, `dissolve_edges`, `polyexpand2d`, `revolve`, `facet`, `reverse`, `delete`, `blast`, `remesh`,
-`copy_to_points` and the sources have no output groups in what I know of Houdini or build nothing a group could name. PolyBevel's other
+`divide`, `dissolve`, `dissolve_edges`, `facet`, `reverse`, `delete`, `blast`, `remesh`, `copy_to_points` and the sources have no
+output groups in what I know of Houdini or build nothing a group could name (tell me if one of them does). PolyBevel's other
 Houdini parameters (fillet shape, divisions, convexity, profile, collisions and limits) are not part of this change: the bevel is still a
 single flat chamfer.
 

@@ -277,5 +277,107 @@ class OtherNodeTests(unittest.TestCase):
         self.assertEqual(int(b.prim["group_bridgepolys"].sum()), b.nprims - 48)
 
 
+def signed_volume(g):
+    P = g.P.astype(float)
+    vp, offs = g.topology.vertex_point, g.topology.prim_offsets
+    v = 0.0
+    for p in range(g.nprims):
+        f = vp[offs[p]:offs[p + 1]]
+        for k in range(1, len(f) - 1):
+            v += float(np.dot(P[f[0]], np.cross(P[f[k]], P[f[k + 1]]))) / 6.0
+    return v
+
+
+class ScreenshotNodeTests(unittest.TestCase):
+    """The nodes whose Houdini panels were shared: Revolve, Subdivide and PolyExpand2D."""
+
+    def revolve(self, profile, **params):
+        n = {"c": {"type": "curve", "params": {"points": profile, "closed": True}},
+             "r": {"type": "revolve", "inputs": {"geo": "c"}, "params": dict({"divisions": 6, "axis": [0, 0, 1]}, **params)}}
+        return cook(n, "r")
+
+    PROFILES = ("1,0,0 2,0,0 2,0,1 1,0,1", "1,0,0 1,0,1 2,0,1 2,0,0")                    # either winding
+
+    def test_revolve_end_caps_close_a_partial_sweep_and_name_their_group(self):
+        from minihou.nodes.bevel import twins
+        for profile in self.PROFILES:
+            for angle in (120.0, -120.0):
+                g = self.revolve(profile, angle=angle, end_caps=True, outgrp_endcaps=True)
+                self.assertEqual((g.nprims, int(g.prim["group_endcaps"].sum())), (26, 2), (profile, angle))
+                self.assertTrue((topo.edges(g).count == 2).all(), "a closed shell")
+                self.assertTrue((twins(g) >= 0).all(), "caps wound like the body")                   # every edge runs both ways
+                self.assertAlmostEqual(abs(signed_volume(g)), np.pi * 3 * 1 * (abs(angle) / 360) * np.sinc(1 / 6) ** 0, delta=0.12)
+        off = self.revolve(self.PROFILES[0], angle=120.0, end_caps=False)
+        self.assertEqual(off.nprims, 24)                                                       # no caps unless asked
+        self.assertNotIn("group_endcaps", off.prim)
+
+    def test_revolve_a_full_turn_has_nothing_to_cap_but_the_group_still_exists(self):
+        g = self.revolve(self.PROFILES[0], angle=360.0, end_caps=True, outgrp_endcaps=True)
+        self.assertEqual(g.nprims, 24)
+        self.assertEqual(int(g.prim["group_endcaps"].sum()), 0)
+
+    def test_revolve_start_angle_turns_the_whole_sweep(self):
+        a = self.revolve(self.PROFILES[0], angle=90.0, start_angle=0.0)
+        b = self.revolve(self.PROFILES[0], angle=90.0, start_angle=90.0)
+        self.assertEqual(a.nprims, b.nprims)
+        # the profile sits in the XZ plane: starting at 90 degrees puts the first ring in the YZ plane
+        self.assertLess(abs(float(a.P[:, 1].min())), 1e-6)
+        self.assertLess(abs(float(b.P[:, 0].max())), 1e-6)
+
+    def subdivide(self, **params):
+        n = dict(BOX)
+        base = cook(BOX, "b")
+        top = max(range(base.nprims), key=lambda p: base.P[base.topology.vertex_point[base.topology.prim_offsets[p]:base.topology.prim_offsets[p + 1]]][:, 2].mean())
+        n["eg"] = {"type": "edge_group", "inputs": {"geo": "b"}, "params": {"name": "top", "method": "primitives", "pattern": str(top)}}
+        n["s"] = {"type": "subdivide", "inputs": {"geo": "eg"}, "params": params}
+        return cook(n, "s")
+
+    def test_subdivide_creases_field_override_weight_and_resulting_group(self):
+        base = self.subdivide(depth=1)
+        self.assertNotIn("edge_group_creases", base.vertex)                                  # off by default
+        g = self.subdivide(depth=1, creases="top", override_crease_weight=True, crease_weight=2.0, outgrp_creases=True)
+        self.assertEqual(int(edge_group(g, "creases").sum()), 8)                               # 4 edges, split in two: still creased (2 - 1)
+        self.assertEqual(sorted(set(edges.values(g, edges.CREASE).tolist())), [0.0, 1.0])
+        h = self.subdivide(depth=1, creases="top", override_crease_weight=True, crease_weight=1.0, outgrp_creases=True)
+        self.assertEqual(int(edge_group(h, "creases").sum()), 0)                               # weight 1 is used up by the first level
+        deeper = self.subdivide(depth=2, creases="top", override_crease_weight=True, crease_weight=3.0, outgrp_creases=True)
+        self.assertEqual(int(edge_group(deeper, "creases").sum()), 16)
+        # the crease keeps the top edges sharp: the corner stays further out than without it
+        smooth, creased = self.subdivide(depth=1).P, self.subdivide(depth=1, creases="top", override_crease_weight=True, crease_weight=2.0).P
+        self.assertGreater(int((creased[:, 2] > 0.999).sum()), int((smooth[:, 2] > 0.999).sum()) + 4)   # the rim points stay on the top plane
+        self.assertEqual(int((edges.values(self.subdivide(depth=1, creases="top"), edges.CREASE) > 0).sum()), 0)   # default weight 1: gone after one level
+
+    def test_subdivide_unchanged_without_the_new_parameters(self):
+        g = self.subdivide(depth=1)
+        self.assertEqual(g.nprims, 24)
+
+    def expand(self, **params):
+        n = {"c": {"type": "curve", "params": {"points": "0,0,0 2,0,0 2,2,0 0,2,0", "closed": True}},
+             "x": {"type": "polyexpand2d", "inputs": {"geo": "c"}, "params": dict({"distance": 0.3}, **params)}}
+        return cook(n, "x")
+
+    def test_polyexpand2d_inside_and_outside_loops_keep_input_groups_and_attributes(self):
+        g = self.expand(mode="inside_outside", keep_input=True, outgrp_inside=True, outgrp_outside=True,
+                        outattr_edgedist=True, outattr_edgespeed=True)
+        self.assertEqual((g.nprims, g.npoints), (3, 12))
+        inside, outside = g.prim["group_inside"] != 0, g.prim["group_outside"] != 0
+        self.assertEqual((int(inside.sum()), int(outside.sum())), (1, 1))
+        vp, offs = g.topology.vertex_point, g.topology.prim_offsets
+        box = lambda p: (g.P[vp[offs[p]:offs[p + 1]], :2].min(0), g.P[vp[offs[p]:offs[p + 1]], :2].max(0))   # noqa: E731
+        np.testing.assert_allclose(box(int(np.flatnonzero(outside)[0])), ([-0.3, -0.3], [2.3, 2.3]), atol=1e-5)
+        np.testing.assert_allclose(box(int(np.flatnonzero(inside)[0])), ([0.3, 0.3], [1.7, 1.7]), atol=1e-5)
+        np.testing.assert_allclose(box(0), ([0, 0], [2, 2]), atol=1e-5)                       # the input is still there
+        d = g.point["edgedist"]
+        np.testing.assert_allclose(sorted(set(np.round(d, 3).tolist())), [-0.3, 0.0, 0.3])    # signed distance of the offset points
+        np.testing.assert_allclose(g.point["edgespeed"][4:], np.sqrt(2), atol=1e-4)           # a right-angle corner moves sqrt(2) times as fast
+
+    def test_polyexpand2d_outputs_can_be_switched_individually_and_single_mode_is_as_before(self):
+        only_out = self.expand(mode="inside_outside", output_inside=False, outgrp_outside=True, outgrp_inside=True)
+        self.assertEqual((only_out.nprims, int(only_out.prim["group_outside"].sum()), int(only_out.prim["group_inside"].sum())), (1, 1, 0))
+        single = self.expand(distance=-0.3, outgrp_inside=True, outgrp_outside=True)
+        self.assertEqual((single.nprims, int(single.prim["group_inside"].sum()), int(single.prim["group_outside"].sum())), (1, 1, 0))
+        self.assertNotIn("edgedist", single.point)                                             # attributes only when switched on
+
+
 if __name__ == "__main__":
     unittest.main()
