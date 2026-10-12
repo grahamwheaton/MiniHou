@@ -2,9 +2,14 @@ from ..geometry import Geometry
 from ..sdk import Input, Int, Str, node
 
 
-@node("output", inputs=["geo"], category="output")
-def output(geo):
-    """Marks the geometry the live link publishes. The evaluator validates it (P present, indices in range)."""
+@node("output", inputs=["geo"], category="output", params=[
+    Str("object", "", doc="Blender object that shows this output (created and updated live). Empty: the main output, "
+                          "shown through the MiniHou proxy; only the display node is the main output"),
+])
+def output(geo, object=""):
+    """Marks the geometry the live link publishes. The evaluator validates it (P present, indices in range). Give an
+    output an ``object`` name to publish more than one result: each named output (that is not the display node) becomes
+    its own mesh object in Blender."""
     return geo
 
 

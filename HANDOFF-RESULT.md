@@ -1,3 +1,5 @@
+> Historical delivery record for 11 October. The merged Claude/Codex master is documented in [docs/MASTER_INTEGRATION.md](docs/MASTER_INTEGRATION.md). The paths and packages below describe the earlier GN worktree.
+
 # MiniHou combined integration result - 11 October 2026
 
 Status: COMPLETE for the supported staged Geometry Nodes bridge and local integration.

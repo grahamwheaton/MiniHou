@@ -213,6 +213,475 @@ class EditorE2E(unittest.TestCase):
         self.assertIn("display", self.node("out").get_attribute("class"))
         self.page.wait_for_function("document.querySelector('#info-body').innerText.includes('Points')")
 
+    def test_copy_and_paste_keeps_wires_between_copied_nodes(self):
+        self.node("hills").locator(".title").click()
+        self.page.keyboard.down("Shift")
+        self.node("ripple").locator(".title").click()
+        self.page.keyboard.up("Shift")
+        self.page.locator("#canvas").focus()
+        self.page.mouse.move(*self.empty_spot())
+        self.page.keyboard.press("Control+c")
+        self.page.keyboard.press("Control+v")
+        self.assertTrue(until(lambda: "hills1" in self.s.graph.nodes and "ripple1" in self.s.graph.nodes))
+        g = self.s.graph.nodes
+        self.assertEqual(g["ripple1"].inputs, {"geo": "hills1"})              # the wire between the copies
+        self.assertNotIn("geo", g["hills1"].inputs)                           # the wire to 'ground' is not copied
+        self.assertEqual(g["hills1"].params, g["hills"].params)
+        self.assertEqual(g["ripple1"].params, g["ripple"].params)
+        self.assertEqual(g["ripple"].inputs, {"geo": "hills"})                # originals untouched
+        self.page.wait_for_selector('.node[data-id="ripple1"].selected')
+
+    def test_cut_removes_and_paste_restores_into_another_graph(self):
+        self.node("spike_up").locator(".title").click()
+        self.page.locator("#canvas").focus()
+        self.page.keyboard.press("Control+x")
+        self.assertTrue(until(lambda: "spike_up" not in self.s.graph.nodes))
+        clip = self.page.evaluate("localStorage.getItem('minihou.clip')")
+        self.assertIn('"minihou":"nodes"', clip)
+        other = os.path.join(self.dir, "other.json")
+        with open(other, "w", encoding="utf-8") as f:
+            f.write('{"version": 1, "nodes": {"b": {"type": "box"}}}')
+        self.page.evaluate("fetch('/api/open', {method: 'POST', headers: {'Content-Type': 'application/json'}, "
+                           "body: JSON.stringify({path: 'other.json'})})")
+        self.page.wait_for_selector('.node[data-id="b"]')
+        self.page.locator("#canvas").focus()
+        self.page.keyboard.press("Control+v")
+        self.assertTrue(until(lambda: any(n.type == "transform" for n in self.s.graph.nodes.values())))
+
+    def test_pasting_junk_or_unknown_types_changes_nothing(self):
+        before = dict(self.s.graph.nodes)
+        for text in ('hello', '{"minihou": "nodes", "nodes": []}', '{"minihou": "nodes", "nodes": {"x": {"type": "nope"}}}'):
+            ok = self.page.evaluate("t => minihou.pasteNodes(t)", text)
+            self.assertIn(ok, (True, False))
+        time.sleep(0.2)
+        self.assertEqual(set(self.s.graph.nodes), set(before))
+        self.errors[:] = [e for e in self.errors if "Failed to load resource" not in e]
+
+    def test_network_box_moves_with_its_nodes_resizes_renames_and_deletes(self):
+        self.node("hills").locator(".title").click()
+        self.page.keyboard.down("Shift")
+        self.node("ripple").locator(".title").click()
+        self.page.keyboard.up("Shift")
+        self.page.locator("#canvas").focus()
+        self.page.keyboard.press("o")
+        self.assertTrue(until(lambda: len(self.s.graph.boxes) == 1))
+        box = self.page.locator(".netbox")
+        box.wait_for(state="visible")
+        before = {k: list(self.s.graph.nodes[k].meta["pos"]) for k in ("hills", "ripple", "points")}
+        b0 = dict(self.s.graph.boxes[0])
+        hdr = box.locator(".hdr")
+        x, y = self.center(hdr.locator(".title"))
+        self.page.mouse.move(x, y)
+        self.page.mouse.down()
+        self.page.mouse.move(x + 60, y + 40, steps=6)
+        self.page.mouse.up()
+        self.assertTrue(until(lambda: self.s.graph.boxes[0]["pos"] != b0["pos"]))
+        db = [self.s.graph.boxes[0]["pos"][i] - b0["pos"][i] for i in (0, 1)]
+        for k in ("hills", "ripple"):                                            # members moved by the same amount
+            self.assertEqual([self.s.graph.nodes[k].meta["pos"][i] - before[k][i] for i in (0, 1)], db)
+        self.assertEqual(self.s.graph.nodes["points"].meta["pos"], before["points"])    # outsiders stay put
+        s0 = list(self.s.graph.boxes[0]["size"])
+        gx, gy = self.center(box.locator(".grip"))
+        self.page.mouse.move(gx, gy)
+        self.page.mouse.down()
+        self.page.mouse.move(gx + 50, gy + 30, steps=5)
+        self.page.mouse.up()
+        self.assertTrue(until(lambda: self.s.graph.boxes[0]["size"][0] > s0[0] and self.s.graph.boxes[0]["size"][1] > s0[1]))
+        self.page.once("dialog", lambda d: d.accept("Terrain"))
+        self.page.locator(".netbox .title").dblclick()
+        self.assertTrue(until(lambda: self.s.graph.boxes[0]["title"] == "Terrain"))
+        self.page.wait_for_function("document.querySelector('.netbox .title').textContent === 'Terrain'")
+        c0 = self.s.graph.boxes[0]["color"]
+        self.page.locator(".netbox .dot").click()
+        self.assertTrue(until(lambda: self.s.graph.boxes[0]["color"] != c0))
+        self.page.locator(".netbox .x").click()
+        self.assertTrue(until(lambda: self.s.graph.boxes == []))
+        self.page.locator("#canvas").focus()
+        self.page.keyboard.press("Control+z")
+        self.assertTrue(until(lambda: len(self.s.graph.boxes) == 1))
+
+    def test_box_button_makes_an_empty_box_and_boxes_are_saved(self):
+        self.page.click("#box-btn")
+        self.assertTrue(until(lambda: len(self.s.graph.boxes) == 1))
+        self.assertTrue(until(lambda: '"boxes"' in self.read_file()))
+        self.page.wait_for_selector(".netbox")
+
+    def pixels_vary(self, selector="#pv-canvas"):
+        """True when the element's screenshot has more than a couple of distinct colours (something was drawn)."""
+        import io
+        import struct
+        import zlib
+        png = self.page.locator(selector).screenshot()
+        pos, chunks = 8, {}
+        while pos < len(png):
+            (n,) = struct.unpack(">I", png[pos:pos + 4])
+            chunks.setdefault(png[pos + 4:pos + 8], []).append(png[pos + 8:pos + 8 + n])
+            pos += 12 + n
+        w, h, depth, ctype = struct.unpack(">IIBB", chunks[b"IHDR"][0][:10])
+        raw = zlib.decompress(b"".join(chunks[b"IDAT"]))
+        bpp = {2: 3, 6: 4}[ctype]
+        stride = w * bpp
+        colours, prev = set(), bytearray(stride)
+        for y in range(h):
+            row = bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+            ft = raw[y * (stride + 1)]
+            for i in range(stride):                         # undo PNG row filters
+                a = row[i - bpp] if i >= bpp else 0
+                b = prev[i]
+                c = prev[i - bpp] if i >= bpp else 0
+                if ft == 1:
+                    row[i] = (row[i] + a) & 255
+                elif ft == 2:
+                    row[i] = (row[i] + b) & 255
+                elif ft == 3:
+                    row[i] = (row[i] + ((a + b) >> 1)) & 255
+                elif ft == 4:
+                    p = a + b - c
+                    pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                    row[i] = (row[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+            prev = row
+            colours.update(bytes(row[x:x + bpp]) for x in range(0, stride, bpp * 3))
+            if len(colours) > 20:
+                return True
+        return len(colours) > 3
+
+    def test_3d_preview_draws_the_selected_node_and_reports_errors(self):
+        if not self.page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+            self.skipTest("this Chromium has no WebGL2")
+        self.page.wait_for_function("window.minihou.preview && window.minihou.preview.ok && window.minihou.preview.tris > 0")
+        self.assertIn("out", self.page.inner_text("#pv-node"))                          # the display node by default
+        self.assertTrue(until(lambda: self.pixels_vary(), 5))
+        self.node("points").locator(".title").click()                                    # points: scatter output, no faces
+        self.page.wait_for_function("window.minihou.preview.tris === 0 && window.minihou.preview.points > 100")
+        self.assertIn("points", self.page.inner_text("#pv-node"))
+        self.assertTrue(until(lambda: self.pixels_vary(), 5))
+        self.page.click("#pv-edges")                                                     # toggles redraw without errors
+        self.page.click("#pv-shaded")
+        self.page.click("#pv-frame")
+        box = self.page.locator("#pv-canvas").bounding_box()
+        self.page.mouse.move(box["x"] + 60, box["y"] + 60)                               # orbit and zoom
+        self.page.mouse.down()
+        self.page.mouse.move(box["x"] + 120, box["y"] + 90, steps=4)
+        self.page.mouse.up()
+        self.page.mouse.wheel(0, 200)
+        self.page.mouse.dblclick(box["x"] + 100, box["y"] + 100)
+        # a node that cannot cook shows its error instead of stale geometry
+        self.s.edit([{"op": "add", "type": "wrangle", "id": "bad", "inputs": {"geo": "ground"},
+                      "params": {"snippet": "@P.z = @nope"}}])
+        self.node("bad").locator(".title").click()
+        self.page.wait_for_function("document.querySelector('#pv-msg').textContent.includes('nope')")
+
+    def test_inspector_lists_what_a_node_changed(self):
+        self.node("ripple").locator(".title").click()
+        self.page.wait_for_function("document.querySelector('#info-body').innerText.toLowerCase().includes('changes from inputs')")
+        text = self.page.inner_text("#info-body")
+        self.assertIn("reads @P", text)                                          # the wrangle's snippet reads @P
+        self.assertRegex(text, r"~\s*P")                                          # and rewrites the positions
+        self.assertTrue(self.page.locator("#info-body .flow.mod").count() >= 1)
+
+    # -- selecting in the 3-D view and turning the selection into nodes ------------------------------------------
+    def box_scene(self, **params):
+        """Replace the graph by a single box into an output, select the box node and wait for the 3-D view to show it."""
+        if not self.page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+            self.skipTest("this Chromium has no WebGL2")
+        graph = {"version": 1, "nodes": {"b": {"type": "box", "params": dict({"size": [2, 2, 2]}, **params), "pos": [0, 0]},
+                                         "o": {"type": "output", "inputs": {"geo": "b"}, "pos": [0, 110]}}, "display": "o"}
+        self.s.edit([{"op": "replace", "graph": graph}])
+        self.page.wait_for_selector('.node[data-id="b"]')
+        self.node("b").locator(".title").click()
+        self.page.wait_for_function("window.minihou.preview.tris === 12 && document.querySelector('#pv-node').innerText.includes('b')")
+        from minihou import Evaluator
+        self.box = Evaluator().cook(self.s.graph, "b")
+        vp, offs = self.box.topology.vertex_point.astype(int), self.box.topology.prim_offsets
+        centres = [self.box.P[vp[offs[p]:offs[p + 1]]].mean(0) for p in range(self.box.nprims)]
+        self.top = int(max(range(len(centres)), key=lambda p: centres[p][2]))               # the face looking up at the camera
+        v = vp[offs[self.top]:offs[self.top + 1]]
+        self.top_edges = [(min(a, b), max(a, b)) for a, b in zip(v.tolist(), v.tolist()[1:] + v.tolist()[:1])]
+        self.top_points = sorted(v.tolist())
+
+    def view_xy(self, kind, ident):
+        """Page coordinates of an element of the 3-D view."""
+        box = self.page.locator("#pv-canvas").bounding_box()
+        sx, sy, _ = self.page.evaluate("([k, i]) => minihou.preview.screenOf(k, i)", [kind, ident])
+        return box["x"] + sx, box["y"] + sy
+
+    def selection(self):
+        return self.page.evaluate("minihou.preview.selection()")
+
+    def test_pick_edges_with_shift_and_bevel_inserts_a_node_in_the_chain(self):
+        self.box_scene()
+        self.page.click('#preview [data-mode="edge"]')
+        for n, e in enumerate(self.top_edges):
+            self.page.keyboard.down("Shift") if n else None
+            self.page.mouse.click(*self.view_xy("edge", list(e)))
+            self.page.keyboard.up("Shift") if n else None
+        self.assertEqual(sorted(map(tuple, self.selection()["edges"])), sorted(self.top_edges))
+        self.assertIn("4 edges selected", self.page.inner_text("#pv-selinfo"))
+        self.page.click('#pv-actions button[data-action="Bevel"]')
+        self.assertTrue(until(lambda: "polybevel1" in self.s.graph.nodes))
+        g = self.s.graph.nodes
+        self.assertEqual(g["polybevel1"].inputs, {"geo": "b"})
+        self.assertEqual(g["o"].inputs, {"geo": "polybevel1"})                              # inserted in the chain
+        self.assertEqual(g["polybevel1"].params["edges"], " ".join(f"{a}-{b}" for a, b in sorted(self.top_edges)))
+        self.page.wait_for_selector('.node[data-id="polybevel1"].selected')
+        self.page.wait_for_function("document.querySelector('#pv-node').innerText.includes('polybevel1')")
+        self.assertEqual(self.selection()["edges"], [])                                      # the selection is spent
+        self.assertTrue(until(lambda: self.s.status()["ok"], 5))
+        self.page.wait_for_function("window.minihou.preview.tris > 12")                      # the bevelled box is shown
+
+    def test_bevel_from_a_selection_then_scrub_its_distance_with_the_arrow(self):
+        self.box_scene()
+        self.page.click('#preview [data-mode="edge"]')
+        for n, e in enumerate(self.top_edges):
+            self.page.keyboard.down("Shift") if n else None
+            self.page.mouse.click(*self.view_xy("edge", list(e)))
+            self.page.keyboard.up("Shift") if n else None
+        self.page.click('#pv-actions button[data-action="Bevel"]')
+        self.assertTrue(until(lambda: "polybevel1" in self.s.graph.nodes))
+        self.page.wait_for_function("minihou.preview.handleTips().some(t => t.id === 'distance')")   # the new node has its arrow
+        tip = self.drag_handle("distance", 30)
+        self.assertTrue(until(lambda: self.s.graph.nodes["polybevel1"].params.get("distance", 0.1) != 0.1))
+        d = self.s.graph.nodes["polybevel1"].params["distance"]
+        self.assertAlmostEqual(d, 0.1 + 30 / tip["ppu"], delta=0.1)
+        self.assertGreaterEqual(d, 0.0)
+        self.assertTrue(until(lambda: self.s.status()["ok"], 5))
+
+    def test_a_lone_edge_cannot_be_bevelled_and_the_error_says_why(self):
+        self.box_scene()
+        self.page.click('#preview [data-mode="edge"]')
+        self.page.mouse.click(*self.view_xy("edge", list(self.top_edges[0])))
+        self.assertEqual(len(self.selection()["edges"]), 1)
+        self.page.keyboard.press("b")                                                        # the shortcut, with the mouse over the view
+        self.assertTrue(until(lambda: "polybevel1" in self.s.graph.nodes))
+        self.page.wait_for_selector("#errorbar:not(.hidden)")
+        self.assertIn("cannot end inside the surface", self.page.inner_text("#errorbar"))
+
+    def test_pick_a_face_and_box_select_faces_then_extrude(self):
+        self.box_scene()
+        self.page.click('#preview [data-mode="face"]')
+        self.page.mouse.click(*self.view_xy("face", self.top))
+        self.assertEqual(self.selection()["faces"], [self.top])
+        canvas = self.page.locator("#pv-canvas").bounding_box()
+        self.page.mouse.move(canvas["x"] + 4, canvas["y"] + 4)                                # a drag over everything: all faces
+        self.page.mouse.down()
+        self.page.mouse.move(canvas["x"] + canvas["width"] - 4, canvas["y"] + canvas["height"] - 4, steps=6)
+        self.page.mouse.up()
+        self.assertEqual(self.selection()["faces"], list(range(6)))
+        self.page.keyboard.down("Control")                                                    # Ctrl-click takes one away
+        self.page.mouse.click(*self.view_xy("face", self.top))
+        self.page.keyboard.up("Control")
+        self.assertEqual(len(self.selection()["faces"]), 5)
+        self.page.click('#pv-actions button[data-action="Extrude"]')
+        self.assertTrue(until(lambda: "polyextrude1" in self.s.graph.nodes))
+        n = self.s.graph.nodes["polyextrude1"]
+        self.assertEqual(n.inputs, {"geo": "b"})
+        rest = [f for f in range(6) if f != self.top]
+        expected = {0: "1-5", 5: "0-4"}.get(self.top, f"0-{self.top - 1} {self.top + 1}-5" if self.top > 1 else f"0 {self.top + 1}-5")
+        self.assertEqual(n.params["group"], expected, rest)
+
+    def test_points_select_group_and_delete_and_keys_switch_modes(self):
+        self.box_scene()
+        self.page.mouse.move(*self.view_xy("point", self.top_points[0]))
+        self.page.keyboard.press("1")
+        self.assertEqual(self.page.evaluate("minihou.preview.mode"), "point")
+        self.page.mouse.click(*self.view_xy("point", self.top_points[0]))
+        self.assertEqual(self.selection()["points"], [self.top_points[0]])
+        self.page.keyboard.press("Escape")                                                    # clears the selection first...
+        self.assertEqual(self.selection()["points"], [])
+        self.assertEqual(self.page.evaluate("minihou.preview.mode"), "point")
+        self.page.keyboard.press("Escape")                                                    # ...then leaves the mode
+        self.assertEqual(self.page.evaluate("minihou.preview.mode"), "view")
+        self.page.keyboard.press("2")
+        self.assertEqual(self.page.evaluate("minihou.preview.mode"), "edge")
+        self.page.keyboard.press("1")
+        self.page.keyboard.press("a")                                                         # select all points
+        self.assertEqual(len(self.selection()["points"]), 8)
+        self.page.click('#pv-actions button[data-action="Group"]')
+        self.assertTrue(until(lambda: "group_create1" in self.s.graph.nodes))
+        self.assertEqual(self.s.graph.nodes["group_create1"].params["pattern"], "0-7")
+        self.assertEqual(self.s.graph.nodes["group_create1"].params["domain"], "points")
+
+    def test_orbit_still_works_with_alt_or_middle_mouse_in_a_selection_mode(self):
+        self.box_scene()
+        self.page.click('#preview [data-mode="face"]')
+        before = self.page.evaluate("minihou.preview.view.yaw")
+        box = self.page.locator("#pv-canvas").bounding_box()
+        self.page.mouse.move(box["x"] + 50, box["y"] + 50)
+        self.page.keyboard.down("Alt")
+        self.page.mouse.down()
+        self.page.mouse.move(box["x"] + 110, box["y"] + 60, steps=4)
+        self.page.mouse.up()
+        self.page.keyboard.up("Alt")
+        self.assertNotEqual(self.page.evaluate("minihou.preview.view.yaw"), before)
+        self.assertEqual(self.selection()["faces"], [])                                       # an orbit selects nothing
+
+    def handle_scene(self, node_type, params, select):
+        if not self.page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+            self.skipTest("this Chromium has no WebGL2")
+        graph = {"version": 1, "nodes": {"b": {"type": "box", "params": {"size": [2, 2, 2]}, "pos": [0, 0]},
+                                         "h": {"type": node_type, "inputs": {"geo": "b"}, "params": params, "pos": [0, 110]},
+                                         "o": {"type": "output", "inputs": {"geo": "h"}, "pos": [0, 220]}}, "display": "o"}
+        self.s.edit([{"op": "replace", "graph": graph}])
+        self.page.wait_for_selector('.node[data-id="h"]')
+        self.node(select).locator(".title").click()
+        self.page.wait_for_function("minihou.preview.handleTips().length > 0")
+
+    def drag_handle(self, hid, pixels):
+        tip = next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == hid)
+        box = self.page.locator("#pv-canvas").bounding_box()
+        x, y = box["x"] + tip["tip"][0], box["y"] + tip["tip"][1]
+        self.page.mouse.move(x, y)
+        self.page.mouse.down()
+        self.page.mouse.move(x + tip["u"][0] * pixels, y + tip["u"][1] * pixels, steps=8)
+        self.page.mouse.up()
+        return tip
+
+    def test_dragging_a_transform_arrow_moves_the_node_and_keeps_the_other_components(self):
+        self.handle_scene("transform", {"translate": [0.5, 1.0, 2.0]}, "h")
+        self.assertEqual(sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()")),
+                         ["translate_x", "translate_y", "translate_z"])
+        tip = self.drag_handle("translate_x", 60)
+        self.assertTrue(until(lambda: self.s.graph.nodes["h"].params.get("translate", [0, 0, 0])[0] > 0.6))
+        t = self.s.graph.nodes["h"].params["translate"]
+        self.assertAlmostEqual(t[0], 0.5 + 60 / tip["ppu"], delta=0.15)                    # 60 px along the arrow, in world units
+        self.assertEqual((t[1], t[2]), (1.0, 2.0))                                          # the other components are untouched
+        self.assertTrue(until(lambda: self.s.status()["ok"]))
+        self.page.wait_for_function("minihou.preview.handleTips().length === 3")             # the arrows follow the moved result
+
+    def test_dragging_an_extrude_arrow_clamps_and_works_for_plain_numbers(self):
+        from minihou import Evaluator
+        graph = Evaluator().cook(self.s.graph) if False else None
+        self.handle_scene("polyextrude", {"group": "0", "distance": 0.2}, "h")
+        tip = self.drag_handle("distance", 50)
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes["h"].params.get("distance", 0.2) - 0.2) > 0.05))
+        d = self.s.graph.nodes["h"].params["distance"]
+        self.assertAlmostEqual(abs(d - 0.2), 50 / tip["ppu"], delta=0.2)
+        self.assertIsInstance(d, float)
+
+    def test_transform_tools_rotate_ring_scale_cubes_and_uniform_square(self):
+        import math
+        self.handle_scene("transform", {"translate": [0.5, 1.0, 2.0], "rotate": [0, 0, 10], "scale": [1, 2, 3]}, "h")
+        self.assertFalse(self.page.locator("#pv-xform").evaluate("e => e.classList.contains('hidden')"))
+        self.page.click('#pv-xform [data-tool="rotate"]')                                   # the tool buttons swap which handles show
+        self.assertEqual(sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()")), ["rotate_x", "rotate_y", "rotate_z"])
+        box = self.page.locator("#pv-canvas").bounding_box()
+        a = self.page.evaluate("minihou.preview.ringScreen('rotate_z', 0.6)")
+        b = self.page.evaluate("minihou.preview.ringScreen('rotate_z', 1.1)")                # half a radian further round the ring
+        self.page.mouse.move(box["x"] + a[0], box["y"] + a[1])
+        self.page.mouse.down()
+        self.page.mouse.move(box["x"] + b[0], box["y"] + b[1], steps=8)
+        self.page.mouse.up()
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes["h"].params.get("rotate", [0, 0, 10])[2] - (10 + math.degrees(0.5))) < 1.0))   # the angle followed the pointer around the ring
+        r = self.s.graph.nodes["h"].params["rotate"]
+        self.assertEqual((r[0], r[1]), (0.0, 0.0))
+        # scale cubes: a pixel drag multiplies that component only
+        self.page.keyboard.press("Escape")
+        self.page.mouse.move(box["x"] + 20, box["y"] + 20)
+        self.page.keyboard.press("r")                                                        # R: scale tool (nothing is selected in the view)
+        ids = sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()"))
+        self.assertEqual(ids, ["scale_x", "scale_y", "scale_z", "uniform_scale"])
+        self.drag_handle("scale_y", 64)                                                      # +64 px: times e
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes["h"].params.get("scale", [1, 2, 3])[1] - 2 * math.e) < 0.3))   # (the last value arrives after the drag)
+        sc = self.s.graph.nodes["h"].params["scale"]
+        self.assertEqual((sc[0], sc[2]), (1.0, 3.0))
+        self.assertTrue(until(lambda: self.s.status()["ok"]))
+        self.drag_handle("uniform_scale", 60)                                                # the square: drag up and to the right
+        self.assertTrue(until(lambda: self.s.graph.nodes["h"].params.get("uniform_scale", 1.0) > 1.2))
+        self.page.keyboard.press("w")
+        self.assertEqual(len(self.page.evaluate("minihou.preview.handleTips()")), 3)         # W: back to the move arrows
+
+    def test_tool_buttons_are_hidden_for_nodes_without_transform_handles(self):
+        self.handle_scene("polyextrude", {"group": "0", "distance": 0.2}, "h")
+        self.assertTrue(self.page.locator("#pv-xform").evaluate("e => e.classList.contains('hidden')"))
+        self.assertEqual(len(self.page.evaluate("minihou.preview.handleTips()")), 1)         # its arrow is always shown
+
+    # ---- the Blender bar: add-on zip to drag, install, open Blender
+    def stub_blenders(self, found, install=None, launch=None):
+        from minihou import blender_setup
+        orig = (blender_setup.list_blenders, blender_setup.install_addon, blender_setup.launch_blender)
+        blender_setup.list_blenders = lambda *a, **k: found
+        if install:
+            blender_setup.install_addon = install
+        if launch:
+            blender_setup.launch_blender = launch
+        self.addCleanup(lambda: (setattr(blender_setup, "list_blenders", orig[0]), setattr(blender_setup, "install_addon", orig[1]),
+                                 setattr(blender_setup, "launch_blender", orig[2])))
+
+    def test_blender_bar_offers_a_draggable_zip_when_nothing_is_connected(self):
+        self.stub_blenders([])
+        self.page.reload()
+        self.page.wait_for_selector("#blender-bar:not(.hidden)")
+        chip = self.page.locator("#bb-zip")
+        self.assertEqual(chip.get_attribute("href"), "/addon/minihou_link.zip")
+        self.assertEqual(chip.get_attribute("draggable"), "true")
+        got = self.page.evaluate("""() => {
+            const dt = new DataTransfer();
+            document.querySelector('#bb-zip').dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true, cancelable: true }));
+            return [dt.getData('DownloadURL'), dt.getData('text/uri-list')];
+        }""")
+        self.assertTrue(got[0].startswith("application/zip:minihou_link.zip:http://127.0.0.1:"), got)
+        self.assertTrue(got[0].endswith("/addon/minihou_link.zip"))
+        self.page.wait_for_function("document.querySelector('#bb-text').textContent.includes('No Blender found')")
+        self.assertIn("No Blender found", self.page.inner_text("#bb-text"))
+        self.assertTrue(self.page.locator("#bb-install").is_disabled())                        # nothing to install into: the zip is the way
+        self.assertTrue(self.page.locator("#bb-open").is_disabled())
+        with self.page.expect_download() as dl:
+            chip.click()                                                                       # a click downloads it
+        self.assertEqual(dl.value.suggested_filename, "minihou_link.zip")
+
+    def test_blender_bar_installs_and_launches_and_can_be_hidden_and_recalled(self):
+        import types
+        self.web.link = types.SimpleNamespace(port=4321, clients=[])                           # the harness runs without a live link
+        calls = []
+        self.stub_blenders([{"path": "/b/5.1/blender", "version": "5.1", "supported": True},
+                            {"path": "/b/4.2/blender", "version": "4.2", "supported": True}],
+                           install=lambda exe, **k: (calls.append(("install", exe)), {"ok": True, "message": "Installed and enabled."})[1],
+                           launch=lambda exe, port, host="127.0.0.1": calls.append(("launch", exe, port)))
+        self.page.reload()
+        self.page.wait_for_selector("#blender-bar:not(.hidden)")
+        self.page.wait_for_selector("#bb-pick:not(.hidden)")                                   # two installs: pick one
+        self.page.select_option("#bb-pick", "1")
+        self.page.click("#bb-install")
+        self.page.wait_for_function("document.querySelector('#bb-msg').innerText.includes('Installed')")
+        self.page.click("#bb-open")
+        self.assertTrue(until(lambda: len(calls) == 2))
+        self.assertEqual(calls[0], ("install", "/b/4.2/blender"))
+        self.assertEqual(calls[1], ("launch", "/b/4.2/blender", 4321))
+        # the page content is not pushed below the bar: the graph pane starts under it
+        self.assertGreaterEqual(self.page.locator("#canvas").bounding_box()["y"], self.page.locator("#blender-bar").bounding_box()["y"] + 30)
+        self.page.click("#bb-close")
+        self.assertTrue(self.page.locator("#blender-bar").is_hidden())
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.assertTrue(self.page.locator("#blender-bar").is_hidden())                         # stays hidden after a reload
+        self.page.click("#blender-status")                                                     # the Blender indicator brings it back
+        self.assertFalse(self.page.locator("#blender-bar").is_hidden())
+
+    def test_sphere_radius_arrow_clamps_at_zero(self):
+        graph = {"version": 1, "nodes": {"s": {"type": "sphere", "params": {"radius": 0.5}}, "o": {"type": "output", "inputs": {"geo": "s"}}},
+                 "display": "o"}
+        if not self.page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+            self.skipTest("this Chromium has no WebGL2")
+        self.s.edit([{"op": "replace", "graph": graph}])
+        self.page.wait_for_selector('.node[data-id="s"]')
+        self.node("s").locator(".title").click()
+        self.page.wait_for_function("minihou.preview.handleTips().length === 1")
+        self.drag_handle("radius", -400)                                                    # far inwards: the radius cannot go negative
+        self.assertTrue(until(lambda: self.s.graph.nodes["s"].params.get("radius", 0.5) < 0.5))
+        self.assertGreaterEqual(self.s.graph.nodes["s"].params["radius"], 0.0)
+
+    def test_frame_slider_scrubs_and_follows_the_frame(self):
+        self.page.fill("#frame-slider", "40")                         # fires input events like a drag
+        end = time.monotonic() + 5
+        while self.s.frame != 40.0 and time.monotonic() < end:
+            time.sleep(0.05)
+        self.assertEqual(self.s.frame, 40.0)
+        self.assertEqual(self.page.input_value("#frame-input"), "40")
+        self.page.fill("#frame-input", "600")                         # a later frame widens the slider's range
+        self.page.press("#frame-input", "Enter")
+        self.page.wait_for_function("Number(document.querySelector('#frame-slider').max) >= 600")
+        self.assertEqual(self.page.input_value("#frame-slider"), "600")
+
     def test_frame_field_sets_the_engine_frame(self):
         self.page.fill("#frame-input", "7")
         self.page.press("#frame-input", "Enter")
@@ -359,6 +828,123 @@ class EditorE2E(unittest.TestCase):
         self.page.click("#file-btn")
         self.page.locator("#file-menu .item", has_text="demo.json").click()
         self.page.wait_for_selector('.node[data-id="hills"]')
+
+
+    # ---- layout: resizable panes and navigation of the 3-D view
+    def width(self, sel):
+        return self.page.locator(sel).bounding_box()["width"]
+
+    def test_layout_presets_swap_stack_and_hide_the_panel(self):
+        self.box_scene()
+        self.page.click('#topbar [data-layout="view"]')
+        self.assertGreater(self.width("#preview"), 2 * self.width("#canvas"))
+        self.page.click('#topbar [data-layout="graph"]')
+        self.assertGreater(self.width("#canvas"), 2 * self.width("#preview"))
+        self.page.click("#lay-swap")
+        self.assertLess(self.page.locator("#canvas").bounding_box()["x"], self.page.locator("#preview").bounding_box()["x"] + 1e-6 + 10_000)
+        self.assertLess(self.page.locator("#preview").bounding_box()["x"], self.page.locator("#canvas").bounding_box()["x"])
+        self.page.click("#lay-dir")                                                            # stacked: the 3-D view is above the graph
+        a, b = self.page.locator("#preview").bounding_box(), self.page.locator("#canvas").bounding_box()
+        self.assertLess(a["y"], b["y"])
+        self.assertAlmostEqual(a["x"], b["x"], delta=2)
+        self.page.click("#lay-side")
+        self.assertFalse(self.page.locator("#side").is_visible())
+        self.page.click("#lay-side")
+        self.assertTrue(self.page.locator("#side").is_visible())
+
+    def test_dividers_resize_and_the_layout_is_remembered(self):
+        self.box_scene()
+        self.page.click('#topbar [data-layout="split"]')
+        w0 = self.width("#preview")
+        sp = self.page.locator("#work-split").bounding_box()
+        self.page.mouse.move(sp["x"] + 2, sp["y"] + 200)
+        self.page.mouse.down()
+        self.page.mouse.move(sp["x"] - 150, sp["y"] + 200, steps=5)
+        self.page.mouse.up()
+        w1 = self.width("#preview")
+        self.assertGreater(w1, w0 + 100)
+        side0 = self.width("#side")
+        sp = self.page.locator("#splitter").bounding_box()
+        self.page.mouse.move(sp["x"] + 2, sp["y"] + 200)
+        self.page.mouse.down()
+        self.page.mouse.move(sp["x"] - 80, sp["y"] + 200, steps=5)
+        self.page.mouse.up()
+        self.assertGreater(self.width("#side"), side0 + 50)
+        params0 = self.page.locator("#params").bounding_box()["height"]
+        sp = self.page.locator("#side-split").bounding_box()
+        self.page.mouse.move(sp["x"] + 40, sp["y"] + 2)
+        self.page.mouse.down()
+        self.page.mouse.move(sp["x"] + 40, sp["y"] - 60, steps=5)
+        self.page.mouse.up()
+        self.assertLess(self.page.locator("#params").bounding_box()["height"], params0 - 30)
+        w2 = self.width("#preview")
+        self.page.reload()
+        self.page.wait_for_selector("#pv-canvas")
+        self.assertAlmostEqual(self.width("#preview"), w2, delta=6)
+        self.assertAlmostEqual(self.width("#side"), side0 + 80, delta=6)
+
+    def test_ctrl_space_fills_the_window_with_the_pane_under_the_pointer(self):
+        self.box_scene()
+        box = self.page.locator("#pv-canvas").bounding_box()
+        self.page.mouse.move(box["x"] + 40, box["y"] + 40)
+        self.page.keyboard.press("Control+Space")
+        self.assertFalse(self.page.locator("#canvas").is_visible())
+        self.assertGreater(self.width("#preview"), 0.6 * self.page.viewport_size["width"])
+        self.page.keyboard.press("Control+Space")
+        self.assertTrue(self.page.locator("#canvas").is_visible())
+        c = self.page.locator("#canvas").bounding_box()
+        self.page.mouse.move(c["x"] + 40, c["y"] + 40)
+        self.page.keyboard.press("Control+Space")
+        self.assertFalse(self.page.locator("#preview").is_visible())
+        self.page.click("#topbar [data-layout=split]")                                         # a preset leaves the maximised state
+        self.assertTrue(self.page.locator("#preview").is_visible())
+
+    def view_angles(self):
+        return self.page.evaluate("[minihou.preview.view.yaw, minihou.preview.view.pitch]")
+
+    def test_axis_views_ortho_gizmo_and_frame_selection(self):
+        import math
+        self.box_scene()
+        self.page.click('#preview [data-view="front"]')
+        self.page.wait_for_function("Math.abs(minihou.preview.view.yaw + Math.PI / 2) < 1e-3")
+        self.assertAlmostEqual(self.view_angles()[1], 0, places=3)
+        self.page.click('#preview [data-view="top"]')
+        self.page.wait_for_function("minihou.preview.view.pitch > 1.57")
+        box = self.page.locator("#pv-canvas").bounding_box()
+        self.page.mouse.move(box["x"] + 60, box["y"] + 300)
+        self.page.keyboard.press("Control+Numpad1")                                            # the back view
+        self.page.wait_for_function("Math.abs(minihou.preview.view.yaw - Math.PI / 2) < 1e-3 && Math.abs(minihou.preview.view.pitch) < 1e-3")
+        self.page.keyboard.press("Numpad3")
+        self.page.wait_for_function("Math.abs(minihou.preview.view.yaw) < 1e-3")
+        self.page.locator('.pv-gizmo [data-axis="+Z"]').click()                                # the gizmo's Z ball looks from above
+        self.page.wait_for_function("minihou.preview.view.pitch > 1.57")
+        # orthographic: parallel edges stay parallel, so the box's top face is a rectangle on screen
+        self.page.keyboard.press("Numpad5")
+        self.assertEqual(self.page.locator("#pv-ortho").inner_text(), "Ortho")
+        self.assertTrue(self.page.evaluate("minihou.preview.view.ortho"))
+        pts = [self.page.evaluate("([k, i]) => minihou.preview.screenOf(k, i)", ["point", i]) for i in self.top_points]
+        xs, ys = sorted({round(p[0]) for p in pts}), sorted({round(p[1]) for p in pts})
+        self.assertEqual((len(xs), len(ys)), (2, 2))
+        self.page.keyboard.press("Numpad5")
+        self.assertFalse(self.page.evaluate("minihou.preview.view.ortho"))
+        # frame selection zooms to the selected points, Home to everything
+        self.page.click('#preview [data-mode="point"]')
+        self.page.mouse.click(*self.view_xy("point", self.top_points[0]))
+        d_all = self.page.evaluate("minihou.preview.view.dist")
+        self.page.keyboard.press("NumpadDecimal")
+        self.assertLess(self.page.evaluate("minihou.preview.view.dist"), d_all)
+        self.page.keyboard.press("Home")
+        self.page.click('#preview [data-mode="view"]')
+        self.page.keyboard.press("Home")
+
+    def test_framing_fits_a_narrow_view(self):
+        self.box_scene()
+        self.page.click('#topbar [data-layout="graph"]')                                       # a narrow 3-D view
+        self.page.click("#pv-frame")
+        box = self.page.locator("#pv-canvas").bounding_box()
+        for i in range(8):
+            sx, sy, _ = self.page.evaluate("([k, i]) => minihou.preview.screenOf(k, i)", ["point", i])
+            self.assertTrue(0 <= sx <= box["width"] and 0 <= sy <= box["height"], (i, sx, sy, box))
 
 
 if __name__ == "__main__":

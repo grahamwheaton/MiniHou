@@ -81,6 +81,8 @@ class Runtime:
         self._missing_instances: List[str] = []
         self.frame_dirty = True                 # send the current frame after connecting
         self._sent_frame = None
+        self.extras: Dict[str, Mirror] = {}      # extra outputs: Blender object name -> mirrored geometry
+        self._refused_extras: set = set()
 
     # -- lifecycle ---------------------------------------------------------
     def connect(self, host: str = "127.0.0.1", port: int = 8765) -> None:
@@ -144,6 +146,9 @@ class Runtime:
             if geo is not None:
                 busy = True
                 self._apply_geo(geo)
+            for name, update in self.inbox.take_extras().items():
+                busy = True
+                self._apply_extra(name, update)
             if self.params_dirty:
                 busy = self._forward_params() or busy
             if self.watched:
@@ -173,6 +178,12 @@ class Runtime:
             self.last_error = ""
             self._log(f"connected to engine (protocol {e.get('protocol')})")
             self.frame_dirty, self._sent_frame = True, None       # a (re)started engine needs the time
+        elif t == "outputs":
+            names = [str(n) for n in e.get("names", [])]
+            for gone in mesh_writer.remove_extra_objects(names):
+                self._log(f"output object {gone!r} removed (no longer in the graph)")
+            self.extras = {n: m for n, m in self.extras.items() if n in names}
+            self._ui_dirty = True
         elif t == "watch_objects":
             self.watched = [str(n) for n in e.get("objects", [])]
             self.dirty_objects = set(self.watched)       # (re)send everything: the engine may have restarted
@@ -210,6 +221,7 @@ class Runtime:
         out, _proxy, mod = proxy.ensure_objects()
         t0 = time.perf_counter()
         timings = mesh_writer.apply_update(out.data, self.mirror, u)
+        timings["warnings"].extend(mesh_writer.write_detail(out, self.mirror.detail))
         names = self.mirror.detail.get("instance_objects") or []
         missing = proxy.sync_instances(mod.node_group, [str(n) for n in names] if isinstance(names, list) else [])
         if missing and missing != self._missing_instances:
@@ -226,6 +238,31 @@ class Runtime:
             self._log(w)
         if self.last_error.startswith("cook"):
             self.last_error = ""
+        self._ui_dirty = True
+
+    def _apply_extra(self, name: str, u: GeoUpdate) -> None:
+        """A named output of the graph: its own mesh object, updated like the main output."""
+        mirror = self.extras.setdefault(name, Mirror())
+        try:
+            mirror.apply(u)
+        except ProtocolError as e:
+            self._log(f"output {name!r} out of sync ({e}); requesting full resend")
+            self.extras.pop(name, None)
+            if self.client:
+                self.client.resync()
+            return
+        obj = mesh_writer.ensure_extra_object(name)
+        if obj is None:
+            if name not in self._refused_extras:
+                self._refused_extras.add(name)
+                self._log(f"output {name!r}: an object with that name already exists in the file and was not made by "
+                          f"MiniHou; pick another object name")
+            return
+        self._refused_extras.discard(name)
+        timings = mesh_writer.apply_update(obj.data, mirror, u)
+        for w in timings["warnings"] + mesh_writer.write_detail(obj, mirror.detail):
+            self._log(f"output {name!r}: {w}")
+        self.applied_count += 1
         self._ui_dirty = True
 
     def _forward_params(self) -> bool:

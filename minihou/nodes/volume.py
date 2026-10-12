@@ -99,6 +99,10 @@ def sdf_boolean(a, b, operation, voxel_size, smooth, transfer_attribs):
     if not len(allp):
         return B.make(np.zeros((0, 3), np.float32), np.zeros(0, np.int64), [0])
     band = max(3.0, smooth / voxel_size + 2.0)
+    for tris in (ta, tb):                                    # fail at once, not after the first mesh has been done
+        if sdf.mesh_work(tris, voxel_size, band) > sdf.MAX_MESH_WORK:
+            raise ValueError("this voxel size (with this smooth) needs too much work for the mesh: use a larger voxel size "
+                             "or a smaller smooth")
     lo, dims = sdf.grid_for(allp.min(0), allp.max(0), voxel_size, (band + 2) * voxel_size)
     va = sdf.from_mesh(ta, voxel_size, band, grid=(lo, dims)).values
     vb = sdf.from_mesh(tb, voxel_size, band, grid=(lo, dims)).values

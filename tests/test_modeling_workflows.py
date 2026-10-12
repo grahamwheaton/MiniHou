@@ -4,7 +4,7 @@ from minihou import Evaluator,Graph
 from minihou.sdk import REGISTRY
 
 ROOT=pathlib.Path(__file__).resolve().parents[1]
-NODES=['edge_group','edge_group_promote','polybridge','dissolve','skin','polyexpand2d',
+NODES=['edge_group','edge_group_promote','polybridge','dissolve_edges','skin_profiles','polyexpand2d',
        'soft_transform','lattice_grid','lattice','point_deform','crease']
 
 

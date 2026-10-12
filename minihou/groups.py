@@ -176,3 +176,24 @@ def restrict(before, after, domain: str, pattern: str):
             old = np.zeros_like(new)
         out.table(domain)[name] = np.where(sel.reshape((-1,) + (1,) * (new.ndim - 1)), new, old.astype(new.dtype))
     return out
+
+
+def parse_edges(text: str, npoints: int):
+    """An edge selection written as point pairs: ``"12-13 40-41, 7-8"`` -> (k, 2) int64 array of point numbers (each pair
+    sorted). Empty text gives no edges. Raises :class:`GroupError` for anything that is not ``a-b`` or an unknown point."""
+    out = []
+    for tok in (text or "").replace(",", " ").split():
+        m = re.match(r"^(\d+)-(\d+)$", tok)
+        if not m:
+            raise GroupError(f"bad edge {tok!r}: write point pairs like 12-13")
+        a, b = int(m.group(1)), int(m.group(2))
+        if a >= npoints or b >= npoints:
+            raise GroupError(f"edge {tok!r}: the geometry has only {npoints} points")
+        if a != b:
+            out.append((min(a, b), max(a, b)))
+    return np.array(sorted(set(out)), np.int64).reshape(-1, 2)
+
+
+def format_edges(pairs) -> str:
+    """The inverse of :func:`parse_edges` (what the editor writes when it makes a selection)."""
+    return " ".join(f"{min(int(a), int(b))}-{max(int(a), int(b))}" for a, b in pairs)

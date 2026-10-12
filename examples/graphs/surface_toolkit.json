@@ -1,0 +1,312 @@
+{
+ "version": 1,
+ "doc": "Surfaces from points and curves: a vase lofted across rings (skin), an irregular terrain (delaunay) and a convex hull around a point cloud.",
+ "nodes": {
+  "rail": {
+   "type": "line",
+   "params": {
+    "length": 3.2,
+    "points": 26
+   },
+   "pos": [
+    -420,
+    0
+   ]
+  },
+  "sizes": {
+   "type": "wrangle",
+   "inputs": {
+    "geo": "rail"
+   },
+   "params": {
+    "snippet": "f@pscale = 0.8 + 0.22 * sin(@P.z * 2.3 + 0.4) + 0.4 * smooth(2.2, 3.2, @P.z)"
+   },
+   "pos": [
+    -420,
+    110
+   ]
+  },
+  "ring": {
+   "type": "circle",
+   "params": {
+    "divisions": 56
+   },
+   "pos": [
+    -610,
+    110
+   ]
+  },
+  "rings": {
+   "type": "copy_to_points",
+   "inputs": {
+    "source": "ring",
+    "points": "sizes"
+   },
+   "pos": [
+    -420,
+    220
+   ]
+  },
+  "vase": {
+   "type": "skin",
+   "inputs": {
+    "geo": "rings"
+   },
+   "params": {
+    "cap": true
+   },
+   "pos": [
+    -420,
+    330
+   ]
+  },
+  "vase_at": {
+   "type": "transform",
+   "inputs": {
+    "geo": "vase"
+   },
+   "params": {
+    "translate": [
+     -4.2,
+     0,
+     0
+    ]
+   },
+   "pos": [
+    -420,
+    440
+   ]
+  },
+  "sheet": {
+   "type": "grid",
+   "params": {
+    "size_x": 4.5,
+    "size_y": 4.5,
+    "columns": 2,
+    "rows": 2
+   },
+   "pos": [
+    0,
+    0
+   ]
+  },
+  "dots": {
+   "type": "scatter",
+   "inputs": {
+    "geo": "sheet"
+   },
+   "params": {
+    "count": 420,
+    "seed": 5
+   },
+   "pos": [
+    0,
+    110
+   ]
+  },
+  "relief": {
+   "type": "wrangle",
+   "inputs": {
+    "geo": "dots"
+   },
+   "params": {
+    "snippet": "@P.z = 0.9 * noise(@P * 0.8 + 3) + 0.3 * sin(@P.x * 1.4)"
+   },
+   "pos": [
+    0,
+    220
+   ]
+  },
+  "mesh": {
+   "type": "delaunay",
+   "inputs": {
+    "geo": "relief"
+   },
+   "params": {
+    "axis": "z",
+    "max_edge": 0.0
+   },
+   "pos": [
+    0,
+    330
+   ]
+  },
+  "cloud_src": {
+   "type": "sphere",
+   "params": {
+    "radius": 1.15,
+    "rows": 14,
+    "columns": 24
+   },
+   "pos": [
+    420,
+    0
+   ]
+  },
+  "cloud": {
+   "type": "scatter",
+   "inputs": {
+    "geo": "cloud_src"
+   },
+   "params": {
+    "count": 90,
+    "seed": 2
+   },
+   "pos": [
+    420,
+    110
+   ]
+  },
+  "stretch": {
+   "type": "transform",
+   "inputs": {
+    "geo": "cloud"
+   },
+   "params": {
+    "scale": [
+     1.0,
+     0.8,
+     1.35
+    ]
+   },
+   "pos": [
+    420,
+    220
+   ]
+  },
+  "hull": {
+   "type": "convex_hull",
+   "inputs": {
+    "geo": "stretch"
+   },
+   "pos": [
+    420,
+    330
+   ]
+  },
+  "hull_at": {
+   "type": "transform",
+   "inputs": {
+    "geo": "hull"
+   },
+   "params": {
+    "translate": [
+     4.2,
+     0,
+     1.3
+    ]
+   },
+   "pos": [
+    420,
+    440
+   ]
+  },
+  "all": {
+   "type": "merge",
+   "inputs": {
+    "geos": [
+     "vase_at",
+     "mesh",
+     "hull_at"
+    ]
+   },
+   "pos": [
+    0,
+    560
+   ]
+  },
+  "out": {
+   "type": "output",
+   "inputs": {
+    "geo": "shade"
+   },
+   "pos": [
+    0,
+    780
+   ]
+  },
+  "shade": {
+   "type": "normal",
+   "inputs": {
+    "geo": "all"
+   },
+   "params": {
+    "domain": "vertex",
+    "cusp_angle": 55
+   },
+   "pos": [
+    0,
+    670
+   ]
+  }
+ },
+ "boxes": [
+  {
+   "id": "box1",
+   "title": "skin: loft across rings",
+   "color": "#5b7fb5",
+   "pos": [
+    -640,
+    -30
+   ],
+   "size": [
+    330,
+    540
+   ]
+  },
+  {
+   "id": "box2",
+   "title": "delaunay: terrain from points",
+   "color": "#5aa06e",
+   "pos": [
+    -30,
+    -30
+   ],
+   "size": [
+    220,
+    440
+   ]
+  },
+  {
+   "id": "box3",
+   "title": "convex_hull",
+   "color": "#c98f3a",
+   "pos": [
+    390,
+    -30
+   ],
+   "size": [
+    220,
+    540
+   ]
+  }
+ ],
+ "display": "out",
+ "exposed": [
+  {
+   "name": "Terrain Points",
+   "node": "dots",
+   "param": "count"
+  },
+  {
+   "name": "Terrain Seed",
+   "node": "dots",
+   "param": "seed"
+  },
+  {
+   "name": "Cut Long Edges",
+   "node": "mesh",
+   "param": "max_edge"
+  },
+  {
+   "name": "Hull Points",
+   "node": "cloud",
+   "param": "count"
+  },
+  {
+   "name": "Ring Points",
+   "node": "ring",
+   "param": "divisions"
+  }
+ ]
+}

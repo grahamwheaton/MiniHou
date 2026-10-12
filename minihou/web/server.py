@@ -14,7 +14,13 @@ live in the other and in Blender.
 ``POST /api/edit``     ``{ops: [...], wait?: bool}`` -> ``{rev, results, changed, status?}`` (see :mod:`minihou.edit`)
 ``POST /api/undo``     also ``/api/redo``
 ``POST /api/inspect``  ``{node, detail?}`` -> geometry summary of any node
+``POST /api/preview``  ``{node}`` -> positions, triangles and edges of any node for the 3-D view (binary, see
+                       :mod:`minihou.preview`), or JSON ``{ok: false, error}``
 ``POST /api/open``     ``{path, create?}`` switch to (or create) a graph file inside the workspace root
+``GET  /api/blender``  installed Blenders (by index) and the add-on zip, for the editor's Blender panel
+``GET  /addon/minihou_link.zip``  the Blender add-on, ready to drag into Blender or install from disk
+``POST /api/blender/install``  ``{index}`` install + enable the add-on in that Blender (runs it in the background once)
+``POST /api/blender/launch``   ``{index}`` open that Blender with the add-on connected to this engine
 ``POST /api/frame``    ``{frame, fps?}`` set the current frame for @Frame / @Time (Blender's timeline also sets it)
 =====================  =======================================================================================
 
@@ -36,6 +42,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 from urllib.parse import parse_qs, urlparse
 
+from .. import blender_setup
 from ..edit import OP_NAMES, EditError
 from ..graph import GraphError
 from ..link.protocol import PROTOCOL_VERSION
@@ -150,13 +157,19 @@ class WebServer:
             return []
         return [c.name for c in self.link.clients]
 
+    def blender_info(self) -> dict:
+        found = blender_setup.list_blenders()
+        return {"blenders": found, "addon": {"available": blender_setup.addon_source() is not None, "url": "/addon/minihou_link.zip",
+                                              "name": "minihou_link.zip"},
+                "clients": self.link_clients(), "link_port": getattr(self.link, "port", None)}
+
     def state(self) -> dict:
         s = self.session
         out = s.snapshot()
         out.update(status=s.status(), nodes=[nt.describe() for nt in s.evaluator.registry], library=s.library_status(),
                    ops=OP_NAMES, root=str(self.root), files=self.files(),
                    link={"port": getattr(self.link, "port", None), "clients": self.link_clients()},
-                   engine={"pid": os.getpid(), "version": _version(), "protocol": PROTOCOL_VERSION,
+                   engine={"pid": os.getpid(), "version": _version(), "python_nodes": _python_allowed(), "protocol": PROTOCOL_VERSION,
                            "capabilities": ["instances_v1"]})
         return out
 
@@ -192,6 +205,11 @@ class WebServer:
         return p
 
 
+def _python_allowed() -> bool:
+    from ..nodes import python_node
+    return python_node.allowed()
+
+
 def _version() -> str:
     from .. import __version__
     return __version__
@@ -223,7 +241,21 @@ class _Handler(BaseHTTPRequestHandler):
         if status >= 400:                       # the request body may be unread: don't reuse this connection
             self.close_connection = True
             extra = {"Connection": "close"}
+            self._drain_body()
         self._send(status, json.dumps(obj, allow_nan=False).encode("utf-8"), "application/json", extra)
+
+    def _drain_body(self) -> None:
+        """Read and discard an unread request body before replying with an error. Closing a socket that still holds
+        unread data makes Windows reset the connection, and the client can then lose the reply (WinError 10053)."""
+        if getattr(self, "_body_read", False):
+            return
+        self._body_read = True
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            if 0 < n <= MAX_BODY:
+                self.rfile.read(n)
+        except (ValueError, OSError):
+            pass
 
     def _host_ok(self) -> bool:
         if self.app.host not in ("127.0.0.1", "localhost", "::1"):
@@ -247,6 +279,7 @@ class _Handler(BaseHTTPRequestHandler):
         if n > MAX_BODY:
             raise ApiError(413, "request too large")
         raw = self.rfile.read(n) if n else b"{}"
+        self._body_read = True
         try:
             data = json.loads(raw.decode("utf-8"))
         except (ValueError, UnicodeDecodeError) as e:
@@ -256,6 +289,7 @@ class _Handler(BaseHTTPRequestHandler):
         return data
 
     def _guard(self, fn):
+        self._body_read = False
         try:
             if not self._host_ok():
                 raise ApiError(403, "bad Host header")
@@ -305,6 +339,14 @@ class _Handler(BaseHTTPRequestHandler):
             st = s.status()
             st["clients"] = app.link_clients()
             return self._json(st)
+        if path == "/api/blender":
+            return self._json(app.blender_info())
+        if path == "/addon/minihou_link.zip":
+            try:
+                data = blender_setup.build_addon_zip()
+            except FileNotFoundError as e:
+                raise ApiError(404, str(e)) from None
+            return self._send(200, data, "application/zip", {"Content-Disposition": 'attachment; filename="minihou_link.zip"'})
         if path == "/api/files":
             return self._json({"root": str(app.root), "files": app.files(),
                                "current": str(s.path) if s.path else None})
@@ -338,6 +380,17 @@ class _Handler(BaseHTTPRequestHandler):
             if not isinstance(node, str):
                 raise ApiError(400, '"node" must be a node id')
             return self._json(s.inspect(node, bool(body.get("detail"))))
+        if path == "/api/preview":
+            node = body.get("node")
+            if not isinstance(node, str):
+                raise ApiError(400, '"node" must be a node id')
+            r = s.preview(node)
+            if not r["ok"]:
+                return self._json({"ok": False, "node": node, "rev": r["rev"], "error": r["error"]})
+            from .. import preview
+            head, arrays = preview.arrays_for(r["geo"])
+            head.update(node=node, rev=r["rev"], handles=r.get("handles", []))
+            return self._send(200, preview.pack(head, arrays), "application/octet-stream")
         if path == "/api/open":
             p = app.resolve(body.get("path"))
             if not p.exists() and not body.get("create"):
@@ -346,6 +399,22 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(snap)
         if path == "/api/save":
             return self._json({"saved": s.flush(), "error": s.save_error})
+        if path in ("/api/blender/install", "/api/blender/launch"):
+            found = blender_setup.list_blenders()
+            idx = body.get("index")
+            if not isinstance(idx, int) or isinstance(idx, bool) or not 0 <= idx < len(found):
+                raise ApiError(400, '"index" must pick one of the Blenders listed by GET /api/blender')
+            exe = found[idx]["path"]                  # never a path from the request: only what discovery found
+            if path.endswith("install"):
+                return self._json(blender_setup.install_addon(exe))
+            port = getattr(app.link, "port", None)
+            if not port:
+                raise ApiError(409, "the live link is not running, so Blender would have nothing to connect to")
+            try:
+                blender_setup.launch_blender(exe, port)
+            except (OSError, FileNotFoundError) as e:
+                return self._json({"ok": False, "message": f"could not start Blender: {e}"})
+            return self._json({"ok": True, "message": f"Starting Blender {found[idx]['version'] or ''}; it connects to this engine by itself."})
         if path == "/api/frame":
             try:
                 frame = float(body.get("frame"))

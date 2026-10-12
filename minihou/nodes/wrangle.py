@@ -2,13 +2,14 @@ import numpy as np
 
 from .. import groups, timectx
 from ..geometry import rows
-from ..sdk import Enum, Str, node
-from ..wrangle import WrangleError, compile_snippet
+from ..sdk import Enum, Input, Str, node
+from ..wrangle import _OTHER_INPUT, WrangleError, compile_snippet
 
 RUN_OVER = {"points": "point", "primitives": "prim", "vertices": "vertex"}
 
 
-@node("wrangle", inputs=["geo"], category="modify", version=3, params=[
+@node("wrangle", inputs=["geo", Input("opinput1", optional=True), Input("opinput2", optional=True),
+                         Input("opinput3", optional=True)], category="modify", version=3, params=[
     Str("snippet", "@P.z += sin(@P.x)", kind="code",
         doc="VEX-like expression run over every element, e.g. '@P.z += sin(@P.x * 2) * 0.5'. See the wrangle reference."),
     Enum("run_over", ["points", "primitives", "vertices"],
@@ -16,13 +17,14 @@ RUN_OVER = {"points": "point", "primitives": "prim", "vertices": "vertex"}
     Str("group", "", doc="Only change these elements: group names, ^exclusions, numbers/ranges, or an expression like "
                          "'@P.z > 0' (empty: all). Over vertices, a primitive group selects its corners"),
 ])
-def wrangle(geo, snippet, run_over, group=""):
+def wrangle(geo, opinput1=None, opinput2=None, opinput3=None, *, snippet, run_over, group=""):
     """Attribute wrangle: run a snippet over points, primitives or vertices (compiled once per snippet, numpy speed).
     Reads attributes of other domains (promoted), writes to the domain it runs over; uv, Cd, N, material_index and
     sharp_face arrive in Blender as UV map, color attribute, normals, material index and flat shading. Groups are
-    @group_<name> ints: writing i@group_top = @P.z > 1 makes a group."""
+    @group_<name> ints: writing i@group_top = @P.z > 1 makes a group. The extra inputs are read with @opinput1_<name>
+    (same element number) and @near1_<name> (nearest point)."""
     dom = RUN_OVER[run_over]
-    written = run_snippet(geo, snippet, dom)
+    written = run_snippet(geo, snippet, dom, (opinput1, opinput2, opinput3))
     sel = domain_mask(geo, dom, group)
     out = geo.copy()
     for name, arr in written.items():
@@ -40,11 +42,12 @@ def wrangle(geo, snippet, run_over, group=""):
     return out
 
 
-def run_snippet(geo, snippet: str, dom: str) -> dict:
-    """Run a snippet over a domain and return what it wrote (name -> array); the geometry is not changed."""
+def run_snippet(geo, snippet: str, dom: str, others=()) -> dict:
+    """Run a snippet over a domain and return what it wrote (name -> array); the geometry is not changed. ``others``
+    are the geometries of the extra inputs (None where unconnected)."""
     prog = compile_snippet(snippet)
     n = {"point": geo.npoints, "prim": geo.nprims, "vertex": geo.nvertices}[dom]
-    ctx = _Domains(geo)
+    ctx = _Domains(geo, others)
     attrs = {name: arr for name in prog.reads | set(prog.writes) if (arr := ctx.read(dom, name)) is not None}
     return prog.run(attrs, n, ctx.specials(dom))
 
@@ -60,9 +63,11 @@ def domain_mask(geo, dom: str, pattern: str):
 class _Domains:
     """Reads an attribute as seen from a domain, promoting from the others (lazily: only what a snippet uses)."""
 
-    def __init__(self, geo):
+    def __init__(self, geo, others=()):
         self.geo = geo
+        self.others = tuple(others)
         self._prim_of_vertex = None
+        self._near = {}
 
     def prim_of_vertex(self) -> np.ndarray:
         if self._prim_of_vertex is None:
@@ -79,8 +84,44 @@ class _Domains:
         out = np.stack(cols, 1).astype(np.float32)
         return out[:, 0] if vertex_values.ndim == 1 else out
 
+    def _other(self, k: int, what: str):
+        o = self.others[k - 1] if k <= len(self.others) else None
+        if o is None:
+            raise WrangleError(f"@{what} reads input {k}, which is not connected")
+        return o
+
+    def _read_other(self, dom: str, kind: str, k: int, name: str):
+        n = {"point": self.geo.npoints, "prim": self.geo.nprims, "vertex": self.geo.nvertices}[dom]
+        if kind == "opinput":
+            o = self._other(k, f"opinput{k}_{name}")
+            a = _Domains(o).read(dom, name)
+            if a is None:
+                raise WrangleError(f"input {k} has no attribute @{name} (over {dom}s)")
+            if len(a) >= n:
+                return a[:n]
+            pad = np.zeros((n - len(a),) + a.shape[1:], a.dtype)             # beyond its end: zero, as in VEX
+            return np.concatenate([a, pad])
+        o = self._other(k, f"near{k}_{name}")
+        if o.npoints == 0:
+            raise WrangleError(f"input {k} has no points to be near")
+        if k not in self._near:
+            from .. import spatial
+            idx, dist = spatial.nearest(o.P.astype(np.float64), self.read(dom, "P").astype(np.float64))
+            self._near[k] = (idx.astype(np.int32), dist.astype(np.float32))
+        idx, dist = self._near[k]
+        if name == "dist":
+            return dist
+        if name == "ptnum":
+            return idx
+        if name not in o.point:
+            raise WrangleError(f"input {k} has no point attribute @{name}")
+        return o.point[name][idx]
+
     def read(self, dom: str, name: str):
         g = self.geo
+        m = _OTHER_INPUT.match(name)
+        if m:
+            return self._read_other(dom, m.group(1), int(m.group(2)), m.group(3))
         if name in g.table(dom):
             return g.table(dom)[name]
         if dom == "vertex":

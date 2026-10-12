@@ -14,7 +14,7 @@ import os
 import socket
 import threading
 import time
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from ..graph import GraphError
 from ..sdk import ParamError
@@ -35,6 +35,10 @@ class _Connection:
         self.diff = DiffState()
         self.instances = InstanceManager(self.session)
         self.instance_mode = False
+
+        self.extra_diffs: Dict[str, DiffState] = {}      # one per extra output (named Blender objects)
+        self._extra_keys: Dict[str, str] = {}
+        self._sent_names: Optional[List[str]] = None
         self.cv = threading.Condition()
         self.closed = False
         self._outbox: List[tuple] = []
@@ -61,6 +65,9 @@ class _Connection:
         with self.cv:
             self._iface_pending = True
             self.cv.notify_all()
+
+    def on_extra_error(self, name: str, message: str):
+        self.post({"type": "error", "where": "output", "node": None, "message": f"output {name!r}: {message}"})
 
     def on_watch(self, names):
         self.post({"type": "watch_objects", "objects": list(names)})
@@ -148,6 +155,8 @@ class _Connection:
                 self.post({"type": "error", "where": "set_param", "message": str(e).strip("'")})
         elif t == "resync":
             self.diff.reset()
+            self.extra_diffs.clear()
+            self._extra_keys.clear()
             self._sent_good_seq = 0
             with self.cv:
                 self._iface_pending = True
@@ -204,6 +213,20 @@ class _Connection:
             header, arrays = self.diff.build(good.geo, good.seq, good.cook)
             self._sent_good_seq = good.seq
             self.bytes_sent += send_message(self.sock, header, arrays)
+            names = sorted(good.extras)
+            if names != self._sent_names:                    # which extra outputs exist (the add-on removes the others)
+                self._sent_names = names
+                self.bytes_sent += send_message(self.sock, {"type": "outputs", "names": names})
+                for gone in set(self.extra_diffs) - set(names):
+                    self.extra_diffs.pop(gone, None)
+                    self._extra_keys.pop(gone, None)
+            for name in names:
+                geo, key = good.extras[name]
+                if self._extra_keys.get(name) == key:
+                    continue
+                self._extra_keys[name] = key
+                header, arrays = self.extra_diffs.setdefault(name, DiffState()).build(geo, good.seq, good.cook, output=name)
+                self.bytes_sent += send_message(self.sock, header, arrays)
         if err is not None and err.seq > self._sent_error_seq:
             self._sent_error_seq = err.seq
             self.bytes_sent += send_message(self.sock, {"type": "error", "where": "cook", "seq": err.seq,

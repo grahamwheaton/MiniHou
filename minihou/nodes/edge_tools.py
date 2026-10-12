@@ -177,7 +177,7 @@ def polybridge(geo, source, destination, segments, twist, reverse):
     return edges.remap(geo, out)
 
 
-@node('dissolve', inputs=['geo'], category='model', params=[
+@node('dissolve_edges', inputs=['geo'], category='model', params=[
     Str('group', '', doc='Interior edges to remove; empty selection is a no-op'),
     Float('angle', 0.1, min=0, max=180, doc='Maximum angle between faces, degrees'),
     Bool('preserve_seams', True, doc='Reject merges across differing corner data or primitive attributes/materials'),

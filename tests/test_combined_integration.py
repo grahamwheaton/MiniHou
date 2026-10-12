@@ -45,6 +45,46 @@ class CombinedRepeatValidation(unittest.TestCase):
                     evaluator.close()
 
 
+class ClaudeCodexIntegration(unittest.TestCase):
+    def test_completed_repeat_inspector_and_named_output(self):
+        from minihou.link.session import Session
+        nodes = {"box": node("box")}
+        repeat(nodes, "box", count=3)
+        nodes["main"] = node("output", geo="box")
+        nodes["named"] = node("output", {"object": "Repeated"}, geo="end")
+        session = Session(Graph.from_dict({"nodes": nodes, "display": "main"}))
+        self.addCleanup(session.stop)
+        session.start()
+        self.assertTrue(session.wait_idle())
+        inspection = session.inspect("end")
+        self.assertTrue(inspection["ok"], inspection)
+        self.assertIn("flow", inspection)
+        result = session.latest_good
+        self.assertIsNotNone(result)
+        np.testing.assert_allclose(result.extras["Repeated"][0].P, result.geo.P + [3, 0, 0])
+
+    def test_named_output_proxy_and_modifier_share_server(self):
+        from minihou.link.instance_client import InstanceClient
+        from tests.test_link import Harness, wait_for
+        from tests.test_modifier_instances import GRAPH, mesh
+        from tests.test_outputs import TWO
+        harness = Harness(Graph.from_dict({"nodes": TWO, "display": "main"}))
+        self.addCleanup(harness.close)
+        proxy, messages = harness.client()
+        instance = InstanceClient(port=harness.port)
+        self.addCleanup(instance.close)
+        self.assertIn("instances_v1", instance.connect()["capabilities"])
+        named, _ = wait_for(messages, "geo", pred=lambda h: h.get("output") == "Trees")
+        self.assertTrue(named["full"])
+        _, result = instance.cook("combined", "", {"Move": [2, 0, 0]}, mesh(), graph=GRAPH)
+        np.testing.assert_array_equal(result["point/P"], mesh()["point/P"] + [2, 0, 0])
+        harness.session.edit([{"op": "set", "id": "b", "params": {"size": [2, 2, 2]}}])
+        changed, _ = wait_for(messages, "geo", pred=lambda h: h.get("output") == "Trees")
+        self.assertFalse(changed["full"])
+        _, again = instance.cook("combined", "", {"Move": [2, 0, 0]}, mesh(), graph=GRAPH)
+        np.testing.assert_array_equal(again["point/P"], result["point/P"])
+
+
 @unittest.skipUnless(importlib.util.find_spec("mujoco"), "optional physics extra not installed")
 class CombinedRepeatPhysics(unittest.TestCase):
     def setUp(self):

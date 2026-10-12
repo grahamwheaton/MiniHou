@@ -104,6 +104,56 @@ class BevelTests(unittest.TestCase):
             cook({"c": {"type": "helix"}, "b": {"type": "polybevel", "inputs": {"geo": "c"}}}, "b")
 
 
+class EdgeSelectionTests(unittest.TestCase):
+    """polybevel `edges`: exactly the listed edges (point pairs), the way the 3-D view's selection writes them."""
+
+    def box(self):
+        return Evaluator().cook(Graph.from_dict({"nodes": {"b": {"type": "box", "params": {"size": [2, 2, 2]}}},
+                                                 "display": "b"}))
+
+    def edges_of_prim(self, geo, prim):
+        vp, offs = geo.topology.vertex_point.astype(int), geo.topology.prim_offsets
+        v = vp[offs[prim]:offs[prim + 1]]
+        return [(min(a, b), max(a, b)) for a, b in zip(v, np.roll(v, -1))]
+
+    def bevel(self, geo, edges, **p):
+        from minihou import REGISTRY
+        from minihou.groups import format_edges
+        nt = REGISTRY.get("polybevel")
+        return nt.fn(geo, **nt.coerce_params(dict(edges=format_edges(edges), **p)))
+
+    def test_a_face_ring_is_bevelled_and_the_rest_is_left_alone(self):
+        g = self.box()
+        out = self.bevel(g, self.edges_of_prim(g, 0), distance=0.2)
+        self.assertEqual(out.nprims, 6 + 4)                                  # four bevel quads, nothing else
+        closed_shell(self, out)
+        self.assertLess(volume(out), volume(g))
+        every = Evaluator().cook(Graph.from_dict({"nodes": {"b": {"type": "box", "params": {"size": [2, 2, 2]}},
+                                                            "v": {"type": "polybevel", "inputs": {"geo": "b"}}},
+                                                  "display": "v"}))
+        self.assertGreater(every.nprims, out.nprims)                         # the angle mode bevels all twelve edges
+
+    def test_the_selection_ignores_the_angle_and_flat_edges_are_allowed(self):
+        from minihou.groups import parse_edges
+        g = Evaluator().cook(Graph.from_dict({"nodes": {"b": {"type": "box", "params": {"size": [2, 2, 2], "divisions": 2}}},
+                                              "display": "b"}))
+        ring = self.edges_of_prim(g, 0)
+        out = self.bevel(g, ring, distance=0.05, min_angle=179.0)            # the angle would exclude everything
+        self.assertGreater(out.nprims, g.nprims)
+        self.assertEqual(len(parse_edges("3-1 1-3 2-2 5-4", 10)), 2)         # sorted, deduplicated, no self edges
+
+    def test_clear_errors(self):
+        g = self.box()
+        with self.assertRaisesRegex(ValueError, "cannot end inside the surface"):
+            self.bevel(g, [self.edges_of_prim(g, 0)[0]], distance=0.1)       # one edge that stops mid-surface
+        for bad, msg in (("1-", "bad edge"), ("a-b", "bad edge"), ("0-99", "only 8 points")):
+            with self.assertRaisesRegex(ValueError, msg):
+                from minihou import REGISTRY
+                REGISTRY.get("polybevel").fn(g, **REGISTRY.get("polybevel").coerce_params({"edges": bad}))
+        same = self.bevel(g, [], distance=0.1)                               # an empty selection means the angle mode
+        self.assertGreater(same.nprims, 6)
+
+
 class VertexNormalTests(unittest.TestCase):
     def test_cusp_angle(self):
         box = cook({"b": {"type": "box"}, "n": {"type": "normal", "inputs": {"geo": "b"}, "params": {"domain": "vertex"}}},

@@ -20,13 +20,23 @@ class Inbox:
         self._lock = threading.Lock()
         self._events: Deque[dict] = deque()
         self._geo: Optional[GeoUpdate] = None
+        self._extras: Dict[str, GeoUpdate] = {}          # extra outputs (named Blender objects), merged per output
         self.geo_received = 0
         self.geo_merged = 0
         self.bytes_received = 0
 
     def push(self, header: dict, arrays: dict) -> None:
         """Called on the socket thread. Must not touch bpy."""
-        if header.get("type") == "geo":
+        if header.get("type") == "geo" and header.get("output") is not None:
+            u = GeoUpdate.from_message(header, arrays)
+            with self._lock:
+                self.geo_received += 1
+                self.bytes_received += u.nbytes
+                old = self._extras.get(u.output)
+                if old is not None:
+                    self.geo_merged += 1
+                self._extras[u.output] = u if old is None else merge_updates(old, u)
+        elif header.get("type") == "geo":
             u = GeoUpdate.from_message(header, arrays)
             with self._lock:
                 self.geo_received += 1
@@ -47,10 +57,17 @@ class Inbox:
             geo, self._geo = self._geo, None
         return events, geo
 
+    def take_extras(self) -> Dict[str, GeoUpdate]:
+        """Main thread: the merged updates of the extra outputs, by Blender object name."""
+        with self._lock:
+            extras, self._extras = self._extras, {}
+        return extras
+
     def clear(self) -> None:
         with self._lock:
             self._events.clear()
             self._geo = None
+            self._extras = {}
 
 
 # Blender stores socket floats as float32, so a value written as 0.4 reads back as 0.4000000059604645

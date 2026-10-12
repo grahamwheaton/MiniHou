@@ -55,7 +55,14 @@ def _cmd_new_node(args) -> int:
     return 0
 
 
+def _python_switch(args) -> None:
+    if getattr(args, "allow_python", False):
+        from .nodes import python_node
+        python_node.set_allowed(True)
+
+
 def _cmd_cook(args) -> int:
+    _python_switch(args)
     _library(args)
     try:
         g = Graph.load(args.graph)
@@ -75,6 +82,7 @@ def _cmd_serve(args) -> int:
     from .link.server import LinkServer
     from .link.session import Session
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+    _python_switch(args)
     library = _library(args)                       # before the graph: it may use library node types
     try:
         g = Graph.load(args.graph, check=False)       # an unfinished graph (saved by the editor) still opens
@@ -83,6 +91,9 @@ def _cmd_serve(args) -> int:
         return 2
     from . import accel
     print(f"compute backend: {accel.status()}", flush=True)
+    from .nodes import python_node
+    if python_node.allowed():
+        print("python nodes: ENABLED (graphs can run Python code)", flush=True)
     accel.warmup_async()          # compile/load kernels in the background; a cook that arrives early just waits
     session = Session(g, cache_bytes=int(args.cache_mb * 1024 * 1024))
     session.attach_library(library)
@@ -134,6 +145,7 @@ def _cmd_serve(args) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="minihou")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    sub.add_parser("app", help="start the engine and the editor in a workspace folder (what the packed program does)", add_help=False)
     s = sub.add_parser("serve", help="serve a graph to Blender over the live link")
     s.add_argument("graph")
     s.add_argument("--host", default="127.0.0.1")
@@ -147,11 +159,15 @@ def main(argv=None) -> int:
     s.add_argument("--nodes", action="append", metavar="DIR",
                    help="node library folder, hot-reloaded (repeatable; default: <root>/nodes)")
     s.add_argument("--cache-mb", type=float, default=2048)
+    s.add_argument("--allow-python", action="store_true",
+                   help="let `python` nodes run the code stored in graphs (off by default: only for graphs you trust; "
+                        "also MINIHOU_PYTHON_NODES=1)")
     s.set_defaults(fn=_cmd_serve)
     c = sub.add_parser("cook", help="cook a graph once and print timings")
     c.add_argument("graph")
     c.add_argument("--node", default=None)
     c.add_argument("--repeat", type=int, default=2, help="cook N times to show cache behaviour")
+    c.add_argument("--allow-python", action="store_true", help="let `python` nodes run their code (see serve)")
     c.add_argument("--nodes", action="append", metavar="DIR", help="node library folder (default: ./nodes)")
     c.set_defaults(fn=_cmd_cook)
     n = sub.add_parser("nodes", help="list node types and parameters")
@@ -169,6 +185,9 @@ def main(argv=None) -> int:
     if argv and argv[0] == "mcp":
         from .mcp import main as mcp_main
         return mcp_main(argv[1:])
+    if not argv or argv[0] == "app":              # double-clicking the packed program (or `python -m minihou`): the app
+        from .app import main as app_main
+        return app_main(argv[1:])
     args = ap.parse_args(argv)
     return args.fn(args)
 

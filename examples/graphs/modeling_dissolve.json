@@ -29,7 +29,7 @@
       ]
     },
     "dissolve": {
-      "type": "dissolve",
+      "type": "dissolve_edges",
       "inputs": {
         "geo": "boundary"
       },

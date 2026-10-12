@@ -1,5 +1,7 @@
 # MiniHou
 
+The combined Claude/Codex version and node-name compatibility notes are documented in [Master integration](docs/MASTER_INTEGRATION.md).
+
 **Wired Geometry Nodes groups:** MiniHou can now process the actual mesh wired into a group inside a native GN
 network, including multiple independently configured placements, nested groups and branches. Blender evaluates
 each native input subgraph on a disposable copy; the external engine computes it and publishes a private result
@@ -82,6 +84,12 @@ connection state, cook/write timings and the exposed parameters. The `MiniHou_Pr
 modifier whose inputs are the same parameters (also editable, keyable and drivable in the modifier panel). Edit the
 graph JSON in any editor and save: the engine hot-reloads it and only the changed nodes recook. `--editor` also opens the
 **node editor** at <http://127.0.0.1:8766/> (the URL is printed either way).
+
+**More than one result**: the display node is the main output (it flows through `MiniHou_Proxy`). Give any other `output` node an
+`object` name (say `Trees`) and its geometry appears as its own mesh object of that name, updated live; remove the name (or the node)
+and the object goes. The add-on only ever touches objects it made: an existing object of the same name is left alone and logged.
+**Detail attributes** (one value per geometry: counts, measurements, a `for_each` iteration) arrive as `mh_<name>` custom properties
+on `MiniHou_Output` (and on each named output's object), ready for drivers and scripts.
 
 ```powershell
 $env:BLENDER_EXE = "C:\Program Files\Blender Foundation\Blender 5.1\blender.exe"   # if auto-detection misses it
@@ -170,10 +178,7 @@ adopt the changes. Other modifiers keep their saved snapshots until reloaded. A 
 `modifier_input` can show a missing-input cook error in the browser: its actual upstream geometry
 is supplied when Blender cooks the modifier, not by this template-editing action.
 
-MiniHou's Geometry Nodes group is an **object-stack cache wrapper**. Placing that group inside a
-different native Geometry Nodes group does not send the enclosing group's incoming geometry into
-MiniHou; it reads the cached object-stack result. Use top-level MiniHou modifiers for supported
-ordered stack evaluation. Nested native GN input evaluation is not implemented by this change.
+For native Geometry Nodes networks, use the wired MiniHou groups described in [Geometry Nodes integration](docs/GEONODES.md). They evaluate incoming geometry through staged probes and support native operations before, between and after MiniHou placements.
 
 ## Scatter an editable Blender source object
 
@@ -213,6 +218,24 @@ and point cache. If a bound source is deleted, or becomes cyclic itself, its geo
 is retained and an unsafe binding is disconnected. Reassign a valid source or repair the dependency to recover without
 recreating the modifier. Source meshes containing MiniHou modifiers are conservatively unsupported, even if no cycle
 would result. Existing interactive-cache and render limitations above still apply.
+
+## The packed app
+
+For people who just want to run it: **MiniHou** is one program (a PyInstaller folder, built by `tools/build_app.py` and by the `app` workflow on
+Windows, Linux and macOS; tag `v*` to attach the zips to a release). Unzip, run `MiniHou` and the editor opens in the browser with a welcome
+graph. It keeps everything in `~/MiniHou` (or `Documents/MiniHou`): `graphs/` for yours, `nodes/` for your own node files, `examples/` copied in
+once and never overwritten. The same thing without packing: `py -m minihou app` (or no arguments at all).
+
+A bar at the top of the editor handles Blender while none is connected:
+
+* **drag `minihou_link.zip`** from the bar onto a Blender window (Blender 4.2+ installs a dropped zip), or click it to download;
+* **Install add-on** runs the Blender you pick once, in the background, unpacks the add-on into its user add-ons folder, enables it and
+  saves the preferences (restart Blender if it was already open);
+* **Open Blender** starts it with the add-on registered from a private copy and connected to this engine's port, so nothing is installed at all.
+
+The bar only runs Blenders it found itself (Program Files, Steam, per-user installs, `/Applications`, `PATH`, `$BLENDER_EXE`); the web API takes
+an index into that list, never a path, and refuses cross-origin pages. Dismiss it with the x; the **Blender** indicator in the top bar brings it
+back. The default build bundles numpy only (about 35 MB); `--with-accel` adds numba and scipy for the faster heavy nodes (several times larger).
 
 ## Node editor
 
@@ -269,6 +292,49 @@ parameter to Blender) and an **inspector** with the node's point/prim counts, bo
 the failing node. Everything is live: drag a slider in Blender and the editor follows; edit in the editor and Blender follows.
 Edits are saved to the graph file (and are undoable, including edits made by an AI). Press **?** for all controls.
 
+![The editor with the 3-D preview and a network box](docs/images/editor_preview.png)
+
+![A bevel made from an edge selection, with its distance arrow in the 3-D view](docs/images/editor_gizmo.png)
+
+![The transform node's rotation rings](docs/images/editor_rotate.png)
+
+![The 3-D view as the main window, with the graph small on the left](docs/images/editor_3d_main.png)
+
+* **Resizable panes**: the graph, the 3-D view and the parameter panel are separate panes with draggable dividers (between graph and
+  view, between those and the side panel, and between parameters and the geometry inspector). **Graph / Split / 3D** in the top bar set
+  the balance (the 3-D view as the main window, or the graph), **⇆** puts the panes side by side or stacked, **⇄** swaps them, **▤** hides
+  the side panel, and **Ctrl+Space** over a pane makes it fill the window (again to go back). The layout is remembered in the browser.
+* **3-D view**: a WebGL2 view of the selected node, or the display node when nothing is selected, so the engine is
+  usable without Blender. Drag to orbit (Z is up), **Shift**-drag or right-drag to pan, wheel to zoom, double-click to frame. Navigation
+  also has **Front / Right / Top** buttons and an axis gizmo in the corner (click an axis ball to look along it; **Numpad 1 / 3 / 7**, with
+  **Ctrl** for the opposite side), **Persp / Ortho** (**Numpad 5**), and **Numpad .** / **Home** to frame the selected elements or everything.
+  Shaded / edges / points toggles; point colours (`Cd`) are shown; back faces are tinted orange so flipped normals stand out.
+  Very large geometry is cut to a drawable size and the view says so.
+* **Select in the 3-D view and build the network from it**: the **Pts / Edges / Faces** buttons under the view (or **1 / 2 / 3** with the
+  mouse over it) switch to a selection mode: click to pick (only what you can see), **Shift** adds, **Ctrl** removes, drag a box to
+  select everything inside it (X-ray); **Alt**-drag or the middle mouse button orbits, **A** selects all, **Esc** clears then leaves.
+  Selected edges are drawn thick, faces tinted. The buttons that appear then add a node **after the node you are looking at and wire it into
+  the chain in place** (everything that read that node reads the new one; the display flag moves along): *Bevel* for edges (`polybevel` with
+  an `edges` list of point pairs; a bevel cannot end in the middle of a surface, so select a loop or edges that meet or reach a border),
+  *Extrude*, *Inset*, *Reverse*, *Group*, *Delete* for faces, *Group* and *Delete* for points. The same `insert` edit op is available to AI
+  tools (`{"op": "insert", "after": "id", "type": "polybevel"}`).
+* **Handles (gizmos)**: the node you are looking at can show draggable arrows in the 3-D view: grab an arrow head and drag, and the parameter
+  follows live (everything recooks, Blender included). `transform` has **Move / Rotate / Scale** tools (buttons above the view, or **W / E / R**
+  with the pointer over it and nothing selected): move arrows, one **ring** per rotation axis (drag around it; the rings turn about the axes
+  each Euler angle really uses and sit at pivot + translate, so they stay put while you drag), and **scale cubes** per axis plus a square
+  for uniform scale (a drag multiplies the value, so it never goes through zero). `polyextrude` and `polybevel` have a distance arrow
+  standing on the selected faces or edges (so the bevel you just made from a selection can be scrubbed straight away), `box` a size
+  arrow per axis and `sphere` a radius arrow. Handles are small provider functions in `minihou/handles.py` (inputs, output, parameters ->
+  arrows); a failing provider just shows none.
+* **Attribute flow**: the inspector lists what the selected node did to its inputs' attributes (`+` added, `~` changed, `→` moved to
+  another domain, `−` removed, and whether topology changed); a wrangle also lists the attributes its snippet reads. It is worked out
+  by comparing cooked results, so it is right for built-in, library and system nodes alike (also in `inspect_node` for AI tools, as `flow`).
+* **Network boxes**: **O** (or the Box button) draws a titled, coloured rectangle behind the selected nodes. Drag its title to move
+  it with its nodes, its corner to resize, double-click to rename, the dot to change colour. They are saved with the graph and never
+  affect a cook.
+* **Copy / cut / paste** (**Ctrl+C / X / V**): nodes travel as JSON text through the clipboard, so they can move to another graph or
+  another editor window; wires between the copied nodes are kept.
+
 ## Build systems with AI (MCP)
 
 The engine includes an [MCP](https://modelcontextprotocol.io) server, so an AI assistant can build and tweak graphs in the running
@@ -317,7 +383,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | ![volumes](docs/images/gallery_volumes.png) sdf_boolean fillet, metaballs | ![lsystem_tree](docs/images/gallery_lsystem_tree.png) lsystem + sweep + leaves | ![eroded_terrain](docs/images/gallery_eroded_terrain.png) heightfield erosion |
 | ![bevel_shapes](docs/images/gallery_bevel_shapes.png) polybevel, tube, torus, cusp normals | ![uv_unwrap](docs/images/gallery_uv_unwrap.png) uv_flatten (LSCM), checker texture | ![fractured_rock](docs/images/gallery_fractured_rock.png) voronoi_fracture, exploded_view, smooth |
 | ![polyreduce_rock](docs/images/gallery_polyreduce_rock.png) polyreduce to 3% (quadric error metrics) | ![spiral_slide](docs/images/gallery_spiral_slide.png) path_deform along a helix (up_vector frames) | ![boolean_part](docs/images/gallery_boolean_part.png) exact boolean: bores, slot, dome |
-| ![pcg_forest](docs/images/gallery_pcg_forest.png) PCG points: sampler, noise filter, house and road differences, self-prune, spawner | | |
+| ![pcg_forest](docs/images/gallery_pcg_forest.png) PCG points: sampler, noise filter, house and road differences, self-prune, spawner | ![surface_toolkit](docs/images/gallery_surface_toolkit.png) skin (loft), delaunay, convex_hull, network boxes | |
 
 ## Nodes
 
@@ -338,6 +404,8 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `noise` | geo | fractal Perlin noise; displaces `P` or writes any attribute (scalar or vector mode); optional group |
 | `group_create` | geo | a named point or primitive group: pattern/expression, bounding box, normal direction, random %, boundary |
 | `group_promote` | geo | convert groups between points and primitives |
+| `group_expand` | geo | grow or shrink a group by rings of neighbours (by points or edges); then `grown ^orig` selects the border ring |
+| `group_expand` | geo | grow or shrink a group by rings of neighbours (points or edges); `^` patterns then select the border ring |
 | `blast` | geo | delete a group of primitives or points (or keep only it) |
 | `polybevel` | geo | chamfer sharp edges (min angle, point group); slides along borders and flat edges so subdivided meshes bevel cleanly; moves are limited where faces would fold; new faces in group `bevel` |
 | `boolean` | a, b | exact union / subtract / intersect of closed meshes: watertight n-gon output, uv and attributes carried across cuts, groups `from_a`/`from_b`; flush faces cut cleanly |
@@ -358,6 +426,12 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `mirror` | geo | reflect across a plane, weld the seam, keep or drop the original |
 | `clip` | geo | cut with a plane; keep above, below or both (new points interpolate attributes) |
 | `polyfill` | geo | close holes with n-gons facing outwards |
+| `convex_hull` | geo | the smallest convex closed mesh around the points (Qhull via SciPy, or a numpy incremental hull) |
+| `revolve` | geo | spin curves or outlines around an axis (`angle`, `divisions`): vases, wheels, goblets; poles are shared points, corner `uv` |
+| `bridge` | geo | join pairs of open boundary loops with a band of faces (quads for equal loops, triangles otherwise); `align`, `twist` |
+| `skin` | geo | loft: resample the input curves to one point count and join consecutive curves with quads (`loop`, `cap`) |
+| `dissolve` | geo | merge neighbouring faces that are flat within `angle` into n-gons (`group` limits it) |
+| `delaunay` | geo | 2-D Delaunay triangulation of the points (`axis`; `max_edge` cuts long triangles); SciPy if installed, else pure Python |
 | `divide` | geo | triangulate (fans for convex polygons, ear clipping for concave ones) |
 | `reverse` | geo | flip winding (and N) of a group of primitives |
 | `facet` | geo | unique points per face (optionally flat normals) |
@@ -393,6 +467,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `sdf_boolean` | a, b | union / subtract / intersect of closed meshes through distance fields, with smooth fillets |
 | `for_each` | geo | run a node or a system on every piece (connected pieces, an attribute's values, or each primitive) and merge |
 | `solver` | geo | feed each frame's result into the next (simulations, growth): deterministic, incremental playback, substeps |
+| `python` | geo, opinput1..3 | real Python inside the graph: geometry and variables piped in, you set `out`; **off unless the engine runs with `--allow-python`** |
 | `wrangle` | geo | VEX-like snippet over points, primitives or vertices (see below) |
 | `attribute_delete` | geo | delete attributes by name or wildcard (`N uv tmp_*`) |
 | `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |
@@ -547,6 +622,30 @@ mesh.
 
 ## Writing a node
 
+### The python node (code inside the graph)
+
+For a quick one-off you do not need a library file: a `python` node holds the code in its **code** box (editor: the code panel,
+same as a wrangle). The geometry you wire in arrives as `geo`, `input1`, `input2`, `input3` (read-only: copy before editing),
+`np` is numpy, and you set `out` to the result, a `Geometry` or an `(n, 3)` array of points (leave it out to pass `geo` through):
+
+```python
+P = geo.P.astype(np.float64)
+P[:, 2] += a * np.sin(P[:, 0] * b) + factor        # a, b: sliders; factor: a named value from the Variables field
+out = geo.copy()
+out.point["P"] = P.astype(np.float32)
+out.detail["bumps"] = int(i)                       # detail attributes reach Blender as custom properties
+```
+
+Variables piped in: `a b c d` (floats), `i j` (ints), `v` (x, y, z), `s` (text), `flag` (bool) are ordinary parameters, so they
+can be exposed to Blender and keyed; the **Variables** field takes any number of `name = value` lines (numbers, text, lists,
+True/False); `Frame`, `Time`, `TimeInc` give the time (tick **animated** so the node recooks on every frame). Treat it as a pure
+function of its inputs and parameters: results are cached like any node. Errors name the line of your code.
+
+**It is off by default.** A graph file can carry code, and a node that runs it would execute whatever a downloaded (or
+AI-written) graph says. Start the engine with `--allow-python` (`py tools\launch_blender.py --engine g.json --allow-python`, or set
+`MINIHOU_PYTHON_NODES=1`) for graphs you trust; nothing inside a graph can switch it on, and without the switch the node
+fails with a message saying so. Wrangles stay sandboxed and are always available.
+
 ### Node libraries (hot-reloaded)
 
 ![A spiral staircase from the example library node nodes/stairs.py, live in Blender](docs/images/spiral_stairs.png)
@@ -638,6 +737,9 @@ Measured with `bench/bench_link.py` (1M points, Blender 5.1.2). Windows numbers 
 Smaller graphs on Linux (slider edit, end to end): 10k points 1.5 ms, 100k 4 ms, 250k 6.6 ms (numba); numpy-only is 2-11x slower.
 Per node at 1M points with numba vs numpy: noise 12.7 vs 283 ms, 4-octave noise 46 vs 1106 ms, scatter 160 vs 1012 ms,
 copy_to_points (1M copies) 134 vs 536 ms, normal 63 vs 662 ms.
+Mesh queries (`raycast.TriGrid`: closest point and ray casts, behind `remesh`, `sdf_boolean`, `ray`, scatter-in-volume and the
+PCG samplers) also have compiled kernels: remesh of a 4,800-triangle sphere at 0.03 voxels takes 3.5 s vs 17 s, 20k closest-point
+queries against a 38k-triangle mesh 1.6 s vs 89 s, 5k inside tests 0.02 s vs 0.4 s. Results match to rounding.
 
 Two findings made the Blender side fast: `mesh.vertices.foreach_set("co")` walks per-vertex RNA structs (165 ms for 1M points) while
 `mesh.attributes["position"].data.foreach_set("vector")` is a memcpy (~1 ms); likewise `.corner_vert` (1.3 ms) vs
@@ -707,7 +809,8 @@ Not verified:
 
 ## Known limits
 
-* One output mesh and one exposed-parameter set per engine. Detail attributes are not sent to Blender.
+* One exposed-parameter set per engine (the display branch); extra outputs are plain mesh objects without a modifier or exposed
+  parameters. Detail attributes reach Blender as custom properties (numbers, text and short number lists only).
 * Curves reach Blender as loose mesh edges: their point attributes come along, their primitive and vertex attributes
   do not (Blender has no domain for them). No edge-domain attributes (e.g. `sharp_edge`, `crease_edge`), in either
   direction. A `blender_object` reads meshes (and what Blender can convert to one, e.g. text and curves with geometry).

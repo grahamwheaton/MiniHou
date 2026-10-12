@@ -35,7 +35,7 @@ self-intersection repair. Existing UV corners remain intact; new corner/point
 floats interpolate, discrete values follow the source, primitive values follow
 the source profile face. New connecting edges start with no edge membership.
 
-`dissolve`: selected manifold interior edges merge regions into single n-gons.
+`dissolve_edges`: selected manifold interior edges merge regions into single n-gons.
 The angle limit prevents unintended folds; default seam protection rejects
 differing primitive attributes/materials and corner UV/data seams. Primitive
 groups union; other primitive values come from the lowest-numbered source.
@@ -53,7 +53,7 @@ at another MiniHou checkout.
 
 ## Skin / Loft and Poly Expand 2D
 
-`skin` connects selected profiles in primitive-number order with quads. Use Merge
+`skin_profiles` connects selected profiles in primitive-number order with quads. Use Merge
 in the intended profile order first. Profiles must have equal corner counts,
 matching closure and deliberately aligned corner correspondence; use Resample
 upstream when necessary. `keep_profiles` retains the sources; `close_loft` joins

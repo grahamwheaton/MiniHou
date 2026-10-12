@@ -63,7 +63,7 @@
       ]
     },
     "skin": {
-      "type": "skin",
+      "type": "skin_profiles",
       "inputs": {
         "geo": "profiles"
       },

@@ -73,7 +73,7 @@ class EdgeToolsTests(unittest.TestCase):
         g.prim['group_side'] = [0,1]
         g = run('edge_group',g,name='border',method='boundary')
         g.freeze()
-        out = run('dissolve', g, group='p0-2')
+        out = run('dissolve_edges', g, group='p0-2')
         self.assertEqual(out.topology.polys(),[[0,1,2,3]])
         self.assertEqual(out.prim['group_side'][0],1)
         self.assertEqual(edges.mask(out,'border').sum(),4)
@@ -87,16 +87,16 @@ class EdgeToolsTests(unittest.TestCase):
                 a[3] += 1
             table[attr] = a
             with self.assertRaisesRegex(ValueError,'seam'):
-                run('dissolve',bad,group='p0-2')
+                run('dissolve_edges',bad,group='p0-2')
         with self.assertRaisesRegex(ValueError,'interior'):
-            run('dissolve',g,group='p0-1')
+            run('dissolve_edges',g,group='p0-1')
 
     def test_empty_and_group_combine(self):
         g = Geometry()
         g.point['P'] = np.empty((0,3),np.float32)
         out = run('edge_group',g)
         self.assertEqual(len(edges.mask(out,'*')),0)
-        self.assertIs(run('dissolve',g),g)
+        self.assertIs(run('dissolve_edges',g),g)
         g = profiles()
         a = run('edge_group',g,name='sel',pattern='0')
         b = run('edge_group',a,name='sel',pattern='1',combine='union')
@@ -105,14 +105,14 @@ class EdgeToolsTests(unittest.TestCase):
     def test_dissolve_rejects_closed_shell_holes_and_nonmanifold(self):
         # Dissolving every edge of a closed shell cannot make one polygon.
         with self.assertRaisesRegex(ValueError,'simple closed boundary'):
-            run('dissolve',run('box'),group='*',angle=180,preserve_seams=False)
+            run('dissolve_edges',run('box'),group='*',angle=180,preserve_seams=False)
         ring=mesh([[x,y,0] for x,y in [(0,0),(3,0),(3,3),(0,3),(1,1),(2,1),(2,2),(1,2)]],
                   [[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]])
         with self.assertRaisesRegex(ValueError,'simple closed boundary'):
-            run('dissolve',ring,group='p0-4 p1-5 p2-6 p3-7')
+            run('dissolve_edges',ring,group='p0-4 p1-5 p2-6 p3-7')
         bad=mesh([[0,0,0],[1,0,0],[0,1,0],[0,-1,0],[0,0,1]],[[0,1,2],[1,0,3],[0,1,4]])
         with self.assertRaisesRegex(ValueError,'manifold interior'):
-            run('dissolve',bad,group='p0-1',angle=180)
+            run('dissolve_edges',bad,group='p0-1',angle=180)
 
     def test_bridge_open_chains_and_rigid_equivariance(self):
         g=mesh([[0,0,0],[1,0,0],[2,0,0],[0,0,2],[1,0,2],[2,0,2]],

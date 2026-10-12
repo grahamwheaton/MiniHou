@@ -11,7 +11,7 @@ import numpy as np
 from .. import groups, topo
 from ..sdk import Bool, Enum, Float, Int, Str, Vec3, node
 from . import _build as B
-from ._util import normalize_rows
+from ._util import guard_count, normalize_rows
 
 
 # -- helpers ----------------------------------------------------------------------------------------------------
@@ -226,6 +226,10 @@ def resample(geo, by, length, segments, group):
     _, _, _, closed, _, seg = curve_arrays(geo, prims)
     sizes = geo.topology.prim_sizes()[prims]
     total = np.add.reduceat(seg, np.cumsum(sizes) - sizes) if len(prims) else np.zeros(0)
+    if by == "length":
+        guard_count(float(total.sum() / length), "resample", "use a larger length")
+    else:
+        guard_count(float(segments) * len(total), "resample", "use fewer segments")
     s_lists = []
     for L, c in zip(total.tolist(), closed.tolist()):
         n = segments if by == "count" else max(int(np.ceil(L / length - 1e-9)), 1)

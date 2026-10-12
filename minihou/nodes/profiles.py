@@ -7,7 +7,7 @@ from . import _build as B
 from .edge_tools import _rebuild
 
 
-@node('skin', inputs=['geo'], category='model', params=[
+@node('skin_profiles', inputs=['geo'], category='model', params=[
     Str('group', '', doc='Profiles in primitive-number order; equal point counts and matching closure required'),
     Bool('keep_profiles', False),
     Bool('close_loft', False, doc='Connect the last profile back to the first (at least three profiles)'),

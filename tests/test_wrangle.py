@@ -259,6 +259,70 @@ class DomainTests(unittest.TestCase):
         self.assertEqual(sorted(set(out.prim["material_index"].tolist())), [0, 1])
 
 
+class ExtraInputTests(unittest.TestCase):
+    """@opinputN_x (same element number) and @nearN_x (nearest point) read the wrangle's extra inputs."""
+
+    def test_same_element_number_pads_with_zero(self):
+        a, b = grid(5), grid(3)
+        b = b.copy()
+        b.point["w"] = np.arange(b.npoints, dtype=np.float32) + 1
+        out = run("wrangle", a, b, snippet="f@got = @opinput1_w; @got2 = @opinput1_P.x", run_over="points")
+        np.testing.assert_array_equal(out.point["got"][:9], np.arange(9) + 1)
+        self.assertTrue(np.all(out.point["got"][9:] == 0))
+        np.testing.assert_allclose(out.point["got2"][:9], b.P[:, 0])
+
+    def test_reads_promote_between_domains(self):
+        a = run("box")
+        b = run("box")
+        b = b.copy()
+        b.prim["id"] = np.arange(b.nprims, dtype=np.int32) * 10
+        over_vertices = run("wrangle", a, b, snippet="i@id = @opinput1_id", run_over="vertices")
+        self.assertEqual(over_vertices.vertex["id"].shape, (a.nvertices,))
+        over_prims = run("wrangle", a, b, snippet="i@id = @opinput1_id", run_over="primitives")
+        np.testing.assert_array_equal(over_prims.prim["id"], np.arange(a.nprims) * 10)
+
+    def test_nearest_point_attributes_distance_and_number(self):
+        src = Geometry.points_only(np.array([[0, 0, 0], [10, 0, 0], [0, 10, 0]], np.float32)).copy()
+        src.point["Cd"] = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]], np.float32)
+        q = Geometry.points_only(np.array([[1, 0, 0], [9, 1, 0], [0, 7, 0]], np.float32))
+        out = run("wrangle", q, src, snippet="v@c = @near1_Cd; f@d = @near1_dist; i@n = @near1_ptnum", run_over="points")
+        np.testing.assert_array_equal(out.point["c"], src.point["Cd"])
+        np.testing.assert_allclose(out.point["d"], [1.0, np.sqrt(2.0), 3.0], atol=1e-6)
+        np.testing.assert_array_equal(out.point["n"], [0, 1, 2])
+        over_prims = run("wrangle", run("box", size=[1, 1, 1]), src, snippet="f@d = @near1_dist", run_over="primitives")
+        self.assertTrue(np.all(over_prims.prim["d"] > 0))
+
+    def test_three_inputs_and_errors(self):
+        a = grid(3)
+        b = a.copy()
+        b.point["k"] = np.full(b.npoints, 2.0, np.float32)
+        c = b.copy()
+        c.point["k"] = np.full(c.npoints, 5.0, np.float32)
+        out = run("wrangle", a, b, c, snippet="f@s = @opinput1_k + @opinput2_k")
+        self.assertTrue(np.all(out.point["s"] == 7.0))
+        for args, snippet, msg in (((a,), "f@x = @opinput1_k", "not connected"),
+                                   ((a, b), "f@x = @opinput1_nope", "no attribute"),
+                                   ((a, b), "f@x = @near1_nope", "no point attribute"),
+                                   ((a, b), "@opinput1_k = 1", "read-only"),
+                                   ((a, b), "@near1_dist = 1", "read-only"),
+                                   ((a, Geometry.points_only(np.zeros((0, 3), np.float32))), "f@x = @near1_dist", "no points")):
+            with self.assertRaisesRegex(WrangleError, msg):
+                run("wrangle", *args, snippet=snippet)
+
+    def test_in_a_graph_the_second_input_follows_its_source(self):
+        g = graph_from({"a": {"type": "grid", "params": {"columns": 3, "rows": 3}},
+                        "b": {"type": "sphere", "params": {"radius": 1.0}},
+                        "w": {"type": "wrangle", "inputs": {"geo": "a", "opinput1": "b"},
+                              "params": {"snippet": "f@d = @near1_dist"}}}, display="w")
+        ev = Evaluator()
+        first = ev.cook(g)
+        g.set_param("b", "radius", 3.0)
+        again = ev.cook(g)
+        self.assertEqual(first.npoints, again.npoints)
+        self.assertFalse(np.array_equal(first.point["d"], again.point["d"]))        # the nearest sphere points moved
+        self.assertIn("a", ev.last_stats.cached)
+
+
 class AttributeNodeTests(unittest.TestCase):
     def test_delete_with_wildcards_and_rename(self):
         g = wd(grid(3), "f@tmp_a = 1; f@tmp_b = 2; f@keep = 3; v@N = set(0, 0, 1)", "points")

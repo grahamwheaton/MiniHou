@@ -13,7 +13,7 @@ class ProfileTests(unittest.TestCase):
         g.prim['material_index'] = [2,3,4]
         g = run('edge_group',g,name='rings')
         g.freeze()
-        out = run('skin',g)
+        out = run('skin_profiles',g)
         self.assertEqual((out.npoints,out.nprims),(12,8))
         self.assertEqual((topo.edges(out).count == 1).sum(),8)
         np.testing.assert_array_equal(out.prim['material_index'],[2]*4+[3]*4)
@@ -23,13 +23,13 @@ class ProfileTests(unittest.TestCase):
 
     def test_skin_open_and_validation(self):
         g = mesh([[x,0,z] for z in [0,1,2] for x in [0,1,2]],[[0,1,2],[3,4,5],[6,7,8]],[False]*3)
-        self.assertEqual(run('skin',g).nprims,4)
-        self.assertEqual(run('skin',g,keep_profiles=True).nprims,7)
+        self.assertEqual(run('skin_profiles',g).nprims,4)
+        self.assertEqual(run('skin_profiles',g,keep_profiles=True).nprims,7)
         with self.assertRaises(ValueError):
-            run('skin',g,group='0')
+            run('skin_profiles',g,group='0')
         bad = mesh([[0,0,0],[1,0,0],[0,1,0]],[[0,1,2],[0,1,2]])
         with self.assertRaises(ValueError):
-            run('skin',bad)
+            run('skin_profiles',bad)
 
     def test_offset_rotated_plane_winding_attributes(self):
         from minihou.nodes._util import euler_xyz_matrix

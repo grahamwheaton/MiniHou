@@ -62,7 +62,8 @@ class DiffState:
         """Forget everything: the next build is a full update."""
         self._sent: Dict[str, np.ndarray] = {}
 
-    def build(self, geo: Geometry, seq: int, cook: Optional[dict] = None) -> Tuple[dict, Dict[str, np.ndarray]]:
+    def build(self, geo: Geometry, seq: int, cook: Optional[dict] = None,
+              output: Optional[str] = None) -> Tuple[dict, Dict[str, np.ndarray]]:
         full = not self._sent
         current: Dict[str, np.ndarray] = {}
         manifest = {}
@@ -95,4 +96,6 @@ class DiffState:
                   "counts": {"point": geo.npoints, "vertex": geo.nvertices, "prim": geo.nprims},
                   "topology_changed": topo_changed, "manifest": manifest,
                   "detail": _json_detail(geo.detail), "cook": cook or {}, "t_sent": time.time()}
+        if output is not None:
+            header["output"] = output
         return header, send

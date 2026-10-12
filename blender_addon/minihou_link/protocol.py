@@ -187,10 +187,10 @@ class GeoUpdate:
     """A decoded ``geo`` message."""
 
     __slots__ = ("seq", "full", "counts", "topology_changed", "manifest", "arrays", "detail", "cook",
-                 "t_sent", "t_recv")
+                 "t_sent", "t_recv", "output")
 
     def __init__(self, seq=0, full=False, counts=None, topology_changed=False, manifest=None, arrays=None,
-                 detail=None, cook=None, t_sent=0.0, t_recv=0.0):
+                 detail=None, cook=None, t_sent=0.0, t_recv=0.0, output=None):
         self.seq = seq
         self.full = full
         self.counts = counts or {"point": 0, "vertex": 0, "prim": 0}
@@ -201,18 +201,22 @@ class GeoUpdate:
         self.cook = cook or {}
         self.t_sent = t_sent
         self.t_recv = t_recv
+        self.output = output                 # None: the main output; else the Blender object name of an extra output
 
     @classmethod
     def from_message(cls, header: dict, arrays: Dict[str, np.ndarray]) -> "GeoUpdate":
         return cls(seq=header["seq"], full=header.get("full", False), counts=header["counts"],
                    topology_changed=header.get("topology_changed", False), manifest=header["manifest"],
                    arrays=arrays, detail=header.get("detail", {}), cook=header.get("cook", {}),
-                   t_sent=header.get("t_sent", 0.0), t_recv=time.time())
+                   t_sent=header.get("t_sent", 0.0), t_recv=time.time(), output=header.get("output"))
 
     def header(self) -> dict:
-        return {"type": "geo", "seq": self.seq, "full": self.full, "counts": self.counts,
-                "topology_changed": self.topology_changed, "manifest": self.manifest,
-                "detail": self.detail, "cook": self.cook, "t_sent": self.t_sent}
+        h = {"type": "geo", "seq": self.seq, "full": self.full, "counts": self.counts,
+             "topology_changed": self.topology_changed, "manifest": self.manifest,
+             "detail": self.detail, "cook": self.cook, "t_sent": self.t_sent}
+        if self.output is not None:
+            h["output"] = self.output
+        return h
 
     @property
     def nbytes(self) -> int:
@@ -231,7 +235,7 @@ def merge_updates(older: GeoUpdate, newer: GeoUpdate) -> GeoUpdate:
     return GeoUpdate(seq=newer.seq, full=older.full or newer.full, counts=newer.counts,
                      topology_changed=older.topology_changed or newer.topology_changed,
                      manifest=newer.manifest, arrays=arrays, detail=newer.detail, cook=newer.cook,
-                     t_sent=newer.t_sent, t_recv=newer.t_recv)
+                     t_sent=newer.t_sent, t_recv=newer.t_recv, output=newer.output)
 
 
 class Mirror:

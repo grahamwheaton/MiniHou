@@ -29,14 +29,14 @@ WORKFLOWS = {
     'modeling_dissolve': ({
         'grid':node('grid',columns=4,rows=4),
         'boundary':node('edge_group',{'geo':'grid'},name='boundary',method='boundary'),
-        'dissolve':node('dissolve',{'geo':'boundary'},group='^boundary'),
+        'dissolve':node('dissolve_edges',{'geo':'boundary'},group='^boundary'),
     },'dissolve','angle'),
     'modeling_skin': ({
         'low':node('circle',divisions=16),
         'middle':node('circle',divisions=16,radius=.6,center=[0,0,1]),
         'high':node('circle',divisions=16,radius=.9,center=[0,0,2]),
         'profiles':node('merge',{'geos':['low','middle','high']}),
-        'skin':node('skin',{'geo':'profiles'}),
+        'skin':node('skin_profiles',{'geo':'profiles'}),
         'normal':node('normal',{'geo':'skin'}),
     },'middle','radius'),
     'modeling_expand2d': ({

@@ -8,6 +8,9 @@ op              fields
 ==============  =============================================================================================
 ``add``         ``type``; optional ``id`` (default: type + number), ``params``, ``inputs`` ({port: id or [ids]}),
                 ``pos`` ([x, y]), ``display`` (true to make it the display node), ``comment``
+``insert``      ``after`` (a node id) + ``type``; optional ``id``, ``params``, ``port`` (the new node's input, default its
+                first), ``pos``, ``comment``: add a node fed by ``after`` and re-wire everything that read ``after`` to read
+                the new node instead (so it joins the chain in place; the display flag moves with it)
 ``remove``      ``id`` (an id or a list of ids)
 ``rename``      ``id``, ``to``
 ``connect``     ``from``, ``to``; optional ``port`` (default: first free input), ``index`` (multi inputs)
@@ -21,6 +24,10 @@ op              fields
 ``replace``     ``graph`` (a whole graph JSON object)
 ``layout``      (no fields) tidy all node positions, like Houdini's L key
 ``loop``        optional ``from``, ``to``/``port``, ``iterations``, ``pos``; insert paired Begin, Transform and End
+
+``box_add``     network box: ``around`` (node ids to enclose) or ``pos`` + ``size``; optional ``id``, ``title``, ``color`` ('#rrggbb')
+``box_set``     ``id``; optional ``title``, ``color``, ``pos``, ``size``
+``box_remove``  ``id`` (an id or a list of ids)
 ==============  =============================================================================================
 
 Graphs may be *incomplete* while being edited (a node whose input is not wired yet); the cook reports that,
@@ -32,7 +39,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from .graph import EXPOSABLE_KINDS, Exposed, Graph, GraphError, NodeInstance
+from .graph import EXPOSABLE_KINDS, Exposed, Graph, GraphError, NodeInstance, clean_box
 from .sdk import ParamError
 
 _ID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -131,6 +138,48 @@ def op_add(g: Graph, op: dict) -> dict:
     if op.get("display"):
         g.display = nid
     return {"id": nid}
+
+
+def op_insert(g: Graph, op: dict) -> dict:
+    src = op["after"]
+    base = _need_node(g, src)
+    t = op["type"]
+    if t not in g.registry:
+        raise GraphError(f"unknown node type {t!r}; known: {g.registry.names()}")
+    nt = g.registry.get(t)
+    if not nt.inputs:
+        raise GraphError(f"node type {t!r} has no inputs, so it cannot be inserted after {src!r}")
+    port = op.get("port") or nt.inputs[0].name
+    if port not in nt.input_names():
+        raise GraphError(f"node type {t!r} has no input {port!r}; inputs: {nt.input_names()}")
+    nid = op.get("id") or _new_id(g, t)
+    # what reads `src` now: (consumer, port, position in a list input)
+    readers = []
+    for cid, c in g.nodes.items():
+        for p_, ref in c.inputs.items():
+            if isinstance(ref, list):
+                readers += [(cid, p_, k) for k, r in enumerate(ref) if r == src]
+            elif ref == src:
+                readers.append((cid, p_, None))
+    meta: Dict[str, Any] = {}
+    if "pos" in op:
+        meta["pos"] = _pos(op["pos"])
+    elif isinstance(base.meta.get("pos"), list):
+        meta["pos"] = [round(base.meta["pos"][0] + 190, 1), round(base.meta["pos"][1] + 70, 1)]
+    if op.get("comment"):
+        meta["comment"] = str(op["comment"])
+    g.add_node(nid, t, op.get("params") or None, None, **meta)
+    _connect(g, src, nid, port, None)
+    for cid, p_, k in readers:
+        c = g.nodes[cid]
+        ref = c.inputs[p_]
+        if isinstance(ref, list):
+            ref[k] = nid
+        else:
+            c.inputs[p_] = nid
+    if g.display == src:
+        g.display = nid
+    return {"id": nid, "rewired": len(readers)}
 
 
 def op_remove(g: Graph, op: dict) -> dict:
@@ -306,13 +355,65 @@ def op_meta(g: Graph, op: dict) -> dict:
     return {}
 
 
+NODE_W, NODE_H, BOX_PAD, BOX_HEADER = 160, 46, 30, 28        # must match the editor's node size and box header
+
+
+def _box_index(g: Graph, bid: Any) -> int:
+    for i, b in enumerate(g.boxes):
+        if b["id"] == bid:
+            return i
+    raise GraphError(f"no such network box {bid!r}")
+
+
+def op_box_add(g: Graph, op: dict) -> dict:
+    bid = op.get("id")
+    if bid is None:
+        n = 1
+        while any(b["id"] == f"box{n}" for b in g.boxes):
+            n += 1
+        bid = f"box{n}"
+    if any(b["id"] == bid for b in g.boxes):
+        raise GraphError(f"duplicate box id {bid!r}")
+    if op.get("around"):
+        ids = op["around"] if isinstance(op["around"], list) else [op["around"]]
+        pts = [_need_node(g, i).meta.get("pos") or [0, 0] for i in ids]
+        x0 = min(p[0] for p in pts) - BOX_PAD
+        y0 = min(p[1] for p in pts) - BOX_PAD - BOX_HEADER
+        x1 = max(p[0] for p in pts) + NODE_W + BOX_PAD
+        y1 = max(p[1] for p in pts) + NODE_H + BOX_PAD
+        pos, size = [x0, y0], [x1 - x0, y1 - y0]
+    else:
+        pos, size = op["pos"], op["size"]
+    g.boxes.append(clean_box({"id": bid, "title": op.get("title", ""), "color": op.get("color", ""),
+                              "pos": pos, "size": size}))
+    return {"id": bid}
+
+
+def op_box_set(g: Graph, op: dict) -> dict:
+    i = _box_index(g, op["id"])
+    merged = dict(g.boxes[i])
+    for key in ("title", "color", "pos", "size"):
+        if key in op:
+            merged[key] = op[key]
+    g.boxes[i] = clean_box(merged)
+    return {}
+
+
+def op_box_remove(g: Graph, op: dict) -> dict:
+    ids = op["id"] if isinstance(op["id"], list) else [op["id"]]
+    for bid in ids:
+        del g.boxes[_box_index(g, bid)]
+    return {}
+
+
 def op_replace(g: Graph, op: dict) -> dict:
     return {"_graph": Graph.from_dict(op["graph"], g.registry, check=False)}
 
 
-_OPS = {"add": op_add, "loop": op_loop, "remove": op_remove, "rename": op_rename, "connect": op_connect,
+_OPS = {"add": op_add, "loop": op_loop, "insert": op_insert, "remove": op_remove, "rename": op_rename, "connect": op_connect,
         "disconnect": op_disconnect, "set": op_set, "display": op_display, "expose": op_expose,
-        "unexpose": op_unexpose, "move": op_move, "meta": op_meta, "replace": op_replace}
+        "unexpose": op_unexpose, "move": op_move, "meta": op_meta, "replace": op_replace,
+        "box_add": op_box_add, "box_set": op_box_set, "box_remove": op_box_remove}
 OP_NAMES = sorted(_OPS)
 
 
@@ -366,8 +467,32 @@ def layout_all(g: Graph) -> None:
         g.nodes[nid].meta["pos"] = [float(round(x + dx)), float(round(y + dy))]
 
 
+def _box_members(g: Graph) -> Dict[str, List[str]]:
+    """Nodes whose centre lies inside each network box."""
+    out: Dict[str, List[str]] = {}
+    for b in g.boxes:
+        x, y = b["pos"]
+        w, h = b["size"]
+        out[b["id"]] = [nid for nid, n in g.nodes.items() if isinstance(n.meta.get("pos"), list)
+                        and x <= n.meta["pos"][0] + NODE_W / 2 <= x + w and y <= n.meta["pos"][1] + NODE_H / 2 <= y + h]
+    return out
+
+
+def _refit_boxes(g: Graph, members: Dict[str, List[str]]) -> None:
+    """Resize boxes to enclose their (moved) members again; boxes with no members stay where they are."""
+    for i, b in enumerate(g.boxes):
+        ids = members.get(b["id"]) or []
+        if ids:
+            tmp = g.copy()
+            op_box_add(tmp, {"id": "_", "around": ids})
+            nb = next(x for x in tmp.boxes if x["id"] == "_")
+            g.boxes[i] = {**b, "pos": nb["pos"], "size": nb["size"]}
+
+
 def op_layout(g: Graph, op: dict) -> dict:
+    members = _box_members(g)
     layout_all(g)
+    _refit_boxes(g, members)
     return {}
 
 
