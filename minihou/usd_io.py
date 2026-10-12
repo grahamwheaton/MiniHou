@@ -11,6 +11,9 @@ usdview. ``pxr`` (``pip install usd-core``) is optional: nothing here imports it
 * ``curves``: a ``BasisCurves`` (linear, not periodic) of the open primitives. USD curves do not index into a shared point
   table, so their points are expanded;
 * ``points``: a ``Points`` of the points no primitive uses.
+* ``instances``: a ``PointInstancer`` for the loose points that place Blender objects (the ``instance`` node's output: ``instance``,
+  ``rot``, ``scale`` and the detail ``instance_objects``). Its prototypes are empty Xforms named after the objects, with
+  ``minihou:blender_object``; the geometry stays in Blender.
 
 Closed primitives with fewer than 3 corners and open ones with fewer than 2 cannot be drawn by USD; they are left out and counted
 in the Xform's ``customData`` (``minihou:dropped``).
@@ -28,8 +31,8 @@ also face / point ``GeomSubset``s on the mesh, which is what other tools look fo
 for files that have only those.
 
 **Reading** (``read_geometry``) accepts any USD file: ``Mesh`` (indexed or not, any orientation, subsets), ``BasisCurves`` (cubic
-curves come in as their control polygon) and ``Points``, with each prim's world transform applied. Other prim types are skipped and
-listed in the report.
+curves come in as their control polygon), ``Points`` and ``PointInstancer`` (as ``instance`` / ``rot`` / ``scale`` points; the
+prototypes are not imported), with each prim's world transform applied. Other prim types are skipped and listed in the report.
 """
 from __future__ import annotations
 
@@ -273,6 +276,14 @@ def write_geometry(stage, path: str, geo: Geometry) -> dict:
                                  (_gather_table(geo.vertex, cv), "vertex", "vertex"),
                                  (_gather_table(geo.prim, curve_prims), "uniform", "prim")])
         out["curves"] = int(len(curve_prims))
+    # -- instances: loose points that place Blender objects (the instance node) become a PointInstancer --------------------
+    names = geo.detail.get("instance_objects")
+    inst_attr = geo.point.get("instance")
+    if isinstance(names, (list, tuple)) and names and inst_attr is not None and inst_attr.ndim == 1 and len(loose):
+        pick = (inst_attr[loose] > 0) & (inst_attr[loose] <= len(names))
+        placed, loose = loose[pick], loose[~pick]
+        if len(placed):
+            out["instances"] = _write_instancer(stage, f"{path}/instances", geo, placed, [str(x) for x in names])
     # -- loose points -------------------------------------------------------------------------------------------------
     if len(loose):
         pp = UsdGeom.Points.Define(stage, f"{path}/points")
@@ -290,6 +301,80 @@ def write_geometry(stage, path: str, geo: Geometry) -> dict:
         xf.GetPrim().SetCustomDataByKey("minihou:detail", json.dumps(_json_safe(geo.detail), allow_nan=False, default=str)
                                         if _finite(geo.detail) else json.dumps(_json_safe(_clean(geo.detail)), default=str))
     return out
+
+
+def _mat_to_quat(R: np.ndarray) -> np.ndarray:
+    """Quaternions ``(n, 4)`` as (x, y, z, w) -- USD's memory order -- of rotation matrices ``(n, 3, 3)`` (column vectors)."""
+    R = np.asarray(R, np.float64)
+    n = len(R)
+    q = np.zeros((n, 4))
+    tr = R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2]
+    cases = (tr > 0, (R[:, 0, 0] >= R[:, 1, 1]) & (R[:, 0, 0] >= R[:, 2, 2]), R[:, 1, 1] >= R[:, 2, 2])
+    done = np.zeros(n, bool)
+    for k, m in enumerate(cases):
+        m = m & ~done
+        done |= m
+        r = R[m]
+        if not len(r):
+            continue
+        if k == 0:
+            s = np.sqrt(np.maximum(tr[m] + 1.0, 1e-12)) * 2
+            q[m] = np.stack([(r[:, 2, 1] - r[:, 1, 2]) / s, (r[:, 0, 2] - r[:, 2, 0]) / s, (r[:, 1, 0] - r[:, 0, 1]) / s, 0.25 * s], 1)
+        elif k == 1:
+            s = np.sqrt(np.maximum(1.0 + r[:, 0, 0] - r[:, 1, 1] - r[:, 2, 2], 1e-12)) * 2
+            q[m] = np.stack([0.25 * s, (r[:, 0, 1] + r[:, 1, 0]) / s, (r[:, 0, 2] + r[:, 2, 0]) / s, (r[:, 2, 1] - r[:, 1, 2]) / s], 1)
+        elif k == 2:
+            s = np.sqrt(np.maximum(1.0 + r[:, 1, 1] - r[:, 0, 0] - r[:, 2, 2], 1e-12)) * 2
+            q[m] = np.stack([(r[:, 0, 1] + r[:, 1, 0]) / s, 0.25 * s, (r[:, 1, 2] + r[:, 2, 1]) / s, (r[:, 0, 2] - r[:, 2, 0]) / s], 1)
+    rest = ~done
+    if rest.any():
+        r = R[rest]
+        s = np.sqrt(np.maximum(1.0 + r[:, 2, 2] - r[:, 0, 0] - r[:, 1, 1], 1e-12)) * 2
+        q[rest] = np.stack([(r[:, 0, 2] + r[:, 2, 0]) / s, (r[:, 1, 2] + r[:, 2, 1]) / s, 0.25 * s, (r[:, 1, 0] - r[:, 0, 1]) / s], 1)
+    return q / np.maximum(np.linalg.norm(q, axis=1, keepdims=True), 1e-12)
+
+
+def _quat_to_mat(q: np.ndarray) -> np.ndarray:
+    q = np.asarray(q, np.float64)
+    q = q / np.maximum(np.linalg.norm(q, axis=1, keepdims=True), 1e-12)
+    x, y, z, w = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
+    R = np.empty((len(q), 3, 3))
+    R[:, 0] = np.stack([1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)], 1)
+    R[:, 1] = np.stack([2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)], 1)
+    R[:, 2] = np.stack([2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)], 1)
+    return R
+
+
+def _write_instancer(stage, path: str, geo: Geometry, rows: np.ndarray, names: List[str]) -> int:
+    """A ``PointInstancer`` for the points ``rows`` that place the Blender objects ``names`` (the ``instance`` node's output).
+    The prototypes are empty Xforms named after the objects (the geometry lives in Blender), carrying ``minihou:blender_object``."""
+    from .nodes.instance import euler_xyz_to_matrix
+    Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
+    inst = UsdGeom.PointInstancer.Define(stage, path)
+    used: set = set()
+    targets = []
+    for nm in names:
+        proto = UsdGeom.Xform.Define(stage, f"{path}/Prototypes/{_unique_name(valid_name(nm), used, 'proto')}")
+        proto.GetPrim().SetCustomDataByKey("minihou:blender_object", nm)
+        targets.append(proto.GetPath())
+    inst.CreatePrototypesRel().SetTargets(targets)
+    P = np.ascontiguousarray(geo.P[rows], np.float32)
+    idx = (geo.point["instance"][rows].astype(np.int64) - 1).astype(np.int32)
+    rot = geo.point.get("rot")
+    scale = geo.point.get("scale")
+    R = euler_xyz_to_matrix(rot[rows].astype(np.float64)) if rot is not None and rot.ndim == 2 and rot.shape[1] == 3 else \
+        np.tile(np.eye(3), (len(rows), 1, 1))
+    S = np.ascontiguousarray(scale[rows], np.float32) if scale is not None and scale.ndim == 2 and scale.shape[1] == 3 else \
+        np.ones((len(rows), 3), np.float32)
+    inst.CreatePositionsAttr().Set(Vt.Vec3fArray.FromNumpy(P))
+    inst.CreateProtoIndicesAttr().Set(Vt.IntArray.FromNumpy(idx))
+    inst.CreateOrientationsfAttr().Set(Vt.QuatfArray.FromNumpy(_mat_to_quat(R).astype(np.float32)))
+    inst.CreateScalesAttr().Set(Vt.Vec3fArray.FromNumpy(S))
+    inst.CreateExtentAttr().Set(Vt.Vec3fArray.FromNumpy(np.stack([P.min(0), P.max(0)]).astype(np.float32)))
+    prim = inst.GetPrim()
+    _set_primvar(prim, "minihou:point_index", rows.astype(np.int32), "vertex", "")
+    _write_attributes(prim, [(_gather_table(geo.point, rows, ("P",)), "vertex", "point")])      # incl. instance / rot / scale, exactly
+    return int(len(rows))
 
 
 def _finite(v) -> bool:
@@ -513,6 +598,7 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
     if unit != 1.0:
         rep.notes.append(f"scaled by metersPerUnit {unit:g}")
     parts: List[Part] = []
+    inst_names: List[str] = []                       # the objects the point instancers place, all instancers' prototypes in order
     it = iter(Usd.PrimRange(start, Usd.TraverseInstanceProxies(Usd.PrimDefaultPredicate)))
     for prim in it:
         if not prim.IsA(UsdGeom.Imageable):
@@ -530,14 +616,22 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
             kind = "curves"
         elif prim.IsA(UsdGeom.Points):
             kind = "points"
-        elif prim.IsA(UsdGeom.Gprim) or prim.IsA(UsdGeom.PointInstancer):
+        elif prim.IsA(UsdGeom.PointInstancer):
+            kind = "instancer"
+        elif prim.IsA(UsdGeom.Gprim):
             rep.skipped.append(f"{prim.GetPath()} ({prim.GetTypeName()})")
             it.PruneChildren()                                       # an instancer's children are its prototypes, not scene geometry
             continue
         else:
             continue
-        pb = UsdGeom.PointBased(prim)
-        pts = pb.GetPointsAttr().Get(tm)
+        instancer = None
+        if kind == "instancer":
+            instancer = UsdGeom.PointInstancer(prim)
+            pts = instancer.GetPositionsAttr().Get(tm)
+            it.PruneChildren()                                       # the prototypes are not scene geometry
+        else:
+            pb = UsdGeom.PointBased(prim)
+            pts = pb.GetPointsAttr().Get(tm)
         if pts is None or not len(pts):
             rep.notes.append(f"{prim.GetPath()}: no points at this time; skipped")
             continue
@@ -585,13 +679,16 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
                 rep.notes.append(f"{prim.GetPath()}: primvar {dropped!r} has a size that fits no domain; skipped")
         if kind == "mesh":
             _add_subset_groups(UsdGeom.Mesh(prim), part, tm)
+        if kind == "instancer":
+            _read_instancer(stage, instancer, tm, part, M @ _pad(M_up), unit, inst_names, rep, str(prim.GetPath()))
         # world space
         Pw = P @ (M[:3, :3] @ M_up) + (M[3, :3] @ M_up)
         part.P = (Pw * unit).astype(np.float32)
         nrm_m = np.linalg.inv(M[:3, :3]).T
+        moved = not (np.allclose(M[:3, :3], np.eye(3)) and np.allclose(M_up, np.eye(3)))          # untouched normals stay exactly as stored
         for table in (part.point_attrs, part.corner_attrs, part.prim_attrs):
             nv = table.get("N")
-            if nv is not None and nv.ndim == 2 and nv.shape[1] == 3:
+            if moved and nv is not None and nv.ndim == 2 and nv.shape[1] == 3:
                 v = nv.astype(np.float64) @ nrm_m @ M_up
                 v /= np.maximum(np.linalg.norm(v, axis=1, keepdims=True), 1e-12)
                 table["N"] = v.astype(np.float32)
@@ -610,9 +707,54 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
     else:
         geo = geos[0] if geos else assemble([])
     detail = _read_detail(stage)
+    if inst_names:
+        geo.detail.setdefault("instance_objects", list(inst_names))
     if detail:
         geo.detail.update(detail)
     return geo, rep
+
+
+def _pad(m3: np.ndarray) -> np.ndarray:
+    out = np.eye(4)
+    out[:3, :3] = m3
+    return out
+
+
+def _read_instancer(stage, inst, tm, part: Part, M: np.ndarray, unit: float, names: List[str], rep: "ReadReport", where: str) -> None:
+    """Instances of a ``PointInstancer`` as the ``instance`` node's attributes: ``instance`` (1-based prototype number), ``rot``
+    (Euler XYZ radians) and ``scale`` per point. Primvars already read from a MiniHou file win (they are exact); ``M`` is the
+    instancer's row-vector world matrix (with the up-axis turn)."""
+    from .nodes.instance import matrix_to_euler_xyz
+    n = len(part.P)
+    targets = inst.GetPrototypesRel().GetTargets()
+    protos = []
+    for t in targets:
+        pr = stage.GetPrimAtPath(t)
+        protos.append(str(pr.GetCustomDataByKey("minihou:blender_object") or t.name) if pr else t.name)
+    idx = inst.GetProtoIndicesAttr().Get(tm)
+    idx = np.asarray(idx, np.int64) if idx is not None and len(idx) == n else np.zeros(n, np.int64)
+    if "instance" not in part.point_attrs:
+        part.point_attrs["instance"] = (idx + 1 + len(names)).astype(np.int32)
+        names.extend(protos)
+    R3 = M[:3, :3].T                                   # column-vector form of the instancer's world rotation (and scale)
+    k = abs(np.linalg.det(R3)) ** (1.0 / 3.0) or 1.0
+    Rp = R3 / k
+    if np.abs(Rp @ Rp.T - np.eye(3)).max() > 1e-3:
+        rep.notes.append(f"{where}: the instancer sits under a sheared or non-uniformly scaled transform; instance rotations ignore that")
+        Rp = np.eye(3)
+    if "rot" not in part.point_attrs:
+        q = inst.GetOrientationsfAttr().Get(tm)
+        if q is None or not len(q):
+            q = inst.GetOrientationsAttr().Get(tm)
+        if q is not None and len(q) == n:
+            R = _quat_to_mat(np.asarray(q, np.float64).reshape(-1, 4))
+        else:
+            R = np.tile(np.eye(3), (n, 1, 1))
+        part.point_attrs["rot"] = matrix_to_euler_xyz(Rp @ R).astype(np.float32)
+    if "scale" not in part.point_attrs:
+        sc = inst.GetScalesAttr().Get(tm)
+        sc = np.asarray(sc, np.float64).reshape(-1, 3) if sc is not None and len(sc) == n else np.ones((n, 3))
+        part.point_attrs["scale"] = (sc * k * unit).astype(np.float32)
 
 
 def _read_detail(stage) -> dict:

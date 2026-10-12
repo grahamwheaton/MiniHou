@@ -27,6 +27,7 @@ one prim:
 | closed faces with 3+ corners | `Mesh` `mesh`: `subdivisionScheme = none`, right handed (counter-clockwise from outside, as in MiniHou and Blender) |
 | open primitives (curves) | `BasisCurves` `curves`, linear, not periodic; points expanded per curve (USD curves have no shared point table) |
 | points no primitive uses | `Points` `points` |
+| points that place Blender objects (`instance` node) | `PointInstancer` `instances`: protoIndices, orientations (quaternions from `rot`), scales; prototypes are empty Xforms named after the objects (`minihou:blender_object`) |
 
 Closed primitives with fewer than 3 corners and open ones with fewer than 2 cannot be USD prims. They are left out and counted
 (`customData minihou:dropped`, and in the export's report); the points they used are written as loose points, so the point table stays whole.
@@ -48,14 +49,15 @@ back identical.
 The **USD Import** node (`usd_import`, in the Create group) reads any USD file:
 
 * meshes (indexed or not, any orientation, any depth of parent transforms, mirrored transforms flip the winding back), curves
-  (cubic curves come in as their control polygon) and points, merged into one geometry in world space;
+  (cubic curves come in as their control polygon), points and point instancers (as `instance` / `rot` / `scale`, with the
+  prototype names in the detail `instance_objects`), merged into one geometry in world space;
 * primvars become attributes (`st` as `uv`, `displayColor` as `Cd`, `displayOpacity` as `Alpha`, normals as `N`, the rest by name);
   indexed primvars are flattened; GeomSubsets become groups when the file has no group primvar of that name;
 * `up_axis` (z: turn a Y-up file to Z-up, the default; keep) and `apply_units` (scale by an *authored* `metersPerUnit`; an unauthored
   one is taken as metres, although USD's own fallback is centimetres);
 * `prim_path` to read part of a stage (only the points that were read come in); `time` = frame reads the file's animation at the current frame (the default reads the un-animated values, or the first sample of a file that has only samples);
-* guide and proxy purposes, and prim types it cannot use (cubes, spheres, point instancers, ...), are skipped and listed in the detail
-  attribute `usd_skipped`; a point instancer's children (its prototypes) are skipped with it; a prim with no points at the read time is noted in `usd_notes`;
+* guide and proxy purposes, and prim types it cannot use (cubes, spheres, ...), are skipped and listed in the detail
+  attribute `usd_skipped`; a point instancer's children (its prototypes) are never imported as scene geometry; a prim with no points at the read time is noted in `usd_notes`;
 * a file with several MiniHou outputs comes back as the outputs joined in order (each keeps its own points and primitives);
 * the cache key includes the file's modification time and size, so saving the file in another tool recooks the node.
 
@@ -70,8 +72,9 @@ The **USD Import** node (`usd_import`, in the Create group) reads any USD file:
 
 ## Not done
 
-* Instances (`instance` points) are written as points with their `instance` / `rot` / `scale` attributes; the prototypes are Blender
-  object names, not geometry, so there is no `PointInstancer` yet.
+* Instancer prototypes are empty Xforms: the objects' geometry lives in Blender, so another tool sees the placements and has to
+  point the prototypes at its own assets. Imported instancers become `instance` / `rot` / `scale` points (their prototypes' geometry
+  is not read); an instancer under a sheared transform loses the shear on the instance rotations.
 * One frame per file (no time samples written); `time` on import reads them.
 * Edge groups are kept as primvars only (USD has edge subsets in newer versions, but few tools read them).
 * Materials, cameras, lights and skeletons are not read or written.

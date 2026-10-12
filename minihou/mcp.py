@@ -453,6 +453,7 @@ class McpServer:
         for name, o in r["outputs"].items():
             d = o["dropped"]
             lines.append(f"  {o['prim']}: {o['faces']:,} faces, {o['curves']:,} curves, {o['points']:,} loose points"
+                         + (f", {o['instances']:,} instances" if o.get("instances") else "")
                          + (f" (left out: {d['faces']} faces with under 3 corners, {d['curves']} one-point curves)" if d["faces"] or d["curves"] else ""))
         return "\n".join(lines)
 

@@ -1913,8 +1913,8 @@
         if (/already exists/.test(err.message) && confirm(name + " already exists. Overwrite it?")) r = await send(true); else throw err;
       }
       $("#file-menu").classList.add("hidden");
-      const o = Object.values(r.outputs), n = (k) => o.reduce((a, x) => a + x[k], 0);
-      toast(`Exported ${fmt(n("faces"))} faces, ${fmt(n("curves"))} curves, ${fmt(n("points"))} loose points to ${name}`, false);
+      const o = Object.values(r.outputs), n = (k) => o.reduce((a, x) => a + (x[k] || 0), 0);
+      toast(`Exported ${fmt(n("faces"))} faces, ${fmt(n("curves"))} curves, ${fmt(n("points"))} loose points` + (n("instances") ? `, ${fmt(n("instances"))} instances` : "") + ` to ${name}`, false);
     } catch (err) { toast(err.message); }
   }
   async function fileOp(op, path, to) {
