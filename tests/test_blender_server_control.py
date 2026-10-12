@@ -94,6 +94,19 @@ class BlenderServerOperatorTests(unittest.TestCase):
         from tests.test_blender_addon import evaluated_positions
         self.assertEqual(bpy.ops.minihou.start_server(), {"FINISHED"})
         ready = self.wait_state("ready")
+        self.assertTrue(self.prefs.auto_connect)
+        self.assertFalse(self.prefs.show_sidebar)
+        self.assertFalse(self.addon.MINIHOU_PT_main.poll(bpy.context))
+        self.prefs.auto_connect = False
+        self.prefs.manual_port = 43210
+        self.assertEqual(modifiers._settings(), ("127.0.0.1", 43210))
+        self.prefs.auto_connect = True
+        from minihou_link.discovery import publish
+        stale = publish("127.0.0.1", 1, "http://127.0.0.1:1/")
+        self.addCleanup(lambda: stale.unlink(missing_ok=True))
+        # A deliberately wrong manual port and newer stale record must not prevent discovery.
+        bpy.context.window_manager.minihou_port = 1
+        self.assertEqual(modifiers._connection().port, self.port)
         bpy.ops.mesh.primitive_cube_add()
         obj = bpy.context.object
         # A fresh modifier needs neither a template file nor a legacy proxy connection.

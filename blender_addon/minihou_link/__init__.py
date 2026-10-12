@@ -1,16 +1,16 @@
 bl_info = {
     "name": "MiniHou Link",
     "author": "MiniHou",
-    "version": (0, 1, 1),
+    "version": (0, 1, 2),
     "blender": (4, 2, 0),
-    "location": "3D Viewport > Sidebar > MiniHou",
+    "location": "Properties > Modifiers > MiniHou",
     "description": "Live link to the MiniHou procedural geometry engine",
     "category": "Object",
 }
 
 import bpy
 from bpy.app.handlers import persistent
-from bpy.props import IntProperty, StringProperty
+from bpy.props import BoolProperty, IntProperty, StringProperty
 
 from . import runtime, modifiers, geonodes_ui, network_ui
 from .server_control import ServerController
@@ -42,12 +42,27 @@ def _restore_endpoint_timer():
 class MINIHOU_Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
 
+    auto_connect: BoolProperty(name="Find MiniHou automatically", default=True,
+        update=lambda self, context: modifiers.disconnect())
+    manual_host: StringProperty(name="Host", default="127.0.0.1",
+        update=lambda self, context: modifiers.disconnect())
+    manual_port: IntProperty(name="Link Port", default=8765, min=1, max=65535,
+        update=lambda self, context: modifiers.disconnect())
+    show_sidebar: BoolProperty(name="Show legacy sidebar tools", default=False)
+
     external_python: StringProperty(name="External Python / Portable Runtime", subtype="FILE_PATH",
         description="Prepared Python 3.11+ executable with MiniHou and numpy; never Blender's executable")
     project_root: StringProperty(name="MiniHou Project Folder", subtype="DIR_PATH",
         description="Folder containing minihou/__main__.py and the node library")
 
     def draw(self, context):
+        self.layout.prop(self, "auto_connect")
+        if not self.auto_connect:
+            self.layout.prop(self, "manual_host")
+            self.layout.prop(self, "manual_port")
+            self.layout.prop(context.scene, "minihou_http_port", text="Editor Port")
+        self.layout.prop(self, "show_sidebar")
+        self.layout.label(text="Advanced: launch an external Python engine from Blender")
         self.layout.prop(self, "external_python")
         self.layout.prop(self, "project_root")
         self.layout.label(text="Prepare dependencies in the external runtime, not Blender.")
@@ -109,7 +124,8 @@ class MINIHOU_OT_open_editor(bpy.types.Operator):
 class MINIHOU_OT_add_modifier(bpy.types.Operator):
     bl_idname = "minihou.add_modifier"
     bl_label = "Add MiniHou Modifier"
-    bl_description = "Add an independent instance of the selected graph to each selected mesh"
+    bl_description = "Add a MiniHou modifier to the selected meshes"
+    new_graph: BoolProperty(default=False, options={"HIDDEN"})
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
@@ -122,7 +138,7 @@ class MINIHOU_OT_add_modifier(bpy.types.Operator):
         try:
             for obj in context.selected_objects:
                 if obj.type == "MESH" and obj.library is None:
-                    modifiers.add_modifier(obj, context.scene.minihou_graph_path)
+                    modifiers.add_modifier(obj, "" if self.new_graph else context.scene.minihou_graph_path)
                     added += 1
             modifiers.pump(force=True)
         except Exception as exc:
@@ -222,6 +238,11 @@ class MINIHOU_PT_main(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "MiniHou"
+
+    @classmethod
+    def poll(cls, context):
+        addon = context.preferences.addons.get(__package__)
+        return bool(addon and addon.preferences.show_sidebar)
 
     def draw(self, context):
         from . import proxy
@@ -330,7 +351,7 @@ class MINIHOU_OT_bake_rbd(bpy.types.Operator):
 
 
 class MINIHOU_PT_modifier_sources(bpy.types.Panel):
-    bl_label = "MiniHou Source Objects"
+    bl_label = "MiniHou"
     bl_idname = "MINIHOU_PT_modifier_sources"
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
@@ -338,9 +359,11 @@ class MINIHOU_PT_modifier_sources(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
-        return context.object is not None and any(modifiers.is_modifier(m) for m in context.object.modifiers)
+        return context.object is not None and context.object.type == "MESH"
 
     def draw(self, context):
+        self.layout.operator("minihou.add_modifier", icon="ADD").new_graph = True
+        self.layout.label(text="Open MiniHou, then edit a modifier's network")
         if any(modifiers.has_rbd(m) for m in context.object.modifiers):
             self.layout.operator('minihou.bake_rbd', icon='REC')
             self.layout.label(text='RBD: synchronous timeline; bake before animation render')

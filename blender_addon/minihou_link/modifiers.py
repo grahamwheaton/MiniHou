@@ -214,21 +214,42 @@ def _disconnect_unsafe_sources(obj, mod):
 
 def _settings(host=None, port=None):
     wm = bpy.context.window_manager
+    addon = bpy.context.preferences.addons.get(__package__)
+    if host is None and port is None and addon and not addon.preferences.auto_connect:
+        return addon.preferences.manual_host, addon.preferences.manual_port
     return (host or getattr(wm, "minihou_host", "127.0.0.1"),
             int(port if port is not None else getattr(wm, "minihou_port", 8765)))
 
 
 def _connection(host=None, port=None):
     global _client, _endpoint
+    addon = bpy.context.preferences.addons.get(__package__)
+    automatic = host is None and port is None and (not addon or addon.preferences.auto_connect)
+    if automatic and _client is not None and _client.sock is not None:
+        return _client
     endpoint = _settings(host, port)
-    if _client is None or endpoint != _endpoint:
+    if _client is None or endpoint != _endpoint or _client.sock is None:
         disconnect()
         from .instance_client import InstanceClient
-        # Cold accelerator compilation and large geometry cooks can exceed five
-        # seconds. Use the instance client's normal bounded cook allowance.
-        _client = InstanceClient(*endpoint, timeout=30.0)
-        _client.connect()
-        _endpoint = endpoint
+        from .discovery import candidates
+        choices = list(dict.fromkeys(candidates() + [endpoint])) if automatic else [endpoint]
+        for address in choices:
+            client = InstanceClient(*address, timeout=0.4 if automatic else 30.0)
+            try:
+                header = client.connect()
+                if automatic and "live_modifier_v1" not in header.get("capabilities", []):
+                    raise RuntimeError("This engine needs updating")
+            except (OSError, RuntimeError, ValueError):
+                client.close()
+                if not automatic:
+                    raise
+                continue
+            client.sock.settimeout(30.0)
+            client.timeout = 30.0
+            _client, _endpoint = client, address
+            break
+        if _client is None:
+            raise RuntimeError("Open the updated MiniHou app, then try again. Blender connects automatically.")
     return _client
 
 

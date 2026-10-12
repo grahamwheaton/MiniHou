@@ -156,8 +156,14 @@ failed cooks retain the last successful cache and report an error. These caches 
 ### Edit a modifier's network
 
 Start the updated MiniHou app, install its bundled Blender add-on, and restart Blender after updating.
-Select a mesh in Blender. Leave **Graph** empty and add a MiniHou modifier to create a basic
-input/transform/output network, or select an existing modifier JSON file. Click that modifier's **Edit Network**.
+Select a mesh in Blender. In **Properties > Modifiers > MiniHou**, click **Add MiniHou Modifier**,
+then **Edit Network**. New modifiers start with an input/transform/output network.
+Blender discovers the newest compatible running local MiniHou app automatically, including when the
+default port is occupied. Existing connections stay with their current engine. Stale discovery records
+are checked by a protocol handshake and ignored. Start the MiniHou app first; the add-on does not launch it automatically.
+Connection overrides live in **Preferences > Add-ons > MiniHou Link**: turn off **Find MiniHou automatically**
+to select a host and port. The N-panel is hidden by default; **Show legacy sidebar tools** restores the
+advanced template, server-launch and proxy controls.
 The browser shows a **Live: object / modifier** badge and previews its actual input geometry.
 No legacy proxy connection or manual Reload Graph is required for live edits.
 
