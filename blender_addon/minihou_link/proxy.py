@@ -222,7 +222,10 @@ def _sync_usage_chain(ng, params: List[dict], ids: Dict[str, str]) -> None:
     gin, gout = nodes["NodeGroupInput"], nodes["NodeGroupOutput"]
     params = list(params)
     ids = dict(ids)
-    object_ids = {item.identifier for item in _sockets(ng, "INPUT") if item.socket_type == "NodeSocketObject"}
+    # Reference-only comparison is available from Blender 5.2. Older versions
+    # must not evaluate object geometry merely to mark a socket as used.
+    object_ids = ({item.identifier for item in _sockets(ng, "INPUT") if item.socket_type == "NodeSocketObject"}
+                  if bpy.app.version >= (5, 2, 0) else set())
     compare_prefix = "__MiniHou_object_usage_"
     for node in list(ng.nodes):
         if node.name.startswith(compare_prefix) and node.name[len(compare_prefix):] not in object_ids:

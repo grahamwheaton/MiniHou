@@ -81,9 +81,10 @@ class SourceObjectTests(unittest.TestCase):
             self.assertFalse(self.m._object_socket(mod, key).hide_in_modifier)
         self.cook()
         bpy.context.view_layer.update()
-        for key in ("monkey", "cube"):
-            self.assertTrue(mod.is_input_used(self.m._object_socket(mod, key).identifier))
-        self.assertTrue(mod.is_input_used(self.m._ensure_source(mod).identifier))
+        if bpy.app.version >= (5, 2, 0):
+            for key in ("monkey", "cube"):
+                self.assertTrue(mod.is_input_used(self.m._object_socket(mod, key).identifier))
+            self.assertTrue(mod.is_input_used(self.m._ensure_source(mod).identifier))
         self.assertEqual(len(evaluated_positions(obj)), 4 * (len(monkey.data.vertices) + 8))
         self.assertIn(monkey_mat, list(self.m._cache(mod).data.materials))
         self.assertIn(cube_mat, list(self.m._cache(mod).data.materials))
