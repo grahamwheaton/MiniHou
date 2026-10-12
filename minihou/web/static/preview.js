@@ -120,7 +120,8 @@ window.MiniHouPreview = (() => {
     const faceIdx = gl.createBuffer();
     const ov = { points: 0, edgeIdx: 0, faceIdx: 0 };
 
-    const view = { yaw: -0.6, pitch: 0.45, dist: 5, target: [0, 0, 0] };
+    const view = { yaw: -0.6, pitch: 0.45, dist: 5, target: [0, 0, 0], ortho: false };
+    const PITCH_MAX = 1.5707, FOV = Math.PI / 4, ORTHO_FOV = 0.03;     // "orthographic" is a very narrow lens far away: the same maths, so picking and handles keep working
     const opt = { shaded: true, edges: true, points: false };
     let data = { npoints: 0, ntris: 0, nedges: 0, hasCd: false, bounds: [[-1, -1, -1], [1, 1, 1]] };
     let raw = null;                                                  // the geometry's typed arrays, for picking
@@ -141,8 +142,12 @@ window.MiniHouPreview = (() => {
       const [lo, hi] = data.bounds;
       view.target = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
       const r = Math.max(Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2, 1e-3);
-      view.dist = r / Math.tan(Math.PI / 8) * 1.15;
+      view.dist = fitDist(r, 1.15);
       schedule();
+    }
+    function fitDist(r, slack) {                                     // far enough that a sphere of radius r fits the narrower side of the canvas
+      const aspect = Math.min(1, Math.max(canvas.clientWidth, 1) / Math.max(canvas.clientHeight, 1));
+      return r / (Math.tan(Math.PI / 8) * aspect) * slack;
     }
     function resize() {
       const dpr = window.devicePixelRatio || 1, w = Math.max(1, Math.round(canvas.clientWidth * dpr)), h = Math.max(1, Math.round(canvas.clientHeight * dpr));
@@ -150,10 +155,11 @@ window.MiniHouPreview = (() => {
     }
     function camera() {                                              // matrices for the current view; sizes in CSS pixels
       const [lo, hi] = data.bounds, r = Math.max(Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2, 1e-3);
-      const cp = Math.cos(view.pitch), eye = [view.target[0] + view.dist * cp * Math.cos(view.yaw),
-        view.target[1] + view.dist * cp * Math.sin(view.yaw), view.target[2] + view.dist * Math.sin(view.pitch)];
-      const w = Math.max(canvas.clientWidth, 1), h = Math.max(canvas.clientHeight, 1), near = Math.max(view.dist * 0.01, r * 1e-3);
-      return { MV: lookAt(eye, view.target, [0, 0, 1]), P: perspective(Math.PI / 4, w / h, near, view.dist + r * 4), eye, w, h, near };
+      const fov = view.ortho ? ORTHO_FOV : FOV, D = view.dist * Math.tan(FOV / 2) / Math.tan(fov / 2);   // same apparent size either way
+      const cp = Math.cos(view.pitch), eye = [view.target[0] + D * cp * Math.cos(view.yaw),
+        view.target[1] + D * cp * Math.sin(view.yaw), view.target[2] + D * Math.sin(view.pitch)];
+      const w = Math.max(canvas.clientWidth, 1), h = Math.max(canvas.clientHeight, 1), near = view.ortho ? Math.max(D - view.dist - r * 4, D * 0.01) : Math.max(view.dist * 0.01, r * 1e-3);
+      return { MV: lookAt(eye, view.target, [0, 0, 1]), P: perspective(fov, w / h, near, D + r * 4 + (view.ortho ? view.dist : 0)), eye, w, h, near };
     }
 
     // ---------------------------------------------------------------- selection (points, edges, faces)
@@ -331,6 +337,7 @@ window.MiniHouPreview = (() => {
       gl.viewport(0, 0, canvas.width, canvas.height);
       gl.clearColor(0.13, 0.14, 0.16, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       api.draws++;
+      renderGizmo(camera());
       if (!data.npoints) return;
       const cam = camera(), MV = cam.MV, P = cam.P;
       gl.enable(gl.DEPTH_TEST);
@@ -434,6 +441,74 @@ window.MiniHouPreview = (() => {
       window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
     }
 
+
+    // ---------------------------------------------------------------- navigation: axis views, orthographic, frame selection, axis gizmo
+    const VIEWS = { front: [-Math.PI / 2, 0], back: [Math.PI / 2, 0], right: [0, 0], left: [Math.PI, 0], top: [-Math.PI / 2, PITCH_MAX], bottom: [-Math.PI / 2, -PITCH_MAX] };
+    let tween = 0;
+    function goTo(yaw, pitch, instant) {
+      cancelAnimationFrame(tween); tween = 0;
+      if (instant) { view.yaw = yaw; view.pitch = pitch; schedule(); return; }
+      const y0 = view.yaw, p0 = view.pitch;
+      let dy = (yaw - y0) % (2 * Math.PI);
+      if (dy > Math.PI) dy -= 2 * Math.PI; else if (dy < -Math.PI) dy += 2 * Math.PI;
+      const t0 = performance.now();
+      const step = (now) => {
+        const k = Math.min(1, (now - t0) / 180), e = k * k * (3 - 2 * k);
+        view.yaw = y0 + dy * e; view.pitch = p0 + (pitch - p0) * e;
+        schedule();
+        tween = k < 1 ? requestAnimationFrame(step) : 0;
+      };
+      tween = requestAnimationFrame(step);
+    }
+    function viewAxis(name, opposite, instant) {
+      const key = opposite ? { front: "back", back: "front", right: "left", left: "right", top: "bottom", bottom: "top" }[name] : name;
+      const v = VIEWS[key];
+      if (v) goTo(v[0], v[1], instant);
+    }
+    function frameSelection() {                                      // the selected elements, or everything when nothing is selected
+      if (!raw) return;
+      const ids = new Set();
+      if (sel.point.size) for (const i of sel.point) ids.add(i);
+      for (const [, e] of sel.edge) { ids.add(e[0]); ids.add(e[1]); }
+      if (sel.face.size) for (let i = 0; i < raw.triPrim.length; i++) if (sel.face.has(raw.triPrim[i])) for (let c = 0; c < 3; c++) ids.add(raw.tri[3 * i + c]);
+      if (!ids.size) { frameAll(); return; }
+      const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+      for (const i of ids) for (let c = 0; c < 3; c++) { const v = raw.P[3 * i + c]; if (v < lo[c]) lo[c] = v; if (v > hi[c]) hi[c] = v; }
+      view.target = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+      const r = Math.max(Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2, 1e-3);
+      view.dist = fitDist(r, 1.3);
+      schedule();
+    }
+    const gsvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    gsvg.setAttribute("class", "pv-gizmo"); gsvg.setAttribute("width", 92); gsvg.setAttribute("height", 92);
+    canvas.parentElement.append(gsvg);
+    const GAXES = [["right", [1, 0, 0], "X", "#ff5d5d"], ["back", [0, 1, 0], "Y", "#4cc38a"], ["top", [0, 0, 1], "Z", "#4aa3ff"]];
+    const gizmo = [];                                                // built once, so a click is never lost to a redraw: negatives first, positives on top
+    for (const sign of [-1, 1]) for (const [name, a, letter, col] of GAXES) {
+      const pos = sign > 0, g = svg("g", { class: "pv-axis", "data-axis": (pos ? "+" : "-") + letter, style: "cursor: pointer" });
+      const line = svg("line", { stroke: col, "stroke-width": 2, x1: 46, y1: 46 });
+      const dot = svg("circle", { r: pos ? 9 : 6.5, fill: pos ? col : "#2d3035", stroke: col, "stroke-width": 1.5 });
+      const label = svg("text", { "text-anchor": "middle", "font-size": 10, "font-weight": 700, fill: "#0b0d10", "pointer-events": "none" });
+      label.textContent = pos ? letter : "";
+      if (pos) g.append(line);
+      g.append(dot, label);
+      g.addEventListener("pointerdown", (e) => e.stopPropagation());
+      g.addEventListener("click", (e) => { e.stopPropagation(); viewAxis(name, !pos, false); });
+      gizmo.push({ a: a.map((v) => v * sign), line, dot, label, g, pos });
+      gsvg.append(g);
+    }
+    function renderGizmo(cam) {
+      const m = cam.MV, R = 30, c = 46;
+      for (const it of gizmo) {
+        const [x, y, z] = it.a, sx = c + R * (m[0] * x + m[4] * y + m[8] * z), sy = c - R * (m[1] * x + m[5] * y + m[9] * z);
+        const front = m[2] * x + m[6] * y + m[10] * z >= 0;           // towards the viewer
+        it.dot.setAttribute("cx", sx); it.dot.setAttribute("cy", sy);
+        it.label.setAttribute("x", sx); it.label.setAttribute("y", sy + 3.5);
+        if (it.pos) { it.line.setAttribute("x2", sx); it.line.setAttribute("y2", sy); }
+        it.g.setAttribute("opacity", front ? 1 : 0.45);
+      }
+    }
+
     // ---------------------------------------------------------------- mouse: orbit / pan / select
     const marquee = document.createElement("div");
     marquee.className = "pv-marquee hidden";
@@ -470,7 +545,7 @@ window.MiniHouPreview = (() => {
         for (let i = 0; i < 3; i++) view.target[i] += (-dx * right[i] + dy * up[i]) * k;
       } else {
         view.yaw -= dx * 0.008;
-        view.pitch = Math.max(-1.5, Math.min(1.5, view.pitch + dy * 0.008));
+        view.pitch = Math.max(-PITCH_MAX, Math.min(PITCH_MAX, view.pitch + dy * 0.008));
       }
       schedule();
     });
@@ -505,7 +580,9 @@ window.MiniHouPreview = (() => {
         else rebuildOverlay();
       },
       clear() { handles = []; data.npoints = 0; raw = null; Object.assign(api, { tris: 0, edges: 0, points: 0 }); change({}, "replace"); schedule(); },
-      frameAll, redraw: schedule,
+      frameAll, frameSelection, viewAxis, redraw: schedule,
+      setOrtho(on) { view.ortho = !!on; schedule(); return view.ortho; },
+      toggleOrtho() { return api.setOrtho(!view.ortho); },
       setMode(m) {
         if (!["view", "point", "edge", "face"].includes(m)) return;
         sel.mode = m;

@@ -77,8 +77,16 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
 
 ![A bevel made from an edge selection, with its distance arrow in the 3-D view](docs/images/editor_gizmo.png)
 
-* **3-D preview** (top right): a WebGL2 view of the selected node, or the display node when nothing is selected, so the engine is
-  usable without Blender. Drag to orbit (Z is up), **Shift**-drag or right-drag to pan, wheel to zoom, double-click to frame.
+![The 3-D view as the main window, with the graph small on the left](docs/images/editor_3d_main.png)
+
+* **Resizable panes**: the graph, the 3-D view and the parameter panel are separate panes with draggable dividers (between graph and
+  view, between those and the side panel, and between parameters and the geometry inspector). **Graph / Split / 3D** in the top bar set
+  the balance (the 3-D view as the main window, or the graph), **⇆** puts the panes side by side or stacked, **⇄** swaps them, **▤** hides
+  the side panel, and **Ctrl+Space** over a pane makes it fill the window (again to go back). The layout is remembered in the browser.
+* **3-D view**: a WebGL2 view of the selected node, or the display node when nothing is selected, so the engine is
+  usable without Blender. Drag to orbit (Z is up), **Shift**-drag or right-drag to pan, wheel to zoom, double-click to frame. Navigation
+  also has **Front / Right / Top** buttons and an axis gizmo in the corner (click an axis ball to look along it; **Numpad 1 / 3 / 7**, with
+  **Ctrl** for the opposite side), **Persp / Ortho** (**Numpad 5**), and **Numpad .** / **Home** to frame the selected elements or everything.
   Shaded / edges / points toggles; point colours (`Cd`) are shown; back faces are tinted orange so flipped normals stand out.
   Very large geometry is cut to a drawable size and the view says so.
 * **Select in the 3-D view and build the network from it**: the **Pts / Edges / Faces** buttons under the view (or **1 / 2 / 3** with the

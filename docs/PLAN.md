@@ -136,6 +136,11 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
    per node type (transform, polyextrude, polybevel, box, sphere) return arrows (origin, direction, parameter, scale, limits) with the
    preview; the viewer draws them as an SVG overlay and a drag becomes a `set` edit (vector parameters keep their other components).
 
+7. **Dockable editor layout**: the 3-D view left the side column and is a pane of its own beside the graph (`#work`), with draggable dividers,
+   Graph / Split / 3D presets, stacked or side by side, swap, a hideable side panel, Ctrl+Space maximise, all saved in the browser. The view
+   got Front/Right/Top buttons, an axis gizmo (built once, so clicks survive redraws), orthographic (a very narrow lens far away, so picking and
+   handles use the same maths), frame selection, Numpad keys, and framing that fits the narrower side of the pane.
+
 Open:
 
 - Extra outputs have no modifier or exposed parameters (only the display branch does).

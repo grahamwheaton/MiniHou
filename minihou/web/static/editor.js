@@ -652,6 +652,11 @@
     box.replaceChildren(...acts.map((a) => h("button", { title: a.title || `${a.label} the selection: adds a ${a.type} node after ${pvNode || "the viewed node"}`,
       dataset: { action: a.label }, onclick: () => applySelectionAction(a) }, a.label + (a.key ? ` (${a.key.toUpperCase()})` : ""))));
   }
+  function toggleOrtho() {
+    const on = pv.toggleOrtho();
+    $("#pv-ortho").textContent = on ? "Ortho" : "Persp";
+    $("#pv-ortho").classList.toggle("on", on);
+  }
   function wireSelectionTools() {
     pv.onSelect = renderSelectionTools;
     // viewport handles: arrows in the view that scrub a parameter of the viewed node
@@ -676,11 +681,19 @@
     };
     document.querySelectorAll("#preview [data-mode]").forEach((b) => { b.onclick = () => pv.setMode(b.dataset.mode); });
     let over = false;
-    $("#pv-canvas").addEventListener("pointerenter", () => { over = true; });
-    $("#pv-canvas").addEventListener("pointerleave", () => { over = false; });
+    const wrap = $("#pv-canvas").parentElement;                         // the canvas and the overlays on it (gizmo, handles) count as one
+    wrap.addEventListener("pointerenter", () => { over = true; });
+    wrap.addEventListener("pointerleave", () => { over = false; });
     document.addEventListener("keydown", (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
-      if (!over || tag === "input" || tag === "textarea" || tag === "select" || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (!over || tag === "input" || tag === "textarea" || tag === "select") return;
+      const nav = { Numpad1: ["front"], Numpad3: ["right"], Numpad7: ["top"] }[e.code];          // Blender-style view keys; Ctrl = the opposite side
+      if (nav && !e.altKey && !e.metaKey) { pv.viewAxis(nav[0], e.ctrlKey); e.preventDefault(); e.stopImmediatePropagation(); return; }
+      if (e.code === "Numpad5" || e.code === "NumpadDecimal" || e.key === "Home") {
+        if (e.code === "Numpad5") toggleOrtho(); else pv.frameSelection();
+        e.preventDefault(); e.stopImmediatePropagation(); return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.key.toLowerCase();
       const mode = { "1": "point", "2": "edge", "3": "face" }[k];
       if (mode) { pv.setMode(mode); e.preventDefault(); e.stopImmediatePropagation(); return; }
@@ -698,7 +711,9 @@
       $(id).checked = pv.opt[key];
       $(id).onchange = (e) => { pv.opt[key] = e.target.checked; pv.redraw(); };
     }
-    $("#pv-frame").onclick = () => pv.frameAll();
+    $("#pv-frame").onclick = () => pv.frameSelection();
+    document.querySelectorAll("#preview [data-view]").forEach((b) => { b.onclick = () => pv.viewAxis(b.dataset.view, false); });
+    $("#pv-ortho").onclick = () => toggleOrtho();
     wireSelectionTools();
   } else { $("#preview .pv-opts").classList.add("hidden"); }
   async function runInspect() {
@@ -1243,21 +1258,93 @@
     if (!name.toLowerCase().endsWith(".json")) name += ".json";
     openFile(name, true);
   }
-  (() => {
-    const side = $("#side");
-    try { const w = +localStorage.getItem("minihou.side"); if (w > 200) side.style.width = w + "px"; } catch (e) { /* storage unavailable */ }
-    $("#splitter").addEventListener("pointerdown", (e) => {
-      const x0 = e.clientX, w0 = side.getBoundingClientRect().width;
-      const move = (ev) => { side.style.width = Math.max(260, Math.min(innerWidth * 0.7, w0 - (ev.clientX - x0))) + "px"; };
-      const up = () => {
-        window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
-        try { localStorage.setItem("minihou.side", parseInt(side.style.width, 10)); } catch (err) { /* ignore */ }
-      };
-      window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  // ---------------------------------------------------------------- layout: graph, 3-D view and parameter panel are resizable panes
+  const layout = (() => {
+    const KEY = "minihou.layout";
+    const work = $("#work"), graphPane = $("#canvas"), viewPane = $("#preview"), side = $("#side"), params = $("#params"), info = $("#info");
+    const L = { viewFrac: 0.5, dir: "row", swap: false, max: null, side: true, sideW: 360, paramsFrac: 0.6 };
+    try { Object.assign(L, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) { /* storage unavailable or damaged */ }
+    L.viewFrac = Math.min(0.92, Math.max(0.08, +L.viewFrac || 0.5));
+    L.paramsFrac = Math.min(0.9, Math.max(0.1, +L.paramsFrac || 0.6));
+    L.sideW = Math.max(220, +L.sideW || 360);
+    if (L.dir !== "col") L.dir = "row";
+    if (L.max !== "graph" && L.max !== "view") L.max = null;
+    const save = () => { try { localStorage.setItem(KEY, JSON.stringify(L)); } catch (e) { /* ignore */ } };
+    let redrawTimer = 0;
+    function apply() {
+      work.classList.toggle("col", L.dir === "col");
+      work.classList.toggle("max-graph", L.max === "graph");
+      work.classList.toggle("max-view", L.max === "view");
+      document.body.classList.toggle("side-hidden", !L.side);
+      const first = L.swap ? viewPane : graphPane, second = L.swap ? graphPane : viewPane;
+      first.style.order = 0; $("#work-split").style.order = 1; second.style.order = 2;
+      const f = L.swap ? L.viewFrac : 1 - L.viewFrac;                                 // share of the first pane
+      first.style.flex = `0 0 calc(${(f * 100).toFixed(3)}% - 2.5px)`;
+      second.style.flex = "1 1 0";
+      for (const p of [graphPane, viewPane]) p.style.flex = L.max ? "1 1 0" : p.style.flex;
+      side.style.width = innerWidth > 760 ? L.sideW + "px" : "";
+      params.style.flex = `0 0 ${(L.paramsFrac * 100).toFixed(2)}%`;
+      info.style.flex = "1 1 0";
+      document.querySelectorAll("#topbar [data-layout]").forEach((b) => {
+        const want = { graph: 0.28, split: 0.5, view: 0.78 }[b.dataset.layout];
+        b.classList.toggle("on", !L.max && Math.abs(L.viewFrac - want) < 0.02);
+      });
+      $("#pv-max").classList.toggle("on", L.max === "view");
+      $("#lay-side").classList.toggle("on", L.side);
+      if (pv) pv.redraw();
+      clearTimeout(redrawTimer); redrawTimer = setTimeout(() => { if (pv) pv.redraw(); }, 60);
+    }
+    function set(patch) {
+      Object.assign(L, patch); apply(); save();
+      if (L.max !== "view") setTimeout(() => frame(false), 30);                         // the graph pane changed shape: show all of it again
+    }
+    function dragSplit(el, onMove, cursorClass) {
+      el.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        document.body.classList.add("dragging-split"); el.classList.add("active");
+        const move = (ev) => { onMove(ev); };
+        const up = () => {
+          window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up);
+          document.body.classList.remove("dragging-split"); el.classList.remove("active"); save();
+        };
+        window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
+      });
+    }
+    dragSplit($("#work-split"), (ev) => {
+      const r = work.getBoundingClientRect();
+      const p = L.dir === "col" ? (ev.clientY - r.top) / r.height : (ev.clientX - r.left) / r.width;      // where the first pane ends
+      const f = Math.min(0.92, Math.max(0.08, p));
+      L.viewFrac = L.swap ? f : 1 - f; apply();
     });
+    dragSplit($("#splitter"), (ev) => { L.sideW = Math.round(Math.max(220, Math.min(innerWidth * 0.7, innerWidth - ev.clientX))); apply(); });
+    dragSplit($("#side-split"), (ev) => {
+      const r = side.getBoundingClientRect();
+      L.paramsFrac = Math.min(0.9, Math.max(0.1, (ev.clientY - r.top) / r.height)); apply();
+    });
+    document.querySelectorAll("#topbar [data-layout]").forEach((b) => {
+      b.onclick = () => set({ viewFrac: { graph: 0.28, split: 0.5, view: 0.78 }[b.dataset.layout], max: null });
+    });
+    $("#lay-dir").onclick = () => set({ dir: L.dir === "row" ? "col" : "row" });
+    $("#lay-swap").onclick = () => set({ swap: !L.swap });
+    $("#lay-side").onclick = () => set({ side: !L.side });
+    $("#pv-max").onclick = () => set({ max: L.max === "view" ? null : "view" });
+    let hover = null;                                                                  // which pane the pointer is over, for Ctrl+Space
+    graphPane.addEventListener("pointerenter", () => { hover = "graph"; });
+    viewPane.addEventListener("pointerenter", () => { hover = "view"; });
+    document.addEventListener("keydown", (e) => {
+      if (e.code !== "Space" || !e.ctrlKey || e.altKey || e.metaKey) return;
+      const tag = (e.target.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      if (L.max) set({ max: null }); else if (hover) set({ max: hover });
+      e.preventDefault(); e.stopImmediatePropagation();
+    }, true);
+    window.addEventListener("resize", apply);
+    apply();
+    return { state: L, set, apply };
   })();
 
   applyView();
   connectEvents();
-  window.minihou = { S, edit, frame, clipboardText, pasteNodes, preview: pv };                  // handy from the browser console
+  window.minihou = { S, edit, frame, clipboardText, pasteNodes, preview: pv, layout };                  // handy from the browser console
 })();

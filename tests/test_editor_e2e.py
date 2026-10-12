@@ -624,5 +624,122 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_selector('.node[data-id="hills"]')
 
 
+    # ---- layout: resizable panes and navigation of the 3-D view
+    def width(self, sel):
+        return self.page.locator(sel).bounding_box()["width"]
+
+    def test_layout_presets_swap_stack_and_hide_the_panel(self):
+        self.box_scene()
+        self.page.click('#topbar [data-layout="view"]')
+        self.assertGreater(self.width("#preview"), 2 * self.width("#canvas"))
+        self.page.click('#topbar [data-layout="graph"]')
+        self.assertGreater(self.width("#canvas"), 2 * self.width("#preview"))
+        self.page.click("#lay-swap")
+        self.assertLess(self.page.locator("#canvas").bounding_box()["x"], self.page.locator("#preview").bounding_box()["x"] + 1e-6 + 10_000)
+        self.assertLess(self.page.locator("#preview").bounding_box()["x"], self.page.locator("#canvas").bounding_box()["x"])
+        self.page.click("#lay-dir")                                                            # stacked: the 3-D view is above the graph
+        a, b = self.page.locator("#preview").bounding_box(), self.page.locator("#canvas").bounding_box()
+        self.assertLess(a["y"], b["y"])
+        self.assertAlmostEqual(a["x"], b["x"], delta=2)
+        self.page.click("#lay-side")
+        self.assertFalse(self.page.locator("#side").is_visible())
+        self.page.click("#lay-side")
+        self.assertTrue(self.page.locator("#side").is_visible())
+
+    def test_dividers_resize_and_the_layout_is_remembered(self):
+        self.box_scene()
+        self.page.click('#topbar [data-layout="split"]')
+        w0 = self.width("#preview")
+        sp = self.page.locator("#work-split").bounding_box()
+        self.page.mouse.move(sp["x"] + 2, sp["y"] + 200)
+        self.page.mouse.down()
+        self.page.mouse.move(sp["x"] - 150, sp["y"] + 200, steps=5)
+        self.page.mouse.up()
+        w1 = self.width("#preview")
+        self.assertGreater(w1, w0 + 100)
+        side0 = self.width("#side")
+        sp = self.page.locator("#splitter").bounding_box()
+        self.page.mouse.move(sp["x"] + 2, sp["y"] + 200)
+        self.page.mouse.down()
+        self.page.mouse.move(sp["x"] - 80, sp["y"] + 200, steps=5)
+        self.page.mouse.up()
+        self.assertGreater(self.width("#side"), side0 + 50)
+        params0 = self.page.locator("#params").bounding_box()["height"]
+        sp = self.page.locator("#side-split").bounding_box()
+        self.page.mouse.move(sp["x"] + 40, sp["y"] + 2)
+        self.page.mouse.down()
+        self.page.mouse.move(sp["x"] + 40, sp["y"] - 60, steps=5)
+        self.page.mouse.up()
+        self.assertLess(self.page.locator("#params").bounding_box()["height"], params0 - 30)
+        w2 = self.width("#preview")
+        self.page.reload()
+        self.page.wait_for_selector("#pv-canvas")
+        self.assertAlmostEqual(self.width("#preview"), w2, delta=6)
+        self.assertAlmostEqual(self.width("#side"), side0 + 80, delta=6)
+
+    def test_ctrl_space_fills_the_window_with_the_pane_under_the_pointer(self):
+        self.box_scene()
+        box = self.page.locator("#pv-canvas").bounding_box()
+        self.page.mouse.move(box["x"] + 40, box["y"] + 40)
+        self.page.keyboard.press("Control+Space")
+        self.assertFalse(self.page.locator("#canvas").is_visible())
+        self.assertGreater(self.width("#preview"), 0.6 * self.page.viewport_size["width"])
+        self.page.keyboard.press("Control+Space")
+        self.assertTrue(self.page.locator("#canvas").is_visible())
+        c = self.page.locator("#canvas").bounding_box()
+        self.page.mouse.move(c["x"] + 40, c["y"] + 40)
+        self.page.keyboard.press("Control+Space")
+        self.assertFalse(self.page.locator("#preview").is_visible())
+        self.page.click("#topbar [data-layout=split]")                                         # a preset leaves the maximised state
+        self.assertTrue(self.page.locator("#preview").is_visible())
+
+    def view_angles(self):
+        return self.page.evaluate("[minihou.preview.view.yaw, minihou.preview.view.pitch]")
+
+    def test_axis_views_ortho_gizmo_and_frame_selection(self):
+        import math
+        self.box_scene()
+        self.page.click('#preview [data-view="front"]')
+        self.page.wait_for_function("Math.abs(minihou.preview.view.yaw + Math.PI / 2) < 1e-3")
+        self.assertAlmostEqual(self.view_angles()[1], 0, places=3)
+        self.page.click('#preview [data-view="top"]')
+        self.page.wait_for_function("minihou.preview.view.pitch > 1.57")
+        box = self.page.locator("#pv-canvas").bounding_box()
+        self.page.mouse.move(box["x"] + 60, box["y"] + 300)
+        self.page.keyboard.press("Control+Numpad1")                                            # the back view
+        self.page.wait_for_function("Math.abs(minihou.preview.view.yaw - Math.PI / 2) < 1e-3 && Math.abs(minihou.preview.view.pitch) < 1e-3")
+        self.page.keyboard.press("Numpad3")
+        self.page.wait_for_function("Math.abs(minihou.preview.view.yaw) < 1e-3")
+        self.page.locator('.pv-gizmo [data-axis="+Z"]').click()                                # the gizmo's Z ball looks from above
+        self.page.wait_for_function("minihou.preview.view.pitch > 1.57")
+        # orthographic: parallel edges stay parallel, so the box's top face is a rectangle on screen
+        self.page.keyboard.press("Numpad5")
+        self.assertEqual(self.page.locator("#pv-ortho").inner_text(), "Ortho")
+        self.assertTrue(self.page.evaluate("minihou.preview.view.ortho"))
+        pts = [self.page.evaluate("([k, i]) => minihou.preview.screenOf(k, i)", ["point", i]) for i in self.top_points]
+        xs, ys = sorted({round(p[0]) for p in pts}), sorted({round(p[1]) for p in pts})
+        self.assertEqual((len(xs), len(ys)), (2, 2))
+        self.page.keyboard.press("Numpad5")
+        self.assertFalse(self.page.evaluate("minihou.preview.view.ortho"))
+        # frame selection zooms to the selected points, Home to everything
+        self.page.click('#preview [data-mode="point"]')
+        self.page.mouse.click(*self.view_xy("point", self.top_points[0]))
+        d_all = self.page.evaluate("minihou.preview.view.dist")
+        self.page.keyboard.press("NumpadDecimal")
+        self.assertLess(self.page.evaluate("minihou.preview.view.dist"), d_all)
+        self.page.keyboard.press("Home")
+        self.page.click('#preview [data-mode="view"]')
+        self.page.keyboard.press("Home")
+
+    def test_framing_fits_a_narrow_view(self):
+        self.box_scene()
+        self.page.click('#topbar [data-layout="graph"]')                                       # a narrow 3-D view
+        self.page.click("#pv-frame")
+        box = self.page.locator("#pv-canvas").bounding_box()
+        for i in range(8):
+            sx, sy, _ = self.page.evaluate("([k, i]) => minihou.preview.screenOf(k, i)", ["point", i])
+            self.assertTrue(0 <= sx <= box["width"] and 0 <= sy <= box["height"], (i, sx, sy, box))
+
+
 if __name__ == "__main__":
     unittest.main()
