@@ -249,6 +249,30 @@ window.MiniHouPreview = (() => {
       }
       return null;
     }
+    function ensurePieces() {                                        // connected pieces: faces that share points (union-find over the triangles)
+      if (raw.facePiece) return;
+      const np = raw.P.length / 3, parent = new Int32Array(np).map((_, i) => i);
+      const find = (a) => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+      const T = raw.tri, union = (x, y) => { const a = find(x), b = find(y); if (a !== b) parent[b] = a; };
+      for (let i = 0, n = T.length / 3; i < n; i++) { union(T[3 * i], T[3 * i + 1]); union(T[3 * i], T[3 * i + 2]); }
+      let nf = 0;
+      for (let i = 0; i < raw.triPrim.length; i++) if (raw.triPrim[i] >= nf) nf = raw.triPrim[i] + 1;
+      const facePiece = new Int32Array(nf).fill(-1), ids = new Map(), pieces = [];
+      for (let i = 0; i < raw.triPrim.length; i++) {
+        const f = raw.triPrim[i];
+        if (facePiece[f] >= 0) continue;
+        const root = find(T[3 * i]);
+        if (!ids.has(root)) { ids.set(root, pieces.length); pieces.push([]); }
+        facePiece[f] = ids.get(root); pieces[ids.get(root)].push(f);
+      }
+      raw.facePiece = facePiece; raw.pieces = pieces;
+    }
+    function piecesOf(faces) {                                       // every face of every piece that one of these faces belongs to
+      ensurePieces();
+      const hit = new Set(), out = [];
+      for (const f of faces) { const p = raw.facePiece[f]; if (p >= 0 && !hit.has(p)) { hit.add(p); for (const g of raw.pieces[p]) out.push(g); } }
+      return out;
+    }
     function pickFace(cam, sx, sy) {
       const hit = raycast(cam.eye, rayAt(cam, sx, sy));
       return hit ? raw.triPrim[hit.tri] : -1;
@@ -272,7 +296,7 @@ window.MiniHouPreview = (() => {
           if (sp[3 * a + 2] < 0 || sp[3 * b + 2] < 0 || sp[3 * c + 2] < 0) continue;
           if (inside((sp[3 * a] + sp[3 * b] + sp[3 * c]) / 3, (sp[3 * a + 1] + sp[3 * b + 1] + sp[3 * c + 1]) / 3)) faces.add(raw.triPrim[i]);
         }
-        out.faces = [...faces];
+        out.faces = sel.mode === "piece" ? piecesOf(faces) : [...faces];
       }
       return out;
     }
@@ -429,7 +453,7 @@ window.MiniHouPreview = (() => {
     const hsvg = document.createElementNS(SVGNS, "svg");
     hsvg.setAttribute("class", "pv-handles");
     canvas.parentElement.append(hsvg);
-    let handles = [], pendingHandles = null, handleDrag = null;
+    let handles = [], pendingHandles = null, handleDrag = null, selHandles = [], pendingSel = null;   // selHandles: the move/rotate/scale gizmo of a selection (they win while something is selected)
     const AXIS_COLOUR = { 0: "#ff5d5d", 1: "#4cc38a", 2: "#4aa3ff" };
     const svg = (tag, attrs) => { const el = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v); return el; };
     function handleGeometry(cam, h) {                                // {s0, tip, u, ppu} in canvas pixels, or null when unusable
@@ -451,7 +475,7 @@ window.MiniHouPreview = (() => {
       return [o[0] + u[0] * c + v[0] * d, o[1] + u[1] * c + v[1] * d, o[2] + u[2] * c + v[2] * d];
     }
     const RING_STEPS = 72;
-    const shown = () => handles.filter((h) => !h.tool || h.tool === api.tool);
+    const shown = () => (selHandles.length ? selHandles : handles).filter((h) => !h.tool || h.tool === api.tool);
     function renderHandles(cam) {
       hsvg.setAttribute("width", cam.w); hsvg.setAttribute("height", cam.h);
       const kids = [];
@@ -500,52 +524,64 @@ window.MiniHouPreview = (() => {
       e.preventDefault(); e.stopPropagation();
       const cam = camera();
       if (!api.onHandleStart) return;
-      const base = api.onHandleStart(h);
-      if (typeof base !== "number" || !Number.isFinite(base)) return;
       const r = canvas.getBoundingClientRect();
       const x0 = e.clientX - r.left, y0 = e.clientY - r.top;
-      handleDrag = { h, base, value: base };
-      let measure;                                                  // pointer position (canvas pixels) -> the new value
-      if (h.kind === "ring") {                                      // the angle of the pointer around the ring, from where the ray meets its plane
-        const { u, v } = ringBasis(h), o = h.origin, n = h.dir;
-        const angleAt = (x, y) => {
-          const ray = rayAt(cam, x, y), den = dot(ray, n);
-          if (Math.abs(den) < 0.05) return null;                    // looking along the ring's plane: no stable angle
-          const t = dot(sub(o, cam.eye), n) / den, rel = sub([cam.eye[0] + ray[0] * t, cam.eye[1] + ray[1] * t, cam.eye[2] + ray[2] * t], o);
-          return Math.atan2(dot(rel, v), dot(rel, u));
-        };
-        let prev = angleAt(x0, y0), total = 0;
-        measure = (x, y) => {
-          const a = angleAt(x, y);
-          if (a === null || prev === null) { if (a !== null) prev = a; return base + total * h.scale; }
-          let d = a - prev;
-          if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
-          total += d; prev = a;
-          return base + total * h.scale;
-        };
-      } else if (h.kind === "uniform") {
-        measure = (x, y) => base * Math.exp(((x - x0) - (y - y0)) / 120);
-      } else {
-        const g = handleGeometry(cam, h);
-        if (!g) { handleDrag = null; return; }
-        const along = (x, y) => (x - x0) * g.u[0] + (y - y0) * g.u[1];
-        measure = h.kind === "scale" ? (x, y) => base * Math.exp(along(x, y) / 64) : (x, y) => base + (along(x, y) / g.ppu) * h.scale;
-      }
+      const drag = handleDrag = { h, base: NaN, value: NaN, measure: null, last: null, released: false };
+      let finished = false;
       const move = (ev) => {
-        let v = measure(ev.clientX - r.left, ev.clientY - r.top);
+        const x = ev.clientX - r.left, y = ev.clientY - r.top;
+        if (!drag.measure) { drag.last = [x, y]; return; }                      // the node is still being created: remember where the pointer is
+        let v = drag.measure(x, y);
         if (h.min !== undefined) v = Math.max(h.min, v);
         if (h.max !== undefined) v = Math.min(h.max, v);
         v = Math.round(v * 1e5) / 1e5;
-        if (v !== handleDrag.value) { handleDrag.value = v; if (api.onHandle) api.onHandle(h, v, false); }
+        if (v !== drag.value) { drag.value = v; if (api.onHandle) api.onHandle(h, v, false); }
       };
-      const up = () => {
-        window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
-        const d = handleDrag; handleDrag = null;
-        if (api.onHandle) api.onHandle(d.h, d.value, true);
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up);
+        if (api.onHandle && Number.isFinite(drag.value)) api.onHandle(drag.h, drag.value, true);
+        handleDrag = null;
         if (pendingHandles) { handles = pendingHandles; pendingHandles = null; }
+        if (pendingSel) { selHandles = pendingSel; pendingSel = null; }
         schedule();
       };
-      window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+      const up = () => { drag.released = true; if (drag.measure) finish(); };
+      window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);
+      const begin = (base) => {                                                 // base: the parameter's value when the drag starts
+        if (typeof base !== "number" || !Number.isFinite(base)) { drag.released = true; finish(); handleDrag = null; return; }
+        drag.base = base; drag.value = base;
+        if (h.kind === "ring") {                                                // the angle of the pointer around the ring, from where the ray meets its plane
+          const { u, v } = ringBasis(h), o = h.origin, n = h.dir;
+          const angleAt = (x, y) => {
+            const ray = rayAt(cam, x, y), den = dot(ray, n);
+            if (Math.abs(den) < 0.05) return null;                              // looking along the ring's plane: no stable angle
+            const t = dot(sub(o, cam.eye), n) / den, rel = sub([cam.eye[0] + ray[0] * t, cam.eye[1] + ray[1] * t, cam.eye[2] + ray[2] * t], o);
+            return Math.atan2(dot(rel, v), dot(rel, u));
+          };
+          let prev = angleAt(x0, y0), total = 0;
+          drag.measure = (x, y) => {
+            const a = angleAt(x, y);
+            if (a === null || prev === null) { if (a !== null) prev = a; return base + total * h.scale; }
+            let d = a - prev;
+            if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;
+            total += d; prev = a;
+            return base + total * h.scale;
+          };
+        } else if (h.kind === "uniform") {
+          drag.measure = (x, y) => base * Math.exp(((x - x0) - (y - y0)) / 120);
+        } else {
+          const g = handleGeometry(cam, h);
+          if (!g) { drag.released = true; finish(); handleDrag = null; return; }
+          const along = (x, y) => (x - x0) * g.u[0] + (y - y0) * g.u[1];
+          drag.measure = h.kind === "scale" ? (x, y) => base * Math.exp(along(x, y) / 64) : (x, y) => base + (along(x, y) / g.ppu) * h.scale;
+        }
+        if (drag.last) { const [lx, ly] = drag.last; drag.last = null; move({ clientX: lx + r.left, clientY: ly + r.top }); }
+        if (drag.released) finish();
+      };
+      const first = api.onHandleStart(h);                                       // a number, or a promise of one (a handle that must create its node first)
+      if (first && typeof first.then === "function") first.then(begin, () => begin(NaN)); else begin(first);
     }
 
 
@@ -686,10 +722,10 @@ window.MiniHouPreview = (() => {
         }).filter(Boolean);
       },
       ringScreen(id, t) {                                                               // for tests: a point on a ring at angle t, in canvas pixels
-        const h = handles.find((x) => x.id === id && x.kind === "ring");
+        const h = (selHandles.length ? selHandles : handles).find((x) => x.id === id && x.kind === "ring");
         return h ? toScreen(camera(), ...ringPoint(h, t)) : null;
       },
-      tool: "move", hasToolHandles() { return handles.some((h) => h.tool); },
+      tool: "move", hasToolHandles() { return (selHandles.length ? selHandles : handles).some((h) => h.tool); },
       setTool(t) { if (["move", "rotate", "scale"].includes(t)) { api.tool = t; schedule(); } },
       set(head, arrays, keepCamera) {
         const same = keepCamera && data.npoints === arrays.P.length / 3 && data.ntris === arrays.tri.length / 3 &&
@@ -705,20 +741,35 @@ window.MiniHouPreview = (() => {
       setOrtho(on) { view.ortho = !!on; schedule(); return view.ortho; },
       toggleOrtho() { return api.setOrtho(!view.ortho); },
       setMode(m) {
-        if (!["view", "point", "edge", "face"].includes(m)) return;
+        if (!["view", "point", "edge", "face", "piece"].includes(m)) return;
         sel.mode = m;
         canvas.style.cursor = m === "view" ? "grab" : "crosshair";
         change({}, "replace");                                                          // a new mode starts with nothing selected
         schedule();
       },
       selection: summary,
+      selectionInfo() {                                                                   // the selected points and where they are: the anchor of a move/rotate/scale gizmo
+        if (!raw) return null;
+        const ids = new Set();
+        if (sel.mode === "point") for (const i of sel.point) ids.add(i);
+        else if (sel.mode === "edge") for (const [, e] of sel.edge) { ids.add(e[0]); ids.add(e[1]); }
+        else if (sel.mode === "face" || sel.mode === "piece") {
+          if (sel.face.size) for (let i = 0; i < raw.triPrim.length; i++) if (sel.face.has(raw.triPrim[i])) for (let c = 0; c < 3; c++) ids.add(raw.tri[3 * i + c]);
+        }
+        if (!ids.size) return null;
+        const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+        for (const i of ids) for (let c = 0; c < 3; c++) { const v = raw.P[3 * i + c]; if (v < lo[c]) lo[c] = v; if (v > hi[c]) hi[c] = v; }
+        return { points: [...ids].sort((a, b) => a - b), center: [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2],
+          radius: Math.max(Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2, 1e-3) };
+      },
+      setSelectionHandles(list) { if (handleDrag) pendingSel = list || []; else { selHandles = list || []; schedule(); } },
       clearSelection() { change({}, "replace"); },
       pickAt(sx, sy, how) {                                                             // CSS pixels inside the canvas
         if (!raw || sel.mode === "view") return false;
         const cam = camera();
         if (sel.mode === "point") { const i = pickPoint(cam, sx, sy, 12); change({ points: i >= 0 ? [i] : [] }, i < 0 && how === "replace" ? "replace" : how); }
         else if (sel.mode === "edge") { const e = pickEdge(cam, sx, sy, 8); change({ edges: e ? [e] : [] }, !e && how === "replace" ? "replace" : how); }
-        else { const f = pickFace(cam, sx, sy); change({ faces: f >= 0 ? [f] : [] }, f < 0 && how === "replace" ? "replace" : how); }
+        else { const f = pickFace(cam, sx, sy); change({ faces: f < 0 ? [] : sel.mode === "piece" ? piecesOf([f]) : [f] }, f < 0 && how === "replace" ? "replace" : how); }
         return true;
       },
       boxSelect(x0, y0, x1, y1, how) { if (raw && sel.mode !== "view") change(boxPick(camera(), x0, y0, x1, y1), how || "replace"); },

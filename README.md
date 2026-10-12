@@ -327,6 +327,13 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
   an `edges` list of point pairs; a bevel cannot end in the middle of a surface, so select a loop or edges that meet or reach a border),
   *Extrude*, *Inset*, *Reverse*, *Group*, *Delete* for faces, *Group* and *Delete* for points. The same `insert` edit op is available to AI
   tools (`{"op": "insert", "after": "id", "type": "polybevel"}`).
+* **Piece (object) selection and moving things like Houdini**: the **Piece** button (or **4**) selects a whole connected piece with one click (a copy
+  from `copy_to_points`, one box of a merge...; a box drag takes every piece it touches). Anything you select, whether points, edges, faces or pieces,
+  shows a **Move / Rotate / Scale** gizmo at its centre. The first drag adds a **`transform`** node after the one you are looking at, with its `group` set
+  to the selected points and its `pivot` to their centre, and carries on dragging it; selecting the same thing again edits that node instead of adding another.
+
+![A selected piece with its move gizmo](docs/images/editor_piece.png)
+
 * **Handles (gizmos)**: the node you are looking at can show draggable arrows in the 3-D view: grab an arrow head and drag, and the parameter
   follows live (everything recooks, Blender included). `transform` has **Move / Rotate / Scale** tools (buttons above the view, or **W / E / R**
   with the pointer over it and nothing selected): move arrows, one **ring** per rotation axis (drag around it; the rings turn about the axes

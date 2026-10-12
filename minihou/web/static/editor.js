@@ -151,7 +151,7 @@
       pendingSet.clear(); pendingContext = null;
     }
     const fileChanged = snap.path !== S.path;
-    if (fileChanged) updateTrail(snap.path);
+    if (fileChanged && snap.path) updateTrail(snap.path);                           // a snapshot without a file (transient) leaves the path alone
     S.rev = snap.rev; S.graph = snap.graph; S.path = snap.path; S.documentId = snap.document_id;
     S.canUndo = snap.can_undo; S.canRedo = snap.can_redo;
     for (const id of [...S.sel]) if (!S.graph.nodes[id]) S.sel.delete(id);
@@ -828,6 +828,7 @@
     pvMsg(empty ? "No geometry" : head.truncated ? "Showing part of a very large geometry." : "");
     pv.set(head, arrays, pvNode === node && pvPath === S.path);
     pv.setHandles(head.handles || []);
+    refreshSelectionHandles();                                                 // a kept selection moved with the geometry: so does its gizmo
     updateToolButtons();
     pvNode = node; pvPath = S.path;
   }
@@ -857,7 +858,8 @@
       { label: "Group", type: "group_create", params: (s) => ({ name: "points", domain: "points", method: "pattern", pattern: rangePattern(s.points) }) },
       { label: "Delete", key: "x", type: "blast", params: (s) => ({ group: rangePattern(s.points), domain: "points" }) }],
   };
-  const SEL_KEY = { point: "points", edge: "edges", face: "faces" };
+  const SEL_KEY = { point: "points", edge: "edges", face: "faces", piece: "faces" };
+  SELECTION_ACTIONS.piece = SELECTION_ACTIONS.face;                          // a piece is a set of faces: the same actions
   let pvSelection = { mode: "view", points: [], edges: [], faces: [] };
   async function applySelectionAction(a) {
     const s = pvSelection, node = pvNode;
@@ -870,13 +872,33 @@
   function renderSelectionTools(s) {
     pvSelection = s;
     const n = (s[SEL_KEY[s.mode]] || []).length;
-    $("#pv-selinfo").textContent = s.mode === "view" ? "" : `${n} ${SEL_KEY[s.mode].replace(/s$/, "")}${n === 1 ? "" : "s"} selected`;
+    $("#pv-selinfo").textContent = s.mode === "view" ? "" : s.mode === "piece" ? `${n} face${n === 1 ? "" : "s"} in the selected pieces` : `${n} ${SEL_KEY[s.mode].replace(/s$/, "")}${n === 1 ? "" : "s"} selected`;
     document.querySelectorAll("#preview [data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === s.mode));
     const box = $("#pv-actions");
     const acts = n ? SELECTION_ACTIONS[s.mode] || [] : [];
     box.classList.toggle("hidden", !acts.length);
     box.replaceChildren(...acts.map((a) => h("button", { title: a.title || `${a.label} the selection: adds a ${a.type} node after ${pvNode || "the viewed node"}`,
       dataset: { action: a.label }, onclick: () => applySelectionAction(a) }, a.label + (a.key ? ` (${a.key.toUpperCase()})` : ""))));
+    refreshSelectionHandles();
+  }
+  // ---- a selection carries a move / rotate / scale gizmo; the first drag adds a transform node for it (group = the selected points)
+  const AXV = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  function selectionGizmo(info) {
+    const c = info.center, hs = [], reach = Math.max(info.radius * 1.15, 0.05);
+    for (let i = 0; i < 3; i++) {
+      const a = "xyz"[i];
+      hs.push({ id: `translate_${a}`, label: `move ${a}`, param: "translate", comp: i, origin: c, dir: AXV[i], scale: 1, kind: "arrow", tool: "move", pending: true });
+      hs.push({ id: `rotate_${a}`, label: `rotate ${a}`, param: "rotate", comp: i, origin: c, dir: AXV[i], scale: 180 / Math.PI, kind: "ring", radius: reach, tool: "rotate", pending: true });
+      hs.push({ id: `scale_${a}`, label: `scale ${a}`, param: "scale", comp: i, origin: c, dir: AXV[i], scale: 1, kind: "scale", tool: "scale", pending: true });
+    }
+    hs.push({ id: "uniform_scale", label: "uniform scale", param: "uniform_scale", comp: null, origin: c, dir: AXV[2], scale: 1, kind: "uniform", tool: "scale", pending: true });
+    return hs;
+  }
+  function refreshSelectionHandles() {
+    if (!pv || !pv.ok) return;
+    const info = pvSelection.mode === "view" ? null : pv.selectionInfo();
+    pv.setSelectionHandles(info ? selectionGizmo(info) : []);
+    updateToolButtons();
   }
   function updateToolButtons() {
     const has = pv.hasToolHandles();
@@ -892,26 +914,37 @@
   function wireSelectionTools() {
     pv.onSelect = renderSelectionTools;
     // viewport handles: arrows in the view that scrub a parameter of the viewed node
-    const handleValue = (h) => {
-      const n = nodeOf(pvNode);
-      if (!n) return NaN;
-      const spec = (typeOf(pvNode).params || []).find((p) => p.name === h.param);
-      const v = n.params && n.params[h.param] !== undefined ? n.params[h.param] : spec ? spec.default : undefined;
-      return h.comp === null || h.comp === undefined ? Number(v) : Number(Array.isArray(v) ? v[h.comp] : NaN);
-    };
-    let handleBase = null;
-    pv.onHandleStart = (h) => {
-      const n = nodeOf(pvNode), spec = (typeOf(pvNode).params || []).find((p) => p.name === h.param);
+    let handleBase = null, gizmoNode = null;
+    const baseFor = (node, h) => {                                                       // the parameter's current value (or default) on that node
+      const n = nodeOf(node), spec = ((S.types[(n || {}).type] || {}).params || []).find((p) => p.name === h.param);
       const cur = n && n.params && n.params[h.param] !== undefined ? n.params[h.param] : spec ? spec.default : undefined;
       handleBase = Array.isArray(cur) ? cur.slice() : null;               // the other components of a vector stay as they were
-      return handleValue(h);
+      return h.comp === null || h.comp === undefined ? Number(cur) : Number(Array.isArray(cur) ? cur[h.comp] : NaN);
     };
+    async function startSelectionDrag(h) {                                // the first drag on a selection's gizmo creates the transform node
+      const info = pv.selectionInfo();
+      if (!info || !pvNode || !nodeOf(pvNode)) return NaN;
+      const pattern = rangePattern(info.points);
+      if (pattern.length > 30000) { toast("That selection is too large to write into a node; select fewer elements."); return NaN; }
+      const cur = nodeOf(pvNode);
+      if (cur.type === "transform" && (cur.params || {}).group === pattern) gizmoNode = pvNode;     // the same selection again: edit the node already there
+      else {
+        const pivot = info.center.map((v) => Math.round(v * 1e5) / 1e5);
+        const r = await edit([{ op: "insert", after: pvNode, type: "transform", params: { group: pattern, pivot } }]);
+        if (!r) return NaN;
+        gizmoNode = r.results[0].id;
+        select([gizmoNode]);
+      }
+      return baseFor(gizmoNode, h);
+    }
+    pv.onHandleStart = (h) => (h.pending ? startSelectionDrag(h) : baseFor(pvNode, h));
     pv.onHandle = (h, value) => {
-      if (!pvNode) return;
-      const spec = (typeOf(pvNode).params || []).find((p) => p.name === h.param);
+      const node = h.pending ? gizmoNode : pvNode;
+      if (!node || !nodeOf(node)) return;
+      const spec = ((S.types[nodeOf(node).type] || {}).params || []).find((p) => p.name === h.param);
       if (spec && spec.kind === "int") value = Math.round(value);                       // an integer parameter takes whole steps
-      if (h.comp === null || h.comp === undefined) queueSet(pvNode, h.param, value);
-      else if (handleBase) { const v = handleBase.slice(); v[h.comp] = value; queueSet(pvNode, h.param, v); }
+      if (h.comp === null || h.comp === undefined) queueSet(node, h.param, value);
+      else if (handleBase) { const v = handleBase.slice(); v[h.comp] = value; queueSet(node, h.param, v); }
     };
     document.querySelectorAll("#preview [data-mode]").forEach((b) => { b.onclick = () => pv.setMode(b.dataset.mode); });
     let over = false;
@@ -934,7 +967,7 @@
         if (e.shiftKey) { tlStop(); tlGoto(k === "arrowright" ? PB.end : PB.start); } else tlStep(k === "arrowright" ? 1 : -1);
         e.preventDefault(); e.stopImmediatePropagation(); return;
       }
-      const mode = { "1": "point", "2": "edge", "3": "face" }[k];
+      const mode = { "1": "point", "2": "edge", "3": "face", "4": "piece" }[k];
       if (mode) { pv.setMode(mode); e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (k === "escape") {
         if (pvSelection.mode !== "view" && !(pvSelection[SEL_KEY[pvSelection.mode]] || []).length) pv.setMode("view"); else pv.clearSelection();

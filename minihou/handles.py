@@ -150,8 +150,19 @@ def _extent(geo) -> float:
 
 @provider("transform")
 def _transform(ins, out, p):
+    from . import groups
     from .nodes._util import euler_xyz_matrix
     c = _center(out)
+    group = str(p.get("group", "") or "")
+    if group:                                      # a grouped transform: the arrows stand on the points it moves (their bounds' centre)
+        src = ins[0] if ins else out
+        try:
+            m = groups.mask(src, "point", group)
+            if m is not None and m.any():
+                P = out.P.astype(np.float64)[m]
+                c = (P.min(0) + P.max(0)) / 2.0
+        except Exception:  # noqa: BLE001 - a bad group just leaves the arrows at the middle of everything
+            pass
     hs = [{"id": f"translate_{'xyz'[i]}", "label": f"move {'xyz'[i]}", "param": "translate", "comp": i, "origin": c,
            "dir": AXES[i], "tool": "move"} for i in range(3)]
     # rotate and scale sit on the fixed point of the transform (pivot + translate), so they do not run away while dragged

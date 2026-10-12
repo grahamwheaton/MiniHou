@@ -50,6 +50,21 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual((hs["scale_x"]["kind"], hs["scale_x"]["param"], hs["scale_x"]["comp"], hs["scale_x"]["tool"]), ("scale", "scale", 0, "scale"))
         self.assertEqual((hs["uniform_scale"]["kind"], hs["uniform_scale"]["param"], hs["uniform_scale"]["comp"]), ("uniform", "uniform_scale", None))
 
+    def test_a_grouped_transform_stands_its_arrows_on_the_points_it_moves(self):
+        from minihou import Evaluator
+        g = graph_from({"a": {"type": "box", "params": {"size": [1, 1, 1], "center": [-3, 0, 0]}},
+                        "b": {"type": "box", "params": {"size": [1, 1, 1], "center": [3, 0, 0]}},
+                        "m": {"type": "merge", "inputs": {"geos": ["a", "b"]}},
+                        "t": {"type": "transform", "inputs": {"geo": "m"}, "params": {"group": "8-15", "translate": [0, 2, 0]}},
+                        "o": {"type": "output", "inputs": {"geo": "t"}}}, display="o")
+        ev = Evaluator()
+        merged, out = ev.cook(g, "m"), ev.cook(g, "t")
+        hs = by_id(handles.handles_for("transform", [merged], out, {"group": "8-15", "translate": [0, 2, 0], "pivot": [3, 0, 0]}))
+        np.testing.assert_allclose(hs["translate_x"]["origin"], [3, 2, 0], atol=1e-5)       # the second box, where it ended up
+        np.testing.assert_allclose(hs["rotate_z"]["origin"], [3, 2, 0], atol=1e-5)          # pivot + translate
+        hs = by_id(handles.handles_for("transform", [merged], out, {"group": "no_such_group_xyz", "translate": [0, 2, 0]}))
+        self.assertEqual(len(hs), 10)                                                       # a group that selects nothing: still handles, at the middle
+
     def test_box_and_sphere_arrows_sit_on_the_surface_and_scale_correctly(self):
         hs = by_id(handles.handles_for("box", [], run("box"), {"size": [2, 4, 6], "center": [1, 0, 0]}))
         np.testing.assert_allclose(hs["size_x"]["origin"], [2, 0, 0])

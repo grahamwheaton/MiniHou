@@ -149,7 +149,9 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
    from a browser onto a Blender window (browser and OS dependent; the Install and Open buttons do not depend on it).
 
 9. **Editor additions (requested)**: a normals overlay toggle, a play/step/loop timeline under the 3-D view (real-time frame skipping,
-   `status.fps` reported by the engine), and a breadcrumb path with double-click to open group (system) nodes.
+   `status.fps` reported by the engine), a breadcrumb path with double-click to open group (system) nodes, and a **Piece** selection mode (connected
+   pieces, computed in the viewer by union-find over the triangles) with a move/rotate/scale gizmo on every selection whose first drag inserts a
+   `transform` (group = the selected points, pivot = their centre) and carries the drag over to it; a handle's start may now return a promise.
 
 Open:
 
