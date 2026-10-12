@@ -147,7 +147,7 @@ class Session:
         """The graph as JSON plus its revision (what editors render)."""
         with self.lock:
             return {"rev": self._rev, "document_id": self._document_id, "graph": self.graph.to_dict(),
-                    "path": str(self.path) if self.path else None,
+                    "path": str(self.path.resolve()) if self.path else None,        # resolved: the editor compares it with the (resolved) root
                     "can_undo": bool(self._undo), "can_redo": bool(self._redo)}
 
     # -- editing -----------------------------------------------------------

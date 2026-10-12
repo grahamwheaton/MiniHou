@@ -1240,12 +1240,13 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: "box1" in self.s.graph.nodes["all"].inputs.get("geos", [])))
         # pick the wire up from the input and drop it on empty space: disconnect
         self.page.set_viewport_size({"width": 1400, "height": 1200})
-        for _ in range(3):                                                                       # a drag can land early on a slow machine
-            self.drag(self.node("out").locator(".port.in"), self.page.locator("#canvas"))
-            self.page.mouse.move(*self.empty_spot())
-            if until(lambda: "geo" not in self.s.graph.nodes["out"].inputs, 3):
-                break
-        self.assertTrue(until(lambda: "geo" not in self.s.graph.nodes["out"].inputs))
+        self.page.mouse.move(*self.center(self.node("out").locator(".port.in")))
+        self.page.mouse.down()
+        x, y = self.empty_spot()                                                                 # drop on empty canvas, not on whatever sits mid-canvas
+        self.page.mouse.move(x + 20, y - 20, steps=8)
+        self.page.mouse.move(x, y, steps=5)
+        self.page.mouse.up()
+        self.assertTrue(until(lambda: "geo" not in self.s.graph.nodes["out"].inputs, 8))
         self.page.wait_for_selector("#errorbar:not(.hidden)")              # the output is now unwired
 
     def test_display_flag_rename_and_delete(self):
