@@ -334,6 +334,17 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
 
 ![A selected piece with its move gizmo](docs/images/editor_piece.png)
 
+* **The Add Node menu** (**Tab**, double-click, right-click or **+ Node**): nodes are grouped the way you think about them: **Create**, **Polygon
+  Modelling**, **Edges**, **Transform & Combine**, **Deform**, **Groups & Selection**, **Attributes**, **UV**, **Curves**, **Points**,
+  **Volumes & Terrain**, **Fracture & RBD**, **Procedural (PCG)**, **Flow & Time**, **Utility & I/O** and **Library** (your own nodes and
+  saved systems). Groups fold (click, **Enter**, or **←** **→**), and the open ones are remembered. Typing searches names, Houdini and Blender
+  names and everyday words (`mountain` finds Noise, `duplicate` Copy and Transform, `shatter` the fracture tools, `weld` Fuse; every word must
+  match); the best match is highlighted and a description with the node's inputs and parameter count shows below. **☆** on a row stars
+  it (**Favourites** list at the top), and the last nodes you added are under **Recent**. The grouping lives in `minihou/menu.py`;
+  nodes you write land in the group of their `category`.
+
+![The Add Node menu](docs/images/editor_add_menu.png)
+
 * **The C pie menu**: press **C** (over the graph or the 3-D view) for Houdini's modelling pie at the pointer: **Adjust** (top), **Deform**, **Polygons**,
   **Group**, **Create**, **Build**, **Edges**, **Modify**, each opening a pie of tools (Transform, Soft Transform, Soft Peak, Smooth, Point Weld... /
   Lattice, Mountain, Bend, Linear Taper, Squash and Stretch, Twist... / PolyBevel, PolyFill, PolyExtrude, PolySplit, PolyBridge, Clip, Boolean /

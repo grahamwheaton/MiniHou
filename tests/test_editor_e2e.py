@@ -999,6 +999,81 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(n.params["group"], str(face))
         self.assertEqual(n.params["distance"], 0.3)
 
+    # -- the Add Node menu -----------------------------------------------------------------
+    def open_menu(self):
+        self.page.mouse.move(*self.empty_spot())
+        self.page.keyboard.press("Tab")
+        self.page.wait_for_selector("#tabmenu:not(.hidden)")
+
+    def menu_heads(self):
+        return self.page.eval_on_selector_all("#tab-list .cat.head", "els => els.map(e => e.dataset.group)")
+
+    def test_add_menu_lists_groups_folded_and_opens_them_with_enter_or_arrows(self):
+        self.page.evaluate("localStorage.clear()")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.open_menu()
+        heads = self.menu_heads()
+        self.assertEqual(heads[0], "Create")
+        self.assertEqual(heads[-1], "Utility & I/O")
+        self.assertIn("Fracture & RBD", heads)
+        self.assertEqual(self.page.locator("#tab-list .it").first.get_attribute("data-name"), "box")       # Create starts open, in menu order
+        self.assertEqual(self.page.locator("#tab-list .cat.head.active").count(), 0)
+        names = self.page.eval_on_selector_all("#tab-list .it", "els => els.map(e => e.dataset.name)")
+        self.assertNotIn("voronoi_fracture", names)                                                            # a closed group lists nothing
+        # click a closed group's header: it opens and the choice is remembered
+        self.page.locator('#tab-list .cat.head[data-group="Fracture & RBD"]').dispatch_event("mousedown")
+        self.page.wait_for_selector('#tab-list .it[data-name="voronoi_fracture"]')
+        self.page.keyboard.press("Escape")
+        self.open_menu()
+        self.page.wait_for_selector('#tab-list .it[data-name="voronoi_fracture"]')
+        # arrow keys reach the headers; Left folds the group of the highlighted node
+        self.page.keyboard.press("ArrowLeft")
+        self.page.wait_for_function("!document.querySelector('#tab-list .it[data-name=\"box\"]')")
+        self.page.keyboard.press("ArrowRight")
+        self.page.wait_for_selector('#tab-list .it[data-name="box"]')
+        self.page.keyboard.press("Escape")
+
+    def test_add_menu_search_ranks_by_known_names_and_shows_the_description(self):
+        self.page.evaluate("localStorage.clear()")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.open_menu()
+        self.page.keyboard.type("mountain")
+        self.page.wait_for_selector('#tab-list .it.active[data-name="noise"]')
+        self.assertIn("Deform", self.page.locator("#tab-list .it.active small").inner_text())             # the group shows beside a result
+        self.assertIn("Noise", self.page.inner_text("#tab-doc"))
+        self.assertIn("in:", self.page.inner_text("#tab-doc"))
+        self.page.keyboard.press("Control+a")
+        self.page.keyboard.type("qqzzxx")
+        self.page.wait_for_selector("#tab-list .cat:has-text('No node matches')")
+        self.page.keyboard.press("Control+a")
+        self.page.keyboard.type("extrude")
+        self.page.wait_for_selector('#tab-list .it.active[data-name="polyextrude"] mark')
+        self.page.keyboard.press("Enter")
+        self.assertTrue(until(lambda: any(n.type == "polyextrude" for n in self.s.graph.nodes.values())))
+
+    def test_add_menu_remembers_recent_and_favourite_nodes(self):
+        self.page.evaluate("localStorage.clear()")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.open_menu()
+        self.page.locator('#tab-list .it[data-name="box"] .star').dispatch_event("mousedown")
+        self.page.wait_for_selector('#tab-list .cat.special:has-text("Favourites")')
+        self.assertEqual(self.page.locator("#tab-list .it").first.get_attribute("data-name"), "box")
+        self.page.keyboard.type("polybevel")
+        self.page.keyboard.press("Enter")
+        self.assertTrue(until(lambda: any(n.type == "polybevel" for n in self.s.graph.nodes.values())))
+        self.page.reload()                                                                                      # all of it survives a reload
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.open_menu()
+        self.page.wait_for_selector('#tab-list .cat.special:has-text("Recent")')
+        self.assertEqual(self.page.eval_on_selector_all("#tab-list .cat.special", "els => els.map(e => e.dataset.group)"),
+                         ["Favourites", "Recent"])
+        recent = self.page.eval_on_selector_all("#tab-list .it", "els => els.map(e => e.dataset.name)")
+        self.assertEqual(recent[:2], ["box", "polybevel"])
+        self.page.keyboard.press("Escape")
+
     def test_output_groups_section_checkbox_and_name_per_group(self):
         graph = {"version": 1, "nodes": {"b": {"type": "box", "params": {"size": [2, 2, 2]}, "pos": [0, 0]},
                                          "bv": {"type": "polybevel", "inputs": {"geo": "b"}, "params": {"distance": 0.2}, "pos": [0, 110]},

@@ -166,7 +166,9 @@ class WebServer:
     def state(self) -> dict:
         s = self.session
         out = s.snapshot()
+        from .. import menu
         out.update(status=s.status(), nodes=[nt.describe() for nt in s.evaluator.registry], library=s.library_status(),
+                   menu={"groups": menu.groups(), "extras": menu.pseudo()},
                    ops=OP_NAMES, root=str(self.root), files=self.files(),
                    link={"port": getattr(self.link, "port", None), "clients": self.link_clients()},
                    engine={"pid": os.getpid(), "version": _version(), "python_nodes": _python_allowed(), "protocol": PROTOCOL_VERSION,

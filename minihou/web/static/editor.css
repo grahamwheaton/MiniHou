@@ -143,14 +143,30 @@ table.attrs td { font: var(--mono); font-size: 11px; }
 
 #errorbar { position: absolute; left: 0; right: 0; bottom: 0; height: 30px; padding: 6px 12px; background: #4a2626; border-top: 1px solid var(--err); color: #ffd6d6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; font: var(--mono); }
 
-#tabmenu { position: fixed; z-index: 40; width: 260px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 10px 30px #000a; overflow: hidden; }
-#tab-search { width: 100%; border: 0; border-bottom: 1px solid var(--line); background: var(--bg); padding: 8px 10px; outline: none; }
-#tab-list { max-height: 320px; overflow: auto; padding: 4px; }
-#tab-list .cat { font-size: 10px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); padding: 6px 8px 2px; }
-#tab-list .it { padding: 4px 8px; border-radius: 4px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
-#tab-list .it small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tabmenu { position: fixed; z-index: 40; width: 380px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 10px 30px #000a; overflow: hidden; }
+#tab-search { width: 100%; border: 0; border-bottom: 1px solid var(--line); background: var(--bg); padding: 9px 12px; outline: none; }
+#tab-list { max-height: 360px; overflow: auto; padding: 4px; }
+#tab-list .cat { font-size: 11px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); padding: 6px 8px 4px; display: flex; align-items: center; gap: 6px; border-radius: 4px; }
+#tab-list .cat.head { cursor: pointer; }
+#tab-list .cat.head:hover, #tab-list .cat.head.active { background: var(--panel2); color: var(--text); }
+#tab-list .cat .chev { width: 12px; text-align: center; }
+#tab-list .cat small { margin-left: auto; opacity: .7; }
+#tab-list .cat.special { color: var(--warn); }
+#tab-list .it { padding: 4px 8px 4px 24px; border-radius: 4px; cursor: pointer; display: flex; align-items: baseline; gap: 8px; }
+#tab-list .it .lb { flex: 0 0 auto; }
+#tab-list .it mark { background: transparent; color: var(--warn); font-weight: 700; }
+#tab-list .it small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+#tab-list .it .star { color: var(--muted); opacity: 0; padding: 0 2px; }
+#tab-list .it:hover .star, #tab-list .it .star.on { opacity: 1; }
+#tab-list .it .star.on { color: var(--warn); }
+#tab-list .it.lib .lb::after { content: " ◆"; color: var(--c-combine); font-size: 10px; }
 #tab-list .it.active { background: var(--accent); color: #fff; }
-#tab-list .it.active small { color: #e6f1ff; }
+#tab-list .it.active small, #tab-list .it.active .star { color: #e6f1ff; }
+#tab-list .it.active mark { color: #fff; text-decoration: underline; }
+#tab-doc { border-top: 1px solid var(--line); padding: 7px 12px 8px; min-height: 66px; font-size: 12px; background: #1f2226; }
+#tab-doc .grp, #tab-doc .io { color: var(--muted); }
+#tab-doc .d { margin-top: 2px; }
+#tab-doc .io { margin-top: 3px; font-size: 11px; }
 
 #help { position: fixed; right: 16px; top: 46px; z-index: 50; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 16px; box-shadow: 0 10px 30px #000a; max-width: 560px; }
 #help h3 { margin: 4px 0 8px; }

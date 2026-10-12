@@ -123,6 +123,7 @@
   async function loadState() {
     try {
       const st = await api("/api/state");
+      S.menuExtras = (st.menu && st.menu.extras) || []; S.menuGroups = (st.menu && st.menu.groups) || [];
       setTypes(st.nodes, st.library);
       S.root = st.root;
       S.status = st.status;
@@ -1282,12 +1283,28 @@
   }
 
   // ---------------------------------------------------------------- Tab menu
-  let menuCtx = null, menuItems = [], menuActive = 0;
+  let menuCtx = null, menuItems = [], menuActive = 0, menuQuery = "";
+  // what the menu remembers between sessions: starred nodes, the last ones used, which groups are open
+  const menuPrefs = (() => {
+    const load = (k, d) => { try { return JSON.parse(localStorage.getItem("minihou." + k) || "null") || d; } catch (e) { return d; } };
+    return { favs: new Set(load("favs", [])), recent: load("recent", []), open: new Set(load("menuopen", ["Create", "Polygon Modelling"])) };
+  })();
+  function saveMenuPrefs() {
+    try {
+      localStorage.setItem("minihou.favs", JSON.stringify([...menuPrefs.favs]));
+      localStorage.setItem("minihou.recent", JSON.stringify(menuPrefs.recent.slice(0, 12)));
+      localStorage.setItem("minihou.menuopen", JSON.stringify([...menuPrefs.open]));
+    } catch (e) { /* storage unavailable */ }
+  }
+  function rememberRecent(name) {
+    menuPrefs.recent = [name, ...menuPrefs.recent.filter((n) => n !== name)].slice(0, 12);
+    saveMenuPrefs();
+  }
   function openMenu(cx, cy, ctx) {
     menuCtx = ctx || {};
     const m = $("#tabmenu");
     m.classList.remove("hidden");
-    const w = 260, hgt = 360;
+    const w = 380, hgt = 480;
     m.style.left = Math.max(4, Math.min(cx, innerWidth - w - 4)) + "px";
     m.style.top = Math.max(4, Math.min(cy, innerHeight - hgt - 4)) + "px";
     const inp = $("#tab-search");
@@ -1296,37 +1313,93 @@
     inp.focus();
   }
   function closeMenu() { $("#tabmenu").classList.add("hidden"); menuCtx = null; canvas.focus({ preventScroll: true }); }
-  function fillMenu(q) {
-    q = q.trim().toLowerCase();
-    let list = [{ name: "loop_block", category: "flow", inputs: [{ name: "geo" }],
-      doc: "Insert paired Loop Begin / Transform body / Loop End (repeat N times)" }, ...S.typeList];
+  function menuTypes() {
+    let list = [...(S.menuExtras || []), ...S.typeList];
     if (menuCtx && (menuCtx.from || menuCtx.fromSel)) list = list.filter((t) => t.inputs.length);   // must accept a wire
-    if (q) {
-      const score = (t) => (t.name.startsWith(q) ? 0 : t.name.includes(q) ? 1 : (t.category || "").includes(q) ? 2 : (t.doc || "").toLowerCase().includes(q) ? 3 : 9);
-      list = list.map((t) => [score(t), t]).filter(([s]) => s < 9).sort((a, b) => a[0] - b[0] || a[1].name.localeCompare(b[1].name)).map(([, t]) => t);
-    }
-    menuItems = list; menuActive = 0;
+    return list;
+  }
+  function fillMenu(q) {
+    menuQuery = q.trim();
+    const rows = NodeMenu.rows(menuTypes(), menuQuery, menuPrefs);
+    // the navigable rows: nodes, and the group headers (Enter or the arrow keys fold them)
+    menuItems = rows.filter((r) => r.kind === "item" || !r.special).map((r) => (r.kind === "item" ? r.type : { head: true, name: r.name, open: r.open }));
+    menuActive = menuItems.findIndex((t) => !t.head);
+    if (menuActive < 0) menuActive = 0;
     const kids = [];
-    let cat = null;
-    list.forEach((t, i) => {
-      if (!q && t.category !== cat) { cat = t.category; kids.push(h("div", { class: "cat" }, cat || "other")); }
-      kids.push(h("div", { class: "it" + (i === 0 ? " active" : ""), dataset: { i }, title: t.doc || "",
-        onmousedown: (e) => { e.preventDefault(); pickMenu(i); } }, h("span", null, t.name), h("small", null, (t.doc || "").split("\n")[0])));
-    });
-    if (!list.length) kids.push(h("div", { class: "cat" }, "no match"));
+    let index = 0;
+    for (const r of rows) {
+      if (r.kind === "head") {
+        const i = r.special ? -1 : index++;
+        kids.push(h("div", { class: "cat head" + (r.special ? " special" : "") + (i === menuActive ? " active" : ""), dataset: { group: r.name, i: i < 0 ? "" : i },
+          onmousedown: (e) => { e.preventDefault(); if (!r.special) toggleGroup(r.name); }, onmousemove: () => { if (i >= 0 && menuActive !== i) setMenuActive(i); } },
+          h("span", { class: "chev" }, r.special ? (r.name === "Favourites" ? "★" : "⏱") : r.open ? "▾" : "▸"), h("span", null, r.name),
+          h("small", null, String(r.count))));
+        continue;
+      }
+      const t = r.type, i = index++;
+      const star = h("span", { class: "star" + (menuPrefs.favs.has(t.name) ? " on" : ""), title: "Favourite",
+        onmousedown: (e) => { e.preventDefault(); e.stopPropagation(); toggleFav(t.name); } }, menuPrefs.favs.has(t.name) ? "★" : "☆");
+      const label = h("span", { class: "lb" }, ...NodeMenu.highlight(t.label || t.name, menuQuery).map(([text, hit]) => (hit ? h("mark", null, text) : text)));
+      kids.push(h("div", { class: "it" + (i === menuActive ? " active" : "") + (t.source ? " lib" : ""), dataset: { i, name: t.name }, title: t.name + (t.doc ? " - " + t.doc.split("\n")[0] : ""),
+        onmousedown: (e) => { e.preventDefault(); pickMenu(i); }, onmousemove: () => { if (menuActive !== i) setMenuActive(i); } },
+        label, h("small", null, r.showGroup ? t.menu || "" : (t.doc || "").split("\n")[0]), star));
+    }
+    if (!menuItems.length) kids.push(h("div", { class: "cat" }, menuQuery ? "No node matches “" + menuQuery + "”" : "no nodes"));
     $("#tab-list").replaceChildren(...kids);
+    showMenuDoc();
+  }
+  function showMenuDoc() {
+    const t = menuItems[menuActive], el = $("#tab-doc");
+    if (!t) { el.textContent = ""; return; }
+    if (t.head) {
+      const g = (S.menuGroups || []).find((x) => x.name === t.name);
+      el.replaceChildren(h("b", null, t.name), h("div", { class: "d" }, (g && g.doc) || ""), h("div", { class: "io" }, "Enter or ← → opens and closes the group"));
+      return;
+    }
+    const ins = (t.inputs || []).map((p) => p.name + (p.optional ? "?" : "") + (p.multi ? "*" : "")).join(", ") || "none";
+    el.replaceChildren(h("b", null, t.label || t.name), h("span", { class: "grp" }, " · " + (t.menu || "")),
+      h("div", { class: "d" }, (t.doc || "").split("\n")[0] || "No description."), h("div", { class: "io" }, "in: " + ins + "  →  " +
+      (t.outputs || [{ name: "geo" }]).map((p) => p.name).join(", ") + (t.params && t.params.length ? "  ·  " + t.params.length + " parameters" : "")));
+  }
+  function toggleGroup(name) {
+    if (menuPrefs.open.has(name)) menuPrefs.open.delete(name); else menuPrefs.open.add(name);
+    saveMenuPrefs();
+    fillMenu($("#tab-search").value);
+    const at = menuItems.findIndex((t) => t.head && t.name === name);                // keep the header under the cursor
+    if (at >= 0) setMenuActive(at);
+  }
+  function toggleFav(name) {
+    if (menuPrefs.favs.has(name)) menuPrefs.favs.delete(name); else menuPrefs.favs.add(name);
+    saveMenuPrefs();
+    fillMenu($("#tab-search").value);
+  }
+  function setMenuActive(i) {
+    menuActive = i;
+    const items = [...$("#tab-list").querySelectorAll("[data-i]")].filter((el) => el.dataset.i !== "");
+    items.forEach((el) => el.classList.toggle("active", Number(el.dataset.i) === i));
+    const cur = items.find((el) => Number(el.dataset.i) === i);
+    if (cur) cur.scrollIntoView({ block: "nearest" });
+    showMenuDoc();
   }
   function moveMenu(d) {
     if (!menuItems.length) return;
-    menuActive = (menuActive + d + menuItems.length) % menuItems.length;
-    const items = [...$("#tab-list").querySelectorAll(".it")];
-    items.forEach((el, i) => el.classList.toggle("active", i === menuActive));
-    items[menuActive].scrollIntoView({ block: "nearest" });
+    setMenuActive((menuActive + d + menuItems.length) % menuItems.length);
+  }
+  // left / right fold the group of the highlighted node (when nothing is typed)
+  function foldMenu(open) {
+    if (menuQuery) return false;
+    const t = menuItems[menuActive];
+    const g = t ? (t.head ? t.name : t.menu) : null;
+    if (!g || menuPrefs.open.has(g) === open) return false;
+    toggleGroup(g);
+    return true;
   }
   async function pickMenu(i) {
     const t = menuItems[i], ctx = menuCtx || {};
+    if (t && t.head) { toggleGroup(t.name); return; }
     closeMenu();
     if (!t) return;
+    rememberRecent(t.name);
     const id = uniqueId(t.name);
     let [x, y] = ctx.world || toWorld(...S.mouse);
     x -= W / 2; y -= 12;
@@ -1564,6 +1637,8 @@
       if (e.key === "Escape") { closeMenu(); e.preventDefault(); }
       else if (e.key === "ArrowDown") { moveMenu(1); e.preventDefault(); }
       else if (e.key === "ArrowUp") { moveMenu(-1); e.preventDefault(); }
+      else if (e.key === "ArrowLeft" && !$("#tab-search").value) { foldMenu(false); e.preventDefault(); }
+      else if (e.key === "ArrowRight" && !$("#tab-search").value) { foldMenu(true); e.preventDefault(); }
       else if (e.key === "Enter") { pickMenu(menuActive); e.preventDefault(); }
       else if (e.key === "Tab") e.preventDefault();
       return;
