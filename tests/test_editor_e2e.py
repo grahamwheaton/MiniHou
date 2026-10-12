@@ -73,6 +73,30 @@ class EditorE2E(unittest.TestCase):
     def tearDown(self):
         self.assertEqual(self.errors, [], "browser errors")
 
+    def test_live_modifier_preview(self):
+        from minihou.link.server import LinkServer
+        from minihou.link.instance_client import InstanceClient
+        from tests.test_modifier_instances import GRAPH, mesh
+        server = LinkServer(self.s, port=0)
+        server.start()
+        self.web.link = server
+        self.addCleanup(server.stop)
+        client = InstanceClient(port=server.port)
+        self.addCleanup(client.close)
+        client.edit_live("browser-test", GRAPH, {"Move": [2, 0, 0]}, mesh(), label="Cube / MiniHou")
+        self.page.wait_for_function("document.querySelector('#live-modifier')?.textContent.includes('Cube / MiniHou')")
+        self.node("move").wait_for()
+        self.assertTrue(self.s.wait_idle())
+        self.assertTrue(self.s.status()["ok"], self.s.status())
+        self.assertTrue(self.s.preview("move")["ok"])
+        self.page.wait_for_function("window.minihou.preview?.ok && window.minihou.preview.points === 3")
+        self.page.click("#pv-frame")
+        self.assertTrue(until(lambda: self.pixels_vary(), 5))
+        self.assertTrue(self.page.locator("#live-modifier").is_visible())
+        self.page.screenshot(path=os.path.join(ROOT, "build", "validation", "live-editor.png"))
+        client.remove("browser-test")
+        self.page.wait_for_function("document.querySelector('#live-modifier')?.textContent.includes('Disconnected')")
+
     # -- helpers ---------------------------------------------------------------------
     def read_file(self):
         with open(self.path, encoding="utf-8") as f:

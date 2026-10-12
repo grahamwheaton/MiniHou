@@ -30,6 +30,7 @@ COLLECTION = "MiniHou Modifier Caches"
 SOURCE = "Source Object"
 SOURCE_TOKEN = "@source"
 _client = None
+_live_ids = set()
 _endpoint = None
 _owners = {}
 _digests = {}
@@ -236,6 +237,7 @@ def disconnect():
     if _client is not None:
         _client.close()
     _client, _endpoint = None, None
+    _live_ids.clear()
     _digests.clear()
     _failures.clear()
 
@@ -289,13 +291,54 @@ def _interface(mod, header, initial=False, activate=False):
         ng.links.new(gin.outputs["Geometry"], gout.inputs["Geometry"])
 
 
+def _apply_live(mod, header):
+    if not header.get("live"):
+        _live_ids.discard(instance_id(mod))
+        return
+    ng = mod.node_group
+    data = json.dumps(header["graph"])
+    values = {p["name"]: p["value"] for p in header["interface"]}
+    current = proxy.read_values(mod, ng, parameters(mod))
+    if ng[GRAPH] != data or json.loads(json.dumps(current)) != values:
+        ng[GRAPH] = data
+        _interface(mod, header)
+        proxy.write_values(mod, ng, parameters(mod), values)
+        _digests.pop(instance_id(mod), None)
+        _failures.pop(instance_id(mod), None)
+    ng[PATH] = header["path"]
+
+
+def edit_live(obj, mod):
+    """Bind actual pre-modifier geometry to the editor without using a legacy proxy."""
+    client = _connection()
+    arrays, _ = read_prefix(obj, mod, with_materials=True)
+    scene = bpy.context.scene
+    header = client.edit_live(instance_id(mod), json.loads(mod.node_group[GRAPH]),
+                              proxy.read_values(mod, mod.node_group, parameters(mod)), arrays,
+                              label=obj.name + " / " + mod.name,
+                              frame=scene.frame_current + scene.frame_subframe,
+                              fps=scene.render.fps / scene.render.fps_base)
+    _live_ids.add(instance_id(mod))
+    _apply_live(mod, header)
+    return {"state": "ready", "editor_url": client.welcome.get("editor_url", "")}, header["path"]
+
+
 def add_modifier(obj, graph_path, *, host=None, port=None):
     """Add an independent graph instance to a mesh. No source mesh is written."""
     mesh_writer.assert_main_thread()
     if obj.type != "MESH" or obj.library is not None:
         raise ValueError("Select a local editable mesh object")
-    path = os.path.abspath(bpy.path.abspath(graph_path))
-    header = _connection(host, port).describe(path)
+    path = os.path.abspath(bpy.path.abspath(graph_path)) if graph_path.strip() else ""
+    if path and not path.lower().endswith(".json"):
+        raise ValueError("Graph must name a .json file; leave Graph empty to start a new modifier")
+    starter = {"nodes": {"input": {"type": "modifier_input"},
+                           "transform": {"type": "transform", "inputs": {"geo": "input"}},
+                           "output": {"type": "output", "inputs": {"geo": "transform"}}},
+               "display": "output", "exposed": [
+                   {"name": "Translate", "node": "transform", "param": "translate"},
+                   {"name": "Scale", "node": "transform", "param": "uniform_scale"},
+                   {"name": "Rotate", "node": "transform", "param": "rotate"}]}
+    header = _connection(host, port).describe(path, None if path else starter)
     mod = obj.modifiers.new("MiniHou", "NODES")
     ng = bpy.data.node_groups.new("MiniHou " + os.path.basename(path), "GeometryNodeTree")
     ng[KEY], ng[PATH] = uuid.uuid4().hex, path
@@ -520,6 +563,8 @@ def pump(host=None, port=None, *, force=False, _only=None):
                     continue
                 signature = None
                 try:
+                    if instance_id(mod) in _live_ids:
+                        _apply_live(mod, client.sync_live(instance_id(mod), proxy.read_values(mod, ng, parameters(mod))))
                     if has_rbd(mod):
                         if (obj.animation_data or obj.data.animation_data or
                                 (obj.data.shape_keys and obj.data.shape_keys.animation_data)):

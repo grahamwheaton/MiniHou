@@ -137,13 +137,11 @@ stack modifier; existing generator graphs continue to work through the proxy. `b
 graphs to prevent feeding the object's final evaluated output back into its own stack.
 
 Each modifier stores its own graph snapshot, parameters and identity in the blend file. Duplicated objects/modifiers
-receive new identities and private caches on the next update. Edit the graph template in the external browser and click
-**Reload Graph** on an instance to adopt the template while retaining matching parameter overrides. Other instances
-remain unchanged. Saved snapshots continue cooking if the source JSON is moved or unavailable. Removing a modifier
-releases its engine instance and unused cache objects on the next update; disconnecting releases connection-owned
-engine caches. Existing proxy and browser editing workflows remain available.
-The browser edits the template, not a live selected modifier session: its standalone cook has no `modifier_input`
-geometry and reports that missing input. Inspect actual instance results and cook status in Blender.
+receive new identities and private caches on the next update. **Edit Network** opens a live session for that
+modifier, including its actual preceding-stack geometry. Browser changes update the stored snapshot and Blender
+controls automatically; Blender control changes update the browser. Other instances remain unchanged.
+**Reload Graph** explicitly imports a saved JSON file. Save the blend file to retain the modifier snapshot.
+Removing a modifier or disconnecting releases its engine cache and live input.
 
 **Evaluation limits:** this is an interactive stack bridge, not a native synchronous Blender modifier callback.
 A main-thread timer reads a disposable copy of the preceding stack and refreshes private output caches. Results update
@@ -157,26 +155,19 @@ failed cooks retain the last successful cache and report an error. These caches 
 
 ### Edit a modifier's network
 
-Each MiniHou modifier has **Edit Network** and **Reload Graph** controls in the MiniHou sidebar
-and in the Properties editor's Modifiers tab, under **MiniHou Source Objects**. Start or reuse the
-external server first. **Edit Network** opens the graph file recorded by that modifier, even when
-the server is currently editing a different file. HTTP routing runs in a background worker; its
-progress or error appears beside that modifier's controls. Update/restart the external engine as
-well as the add-on to enable the safe routing protocol.
+Start the updated MiniHou app, install its bundled Blender add-on, and restart Blender after updating.
+Select a mesh in Blender. Leave **Graph** empty and add a MiniHou modifier to create a basic
+input/transform/output network, or select an existing modifier JSON file. Click that modifier's **Edit Network**.
+The browser shows a **Live: object / modifier** badge and previews its actual input geometry.
+No legacy proxy connection or manual Reload Graph is required for live edits.
 
-There is **one shared editor session**. Selecting another modifier's network switches that session
-and all its browser tabs (and the legacy proxy graph). Submitted edits to the previous graph are
-saved first; a failed save prevents the switch. Finish typing a field before switching. A slider
-request that arrives after a switch is rejected for the new graph and retained in that browser's
-storage: **Unsent edits** downloads the original graph path and edit operations for manual recovery.
-Missing templates, paths outside the server's workspace root, and failed browser launches report
-errors instead of silently opening whichever graph was already active.
-
-This edits the **graph template file**, not the modifier's stored graph snapshot or live parameter
-values. After editing, save in the browser and click **Reload Graph** on each modifier that should
-adopt the changes. Other modifiers keep their saved snapshots until reloaded. A template using
-`modifier_input` can show a missing-input cook error in the browser: its actual upstream geometry
-is supplied when Blender cooks the modifier, not by this template-editing action.
+Each live modifier saves a separate graph under the workspace's `graphs/Blender-*.json`; the source template
+is preserved. There is one shared browser editor session: selecting another modifier switches all browser tabs.
+Pending changes are saved before switching; failed saves prevent the switch. Late edits from the previous
+document are rejected and retained in the browser's **Unsent edits** recovery download.
+Legacy proxy output is suspended while a live modifier is being edited. Disconnecting Blender clears the
+live input and displays a disconnected badge. Update both the app and add-on to use this protocol.
+Native Geometry Nodes group editing remains a separate template workflow.
 
 For native Geometry Nodes networks, use the wired MiniHou groups described in [Geometry Nodes integration](docs/GEONODES.md). They evaluate incoming geometry through staged probes and support native operations before, between and after MiniHou placements.
 

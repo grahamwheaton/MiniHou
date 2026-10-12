@@ -86,39 +86,65 @@ class BlenderServerOperatorTests(unittest.TestCase):
         self.assertIsNotNone(process.poll())
         self.assertFalse(self.addon._server.snapshot()["owned"])
 
-    def test_edit_network_routes_each_modifier_template_and_reports_missing_file(self):
+    def test_edit_network_binds_actual_mesh_and_browser_edits_recook_modifier(self):
         import json
-        from urllib.request import urlopen
-        from minihou_link import modifiers, network_ui
-        (ROOT / "build").mkdir(exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=ROOT / "build", prefix="edit_network_") as folder:
-            a, b = Path(folder) / "a.json", Path(folder) / "b.json"
-            shutil.copyfile(ROOT / "examples/modifiers/transform.json", a)
-            shutil.copyfile(ROOT / "examples/modifiers/repeat_transform.json", b)
-            self.assertEqual(bpy.ops.minihou.start_server(), {"FINISHED"})
-            ready = self.wait_state("ready")
-            bpy.ops.mesh.primitive_cube_add()
-            obj = bpy.context.object
-            first = modifiers.add_modifier(obj, str(a), port=self.port)
-            second = modifiers.add_modifier(obj, str(b), port=self.port)
-            snapshots = [mod.node_group[modifiers.GRAPH] for mod in (first, second)]
-            with patch("minihou_link.network_editor.webbrowser.open", return_value=True) as browser:
-                for mod, path in ((first, a), (second, b), (first, a)):
-                    self.assertEqual(bpy.ops.minihou.edit_network(modifier_name=mod.name), {"FINISHED"})
-                    network_ui.router._thread.join(5)
-                    self.assertEqual(network_ui.router.snapshot()["state"], "ready", network_ui.router.snapshot())
-                    with urlopen(ready["editor_url"] + "api/graph", timeout=3) as response:
-                        self.assertEqual(Path(json.load(response)["path"]), path)
-                self.assertEqual(browser.call_count, 3)
-                b.unlink()
-                self.assertEqual(bpy.ops.minihou.edit_network(modifier_name=second.name), {"FINISHED"})
-                network_ui.router._thread.join(5)
-                self.assertEqual(network_ui.router.snapshot()["state"], "error")
-                self.assertIn("no such", network_ui.router.snapshot()["detail"])
-                self.assertEqual(browser.call_count, 3)
-            self.assertEqual([mod.node_group[modifiers.GRAPH] for mod in (first, second)], snapshots)
-            for mod in (first, second):
-                obj.modifiers.remove(mod)
+        import numpy as np
+        from urllib.request import urlopen, Request
+        from minihou_link import modifiers, network_ui, proxy
+        from tests.test_blender_addon import evaluated_positions
+        self.assertEqual(bpy.ops.minihou.start_server(), {"FINISHED"})
+        ready = self.wait_state("ready")
+        bpy.ops.mesh.primitive_cube_add()
+        obj = bpy.context.object
+        # A fresh modifier needs neither a template file nor a legacy proxy connection.
+        mod = modifiers.add_modifier(obj, "", port=self.port)
+        other = modifiers.add_modifier(obj, "", port=self.port)
+        modifiers.pump(port=self.port, force=True)
+        initial = evaluated_positions(obj).copy()
+        with patch("minihou_link.network_editor.webbrowser.open", return_value=True), \
+             patch.object(self.addon._server, "snapshot", return_value={"state": "stopped"}):
+            self.assertEqual(bpy.ops.minihou.edit_network(modifier_name=mod.name), {"FINISHED"})
+            network_ui.router._thread.join(5)
+        self.assertEqual(network_ui.router.snapshot()["state"], "ready", network_ui.router.snapshot())
+        with urlopen(ready["editor_url"] + "api/graph", timeout=3) as response:
+            state = json.load(response)
+        self.addCleanup(lambda: Path(state["path"]).unlink(missing_ok=True))
+        self.assertTrue(state["live_modifier"]["connected"])
+        self.assertIn(obj.name, state["live_modifier"]["label"])
+        self.assertEqual(Path(state["path"]), Path(modifiers.graph_path(mod)))
+        request = Request(ready["editor_url"] + "api/edit", data=json.dumps({
+            "document_id": state["document_id"],
+            "ops": [{"op": "set", "id": "transform", "params": {"translate": [3, 0, 0]}}]
+        }).encode(), headers={"Content-Type": "application/json"})
+        with urlopen(request, timeout=3) as response:
+            self.assertEqual(response.status, 200)
+        modifiers.pump(port=self.port, force=True)
+        self.assertEqual(modifiers.last_error(), "")
+        np.testing.assert_allclose(evaluated_positions(obj), initial + [3, 0, 0], atol=1e-5)
+        self.assertEqual(list(proxy.read_values(other, other.node_group, modifiers.parameters(other))["Translate"]), [0, 0, 0])
+        # Blender controls update the same browser graph, with no manual Reload Graph.
+        proxy.write_values(mod, mod.node_group, modifiers.parameters(mod), {"Translate": [6, 0, 0]})
+        modifiers.pump(port=self.port, force=True)
+        with urlopen(ready["editor_url"] + "api/graph", timeout=3) as response:
+            updated = json.load(response)
+        self.assertEqual(updated["graph"]["nodes"]["transform"]["params"]["translate"], [6, 0, 0])
+        # Source mesh changes are visible to the browser as real modifier input.
+        for vertex in obj.data.vertices:
+            vertex.co.y += 2
+        obj.data.update()
+        modifiers.pump(port=self.port, force=True)
+        request = Request(ready["editor_url"] + "api/inspect", data=json.dumps({"node": "input"}).encode(),
+                          headers={"Content-Type": "application/json"})
+        with urlopen(request, timeout=3) as response:
+            inspection = json.load(response)
+        self.assertTrue(inspection["ok"], inspection)
+        self.assertEqual(inspection["points"], 8)
+        np.testing.assert_allclose(evaluated_positions(obj), initial + [6, 2, 0], atol=1e-5)
+        # Stored snapshots are updated for saving with the blend file.
+        saved = json.loads(mod.node_group[modifiers.GRAPH])
+        self.assertEqual(saved["nodes"]["transform"]["params"]["translate"], [6, 0, 0])
+        obj.modifiers.remove(other)
+        obj.modifiers.remove(mod)
 
 
 if __name__ == "__main__":

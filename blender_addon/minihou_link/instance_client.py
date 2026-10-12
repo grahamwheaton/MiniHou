@@ -11,6 +11,7 @@ class InstanceClient:
         self.sock = None
         self.lock = threading.RLock()
         self.sequence = 0
+        self.welcome = {}
 
     def connect(self):
         with self.lock:
@@ -26,6 +27,7 @@ class InstanceClient:
                         or header.get("protocol") != PROTOCOL_VERSION
                         or "instances_v1" not in header.get("capabilities", [])):
                     raise RuntimeError("server does not support independent MiniHou modifier instances")
+                self.welcome = header
                 return header
             except Exception:
                 self.close()
@@ -52,7 +54,8 @@ class InstanceClient:
                 if reply.get("instance_id") != header.get("instance_id"):
                     raise ProtocolError("modifier response instance ID mismatch")
                 expected = {"instance_cook": "instance_result", "instance_describe": "instance_description",
-                            "instance_remove": "instance_removed"}[header["type"]]
+                            "instance_remove": "instance_removed", "instance_edit": "instance_synced",
+                            "instance_sync": "instance_synced"}[header["type"]]
                 if reply.get("type") not in (expected, "instance_error"):
                     raise ProtocolError("unexpected modifier response type")
             except Exception:
@@ -74,3 +77,13 @@ class InstanceClient:
 
     def remove(self, instance_id):
         return self._request({"type": "instance_remove", "instance_id": instance_id})[0]
+
+    def edit_live(self, instance_id, graph, params, arrays, *, label="Blender modifier", frame=1, fps=24):
+        self.connect()
+        if "live_modifier_v1" not in self.welcome.get("capabilities", []):
+            raise RuntimeError("Restart MiniHou with the updated app to enable live modifier editing")
+        return self._request({"type": "instance_edit", "instance_id": instance_id,
+                              "graph": graph, "params": params, "label": label, "frame": frame, "fps": fps}, arrays)[0]
+
+    def sync_live(self, instance_id, params):
+        return self._request({"type": "instance_sync", "instance_id": instance_id, "params": params})[0]

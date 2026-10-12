@@ -112,6 +112,7 @@ class WebServer:
                  root=None, bind_retry_seconds: float = 3.0):
         self.session, self.host, self.port, self.link = session, host, port, link
         self.root = Path(root or os.getcwd()).resolve()
+        session.editor_root = self.root
         self.bind_retry_seconds = bind_retry_seconds
         self._httpd: Optional[_HTTPServer] = None
         self._thread: Optional[threading.Thread] = None

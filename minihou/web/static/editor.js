@@ -150,6 +150,10 @@
       pendingSet.clear(); pendingContext = null;
     }
     const fileChanged = snap.path !== S.path;
+    let liveBadge = $("#live-modifier");
+    if (!liveBadge) { liveBadge = h("span", { id: "live-modifier", class: "status" }); $("#preview").prepend(liveBadge); liveBadge.style.cssText = "flex:none;padding:6px 10px;white-space:normal;color:#8fdbad"; }
+    liveBadge.textContent = snap.live_modifier ? `${snap.live_modifier.connected ? "Live" : "Disconnected"}: ${snap.live_modifier.label}` : "";
+    liveBadge.style.display = snap.live_modifier ? "block" : "none";
     S.rev = snap.rev; S.graph = snap.graph; S.path = snap.path; S.documentId = snap.document_id;
     S.canUndo = snap.can_undo; S.canRedo = snap.can_redo;
     for (const id of [...S.sel]) if (!S.graph.nodes[id]) S.sel.delete(id);

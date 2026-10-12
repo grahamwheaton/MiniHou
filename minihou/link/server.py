@@ -119,7 +119,7 @@ class _Connection:
             log.info("client %s connected (%s)", self.addr, self.name)
             self.instance_mode = h.get("mode") == "instances"
             self.post({"type": "welcome", "protocol": PROTOCOL_VERSION, "server": "minihou",
-                       "capabilities": ["instances_v1"], "editor_url": self.server.editor_url,
+                       "capabilities": ["instances_v1", "live_modifier_v1"], "editor_url": self.server.editor_url,
                        "graph_path": str(self.session.path.resolve()) if self.session.path else None})
             if self.instance_mode:
                 return
@@ -129,13 +129,17 @@ class _Connection:
                 self._want_result = True
                 self.session.add_listener(self)
                 self.cv.notify_all()
-        elif t in ("instance_cook", "instance_describe", "instance_remove"):
+        elif t in ("instance_cook", "instance_describe", "instance_remove", "instance_edit", "instance_sync"):
             try:
                 if not self.instance_mode:
                     raise ValueError("instance requests require hello mode instances")
                 if t == "instance_remove":
                     self.instances.remove(h["instance_id"])
                     response, output = {"type": "instance_removed"}, None
+                elif t == "instance_edit":
+                    response, output = self.instances.edit_live(h, _decode_object(h, _arrays or {})), None
+                elif t == "instance_sync":
+                    response, output = self.instances.sync_live(h), None
                 elif t == "instance_describe":
                     response, output = self.instances.describe(h), None
                 else:
@@ -146,6 +150,9 @@ class _Connection:
                 self.post({"type": "instance_error", "request_id": h.get("request_id"),
                            "instance_id": h.get("instance_id"), "message": str(e)})
         elif t == "set_param":
+            if self.session.live_modifier is not None:
+                self.post({"type": "error", "message": "Use the selected modifier controls or live editor"})
+                return
             try:
                 if "name" in h:
                     self.session.set_param(h["name"], h["value"])
@@ -197,7 +204,7 @@ class _Connection:
                     iface, self._iface_pending = self._iface_pending, False
                 for header, arrays in outbox:
                     self.bytes_sent += send_message(self.sock, header, arrays)
-                if iface:
+                if iface and self.session.live_modifier is None:
                     self.bytes_sent += send_message(self.sock, self.session.interface())
                 if want:
                     self._send_results()
@@ -208,6 +215,8 @@ class _Connection:
             self.close()
 
     def _send_results(self):
+        if self.session.live_modifier is not None:
+            return  # Never publish a live modifier back into the legacy proxy.
         good, err = self.session.latest_good, self.session.latest_error
         if good is not None and good.seq > self._sent_good_seq:
             header, arrays = self.diff.build(good.geo, good.seq, good.cook)
