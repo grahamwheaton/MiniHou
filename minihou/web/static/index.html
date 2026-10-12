@@ -146,6 +146,7 @@
     <tr><td>3-D view: <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> / <kbd>Esc</kbd></td><td>select points / edges / faces / whole pieces (click or drag a box, <kbd>Shift</kbd> adds, <kbd>Ctrl</kbd> removes; <kbd>Alt</kbd>-drag or middle mouse orbits) / back to view. The buttons under the view add a node after the one you are looking at (Bevel for edges, Extrude, Inset, Delete, Group for faces...)</td></tr>
     <tr><td>timeline (under the 3-D view)</td><td>▶ plays the graph in real time between the start and end frames (frames are skipped, never queued, if a cook is slower than the frame rate); <kbd>Space</kbd> plays or pauses, <kbd>←</kbd> <kbd>→</kbd> step, <kbd>Shift</kbd>+arrow jumps to the ends, ⟲ loops. Blender's own timeline still drives the frame when it is connected</td></tr>
     <tr><td>3-D view navigation</td><td>drag orbits, <kbd>Shift</kbd>-drag / right / middle mouse pans, wheel zooms; the axis gizmo (top right) or <kbd>Numpad 1</kbd> <kbd>3</kbd> <kbd>7</kbd> (<kbd>Ctrl</kbd>: opposite side) snap to front / right / top; <kbd>Numpad 5</kbd> perspective or orthographic; <kbd>Numpad .</kbd> / <kbd>Home</kbd> frame the selection or everything</td></tr>
+    <tr><td><kbd>C</kbd> (pie menu)</td><td>Houdini's modelling tools in a pie at the pointer, over the graph or the 3-D view: <b>Adjust</b> (top), <b>Deform</b>, <b>Polygons</b>, <b>Group</b>, <b>Create</b>, <b>Build</b>, <b>Edges</b>, <b>Modify</b>, each with a page of tools and a <b>»</b> for more. Hold <kbd>C</kbd>, flick towards a slot and let go; or tap <kbd>C</kbd> and click (<kbd>1</kbd>-<kbd>8</kbd> pick a slot, the middle goes back, <kbd>Esc</kbd> closes). A tool adds its node after the one you are looking at, already filled in from the points, edges or faces you selected</td></tr>
     <tr><td>moving a selection</td><td>whatever you select (points, edges, faces, pieces) shows a <b>Move / Rotate / Scale</b> gizmo at its centre; the first drag adds a <b>transform</b> node after the viewed node (its group is the selected points, its pivot the centre), later drags on the same selection edit that node</td></tr>
     <tr><td>handles in the 3-D view</td><td>the node you look at can show arrows to drag; a <b>transform</b> has <b>Move / Rotate / Scale</b> tools (<kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd> with the pointer over the view and nothing selected): move arrows, one ring per rotation axis (drag around it), scale cubes per axis and a square for uniform scale</td></tr>
     <tr><td>layout</td><td>drag the dividers between the graph, the 3-D view and the parameter panel; <b>Graph / Split / 3D</b> set the balance, <b>⇆</b> stacks or aligns, <b>⇄</b> swaps, <b>▤</b> hides the panel; <kbd>Ctrl+Space</kbd> over a pane fills the window with it (again to go back). Saved in this browser.</td></tr>
@@ -159,6 +160,7 @@
   <p class="muted">Edits are saved to the graph file and show up live in Blender and in other editors.</p>
 </div>
 
+<script src="/static/pie.js"></script>
 <script src="/static/preview.js"></script>
 <script src="/static/editor.js"></script>
 </body>

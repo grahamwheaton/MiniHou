@@ -266,3 +266,20 @@ body.has-bar #work, body.has-bar #side { min-height: 0; }
 .ogpair.off .prow.bool .pl { color: var(--muted); }
 .ogpair .prow.bool .pl { white-space: normal; line-height: 1.15; }
 .ogpair .prow.bool .pbtn.reset { display: none; }
+
+/* the "C" pie menu */
+#pie { position: fixed; inset: 0; z-index: 60; background: #0003; cursor: default; user-select: none; }
+#pie svg { position: absolute; overflow: visible; filter: drop-shadow(0 6px 18px #000a); }
+#pie .pie-bg { fill: #14161999; stroke: #ffffff22; }
+#pie .pie-wedge { fill: #2b2e33f0; stroke: #14161a; stroke-width: 1; }
+#pie .pie-wedge.sub { fill: #32373ef0; }
+#pie .pie-wedge.empty { fill: #1d1f22b0; }
+#pie .pie-wedge.off { fill: #24272bcc; }
+#pie g.hot .pie-wedge { fill: var(--accent); }
+#pie g.hot .pie-label { fill: #08121c; }
+#pie .pie-label { fill: var(--text); font: 600 13px system-ui, sans-serif; pointer-events: none; }
+#pie .pie-label.off { fill: var(--muted); }
+#pie .pie-centre circle { fill: #1c1e22; stroke: #ffffff30; }
+#pie .pie-centre.hot circle { fill: #3a3f46; stroke: var(--accent); }
+#pie .pie-title { fill: var(--muted); font: 700 14px system-ui, sans-serif; pointer-events: none; }
+#pie .pie-info { position: absolute; transform: translateX(-50%); max-width: 420px; padding: 3px 10px; border-radius: 10px; background: #14161acc; color: var(--text); font-size: 12px; text-align: center; pointer-events: none; }

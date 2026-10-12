@@ -334,6 +334,17 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
 
 ![A selected piece with its move gizmo](docs/images/editor_piece.png)
 
+* **The C pie menu**: press **C** (over the graph or the 3-D view) for Houdini's modelling pie at the pointer: **Adjust** (top), **Deform**, **Polygons**,
+  **Group**, **Create**, **Build**, **Edges**, **Modify**, each opening a pie of tools (Transform, Soft Transform, Soft Peak, Smooth, Point Weld... /
+  Lattice, Mountain, Bend, Linear Taper, Squash and Stretch, Twist... / PolyBevel, PolyFill, PolyExtrude, PolySplit, PolyBridge, Clip, Boolean /
+  Group Promote, Group by Range, Group Create, Group Expression / Null, Circle, Tube, Sphere, Curve, Grid, Box / Mirror, Duplicate, Combine, Extract /
+  Dissolve, Edge Collapse, Edge Loop, Edge Cusp, Edge Flip...) with a **»** for a second page. **Hold C, flick towards a slot and let go**, or tap C and
+  click; **1-8** pick a slot, the middle goes back, **Esc** closes. A tool adds its node after the node you are looking at (sources like Grid and Box
+  are added unwired) and fills it in from your 3-D selection: faces become the group of an Extrude, edges the edges of a Bevel, Edge Collapse or Edge
+  Loop, points the group of a Transform. Tools this engine does not have yet (Sculpt, Group Paint) are greyed out.
+
+![The C pie menu over the 3-D view](docs/images/editor_pie.png)
+
 * **Handles (gizmos)**: the node you are looking at can show draggable arrows in the 3-D view: grab an arrow head and drag, and the parameter
   follows live (everything recooks, Blender included). `transform` has **Move / Rotate / Scale** tools (buttons above the view, or **W / E / R**
   with the pointer over it and nothing selected): move arrows, one **ring** per rotation axis (drag around it; the rings turn about the axes
@@ -419,6 +430,16 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `match_size` | geo | move (centre, or sit on the ground with justify min) and scale (uniform or per axis) to a target box |
 | `copy_transform` | geo | copies with an accumulating translate/rotate/scale (stairs, spirals, arrays); point `copynum` |
 | `peak` | geo | move points along their normals (optional group) |
+| `soft_peak` | geo | peak with a falloff: the group moves fully, points within `radius` of it follow (smooth, linear or constant) |
+| `twist` | geo | rotate about an axis in proportion to the distance along it (degrees per unit); optional group |
+| `linear_taper` | geo | scale across an axis by a factor reached at `length` (`taper_x`, `taper_y`, `dropoff`, `symmetric`) |
+| `squash_stretch` | geo | scale along an axis, optionally compensating across it to keep the volume |
+| `null` | geo | pass-through with a label: a named place to read or output from |
+| `group_range` | geo | group a range of points or primitives, every Nth, with invert and combine |
+| `edge_collapse` | geo | merge the ends of the selected edges (chains collapse to one point at their average); group `collapsedpoints` |
+| `edge_flip` | geo | swap the diagonal of the two triangles on each selected edge; edge group `flippededges` |
+| `edge_cusp` | geo | per-corner normals that are hard across the selected edges (and angles above `cusp_angle`) and smooth elsewhere |
+| `polysplit` | geo | edge loops through quad strips (position, number of loops; crack-free at triangles and n-gons) or a face cut between two points; groups `splitpoints`, `splitedges` |
 | `blend` | geo, targets* | morph the base towards shapes with the same points (shape keys / Blend Shapes): `amount`, per-target `weights` as numbers or expressions (`smoothstep(1, 49, @Frame)`, `sin(@Time * 3) * 0.5 + 0.5`), which attributes (`P`, `N`, `*`), a per-point `mask`, a `group`; several targets add their offsets |
 | `bound` | geo | bounding box, world-aligned or fitted to the principal axes; detail `bound_min/max/size` |
 | `noise` | geo | fractal Perlin noise; displaces `P` or writes any attribute (scalar or vector mode); optional group |

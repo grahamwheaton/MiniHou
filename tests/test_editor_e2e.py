@@ -911,6 +911,94 @@ class EditorE2E(unittest.TestCase):
         self.drag_handle("translate_x", 40)
         self.assertTrue(until(lambda: any(n.type == "transform" and n.params.get("group") == "8" for n in self.s.graph.nodes.values())))
 
+    # -- the "C" pie menu ---------------------------------------------------------------
+    def pie_slot_xy(self, slot, radius=104):
+        import math
+        st = self.page.evaluate("MiniPie.state()")
+        a = math.radians(slot * 45)
+        return st["x"] + radius * math.sin(a), st["y"] - radius * math.cos(a)
+
+    def pie_labels(self):
+        return self.page.eval_on_selector_all("#pie g[data-slot] text.pie-label", "els => els.map(e => e.textContent.trim())")
+
+    def test_pie_menu_hold_flick_release_inserts_a_tool_after_the_selected_node(self):
+        self.s.edit([{"op": "replace", "graph": {"version": 1, "nodes": {"b": {"type": "box", "pos": [0, 0]},
+                      "o": {"type": "output", "inputs": {"geo": "b"}, "pos": [0, 110]}}, "display": "o"}}])
+        self.page.wait_for_selector('.node[data-id="b"]')
+        self.node("b").locator(".title").click()
+        self.page.mouse.move(*self.empty_spot())
+        self.page.keyboard.down("c")
+        self.page.wait_for_selector("#pie:not(.hidden)")
+        self.assertEqual(self.pie_labels(), ["Adjust", "Deform", "Polygons", "Group", "Create", "Build", "Edges", "Modify"])
+        time.sleep(0.35)
+        self.page.mouse.move(*self.pie_slot_xy(1), steps=4)                                    # up and to the right: Deform
+        self.page.keyboard.up("c")
+        self.page.wait_for_function("MiniPie.state() && MiniPie.state().page === 'deform'")
+        self.assertEqual(self.pie_labels(), ["Lattice", "Mountain", "Bend", "Linear Taper", "Squash and Stretch", "Twist", "»"])
+        self.page.mouse.click(*self.pie_slot_xy(5))                                              # lower left: Twist
+        self.page.wait_for_selector("#pie", state="hidden")
+        self.assertTrue(until(lambda: any(n.type == "twist" for n in self.s.graph.nodes.values())))
+        tid = next(i for i, n in self.s.graph.nodes.items() if n.type == "twist")
+        self.assertEqual(self.s.graph.nodes[tid].inputs, {"geo": "b"})
+        self.assertEqual(self.s.graph.nodes["o"].inputs["geo"], tid)
+        self.page.wait_for_selector(f'.node[data-id="{tid}"].selected')
+
+    def test_pie_menu_pages_digits_back_escape_and_disabled_tools(self):
+        self.page.mouse.move(*self.empty_spot())
+        self.page.keyboard.press("c")
+        self.page.wait_for_selector("#pie:not(.hidden)")
+        self.page.keyboard.press("5")                                                           # slot 5 = Create
+        self.page.wait_for_function("MiniPie.state() && MiniPie.state().page === 'create'")
+        self.assertEqual(self.pie_labels(), ["Null", "Circle", "Tube", "Sphere", "Curve", "Grid", "Box", "»"])
+        self.page.mouse.click(*self.pie_slot_xy(7))                                              # the » arrow: a second page
+        self.page.wait_for_function("MiniPie.state().page === 'create2'")
+        self.assertIn("Torus", self.pie_labels())
+        st = self.page.evaluate("MiniPie.state()")
+        self.page.mouse.click(st["x"], st["y"])                                                  # the middle goes back to the main pie
+        self.page.wait_for_function("MiniPie.state().page === 'main'")
+        self.page.mouse.click(*self.pie_slot_xy(0))                                              # Adjust
+        self.page.wait_for_function("MiniPie.state().page === 'adjust'")
+        before = len(self.s.graph.nodes)
+        self.page.mouse.click(*self.pie_slot_xy(4))                                              # Sculpt: not available, says so
+        self.page.wait_for_selector("#pie", state="hidden")
+        self.assertIn("Sculpting", self.page.locator("#toast").inner_text())
+        self.assertEqual(len(self.s.graph.nodes), before)
+        self.page.keyboard.press("c")
+        self.page.wait_for_selector("#pie:not(.hidden)")
+        self.page.keyboard.press("Escape")
+        self.page.wait_for_selector("#pie", state="hidden")
+        self.page.keyboard.press("Tab")                                                          # typing a c in a text field is just typing
+        self.page.keyboard.type("c")
+        self.assertTrue(self.page.locator("#pie").is_hidden())
+        self.page.keyboard.press("Escape")
+
+    def test_pie_menu_adds_a_source_unwired_and_fills_a_tool_from_the_3d_selection(self):
+        self.two_boxes()
+        self.page.mouse.move(*self.empty_spot())
+        self.page.keyboard.press("c")
+        self.page.keyboard.press("5")
+        self.page.mouse.click(*self.pie_slot_xy(5))                                              # Grid
+        self.assertTrue(until(lambda: any(n.type == "grid" for n in self.s.graph.nodes.values())))
+        gid = next(i for i, n in self.s.graph.nodes.items() if n.type == "grid")
+        self.assertEqual(self.s.graph.nodes[gid].inputs, {})
+        self.page.wait_for_selector(f'.node[data-id="{gid}"].selected')
+        self.node("m").locator(".title").click()
+        self.page.wait_for_function("minihou.preview.tris === 24")
+        self.page.click('#preview [data-mode="face"]')
+        face = self.second_box_top()
+        self.page.mouse.click(*self.view_xy("face", face))
+        self.assertEqual(self.selection()["faces"], [face])
+        box = self.page.locator("#pv-canvas").bounding_box()
+        self.page.mouse.move(box["x"] + 40, box["y"] + 60)
+        self.page.keyboard.press("c")
+        self.page.keyboard.press("3")                                                           # Polygons
+        self.page.mouse.click(*self.pie_slot_xy(2))                                              # PolyExtrude
+        self.assertTrue(until(lambda: any(n.type == "polyextrude" for n in self.s.graph.nodes.values())))
+        n = next(n for n in self.s.graph.nodes.values() if n.type == "polyextrude")
+        self.assertEqual(n.inputs, {"geo": "m"})
+        self.assertEqual(n.params["group"], str(face))
+        self.assertEqual(n.params["distance"], 0.3)
+
     def test_output_groups_section_checkbox_and_name_per_group(self):
         graph = {"version": 1, "nodes": {"b": {"type": "box", "params": {"size": [2, 2, 2]}, "pos": [0, 0]},
                                          "bv": {"type": "polybevel", "inputs": {"geo": "b"}, "params": {"distance": 0.2}, "pos": [0, 110]},

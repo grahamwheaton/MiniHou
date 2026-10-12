@@ -165,6 +165,17 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
     Resulting Creases group), PolyExpand2D (inside/outside loops, Keep Input, inside/outside groups, edgedist/edgespeed attributes), Group Create (the
     filter sections, edge groups, boundary groups).
 
+13. **"C" pie menu with Houdini's modelling tools** (`web/static/pie.js`, wired in `editor.js`): eight categories (Adjust, Deform, Polygons, Group,
+    Create, Build, Edges, Modify), each a sub-pie with a `»` page; hold C and flick, or tap C and click. A tool inserts its node after the node you
+    are looking at, filled in from the 3-D selection. New nodes for the tools that had none (`minihou/nodes/modeling_tools.py`): `null`, `twist`,
+    `linear_taper`, `squash_stretch`, `soft_peak`, `group_range`, `edge_collapse`, `edge_flip`, `edge_cusp`, `polysplit` (edge loops through quad
+    strips, no T-junctions; cut a face between two points). The example library node `twist` became `twist_height`. Mapped onto existing nodes:
+    Duplicate = `copy_transform`, Combine = `merge`, Extract = `blast` (keep selected), Mountain = `noise`, Group Expression = `group_create`,
+    Point Weld = `fuse`, Dissolve = `dissolve_edges`, Edge Loop = `polysplit`. Not built: **Sculpt** and **Group Paint** (interactive brush tools;
+    shown greyed out). The **Modify** page was not in the screenshots, so its tools are a guess (Blast, Fuse, Normal, Reverse, Divide, Subdivide,
+    Resample, then attribute nodes): compare with Houdini. Houdini's pie tools start an interactive state; here a tool adds the node with sensible
+    defaults and the parameters do the rest. Slot positions inside each sub-pie follow the order in the screenshots, clockwise from the top.
+
 Open:
 
 - Output groups other than PolyBevel's are from memory of Houdini's nodes: compare with Houdini and adjust names/sets.

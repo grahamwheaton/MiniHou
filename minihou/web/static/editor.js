@@ -811,7 +811,7 @@
   // ---------------------------------------------------------------- 3-D preview of the selected (or display) node
   const pvMsg = (text) => { const m = $("#pv-msg"); m.textContent = text || ""; m.classList.toggle("hidden", !text); };
   const pv = window.MiniHouPreview ? window.MiniHouPreview.create($("#pv-canvas"), pvMsg) : null;
-  let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null;
+  let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false;
   function schedulePreview() {
     if (!pv || !pv.ok) return;
     clearTimeout(pvTimer);
@@ -925,6 +925,50 @@
     $("#pv-ortho").textContent = on ? "Ortho" : "Persp";
     $("#pv-ortho").classList.toggle("on", on);
   }
+  // ---- the "C" pie menu (pie.js): a tool inserts its node after the viewed node, filled in from the 3-D selection
+  let pieFromView = false;
+  function pieSelectionParams(item) {
+    const s = pvSelection;
+    if (!item.sel || !pv || !pv.ok || s.mode === "view" || !(s[SEL_KEY[s.mode]] || []).length) return {};
+    const mode = s.mode === "piece" ? "face" : s.mode;
+    let spec = item.sel[mode];
+    if (!spec) return {};
+    spec = typeof spec === "string" ? { [spec]: "$" } : { ...spec };
+    const from = spec.from || { face: "faces", point: "points", edge: "edges" }[mode];
+    delete spec.from;
+    let pattern;
+    if (from === "points") { const info = pv.selectionInfo(); pattern = info ? rangePattern(info.points) : ""; }
+    else if (from === "edges") pattern = edgePattern(s.edges);
+    else pattern = rangePattern(from === "faces" ? s.faces : s.points);
+    if (!pattern || pattern.length > 30000) return {};
+    for (const k of Object.keys(spec)) if (spec[k] === "$") spec[k] = pattern;
+    return spec;
+  }
+  async function pieTool(item, note) {
+    if (!item) { if (note) toast(note); return; }
+    const t = S.types[item.type];
+    if (!t) { toast(`This engine has no ${item.type} node.`); return; }
+    const params = { ...(item.params || {}), ...pieSelectionParams(item) };
+    if (item.center && pv && pv.ok && pvSelection.mode !== "view" && (pvSelection[SEL_KEY[pvSelection.mode]] || []).length) {
+      const info = pv.selectionInfo();
+      if (info) params[item.center] = info.center.map((v) => Math.round(v * 1e5) / 1e5);
+    }
+    const one = S.sel.size === 1 ? [...S.sel][0] : null;
+    const target = pieFromView && pvNode && nodeOf(pvNode) ? pvNode : one && nodeOf(one) ? one : pvNode && nodeOf(pvNode) ? pvNode : displayNode();
+    if (item.source || !t.inputs.length || !target) {
+      const id = uniqueId(item.type);
+      let [x, y] = pieFromView || !S.mouse ? toWorld(canvas.getBoundingClientRect().left + canvas.clientWidth / 2, canvas.getBoundingClientRect().top + canvas.clientHeight / 2) : toWorld(...S.mouse);
+      const r = await edit([{ op: "add", type: item.type, id, params, pos: [x - W / 2, y - 12] }]);
+      if (r) select([id]);
+      return;
+    }
+    const r = await edit([{ op: "insert", after: target, type: item.type, params }]);
+    if (r) { if (pv && pv.ok) pv.clearSelection(); select([r.results[0].id]); }
+  }
+  if (window.MiniPie) {
+    MiniPie.init({ types: () => S.types, onPick: pieTool, onOpen: () => { pieFromView = pvOver; },
+      blocked: () => !$("#tabmenu").classList.contains("hidden") || !$("#help").classList.contains("hidden") });
+  }
   function wireSelectionTools() {
     pv.onSelect = renderSelectionTools;
     // viewport handles: arrows in the view that scrub a parameter of the viewed node
@@ -961,13 +1005,12 @@
       else if (handleBase) { const v = handleBase.slice(); v[h.comp] = value; queueSet(node, h.param, v); }
     };
     document.querySelectorAll("#preview [data-mode]").forEach((b) => { b.onclick = () => pv.setMode(b.dataset.mode); });
-    let over = false;
     const wrap = $("#pv-canvas").parentElement;                         // the canvas and the overlays on it (gizmo, handles) count as one
-    wrap.addEventListener("pointerenter", () => { over = true; });
-    wrap.addEventListener("pointerleave", () => { over = false; });
+    wrap.addEventListener("pointerenter", () => { pvOver = true; });
+    wrap.addEventListener("pointerleave", () => { pvOver = false; });
     document.addEventListener("keydown", (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
-      if (!over || tag === "input" || tag === "textarea" || tag === "select") return;
+      if (!pvOver || tag === "input" || tag === "textarea" || tag === "select") return;
       const nav = { Numpad1: ["front"], Numpad3: ["right"], Numpad7: ["top"] }[e.code];          // Blender-style view keys; Ctrl = the opposite side
       if (nav && !e.altKey && !e.metaKey) { pv.viewAxis(nav[0], e.ctrlKey); e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (e.code === "Numpad5" || e.code === "NumpadDecimal" || e.key === "Home") {
