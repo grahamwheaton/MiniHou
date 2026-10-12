@@ -225,7 +225,7 @@ once and never overwritten. The same thing without packing: `py -m minihou app` 
 
 A bar at the top of the editor handles Blender while none is connected:
 
-* **drag `minihou_link.zip`** from the bar onto a Blender window (Blender 4.2+ installs a dropped zip), or click it to download;
+* **Download ZIP** saves `minihou_link.zip`. In Blender, use **Preferences > Add-ons > menu > Install from Disk**, select the ZIP, then enable MiniHou Link;
 * **Install add-on** runs the Blender you pick once, in the background, unpacks the add-on into its user add-ons folder, enables it and
   saves the preferences (restart Blender if it was already open);
 * **Open Blender** starts it with the add-on registered from a private copy and connected to this engine's port, so nothing is installed at all.

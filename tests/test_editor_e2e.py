@@ -631,20 +631,13 @@ class EditorE2E(unittest.TestCase):
         self.addCleanup(lambda: (setattr(blender_setup, "list_blenders", orig[0]), setattr(blender_setup, "install_addon", orig[1]),
                                  setattr(blender_setup, "launch_blender", orig[2])))
 
-    def test_blender_bar_offers_a_draggable_zip_when_nothing_is_connected(self):
+    def test_blender_bar_offers_a_zip_download_with_install_instructions(self):
         self.stub_blenders([])
         self.page.reload()
         self.page.wait_for_selector("#blender-bar:not(.hidden)")
         chip = self.page.locator("#bb-zip")
         self.assertEqual(chip.get_attribute("href"), "/addon/minihou_link.zip")
-        self.assertEqual(chip.get_attribute("draggable"), "true")
-        got = self.page.evaluate("""() => {
-            const dt = new DataTransfer();
-            document.querySelector('#bb-zip').dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true, cancelable: true }));
-            return [dt.getData('DownloadURL'), dt.getData('text/uri-list')];
-        }""")
-        self.assertTrue(got[0].startswith("application/zip:minihou_link.zip:http://127.0.0.1:"), got)
-        self.assertTrue(got[0].endswith("/addon/minihou_link.zip"))
+        self.assertEqual(chip.get_attribute("draggable"), "false")
         self.page.wait_for_function("document.querySelector('#bb-text').textContent.includes('No Blender found')")
         self.assertIn("No Blender found", self.page.inner_text("#bb-text"))
         self.assertTrue(self.page.locator("#bb-install").is_disabled())                        # nothing to install into: the zip is the way
@@ -652,6 +645,7 @@ class EditorE2E(unittest.TestCase):
         with self.page.expect_download() as dl:
             chip.click()                                                                       # a click downloads it
         self.assertEqual(dl.value.suggested_filename, "minihou_link.zip")
+        self.assertIn("Install from Disk", self.page.inner_text("#bb-msg"))
 
     def test_blender_bar_installs_and_launches_and_can_be_hidden_and_recalled(self):
         import types

@@ -411,7 +411,7 @@
     $("#bb-zip").classList.toggle("hidden", !addon.available);
     $("#bb-text").textContent = BB.connected ? "Blender is connected." :
       blenders.length ? "Blender is not connected. Install the add-on once, then open Blender:" :
-        "No Blender found here. Drag the zip onto a Blender window (4.2+), or use Preferences > Add-ons > Install from Disk:";
+        "No Blender found here. Download the ZIP, then use Blender Preferences > Add-ons > Install from Disk:";
     if (!BB.msg) $("#bb-msg").textContent = "";
   }
   async function blenderAction(kind) {
@@ -433,12 +433,10 @@
     try { localStorage.removeItem(BAR_KEY); } catch (e) { /* ignore */ }
     BB.forced = true; BB.msg = false; renderBlenderBar();
   };
-  $("#bb-zip").addEventListener("dragstart", (e) => {                 // Chrome/Edge turn this into a file when dropped on another app
-    const url = new URL($("#bb-zip").getAttribute("href"), location.href).href;
-    e.dataTransfer.setData("DownloadURL", `application/zip:minihou_link.zip:${url}`);
-    e.dataTransfer.setData("text/uri-list", url);
-    e.dataTransfer.effectAllowed = "copy";
-  });
+  $("#bb-zip").onclick = () => {
+    BB.msg = true;
+    $("#bb-msg").textContent = "In Blender: Preferences > Add-ons > menu > Install from Disk. Choose the downloaded ZIP, then enable MiniHou Link.";
+  };
 
   // ---------------------------------------------------------------- frame (time)
   function syncSlider(f) {
