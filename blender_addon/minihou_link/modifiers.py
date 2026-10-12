@@ -389,7 +389,7 @@ def _interface(mod, header, initial=False, activate=False):
     ng = mod.node_group
     gout = next((n for n in ng.nodes if n.bl_idname == "NodeGroupOutput"), None)
     passthrough = initial or (gout is not None and any(
-        link.from_node.bl_idname == "NodeGroupInput" for link in gout.inputs["Geometry"].links))
+        link.from_node.bl_idname == "NodeGroupInput" for target in (gout.inputs["Geometry"], proxy._chain_target(ng)) for link in target.links))
     old = proxy.read_values(mod, ng, parameters(mod)) if not initial else {}
     params = header["interface"]
     cache = _cache(mod)
@@ -406,6 +406,8 @@ def _interface(mod, header, initial=False, activate=False):
     ng["minihou_object_sockets"] = json.dumps(saved)
     for key in keys:
         _object_socket(mod, key)
+    proxy._sync_usage_chain(ng, params, json.loads(ng.get(proxy.MAP_KEY, "{}")))
+    ng["minihou_object_usage_version"] = 1
     ng[PARAMS] = json.dumps(params)
     values = {p["name"]: old.get(p["name"], p["value"]) for p in params}
     proxy.write_values(mod, ng, params, values)
@@ -414,7 +416,7 @@ def _interface(mod, header, initial=False, activate=False):
     if passthrough and not activate:
         gin = next(n for n in ng.nodes if n.bl_idname == "NodeGroupInput")
         gout = next(n for n in ng.nodes if n.bl_idname == "NodeGroupOutput")
-        ng.links.new(gin.outputs["Geometry"], gout.inputs["Geometry"])
+        ng.links.new(gin.outputs["Geometry"], proxy._chain_target(ng))
 
 
 def _apply_live(mod, header):
@@ -477,7 +479,7 @@ def add_modifier(obj, graph_path, *, host=None, port=None):
     # Until the first successful cook, pass upstream geometry through unchanged.
     gin = next(n for n in ng.nodes if n.bl_idname == "NodeGroupInput")
     gout = next(n for n in ng.nodes if n.bl_idname == "NodeGroupOutput")
-    ng.links.new(gin.outputs["Geometry"], gout.inputs["Geometry"])
+    ng.links.new(gin.outputs["Geometry"], proxy._chain_target(ng))
     ng[STATUS] = "Waiting for first cook"
     _owners[instance_id(mod)] = (obj.as_pointer(), mod.as_pointer())
     return mod
@@ -667,6 +669,9 @@ def pump(host=None, port=None, *, force=False, _only=None):
                    for m in o.modifiers if is_modifier(m)]
         all_entries = [(o, m) for o in bpy.data.objects if o.type == "MESH" and CACHE not in o
                        and o.library is None for m in o.modifiers if is_modifier(m)]
+        for _, modifier in all_entries:
+            if modifier.node_group.get("minihou_object_usage_version", 0) < 1:
+                _interface(modifier, {"interface": parameters(modifier)})
         live = _unique(all_entries)  # copied objects in another scene also need fresh identities
         _cleanup(live)
         if not entries:
