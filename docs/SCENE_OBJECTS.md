@@ -21,6 +21,7 @@ unchanged, so it can sit anywhere in a graph, next to the normal output, and the
 | `source` | object to duplicate for points that do not say (no `instance` attribute) |
 | `id_attrib` | instances: integer point attribute that identifies each object (default `id`); without it the point number |
 | `piece_attrib` | pieces: integer primitive attribute that numbers the pieces (default `piece`, which `assemble` and the fracture nodes write); without one, connected pieces numbered in order |
+| `attributes` | pieces: attributes carried onto each piece's mesh (default `uv Cd N material_index`; the ones that exist): `uv`, `Cd`, `N`, `material_index` become Blender's UV map, colour attribute, custom normals and face materials, others generic attributes |
 | `max_objects` | refuse (do not truncate) above this many points; default 2,000, at most 10,000 |
 
 ## Pieces: one mesh object per piece
@@ -30,8 +31,8 @@ connected pieces when there is none, and makes **one mesh object per piece with 
 so a fractured wall becomes a hundred separate objects you can rigid-body simulate, animate, give a material or a modifier. The
 piece number is the object's identity: a piece keeps its object when other pieces come and go. The shape travels as binary arrays;
 a piece is rewritten only when its shape really changed (a hash of its points and faces), so moving the whole thing, or changing
-something that does not touch the pieces, rewrites no meshes. Shapes only: positions and faces (no attributes, UVs or materials
-yet, which is the next thing to add).
+something that does not touch the pieces, rewrites no meshes. Besides the shape, the attributes named in `attributes` travel too (UV
+map, colours, custom normals, material index; others as generic attributes), and the piece is rewritten when any of them changes.
 
 ## Works with the live link and with modifiers
 
@@ -61,8 +62,8 @@ Working on the objects only makes sense if they stay put, so:
 
 ## Limits and not done
 
-* Pieces carry shape only: no point or face attributes, UVs or material slots yet. A piece's mesh is rewritten when its shape
-  changes, which discards edits you made to that piece's mesh in edit mode (modifiers, materials set on the object, and transforms stay).
+* Pieces carry the attributes you list; they do not create material slots (the engine only knows indices). A piece's mesh is rewritten when its shape or attributes
+  change, which discards edits you made to that piece's mesh in edit mode (modifiers, materials set on the object, and transforms stay).
 * Up to 2 million points across all pieces.
 * Linked duplicates share the source's data: per-object modifiers, yes; per-object edits to the mesh itself, no (make single user).
 * Objects are created and updated from the add-on's timer, never from a handler, so a frame-change cook shows them a fraction of a

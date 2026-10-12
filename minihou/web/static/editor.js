@@ -1840,7 +1840,7 @@
     const p = (S.status && S.status.proxy) || { level: 1, auto: false, link_tris: 0 };
     const row = proxyRow();
     $("#proxy-label").textContent = row.label;
-    $("#proxy-btn").classList.toggle("on", row.id !== "full" || p.link_tris > 0);
+    $("#proxy-btn").classList.toggle("on", row.id !== "full" || p.link_tris > 0 || !!(S.status && S.status.disk_cache));
     $("#proxy-btn").title = row.id === "full" ? "Proxy: work on a lighter version of a very large scene" : `Proxy ${row.label}: nodes cook a smaller version of the scene (counts, resolutions, voxel sizes scale)`;
     if (!$("#proxy-menu").classList.contains("hidden")) fillProxyMenu();
   }
@@ -1857,6 +1857,19 @@
       m.appendChild(it);
     }
     const sep = document.createElement("div"); sep.className = "sep"; m.appendChild(sep);
+    const dc = (S.status && S.status.disk_cache) || null;
+    const hd = document.createElement("div"); hd.className = "head"; hd.textContent = "Disk cache: expensive results survive a restart, so reopening a big scene is quick."; m.appendChild(hd);
+    const dcRow = (label, hint, id, fn) => {
+      const it = document.createElement("div"); it.className = "item"; it.dataset.diskcache = id;
+      it.innerHTML = `<span class="dot"></span><span>${label}</span><span class="hint">${hint}</span>`;
+      it.onclick = async () => { try { const r = await api("/api/disk_cache", fn); S.status = Object.assign(S.status || {}, { disk_cache: r.stats }); } catch (e) { toast(e.message); } renderProxy(); $("#proxy-menu").classList.add("hidden"); };
+      m.appendChild(it);
+    };
+    if (dc) {
+      dcRow("Disk cache on", `${(dc.bytes / 1e6).toFixed(0)} MB · ${dc.hits} hits`, "off", { enabled: false });
+      dcRow("Clear the cache", "", "clear", { clear: true });
+    } else dcRow("Turn disk cache on", "off", "on", { enabled: true });
+    const sep2 = document.createElement("div"); sep2.className = "sep"; m.appendChild(sep2);
     const h2 = document.createElement("div"); h2.className = "head"; h2.textContent = "Send Blender at most:"; m.appendChild(h2);
     for (const [n, label] of LINK_CAPS) {
       const it = document.createElement("div"); it.className = "item" + ((p.link_tris || 0) === n ? " cur" : ""); it.dataset.cap = String(n);

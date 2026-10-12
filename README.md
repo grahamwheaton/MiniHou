@@ -841,7 +841,7 @@ everything a result depends on, and that key is also the file name, so a restart
 cooking them and everything upstream. Measured: a sphere remeshed at 0.03 voxels cooks in 4.5 s; after a restart the same graph is
 back in 48 ms. Only results that took at least 100 ms and read back in well under half that time are kept; anything that depends on
 a Blender object, a simulation or fed-in system geometry is never stored; the status line and `engine_status` show hits and size.
-Off by default. Details: [docs/PROXY.md](docs/PROXY.md#disk-cache).
+Off by default; the **Proxy** menu in the editor also switches it on and off and clears it. Details: [docs/PROXY.md](docs/PROXY.md#disk-cache).
 
 ## Very large scenes (proxies)
 

@@ -30,30 +30,35 @@ MAX_OBJECTS_LIMIT = 10_000
                                "number is used (so changing how many points there are can hand objects to other points)"),
     Str("piece_attrib", "piece", doc="pieces: integer primitive attribute that numbers the pieces (it is the objects' identity); "
                                      "when the geometry has none, connected pieces are used, numbered in order"),
+    Str("attributes", "uv Cd N material_index", doc="pieces: attributes to carry onto each piece's mesh (space separated; the ones that exist "
+                                                  "are sent): uv, Cd and N become Blender's UV map, colour attribute and custom normals, "
+                                                  "material_index the face material, anything else a generic attribute"),
     Int("max_objects", 2000, min=1, max=MAX_OBJECTS_LIMIT, doc="Safety limit: more points than this is refused, not truncated"),
 ])
-def scene_objects(geo, mode, prefix, collection, source, id_attrib, piece_attrib, max_objects):
+def scene_objects(geo, mode, prefix, collection, source, id_attrib, piece_attrib, attributes, max_objects):
     """Make Blender objects out of points. The geometry passes through unchanged; what happens in Blender is described by the
     manifest the link sends (see the manual). Objects are never deleted by a cook: ones that are no longer needed are hidden, and
     a Clean up button in the MiniHou panel removes them for good."""
-    plan(geo, mode, source, id_attrib, max_objects, piece_attrib)       # validates: a bad setup is an error on this node
+    plan(geo, mode, source, id_attrib, max_objects, piece_attrib, attributes)       # validates: a bad setup is an error on this node
     return geo
 
 
-def plan(geo: Geometry, mode: str, source: str, id_attrib: str, max_objects: int, piece_attrib: str = "piece"):
+def plan(geo: Geometry, mode: str, source: str, id_attrib: str, max_objects: int, piece_attrib: str = "piece", attributes: str = ""):
     """The manifest columns for ``mode`` and the binary arrays that go with it (none for instances)."""
     if mode == "pieces":
-        return plan_pieces(geo, piece_attrib, max_objects)
+        return plan_pieces(geo, piece_attrib, max_objects, attributes)
     return plan_instances(geo, source, id_attrib, max_objects), {}
 
 
 MAX_PIECE_POINTS = 2_000_000
 
 
-def plan_pieces(geo: Geometry, piece_attrib: str, max_objects: int):
+def plan_pieces(geo: Geometry, piece_attrib: str, max_objects: int, attributes: str = ""):
     """One mesh per piece. Columns (JSON): ``id`` (piece numbers), ``loc`` (each piece's centre), ``npts`` / ``ncorner`` / ``nprim``
     (counts per piece). Arrays: ``P`` float32 (points of all pieces, relative to their centres), ``vp`` int32 (corner -> point,
-    local to the piece) and ``sizes`` int32 (corners per face), all pieces one after the other."""
+    local to the piece) and ``sizes`` int32 (corners per face), all pieces one after the other. Each wanted attribute that exists
+    adds an array ``point:<name>`` (rows like ``P``), ``vertex:<name>`` (rows like ``vp``) or ``prim:<name>`` (rows like ``sizes``),
+    and the column ``attributes`` lists their keys."""
     t = geo.topology
     offs = t.prim_offsets.astype(np.int64)
     sizes = np.diff(offs)
@@ -96,9 +101,17 @@ def plan_pieces(geo: Geometry, piece_attrib: str, max_objects: int):
     vp = (local - point_base[piece_of_corner]).astype(np.int32)
     ncorner = np.bincount(piece_of_corner, minlength=len(uniq))
     nprim = np.bincount(piece_of_prim, minlength=len(uniq))
+    arrays = {"P": np.ascontiguousarray(P_local), "vp": vp, "sizes": s.astype(np.int32)}
+    carried = []
+    for name in dict.fromkeys(str(attributes).split()):
+        for domain, table, rows_ in (("point", geo.point, ukey % n), ("vertex", geo.vertex, corner), ("prim", geo.prim, prims)):
+            a = table.get(name)
+            if a is not None and name != "P":
+                arrays[f"{domain}:{name}"] = np.ascontiguousarray(a[rows_])
+                carried.append(f"{domain}:{name}")
     cols = {"sources": [], "id": uniq.tolist(), "loc": np.round(centre, 6).tolist(), "npts": npts.tolist(),
-            "ncorner": ncorner.tolist(), "nprim": nprim.tolist()}
-    return cols, {"P": np.ascontiguousarray(P_local), "vp": vp, "sizes": s.astype(np.int32)}
+            "ncorner": ncorner.tolist(), "nprim": nprim.tolist(), "attributes": carried}
+    return cols, arrays
 
 
 def plan_instances(geo: Geometry, source: str, id_attrib: str, max_objects: int) -> dict:
@@ -147,7 +160,8 @@ def build_manifest(node_id: str, params: dict, geo: Geometry, key: str):
     "collection", ...columns}`` plus binary arrays for ``pieces``. Instance columns: ``sources`` (Blender object names), and per
     object ``id``, ``src`` (index into sources), ``loc``, ``rot`` (Euler XYZ radians), ``scale``. Piece columns: see
     :func:`plan_pieces`."""
-    body, arrays = plan(geo, params["mode"], params["source"], params["id_attrib"], params["max_objects"], params["piece_attrib"])
+    body, arrays = plan(geo, params["mode"], params["source"], params["id_attrib"], params["max_objects"], params["piece_attrib"],
+                        params["attributes"])
     prefix = str(params["prefix"]).strip() or "MiniHou"
     header = dict(type="scene_objects", node=node_id, key=key, mode=params["mode"], prefix=prefix[:60],
                   collection=(str(params["collection"]).strip() or prefix)[:60], **body)

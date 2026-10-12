@@ -89,5 +89,5 @@ Measured: remesh of a sphere at 0.03 voxels 4.5 s, 48 ms after a restart (the ch
 
 * Instances are not reduced separately (an instance node with a million placements counts by its points).
 * Cook parameters are marked on the commonest count / resolution parameters only; others run at full size at any level.
-* The disk cache is off by default and has no editor button yet (flag, environment variable, `engine_status`).
+* The disk cache is off by default (flag, environment variable, or the Proxy menu in the editor).
 * Packed / instanced RBD pieces and the solver always cook the real thing in their input; do not use a proxy to judge a simulation.

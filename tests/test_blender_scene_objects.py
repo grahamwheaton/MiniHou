@@ -256,6 +256,32 @@ class ScenePiecesTests(LiveHarness, unittest.TestCase):
         self.assertIs(scene_objs()[1], mine)
         self.assertIn("Mine", [m.name for m in mine.modifiers])
 
+    def test_uvs_colours_and_materials_come_with_the_pieces(self):
+        graph = chunks()
+        graph["nodes"]["uv"] = {"type": "wrangle", "inputs": {"geo": "a"}, "params": {
+            "snippet": "u@uv = set(@P.x, @P.y) * 0.5", "run_over": "vertices"}}
+        graph["nodes"]["col"] = {"type": "wrangle", "inputs": {"geo": "uv"}, "params": {
+            "snippet": "v@Cd = set(1, 0, 0) if @P.x > 0 else set(0, 0, 1)", "run_over": "points"}}
+        graph["nodes"]["mat"] = {"type": "wrangle", "inputs": {"geo": "col"}, "params": {
+            "snippet": "i@material_index = @primnum % 2", "run_over": "primitives"}}
+        graph["nodes"]["so"]["inputs"] = {"geo": "mat"}
+        self.write(graph)
+        self.pump(lambda: len(scene_objs()) >= 4 and all("Color" in o.data.color_attributes for o in scene_objs()))
+        for o in scene_objs():
+            me = o.data
+            self.assertIn("UVMap", me.uv_layers)
+            uv = np.empty(len(me.loops) * 2, np.float32)
+            me.uv_layers["UVMap"].data.foreach_get("uv", uv)
+            self.assertLessEqual(float(np.abs(uv).max()), 0.5 + 1e-4)
+            mats = np.empty(len(me.polygons), np.int32)
+            me.polygons.foreach_get("material_index", mats)
+            self.assertTrue(set(mats.tolist()) <= {0, 1})
+            col = np.empty(len(me.vertices) * 4, np.float32) if me.color_attributes["Color"].domain == "POINT" else \
+                np.empty(len(me.loops) * 4, np.float32)
+            me.color_attributes["Color"].data.foreach_get("color", col)
+            reds = {tuple(c) for c in col.reshape(-1, 4)[:, :3].round(3).tolist()}
+            self.assertTrue(reds <= {(1.0, 0.0, 0.0), (0.0, 0.0, 1.0)})
+
     def count_for(self, c):
         from minihou import Evaluator, Graph
         return int(Evaluator().cook(Graph.from_dict(chunks(count=c)), "a").prim["piece"].max()) + 1

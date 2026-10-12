@@ -144,7 +144,13 @@ class EditorE2E(unittest.TestCase):
         self.page.keyboard.press("Control+Shift+z")
         self.assertTrue(until(lambda: len(self.s.graph.nodes) == 7))
         self.page.keyboard.press("f")
-        self.node("loop_begin_1").locator(".title").click()
+        for _ in range(3):                                                         # the redo above may still be re-rendering the graph
+            self.node("loop_begin_1").locator(".title").click()
+            try:
+                self.page.wait_for_function("(document.querySelector('#params input.nid') || {}).value === 'loop_begin_1'", timeout=4000)
+                break
+            except Exception:  # noqa: BLE001 - playwright TimeoutError: click again
+                continue
         self.page.fill("#params input.nid", "copy_begin")
         self.page.press("#params input.nid", "Enter")
         self.assertTrue(until(lambda: "copy_begin" in self.s.graph.nodes))
@@ -1680,6 +1686,18 @@ class EditorE2E(unittest.TestCase):
         back, _ = usd_io.read_geometry(target)
         self.assertEqual(back.npoints, self.s.latest_good.geo.npoints)
         self.assertEqual(back.nprims, self.s.latest_good.geo.nprims)
+
+    def test_the_disk_cache_is_switched_from_the_proxy_menu(self):
+        self.page.click("#proxy-btn")
+        self.page.click('#proxy-menu [data-diskcache="on"]')
+        self.assertTrue(until(lambda: self.s.disk_cache is not None))
+        self.assertTrue(until(lambda: self.page.locator("#proxy-btn").evaluate("b => b.classList.contains('on')")))
+        self.page.click("#proxy-btn")
+        self.page.wait_for_selector('#proxy-menu [data-diskcache="clear"]')
+        self.page.click('#proxy-menu [data-diskcache="clear"]')
+        self.page.click("#proxy-btn")
+        self.page.click('#proxy-menu [data-diskcache="off"]')
+        self.assertTrue(until(lambda: self.s.disk_cache is None))
 
 
 if __name__ == "__main__":

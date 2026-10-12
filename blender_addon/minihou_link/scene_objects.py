@@ -18,7 +18,7 @@ import mathutils
 import numpy as np
 
 from . import scene_plan as sp
-from .mesh_writer import assert_main_thread, set_corner_verts, set_positions
+from .mesh_writer import NATIVE, assert_main_thread, set_corner_verts, set_positions, write_attribute, write_native
 
 SESSION = "session"
 _pending: Dict[Tuple[str, str], Tuple[dict, str]] = {}      # (owner, node) -> (manifest, parent object name)
@@ -165,7 +165,10 @@ def _make_piece(name: str, ident: int, col):
     return obj
 
 
-def _write_piece(mesh, P: np.ndarray, vp: np.ndarray, sizes: np.ndarray) -> None:
+def _write_piece(mesh, P: np.ndarray, vp: np.ndarray, sizes: np.ndarray, attrs: Optional[Dict[str, np.ndarray]] = None) -> List[str]:
+    """Fill ``mesh`` with one piece. ``attrs``: ``"domain:name"`` -> values. Returns warnings."""
+    import types
+    warnings: List[str] = []
     mesh.clear_geometry()
     if len(P):
         mesh.vertices.add(len(P))
@@ -178,18 +181,32 @@ def _write_piece(mesh, P: np.ndarray, vp: np.ndarray, sizes: np.ndarray) -> None
     if len(P):
         set_positions(mesh, P)
     mesh.update(calc_edges=True)
+    shape = types.SimpleNamespace(vertex_point=vp, prim_offsets=np.concatenate([[0], np.cumsum(sizes)]).astype(np.int32))
+    for key, arr in (attrs or {}).items():
+        domain, name = key.split(":", 1)
+        try:
+            ok = bool(write_native(mesh, shape, domain, name, arr)) if name in NATIVE else write_attribute(mesh, domain, name, arr)
+        except (RuntimeError, TypeError, ValueError) as e:
+            ok, name = False, f"{name} ({e})"
+        if not ok:
+            warnings.append(f"attribute {key!r} could not be written to the piece meshes")
+    mesh.update()
+    return warnings
 
 
 def _piece_slices(manifest: dict, arrays: dict):
-    """Per manifest entry: (id, P, vp, sizes) views into the arrays."""
+    """Per manifest entry: (id, P, vp, sizes, attrs) views into the arrays."""
     pb = np.concatenate([[0], np.cumsum(manifest["npts"])]).astype(np.int64)
     cb = np.concatenate([[0], np.cumsum(manifest["ncorner"])]).astype(np.int64)
     fb = np.concatenate([[0], np.cumsum(manifest["nprim"])]).astype(np.int64)
     P, vp, sizes = arrays["P"].reshape(-1, 3), arrays["vp"], arrays["sizes"]
     if pb[-1] != len(P) or cb[-1] != len(vp) or fb[-1] != len(sizes):
         raise ValueError("the piece arrays do not match the counts in the manifest")
+    bounds = {"point": pb, "vertex": cb, "prim": fb}
+    wanted = [k for k in manifest.get("attributes", []) if k in arrays and k.split(":", 1)[0] in bounds]
     for k, ident in enumerate(manifest["id"]):
-        yield int(ident), P[pb[k]:pb[k + 1]], vp[cb[k]:cb[k + 1]], sizes[fb[k]:fb[k + 1]]
+        attrs = {key: arrays[key][bounds[key.split(":", 1)[0]][k]:bounds[key.split(":", 1)[0]][k + 1]] for key in wanted}
+        yield int(ident), P[pb[k]:pb[k + 1]], vp[cb[k]:cb[k + 1]], sizes[fb[k]:fb[k + 1]], attrs
 
 
 def _retarget(obj, item: sp.Item, tag: str, col, placeholder_log: List[str]):
@@ -258,16 +275,23 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "", arrays: Option
             obj.matrix_parent_inverse = mathutils.Matrix.Identity(4)
     rewritten = 0
     if pieces:                                            # shapes: only the pieces whose shape really changed are rewritten
-        for ident, P, vp, sizes in _piece_slices(manifest, arrays):
+        warned = set()
+        for ident, P, vp, sizes, attrs in _piece_slices(manifest, arrays):
             obj = objs.get(ident)
             if obj is None or obj.type != "MESH":
                 continue
             h = hashlib.blake2b(digest_size=12)
             for a in (P, vp, sizes):
                 h.update(np.ascontiguousarray(a).tobytes())
+            for key in sorted(attrs):
+                h.update(key.encode())
+                h.update(np.ascontiguousarray(attrs[key]).tobytes())
             digest = h.hexdigest()
             if obj.data.get(DIGEST) != digest:
-                _write_piece(obj.data, P, vp, sizes)
+                for w in _write_piece(obj.data, P, vp, sizes, attrs):
+                    if w not in warned:
+                        warned.add(w)
+                        _log(f"scene_objects {node!r}: {w}")
                 obj.data[DIGEST] = digest
                 rewritten += 1
     for ident in plan.hide:

@@ -238,6 +238,45 @@ class SessionDiskCacheTests(unittest.TestCase):
         self.assertEqual(st["cook"]["disk"], ["s"])
 
 
+class SessionToggleTests(unittest.TestCase):
+    def test_the_disk_cache_can_be_switched_on_cleared_and_off_while_running(self):
+        from minihou.web import WebServer
+        import json
+        import urllib.request
+        d = tempfile.mkdtemp(prefix="minihou_dc_")
+        self.addCleanup(shutil.rmtree, d, True)
+        reg = make_registry([])
+        s = Session(graph(reg, n=3000), registry=reg)
+        s.start()
+        self.addCleanup(s.stop)
+        self.assertTrue(s.wait_idle(10))
+        self.assertNotIn("disk_cache", s.status())
+        web = WebServer(s, "127.0.0.1", 0, root=d)
+        web.start()
+        self.addCleanup(web.stop)
+
+        def post(body):
+            req = urllib.request.Request(web.url + "api/disk_cache", data=json.dumps(body).encode(), method="POST",
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return json.loads(r.read())
+        r = post({"enabled": True})
+        self.assertTrue(r["enabled"])
+        self.assertEqual(r["stats"]["folder"], os.path.join(d, ".minihou_cache"))
+        s.disk_cache.min_ms = 0
+        s.disk_cache.min_bytes = 0
+        s.edit([{"op": "set", "id": "b", "params": {"x": 0.5}}])
+        self.assertTrue(s.wait_idle(10))
+        self.assertTrue(s.disk_cache.flush())
+        self.assertGreater(s.status()["disk_cache"]["writes"], 0)
+        self.assertEqual(post({"clear": True})["stats"]["bytes"], 0)
+        r = post({"enabled": False})
+        self.assertEqual((r["enabled"], s.evaluator.disk), (False, None))
+        self.assertNotIn("disk_cache", s.status())
+        with self.assertRaises(Exception):
+            post({"enabled": "yes"})
+
+
 class CommandLineTests(unittest.TestCase):
     def test_the_flag_and_the_default_folder(self):
         import argparse

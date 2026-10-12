@@ -402,6 +402,26 @@ class Session:
         out["frame"] = frame
         return out
 
+    def set_disk_cache(self, folder=None, *, max_bytes: Optional[int] = None, clear: bool = False) -> Optional[dict]:
+        """Turn the disk cache on (in ``folder``) or off (``folder=None``; the files stay), or clear what it holds. Returns its stats."""
+        from ..diskcache import DEFAULT_MAX_BYTES, DiskCache
+        with self._cook_lock:
+            if folder is None:
+                old, self.disk_cache, self.evaluator.disk = self.disk_cache, None, None
+                if old is not None:
+                    if clear:
+                        old.clear()
+                    old.close()
+                return None
+            if self.disk_cache is None or str(self.disk_cache.folder) != str(folder):
+                if self.disk_cache is not None:
+                    self.disk_cache.close()
+                self.disk_cache = DiskCache(folder, max_bytes=max_bytes or DEFAULT_MAX_BYTES)
+                self.evaluator.disk = self.disk_cache
+            if clear:
+                self.disk_cache.clear()
+            return self.disk_cache.stats()
+
     def view_level(self) -> float:
         """The proxy level the editor is looking at: the settings' level, or in auto mode the level of the newest result."""
         good = self.latest_good

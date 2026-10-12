@@ -177,6 +177,27 @@ class PiecesManifestTests(unittest.TestCase):
             plan(Geometry.from_arrays(np.zeros((3, 3), np.float32)), "pieces", "", "id", 10, "piece")
         self.assertIn("faces", str(cm.exception))
 
+    def test_wanted_attributes_travel_with_their_pieces(self):
+        geo = self.fractured().copy()
+        geo.point["Cd"] = np.random.default_rng(1).random((geo.npoints, 3)).astype(np.float32)
+        geo.vertex["uv"] = np.random.default_rng(2).random((geo.nvertices, 2)).astype(np.float32)
+        geo.prim["material_index"] = (geo.prim["piece"] % 2).astype(np.int32)
+        geo.point["secret"] = np.arange(geo.npoints, dtype=np.float32)
+        cols, arrays = plan(geo, "pieces", "", "id", 100, "piece", "uv Cd material_index missing")
+        self.assertEqual(cols["attributes"], ["vertex:uv", "point:Cd", "prim:material_index"])          # in the order asked, only existing ones
+        self.assertNotIn("point:secret", arrays)
+        self.assertEqual(len(arrays["point:Cd"]), len(arrays["P"]))
+        self.assertEqual(len(arrays["vertex:uv"]), len(arrays["vp"]))
+        self.assertEqual(len(arrays["prim:material_index"]), len(arrays["sizes"]))
+        # piece 0's first face material comes from the source face of piece 0
+        k0 = np.flatnonzero(geo.prim["piece"] == cols["id"][0])
+        self.assertEqual(int(arrays["prim:material_index"][0]), int(geo.prim["material_index"][k0[0]]))
+        # attributes follow the same rows as the shape: the uv of corner 0 is the source corner's uv
+        corner0 = geo.topology.prim_offsets[k0[0]]
+        np.testing.assert_allclose(arrays["vertex:uv"][0], geo.vertex["uv"][corner0])
+        none, arrays2 = plan(geo, "pieces", "", "id", 100, "piece", "")
+        self.assertEqual((none["attributes"], set(arrays2)), ([], {"P", "vp", "sizes"}))
+
     def test_the_manifest_carries_the_arrays_and_survives_the_link(self):
         geo = self.fractured()
         header, arrays = build_manifest("so", params(mode="pieces", prefix="Chunk"), geo, "k")

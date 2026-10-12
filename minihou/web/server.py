@@ -20,6 +20,8 @@ live in the other and in Blender.
 ``POST /api/export_usd`` ``{path, node?, overwrite?, graph?}`` write the cooked geometry (always at full size, whatever the proxy level)
                        to a ``.usd`` / ``.usda`` / ``.usdc`` file under the root: the display output and each extra output, or just
                        ``node``; the graph is stored in the file unless ``graph`` is false (see :mod:`minihou.usd_io`)
+``POST /api/disk_cache`` ``{enabled?, clear?}`` turn the disk cache of expensive results on (``.minihou_cache`` in the root) or off, or
+                       clear it; returns ``{enabled, stats}``
 ``POST /api/proxy``    ``{level?, auto?, link_tris?}`` the proxy settings (cook level 0.001..1, auto refine, Blender triangle cap);
                        also ``GET`` for the current ones
 ``POST /api/open``     ``{path, create?}`` switch to (or create) a graph file inside the workspace root
@@ -600,6 +602,19 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ApiError(400, str(e)) from None
             except OSError as e:                                  # e.g. the file is open in another program (Windows), or no permission
                 raise ApiError(409, f"cannot write {p.name}: {e.strerror or e}") from None
+        if path == "/api/disk_cache":
+            enabled, clear = body.get("enabled"), bool(body.get("clear"))
+            if enabled is not None and not isinstance(enabled, bool):
+                raise ApiError(400, '"enabled" must be true or false')
+            if enabled is None:
+                stats = s.disk_cache.stats() if s.disk_cache is not None else None
+                if clear and s.disk_cache is not None:
+                    stats = s.set_disk_cache(s.disk_cache.folder, clear=True)
+            elif enabled:
+                stats = s.set_disk_cache(app.root / ".minihou_cache", clear=clear)
+            else:
+                stats = s.set_disk_cache(None, clear=clear)
+            return self._json({"enabled": stats is not None, "stats": stats})
         if path == "/api/proxy":
             try:
                 level = body.get("level")
