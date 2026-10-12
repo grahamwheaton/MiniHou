@@ -911,6 +911,32 @@ class EditorE2E(unittest.TestCase):
         self.drag_handle("translate_x", 40)
         self.assertTrue(until(lambda: any(n.type == "transform" and n.params.get("group") == "8" for n in self.s.graph.nodes.values())))
 
+    def test_output_groups_section_checkbox_and_name_per_group(self):
+        graph = {"version": 1, "nodes": {"b": {"type": "box", "params": {"size": [2, 2, 2]}, "pos": [0, 0]},
+                                         "bv": {"type": "polybevel", "inputs": {"geo": "b"}, "params": {"distance": 0.2}, "pos": [0, 110]},
+                                         "o": {"type": "output", "inputs": {"geo": "bv"}, "pos": [0, 220]}}, "display": "o"}
+        self.s.edit([{"op": "replace", "graph": graph}])
+        self.page.wait_for_selector('.node[data-id="bv"]')
+        self.node("bv").locator(".title").click()
+        self.page.wait_for_selector("#params .ogheader")
+        self.assertEqual(self.page.locator("#params .ogheader").inner_text(), "Output Groups")
+        pairs = self.page.locator("#params .ogpair")
+        self.assertEqual(pairs.count(), 6)                                                       # the six PolyBevel groups
+        self.assertEqual([t.strip() for t in pairs.locator(".prow.bool .pl").all_inner_texts()],
+                         ["Point Fillet Polygons", "Point Fillet Edges", "Edge Fillet Polygons", "Offset Edges", "Offset Points", "Merged Points"])
+        names = [pairs.nth(i).locator("input[type=text]").input_value() for i in range(6)]
+        self.assertEqual(names, ["pointfilletpolys", "pointfilletedges", "edgefilletpolys", "offsetedges", "offsetpoints", "mergedpoints"])
+        self.assertTrue(all("off" in (pairs.nth(i).get_attribute("class") or "") for i in range(6)))     # all off by default
+        row = pairs.nth(2)
+        row.locator("input[type=checkbox]").check()
+        self.assertTrue(until(lambda: self.s.graph.nodes["bv"].params.get("outgrp_edgefilletpolys") is True))
+        self.assertNotIn("off", row.get_attribute("class"))
+        row.locator("input[type=text]").fill("strips")
+        row.locator("input[type=text]").press("Enter")
+        self.assertTrue(until(lambda: self.s.graph.nodes["bv"].params.get("outgrp_edgefilletpolys_name") == "strips"))
+        self.page.wait_for_function("document.querySelector('#info-body') && document.querySelector('#info-body').innerText.includes('group_strips')")
+        self.assertEqual(self.page.locator("#params .ogpair .pbtn.expose").first.is_visible(), False)    # these are not Blender modifier inputs
+
     def test_sphere_radius_arrow_clamps_at_zero(self):
         graph = {"version": 1, "nodes": {"s": {"type": "sphere", "params": {"radius": 0.5}}, "o": {"type": "output", "inputs": {"geo": "s"}}},
                  "display": "o"}

@@ -70,7 +70,7 @@ def voronoi_fracture(geo, points, piece_attrib, inside_group, gap):
                 break
             normal = (S[j] - S[i]) / dist[j]
             origin = (S[i] + S[j]) / 2.0 - normal * (gap / 2.0)
-            piece = clip(piece, origin, normal, "below")
+            piece = clip(piece, origin, normal, "below", outgrp_above=False)     # no output groups wanted here
             if piece.nprims == 0:
                 break
             piece = _cap_plane(piece, origin, normal, eps, inside_group)

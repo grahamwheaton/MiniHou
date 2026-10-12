@@ -427,12 +427,12 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `group_expand` | geo | grow or shrink a group by rings of neighbours (by points or edges); then `grown ^orig` selects the border ring |
 | `group_expand` | geo | grow or shrink a group by rings of neighbours (points or edges); `^` patterns then select the border ring |
 | `blast` | geo | delete a group of primitives or points (or keep only it) |
-| `polybevel` | geo | chamfer sharp edges (min angle, point group); slides along borders and flat edges so subdivided meshes bevel cleanly; moves are limited where faces would fold; new faces in group `bevel` |
+| `polybevel` | geo | chamfer sharp edges (min angle, or a point / edge / primitive group); slides along borders and flat edges so subdivided meshes bevel cleanly; moves are limited where faces would fold; new faces in group `bevel`; Houdini's six output groups |
 | `boolean` | a, b | exact union / subtract / intersect of closed meshes: watertight n-gon output, uv and attributes carried across cuts, groups `from_a`/`from_b`; flush faces cut cleanly |
 | `voronoi_fracture` | geo, points | break a closed mesh into the exact Voronoi cells of the points; closed pieces, prim `piece`, caps in group `inside`, optional gap |
 | `polyreduce` | geo | reduce to a percentage or count of triangles with quadric error metrics; keeps borders, sharp edges and manifold shells; attributes blend along collapses |
 | `exploded_view` | geo | push pieces (a prim attribute) away from a centre |
-| `polyextrude` | geo | extrude faces (a group) along their normals with inset; connected regions or individual faces; groups `extrudeFront`/`extrudeSide` |
+| `polyextrude` | geo | extrude faces (a group) along their normals with inset; connected regions or individual faces; output groups front / back / side (`extrudeFront`, `extrudeBack`, `extrudeSide`) |
 | `subdivide` | geo | Catmull-Clark or linear; optional semi-sharp edge/corner creases; UVs and groups follow |
 | `edge_group`, `edge_group_promote` | geo | Derived edge selections: patterns, endpoint pairs, boundary or point/primitive groups; promote to incident points/primitives |
 | `polybridge` | geo | Linear segmented quad bridge between equal-count boundary chains or loops |
@@ -518,6 +518,14 @@ attributes, and Blender gets each as a boolean attribute (use it with *Named Att
 
 A point group used on primitives selects those whose points are all in it; a primitive group used on points selects
 the points its primitives use.
+
+### Output groups
+
+The modelling nodes can write groups for what they just made, switched on in an **Output Groups** section of their parameters (a checkbox and a
+name each, like Houdini's): PolyBevel's six (`pointfilletpolys`, `pointfilletedges`, `edgefilletpolys`, `offsetedges`, `offsetpoints`,
+`mergedpoints`), PolyExtrude's front, back and side, and groups on `mirror`, `boolean`, `clip`, `fuse`, `sweep`, `skin` and the bridges. Prim, point
+and **edge** groups are all supported and flow into the next node's group field, e.g. bevel, then `polyextrude` with group `edgefilletpolys`, or `polybevel`
+with *group type* `edges` and group `offsetedges`. `docs/output_groups.md` lists every group, its default name, and how to add them to your own nodes.
 
 ### Curves
 

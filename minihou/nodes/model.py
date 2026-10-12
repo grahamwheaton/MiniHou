@@ -6,6 +6,7 @@ Everything is vectorised over all primitives at once (the only Python loops are 
 import numpy as np
 
 from .. import groups, topo
+from ..outgroups import OutGroup, OutGroups
 from ..sdk import Bool, Enum, Float, Str, Vec3, node
 from . import _build as B
 from .normal import prim_normals
@@ -190,14 +191,22 @@ def divide(geo, group):
 
 
 # -- mirror -----------------------------------------------------------------------------------------------------
+MIRROR_OUT = OutGroups(
+    OutGroup("mirrored", "Mirrored Primitives", "mirrored", "prim", doc="The reflected copies of the primitives"),
+    OutGroup("mirroredpoints", "Mirrored Points", "mirroredpoints", "point", doc="The reflected copies of the points"),
+    OutGroup("seam", "Seam Points", "seampoints", "point", doc="Points on the mirror plane that were welded to their reflections"),
+)
+
+
 @node("mirror", inputs=["geo"], category="modify", params=[
     Vec3("origin", (0.0, 0.0, 0.0)),
     Vec3("normal", (1.0, 0.0, 0.0), doc="Normal of the mirror plane (default: mirror across X = 0)"),
     Bool("keep_original", True),
     Bool("consolidate_seam", True, doc="Weld mirrored points that lie on the plane to the originals"),
     Float("distance", 0.001, min=0.0, soft_max=0.1, doc="How close to the plane a point must be to weld"),
+    *MIRROR_OUT.params(),
 ])
-def mirror(geo, origin, normal, keep_original, consolidate_seam, distance):
+def mirror(geo, origin, normal, keep_original, consolidate_seam, distance, **og):
     """Reflect geometry across a plane (Houdini's Mirror). The copy's winding is reversed so it faces outwards, and N
     is reflected."""
     n = np.asarray(normal, np.float64)
@@ -224,7 +233,10 @@ def mirror(geo, origin, normal, keep_original, consolidate_seam, distance):
     m_vert = {k: a[rev] for k, a in reflect(geo.vertex).items()}
     m_prim = reflect(geo.prim)
     if not keep_original:
-        return B.make(Pm, t.vertex_point[rev], t.prim_offsets, m_point, m_vert, m_prim, geo.detail, t.closed)
+        out = B.make(Pm, t.vertex_point[rev], t.prim_offsets, m_point, m_vert, m_prim, geo.detail, t.closed)
+        out = MIRROR_OUT.write(out, og, "mirrored", np.ones(out.nprims, bool))
+        out = MIRROR_OUT.write(out, og, "mirroredpoints", np.ones(out.npoints, bool))
+        return MIRROR_OUT.write(out, og, "seam", np.zeros(out.npoints, bool))
     np_ = geo.npoints
     point_map = np.arange(np_) + np_
     if consolidate_seam:
@@ -236,16 +248,32 @@ def mirror(geo, origin, normal, keep_original, consolidate_seam, distance):
                   B.concat([dict(geo.point.items()), m_point]), B.concat([dict(geo.vertex.items()), m_vert]),
                   B.concat([dict(geo.prim.items()), m_prim]), geo.detail,
                   None if t.closed is None else np.concatenate([t.closed, t.closed]))
+    seam = np.zeros(2 * np_, bool)
+    if consolidate_seam:
+        seam[:np_] = np.abs(d) <= distance
+    both = MIRROR_OUT.write(both, og, "mirrored", lambda: np.arange(both.nprims) >= t.nprims)
+    both = MIRROR_OUT.write(both, og, "mirroredpoints", lambda: (np.arange(both.npoints) >= np_) | seam)
+    both = MIRROR_OUT.write(both, og, "seam", seam)
     return compact_points(both)
 
 
 # -- clip -------------------------------------------------------------------------------------------------------
+CLIP_OUT = OutGroups(
+    OutGroup("above", "Above", "above", "prim", default=True, doc="Faces on the side the normal points to"),
+    OutGroup("below", "Below", "below", "prim", doc="Faces on the other side"),
+    OutGroup("cutpolys", "Cut Polygons", "cutpolys", "prim", doc="Faces the plane went through (trimmed pieces of them)"),
+    OutGroup("cutpoints", "Cut Points", "cutpoints", "point", doc="The new points on the plane, and original points that lie on it"),
+    OutGroup("cutedges", "Cut Edges", "cutedges", "edge", doc="The edges that lie in the plane: the opening a cap would fill"),
+)
+
+
 @node("clip", inputs=["geo"], category="modify", params=[
     Vec3("origin", (0.0, 0.0, 0.0)),
     Vec3("normal", (0.0, 0.0, 1.0), doc="Plane normal; 'above' is the side it points to"),
     Enum("keep", ["above", "below", "both"], doc="both: cut along the plane and keep both halves (sharing the seam)"),
+    *CLIP_OUT.params(),
 ])
-def clip(geo, origin, normal, keep):
+def clip(geo, origin, normal, keep, **og):
     """Cut polygons with a plane (Houdini's Clip). Cut edges get new points with interpolated attributes; faces
     straddling the plane are trimmed, not deleted. Use polyfill to cap the opening."""
     B.require_polygons(geo, "clip")
@@ -293,9 +321,20 @@ def clip(geo, origin, normal, keep):
     src_prim = prims_out % max(t.nprims, 1)
     pts = B.concat([dict(geo.point.items()), new_pts])
     out = B.make(pts["P"], point_idx, B.offsets_from_sizes(sizes_out), pts, vx, B.gather(geo.prim, src_prim), geo.detail)
-    if keep == "both":
-        out.prim["group_above"] = (prims_out < t.nprims).astype(np.int32)
-    return compact_points(out)
+    out = CLIP_OUT.write(out, og, "above", lambda: prims_out < t.nprims)
+    out = CLIP_OUT.write(out, og, "below", lambda: prims_out >= t.nprims)
+    was_cut = np.zeros(t.nprims, bool)
+    was_cut[pv[crosses]] = True
+    out = CLIP_OUT.write(out, og, "cutpolys", lambda: was_cut[src_prim])
+    on_plane = np.concatenate([d == 0.0, np.ones(len(cut_edges), bool)])         # original points on the plane, then the new ones
+    out = CLIP_OUT.write(out, og, "cutpoints", on_plane)
+    used = np.zeros(out.npoints, bool)
+    used[out.topology.vertex_point] = True
+    out = compact_points(out)
+    if CLIP_OUT.enabled(og, "cutedges"):                     # an edge of the result with both ends on the plane lies in it
+        ends = on_plane[used][topo.edges(out).points]
+        out = CLIP_OUT.write(out, og, "cutedges", ends.all(axis=1))
+    return out
 
 
 # -- polyfill ---------------------------------------------------------------------------------------------------
@@ -349,6 +388,14 @@ def polyfill(geo, fill_group):
 
 
 # -- polyextrude ------------------------------------------------------------------------------------------------
+# PolyExtrude's Output Groups: Front and Side were always made (those names), Back only exists when the originals are kept
+EXTRUDE_OUT = OutGroups(
+    OutGroup("front", "Front", "extrudeFront", "prim", default=True, doc="The extruded faces (the selected faces, moved)"),
+    OutGroup("back", "Back", "extrudeBack", "prim", doc="The original faces left behind (needs 'output_back')"),
+    OutGroup("side", "Side", "extrudeSide", "prim", default=True, doc="The walls between the original outline and the front faces"),
+)
+
+
 @node("polyextrude", inputs=["geo"], category="modify", params=[
     Str("group", "", doc="Primitives to extrude (pattern; empty: all)"),
     Float("distance", 0.5, soft_min=-2.0, soft_max=2.0, doc="Along the face normals (negative: inwards)"),
@@ -356,13 +403,16 @@ def polyfill(geo, fill_group):
     Enum("mode", ["connected", "individual"], doc="connected: neighbouring faces extrude as one region (Houdini's "
                                                   "'keep shared edges together'); individual: every face on its own"),
     Bool("output_back", False, doc="Keep the original faces as well (a closed shell)"),
+    *EXTRUDE_OUT.params(),
 ])
-def polyextrude(geo, group, distance, inset, mode, output_back):
+def polyextrude(geo, group, distance, inset, mode, output_back, **og):
     """Extrude faces along their normals with optional inset (Houdini's PolyExtrude). Side walls are added on the
     region's boundary; groups extrudeFront and extrudeSide hold the new faces."""
     B.require_polygons(geo, "polyextrude")
     sel = _prim_sel(geo, group)
     if not sel.any():
+        for key in ("front", "back", "side"):                      # the switched-on groups still exist, empty
+            geo = EXTRUDE_OUT.write(geo, og, key, np.zeros(geo.nprims, bool))
         return geo
     t = geo.topology
     vp = t.vertex_point.astype(np.int64)
@@ -453,8 +503,11 @@ def polyextrude(geo, group, distance, inset, mode, output_back):
     front[:t.nprims] = sel
     side = np.zeros(total, bool)
     side[t.nprims:t.nprims + nside] = True
-    out = groups.write(out, "prim", "extrudeFront", front)
-    out = groups.write(out, "prim", "extrudeSide", side)
+    back = np.zeros(total, bool)
+    back[t.nprims + nside:] = True                           # the kept originals, last
+    out = EXTRUDE_OUT.write(out, og, "front", front)
+    out = EXTRUDE_OUT.write(out, og, "back", back)
+    out = EXTRUDE_OUT.write(out, og, "side", side)
     if "N" in out.point:                                   # stale after moving points; recompute with a normal node
         del out.point["N"]
     return compact_points(out)

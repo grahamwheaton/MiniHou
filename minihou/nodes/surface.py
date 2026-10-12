@@ -4,6 +4,7 @@ import numpy as np
 from .. import hull as hl
 from .. import topo
 from ..geometry import Geometry
+from ..outgroups import OutGroup, OutGroups
 from ..sdk import Bool, Enum, Float, Int, Str, Vec3, node
 from . import _build as B
 from ._util import normalize_rows
@@ -95,12 +96,19 @@ def dissolve(geo, group, angle):
 
 
 # -- skin -------------------------------------------------------------------------------------------------------
+SKIN_OUT = OutGroups(
+    OutGroup("surface", "Surface", "skinsurface", "prim", doc="The lofted quads between the curves"),
+    OutGroup("cap", "Cap Polygons", "skincap", "prim", doc="The faces closing the first and last curve"),
+)
+
+
 @node("skin", inputs=["geo"], category="modify", params=[
     Int("samples", 0, min=0, soft_max=200, doc="Points per curve after resampling by length (0: the most any curve has)"),
     Bool("loop", False, doc="Join the last curve back to the first (a tube from rings)"),
     Bool("cap", False, doc="Fill the first and last curve with a face when the curves are closed (ignored with loop)"),
+    *SKIN_OUT.params(),
 ])
-def skin(geo, samples, loop, cap):
+def skin(geo, samples, loop, cap, **og):
     """Stretch a surface across a row of curves (Houdini's Skin / loft): every curve is resampled to the same number
     of points by arclength and consecutive curves are joined with quads, in primitive order. Closed curves give
     tubes (closed in the other direction too with `loop`). Writes `uv` (u along the curves, v across them)."""
@@ -146,7 +154,8 @@ def skin(geo, samples, loop, cap):
                    np.repeat(np.arange(M) / (M if loop else M - 1), n)], 1).astype(np.float32)
     vertex_point = np.concatenate(verts).astype(np.int32)
     out = B.make(pos, vertex_point, B.offsets_from_sizes(sizes_out), {"uv": uv})
-    return out
+    out = SKIN_OUT.write(out, og, "surface", lambda: np.arange(out.nprims) < len(quads))
+    return SKIN_OUT.write(out, og, "cap", lambda: np.arange(out.nprims) >= len(quads))
 
 
 # -- revolve ----------------------------------------------------------------------------------------------------
@@ -286,14 +295,20 @@ def _bridge_pair(La, Lb, P, align, twist):
     return faces
 
 
+BRIDGE_OUT = OutGroups(
+    OutGroup("bridge", "Bridge Polygons", "bridgepolys", "prim", doc="The faces that join the paired loops"),
+)
+
+
 @node("bridge", inputs=["geo"], category="modify", params=[
     Bool("align", True, doc="Rotate the second loop to the position that keeps the rungs shortest (equal-length loops)"),
     Int("twist", 0, soft_min=-8, soft_max=8, doc="Extra steps to turn the second loop"),
     Enum("pairing", ["mutual_nearest", "in_order"], doc="mutual_nearest: join two open loops of different pieces when each is "
                                                         "the other's nearest (centres); in_order: the first two, the next "
                                                         "two... (a lone loop in a single piece pairs with the next nearest)"),
+    *BRIDGE_OUT.params(),
 ])
-def bridge(geo, align, twist, pairing):
+def bridge(geo, align, twist, pairing, **og):
     """Join pairs of open boundary loops with a band of faces (Houdini's Bridge): two pipe ends become one pipe, a hole
     in a wall and a hole in a floor a corridor. Equal loops get quads; loops of different sizes get triangles. Loops are
     paired when each is the other's nearest loop among those of other pieces (or in order); a loop with no partner is
@@ -333,5 +348,6 @@ def bridge(geo, align, twist, pairing):
     verts = np.concatenate([np.asarray(f, np.int64) for f in new])
     offs = np.concatenate([t.prim_offsets.astype(np.int64), t.prim_offsets[-1] + np.cumsum(sizes)])
     pad = lambda table, k: {n: np.concatenate([a, np.zeros((k,) + a.shape[1:], a.dtype)]) for n, a in table.items()}  # noqa: E731
-    return B.make(geo.P, np.concatenate([t.vertex_point, verts]), offs, dict(geo.point.items()),
-                  pad(geo.vertex, len(verts)), pad(geo.prim, len(new)), geo.detail)
+    out = B.make(geo.P, np.concatenate([t.vertex_point, verts]), offs, dict(geo.point.items()),
+                 pad(geo.vertex, len(verts)), pad(geo.prim, len(new)), geo.detail)
+    return BRIDGE_OUT.write(out, og, "bridge", lambda: np.arange(out.nprims) >= t.nprims)

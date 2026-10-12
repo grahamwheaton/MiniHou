@@ -157,8 +157,13 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
     attributes blended along the curve); blend morphs towards same-point-count targets with additive offsets, expression weights over `@Frame`/`@Time`
     (a small safe expression evaluator, no `eval`) and a per-point mask. Example graph `fillet_blend`.
 
+11. **Output groups** (`minihou/outgroups.py`, `docs/output_groups.md`): a toggle + name per group as parameter pairs, an "Output Groups" section in the
+    editor, prim/point/edge domains. PolyBevel's six from Houdini's panel, PolyExtrude front/back/side, and groups on mirror, boolean, clip, fuse,
+    sweep, skin and the bridges; `polybevel` got a Group Type (points / edges / primitives) so one bevel's edge groups feed the next.
+
 Open:
 
+- Output groups other than PolyBevel's are from memory of Houdini's nodes: compare with Houdini and adjust names/sets.
 - Extra outputs have no modifier or exposed parameters (only the display branch does).
 - More handles (bevel segments, copy_to_points scale). (Done: `@node(handles=[Handle(...)])` for any node, library nodes included, used by tube, helix, line and bend; transform Move / Rotate / Scale tools: rings
   turn about each Euler angle's real axis, scale cubes follow the rotated axes, drags multiply so scale never crosses zero.)

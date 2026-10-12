@@ -81,6 +81,9 @@ Rules
 * Params: Float/Int(name, default, min=, max=, soft_min=, soft_max=, doc=), Bool, Vec3, Enum(name, choices), Str(name,
   default, kind="code"). Float/Int/Bool/Vec3 params can be exposed to Blender.
 * Node names: lower_case, unique, not an existing type. Category is free text (shown in the Tab menu).
+* Output groups (optional): `from minihou.outgroups import OutGroup, OutGroups`; `OUT = OutGroups(OutGroup("top", "Top Polygons", "toppolys", "prim"))`,
+  `params=[..., *OUT.params()]`, a `**og` argument, and `OUT.write(result, og, "top", bool_mask_or_function)`: a checkbox + name per group in the
+  editor, prim / point / edge domains (edge masks over `topo.edges(result)`, or `outgroups.edge_mask(result, point_pairs)`).
 * Viewport handles (optional): `@node(..., handles=[Handle("height", axis="z", at="origin", reach=True)])` draws a draggable
   arrow in the editor's 3-D view while the node is selected and writes the parameter back. `Handle(param, kind="arrow" | "ring" |
   "scale", axis="x"/"y"/"z"/"-x"/vector/"@vec3_param", at="center"/"origin"/"top"/"bottom"/vector/"@vec3_param", comp=, scale=,

@@ -632,7 +632,20 @@
       onclick: () => queueSet(id, "reset", Number(n.params?.reset || 0) + 1),
       title: "Discard this simulation and replay from its initial geometry"
     }, "Reset simulation"));
-    for (const p of t.params) out.push(paramRow(id, p));
+    let ogHeader = false;
+    for (let i = 0; i < t.params.length; i++) {
+      const p = t.params[i];
+      if (p.ui === "outgroup") {                                     // Output Groups: a checkbox and the group's name side by side, like Houdini
+        if (!ogHeader) { out.push(h("div", { class: "ogheader" }, "Output Groups")); ogHeader = true; }
+        const q = t.params[i + 1], named = q && q.ui === "outgroup_name";
+        const pair = h("div", { class: "ogpair" + (effective(id, p) ? "" : " off") }, paramRow(id, p), named ? paramRow(id, q) : null);
+        pair.addEventListener("change", (e) => { if (e.target.type === "checkbox") pair.classList.toggle("off", !e.target.checked); });
+        out.push(pair);
+        if (named) i++;
+        continue;
+      }
+      out.push(paramRow(id, p));
+    }
     out.push(h("div", { class: "section" }, "Note"));
     out.push(h("div", { class: "pw" }, h("input", { type: "text", value: n.comment || "", placeholder: "comment shown above the node",
       onchange: (e) => edit([{ op: "meta", id, set: { comment: e.target.value.trim() || null } }]) })));
@@ -748,6 +761,7 @@
       else if (p.kind === "enum") set("enum", (el) => (el.value = v));
       else if (p.ui === "code") set("code", (el) => { if (!el.classList.contains("dirty")) el.value = v; });
       else set("str", (el) => (el.value = v));
+      if (p.ui === "outgroup") { const pair = row.closest(".ogpair"); if (pair) pair.classList.toggle("off", !v); }
       const lab = row.querySelector(".pl"); if (lab) lab.classList.toggle("changed", isSet(id, p));
       const rb = row.querySelector('[data-role="reset"]'); if (rb) rb.style.visibility = isSet(id, p) ? "visible" : "hidden";
       const eb = row.querySelector('[data-role="expose"]');
