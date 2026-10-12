@@ -223,7 +223,9 @@ def _connection(host=None, port=None):
     if _client is None or endpoint != _endpoint:
         disconnect()
         from .instance_client import InstanceClient
-        _client = InstanceClient(*endpoint, timeout=5.0)
+        # Cold accelerator compilation and large geometry cooks can exceed five
+        # seconds. Use the instance client's normal bounded cook allowance.
+        _client = InstanceClient(*endpoint, timeout=30.0)
         _client.connect()
         _endpoint = endpoint
     return _client

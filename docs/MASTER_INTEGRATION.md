@@ -46,3 +46,5 @@ The merged add-on ZIP also installed/enabled/disabled successfully in an isolate
 Fresh GitHub runners exposed two validation setup assumptions: the Edit Network test now creates its temporary-file parent directory, and the Blender CI job installs MuJoCo in its external Python so wired-RBD acceptance runs rather than failing for a missing dependency. Nothing is installed into Blender's Python.
 
 Windows CI also exercises 8.3 temporary paths such as `RUNNER~1`. Server reuse now canonicalizes both graph paths before comparison; routing tests compare canonical paths rather than short-versus-long spellings.
+
+The Blender modifier client allows 30 seconds for an external cook (matching the shared client default). The prior five-second override timed out during a cold accelerated scatter cook on the Windows runner; failed cooks still retain their previous mesh and report an error.
