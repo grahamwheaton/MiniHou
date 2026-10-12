@@ -93,7 +93,7 @@
     fracture2: { title: "Fracture", items: [
       T("RBD Material Fracture", "rbd_material_fracture"), T("Assemble", "assemble"),
       T("RBD Configure", "rbd_configure"), T("RBD Solver", "rbd_solver", { tip: "Bodies in the first input, then colliders and glue links" }),
-      null, null, null, null] },
+      T("RBD Constraint Properties", "rbd_constraint_properties", { tip: "Set or scale the strength of glue links" }), null, null, null] },
 
     edges: { title: "Edges", items: [
       T("Dissolve", "dissolve_edges", { sel: { edge: "group" } }), T("Edge Collapse", "edge_collapse", { sel: { edge: "group" } }),
@@ -257,5 +257,16 @@
     window.addEventListener("blur", close);
   }
 
-  window.MiniPie = { init, open, close, isOpen, PAGES, state: () => st && { page: st.page, hover: st.hover, x: st.x, y: st.y } };
+  /* The pie's definition of a tool (its selection mapping and presets) by node type, preferring the one with this label. */
+  function find(type, label) {
+    let any = null;
+    for (const page of Object.values(PAGES)) for (const it of page.items) {
+      if (!it || it.page || it.type !== type) continue;
+      if (it.label === label) return it;
+      if (!any) any = it;
+    }
+    return any;
+  }
+
+  window.MiniPie = { init, open, close, isOpen, PAGES, find, state: () => st && { page: st.page, hover: st.hover, x: st.x, y: st.y } };
 })();

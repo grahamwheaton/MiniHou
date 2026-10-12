@@ -74,8 +74,9 @@ class Piece:
     parts: tuple = ()          # (local positions, triangles) per convex part; more than one for a glued cluster
 
 
-def convex_part(geo, prims, points, label):
-    """Validate one connected piece as a closed convex shell; returns its triangles over ``points`` (sorted point ids)."""
+def convex_part(geo, prims, points, label, hull=False):
+    """Validate one connected piece as a closed convex shell; returns its triangles over ``points`` (sorted point ids).
+    ``hull``: the piece may be nearly convex (the solver collides with its convex hull anyway)."""
     vp, offsets = geo.topology.vertex_point, geo.topology.prim_offsets
     P = geo.P[points].astype(np.float64)
     local = P - P.mean(0)
@@ -96,7 +97,7 @@ def convex_part(geo, prims, points, label):
         n /= length
         if np.max(np.abs((Q - Q[0]) @ n)) > eps:
             raise ValueError(f"RBD piece {label} has non-planar faces; triangulate first")
-        if np.max((local - Q[0]) @ n) > eps:
+        if not hull and np.max((local - Q[0]) @ n) > eps:
             raise ValueError(f"RBD piece {label} is concave or inward wound; convex closed pieces only")
         for a, b in zip(face, np.roll(face, -1)):
             key = (min(a, b), max(a, b))
@@ -126,6 +127,7 @@ def pieces(geo, static=False):
     if ids.shape != (geo.nprims,) or ids.dtype.kind not in "iu":
         raise ValueError("rbd_id must be a scalar primitive integer attribute")
     compound = geo.prim.get("rbd_compound")
+    use_hull = geo.prim.get("rbd_hull")
     defaults = dict(active=1, mass=1., friction=.6, restitution=0., linear_damping=.05,
                     angular_damping=.1, v=(0., 0., 0.), w=(0., 0., 0.))
     result, used = [], np.zeros(geo.npoints, bool)
@@ -148,7 +150,7 @@ def pieces(geo, static=False):
         for comp in comps:
             cprims = prims[components[prims] == comp]
             cpoints = np.unique(vp[np.concatenate([np.arange(offsets[p], offsets[p + 1]) for p in cprims])])
-            tri = convex_part(geo, cprims, cpoints, ident)
+            tri = convex_part(geo, cprims, cpoints, ident, hull=use_hull is not None and bool(np.all(use_hull[cprims])))
             parts.append((geo.P[cpoints].astype(np.float64) - center, tri))
         triangles = parts[0][1] if len(parts) == 1 else np.zeros((0, 3), np.int64)
         values = {}

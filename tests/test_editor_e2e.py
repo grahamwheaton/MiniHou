@@ -62,7 +62,7 @@ class EditorE2E(unittest.TestCase):
         self.web.start()
         self.addCleanup(self.s.stop)
         self.addCleanup(self.web.stop)
-        self.page = self.browser.new_page(viewport={"width": 1400, "height": 850})
+        self.page = self.browser.new_page(viewport={"width": 1400, "height": 960})
         self.addCleanup(self.page.close)
         self.errors = []
         self.page.on("pageerror", lambda e: self.errors.append(str(e)))
@@ -338,6 +338,8 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: len(self.s.graph.boxes) == 1))
         box = self.page.locator(".netbox")
         box.wait_for(state="visible")
+        self.page.keyboard.press("f")                                                      # frame the selection so the box's corner is in view
+        self.page.wait_for_timeout(200)
         before = {k: list(self.s.graph.nodes[k].meta["pos"]) for k in ("hills", "ripple", "points")}
         b0 = dict(self.s.graph.boxes[0])
         hdr = box.locator(".hdr")
@@ -1142,6 +1144,148 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(n.params["group"], str(face))
         self.assertEqual(n.params["distance"], 0.3)
 
+    # -- the tool shelf ----------------------------------------------------------------------
+    def shelf_tool(self, label):
+        return self.page.locator(f'#shelf .sh-tool[data-label="{label}"]')
+
+    def test_shelf_has_houdini_style_tabs_and_null(self):
+        self.page.evaluate("localStorage.clear()")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        tabs = self.page.eval_on_selector_all("#shelf .sh-tab[data-tab]", "els => els.map(e => e.dataset.tab)")
+        self.assertEqual(tabs[:5], ["Create", "Modify", "Model", "Polygon", "Edges"])
+        self.assertIn("Rigid Bodies", tabs)
+        self.assertIn("Library", tabs)
+        self.assertEqual(self.page.locator("#shelf .sh-tab.on").inner_text(), "Create")
+        labels = self.page.eval_on_selector_all("#shelf .sh-tool", "els => els.map(e => e.dataset.label)")
+        self.assertEqual(labels[:6], ["Box", "Sphere", "Tube", "Torus", "Grid", "Null"])                     # Null is there
+        self.assertGreater(self.page.locator("#shelf .sh-tool svg").count(), 10)
+        # the shelf takes room: the panes start below it
+        self.assertGreater(self.page.locator("#main").bounding_box()["y"], 120)
+
+    def test_shelf_click_adds_sources_unwired_and_inserts_modifiers_after_the_selection(self):
+        before = set(self.s.graph.nodes)
+        self.shelf_tool("Null").click()
+        self.assertTrue(until(lambda: any(n.type == "null" for n in self.s.graph.nodes.values())))
+        nid = next(i for i, n in self.s.graph.nodes.items() if n.type == "null" and i not in before)
+        self.assertEqual(self.s.graph.nodes[nid].inputs, {})                                                 # no input: added on its own
+        self.page.click('#shelf .sh-tab[data-tab="Deform"]')
+        self.node("hills").locator(".title").click()
+        self.shelf_tool("Twist").click()
+        self.assertTrue(until(lambda: any(n.type == "twist" for n in self.s.graph.nodes.values())))
+        tid = next(i for i, n in self.s.graph.nodes.items() if n.type == "twist")
+        self.assertEqual(self.s.graph.nodes[tid].inputs, {"geo": "hills"})                                   # a modifier goes after the selected node
+        self.page.wait_for_selector(f'.node[data-id="{tid}"].selected')
+
+    def test_shelf_drag_drops_a_tool_where_you_want_it(self):
+        self.shelf_tool("Sphere").drag_to(self.page.locator("#canvas"), target_position={"x": 220, "y": 480})
+        self.assertTrue(until(lambda: any(n.type == "sphere" and n.inputs == {} and i != "ground" for i, n in self.s.graph.nodes.items()
+                                          if n.meta.get("pos") and abs(n.meta["pos"][1]) > 0)))
+
+    def test_shelf_remembers_the_tab_folds_and_hides_tabs(self):
+        self.page.evaluate("localStorage.clear()")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.page.click('#shelf .sh-tab[data-tab="Polygon"]')
+        self.page.wait_for_selector('#shelf .sh-tool[data-label="PolyExtrude"]')
+        self.page.reload()
+        self.page.wait_for_selector('#shelf .sh-tab.on[data-tab="Polygon"]')                                 # the tab came back
+        y = self.page.locator("#main").bounding_box()["y"]
+        self.page.click("#shelf .sh-fold")                                                                  # fold the tools away
+        self.page.wait_for_function(f"document.querySelector('#main').getBoundingClientRect().top < {y} - 40")
+        self.page.click("#shelf .sh-fold")
+        self.page.wait_for_selector('#shelf .sh-tool[data-label="PolyExtrude"]')
+        self.page.click("#shelf .sh-tab.plus")                                                              # choose tabs
+        self.page.locator("#sh-tabmenu .item", has_text="Texture").dispatch_event("mousedown")
+        self.page.wait_for_function("!document.querySelector('#shelf .sh-tab[data-tab=\"Texture\"]')")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.assertEqual(self.page.locator('#shelf .sh-tab[data-tab="Texture"]').count(), 0)
+
+    def test_shelf_library_tab_lists_new_library_nodes(self):
+        os.makedirs(os.path.join(self.dir, "nodes"))
+        with open(os.path.join(self.dir, "nodes", "shelved.py"), "w", encoding="utf-8") as f:
+            f.write("from minihou.sdk import node\n\n@node('shelved_thing', inputs=['geo'], category='custom')\ndef shelved_thing(geo):\n    return geo.copy()\n")
+        self.page.wait_for_function("window.minihou.S.types['shelved_thing'] !== undefined")
+        self.page.click('#shelf .sh-tab[data-tab="Library"]')
+        self.page.wait_for_selector('#shelf .sh-tool[data-type="shelved_thing"]')
+
+    # -- the Add Node menu -----------------------------------------------------------------
+    def open_menu(self):
+        self.page.mouse.move(*self.empty_spot())
+        self.page.keyboard.press("Tab")
+        self.page.wait_for_selector("#tabmenu:not(.hidden)")
+        self.page.wait_for_function("document.activeElement && document.activeElement.id === 'tab-search'")
+
+    def menu_heads(self):
+        return self.page.eval_on_selector_all("#tab-list .cat.head", "els => els.map(e => e.dataset.group)")
+
+    def test_add_menu_lists_groups_folded_and_opens_them_with_enter_or_arrows(self):
+        self.page.evaluate("localStorage.clear()")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.open_menu()
+        heads = self.menu_heads()
+        self.assertEqual(heads[0], "Create")
+        self.assertEqual(heads[-1], "Utility & I/O")
+        self.assertIn("Fracture & RBD", heads)
+        self.assertEqual(self.page.locator("#tab-list .it").first.get_attribute("data-name"), "box")       # Create starts open, in menu order
+        self.assertEqual(self.page.locator("#tab-list .cat.head.active").count(), 0)
+        names = self.page.eval_on_selector_all("#tab-list .it", "els => els.map(e => e.dataset.name)")
+        self.assertNotIn("voronoi_fracture", names)                                                            # a closed group lists nothing
+        # click a closed group's header: it opens and the choice is remembered
+        self.page.locator('#tab-list .cat.head[data-group="Fracture & RBD"]').dispatch_event("mousedown")
+        self.page.wait_for_selector('#tab-list .it[data-name="voronoi_fracture"]')
+        self.page.keyboard.press("Escape")
+        self.open_menu()
+        self.page.wait_for_selector('#tab-list .it[data-name="voronoi_fracture"]')
+        # arrow keys reach the headers; Left folds the group of the highlighted node
+        self.page.keyboard.press("ArrowLeft")
+        self.page.wait_for_function("!document.querySelector('#tab-list .it[data-name=\"box\"]')")
+        self.page.keyboard.press("ArrowRight")
+        self.page.wait_for_selector('#tab-list .it[data-name="box"]')
+        self.page.keyboard.press("Escape")
+
+    def test_add_menu_search_ranks_by_known_names_and_shows_the_description(self):
+        self.page.evaluate("localStorage.clear()")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.open_menu()
+        self.page.keyboard.type("mountain")
+        self.page.wait_for_selector('#tab-list .it.active[data-name="noise"]')
+        self.assertIn("Deform", self.page.locator("#tab-list .it.active small").inner_text())             # the group shows beside a result
+        self.assertIn("Noise", self.page.inner_text("#tab-doc"))
+        self.assertIn("in:", self.page.inner_text("#tab-doc"))
+        self.page.keyboard.press("Control+a")
+        self.page.keyboard.type("qqzzxx")
+        self.page.wait_for_selector("#tab-list .cat:has-text('No node matches')")
+        self.page.keyboard.press("Control+a")
+        self.page.keyboard.type("extrude")
+        self.page.wait_for_selector('#tab-list .it.active[data-name="polyextrude"] mark')
+        self.page.keyboard.press("Enter")
+        self.assertTrue(until(lambda: any(n.type == "polyextrude" for n in self.s.graph.nodes.values())))
+
+    def test_add_menu_remembers_recent_and_favourite_nodes(self):
+        self.page.evaluate("localStorage.clear()")
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.open_menu()
+        self.page.locator('#tab-list .it[data-name="box"] .star').dispatch_event("mousedown")
+        self.page.wait_for_selector('#tab-list .cat.special:has-text("Favourites")')
+        self.assertEqual(self.page.locator("#tab-list .it").first.get_attribute("data-name"), "box")
+        self.page.keyboard.type("polybevel")
+        self.page.keyboard.press("Enter")
+        self.assertTrue(until(lambda: any(n.type == "polybevel" for n in self.s.graph.nodes.values())))
+        self.page.reload()                                                                                      # all of it survives a reload
+        self.page.wait_for_selector('.node[data-id="out"]')
+        self.open_menu()
+        self.page.wait_for_selector('#tab-list .cat.special:has-text("Recent")')
+        self.assertEqual(self.page.eval_on_selector_all("#tab-list .cat.special", "els => els.map(e => e.dataset.group)"),
+                         ["Favourites", "Recent"])
+        recent = self.page.eval_on_selector_all("#tab-list .it", "els => els.map(e => e.dataset.name)")
+        self.assertEqual(recent[:2], ["box", "polybevel"])
+        self.page.keyboard.press("Escape")
+
     def test_output_groups_section_checkbox_and_name_per_group(self):
         graph = {"version": 1, "nodes": {"b": {"type": "box", "params": {"size": [2, 2, 2]}, "pos": [0, 0]},
                                          "bv": {"type": "polybevel", "inputs": {"geo": "b"}, "params": {"distance": 0.2}, "pos": [0, 110]},
@@ -1238,6 +1382,7 @@ class EditorE2E(unittest.TestCase):
         self.drag(self.node("box1").locator(".port.out"), self.node("all").locator(".port.in"))
         self.assertTrue(until(lambda: "box1" in self.s.graph.nodes["all"].inputs.get("geos", [])))
         # pick the wire up from the input and drop it on empty space: disconnect
+        self.page.set_viewport_size({"width": 1400, "height": 1200})
         self.drag(self.node("out").locator(".port.in"), self.page.locator("#canvas"))
         self.page.mouse.move(*self.empty_spot())
         self.assertTrue(until(lambda: "geo" not in self.s.graph.nodes["out"].inputs))
@@ -1360,7 +1505,7 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_selector('.node[data-id="deep"]')
         expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo", b])
         self.page.click("#file-btn")                                                           # opening a file from the menu starts a new path
-        self.page.locator("#file-menu .item", has_text="demo.json").click()
+        self.page.locator('#file-menu .frow[data-path="demo.json"]').click()
         self.page.wait_for_selector('.node[data-id="grp"]')
         expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo"])
 
@@ -1377,14 +1522,110 @@ class EditorE2E(unittest.TestCase):
     def test_new_file_from_the_file_menu(self):
         self.page.on("dialog", lambda d: d.accept("graphs/fresh.json"))
         self.page.click("#file-btn")
-        self.page.locator("#file-menu .item", has_text="New graph").click()
+        self.page.locator("#file-menu .fm-foot button", has_text="New graph").click()
         self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == "fresh.json"))
         self.page.wait_for_selector('.node[data-id="grid1"]')
         self.assertTrue(os.path.exists(os.path.join(self.dir, "graphs", "fresh.json")))
         self.page.click("#file-btn")
-        self.page.locator("#file-menu .item", has_text="demo.json").click()
+        self.page.locator('#file-menu .frow[data-path="demo.json"]').click()
         self.page.wait_for_selector('.node[data-id="hills"]')
 
+
+    # -- the graph & library browser ------------------------------------------------------
+    def open_files(self):
+        self.page.click("#file-btn")
+        self.page.wait_for_selector("#file-menu:not(.hidden) .fm-list")
+
+    def test_file_browser_searches_lists_folders_recent_and_the_current_graph(self):
+        os.makedirs(os.path.join(self.dir, "graphs"), exist_ok=True)
+        for name in ("alpha_rock.json", "beta_wall.json"):
+            shutil.copyfile(self.path, os.path.join(self.dir, "graphs", name))
+        self.open_files()
+        self.assertIn("demo.json", self.page.inner_text(".fm-cur"))
+        heads = self.page.eval_on_selector_all("#file-menu .fm-list .cat", "els => els.map(e => e.textContent)")
+        self.assertIn("Graphs", heads)
+        self.assertIn("graphs/", heads)                                                # a folder gets its own heading
+        rows = self.page.eval_on_selector_all("#file-menu .frow", "els => els.map(e => e.dataset.path)")
+        self.assertEqual(sorted(rows), ["demo.json", "graphs/alpha_rock.json", "graphs/beta_wall.json"])
+        self.page.keyboard.type("wall")
+        self.page.wait_for_function("document.querySelectorAll('#file-menu .frow').length === 1")
+        self.assertEqual(self.page.locator("#file-menu .frow").get_attribute("data-path"), "graphs/beta_wall.json")
+        self.assertIn("mark", self.page.locator("#file-menu .frow .nm").inner_html())
+        self.page.keyboard.press("Enter")                                                       # Enter opens the highlighted file
+        self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == "beta_wall.json"))
+        self.page.wait_for_selector('.node[data-id="hills"]')
+        self.open_files()
+        recent = self.page.eval_on_selector_all("#file-menu .fm-list .cat", "els => els.map(e => e.textContent)")
+        self.assertEqual(recent[0], "Recent")                                                   # opened files come back at the top
+        self.page.keyboard.type("zzzz")
+        self.page.wait_for_selector("#file-menu .cat:has-text('No graph or library node matches')")
+        self.page.keyboard.press("Escape")
+        self.page.wait_for_selector("#file-menu", state="hidden")
+
+    def test_save_as_duplicate_rename_delete_and_insert_from_the_browser(self):
+        self.page.on("dialog", lambda d: d.accept(self._answer))
+        self._answer = "graphs/saved_copy.json"
+        self.open_files()
+        self.page.locator(".fm-cur button", has_text="Save As").click()
+        self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == "saved_copy.json"))
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "graphs", "saved_copy.json")))
+        # duplicate demo.json from its row
+        self.open_files()
+        row = self.page.locator('#file-menu .frow[data-path="demo.json"]')
+        row.hover()
+        row.locator('button[title="Duplicate"]').click()
+        self.page.wait_for_selector('#file-menu .frow[data-path="demo_copy.json"]')
+        # rename it, then delete it
+        self._answer = "demo_renamed.json"
+        row = self.page.locator('#file-menu .frow[data-path="demo_copy.json"]')
+        row.hover()
+        row.locator('button[title="Rename"]').click()
+        self.page.wait_for_selector('#file-menu .frow[data-path="demo_renamed.json"]')
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "demo_copy.json")))
+        row = self.page.locator('#file-menu .frow[data-path="demo_renamed.json"]')
+        row.hover()
+        row.locator('button[title="Delete"]').click()
+        self.page.wait_for_function("!document.querySelector('#file-menu .frow[data-path=\"demo_renamed.json\"]')")
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "demo_renamed.json")))
+        # the open graph has no rename / delete buttons
+        cur = self.page.locator('#file-menu .frow[data-path="graphs/saved_copy.json"]')
+        cur.hover()
+        self.assertEqual(cur.locator('button[title="Delete"]').count(), 0)
+        # insert another graph's nodes into this one
+        before = len(self.s.graph.nodes)
+        row = self.page.locator('#file-menu .frow[data-path="demo.json"]')
+        row.hover()
+        row.locator('button[title^="Insert"]').click()
+        self.assertTrue(until(lambda: len(self.s.graph.nodes) > before))
+
+    def test_ctrl_g_saves_the_selection_as_a_library_node_and_swaps_it_in(self):
+        self.page.on("dialog", lambda d: d.accept("rough_ground"))
+        self.node("ground").locator(".title").click()
+        self.page.keyboard.down("Shift")
+        self.node("hills").locator(".title").click()
+        self.page.keyboard.up("Shift")
+        total = len(self.s.graph.nodes)
+        self.page.keyboard.press("Control+g")
+        self.assertTrue(until(lambda: "rough_ground" in self.s.evaluator.registry))
+        self.assertTrue(until(lambda: any(n.type == "rough_ground" for n in self.s.graph.nodes.values())))
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "nodes", "rough_ground.json")))
+        self.assertEqual(len(self.s.graph.nodes), total - 1)                                   # two nodes became one
+        self.page.wait_for_selector(".node.selected")
+        # the new node shows up in the file browser (as a library node) and in the Add Node menu under Library
+        self.open_files()
+        self.page.wait_for_selector('#file-menu .frow[data-path="nodes/rough_ground.json"]')
+        heads = self.page.eval_on_selector_all("#file-menu .fm-list .cat", "els => els.map(e => e.textContent)")
+        self.assertIn("Library nodes ◆", heads)
+        self.page.keyboard.press("Escape")
+        self.page.wait_for_selector("#file-menu", state="hidden")
+        self.page.mouse.click(*self.empty_spot())                                                # nothing selected: a node without inputs can be added too
+        self.open_menu()
+        self.page.keyboard.type("rough")
+        self.page.wait_for_selector('#tab-list .it[data-name="rough_ground"]')
+        self.assertIn("Library", self.page.locator('#tab-list .it[data-name="rough_ground"] small').inner_text())
+        self.page.keyboard.press("Escape")
+        self.page.keyboard.press("Control+z")                                                    # one undo brings the nodes back
+        self.assertTrue(until(lambda: len(self.s.graph.nodes) == total))
 
     # ---- layout: resizable panes and navigation of the 3-D view
     def width(self, sel):

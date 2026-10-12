@@ -125,6 +125,7 @@
   async function loadState() {
     try {
       const st = await api("/api/state");
+      S.menuExtras = (st.menu && st.menu.extras) || []; S.menuGroups = (st.menu && st.menu.groups) || [];
       setTypes(st.nodes, st.library);
       S.root = st.root;
       S.status = st.status;
@@ -141,11 +142,13 @@
     for (const t of nodes) S.types[t.name] = t;
     S.typeList = nodes.slice().sort((a, b) => (a.category || "").localeCompare(b.category || "") || a.name.localeCompare(b.name));
     S.library = library || null;
+    if (window.MiniShelf) MiniShelf.refresh();
     const errs = new Set(((library && library.files) || []).filter((f) => f.error).map((f) => relPath(f.file) + ": " + f.error));
     const fresh = [...errs].filter((e) => !libErrors.has(e));
     if (fresh.length) toast("Node library: " + fresh.join("\n"));
     libErrors = errs;
   }
+  let lastRemembered = null;
   function applySnapshot(snap) {
     if (!snap || snap.rev < S.rev) return;
     if (S.documentId !== null && snap.document_id !== S.documentId && pendingSet.size) {
@@ -158,6 +161,7 @@
     liveBadge.textContent = snap.live_modifier ? `${snap.live_modifier.connected ? "Live" : "Disconnected"}: ${snap.live_modifier.label}` : "";
     liveBadge.style.display = snap.live_modifier ? "block" : "none";
     if (fileChanged && snap.path) updateTrail(snap.path);                           // a snapshot without a file (transient) leaves the path alone
+    if (snap.path && snap.path !== lastRemembered && S.root) { lastRemembered = snap.path; rememberFile(relPath(snap.path)); }
     S.rev = snap.rev; S.graph = snap.graph; S.path = snap.path; S.documentId = snap.document_id;
     S.canUndo = snap.can_undo; S.canRedo = snap.can_redo;
     for (const id of [...S.sel]) if (!S.graph.nodes[id]) S.sel.delete(id);
@@ -1036,7 +1040,7 @@
     for (const k of Object.keys(spec)) if (spec[k] === "$") spec[k] = pattern;
     return spec;
   }
-  async function pieTool(item, note) {
+  async function pieTool(item, note, opts) {
     if (!item) { if (note) toast(note); return; }
     const t = S.types[item.type];
     if (!t) { toast(`This engine has no ${item.type} node.`); return; }
@@ -1046,7 +1050,8 @@
       if (info) params[item.center] = info.center.map((v) => Math.round(v * 1e5) / 1e5);
     }
     const one = S.sel.size === 1 ? [...S.sel][0] : null;
-    const target = pieFromView && pvNode && nodeOf(pvNode) ? pvNode : one && nodeOf(one) ? one : pvNode && nodeOf(pvNode) ? pvNode : displayNode();
+    const target = opts && opts.floating ? (one && nodeOf(one) ? one : null)                  // the shelf: a tool with nothing selected floats
+      : pieFromView && pvNode && nodeOf(pvNode) ? pvNode : one && nodeOf(one) ? one : pvNode && nodeOf(pvNode) ? pvNode : displayNode();
     if (item.source || !t.inputs.length || !target) {
       const id = uniqueId(item.type);
       let [x, y] = pieFromView || !S.mouse ? toWorld(canvas.getBoundingClientRect().left + canvas.clientWidth / 2, canvas.getBoundingClientRect().top + canvas.clientHeight / 2) : toWorld(...S.mouse);
@@ -1056,6 +1061,25 @@
     }
     const r = await edit([{ op: "insert", after: target, type: item.type, params }]);
     if (r) { if (pv && pv.ok) pv.clearSelection(); select([r.results[0].id]); }
+  }
+  // ---- the tool shelf (shelf.js): the same tools as the pie, one click or drag away
+  async function addToolAt(tool, clientX, clientY) {
+    const t = S.types[tool.type];
+    if (!t) { toast(`This engine has no ${tool.type} node.`); return; }
+    const id = uniqueId(tool.type), [x, y] = toWorld(clientX, clientY);
+    const r = await edit([{ op: "add", type: tool.type, id, pos: [Math.round(x - W / 2), Math.round(y - 12)] }]);
+    if (r) select([id]);
+  }
+  if (window.MiniShelf) {
+    MiniShelf.init({ types: () => S.types, typeList: () => S.typeList,
+      onPick: (tool, item) => { pieFromView = false; pieTool(item || { label: tool.label, type: tool.type }, null, { floating: true }); } });
+    canvas.addEventListener("dragover", (e) => { if ([...(e.dataTransfer.types || [])].includes("application/x-minihou-tool")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } });
+    canvas.addEventListener("drop", (e) => {
+      const raw = e.dataTransfer.getData("application/x-minihou-tool");
+      if (!raw) return;
+      e.preventDefault();
+      try { addToolAt(JSON.parse(raw), e.clientX, e.clientY); } catch (err) { /* not ours */ }
+    });
   }
   if (window.MiniPie) {
     MiniPie.init({ types: () => S.types, onPick: pieTool, onOpen: () => { pieFromView = pvOver; },
@@ -1386,12 +1410,28 @@
   }
 
   // ---------------------------------------------------------------- Tab menu
-  let menuCtx = null, menuItems = [], menuActive = 0;
+  let menuCtx = null, menuItems = [], menuActive = 0, menuQuery = "";
+  // what the menu remembers between sessions: starred nodes, the last ones used, which groups are open
+  const menuPrefs = (() => {
+    const load = (k, d) => { try { return JSON.parse(localStorage.getItem("minihou." + k) || "null") || d; } catch (e) { return d; } };
+    return { favs: new Set(load("favs", [])), recent: load("recent", []), open: new Set(load("menuopen", ["Create", "Polygon Modelling"])) };
+  })();
+  function saveMenuPrefs() {
+    try {
+      localStorage.setItem("minihou.favs", JSON.stringify([...menuPrefs.favs]));
+      localStorage.setItem("minihou.recent", JSON.stringify(menuPrefs.recent.slice(0, 12)));
+      localStorage.setItem("minihou.menuopen", JSON.stringify([...menuPrefs.open]));
+    } catch (e) { /* storage unavailable */ }
+  }
+  function rememberRecent(name) {
+    menuPrefs.recent = [name, ...menuPrefs.recent.filter((n) => n !== name)].slice(0, 12);
+    saveMenuPrefs();
+  }
   function openMenu(cx, cy, ctx) {
     menuCtx = ctx || {};
     const m = $("#tabmenu");
     m.classList.remove("hidden");
-    const w = 260, hgt = 360;
+    const w = 380, hgt = 480;
     m.style.left = Math.max(4, Math.min(cx, innerWidth - w - 4)) + "px";
     m.style.top = Math.max(4, Math.min(cy, innerHeight - hgt - 4)) + "px";
     const inp = $("#tab-search");
@@ -1400,37 +1440,93 @@
     inp.focus();
   }
   function closeMenu() { $("#tabmenu").classList.add("hidden"); menuCtx = null; canvas.focus({ preventScroll: true }); }
-  function fillMenu(q) {
-    q = q.trim().toLowerCase();
-    let list = [{ name: "loop_block", category: "flow", inputs: [{ name: "geo" }],
-      doc: "Insert paired Loop Begin / Transform body / Loop End (repeat N times)" }, ...S.typeList];
+  function menuTypes() {
+    let list = [...(S.menuExtras || []), ...S.typeList];
     if (menuCtx && (menuCtx.from || menuCtx.fromSel)) list = list.filter((t) => t.inputs.length);   // must accept a wire
-    if (q) {
-      const score = (t) => (t.name.startsWith(q) ? 0 : t.name.includes(q) ? 1 : (t.category || "").includes(q) ? 2 : (t.doc || "").toLowerCase().includes(q) ? 3 : 9);
-      list = list.map((t) => [score(t), t]).filter(([s]) => s < 9).sort((a, b) => a[0] - b[0] || a[1].name.localeCompare(b[1].name)).map(([, t]) => t);
-    }
-    menuItems = list; menuActive = 0;
+    return list;
+  }
+  function fillMenu(q) {
+    menuQuery = q.trim();
+    const rows = NodeMenu.rows(menuTypes(), menuQuery, menuPrefs);
+    // the navigable rows: nodes, and the group headers (Enter or the arrow keys fold them)
+    menuItems = rows.filter((r) => r.kind === "item" || !r.special).map((r) => (r.kind === "item" ? r.type : { head: true, name: r.name, open: r.open }));
+    menuActive = menuItems.findIndex((t) => !t.head);
+    if (menuActive < 0) menuActive = 0;
     const kids = [];
-    let cat = null;
-    list.forEach((t, i) => {
-      if (!q && t.category !== cat) { cat = t.category; kids.push(h("div", { class: "cat" }, cat || "other")); }
-      kids.push(h("div", { class: "it" + (i === 0 ? " active" : ""), dataset: { i }, title: t.doc || "",
-        onmousedown: (e) => { e.preventDefault(); pickMenu(i); } }, h("span", null, t.name), h("small", null, (t.doc || "").split("\n")[0])));
-    });
-    if (!list.length) kids.push(h("div", { class: "cat" }, "no match"));
+    let index = 0;
+    for (const r of rows) {
+      if (r.kind === "head") {
+        const i = r.special ? -1 : index++;
+        kids.push(h("div", { class: "cat head" + (r.special ? " special" : "") + (i === menuActive ? " active" : ""), dataset: { group: r.name, i: i < 0 ? "" : i },
+          onmousedown: (e) => { e.preventDefault(); if (!r.special) toggleGroup(r.name); }, onmousemove: () => { if (i >= 0 && menuActive !== i) setMenuActive(i); } },
+          h("span", { class: "chev" }, r.special ? (r.name === "Favourites" ? "★" : "⏱") : r.open ? "▾" : "▸"), h("span", null, r.name),
+          h("small", null, String(r.count))));
+        continue;
+      }
+      const t = r.type, i = index++;
+      const star = h("span", { class: "star" + (menuPrefs.favs.has(t.name) ? " on" : ""), title: "Favourite",
+        onmousedown: (e) => { e.preventDefault(); e.stopPropagation(); toggleFav(t.name); } }, menuPrefs.favs.has(t.name) ? "★" : "☆");
+      const label = h("span", { class: "lb" }, ...NodeMenu.highlight(t.label || t.name, menuQuery).map(([text, hit]) => (hit ? h("mark", null, text) : text)));
+      kids.push(h("div", { class: "it" + (i === menuActive ? " active" : "") + (t.source ? " lib" : ""), dataset: { i, name: t.name }, title: t.name + (t.doc ? " - " + t.doc.split("\n")[0] : ""),
+        onmousedown: (e) => { e.preventDefault(); pickMenu(i); }, onmousemove: () => { if (menuActive !== i) setMenuActive(i); } },
+        label, h("small", null, r.showGroup ? t.menu || "" : (t.doc || "").split("\n")[0]), star));
+    }
+    if (!menuItems.length) kids.push(h("div", { class: "cat" }, menuQuery ? "No node matches “" + menuQuery + "”" : "no nodes"));
     $("#tab-list").replaceChildren(...kids);
+    showMenuDoc();
+  }
+  function showMenuDoc() {
+    const t = menuItems[menuActive], el = $("#tab-doc");
+    if (!t) { el.textContent = ""; return; }
+    if (t.head) {
+      const g = (S.menuGroups || []).find((x) => x.name === t.name);
+      el.replaceChildren(h("b", null, t.name), h("div", { class: "d" }, (g && g.doc) || ""), h("div", { class: "io" }, "Enter or ← → opens and closes the group"));
+      return;
+    }
+    const ins = (t.inputs || []).map((p) => p.name + (p.optional ? "?" : "") + (p.multi ? "*" : "")).join(", ") || "none";
+    el.replaceChildren(h("b", null, t.label || t.name), h("span", { class: "grp" }, " · " + (t.menu || "")),
+      h("div", { class: "d" }, (t.doc || "").split("\n")[0] || "No description."), h("div", { class: "io" }, "in: " + ins + "  →  " +
+      (t.outputs || [{ name: "geo" }]).map((p) => p.name).join(", ") + (t.params && t.params.length ? "  ·  " + t.params.length + " parameters" : "")));
+  }
+  function toggleGroup(name) {
+    if (menuPrefs.open.has(name)) menuPrefs.open.delete(name); else menuPrefs.open.add(name);
+    saveMenuPrefs();
+    fillMenu($("#tab-search").value);
+    const at = menuItems.findIndex((t) => t.head && t.name === name);                // keep the header under the cursor
+    if (at >= 0) setMenuActive(at);
+  }
+  function toggleFav(name) {
+    if (menuPrefs.favs.has(name)) menuPrefs.favs.delete(name); else menuPrefs.favs.add(name);
+    saveMenuPrefs();
+    fillMenu($("#tab-search").value);
+  }
+  function setMenuActive(i) {
+    menuActive = i;
+    const items = [...$("#tab-list").querySelectorAll("[data-i]")].filter((el) => el.dataset.i !== "");
+    items.forEach((el) => el.classList.toggle("active", Number(el.dataset.i) === i));
+    const cur = items.find((el) => Number(el.dataset.i) === i);
+    if (cur) cur.scrollIntoView({ block: "nearest" });
+    showMenuDoc();
   }
   function moveMenu(d) {
     if (!menuItems.length) return;
-    menuActive = (menuActive + d + menuItems.length) % menuItems.length;
-    const items = [...$("#tab-list").querySelectorAll(".it")];
-    items.forEach((el, i) => el.classList.toggle("active", i === menuActive));
-    items[menuActive].scrollIntoView({ block: "nearest" });
+    setMenuActive((menuActive + d + menuItems.length) % menuItems.length);
+  }
+  // left / right fold the group of the highlighted node (when nothing is typed)
+  function foldMenu(open) {
+    if (menuQuery) return false;
+    const t = menuItems[menuActive];
+    const g = t ? (t.head ? t.name : t.menu) : null;
+    if (!g || menuPrefs.open.has(g) === open) return false;
+    toggleGroup(g);
+    return true;
   }
   async function pickMenu(i) {
     const t = menuItems[i], ctx = menuCtx || {};
+    if (t && t.head) { toggleGroup(t.name); return; }
     closeMenu();
     if (!t) return;
+    rememberRecent(t.name);
     const id = uniqueId(t.name);
     let [x, y] = ctx.world || toWorld(...S.mouse);
     x -= W / 2; y -= 12;
@@ -1668,6 +1764,8 @@
       if (e.key === "Escape") { closeMenu(); e.preventDefault(); }
       else if (e.key === "ArrowDown") { moveMenu(1); e.preventDefault(); }
       else if (e.key === "ArrowUp") { moveMenu(-1); e.preventDefault(); }
+      else if (e.key === "ArrowLeft" && !$("#tab-search").value) { foldMenu(false); e.preventDefault(); }
+      else if (e.key === "ArrowRight" && !$("#tab-search").value) { foldMenu(true); e.preventDefault(); }
       else if (e.key === "Enter") { pickMenu(menuActive); e.preventDefault(); }
       else if (e.key === "Tab") e.preventDefault();
       return;
@@ -1683,6 +1781,7 @@
     } else if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); undo(e.shiftKey); }
     else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); undo(true); }
     else if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); if (S.sel.size) duplicate([...S.sel]); }
+    else if (mod && e.key.toLowerCase() === "g") { e.preventDefault(); saveSelectionAsNode(); }                // Houdini's collapse to subnet
     else if (mod && e.key.toLowerCase() === "a") { e.preventDefault(); select(Object.keys(S.graph.nodes)); }
     else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelection(); }
     else if (e.key === "f" || e.key === "F") frame(true);
@@ -1714,20 +1813,167 @@
   $("#box-btn").onclick = () => addBox();
   $("#info-detail").onchange = () => { inspectKey = null; scheduleInspect(); };
   $("#errorbar").onclick = () => { const id = $("#errorbar").dataset.node; if (id && nodeOf(id)) { select([id]); frame(true); } };
+  // ---- the graph & library browser: search, recent, folders, library nodes, Save As, insert, duplicate, rename, delete
+  const FM = { files: [], q: "", active: 0, rows: [], libDir: "" };
+  const recentFiles = () => { try { return JSON.parse(localStorage.getItem("minihou.recentfiles") || "[]").map(relPath); } catch (e) { return []; } };
+  function rememberFile(path) {
+    if (!path || !S.root) return;
+    try { localStorage.setItem("minihou.recentfiles", JSON.stringify([path, ...recentFiles().filter((p) => p !== path)].slice(0, 8))); } catch (e) { /* storage unavailable */ }
+  }
+  function ago(sec) {
+    const d = Date.now() / 1000 - sec;
+    if (d < 60) return "just now";
+    if (d < 3600) return Math.floor(d / 60) + " min ago";
+    if (d < 86400) return Math.floor(d / 3600) + " h ago";
+    if (d < 86400 * 60) return Math.floor(d / 86400) + " d ago";
+    return new Date(sec * 1000).toLocaleDateString();
+  }
+  const fileMatches = (f, toks) => toks.every((t) => (f.path + " " + (f.type || "") + " " + (f.doc || "")).toLowerCase().includes(t));
+  async function openFileMenu() {
+    const menu = $("#file-menu");
+    try { const d = await api("/api/library"); FM.files = d.files; FM.libDir = d.library_dir; } catch (err) { toast(err.message); return; }
+    FM.q = ""; FM.active = 0;
+    menu.classList.remove("hidden");
+    renderFileMenu();
+    const inp = $("#fm-search");
+    if (inp) inp.focus();
+  }
+  function fileRows() {
+    const toks = NodeMenu.tokens(FM.q.replace(/[/.]/g, " "));
+    const cur = S.path ? relPath(S.path) : null;
+    const files = FM.files.filter((f) => !toks.length || fileMatches(f, toks));
+    const rows = [];
+    const section = (title, list, opts = {}) => { if (list.length) { rows.push({ head: title }); list.forEach((f) => rows.push({ file: f, ...opts })); } };
+    if (!toks.length) {
+      const recent = recentFiles().map((p) => FM.files.find((f) => f.path === p)).filter((f) => f && f.path !== cur && !f.system).slice(0, 5);
+      section("Recent", recent);
+    }
+    section("Library nodes ◆", files.filter((f) => f.system), { lib: true });
+    const shown = new Set(rows.filter((r) => r.file && !r.lib).map((r) => r.file.path));                 // a recent file is not listed twice
+    const graphs = files.filter((f) => !f.system && !shown.has(f.path)).sort((a, b) => a.path.localeCompare(b.path));
+    const folders = new Map();
+    for (const f of graphs) { const dir = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : "(root)"; if (!folders.has(dir)) folders.set(dir, []); folders.get(dir).push(f); }
+    for (const [dir, list] of folders) section(toks.length ? "Graphs" : dir === "(root)" ? "Graphs" : dir + "/", list, { tree: true });
+    if (toks.length) {                                                         // one heading when searching
+      const seen = new Set();
+      return rows.filter((r) => !r.head || !seen.has(r.head) && seen.add(r.head));
+    }
+    return rows;
+  }
+  function renderFileMenu() {
+    const menu = $("#file-menu");
+    const cur = S.path ? relPath(S.path) : null;
+    const curFile = FM.files.find((f) => f.path === cur);
+    const rows = fileRows();
+    FM.rows = rows.filter((r) => r.file);
+    if (FM.active >= FM.rows.length) FM.active = Math.max(0, FM.rows.length - 1);
+    let n = 0;
+    const list = rows.map((r) => {
+      if (r.head) return h("div", { class: "cat" }, r.head);
+      const f = r.file, i = n++, name = f.path.split("/").pop().replace(/\.json$/, "");
+      const actions = h("span", { class: "acts" },
+        r.lib && h("button", { title: "Add this node to the graph", onclick: (e) => { e.stopPropagation(); addLibraryNode(f); } }, "+"),
+        h("button", { title: "Insert this graph's nodes into the open graph", onclick: (e) => { e.stopPropagation(); insertFromFile(f.path); } }, "⤓"),
+        h("button", { title: "Duplicate", onclick: (e) => { e.stopPropagation(); fileOp("duplicate", f.path); } }, "⧉"),
+        !f.current && h("button", { title: "Rename", onclick: (e) => { e.stopPropagation(); renameFile(f); } }, "✎"),
+        !f.current && h("button", { title: "Delete", onclick: (e) => { e.stopPropagation(); deleteFile(f); } }, "🗑"));
+      return h("div", { class: "item frow" + (f.path === cur ? " cur" : "") + (i === FM.active ? " active" : "") + (f.error ? " bad" : ""), dataset: { i, path: f.path },
+        title: f.path + (f.doc ? "\n" + f.doc : "") + (f.error ? "\n" + f.error : ""), onclick: () => openFile(f.path), onmousemove: () => { if (FM.active !== i) { FM.active = i; markActive(); } } },
+        h("span", { class: "nm" }, ...NodeMenu.highlight(name, FM.q).map(([t, hit]) => (hit ? h("mark", null, t) : t)), f.system && f.type ? h("small", { class: "ty" }, " " + f.type) : ""),
+        h("span", { class: "meta" }, `${f.nodes} node${f.nodes === 1 ? "" : "s"} · ${ago(f.mtime)}`), actions);
+    });
+    menu.replaceChildren(
+      h("input", { id: "fm-search", placeholder: "Search graphs and library nodes…", value: FM.q, autocomplete: "off", spellcheck: "false",
+        oninput: (e) => { FM.q = e.target.value; FM.active = 0; renderFileMenu(); $("#fm-search").focus(); } }),
+      h("div", { class: "fm-cur" }, h("div", null, h("b", null, cur || "(unsaved graph)"), h("small", null, curFile ? ` · ${curFile.nodes} nodes · edits save as you make them` : "")),
+        h("span", { class: "acts on" },
+          h("button", { onclick: saveAs, title: "Write this graph to a new file and switch to it" }, "Save As…"),
+          h("button", { onclick: saveSelectionAsNode, disabled: !S.sel.size, title: "Turn the selected nodes into a reusable library node (Ctrl+G)" }, "Save selection as node…"))),
+      h("div", { class: "fm-list" }, ...(list.length ? list : [h("div", { class: "cat" }, FM.q ? "No graph or library node matches “" + FM.q + "”" : "No graph files here yet")])),
+      h("div", { class: "fm-foot" }, h("button", { onclick: newFile }, "New graph…"),
+        h("small", null, "Library nodes live in " + (FM.libDir ? FM.libDir.split(/[\\/]/).slice(-2).join("/") : "nodes") + " and appear in the Add Node menu under Library.")));
+  }
+  function markActive() {
+    document.querySelectorAll("#file-menu .frow").forEach((el) => el.classList.toggle("active", Number(el.dataset.i) === FM.active));
+    const el = document.querySelector(`#file-menu .frow[data-i="${FM.active}"]`);
+    if (el) el.scrollIntoView({ block: "nearest" });
+  }
   $("#file-btn").onclick = async (e) => {
     e.stopPropagation();
-    const menu = $("#file-menu");
-    if (!menu.classList.contains("hidden")) { menu.classList.add("hidden"); return; }
-    let files = [];
-    try { files = (await api("/api/files")).files; } catch (err) { toast(err.message); return; }
-    const cur = S.path ? relPath(S.path) : null;
-    menu.replaceChildren(
-      ...files.map((f) => h("div", { class: "item" + (f === cur ? " cur" : ""), onclick: () => openFile(f) }, f)),
-      h("div", { class: "sep" }),
-      h("div", { class: "item", onclick: newFile }, "New graph…"));
-    menu.classList.remove("hidden");
+    if (!$("#file-menu").classList.contains("hidden")) { $("#file-menu").classList.add("hidden"); return; }
+    await openFileMenu();
   };
+  $("#file-menu").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { $("#file-menu").classList.add("hidden"); e.stopPropagation(); }
+    else if (e.key === "ArrowDown" || e.key === "ArrowUp") { if (FM.rows.length) { FM.active = (FM.active + (e.key === "ArrowDown" ? 1 : -1) + FM.rows.length) % FM.rows.length; markActive(); } e.preventDefault(); }
+    else if (e.key === "Enter" && FM.rows[FM.active]) { openFile(FM.rows[FM.active].file.path); e.preventDefault(); }
+  });
   document.addEventListener("click", (e) => { if (!e.target.closest(".file")) $("#file-menu").classList.add("hidden"); });
+  async function saveAs() {
+    const cur = S.path ? relPath(S.path) : "graphs/my_graph.json";
+    let name = prompt("Save a copy as (inside " + (S.root || "the workspace") + ") and switch to it:", cur.replace(/\.json$/, "") + "_v2.json");
+    if (!name) return;
+    name = name.trim();
+    if (!name.toLowerCase().endsWith(".json")) name += ".json";
+    try { const snap = await api("/api/save_as", { path: name }); $("#file-menu").classList.add("hidden"); S.sel.clear(); applySnapshot(snap); toast("Saved as " + name, false); }
+    catch (err) {
+      if (/already exists/.test(err.message) && confirm(name + " already exists. Overwrite it?")) {
+        try { const snap = await api("/api/save_as", { path: name, overwrite: true }); $("#file-menu").classList.add("hidden"); S.sel.clear(); applySnapshot(snap); } catch (e2) { toast(e2.message); }
+      } else toast(err.message);
+    }
+  }
+  async function fileOp(op, path, to) {
+    try { await api("/api/file_op", { op, path, to }); await openFileMenu(); } catch (err) { toast(err.message); }
+  }
+  function renameFile(f) {
+    let to = prompt("Rename to:", f.path);
+    if (!to || to === f.path) return;
+    if (!to.toLowerCase().endsWith(".json")) to += ".json";
+    fileOp("rename", f.path, to.trim());
+  }
+  function deleteFile(f) {
+    const warn = f.system ? "\n\nIt is a library node: graphs that use it will show an error." : "";
+    if (confirm("Delete " + f.path + "? This cannot be undone." + warn)) fileOp("delete", f.path);
+  }
+  async function insertFromFile(path) {
+    try {
+      const d = await api("/api/file?path=" + encodeURIComponent(path));
+      const nodes = (d.graph && d.graph.nodes) || {};
+      if (!Object.keys(nodes).length) { toast("That graph has no nodes."); return; }
+      $("#file-menu").classList.add("hidden");
+      await pasteNodes(JSON.stringify({ minihou: "nodes", nodes }));
+    } catch (err) { toast(err.message); }
+  }
+  async function addLibraryNode(f) {
+    const t = S.types[f.type];
+    if (!t) { toast(f.error || "That library node is not loaded."); return; }
+    $("#file-menu").classList.add("hidden");
+    const one = S.sel.size === 1 ? [...S.sel][0] : null, id = uniqueId(t.name);
+    const r = canvas.getBoundingClientRect(), [x, y] = toWorld(r.left + r.width / 2, r.top + r.height / 2);
+    const op = { op: "add", type: t.name, id, pos: [Math.round(x - W / 2), Math.round(y - 12)] };
+    if (one && nodeOf(one) && t.inputs[0]) op.inputs = { [t.inputs[0].name]: one };
+    const res = await edit([op]);
+    if (res) select([id]);
+  }
+  async function saveSelectionAsNode() {
+    const ids = [...S.sel].filter((id) => nodeOf(id));
+    if (!ids.length) { toast("Select the nodes to turn into a node first."); return; }
+    const first = nodeOf(ids[0]);
+    let name = prompt("Name the new library node (letters, digits and _). It appears in the Add Node menu under Library:", ids.length === 1 ? first.type + "_group" : "my_node");
+    if (!name) return;
+    name = name.trim();
+    try {
+      const d = await api("/api/make_system", { name, nodes: ids, replace: true });
+      $("#file-menu").classList.add("hidden");
+      toast(`Made the library node ${name} (${d.path}) and put it where the selection was. Undo (Ctrl+Z) takes the nodes back.`, false);
+      for (let i = 0; i < 40 && d.node && !nodeOf(d.node); i++) await new Promise((r) => setTimeout(r, 50));      // the new graph arrives over the event stream
+      if (d.node && nodeOf(d.node)) select([d.node]);
+    } catch (err) {
+      if (/already exists/.test(err.message) && /\.json already exists/.test(err.message) && confirm(name + " exists in the library. Replace it?")) {
+        try { await api("/api/make_system", { name, nodes: ids, replace: true, overwrite: true }); $("#file-menu").classList.add("hidden"); } catch (e2) { toast(e2.message); }
+      } else toast(err.message);
+    }
+  }
   async function openFile(path, create, nav) {
     $("#file-menu").classList.add("hidden");
     S.nav = nav || null;

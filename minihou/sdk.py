@@ -317,6 +317,8 @@ class NodeType:
              "params": [p.describe() for p in self.params]}
         if self.source:
             d["source"] = self.source
+        from . import menu
+        d.update(menu.info(self.name, self.category, self.source))
         return d
 
 

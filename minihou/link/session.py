@@ -696,6 +696,20 @@ class Session:
         self._stamp = self._file_stamp()
         return True
 
+    def save_as(self, path, overwrite: bool = False) -> dict:
+        """Write the open graph to another file and switch to it (the old file is kept as last saved). Raises
+        :class:`GraphError` if the target exists and ``overwrite`` is false."""
+        path = Path(path).resolve()
+        with self._file_lock, self.lock:
+            if self.path is not None and path == self.path.resolve():
+                raise GraphError("that is the file already open: edits are saved to it as you make them")
+            if path.exists() and not overwrite:
+                raise GraphError(f"{path.name} already exists")
+            text = self.graph.to_json()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write(path, text)
+        return self.open_file(path)
+
     def open_file(self, path, create: bool = False) -> dict:
         """Switch the session to another graph file (creating a starter graph if asked). The old file is saved
         first. Raises :class:`GraphError` / ``OSError``."""

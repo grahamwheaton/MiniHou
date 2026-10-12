@@ -356,6 +356,39 @@ Edits are saved to the graph file (and are undoable, including edits made by an 
 
 ![A selected piece with its move gizmo](docs/images/editor_piece.png)
 
+* **The tool shelf** (the ribbon under the top bar, like Houdini's): tabs **Create**, **Modify**, **Model**, **Polygon**, **Edges**, **Deform**, **Texture**,
+  **Groups**, **Attributes**, **Curves**, **Points**, **Rigid Bodies**, **Constraints**, **Terrain FX**, **Volume**, **PCG**, **Flow** and **Library**
+  (your own nodes and saved systems), with only the tools this engine has: **Box, Sphere, Tube, Torus, Grid, Null, Line, Circle, Curve, Helix, L-System...**
+  (yes, there is a **Null**, on Create and Modify). A click does what the same tool does in the C pie menu: a source is added on its own, any other tool is
+  added after the selected node (filled in from your 3-D selection: the selected faces, edges or points); with nothing selected it floats.
+  **Drag** a tool onto the graph to drop it where you want it. **+** chooses which tabs to show, **▴** folds the tools away, and the tab you were on is
+  remembered. Every built-in node is on a tab (`tests/test_shelf.py` checks).
+
+![The tool shelf](docs/images/editor_shelf.png)
+
+* **The Add Node menu** (**Tab**, double-click, right-click or **+ Node**): nodes are grouped the way you think about them: **Create**, **Polygon
+  Modelling**, **Edges**, **Transform & Combine**, **Deform**, **Groups & Selection**, **Attributes**, **UV**, **Curves**, **Points**,
+  **Volumes & Terrain**, **Fracture & RBD**, **Procedural (PCG)**, **Flow & Time**, **Utility & I/O** and **Library** (your own nodes and
+  saved systems). Groups fold (click, **Enter**, or **←** **→**), and the open ones are remembered. Typing searches names, Houdini and Blender
+  names and everyday words (`mountain` finds Noise, `duplicate` Copy and Transform, `shatter` the fracture tools, `weld` Fuse; every word must
+  match); the best match is highlighted and a description with the node's inputs and parameter count shows below. **☆** on a row stars
+  it (**Favourites** list at the top), and the last nodes you added are under **Recent**. The grouping lives in `minihou/menu.py`;
+  nodes you write land in the group of their `category`.
+
+![The Add Node menu](docs/images/editor_add_menu.png)
+
+* **The graph & library browser** (click the file name, top left): a search box over every graph file and library node in the workspace, **Recent**
+  files, **Library nodes ◆** (systems in the node folder), then your graphs by folder, each with its node count and age. **↑ ↓ Enter** open,
+  and a row's buttons **⤓** insert that graph's nodes into the open one, **+** (library nodes) add the node, **⧉ ✎ 🗑** duplicate, rename or delete
+  it. **Save As…** copies the open graph to a new file and switches to it (edits to the open graph always save as you make them); **New
+  graph…** starts one. **Save selection as node… (Ctrl+G)** turns the selected nodes into a reusable library node and puts it where they
+  were, wired to the same neighbours: nodes it reads become its inputs, the parameters you exposed (the **B** button) become its parameters, and
+  one **Ctrl+Z** brings the original nodes back. It is a normal graph file in `nodes/`, listed in the Add Node menu under **Library**; double-click it
+  to edit what is inside. A selection must lead out through one node, loops must be selected whole, and the RBD Solver and Blender Object nodes
+  must stay in the main graph.
+
+![The graph and library browser](docs/images/editor_file_browser.png)
+
 * **The C pie menu**: press **C** (over the graph or the 3-D view) for Houdini's modelling pie at the pointer: **Adjust** (top), **Deform**, **Polygons**,
   **Group**, **Create**, **Build**, **Edges**, **Modify**, each opening a pie of tools (Transform, Soft Transform, Soft Peak, Smooth, Point Weld... /
   Lattice, Mountain, Bend, Linear Taper, Squash and Stretch, Twist... / PolyBevel, PolyFill, PolyExtrude, PolySplit, PolyBridge, Clip, Boolean /
@@ -472,15 +505,16 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `blast` | geo | delete a group of primitives or points (or keep only it) |
 | `polybevel` | geo | chamfer sharp edges (min angle, or a point / edge / primitive group); slides along borders and flat edges so subdivided meshes bevel cleanly; moves are limited where faces would fold; new faces in group `bevel`; Houdini's six output groups |
 | `boolean` | a, b | exact union / subtract / intersect of closed meshes: watertight n-gon output, uv and attributes carried across cuts, groups `from_a`/`from_b`; flush faces cut cleanly |
-| `voronoi_fracture` | geo, points | break a closed mesh into the exact Voronoi cells of the points; closed pieces, prim `piece`, caps in group `inside`, optional gap; output groups `inside`, `outside`, `cutpoints`, `cutedges` |
-| `voronoi_fracture_points` | geo, points* | fracture points for the above: scattered inside a closed mesh, optional surface share, thinning, Lloyd relaxation, clusters and extra points from the second input; groups `interior`, `surface`, `clustered`, `extrapoints` |
+| `voronoi_fracture` | geo, points | break a closed mesh into the exact Voronoi cells of the points; closed pieces, prim `piece`, caps in group `inside` (faces already inside stay inside), optional gap; **Create Inside Surfaces** (`create_inside`) and **Cluster Pieces** (cells whose points share a `cluster` number become one piece); output groups `inside`, `outside`, `cutpoints`, `cutedges` |
+| `voronoi_fracture_points` | geo, points* | fracture points for the above: scattered inside a closed mesh, optional surface share, thinning, Lloyd relaxation, dense clusters, extra points from the second input, or **impacts** (second input = impact points with optional `impulse`: points gather round them); writes `piece`, `cluster` (`merge_clusters` groups the points by distance) and `impact`; groups `interior`, `surface`, `clustered`, `extrapoints`, `impactpoints` |
 | `voronoi_split` | geo, points | split any polygon geometry (open sheets, soup) by the Voronoi cells without capping; `piece`, groups `cutpoints`, `cutedges` |
 | `voronoi_adjacency` | geo, points* | which pieces touch: a point per piece and a two-point curve per shared cut face (`piece_a`, `piece_b`, `area`); groups `connected`, `isolated`, `stronglinks` |
 | `boolean_fracture` | geo, cutters | break a closed mesh with cutter meshes: one piece per cutter plus the remainder, `piece`, `cutter`, groups `inside`, `outside`, `cutterpieces`, `remainder`, `cutpoints`, `cutedges` |
 | `convex_decomposition` | geo | cut a closed concave mesh into nearly convex pieces (collision shapes): reflex-edge planes, `max_concavity`, `max_pieces`; `piece`, groups as the fracture |
 | `assemble` | geo | number and name pieces (attribute, connectivity or groups), give each its own points and a pivot; detail `piece_names`; groups `splitpoints`, `sharedpoints` |
 | `glue_cluster` | geo | glue touching pieces: `cluster` (rigid groups of the most firmly stuck pieces) on the pieces, or the links (`rbd_a`, `rbd_b`, `strength` in newtons) for the solver's third input |
-| `rbd_material_fracture` | geo | fracture, assemble, glue and set mass / friction / bounce from a material in one node (`output` pieces or constraints) |
+| `rbd_material_fracture` | geo | fracture, assemble, glue and set mass / friction / bounce from a material (or `custom`) in one node: **Fracture Level** (each level breaks every piece again), **Convex Parts** (a concave input becomes compound bodies of convex parts for the solver), **Interior Detail** (noise on the new inside faces), clusters, `output` pieces or constraints |
+| `rbd_constraint_properties` | constraints | edit glue links from `glue_cluster`: set or scale the break strength of a group of links (per area or absolute), random variation, unbreakable; group `editedlinks` |
 | `polyreduce` | geo | reduce to a percentage or count of triangles with quadric error metrics; keeps borders, sharp edges and manifold shells; attributes blend along collapses |
 | `exploded_view` | geo | push pieces (a prim attribute) away from a centre |
 | `polyextrude` | geo | extrude faces (a group) along their normals with inset; connected regions or individual faces; output groups front / back / side (`extrudeFront`, `extrudeBack`, `extrudeSide`) |

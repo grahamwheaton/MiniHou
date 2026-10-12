@@ -17,6 +17,11 @@ live in the other and in Blender.
 ``POST /api/preview``  ``{node}`` -> positions, triangles and edges of any node for the 3-D view (binary, see
                        :mod:`minihou.preview`), or JSON ``{ok: false, error}``
 ``POST /api/open``     ``{path, create?}`` switch to (or create) a graph file inside the workspace root
+``GET  /api/library``  every graph file with name, age, node count, doc and whether it is a library node (for the file browser)
+``GET  /api/file``     ``?path=`` one graph file's JSON (to insert its nodes into the open graph)
+``POST /api/save_as``  ``{path, overwrite?}`` copy the open graph to a new file and switch to it
+``POST /api/file_op``  ``{op: rename|duplicate|delete, path, to?}`` on a graph file (never the open one, except duplicate)
+``POST /api/make_system`` ``{name, nodes, replace?, doc?, overwrite?}`` save the selected nodes as a library node; replace swaps them for it
 ``GET  /api/blender``  installed Blenders (by index) and the add-on zip, for the editor's Blender panel
 ``GET  /addon/minihou_link.zip``  the Blender add-on, ready to drag into Blender or install from disk
 ``POST /api/blender/install``  ``{index}`` install + enable the add-on in that Blender (runs it in the background once)
@@ -117,6 +122,7 @@ class WebServer:
         self._httpd: Optional[_HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
         self.stopping = threading.Event()
+        self._listing_cache: dict = {}
 
     @property
     def url(self) -> str:
@@ -167,7 +173,9 @@ class WebServer:
     def state(self) -> dict:
         s = self.session
         out = s.snapshot()
+        from .. import menu
         out.update(status=s.status(), nodes=[nt.describe() for nt in s.evaluator.registry], library=s.library_status(),
+                   menu={"groups": menu.groups(), "extras": menu.pseudo()},
                    ops=OP_NAMES, root=str(self.root), files=self.files(),
                    link={"port": getattr(self.link, "port", None), "clients": self.link_clients()},
                    engine={"pid": os.getpid(), "version": _version(), "python_nodes": _python_allowed(), "protocol": PROTOCOL_VERSION,
@@ -193,6 +201,130 @@ class WebServer:
             if len(out) >= 500:
                 break
         return out
+
+    def library_listing(self) -> dict:
+        """Every graph file under the root with what a browser needs: name, age, size, node count, doc, and whether it is a
+        library node (a system) that the engine has loaded."""
+        s = self.session
+        lib = s.library
+        systems = {}
+        if lib is not None:
+            for f in lib.files.values():
+                if str(f.path).endswith(".json"):
+                    systems[str(Path(f.path).resolve())] = f
+        cur = str(s.path.resolve()) if s.path else None
+        out = []
+        for rel in self.files():
+            p = (self.root / rel).resolve()
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            key = (str(p), st.st_mtime_ns, st.st_size)
+            meta = self._listing_cache.get(key)
+            if meta is None:
+                meta = {"nodes": 0, "doc": "", "exposed": 0}
+                if st.st_size < 2_000_000:
+                    try:
+                        with open(p, encoding="utf-8") as fh:
+                            data = json.load(fh)
+                        meta = {"nodes": len(data.get("nodes") or {}), "doc": str(data.get("doc") or "")[:300],
+                                "exposed": len(data.get("exposed") or [])}
+                    except (OSError, ValueError, UnicodeDecodeError, AttributeError):
+                        pass
+                if len(self._listing_cache) > 2000:
+                    self._listing_cache.clear()
+                self._listing_cache[key] = meta
+            f = systems.get(str(p))
+            out.append({"path": rel, "name": p.stem, "mtime": st.st_mtime, "size": st.st_size, "current": str(p) == cur,
+                        "system": f is not None, "type": (f.types[0] if f is not None and f.types else None),
+                        "error": f.error if f is not None else None, **meta})
+        folder = str(lib.dirs[0]) if lib is not None and lib.dirs else str(self.root / "nodes")
+        return {"root": str(self.root), "files": out, "library_dir": folder, "current": cur}
+
+    def library_dir(self) -> Path:
+        lib = self.session.library
+        return lib.dirs[0] if lib is not None and lib.dirs else (self.root / "nodes").resolve()
+
+    def make_system(self, name: Any, ids: Any, replace: bool, doc: str, overwrite: bool) -> dict:
+        """Save the selected nodes as a library node (a system graph in the node folder); optionally swap the selection for it."""
+        from .. import subgraph
+        from ..graph import GraphError
+        from ..link.session import _atomic_write
+        s = self.session
+        if not isinstance(name, str) or not subgraph.NAME.match(name):
+            raise ApiError(400, "name must be letters, digits and _ (not starting with a digit): it becomes the node's type name")
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids) or not ids:
+            raise ApiError(400, '"nodes" must list the ids of the nodes to save')
+        folder = self.library_dir()
+        target = folder / (name + ".json")
+        reg = s.evaluator.registry
+        if name in reg and not (overwrite and reg.get(name).source == str(target)):
+            other = reg.get(name).source
+            raise ApiError(409, f"a node type called {name!r} already exists ({'in ' + other if other else 'built in'})")
+        if target.exists() and not overwrite:
+            raise ApiError(409, f"{target.name} already exists in the node folder")
+        with s.lock:
+            graph = s.graph.copy()
+        try:
+            data, _ports = subgraph.extract(graph, ids, doc)
+            ops = subgraph.replace_ops(graph, ids, name) if replace else None
+        except GraphError as e:
+            raise ApiError(400, str(e)) from None
+        before = target.read_text(encoding="utf-8") if target.exists() else None
+        from ..graph import Graph
+        folder.mkdir(parents=True, exist_ok=True)
+        _atomic_write(target, Graph.from_dict(data, reg, check=False).to_json())
+        s._poll_library()
+        if name not in reg or reg.get(name).source != str(target):         # the engine refused it: put things back and say why
+            entry = s.library.files.get(target) if s.library is not None else None
+            why = entry.error if entry is not None and entry.error else "the engine could not load it"
+            if before is None:
+                target.unlink(missing_ok=True)
+            else:
+                _atomic_write(target, before)
+            s._poll_library()
+            raise ApiError(400, f"cannot make a node from that selection: {why}")
+        result = {"name": name, "path": str(target.relative_to(self.root)) if self.root in target.parents else str(target)}
+        if ops is not None:
+            try:
+                r = s.edit(ops, origin="api")
+            except Exception as e:  # noqa: BLE001
+                raise ApiError(400, f"saved {target.name}, but replacing the selection failed: {e}") from None
+            result.update(replaced=True, rev=r["rev"], node=r["results"][0].get("id"))
+        return result
+
+    def file_op(self, op: Any, path: Any, to: Any) -> dict:
+        s = self.session
+        p = self.resolve(path)
+        cur = s.path.resolve() if s.path else None
+        if not p.is_file():
+            raise ApiError(404, f"no such graph file: {path}")
+        if op == "duplicate":
+            if to:
+                dst = self.resolve(to)
+            else:
+                k, dst = 1, p.with_name(p.stem + "_copy.json")
+                while dst.exists():
+                    k += 1
+                    dst = p.with_name(f"{p.stem}_copy{k}.json")
+            if dst.exists():
+                raise ApiError(409, f"{dst.name} already exists")
+            dst.write_bytes(p.read_bytes())
+            return {"path": dst.relative_to(self.root).as_posix()}
+        if cur is not None and p == cur:
+            raise ApiError(409, "that graph is open: open another one first (or use Save As)")
+        if op == "rename":
+            dst = self.resolve(to)
+            if dst.exists():
+                raise ApiError(409, f"{dst.name} already exists")
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            p.rename(dst)
+            return {"path": dst.relative_to(self.root).as_posix()}
+        if op == "delete":
+            p.unlink()
+            return {"deleted": path}
+        raise ApiError(400, 'op must be "rename", "duplicate" or "delete"')
 
     def resolve(self, path: Any) -> Path:
         if not isinstance(path, str) or not path.strip():
@@ -351,6 +483,16 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/files":
             return self._json({"root": str(app.root), "files": app.files(),
                                "current": str(s.path) if s.path else None})
+        if path == "/api/library":
+            return self._json(app.library_listing())
+        if path == "/api/file":
+            p = app.resolve(parse_qs(urlparse(self.path).query).get("path", [None])[0])
+            if not p.is_file() or p.stat().st_size > 8_000_000:
+                raise ApiError(404, f"no such graph file (or too large): {p.name}")
+            try:
+                return self._json({"path": p.relative_to(app.root).as_posix(), "graph": json.loads(p.read_text(encoding="utf-8"))})
+            except (OSError, ValueError, UnicodeDecodeError) as e:
+                raise ApiError(400, f"cannot read {p.name}: {e}") from None
         if path == "/api/events":
             return self._events()
         raise ApiError(404, f"no such endpoint: {path}")
@@ -401,6 +543,17 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ApiError(404, f"no such graph file: {p}")
             snap = s.open_file(p, create=bool(body.get("create")))
             return self._json(snap)
+        if path == "/api/save_as":
+            p = app.resolve(body.get("path"))
+            try:
+                return self._json(s.save_as(p, overwrite=bool(body.get("overwrite"))))
+            except GraphError as e:
+                raise ApiError(409, str(e)) from None
+        if path == "/api/file_op":
+            return self._json(app.file_op(body.get("op"), body.get("path"), body.get("to")))
+        if path == "/api/make_system":
+            return self._json(app.make_system(body.get("name"), body.get("nodes"), bool(body.get("replace")), str(body.get("doc") or ""),
+                                              bool(body.get("overwrite"))))
         if path == "/api/save":
             return self._json({"saved": s.flush(), "error": s.save_error})
         if path in ("/api/blender/install", "/api/blender/launch"):
