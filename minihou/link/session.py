@@ -90,6 +90,7 @@ class Session:
     def __init__(self, graph: Graph, *, registry: Optional[Registry] = None, cache_bytes: int = DEFAULT_CACHE_BYTES):
         layout_missing(graph)
         self.graph = graph
+        self.live_modifier = None
         self.evaluator = Evaluator(registry or graph.registry, Cache(cache_bytes))
         self.lock = threading.RLock()
         self._cook_lock = threading.Lock()            # the evaluator is single-threaded
@@ -140,7 +141,55 @@ class Session:
         with self.lock:
             return {"rev": self._rev, "document_id": self._document_id, "graph": self.graph.to_dict(),
                     "path": str(self.path) if self.path else None,
-                    "can_undo": bool(self._undo), "can_redo": bool(self._redo)}
+                    "can_undo": bool(self._undo), "can_redo": bool(self._redo),
+                    "live_modifier": ({"label": self.live_modifier.label, "connected": self.live_modifier.connected}
+                                      if self.live_modifier else None)}
+
+    def _modifier_feeds(self, graph):
+        doc = self.live_modifier
+        if doc is None or not doc.connected or doc.geometry is None:
+            return {}
+        from .live import object_feeds
+        feeds = {nid: (doc.token, doc.geometry) for nid, n in graph.nodes.items() if n.type == "modifier_input"}
+        feeds.update(object_feeds(graph, doc.sources))
+        return feeds
+
+    def bind_modifier(self, doc):
+        # Keep each modifier in its own persisted graph, never overwrite its source template.
+        with self._file_lock, self.lock:
+            if self.live_modifier is doc:
+                return
+            if self._dirty and not self._flush_locked():
+                raise GraphError("Cannot save current graph; live editor was not switched")
+            doc.path.parent.mkdir(parents=True, exist_ok=True)
+            _atomic_write(doc.path, doc.graph.to_json())
+            self.open_file(doc.path)
+            self.live_modifier = doc
+            self.frame, self.fps = doc.frame, doc.fps
+            self._rev += 1
+            self._wake.set()
+        self._notify_graph("modifier")
+
+    def modifier_input(self, doc, geometry, token, frame, fps):
+        with self.lock:
+            changed = doc.token != token or doc.geometry is None
+            doc.geometry, doc.token = geometry.freeze(), token
+            doc.frame, doc.fps = frame, fps
+            if self.live_modifier is doc:
+                changed = changed or self.frame != frame or self.fps != fps
+                self.frame, self.fps = frame, fps
+                if changed:
+                    self._rev += 1
+                    self._wake.set()
+
+    def disconnect_modifier(self, doc):
+        with self.lock:
+            doc.connected = False
+            doc.geometry = None
+            if self.live_modifier is doc:
+                self._rev += 1
+                self._wake.set()
+        self._notify_graph("modifier-disconnected")
 
     # -- editing -----------------------------------------------------------
     def set_param(self, name: str, value: Any, origin: str = "link") -> Any:
@@ -219,6 +268,8 @@ class Session:
         layout_missing(graph)
         with self.lock:
             self.graph = graph
+            if self.live_modifier is not None:
+                self.live_modifier.graph = graph.copy()
             self._rev += 1
             self._wake.set()
             if save:
@@ -227,6 +278,8 @@ class Session:
 
     def _changed(self) -> None:
         """Call with the lock held after mutating the graph."""
+        if self.live_modifier is not None:
+            self.live_modifier.graph = self.graph.copy()
         self._rev += 1
         self._dirty = True
         self._wake.set()
@@ -341,23 +394,25 @@ class Session:
             rev = self._rev
             snapshot = self.graph.copy()
             frame, fps = self.frame, self.fps
+            feeds = self._modifier_feeds(snapshot)
         t0 = time.perf_counter()
         published: Optional[Result] = None
         try:
             extras: Dict[str, Tuple[Geometry, str]] = {}
             with self._cook_lock, timectx.at(frame, fps):
-                geo = self.evaluator.cook(snapshot)
+                geo = self.evaluator.cook(snapshot, feeds=feeds)
                 stats = self.evaluator.last_stats
                 live = self.evaluator.live_keys(snapshot)
                 for name, nid in snapshot.extra_outputs().items():     # more outputs: each its own Blender object
                     try:
-                        eg = self.evaluator.cook(snapshot, nid)
+                        eg = self.evaluator.cook(snapshot, nid, feeds=feeds)
                     except (NodeError, GraphError, ParamError) as e:
                         self._extra_error(name, f"{nid}: {e}")
                         continue
                     extras[name] = (eg, self.evaluator.last_stats.key)
                     live += self.evaluator.live_keys(snapshot, nid)
-                self.evaluator.cache.retain(live)
+                if not feeds:
+                    self.evaluator.cache.retain(live)
             overall = stats.key + "".join(f"|{n}:{k}" for n, (_, k) in sorted(extras.items()))
             if overall != self._last_key or self._last_error_msg is not None:
                 d = stats.to_dict()
@@ -407,6 +462,7 @@ class Session:
             snapshot = self.graph.copy()
             rev = self._rev
             frame, fps = self.frame, self.fps
+            feeds = self._modifier_feeds(snapshot)
         if node not in snapshot.nodes:
             return {"node": node, "rev": rev, "ok": False, "error": {"node": node, "message": f"no such node {node!r}"}}
         t0 = time.perf_counter()
@@ -418,8 +474,8 @@ class Session:
                     # the completed loop against its initial input for attribute flow.
                     begin = snapshot.nodes[node].inputs.get("begin")
                     sources = list(snapshot.input_ids(begin)) if begin in snapshot.nodes else []
-                ins = [self.evaluator.cook(snapshot, src) for src in sources if src in snapshot.nodes]
-                geo = self.evaluator.cook(snapshot, node)
+                ins = [self.evaluator.cook(snapshot, src, feeds=feeds) for src in sources if src in snapshot.nodes]
+                geo = self.evaluator.cook(snapshot, node, feeds=feeds)
                 stats = self.evaluator.last_stats.to_dict()
         except (NodeError, GraphError, ParamError) as e:
             return {"node": node, "rev": rev, "ok": False,
@@ -447,18 +503,24 @@ class Session:
             snapshot = self.graph.copy()
             rev = self._rev
             frame, fps = self.frame, self.fps
+            feeds = self._modifier_feeds(snapshot)
+            live_preview = self.live_modifier is not None and self.live_modifier.connected
+            sources = dict(self.live_modifier.sources) if live_preview else {}
         if node not in snapshot.nodes:
             return {"ok": False, "node": node, "rev": rev, "error": {"node": node, "message": f"no such node {node!r}"}}
         try:
             with self._cook_lock, timectx.at(frame, fps):
-                geo = self.evaluator.cook(snapshot, node)
+                geo = self.evaluator.cook(snapshot, node, feeds=feeds)
                 handles = []
                 inst = snapshot.nodes[node]
                 nt = self.evaluator.registry.get(inst.type) if inst.type in self.evaluator.registry else None
-                if has_handles(inst.type, nt):                   # inputs (cached) and parameters for the viewport handles
-                    ins = [self.evaluator.cook(snapshot, src) for src in snapshot.input_ids(node) if src in snapshot.nodes]
+                if has_handles(inst.type, nt):
+                    ins = [self.evaluator.cook(snapshot, src, feeds=feeds) for src in snapshot.input_ids(node) if src in snapshot.nodes]
                     handles = handles_for(inst.type, ins, geo, snapshot.effective_params(node), nt)
-        except (NodeError, GraphError, ParamError) as e:
+                if live_preview and geo.detail.get("instance_objects"):
+                    from .live import preview_instances
+                    geo = preview_instances(geo, sources)
+        except (NodeError, GraphError, ParamError, ValueError) as e:
             return {"ok": False, "node": node, "rev": rev,
                     "error": {"node": getattr(e, "node_id", None), "message": str(e)}}
         return {"ok": True, "node": node, "rev": rev, "geo": geo, "handles": handles}
@@ -673,6 +735,7 @@ class Session:
             if not path.exists():
                 path.parent.mkdir(parents=True, exist_ok=True)
                 _atomic_write(path, text)
+            self.live_modifier = None
             self.path = path
             self._save_enabled = True
             self._file_text = text

@@ -73,6 +73,77 @@ class EditorE2E(unittest.TestCase):
     def tearDown(self):
         self.assertEqual(self.errors, [], "browser errors")
 
+    def test_live_modifier_preview(self):
+        from minihou.link.server import LinkServer
+        from minihou.link.instance_client import InstanceClient
+        from tests.test_modifier_instances import GRAPH, mesh
+        server = LinkServer(self.s, port=0)
+        server.start()
+        self.web.link = server
+        self.addCleanup(server.stop)
+        client = InstanceClient(port=server.port)
+        self.addCleanup(client.close)
+        client.edit_live("browser-test", GRAPH, {"Move": [2, 0, 0]}, mesh(), label="Cube / MiniHou")
+        self.page.wait_for_function("document.querySelector('#live-modifier')?.textContent.includes('Cube / MiniHou')")
+        self.node("move").wait_for()
+        self.assertTrue(self.s.wait_idle())
+        self.assertTrue(self.s.status()["ok"], self.s.status())
+        self.assertTrue(self.s.preview("move")["ok"])
+        self.page.wait_for_function("window.minihou.preview?.ok && window.minihou.preview.points === 3")
+        self.page.click("#pv-frame")
+        self.assertTrue(until(lambda: self.pixels_vary(), 5))
+        self.assertTrue(self.page.locator("#live-modifier").is_visible())
+        self.page.screenshot(path=os.path.join(ROOT, "build", "validation", "live-editor.png"))
+        client.remove("browser-test")
+        self.page.wait_for_function("document.querySelector('#live-modifier')?.textContent.includes('Disconnected')")
+
+    def test_live_object_instance_meshes_render(self):
+        from minihou.link.server import LinkServer
+        from minihou.link.instance_client import InstanceClient
+        from minihou.link.diff import DiffState
+        from minihou import Evaluator
+        from tests.test_modifier_instances import mesh
+        server = LinkServer(self.s, port=0)
+        server.start()
+        self.web.link = server
+        self.addCleanup(server.stop)
+        client = InstanceClient(port=server.port)
+        self.addCleanup(client.close)
+        source = Evaluator().cook(Graph.from_dict({"nodes": {"box": {"type": "box"}}, "display": "box"}))
+        _, arrays = DiffState().build(source, 1)
+        client.set_sources("preview", {"source": arrays})
+        graph = {"nodes": {"input": {"type": "modifier_input"},
+                 "instances": {"type": "instance", "inputs": {"points": "input"},
+                               "params": {"objects": "@source", "random_spin": 0}}}, "display": "instances"}
+        client.edit_live("preview", graph, {}, mesh(), label="Object mesh preview")
+        self.page.wait_for_function("window.minihou.preview?.ok && window.minihou.preview.points === 24 && window.minihou.preview.tris > 0")
+        self.page.click("#pv-frame")
+        self.assertTrue(until(lambda: self.pixels_vary(), 5))
+        self.page.screenshot(path=os.path.join(ROOT, "build", "validation", "object-preview.png"))
+
+    def test_modifier_input_adds_named_outputs_and_wires_them(self):
+        self.s.replace_graph(Graph.from_dict({"nodes": {
+            "input": {"type": "modifier_input", "pos": [20, 20]},
+            "copy": {"type": "copy_to_points", "pos": [20, 260], "inputs": {"points": "input"}}}, "display": "copy"}, check=False))
+        self.node("input").locator(".title").click()
+        self.page.once("dialog", lambda d: d.accept("Monkey"))
+        self.page.click("#add-modifier-input")
+        self.page.wait_for_selector('.node[data-id="input"] .input-output-label')
+        self.assertEqual(self.node("input").locator(".input-output-label").inner_text(), "Monkey")
+        child = next(nid for nid, n in self.s.graph.nodes.items() if n.type == "object_input")
+        self.assertEqual(self.page.locator(f'.node[data-id="{child}"]').count(), 0)
+        self.drag(self.node("input").locator(f'.port.out[data-node="{child}"]'), self.node("copy").locator('.port.in[data-port="source"]'))
+        self.assertTrue(until(lambda: self.s.graph.nodes["copy"].inputs.get("source") == child))
+        self.node("input").locator(".title").click()
+        self.page.get_by_label("Input name", exact=True).fill("Suzanne")
+        self.page.get_by_label("Input name", exact=True).press("Tab")
+        self.assertTrue(until(lambda: self.s.graph.nodes[child].meta.get("input_label") == "Suzanne"))
+        self.assertEqual(self.s.graph.nodes["copy"].inputs["source"], child)
+        self.page.screenshot(path=os.path.join(ROOT, "build", "validation", "group-input.png"))
+        self.page.get_by_role("button", name="Remove", exact=True).click()
+        self.assertTrue(until(lambda: child not in self.s.graph.nodes))
+        self.assertNotIn("source", self.s.graph.nodes["copy"].inputs)
+
     # -- helpers ---------------------------------------------------------------------
     def read_file(self):
         with open(self.path, encoding="utf-8") as f:
@@ -112,14 +183,14 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_selector('.node[data-id="loop_end1"].selected')
         self.assertEqual(self.s.graph.nodes["loop_end1"].inputs, {"geo": "transform1", "begin": "loop_begin1"})
         self.page.locator("#params button", has_text="Display Loop End").click()
-        count = self.page.locator('.prow[data-param="iterations"] input[type=number]')
+        count = self.page.locator('#params .prow[data-param="iterations"] input[type=number]')
         count.fill("4")
         count.press("Enter")
         self.assertTrue(until(lambda: self.s.graph.get_param("loop_end1", "iterations") == 4))
         self.page.locator("#canvas").focus()
         self.page.keyboard.press("f")
         self.node("transform1").locator(".title").click()
-        number = self.page.locator('.prow[data-param="translate"] input[type=number]').first
+        number = self.page.locator('#params .prow[data-param="translate"] input[type=number]').first
         number.fill("0.5")
         number.press("Enter")
         self.assertTrue(until(lambda: self.s.graph.get_param("transform1", "translate")[0] == .5))
@@ -186,7 +257,7 @@ class EditorE2E(unittest.TestCase):
         self.node("hills").locator(".title").click()
         held = []
         self.page.route("**/api/edit", lambda route: held.append(route))
-        number = self.page.locator('.prow[data-param="frequency"] input[type=number]')
+        number = self.page.locator('#params .prow[data-param="frequency"] input[type=number]')
         number.fill("0.73")
         number.press("Enter")
         self.page.wait_for_timeout(100)
@@ -547,6 +618,84 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: self.s.status()["ok"]))
         self.page.wait_for_function("minihou.preview.handleTips().length === 3")             # the arrows follow the moved result
 
+    def test_gizmo_drag_streams_preview_before_release(self):
+        self.handle_scene("transform", {"translate": [0, 1, 2]}, "h")
+        self.page.wait_for_timeout(350)  # finish the initial frame before measuring
+        self.page.evaluate("""() => {
+            window.dragFrames = [];
+            const pv = minihou.preview, original = pv.set.bind(pv);
+            pv.set = (...args) => { original(...args); dragFrames.push({t: performance.now(), bounds: pv.bounds()}); };
+            window.dragStart = performance.now();
+        }""")
+        tip = next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == "translate_x")
+        box = self.page.locator("#pv-canvas").bounding_box()
+        x, y = box["x"] + tip["tip"][0], box["y"] + tip["tip"][1]
+        self.page.mouse.move(x, y)
+        self.page.mouse.down()
+        try:
+            for step in range(1, 41):
+                self.page.mouse.move(x + tip["u"][0] * step * 2, y + tip["u"][1] * step * 2)
+                self.page.wait_for_timeout(25)
+            stats = self.page.evaluate("({frames: dragFrames.length, first_ms: dragFrames.length ? dragFrames[0].t - dragStart : null, duration_ms: performance.now() - dragStart})")
+        finally:
+            self.page.mouse.up()
+        print("Gizmo drag preview benchmark:", stats, flush=True)
+        self.assertGreaterEqual(stats["frames"], 3, "geometry must update during a continuous drag, not only after release")
+        expected = 80 / tip["ppu"]
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes["h"].params["translate"][0] - expected) < 0.15))
+        self.page.wait_for_function("expected => Math.abs(minihou.preview.bounds()[0][0] - (expected - 1)) < 0.15", arg=expected)
+
+    def test_gizmo_preview_slow_cooks_do_not_overlap(self):
+        import threading
+        original = self.s.preview
+        lock = threading.Lock()
+        active = peak = 0
+
+        def slow_preview(node):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            try:
+                time.sleep(0.12)
+                return original(node)
+            finally:
+                with lock:
+                    active -= 1
+
+        self.s.preview = slow_preview
+        self.test_gizmo_drag_streams_preview_before_release()
+        self.assertEqual(peak, 1, "slow cooks must not accumulate parallel preview requests")
+
+    def test_preview_discards_result_after_selecting_another_node(self):
+        import threading
+        self.handle_scene("transform", {"translate": [0, 1, 2]}, "h")
+        self.page.wait_for_timeout(350)
+        started, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        original = self.s.preview
+
+        def delayed_preview(node):
+            result = original(node)
+            if node == "h":
+                started.set()
+                release.wait(5)
+            return result
+
+        self.s.preview = delayed_preview
+        self.page.evaluate("minihou.edit([{op: 'set', id: 'h', params: {translate: [3, 1, 2]}}])")
+        self.page.wait_for_timeout(100)
+        self.assertTrue(started.is_set())
+        self.node("b").locator(".title").click()
+        self.page.evaluate("""() => {
+            window.previewNodes = [];
+            const pv = minihou.preview, original = pv.set.bind(pv);
+            pv.set = (...args) => { previewNodes.push(args[0].node); return original(...args); };
+        }""")
+        release.set()
+        self.page.wait_for_function("window.previewNodes.includes('b')")
+        self.assertNotIn("h", self.page.evaluate("window.previewNodes"))
+
     def test_dragging_an_extrude_arrow_clamps_and_works_for_plain_numbers(self):
         from minihou import Evaluator
         graph = Evaluator().cook(self.s.graph) if False else None
@@ -606,20 +755,13 @@ class EditorE2E(unittest.TestCase):
         self.addCleanup(lambda: (setattr(blender_setup, "list_blenders", orig[0]), setattr(blender_setup, "install_addon", orig[1]),
                                  setattr(blender_setup, "launch_blender", orig[2])))
 
-    def test_blender_bar_offers_a_draggable_zip_when_nothing_is_connected(self):
+    def test_blender_bar_offers_a_zip_download_with_install_instructions(self):
         self.stub_blenders([])
         self.page.reload()
         self.page.wait_for_selector("#blender-bar:not(.hidden)")
         chip = self.page.locator("#bb-zip")
         self.assertEqual(chip.get_attribute("href"), "/addon/minihou_link.zip")
-        self.assertEqual(chip.get_attribute("draggable"), "true")
-        got = self.page.evaluate("""() => {
-            const dt = new DataTransfer();
-            document.querySelector('#bb-zip').dispatchEvent(new DragEvent('dragstart', { dataTransfer: dt, bubbles: true, cancelable: true }));
-            return [dt.getData('DownloadURL'), dt.getData('text/uri-list')];
-        }""")
-        self.assertTrue(got[0].startswith("application/zip:minihou_link.zip:http://127.0.0.1:"), got)
-        self.assertTrue(got[0].endswith("/addon/minihou_link.zip"))
+        self.assertEqual(chip.get_attribute("draggable"), "false")
         self.page.wait_for_function("document.querySelector('#bb-text').textContent.includes('No Blender found')")
         self.assertIn("No Blender found", self.page.inner_text("#bb-text"))
         self.assertTrue(self.page.locator("#bb-install").is_disabled())                        # nothing to install into: the zip is the way
@@ -627,6 +769,7 @@ class EditorE2E(unittest.TestCase):
         with self.page.expect_download() as dl:
             chip.click()                                                                       # a click downloads it
         self.assertEqual(dl.value.suggested_filename, "minihou_link.zip")
+        self.assertIn("Install from Disk", self.page.inner_text("#bb-msg"))
 
     def test_blender_bar_installs_and_launches_and_can_be_hidden_and_recalled(self):
         import types
@@ -815,7 +958,7 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_selector('.node[data-id="m"]')
         self.node("m").locator(".title").click()
         self.page.wait_for_function("minihou.preview.tris === 24")
-        self.page.wait_for_function("minihou.preview.points === 16")
+        self.page.wait_for_function("minihou.preview.points === 16 && document.querySelector('#pv-node').innerText.includes('m')")
         from minihou import Evaluator
         self.merged = Evaluator().cook(self.s.graph, "m")
 
@@ -1139,7 +1282,7 @@ class EditorE2E(unittest.TestCase):
     def test_select_and_edit_a_parameter(self):
         self.node("hills").locator(".title").click()
         self.assertEqual(self.page.input_value("#params input.nid"), "hills")
-        num = self.page.locator('.prow[data-param="frequency"] input[type=number]')
+        num = self.page.locator('#params .prow[data-param="frequency"] input[type=number]')
         num.fill("0.5")
         num.press("Enter")
         self.assertTrue(until(lambda: self.s.graph.nodes["hills"].params.get("frequency") == 0.5))
@@ -1192,7 +1335,7 @@ class EditorE2E(unittest.TestCase):
 
     def test_wrangle_error_is_shown_on_the_node(self):
         self.node("ripple").locator(".title").click()
-        ta = self.page.locator('.prow[data-param="snippet"] textarea')
+        ta = self.page.locator('#params .prow[data-param="snippet"] textarea')
         ta.fill("@P.z = nope")
         ta.press("Control+Enter")
         self.page.wait_for_selector('.node[data-id="ripple"].error')
@@ -1205,7 +1348,7 @@ class EditorE2E(unittest.TestCase):
     def test_expose_toggle(self):
         self.node("ripple").locator(".title").click()
         self.node("spike_up").locator(".title").click()
-        self.page.locator('.prow[data-param="scale"] .expose').click()
+        self.page.locator('#params .prow[data-param="scale"] .expose').click()
         self.assertTrue(until(lambda: any(e.node == "spike_up" and e.param == "scale" for e in self.s.graph.exposed)))
 
     def test_edits_from_elsewhere_show_up_live(self):
@@ -1254,6 +1397,7 @@ class EditorE2E(unittest.TestCase):
 
     def test_double_click_opens_nested_groups_with_a_breadcrumb_path_back(self):
         import json as _json
+        from playwright.sync_api import expect
         a, b = f"e2e_inner_{os.getpid()}", f"e2e_outer_{os.getpid()}"
         os.makedirs(os.path.join(self.dir, "nodes"))
         inner = {"version": 1, "doc": "Inner.", "nodes": {"inp": {"type": "input", "params": {"name": "src"}},
@@ -1270,31 +1414,31 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(self.page.locator("#crumbs .crumb").count(), 1)                       # the root graph alone
         self.node("grp").locator(".title").dblclick()
         self.page.wait_for_selector('.node[data-id="deep"]')
-        self.assertEqual(self.page.locator("#crumbs .crumb").all_inner_texts(), ["demo", b])
+        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo", b])
         self.assertTrue(self.page.locator("#crumbs .crumb.cur").inner_text() == b)
         self.node("deep").locator(".title").dblclick()                                         # a group inside a group
         self.page.wait_for_selector('.node[data-id="inp"]')
         self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == f"{a}.json"))
-        self.assertEqual(self.page.locator("#crumbs .crumb").all_inner_texts(), ["demo", b, a])
+        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo", b, a])
         self.page.locator('#crumbs .crumb[data-index="1"]').click()                            # back out one level through the crumb
         self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == f"{b}.json"))
         self.page.wait_for_selector('.node[data-id="deep"]')
-        self.assertEqual(self.page.locator("#crumbs .crumb").all_inner_texts(), ["demo", b])
+        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo", b])
         self.page.keyboard.press("Alt+ArrowUp")                                                # and out to the root with the keyboard
         self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == "demo.json"))
         self.page.wait_for_selector('.node[data-id="grp"]')
-        self.assertEqual(self.page.locator("#crumbs .crumb").all_inner_texts(), ["demo"])
+        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo"])
         self.page.reload()                                                                     # the path survives a reload of the tab
         self.page.wait_for_selector('.node[data-id="grp"]')
         self.node("grp").locator(".title").dblclick()
         self.page.wait_for_selector('.node[data-id="deep"]')
         self.page.reload()
         self.page.wait_for_selector('.node[data-id="deep"]')
-        self.assertEqual(self.page.locator("#crumbs .crumb").all_inner_texts(), ["demo", b])
+        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo", b])
         self.page.click("#file-btn")                                                           # opening a file from the menu starts a new path
         self.page.locator('#file-menu .frow[data-path="demo.json"]').click()
         self.page.wait_for_selector('.node[data-id="grp"]')
-        self.assertEqual(self.page.locator("#crumbs .crumb").all_inner_texts(), ["demo"])
+        expect(self.page.locator("#crumbs .crumb")).to_have_text(["demo"])
 
     def test_graph_text_is_never_html(self):
         payload = '<img src=x onerror="window.__xss=1"><b>bold</b>'
@@ -1485,6 +1629,34 @@ class EditorE2E(unittest.TestCase):
 
     def view_angles(self):
         return self.page.evaluate("[minihou.preview.view.yaw, minihou.preview.view.pitch]")
+
+    def test_viewport_tool_strips_context_and_hints(self):
+        self.box_scene()
+        self.page.click('#preview [data-mode="edge"]')
+        self.assertEqual(self.page.locator('#pv-hint-title').inner_text(), 'Select edges')
+        self.page.click('#pv-hints-toggle')
+        self.assertFalse(self.page.locator('#pv-hints').is_visible())
+        self.page.click('#pv-hints-toggle')
+        self.page.select_option('#pv-view-extra', 'back')
+        self.page.wait_for_function('Math.abs(minihou.preview.view.yaw - Math.PI / 2) < 0.001')
+        self.page.locator('#pv-normals').check()
+        self.assertTrue(self.page.evaluate('minihou.preview.opt.normals'))
+        self.page.locator('#pv-normals').uncheck()
+        self.page.evaluate("async () => { await minihou.edit([{op:'insert',after:'b',type:'polybevel',params:{distance:0.1}}]); }")
+        self.node('polybevel1').click()
+        field = self.page.locator('#pv-context [data-param="distance"] input[type="number"]')
+        field.fill('0.23')
+        field.press('Tab')
+        self.assertTrue(until(lambda: self.s.graph.nodes['polybevel1'].params.get('distance') == 0.23))
+        self.page.wait_for_function("document.querySelector('#params [data-param=distance] input[type=number]').value === '0.23'")
+        field.focus()
+        field.fill('0.31')
+        self.page.wait_for_timeout(700)
+        self.assertEqual(field.input_value(), '0.31')
+        field.press('Tab')
+        self.assertTrue(until(lambda: self.s.graph.nodes['polybevel1'].params.get('distance') == 0.31))
+        self.page.click('#pv-frame-all')
+        self.page.screenshot(path=os.path.join(ROOT, 'build', 'validation', 'viewport-tool-strips.png'))
 
     def test_axis_views_ortho_gizmo_and_frame_selection(self):
         import math

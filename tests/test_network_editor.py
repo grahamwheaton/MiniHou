@@ -38,6 +38,13 @@ class NetworkRoutingTests(unittest.TestCase):
             self.assertFalse(self.router._thread.is_alive())
             return self.router.snapshot(), opened.call_count
 
+    def test_desktop_activation_does_not_open_browser(self):
+        calls = []
+        self.web.desktop_activate = lambda body: calls.append(body) or True
+        state, browsers = self.route(self.b)
+        self.assertEqual((state["state"], browsers), ("ready", 0))
+        self.assertEqual(calls, [{}])
+
     def test_two_templates_route_and_flush_current_edits(self):
         self.s.edit([{"op": "set", "id": "g", "params": {"rows": 7}}])
         state, calls = self.route(self.b)

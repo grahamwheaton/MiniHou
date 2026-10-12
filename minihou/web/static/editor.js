@@ -84,7 +84,9 @@
         a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
       } }, "Unsent edits"));
   }
+  let desktopPendingEdits = 0;
   async function edit(ops, context = { path: S.path, documentId: S.documentId }) {
+    desktopPendingEdits++;
     try {
       const r = await api("/api/edit", { ops, origin: "editor", document_id: context.documentId });
       applySnapshot(r.graph);
@@ -93,7 +95,7 @@
       if (context.documentId !== S.documentId || e.message.includes("Editor graph changed")) stashEdits(ops, context);
       else toast(e.message);
       return null;
-    }
+    } finally { desktopPendingEdits--; }
   }
 
   // Parameter changes are coalesced: one request in flight, the latest values win (smooth slider drags).
@@ -153,6 +155,10 @@
       pendingSet.clear(); pendingContext = null;
     }
     const fileChanged = snap.path !== S.path;
+    let liveBadge = $("#live-modifier");
+    if (!liveBadge) { liveBadge = h("span", { id: "live-modifier", class: "status" }); $("#preview").prepend(liveBadge); liveBadge.style.cssText = "flex:none;padding:6px 10px;white-space:normal;color:#8fdbad"; }
+    liveBadge.textContent = snap.live_modifier ? `${snap.live_modifier.connected ? "Live" : "Disconnected"}: ${snap.live_modifier.label}` : "";
+    liveBadge.style.display = snap.live_modifier ? "block" : "none";
     if (fileChanged && snap.path) updateTrail(snap.path);                           // a snapshot without a file (transient) leaves the path alone
     if (snap.path && snap.path !== lastRemembered && S.root) { lastRemembered = snap.path; rememberFile(relPath(snap.path)); }
     S.rev = snap.rev; S.graph = snap.graph; S.path = snap.path; S.documentId = snap.document_id;
@@ -188,7 +194,17 @@
   // ---------------------------------------------------------------- geometry of the drawing
   const nodeOf = (id) => S.graph.nodes[id];
   const typeOf = (id) => S.types[(nodeOf(id) || {}).type] || { inputs: [], params: [], category: "" };
+  function inputMembers(id) {
+    return Object.entries(S.graph.nodes).filter(([, n]) => n.type === "object_input" && n.input_owner === id);
+  }
+  function inputOwner(id) {
+    const owner = nodeOf(id)?.input_owner;
+    return nodeOf(id)?.type === "object_input" && nodeOf(owner)?.type === "modifier_input" ? owner : null;
+  }
+  function nodeHeight(id) { return H + inputMembers(id).length * 22; }
   function pos(id) {
+    const owner = inputOwner(id);
+    if (owner) return pos(owner);
     if (S.dragPos.has(id)) return S.dragPos.get(id);
     const p = (nodeOf(id) || {}).pos;
     return Array.isArray(p) ? p : [0, 0];
@@ -206,7 +222,14 @@
     const off = spec && spec.multi && m > 1 ? (k - (m - 1) / 2) * Math.min(7, 26 / (m - 1)) : 0;
     return [x + (W * (portIndex + 1)) / (n + 1) + off, y];
   }
-  const outPortCenter = (id) => { const [x, y] = pos(id); return [x + W / 2, y + H]; };
+  const outPortCenter = (id) => {
+    const owner = inputOwner(id);
+    if (owner) {
+      const [x, y] = pos(owner), i = inputMembers(owner).findIndex(([key]) => key === id);
+      return [x + W, y + H + i * 22];
+    }
+    const [x, y] = pos(id); return [x + W / 2, y + nodeHeight(id)];
+  };
   function wirePath([x1, y1], [x2, y2]) {
     const dy = Math.max(40, Math.abs(y2 - y1) / 2) + (y2 < y1 ? 60 : 0);
     return `M${x1},${y1} C${x1},${y1 + dy} ${x2},${y2 - dy} ${x2},${y2}`;
@@ -227,7 +250,7 @@
     const r = canvas.getBoundingClientRect();
     if (!ids.length) { S.view = { x: r.width / 2 - W / 2, y: r.height / 3, k: 1 }; applyView(); return; }
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const id of ids) { const [x, y] = pos(id); x0 = Math.min(x0, x); y0 = Math.min(y0, y - 30); x1 = Math.max(x1, x + W); y1 = Math.max(y1, y + H + 10); }
+    for (const id of ids) { const [x, y] = pos(id); x0 = Math.min(x0, x); y0 = Math.min(y0, y - 30); x1 = Math.max(x1, x + W); y1 = Math.max(y1, y + nodeHeight(id) + 10); }
     const pad = 60;
     const k = Math.max(0.25, Math.min(1.3, (r.width - 2 * pad) / (x1 - x0), (r.height - 2 * pad) / (y1 - y0)));
     S.view = { k, x: r.width / 2 - ((x0 + x1) / 2) * k, y: r.height / 2 - ((y0 + y1) / 2) * k };
@@ -262,19 +285,20 @@
     const live = upstreamOfDisplay(), disp = displayNode();
     const keep = new Set();
     for (const [id, n] of Object.entries(S.graph.nodes)) {
+      if (inputOwner(id)) continue;
       keep.add(id);
       const t = typeOf(id);
       let el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
       if (!el) { el = h("div", { class: "node", dataset: { id } }); nodesEl.append(el); }
       const [x, y] = pos(id);
-      el.style.left = x + "px"; el.style.top = y + "px";
+      el.style.left = x + "px"; el.style.top = y + "px"; el.style.height = nodeHeight(id) + "px";
       el.className = ["node", "cat-" + (t.category || "other"), t.category === "system" && t.source && "group", S.sel.has(id) && "selected", id === disp && "display",
         id === errNode && "error", !live.has(id) && "unused"].filter(Boolean).join(" ");
       const ex = exposedOf(id);
       // Rebuild a node's DOM only when its structure changes (wiring, comment, flags); status updates touch just the
       // status line. Stable elements keep hover state and never vanish under a click or a drag.
       const subSig = JSON.stringify([id === errNode && st.error.message, nodeMs[id], cached.has(id), n.type]);
-      const structSig = JSON.stringify([n.type, n.inputs, n.comment, ex.map((e) => e.name), t.inputs.length, id === disp, t.category === "system" && !!t.source]);
+      const structSig = JSON.stringify([inputMembers(id).map(([key, child]) => [key, child.input_label]), n.type, n.inputs, n.comment, ex.map((e) => e.name), t.inputs.length, id === disp, t.category === "system" && !!t.source]);
       if (el._struct === structSig) {
         if (el._sub !== subSig) { el._sub = subSig; el.querySelector(".sub").replaceChildren(...subLine(id, n, st, errNode, nodeMs, cached)); }
         continue;
@@ -292,6 +316,11 @@
         kids.push(h("div", { class: "port-label", style: { left: cx + "px" } }, spec.name));
       });
       kids.push(h("div", { class: "port out", dataset: { node: id }, title: "output: drag to an input" }));
+      inputMembers(id).forEach(([key, child], i) => {
+        kids.push(h("div", { class: "input-output-label", style: { position: "absolute", right: "14px", top: (H + i * 22 - 8) + "px", fontSize: "11px" } }, child.input_label || key));
+        kids.push(h("div", { class: "port out", dataset: { node: key }, title: child.input_label || key,
+          style: { left: (W - 7) + "px", top: (H + i * 22 - 7) + "px", bottom: "auto" } }));
+      });
       if (n.comment) kids.push(h("div", { class: "comment" }, String(n.comment)));
       if (t.category === "system" && t.source) kids.push(h("div", { class: "groupmark", title: "A group: double-click to open it" }, "▣"));
       if (ex.length) kids.push(h("div", { class: "badge", title: "Exposed to Blender: " + ex.map((e) => e.name).join(", ") }, "B"));
@@ -454,7 +483,7 @@
     $("#bb-zip").classList.toggle("hidden", !addon.available);
     $("#bb-text").textContent = BB.connected ? "Blender is connected." :
       blenders.length ? "Blender is not connected. Install the add-on once, then open Blender:" :
-        "No Blender found here. Drag the zip onto a Blender window (4.2+), or use Preferences > Add-ons > Install from Disk:";
+        "No Blender found here. Download the ZIP, then use Blender Preferences > Add-ons > Install from Disk:";
     if (!BB.msg) $("#bb-msg").textContent = "";
   }
   async function blenderAction(kind) {
@@ -476,12 +505,10 @@
     try { localStorage.removeItem(BAR_KEY); } catch (e) { /* ignore */ }
     BB.forced = true; BB.msg = false; renderBlenderBar();
   };
-  $("#bb-zip").addEventListener("dragstart", (e) => {                 // Chrome/Edge turn this into a file when dropped on another app
-    const url = new URL($("#bb-zip").getAttribute("href"), location.href).href;
-    e.dataTransfer.setData("DownloadURL", `application/zip:minihou_link.zip:${url}`);
-    e.dataTransfer.setData("text/uri-list", url);
-    e.dataTransfer.effectAllowed = "copy";
-  });
+  $("#bb-zip").onclick = () => {
+    BB.msg = true;
+    $("#bb-msg").textContent = "In Blender: Preferences > Add-ons > menu > Install from Disk. Choose the downloaded ZIP, then enable MiniHou Link.";
+  };
 
   // ---------------------------------------------------------------- frame (time)
   function syncSlider(f) {
@@ -576,12 +603,14 @@
   const EXPOSABLE = new Set(["float", "int", "bool", "vec3"]);
 
   function renderParams(statusOnly) {
+    updateViewportHints();
+    updateViewportContext();
     const panel = $("#params");
     const ids = [...S.sel].filter((id) => nodeOf(id));
     document.body.classList.toggle("no-selection", ids.length === 0);
-    const key = ids.length === 1 ? ids[0] + ":" + nodeOf(ids[0]).type : ids.length ? "multi:" + ids.join(",") : "graph";
+    const key = ids.length === 1 ? ids[0] + ":" + JSON.stringify({ ...nodeOf(ids[0]), params: undefined }) + JSON.stringify(inputMembers(ids[0])) : ids.length ? "multi:" + ids.join(",") : "graph";
     const busy = scrubbing || panel.contains(document.activeElement);
-    if (key === panelKey && (busy || statusOnly)) { syncParams(ids[0]); return; }
+    if (key === panelKey && (ids.length === 1 || busy || statusOnly)) { syncParams(ids[0]); return; }
     panelKey = key;
     if (ids.length === 1) panel.replaceChildren(...nodePanel(ids[0]));
     else if (ids.length > 1) panel.replaceChildren(...multiPanel(ids));
@@ -621,6 +650,28 @@
       h("button", { onclick: () => removeNodes([id]) }, "Delete"),
       t.category === "system" && t.source && h("button", { title: "Open this system's graph to edit it (saves reload it everywhere)",
         onclick: () => openFile(t.source, false, { mode: "push", via: id }) }, "Edit system")));
+    if (n.type === "modifier_input") {
+      out.push(h("div", { class: "section" }, "Modifier inputs"));
+      out.push(h("div", { class: "pdoc" }, "Add object inputs here. Pick their Blender objects on the modifier, then wire the named outputs into your graph."));
+      for (const [key, child] of inputMembers(id)) {
+        out.push(h("div", { class: "pw" },
+          h("input", { type: "text", value: child.input_label || key, "aria-label": "Input name", onchange: async (e) => {
+            const label = e.target.value.trim();
+            if (label) await edit([{ op: "meta", id: key, set: { input_label: label } }]);
+          } }),
+          h("button", { title: "Remove this input and its wires", onclick: async () => {
+            await edit([{ op: "remove", id: key }]); panelKey = null; renderParams();
+          } }, "Remove")));
+      }
+      out.push(h("button", { id: "add-modifier-input", onclick: async () => {
+        const label = prompt("Object input name", "Object");
+        if (!label?.trim()) return;
+        const key = uniqueId(id + "_object_");
+        const r = await edit([{ op: "add", id: key, type: "object_input", pos: pos(id) },
+          { op: "meta", id: key, set: { input_owner: id, input_label: label.trim() } }]);
+        if (r) { panelKey = null; render(); }
+      } }, "+ Add Object Input"));
+    }
     const ins = inputs(id);
     if (ins.length) {
       out.push(h("div", { class: "section" }, "Inputs"));
@@ -747,9 +798,8 @@
       window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
     });
   }
-  function syncParams(id) {
-    // Update values in place (keeps focus and an in-progress drag) when the same node's panel is showing.
-    const panel = $("#params");
+  function syncParams(id, panel = $("#params")) {
+    // Update values in place, keeping focus and in-progress drags.
     if (!id || !nodeOf(id)) return;
     const err = panel.querySelector('[data-role="err"]');
     if (err) { const m = nodeErrorText(id); err.textContent = m; err.style.display = m ? "" : "none"; }
@@ -814,27 +864,43 @@
   // ---------------------------------------------------------------- 3-D preview of the selected (or display) node
   const pvMsg = (text) => { const m = $("#pv-msg"); m.textContent = text || ""; m.classList.toggle("hidden", !text); };
   const pv = window.MiniHouPreview ? window.MiniHouPreview.create($("#pv-canvas"), pvMsg) : null;
-  let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false;
+  let pvTimer = null, pvKey = null, pvNode = null, pvPath = null, pvOver = false;
+  let pvInFlight = false, pvDirty = false;
   function schedulePreview() {
     if (!pv || !pv.ok) return;
-    clearTimeout(pvTimer);
-    pvTimer = setTimeout(runPreview, PB.playing ? 0 : 200);
+    // A trailing debounce starves the viewport throughout a continuous gizmo drag.
+    // Keep the first deadline, and at most one geometry request in flight. Changes
+    // during a slow cook collapse into one request for the latest state afterwards.
+    pvDirty = true;
+    if (pvTimer === null && !pvInFlight) pvTimer = setTimeout(runPreview, PB.playing ? 0 : 33);
+  }
+  function previewTarget() {
+    const ids = [...S.sel].filter((id) => nodeOf(id));
+    return ids.length === 1 ? ids[0] : displayNode();
   }
   async function runPreview() {
-    const ids = [...S.sel].filter((id) => nodeOf(id));
-    const node = ids.length === 1 ? ids[0] : displayNode();
+    pvTimer = null; pvDirty = false; pvInFlight = true;
+    try { await loadPreview(); }
+    finally {
+      pvInFlight = false;
+      if (pvDirty) schedulePreview();
+    }
+  }
+  async function loadPreview() {
+    const node = previewTarget(), documentId = S.documentId;
     $("#pv-node").textContent = node ? "· " + node : "";
     if (!node) { pv.clear(); pvMsg(""); pvKey = null; return; }
-    const key = `${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}`;
+    const key = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}`;
     if (key === pvKey) return;
     pvKey = key;
-    const seq = ++pvSeq;
     let buf;
     try {
       const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node }) });
       buf = await r.arrayBuffer();
     } catch (e) { pvKey = null; return; }
-    if (seq !== pvSeq) return;
+    // A completed frame of the same node is useful even if a newer edit arrived.
+    // Never install geometry from the previous selection or document, though.
+    if (documentId !== S.documentId || node !== previewTarget()) { pvKey = null; return; }
     const { head, arrays } = window.MiniHouPreview.parse(buf);
     if (!arrays) {
       pv.clear();
@@ -888,6 +954,7 @@
   }
   function renderSelectionTools(s) {
     pvSelection = s;
+    updateViewportHints();
     const n = (s[SEL_KEY[s.mode]] || []).length;
     $("#pv-selinfo").textContent = s.mode === "view" ? "" : s.mode === "piece" ? `${n} face${n === 1 ? "" : "s"} in the selected pieces` : `${n} ${SEL_KEY[s.mode].replace(/s$/, "")}${n === 1 ? "" : "s"} selected`;
     document.querySelectorAll("#preview [data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === s.mode));
@@ -922,7 +989,32 @@
     $("#pv-xform").classList.toggle("hidden", !has);
     document.querySelectorAll("#pv-xform [data-tool]").forEach((b) => b.classList.toggle("on", b.dataset.tool === pv.tool));
   }
-  function setTool(t) { pv.setTool(t); updateToolButtons(); }
+  function updateViewportContext() {
+    const panel = $("#pv-context");
+    const ids = [...S.sel].filter((id) => nodeOf(id));
+    const id = ids.length === 1 ? ids[0] : "";
+    const key = id ? id + ":" + nodeOf(id).type : "";
+    if (panel.dataset.node !== key) {
+      panel.dataset.node = key;
+      const params = id ? typeOf(id).params.filter((p) => ["float", "int", "enum", "bool"].includes(p.kind) && p.ui !== "outgroup").slice(0, 4) : [];
+      panel.replaceChildren(...params.map((p) => paramRow(id, p)));
+      panel.classList.toggle("hidden", !params.length);
+    }
+    syncParams(id, panel);
+  }
+  function updateViewportHints() {
+    const state = $("#pv-state");
+    if (!state) return;
+    const id = [...S.sel].find((id) => nodeOf(id)), node = id && nodeOf(id);
+    const mode = pvSelection.mode;
+    const name = mode === "view" ? (node ? node.type + " · " + id : "View") : "Select " + ({ point: "points", edge: "edges", face: "faces", piece: "pieces" }[mode] || mode);
+    state.textContent = name;
+    $("#pv-hint-title").textContent = name;
+    $("#pv-hint-text").textContent = mode === "view"
+      ? "Drag: orbit · Middle/right drag: pan\nWheel: dolly · Double-click: frame all\nC: modeling tools · 1–4: component selection"
+      : "Click / drag box: select · Shift: add · Ctrl: remove\nAlt-drag / middle drag: orbit · Right drag: pan\nW / E / R: move / rotate / scale · C: modeling tools";
+  }
+  function setTool(t) { pv.setTool(t); updateToolButtons(); updateViewportHints(); }
   function toggleOrtho() {
     const on = pv.toggleOrtho();
     $("#pv-ortho").textContent = on ? "Ortho" : "Persp";
@@ -1044,6 +1136,12 @@
       $(id).checked = pv.opt[key];
       $(id).onchange = (e) => { pv.opt[key] = e.target.checked; pv.redraw(); };
     }
+    $("#pv-frame-all").onclick = () => pv.frameAll();
+    $("#pv-view-extra").onchange = (e) => { if (e.target.value) pv.viewAxis(e.target.value, false); e.target.value = ""; };
+    $("#pv-hints-toggle").onclick = (e) => {
+      const hidden = $("#pv-hints").classList.toggle("hidden");
+      e.currentTarget.setAttribute("aria-pressed", String(!hidden));
+    };
     $("#pv-frame").onclick = () => pv.frameSelection();
     document.querySelectorAll("#preview [data-view]").forEach((b) => { b.onclick = () => pv.viewAxis(b.dataset.view, false); });
     $("#pv-ortho").onclick = () => toggleOrtho();
@@ -1126,6 +1224,7 @@
     const expanded = new Set(ids);
     for (const id of ids) {
       const n = nodeOf(id);
+      for (const [member] of inputMembers(id)) expanded.add(member);
       const end = n.type === "loop_end" ? id : n.type === "loop_begin"
         ? Object.keys(S.graph.nodes).find(k => nodeOf(k).type === "loop_end" && nodeOf(k).inputs?.begin === id) : null;
       if (end) for (const member of loopRegion(end)) expanded.add(member);
@@ -1138,6 +1237,8 @@
       ops.push({ op: "add", id: map[id], type: n.type, params: n.params || {}, pos: [x + 40, y + 40], comment: n.comment || undefined });
     }
     for (const id of ids) {
+      const n = nodeOf(id);
+      if (inputOwner(id) && map[n.input_owner]) ops.push({ op: "meta", id: map[id], set: { input_owner: map[n.input_owner], input_label: n.input_label || id } });
       for (const [spec, srcs] of inputs(id)) for (const s of srcs) ops.push({ op: "connect", from: map[s] || s, to: map[id], port: spec.name });
     }
     const r = await edit(ops);
@@ -1166,6 +1267,7 @@
   // ---- copy / cut / paste: nodes travel as JSON text, so they can move between graphs and editor windows
   const CLIP_KEY = "minihou.clip", CLIP_LIMIT = 500;
   function clipboardText(ids) {
+    ids = [...new Set(ids.concat(ids.flatMap(id => inputMembers(id).map(([key]) => key))))];
     const keep = new Set(ids), nodes = {};
     for (const id of ids) {
       const n = nodeOf(id), ins = {};
@@ -1173,7 +1275,7 @@
         const inner = srcs.filter((s) => keep.has(s));
         if (inner.length) ins[spec.name] = Array.isArray((n.inputs || {})[spec.name]) ? inner : inner[0];
       }
-      nodes[id] = { type: n.type, params: n.params || {}, inputs: ins, pos: pos(id), comment: n.comment || undefined };
+      nodes[id] = { type: n.type, params: n.params || {}, inputs: ins, pos: pos(id), comment: n.comment || undefined, input_owner: keep.has(n.input_owner) ? n.input_owner : undefined, input_label: n.input_label };
     }
     return JSON.stringify({ minihou: "nodes", version: 1, nodes });
   }
@@ -1214,6 +1316,8 @@
       return op;
     });
     for (const id of ok) {
+      const n = d.nodes[id];
+      if (n.type === "object_input" && map[n.input_owner]) ops.push({ op: "meta", id: map[id], set: { input_owner: map[n.input_owner], input_label: n.input_label || id } });
       for (const [port, ref] of Object.entries(d.nodes[id].inputs || {})) {
         for (const src of Array.isArray(ref) ? ref : [ref]) if (okSet.has(src)) ops.push({ op: "connect", from: map[src], to: map[id], port });
       }
@@ -1952,5 +2056,5 @@
   applyView();
   try { recoveryButton(); } catch (e) { /* Browser storage may be disabled. */ }
   connectEvents();
-  window.minihou = { S, edit, frame, clipboardText, pasteNodes, preview: pv, layout };                  // handy from the browser console
+  window.minihou = { desktopCanClose: () => { document.activeElement?.blur(); return !desktopPendingEdits && !setInFlight && !pendingSet.size; }, S, edit, frame, clipboardText, pasteNodes, preview: pv, layout };                  // handy from the browser console
 })();

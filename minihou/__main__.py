@@ -110,6 +110,13 @@ def _cmd_serve(args) -> int:
         print(f"cannot start server: {e}", file=sys.stderr)
         server.stop()
         return 3
+    from .link.discovery import publish
+    discovery_record = None
+    if web:
+        try:
+            discovery_record = publish(args.host, port, web.url)
+        except OSError as e:
+            print(f"Automatic connection unavailable: {e}", file=sys.stderr)
     session.start()
     if not args.no_watch:
         session.watch_file(args.graph, save=not args.no_save)
@@ -130,11 +137,17 @@ def _cmd_serve(args) -> int:
             except (OSError, ValueError):
                 pass
     try:
-        while True:
-            time.sleep(0.5)
+        if web and getattr(args, "desktop", False):
+            from .desktop import run
+            run(web, args.root)
+        else:
+            while True:
+                time.sleep(0.5)
     except KeyboardInterrupt:
         print("shutting down")
     finally:
+        if discovery_record:
+            discovery_record.unlink(missing_ok=True)
         if web:
             web.stop()
         server.stop()

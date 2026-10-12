@@ -137,13 +137,11 @@ stack modifier; existing generator graphs continue to work through the proxy. `b
 graphs to prevent feeding the object's final evaluated output back into its own stack.
 
 Each modifier stores its own graph snapshot, parameters and identity in the blend file. Duplicated objects/modifiers
-receive new identities and private caches on the next update. Edit the graph template in the external browser and click
-**Reload Graph** on an instance to adopt the template while retaining matching parameter overrides. Other instances
-remain unchanged. Saved snapshots continue cooking if the source JSON is moved or unavailable. Removing a modifier
-releases its engine instance and unused cache objects on the next update; disconnecting releases connection-owned
-engine caches. Existing proxy and browser editing workflows remain available.
-The browser edits the template, not a live selected modifier session: its standalone cook has no `modifier_input`
-geometry and reports that missing input. Inspect actual instance results and cook status in Blender.
+receive new identities and private caches on the next update. **Edit Network** opens a live session for that
+modifier, including its actual preceding-stack geometry. Browser changes update the stored snapshot and Blender
+controls automatically; Blender control changes update the browser. Other instances remain unchanged.
+**Reload Graph** explicitly imports a saved JSON file. Save the blend file to retain the modifier snapshot.
+Removing a modifier or disconnecting releases its engine cache and live input.
 
 **Evaluation limits:** this is an interactive stack bridge, not a native synchronous Blender modifier callback.
 A main-thread timer reads a disposable copy of the preceding stack and refreshes private output caches. Results update
@@ -155,28 +153,52 @@ modifiers (including self-references and cache objects) are rejected to avoid cr
 this bridge does not schedule interdependent object stacks. Edit Mode and active renders are skipped. Slow cooks can pause the UI;
 failed cooks retain the last successful cache and report an error. These caches are not a baking/render-farm system.
 
+### Import multiple Blender objects
+
+Select the **modifier_input** node and click **+ Add Object Input** in its inspector. Name the input
+(e.g. Monkey). A named output socket appears on the Input node and a matching object picker appears on
+the Blender modifier. Wire that output into the graph. Rename inputs or remove them in the same inspector;
+renaming preserves the selected Blender object. The original bottom socket remains the modifier's incoming geometry.
+
+
+Add an **object_input** node for each mesh you want to import. Each node creates an **Object: node-name**
+picker on the MiniHou modifier card in Blender. Choose the mesh there. A blank Binding uses the node name;
+set Binding to share a named input between nodes. Object references survive object renames and blend-file saves.
+Connect these nodes to **copy_to_points**, merge, or other geometry nodes. Keep **modifier_input** in the
+output's upstream network to retain stack-modifier semantics. Source meshes are evaluated in local coordinates;
+source object placement transforms are ignored. Native source modifiers and materials are included.
+
+For native Blender instances, use **instance** with **Objects = @source**, and choose **Source Object** on
+the modifier card. Multiple bindings are supported, for example **@tree @rock** creates separate object pickers.
+The browser preview now shows the actual source geometry at the instance positions. Source mesh edits refresh
+the preview. Blender continues using native instances. Browser previews above two million realized vertices
+report a limit; reduce the scatter count to preview. The viewer shows geometry, not Blender shader materials.
+
+Object pickers live on the modifier itself; the separate MiniHou panel contains network-editing controls.
+Source meshes that depend on MiniHou outputs or the destination object are rejected to prevent feedback loops.
+As before, the MiniHou cook is an interactive bridge, not a fully native Geometry Nodes computation.
+
 ### Edit a modifier's network
 
-Each MiniHou modifier has **Edit Network** and **Reload Graph** controls in the MiniHou sidebar
-and in the Properties editor's Modifiers tab, under **MiniHou Source Objects**. Start or reuse the
-external server first. **Edit Network** opens the graph file recorded by that modifier, even when
-the server is currently editing a different file. HTTP routing runs in a background worker; its
-progress or error appears beside that modifier's controls. Update/restart the external engine as
-well as the add-on to enable the safe routing protocol.
+Start the updated MiniHou app, install its bundled Blender add-on, and restart Blender after updating.
+Select a mesh in Blender. In **Properties > Modifiers > MiniHou**, click **Add MiniHou Modifier**,
+then **Edit Network**. New modifiers start with an input/transform/output network.
+Blender discovers the newest compatible running local MiniHou app automatically, including when the
+default port is occupied. Existing connections stay with their current engine. Stale discovery records
+are checked by a protocol handshake and ignored. Start the MiniHou app first; the add-on does not launch it automatically.
+Connection overrides live in **Preferences > Add-ons > MiniHou Link**: turn off **Find MiniHou automatically**
+to select a host and port. The N-panel is hidden by default; **Show legacy sidebar tools** restores the
+advanced template, server-launch and proxy controls.
+The browser shows a **Live: object / modifier** badge and previews its actual input geometry.
+No legacy proxy connection or manual Reload Graph is required for live edits.
 
-There is **one shared editor session**. Selecting another modifier's network switches that session
-and all its browser tabs (and the legacy proxy graph). Submitted edits to the previous graph are
-saved first; a failed save prevents the switch. Finish typing a field before switching. A slider
-request that arrives after a switch is rejected for the new graph and retained in that browser's
-storage: **Unsent edits** downloads the original graph path and edit operations for manual recovery.
-Missing templates, paths outside the server's workspace root, and failed browser launches report
-errors instead of silently opening whichever graph was already active.
-
-This edits the **graph template file**, not the modifier's stored graph snapshot or live parameter
-values. After editing, save in the browser and click **Reload Graph** on each modifier that should
-adopt the changes. Other modifiers keep their saved snapshots until reloaded. A template using
-`modifier_input` can show a missing-input cook error in the browser: its actual upstream geometry
-is supplied when Blender cooks the modifier, not by this template-editing action.
+Each live modifier saves a separate graph under the workspace's `graphs/Blender-*.json`; the source template
+is preserved. There is one shared browser editor session: selecting another modifier switches all browser tabs.
+Pending changes are saved before switching; failed saves prevent the switch. Late edits from the previous
+document are rejected and retained in the browser's **Unsent edits** recovery download.
+Legacy proxy output is suspended while a live modifier is being edited. Disconnecting Blender clears the
+live input and displays a disconnected badge. Update both the app and add-on to use this protocol.
+Native Geometry Nodes group editing remains a separate template workflow.
 
 For native Geometry Nodes networks, use the wired MiniHou groups described in [Geometry Nodes integration](docs/GEONODES.md). They evaluate incoming geometry through staged probes and support native operations before, between and after MiniHou placements.
 
@@ -228,7 +250,7 @@ once and never overwritten. The same thing without packing: `py -m minihou app` 
 
 A bar at the top of the editor handles Blender while none is connected:
 
-* **drag `minihou_link.zip`** from the bar onto a Blender window (Blender 4.2+ installs a dropped zip), or click it to download;
+* **Download ZIP** saves `minihou_link.zip`. In Blender, use **Preferences > Add-ons > menu > Install from Disk**, select the ZIP, then enable MiniHou Link;
 * **Install add-on** runs the Blender you pick once, in the background, unpacks the add-on into its user add-ons folder, enables it and
   saves the preferences (restart Blender if it was already open);
 * **Open Blender** starts it with the add-on registered from a private copy and connected to this engine's port, so nothing is installed at all.

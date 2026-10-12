@@ -451,3 +451,19 @@ class FileFormatTests(unittest.TestCase):
         self.assertEqual(g2.nodes["g"].params["size_x"], 10.0)                  # ints read back as floats
         self.assertIsInstance(g2.nodes["g"].params["size_x"], float)
         self.assertEqual(g2.nodes["w"].params["snippet"], "a = 1, 2\n# [not, an, array]\n@P.z += a")
+
+
+class ModifierInputOwnershipTests(unittest.TestCase):
+    def test_rename_delete_undo_and_roundtrip(self):
+        graph = Graph.from_dict({"nodes": {
+            "input": {"type": "modifier_input"},
+            "socket": {"type": "object_input", "input_owner": "input", "input_label": "Monkey"}}, "display": "input"})
+        session = Session(graph)
+        session.edit([{"op": "rename", "id": "input", "to": "group_input"}])
+        self.assertEqual(session.graph.nodes["socket"].meta["input_owner"], "group_input")
+        restored = Graph.from_json(session.graph.to_json())
+        self.assertEqual(restored.nodes["socket"].meta["input_label"], "Monkey")
+        session.edit([{"op": "remove", "id": "group_input"}])
+        self.assertNotIn("socket", session.graph.nodes)
+        session.undo()
+        self.assertIn("socket", session.graph.nodes)
