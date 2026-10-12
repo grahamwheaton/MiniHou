@@ -23,7 +23,7 @@ class PieMenuData(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         import minihou.nodes  # noqa: F401 - registers the built-in nodes
-        out = subprocess.run(["node", "-e", DUMP, PIE], capture_output=True, text=True, check=True).stdout
+        out = subprocess.run(["node", "-e", DUMP, PIE], capture_output=True, text=True, encoding="utf-8", check=True).stdout
         cls.pages = json.loads(out)
 
     def items(self):
