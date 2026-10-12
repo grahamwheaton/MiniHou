@@ -239,6 +239,96 @@ def resample(geo, by, length, segments, group):
     return out
 
 
+# -- fillet -----------------------------------------------------------------------------------------------------
+@node("fillet", inputs=["geo"], category="curve", params=[
+    Float("radius", 0.2, min=0.0, soft_max=2.0, doc="Radius of the arc that replaces each corner (reduced where the neighbouring "
+                                                     "segments are too short to hold it)"),
+    Int("divisions", 6, min=1, max=256, soft_max=32, doc="Segments per rounded corner"),
+    Float("min_angle", 1.0, min=0.0, max=179.0, doc="Leave corners that turn by less than this many degrees alone"),
+    Str("group", "", doc="Points to round (empty: every corner)"),
+])
+def fillet(geo, radius, divisions, min_angle, group):
+    """Round the corners of curves with circular arcs (Houdini's Fillet). Open curves keep their end points; closed
+    curves and polygon outlines are rounded all the way round. Each corner becomes ``divisions + 1`` points on the arc
+    tangent to both segments; where two corners compete for a short segment each gets at most half of it, so arcs
+    never overlap. Point attributes are blended along the curve, ``curveu`` is not added. Every primitive becomes its
+    own curve (points are not shared afterwards)."""
+    t = geo.topology
+    if geo.nprims == 0:
+        return geo
+    sizes_all = t.prim_sizes()
+    _, _, sizes, closed, vert, _ = curve_arrays(geo)
+    nv = len(vert)
+    vp = t.vertex_point.astype(np.int64)[vert]
+    P = geo.P.astype(np.float64)[vp]
+    start = np.cumsum(sizes) - sizes
+    owner = np.repeat(np.arange(len(sizes)), sizes)
+    local = np.arange(nv) - start[owner]
+    cl = closed[owner]
+    sz = sizes[owner]
+    first, last = local == 0, local == sz - 1
+    prev = np.where(first, np.where(cl, start[owner] + sz - 1, np.arange(nv)), np.arange(nv) - 1)
+    nxt = np.where(last, np.where(cl, start[owner], np.arange(nv)), np.arange(nv) + 1)
+    interior = (sz >= 3) & (cl | ~(first | last))                       # corners need two neighbours
+    A, Bv = P[prev] - P, P[nxt] - P
+    La, Lb = np.linalg.norm(A, axis=1), np.linalg.norm(Bv, axis=1)
+    ok = interior & (La > 1e-12) & (Lb > 1e-12)
+    a = A / np.where(ok, La, 1.0)[:, None]
+    b = Bv / np.where(ok, Lb, 1.0)[:, None]
+    cos = np.clip(np.einsum("ij,ij->i", a, b), -1.0, 1.0)
+    theta = np.arccos(cos)                                               # the angle between the two segments (pi: straight)
+    turn = np.pi - theta
+    m = groups.mask(geo, "point", group)
+    selected = np.ones(nv, bool) if m is None else m[vp]
+    corner = ok & selected & (radius > 0) & (turn >= np.radians(max(min_angle, 1e-3))) & (theta > 1e-3)
+    if not corner.any():
+        return geo
+    half = np.where(corner, theta / 2.0, np.pi / 2.0)
+    tang = radius / np.tan(half)                                         # distance from the corner to where the arc touches
+    end_prev = ~cl[prev] & (first[prev] | last[prev])                    # a neighbour that is an end of an open curve is not a corner
+    end_next = ~cl[nxt] & (first[nxt] | last[nxt])
+    room = np.minimum(np.where(end_prev, La, La / 2.0), np.where(end_next, Lb, Lb / 2.0))
+    tang = np.where(corner, np.minimum(tang, room), 0.0)
+    R = tang * np.tan(half)
+    n = int(divisions)
+    cnt = np.where(corner, n + 1, 1)
+    guard_count(float(cnt.sum()), "fillet", "use fewer divisions")
+    total = int(cnt.sum())
+    src = np.repeat(np.arange(nv), cnt)
+    k = np.arange(total) - np.repeat(np.cumsum(cnt) - cnt, cnt)
+    c = corner[src]
+    s = np.where(c, k / float(n), 0.0)
+    # the arc: slerp between the two radii that end on the tangent points, about the centre on the bisector
+    bis = a + b
+    bn = np.linalg.norm(bis, axis=1)
+    bis = bis / np.where(bn > 1e-12, bn, 1.0)[:, None]
+    centre = P + bis * (R / np.maximum(np.sin(half), 1e-12))[:, None]
+    u1 = (P + a * tang[:, None] - centre) / np.maximum(R, 1e-12)[:, None]
+    u2 = (P + b * tang[:, None] - centre) / np.maximum(R, 1e-12)[:, None]
+    om = np.maximum(np.pi - theta, 1e-6)                                 # the angle the arc sweeps
+    so = np.sin(om)
+    w1, w2 = np.sin((1.0 - s) * om[src]) / so[src], np.sin(s * om[src]) / so[src]
+    arc = centre[src] + R[src, None] * (u1[src] * w1[:, None] + u2[src] * w2[:, None])
+    newP = np.where(c[:, None], arc, P[src])
+    # attributes: the value at each tangent point (blended towards the neighbour), then along the arc
+    fa = np.where(corner, tang / np.where(ok, La, 1.0), 0.0)[src]
+    fb = np.where(corner, tang / np.where(ok, Lb, 1.0), 0.0)[src]
+    ic, ip, inx = vp[src], vp[prev][src], vp[nxt][src]
+    first_val = B.lerp(geo.point, ic, ip, fa)
+    second_val = B.lerp(geo.point, ic, inx, fb)
+    point = {}
+    for name, arr in geo.point.items():
+        v1, v2 = first_val[name], second_val[name]
+        if arr.dtype.kind == "f":
+            ss = s.reshape((-1,) + (1,) * (arr.ndim - 1)).astype(np.float32)
+            point[name] = (v1 * (1 - ss) + v2 * ss).astype(np.float32)
+        else:
+            point[name] = v1
+    new_sizes = np.add.reduceat(cnt, start) if len(sizes) else np.zeros(0, np.int64)
+    prims = np.arange(geo.nprims)
+    return _curves_geometry(newP.astype(np.float32), new_sizes, closed, point, B.gather(geo.prim, prims), geo.detail)
+
+
 @node("carve", inputs=["geo"], category="curve", params=[
     Float("start", 0.0, min=0.0, max=1.0, doc="Keep from this fraction of each curve's length..."),
     Float("end", 1.0, min=0.0, max=1.0, doc="...to this one (animate it to grow a curve)"),

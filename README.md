@@ -419,6 +419,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `match_size` | geo | move (centre, or sit on the ground with justify min) and scale (uniform or per axis) to a target box |
 | `copy_transform` | geo | copies with an accumulating translate/rotate/scale (stairs, spirals, arrays); point `copynum` |
 | `peak` | geo | move points along their normals (optional group) |
+| `blend` | geo, targets* | morph the base towards shapes with the same points (shape keys / Blend Shapes): `amount`, per-target `weights` as numbers or expressions (`smoothstep(1, 49, @Frame)`, `sin(@Time * 3) * 0.5 + 0.5`), which attributes (`P`, `N`, `*`), a per-point `mask`, a `group`; several targets add their offsets |
 | `bound` | geo | bounding box, world-aligned or fitted to the principal axes; detail `bound_min/max/size` |
 | `noise` | geo | fractal Perlin noise; displaces `P` or writes any attribute (scalar or vector mode); optional group |
 | `group_create` | geo | a named point or primitive group: pattern/expression, bounding box, normal direction, random %, boundary |
@@ -468,6 +469,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `line` / `helix` / `curve` | - | open curves: straight, spiral (cone spirals too), or through typed points |
 | `resample` | geo | even spacing along curves (or polygon outlines); adds `curveu` (0 to 1 along each curve) |
 | `carve` | geo | keep part of each curve by length (animate `end` to grow it) |
+| `fillet` | geo | round the corners of curves and polygon outlines with circular arcs (`radius`, `divisions`, `min_angle`, `group`); arcs are tangent to both segments and share short segments (never overlap); attributes blend along the curve; open curves keep their ends |
 | `sweep` | geo | tubes along curves: rotation-minimising frames, radius x point `width`/`pscale`, caps, twist, uv |
 | `path_deform` | geo, curve | bend geometry along a curve (minimal-rotation or up-vector frames), offset, stretch to fit, twist; rotates N |
 | `convert_line` | geo | every edge to curves (joined into polylines), e.g. wireframes with `sweep` |

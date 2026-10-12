@@ -153,6 +153,10 @@ Worked through after that (all with tests; the bpy ones run with the `bpy` wheel
    pieces, computed in the viewer by union-find over the triangles) with a move/rotate/scale gizmo on every selection whose first drag inserts a
    `transform` (group = the selected points, pivot = their centre) and carries the drag over to it; a handle's start may now return a promise.
 
+10. **`fillet` and `blend`**: fillet rounds curve corners exactly (tangent arcs, radius limited to half of each neighbouring segment so arcs never overlap,
+    attributes blended along the curve); blend morphs towards same-point-count targets with additive offsets, expression weights over `@Frame`/`@Time`
+    (a small safe expression evaluator, no `eval`) and a per-point mask. Example graph `fillet_blend`.
+
 Open:
 
 - Extra outputs have no modifier or exposed parameters (only the display branch does).
