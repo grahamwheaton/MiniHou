@@ -3107,9 +3107,11 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(self.page.locator('#sheet .sh-h[data-col="P"] .sh-org').count(), 0)         # built-in columns are not 'made' by a node
         self.page.click('#sheet .sh-h[data-col="w"] .sh-org')                                        # the chip selects that node
         self.assertTrue(until(lambda: self.page.evaluate("[...minihou.S.sel].join()") == "w"))
+        self.page.wait_for_selector('#sheet .sh-row[data-id="0"] .sh-c[data-col="uv"]')              # selecting the node reloads the table: wait for its rows
         self.page.click("#sheet .sh-cols")
         self.page.uncheck('#sheet .sh-colsmenu input[data-col="uv"]')
-        self.assertEqual(self.page.locator('#sheet .sh-h[data-col="uv"]').count(), 0)
+        self.page.wait_for_function("document.querySelectorAll('#sheet .sh-h[data-col=\"uv\"]').length === 0")
+        self.page.wait_for_selector('#sheet .sh-row[data-id="0"] .sh-c[data-col="w"]')
         self.assertEqual(self.page.locator('#sheet .sh-row[data-id="0"] .sh-c[data-col="uv"]').count(), 0)
         self.assertEqual(self.page.locator('#sheet .sh-row[data-id="0"] .sh-c[data-col="w"]').count(), 1)
         self.page.click('#sheet .sh-tab[data-domain="prim"]')                                        # hiding is per domain

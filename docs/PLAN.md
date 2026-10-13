@@ -292,7 +292,7 @@ Worked through in order of how often Houdini users reach for them:
 8. **Bevel and shading**: `polybevel` splits the faces around each point into wedges at bevelled edges; each wedge's
    copy of the point moves `distance` from its bounding bevelled edges (bisector in one face, sliding along unbevelled
    or border edges across several), bevelled edges become quads and points with 3+ bevelled edges get corner
-   polygons. `normal` domain `vertex` averages only faces within the cusp angle, so Blender (custom normals) shows
+   polygons (with divisions, a grid of quads per corner on the sphere through the strips' profiles; see VIEWPORT-TOOLS.md). `normal` domain `vertex` averages only faces within the cusp angle, so Blender (custom normals) shows
    crisp chamfers on smooth surfaces. `tube` and `torus` join the sources.
 9. **UV unwrap** (`minihou/lscm.py`): islands across non-seam edges; non-disc islands (Euler characteristic != 1) are cut
    by a plane through their centre along whichever principal axis leaves the most discs, repeatedly. One sparse LSCM

@@ -4,7 +4,8 @@ The faces around each point are split into *wedges* by the bevelled edges (faces
 stay together). Every wedge gets its own copy of the point, moved into the wedge so it sits ``distance`` from the
 bevelled edges that bound it: along the bisector between two bevelled edges, or sliding along a mesh border or an
 unbevelled edge when that is where the wedge continues (so a subdivided box bevels cleanly). Each bevelled edge becomes
-a quad between the copies on its two sides, and points where three or more bevelled edges meet get a corner polygon.
+a quad between the copies on its two sides, and points where three or more bevelled edges meet get a corner polygon (with several divisions,
+a grid of quads on the sphere through the strips' profiles, see ``_segments``).
 """
 import numpy as np
 
@@ -331,7 +332,7 @@ def _segments(geo, first_strip, strip_count, count, shape, convexity, homes, og)
     """Refine strips with shared profile chains; corner fans close the same chains.
 
     Float attributes interpolate; discrete attributes retain their source identity.
-    Corner patches are triangle fans, not a general rolling-ball intersection.
+    Corners where strips meet are grids of quads on the sphere through their boundary (see ``patch``), not a general rolling-ball intersection.
     """
     P = geo.P.astype(float)
     offsets = geo.topology.prim_offsets
@@ -375,6 +376,103 @@ def _segments(geo, first_strip, strip_count, count, shape, convexity, homes, og)
         chains[key] = result
         return result
 
+    def patch(face):
+        """The corner where several bevelled edges meet, as Blender's vertex mesh does it: every ring corner owns a grid of quads and the grids meet
+        in the middle (a point for an even number of segments, a polygon for an odd one). The boundary is the profile chains of the strips; the inside
+        is a Coons patch pushed onto the sphere through the boundary (the exact rounded corner of a box), so the corner arches like the edges do.
+        None when a side is not a strip end (a cap), which keeps the plain fan."""
+        m = len(face)
+        sides = []
+        for a, b in zip(face, face[1:] + face[:1]):
+            seq = chains.get(tuple(sorted((a, b))))
+            if seq is None or len(seq) != count + 1:
+                return None
+            sides.append(seq if seq[0] == a else seq[::-1])
+        if m < 3:
+            return None
+        pts = [np.asarray([positions[i] for i in side], float) for side in sides]
+        loop = np.concatenate([q[:-1] for q in pts])
+        weight_sphere = 0.0 if shape == 'flat' else float(convexity)
+        centre, radius = None, 0.0
+        if weight_sphere > 0 and len(loop) >= 6:
+            A = np.c_[2 * loop, np.ones(len(loop))]
+            sol = np.linalg.lstsq(A, (loop * loop).sum(1), rcond=None)[0]
+            r2 = sol[3] + float(sol[:3] @ sol[:3])
+            if r2 > 0:
+                r = float(np.sqrt(r2))
+                miss = float(np.abs(np.linalg.norm(loop - sol[:3], axis=1) - r).max())
+                if miss <= 0.2 * r and r <= 25 * max(float(np.ptp(loop, axis=0).max()), _EPS):      # a sphere fits (a flat or saddle corner stays a plain patch)
+                    centre, radius = sol[:3], r
+
+        def project(q, w):
+            if centre is None:
+                return q
+            d = q - centre
+            on = centre + radius * d / np.maximum(np.linalg.norm(d, axis=-1, keepdims=True), _EPS)
+            return q + (weight_sphere * np.asarray(w, float))[..., None] * (on - q)
+
+        def along(q, t):
+            x = np.clip(t, 0.0, 1.0) * count
+            i0 = np.minimum(np.floor(x).astype(int), count - 1)
+            f = (x - i0)[..., None]
+            return q[i0] * (1 - f) + q[i0 + 1] * f
+
+        apex = project(loop.mean(axis=0), 1.0)
+        mids = [along(q, np.asarray(0.5)) for q in pts]
+
+        def seam(i, y):                                      # from the middle of side i to the apex, on the surface
+            y = np.asarray(y, float)
+            return project(mids[i] * (1 - y)[..., None] + apex * y[..., None], np.minimum(1.0, 8.0 * y))
+
+        h, odd = count // 2, count % 2
+        x = 2.0 * np.arange(h + 1) / count
+        X, Y = np.meshgrid(x, x, indexing='ij')                 # X along side i from its corner, Y back along side i-1
+        ids = {}
+        grids = []
+        for i in range(m):
+            prev = (i - 1) % m
+            bottom = along(pts[i], X / 2)
+            left = along(pts[prev], 1 - Y / 2)
+            right, top = seam(i, Y), seam(prev, X)
+            e = lambda a: a[..., None]                       # noqa: E731
+            F = (e(1 - Y) * bottom + e(Y) * top + e(1 - X) * left + e(X) * right
+                 - (e((1 - X) * (1 - Y)) * pts[i][0] + e(X * (1 - Y)) * mids[i] + e((1 - X) * Y) * mids[prev] + e(X * Y) * apex))
+            F = project(F, np.minimum(1.0, 8.0 * np.minimum(X, Y)))
+            grid = np.empty((h + 1, h + 1), np.int64)
+            for u in range(h + 1):
+                for v in range(h + 1):
+                    if u == 0 and v == 0:
+                        grid[u, v] = face[i]
+                    elif v == 0:
+                        grid[u, v] = sides[i][u]
+                    elif u == 0:
+                        grid[u, v] = sides[prev][count - v]
+                    else:
+                        if not odd and u == h and v == h:
+                            key = ('centre',)
+                        elif not odd and u == h:
+                            key = ('seam', i, v)
+                        elif not odd and v == h:
+                            key = ('seam', prev, u)
+                        else:
+                            key = ('own', i, u, v)
+                        if key not in ids:
+                            ids[key] = add_point(F[u, v], face[i], face[i], 0.)
+                        grid[u, v] = ids[key]
+            grids.append(grid)
+        made = []
+        for g in grids:                                        # quads wound like the ring they replace
+            for u in range(h):
+                for v in range(h):
+                    made.append([int(g[u, v]), int(g[u + 1, v]), int(g[u + 1, v + 1]), int(g[u, v + 1])])
+        if odd:                                                # bridge the grids across each side's middle, and close the middle with one polygon
+            for i in range(m):
+                g, nxt = grids[i], grids[(i + 1) % m]
+                for v in range(h):
+                    made.append([int(g[h, v]), int(nxt[v, h]), int(nxt[v + 1, h]), int(g[h, v + 1])])
+            made.append([int(g[h, h]) for g in grids])
+        return made
+
     strips = []
     for face in faces[first_strip:first_strip+strip_count]:
         a,b,c,d = face
@@ -394,9 +492,11 @@ def _segments(geo, first_strip, strip_count, count, shape, convexity, homes, og)
                     seq = seq[::-1]
                 boundary.extend(seq[:-1])
             if f >= first_strip+strip_count:
-                center = np.mean([positions[i] for i in boundary],axis=0)
-                center_id = add_point(center,face[0],face[0],0.)
-                made = [[a,b,center_id] for a,b in zip(boundary,boundary[1:]+boundary[:1])]
+                made = patch(face)
+                if made is None:                               # not a corner of strips (a cap): a fan from the middle
+                    center = np.mean([positions[i] for i in boundary],axis=0)
+                    center_id = add_point(center,face[0],face[0],0.)
+                    made = [[a,b,center_id] for a,b in zip(boundary,boundary[1:]+boundary[:1])]
             else:
                 made = [boundary]
         new_faces.extend(made)
