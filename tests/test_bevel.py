@@ -30,6 +30,65 @@ def bevel(src, **params):
     return cook({"s": src, "b": {"type": "polybevel", "inputs": {"geo": "s"}, "params": params}}, "b")
 
 
+class CornerPatchTests(unittest.TestCase):
+    """Where bevelled edges meet, the corner is a grid of quads on the rounded surface (Blender's vertex mesh), not a flat fan: the corner of a box
+    is an exact octant of a sphere whatever the number of segments, even or odd."""
+
+    def test_the_corner_of_a_box_is_an_octant_of_a_sphere_for_every_segment_count(self):
+        d = 0.2
+        centre = np.array([0.5 - d] * 3)
+        for divisions in (2, 3, 4, 5, 6, 7, 11, 16):
+            g = bevel({"type": "box"}, distance=d, divisions=divisions)
+            closed_shell(self, g)
+            P = g.P.astype(np.float64)
+            corner = P[(P > 0.5 - d - 1e-6).all(axis=1)]                               # points of the (+, +, +) corner and its arcs
+            r = np.linalg.norm(corner - centre, axis=1)
+            self.assertGreater(len(corner), 3 * divisions, divisions)
+            self.assertTrue(np.all(np.abs(r - d) < 2e-3), (divisions, float(np.abs(r - d).max())))
+            tri, owner = fan_triangulate(g.topology)                                   # every face looks outward: no dimple, no fold
+            T = P[g.topology.vertex_point[tri]]
+            normal = np.cross(T[:, 1] - T[:, 0], T[:, 2] - T[:, 0])
+            outward = np.einsum("ij,ij->i", normal, T.mean(axis=1))
+            self.assertTrue(np.all(outward > -1e-9), divisions)
+
+    def test_the_rounded_box_volume_converges_to_the_exact_one(self):
+        d = 0.2
+        exact = 1 - 12 * (1 - 2 * d) * d * d * (1 - np.pi / 4) - 8 * d ** 3 * (1 - np.pi / 6)
+        coarse = abs(volume(bevel({"type": "box"}, distance=d, divisions=4)) - exact)
+        fine = abs(volume(bevel({"type": "box"}, distance=d, divisions=16)) - exact)
+        self.assertLess(fine, 0.001)
+        self.assertLess(fine, coarse)
+
+    def test_corners_with_more_than_three_edges_and_other_shapes_stay_closed_and_finite(self):
+        for src, kw in (({"type": "box", "params": {"divisions": 4}}, dict(distance=0.03, divisions=8, min_angle=0)),
+                        ({"type": "box", "params": {"divisions": 3}}, dict(distance=0.04, divisions=5)),
+                        ({"type": "sphere", "params": {"rows": 6, "columns": 8}}, dict(distance=0.02, divisions=4, min_angle=20)),
+                        ({"type": "torus", "params": {"rows": 8, "columns": 8}}, dict(distance=0.02, divisions=4, min_angle=20)),
+                        ({"type": "box"}, dict(distance=0.2, divisions=6, shape="flat")),
+                        ({"type": "box"}, dict(distance=0.2, divisions=6, convexity=0.0)),
+                        ({"type": "box"}, dict(distance=0.2, divisions=64))):
+            g = bevel(src, **kw)
+            closed_shell(self, g)
+            self.assertTrue(np.isfinite(g.P).all())
+
+    def test_flat_shape_keeps_flat_corners_and_convexity_blends_toward_the_sphere(self):
+        d, centre = 0.2, np.array([0.3] * 3)
+        flat = bevel({"type": "box"}, distance=d, divisions=6, shape="flat")
+        half = bevel({"type": "box"}, distance=d, divisions=6, convexity=0.5)
+        full = bevel({"type": "box"}, distance=d, divisions=6)
+        radius = lambda g: np.linalg.norm(g.P[(g.P > 0.3 - 1e-6).all(axis=1)] - centre, axis=1)    # noqa: E731
+        self.assertLess(volume(flat), volume(half))
+        self.assertLess(volume(half), volume(full))
+        self.assertGreater(float(np.ptp(radius(flat))), float(np.ptp(radius(full))) + 0.01)
+
+    def test_bevel_groups_and_edge_groups_still_cover_the_corner_patches(self):
+        g = bevel({"type": "box"}, distance=0.1, divisions=4, outgrp_pointfilletpolys=True, outgrp_pointfilletedges=True)
+        patch = g.prim["group_pointfilletpolys"].astype(bool)
+        self.assertEqual(int(patch.sum()), 8 * 3 * 2 * 2)                              # 8 corners, 3 grids of 2 x 2 quads each
+        self.assertTrue(g.prim["group_bevel"].astype(bool)[patch].all())
+        self.assertTrue(g.prim["group_pointfilletpolys"].dtype.kind in "iu")
+
+
 class PrimitiveTests(unittest.TestCase):
     def test_tube_and_cone(self):
         g = cook({"t": {"type": "tube", "params": {"columns": 24, "rows": 3, "height": 2}}}, "t")
