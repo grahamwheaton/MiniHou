@@ -1347,6 +1347,7 @@
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.key.toLowerCase();
+      if (k === "f") { pv.frameSelection(); e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (k === " ") { tlToggle(); e.preventDefault(); e.stopImmediatePropagation(); return; }                        // timeline, with the pointer over the view
       if (k === "arrowright" || k === "arrowleft") {
         if (e.shiftKey) { tlStop(); tlGoto(k === "arrowright" ? PB.end : PB.start); } else tlStep(k === "arrowright" ? 1 : -1);

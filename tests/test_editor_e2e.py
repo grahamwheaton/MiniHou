@@ -120,6 +120,40 @@ class EditorE2E(unittest.TestCase):
         self.page.mouse.down(button='middle');self.page.mouse.move(r['x']+95,r['y']+45);self.page.mouse.up(button='middle')
         self.assertNotEqual(yaw,self.page.evaluate('minihou.preview.view.yaw'))
 
+    def test_f_frames_viewport_selection(self):
+        self.two_boxes()
+        self.page.click('#preview [data-mode="piece"]')
+        xy=self.view_xy('face',self.second_box_top())
+        self.page.mouse.click(*xy)
+        self.page.keyboard.press('f')
+        target=self.page.evaluate('minihou.preview.view.target')
+        self.assertAlmostEqual(target[0],2,places=4)
+        self.assertAlmostEqual(target[1],0,places=4)
+        self.assertAlmostEqual(target[2],0,places=4)
+
+    def test_wheel_zoom_shrinks_steps_as_surface_gets_closer(self):
+        import math
+        self.box_scene()
+        xy=self.view_xy('face',self.top)
+        self.page.mouse.move(*xy)
+        eyes=[self.page.evaluate('minihou.preview.navigationState().eye')]
+        for _ in range(4):
+            self.page.mouse.wheel(0,-100);self.page.wait_for_timeout(60)
+            eyes.append(self.page.evaluate('minihou.preview.navigationState().eye'))
+        distances=[math.dist(a,b) for a,b in zip(eyes,eyes[1:])]
+        self.assertGreater(distances[0],0)
+        for a,b in zip(distances,distances[1:]):self.assertLess(b,a)
+
+    def test_single_edge_bevel_from_viewport(self):
+        self.box_scene()
+        self.page.click('#preview [data-mode="edge"]')
+        self.page.mouse.click(*self.view_xy('edge',self.top_edges[0]))
+        self.page.click('#pv-actions button[data-action="Bevel"]')
+        self.assertTrue(until(lambda:'polybevel1' in self.s.graph.nodes))
+        self.page.wait_for_function("document.querySelector('#pv-node').textContent.includes('polybevel1')")
+        self.page.wait_for_function('minihou.preview.points === 10')
+        self.assertEqual(len(self.s.graph.nodes['polybevel1'].params['edges'].split()),1)
+
     def test_loop_cut_right_click_centers_without_camera_jump(self):
         self.box_scene()
         self.page.evaluate('minihou.preview.view.dist *= 0.7; minihou.preview.redraw()')
@@ -851,15 +885,17 @@ class EditorE2E(unittest.TestCase):
         self.assertGreaterEqual(d, 0.0)
         self.assertTrue(until(lambda: self.s.status()["ok"], 5))
 
-    def test_a_lone_edge_cannot_be_bevelled_and_the_error_says_why(self):
+    def test_a_lone_edge_bevel_shortcut_succeeds_and_undoes(self):
         self.box_scene()
         self.page.click('#preview [data-mode="edge"]')
         self.page.mouse.click(*self.view_xy("edge", list([self.top_points[0],self.top_points[1]])))
         self.assertEqual(len(self.selection()["edges"]), 1)
         self.page.keyboard.press("b")                                                        # the shortcut, with the mouse over the view
         self.assertTrue(until(lambda: "polybevel1" in self.s.graph.nodes))
-        self.page.wait_for_selector("#errorbar:not(.hidden)")
-        self.assertIn("cannot end inside the surface", self.page.inner_text("#errorbar"))
+        self.page.wait_for_function('minihou.preview.points === 10')
+        self.assertTrue(until(lambda:self.s.status()['ok']))
+        self.page.keyboard.press('Control+z')
+        self.assertTrue(until(lambda:'polybevel1' not in self.s.graph.nodes))
 
     def test_pick_a_face_and_box_select_faces_then_extrude(self):
         self.box_scene()

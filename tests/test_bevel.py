@@ -177,10 +177,18 @@ class EdgeSelectionTests(unittest.TestCase):
         self.assertGreater(out.nprims, g.nprims)
         self.assertEqual(len(parse_edges("3-1 1-3 2-2 5-4", 10)), 2)         # sorted, deduplicated, no self edges
 
+    def test_single_box_edge_terminates_without_cracks(self):
+        from minihou import topo
+        for edge in topo.edges(self.box()).points:
+            for divisions in (1,4):
+                g=self.bevel(self.box(),[tuple(edge)],distance=.1,divisions=divisions)
+                closed_shell(self,g)
+                self.assertEqual(len(np.unique(g.topology.vertex_point)),g.npoints)
+                self.assertGreater(volume(g),0)
+                self.assertTrue(np.isfinite(g.P).all())
+
     def test_clear_errors(self):
         g = self.box()
-        with self.assertRaisesRegex(ValueError, "cannot end inside the surface"):
-            self.bevel(g, [self.edges_of_prim(g, 0)[0]], distance=0.1)       # one edge that stops mid-surface
         for bad, msg in (("1-", "bad edge"), ("a-b", "bad edge"), ("0-99", "only 8 points")):
             with self.assertRaisesRegex(ValueError, msg):
                 from minihou import REGISTRY

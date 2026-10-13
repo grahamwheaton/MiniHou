@@ -124,20 +124,6 @@ def _limit_overlap(geo, pos, w, home, pv, N):
     return pos
 
 
-def _check_ends(geo, vp, bev, twin):
-    """A bevel cannot stop in the middle of a surface: a selected edge that ends at an interior point where no other
-    selected edge continues it would leave the faces around that point unsplit. Say so, naming the points."""
-    n = geo.npoints
-    count = np.bincount(vp[bev], minlength=n)
-    open_pt = np.zeros(n, bool)
-    open_pt[vp[twin < 0]] = True
-    dangling = np.flatnonzero((count == 1) & ~open_pt)
-    if len(dangling):
-        raise ValueError(f"a bevel cannot end inside the surface (at point{'s' if len(dangling) > 1 else ''} "
-                         f"{', '.join(map(str, dangling[:6].tolist()))}{'...' if len(dangling) > 6 else ''}): select a whole "
-                         f"edge loop, edges that meet other selected edges, or edges that run to an open border")
-
-
 # Houdini's PolyBevel "Output Groups" section: every one off by default, with these names.
 OUT = OutGroups(
     OutGroup("pointfilletpolys", "Point Fillet Polygons", "pointfilletpolys", "prim",
@@ -190,7 +176,6 @@ def polybevel(geo, distance, min_angle, group, group_type, edges, output_group, 
         n = max(geo.npoints, 1)
         want = np.isin(np.minimum(vp, vp[nx]) * n + np.maximum(vp, vp[nx]), picked[:, 0] * n + picked[:, 1])
         bev = two & want
-        _check_ends(geo, vp, bev, twin)
     if group_type == "points":
         sel = groups.mask(geo, "point", group)
         if sel is not None:
@@ -205,16 +190,21 @@ def polybevel(geo, distance, min_angle, group, group_type, edges, output_group, 
             psel = groups.mask(geo, "prim", group)
             want = psel[pv] | psel[pv[np.maximum(twin, 0)]]
         bev = two & want
-        _check_ends(geo, vp, bev, twin)
     if exclude_edges.strip():
         excluded = edgelib.mask(geo, exclude_edges)
         ei = topo.edges(geo).of_vertex
         bev &= ~np.where(ei >= 0, excluded[np.maximum(ei, 0)], False)
-        _check_ends(geo, vp, bev, twin)
     if not bev.any():
         return _outputs(geo, og, None)
-    bound_out = bev | ~two
-    bound_in = bound_out[pr]
+    # At a terminating bevel, split its two side-face corners from the cap fan.
+    # The cap polygons gain the two offset endpoints instead of rejecting the edge.
+    count = np.bincount(vp[bev], minlength=geo.npoints)
+    dangling = count == 1
+    side = bev | bev[pr]
+    other_in = np.maximum(twin[pr], 0)
+    other_out = nx[np.maximum(twin, 0)]
+    bound_out = bev | ~two | (dangling[vp] & two & (side | side[other_out]))
+    bound_in = bev[pr] | ~two[pr] | (dangling[vp] & two[pr] & (side | side[other_in]))
     # corners on either side of an unbevelled interior edge share a wedge
     join = np.flatnonzero(~bound_in)
     w = spatial.components(t.nvertices, join, twin[pr[join]])
@@ -245,12 +235,42 @@ def polybevel(geo, distance, min_angle, group, group_type, edges, output_group, 
     for _ in range(int(rlen.max()) - 1 if len(roots) else 0):
         steps.append(np.where(len(steps) < rlen, succ[steps[-1]], -1))
     walk = np.stack(steps, 1) if len(roots) else np.zeros((0, 0), np.int64)
-    ring_w = walk[walk >= 0]                                # row by row: each ring in order
+    rings = [row[row >= 0].tolist() for row in walk]
+    cap_corners = np.flatnonzero(dangling[vp] & ~side)
+    for point_id in np.flatnonzero(dangling):
+        caps = cap_corners[vp[cap_corners] == point_id]
+        # Several cap faces share the original point. Close the remaining gap
+        # with a triangle using the same orientation as the existing corner rings.
+        if len(caps) > 1:
+            candidates = on[vp[corner[on]] == point_id]
+            if len(candidates):
+                a = int(candidates[0]); b = int(succ[a]); c = int(w[caps[0]])
+                if len({a,b,c}) == 3:
+                    rings.append([a,b,c])
+    rlen = np.asarray([len(ring) for ring in rings], dtype=np.int64)
+    walk = np.full((len(rings), int(rlen.max()) if len(rlen) else 0), -1, np.int64)
+    for i, ring in enumerate(rings):
+        walk[i,:len(ring)] = ring
+    roots = walk[:,0] if len(rings) else np.zeros(0,np.int64)
+    ring_w = walk[walk >= 0]
     ring_src = corner[ring_w]
 
-    v_src = np.concatenate([np.arange(t.nvertices), q_src.ravel(), ring_src])
-    vpoint = w[v_src]
-    sizes = np.concatenate([t.prim_sizes(), np.full(len(c1), 4), rlen]).astype(np.int64)
+    original_points, original_sources, original_sizes = [], [], []
+    for f in range(t.nprims):
+        start = len(original_points)
+        for v in range(int(t.prim_offsets[f]), int(t.prim_offsets[f+1])):
+            if dangling[vp[v]] and not side[v]:
+                a = int(w[other_in[v]]) if two[pr[v]] and side[other_in[v]] else int(w[v])
+                b = int(w[other_out[v]]) if two[v] and side[other_out[v]] else int(w[v])
+                original_points.append(a); original_sources.append(v)
+                if b != a:
+                    original_points.append(b); original_sources.append(v)
+            else:
+                original_points.append(int(w[v])); original_sources.append(v)
+        original_sizes.append(len(original_points)-start)
+    v_src = np.concatenate([np.asarray(original_sources), q_src.ravel(), ring_src])
+    vpoint = np.concatenate([np.asarray(original_points), w[q_src.ravel()], w[ring_src]])
+    sizes = np.concatenate([original_sizes, np.full(len(c1), 4), rlen]).astype(np.int64)
     ring_first = corner[roots]
     p_src = np.concatenate([np.arange(t.nprims), pv[c1], pv[ring_first]])
     point = B.gather(geo.point, vp[corner])
@@ -278,7 +298,13 @@ def polybevel(geo, distance, min_angle, group, group_type, edges, output_group, 
     out = OUT.write(out, og, "pointfilletedges", lambda: edge_mask(out, _ring_pairs(walk, rlen)))
     if divisions > 1:
         out = _segments(out, t.nprims, nq, int(divisions), shape, float(convexity), geo.P[vp[corner]], og)
-    return B.drop_degenerate(out)
+    out = B.drop_degenerate(out)
+    if dangling.any():
+        used = np.unique(out.topology.vertex_point)
+        remap = np.full(out.npoints,-1,np.int32);remap[used]=np.arange(len(used))
+        out = B.make(out.P[used],remap[out.topology.vertex_point],out.topology.prim_offsets,
+                     B.gather(out.point,used),dict(out.vertex.items()),dict(out.prim.items()),out.detail)
+    return out
 
 
 def _ring_pairs(walk, rlen):

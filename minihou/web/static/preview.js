@@ -1004,7 +1004,13 @@ window.MiniHouPreview = (() => {
     };
     canvas.addEventListener("pointerup", endDrag); canvas.addEventListener("pointercancel", endDrag);
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-    canvas.addEventListener("wheel", (e) => { e.preventDefault(); if(fly){flySpeed=Math.max(.001,Math.min(100000,flySpeed*Math.exp(-e.deltaY*.0015)));flyHint();return;} view.dist *= Math.exp(e.deltaY * 0.0012); schedule(); }, { passive: false });
+    canvas.addEventListener("wheel", (e) => { e.preventDefault(); if(fly){flySpeed=Math.max(.001,Math.min(100000,flySpeed*Math.exp(-e.deltaY*.0015)));flyHint();return;} const cam=camera(),r=canvas.getBoundingClientRect(),direction=rayAt(cam,e.clientX-r.left,e.clientY-r.top),hit=raw?raycast(cam.eye,direction):null;
+      if(hit && !view.ortho){
+        const fraction=1-Math.exp(-Math.max(-500,Math.min(500,e.deltaY))*.0012);
+        const step=hit.t*fraction;
+        for(let i=0;i<3;i++)view.target[i]-=direction[i]*step;
+      }else view.dist=Math.max(.0001,view.dist*Math.exp(Math.max(-500,Math.min(500,e.deltaY))*.0012));
+      schedule(); }, { passive: false });
     canvas.addEventListener("dblclick", (e) => { if (sel.mode === "view") frameAll(); });
     if (window.ResizeObserver) new ResizeObserver(schedule).observe(canvas);
 

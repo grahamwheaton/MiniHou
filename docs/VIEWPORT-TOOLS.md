@@ -19,6 +19,9 @@ Holding Ctrl temporarily inverts snapping during transform and curve drags. PCG 
 
 PolyBevel now has Divisions (1–64), Round/Flat shape, Convexity (0 flat to 1 round), Limit Overlap, and Exclude Edges. Existing one-division graphs retain their chamfer. For a rounded bevel start with Divisions 4 and Convexity 1. Output Groups includes Point Fillet Polygons/Edges, Edge Fillet Polygons, Offset Edges/Points and Merged Points; groups follow the segmented topology. Merged Points stays empty because this implementation limits offsets rather than merging collisions.
 
-Round strips use tangent rational quadratic profiles. Corner junctions use shared-boundary triangle fans, not a rolling-ball patch solver. Houdini-specific custom profile ramps, slide-on-ring overrides, asymmetry tolerance, distance scaling modes, and global collision merging are not implemented; controls for unsupported algorithms are not shown. Explicit edge selections still need to continue to another selected edge or a mesh border.
+Round strips use tangent rational quadratic profiles. Corner junctions use shared-boundary triangle fans, not a rolling-ball patch solver. Houdini-specific custom profile ramps, slide-on-ring overrides, asymmetry tolerance, distance scaling modes, and global collision merging are not implemented; controls for unsupported algorithms are not shown. Terminating selected edges now create endpoint caps, including single box edges.
 
 Loop-cut commits now retain the current camera, including right-click to center the cut.
+
+
+F over the viewport frames the current component/object selection, or the displayed geometry if no components are selected. Wheel zoom uses the surface depth under the cursor when available, slowing near geometry; over empty background it falls back to distance-scaled zoom.
