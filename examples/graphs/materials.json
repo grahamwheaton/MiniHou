@@ -84,19 +84,14 @@
  },
  "exposed": [
   {
-   "name": "Cut Material",
-   "node": "cut",
-   "param": "material"
-  },
-  {
-   "name": "Wall Material",
-   "node": "skin",
-   "param": "material"
-  },
-  {
    "name": "Pieces",
    "node": "pts",
    "param": "count"
+  },
+  {
+   "name": "Seed",
+   "node": "pts",
+   "param": "seed"
   }
  ]
 }
