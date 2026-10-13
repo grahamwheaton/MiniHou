@@ -215,7 +215,13 @@ class EditorE2E(unittest.TestCase):
         self.page.keyboard.press("Control+Shift+z")
         self.assertTrue(until(lambda: len(self.s.graph.nodes) == 7))
         self.page.keyboard.press("f")
-        self.node("loop_begin_1").locator(".title").click()
+        for _ in range(3):                                                         # the redo above may still be re-rendering the graph
+            self.node("loop_begin_1").locator(".title").click()
+            try:
+                self.page.wait_for_function("(document.querySelector('#params input.nid') || {}).value === 'loop_begin_1'", timeout=4000)
+                break
+            except Exception:  # noqa: BLE001 - playwright TimeoutError: click again
+                continue
         self.page.fill("#params input.nid", "copy_begin")
         self.page.press("#params input.nid", "Enter")
         self.assertTrue(until(lambda: "copy_begin" in self.s.graph.nodes))
@@ -273,7 +279,7 @@ class EditorE2E(unittest.TestCase):
         downloading.value.save_as(saved)
         with open(saved, encoding="utf-8") as f:
             recovery = json.load(f)
-        self.assertEqual(recovery[-1]["path"], self.path)
+        self.assertEqual(os.path.realpath(recovery[-1]["path"]), os.path.realpath(self.path))      # the engine reports the resolved path
         self.assertEqual(recovery[-1]["ops"][0]["params"]["frequency"], .73)
         self.errors[:] = [e for e in self.errors if "400 (Bad Request)" not in e]
 
@@ -1553,12 +1559,13 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: "box1" in self.s.graph.nodes["all"].inputs.get("geos", [])))
         # pick the wire up from the input and drop it on empty space: disconnect
         self.page.set_viewport_size({"width": 1400, "height": 1200})
-        for _ in range(3):                                                                       # a drag can land early on a slow machine
-            self.drag(self.node("out").locator(".port.in"), self.page.locator("#canvas"))
-            self.page.mouse.move(*self.empty_spot())
-            if until(lambda: "geo" not in self.s.graph.nodes["out"].inputs, 3):
-                break
-        self.assertTrue(until(lambda: "geo" not in self.s.graph.nodes["out"].inputs))
+        self.page.mouse.move(*self.center(self.node("out").locator(".port.in")))
+        self.page.mouse.down()
+        x, y = self.empty_spot()                                                                 # drop on empty canvas, not on whatever sits mid-canvas
+        self.page.mouse.move(x + 20, y - 20, steps=8)
+        self.page.mouse.move(x, y, steps=5)
+        self.page.mouse.up()
+        self.assertTrue(until(lambda: "geo" not in self.s.graph.nodes["out"].inputs, 8))
         self.page.wait_for_selector("#errorbar:not(.hidden)")              # the output is now unwired
 
     def test_display_flag_rename_and_delete(self):
@@ -2021,6 +2028,18 @@ class EditorE2E(unittest.TestCase):
         back, _ = usd_io.read_geometry(target)
         self.assertEqual(back.npoints, self.s.latest_good.geo.npoints)
         self.assertEqual(back.nprims, self.s.latest_good.geo.nprims)
+
+    def test_the_disk_cache_is_switched_from_the_proxy_menu(self):
+        self.page.click("#proxy-btn")
+        self.page.click('#proxy-menu [data-diskcache="on"]')
+        self.assertTrue(until(lambda: self.s.disk_cache is not None))
+        self.assertTrue(until(lambda: self.page.locator("#proxy-btn").evaluate("b => b.classList.contains('on')")))
+        self.page.click("#proxy-btn")
+        self.page.wait_for_selector('#proxy-menu [data-diskcache="clear"]')
+        self.page.click('#proxy-menu [data-diskcache="clear"]')
+        self.page.click("#proxy-btn")
+        self.page.click('#proxy-menu [data-diskcache="off"]')
+        self.assertTrue(until(lambda: self.s.disk_cache is None))
 
 
 if __name__ == "__main__":

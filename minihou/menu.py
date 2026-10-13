@@ -30,7 +30,7 @@ GROUPS: List[Tuple[str, str, List[str]]] = [
     ("Groups & Selection", "Pick parts of the geometry, delete or keep them",
      ["group_create", "group_expand", "group_promote", "group_range", "blast", "delete"]),
     ("Attributes", "Create, change and measure data on points, faces and corners",
-     ["wrangle", "attribute_create", "attribute_transfer", "attribute_promote", "attribute_randomize", "attribute_blur",
+     ["wrangle", "attribute_create", "attribute_transfer", "attribute_promote", "attribute_randomize", "attribute_blur", "set_material",
       "attribute_rename", "attribute_delete", "measure", "normal", "color", "connectivity", "sort", "ray", "python"]),
     ("UV", "Texture coordinates", ["uv_project", "uv_flatten"]),
     ("Curves", "Curves and what to build from them",
@@ -51,7 +51,7 @@ GROUPS: List[Tuple[str, str, List[str]]] = [
     ("Procedural Systems", "Buildings, connected regions and geometric goal relaxation",
      ["building_rules", "region_identify", "region_transform", "goal_length", "goal_collision", "goal_surface",
       "goal_gravity", "goal_pin", "goal_solve"]),
-    ("Utility & I/O", "Pass-through, system inputs and the output", ["null", "input", "output"]),
+    ("Utility & I/O", "Pass-through, system inputs and the outputs", ["null", "input", "output", "scene_objects"]),
     (LIBRARY, "Your own nodes and saved systems", []),
 ]
 
@@ -94,7 +94,7 @@ ALIASES: Dict[str, str] = {
     "group_range": "every other nth", "blast": "delete extract keep", "delete": "remove",
     "wrangle": "vex expression code snippet attribwrangle", "attribute_create": "add attribute", "attribute_transfer": "copy nearest project",
     "attribute_promote": "convert move domain", "attribute_randomize": "random", "attribute_blur": "smooth average",
-    "attribute_rename": "name", "attribute_delete": "remove", "measure": "area volume perimeter curvature",
+    "set_material": "material assign shader slot", "attribute_rename": "name", "attribute_delete": "remove", "measure": "area volume perimeter curvature",
     "normal": "normals compute", "color": "colour", "connectivity": "pieces islands", "sort": "reorder", "ray": "project raycast hit",
     "python": "script code custom", "uv_project": "texture coordinates map", "uv_flatten": "unwrap lscm texture",
     "resample": "points along curve spacing", "carve": "trim curve", "convert_line": "polyline", "fillet": "round corners curve",
@@ -108,6 +108,7 @@ ALIASES: Dict[str, str] = {
     "rbd_constraint_properties": "constraint glue strength break", "rbd_configure": "bodies mass friction physics",
     "rbd_solver": "simulate physics dynamics bullet", "loop_block": "repeat iterate for", "loop_begin": "repeat iterate",
     "loop_end": "repeat iterate", "for_each": "per piece iterate", "solver": "feedback simulation previous frame",
+    "scene_objects": "realize real objects scene export blender instances scatter",
     "null": "named output pass through", "input": "system port", "output": "result display", "box": "cube", "sphere": "ball",
     "grid": "plane floor", "tube": "cylinder cone", "torus": "donut ring", "circle": "disc", "line": "segment",
     "curve": "polyline path", "bezier": "curve spline tangent handles control points path", "helix": "spiral coil", "lsystem": "plant tree fractal", "blender_object": "read import mesh",
@@ -121,7 +122,7 @@ _TITLES = {"polyextrude": "PolyExtrude", "polybevel": "PolyBevel", "polysplit": 
            "lsystem": "L-System", "rbd_configure": "RBD Configure", "rbd_solver": "RBD Solver",
            "rbd_material_fracture": "RBD Material Fracture", "rbd_constraint": "RBD Constraint", "rbd_constraint_properties": "RBD Constraint Properties",
            "loop_block": "Repeat (Loop Block)", "for_each": "For Each", "points_to_surface": "Points to Surface",
-           "copy_to_points": "Copy to Points", "blender_object": "Blender Object", "usd_import": "USD Import", "modifier_input": "Modifier Input"}
+           "copy_to_points": "Copy to Points", "blender_object": "Blender Object", "usd_import": "USD Import", "scene_objects": "Scene Objects", "modifier_input": "Modifier Input"}
 
 _ORDER: Dict[str, Tuple[int, int]] = {}
 for _gi, (_g, _doc, _names) in enumerate(GROUPS):

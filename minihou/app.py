@@ -91,6 +91,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--browser", action="store_true", help="open in a browser instead of the desktop window")
     ap.add_argument("--no-browser", action="store_true", help="do not open the editor in a browser")
     ap.add_argument("--allow-python", action="store_true", help="let python nodes run code stored in graphs (trusted graphs only)")
+    ap.add_argument("--disk-cache", action="store_true", help="keep expensive results on disk (in the workspace) so reopening a big scene is quick")
     args = ap.parse_args(argv)
 
     root = Path(args.workspace).expanduser() if args.workspace else default_workspace()
@@ -115,7 +116,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         args.http_port = 0
     ns = argparse.Namespace(graph=str(graph), host=args.host, port=args.port, http_port=args.http_port, root=str(root),
                             desktop=desktop, open=args.browser and not args.no_browser, nodes=[str(root / "nodes")], cache_mb=2048.0, no_watch=False, no_save=False,
-                            allow_python=args.allow_python)
+                            allow_python=args.allow_python, disk_cache="auto" if args.disk_cache else None, disk_cache_gb=4.0)
     print(f"MiniHou workspace: {root}", flush=True)
     return _cmd_serve(ns)
 

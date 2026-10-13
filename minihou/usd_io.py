@@ -11,6 +11,15 @@ usdview. ``pxr`` (``pip install usd-core``) is optional: nothing here imports it
 * ``curves``: a ``BasisCurves`` (linear, not periodic) of the open primitives. USD curves do not index into a shared point
   table, so their points are expanded;
 * ``points``: a ``Points`` of the points no primitive uses.
+* ``instances``: a ``PointInstancer`` for the loose points that place Blender objects (the ``instance`` node's output: ``instance``,
+  ``rot``, ``scale`` and the detail ``instance_objects``). Its prototypes are empty Xforms named after the objects, with
+  ``minihou:blender_object``; the geometry stays in Blender.
+
+**Materials** are names (see :mod:`minihou.materials`). Each name a face uses becomes a ``Material`` under ``/MiniHou/Looks``
+(a small ``UsdPreviewSurface`` whose colour is the faces' ``Cd``, or grey) and the mesh is bound to it: directly when every face
+has the same one, otherwise through ``GeomSubset``s of the ``materialBind`` family. A name that was read from a file (the
+``usd_import`` node keeps where it came from) is *referenced* from that file instead, so its shading network and textures come
+through untouched. No shading is ever authored beyond that preview surface.
 
 Closed primitives with fewer than 3 corners and open ones with fewer than 2 cannot be drawn by USD; they are left out and counted
 in the Xform's ``customData`` (``minihou:dropped``).
@@ -28,8 +37,8 @@ also face / point ``GeomSubset``s on the mesh, which is what other tools look fo
 for files that have only those.
 
 **Reading** (``read_geometry``) accepts any USD file: ``Mesh`` (indexed or not, any orientation, subsets), ``BasisCurves`` (cubic
-curves come in as their control polygon) and ``Points``, with each prim's world transform applied. Other prim types are skipped and
-listed in the report.
+curves come in as their control polygon), ``Points`` and ``PointInstancer`` (as ``instance`` / ``rot`` / ``scale`` points; the
+prototypes are not imported), with each prim's world transform applied. Other prim types are skipped and listed in the report.
 """
 from __future__ import annotations
 
@@ -41,6 +50,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from . import materials as M
 from .geometry import Geometry
 
 USD_EXTENSIONS = (".usd", ".usda", ".usdc")
@@ -61,6 +71,13 @@ def pxr():
     except ImportError as e:
         raise UsdUnavailable("USD support needs the 'usd-core' package: pip install usd-core") from e
     return Gf, Sdf, Tf, Usd, UsdGeom, Vt
+
+
+def shade():
+    """``pxr.UsdShade`` (materials and bindings)."""
+    pxr()
+    from pxr import UsdShade
+    return UsdShade
 
 
 def available() -> bool:
@@ -201,10 +218,107 @@ def _gather_table(table, idx: np.ndarray, exclude=()) -> Dict[str, np.ndarray]:
     return {n: np.ascontiguousarray(a[idx]) for n, a in table.items() if n not in exclude}
 
 
-def write_geometry(stage, path: str, geo: Geometry) -> dict:
-    """Write ``geo`` under the Xform ``path`` of ``stage``; returns the counts written."""
+def _material_color(geo: Geometry, name: str) -> Tuple[float, float, float]:
+    """The colour for a material's preview surface: the mean ``Cd`` of the faces that use it, else mid grey."""
+    lst = M.names(geo)
+    slots = [i for i, n in enumerate(lst) if n == name]
+    faces = np.flatnonzero(np.isin(M.indices(geo), slots))
+    cd = geo.prim.get("Cd")
+    if len(faces) and cd is not None and cd.ndim == 2 and cd.shape[1] >= 3:
+        c = np.asarray(cd, np.float64)[faces, :3].mean(0)
+    else:
+        cd = geo.point.get("Cd")
+        if len(faces) and cd is not None and cd.ndim == 2 and cd.shape[1] >= 3:
+            t = geo.topology
+            corners = np.concatenate([np.arange(t.prim_offsets[f], t.prim_offsets[f + 1]) for f in faces]) if len(faces) < 5000 else None
+            pts = np.unique(t.vertex_point[corners]) if corners is not None else np.arange(geo.npoints)
+            c = np.asarray(cd, np.float64)[pts, :3].mean(0)
+        else:
+            c = np.array([0.5, 0.5, 0.5])
+    c = np.clip(np.nan_to_num(c, nan=0.5), 0.0, 1.0)
+    return float(c[0]), float(c[1]), float(c[2])
+
+
+def _asset_path(source: str, anchor: Optional[str]) -> str:
+    """How the exported file refers to ``source``: relative to its own folder when it can be, else absolute."""
+    if anchor:
+        try:
+            return os.path.relpath(source, anchor).replace(os.sep, "/")
+        except ValueError:                                              # another drive on Windows
+            pass
+    return os.path.abspath(source).replace(os.sep, "/")
+
+
+def write_looks(stage, parent: str, geos: List[Geometry], anchor: Optional[str] = None) -> Dict[str, str]:
+    """A ``Material`` for every name the geometries' faces use, under the Scope ``parent``. Returns name -> prim path.
+    Names read from a USD file (``detail['usd_materials']``) are referenced from it; the others get a preview surface."""
+    Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
+    UsdShade = shade()
+    wanted: Dict[str, Geometry] = {}
+    for g in geos:
+        for name in M.used(g):
+            wanted.setdefault(name, g)
+    if not wanted:
+        return {}
+    UsdGeom.Scope.Define(stage, parent)
+    taken: set = set()
+    out: Dict[str, str] = {}
+    for name, g in wanted.items():
+        path = f"{parent}/{_unique_name(valid_name(name), taken, 'mat')}"
+        src = (g.detail.get("usd_materials") or {}).get(name) if isinstance(g.detail.get("usd_materials"), dict) else None
+        if isinstance(src, dict) and src.get("file") and src.get("prim") and os.path.isfile(str(src["file"])):
+            prim = stage.DefinePrim(path, "Material")
+            prim.GetReferences().AddReference(_asset_path(str(src["file"]), anchor), Sdf.Path(str(src["prim"])))
+        else:
+            mat = UsdShade.Material.Define(stage, path)
+            shader = UsdShade.Shader.Define(stage, f"{path}/PreviewSurface")
+            shader.CreateIdAttr("UsdPreviewSurface")
+            shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*_material_color(g, name)))
+            shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.5)
+            mat.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+            prim = mat.GetPrim()
+        prim.SetCustomDataByKey("minihou:material", name)
+        out[name] = path
+    return out
+
+
+def _write_material_bindings(mesh, geo: Geometry, mesh_prims: np.ndarray, looks: Dict[str, str]) -> List[str]:
+    """Bind the mesh's faces to their materials: the whole mesh when one name covers every face, else ``materialBind`` subsets."""
+    Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
+    UsdShade = shade()
+    lst = M.names(geo)
+    idx = M.indices(geo)[mesh_prims]
+    faces: Dict[str, np.ndarray] = {}
+    for slot in np.unique(idx):
+        name = lst[slot] if 0 <= slot < len(lst) else ""
+        if not name or name not in looks:
+            continue
+        sel = np.flatnonzero(idx == slot)
+        faces[name] = np.union1d(faces[name], sel) if name in faces else sel
+    if not faces:
+        return []
+    stage = mesh.GetPrim().GetStage()
+    api = UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim())
+    if len(faces) == 1 and len(next(iter(faces.values()))) == len(mesh_prims):
+        name = next(iter(faces))
+        api.Bind(UsdShade.Material(stage.GetPrimAtPath(looks[name])))
+        return [name]
+    used: set = set()
+    for name, sel in faces.items():
+        sub = UsdGeom.Subset.CreateGeomSubset(mesh, _unique_name("mat_" + valid_name(name), used, "sub"), "face",
+                                              Vt.IntArray.FromNumpy(sel.astype(np.int32)), "materialBind", UsdGeom.Tokens.nonOverlapping)
+        UsdShade.MaterialBindingAPI.Apply(sub.GetPrim()).Bind(UsdShade.Material(stage.GetPrimAtPath(looks[name])))
+    api.SetMaterialBindSubsetsFamilyType(UsdGeom.Tokens.nonOverlapping)
+    return list(faces)
+
+
+def write_geometry(stage, path: str, geo: Geometry, looks: Optional[Dict[str, str]] = None, anchor: Optional[str] = None) -> dict:
+    """Write ``geo`` under the Xform ``path`` of ``stage``; returns the counts written. ``looks`` (name -> Material prim path, from
+    :func:`write_looks`) binds faces to materials; when it is not given the geometry's own are made under ``<path>/Looks``."""
     Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
     xf = UsdGeom.Xform.Define(stage, path)
+    if looks is None:
+        looks = write_looks(stage, f"{path}/Looks", [geo], anchor)
     t = geo.topology
     n = geo.npoints
     P = np.ascontiguousarray(geo.P, np.float32)
@@ -253,6 +367,9 @@ def write_geometry(stage, path: str, geo: Geometry) -> dict:
                                  (_gather_table(geo.vertex, cv), "faceVarying", "vertex"),
                                  (_gather_table(geo.prim, mesh_prims), "uniform", "prim")])
         _write_group_subsets(mesh, geo, mesh_prims, pts)
+        bound = _write_material_bindings(mesh, geo, mesh_prims, looks)
+        if bound:
+            out["materials"] = bound
         out["faces"] = int(len(mesh_prims))
     # -- curves -------------------------------------------------------------------------------------------------------
     if len(curve_prims):
@@ -273,6 +390,14 @@ def write_geometry(stage, path: str, geo: Geometry) -> dict:
                                  (_gather_table(geo.vertex, cv), "vertex", "vertex"),
                                  (_gather_table(geo.prim, curve_prims), "uniform", "prim")])
         out["curves"] = int(len(curve_prims))
+    # -- instances: loose points that place Blender objects (the instance node) become a PointInstancer --------------------
+    names = geo.detail.get("instance_objects")
+    inst_attr = geo.point.get("instance")
+    if isinstance(names, (list, tuple)) and names and inst_attr is not None and inst_attr.ndim == 1 and len(loose):
+        pick = (inst_attr[loose] > 0) & (inst_attr[loose] <= len(names))
+        placed, loose = loose[pick], loose[~pick]
+        if len(placed):
+            out["instances"] = _write_instancer(stage, f"{path}/instances", geo, placed, [str(x) for x in names])
     # -- loose points -------------------------------------------------------------------------------------------------
     if len(loose):
         pp = UsdGeom.Points.Define(stage, f"{path}/points")
@@ -290,6 +415,80 @@ def write_geometry(stage, path: str, geo: Geometry) -> dict:
         xf.GetPrim().SetCustomDataByKey("minihou:detail", json.dumps(_json_safe(geo.detail), allow_nan=False, default=str)
                                         if _finite(geo.detail) else json.dumps(_json_safe(_clean(geo.detail)), default=str))
     return out
+
+
+def _mat_to_quat(R: np.ndarray) -> np.ndarray:
+    """Quaternions ``(n, 4)`` as (x, y, z, w) -- USD's memory order -- of rotation matrices ``(n, 3, 3)`` (column vectors)."""
+    R = np.asarray(R, np.float64)
+    n = len(R)
+    q = np.zeros((n, 4))
+    tr = R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2]
+    cases = (tr > 0, (R[:, 0, 0] >= R[:, 1, 1]) & (R[:, 0, 0] >= R[:, 2, 2]), R[:, 1, 1] >= R[:, 2, 2])
+    done = np.zeros(n, bool)
+    for k, m in enumerate(cases):
+        m = m & ~done
+        done |= m
+        r = R[m]
+        if not len(r):
+            continue
+        if k == 0:
+            s = np.sqrt(np.maximum(tr[m] + 1.0, 1e-12)) * 2
+            q[m] = np.stack([(r[:, 2, 1] - r[:, 1, 2]) / s, (r[:, 0, 2] - r[:, 2, 0]) / s, (r[:, 1, 0] - r[:, 0, 1]) / s, 0.25 * s], 1)
+        elif k == 1:
+            s = np.sqrt(np.maximum(1.0 + r[:, 0, 0] - r[:, 1, 1] - r[:, 2, 2], 1e-12)) * 2
+            q[m] = np.stack([0.25 * s, (r[:, 0, 1] + r[:, 1, 0]) / s, (r[:, 0, 2] + r[:, 2, 0]) / s, (r[:, 2, 1] - r[:, 1, 2]) / s], 1)
+        elif k == 2:
+            s = np.sqrt(np.maximum(1.0 + r[:, 1, 1] - r[:, 0, 0] - r[:, 2, 2], 1e-12)) * 2
+            q[m] = np.stack([(r[:, 0, 1] + r[:, 1, 0]) / s, 0.25 * s, (r[:, 1, 2] + r[:, 2, 1]) / s, (r[:, 0, 2] - r[:, 2, 0]) / s], 1)
+    rest = ~done
+    if rest.any():
+        r = R[rest]
+        s = np.sqrt(np.maximum(1.0 + r[:, 2, 2] - r[:, 0, 0] - r[:, 1, 1], 1e-12)) * 2
+        q[rest] = np.stack([(r[:, 0, 2] + r[:, 2, 0]) / s, (r[:, 1, 2] + r[:, 2, 1]) / s, 0.25 * s, (r[:, 1, 0] - r[:, 0, 1]) / s], 1)
+    return q / np.maximum(np.linalg.norm(q, axis=1, keepdims=True), 1e-12)
+
+
+def _quat_to_mat(q: np.ndarray) -> np.ndarray:
+    q = np.asarray(q, np.float64)
+    q = q / np.maximum(np.linalg.norm(q, axis=1, keepdims=True), 1e-12)
+    x, y, z, w = q[:, 0], q[:, 1], q[:, 2], q[:, 3]
+    R = np.empty((len(q), 3, 3))
+    R[:, 0] = np.stack([1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)], 1)
+    R[:, 1] = np.stack([2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)], 1)
+    R[:, 2] = np.stack([2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)], 1)
+    return R
+
+
+def _write_instancer(stage, path: str, geo: Geometry, rows: np.ndarray, names: List[str]) -> int:
+    """A ``PointInstancer`` for the points ``rows`` that place the Blender objects ``names`` (the ``instance`` node's output).
+    The prototypes are empty Xforms named after the objects (the geometry lives in Blender), carrying ``minihou:blender_object``."""
+    from .nodes.instance import euler_xyz_to_matrix
+    Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
+    inst = UsdGeom.PointInstancer.Define(stage, path)
+    used: set = set()
+    targets = []
+    for nm in names:
+        proto = UsdGeom.Xform.Define(stage, f"{path}/Prototypes/{_unique_name(valid_name(nm), used, 'proto')}")
+        proto.GetPrim().SetCustomDataByKey("minihou:blender_object", nm)
+        targets.append(proto.GetPath())
+    inst.CreatePrototypesRel().SetTargets(targets)
+    P = np.ascontiguousarray(geo.P[rows], np.float32)
+    idx = (geo.point["instance"][rows].astype(np.int64) - 1).astype(np.int32)
+    rot = geo.point.get("rot")
+    scale = geo.point.get("scale")
+    R = euler_xyz_to_matrix(rot[rows].astype(np.float64)) if rot is not None and rot.ndim == 2 and rot.shape[1] == 3 else \
+        np.tile(np.eye(3), (len(rows), 1, 1))
+    S = np.ascontiguousarray(scale[rows], np.float32) if scale is not None and scale.ndim == 2 and scale.shape[1] == 3 else \
+        np.ones((len(rows), 3), np.float32)
+    inst.CreatePositionsAttr().Set(Vt.Vec3fArray.FromNumpy(P))
+    inst.CreateProtoIndicesAttr().Set(Vt.IntArray.FromNumpy(idx))
+    inst.CreateOrientationsfAttr().Set(Vt.QuatfArray.FromNumpy(_mat_to_quat(R).astype(np.float32)))
+    inst.CreateScalesAttr().Set(Vt.Vec3fArray.FromNumpy(S))
+    inst.CreateExtentAttr().Set(Vt.Vec3fArray.FromNumpy(np.stack([P.min(0), P.max(0)]).astype(np.float32)))
+    prim = inst.GetPrim()
+    _set_primvar(prim, "minihou:point_index", rows.astype(np.int32), "vertex", "")
+    _write_attributes(prim, [(_gather_table(geo.point, rows, ("P",)), "vertex", "point")])      # incl. instance / rot / scale, exactly
+    return int(len(rows))
 
 
 def _finite(v) -> bool:
@@ -354,10 +553,13 @@ def write_stage(path, outputs: Dict[str, Geometry], graph: Optional[dict] = None
         stage.SetDefaultPrim(root.GetPrim())
         report = WriteReport(path)
         used: set = set()
+        anchor = os.path.dirname(os.path.abspath(path))
+        looks = write_looks(stage, f"/{ROOT}/Looks", list(outputs.values()), anchor)      # shared by every output
+        used.add("Looks")
         for name, geo in outputs.items():
             base = valid_name(name)
             nm = _unique_name(base, used, "out")
-            report.outputs[name] = dict(write_geometry(stage, f"/{ROOT}/{nm}", geo), prim=f"/{ROOT}/{nm}")
+            report.outputs[name] = dict(write_geometry(stage, f"/{ROOT}/{nm}", geo, looks), prim=f"/{ROOT}/{nm}")
         layer = stage.GetRootLayer()
         data = {"minihou": {"format": 1, "outputs": json.dumps(list(outputs))}}      # no lists: the text format cannot hold them
         if graph is not None:
@@ -388,6 +590,8 @@ class Part:
     prim_attrs: Dict[str, np.ndarray] = field(default_factory=dict)
     prim_index: Optional[np.ndarray] = None
     group: Optional[str] = None                      # the MiniHou output Xform it was exported under (None: a foreign prim)
+    materials: List[str] = field(default_factory=list)        # names for this part's material_index (read from bindings; foreign prims)
+    material_sources: Dict[str, dict] = field(default_factory=dict)     # where those materials live: {"file", "prim"}
 
 
 def _output_of(prim) -> Optional[str]:
@@ -513,6 +717,7 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
     if unit != 1.0:
         rep.notes.append(f"scaled by metersPerUnit {unit:g}")
     parts: List[Part] = []
+    inst_names: List[str] = []                       # the objects the point instancers place, all instancers' prototypes in order
     it = iter(Usd.PrimRange(start, Usd.TraverseInstanceProxies(Usd.PrimDefaultPredicate)))
     for prim in it:
         if not prim.IsA(UsdGeom.Imageable):
@@ -530,14 +735,22 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
             kind = "curves"
         elif prim.IsA(UsdGeom.Points):
             kind = "points"
-        elif prim.IsA(UsdGeom.Gprim) or prim.IsA(UsdGeom.PointInstancer):
+        elif prim.IsA(UsdGeom.PointInstancer):
+            kind = "instancer"
+        elif prim.IsA(UsdGeom.Gprim):
             rep.skipped.append(f"{prim.GetPath()} ({prim.GetTypeName()})")
             it.PruneChildren()                                       # an instancer's children are its prototypes, not scene geometry
             continue
         else:
             continue
-        pb = UsdGeom.PointBased(prim)
-        pts = pb.GetPointsAttr().Get(tm)
+        instancer = None
+        if kind == "instancer":
+            instancer = UsdGeom.PointInstancer(prim)
+            pts = instancer.GetPositionsAttr().Get(tm)
+            it.PruneChildren()                                       # the prototypes are not scene geometry
+        else:
+            pb = UsdGeom.PointBased(prim)
+            pts = pb.GetPointsAttr().Get(tm)
         if pts is None or not len(pts):
             rep.notes.append(f"{prim.GetPath()}: no points at this time; skipped")
             continue
@@ -585,13 +798,17 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
                 rep.notes.append(f"{prim.GetPath()}: primvar {dropped!r} has a size that fits no domain; skipped")
         if kind == "mesh":
             _add_subset_groups(UsdGeom.Mesh(prim), part, tm)
+            _read_material_bindings(prim, part, tm, os.path.abspath(path), rep)
+        if kind == "instancer":
+            _read_instancer(stage, instancer, tm, part, M @ _pad(M_up), unit, inst_names, rep, str(prim.GetPath()))
         # world space
         Pw = P @ (M[:3, :3] @ M_up) + (M[3, :3] @ M_up)
         part.P = (Pw * unit).astype(np.float32)
         nrm_m = np.linalg.inv(M[:3, :3]).T
+        moved = not (np.allclose(M[:3, :3], np.eye(3)) and np.allclose(M_up, np.eye(3)))          # untouched normals stay exactly as stored
         for table in (part.point_attrs, part.corner_attrs, part.prim_attrs):
             nv = table.get("N")
-            if nv is not None and nv.ndim == 2 and nv.shape[1] == 3:
+            if moved and nv is not None and nv.ndim == 2 and nv.shape[1] == 3:
                 v = nv.astype(np.float64) @ nrm_m @ M_up
                 v /= np.maximum(np.linalg.norm(v, axis=1, keepdims=True), 1e-12)
                 table["N"] = v.astype(np.float32)
@@ -603,16 +820,73 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
     groups: Dict[Optional[str], List[Part]] = {}
     for part in parts:
         groups.setdefault(part.group, []).append(part)
-    geos = [assemble(ps) for ps in groups.values()]
+    geos = []
+    for key, ps in groups.items():
+        g = assemble(ps)
+        d = _output_detail(stage, key) if key else {}                              # each MiniHou output has its own name list
+        if isinstance(d.get("materials"), list) and d["materials"]:
+            g = g.copy()
+            g.detail["materials"] = [str(n) for n in d["materials"]]
+            if isinstance(d.get("usd_materials"), dict):
+                g.detail["usd_materials"] = d["usd_materials"]
+            g.freeze()
+        geos.append(g)
     if len(geos) > 1:
         from .nodes.merge import merge
         geo = merge(geos).freeze()
     else:
         geo = geos[0] if geos else assemble([])
     detail = _read_detail(stage)
+    for k in ("materials", "usd_materials"):                 # handled per output above
+        detail.pop(k, None)
+    if inst_names:
+        geo.detail.setdefault("instance_objects", list(inst_names))
     if detail:
         geo.detail.update(detail)
     return geo, rep
+
+
+def _pad(m3: np.ndarray) -> np.ndarray:
+    out = np.eye(4)
+    out[:3, :3] = m3
+    return out
+
+
+def _read_instancer(stage, inst, tm, part: Part, M: np.ndarray, unit: float, names: List[str], rep: "ReadReport", where: str) -> None:
+    """Instances of a ``PointInstancer`` as the ``instance`` node's attributes: ``instance`` (1-based prototype number), ``rot``
+    (Euler XYZ radians) and ``scale`` per point. Primvars already read from a MiniHou file win (they are exact); ``M`` is the
+    instancer's row-vector world matrix (with the up-axis turn)."""
+    from .nodes.instance import matrix_to_euler_xyz
+    n = len(part.P)
+    targets = inst.GetPrototypesRel().GetTargets()
+    protos = []
+    for t in targets:
+        pr = stage.GetPrimAtPath(t)
+        protos.append(str(pr.GetCustomDataByKey("minihou:blender_object") or t.name) if pr else t.name)
+    idx = inst.GetProtoIndicesAttr().Get(tm)
+    idx = np.asarray(idx, np.int64) if idx is not None and len(idx) == n else np.zeros(n, np.int64)
+    if "instance" not in part.point_attrs:
+        part.point_attrs["instance"] = (idx + 1 + len(names)).astype(np.int32)
+        names.extend(protos)
+    R3 = M[:3, :3].T                                   # column-vector form of the instancer's world rotation (and scale)
+    k = abs(np.linalg.det(R3)) ** (1.0 / 3.0) or 1.0
+    Rp = R3 / k
+    if np.abs(Rp @ Rp.T - np.eye(3)).max() > 1e-3:
+        rep.notes.append(f"{where}: the instancer sits under a sheared or non-uniformly scaled transform; instance rotations ignore that")
+        Rp = np.eye(3)
+    if "rot" not in part.point_attrs:
+        q = inst.GetOrientationsfAttr().Get(tm)
+        if q is None or not len(q):
+            q = inst.GetOrientationsAttr().Get(tm)
+        if q is not None and len(q) == n:
+            R = _quat_to_mat(np.asarray(q, np.float64).reshape(-1, 4))
+        else:
+            R = np.tile(np.eye(3), (n, 1, 1))
+        part.point_attrs["rot"] = matrix_to_euler_xyz(Rp @ R).astype(np.float32)
+    if "scale" not in part.point_attrs:
+        sc = inst.GetScalesAttr().Get(tm)
+        sc = np.asarray(sc, np.float64).reshape(-1, 3) if sc is not None and len(sc) == n else np.ones((n, 3))
+        part.point_attrs["scale"] = (sc * k * unit).astype(np.float32)
 
 
 def _read_detail(stage) -> dict:
@@ -632,11 +906,23 @@ def _read_detail(stage) -> dict:
     return out
 
 
+def _output_detail(stage, path: str) -> dict:
+    """The detail attributes stored on one MiniHou output Xform."""
+    prim = stage.GetPrimAtPath(path)
+    raw = prim.GetCustomDataByKey("minihou:detail") if prim and prim.IsValid() else None
+    try:
+        return json.loads(raw) if raw else {}
+    except ValueError:
+        return {}
+
+
 def _add_subset_groups(mesh, part: Part, tm) -> None:
     """Face / point ``GeomSubset``s as groups, when the file has no ``group_*`` primvar of that name already."""
     Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
     nq, npnt = len(part.sizes), len(part.P)
     for sub in UsdGeom.Subset.GetAllGeomSubsets(mesh):
+        if sub.GetFamilyNameAttr().Get() == "materialBind":              # material bindings, not groups (see _read_material_bindings)
+            continue
         ind = sub.GetIndicesAttr().Get(tm)
         if ind is None:
             continue
@@ -658,6 +944,76 @@ def _add_subset_groups(mesh, part: Part, tm) -> None:
             a = np.zeros(npnt, np.int32)
             a[ind[(ind >= 0) & (ind < npnt)]] = 1
             part.point_attrs[name] = a
+
+
+def _preview_color(mat) -> Optional[Tuple[float, float, float]]:
+    """The base colour a material would show: ``diffuseColor`` (UsdPreviewSurface) or ``base_color`` (MaterialX standard surface),
+    when it is a plain value on the surface shader. A texture or a network behind it gives nothing."""
+    UsdShade = shade()
+    try:
+        shader = mat.ComputeSurfaceSource()[0]
+    except Exception:  # noqa: BLE001 - odd material networks must not stop a read
+        return None
+    if not shader:
+        return None
+    for name in ("diffuseColor", "base_color"):
+        inp = shader.GetInput(name)
+        if inp:
+            v = inp.Get()
+            if v is not None and len(v) >= 3:
+                return float(v[0]), float(v[1]), float(v[2])
+    return None
+
+
+def _read_material_bindings(prim, part: Part, tm, file: str, rep: "ReadReport") -> None:
+    """Material bindings of a foreign mesh (direct, inherited from a parent, or per ``materialBind`` subset) as names and a
+    ``material_index``. MiniHou files keep their own ``material_index`` primvar and name list, which win. Where the mesh has
+    no colour of its own, the faces take their material's base colour as ``Cd``."""
+    UsdShade = shade()
+    nq = len(part.sizes)
+    if not nq or "material_index" in part.prim_attrs:
+        return
+    api = UsdShade.MaterialBindingAPI(prim)
+    names: List[str] = [""]
+    where: Dict[str, str] = {}                                         # prim path -> name
+    colors: List[Optional[Tuple[float, float, float]]] = [None]
+    sources: Dict[str, dict] = {}
+
+    def slot(mat) -> int:
+        path = str(mat.GetPath())
+        if path in where:
+            return names.index(where[path])
+        name = mat.GetPrim().GetName()
+        base, k = name, 2
+        while name in names:
+            name, k = f"{base}_{k}", k + 1
+        where[path] = name
+        names.append(name)
+        colors.append(_preview_color(mat))
+        sources[name] = {"file": file, "prim": path}
+        return len(names) - 1
+
+    index = np.zeros(nq, np.int32)
+    base_mat = api.ComputeBoundMaterial()[0]
+    if base_mat:
+        index[:] = slot(base_mat)
+    for sub in api.GetMaterialBindSubsets():
+        ind = sub.GetIndicesAttr().Get(tm)
+        mat = UsdShade.MaterialBindingAPI(sub.GetPrim()).ComputeBoundMaterial()[0]
+        if ind is None or not mat:
+            continue
+        ind = np.asarray(ind, np.int64)
+        index[ind[(ind >= 0) & (ind < nq)]] = slot(mat)
+    if len(names) == 1:
+        return
+    part.prim_attrs["material_index"] = index
+    part.materials = names
+    part.material_sources = sources
+    has_color = any("Cd" in t for t in (part.point_attrs, part.corner_attrs, part.prim_attrs))
+    if not has_color and any(c is not None for c in colors):
+        table = np.array([c if c is not None else (0.8, 0.8, 0.8) for c in colors], np.float32)
+        part.prim_attrs["Cd"] = table[index]
+        rep.notes.append(f"{prim.GetPath()}: faces coloured from their materials ({len(names) - 1} material(s))")
 
 
 def _reverse_winding(part: Part) -> Part:
@@ -745,6 +1101,14 @@ def assemble(parts: List[Part]) -> Geometry:
     sizes_all = np.concatenate(sizes) if sizes else np.zeros(0, np.int64)
     closed_all = np.concatenate(closed) if closed else np.zeros(0, bool)
     ca = _union([p.corner_attrs for p in parts], ncorner)
+    mat_names: List[str] = []
+    mat_sources: Dict[str, dict] = {}
+    if any(p.materials for p in parts):                    # bindings read from a foreign file: one name list for all parts
+        have = [p for p in parts if p.materials]
+        mat_names, remapped = M.combine([p.materials for p in have], [p.prim_attrs["material_index"] for p in have], first_empty=True)
+        for p, idx in zip(have, remapped):
+            p.prim_attrs["material_index"] = idx
+            mat_sources.update(p.material_sources)
     qa = _union([p.prim_attrs for p in parts], nprim)
     if all(p.prim_index is not None for p in parts if len(p.sizes)) and sum(nprim):
         order = np.argsort(np.concatenate([p.prim_index for p in parts if len(p.sizes)]), kind="stable")
@@ -763,6 +1127,9 @@ def assemble(parts: List[Part]) -> Geometry:
         geo.vertex[k] = v
     for k, v in qa.items():
         geo.prim[k] = v
+    if mat_names:
+        geo.detail["materials"] = mat_names
+        geo.detail["usd_materials"] = mat_sources
     geo.validate()
     return geo.freeze()
 

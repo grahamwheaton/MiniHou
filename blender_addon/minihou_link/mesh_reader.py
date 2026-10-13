@@ -64,7 +64,16 @@ def read_object(obj, depsgraph) -> Tuple[dict, Dict[str, np.ndarray]]:
         ev.to_mesh_clear()
     info["read_ms"] = round((time.perf_counter() - t0) * 1000, 2)
     M = [v for row in obj.matrix_world for v in row]
-    return {"matrix": M, "info": info}, arrays
+    return {"matrix": M, "info": info, "materials": slot_names(ev)}, arrays
+
+
+def slot_names(obj) -> List[str]:
+    """The names of an object's material slots (``""`` for an empty slot), or nothing when it has none."""
+    try:
+        names = [s.material.name if s.material is not None else "" for s in obj.material_slots]
+    except (AttributeError, RuntimeError):
+        return []
+    return names if any(names) else []
 
 
 def _read_mesh(obj, me) -> Tuple[Dict[str, np.ndarray], dict]:

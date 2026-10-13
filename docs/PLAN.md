@@ -333,6 +333,17 @@ Worked through in order of how often Houdini users reach for them:
     stored on each primvar, plus `point_index` / `prim_index` primvars that make MiniHou round trips exact. `usd_import` applies world
     transforms, up axis and units, flips winding for left-handed or mirrored prims, and keys its cache on the file's mtime and size.
     Not opened in Houdini / Blender / Omniverse here; no PointInstancer yet.
+20. **Scene objects** (`nodes/scene_objects.py`, add-on `scene_plan.py` + `scene_objects.py`, `docs/SCENE_OBJECTS.md`): a sink node whose points
+    become real Blender objects (linked duplicates). The engine sends a JSON manifest (`scene_objects`, with `scene_nodes` for which
+    nodes exist) once per change per client, through the live link and in the modifier response (`instance_result.scene`). The
+    add-on keeps them by custom-property marker, plans create / move / retarget / show / hide in a bpy-free module (unit-tested), parks
+    surplus objects instead of deleting them, and only touches the scene from its timer. Verified against Blender 5.1 in the tests.
+21. **Materials by name** (`minihou/materials.py`, `nodes/materials_node.py`, add-on `material_slots.py` + `mesh_writer.apply_material_names`,
+    `usd_io.write_looks` / `_read_material_bindings`, `docs/MATERIALS.md`): `material_index` plus the detail list `materials` give face
+    materials a meaning; `set_material` assigns by name; `merge` / `boolean` unify the lists; the link carries the list in the geometry
+    header (and `materials` in `object_geo` / `instance_cook`); the add-on fills slots by name without ever removing one. USD export
+    binds `Material` prims (preview colour from `Cd`) and import reads bindings; materials read from a file are referenced, not
+    rewritten, so shading networks survive. Checked against Blender 5.1's own USD exporter and importer locally.
 
 Closest-point and ray queries on triangle grids have numba kernels (`nodes/_kernels.py` `grid_closest`, `grid_intersect`;
 remesh of a 4,800-triangle sphere 17 s -> 3.5 s). Surfaces from points and curves: `delaunay` (SciPy or a pure-Python

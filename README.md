@@ -456,6 +456,7 @@ The same edit operations are available to scripts over HTTP (`POST /api/edit`, s
 | `examples/graphs/curves_vine.json` | helix -> resample -> noise -> blur -> width ramp -> sweep; a wireframe sphere |
 | `examples/graphs/lsystem_tree.json` | an L-system tree: branches swept by width, leaves copied onto the `J` points |
 | `examples/graphs/eroded_terrain.json` | fractal hills -> droplet + thermal erosion; wet basins (flow) get the second material |
+| `examples/graphs/materials.json` | a fractured box: the cut faces get the material `Concrete Cut`, the outside `Painted Wall` (Blender slots and USD bindings by name) |
 | `examples/graphs/volumes.json` | a box minus a sphere with a smooth fillet (sdf_boolean), metaball blobs (points_to_surface) |
 
 All examples are cooked by the test-suite, so they keep working as nodes evolve.
@@ -575,6 +576,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `solver` | geo | feed each frame's result into the next (simulations, growth): deterministic, incremental playback, substeps |
 | `python` | geo, opinput1..3 | real Python inside the graph: geometry and variables piped in, you set `out`; **off unless the engine runs with `--allow-python`** |
 | `wrangle` | geo | VEX-like snippet over points, primitives or vertices (see below) |
+| `set_material` | geo | give a group of faces a material **by name**; the names travel through merges and booleans into Blender's material slots and USD's material bindings ([docs/MATERIALS.md](docs/MATERIALS.md)) |
 | `attribute_delete` | geo | delete attributes by name or wildcard (`N uv tmp_*`) |
 | `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |
 | `normal` | geo | area-weighted point normals, face normals (Newell, n-gon safe), or vertex normals with a cusp angle (hard edges stay sharp; Blender gets custom normals) |
@@ -683,7 +685,7 @@ just work (and the Geometry Nodes proxy carries them):
 | `uv` (any domain, 2+ components) | UV map **UVMap** on face corners, active for render |
 | `Cd` (3 or 4 components; points, vertices or faces) | color attribute **Color** (points or corners), active for render; use it in a shader with a *Color Attribute* node |
 | `N` (points, vertices or faces) | custom normals (Blender 4.5+: the `custom_normal` attribute, 7 ms for 1M points) |
-| `material_index` (primitives, int) | each face's material slot |
+| `material_index` (primitives, int) | each face's material slot; with the detail list `materials` (names), the slots are filled by name, see [docs/MATERIALS.md](docs/MATERIALS.md) |
 | `sharp_face` (primitives) | flat shading for those faces (others smooth) |
 | anything else | a generic attribute of that name: POINT / CORNER / FACE, float, float2, vector, color (4 floats), int, bool; read it with an *Attribute* shader node or Named Attribute in Geometry Nodes |
 
@@ -839,12 +841,31 @@ line, whole numbers as ints, and values from Blender's float32 sliders snapped t
 keyframes and drivers on them keep working. A graph may be unfinished (an unwired node): it still opens, and only the nodes
 feeding the display node have to be valid for it to cook.
 
+## Real Blender objects from a graph (Scene Objects)
+
+A **Scene Objects** node turns its input into separate scene objects in Blender: one linked duplicate of the object each point names
+(the Instance node's output, or a `source` object) with the point's position, rotation and scale, or, in `pieces` mode, one mesh
+object per piece (fracture pieces, say) with its origin at the piece's centre. They go in their own collection. Give
+them modifiers, materials or constraints and they keep them: objects are found by marker, a cook only creates, moves, shows and hides,
+and surplus objects are parked (hidden), never deleted, until you press *Delete parked*. Works through the live link and through a
+MiniHou modifier (objects parented to the host object). Details and limits: [docs/SCENE_OBJECTS.md](docs/SCENE_OBJECTS.md).
+
 ## USD export and import
 
 File menu > *Export USD...* (also `POST /api/export_usd`, MCP `export_usd`) writes the cooked geometry, always at full size, as meshes,
 curves and points with attributes as primvars and groups as GeomSubsets; the graph is stored inside the file. The **USD Import** node
-reads USD files from other tools (transforms, Y-up, indexed primvars, subsets) and a MiniHou export comes back exactly. Needs
+reads USD files from other tools (transforms, Y-up, indexed primvars, subsets) and a MiniHou export comes back exactly. Material names are written as bound `Material` prims and read back from other tools' bindings; their shading networks stay in the original file and are referenced, not rewritten ([docs/MATERIALS.md](docs/MATERIALS.md)). Needs
 `pip install usd-core`. Graphs themselves stay JSON. Details and limits: [docs/USD.md](docs/USD.md).
+
+## Disk cache (reopen big scenes quickly)
+
+`minihou serve graph.json --disk-cache` (or `MINIHOU_DISK_CACHE=1`, or `minihou app --disk-cache`) keeps expensive results in
+`.minihou_cache` (4 GB cap, `--disk-cache-gb`, `--disk-cache DIR` to put it elsewhere). The in-memory cache is keyed by a hash of
+everything a result depends on, and that key is also the file name, so a restarted engine finds its earlier results and skips
+cooking them and everything upstream. Measured: a sphere remeshed at 0.03 voxels cooks in 4.5 s; after a restart the same graph is
+back in 48 ms. Only results that took at least 100 ms and read back in well under half that time are kept; anything that depends on
+a Blender object, a simulation or fed-in system geometry is never stored; the status line and `engine_status` show hits and size.
+Off by default; the **Proxy** menu in the editor also switches it on and off and clears it. Details: [docs/PROXY.md](docs/PROXY.md#disk-cache).
 
 ## Very large scenes (proxies)
 

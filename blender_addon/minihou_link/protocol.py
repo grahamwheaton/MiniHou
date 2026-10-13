@@ -24,7 +24,8 @@ client -> server: ``hello``, ``set_param``, ``resync``, ``ping``, ``object_geo``
 server -> client: ``welcome``, ``interface``, ``geo``, ``error``, ``status``, ``pong``, ``watch_objects``
 
 ``watch_objects`` lists the Blender objects the graph reads (``blender_object`` nodes). The client answers with
-``object_geo`` for each (and again whenever one changes): ``{"object", "matrix": 16 floats row-major, "info"}`` plus
+``object_geo`` for each (and again whenever one changes): ``{"object", "matrix": 16 floats row-major, "info", "materials"}`` (the object's
+material slot names, when it has any; ``instance_cook`` carries the same field for its input) plus
 arrays keyed like ``geo`` (``point/P``, the two ``topo/...`` arrays, ``<domain>/<name>``), or ``object_missing``
 ``{"object", "reason"}``.
 

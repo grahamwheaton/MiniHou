@@ -71,8 +71,23 @@ same clustering (as triangles, with averaged attributes). The cooked geometry it
 Not yet verified in a real Blender (no Blender in the build sandbox for this change): the add-on receives ordinary geometry
 messages, so nothing on its side changed.
 
+## Disk cache
+
+`minihou/diskcache.py`, opt-in (`--disk-cache`, see the README). Because every result is keyed by a Merkle hash of its node type and
+version, its library code, its parameters at the proxy level and the keys of its inputs, the key doubles as a file name:
+`.minihou_cache/<key[:2]>/<key>/` holds `meta.json` and one `.npy` per array (written to a temporary folder, then renamed, on a
+background thread). The evaluator asks the disk when memory misses, *before* cooking inputs, so one hit skips a whole upstream
+branch. Proxy levels have their own entries, so Full is still there after a trip to 10%.
+
+Never stored: results that took under 100 ms or that would take longer to read than half their cook time; anything downstream of
+`blender_object`, `modifier_input`, `rbd_solver`, `solver` or geometry fed into a system (their keys are not stable between runs);
+results whose detail attributes would not survive JSON unchanged (a tuple, a numpy value), so a hit is always identical to a fresh
+cook. A damaged entry counts as a miss and is deleted. Least recently used entries go when the folder passes its cap.
+Measured: remesh of a sphere at 0.03 voxels 4.5 s, 48 ms after a restart (the cheap `smooth` after it is cooked again).
+
 ## Not done
 
 * Instances are not reduced separately (an instance node with a million placements counts by its points).
 * Cook parameters are marked on the commonest count / resolution parameters only; others run at full size at any level.
+* The disk cache is off by default (flag, environment variable, or the Proxy menu in the editor).
 * Packed / instanced RBD pieces and the solver always cook the real thing in their input; do not use a proxy to judge a simulation.

@@ -53,8 +53,9 @@ points_to_surface, sdf_boolean), instancing of Blender objects (instance), PCG p
 point booleans pcg_difference/intersection/union, pcg_self_prune, density noise/filter, pcg_spawner), for_each (a
 system per piece), time (@Frame, solver; set_frame to check).
 To work on something the user made in Blender, start from a blender_object node
-(the object's name; its UV map, color attribute, vertex groups and material indices arrive as attributes, and it recooks live
-when they edit it); inspect_node on it shows what was read. Z is up; units are Blender metres. The user is
+(the object's name; its UV map, color attribute, vertex groups and material indices arrive as attributes, its material slot
+names as the detail list 'materials', and it recooks live when they edit it); inspect_node on it shows what was read.
+Give faces a material with set_material (a group and a name): Blender gets the slots by name, USD gets bound materials. Z is up; units are Blender metres. The user is
 watching the editor and Blender live and can undo your edits, so prefer small verified steps over huge batches."""
 
 OPS_DOC = """\
@@ -378,6 +379,10 @@ class McpServer:
                  f"Editor (for the user): {self.engine.url}",
                  "Python nodes: " + ("enabled (the user allowed them)" if st["engine"].get("python_nodes")
                                     else "off (the engine was not started with --allow-python)")]
+        dc = (st.get("status") or {}).get("disk_cache")
+        if dc:
+            lines.append(f"Disk cache: {dc['bytes'] / 1e6:,.0f} MB of {dc['max_bytes'] / 1e9:g} GB in {dc['folder']}; {dc['hits']} hits, "
+                         f"{dc['writes']} results written")
         if lib:
             lines.append(f"Node library: {sum(len(f['nodes']) for f in lib['files'])} custom node type(s) from "
                          f"{len(lib['files'])} file(s)" + "".join(f"\n  ERROR in {f['file']}: {f['error']}" for f in bad))
@@ -449,6 +454,7 @@ class McpServer:
         for name, o in r["outputs"].items():
             d = o["dropped"]
             lines.append(f"  {o['prim']}: {o['faces']:,} faces, {o['curves']:,} curves, {o['points']:,} loose points"
+                         + (f", {o['instances']:,} instances" if o.get("instances") else "")
                          + (f" (left out: {d['faces']} faces with under 3 corners, {d['curves']} one-point curves)" if d["faces"] or d["curves"] else ""))
         return "\n".join(lines)
 
