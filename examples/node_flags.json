@@ -2,10 +2,43 @@
   "version": 1,
   "doc": "Node flags: left box is a snap-able template; the translated box is displayed. Bypass move to compare; lock it then edit box to test freezing. Render is deliberately set to box.",
   "nodes": {
-    "box": {"type": "box", "pos": [40, 40], "flags": {"template": true}},
-    "move": {"type": "transform", "inputs": {"geo": "box"}, "params": {"translate": [3, 0, 0]}, "pos": [40, 170]},
-    "output": {"type": "output", "inputs": {"geo": "move"}, "pos": [40, 300]}
+    "box": {
+      "type": "box",
+      "pos": [
+        40,
+        40
+      ],
+      "flags": {
+        "template": true
+      }
+    },
+    "move": {
+      "type": "transform",
+      "inputs": {
+        "geo": "box"
+      },
+      "params": {
+        "translate": [
+          3,
+          0,
+          0
+        ]
+      },
+      "pos": [
+        40,
+        170
+      ]
+    },
+    "output": {
+      "type": "output",
+      "inputs": {
+        "geo": "move"
+      },
+      "pos": [
+        40,
+        300
+      ]
+    }
   },
-  "display": "output",
-  "render": "box"
+  "display": "output"
 }

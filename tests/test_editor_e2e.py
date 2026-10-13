@@ -69,6 +69,9 @@ class EditorE2E(unittest.TestCase):
         self.page.on("console", lambda m: m.type == "error" and self.errors.append(m.text))
         self.page.goto(self.web.url)
         self.page.wait_for_selector('.node[data-id="out"]')
+        # Historical viewport tests explicitly opt into inspecting the selection.
+        if not self._testMethodName.startswith('test_network_interaction_'):
+            self.page.select_option('#pv-follow', 'selection')
 
     def tearDown(self):
         self.assertEqual(self.errors, [], "browser errors")
@@ -79,6 +82,63 @@ class EditorE2E(unittest.TestCase):
         if text is not None:
             dialog.locator("input").fill(text)
         dialog.locator('button[type="submit"]').click()
+
+    def test_network_interaction_selection_keeps_display_and_x_undo(self):
+        self.two_boxes()
+        self.page.keyboard.press('l')
+        self.page.wait_for_timeout(250)
+        self.assertEqual(self.page.locator('#pv-follow').input_value(), 'display')
+        before=self.s.graph.display
+        self.node('a').locator('.title').click()
+        self.assertEqual(self.s.graph.display,before)
+        self.assertEqual(self.node('a').locator('[data-flag=display]').inner_text(),'D')
+        self.assertEqual(self.node('a').locator('[data-flag=bypass]').inner_text(),'B')
+        self.page.keyboard.press('x')
+        self.assertTrue(until(lambda:'a' not in self.s.graph.nodes))
+        self.page.keyboard.press('Control+z')
+        self.assertTrue(until(lambda:'a' in self.s.graph.nodes))
+
+    def test_network_interaction_box_select(self):
+        self.two_boxes()
+        self.page.keyboard.press('l')
+        self.page.wait_for_timeout(250)
+        a=self.node('a').bounding_box()
+        self.page.mouse.move(a['x']-8,a['y']-12)
+        self.page.mouse.down()
+        self.page.mouse.move(a['x']+a['width']+4,a['y']+a['height']+12,steps=6)
+        self.page.mouse.up()
+        self.assertIn('selected', self.node('a').get_attribute('class'))
+
+    def test_network_interaction_cut_and_undo(self):
+        self.two_boxes()
+        self.page.keyboard.press('l')
+        self.page.wait_for_timeout(250)
+        self.page.wait_for_timeout(250)
+        point=self.page.locator('path.hit').first.evaluate("p=>{const q=p.getPointAtLength(p.getTotalLength()/2).matrixTransform(p.getScreenCTM());return [q.x,q.y]}")
+        before=self.s.graph.to_dict()
+        self.page.keyboard.down('Shift')
+        self.page.mouse.move(point[0]-35,point[1])
+        self.page.mouse.down(button='right')
+        self.page.mouse.move(point[0]+35,point[1],steps=8)
+        self.page.mouse.up(button='right')
+        self.page.keyboard.up('Shift')
+        self.assertTrue(until(lambda:self.s.graph.to_dict()!=before))
+        self.page.keyboard.press('Control+z')
+        self.assertTrue(until(lambda:self.s.graph.to_dict()==before))
+
+    def test_network_interaction_shake_disconnect_and_undo(self):
+        self.two_boxes()
+        self.page.keyboard.press('l')
+        self.page.wait_for_timeout(250)
+        title=self.node('m').locator('.title').bounding_box()
+        x,y=title['x']+10,title['y']+5
+        before=self.s.graph.to_dict()
+        self.page.mouse.move(x,y);self.page.mouse.down()
+        for dx in [25,55,-25,55,-25]:self.page.mouse.move(x+dx,y,steps=2)
+        self.page.mouse.up()
+        self.assertTrue(until(lambda:not self.s.graph.nodes['m'].inputs.get('geos')))
+        self.page.keyboard.press('Control+z')
+        self.assertTrue(until(lambda:self.s.graph.to_dict()==before))
 
     def test_node_flags_controls_templates_snap_and_saved_state(self):
         self.two_boxes()
@@ -93,8 +153,7 @@ class EditorE2E(unittest.TestCase):
         self.node('b').locator('[data-flag=display]').click()
         self.assertTrue(until(lambda:self.s.graph.display=='b'))
         self.page.wait_for_function('document.querySelector("#pv-follow").value === "display"')
-        self.node('a').locator('[data-flag=render]').click()
-        self.assertTrue(until(lambda:self.s.graph.render=='a'))
+        self.assertEqual(self.page.locator('[data-flag=render]').count(), 0)
         self.node('b').locator('[data-flag=bypass]').click()
         self.page.wait_for_function('minihou.preview.points === 0 && minihou.preview.templatePoints === 8')
         self.node('b').locator('[data-flag=bypass]').click()
@@ -1264,7 +1323,7 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_selector('.node[data-id="m"]')
         self.node("m").locator(".title").click()
         self.page.wait_for_function("minihou.preview.tris === 24")
-        self.page.wait_for_function("minihou.preview.points === 16 && document.querySelector('#pv-node').innerText.includes('m')")
+        self.page.wait_for_function("minihou.preview.points === 16 && document.querySelector('#pv-node').innerText.includes(document.querySelector('#pv-follow').value === 'display' ? 'o' : 'm')")
         from minihou import Evaluator
         self.merged = Evaluator().cook(self.s.graph, "m")
 

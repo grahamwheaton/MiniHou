@@ -4,12 +4,11 @@ MiniHou uses Houdini-style geometry (SOP) flags. These are separate from Blender
 
 | Flag | Control | Behavior |
 | --- | --- | --- |
-| Bypass / Ignore | Yellow left strip; Q or B | Passes the first declared input through without running the operation or cooking other inputs. A generator produces empty geometry. |
-| Lock / Freeze | Red L strip; context menu | Saves the current full-resolution geometry in the graph. Parameters and upstream changes have no effect until unlocked. |
-| Template | Maroon strip; E | Reference wireframe and snapping, excluded from output and component selection. Normally exclusive; Shift-click adds references. |
+| Bypass / Ignore | Yellow B button; Q or B | Passes the first declared input through without running the operation or cooking other inputs. A generator produces empty geometry. |
+| Lock / Freeze | Red L button; context menu | Saves the current full-resolution geometry in the graph. Parameters and upstream changes have no effect until unlocked. |
+| Template | Maroon T button; E | Reference wireframe and snapping, excluded from output and component selection. Normally exclusive; Shift-click adds references. |
 | Selectable Template | Ctrl-click Template; W | Adds shaded, selectable reference geometry. Applying a selection tool or gizmo inserts a Merge node before the operation and clears the consumed template flags. |
-| Display | Blue strip; R | Chooses the viewport/live-link output. Clicking it sets the preview source to Display flag. The preview source dropdown can inspect a selected node independently. |
-| Render | Purple strip; T or Ctrl-click Display | Separate output for USD export, CLI `cook --render`, and explicit Blender render/bake preparation. Toggle off to follow Display again. |
+| Display | Blue D button; R | Chooses the viewport/live-link output. Clicking it sets the preview source to Display flag. The preview source dropdown can inspect a selected node independently. |
 | Unload | Context menu; U badge | Does not retain intermediate geometry in memory or write it to disk cache. Directly displayed/cooked targets remain cached. |
 
 Shortcuts apply in the network, not while typing or using viewport transform tools.
@@ -17,15 +16,22 @@ Bypass, Lock and Unload act on the selected nodes when clicked on a selected nod
 Flags survive save/reload, duplication, clipboard operations and undo/redo.
 Try `examples/node_flags.json`.
 
-## Render integration and limits
+## Network interactions
 
-The Blender instance protocol accepts `render=True`. The add-on's existing synchronous
-`modifiers.cook_frame(scene, frame)` and RBD bake preparation use this output;
-ordinary viewport polling uses Display. For scripted still renders, call the barrier
-immediately before the render operator as in the existing RBD workflow.
-Automatic switching for Blender's ordinary F12/animation render and native nested
-Geometry Nodes wrappers is not implemented. MiniHou must not change Blender datablocks
-inside active rendering. Do not rely on the purple flag alone to change an F12 render.
+The viewport defaults to **Display flag**. Selecting or box-selecting nodes does not change it.
+Use **Inspect selected node** only when you explicitly want the viewport to follow selection.
+The Render button, shortcut and menu entry have been removed. Older graphs retain their
+render metadata for compatibility with existing scripts; new graphs use Display.
+
+- Left-drag empty space: box select; Shift adds to the selection.
+- Middle-drag or Alt-left-drag: pan.
+- X, Delete or Backspace: delete selected nodes or wire; Ctrl-Z undoes.
+- Shake dragged nodes horizontally (three quick direction reversals): disconnect external
+  wires on release, preserving wires between selected nodes. Ordinary movement does not disconnect.
+- Shift-right-drag across wires: cut crossed wires on release. Crossed wires turn red.
+- Escape cancels a pending move, shake, box selection or cut. Undo restores a completed gesture.
+
+## Limits
 
 Locks are compressed, non-pickle snapshots stored in graph JSON (64 MiB uncompressed
 per node); unsupported non-JSON detail attributes are rejected. This can increase graph

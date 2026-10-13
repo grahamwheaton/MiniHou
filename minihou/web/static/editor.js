@@ -328,7 +328,7 @@
       el._struct = structSig; el._sub = subSig;
       const kids = [h("div", { class: "band" }), h("div", { class: "title", title: id }, id),
         h("div", { class: "sub" }, subLine(id, n, st, errNode, nodeMs, cached)),
-        ...['bypass','lock','template','display','render'].map(name=>h('button',{class:'flag flag-'+name+(flagState(id,name)?' on':''),dataset:{flag:name},title:flagTitle(name), 'aria-label':flagTitle(name),'aria-pressed':String(flagState(id,name))}, name==='lock'?'L':''))];
+        ...['bypass','lock','template','display'].map(name=>h('button',{class:'flag flag-'+name+(flagState(id,name)?' on':''),dataset:{flag:name},title:flagTitle(name), 'aria-label':flagTitle(name),'aria-pressed':String(flagState(id,name))}, ({bypass:'B',lock:'L',template:'T',display:'D'})[name]))];
       el.classList.toggle('bypassed',!!n.flags?.bypass);
       el.classList.toggle('templated',!!(n.flags?.template||n.flags?.selectable_template));
       el.classList.toggle('selectable-template',!!n.flags?.selectable_template);
@@ -1000,7 +1000,7 @@
     pvDirty = true;
     if (pvTimer === null && !pvInFlight) pvTimer = setTimeout(runPreview, PB.playing ? 0 : 33);
   }
-  function flagTitle(name){return {display:'Display (R; Ctrl-click: Render)',render:'Render (T; toggle off to follow Display)',template:'Template (E; Shift: add; Ctrl: selectable)',selectable_template:'Selectable Template (W)',bypass:'Bypass / Ignore (Q or B)',lock:'Lock / Freeze geometry',unload:'Unload cached geometry'}[name];}
+  function flagTitle(name){return {display:'Display (R)',render:'Render (T; toggle off to follow Display)',template:'Template (E; Shift: add; Ctrl: selectable)',selectable_template:'Selectable Template (W)',bypass:'Bypass / Ignore (Q or B)',lock:'Lock / Freeze geometry',unload:'Unload cached geometry'}[name];}
   function flagState(id,name){const n=nodeOf(id);return name==='display'?id===displayNode():name==='render'?id===(S.graph.render||displayNode()):name==='lock'?!!n?.locked_geometry:!!n?.flags?.[name];}
   async function setNodeFlag(id,name,additive=false){
     if(!name)return;
@@ -1815,7 +1815,15 @@
   }
 
   // ---------------------------------------------------------------- mouse
-  let drag = null;
+  let drag = null, suppressContextUntil=0;
+  function segmentsCross(a,b,c,d){
+    const cross=(p,q,r)=>(q[0]-p[0])*(r[1]-p[1])-(q[1]-p[1])*(r[0]-p[0]);
+    return Math.max(a[0],b[0])>=Math.min(c[0],d[0]) && Math.max(c[0],d[0])>=Math.min(a[0],b[0]) && Math.max(a[1],b[1])>=Math.min(c[1],d[1]) && Math.max(c[1],d[1])>=Math.min(a[1],b[1]) && cross(a,b,c)*cross(a,b,d)<=0 && cross(c,d,a)*cross(c,d,b)<=0;
+  }
+  function cancelNetworkDrag(){if(!drag)return;drag=null;S.dragPos.clear();S.boxDrag=null;overlay.replaceChildren();$('#boxsel').classList.add('hidden');canvas.classList.remove('panning','wiring','detaching');window.removeEventListener('pointermove',onDrag);window.removeEventListener('pointerup',onDrop);renderNodes();renderBoxes();}
+  window.addEventListener('pointercancel',cancelNetworkDrag);
+  window.addEventListener('blur',cancelNetworkDrag);
+
   function portUnder(x, y) {
     const el = document.elementFromPoint(x, y);
     return el ? { port: el.closest(".port"), node: el.closest(".node") } : {};
@@ -1842,7 +1850,9 @@
         return;
       }
     }
-    if (e.button === 1 || (e.button === 0 && !nodeEl && !t.classList.contains("hit") && !e.shiftKey)) {
+    if (e.button === 2 && e.shiftKey) {
+      drag={kind:"cut",points:[[e.clientX,e.clientY]],cuts:new Map()};suppressContextUntil=performance.now()+1000;
+    } else if (e.button === 1 || (e.button === 0 && e.altKey && !nodeEl)) {
       drag = { kind: "pan", x0: e.clientX, y0: e.clientY, vx: S.view.x, vy: S.view.y, moved: false };
       canvas.classList.add("panning");
     } else if (e.button !== 0) {
@@ -1856,7 +1866,7 @@
       if (srcs.length) { drag = { kind: "wire", from: srcs[srcs.length - 1], pickup: { to: id, port: pname, from: srcs[srcs.length - 1] } }; renderWires(); }
       else drag = { kind: "wire-rev", to: id, port: pname };
     } else if (t.classList.contains("flag")) {
-      const name=e.ctrlKey&&t.dataset.flag==='display'?'render':e.ctrlKey&&t.dataset.flag==='template'?'selectable_template':t.dataset.flag;
+      const name=e.ctrlKey&&t.dataset.flag==='template'?'selectable_template':t.dataset.flag;
       setNodeFlag(nodeEl.dataset.id,name,e.shiftKey);
       return;
     } else if (nodeEl) {
@@ -1874,8 +1884,8 @@
       S.wireSel = { to: t.dataset.to, port: t.dataset.port, from: t.dataset.from };
       S.sel.clear(); renderNodes(); renderParams();
       return;
-    } else if (e.shiftKey) {
-      drag = { kind: "box", x0: e.clientX, y0: e.clientY };
+    } else {
+      drag = { kind: "box", x0: e.clientX, y0: e.clientY, additive:e.shiftKey };
     }
     if (drag) {
       e.preventDefault();
@@ -1891,7 +1901,14 @@
   function onDrag(e) {
     S.mouse = [e.clientX, e.clientY];
     if (!drag) return;
-    if (drag.kind === "pan") {
+    if (drag.kind === "cut") {
+      const next=[e.clientX,e.clientY], prev=drag.points.at(-1);
+      for(const path of canvas.querySelectorAll("path.hit")){
+        const matrix=path.getScreenCTM(), len=path.getTotalLength();let a=path.getPointAtLength(0).matrixTransform(matrix);
+        for(let t=4;t<len+4;t+=4){const b=path.getPointAtLength(Math.min(t,len)).matrixTransform(matrix);
+          if(segmentsCross(prev,next,[a.x,a.y],[b.x,b.y])){const w={to:path.dataset.to,port:path.dataset.port,from:path.dataset.from};drag.cuts.set(JSON.stringify(w),w);path.classList.add("cut-mark");break;}a=b;}}
+      drag.points.push(next);const r=canvas.getBoundingClientRect();overlay.replaceChildren(svgEl("path",{d:drag.points.map((p,i)=>`${i?"L":"M"}${p[0]-r.left},${p[1]-r.top}`).join(" ")}));
+    } else if (drag.kind === "pan") {
       const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
       if (Math.abs(dx) + Math.abs(dy) > 2) drag.moved = true;
       S.view.x = drag.vx + dx; S.view.y = drag.vy + dy; applyView();
@@ -1900,6 +1917,11 @@
       if (Math.abs(dx) + Math.abs(dy) > 1) drag.moved = true;
       for (const id of drag.ids) { const [x, y] = drag.start.get(id); S.dragPos.set(id, [Math.round(x + dx), Math.round(y + dy)]); }
       for (const id of drag.ids) { const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`); if (el) { const [x, y] = pos(id); el.style.left = x + "px"; el.style.top = y + "px"; } }
+      const now=performance.now(), q=drag.shake ||= {x:e.clientX,dir:0,turns:0,time:now};
+      const delta=e.clientX-q.x;
+      if(Math.abs(delta)>=18){const dir=Math.sign(delta);if(now-q.time>650)q.turns=0;
+        if(q.dir && dir!==q.dir){q.turns++;q.time=now;}q.dir=dir;q.x=e.clientX;
+        if(q.turns>=3 && !drag.detached){drag.detached=true;canvas.classList.add("detaching");toast("Disconnect on release; Esc cancels");}}
       renderWires();
     } else if (drag.kind === "boxmove" || drag.kind === "boxresize") {
       const [wx, wy] = toWorld(e.clientX, e.clientY), [dx, dy] = nodeDragDelta(wx - drag.wx, wy - drag.wy, drag.kind === "move" ? drag.start.get(drag.ids[0]) : drag.kind === "boxresize" ? drag.size : drag.pos);
@@ -1939,7 +1961,7 @@
     window.removeEventListener("pointermove", onDrag); window.removeEventListener("pointerup", onDrop);
     const d = drag; drag = null;
     overlay.replaceChildren();
-    canvas.classList.remove("panning", "wiring");
+    canvas.classList.remove("panning", "wiring", "detaching");
     document.querySelectorAll(".port.target").forEach((el) => el.classList.remove("target"));
     if (!d) return;
     if (d.kind === "boxmove" || d.kind === "boxresize") {
@@ -1957,13 +1979,19 @@
       if (!r) { renderBoxes(); renderNodes(); }
       return;
     }
-    if (d.kind === "pan") {
+    if (d.kind === "cut") {
+      suppressContextUntil=performance.now()+500;
+      if(d.cuts.size)await edit([...d.cuts.values()].map(w=>({op:"disconnect",...w})));
+      renderWires();
+    } else if (d.kind === "pan") {
       if (!d.moved && e.button === 0) { S.sel.clear(); S.wireSel = null; renderNodes(); renderParams(); scheduleInspect(); }
     } else if (d.kind === "move") {
       if (d.moved) {
         const positions = {};
         for (const id of d.ids) positions[id] = pos(id);
-        const r = await edit([{ op: "move", positions }]);
+        const ops=[{op:"move",positions}];
+        if(d.detached){const ids=new Set(d.ids);for(const [to,n] of Object.entries(S.graph.nodes))for(const [port,ref] of Object.entries(n.inputs||{}))for(const from of [ref].flat())if(ids.has(to)!==ids.has(from))ops.push({op:"disconnect",to,port,from});}
+        const r = await edit(ops);
         S.dragPos.clear();
         if (!r) renderNodes();
       } else S.dragPos.clear();
@@ -1989,8 +2017,8 @@
       $("#boxsel").classList.add("hidden");
       const [ax, ay] = toWorld(Math.min(d.x0, e.clientX), Math.min(d.y0, e.clientY));
       const [bx, by] = toWorld(Math.max(d.x0, e.clientX), Math.max(d.y0, e.clientY));
-      const hits = Object.keys(S.graph.nodes).filter((id) => { const [x, y] = pos(id); return x + W > ax && x < bx && y + H > ay && y < by; });
-      select(hits, true);
+      const hits = Object.keys(S.graph.nodes).filter((id) => { const [x, y] = pos(id); return x + W > ax && x < bx && y + nodeHeight(id) > ay && y < by; });
+      select(hits, d.additive);
     }
   }
   canvas.addEventListener("dblclick", (e) => {
@@ -2020,6 +2048,7 @@
   // ---------------------------------------------------------------- keyboard
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
+      cancelNetworkDrag();
       api("/api/cancel", {}).catch((err) => toast(err.message));
     }
   }, true);
@@ -2038,7 +2067,7 @@
     }
     const tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea" || tag === "select") return;
-    if(!pvOver&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&S.sel.size){const flag={q:'bypass',b:'bypass',e:'template',w:'selectable_template',r:'display',t:'render'}[e.key.toLowerCase()];if(flag){e.preventDefault();setNodeFlag([...S.sel][0],flag,e.shiftKey);return;}}
+    if(!pvOver&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&S.sel.size){const flag={q:'bypass',b:'bypass',e:'template',w:'selectable_template',r:'display'}[e.key.toLowerCase()];if(flag){e.preventDefault();setNodeFlag([...S.sel][0],flag,e.shiftKey);return;}}
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === "Escape") { $("#help").classList.add("hidden"); $("#file-menu").classList.add("hidden"); }
     else if (e.key === "Tab") {
@@ -2050,7 +2079,7 @@
     else if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); if (S.sel.size) duplicate([...S.sel]); }
     else if (mod && e.key.toLowerCase() === "g") { e.preventDefault(); saveSelectionAsNode(); }                // Houdini's collapse to subnet
     else if (mod && e.key.toLowerCase() === "a") { e.preventDefault(); select(Object.keys(S.graph.nodes)); }
-    else if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSelection(); }
+    else if (e.key === "Delete" || e.key === "Backspace" || (!pvOver && !mod && e.key.toLowerCase() === "x")) { e.preventDefault(); deleteSelection(); }
     else if (e.key === "f" || e.key === "F") frame(true);
     else if (e.key === "l" || e.key === "L") tidy();
     else if ((e.key === "o" || e.key === "O") && !mod) addBox();
@@ -2446,12 +2475,13 @@
     e.stopPropagation();
   };
   function graphContextMenu(e) {
+    if(drag?.kind==="cut" || performance.now()<suppressContextUntil){e.preventDefault();return;}
     e.preventDefault(); closeMenu();
     const rows = [], action = (label, fn) => rows.push(h("button", { role: "menuitem", onclick: () => { closeContext(); Promise.resolve(fn()).catch(err => toast(err.message)); } }, label));
     const node = e.target.closest(".node"), box = e.target.closest(".netbox"), wire = e.target.closest("path.hit");
     if (node) {
       const id = node.dataset.id; if (!S.sel.has(id)) select([id]);
-      for(const name of ['display','render','template','selectable_template','bypass','lock','unload'])action((flagState(id,name)?'✓ ':'')+flagTitle(name),()=>setNodeFlag(id,name,true));
+      for(const name of ['display','template','selectable_template','bypass','lock','unload'])action((flagState(id,name)?'✓ ':'')+flagTitle(name),()=>setNodeFlag(id,name,true));
       action("Rename…", async () => { const name = await appPrompt("Node name", id); if (name && name !== id) return edit([{ op: "rename", id, to: name }]); });
       action("Duplicate", () => duplicate([...S.sel]));
       action("Frame selection", () => frame(true));

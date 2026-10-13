@@ -570,3 +570,15 @@ body.has-error #main {bottom:calc(var(--app-status-h) + 30px);}
 .app-dialog input {width:100%;padding:6px;background:var(--bg);border:1px solid var(--line);}
 .dialog-actions {display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--line);margin-top:18px;padding-top:12px;}
 .dialog-actions .primary {border-color:#a27c42;color:#f4d098;background:#4b4233;}
+
+.node button.flag {width:18px;font-size:11px;font-weight:700;color:#eee;border:1px solid #15191d;}
+.node .flag-bypass {left:0;right:auto;}
+.node .flag-lock {left:18px;right:auto;}
+.node .flag-template {right:18px;}
+.node .flag-display {right:0;}
+.node .title,.node .sub {left:41px;right:40px;margin:0;}
+.node button.flag.on {color:#111;}
+.detaching .node.selected {outline:2px dashed #edba60;}
+path.hit.cut-mark {stroke:#ff6464;stroke-opacity:1;stroke-width:4px;}
+
+.flag-legend {font-size:10px;color:#bfc8d3;margin-left:8px;}

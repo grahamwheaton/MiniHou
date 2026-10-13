@@ -108,7 +108,7 @@
 <main id="main">
   <div id="work">
   <section id="canvas" tabindex="0" aria-label="Node graph">
-    <div id="network-pane-header" class="pane-heading"><span>Node network</span><span class="spacer"></span><label><input id="network-snap" type="checkbox"> Snap</label><button id="network-home" title="Frame all nodes" aria-label="Frame all nodes">⌂</button></div>
+    <div id="network-pane-header" class="pane-heading"><span>Node network</span><span class="flag-legend">B Bypass · L Lock · T Template · D Display</span><span class="spacer"></span><label><input id="network-snap" type="checkbox"> Snap</label><button id="network-home" title="Frame all nodes" aria-label="Frame all nodes">⌂</button></div>
     <div id="world">
       <div id="boxes"></div>
       <svg id="wires" width="1" height="1"></svg>
@@ -130,7 +130,7 @@
         <button id="pv-max" class="small" title="Maximize viewport (Ctrl+Space)">⛶</button>
       </div>
       <div class="pv-tools"><strong id="pv-state">View</strong>
-        <select id="pv-follow" aria-label="Preview source"><option value="selection">Selected node</option><option value="display">Display flag</option></select>
+        <select id="pv-follow" aria-label="Preview source"><option value="display">Display flag</option><option value="selection">Inspect selected node</option></select>
         <span id="pv-selinfo" class="muted small"></span>
         <span class="spacer"></span>
         <span class="pv-nav" role="group" aria-label="View">
@@ -229,7 +229,8 @@
     <tr><td>click a wire, <kbd>Delete</kbd></td><td>disconnect</td></tr>
     <tr><td>blue bar on a node</td><td>display flag: what Blender shows</td></tr>
     <tr><td>Q / B · E · W · R · T (network)</td><td>Bypass · Template · Selectable Template · Display · Render. Shift-click Template adds references; Ctrl-click Display sets Render. Right-click a node for all flags, Lock and Unload.</td></tr>
-    <tr><td>drag background / middle mouse</td><td>pan; wheel zooms; <kbd>Shift</kbd>-drag box-selects</td></tr>
+    <tr><td>X / shake node / Shift-right-drag</td><td>delete / disconnect on release / cut wires; Esc cancels gestures</td></tr><tr><td>B / L / T / D</td><td>Bypass / Lock / Template / Display buttons</td></tr>
+    <tr><td>drag background / middle mouse</td><td>box select / pan; Shift adds to selection; wheel zooms</td></tr>
     <tr><td><kbd>F</kbd> / <kbd>L</kbd></td><td>frame selection (or all) / tidy the layout</td></tr>
     <tr><td>3-D view: <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> / <kbd>Esc</kbd></td><td>select points / edges / faces / whole objects (click or drag a box, <kbd>Shift</kbd> adds, <kbd>Ctrl</kbd> removes; <kbd>Alt</kbd>-drag or middle mouse orbits) / back to view. The buttons under the view add a node after the one you are looking at (Bevel for edges, Extrude, Inset, Delete, Group for faces...)</td></tr>
     <tr><td>timeline (under the 3-D view)</td><td>▶ plays the graph in real time between the start and end frames (frames are skipped, never queued, if a cook is slower than the frame rate); <kbd>Space</kbd> plays or pauses, <kbd>←</kbd> <kbd>→</kbd> step, <kbd>Shift</kbd>+arrow jumps to the ends, ⟲ loops. Blender's own timeline still drives the frame when it is connected</td></tr>
