@@ -75,7 +75,7 @@ def _face_grid(n):
     Vec3("axis_divisions", (0,0,0), min=0, max=1000, label="Axis Divisions", doc="Cells per axis; zero uses Divisions. Integer values required."),
     Bool("add_vertex_normals", False),
 ])
-def box(geo=None, size=(1,1,1), center=(0,0,0), divisions=1, rotate=(0,0,0), uniform_scale=1,
+def box_node(geo=None, size=(1,1,1), center=(0,0,0), divisions=1, rotate=(0,0,0), uniform_scale=1,
         axis_divisions=(0,0,0), consolidate=True, connectivity="quadrilaterals", primitive_type="polygons", add_vertex_normals=False):
     """Polygon box or surface points; optional input fits an axis-aligned bounding box before rotation."""
     if any(v != int(v) for v in axis_divisions):
@@ -228,3 +228,8 @@ def source_transform(g, center, rotate, scale, uniform_scale):
     out=g.copy();c=np.asarray(center)
     out.point["P"]=(((g.P-c)*np.asarray(scale)*uniform_scale)@euler_xyz_matrix(rotate).T+c).astype(np.float32)
     return out
+
+
+def box(size=(1,1,1), center=(0,0,0), divisions=1, **kwargs):
+    """Keep the internal primitive helper's original positional calling convention."""
+    return box_node(size=size, center=center, divisions=divisions, **kwargs)
