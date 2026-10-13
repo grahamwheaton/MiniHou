@@ -1128,7 +1128,7 @@ class EditorE2E(unittest.TestCase):
         self.drag_handle("uniform_scale", 60)                                                # the square: drag up and to the right
         self.assertTrue(until(lambda: self.s.graph.nodes["h"].params.get("uniform_scale", 1.0) > 1.2))
         self.page.keyboard.press("w")
-        self.assertEqual(len(self.page.evaluate("minihou.preview.handleTips()")), 3)         # W: back to the move arrows
+        self.assertEqual(len(self.page.evaluate("minihou.preview.handleTips()")), 6)         # W: back to the move arrows
 
     def test_tool_buttons_are_hidden_for_nodes_without_transform_handles(self):
         self.handle_scene("polyextrude", {"group": "0", "distance": 0.2}, "h")

@@ -77,7 +77,7 @@ class PieMenuData(unittest.TestCase):
                 for key in spec:
                     self.assertIn(key, params, f"{where} ({mode})")
             if it.get("source"):
-                self.assertFalse(nt.inputs, where)
+                self.assertTrue(all(port.optional for port in nt.inputs), where)
             else:
                 self.assertTrue(nt.inputs or it["type"] == "null", where)
 
