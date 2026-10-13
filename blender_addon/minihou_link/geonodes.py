@@ -376,7 +376,8 @@ def _cook_tree(obj, mod, host, port, force):
             header, output = modifiers._connection(host, port).cook(
                 tree[KEY], tree[modifiers.PATH], values, arrays,
                 frame=scene.frame_current + scene.frame_subframe,
-                fps=scene.render.fps / scene.render.fps_base, graph=graph)
+                fps=scene.render.fps / scene.render.fps_base, graph=graph,
+                materials=[m.name if m is not None else "" for m in materials])
             update = GeoUpdate.from_message(header, output)
             if update.detail.get("instance_objects"):
                 raise ValueError("Wired groups require mesh output; external object instancing is unsupported")

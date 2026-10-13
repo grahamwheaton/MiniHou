@@ -35,7 +35,7 @@ from typing import Dict, List, Optional
 import bpy
 from bpy.app.handlers import persistent
 
-from . import mesh_reader, mesh_writer, proxy
+from . import mesh_reader, mesh_writer, proxy, scene_objects
 from .client import LinkClient
 from .protocol import GeoUpdate, Mirror, ProtocolError
 from .state import Inbox, ParamForwarder
@@ -70,6 +70,7 @@ class Runtime:
         self._timer_on = False
         self._last_forward = 0.0
         self._ui_dirty = True
+        scene_objects.set_logger(self._log)
         self.watched: List[str] = []
         self.dirty_objects: set = set()
         self.objects_sent = 0
@@ -151,6 +152,9 @@ class Runtime:
             for name, update in self.inbox.take_extras().items():
                 busy = True
                 self._apply_extra(name, update)
+            if scene_objects.flush():                       # real objects from scene_objects nodes (never from a handler)
+                busy = True
+                self._ui_dirty = True
             if self.params_dirty:
                 busy = self._forward_params() or busy
             if self.watched:
@@ -185,6 +189,11 @@ class Runtime:
             for gone in mesh_writer.remove_extra_objects(names):
                 self._log(f"output object {gone!r} removed (no longer in the graph)")
             self.extras = {n: m for n, m in self.extras.items() if n in names}
+            self._ui_dirty = True
+        elif t == "scene_nodes":
+            scene_objects.queue_nodes(scene_objects.SESSION, e.get("nodes", []))
+        elif t == "scene_objects":
+            scene_objects.queue(scene_objects.SESSION, e)
             self._ui_dirty = True
         elif t == "watch_objects":
             self.watched = [str(n) for n in e.get("objects", [])]

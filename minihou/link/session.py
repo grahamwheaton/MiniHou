@@ -75,6 +75,8 @@ class Result:
     rev: int = 0                                  # graph revision this result was cooked from
     proxy: float = 1.0                            # proxy level it was cooked at (1.0: the real thing)
     link_memo: Any = None                         # (link_tris, reduced geometry) for the Blender link
+    scene: Optional[Dict[str, dict]] = None       # scene_objects manifests by node id (None: not produced by this pass; keep the old ones)
+    scene_arrays: Dict[str, dict] = field(default_factory=dict)   # their binary arrays (pieces mode), by node id
     extras: Dict[str, Tuple[Geometry, str]] = field(default_factory=dict)   # extra outputs: object name -> (geometry, key)
 
 
@@ -91,11 +93,12 @@ def _merge_key(ops: List[dict]) -> Optional[tuple]:
 
 
 class Session:
-    def __init__(self, graph: Graph, *, registry: Optional[Registry] = None, cache_bytes: int = DEFAULT_CACHE_BYTES):
+    def __init__(self, graph: Graph, *, registry: Optional[Registry] = None, cache_bytes: int = DEFAULT_CACHE_BYTES, disk_cache=None):
         layout_missing(graph)
         self.graph = graph
         self.live_modifier = None
-        self.evaluator = Evaluator(registry or graph.registry, Cache(cache_bytes))
+        self.disk_cache = disk_cache                  # optional minihou.diskcache.DiskCache: expensive results survive a restart
+        self.evaluator = Evaluator(registry or graph.registry, Cache(cache_bytes), disk=disk_cache)
         self.lock = threading.RLock()
         self._cook_lock = threading.Lock()            # the evaluator is single-threaded
         self.latest_good: Optional[Result] = None     # newest successful cook
@@ -150,7 +153,7 @@ class Session:
         """The graph as JSON plus its revision (what editors render)."""
         with self.lock:
             return {"rev": self._rev, "document_id": self._document_id, "graph": self.graph.to_dict(),
-                    "path": str(self.path) if self.path else None,
+                    "path": str(self.path.resolve()) if self.path else None,
                     "can_undo": bool(self._undo), "can_redo": bool(self._redo),
                     "live_modifier": ({"label": self.live_modifier.label, "connected": self.live_modifier.connected}
                                       if self.live_modifier else None)}
@@ -454,6 +457,26 @@ class Session:
         out["frame"] = frame
         return out
 
+    def set_disk_cache(self, folder=None, *, max_bytes: Optional[int] = None, clear: bool = False) -> Optional[dict]:
+        """Turn the disk cache on (in ``folder``) or off (``folder=None``; the files stay), or clear what it holds. Returns its stats."""
+        from ..diskcache import DEFAULT_MAX_BYTES, DiskCache
+        with self._cook_lock:
+            if folder is None:
+                old, self.disk_cache, self.evaluator.disk = self.disk_cache, None, None
+                if old is not None:
+                    if clear:
+                        old.clear()
+                    old.close()
+                return None
+            if self.disk_cache is None or str(self.disk_cache.folder) != str(folder):
+                if self.disk_cache is not None:
+                    self.disk_cache.close()
+                self.disk_cache = DiskCache(folder, max_bytes=max_bytes or DEFAULT_MAX_BYTES)
+                self.evaluator.disk = self.disk_cache
+            if clear:
+                self.disk_cache.clear()
+            return self.disk_cache.stats()
+
     def view_level(self) -> float:
         """The proxy level the editor is looking at: the settings' level, or in auto mode the level of the newest result."""
         good = self.latest_good
@@ -507,7 +530,8 @@ class Session:
                     break
                 self._refining = True
                 self._notify_status(rev)
-            status, res = self._cook_pass(rev, snapshot, frame, fps, L, cancelable=step > 0)
+            status, res = self._cook_pass(rev, snapshot, frame, fps, L, cancelable=step > 0,
+                                          emit_scene=not (auto and step == 0 and len(plan) > 1))      # the coarse pass of auto must not churn objects
             published = res or published
             if status != "ok":
                 break
@@ -539,7 +563,7 @@ class Session:
         except Exception:  # noqa: BLE001 - if keys cannot be computed the cook itself will say why
             return False
 
-    def _cook_pass(self, rev: int, snapshot: Graph, frame, fps, level: float, cancelable: bool = False):
+    def _cook_pass(self, rev: int, snapshot: Graph, frame, fps, level: float, cancelable: bool = False, emit_scene: bool = True):
         """One cook at ``level``. Returns ("ok" | "error" | "cancelled", the Result it published or None)."""
         t0 = time.perf_counter()
         published: Optional[Result] = None
@@ -548,6 +572,8 @@ class Session:
             feeds = self._modifier_feeds(snapshot)
         try:
             extras: Dict[str, Tuple[Geometry, str]] = {}
+            scene: Optional[Dict[str, dict]] = {} if emit_scene else None
+            scene_arrays: Dict[str, dict] = {}
             with self._cook_lock, timectx.at(frame, fps):
                 ev.proxy_level = level
                 ev.cancel = (lambda: self._rev != rev or self._wake.is_set()) if cancelable else None
@@ -563,6 +589,16 @@ class Session:
                             continue
                         extras[name] = (eg, ev.last_stats.key)
                         live += ev.live_keys(snapshot, nid)
+                    if scene is not None:
+                        from ..nodes.scene_objects import build_manifest
+                        for nid in snapshot.scene_sinks():                  # results that become real Blender objects
+                            try:
+                                sg = ev.cook(snapshot, nid, feeds=feeds)
+                                scene[nid], scene_arrays[nid] = build_manifest(nid, snapshot.effective_params(nid), sg, ev.last_stats.key)
+                                live += ev.live_keys(snapshot, nid)
+                                self._extra_errors.pop("scene:" + nid, None)
+                            except (NodeError, GraphError, ParamError, ValueError) as e:
+                                self._extra_error("scene:" + nid, f"{nid}: {e}")
                     if not feeds:
                         ev.cache.retain(live)
                 finally:
@@ -570,13 +606,17 @@ class Session:
             ms = (time.perf_counter() - t0) * 1000
             if level >= 1.0 and stats.cooked:
                 self._full_ms = ms
-            overall = stats.key + "".join(f"|{n}:{k}" for n, (_, k) in sorted(extras.items()))
+            overall = stats.key + "".join(f"|{n}:{k}" for n, (_, k) in sorted(extras.items())) \
+                + ("".join(f"|scene:{n}:{m['key']}" for n, m in sorted(scene.items())) if scene else "")
             if overall != self._last_key or self._last_error_msg is not None:
                 d = stats.to_dict()
                 cook = {"ms": round(ms, 3), "cooked": d["cooked"], "cached": d["cached"], "node_ms": d["node_ms"]}
+                if d["disk"]:
+                    cook["disk"] = d["disk"]                  # which results came back from the disk cache
                 if level < 1.0:
                     cook["proxy"] = level
-                published = Result(0, geo, stats.key, cook, rev=rev, extras=extras, proxy=level)
+                published = Result(0, geo, stats.key, cook, rev=rev, extras=extras, proxy=level, scene=scene,
+                                   scene_arrays=scene_arrays)
                 self._last_key, self._last_error_msg = overall, None
                 self._publish(published)
             elif self.latest_good is not None:
@@ -600,6 +640,8 @@ class Session:
         out: Dict[str, Any] = {"rev": rev, "cooked_rev": self._cooked_rev, "busy": self._cooked_rev < rev,
                                "frame": self.frame, "fps": self.fps}
         out["proxy"] = self.proxy_info()
+        if self.disk_cache is not None:
+            out["disk_cache"] = self.disk_cache.stats()
         if err is not None:
             out.update(ok=False, error=err.error)
         else:
@@ -709,6 +751,8 @@ class Session:
 
         with self._cook_lock:
             self.evaluator.rbd.clear()
+        if self.disk_cache is not None:
+            self.disk_cache.close()
 
     def wait_idle(self, timeout: float = 10.0) -> bool:
         """Block until every edit made so far has been cooked (for tests, scripts and AI tools)."""

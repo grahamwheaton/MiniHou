@@ -26,11 +26,20 @@ from typing import Dict, List, Optional, Tuple
 from . import proxy, timectx
 from .geometry import Geometry
 from .inputs import input_cache_scope
+from .diskcache import VOLATILE_TYPES
 from .graph import Graph, GraphError
 from .loops import analyze as analyze_loops, cook_budget, consume_iteration
 from .sdk import REGISTRY, Registry
 
 DEFAULT_CACHE_BYTES = 2 * 1024 ** 3
+
+
+def _flat(in_keys):
+    for k in in_keys:
+        if isinstance(k, list):
+            yield from k
+        elif k is not None:
+            yield k
 
 
 class CookCancelled(RuntimeError):
@@ -64,12 +73,13 @@ class CookStats:
     target: str = ""
     key: str = ""
     cooked: List[str] = field(default_factory=list)     # nodes whose function actually ran, in order
-    cached: List[str] = field(default_factory=list)     # nodes served from cache
+    cached: List[str] = field(default_factory=list)     # nodes served from cache (memory or disk)
+    disk: List[str] = field(default_factory=list)       # the ones of those that came from the disk cache
     node_ms: Dict[str, float] = field(default_factory=dict)
     total_ms: float = 0.0
 
     def to_dict(self) -> dict:
-        return {"target": self.target, "cooked": list(self.cooked), "cached": list(self.cached),
+        return {"target": self.target, "cooked": list(self.cooked), "cached": list(self.cached), "disk": list(self.disk),
                 "node_ms": {k: round(v, 3) for k, v in self.node_ms.items()},
                 "total_ms": round(self.total_ms, 3)}
 
@@ -154,9 +164,11 @@ class Cache:
 class Evaluator:
     """Cooks graphs against a shared cache. Not thread-safe: use one thread per evaluator."""
 
-    def __init__(self, registry: Optional[Registry] = None, cache: Optional[Cache] = None):
+    def __init__(self, registry: Optional[Registry] = None, cache: Optional[Cache] = None, disk=None):
         self.registry = registry or REGISTRY
         self.cache = cache if cache is not None else Cache()
+        self.disk = disk                                   # optional minihou.diskcache.DiskCache: results that survive a restart
+        self._volatile: set = set()                        # keys of results that depend on something outside the graph (never stored on disk)
         self.last_stats = CookStats()
         self.proxy_level: Optional[float] = None           # cook at this proxy level (None: whatever surrounds the cook)
         self.cancel = None                                 # callable -> True stops the cook before its next node (CookCancelled)
@@ -175,6 +187,7 @@ class Evaluator:
         for nid in order:
             if fixed and nid in fixed:
                 keys[nid] = fixed[nid]
+                self._volatile.add(keys[nid])               # fed in from outside (a system's input): a one-off token
                 continue
             inst = graph.nodes[nid]
             nt = self.registry.get(inst.type)
@@ -196,6 +209,10 @@ class Evaluator:
                 + ([input_cache_scope()] if input_cache_scope() else []),
                 separators=(",", ":"), allow_nan=False)
             keys[nid] = hashlib.blake2b(payload.encode("utf-8"), digest_size=16).hexdigest()
+            if nt.name in VOLATILE_TYPES or any(k in self._volatile for k in _flat(in_keys)):
+                if len(self._volatile) > 200_000:
+                    self._volatile.clear()
+                self._volatile.add(keys[nid])
         return keys
 
     # -- cooking -----------------------------------------------------------
@@ -253,6 +270,11 @@ class Evaluator:
             if self.cancel is not None and self.cancel():
                 raise CookCancelled("cook cancelled: a newer edit replaced it")
             hit = self.cache.get(keys[nid])
+            if hit is None and self.disk is not None and keys[nid] not in self._volatile:
+                hit = self.disk.get(keys[nid])               # cooked in an earlier session: skips everything upstream too
+                if hit is not None:
+                    self.cache.put(keys[nid], hit, graph.nodes[nid].type)
+                    stats.disk.append(nid)
             if hit is not None:
                 results[nid] = hit
                 stats.cached.append(nid)
@@ -315,6 +337,7 @@ class Evaluator:
         self.cache.put(key, state, "loop_end")
         stats.cooked.append(nid)
         stats.node_ms[nid] = (time.perf_counter() - t0) * 1000.0
+        self._store(key, state, stats.node_ms[nid])
         return state
 
     def _cook_node(self, graph: Graph, nid: str, key: str, results: Dict[str, Geometry],
@@ -346,7 +369,12 @@ class Evaluator:
         stats.node_ms[nid] = (time.perf_counter() - t0) * 1000.0
         stats.cooked.append(nid)
         self.cache.put(key, out, nt.name)
+        self._store(key, out, stats.node_ms[nid])
         return out
+
+    def _store(self, key: str, geo: Geometry, ms: float) -> None:
+        if self.disk is not None and key not in self._volatile:
+            self.disk.put(key, geo, ms)
 
     def live_keys(self, graph: Graph, target: Optional[str] = None) -> List[str]:
         """Keys of every node upstream of ``target`` (what a cook of it would use)."""

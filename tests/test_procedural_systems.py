@@ -219,12 +219,12 @@ class ProceduralExampleTests(unittest.TestCase):
 
     def test_fabric_and_packing_measured_behavior(self):
         root = Path(__file__).resolve().parents[1]/"examples"
-        fabric = Graph.from_dict(json.loads((root/"procedural_fabric.json").read_text()))
+        fabric = Graph.from_dict(json.loads((root/"procedural_fabric.json").read_text(encoding="utf-8")))
         f = Evaluator().cook(fabric,"relax")
         np.testing.assert_array_equal(f.P[[0,8,72,80],2],3)
         self.assertLess(float(f.P[40,2]),2.8)
         self.assertLess(f.detail["goal_max_residual"],.02)
-        packing = Graph.from_dict(json.loads((root/"procedural_packing.json").read_text()))
+        packing = Graph.from_dict(json.loads((root/"procedural_packing.json").read_text(encoding="utf-8")))
         p = Evaluator().cook(packing,"relax")
         delta = p.P[:,None]-p.P[None,:]
         distances = np.linalg.norm(delta,axis=-1)

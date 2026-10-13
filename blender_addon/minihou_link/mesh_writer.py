@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 import bpy
 import numpy as np
 
+from . import material_slots
 from .protocol import GeoUpdate, Mirror, TOPO_KEYS, attr_key, split_key
 
 _DOMAIN = {"point": "POINT", "vertex": "CORNER", "prim": "FACE"}
@@ -53,6 +54,45 @@ def attribute_spec(arr: np.ndarray) -> Optional[Tuple[str, str, np.dtype]]:
     return None
 
 
+MADE_KEY = "minihou_made"                    # custom property on a material MiniHou created because the graph named it
+
+
+def material_for(name: str):
+    """The material called ``name``; one is made (and marked) when the file has none, so a name in a graph is never silently
+    ignored. Returns ``(material, made)``."""
+    mat = bpy.data.materials.get(name)
+    if mat is not None:
+        return mat, False
+    mat = bpy.data.materials.new(name)
+    mat[MADE_KEY] = 1
+    return mat, True
+
+
+def apply_material_names(mesh, names) -> List[str]:
+    """Fill the mesh's material slots from the engine's name list (see :mod:`material_slots`). Existing slots are never removed.
+    Returns warnings (a material that had to be created)."""
+    assert_main_thread()
+    names = material_slots.usable(names)
+    if not names:
+        return []
+    current = [m.name if m is not None else None for m in mesh.materials]
+    wanted = material_slots.plan(current, names)
+    warnings: List[str] = []
+    for i, name in enumerate(wanted):
+        if i < len(current) and current[i] == name:
+            continue
+        mat = None
+        if name:
+            mat, made = material_for(name)
+            if made:
+                warnings.append(f"material {name!r} is not in this file; made an empty one")
+        if i < len(current):
+            mesh.materials[i] = mat
+        else:
+            mesh.materials.append(mat)
+    return warnings
+
+
 def set_positions(mesh, P: np.ndarray) -> str:
     """Write vertex positions. Returns which path was used.
 
@@ -92,7 +132,7 @@ def set_edge_verts(mesh, pairs: np.ndarray) -> None:
 
 DETAIL_PREFIX = "mh_"                        # detail attribute "iteration" -> custom property "mh_iteration" on the output object
 DETAIL_KEYS = "minihou_detail_keys"          # which custom properties we wrote, so stale ones can go
-DETAIL_INTERNAL = {"instance_objects"}       # detail data the add-on consumes itself
+DETAIL_INTERNAL = {"instance_objects", "materials"}       # detail data the add-on consumes itself
 
 
 def _detail_value(v):
@@ -385,6 +425,8 @@ def apply_update(mesh, mirror: Mirror, u: GeoUpdate) -> Dict[str, object]:
             mesh.normals_split_custom_set([(0.0, 0.0, 0.0)] * len(mesh.loops))   # old Blender: back to auto normals
     mesh[CUSTOM_ATTRS_KEY] = sorted((set(ours) & live_names) | wanted)
     out["attributes_ms"] = (pc() - t) * 1000
+
+    out["warnings"].extend(apply_material_names(mesh, (getattr(mirror, "detail", None) or u.detail).get("materials")))
 
     t = pc()
     mesh.update(calc_edges=rebuild)

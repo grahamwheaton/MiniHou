@@ -860,6 +860,8 @@ def glue_cluster(geo, piece_attrib, output, strength, strength_variation, seed, 
 
 # --------------------------------------------------------------------------------------------- rbd material fracture
 
+MAX_MATERIAL_PIECES = 2000          # pieces rbd_material_fracture will make in all (levels multiply: 26 x 64 x 64 took over a minute)
+
 # density kg/m3, friction, restitution, glue strength N/m2 (tuned so a wall stands under its own weight and breaks under a
 # hard hit; the order is realistic, the numbers are not measured)
 MATERIALS = {
@@ -1055,6 +1057,10 @@ def rbd_material_fracture(geo, material, density, friction, restitution, glue_st
     from .merge import merge
     if material != "custom":
         density, friction, restitution, glue_strength = MATERIALS[material]
+    total = int(pieces) * int(sub_pieces) ** max(int(fracture_level) - 1, 0)
+    if total > MAX_MATERIAL_PIECES:
+        raise ValueError(f"{pieces} pieces broken into {sub_pieces} more for {fracture_level - 1} further level(s) would make about "
+                         f"{total:,} pieces (limit {MAX_MATERIAL_PIECES:,}); lower the pieces, sub_pieces or fracture_level")
     scatter_off = {"outgrp_" + k: False for k in ("interior", "surface", "clustered", "extra", "impact")}
     fracture_og = {k: v for k, v in og.items() if k.startswith("outgrp_")}
     inside_name = og.get("outgrp_inside_name", "inside")

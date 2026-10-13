@@ -191,6 +191,10 @@ class Graph:
                 out[name] = nid
         return out
 
+    def scene_sinks(self) -> Dict[str, str]:
+        """``{node id: node id}`` of the ``scene_objects`` nodes: results that become real Blender objects."""
+        return {nid: nid for nid, n in self.nodes.items() if n.type == "scene_objects"}
+
     def output_node(self) -> str:
         main = self._main_output()
         if main is None:

@@ -1,6 +1,7 @@
 import numpy as np
 
 from ..geometry import Geometry, Topology
+from ..materials import merge_sources, unify as unify_materials
 from ..sdk import Input, Int, node
 
 
@@ -21,6 +22,7 @@ def merge(geos):
     """Concatenate any number of geometries. Attributes missing on an input are zero-filled."""
     if len(geos) == 1:
         return geos[0]
+    geos = unify_materials(geos)                       # material indices of every input mean the same in the result
     npts = [g.npoints for g in geos]
     nvs = [g.nvertices for g in geos]
     nps = [g.nprims for g in geos]
@@ -45,6 +47,7 @@ def merge(geos):
     for g in geos:
         for k, v in g.detail.items():
             out.detail.setdefault(k, v)
+    merge_sources(geos, out)
     _merge_instances(geos, out)
     return out
 

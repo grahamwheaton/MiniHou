@@ -17,7 +17,7 @@
     ["Modify", "#5ea0e0", [
       T("Transform", "transform"), T("Merge", "merge"), T("Duplicate", "copy_transform", "duplicate"), T("Copy to Points", "copy_to_points"),
       T("Instance", "instance"), T("Switch", "switch"), T("Match Size", "match_size"), T("Bound", "bound"), T("Blast", "blast"),
-      T("Delete", "delete"), T("Fuse", "fuse"), T("Clean", "clean"), T("Sort", "sort"), T("Null", "null"), T("Output", "output"),
+      T("Delete", "delete"), T("Fuse", "fuse"), T("Clean", "clean"), T("Sort", "sort"), T("Null", "null"), T("Output", "output"), T("Scene Objects", "scene_objects", "output"),
       T("Input", "input", "host")]],
     ["Model", "#d99a4e", [
       T("Boolean", "boolean"), T("Clip", "clip"), T("Mirror", "mirror"), T("Subdivide", "subdivide"), T("Skin", "skin"),
@@ -46,6 +46,7 @@
       T("Attribute Promote", "attribute_promote", "attr"), T("Attribute Randomize", "attribute_randomize", "attr"),
       T("Attribute Blur", "attribute_blur", "attr"), T("Attribute Rename", "attribute_rename", "attr"),
       T("Attribute Delete", "attribute_delete", "attr"), T("Measure", "measure"), T("Connectivity", "connectivity"), T("Ray", "ray"),
+      T("Set Material", "set_material", "attr"),
       T("Python", "python", "code")]],
     ["Curves", "#7fd0a0", [
       T("Bezier", "bezier", "curve"), T("Polyline", "curve"), T("Line", "line"), T("Helix", "helix"), T("Resample", "resample"), T("Carve", "carve"),

@@ -328,7 +328,7 @@ class UsdForeignFileTests(unittest.TestCase):
         g, rep = usd_io.read_geometry(p)
         self.assertEqual(g.nprims, 1)                                                      # only the ground
         self.assertAlmostEqual(float(g.P[:, 0].max()), 9.0)
-        self.assertTrue(any("PointInstancer" in x for x in rep.skipped))
+        self.assertTrue(any("Scatter" in n and "no points" in n for n in rep.notes))                # an empty instancer is reported
 
     def test_files_with_only_time_samples_read_their_first_sample(self):
         p, s = self.stage(up="Z")
@@ -584,6 +584,103 @@ class UsdWithoutPxrTests(unittest.TestCase):
                 with self.assertRaises(NodeError) as cm:
                     Evaluator().cook(g)
                 self.assertIn("pip install usd-core", str(cm.exception))
+
+
+def instanced():
+    """What the instance node makes: points with instance / rot / scale and the objects' names, plus an ordinary point."""
+    rng = np.random.default_rng(5)
+    n = 40
+    g = Geometry.from_arrays(np.vstack([rng.random((n, 3)) * 10, [[50.0, 50.0, 50.0]]]).astype(np.float32))
+    g.point["instance"] = np.concatenate([rng.integers(1, 4, n), [0]]).astype(np.int32)
+    g.point["rot"] = (rng.random((n + 1, 3)) * 6.28 - 3.14).astype(np.float32)
+    g.point["scale"] = (0.5 + rng.random((n + 1, 3))).astype(np.float32)
+    g.point["N"] = rng.random((n + 1, 3)).astype(np.float32)
+    g.detail["instance_objects"] = ["Tree", "Bush", "Rock"]
+    return g.freeze()
+
+
+@needs_usd
+class UsdInstancingTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="minihou_usd_")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+
+    def test_quaternions_round_trip_every_rotation(self):
+        from minihou.nodes.instance import euler_xyz_to_matrix
+        rng = np.random.default_rng(1)
+        e = (rng.random((500, 3)) * 2 * np.pi - np.pi)
+        e[:3] = [[0, 0, 0], [np.pi / 2, 0, 0], [0, np.pi, 0]]                                 # axis-aligned and half turns too
+        R = euler_xyz_to_matrix(e)
+        back = usd_io._quat_to_mat(usd_io._mat_to_quat(R))
+        np.testing.assert_allclose(back, R, atol=1e-9)
+
+    def test_instances_become_a_point_instancer_and_come_back_exactly(self):
+        g = instanced()
+        p = os.path.join(self.dir, "i.usda")
+        rep = usd_io.write_stage(p, {"forest": g})
+        self.assertEqual((rep.outputs["forest"]["instances"], rep.outputs["forest"]["points"]), (40, 1))      # the odd point stays a point
+        stage = Usd.Stage.Open(p)
+        inst = UsdGeom.PointInstancer(stage.GetPrimAtPath("/MiniHou/forest/instances"))
+        self.assertEqual([t.name for t in inst.GetPrototypesRel().GetTargets()], ["Tree", "Bush", "Rock"])
+        self.assertEqual(stage.GetPrimAtPath("/MiniHou/forest/instances/Prototypes/Bush").GetCustomDataByKey("minihou:blender_object"), "Bush")
+        keep = g.point["instance"] > 0
+        np.testing.assert_array_equal(np.asarray(inst.GetProtoIndicesAttr().Get()), g.point["instance"][keep] - 1)
+        np.testing.assert_allclose(np.asarray(inst.GetPositionsAttr().Get()), g.P[keep])
+        from minihou.nodes.instance import euler_xyz_to_matrix
+        R = usd_io._quat_to_mat(np.asarray(inst.GetOrientationsfAttr().Get()))
+        np.testing.assert_allclose(R, euler_xyz_to_matrix(g.point["rot"][keep].astype(np.float64)), atol=1e-5)
+        np.testing.assert_allclose(np.asarray(inst.GetScalesAttr().Get()), g.point["scale"][keep])
+        back, info = usd_io.read_geometry(p)
+        same(self, g, back)                                                                    # rot / scale / N / the lone point, exactly
+        self.assertEqual(back.detail["instance_objects"], ["Tree", "Bush", "Rock"])
+        self.assertEqual(info.skipped, [])
+
+    def test_a_foreign_instancer_gives_instance_rot_and_scale_and_no_prototype_geometry(self):
+        p = os.path.join(self.dir, "f.usda")
+        s = Usd.Stage.CreateNew(p)
+        UsdGeom.SetStageUpAxis(s, "Y")
+        UsdGeom.SetStageMetersPerUnit(s, 1.0)
+        top = UsdGeom.Xform.Define(s, "/World")
+        top.AddScaleOp().Set((2.0, 2.0, 2.0))
+        inst = UsdGeom.PointInstancer.Define(s, "/World/Scatter")
+        for name in ("Pine", "Oak"):
+            m = UsdGeom.Mesh.Define(s, f"/World/Scatter/Prototypes/{name}")
+            m.CreatePointsAttr([(0, 0, 0), (1, 0, 0), (0, 1, 0)])
+            m.CreateFaceVertexCountsAttr([3])
+            m.CreateFaceVertexIndicesAttr([0, 1, 2])
+        inst.CreatePrototypesRel().SetTargets([Sdf.Path("/World/Scatter/Prototypes/Pine"), Sdf.Path("/World/Scatter/Prototypes/Oak")])
+        inst.CreatePositionsAttr([(1, 0, 0), (0, 0, 3), (0, 5, 0)])
+        inst.CreateProtoIndicesAttr([0, 1, 1])
+        inst.CreateScalesAttr([(1, 1, 1), (2, 2, 2), (1, 3, 1)])
+        s.GetRootLayer().Save()
+        g, rep = usd_io.read_geometry(p)
+        self.assertEqual((g.npoints, g.nprims), (3, 0))                                         # no prototype triangles
+        self.assertEqual(g.detail["instance_objects"], ["Pine", "Oak"])
+        np.testing.assert_array_equal(g.point["instance"], [1, 2, 2])
+        # Y-up -> Z-up: (x, y, z) -> (x, -z, y), and the parent doubles everything
+        np.testing.assert_allclose(g.P, [[2, 0, 0], [0, -6, 0], [0, 0, 10]], atol=1e-5)
+        np.testing.assert_allclose(g.point["scale"], [[2, 2, 2], [4, 4, 4], [2, 6, 2]], atol=1e-5)
+        # the identity orientation, seen after the Y-up turn, is a quarter turn about X
+        from minihou.nodes.instance import euler_xyz_to_matrix
+        R = euler_xyz_to_matrix(g.point["rot"].astype(np.float64))[0]
+        np.testing.assert_allclose(R @ np.array([0, 1.0, 0]), [0, 0, 1.0], atol=1e-5)          # +Y of the prototype is now +Z
+
+    def test_two_instancers_keep_their_own_objects(self):
+        p = os.path.join(self.dir, "two.usda")
+        s = Usd.Stage.CreateNew(p)
+        for i, names in enumerate((["A", "B"], ["C"])):
+            inst = UsdGeom.PointInstancer.Define(s, f"/I{i}")
+            targets = []
+            for nm in names:
+                UsdGeom.Xform.Define(s, f"/I{i}/P/{nm}")
+                targets.append(Sdf.Path(f"/I{i}/P/{nm}"))
+            inst.CreatePrototypesRel().SetTargets(targets)
+            inst.CreatePositionsAttr([(i, 0, 0), (i, 1, 0)])
+            inst.CreateProtoIndicesAttr([0, len(names) - 1])
+        s.GetRootLayer().Save()
+        g, _ = usd_io.read_geometry(p, up_axis="keep")
+        self.assertEqual(g.detail["instance_objects"], ["A", "B", "C"])
+        np.testing.assert_array_equal(g.point["instance"], [1, 2, 3, 3])
 
 
 class UsdMissingTests(unittest.TestCase):
