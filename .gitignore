@@ -11,3 +11,4 @@ gui_test_output/
 *.tar.gz
 .minihou_cache/
 .houdini_docs_cache/
+graphs/
