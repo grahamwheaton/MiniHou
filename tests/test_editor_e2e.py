@@ -2389,6 +2389,74 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_selector('.node[data-id="g"]')
         self.page.locator("#pv-proxy").wait_for(state="visible")
 
+    # -- instances drawn as impostors ---------------------------------------------------------------------------------------------
+    def instanced_scene(self, count=300, rows=16, columns=32):
+        self.s.edit([{"op": "replace", "graph": {"nodes": {
+            "s": {"type": "sphere", "params": {"rows": rows, "columns": columns}, "pos": [0, 0]},
+            "grid": {"type": "grid", "params": {"size_x": 60, "size_y": 60}, "pos": [120, 0]},
+            "sc": {"type": "scatter", "inputs": {"geo": "grid"}, "params": {"count": count}, "pos": [120, 90]},
+            "c": {"type": "copy_to_points", "inputs": {"source": "s", "points": "sc"}, "pos": [0, 180]}}, "display": "c"}}])
+        self.page.wait_for_selector('.node[data-id="c"]')
+
+    def inst(self):
+        return self.page.evaluate("minihou.preview.instanceStats()")
+
+    def drawn_pixels(self):
+        """How many canvas pixels differ from the background, read from the GL buffer right after a draw."""
+        return self.page.evaluate("""() => new Promise((resolve) => {
+            const c = document.querySelector('#pv-canvas'), gl = c.getContext('webgl2'); minihou.preview.redraw();
+            requestAnimationFrame(() => { const w = c.width, h = c.height, px = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+              let n = 0; for (let i = 0; i < px.length; i += 4) if (Math.abs(px[i] - 0x21) + Math.abs(px[i + 1] - 0x24) + Math.abs(px[i + 2] - 0x29) > 24) n++; resolve(n); }); })""")
+
+    def test_repeated_copies_are_drawn_as_impostors_with_a_level_per_instance(self):
+        self.instanced_scene(300)                                                                    # 300 spheres of 960 triangles: over the 250,000 budget
+        self.page.wait_for_function("minihou.preview.instanceStats().on", timeout=20000)
+        st = self.inst()
+        self.assertEqual((st["kind"], st["count"], st["replaces"]), ("blocks", 300, True))
+        self.assertEqual(self.page.evaluate("minihou.preview.tris"), 0)                              # the real triangles are not in the browser
+        self.assertIn("Instanced view: 300 copies", self.page.locator("#pv-proxy-text").inner_text())
+        self.page.click("#pv-max")
+        self.page.evaluate("minihou.preview.frameAll()")
+        self.page.wait_for_function("minihou.preview.instanceStats().visible === 300")
+        self.assertGreater(self.drawn_pixels(), 200)
+        st = self.inst()
+        self.assertEqual(sum(st["lod"]), st["visible"])
+        self.assertLessEqual(st["tris"], st["budget"])
+        near = self.page.evaluate("(() => { const v = minihou.preview.view; v.dist = 12; v.target = [0, 0, 0]; minihou.preview.redraw(); return 1; })()")
+        self.page.wait_for_function("minihou.preview.instanceStats().visible < 300")                 # zoomed in: the rest is outside the view and not drawn
+        st = self.inst()
+        self.assertGreater(st["lod"][0] + st["lod"][1], 0)                                           # what remains is close: a shape, not a dot
+        self.page.evaluate("(() => { const v = minihou.preview.view; v.dist = 4000; minihou.preview.redraw(); })()")
+        self.page.wait_for_function("(() => { const s = minihou.preview.instanceStats(); return s.visible === 300 && s.lod[0] === 0 && s.lod[1] === 0; })()")
+        self.assertGreater(self.drawn_pixels(), 0)                                                   # far away: boxes and dots
+        self.page.evaluate("(() => { const v = minihou.preview.view; v.dist = 90; minihou.preview.opt.instTris = 20000; minihou.preview.redraw(); })()")      # a tight budget demotes instances
+        self.page.wait_for_function("(() => { const s = minihou.preview.instanceStats(); return s.scale > 1 && s.tris <= 20000; })()")
+        self.page.evaluate("minihou.preview.opt.instTris = 1500000")
+
+    def test_full_res_and_selecting_show_the_real_geometry_instead_of_impostors(self):
+        self.instanced_scene(300)
+        self.page.wait_for_function("minihou.preview.instanceStats().on", timeout=20000)
+        self.page.click("#pv-full")                                                                  # Full res: everything the viewer can hold
+        self.page.wait_for_function("!minihou.preview.instanceStats().on && minihou.preview.tris === 300 * 960", timeout=20000)
+        self.page.click("#pv-full")
+        self.page.wait_for_function("minihou.preview.instanceStats().on", timeout=20000)
+        self.page.keyboard.press("1")                                                                # a selection mode loads the full detail (Detail: Auto)
+        self.page.wait_for_function("!minihou.preview.instanceStats().on && minihou.preview.tris > 0", timeout=20000)
+
+    def test_instance_points_are_boxes_and_stay_selectable_points(self):
+        self.s.edit([{"op": "replace", "graph": {"nodes": {
+            "grid": {"type": "grid", "params": {"size_x": 60, "size_y": 60}, "pos": [0, 0]},
+            "sc": {"type": "scatter", "inputs": {"geo": "grid"}, "params": {"count": 200}, "pos": [0, 90]},
+            "i": {"type": "instance", "inputs": {"points": "sc"}, "params": {"objects": "Tree", "scale_min": 1, "scale_max": 3}, "pos": [0, 180]}}, "display": "i"}}])
+        self.page.wait_for_function("minihou.preview.instanceStats().on", timeout=20000)
+        st = self.inst()
+        self.assertEqual((st["kind"], st["count"], st["approximate"], st["replaces"]), ("points", 200, True, False))
+        self.assertEqual(self.page.evaluate("minihou.preview.points"), 200)                          # the instance points are still the geometry
+        self.page.click("#pv-max")
+        self.page.evaluate("minihou.preview.frameAll()")
+        self.page.wait_for_function("minihou.preview.instanceStats().visible === 200")
+        self.assertGreater(self.drawn_pixels(), 100)
+
     def test_a_big_geometry_is_drawn_reduced_and_selecting_loads_the_full_detail(self):
         self.big_grid()
         self.assertIn("Reduced view", self.page.locator("#pv-proxy-text").inner_text())

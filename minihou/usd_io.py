@@ -43,6 +43,7 @@ prototypes are not imported), with each prim's world transform applied. Other pr
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -1012,6 +1013,7 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
         rep.notes.append(f"scaled by metersPerUnit {unit:g}")
     parts: List[Part] = []
     inst_names: List[str] = []                       # the objects the point instancers place, all instancers' prototypes in order
+    inst_bounds: List = []                           # and the local bounding box of each ([[lo], [hi]] or None), for the viewport's impostors
     src_paths: List[str] = []                        # the USD prims primitives came from (for ``prim_attrib``)
     it = iter(Usd.PrimRange(start, Usd.TraverseInstanceProxies(Usd.PrimDefaultPredicate)))
     for prim in it:
@@ -1108,7 +1110,7 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
             _add_subset_groups(UsdGeom.Mesh(prim), part, tm)
             _read_material_bindings(prim, part, tm, os.path.abspath(path), rep)
         if kind == "instancer":
-            _read_instancer(stage, instancer, tm, part, M @ _pad(M_up), unit, inst_names, rep, str(prim.GetPath()))
+            _read_instancer(stage, instancer, tm, part, M @ _pad(M_up), unit, inst_names, rep, str(prim.GetPath()), inst_bounds)
         # world space
         Pw = P @ (M[:3, :3] @ M_up) + (M[3, :3] @ M_up)
         part.P = (Pw * unit).astype(np.float32)
@@ -1149,6 +1151,8 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
         detail.pop(k, None)
     if inst_names:
         geo.detail.setdefault("instance_objects", list(inst_names))
+        if len(inst_bounds) == len(inst_names) and any(b is not None for b in inst_bounds):
+            geo.detail.setdefault("instance_bounds", list(inst_bounds))
     if src_paths:
         geo.detail["usd_paths"] = src_paths
     if detail:
@@ -1162,7 +1166,28 @@ def _pad(m3: np.ndarray) -> np.ndarray:
     return out
 
 
-def _read_instancer(stage, inst, tm, part: Part, M: np.ndarray, unit: float, names: List[str], rep: "ReadReport", where: str) -> None:
+def _prototype_bounds(stage, inst, targets, tm) -> list:
+    """The bounding box of each prototype in the instancer's space (stage units, before the instance's own transform), ``[[lo], [hi]]`` or None."""
+    Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
+    out: list = []
+    try:
+        cache = UsdGeom.BBoxCache(tm, [UsdGeom.Tokens.default_, UsdGeom.Tokens.render], useExtentsHint=True)
+    except Exception:
+        return [None] * len(targets)
+    for t in targets:
+        pr = stage.GetPrimAtPath(t)
+        try:
+            box = cache.ComputeRelativeBound(pr, inst.GetPrim()) if hasattr(cache, "ComputeRelativeBound") else cache.ComputeUntransformedBound(pr)
+            rng = box.ComputeAlignedRange()
+            lo, hi = rng.GetMin(), rng.GetMax()
+            vals = [float(x) for x in (*lo, *hi)]
+            out.append(None if rng.IsEmpty() or not all(math.isfinite(v) for v in vals) else [vals[:3], vals[3:]])
+        except Exception:
+            out.append(None)
+    return out
+
+
+def _read_instancer(stage, inst, tm, part: Part, M: np.ndarray, unit: float, names: List[str], rep: "ReadReport", where: str, bounds: Optional[list] = None) -> None:
     """Instances of a ``PointInstancer`` as the ``instance`` node's attributes: ``instance`` (1-based prototype number), ``rot``
     (Euler XYZ radians) and ``scale`` per point. Primvars already read from a MiniHou file win (they are exact); ``M`` is the
     instancer's row-vector world matrix (with the up-axis turn)."""
@@ -1178,6 +1203,8 @@ def _read_instancer(stage, inst, tm, part: Part, M: np.ndarray, unit: float, nam
     if "instance" not in part.point_attrs:
         part.point_attrs["instance"] = (idx + 1 + len(names)).astype(np.int32)
         names.extend(protos)
+        if bounds is not None:
+            bounds.extend(_prototype_bounds(stage, inst, targets, tm))
     R3 = M[:3, :3].T                                   # column-vector form of the instancer's world rotation (and scale)
     k = abs(np.linalg.det(R3)) ** (1.0 / 3.0) or 1.0
     Rp = R3 / k

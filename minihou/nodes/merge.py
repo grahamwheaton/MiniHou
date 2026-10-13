@@ -72,6 +72,17 @@ def _merge_instances(geos, out):
         parts.append(lut[np.clip(np.asarray(a).reshape(g.npoints, -1)[:, 0], 0, len(lst))])
     out.point["instance"] = np.concatenate(parts).astype(np.int32)
     out.detail["instance_objects"] = combined
+    sizes = [None] * len(combined)                                            # the shapes' sizes follow their names (when an input knew them)
+    for g, lst in zip(geos, lists):
+        known = g.detail.get("instance_bounds")
+        if lst and isinstance(known, list) and len(known) == len(lst):
+            for name, b in zip(lst, known):
+                if b is not None and sizes[combined.index(name)] is None:
+                    sizes[combined.index(name)] = b
+    if any(b is not None for b in sizes):
+        out.detail["instance_bounds"] = sizes
+    else:
+        out.detail.pop("instance_bounds", None)
 
 
 @node("switch", inputs=[Input("geos", multi=True)], category="combine", params=[

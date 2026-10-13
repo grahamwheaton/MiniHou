@@ -1169,6 +1169,10 @@
   // full always asks for full detail; fast always reduces (selection off). Remembered between sessions.
   let pvDetail = "auto";
   try { const d = localStorage.getItem("minihou.pvDetail"); if (["auto", "full", "fast"].includes(d)) pvDetail = d; } catch (e) { /* no storage */ }
+  // Instances (copies of one shape, instance points) are drawn as impostors: auto does it for big scenes and for instance points, always for any
+  // repeated shape, never keeps the old drawing. Remembered between sessions.
+  let pvInstances = "auto";
+  try { const d = localStorage.getItem("minihou.pvInstances"); if (["auto", "always", "never"].includes(d)) pvInstances = d; } catch (e) { /* no storage */ }
   const wantFull = () => pvDetail === "full" || (pvDetail === "auto" && (pvSelection.mode !== "view" || !!(paintTool && paintTool.active())));
   function setDetail(d) {
     pvDetail = d;
@@ -1184,7 +1188,7 @@
   function setReducedView(p) {
     pvReduced = p;
     $("#pv-proxy").classList.toggle("hidden", !p && pvDetail !== "full");
-    $("#pv-proxy-text").textContent = p ? `Reduced view: ${fmt(p.shown_tris)} of ${fmt(p.tris)} triangles` + (p.points > p.shown_points ? `, ${fmt(p.shown_points)} of ${fmt(p.points)} points` : "") + (tooBig(p) ? " (more than the viewer can hold)" : "") : "";
+    $("#pv-proxy-text").textContent = p && p.instanced ? `Instanced view: ${fmt(p.instances)} copies drawn as impostors (${fmt(p.tris)} triangles at full detail)` : p ? `Reduced view: ${fmt(p.shown_tris)} of ${fmt(p.tris)} triangles` + (p.points > p.shown_points ? `, ${fmt(p.shown_points)} of ${fmt(p.points)} points` : "") + (tooBig(p) ? " (more than the viewer can hold)" : "") : "";
     $("#pv-full").classList.toggle("on", pvDetail === "full");
     $("#pv-full").textContent = pvDetail === "full" ? "Full res ✓" : "Full res";
     $("#pv-detail").value = pvDetail;
@@ -1247,12 +1251,12 @@
     $("#pv-node").textContent = node ? "· " + node : "";
     if (!node) { pv.clear(); pvMsg(""); pvKey = null; return; }
     const full = wantFull(), attr = paintTool ? paintTool.wantAttr() : null, mask = paintTool ? paintTool.wantMask() : null;
-    const key = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}:${full}:${attr ? attr.name + "/" + attr.domain : ""}:${mask ? mask.name + "/" + mask.domain : ""}`;
+    const key = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}:${full}:${pvInstances}:${attr ? attr.name + "/" + attr.domain : ""}:${mask ? mask.name + "/" + mask.domain : ""}`;
     if (key === pvKey) return;
     pvKey = key;
     let buf;
     try {
-      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full, templates:true, attr: attr || undefined, mask: mask || undefined }) });
+      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full, templates:true, attr: attr || undefined, mask: mask || undefined, instances: pvInstances }) });
       buf = await r.arrayBuffer();
     } catch (e) { pvKey = null; return; }
     // A completed frame of the same node is useful even if a newer edit arrived.

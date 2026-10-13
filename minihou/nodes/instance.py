@@ -89,4 +89,5 @@ def instance(points, objects, pick, pick_attrib, seed, align, random_spin, scale
     out.point["rot"] = matrix_to_euler_xyz(R).astype(np.float32)
     out.point["scale"] = np.repeat(s[:, None], 3, 1).astype(np.float32)
     out.detail["instance_objects"] = names
+    out.detail.pop("instance_bounds", None)                 # sizes of other objects, if the incoming points had any
     return out

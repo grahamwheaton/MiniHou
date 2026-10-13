@@ -744,7 +744,6 @@ class Session:
                 out["blender"] = dict(data.info, error=data.error) if data.error else dict(data.info)
         return out
 
-    @cancellable
     def column_origins(self, node: str, domain: str, names: List[str], limit: int = 400) -> Dict[str, str]:
         """For each attribute (column) name, the node that first made it on the way to ``node``: walk up through the first input that has it
         until no input does. Used by the spreadsheet; cooked results come from the cache, and anything that fails to cook is just left out."""
@@ -775,8 +774,13 @@ class Session:
             return out
         return out
 
-    def preview(self, node: str, templates: bool = False) -> dict:
-        """Cook ``node`` and return ``{"ok", "node", "rev", "geo"}``, or ``{"ok": False, "error"}`` (never raises)."""
+    @cancellable
+    def preview(self, node: str, templates: bool = False, instances: str = "never") -> dict:
+        """Cook ``node`` and return ``{"ok", "node", "rev", "geo"}``, or ``{"ok": False, "error"}`` (never raises).
+
+        With a live Blender link, instance points are realised as copies of their source objects for the preview. ``instances`` ``auto`` /
+        ``always`` keeps them as points when the copies would be more than the viewport's triangle budget (or always) and returns the source
+        geometries as ``instance_sources`` so the viewer can draw impostors instead (see :mod:`minihou.impostors`)."""
         with self.lock:
             snapshot = self.graph.copy()
             rev = self._rev
@@ -795,9 +799,15 @@ class Session:
                 if has_handles(inst.type, nt) and not inst.meta.get("flags", {}).get("bypass") and not inst.meta.get("locked_geometry"):
                     ins = [self.evaluator.cook(snapshot, src, feeds=feeds) for src in snapshot.input_ids(node) if src in snapshot.nodes]
                     handles = handles_for(inst.type, ins, geo, snapshot.effective_params(node), nt)
+                instance_sources = None
                 if live_preview and geo.detail.get("instance_objects"):
                     from .live import preview_instances
-                    geo = preview_instances(geo, sources)
+                    if instances != "never":
+                        from .. import impostors, preview as _preview
+                        if instances == "always" or impostors.estimate_tris(geo, sources) > _preview.DISPLAY_TRIS:
+                            instance_sources = dict(sources)
+                    if instance_sources is None:
+                        geo = preview_instances(geo, sources)
                 references, selectable, warnings = [], [], []
                 if templates:
                     from ..nodes.merge import merge
@@ -823,7 +833,7 @@ class Session:
         except (NodeError, GraphError, ParamError, ValueError) as e:
             return {"ok": False, "node": node, "rev": rev,
                     "error": {"node": getattr(e, "node_id", None), "message": str(e)}}
-        return {"ok": True, "node": node, "rev": rev, "geo": geo, "handles": handles,
+        return {"ok": True, "node": node, "rev": rev, "geo": geo, "handles": handles, "instance_sources": instance_sources,
                 "reference": reference if templates else None, "selectable": selectable, "template_warnings": warnings}
 
     def start(self, cook_immediately: bool = True) -> None:

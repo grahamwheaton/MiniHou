@@ -125,6 +125,29 @@ class PreviewArraysTests(unittest.TestCase):
         h1["node"] = "x"                                                                 # callers may add header fields
         self.assertNotIn("node", preview.arrays_for(grid)[0])
 
+    def test_big_triangle_lists_come_sorted_with_a_chunk_table(self):
+        grid = run("grid", columns=260, rows=260).freeze()                                  # 135,200 triangles: over CHUNK_MIN_TRIS
+        head, a = preview.arrays_for(grid, full=True)
+        tri = a["tri"].reshape(-1, 3)
+        self.assertEqual(len(tri), 259 * 259 * 2)
+        table = a["chunks"].reshape(-1, 8)
+        self.assertEqual(len(table), -(-len(tri) // preview.CHUNK_TRIS))
+        self.assertEqual(int(table[:, 1].sum()), len(tri))
+        self.assertEqual(table[:, 0].astype(int).tolist(), [i * preview.CHUNK_TRIS for i in range(len(table))])
+        P = a["P"].reshape(-1, 3)
+        for row in table[[0, len(table) // 2, -1]]:                                           # each chunk's box holds its triangles' points
+            first, count = int(row[0]), int(row[1])
+            pts = P[tri[first:first + count].reshape(-1)]
+            self.assertTrue((pts.min(axis=0) >= row[2:5] - 1e-5).all() and (pts.max(axis=0) <= row[5:8] + 1e-5).all())
+        spreads = []
+        for r in table:
+            pts = P[tri[int(r[0]):int(r[0]) + int(r[1])].reshape(-1)]
+            spreads.append(float((pts.max(axis=0) - pts.min(axis=0)).max()))
+        self.assertLess(float(np.median(spreads)), 6.0)                                       # most chunks are compact (in the file's order every chunk would span the whole 10-wide grid)
+        self.assertEqual(sorted(a["tri_prim"].tolist()), np.repeat(np.arange(259 * 259), 2).tolist())              # the same triangles, in another order
+        small, b = preview.arrays_for(run("grid", columns=40, rows=40).freeze())
+        self.assertNotIn("chunks", b)                                                          # small meshes are sent as they are
+
     def test_unpack_rejects_other_data(self):
         with self.assertRaises(ValueError):
             preview.unpack(b'{"ok": false}')

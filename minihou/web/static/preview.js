@@ -41,6 +41,23 @@ window.MiniHouPreview = (() => {
   in vec3 vView; in vec3 vCol; uniform vec3 uBase; uniform float uUseCol; uniform float uAlpha; out vec4 o;
   void main() { o = vec4(mix(uBase, vCol, uUseCol), uAlpha); }`;
 
+  // Instances drawn as impostors: one transform per instance (three rows of a 3x4 matrix) on shared shape meshes. Two-sided: a mirrored instance flips its winding.
+  const VS_INST = `#version 300 es
+  in vec3 aPos; in vec4 aR0; in vec4 aR1; in vec4 aR2; in vec3 aCol;
+  uniform mat4 uMV, uP;
+  out vec3 vView; out vec3 vCol;
+  void main() { vec4 p = vec4(aPos, 1.0); vec3 w = vec3(dot(aR0, p), dot(aR1, p), dot(aR2, p));
+                vec4 v = uMV * vec4(w, 1.0); vView = v.xyz; vCol = aCol; gl_Position = uP * v; }`;
+  const FS_INST = `#version 300 es
+  precision highp float;
+  in vec3 vView; in vec3 vCol; uniform vec3 uBase; uniform float uUseCol, uLighting; out vec4 o;
+  void main() {
+    vec3 n = normalize(cross(dFdx(vView), dFdy(vView)));
+    float d = abs(n.z);
+    vec3 base = mix(uBase, vCol, uUseCol);
+    o = vec4(base * (0.28 + 0.72 * d * uLighting) + vec3(0.10) * pow(1.0 - d, 3.0), 1.0);
+  }`;
+
   // Infinite Z-up construction plane, drawn as a background so it never hides geometry.
   const VS_GRID = `#version 300 es
   out vec2 vNdc;
@@ -128,13 +145,14 @@ window.MiniHouPreview = (() => {
       return { p, u };
     };
     const MESH_U = ["uMV", "uP", "uPointSize", "uBase", "uUseCol", "uAlpha", "uBias", "uLighting"];
-    let mesh, flat, edgeProg, colorProg, gridProg;
+    let mesh, flat, edgeProg, colorProg, gridProg, instProg;
     try {
       gridProg = prog(VS_GRID, FS_GRID, [], ["uMV", "uP", "uEye", "uTarget", "uSpacing", "uRange", "uOpacity", "uAxes"]);
       mesh = prog(VS, FS_MESH, ["aPos", "aCol"], MESH_U);
       flat = prog(VS, FS_FLAT, ["aPos", "aCol"], MESH_U);
       edgeProg = prog(VS_EDGE, FS_COLOR, ["aA", "aB", "aT", "aS"], ["uMV", "uP", "uViewport", "uWidth", "uBias", "uColor"]);
       colorProg = prog(VS, FS_COLOR, ["aPos", "aCol"], ["uMV", "uP", "uPointSize", "uBias", "uColor"]);
+      instProg = prog(VS_INST, FS_INST, ["aPos", "aR0", "aR1", "aR2", "aCol"], ["uMV", "uP", "uBase", "uUseCol", "uLighting"]);
     } catch (e) { if (onMessage) onMessage("3-D preview unavailable: " + e.message); api.ok = false; return api; }
 
     const vao = gl.createVertexArray(), posBuf = gl.createBuffer(), colBuf = gl.createBuffer();
@@ -170,7 +188,8 @@ window.MiniHouPreview = (() => {
 
     const view = { yaw: -0.6, pitch: 0.45, dist: 5, target: [0, 0, 0], ortho: false };
     const PITCH_MAX = 1.5707, FOV = Math.PI / 4, ORTHO_FOV = 0.03;     // "orthographic" is a very narrow lens far away: the same maths, so picking and handles keep working
-    const opt = { navigation: "blender", orbitDepth: true, shaded: true, edges: true, points: false, normals: false, grid: true, background: "#212429", gridOpacity: 1, axes: true, lighting: 1, pointSize: 4, gridSpacing: 0 };
+    const opt = { navigation: "blender", orbitDepth: true, shaded: true, edges: true, points: false, normals: false, grid: true, background: "#212429", gridOpacity: 1, axes: true, lighting: 1, pointSize: 4, gridSpacing: 0,
+      instBias: 1, instTris: 1500000 };                              // impostors: > 1 keeps detail to smaller instances; the most triangles all instances may draw together
     let data = { npoints: 0, ntris: 0, nedges: 0, hasCd: false, bounds: [[-1, -1, -1], [1, 1, 1]] };
     let raw = null;                                                  // the geometry's typed arrays, for picking
     let raf = 0;
@@ -275,6 +294,7 @@ window.MiniHouPreview = (() => {
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, edgeBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arrays.edge, gl.STATIC_DRAW);
       data.npoints = arrays.P.length / 3; data.ntris = arrays.tri.length / 3; data.nedges = arrays.edge.length / 2;
       data.bounds = head.bounds; nrmDirty = true;
+      uploadInstances(head, arrays);
       raw = { P: arrays.P, tri: arrays.tri, edge: arrays.edge, triPrim: arrays.tri_prim || new Uint32Array(arrays.tri.length / 3) };
       Object.assign(api, { tris: data.ntris, edges: data.nedges, points: data.npoints });
     }
@@ -566,6 +586,127 @@ window.MiniHouPreview = (() => {
       gl.uniform1f(colorProg.u.uPointSize, 4);
     }
 
+    // ---------------------------------------------------------------- instances drawn as impostors (the engine sends each shape once at three levels
+    // of detail and a transform per instance: minihou/impostors.py). Each camera move picks a level per instance from its size on screen and
+    // keeps the total within a triangle budget; instances outside the view are not drawn at all.
+    const inst = { on: false, head: null, N: 0, M: null, proto: null, sph: null, col: null, px: null, vis: null, posBuf: gl.createBuffer(), idxBuf: gl.createBuffer(),
+      buckets: new Map(), dots: { vao: gl.createVertexArray(), buf: gl.createBuffer(), n: 0, data: null }, sig: null, last: 0, timer: 0,
+      stats: { count: 0, visible: 0, lod: [0, 0, 0, 0], tris: 0, budget: 0, scale: 1, updates: 0, ms: 0 } };
+    gl.bindVertexArray(inst.dots.vao); gl.bindBuffer(gl.ARRAY_BUFFER, inst.dots.buf); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0); gl.bindVertexArray(null);
+    const BOX_PX = 3, DOT_PX = 0.8, T0_PX = 70, T1_PX = 22;               // diameters, in pixels, where the levels change (before the bias and the budget)
+    function clearInstances() {
+      inst.on = false; inst.head = null; inst.N = 0; inst.M = inst.proto = inst.sph = inst.col = inst.px = inst.vis = null; inst.sig = null;
+      for (const b of inst.buckets.values()) { b.count = 0; }
+      inst.dots.n = 0; Object.assign(inst.stats, { count: 0, visible: 0, lod: [0, 0, 0, 0], tris: 0 });
+    }
+    function uploadInstances(head, arrays) {
+      clearInstances();
+      const h = head.instances;
+      if (!h || !arrays.inst_M || !h.count) return;
+      inst.on = true; inst.head = h; inst.N = h.count; inst.M = arrays.inst_M; inst.proto = arrays.inst_proto; inst.sph = arrays.inst_sph; inst.col = arrays.inst_col || null;
+      inst.px = new Float32Array(inst.N); inst.vis = new Uint8Array(inst.N);
+      gl.bindBuffer(gl.ARRAY_BUFFER, inst.posBuf); gl.bufferData(gl.ARRAY_BUFFER, arrays.ip_P, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, inst.idxBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arrays.ip_tri, gl.STATIC_DRAW);
+      for (const b of inst.buckets.values()) { gl.deleteVertexArray(b.vao); gl.deleteBuffer(b.buf); }
+      inst.buckets.clear();
+      inst.stats.count = inst.N;
+    }
+    function bucketFor(m) {
+      let b = inst.buckets.get(m);
+      if (b) return b;
+      const vao = gl.createVertexArray(), buf = gl.createBuffer(), stride = 60;
+      gl.bindVertexArray(vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, inst.posBuf); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      for (const [loc, n, off] of [[1, 4, 0], [2, 4, 16], [3, 4, 32], [4, 3, 48]]) { gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, n, gl.FLOAT, false, stride, off); gl.vertexAttribDivisor(loc, 1); }
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, inst.idxBuf);
+      gl.bindVertexArray(null);
+      b = { vao, buf, count: 0, data: null };
+      inst.buckets.set(m, b);
+      return b;
+    }
+    function updateInstances(cam) {
+      const t0 = performance.now(), h = inst.head, N = inst.N, sph = inst.sph, m = cam.MV, P = cam.P, px = inst.px, vis = inst.vis;
+      const k = P[5] * cam.h, kx = P[0], ky = P[5], near = cam.near, protos = h.protos, proto = inst.proto;
+      let nvis = 0;
+      for (let i = 0; i < N; i++) {
+        const cx = sph[4 * i], cy = sph[4 * i + 1], cz = sph[4 * i + 2], r = sph[4 * i + 3];
+        const vx = m[0] * cx + m[4] * cy + m[8] * cz + m[12], vy = m[1] * cx + m[5] * cy + m[9] * cz + m[13], d = -(m[2] * cx + m[6] * cy + m[10] * cz + m[14]);
+        if (d + r < near || Math.abs(vx) * kx > d + r * kx * 1.5 || Math.abs(vy) * ky > d + r * ky * 1.5) { vis[i] = 0; continue; }      // behind or outside the view
+        vis[i] = 1; nvis++;
+        px[i] = r * k / Math.max(d, 1e-9);                                                  // the instance's diameter on screen, in CSS pixels
+      }
+      // thresholds grow (scale) until the triangles of every visible instance fit the budget
+      const bias = Math.max(0.05, opt.instBias || 1), budget = Math.max(1000, opt.instTris || 1500000);
+      let scale = 1, tris = 0;
+      const lodOf = (p, f) => (p * bias >= T0_PX * f ? 0 : p * bias >= T1_PX * f ? 1 : p * bias >= BOX_PX * f ? 2 : p * bias >= DOT_PX ? 3 : 4);
+      for (let pass = 0; pass < 14; pass++) {
+        tris = 0;
+        for (let i = 0; i < N; i++) { if (!vis[i]) continue; const c = lodOf(px[i], scale); if (c < 3) tris += protos[proto[i]].tris[c]; }
+        if (tris <= budget) break;
+        scale *= 1.6;
+      }
+      const counts = new Map(), lod = [0, 0, 0, 0];
+      for (let i = 0; i < N; i++) {
+        if (!vis[i]) continue;
+        const c = lodOf(px[i], scale);
+        if (c === 4) continue;
+        lod[c]++;
+        if (c < 3) { const mesh = protos[proto[i]].lods[c]; counts.set(mesh, (counts.get(mesh) || 0) + 1); }
+      }
+      const fill = new Map(), M = inst.M, col = inst.col;
+      for (const [mesh, n] of counts) {
+        const b = bucketFor(mesh);
+        if (!b.data || b.data.length < n * 15) b.data = new Float32Array(Math.max(n * 15, 15 * 64));
+        b.count = 0; fill.set(mesh, b);
+      }
+      for (const [mesh, b] of inst.buckets) if (!fill.has(mesh)) b.count = 0;
+      let nd = 0;
+      if (!inst.dots.data || inst.dots.data.length < lod[3] * 3) inst.dots.data = new Float32Array(Math.max(lod[3] * 3, 3 * 64));
+      for (let i = 0; i < N; i++) {
+        if (!vis[i]) continue;
+        const c = lodOf(px[i], scale);
+        if (c === 4) continue;
+        if (c === 3) { inst.dots.data[3 * nd] = sph[4 * i]; inst.dots.data[3 * nd + 1] = sph[4 * i + 1]; inst.dots.data[3 * nd + 2] = sph[4 * i + 2]; nd++; continue; }
+        const b = fill.get(protos[proto[i]].lods[c]), o = b.count * 15;
+        for (let j = 0; j < 12; j++) b.data[o + j] = M[12 * i + j];
+        if (col) { b.data[o + 12] = col[3 * i]; b.data[o + 13] = col[3 * i + 1]; b.data[o + 14] = col[3 * i + 2]; } else { b.data[o + 12] = b.data[o + 13] = b.data[o + 14] = 0; }
+        b.count++;
+      }
+      for (const b of fill.values()) { gl.bindBuffer(gl.ARRAY_BUFFER, b.buf); gl.bufferData(gl.ARRAY_BUFFER, b.data.subarray(0, b.count * 15), gl.DYNAMIC_DRAW); }
+      inst.dots.n = nd;
+      if (nd) { gl.bindBuffer(gl.ARRAY_BUFFER, inst.dots.buf); gl.bufferData(gl.ARRAY_BUFFER, inst.dots.data.subarray(0, nd * 3), gl.DYNAMIC_DRAW); }
+      Object.assign(inst.stats, { count: N, visible: nvis, lod, tris, budget, scale, updates: inst.stats.updates + 1, ms: Math.round(performance.now() - t0) });
+    }
+    function drawInstances(cam) {
+      if (!inst.on) return;
+      const sig = [...cam.MV, ...cam.P, opt.instBias, opt.instTris, cam.w, cam.h].join(",");
+      if (sig !== inst.sig) {
+        const now = performance.now();
+        if (inst.N > 150000 && inst.sig !== null && now - inst.last < 70) { if (!inst.timer) inst.timer = setTimeout(() => { inst.timer = 0; schedule(); }, 80); }   // a huge set refreshes a few times a second while the camera moves
+        else { updateInstances(cam); inst.sig = sig; inst.last = performance.now(); }
+      }
+      gl.enable(gl.DEPTH_TEST);
+      gl.useProgram(instProg.p);
+      gl.uniformMatrix4fv(instProg.u.uMV, false, cam.MV); gl.uniformMatrix4fv(instProg.u.uP, false, cam.P);
+      gl.uniform3fv(instProg.u.uBase, [0.62, 0.68, 0.76]); gl.uniform1f(instProg.u.uUseCol, inst.col ? 1 : 0); gl.uniform1f(instProg.u.uLighting, opt.lighting);
+      const meshes = inst.head.meshes;
+      for (const [mesh, b] of inst.buckets) {
+        if (!b.count) continue;
+        gl.bindVertexArray(b.vao);
+        gl.drawElementsInstanced(gl.TRIANGLES, meshes[mesh].t_n * 3, gl.UNSIGNED_INT, meshes[mesh].t_off * 12, b.count);
+      }
+      if (inst.dots.n) {
+        gl.useProgram(colorProg.p); gl.bindVertexArray(inst.dots.vao);
+        gl.uniformMatrix4fv(colorProg.u.uMV, false, cam.MV); gl.uniformMatrix4fv(colorProg.u.uP, false, cam.P);
+        gl.uniform1f(colorProg.u.uBias, 0); gl.uniform1f(colorProg.u.uPointSize, 2); gl.uniform4f(colorProg.u.uColor, 0.62, 0.68, 0.76, 1);
+        gl.drawArrays(gl.POINTS, 0, inst.dots.n);
+      }
+      gl.bindVertexArray(null);
+    }
+    function instanceStats() { return { ...inst.stats, lod: inst.stats.lod.slice(), on: inst.on, kind: inst.head ? inst.head.kind : null, approximate: !!(inst.head && inst.head.approximate),
+      replaces: !!(inst.head && inst.head.replaces), total: inst.head ? inst.head.total : 0, fullTris: inst.head ? inst.head.full_tris : 0 }; }
+
     function draw() {
       raf = 0;
       resize();
@@ -588,7 +729,7 @@ window.MiniHouPreview = (() => {
       }
       renderGizmo(cam);
       if (api.onOverlayDraw) api.onOverlayDraw();
-      if (!data.npoints && !templateRaw) return;
+      if (!data.npoints && !templateRaw && !inst.on) return;
       gl.enable(gl.DEPTH_TEST);
       gl.bindVertexArray(vao);
       const setup = (pr, base, useCol, alpha) => {
@@ -616,11 +757,13 @@ window.MiniHouPreview = (() => {
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, edgeBuf); gl.drawElements(gl.LINES, data.nedges * 2, gl.UNSIGNED_INT, 0);
         gl.disable(gl.BLEND);
       }
-      if (opt.points || sel.mode === "point" || (!data.ntris && !data.nedges)) {
+      if (opt.points || sel.mode === "point" || (!data.ntris && !data.nedges && !inst.on)) {
         setup(flat, sel.mode === "point" ? [0.9, 0.93, 0.98] : [0.95, 0.75, 0.3], true);
         gl.uniform1f(flat.u.uBias, 0.0004);
         gl.drawArrays(gl.POINTS, 0, data.npoints);
       }
+      drawInstances(cam);
+      gl.bindVertexArray(vao);
       if(templateRaw){
         gl.bindVertexArray(templateVao);setup(flat,[0.72,0.38,0.52],false,0.8);
         gl.uniform1f(flat.u.uBias,0.0003);
@@ -1172,7 +1315,8 @@ window.MiniHouPreview = (() => {
         if (!same && (sel.point.size || sel.edge.size || sel.face.size)) change({}, "replace");   // other geometry: drop the selection
         else rebuildOverlay();
       },
-      clear() { templateRaw=null;api.templatePoints=0;api.selectableTemplates=[];handles = []; data.npoints = 0; raw = null; Object.assign(api, { tris: 0, edges: 0, points: 0 }); change({}, "replace"); schedule(); },
+      instanceStats,
+      clear() { clearInstances(); templateRaw=null;api.templatePoints=0;api.selectableTemplates=[];handles = []; data.npoints = 0; raw = null; Object.assign(api, { tris: 0, edges: 0, points: 0 }); change({}, "replace"); schedule(); },
       frameAll, frameSelection, viewAxis, redraw: schedule, bounds: () => data.bounds,
       normalSegments() { if (nrmDirty) buildNormals(); return Array.from(nrmLines); },   // for tests: [cx, cy, cz, tx, ty, tz] per primitive
       setOrtho(on) { view.ortho = !!on; schedule(); return view.ortho; },

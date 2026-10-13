@@ -14,7 +14,7 @@ live in the other and in Blender.
 ``POST /api/edit``     ``{ops: [...], wait?: bool}`` -> ``{rev, results, changed, status?}`` (see :mod:`minihou.edit`)
 ``POST /api/undo``     also ``/api/redo``
 ``POST /api/inspect``  ``{node, detail?}`` -> geometry summary of any node
-``POST /api/preview``  ``{node, full?, tris?, attr?, mask?}`` -> positions, triangles and edges of any node for the 3-D view (binary, see
+``POST /api/preview``  ``{node, full?, tris?, attr?, mask?, instances?}`` -> positions, triangles and edges of any node for the 3-D view (binary, see
                        :mod:`minihou.preview`; a big one is reduced to the display budget unless ``full``, or to ``tris`` triangles),
                        or JSON ``{ok: false, error}``
 ``POST /api/export_usd`` ``{path, node?, overwrite?, graph?}`` write the cooked geometry (always at full size, whatever the proxy level)
@@ -619,12 +619,28 @@ class _Handler(BaseHTTPRequestHandler):
             node = body.get("node")
             if not isinstance(node, str):
                 raise ApiError(400, '"node" must be a node id')
-            r = s.preview(node, templates=bool(body.get("templates")))
+            imode = body.get("instances") if body.get("instances") in ("auto", "always", "never") else "auto"
+            r = s.preview(node, templates=bool(body.get("templates")), instances=imode)
             if not r["ok"]:
                 return self._json({"ok": False, "node": node, "rev": r["rev"], "error": r["error"]})
-            from .. import preview
-            head, arrays = preview.arrays_for(r["geo"], full=bool(body.get("full")), tris=_budget(body.get("tris")))
+            from .. import impostors, preview
+            full, budget = bool(body.get("full")), _budget(body.get("tris"))
+            iset = None
+            try:
+                iset = impostors.plan(r["geo"], imode, full, budget, r.get("instance_sources"))
+            except Exception:                                        # impostors are a nicety: never lose the preview over them
+                log.exception("impostors failed for %s", node)
+            if iset is not None and iset.replaces:
+                head, arrays = impostors.shell(r["geo"])
+            else:
+                head, arrays = preview.arrays_for(r["geo"], full=full, tris=budget)
             head.update(node=node, rev=r["rev"], handles=r.get("handles", []), cook_level=s.view_level())
+            if iset is not None:
+                arrays = dict(arrays)
+                head["instances"], extra = impostors.pack(iset)
+                arrays.update(extra)
+                if iset.replaces:
+                    head["proxy"].update(instanced=True, instances=int(iset.total or len(iset.M)))
             if isinstance(body.get("attr"), dict) or isinstance(body.get("mask"), dict):
                 arrays = dict(arrays)                                # the memoised arrays are shared: never add to them
                 try:
