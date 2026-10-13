@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence
 
+SHAPED = ("pieces", "curves", "points")    # modes whose objects get their geometry from the manifest's arrays (not a duplicate of a source)
 LOC_EPS = 1e-5
 ROT_EPS = 1e-6
 SCALE_EPS = 1e-5
@@ -70,7 +71,7 @@ class Plan:
 def items(manifest: dict) -> List[Item]:
     sources = [str(s) for s in manifest.get("sources", [])]
     prefix = str(manifest.get("prefix") or "MiniHou")
-    pieces = manifest.get("mode") == "pieces"
+    pieces = manifest.get("mode") in SHAPED                 # these carry their shape in the arrays and sit where the manifest says
     out: List[Item] = []
     seen = set()
     for i, ident in enumerate(manifest.get("id", [])):

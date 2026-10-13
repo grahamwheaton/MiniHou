@@ -160,13 +160,17 @@ def _generic_attrs(owner, domains: Dict[str, int], skip: set, render_color: str 
 
 
 def _render_color(owner) -> str:
+    """The colour attribute to call ``Cd``: the render colour of a mesh; curves and point clouds have no such setting, so their first."""
     try:
         idx = owner.color_attributes.render_color_index
         if 0 <= idx < len(owner.color_attributes):
             return owner.color_attributes[idx].name
     except (AttributeError, IndexError, RuntimeError):
         pass
-    return ""
+    try:
+        return owner.color_attributes[0].name if len(owner.color_attributes) else ""
+    except (AttributeError, IndexError, RuntimeError):
+        return ""
 
 
 def _optional(owner, name: str, n: int, width: int, dtype, prop: str):

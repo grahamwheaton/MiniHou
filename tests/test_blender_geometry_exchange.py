@@ -262,5 +262,109 @@ class LiveCurveTests(LiveHarness, unittest.TestCase):
         self.assertEqual(len(self.output_mesh().edges), 3 + 2)
 
 
+def graph_sending(name, mode, **params):
+    return {"version": 1, "display": "main", "nodes": {
+        "src": {"type": "blender_object", "params": {"object": name, "space": "object"}},
+        "so": {"type": "scene_objects", "inputs": {"geo": "src"}, "params": dict({"mode": mode, "prefix": "Out"}, **params)},
+        "main": {"type": "output", "inputs": {"geo": "src"}}}}
+
+
+def made(tag="session:so"):
+    return sorted((o for o in bpy.data.objects if o.get("minihou_scene") == tag), key=lambda o: o.get("minihou_id", 0))
+
+
+@unittest.skipIf(bpy is None, "needs Blender / the bpy module")
+class CurvesOutTests(LiveHarness, unittest.TestCase):
+    """A Blender curves object through the engine and back as a real Blender curves object (Scene Objects, mode curves)."""
+
+    def initial_graph(self):
+        return graph_sending("Src", "curves")
+
+    def setUp(self):
+        super().setUp()
+        pos = np.array([(0, 0, 0), (1, 0, 0), (2, 1, 0), (0, 2, 0), (1, 2, 0), (2, 2, 1)], np.float32)
+        self.src = hair_curves("Src", [3, 3], pos, poly=True)
+        a = self.src.data.attributes.new("radius", "FLOAT", "POINT")
+        a.data.foreach_set("value", np.linspace(.1, .6, 6, dtype=np.float32))
+        self.src.data.attributes.new("strand", "INT", "CURVE").data.foreach_set("value", np.array([4, 9], np.int32))
+
+    def out(self):
+        objs = made()
+        return objs[0] if objs and objs[0].type == "CURVES" and len(objs[0].data.points) else None
+
+    def test_curves_come_out_as_a_curves_object_with_the_same_points_radius_and_attributes(self):
+        self.pump(lambda: self.out() is not None)
+        o = self.out()
+        self.assertEqual(o.name, "Out_0000")
+        self.assertEqual((len(o.data.curves), len(o.data.points)), (2, 6))
+        header, arrays = read(o)
+        np.testing.assert_allclose(arrays["point/P"], read(self.src)[1]["point/P"], atol=1e-6)
+        np.testing.assert_allclose(arrays["point/radius"], np.linspace(.1, .6, 6), atol=1e-6)
+
+    def test_a_curve_made_of_a_polygon_outline_is_cyclic_and_the_user_keeps_modifiers_on_the_object(self):
+        self.pump(lambda: self.out() is not None)
+        o = self.out()
+        o.modifiers.new("Mine", "NODES")
+        self.write(graph_sending("Src", "curves", prefix="Out", attributes="radius strand"))        # same shape, another manifest
+        self.pump(lambda: "session:so" in self.so.last_summary)
+        self.assertEqual(len(made()), 1)
+        self.assertEqual([m.name for m in made()[0].modifiers], ["Mine"])
+
+    def test_changing_the_curves_rewrites_the_data_and_keeps_the_object(self):
+        self.pump(lambda: self.out() is not None)
+        first = self.out()
+        pos = np.array([(0, 0, 0), (1, 0, 0), (2, 1, 0), (0, 2, 0)], np.float32)
+        hair_curves("Src2", [4], pos, poly=True)
+        self.write(graph_sending("Src2", "curves"))
+        self.pump(lambda: self.out() is not None and len(self.out().data.points) == 4)
+        self.assertEqual(self.out().name, first.name)
+        self.assertEqual(len(made()), 1)
+
+
+@unittest.skipIf(bpy is None, "needs Blender / the bpy module")
+class PointsOutTests(LiveHarness, unittest.TestCase):
+    def initial_graph(self):
+        return graph_sending("Src", "points", attributes="Cd id")
+
+    def setUp(self):
+        super().setUp()
+        self.src = point_cloud("Src", np.arange(12).reshape(4, 3), radius=[.1, .2, .3, .4], ids=[5, 6, 7, 8])
+
+    def test_a_point_cloud_comes_out_as_a_point_cloud_with_radius_and_attributes(self):
+        self.pump(lambda: made() and made()[0].type == "POINTCLOUD" and len(made()[0].data.points) == 4)
+        o = made()[0]
+        header, arrays = read(o)
+        np.testing.assert_allclose(arrays["point/P"], np.arange(12).reshape(4, 3), atol=1e-6)
+        np.testing.assert_allclose(arrays["point/radius"], [.1, .2, .3, .4], atol=1e-6)
+        np.testing.assert_array_equal(arrays["point/id"], [5, 6, 7, 8])
+
+
+@unittest.skipIf(bpy is None, "needs Blender / the bpy module")
+class EngineMadeCurvesOutTests(LiveHarness, unittest.TestCase):
+    """Curves made in MiniHou itself, closed ones included, and a mode change on the same node."""
+
+    def initial_graph(self):
+        return {"version": 1, "display": "main", "nodes": {
+            "c": {"type": "curve", "params": {"points": "0,0,0 2,0,0 2,2,0 0,2,0", "closed": True}},
+            "so": {"type": "scene_objects", "inputs": {"geo": "c"}, "params": {"mode": "curves", "prefix": "Loop"}},
+            "main": {"type": "output", "inputs": {"geo": "c"}}}}
+
+    def test_a_closed_curve_becomes_a_cyclic_curve(self):
+        self.pump(lambda: made() and made()[0].type == "CURVES" and len(made()[0].data.points) == 4)
+        o = made()[0]
+        cyc = np.empty(1, np.int8)
+        o.data.attributes["cyclic"].data.foreach_get("value", cyc)
+        self.assertEqual(int(cyc[0]), 1)
+        self.assertEqual(o.name, "Loop_0000")
+
+    def test_switching_the_node_to_points_replaces_the_object_with_a_point_cloud(self):
+        self.pump(lambda: made() and made()[0].type == "CURVES")
+        g = self.initial_graph()
+        g["nodes"]["so"]["params"]["mode"] = "points"
+        self.write(g)
+        self.pump(lambda: made() and made()[0].type == "POINTCLOUD" and len(made()[0].data.points) == 4)
+        self.assertEqual(len(made()), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
