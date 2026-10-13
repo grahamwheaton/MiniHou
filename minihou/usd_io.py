@@ -628,6 +628,7 @@ def write_stage(path, outputs: Dict[str, Geometry], graph: Optional[dict] = None
     return report
 
 
+DETAIL_ATTR = "minihou:detail"                      # an animation's detail attributes, per frame (a plain file keeps them in customData)
 _BLOCK = object()                                  # "no value here": an attribute a frame does not have (blocked from that frame on)
 
 
@@ -645,11 +646,15 @@ class _Samples:
         self.present: Dict[str, List[float]] = {}     # prim path -> the frames it exists in
         self.known: Dict[str, set] = {}               # prim path -> attribute paths it has had
         self.frames: List[float] = []
+        self.first = 0.0                              # the first frame: USD holds a first sample backwards, so late data is blocked from here
 
     def add(self, frame: float, fs) -> None:
         Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
         final, tc, f = self.final, Usd.TimeCode(float(frame)), float(frame)
         flayer, layer = fs.GetRootLayer(), final.GetRootLayer()
+        if not self.frames:
+            self.first = f
+        here: set = set()
         it = iter(Usd.PrimRange(fs.GetPseudoRoot()))
         for prim in it:
             if prim.IsPseudoRoot():
@@ -659,6 +664,7 @@ class _Samples:
                 it.PruneChildren()
                 continue
             key = str(path)
+            here.add(key)
             if not layer.GetPrimAtPath(path):
                 Sdf.CopySpec(flayer, path, layer, path)                            # the whole subtree: relationships, references, metadata
                 self._sampled(final.GetPrimAtPath(path), tc, f)
@@ -678,15 +684,27 @@ class _Samples:
                     tgt = final.GetAttributeAtPath(akey)
                     tgt.ClearDefault()
                 self._write(akey, tgt, v, tc, f)
+            raw = prim.GetCustomDataByKey("minihou:detail")
+            if raw:                                                                # detail attributes can change per frame: also as a sampled string
+                mine = final.GetPrimAtPath(path)
+                da = mine.GetAttribute(DETAIL_ATTR) or mine.CreateAttribute(DETAIL_ATTR, Sdf.ValueTypeNames.String, True)
+                self._write(str(da.GetPath()), da, str(raw), tc, f)
+                seen.add(str(da.GetPath()))
             for akey in self.known.setdefault(key, set()) - seen:                  # one it had and this frame does not
                 self._write(akey, final.GetAttributeAtPath(akey), _BLOCK, tc, f)
             self.known[key] |= seen
+        for key, names in self.known.items():                                      # prims this frame lacks (a group's subset, a material): no values
+            if key not in here:
+                for akey in names:
+                    self._write(akey, final.GetAttributeAtPath(akey), _BLOCK, tc, f)
         self.frames.append(f)
 
     def _write(self, akey: str, tgt, v, tc, f: float) -> None:
         Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
         old = self.held.get(akey)
         if old is None:
+            if self.frames:                                                        # first seen after the first frame: nothing before this
+                _put(tgt, _BLOCK, Usd.TimeCode(self.first))
             _put(tgt, v, tc)
         elif (old[0] is _BLOCK) == (v is _BLOCK) and (v is _BLOCK or old[0] == v):
             self.held[akey] = (old[0], old[1], f)
@@ -720,6 +738,8 @@ class _Samples:
                 if v is None:
                     continue
                 attr.ClearDefault()                                                 # the sample replaces the single value
+                if self.frames:                                                     # a prim that appears later: nothing before it
+                    _put(attr, _BLOCK, Usd.TimeCode(self.first))
                 attr.Set(v, tc)
                 self.held[str(attr.GetPath())] = (v, frame, frame)
                 known.add(str(attr.GetPath()))
@@ -1111,7 +1131,7 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
     geos = []
     for key, ps in groups.items():
         g = assemble(ps)
-        d = _output_detail(stage, key) if key else {}                              # each MiniHou output has its own name list
+        d = _output_detail(stage, key, tm) if key else {}                              # each MiniHou output has its own name list
         if isinstance(d.get("materials"), list) and d["materials"]:
             g = g.copy()
             g.detail["materials"] = [str(n) for n in d["materials"]]
@@ -1124,7 +1144,7 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
         geo = merge(geos).freeze()
     else:
         geo = geos[0] if geos else assemble([])
-    detail = _read_detail(stage)
+    detail = _read_detail(stage, tm)
     for k in ("materials", "usd_materials"):                 # handled per output above
         detail.pop(k, None)
     if inst_names:
@@ -1179,7 +1199,21 @@ def _read_instancer(stage, inst, tm, part: Part, M: np.ndarray, unit: float, nam
         part.point_attrs["scale"] = (sc * k * unit).astype(np.float32)
 
 
-def _read_detail(stage) -> dict:
+def _detail_of(prim, tm) -> dict:
+    """The detail attributes stored on a MiniHou output Xform: the sampled attribute of an animation at ``tm``, else its customData."""
+    raw = None
+    a = prim.GetAttribute(DETAIL_ATTR)
+    if a and a.HasAuthoredValue():
+        raw = a.Get(tm)
+    if raw is None:
+        raw = prim.GetCustomDataByKey("minihou:detail")
+    try:
+        return json.loads(raw) if raw else {}
+    except ValueError:
+        return {}
+
+
+def _read_detail(stage, tm) -> dict:
     """Detail attributes of a MiniHou export (all outputs merged; the first output wins on a clash)."""
     out: dict = {}
     root = stage.GetDefaultPrim()
@@ -1188,24 +1222,15 @@ def _read_detail(stage) -> dict:
     if not root or not root.IsValid():
         return out
     for child in root.GetChildren():
-        raw = child.GetCustomDataByKey("minihou:detail")
-        if raw:
-            try:
-                for k, v in json.loads(raw).items():
-                    out.setdefault(k, v)
-            except ValueError:
-                pass
+        for k, v in _detail_of(child, tm).items():
+            out.setdefault(k, v)
     return out
 
 
-def _output_detail(stage, path: str) -> dict:
+def _output_detail(stage, path: str, tm) -> dict:
     """The detail attributes stored on one MiniHou output Xform."""
     prim = stage.GetPrimAtPath(path)
-    raw = prim.GetCustomDataByKey("minihou:detail") if prim and prim.IsValid() else None
-    try:
-        return json.loads(raw) if raw else {}
-    except ValueError:
-        return {}
+    return _detail_of(prim, tm) if prim and prim.IsValid() else {}
 
 
 def _add_subset_groups(mesh, part: Part, tm) -> None:

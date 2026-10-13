@@ -2281,7 +2281,7 @@ class EditorE2E(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.dir, "imports", "notes.txt")))
 
     def test_the_desktop_window_hands_over_real_paths_and_nothing_is_copied(self):
-        inside = os.path.join(self.dir, "models", "car.usdc")
+        inside = os.path.join(os.path.realpath(self.dir), "models", "car.usdc")
         outside = os.path.join(tempfile.gettempdir(), "elsewhere", "far.usda")
         self.page.evaluate("([a, b]) => minihou.droppedPaths([a, b], 300, 200)", [inside, outside])
         self.assertTrue(until(lambda: sum(n.type == "usd_import" for n in self.s.graph.nodes.values()) == 2))

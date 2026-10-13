@@ -56,7 +56,7 @@ unit the file declares; the geometry is scaled so a metre stays a metre), `mater
 A **frame range** cooks the graph at each frame (the timeline does not move) and merges the frames into one stage: whatever differs
 between frames (points, topology, attributes, whether a primitive exists at all) becomes time samples at that frame, so a moving mesh
 costs one `points` sample per frame and its unchanged topology is written once. A prim missing from some frames gets animated
-`visibility`; an attribute a frame lacks is blocked there. `startTimeCode`, `endTimeCode` and `timeCodesPerSecond` are set. Reading it back
+`visibility`; an attribute (or a group's or material's subset) a frame lacks is blocked there, and one that first appears at a later frame is blocked before it, so nothing leaks into earlier frames; the detail attributes (material names...) are also sampled per frame. `startTimeCode`, `endTimeCode` and `timeCodesPerSecond` are set. Reading it back
 with `usd_import` at `time = frame` gives each frame. Up to 20,000 frames per export; it holds the engine's cook lock while it writes.
 
 ## Choosing and dropping files

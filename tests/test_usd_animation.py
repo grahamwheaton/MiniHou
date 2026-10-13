@@ -79,6 +79,32 @@ class AnimationTests(unittest.TestCase):
         self.assertNotIn("weight", usd_io.read_geometry(self.path, time=2)[0].point)
         np.testing.assert_allclose(usd_io.read_geometry(self.path, time=3)[0].point["weight"], np.arange(8))
 
+    def test_data_that_first_appears_later_does_not_leak_back_to_earlier_frames(self):
+        a = box().copy()
+        b = box().copy()
+        b.point["weight"] = np.arange(8, dtype=np.float32)
+        b.prim["group_cut"] = np.array([1, 1, 0, 0, 0, 0], np.int32)                 # a group: a GeomSubset that only exists from frame 2 on
+        b.prim["material_index"] = np.array([0, 0, 1, 1, 1, 1], np.int32)
+        b.detail["materials"] = ["Red", "Blue"]
+        usd_io.write_animation(self.path, iter([(1.0, {"t": a}), (2.0, {"t": a}), (3.0, {"t": b}), (4.0, {"t": b})]), fps=24)
+        for f in (1, 2):
+            g = usd_io.read_geometry(self.path, time=f)[0]
+            self.assertNotIn("weight", g.point, f)
+            self.assertNotIn("group_cut", g.prim, f)
+            self.assertEqual([n for n in g.detail.get("materials", []) if n], [], f)
+        g = usd_io.read_geometry(self.path, time=3)[0]
+        np.testing.assert_allclose(g.point["weight"], np.arange(8))
+        self.assertEqual(g.prim["group_cut"].tolist(), [1, 1, 0, 0, 0, 0])
+        self.assertEqual(sorted(n for n in g.detail["materials"] if n), ["Blue", "Red"])
+
+    def test_a_subset_that_disappears_is_gone_from_the_later_frames(self):
+        b = box().copy()
+        b.prim["group_cut"] = np.array([1, 1, 0, 0, 0, 0], np.int32)
+        usd_io.write_animation(self.path, iter([(1.0, {"t": b}), (2.0, {"t": box()}), (3.0, {"t": b})]), fps=24)
+        self.assertIn("group_cut", usd_io.read_geometry(self.path, time=1)[0].prim)
+        self.assertNotIn("group_cut", usd_io.read_geometry(self.path, time=2)[0].prim)
+        self.assertIn("group_cut", usd_io.read_geometry(self.path, time=3)[0].prim)
+
     def test_the_export_node_writes_a_frame_range_of_a_time_dependent_graph(self):
         g = Graph.from_dict({"nodes": {"box": {"type": "box"},
                                        "w": {"type": "wrangle", "inputs": {"geo": "box"}, "params": {"snippet": "@P.x += @Frame * 10;"}},
