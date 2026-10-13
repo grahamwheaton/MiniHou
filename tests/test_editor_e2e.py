@@ -293,14 +293,24 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: len(self.s.graph.nodes) == 4))
         self.page.keyboard.press("Control+Shift+z")
         self.assertTrue(until(lambda: len(self.s.graph.nodes) == 7))
-        self.page.keyboard.press("f")
-        for _ in range(8):                                                         # the redo above may still be re-rendering the graph
+        self.page.wait_for_function("document.querySelectorAll('.node').length === 7")      # the redo has re-rendered the graph
+        self.page.wait_for_function("document.querySelector('#cook-status').classList.contains('ok')")
+        selected = False
+        for _ in range(8):                                                         # a click can still land on a node being replaced
+            self.page.locator("#canvas").focus()
+            self.page.keyboard.press("f")
+            self.page.locator("#canvas").click(position={"x": 12, "y": 90})               # the duplicate may still be selected as a group
             self.node("loop_begin_1").locator(".title").click()
             try:
                 self.page.wait_for_function("(document.querySelector('#params input.nid') || {}).value === 'loop_begin_1'", timeout=4000)
+                selected = True
                 break
             except Exception:  # noqa: BLE001 - playwright TimeoutError: click again
                 continue
+        if not selected:
+            info = self.page.evaluate("""() => ({nodes: [...document.querySelectorAll('.node')].map(n => [n.dataset.id, n.className, JSON.stringify(n.getBoundingClientRect())]),
+                params: (document.querySelector('#params') || {}).innerText})""")
+            self.fail(f"loop_begin_1 could not be selected: {info}")
         self.page.fill("#params input.nid", "copy_begin")
         self.page.press("#params input.nid", "Enter")
         self.assertTrue(until(lambda: "copy_begin" in self.s.graph.nodes))
