@@ -1688,14 +1688,27 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(back.nprims, self.s.latest_good.geo.nprims)
 
     def test_the_disk_cache_is_switched_from_the_proxy_menu(self):
-        self.page.click("#proxy-btn")
+        def open_menu():                                   # the button toggles the menu, so open it only when it is closed
+            for _ in range(5):
+                if self.page.locator("#proxy-menu").is_visible():
+                    return
+                self.page.click("#proxy-btn")
+                try:
+                    self.page.wait_for_selector("#proxy-menu", state="visible", timeout=1500)
+                    return
+                except Exception:  # noqa: BLE001 - the click landed while the menu was closing: try again
+                    pass
+            self.fail("the proxy menu did not open")
+        open_menu()
         self.page.click('#proxy-menu [data-diskcache="on"]')
         self.assertTrue(until(lambda: self.s.disk_cache is not None))
         self.assertTrue(until(lambda: self.page.locator("#proxy-btn").evaluate("b => b.classList.contains('on')")))
-        self.page.click("#proxy-btn")
+        self.page.wait_for_selector("#proxy-menu", state="hidden")
+        open_menu()
         self.page.wait_for_selector('#proxy-menu [data-diskcache="clear"]')
         self.page.click('#proxy-menu [data-diskcache="clear"]')
-        self.page.click("#proxy-btn")
+        self.page.wait_for_selector("#proxy-menu", state="hidden")      # the item closes the menu once the engine has answered
+        open_menu()
         self.page.click('#proxy-menu [data-diskcache="off"]')
         self.assertTrue(until(lambda: self.s.disk_cache is None))
 

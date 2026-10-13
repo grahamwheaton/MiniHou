@@ -70,7 +70,7 @@ def indices(geo, domain: str = "prim") -> np.ndarray:
     (``'point'``, ``material_id``, which Scene Objects reads for its instances); zeros when the attribute is missing."""
     n = geo.nprims if domain == "prim" else geo.npoints
     a = _table(geo, domain).get(ATTR if domain == "prim" else POINT_ATTR)
-    if a is None:
+    if a is None or n == 0:
         return np.zeros(n, np.int64)
     return np.asarray(a).reshape(n, -1)[:, 0].astype(np.int64)
 
