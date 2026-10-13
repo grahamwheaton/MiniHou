@@ -199,8 +199,37 @@ def _polyextrude(ins, out, p):
     offs = t.prim_offsets.astype(np.int64)
     pts = np.unique(np.concatenate([vp[offs[q]:offs[q + 1]] for q in prims.tolist()]))
     origin = src.P.astype(np.float64)[pts].mean(0)
+    normal = _mean_normal(src, prims)
+    corner = src.P.astype(float)[pts[0]]
+    inward = origin - corner
+    if np.linalg.norm(inward) < 1e-9:
+        inward = AXES[0]
+    inward /= np.linalg.norm(inward)
     return [{"id": "distance", "label": "distance", "param": "distance", "comp": None, "origin": origin,
-             "dir": _mean_normal(src, prims)}]
+             "dir": normal},
+            {"id": "inset", "label": "Inset / Outset amount", "param": "inset", "comp": None,
+             "origin": corner + normal * float(p.get("distance",0)), "dir": inward, "kind": "cage"}]
+
+
+@provider("pushpull")
+def _pushpull(ins, out, p):
+    return _polyextrude(ins,out,p)[:1]
+
+
+@provider("inset")
+def _inset(ins, out, p):
+    result = _polyextrude(ins,out,{**p,"distance":0})[1:]
+    for h in result:
+        h.update(id="amount",param="amount",label="Inset amount",min=0.)
+    return result
+
+
+@provider("outset")
+def _outset(ins, out, p):
+    result = _inset(ins,out,p)
+    for h in result:
+        h.update(label="Outset amount",dir=-h["dir"])
+    return result
 
 
 @provider("polybevel")

@@ -1165,6 +1165,13 @@
     $("#pv-paint-btn").onclick = () => { if (paintTool.isOpen() && paintTool.active()) paintTool.close(); else paintTool.open("paint"), paintTool.setPaint(true); };
     $("#pv-assign-btn").onclick = () => { if (paintTool.isOpen() && !paintTool.active()) paintTool.close(); else { paintTool.setPaint(false); paintTool.open("assign"); } };
   }  const curveTool = pv?.ok && window.MiniCurveTool ? MiniCurveTool(pv,$('#pv-canvas'),(id,value)=>queueSet(id,'controls',value)) : null;
+  const sketchTool=pv?.ok&&window.MiniSketchTool?MiniSketchTool(pv,$('#pv-canvas'),async spec=>{
+    const id=uniqueId(spec.type),r=await edit([{op:'add',id,type:spec.type,params:spec.params,pos:[80,80],display:true}]);
+    if(!r)throw Error('Sketch could not be added to the graph');
+    pvKeepCameraNode=id;select([id]);
+  }):null;
+  if(sketchTool){$('#pv-sketch-panel').append(sketchTool.panel());const previous=pv.onOverlayDraw;pv.onOverlayDraw=()=>{previous?.();sketchTool.draw();};}
+
   let pvKeepCameraNode = null;
   let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false, pvReduced = null, pvTooBig = null;
   let pvSelection = { mode: "view", points: [], edges: [], faces: [] };
@@ -1385,7 +1392,9 @@
       params: (s) => ({ edges: edgePattern(s.edges) }) }],
     face: [
       { label: "Extrude", key: "e", type: "polyextrude", params: (s) => ({ group: rangePattern(s.faces), distance: 0.3 }) },
-      { label: "Inset", type: "polyextrude", params: (s) => ({ group: rangePattern(s.faces), distance: 0, inset: 0.15 }) },
+      { label: "Inset", type: "inset", params: (s) => ({ group: rangePattern(s.faces), amount: 0.15 }) },
+      { label: "Outset", type: "outset", params: (s) => ({ group: rangePattern(s.faces), amount: 0.15 }) },
+      { label: "Push / Pull", type: "pushpull", params: (s) => ({ group: rangePattern(s.faces), distance: 0.25 }) },
       { label: "Reverse", type: "reverse", params: (s) => ({ group: rangePattern(s.faces) }) },
       { label: "Group", type: "group_create", params: (s) => ({ name: "faces", domain: "primitives", method: "pattern", pattern: rangePattern(s.faces) }) },
       { label: "Delete", key: "x", type: "blast", params: (s) => ({ group: rangePattern(s.faces), domain: "primitives" }) }],
@@ -1722,7 +1731,7 @@
     wrap.addEventListener("pointerleave", () => { pvOver = false; });
     document.addEventListener("keydown", (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
-      if(loopTool?.active()||pv.isDragging()||curveTool?.active())return;
+      if(sketchTool?.active()||loopTool?.active()||pv.isDragging()||curveTool?.active())return;
       if (!pvOver || tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable) return;
       if(e.ctrlKey&&e.code==='KeyR'){e.preventDefault();e.stopImmediatePropagation();loopTool?.start();return;}
       const nav = { Numpad1: ["front"], Numpad3: ["right"], Numpad7: ["top"] }[e.code];          // Blender-style view keys; Ctrl = the opposite side

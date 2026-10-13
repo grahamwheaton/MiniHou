@@ -17,7 +17,7 @@ GROUPS: List[Tuple[str, str, List[str]]] = [
      ["box", "sphere", "grid", "tube", "torus", "circle", "line", "bezier", "curve", "helix", "lsystem", "lattice_grid",
       "blender_object", "blender_image", "image_file", "usd_import", "modifier_input", "object_input"]),
     ("Polygon Modelling", "Build and edit polygon surfaces",
-     ["polyextrude", "polybevel", "polysplit", "polyfill", "polybridge", "polyexpand2d", "subdivide", "mirror", "boolean",
+     ["polyextrude", "pushpull", "inset", "outset", "polybevel", "polysplit", "polyfill", "polybridge", "polyexpand2d", "subdivide", "mirror", "boolean",
       "clip", "dissolve", "divide", "reverse", "facet", "bridge", "skin", "skin_profiles", "revolve", "polyreduce", "clean",
       "convex_hull"]),
     ("Edges", "Work on edges and creases",
@@ -118,7 +118,7 @@ ALIASES: Dict[str, str] = {
     "modifier_input": "host geometry",
 }
 
-_TITLES = {"polyextrude": "PolyExtrude", "polybevel": "PolyBevel", "polysplit": "PolySplit", "polyfill": "PolyFill",
+_TITLES = {"pushpull": "Push / Pull","polyextrude": "PolyExtrude", "polybevel": "PolyBevel", "polysplit": "PolySplit", "polyfill": "PolyFill",
            "polybridge": "PolyBridge", "polyexpand2d": "PolyExpand2D", "polyreduce": "PolyReduce", "polypath": "PolyPath",
            "uv_project": "UV Project", "uv_flatten": "UV Flatten", "sdf_boolean": "SDF Boolean", "pcg_points": "PCG Points",
            "lsystem": "L-System", "rbd_configure": "RBD Configure", "rbd_solver": "RBD Solver",

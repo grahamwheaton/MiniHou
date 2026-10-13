@@ -4,7 +4,7 @@ A practical plane-based drawing toolset, not a complete SketchUp implementation.
 
 ## Drawing
 
-Choose a drawing plane (XY, XZ or YZ), then Line, Pen, Polygon, Rectangle or Circle. Left-click points. Line uses two endpoints; rectangle uses opposite corners; circle uses centre and radius with 32 segments by default. Pen and polygon accept multiple points; Enter finishes, or click the starting point to close a polygon. Escape or right-click cancels without adding a node. Middle mouse remains available for navigation. Backspace removes the last point or typed digit.
+Open **Sketch & Measure** above the viewport. Choose a drawing plane (XY, XZ or YZ), then Line, Pen, Polygon, Rectangle or Circle. Left-click points. Line uses two endpoints; rectangle uses opposite corners; circle uses centre and radius with 32 segments by default. Pen and polygon accept multiple points; Enter finishes, or click the starting point to close a polygon. Escape or right-click cancels without adding a node. Middle mouse remains available for navigation. Backspace removes the last point or typed digit.
 
 X/Y/Z locks the next segment to an axis in the selected drawing plane. An axis perpendicular to that plane is rejected. Type a positive length and press Enter to use an exact segment length/radius along the current pointer direction. For a rectangle this length is its diagonal, not separate width and height. Inputs elsewhere in the UI retain normal typing.
 

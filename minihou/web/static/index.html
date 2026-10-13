@@ -145,6 +145,7 @@
           <button data-view="front" title="Front (Numpad 1, Ctrl for back)">Front</button><button data-view="right" title="Right (Numpad 3, Ctrl for left)">Right</button><button data-view="top" title="Top (Numpad 7, Ctrl for bottom)">Top</button><select id="pv-view-extra" aria-label="More axis views"><option value="">More views…</option><option value="back">Back</option><option value="left">Left</option><option value="bottom">Bottom</option></select><button id="pv-ortho" title="Perspective / orthographic (Numpad 5)">Persp</button><button id="pv-walk" title="Fly navigation: Shift+` or hold right mouse. WASD, Q/E, wheel speed." aria-pressed="false">Walk / Fly</button><button id="pv-frame-all" title="Frame all geometry">All</button><button id="pv-frame" title="Frame the selection, or everything (Numpad . / Home / double-click the view)">⌂</button>
         </span>
       </div>
+      <details id="pv-sketch"><summary>Sketch &amp; Measure</summary><div id="pv-sketch-panel"></div></details>
       <div class="pv-interaction" aria-label="Transform settings">
         <label>Orientation <select id="pv-orientation" title="Coordinate frame for selection transforms and curve constraints"><option value="global">Global</option><option value="local">Local</option><option value="normal">Normal</option><option value="view">View</option><option value="cursor">Cursor</option><option value="custom">Custom</option></select></label>
         <button id="pv-custom-frame" title="Capture the current selection normal as a custom orientation">Capture frame</button>
@@ -271,6 +272,7 @@
 <script src="/static/interaction.js"></script>
 <script src="/static/preview.js"></script>
 <script src="/static/curve-tool.js"></script>
+<script src="/static/sketch-tool.js"></script>
 <script src="/static/loop-tool.js"></script>
 <script src="/static/paint-tool.js"></script>
 <script src="/static/sheet.js"></script>

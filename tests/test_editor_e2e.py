@@ -86,6 +86,31 @@ class EditorE2E(unittest.TestCase):
             dialog.locator("input").fill(text)
         dialog.locator('button[type="submit"]').click()
 
+    def test_sketch_panel_commits_rectangle(self):
+        self.page.locator('#pv-sketch summary').click()
+        self.page.get_by_label('Sketch grid').fill('0')
+        self.page.get_by_label('Sketch grid').press('Tab')
+        self.page.locator('#pv-sketch-panel').get_by_role('button',name='rectangle',exact=True).click()
+        r=self.page.locator('#pv-canvas').bounding_box()
+        self.page.mouse.click(r['x']+r['width']*.4,r['y']+r['height']*.4)
+        self.page.mouse.click(r['x']+r['width']*.6,r['y']+r['height']*.6)
+        self.assertTrue(until(lambda:any(n.type=='curve' for n in self.s.graph.nodes.values())))
+        node=next(n for n in self.s.graph.nodes.values() if n.type=='curve')
+        self.assertTrue(node.params['closed'])
+        self.assertEqual(len(node.params['points'].split()),4)
+        self.page.keyboard.press('Escape')
+
+    def test_inset_amount_gizmo(self):
+        self.handle_scene('inset', {'group':'1','amount':.1}, 'h')
+        tip=next(t for t in self.page.evaluate('minihou.preview.handleTips()') if t['id']=='amount')
+        rect=self.page.locator('.pv-handle[data-id="amount"] .pv-grab').bounding_box()
+        x,y=rect['x']+rect['width']/2,rect['y']+rect['height']/2
+        self.page.mouse.move(x,y);self.page.mouse.down()
+        self.page.mouse.move(x+tip['u'][0]*25,y+tip['u'][1]*25,steps=8)
+        self.page.mouse.up()
+        self.assertTrue(until(lambda:self.s.graph.nodes['h'].params['amount']!=.1))
+        self.assertTrue(until(lambda:self.s.status()['ok']))
+
     def test_lattice_result_handles_edit_deformed_cage(self):
         graph={'version':1,'nodes':{'b':{'type':'box'},'rest':{'type':'lattice_grid'},'cage':{'type':'lattice_grid'},'l':{'type':'lattice','inputs':{'geo':'b','rest':'rest','deformed':'cage'}}},'display':'l'}
         self.s.edit([{'op':'replace','graph':graph}])

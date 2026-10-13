@@ -692,3 +692,9 @@ path.hit.cut-mark {stroke:#ff6464;stroke-opacity:1;stroke-width:4px;}
 #crumbs {top:94px;}
 
 .pv-sheet {position:relative;}
+
+#pv-sketch {padding:4px 8px;border-bottom:1px solid var(--line);font-size:11px;}
+#pv-sketch-panel>div {display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:5px 0;}
+#pv-sketch-panel p {flex-basis:100%;margin:0;color:var(--muted);}
+#pv-sketch-panel input {width:65px;}
+[data-sketch-active] .pv-grab,[data-sketch-active] .curve-grab {pointer-events:none!important;}
