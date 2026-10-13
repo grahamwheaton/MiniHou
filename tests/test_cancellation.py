@@ -11,6 +11,26 @@ from minihou.web import WebServer
 
 
 class CancellationTests(unittest.TestCase):
+    def test_cancelled_preview_returns_a_json_error_not_http_500(self):
+        from minihou.cancellation import CookCancelled
+        session = Session(Graph.from_dict({"nodes": {"box": {"type": "box"}}, "display": "box"}))
+        self.addCleanup(session.stop)
+        with tempfile.TemporaryDirectory() as root:
+            server = WebServer(session, port=0, root=root)
+            server.start()
+            try:
+                with patch.object(session.evaluator, "cook", side_effect=CookCancelled):
+                    request = Request(server.url + "api/preview", b'{"node":"box"}', {"Content-Type": "application/json"})
+                    with urlopen(request, timeout=3) as response:
+                        result = json.load(response)
+                        self.assertEqual(response.status, 200)
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["node"], "box")
+                self.assertEqual(result["rev"], session.snapshot()["rev"])
+                self.assertIn("cancelled", result["error"]["message"])
+            finally:
+                server.stop()
+
     def test_cancel_endpoint_keeps_graph_edits(self):
         from pathlib import Path
         session = Session(Graph.from_dict({"nodes": {"box": {"type": "box"}}, "display": "box"}))
