@@ -120,6 +120,30 @@ class EditorE2E(unittest.TestCase):
         self.page.mouse.down(button='middle');self.page.mouse.move(r['x']+95,r['y']+45);self.page.mouse.up(button='middle')
         self.assertNotEqual(yaw,self.page.evaluate('minihou.preview.view.yaw'))
 
+    def test_loop_cut_right_click_centers_without_camera_jump(self):
+        self.box_scene()
+        self.page.evaluate('minihou.preview.view.dist *= 0.7; minihou.preview.redraw()')
+        before=self.page.evaluate('JSON.stringify(minihou.preview.view)')
+        xy=self.view_xy('edge',self.top_edges[0])
+        self.page.mouse.move(*xy);self.page.keyboard.press('Control+r')
+        self.page.mouse.move(xy[0]+1,xy[1]+1);self.page.mouse.click(xy[0]+1,xy[1]+1)
+        self.page.mouse.move(xy[0]+30,xy[1]+1);self.page.mouse.click(xy[0]+30,xy[1]+1,button='right')
+        self.assertTrue(until(lambda:any(n.type=='polysplit' for n in self.s.graph.nodes.values())))
+        self.page.wait_for_function("document.querySelector('#pv-node').textContent.includes('polysplit')")
+        self.page.wait_for_timeout(150)
+        self.assertEqual(before,self.page.evaluate('JSON.stringify(minihou.preview.view)'))
+        self.assertFalse(self.page.evaluate('minihou.preview.navigationState().active'))
+        self.assertEqual(next(n for n in self.s.graph.nodes.values() if n.type=='polysplit').params['position'],.5)
+
+    def test_bevel_divisions_control_reaches_geometry(self):
+        self.box_scene()
+        self.page.evaluate("minihou.edit([{op:'insert',after:'b',id:'h',type:'polybevel',params:{distance:.1}}])")
+        self.node('h').locator('.title').click()
+        row=self.page.locator('#params .prow[data-param="divisions"] input[type=number]')
+        row.fill('4');row.press('Enter')
+        self.assertTrue(until(lambda:self.s.graph.nodes['h'].params.get('divisions')==4))
+        self.page.wait_for_function('minihou.preview.points > 24')
+
     def test_loop_cut_modal_commit_and_cancel(self):
         self.box_scene()
         xy=self.view_xy('edge',[self.top_points[0],self.top_points[1]])

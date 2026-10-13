@@ -51,6 +51,41 @@ class PrimitiveTests(unittest.TestCase):
         self.assertTrue(u.min() >= 0 and u.max() <= 1)
 
 
+class SegmentedBevelTests(unittest.TestCase):
+    def test_round_divisions_make_closed_shell_and_preserve_attributes(self):
+        counts=[]
+        for divisions in (1,2,4,8):
+            g=bevel({'type':'box'},distance=.1,divisions=divisions,outgrp_edgefilletpolys=True,outgrp_pointfilletpolys=True,outgrp_offsetedges=True,outgrp_pointfilletedges=True,outgrp_offsetpoints=True,outgrp_mergedpoints=True)
+            closed_shell(self,g)
+            self.assertTrue(np.isfinite(g.P).all())
+            self.assertGreater(volume(g),.94)
+            self.assertLess(volume(g),1.)
+            if 'uv' in g.vertex:
+                self.assertEqual(g.vertex['uv'].shape,(g.nvertices,2))
+            from minihou import groups,edges
+            self.assertEqual(int(groups.mask(g,'prim','edgefilletpolys').sum()),12*divisions)
+            self.assertEqual(int(groups.mask(g,'point','offsetpoints').sum()),24)
+            self.assertGreater(int(edges.mask(g,'pointfilletedges').sum()),0)
+            self.assertFalse(groups.mask(g,'point','mergedpoints').any())
+            counts.append(g.nprims)
+        self.assertEqual(counts,sorted(set(counts)))
+
+    def test_flat_profile_subdivision_preserves_chamfer_volume(self):
+        src={'type':'box'}
+        one=bevel(src,distance=.1)
+        flat=bevel(src,distance=.1,divisions=4,shape='flat')
+        zero=bevel(src,distance=.1,divisions=4,convexity=0)
+        self.assertAlmostEqual(volume(one),volume(flat),places=6)
+        np.testing.assert_allclose(flat.P,zero.P)
+        closed_shell(self,flat)
+
+    def test_subdivided_box_and_tube_remain_closed(self):
+        for src in ({'type':'box','params':{'divisions':3}}, {'type':'tube','params':{'columns':12}}):
+            g=bevel(src,distance=.04,divisions=4)
+            closed_shell(self,g)
+            self.assertGreater(volume(g),0)
+
+
 class BevelTests(unittest.TestCase):
     def test_box_volume_and_counts(self):
         d = 0.1

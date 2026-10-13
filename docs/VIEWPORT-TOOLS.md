@@ -13,3 +13,12 @@ Lattice Grid exposes XYZ displacement handles and cage guides. Connect an unmodi
 Selection: 1/2/3 choose points/edges/faces. Ctrl-click extends by shortest topological path (fewest edges, not geometric distance). Alt-click selects edge loops, Ctrl-Alt-click selects rings; Shift adds, Ctrl-Shift subtracts. Loops stop at non-four-valence vertices; rings traverse quads. Face selection derives the faces adjoining the chosen strip. These are not all of Blender's selection variants.
 
 Holding Ctrl temporarily inverts snapping during transform and curve drags. PCG shelf icons now distinguish common filtering, transform, surface, attribute, merge and sampling operations.
+
+
+## Segmented bevel
+
+PolyBevel now has Divisions (1–64), Round/Flat shape, Convexity (0 flat to 1 round), Limit Overlap, and Exclude Edges. Existing one-division graphs retain their chamfer. For a rounded bevel start with Divisions 4 and Convexity 1. Output Groups includes Point Fillet Polygons/Edges, Edge Fillet Polygons, Offset Edges/Points and Merged Points; groups follow the segmented topology. Merged Points stays empty because this implementation limits offsets rather than merging collisions.
+
+Round strips use tangent rational quadratic profiles. Corner junctions use shared-boundary triangle fans, not a rolling-ball patch solver. Houdini-specific custom profile ramps, slide-on-ring overrides, asymmetry tolerance, distance scaling modes, and global collision merging are not implemented; controls for unsupported algorithms are not shown. Explicit edge selections still need to continue to another selected edge or a mesh border.
+
+Loop-cut commits now retain the current camera, including right-click to center the cut.

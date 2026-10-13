@@ -968,8 +968,9 @@
   // ---------------------------------------------------------------- 3-D preview of the selected (or display) node
   const pvMsg = (text) => { const m = $("#pv-msg"); m.textContent = text || ""; m.classList.toggle("hidden", !text); };
   const pv = window.MiniHouPreview ? window.MiniHouPreview.create($("#pv-canvas"), pvMsg) : null;
-  const loopTool=pv?.ok&&window.MiniLoopTool?MiniLoopTool(pv,$('#pv-canvas'),async params=>{if(!pvNode)return;const r=await edit([{op:'insert',after:pvNode,type:'polysplit',params}]);if(r){const id=r.results?.[0]?.id;if(id)select([id]);}}):null;
+  const loopTool=pv?.ok&&window.MiniLoopTool?MiniLoopTool(pv,$('#pv-canvas'),async params=>{if(!pvNode)return;const r=await edit([{op:'insert',after:pvNode,type:'polysplit',params}]);if(r){const id=r.results?.[0]?.id;if(id){pvKeepCameraNode=id;select([id]);}}}):null;
   const curveTool = pv?.ok && window.MiniCurveTool ? MiniCurveTool(pv,$('#pv-canvas'),(id,value)=>queueSet(id,'controls',value)) : null;
+  let pvKeepCameraNode = null;
   let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false, pvFull = false, pvReduced = null;
   const pct = (x) => (x >= 0.1 ? Math.round(x * 100) : Math.round(x * 1000) / 10) + "%";
   // A big geometry is drawn reduced (clustered to a budget): say so, offer full detail, and keep selection off (the drawn points are not the real ones)
@@ -1048,7 +1049,8 @@
     const empty = !head.points;
     pvMsg(empty ? "No geometry" : head.truncated ? "Showing part of a very large geometry." : "");
     setReducedView(head.proxy && head.proxy.active ? head.proxy : null);
-    pv.set(head, arrays, pvNode === node && pvPath === S.path);
+    pv.set(head, arrays, (pvNode === node && pvPath === S.path) || pvKeepCameraNode === node);
+    if(pvKeepCameraNode===node)pvKeepCameraNode=null;
     pv.selectableTemplates=head.selectable_templates||[];
     if(head.template_warnings?.length)pvMsg(head.template_warnings.join('\n'));
     pv.setHandles(head.handles || []);

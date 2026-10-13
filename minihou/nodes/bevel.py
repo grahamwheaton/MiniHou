@@ -1,4 +1,4 @@
-"""Poly bevel (Houdini's PolyBevel, one segment): chamfer edges of a polygon mesh.
+"""Poly bevel: chamfer or round polygon mesh edges with segmented profiles.
 
 The faces around each point are split into *wedges* by the bevelled edges (faces joined across an unbevelled edge
 stay together). Every wedge gets its own copy of the point, moved into the wedge so it sits ``distance`` from the
@@ -10,7 +10,7 @@ import numpy as np
 
 from .. import edges as edgelib, groups, spatial, topo
 from ..outgroups import OutGroup, OutGroups, edge_mask
-from ..sdk import Enum, Float, Str, node
+from ..sdk import Bool, Enum, Float, Int, Str, node
 from . import _build as B
 from .normal import prim_normals
 
@@ -154,6 +154,11 @@ OUT = OutGroups(
 
 @node("polybevel", inputs=["geo"], category="model", params=[
     Float("distance", 0.1, min=0.0, soft_max=1.0, doc="How far the bevel cuts into the faces on each side"),
+    Int("divisions", 1, min=1, max=64, doc="Segments across each bevel strip. One preserves the original chamfer."),
+    Enum("shape", ["round", "flat"], doc="Round uses a tangent circular profile; flat subdivides the chamfer."),
+    Float("convexity", 1.0, min=0.0, max=1.0, doc="Blend from a flat profile (0) to the round profile (1)."),
+    Bool("limit_overlap", True, doc="Reduce offsets that would fold an original face. This is not a global self-intersection solver."),
+    Str("exclude_edges", "", doc="Edges to exclude: edge ids, named groups, or pA-B point pairs."),
     Float("min_angle", 30.0, min=0.0, max=180.0,
           doc="Only bevel edges whose faces meet at least this many degrees off flat (0: every interior edge)"),
     Str("group", "", doc="What to bevel, read as 'group_type' (empty: every sharp edge, see min_angle)"),
@@ -165,8 +170,8 @@ OUT = OutGroups(
     Str("output_group", "bevel", doc="Primitive group for all the new bevel faces (empty: none)"),
     *OUT.params(),
 ])
-def polybevel(geo, distance, min_angle, group, group_type, edges, output_group, **og):
-    """Chamfer the sharp edges of a polygon mesh (Houdini's PolyBevel with one segment). Keep ``distance`` below half
+def polybevel(geo, distance, min_angle, group, group_type, edges, output_group, divisions=1, shape="round", convexity=1.0, limit_overlap=True, exclude_edges="", **og):
+    """Bevel polygon edges with segmented round or flat profiles. Keep ``distance`` below half
     the shortest bevelled face edge, or the cuts overlap. N is removed (recompute it with a normal node)."""
     B.require_polygons(geo, "polybevel")
     if geo.nprims == 0 or distance <= 0.0:
@@ -201,6 +206,11 @@ def polybevel(geo, distance, min_angle, group, group_type, edges, output_group, 
             want = psel[pv] | psel[pv[np.maximum(twin, 0)]]
         bev = two & want
         _check_ends(geo, vp, bev, twin)
+    if exclude_edges.strip():
+        excluded = edgelib.mask(geo, exclude_edges)
+        ei = topo.edges(geo).of_vertex
+        bev &= ~np.where(ei >= 0, excluded[np.maximum(ei, 0)], False)
+        _check_ends(geo, vp, bev, twin)
     if not bev.any():
         return _outputs(geo, og, None)
     bound_out = bev | ~two
@@ -209,7 +219,8 @@ def polybevel(geo, distance, min_angle, group, group_type, edges, output_group, 
     join = np.flatnonzero(~bound_in)
     w = spatial.components(t.nvertices, join, twin[pr[join]])
     pos, corner = _wedge_points(geo, float(distance), w, vp, pr, nx, pv, twin, bev, bound_in, bound_out, N)
-    pos = _limit_overlap(geo, pos, w, vp[corner], pv, N)
+    if limit_overlap:
+        pos = _limit_overlap(geo, pos, w, vp[corner], pv, N)
     nw = len(pos)
 
     # bevel quads, one per bevelled edge
@@ -260,13 +271,14 @@ def polybevel(geo, distance, min_angle, group, group_type, edges, output_group, 
     off_pts = np.unique(w[q_src.ravel()]) if nq else np.zeros(0, np.int64)
     out = OUT.write(out, og, "offsetpoints", lambda: np.isin(np.arange(npt), off_pts))
     out = OUT.write(out, og, "mergedpoints", np.zeros(npt, bool))
-    out = B.drop_degenerate(out)
     # edge groups last: they are named by point pairs, which survive the removal of degenerate faces
     qw = w[q_src] if nq else np.zeros((0, 4), np.int64)
     offset_pairs = np.concatenate([qw[:, [0, 1]], qw[:, [2, 3]]])
     out = OUT.write(out, og, "offsetedges", lambda: edge_mask(out, offset_pairs))
     out = OUT.write(out, og, "pointfilletedges", lambda: edge_mask(out, _ring_pairs(walk, rlen)))
-    return out
+    if divisions > 1:
+        out = _segments(out, t.nprims, nq, int(divisions), shape, float(convexity), geo.P[vp[corner]], og)
+    return B.drop_degenerate(out)
 
 
 def _ring_pairs(walk, rlen):
@@ -287,3 +299,106 @@ def _outputs(geo, og, _unused):
     for key in ("pointfilletedges", "offsetedges"):
         geo = OUT.write(geo, og, key, lambda: np.zeros(len(topo.edges(geo).points), bool))
     return geo
+
+
+def _segments(geo, first_strip, strip_count, count, shape, convexity, homes, og):
+    """Refine strips with shared profile chains; corner fans close the same chains.
+
+    Float attributes interpolate; discrete attributes retain their source identity.
+    Corner patches are triangle fans, not a general rolling-ball intersection.
+    """
+    P = geo.P.astype(float)
+    offsets = geo.topology.prim_offsets
+    vp = geo.topology.vertex_point
+    faces = [vp[offsets[i]:offsets[i+1]].tolist() for i in range(geo.nprims)]
+    positions = list(P)
+    point_rows = {name: list(a) for name, a in geo.point.items() if name != 'P'}
+    ancestry = [(i, i, 0.) for i in range(geo.npoints)]
+    chains = {}
+
+    def add_point(position, a, b, fraction):
+        index = len(positions)
+        positions.append(position)
+        ancestry.append((a, b, fraction))
+        for name, array in geo.point.items():
+            if name == 'P':
+                continue
+            point_rows[name].append(array[a] * (1-fraction) + array[b] * fraction if array.dtype.kind == 'f' else array[a])
+        return index
+
+    def chain(a, b, axis):
+        key = tuple(sorted((a, b)))
+        if key in chains:
+            result = chains[key]
+            return result if result[0] == a else result[::-1]
+        left, right = P[a], P[b]
+        midpoint = (left + right) / 2
+        direction = _unit(np.asarray(axis))
+        control = homes[a] - direction * np.dot(homes[a] - midpoint, direction)
+        u, v = _unit(left-control), _unit(right-control)
+        weight = float(np.sqrt(max(0., (1.-np.clip(np.dot(u,v),-1.,1.))/2.)))
+        result = [a]
+        for j in range(1, count):
+            t = j/count
+            linear = left*(1-t) + right*t
+            denom = (1-t)**2 + 2*weight*t*(1-t) + t*t
+            arc = ((1-t)**2*left + 2*weight*t*(1-t)*control + t*t*right) / max(denom, _EPS)
+            position = linear if shape == 'flat' else linear + convexity*(arc-linear)
+            result.append(add_point(position, a, b, t))
+        result.append(b)
+        chains[key] = result
+        return result
+
+    strips = []
+    for face in faces[first_strip:first_strip+strip_count]:
+        a,b,c,d = face
+        left = chain(a,d,P[b]-P[a])
+        right = chain(b,c,P[b]-P[a])
+        strips.append([[left[j],right[j],right[j+1],left[j+1]] for j in range(count)])
+
+    new_faces, parents = [], []
+    for f, face in enumerate(faces):
+        if first_strip <= f < first_strip+strip_count:
+            made = strips[f-first_strip]
+        else:
+            boundary = []
+            for a,b in zip(face,face[1:]+face[:1]):
+                seq = chains.get(tuple(sorted((a,b))), [a,b])
+                if seq[0] != a:
+                    seq = seq[::-1]
+                boundary.extend(seq[:-1])
+            if f >= first_strip+strip_count:
+                center = np.mean([positions[i] for i in boundary],axis=0)
+                center_id = add_point(center,face[0],face[0],0.)
+                made = [[a,b,center_id] for a,b in zip(boundary,boundary[1:]+boundary[:1])]
+            else:
+                made = [boundary]
+        new_faces.extend(made)
+        parents.extend([f]*len(made))
+
+    va, vb, vt = [], [], []
+    for face, parent in zip(new_faces, parents):
+        mapping = dict(zip(faces[parent],range(int(offsets[parent]),int(offsets[parent+1]))))
+        fallback = int(offsets[parent])
+        for point in face:
+            a,b,t = ancestry[point]
+            va.append(mapping.get(a,fallback));vb.append(mapping.get(b,fallback));vt.append(t)
+    vertex = B.lerp(geo.vertex,np.asarray(va),np.asarray(vb),np.asarray(vt))
+    for name in list(vertex):
+        if name.startswith(edgelib.PREFIX):
+            del vertex[name]
+    point = {name: np.asarray(rows,dtype=geo.point[name].dtype) for name,rows in point_rows.items()}
+    out = B.make(np.asarray(positions),np.asarray([i for face in new_faces for i in face]),
+                 B.offsets_from_sizes([len(face) for face in new_faces]),point,vertex,
+                 B.gather(geo.prim,np.asarray(parents)),geo.detail)
+    old_edges = topo.edges(geo).points
+    for name in geo.vertex:
+        if not name.startswith(edgelib.PREFIX):
+            continue
+        pairs = []
+        for a,b in old_edges[edgelib.values(geo,name)>0]:
+            seq = chains.get(tuple(sorted((int(a),int(b)))),[int(a),int(b)])
+            pairs.extend(zip(seq,seq[1:]))
+        out = edgelib.write(out,name,edge_mask(out,pairs).astype(np.int32))
+    out = OUT.write(out,og,'offsetpoints',lambda:np.r_[groups.mask(geo,'point',OUT.settings(og,'offsetpoints')[1]),np.zeros(out.npoints-geo.npoints,bool)])
+    return out
