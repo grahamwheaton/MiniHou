@@ -192,6 +192,38 @@ def op_remove(g: Graph, op: dict) -> dict:
     return {"removed": ids}
 
 
+def op_dissolve(g: Graph, op: dict) -> dict:
+    ids = set(op["id"] if isinstance(op["id"], list) else [op["id"]])
+    for nid in ids:
+        _need_node(g, nid)
+    def sources(nid, seen=()):
+        if nid not in ids:
+            return [nid]
+        if nid in seen:
+            raise GraphError("Cannot dissolve a cyclic selection")
+        n = g.nodes[nid]
+        ports = g.registry.get(n.type).inputs
+        ref = n.inputs.get(ports[0].name) if ports else None
+        return [src for r in (ref if isinstance(ref, list) else [ref]) if r
+                for src in sources(r, (*seen, nid))]
+    for nid, n in g.nodes.items():
+        if nid in ids:
+            continue
+        for port, ref in list(n.inputs.items()):
+            refs = [r for old in (ref if isinstance(ref, list) else [ref]) for r in sources(old)]
+            refs = list(dict.fromkeys(refs))
+            if refs:
+                n.inputs[port] = refs if isinstance(ref, list) else refs[0]
+            else:
+                n.inputs.pop(port)
+    display = sources(g.display) if g.display in ids else None
+    for nid in ids:
+        g.remove_node(nid)
+    if display:
+        g.display = display[0]
+    return {"removed": sorted(ids)}
+
+
 def op_loop(g: Graph, op: dict) -> dict:
     """One undoable insertion. Pairing uses an input edge, so rename/save/duplicate need no side registry."""
     source = op.get("from")
@@ -479,7 +511,7 @@ def op_replace(g: Graph, op: dict) -> dict:
     return {"_graph": Graph.from_dict(op["graph"], g.registry, check=False)}
 
 
-_OPS = {"add": op_add, "loop": op_loop, "insert": op_insert, "remove": op_remove, "rename": op_rename, "connect": op_connect,
+_OPS = {"add": op_add, "loop": op_loop, "insert": op_insert, "remove": op_remove, "dissolve": op_dissolve, "rename": op_rename, "connect": op_connect,
         "disconnect": op_disconnect, "set": op_set, "display": op_display, "flag": op_flag, "merge_templates": op_merge_templates, "expose": op_expose,
         "unexpose": op_unexpose, "move": op_move, "meta": op_meta, "replace": op_replace,
         "box_add": op_box_add, "box_set": op_box_set, "box_remove": op_box_remove}

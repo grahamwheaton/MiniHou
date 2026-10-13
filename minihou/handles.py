@@ -166,6 +166,7 @@ def _transform(ins, out, p):
     B = euler_xyz_matrix(p.get("axis_rotation", (0, 0, 0)))
     hs = [{"id": f"translate_{'xyz'[i]}", "label": f"move {'xyz'[i]}", "param": "translate", "comp": i, "origin": c,
            "dir": B[:, i], "tool": "move"} for i in range(3)]
+    hs += [{"id": f"translate_plane_{i}", "label": f"move {"YZ XZ XY".split()[i]}", "param": "translate", "comp": None, "origin": c, "dir": B[:, i], "axis_rotation": p.get("axis_rotation", (0,0,0)), "plane_axis": i, "kind": "plane", "tool": "move"} for i in range(3)]
     # rotate and scale sit on the fixed point of the transform (pivot + translate), so they do not run away while dragged
     rot = np.asarray(p.get("rotate", (0, 0, 0)), np.float64)
     R = euler_xyz_matrix(rot)

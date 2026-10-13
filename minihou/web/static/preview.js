@@ -536,8 +536,8 @@ window.MiniHouPreview = (() => {
         return IM.length(n)<1e-9?IM.frame(interaction.local):IM.normalFrame(n,tangent);
       } return IM.identity();
     }
-    function planePoint(sx,sy,anchor) {
-      const cam=camera(),n=norm(sub(cam.eye,view.target)),ray=rayAt(cam,sx,sy),den=dot(ray,n);
+    function planePoint(sx,sy,anchor,normal=null) {
+      const cam=camera(),n=normal||norm(sub(cam.eye,view.target)),ray=rayAt(cam,sx,sy),den=dot(ray,n);
       if(Math.abs(den)<1e-8)return null;return IM.add(cam.eye,IM.mul(ray,dot(sub(anchor,cam.eye),n)/den));
     }
     function snapHit(sx,sy,anchor=[0,0,0]) {
@@ -583,6 +583,13 @@ window.MiniHouPreview = (() => {
       const u = [dx / ppu, dy / ppu];
       return { s0, tip: [s0[0] + u[0] * 64, s0[1] + u[1] * 64], u, ppu };
     }
+    function planeCorners(cam,h){
+      if(h.plane_axis===undefined)return null;
+      const frame=h.axis_rotation?IM.frame(h.axis_rotation):IM.identity(), axes=[0,1,2].filter(i=>i!==h.plane_axis);
+      const o=toScreen(cam,...h.origin), unit=toScreen(cam,...IM.add(h.origin,frame[axes[0]]));if(!o||!unit)return null;
+      const scale=25/Math.max(10,Math.hypot(unit[0]-o[0],unit[1]-o[1]));
+      return [[.5,.5],[1,.5],[1,1],[.5,1]].map(([a,b])=>toScreen(cam,...IM.add(h.origin,IM.add(IM.mul(frame[axes[0]],a*scale),IM.mul(frame[axes[1]],b*scale)))));
+    }
     // a ring: basis vectors in its plane, and its outline projected to the screen (null where it passes behind the camera)
     function ringBasis(h) {
       const n = h.dir, a = Math.abs(n[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0], u = norm(cross(a, n));
@@ -618,7 +625,9 @@ window.MiniHouPreview = (() => {
           const g = handleGeometry(cam, h);
           const s0 = g ? g.s0 : toScreen(cam, h.origin[0], h.origin[1], h.origin[2]);
           if (!s0) continue;
-          grp.append(svg("rect", { x: s0[0] - 8, y: s0[1] - 8, width: 16, height: 16, fill: "#ffb04d", stroke: "#0008", class: "pv-grab", style: "cursor: nesw-resize" }), tip);
+          const corners=planeCorners(cam,h);
+          if(corners && corners.every(Boolean)){grp.append(svg('polygon',{points:corners.map(p=>p.slice(0,2).join(',')).join(' '),fill:['#e65b5b','#6dcc73','#639bfa'][h.plane_axis],'fill-opacity':.6,stroke:'#eee8',class:'pv-grab',style:'cursor:move'}),tip);}
+          else grp.append(svg("rect", { x: s0[0] - 8, y: s0[1] - 8, width: 16, height: 16, fill: "#ffb04d", stroke: "#0008", class: "pv-grab", style: "cursor: nesw-resize" }), tip);
         } else {
           const g = handleGeometry(cam, h);
           if (!g) continue;
@@ -755,12 +764,12 @@ window.MiniHouPreview = (() => {
     function startPlaneDrag(e,h) {
       if(e.button!==0||handleDrag||endingDrag)return;e.preventDefault();e.stopPropagation();
       const r=canvas.getBoundingClientRect(),frame=h.axis_rotation?IM.frame(h.axis_rotation):IM.identity(),origin=h.origin.slice();
-      const start=planePoint(e.clientX-r.left,e.clientY-r.top,origin),info=api.selectionInfo();if(!start)return;
+      const start=planePoint(e.clientX-r.left,e.clientY-r.top,origin,h.plane_axis===undefined?null:frame[h.plane_axis]),info=api.selectionInfo();if(!start)return;
       snapData=raw;snapExclude=new Set(info?.points||[]);
-      const drag=handleDrag={h,value:null};let base=null,last=e,axis=null,plane=false,released=false,cancelled=false;
+      const drag=handleDrag={h,value:null};let base=null,last=e,axis=h.plane_axis??null,plane=h.plane_axis!==undefined,released=false,cancelled=false;
       let precise=false,rawAnchor=[0,0,0],valueAnchor=[0,0,0],previousDelta=[0,0,0];
       document.body.classList.add('pv-dragging');feedback.hidden=false;
-      function move(ev){last=ev;if(!base)return;const x=ev.clientX-r.left,y=ev.clientY-r.top,p=planePoint(x,y,origin);if(!p)return;
+      function move(ev){last=ev;if(!base)return;const x=ev.clientX-r.left,y=ev.clientY-r.top,p=planePoint(x,y,origin,h.plane_axis===undefined?null:frame[h.plane_axis]);if(!p)return;
         drag.guideDir=axis!==null&&!plane?frame[axis]:null;
         let d=sub(p,start);if(!!ev.shiftKey!==precise){precise=!!ev.shiftKey;rawAnchor=d;valueAnchor=previousDelta;}
         d=IM.add(valueAnchor,IM.mul(sub(d,rawAnchor),precise?0.1:1));previousDelta=d;
@@ -922,7 +931,7 @@ window.MiniHouPreview = (() => {
             return sp ? { id: h.id, comp: h.comp, param: h.param, kind: h.kind, tip: [sp[0], sp[1]], ppu: 1, u: [1, 0] } : null;
           }
           const g = handleGeometry(cam, h);
-          if (h.kind === "uniform" || h.kind === "plane") { const s0 = g ? g.s0 : toScreen(cam, ...h.origin); return s0 ? { id: h.id, comp: h.comp, param: h.param, kind: h.kind, tip: [s0[0], s0[1]], ppu: 1, u: [1, -1] } : null; }
+          if (h.kind === "uniform" || h.kind === "plane") { const corners=planeCorners(cam,h); const s0=corners&&corners.every(Boolean)?[corners.reduce((a,p)=>a+p[0],0)/4,corners.reduce((a,p)=>a+p[1],0)/4]:g ? g.s0 : toScreen(cam, ...h.origin); return s0 ? { id: h.id, comp: h.comp, param: h.param, kind: h.kind, tip: [s0[0], s0[1]], ppu: 1, u: [1, -1] } : null; }
           return g ? { id: h.id, comp: h.comp, param: h.param, kind: h.kind, tip: g.tip, ppu: g.ppu, u: g.u } : null;
         }).filter(Boolean);
       },

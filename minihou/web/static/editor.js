@@ -328,7 +328,7 @@
       el._struct = structSig; el._sub = subSig;
       const kids = [h("div", { class: "band" }), h("div", { class: "title", title: id }, id),
         h("div", { class: "sub" }, subLine(id, n, st, errNode, nodeMs, cached)),
-        ...['bypass','lock','template','display'].map(name=>h('button',{class:'flag flag-'+name+(flagState(id,name)?' on':''),dataset:{flag:name},title:flagTitle(name), 'aria-label':flagTitle(name),'aria-pressed':String(flagState(id,name))}, ({bypass:'B',lock:'L',template:'T',display:'D'})[name]))];
+        ...['bypass','lock','template','display'].map(name=>h('button',{class:'flag flag-'+name+(flagState(id,name)?' on':''),dataset:{flag:name},title:flagTitle(name), 'aria-label':flagTitle(name),'aria-pressed':String(flagState(id,name))}, ({bypass:'M',lock:'L',template:'T',display:'D'})[name]))];
       el.classList.toggle('bypassed',!!n.flags?.bypass);
       el.classList.toggle('templated',!!(n.flags?.template||n.flags?.selectable_template));
       el.classList.toggle('selectable-template',!!n.flags?.selectable_template);
@@ -1000,7 +1000,7 @@
     pvDirty = true;
     if (pvTimer === null && !pvInFlight) pvTimer = setTimeout(runPreview, PB.playing ? 0 : 33);
   }
-  function flagTitle(name){return {display:'Display (R)',render:'Render (T; toggle off to follow Display)',template:'Template (E; Shift: add; Ctrl: selectable)',selectable_template:'Selectable Template (W)',bypass:'Bypass / Ignore (Q or B)',lock:'Lock / Freeze geometry',unload:'Unload cached geometry'}[name];}
+  function flagTitle(name){return {display:'Display (R)',render:'Render (T; toggle off to follow Display)',template:'Template (E; Shift: add; Ctrl: selectable)',selectable_template:'Selectable Template (W)',bypass:'Mute (M)',lock:'Lock / Freeze geometry',unload:'Unload cached geometry'}[name];}
   function flagState(id,name){const n=nodeOf(id);return name==='display'?id===displayNode():name==='render'?id===(S.graph.render||displayNode()):name==='lock'?!!n?.locked_geometry:!!n?.flags?.[name];}
   async function setNodeFlag(id,name,additive=false){
     if(!name)return;
@@ -1069,7 +1069,7 @@
   };
   const edgePattern = (edges) => edges.map(([a, b]) => `${a}-${b}`).join(" ");
   const SELECTION_ACTIONS = {
-    edge: [{ label: "Bevel", key: "b", type: "polybevel", title: "Bevel the selected edges (a loop, or edges that meet or reach a border)",
+    edge: [{label:"Delete",key:"x",type:"blast",params:s=>({group:s.edges.map(([a,b])=>`p${a}-${b}`).join(' '),domain:"edges"})}, { label: "Bevel", key: "b", type: "polybevel", title: "Bevel the selected edges (a loop, or edges that meet or reach a border)",
       params: (s) => ({ edges: edgePattern(s.edges) }) }],
     face: [
       { label: "Extrude", key: "e", type: "polyextrude", params: (s) => ({ group: rangePattern(s.faces), distance: 0.3 }) },
@@ -1118,6 +1118,7 @@
       hs.push({ id: `scale_${a}`, label: `scale ${a}`, param: "scale", comp: i, origin: c, dir: axes[i], axis_rotation, scale: 1, kind: "scale", tool: "scale", pending: true });
     }
     hs.push({ id: "uniform_scale", label: "uniform scale", param: "uniform_scale", comp: null, origin: c, dir: axes[2], axis_rotation, scale: 1, kind: "uniform", tool: "scale", pending: true });
+    for(let i=0;i<3;i++)hs.push({id:'translate_plane_'+i,label:'move '+['YZ','XZ','XY'][i],param:'translate',comp:null,origin:c,dir:axes[i],axis_rotation,plane_axis:i,scale:1,kind:'plane',tool:'move',pending:true});
     hs.push({id:'translate_plane',label:'move in view plane',param:'translate',comp:null,origin:c,dir:axes[2],axis_rotation,scale:1,kind:'plane',tool:'move',pending:true});
     return hs;
   }
@@ -1199,6 +1200,10 @@
     const t = S.types[item.type];
     if (!t) { toast(`This engine has no ${item.type} node.`); return; }
     const params = { ...(item.params || {}), ...pieSelectionParams(item) };
+    if(item.type==='blast' && pvSelection.mode!=='view'){
+      const mode=pvSelection.mode, values=pvSelection[SEL_KEY[mode]]||[];
+      if(values.length)Object.assign(params,{domain:mode==='edge'?'edges':mode==='point'?'points':'primitives',group:mode==='edge'?values.map(([a,b])=>`p${a}-${b}`).join(' '):rangePattern(values)});
+    }
     if (item.center && pv && pv.ok && pvSelection.mode !== "view" && (pvSelection[SEL_KEY[pvSelection.mode]] || []).length) {
       const info = pv.selectionInfo();
       if (info) params[item.center] = info.center.map((v) => Math.round(v * 1e5) / 1e5);
@@ -1228,6 +1233,20 @@
     MiniShelf.init({ types: () => S.types, typeList: () => S.typeList,
       onPick: (tool, item) => { pieFromView = false; pieTool(item || { label: tool.label, type: tool.type }, null, { floating: true }); } });
     canvas.addEventListener("dragover", (e) => { if ([...(e.dataTransfer.types || [])].includes("application/x-minihou-tool")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } });
+    const viewport=$('#pv-canvas');
+    viewport.addEventListener('dragover',e=>{if([...e.dataTransfer.types].includes('application/x-minihou-tool')){e.preventDefault();e.dataTransfer.dropEffect='copy';}});
+    viewport.addEventListener('drop',async e=>{
+      const raw=e.dataTransfer.getData('application/x-minihou-tool');if(!raw)return;e.preventDefault();
+      try{const tool=JSON.parse(raw),t=S.types[tool.type];if(!t||t.category!=='source'){toast('Drop a primitive from Create into the viewport.');return;}
+        const r=viewport.getBoundingClientRect(),point=pv.planePoint(e.clientX-r.left,e.clientY-r.top,[0,0,0],[0,0,1]);
+        if(!point){toast('Look toward the construction grid to place a primitive.');return;}
+        const id=uniqueId(tool.type),params={},hasCenter=t.params.some(p=>p.name==='center');
+        if(hasCenter)params.center=point.map(v=>Math.round(v*1e5)/1e5);
+        const ops=[{op:'add',id,type:tool.type,params,pos:[60,60],display:true}];
+        if(!hasCenter){const move=uniqueId('transform');ops.push({op:'add',id:move,type:'transform',inputs:{geo:id},params:{translate:point},pos:[60,170],display:true});}
+        const result=await edit(ops);if(result)select([ops.at(-1).id]);
+      }catch(err){toast(err.message);}
+    });
     canvas.addEventListener("drop", (e) => {
       const raw = e.dataTransfer.getData("application/x-minihou-tool");
       if (!raw) return;
@@ -2067,7 +2086,7 @@
     }
     const tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea" || tag === "select") return;
-    if(!pvOver&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&S.sel.size){const flag={q:'bypass',b:'bypass',e:'template',w:'selectable_template',r:'display'}[e.key.toLowerCase()];if(flag){e.preventDefault();setNodeFlag([...S.sel][0],flag,e.shiftKey);return;}}
+    if(!pvOver&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&S.sel.size){const flag={m:'bypass',e:'template',w:'selectable_template',r:'display'}[e.key.toLowerCase()];if(flag){e.preventDefault();setNodeFlag([...S.sel][0],flag,e.shiftKey);return;}}
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === "Escape") { $("#help").classList.add("hidden"); $("#file-menu").classList.add("hidden"); }
     else if (e.key === "Tab") {
@@ -2076,6 +2095,7 @@
       openMenu(S.mouse[0], S.mouse[1], one ? { fromSel: one } : { world: toWorld(...S.mouse) });
     } else if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); undo(e.shiftKey); }
     else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); undo(true); }
+    else if (!pvOver && mod && e.key.toLowerCase() === "x") { e.preventDefault(); if(S.sel.size)edit([{op:"dissolve",id:[...S.sel]}]); }
     else if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); if (S.sel.size) duplicate([...S.sel]); }
     else if (mod && e.key.toLowerCase() === "g") { e.preventDefault(); saveSelectionAsNode(); }                // Houdini's collapse to subnet
     else if (mod && e.key.toLowerCase() === "a") { e.preventDefault(); select(Object.keys(S.graph.nodes)); }

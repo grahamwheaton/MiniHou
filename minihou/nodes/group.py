@@ -365,13 +365,24 @@ def keep_prims(geo: Geometry, pkeep: np.ndarray, remove_unused_points: bool = Tr
 
 @node("blast", inputs=["geo"], category="group", params=[
     Str("group", "", doc="What to delete: group names, ^exclusions, numbers/ranges, or an expression like '@P.z < 0'"),
-    Enum("domain", ["primitives", "points"], doc="Delete primitives, or points (and the primitives using them)"),
+    Enum("domain", ["primitives", "points", "edges"], doc="Delete faces, points, or faces touching selected edges"),
     Bool("delete_non_selected", False, doc="Keep the selection and delete everything else"),
     Bool("keep_unused_points", False, doc="primitives: keep points no remaining primitive uses"),
 ])
 def blast(geo, group, domain, delete_non_selected, keep_unused_points):
     """Delete a selection of primitives or points (Houdini's Blast). Attributes and groups are compacted to match."""
     dom = DOMAIN[domain]
+    if dom == "edge":
+        selected = edgelib.mask(geo, group) if group.strip() else np.zeros(len(topo.edges(geo).points), bool)
+        pairs = topo.edges(geo).points
+        chosen = {tuple(sorted(e)) for e in pairs[selected]} if selected is not None else set()
+        t = geo.topology
+        touched = np.zeros(geo.nprims, bool)
+        for i in range(geo.nprims):
+            ps = t.vertex_point[t.prim_offsets[i]:t.prim_offsets[i+1]]
+            count = len(ps) if t.closed_mask()[i] else max(0,len(ps)-1)
+            touched[i] = any(tuple(sorted((int(ps[j]),int(ps[(j+1)%len(ps)])))) in chosen for j in range(count))
+        return keep_prims(geo, touched if delete_non_selected else ~touched, remove_unused_points=not keep_unused_points)
     m = groups.mask(geo, dom, group)
     if m is None:                                            # empty field selects nothing (unlike most nodes)
         m = np.zeros(geo.npoints if dom == "point" else geo.nprims, bool)

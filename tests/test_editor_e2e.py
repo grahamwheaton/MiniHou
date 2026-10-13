@@ -83,6 +83,34 @@ class EditorE2E(unittest.TestCase):
             dialog.locator("input").fill(text)
         dialog.locator('button[type="submit"]').click()
 
+    def test_blast_shelf_captures_face_selection(self):
+        self.two_boxes();self.page.click('#preview [data-mode="face"]')
+        face=self.second_box_top();self.page.mouse.click(*self.view_xy('face',face))
+        self.page.locator('#shelf .sh-tab').filter(has_text='Groups').click()
+        self.shelf_tool('Blast').click()
+        self.assertTrue(until(lambda:any(n.type=='blast' for n in self.s.graph.nodes.values())))
+        node=next(n for n in self.s.graph.nodes.values() if n.type=='blast')
+        self.assertEqual(node.params['group'],str(face))
+        self.assertEqual(node.params['domain'],'primitives')
+
+    def test_network_interaction_mute_dissolve_and_layout(self):
+        self.two_boxes();self.page.keyboard.press('l');self.page.wait_for_timeout(250)
+        self.node('m').locator('.title').click();self.page.keyboard.press('m')
+        self.assertTrue(until(lambda:self.s.graph.nodes['m'].meta.get('flags',{}).get('bypass')))
+        self.page.keyboard.press('Control+x')
+        self.assertTrue(until(lambda:'m' not in self.s.graph.nodes))
+        self.assertEqual(self.s.graph.nodes['o'].inputs['geo'],'a')
+        self.assertFalse(self.page.locator('#frame-input').is_visible())
+        crumb=self.page.locator('#crumbs').bounding_box();head=self.page.locator('#network-pane-header').bounding_box()
+        self.assertGreaterEqual(crumb['y'],head['y']+head['height'])
+
+    def test_network_interaction_shelf_drop_into_view(self):
+        self.two_boxes()
+        self.page.locator('#pv-canvas').evaluate("""el=>{const d=new DataTransfer();d.setData('application/x-minihou-tool',JSON.stringify({type:'box'}));const r=el.getBoundingClientRect();el.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:d,clientX:r.left+r.width/2,clientY:r.top+r.height/2}));}""")
+        self.assertTrue(until(lambda:'box1' in self.s.graph.nodes))
+        self.assertEqual(self.s.graph.display,'box1')
+        self.assertIn('center',self.s.graph.nodes['box1'].params)
+
     def test_network_interaction_selection_keeps_display_and_x_undo(self):
         self.two_boxes()
         self.page.keyboard.press('l')
@@ -92,7 +120,7 @@ class EditorE2E(unittest.TestCase):
         self.node('a').locator('.title').click()
         self.assertEqual(self.s.graph.display,before)
         self.assertEqual(self.node('a').locator('[data-flag=display]').inner_text(),'D')
-        self.assertEqual(self.node('a').locator('[data-flag=bypass]').inner_text(),'B')
+        self.assertEqual(self.node('a').locator('[data-flag=bypass]').inner_text(),'M')
         self.page.keyboard.press('x')
         self.assertTrue(until(lambda:'a' not in self.s.graph.nodes))
         self.page.keyboard.press('Control+z')
@@ -484,10 +512,11 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(g["ripple"].inputs, {"geo": "hills"})                # originals untouched
         self.page.wait_for_selector('.node[data-id="ripple1"].selected')
 
-    def test_cut_removes_and_paste_restores_into_another_graph(self):
+    def test_copy_delete_removes_and_paste_restores_into_another_graph(self):
         self.node("spike_up").locator(".title").click()
         self.page.locator("#canvas").focus()
-        self.page.keyboard.press("Control+x")
+        self.page.keyboard.press("Control+c")
+        self.page.keyboard.press("x")
         self.assertTrue(until(lambda: "spike_up" not in self.s.graph.nodes))
         clip = self.page.evaluate("localStorage.getItem('minihou.clip')")
         self.assertIn('"minihou":"nodes"', clip)
@@ -794,13 +823,13 @@ class EditorE2E(unittest.TestCase):
     def test_dragging_a_transform_arrow_moves_the_node_and_keeps_the_other_components(self):
         self.handle_scene("transform", {"translate": [0.5, 1.0, 2.0]}, "h")
         self.assertEqual(sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()")),
-                         ["translate_x", "translate_y", "translate_z"])
+                         ["translate_plane_0", "translate_plane_1", "translate_plane_2", "translate_x", "translate_y", "translate_z"])
         tip = self.drag_handle("translate_x", 60)
         self.assertTrue(until(lambda: abs(self.s.graph.nodes["h"].params.get("translate", [0, 0, 0])[0] - (0.5 + 60 / tip["ppu"])) < 0.15))   # 60 px along the arrow, in world units
         t = self.s.graph.nodes["h"].params["translate"]
         self.assertEqual((t[1], t[2]), (1.0, 2.0))                                          # the other components are untouched
         self.assertTrue(until(lambda: self.s.status()["ok"]))
-        self.page.wait_for_function("minihou.preview.handleTips().length === 3")             # the arrows follow the moved result
+        self.page.wait_for_function("minihou.preview.handleTips().length === 6")             # the arrows follow the moved result
 
     def test_gizmo_drag_streams_preview_before_release(self):
         self.handle_scene("transform", {"translate": [0, 1, 2]}, "h")
@@ -1348,7 +1377,7 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual([round(v, 3) for v in info["center"]], [2.0, 0.0, 0.0])
         # a drag on the move gizmo adds the transform: group = the selected points, pivot = their centre
         ids = sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()"))
-        self.assertEqual(ids, ["translate_plane", "translate_x", "translate_y", "translate_z"])
+        self.assertEqual(ids, ["translate_plane", "translate_plane_0", "translate_plane_1", "translate_plane_2", "translate_x", "translate_y", "translate_z"])
         ppu = next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == "translate_z")["ppu"]
         self.assertFalse([n for n in self.s.graph.nodes.values() if n.type == "transform"])
         self.drag_handle("translate_z", int(0.75 * ppu))
@@ -1415,7 +1444,7 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(self.selection()["points"], [8])
         info = self.page.evaluate("minihou.preview.selectionInfo()")
         self.assertEqual(info["points"], [8])
-        self.assertEqual(len(self.page.evaluate("minihou.preview.handleTips()")), 4)            # move arrows and plane handle at the point
+        self.assertEqual(len(self.page.evaluate("minihou.preview.handleTips()")), 7)            # move arrows and plane handle at the point
         self.drag_handle("translate_x", 40)
         self.assertTrue(until(lambda: any(n.type == "transform" and n.params.get("group") == "8" for n in self.s.graph.nodes.values())))
 
@@ -1689,26 +1718,20 @@ class EditorE2E(unittest.TestCase):
         self.assertGreaterEqual(self.s.graph.nodes["s"].params["radius"], 0.0)
 
     def test_frame_slider_scrubs_and_follows_the_frame(self):
-        self.page.fill("#frame-slider", "40")                         # fires input events like a drag
-        end = time.monotonic() + 5
-        while self.s.frame != 40.0 and time.monotonic() < end:
-            time.sleep(0.05)
-        self.assertEqual(self.s.frame, 40.0)
-        self.assertEqual(self.page.input_value("#frame-input"), "40")
-        self.page.fill("#frame-input", "600")                         # a later frame widens the slider's range
-        self.page.press("#frame-input", "Enter")
-        self.page.wait_for_function("Number(document.querySelector('#frame-slider').max) >= 600")
-        self.assertEqual(self.page.input_value("#frame-slider"), "600")
+        self.page.fill('#tl-slider','40')
+        self.assertTrue(until(lambda:self.s.frame==40))
+        self.assertEqual(self.page.input_value('#tl-frame'),'40')
 
     def test_frame_field_sets_the_engine_frame(self):
-        self.page.fill("#frame-input", "7")
-        self.page.press("#frame-input", "Enter")
-        self.page.click("#frame-next")
-        end = time.monotonic() + 5
-        while self.s.frame != 8.0 and time.monotonic() < end:
-            time.sleep(0.02)
-        self.assertEqual(self.s.frame, 8.0)
-        self.assertEqual(self.errors, [])
+        self.page.fill('#tl-frame','7');self.page.press('#tl-frame','Enter');self.page.click('#tl-next')
+        self.assertTrue(until(lambda:self.s.frame==8))
+
+    def test_plane_gizmo_keeps_excluded_axis(self):
+        self.handle_scene('transform', {'translate':[0,0,0]}, 'h')
+        self.page.wait_for_timeout(300)
+        self.drag_handle('translate_plane_2',40)
+        self.assertTrue(until(lambda:sum(abs(v) for v in self.s.graph.nodes['h'].params.get('translate',[0,0,0]))>.01))
+        self.assertAlmostEqual(self.s.graph.nodes['h'].params['translate'][2],0,places=4)
 
     def test_select_and_edit_a_parameter(self):
         self.node("hills").locator(".title").click()

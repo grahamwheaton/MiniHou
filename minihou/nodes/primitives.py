@@ -3,7 +3,7 @@ import numpy as np
 
 from ..geometry import Geometry, Topology
 from ..outgroups import OutGroup, OutGroups
-from ..sdk import Bool, Float, Handle, Int, Vec3, node
+from ..sdk import Bool, Enum, Float, Handle, Input, Int, Vec3, node
 from . import _build as B
 from ._util import euler_xyz_matrix
 
@@ -63,37 +63,59 @@ def _face_grid(n):
     return np.stack([b, b + 1, b + n + 2, b + n + 1], axis=1)
 
 
-@node("box", category="source", params=[
+@node("box", inputs=[Input("geo", optional=True, doc="Optional geometry to bound")], category="source", params=[
+    Enum("primitive_type", ["polygons", "points"], label="Primitive Type"),
+    Enum("connectivity", ["quadrilaterals", "triangles"], label="Connectivity"),
+    Bool("consolidate", True, label="Consolidate Corner Points"),
     Vec3("size", (1.0, 1.0, 1.0), min=0.0),
     Vec3("center", (0.0, 0.0, 0.0)),
-    Int("divisions", 1, min=1, max=1000, soft_max=50, proxy="res2"),
+    Vec3("rotate", (0.0, 0.0, 0.0)),
+    Float("uniform_scale", 1.0, min=0.0),
+    Int("divisions", 1, min=1, max=1000, soft_max=50, proxy="res2", doc="Legacy uniform cell divisions; used when axis divisions are zero"),
+    Vec3("axis_divisions", (0,0,0), min=0, max=1000, label="Axis Divisions", doc="Cells per axis; zero uses Divisions. Integer values required."),
+    Bool("add_vertex_normals", False),
 ])
-def box(size, center, divisions):
-    """Closed box of quads (outward-facing), each face split into ``divisions`` x ``divisions``."""
-    n = divisions
-    u = np.linspace(-0.5, 0.5, n + 1)
-    uu, vv = np.meshgrid(u, u)
-    uu, vv = uu.ravel(), vv.ravel()
-    ones = np.full_like(uu, 0.5)
-    # (P(u, v) for each face) chosen so (u, v) increasing is CCW seen from outside
-    faces = [np.stack([uu, vv, ones], 1), np.stack([vv, uu, -ones], 1),      # +Z, -Z
-             np.stack([ones, uu, vv], 1), np.stack([-ones, vv, uu], 1),      # +X, -X
-             np.stack([vv, ones, uu], 1), np.stack([uu, -ones, vv], 1)]      # +Y, -Y
-    quads = _face_grid(n)
-    per = (n + 1) ** 2
-    P = np.concatenate(faces) * np.asarray(size, np.float64) + np.asarray(center, np.float64)
-    vp = np.concatenate([quads + k * per for k in range(6)]).ravel()
-    g = Geometry.from_arrays(P.astype(np.float32), vp, np.arange(6 * n * n + 1) * 4)
-    return fuse_points(g, 1e-6 * max(1.0, float(max(size))) if max(size) > 0 else 1e-9)
+def box(geo=None, size=(1,1,1), center=(0,0,0), divisions=1, rotate=(0,0,0), uniform_scale=1,
+        axis_divisions=(0,0,0), consolidate=True, connectivity="quadrilaterals", primitive_type="polygons", add_vertex_normals=False):
+    """Polygon box or surface points; optional input fits an axis-aligned bounding box before rotation."""
+    if any(v != int(v) for v in axis_divisions):
+        raise ValueError("Axis divisions must be integers")
+    dims=[int(v) or divisions for v in axis_divisions]
+    if sum(dims[i]*dims[j] for i,j in [(0,1),(1,2),(0,2)]) > 1000000:
+        raise ValueError("Box exceeds one million face cells")
+    size=np.asarray(size,np.float64);center=np.asarray(center,np.float64)
+    if geo is not None and geo.npoints:
+        lo,hi=geo.P.min(0),geo.P.max(0)
+        size=size*(hi-lo);center=center+(hi+lo)/2
+    points=[];polys=[];offset=0
+    for u,v,w,sign in [(0,1,2,1),(1,0,2,-1),(1,2,0,1),(2,1,0,-1),(2,0,1,1),(0,2,1,-1)]:
+        nu,nv=dims[u],dims[v]
+        uu,vv=np.meshgrid(np.linspace(-.5,.5,nu+1),np.linspace(-.5,.5,nv+1))
+        ps=np.zeros(((nu+1)*(nv+1),3));ps[:,u]=uu.ravel();ps[:,v]=vv.ravel();ps[:,w]=sign*.5
+        ii,jj=np.meshgrid(np.arange(nu),np.arange(nv));q=(jj*(nu+1)+ii).ravel()+offset
+        quads=np.stack([q,q+1,q+nu+2,q+nu+1],axis=1)
+        points.append(ps);polys.extend(quads);offset+=len(ps)
+    P=np.concatenate(points)*size*uniform_scale
+    P=P@euler_xyz_matrix(rotate).T+center
+    polygons=np.asarray(polys)
+    if connectivity=="triangles":polygons=np.concatenate([polygons[:,[0,1,2]],polygons[:,[0,2,3]]])
+    g=Geometry.from_arrays(P.astype(np.float32),polygons.ravel(),np.arange(len(polygons)+1)*polygons.shape[1])
+    if consolidate:g=fuse_points(g,1e-6*max(1.,float(np.max(size)*uniform_scale)))
+    if primitive_type=="points":return Geometry.points_only(g.P)
+    if add_vertex_normals:
+        from .normal import normal
+        g=normal(g,"vertex",60.)
+    return g
 
 
 @node("sphere", category="source", params=[
     Float("radius", 1.0, min=0.0),
     Vec3("center", (0.0, 0.0, 0.0)),
+    Vec3("rotate", (0,0,0)), Vec3("scale", (1,1,1)), Float("uniform_scale", 1., min=0),
     Int("rows", 16, min=2, max=4096, soft_max=200, doc="latitude bands", proxy="res2"),
     Int("columns", 32, min=3, max=4096, soft_max=400, doc="longitude segments", proxy="res2"),
 ])
-def sphere(radius, center, rows, columns):
+def sphere(radius, center, rows, columns, rotate=(0,0,0), scale=(1,1,1), uniform_scale=1):
     """UV sphere: triangle fans at the poles, quads between; outward-facing, closed."""
     lat = np.linspace(0, np.pi, rows + 1)[1:-1]                 # ring latitudes (from +Z pole down)
     lon = np.linspace(0, 2 * np.pi, columns, endpoint=False)
@@ -115,7 +137,7 @@ def sphere(radius, center, rows, columns):
     offs = np.concatenate([np.arange(columns + 1) * 3,
                            columns * 3 + np.arange(1, quads.shape[0] + 1) * 4,
                            columns * 3 + quads.shape[0] * 4 + np.arange(1, columns + 1) * 3])
-    return Geometry.from_arrays(P.astype(np.float32), vp, offs)
+    return source_transform(Geometry.from_arrays(P.astype(np.float32), vp, offs), center, rotate, scale, uniform_scale)
 
 
 @node("circle", category="source", params=[
@@ -150,13 +172,14 @@ def _ring_quads(rows, columns, wrap_rows):
     Float("radius_top", 1.0, min=0.0, soft_max=10.0, doc="0 makes a cone"),
     Float("height", 2.0, min=0.0, soft_max=20.0),
     Vec3("center", (0.0, 0.0, 0.0)),
+    Vec3("rotate", (0,0,0)), Vec3("scale", (1,1,1)), Float("uniform_scale", 1., min=0),
     Int("rows", 1, min=1, max=4096, soft_max=100, doc="segments along the height", proxy="res2"),
     Int("columns", 24, min=3, max=4096, soft_max=200, doc="segments around", proxy="res2"),
     Bool("caps", True, doc="Close the ends with n-gons (a zero radius ends in a point instead)"),
 ], handles=[Handle("radius_bottom", axis="x", at="bottom", reach=True, min=0.0),
             Handle("radius_top", axis="x", at="top", reach=True, min=0.0),
             Handle("height", axis="z", at="top", scale=2.0, min=0.0)])         # the tube grows both ways from its centre
-def tube(radius_bottom, radius_top, height, center, rows, columns, caps):
+def tube(radius_bottom, radius_top, height, center, rows, columns, caps, rotate=(0,0,0), scale=(1,1,1), uniform_scale=1):
     """Cylinder or cone along +Z (Houdini's Tube), outward-facing, with vertex uvs; closed when ``caps`` is on."""
     t = np.linspace(0.0, 1.0, rows + 1)
     rad = radius_bottom + (radius_top - radius_bottom) * t
@@ -177,17 +200,18 @@ def tube(radius_bottom, radius_top, height, center, rows, columns, caps):
     g.vertex["uv"] = np.concatenate(uvs).astype(np.float32)
     if min(radius_bottom, radius_top) <= 0.0:                              # cone: weld the tip ring into one point
         g = B.drop_degenerate(fuse_points(g, 1e-7 * max(1.0, radius_bottom, radius_top, height)))
-    return g
+    return source_transform(g, center, rotate, scale, uniform_scale)
 
 
 @node("torus", category="source", params=[
     Float("radius", 1.0, min=0.0, soft_max=10.0, doc="From the centre to the middle of the tube"),
     Float("thickness", 0.25, min=0.0, soft_max=5.0, doc="Radius of the tube"),
     Vec3("center", (0.0, 0.0, 0.0)),
+    Vec3("rotate", (0,0,0)), Vec3("scale", (1,1,1)), Float("uniform_scale", 1., min=0),
     Int("rows", 12, min=3, max=4096, soft_max=200, doc="segments around the tube", proxy="res2"),
     Int("columns", 32, min=3, max=4096, soft_max=400, doc="segments around the ring", proxy="res2"),
 ])
-def torus(radius, thickness, center, rows, columns):
+def torus(radius, thickness, center, rows, columns, rotate=(0,0,0), scale=(1,1,1), uniform_scale=1):
     """Torus in the XY plane (Houdini's Torus), outward-facing quads with vertex uvs; closed."""
     phi = np.linspace(0, 2 * np.pi, rows, endpoint=False)[:, None]        # around the tube
     th = np.linspace(0, 2 * np.pi, columns, endpoint=False)[None, :]       # around the ring
@@ -197,4 +221,10 @@ def torus(radius, thickness, center, rows, columns):
     g = Geometry.from_arrays((P.reshape(-1, 3) + np.asarray(center)).astype(np.float32), quads.ravel(),
                              np.arange(len(quads) + 1) * 4)
     g.vertex["uv"] = uv.astype(np.float32)
-    return g
+    return source_transform(g, center, rotate, scale, uniform_scale)
+
+
+def source_transform(g, center, rotate, scale, uniform_scale):
+    out=g.copy();c=np.asarray(center)
+    out.point["P"]=(((g.P-c)*np.asarray(scale)*uniform_scale)@euler_xyz_matrix(rotate).T+c).astype(np.float32)
+    return out

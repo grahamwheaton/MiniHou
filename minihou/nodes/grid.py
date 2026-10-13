@@ -10,8 +10,9 @@ from ..sdk import Float, Int, Vec3, node
     Int("columns", 10, min=2, max=20000, soft_max=1000, label="Columns (points)", proxy="res2"),
     Int("rows", 10, min=2, max=20000, soft_max=1000, label="Rows (points)", proxy="res2"),
     Vec3("center", (0.0, 0.0, 0.0)),
+    Vec3("rotate", (0,0,0)), Vec3("scale", (1,1,1)), Float("uniform_scale", 1., min=0),
 ])
-def grid(size_x, size_y, columns, rows, center):
+def grid(size_x, size_y, columns, rows, center, rotate=(0,0,0), scale=(1,1,1), uniform_scale=1):
     """Rectangular grid of quads in the XY plane. ``columns``/``rows`` count points per side.
 
     Writes point attributes ``P`` and ``uv`` (u along X, v along Y).
@@ -31,4 +32,5 @@ def grid(size_x, size_y, columns, rows, center):
     g.point["uv"] = np.stack([uu.ravel(), vv.ravel()], axis=1)
     g.detail["grid_columns"] = int(columns)          # lets heightfield nodes see the lattice (points row by row)
     g.detail["grid_rows"] = int(rows)
-    return g
+    from .primitives import source_transform
+    return source_transform(g, center, rotate, scale, uniform_scale)

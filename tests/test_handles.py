@@ -19,7 +19,7 @@ class ProviderTests(unittest.TestCase):
         src = run("box", size=[2, 2, 2])
         out = run("transform", src, translate=[3, 0, 0])
         hs = by_id(handles.handles_for("transform", [src], out, {"translate": [3, 0, 0]}))
-        self.assertEqual(sorted(k for k in hs if k.startswith("translate")), ["translate_x", "translate_y", "translate_z"])
+        self.assertEqual(sorted(k for k in hs if k.startswith("translate")), ["translate_plane_0", "translate_plane_1", "translate_plane_2", "translate_x", "translate_y", "translate_z"])
         np.testing.assert_allclose(hs["translate_y"]["origin"], [3, 0, 0], atol=1e-6)    # at the moved box's centre
         self.assertEqual((hs["translate_y"]["param"], hs["translate_y"]["comp"], hs["translate_y"]["dir"]), ("translate", 1, [0.0, 1.0, 0.0]))
 
@@ -63,7 +63,7 @@ class ProviderTests(unittest.TestCase):
         np.testing.assert_allclose(hs["translate_x"]["origin"], [3, 2, 0], atol=1e-5)       # the second box, where it ended up
         np.testing.assert_allclose(hs["rotate_z"]["origin"], [3, 2, 0], atol=1e-5)          # pivot + translate
         hs = by_id(handles.handles_for("transform", [merged], out, {"group": "no_such_group_xyz", "translate": [0, 2, 0]}))
-        self.assertEqual(len(hs), 10)                                                       # a group that selects nothing: still handles, at the middle
+        self.assertEqual(len(hs), 13)                                                       # a group that selects nothing: still handles, at the middle
 
     def test_box_and_sphere_arrows_sit_on_the_surface_and_scale_correctly(self):
         hs = by_id(handles.handles_for("box", [], run("box"), {"size": [2, 4, 6], "center": [1, 0, 0]}))
@@ -180,7 +180,7 @@ class PreviewHandlesTests(unittest.TestCase):
                                 "n": {"type": "noise", "inputs": {"geo": "t"}},
                                 "o": {"type": "output", "inputs": {"geo": "n"}}}, display="o"))
         t = s.preview("t")
-        self.assertEqual(sorted(h["id"] for h in t["handles"]), ["rotate_x", "rotate_y", "rotate_z", "scale_x", "scale_y", "scale_z", "translate_x", "translate_y", "translate_z", "uniform_scale"])
+        self.assertEqual(sorted(h["id"] for h in t["handles"]), ["rotate_x", "rotate_y", "rotate_z", "scale_x", "scale_y", "scale_z", "translate_plane_0", "translate_plane_1", "translate_plane_2", "translate_x", "translate_y", "translate_z", "uniform_scale"])
         np.testing.assert_allclose(t["handles"][0]["origin"], [1, 2, 3], atol=1e-5)
         self.assertEqual(s.preview("n")["handles"], [])
         self.assertEqual(len(s.preview("b")["handles"]), 3)
@@ -197,7 +197,7 @@ class PreviewHandlesTests(unittest.TestCase):
             data = c.getresponse().read()
             c.close()
             head, _ = preview.unpack(data)
-            self.assertEqual(sorted(h["id"] for h in head["handles"]), ["rotate_x", "rotate_y", "rotate_z", "scale_x", "scale_y", "scale_z", "translate_x", "translate_y", "translate_z", "uniform_scale"])
+            self.assertEqual(sorted(h["id"] for h in head["handles"]), ["rotate_x", "rotate_y", "rotate_z", "scale_x", "scale_y", "scale_z", "translate_plane_0", "translate_plane_1", "translate_plane_2", "translate_x", "translate_y", "translate_z", "uniform_scale"])
         finally:
             t.doCleanups()
 

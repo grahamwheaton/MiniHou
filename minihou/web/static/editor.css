@@ -582,3 +582,12 @@ body.has-error #main {bottom:calc(var(--app-status-h) + 30px);}
 path.hit.cut-mark {stroke:#ff6464;stroke-opacity:1;stroke-width:4px;}
 
 .flag-legend {font-size:10px;color:#bfc8d3;margin-left:8px;}
+
+.node .title {color:var(--accent);}
+#topbar .frame {display:none;}
+#crumbs {top:30px;max-width:calc(100% - 20px);}
+.sh-tools {height:80px;padding-bottom:12px;}
+.sh-tool {height:64px;}
+.sh-label {white-space:normal;overflow:visible;}
+
+.node .sub {color:var(--accent);}
