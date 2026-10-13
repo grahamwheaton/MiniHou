@@ -107,10 +107,13 @@
       const note = h("div", { class: "fd-note muted" });
       let dir = "", entries = [], sep = "/";
       const joined = (name) => dir.replace(/[\\/]+$/, "") + sep + name;
+      let seq = 0;
       async function go(target) {
+        const mine = ++seq;                                          // a slower, older answer must not replace a newer one
         let r = null;
         try { r = await api("/api/browse?path=" + encodeURIComponent(target || "") + "&exts=" + encodeURIComponent(exts.join(",")) + "&fallback=1" + (places.childElementCount ? "" : "&places=1")); }
         catch (e) { /* shown below */ }
+        if (mine !== seq) return;
         if (!r) { note.textContent = "Cannot open that folder."; return; }
         dir = r.path; sep = r.sep || "/"; entries = r.entries; pathInput.value = dir;
         if (r.places && !places.childElementCount) places.append(...r.places.map((pl) => h("button", { type: "button", onclick: () => go(pl.path) }, pl.name)));

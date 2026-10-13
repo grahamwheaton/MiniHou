@@ -2200,6 +2200,7 @@ class EditorE2E(unittest.TestCase):
         self.page.click('#params .prow[data-param="file"] .browse')
         dialog = self.page.locator(".file-dialog[open]")
         dialog.wait_for()
+        self.assertTrue(until(lambda: dialog.locator(".fd-path").input_value() == os.path.realpath(self.dir)))        # the first listing is in
         dialog.locator(".fd-path").fill(outside)
         dialog.locator(".fd-path").press("Enter")
         dialog.locator('.fd-row[data-name="far.usdc"]').wait_for()
@@ -2276,6 +2277,7 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: any(n.type == "image_file" for n in self.s.graph.nodes.values())))
         nid = next(i for i, n in self.s.graph.nodes.items() if n.type == "image_file")
         self.assertEqual(self.s.graph.nodes[nid].params["file"], "imports/height.png")
+        self.page.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').textContent.includes('Imported')")      # before the next toast
         self.drop_files([("notes.txt", b"hello")])
         self.page.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').textContent.includes('Cannot import notes.txt')")
         self.assertFalse(os.path.exists(os.path.join(self.dir, "imports", "notes.txt")))
