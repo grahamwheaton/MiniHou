@@ -60,6 +60,11 @@ Working on the objects only makes sense if they stay put, so:
 * A quick pass of auto proxy sends no objects (only the full pass does), so the objects never flicker; a fixed proxy level (for
   example 10%) does send what it cooked, because you asked for it.
 
+## Materials
+
+Pieces get material slots by name (`set_material` before the node; `index_attrib` for one per piece), and instances can take their own
+material in the first slot (`set_material` with the points domain). See [MATERIALS.md](MATERIALS.md).
+
 ## Limits and not done
 
 * Pieces carry the attributes you list, and get material slots by name when the geometry has material names (see

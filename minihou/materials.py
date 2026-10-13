@@ -2,7 +2,7 @@
 
 The engine does not shade anything; it only has to say which faces use which material. A geometry carries that as
 
-* the primitive attribute ``material_index`` (an int per face), and
+* the primitive attribute ``material_index`` (an int per face; ``material_id`` does the same for points), and
 * the detail attribute ``materials``: a list of material names, where ``materials[i]`` is the name for index ``i``.
 
 A name of ``""`` means "no material of ours": whatever the target already has in that slot stays (a Blender slot, a USD
@@ -20,6 +20,7 @@ import numpy as np
 
 KEY = "materials"
 ATTR = "material_index"
+POINT_ATTR = "material_id"         # the same thing on points (Scene Objects instances); not a Blender attribute
 MAX_NAME = 63                      # Blender's limit for a data-block name
 
 
@@ -60,36 +61,55 @@ def slot_for(lst: List[str], name: str) -> int:
     return len(lst) - 1
 
 
-def indices(geo) -> np.ndarray:
-    """``material_index`` as int64, one per primitive (zeros when the attribute is missing)."""
-    a = geo.prim.get(ATTR)
+def _table(geo, domain: str):
+    return geo.prim if domain == "prim" else geo.point
+
+
+def indices(geo, domain: str = "prim") -> np.ndarray:
+    """The material index as int64, one per primitive (``domain='prim'``, the attribute ``material_index``) or per point
+    (``'point'``, ``material_id``, which Scene Objects reads for its instances); zeros when the attribute is missing."""
+    n = geo.nprims if domain == "prim" else geo.npoints
+    a = _table(geo, domain).get(ATTR if domain == "prim" else POINT_ATTR)
     if a is None:
-        return np.zeros(geo.nprims, np.int64)
-    return np.asarray(a).reshape(geo.nprims, -1)[:, 0].astype(np.int64)
+        return np.zeros(n, np.int64)
+    return np.asarray(a).reshape(n, -1)[:, 0].astype(np.int64)
 
 
-def assign(geo, mask, name: str):
-    """A copy of ``geo`` where the primitives in ``mask`` (``None``: all) use material ``name``. Faces outside the mask keep
-    what they had. The name list grows by one when the name is new; slot 0 stays whatever it was (``""`` when the geometry
-    had no list)."""
+def _top(geo) -> int:
+    """One more than the largest index in use on either domain."""
+    top = 0
+    for dom in ("prim", "point"):
+        idx = indices(geo, dom) if (ATTR if dom == "prim" else POINT_ATTR) in _table(geo, dom) else ()
+        if len(idx):
+            top = max(top, int(np.max(idx)) + 1)
+    return top
+
+
+def assign_picks(geo, mask, picks, choices: Sequence[str], domain: str = "prim"):
+    """A copy of ``geo`` where the elements in ``mask`` (``None``: all) of ``domain`` get material ``choices[picks[i]]``. Others keep
+    what they had. New names are appended to the list; slot 0 stays whatever it was (``""`` when the geometry had no list)."""
     out = geo.copy()
     lst = names(geo)
-    idx = indices(geo)
-    top = int(idx.max()) + 1 if len(idx) else 0
-    while len(lst) < max(top, 1):
-        lst.append("")                                   # untouched faces keep meaning "no material of ours"
-    slot = slot_for(lst, name)
-    sel = np.ones(geo.nprims, bool) if mask is None else np.asarray(mask, bool)
-    idx = np.where(sel, slot, idx)
-    out.prim[ATTR] = idx.astype(np.int32)
-    out.detail[KEY] = _compact(lst, idx)
+    idx = indices(geo, domain)
+    while len(lst) < max(_top(geo), 1):
+        lst.append("")                                   # untouched elements keep meaning "no material of ours"
+    slots = np.array([slot_for(lst, c) for c in choices], np.int64)
+    sel = np.ones(len(idx), bool) if mask is None else np.asarray(mask, bool)
+    idx = np.where(sel, slots[np.asarray(picks, np.int64)], idx)
+    _table(out, domain)[ATTR if domain == "prim" else POINT_ATTR] = idx.astype(np.int32)
+    out.detail[KEY] = _compact(lst, _top(out))
     return out
 
 
-def _compact(lst: List[str], idx: np.ndarray) -> List[str]:
-    """The list, with trailing empty names that no face uses dropped (keeps the detail attribute short)."""
+def assign(geo, mask, name: str, domain: str = "prim"):
+    """``geo`` with the elements in ``mask`` (``None``: all) using material ``name`` (see :func:`assign_picks`)."""
+    n = geo.nprims if domain == "prim" else geo.npoints
+    return assign_picks(geo, mask, np.zeros(n, np.int64), [clean(name)], domain)
+
+
+def _compact(lst: List[str], top: int) -> List[str]:
+    """The list, with trailing empty names that nothing uses dropped (keeps the detail attribute short)."""
     n = len(lst)
-    top = int(idx.max()) + 1 if len(idx) else 0
     while n > max(top, 1) and not lst[n - 1]:
         n -= 1
     return lst[:n]
@@ -123,17 +143,22 @@ def merge_sources(geos: Sequence, out) -> None:
 
 
 def unify(geos: Sequence):
-    """The inputs, with their material indices rewritten to share one name list (stored in each one's detail). Inputs that
-    already agree are returned untouched, so the common case costs nothing."""
+    """The inputs, with their material indices (on primitives and on points) rewritten to share one name list (stored in each
+    one's detail). Inputs that already agree are returned untouched, so the common case costs nothing."""
     geos = list(geos)
     lists = [names(g) for g in geos]
     if not any(lists) or all(lst == lists[0] for lst in lists):
         return geos                                       # no names anywhere, or the same names: the indices already agree
-    combined, remapped = combine(lists, [indices(g) for g in geos])
+    combined: List[str] = []
     out = []
-    for g, idx in zip(geos, remapped):
+    for g, lst in zip(geos, lists):
+        top = max(len(lst), _top(g), 1)
+        lut = np.array([slot_for(combined, n) for n in list(lst) + [""] * (top - len(lst))], np.int64)
         h = g.copy()
-        h.prim[ATTR] = idx
-        h.detail[KEY] = list(combined)
+        h.prim[ATTR] = lut[indices(g)].astype(np.int32)
+        if POINT_ATTR in g.point:
+            h.point[POINT_ATTR] = lut[indices(g, "point")].astype(np.int32)
         out.append(h)
+    for h in out:
+        h.detail[KEY] = list(combined)
     return out

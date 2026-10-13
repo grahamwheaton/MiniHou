@@ -18,7 +18,7 @@ import mathutils
 import numpy as np
 
 from . import scene_plan as sp
-from .mesh_writer import NATIVE, apply_material_names, assert_main_thread, set_corner_verts, set_positions, write_attribute, write_native
+from .mesh_writer import NATIVE, apply_material_names, assert_main_thread, material_for, set_corner_verts, set_positions, write_attribute, write_native
 
 SESSION = "session"
 _pending: Dict[Tuple[str, str], Tuple[dict, str]] = {}      # (owner, node) -> (manifest, parent object name)
@@ -209,6 +209,42 @@ def _piece_slices(manifest: dict, arrays: dict):
         yield int(ident), P[pb[k]:pb[k + 1]], vp[cb[k]:cb[k + 1]], sizes[fb[k]:fb[k + 1]], attrs
 
 
+_noted: set = set()                           # warnings already logged, so a cook per frame does not repeat them
+MARK_MAT = "minihou_material"                 # on an instance object whose first slot we pointed at a material of its own
+
+
+def _apply_object_materials(manifest: dict, objs: Dict[int, "bpy.types.Object"], node: str, warned: set) -> None:
+    """Instances share their source's mesh, so a material of their own is an *object-linked* first slot. Objects the node names a
+    material for get it; ones we overrode before and no longer name one go back to the source's. The source needs a slot."""
+    col = manifest.get("material")
+    names = {int(i): n for i, n in zip(manifest.get("id", []), col)} if col else {}
+    for ident, obj in objs.items():
+        name = names.get(ident, "")
+        had = obj.get(MARK_MAT)
+        if not name and had is None:
+            continue
+        slots = getattr(obj, "material_slots", None)
+        if slots is None or not len(slots):
+            if name and ("noslot", node) not in warned:
+                warned.add(("noslot", node))
+                _log(f"scene_objects {node!r}: {obj.name} has no material slot, so it cannot take the material {name!r}; give the source object one")
+            continue
+        slot = slots[0]
+        if name:
+            mat, made = material_for(name)
+            if made and ("made", name) not in warned:
+                warned.add(("made", name))
+                _log(f"scene_objects {node!r}: material {name!r} is not in this file; made an empty one")
+            if slot.link != "OBJECT":
+                slot.link = "OBJECT"
+            if slot.material is not mat:
+                slot.material = mat
+            obj[MARK_MAT] = name
+        else:
+            slot.link = "DATA"
+            del obj[MARK_MAT]
+
+
 def _retarget(obj, item: sp.Item, tag: str, col, placeholder_log: List[str]):
     """Make ``obj`` duplicate another source. Same kind of data: swap it in place (modifiers stay). Otherwise rebuild."""
     src = bpy.data.objects.get(item.src) if item.src else None
@@ -298,6 +334,8 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "", arrays: Option
                 if w not in warned:
                     warned.add(w)
                     _log(f"scene_objects {node!r}: {w}")
+    if not pieces:
+        _apply_object_materials(manifest, objs, node, _noted)
     for ident in plan.hide:
         _hide(objs[ident])
     for name in plan.duplicates:
