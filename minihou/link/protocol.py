@@ -19,7 +19,8 @@ The receiver reads header+blob into one ``bytearray`` and exposes arrays as zero
 
 Message types (``header["type"]``)
 ----------------------------------
-client -> server: ``hello``, ``set_param``, ``resync``, ``ping``, ``object_geo``, ``object_missing``, ``set_frame``
+client -> server: ``hello``, ``set_param``, ``resync``, ``ping``, ``object_geo``, ``object_missing``, ``image_data``, ``image_missing``,
+``set_frame``
 (``{frame, fps}``: the timeline moved; nodes using @Frame / @Time recook)
 server -> client: ``welcome``, ``interface``, ``geo``, ``error``, ``status``, ``pong``, ``watch_objects``
 
@@ -28,6 +29,11 @@ server -> client: ``welcome``, ``interface``, ``geo``, ``error``, ``status``, ``
 material slot names, when it has any; ``instance_cook`` carries the same field for its input) plus
 arrays keyed like ``geo`` (``point/P``, the two ``topo/...`` arrays, ``<domain>/<name>``), or ``object_missing``
 ``{"object", "reason"}``.
+
+``watch_objects`` also lists the Blender images the graph reads (``blender_image`` nodes) under ``"images"``. The client answers each with
+``image_data`` ``{"image", "width", "height", "is_float", "colorspace", "source"}`` plus the array ``pixels`` (float32, height x width x 4, rows
+from the bottom as Blender stores them) whenever the image changes, or ``image_missing`` ``{"image", "reason"}``. An ``image_out`` node reaches
+the client as a ``scene_objects`` message with ``mode: "image"`` (``image``, ``width``, ``height``, ``encoding``) and the array ``pixels``.
 
 Modifier RPC (opt in with ``hello`` ``mode: "instances"``) is separate from the legacy
 proxy subscription. ``welcome`` advertises ``capabilities: ["instances_v1"]``, ``graph_path``

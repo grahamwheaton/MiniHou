@@ -71,8 +71,8 @@ class _Connection:
     def on_extra_error(self, name: str, message: str):
         self.post({"type": "error", "where": "output", "node": None, "message": f"output {name!r}: {message}"})
 
-    def on_watch(self, names):
-        self.post({"type": "watch_objects", "objects": list(names)})
+    def on_watch(self, names, images=()):
+        self.post({"type": "watch_objects", "objects": list(names), "images": list(images)})
 
     # -- helpers -----------------------------------------------------------
     def post(self, header: dict, arrays=None):
@@ -121,11 +121,11 @@ class _Connection:
             log.info("client %s connected (%s)", self.addr, self.name)
             self.instance_mode = h.get("mode") == "instances"
             self.post({"type": "welcome", "protocol": PROTOCOL_VERSION, "server": "minihou",
-                       "capabilities": ["instances_v1", "live_modifier_v1", "object_inputs_v1", "scene_objects_v1"], "editor_url": self.server.editor_url,
+                       "capabilities": ["instances_v1", "live_modifier_v1", "object_inputs_v1", "scene_objects_v1", "image_exchange_v1"], "editor_url": self.server.editor_url,
                        "graph_path": str(self.session.path.resolve()) if self.session.path else None})
             if self.instance_mode:
                 return
-            self.post({"type": "watch_objects", "objects": self.session.watched_objects()})
+            self.post({"type": "watch_objects", "objects": self.session.watched_objects(), "images": self.session.watched_images()})
             with self.cv:
                 self._iface_pending = True
                 self._want_result = True
@@ -189,6 +189,17 @@ class _Connection:
                 self.post({"type": "error", "where": "object_geo", "message": f"{name}: {e}"})
                 return
             self.session.object_received(name, geo, h.get("matrix"), info=h.get("info") or {})
+        elif t == "image_data":
+            name = str(h.get("image", ""))
+            try:
+                pix = _arrays["pixels"].reshape(int(h["height"]), int(h["width"]), 4)
+            except Exception as e:  # noqa: BLE001 - bad data from a client must not kill the connection
+                self.session.image_received(name, None, error=f"could not read the pixels: {e}")
+                self.post({"type": "error", "where": "image_data", "message": f"{name}: {e}"})
+                return
+            self.session.image_received(name, pix, {k: h[k] for k in ("is_float", "colorspace", "source") if k in h})
+        elif t == "image_missing":
+            self.session.image_received(str(h.get("image", "")), None, error=str(h.get("reason", "no such image")))
         elif t == "set_frame":
             try:
                 self.session.set_frame(float(h.get("frame", 1.0)), h.get("fps"))

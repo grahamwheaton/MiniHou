@@ -35,7 +35,7 @@ from typing import Dict, List, Optional
 import bpy
 from bpy.app.handlers import persistent
 
-from . import mesh_reader, mesh_writer, proxy, scene_objects
+from . import image_exchange, mesh_reader, mesh_writer, proxy, scene_objects
 from .client import LinkClient
 from .protocol import GeoUpdate, Mirror, ProtocolError
 from .state import Inbox, ParamForwarder
@@ -43,6 +43,8 @@ from .state import Inbox, ParamForwarder
 MIN_FORWARD_INTERVAL = 1.0 / 30.0
 BUSY_INTERVAL = 1.0 / 60.0
 IDLE_INTERVAL = 0.05
+IMAGE_INTERVAL = 0.3            # seconds between sends of one watched image
+IMAGE_POLL = 1.0                # how often painted-on (dirty) watched images are looked at again
 OBJECT_INTERVAL = 0.1             # seconds between sends of one watched object
 EXISTENCE_INTERVAL = 0.5          # how often watched objects are checked for being added, deleted or renamed
 
@@ -78,6 +80,13 @@ class Runtime:
         self._object_digest: Dict[str, str] = {}
         self._object_last: Dict[str, float] = {}
         self._object_present: Dict[str, bool] = {}
+        self.watched_images: List[str] = []
+        self.dirty_images: set = set()
+        self.images_sent = 0
+        self._image_digest: Dict[str, str] = {}
+        self._image_last: Dict[str, float] = {}
+        self._image_present: Dict[str, bool] = {}
+        self._last_image_poll = 0.0
         self._last_existence = 0.0
         self._missing_instances: List[str] = []
         self.frame_dirty = True                 # send the current frame after connecting
@@ -159,6 +168,8 @@ class Runtime:
                 busy = self._forward_params() or busy
             if self.watched:
                 busy = self._send_objects() or busy
+            if self.watched_images:
+                busy = self._send_images() or busy
             if self.frame_dirty:
                 busy = self._send_frame() or busy
             if self._ui_dirty:
@@ -196,6 +207,12 @@ class Runtime:
             scene_objects.queue(scene_objects.SESSION, e)
             self._ui_dirty = True
         elif t == "watch_objects":
+            self.watched_images = [str(n) for n in e.get("images", [])]
+            self.dirty_images = set(self.watched_images)
+            self._image_digest.clear()
+            self._image_present.clear()
+            if self.watched_images:
+                self._log(f"engine reads Blender images: {', '.join(self.watched_images)}")
             self.watched = [str(n) for n in e.get("objects", [])]
             self.dirty_objects = set(self.watched)       # (re)send everything: the engine may have restarted
             self._object_digest.clear()
@@ -323,6 +340,46 @@ class Runtime:
         self.frame_dirty = True
         return False
 
+    def _send_images(self) -> bool:
+        """Send the watched images that changed (painting flags them; dirty ones are looked at again every second)."""
+        now = time.monotonic()
+        poll = now - self._last_image_poll >= IMAGE_POLL
+        if poll:
+            self._last_image_poll = now
+            for name in self.watched_images:
+                img = bpy.data.images.get(name)
+                if (img is not None) != self._image_present.get(name, False) or (img is not None and img.is_dirty):
+                    self.dirty_images.add(name)
+        sent = False
+        for name in sorted(self.dirty_images):
+            if name not in self.watched_images:
+                self.dirty_images.discard(name)
+                continue
+            if now - self._image_last.get(name, -1e9) < IMAGE_INTERVAL:
+                continue
+            self.dirty_images.discard(name)
+            self._image_last[name] = now
+            img = bpy.data.images.get(name)
+            self._image_present[name] = img is not None
+            if img is None:
+                header, arrays = {"type": "image_missing", "image": name, "reason": f"no image named {name!r} in the Blender file"}, None
+            else:
+                try:
+                    fields, arrays = image_exchange.read_image(img)
+                    header = {"type": "image_data", "image": name, **fields}
+                except ValueError as e:
+                    header, arrays = {"type": "image_missing", "image": name, "reason": str(e)}, None
+            digest = _digest(header, arrays)
+            if self._image_digest.get(name) == digest:
+                continue
+            if self.client.send(header, arrays):
+                self._image_digest[name] = digest
+                self.images_sent += 1
+                sent = True
+                self.object_info["image:" + name] = (f"{header['width']} x {header['height']} px" if header["type"] == "image_data" else header["reason"])
+                self._ui_dirty = True
+        return sent
+
     def _send_objects(self) -> bool:
         """Send watched objects that changed (main thread). Returns True if anything was sent."""
         if self.client is None:
@@ -413,6 +470,8 @@ def _depsgraph_post(scene, depsgraph) -> None:
                 rt.params_dirty = True
             elif watched and name in watched:
                 rt.dirty_objects.add(name)
+        elif isinstance(idb, bpy.types.Image) and idb.name in rt.watched_images:
+            rt.dirty_images.add(idb.name)
 
 
 @persistent

@@ -366,5 +366,132 @@ class EngineMadeCurvesOutTests(LiveHarness, unittest.TestCase):
         self.assertEqual(len(made()), 1)
 
 
+def blender_image(name, pix, float_buffer=True, srgb=False):
+    h, w = pix.shape[:2]
+    img = bpy.data.images.new(name, w, h, alpha=True, float_buffer=float_buffer)
+    if srgb:
+        img.colorspace_settings.name = "sRGB"
+    img.pixels.foreach_set(np.ascontiguousarray(pix, np.float32).ravel())
+    img.update()
+    return img
+
+
+def ramp(h, w):
+    pix = np.ones((h, w, 4), np.float32)
+    pix[..., 0] = np.linspace(0, 1, w)[None, :]
+    pix[..., 1] = np.linspace(0, 1, h)[:, None]
+    pix[..., 2] = 0.25
+    return pix
+
+
+@unittest.skipIf(bpy is None, "needs Blender / the bpy module")
+class ImageExchangeTests(unittest.TestCase):
+    def setUp(self):
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+
+    def test_an_image_is_read_with_rows_from_the_bottom_and_says_what_it_is(self):
+        from minihou_link import image_exchange
+        pix = ramp(3, 5)
+        img = blender_image("Tex", pix)
+        fields, arrays = image_exchange.read_image(img)
+        self.assertEqual((fields["width"], fields["height"], fields["is_float"]), (5, 3, True))
+        np.testing.assert_allclose(arrays["pixels"], pix, atol=1e-6)
+
+    def test_a_byte_image_comes_as_the_numbers_it_stores_and_its_colour_space(self):
+        from minihou_link import image_exchange
+        img = blender_image("Byte", ramp(2, 2), float_buffer=False, srgb=True)
+        fields, arrays = image_exchange.read_image(img)
+        self.assertFalse(fields["is_float"])
+        self.assertEqual(fields["colorspace"], "sRGB")
+        self.assertEqual(arrays["pixels"].shape, (2, 2, 4))
+
+    def test_an_empty_image_and_the_nodes_own_images_are_refused(self):
+        from minihou_link import image_exchange
+        img = bpy.data.images.new("Empty", 4, 4)
+        img["minihou_scene"] = "session:node"
+        with self.assertRaises(ValueError):
+            image_exchange.read_image(img)
+
+    def manifest(self, pix, **kw):
+        h, w = pix.shape[:2]
+        return dict({"type": "scene_objects", "node": "io", "mode": "image", "image": "Out", "width": w, "height": h, "encoding": "linear"}, **kw)
+
+    def test_a_manifest_makes_the_image_and_a_second_one_updates_and_resizes_it(self):
+        from minihou_link import image_exchange
+        pix = ramp(3, 4)
+        s = image_exchange.apply_image(self.manifest(pix), {"pixels": pix}, "session:io")
+        self.assertEqual((s["created"], s["rewritten"]), (1, 1))
+        img = bpy.data.images["Out"]
+        self.assertEqual(tuple(img.size), (4, 3))
+        self.assertTrue(img.is_float)
+        got = np.empty(4 * 3 * 4, np.float32)
+        img.pixels.foreach_get(got)
+        np.testing.assert_allclose(got.reshape(3, 4, 4), pix, atol=1e-6)
+        again = image_exchange.apply_image(self.manifest(pix), {"pixels": pix}, "session:io")
+        self.assertEqual(again["rewritten"], 0)                                           # same pixels: untouched
+        bigger = ramp(5, 6)
+        image_exchange.apply_image(self.manifest(bigger), {"pixels": bigger}, "session:io")
+        self.assertEqual(tuple(bpy.data.images["Out"].size), (6, 5))
+        self.assertEqual(len(bpy.data.images), 1)
+
+    def test_encodings_choose_the_buffer_and_colour_space(self):
+        from minihou_link import image_exchange
+        pix = ramp(2, 2)
+        image_exchange.apply_image(self.manifest(pix, image="D", encoding="data"), {"pixels": pix}, "session:io")
+        self.assertEqual(bpy.data.images["D"].colorspace_settings.name, "Non-Color")
+        self.assertTrue(bpy.data.images["D"].is_float)
+        image_exchange.apply_image(self.manifest(pix, image="S", encoding="srgb"), {"pixels": pix}, "session:io")
+        self.assertEqual(bpy.data.images["S"].colorspace_settings.name, "sRGB")
+        self.assertFalse(bpy.data.images["S"].is_float)
+
+
+def graph_reading_image(name, **params):
+    return {"version": 1, "display": "main", "nodes": {
+        "i": {"type": "blender_image", "params": dict({"image": name, "colorspace": "stored"}, **params)},
+        "main": {"type": "output", "inputs": {"geo": "i"}}}}
+
+
+@unittest.skipIf(bpy is None, "needs Blender / the bpy module")
+class LiveImageTests(LiveHarness, unittest.TestCase):
+    def initial_graph(self):
+        return graph_reading_image("Tex", height="red", height_scale=2.0)
+
+    def output_mesh(self):
+        ob = bpy.data.objects.get("MiniHou_Output")
+        return ob.data if ob is not None else None
+
+    def test_a_blender_image_becomes_a_lifted_pixel_grid_and_follows_edits_to_it(self):
+        img = blender_image("Tex", ramp(4, 6))
+        self.pump(lambda: self.output_mesh() is not None and len(self.output_mesh().vertices) == 24)
+        mesh = self.output_mesh()
+        self.assertEqual(len(mesh.polygons), 3 * 5)
+        z = np.array([v.co.z for v in mesh.vertices])
+        self.assertAlmostEqual(float(z.max()), 2.0, places=4)
+        self.assertIn("Color", [a.name for a in mesh.color_attributes])
+        flat = np.ones(4 * 6 * 4, np.float32) * 0.25                               # paint the whole image
+        img.pixels.foreach_set(flat)
+        img.update()
+        self.pump(lambda: abs(max(v.co.z for v in self.output_mesh().vertices) - 0.5) < 1e-4)
+
+
+@unittest.skipIf(bpy is None, "needs Blender / the bpy module")
+class LiveImageOutTests(LiveHarness, unittest.TestCase):
+    def initial_graph(self):
+        return {"version": 1, "display": "main", "nodes": {
+            "g": {"type": "grid", "params": {"columns": 6, "rows": 4, "size_x": 3, "size_y": 2}},
+            "n": {"type": "wrangle", "inputs": {"geo": "g"}, "params": {"run_over": "points", "snippet": "f@h = @P.x * 0.5 + 1.0;"}},
+            "io": {"type": "image_out", "inputs": {"geo": "n"}, "params": {"image": "Result", "source": "h", "encoding": "data"}},
+            "main": {"type": "output", "inputs": {"geo": "g"}}}}
+
+    def test_a_grid_attribute_becomes_a_blender_image(self):
+        self.pump(lambda: "Result" in bpy.data.images and tuple(bpy.data.images["Result"].size) == (6, 4))
+        img = bpy.data.images["Result"]
+        got = np.empty(6 * 4 * 4, np.float32)
+        img.pixels.foreach_get(got)
+        got = got.reshape(4, 6, 4)
+        np.testing.assert_allclose(got[0, :, 0], np.linspace(-1.5, 1.5, 6) * 0.5 + 1.0, atol=1e-5)
+        self.assertEqual(img.colorspace_settings.name, "Non-Color")
+
+
 if __name__ == "__main__":
     unittest.main()

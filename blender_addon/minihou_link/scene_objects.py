@@ -17,6 +17,7 @@ import bpy
 import mathutils
 import numpy as np
 
+from . import image_exchange
 from . import scene_plan as sp
 from .mesh_writer import NATIVE, apply_material_names, assert_main_thread, material_for, set_corner_verts, set_positions, write_attribute, write_native
 
@@ -382,6 +383,8 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "", arrays: Option
     ``_arrays``). Returns counts."""
     assert_main_thread()
     mode = str(manifest.get("mode") or "instances")
+    if mode == "image":                                   # not objects: one Blender image (see image_exchange)
+        return image_exchange.apply_image(manifest, arrays if arrays is not None else manifest.get("_arrays"), sp.owner_tag(owner, str(manifest["node"])))
     pieces = mode == "pieces"
     shaped = mode in sp.SHAPED
     arrays = arrays if arrays is not None else manifest.get("_arrays")

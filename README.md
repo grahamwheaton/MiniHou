@@ -458,6 +458,7 @@ The same edit operations are available to scripts over HTTP (`POST /api/edit`, s
 | `examples/graphs/curves_vine.json` | helix -> resample -> noise -> blur -> width ramp -> sweep; a wireframe sphere |
 | `examples/graphs/lsystem_tree.json` | an L-system tree: branches swept by width, leaves copied onto the `J` points |
 | `examples/graphs/eroded_terrain.json` | fractal hills -> droplet + thermal erosion; wet basins (flow) get the second material |
+| `examples/graphs/height_image.json` | an eroded height map sent to Blender as the float image `Terrain_Height` (and a PNG when `file` is set) |
 | `examples/graphs/materials.json` | a fractured box: the cut faces get the material `Concrete Cut`, the outside `Painted Wall` (Blender slots and USD bindings by name) |
 | `examples/graphs/volumes.json` | a box minus a sphere with a smooth fillet (sdf_boolean), metaball blobs (points_to_surface) |
 
@@ -851,6 +852,12 @@ object per piece (fracture pieces, say) with its origin at the piece's centre. T
 them modifiers, materials or constraints and they keep them: objects are found by marker, a cook only creates, moves, shows and hides,
 and surplus objects are parked (hidden), never deleted, until you press *Delete parked*. Works through the live link and through a
 MiniHou modifier (objects parented to the host object). Details and limits: [docs/SCENE_OBJECTS.md](docs/SCENE_OBJECTS.md).
+
+## Curves, point clouds and images between Blender and MiniHou
+
+`blender_object` reads meshes, **curves** (Bezier, NURBS, poly, hair curves, sampled exactly as Blender draws them), **point clouds** and mixed Geometry Nodes
+output; *Scene Objects* modes **curves** and **points** make real Blender curves and point clouds; `blender_image` / `image_file` bring **images** in as
+pixel grids (heightfield nodes work on them) and `image_out` writes a grid or baked points to a Blender image or a PNG. Details: [docs/EXCHANGE.md](docs/EXCHANGE.md).
 
 ## USD export and import
 

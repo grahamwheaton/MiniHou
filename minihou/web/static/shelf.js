@@ -12,12 +12,12 @@
     ["Create", "#6fbf73", [
       T("Box", "box"), T("Sphere", "sphere"), T("Tube", "tube"), T("Torus", "torus"), T("Grid", "grid"), T("Null", "null"),
       T("Line", "line"), T("Circle", "circle"), T("Bezier", "bezier", "curve"), T("Polyline", "curve"), T("Helix", "helix"), T("L-System", "lsystem"),
-      T("Lattice Grid", "lattice_grid", "lattice"), T("Metaball", "points_to_surface"), T("Blender Object", "blender_object", "file"), T("USD Import", "usd_import", "file"),
+      T("Lattice Grid", "lattice_grid", "lattice"), T("Metaball", "points_to_surface"), T("Blender Object", "blender_object", "file"), T("Blender Image", "blender_image", "file"), T("Image File", "image_file", "file"), T("USD Import", "usd_import", "file"),
       T("Host Mesh", "modifier_input", "host"), T("Object Input", "object_input", "host")]],
     ["Modify", "#5ea0e0", [
       T("Transform", "transform"), T("Merge", "merge"), T("Duplicate", "copy_transform", "duplicate"), T("Copy to Points", "copy_to_points"),
       T("Instance", "instance"), T("Switch", "switch"), T("Match Size", "match_size"), T("Bound", "bound"), T("Blast", "blast"),
-      T("Delete", "delete"), T("Fuse", "fuse"), T("Clean", "clean"), T("Sort", "sort"), T("Null", "null"), T("Output", "output"), T("Scene Objects", "scene_objects", "output"),
+      T("Delete", "delete"), T("Fuse", "fuse"), T("Clean", "clean"), T("Sort", "sort"), T("Null", "null"), T("Output", "output"), T("Scene Objects", "scene_objects", "output"), T("Image Out", "image_out", "output"),
       T("Input", "input", "host")]],
     ["Model", "#d99a4e", [
       T("Boolean", "boolean"), T("Clip", "clip"), T("Mirror", "mirror"), T("Subdivide", "subdivide"), T("Skin", "skin"),

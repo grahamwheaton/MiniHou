@@ -215,12 +215,12 @@ class InstanceManager:
     def _scene(graph, evaluator, feeds, frame, fps):
         """Manifests of the graph's ``scene_objects`` nodes, cooked with the same inputs as the modifier's result."""
         from ..evaluator import NodeError
-        from ..nodes.scene_objects import build_manifest
+        from ..nodes.scene_objects import build_sink_manifest
         out, errors, arrays = [], [], {}
         for nid in graph.scene_sinks():
             try:
                 geo = evaluator.cook(graph, nid, feeds=feeds, frame=frame, fps=fps)
-                header, extra = build_manifest(nid, graph.effective_params(nid), geo, evaluator.last_stats.key)
+                header, extra = build_sink_manifest(graph.nodes[nid].type, nid, graph.effective_params(nid), geo, evaluator.last_stats.key)
                 out.append(header)
                 arrays.update({f"scene:{nid}:{k}": v for k, v in extra.items()})     # prefixed: the reply's own arrays are the mesh
             except (NodeError, ValueError) as e:                     # a bad sink must not take the modifier's own result down

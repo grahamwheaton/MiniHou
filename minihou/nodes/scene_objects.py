@@ -250,3 +250,11 @@ def build_manifest(node_id: str, params: dict, geo: Geometry, key: str):
     header = dict(type="scene_objects", node=node_id, key=key, mode=params["mode"], prefix=prefix[:60],
                   collection=(str(params["collection"]).strip() or prefix)[:60], **body)
     return header, arrays
+
+
+def build_sink_manifest(node_type: str, node_id: str, params: dict, geo: Geometry, key: str):
+    """:func:`build_manifest` for a ``scene_objects`` node, the image manifest for an ``image_out`` node."""
+    if node_type == "image_out":
+        from .image_nodes import build_image_manifest
+        return build_image_manifest(node_id, params, geo, key)
+    return build_manifest(node_id, params, geo, key)

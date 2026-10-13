@@ -13,6 +13,8 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+import numpy as np
+
 from .geometry import Geometry
 
 
@@ -47,10 +49,43 @@ class ObjectData:
     info: dict = field(default_factory=dict)      # what was read: attribute names, vertex groups, timings
 
 
+@dataclass
+class ImageData:
+    pixels: Optional["np.ndarray"]                # (H, W, 4) float32, rows from the bottom; None when there is none (see error)
+    meta: dict = field(default_factory=dict)      # is_float, colorspace (the image's own), source file ...
+    error: str = ""
+    token: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+
 class ObjectInputs:
     def __init__(self):
         self._lock = threading.Lock()
         self._data: Dict[str, ObjectData] = {}
+        self._images: Dict[str, ImageData] = {}
+
+    # -- Blender images ------------------------------------------------------------------------------
+    def put_image(self, name: str, pixels, meta: Optional[dict] = None, error: str = "") -> None:
+        if pixels is not None:
+            pixels = np.ascontiguousarray(pixels, np.float32)
+            pixels.setflags(write=False)
+        with self._lock:
+            self._images[name] = ImageData(pixels, dict(meta or {}), error)
+
+    def get_image(self, name: str) -> Optional[ImageData]:
+        if not _READ_ALLOWED.get():
+            raise ValueError("modifier graphs cannot read legacy Blender image inputs: feedback loop prevention")
+        with self._lock:
+            return self._images.get(name)
+
+    def image_token(self, name: str) -> str:
+        d = self.get_image(name)
+        return d.token if d is not None else "none"
+
+    def retain_images(self, names) -> None:
+        keep = set(names)
+        with self._lock:
+            for n in [n for n in self._images if n not in keep]:
+                del self._images[n]
 
     def put(self, name: str, geo: Optional[Geometry], matrix=None, error: str = "", info: Optional[dict] = None) -> None:
         with self._lock:
@@ -80,6 +115,7 @@ class ObjectInputs:
     def clear(self) -> None:
         with self._lock:
             self._data.clear()
+            self._images.clear()
 
 
 INPUTS = ObjectInputs()

@@ -344,6 +344,11 @@ Worked through in order of how often Houdini users reach for them:
     header (and `materials` in `object_geo` / `instance_cook`); the add-on fills slots by name without ever removing one. USD export
     binds `Material` prims (preview colour from `Cd`) and import reads bindings; materials read from a file are referenced, not
     rewritten, so shading networks survive. Checked against Blender 5.1's own USD exporter and importer locally.
+22. **Geometry and image exchange** (`blender_addon/minihou_link/curve_eval.py`, `geometry_parts.py`, `image_exchange.py`, `minihou/images.py`,
+    `nodes/image_nodes.py`, `docs/EXCHANGE.md`): curves (sampled like Blender, compared against it in the tests), point clouds and mixed
+    components come in through `blender_object`; Scene Objects modes curves/points make real Blender curves and point clouds; images are pixel
+    grids (`blender_image`, `image_file`, `image_out`, PNG codec with 16-bit support) carried by new `image_data` messages and the
+    `scene_objects` manifest transport.
 
 Closest-point and ray queries on triangle grids have numba kernels (`nodes/_kernels.py` `grid_closest`, `grid_intersect`;
 remesh of a 4,800-triangle sphere 17 s -> 3.5 s). Surfaces from points and curves: `delaunay` (SciPy or a pure-Python

@@ -15,7 +15,7 @@ LIBRARY = "Library"
 GROUPS: List[Tuple[str, str, List[str]]] = [
     ("Create", "Shapes and curves from nothing, and the doors into a graph",
      ["box", "sphere", "grid", "tube", "torus", "circle", "line", "bezier", "curve", "helix", "lsystem", "lattice_grid",
-      "blender_object", "usd_import", "modifier_input", "object_input"]),
+      "blender_object", "blender_image", "image_file", "usd_import", "modifier_input", "object_input"]),
     ("Polygon Modelling", "Build and edit polygon surfaces",
      ["polyextrude", "polybevel", "polysplit", "polyfill", "polybridge", "polyexpand2d", "subdivide", "mirror", "boolean",
       "clip", "dissolve", "divide", "reverse", "facet", "bridge", "skin", "skin_profiles", "revolve", "polyreduce", "clean",
@@ -51,7 +51,7 @@ GROUPS: List[Tuple[str, str, List[str]]] = [
     ("Procedural Systems", "Buildings, connected regions and geometric goal relaxation",
      ["building_rules", "region_identify", "region_transform", "goal_length", "goal_collision", "goal_surface",
       "goal_gravity", "goal_pin", "goal_solve"]),
-    ("Utility & I/O", "Pass-through, system inputs and the outputs", ["null", "input", "output", "scene_objects"]),
+    ("Utility & I/O", "Pass-through, system inputs and the outputs", ["null", "input", "output", "scene_objects", "image_out"]),
     (LIBRARY, "Your own nodes and saved systems", []),
 ]
 
@@ -111,7 +111,7 @@ ALIASES: Dict[str, str] = {
     "scene_objects": "realize real objects scene export blender instances scatter",
     "null": "named output pass through", "input": "system port", "output": "result display", "box": "cube", "sphere": "ball",
     "grid": "plane floor", "tube": "cylinder cone", "torus": "donut ring", "circle": "disc", "line": "segment",
-    "curve": "polyline path", "bezier": "curve spline tangent handles control points path", "helix": "spiral coil", "lsystem": "plant tree fractal", "blender_object": "read import mesh",
+    "curve": "polyline path", "bezier": "curve spline tangent handles control points path", "helix": "spiral coil", "lsystem": "plant tree fractal", "blender_object": "read import mesh curve curves hair point cloud", "blender_image": "texture picture bitmap pixels height map mask read import", "image_file": "png texture picture bitmap pixels height map mask load file", "image_out": "texture picture bitmap pixels bake export write png",
     "usd_import": "usd usda usdc usdz open load file scene pixar omniverse houdini",
     "modifier_input": "host geometry",
 }
@@ -122,7 +122,7 @@ _TITLES = {"polyextrude": "PolyExtrude", "polybevel": "PolyBevel", "polysplit": 
            "lsystem": "L-System", "rbd_configure": "RBD Configure", "rbd_solver": "RBD Solver",
            "rbd_material_fracture": "RBD Material Fracture", "rbd_constraint": "RBD Constraint", "rbd_constraint_properties": "RBD Constraint Properties",
            "loop_block": "Repeat (Loop Block)", "for_each": "For Each", "points_to_surface": "Points to Surface",
-           "copy_to_points": "Copy to Points", "blender_object": "Blender Object", "usd_import": "USD Import", "scene_objects": "Scene Objects", "modifier_input": "Modifier Input"}
+           "copy_to_points": "Copy to Points", "blender_object": "Blender Object", "blender_image": "Blender Image", "image_file": "Image File", "image_out": "Image Out", "usd_import": "USD Import", "scene_objects": "Scene Objects", "modifier_input": "Modifier Input"}
 
 _ORDER: Dict[str, Tuple[int, int]] = {}
 for _gi, (_g, _doc, _names) in enumerate(GROUPS):

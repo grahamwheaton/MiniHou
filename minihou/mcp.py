@@ -55,7 +55,8 @@ system per piece), time (@Frame, solver; set_frame to check).
 To work on something the user made in Blender, start from a blender_object node
 (the object's name; its UV map, color attribute, vertex groups and material indices arrive as attributes, its material slot
 names as the detail list 'materials', and it recooks live when they edit it); inspect_node on it shows what was read.
-Give faces a material with set_material (a group and a name): Blender gets the slots by name, USD gets bound materials. Z is up; units are Blender metres. The user is
+Curves, hair curves, point clouds and images also come in (blender_object, blender_image) and go out (scene_objects modes curves/points,
+image_out). Give faces a material with set_material (a group and a name): Blender gets the slots by name, USD gets bound materials. Z is up; units are Blender metres. The user is
 watching the editor and Blender live and can undo your edits, so prefer small verified steps over huge batches."""
 
 OPS_DOC = """\

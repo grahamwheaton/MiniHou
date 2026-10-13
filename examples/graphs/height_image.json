@@ -1,0 +1,87 @@
+{
+ "version": 1,
+ "display": "out",
+ "doc": "A height map made in MiniHou and sent to Blender as an image. A grid gets fractal hills as a height attribute and is eroded; image_out turns the grid into the Blender image 'Terrain_Height' (a float, Non-Color image, stretched to 0..1). Use it as a displacement texture, or read it back with blender_image; set its 'file' to also write a PNG for other programs.",
+ "nodes": {
+  "g": {
+   "type": "grid",
+   "params": {
+    "columns": 128,
+    "rows": 128,
+    "size_x": 20,
+    "size_y": 20
+   },
+   "pos": [
+    0,
+    0
+   ]
+  },
+  "h": {
+   "type": "wrangle",
+   "inputs": {
+    "geo": "g"
+   },
+   "params": {
+    "run_over": "points",
+    "snippet": "f@height = noise(@P * 0.15) * 2.0 + noise(@P * 0.6 + set(3.0, 3.0, 3.0)) * 0.4; @P.z = @height;"
+   },
+   "pos": [
+    0,
+    110
+   ]
+  },
+  "e": {
+   "type": "heightfield_erode",
+   "inputs": {
+    "geo": "h"
+   },
+   "params": {
+    "iterations": 4,
+    "droplets": 2000,
+    "seed": 1
+   },
+   "pos": [
+    0,
+    220
+   ]
+  },
+  "io": {
+   "type": "image_out",
+   "inputs": {
+    "geo": "e"
+   },
+   "params": {
+    "image": "Terrain_Height",
+    "source": "height",
+    "normalize": true,
+    "encoding": "data"
+   },
+   "pos": [
+    0,
+    330
+   ]
+  },
+  "out": {
+   "type": "output",
+   "inputs": {
+    "geo": "io"
+   },
+   "pos": [
+    0,
+    440
+   ]
+  }
+ },
+ "exposed": [
+  {
+   "name": "Erosion rounds",
+   "node": "e",
+   "param": "iterations"
+  },
+  {
+   "name": "Seed",
+   "node": "e",
+   "param": "seed"
+  }
+ ]
+}
