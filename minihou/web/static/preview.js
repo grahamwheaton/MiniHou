@@ -139,6 +139,10 @@ window.MiniHouPreview = (() => {
 
     const vao = gl.createVertexArray(), posBuf = gl.createBuffer(), colBuf = gl.createBuffer();
     const triBuf = gl.createBuffer(), edgeBuf = gl.createBuffer();
+    const templateVao = gl.createVertexArray(), templatePos = gl.createBuffer(), templateEdge = gl.createBuffer();
+    let templateRaw = null;
+    gl.bindVertexArray(templateVao);gl.bindBuffer(gl.ARRAY_BUFFER,templatePos);
+    gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,0,0);
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
@@ -462,7 +466,7 @@ window.MiniHouPreview = (() => {
       }
       renderGizmo(cam);
       if (api.onOverlayDraw) api.onOverlayDraw();
-      if (!data.npoints) return;
+      if (!data.npoints && !templateRaw) return;
       gl.enable(gl.DEPTH_TEST);
       gl.bindVertexArray(vao);
       const setup = (pr, base, useCol, alpha) => {
@@ -491,6 +495,13 @@ window.MiniHouPreview = (() => {
         setup(flat, sel.mode === "point" ? [0.9, 0.93, 0.98] : [0.95, 0.75, 0.3], true);
         gl.uniform1f(flat.u.uBias, 0.0004);
         gl.drawArrays(gl.POINTS, 0, data.npoints);
+      }
+      if(templateRaw){
+        gl.bindVertexArray(templateVao);setup(flat,[0.72,0.38,0.52],false,0.8);
+        gl.uniform1f(flat.u.uBias,0.0003);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,templateEdge);gl.drawElements(gl.LINES,templateRaw.edge.length,gl.UNSIGNED_INT,0);
+        if(!templateRaw.edge.length)gl.drawArrays(gl.POINTS,0,templateRaw.P.length/3);
+        gl.bindVertexArray(vao);
       }
       drawSelection(cam);
       if (opt.normals) { gl.bindVertexArray(null); drawNormals(cam); }
@@ -530,10 +541,16 @@ window.MiniHouPreview = (() => {
       if(Math.abs(den)<1e-8)return null;return IM.add(cam.eye,IM.mul(ray,dot(sub(anchor,cam.eye),n)/den));
     }
     function snapHit(sx,sy,anchor=[0,0,0]) {
-      const source=snapData||raw;if(!source)return null;const cam=camera(),P=source.P;
+      const sources=[snapData||raw,templateRaw].filter(Boolean);
+      let bestHit=null,bestDistance=18;
+      for(const source of sources){const hit=snapSource(source,sx,sy,anchor,source===templateRaw);if(hit){const p=toScreen(camera(),...hit),d=p?Math.hypot(p[0]-sx,p[1]-sy):Infinity;if(d<bestDistance){bestDistance=d;bestHit=hit;}}}
+      return bestHit;
+    }
+    function snapSource(source,sx,sy,anchor,reference) {
+      if(!source)return null;const cam=camera(),P=source.P;
       const point=i=>Array.from(P.slice(i*3,i*3+3));let best=null,dist=18;
       const test=p=>{const q=toScreen(cam,...p);if(!q)return;const d=Math.hypot(q[0]-sx,q[1]-sy);if(d<dist){dist=d;best=p;}};
-      const excluded=i=>!interaction.includeSelected&&snapExclude.has(i);
+      const excluded=i=>!reference&&!interaction.includeSelected&&snapExclude.has(i);
       if(interaction.element==='vertex')for(let i=0;i<P.length/3;i++){if(!excluded(i))test(point(i));}
       if(['edge','midpoint','perpendicular'].includes(interaction.element))for(let i=0;i<source.edge.length;i+=2){const a=source.edge[i],b=source.edge[i+1];if(excluded(a)||excluded(b))continue;const p=point(a),q=point(b);
         if(interaction.element==='midpoint')test(IM.mul(IM.add(p,q),0.5));
@@ -916,6 +933,12 @@ window.MiniHouPreview = (() => {
       tool: "move", hasToolHandles() { return (selHandles.length ? selHandles : handles).some((h) => h.tool); },
       setTool(t) { if (["move", "rotate", "scale"].includes(t)) { api.tool = t; schedule(); } },
       set(head, arrays, keepCamera) {
+        templateRaw=arrays.template_P?{P:arrays.template_P,edge:arrays.template_edge,tri:arrays.template_tri}:null;
+        api.templatePoints=templateRaw?templateRaw.P.length/3:0;
+        gl.bindVertexArray(templateVao);
+        gl.bindBuffer(gl.ARRAY_BUFFER,templatePos);gl.bufferData(gl.ARRAY_BUFFER,templateRaw?.P||new Float32Array(),gl.STATIC_DRAW);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,templateEdge);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,templateRaw?.edge||new Uint32Array(),gl.STATIC_DRAW);
+        gl.bindVertexArray(null);
         // An inserted transform becomes the preview node mid-drag. Keep the
         // camera and selection stable while its asynchronous result arrives.
         keepCamera = keepCamera || !!handleDrag;
@@ -926,7 +949,7 @@ window.MiniHouPreview = (() => {
         if (!same && (sel.point.size || sel.edge.size || sel.face.size)) change({}, "replace");   // other geometry: drop the selection
         else rebuildOverlay();
       },
-      clear() { handles = []; data.npoints = 0; raw = null; Object.assign(api, { tris: 0, edges: 0, points: 0 }); change({}, "replace"); schedule(); },
+      clear() { templateRaw=null;api.templatePoints=0;api.selectableTemplates=[];handles = []; data.npoints = 0; raw = null; Object.assign(api, { tris: 0, edges: 0, points: 0 }); change({}, "replace"); schedule(); },
       frameAll, frameSelection, viewAxis, redraw: schedule, bounds: () => data.bounds,
       normalSegments() { if (nrmDirty) buildNormals(); return Array.from(nrmLines); },   // for tests: [cx, cy, cz, tx, ty, tz] per primitive
       setOrtho(on) { view.ortho = !!on; schedule(); return view.ortho; },

@@ -320,7 +320,7 @@
       // Rebuild a node's DOM only when its structure changes (wiring, comment, flags); status updates touch just the
       // status line. Stable elements keep hover state and never vanish under a click or a drag.
       const subSig = JSON.stringify([id === errNode && st.error.message, nodeMs[id], cached.has(id), n.type]);
-      const structSig = JSON.stringify([inputMembers(id).map(([key, child]) => [key, child.input_label]), n.type, n.inputs, n.comment, ex.map((e) => e.name), t.inputs.length, id === disp, t.category === "system" && !!t.source]);
+      const structSig = JSON.stringify([n.flags,!!n.locked_geometry,S.graph.render,inputMembers(id).map(([key, child]) => [key, child.input_label]), n.type, n.inputs, n.comment, ex.map((e) => e.name), t.inputs.length, id === disp, t.category === "system" && !!t.source]);
       if (el._struct === structSig) {
         if (el._sub !== subSig) { el._sub = subSig; el.querySelector(".sub").replaceChildren(...subLine(id, n, st, errNode, nodeMs, cached)); }
         continue;
@@ -328,7 +328,11 @@
       el._struct = structSig; el._sub = subSig;
       const kids = [h("div", { class: "band" }), h("div", { class: "title", title: id }, id),
         h("div", { class: "sub" }, subLine(id, n, st, errNode, nodeMs, cached)),
-        h("div", { class: "flag", title: id === disp ? "Display flag (this is what Blender shows)" : "Set display flag" })];
+        ...['bypass','lock','template','display','render'].map(name=>h('button',{class:'flag flag-'+name+(flagState(id,name)?' on':''),dataset:{flag:name},title:flagTitle(name), 'aria-label':flagTitle(name),'aria-pressed':String(flagState(id,name))}, name==='lock'?'L':''))];
+      el.classList.toggle('bypassed',!!n.flags?.bypass);
+      el.classList.toggle('templated',!!(n.flags?.template||n.flags?.selectable_template));
+      el.classList.toggle('selectable-template',!!n.flags?.selectable_template);
+      if(n.flags?.unload)kids.push(h('span',{class:'unload-badge',title:'Unload: do not retain intermediate geometry'},'U'));
       inputs(id).forEach(([spec, srcs], i) => {
         const cx = (W * (i + 1)) / (t.inputs.length + 1);
         const missing = !srcs.length && !spec.optional;
@@ -996,7 +1000,18 @@
     pvDirty = true;
     if (pvTimer === null && !pvInFlight) pvTimer = setTimeout(runPreview, PB.playing ? 0 : 33);
   }
+  function flagTitle(name){return {display:'Display (R; Ctrl-click: Render)',render:'Render (T; toggle off to follow Display)',template:'Template (E; Shift: add; Ctrl: selectable)',selectable_template:'Selectable Template (W)',bypass:'Bypass / Ignore (Q or B)',lock:'Lock / Freeze geometry',unload:'Unload cached geometry'}[name];}
+  function flagState(id,name){const n=nodeOf(id);return name==='display'?id===displayNode():name==='render'?id===(S.graph.render||displayNode()):name==='lock'?!!n?.locked_geometry:!!n?.flags?.[name];}
+  async function setNodeFlag(id,name,additive=false){
+    if(!name)return;
+    const ids=['display','render','template','selectable_template'].includes(name)?[id]:(S.sel.has(id)?[...S.sel]:[id]);
+    const value=name==='display'?true:name==='render'?S.graph.render!==id:!flagState(id,name);
+    const result=await edit(ids.map(id=>({op:'flag',id,flag:name,value,additive})));
+    if(result&&name==='display'){$('#pv-follow').value='display';pvKey=null;schedulePreview();}
+  }
+  $('#pv-follow').onchange=()=>{pvKey=null;schedulePreview();};
   function previewTarget() {
+    if($('#pv-follow')?.value==='display')return displayNode();
     const ids = [...S.sel].filter((id) => nodeOf(id));
     return ids.length === 1 ? ids[0] : displayNode();
   }
@@ -1017,7 +1032,7 @@
     pvKey = key;
     let buf;
     try {
-      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full: pvFull }) });
+      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full: pvFull, templates:true }) });
       buf = await r.arrayBuffer();
     } catch (e) { pvKey = null; return; }
     // A completed frame of the same node is useful even if a newer edit arrived.
@@ -1033,6 +1048,8 @@
     pvMsg(empty ? "No geometry" : head.truncated ? "Showing part of a very large geometry." : "");
     setReducedView(head.proxy && head.proxy.active ? head.proxy : null);
     pv.set(head, arrays, pvNode === node && pvPath === S.path);
+    pv.selectableTemplates=head.selectable_templates||[];
+    if(head.template_warnings?.length)pvMsg(head.template_warnings.join('\n'));
     pv.setHandles(head.handles || []);
     refreshSelectionHandles();                                                 // a kept selection moved with the geometry: so does its gizmo
     updateToolButtons();
@@ -1068,10 +1085,12 @@
   SELECTION_ACTIONS.piece = SELECTION_ACTIONS.face;                          // a piece is a set of faces: the same actions
   let pvSelection = { mode: "view", points: [], edges: [], faces: [] };
   async function applySelectionAction(a) {
-    const s = pvSelection, node = pvNode;
+    const s = pvSelection;
+    let node = pvNode;
     if (!node || !nodeOf(node)) { toast("Nothing to attach the new node to."); return; }
     const params = a.params(s);
     if ((params.group || params.pattern || params.edges || "").length > 30000) { toast("That selection is too large to write into a node; select fewer elements."); return; }
+    if(pv.selectableTemplates?.length){const merged=await edit([{op:'merge_templates',id:node}]);if(!merged)return;node=merged.results[0].id;pv.selectableTemplates=[];}
     const r = await edit([{ op: "insert", after: node, type: a.type, params }]);
     if (r) { pv.clearSelection(); select([r.results[0].id]); }
   }
@@ -1231,7 +1250,7 @@
     $('#pv-custom-frame').onclick=()=>{pv.interaction.orientation='normal';pv.interaction.custom=pv.orientationFrame();pv.interaction.orientation='custom';$('#pv-orientation').value='custom';store();};
     pv.onSelect = renderSelectionTools;
     // viewport handles: arrows in the view that scrub a parameter of the viewed node
-    let handleBase = null, gizmoNode = null, createdNode=null, originalGraph=null, originalNode=null;
+    let handleBase = null, gizmoNode = null, createdNode=null, originalGraph=null, originalNode=null, createdTemplateMerge=null;
     const baseFor = (node, h) => {                                                       // the parameter's current value (or default) on that node
       const n = nodeOf(node), spec = ((S.types[(n || {}).type] || {}).params || []).find((p) => p.name === h.param);
       const cur = n && n.params && n.params[h.param] !== undefined ? n.params[h.param] : spec ? spec.default : undefined;
@@ -1242,6 +1261,7 @@
       const info = pv.selectionInfo();
       if (!info || !pvNode || !nodeOf(pvNode)) return NaN;
       const pattern = rangePattern(info.points);
+      if(pv.selectableTemplates?.length){const merged=await edit([{op:'merge_templates',id:pvNode}]);if(!merged)return NaN;pvNode=merged.results[0].id;createdTemplateMerge=pvNode;pv.selectableTemplates=[];}
       if (pattern.length > 30000) { toast("That selection is too large to write into a node; select fewer elements."); return NaN; }
       const cur = nodeOf(pvNode);
       if (h.tool==='move'&&cur.type === "transform" && (cur.params || {}).group === pattern && JSON.stringify(cur.params.axis_rotation||[0,0,0])===JSON.stringify(h.axis_rotation||[0,0,0])) gizmoNode = pvNode;
@@ -1255,7 +1275,7 @@
       }
       return baseFor(gizmoNode, h);
     }
-    pv.onHandleStart = (h) => {createdNode=null;originalGraph=structuredClone(S.graph);originalNode=pvNode;return h.pending ? startSelectionDrag(h) : baseFor(pvNode, h);};
+    pv.onHandleStart = (h) => {createdTemplateMerge=null;createdNode=null;originalGraph=structuredClone(S.graph);originalNode=pvNode;return h.pending ? startSelectionDrag(h) : baseFor(pvNode, h);};
     pv.onHandleAxis = h => {
       const node=h.pending?gizmoNode:originalNode,n=originalGraph.nodes[node],spec=typeOf(h.pending?gizmoNode:originalNode).params.find(p=>p.name===h.param),cur=n?.params?.[h.param]??spec?.default;
       handleBase=Array.isArray(cur)?cur.slice():null;return Number(handleBase?handleBase[h.comp]:cur);
@@ -1266,6 +1286,7 @@
       while(setInFlight||pendingSet.size)await new Promise(resolve=>setTimeout(resolve,20));
       if(created&&nodeOf(created)){
         const ops=[{op:'remove',id:created}];
+        if(createdTemplateMerge){ops.push({op:'remove',id:createdTemplateMerge});for(const [id,n]of Object.entries(graph.nodes))if(n.flags)ops.push({op:'meta',id,set:{flags:n.flags}});}
         for(const [id,n] of Object.entries(graph.nodes))for(const [port,ref] of Object.entries(n.inputs||{})){
           const refs=Array.isArray(ref)?ref:[ref];if(!refs.includes(previous))continue;
           ops.push({op:'disconnect',to:id,port});for(const from of refs)ops.push({op:'connect',from,to:id,port});
@@ -1485,6 +1506,7 @@
     for (const id of ids) {
       const n = nodeOf(id);
       if (n.color) ops.push({ op: "meta", id: map[id], set: { color: n.color } });
+      if(n.flags||n.locked_geometry)ops.push({op:'meta',id:map[id],set:{flags:n.flags||{},locked_geometry:n.locked_geometry||null}});
       if (inputOwner(id) && map[n.input_owner]) ops.push({ op: "meta", id: map[id], set: { input_owner: map[n.input_owner], input_label: n.input_label || id } });
       for (const [spec, srcs] of inputs(id)) for (const s of srcs) ops.push({ op: "connect", from: map[s] || s, to: map[id], port: spec.name });
     }
@@ -1522,7 +1544,7 @@
         const inner = srcs.filter((s) => keep.has(s));
         if (inner.length) ins[spec.name] = Array.isArray((n.inputs || {})[spec.name]) ? inner : inner[0];
       }
-      nodes[id] = { type: n.type, params: n.params || {}, inputs: ins, pos: pos(id), comment: n.comment || undefined, input_owner: keep.has(n.input_owner) ? n.input_owner : undefined, input_label: n.input_label };
+      nodes[id] = { type: n.type, params: n.params || {}, inputs: ins, pos: pos(id), flags:n.flags, locked_geometry:n.locked_geometry, comment: n.comment || undefined, input_owner: keep.has(n.input_owner) ? n.input_owner : undefined, input_label: n.input_label };
     }
     return JSON.stringify({ minihou: "nodes", version: 1, nodes });
   }
@@ -1564,6 +1586,7 @@
     });
     for (const id of ok) {
       const n = d.nodes[id];
+      if(n.flags||n.locked_geometry)ops.push({op:'meta',id:map[id],set:{flags:n.flags||{},locked_geometry:n.locked_geometry||null}});
       if (n.type === "object_input" && map[n.input_owner]) ops.push({ op: "meta", id: map[id], set: { input_owner: map[n.input_owner], input_label: n.input_label || id } });
       for (const [port, ref] of Object.entries(d.nodes[id].inputs || {})) {
         for (const src of Array.isArray(ref) ? ref : [ref]) if (okSet.has(src)) ops.push({ op: "connect", from: map[src], to: map[id], port });
@@ -1833,7 +1856,8 @@
       if (srcs.length) { drag = { kind: "wire", from: srcs[srcs.length - 1], pickup: { to: id, port: pname, from: srcs[srcs.length - 1] } }; renderWires(); }
       else drag = { kind: "wire-rev", to: id, port: pname };
     } else if (t.classList.contains("flag")) {
-      edit([{ op: "display", id: nodeEl.dataset.id }]);
+      const name=e.ctrlKey&&t.dataset.flag==='display'?'render':e.ctrlKey&&t.dataset.flag==='template'?'selectable_template':t.dataset.flag;
+      setNodeFlag(nodeEl.dataset.id,name,e.shiftKey);
       return;
     } else if (nodeEl) {
       const id = nodeEl.dataset.id;
@@ -2014,6 +2038,7 @@
     }
     const tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" || tag === "textarea" || tag === "select") return;
+    if(!pvOver&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&S.sel.size){const flag={q:'bypass',b:'bypass',e:'template',w:'selectable_template',r:'display',t:'render'}[e.key.toLowerCase()];if(flag){e.preventDefault();setNodeFlag([...S.sel][0],flag,e.shiftKey);return;}}
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === "Escape") { $("#help").classList.add("hidden"); $("#file-menu").classList.add("hidden"); }
     else if (e.key === "Tab") {
@@ -2426,6 +2451,7 @@
     const node = e.target.closest(".node"), box = e.target.closest(".netbox"), wire = e.target.closest("path.hit");
     if (node) {
       const id = node.dataset.id; if (!S.sel.has(id)) select([id]);
+      for(const name of ['display','render','template','selectable_template','bypass','lock','unload'])action((flagState(id,name)?'✓ ':'')+flagTitle(name),()=>setNodeFlag(id,name,true));
       action("Rename…", async () => { const name = await appPrompt("Node name", id); if (name && name !== id) return edit([{ op: "rename", id, to: name }]); });
       action("Duplicate", () => duplicate([...S.sel]));
       action("Frame selection", () => frame(true));

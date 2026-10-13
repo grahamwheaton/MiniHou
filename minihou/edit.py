@@ -226,6 +226,8 @@ def op_rename(g: Graph, op: dict) -> dict:
             n.inputs[port] = [new if r == old else r for r in ref] if isinstance(ref, list) else (new if ref == old else ref)
     if g.display == old:
         g.display = new
+    if g.render == old:
+        g.render = new
     for n in g.nodes.values():
         if n.type == "object_input" and n.meta.get("input_owner") == old:
             n.meta["input_owner"] = new
@@ -305,6 +307,68 @@ def op_display(g: Graph, op: dict) -> dict:
     _need_node(g, op["id"])
     g.display = op["id"]
     return {}
+
+
+def op_flag(g: Graph, op: dict) -> dict:
+    from .flags import NODE_FLAGS
+    n = _need_node(g, op["id"])
+    name, value = op["flag"], op.get("value", True)
+    if not isinstance(value, bool):
+        raise GraphError("flag value must be a boolean")
+    if name == "display":
+        if value:
+            g.display = n.id
+        return {}
+    if name == "render":
+        g.render = n.id if value else None
+        return {}
+    if name == "lock":
+        if value:
+            # Captured by Session at the current frame with modifier input feeds.
+            if not isinstance(op.get("snapshot"), str):
+                raise GraphError("Lock must be captured by a live session")
+            from .flags import thaw_geometry
+            thaw_geometry(op["snapshot"])
+            n.meta["locked_geometry"] = op["snapshot"]
+        else:
+            n.meta.pop("locked_geometry", None)
+        return {}
+    if name not in NODE_FLAGS:
+        raise GraphError(f"unknown node flag {name!r}")
+    if name == "bypass" and n.type == "loop_begin" and value:
+        raise GraphError("Bypass the Loop End to skip a repeat block")
+    if name in {"template", "selectable_template"} and value and not op.get("additive", False):
+        for other in g.nodes.values():
+            other.meta.setdefault("flags", {}).update(template=False, selectable_template=False)
+    flags = n.meta.setdefault("flags", {})
+    flags[name] = value
+    if name in {"template", "selectable_template"} and value:
+        flags["selectable_template" if name == "template" else "template"] = False
+    return {}
+
+
+def op_merge_templates(g: Graph, op: dict) -> dict:
+    source = _need_node(g, op["id"]).id
+    refs = [nid for nid, n in g.nodes.items() if nid != source and n.meta.get("flags", {}).get("selectable_template")]
+    if not refs:
+        return {"id": source}
+    protected = set(refs)
+    for nid in refs:
+        protected.update(g.upstream_order(nid))
+    nid, i = "template_merge", 1
+    while nid in g.nodes:
+        nid, i = f"template_merge{i}", i + 1
+    for consumer in g.nodes.values():
+        if consumer.id in protected:
+            continue
+        consumer.inputs = {p: [nid if r == source else r for r in ref] if isinstance(ref, list)
+                           else nid if ref == source else ref for p, ref in consumer.inputs.items()}
+    g.add_node(nid, "merge", inputs={"geos": [source, *refs]})
+    for ref in refs:
+        g.nodes[ref].meta["flags"]["selectable_template"] = False
+    if g.display == source:
+        g.display = nid
+    return {"id": nid}
 
 
 def op_expose(g: Graph, op: dict) -> dict:
@@ -416,7 +480,7 @@ def op_replace(g: Graph, op: dict) -> dict:
 
 
 _OPS = {"add": op_add, "loop": op_loop, "insert": op_insert, "remove": op_remove, "rename": op_rename, "connect": op_connect,
-        "disconnect": op_disconnect, "set": op_set, "display": op_display, "expose": op_expose,
+        "disconnect": op_disconnect, "set": op_set, "display": op_display, "flag": op_flag, "merge_templates": op_merge_templates, "expose": op_expose,
         "unexpose": op_unexpose, "move": op_move, "meta": op_meta, "replace": op_replace,
         "box_add": op_box_add, "box_set": op_box_set, "box_remove": op_box_remove}
 OP_NAMES = sorted(_OPS)

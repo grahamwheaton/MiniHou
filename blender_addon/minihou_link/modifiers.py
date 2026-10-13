@@ -644,7 +644,7 @@ def _cleanup(live):
     scene_objects.retain_owners(live)            # objects of removed modifiers are parked (hidden), never deleted
 
 
-def pump(host=None, port=None, *, force=False, _only=None):
+def pump(host=None, port=None, *, force=False, _only=None, render=False):
     """Synchronously refresh visible instances in stack order. Returns number of engine cooks.
 
     All Blender access occurs here on the main thread. Content hashes suppress engine feedback.
@@ -725,7 +725,7 @@ def pump(host=None, port=None, *, force=False, _only=None):
                     has_imports = any(n.get("type") == "object_input" for n in graph_data.get("nodes", {}).values())
                     if instance_id(mod) in _live_ids or has_imports:
                         source_token = _send_sources(client, obj, mod, materials)
-                    signature = _digest(mod, arrays, values, materials) + source_token
+                    signature = _digest(mod, arrays, values, materials) + source_token + (":render" if render else ":display")
                     ident = instance_id(mod)
                     failed = _failures.get(ident)
                     selected_source = get_source(mod)
@@ -749,7 +749,7 @@ def pump(host=None, port=None, *, force=False, _only=None):
                                                   frame=scene.frame_current + scene.frame_subframe,
                                                   fps=scene.render.fps / scene.render.fps_base,
                                                   graph=json.loads(ng[GRAPH]),
-                                                  materials=[m.name if m is not None else "" for m in materials])
+                                                  materials=[m.name if m is not None else "" for m in materials], render=render)
                     scene_arrays = {k: v for k, v in output.items() if k.startswith("scene:")}     # pieces' meshes, by node
                     output = {k: v for k, v in output.items() if not k.startswith("scene:")}
                     update = GeoUpdate.from_message(header, output)
@@ -853,7 +853,7 @@ def _animated_nodes(group, seen=None):
         or _animated_nodes(getattr(n, 'node_tree', None), seen) for n in group.nodes)
 
 
-def cook_frame(scene=None, frame=None):
+def cook_frame(scene=None, frame=None, *, render=True):
     """Explicit synchronous barrier before a still render. Never mutate during rendering."""
     if _rendering:
         raise RuntimeError('MiniHou cannot cook during a render; bake first or cook each frame before rendering')
@@ -861,7 +861,7 @@ def cook_frame(scene=None, frame=None):
     if frame is not None:
         scene.frame_set(int(frame))
     host, port = _endpoint or _settings()
-    count = pump(host, port, force=True)
+    count = pump(host, port, force=True, render=render)
     if last_error():
         raise RuntimeError(last_error())
     bpy.context.view_layer.update()

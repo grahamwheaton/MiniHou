@@ -80,6 +80,44 @@ class EditorE2E(unittest.TestCase):
             dialog.locator("input").fill(text)
         dialog.locator('button[type="submit"]').click()
 
+    def test_node_flags_controls_templates_snap_and_saved_state(self):
+        self.two_boxes()
+        self.page.keyboard.press('l')
+        self.node('a').locator('[data-flag=template]').click()
+        self.node('b').locator('.title').click()
+        self.page.wait_for_function('minihou.preview.templatePoints === 8 && minihou.preview.points === 8')
+        hit = self.page.evaluate("""()=>{const p=minihou.preview;p.interaction.snap=true;p.interaction.element='vertex';
+          const q=p.project([-2.5,-0.5,0.5]);return p.snapPosition([0,0,0],q[0],q[1],false,[0,0,0],null);} """)
+        import numpy as np
+        np.testing.assert_allclose(hit,[-2.5,-0.5,0.5],atol=1e-5)
+        self.node('b').locator('[data-flag=display]').click()
+        self.assertTrue(until(lambda:self.s.graph.display=='b'))
+        self.page.wait_for_function('document.querySelector("#pv-follow").value === "display"')
+        self.node('a').locator('[data-flag=render]').click()
+        self.assertTrue(until(lambda:self.s.graph.render=='a'))
+        self.node('b').locator('[data-flag=bypass]').click()
+        self.page.wait_for_function('minihou.preview.points === 0 && minihou.preview.templatePoints === 8')
+        self.node('b').locator('[data-flag=bypass]').click()
+        self.page.wait_for_function('minihou.preview.points === 8')
+        self.node('b').locator('[data-flag=lock]').click()
+        self.assertTrue(until(lambda:bool(self.s.graph.nodes['b'].meta.get('locked_geometry'))))
+        self.page.reload()
+        self.page.wait_for_selector('.node[data-id=b] [data-flag=lock].on')
+        self.assertTrue(self.s.graph.nodes['a'].meta['flags']['template'])
+
+    def test_selectable_template_component_action_inserts_merge(self):
+        self.two_boxes()
+        self.node('a').locator('[data-flag=template]').click(modifiers=['Control'])
+        self.node('b').locator('.title').click()
+        self.page.wait_for_function('minihou.preview.points === 16 && minihou.preview.selectableTemplates.length === 1')
+        self.page.click('#preview [data-mode="point"]')
+        self.page.evaluate('minihou.preview.selectAll()')
+        self.page.locator('#pv-actions button',has_text='Delete').click()
+        self.assertTrue(until(lambda:any(n.type=='blast' for n in self.s.graph.nodes.values())))
+        merge = next(n for n in self.s.graph.nodes.values() if n.id.startswith('template_merge'))
+        self.assertEqual(merge.inputs['geos'],['b','a'])
+        self.assertFalse(self.s.graph.nodes['a'].meta['flags']['selectable_template'])
+
     def test_application_shell_menus_and_preferences_tabs(self):
         page = self.page
         page.wait_for_function('document.querySelector(".node[data-id=out]").getBoundingClientRect().bottom <= document.querySelector("#canvas").getBoundingClientRect().bottom')
@@ -738,14 +776,14 @@ class EditorE2E(unittest.TestCase):
         lock = threading.Lock()
         active = peak = 0
 
-        def slow_preview(node):
+        def slow_preview(node, **kwargs):
             nonlocal active, peak
             with lock:
                 active += 1
                 peak = max(peak, active)
             try:
                 time.sleep(0.12)
-                return original(node)
+                return original(node, **kwargs)
             finally:
                 with lock:
                     active -= 1
@@ -762,8 +800,8 @@ class EditorE2E(unittest.TestCase):
         self.addCleanup(release.set)
         original = self.s.preview
 
-        def delayed_preview(node):
-            result = original(node)
+        def delayed_preview(node, **kwargs):
+            result = original(node, **kwargs)
             if node == "h":
                 started.set()
                 release.wait(5)
@@ -1659,7 +1697,7 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_selector("#errorbar:not(.hidden)")              # the output is now unwired
 
     def test_display_flag_rename_and_delete(self):
-        self.node("points").locator(".flag").click()
+        self.node("points").locator("[data-flag=display]").click()
         self.assertTrue(until(lambda: self.s.graph.display == "points"))
         self.node("spike").locator(".title").click()
         nid = self.page.locator("#params input.nid")

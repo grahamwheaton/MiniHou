@@ -231,9 +231,24 @@ class Session:
 
         Returns ``{"rev", "results", "changed"}``. Interface changes (including exposed values) are pushed to link
         clients, so Blender follows edits made in the editor or by an AI."""
+        capture_rev = None
+        if any(op.get("op") == "flag" and op.get("flag") == "lock" and op.get("value", True) for op in ops):
+            from ..flags import freeze_geometry
+            with self.lock:
+                self._check_document(document_id)
+                capture_rev, snapshot = self._rev, self.graph.copy()
+                feeds, frame, fps = self._modifier_feeds(snapshot), self.frame, self.fps
+            ev = Evaluator(registry=snapshot.registry)
+            try:
+                ops = [dict(op, snapshot=freeze_geometry(ev.cook(snapshot, op["id"], feeds=feeds, frame=frame, fps=fps)))
+                       if op.get("op") == "flag" and op.get("flag") == "lock" and op.get("value", True) else op for op in ops]
+            finally:
+                ev.close()
         key = _merge_key(ops)
         with self.lock:
             self._check_document(document_id)
+            if capture_rev is not None and capture_rev != self._rev:
+                raise GraphError("Graph changed while locking geometry; try again")
             before = self.graph.to_dict()
             new, results = apply_ops(self.graph, ops)
             changed = new.to_dict() != before
@@ -447,7 +462,7 @@ class Session:
                 if node is not None:
                     outputs[node] = ev.cook(snapshot, node)
                 else:
-                    outputs[snapshot.output_node()] = ev.cook(snapshot)
+                    outputs[snapshot.render_node()] = ev.cook(snapshot, snapshot.render_node())
                     for name, nid in snapshot.extra_outputs().items():
                         outputs[name] = ev.cook(snapshot, nid)
             finally:
@@ -694,7 +709,7 @@ class Session:
         return out
 
     @cancellable
-    def preview(self, node: str) -> dict:
+    def preview(self, node: str, templates: bool = False) -> dict:
         """Cook ``node`` and return ``{"ok", "node", "rev", "geo"}``, or ``{"ok": False, "error"}`` (never raises)."""
         with self.lock:
             snapshot = self.graph.copy()
@@ -711,16 +726,39 @@ class Session:
                 handles = []
                 inst = snapshot.nodes[node]
                 nt = self.evaluator.registry.get(inst.type) if inst.type in self.evaluator.registry else None
-                if has_handles(inst.type, nt):
+                if has_handles(inst.type, nt) and not inst.meta.get("flags", {}).get("bypass") and not inst.meta.get("locked_geometry"):
                     ins = [self.evaluator.cook(snapshot, src, feeds=feeds) for src in snapshot.input_ids(node) if src in snapshot.nodes]
                     handles = handles_for(inst.type, ins, geo, snapshot.effective_params(node), nt)
                 if live_preview and geo.detail.get("instance_objects"):
                     from .live import preview_instances
                     geo = preview_instances(geo, sources)
+                references, selectable, warnings = [], [], []
+                if templates:
+                    from ..nodes.merge import merge
+                    for nid, n in snapshot.nodes.items():
+                        flags = n.meta.get("flags", {})
+                        if nid == node or not (flags.get("template") or flags.get("selectable_template")):
+                            continue
+                        try:
+                            ref = self.evaluator.cook(snapshot, nid, feeds=feeds)
+                            if live_preview and ref.detail.get("instance_objects"):
+                                from .live import preview_instances
+                                ref = preview_instances(ref, sources)
+                            if flags.get("selectable_template"):
+                                selectable.append(nid)
+                                geo = merge([geo, ref])
+                            else:
+                                references.append(ref)
+                        except (NodeError, GraphError, ParamError, ValueError) as exc:
+                            warnings.append(f"Template {nid}: {exc}")
+                    if selectable:
+                        handles = []
+                    reference = merge(references) if references else None
         except (NodeError, GraphError, ParamError, ValueError) as e:
             return {"ok": False, "node": node, "rev": rev,
                     "error": {"node": getattr(e, "node_id", None), "message": str(e)}}
-        return {"ok": True, "node": node, "rev": rev, "geo": geo, "handles": handles}
+        return {"ok": True, "node": node, "rev": rev, "geo": geo, "handles": handles,
+                "reference": reference if templates else None, "selectable": selectable, "template_warnings": warnings}
 
     def start(self, cook_immediately: bool = True) -> None:
         if self._thread and self._thread.is_alive():

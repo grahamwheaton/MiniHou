@@ -223,6 +223,8 @@ class Evaluator:
         ``{node_id: (cache_key, geometry)}``; their upstream is not cooked (how systems receive their inputs).
         ``frame``/``fps`` set the time for ``@Frame``/``@Time`` (default: the surrounding cook's, else frame 1)."""
         with timectx.at(frame, fps), proxy.using(self.proxy_level), cook_budget():
+            from .flags import evaluation_graph
+            graph, feeds = evaluation_graph(graph, feeds)
             return self._cook(graph, target, feeds)
 
     def _cook(self, graph: Graph, target: Optional[str], feeds, *, loop_body=False) -> Geometry:
@@ -269,8 +271,9 @@ class Evaluator:
                 continue
             if self.cancel is not None and self.cancel():
                 raise CookCancelled("cook cancelled: a newer edit replaced it")
-            hit = self.cache.get(keys[nid])
-            if hit is None and self.disk is not None and keys[nid] not in self._volatile:
+            unload = graph.nodes[nid].meta.get("flags", {}).get("unload") and nid != target
+            hit = None if unload else self.cache.get(keys[nid])
+            if not unload and hit is None and self.disk is not None and keys[nid] not in self._volatile:
                 hit = self.disk.get(keys[nid])               # cooked in an earlier session: skips everything upstream too
                 if hit is not None:
                     self.cache.put(keys[nid], hit, graph.nodes[nid].type)
@@ -298,6 +301,9 @@ class Evaluator:
             stack.pop()
         stats.total_ms = (time.perf_counter() - t_start) * 1000.0
         self.last_stats = stats
+        for nid in keys:
+            if nid != target and graph.nodes[nid].meta.get("flags", {}).get("unload") and keys[nid] in self.cache._entries:
+                self.cache._drop(keys[nid])
         return results[target]
 
     def _cook_loop(self, graph, nid, key, results, feeds, stats):
@@ -369,7 +375,8 @@ class Evaluator:
         stats.node_ms[nid] = (time.perf_counter() - t0) * 1000.0
         stats.cooked.append(nid)
         self.cache.put(key, out, nt.name)
-        self._store(key, out, stats.node_ms[nid])
+        if not inst.meta.get("flags", {}).get("unload"):
+            self._store(key, out, stats.node_ms[nid])
         return out
 
     def _store(self, key: str, geo: Geometry, ms: float) -> None:

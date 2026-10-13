@@ -130,6 +130,7 @@
         <button id="pv-max" class="small" title="Maximize viewport (Ctrl+Space)">⛶</button>
       </div>
       <div class="pv-tools"><strong id="pv-state">View</strong>
+        <select id="pv-follow" aria-label="Preview source"><option value="selection">Selected node</option><option value="display">Display flag</option></select>
         <span id="pv-selinfo" class="muted small"></span>
         <span class="spacer"></span>
         <span class="pv-nav" role="group" aria-label="View">
@@ -227,6 +228,7 @@
     <tr><td>drag a connected input</td><td>re-route or (drop on empty space) disconnect</td></tr>
     <tr><td>click a wire, <kbd>Delete</kbd></td><td>disconnect</td></tr>
     <tr><td>blue bar on a node</td><td>display flag: what Blender shows</td></tr>
+    <tr><td>Q / B · E · W · R · T (network)</td><td>Bypass · Template · Selectable Template · Display · Render. Shift-click Template adds references; Ctrl-click Display sets Render. Right-click a node for all flags, Lock and Unload.</td></tr>
     <tr><td>drag background / middle mouse</td><td>pan; wheel zooms; <kbd>Shift</kbd>-drag box-selects</td></tr>
     <tr><td><kbd>F</kbd> / <kbd>L</kbd></td><td>frame selection (or all) / tidy the layout</td></tr>
     <tr><td>3-D view: <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> / <kbd>Esc</kbd></td><td>select points / edges / faces / whole objects (click or drag a box, <kbd>Shift</kbd> adds, <kbd>Ctrl</kbd> removes; <kbd>Alt</kbd>-drag or middle mouse orbits) / back to view. The buttons under the view add a node after the one you are looking at (Bevel for edges, Extrude, Inset, Delete, Group for faces...)</td></tr>

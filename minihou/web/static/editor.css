@@ -78,7 +78,24 @@ body.has-error #main { bottom: 30px; }
 .node .sub .ms { color: #b5bdc6; }
 .node .flag { position: absolute; right: 0; top: 0; bottom: 0; width: 15px; border-left: 1px solid #0005; border-radius: 0 6px 6px 0; cursor: pointer; background: #2f3338; }
 .node .flag:hover { background: #3b4f6a; }
-.node.display .flag { background: var(--display); }
+.node.display .flag-display { background: var(--display); }
+.node button.flag {padding:0;border:0;border-radius:0;width:10px;font-size:8px;color:#ccc;background:#30343a;}
+.node button.flag:hover {filter:brightness(1.5);}
+.node .flag-bypass {left:0;right:auto;}
+.node .flag-lock {left:10px;right:auto;}
+.node .flag-template {right:20px;}
+.node .flag-display {right:10px;}
+.node .flag-render {right:0;}
+.node .flag-bypass.on {background:#d1af38!important;}
+.node .flag-lock.on {background:#cb5353!important;}
+.node .flag-template.on,.node.templated .flag-template {background:#aa587c!important;}
+.node .flag-display.on {background:#508aff!important;}
+.node .flag-render.on {background:#985ddd!important;}
+.node.bypassed .title {text-decoration:line-through;opacity:.65;}
+.node.templated {outline:1px solid #aa587c;}
+.node.selectable-template .flag-template {background:#dc86b5!important;}
+.node .unload-badge {position:absolute;left:23px;top:-8px;background:#454a50;border-radius:3px;padding:1px 3px;font-size:9px;}
+.node .title,.node .sub {margin-left:10px;margin-right:25px;}
 .node.selected { border-color: var(--node-hi); box-shadow: 0 0 0 1px var(--node-hi), 0 2px 8px #0008; }
 .node.error { border-color: var(--err); box-shadow: 0 0 0 1px var(--err), 0 2px 8px #0008; }
 .node.error .sub { color: var(--err); }

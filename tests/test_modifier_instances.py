@@ -42,6 +42,15 @@ class ModifierInstances(unittest.TestCase):
         self.clients.append(c)
         return c
 
+    def test_render_flag_routes_only_render_requests(self):
+        graph = copy.deepcopy(GRAPH)
+        graph['render'] = 'input'
+        c = self.client()
+        _, view = c.cook('flags', '', {'Move': [5, 0, 0]}, mesh(), graph=graph)
+        _, rendered = c.cook('flags', '', {'Move': [5, 0, 0]}, mesh(), graph=graph, render=True)
+        np.testing.assert_array_equal(view['point/P'][:, 0], [6, 6, 6])
+        np.testing.assert_array_equal(rendered['point/P'], mesh()['point/P'])
+
     def test_repeat_blocks_isolate_count_parameters_and_upstream_mesh(self):
         from pathlib import Path
         graph = Graph.load(Path(__file__).resolve().parents[1] / "examples/modifiers/repeat_transform.json").to_dict()

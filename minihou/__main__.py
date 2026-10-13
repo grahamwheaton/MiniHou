@@ -72,7 +72,7 @@ def _cmd_cook(args) -> int:
         return 2
     ev = Evaluator()
     for i in range(args.repeat):
-        geo = ev.cook(g, args.node)
+        geo = ev.cook(g, args.node or (g.render_node() if args.render else None))
         s = ev.last_stats
         print(f"cook {i + 1}: {s.total_ms:.1f} ms  cooked={s.cooked}  cached={s.cached}")
     print(geo)
@@ -199,6 +199,7 @@ def main(argv=None) -> int:
     c = sub.add_parser("cook", help="cook a graph once and print timings")
     c.add_argument("graph")
     c.add_argument("--node", default=None)
+    c.add_argument("--render", action="store_true", help="cook the render-flag output instead of display")
     c.add_argument("--repeat", type=int, default=2, help="cook N times to show cache behaviour")
     c.add_argument("--allow-python", action="store_true", help="let `python` nodes run their code (see serve)")
     c.add_argument("--nodes", action="append", metavar="DIR", help="node library folder (default: ./nodes)")

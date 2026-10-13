@@ -70,10 +70,10 @@ class InstanceClient:
     def describe(self, graph_path, graph=None):
         return self._request({"type": "instance_describe", "graph_path": graph_path, "graph": graph})[0]
 
-    def cook(self, instance_id, graph_path, params, arrays, *, frame=1, fps=24, graph=None, materials=None):
+    def cook(self, instance_id, graph_path, params, arrays, *, frame=1, fps=24, graph=None, materials=None, render=False):
         header = {"type": "instance_cook", "instance_id": instance_id,
                   "graph_path": graph_path, "graph": graph, "params": params,
-                  "frame": frame, "fps": fps}
+                  "frame": frame, "fps": fps, "render": bool(render)}
         if materials and any(materials):
             header["materials"] = list(materials)              # slot names of the geometry going in (see minihou.materials)
         return self._request(header, arrays)

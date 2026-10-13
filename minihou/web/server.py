@@ -552,12 +552,24 @@ class _Handler(BaseHTTPRequestHandler):
             node = body.get("node")
             if not isinstance(node, str):
                 raise ApiError(400, '"node" must be a node id')
-            r = s.preview(node)
+            r = s.preview(node, templates=bool(body.get("templates")))
             if not r["ok"]:
                 return self._json({"ok": False, "node": node, "rev": r["rev"], "error": r["error"]})
             from .. import preview
             head, arrays = preview.arrays_for(r["geo"], full=bool(body.get("full")), tris=_budget(body.get("tris")))
             head.update(node=node, rev=r["rev"], handles=r.get("handles", []))
+            head.update(selectable_templates=r.get("selectable", []), template_warnings=r.get("template_warnings", []))
+            if r.get("reference") is not None:
+                refhead, refs = preview.arrays_for(r["reference"], full=bool(body.get("full")), tris=_budget(body.get("tris")))
+                for key in ("P", "edge", "tri"):
+                    arrays["template_" + key] = refs[key]
+                head["template_points"] = refhead["points"]
+                if refhead["points"]:
+                    if not head["points"]:
+                        head["bounds"] = refhead["bounds"]
+                    else:
+                        head["bounds"] = [[min(a, b) for a, b in zip(head["bounds"][0], refhead["bounds"][0])],
+                                          [max(a, b) for a, b in zip(head["bounds"][1], refhead["bounds"][1])]]
             return self._send(200, preview.pack(head, arrays), "application/octet-stream")
         if path == "/api/open":
             p = app.resolve(body.get("path"))

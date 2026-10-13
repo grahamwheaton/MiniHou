@@ -103,6 +103,7 @@ class Graph:
         self.registry = registry or REGISTRY
         self.nodes: Dict[str, NodeInstance] = {}
         self.display: Optional[str] = None
+        self.render: Optional[str] = None  # None follows display; explicit id separates render output.
         self.exposed: List[Exposed] = []
         self.doc: str = ""                    # what the graph does (systems show it as their node doc)
         self.boxes: List[Dict[str, Any]] = []  # network boxes: coloured, titled rectangles behind the nodes (cosmetic)
@@ -134,6 +135,8 @@ class Graph:
         self.exposed = [e for e in self.exposed if e.node != node_id]
         if self.display == node_id:
             self.display = None
+        if self.render == node_id:
+            self.render = None
 
     def connect(self, node_id: str, port: str, source: Union[str, List[str]]) -> None:
         inst = self._node(node_id)
@@ -211,6 +214,9 @@ class Graph:
             raise GraphError("graph has no display node and no 'output' node")
         return main
 
+    def render_node(self) -> str:
+        return self.render or self.output_node()
+
     def upstream_order(self, target: str, stop=()) -> List[str]:
         """Node ids needed to cook ``target``, dependencies first, ``target`` last (iterative DFS). Nodes in ``stop`` are
         included but not descended into (their result is supplied from outside, e.g. a system's inputs)."""
@@ -268,6 +274,8 @@ class Graph:
                 errs.append((nid, f"node {nid!r}: unknown node type {inst.type!r}"))
                 continue
             nt = self.registry.get(inst.type)
+            if inst.meta.get("flags", {}).get("bypass") or inst.meta.get("locked_geometry"):
+                continue
             try:
                 nt.coerce_params(inst.params)
             except ParamError as e:
@@ -319,6 +327,8 @@ class Graph:
                 errs.append((exc.node_id, str(exc)))
         if self.display is not None and self.display not in self.nodes:
             errs.append((None, f"display node {self.display!r} does not exist"))
+        if self.render is not None and self.render not in self.nodes:
+            errs.append((None, f"render node {self.render!r} does not exist"))
         names = set()
         for e in self.exposed:
             if e.name in names:
@@ -383,6 +393,7 @@ class Graph:
                                    copy.deepcopy(v.meta))
                    for k, v in self.nodes.items()}
         g.display = self.display
+        g.render = self.render
         g.exposed = [Exposed(e.name, e.node, e.param, e.label) for e in self.exposed]
         g.doc = self.doc
         g.boxes = copy.deepcopy(self.boxes)
@@ -410,6 +421,8 @@ class Graph:
             out["boxes"] = copy.deepcopy(self.boxes)
         if self.display:
             out["display"] = self.display
+        if self.render:
+            out["render"] = self.render
         if self.exposed:
             out["exposed"] = [{k: v for k, v in (("name", e.name), ("node", e.node), ("param", e.param),
                                                  ("label", e.label)) if v} for e in self.exposed]
@@ -429,6 +442,10 @@ class Graph:
                 errs.append(f"node {nid!r}: expected an object with a 'type'")
                 continue
             meta = {k: v for k, v in nd.items() if k not in ("type", "params", "inputs")}
+            from .flags import NODE_FLAGS
+            flags = meta.get("flags", {})
+            if not isinstance(flags, dict) or any(k not in NODE_FLAGS or not isinstance(v, bool) for k, v in flags.items()):
+                raise GraphError(f"node {nid!r}: invalid flags")
             inputs = {}
             for port, ref in (nd.get("inputs") or {}).items():
                 inputs[port] = list(ref) if isinstance(ref, list) else ref
@@ -451,6 +468,9 @@ class Graph:
                 errs.append(f"invalid node id {nid!r}")
             g.nodes[nid] = NodeInstance(nid, nd["type"], params, inputs, meta)
         g.display = data.get("display")
+        g.render = data.get("render")
+        if g.render is not None and not isinstance(g.render, str):
+            raise GraphError("render must be a node id")
         g.doc = str(data.get("doc") or "")
         for bd in data.get("boxes", []) or []:
             try:

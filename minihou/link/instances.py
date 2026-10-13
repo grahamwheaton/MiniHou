@@ -198,7 +198,7 @@ class InstanceManager:
                      if node.type == "modifier_input"}
             feeds.update(object_feeds(graph, self.sources.get(instance_id, {})))
             with without_object_inputs():
-                result = evaluator.cook(graph, feeds=feeds, frame=frame, fps=fps)
+                result = evaluator.cook(graph, graph.render_node() if h.get("render") else None, feeds=feeds, frame=frame, fps=fps)
                 scene, scene_errors, scene_arrays = self._scene(graph, evaluator, feeds, frame, fps)
             result.validate()
             if not np.isfinite(result.P).all():
