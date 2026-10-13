@@ -89,6 +89,15 @@ def copy_to_points(source, points, orient, use_pscale):
     the same name); the source's N turns with each copy. Vertex, primitive and detail attributes come from
     ``source``."""
     T, S = points.npoints, source.npoints
+    # Bound the realised output and temporary position arrays before allocating.
+    source_bytes = source.P.nbytes + source.topology.vertex_point.nbytes + source.topology.prim_offsets.nbytes
+    for domain in (source.point, source.vertex, source.prim):
+        source_bytes += sum(array.nbytes for _, array in domain.items())
+    estimate = T * source_bytes + T * S * 72
+    estimate += S * sum(array.nbytes for name, array in points.point.items() if name not in _TRANSFORM_ATTRS)
+    if estimate > 256 * 1024**2:
+        raise ValueError(f"Copy to Points would require approximately {estimate / 1024**3:.2f} GiB for {T:,} copies; "
+                         "the safety limit is 256 MiB. Reduce the point count or use Instance instead.")
     nv, npr = source.nvertices, source.nprims
     if T == 0 or S == 0:
         out = Geometry.from_arrays(np.zeros((0, 3), np.float32))
