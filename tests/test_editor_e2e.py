@@ -337,19 +337,100 @@ class EditorE2E(unittest.TestCase):
         self.page.keyboard.press('Control+z')
         self.assertTrue(until(lambda:self.s.graph.to_dict()==before))
 
+    def network_stream_scene(self):
+        graph={'nodes':{'a':{'type':'box','pos':[0,0]},'h':{'type':'transform','inputs':{'geo':'a'},'pos':[0,180]},'o':{'type':'output','inputs':{'geo':'h'},'pos':[0,400]},'loose':{'type':'subdivide','pos':[320,180]}},'display':'o'}
+        self.s.edit([{'op':'replace','graph':graph}])
+        self.page.wait_for_selector('.node[data-id="loose"]')
+        self.page.evaluate('minihou.frame(false)')
+        self.node('h').locator('.title').click()
+
     def test_network_interaction_shake_disconnect_and_undo(self):
-        self.two_boxes()
-        self.page.keyboard.press('l')
-        self.page.wait_for_timeout(250)
-        title=self.node('m').locator('.title').bounding_box()
+        self.network_stream_scene()
+        title=self.node('h').locator('.title').bounding_box()
         x,y=title['x']+10,title['y']+5
         before=self.s.graph.to_dict()
         self.page.mouse.move(x,y);self.page.mouse.down()
         for dx in [25,55,-25,55,-25]:self.page.mouse.move(x+dx,y,steps=2)
         self.page.mouse.up()
-        self.assertTrue(until(lambda:not self.s.graph.nodes['m'].inputs.get('geos')))
+        self.assertTrue(until(lambda:not self.s.graph.nodes['h'].inputs))
+        self.assertEqual(self.s.graph.nodes['o'].inputs['geo'],'a')
         self.page.keyboard.press('Control+z')
         self.assertTrue(until(lambda:self.s.graph.to_dict()==before))
+
+    def test_network_interaction_alt_detach_cancel_and_undo(self):
+        self.network_stream_scene()
+        before=self.s.graph.to_dict()
+        title=self.node('h').locator('.title').bounding_box()
+        x,y=title['x']+10,title['y']+5
+        self.page.keyboard.down('Alt');self.page.mouse.move(x,y);self.page.mouse.down()
+        self.page.mouse.move(x+65,y+20,steps=5)
+        self.page.keyboard.press('Escape');self.page.mouse.up();self.page.keyboard.up('Alt')
+        self.assertEqual(self.s.graph.to_dict(),before)
+        self.page.keyboard.down('Alt');self.page.mouse.move(x,y);self.page.mouse.down()
+        self.page.mouse.move(x+65,y+20,steps=5);self.page.mouse.up();self.page.keyboard.up('Alt')
+        self.assertTrue(until(lambda:not self.s.graph.nodes['h'].inputs))
+        self.assertEqual(self.s.graph.nodes['o'].inputs['geo'],'a')
+        self.page.keyboard.press('Control+z')
+        self.assertTrue(until(lambda:self.s.graph.to_dict()==before))
+
+    def test_network_interaction_drop_loose_on_wire(self):
+        self.network_stream_scene()
+        before=self.s.graph.to_dict()
+        wire=self.page.locator('path.hit[data-from="h"][data-to="o"]')
+        target=wire.evaluate('(p)=>{const q=p.getPointAtLength(p.getTotalLength()/2).matrixTransform(p.getScreenCTM());return [q.x,q.y]}')
+        title=self.node('loose').locator('.title').bounding_box()
+        self.page.mouse.move(title['x']+10,title['y']+5);self.page.mouse.down()
+        self.page.mouse.move(*target,steps=8)
+        self.assertEqual(self.page.locator('path.insert-target').count(),1)
+        self.page.mouse.up()
+        self.assertTrue(until(lambda:self.s.graph.nodes['o'].inputs.get('geo')=='loose'))
+        self.assertEqual(self.s.graph.nodes['loose'].inputs['geo'],'h')
+        self.page.keyboard.press('Control+z')
+        self.assertTrue(until(lambda:self.s.graph.to_dict()==before))
+
+    def test_network_interaction_cancel_wire_insertion(self):
+        self.network_stream_scene()
+        before=self.s.graph.to_dict()
+        target=self.page.locator('path.hit[data-from="h"][data-to="o"]').evaluate('(p)=>{const q=p.getPointAtLength(p.getTotalLength()/2).matrixTransform(p.getScreenCTM());return [q.x,q.y]}')
+        title=self.node('loose').locator('.title').bounding_box()
+        self.page.mouse.move(title['x']+10,title['y']+5);self.page.mouse.down()
+        self.page.mouse.move(*target,steps=8)
+        self.assertEqual(self.page.locator('path.insert-target').count(),1)
+        self.page.keyboard.press('Escape');self.page.mouse.up()
+        self.assertEqual(self.s.graph.to_dict(),before)
+        self.assertEqual(self.page.locator('path.insert-target').count(),0)
+
+    def test_network_interaction_ambiguous_detach_preserves_graph(self):
+        self.network_stream_scene()
+        self.s.edit([{'op':'add','id':'m','type':'merge','inputs':{'geos':['a','h']},'pos':[150,200]}])
+        self.page.wait_for_selector('.node[data-id="m"]')
+        before=self.s.graph.to_dict()
+        title=self.node('m').locator('.title').bounding_box()
+        x,y=title['x']+10,title['y']+5
+        self.page.keyboard.down('Alt');self.page.mouse.move(x,y);self.page.mouse.down()
+        self.page.mouse.move(x+60,y+25,steps=4);self.page.mouse.up();self.page.keyboard.up('Alt')
+        self.page.locator('#toast').wait_for(state='visible')
+        self.assertEqual(self.s.graph.to_dict(),before)
+
+    def test_network_interaction_dynamic_nodes_persistence_and_saved_positions(self):
+        self.network_stream_scene()
+        self.assertTrue(self.page.locator('#network-dynamic').is_checked())
+        before=self.s.graph.to_dict()
+        title=self.node('h').locator('.title').bounding_box()
+        x,y=title['x']+10,title['y']+5
+        target=self.node('o').bounding_box()
+        self.page.mouse.move(x,y);self.page.mouse.down()
+        self.page.mouse.move(target['x']+60,target['y']-20,steps=6)
+        self.page.wait_for_timeout(250)
+        changed=self.page.evaluate("""()=>{const e=document.querySelector('.node[data-id="o"]'),p=minihou.S.graph.nodes.o.pos;return Math.hypot(parseFloat(e.style.left)-p[0],parseFloat(e.style.top)-p[1]);}""")
+        self.assertGreater(changed,.1)
+        self.assertLessEqual(changed,12.01)
+        self.assertEqual(self.s.graph.to_dict(),before)
+        self.page.keyboard.press('Escape');self.page.mouse.up()
+        self.page.locator('#network-dynamic').uncheck()
+        self.page.reload();self.page.wait_for_selector('.node[data-id="o"]')
+        self.assertFalse(self.page.locator('#network-dynamic').is_checked())
+        self.assertEqual(self.s.graph.to_dict(),before)
 
     def test_node_flags_controls_templates_snap_and_saved_state(self):
         self.two_boxes()
@@ -1143,6 +1224,28 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(self.page.evaluate('minihou.preview.tool'),'rotate')
         self.assertFalse(any(n.type=='polyextrude' for n in self.s.graph.nodes.values()))
         self.page.wait_for_selector('.curve-grab[data-axis="2"]')
+
+    def test_bezier_tangent_plane_gizmo_commits_and_undo(self):
+        import json
+        from minihou.nodes.curves import BEZIER_DEFAULT
+        self.page.evaluate("minihou.edit([{op:'add',id:'bc',type:'bezier'}])")
+        self.node('bc').locator('.title').click()
+        self.page.wait_for_function('minihou.preview.points === 49')
+        self.page.locator('.curve-grab[data-point="1"][data-part="p"]').click()
+        self.page.locator('.curve-grab[data-point="1"][data-part="right"]').click()
+        self.page.wait_for_function('minihou.desktopCanClose()')
+        before=self.s.graph.to_dict()
+        controls=json.loads(self.s.graph.nodes['bc'].params.get('controls',BEZIER_DEFAULT))
+        handle=self.page.locator('.curve-grab[data-plane="2"]')
+        rect=handle.bounding_box();x,y=rect['x']+rect['width']/2,rect['y']+rect['height']/2
+        self.page.mouse.move(x,y);self.page.mouse.down();self.page.mouse.move(x+24,y-16,steps=6);self.page.mouse.up()
+        self.assertTrue(until(lambda:self.s.graph.to_dict()!=before))
+        after=json.loads(self.s.graph.nodes['bc'].params['controls'])
+        self.assertNotEqual(after[1]['right'],controls[1]['right'])
+        self.assertAlmostEqual(after[1]['right'][2],controls[1]['right'][2],places=5)
+        self.assertEqual(after[1]['p'],controls[1]['p'])
+        self.page.keyboard.press('Control+z')
+        self.assertTrue(until(lambda:self.s.graph.to_dict()==before))
 
     def test_match_size_cage_keeps_opposite_face_fixed(self):
         self.handle_scene('match_size',{'scale':True,'uniform':False,'size':[2,2,2],'center':[0,0,0]},'h')

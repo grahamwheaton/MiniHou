@@ -70,6 +70,7 @@
       <label>Node colour <input id="pref-nodeColor" type="color"></label>
       <label>Wire colour <input id="pref-wireColor" type="color"></label>
       <label>Selection colour <input id="pref-selectionColor" type="color"></label>
+      <label><input id="pref-dynamicNodes" type="checkbox"> Dynamic Nodes (gentle visual movement; saved positions unchanged)</label>
       <label><input id="pref-nodeSnap" type="checkbox"> Snap nodes and frames to grid</label>
       <label>Snap spacing <input id="pref-nodeSnapStep" type="number" min="1" max="200" step="1"></label>
       <label>New frame colour <input id="pref-frameColor" type="color"></label>
@@ -101,7 +102,8 @@
 <main id="main">
   <div id="work">
   <section id="canvas" tabindex="0" aria-label="Node graph">
-    <div id="network-pane-header" class="pane-heading"><span>Node network</span><span class="flag-legend">M Mute · L Lock · T Template · D Display</span><span class="spacer"></span><label><input id="network-snap" type="checkbox"> Snap</label><button id="network-home" title="Frame all nodes" aria-label="Frame all nodes">⌂</button></div>
+    <div id="network-gesture-status" role="status" aria-live="polite"></div>
+    <div id="network-pane-header" class="pane-heading"><span>Node network</span><span class="flag-legend">M Mute · L Lock · T Template · D Display</span><span class="spacer"></span><label title="Gentle visual movement while dragging; respects reduced motion"><input id="network-dynamic" type="checkbox"> Dynamic Nodes</label><label><input id="network-snap" type="checkbox"> Snap</label><button id="network-home" title="Frame all nodes" aria-label="Frame all nodes">⌂</button></div>
     <div id="network-toolbar" aria-label="Node editor commands">
   <div class="file">
     <button id="file-btn" title="Open or create a graph file">
@@ -276,6 +278,7 @@
 <script src="/static/loop-tool.js"></script>
 <script src="/static/paint-tool.js"></script>
 <script src="/static/sheet.js"></script>
+<script src="/static/dynamic-nodes.js"></script>
 <script src="/static/editor.js"></script>
 </body>
 </html>

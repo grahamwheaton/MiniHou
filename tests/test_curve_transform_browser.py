@@ -1,8 +1,12 @@
 """Actual curve SVG pointer lifecycle, using a bounded orthographic preview fixture."""
 from pathlib import Path
 import unittest
-from playwright.sync_api import sync_playwright
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    sync_playwright = None
 
+@unittest.skipIf(sync_playwright is None, 'playwright unavailable')
 class CurveTransformBrowserTests(unittest.TestCase):
     def test_plane_tangent_rotation_precision_and_cancel(self):
         with sync_playwright() as pw:

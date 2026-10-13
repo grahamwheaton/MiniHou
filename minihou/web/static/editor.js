@@ -3,6 +3,7 @@
 // (Blender sliders, AI tools, file edits) arrive over Server-Sent Events.
 "use strict";
 (() => {
+  let dynamicNodes=null;
   const W = 160, H = 46;                       // node size (must match editor.css)
   const $ = (s, el = document) => el.querySelector(s);
   const canvas = $("#canvas"), world = $("#world"), wiresSvg = $("#wires"), nodesEl = $("#nodes"), overlay = $("#overlay");
@@ -311,6 +312,11 @@
     const p = (nodeOf(id) || {}).pos;
     return Array.isArray(p) ? p : [0, 0];
   }
+  function visualPos(id){const p=pos(id),o=dynamicNodes?.offset(inputOwner(id)||id)||[0,0];return [p[0]+o[0],p[1]+o[1]];}
+  function updateDynamics(){
+    if(!dynamicNodes)return;
+    dynamicNodes.update({enabled:preferences.dynamicNodes,nodes:Object.keys(S.graph.nodes).filter(id=>!inputOwner(id)&&!hiddenInFrame(id)).map(id=>{const p=pos(id);return {id,x:p[0]+W/2,y:p[1]+nodeHeight(id)/2};}),selected:[...S.sel,...Object.keys(S.graph.nodes).filter(lockedInFrame)],dragging:drag?.kind==='move'?drag.ids:[],pointer:toWorld(...S.mouse),paused:document.hidden});
+  }
   function inputs(id) {                                       // [[port, [sources]]] in declaration order
     const n = nodeOf(id), t = typeOf(id);
     return t.inputs.map((spec) => {
@@ -319,7 +325,7 @@
     });
   }
   function inPortCenter(id, portIndex, k = 0, m = 1) {
-    const [x, y] = pos(id), n = typeOf(id).inputs.length;
+    const [x, y] = visualPos(id), n = typeOf(id).inputs.length;
     const spec = typeOf(id).inputs[portIndex];
     const off = spec && spec.multi && m > 1 ? (k - (m - 1) / 2) * Math.min(7, 26 / (m - 1)) : 0;
     return [x + (W * (portIndex + 1)) / (n + 1) + off, y];
@@ -327,10 +333,10 @@
   const outPortCenter = (id) => {
     const owner = inputOwner(id);
     if (owner) {
-      const [x, y] = pos(owner), i = inputMembers(owner).findIndex(([key]) => key === id);
+      const [x, y] = visualPos(owner), i = inputMembers(owner).findIndex(([key]) => key === id);
       return [x + W, y + H + i * 22];
     }
-    const [x, y] = pos(id); return [x + W / 2, y + nodeHeight(id)];
+    const [x, y] = visualPos(id); return [x + W / 2, y + nodeHeight(id)];
   };
   function wirePath([x1, y1], [x2, y2]) {
     const dy = Math.max(40, Math.abs(y2 - y1) / 2) + (y2 < y1 ? 60 : 0);
@@ -363,7 +369,7 @@
 
   // ---------------------------------------------------------------- rendering
   function render() {
-    renderBoxes(); renderNodes(); renderTop(); renderStatus(); renderParams(); scheduleInspect();
+    updateDynamics();renderBoxes(); renderNodes(); renderTop(); renderStatus(); renderParams(); scheduleInspect();
     $("#empty-hint").classList.toggle("hidden", Object.keys(S.graph.nodes).length > 0);
   }
   function upstreamOfDisplay() {
@@ -395,7 +401,7 @@
       let el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
       if (!el) { el = h("div", { class: "node", dataset: { id } }); nodesEl.append(el); }
       el.style.background = /^#[0-9a-f]{6}$/i.test(n.color || "") ? n.color : "";
-      const [x, y] = pos(id);
+      const [x, y] = visualPos(id);
       el.style.left = x + "px"; el.style.top = y + "px"; el.style.height = nodeHeight(id) + "px";
       el.className = ["node", "cat-" + (t.category || "other"), t.category === "system" && t.source && "group", S.sel.has(id) && "selected", id === disp && "display",
         id === errNode && "error", !live.has(id) && "unused"].filter(Boolean).join(" ");
@@ -471,9 +477,10 @@
           const d = wirePath(outPortCenter(src), inPortCenter(id, i, k, srcs.length));
           const sel = S.wireSel && S.wireSel.to === id && S.wireSel.port === spec.name && S.wireSel.from === src;
           const pair = nodeOf(id).type === "loop_end" && spec.name === "begin";
-          kids.push(svgEl("path", { d, class: [sel && "sel", pair && "loop-pair"].filter(Boolean).join(" ") }));
+          const target=drag?.insert, prospect=target&&target.to===id&&target.port===spec.name&&target.from===src&&target.index===k;
+          kids.push(svgEl("path", { d, class: [sel && "sel", pair && "loop-pair", prospect && "insert-target"].filter(Boolean).join(" ") }));
           const hit = svgEl("path", { d, class: "hit" });
-          hit.dataset.to = id; hit.dataset.port = spec.name; hit.dataset.from = src;
+          hit.dataset.index=k; hit.dataset.to = id; hit.dataset.port = spec.name; hit.dataset.from = src;
           kids.push(hit);
         });
       });
@@ -1765,7 +1772,7 @@
   const preferenceDefaults = { navigation: "blender", orbitDepth: true, background: "#212429", gridOpacity: 1, grid: true, axes: true,
     shaded: true, edges: true, points: false, normals: false,
     nodeBackdrop: "grid", nodeBackground: "#26292d", nodeGrid: "#2d3035", nodeColor: "#3a3f46",
-    wireColor: "#a9b1ba", selectionColor: "#e8a33d", nodeSnap: false, nodeSnapStep: 24, frameColor: "#5b7fb5", lighting: 1, pointSize: 4, gridSpacing: 0 };
+    wireColor: "#a9b1ba", selectionColor: "#e8a33d", nodeSnap: false, dynamicNodes: true, nodeSnapStep: 24, frameColor: "#5b7fb5", lighting: 1, pointSize: 4, gridSpacing: 0 };
   function validPreference(key, value) {
     const ranges = { lighting: [0, 2], pointSize: [1, 20], gridSpacing: [0, 10000], gridOpacity: [0, 2], nodeSnapStep: [1, 200] };
     if (ranges[key]) return Number.isFinite(value) && value >= ranges[key][0] && value <= ranges[key][1] && (key !== "nodeSnapStep" || Number.isInteger(value));
@@ -1796,6 +1803,8 @@
     }
     $("#pref-display-mode").value = !preferences.shaded ? (preferences.points && !preferences.edges ? "points" : "wire") : preferences.edges ? "edges" : "shaded";
     $("#network-snap").checked = preferences.nodeSnap;
+    $("#network-dynamic").checked=preferences.dynamicNodes;
+    if(dynamicNodes)updateDynamics();
     $("#pv-display-mode").value = $("#pref-display-mode").value;
     if (save) {
       try { localStorage.setItem(preferencesKey, JSON.stringify(preferences)); $("#preferences-storage").textContent = "Saved in this browser."; }
@@ -1810,6 +1819,7 @@
     applyPreferences(true);
   };
   $("#network-snap").onchange = e => { preferences.nodeSnap = e.target.checked; applyPreferences(true); };
+  $("#network-dynamic").onchange=e=>{preferences.dynamicNodes=e.target.checked;applyPreferences(true);};
   $("#network-home").onclick = () => frame(false);
   $("#pref-python-nodes").onchange = async e => {
     const input=e.target; input.disabled=true;
@@ -1905,7 +1915,7 @@
     if (!add) S.sel.clear();
     for (const id of ids) S.sel.add(id);
     S.wireSel = null;
-    renderNodes(); renderParams(); scheduleInspect();
+    updateDynamics();renderNodes(); renderParams(); scheduleInspect();
   }
   function uniqueId(base, taken) {
     base = String(base).replace(/[^A-Za-z0-9_]/g, "_").replace(/^(\d)/, "n$1") || "node";
@@ -2253,11 +2263,43 @@
 
   // ---------------------------------------------------------------- mouse
   let drag = null, suppressContextUntil=0;
+  dynamicNodes=window.MiniDynamicNodes?.({onChange:()=>{
+    for(const el of nodesEl.children){const p=visualPos(el.dataset.id);el.style.left=p[0]+'px';el.style.top=p[1]+'px';}
+    renderWires();
+  }});
+  document.addEventListener('visibilitychange',updateDynamics);
+  function gestureHint(text=''){ $('#network-gesture-status').textContent=text; }
+  function detachProblem(id){
+    const refs=Object.values(nodeOf(id)?.inputs||{}).flat();
+    if(refs.length>1)return 'Cannot detach: multiple upstream connections are ambiguous. Wires kept.';
+    if(!refs.length&&!looseNode(id))return 'Cannot detach a source node with consumers. Wires kept.';
+    return '';
+  }
+  function looseNode(id){return !Object.values(nodeOf(id)?.inputs||{}).flat().length && !Object.values(S.graph.nodes).some(n=>Object.values(n.inputs||{}).flat().includes(id));}
+  function insertionTarget(e,id){
+    if(!looseNode(id))return null;
+    const model=typeOf(id), paths=canvas.querySelectorAll('path.hit');
+    if(paths.length>1000)return null;
+    const candidates=[];
+    for(const path of paths){
+      if(path.dataset.from===id||path.dataset.to===id)continue;
+      const bounds=path.getBoundingClientRect();if(e.clientX<bounds.left-22||e.clientX>bounds.right+22||e.clientY<bounds.top-22||e.clientY>bounds.bottom+22)continue;
+      const source=typeOf(path.dataset.from),dest=typeOf(path.dataset.to).inputs.find(p=>p.name===path.dataset.port);
+      const compatible=model.inputs.filter(p=>p.type===source.outputs?.[0]?.type);
+      if(compatible.length!==1||model.inputs.some(p=>p!==compatible[0]&&!p.optional)||model.outputs?.length!==1||model.outputs[0].type!==dest?.type)continue;
+      const matrix=path.getScreenCTM(),len=path.getTotalLength();let best=Infinity;
+      for(let k=0;k<=24;k++){const q=path.getPointAtLength(len*k/24).matrixTransform(matrix);best=Math.min(best,Math.hypot(q.x-e.clientX,q.y-e.clientY));}
+      if(best<22)candidates.push({from:path.dataset.from,to:path.dataset.to,port:path.dataset.port,index:Number(path.dataset.index),input:compatible[0].name,distance:best});
+    }
+    candidates.sort((a,b)=>a.distance-b.distance);
+    if(candidates.length>1&&candidates[1].distance-candidates[0].distance<5)return null;
+    return candidates[0]||null;
+  }
   function segmentsCross(a,b,c,d){
     const cross=(p,q,r)=>(q[0]-p[0])*(r[1]-p[1])-(q[1]-p[1])*(r[0]-p[0]);
     return Math.max(a[0],b[0])>=Math.min(c[0],d[0]) && Math.max(c[0],d[0])>=Math.min(a[0],b[0]) && Math.max(a[1],b[1])>=Math.min(c[1],d[1]) && Math.max(c[1],d[1])>=Math.min(a[1],b[1]) && cross(a,b,c)*cross(a,b,d)<=0 && cross(c,d,a)*cross(c,d,b)<=0;
   }
-  function cancelNetworkDrag(){if(!drag)return;drag=null;S.dragPos.clear();S.boxDrag=null;overlay.replaceChildren();$('#boxsel').classList.add('hidden');canvas.classList.remove('panning','wiring','detaching');window.removeEventListener('pointermove',onDrag);window.removeEventListener('pointerup',onDrop);renderNodes();renderBoxes();}
+  function cancelNetworkDrag(){if(!drag)return;drag=null;gestureHint();S.dragPos.clear();updateDynamics();S.boxDrag=null;overlay.replaceChildren();$('#boxsel').classList.add('hidden');canvas.classList.remove('panning','wiring','detaching');window.removeEventListener('pointermove',onDrag);window.removeEventListener('pointerup',onDrop);renderNodes();renderBoxes();}
   window.addEventListener('pointercancel',cancelNetworkDrag);
   window.addEventListener('blur',cancelNetworkDrag);
 
@@ -2317,7 +2359,8 @@
       if (!S.sel.has(id)) select([id]);
       const [wx, wy] = toWorld(e.clientX, e.clientY);
       if (lockedInFrame(id)) return;
-      drag = { kind: "move", ids: [...S.sel].filter(i => !lockedInFrame(i)), wx, wy, start: new Map([...S.sel].map((i) => [i, pos(i).slice()])), moved: false };
+      drag = { kind: "move", ids: [...S.sel].filter(i => !lockedInFrame(i)), wx, wy, start: new Map([...S.sel].map((i) => [i, pos(i).slice()])), moved: false, detached:e.altKey };
+      if(e.altKey)gestureHint("Detach on release: reconnect stream; Esc cancels");
     } else if (t.classList.contains("hit")) {
       S.wireSel = { to: t.dataset.to, port: t.dataset.port, from: t.dataset.from };
       S.sel.clear(); renderNodes(); renderParams();
@@ -2359,8 +2402,12 @@
       const delta=e.clientX-q.x;
       if(Math.abs(delta)>=18){const dir=Math.sign(delta);if(now-q.time>650)q.turns=0;
         if(q.dir && dir!==q.dir){q.turns++;q.time=now;}q.dir=dir;q.x=e.clientX;
-        if(q.turns>=3 && !drag.detached){drag.detached=true;canvas.classList.add("detaching");toast("Disconnect on release; Esc cancels");}}
-      renderWires();
+        if(q.turns>=3 && !drag.detached){drag.detached=true;canvas.classList.add("detaching");gestureHint("Detach on release: reconnect stream; Esc cancels");}}
+      if(e.altKey)drag.detached=true;
+      if(drag.detached)drag.insert=null;
+      if(drag.detached)gestureHint(drag.ids.length===1?(detachProblem(drag.ids[0])||"Detach on release: reconnect stream; Esc cancels"):"Detach requires one node; wires will be kept");
+      else if(drag.ids.length===1){drag.insert=insertionTarget(e,drag.ids[0]);gestureHint(drag.insert?'Insert on highlighted wire; Esc cancels':'');}
+      updateDynamics();renderWires();
     } else if (drag.kind === "boxmove" || drag.kind === "boxresize") {
       const [wx, wy] = toWorld(e.clientX, e.clientY), [dx, dy] = nodeDragDelta(wx - drag.wx, wy - drag.wy, drag.kind === "move" ? drag.start.get(drag.ids[0]) : drag.kind === "boxresize" ? drag.size : drag.pos);
       if (Math.abs(dx) + Math.abs(dy) > 1) drag.moved = true;
@@ -2397,7 +2444,7 @@
   }
   async function onDrop(e) {
     window.removeEventListener("pointermove", onDrag); window.removeEventListener("pointerup", onDrop);
-    const d = drag; drag = null;
+    const d = drag; drag = null; gestureHint();updateDynamics();
     overlay.replaceChildren();
     canvas.classList.remove("panning", "wiring", "detaching");
     document.querySelectorAll(".port.target").forEach((el) => el.classList.remove("target"));
@@ -2428,7 +2475,8 @@
         const positions = {};
         for (const id of d.ids) positions[id] = pos(id);
         const ops=[{op:"move",positions}];
-        if(d.detached){const ids=new Set(d.ids);for(const [to,n] of Object.entries(S.graph.nodes))for(const [port,ref] of Object.entries(n.inputs||{}))for(const from of [ref].flat())if(ids.has(to)!==ids.has(from))ops.push({op:"disconnect",to,port,from});}
+        if(d.detached && d.ids.length===1){const problem=detachProblem(d.ids[0]);if(problem){toast(problem);S.dragPos.clear();renderNodes();return;}ops.push({op:'detach',id:d.ids[0]});}
+        else if(d.insert){const op={op:'insert_existing',id:d.ids[0],...d.insert};delete op.distance;if(!typeOf(op.to).inputs.find(p=>p.name===op.port)?.multi)delete op.index;ops.push(op);}
         const r = await edit(ops);
         S.dragPos.clear();
         if (!r) renderNodes();

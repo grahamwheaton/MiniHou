@@ -698,3 +698,10 @@ path.hit.cut-mark {stroke:#ff6464;stroke-opacity:1;stroke-width:4px;}
 #pv-sketch-panel p {flex-basis:100%;margin:0;color:var(--muted);}
 #pv-sketch-panel input {width:65px;}
 [data-sketch-active] .pv-grab,[data-sketch-active] .curve-grab {pointer-events:none!important;}
+
+#network-gesture-status {position:absolute;bottom:12px;left:12px;z-index:12;pointer-events:none;background:var(--panel);color:var(--node-hi);padding:4px 8px;border-radius:4px;font-size:12px;}
+#network-gesture-status:empty {display:none;}
+#wires path.insert-target {stroke:#ffd67a;stroke-width:5;filter:drop-shadow(0 0 3px #f5bc57);}
+
+#network-pane-header .flag-legend {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+#network-pane-header label {white-space:nowrap;flex-shrink:0;}
