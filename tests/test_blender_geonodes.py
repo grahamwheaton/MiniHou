@@ -29,7 +29,7 @@ class GeometryNodesPlacementTests(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.path = Path(cls.tmp.name) / "wired_transform.json"
         cls.path.write_text(json.dumps(GRAPH), encoding="utf-8")
-        cls.engine = Engine(cls.path)
+        cls.engine = Engine(cls.path, http_port=0)
 
     @classmethod
     def tearDownClass(cls):
@@ -539,12 +539,121 @@ class GeometryNodesPlacementTests(unittest.TestCase):
                 self.assert_x(obj, [3])
                 from unittest.mock import patch
                 from minihou_link import network_ui
-                with patch.object(network_ui.router, "start") as route:
+                with patch.object(network_ui.router, "start") as route, patch.object(self.g, "edit_live", return_value=({"state": "ready"}, "live.json")) as edit:
                     self.assertEqual(bpy.ops.minihou.edit_group_network(), {"FINISHED"})
-                    route.assert_called_once_with(minihou_link._server.snapshot(), str(self.path))
+                    route.assert_called_once_with({"state": "ready"}, "live.json", live=True)
+                    edit.assert_called_once_with(obj, mini)
+                area.spaces.active.path.append(mini.node_tree, node=mini)
+                self.assertEqual(geonodes_ui._active(bpy.context), mini)
+                self.assertTrue(bpy.ops.minihou.edit_group_network.poll())
         finally:
             area.type = old_type
             minihou_link.unregister()
+
+    def test_nested_modifier_wrapper_converts_and_uses_wired_input(self):
+        from minihou_link import modifiers
+        obj = self.mesh()
+        old = modifiers.add_modifier(obj, str(self.path), port=self.engine.port)
+        wrapper = old.node_group
+        obj.modifiers.remove(old)
+        tree, gin, gout = self.tree()
+        prefix, suffix = self.native(tree, 3), self.native(tree, 8)
+        node = tree.nodes.new("GeometryNodeGroup")
+        node.node_tree = wrapper
+        node.inputs["Scale"].default_value = 2
+        self.chain(tree, gin, prefix, node, suffix, gout)
+        self.attach(obj, tree)
+        self.cook()
+        self.assert_x(obj, [16])
+        self.assertIn(self.g.KEY, node.node_tree)
+        self.assertNotIn(modifiers.KEY, node.node_tree)
+
+    def test_contained_object_picker_import_and_reassignment(self):
+        graph = {"nodes": {"input": {"type": "modifier_input"},
+                           "source": {"type": "object_input", "params": {"binding": "asset"}},
+                           "copies": {"type": "copy_to_points", "inputs": {"source": "source", "points": "input"}}},
+                 "display": "copies"}
+        path = Path(self.tmp.name) / "object_import.json"
+        path.write_text(json.dumps(graph), encoding="utf-8")
+        obj, source, replacement = self.mesh(), self.mesh("Asset", 4), self.mesh("Replacement", 9)
+        tree, gin, gout = self.tree()
+        node = self.g.add_group(tree, str(path), port=self.engine.port)
+        node.inputs["Object: asset"].default_value = source
+        self.chain(tree, gin, node, gout)
+        self.attach(obj, tree)
+        self.cook()
+        self.assert_x(obj, [5])
+        source.data.vertices[0].co.x = 6
+        source.data.update()
+        self.cook()
+        self.assert_x(obj, [7])
+        node.inputs["Object: asset"].default_value = replacement
+        self.cook()
+        self.assert_x(obj, [10])
+        node.inputs["Object: asset"].default_value = obj
+        self.g.pump(force=True)
+        self.assertIn("cycle", self.g.last_error())
+        self.assert_x(obj, [10])
+
+    def test_live_group_edit_uses_its_wired_mesh_and_updates_only_it(self):
+        import urllib.request
+        from minihou_link import modifiers
+        obj, tree, prefix, first, second = self.mixed()
+        self.cook()
+        # Connection already points to the test engine.
+        server, path = self.g.edit_live(obj, first)
+        self.assertEqual(server["state"], "ready")
+        request = urllib.request.Request(server["editor_url"].rstrip("/") + "/api/edit",
+            data=json.dumps({"ops": [{"op": "set", "id": "t", "params": {"uniform_scale": 3}}],
+                             "wait": True}).encode(), headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(request) as response:
+            result = json.load(response)
+        self.assertNotIn("error", result)
+        self.cook()
+        self.assertEqual(first.inputs["Scale"].default_value, 3)
+        self.assertEqual(second.inputs["Scale"].default_value, 1)
+        self.assert_x(obj, [19])
+
+    def test_native_instances_with_contained_source_and_downstream_realization(self):
+        graph = {"nodes": {"input": {"type": "modifier_input"},
+                           "inst": {"type": "instance", "inputs": {"points": "input"},
+                                    "params": {"objects": "@source", "random_spin": 0, "align": "up"}}},
+                 "display": "inst"}
+        path = Path(self.tmp.name) / "native_instances.json"
+        path.write_text(json.dumps(graph), encoding="utf-8")
+        obj, source = self.mesh(), self.mesh("Asset", 4)
+        tree, gin, gout = self.tree()
+        node = self.g.add_group(tree, str(path), port=self.engine.port)
+        node.inputs["Source Object"].default_value = source
+        realize = tree.nodes.new("GeometryNodeRealizeInstances")
+        suffix = self.native(tree, 2)
+        self.chain(tree, gin, node, realize, suffix, gout)
+        self.attach(obj, tree)
+        self.cook()
+        self.assert_x(obj, [7])
+        source.data.vertices[0].co.x = 6
+        source.data.update()
+        self.cook()
+        self.assert_x(obj, [9])
+        # Copy the group occurrence: source sockets must remain independently editable.
+        other = self.mesh("Second owner", 3)
+        copied = tree.copy()
+        self.attach(other, copied)
+        self.cook()
+        copied_node = next(n for n in other.modifiers[0].node_group.nodes if self.g.is_group(n))
+        asset2 = self.mesh("Second asset", 10)
+        copied_node.inputs["Source Object"].default_value = asset2
+        self.cook()
+        self.assert_x(other, [15])
+        self.assert_x(obj, [9])
+        self.assertNotEqual(copied_node.node_tree[self.g.KEY], node.node_tree[self.g.KEY])
+        saved = Path(self.tmp.name) / "objects_roundtrip.blend"
+        bpy.ops.wm.save_as_mainfile(filepath=str(saved))
+        bpy.ops.wm.open_mainfile(filepath=str(saved))
+        self.g._reset()
+        self.cook()
+        self.assert_x(bpy.data.objects["Second owner"], [15])
+        self.assert_x(bpy.data.objects["Source"], [9])
 
     def rbd_path(self):
         graph = {"version": 1, "nodes": {

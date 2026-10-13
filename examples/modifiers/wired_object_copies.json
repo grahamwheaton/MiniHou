@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "nodes": {
+    "input": {"type": "modifier_input"},
+    "asset": {"type": "object_input", "params": {"binding": "asset"}},
+    "copies": {"type": "copy_to_points", "inputs": {"source": "asset", "points": "input"}},
+    "output": {"type": "output", "inputs": {"geo": "copies"}}
+  },
+  "display": "output"
+}

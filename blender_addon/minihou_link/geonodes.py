@@ -10,6 +10,7 @@ import hashlib
 import json
 import time
 import uuid
+from types import SimpleNamespace
 
 import bpy
 from bpy.app.handlers import persistent
@@ -24,10 +25,12 @@ _busy = False
 _last_error = ""
 _retry_at = 0.0
 _known = set()
+_live = set()
+_source_sent = {}
 
 
 def is_group(node):
-    return node.bl_idname == "GeometryNodeGroup" and node.node_tree is not None and KEY in node.node_tree
+    return node.bl_idname == "GeometryNodeGroup" and node.node_tree is not None and (KEY in node.node_tree or modifiers.KEY in node.node_tree)
 
 
 def contains(tree, seen=None):
@@ -37,7 +40,7 @@ def contains(tree, seen=None):
     if tree.as_pointer() in seen:
         return False
     seen.add(tree.as_pointer())
-    return KEY in tree or any(contains(getattr(n, "node_tree", None), seen) for n in tree.nodes)
+    return KEY in tree or modifiers.KEY in tree or any(contains(getattr(n, "node_tree", None), seen) for n in tree.nodes)
 
 
 def status(node):
@@ -77,6 +80,7 @@ def add_group(tree, graph_path, *, host=None, port=None):
     node.node_tree = ng
     node.label = "MiniHou: " + os.path.basename(path)
     node.width = 240
+    _object_interface(ng)
     return node
 
 
@@ -91,7 +95,120 @@ def reload_graph(node, *, host=None, port=None):
             s.default_value = old[s.name]
     tree[modifiers.GRAPH] = json.dumps(header["graph"])
     tree[modifiers.PARAMS] = json.dumps(header["interface"])
+    _object_interface(tree)
     _digests.pop(tree[KEY], None)
+
+
+def _object_interface(tree):
+    """Use reference comparisons, never Object Info, to activate safe picker sockets."""
+    adapter = SimpleNamespace(node_group=tree)
+    keys = modifiers._object_keys(adapter)
+    saved = json.loads(tree.get("minihou_object_sockets", "{}"))
+    for key in list(saved):
+        if key not in keys:
+            item = next((s for s in proxy._sockets(tree, "INPUT") if s.identifier == saved[key]), None)
+            if item is not None:
+                proxy._remove_input(tree, item)
+            del saved[key]
+    encoded = json.dumps(saved)
+    if tree.get("minihou_object_sockets") != encoded:
+        tree["minihou_object_sockets"] = encoded
+    for key in keys:
+        modifiers._object_socket(adapter, key)
+    proxy._sync_usage_chain(tree, json.loads(tree[modifiers.PARAMS]),
+                            json.loads(tree.get(proxy.MAP_KEY, "{}")))
+
+
+def _bindings(obj, mod, path, node):
+    tree = node.node_tree
+    adapter = SimpleNamespace(node_group=tree)
+    result = {}
+    for key in modifiers._object_keys(adapter):
+        item = modifiers._object_socket(adapter, key)
+        source = _value(mod.node_group, mod, path[:-1], _socket(node.inputs, item.identifier))
+        if source is not None:
+            modifiers._validate_source(obj, source)
+        result[key] = source
+    return result
+
+
+def _sources(client, ident, bindings, materials):
+    import numpy as np
+    sources = {}
+    for key, source in bindings.items():
+        if source is None:
+            continue
+        _, arrays = mesh_reader.read_object(source, bpy.context.evaluated_depsgraph_get())
+        slots = source.evaluated_get(bpy.context.evaluated_depsgraph_get()).data.materials
+        mapping = []
+        for material in slots:
+            material = material.original if material else None
+            if material not in materials:
+                materials.append(material)
+            mapping.append(materials.index(material))
+        if mapping and "prim/material_index" in arrays:
+            arrays["prim/material_index"] = np.asarray(mapping, dtype=np.int32)[
+                np.clip(arrays["prim/material_index"], 0, len(mapping) - 1)]
+        sources[key] = arrays
+    h = hashlib.sha256()
+    for key, arrays in sources.items():
+        h.update(key.encode())
+        for name, array in sorted(arrays.items()):
+            h.update(str((name, array.dtype, array.shape)).encode())
+            h.update(array.tobytes())
+    token = h.hexdigest()
+    if _source_sent.get(ident) != (client, token):
+        client.set_sources(ident, sources)
+        _source_sent[ident] = (client, token)
+    return token
+
+
+def _apply_live(node, header):
+    if not header.get("live"):
+        _live.discard(node.node_tree[KEY])
+        return
+    tree = node.node_tree
+    graph = json.dumps(header["graph"])
+    if tree[modifiers.GRAPH] != graph or tree[modifiers.PARAMS] != json.dumps(header["interface"]):
+        tree[modifiers.GRAPH] = graph
+        tree[modifiers.PARAMS] = json.dumps(header["interface"])
+        proxy.sync_interface(tree, _cache(tree), header["interface"], json.dumps(header["interface"]))
+        _object_interface(tree)
+        for p in header["interface"]:
+            socket = node.inputs.get(p["name"])
+            if socket is not None and not socket.is_linked:
+                socket.default_value = p["value"]
+        _digests.pop(tree[KEY], None)
+    tree[modifiers.PATH] = header["path"]
+
+
+def edit_live(obj, node):
+    """Resolve a unique occurrence on this object's stack, then bind actual wired input."""
+    if obj is None:
+        raise ValueError("Select the mesh object owning this Geometry Nodes network")
+    matches = [(mod, path) for mod in obj.modifiers if mod.type == "NODES" and mod.node_group
+               for path, candidate in _placements(mod.node_group) if candidate == node]
+    if len(matches) != 1:
+        raise ValueError("Select the group on its owning object; cook shared groups before editing")
+    mod, path = matches[0]
+    tree = node.node_tree
+    if KEY not in tree:
+        raise ValueError("Cook Wired Groups first to convert this modifier wrapper")
+    _validate(obj, mod.node_group, mod)
+    client = modifiers._connection()
+    arrays, materials, _ = _probe(obj, mod, path)
+    materials = list(materials)
+    _sources(client, tree[KEY], _bindings(obj, mod, path, node), materials)
+    values = {p["name"]: _value(mod.node_group, mod, path[:-1], node.inputs[p["name"]])
+              for p in json.loads(tree[modifiers.PARAMS])}
+    scene = bpy.context.scene
+    header = client.edit_live(tree[KEY], json.loads(tree[modifiers.GRAPH]), values, arrays,
+                              label=obj.name + " / " + " / ".join(path),
+                              frame=scene.frame_current + scene.frame_subframe,
+                              fps=scene.render.fps / scene.render.fps_base)
+    _live.add(tree[KEY])
+    _apply_live(node, header)
+    return {"state": "ready", "editor_url": client.welcome.get("editor_url", "")}, header["path"]
 
 
 def _private(tree, seen_ids):
@@ -101,11 +218,15 @@ def _private(tree, seen_ids):
     if tree.users - int(tree.use_fake_user) > 1:
         tree = tree.copy()
         tree.use_fake_user = False
+    if modifiers.KEY in tree:
+        tree[KEY] = uuid.uuid4().hex
+        del tree[modifiers.KEY]
     if KEY in tree:
         if tree[KEY] in seen_ids:
             tree[KEY] = uuid.uuid4().hex
         seen_ids.add(tree[KEY])
         _cache(tree)
+        _object_interface(tree)
     else:
         for node in tree.nodes:
             child = getattr(node, "node_tree", None)
@@ -339,6 +460,8 @@ def _signature(tree, arrays, params, materials):
 
 def _cook_tree(obj, mod, host, port, force):
     root = mod.node_group
+    for _, placement in _placements(root):
+        modifiers._disconnect_unsafe_sources(obj, SimpleNamespace(node_group=placement.node_tree))
     _validate(obj, root, mod)
     paths = _order(root)
     active = set(paths)
@@ -364,8 +487,22 @@ def _cook_tree(obj, mod, host, port, force):
                         raise ValueError("RBD requires static input; animated upstream modifiers are unsupported")
             values = {p["name"]: _value(root, mod, path[:-1], node.inputs[p["name"]])
                       for p in json.loads(tree[modifiers.PARAMS])}
+            client = modifiers._connection(host, port)
+            if tree[KEY] in _live:
+                _apply_live(node, client.sync_live(tree[KEY], values))
+                graph = json.loads(tree[modifiers.GRAPH])
+                values = {p["name"]: _value(root, mod, path[:-1], node.inputs[p["name"]])
+                          for p in json.loads(tree[modifiers.PARAMS])}
+            # Validate pickers before evaluating any staged geometry.
+            bindings = _bindings(obj, mod, path, node)
             arrays, materials, info = _probe(obj, mod, path)
-            signature = _signature(tree, arrays, values, materials)
+            materials = list(materials)
+            source_digest = _sources(client, tree[KEY], bindings, materials)
+            signature = _signature(tree, arrays, values, materials) + source_digest
+            names = json.loads(tree.get(proxy.INST_KEY, "[]"))
+            objects = [bindings.get(name[1:]) for name in names]
+            if names:
+                proxy.sync_instances(tree, names, objects=objects)
             ready = "Ready (staged wired input)" + (
                 "; skipped attributes: " + ", ".join(info["skipped"]) if info["skipped"] else "")
             if not force and _digests.get(tree[KEY]) == signature:
@@ -379,8 +516,10 @@ def _cook_tree(obj, mod, host, port, force):
                 fps=scene.render.fps / scene.render.fps_base, graph=graph,
                 materials=[m.name if m is not None else "" for m in materials])
             update = GeoUpdate.from_message(header, output)
-            if update.detail.get("instance_objects"):
-                raise ValueError("Wired groups require mesh output; external object instancing is unsupported")
+            names = update.detail.get("instance_objects", [])
+            if any(not name.startswith("@") for name in names):
+                raise ValueError("Use @binding object inputs for wired group instances")
+            objects = [bindings.get(name[1:]) for name in names]
             mirror = Mirror()
             mirror.apply(update)
             cache = _cache(tree)
@@ -397,6 +536,7 @@ def _cook_tree(obj, mod, host, port, force):
             cache.data = mesh
             if old.users == 0:
                 bpy.data.meshes.remove(old)
+            proxy.sync_instances(tree, names, objects=objects)
             _digests[tree[KEY]] = signature
             _known.add(tree[KEY])
             tree[modifiers.STATUS] = ready
@@ -417,13 +557,15 @@ def _cleanup():
         if KEY in tree and tree.users == 0:
             bpy.data.node_groups.remove(tree)
     used = {tree[KEY] for tree in bpy.data.node_groups if KEY in tree}
-    for ident in (_known | set(_digests)) - used:
+    for ident in (_known | set(_digests) | set(_source_sent) | _live) - used:
         if modifiers._client is not None:
             try:
                 modifiers._client.remove(ident)
             except Exception:
                 pass  # client.close/next cook handles transport failure
         _known.discard(ident)
+        _live.discard(ident)
+        _source_sent.pop(ident, None)
         _digests.pop(ident, None)
     for obj in list(bpy.data.objects):
         if CACHE in obj and obj[CACHE] not in used:
@@ -458,7 +600,7 @@ def pump(host=None, port=None, *, force=False):
             if obj.library or obj.type != "MESH" or CACHE in obj:
                 continue
             for mod in obj.modifiers:
-                if mod.type == "NODES" and contains(mod.node_group):
+                if mod.type == "NODES" and not modifiers.is_modifier(mod) and contains(mod.node_group):
                     tree = _private(mod.node_group, seen)
                     if tree != mod.node_group:
                         mod.node_group = tree
@@ -509,6 +651,8 @@ def last_error():
 def _reset(_dummy=None):
     global _retry_at, _last_error
     _digests.clear()
+    _live.clear()
+    _source_sent.clear()
     _retry_at, _last_error = 0, ""
 
 

@@ -6,7 +6,16 @@ from . import geonodes, modifiers
 def _active(context):
     tree = getattr(context.space_data, "edit_tree", None)
     node = tree.nodes.active if tree else None
-    return node if node and geonodes.is_group(node) else None
+    if node and geonodes.is_group(node):
+        return node
+    # Tab inside the group: recover the occurrence from the editor breadcrumb path.
+    path = getattr(context.space_data, "path", ())
+    if tree and len(path) > 1:
+        parent = path[-2].node_tree
+        candidates = [n for n in parent.nodes if geonodes.is_group(n) and n.node_tree == tree]
+        active = parent.nodes.active
+        return active if active in candidates else candidates[0] if len(candidates) == 1 else None
+    return None
 
 
 class MINIHOU_OT_add_group(bpy.types.Operator):
@@ -60,7 +69,7 @@ class MINIHOU_OT_reload_group(bpy.types.Operator):
 class MINIHOU_OT_edit_group_network(bpy.types.Operator):
     bl_idname = "minihou.edit_group_network"
     bl_label = "Edit Network"
-    bl_description = "Open this placement's graph template in the shared external editor; save then Reload Group Graph"
+    bl_description = "Edit this placement live in MiniHou using its wired Blender geometry"
 
     @classmethod
     def poll(cls, context):
@@ -69,13 +78,14 @@ class MINIHOU_OT_edit_group_network(bpy.types.Operator):
     def execute(self, context):
         from . import _server, network_ui
         try:
-            network_ui.router.start(_server.snapshot(), _active(context).node_tree[modifiers.PATH])
+            server, path = geonodes.edit_live(context.object, _active(context))
+            network_ui.router.start(server, path, live=True)
             if not bpy.app.timers.is_registered(network_ui._redraw):
                 bpy.app.timers.register(network_ui._redraw, first_interval=0.1)
         except Exception as exc:
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
-        self.report({"INFO"}, "Opening graph template; save edits, then Reload Group Graph")
+        self.report({"INFO"}, "Opening live group network")
         return {"FINISHED"}
 
 
@@ -107,7 +117,7 @@ class MINIHOU_PT_geonodes(bpy.types.Panel):
                 box.label(text=text[offset:offset + 55])
             box.operator("minihou.edit_group_network", icon="URL")
             box.operator("minihou.reload_group")
-            box.label(text="Template editing; reload to adopt changes.")
+            box.label(text="Edit Network updates this placement live.")
             from . import network_ui
             state = network_ui.router.snapshot()
             if state["path"] == node.node_tree[modifiers.PATH]:
@@ -119,13 +129,21 @@ class MINIHOU_PT_geonodes(bpy.types.Panel):
 _classes = (MINIHOU_OT_add_group, MINIHOU_OT_reload_group, MINIHOU_OT_edit_group_network, MINIHOU_PT_geonodes)
 
 
+def _context_menu(self, context):
+    if _active(context):
+        self.layout.separator()
+        self.layout.operator("minihou.edit_group_network", icon="NODETREE")
+
+
 def register():
     geonodes.register()
+    bpy.types.NODE_MT_context_menu.append(_context_menu)
     for cls in _classes:
         bpy.utils.register_class(cls)
 
 
 def unregister():
+    bpy.types.NODE_MT_context_menu.remove(_context_menu)
     for cls in reversed(_classes):
         bpy.utils.unregister_class(cls)
     geonodes.unregister()

@@ -38,7 +38,13 @@ Change the native scale, A's Scale, or B's Translate independently. The cube car
 2. Open the Geometry Nodes editor's sidebar (`N`), select **MiniHou**, and choose the graph JSON.
 3. Click **Add MiniHou Group**, then wire both Geometry sockets. The engine graph must use `modifier_input` on its output dependency path.
 4. Set each placement's exposed parameters on its group node. Click **Cook Wired Groups / Stack Now** for deterministic refresh.
-5. Select a placement to inspect its status. **Edit Network** uses the same safe external-editor routing as stack modifiers (Start/reuse a server first). Save there, then **Reload Group Graph** adopts that template for this placement while retaining matching parameter values. Editing is of the template, not live mutation of the stored snapshot. The editor session is shared with other tabs and the legacy proxy.
+5. Select a placement and use **Edit Network** in its right-click menu or MiniHou sidebar. You can also Tab inside the group and use the sidebar action. This opens that occurrence live in the external MiniHou editor with its actual wired input; edits update that occurrence. Linked parameter sockets remain controlled by their enclosing Blender graph. Start the MiniHou app/HTTP editor first. **Reload Group Graph** remains an explicit way to adopt a saved template.
+
+Existing MiniHou modifier groups dropped into another GN tree are recognized and converted to private wired placements on the next cook. The original modifier stays independent when it still uses the source group. This also repairs the previously inert arrangement `Group Input -> MiniHou -> Subdivide Mesh -> Group Output`.
+
+Object-input nodes in the MiniHou graph create object pickers directly on the MiniHou group. Pick independent Blender mesh objects there; for native instances use `@source` or another `@binding` in the MiniHou Instance node. Object inputs can also be linked through enclosing Group Inputs/reroutes. The 5.2 picker activation uses reference comparisons rather than evaluating the chosen object's geometry; unsafe self/cross-MiniHou references are rejected before cooking. On 5.1 Blender may still draw unused object sockets dimly, but values are read by the bridge. Source transforms are ignored, matching the existing source-local import convention. Native modifiers and materials are included.
+
+For a small usable graph, select `examples/modifiers/wired_object_copies.json`: connect a mesh of points to Geometry, choose the source in **Object: asset**, then feed the result into native Subdivide/Transform nodes. Every point receives a realized copy of the source.
 
 Each placement stores a graph snapshot in the blend. Editing a graph file does not silently replace existing snapshots. Duplicate objects/groups receive independent placement identities and caches. Ancestor groups that contain MiniHou placements become private when shared, so independent objects and nested placements cannot overwrite one another's results. Ordinary native groups without placements can remain shared.
 
@@ -46,7 +52,7 @@ Acyclic branches and nested ordinary groups are supported. Connected placements 
 
 ## Supported data and parameters
 
-The bridge accepts mesh geometry. Instances are realized at the input boundary. Remaining curve, point-cloud, volume, grease-pencil, or instance components are rejected instead of silently treated as mesh. Engine output that depends on external object instancing is unsupported for wired groups.
+The bridge accepts mesh geometry. Instances are realized at the input boundary. Remaining curve, point-cloud, volume, grease-pencil, or instance components are rejected instead of silently treated as mesh. Native object instances are supported through contained @binding pickers. Add native Realize Instances downstream when a mesh-only operation requires it. Arbitrary object names are rejected: use bindings.
 
 Named numeric attributes on POINT, CORNER and FACE domains travel as engine point, vertex and primitive attributes. Supported reader types include float, float2/vector, colors, integer, boolean, int-pair and quaternion data. Booleans become integer flags; byte colors become float colors. Render UVs use `uv`; render colors use `Cd` and optional `Alpha`. Material slots and face material indices are preserved. Loose edges become open two-point primitives; their newly added corner/primitive attribute values are zero. Authored custom normals are read as corner `N`; preservation through a particular engine operation depends on that operation.
 
