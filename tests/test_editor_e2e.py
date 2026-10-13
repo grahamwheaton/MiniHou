@@ -1375,6 +1375,26 @@ class EditorE2E(unittest.TestCase):
         ids = sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()"))
         self.assertEqual(ids, ["distance", "inset"])                                          # its arrow and the inset cage are always shown
 
+    def test_guides_outline_the_region_a_node_works_on_and_are_not_handles(self):
+        self.handle_scene("soft_transform", {"center": [0, 0, 0], "radius": 1.5}, "h")
+        self.page.wait_for_function("minihou.preview.guideCount() == 1")
+        self.assertTrue(until(lambda: self.page.locator(".pv-handles .pv-guide").count() == 3))        # three circles of the falloff sphere
+        ids = {t["id"] for t in self.page.evaluate("minihou.preview.handleTips()")}
+        self.assertNotIn("guide:region", ids)                                                         # decoration: nothing to grab
+        self.assertEqual(self.page.locator(".pv-handles .pv-guide").first.evaluate("e => getComputedStyle(e).pointerEvents"), "none")
+        self.node("o").locator(".title").click()                                                      # a node without guides: they go
+        self.page.wait_for_function("minihou.preview.guideCount() == 0")
+
+    def test_the_bounds_helper_outlines_and_measures_the_geometry(self):
+        self.handle_scene("transform", {}, "h")
+        self.assertEqual(self.page.locator(".pv-bounds").count(), 0)
+        self.page.locator("#pv-bounds").check()
+        self.assertTrue(until(lambda: self.page.locator(".pv-handles line.pv-bounds").count() >= 8))
+        labels = self.page.locator(".pv-bounds-label").evaluate_all("els => els.map(e => e.textContent.trim())")
+        self.assertEqual(sorted(labels), ["X 2", "Y 2", "Z 2"])                                        # the 2 x 2 x 2 box
+        self.page.locator("#pv-bounds").uncheck()
+        self.assertTrue(until(lambda: self.page.locator(".pv-bounds").count() == 0))
+
     # ---- the Blender bar: add-on zip to drag, install, open Blender
     def stub_blenders(self, found, install=None, launch=None):
         from minihou import blender_setup

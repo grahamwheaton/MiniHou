@@ -212,6 +212,12 @@ Open:
 - Extra outputs have no modifier or exposed parameters (only the display branch does).
 - More handles (bevel segments, copy_to_points scale). (Done: `@node(handles=[Handle(...)])` for any node, library nodes included, used by tube, helix, line and bend; transform Move / Rotate / Scale tools: rings
   turn about each Euler angle's real axis, scale cubes follow the rotated axes, drags multiply so scale never crosses zero.)
+- Houdini parity audit (`tools/houdini_parity.py`, report in `docs/HOUDINI_PARITY.md`, re-run it after changing nodes). Inputs added from it: group_create / edge_group
+  bounding object, match_size destination size, sweep cross-section, polybevel cross-section curve, bend rest geometry, heightfield_erode mask, curve / bezier
+  pass-through. Still different, by design or for later: a second output (voronoi / boolean fracture constraint geometry: a node has one output port), polyreduce rest / view /
+  curve inputs, polysplit projection curve, points_to_surface collision and mask volumes, lattice_grid's three sources, lsystem leaf inputs, voronoi_fracture_points SDF input.
+  Gizmos and helpers: `Guide` outlines (falloff spheres, planes, axes, bounding boxes) plus handles on circle, torus, grid, soft_transform, twist, squash_stretch, linear_taper, clip,
+  mirror, revolve, uv_project, copy_transform, group_create, match_size; a viewer "bounds" helper. Not yet: handles for the many nodes whose parameters are not spatial.
 - Edge selections are point pairs, so they only stay valid while the geometry upstream keeps its point numbering (as in Houdini).
 
 Not scheduled:

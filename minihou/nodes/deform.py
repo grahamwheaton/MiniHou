@@ -2,7 +2,7 @@
 import numpy as np
 
 from .. import groups, spatial
-from ..sdk import Bool, Float, Handle, Input, Int, Str, Vec3, node
+from ..sdk import Bool, Float, Guide, Handle, Input, Int, Str, Vec3, node
 from . import _build as B
 from .model import compact_points
 from ._util import normalize_rows
@@ -32,7 +32,9 @@ def _frame(direction, up):
     Str("group", "", doc="Only these points"),
 ], handles=[Handle("length", axis="@direction", at="@origin", reach=True, min=1e-6),
             Handle("bend", kind="ring", axis="@up", at="@origin"),
-            Handle("twist", kind="ring", axis="@direction", at="@origin", id="twist_ring")])
+            Handle("twist", kind="ring", axis="@direction", at="@origin", id="twist_ring")],
+      guides=[Guide("line", at="@origin", axis="@direction", size="@length", id="region", label="capture region"),
+              Guide("plane", at="@origin", axis="@direction", id="start", label="capture start")])
 def bend(geo, rest, origin, direction, length, up, bend, twist, taper, group):
     """Bend, twist and taper geometry along an axis (Houdini's Bend SOP). Inside the capture region the shape
     curls into an arc; beyond it, it continues straight along the bent end. N follows the deformation. With rest

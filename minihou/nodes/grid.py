@@ -1,7 +1,7 @@
 import numpy as np
 
 from ..geometry import Geometry
-from ..sdk import Float, Int, Vec3, node
+from ..sdk import Float, Handle, Int, Vec3, node
 
 
 @node("grid", category="source", params=[
@@ -11,7 +11,8 @@ from ..sdk import Float, Int, Vec3, node
     Int("rows", 10, min=2, max=20000, soft_max=1000, label="Rows (points)", proxy="res2"),
     Vec3("center", (0.0, 0.0, 0.0)),
     Vec3("rotate", (0,0,0)), Vec3("scale", (1,1,1)), Float("uniform_scale", 1., min=0),
-])
+], handles=[Handle("size_x", axis="x", at="@center", reach=True, scale=2.0, min=0.0), Handle("size_y", axis="y", at="@center", reach=True, scale=2.0, min=0.0)])
+
 def grid(size_x, size_y, columns, rows, center, rotate=(0,0,0), scale=(1,1,1), uniform_scale=1):
     """Rectangular grid of quads in the XY plane. ``columns``/``rows`` count points per side.
 

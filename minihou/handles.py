@@ -29,22 +29,150 @@ def provider(node_type: str):
 
 
 def has_handles(node_type: str, nt=None) -> bool:
-    """Whether a node type shows handles: a built-in provider and/or ``Handle`` specs declared with ``@node(handles=...)``."""
-    return node_type in PROVIDERS or bool(getattr(nt, "handles", ()))
+    """Whether a node type shows handles or guides: a built-in provider and/or ``Handle`` / ``Guide`` specs declared with
+    ``@node(handles=..., guides=...)``."""
+    return node_type in PROVIDERS or bool(getattr(nt, "handles", ())) or bool(getattr(nt, "guides", ()))
 
 
 def handles_for(node_type: str, inputs: list, output, params: dict, nt=None) -> List[dict]:
     fn = PROVIDERS.get(node_type)
     specs = tuple(getattr(nt, "handles", ()) or ())
-    if (fn is None and not specs) or output is None:
+    gspecs = tuple(getattr(nt, "guides", ()) or ())
+    if (fn is None and not specs and not gspecs) or output is None:
         return []
+    params = {**params, "_inputs": len(inputs)}               # for `when="_inputs=2"`: how many inputs are connected
+    if node_type == "group_create" and len(inputs) > 1 and inputs[1] is not None:       # the bounding object replaces the box parameters
+        from .nodes.group import region_from
+        params["box_center"], params["box_size"] = region_from(inputs[1], params.get("box_center"), params.get("box_size"))
     out: List[dict] = []
-    for make in ([lambda: fn(inputs, output, params)] if fn else []) + ([lambda: declared(specs, output, params)] if specs else []):
+    makers = ([lambda: fn(inputs, output, params)] if fn else []) + ([lambda: declared(specs, output, params)] if specs else [])
+    for make in makers:
         try:                                      # each source on its own: a failing one just shows nothing
             out += [_clean(h) for h in make()]
         except Exception:  # noqa: BLE001 - a gizmo must never break the preview
             continue
+    if gspecs:
+        try:
+            out += declared_guides(gspecs, output, params)
+        except Exception:  # noqa: BLE001 - nor a helper
+            pass
     return out
+
+
+# -- guides: outlines of the regions a node works on ---------------------------------------------------------------------
+GUIDE_COLOURS = {"x": "#ff5d5d", "y": "#4cc38a", "z": "#4aa3ff"}
+MAX_GUIDE_POINTS = 4000
+
+
+def guide(id: str, label: str, lines, color: str = "") -> dict:
+    """A guide item for the viewer: ``lines`` are polylines of world positions (each an (n, 3) array or list)."""
+    return {"id": "guide:" + id, "label": label, "kind": "guide", "color": color, "lines": [np.asarray(l, np.float64).reshape(-1, 3) for l in lines],
+            "param": "", "comp": None, "origin": np.zeros(3), "dir": AXES[0]}
+
+
+def _basis(n):
+    n = np.asarray(n, np.float64)
+    n = n / max(float(np.linalg.norm(n)), 1e-12)
+    a = AXES[0] if abs(n[0]) < 0.9 else AXES[1]
+    u = np.cross(a, n)
+    u /= max(float(np.linalg.norm(u)), 1e-12)
+    return u, np.cross(n, u), n
+
+
+def box_lines(center, size) -> list:
+    c, h = np.asarray(center, np.float64), np.abs(np.asarray(size, np.float64)) / 2.0
+    corners = np.array([[sx, sy, sz] for sz in (-1, 1) for sy in (-1, 1) for sx in (-1, 1)], np.float64) * h + c
+    return [corners[[a, b]] for a, b in ((0, 1), (2, 3), (4, 5), (6, 7), (0, 2), (1, 3), (4, 6), (5, 7), (0, 4), (1, 5), (2, 6), (3, 7))]
+
+
+def circle_lines(center, normal, radius, steps: int = 64) -> list:
+    u, v, _ = _basis(normal)
+    t = np.linspace(0.0, 2.0 * np.pi, steps + 1)
+    return [np.asarray(center, np.float64) + (np.cos(t)[:, None] * u + np.sin(t)[:, None] * v) * float(radius)]
+
+
+def sphere_lines(center, radii) -> list:
+    """Three great circles of a sphere or ellipsoid (radii: a number or one per axis)."""
+    c = np.asarray(center, np.float64)
+    r = np.broadcast_to(np.asarray(radii, np.float64), (3,))
+    t = np.linspace(0.0, 2.0 * np.pi, 65)
+    co, si = np.cos(t), np.sin(t)
+    z = np.zeros_like(t)
+    return [c + np.stack([co * r[0], si * r[1], z], 1), c + np.stack([co * r[0], z, si * r[2]], 1), c + np.stack([z, co * r[1], si * r[2]], 1)]
+
+
+def plane_lines(origin, normal, size) -> list:
+    u, v, n = _basis(normal)
+    o, h = np.asarray(origin, np.float64), float(size) / 2.0
+    ring = np.array([o + (-u - v) * h, o + (u - v) * h, o + (u + v) * h, o + (-u + v) * h, o + (-u - v) * h])
+    return [ring, np.array([o, o + n * h * 0.5])]
+
+
+def _vector(v, params, default=None):
+    if isinstance(v, str):
+        if v.startswith("@"):
+            return params.get(v[1:])
+        return default
+    return v
+
+
+def declared_guides(specs, out, params) -> List[dict]:
+    """The guide items for the ``Guide`` specs of a node type, resolved against the current parameters and the node's output."""
+    from .sdk import HANDLE_AXES, holds
+    c, lo, hi = _bounds(out)
+    extent = max(float(np.linalg.norm(hi - lo) / 2.0), 0.05)
+    res = []
+    for g in specs:
+        if g.when and not holds(g.when, params):
+            continue
+        a = g.at
+        if isinstance(a, str):
+            if a == "center":
+                o = c
+            elif a == "origin":
+                o = np.zeros(3)
+            elif a == "top":
+                o = np.array([c[0], c[1], hi[2]])
+            elif a == "bottom":
+                o = np.array([c[0], c[1], lo[2]])
+            else:
+                o = np.asarray(params[a[1:]], np.float64).reshape(3)
+        else:
+            o = np.asarray(a, np.float64).reshape(3)
+        ax = g.axis
+        if isinstance(ax, str):
+            d = np.asarray(params[ax[1:]], np.float64).reshape(3) if ax.startswith("@") else np.asarray(HANDLE_AXES[ax.lstrip("-")], np.float64) * (-1.0 if ax.startswith("-") else 1.0)
+        else:
+            d = np.asarray(ax, np.float64).reshape(3)
+        if float(np.linalg.norm(d)) < 1e-12:
+            d = AXES[2]
+        size = _vector(g.size, params)
+        if g.shape == "box":
+            s = np.broadcast_to(np.asarray(size if size is not None else (hi - lo), np.float64), (3,))
+            lines = box_lines(o, s)
+        elif g.shape == "bounds":
+            lines = box_lines(c, hi - lo)
+        elif g.shape == "sphere":
+            if size is None:
+                r = extent
+            else:
+                sz = np.asarray(size, np.float64)
+                r = sz if sz.ndim == 0 else np.abs(sz) / 2.0
+            lines = sphere_lines(o, r)
+        elif g.shape == "circle":
+            lines = circle_lines(o, d, float(size) if size is not None else extent)
+        elif g.shape == "plane":
+            lines = plane_lines(o, d, float(size) if size is not None else extent * 2.0)
+        elif g.shape == "line":
+            n = d / np.linalg.norm(d)
+            L = float(size) if size is not None else extent * 2.0
+            lines = [np.array([o, o + n * L])]
+        else:                                                   # axes
+            L = float(size) if size is not None else extent * 0.5
+            lines = [np.array([o, o + AXES[i] * L]) for i in range(3)]
+        col = GUIDE_COLOURS.get(g.color, g.color)
+        res.append(guide(g.key(), g.label or g.key().replace("_", " "), lines, col))
+    return [_clean(h) for h in res]
 
 
 def _bounds(geo):
@@ -58,7 +186,7 @@ def _bounds(geo):
 def declared(specs, out, params) -> List[dict]:
     """Handles for the ``Handle`` specs of a node type (see :class:`minihou.sdk.Handle`), resolved against the current
     parameters and the node's output."""
-    from .sdk import HANDLE_AXES
+    from .sdk import HANDLE_AXES, holds
     c, lo, hi = _bounds(out)
     extent = float(np.linalg.norm(hi - lo) / 2.0)
 
@@ -67,6 +195,8 @@ def declared(specs, out, params) -> List[dict]:
 
     res = []
     for h in specs:
+        if h.when and not holds(h.when, params):
+            continue
         value = params.get(h.param)
         if h.comp is not None:
             value = value[h.comp] if value is not None else None
@@ -108,6 +238,10 @@ def declared(specs, out, params) -> List[dict]:
 
 
 def _clean(h: dict) -> dict:
+    if h.get("kind") == "guide":
+        lines = [[[float(x) for x in p] for p in np.asarray(l, np.float64).reshape(-1, 3)[:MAX_GUIDE_POINTS]] for l in h["lines"][:64]]
+        return {"id": str(h["id"]), "label": str(h.get("label", "")), "kind": "guide", "color": str(h.get("color", "")), "lines": lines,
+                "param": "", "comp": None, "origin": [0.0, 0.0, 0.0], "dir": [1.0, 0.0, 0.0], "scale": 1.0}
     out = dict(h)
     out["origin"] = [float(x) for x in np.asarray(h["origin"], np.float64).reshape(3)]
     d = np.asarray(h["dir"], np.float64).reshape(3)

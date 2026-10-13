@@ -7,7 +7,7 @@ Blender the result is the UV map 'UVMap'.
 import numpy as np
 
 from .. import topo
-from ..sdk import Enum, Float, Str, Vec3, node
+from ..sdk import Enum, Float, Guide, Handle, Str, Vec3, node
 from .normal import prim_normals
 from ._util import euler_xyz_matrix, normalize_rows
 
@@ -44,7 +44,8 @@ def _fix_wrap(u, pv, nprims, on_axis):
     Vec3("scale", (1.0, 1.0, 1.0), doc="Size of one UV tile in the frame (box/planar); height (cylindrical)"),
     Float("rotate_uv", 0.0, soft_min=-180.0, soft_max=180.0, doc="Rotate the UVs about (0.5, 0.5), degrees"),
     Str("group", "", doc="Only these primitives (others keep their uv)"),
-])
+], handles=[Handle("center", kind="arrow", axis="x", at="@center", comp=0, tool="move"), Handle("center", kind="arrow", axis="y", at="@center", comp=1, tool="move"), Handle("center", kind="arrow", axis="z", at="@center", comp=2, tool="move"), Handle("rotate", kind="ring", axis="x", at="@center", comp=0, tool="rotate"), Handle("rotate", kind="ring", axis="y", at="@center", comp=1, tool="rotate"), Handle("rotate", kind="ring", axis="z", at="@center", comp=2, tool="rotate"), Handle("scale", kind="scale", axis="x", at="@center", comp=0, tool="scale"), Handle("scale", kind="scale", axis="y", at="@center", comp=1, tool="scale"), Handle("scale", kind="scale", axis="z", at="@center", comp=2, tool="scale")], guides=[Guide("axes", at="@center", id="frame", label="projection centre")])
+
 def uv_project(geo, method, center, rotate, scale, rotate_uv, group):
     """Project texture coordinates onto the geometry (written as vertex uv, Blender's UV map)."""
     from .. import groups

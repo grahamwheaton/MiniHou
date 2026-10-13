@@ -7,7 +7,7 @@ import numpy as np
 
 from .. import groups, topo
 from ..outgroups import OutGroup, OutGroups
-from ..sdk import Bool, Enum, Float, Str, Vec3, node
+from ..sdk import Bool, Enum, Float, Guide, Handle, Str, Vec3, node
 from . import _build as B
 from .normal import prim_normals
 from ._util import normalize_rows
@@ -205,7 +205,8 @@ MIRROR_OUT = OutGroups(
     Bool("consolidate_seam", True, doc="Weld mirrored points that lie on the plane to the originals"),
     Float("distance", 0.001, min=0.0, soft_max=0.1, doc="How close to the plane a point must be to weld"),
     *MIRROR_OUT.params(),
-])
+], handles=[Handle("origin", axis="x", at="@origin", comp=0), Handle("origin", axis="y", at="@origin", comp=1), Handle("origin", axis="z", at="@origin", comp=2)], guides=[Guide("plane", at="@origin", axis="@normal", id="plane", label="mirror plane")])
+
 def mirror(geo, origin, normal, keep_original, consolidate_seam, distance, **og):
     """Reflect geometry across a plane (Houdini's Mirror). The copy's winding is reversed so it faces outwards, and N
     is reflected."""
@@ -272,7 +273,8 @@ CLIP_OUT = OutGroups(
     Vec3("normal", (0.0, 0.0, 1.0), doc="Plane normal; 'above' is the side it points to"),
     Enum("keep", ["above", "below", "both"], doc="both: cut along the plane and keep both halves (sharing the seam)"),
     *CLIP_OUT.params(),
-])
+], handles=[Handle("origin", axis="x", at="@origin", comp=0), Handle("origin", axis="y", at="@origin", comp=1), Handle("origin", axis="z", at="@origin", comp=2)], guides=[Guide("plane", at="@origin", axis="@normal", id="plane", label="clip plane")])
+
 def clip(geo, origin, normal, keep, **og):
     """Cut polygons with a plane (Houdini's Clip). Cut edges get new points with interpolated attributes; faces
     straddling the plane are trimmed, not deleted. Use polyfill to cap the opening."""

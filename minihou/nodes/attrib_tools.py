@@ -6,7 +6,7 @@ import numpy as np
 
 from .. import groups, spatial, topo
 from ..geometry import rows
-from ..sdk import Bool, Enum, Float, Input, Int, Str, Vec3, node
+from ..sdk import Bool, Enum, Float, Guide, Input, Int, Str, Vec3, node
 from . import _build as B
 from .normal import prim_normals
 from ._util import normalize_rows
@@ -295,7 +295,7 @@ def smooth(geo, iterations, strength, method, pin_boundary, group):
     Bool("scale", False, doc="Scale to the target size"),
     Vec3("size", (1.0, 1.0, 1.0), min=0.0),
     Bool("uniform", True, doc="Keep proportions: the largest fitting uniform scale"),
-])
+], guides=[Guide("box", at="@center", size="@size", when="scale", id="target", label="target size")])
 def match_size(geo, target, translate, center, justify_z, scale, size, uniform):
     """Fit geometry to a target position and size (Houdini's Match Size). A second input replaces the target
     position and size with its own bounding box."""

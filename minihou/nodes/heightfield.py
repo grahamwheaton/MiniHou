@@ -140,7 +140,7 @@ def hydraulic(H, cell, iterations, rain, capacity, erode_rate, deposit_rate, eva
 
 @node("heightfield_erode", inputs=["geo", Input("mask", optional=True, doc="Same-size grid whose float point attribute 'mask' (0..1) says where erosion may "
                                                                        "act: 0 keeps the terrain as it was, 1 erodes fully")],
-      category="terrain", params=[
+      category="terrain", version=2, params=[
     Int("iterations", 30, min=0, soft_max=300, doc="Rounds of rain (each drops 'droplets' droplets)"),
     Int("droplets", 4096, min=1, soft_max=100000),
     Float("rain", 0.01, min=0.0, soft_max=0.1, doc="Water per droplet (scales how much each one can carry)"),

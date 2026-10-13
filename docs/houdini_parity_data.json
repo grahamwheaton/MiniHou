@@ -4,6 +4,7 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -95,6 +96,7 @@
    "category": "attribute",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -353,6 +355,9 @@
    "category": "attribute",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "Tip In order to maintain good performance on time dependent meshes, there is a second input that can be used to specify the geometry at one frame in time (rest geometry)."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -461,6 +466,10 @@
    "category": "attribute",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "Locals \u00b6 Note Variable names ending with 2 refer to the geometry from the second input, if applicable.",
+    "For example, PT2 is the current point number from the second input."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -559,6 +568,10 @@
    "category": "attribute",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "tes from Reference Geometry When this parameter is enabled, attributes from the reference geometry (second input) are inserted before the user-specified ones.",
+    "For example, if the second input has point attributes bar and foo , and the Point Attributes parameter is set to score weight , then"
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -622,6 +635,7 @@
    "category": "attribute",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -690,6 +704,7 @@
    "category": "attribute",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -758,6 +773,7 @@
    "category": "attribute",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -876,6 +892,7 @@
    "category": "attribute",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -984,6 +1001,10 @@
    "category": "deform",
    "handles": true,
    "has_inputs_section": true,
+   "hints": [
+    "Attributes \u00b6 Use Rest Positions If this is on, and the second input is connected, use the point positions in the second input to compute which points are in the captur",
+    "If this is on and the second input is not connected, use a rest point attribute if present (this should be a 3float attribute containi"
+   ],
    "inputs_houdini": [
     {
      "label": "Geometry to Bend",
@@ -1186,6 +1207,7 @@
    "category": "source",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Input Curves",
@@ -1201,7 +1223,13 @@
     }
    ],
    "inputs_ok": false,
-   "inputs_ours": [],
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "geo",
+     "optional": true
+    }
+   ],
    "output_groups_houdini": [],
    "output_groups_ours": [],
    "outputs_houdini": [],
@@ -1526,6 +1554,7 @@
    "category": "group",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -1574,6 +1603,9 @@
    "category": "deform",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "Connect the geometry node(s) you want to use as the target geometry to the second input (input 2) on the Blend Shapes SOP node."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -1697,6 +1729,9 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "Set B Group Use a subset of the second input as the \u201cB\u201d object."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -1880,6 +1915,7 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Geometry to Fracture",
@@ -2068,6 +2104,7 @@
    "category": "generate",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -2216,6 +2253,7 @@
    "category": "source",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Bounding source",
@@ -2269,6 +2307,12 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "You can specify the shape of the bridge by attaching a curve to the second input and setting Spine shape to Curve from second input .",
+    "Curve From Second Input Take the shape of a curve connected to this node\u2019s second input.",
+    "External spine \u00b6 Available when Spine Shape is Curve From Second Input .",
+    "Thickness Attribute If Spine Shape is Curve From Second Input (on the Spine tab), use this attribute on the external curve to control the thickness of the bridge."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -2574,6 +2618,7 @@
    "category": "curve",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -2700,8 +2745,9 @@
   },
   "circle": {
    "category": "source",
-   "handles": false,
+   "handles": true,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [],
@@ -2764,6 +2810,7 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -2865,8 +2912,9 @@
   },
   "clip": {
    "category": "modify",
-   "handles": false,
+   "handles": true,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -2981,6 +3029,7 @@
    "category": "attribute",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -3044,6 +3093,7 @@
    "category": "attribute",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -3122,6 +3172,7 @@
    "category": "curve",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -3180,6 +3231,7 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -3263,6 +3315,10 @@
    "category": "generate",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "0 geometry node Copies geometry in the first input onto the points of the second input.",
+    "Target Points A subset of the target (second input) points to copy onto."
+   ],
    "inputs_houdini": [
     {
      "label": "Geometry to Copy",
@@ -3368,8 +3424,9 @@
   },
   "copy_transform": {
    "category": "combine",
-   "handles": false,
+   "handles": true,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -3438,6 +3495,7 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -3481,6 +3539,7 @@
    "category": "source",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Input Curves",
@@ -3496,7 +3555,13 @@
     }
    ],
    "inputs_ok": false,
-   "inputs_ours": [],
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "geo",
+     "optional": true
+    }
+   ],
    "output_groups_houdini": [],
    "output_groups_ours": [],
    "outputs_houdini": [],
@@ -3816,6 +3881,7 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Input1",
@@ -3994,6 +4060,7 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -4172,6 +4239,7 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -4240,6 +4308,7 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -4308,6 +4377,10 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "Divide has an optional second input for rest geometry.",
+    "When the second input is connected, the Divide node will use the points from the rest geometry to perform convexing."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -4406,6 +4479,7 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -4451,6 +4525,7 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -4484,6 +4559,7 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -4524,6 +4600,12 @@
    "category": "group",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "Bounding Box Group by an axis aligned bounding box, specified either directly or by the second input.",
+    "Bounding Sphere Group by a sphere, either specified directly or by the second input.",
+    "Bounding Object Group points depending if they are inside the second input.",
+    "Bounding Volume Group points depending if they are inside the second input\u2019s volumes or VDBs."
+   ],
    "inputs_houdini": [
     {
      "label": "Source geometry",
@@ -4741,6 +4823,7 @@
    "category": "group",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Input Geometry",
@@ -4849,6 +4932,7 @@
    "category": "deform",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -4902,6 +4986,7 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -5000,6 +5085,7 @@
    "category": "curve",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -5093,6 +5179,7 @@
    "category": "combine",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Initial Geometry",
@@ -5146,6 +5233,12 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "However, with a second input to the node, only points in the first input can be query points and only points in the second input",
+    "When there is a second input connected, this group refers to the second input.",
+    "This parameter is not applicable when a second input is connected, since that geometry cannot be modified.",
+    "ive attribute in the first input, and can be a point, vertex, primitive, or detail attribute in the second input; they do not need to be the same."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -5153,6 +5246,11 @@
      "multi": false,
      "name": "geo",
      "optional": false
+    },
+    {
+     "multi": false,
+     "name": "targets",
+     "optional": true
     }
    ],
    "output_groups_houdini": [],
@@ -5362,6 +5460,7 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Glue Network",
@@ -5490,8 +5589,9 @@
   },
   "grid": {
    "category": "source",
-   "handles": false,
+   "handles": true,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [],
@@ -5547,8 +5647,14 @@
   },
   "group_create": {
    "category": "group",
-   "handles": false,
+   "handles": true,
    "has_inputs_section": true,
+   "hints": [
+    "Bounding Box Group by an axis aligned bounding box, specified either directly or by the second input.",
+    "Bounding Sphere Group by a sphere, either specified directly or by the second input.",
+    "Bounding Object Group points depending if they are inside the second input.",
+    "Bounding Volume Group points depending if they are inside the second input\u2019s volumes or VDBs."
+   ],
    "inputs_houdini": [
     {
      "label": "Source geometry",
@@ -5696,6 +5802,7 @@
    "category": "group",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Source geometry",
@@ -5799,6 +5906,7 @@
    "category": "group",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Input Geometry",
@@ -5907,6 +6015,7 @@
    "category": "group",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Source geometry",
@@ -6040,6 +6149,7 @@
    "category": "terrain",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Terrain to Erode",
@@ -6232,6 +6342,12 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "Connect the curve to the Poly Extrude node\u2019s second input.",
+    "In the Poly Extrude parameters, set Spine Shape to Curve from second input .",
+    "Curve From Second Input Take the shape of a curve connected to this node\u2019s second input.",
+    "External Spine \u00b6 Available when Spine Shape is Curve from second input and the node\u2019s second input is connected."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -6585,6 +6701,7 @@
    "category": "generate",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -6638,6 +6755,10 @@
    "category": "deform",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "Locals \u00b6 Note Variable names ending with 2 refer to the geometry from the second input, if applicable.",
+    "For example, PT2 is the current point number from the second input."
+   ],
    "inputs_houdini": [
     {
      "label": "Data Source",
@@ -6744,6 +6865,10 @@
    "category": "source",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "Locals \u00b6 Note Variable names ending with 2 refer to the geometry from the second input, if applicable.",
+    "For example, PT2 is the current point number from the second input."
+   ],
    "inputs_houdini": [
     {
      "label": "Data Source",
@@ -6839,6 +6964,7 @@
    "category": "source",
    "handles": true,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [],
@@ -6869,13 +6995,14 @@
   },
   "linear_taper": {
    "category": "deform",
-   "handles": false,
+   "handles": true,
    "status": "own"
   },
   "loop_begin": {
    "category": "flow",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Initial Geometry",
@@ -6929,6 +7056,12 @@
    "category": "flow",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "referenced in by the Piece Block Path parameter is set to Method \u25b8 Extract Piece or Point , or the second input of the node is connected.",
+    "Auto Detect from Inputs If a second input is present on the node, the Interation Method \u25b8 By Pieces or Points method is used across the input",
+    "Alternatively, you can connect the geometry that contains the pieces to this node\u2019s second input .",
+    "Input 2 Geometry Pieces to Loop Over."
+   ],
    "inputs_houdini": [
     {
      "label": "Input 1",
@@ -7036,6 +7169,9 @@
    "category": "source",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "t Turtle command 1 J 2 K 3 M If you connect a leaf surface to the L-systems input 1 and a flower to input 2, you can use the following to create a bush with leaves and flowers: Premise A Rule 1 A= [&F"
+   ],
    "inputs_houdini": [
     {
      "label": "Leaf J",
@@ -7275,6 +7411,12 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "On this page Parameters Inputs The reference can be the bounding box of the geometry in the second input, the bounds of a group in the first input, or specified numerically.",
+    "Second Input The bounding box of the second input will be used as reference.",
+    "Input If Wired The second input\u2019s bounding box is used if present.",
+    "Target Group The parts of the second input to use to build a reference bounding box."
+   ],
    "inputs_houdini": [
     {
      "label": "Source Geometry",
@@ -7407,6 +7549,7 @@
    "category": "attribute",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -7500,6 +7643,7 @@
    "category": "combine",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -7525,8 +7669,9 @@
   },
   "mirror": {
    "category": "modify",
-   "handles": false,
+   "handles": true,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -7614,6 +7759,7 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -7917,6 +8063,7 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -7990,6 +8137,7 @@
    "category": "utility",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -8033,6 +8181,7 @@
    "category": "output",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -8060,6 +8209,12 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "Connect the curve to the Poly Extrude node\u2019s second input.",
+    "In the Poly Extrude parameters, set Spine Shape to Curve from second input .",
+    "Curve From Second Input Take the shape of a curve connected to this node\u2019s second input.",
+    "External Spine \u00b6 Available when Spine Shape is Curve from second input and the node\u2019s second input is connected."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -8413,6 +8568,9 @@
    "category": "deform",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "Curves A primitive group on the second input used to specify which curves to map geometry onto."
+   ],
    "inputs_houdini": [
     {
      "label": "Geometry to deform",
@@ -8975,6 +9133,7 @@
    "category": "deform",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -9038,6 +9197,12 @@
    "category": "deform",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "Input 2 Rest point lattice.",
+    "eforming, the node uses the difference between this and the current version of the lattice from the third input.",
+    "Input 3 Deformed point lattice.",
+    "e node compares the point positions in this geometry to their positions in the rest geometry on the second input to know how the lattice is deforming."
+   ],
    "inputs_houdini": [
     {
      "label": "Input 1",
@@ -9149,6 +9314,7 @@
    "category": "deform",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -9197,6 +9363,12 @@
    "category": "deform",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "If a second input is attached, the points are confined to that surface when relaxing, i.",
+    "If no second input is attached, by default, the \u201cN\u201d attribute on the points will be used as if it were the surface nor",
+    "Surface Primitives The primitives from the second input that form the surface that the Points to Relax should be relaxed on.",
+    "n 3D space, instead of relaxing points in 2D planes and optionally projecting onto a surface in the second input."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -9285,6 +9457,12 @@
    "category": "volume",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "Connect the volumes/geometry you want to subtract from the surface to this node\u2019s second input (\u201cCollision objects and volumes\u201d).",
+    "To mask the effect of a filter with a fog volume: Connect the mask volume to this node\u2019s third input (\u201cMask volumes\u201d).",
+    "r mask within the specified world-space offset of any collision objects or volumes connected to the second input.",
+    "Mask Input Use volumes in the geometry connected to this node\u2019s third input (\u201cMask volumes\u201d) to mask the filters."
+   ],
    "inputs_houdini": [
     {
      "label": "Particles and Volumes",
@@ -9621,6 +9799,9 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "Curve Use a curve connected to this node\u2019s second input as a custom cross-section."
+   ],
    "inputs_houdini": [
     {
      "label": "First (Polygons to bevel)",
@@ -9779,6 +9960,12 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "You can specify the shape of the bridge by attaching a curve to the second input and setting Spine shape to Curve from second input .",
+    "Curve From Second Input Take the shape of a curve connected to this node\u2019s second input.",
+    "External spine \u00b6 Available when Spine Shape is Curve From Second Input .",
+    "Thickness Attribute If Spine Shape is Curve From Second Input (on the Spine tab), use this attribute on the external curve to control the thickness of the bridge."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -10069,6 +10256,7 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -10200,6 +10388,12 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "Connect the curve to the Poly Extrude node\u2019s second input.",
+    "In the Poly Extrude parameters, set Spine Shape to Curve from second input .",
+    "Curve From Second Input Take the shape of a curve connected to this node\u2019s second input.",
+    "External Spine \u00b6 Available when Spine Shape is Curve from second input and the node\u2019s second input is connected."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -10542,6 +10736,7 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -10650,6 +10845,7 @@
    "category": "curve",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -10698,6 +10894,11 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "Retain density by view Silhouette When you connect geometry representing view points to the third input, this weight controls how much the node tries to preserve the model\u2019s silhouette(s) as seen from",
+    "Front facing When you connect geometry representing view points to the third input, this weight controls how much the node tries to preserve the polygons visible from the view point(",
+    "ng geometry across multiple frames, you can connect the original, undeformed \u201crest\u201d geometry to the second input to prevent sizzling topology changes across frames."
+   ],
    "inputs_houdini": [
     {
      "label": "Geometry to reduce",
@@ -10867,6 +11068,7 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Input Geometry",
@@ -10982,6 +11184,7 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -11035,6 +11238,12 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "etry in the direction of its normal, and then moves the point to any geometry the ray hits from the second input.",
+    "Append a Ray node to the Point node and connect the Sphere to the right input.",
+    "The first surface of the Collision Source (right input) will be where those points of the grid will rest.",
+    "Average ray The fired rays that hit the second input\u2019s geometry are averaged."
+   ],
    "inputs_houdini": [
     {
      "label": "Ray points or primitives",
@@ -11192,6 +11401,9 @@
    "category": "physics",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "Note You could alternatively use your own bounding geometry by connecting it to the 4th input of this node."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -11605,6 +11817,9 @@
    "category": "physics",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "Existing Constraints Constraints will only be created between pieces with name pairs defined by the second inputs constraint geometry."
+   ],
    "inputs_houdini": [
     {
      "label": "Geometry",
@@ -11754,6 +11969,7 @@
    "category": "physics",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -12014,6 +12230,12 @@
    "category": "physics",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "Use Input Points Use points from the fourth input.",
+    "Input Points The group of points from the fourth input to use.",
+    "Input Geo Uses cutter geometry from the fourth input.",
+    "Use Input Geo Use additional cutter geometry from the fourth input."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -12027,49 +12249,7 @@
     "Pieces Inside Cutting Geometry",
     "Surface Inside Cutting Geometry",
     "Interior Seams",
-    "Exterior Seams",
-    "Enable Chipping",
-    "Chipping Ratio",
-    "Seed",
-    "Randomness",
-    "Corner Ratio",
-    "Corner Depth",
-    "Directional Noise",
-    "Detriangulate",
-    "Detail Size",
-    "Edge Detail",
-    "Noise Height",
-    "Noise Element Size",
-    "Interior Detail",
-    "Noise Amplitude",
-    "Noise Type",
-    "Frequency",
-    "Offset",
-    "Crease Weights",
-    "Weight",
-    "Proxy Geometry",
-    "Max Concavity",
-    "Voxel Size",
-    "Min Radius in Voxels",
-    "Max Radius in Voxels",
-    "Max Spheres",
-    "Search Radius",
-    "Use Tags",
-    "Apply Constraint Properties",
-    "Glue Constraint Name",
-    "Enable Color",
-    "Primary Strength",
-    "Chipping Strength",
-    "Strength Variance",
-    "Switch to Soft Constraint when Broken",
-    "Soft Constraint Name",
-    "Degrees of Freedom",
-    "Stiffness",
-    "Damping Ratio",
-    "Guide Geometry",
-    "Fracture ID",
-    "Treat Geometry As",
-    "Connectivity Partition"
+    "Exterior Seams"
    ],
    "output_groups_ours": [
     "outgrp_inside",
@@ -13529,6 +13709,12 @@
    "category": "physics",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "It will be used as simulation geometry if none is provided in the third input.",
+    "The second input is the constraint geometry, used to instantiate dynamic constraint relationships between simulated",
+    "The third input is the proxy geometry, a simplified representation of the render geometry, better suited for fast s",
+    "The fourth input provides the collision geometry."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -14367,6 +14553,7 @@
    "category": "volume",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Geometry to Divide",
@@ -14514,6 +14701,7 @@
    "category": "curve",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -14632,6 +14820,7 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -14678,8 +14867,9 @@
   },
   "revolve": {
    "category": "generate",
-   "handles": false,
+   "handles": true,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -14805,6 +14995,9 @@
    "category": "generate",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "Connect the deforming geometry to the second input of Attribute Interpolate ."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -14983,6 +15176,9 @@
    "category": "volume",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "Group B The volume primitives to merge in from the second input."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -15076,6 +15272,7 @@
    "category": "attribute",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -15134,6 +15331,12 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "If a second input exists, a \u201cbi-linear skinning\u201d is performed which computes a cross-skin between the faces in the fi",
+    "rst input (U cross-sections) and the faces in the second input (V cross-sections).",
+    "The U face (1st input) is swept along the V face (second input).",
+    "or the bilinear skin: the two U boundaries (1st input) are cross-skinned with the V boundaries (the 2nd input)."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -15220,6 +15423,7 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -15308,6 +15512,7 @@
    "category": "deform",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -15371,6 +15576,7 @@
    "category": "deform",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -15462,8 +15668,9 @@
   },
   "soft_transform": {
    "category": "deform",
-   "handles": false,
+   "handles": true,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -15587,6 +15794,9 @@
    "category": "time",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "The solver\u2019s second, third, and fourth inputs allow you pass extra bits of geometry down to the solver\u2019s SOP network if needed."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -15640,6 +15850,7 @@
    "category": "attribute",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -15748,6 +15959,7 @@
    "category": "source",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [],
@@ -15828,13 +16040,19 @@
   },
   "squash_stretch": {
    "category": "deform",
-   "handles": false,
+   "handles": true,
    "status": "own"
   },
   "subdivide": {
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "The elements of the right input specified by the Creases field are used as creases.",
+    "The Crease Algorithm \u00b6 If there is a second input: If the Override parameter is on, each edge defined in the second input will have its edge crease w",
+    "If the vertex attribute creaseweight exists on the second input, each matching edge in the input will have its crease weight set to the maximum of the vertex attri",
+    "If the primitive attribute creaseweight exists on the second input, each polygon in the second input will set matching edges to the appropriate weights."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -15955,6 +16173,12 @@
    "category": "curve",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "0 Overview \u00b6 This node takes a cross-section curve from the second input, distributes copies of it along a spine curve from the first input, and creates a surface between t",
+    "Instead of using modeled cross-sections connected to the second input, you can use automatic circle, square, or line cross-sections using the Surface Shape parameter.",
+    "If the input has multiple curves, Connecting modeled cross-section curves to the second input is optional.",
+    "Cross Section Group If this is blank, the node uses all curves from the second input, or you can specify a group or set of curves using group syntax ."
+   ],
    "inputs_houdini": [
     {
      "label": "First (Backbone curves)",
@@ -16356,6 +16580,12 @@
    "category": "combine",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "For example, you could use the expression $F - 1 to switch to the first input at frame 1, the second input at frame 2, and so on.",
+    "Use the expression ($F >= 5) to use the first input for the first four frames, and the second input afterward (boolean operators such as >= return 0 for false and 1 for true, so the switch will selec",
+    "geometry () else 0 With this python expression, the switch will use the second input, unless it has an error, in which case it will switch to the first input.",
+    "It tests if the second input (index 1 ) successfully cooks with geometry before returning its index."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -16387,8 +16617,9 @@
   },
   "torus": {
    "category": "source",
-   "handles": false,
+   "handles": true,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [],
@@ -16471,6 +16702,7 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -16594,6 +16826,7 @@
    "category": "source",
    "handles": true,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [],
@@ -16669,8 +16902,9 @@
   },
   "twist": {
    "category": "deform",
-   "handles": false,
+   "handles": true,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Twist Source",
@@ -16729,6 +16963,7 @@
    "category": "output",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -16922,6 +17157,7 @@
    "category": "source",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [],
@@ -17024,6 +17260,7 @@
    "category": "attribute",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -17165,8 +17402,9 @@
   },
   "uv_project": {
    "category": "attribute",
-   "handles": false,
+   "handles": true,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -17270,6 +17508,7 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [
@@ -17306,6 +17545,7 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Geometry to Fracture",
@@ -17477,6 +17717,9 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [
+    "The second input can also accept metaball primitives directly, which will be merged with any copied metaballs to for"
+   ],
    "inputs_houdini": [
     {
      "label": "Geometry for Impact",
@@ -17619,6 +17862,7 @@
    "category": "model",
    "handles": false,
    "has_inputs_section": true,
+   "hints": [],
    "inputs_houdini": [
     {
      "label": "Geometry to Split",
@@ -17709,6 +17953,9 @@
    "category": "modify",
    "handles": false,
    "has_inputs_section": false,
+   "hints": [
+    "You can use v@opinput1_Cd , for example, to read the second input\u2019s v@Cd attribute."
+   ],
    "inputs_houdini": [],
    "inputs_ok": true,
    "inputs_ours": [

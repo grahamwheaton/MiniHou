@@ -136,5 +136,29 @@ class ErodeMaskTests(unittest.TestCase):
             cook({**self.TERRAIN, "e": e}, "e")
 
 
+class CurvePassThroughTests(unittest.TestCase):
+    def test_curve_and_bezier_add_to_the_geometry_they_are_given(self):
+        for kind, params in (("curve", {"points": "0,0,0 1,0,0 1,1,0"}), ("bezier", {})):
+            nodes = {"b": {"type": "box"}, "c": {"type": kind, "inputs": {"geo": "b"}, "params": params}}
+            g = cook(nodes, "c")
+            alone = cook({"c": {"type": kind, "params": params}}, "c")
+            self.assertEqual(g.nprims, 6 + alone.nprims, kind)                      # the box's six faces and the curve
+            self.assertEqual(g.npoints, 8 + alone.npoints, kind)
+
+
+class FuseTargetsTests(unittest.TestCase):
+    def test_second_input_is_the_snap_target(self):
+        nodes = {"a": {"type": "grid", "params": {"size_x": 2, "size_y": 2, "columns": 3, "rows": 3}},
+                 "t": {"type": "box", "params": {"size": (0.4, 0.4, 0.4), "center": (1, 1, 0), "primitive_type": "points"}},
+                 "f": {"type": "fuse", "inputs": {"geo": "a", "targets": "t"}, "params": {"distance": 0.8, "outgrp_fused": True}}}
+        g = cook(nodes, "f")
+        src = cook({"a": nodes["a"]}, "a")
+        moved = np.any(np.abs(g.P - src.P) > 1e-6, axis=1)
+        self.assertEqual(g.npoints, src.npoints)                                  # nothing is welded away
+        self.assertEqual(int(moved.sum()), 1)                                      # only the corner within 0.8 of a target point snapped...
+        t = cook({"t": nodes["t"]}, "t").P
+        self.assertLess(float(np.min(np.linalg.norm(t - g.P[moved][0], axis=1))), 1e-6)   # ...exactly onto one
+
+
 if __name__ == "__main__":
     unittest.main()

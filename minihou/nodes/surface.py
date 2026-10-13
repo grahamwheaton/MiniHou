@@ -5,7 +5,7 @@ from .. import hull as hl
 from .. import topo
 from ..geometry import Geometry
 from ..outgroups import OutGroup, OutGroups
-from ..sdk import Bool, Enum, Float, Int, Str, Vec3, node
+from ..sdk import Bool, Enum, Float, Guide, Handle, Int, Str, Vec3, node
 from . import _build as B
 from ._util import normalize_rows
 from .model import _prim_sel, compact_points
@@ -173,7 +173,8 @@ REVOLVE_OUT = OutGroups(
     Float("start_angle", 0.0, soft_min=-360.0, soft_max=360.0, doc="Where the sweep starts, in degrees (the end is start + angle)"),
     Bool("end_caps", False, doc="Close both ends of a partial revolve with a face per profile (nothing to close at 360 degrees)"),
     *REVOLVE_OUT.params(),
-])
+], handles=[Handle("origin", axis="x", at="@origin", comp=0), Handle("origin", axis="y", at="@origin", comp=1), Handle("origin", axis="z", at="@origin", comp=2), Handle("angle", kind="ring", axis="@axis", at="@origin")], guides=[Guide("line", at="@origin", axis="@axis", id="axis", label="revolve axis")])
+
 def revolve(geo, origin, axis, angle, divisions, start_angle=0.0, end_caps=False, **og):
     """Spin curves (or polygon outlines) around an axis into a surface (Houdini's Revolve): a profile of a vase, a wheel
     or a goblet becomes the solid. Each segment of a profile makes a ring of quads; points on the axis are shared, so a

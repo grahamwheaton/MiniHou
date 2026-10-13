@@ -1,7 +1,7 @@
 import numpy as np
 
 from .. import groups
-from ..sdk import Bool, Float, Int, Str, Vec3, node
+from ..sdk import Bool, Float, Handle, Int, Str, Vec3, node
 from ._util import euler_xyz_matrix, normalize_rows
 
 
@@ -38,7 +38,8 @@ def transform(geo, translate, rotate, scale, uniform_scale, pivot, group="", axi
     Vec3("rotate", (0.0, 0.0, 0.0), doc="Euler XYZ degrees per copy"),
     Float("scale", 1.0, doc="Uniform scale per copy"),
     Vec3("pivot", (0.0, 0.0, 0.0)),
-])
+], handles=[Handle("translate", kind="arrow", axis="x", at="center", comp=0, tool="move"), Handle("translate", kind="arrow", axis="y", at="center", comp=1, tool="move"), Handle("translate", kind="arrow", axis="z", at="center", comp=2, tool="move")])
+
 def copy_transform(geo, copies, translate, rotate, scale, pivot):
     """Copies with an accumulating transform (Houdini's Copy and Transform): stairs, spirals, arrays. Each copy's
     points get the int ``copynum``."""

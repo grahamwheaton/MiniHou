@@ -126,11 +126,14 @@ def bezier_controls(controls, closed=False):
     return out
 
 
-@node("bezier", category="source", params=[
-    Str("controls", BEZIER_DEFAULT, doc="Control points edited with the viewport curve tool"),
-    Bool("closed", False),
-    Int("resolution", 24, min=1, max=1024, doc="Samples per Bezier segment"),
-])
+def _add_to(geo, curves):
+    """The curve on its own, or appended to the geometry on the optional input (Houdini's Curve nodes pass what they are given on)."""
+    if geo is None:
+        return curves
+    from .merge import merge
+    return merge([geo, curves])
+
+
 def bezier(controls, closed, resolution):
     """Editable cubic Bezier curve. Select anchors or tangent handles in the viewport; sweep for a surface."""
     cs = bezier_controls(controls, closed)
@@ -146,6 +149,16 @@ def bezier(controls, closed, resolution):
         parts.append(cs[-1]["p"][None, :])
     P = np.concatenate(parts).astype(np.float32)
     return _curves_geometry(P, [len(P)], [closed])
+
+
+@node("bezier", inputs=[Input("geo", optional=True, doc="Geometry to pass through: the new curve is added to it")], category="source", params=[
+    Str("controls", BEZIER_DEFAULT, doc="Control points edited with the viewport curve tool"),
+    Bool("closed", False),
+    Int("resolution", 24, min=1, max=1024, doc="Samples per Bezier segment"),
+])
+def bezier_node(geo, controls, closed, resolution):
+    """Editable cubic Bezier curve (see ``bezier``); with an input, the curve is added to that geometry."""
+    return _add_to(geo, bezier(controls, closed, resolution))
 
 
 @node("line", category="source", params=[
@@ -180,10 +193,6 @@ def helix(radius, radius_end, height, turns, points):
     return _curves_geometry(P.astype(np.float32), [points], [False])
 
 
-@node("curve", category="source", params=[
-    Str("points", "0,0,0  1,0,0  1,1,0  2,1,1", doc="Point positions 'x,y,z' separated by spaces"),
-    Bool("closed", False),
-])
 def curve(points, closed):
     """A curve through typed-in points (Houdini's Curve SOP, as text)."""
     try:
@@ -193,6 +202,15 @@ def curve(points, closed):
     if P.ndim != 2 or P.shape[1] != 3 or len(P) < 2:
         raise ValueError("give at least two points, each as x,y,z")
     return _curves_geometry(P.astype(np.float32), [len(P)], [bool(closed)])
+
+
+@node("curve", inputs=[Input("geo", optional=True, doc="Geometry to pass through: the new curve is added to it")], category="source", params=[
+    Str("points", "0,0,0  1,0,0  1,1,0  2,1,1", doc="Point positions 'x,y,z' separated by spaces"),
+    Bool("closed", False),
+])
+def curve_node(geo, points, closed):
+    """A curve through typed-in points (Houdini's Curve SOP, as text); with an input, the curve is added to that geometry."""
+    return _add_to(geo, curve(points, closed))
 
 
 # -- conversion -------------------------------------------------------------------------------------------------

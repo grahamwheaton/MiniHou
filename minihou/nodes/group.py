@@ -5,7 +5,7 @@ import numpy as np
 
 from .. import edges as edgelib, groups, topo
 from ..geometry import Geometry, Topology
-from ..sdk import Bool, Enum, Float, Input, Int, Str, Vec3, node
+from ..sdk import Bool, Enum, Float, Guide, Handle, Input, Int, Str, Vec3, node
 from . import _build as B
 from .delete import keep_points
 from .normal import prim_normals
@@ -199,7 +199,21 @@ def _boundary_edge_mask(geo, dom, member):
     Bool("boundary_groups", False, doc="filters: also make '<name>_boundary', the edge group around what was selected"),
     Bool("random_enable", False, doc="filters: Keep by Random Chance (percent and seed above)"),
     Str("seed_attrib", "", doc="filters: a point or primitive attribute that seeds each element separately (empty: by element number)"),
-])
+], handles=[Handle("box_center", axis="x", at="@box_center", comp=0, id="box_center_x", when="method=bounding_box&_inputs!=2"),
+                 Handle("box_center", axis="y", at="@box_center", comp=1, id="box_center_y", when="method=bounding_box&_inputs!=2"),
+                 Handle("box_center", axis="z", at="@box_center", comp=2, id="box_center_z", when="method=bounding_box&_inputs!=2"),
+                 Handle("box_size", axis="x", at="@box_center", comp=0, reach=True, scale=2.0, min=0.0, id="box_size_x", when="method=bounding_box&_inputs!=2"),
+                 Handle("box_size", axis="y", at="@box_center", comp=1, reach=True, scale=2.0, min=0.0, id="box_size_y", when="method=bounding_box&_inputs!=2"),
+                 Handle("box_size", axis="z", at="@box_center", comp=2, reach=True, scale=2.0, min=0.0, id="box_size_z", when="method=bounding_box&_inputs!=2"),
+                 Handle("box_center", axis="x", at="@box_center", comp=0, id="box_center_x_f", when="method=filters&bounds_enable&_inputs!=2"),
+                 Handle("box_center", axis="y", at="@box_center", comp=1, id="box_center_y_f", when="method=filters&bounds_enable&_inputs!=2"),
+                 Handle("box_center", axis="z", at="@box_center", comp=2, id="box_center_z_f", when="method=filters&bounds_enable&_inputs!=2"),
+                 Handle("box_size", axis="x", at="@box_center", comp=0, reach=True, scale=2.0, min=0.0, id="box_size_x_f", when="method=filters&bounds_enable&_inputs!=2"),
+                 Handle("box_size", axis="y", at="@box_center", comp=1, reach=True, scale=2.0, min=0.0, id="box_size_y_f", when="method=filters&bounds_enable&_inputs!=2"),
+                 Handle("box_size", axis="z", at="@box_center", comp=2, reach=True, scale=2.0, min=0.0, id="box_size_z_f", when="method=filters&bounds_enable&_inputs!=2")],
+   guides=[Guide("box", at="@box_center", size="@box_size", when="method=bounding_box", id="region", label="bounding box"),
+           Guide("box", at="@box_center", size="@box_size", when="method=filters&bounds_enable&bounds_type=box", id="region_f", label="bounding region"),
+           Guide("sphere", at="@box_center", size="@box_size", when="method=filters&bounds_enable&bounds_type=sphere", id="region_s", label="bounding region")])
 def group_create(geo, bounds, name, domain, method, pattern, box_center, box_size, direction, angle, percent, seed, combine,
                  base_enable=True, bounds_enable=False, bounds_type="box", bounds_partial=False, normals_enable=False,
                  backface_from="", normals_opposite=False, edges_enable=False, min_edge_angle_on=False, min_edge_angle=20.0,
