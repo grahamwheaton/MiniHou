@@ -73,6 +73,85 @@ class EditorE2E(unittest.TestCase):
     def tearDown(self):
         self.assertEqual(self.errors, [], "browser errors")
 
+    def answer_app_dialog(self, text=None):
+        dialog = self.page.locator(".app-dialog[open]")
+        dialog.wait_for()
+        if text is not None:
+            dialog.locator("input").fill(text)
+        dialog.locator('button[type="submit"]').click()
+
+    def test_application_shell_menus_and_preferences_tabs(self):
+        page = self.page
+        page.wait_for_function('document.querySelector(".node[data-id=out]").getBoundingClientRect().bottom <= document.querySelector("#canvas").getBoundingClientRect().bottom')
+        self.assertTrue(page.locator("#app-menubar").is_visible())
+        self.assertTrue(page.locator("#app-statusbar #cook-status").is_visible())
+        self.assertTrue(page.locator("#blender-bar").is_hidden())
+        page.keyboard.press("F10")
+        self.assertEqual(page.locator('[data-app-menu="File"]').get_attribute("aria-expanded"), "true")
+        page.keyboard.press("ArrowRight")
+        self.assertEqual(page.locator('[data-app-menu="Edit"]').get_attribute("aria-expanded"), "true")
+        page.keyboard.press("Escape")
+        self.assertTrue(page.locator("#app-menu-popup").is_hidden())
+        page.locator('[data-app-menu="View"]').click()
+        page.locator("#app-menu-popup").get_by_role("menuitem", name="Preferences…", exact=True).click()
+        page.locator('[data-preference-tab="network"]').click()
+        self.assertTrue(page.locator("#pref-nodeBackdrop").is_visible())
+        self.assertTrue(page.locator("#pref-background").is_hidden())
+        page.keyboard.press("ArrowLeft")
+        self.assertTrue(page.locator("#pref-background").is_visible())
+        page.get_by_role("button", name="Done", exact=True).click()
+        for width in (1024, 800):
+            page.set_viewport_size({"width": width, "height": 800})
+            self.assertLessEqual(page.evaluate("document.documentElement.scrollWidth"), width)
+            self.assertTrue(page.locator('[data-app-menu="Edit"]').is_visible())
+        page.locator('[data-app-menu="Edit"]').click()
+        page.locator("#app-menu-popup").get_by_role("menuitem", name="Sticky note", exact=True).click()
+        page.wait_for_selector(".sticky-note")
+
+    def test_graph_annotations_and_search(self):
+        page = self.page
+        page.locator('.node[data-id="ground"]').click(button="right")
+        page.locator('#graph-context input[type=color]').evaluate(
+            '(e)=>{e.value="#7733aa";e.dispatchEvent(new Event("change",{bubbles:true}))}')
+        self.assertTrue(until(lambda: self.s.graph.nodes["ground"].meta.get("color") == "#7733aa"))
+        page.keyboard.press("Escape")
+        page.locator("#box-btn").click()
+        page.wait_for_selector(".netbox")
+        page.locator(".netbox .title").click(button="right")
+        page.get_by_role("menuitem", name="Collapse", exact=True).click()
+        page.wait_for_function("!document.querySelector('.node[data-id=ground]')")
+        page.locator("#find-btn").click()
+        page.locator("#node-search input").fill("ground")
+        page.locator("#node-search input").press("Enter")
+        page.wait_for_selector('.node[data-id="ground"]')
+        self.assertFalse(self.s.graph.boxes[0]["collapsed"])
+        page.locator("#note-btn").click()
+        note = page.locator(".sticky-note textarea")
+        note.fill("<script>literal annotation</script>")
+        note.blur()
+        self.assertTrue(until(lambda: any(b.get("text") == "<script>literal annotation</script>" for b in self.s.graph.boxes)))
+        page.locator("#undo-btn").click()
+        self.assertTrue(until(lambda: any(b.get("text") == "Write your note here…" for b in self.s.graph.boxes)))
+
+    def test_preferences_import_validation_and_persistence(self):
+        import json
+        page = self.page
+        page.locator("#preferences-btn").click()
+        page.locator("#preferences-preset").select_option("contrast")
+        self.assertEqual(page.locator("#pref-selectionColor").input_value(), "#ffff00")
+        page.locator("#preferences-file").set_input_files({"name": "prefs.json", "mimeType": "application/json",
+            "buffer": json.dumps({"version": 1, "preferences": {"background": "#445566", "pointSize": 8}}).encode()})
+        page.wait_for_function('document.querySelector("#pref-pointSize").value === "8"')
+        page.locator("#preferences-file").set_input_files({"name": "bad.json", "mimeType": "application/json",
+            "buffer": json.dumps({"version": 1, "preferences": {"pointSize": -1}}).encode()})
+        page.wait_for_function('document.querySelector("#toast").textContent.includes("Invalid preference")')
+        self.assertEqual(page.locator("#pref-pointSize").input_value(), "8")
+        page.get_by_role("button", name="Done", exact=True).click()
+        page.reload()
+        page.locator("#preferences-btn").click()
+        self.assertEqual(page.locator("#pref-background").input_value(), "#445566")
+        self.assertEqual(page.locator("#pref-pointSize").input_value(), "8")
+
     def test_live_modifier_preview(self):
         from minihou.link.server import LinkServer
         from minihou.link.instance_client import InstanceClient
@@ -126,8 +205,8 @@ class EditorE2E(unittest.TestCase):
             "input": {"type": "modifier_input", "pos": [20, 20]},
             "copy": {"type": "copy_to_points", "pos": [20, 260], "inputs": {"points": "input"}}}, "display": "copy"}, check=False))
         self.node("input").locator(".title").click()
-        self.page.once("dialog", lambda d: d.accept("Monkey"))
         self.page.click("#add-modifier-input")
+        self.answer_app_dialog("Monkey")
         self.page.wait_for_selector('.node[data-id="input"] .input-output-label')
         self.assertEqual(self.node("input").locator(".input-output-label").inner_text(), "Monkey")
         child = next(nid for nid, n in self.s.graph.nodes.items() if n.type == "object_input")
@@ -366,12 +445,12 @@ class EditorE2E(unittest.TestCase):
         self.page.mouse.move(gx + 50, gy + 30, steps=5)
         self.page.mouse.up()
         self.assertTrue(until(lambda: self.s.graph.boxes[0]["size"][0] > s0[0] and self.s.graph.boxes[0]["size"][1] > s0[1]))
-        self.page.once("dialog", lambda d: d.accept("Terrain"))
         self.page.locator(".netbox .title").dblclick()
+        self.answer_app_dialog("Terrain")
         self.assertTrue(until(lambda: self.s.graph.boxes[0]["title"] == "Terrain"))
         self.page.wait_for_function("document.querySelector('.netbox .title').textContent === 'Terrain'")
         c0 = self.s.graph.boxes[0]["color"]
-        self.page.locator(".netbox .dot").click()
+        self.page.locator(".netbox .dot").evaluate('(e)=>{e.value="#aa7733";e.dispatchEvent(new Event("input",{bubbles:true}))}')
         self.assertTrue(until(lambda: self.s.graph.boxes[0]["color"] != c0))
         self.page.locator(".netbox .x").click()
         self.assertTrue(until(lambda: self.s.graph.boxes == []))
@@ -820,7 +899,16 @@ class EditorE2E(unittest.TestCase):
         tip=next(t for t in tips if t['id']=='translate_plane')
         box=self.page.locator('#pv-canvas').bounding_box()
         target=self.view_xy('point',0)
+        self.page.evaluate("""() => {
+          const pv=minihou.preview, original=pv.set.bind(pv);
+          window.dragPreviewUpdates=0;
+          pv.set=(...args)=>{original(...args);window.dragPreviewUpdates++;};
+        }""")
         self.page.mouse.move(box['x']+tip['tip'][0],box['y']+tip['tip'][1]);self.page.mouse.down()
+        self.page.mouse.move((box['x']+tip['tip'][0]+target[0])/2,
+                             (box['y']+tip['tip'][1]+target[1])/2,steps=4)
+        self.page.wait_for_function('window.dragPreviewUpdates > 0')
+        np.testing.assert_allclose(self.view_xy('point',0),target,atol=0.1)
         self.page.mouse.move(*target,steps=8);self.page.mouse.up()
         self.page.wait_for_function('minihou.desktopCanClose()')
         n=next(n for n in self.s.graph.nodes.values() if n.type=='transform')
@@ -936,6 +1024,7 @@ class EditorE2E(unittest.TestCase):
     def test_blender_bar_offers_a_zip_download_with_install_instructions(self):
         self.stub_blenders([])
         self.page.reload()
+        self.page.click("#blender-status")
         self.page.wait_for_selector("#blender-bar:not(.hidden)")
         chip = self.page.locator("#bb-zip")
         self.assertEqual(chip.get_attribute("href"), "/addon/minihou_link.zip")
@@ -958,6 +1047,7 @@ class EditorE2E(unittest.TestCase):
                            install=lambda exe, **k: (calls.append(("install", exe)), {"ok": True, "message": "Installed and enabled."})[1],
                            launch=lambda exe, port, host="127.0.0.1": calls.append(("launch", exe, port)))
         self.page.reload()
+        self.page.click("#blender-status")
         self.page.wait_for_selector("#blender-bar:not(.hidden)")
         self.page.wait_for_selector("#bb-pick:not(.hidden)")                                   # two installs: pick one
         self.page.select_option("#bb-pick", "1")
@@ -1706,9 +1796,9 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(self.page.locator("#nodes img, #params img").count(), 0)
 
     def test_new_file_from_the_file_menu(self):
-        self.page.on("dialog", lambda d: d.accept("graphs/fresh.json"))
         self.page.click("#file-btn")
         self.page.locator("#file-menu .fm-foot button", has_text="New graph").click()
+        self.answer_app_dialog("graphs/fresh.json")
         self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == "fresh.json"))
         self.page.wait_for_selector('.node[data-id="grid1"]')
         self.assertTrue(os.path.exists(os.path.join(self.dir, "graphs", "fresh.json")))
@@ -1752,10 +1842,10 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_selector("#file-menu", state="hidden")
 
     def test_save_as_duplicate_rename_delete_and_insert_from_the_browser(self):
-        self.page.on("dialog", lambda d: d.accept(self._answer))
         self._answer = "graphs/saved_copy.json"
         self.open_files()
         self.page.locator(".fm-cur button", has_text="Save As").click()
+        self.answer_app_dialog(self._answer)
         self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == "saved_copy.json"))
         self.assertTrue(os.path.exists(os.path.join(self.dir, "graphs", "saved_copy.json")))
         # duplicate demo.json from its row
@@ -1769,11 +1859,13 @@ class EditorE2E(unittest.TestCase):
         row = self.page.locator('#file-menu .frow[data-path="demo_copy.json"]')
         row.hover()
         row.locator('button[title="Rename"]').click()
+        self.answer_app_dialog(self._answer)
         self.page.wait_for_selector('#file-menu .frow[data-path="demo_renamed.json"]')
         self.assertFalse(os.path.exists(os.path.join(self.dir, "demo_copy.json")))
         row = self.page.locator('#file-menu .frow[data-path="demo_renamed.json"]')
         row.hover()
         row.locator('button[title="Delete"]').click()
+        self.answer_app_dialog()
         self.page.wait_for_function("!document.querySelector('#file-menu .frow[data-path=\"demo_renamed.json\"]')")
         self.assertFalse(os.path.exists(os.path.join(self.dir, "demo_renamed.json")))
         # the open graph has no rename / delete buttons
@@ -1788,13 +1880,13 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: len(self.s.graph.nodes) > before))
 
     def test_ctrl_g_saves_the_selection_as_a_library_node_and_swaps_it_in(self):
-        self.page.on("dialog", lambda d: d.accept("rough_ground"))
         self.node("ground").locator(".title").click()
         self.page.keyboard.down("Shift")
         self.node("hills").locator(".title").click()
         self.page.keyboard.up("Shift")
         total = len(self.s.graph.nodes)
         self.page.keyboard.press("Control+g")
+        self.answer_app_dialog("rough_ground")
         self.assertTrue(until(lambda: "rough_ground" in self.s.evaluator.registry))
         self.assertTrue(until(lambda: any(n.type == "rough_ground" for n in self.s.graph.nodes.values())))
         self.assertTrue(os.path.exists(os.path.join(self.dir, "nodes", "rough_ground.json")))
@@ -2020,8 +2112,8 @@ class EditorE2E(unittest.TestCase):
         self.page.click("#file-btn")
         self.page.wait_for_selector("#file-menu:not(.hidden) .fm-list")
         answers = iter(["exports/demo_out.usda"])
-        self.page.on("dialog", lambda d: d.accept(next(answers, "")) if d.type == "prompt" else d.accept())
         self.page.locator("#file-menu button", has_text="Export USD").click()
+        self.answer_app_dialog("exports/demo_out.usda")
         target = os.path.join(self.dir, "exports", "demo_out.usda")
         self.assertTrue(until(lambda: os.path.isfile(target), 8))
         self.page.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').textContent.includes('Exported')")
@@ -2030,14 +2122,27 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(back.nprims, self.s.latest_good.geo.nprims)
 
     def test_the_disk_cache_is_switched_from_the_proxy_menu(self):
-        self.page.click("#proxy-btn")
+        def open_menu():                                   # the button toggles the menu, so open it only when it is closed
+            for _ in range(5):
+                if self.page.locator("#proxy-menu").is_visible():
+                    return
+                self.page.click("#proxy-btn")
+                try:
+                    self.page.wait_for_selector("#proxy-menu", state="visible", timeout=1500)
+                    return
+                except Exception:  # noqa: BLE001 - the click landed while the menu was closing: try again
+                    pass
+            self.fail("the proxy menu did not open")
+        open_menu()
         self.page.click('#proxy-menu [data-diskcache="on"]')
         self.assertTrue(until(lambda: self.s.disk_cache is not None))
         self.assertTrue(until(lambda: self.page.locator("#proxy-btn").evaluate("b => b.classList.contains('on')")))
-        self.page.click("#proxy-btn")
+        self.page.wait_for_selector("#proxy-menu", state="hidden")
+        open_menu()
         self.page.wait_for_selector('#proxy-menu [data-diskcache="clear"]')
         self.page.click('#proxy-menu [data-diskcache="clear"]')
-        self.page.click("#proxy-btn")
+        self.page.wait_for_selector("#proxy-menu", state="hidden")      # the item closes the menu once the engine has answered
+        open_menu()
         self.page.click('#proxy-menu [data-diskcache="off"]')
         self.assertTrue(until(lambda: self.s.disk_cache is None))
 

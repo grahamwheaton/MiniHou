@@ -39,7 +39,13 @@ def cancellable(fn):
                     session._cooked_rev = session._rev
                     session._idle.notify_all()
                 session._report_error(None, "Cook cancelled (Escape)", session._rev)
-            return {"ok": False, "error": {"message": "Cook cancelled (Escape)"}} if fn.__name__ != "cook_once" else None
+            if fn.__name__ == "cook_once":
+                return None
+            # Preview/inspect callers need the same response envelope when a cook
+            # is interrupted, including during a document switch.
+            node = args[0] if args else kwargs.get("node")
+            return {"ok": False, "node": node, "rev": session._rev,
+                    "error": {"node": node, "message": "Cook cancelled (Escape)"}}
         finally:
             sys.settrace(previous)
     return run

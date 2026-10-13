@@ -156,14 +156,22 @@ def plan_instances(geo: Geometry, source: str, id_attrib: str, max_objects: int)
     else:
         ps = geo.point.get("pscale")
         sc = np.repeat((ps[pick].astype(np.float64) if ps is not None and ps.ndim == 1 else np.ones(len(pick)))[:, None], 3, 1)
-    return {"sources": src_names, "id": ids.tolist(), "src": src_index.tolist(), "loc": np.round(P, 6).tolist(),
+    cols = {"sources": src_names, "id": ids.tolist(), "src": src_index.tolist(), "loc": np.round(P, 6).tolist(),
             "rot": np.round(rot, 7).tolist(), "scale": np.round(sc, 6).tolist()}
+    mats = materials.names(geo)
+    if mats and materials.POINT_ATTR in geo.point:        # set_material on points: each object's own material (its first slot)
+        idx = materials.indices(geo, "point")[pick]
+        col = [mats[i] if 0 <= i < len(mats) else "" for i in idx]
+        if any(col):
+            cols["material"] = col
+    return cols
 
 
 def build_manifest(node_id: str, params: dict, geo: Geometry, key: str):
     """``(header, arrays)``: the message the add-on realises, ``{"type": "scene_objects", "node", "key", "mode", "prefix",
     "collection", ...columns}`` plus binary arrays for ``pieces``. Instance columns: ``sources`` (Blender object names), and per
-    object ``id``, ``src`` (index into sources), ``loc``, ``rot`` (Euler XYZ radians), ``scale``. Piece columns: see
+    object ``id``, ``src`` (index into sources), ``loc``, ``rot`` (Euler XYZ radians), ``scale`` and, when ``set_material`` ran on the
+    points, ``material`` (a name, ``""`` for none). Piece columns: see
     :func:`plan_pieces`."""
     body, arrays = plan(geo, params["mode"], params["source"], params["id_attrib"], params["max_objects"], params["piece_attrib"],
                         params["attributes"])

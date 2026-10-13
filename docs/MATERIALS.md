@@ -21,6 +21,17 @@ name puts the faces back to "not ours". Nothing else in the graph needs to know:
 list and rewrite the indices, so a Wood box merged with a Metal box has faces of each, and copying, deleting, fracturing and
 subdividing keep `material_index` like any other face attribute.
 
+### A material per piece, and per instance
+
+* **Per piece.** Set `index_attrib` to an integer primitive attribute (`piece` after *Assemble*, or one made by *Attribute
+  Randomize*) and list `names` separated by commas: element number *n* gets the name at position *n*, wrapping around. With
+  *Scene Objects* in pieces mode every piece object then has its own material in its slot.
+* **Per instance.** Set `domain` to *points* and run *Set Material* on the points that feed *Scene Objects* (instances mode); the
+  points carry the index as `material_id`. Instances share their source object's mesh, so each one gets an **object-linked first
+  slot** with its own material and the shared mesh is never touched. The source needs at least one material slot (the node logs it
+  when it has none), only the **first** slot is overridden, and an instance the graph stops naming goes back to the source's material.
+  `group` limits which points are named, as for faces.
+
 Fracture and other cutting nodes make new faces that carry no material of ours (index 0, or the face they were cut from). The
 usual use is *fracture, then `set_material` on the `inside` group*.
 
@@ -60,8 +71,8 @@ new file exactly as they were. If the original file is gone, a preview surface i
 
 ## Checked against Blender
 
-Blender 5.1's own USD exporter and importer were run against these files (tests in `tests/test_blender_materials.py`, which need the
-`bpy` module and `usd-core` side by side and so run locally, not in CI): a Blender cube with two materials comes into MiniHou with
+Blender's own USD exporter and importer were run against these files (tests in `tests/test_blender_materials.py`, which need the
+`bpy` module and `usd-core` side by side; they run in the Windows Blender 5.1 and 5.2 CI jobs and locally): a Blender cube with two materials comes into MiniHou with
 both names and the right faces; a MiniHou file with two materials imports into Blender with two slots and the right faces.
 
 ## Not done
@@ -69,6 +80,7 @@ both names and the right faces; a MiniHou file with two materials imports into B
 * **MaterialX / shader authoring.** MiniHou writes no shading beyond the preview colour, on purpose; Hydra and Vulkan are renderer
   concerns and not involved.
 * Materials on **curves and points** (USD binds them, MiniHou does not read or write that).
-* Per-**instance** materials (a linked duplicate shares its source's materials; use *Scene Objects* pieces and `set_material`).
+* Per-instance materials beyond the **first slot** of the source.
+* Per-instance materials **in USD** (a PointInstancer has no per-instance binding here; export pieces or bake the instances).
 * **Textures** are not packed or copied: a referenced material points at the original files.
 * Two different materials that share a name in Blender cannot exist (Blender names are unique); in USD they get suffixes on import.

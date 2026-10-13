@@ -1,5 +1,7 @@
 # MiniHou
 
+See [Editor UI](docs/EDITOR_UI.md) for preferences, context menus, search, sticky notes and frame controls.
+
 The combined Claude/Codex version and node-name compatibility notes are documented in [Master integration](docs/MASTER_INTEGRATION.md).
 
 **Wired Geometry Nodes groups:** MiniHou can now process the actual mesh wired into a group inside a native GN
@@ -576,7 +578,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `solver` | geo | feed each frame's result into the next (simulations, growth): deterministic, incremental playback, substeps |
 | `python` | geo, opinput1..3 | real Python inside the graph: geometry and variables piped in, you set `out`; **off unless the engine runs with `--allow-python`** |
 | `wrangle` | geo | VEX-like snippet over points, primitives or vertices (see below) |
-| `set_material` | geo | give a group of faces a material **by name**; the names travel through merges and booleans into Blender's material slots and USD's material bindings ([docs/MATERIALS.md](docs/MATERIALS.md)) |
+| `set_material` | geo | give a group of faces (or, on the points domain, instances) a material **by name**, or one per piece from an index attribute; the names travel through merges and booleans into Blender's material slots and USD's material bindings ([docs/MATERIALS.md](docs/MATERIALS.md)) |
 | `attribute_delete` | geo | delete attributes by name or wildcard (`N uv tmp_*`) |
 | `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |
 | `normal` | geo | area-weighted point normals, face normals (Newell, n-gon safe), or vertex normals with a cusp angle (hard edges stay sharp; Blender gets custom normals) |
