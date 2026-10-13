@@ -103,6 +103,73 @@ class MaterialPiecesTests(LiveHarness, unittest.TestCase):
             self.assertEqual(set(face_materials(o.data)), {"Rubble"})
 
 
+CYCLE = chunks()
+CYCLE["nodes"]["m"] = {"type": "set_material", "inputs": {"geo": "a"}, "params": {"index_attrib": "piece", "names": "Wood,Metal,Glass"}}
+CYCLE["nodes"]["so"]["inputs"] = {"geo": "m"}
+
+
+@unittest.skipIf(bpy is None, "needs Blender / the bpy module")
+class MaterialPerPieceTests(LiveHarness, unittest.TestCase):
+    def initial_graph(self):
+        return CYCLE
+
+    def test_pieces_take_different_materials_by_their_number(self):
+        self.pump(lambda: len(scene_objs()) > 3 and all(len(o.data.polygons) for o in scene_objs()))
+        want = ["Wood", "Metal", "Glass"]
+        for o in scene_objs():
+            used = {n for n in face_materials(o.data)}
+            self.assertEqual(used, {want[o["minihou_id"] % 3]}, o.name)
+
+
+def instances_graph(material="Red", with_material=True):
+    nodes = {
+        "g": {"type": "grid", "params": {"columns": 4, "rows": 4, "size_x": 10, "size_y": 10}},
+        "p": {"type": "scatter", "inputs": {"geo": "g"}, "params": {"count": 6, "seed": 1}},
+        "i": {"type": "instance", "inputs": {"points": "p"}, "params": {"objects": "Tree", "seed": 3}},
+        "so": {"type": "scene_objects", "inputs": {"geo": "i"}, "params": {"prefix": "Forest"}},
+        "main": {"type": "output", "inputs": {"geo": "g"}}}
+    if with_material:
+        nodes["m"] = {"type": "set_material", "inputs": {"geo": "i"},
+                      "params": {"domain": "points", "group": "@ptnum < 2", "material": material}}
+        nodes["so"]["inputs"] = {"geo": "m"}
+    return {"version": 1, "display": "main", "nodes": nodes}
+
+
+@unittest.skipIf(bpy is None, "needs Blender / the bpy module")
+class MaterialPerInstanceTests(LiveHarness, unittest.TestCase):
+    def initial_graph(self):
+        return instances_graph()
+
+    def setUp(self):
+        super().setUp()
+        self.tree.data.materials.append(bpy.data.materials.new("TreeMat"))
+
+    def slot_names(self):
+        out = {}
+        for o in scene_objs():
+            s = o.material_slots[0]
+            out[o["minihou_id"]] = (s.link, s.material.name if s.material else None)
+        return out
+
+    def test_named_instances_get_their_own_first_slot_and_the_source_keeps_its_material(self):
+        self.pump(lambda: len(scene_objs()) == 6 and self.slot_names().get(0, ("", ""))[1] == "Red")
+        names = self.slot_names()
+        self.assertEqual({k: v for k, v in names.items() if v[1] == "Red"}.keys(), {0, 1})
+        for ident, (link, name) in names.items():
+            if ident > 1:
+                self.assertEqual((link, name), ("DATA", "TreeMat"))
+        self.assertEqual([m.name for m in self.tree.data.materials], ["TreeMat"])              # the shared mesh is untouched
+
+    def test_changing_and_removing_the_material_updates_and_resets_the_instances(self):
+        self.pump(lambda: len(scene_objs()) == 6 and self.slot_names().get(0, ("", ""))[1] == "Red")
+        self.write(instances_graph(material="Blue"))
+        self.pump(lambda: self.slot_names().get(0, ("", ""))[1] == "Blue")
+        self.write(instances_graph(with_material=False))
+        self.pump(lambda: self.slot_names().get(0, ("", ""))[1] == "TreeMat")
+        self.assertEqual({v[0] for v in self.slot_names().values()}, {"DATA"})
+        self.assertFalse(any("minihou_material" in o for o in scene_objs()))
+
+
 MOD_GRAPH = {"version": 1, "display": "o", "nodes": {
     "i": {"type": "modifier_input"},
     "m": {"type": "set_material", "inputs": {"geo": "i"}, "params": {"group": "@primnum < 2", "material": "Painted"}},

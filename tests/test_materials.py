@@ -153,3 +153,74 @@ class PiecesTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PerElementTests(unittest.TestCase):
+    """index_attrib picks a name per element; the points domain gives points (Scene Objects instances) their own."""
+
+    def pieces(self, **params):
+        nodes = {"b": {"type": "box", "params": {"size": [2, 2, 2]}},
+                 "pts": {"type": "voronoi_fracture_points", "inputs": {"geo": "b"}, "params": {"count": 5, "seed": 2}},
+                 "f": {"type": "voronoi_fracture", "inputs": {"geo": "b", "points": "pts"}, "params": {}},
+                 "a": {"type": "assemble", "inputs": {"geo": "f"}, "params": {}},
+                 "m": {"type": "set_material", "inputs": {"geo": "a"}, "params": dict({"index_attrib": "piece", "names": "Wood, Metal ,Glass"}, **params)}}
+        return cook(nodes, "m")
+
+    def test_each_piece_takes_the_name_its_number_picks_wrapping_around(self):
+        geo = self.pieces()
+        piece = geo.prim["piece"].astype(int)
+        lst = M.names(geo)
+        want = ["Wood", "Metal", "Glass"]
+        self.assertEqual([lst[i] for i in M.indices(geo)], [want[p % 3] for p in piece])
+        self.assertGreater(len(set(piece)), 3)                                     # it wrapped
+
+    def test_a_group_limits_which_pieces_are_touched(self):
+        geo = self.pieces(group="@piece == 0")
+        faces = names_per_face(geo)
+        piece = geo.prim["piece"].astype(int)
+        self.assertEqual({f for f, p in zip(faces, piece) if p == 0}, {"Wood"})
+        self.assertEqual({f for f, p in zip(faces, piece) if p != 0}, {""})
+
+    def test_a_missing_attribute_or_names_or_a_float_attribute_is_a_clear_error(self):
+        from minihou.evaluator import NodeError
+        for bad, text in (({"index_attrib": "nope"}, "no primitive attribute"), ({"names": ""}, "list the material names")):
+            with self.subTest(bad=bad), self.assertRaises(NodeError) as cm:
+                self.pieces(**bad)
+            self.assertIn(text, str(cm.exception))
+        nodes = {"b": {"type": "box"}, "w": {"type": "wrangle", "inputs": {"geo": "b"}, "params": {"run_over": "primitives", "snippet": "f@frac = 0.5;"}},
+                 "m": {"type": "set_material", "inputs": {"geo": "w"}, "params": {"index_attrib": "frac", "names": "A,B"}}}
+        with self.assertRaises(NodeError) as cm:
+            cook(nodes, "m")
+        self.assertIn("must be an integer", str(cm.exception))
+
+    def test_points_get_material_id_and_leave_the_faces_alone(self):
+        nodes = {"g": {"type": "grid", "params": {"columns": 3, "rows": 3}},
+                 "p": {"type": "scatter", "inputs": {"geo": "g"}, "params": {"count": 6, "seed": 1}},
+                 "r": {"type": "attribute_randomize", "inputs": {"geo": "p"}, "params": {}},
+                 "m": {"type": "set_material", "inputs": {"geo": "p"}, "params": {"domain": "points", "material": "Leaf"}}}
+        geo = cook(nodes, "m")
+        self.assertEqual(M.names(geo), ["", "Leaf"])
+        self.assertEqual(set(geo.point["material_id"].tolist()), {1})
+        self.assertNotIn("material_index", geo.prim)
+
+    def test_merge_remaps_point_indices_too(self):
+        def pts(name, x):
+            return {f"p{name}": {"type": "scatter", "inputs": {"geo": f"g{name}"}, "params": {"count": 3, "seed": 1}},
+                    f"g{name}": {"type": "grid", "params": {"columns": 2, "rows": 2, "center": [x, 0, 0]}},
+                    f"m{name}": {"type": "set_material", "inputs": {"geo": f"p{name}"}, "params": {"domain": "points", "material": name}}}
+        nodes = {**pts("A", 0), **pts("B", 9), "out": {"type": "merge", "inputs": {"geos": ["mA", "mB"]}}}
+        geo = cook(nodes, "out")
+        lst = M.names(geo)
+        picked = [lst[i] for i in M.indices(geo, "point")]
+        self.assertEqual(sorted(set(picked)), ["A", "B"])
+        self.assertEqual(picked[:geo.npoints // 2].count("A") + picked[geo.npoints // 2:].count("B"), geo.npoints)
+
+    def test_instance_manifest_carries_the_materials_per_object(self):
+        nodes = {"g": {"type": "grid", "params": {"columns": 3, "rows": 3}},
+                 "p": {"type": "scatter", "inputs": {"geo": "g"}, "params": {"count": 6, "seed": 1}},
+                 "m": {"type": "set_material", "inputs": {"geo": "p"},
+                       "params": {"domain": "points", "group": "@ptnum < 2", "material": "Red"}}}
+        geo = cook(nodes, "m")
+        cols = plan(geo, "instances", "Tree", "id", 100)[0]
+        self.assertEqual(cols["material"], ["Red", "Red", "", "", "", ""])
+        self.assertNotIn("material", plan(cook({"g": {"type": "grid"}}, "g"), "instances", "Tree", "id", 100)[0])
