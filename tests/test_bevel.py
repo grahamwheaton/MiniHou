@@ -89,6 +89,38 @@ class CornerPatchTests(unittest.TestCase):
         self.assertTrue(g.prim["group_pointfilletpolys"].dtype.kind in "iu")
 
 
+class CrossSectionTests(unittest.TestCase):
+    """The second input is the bevel's profile: a curve from the first to the last point, bulging towards the corner."""
+
+    def profile(self, height):
+        return {"l": {"type": "line", "params": {"length": 1, "points": 3, "direction": (1, 0, 0)}},
+                "p": {"type": "wrangle", "inputs": {"geo": "l"}, "params": {"snippet": "@P.y = %f * (1 - abs(@P.x - 0.5) * 2);" % height}}}
+
+    def strip_point(self, g, d):
+        P = g.P.astype(np.float64)
+        sel = (np.abs(P[:, 0] - P[:, 1]) < 1e-6) & (P[:, 0] > 0.5 - d + 1e-6) & (P[:, 0] < 0.5 - 1e-6) & (np.abs(P[:, 2] - (0.5 - d)) < 1e-6)
+        self.assertEqual(int(sel.sum()), 1)
+        return P[sel][0]
+
+    def test_profile_curve_sets_the_bulge(self):
+        d = 0.2
+        chord = d * np.sqrt(2)
+        for height in (0.1, 0.3, 0.45):
+            nodes = {"s": {"type": "box"}, **self.profile(height),
+                     "b": {"type": "polybevel", "inputs": {"geo": "s", "profile": "p"}, "params": {"distance": d, "divisions": 2}}}
+            g = cook(nodes, "b")
+            closed_shell(self, g)
+            mid = np.array([0.5 - d / 2] * 2)
+            sag = (self.strip_point(g, d)[:2] - mid)[0] * np.sqrt(2)                 # distance from the chord, along the diagonal
+            self.assertAlmostEqual(sag / chord, height, places=3)
+
+    def test_without_it_the_round_profile_is_unchanged(self):
+        d = 0.2
+        g = bevel({"type": "box"}, distance=d, divisions=2)
+        sag = (self.strip_point(g, d)[0] - (0.5 - d / 2)) * np.sqrt(2)
+        self.assertAlmostEqual(sag / (d * np.sqrt(2)), (1 - np.cos(np.pi / 4)) / np.sqrt(2), places=3)   # quarter circle: sag = r(1 - cos 45), chord = r sqrt 2
+
+
 class PrimitiveTests(unittest.TestCase):
     def test_tube_and_cone(self):
         g = cook({"t": {"type": "tube", "params": {"columns": 24, "rows": 3, "height": 2}}}, "t")

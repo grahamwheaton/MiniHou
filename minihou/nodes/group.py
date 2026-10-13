@@ -5,7 +5,7 @@ import numpy as np
 
 from .. import edges as edgelib, groups, topo
 from ..geometry import Geometry, Topology
-from ..sdk import Bool, Enum, Float, Int, Str, Vec3, node
+from ..sdk import Bool, Enum, Float, Input, Int, Str, Vec3, node
 from . import _build as B
 from .delete import keep_points
 from .normal import prim_normals
@@ -65,6 +65,16 @@ def _edge_normals(geo):
     cos_all = np.einsum("ij,ij->i", N[pv[ok]], n_first[e.of_vertex[ok]])
     np.minimum.at(cosmin, e.of_vertex[ok], cos_all)
     return avg, np.degrees(np.arccos(np.clip(cosmin, -1.0, 1.0)))
+
+
+def region_from(bounds, center, size):
+    """The bounding region of a group node: the bounding box of the optional ``bounds`` input (Houdini's Bounding
+    Object input) when it has points, else the node's own centre and size."""
+    if bounds is not None and bounds.npoints:
+        P = bounds.P.astype(np.float64)
+        lo, hi = P.min(0), P.max(0)
+        return tuple((lo + hi) / 2), tuple(np.maximum(hi - lo, 1e-9))
+    return center, size
 
 
 def _filters(geo, dom, name, p):
@@ -153,7 +163,8 @@ def _boundary_edge_mask(geo, dom, member):
     return both & (e.count == 1)
 
 
-@node("group_create", inputs=["geo"], category="group", params=[
+@node("group_create", inputs=["geo", Input("bounds", optional=True, doc="Bounding object: when connected, its bounding box replaces box_center/box_size")],
+      category="group", params=[
     Str("name", "group1", doc="Group name; wrangles read it as @group_<name>"),
     Enum("domain", ["points", "primitives", "edges"], doc="What the group holds (an edge group is stored like the edge_group node's)"),
     Enum("method", ["pattern", "bounding_box", "normal", "random", "boundary", "filters"],
@@ -189,7 +200,7 @@ def _boundary_edge_mask(geo, dom, member):
     Bool("random_enable", False, doc="filters: Keep by Random Chance (percent and seed above)"),
     Str("seed_attrib", "", doc="filters: a point or primitive attribute that seeds each element separately (empty: by element number)"),
 ])
-def group_create(geo, name, domain, method, pattern, box_center, box_size, direction, angle, percent, seed, combine,
+def group_create(geo, bounds, name, domain, method, pattern, box_center, box_size, direction, angle, percent, seed, combine,
                  base_enable=True, bounds_enable=False, bounds_type="box", bounds_partial=False, normals_enable=False,
                  backface_from="", normals_opposite=False, edges_enable=False, min_edge_angle_on=False, min_edge_angle=20.0,
                  max_edge_angle_on=False, max_edge_angle=20.0, min_edge_length_on=False, min_edge_length=0.0,
@@ -198,6 +209,7 @@ def group_create(geo, name, domain, method, pattern, box_center, box_size, direc
     """Make a named group of points, primitives or edges (stored as the int attribute group_<name>, 1 = member; edge
     groups as edge_group_<name>). Most nodes take a group field, and Blender gets each group as a boolean attribute."""
     dom = DOMAIN[domain]
+    box_center, box_size = region_from(bounds, box_center, box_size)
     if method == "filters" or dom == "edge":
         m = _filters(geo, dom, name, dict(
             pattern=pattern, base_enable=base_enable or method != "filters", bounds_enable=bounds_enable, bounds_type=bounds_type,

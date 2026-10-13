@@ -11,7 +11,7 @@ import numpy as np
 
 from .. import groups, topo
 from ..outgroups import OutGroup, OutGroups
-from ..sdk import Bool, Enum, Float, Handle, Int, Str, Vec3, node
+from ..sdk import Bool, Enum, Float, Handle, Input, Int, Str, Vec3, node
 from . import _build as B
 from ._util import guard_count, normalize_rows
 
@@ -458,17 +458,50 @@ SWEEP_OUT = OutGroups(
 )
 
 
-@node("sweep", inputs=["geo"], category="curve", params=[
+def _section_profile(section):
+    """The first primitive of the cross-section input as 2D points (x, y) about its centroid, whether it is closed, and
+    the v texture coordinate of every point (0..1 along its length)."""
+    t = section.topology
+    sizes = t.prim_sizes()
+    prim = int(np.flatnonzero(sizes >= 2)[0]) if (sizes >= 2).any() else -1
+    if prim < 0:
+        raise ValueError("sweep: the cross-section input has no polygon or curve")
+    o = int(t.prim_offsets[prim])
+    ids = t.vertex_point[o:o + int(sizes[prim])].astype(np.int64)
+    pts = section.P.astype(np.float64)[ids]
+    closed = bool(t.closed_mask()[prim])
+    if closed and len(pts) > 1 and np.allclose(pts[0], pts[-1]):
+        pts = pts[:-1]
+    # the plane the section lies in: Z when it is flat in XY (the Houdini convention), else its best-fit plane
+    c = pts.mean(0)
+    q = pts - c
+    ext = np.ptp(q, axis=0)
+    if ext[2] <= 1e-9 * max(ext.max(), 1e-12):
+        xy = q[:, :2]
+    else:
+        u, sv, vt = np.linalg.svd(q, full_matrices=False)
+        xy = q @ vt[:2].T
+    seg = np.linalg.norm(np.diff(np.vstack([xy, xy[:1]]) if closed else xy, axis=0), axis=1)
+    v = np.r_[0.0, np.cumsum(seg)]
+    v = v / max(v[-1], 1e-30)
+    return xy, closed, v
+
+
+@node("sweep", inputs=["geo", Input("section", optional=True, doc="Cross-section curve or polygon (Houdini's second input); "
+                                                                   "without it the tube is a circle")],
+      category="curve", params=[
     Float("radius", 0.05, min=0.0, soft_max=1.0, doc="Tube radius; multiplied by point 'width' or 'pscale' if present"),
+    Float("section_scale", 1.0, min=0.0, soft_max=10.0, doc="Scale of the connected cross-section (radius is not used then)"),
     Int("divisions", 8, min=3, soft_max=64, doc="Sides around the tube"),
     Bool("caps", True, doc="Close the ends of open curves"),
     Float("twist", 0.0, soft_min=-720.0, soft_max=720.0, doc="Degrees of twist from start to end"),
     *SWEEP_OUT.params(),
 ])
-def sweep(geo, radius, divisions, caps, twist, **og):
+def sweep(geo, section, radius, section_scale, divisions, caps, twist, **og):
     """Tubes along curves (Houdini's Sweep / PolyWire): rotation-minimising frames (no flips), radius scaled by
     point width or pscale, uv along (u) and around (v) the tube, curve point attributes kept on the rings.
-    Closed primitives (closed curves, polygon outlines) make closed rings."""
+    Closed primitives (closed curves, polygon outlines) make closed rings. A second input replaces the circle with
+    its own cross-section (open sections make open sheets, closed ones tubes with caps)."""
     t = geo.topology
     prims = np.flatnonzero(t.prim_sizes() >= 2)
     if not len(prims):
@@ -484,14 +517,29 @@ def sweep(geo, radius, divisions, caps, twist, **og):
     total = np.add.reduceat(seg, first)
     cum = np.cumsum(seg) - seg
     u = (cum - cum[first][curve]) / np.where(total > 0, total, 1.0)[curve]
-    w = np.full(len(vp), radius)
+    w = np.full(len(vp), radius if section is None else section_scale)
     for nm in ("width", "pscale"):
         if nm in geo.point:
             w = w * geo.point[nm].reshape(geo.npoints, -1)[:, 0].astype(np.float64)[vp]
             break
-    D = int(divisions)
-    ang = np.arange(D) * 2 * np.pi / D + np.radians(twist) * u[:, None]
-    ring = P[:, None, :] + w[:, None, None] * (np.cos(ang)[..., None] * N[:, None, :] + np.sin(ang)[..., None] * Bn[:, None, :])
+    if section is None:
+        D = int(divisions)
+        base_ang = np.arange(D) * 2 * np.pi / D
+        sx, sy = np.cos(base_ang), np.sin(base_ang)
+        sec_closed, vcoord = True, np.arange(D + 1) / D
+    else:
+        xy, sec_closed, vcoord = _section_profile(section)
+        sx, sy = xy[:, 0], xy[:, 1]
+        D = len(sx)
+        if D < 2:
+            raise ValueError("sweep: the cross-section needs at least two points")
+        if sec_closed and D < 3:
+            sec_closed = False
+        vcoord = np.r_[vcoord[:D], 1.0] if sec_closed else vcoord
+    tw = np.radians(twist) * u
+    cx = np.cos(tw)[:, None] * sx[None, :] - np.sin(tw)[:, None] * sy[None, :]
+    cy = np.sin(tw)[:, None] * sx[None, :] + np.cos(tw)[:, None] * sy[None, :]
+    ring = P[:, None, :] + w[:, None, None] * (cx[..., None] * N[:, None, :] + cy[..., None] * Bn[:, None, :])
     newP = ring.reshape(-1, 3)
     ring_id = np.arange(len(vp))
     # quads between ring i and the next ring of the same curve
@@ -499,21 +547,23 @@ def sweep(geo, radius, divisions, caps, twist, **og):
     i0 = ring_id[has_next]
     i1 = np.where(local[has_next] == sizes[curve[has_next]] - 1, first[curve[has_next]], i0 + 1)
     j = np.arange(D)
-    a = (i0[:, None] * D + j[None, :]).ravel()
-    b = (i0[:, None] * D + (j[None, :] + 1) % D).ravel()
-    c = (i1[:, None] * D + (j[None, :] + 1) % D).ravel()
-    d = (i1[:, None] * D + j[None, :]).ravel()
+    nseg = D if sec_closed else D - 1                       # an open section leaves its two ends unjoined
+    js = np.arange(nseg)
+    a = (i0[:, None] * D + js[None, :]).ravel()
+    b = (i0[:, None] * D + (js[None, :] + 1) % D).ravel()
+    c = (i1[:, None] * D + (js[None, :] + 1) % D).ravel()
+    d = (i1[:, None] * D + js[None, :]).ravel()
     quads = np.stack([a, b, c, d], 1)
     # uv per corner: u along, v around (the seam closes at v = 1)
-    u0 = np.repeat(u[i0], D)
-    u1 = np.repeat(np.where(i1 == first[curve[i0]], 1.0, u[i1]) if len(i0) else u[i1], D)
-    v0 = np.tile(j / D, len(i0))
-    v1 = np.tile((j + 1) / D, len(i0))
+    u0 = np.repeat(u[i0], nseg)
+    u1 = np.repeat(np.where(i1 == first[curve[i0]], 1.0, u[i1]) if len(i0) else u[i1], nseg)
+    v0 = np.tile(vcoord[js], len(i0))
+    v1 = np.tile(vcoord[js + 1], len(i0))
     uv = np.stack([np.c_[u0, v0], np.c_[u0, v1], np.c_[u1, v1], np.c_[u1, v0]], 1).reshape(-1, 2)
-    prim_src = np.repeat(curve[i0], D)
+    prim_src = np.repeat(curve[i0], nseg)
     polys_vp, sizes_out, uv_parts, prim_parts = [quads.ravel()], [np.full(len(quads), 4)], [uv], [prim_src]
     ncaps = 0
-    if caps:
+    if caps and sec_closed:
         open_c = np.flatnonzero(~closed)
         if len(open_c):
             s_ring = first[open_c]
@@ -522,7 +572,8 @@ def sweep(geo, radius, divisions, caps, twist, **og):
             end_cap = (e_ring[:, None] * D + j[None, :]).ravel()
             polys_vp += [start_cap, end_cap]
             sizes_out += [np.full(len(open_c), D), np.full(len(open_c), D)]
-            cap_uv = np.c_[0.5 + 0.5 * np.cos(j * 2 * np.pi / D), 0.5 + 0.5 * np.sin(j * 2 * np.pi / D)]
+            rng = max(float(np.abs(np.c_[sx, sy]).max()), 1e-12)
+            cap_uv = np.c_[0.5 + 0.5 * sx / rng, 0.5 + 0.5 * sy / rng]
             uv_parts += [np.tile(cap_uv[::-1], (len(open_c), 1)), np.tile(cap_uv, (len(open_c), 1))]
             prim_parts += [open_c, open_c]
             ncaps = len(open_c)

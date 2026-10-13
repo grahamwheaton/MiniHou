@@ -47,6 +47,8 @@ class ExampleGraphTests(unittest.TestCase):
             with self.subTest(example=path.name):
                 geo = quad_geo()
                 params = {"Translate": [3, 0, 0], "Scale": 2} if path.stem == "transform" else {}
+                if path.stem == "wired_object_copies":                    # its source comes from the modifier's object picker
+                    manager.set_sources(path.stem, {"asset": quad_geo()})
                 header, arrays = manager.cook({"instance_id": path.stem, "graph_path": str(path),
                                                "params": params}, geo)
                 if path.stem == "transform":
@@ -55,6 +57,8 @@ class ExampleGraphTests(unittest.TestCase):
                     self.assertEqual(header["detail"]["instance_objects"], ["@source"])
                     self.assertEqual(len(arrays["point/P"]), 24)
                     np.testing.assert_array_equal(arrays["point/instance"], 1)
+                elif path.stem == "wired_object_copies":
+                    self.assertEqual(len(arrays["point/P"]), geo.npoints * quad_geo().npoints)
                 elif path.stem == "repeat_transform":
                     np.testing.assert_allclose(arrays["point/P"], geo.P + [2, 0, 0])
 

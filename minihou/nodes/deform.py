@@ -2,7 +2,7 @@
 import numpy as np
 
 from .. import groups, spatial
-from ..sdk import Bool, Float, Handle, Int, Str, Vec3, node
+from ..sdk import Bool, Float, Handle, Input, Int, Str, Vec3, node
 from . import _build as B
 from .model import compact_points
 from ._util import normalize_rows
@@ -20,7 +20,8 @@ def _frame(direction, up):
     return D, U, S
 
 
-@node("bend", inputs=["geo"], category="deform", params=[
+@node("bend", inputs=["geo", Input("rest", optional=True, doc="Rest geometry: the bend is worked out on these positions (same point count) and applied to the first input")],
+      category="deform", params=[
     Vec3("origin", (0.0, 0.0, 0.0), doc="Start of the capture region"),
     Vec3("direction", (0.0, 0.0, 1.0), doc="Axis of the capture region"),
     Float("length", 1.0, min=1e-6, soft_max=10.0, doc="Length of the capture region along the axis"),
@@ -32,12 +33,17 @@ def _frame(direction, up):
 ], handles=[Handle("length", axis="@direction", at="@origin", reach=True, min=1e-6),
             Handle("bend", kind="ring", axis="@up", at="@origin"),
             Handle("twist", kind="ring", axis="@direction", at="@origin", id="twist_ring")])
-def bend(geo, origin, direction, length, up, bend, twist, taper, group):
+def bend(geo, rest, origin, direction, length, up, bend, twist, taper, group):
     """Bend, twist and taper geometry along an axis (Houdini's Bend SOP). Inside the capture region the shape
-    curls into an arc; beyond it, it continues straight along the bent end. N follows the deformation."""
+    curls into an arc; beyond it, it continues straight along the bent end. N follows the deformation. With rest
+    geometry on the second input the capture region is measured on the rest positions, and only the displacement
+    they undergo is added to the first input (so animated or already-deformed points bend as they were modelled)."""
     D, U, S = _frame(direction, up)
     o = np.asarray(origin, np.float64)
-    P = geo.P.astype(np.float64) - o
+    use_rest = rest is not None and rest.npoints == geo.npoints
+    if rest is not None and not use_rest:
+        raise ValueError(f"bend: the rest geometry has {rest.npoints} points, the input {geo.npoints}")
+    P = (rest if use_rest else geo).P.astype(np.float64) - o
     a, s, u = P @ D, P @ S, P @ U
     t = np.clip(a / length, 0.0, 1.0)
     # twist and taper in the cross-section
@@ -59,6 +65,8 @@ def bend(geo, origin, direction, length, up, bend, twist, taper, group):
         C = np.where((a < 0)[:, None], np.outer(a, D), C)
     newP = o + C + s[:, None] * Ns + u[:, None] * U
     out = geo.copy()
+    if use_rest:
+        newP = geo.P.astype(np.float64) + (newP - (P + o))
     out.point["P"] = newP.astype(np.float32)
     if "N" in geo.point and geo.point["N"].ndim == 2:
         N = geo.point["N"].astype(np.float64)

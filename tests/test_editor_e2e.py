@@ -1372,7 +1372,8 @@ class EditorE2E(unittest.TestCase):
     def test_tool_buttons_are_hidden_for_nodes_without_transform_handles(self):
         self.handle_scene("polyextrude", {"group": "0", "distance": 0.2}, "h")
         self.assertTrue(self.page.locator("#pv-xform").evaluate("e => e.classList.contains('hidden')"))
-        self.assertEqual(len(self.page.evaluate("minihou.preview.handleTips()")), 1)         # its arrow is always shown
+        ids = sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()"))
+        self.assertEqual(ids, ["distance", "inset"])                                          # its arrow and the inset cage are always shown
 
     # ---- the Blender bar: add-on zip to drag, install, open Blender
     def stub_blenders(self, found, install=None, launch=None):

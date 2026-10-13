@@ -2,9 +2,71 @@
   "version": 1,
   "doc": "Small editable sketch examples: a rectangle face, a 3D plane polyline and an eight-sided circle outline. No large copy workloads.",
   "nodes": {
-    "rectangle": {"type":"curve","params":{"points":"0,0,0 3,0,0 3,2,0 0,2,0","closed":true},"pos":[0,0]},
-    "pen": {"type":"curve","params":{"points":"0,0,0 1,0,1 2,0,1 2,0,2","closed":false},"pos":[220,0]},
-    "circle": {"type":"curve","params":{"points":"1,0,0 0.7071068,0.7071068,0 0,1,0 -0.7071068,0.7071068,0 -1,0,0 -0.7071068,-0.7071068,0 0,-1,0 0.7071068,-0.7071068,0","closed":true},"pos":[440,0]}
+    "rectangle": {
+      "type": "curve",
+      "params": {
+        "points": "0,0,0 3,0,0 3,2,0 0,2,0",
+        "closed": true
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "pen": {
+      "type": "curve",
+      "params": {
+        "points": "0,0,0 1,0,1 2,0,1 2,0,2",
+        "closed": false
+      },
+      "pos": [
+        220,
+        0
+      ]
+    },
+    "circle": {
+      "type": "curve",
+      "params": {
+        "points": "1,0,0 0.7071068,0.7071068,0 0,1,0 -0.7071068,0.7071068,0 -1,0,0 -0.7071068,-0.7071068,0 0,-1,0 0.7071068,-0.7071068,0",
+        "closed": true
+      },
+      "pos": [
+        440,
+        0
+      ]
+    },
+    "all": {
+      "type": "merge",
+      "inputs": {
+        "geos": [
+          "rectangle",
+          "pen",
+          "circle"
+        ]
+      },
+      "pos": [
+        300,
+        400
+      ]
+    },
+    "size": {
+      "type": "transform",
+      "inputs": {
+        "geo": "all"
+      },
+      "params": {},
+      "pos": [
+        300,
+        520
+      ]
+    }
   },
-  "display":"rectangle"
+  "display": "size",
+  "exposed": [
+    {
+      "name": "Scale",
+      "node": "size",
+      "param": "uniform_scale"
+    }
+  ]
 }

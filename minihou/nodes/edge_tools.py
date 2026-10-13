@@ -3,7 +3,7 @@ import numpy as np
 from .. import edges, groups, topo
 from ..geometry import Geometry, Topology
 from ..outgroups import OutGroup, OutGroups
-from ..sdk import Bool, Enum, Float, Int, Str, node
+from ..sdk import Bool, Enum, Float, Input, Int, Str, node
 from . import _build as B
 
 
@@ -28,13 +28,15 @@ def crease(geo, domain, group, sharpness):
     return out
 
 
-@node('edge_group', inputs=['geo'], category='group', params=[
+@node('edge_group', inputs=['geo', Input('bounds', optional=True, doc='Bounding object for the bounding_object method')],
+      category='group', params=[
     Str('name', 'edges'),
-    Enum('method', ['pattern', 'boundary', 'points', 'primitives']),
+    Enum('method', ['pattern', 'boundary', 'points', 'primitives', 'bounding_object'],
+         doc='bounding_object: edges with both ends inside the bounding box of the second input'),
     Str('pattern', '*', doc='Edges: ids/ranges, p0-1 pairs, names, wildcards, ^exclusions. Other methods: point/primitive group pattern.'),
     Enum('combine', ['replace', 'union', 'intersect', 'subtract']),
 ])
-def edge_group(geo, name, method, pattern, combine):
+def edge_group(geo, bounds, name, method, pattern, combine):
     """Create a derived edge group; stored as edge_group_<name> on outgoing corners for protocol compatibility."""
     groups.attr_name(name)
     e = topo.edges(geo)
@@ -42,6 +44,14 @@ def edge_group(geo, name, method, pattern, combine):
         m = edges.mask(geo, pattern)
     elif method == 'boundary':
         m = e.count == 1
+    elif method == 'bounding_object':
+        if bounds is None or not bounds.npoints:
+            raise ValueError('edge_group: connect the bounding object to the second input')
+        P = bounds.P.astype(np.float64)
+        lo, hi = P.min(0), P.max(0)
+        Q = geo.P.astype(np.float64)
+        inside = np.all((Q >= lo - 1e-9) & (Q <= hi + 1e-9), axis=1)
+        m = inside[e.points].all(axis=1)
     else:
         domain = 'point' if method == 'points' else 'prim'
         sel = groups.mask(geo, domain, pattern)
