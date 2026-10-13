@@ -280,9 +280,13 @@ window.MiniPaint = (pv, canvas, host) => {
     return out;
   }
   const specNow = () => ({ attr: st.attr, domain: st.domain, kind: kindOf() });
+  let lastNode = null;
   function target(spec) {                                          // the paint node to write to: the viewed one when it matches, else a new one after it
     const v = host.viewedNode(), info = v && host.nodeInfo(v);
-    if (info && info.type === "attrib_paint" && info.params.attribute === spec.attr && info.params.domain === spec.domain && info.params.kind === spec.kind) return { id: v };
+    const fits = (i) => !!i && i.type === "attrib_paint" && i.params.attribute === spec.attr && i.params.domain === spec.domain && i.params.kind === spec.kind;
+    if (fits(info)) return { id: v };
+    const last = lastNode && host.nodeInfo(lastNode);                // the node the previous edit made, before the view has caught up with it
+    if (fits(last)) return { id: lastNode };
     return { id: null, after: v };
   }
   async function writeOps(spec, extra) {                           // extra: paint_assign ops without the node id
@@ -295,7 +299,7 @@ window.MiniPaint = (pv, canvas, host) => {
     }
     for (const op of extra) ops.push({ ...op, op: "paint_assign", id });
     const r = await host.edit(ops);
-    if (r) host.select([id]);
+    if (r) { lastNode = id; host.select([id]); }
     return r ? id : null;
   }
   async function commit(ids) {
