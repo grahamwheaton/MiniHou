@@ -83,6 +83,58 @@ class EditorE2E(unittest.TestCase):
             dialog.locator("input").fill(text)
         dialog.locator('button[type="submit"]').click()
 
+    def test_lattice_result_handles_edit_deformed_cage(self):
+        graph={'version':1,'nodes':{'b':{'type':'box'},'rest':{'type':'lattice_grid'},'cage':{'type':'lattice_grid'},'l':{'type':'lattice','inputs':{'geo':'b','rest':'rest','deformed':'cage'}}},'display':'l'}
+        self.s.edit([{'op':'replace','graph':graph}])
+        self.page.wait_for_selector('.node[data-id="l"]')
+        self.node('l').locator('.title').click()
+        self.page.wait_for_function("minihou.preview.handleTips().some(h=>h.id==='control_0_0')")
+        self.drag_handle('control_0_0',35)
+        self.assertTrue(until(lambda:'offsets' in self.s.graph.nodes['cage'].params))
+        import json
+        values=json.loads(self.s.graph.nodes['cage'].params['offsets'])
+        self.assertNotEqual(values[0],0)
+        self.assertNotIn('offsets',self.s.graph.nodes['rest'].params)
+
+    def test_control_shortest_path_and_alt_ring(self):
+        self.box_scene()
+        self.page.click('#preview [data-mode="point"]')
+        self.page.mouse.click(*self.view_xy('point',self.top_points[0]))
+        self.page.keyboard.down('Control')
+        target=next(v for v in self.top_points if v!=self.top_points[0] and tuple(sorted([v,self.top_points[0]])) not in self.top_edges)
+        self.page.mouse.click(*self.view_xy('point',target))
+        self.page.keyboard.up('Control')
+        self.assertGreaterEqual(len(self.selection()['points']),3)
+        self.page.click('#preview [data-mode="edge"]')
+        self.page.keyboard.down('Control');self.page.keyboard.down('Alt')
+        self.page.mouse.click(*self.view_xy('edge',self.top_edges[0]))
+        self.page.keyboard.up('Alt');self.page.keyboard.up('Control')
+        self.assertEqual(len(self.selection()['edges']),4)
+
+    def test_blender_navigation_default_and_middle_mouse(self):
+        self.box_scene()
+        self.assertEqual(self.page.evaluate('minihou.preview.opt.navigation'),'blender')
+        r=self.page.locator('#pv-canvas').bounding_box()
+        self.page.mouse.move(r['x']+30,r['y']+30)
+        yaw=self.page.evaluate('minihou.preview.view.yaw')
+        self.page.mouse.down(button='middle');self.page.mouse.move(r['x']+95,r['y']+45);self.page.mouse.up(button='middle')
+        self.assertNotEqual(yaw,self.page.evaluate('minihou.preview.view.yaw'))
+
+    def test_loop_cut_modal_commit_and_cancel(self):
+        self.box_scene()
+        xy=self.view_xy('edge',[self.top_points[0],self.top_points[1]])
+        self.page.mouse.move(*xy);self.page.keyboard.press('Control+r')
+        self.page.mouse.move(xy[0]+1,xy[1]+1)
+        self.page.mouse.click(xy[0]+1,xy[1]+1)
+        self.page.mouse.move(xy[0]+25,xy[1]+1)
+        self.page.mouse.click(xy[0]+25,xy[1]+1)
+        self.assertTrue(until(lambda:any(n.type=='polysplit' for n in self.s.graph.nodes.values())))
+        n=next(n for n in self.s.graph.nodes.values() if n.type=='polysplit')
+        self.assertTrue(n.params['split_edges'].startswith('p'))
+        before=len(self.s.graph.nodes)
+        self.page.keyboard.press('Control+r');self.page.keyboard.press('Escape')
+        self.assertEqual(len(self.s.graph.nodes),before)
+
     def test_wasd_right_mouse_moves_without_editing_and_stops(self):
         self.two_boxes();self.page.wait_for_timeout(200)
         r=self.page.locator('#pv-canvas').bounding_box();x,y=r['x']+100,r['y']+100
@@ -778,7 +830,7 @@ class EditorE2E(unittest.TestCase):
     def test_a_lone_edge_cannot_be_bevelled_and_the_error_says_why(self):
         self.box_scene()
         self.page.click('#preview [data-mode="edge"]')
-        self.page.mouse.click(*self.view_xy("edge", list(self.top_edges[0])))
+        self.page.mouse.click(*self.view_xy("edge", list([self.top_points[0],self.top_points[1]])))
         self.assertEqual(len(self.selection()["edges"]), 1)
         self.page.keyboard.press("b")                                                        # the shortcut, with the mouse over the view
         self.assertTrue(until(lambda: "polybevel1" in self.s.graph.nodes))
@@ -796,9 +848,11 @@ class EditorE2E(unittest.TestCase):
         self.page.mouse.move(canvas["x"] + canvas["width"] - 4, canvas["y"] + canvas["height"] - 4, steps=6)
         self.page.mouse.up()
         self.assertEqual(self.selection()["faces"], list(range(6)))
-        self.page.keyboard.down("Control")                                                    # Ctrl-click takes one away
+        self.page.keyboard.down("Shift")
+        self.page.keyboard.down("Control")                                                    # Ctrl+Shift-click subtracts
         self.page.mouse.click(*self.view_xy("face", self.top))
         self.page.keyboard.up("Control")
+        self.page.keyboard.up("Shift")
         self.assertEqual(len(self.selection()["faces"]), 5)
         self.page.click('#pv-actions button[data-action="Extrude"]')
         self.assertTrue(until(lambda: "polyextrude1" in self.s.graph.nodes))
@@ -832,6 +886,7 @@ class EditorE2E(unittest.TestCase):
 
     def test_orbit_still_works_with_alt_or_middle_mouse_in_a_selection_mode(self):
         self.box_scene()
+        self.page.evaluate("minihou.preview.opt.navigation='houdini'")
         self.page.click('#preview [data-mode="face"]')
         before = self.page.evaluate("minihou.preview.view.yaw")
         box = self.page.locator("#pv-canvas").bounding_box()

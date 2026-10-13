@@ -170,7 +170,7 @@ window.MiniHouPreview = (() => {
 
     const view = { yaw: -0.6, pitch: 0.45, dist: 5, target: [0, 0, 0], ortho: false };
     const PITCH_MAX = 1.5707, FOV = Math.PI / 4, ORTHO_FOV = 0.03;     // "orthographic" is a very narrow lens far away: the same maths, so picking and handles keep working
-    const opt = { shaded: true, edges: true, points: false, normals: false, grid: true, background: "#212429", gridOpacity: 1, axes: true, lighting: 1, pointSize: 4, gridSpacing: 0 };
+    const opt = { navigation: "blender", orbitDepth: true, shaded: true, edges: true, points: false, normals: false, grid: true, background: "#212429", gridOpacity: 1, axes: true, lighting: 1, pointSize: 4, gridSpacing: 0 };
     let data = { npoints: 0, ntris: 0, nedges: 0, hasCd: false, bounds: [[-1, -1, -1], [1, 1, 1]] };
     let raw = null;                                                  // the geometry's typed arrays, for picking
     let raf = 0;
@@ -316,6 +316,36 @@ window.MiniHouPreview = (() => {
     function pickFace(cam, sx, sy) {
       const hit = raycast(cam.eye, rayAt(cam, sx, sy));
       return hit ? raw.triPrim[hit.tri] : -1;
+    }
+    function quadStrip(edge,ring=true) {
+      const es=[];for(let i=0;i<raw.edge.length;i+=2)es.push([raw.edge[i],raw.edge[i+1]]);
+      const faces=new Map();for(let i=0;i<raw.tri.length;i+=3){const f=raw.triPrim[i/3];if(!faces.has(f))faces.set(f,new Set());for(let j=0;j<3;j++)faces.get(f).add(raw.tri[i+j]);}
+      const incident=e=>[...faces.values()].filter(v=>v.has(e[0])&&v.has(e[1]));
+      const found=new Map([[edgeKey(...edge),edge]]),queue=[edge];
+      for(let i=0;i<queue.length;i++){
+        const e=queue[i],fs=incident(e);if(fs.length>2)continue;
+        let next=[];
+        if(ring)for(const f of fs){if(f.size!==4)continue;const opposite=es.find(o=>f.has(o[0])&&f.has(o[1])&&!o.some(v=>e.includes(v)));if(opposite)next.push(opposite);}
+        else for(const v of e){const at=es.filter(o=>o.includes(v));if(at.length!==4)continue;next.push(...at.filter(o=>!o.some(x=>x!==v&&e.includes(x))&&!fs.some(f=>f.has(o[0])&&f.has(o[1]))));}
+        for(const n of next){const k=edgeKey(...n);if(!found.has(k)){found.set(k,n);queue.push(n);}}
+      }return [...found.values()];
+    }
+    function pathPick(sx,sy,how) {
+      const cam=camera(), edges=[];for(let i=0;i<raw.edge.length;i+=2)edges.push([raw.edge[i],raw.edge[i+1]]);
+      const faces=new Map();for(let i=0;i<raw.tri.length;i+=3){const f=raw.triPrim[i/3];if(!faces.has(f))faces.set(f,new Set());for(let j=0;j<3;j++)faces.get(f).add(raw.tri[i+j]);}
+      const mode=sel.mode, target=mode==='point'?pickPoint(cam,sx,sy,12):mode==='edge'?pickEdge(cam,sx,sy,8):pickFace(cam,sx,sy);
+      const key=v=>Array.isArray(v)?edgeKey(...v):v, selected=mode==='point'?[...sel.point]:mode==='edge'?[...sel.edge.values()]:[...sel.face];
+      if(target===null||target===undefined||target===-1)return;
+      if(!selected.length){api.pickAt(sx,sy,how);return;}
+      const values=mode==='point'?[...new Set(edges.flat())]:mode==='edge'?edges:[...faces.keys()], adjacency=new Map(values.map(v=>[key(v),[]]));
+      const connect=(a,b)=>{adjacency.get(key(a))?.push(b);adjacency.get(key(b))?.push(a);};
+      if(mode==='point')edges.forEach(e=>connect(...e));
+      else if(mode==='edge'){const at=new Map();for(const e of edges)for(const v of e){if(!at.has(v))at.set(v,[]);at.get(v).push(e);}for(const es of at.values())for(let i=0;i<es.length;i++)for(let j=i+1;j<es.length;j++)connect(es[i],es[j]);}
+      else {const at=new Map();for(const [f,vs]of faces)for(const e of edges)if(vs.has(e[0])&&vs.has(e[1])){const k=edgeKey(...e);if(!at.has(k))at.set(k,[]);at.get(k).push(f);}for(const fs of at.values())for(let i=0;i<fs.length;i++)for(let j=i+1;j<fs.length;j++)connect(fs[i],fs[j]);}
+      const start=selected.at(-1),queue=[start],previous=new Map([[key(start),null]]),items=new Map([[key(start),start]]);
+      for(let i=0;i<queue.length&&!previous.has(key(target));i++)for(const v of adjacency.get(key(queue[i]))||[])if(!previous.has(key(v))){previous.set(key(v),key(queue[i]));items.set(key(v),v);queue.push(v);}
+      if(!previous.has(key(target)))return;const path=[];for(let k=key(target);k!==null;k=previous.get(k))path.push(items.get(k));
+      change({[mode==='point'?'points':mode==='edge'?'edges':'faces']:path},'add');
     }
     function boxPick(cam, x0, y0, x1, y1) {                          // everything inside the rectangle (X-ray)
       const lo = [Math.min(x0, x1), Math.min(y0, y1)], hi = [Math.max(x0, x1), Math.max(y0, y1)];
@@ -606,9 +636,10 @@ window.MiniHouPreview = (() => {
     function renderHandles(cam) {
       hsvg.setAttribute("width", cam.w); hsvg.setAttribute("height", cam.h);
       const kids = [];
+      for(const h of shown())for(const line of h.guide_lines||[]){const a=toScreen(cam,...line[0]),b=toScreen(cam,...line[1]);if(a&&b)kids.push(svg('line',{x1:a[0],y1:a[1],x2:b[0],y2:b[1],stroke:'#e8b565','stroke-width':1,'pointer-events':'none',opacity:.65}));}
       for (const h of shown()) {
         const active=handleDrag?.h.id===h.id;
-        const col = active ? '#fff18c' : AXIS_COLOUR[h.comp] || "#ffb04d";
+        const col = active ? '#fff18c' : AXIS_COLOUR[h.axis_color??h.comp] || "#ffb04d";
         const grp = svg("g", { class: "pv-handle"+(active?' active':''), "data-id": h.id, opacity: handleDrag&&!active?0.3:1 });
         const tip = svg("title", {});
         tip.textContent = h.label + " (drag)";
@@ -653,7 +684,7 @@ window.MiniHouPreview = (() => {
       if(handleDrag){
         const h=handleDrag.h,dir=handleDrag.guideDir||(h.kind!=='plane'&&h.kind!=='uniform'?h.dir:null);
         const p=toScreen(cam,...h.origin),g=dir&&handleGeometry(cam,{...h,dir});
-        if(p&&g)kids.push(svg('line',{x1:p[0]-g.u[0]*2000,y1:p[1]-g.u[1]*2000,x2:p[0]+g.u[0]*2000,y2:p[1]+g.u[1]*2000,stroke:AXIS_COLOUR[h.comp]||'#ffb04d','stroke-dasharray':'5 5',opacity:0.45,'pointer-events':'none'}));
+        if(p&&g)kids.push(svg('line',{x1:p[0]-g.u[0]*2000,y1:p[1]-g.u[1]*2000,x2:p[0]+g.u[0]*2000,y2:p[1]+g.u[1]*2000,stroke:AXIS_COLOUR[h.axis_color??h.comp]||'#ffb04d','stroke-dasharray':'5 5',opacity:0.45,'pointer-events':'none'}));
       }
       if(snapMark){const p=toScreen(cam,...snapMark);if(p)kids.push(svg('circle',{cx:p[0],cy:p[1],r:8,fill:'none',stroke:'#ffef83','stroke-width':2,'pointer-events':'none'}));}
       hsvg.replaceChildren(...kids);
@@ -921,10 +952,15 @@ window.MiniHouPreview = (() => {
       if(e.button===2 && !e.altKey){e.preventDefault();canvas.setPointerCapture(e.pointerId);startFly(false);if(fly){fly.x=e.clientX;fly.y=e.clientY;}return;}
       canvas.setPointerCapture(e.pointerId);
       const r = canvas.getBoundingClientRect();
-      const selecting = sel.mode !== "view" && e.button === 0 && !e.altKey && raw;
-      const pan = sel.mode === "view" ? (e.button === 1 || e.button === 2 || e.shiftKey) : (e.button === 2 || (e.button === 1 && e.shiftKey));
-      dragging = { x: e.clientX, y: e.clientY, pan, select: !!selecting, x0: e.clientX - r.left, y0: e.clientY - r.top, moved: false,
-        how: e.shiftKey ? "add" : (e.ctrlKey || e.metaKey) ? "subtract" : "replace" };
+      const selecting = sel.mode !== "view" && e.button === 0 && !(opt.navigation==="houdini" && e.altKey) && raw;
+      if(opt.navigation!=="houdini" && e.button===0 && !selecting && !e.altKey)return;
+      const pan = opt.navigation!=="houdini" ? (e.button===1 && e.shiftKey || e.button===2) : sel.mode === "view" ? (e.button === 1 || e.button === 2 || e.shiftKey) : (e.button === 2 || (e.button === 1 && e.shiftKey));
+      if(opt.orbitDepth && e.button===1 && !e.shiftKey && !e.ctrlKey && raw){
+        const cam=camera(),direction=rayAt(cam,e.clientX-r.left,e.clientY-r.top),hit=raycast(cam.eye,direction);
+        if(hit){const target=cam.eye.map((v,i)=>v+direction[i]*hit.t),offset=sub(cam.eye,target);view.target=target;view.dist=Math.hypot(...offset);view.yaw=Math.atan2(offset[1],offset[0]);view.pitch=Math.asin(offset[2]/view.dist);}
+      }
+      dragging = { x: e.clientX, y: e.clientY, zoom: opt.navigation!=="houdini" && e.button===1 && e.ctrlKey, pan, select: !!selecting, x0: e.clientX - r.left, y0: e.clientY - r.top, moved: false,
+        loop: e.altKey, ring: e.ctrlKey, path: e.ctrlKey && !e.altKey && !e.shiftKey, how: e.ctrlKey && e.shiftKey ? "subtract" : e.shiftKey ? "add" : (e.ctrlKey || e.metaKey) ? "subtract" : "replace" };
       e.preventDefault();
     }
     canvas.addEventListener("pointerdown", beginCanvasDrag);
@@ -943,7 +979,9 @@ window.MiniHouPreview = (() => {
       }
       const dx = e.clientX - dragging.x, dy = e.clientY - dragging.y;
       dragging.x = e.clientX; dragging.y = e.clientY;
-      if (dragging.pan) {
+      if (dragging.zoom) {
+        view.dist=Math.max(0.001,view.dist*Math.exp(dy*0.01));
+      } else if (dragging.pan) {
         const k = (view.dist * Math.tan(Math.PI / 8) * 2) / Math.max(canvas.clientHeight, 1);
         const right = [-Math.sin(view.yaw), Math.cos(view.yaw), 0];
         const up = [-Math.sin(view.pitch) * Math.cos(view.yaw), -Math.sin(view.pitch) * Math.sin(view.yaw), Math.cos(view.pitch)];
@@ -960,6 +998,8 @@ window.MiniHouPreview = (() => {
       if (!d || !d.select || (e && e.type === "pointercancel")) return;
       const cam = camera();
       if (d.moved && d.x1 !== undefined) api.boxSelect(d.x0, d.y0, d.x1, d.y1, d.how);
+      else if(d.loop){const edge=pickEdge(cam,d.x0,d.y0,12);if(edge){const es=quadStrip(edge,d.ring);const fs=new Set();if(sel.mode==='face')for(let i=0;i<raw.tri.length;i+=3)for(const [a,b]of es){const tri=[raw.tri[i],raw.tri[i+1],raw.tri[i+2]];if(tri.includes(a)&&tri.includes(b))fs.add(raw.triPrim[i/3]);}change(sel.mode==='point'?{points:[...new Set(es.flat())]}:sel.mode==='face'?{faces:[...fs]}:{edges:es},d.how==='add'?'add':'replace');}}
+      else if(d.path && sel.mode!=="piece")pathPick(d.x0,d.y0,d.how);
       else api.pickAt(d.x0, d.y0, d.how);
     };
     canvas.addEventListener("pointerup", endDrag); canvas.addEventListener("pointercancel", endDrag);
@@ -970,7 +1010,10 @@ window.MiniHouPreview = (() => {
 
     Object.assign(api, {
       showFeedback(text){feedback.hidden=!text;feedback.textContent=text||'';if(!text)snapMark=null;schedule();},
-      interaction, orientationFrame, snapPosition, planePoint, project: p=>toScreen(camera(),...p),
+      interaction, orientationFrame, snapPosition, planePoint,
+      edgeAt:(x,y)=>raw?pickEdge(camera(),x,y,14):null,
+      geometry:()=>raw, quadStrip,
+      project: p=>toScreen(camera(),...p),
       isDragging:()=>!!handleDrag||endingDrag,
       view, opt, onSelect: null, onHandle: null, onHandleStart: null,
       setHandles(list) { if (handleDrag) pendingHandles = list || []; else { handles = list || []; schedule(); } },

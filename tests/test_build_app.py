@@ -1,0 +1,29 @@
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+from tools import build_app
+
+class BuildDeliveryTests(unittest.TestCase):
+    def test_default_is_unpacked_and_preserves_previous(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'build').mkdir();dist=root/'dist';(dist/'MiniHou').mkdir(parents=True)
+            (dist/'MiniHou'/'old.txt').write_text('old')
+            def fake_build(accel, stage):
+                folder=stage/'MiniHou';folder.mkdir();(folder/'MiniHou.exe').write_text('new');return folder
+            with patch.object(build_app,'ROOT',root),patch.object(build_app,'build',side_effect=fake_build),patch.object(build_app,'smoke') as smoke,patch.object(build_app.shutil,'make_archive') as archive,patch('sys.argv',['build_app','--output',str(dist)]):
+                self.assertEqual(build_app.main(),0)
+                smoke.assert_called_once();archive.assert_not_called()
+            self.assertEqual([p.name for p in dist.iterdir()],['MiniHou'])
+            self.assertTrue((dist/'MiniHou'/'MiniHou.exe').exists())
+            self.assertEqual(len(list((root/'build').glob('app-previous-*/MiniHou/old.txt'))),1)
+
+    def test_locked_application_is_left_intact(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'build').mkdir();dist=root/'dist';(dist/'MiniHou').mkdir(parents=True)
+            original=dist/'MiniHou'/'old.txt';original.write_text('old')
+            def fake_build(accel,stage):
+                folder=stage/'MiniHou';folder.mkdir();return folder
+            with patch.object(build_app,'ROOT',root),patch.object(build_app,'build',side_effect=fake_build),patch.object(build_app,'smoke'),patch.object(Path,'rename',side_effect=PermissionError('locked')),patch('sys.argv',['build_app','--output',str(dist)]):
+                with self.assertRaises(PermissionError):build_app.main()
+            self.assertEqual(original.read_text(),'old')

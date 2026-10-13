@@ -968,6 +968,7 @@
   // ---------------------------------------------------------------- 3-D preview of the selected (or display) node
   const pvMsg = (text) => { const m = $("#pv-msg"); m.textContent = text || ""; m.classList.toggle("hidden", !text); };
   const pv = window.MiniHouPreview ? window.MiniHouPreview.create($("#pv-canvas"), pvMsg) : null;
+  const loopTool=pv?.ok&&window.MiniLoopTool?MiniLoopTool(pv,$('#pv-canvas'),async params=>{if(!pvNode)return;const r=await edit([{op:'insert',after:pvNode,type:'polysplit',params}]);if(r){const id=r.results?.[0]?.id;if(id)select([id]);}}):null;
   const curveTool = pv?.ok && window.MiniCurveTool ? MiniCurveTool(pv,$('#pv-canvas'),(id,value)=>queueSet(id,'controls',value)) : null;
   let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false, pvFull = false, pvReduced = null;
   const pct = (x) => (x >= 0.1 ? Math.round(x * 100) : Math.round(x * 1000) / 10) + "%";
@@ -1168,7 +1169,7 @@
       ? "Drag anchors / tangents: edit curve · X/Y/Z: constrain\nShift: precision · Ctrl: snap · Esc: cancel\nShift-double-click: append · Handle modes in inspector"
       : mode === "view"
       ? "Drag: orbit · Middle drag: pan · RMB: fly\nWASD + Q/E while flying · wheel: speed / dolly\nC: modeling tools · 1–4: component selection"
-      : "Click / drag box: select · Shift: add · Ctrl: remove\nAlt-drag / middle drag: orbit · Right drag: pan\nW / E / R: move / rotate / scale · C: modeling tools";
+      : "Click / drag box: select · Shift: add · Ctrl: path · Ctrl+Shift: remove\nMiddle: orbit · Shift-middle: pan · Alt-click: loop · Ctrl+Alt-click: ring\nW / E / R: move / rotate / scale · C: modeling tools";
   }
   function setTool(t) { pv.setTool(t); updateToolButtons(); updateViewportHints(); }
   $('#pv-walk').onclick=()=>pv.toggleWalk();
@@ -1273,8 +1274,10 @@
     // viewport handles: arrows in the view that scrub a parameter of the viewed node
     let handleBase = null, gizmoNode = null, createdNode=null, originalGraph=null, originalNode=null, createdTemplateMerge=null;
     const baseFor = (node, h) => {                                                       // the parameter's current value (or default) on that node
+      if(h.input_target){node=nodeOf(node)?.inputs?.[h.input_target];if(typeof node!=='string'||nodeOf(node)?.type!=='lattice_grid')return NaN;}
       const n = nodeOf(node), spec = ((S.types[(n || {}).type] || {}).params || []).find((p) => p.name === h.param);
       const cur = n && n.params && n.params[h.param] !== undefined ? n.params[h.param] : spec ? spec.default : undefined;
+      if(h.json_array){try{handleBase=JSON.parse(cur);}catch{handleBase=[];}if(!Array.isArray(handleBase)||handleBase.length!==h.json_array)handleBase=Array(h.json_array).fill(0);return Number(handleBase[h.comp]);}
       handleBase = Array.isArray(cur) ? cur.slice() : null;               // the other components of a vector stay as they were
       return h.kind==='plane'?handleBase:h.comp === null || h.comp === undefined ? Number(cur) : Number(Array.isArray(cur) ? cur[h.comp] : NaN);
     };
@@ -1317,12 +1320,13 @@
       }
     };
     pv.onHandle = (h, value) => {
-      const node = h.pending ? gizmoNode : pvNode;
+      let node = h.pending ? gizmoNode : pvNode;
+      if(h.input_target)node=nodeOf(node)?.inputs?.[h.input_target];
       if (!node || !nodeOf(node)) return;
       const spec = ((S.types[nodeOf(node).type] || {}).params || []).find((p) => p.name === h.param);
       if (spec && spec.kind === "int") value = Math.round(value);                       // an integer parameter takes whole steps
       if (h.comp === null || h.comp === undefined) queueSet(node, h.param, value);
-      else if (handleBase) { const v = handleBase.slice(); v[h.comp] = value; queueSet(node, h.param, v); }
+      else if (handleBase) { const v = handleBase.slice(); v[h.comp] = value; queueSet(node, h.param, h.json_array?JSON.stringify(v):v); }
     };
     document.querySelectorAll("#preview [data-mode]").forEach((b) => { b.onclick = () => { if (b.dataset.mode !== "view" && blockedByReduced()) return; pv.setMode(b.dataset.mode); }; });
     const wrap = $("#pv-canvas").parentElement;                         // the canvas and the overlays on it (gizmo, handles) count as one
@@ -1330,8 +1334,9 @@
     wrap.addEventListener("pointerleave", () => { pvOver = false; });
     document.addEventListener("keydown", (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
-      if(pv.isDragging()||curveTool?.active())return;
+      if(loopTool?.active()||pv.isDragging()||curveTool?.active())return;
       if (!pvOver || tag === "input" || tag === "textarea" || tag === "select") return;
+      if(e.ctrlKey&&e.code==='KeyR'){e.preventDefault();e.stopImmediatePropagation();loopTool?.start();return;}
       const nav = { Numpad1: ["front"], Numpad3: ["right"], Numpad7: ["top"] }[e.code];          // Blender-style view keys; Ctrl = the opposite side
       if (nav && !e.altKey && !e.metaKey) { pv.viewAxis(nav[0], e.ctrlKey); e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (e.code === "Numpad5" || e.code === "NumpadDecimal" || e.key === "Home") {
@@ -1358,13 +1363,14 @@
     }, true);
   }
   // Browser-local viewport preferences: only validated, known fields are restored.
-  const preferenceDefaults = { background: "#212429", gridOpacity: 1, grid: true, axes: true,
+  const preferenceDefaults = { navigation: "blender", orbitDepth: true, background: "#212429", gridOpacity: 1, grid: true, axes: true,
     shaded: true, edges: true, points: false, normals: false,
     nodeBackdrop: "grid", nodeBackground: "#26292d", nodeGrid: "#2d3035", nodeColor: "#3a3f46",
     wireColor: "#a9b1ba", selectionColor: "#e8a33d", nodeSnap: false, nodeSnapStep: 24, frameColor: "#5b7fb5", lighting: 1, pointSize: 4, gridSpacing: 0 };
   function validPreference(key, value) {
     const ranges = { lighting: [0, 2], pointSize: [1, 20], gridSpacing: [0, 10000], gridOpacity: [0, 2], nodeSnapStep: [1, 200] };
     if (ranges[key]) return Number.isFinite(value) && value >= ranges[key][0] && value <= ranges[key][1] && (key !== "nodeSnapStep" || Number.isInteger(value));
+    if (key === "navigation") return ["blender", "houdini"].includes(value);
     if (key === "nodeBackdrop") return ["grid", "checker", "solid"].includes(value);
     if (/background|color|nodeGrid/i.test(key)) return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
     return typeof value === "boolean";

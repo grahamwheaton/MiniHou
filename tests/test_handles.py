@@ -15,6 +15,24 @@ def by_id(hs):
 
 
 class ProviderTests(unittest.TestCase):
+    def test_match_size_target_handles_and_disabled_scale(self):
+        src=run('box')
+        hs=handles.handles_for('match_size',[src],src,{'scale':False})
+        self.assertEqual(len(hs),3)
+        hs=handles.handles_for('match_size',[src],src,{'scale':True,'size':[2,4,6]})
+        self.assertEqual(len(hs),9)
+        self.assertEqual(next(h for h in hs if h['id']=='target_size_2_1')['origin'],[0,0,3])
+
+    def test_lattice_controls_affect_deformation(self):
+        rest=run('lattice_grid')
+        offsets=np.zeros(rest.npoints*3);offsets[0]=1
+        moved=run('lattice_grid',offsets=json.dumps(offsets.tolist()))
+        out=run('lattice',rest,rest,moved)
+        np.testing.assert_allclose(out.P,moved.P,atol=1e-6)
+        hs=handles.handles_for('lattice_grid',[],moved,{})
+        self.assertEqual(len(hs),24)
+        self.assertEqual(hs[0]['json_array'],24)
+
     def test_transform_has_translate_arrows_at_the_result(self):
         src = run("box", size=[2, 2, 2])
         out = run("transform", src, translate=[3, 0, 0])

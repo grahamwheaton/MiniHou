@@ -61,6 +61,8 @@
       <button id="preferences-network-tab" type="button" role="tab" aria-selected="false" aria-controls="preferences-network-page" data-preference-tab="network" tabindex="-1">Node editor</button>
     </div>
     <fieldset id="preferences-viewport-page" role="tabpanel" aria-labelledby="preferences-viewport-tab" data-preference-page="viewport"><legend>3D viewport</legend>
+      <label>Navigation <select id="pref-navigation"><option value="blender">Blender (middle mouse orbit)</option><option value="houdini">Houdini / MiniHou</option></select></label>
+      <label><input id="pref-orbitDepth" type="checkbox"> Orbit around geometry depth under the mouse</label>
       <label>Display mode <select id="pref-display-mode"><option value="shaded">Shaded</option><option value="edges">Shaded + edges</option><option value="wire">Wireframe</option><option value="points">Points</option></select></label>
       <label>Lighting <input id="pref-lighting" type="range" min="0" max="2" step="0.05"></label>
       <label>Point size <input id="pref-pointSize" type="number" min="1" max="20" step="1"></label>
@@ -232,10 +234,11 @@
     <tr><td>X / shake node / Shift-right-drag</td><td>delete / disconnect on release / cut wires; Esc cancels gestures</td></tr><tr><td>M / L / T / D</td><td>Mute / Lock / Template / Display buttons</td></tr>
     <tr><td>drag background / middle mouse</td><td>box select / pan; Shift adds to selection; wheel zooms</td></tr>
     <tr><td><kbd>F</kbd> / <kbd>L</kbd></td><td>frame selection (or all) / tidy the layout</td></tr>
-    <tr><td>3-D view: <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> / <kbd>Esc</kbd></td><td>select points / edges / faces / whole objects (click or drag a box, <kbd>Shift</kbd> adds, <kbd>Ctrl</kbd> removes; <kbd>Alt</kbd>-drag or middle mouse orbits) / back to view. The buttons under the view add a node after the one you are looking at (Bevel for edges, Extrude, Inset, Delete, Group for faces...)</td></tr>
+    <tr><td>3-D view: <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> <kbd>4</kbd> / <kbd>Esc</kbd></td><td>select points / edges / faces / whole objects (click or drag a box, <kbd>Shift</kbd> adds, <kbd>Ctrl</kbd> finds a shortest path, <kbd>Ctrl+Shift</kbd> removes; middle mouse orbits) / back to view. The buttons under the view add a node after the one you are looking at (Bevel for edges, Extrude, Inset, Delete, Group for faces...)</td></tr>
     <tr><td>timeline (under the 3-D view)</td><td>▶ plays the graph in real time between the start and end frames (frames are skipped, never queued, if a cook is slower than the frame rate); <kbd>Space</kbd> plays or pauses, <kbd>←</kbd> <kbd>→</kbd> step, <kbd>Shift</kbd>+arrow jumps to the ends, ⟲ loops. Blender's own timeline still drives the frame when it is connected</td></tr>
     <tr><td>WASD navigation</td><td>Hold right mouse: look and fly; WASD moves, Q/E down/up, Shift fast, Ctrl slow, wheel speed. Walk / Fly or Shift+backtick toggles; Enter accepts, Escape restores camera. No collision/gravity.</td></tr>
-    <tr><td>3-D view navigation</td><td>drag orbits, <kbd>Shift</kbd>-drag / middle mouse pans, wheel zooms; the axis gizmo (top right) or <kbd>Numpad 1</kbd> <kbd>3</kbd> <kbd>7</kbd> (<kbd>Ctrl</kbd>: opposite side) snap to front / right / top; <kbd>Numpad 5</kbd> perspective or orthographic; <kbd>Numpad .</kbd> / <kbd>Home</kbd> frame the selection or everything</td></tr>
+    <tr><td><kbd>Ctrl+R</kbd> over 3-D view</td><td>Loop cut: hover a quad edge, wheel sets count, click then slide and click to confirm. Escape cancels; right-click during slide centers the cut.</td></tr>
+    <tr><td>3-D view navigation</td><td>middle mouse orbits, <kbd>Shift</kbd>-middle pans, <kbd>Ctrl</kbd>-middle dollies, wheel zooms; change navigation and depth orbit in Preferences; the axis gizmo (top right) or <kbd>Numpad 1</kbd> <kbd>3</kbd> <kbd>7</kbd> (<kbd>Ctrl</kbd>: opposite side) snap to front / right / top; <kbd>Numpad 5</kbd> perspective or orthographic; <kbd>Numpad .</kbd> / <kbd>Home</kbd> frame the selection or everything</td></tr>
     <tr><td><kbd>C</kbd> (pie menu)</td><td>Houdini's modelling tools in a pie at the pointer, over the graph or the 3-D view: <b>Adjust</b> (top), <b>Deform</b>, <b>Polygons</b>, <b>Group</b>, <b>Create</b>, <b>Build</b>, <b>Edges</b>, <b>Modify</b>, each with a page of tools and a <b>»</b> for more. Hold <kbd>C</kbd>, flick towards a slot and let go; or tap <kbd>C</kbd> and click (<kbd>1</kbd>-<kbd>8</kbd> pick a slot, the middle goes back, <kbd>Esc</kbd> closes). A tool adds its node after the one you are looking at, already filled in from the points, edges or faces you selected</td></tr>
     <tr><td>moving a selection</td><td>whatever you select (points, edges, faces, objects) shows a <b>Move / Rotate / Scale</b> gizmo at its centre; the first drag adds a <b>transform</b> node after the viewed node (its group is the selected points, its pivot the centre), later drags on the same selection edit that node</td></tr>
     <tr><td>handles in the 3-D view</td><td>the node you look at can show arrows to drag; a <b>transform</b> has <b>Move / Rotate / Scale</b> tools (<kbd>W</kbd> <kbd>E</kbd> <kbd>R</kbd> with the pointer over the view and nothing selected): move arrows, one ring per rotation axis (drag around it), scale cubes per axis and a square for uniform scale</td></tr>
@@ -258,6 +261,7 @@
 <script src="/static/interaction.js"></script>
 <script src="/static/preview.js"></script>
 <script src="/static/curve-tool.js"></script>
+<script src="/static/loop-tool.js"></script>
 <script src="/static/editor.js"></script>
 </body>
 </html>

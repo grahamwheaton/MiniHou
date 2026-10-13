@@ -193,7 +193,7 @@
   /* The tools of a tab that this engine has: PCG lists every pcg_* node, Library every library node. */
   function toolsOf(name) {
     const types = hooks.types();
-    if (name === "PCG") return Object.keys(types).filter((n) => n.startsWith("pcg_")).sort().map((n) => T((types[n].label || n).replace(/^PCG /, ""), n, "scatter"));
+    if (name === "PCG") return Object.keys(types).filter((n) => n.startsWith("pcg_")).sort().map((n) => T((types[n].label || n).replace(/^PCG /, ""), n, /filter|prune|density/.test(n)?"blast":/transform|rotate|scale/.test(n)?"transform":/spline|curve/.test(n)?"curve":/grid|surface/.test(n)?"grid":/attribute/.test(n)?"attrib":/merge|union/.test(n)?"merge":/sample|scatter/.test(n)?"scatter":"instance"));
     if (name === "Library") return hooks.typeList().filter((t) => t.menu === "Library").map((t) => T(t.label || t.name, t.name, "file"));
     const tab = TABS.find((x) => x[0] === name);
     return tab && tab[2] ? tab[2].filter((t) => types[t.type]) : [];

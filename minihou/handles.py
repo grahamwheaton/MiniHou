@@ -247,3 +247,64 @@ def _box(ins, out, p):
     s = np.asarray(p.get("size", (1, 1, 1)), np.float64)
     return [{"id": f"size_{'xyz'[i]}", "label": f"size {'xyz'[i]}", "param": "size", "comp": i, "origin": c + AXES[i] * s[i] / 2,
              "dir": AXES[i], "scale": 2.0, "min": 0.0} for i in range(3)]
+
+
+@provider("match_size")
+def _match_size(ins, out, p):
+    """Target-box face controls; enabled operations only, matching evaluation."""
+    center = np.asarray(p.get("center", (0, 0, 0)), dtype=float)
+    size = np.asarray(p.get("size", (1, 1, 1)), dtype=float)
+    result = []
+    if p.get("translate", True):
+        result += [{"id": f"center_{i}", "label": f"Target center {'XYZ'[i]}",
+                    "param": "center", "comp": i, "origin": center, "dir": AXES[i], "tool": "move"} for i in range(3)]
+    if p.get("scale", False):
+        box_center = center.copy() if p.get("translate", True) else _bounds(ins[0])[0]
+        if p.get("translate", True):
+            box_center[2] += {"min": 0.5, "max": -0.5}.get(p.get("justify_z"), 0) * size[2]
+        for i in range(3):
+            for sign in (-1, 1):
+                result.append({"id": f"target_size_{i}_{sign}", "label": f"Target size {'XYZ'[i]}",
+                               "param": "size", "comp": i, "origin": box_center + sign * AXES[i] * size[i] / 2,
+                               "dir": sign * AXES[i], "scale": 2.0, "min": 0.0001})
+    if result and p.get("scale", False):
+        corners = [box_center + np.asarray(v) * size / 2 for v in __import__('itertools').product((-1, 1), repeat=3)]
+        result[0]['guide_lines'] = [[a.tolist(), b.tolist()] for j, a in enumerate(corners) for b in corners[j+1:] if np.count_nonzero(a != b) == 1]
+    return result
+
+
+@provider("lattice_grid")
+def _lattice_grid(ins, out, p):
+    # Dense cages remain editable numerically; avoid thousands of DOM handles.
+    if out.npoints > 216:
+        return []
+    result = [{"id": f"control_{j}_{i}", "label": f"Control {j} {'XYZ'[i]}",
+             "param": "offsets", "comp": j * 3 + i, "origin": point, "dir": AXES[i],
+             "json_array": out.npoints * 3, "axis_color": i}
+            for j, point in enumerate(out.P) for i in range(3)]
+
+    nx, ny, nz = (int(p.get(k, 2)) for k in ('columns', 'rows', 'layers'))
+    lines = []
+    for z in range(nz):
+        for y in range(ny):
+            for x in range(nx):
+                a = x + nx * (y + ny * z)
+                for ok, step in ((x + 1 < nx, 1), (y + 1 < ny, nx), (z + 1 < nz, nx * ny)):
+                    if ok:
+                        lines.append([out.P[a].tolist(), out.P[a+step].tolist()])
+    if result:
+        result[0]['guide_lines'] = lines
+    return result
+
+
+@provider("lattice")
+def _lattice(ins, out, p):
+    if len(ins) < 3 or ins[2] is None:
+        return []
+    dims = ins[2].detail.get('lattice_dimensions')
+    if dims is None:
+        return []
+    result = _lattice_grid([], ins[2], dict(zip(('columns', 'rows', 'layers'), dims)))
+    for handle in result:
+        handle['input_target'] = 'deformed'
+    return result

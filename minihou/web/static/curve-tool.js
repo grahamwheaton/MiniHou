@@ -27,13 +27,14 @@ window.MiniCurveTool = (pv, canvas, save) => {
     resolved.forEach((c,i)=>{
       const p=pv.project(c.p);if(!p)return;
       if(i===selected)for(const part of ['left','right']) {const q=pv.project(c[part]);if(!q)continue;overlay.append(el('line',{x1:p[0],y1:p[1],x2:q[0],y2:q[1],stroke:'#efb657','stroke-width':1.5}));const h=el('rect',{x:q[0]-5,y:q[1]-5,width:10,height:10,fill:'#efb657',class:'curve-grab','data-point':i,'data-part':part});h.onpointerdown=e=>start(e,i,part);overlay.append(h);}
+      if(i===selected){const frame=pv.orientationFrame();frame.forEach((axis,k)=>{let q=pv.project(M.add(c.p,axis));if(!q)return;const length=Math.hypot(q[0]-p[0],q[1]-p[1]);if(length<2)return;q=[p[0]+(q[0]-p[0])*64/length,p[1]+(q[1]-p[1])*64/length];const line=el('line',{x1:p[0],y1:p[1],x2:q[0],y2:q[1],stroke:['#f16b67','#83cf72','#76aaff'][k],'stroke-width':3,'pointer-events':'none'});line.onpointerdown=e=>start(e,i,'p',k);overlay.append(line);const tip=el('circle',{cx:q[0],cy:q[1],r:5,fill:['#f16b67','#83cf72','#76aaff'][k],class:'curve-grab'});tip.onpointerdown=e=>start(e,i,'p',k);overlay.append(tip);});}
       const a=el('circle',{cx:p[0],cy:p[1],r:i===selected?7:5,fill:i===selected?'#ffb04d':'#e8edf4',stroke:'#17202c','stroke-width':2,class:'curve-grab','data-point':i,'data-part':'p'});a.onpointerdown=e=>start(e,i,'p');overlay.append(a);
     });
   }
-  function start(e,i,part) {
+  function start(e,i,part,forcedAxis=null) {
     if(e.button!==0||drag)return;e.preventDefault();e.stopPropagation();selected=i;cs=M.controls(cs,closed);renderPanel();
     const before=structuredClone(cs),anchor=cs[i][part],r=canvas.getBoundingClientRect(),start=pv.planePoint(e.clientX-r.left,e.clientY-r.top,anchor);
-    if(!start)return;let axis=null,last=e,precise=false,rawAnchor=[0,0,0],valueAnchor=[0,0,0],previousDelta=[0,0,0];
+    if(!start)return;let axis=forcedAxis,last=e,precise=false,rawAnchor=[0,0,0],valueAnchor=[0,0,0],previousDelta=[0,0,0];
     drag={};document.body.classList.add('pv-dragging');
     function move(ev){last=ev;let p=pv.planePoint(ev.clientX-r.left,ev.clientY-r.top,anchor);if(!p)return;let d=M.sub(p,start);if(!!ev.shiftKey!==precise){precise=!!ev.shiftKey;rawAnchor=d;valueAnchor=previousDelta;}d=M.add(valueAnchor,M.mul(M.sub(d,rawAnchor),precise?0.1:1));previousDelta=d;if(axis!==null){const f=pv.orientationFrame();d=M.mul(f[axis],M.dot(d,f[axis]));}p=M.add(anchor,d);p=pv.snapPosition(p,ev.clientX-r.left,ev.clientY-r.top,ev.ctrlKey,anchor,axis);cs=M.moveControl(before,i,part,p);pv.showFeedback(`Point ${i+1} ${part==='p'?'anchor':part+' tangent'} · ${axis===null?'view plane':'axis '+'XYZ'[axis]} · ${p.map(v=>v.toFixed(3)).join(', ')} · Esc cancels`);draw();}
     function finish(cancel){window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);window.removeEventListener('pointercancel',cancelEvent);window.removeEventListener('keydown',key,true);window.removeEventListener('contextmenu',cancelEvent,true);window.removeEventListener('pointerdown',right,true);document.body.classList.remove('pv-dragging');pv.showFeedback(null);drag=null;if(cancel)cs=before;else if(JSON.stringify(cs)!==JSON.stringify(before))save(id,JSON.stringify(cs));draw();renderPanel();}

@@ -1,7 +1,7 @@
-"""Build the packed MiniHou application with PyInstaller (one folder, zipped), then smoke-test it.
+"""Build the packed MiniHou application with PyInstaller (ready-to-run folder), then smoke-test it.
 
     py -m pip install pyinstaller numpy
-    py tools/build_app.py                  # -> dist/MiniHou/ and dist/MiniHou-<os>.zip, numpy-only (small, portable)
+    py tools/build_app.py                  # -> dist/MiniHou/, numpy-only (small, portable)
     py tools/build_app.py --with-accel     # also bundle numba and scipy (several times larger; faster heavy nodes)
     py tools/build_app.py --no-smoke       # skip starting the built program and fetching its pages
 
@@ -25,10 +25,10 @@ DIST = ROOT / "dist"
 NAME = "MiniHou"
 
 
-def build(with_accel: bool) -> Path:
+def build(with_accel: bool, destination: Path = DIST) -> Path:
     sep = os.pathsep
     cmd = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onedir", "--windowed", "--name", NAME,
-           "--distpath", str(DIST), "--workpath", str(ROOT / "build" / "pyinstaller"), "--specpath", str(ROOT / "build"),
+           "--distpath", str(destination), "--workpath", str(ROOT / "build" / "pyinstaller"), "--specpath", str(ROOT / "build"),
            "--paths", str(ROOT),
            "--collect-submodules", "minihou",
            "--collect-all", "webview",
@@ -52,7 +52,7 @@ def build(with_accel: bool) -> Path:
     cmd.append(str(ROOT / "tools" / "minihou_app.py"))
     print(" ".join(cmd), flush=True)
     subprocess.run(cmd, check=True, cwd=ROOT)
-    return DIST / NAME
+    return destination / NAME
 
 
 def exe_path(folder: Path) -> Path:
@@ -105,13 +105,35 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--with-accel", action="store_true", help="bundle numba and scipy too")
     ap.add_argument("--no-smoke", action="store_true")
+    ap.add_argument("--zip", action="store_true", help="also create a ZIP for sharing (off by default)")
+    ap.add_argument("--output", type=Path, default=DIST, help="distribution directory (default: dist)")
     args = ap.parse_args()
-    folder = build(args.with_accel)
+    destination = args.output.resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    (ROOT / "build").mkdir(exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix="app-staging-", dir=ROOT / "build"))
+    folder = build(args.with_accel, staging)
     if not args.no_smoke:
         smoke(folder)
+    # Only replace the known application folder, after validation. Keep unrelated files.
+    target = destination / NAME
+    previous = None
+    if target.exists():
+        previous = Path(tempfile.mkdtemp(prefix="app-previous-", dir=ROOT / "build")) / NAME
+        target.rename(previous)
+    try:
+        folder.rename(target)
+    except Exception:
+        if previous is not None and not target.exists():
+            previous.rename(target)
+        raise
+    folder = target
+    staging.rmdir()
     system = {"Windows": "windows", "Darwin": "macos", "Linux": "linux"}.get(platform.system(), platform.system().lower())
-    archive = shutil.make_archive(str(DIST / f"{NAME}-{system}" ), "zip", DIST, NAME)
-    print(f"built {folder}\narchive {archive} ({os.path.getsize(archive) / 1e6:.1f} MB)")
+    print(f"built {folder} — run {exe_path(folder)}")
+    if args.zip:
+        archive = shutil.make_archive(str(destination / f"{NAME}-{system}"), "zip", destination, NAME)
+        print(f"archive {archive} ({os.path.getsize(archive) / 1e6:.1f} MB)")
     return 0
 
 

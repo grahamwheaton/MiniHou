@@ -1,5 +1,6 @@
 """Portable spatial falloff, trilinear lattice and local affine point deformers."""
 import itertools
+import json
 import numpy as np
 from .. import groups, topo
 from ..geometry import Geometry
@@ -74,15 +75,22 @@ def soft_transform(geo, center, radius, translate, rotate, scale, falloff, group
 @node('lattice_grid', category='source', params=[
     Vec3('center',(0,0,0)), Vec3('size',(2,2,2)),
     Int('columns',2,min=2,max=64), Int('rows',2,min=2,max=64), Int('layers',2,min=2,max=64),
+    Str('offsets','[]',doc='Per-control XYZ displacement values edited by viewport handles. Changing resolution resets incompatible offsets.'),
 ])
-def lattice_grid(center,size,columns,rows,layers):
+def lattice_grid(center,size,columns,rows,layers,offsets="[]"):
     """Complete 3D control-point grid for Lattice: columns X, rows Y, layers Z; X varies fastest."""
     if np.any(np.asarray(size)<=0):
         raise ValueError('lattice_grid size must be positive in all three dimensions')
     axes = [np.linspace(c-s/2,c+s/2,n) for c,s,n in zip(center,size,(columns,rows,layers))]
     P = np.array([[x,y,z] for z in axes[2] for y in axes[1] for x in axes[0]],np.float32)
+    delta = np.asarray(json.loads(offsets), dtype=float)
+    if delta.size and (delta.ndim != 1 or not np.isfinite(delta).all()):
+        raise ValueError('lattice offsets must be a finite flat XYZ array')
+    if delta.size == P.size:
+        P += delta.reshape(P.shape)
     out = Geometry(len(P))
     out.point['P'] = P
+    out.detail['lattice_dimensions'] = [int(columns), int(rows), int(layers)]
     return out
 
 
