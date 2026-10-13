@@ -214,7 +214,7 @@ def _boundary_edge_mask(geo, dom, member):
    guides=[Guide("box", at="@box_center", size="@box_size", when="method=bounding_box", id="region", label="bounding box"),
            Guide("box", at="@box_center", size="@box_size", when="method=filters&bounds_enable&bounds_type=box", id="region_f", label="bounding region"),
            Guide("sphere", at="@box_center", size="@box_size", when="method=filters&bounds_enable&bounds_type=sphere", id="region_s", label="bounding region")])
-def group_create(geo, bounds, name, domain, method, pattern, box_center, box_size, direction, angle, percent, seed, combine,
+def group_create(geo, bounds=None, *, name, domain, method, pattern, box_center, box_size, direction, angle, percent, seed, combine,
                  base_enable=True, bounds_enable=False, bounds_type="box", bounds_partial=False, normals_enable=False,
                  backface_from="", normals_opposite=False, edges_enable=False, min_edge_angle_on=False, min_edge_angle=20.0,
                  max_edge_angle_on=False, max_edge_angle=20.0, min_edge_length_on=False, min_edge_length=0.0,

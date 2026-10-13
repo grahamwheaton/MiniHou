@@ -154,7 +154,7 @@ def hydraulic(H, cell, iterations, rain, capacity, erode_rate, deposit_rate, eva
     Float("talus_angle", 35.0, min=0.0, max=89.0, doc="Slopes steeper than this slump"),
     Float("thermal_rate", 0.5, min=0.0, max=1.0),
 ])
-def heightfield_erode(geo, mask, iterations, droplets, rain, capacity, erode_rate, deposit_rate, evaporation, inertia, seed,
+def heightfield_erode(geo, mask=None, *, iterations, droplets, rain, capacity, erode_rate, deposit_rate, evaporation, inertia, seed,
                       thermal_iterations, talus_angle, thermal_rate):
     """Erode a terrain grid: rivers cut valleys and lay down fans of sediment, then over-steep slopes slump. Writes
     flow (river mask 0..1), erosion and deposit point attributes for shading. A second input with a 'mask' point

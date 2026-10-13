@@ -48,7 +48,7 @@ FUSE_OUT = OutGroups(
 
 @node("fuse", inputs=["geo", Input("targets", optional=True, doc="Snap targets: points of the first input within the distance move onto the nearest point here")],
       category="modify", params=[Float("distance", 0.001, min=0.0, soft_max=1.0), *FUSE_OUT.params()], version=2)
-def fuse(geo, targets, distance, **og):
+def fuse(geo, targets=None, *, distance, **og):
     """Weld points that lie within ``distance`` of each other (snapped to a grid of that size). With a second input
     the first input's points are only snapped onto the nearest point of the second (within ``distance``): the
     second input is not modified, and the first input's points are not welded to each other."""

@@ -35,7 +35,7 @@ def _frame(direction, up):
             Handle("twist", kind="ring", axis="@direction", at="@origin", id="twist_ring")],
       guides=[Guide("line", at="@origin", axis="@direction", size="@length", id="region", label="capture region"),
               Guide("plane", at="@origin", axis="@direction", id="start", label="capture start")])
-def bend(geo, rest, origin, direction, length, up, bend, twist, taper, group):
+def bend(geo, rest=None, *, origin, direction, length, up, bend, twist, taper, group):
     """Bend, twist and taper geometry along an axis (Houdini's Bend SOP). Inside the capture region the shape
     curls into an arc; beyond it, it continues straight along the bent end. N follows the deformation. With rest
     geometry on the second input the capture region is measured on the rest positions, and only the displacement

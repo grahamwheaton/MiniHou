@@ -36,7 +36,7 @@ def crease(geo, domain, group, sharpness):
     Str('pattern', '*', doc='Edges: ids/ranges, p0-1 pairs, names, wildcards, ^exclusions. Other methods: point/primitive group pattern.'),
     Enum('combine', ['replace', 'union', 'intersect', 'subtract']),
 ])
-def edge_group(geo, bounds, name, method, pattern, combine):
+def edge_group(geo, bounds=None, *, name, method, pattern, combine):
     """Create a derived edge group; stored as edge_group_<name> on outgoing corners for protocol compatibility."""
     groups.attr_name(name)
     e = topo.edges(geo)

@@ -515,7 +515,7 @@ def _section_profile(section):
     Float("twist", 0.0, soft_min=-720.0, soft_max=720.0, doc="Degrees of twist from start to end"),
     *SWEEP_OUT.params(),
 ])
-def sweep(geo, section, radius, section_scale, divisions, caps, twist, **og):
+def sweep(geo, section=None, *, radius, section_scale, divisions, caps, twist, **og):
     """Tubes along curves (Houdini's Sweep / PolyWire): rotation-minimising frames (no flips), radius scaled by
     point width or pscale, uv along (u) and around (v) the tube, curve point attributes kept on the rings.
     Closed primitives (closed curves, polygon outlines) make closed rings. A second input replaces the circle with
