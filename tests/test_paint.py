@@ -193,6 +193,62 @@ class Views(unittest.TestCase):
         with self.assertRaises(ValueError):
             spreadsheet.page(geo, "wire", 0, 1)
 
+    def test_spreadsheet_sorts_filters_and_pages_the_result(self):
+        from minihou import spreadsheet
+        g = graph("point", data=paint.merge("", 1, [1, 5, 9], [[0.5], [1.0], [0.25]]))
+        geo = Evaluator().cook(g)
+        r = spreadsheet.page(geo, "point", 0, 5, sort={"column": "w", "desc": True})
+        self.assertEqual([row[0] for row in r["rows"]], [5, 1, 9, 0, 2])                       # descending; ties keep ascending element order
+        self.assertEqual(r["total"], 12)
+        asc = spreadsheet.page(geo, "point", 0, 12, sort={"column": "w"})
+        self.assertEqual([row[0] for row in asc["rows"]][-3:], [9, 1, 5])                      # 0.25, 0.5, 1.0 last
+        f = spreadsheet.page(geo, "point", 0, 50, filter="@w > 0.4")
+        self.assertEqual((f["total"], [row[0] for row in f["rows"]]), (2, [1, 5]))
+        both = spreadsheet.page(geo, "point", 0, 50, filter="@w > 0.1", sort={"column": "w", "desc": True})
+        self.assertEqual([row[0] for row in both["rows"]], [5, 1, 9])
+        sel = spreadsheet.page(geo, "point", 0, 50, ids=[9, 5, 2], filter="@w > 0.1", sort={"column": "w", "desc": True})   # selected only, in the table's order
+        self.assertEqual([row[0] for row in sel["rows"]], [5, 9])
+        rng = spreadsheet.page(geo, "point", 0, 50, filter="0-2")
+        self.assertEqual([row[0] for row in rng["rows"]], [0, 1, 2])
+        z = spreadsheet.page(geo, "point", 0, 3, sort={"column": "P", "comp": "y", "desc": True})   # a vector column by one component
+        self.assertGreaterEqual(z["rows"][0][1][1], z["rows"][1][1][1])
+        ln = spreadsheet.page(geo, "point", 0, 3, sort={"column": "P", "comp": "len"})
+        self.assertEqual(ln["total"], 12)
+        for bad in ({"column": "nope"}, {"column": "w", "comp": 7}, {"nocolumn": 1}):
+            with self.assertRaises(ValueError, msg=str(bad)):
+                spreadsheet.page(geo, "point", 0, 3, sort=bad)
+        with self.assertRaises(ValueError):
+            spreadsheet.page(geo, "point", 0, 3, filter="no_such_group")
+        e = spreadsheet.page(geo, "edge", 0, 500, filter="faces == 1 and a < 3")
+        self.assertTrue(e["total"] > 0 and all(row[1] < 3 for row in e["rows"]))
+        e2 = spreadsheet.page(geo, "edge", 0, 5, sort={"column": "a", "desc": True})
+        self.assertGreaterEqual(e2["rows"][0][1], e2["rows"][-1][1])
+        with self.assertRaises(ValueError):
+            spreadsheet.page(geo, "edge", 0, 5, filter="a ~ 3")
+        with self.assertRaises(ValueError):
+            spreadsheet.page(geo, "vertex", 0, 5, filter="nope > 1")
+
+    def test_sorted_orders_are_remembered_per_frozen_geometry(self):
+        from minihou import spreadsheet
+        geo = self.painted()
+        self.assertTrue(geo.frozen)                                                           # cooked geometry is frozen
+        a = spreadsheet.page(geo, "point", 0, 3, sort={"column": "w", "desc": True})
+        b = spreadsheet.page(geo, "point", 3, 3, sort={"column": "w", "desc": True})
+        self.assertEqual(a["total"], b["total"])
+        self.assertEqual(len(spreadsheet._ORDERS[geo]), 1)
+
+    def test_column_origins_name_the_node_that_made_each_attribute(self):
+        from minihou.link.session import Session
+        g = Graph.from_dict({"nodes": {"g": {"type": "grid", "params": {"columns": 4, "rows": 3}},
+                                       "p": {"type": "attrib_paint", "inputs": {"geo": "g"}, "params": {"attribute": "w", "domain": "point", "kind": "float"}},
+                                       "t": {"type": "transform", "inputs": {"geo": "p"}, "params": {"translate": [1, 0, 0]}}}, "display": "t"})
+        s = Session(g)
+        s.start()
+        self.addCleanup(s.stop)
+        self.assertEqual(s.column_origins("t", "point", ["uv", "w"]), {"uv": "g", "w": "p"})
+        self.assertEqual(s.column_origins("p", "point", ["w"]), {"w": "p"})
+        self.assertEqual(s.column_origins("nope", "point", ["w"]), {})
+
     def test_preview_attr_arrays_use_the_viewers_numbering(self):
         from minihou import preview
         geo = self.painted()

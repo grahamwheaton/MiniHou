@@ -1139,6 +1139,14 @@
     selectionFor, selectedSet: (domain) => { const ids = selectionFor(domain); return ids ? new Set(ids) : null; },
     selectElements: (domain, ids, how) => pv.selectElements && pv.selectElements(domain, ids, how),
     opened: (on) => { $("#pv-sheet-btn").classList.toggle("on", on); $("#preview").classList.toggle("sheet-open", on); },
+    selectNode: (id) => { if (nodeOf(id)) select([id]); },
+    assignCells: async (domain, col, ids, values) => {                      // pasted cells of one column: one edit
+      if (!paintTool) return;
+      const float = col.dtype.startsWith("float"), kind = domain === "edge" ? "int" : col.comps === 3 && float ? "vec3" : col.comps === 1 ? (float ? "float" : "int") : null;
+      if (!kind) { toast("Only single numbers and 3-vectors can be pasted here."); return; }
+      if (pvReduced || (S.status && S.status.proxy && S.status.proxy.cooked < 1)) { toast("Paste into cells at full detail and full cook (Proxy: Full)."); return; }
+      await paintTool.assignValues({ attr: col.name, domain, kind }, ids, values);
+    },
     assignCell: async (domain, col, id, nums) => {
       if (!paintTool) return;
       const float = col.dtype.startsWith("float"), kind = domain === "edge" ? "int" : col.comps === 3 && float ? "vec3" : col.comps === 1 ? (float ? "float" : "int") : null;

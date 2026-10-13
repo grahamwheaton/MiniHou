@@ -2853,7 +2853,7 @@ class EditorE2E(unittest.TestCase):
         self.s.edit([{"op": "insert", "after": "g", "type": "attrib_paint", "id": "w", "params": {"attribute": "w"}}])
         self.page.click("#pv-sheet-btn")
         self.page.locator("#sheet .sh-tab[data-domain='point']").click()
-        self.page.wait_for_function("[...document.querySelectorAll('#sheet .sh-h')].some((h) => h.textContent === 'w')")        # the paint node's column is in
+        self.page.wait_for_function("[...document.querySelectorAll('#sheet .sh-hname')].some((h) => h.textContent === 'w')")        # the paint node's column is in
         self.page.wait_for_selector('#sheet .sh-row[data-id="5"] .sh-c.ed')
         cell = self.page.locator('#sheet .sh-row[data-id="5"] .sh-c[data-col="w"]')
         cell.dblclick()
@@ -2862,6 +2862,105 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: float(self.painted("w").point["w"][5]) == 4.5))
         self.assertEqual(sum(n.type == "attrib_paint" for n in self.s.graph.nodes.values()), 1)
         self.page.wait_for_function("(() => { const c = document.querySelector('#sheet .sh-row[data-id=\"5\"] .sh-c[data-col=\"w\"]'); return !!c && c.textContent === '4.5'; })()")
+
+    def sheet_with_weights(self, columns=4, rows=3):
+        self.grid_view(columns, rows)
+        self.s.edit([{"op": "insert", "after": "g", "type": "attrib_paint", "id": "w", "params": {"attribute": "w"}},
+                     {"op": "paint_assign", "id": "w", "indices": [3, 7, 9], "values": [0.2, 0.9, 0.5]}])
+        self.page.click("#pv-sheet-btn")
+        self.page.wait_for_function("[...document.querySelectorAll('#sheet .sh-hname')].some((h) => h.textContent === 'w')")
+        self.page.wait_for_selector("#sheet .sh-row")
+
+    def first_ids(self, n=3):
+        return self.page.evaluate("[...document.querySelectorAll('#sheet .sh-row')].sort((a, b) => a.dataset.i - b.dataset.i).slice(0, %d).map((r) => Number(r.dataset.id))" % n)
+
+    def test_the_spreadsheet_sorts_by_a_header_and_filters_with_an_expression(self):
+        self.sheet_with_weights()
+        self.assertEqual(self.first_ids(2), [0, 1])
+        self.page.click('#sheet .sh-h[data-col="w"]')                                                 # ascending: the zeros, then 0.2 0.5 0.9 at the end
+        self.page.wait_for_function("document.querySelector('#sheet .sh-h[data-col=\"w\"] .sh-sort')?.textContent === '▲'")
+        self.page.click('#sheet .sh-h[data-col="w"]')                                                 # descending
+        self.page.wait_for_function("document.querySelector('#sheet .sh-h[data-col=\"w\"] .sh-sort')?.textContent === '▼'")
+        self.assertTrue(until(lambda: self.first_ids(3) == [7, 9, 3]))
+        self.page.click('#sheet .sh-h[data-col="w"]')                                                 # off
+        self.assertTrue(until(lambda: self.first_ids(2) == [0, 1]))
+        self.assertEqual(self.page.locator('#sheet .sh-h[data-col="w"] .sh-sort').count(), 0)
+        self.page.click('#sheet .sh-h[data-col="P"]', modifiers=["Alt"])                                 # a vector: Alt-click picks y
+        self.page.wait_for_function("document.querySelector('#sheet .sh-h[data-col=\"P\"] .sh-sort')?.textContent === '▲ y'")
+        self.page.click('#sheet .sh-h[data-col="P"]', modifiers=["Alt"])
+        self.page.wait_for_function("document.querySelector('#sheet .sh-h[data-col=\"P\"] .sh-sort')?.textContent === '▲ z'")
+        self.page.click('#sheet .sh-h[data-col="P"]', modifiers=["Alt"])
+        self.page.wait_for_function("document.querySelector('#sheet .sh-h[data-col=\"P\"] .sh-sort')?.textContent === '▲ len'")
+        self.page.click('#sheet .sh-h[data-col="P"]', modifiers=["Alt"])
+        self.page.wait_for_function("document.querySelector('#sheet .sh-h[data-col=\"P\"] .sh-sort')?.textContent === '▲ x'")
+        self.page.click('#sheet .sh-h[data-col="P"]')
+        self.page.click('#sheet .sh-h[data-col="P"]')                                                 # off again
+        self.page.fill("#sheet .sh-filter", "@w > 0.3")
+        self.page.wait_for_function("document.querySelector('#sheet .sh-status').textContent.startsWith('2 rows (filtered)')")
+        self.assertEqual(sorted(self.first_ids(5)), [7, 9])
+        self.page.click('#sheet .sh-h[data-col="w"]')
+        self.page.click('#sheet .sh-h[data-col="w"]')
+        self.assertTrue(until(lambda: self.first_ids(2) == [7, 9]))
+        self.page.fill("#sheet .sh-filter", "no_such_group")                                           # a filter that cannot be read: the message says why
+        self.page.wait_for_function("document.querySelector('#sheet .sh-msg') && document.querySelector('#sheet .sh-msg').textContent.includes('no group')")
+        self.assertEqual(self.page.evaluate("minihou.sheet.rows()"), 0)
+        self.page.fill("#sheet .sh-filter", "")
+        self.page.wait_for_function("document.querySelector('#sheet .sh-status').textContent.startsWith('12 rows')")
+        self.page.click('#sheet .sh-tab[data-domain="edge"]')                                        # edges filter by column comparisons
+        self.page.fill("#sheet .sh-filter", "faces == 1 and a < 2")
+        self.page.wait_for_function("document.querySelector('#sheet .sh-status').textContent.includes('(filtered)')")
+        self.assertGreater(self.page.evaluate("minihou.sheet.rows()"), 0)
+
+    def test_spreadsheet_columns_can_be_hidden_and_say_which_node_made_them(self):
+        self.sheet_with_weights()
+        self.s.edit([{"op": "insert", "after": "w", "type": "transform", "id": "t", "params": {"translate": [1, 0, 0]}}])
+        self.page.wait_for_function("document.querySelector('#sheet .sh-h[data-col=\"w\"] .sh-org')?.textContent === '← w'")
+        self.assertEqual(self.page.locator('#sheet .sh-h[data-col="uv"] .sh-org').inner_text(), "← g")
+        self.assertEqual(self.page.locator('#sheet .sh-h[data-col="P"] .sh-org').count(), 0)         # built-in columns are not 'made' by a node
+        self.page.click('#sheet .sh-h[data-col="w"] .sh-org')                                        # the chip selects that node
+        self.assertTrue(until(lambda: self.page.evaluate("[...minihou.S.sel].join()") == "w"))
+        self.page.click("#sheet .sh-cols")
+        self.page.uncheck('#sheet .sh-colsmenu input[data-col="uv"]')
+        self.assertEqual(self.page.locator('#sheet .sh-h[data-col="uv"]').count(), 0)
+        self.assertEqual(self.page.locator('#sheet .sh-row[data-id="0"] .sh-c[data-col="uv"]').count(), 0)
+        self.assertEqual(self.page.locator('#sheet .sh-row[data-id="0"] .sh-c[data-col="w"]').count(), 1)
+        self.page.click('#sheet .sh-tab[data-domain="prim"]')                                        # hiding is per domain
+        self.page.click('#sheet .sh-tab[data-domain="point"]')
+        self.page.wait_for_selector('#sheet .sh-h[data-col="w"]')
+        self.assertEqual(self.page.locator('#sheet .sh-h[data-col="uv"]').count(), 0)                # and it is remembered
+        self.page.click("#sheet .sh-cols")
+        self.page.click("#sheet .sh-colsall")
+        self.assertEqual(self.page.locator('#sheet .sh-h[data-col="uv"]').count(), 1)
+
+    def test_spreadsheet_cells_copy_and_paste_as_one_edit_per_column(self):
+        self.sheet_with_weights()
+        cell = lambda i: self.page.locator('#sheet .sh-row[data-i="%d"] .sh-c[data-col="w"]' % i)
+        cell(3).click()
+        cell(5).click(modifiers=["Shift"])
+        self.assertEqual(self.page.evaluate("minihou.sheet.selectionText()"), "0.2\n0\n0")
+        text = self.page.evaluate("""() => { const dt = new DataTransfer(); const ev = new ClipboardEvent('copy', { clipboardData: dt, bubbles: true, cancelable: true });
+            document.querySelector('#sheet .sh-scroll').dispatchEvent(ev); return dt.getData('text/plain'); }""")
+        self.assertEqual(text, "0.2\n0\n0")
+        cell(0).click()
+        edits = len(self.s.graph.nodes)
+        self.page.evaluate("""() => { const dt = new DataTransfer(); dt.setData('text/plain', '1\\n2\\n3');
+            document.querySelector('#sheet .sh-scroll').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); }""")
+        self.assertTrue(until(lambda: self.painted("w").point["w"][:3].tolist() == [1.0, 2.0, 3.0]))
+        self.assertEqual(len(self.s.graph.nodes), edits)                                              # the same paint node
+        self.s.undo()                                                                                # the whole paste: one step
+        self.assertTrue(until(lambda: self.painted("w").point["w"][:3].tolist() == [0.0, 0.0, 0.0]))
+        self.assertAlmostEqual(float(self.painted("w").point["w"][3]), 0.2, places=5)                  # what was painted before is untouched
+        cell(2).click()
+        cell(6).click(modifiers=["Shift"])
+        self.page.evaluate("minihou.sheet.paste('4.5')")                                             # one value fills the selected range
+        self.assertTrue(until(lambda: self.painted("w").point["w"][2:7].tolist() == [4.5] * 5))
+        self.page.locator('#sheet .sh-row[data-i="1"] .sh-c[data-col="P"]').click()                  # built-in columns are read-only
+        self.page.evaluate("minihou.sheet.paste('1 2 3')")
+        self.page.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').textContent.includes('read-only')")
+        cell(0).click()
+        self.page.evaluate("minihou.sheet.paste('abc')")                                             # a value that is not a number: nothing changes, and it says so
+        self.page.wait_for_function("document.querySelector('#toast').textContent.includes('needs 1 number')")
+        self.assertEqual(float(self.painted("w").point["w"][0]), 0.0)
 
     def test_paint_needs_the_real_geometry_and_the_full_cook(self):
         self.big_grid()

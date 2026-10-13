@@ -745,6 +745,36 @@ class Session:
         return out
 
     @cancellable
+    def column_origins(self, node: str, domain: str, names: List[str], limit: int = 400) -> Dict[str, str]:
+        """For each attribute (column) name, the node that first made it on the way to ``node``: walk up through the first input that has it
+        until no input does. Used by the spreadsheet; cooked results come from the cache, and anything that fails to cook is just left out."""
+        from .. import spreadsheet
+        with self.lock:
+            snapshot = self.graph.copy()
+            frame, fps = self.frame, self.fps
+            feeds = self._modifier_feeds(snapshot)
+        if node not in snapshot.nodes:
+            return {}
+        out: Dict[str, str] = {}
+        has_cache: Dict[str, set] = {}
+        try:
+            with self._cook_lock, timectx.at(frame, fps), proxy.using(self.view_level()):
+                def columns(nid: str) -> set:
+                    if nid not in has_cache:
+                        has_cache[nid] = set(spreadsheet._tables(self.evaluator.cook(snapshot, nid, feeds=feeds), domain))
+                    return has_cache[nid]
+                for name in names:
+                    cur = node
+                    for _ in range(limit):
+                        nxt = next((i for i in snapshot.input_ids(cur) if i in snapshot.nodes and name in columns(i)), None)
+                        if nxt is None:
+                            break
+                        cur = nxt
+                    out[name] = cur
+        except (NodeError, GraphError, ParamError, ValueError):
+            return out
+        return out
+
     def preview(self, node: str, templates: bool = False) -> dict:
         """Cook ``node`` and return ``{"ok", "node", "rev", "geo"}``, or ``{"ok": False, "error"}`` (never raises)."""
         with self.lock:

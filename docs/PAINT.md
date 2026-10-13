@@ -73,6 +73,21 @@ a page) and virtualised in the page, so a million points cost the same as ten. C
 *Selected only* filters to the viewport selection. **Double-click a cell** of an attribute (a number, or three numbers for a vector) to edit it:
 the edit goes through `paint_assign`, into the viewed `attrib_paint` node or a new one. Built-in columns (`P`, `point`, `size`, ...) are read-only.
 
+* **Sort**: click a header (ascending, again for descending, again for off). A vector column sorts by x; **Alt-click** steps through y, z and the
+  vector's length. NaN sorts last. The engine does the sorting and remembers each order per cooked geometry, so scrolling a sorted million-row
+  table costs nothing extra.
+* **Filter** (the box in the bar): points and primitives take the group syntax of every group field: a group name, element numbers (`0-99`, `0-99:2`),
+  `^` to remove, or an expression such as `@P.z > 0.5` or `@w > 0.3 and @group_top`. Vertices and edges take comparisons of a column with a number, joined by `and`
+  (`faces == 1 and a < 10`, `P.z > 0` for a vector component `.x .y .z .len`). A filter that cannot be read shows its message in the table.
+  Filter, sort and *Selected only* combine; row numbers always stay the elements' own numbers.
+* **Columns**: the menu hides columns (remembered per domain).
+* **Where it came from**: each attribute column carries `← node`, the node that first made the attribute on the way to the viewed node (clicking it
+  selects that node). Built-in columns have none.
+* **Copy and paste**: click a cell (Shift-click for a range) and press Ctrl+C: tab-separated text, vectors with spaces. Ctrl+V pastes a block of numbers
+  starting at the clicked cell (rows follow the table's current order, so a sorted or filtered table pastes into the rows you see); one number pasted
+  over a selected range fills it. A paste is **one edit per column** (one undo step each, into the viewed paint node), at most 20,000 rows at a time,
+  full detail and full cook only. Anything that is not a number of the right count (1 for a float, 3 for a vector) refuses the whole paste and says where.
+
 ## For scripts
 
 ```json

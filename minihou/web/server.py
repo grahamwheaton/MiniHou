@@ -27,8 +27,10 @@ live in the other and in Blender.
                        there is none (the editor then shows its own browser)
 ``POST /api/upload``   ``?name=`` the raw bytes of a dropped file (header ``X-MiniHou-Upload: 1`` required, streamed to disk, up to 16 GB) into
                        ``imports/`` under the root -> ``{path, size}``; ``.usd``/``.usda``/``.usdc``/``.usdz``/``.png`` only
-``POST /api/spreadsheet`` ``{node, domain: point|vertex|prim|edge|detail, start?, count?, ids?}`` a page (at most 500) of rows of any node's geometry:
-                       ``{total, columns, rows: [[element, value...]]}``; ``ids`` restricts to those elements (the selection)
+``POST /api/spreadsheet`` ``{node, domain: point|vertex|prim|edge|detail, start?, count?, ids?, sort?, filter?, origins?}`` a page (at most 500) of rows of any node's geometry:
+                       ``{total, columns, rows: [[element, value...]]}``; ``ids`` restricts to those elements (the selection), ``filter`` keeps matching rows
+                       (point/prim: group syntax such as ``@w > 0.5``; vertex/edge: ``column <op> number and ...``), ``sort`` is ``{column, comp?, desc?}``,
+                       ``origins`` adds ``{column: node that first made it}``
 ``POST /api/disk_cache`` ``{enabled?, clear?}`` turn the disk cache of expensive results on (``.minihou_cache`` in the root) or off, or
                        clear it; returns ``{enabled, stats}``
 ``POST /api/proxy``    ``{level?, auto?, link_tris?}`` the proxy settings (cook level 0.001..1, auto refine, Blender triangle cap);
@@ -657,9 +659,14 @@ class _Handler(BaseHTTPRequestHandler):
             if ids is not None and (not isinstance(ids, list) or any(isinstance(i, bool) or not isinstance(i, int) for i in ids[:100000])):
                 raise ApiError(400, '"ids" must be a list of element numbers')
             try:
-                out = spreadsheet.page(r["geo"], str(body.get("domain") or "point"), int(body.get("start") or 0), int(body.get("count") or 100), ids)
+                out = spreadsheet.page(r["geo"], str(body.get("domain") or "point"), int(body.get("start") or 0), int(body.get("count") or 100), ids,
+                                       body.get("sort"), str(body.get("filter") or ""))
+            except spreadsheet.FilterError as e:                          # a filter or sort the geometry cannot satisfy: shown in the table, not an HTTP error
+                return self._json({"ok": False, "node": node, "rev": r["rev"], "error": {"node": node, "message": str(e)}})
             except (ValueError, TypeError) as e:
                 raise ApiError(400, str(e)) from None
+            if body.get("origins") and out.get("columns"):
+                out["origins"] = s.column_origins(node, out["domain"], [c["name"] for c in out["columns"] if not c.get("computed")])
             out.update(ok=True, node=node, rev=r["rev"], cook_level=s.view_level())
             return self._json(out)
         if path == "/api/open":

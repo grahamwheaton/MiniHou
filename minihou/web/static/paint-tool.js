@@ -585,6 +585,7 @@ window.MiniPaint = (pv, canvas, host) => {
     toggle() { return api.setPaint(!active); },
     refreshInfo, fillNames, fillGroups, applyView, blocked, allowed: () => buildAllow(),
     assign: (spec, ids, value) => writeOps(spec, [{ indices: ids, value }]),                 // spreadsheet cells
+    assignValues: (spec, ids, values) => writeOps(spec, [{ indices: ids, values }]),         // pasted cells: one value (or 3-vector) per element
     values: () => (ctx ? { vals: ctx.vals, n: ctx.n, node: ctx.node } : null),
     setBase: (b) => { if (ctx) ctx.base = b; },
   };
