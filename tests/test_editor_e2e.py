@@ -1009,7 +1009,14 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_function("minihou.preview.handleTips().length > 0")
 
     def drag_handle(self, hid, pixels):
-        tip = next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == hid)
+        def tip_of():
+            return next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == hid)
+        tip, last = tip_of(), None
+        for _ in range(40):                                                   # the view may still be settling after a cook: grab it when it stops moving
+            last, tip = tip, tip_of()
+            if tip["tip"] == last["tip"] and tip["u"] == last["u"]:
+                break
+            time.sleep(0.05)
         box = self.page.locator("#pv-canvas").bounding_box()
         x, y = box["x"] + tip["tip"][0], box["y"] + tip["tip"][1]
         self.page.mouse.move(x, y)
