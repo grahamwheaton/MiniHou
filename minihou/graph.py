@@ -66,7 +66,7 @@ _BOX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 def clean_box(d: Any) -> Dict[str, Any]:
-    """Validate and normalise a network box: ``{id, title, color, pos: [x, y], size: [w, h]}``."""
+    """Validate frame geometry plus optional note text and collapsed/locked flags."""
     if not isinstance(d, dict):
         raise GraphError("a box is an object")
     bid = d.get("id")
@@ -84,8 +84,18 @@ def clean_box(d: Any) -> Dict[str, Any]:
     color = d.get("color") or ""
     if color and not (isinstance(color, str) and _BOX_COLOR.match(color)):
         raise GraphError(f"color must be '#rrggbb', got {color!r}")
-    return {"id": bid, "title": str(d.get("title") or "")[:80], "color": color.lower(),
+    result = {"id": bid, "title": str(d.get("title") or "")[:80], "color": color.lower(),
             "pos": pair("pos"), "size": pair("size", 40.0)}
+    for key in ("collapsed", "locked", "note"):
+        if key in d:
+            if not isinstance(d[key], bool):
+                raise GraphError(f"{key} must be a boolean")
+            result[key] = d[key]
+    if "text" in d:
+        if not isinstance(d["text"], str) or len(d["text"]) > 10000:
+            raise GraphError("note text must be a string of at most 10000 characters")
+        result["text"] = d["text"]
+    return result
 
 
 class Graph:

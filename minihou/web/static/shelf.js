@@ -225,7 +225,7 @@
     }) : [el("div", { class: "sh-empty" }, prefs.tab === "Library" ? "No library nodes yet: select nodes and press Ctrl+G to make one." : "Nothing here.")]));
     root.classList.toggle("collapsed", prefs.collapsed);
     root.replaceChildren(row, body);
-    document.documentElement.style.setProperty("--shelf-h", (prefs.collapsed ? 27 : 100) + "px");
+    document.documentElement.style.setProperty("--shelf-h", (prefs.collapsed ? 27 : 84) + "px");
     root.dataset.tab = prefs.tab;
     row.querySelector(".sh-tab.on") && row.querySelector(".sh-tab.on").scrollIntoView({ block: "nearest", inline: "nearest" });
   }

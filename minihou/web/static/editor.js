@@ -50,6 +50,24 @@
     toastTimer = setTimeout(() => (t.style.display = "none"), isErr ? 6000 : 2500);
   }
 
+  // In-app text and confirmation dialogs, shared by file and graph actions.
+  function appDialog(message, initial, confirmation = false) {
+    return new Promise(resolve => {
+      const dialog = h("dialog", { class: "app-dialog", "aria-label": confirmation ? "Confirm action" : "Edit value" });
+      const input = h("input", { type: "text", value: initial || "", "aria-label": message });
+      const form = h("form", { method: "dialog" }, h("h2", null, confirmation ? "Confirm action" : "MiniHou"),
+        h("p", null, message), confirmation ? null : input,
+        h("div", { class: "dialog-actions" }, h("button", { type: "button", onclick: () => dialog.close("cancel") }, "Cancel"), h("button", { type: "submit", class: "primary" }, confirmation ? "Confirm" : "OK")));
+      form.onsubmit = e => { e.preventDefault(); dialog.close("ok"); };
+      dialog.append(form); document.body.append(dialog);
+      dialog.addEventListener("close", () => { const ok = dialog.returnValue === "ok"; const value = input.value; dialog.remove(); resolve(confirmation ? ok : ok ? value : null); }, { once: true });
+      dialog.showModal(); if (!confirmation) { input.focus(); input.select(); }
+    });
+  }
+  const appPrompt = (message, initial) => appDialog(message, initial);
+  const appConfirm = message => appDialog(message, "", true);
+  document.addEventListener("keydown", e => { if (document.querySelector(".app-dialog[open]")) e.stopImmediatePropagation(); }, true);
+
   // ---------------------------------------------------------------- API
   async function api(path, body) {
     const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
@@ -122,6 +140,7 @@
   }
 
   // ---------------------------------------------------------------- state from the engine
+  let fullStateLoaded = false;
   async function loadState() {
     try {
       const st = await api("/api/state");
@@ -131,6 +150,7 @@
       S.status = st.status;
       S.status.clients = st.link.clients;
       S.rev = -1;                                    // the engine may have restarted: accept its revision
+      if (!fullStateLoaded) { S.framed = false; fullStateLoaded = true; }
       applySnapshot(st);
     } catch (e) {
       setOnline(false);
@@ -167,7 +187,7 @@
     for (const id of [...S.sel]) if (!S.graph.nodes[id]) S.sel.delete(id);
     if (S.wireSel && !wireExists(S.wireSel)) S.wireSel = null;
     render();
-    if (fileChanged || !S.framed) { frame(false); S.framed = true; }
+    if (fileChanged || !S.framed) { frame(false); S.framed = true; requestAnimationFrame(() => { if (!drag && !S.sel.size) frame(false); }); }
   }
   function connectEvents() {
     const es = new EventSource("/api/events");
@@ -243,7 +263,7 @@
   function applyView() {
     const { x, y, k } = S.view;
     world.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
-    canvas.style.backgroundSize = `${24 * k}px ${24 * k}px`;
+    canvas.style.backgroundSize = `${(Number(canvas.dataset.gridSpacing) || 24) * (canvas.dataset.backdrop === "checker" ? 2 : 1) * k}px ${(Number(canvas.dataset.gridSpacing) || 24) * (canvas.dataset.backdrop === "checker" ? 2 : 1) * k}px`;
     canvas.style.backgroundPosition = `${x}px ${y}px`;
   }
   function frame(selectedOnly) {
@@ -286,11 +306,12 @@
     const live = upstreamOfDisplay(), disp = displayNode();
     const keep = new Set();
     for (const [id, n] of Object.entries(S.graph.nodes)) {
-      if (inputOwner(id)) continue;
+      if (inputOwner(id) || hiddenInFrame(id)) continue;
       keep.add(id);
       const t = typeOf(id);
       let el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`);
       if (!el) { el = h("div", { class: "node", dataset: { id } }); nodesEl.append(el); }
+      el.style.background = /^#[0-9a-f]{6}$/i.test(n.color || "") ? n.color : "";
       const [x, y] = pos(id);
       el.style.left = x + "px"; el.style.top = y + "px"; el.style.height = nodeHeight(id) + "px";
       el.className = ["node", "cat-" + (t.category || "other"), t.category === "system" && t.source && "group", S.sel.has(id) && "selected", id === disp && "display",
@@ -358,7 +379,7 @@
     for (const id of Object.keys(S.graph.nodes)) {
       inputs(id).forEach(([spec, srcs], i) => {
         srcs.forEach((src, k) => {
-          if (!nodeOf(src)) return;
+          if (!nodeOf(src) || hiddenInFrame(id) || hiddenInFrame(src)) return;
           if (drag && drag.pickup && drag.pickup.to === id && drag.pickup.port === spec.name && drag.pickup.from === src) return;
           const d = wirePath(outPortCenter(src), inPortCenter(id, i, k, srcs.length));
           const sel = S.wireSel && S.wireSel.to === id && S.wireSel.port === spec.name && S.wireSel.from === src;
@@ -373,6 +394,7 @@
     wiresSvg.replaceChildren(...kids);
   }
   function renderTop() {
+    $("#app-document").textContent = S.path ? relPath(S.path) : "Untitled graph";
     $("#file-name").textContent = S.path ? relPath(S.path) : "(unsaved graph)";
     $("#file-btn").title = S.path || "";
     $("#undo-btn").disabled = !S.canUndo;
@@ -458,7 +480,6 @@
   // ---------------------------------------------------------------- Blender bar: install the add-on, open Blender connected
   const BAR_KEY = "minihou.blenderbar";                             // "hidden" once dismissed
   const BB = { info: null, connected: false, forced: false, loading: false };
-  const storedHidden = () => { try { return localStorage.getItem(BAR_KEY) === "hidden"; } catch (e) { return false; } };
   async function loadBlenderInfo() {
     if (BB.loading || BB.info) return;
     BB.loading = true;
@@ -472,7 +493,7 @@
   }
   function renderBlenderBar() {
     const bar = $("#blender-bar");
-    const show = BB.forced || (!BB.connected && !storedHidden() && S.online !== false);
+    const show = BB.forced;
     bar.classList.toggle("hidden", !show);
     document.body.classList.toggle("has-bar", show);
     if (!show) return;
@@ -670,7 +691,7 @@
           } }, "Remove")));
       }
       out.push(h("button", { id: "add-modifier-input", onclick: async () => {
-        const label = prompt("Object input name", "Object");
+        const label = await appPrompt("Object input name", "Object");
         if (!label?.trim()) return;
         const key = uniqueId(id + "_object_");
         const r = await edit([{ op: "add", id: key, type: "object_input", pos: pos(id) },
@@ -1287,10 +1308,72 @@
       else if (k === "a" && pvSelection.mode !== "view") { pv.selectAll(); e.preventDefault(); e.stopImmediatePropagation(); }
     }, true);
   }
+  // Browser-local viewport preferences: only validated, known fields are restored.
+  const preferenceDefaults = { background: "#212429", gridOpacity: 1, grid: true, axes: true,
+    shaded: true, edges: true, points: false, normals: false,
+    nodeBackdrop: "grid", nodeBackground: "#26292d", nodeGrid: "#2d3035", nodeColor: "#3a3f46",
+    wireColor: "#a9b1ba", selectionColor: "#e8a33d", nodeSnap: false, nodeSnapStep: 24, frameColor: "#5b7fb5", lighting: 1, pointSize: 4, gridSpacing: 0 };
+  function validPreference(key, value) {
+    const ranges = { lighting: [0, 2], pointSize: [1, 20], gridSpacing: [0, 10000], gridOpacity: [0, 2], nodeSnapStep: [1, 200] };
+    if (ranges[key]) return Number.isFinite(value) && value >= ranges[key][0] && value <= ranges[key][1] && (key !== "nodeSnapStep" || Number.isInteger(value));
+    if (key === "nodeBackdrop") return ["grid", "checker", "solid"].includes(value);
+    if (/background|color|nodeGrid/i.test(key)) return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
+    return typeof value === "boolean";
+  }
+  const preferencesKey = "minihou.preferences.v1";
+  const preferences = { ...preferenceDefaults };
+  try {
+    const saved = JSON.parse(localStorage.getItem(preferencesKey) || "{}");
+    for (const key of Object.keys(preferences)) {
+      const value = saved?.[key];
+      if (validPreference(key, value)) preferences[key] = value;
+    }
+  } catch (e) { /* Keep defaults when storage is unavailable or malformed. */ }
+  function applyPreferences(save = false) {
+    if (pv && pv.ok) { Object.assign(pv.opt, preferences); pv.redraw(); }
+    for (const [key, css] of [["nodeBackground", "--canvas"], ["nodeGrid", "--grid"], ["nodeColor", "--node"], ["wireColor", "--wire"], ["selectionColor", "--node-hi"]]) canvas.style.setProperty(css, preferences[key]);
+    canvas.dataset.backdrop = preferences.nodeBackdrop;
+    canvas.dataset.gridSpacing = preferences.nodeSnapStep;
+    applyView();
+    for (const key of Object.keys(preferences)) {
+      const input = $("#pref-" + key);
+      if (input.type === "checkbox") input.checked = preferences[key]; else input.value = preferences[key];
+      const quick = $("#pv-" + key); if (quick) quick.checked = preferences[key];
+    }
+    $("#pref-display-mode").value = !preferences.shaded ? (preferences.points && !preferences.edges ? "points" : "wire") : preferences.edges ? "edges" : "shaded";
+    $("#network-snap").checked = preferences.nodeSnap;
+    $("#pv-display-mode").value = $("#pref-display-mode").value;
+    if (save) {
+      try { localStorage.setItem(preferencesKey, JSON.stringify(preferences)); $("#preferences-storage").textContent = "Saved in this browser."; }
+      catch (e) { $("#preferences-storage").textContent = "Browser storage is unavailable. Changes apply for this session."; }
+    }
+  }
+  applyPreferences();
+  for (const key of Object.keys(preferences)) $("#pref-" + key).oninput = e => {
+    const value = e.target.type === "checkbox" ? e.target.checked : ["gridOpacity", "nodeSnapStep", "lighting", "pointSize", "gridSpacing"].includes(key) ? Number(e.target.value) : e.target.value;
+    if (!validPreference(key, value)) return;
+    preferences[key] = value;
+    applyPreferences(true);
+  };
+  $("#network-snap").onchange = e => { preferences.nodeSnap = e.target.checked; applyPreferences(true); };
+  $("#network-home").onclick = () => frame(false);
+  const preferencesDialog = $("#preferences");
+  function preferencePage(page) {
+    document.querySelectorAll("[data-preference-tab]").forEach(b => { const active = b.dataset.preferenceTab === page; b.setAttribute("aria-selected", active); b.tabIndex = active ? 0 : -1; });
+    document.querySelectorAll("[data-preference-page]").forEach(p => p.hidden = p.dataset.preferencePage !== page);
+  }
+  document.querySelectorAll("[data-preference-tab]").forEach(b => {
+    b.onclick = () => preferencePage(b.dataset.preferenceTab);
+    b.onkeydown = e => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) { const page = e.key === "Home" ? "viewport" : e.key === "End" ? "network" : b.dataset.preferenceTab === "viewport" ? "network" : "viewport"; preferencePage(page); document.querySelector(`[data-preference-tab="${page}"]`).focus(); e.preventDefault(); } };
+  });
+  $("#preferences-btn").onclick = () => { applyPreferences(); preferencesDialog.showModal(); preferencesDialog.scrollTop = 0; $("#preferences-preset").focus({ preventScroll: true }); };
+  $("#preferences-reset").onclick = () => { Object.assign(preferences, preferenceDefaults); applyPreferences(true); };
+  preferencesDialog.addEventListener("keydown", e => e.stopPropagation());
+  document.addEventListener("keydown", e => { if (preferencesDialog.open && e.target.dataset.preferenceTab) e.target.onkeydown(e); if (preferencesDialog.open) e.stopImmediatePropagation(); }, true);
   if (pv && pv.ok) {
-    for (const [id, key] of [["#pv-shaded", "shaded"], ["#pv-edges", "edges"], ["#pv-points", "points"], ["#pv-normals", "normals"]]) {
+    for (const [id, key] of [["#pv-grid", "grid"], ["#pv-shaded", "shaded"], ["#pv-edges", "edges"], ["#pv-points", "points"], ["#pv-normals", "normals"]]) {
       $(id).checked = pv.opt[key];
-      $(id).onchange = (e) => { pv.opt[key] = e.target.checked; pv.redraw(); };
+      $(id).onchange = (e) => { preferences[key] = e.target.checked; applyPreferences(true); };
     }
     $("#pv-frame-all").onclick = () => pv.frameAll();
     $("#pv-view-extra").onchange = (e) => { if (e.target.value) pv.viewAxis(e.target.value, false); e.target.value = ""; };
@@ -1394,6 +1477,7 @@
     }
     for (const id of ids) {
       const n = nodeOf(id);
+      if (n.color) ops.push({ op: "meta", id: map[id], set: { color: n.color } });
       if (inputOwner(id) && map[n.input_owner]) ops.push({ op: "meta", id: map[id], set: { input_owner: map[n.input_owner], input_label: n.input_label || id } });
       for (const [spec, srcs] of inputs(id)) for (const s of srcs) ops.push({ op: "connect", from: map[s] || s, to: map[id], port: spec.name });
     }
@@ -1502,9 +1586,12 @@
   const boxesEl = $("#boxes");
   const boxRect = (b) => S.boxDrag && S.boxDrag.id === b.id ? S.boxDrag : { pos: b.pos, size: b.size };
   function boxMembers(b) {                                    // nodes whose centre is inside the box
+    if (b.note) return [];
     const [x, y] = b.pos, [w, hh] = b.size;
     return Object.keys(S.graph.nodes).filter((id) => { const [nx, ny] = pos(id); return nx + W / 2 >= x && nx + W / 2 <= x + w && ny + H / 2 >= y && ny + H / 2 <= y + hh; });
   }
+  function hiddenInFrame(id) { return (S.graph.boxes || []).some(b => b.collapsed && !b.note && boxMembers(b).includes(id)); }
+  function lockedInFrame(id) { return (S.graph.boxes || []).some(b => b.locked && !b.note && boxMembers(b).includes(id)); }
   function renderBoxes() {
     const list = S.graph.boxes || [], keep = new Set();
     for (const b of list) {
@@ -1512,14 +1599,19 @@
       let el = boxesEl.querySelector(`.netbox[data-id="${CSS.escape(b.id)}"]`);
       if (!el) {
         el = h("div", { class: "netbox", dataset: { id: b.id } },
-          h("div", { class: "hdr" }, h("span", { class: "dot", title: "Change colour" }), h("span", { class: "title" }), h("span", { class: "x", title: "Delete the box (nodes stay)" }, "×")),
+          h("div", { class: "hdr" }, h("input", { class: "dot", type: "color", title: "Frame colour", "aria-label": "Frame colour", oninput: e => edit([{ op: "box_set", id: b.id, color: e.target.value }]) }), h("span", { class: "title" }), h("span", { class: "x", title: "Delete the box (nodes stay)" }, "×")),
+          h("textarea", { class: "note-text", "aria-label": "Sticky note text", maxlength: 10000, onchange: e => edit([{ op: "box_set", id: b.id, text: e.target.value }]) }),
           h("div", { class: "grip", title: "Resize" }));
         boxesEl.append(el);
       }
       const r = boxRect(b);
       el.style.left = r.pos[0] + "px"; el.style.top = r.pos[1] + "px";
-      el.style.width = r.size[0] + "px"; el.style.height = r.size[1] + "px";
+      el.style.width = r.size[0] + "px"; el.style.height = (b.collapsed ? 28 : r.size[1]) + "px";
+      el.classList.toggle("collapsed", !!b.collapsed); el.classList.toggle("sticky-note", !!b.note); el.classList.toggle("locked", !!b.locked);
+      const note = el.querySelector(".note-text"); note.hidden = !b.note || !!b.collapsed; note.readOnly = !!b.locked;
+      if (document.activeElement !== note) note.value = b.text || "";
       el.style.setProperty("--bc", b.color || BOX_COLORS[0]);
+      el.querySelector(".dot").value = b.color || BOX_COLORS[0];
       const t = el.querySelector(".title");
       if (t.textContent !== (b.title || "")) t.textContent = b.title || "";
       t.title = "Double-click to rename";
@@ -1530,17 +1622,17 @@
   async function addBox() {
     const ids = [...S.sel].filter((id) => nodeOf(id));
     let op;
-    if (ids.length) op = { op: "box_add", around: ids, title: "Box" };
+    if (ids.length) op = { op: "box_add", around: ids, title: "Frame", color: preferences.frameColor };
     else {
       const r = canvas.getBoundingClientRect(), [x, y] = toWorld(r.left + r.width / 2, r.top + r.height / 2);
-      op = { op: "box_add", pos: [Math.round(x - 150), Math.round(y - 100)], size: [300, 200], title: "Box" };
+      op = { op: "box_add", pos: [Math.round(x - 150), Math.round(y - 100)], size: [300, 200], title: "Frame", color: preferences.frameColor };
     }
     await edit([op]);
   }
   async function renameBox(id) {
     const b = boxById(id);
     if (!b) return;
-    const t = prompt("Box title:", b.title || "");
+    const t = await appPrompt("Box title:", b.title || "");
     if (t !== null) await edit([{ op: "box_set", id, title: t }]);
   }
 
@@ -1707,11 +1799,8 @@
     const boxEl = t.closest(".netbox");
     if (boxEl && e.button === 0 && !port && !nodeEl) {
       const b = boxById(boxEl.dataset.id);
-      if (b && t.closest(".dot")) {
-        const i = Math.max(0, BOX_COLORS.indexOf(b.color));
-        edit([{ op: "box_set", id: b.id, color: BOX_COLORS[(i + 1) % BOX_COLORS.length] }]);
-        return;
-      }
+      if (t.closest(".note-text") || b?.locked) return;
+      if (b && t.closest(".dot")) return;
       if (b && t.closest(".x")) { edit([{ op: "box_remove", id: b.id }]); return; }
       if (b && (t.closest(".hdr") || t.closest(".grip"))) {
         const [wx, wy] = toWorld(e.clientX, e.clientY);
@@ -1748,7 +1837,8 @@
       }
       if (!S.sel.has(id)) select([id]);
       const [wx, wy] = toWorld(e.clientX, e.clientY);
-      drag = { kind: "move", ids: [...S.sel], wx, wy, start: new Map([...S.sel].map((i) => [i, pos(i).slice()])), moved: false };
+      if (lockedInFrame(id)) return;
+      drag = { kind: "move", ids: [...S.sel].filter(i => !lockedInFrame(i)), wx, wy, start: new Map([...S.sel].map((i) => [i, pos(i).slice()])), moved: false };
     } else if (t.classList.contains("hit")) {
       S.wireSel = { to: t.dataset.to, port: t.dataset.port, from: t.dataset.from };
       S.sel.clear(); renderNodes(); renderParams();
@@ -1762,6 +1852,11 @@
       window.addEventListener("pointermove", onDrag); window.addEventListener("pointerup", onDrop);
     }
   });
+  function nodeDragDelta(dx, dy, anchor) {
+    if (!preferences.nodeSnap) return [dx, dy];
+    const step = preferences.nodeSnapStep;
+    return [Math.round((anchor[0] + dx) / step) * step - anchor[0], Math.round((anchor[1] + dy) / step) * step - anchor[1]];
+  }
   function onDrag(e) {
     S.mouse = [e.clientX, e.clientY];
     if (!drag) return;
@@ -1770,13 +1865,13 @@
       if (Math.abs(dx) + Math.abs(dy) > 2) drag.moved = true;
       S.view.x = drag.vx + dx; S.view.y = drag.vy + dy; applyView();
     } else if (drag.kind === "move") {
-      const [wx, wy] = toWorld(e.clientX, e.clientY), dx = wx - drag.wx, dy = wy - drag.wy;
+      const [wx, wy] = toWorld(e.clientX, e.clientY), [dx, dy] = nodeDragDelta(wx - drag.wx, wy - drag.wy, drag.kind === "move" ? drag.start.get(drag.ids[0]) : drag.kind === "boxresize" ? drag.size : drag.pos);
       if (Math.abs(dx) + Math.abs(dy) > 1) drag.moved = true;
       for (const id of drag.ids) { const [x, y] = drag.start.get(id); S.dragPos.set(id, [Math.round(x + dx), Math.round(y + dy)]); }
       for (const id of drag.ids) { const el = nodesEl.querySelector(`.node[data-id="${CSS.escape(id)}"]`); if (el) { const [x, y] = pos(id); el.style.left = x + "px"; el.style.top = y + "px"; } }
       renderWires();
     } else if (drag.kind === "boxmove" || drag.kind === "boxresize") {
-      const [wx, wy] = toWorld(e.clientX, e.clientY), dx = wx - drag.wx, dy = wy - drag.wy;
+      const [wx, wy] = toWorld(e.clientX, e.clientY), [dx, dy] = nodeDragDelta(wx - drag.wx, wy - drag.wy, drag.kind === "move" ? drag.start.get(drag.ids[0]) : drag.kind === "boxresize" ? drag.size : drag.pos);
       if (Math.abs(dx) + Math.abs(dy) > 1) drag.moved = true;
       if (drag.kind === "boxmove") {
         S.boxDrag = { id: drag.id, pos: [Math.round(drag.pos[0] + dx), Math.round(drag.pos[1] + dy)], size: drag.size };
@@ -1878,7 +1973,7 @@
     if (t.category === "system" && t.source) { e.stopImmediatePropagation(); openFile(t.source, false, { mode: "push", via: id }); }
   });
   canvas.addEventListener("dblclick", (e) => { if (!e.target.closest(".node") && !e.target.closest(".netbox")) openMenu(e.clientX, e.clientY, { world: toWorld(e.clientX, e.clientY) }); });
-  canvas.addEventListener("contextmenu", (e) => { e.preventDefault(); if (!e.target.closest(".node")) openMenu(e.clientX, e.clientY, { world: toWorld(e.clientX, e.clientY) }); });
+  canvas.addEventListener("contextmenu", graphContextMenu);
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     const trackpadPan = !e.ctrlKey && e.deltaMode === 0 && Math.abs(e.deltaX) > 0 && Math.abs(e.deltaY) < 50;
@@ -2105,13 +2200,13 @@
   document.addEventListener("click", (e) => { if (!e.target.closest(".file")) $("#file-menu").classList.add("hidden"); });
   async function saveAs() {
     const cur = S.path ? relPath(S.path) : "graphs/my_graph.json";
-    let name = prompt("Save a copy as (inside " + (S.root || "the workspace") + ") and switch to it:", cur.replace(/\.json$/, "") + "_v2.json");
+    let name = await appPrompt("Save a copy as (inside " + (S.root || "the workspace") + ") and switch to it:", cur.replace(/\.json$/, "") + "_v2.json");
     if (!name) return;
     name = name.trim();
     if (!name.toLowerCase().endsWith(".json")) name += ".json";
     try { const snap = await api("/api/save_as", { path: name }); $("#file-menu").classList.add("hidden"); S.sel.clear(); applySnapshot(snap); toast("Saved as " + name, false); }
     catch (err) {
-      if (/already exists/.test(err.message) && confirm(name + " already exists. Overwrite it?")) {
+      if (/already exists/.test(err.message) && await appConfirm(name + " already exists. Overwrite it?")) {
         try { const snap = await api("/api/save_as", { path: name, overwrite: true }); $("#file-menu").classList.add("hidden"); S.sel.clear(); applySnapshot(snap); } catch (e2) { toast(e2.message); }
       } else toast(err.message);
     }
@@ -2119,7 +2214,7 @@
   async function exportUsd() {
     const cur = S.path ? relPath(S.path) : "exports/scene.json";
     const picked = [...S.sel].filter((id) => nodeOf(id)), single = picked.length === 1 ? picked[0] : null;
-    let name = prompt("Export the " + (single ? "node " + single : "display output") + " as USD (inside " + (S.root || "the workspace") + ", full size, .usd .usda or .usdc):",
+    let name = await appPrompt("Export the " + (single ? "node " + single : "display output") + " as USD (inside " + (S.root || "the workspace") + ", full size, .usd .usda or .usdc):",
       cur.replace(/\.json$/i, "") + ".usdc");
     if (!name) return;
     name = name.trim();
@@ -2129,7 +2224,7 @@
       let r;
       try { r = await send(false); }
       catch (err) {
-        if (/already exists/.test(err.message) && confirm(name + " already exists. Overwrite it?")) r = await send(true); else throw err;
+        if (/already exists/.test(err.message) && await appConfirm(name + " already exists. Overwrite it?")) r = await send(true); else throw err;
       }
       $("#file-menu").classList.add("hidden");
       const o = Object.values(r.outputs), n = (k) => o.reduce((a, x) => a + x[k], 0);
@@ -2139,15 +2234,15 @@
   async function fileOp(op, path, to) {
     try { await api("/api/file_op", { op, path, to }); await openFileMenu(); } catch (err) { toast(err.message); }
   }
-  function renameFile(f) {
-    let to = prompt("Rename to:", f.path);
+  async function renameFile(f) {
+    let to = await appPrompt("Rename to:", f.path);
     if (!to || to === f.path) return;
     if (!to.toLowerCase().endsWith(".json")) to += ".json";
     fileOp("rename", f.path, to.trim());
   }
-  function deleteFile(f) {
+  async function deleteFile(f) {
     const warn = f.system ? "\n\nIt is a library node: graphs that use it will show an error." : "";
-    if (confirm("Delete " + f.path + "? This cannot be undone." + warn)) fileOp("delete", f.path);
+    if (await appConfirm("Delete " + f.path + "? This cannot be undone." + warn)) fileOp("delete", f.path);
   }
   async function insertFromFile(path) {
     try {
@@ -2173,7 +2268,7 @@
     const ids = [...S.sel].filter((id) => nodeOf(id));
     if (!ids.length) { toast("Select the nodes to turn into a node first."); return; }
     const first = nodeOf(ids[0]);
-    let name = prompt("Name the new library node (letters, digits and _). It appears in the Add Node menu under Library:", ids.length === 1 ? first.type + "_group" : "my_node");
+    let name = await appPrompt("Name the new library node (letters, digits and _). It appears in the Add Node menu under Library:", ids.length === 1 ? first.type + "_group" : "my_node");
     if (!name) return;
     name = name.trim();
     try {
@@ -2183,7 +2278,7 @@
       for (let i = 0; i < 40 && d.node && !nodeOf(d.node); i++) await new Promise((r) => setTimeout(r, 50));      // the new graph arrives over the event stream
       if (d.node && nodeOf(d.node)) select([d.node]);
     } catch (err) {
-      if (/already exists/.test(err.message) && /\.json already exists/.test(err.message) && confirm(name + " exists in the library. Replace it?")) {
+      if (/already exists/.test(err.message) && /\.json already exists/.test(err.message) && await appConfirm(name + " exists in the library. Replace it?")) {
         try { await api("/api/make_system", { name, nodes: ids, replace: true, overwrite: true }); $("#file-menu").classList.add("hidden"); } catch (e2) { toast(e2.message); }
       } else toast(err.message);
     }
@@ -2195,8 +2290,8 @@
     catch (e) { toast(e.message); }
     S.nav = null;
   }
-  function newFile() {
-    let name = prompt("New graph file (inside " + (S.root || "the workspace") + "):", "graphs/my_system.json");
+  async function newFile() {
+    let name = await appPrompt("New graph file (inside " + (S.root || "the workspace") + "):", "graphs/my_system.json");
     if (!name) return;
     name = name.trim();
     if (!name.toLowerCase().endsWith(".json")) name += ".json";
@@ -2288,6 +2383,202 @@
     return { state: L, set, apply };
   })();
 
+  // Graph editing menus and browser-local appearance presets.
+  function colourControl(value, change) {
+    return h("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(value || "") ? value : preferences.nodeColor,
+      "aria-label": "Colour", onchange: e => change(e.target.value) });
+  }
+  const contextMenu = h("div", { id: "graph-context", class: "hidden", role: "menu", "aria-label": "Graph actions" });
+  document.body.append(contextMenu);
+  function closeContext() { contextMenu.classList.add("hidden"); }
+  document.addEventListener("pointerdown", e => { if (!contextMenu.contains(e.target)) closeContext(); }, true);
+  contextMenu.onkeydown = e => {
+    if (e.key === "Escape") { closeContext(); canvas.focus(); }
+    if (["ArrowDown", "ArrowUp"].includes(e.key)) {
+      const buttons = [...contextMenu.querySelectorAll("button,input")], at = buttons.indexOf(document.activeElement);
+      buttons[(at + (e.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length]?.focus(); e.preventDefault();
+    }
+    e.stopPropagation();
+  };
+  function graphContextMenu(e) {
+    e.preventDefault(); closeMenu();
+    const rows = [], action = (label, fn) => rows.push(h("button", { role: "menuitem", onclick: () => { closeContext(); Promise.resolve(fn()).catch(err => toast(err.message)); } }, label));
+    const node = e.target.closest(".node"), box = e.target.closest(".netbox"), wire = e.target.closest("path.hit");
+    if (node) {
+      const id = node.dataset.id; if (!S.sel.has(id)) select([id]);
+      action("Rename…", async () => { const name = await appPrompt("Node name", id); if (name && name !== id) return edit([{ op: "rename", id, to: name }]); });
+      action("Duplicate", () => duplicate([...S.sel]));
+      action("Frame selection", () => frame(true));
+      action("Group in frame", addBox);
+      rows.push(h("label", null, "Node colour ", colourControl(nodeOf(id).color, color => edit([...S.sel].map(id => ({ op: "meta", id, set: { color } }))))));
+      action("Use default colour", () => edit([...S.sel].map(id => ({ op: "meta", id, set: { color: null } }))));
+      action("Delete", () => removeNodes([...S.sel]));
+    } else if (wire) {
+      const w = wire.dataset;
+      action("Focus source", () => { select([w.from]); frame(true); });
+      action("Focus destination", () => { select([w.to]); frame(true); });
+      action("Disconnect", () => edit([{ op: "disconnect", from: w.from, to: w.to, port: w.port }]));
+    } else if (box) {
+      const b = boxById(box.dataset.id);
+      action("Rename…", () => renameBox(b.id));
+      rows.push(h("label", null, "Frame colour ", colourControl(b.color, color => edit([{ op: "box_set", id: b.id, color }]))));
+      action(b.collapsed ? "Expand" : "Collapse", () => edit([{ op: "box_set", id: b.id, collapsed: !b.collapsed }]));
+      action(b.locked ? "Unlock" : "Lock", () => edit([{ op: "box_set", id: b.id, locked: !b.locked }]));
+      if (!b.note) action("Fit around contents", () => {
+        const ids = boxMembers(b); if (!ids.length) { toast("This frame contains no nodes.", false); return; }
+        const pts = ids.map(pos), x = Math.min(...pts.map(p => p[0])) - 30, y = Math.min(...pts.map(p => p[1])) - 58;
+        return edit([{ op: "box_set", id: b.id, pos: [x, y], size: [Math.max(...pts.map(p => p[0])) + W + 30 - x, Math.max(...ids.map(id => pos(id)[1] + nodeHeight(id))) + 30 - y] }]);
+      });
+      action("Duplicate", () => edit([{ op: "box_add", title: b.title, color: b.color, pos: [b.pos[0] + 40, b.pos[1] + 40], size: b.size, note: !!b.note, text: b.text || "" }]));
+      action("Delete frame (keep nodes)", () => edit([{ op: "box_remove", id: b.id }]));
+    } else {
+      const point = toWorld(e.clientX, e.clientY);
+      action("Add node…", () => openMenu(e.clientX, e.clientY, { world: point }));
+      action("Add sticky note", () => addStickyNote(point));
+      action("Add frame", addBox); action("Find node…", openNodeSearch); action("Frame all", () => frame(false));
+    }
+    contextMenu.replaceChildren(...rows); contextMenu.classList.remove("hidden");
+    contextMenu.style.left = Math.max(8, Math.min(e.clientX, innerWidth - contextMenu.offsetWidth - 8)) + "px";
+    contextMenu.style.top = Math.max(8, Math.min(e.clientY, innerHeight - contextMenu.offsetHeight - 8)) + "px";
+    contextMenu.querySelector("button")?.focus();
+  }
+  function addStickyNote(point) {
+    if (!point) { const r = canvas.getBoundingClientRect(); point = toWorld(r.left + r.width / 2, r.top + r.height / 2); }
+    return edit([{ op: "box_add", title: "Note", color: "#c9a94d", pos: point, size: [260, 180], note: true, text: "Write your note here…" }]);
+  }
+  $("#note-btn").onclick = () => addStickyNote();
+  const searchDialog = h("dialog", { id: "node-search", "aria-label": "Find node" });
+  const searchInput = h("input", { type: "search", placeholder: "Name, type or comment…", "aria-label": "Find node" });
+  const searchResults = h("div", { class: "search-results" });
+  searchDialog.append(h("h2", null, "Find node"), searchInput, searchResults, h("button", { onclick: () => searchDialog.close() }, "Close")); document.body.append(searchDialog);
+  function updateNodeSearch() {
+    const query = searchInput.value.toLowerCase().trim();
+    const matches = Object.entries(S.graph.nodes).filter(([id, n]) => !inputOwner(id) && `${id} ${n.type} ${n.comment || ""}`.toLowerCase().includes(query));
+    searchResults.replaceChildren(...matches.slice(0, 100).map(([id, n]) => h("button", { onclick: async () => {
+      const hidden = (S.graph.boxes || []).filter(b => b.collapsed && boxMembers(b).includes(id));
+      if (hidden.length) await edit(hidden.map(b => ({ op: "box_set", id: b.id, collapsed: false })));
+      select([id]); frame(true); searchDialog.close();
+    } }, id, h("span", { class: "muted" }, " · " + n.type))));
+    if (!matches.length) searchResults.append(h("p", { class: "muted" }, "No matching nodes."));
+  }
+  function openNodeSearch() { searchInput.value = ""; updateNodeSearch(); searchDialog.showModal(); searchInput.focus(); }
+  searchInput.oninput = updateNodeSearch;
+  searchInput.onkeydown = e => { if (e.key === "Enter") { searchResults.querySelector("button")?.click(); e.preventDefault(); } if (e.key === "ArrowDown") searchResults.querySelector("button")?.focus(); };
+  searchDialog.onkeydown = e => e.stopPropagation();
+  $("#find-btn").onclick = openNodeSearch;
+  document.addEventListener("keydown", e => {
+    if (searchDialog.open) {
+      if (e.key === "Enter" && document.activeElement === searchInput) { searchResults.querySelector("button")?.click(); e.preventDefault(); }
+      if (["ArrowDown", "ArrowUp"].includes(e.key)) {
+        const buttons = [...searchResults.querySelectorAll("button")], at = buttons.indexOf(document.activeElement);
+        buttons[(at + (e.key === "ArrowDown" ? 1 : buttons.length - 1)) % buttons.length]?.focus(); e.preventDefault();
+      }
+      e.stopImmediatePropagation(); return;
+    }
+    if (!contextMenu.classList.contains("hidden")) { contextMenu.onkeydown(e); e.stopImmediatePropagation(); return; }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f" && !/input|textarea|select/i.test(e.target.tagName)) { e.preventDefault(); e.stopImmediatePropagation(); openNodeSearch(); }
+  }, true);
+  $("#pv-display-mode").onchange = $("#pref-display-mode").onchange = e => {
+    const mode = e.target.value; preferences.shaded = ["shaded", "edges"].includes(mode); preferences.edges = ["edges", "wire"].includes(mode); preferences.points = mode === "points"; applyPreferences(true);
+  };
+  $("#preferences-save-custom").onclick = () => {
+    try { localStorage.setItem("minihou.preferences.custom", JSON.stringify(preferences)); toast("Custom preset saved.", false); }
+    catch (err) { toast("Browser storage is unavailable; custom preset was not saved."); }
+  };
+  $("#preferences-preset").onchange = e => {
+    if (!e.target.value) return;
+    if (e.target.value === "custom") {
+      try {
+        const custom = JSON.parse(localStorage.getItem("minihou.preferences.custom") || "null");
+        if (!custom) throw new Error("Save a custom preset first.");
+        const next = { ...preferenceDefaults };
+        for (const key of Object.keys(next)) if (key in custom && validPreference(key, custom[key])) next[key] = custom[key];
+        Object.assign(preferences, next); applyPreferences(true);
+      } catch (err) { toast(err.message); }
+      e.target.value = ""; return;
+    }
+    Object.assign(preferences, preferenceDefaults);
+    if (e.target.value === "houdini") Object.assign(preferences, { background: "#3d3d3d", nodeBackground: "#303030", nodeGrid: "#393939", nodeColor: "#505050", selectionColor: "#ffb540", nodeSnap: true });
+    if (e.target.value === "contrast") Object.assign(preferences, { background: "#101010", nodeBackground: "#101010", nodeGrid: "#444444", nodeColor: "#424242", wireColor: "#ffffff", selectionColor: "#ffff00", gridOpacity: 1.6 });
+    applyPreferences(true); e.target.value = "";
+  };
+  $("#preferences-export").onclick = () => {
+    const url = URL.createObjectURL(new Blob([JSON.stringify({ version: 1, preferences }, null, 2)], { type: "application/json" }));
+    const a = h("a", { href: url, download: "minihou-preferences.json" }); a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  $("#preferences-import").onclick = () => $("#preferences-file").click();
+  $("#preferences-file").onchange = async e => {
+    const file = e.target.files[0]; if (!file) return;
+    try {
+      if (file.size > 100000) throw new Error("Preferences file is too large.");
+      const data = JSON.parse(await file.text());
+      if (data.version !== 1 || !data.preferences || typeof data.preferences !== "object") throw new Error("Not a supported preferences file.");
+      const next = { ...preferenceDefaults };
+      for (const key of Object.keys(next)) if (key in data.preferences) {
+        if (!validPreference(key, data.preferences[key])) throw new Error("Invalid preference: " + key);
+        next[key] = data.preferences[key];
+      }
+      Object.assign(preferences, next); applyPreferences(true); toast("Preferences imported.", false);
+    } catch (err) { toast(err.message); } finally { e.target.value = ""; }
+  };
+  // Desktop-style shell: commands stay wired to the same editor actions.
+  const appPopup = h("div", { id: "app-menu-popup", role: "menu", class: "hidden" });
+  document.body.append(appPopup);
+  let appMenuOwner = null;
+  function closeAppMenu(restoreFocus = false) {
+    appPopup.classList.add("hidden");
+    if (appMenuOwner) { appMenuOwner.setAttribute("aria-expanded", "false"); if (restoreFocus) appMenuOwner.focus(); }
+    appMenuOwner = null;
+  }
+  const clickCommand = id => () => $(id).click();
+  const appCommands = {
+    File: [["New graph…", newFile], ["Open graph…", clickCommand("#file-btn")], ["Save as…", saveAs], ["Preferences…", clickCommand("#preferences-btn")]],
+    Edit: [["Undo", clickCommand("#undo-btn"), "Ctrl+Z", () => !S.canUndo], ["Redo", clickCommand("#redo-btn"), "Ctrl+Shift+Z", () => !S.canRedo],
+      ["Add node…", clickCommand("#add-btn"), "Tab"], ["Find node…", openNodeSearch, "Ctrl+F"], ["Duplicate selection", () => duplicate([...S.sel]), "Ctrl+D", () => !S.sel.size],
+      ["Group in frame", addBox, "O"], ["Sticky note", () => addStickyNote()], ["Tidy layout", clickCommand("#tidy-btn"), "L"], ["Delete selection", () => removeNodes([...S.sel]), "Delete", () => !S.sel.size]],
+    View: [["Node network", () => layout.set({ max: "graph" })], ["Split workspace", () => layout.set({ max: null })], ["3D viewport", () => layout.set({ max: "view" })],
+      ["Frame all nodes", () => frame(false), "Home"], ["Swap panes", clickCommand("#lay-swap")], ["Stack panes", clickCommand("#lay-dir")], ["Toggle parameters", clickCommand("#lay-side")],
+      ["Blender connection…", clickCommand("#blender-status")], ["Preferences…", clickCommand("#preferences-btn")]],
+    Help: [["Keyboard and mouse", clickCommand("#help-btn"), "?"], ["Blender connection…", clickCommand("#blender-status")]]
+  };
+  function openAppMenu(button, focus = true) {
+    closeAppMenu(); closeContext();
+    appMenuOwner = button; button.setAttribute("aria-expanded", "true");
+    appPopup.replaceChildren(...appCommands[button.dataset.appMenu].map(([label, action, shortcut, disabled]) => h("button", {
+      role: "menuitem", disabled: disabled?.(), onclick: () => { closeAppMenu(); Promise.resolve(action()).catch(err => toast(err.message)); }
+    }, h("span", null, label), h("span", { class: "menu-shortcut" }, shortcut || ""))));
+    appPopup.classList.remove("hidden"); const r = button.getBoundingClientRect();
+    appPopup.style.left = r.left + "px"; appPopup.style.top = r.bottom + "px";
+    if (focus) appPopup.querySelector("button:not(:disabled)")?.focus();
+  }
+  const appMenuButtons = [...document.querySelectorAll("[data-app-menu]")];
+  appMenuButtons.forEach(button => {
+    button.onclick = () => appMenuOwner === button ? closeAppMenu() : openAppMenu(button);
+    button.onpointerenter = () => { if (appMenuOwner && appMenuOwner !== button) openAppMenu(button, false); };
+  });
+  document.addEventListener("pointerdown", e => { if (!appPopup.contains(e.target) && !e.target.closest("[data-app-menu]")) closeAppMenu(); }, true);
+  document.addEventListener("keydown", e => {
+    if (e.key === "F10" && !preferencesDialog.open && !searchDialog.open) { e.preventDefault(); e.stopImmediatePropagation(); appMenuOwner ? closeAppMenu(true) : openAppMenu(appMenuButtons[0]); return; }
+    const menuButton = e.target.closest("[data-app-menu]");
+    if (!appMenuOwner && menuButton && ["ArrowDown", "ArrowUp"].includes(e.key)) { openAppMenu(menuButton); e.preventDefault(); e.stopImmediatePropagation(); return; }
+    if (!appMenuOwner) return;
+    if (e.key === "Escape") closeAppMenu(true);
+    if (e.key === "Tab") closeAppMenu();
+    if (["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) {
+      const items = [...appPopup.querySelectorAll("button:not(:disabled)")], at = items.indexOf(document.activeElement);
+      const index = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
+      items[index]?.focus(); e.preventDefault();
+    }
+    if (["ArrowLeft", "ArrowRight"].includes(e.key)) { const at = appMenuButtons.indexOf(appMenuOwner); openAppMenu(appMenuButtons[(at + (e.key === "ArrowRight" ? 1 : appMenuButtons.length - 1)) % appMenuButtons.length]); e.preventDefault(); }
+    e.stopImmediatePropagation();
+  }, true);
+  [$("#cook-status"), $("#blender-status"), $("#topbar .proxy")].forEach(el => $("#app-status-items").append(el));
+  $("#network-pane-header").onpointerdown = e => e.stopPropagation();
+  $("#canvas").classList.add("active-pane");
+  $("#main").addEventListener("pointerdown", e => {
+    const active = e.target.closest("#canvas,#preview,#side"); if (!active) return;
+    document.querySelectorAll(".active-pane").forEach(p => p.classList.remove("active-pane")); active.classList.add("active-pane");
+  }, true);
   applyView();
   try { recoveryButton(); } catch (e) { /* Browser storage may be disabled. */ }
   connectEvents();
