@@ -30,7 +30,7 @@ class ProviderTests(unittest.TestCase):
         out=run('lattice',rest,rest,moved)
         np.testing.assert_allclose(out.P,moved.P,atol=1e-6)
         hs=handles.handles_for('lattice_grid',[],moved,{})
-        self.assertEqual(len(hs),24)
+        self.assertEqual(len(hs),32)
         self.assertEqual(hs[0]['json_array'],24)
 
     def test_transform_has_translate_arrows_at_the_result(self):

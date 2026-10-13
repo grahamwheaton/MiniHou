@@ -23,6 +23,19 @@ class NodeFlagsTests(unittest.TestCase):
     def flag(self, name, nid="move", value=True, **kw):
         self.g, _ = apply_ops(self.g, [{"op": "flag", "id": nid, "flag": name, "value": value, **kw}])
 
+    def test_additive_display_preview_does_not_change_export(self):
+        self.flag("display", "other", additive=True)
+        self.assertEqual(self.g.render_node(), "out")
+        restored = Graph.from_dict(self.g.to_dict())
+        self.assertTrue(restored.nodes["other"].meta["display_extra"])
+        s = Session(restored)
+        self.addCleanup(s.stop)
+        self.assertEqual(s.preview("out", templates=True)["geo"].npoints, 16)
+        self.assertEqual(self.ev.cook(restored).npoints, 8)
+        self.flag("display", "box")
+        self.assertFalse(self.g.nodes["other"].meta.get("display_extra"))
+        self.assertEqual(self.g.display, "box")
+
     def test_bypass_invalidates_downstream_and_restores(self):
         before = self.ev.cook(self.g).P.copy()
         self.flag("bypass")

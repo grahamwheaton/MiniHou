@@ -990,7 +990,10 @@ window.MiniHouPreview = (() => {
         const grp = svg("g", { class: "pv-handle"+(active?' active':''), "data-id": h.id, opacity: handleDrag&&!active?0.3:1 });
         const tip = svg("title", {});
         tip.textContent = h.label + " (drag)";
-        if (h.kind === "ring") {
+        if (h.kind === "cage") {
+          const p=toScreen(cam,...h.origin);if(!p)continue;
+          grp.append(svg('rect',{x:p[0]-5,y:p[1]-5,width:10,height:10,fill:col,stroke:'#17202c',class:'pv-grab'}),tip);
+        } else if (h.kind === "ring") {
           let d = "", pen = false;
           for (let k = 0; k <= RING_STEPS; k++) {
             const p = ringPoint(h, (k / RING_STEPS) * 2 * Math.PI), sp = toScreen(cam, p[0], p[1], p[2]);

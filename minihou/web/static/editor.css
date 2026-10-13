@@ -684,3 +684,11 @@ path.hit.cut-mark {stroke:#ff6464;stroke-opacity:1;stroke-width:4px;}
 .pv-perf select, .pv-perf input[type=number] { background: var(--bg); border: 1px solid var(--line); color: var(--text); padding: 1px 3px; }
 .pv-perf input[type=range] { width: 120px; }
 .pv-perf #pv-perf-stats { white-space: pre-wrap; font: var(--mono); font-size: 11px; }
+
+/* Graph commands belong to their pane, including narrow and detached layouts. */
+#network-toolbar {position:absolute;top:26px;left:0;right:0;z-index:8;display:flex;align-items:center;gap:4px;padding:5px 8px;background:#2b2f34;border-bottom:1px solid var(--line);flex-wrap:wrap;}
+#network-toolbar button {white-space:nowrap;font-size:11px;padding:3px 6px;}
+#network-toolbar .file {min-width:90px;max-width:200px;}
+#crumbs {top:94px;}
+
+.pv-sheet {position:relative;}

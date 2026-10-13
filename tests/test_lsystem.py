@@ -88,7 +88,7 @@ class TurtleTests(unittest.TestCase):
         from pathlib import Path
         root = Path(__file__).resolve().parents[1]
         for name in ("lsystem_3d_coral", "lsystem_3d_tree"):
-            data = json.loads((root / "examples" / "graphs" / (name + ".json")).read_text())
+            data = json.loads((root / "examples" / "graphs" / (name + ".json")).read_text(encoding="utf-8"))
             a = Evaluator().cook(Graph.from_dict(data))
             b = Evaluator().cook(Graph.from_dict(data))
             np.testing.assert_array_equal(a.P, b.P)

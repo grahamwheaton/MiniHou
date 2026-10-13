@@ -1092,6 +1092,47 @@ class EditorE2E(unittest.TestCase):
         self.assertAlmostEqual(abs(d - 0.2), 50 / tip["ppu"], delta=0.2)
         self.assertIsInstance(d, float)
 
+    def test_new_pane_commands_additive_display_and_curve_transform(self):
+        for ident in ['file-btn','undo-btn','redo-btn','add-btn','find-btn','note-btn','tidy-btn','box-btn']:
+            self.assertEqual(self.page.locator('#network-toolbar #'+ident).count(),1)
+        self.node('points').locator('[data-flag=display]').click(modifiers=['Shift'])
+        self.assertTrue(until(lambda:self.s.graph.nodes['points'].meta.get('display_extra')))
+        self.assertEqual(self.s.graph.display,'out')
+        self.node('out').locator('[data-flag=display]').click()
+        self.assertTrue(until(lambda:not self.s.graph.nodes['points'].meta.get('display_extra')))
+        self.page.select_option('#pv-follow','selection')
+        result=self.page.evaluate("""()=>{const M=MiniInteraction,c=[{p:[0,0,0],left:[-1,0,0],right:[1,0,0],mode:'MIRRORED'}];
+          const r=M.transformControl(c,0,'right','rotate',2,90);
+          const s=M.transformControl(r,0,'right','scale',null,2);
+          return [r[0],s[0]];}""")
+        self.assertAlmostEqual(result[0]['right'][1],1)
+        self.assertAlmostEqual(result[1]['right'][1],2)
+        self.assertAlmostEqual(result[1]['left'][1],-2)
+        self.page.evaluate("minihou.edit([{op:'add',id:'bc',type:'bezier'}])")
+        self.node('bc').locator('.title').click()
+        self.page.wait_for_selector('.curve-grab[data-point="1"][data-part="p"]')
+        self.page.locator('.curve-grab[data-point="1"][data-part="p"]').click()
+        self.page.select_option('#pv-follow','selection')
+        self.page.wait_for_function('minihou.preview.points === 49')
+        self.page.keyboard.press('e')
+        self.assertEqual(self.page.evaluate('minihou.preview.tool'),'rotate')
+        self.assertFalse(any(n.type=='polyextrude' for n in self.s.graph.nodes.values()))
+        self.page.wait_for_selector('.curve-grab[data-axis="2"]')
+
+    def test_match_size_cage_keeps_opposite_face_fixed(self):
+        self.handle_scene('match_size',{'scale':True,'uniform':False,'size':[2,2,2],'center':[0,0,0]},'h')
+        handle=self.page.locator('.pv-handle[data-id="target_size_0_1"] .pv-grab')
+        handle.wait_for()
+        bounds=handle.bounding_box()
+        tip=next(t for t in self.page.evaluate('minihou.preview.handleTips()') if t['id']=='target_size_0_1')
+        x,y=bounds['x']+5,bounds['y']+5
+        self.page.mouse.move(x,y);self.page.mouse.down()
+        self.page.mouse.move(x+tip['u'][0]*40,y+tip['u'][1]*40,steps=6);self.page.mouse.up()
+        self.assertTrue(until(lambda:self.s.graph.nodes['h'].params['size'][0]>2.01))
+        self.page.wait_for_function('minihou.desktopCanClose()')
+        params=self.s.graph.nodes['h'].params
+        self.assertAlmostEqual(params['center'][0]-params['size'][0]/2,-1,places=5)
+
     def test_bezier_anchor_handles_modes_split_and_cancel(self):
         import json
         self.page.evaluate("minihou.edit([{op:'add',id:'bc',type:'bezier'}])")

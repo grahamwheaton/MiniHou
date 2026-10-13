@@ -813,14 +813,14 @@ class Session:
                     from ..nodes.merge import merge
                     for nid, n in snapshot.nodes.items():
                         flags = n.meta.get("flags", {})
-                        if nid == node or not (flags.get("template") or flags.get("selectable_template")):
+                        if nid == node or not (n.meta.get("display_extra") or flags.get("template") or flags.get("selectable_template")):
                             continue
                         try:
                             ref = self.evaluator.cook(snapshot, nid, feeds=feeds)
                             if live_preview and ref.detail.get("instance_objects"):
                                 from .live import preview_instances
                                 ref = preview_instances(ref, sources)
-                            if flags.get("selectable_template"):
+                            if n.meta.get("display_extra") or flags.get("selectable_template"):
                                 selectable.append(nid)
                                 geo = merge([geo, ref])
                             else:

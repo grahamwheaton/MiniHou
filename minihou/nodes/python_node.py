@@ -36,7 +36,10 @@ out.point["P"] = P.astype(np.float32)
 def allowed() -> bool:
     if _ENABLED is not None:
         return _ENABLED
-    return os.environ.get("MINIHOU_PYTHON_NODES", "").strip().lower() in _TRUE
+    if "MINIHOU_PYTHON_NODES" in os.environ:
+        return os.environ["MINIHOU_PYTHON_NODES"].strip().lower() in _TRUE
+    from ..user_preferences import read
+    return read()["python_nodes"]
 
 
 def set_allowed(value) -> None:

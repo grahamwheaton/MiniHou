@@ -590,6 +590,20 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._body()
         app, s = self.app, self.app.session
         origin = str(body.get("origin") or "api")[:32]
+        if path == "/api/preferences":
+            from .. import user_preferences
+            from ..nodes import python_node
+            value = body.get("python_nodes")
+            if not isinstance(value, bool):
+                raise ApiError(400, "python_nodes must be a boolean")
+            with s._cook_lock:
+                user_preferences.set_python(value)
+                python_node.set_allowed(value)
+                s.evaluator.cache.clear()
+            with s.lock:
+                s._rev += 1
+                s._wake.set()
+            return self._json({"python_nodes": python_node.allowed()})
         if path == "/api/cancel":
             s.cancel_cook()
             return self._json({"ok": True})
