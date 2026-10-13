@@ -1,7 +1,7 @@
 """The packed application: ``MiniHou`` (or ``python -m minihou app``) -- one program that starts the engine and opens the editor.
 
-It keeps everything in one workspace folder (default ``~/MiniHou``): ``graphs/`` for your graphs (a welcome graph and the
-examples are copied in the first time), ``nodes/`` for your own node files. The editor's top bar offers to install the
+It keeps everything in one workspace folder (default ``~/MiniHou``): ``graphs/`` for your graphs (startup creates a fresh
+empty graph), examples copied separately, and ``nodes/`` for your own node files. The editor's top bar offers to install the
 Blender add-on and to open Blender connected, so nothing has to be set up by hand.
 """
 from __future__ import annotations
@@ -38,8 +38,8 @@ def examples_source() -> Optional[Path]:
     return None
 
 
-def prepare_workspace(root: Path) -> Path:
-    """Create the folders and copy the examples the first time; returns the graph to open. Never overwrites anything."""
+def prepare_workspace(root: Path, fresh: bool = True) -> Optional[Path]:
+    """Prepare folders and examples; create a new empty graph unless one was explicitly selected."""
     root.mkdir(parents=True, exist_ok=True)
     (root / "graphs").mkdir(exist_ok=True)
     (root / "nodes").mkdir(exist_ok=True)
@@ -52,15 +52,18 @@ def prepare_workspace(root: Path) -> Path:
             for example in src.glob("*.json"):
                 if not (dst / example.name).exists():
                     shutil.copyfile(example, dst / example.name)
-        welcome = root / WELCOME
-        if not welcome.exists() and (src / "demo.json").is_file():
-            shutil.copyfile(src / "demo.json", welcome)
-    for cand in (root / WELCOME, *sorted((root / "graphs").glob("*.json"))):
-        if cand.is_file():
-            return cand
-    starter = root / "graphs" / "untitled.json"
-    starter.write_text('{"version": 1, "nodes": {}}\n', encoding="utf-8")
-    return starter
+    if not fresh:
+        return None
+    index = 0
+    while True:
+        name = "untitled.json" if index == 0 else f"untitled-{index}.json"
+        starter = root / "graphs" / name
+        try:
+            with starter.open("x", encoding="utf-8") as stream:
+                stream.write('{"version": 1, "nodes": {}}\n')
+            return starter
+        except FileExistsError:
+            index += 1
 
 
 def _port_free(host: str, port: int) -> bool:
@@ -83,7 +86,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     from .link.protocol import DEFAULT_PORT
     from .web.server import DEFAULT_HTTP_PORT
     ap = argparse.ArgumentParser(prog="minihou app", description=__doc__.split("\n\n")[0])
-    ap.add_argument("graph", nargs="?", help="graph file to open (default: the welcome graph)")
+    ap.add_argument("graph", nargs="?", help="graph file to open (default: a fresh empty graph)")
     ap.add_argument("--workspace", default=None, help="folder for graphs and nodes (default: ~/MiniHou)")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT, help="live-link port Blender connects to (another is used if busy)")
@@ -107,7 +110,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     graph = Path(args.graph).expanduser() if args.graph else prepare_workspace(root)
     if args.graph:
         root.mkdir(parents=True, exist_ok=True)
-        prepare_workspace(root)
+        prepare_workspace(root, fresh=False)
     if not _port_free(args.host, args.port):
         print(f"port {args.port} is busy (another MiniHou?): using a free one; Blender is started with the right port by the editor's button.",
               flush=True)

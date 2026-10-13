@@ -137,10 +137,19 @@ class RealBlenderInstallTests(TempCase):
 
 
 class WorkspaceTests(TempCase):
+    def test_existing_welcome_graph_is_not_opened_at_startup(self):
+        ws = self.root / "MiniHou"
+        (ws / "graphs").mkdir(parents=True)
+        old = ws / "graphs" / "welcome.json"
+        old.write_text("invalid saved graph", encoding="utf-8")
+        graph = app.prepare_workspace(ws)
+        self.assertEqual(json.loads(graph.read_text(encoding="utf-8"))["nodes"], {})
+        self.assertEqual(old.read_text(encoding="utf-8"), "invalid saved graph")
+
     def test_first_run_creates_folders_examples_and_a_welcome_graph(self):
         ws = self.root / "MiniHou"
         graph = app.prepare_workspace(ws)
-        self.assertEqual(graph, ws / "graphs" / "welcome.json")
+        self.assertEqual(graph, ws / "graphs" / "untitled.json")
         self.assertTrue((ws / "nodes").is_dir())
         self.assertTrue((ws / "examples" / "crater.json").is_file())
         self.assertIn('"nodes"', graph.read_text(encoding="utf-8"))
@@ -151,7 +160,8 @@ class WorkspaceTests(TempCase):
         graph.write_text('{"version": 1, "nodes": {"mine": {"type": "box"}}}', encoding="utf-8")
         (ws / "examples" / "crater.json").write_text("edited", encoding="utf-8")
         again = app.prepare_workspace(ws)
-        self.assertEqual(again, graph)
+        self.assertNotEqual(again, graph)
+        self.assertEqual(json.loads(again.read_text(encoding="utf-8"))["nodes"], {})
         self.assertIn("mine", graph.read_text(encoding="utf-8"))
         self.assertEqual((ws / "examples" / "crater.json").read_text(encoding="utf-8"), "edited")
 
@@ -183,7 +193,7 @@ class WorkspaceTests(TempCase):
         import urllib.request
         data = urllib.request.urlopen(url + "addon/minihou_link.zip", timeout=20).read()
         self.assertIn("minihou_link/__init__.py", zipfile.ZipFile(BytesIO(data)).namelist())
-        self.assertTrue((ws / "graphs" / "welcome.json").is_file())
+        self.assertTrue((ws / "graphs" / "untitled.json").is_file())
 
 
 if __name__ == "__main__":
