@@ -11,6 +11,8 @@ op              fields
 ``insert``      ``after`` (a node id) + ``type``; optional ``id``, ``params``, ``port`` (the new node's input, default its
                 first), ``pos``, ``comment``: add a node fed by ``after`` and re-wire everything that read ``after`` to read
                 the new node instead (so it joins the chain in place; the display flag moves with it)
+``detach``      ``id``; disconnect one node while forwarding its sole input to all consumers (ambiguous inputs rejected)
+``insert_existing`` ``id``, ``from``, ``to``, ``port``; exact ``index`` for multi inputs, optional new-node ``input``
 ``remove``      ``id`` (an id or a list of ids)
 ``rename``      ``id``, ``to``
 ``connect``     ``from``, ``to``; optional ``port`` (default: first free input), ``index`` (multi inputs)
@@ -222,6 +224,103 @@ def op_dissolve(g: Graph, op: dict) -> dict:
     if display:
         g.display = display[0]
     return {"removed": sorted(ids)}
+
+
+def _readers(g: Graph, source: str):
+    """Exact edge slots, retaining repetitions and multi-input ordering."""
+    for nid, node in g.nodes.items():
+        for port, refs in node.inputs.items():
+            if isinstance(refs, list):
+                for index, ref in enumerate(refs):
+                    if ref == source:
+                        yield nid, port, index
+            elif refs == source:
+                yield nid, port, None
+
+
+def _compatible(g: Graph, source: str, destination: str, port: str):
+    src = _need_node(g, source)
+    dst = _need_node(g, destination)
+    outputs = g.registry.get(src.type).outputs
+    spec = next((p for p in g.registry.get(dst.type).inputs if p.name == port), None)
+    if spec is None:
+        raise GraphError(f"node {destination!r} has no input {port!r}")
+    if len(outputs) != 1 or outputs[0].type != spec.type:
+        raise GraphError(f"incompatible wire from {source!r} to {destination!r}.{port}")
+    return spec
+
+
+def _replace_edge(g: Graph, destination: str, port: str, index, source: str):
+    if index is None:
+        g.nodes[destination].inputs[port] = source
+    else:
+        g.nodes[destination].inputs[port][index] = source
+
+
+def op_detach(g: Graph, op: dict) -> dict:
+    """Unsplice one node without guessing which of several inputs is the main stream.
+
+    One incoming occurrence can safely feed every outgoing branch. More than one
+    incoming occurrence is ambiguous even when the same source appears twice.
+    Display/export flags and unrelated edges are deliberately unchanged.
+    """
+    nid = op["id"]
+    node = _need_node(g, nid)
+    incoming = g.input_ids(nid)
+    readers = list(_readers(g, nid))
+    if len(incoming) > 1 or (not incoming and readers):
+        raise GraphError("Cannot detach safely: select a node with exactly one connected input; no wires were changed")
+    if incoming:
+        source = incoming[0]
+        _need_node(g, source)
+        for destination, port, index in readers:
+            _compatible(g, source, destination, port)
+        for destination, port, index in readers:
+            _replace_edge(g, destination, port, index, source)
+    node.inputs.clear()
+    return {"id": nid, "rewired": len(readers)}
+
+
+def op_insert_existing(g: Graph, op: dict) -> dict:
+    """Insert a loose node into one exact wire, never all wires sharing a source."""
+    nid, source, destination, port = op["id"], op["from"], op["to"], op["port"]
+    node = _need_node(g, nid)
+    target = _need_node(g, destination)
+    if g.input_ids(nid) or list(_readers(g, nid)):
+        raise GraphError("Only a completely loose node can be inserted into a wire")
+    if nid in (source, destination):
+        raise GraphError("Cannot insert a node into its own wire")
+    destination_spec = _compatible(g, source, destination, port)
+    index = op.get("index")
+    refs = target.inputs.get(port)
+    if destination_spec.multi:
+        if (not isinstance(index, int) or isinstance(index, bool) or not isinstance(refs, list)
+                or index < 0 or index >= len(refs) or refs[index] != source):
+            raise GraphError("Wire changed or ambiguous: provide its exact multi-input index")
+    elif index is not None or refs != source:
+        raise GraphError("Wire changed: the requested source no longer feeds that input")
+    inputs = g.registry.get(node.type).inputs
+    output = g.registry.get(g.nodes[source].type).outputs[0]
+    candidates = [p for p in inputs if p.type == output.type]
+    requested = op.get("input")
+    if requested is None:
+        if len(candidates) != 1:
+            raise GraphError("Insertion is ambiguous: choose one compatible node input")
+        chosen = candidates[0]
+    else:
+        chosen = next((p for p in candidates if p.name == requested), None)
+        if chosen is None:
+            raise GraphError("The chosen node input is missing or incompatible")
+    if any(not p.optional and p.name != chosen.name for p in inputs):
+        raise GraphError("Cannot insert a node that requires other unconnected inputs")
+    _compatible(g, nid, destination, port)
+    # Existing edge is part of a DAG; replacing it with a previously isolated node
+    # cannot introduce a cycle. Check malformed graphs too, before mutating.
+    if source == destination or destination in g.upstream_order(source):
+        raise GraphError("Cannot insert into a cyclic wire")
+    node.inputs[chosen.name] = [source] if chosen.multi else source
+    _replace_edge(g, destination, port, index, nid)
+    return {"id": nid, "input": chosen.name, "rewired": 1}
 
 
 def op_loop(g: Graph, op: dict) -> dict:
@@ -562,7 +661,7 @@ def op_replace(g: Graph, op: dict) -> dict:
     return {"_graph": Graph.from_dict(op["graph"], g.registry, check=False)}
 
 
-_OPS = {"add": op_add, "loop": op_loop, "insert": op_insert, "remove": op_remove, "dissolve": op_dissolve, "rename": op_rename, "connect": op_connect,
+_OPS = {"add": op_add, "loop": op_loop, "insert": op_insert, "remove": op_remove, "dissolve": op_dissolve, "detach": op_detach, "insert_existing": op_insert_existing, "rename": op_rename, "connect": op_connect,
         "disconnect": op_disconnect, "set": op_set, "paint_assign": op_paint_assign, "display": op_display, "flag": op_flag, "merge_templates": op_merge_templates, "expose": op_expose,
         "unexpose": op_unexpose, "move": op_move, "meta": op_meta, "replace": op_replace,
         "box_add": op_box_add, "box_set": op_box_set, "box_remove": op_box_remove}
