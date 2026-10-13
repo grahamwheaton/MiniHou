@@ -1,5 +1,7 @@
 # MiniHou
 
+See [Editor UI](docs/EDITOR_UI.md) for preferences, context menus, search, sticky notes and frame controls.
+
 The combined Claude/Codex version and node-name compatibility notes are documented in [Master integration](docs/MASTER_INTEGRATION.md).
 
 **Wired Geometry Nodes groups:** MiniHou can now process the actual mesh wired into a group inside a native GN

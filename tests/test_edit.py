@@ -25,6 +25,25 @@ def base():
 
 
 class OpsTests(unittest.TestCase):
+    def test_frame_annotations_roundtrip_and_undo(self):
+        session = Session(base())
+        session.edit([{"op": "box_add", "id": "note", "pos": [10, 20], "size": [200, 100],
+                       "note": True, "text": "<script>plain text</script>", "locked": True}])
+        session.edit([{"op": "box_set", "id": "note", "collapsed": True, "text": "Updated"}])
+        restored = Graph.from_dict(session.graph.to_dict())
+        self.assertTrue(restored.boxes[0]["collapsed"])
+        self.assertTrue(restored.boxes[0]["locked"])
+        self.assertEqual(restored.boxes[0]["text"], "Updated")
+        session.undo()
+        self.assertEqual(session.graph.boxes[0]["text"], "<script>plain text</script>")
+        self.assertNotIn("collapsed", session.graph.boxes[0])
+
+    def test_frame_annotations_reject_invalid_values(self):
+        for extra in ({"locked": "yes"}, {"collapsed": 1}, {"note": []}, {"text": 42}, {"text": "x" * 10001}):
+            with self.subTest(extra=list(extra)):
+                with self.assertRaises(EditError):
+                    apply_ops(base(), [{"op": "box_add", "pos": [0, 0], "size": [100, 100], **extra}])
+
     def test_add_with_auto_id_inputs_and_display(self):
         g, res = apply_ops(base(), [{"op": "add", "type": "transform", "inputs": {"geo": "n"}},
                                     {"op": "add", "type": "transform"}])

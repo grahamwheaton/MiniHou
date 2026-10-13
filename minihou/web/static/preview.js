@@ -27,12 +27,12 @@ window.MiniHouPreview = (() => {
   void main() { o = uColor; }`;
   const FS_MESH = `#version 300 es
   precision highp float;
-  in vec3 vView; in vec3 vCol; uniform vec3 uBase; uniform float uUseCol; out vec4 o;
+  in vec3 vView; in vec3 vCol; uniform vec3 uBase; uniform float uUseCol, uLighting; out vec4 o;
   void main() {
     vec3 n = normalize(cross(dFdx(vView), dFdy(vView)));
     float d = max(n.z, 0.0);                                    // headlight: view space looks down -Z, n faces the viewer
     vec3 base = mix(uBase, vCol, uUseCol);
-    vec3 col = base * (0.28 + 0.72 * d) + vec3(0.10) * pow(1.0 - d, 3.0);
+    vec3 col = base * (0.28 + 0.72 * d * uLighting) + vec3(0.10) * pow(1.0 - d, 3.0);
     if (!gl_FrontFacing) col = mix(col, vec3(0.95, 0.45, 0.18), 0.55);   // back faces: flipped normals show up orange
     o = vec4(col, 1.0);
   }`;
@@ -40,6 +40,41 @@ window.MiniHouPreview = (() => {
   precision highp float;
   in vec3 vView; in vec3 vCol; uniform vec3 uBase; uniform float uUseCol; uniform float uAlpha; out vec4 o;
   void main() { o = vec4(mix(uBase, vCol, uUseCol), uAlpha); }`;
+
+  // Infinite Z-up construction plane, drawn as a background so it never hides geometry.
+  const VS_GRID = `#version 300 es
+  out vec2 vNdc;
+  void main() {
+    vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+    vNdc = p * 2.0 - 1.0; gl_Position = vec4(vNdc, 0.0, 1.0);
+  }`;
+  const FS_GRID = `#version 300 es
+  precision highp float;
+  in vec2 vNdc;
+  uniform mat4 uMV, uP;
+  uniform vec3 uEye, uTarget;
+  uniform float uSpacing, uRange, uOpacity, uAxes;
+  out vec4 o;
+  float lines(vec2 p) {
+    vec2 width = max(fwidth(p), vec2(0.0001));
+    vec2 d = abs(fract(p - 0.5) - 0.5) / width;
+    return 1.0 - min(min(d.x, d.y), 1.0);
+  }
+  void main() {
+    vec3 ray = normalize(transpose(mat3(uMV)) * vec3(vNdc / vec2(uP[0][0], uP[1][1]), -1.0));
+    if (abs(ray.z) < 0.00001) discard;
+    float t = -uEye.z / ray.z;
+    if (t <= 0.0) discard;
+    vec2 p = (uEye + ray * t).xy;
+    float minor = lines(p / uSpacing), major = lines(p / (uSpacing * 10.0));
+    float fade = 1.0 - smoothstep(uRange * 0.25, uRange, length(p - uTarget.xy));
+    fade *= smoothstep(0.0, 0.15, abs(ray.z));
+    vec2 axis = 1.0 - min(abs(p) / max(fwidth(p), vec2(0.0001)), vec2(1.0));
+    vec3 color = vec3(0.48, 0.50, 0.53);
+    color = mix(color, vec3(0.65, 0.28, 0.26), axis.y * uAxes);
+    color = mix(color, vec3(0.28, 0.53, 0.34), axis.x * uAxes);
+    o = vec4(color, max(max(minor * 0.18, major * 0.32), max(axis.x, axis.y) * 0.5 * uAxes) * fade * uOpacity);
+  }`;
 
   // ---- tiny column-major mat4 helpers
   const ident = () => new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
@@ -92,9 +127,10 @@ window.MiniHouPreview = (() => {
       for (const n of uniforms) u[n] = gl.getUniformLocation(p, n);
       return { p, u };
     };
-    const MESH_U = ["uMV", "uP", "uPointSize", "uBase", "uUseCol", "uAlpha", "uBias"];
-    let mesh, flat, edgeProg, colorProg;
+    const MESH_U = ["uMV", "uP", "uPointSize", "uBase", "uUseCol", "uAlpha", "uBias", "uLighting"];
+    let mesh, flat, edgeProg, colorProg, gridProg;
     try {
+      gridProg = prog(VS_GRID, FS_GRID, [], ["uMV", "uP", "uEye", "uTarget", "uSpacing", "uRange", "uOpacity", "uAxes"]);
       mesh = prog(VS, FS_MESH, ["aPos", "aCol"], MESH_U);
       flat = prog(VS, FS_FLAT, ["aPos", "aCol"], MESH_U);
       edgeProg = prog(VS_EDGE, FS_COLOR, ["aA", "aB", "aT", "aS"], ["uMV", "uP", "uViewport", "uWidth", "uBias", "uColor"]);
@@ -130,7 +166,7 @@ window.MiniHouPreview = (() => {
 
     const view = { yaw: -0.6, pitch: 0.45, dist: 5, target: [0, 0, 0], ortho: false };
     const PITCH_MAX = 1.5707, FOV = Math.PI / 4, ORTHO_FOV = 0.03;     // "orthographic" is a very narrow lens far away: the same maths, so picking and handles keep working
-    const opt = { shaded: true, edges: true, points: false, normals: false };
+    const opt = { shaded: true, edges: true, points: false, normals: false, grid: true, background: "#212429", gridOpacity: 1, axes: true, lighting: 1, pointSize: 4, gridSpacing: 0 };
     let data = { npoints: 0, ntris: 0, nedges: 0, hasCd: false, bounds: [[-1, -1, -1], [1, 1, 1]] };
     let raw = null;                                                  // the geometry's typed arrays, for picking
     let raf = 0;
@@ -408,19 +444,33 @@ window.MiniHouPreview = (() => {
       raf = 0;
       resize();
       gl.viewport(0, 0, canvas.width, canvas.height);
-      gl.clearColor(0.13, 0.14, 0.16, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      const bg = opt.background.match(/[0-9a-f]{2}/gi).map(x => parseInt(x, 16) / 255);
+      gl.clearColor(...bg, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       api.draws++;
-      renderGizmo(camera());
+      const cam = camera(), MV = cam.MV, P = cam.P;
+      if (opt.grid) {
+        gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
+        gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.useProgram(gridProg.p); gl.bindVertexArray(null);
+        gl.uniformMatrix4fv(gridProg.u.uMV, false, MV); gl.uniformMatrix4fv(gridProg.u.uP, false, P);
+        gl.uniform3fv(gridProg.u.uEye, cam.eye); gl.uniform3fv(gridProg.u.uTarget, view.target);
+        gl.uniform1f(gridProg.u.uSpacing, opt.gridSpacing || Math.pow(10, Math.floor(Math.log10(Math.max(view.dist / 5, 1e-8)))));
+        gl.uniform1f(gridProg.u.uRange, view.dist * 12);
+        gl.uniform1f(gridProg.u.uOpacity, opt.gridOpacity); gl.uniform1f(gridProg.u.uAxes, opt.axes ? 1 : 0);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.disable(gl.BLEND); gl.depthMask(true);
+      }
+      renderGizmo(cam);
       if (api.onOverlayDraw) api.onOverlayDraw();
       if (!data.npoints) return;
-      const cam = camera(), MV = cam.MV, P = cam.P;
       gl.enable(gl.DEPTH_TEST);
       gl.bindVertexArray(vao);
       const setup = (pr, base, useCol, alpha) => {
         gl.useProgram(pr.p);
         gl.uniformMatrix4fv(pr.u.uMV, false, MV); gl.uniformMatrix4fv(pr.u.uP, false, P);
         gl.uniform3fv(pr.u.uBase, base); gl.uniform1f(pr.u.uUseCol, useCol && data.hasCd ? 1 : 0);
-        gl.uniform1f(pr.u.uPointSize, 4); gl.uniform1f(pr.u.uBias, 0);
+        gl.uniform1f(pr.u.uPointSize, opt.pointSize);
+        if (pr.u.uLighting) gl.uniform1f(pr.u.uLighting, opt.lighting); gl.uniform1f(pr.u.uBias, 0);
         if (pr.u.uAlpha) gl.uniform1f(pr.u.uAlpha, alpha === undefined ? 1 : alpha);
         if (data.hasCd) gl.enableVertexAttribArray(1); else { gl.disableVertexAttribArray(1); gl.vertexAttrib3f(1, 1, 1, 1); }
       };

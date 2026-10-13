@@ -8,19 +8,29 @@
 <link rel="stylesheet" href="/static/editor.css">
 </head>
 <body>
-<header id="topbar">
-  <span class="brand">MiniHou</span>
+<nav id="app-menubar" aria-label="Application menus">
+  <span class="app-mark">MiniHou</span>
+  <button data-app-menu="File" aria-haspopup="menu" aria-expanded="false">File</button>
+  <button data-app-menu="Edit" aria-haspopup="menu" aria-expanded="false">Edit</button>
+  <button data-app-menu="View" aria-haspopup="menu" aria-expanded="false">View</button>
+  <button data-app-menu="Help" aria-haspopup="menu" aria-expanded="false">Help</button>
+  <span id="app-document" class="muted">Procedural workspace</span>
+</nav>
+<header id="topbar" aria-label="Command toolbar">
+
   <div class="file">
     <button id="file-btn" title="Open or create a graph file">
-      <span id="file-name">…</span><span class="caret">▾</span>
+      <span class="file-icon" aria-hidden="true">▱</span><span id="file-name">…</span><span class="caret">▾</span>
     </button>
     <div id="file-menu" class="menu hidden"></div>
   </div>
   <button id="undo-btn" title="Undo (Ctrl+Z)">↶</button>
   <button id="redo-btn" title="Redo (Ctrl+Shift+Z)">↷</button>
   <button id="add-btn" title="Add a node (Tab)">+ Node</button>
+  <button id="find-btn" title="Find a node (Ctrl+F)">Find</button>
+  <button id="note-btn" title="Add a sticky note">Note</button>
   <button id="tidy-btn" title="Tidy the layout (L)">Tidy</button>
-  <button id="box-btn" title="Network box around the selected nodes (O)">Box</button>
+  <button id="box-btn" title="Coloured frame around selected nodes (O); drag its header to move the group">Frame</button>
   <span class="frame" title="Current frame (@Frame, @Time). Blender's timeline sets it when connected.">
     <button id="frame-prev" title="Previous frame">◀</button><input id="frame-input" type="number" step="1" value="1" aria-label="Frame"><button id="frame-next" title="Next frame">▶</button><input id="frame-slider" type="range" min="1" max="250" step="1" value="1" aria-label="Frame slider" title="Scrub the frame (the range grows if you type a later frame)">
   </span>
@@ -37,8 +47,49 @@
   </span>
   <span id="cook-status" class="status"><span class="dot"></span><span class="text">connecting…</span></span>
   <span id="blender-status" class="status clickable" role="button" tabindex="0" title="Blender clients connected to the live link"><span class="dot"></span><span class="text">Blender</span></span>
+  <button id="preferences-btn" title="User preferences" aria-label="Preferences">⚙</button>
   <button id="help-btn" title="Keyboard and mouse">?</button>
 </header>
+
+<dialog id="preferences" aria-labelledby="preferences-title">
+  <form method="dialog">
+    <h2 id="preferences-title">User preferences</h2>
+    <p class="muted">Changes apply immediately and are saved in this browser.</p>
+    <div class="preferences-actions"><select id="preferences-preset" aria-label="Preference preset"><option value="">Choose preset…</option><option value="houdini">Houdini-style</option><option value="contrast">High contrast</option><option value="default">Default</option><option value="custom">Custom</option></select><button id="preferences-save-custom" type="button">Save custom</button><button id="preferences-export" type="button">Export</button><button id="preferences-import" type="button">Import</button><input id="preferences-file" type="file" accept="application/json,.json" hidden></div>
+    <div class="preference-tabs" role="tablist" aria-label="Preferences category">
+      <button id="preferences-viewport-tab" type="button" role="tab" aria-selected="true" aria-controls="preferences-viewport-page" data-preference-tab="viewport">3D viewport</button>
+      <button id="preferences-network-tab" type="button" role="tab" aria-selected="false" aria-controls="preferences-network-page" data-preference-tab="network" tabindex="-1">Node editor</button>
+    </div>
+    <fieldset id="preferences-viewport-page" role="tabpanel" aria-labelledby="preferences-viewport-tab" data-preference-page="viewport"><legend>3D viewport</legend>
+      <label>Display mode <select id="pref-display-mode"><option value="shaded">Shaded</option><option value="edges">Shaded + edges</option><option value="wire">Wireframe</option><option value="points">Points</option></select></label>
+      <label>Lighting <input id="pref-lighting" type="range" min="0" max="2" step="0.05"></label>
+      <label>Point size <input id="pref-pointSize" type="number" min="1" max="20" step="1"></label>
+      <label>Grid spacing (0 = automatic) <input id="pref-gridSpacing" type="number" min="0" max="10000" step="0.1"></label>
+      <label>Background colour <input id="pref-background" type="color"></label>
+      <label>Grid brightness <input id="pref-gridOpacity" type="range" min="0" max="2" step="0.05"></label>
+      <label><input id="pref-grid" type="checkbox"> Show ground grid</label>
+      <label><input id="pref-axes" type="checkbox"> Show coloured world axes</label>
+      <label><input id="pref-shaded" type="checkbox"> Shaded surfaces</label>
+      <label><input id="pref-edges" type="checkbox"> Show edges</label>
+      <label><input id="pref-points" type="checkbox"> Show points</label>
+      <label><input id="pref-normals" type="checkbox"> Show face normals</label>
+    </fieldset>
+    <fieldset id="preferences-network-page" role="tabpanel" aria-labelledby="preferences-network-tab" data-preference-page="network" hidden><legend>Node editor</legend>
+      <label>Backdrop <select id="pref-nodeBackdrop"><option value="grid">Grid</option><option value="checker">Checker</option><option value="solid">Solid</option></select></label>
+      <label>Background colour <input id="pref-nodeBackground" type="color"></label>
+      <label>Grid / checker colour <input id="pref-nodeGrid" type="color"></label>
+      <label>Node colour <input id="pref-nodeColor" type="color"></label>
+      <label>Wire colour <input id="pref-wireColor" type="color"></label>
+      <label>Selection colour <input id="pref-selectionColor" type="color"></label>
+      <label><input id="pref-nodeSnap" type="checkbox"> Snap nodes and frames to grid</label>
+      <label>Snap spacing <input id="pref-nodeSnapStep" type="number" min="1" max="200" step="1"></label>
+      <label>New frame colour <input id="pref-frameColor" type="color"></label>
+      <p class="muted">Frame (O) groups selected nodes. Right-click frames for fit, collapse and lock. Frame colours and notes are saved with the graph.</p>
+    </fieldset>
+    <p id="preferences-storage" class="muted" role="status"></p>
+    <div class="preferences-actions"><button id="preferences-reset" type="button">Restore defaults</button><button>Done</button></div>
+  </form>
+</dialog>
 
 <div id="shelf" aria-label="Tool shelf"></div>
 
@@ -57,6 +108,7 @@
 <main id="main">
   <div id="work">
   <section id="canvas" tabindex="0" aria-label="Node graph">
+    <div id="network-pane-header" class="pane-heading"><span>Node network</span><span class="spacer"></span><label><input id="network-snap" type="checkbox"> Snap</label><button id="network-home" title="Frame all nodes" aria-label="Frame all nodes">⌂</button></div>
     <div id="world">
       <div id="boxes"></div>
       <svg id="wires" width="1" height="1"></svg>
@@ -112,9 +164,11 @@
         </div>
         <div class="pv-wrap"><div id="pv-hints" class="pv-hints"><strong id="pv-hint-title">View</strong><div id="pv-hint-text"></div></div><canvas id="pv-canvas" aria-label="3D preview"></canvas><div id="pv-msg" class="muted hidden"></div><div id="pv-proxy" class="hidden"><span id="pv-proxy-text"></span><button id="pv-full" class="small">Full res</button></div></div>
         <div class="pv-opts pv-display-strip" role="group" aria-label="Display options">
+          <select id="pv-display-mode" aria-label="Viewport display mode"><option value="shaded">Shaded</option><option value="edges">Shaded + edges</option><option value="wire">Wireframe</option><option value="points">Points</option></select>
           <label class="small"><input type="checkbox" id="pv-shaded" checked> shaded</label>
           <label class="small"><input type="checkbox" id="pv-edges" checked> edges</label>
           <label class="small"><input type="checkbox" id="pv-points"> points</label>
+          <label class="small" title="Show the ground grid and world axes"><input type="checkbox" id="pv-grid" checked> grid</label>
           <label class="small" title="Draw each face's normal (from its winding) as a line from its centre"><input type="checkbox" id="pv-normals"> normals</label>
         </div>
         <button id="pv-hints-toggle" title="Show tool hints" aria-label="Show tool hints" aria-pressed="true">?</button>
@@ -140,6 +194,7 @@
   <div id="splitter" title="Drag to resize"></div>
 
   <aside id="side">
+    <div class="pane-heading inspector-heading">Parameters</div>
     <section id="params" class="panel">
       <div class="panel-empty">Select a node to edit its parameters.</div>
     </section>
@@ -154,6 +209,7 @@
   </aside>
 </main>
 
+<footer id="app-statusbar" aria-label="Application status"><span id="app-command-hint">Tab: add node · Ctrl+F: find · O: frame</span><span class="spacer"></span><div id="app-status-items"></div></footer>
 <footer id="errorbar" class="hidden"></footer>
 
 <div id="tabmenu" class="hidden">

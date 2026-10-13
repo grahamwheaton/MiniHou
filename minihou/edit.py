@@ -26,7 +26,7 @@ op              fields
 ``loop``        optional ``from``, ``to``/``port``, ``iterations``, ``pos``; insert paired Begin, Transform and End
 
 ``box_add``     network box: ``around`` (node ids to enclose) or ``pos`` + ``size``; optional ``id``, ``title``, ``color`` ('#rrggbb')
-``box_set``     ``id``; optional ``title``, ``color``, ``pos``, ``size``
+``box_set``     ``id``; optional ``title``, ``color``, ``pos``, ``size``, ``note``, ``text``, ``collapsed``, ``locked``
 ``box_remove``  ``id`` (an id or a list of ids)
 ==============  =============================================================================================
 
@@ -389,7 +389,7 @@ def op_box_add(g: Graph, op: dict) -> dict:
         pos, size = [x0, y0], [x1 - x0, y1 - y0]
     else:
         pos, size = op["pos"], op["size"]
-    g.boxes.append(clean_box({"id": bid, "title": op.get("title", ""), "color": op.get("color", ""),
+    g.boxes.append(clean_box({**{k: op[k] for k in ("collapsed", "locked", "note", "text") if k in op}, "id": bid, "title": op.get("title", ""), "color": op.get("color", ""),
                               "pos": pos, "size": size}))
     return {"id": bid}
 
@@ -397,7 +397,7 @@ def op_box_add(g: Graph, op: dict) -> dict:
 def op_box_set(g: Graph, op: dict) -> dict:
     i = _box_index(g, op["id"])
     merged = dict(g.boxes[i])
-    for key in ("title", "color", "pos", "size"):
+    for key in ("title", "color", "pos", "size", "collapsed", "locked", "note", "text"):
         if key in op:
             merged[key] = op[key]
     g.boxes[i] = clean_box(merged)
