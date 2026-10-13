@@ -2,6 +2,7 @@
 import importlib.util
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -186,8 +187,9 @@ class WorkspaceTests(TempCase):
         end = time.monotonic() + 60
         while time.monotonic() < end and not url:
             for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
-                if line.startswith("editor: "):
-                    url = line.split(": ", 1)[1].strip()
+                m = re.match(r"editor: (https?://[\w.\-]+:\d+/)", line)           # a log line from another thread can land inside this one
+                if m:
+                    url = m.group(1)
             time.sleep(0.2)
         self.assertTrue(url, log.read_text(encoding="utf-8", errors="replace"))
         import urllib.request

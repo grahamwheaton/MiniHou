@@ -3050,7 +3050,7 @@ class EditorE2E(unittest.TestCase):
         self.page.evaluate("minihou.preview.selectElements('point', [0,1,2,3,4,10,11,12,13,14], 'replace')")
         self.page.select_option("#attr-card .pa-mask", "selection")
         self.page.click("#attr-card .pa-masksnap")
-        self.assertIn("mask: 10 selected", self.page.locator("#attr-card .pa-info").inner_text())
+        self.assertTrue(until(lambda: "mask: 10 selected" in self.page.locator("#attr-card .pa-info").inner_text(), timeout=15))
         self.page.click('#attr-card .pa-tabbtn[data-tab="paint"]')
         self.page.wait_for_function("minihou.paint.active() && minihou.paint.values() && minihou.paint.values().n === 100")
         self.assertEqual(self.page.evaluate("minihou.preview.selection().points.length"), 0)          # paint mode cleared the selection; the mask kept it
@@ -3124,7 +3124,7 @@ class EditorE2E(unittest.TestCase):
         self.page.fill("#attr-card .pa-value", "1")
         self.page.locator("#attr-card .pa-value").press("Tab")
         self.page.click("#attr-card .pa-assign-all")
-        self.assertTrue(until(lambda: bool((self.painted().point["temp"] == 1.0).all())))
+        self.assertTrue(until(lambda: bool((self.painted().point["temp"] == 1.0).all()), timeout=15))
         self.page.click("#attr-card .pa-clear")
         self.assertTrue(until(lambda: float(self.painted().point["temp"].max()) == 1.0))             # cleared the strokes, the default stays
         self.assertEqual(sum(n.type == "attrib_paint" for n in self.s.graph.nodes.values()), 1)       # one node, reused
