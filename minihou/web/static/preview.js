@@ -916,6 +916,9 @@ window.MiniHouPreview = (() => {
       tool: "move", hasToolHandles() { return (selHandles.length ? selHandles : handles).some((h) => h.tool); },
       setTool(t) { if (["move", "rotate", "scale"].includes(t)) { api.tool = t; schedule(); } },
       set(head, arrays, keepCamera) {
+        // An inserted transform becomes the preview node mid-drag. Keep the
+        // camera and selection stable while its asynchronous result arrives.
+        keepCamera = keepCamera || !!handleDrag;
         const same = keepCamera && data.npoints === arrays.P.length / 3 && data.ntris === arrays.tri.length / 3 &&
           data.nedges === arrays.edge.length / 2;                                       // same node, same topology: indices still mean the same
         upload(head, arrays);

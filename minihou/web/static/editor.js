@@ -1117,6 +1117,13 @@
     document.querySelectorAll("#pv-xform [data-tool]").forEach((b) => b.classList.toggle("on", b.dataset.tool === pv.tool));
   }
   function updateViewportContext() {
+    clearTimeout(updateViewportContext.timer);
+    // Inserting a transform during a gizmo drag must not reveal a toolbar
+    // that resizes the canvas and shifts the pointer's snap targets.
+    if (document.body.classList.contains('pv-dragging')) {
+      updateViewportContext.timer = setTimeout(updateViewportContext, 50);
+      return;
+    }
     const panel = $("#pv-context");
     const ids = [...S.sel].filter((id) => nodeOf(id));
     const id = ids.length === 1 ? ids[0] : "";

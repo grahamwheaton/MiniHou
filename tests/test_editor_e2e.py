@@ -899,7 +899,16 @@ class EditorE2E(unittest.TestCase):
         tip=next(t for t in tips if t['id']=='translate_plane')
         box=self.page.locator('#pv-canvas').bounding_box()
         target=self.view_xy('point',0)
+        self.page.evaluate("""() => {
+          const pv=minihou.preview, original=pv.set.bind(pv);
+          window.dragPreviewUpdates=0;
+          pv.set=(...args)=>{original(...args);window.dragPreviewUpdates++;};
+        }""")
         self.page.mouse.move(box['x']+tip['tip'][0],box['y']+tip['tip'][1]);self.page.mouse.down()
+        self.page.mouse.move((box['x']+tip['tip'][0]+target[0])/2,
+                             (box['y']+tip['tip'][1]+target[1])/2,steps=4)
+        self.page.wait_for_function('window.dragPreviewUpdates > 0')
+        np.testing.assert_allclose(self.view_xy('point',0),target,atol=0.1)
         self.page.mouse.move(*target,steps=8);self.page.mouse.up()
         self.page.wait_for_function('minihou.desktopCanClose()')
         n=next(n for n in self.s.graph.nodes.values() if n.type=='transform')
