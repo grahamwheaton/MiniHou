@@ -23,6 +23,7 @@ suite = unittest.defaultTestLoader.loadTestsFromNames([
     "tests.test_blender_modeling",
     "tests.test_blender_scene_objects",
     "tests.test_blender_materials",
+    "tests.test_blender_geometry_exchange",
 ])
 result = unittest.TextTestRunner(verbosity=2).run(suite)
 sys.stdout.flush()
