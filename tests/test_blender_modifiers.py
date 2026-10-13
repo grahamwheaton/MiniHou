@@ -4,6 +4,7 @@ MINIHOU_ENGINE_PYTHON=<supported external Python> blender --background --factory
     --python tests/test_blender_modifiers.py
 """
 import json
+import time
 import sys
 import tempfile
 import unittest
@@ -200,7 +201,14 @@ class ModifierStackTests(unittest.TestCase):
         obj = bpy.data.objects["Source"]
         self.assertEqual(self.m.instance_id(obj.modifiers[0]), ident)
         self.assert_x(obj, [3])
-        self.path.unlink()  # persisted graph survives unavailable original file
+        for attempt in range(40):                      # on Windows the engine may be reading the file this very moment
+            try:
+                self.path.unlink()  # persisted graph survives unavailable original file
+                break
+            except PermissionError:
+                if attempt == 39:
+                    raise
+                time.sleep(0.1)
         self.assertEqual(bpy.context.window_manager.minihou_port, self.engine.port)
         self.assertEqual(self.m.pump(force=True), 1)  # restored endpoint; no explicit host/port
         self.assertEqual(self.m.last_error(), "")

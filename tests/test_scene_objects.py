@@ -333,3 +333,48 @@ class ModifierPathTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CurveAndPointModeTests(unittest.TestCase):
+    def geo(self, closed=False):
+        nodes = {"c": {"type": "curve", "params": {"points": "0,0,0 1,0,0 1,1,0 0,2,0", "closed": closed}},
+                 "w": {"type": "wrangle", "inputs": {"geo": "c"}, "params": {"run_over": "points", "snippet": "f@radius = @ptnum * 0.1; i@id = @ptnum + 10;"}},
+                 "k": {"type": "wrangle", "inputs": {"geo": "w"}, "params": {"run_over": "primitives", "snippet": "i@tag = 7;"}}}
+        return Evaluator().cook(Graph.from_dict({"nodes": nodes, "display": "k"}), "k")
+
+    def test_curves_mode_sends_points_sizes_cyclic_flags_and_attributes(self):
+        cols, arrays = plan(self.geo(), "curves", "", "id", 100, "piece", "id tag")
+        self.assertEqual((cols["npts"], cols["ncurve"], cols["id"]), ([4], [1], [0]))
+        np.testing.assert_array_equal(arrays["sizes"], [4])
+        np.testing.assert_array_equal(arrays["cyclic"], [0])
+        self.assertEqual(arrays["P"].shape, (4, 3))
+        self.assertEqual(sorted(cols["attributes"]), ["point:id", "point:radius", "prim:tag"])          # radius always goes
+        np.testing.assert_allclose(arrays["point:radius"], [0, .1, .2, .3], atol=1e-6)
+
+    def test_a_closed_primitive_is_a_cyclic_curve(self):
+        cols, arrays = plan(self.geo(closed=True), "curves", "", "id", 100, "piece", "")
+        np.testing.assert_array_equal(arrays["cyclic"], [1])
+
+    def test_star_carries_every_supported_attribute_and_groups_stay_behind(self):
+        geo = self.geo()
+        cols, _ = plan(geo, "curves", "", "id", 100, "piece", "*")
+        self.assertIn("point:id", cols["attributes"])
+        self.assertIn("prim:tag", cols["attributes"])
+        self.assertFalse([k for k in cols["attributes"] if "group_" in k])
+
+    def test_curves_mode_needs_curves(self):
+        with self.assertRaises(ValueError):
+            plan(Geometry.from_arrays(np.zeros((3, 3), np.float32)), "curves", "", "id", 100, "piece", "")
+
+    def test_points_mode_sends_every_point_and_its_attributes(self):
+        cols, arrays = plan(self.geo(), "points", "", "id", 100, "piece", "id")
+        self.assertEqual(cols["npts"], [4])
+        self.assertEqual(sorted(cols["attributes"]), ["point:id", "point:radius"])
+        self.assertEqual(arrays["P"].shape, (4, 3))
+        with self.assertRaises(ValueError):
+            plan(Geometry.from_arrays(np.zeros((0, 3), np.float32)), "points", "", "id", 100, "piece", "")
+
+    def test_the_manifest_header_names_the_mode(self):
+        header, arrays = build_manifest("so", params(mode="curves", prefix="Strand"), self.geo(), "k")
+        self.assertEqual((header["mode"], header["prefix"]), ("curves", "Strand"))
+        self.assertIn("P", arrays)

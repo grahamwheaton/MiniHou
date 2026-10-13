@@ -5,7 +5,9 @@ cook) turns what it receives into a **manifest** the add-on realises as ordinary
 
 * ``instances``: one linked duplicate of a Blender object per point, placed with the point's position, ``rot`` and ``scale``;
 * ``pieces``: one mesh object per piece of the geometry (a ``piece`` primitive attribute, or connected pieces), each with its origin
-  at the piece's centre.
+  at the piece's centre;
+* ``curves``: one Blender curves object holding every curve of the geometry (open primitives; polygons as cyclic outlines);
+* ``points``: one Blender point-cloud object holding every point.
 
 You can then give each object its own modifiers, materials, constraints; they are found again by a stable id, so the next cook moves
 the same objects instead of making new ones. See :func:`build_manifest` for the wire form.
@@ -20,9 +22,11 @@ MAX_OBJECTS_LIMIT = 10_000
 
 
 @node("scene_objects", inputs=["geo"], category="output", params=[
-    Enum("mode", ["instances", "pieces"], doc="instances: one Blender object per point (a linked duplicate of the object the point "
-                                              "names), placed with the point's position, rot and scale; pieces: one mesh object per "
-                                              "piece of the geometry (fracture pieces, say), origin at its centre"),
+    Enum("mode", ["instances", "pieces", "curves", "points"],
+         doc="instances: one Blender object per point (a linked duplicate of the object the point names), placed with the point's "
+             "position, rot and scale; pieces: one mesh object per piece of the geometry (fracture pieces, say), origin at its centre; "
+             "curves: a Blender curves object with every curve (poly curves, with radius and tilt); points: a Blender point cloud "
+             "with every point (and its radius)"),
     Str("prefix", "MiniHou", doc="Object names start with this (Prefix_0001, ...)"),
     Str("collection", "", doc="Blender collection the objects go in (created if missing; empty: the prefix)"),
     Str("source", "", doc="Blender object to duplicate for points that do not say which (no 'instance' attribute); "
@@ -31,9 +35,10 @@ MAX_OBJECTS_LIMIT = 10_000
                                "number is used (so changing how many points there are can hand objects to other points)"),
     Str("piece_attrib", "piece", doc="pieces: integer primitive attribute that numbers the pieces (it is the objects' identity); "
                                      "when the geometry has none, connected pieces are used, numbered in order"),
-    Str("attributes", "uv Cd N material_index", doc="pieces: attributes to carry onto each piece's mesh (space separated; the ones that exist "
-                                                  "are sent): uv, Cd and N become Blender's UV map, colour attribute and custom normals, "
-                                                  "material_index the face material, anything else a generic attribute"),
+    Str("attributes", "uv Cd N material_index", doc="pieces, curves, points: attributes to carry onto the objects (space separated; the ones "
+                                                  "that exist are sent; * is all of them): for pieces uv, Cd and N become Blender's UV map, "
+                                                  "colour attribute and custom normals and material_index the face material; Cd on curves and "
+                                                  "points becomes a colour attribute; anything else a generic attribute. radius and tilt always go"),
     Int("max_objects", 2000, min=1, max=MAX_OBJECTS_LIMIT, doc="Safety limit: more points than this is refused, not truncated"),
 ])
 def scene_objects(geo, mode, prefix, collection, source, id_attrib, piece_attrib, attributes, max_objects):
@@ -48,6 +53,10 @@ def plan(geo: Geometry, mode: str, source: str, id_attrib: str, max_objects: int
     """The manifest columns for ``mode`` and the binary arrays that go with it (none for instances)."""
     if mode == "pieces":
         return plan_pieces(geo, piece_attrib, max_objects, attributes)
+    if mode == "curves":
+        return plan_curves(geo, attributes)
+    if mode == "points":
+        return plan_points(geo, attributes)
     return plan_instances(geo, source, id_attrib, max_objects), {}
 
 
@@ -119,6 +128,68 @@ def plan_pieces(geo: Geometry, piece_attrib: str, max_objects: int, attributes: 
     return cols, arrays
 
 
+def _wanted(attributes: str, always=()) -> tuple:
+    """(names, everything) from the ``attributes`` parameter."""
+    names = list(dict.fromkeys(str(attributes).split()))
+    return [n for n in names if n != "*"] + [a for a in always if a not in names], "*" in names
+
+
+def _supported(a) -> bool:
+    return a.dtype.kind in "fiub" and a.ndim in (1, 2) and (a.ndim == 1 or a.shape[1] <= 4)
+
+
+def plan_curves(geo: Geometry, attributes: str = ""):
+    """One Blender curves object: ``P`` (a point per corner of every kept primitive, float32), ``sizes`` (points per curve, int32) and
+    ``cyclic`` (uint8 per curve: closed primitives), plus ``point:<name>`` (rows like ``P``; vertex attributes too) and ``prim:<name>``
+    (one per curve). Primitives with fewer than 2 corners are left out. Columns: ``npts``, ``ncurve``, ``attributes``."""
+    t = geo.topology
+    offs = t.prim_offsets.astype(np.int64)
+    sizes = np.diff(offs)
+    keep = np.flatnonzero(sizes >= 2)
+    if not len(keep):
+        raise ValueError("curves mode needs curves or polygons: the input has no primitive with 2 or more points")
+    s = sizes[keep]
+    n = int(s.sum())
+    if n > MAX_PIECE_POINTS:
+        raise ValueError(f"{n:,} curve points is more than the limit ({MAX_PIECE_POINTS:,})")
+    corner = np.repeat(offs[keep], s) + np.arange(n, dtype=np.int64) - np.repeat(np.cumsum(s) - s, s)
+    pt = t.vertex_point.astype(np.int64)[corner]
+    arrays = {"P": np.ascontiguousarray(np.asarray(geo.P, np.float32)[pt]), "sizes": s.astype(np.int32),
+              "cyclic": (t.closed_mask()[keep] & (s >= 3)).astype(np.uint8)}
+    names, every = _wanted(attributes, ("radius", "tilt"))
+    carried = []
+    for domain, table, rows_ in (("point", geo.point, pt), ("point", geo.vertex, corner), ("prim", geo.prim, keep)):
+        for name in (list(table.names()) if every else names):
+            a = table.get(name)
+            key = f"{domain}:{name}"
+            if a is None or name == "P" or key in arrays or name.startswith("group_") or not _supported(a):
+                continue
+            arrays[key] = np.ascontiguousarray(a[rows_])
+            carried.append(key)
+    cols = {"sources": [], "id": [0], "loc": [[0.0, 0.0, 0.0]], "npts": [n], "ncurve": [int(len(keep))], "attributes": carried}
+    return cols, arrays
+
+
+def plan_points(geo: Geometry, attributes: str = ""):
+    """One Blender point cloud: ``P`` (every point, float32) and ``point:<name>`` attributes. Column: ``npts``, ``attributes``."""
+    n = geo.npoints
+    if n == 0:
+        raise ValueError("points mode needs points: the input has none")
+    if n > MAX_PIECE_POINTS:
+        raise ValueError(f"{n:,} points is more than the limit ({MAX_PIECE_POINTS:,})")
+    arrays = {"P": np.ascontiguousarray(np.asarray(geo.P, np.float32))}
+    names, every = _wanted(attributes, ("radius",))
+    carried = []
+    for name in (list(geo.point.names()) if every else names):
+        a = geo.point.get(name)
+        if a is None or name == "P" or name.startswith("group_") or not _supported(a):
+            continue
+        arrays[f"point:{name}"] = np.ascontiguousarray(a)
+        carried.append(f"point:{name}")
+    cols = {"sources": [], "id": [0], "loc": [[0.0, 0.0, 0.0]], "npts": [n], "attributes": carried}
+    return cols, arrays
+
+
 def plan_instances(geo: Geometry, source: str, id_attrib: str, max_objects: int) -> dict:
     """Which points become objects, which Blender object each duplicates, their ids and transforms (columnar, JSON-ready)."""
     n = geo.npoints
@@ -179,3 +250,11 @@ def build_manifest(node_id: str, params: dict, geo: Geometry, key: str):
     header = dict(type="scene_objects", node=node_id, key=key, mode=params["mode"], prefix=prefix[:60],
                   collection=(str(params["collection"]).strip() or prefix)[:60], **body)
     return header, arrays
+
+
+def build_sink_manifest(node_type: str, node_id: str, params: dict, geo: Geometry, key: str):
+    """:func:`build_manifest` for a ``scene_objects`` node, the image manifest for an ``image_out`` node."""
+    if node_type == "image_out":
+        from .image_nodes import build_image_manifest
+        return build_image_manifest(node_id, params, geo, key)
+    return build_manifest(node_id, params, geo, key)

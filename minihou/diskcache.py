@@ -38,7 +38,7 @@ MIN_MS = 100.0
 MIN_BYTES = 0
 READ_BYTES_PER_MS = 300_000            # about what a disk gives back; a result is kept only if reading it is clearly quicker than cooking it
 # node types whose results are not a pure function of their key
-VOLATILE_TYPES = {"blender_object", "modifier_input", "rbd_solver", "solver", "input"}
+VOLATILE_TYPES = {"blender_object", "blender_image", "modifier_input", "rbd_solver", "solver", "input"}
 
 
 def folder_size(path: Path) -> int:

@@ -14,6 +14,13 @@ What is sent (evaluated mesh: modifiers applied), keyed like ``geo`` messages:
   vertex and primitive attributes are zero
 
 Edge attributes (e.g. ``sharp_edge``) are skipped: the engine has no edge domain.
+
+Curves and point clouds. An object's evaluated geometry can hold a mesh, curves and a point cloud at once (a legacy curve object, a
+hair-curves object, a point-cloud object, the output of Geometry Nodes); each component that is there is read and they are joined into
+one geometry (the parts stay separate: point numbers are shifted). Curves become open primitives sampled exactly as Blender draws them
+(Bezier handles, NURBS knots and weights, Catmull-Rom, poly; see ``curve_eval``), cyclic ones closed primitives, ``radius`` and ``tilt``
+point attributes riding along, curve-domain attributes becoming primitive attributes. A point cloud is points with ``radius`` and its
+attributes. The curve-less rest (a legacy curve's bevel or extrusion, text) is the mesh component.
 """
 from __future__ import annotations
 
@@ -22,6 +29,7 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 
+from . import geometry_parts
 from .protocol import TOPO_PRIM_CLOSED, TOPO_PRIM_OFFSETS, TOPO_VERTEX_POINT, attr_key
 
 _DOMAIN = {"POINT": "point", "CORNER": "vertex", "FACE": "prim"}
@@ -46,25 +54,169 @@ def _get(collection, prop: str, n: int, width: int, dtype) -> np.ndarray:
     return a.reshape(n, width) if width > 1 else a
 
 
+_MESH_TYPES = {"MESH", "SURFACE", "META", "FONT"}
+_CURVE_BUILTIN = {"position", "curve_type", "cyclic", "resolution", "handle_left", "handle_right", "handle_type_left",
+                  "handle_type_right", "nurbs_weight", "nurbs_order", "knots_mode", "normal_mode", "surface_uv_coordinate"}
+
+
+def _geometry_set(ev):
+    """The evaluated geometry (Blender 4.3+), whose components must stay referenced while they are read; None when unavailable."""
+    try:
+        return ev.evaluated_geometry()
+    except (AttributeError, RuntimeError, TypeError):
+        return None
+
+
+def _component(gs, name):
+    try:
+        return getattr(gs, name) if gs is not None else None
+    except (AttributeError, RuntimeError):
+        return None
+
+
 def read_object(obj, depsgraph) -> Tuple[dict, Dict[str, np.ndarray]]:
     """``(header fields, arrays)`` for an ``object_geo`` message. Raises ValueError if it cannot be read."""
     if obj.name in OWN_OBJECTS:
         raise ValueError("MiniHou's own objects cannot be inputs (the output would feed itself)")
     t0 = time.perf_counter()
     ev = obj.evaluated_get(depsgraph)
-    try:
-        me = ev.to_mesh()
-    except RuntimeError as e:
-        raise ValueError(f"cannot be converted to a mesh ({e})") from None
-    if me is None:
-        raise ValueError(f"a {obj.type.lower()} object has no mesh data")
-    try:
-        arrays, info = _read_mesh(obj, me)
-    finally:
-        ev.to_mesh_clear()
+    gs = _geometry_set(ev)
+    cv, pc, gmesh = _component(gs, "curves"), _component(gs, "pointcloud"), _component(gs, "mesh")
+    parts: List[Dict[str, np.ndarray]] = []
+    info: dict = {"components": []}
+    names: List[str] = []
+    # the mesh component: for mesh-like objects always (as before), for the rest only when it is there (a bevelled curve, text)
+    if obj.type in _MESH_TYPES or gmesh is not None or (cv is None and pc is None):
+        try:
+            me = ev.to_mesh()
+        except RuntimeError as e:
+            if cv is None and pc is None:
+                raise ValueError(f"cannot be converted to a mesh ({e})") from None
+            me = None
+        if me is None and cv is None and pc is None:
+            raise ValueError(f"a {obj.type.lower()} object has no mesh data")
+        if me is not None:
+            try:
+                arrays, minfo = _read_mesh(obj, me)
+            finally:
+                ev.to_mesh_clear()
+            if len(arrays[attr_key("point", "P")]) or (cv is None and pc is None):
+                parts.append(arrays)
+                info.update(minfo)
+                info["components"].append("mesh")
+                names.extend(minfo.get("attributes", []))
+    if cv is not None and len(cv.points):
+        arrays, cinfo = _read_curves(cv)
+        parts.append(arrays)
+        info["components"].append("curves")
+        info["curves"] = cinfo["curves"]
+        names.extend(cinfo.get("attributes", []))
+    if pc is not None and len(pc.points):
+        arrays, pinfo = _read_pointcloud(pc)
+        parts.append(arrays)
+        info["components"].append("points")
+        info["pointcloud"] = len(pc.points)
+        names.extend(pinfo.get("attributes", []))
+    if not parts:
+        raise ValueError(f"a {obj.type.lower()} object has no geometry")
+    arrays = geometry_parts.combine(parts)
+    npts = len(arrays[attr_key("point", "P")])
+    offs = arrays.get(TOPO_PRIM_OFFSETS)
+    info.update(points=npts, vertices=len(arrays.get(TOPO_VERTEX_POINT, ())), prims=max((len(offs) - 1) if offs is not None else 0, 0),
+                attributes=sorted(set(names)))
+    info.setdefault("loose_edges", 0)
+    info.setdefault("vertex_groups", [])
+    info.setdefault("skipped", [])
     info["read_ms"] = round((time.perf_counter() - t0) * 1000, 2)
     M = [v for row in obj.matrix_world for v in row]
     return {"matrix": M, "info": info, "materials": slot_names(ev)}, arrays
+
+
+def _generic_attrs(owner, domains: Dict[str, int], skip: set, render_color: str = "") -> Tuple[Dict[str, Dict[str, np.ndarray]], List[str]]:
+    """Attributes of a Curves / PointCloud datablock by domain ({'POINT': n, 'CURVE': m}): name -> array, plus what was skipped."""
+    out: Dict[str, Dict[str, np.ndarray]] = {d: {} for d in domains}
+    skipped: List[str] = []
+    for a in owner.attributes:
+        if a.name.startswith(".") or a.name in skip:
+            continue
+        spec = _TYPES.get(a.data_type)
+        if a.domain not in domains:
+            skipped.append(f"{a.name} ({a.domain} {a.data_type})")
+            continue
+        if spec is None:
+            skipped.append(f"{a.name} ({a.domain} {a.data_type})")
+            continue
+        prop, width, dtype = spec
+        data = _get(a.data, prop, domains[a.domain], width, dtype)
+        name = a.name
+        if name == render_color and width == 4:
+            if not np.allclose(data[:, 3], 1.0):
+                out[a.domain]["Alpha"] = np.ascontiguousarray(data[:, 3])
+            data, name = np.ascontiguousarray(data[:, :3]), "Cd"
+        if dtype is bool:
+            data = data.astype(np.int32)
+        out[a.domain][name] = data
+    return out, skipped
+
+
+def _render_color(owner) -> str:
+    """The colour attribute to call ``Cd``: the render colour of a mesh; curves and point clouds have no such setting, so their first."""
+    try:
+        idx = owner.color_attributes.render_color_index
+        if 0 <= idx < len(owner.color_attributes):
+            return owner.color_attributes[idx].name
+    except (AttributeError, IndexError, RuntimeError):
+        pass
+    try:
+        return owner.color_attributes[0].name if len(owner.color_attributes) else ""
+    except (AttributeError, IndexError, RuntimeError):
+        return ""
+
+
+def _optional(owner, name: str, n: int, width: int, dtype, prop: str):
+    if name not in owner.attributes:
+        return None
+    return _get(owner.attributes[name].data, prop, n, width, dtype)
+
+
+def _read_curves(cv) -> Tuple[Dict[str, np.ndarray], dict]:
+    """A ``bpy.types.Curves`` (legacy curve objects evaluate to one too) as primitives sampled the way Blender draws them."""
+    n, ncurves = len(cv.points), len(cv.curves)
+    position = _get(cv.attributes["position"].data, "vector", n, 3, np.float32)
+    off = np.empty(len(cv.curve_offset_data), np.int32)
+    cv.curve_offset_data.foreach_get("value", off)
+    opt = lambda name, count, w, dt, prop="value": _optional(cv, name, count, w, dt, prop)  # noqa: E731
+    skip = set(_CURVE_BUILTIN) | {"radius", "tilt"}
+    generic, skipped = _generic_attrs(cv, {"POINT": n, "CURVE": ncurves}, skip, _render_color(cv))
+    point_attrs = dict(generic["POINT"])
+    for name in ("radius", "tilt"):
+        a = opt(name, n, 1, np.float32)
+        if a is not None:
+            point_attrs[name] = a
+    cyc = opt("cyclic", ncurves, 1, bool)
+    ctype = opt("curve_type", ncurves, 1, np.int32)
+    res = opt("resolution", ncurves, 1, np.int32)
+    if ctype is None:                                     # Blender omits the attribute for hair made without types: Catmull-Rom
+        ctype = np.full(ncurves, 0, np.int32)
+    if res is None:
+        res = np.full(ncurves, 12, np.int32)              # and its default curve resolution
+    arrays, cinfo = geometry_parts.curve_arrays(
+        position, off, curve_type=ctype, cyclic=cyc, resolution=res,
+        handle_left=opt("handle_left", n, 3, np.float32, "vector"), handle_right=opt("handle_right", n, 3, np.float32, "vector"),
+        nurbs_weight=opt("nurbs_weight", n, 1, np.float32), nurbs_order=opt("nurbs_order", ncurves, 1, np.int32),
+        knots_mode=opt("knots_mode", ncurves, 1, np.int32), point_attrs=point_attrs, curve_attrs=generic["CURVE"])
+    cinfo["skipped"] = skipped
+    cinfo["attributes"] = sorted(set(point_attrs) | set(generic["CURVE"]))
+    return arrays, cinfo
+
+
+def _read_pointcloud(pc) -> Tuple[Dict[str, np.ndarray], dict]:
+    """A ``bpy.types.PointCloud`` as points with ``radius`` and its attributes."""
+    n = len(pc.points)
+    position = _get(pc.attributes["position"].data, "vector", n, 3, np.float32)
+    generic, skipped = _generic_attrs(pc, {"POINT": n}, {"position"}, _render_color(pc))
+    arrays = geometry_parts.point_arrays(position, generic["POINT"])
+    return arrays, {"attributes": sorted(generic["POINT"]), "skipped": skipped}
 
 
 def slot_names(obj) -> List[str]:

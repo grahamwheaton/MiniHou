@@ -329,6 +329,21 @@ class Session:
             return sorted({str(inst.params.get("object") or "") for inst in self.graph.nodes.values()
                            if inst.type == "blender_object"} - {""})
 
+    def watched_images(self) -> List[str]:
+        """Blender images the graph reads (``blender_image`` nodes): the add-on streams exactly these."""
+        with self.lock:
+            return sorted({str(inst.params.get("image") or "") for inst in self.graph.nodes.values()
+                           if inst.type == "blender_image"} - {""})
+
+    def image_received(self, name: str, pixels, meta: Optional[dict] = None, error: str = "") -> None:
+        """New pixels for a Blender image (or why there are none). Recooks what depends on it; not a graph edit."""
+        INPUTS.put_image(name, pixels, meta, error)
+        if name not in self.watched_images():
+            return
+        with self.lock:
+            self._rev += 1
+            self._wake.set()
+
     def set_frame(self, frame: float, fps: Optional[float] = None) -> None:
         """The timeline moved (Blender sends this). Recooks only nodes that use @Frame / @Time; not a graph edit."""
         frame = float(frame)
@@ -350,16 +365,17 @@ class Session:
             self._wake.set()
 
     def _check_watch(self) -> None:
-        w = self.watched_objects()
-        if w == self._watched:
+        w, wi = self.watched_objects(), self.watched_images()
+        if w == self._watched and wi == getattr(self, "_watched_images", None):
             return
-        self._watched = w
+        self._watched, self._watched_images = w, wi
         INPUTS.retain(w)
+        INPUTS.retain_images(wi)
         for l in list(self._listeners):
             fn = getattr(l, "on_watch", None)
             if fn:
                 try:
-                    fn(w)
+                    fn(w, wi)
                 except Exception:  # noqa: BLE001
                     log.exception("listener failed")
 
@@ -605,11 +621,12 @@ class Session:
                         extras[name] = (eg, ev.last_stats.key)
                         live += ev.live_keys(snapshot, nid)
                     if scene is not None:
-                        from ..nodes.scene_objects import build_manifest
+                        from ..nodes.scene_objects import build_sink_manifest
                         for nid in snapshot.scene_sinks():                  # results that become real Blender objects
                             try:
                                 sg = ev.cook(snapshot, nid, feeds=feeds)
-                                scene[nid], scene_arrays[nid] = build_manifest(nid, snapshot.effective_params(nid), sg, ev.last_stats.key)
+                                scene[nid], scene_arrays[nid] = build_sink_manifest(snapshot.nodes[nid].type, nid, snapshot.effective_params(nid), sg,
+                                                                                    ev.last_stats.key)
                                 live += ev.live_keys(snapshot, nid)
                                 self._extra_errors.pop("scene:" + nid, None)
                             except (NodeError, GraphError, ParamError, ValueError) as e:
@@ -702,6 +719,10 @@ class Session:
                 out["wrangle"] = {"reads": sorted(prog.reads), "writes": sorted(prog.writes)}
             except Exception:  # noqa: BLE001 - a broken snippet already failed the cook above
                 pass
+        if n.type == "blender_image":
+            d = INPUTS.get_image(str(n.params.get("image", "")))
+            if d is not None:
+                out["blender"] = dict(d.meta, error=d.error) if d.error else dict(d.meta)
         if n.type == "blender_object":                       # what Blender sent: attributes, vertex groups, skips
             data = INPUTS.get(str(n.params.get("object", "")))
             if data is not None:

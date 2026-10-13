@@ -110,3 +110,21 @@ class PlannerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ShapedModeTests(unittest.TestCase):
+    def test_curves_and_points_are_one_object_where_the_manifest_puts_it(self):
+        for mode in ("curves", "points", "pieces"):
+            m = {"type": "scene_objects", "node": "so", "key": "k", "prefix": "Strand", "mode": mode, "sources": [], "id": [0],
+                 "loc": [[0.0, 0.0, 0.0]]}
+            [item] = sp.items(m)
+            self.assertEqual((item.name, item.src, tuple(item.scale)), ("Strand_0000", "", (1.0, 1.0, 1.0)))
+            plan = sp.plan(m, {}, [])
+            self.assertEqual([i.ident for i in plan.create], [0])
+
+    def test_a_second_cook_updates_nothing_and_a_missing_id_parks_the_object(self):
+        m = {"type": "scene_objects", "node": "so", "key": "k", "prefix": "S", "mode": "curves", "sources": [], "id": [0], "loc": [[0, 0, 0]]}
+        have = {0: sp.Existing(0, "S_0000", "", False, False, (0, 0, 0), (0, 0, 0), (1, 1, 1), "")}
+        self.assertEqual(sp.plan(m, have, []).update, [])
+        gone = dict(m, id=[])
+        self.assertEqual(sp.plan(gone, have, []).hide, [0])

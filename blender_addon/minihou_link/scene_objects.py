@@ -17,6 +17,7 @@ import bpy
 import mathutils
 import numpy as np
 
+from . import image_exchange
 from . import scene_plan as sp
 from .mesh_writer import NATIVE, apply_material_names, assert_main_thread, material_for, set_corner_verts, set_positions, write_attribute, write_native
 
@@ -156,13 +157,123 @@ def _make(name: str, src_name: str, tag: str, ident: int, col, placeholder_log: 
 DIGEST = "minihou_digest"        # on a piece's mesh: hash of the shape last written, so an unchanged piece is not rewritten
 
 
-def _make_piece(name: str, ident: int, col):
-    obj = bpy.data.objects.new(name, bpy.data.meshes.new(name))      # each piece has its own mesh
+def _make_shaped(mode: str, name: str, ident: int, col):
+    """The object for a shaped mode: a mesh object (pieces), a curves object or a point-cloud object, with data of its own."""
+    if mode == "curves":
+        data = bpy.data.hair_curves.new(name)
+    elif mode == "points":
+        data = bpy.data.pointclouds.new(name)
+    else:
+        data = bpy.data.meshes.new(name)
+    obj = bpy.data.objects.new(name, data)
     obj[sp.MARK_ID] = int(ident)
     obj[sp.MARK_SRC] = ""
     obj.rotation_mode = "XYZ"
     col.objects.link(obj)
     return obj
+
+
+_OBJECT_TYPE = {"pieces": "MESH", "curves": "CURVES", "points": "POINTCLOUD"}
+COLOR_NAME = "Color"                                 # what the engine's Cd becomes on curves and point clouds
+
+
+def _blender_attr(name: str) -> str:
+    return COLOR_NAME if name == "Cd" else name
+
+
+def _write_attributes(data, domain_of: Dict[str, int], attrs: Dict[str, np.ndarray]) -> List[str]:
+    """Write ``"domain:name"`` arrays as attributes of a Curves / PointCloud (``domain_of``: 'point'/'prim' -> blender domain name and
+    size are chosen by the caller). Returns warnings."""
+    warnings: List[str] = []
+    for key, arr in attrs.items():
+        dom, name = key.split(":", 1)
+        blender_domain = "POINT" if dom == "point" else "CURVE"
+        a = np.asarray(arr)
+        bname = _blender_attr(name)
+        try:
+            if a.ndim == 2 and a.shape[1] == 3 and name != "Cd":
+                kind, prop, flat = "FLOAT_VECTOR", "vector", a.astype(np.float32)
+            elif a.ndim == 2 and a.shape[1] in (3, 4) and name == "Cd":
+                rgba = np.ones((len(a), 4), np.float32)
+                rgba[:, :a.shape[1]] = a
+                kind, prop, flat = "FLOAT_COLOR", "color", rgba
+            elif a.ndim == 2 and a.shape[1] == 2:
+                kind, prop, flat = "FLOAT2", "vector", a.astype(np.float32)
+            elif a.ndim == 2:
+                raise ValueError("unsupported width")
+            elif a.dtype.kind == "b":
+                kind, prop, flat = "BOOLEAN", "value", a
+            elif a.dtype.kind in "iu":
+                kind, prop, flat = "INT", "value", a.astype(np.int32)
+            else:
+                kind, prop, flat = "FLOAT", "value", a.astype(np.float32)
+            existing = data.attributes.get(bname)
+            if existing is not None and (existing.data_type != kind or existing.domain != blender_domain):
+                data.attributes.remove(existing)
+                existing = None
+            if existing is None:
+                existing = data.attributes.new(bname, kind, blender_domain)
+            existing.data.foreach_set(prop, np.ascontiguousarray(flat).ravel())
+        except (RuntimeError, TypeError, ValueError, KeyError) as e:
+            warnings.append(f"attribute {key!r} could not be written ({e})")
+    return warnings
+
+
+def _write_curves(data, sizes: np.ndarray, P: np.ndarray, cyclic: np.ndarray, attrs: Dict[str, np.ndarray]) -> List[str]:
+    """Fill a fresh Curves datablock: poly curves with the given points, cyclic flags and attributes."""
+    data.add_curves([int(x) for x in sizes])
+    data.set_types(type="POLY")
+    data.attributes["position"].data.foreach_set("vector", np.ascontiguousarray(P, np.float32).ravel())
+    if len(cyclic) and cyclic.any():
+        data.attributes.new("cyclic", "BOOLEAN", "CURVE").data.foreach_set("value", cyclic.astype(np.int8))
+    return _write_attributes(data, {}, attrs)
+
+
+def _write_points(data, P: np.ndarray, attrs: Dict[str, np.ndarray]) -> List[str]:
+    data.resize(len(P))
+    data.attributes["position"].data.foreach_set("vector", np.ascontiguousarray(P, np.float32).ravel())
+    return _write_attributes(data, {}, attrs)
+
+
+def _apply_shaped(mode: str, manifest: dict, arrays: dict, objs: Dict[int, "bpy.types.Object"], col, tag: str, node: str) -> int:
+    """curves / points: one object (id 0) whose data is replaced when the shape changed. Returns how many were rewritten."""
+    obj = objs.get(0)
+    if obj is None:
+        return 0
+    if obj.type != _OBJECT_TYPE[mode]:                    # the node used to make something else: start over (its modifiers cannot move)
+        _log(f"scene_objects {node!r}: {obj.name} was a {obj.type.lower()} object, now the node makes {mode}; it is replaced "
+             f"(modifiers on the old one are lost)")
+        name = obj.name
+        bpy.data.objects.remove(obj, do_unlink=True)
+        obj = _make_shaped(mode, name, 0, col)
+        obj[sp.MARK] = tag
+        objs[0] = obj
+    h = hashlib.blake2b(digest_size=12)
+    for key in sorted(arrays):
+        h.update(key.encode())
+        h.update(np.ascontiguousarray(arrays[key]).tobytes())
+    digest = h.hexdigest()
+    if obj.data.get(DIGEST) == digest:
+        return 0
+    name = obj.data.name
+    old = obj.data
+    new = bpy.data.hair_curves.new(name) if mode == "curves" else bpy.data.pointclouds.new(name)
+    attrs = {k: arrays[k] for k in manifest.get("attributes", []) if k in arrays}
+    try:
+        warnings = (_write_curves(new, arrays["sizes"], arrays["P"], arrays["cyclic"], attrs) if mode == "curves"
+                    else _write_points(new, arrays["P"], attrs))
+    except Exception:
+        (bpy.data.hair_curves if mode == "curves" else bpy.data.pointclouds).remove(new)
+        raise
+    for w in dict.fromkeys(warnings):
+        _log(f"scene_objects {node!r}: {w}")
+    new[DIGEST] = digest
+    for slot in range(len(old.materials)):                # materials the user put on the object stay
+        new.materials.append(old.materials[slot])
+    obj.data = new
+    if old.users == 0:
+        (bpy.data.hair_curves if mode == "curves" else bpy.data.pointclouds).remove(old)
+    return 1
 
 
 def _write_piece(mesh, P: np.ndarray, vp: np.ndarray, sizes: np.ndarray, attrs: Optional[Dict[str, np.ndarray]] = None) -> List[str]:
@@ -271,10 +382,14 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "", arrays: Option
     """Make the objects the manifest describes. ``arrays``: the binary part (pieces mode; session manifests carry it as
     ``_arrays``). Returns counts."""
     assert_main_thread()
-    pieces = manifest.get("mode") == "pieces"
+    mode = str(manifest.get("mode") or "instances")
+    if mode == "image":                                   # not objects: one Blender image (see image_exchange)
+        return image_exchange.apply_image(manifest, arrays if arrays is not None else manifest.get("_arrays"), sp.owner_tag(owner, str(manifest["node"])))
+    pieces = mode == "pieces"
+    shaped = mode in sp.SHAPED
     arrays = arrays if arrays is not None else manifest.get("_arrays")
-    if pieces and not arrays:
-        raise ValueError("a pieces manifest arrived without its mesh arrays")
+    if shaped and not arrays:
+        raise ValueError(f"a {mode} manifest arrived without its arrays")
     node = str(manifest["node"])
     tag = sp.owner_tag(owner, node)
     by_id, extras = _existing(tag)
@@ -286,7 +401,7 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "", arrays: Option
     missing_log: List[str] = []
     objs: Dict[int, "bpy.types.Object"] = dict(by_id)
     for item in plan.create:
-        obj = _make_piece(item.name, item.ident, col) if pieces else _make(item.name, item.src, tag, item.ident, col, missing_log)
+        obj = _make_shaped(mode, item.name, item.ident, col) if shaped else _make(item.name, item.src, tag, item.ident, col, missing_log)
         obj[sp.MARK] = tag
         objs[item.ident] = obj
     rebuilt = set()
@@ -310,6 +425,8 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "", arrays: Option
             obj.parent = parent_obj
             obj.matrix_parent_inverse = mathutils.Matrix.Identity(4)
     rewritten = 0
+    if mode in ("curves", "points"):
+        rewritten = _apply_shaped(mode, manifest, arrays, objs, col, tag, node)
     if pieces:                                            # shapes: only the pieces whose shape really changed are rewritten
         warned = set()
         for ident, P, vp, sizes, attrs in _piece_slices(manifest, arrays):
@@ -334,7 +451,7 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "", arrays: Option
                 if w not in warned:
                     warned.add(w)
                     _log(f"scene_objects {node!r}: {w}")
-    if not pieces:
+    if mode == "instances":
         _apply_object_materials(manifest, objs, node, _noted)
     for ident in plan.hide:
         _hide(objs[ident])
