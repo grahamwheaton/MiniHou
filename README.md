@@ -859,6 +859,12 @@ MiniHou modifier (objects parented to the host object). Details and limits: [doc
 output; *Scene Objects* modes **curves** and **points** make real Blender curves and point clouds; `blender_image` / `image_file` bring **images** in as
 pixel grids (heightfield nodes work on them) and `image_out` writes a grid or baked points to a Blender image or a PNG. Details: [docs/EXCHANGE.md](docs/EXCHANGE.md).
 
+## Painting and assigning attributes
+
+**Paint** mode (key `5`) brushes any attribute onto points, faces or edges in the 3-D view; **Quick Assign** gives the selection a value; the
+**Spreadsheet** shows every point, vertex, primitive, edge and detail attribute and lets you edit cells. They all write to one node,
+`attrib_paint`, one undo step per stroke or assignment. Details and limits: [docs/PAINT.md](docs/PAINT.md).
+
 ## USD export and import
 
 File menu > *Export USD...* (also `POST /api/export_usd`, MCP `export_usd`) writes the cooked geometry, always at full size, as meshes,
@@ -871,6 +877,9 @@ files on the editor to make the node. The **USD Export** node (settings, a frame
 **Save to Disk**; the **USD Import** node has Houdini-style settings (Primitives patterns, purposes, time offset and scale, path attribute,
 Reload). On a big scene the viewport's **Detail** setting (Auto / Full / Fast) and the cook **Proxy** are in its display options; selecting
 loads the full detail ([docs/PROXY.md](docs/PROXY.md)).
+Instances (copies of one shape, instance points, USD point instancers) are drawn as **impostors**: each shape once at three levels of detail and a
+transform per instance, with the level chosen by size on screen. The **Perf** menu in the viewport adds an impostor and display budget, culling of what
+is outside the view, cheaper drawing while the camera moves, near/far clip, a section plane and live statistics ([docs/PROXY.md](docs/PROXY.md#3-instances-as-impostors-display-only)).
 
 ## Disk cache (reopen big scenes quickly)
 

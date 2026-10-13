@@ -79,6 +79,52 @@ same clustering (as triangles, with averaged attributes). The cooked geometry it
 Not yet verified in a real Blender (no Blender in the build sandbox for this change): the add-on receives ordinary geometry
 messages, so nothing on its side changed.
 
+## 3. Instances as impostors (display only)
+
+A hundred thousand trees are a hundred thousand copies of a few shapes. Clustering the whole scene (part 1) turns every tree into the same
+blob, and sending every copy is too much for the browser. `minihou/impostors.py` finds the instances and the viewer draws them like Houdini's
+packed primitives in the viewport: each **shape once, at three levels of detail**, plus **one transform per instance**.
+
+What counts as an instance:
+
+* **Instance points** (`instance` node, USD point instancers, PCG): points with an `instance` attribute and the detail `instance_objects`, with `rot` /
+  `scale` / `orient` / `N` read exactly as `copy_to_points` reads them. With a live Blender link the shapes are the Blender objects' geometry; USD point
+  instancers also bring the **size** of each prototype (detail `instance_bounds`), so without a shape each instance is a box of the right size. With neither,
+  an instance is a unit box times its scale and the Perf statistics say "sizes guessed". The points stay in the view (selecting them works).
+  With a live link, instead of realising every copy for the preview (which stops at 2 million vertices) the engine keeps the points and sends the sources
+  once whenever the copies would be over the display budget.
+* **Copies that were really made** (`copy_to_points`, anything repeated end to end): geometry that is a block of points / vertices / primitives repeated, where
+  every repetition is an affine copy (least-squares fit, within 0.2% of its size) of the first. Nothing is stored on the geometry, so nothing can go stale; edit a
+  copy by hand and it stops being recognised. At least 8 copies of at least 8 points and 4 primitives. Only in a view that would be reduced anyway:
+  with **Full res**, a selection mode or paint mode the real geometry is sent as before.
+
+Drawing: per camera move each instance gets a level from its **diameter on screen** (detailed above ~70 px, coarse above ~22 px, a bounding box above 3 px,
+a dot above 0.8 px), the instances outside the view are skipped, and the total triangles are held to a budget (thresholds grow until it fits). The detailed
+level is the shape reduced to 4,000 triangles, the coarse one to 300. The *Perf* menu sets Impostors (Auto / Always / Never), the detail bias and the budget.
+`POST /api/preview` takes `instances: auto|always|never`; the header carries `instances` and the arrays `ip_P`, `ip_tri`, `inst_M`, `inst_proto`, `inst_sph`,
+`inst_col`. Measured here (headless software GL): 300 copies of a 960-triangle sphere (288,000 triangles) draw 6,480 triangles at a middle distance (12 coarse
+spheres, 288 boxes) and 86,076 close up (18 detailed, 273 coarse), and nothing once every instance is under a pixel. The statistics update in under
+2 ms for 300 instances; a million instances is a few tens of milliseconds per camera move (a set over 150,000 refreshes a few times a second while moving).
+
+## 4. Large-scene view settings (the Perf menu)
+
+In the viewport's display strip. All remembered between sessions.
+
+| setting | what it does |
+|---|---|
+| Impostors | Auto, Always, Never (above). |
+| Impostor detail | Higher keeps the detailed level for smaller instances. |
+| Triangles for instances | The most all instances draw together: 250k to 3M. |
+| Display budget | The triangles a geometry may have before it is drawn reduced (default 250k; 100k to 2.5M). Full res and selecting still load everything the viewer can hold. |
+| Skip what is outside the view | A triangle list over 100,000 is sent sorted along a space-filling curve with a table of runs of 8,192 triangles and their boxes; runs outside the view (or beyond the section plane) are not drawn. Selecting and painting still use all of them. |
+| Skip pieces smaller than N px | Optionally also drop runs that are tiny on screen. |
+| While the camera moves | **Balanced** draws at 60% resolution, **Fast** at 45% and without edges, while you orbit, pan or zoom; a sharp frame follows when you stop. |
+| Camera clip | Near and far distance of the camera in perspective view; empty is automatic from the scene's size. |
+| Section plane | Hides everything beyond a plane (axis X / Y / Z, offset, flip, *Centre*). What is cut away cannot be picked, box-selected or painted. |
+| Statistics | Triangles drawn of the total, runs drawn, instances by level, frame time. |
+
+Everything here is display. Nothing changes the cooked geometry, the Blender link or an export.
+
 ## Disk cache
 
 `minihou/diskcache.py`, opt-in (`--disk-cache`, see the README). Because every result is keyed by a Merkle hash of its node type and
@@ -95,7 +141,7 @@ Measured: remesh of a sphere at 0.03 voxels 4.5 s, 48 ms after a restart (the ch
 
 ## Not done
 
-* Instances are not reduced separately (an instance node with a million placements counts by its points).
+* Impostors are boxes and reduced meshes, not baked billboards. Copies are recognised only when they are one repeated block (a merge of several different shapes is drawn by the ordinary reduction); a copy that was edited by hand loses its status.
 * Cook parameters are marked on the commonest count / resolution parameters only; others run at full size at any level.
 * The disk cache is off by default (flag, environment variable, or the Proxy menu in the editor).
 * Packed / instanced RBD pieces and the solver always cook the real thing in their input; do not use a proxy to judge a simulation.

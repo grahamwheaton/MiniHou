@@ -543,6 +543,7 @@ def pcg_spawner(points, objects, seed):
     out.point["instance"] = (pick + 1).astype(np.int32)
     out.point["variant"] = pick.astype(np.int32)
     out.detail["instance_objects"] = [e[0] for e in entries]
+    out.detail.pop("instance_bounds", None)
     return out
 
 

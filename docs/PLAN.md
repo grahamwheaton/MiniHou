@@ -349,6 +349,10 @@ Worked through in order of how often Houdini users reach for them:
     components come in through `blender_object`; Scene Objects modes curves/points make real Blender curves and point clouds; images are pixel
     grids (`blender_image`, `image_file`, `image_out`, PNG codec with 16-bit support) carried by new `image_data` messages and the
     `scene_objects` manifest transport.
+23. **Attribute paint, quick assign and the spreadsheet** (`minihou/paint.py`, `nodes/paint_node.py`, `spreadsheet.py`, the `paint_assign` edit
+    op, `web/static/paint-tool.js`, `sheet.js`, `docs/PAINT.md`): one node, `attrib_paint`, holds sparse painted values (points, primitives,
+    edge groups); the viewer's Paint mode (depth raster + brush in the page, one edit per stroke), the Quick Assign panel and spreadsheet cells all
+    write it, and the view colours by the attribute. Vertex (corner) painting is left out (the preview has no corner numbering); edges are edge groups.
 
 Closest-point and ray queries on triangle grids have numba kernels (`nodes/_kernels.py` `grid_closest`, `grid_intersect`;
 remesh of a 4,800-triangle sphere 17 s -> 3.5 s). Surfaces from points and curves: `delaunay` (SciPy or a pure-Python

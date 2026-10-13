@@ -5,14 +5,16 @@ window.MiniHouPreview = (() => {
   const VS = `#version 300 es
   in vec3 aPos; in vec3 aCol;
   uniform mat4 uMV, uP; uniform float uPointSize, uBias;
-  out vec3 vView; out vec3 vCol;
-  void main() { vec4 v = uMV * vec4(aPos, 1.0); vView = v.xyz; vCol = aCol; gl_Position = uP * v;
+  out vec3 vView; out vec3 vCol; out vec3 vWorld;
+  void main() { vec4 v = uMV * vec4(aPos, 1.0); vView = v.xyz; vCol = aCol; vWorld = aPos; gl_Position = uP * v;
                 gl_Position.z -= uBias * gl_Position.w; gl_PointSize = uPointSize; }`;
   // selected edges: each edge is a quad that is widened in screen space, so selections read as thick lines
   const VS_EDGE = `#version 300 es
   in vec3 aA; in vec3 aB; in float aT; in float aS;
   uniform mat4 uMV, uP; uniform vec2 uViewport; uniform float uWidth, uBias;
+  out vec3 vWorld;
   void main() {
+    vWorld = mix(aA, aB, aT);
     vec4 ca = uP * uMV * vec4(aA, 1.0), cb = uP * uMV * vec4(aB, 1.0);
     vec2 d = (cb.xy / max(cb.w, 1e-4) - ca.xy / max(ca.w, 1e-4)) * uViewport;
     float l = length(d); d = l > 1e-6 ? d / l : vec2(1.0, 0.0);
@@ -21,14 +23,19 @@ window.MiniHouPreview = (() => {
     c.z -= uBias * c.w;
     gl_Position = c;
   }`;
+  // The section plane (a cut through the scene): fragments on the far side of it are not drawn. Every program that draws geometry shares this.
+  const CLIP_DECL = "in vec3 vWorld; uniform vec4 uClip; uniform float uClipOn;";
+  const CLIP_TEST = "if (uClipOn > 0.5 && dot(vWorld, uClip.xyz) > uClip.w) discard;";
   const FS_COLOR = `#version 300 es
   precision highp float;
+  ${CLIP_DECL}
   uniform vec4 uColor; out vec4 o;
-  void main() { o = uColor; }`;
+  void main() { ${CLIP_TEST} o = uColor; }`;
   const FS_MESH = `#version 300 es
   precision highp float;
-  in vec3 vView; in vec3 vCol; uniform vec3 uBase; uniform float uUseCol, uLighting; out vec4 o;
+  in vec3 vView; in vec3 vCol; ${CLIP_DECL} uniform vec3 uBase; uniform float uUseCol, uLighting; out vec4 o;
   void main() {
+    ${CLIP_TEST}
     vec3 n = normalize(cross(dFdx(vView), dFdy(vView)));
     float d = max(n.z, 0.0);                                    // headlight: view space looks down -Z, n faces the viewer
     vec3 base = mix(uBase, vCol, uUseCol);
@@ -38,8 +45,26 @@ window.MiniHouPreview = (() => {
   }`;
   const FS_FLAT = `#version 300 es
   precision highp float;
-  in vec3 vView; in vec3 vCol; uniform vec3 uBase; uniform float uUseCol; uniform float uAlpha; out vec4 o;
-  void main() { o = vec4(mix(uBase, vCol, uUseCol), uAlpha); }`;
+  in vec3 vView; in vec3 vCol; ${CLIP_DECL} uniform vec3 uBase; uniform float uUseCol; uniform float uAlpha; out vec4 o;
+  void main() { ${CLIP_TEST} o = vec4(mix(uBase, vCol, uUseCol), uAlpha); }`;
+
+  // Instances drawn as impostors: one transform per instance (three rows of a 3x4 matrix) on shared shape meshes. Two-sided: a mirrored instance flips its winding.
+  const VS_INST = `#version 300 es
+  in vec3 aPos; in vec4 aR0; in vec4 aR1; in vec4 aR2; in vec3 aCol;
+  uniform mat4 uMV, uP;
+  out vec3 vView; out vec3 vCol; out vec3 vWorld;
+  void main() { vec4 p = vec4(aPos, 1.0); vec3 w = vec3(dot(aR0, p), dot(aR1, p), dot(aR2, p));
+                vec4 v = uMV * vec4(w, 1.0); vView = v.xyz; vCol = aCol; vWorld = w; gl_Position = uP * v; }`;
+  const FS_INST = `#version 300 es
+  precision highp float;
+  in vec3 vView; in vec3 vCol; ${CLIP_DECL} uniform vec3 uBase; uniform float uUseCol, uLighting; out vec4 o;
+  void main() {
+    ${CLIP_TEST}
+    vec3 n = normalize(cross(dFdx(vView), dFdy(vView)));
+    float d = abs(n.z);
+    vec3 base = mix(uBase, vCol, uUseCol);
+    o = vec4(base * (0.28 + 0.72 * d * uLighting) + vec3(0.10) * pow(1.0 - d, 3.0), 1.0);
+  }`;
 
   // Infinite Z-up construction plane, drawn as a background so it never hides geometry.
   const VS_GRID = `#version 300 es
@@ -127,14 +152,16 @@ window.MiniHouPreview = (() => {
       for (const n of uniforms) u[n] = gl.getUniformLocation(p, n);
       return { p, u };
     };
-    const MESH_U = ["uMV", "uP", "uPointSize", "uBase", "uUseCol", "uAlpha", "uBias", "uLighting"];
-    let mesh, flat, edgeProg, colorProg, gridProg;
+    const CLIP_U = ["uClip", "uClipOn"];
+    const MESH_U = ["uMV", "uP", "uPointSize", "uBase", "uUseCol", "uAlpha", "uBias", "uLighting", ...CLIP_U];
+    let mesh, flat, edgeProg, colorProg, gridProg, instProg;
     try {
       gridProg = prog(VS_GRID, FS_GRID, [], ["uMV", "uP", "uEye", "uTarget", "uSpacing", "uRange", "uOpacity", "uAxes"]);
       mesh = prog(VS, FS_MESH, ["aPos", "aCol"], MESH_U);
       flat = prog(VS, FS_FLAT, ["aPos", "aCol"], MESH_U);
-      edgeProg = prog(VS_EDGE, FS_COLOR, ["aA", "aB", "aT", "aS"], ["uMV", "uP", "uViewport", "uWidth", "uBias", "uColor"]);
-      colorProg = prog(VS, FS_COLOR, ["aPos", "aCol"], ["uMV", "uP", "uPointSize", "uBias", "uColor"]);
+      edgeProg = prog(VS_EDGE, FS_COLOR, ["aA", "aB", "aT", "aS"], ["uMV", "uP", "uViewport", "uWidth", "uBias", "uColor", ...CLIP_U]);
+      colorProg = prog(VS, FS_COLOR, ["aPos", "aCol"], ["uMV", "uP", "uPointSize", "uBias", "uColor", ...CLIP_U]);
+      instProg = prog(VS_INST, FS_INST, ["aPos", "aR0", "aR1", "aR2", "aCol"], ["uMV", "uP", "uBase", "uUseCol", "uLighting", ...CLIP_U]);
     } catch (e) { if (onMessage) onMessage("3-D preview unavailable: " + e.message); api.ok = false; return api; }
 
     const vao = gl.createVertexArray(), posBuf = gl.createBuffer(), colBuf = gl.createBuffer();
@@ -170,20 +197,118 @@ window.MiniHouPreview = (() => {
 
     const view = { yaw: -0.6, pitch: 0.45, dist: 5, target: [0, 0, 0], ortho: false };
     const PITCH_MAX = 1.5707, FOV = Math.PI / 4, ORTHO_FOV = 0.03;     // "orthographic" is a very narrow lens far away: the same maths, so picking and handles keep working
-    const opt = { navigation: "blender", orbitDepth: true, shaded: true, edges: true, points: false, normals: false, grid: true, background: "#212429", gridOpacity: 1, axes: true, lighting: 1, pointSize: 4, gridSpacing: 0 };
+    const opt = { navigation: "blender", orbitDepth: true, shaded: true, edges: true, points: false, normals: false, grid: true, background: "#212429", gridOpacity: 1, axes: true, lighting: 1, pointSize: 4, gridSpacing: 0,
+      instBias: 1, instTris: 1500000,
+      clipNear: 0, clipFar: 0,                                       // camera clip distances (0 = automatic from the scene's size)
+      section: { on: false, axis: 2, offset: 0, flip: false },       // a cutting plane: what lies beyond it is hidden (and cannot be picked or painted)
+      cull: true, cullPx: 0,                                         // skip the runs of triangles outside the view (and, if cullPx > 0, ones smaller than that on screen)
+      navQuality: "full" };                                          // full | balanced | fast: draw cheaper while the camera moves                              // impostors: > 1 keeps detail to smaller instances; the most triangles all instances may draw together
     let data = { npoints: 0, ntris: 0, nedges: 0, hasCd: false, bounds: [[-1, -1, -1], [1, 1, 1]] };
     let raw = null;                                                  // the geometry's typed arrays, for picking
     let raf = 0;
 
+    // ---------------------------------------------------------------- an attribute shown as colour (the painted one)
+    // attrView = {domain: point|prim|edge, comps, values (Float32Array), min, max, ramp: heat|gray}. Points reuse the colour buffer, primitives
+    // draw from an unwelded copy of the triangles (a point is shared by faces, a primitive's colour is not), edges are an overlay.
+    let attrView = null, cd0 = null, primCount = 0, aedCount = 0, ptCol = null, primColArr = null, primTriIdx = null;
+    const primVao = gl.createVertexArray(), primPos = gl.createBuffer(), primCol = gl.createBuffer();
+    gl.bindVertexArray(primVao); gl.bindBuffer(gl.ARRAY_BUFFER, primPos); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, primCol); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0); gl.bindVertexArray(null);
+    const aedVao = gl.createVertexArray(), aedBuf = gl.createBuffer(), aedIdx = gl.createBuffer();
+    gl.bindVertexArray(aedVao); gl.bindBuffer(gl.ARRAY_BUFFER, aedBuf);
+    for (const [loc, n, off] of [[0, 3, 0], [1, 3, 12], [2, 1, 24], [3, 1, 28]]) { gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, n, gl.FLOAT, false, 32, off); }
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, aedIdx); gl.bindVertexArray(null);
+    const HEAT = [[0.12, 0.2, 0.75], [0.1, 0.75, 0.85], [0.2, 0.8, 0.25], [0.95, 0.85, 0.15], [0.9, 0.2, 0.15]];
+    function colourOf(a, i, out, o) {                                    // the colour of element i of the attribute, into out[o..o+2]
+      const v = a.values, nc = a.comps;
+      if (nc >= 3) { out[o] = Math.min(1, Math.max(0, v[3 * i])); out[o + 1] = Math.min(1, Math.max(0, v[3 * i + 1])); out[o + 2] = Math.min(1, Math.max(0, v[3 * i + 2])); return; }
+      const span = a.max - a.min, t = span > 0 ? Math.min(1, Math.max(0, (v[nc * i] - a.min) / span)) : 0;
+      if (a.ramp === "gray") { out[o] = out[o + 1] = out[o + 2] = t; return; }
+      const f = t * (HEAT.length - 1), k = Math.min(HEAT.length - 2, Math.floor(f)), u = f - k;
+      for (let c = 0; c < 3; c++) out[o + c] = HEAT[k][c] * (1 - u) + HEAT[k + 1][c] * u;
+    }
+    function recolour() {
+      const a = attrView;
+      if (!a || !raw) return;
+      if (a.domain === "point") {
+        const n = data.npoints, col = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) colourOf(a, i, col, 3 * i);
+        gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, col, gl.DYNAMIC_DRAW); data.hasCd = true; ptCol = col;
+      } else if (a.domain === "prim") {
+        const T = raw.tri, TP = raw.triPrim, nt = T.length / 3;
+        if (primCount !== nt * 3) {                                       // the unwelded positions, once per geometry
+          const pos = new Float32Array(nt * 9);
+          for (let t = 0; t < nt; t++) for (let c = 0; c < 3; c++) { const v = T[3 * t + c] * 3; pos.set([raw.P[v], raw.P[v + 1], raw.P[v + 2]], 9 * t + 3 * c); }
+          gl.bindBuffer(gl.ARRAY_BUFFER, primPos); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW); primCount = nt * 3;
+        }
+        const col = new Float32Array(nt * 9), tmp = [0, 0, 0];
+        for (let t = 0; t < nt; t++) { colourOf(a, TP[t], tmp, 0); for (let c = 0; c < 3; c++) col.set(tmp, 9 * t + 3 * c); }
+        gl.bindBuffer(gl.ARRAY_BUFFER, primCol); gl.bufferData(gl.ARRAY_BUFFER, col, gl.DYNAMIC_DRAW); primColArr = col;
+        if (!primTriIdx || primTriIdx.raw !== raw) {                         // which triangles each primitive owns, for touch-ups
+          let np = 0; for (let t = 0; t < nt; t++) if (TP[t] >= np) np = TP[t] + 1;
+          const start = new Int32Array(np + 1), items = new Int32Array(nt);
+          for (let t = 0; t < nt; t++) start[TP[t] + 1]++;
+          for (let f = 0; f < np; f++) start[f + 1] += start[f];
+          const fill = start.slice(0, np);
+          for (let t = 0; t < nt; t++) items[fill[TP[t]]++] = t;
+          primTriIdx = { raw, start, items, np };
+        }
+      } else if (a.domain === "edge") {
+        const E = raw.edge, P = raw.P, m = [];                            // the edges that are in the group (one colour: the overlay has no per-edge colour)
+        for (let k = 0; k < E.length / 2; k++) if (k < a.values.length / a.comps && a.values[a.comps * k] !== 0) m.push(k);
+        const verts = new Float32Array(m.length * 32), idx = new Uint32Array(m.length * 6);
+        m.forEach((k, e) => {
+          const A = E[2 * k] * 3, B = E[2 * k + 1] * 3;
+          [[0, -1], [0, 1], [1, 1], [1, -1]].forEach(([t, side], j) => verts.set([P[A], P[A + 1], P[A + 2], P[B], P[B + 1], P[B + 2], t, side], (e * 4 + j) * 8));
+          idx.set([e * 4, e * 4 + 1, e * 4 + 2, e * 4, e * 4 + 2, e * 4 + 3], e * 6);
+        });
+        gl.bindBuffer(gl.ARRAY_BUFFER, aedBuf); gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, aedIdx); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.DYNAMIC_DRAW);
+        aedCount = idx.length;
+      }
+      schedule();
+    }
+    function recolourTouched(ids) {                                       // after a dab: only the elements it changed, not the whole buffer
+      const a = attrView;
+      if (!a || !raw) return;
+      if (a.domain === "point" && ptCol && ptCol.length === data.npoints * 3) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+        for (const i of ids) { colourOf(a, i, ptCol, 3 * i); gl.bufferSubData(gl.ARRAY_BUFFER, i * 12, ptCol, 3 * i, 3); }
+      } else if (a.domain === "prim" && primColArr && primTriIdx && primTriIdx.raw === raw && primCount === data.ntris * 3) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, primCol);
+        const tmp = [0, 0, 0];
+        for (const f of ids) {
+          if (f >= primTriIdx.np) continue;
+          colourOf(a, f, tmp, 0);
+          for (let j = primTriIdx.start[f]; j < primTriIdx.start[f + 1]; j++) {
+            const t = primTriIdx.items[j];
+            for (let c = 0; c < 3; c++) primColArr.set(tmp, 9 * t + 3 * c);
+            gl.bufferSubData(gl.ARRAY_BUFFER, t * 36, primColArr, 9 * t, 9);
+          }
+        }
+      } else { recolour(); return; }
+      schedule();
+    }
+    function setAttrView(v) {
+      const was = attrView;
+      attrView = v || null;
+      if (was && was.domain === "point" && !attrView) {                    // back to the geometry's own colours
+        if (cd0) { gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, cd0, gl.STATIC_DRAW); }
+        data.hasCd = !!cd0;
+      }
+      if (was && was.domain === "edge" && !(attrView && attrView.domain === "edge")) aedCount = 0;
+      if (attrView) recolour(); else schedule();
+    }
     function upload(head, arrays) {
       gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, arrays.P, gl.STATIC_DRAW);
-      data.hasCd = !!arrays.Cd;
+      data.hasCd = !!arrays.Cd; cd0 = arrays.Cd || null; attrView = null; primCount = 0; aedCount = 0;
       if (arrays.Cd) { gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, arrays.Cd, gl.STATIC_DRAW); }
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arrays.tri, gl.STATIC_DRAW);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, edgeBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arrays.edge, gl.STATIC_DRAW);
       data.npoints = arrays.P.length / 3; data.ntris = arrays.tri.length / 3; data.nedges = arrays.edge.length / 2;
       data.bounds = head.bounds; nrmDirty = true;
-      raw = { P: arrays.P, tri: arrays.tri, edge: arrays.edge, triPrim: arrays.tri_prim || new Uint32Array(arrays.tri.length / 3) };
+      uploadInstances(head, arrays);
+      raw = { P: arrays.P, tri: arrays.tri, edge: arrays.edge, triPrim: arrays.tri_prim || new Uint32Array(arrays.tri.length / 3), chunks: arrays.chunks || null };
       Object.assign(api, { tris: data.ntris, edges: data.nedges, points: data.npoints });
     }
     function frameAll() {
@@ -197,8 +322,8 @@ window.MiniHouPreview = (() => {
       const aspect = Math.min(1, Math.max(canvas.clientWidth, 1) / Math.max(canvas.clientHeight, 1));
       return r / (Math.tan(Math.PI / 8) * aspect) * slack;
     }
-    function resize() {
-      const dpr = window.devicePixelRatio || 1, w = Math.max(1, Math.round(canvas.clientWidth * dpr)), h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+    function resize(scale) {
+      const dpr = (window.devicePixelRatio || 1) * (scale || 1), w = Math.max(1, Math.round(canvas.clientWidth * dpr)), h = Math.max(1, Math.round(canvas.clientHeight * dpr));
       if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     }
     function camera() {                                              // matrices for the current view; sizes in CSS pixels
@@ -206,8 +331,11 @@ window.MiniHouPreview = (() => {
       const fov = view.ortho ? ORTHO_FOV : FOV, D = view.dist * Math.tan(FOV / 2) / Math.tan(fov / 2);   // same apparent size either way
       const cp = Math.cos(view.pitch), eye = [view.target[0] + D * cp * Math.cos(view.yaw),
         view.target[1] + D * cp * Math.sin(view.yaw), view.target[2] + D * Math.sin(view.pitch)];
-      const w = Math.max(canvas.clientWidth, 1), h = Math.max(canvas.clientHeight, 1), near = view.ortho ? Math.max(D - view.dist - r * 4, D * 0.01) : Math.max(view.dist * 0.01, r * 1e-3);
-      return { MV: lookAt(eye, view.target, [0, 0, 1]), P: perspective(fov, w / h, near, Math.max(D + r * 4 + (view.ortho ? view.dist : 0), Math.hypot(...eye.map((v,i)=>v-(lo[i]+hi[i])/2))+r*4)), eye, w, h, near };
+      const w = Math.max(canvas.clientWidth, 1), h = Math.max(canvas.clientHeight, 1);
+      let near = view.ortho ? Math.max(D - view.dist - r * 4, D * 0.01) : Math.max(view.dist * 0.01, r * 1e-3);
+      let far = Math.max(D + r * 4 + (view.ortho ? view.dist : 0), Math.hypot(...eye.map((v,i)=>v-(lo[i]+hi[i])/2))+r*4);
+      if (!view.ortho) { if (opt.clipNear > 0) near = opt.clipNear; if (opt.clipFar > 0) far = opt.clipFar; far = Math.max(far, near * 1.01); }     // manual clip distances are measured from the camera
+      return { MV: lookAt(eye, view.target, [0, 0, 1]), P: perspective(fov, w / h, near, far), eye, w, h, near, far };
     }
 
     // ---------------------------------------------------------------- selection (points, edges, faces)
@@ -226,7 +354,7 @@ window.MiniHouPreview = (() => {
       return norm([dx * m[0] + dy * m[1] - m[2], dx * m[4] + dy * m[5] - m[6], dx * m[8] + dy * m[9] - m[10]]);
     }
     function raycast(o, d, tMax, anyHit) {                           // nearest triangle hit (Moller-Trumbore): {t, tri} or null
-      const P = raw.P, T = raw.tri;
+      const P = raw.P, T = raw.tri, cut = sectionPlane();
       let best = null, bt = tMax === undefined ? Infinity : tMax;
       for (let i = 0, n = T.length / 3; i < n; i++) {
         const a = T[3 * i] * 3, b = T[3 * i + 1] * 3, c = T[3 * i + 2] * 3;
@@ -242,7 +370,10 @@ window.MiniHouPreview = (() => {
         const v = (d[0] * qx + d[1] * qy + d[2] * qz) * inv;
         if (v < 0 || u + v > 1) continue;
         const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
-        if (t > 1e-9 && t < bt) { bt = t; best = { t, tri: i }; if (anyHit) return best; }
+        if (t > 1e-9 && t < bt) {
+          if (cut && cut.n[0] * (o[0] + d[0] * t) + cut.n[1] * (o[1] + d[1] * t) + cut.n[2] * (o[2] + d[2] * t) > cut.d) continue;     // the part beyond the section plane is not there
+          bt = t; best = { t, tri: i }; if (anyHit) return best;
+        }
       }
       return best;
     }
@@ -252,8 +383,9 @@ window.MiniHouPreview = (() => {
       return !raycast(cam.eye, [d[0] / L, d[1] / L, d[2] / L], L * (1 - 2e-3) - 1e-6, true);
     }
     function projectedPoints(cam) {
-      const n = raw.P.length / 3, out = new Float32Array(n * 3);
+      const n = raw.P.length / 3, out = new Float32Array(n * 3), cut = sectionPlane();
       for (let i = 0; i < n; i++) {
+        if (cut && cut.n[0] * raw.P[3 * i] + cut.n[1] * raw.P[3 * i + 1] + cut.n[2] * raw.P[3 * i + 2] > cut.d) { out[3 * i + 2] = -1; continue; }     // beyond the section plane: not selectable
         const s = toScreen(cam, raw.P[3 * i], raw.P[3 * i + 1], raw.P[3 * i + 2]);
         if (s) { out[3 * i] = s[0]; out[3 * i + 1] = s[1]; out[3 * i + 2] = s[2]; } else out[3 * i + 2] = -1;
       }
@@ -474,14 +606,206 @@ window.MiniHouPreview = (() => {
       gl.uniform1f(colorProg.u.uPointSize, 4);
     }
 
+    // ---------------------------------------------------------------- the section plane, and what is outside the view
+    // The plane keeps what satisfies dot(n, p) <= d. Anything beyond it is hidden by the shaders and cannot be picked or painted (isClipped).
+    function sectionPlane() {
+      const s = opt.section;
+      if (!s || !s.on) return null;
+      const n = [0, 0, 0]; n[s.axis] = s.flip ? -1 : 1;
+      return { n, d: s.flip ? -s.offset : s.offset };
+    }
+    function isClipped(x, y, z) { const p = sectionPlane(); return !!p && p.n[0] * x + p.n[1] * y + p.n[2] * z > p.d; }
+    function mat4mul(a, b) {                                                           // column-major a * b
+      const o = new Float32Array(16);
+      for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { let v = 0; for (let k = 0; k < 4; k++) v += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = v; }
+      return o;
+    }
+    function frustumPlanes(cam) {                                                      // [a, b, c, d] with a*x + b*y + c*z + d >= 0 inside: left, right, bottom, top, near, far (+ the section plane)
+      const m = mat4mul(cam.P, cam.MV), row = (i) => [m[i], m[4 + i], m[8 + i], m[12 + i]];
+      const r0 = row(0), r1 = row(1), r2 = row(2), r3 = row(3), add = (a, b, k) => a.map((v, i) => v + k * b[i]);
+      const planes = [add(r3, r0, 1), add(r3, r0, -1), add(r3, r1, 1), add(r3, r1, -1), add(r3, r2, 1), add(r3, r2, -1)];
+      const sp = sectionPlane();
+      if (sp) planes.push([-sp.n[0], -sp.n[1], -sp.n[2], sp.d]);
+      return planes;
+    }
+    function boxOutside(planes, t, o) {                                                // an axis-aligned box (min at t[o..o+2], max at t[o+3..o+5]) entirely outside one plane
+      for (const [a, b, c, d] of planes) {
+        const x = a > 0 ? t[o + 3] : t[o], y = b > 0 ? t[o + 4] : t[o + 1], z = c > 0 ? t[o + 5] : t[o + 2];
+        if (a * x + b * y + c * z + d < 0) return true;
+      }
+      return false;
+    }
+    const stats = { tris: 0, trisTotal: 0, chunks: 0, chunksDrawn: 0, drawMs: 0, moving: false, scale: 1, draws: 0 };
+    function triangleRuns(cam) {                                                       // [{first, n}] of the visible runs of triangles, or null = draw them all
+      const t = raw && raw.chunks;
+      if (!t || !opt.cull) return null;
+      const planes = frustumPlanes(cam), n = t.length / 8, runs = [];
+      let cur = null, drawn = 0;
+      const k = cam.P[5] * cam.h, m = cam.MV;
+      for (let c = 0; c < n; c++) {
+        const o = 8 * c + 2;
+        let skip = boxOutside(planes, t, o);
+        if (!skip && opt.cullPx > 0) {                                                 // too small on screen to matter
+          const cx = (t[o] + t[o + 3]) / 2, cy = (t[o + 1] + t[o + 4]) / 2, cz = (t[o + 2] + t[o + 5]) / 2, r = Math.hypot(t[o + 3] - t[o], t[o + 4] - t[o + 1], t[o + 5] - t[o + 2]) / 2;
+          const d = -(m[2] * cx + m[6] * cy + m[10] * cz + m[14]);
+          if (d > r && r * k / d < opt.cullPx) skip = true;
+        }
+        if (skip) continue;
+        const first = t[8 * c], cnt = t[8 * c + 1];
+        if (cur && cur.first + cur.n === first) cur.n += cnt; else runs.push(cur = { first, n: cnt });
+        drawn += cnt;
+      }
+      stats.chunks = n; stats.chunksDrawn = runs.reduce((a, r) => a + Math.ceil(r.n / 8192), 0); stats.tris = drawn;
+      return runs;
+    }
+
+    // ---------------------------------------------------------------- instances drawn as impostors (the engine sends each shape once at three levels
+    // of detail and a transform per instance: minihou/impostors.py). Each camera move picks a level per instance from its size on screen and
+    // keeps the total within a triangle budget; instances outside the view are not drawn at all.
+    const inst = { on: false, head: null, N: 0, M: null, proto: null, sph: null, col: null, px: null, vis: null, posBuf: gl.createBuffer(), idxBuf: gl.createBuffer(),
+      buckets: new Map(), dots: { vao: gl.createVertexArray(), buf: gl.createBuffer(), n: 0, data: null }, sig: null, last: 0, timer: 0,
+      stats: { count: 0, visible: 0, lod: [0, 0, 0, 0], tris: 0, budget: 0, scale: 1, updates: 0, ms: 0 } };
+    gl.bindVertexArray(inst.dots.vao); gl.bindBuffer(gl.ARRAY_BUFFER, inst.dots.buf); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0); gl.bindVertexArray(null);
+    const BOX_PX = 3, DOT_PX = 0.8, T0_PX = 70, T1_PX = 22;               // diameters, in pixels, where the levels change (before the bias and the budget)
+    function clearInstances() {
+      inst.on = false; inst.head = null; inst.N = 0; inst.M = inst.proto = inst.sph = inst.col = inst.px = inst.vis = null; inst.sig = null;
+      for (const b of inst.buckets.values()) { b.count = 0; }
+      inst.dots.n = 0; Object.assign(inst.stats, { count: 0, visible: 0, lod: [0, 0, 0, 0], tris: 0 });
+    }
+    function uploadInstances(head, arrays) {
+      clearInstances();
+      const h = head.instances;
+      if (!h || !arrays.inst_M || !h.count) return;
+      inst.on = true; inst.head = h; inst.N = h.count; inst.M = arrays.inst_M; inst.proto = arrays.inst_proto; inst.sph = arrays.inst_sph; inst.col = arrays.inst_col || null;
+      inst.px = new Float32Array(inst.N); inst.vis = new Uint8Array(inst.N);
+      gl.bindBuffer(gl.ARRAY_BUFFER, inst.posBuf); gl.bufferData(gl.ARRAY_BUFFER, arrays.ip_P, gl.STATIC_DRAW);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, inst.idxBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arrays.ip_tri, gl.STATIC_DRAW);
+      for (const b of inst.buckets.values()) { gl.deleteVertexArray(b.vao); gl.deleteBuffer(b.buf); }
+      inst.buckets.clear();
+      inst.stats.count = inst.N;
+    }
+    function bucketFor(m) {
+      let b = inst.buckets.get(m);
+      if (b) return b;
+      const vao = gl.createVertexArray(), buf = gl.createBuffer(), stride = 60;
+      gl.bindVertexArray(vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, inst.posBuf); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      for (const [loc, n, off] of [[1, 4, 0], [2, 4, 16], [3, 4, 32], [4, 3, 48]]) { gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, n, gl.FLOAT, false, stride, off); gl.vertexAttribDivisor(loc, 1); }
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, inst.idxBuf);
+      gl.bindVertexArray(null);
+      b = { vao, buf, count: 0, data: null };
+      inst.buckets.set(m, b);
+      return b;
+    }
+    function updateInstances(cam) {
+      const t0 = performance.now(), h = inst.head, N = inst.N, sph = inst.sph, m = cam.MV, P = cam.P, px = inst.px, vis = inst.vis;
+      const k = P[5] * cam.h, kx = P[0], ky = P[5], near = cam.near, protos = h.protos, proto = inst.proto, sp = sectionPlane();
+      let nvis = 0;
+      for (let i = 0; i < N; i++) {
+        const cx = sph[4 * i], cy = sph[4 * i + 1], cz = sph[4 * i + 2], r = sph[4 * i + 3];
+        const vx = m[0] * cx + m[4] * cy + m[8] * cz + m[12], vy = m[1] * cx + m[5] * cy + m[9] * cz + m[13], d = -(m[2] * cx + m[6] * cy + m[10] * cz + m[14]);
+        if (d + r < near || Math.abs(vx) * kx > d + r * kx * 1.5 || Math.abs(vy) * ky > d + r * ky * 1.5) { vis[i] = 0; continue; }      // behind or outside the view
+        if (sp && sp.n[0] * cx + sp.n[1] * cy + sp.n[2] * cz - sp.d > r) { vis[i] = 0; continue; }                                    // wholly beyond the section plane
+        vis[i] = 1; nvis++;
+        px[i] = r * k / Math.max(d, 1e-9);                                                  // the instance's diameter on screen, in CSS pixels
+      }
+      // thresholds grow (scale) until the triangles of every visible instance fit the budget
+      const bias = Math.max(0.05, opt.instBias || 1), budget = Math.max(1000, opt.instTris || 1500000);
+      let scale = 1, tris = 0;
+      const lodOf = (p, f) => (p * bias >= T0_PX * f ? 0 : p * bias >= T1_PX * f ? 1 : p * bias >= BOX_PX * f ? 2 : p * bias >= DOT_PX ? 3 : 4);
+      for (let pass = 0; pass < 14; pass++) {
+        tris = 0;
+        for (let i = 0; i < N; i++) { if (!vis[i]) continue; const c = lodOf(px[i], scale); if (c < 3) tris += protos[proto[i]].tris[c]; }
+        if (tris <= budget) break;
+        scale *= 1.6;
+      }
+      const counts = new Map(), lod = [0, 0, 0, 0];
+      for (let i = 0; i < N; i++) {
+        if (!vis[i]) continue;
+        const c = lodOf(px[i], scale);
+        if (c === 4) continue;
+        lod[c]++;
+        if (c < 3) { const mesh = protos[proto[i]].lods[c]; counts.set(mesh, (counts.get(mesh) || 0) + 1); }
+      }
+      const fill = new Map(), M = inst.M, col = inst.col;
+      for (const [mesh, n] of counts) {
+        const b = bucketFor(mesh);
+        if (!b.data || b.data.length < n * 15) b.data = new Float32Array(Math.max(n * 15, 15 * 64));
+        b.count = 0; fill.set(mesh, b);
+      }
+      for (const [mesh, b] of inst.buckets) if (!fill.has(mesh)) b.count = 0;
+      let nd = 0;
+      if (!inst.dots.data || inst.dots.data.length < lod[3] * 3) inst.dots.data = new Float32Array(Math.max(lod[3] * 3, 3 * 64));
+      for (let i = 0; i < N; i++) {
+        if (!vis[i]) continue;
+        const c = lodOf(px[i], scale);
+        if (c === 4) continue;
+        if (c === 3) { inst.dots.data[3 * nd] = sph[4 * i]; inst.dots.data[3 * nd + 1] = sph[4 * i + 1]; inst.dots.data[3 * nd + 2] = sph[4 * i + 2]; nd++; continue; }
+        const b = fill.get(protos[proto[i]].lods[c]), o = b.count * 15;
+        for (let j = 0; j < 12; j++) b.data[o + j] = M[12 * i + j];
+        if (col) { b.data[o + 12] = col[3 * i]; b.data[o + 13] = col[3 * i + 1]; b.data[o + 14] = col[3 * i + 2]; } else { b.data[o + 12] = b.data[o + 13] = b.data[o + 14] = 0; }
+        b.count++;
+      }
+      for (const b of fill.values()) { gl.bindBuffer(gl.ARRAY_BUFFER, b.buf); gl.bufferData(gl.ARRAY_BUFFER, b.data.subarray(0, b.count * 15), gl.DYNAMIC_DRAW); }
+      inst.dots.n = nd;
+      if (nd) { gl.bindBuffer(gl.ARRAY_BUFFER, inst.dots.buf); gl.bufferData(gl.ARRAY_BUFFER, inst.dots.data.subarray(0, nd * 3), gl.DYNAMIC_DRAW); }
+      Object.assign(inst.stats, { count: N, visible: nvis, lod, tris, budget, scale, updates: inst.stats.updates + 1, ms: Math.round(performance.now() - t0) });
+    }
+    function drawInstances(cam) {
+      if (!inst.on) return;
+      const sig = [...cam.MV, ...cam.P, opt.instBias, opt.instTris, cam.w, cam.h, JSON.stringify(opt.section)].join(",");
+      if (sig !== inst.sig) {
+        const now = performance.now();
+        if (inst.N > 150000 && inst.sig !== null && now - inst.last < 70) { if (!inst.timer) inst.timer = setTimeout(() => { inst.timer = 0; schedule(); }, 80); }   // a huge set refreshes a few times a second while the camera moves
+        else { updateInstances(cam); inst.sig = sig; inst.last = performance.now(); }
+      }
+      gl.enable(gl.DEPTH_TEST);
+      gl.useProgram(instProg.p);
+      gl.uniformMatrix4fv(instProg.u.uMV, false, cam.MV); gl.uniformMatrix4fv(instProg.u.uP, false, cam.P);
+      gl.uniform3fv(instProg.u.uBase, [0.62, 0.68, 0.76]); gl.uniform1f(instProg.u.uUseCol, inst.col ? 1 : 0); gl.uniform1f(instProg.u.uLighting, opt.lighting);
+      const meshes = inst.head.meshes;
+      for (const [mesh, b] of inst.buckets) {
+        if (!b.count) continue;
+        gl.bindVertexArray(b.vao);
+        gl.drawElementsInstanced(gl.TRIANGLES, meshes[mesh].t_n * 3, gl.UNSIGNED_INT, meshes[mesh].t_off * 12, b.count);
+      }
+      if (inst.dots.n) {
+        gl.useProgram(colorProg.p); gl.bindVertexArray(inst.dots.vao);
+        gl.uniformMatrix4fv(colorProg.u.uMV, false, cam.MV); gl.uniformMatrix4fv(colorProg.u.uP, false, cam.P);
+        gl.uniform1f(colorProg.u.uBias, 0); gl.uniform1f(colorProg.u.uPointSize, 2); gl.uniform4f(colorProg.u.uColor, 0.62, 0.68, 0.76, 1);
+        gl.drawArrays(gl.POINTS, 0, inst.dots.n);
+      }
+      gl.bindVertexArray(null);
+    }
+    function instanceStats() { return { ...inst.stats, lod: inst.stats.lod.slice(), on: inst.on, kind: inst.head ? inst.head.kind : null, approximate: !!(inst.head && inst.head.approximate),
+      replaces: !!(inst.head && inst.head.replaces), total: inst.head ? inst.head.total : 0, fullTris: inst.head ? inst.head.full_tris : 0 }; }
+
+    const NAV_SCALE = { full: 1, balanced: 0.6, fast: 0.45 };                 // the share of the resolution drawn while the camera moves
+    let lastCam = null, settleTimer = 0;
+    function camMoved(cam) {                                                // did the camera change since the last frame?
+      const now = new Float32Array(32); now.set(cam.MV, 0); now.set(cam.P, 16);
+      let moved = false;
+      if (lastCam) for (let i = 0; i < 32; i++) if (lastCam[i] !== now[i]) { moved = true; break; }
+      lastCam = now;
+      return moved;
+    }
     function draw() {
       raf = 0;
-      resize();
+      const t0 = performance.now();
+      const cam0 = camera(), moving = camMoved(cam0), navScale = moving ? (NAV_SCALE[opt.navQuality] || 1) : 1, skipEdges = moving && opt.navQuality === "fast";
+      if (moving && opt.navQuality !== "full") { clearTimeout(settleTimer); settleTimer = setTimeout(() => { settleTimer = 0; schedule(); }, 200); }     // one full-quality frame once it stops
+      resize(navScale);
+      Object.assign(stats, { moving, scale: navScale, draws: stats.draws + 1 });
       gl.viewport(0, 0, canvas.width, canvas.height);
       const bg = opt.background.match(/[0-9a-f]{2}/gi).map(x => parseInt(x, 16) / 255);
       gl.clearColor(...bg, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       api.draws++;
-      const cam = camera(), MV = cam.MV, P = cam.P;
+      const cam = cam0, MV = cam.MV, P = cam.P;
+      const sp = sectionPlane();
+      for (const pr of [mesh, flat, colorProg, edgeProg, instProg]) {                          // the section plane, for every program that draws geometry
+        gl.useProgram(pr.p); gl.uniform4f(pr.u.uClip, sp ? sp.n[0] : 0, sp ? sp.n[1] : 0, sp ? sp.n[2] : 0, sp ? sp.d : 0); gl.uniform1f(pr.u.uClipOn, sp ? 1 : 0);
+      }
       if (opt.grid) {
         gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
         gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -496,7 +820,7 @@ window.MiniHouPreview = (() => {
       }
       renderGizmo(cam);
       if (api.onOverlayDraw) api.onOverlayDraw();
-      if (!data.npoints && !templateRaw) return;
+      if (!data.npoints && !templateRaw && !inst.on) return;
       gl.enable(gl.DEPTH_TEST);
       gl.bindVertexArray(vao);
       const setup = (pr, base, useCol, alpha) => {
@@ -509,23 +833,36 @@ window.MiniHouPreview = (() => {
         if (data.hasCd) gl.enableVertexAttribArray(1); else { gl.disableVertexAttribArray(1); gl.vertexAttrib3f(1, 1, 1, 1); }
       };
       if (opt.shaded && data.ntris) {
+        const primView = attrView && attrView.domain === "prim" && primCount === data.ntris * 3;
+        if (primView) { gl.bindVertexArray(primVao); data.hasCd = true; }
         setup(mesh, [0.62, 0.68, 0.76], true);
         gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1, 1);
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triBuf); gl.drawElements(gl.TRIANGLES, data.ntris * 3, gl.UNSIGNED_INT, 0);
+        const runs = triangleRuns(cam);                                                       // null = every triangle (no chunk table, or culling is off)
+        stats.trisTotal = data.ntris;
+        if (!runs) { stats.tris = data.ntris; stats.chunks = stats.chunksDrawn = 0; }
+        if (primView) {
+          if (runs) for (const r of runs) gl.drawArrays(gl.TRIANGLES, r.first * 3, r.n * 3); else gl.drawArrays(gl.TRIANGLES, 0, primCount);
+          data.hasCd = !!cd0; gl.bindVertexArray(vao);
+        } else {
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triBuf);
+          if (runs) for (const r of runs) gl.drawElements(gl.TRIANGLES, r.n * 3, gl.UNSIGNED_INT, r.first * 12); else gl.drawElements(gl.TRIANGLES, data.ntris * 3, gl.UNSIGNED_INT, 0);
+        }
         gl.disable(gl.POLYGON_OFFSET_FILL);
       }
-      if ((opt.edges || sel.mode === "edge") && data.nedges) {
+      if ((opt.edges || sel.mode === "edge") && data.nedges && !skipEdges) {
         const over = opt.shaded && data.ntris;                  // over a shaded surface the edges are soft dark lines
         setup(flat, over ? [0.04, 0.05, 0.06] : [0.75, 0.82, 0.9], false, over ? (sel.mode === "edge" ? 0.6 : 0.35) : 1);
         gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, edgeBuf); gl.drawElements(gl.LINES, data.nedges * 2, gl.UNSIGNED_INT, 0);
         gl.disable(gl.BLEND);
       }
-      if (opt.points || sel.mode === "point" || (!data.ntris && !data.nedges)) {
+      if (opt.points || sel.mode === "point" || (!data.ntris && !data.nedges && !inst.on)) {
         setup(flat, sel.mode === "point" ? [0.9, 0.93, 0.98] : [0.95, 0.75, 0.3], true);
         gl.uniform1f(flat.u.uBias, 0.0004);
         gl.drawArrays(gl.POINTS, 0, data.npoints);
       }
+      drawInstances(cam);
+      gl.bindVertexArray(vao);
       if(templateRaw){
         gl.bindVertexArray(templateVao);setup(flat,[0.72,0.38,0.52],false,0.8);
         gl.uniform1f(flat.u.uBias,0.0003);
@@ -533,10 +870,20 @@ window.MiniHouPreview = (() => {
         if(!templateRaw.edge.length)gl.drawArrays(gl.POINTS,0,templateRaw.P.length/3);
         gl.bindVertexArray(vao);
       }
+      if (aedCount) {
+        gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.useProgram(edgeProg.p); gl.bindVertexArray(aedVao);
+        gl.uniformMatrix4fv(edgeProg.u.uMV, false, cam.MV); gl.uniformMatrix4fv(edgeProg.u.uP, false, cam.P);
+        gl.uniform2f(edgeProg.u.uViewport, canvas.clientWidth, canvas.clientHeight); gl.uniform1f(edgeProg.u.uWidth, 3.2);
+        gl.uniform1f(edgeProg.u.uBias, 0.0015); gl.uniform4f(edgeProg.u.uColor, 0.95, 0.25, 0.75, 1);
+        gl.drawElements(gl.TRIANGLES, aedCount, gl.UNSIGNED_INT, 0);
+        gl.disable(gl.BLEND); gl.bindVertexArray(vao);
+      }
       drawSelection(cam);
       if (opt.normals) { gl.bindVertexArray(null); drawNormals(cam); }
       gl.bindVertexArray(null);
       renderHandles(cam);
+      stats.drawMs = Math.round((performance.now() - t0) * 10) / 10;
     }
     function schedule() { if (!raf) raf = requestAnimationFrame(draw); }
 
@@ -1021,6 +1368,16 @@ window.MiniHouPreview = (() => {
       geometry:()=>raw, quadStrip,
       project: p=>toScreen(camera(),...p),
       isDragging:()=>!!handleDrag||endingDrag,
+      selectElements(domain, ids, how) {                                                // the spreadsheet's row click: select these elements (points, primitives or edge numbers)
+        if (!raw) return false;
+        const mode = domain === "point" ? "point" : domain === "edge" ? "edge" : "face";
+        if (sel.mode !== mode) api.setMode(mode);
+        const found = domain === "point" ? { points: ids } : domain === "prim" ? { faces: ids } : { edges: ids.filter((k) => 2 * k + 1 < raw.edge.length).map((k) => [raw.edge[2 * k], raw.edge[2 * k + 1]]) };
+        change(found, how || "replace");
+        return true;
+      },
+      camera: () => camera(), rayAt: (sx, sy) => rayAt(camera(), sx, sy), setAttrView, attrDirty: recolour, attrTouch: recolourTouched, attrViewInfo: () => attrView,
+      edgeCount: () => data.nedges,
       view, opt, onSelect: null, onHandle: null, onHandleStart: null,
       setHandles(list) { if (handleDrag) pendingHandles = list || []; else { handles = list || []; schedule(); } },
       handleTips() {                                                                    // for tests: where each handle's grab point is, in canvas pixels
@@ -1058,7 +1415,10 @@ window.MiniHouPreview = (() => {
         if (!same && (sel.point.size || sel.edge.size || sel.face.size)) change({}, "replace");   // other geometry: drop the selection
         else rebuildOverlay();
       },
-      clear() { templateRaw=null;api.templatePoints=0;api.selectableTemplates=[];handles = []; data.npoints = 0; raw = null; Object.assign(api, { tris: 0, edges: 0, points: 0 }); change({}, "replace"); schedule(); },
+      instanceStats, sectionPlane, isClipped,
+      setSection(o) { Object.assign(opt.section, o); schedule(); },
+      drawStats() { return { ...stats, instances: instanceStats() }; },
+      clear() { clearInstances(); templateRaw=null;api.templatePoints=0;api.selectableTemplates=[];handles = []; data.npoints = 0; raw = null; Object.assign(api, { tris: 0, edges: 0, points: 0 }); change({}, "replace"); schedule(); },
       frameAll, frameSelection, viewAxis, redraw: schedule, bounds: () => data.bounds,
       normalSegments() { if (nrmDirty) buildNormals(); return Array.from(nrmLines); },   // for tests: [cx, cy, cz, tx, ty, tz] per primitive
       setOrtho(on) { view.ortho = !!on; schedule(); return view.ortho; },

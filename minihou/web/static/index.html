@@ -133,7 +133,7 @@
       </div>
       <div class="pv-tools"><strong id="pv-state">View</strong>
         <select id="pv-follow" aria-label="Preview source"><option value="display">Display flag</option><option value="selection">Inspect selected node</option></select>
-        <span id="pv-selinfo" class="muted small"></span>
+        <span id="pv-selinfo" class="muted small"></span><button id="pv-sheet-btn" class="small" title="Geometry spreadsheet: every point, vertex, primitive, edge and detail attribute">Spreadsheet</button>
         <span class="spacer"></span>
         <span class="pv-nav" role="group" aria-label="View">
           <button data-view="front" title="Front (Numpad 1, Ctrl for back)">Front</button><button data-view="right" title="Right (Numpad 3, Ctrl for left)">Right</button><button data-view="top" title="Top (Numpad 7, Ctrl for bottom)">Top</button><select id="pv-view-extra" aria-label="More axis views"><option value="">More views…</option><option value="back">Back</option><option value="left">Left</option><option value="bottom">Bottom</option></select><button id="pv-ortho" title="Perspective / orthographic (Numpad 5)">Persp</button><button id="pv-walk" title="Fly navigation: Shift+` or hold right mouse. WASD, Q/E, wheel speed." aria-pressed="false">Walk / Fly</button><button id="pv-frame-all" title="Frame all geometry">All</button><button id="pv-frame" title="Frame the selection, or everything (Numpad . / Home / double-click the view)">⌂</button>
@@ -159,7 +159,7 @@
       <div class="pv-stage">
         <div class="pv-left-tools">
         <span class="pv-modes pv-tool-strip" role="group" aria-label="Selection mode">
-          <button data-mode="view" class="on" title="Orbit only (default)">View</button><button data-mode="point" title="Select points (1)">Pts</button><button data-mode="edge" title="Select edges (2)">Edges</button><button data-mode="face" title="Select faces (3)">Faces</button><button data-mode="piece" title="Select whole connected objects (4): drag the gizmo to move, rotate or scale them">Object</button>
+          <button data-mode="view" class="on" title="Orbit only (default)">View</button><button data-mode="point" title="Select points (1)">Pts</button><button data-mode="edge" title="Select edges (2)">Edges</button><button data-mode="face" title="Select faces (3)">Faces</button><button data-mode="piece" title="Select whole connected objects (4): drag the gizmo to move, rotate or scale them">Object</button><button id="pv-paint-btn" title="Paint an attribute onto points, faces or edges (5)">Paint</button><button id="pv-assign-btn" title="Quick assign: give the selection an attribute value">Assign</button>
         </span>
         <span id="pv-xform" class="pv-nav hidden" role="group" aria-label="Handle tool">
           <button data-tool="move" class="on" title="Move arrows (W)">Move</button><button data-tool="rotate" title="Rotation rings (E)">Rotate</button><button data-tool="scale" title="Scale handles (R)">Scale</button>
@@ -175,9 +175,11 @@
           <label class="small"><input type="checkbox" id="pv-points"> points</label>
           <label class="small" title="Show the ground grid and world axes"><input type="checkbox" id="pv-grid" checked> grid</label>
           <label class="small" title="Draw each face's normal (from its winding) as a line from its centre"><input type="checkbox" id="pv-normals"> normals</label>
+          <button id="pv-perf-btn" class="small" aria-haspopup="dialog" aria-expanded="false" title="Performance and view clipping for very large scenes: impostors for instances, display budget, culling, near/far clip, section plane">Perf ▾</button>
         </div>
         <button id="pv-hints-toggle" title="Show tool hints" aria-label="Show tool hints" aria-pressed="true">?</button>
       </div>
+      <div id="sheet" class="pv-sheet hidden" aria-label="Geometry spreadsheet"></div>
       <div id="pv-actions" class="pv-actions hidden"></div>
       <div id="pv-time" class="pv-time" role="group" aria-label="Timeline">
         <button id="tl-first" title="Go to the start frame (Shift+Left)" aria-label="Start">⏮</button>
@@ -264,6 +266,8 @@
 <script src="/static/preview.js"></script>
 <script src="/static/curve-tool.js"></script>
 <script src="/static/loop-tool.js"></script>
+<script src="/static/paint-tool.js"></script>
+<script src="/static/sheet.js"></script>
 <script src="/static/editor.js"></script>
 </body>
 </html>

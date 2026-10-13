@@ -8,7 +8,9 @@ The header has ``points``, ``prims``, ``tris``, ``edges``, ``bounds`` ([min, max
 ``{name, dtype, count, offset}`` (offset in bytes from the start of the data, every array 4-byte aligned). Arrays:
 ``P`` float32 (3 per point), ``tri`` uint32 (3 per triangle, point indices), ``edge`` uint32 (2 per edge), ``tri_prim`` uint32 (the
 primitive number of each triangle, for picking faces), ``Cd`` float32 (3 per point) when the geometry has point colours and
-``point_src`` uint32 (the original point each drawn point stands for) when the geometry was reduced. ``points``, ``prims`` are the
+``point_src`` uint32 (the original point each drawn point stands for) when the geometry was reduced, and ``chunks`` (float32, 8 per run of
+``CHUNK_TRIS`` triangles: first triangle, count, bounding box min xyz and max xyz; the triangles are then sorted so that runs are compact) from
+``CHUNK_MIN_TRIS`` triangles on. A header with ``instances`` carries impostors, see :mod:`minihou.impostors`. ``points``, ``prims`` are the
 real counts; ``tris`` / ``edges`` what is drawn. ``proxy`` says whether the drawing was reduced to fit the budget (``active``), from
 how many points / triangles (``points``, ``tris``) to how many (``shown_points``, ``shown_tris``).
 """
@@ -34,6 +36,8 @@ MAX_TRIS = 2_500_000
 MAX_EDGES = 5_000_000
 MAX_POINTS = 4_000_000
 EXACT_PRIMS = 100_000            # up to this many primitives, polygons with more than 3 corners are triangulated exactly (concave ones too)
+CHUNK_MIN_TRIS = 100_000         # from this many triangles on, they are sorted along a space-filling curve and sent with a chunk table
+CHUNK_TRIS = 8192                # triangles per chunk
 
 
 def _triangles(geo):
@@ -60,6 +64,34 @@ def _triangles(geo):
         return np.concatenate(parts), np.concatenate(owners)
     tri_v, owner = proxy.fan_triangles(geo)                         # a big mesh: fans (concave polygons may show a wrong diagonal)
     return vp[tri_v], owner.astype(np.int64)
+
+
+def _spread_bits(v: np.ndarray) -> np.ndarray:
+    v = (v | (v << 16)) & np.uint32(0x030000FF)
+    v = (v | (v << 8)) & np.uint32(0x0300F00F)
+    v = (v | (v << 4)) & np.uint32(0x030C30C3)
+    v = (v | (v << 2)) & np.uint32(0x09249249)
+    return v
+
+
+def chunk_triangles(P: np.ndarray, tri: np.ndarray, tri_prim: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(tri, tri_prim, table)``: the triangles sorted along a Morton curve of their centres, so triangles that are near each other are near
+    in the list too, and a table with one row per run of ``CHUNK_TRIS`` of them: first triangle, triangle count, bounding box min xyz, max xyz
+    (float32; the viewer skips the runs that are outside its view). The triangles are the same, only in another order."""
+    n = len(tri)
+    corners = P[tri.reshape(-1)].reshape(n, 3, 3)
+    c = corners.mean(axis=1)
+    lo, hi = c.min(axis=0), c.max(axis=0)
+    q = np.minimum(((c - lo) / np.maximum(hi - lo, 1e-12) * 1023.0).astype(np.uint32), np.uint32(1023))
+    code = _spread_bits(q[:, 0]) | (_spread_bits(q[:, 1]) << 1) | (_spread_bits(q[:, 2]) << 2)
+    order = np.argsort(code, kind="stable")
+    tri, tri_prim, corners = tri[order], tri_prim[order], corners[order]
+    starts = np.arange(0, n, CHUNK_TRIS)
+    counts = np.minimum(starts + CHUNK_TRIS, n) - starts
+    tmin = np.minimum.reduceat(corners.min(axis=1), starts, axis=0)
+    tmax = np.maximum.reduceat(corners.max(axis=1), starts, axis=0)
+    table = np.concatenate([starts[:, None], counts[:, None], tmin, tmax], axis=1).astype(np.float32)
+    return tri, tri_prim, table
 
 
 _MEMO: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()      # geometry -> {(full, tris): (header, arrays)}
@@ -94,7 +126,12 @@ def _arrays_for(geo, full: bool = False, tris: int = 0) -> Tuple[dict, Dict[str,
     from . import topo
     n0, tris0 = geo.npoints, proxy.triangle_count(geo)
     tri_cap = int(tris) if tris else (MAX_TRIS if full else DISPLAY_TRIS)
-    pt_cap = MAX_POINTS if full else DISPLAY_POINTS
+    if full:
+        pt_cap = MAX_POINTS
+    elif tris:
+        pt_cap = min(MAX_POINTS, max(DISPLAY_POINTS, 2 * int(tris)))          # a bigger triangle budget lets the points grow with it
+    else:
+        pt_cap = DISPLAY_POINTS
     red = proxy.decimate(geo, tri_cap, pt_cap)
     shown = red.geo
     t = shown.topology
@@ -110,6 +147,9 @@ def _arrays_for(geo, full: bool = False, tris: int = 0) -> Tuple[dict, Dict[str,
         edge, truncated = edge[:MAX_EDGES], True
     if red.reduced:
         tri_prim = red.prim_src[tri_prim] if len(tri_prim) else tri_prim
+    if len(tri) >= CHUNK_MIN_TRIS:
+        tri, tri_prim, table = chunk_triangles(shown.P, tri, tri_prim)
+        out["chunks"] = np.ascontiguousarray(table).reshape(-1)
     out["tri"] = np.ascontiguousarray(tri, np.uint32).reshape(-1)
     out["tri_prim"] = np.ascontiguousarray(tri_prim, np.uint32)
     out["edge"] = np.ascontiguousarray(edge, np.uint32).reshape(-1)
@@ -127,6 +167,62 @@ def _arrays_for(geo, full: bool = False, tris: int = 0) -> Tuple[dict, Dict[str,
             "proxy": {"active": bool(red.reduced), "points": int(n0), "tris": int(tris0), "shown_points": int(n), "shown_tris": int(len(tri)),
                       "full": bool(full), "max_tris": MAX_TRIS, "max_points": MAX_POINTS}}
     return head, out
+
+
+def attr_arrays(geo, spec: dict, head: dict, arrays: Dict[str, np.ndarray]) -> None:
+    """Add one attribute's values to a preview (``spec``: ``{"name", "domain": point|prim|edge}``) so the viewer can colour by it: the array
+    ``attr`` (float32, one to three numbers per element, point order / primitive order / derived edge order) and the header's ``attr``
+    (name, domain, components, ranges). Only for a view that is not reduced: the numbers of a clustered view's elements are not the real ones."""
+    name, dom = str(spec.get("name") or ""), str(spec.get("domain") or "point")
+    info = {"name": name, "domain": dom}
+    head["attr"] = info
+    if head["proxy"]["active"]:
+        info["reduced"] = True
+        return
+    if dom == "edge":
+        from . import edges
+        a = edges.values(geo, edges.PREFIX + name) if edges.PREFIX + name in geo.vertex else None
+    elif dom in ("point", "prim"):
+        a = geo.table(dom).get(name)
+    else:
+        raise ValueError("domain must be point, prim or edge")
+    if a is None or a.dtype.kind not in "fiub":
+        info["missing"] = True
+        return
+    a2 = np.asarray(a).reshape(len(a), -1).astype(np.float32)[:, :3]
+    nc = a2.shape[1]
+    arrays["attr"] = np.ascontiguousarray(a2).reshape(-1)
+    info.update(comps=nc, count=int(len(a2)))
+    if len(a2):
+        info["min"], info["max"] = [float(x) for x in a2.min(0)], [float(x) for x in a2.max(0)]
+    else:
+        info["min"], info["max"] = [0.0] * nc, [0.0] * nc
+
+
+def mask_arrays(geo, spec: dict, head: dict, arrays: Dict[str, np.ndarray]) -> None:
+    """Add a group's membership to a preview (``spec``: ``{"name", "domain": point|prim|edge}``) so the paint tool can limit a brush to it: the
+    array ``mask`` (uint32, 1 = member, one per element in point order / primitive order / derived edge order) and the header's ``mask``
+    (name, domain, count, members; ``missing`` when there is no such group). A point group asked for on primitives (or the other way round)
+    is converted like every group field does. Like :func:`attr_arrays`, only for a view that is not reduced."""
+    from . import edges, groups
+    name, dom = str(spec.get("name") or ""), str(spec.get("domain") or "point")
+    info = {"name": name, "domain": dom}
+    head["mask"] = info
+    if head["proxy"]["active"]:
+        info["reduced"] = True
+        return
+    if dom == "edge":
+        a = edges.values(geo, edges.PREFIX + name) if edges.PREFIX + name in geo.vertex else None
+        m = None if a is None else np.asarray(a).reshape(len(a), -1)[:, 0] != 0
+    elif dom in ("point", "prim"):
+        m = groups.member(geo, dom, name) if name else None
+    else:
+        raise ValueError("domain must be point, prim or edge")
+    if m is None:
+        info["missing"] = True
+        return
+    arrays["mask"] = np.ascontiguousarray(m, np.uint32)
+    info.update(count=int(len(m)), members=int(np.count_nonzero(m)))
 
 
 def pack(head: dict, arrays: Dict[str, np.ndarray]) -> bytes:

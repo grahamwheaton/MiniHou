@@ -56,7 +56,7 @@ To work on something the user made in Blender, start from a blender_object node
 (the object's name; its UV map, color attribute, vertex groups and material indices arrive as attributes, its material slot
 names as the detail list 'materials', and it recooks live when they edit it); inspect_node on it shows what was read.
 Curves, hair curves, point clouds and images also come in (blender_object, blender_image) and go out (scene_objects modes curves/points,
-image_out). Give faces a material with set_material (a group and a name): Blender gets the slots by name, USD gets bound materials. USD files come in with usd_import (a Primitives pattern, purposes, time offset and scale) and go out with usd_export (press_button save; cooking itself never writes). Z is up; units are Blender metres. The user is
+image_out). Give faces a material with set_material (a group and a name): Blender gets the slots by name, USD gets bound materials. Attributes can be painted by hand with an attrib_paint node (paint_assign op; the user can also paint it in the 3-D view). USD files come in with usd_import (a Primitives pattern, purposes, time offset and scale) and go out with usd_export (press_button save; cooking itself never writes). Z is up; units are Blender metres. The user is
 watching the editor and Blender live and can undo your edits, so prefer small verified steps over huge batches."""
 
 OPS_DOC = """\
@@ -69,6 +69,9 @@ Each op is an object with "op":
   connect    {"op":"connect","from":src,"to":dst,"port"?:name,"index"?:int}  (port defaults to the first free input)
   disconnect {"op":"disconnect","to":dst,"port"?:name,"from"?:src}
   set        {"op":"set","id":id,"params":{name:value}}  (null resets to default; vec3 = [x,y,z])
+  paint_assign {"op":"paint_assign","id":paint_node,"indices":[0,5,9],"value":0.5 | "values":[..] | "erase":true,"clear"?:true,"default"?:v}
+             write painted values into an attrib_paint node (the viewer's Paint mode, Quick Assign and spreadsheet use this): element numbers are
+             point / primitive / derived-edge numbers as inspect_node shows them; erase sends them back to the input's value; clear forgets all
   display    {"op":"display","id":id}  (what Blender shows; usually an "output" node). More results: set an extra "output" node's
              "object" param (e.g. "Trees") and it appears as its own Blender object, live
   expose     {"op":"expose","id":id,"param":name,"name"?:"Label in Blender"}  (float/int/bool/vec3 only)

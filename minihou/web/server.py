@@ -14,7 +14,7 @@ live in the other and in Blender.
 ``POST /api/edit``     ``{ops: [...], wait?: bool}`` -> ``{rev, results, changed, status?}`` (see :mod:`minihou.edit`)
 ``POST /api/undo``     also ``/api/redo``
 ``POST /api/inspect``  ``{node, detail?}`` -> geometry summary of any node
-``POST /api/preview``  ``{node, full?, tris?}`` -> positions, triangles and edges of any node for the 3-D view (binary, see
+``POST /api/preview``  ``{node, full?, tris?, attr?, mask?, instances?}`` -> positions, triangles and edges of any node for the 3-D view (binary, see
                        :mod:`minihou.preview`; a big one is reduced to the display budget unless ``full``, or to ``tris`` triangles),
                        or JSON ``{ok: false, error}``
 ``POST /api/export_usd`` ``{path, node?, overwrite?, graph?}`` write the cooked geometry (always at full size, whatever the proxy level)
@@ -27,6 +27,10 @@ live in the other and in Blender.
                        there is none (the editor then shows its own browser)
 ``POST /api/upload``   ``?name=`` the raw bytes of a dropped file (header ``X-MiniHou-Upload: 1`` required, streamed to disk, up to 16 GB) into
                        ``imports/`` under the root -> ``{path, size}``; ``.usd``/``.usda``/``.usdc``/``.usdz``/``.png`` only
+``POST /api/spreadsheet`` ``{node, domain: point|vertex|prim|edge|detail, start?, count?, ids?, sort?, filter?, origins?}`` a page (at most 500) of rows of any node's geometry:
+                       ``{total, columns, rows: [[element, value...]]}``; ``ids`` restricts to those elements (the selection), ``filter`` keeps matching rows
+                       (point/prim: group syntax such as ``@w > 0.5``; vertex/edge: ``column <op> number and ...``), ``sort`` is ``{column, comp?, desc?}``,
+                       ``origins`` adds ``{column: node that first made it}``
 ``POST /api/disk_cache`` ``{enabled?, clear?}`` turn the disk cache of expensive results on (``.minihou_cache`` in the root) or off, or
                        clear it; returns ``{enabled, stats}``
 ``POST /api/proxy``    ``{level?, auto?, link_tris?}`` the proxy settings (cook level 0.001..1, auto refine, Blender triangle cap);
@@ -615,12 +619,37 @@ class _Handler(BaseHTTPRequestHandler):
             node = body.get("node")
             if not isinstance(node, str):
                 raise ApiError(400, '"node" must be a node id')
-            r = s.preview(node, templates=bool(body.get("templates")))
+            imode = body.get("instances") if body.get("instances") in ("auto", "always", "never") else "auto"
+            r = s.preview(node, templates=bool(body.get("templates")), instances=imode)
             if not r["ok"]:
                 return self._json({"ok": False, "node": node, "rev": r["rev"], "error": r["error"]})
-            from .. import preview
-            head, arrays = preview.arrays_for(r["geo"], full=bool(body.get("full")), tris=_budget(body.get("tris")))
-            head.update(node=node, rev=r["rev"], handles=r.get("handles", []))
+            from .. import impostors, preview
+            full, budget = bool(body.get("full")), _budget(body.get("tris"))
+            iset = None
+            try:
+                iset = impostors.plan(r["geo"], imode, full, budget, r.get("instance_sources"))
+            except Exception:                                        # impostors are a nicety: never lose the preview over them
+                log.exception("impostors failed for %s", node)
+            if iset is not None and iset.replaces:
+                head, arrays = impostors.shell(r["geo"])
+            else:
+                head, arrays = preview.arrays_for(r["geo"], full=full, tris=budget)
+            head.update(node=node, rev=r["rev"], handles=r.get("handles", []), cook_level=s.view_level())
+            if iset is not None:
+                arrays = dict(arrays)
+                head["instances"], extra = impostors.pack(iset)
+                arrays.update(extra)
+                if iset.replaces:
+                    head["proxy"].update(instanced=True, instances=int(iset.total or len(iset.M)))
+            if isinstance(body.get("attr"), dict) or isinstance(body.get("mask"), dict):
+                arrays = dict(arrays)                                # the memoised arrays are shared: never add to them
+                try:
+                    if isinstance(body.get("attr"), dict):
+                        preview.attr_arrays(r["geo"], body["attr"], head, arrays)
+                    if isinstance(body.get("mask"), dict):
+                        preview.mask_arrays(r["geo"], body["mask"], head, arrays)
+                except ValueError as e:
+                    raise ApiError(400, str(e)) from None
             head.update(selectable_templates=r.get("selectable", []), template_warnings=r.get("template_warnings", []))
             if r.get("reference") is not None:
                 refhead, refs = preview.arrays_for(r["reference"], full=bool(body.get("full")), tris=_budget(body.get("tris")))
@@ -634,6 +663,28 @@ class _Handler(BaseHTTPRequestHandler):
                         head["bounds"] = [[min(a, b) for a, b in zip(head["bounds"][0], refhead["bounds"][0])],
                                           [max(a, b) for a, b in zip(head["bounds"][1], refhead["bounds"][1])]]
             return self._send(200, preview.pack(head, arrays), "application/octet-stream")
+        if path == "/api/spreadsheet":
+            node = body.get("node")
+            if not isinstance(node, str):
+                raise ApiError(400, '"node" must be a node id')
+            r = s.preview(node)
+            if not r["ok"]:
+                return self._json({"ok": False, "node": node, "rev": r["rev"], "error": r["error"]})
+            from .. import spreadsheet
+            ids = body.get("ids")
+            if ids is not None and (not isinstance(ids, list) or any(isinstance(i, bool) or not isinstance(i, int) for i in ids[:100000])):
+                raise ApiError(400, '"ids" must be a list of element numbers')
+            try:
+                out = spreadsheet.page(r["geo"], str(body.get("domain") or "point"), int(body.get("start") or 0), int(body.get("count") or 100), ids,
+                                       body.get("sort"), str(body.get("filter") or ""))
+            except spreadsheet.FilterError as e:                          # a filter or sort the geometry cannot satisfy: shown in the table, not an HTTP error
+                return self._json({"ok": False, "node": node, "rev": r["rev"], "error": {"node": node, "message": str(e)}})
+            except (ValueError, TypeError) as e:
+                raise ApiError(400, str(e)) from None
+            if body.get("origins") and out.get("columns"):
+                out["origins"] = s.column_origins(node, out["domain"], [c["name"] for c in out["columns"] if not c.get("computed")])
+            out.update(ok=True, node=node, rev=r["rev"], cook_level=s.view_level())
+            return self._json(out)
         if path == "/api/open":
             p = app.resolve(body.get("path"))
             if not p.exists() and not body.get("create"):
