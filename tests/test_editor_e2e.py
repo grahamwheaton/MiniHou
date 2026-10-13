@@ -1428,6 +1428,7 @@ class EditorE2E(unittest.TestCase):
         self.page.evaluate("localStorage.clear()")
         self.page.reload()
         self.page.wait_for_selector('.node[data-id="out"]')
+        self.page.wait_for_selector("#shelf .sh-tab[data-tab]", state="attached")
         tabs = self.page.eval_on_selector_all("#shelf .sh-tab[data-tab]", "els => els.map(e => e.dataset.tab)")
         self.assertEqual(tabs[:5], ["Create", "Modify", "Model", "Polygon", "Edges"])
         self.assertIn("Rigid Bodies", tabs)
@@ -2063,29 +2064,34 @@ class EditorE2E(unittest.TestCase):
             self.assertTrue(0 <= sx <= box["width"] and 0 <= sy <= box["height"], (i, sx, sy, box))
 
     def test_proxy_menu_sets_the_cook_level_and_the_status_says_so(self):
-        self.page.click("#proxy-btn")
+        self.open_proxy_menu()
         self.page.wait_for_selector('#proxy-menu .item[data-proxy="0.1"]')
         self.page.click('#proxy-menu .item[data-proxy="0.1"]')
+        self.page.wait_for_selector("#proxy-menu", state="hidden")      # the item closes it once the engine has answered
         self.assertTrue(until(lambda: self.s.proxy_level == 0.1))
         self.assertTrue(until(lambda: self.page.locator("#proxy-label").inner_text() == "10%"))
         self.assertTrue(until(lambda: "proxy 10%" in self.page.locator("#cook-status .text").inner_text()))
         self.assertTrue(self.page.locator("#proxy-btn").evaluate("b => b.classList.contains('on')"))
         self.assertEqual(self.s.latest_good.proxy, 0.1)
         # Auto, then back to the real thing
-        self.page.click("#proxy-btn")
+        self.open_proxy_menu()
         self.page.click('#proxy-menu .item[data-proxy="auto"]')
+        self.page.wait_for_selector("#proxy-menu", state="hidden")      # the item closes it once the engine has answered
         self.assertTrue(until(lambda: self.s.proxy_auto))
         self.assertTrue(until(lambda: self.page.locator("#proxy-label").inner_text() == "Auto"))
-        self.page.click("#proxy-btn")
+        self.open_proxy_menu()
         self.page.click('#proxy-menu .item[data-proxy="full"]')
+        self.page.wait_for_selector("#proxy-menu", state="hidden")      # the item closes it once the engine has answered
         self.assertTrue(until(lambda: self.s.proxy_level == 1.0 and not self.s.proxy_auto))
         self.assertTrue(until(lambda: "proxy" not in self.page.locator("#cook-status .text").inner_text()))
         # the Blender cap
-        self.page.click("#proxy-btn")
+        self.open_proxy_menu()
         self.page.click('#proxy-menu .item[data-cap="100000"]')
+        self.page.wait_for_selector("#proxy-menu", state="hidden")      # the item closes it once the engine has answered
         self.assertTrue(until(lambda: self.s.link_tris == 100000))
-        self.page.click("#proxy-btn")
+        self.open_proxy_menu()
         self.page.click('#proxy-menu .item[data-cap="0"]')
+        self.page.wait_for_selector("#proxy-menu", state="hidden")      # the item closes it once the engine has answered
         self.assertTrue(until(lambda: self.s.link_tris == 0))
 
     def test_a_big_geometry_is_drawn_reduced_with_full_res_on_request_and_selection_waits(self):
@@ -2131,28 +2137,30 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(back.npoints, self.s.latest_good.geo.npoints)
         self.assertEqual(back.nprims, self.s.latest_good.geo.nprims)
 
+    def open_proxy_menu(self):
+        """The button toggles the menu, so open it only when it is closed (an item closes it after the engine has answered)."""
+        for _ in range(5):
+            if self.page.locator("#proxy-menu").is_visible():
+                return
+            self.page.click("#proxy-btn")
+            try:
+                self.page.wait_for_selector("#proxy-menu", state="visible", timeout=1500)
+                return
+            except Exception:  # noqa: BLE001 - the click landed while the menu was closing: try again
+                pass
+        self.fail("the proxy menu did not open")
+
     def test_the_disk_cache_is_switched_from_the_proxy_menu(self):
-        def open_menu():                                   # the button toggles the menu, so open it only when it is closed
-            for _ in range(5):
-                if self.page.locator("#proxy-menu").is_visible():
-                    return
-                self.page.click("#proxy-btn")
-                try:
-                    self.page.wait_for_selector("#proxy-menu", state="visible", timeout=1500)
-                    return
-                except Exception:  # noqa: BLE001 - the click landed while the menu was closing: try again
-                    pass
-            self.fail("the proxy menu did not open")
-        open_menu()
+        self.open_proxy_menu()
         self.page.click('#proxy-menu [data-diskcache="on"]')
         self.assertTrue(until(lambda: self.s.disk_cache is not None))
         self.assertTrue(until(lambda: self.page.locator("#proxy-btn").evaluate("b => b.classList.contains('on')")))
         self.page.wait_for_selector("#proxy-menu", state="hidden")
-        open_menu()
+        self.open_proxy_menu()
         self.page.wait_for_selector('#proxy-menu [data-diskcache="clear"]')
         self.page.click('#proxy-menu [data-diskcache="clear"]')
         self.page.wait_for_selector("#proxy-menu", state="hidden")      # the item closes the menu once the engine has answered
-        open_menu()
+        self.open_proxy_menu()
         self.page.click('#proxy-menu [data-diskcache="off"]')
         self.assertTrue(until(lambda: self.s.disk_cache is None))
 
