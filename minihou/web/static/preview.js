@@ -5,14 +5,16 @@ window.MiniHouPreview = (() => {
   const VS = `#version 300 es
   in vec3 aPos; in vec3 aCol;
   uniform mat4 uMV, uP; uniform float uPointSize, uBias;
-  out vec3 vView; out vec3 vCol;
-  void main() { vec4 v = uMV * vec4(aPos, 1.0); vView = v.xyz; vCol = aCol; gl_Position = uP * v;
+  out vec3 vView; out vec3 vCol; out vec3 vWorld;
+  void main() { vec4 v = uMV * vec4(aPos, 1.0); vView = v.xyz; vCol = aCol; vWorld = aPos; gl_Position = uP * v;
                 gl_Position.z -= uBias * gl_Position.w; gl_PointSize = uPointSize; }`;
   // selected edges: each edge is a quad that is widened in screen space, so selections read as thick lines
   const VS_EDGE = `#version 300 es
   in vec3 aA; in vec3 aB; in float aT; in float aS;
   uniform mat4 uMV, uP; uniform vec2 uViewport; uniform float uWidth, uBias;
+  out vec3 vWorld;
   void main() {
+    vWorld = mix(aA, aB, aT);
     vec4 ca = uP * uMV * vec4(aA, 1.0), cb = uP * uMV * vec4(aB, 1.0);
     vec2 d = (cb.xy / max(cb.w, 1e-4) - ca.xy / max(ca.w, 1e-4)) * uViewport;
     float l = length(d); d = l > 1e-6 ? d / l : vec2(1.0, 0.0);
@@ -21,14 +23,19 @@ window.MiniHouPreview = (() => {
     c.z -= uBias * c.w;
     gl_Position = c;
   }`;
+  // The section plane (a cut through the scene): fragments on the far side of it are not drawn. Every program that draws geometry shares this.
+  const CLIP_DECL = "in vec3 vWorld; uniform vec4 uClip; uniform float uClipOn;";
+  const CLIP_TEST = "if (uClipOn > 0.5 && dot(vWorld, uClip.xyz) > uClip.w) discard;";
   const FS_COLOR = `#version 300 es
   precision highp float;
+  ${CLIP_DECL}
   uniform vec4 uColor; out vec4 o;
-  void main() { o = uColor; }`;
+  void main() { ${CLIP_TEST} o = uColor; }`;
   const FS_MESH = `#version 300 es
   precision highp float;
-  in vec3 vView; in vec3 vCol; uniform vec3 uBase; uniform float uUseCol, uLighting; out vec4 o;
+  in vec3 vView; in vec3 vCol; ${CLIP_DECL} uniform vec3 uBase; uniform float uUseCol, uLighting; out vec4 o;
   void main() {
+    ${CLIP_TEST}
     vec3 n = normalize(cross(dFdx(vView), dFdy(vView)));
     float d = max(n.z, 0.0);                                    // headlight: view space looks down -Z, n faces the viewer
     vec3 base = mix(uBase, vCol, uUseCol);
@@ -38,20 +45,21 @@ window.MiniHouPreview = (() => {
   }`;
   const FS_FLAT = `#version 300 es
   precision highp float;
-  in vec3 vView; in vec3 vCol; uniform vec3 uBase; uniform float uUseCol; uniform float uAlpha; out vec4 o;
-  void main() { o = vec4(mix(uBase, vCol, uUseCol), uAlpha); }`;
+  in vec3 vView; in vec3 vCol; ${CLIP_DECL} uniform vec3 uBase; uniform float uUseCol; uniform float uAlpha; out vec4 o;
+  void main() { ${CLIP_TEST} o = vec4(mix(uBase, vCol, uUseCol), uAlpha); }`;
 
   // Instances drawn as impostors: one transform per instance (three rows of a 3x4 matrix) on shared shape meshes. Two-sided: a mirrored instance flips its winding.
   const VS_INST = `#version 300 es
   in vec3 aPos; in vec4 aR0; in vec4 aR1; in vec4 aR2; in vec3 aCol;
   uniform mat4 uMV, uP;
-  out vec3 vView; out vec3 vCol;
+  out vec3 vView; out vec3 vCol; out vec3 vWorld;
   void main() { vec4 p = vec4(aPos, 1.0); vec3 w = vec3(dot(aR0, p), dot(aR1, p), dot(aR2, p));
-                vec4 v = uMV * vec4(w, 1.0); vView = v.xyz; vCol = aCol; gl_Position = uP * v; }`;
+                vec4 v = uMV * vec4(w, 1.0); vView = v.xyz; vCol = aCol; vWorld = w; gl_Position = uP * v; }`;
   const FS_INST = `#version 300 es
   precision highp float;
-  in vec3 vView; in vec3 vCol; uniform vec3 uBase; uniform float uUseCol, uLighting; out vec4 o;
+  in vec3 vView; in vec3 vCol; ${CLIP_DECL} uniform vec3 uBase; uniform float uUseCol, uLighting; out vec4 o;
   void main() {
+    ${CLIP_TEST}
     vec3 n = normalize(cross(dFdx(vView), dFdy(vView)));
     float d = abs(n.z);
     vec3 base = mix(uBase, vCol, uUseCol);
@@ -144,15 +152,16 @@ window.MiniHouPreview = (() => {
       for (const n of uniforms) u[n] = gl.getUniformLocation(p, n);
       return { p, u };
     };
-    const MESH_U = ["uMV", "uP", "uPointSize", "uBase", "uUseCol", "uAlpha", "uBias", "uLighting"];
+    const CLIP_U = ["uClip", "uClipOn"];
+    const MESH_U = ["uMV", "uP", "uPointSize", "uBase", "uUseCol", "uAlpha", "uBias", "uLighting", ...CLIP_U];
     let mesh, flat, edgeProg, colorProg, gridProg, instProg;
     try {
       gridProg = prog(VS_GRID, FS_GRID, [], ["uMV", "uP", "uEye", "uTarget", "uSpacing", "uRange", "uOpacity", "uAxes"]);
       mesh = prog(VS, FS_MESH, ["aPos", "aCol"], MESH_U);
       flat = prog(VS, FS_FLAT, ["aPos", "aCol"], MESH_U);
-      edgeProg = prog(VS_EDGE, FS_COLOR, ["aA", "aB", "aT", "aS"], ["uMV", "uP", "uViewport", "uWidth", "uBias", "uColor"]);
-      colorProg = prog(VS, FS_COLOR, ["aPos", "aCol"], ["uMV", "uP", "uPointSize", "uBias", "uColor"]);
-      instProg = prog(VS_INST, FS_INST, ["aPos", "aR0", "aR1", "aR2", "aCol"], ["uMV", "uP", "uBase", "uUseCol", "uLighting"]);
+      edgeProg = prog(VS_EDGE, FS_COLOR, ["aA", "aB", "aT", "aS"], ["uMV", "uP", "uViewport", "uWidth", "uBias", "uColor", ...CLIP_U]);
+      colorProg = prog(VS, FS_COLOR, ["aPos", "aCol"], ["uMV", "uP", "uPointSize", "uBias", "uColor", ...CLIP_U]);
+      instProg = prog(VS_INST, FS_INST, ["aPos", "aR0", "aR1", "aR2", "aCol"], ["uMV", "uP", "uBase", "uUseCol", "uLighting", ...CLIP_U]);
     } catch (e) { if (onMessage) onMessage("3-D preview unavailable: " + e.message); api.ok = false; return api; }
 
     const vao = gl.createVertexArray(), posBuf = gl.createBuffer(), colBuf = gl.createBuffer();
@@ -189,7 +198,11 @@ window.MiniHouPreview = (() => {
     const view = { yaw: -0.6, pitch: 0.45, dist: 5, target: [0, 0, 0], ortho: false };
     const PITCH_MAX = 1.5707, FOV = Math.PI / 4, ORTHO_FOV = 0.03;     // "orthographic" is a very narrow lens far away: the same maths, so picking and handles keep working
     const opt = { navigation: "blender", orbitDepth: true, shaded: true, edges: true, points: false, normals: false, grid: true, background: "#212429", gridOpacity: 1, axes: true, lighting: 1, pointSize: 4, gridSpacing: 0,
-      instBias: 1, instTris: 1500000 };                              // impostors: > 1 keeps detail to smaller instances; the most triangles all instances may draw together
+      instBias: 1, instTris: 1500000,
+      clipNear: 0, clipFar: 0,                                       // camera clip distances (0 = automatic from the scene's size)
+      section: { on: false, axis: 2, offset: 0, flip: false },       // a cutting plane: what lies beyond it is hidden (and cannot be picked or painted)
+      cull: true, cullPx: 0,                                         // skip the runs of triangles outside the view (and, if cullPx > 0, ones smaller than that on screen)
+      navQuality: "full" };                                          // full | balanced | fast: draw cheaper while the camera moves                              // impostors: > 1 keeps detail to smaller instances; the most triangles all instances may draw together
     let data = { npoints: 0, ntris: 0, nedges: 0, hasCd: false, bounds: [[-1, -1, -1], [1, 1, 1]] };
     let raw = null;                                                  // the geometry's typed arrays, for picking
     let raf = 0;
@@ -295,7 +308,7 @@ window.MiniHouPreview = (() => {
       data.npoints = arrays.P.length / 3; data.ntris = arrays.tri.length / 3; data.nedges = arrays.edge.length / 2;
       data.bounds = head.bounds; nrmDirty = true;
       uploadInstances(head, arrays);
-      raw = { P: arrays.P, tri: arrays.tri, edge: arrays.edge, triPrim: arrays.tri_prim || new Uint32Array(arrays.tri.length / 3) };
+      raw = { P: arrays.P, tri: arrays.tri, edge: arrays.edge, triPrim: arrays.tri_prim || new Uint32Array(arrays.tri.length / 3), chunks: arrays.chunks || null };
       Object.assign(api, { tris: data.ntris, edges: data.nedges, points: data.npoints });
     }
     function frameAll() {
@@ -309,8 +322,8 @@ window.MiniHouPreview = (() => {
       const aspect = Math.min(1, Math.max(canvas.clientWidth, 1) / Math.max(canvas.clientHeight, 1));
       return r / (Math.tan(Math.PI / 8) * aspect) * slack;
     }
-    function resize() {
-      const dpr = window.devicePixelRatio || 1, w = Math.max(1, Math.round(canvas.clientWidth * dpr)), h = Math.max(1, Math.round(canvas.clientHeight * dpr));
+    function resize(scale) {
+      const dpr = (window.devicePixelRatio || 1) * (scale || 1), w = Math.max(1, Math.round(canvas.clientWidth * dpr)), h = Math.max(1, Math.round(canvas.clientHeight * dpr));
       if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     }
     function camera() {                                              // matrices for the current view; sizes in CSS pixels
@@ -318,8 +331,11 @@ window.MiniHouPreview = (() => {
       const fov = view.ortho ? ORTHO_FOV : FOV, D = view.dist * Math.tan(FOV / 2) / Math.tan(fov / 2);   // same apparent size either way
       const cp = Math.cos(view.pitch), eye = [view.target[0] + D * cp * Math.cos(view.yaw),
         view.target[1] + D * cp * Math.sin(view.yaw), view.target[2] + D * Math.sin(view.pitch)];
-      const w = Math.max(canvas.clientWidth, 1), h = Math.max(canvas.clientHeight, 1), near = view.ortho ? Math.max(D - view.dist - r * 4, D * 0.01) : Math.max(view.dist * 0.01, r * 1e-3);
-      return { MV: lookAt(eye, view.target, [0, 0, 1]), P: perspective(fov, w / h, near, Math.max(D + r * 4 + (view.ortho ? view.dist : 0), Math.hypot(...eye.map((v,i)=>v-(lo[i]+hi[i])/2))+r*4)), eye, w, h, near };
+      const w = Math.max(canvas.clientWidth, 1), h = Math.max(canvas.clientHeight, 1);
+      let near = view.ortho ? Math.max(D - view.dist - r * 4, D * 0.01) : Math.max(view.dist * 0.01, r * 1e-3);
+      let far = Math.max(D + r * 4 + (view.ortho ? view.dist : 0), Math.hypot(...eye.map((v,i)=>v-(lo[i]+hi[i])/2))+r*4);
+      if (!view.ortho) { if (opt.clipNear > 0) near = opt.clipNear; if (opt.clipFar > 0) far = opt.clipFar; far = Math.max(far, near * 1.01); }     // manual clip distances are measured from the camera
+      return { MV: lookAt(eye, view.target, [0, 0, 1]), P: perspective(fov, w / h, near, far), eye, w, h, near, far };
     }
 
     // ---------------------------------------------------------------- selection (points, edges, faces)
@@ -338,7 +354,7 @@ window.MiniHouPreview = (() => {
       return norm([dx * m[0] + dy * m[1] - m[2], dx * m[4] + dy * m[5] - m[6], dx * m[8] + dy * m[9] - m[10]]);
     }
     function raycast(o, d, tMax, anyHit) {                           // nearest triangle hit (Moller-Trumbore): {t, tri} or null
-      const P = raw.P, T = raw.tri;
+      const P = raw.P, T = raw.tri, cut = sectionPlane();
       let best = null, bt = tMax === undefined ? Infinity : tMax;
       for (let i = 0, n = T.length / 3; i < n; i++) {
         const a = T[3 * i] * 3, b = T[3 * i + 1] * 3, c = T[3 * i + 2] * 3;
@@ -354,7 +370,10 @@ window.MiniHouPreview = (() => {
         const v = (d[0] * qx + d[1] * qy + d[2] * qz) * inv;
         if (v < 0 || u + v > 1) continue;
         const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
-        if (t > 1e-9 && t < bt) { bt = t; best = { t, tri: i }; if (anyHit) return best; }
+        if (t > 1e-9 && t < bt) {
+          if (cut && cut.n[0] * (o[0] + d[0] * t) + cut.n[1] * (o[1] + d[1] * t) + cut.n[2] * (o[2] + d[2] * t) > cut.d) continue;     // the part beyond the section plane is not there
+          bt = t; best = { t, tri: i }; if (anyHit) return best;
+        }
       }
       return best;
     }
@@ -364,8 +383,9 @@ window.MiniHouPreview = (() => {
       return !raycast(cam.eye, [d[0] / L, d[1] / L, d[2] / L], L * (1 - 2e-3) - 1e-6, true);
     }
     function projectedPoints(cam) {
-      const n = raw.P.length / 3, out = new Float32Array(n * 3);
+      const n = raw.P.length / 3, out = new Float32Array(n * 3), cut = sectionPlane();
       for (let i = 0; i < n; i++) {
+        if (cut && cut.n[0] * raw.P[3 * i] + cut.n[1] * raw.P[3 * i + 1] + cut.n[2] * raw.P[3 * i + 2] > cut.d) { out[3 * i + 2] = -1; continue; }     // beyond the section plane: not selectable
         const s = toScreen(cam, raw.P[3 * i], raw.P[3 * i + 1], raw.P[3 * i + 2]);
         if (s) { out[3 * i] = s[0]; out[3 * i + 1] = s[1]; out[3 * i + 2] = s[2]; } else out[3 * i + 2] = -1;
       }
@@ -586,6 +606,59 @@ window.MiniHouPreview = (() => {
       gl.uniform1f(colorProg.u.uPointSize, 4);
     }
 
+    // ---------------------------------------------------------------- the section plane, and what is outside the view
+    // The plane keeps what satisfies dot(n, p) <= d. Anything beyond it is hidden by the shaders and cannot be picked or painted (isClipped).
+    function sectionPlane() {
+      const s = opt.section;
+      if (!s || !s.on) return null;
+      const n = [0, 0, 0]; n[s.axis] = s.flip ? -1 : 1;
+      return { n, d: s.flip ? -s.offset : s.offset };
+    }
+    function isClipped(x, y, z) { const p = sectionPlane(); return !!p && p.n[0] * x + p.n[1] * y + p.n[2] * z > p.d; }
+    function mat4mul(a, b) {                                                           // column-major a * b
+      const o = new Float32Array(16);
+      for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) { let v = 0; for (let k = 0; k < 4; k++) v += a[k * 4 + r] * b[c * 4 + k]; o[c * 4 + r] = v; }
+      return o;
+    }
+    function frustumPlanes(cam) {                                                      // [a, b, c, d] with a*x + b*y + c*z + d >= 0 inside: left, right, bottom, top, near, far (+ the section plane)
+      const m = mat4mul(cam.P, cam.MV), row = (i) => [m[i], m[4 + i], m[8 + i], m[12 + i]];
+      const r0 = row(0), r1 = row(1), r2 = row(2), r3 = row(3), add = (a, b, k) => a.map((v, i) => v + k * b[i]);
+      const planes = [add(r3, r0, 1), add(r3, r0, -1), add(r3, r1, 1), add(r3, r1, -1), add(r3, r2, 1), add(r3, r2, -1)];
+      const sp = sectionPlane();
+      if (sp) planes.push([-sp.n[0], -sp.n[1], -sp.n[2], sp.d]);
+      return planes;
+    }
+    function boxOutside(planes, t, o) {                                                // an axis-aligned box (min at t[o..o+2], max at t[o+3..o+5]) entirely outside one plane
+      for (const [a, b, c, d] of planes) {
+        const x = a > 0 ? t[o + 3] : t[o], y = b > 0 ? t[o + 4] : t[o + 1], z = c > 0 ? t[o + 5] : t[o + 2];
+        if (a * x + b * y + c * z + d < 0) return true;
+      }
+      return false;
+    }
+    const stats = { tris: 0, trisTotal: 0, chunks: 0, chunksDrawn: 0, drawMs: 0, moving: false, scale: 1, draws: 0 };
+    function triangleRuns(cam) {                                                       // [{first, n}] of the visible runs of triangles, or null = draw them all
+      const t = raw && raw.chunks;
+      if (!t || !opt.cull) return null;
+      const planes = frustumPlanes(cam), n = t.length / 8, runs = [];
+      let cur = null, drawn = 0;
+      const k = cam.P[5] * cam.h, m = cam.MV;
+      for (let c = 0; c < n; c++) {
+        const o = 8 * c + 2;
+        let skip = boxOutside(planes, t, o);
+        if (!skip && opt.cullPx > 0) {                                                 // too small on screen to matter
+          const cx = (t[o] + t[o + 3]) / 2, cy = (t[o + 1] + t[o + 4]) / 2, cz = (t[o + 2] + t[o + 5]) / 2, r = Math.hypot(t[o + 3] - t[o], t[o + 4] - t[o + 1], t[o + 5] - t[o + 2]) / 2;
+          const d = -(m[2] * cx + m[6] * cy + m[10] * cz + m[14]);
+          if (d > r && r * k / d < opt.cullPx) skip = true;
+        }
+        if (skip) continue;
+        const first = t[8 * c], cnt = t[8 * c + 1];
+        if (cur && cur.first + cur.n === first) cur.n += cnt; else runs.push(cur = { first, n: cnt });
+        drawn += cnt;
+      }
+      stats.chunks = n; stats.chunksDrawn = runs.reduce((a, r) => a + Math.ceil(r.n / 8192), 0); stats.tris = drawn;
+      return runs;
+    }
+
     // ---------------------------------------------------------------- instances drawn as impostors (the engine sends each shape once at three levels
     // of detail and a transform per instance: minihou/impostors.py). Each camera move picks a level per instance from its size on screen and
     // keeps the total within a triangle budget; instances outside the view are not drawn at all.
@@ -627,12 +700,13 @@ window.MiniHouPreview = (() => {
     }
     function updateInstances(cam) {
       const t0 = performance.now(), h = inst.head, N = inst.N, sph = inst.sph, m = cam.MV, P = cam.P, px = inst.px, vis = inst.vis;
-      const k = P[5] * cam.h, kx = P[0], ky = P[5], near = cam.near, protos = h.protos, proto = inst.proto;
+      const k = P[5] * cam.h, kx = P[0], ky = P[5], near = cam.near, protos = h.protos, proto = inst.proto, sp = sectionPlane();
       let nvis = 0;
       for (let i = 0; i < N; i++) {
         const cx = sph[4 * i], cy = sph[4 * i + 1], cz = sph[4 * i + 2], r = sph[4 * i + 3];
         const vx = m[0] * cx + m[4] * cy + m[8] * cz + m[12], vy = m[1] * cx + m[5] * cy + m[9] * cz + m[13], d = -(m[2] * cx + m[6] * cy + m[10] * cz + m[14]);
         if (d + r < near || Math.abs(vx) * kx > d + r * kx * 1.5 || Math.abs(vy) * ky > d + r * ky * 1.5) { vis[i] = 0; continue; }      // behind or outside the view
+        if (sp && sp.n[0] * cx + sp.n[1] * cy + sp.n[2] * cz - sp.d > r) { vis[i] = 0; continue; }                                    // wholly beyond the section plane
         vis[i] = 1; nvis++;
         px[i] = r * k / Math.max(d, 1e-9);                                                  // the instance's diameter on screen, in CSS pixels
       }
@@ -680,7 +754,7 @@ window.MiniHouPreview = (() => {
     }
     function drawInstances(cam) {
       if (!inst.on) return;
-      const sig = [...cam.MV, ...cam.P, opt.instBias, opt.instTris, cam.w, cam.h].join(",");
+      const sig = [...cam.MV, ...cam.P, opt.instBias, opt.instTris, cam.w, cam.h, JSON.stringify(opt.section)].join(",");
       if (sig !== inst.sig) {
         const now = performance.now();
         if (inst.N > 150000 && inst.sig !== null && now - inst.last < 70) { if (!inst.timer) inst.timer = setTimeout(() => { inst.timer = 0; schedule(); }, 80); }   // a huge set refreshes a few times a second while the camera moves
@@ -707,14 +781,31 @@ window.MiniHouPreview = (() => {
     function instanceStats() { return { ...inst.stats, lod: inst.stats.lod.slice(), on: inst.on, kind: inst.head ? inst.head.kind : null, approximate: !!(inst.head && inst.head.approximate),
       replaces: !!(inst.head && inst.head.replaces), total: inst.head ? inst.head.total : 0, fullTris: inst.head ? inst.head.full_tris : 0 }; }
 
+    const NAV_SCALE = { full: 1, balanced: 0.6, fast: 0.45 };                 // the share of the resolution drawn while the camera moves
+    let lastCam = null, settleTimer = 0;
+    function camMoved(cam) {                                                // did the camera change since the last frame?
+      const now = new Float32Array(32); now.set(cam.MV, 0); now.set(cam.P, 16);
+      let moved = false;
+      if (lastCam) for (let i = 0; i < 32; i++) if (lastCam[i] !== now[i]) { moved = true; break; }
+      lastCam = now;
+      return moved;
+    }
     function draw() {
       raf = 0;
-      resize();
+      const t0 = performance.now();
+      const cam0 = camera(), moving = camMoved(cam0), navScale = moving ? (NAV_SCALE[opt.navQuality] || 1) : 1, skipEdges = moving && opt.navQuality === "fast";
+      if (moving && opt.navQuality !== "full") { clearTimeout(settleTimer); settleTimer = setTimeout(() => { settleTimer = 0; schedule(); }, 200); }     // one full-quality frame once it stops
+      resize(navScale);
+      Object.assign(stats, { moving, scale: navScale, draws: stats.draws + 1 });
       gl.viewport(0, 0, canvas.width, canvas.height);
       const bg = opt.background.match(/[0-9a-f]{2}/gi).map(x => parseInt(x, 16) / 255);
       gl.clearColor(...bg, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       api.draws++;
-      const cam = camera(), MV = cam.MV, P = cam.P;
+      const cam = cam0, MV = cam.MV, P = cam.P;
+      const sp = sectionPlane();
+      for (const pr of [mesh, flat, colorProg, edgeProg, instProg]) {                          // the section plane, for every program that draws geometry
+        gl.useProgram(pr.p); gl.uniform4f(pr.u.uClip, sp ? sp.n[0] : 0, sp ? sp.n[1] : 0, sp ? sp.n[2] : 0, sp ? sp.d : 0); gl.uniform1f(pr.u.uClipOn, sp ? 1 : 0);
+      }
       if (opt.grid) {
         gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
         gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -746,11 +837,19 @@ window.MiniHouPreview = (() => {
         if (primView) { gl.bindVertexArray(primVao); data.hasCd = true; }
         setup(mesh, [0.62, 0.68, 0.76], true);
         gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1, 1);
-        if (primView) { gl.drawArrays(gl.TRIANGLES, 0, primCount); data.hasCd = !!cd0; gl.bindVertexArray(vao); }
-        else { gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triBuf); gl.drawElements(gl.TRIANGLES, data.ntris * 3, gl.UNSIGNED_INT, 0); }
+        const runs = triangleRuns(cam);                                                       // null = every triangle (no chunk table, or culling is off)
+        stats.trisTotal = data.ntris;
+        if (!runs) { stats.tris = data.ntris; stats.chunks = stats.chunksDrawn = 0; }
+        if (primView) {
+          if (runs) for (const r of runs) gl.drawArrays(gl.TRIANGLES, r.first * 3, r.n * 3); else gl.drawArrays(gl.TRIANGLES, 0, primCount);
+          data.hasCd = !!cd0; gl.bindVertexArray(vao);
+        } else {
+          gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triBuf);
+          if (runs) for (const r of runs) gl.drawElements(gl.TRIANGLES, r.n * 3, gl.UNSIGNED_INT, r.first * 12); else gl.drawElements(gl.TRIANGLES, data.ntris * 3, gl.UNSIGNED_INT, 0);
+        }
         gl.disable(gl.POLYGON_OFFSET_FILL);
       }
-      if ((opt.edges || sel.mode === "edge") && data.nedges) {
+      if ((opt.edges || sel.mode === "edge") && data.nedges && !skipEdges) {
         const over = opt.shaded && data.ntris;                  // over a shaded surface the edges are soft dark lines
         setup(flat, over ? [0.04, 0.05, 0.06] : [0.75, 0.82, 0.9], false, over ? (sel.mode === "edge" ? 0.6 : 0.35) : 1);
         gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -784,6 +883,7 @@ window.MiniHouPreview = (() => {
       if (opt.normals) { gl.bindVertexArray(null); drawNormals(cam); }
       gl.bindVertexArray(null);
       renderHandles(cam);
+      stats.drawMs = Math.round((performance.now() - t0) * 10) / 10;
     }
     function schedule() { if (!raf) raf = requestAnimationFrame(draw); }
 
@@ -1315,7 +1415,9 @@ window.MiniHouPreview = (() => {
         if (!same && (sel.point.size || sel.edge.size || sel.face.size)) change({}, "replace");   // other geometry: drop the selection
         else rebuildOverlay();
       },
-      instanceStats,
+      instanceStats, sectionPlane, isClipped,
+      setSection(o) { Object.assign(opt.section, o); schedule(); },
+      drawStats() { return { ...stats, instances: instanceStats() }; },
       clear() { clearInstances(); templateRaw=null;api.templatePoints=0;api.selectableTemplates=[];handles = []; data.npoints = 0; raw = null; Object.assign(api, { tris: 0, edges: 0, points: 0 }); change({}, "replace"); schedule(); },
       frameAll, frameSelection, viewAxis, redraw: schedule, bounds: () => data.bounds,
       normalSegments() { if (nrmDirty) buildNormals(); return Array.from(nrmLines); },   // for tests: [cx, cy, cz, tx, ty, tz] per primitive
