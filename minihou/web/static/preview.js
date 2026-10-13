@@ -207,7 +207,7 @@ window.MiniHouPreview = (() => {
       const cp = Math.cos(view.pitch), eye = [view.target[0] + D * cp * Math.cos(view.yaw),
         view.target[1] + D * cp * Math.sin(view.yaw), view.target[2] + D * Math.sin(view.pitch)];
       const w = Math.max(canvas.clientWidth, 1), h = Math.max(canvas.clientHeight, 1), near = view.ortho ? Math.max(D - view.dist - r * 4, D * 0.01) : Math.max(view.dist * 0.01, r * 1e-3);
-      return { MV: lookAt(eye, view.target, [0, 0, 1]), P: perspective(fov, w / h, near, D + r * 4 + (view.ortho ? view.dist : 0)), eye, w, h, near };
+      return { MV: lookAt(eye, view.target, [0, 0, 1]), P: perspective(fov, w / h, near, Math.max(D + r * 4 + (view.ortho ? view.dist : 0), Math.hypot(...eye.map((v,i)=>v-(lo[i]+hi[i])/2))+r*4)), eye, w, h, near };
     }
 
     // ---------------------------------------------------------------- selection (points, edges, faces)
@@ -862,12 +862,63 @@ window.MiniHouPreview = (() => {
       }
     }
 
+    // Fly navigation: hold RMB, or latch with Shift+` / Walk. Escape restores the camera.
+    let fly=null, flyRAF=0, flySpeed=0;
+    const flyKeys=new Set();
+    function flyForward(){return [-Math.cos(view.pitch)*Math.cos(view.yaw),-Math.cos(view.pitch)*Math.sin(view.yaw),-Math.sin(view.pitch)];}
+    function flyHint(){feedback.hidden=false;feedback.textContent=`Fly ${flySpeed.toFixed(2)} units/s · WASD · Q/E down/up · Shift fast · Ctrl slow · wheel speed · Enter accept · Esc cancel`;}
+    function endFly(cancel=false){
+      if(!fly)return;const old=fly;fly=null;flyKeys.clear();cancelAnimationFrame(flyRAF);
+      if(cancel)Object.assign(view,old.saved,{target:old.saved.target.slice()});
+      if(document.pointerLockElement===canvas)document.exitPointerLock();
+      canvas.style.cursor='';feedback.hidden=true;api.onNavigationChange?.(false);schedule();
+    }
+    function startFly(latched=false){
+      if(fly || handleDrag || endingDrag)return;
+      const saved={...view,target:view.target.slice()};view.ortho=false;
+      fly={latched,saved,last:performance.now(),eye:camera().eye.slice(),x:null,y:null};
+      if(!flySpeed)flySpeed=Math.max(.1,view.dist*.5);
+      canvas.style.cursor='crosshair';api.onNavigationChange?.(true);flyHint();
+      function tick(now){if(!fly)return;const dt=Math.min(.05,(now-fly.last)/1000);fly.last=now;
+        const f=flyForward(),right=[-Math.sin(view.yaw),Math.cos(view.yaw),0];
+        const forward=Number(flyKeys.has('KeyW'))-Number(flyKeys.has('KeyS')),side=Number(flyKeys.has('KeyD'))-Number(flyKeys.has('KeyA')),up=Number(flyKeys.has('KeyE'))-Number(flyKeys.has('KeyQ'));
+        const delta=f.map((v,i)=>v*forward+right[i]*side+(i===2?up:0)),len=Math.hypot(...delta);
+        const speed=flySpeed*(flyKeys.has('ShiftLeft')||flyKeys.has('ShiftRight')?4:1)*(flyKeys.has('ControlLeft')||flyKeys.has('ControlRight')?.2:1);
+        if(len)fly.eye=fly.eye.map((v,i)=>v+delta[i]/len*speed*dt);
+        view.target=fly.eye.map((v,i)=>v+f[i]*view.dist);schedule();flyRAF=requestAnimationFrame(tick);
+      }
+      flyRAF=requestAnimationFrame(tick);
+      if(latched){try{const p=canvas.requestPointerLock?.();p?.catch(()=>{});}catch(_){}}
+    }
+    api.toggleWalk=()=>fly?endFly(false):startFly(true);
+    api.navigationState=()=>({active:!!fly,latched:!!fly?.latched,speed:flySpeed,eye:camera().eye.slice(),target:view.target.slice(),yaw:view.yaw,pitch:view.pitch});
+    document.addEventListener('keydown',e=>{
+      const typing=e.target.closest?.('input,textarea,select,[contenteditable="true"]');
+      if(!fly){if(!typing && e.shiftKey && e.code==='Backquote' && canvas.parentElement.matches(':hover')){e.preventDefault();e.stopImmediatePropagation();startFly(true);}return;}
+      if(typing || document.querySelector('.app-dialog[open]')){endFly(false);return;}
+      e.preventDefault();e.stopImmediatePropagation();
+      if(e.code==='Escape'){endFly(true);return;}if(e.code==='Enter' || (e.shiftKey&&e.code==='Backquote')){endFly(false);return;}
+      flyKeys.add(e.code);
+    },true);
+    document.addEventListener('keyup',e=>{if(!fly)return;flyKeys.delete(e.code);e.preventDefault();e.stopImmediatePropagation();},true);
+    document.addEventListener('pointermove',e=>{if(!fly)return;
+      const locked=document.pointerLockElement===canvas,dx=locked?e.movementX:fly.x===null?0:e.clientX-fly.x,dy=locked?e.movementY:fly.y===null?0:e.clientY-fly.y;
+      fly.x=e.clientX;fly.y=e.clientY;view.yaw-=dx*.003;view.pitch=Math.max(-PITCH_MAX,Math.min(PITCH_MAX,view.pitch+dy*.003));
+      const f=flyForward();view.target=fly.eye.map((v,i)=>v+f[i]*view.dist);schedule();
+    },true);
+    window.addEventListener('pointerup',e=>{if(fly&&!fly.latched&&e.button===2)endFly(false);},true);
+    window.addEventListener('blur',()=>endFly(false));
+    document.addEventListener('visibilitychange',()=>{if(document.hidden)endFly(false);});
+    document.addEventListener('pointerlockchange',()=>{if(!fly&&document.pointerLockElement===canvas){document.exitPointerLock();return;}if(fly?.latched&&document.pointerLockElement!==canvas)endFly(true);});
+    canvas.addEventListener('pointercancel',()=>endFly(false));
     // ---------------------------------------------------------------- mouse: orbit / pan / select
     const marquee = document.createElement("div");
     marquee.className = "pv-marquee hidden";
     canvas.parentElement.append(marquee);
     let dragging = null;
     function beginCanvasDrag(e) {
+      if(fly){e.preventDefault();return;}
+      if(e.button===2 && !e.altKey){e.preventDefault();canvas.setPointerCapture(e.pointerId);startFly(false);if(fly){fly.x=e.clientX;fly.y=e.clientY;}return;}
       canvas.setPointerCapture(e.pointerId);
       const r = canvas.getBoundingClientRect();
       const selecting = sel.mode !== "view" && e.button === 0 && !e.altKey && raw;
@@ -913,7 +964,7 @@ window.MiniHouPreview = (() => {
     };
     canvas.addEventListener("pointerup", endDrag); canvas.addEventListener("pointercancel", endDrag);
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-    canvas.addEventListener("wheel", (e) => { e.preventDefault(); view.dist *= Math.exp(e.deltaY * 0.0012); schedule(); }, { passive: false });
+    canvas.addEventListener("wheel", (e) => { e.preventDefault(); if(fly){flySpeed=Math.max(.001,Math.min(100000,flySpeed*Math.exp(-e.deltaY*.0015)));flyHint();return;} view.dist *= Math.exp(e.deltaY * 0.0012); schedule(); }, { passive: false });
     canvas.addEventListener("dblclick", (e) => { if (sel.mode === "view") frameAll(); });
     if (window.ResizeObserver) new ResizeObserver(schedule).observe(canvas);
 
@@ -954,7 +1005,7 @@ window.MiniHouPreview = (() => {
         const same = keepCamera && data.npoints === arrays.P.length / 3 && data.ntris === arrays.tri.length / 3 &&
           data.nedges === arrays.edge.length / 2;                                       // same node, same topology: indices still mean the same
         upload(head, arrays);
-        if (!keepCamera) frameAll(); else schedule();
+        if (!keepCamera && !fly) frameAll(); else schedule();
         if (!same && (sel.point.size || sel.edge.size || sel.face.size)) change({}, "replace");   // other geometry: drop the selection
         else rebuildOverlay();
       },

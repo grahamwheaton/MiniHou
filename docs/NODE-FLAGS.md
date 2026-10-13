@@ -63,4 +63,17 @@ PCA oriented bounds, object parenting/pivot hierarchy, or separate object Render
 
 Move gizmos provide XY/XZ/YZ plane squares alongside axis arrows, with existing precision,
 snapping, orientation and Escape cancellation. This does not claim full Blender gizmo parity.
-WASD fly navigation was not found in the available pushed branches; it is not in this build.
+## Viewport navigation and insertion
+
+Hold right mouse in the viewport for mouse-look and WASD movement. Q/E move down/up,
+Shift speeds up, Ctrl slows down, and the wheel changes speed. Release right mouse to
+finish. Middle mouse still pans; Alt-right-drag also pans.
+
+Walk / Fly or Shift+backtick latches navigation. Mouse-look uses pointer lock when the
+host permits it; otherwise it follows the pointer within the window. Enter accepts;
+Escape restores the starting camera. Losing focus stops movement and clears held keys.
+This is free flight: it has no collision detection, gravity or terrain-following walking.
+
+Adding a modifier from Tab or + Node with one node selected inserts it after that node
+and reconnects its existing consumers. Undo restores all those connections. Generators
+still create independent sources, and dragging a wire to the menu keeps explicit wiring.

@@ -83,6 +83,51 @@ class EditorE2E(unittest.TestCase):
             dialog.locator("input").fill(text)
         dialog.locator('button[type="submit"]').click()
 
+    def test_wasd_right_mouse_moves_without_editing_and_stops(self):
+        self.two_boxes();self.page.wait_for_timeout(200)
+        r=self.page.locator('#pv-canvas').bounding_box();x,y=r['x']+100,r['y']+100
+        before=self.s.graph.to_dict();start=self.page.evaluate('minihou.preview.navigationState()')
+        self.page.mouse.move(x,y);self.page.mouse.down(button='right');self.page.keyboard.down('w')
+        self.page.wait_for_timeout(250);self.page.keyboard.up('w')
+        moved=self.page.evaluate('minihou.preview.navigationState()')
+        self.assertTrue(moved['active']);self.assertNotEqual(start['eye'],moved['eye'])
+        self.page.mouse.move(x+40,y+20);look=self.page.evaluate('minihou.preview.navigationState()')
+        self.assertNotEqual(look['yaw'],start['yaw'])
+        self.page.mouse.up(button='right');self.assertFalse(self.page.evaluate('minihou.preview.navigationState().active'))
+        stopped=self.page.evaluate('minihou.preview.navigationState().eye');self.page.wait_for_timeout(100)
+        self.assertEqual(stopped,self.page.evaluate('minihou.preview.navigationState().eye'))
+        self.assertEqual(before,self.s.graph.to_dict())
+
+    def test_wasd_escape_restores_camera_and_wheel_changes_speed(self):
+        self.two_boxes();self.page.wait_for_timeout(200)
+        r=self.page.locator('#pv-canvas').bounding_box();self.page.mouse.move(r['x']+100,r['y']+100)
+        start=self.page.evaluate('minihou.preview.navigationState()');self.page.mouse.down(button='right')
+        speed=self.page.evaluate('minihou.preview.navigationState().speed');self.page.mouse.wheel(0,-100)
+        self.assertGreater(self.page.evaluate('minihou.preview.navigationState().speed'),speed)
+        self.page.keyboard.down('e');self.page.wait_for_timeout(150);self.page.keyboard.up('e');self.page.keyboard.press('Escape');self.page.mouse.up(button='right')
+        end=self.page.evaluate('minihou.preview.navigationState()')
+        self.assertFalse(end['active']);self.assertEqual(start['eye'],end['eye'])
+
+    def test_wasd_toggle_and_blur_release(self):
+        self.two_boxes();self.page.click('#pv-walk')
+        self.assertTrue(self.page.evaluate('minihou.preview.navigationState().active'))
+        self.page.keyboard.down('w');self.page.evaluate("window.dispatchEvent(new Event('blur'))")
+        self.assertFalse(self.page.evaluate('minihou.preview.navigationState().active'))
+        self.page.keyboard.up('w')
+
+    def test_tab_modifier_inserts_into_existing_output_and_undo(self):
+        self.two_boxes();before=self.s.graph.to_dict()
+        self.node('m').locator('.title').click();self.page.keyboard.press('Tab');self.page.keyboard.type('subdivide');self.page.keyboard.press('Enter')
+        self.assertTrue(until(lambda:'subdivide1' in self.s.graph.nodes))
+        self.assertEqual(self.s.graph.nodes['subdivide1'].inputs,{'geo':'m'})
+        self.assertEqual(self.s.graph.nodes['o'].inputs,{'geo':'subdivide1'})
+        self.assertEqual(self.s.graph.display,'o')
+        self.page.keyboard.press('Control+z');self.assertTrue(until(lambda:self.s.graph.to_dict()==before))
+
+    def test_add_button_inserts_after_selection(self):
+        self.two_boxes();self.node('m').locator('.title').click();self.page.click('#add-btn');self.page.keyboard.type('subdivide');self.page.keyboard.press('Enter')
+        self.assertTrue(until(lambda:self.s.graph.nodes['o'].inputs.get('geo')=='subdivide1'))
+
     def test_blast_shelf_captures_face_selection(self):
         self.two_boxes();self.page.click('#preview [data-mode="face"]')
         face=self.second_box_top();self.page.mouse.click(*self.view_xy('face',face))
@@ -1544,6 +1589,7 @@ class EditorE2E(unittest.TestCase):
         self.page.evaluate("localStorage.clear()")
         self.page.reload()
         self.page.wait_for_selector('.node[data-id="out"]')
+        self.page.wait_for_selector("#shelf .sh-tab[data-tab]")
         tabs = self.page.eval_on_selector_all("#shelf .sh-tab[data-tab]", "els => els.map(e => e.dataset.tab)")
         self.assertEqual(tabs[:5], ["Create", "Modify", "Model", "Polygon", "Edges"])
         self.assertIn("Rigid Bodies", tabs)

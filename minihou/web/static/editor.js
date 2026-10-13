@@ -1167,10 +1167,12 @@
     $("#pv-hint-text").textContent = node?.type==='bezier'
       ? "Drag anchors / tangents: edit curve · X/Y/Z: constrain\nShift: precision · Ctrl: snap · Esc: cancel\nShift-double-click: append · Handle modes in inspector"
       : mode === "view"
-      ? "Drag: orbit · Middle/right drag: pan\nWheel: dolly · Double-click: frame all\nC: modeling tools · 1–4: component selection"
+      ? "Drag: orbit · Middle drag: pan · RMB: fly\nWASD + Q/E while flying · wheel: speed / dolly\nC: modeling tools · 1–4: component selection"
       : "Click / drag box: select · Shift: add · Ctrl: remove\nAlt-drag / middle drag: orbit · Right drag: pan\nW / E / R: move / rotate / scale · C: modeling tools";
   }
   function setTool(t) { pv.setTool(t); updateToolButtons(); updateViewportHints(); }
+  $('#pv-walk').onclick=()=>pv.toggleWalk();
+  pv.onNavigationChange=on=>{$('#pv-walk').classList.toggle('on',on);$('#pv-walk').setAttribute('aria-pressed',String(on));};
   function toggleOrtho() {
     const on = pv.toggleOrtho();
     $("#pv-ortho").textContent = on ? "Ortho" : "Persp";
@@ -1815,6 +1817,11 @@
         select([end]);
       }
       return;
+    }
+    const selectedSource=ctx.fromSel || (!ctx.from && !ctx.feeds && S.sel.size===1 ? [...S.sel][0] : null);
+    if(selectedSource && t.inputs.length && t.category!=='source'){
+      const r=await edit([{op:'insert',after:selectedSource,type:t.name,id}]);
+      if(r)select([id]);return;
     }
     const op = { op: "add", type: t.name, id, pos: [x, y] };
     const ops = [op];
