@@ -573,3 +573,6 @@ body.has-error #main {bottom:calc(var(--app-status-h) + 30px);}
 .file-dialog .fd-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-dialog .fd-s { flex: none; }
 .file-dialog .fd-note { min-height: 16px; font-size: 11px; }
+#drop-hint { position: fixed; inset: 24px; display: flex; align-items: center; justify-content: center; z-index: 60; pointer-events: none;
+  border: 2px dashed var(--accent); border-radius: 10px; background: #0007; color: var(--text); font-size: 18px; }
+#drop-hint.hidden { display: none; }

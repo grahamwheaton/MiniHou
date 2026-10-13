@@ -2244,6 +2244,59 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').textContent.includes('Saved 6 faces')")
         self.assertTrue(os.path.isfile(os.path.join(self.dir, "out", "crate.usdc")))
 
+    def drop_files(self, files, dx=300, dy=200, target="#canvas"):
+        """Drop ``files`` ([(name, bytes)]) on the page like a file manager would."""
+        self.page.evaluate("""([files, target, dx, dy]) => {
+          const dt = new DataTransfer();
+          for (const [name, bytes] of files) dt.items.add(new File([new Uint8Array(bytes)], name, { type: "application/octet-stream" }));
+          const el = document.querySelector(target), r = el.getBoundingClientRect();
+          for (const type of ["dragenter", "dragover", "drop"]) el.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true, clientX: r.left + dx, clientY: r.top + dy }));
+        }""", [[[n, list(b)] for n, b in files], target, dx, dy])
+
+    USDA = b'#usda 1.0\ndef Mesh "m" {\n  point3f[] points = [(0,0,0),(1,0,0),(1,1,0)]\n  int[] faceVertexCounts = [3]\n  int[] faceVertexIndices = [0,1,2]\n}\n'
+
+    def test_dropping_a_usd_file_uploads_it_and_makes_a_usd_import_node_at_the_drop_point(self):
+        self.drop_files([("tri.usda", self.USDA)], 300, 200)
+        self.assertTrue(until(lambda: any(n.type == "usd_import" for n in self.s.graph.nodes.values())))
+        nid = next(i for i, n in self.s.graph.nodes.items() if n.type == "usd_import")
+        self.assertEqual(self.s.graph.nodes[nid].params["file"], "imports/tri.usda")
+        with open(os.path.join(self.dir, "imports", "tri.usda"), "rb") as f:
+            self.assertEqual(f.read(), self.USDA)
+        self.assertEqual(self.s.graph.display, nid)
+        self.assertTrue(until(lambda: nid in self.page.evaluate("[...minihou.S.sel]")))
+        box = self.node(nid).bounding_box()
+        canvas = self.page.locator("#canvas").bounding_box()
+        self.assertLess(abs((box["x"] + box["width"] / 2) - (canvas["x"] + 300)), 120)           # at the drop point
+        self.assertLess(abs((box["y"] + 12) - (canvas["y"] + 200)), 120)
+        self.drop_files([("tri.usda", self.USDA)])                                              # the same name again: a new file, never a replacement
+        self.assertTrue(until(lambda: os.path.isfile(os.path.join(self.dir, "imports", "tri_1.usda"))))
+
+    def test_dropping_a_png_makes_an_image_file_node_and_other_files_are_refused(self):
+        self.drop_files([("height.png", b"\x89PNG\r\n\x1a\n" + b"0" * 40)])
+        self.assertTrue(until(lambda: any(n.type == "image_file" for n in self.s.graph.nodes.values())))
+        nid = next(i for i, n in self.s.graph.nodes.items() if n.type == "image_file")
+        self.assertEqual(self.s.graph.nodes[nid].params["file"], "imports/height.png")
+        self.drop_files([("notes.txt", b"hello")])
+        self.page.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').textContent.includes('Cannot import notes.txt')")
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "imports", "notes.txt")))
+
+    def test_the_desktop_window_hands_over_real_paths_and_nothing_is_copied(self):
+        inside = os.path.join(self.dir, "models", "car.usdc")
+        outside = os.path.join(tempfile.gettempdir(), "elsewhere", "far.usda")
+        self.page.evaluate("([a, b]) => minihou.droppedPaths([a, b], 300, 200)", [inside, outside])
+        self.assertTrue(until(lambda: sum(n.type == "usd_import" for n in self.s.graph.nodes.values()) == 2))
+        files = sorted(n.params["file"] for n in self.s.graph.nodes.values() if n.type == "usd_import")
+        self.assertEqual(files, sorted(["models/car.usdc", outside]))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "imports")))
+
+    def test_import_node_shows_reload_and_hides_its_counter(self):
+        self.add_selected("imp", "usd_import")
+        self.assertEqual(self.page.locator('#params button[data-action="reload"]').count(), 1)
+        self.assertEqual(self.page.locator('#params .prow[data-param="reload"]').count(), 0)
+        self.assertEqual(self.page.locator('#params .prow[data-param="prim_path"] .pl').inner_text(), "Primitives")
+        self.page.click('#params button[data-action="reload"]')
+        self.assertTrue(until(lambda: self.s.graph.nodes["imp"].params.get("reload") == 1))
+
     def test_export_usd_from_the_file_menu(self):
         try:
             from minihou import usd_io

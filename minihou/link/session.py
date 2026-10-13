@@ -23,7 +23,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Sequence, Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -445,11 +445,11 @@ class Session:
                 "full_ms": None if self._full_ms is None else round(self._full_ms, 1)}
 
     def export_usd(self, path, node: Optional[str] = None, overwrite: bool = False, embed_graph: bool = True,
-                   name: Optional[str] = None, options: Optional[dict] = None) -> dict:
+                   name: Optional[str] = None, options: Optional[dict] = None, frames: Optional[Sequence[float]] = None) -> dict:
         """Write the cooked geometry to a USD file at full size, whatever the proxy level: the display output and every extra output
         (as Blender receives them), or just ``node`` (under the prim name ``name``, default the node's id). ``options`` are the keyword
-        arguments of :func:`minihou.usd_io.write_stage` (``up_axis``, ``units``, ``root``, ``materials``). Returns the counts written
-        per output."""
+        arguments of :func:`minihou.usd_io.write_stage` (``up_axis``, ``units``, ``root``, ``materials``). ``frames``: write an animation,
+        cooking the graph at each of those frames (the timeline stays where it is). Returns the counts written per output."""
         from .. import usd_io
         with self.lock:
             snapshot = self.graph.copy()
@@ -458,21 +458,32 @@ class Session:
             raise GraphError(f"no such node {node!r}")
         if not usd_io.available():
             raise usd_io.UsdUnavailable("USD support needs the 'usd-core' package: pip install usd-core")
-        outputs: Dict[str, Geometry] = {}
-        with self._cook_lock, timectx.at(frame, fps), proxy.using(1.0):
-            ev = self.evaluator
-            saved, ev.proxy_level = ev.proxy_level, None             # ambient level 1.0: never a proxy cook, never the link's reduction
-            try:
+        ev = self.evaluator
+        graph = snapshot.to_dict() if embed_graph else None
+
+        def cook_outputs(at: float) -> Dict[str, Geometry]:
+            outputs: Dict[str, Geometry] = {}
+            with timectx.at(at, fps):
                 if node is not None:
                     outputs[name or node] = ev.cook(snapshot, node)
                 else:
                     outputs[snapshot.output_node()] = ev.cook(snapshot)
-                    for name, nid in snapshot.extra_outputs().items():
-                        outputs[name] = ev.cook(snapshot, nid)
+                    for extra, nid in snapshot.extra_outputs().items():
+                        outputs[extra] = ev.cook(snapshot, nid)
+            return outputs
+
+        with self._cook_lock, proxy.using(1.0):
+            saved, ev.proxy_level = ev.proxy_level, None             # ambient level 1.0: never a proxy cook, never the link's reduction
+            try:
+                if frames:
+                    rep = usd_io.write_animation(path, ((f, cook_outputs(f)) for f in frames), fps=fps, graph=graph, overwrite=overwrite,
+                                                 **(options or {}))
+                else:
+                    outputs = cook_outputs(frame)
             finally:
                 ev.proxy_level = saved
-        rep = usd_io.write_stage(path, outputs, graph=snapshot.to_dict() if embed_graph else None, overwrite=overwrite, frame=frame,
-                                 **(options or {}))
+        if not frames:
+            rep = usd_io.write_stage(path, outputs, graph=graph, overwrite=overwrite, frame=frame, **(options or {}))
         out = rep.to_dict()
         out["frame"] = frame
         return out

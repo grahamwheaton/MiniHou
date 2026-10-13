@@ -1341,6 +1341,66 @@
       try { addToolAt(JSON.parse(raw), e.clientX, e.clientY); } catch (err) { /* not ours */ }
     });
   }
+  // ---------------------------------------------------------------- dropping files on the editor
+  // A USD file becomes a USD Import node, a PNG an Image File node, at the drop point (the middle of the graph when dropped elsewhere).
+  // A page only learns a dropped file's name, so the bytes go to the engine (imports/ under the workspace); the desktop window instead
+  // reports the real paths (minihou.droppedPaths) and nothing is copied.
+  const DROP_NODES = { ".usd": "usd_import", ".usda": "usd_import", ".usdc": "usd_import", ".usdz": "usd_import", ".png": "image_file" };
+  const dropExt = (name) => ((/\.[A-Za-z0-9]+$/.exec(name) || [""])[0]).toLowerCase();
+  const dragHasFiles = (e) => [...((e.dataTransfer && e.dataTransfer.types) || [])].includes("Files");
+  let dropFromDesktop = 0;                                          // when the desktop window last handed over real paths
+  function uploadFile(file) {
+    return new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open("POST", "/api/upload?name=" + encodeURIComponent(file.name));
+      x.setRequestHeader("Content-Type", "application/octet-stream");
+      x.setRequestHeader("X-MiniHou-Upload", "1");
+      x.upload.onprogress = (e) => { if (e.lengthComputable && file.size > 4 * 2 ** 20) toast(`Uploading ${file.name}: ${Math.round((100 * e.loaded) / e.total)}%`, false); };
+      x.onload = () => { let d = {}; try { d = JSON.parse(x.responseText); } catch (err) { /* below */ } x.status === 200 ? resolve(d) : reject(new Error(d.error || "upload failed (" + x.status + ")")); };
+      x.onerror = () => reject(new Error("upload failed: is the engine still running?"));
+      x.send(file);
+    });
+  }
+  async function importDropped(items, clientX, clientY) {          // items: [{name, path?, file?}]
+    const usable = items.filter((it) => DROP_NODES[dropExt(it.name)] && S.types[DROP_NODES[dropExt(it.name)]]);
+    const skipped = items.filter((it) => !usable.includes(it));
+    if (skipped.length) toast(`Cannot import ${skipped.map((it) => it.name).join(", ")}: drop USD (.usd .usda .usdc .usdz) or PNG files.`);
+    if (!usable.length) return;
+    const r = canvas.getBoundingClientRect();
+    const inside = clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+    const [x, y] = inside ? toWorld(clientX, clientY) : toWorld(r.left + r.width / 2, r.top + r.height / 2);
+    const taken = new Set(Object.keys(S.graph.nodes)), ops = [], ids = [];
+    for (let i = 0; i < usable.length; i++) {
+      const it = usable[i], type = DROP_NODES[dropExt(it.name)];
+      let file = it.path;
+      if (!file) {
+        try { toast(`Uploading ${it.name}…`, false); file = (await uploadFile(it.file)).path; } catch (err) { toast(err.message); continue; }
+      } else file = toParamPath(file);
+      const id = uniqueId(type, taken); taken.add(id); ids.push(id);
+      ops.push({ op: "add", type, id, params: { file }, pos: [Math.round(x - W / 2 + i * 30), Math.round(y - 12 + i * 70)] });
+    }
+    if (!ops.length) return;
+    ops.push({ op: "display", id: ids[ids.length - 1] });
+    const res = await edit(ops);
+    if (res) { select(ids); toast(`Imported ${ids.length === 1 ? ids[0] : ids.length + " files"}`, false); }
+  }
+  let dropDepth = 0;
+  const dropHint = h("div", { id: "drop-hint", class: "hidden" }, "Drop a USD or PNG file to import it");
+  document.body.append(dropHint);
+  document.addEventListener("dragenter", (e) => { if (dragHasFiles(e)) { dropDepth++; dropHint.classList.remove("hidden"); } });
+  document.addEventListener("dragleave", (e) => { if (dragHasFiles(e) && --dropDepth <= 0) { dropDepth = 0; dropHint.classList.add("hidden"); } });
+  document.addEventListener("dragover", (e) => { if (dragHasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } });
+  document.addEventListener("drop", (e) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault(); dropDepth = 0; dropHint.classList.add("hidden");
+    const files = [...e.dataTransfer.files].map((f) => ({ name: f.name, file: f })), x = e.clientX, y = e.clientY;
+    if (window.pywebview) setTimeout(() => { if (Date.now() - dropFromDesktop > 1500) importDropped(files, x, y); }, 700);          // the desktop window may have real paths for us
+    else importDropped(files, x, y);
+  });
+  window.addEventListener("dragover", (e) => { if (dragHasFiles(e)) e.preventDefault(); });                // never let the browser open a file that misses the page
+  window.addEventListener("drop", (e) => { if (dragHasFiles(e)) e.preventDefault(); });
+  const droppedPaths = (paths, x, y) => { dropFromDesktop = Date.now(); importDropped((paths || []).map((p) => ({ name: String(p).split(/[\\/]/).pop(), path: String(p) })), x ?? -1, y ?? -1); };
+
   if (window.MiniPie) {
     MiniPie.init({ types: () => S.types, onPick: pieTool, onOpen: () => { pieFromView = pvOver; },
       blocked: () => !$("#tabmenu").classList.contains("hidden") || !$("#help").classList.contains("hidden") });
@@ -2737,5 +2797,5 @@
   applyView();
   try { recoveryButton(); } catch (e) { /* Browser storage may be disabled. */ }
   connectEvents();
-  window.minihou = { desktopCanClose: () => { document.activeElement?.blur(); return !desktopPendingEdits && !setInFlight && !pendingSet.size; }, S, edit, frame, clipboardText, pasteNodes, preview: pv, layout };                  // handy from the browser console
+  window.minihou = { droppedPaths, importDropped, desktopCanClose: () => { document.activeElement?.blur(); return !desktopPendingEdits && !setInFlight && !pendingSet.size; }, S, edit, frame, clipboardText, pasteNodes, preview: pv, layout };                  // handy from the browser console
 })();
