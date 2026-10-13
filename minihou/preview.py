@@ -30,9 +30,9 @@ MAGIC = b"MHPV"
 DISPLAY_TRIS = 250_000
 DISPLAY_POINTS = 500_000
 # "Full resolution" on request: the most the viewer is asked to hold (past this it reduces too, so a request can never hang the browser)
-MAX_TRIS = 600_000
-MAX_EDGES = 1_200_000
-MAX_POINTS = 2_000_000
+MAX_TRIS = 2_500_000
+MAX_EDGES = 5_000_000
+MAX_POINTS = 4_000_000
 EXACT_PRIMS = 100_000            # up to this many primitives, polygons with more than 3 corners are triangulated exactly (concave ones too)
 
 
@@ -125,7 +125,7 @@ def _arrays_for(geo, full: bool = False, tris: int = 0) -> Tuple[dict, Dict[str,
     head = {"points": int(n0), "prims": int(geo.topology.nprims), "tris": int(len(tri)), "edges": int(len(edge)),
             "bounds": [lo, hi], "truncated": truncated,
             "proxy": {"active": bool(red.reduced), "points": int(n0), "tris": int(tris0), "shown_points": int(n), "shown_tris": int(len(tri)),
-                      "full": bool(full)}}
+                      "full": bool(full), "max_tris": MAX_TRIS, "max_points": MAX_POINTS}}
     return head, out
 
 

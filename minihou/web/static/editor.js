@@ -77,6 +77,86 @@
     if (!r.ok) throw new Error(data.error || r.statusText);
     return data;
   }
+
+  // ---------------------------------------------------------------- choosing files
+  // A page never learns the real path of a file, so the engine (on this machine) does the choosing: the desktop window's or the system's
+  // own dialog when there is one, otherwise the in-app browser below. What comes back is a workspace-relative path when the file is inside it.
+  const isAbs = (p) => /^([A-Za-z]:[\\/]|[\\/])/.test(p);
+  const sameCase = (a, b) => (S.root && /^[A-Za-z]:/.test(S.root) ? a.toLowerCase() === b.toLowerCase() : a === b);
+  function toParamPath(abs) {
+    const root = (S.root || "").replace(/\\/g, "/").replace(/\/$/, ""), p = abs.replace(/\\/g, "/");
+    if (root && p.length > root.length + 1 && sameCase(p.slice(0, root.length + 1), root + "/")) return p.slice(root.length + 1);
+    return abs;
+  }
+  const absPath = (v) => (!v ? (S.root || "") : isAbs(v) ? v : (S.root || "").replace(/[\\/]$/, "") + "/" + v);
+  const fmtBytes = (n) => (n >= 2 ** 30 ? (n / 2 ** 30).toFixed(1) + " GB" : n >= 2 ** 20 ? (n / 2 ** 20).toFixed(1) + " MB" : n >= 1024 ? Math.round(n / 1024) + " KB" : n + " B");
+  async function pickFile(opts) {                                // opts: {mode: "open"|"save", exts: [".usd"], title, start}; -> param path | null
+    try {
+      const r = await api("/api/pick_file", { mode: opts.mode, exts: opts.exts, title: opts.title, start: opts.start });
+      if (r.native) return r.cancelled ? null : r.path;
+    } catch (e) { toast(e.message); return null; }
+    return browseFile(opts);
+  }
+  function browseFile(opts) {
+    return new Promise((resolve) => {
+      const save = opts.mode === "save", exts = opts.exts || [];
+      const dialog = h("dialog", { class: "app-dialog file-dialog", "aria-label": opts.title || (save ? "Save file" : "Open file") });
+      const pathInput = h("input", { type: "text", class: "fd-path", "aria-label": "Folder" });
+      const list = h("div", { class: "fd-list", role: "listbox" }), places = h("div", { class: "fd-places" });
+      const nameInput = h("input", { type: "text", class: "fd-name", "aria-label": "File name", placeholder: save ? "file name" : "pick a file above" });
+      const note = h("div", { class: "fd-note muted" });
+      let dir = "", entries = [], sep = "/";
+      const joined = (name) => dir.replace(/[\\/]+$/, "") + sep + name;
+      let seq = 0;
+      async function go(target) {
+        const mine = ++seq;                                          // a slower, older answer must not replace a newer one
+        let r = null;
+        try { r = await api("/api/browse?path=" + encodeURIComponent(target || "") + "&exts=" + encodeURIComponent(exts.join(",")) + "&fallback=1" + (places.childElementCount ? "" : "&places=1")); }
+        catch (e) { /* shown below */ }
+        if (mine !== seq) return;
+        if (!r) { note.textContent = "Cannot open that folder."; return; }
+        dir = r.path; sep = r.sep || "/"; entries = r.entries; pathInput.value = dir;
+        if (r.places && !places.childElementCount) places.append(...r.places.map((pl) => h("button", { type: "button", onclick: () => go(pl.path) }, pl.name)));
+        list.replaceChildren(...(r.parent ? [h("div", { class: "fd-row", onclick: () => go(r.parent), ondblclick: () => go(r.parent) }, h("span", { class: "fd-n" }, "⬑ .."))] : []),
+          ...entries.map((e) => h("div", { class: "fd-row" + (e.dir ? " dir" : ""), dataset: { name: e.name }, role: "option",
+            onclick: () => { if (!e.dir) { nameInput.value = e.name; list.querySelectorAll(".sel").forEach((x) => x.classList.remove("sel")); list.querySelector(`[data-name="${CSS.escape(e.name)}"]`)?.classList.add("sel"); } },
+            ondblclick: () => (e.dir ? go(joined(e.name)) : finish(e.name)) },
+            h("span", { class: "fd-n" }, (e.dir ? "📁 " : "") + e.name), h("span", { class: "fd-s muted" }, e.dir ? "" : fmtBytes(e.size)))));
+        note.textContent = r.truncated ? "Only the first entries are shown." : (!entries.length ? "Nothing here" + (exts.length ? " with " + exts.join(" ") : "") : "");
+      }
+      async function finish(nm) {
+        let name = (nm || nameInput.value || "").trim();
+        if (!name) return;
+        if (save && exts.length && !/\.[A-Za-z0-9]+$/.test(name)) name += exts[0];
+        if (save && entries.some((e) => !e.dir && e.name.toLowerCase() === name.toLowerCase()) && !(await appConfirm(name + " already exists. Replace it?"))) return;
+        dialog.close("ok"); dialog.dataset.result = toParamPath(joined(name));
+      }
+      const form = h("form", { method: "dialog" }, h("h2", null, opts.title || (save ? "Save as" : "Open")),
+        h("div", { class: "fd-top" }, h("button", { type: "button", title: "Up one folder", onclick: () => go(dir.replace(/[\\/][^\\/]*[\\/]?$/, "") || dir) }, "↑"), pathInput),
+        h("div", { class: "fd-body" }, places, list), note,
+        h("div", { class: "fd-bottom" }, nameInput, h("button", { type: "button", onclick: () => dialog.close("cancel") }, "Cancel"),
+          h("button", { type: "button", class: "primary", onclick: () => finish() }, save ? "Save" : "Open")));
+      form.append(h("button", { type: "submit", hidden: true, tabindex: -1 }));
+      form.onsubmit = (e) => { e.preventDefault(); if (document.activeElement === pathInput) go(pathInput.value.trim()); else finish(); };       // Enter in either field
+      dialog.append(form); document.body.append(dialog);
+      dialog.addEventListener("close", () => { const r = dialog.returnValue === "ok" ? dialog.dataset.result || null : null; dialog.remove(); resolve(r); }, { once: true });
+      dialog.showModal();
+      const start = opts.start ? absPath(opts.start) : "";
+      if (save && opts.start && !/[\\/]$/.test(opts.start)) nameInput.value = opts.start.split(/[\\/]/).pop();
+      go(start);
+    });
+  }
+  async function settle() { for (let i = 0; i < 100 && (setInFlight || pendingSet.size); i++) await new Promise((r) => setTimeout(r, 30)); }
+  async function pressAction(id, a, btn) {
+    btn.disabled = true;
+    try {
+      await settle();
+      const r = await api("/api/node_action", { node: id, action: a.name });
+      toast(r.message || a.label + " done", false);
+    } catch (err) { toast(err.message); }
+    finally { btn.disabled = false; }
+  }
+
   const recoveryKey = "minihou.unsent-edits";
   let recoveredEdits = [];
   try {
@@ -713,6 +793,11 @@
       }
     }
     if (t.params.length) out.push(h("div", { class: "section" }, "Parameters"));
+    if (t.actions && t.actions.length) out.push(h("div", { class: "pactions node-actions" }, t.actions.map((a) => {
+      const btn = h("button", { class: "primary", title: a.doc || "", dataset: { action: a.name } }, a.label);
+      btn.onclick = () => pressAction(id, a, btn);
+      return btn;
+    })));
     if(n.type==='bezier'&&curveTool)out.push(curveTool.panel());
     if (n.type === "rbd_solver") out.push(h("button", {
       onclick: () => queueSet(id, "reset", Number(n.params?.reset || 0) + 1),
@@ -722,6 +807,7 @@
     for (let i = 0; i < t.params.length; i++) {
       const p = t.params[i];
       if(n.type==='bezier'&&p.name==='controls')continue;
+      if (p.ui === "hidden") continue;
       if (p.ui === "outgroup") {                                     // Output Groups: a checkbox and the group's name side by side, like Houdini
         if (!ogHeader) { out.push(h("div", { class: "ogheader" }, "Output Groups")); ogHeader = true; }
         const q = t.params[i + 1], named = q && q.ui === "outgroup_name";
@@ -837,6 +923,15 @@
       const sel = h("select", { dataset: { role: "enum" }, onchange: (e) => queueSet(id, p.name, e.target.value) },
         p.choices.map((c) => h("option", { value: c, selected: c === v }, c)));
       widget = h("div", { class: "pw" }, sel);
+    } else if ((p.ui || "").startsWith("file:")) {
+      const [, mode, exts] = p.ui.split(":");
+      const inp = h("input", { type: "text", value: v, dataset: { role: "str" }, placeholder: mode === "save" ? "where to write" : "choose a file", onchange: (e) => queueSet(id, p.name, e.target.value) });
+      const browse = h("button", { type: "button", class: "pbtn browse", dataset: { role: "browse" }, title: mode === "save" ? "Choose where to save" : "Choose a file",
+        onclick: async () => {
+          const chosen = await pickFile({ mode, exts: (exts || "").split(",").filter(Boolean), title: (mode === "save" ? "Save " : "Open ") + (p.label || p.name), start: inp.value.trim() });
+          if (chosen) { inp.value = chosen; queueSet(id, p.name, chosen); }
+        } }, "📂");
+      widget = h("div", { class: "pw filepick" }, inp, browse);
     } else if (p.ui === "code") {
       const ta = h("textarea", { value: v, spellcheck: false, rows: Math.min(14, Math.max(3, String(v).split("\n").length + 1)), dataset: { role: "code" } });
       const apply = () => { ta.classList.remove("dirty"); if (ta.value !== effective(id, p)) queueSet(id, p.name, ta.value); };
@@ -971,28 +1066,52 @@
   const loopTool=pv?.ok&&window.MiniLoopTool?MiniLoopTool(pv,$('#pv-canvas'),async params=>{if(!pvNode)return;const r=await edit([{op:'insert',after:pvNode,type:'polysplit',params}]);if(r){const id=r.results?.[0]?.id;if(id){pvKeepCameraNode=id;select([id]);}}}):null;
   const curveTool = pv?.ok && window.MiniCurveTool ? MiniCurveTool(pv,$('#pv-canvas'),(id,value)=>queueSet(id,'controls',value)) : null;
   let pvKeepCameraNode = null;
-  let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false, pvFull = false, pvReduced = null;
+  let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false, pvReduced = null, pvTooBig = null;
+  let pvSelection = { mode: "view", points: [], edges: [], faces: [] };
+  // Viewport detail: auto draws a big geometry reduced, but at full detail while a selection mode is on (selecting needs the real points);
+  // full always asks for full detail; fast always reduces (selection off). Remembered between sessions.
+  let pvDetail = "auto";
+  try { const d = localStorage.getItem("minihou.pvDetail"); if (["auto", "full", "fast"].includes(d)) pvDetail = d; } catch (e) { /* no storage */ }
+  const wantFull = () => pvDetail === "full" || (pvDetail === "auto" && pvSelection.mode !== "view");
+  function setDetail(d) {
+    pvDetail = d;
+    try { localStorage.setItem("minihou.pvDetail", d); } catch (e) { /* no storage */ }
+    $("#pv-detail").value = d;
+    pvKey = null; schedulePreview(); setReducedView(pvReduced);
+  }
   const pct = (x) => (x >= 0.1 ? Math.round(x * 100) : Math.round(x * 1000) / 10) + "%";
-  // A big geometry is drawn reduced (clustered to a budget): say so, offer full detail, and keep selection off (the drawn points are not the real ones)
+  // A big geometry is drawn reduced (clustered to a budget). Selecting needs the real points, so a selection mode asks for full detail
+  // (auto) and only stays off when the geometry is too big even then, or detail is set to fast.
+  const tooBig = (p) => !!p && (p.full || p.tooBig);                      // reduced although full detail was asked for
+  function selectLock(p) { return !!p && (tooBig(p) || pvDetail === "fast"); }
   function setReducedView(p) {
     pvReduced = p;
-    $("#pv-proxy").classList.toggle("hidden", !p && !pvFull);
-    $("#pv-proxy-text").textContent = p ? `Reduced view: ${fmt(p.shown_tris)} of ${fmt(p.tris)} triangles` + (p.points > p.shown_points ? `, ${fmt(p.shown_points)} of ${fmt(p.points)} points` : "") : "";
-    $("#pv-full").classList.toggle("on", pvFull);
-    $("#pv-full").textContent = pvFull ? "Full res ✓" : "Full res";
+    $("#pv-proxy").classList.toggle("hidden", !p && pvDetail !== "full");
+    $("#pv-proxy-text").textContent = p ? `Reduced view: ${fmt(p.shown_tris)} of ${fmt(p.tris)} triangles` + (p.points > p.shown_points ? `, ${fmt(p.shown_points)} of ${fmt(p.points)} points` : "") + (tooBig(p) ? " (more than the viewer can hold)" : "") : "";
+    $("#pv-full").classList.toggle("on", pvDetail === "full");
+    $("#pv-full").textContent = pvDetail === "full" ? "Full res ✓" : "Full res";
+    $("#pv-detail").value = pvDetail;
+    const lock = selectLock(p), why = lockMessage(p);
     document.querySelectorAll("#preview [data-mode]").forEach((b) => {
-      const lock = !!p && b.dataset.mode !== "view";
-      b.disabled = lock; b.title = lock ? "Selecting works on the real geometry: this view is reduced. Use Full res, or lower the proxy level." : b.title;
+      const off = lock && b.dataset.mode !== "view";
+      if (!b.dataset.title) b.dataset.title = b.title;
+      b.disabled = off; b.title = off ? why : b.dataset.title;
     });
-    if (p && pvSelection.mode !== "view") pv.setMode("view");
+    if (lock && pvSelection.mode !== "view") { pv.setMode("view"); pvMsg(why); clearTimeout(blockedByReduced.t); blockedByReduced.t = setTimeout(() => pvMsg(""), 6000); }
+  }
+  function lockMessage(p) {
+    if (!p) return "";
+    if (tooBig(p)) return `Selecting needs the real geometry, and this one has ${fmt(p.tris)} triangles / ${fmt(p.points)} points, more than the viewer can hold (${fmt(p.max_tris)} / ${fmt(p.max_points)}). Cut it down first (Blast, or Group Create with a bounds box).`;
+    return "Detail is set to Fast, so the view is reduced and selecting is off. Set Detail to Auto or Full to select.";
   }
   function blockedByReduced() {
-    if (!pvReduced) return false;
-    pvMsg("Selecting needs the real geometry: this view is reduced. Click Full res, or lower the proxy level.");
-    clearTimeout(blockedByReduced.t); blockedByReduced.t = setTimeout(() => pvMsg(""), 3500);
+    if (!selectLock(pvReduced)) return false;
+    pvMsg(lockMessage(pvReduced));
+    clearTimeout(blockedByReduced.t); blockedByReduced.t = setTimeout(() => pvMsg(""), 6000);
     return true;
   }
-  $("#pv-full").onclick = () => { pvFull = !pvFull; pvKey = null; schedulePreview(); setReducedView(pvReduced); };
+  $("#pv-full").onclick = () => setDetail(pvDetail === "full" ? "auto" : "full");
+  $("#pv-detail").onchange = (e) => setDetail(e.target.value);
   let pvInFlight = false, pvDirty = false;
   function schedulePreview() {
     if (!pv || !pv.ok) return;
@@ -1029,12 +1148,13 @@
     const node = previewTarget(), documentId = S.documentId;
     $("#pv-node").textContent = node ? "· " + node : "";
     if (!node) { pv.clear(); pvMsg(""); pvKey = null; return; }
-    const key = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}:${pvFull}`;
+    const full = wantFull();
+    const key = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}:${full}`;
     if (key === pvKey) return;
     pvKey = key;
     let buf;
     try {
-      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full: pvFull, templates:true }) });
+      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full, templates:true }) });
       buf = await r.arrayBuffer();
     } catch (e) { pvKey = null; return; }
     // A completed frame of the same node is useful even if a newer edit arrived.
@@ -1048,7 +1168,11 @@
     }
     const empty = !head.points;
     pvMsg(empty ? "No geometry" : head.truncated ? "Showing part of a very large geometry." : "");
-    setReducedView(head.proxy && head.proxy.active ? head.proxy : null);
+    let rp = head.proxy && head.proxy.active ? head.proxy : null;
+    const sig = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}`;
+    if (rp && rp.full) pvTooBig = sig;                                           // full detail was refused for this result: say so on the next (reduced) view too
+    else if (rp && pvTooBig === sig) rp = { ...rp, tooBig: true };
+    setReducedView(rp);
     pv.set(head, arrays, (pvNode === node && pvPath === S.path) || pvKeepCameraNode === node);
     if(pvKeepCameraNode===node)pvKeepCameraNode=null;
     pv.selectableTemplates=head.selectable_templates||[];
@@ -1086,7 +1210,6 @@
   };
   const SEL_KEY = { point: "points", edge: "edges", face: "faces", piece: "faces" };
   SELECTION_ACTIONS.piece = SELECTION_ACTIONS.face;                          // a piece is a set of faces: the same actions
-  let pvSelection = { mode: "view", points: [], edges: [], faces: [] };
   async function applySelectionAction(a) {
     const s = pvSelection;
     let node = pvNode;
@@ -1098,7 +1221,12 @@
     if (r) { pv.clearSelection(); select([r.results[0].id]); }
   }
   function renderSelectionTools(s) {
+    const was = pvSelection.mode;
     pvSelection = s;
+    if (was !== s.mode && (was === "view" || s.mode === "view") && pvDetail === "auto") {          // selecting asks for full detail, leaving it lets go again
+      if (s.mode !== "view" && pvReduced && !selectLock(pvReduced)) { pvMsg("Loading full detail for selecting…"); }
+      schedulePreview();
+    }
     updateViewportHints();
     const n = (s[SEL_KEY[s.mode]] || []).length;
     $("#pv-selinfo").textContent = s.mode === "view" ? "" : s.mode === "piece" ? `${n} face${n === 1 ? "" : "s"} in the selected objects` : `${n} ${SEL_KEY[s.mode].replace(/s$/, "")}${n === 1 ? "" : "s"} selected`;
@@ -1259,6 +1387,66 @@
       try { addToolAt(JSON.parse(raw), e.clientX, e.clientY); } catch (err) { /* not ours */ }
     });
   }
+  // ---------------------------------------------------------------- dropping files on the editor
+  // A USD file becomes a USD Import node, a PNG an Image File node, at the drop point (the middle of the graph when dropped elsewhere).
+  // A page only learns a dropped file's name, so the bytes go to the engine (imports/ under the workspace); the desktop window instead
+  // reports the real paths (minihou.droppedPaths) and nothing is copied.
+  const DROP_NODES = { ".usd": "usd_import", ".usda": "usd_import", ".usdc": "usd_import", ".usdz": "usd_import", ".png": "image_file" };
+  const dropExt = (name) => ((/\.[A-Za-z0-9]+$/.exec(name) || [""])[0]).toLowerCase();
+  const dragHasFiles = (e) => [...((e.dataTransfer && e.dataTransfer.types) || [])].includes("Files");
+  let dropFromDesktop = 0;                                          // when the desktop window last handed over real paths
+  function uploadFile(file) {
+    return new Promise((resolve, reject) => {
+      const x = new XMLHttpRequest();
+      x.open("POST", "/api/upload?name=" + encodeURIComponent(file.name));
+      x.setRequestHeader("Content-Type", "application/octet-stream");
+      x.setRequestHeader("X-MiniHou-Upload", "1");
+      x.upload.onprogress = (e) => { if (e.lengthComputable && file.size > 4 * 2 ** 20) toast(`Uploading ${file.name}: ${Math.round((100 * e.loaded) / e.total)}%`, false); };
+      x.onload = () => { let d = {}; try { d = JSON.parse(x.responseText); } catch (err) { /* below */ } x.status === 200 ? resolve(d) : reject(new Error(d.error || "upload failed (" + x.status + ")")); };
+      x.onerror = () => reject(new Error("upload failed: is the engine still running?"));
+      x.send(file);
+    });
+  }
+  async function importDropped(items, clientX, clientY) {          // items: [{name, path?, file?}]
+    const usable = items.filter((it) => DROP_NODES[dropExt(it.name)] && S.types[DROP_NODES[dropExt(it.name)]]);
+    const skipped = items.filter((it) => !usable.includes(it));
+    if (skipped.length) toast(`Cannot import ${skipped.map((it) => it.name).join(", ")}: drop USD (.usd .usda .usdc .usdz) or PNG files.`);
+    if (!usable.length) return;
+    const r = canvas.getBoundingClientRect();
+    const inside = clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+    const [x, y] = inside ? toWorld(clientX, clientY) : toWorld(r.left + r.width / 2, r.top + r.height / 2);
+    const taken = new Set(Object.keys(S.graph.nodes)), ops = [], ids = [];
+    for (let i = 0; i < usable.length; i++) {
+      const it = usable[i], type = DROP_NODES[dropExt(it.name)];
+      let file = it.path;
+      if (!file) {
+        try { toast(`Uploading ${it.name}…`, false); file = (await uploadFile(it.file)).path; } catch (err) { toast(err.message); continue; }
+      } else file = toParamPath(file);
+      const id = uniqueId(type, taken); taken.add(id); ids.push(id);
+      ops.push({ op: "add", type, id, params: { file }, pos: [Math.round(x - W / 2 + i * 30), Math.round(y - 12 + i * 70)] });
+    }
+    if (!ops.length) return;
+    ops.push({ op: "display", id: ids[ids.length - 1] });
+    const res = await edit(ops);
+    if (res) { select(ids); toast(`Imported ${ids.length === 1 ? ids[0] : ids.length + " files"}`, false); }
+  }
+  let dropDepth = 0;
+  const dropHint = h("div", { id: "drop-hint", class: "hidden" }, "Drop a USD or PNG file to import it");
+  document.body.append(dropHint);
+  document.addEventListener("dragenter", (e) => { if (dragHasFiles(e)) { dropDepth++; dropHint.classList.remove("hidden"); } });
+  document.addEventListener("dragleave", (e) => { if (dragHasFiles(e) && --dropDepth <= 0) { dropDepth = 0; dropHint.classList.add("hidden"); } });
+  document.addEventListener("dragover", (e) => { if (dragHasFiles(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } });
+  document.addEventListener("drop", (e) => {
+    if (!dragHasFiles(e)) return;
+    e.preventDefault(); dropDepth = 0; dropHint.classList.add("hidden");
+    const files = [...e.dataTransfer.files].map((f) => ({ name: f.name, file: f })), x = e.clientX, y = e.clientY;
+    if (window.pywebview) setTimeout(() => { if (Date.now() - dropFromDesktop > 1500) importDropped(files, x, y); }, 700);          // the desktop window may have real paths for us
+    else importDropped(files, x, y);
+  });
+  window.addEventListener("dragover", (e) => { if (dragHasFiles(e)) e.preventDefault(); });                // never let the browser open a file that misses the page
+  window.addEventListener("drop", (e) => { if (dragHasFiles(e)) e.preventDefault(); });
+  const droppedPaths = (paths, x, y) => { dropFromDesktop = Date.now(); importDropped((paths || []).map((p) => ({ name: String(p).split(/[\\/]/).pop(), path: String(p) })), x ?? -1, y ?? -1); };
+
   if (window.MiniPie) {
     MiniPie.init({ types: () => S.types, onPick: pieTool, onOpen: () => { pieFromView = pvOver; },
       blocked: () => !$("#tabmenu").classList.contains("hidden") || !$("#help").classList.contains("hidden") });
@@ -1273,6 +1461,7 @@
     document.querySelectorAll('.pv-cursor-angle').forEach(e=>{const i=Number(e.dataset.axis);e.value=pv.interaction.cursor[i];e.onchange=()=>{if(Number.isFinite(Number(e.value))){pv.interaction.cursor[i]=Number(e.value);store();}};});
     $('#pv-custom-frame').onclick=()=>{pv.interaction.orientation='normal';pv.interaction.custom=pv.orientationFrame();pv.interaction.orientation='custom';$('#pv-orientation').value='custom';store();};
     pv.onSelect = renderSelectionTools;
+    pv.canPick = () => !pvReduced;                                              // the drawn points of a reduced view are not the real ones
     // viewport handles: arrows in the view that scrub a parameter of the viewed node
     let handleBase = null, gizmoNode = null, createdNode=null, originalGraph=null, originalNode=null, createdTemplateMerge=null;
     const baseFor = (node, h) => {                                                       // the parameter's current value (or default) on that node
@@ -2247,10 +2436,19 @@
     if (p.auto) return PROXY_ROWS[1];
     return PROXY_ROWS.find((r) => !r.auto && Math.abs(r.level - p.level) < 1e-9) || { id: "custom", label: pct(p.level), level: p.level, auto: false };
   };
+  const pvLevel = $("#pv-proxy-level");                                         // the same cook proxy, reachable from the viewport's display options
+  for (const r of PROXY_ROWS) pvLevel.append(h("option", { value: r.id }, "Proxy: " + r.label));
+  pvLevel.onchange = async () => {
+    const r = PROXY_ROWS.find((x) => x.id === pvLevel.value);
+    try { S.status = Object.assign(S.status || {}, { proxy: await api("/api/proxy", { level: r.level, auto: r.auto }) }); } catch (e) { toast(e.message); }
+    renderProxy();
+  };
   function renderProxy() {
     const p = (S.status && S.status.proxy) || { level: 1, auto: false, link_tris: 0 };
     const row = proxyRow();
     $("#proxy-label").textContent = row.label;
+    if (![...pvLevel.options].some((o) => o.value === row.id)) pvLevel.append(h("option", { value: row.id }, "Proxy: " + row.label));
+    pvLevel.value = row.id;
     $("#proxy-btn").classList.toggle("on", row.id !== "full" || p.link_tris > 0 || !!(S.status && S.status.disk_cache));
     $("#proxy-btn").title = row.id === "full" ? "Proxy: work on a lighter version of a very large scene" : `Proxy ${row.label}: nodes cook a smaller version of the scene (counts, resolutions, voxel sizes scale)`;
     if (!$("#proxy-menu").classList.contains("hidden")) fillProxyMenu();
@@ -2259,7 +2457,7 @@
     const p = (S.status && S.status.proxy) || { level: 1, auto: false, link_tris: 0 }, cur = proxyRow().id, m = $("#proxy-menu");
     m.innerHTML = "";
     const head = document.createElement("div"); head.className = "head";
-    head.textContent = "Cook a lighter version of the scene while you work: grid and scatter counts, sphere bands, voxel sizes and spacings scale down. The viewport always draws within a budget of its own.";
+    head.textContent = "Cook a lighter version of the scene while you work: grid and scatter counts, sphere bands, voxel sizes and spacings scale down. The viewport has its own Detail setting (reduced above a budget, full while you select).";
     m.appendChild(head);
     for (const r of PROXY_ROWS) {
       const it = document.createElement("div"); it.className = "item" + (r.id === cur ? " cur" : ""); it.dataset.proxy = r.id;
@@ -2694,5 +2892,5 @@
   applyView();
   try { recoveryButton(); } catch (e) { /* Browser storage may be disabled. */ }
   connectEvents();
-  window.minihou = { desktopCanClose: () => { document.activeElement?.blur(); return !desktopPendingEdits && !setInFlight && !pendingSet.size; }, S, edit, frame, clipboardText, pasteNodes, preview: pv, layout };                  // handy from the browser console
+  window.minihou = { droppedPaths, importDropped, desktopCanClose: () => { document.activeElement?.blur(); return !desktopPendingEdits && !setInFlight && !pendingSet.size; }, S, edit, frame, clipboardText, pasteNodes, preview: pv, layout };                  // handy from the browser console
 })();

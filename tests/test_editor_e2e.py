@@ -59,6 +59,7 @@ class EditorE2E(unittest.TestCase):
         self.addCleanup(self.lib.unload)
         self.s.attach_library(self.lib, interval=0.05)
         self.web = WebServer(self.s, "127.0.0.1", 0, root=self.dir)
+        self.web.pick_file = lambda *a: None                       # no operating system dialog in tests: the editor's own browser opens
         self.web.start()
         self.addCleanup(self.s.stop)
         self.addCleanup(self.web.stop)
@@ -573,14 +574,24 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: len(self.s.graph.nodes) == 4))
         self.page.keyboard.press("Control+Shift+z")
         self.assertTrue(until(lambda: len(self.s.graph.nodes) == 7))
-        self.page.keyboard.press("f")
-        for _ in range(8):                                                         # the redo above may still be re-rendering the graph
+        self.page.wait_for_function("document.querySelectorAll('.node').length === 7")      # the redo has re-rendered the graph
+        self.page.wait_for_function("document.querySelector('#cook-status').classList.contains('ok')")
+        selected = False
+        for _ in range(8):                                                         # a click can still land on a node being replaced
+            self.page.locator("#canvas").focus()
+            self.page.keyboard.press("f")
+            self.page.locator("#canvas").click(position={"x": 12, "y": 90})               # the duplicate may still be selected as a group
             self.node("loop_begin_1").locator(".title").click()
             try:
                 self.page.wait_for_function("(document.querySelector('#params input.nid') || {}).value === 'loop_begin_1'", timeout=4000)
+                selected = True
                 break
             except Exception:  # noqa: BLE001 - playwright TimeoutError: click again
                 continue
+        if not selected:
+            info = self.page.evaluate("""() => ({nodes: [...document.querySelectorAll('.node')].map(n => [n.dataset.id, n.className, JSON.stringify(n.getBoundingClientRect())]),
+                params: (document.querySelector('#params') || {}).innerText})""")
+            self.fail(f"loop_begin_1 could not be selected: {info}")
         self.page.fill("#params input.nid", "copy_begin")
         self.page.press("#params input.nid", "Enter")
         self.assertTrue(until(lambda: "copy_begin" in self.s.graph.nodes))
@@ -1704,7 +1715,7 @@ class EditorE2E(unittest.TestCase):
         self.page.evaluate("localStorage.clear()")
         self.page.reload()
         self.page.wait_for_selector('.node[data-id="out"]')
-        self.page.wait_for_selector("#shelf .sh-tab[data-tab]")
+        self.page.wait_for_selector("#shelf .sh-tab[data-tab]", state="attached")
         tabs = self.page.eval_on_selector_all("#shelf .sh-tab[data-tab]", "els => els.map(e => e.dataset.tab)")
         self.assertEqual(tabs[:5], ["Create", "Modify", "Model", "Polygon", "Edges"])
         self.assertIn("Rigid Bodies", tabs)
@@ -2334,55 +2345,239 @@ class EditorE2E(unittest.TestCase):
             self.assertTrue(0 <= sx <= box["width"] and 0 <= sy <= box["height"], (i, sx, sy, box))
 
     def test_proxy_menu_sets_the_cook_level_and_the_status_says_so(self):
-        self.page.click("#proxy-btn")
+        self.open_proxy_menu()
         self.page.wait_for_selector('#proxy-menu .item[data-proxy="0.1"]')
         self.page.click('#proxy-menu .item[data-proxy="0.1"]')
+        self.page.wait_for_selector("#proxy-menu", state="hidden")      # the item closes it once the engine has answered
         self.assertTrue(until(lambda: self.s.proxy_level == 0.1))
         self.assertTrue(until(lambda: self.page.locator("#proxy-label").inner_text() == "10%"))
         self.assertTrue(until(lambda: "proxy 10%" in self.page.locator("#cook-status .text").inner_text()))
         self.assertTrue(self.page.locator("#proxy-btn").evaluate("b => b.classList.contains('on')"))
         self.assertEqual(self.s.latest_good.proxy, 0.1)
         # Auto, then back to the real thing
-        self.page.click("#proxy-btn")
+        self.open_proxy_menu()
         self.page.click('#proxy-menu .item[data-proxy="auto"]')
+        self.page.wait_for_selector("#proxy-menu", state="hidden")      # the item closes it once the engine has answered
         self.assertTrue(until(lambda: self.s.proxy_auto))
         self.assertTrue(until(lambda: self.page.locator("#proxy-label").inner_text() == "Auto"))
-        self.page.click("#proxy-btn")
+        self.open_proxy_menu()
         self.page.click('#proxy-menu .item[data-proxy="full"]')
+        self.page.wait_for_selector("#proxy-menu", state="hidden")      # the item closes it once the engine has answered
         self.assertTrue(until(lambda: self.s.proxy_level == 1.0 and not self.s.proxy_auto))
         self.assertTrue(until(lambda: "proxy" not in self.page.locator("#cook-status .text").inner_text()))
         # the Blender cap
-        self.page.click("#proxy-btn")
+        self.open_proxy_menu()
         self.page.click('#proxy-menu .item[data-cap="100000"]')
+        self.page.wait_for_selector("#proxy-menu", state="hidden")      # the item closes it once the engine has answered
         self.assertTrue(until(lambda: self.s.link_tris == 100000))
-        self.page.click("#proxy-btn")
+        self.open_proxy_menu()
         self.page.click('#proxy-menu .item[data-cap="0"]')
+        self.page.wait_for_selector("#proxy-menu", state="hidden")      # the item closes it once the engine has answered
         self.assertTrue(until(lambda: self.s.link_tris == 0))
 
-    def test_a_big_geometry_is_drawn_reduced_with_full_res_on_request_and_selection_waits(self):
+    def big_grid(self, display_tris=3000, max_tris=None):
         from minihou import preview
-        old = preview.DISPLAY_TRIS
-        preview.DISPLAY_TRIS = 3000
-        self.addCleanup(setattr, preview, "DISPLAY_TRIS", old)
+        old = preview.DISPLAY_TRIS, preview.MAX_TRIS
+        preview.DISPLAY_TRIS = display_tris
+        if max_tris:
+            preview.MAX_TRIS = max_tris
+        self.addCleanup(lambda: (setattr(preview, "DISPLAY_TRIS", old[0]), setattr(preview, "MAX_TRIS", old[1])))
         self.s.edit([{"op": "replace", "graph": {"nodes": {"g": {"type": "grid", "params": {"columns": 100, "rows": 100}, "pos": [0, 0]}},
                                                  "display": "g"}}])
         self.page.wait_for_selector('.node[data-id="g"]')
-        banner = self.page.locator("#pv-proxy")
-        banner.wait_for(state="visible")
+        self.page.locator("#pv-proxy").wait_for(state="visible")
+
+    def test_a_big_geometry_is_drawn_reduced_and_selecting_loads_the_full_detail(self):
+        self.big_grid()
         self.assertIn("Reduced view", self.page.locator("#pv-proxy-text").inner_text())
         self.assertLessEqual(self.page.evaluate("minihou.preview.tris"), 3000)
-        self.assertTrue(self.page.locator('#preview [data-mode="point"]').is_disabled())
+        self.assertFalse(self.page.locator('#preview [data-mode="point"]').is_disabled())          # selecting is on offer
         self.page.locator("#canvas").focus()
         self.page.mouse.move(*self.center(self.page.locator("#pv-canvas")))
         self.page.keyboard.press("1")                                                           # asks for point selection
-        self.page.wait_for_function("document.querySelector('#pv-msg').textContent.includes('Selecting needs')")
-        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "view")
-        self.page.click("#pv-full")
-        self.assertTrue(until(lambda: self.page.evaluate("minihou.preview.tris") == 2 * 99 * 99, 8))
-        self.assertTrue(until(lambda: not self.page.locator('#preview [data-mode="point"]').is_disabled()))
+        self.assertTrue(until(lambda: self.page.evaluate("minihou.preview.tris") == 2 * 99 * 99, 8))     # the real geometry arrived
+        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "point")
         self.assertEqual(self.page.locator("#pv-proxy-text").inner_text(), "")
-        self.page.click('#preview [data-mode="point"]')
-        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "point")        # selecting works on the real geometry
+        self.page.keyboard.press("3")                                                           # faces: still full
+        self.page.keyboard.press("a")
+        self.assertTrue(until(lambda: self.page.evaluate("minihou.preview.selection().faces.length") == 99 * 99))
+        self.page.keyboard.press("x")                                                           # Delete: a blast node after the viewed node
+        self.assertTrue(until(lambda: any(n.type == "blast" for n in self.s.graph.nodes.values())))
+        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "face")
+        self.page.wait_for_function("minihou.preview.tris === 0 || minihou.preview.tris === 2 * 99 * 99")
+        self.assertEqual(self.page.locator("#pv-proxy-text").inner_text(), "")                     # it did not slip back to a reduced view
+
+    def test_detail_full_pins_the_full_view_and_fast_keeps_selection_off(self):
+        self.big_grid()
+        self.page.select_option("#pv-detail", "full")
+        self.assertTrue(until(lambda: self.page.evaluate("minihou.preview.tris") == 2 * 99 * 99, 8))
+        self.assertEqual(self.page.evaluate("localStorage.getItem('minihou.pvDetail')"), "full")
+        self.page.select_option("#pv-detail", "fast")
+        self.assertTrue(until(lambda: self.page.evaluate("minihou.preview.tris") <= 3000, 8))
+        self.assertTrue(self.page.locator('#preview [data-mode="point"]').is_disabled())
+        self.page.locator("#canvas").focus()
+        self.page.mouse.move(*self.center(self.page.locator("#pv-canvas")))
+        self.page.keyboard.press("1")
+        self.page.wait_for_function("document.querySelector('#pv-msg').textContent.includes('Detail is set to Fast')")
+        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "view")
+        self.page.select_option("#pv-detail", "auto")
+        self.assertTrue(until(lambda: not self.page.locator('#preview [data-mode="point"]').is_disabled()))
+
+    def test_selecting_says_so_when_the_geometry_is_too_big_even_for_full_detail(self):
+        self.big_grid(max_tris=5000)
+        self.page.locator("#canvas").focus()
+        self.page.mouse.move(*self.center(self.page.locator("#pv-canvas")))
+        self.page.keyboard.press("1")
+        self.page.wait_for_function("document.querySelector('#pv-msg').textContent.includes('more than the viewer can hold')")
+        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "view")
+        self.assertTrue(self.page.locator('#preview [data-mode="face"]').is_disabled())
+        self.assertIn("more than the viewer can hold", self.page.locator("#pv-proxy-text").inner_text())
+
+    def test_the_cook_proxy_can_be_set_from_the_viewport_options(self):
+        self.page.select_option("#pv-proxy-level", "0.1")
+        self.assertTrue(until(lambda: self.s.proxy_level == 0.1))
+        self.assertTrue(until(lambda: self.page.locator("#proxy-label").inner_text() == "10%"))
+        self.page.select_option("#pv-proxy-level", "full")
+        self.assertTrue(until(lambda: self.s.proxy_level == 1.0 and not self.s.proxy_auto))
+        self.page.select_option("#pv-proxy-level", "auto")
+        self.assertTrue(until(lambda: self.s.proxy_auto))
+        self.assertTrue(until(lambda: self.page.locator("#pv-proxy-level").input_value() == "auto"))
+
+    # -- choosing files ------------------------------------------------------------------------------------------------------
+    def add_selected(self, nid, ntype, **params):
+        self.s.edit([{"op": "add", "type": ntype, "id": nid, "params": params, "pos": [200, 200]}])
+        self.page.wait_for_selector(f'.node[data-id="{nid}"]')
+        self.node(nid).locator(".title").click()
+        self.page.wait_for_selector(f'#params .prow[data-param="file"] .browse')
+
+    def test_a_file_parameter_has_a_browse_button_that_opens_the_in_app_browser(self):
+        os.makedirs(os.path.join(self.dir, "models", "deep"))
+        for name in ("models/car.usd", "models/notes.txt", "models/other.usda"):
+            with open(os.path.join(self.dir, name), "wb") as f:
+                f.write(b"x")
+        self.add_selected("imp", "usd_import")
+        self.page.click('#params .prow[data-param="file"] .browse')
+        dialog = self.page.locator(".file-dialog[open]")
+        dialog.wait_for()
+        dialog.locator('.fd-row[data-name="models"]').wait_for()
+        self.assertEqual(dialog.locator(".fd-path").input_value(), os.path.realpath(self.dir))
+        dialog.locator('.fd-row[data-name="models"]').dblclick()
+        dialog.locator('.fd-row[data-name="car.usd"]').wait_for()
+        names = dialog.locator(".fd-row[data-name]").evaluate_all("els => els.map(e => e.dataset.name)")
+        self.assertEqual(names, ["deep", "car.usd", "other.usda"])                               # only folders and the extensions asked for
+        dialog.locator('.fd-row[data-name="car.usd"]').click()
+        self.assertEqual(dialog.locator(".fd-name").input_value(), "car.usd")
+        dialog.get_by_role("button", name="Open", exact=True).click()
+        self.assertTrue(until(lambda: self.s.graph.nodes["imp"].params.get("file") == "models/car.usd"))       # relative: it is inside the workspace
+        self.page.wait_for_function("document.querySelector('#params .prow[data-param=file] input').value === 'models/car.usd'")
+
+    def test_the_browser_goes_anywhere_and_stores_an_outside_file_as_an_absolute_path(self):
+        outside = os.path.realpath(tempfile.mkdtemp(prefix="minihou_outside_"))
+        self.addCleanup(shutil.rmtree, outside, True)
+        with open(os.path.join(outside, "far.usdc"), "wb") as f:
+            f.write(b"x")
+        self.add_selected("imp", "usd_import")
+        self.page.click('#params .prow[data-param="file"] .browse')
+        dialog = self.page.locator(".file-dialog[open]")
+        dialog.wait_for()
+        self.assertTrue(until(lambda: dialog.locator(".fd-path").input_value() == os.path.realpath(self.dir)))        # the first listing is in
+        dialog.locator(".fd-path").fill(outside)
+        dialog.locator(".fd-path").press("Enter")
+        dialog.locator('.fd-row[data-name="far.usdc"]').wait_for()
+        dialog.locator('.fd-row[data-name="far.usdc"]').dblclick()                                 # double click chooses it
+        self.assertTrue(until(lambda: self.s.graph.nodes["imp"].params.get("file") == os.path.join(outside, "far.usdc")))
+        self.page.click('#params .prow[data-param="file"] .browse')                                 # reopens where the file is
+        dialog = self.page.locator(".file-dialog[open]")
+        dialog.wait_for()
+        self.assertTrue(until(lambda: dialog.locator(".fd-path").input_value() == outside))
+        dialog.get_by_role("button", name="Cancel").click()
+        self.assertEqual(self.page.locator(".file-dialog[open]").count(), 0)
+        self.assertEqual(self.s.graph.nodes["imp"].params.get("file"), os.path.join(outside, "far.usdc"))     # cancelled: unchanged
+
+    def test_the_save_browser_adds_the_extension_and_asks_before_replacing(self):
+        with open(os.path.join(self.dir, "taken.usdc"), "wb") as f:
+            f.write(b"x")
+        self.add_selected("exp", "usd_export")
+        self.page.click('#params .prow[data-param="file"] .browse')
+        dialog = self.page.locator(".file-dialog[open]")
+        dialog.wait_for()
+        dialog.locator('.fd-row[data-name="taken.usdc"]').wait_for()
+        dialog.locator(".fd-name").fill("taken")
+        dialog.get_by_role("button", name="Save", exact=True).click()
+        confirm = self.page.locator(".app-dialog[open]:not(.file-dialog)")                          # "taken.usdc already exists. Replace it?"
+        confirm.wait_for()
+        self.assertIn("taken.usdc already exists", confirm.inner_text())
+        confirm.locator('button[type="submit"]').click()
+        self.assertTrue(until(lambda: self.s.graph.nodes["exp"].params.get("file") == "taken.usdc"))
+
+    def test_save_to_disk_button_writes_the_usd_file(self):
+        try:
+            from minihou import usd_io
+            usd_io.pxr()
+        except Exception:  # noqa: BLE001
+            self.skipTest("usd-core is not installed")
+        self.s.edit([{"op": "add", "type": "box", "id": "b"}, {"op": "add", "type": "usd_export", "id": "exp", "inputs": {"geo": "b"},
+                                                                  "params": {"file": "out/crate.usdc"}, "pos": [200, 200]}])
+        self.page.wait_for_selector('.node[data-id="exp"]')
+        self.node("exp").locator(".title").click()
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "out", "crate.usdc")))             # cooking wrote nothing
+        self.page.click('#params button[data-action="save"]')
+        self.page.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').textContent.includes('Saved 6 faces')")
+        self.assertTrue(os.path.isfile(os.path.join(self.dir, "out", "crate.usdc")))
+
+    def drop_files(self, files, dx=300, dy=200, target="#canvas"):
+        """Drop ``files`` ([(name, bytes)]) on the page like a file manager would."""
+        self.page.evaluate("""([files, target, dx, dy]) => {
+          const dt = new DataTransfer();
+          for (const [name, bytes] of files) dt.items.add(new File([new Uint8Array(bytes)], name, { type: "application/octet-stream" }));
+          const el = document.querySelector(target), r = el.getBoundingClientRect();
+          for (const type of ["dragenter", "dragover", "drop"]) el.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true, clientX: r.left + dx, clientY: r.top + dy }));
+        }""", [[[n, list(b)] for n, b in files], target, dx, dy])
+
+    USDA = b'#usda 1.0\ndef Mesh "m" {\n  point3f[] points = [(0,0,0),(1,0,0),(1,1,0)]\n  int[] faceVertexCounts = [3]\n  int[] faceVertexIndices = [0,1,2]\n}\n'
+
+    def test_dropping_a_usd_file_uploads_it_and_makes_a_usd_import_node_at_the_drop_point(self):
+        self.drop_files([("tri.usda", self.USDA)], 300, 200)
+        self.assertTrue(until(lambda: any(n.type == "usd_import" for n in self.s.graph.nodes.values())))
+        nid = next(i for i, n in self.s.graph.nodes.items() if n.type == "usd_import")
+        self.assertEqual(self.s.graph.nodes[nid].params["file"], "imports/tri.usda")
+        with open(os.path.join(self.dir, "imports", "tri.usda"), "rb") as f:
+            self.assertEqual(f.read(), self.USDA)
+        self.assertEqual(self.s.graph.display, nid)
+        self.assertTrue(until(lambda: nid in self.page.evaluate("[...minihou.S.sel]")))
+        box = self.node(nid).bounding_box()
+        canvas = self.page.locator("#canvas").bounding_box()
+        self.assertLess(abs((box["x"] + box["width"] / 2) - (canvas["x"] + 300)), 120)           # at the drop point
+        self.assertLess(abs((box["y"] + 12) - (canvas["y"] + 200)), 120)
+        self.drop_files([("tri.usda", self.USDA)])                                              # the same name again: a new file, never a replacement
+        self.assertTrue(until(lambda: os.path.isfile(os.path.join(self.dir, "imports", "tri_1.usda"))))
+
+    def test_dropping_a_png_makes_an_image_file_node_and_other_files_are_refused(self):
+        self.drop_files([("height.png", b"\x89PNG\r\n\x1a\n" + b"0" * 40)])
+        self.assertTrue(until(lambda: any(n.type == "image_file" for n in self.s.graph.nodes.values())))
+        nid = next(i for i, n in self.s.graph.nodes.items() if n.type == "image_file")
+        self.assertEqual(self.s.graph.nodes[nid].params["file"], "imports/height.png")
+        self.page.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').textContent.includes('Imported')")      # before the next toast
+        self.drop_files([("notes.txt", b"hello")])
+        self.page.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').textContent.includes('Cannot import notes.txt')")
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "imports", "notes.txt")))
+
+    def test_the_desktop_window_hands_over_real_paths_and_nothing_is_copied(self):
+        inside = os.path.join(os.path.realpath(self.dir), "models", "car.usdc")
+        outside = os.path.join(tempfile.gettempdir(), "elsewhere", "far.usda")
+        self.page.evaluate("([a, b]) => minihou.droppedPaths([a, b], 300, 200)", [inside, outside])
+        self.assertTrue(until(lambda: sum(n.type == "usd_import" for n in self.s.graph.nodes.values()) == 2))
+        files = sorted(n.params["file"] for n in self.s.graph.nodes.values() if n.type == "usd_import")
+        self.assertEqual(files, sorted(["models/car.usdc", outside]))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "imports")))
+
+    def test_import_node_shows_reload_and_hides_its_counter(self):
+        self.add_selected("imp", "usd_import")
+        self.assertEqual(self.page.locator('#params button[data-action="reload"]').count(), 1)
+        self.assertEqual(self.page.locator('#params .prow[data-param="reload"]').count(), 0)
+        self.assertEqual(self.page.locator('#params .prow[data-param="prim_path"] .pl').inner_text(), "Primitives")
+        self.page.click('#params button[data-action="reload"]')
+        self.assertTrue(until(lambda: self.s.graph.nodes["imp"].params.get("reload") == 1))
 
     def test_export_usd_from_the_file_menu(self):
         try:
@@ -2402,28 +2597,30 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(back.npoints, self.s.latest_good.geo.npoints)
         self.assertEqual(back.nprims, self.s.latest_good.geo.nprims)
 
+    def open_proxy_menu(self):
+        """The button toggles the menu, so open it only when it is closed (an item closes it after the engine has answered)."""
+        for _ in range(5):
+            if self.page.locator("#proxy-menu").is_visible():
+                return
+            self.page.click("#proxy-btn")
+            try:
+                self.page.wait_for_selector("#proxy-menu", state="visible", timeout=1500)
+                return
+            except Exception:  # noqa: BLE001 - the click landed while the menu was closing: try again
+                pass
+        self.fail("the proxy menu did not open")
+
     def test_the_disk_cache_is_switched_from_the_proxy_menu(self):
-        def open_menu():                                   # the button toggles the menu, so open it only when it is closed
-            for _ in range(5):
-                if self.page.locator("#proxy-menu").is_visible():
-                    return
-                self.page.click("#proxy-btn")
-                try:
-                    self.page.wait_for_selector("#proxy-menu", state="visible", timeout=1500)
-                    return
-                except Exception:  # noqa: BLE001 - the click landed while the menu was closing: try again
-                    pass
-            self.fail("the proxy menu did not open")
-        open_menu()
+        self.open_proxy_menu()
         self.page.click('#proxy-menu [data-diskcache="on"]')
         self.assertTrue(until(lambda: self.s.disk_cache is not None))
         self.assertTrue(until(lambda: self.page.locator("#proxy-btn").evaluate("b => b.classList.contains('on')")))
         self.page.wait_for_selector("#proxy-menu", state="hidden")
-        open_menu()
+        self.open_proxy_menu()
         self.page.wait_for_selector('#proxy-menu [data-diskcache="clear"]')
         self.page.click('#proxy-menu [data-diskcache="clear"]')
         self.page.wait_for_selector("#proxy-menu", state="hidden")      # the item closes the menu once the engine has answered
-        open_menu()
+        self.open_proxy_menu()
         self.page.click('#proxy-menu [data-diskcache="off"]')
         self.assertTrue(until(lambda: self.s.disk_cache is None))
 

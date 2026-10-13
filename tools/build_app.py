@@ -130,7 +130,7 @@ def main() -> int:
     folder = target
     staging.rmdir()
     system = {"Windows": "windows", "Darwin": "macos", "Linux": "linux"}.get(platform.system(), platform.system().lower())
-    print(f"built {folder} — run {exe_path(folder)}")
+    print(f"built {folder} - run {exe_path(folder)}")
     if args.zip:
         archive = shutil.make_archive(str(destination / f"{NAME}-{system}"), "zip", destination, NAME)
         print(f"archive {archive} ({os.path.getsize(archive) / 1e6:.1f} MB)")

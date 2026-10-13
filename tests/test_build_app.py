@@ -8,9 +8,9 @@ class BuildDeliveryTests(unittest.TestCase):
     def test_default_is_unpacked_and_preserves_previous(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);(root/'build').mkdir();dist=root/'dist';(dist/'MiniHou').mkdir(parents=True)
-            (dist/'MiniHou'/'old.txt').write_text('old')
+            (dist/'MiniHou'/'old.txt').write_text('old',encoding='utf-8')
             def fake_build(accel, stage):
-                folder=stage/'MiniHou';folder.mkdir();(folder/'MiniHou.exe').write_text('new');return folder
+                folder=stage/'MiniHou';folder.mkdir();(folder/'MiniHou.exe').write_text('new',encoding='utf-8');return folder
             with patch.object(build_app,'ROOT',root),patch.object(build_app,'build',side_effect=fake_build),patch.object(build_app,'smoke') as smoke,patch.object(build_app.shutil,'make_archive') as archive,patch('sys.argv',['build_app','--output',str(dist)]):
                 self.assertEqual(build_app.main(),0)
                 smoke.assert_called_once();archive.assert_not_called()
@@ -21,9 +21,9 @@ class BuildDeliveryTests(unittest.TestCase):
     def test_locked_application_is_left_intact(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);(root/'build').mkdir();dist=root/'dist';(dist/'MiniHou').mkdir(parents=True)
-            original=dist/'MiniHou'/'old.txt';original.write_text('old')
+            original=dist/'MiniHou'/'old.txt';original.write_text('old',encoding='utf-8')
             def fake_build(accel,stage):
                 folder=stage/'MiniHou';folder.mkdir();return folder
             with patch.object(build_app,'ROOT',root),patch.object(build_app,'build',side_effect=fake_build),patch.object(build_app,'smoke'),patch.object(Path,'rename',side_effect=PermissionError('locked')),patch('sys.argv',['build_app','--output',str(dist)]):
                 with self.assertRaises(PermissionError):build_app.main()
-            self.assertEqual(original.read_text(),'old')
+            self.assertEqual(original.read_text(encoding='utf-8'),'old')

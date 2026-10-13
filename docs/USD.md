@@ -44,6 +44,33 @@ MiniHou file back rebuilds the exact point table and primitive order, including 
 points, positions, topology, open/closed flags, every attribute in every table (dtype and shape), groups, edge groups and detail come
 back identical.
 
+## The USD Export node
+
+`usd_export` (Utility & I/O) passes its input on unchanged and has a **Save to Disk** button (MCP: `press_button`, API:
+`POST /api/node_action`). Cooking never writes a file, so the node is safe in any graph; pressing the button cooks it at full size,
+whatever the proxy level, and writes. Settings: `file` (with a save dialog), `format` (auto by extension, `usdc` binary, `usda` text), `name` of its
+prim, `root` (the default prim, `MiniHou`), `frames` (`current`, or `range` with `start`, `end`, `step`), `up_axis` (`y` writes a Y-up
+stage: the root Xform turns the Z-up geometry, so the numbers stay and a MiniHou file still reads back identically), `units` (the
+unit the file declares; the geometry is scaled so a metre stays a metre), `materials`, `embed_graph` and `overwrite`.
+
+A **frame range** cooks the graph at each frame (the timeline does not move) and merges the frames into one stage: whatever differs
+between frames (points, topology, attributes, whether a primitive exists at all) becomes time samples at that frame, so a moving mesh
+costs one `points` sample per frame and its unchanged topology is written once. A prim missing from some frames gets animated
+`visibility`; an attribute (or a group's or material's subset) a frame lacks is blocked there, and one that first appears at a later frame is blocked before it, so nothing leaks into earlier frames; the detail attributes (material names...) are also sampled per frame. `startTimeCode`, `endTimeCode` and `timeCodesPerSecond` are set. Reading it back
+with `usd_import` at `time = frame` gives each frame. Up to 20,000 frames per export; it holds the engine's cook lock while it writes.
+
+## Choosing and dropping files
+
+A file parameter (`usd_import`, `usd_export`, `image_file`, `image_out`) has a **Browse** button. The page cannot learn a file's real
+path, so the engine asks the operating system: the desktop window's native dialog, else the system dialog of Python's `tkinter` (in a
+child process; set `MINIHOU_NATIVE_DIALOG=0` to turn that off), else the editor's own browser (any folder, only the extensions asked
+for; `GET /api/browse`). A file inside the workspace is stored relative to it, any other as an absolute path.
+
+Dropping a `.usd/.usda/.usdc/.usdz` or `.png` file on the editor makes a *USD Import* / *Image File* node at the drop point, selects it and
+sets its display flag. In a browser the file's bytes are streamed to `imports/` under the workspace (`POST /api/upload`, up to 16 GB,
+never replacing a file; a custom header and the Origin check guard it); the desktop window hands over the real path instead and nothing
+is copied (this needs pywebview 5's DOM events; with an older one the file is uploaded). Several files make several nodes.
+
 ## Import
 
 The **USD Import** node (`usd_import`, in the Create group) reads any USD file:
@@ -55,7 +82,20 @@ The **USD Import** node (`usd_import`, in the Create group) reads any USD file:
   indexed primvars are flattened; GeomSubsets become groups when the file has no group primvar of that name;
 * `up_axis` (z: turn a Y-up file to Z-up, the default; keep) and `apply_units` (scale by an *authored* `metersPerUnit`; an unauthored
   one is taken as metres, although USD's own fallback is centimetres);
-* `prim_path` to read part of a stage (only the points that were read come in); `time` = frame reads the file's animation at the current frame (the default reads the un-animated values, or the first sample of a file that has only samples);
+* **Primitives** (`prim_path`) to read part of a stage (only the points that were read come in): one prim path, or several
+  patterns separated by spaces with `*` / `?` wildcards and a leading `^` to exclude, e.g. `/World/Props /World/Set/chair* ^/World/Props/lights`
+  (a pattern takes the prims it matches and everything below them);
+* **time**: `frame` reads the file's animation at the current frame (the default reads the un-animated values, or the first sample of
+  a file that has only samples). `time_offset` and `time_scale` map the frame to the file's time: file time = (frame - offset) / scale.
+  A prim whose visibility is animated is read only while it is visible;
+* **purpose**: a list of `default`, `render`, `proxy`, `guide` (or `all`); the default is `default render`. Prims of another purpose
+  are skipped and listed in `usd_skipped`, as are prim types it cannot use (cubes, spheres, ...);
+* **path_attrib** (off by default): an integer primitive attribute telling which USD prim each primitive came from, as an index into the
+  detail list `usd_paths`;
+* **missing_file**: `error` (default) or `empty` (empty geometry, for a graph that opens before its files are there); **Reload** button;
+* the file parameter has a **Browse** button (below), and a relative path starts in the workspace folder, not wherever the process was
+  started. These settings follow Houdini's USD Import where MiniHou has the same idea; its Variants, Traversal, Display As, Pivot
+  Location and Unpack have no counterpart (MiniHou reads geometry, not a stage);
 * guide and proxy purposes, and prim types it cannot use (cubes, spheres, ...), are skipped and listed in the detail
   attribute `usd_skipped`; a point instancer's children (its prototypes) are never imported as scene geometry; a prim with no points at the read time is noted in `usd_notes`;
 * a file with several MiniHou outputs comes back as the outputs joined in order (each keeps its own points and primitives);
@@ -75,7 +115,7 @@ The **USD Import** node (`usd_import`, in the Create group) reads any USD file:
 * Instancer prototypes are empty Xforms: the objects' geometry lives in Blender, so another tool sees the placements and has to
   point the prototypes at its own assets. Imported instancers become `instance` / `rot` / `scale` points (their prototypes' geometry
   is not read); an instancer under a sheared transform loses the shear on the instance rotations.
-* One frame per file (no time samples written); `time` on import reads them.
+* The File menu export writes one frame. The USD Export node can write a frame range (below).
 * Edge groups are kept as primvars only (USD has edge subsets in newer versions, but few tools read them).
 * Cameras, lights and skeletons are not read or written. Materials are carried by name and binding, and shading networks by
   reference, not authored: see [MATERIALS.md](MATERIALS.md).

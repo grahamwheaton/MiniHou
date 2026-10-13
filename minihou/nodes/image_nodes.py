@@ -7,7 +7,7 @@ import os
 
 import numpy as np
 
-from .. import images
+from .. import images, paths
 from ..inputs import INPUTS
 from ..sdk import Bool, Enum, Float, Int, Str, Vec3, node
 
@@ -15,7 +15,7 @@ HEIGHT = ["none", "luminance", "red", "green", "blue", "alpha"]
 
 
 def _file_token(params) -> str:
-    path = str(params.get("file") or "")
+    path = paths.resolve(params.get("file"))
     try:
         st = os.stat(path)
         return f"{st.st_mtime_ns}:{st.st_size}"
@@ -60,7 +60,7 @@ def blender_image(image, max_size, colorspace, size, center, height, height_scal
 
 
 @node("image_file", category="source", key_extra=_file_token, params=[
-    Str("file", "", doc="A PNG file (any format Pillow reads, when it is installed). A relative path starts in the folder the engine runs in"),
+    Str("file", "", doc="A PNG file (any format Pillow reads, when it is installed). A relative path starts in the workspace folder", kind="file:open:.png"),
     Int("max_size", 1024, min=2, max=8192, doc="The longest side in pixels (bigger images are averaged down in blocks)"),
     Enum("colorspace", ["auto", "stored"], doc="auto: colour images are sRGB, so they become linear colour; stored: the numbers as they are "
                                                "(masks, heights)"),
@@ -74,7 +74,7 @@ def image_file(file, max_size, colorspace, size, center, height, height_scale):
     any paint program."""
     if not str(file).strip():
         raise ValueError("set 'file' to a PNG file")
-    path = str(file).strip()
+    path = paths.resolve(file)
     if not os.path.isfile(path):
         raise ValueError(f"no such file: {path}")
     try:
@@ -96,7 +96,7 @@ def image_file(file, max_size, colorspace, size, center, height, height_scale):
     Bool("normalize", False, doc="Stretch the values to 0..1 (a height map before it becomes an image)"),
     Enum("encoding", ["linear", "srgb", "data"], doc="linear: scene-linear colour in a float image; srgb: encode for an 8-bit sRGB image; "
                                                       "data: a float Non-Color image (heights, masks, vectors)"),
-    Str("file", "", doc="Also write a PNG here (8-bit sRGB for 'srgb', else 16-bit linear numbers): the way to hand an image to Houdini"),
+    Str("file", "", doc="Also write a PNG here (8-bit sRGB for 'srgb', else 16-bit linear numbers): the way to hand an image to Houdini", kind="file:save:.png"),
 ])
 def image_out(geo, image, mode, source, width, height, normalize, encoding, file):
     """Send an image to Blender: the geometry passes through unchanged, and the link makes (or updates) the Blender image `image` from
@@ -125,7 +125,7 @@ def build_image_manifest(node_id: str, params: dict, geo, key: str):
     ``width``, ``height``, ``encoding``; array ``pixels`` (float32, H x W x 4, rows from the bottom)."""
     pix = pixels(geo, params["mode"], params["source"], params["width"], params["height"], params["normalize"])
     if params["file"]:
-        images.write_png(str(params["file"]).strip(), pix, bits=8 if params["encoding"] == "srgb" else 16, srgb=params["encoding"] == "srgb")
+        images.write_png(paths.resolve(params["file"]), pix, bits=8 if params["encoding"] == "srgb" else 16, srgb=params["encoding"] == "srgb")
     h, w = pix.shape[:2]
     if params["encoding"] == "srgb":                       # an 8-bit sRGB image holds the encoded numbers
         pix = pix.copy()

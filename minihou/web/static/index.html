@@ -167,6 +167,8 @@
         </div>
         <div class="pv-wrap"><div id="pv-hints" class="pv-hints"><strong id="pv-hint-title">View</strong><div id="pv-hint-text"></div></div><canvas id="pv-canvas" aria-label="3D preview"></canvas><div id="pv-msg" class="muted hidden"></div><div id="pv-proxy" class="hidden"><span id="pv-proxy-text"></span><button id="pv-full" class="small">Full res</button></div></div>
         <div class="pv-opts pv-display-strip" role="group" aria-label="Display options">
+          <select id="pv-detail" aria-label="Viewport detail" title="Detail: Auto draws a big geometry reduced but at full detail while you select; Full always draws everything the viewer can hold; Fast always reduces"><option value="auto">Detail: Auto</option><option value="full">Detail: Full</option><option value="fast">Detail: Fast</option></select>
+          <select id="pv-proxy-level" aria-label="Cook proxy level" title="Cook proxy: nodes cook a lighter version of the scene (counts, resolutions and voxel sizes scale). Full is the real thing."></select>
           <select id="pv-display-mode" aria-label="Viewport display mode"><option value="shaded">Shaded</option><option value="edges">Shaded + edges</option><option value="wire">Wireframe</option><option value="points">Points</option></select>
           <label class="small"><input type="checkbox" id="pv-shaded" checked> shaded</label>
           <label class="small"><input type="checkbox" id="pv-edges" checked> edges</label>

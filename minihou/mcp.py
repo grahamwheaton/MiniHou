@@ -56,7 +56,7 @@ To work on something the user made in Blender, start from a blender_object node
 (the object's name; its UV map, color attribute, vertex groups and material indices arrive as attributes, its material slot
 names as the detail list 'materials', and it recooks live when they edit it); inspect_node on it shows what was read.
 Curves, hair curves, point clouds and images also come in (blender_object, blender_image) and go out (scene_objects modes curves/points,
-image_out). Give faces a material with set_material (a group and a name): Blender gets the slots by name, USD gets bound materials. Z is up; units are Blender metres. The user is
+image_out). Give faces a material with set_material (a group and a name): Blender gets the slots by name, USD gets bound materials. USD files come in with usd_import (a Primitives pattern, purposes, time offset and scale) and go out with usd_export (press_button save; cooking itself never writes). Z is up; units are Blender metres. The user is
 watching the editor and Blender live and can undo your edits, so prefer small verified steps over huge batches."""
 
 OPS_DOC = """\
@@ -122,10 +122,17 @@ TOOLS: List[dict] = [
      "description": "Write the cooked geometry to a USD file (.usd/.usda/.usdc, inside the MiniHou folder) for Houdini, Blender, "
                     "Omniverse or usdview. Always full size, whatever the proxy level. The display output and each extra output "
                     "become prims under /MiniHou (meshes, curves and points, with attributes as primvars and groups as GeomSubsets); "
-                    "the graph is stored in the file. Read a USD file back with the usd_import node.",
+                    "the graph is stored in the file. Read a USD file back with the usd_import node (or write one from a graph with a usd_export node and press_button save).",
      "inputSchema": {"type": "object", "required": ["path"], "additionalProperties": False, "properties": {
          "path": {"type": "string"}, "node": {"type": "string", "description": "Export this node instead of the display output."},
          "overwrite": {"type": "boolean"}, "graph": {"type": "boolean", "description": "Store the graph in the file (default true)."}}}},
+    {"name": "press_button",
+     "description": "Press a button of a node, the way the editor's parameter panel does. usd_export: `save` writes its USD file "
+                    "(settings are the node's parameters: file, format, root, frames current or range, up_axis, units, materials, "
+                    "embed_graph, overwrite; cooking never writes, only this does). usd_import: `reload` reads the file again. "
+                    "list_node_types shows each node's buttons.",
+     "inputSchema": {"type": "object", "required": ["node", "action"], "additionalProperties": False, "properties": {
+         "node": {"type": "string"}, "action": {"type": "string", "description": "e.g. save, reload"}}}},
     {"name": "set_proxy",
      "description": "Work on a very large scene: cook it at a fraction of its size. Node parameters that set the amount of work "
                     "(grid columns/rows, scatter count, sphere bands, voxel size, spacing...) scale with the level, so a 10% "
@@ -241,8 +248,10 @@ def format_node_types(types: List[dict]) -> str:
                         for i in t["inputs"]) or "none (a source)"
         src = f" (from {t['source']})" if t.get("source") else ""
         out.append(f"{t['name']} [{t.get('category') or 'other'}]{src}\n  {' '.join((t.get('doc') or '').split())}\n  inputs: {ins}")
+        if t.get("actions"):
+            out.append("  buttons (press_button): " + "; ".join(f"{a['name']} - {a['doc'] or a['label']}" for a in t["actions"]))
         if t["params"]:
-            out.append("  params:\n" + "\n".join(_fmt_param(p) for p in t["params"]))
+            out.append("  params:\n" + "\n".join(_fmt_param(p) for p in t["params"] if p.get("ui") != "hidden"))
     return "\n\n".join(out)
 
 
@@ -458,6 +467,10 @@ class McpServer:
                          + (f", {o['instances']:,} instances" if o.get("instances") else "")
                          + (f" (left out: {d['faces']} faces with under 3 corners, {d['curves']} one-point curves)" if d["faces"] or d["curves"] else ""))
         return "\n".join(lines)
+
+    def tool_press_button(self, node: str, action: str) -> str:
+        r = self.engine.post("/api/node_action", {"node": node, "action": action})
+        return r.get("message") or f"Pressed {action} on {node}."
 
     def tool_set_proxy(self, level: Optional[float] = None, auto: Optional[bool] = None, link_tris: Optional[int] = None) -> str:
         body = {k: v for k, v in (("level", level), ("auto", auto), ("link_tris", link_tris)) if v is not None}

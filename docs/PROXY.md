@@ -7,7 +7,7 @@ means at full size.
 
 `minihou/proxy.py` `decimate()` reduces any geometry to a budget of triangles and points. The 3-D view asks for
 250,000 triangles / 500,000 points (`preview.DISPLAY_TRIS`, `DISPLAY_POINTS`); "Full res" in the view raises that to
-600,000 / 2,000,000 (`MAX_*`); past those the same reduction applies, so a request can never hang the browser.
+2,500,000 / 4,000,000 (`MAX_*`); past those the same reduction applies, so a request can never hang the browser.
 
 * **Meshes**: vertex clustering. Points that fall in the same cell of a 3-D grid merge into their mean; the cell size is
   searched (on a sample of the points, then checked on all of them) so the triangles that survive are just under the budget.
@@ -18,8 +18,16 @@ means at full size.
   takes the first member; primitive and vertex attributes follow the triangle that survived.
 * The preview header says what happened: `proxy: {active, points, tris, shown_points, shown_tris}`; `point_src` and
   `tri_prim` map what is drawn back to original point and primitive numbers.
-* The view shows "Reduced view: 250,000 of 3,996,002 triangles" with a **Full res** button. While the view is reduced,
-  point/edge/face selection is off (the drawn points are not the real ones); Full res turns it back on.
+* The view shows "Reduced view: 250,000 of 3,996,002 triangles" with a **Full res** button. Selecting needs the real points, so
+  the **Detail** setting in the viewport's display options decides what happens (it is remembered): **Auto** (default) draws
+  big geometry reduced but loads the full detail the moment you turn a selection mode on (1-4 or the Pts/Edges/Faces buttons)
+  and goes back to the reduced view when you leave it; **Full** always asks for everything the viewer can hold; **Fast** always
+  reduces and keeps selection off. A geometry over the cap even at full detail (`preview.MAX_TRIS` / `MAX_POINTS`) cannot be
+  selected on: the view says how big it is and the selection modes stay off until you cut it down (Blast, Group Create with
+  a bounds box). Nothing re-reduces the view behind your back: a node inserted from a selection keeps the full view.
+* The **cook proxy** (Full / Auto / 50% ... 1%, which scales node parameters) is also in the viewport's display options, next
+  to Detail, and in the status bar's Proxy menu. It never changes how a USD file is read: only parameters marked as
+  proxy-able scale.
 * Measured (Linux sandbox, preview request incl. reduction, quad grid): 1M quads 1.6 s and 7.6 MB on the wire (was 5.1 s,
   31 MB, truncated); 4M quads 6.3 s and 8.4 MB (was truncated at 48 MB). Cooking those grids takes 0.2-0.4 s, so the
   preview is the slow part. Results are remembered per cooked geometry, so a second request for the same node is instant.

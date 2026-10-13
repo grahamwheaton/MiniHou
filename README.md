@@ -866,6 +866,12 @@ curves and points with attributes as primvars and groups as GeomSubsets; the gra
 reads USD files from other tools (transforms, Y-up, indexed primvars, subsets) and a MiniHou export comes back exactly. Material names are written as bound `Material` prims and read back from other tools' bindings; their shading networks stay in the original file and are referenced, not rewritten ([docs/MATERIALS.md](docs/MATERIALS.md)). Needs
 `pip install usd-core`. Graphs themselves stay JSON. Details and limits: [docs/USD.md](docs/USD.md).
 
+File parameters have a **Browse** button (the system or desktop dialog, or the editor's own folder browser) and you can **drop** USD or PNG
+files on the editor to make the node. The **USD Export** node (settings, a frame range, up axis, units) writes its file when you press
+**Save to Disk**; the **USD Import** node has Houdini-style settings (Primitives patterns, purposes, time offset and scale, path attribute,
+Reload). On a big scene the viewport's **Detail** setting (Auto / Full / Fast) and the cook **Proxy** are in its display options; selecting
+loads the full detail ([docs/PROXY.md](docs/PROXY.md)).
+
 ## Disk cache (reopen big scenes quickly)
 
 `minihou serve graph.json --disk-cache` (or `MINIHOU_DISK_CACHE=1`, or `minihou app --disk-cache`) keeps expensive results in

@@ -148,9 +148,13 @@ def _json_safe(v):
 class WriteReport:
     path: str = ""
     outputs: Dict[str, dict] = field(default_factory=dict)
+    frames: List[float] = field(default_factory=list)          # an animation: the frames written
 
     def to_dict(self) -> dict:
-        return {"path": self.path, "outputs": self.outputs}
+        d = {"path": self.path, "outputs": self.outputs}
+        if self.frames:
+            d["frames"] = [self.frames[0], self.frames[-1], len(self.frames)]
+        return d
 
 
 def _set_primvar(prim, usd_name: str, arr: np.ndarray, interp: str, original: str, role: str = "", extra: Optional[dict] = None):
@@ -532,48 +536,279 @@ def _write_group_subsets(mesh, geo: Geometry, mesh_prims: np.ndarray, pts: np.nd
             UsdGeom.Subset.SetFamilyType(mesh, family, UsdGeom.Tokens.unrestricted)
 
 
-def write_stage(path, outputs: Dict[str, Geometry], graph: Optional[dict] = None, overwrite: bool = False,
-                frame: Optional[float] = None) -> WriteReport:
-    """Write ``outputs`` (name -> geometry) to the USD file ``path`` (.usd/.usda/.usdc)."""
-    Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
-    path = os.fspath(path)
+UNITS = {"meters": 1.0, "centimeters": 0.01, "millimeters": 0.001, "inches": 0.0254, "feet": 0.3048}      # name -> metres per unit
+
+
+def _scaled(geo: Geometry, k: float) -> Geometry:
+    """``geo`` with its positions (and instance scales) multiplied by ``k``; the geometry itself when ``k`` is 1."""
+    if k == 1.0:
+        return geo
+    g = geo.copy()
+    g.point["P"] = (np.asarray(geo.P, np.float64) * k).astype(np.float32)
+    if "scale" in g.point and g.point["scale"].dtype.kind == "f":
+        g.point["scale"] = (np.asarray(g.point["scale"], np.float64) * k).astype(np.float32)
+    return g
+
+
+def _check_write_args(path: str, up_axis: str, units: str, overwrite: bool) -> None:
     if not path.lower().endswith(USD_EXTENSIONS):
         raise ValueError("a USD file must end in .usd, .usda or .usdc")
+    if up_axis not in ("z", "y"):
+        raise ValueError("up_axis must be 'z' or 'y'")
+    if units not in UNITS:
+        raise ValueError(f"units must be one of {', '.join(UNITS)}")
     if os.path.exists(path) and not overwrite:
         raise FileExistsError(f"{os.path.basename(path)} already exists")
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+
+
+def _new_stage(target: str, up_axis: str, mpu: float, top: str):
+    """A stage with the axis, unit and default root prim set (``target``: a file, or ``None`` for one in memory)."""
+    Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
+    stage = Usd.Stage.CreateNew(target) if target else Usd.Stage.CreateInMemory()
+    UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y if up_axis == "y" else UsdGeom.Tokens.z)
+    UsdGeom.SetStageMetersPerUnit(stage, mpu)
+    rootx = UsdGeom.Xform.Define(stage, f"/{top}")
+    if up_axis == "y":
+        UsdGeom.XformCommonAPI(rootx).SetRotate(Gf.Vec3f(-90.0, 0.0, 0.0))     # (x, y, z) -> (x, z, -y)
+    stage.SetDefaultPrim(rootx.GetPrim())
+    return stage
+
+
+def _author_outputs(stage, outputs: Dict[str, Geometry], top: str, k: float, materials: bool, anchor: str, report: WriteReport) -> None:
+    """Write every output (scaled by ``k``) under ``/<top>``; the counts go into ``report``."""
+    used: set = set()
+    geos = {name: _scaled(g, k) for name, g in outputs.items()}
+    looks: Dict[str, str] = {}
+    if materials:
+        looks = write_looks(stage, f"/{top}/Looks", list(geos.values()), anchor)      # shared by every output
+        used.add("Looks")
+    for name, geo in geos.items():
+        nm = _unique_name(valid_name(name), used, "out")
+        report.outputs[name] = dict(write_geometry(stage, f"/{top}/{nm}", geo, looks), prim=f"/{top}/{nm}")
+
+
+def _layer_data(outputs, graph: Optional[dict], frame: Optional[float]) -> dict:
+    data = {"minihou": {"format": 1, "outputs": json.dumps(list(outputs))}}      # no lists: the text format cannot hold them
+    if graph is not None:
+        data["minihou"]["graph"] = json.dumps(graph, sort_keys=True)
+    if frame is not None:
+        data["minihou"]["frame"] = float(frame)
+    return data
+
+
+def write_stage(path, outputs: Dict[str, Geometry], graph: Optional[dict] = None, overwrite: bool = False,
+                frame: Optional[float] = None, *, up_axis: str = "z", units: str = "meters", root: str = ROOT,
+                materials: bool = True) -> WriteReport:
+    """Write ``outputs`` (name -> geometry) to the USD file ``path`` (.usd/.usda/.usdc).
+
+    ``up_axis``: ``z`` (MiniHou's own) or ``y`` (the stage is Y up, and the root Xform turns the Z-up geometry into it, so the numbers
+    stay as they are). ``units``: the unit the stage declares (a key of :data:`UNITS`); the geometry is scaled so a metre stays a metre.
+    ``root``: name of the default prim. ``materials``: bind faces to Material prims (off: geometry only)."""
+    path = os.fspath(path)
+    _check_write_args(path, up_axis, units, overwrite)
+    mpu = UNITS[units]
+    top = valid_name(root) or ROOT
     tmp = path + ".part" + os.path.splitext(path)[1]                   # write beside the target, then swap in: no half files
     if os.path.exists(tmp):
         os.remove(tmp)
     try:
-        stage = Usd.Stage.CreateNew(tmp)
-        UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
-        UsdGeom.SetStageMetersPerUnit(stage, 1.0)
-        root = UsdGeom.Xform.Define(stage, f"/{ROOT}")
-        stage.SetDefaultPrim(root.GetPrim())
+        stage = _new_stage(tmp, up_axis, mpu, top)
         report = WriteReport(path)
-        used: set = set()
-        anchor = os.path.dirname(os.path.abspath(path))
-        looks = write_looks(stage, f"/{ROOT}/Looks", list(outputs.values()), anchor)      # shared by every output
-        used.add("Looks")
-        for name, geo in outputs.items():
-            base = valid_name(name)
-            nm = _unique_name(base, used, "out")
-            report.outputs[name] = dict(write_geometry(stage, f"/{ROOT}/{nm}", geo, looks), prim=f"/{ROOT}/{nm}")
+        _author_outputs(stage, outputs, top, 1.0 / mpu, materials, os.path.dirname(os.path.abspath(path)), report)
         layer = stage.GetRootLayer()
-        data = {"minihou": {"format": 1, "outputs": json.dumps(list(outputs))}}      # no lists: the text format cannot hold them
-        if graph is not None:
-            data["minihou"]["graph"] = json.dumps(graph, sort_keys=True)
-        if frame is not None:
-            data["minihou"]["frame"] = float(frame)
-        layer.customLayerData = data
+        layer.customLayerData = _layer_data(outputs, graph, frame)
         layer.documentation = "Exported from MiniHou"
-        stage.GetRootLayer().Save()
+        layer.Save()
         del stage
         os.replace(tmp, path)
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
+    return report
+
+
+DETAIL_ATTR = "minihou:detail"                      # an animation's detail attributes, per frame (a plain file keeps them in customData)
+_BLOCK = object()                                  # "no value here": an attribute a frame does not have (blocked from that frame on)
+
+
+def _put(attr, value, tc) -> None:
+    Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
+    attr.Set(Sdf.ValueBlock() if value is _BLOCK else value, tc)
+
+
+class _Samples:
+    """Merges the stages of successive frames into one stage whose varying attributes carry time samples."""
+
+    def __init__(self, final):
+        self.final = final
+        self.held: Dict[str, tuple] = {}              # attribute path -> (value now held, last frame it was written at, last frame it was seen at)
+        self.present: Dict[str, List[float]] = {}     # prim path -> the frames it exists in
+        self.known: Dict[str, set] = {}               # prim path -> attribute paths it has had
+        self.frames: List[float] = []
+        self.first = 0.0                              # the first frame: USD holds a first sample backwards, so late data is blocked from here
+
+    def add(self, frame: float, fs) -> None:
+        Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
+        final, tc, f = self.final, Usd.TimeCode(float(frame)), float(frame)
+        flayer, layer = fs.GetRootLayer(), final.GetRootLayer()
+        if not self.frames:
+            self.first = f
+        here: set = set()
+        it = iter(Usd.PrimRange(fs.GetPseudoRoot()))
+        for prim in it:
+            if prim.IsPseudoRoot():
+                continue
+            path = prim.GetPath()
+            if not flayer.GetPrimAtPath(path):                                     # composed in from a reference (a material's network)
+                it.PruneChildren()
+                continue
+            key = str(path)
+            here.add(key)
+            if not layer.GetPrimAtPath(path):
+                Sdf.CopySpec(flayer, path, layer, path)                            # the whole subtree: relationships, references, metadata
+                self._sampled(final.GetPrimAtPath(path), tc, f)
+            self.present.setdefault(key, []).append(f)
+            seen = set()
+            for attr in prim.GetAttributes():
+                akey = str(attr.GetPath())
+                if not self._varying(flayer, attr):
+                    continue
+                v = attr.Get()
+                if v is None:
+                    continue
+                seen.add(akey)
+                tgt = final.GetAttributeAtPath(akey)
+                if not tgt:                                                         # an attribute this prim did not have before
+                    Sdf.CopySpec(flayer, attr.GetPath(), layer, attr.GetPath())
+                    tgt = final.GetAttributeAtPath(akey)
+                    tgt.ClearDefault()
+                self._write(akey, tgt, v, tc, f)
+            raw = prim.GetCustomDataByKey("minihou:detail")
+            if raw:                                                                # detail attributes can change per frame: also as a sampled string
+                mine = final.GetPrimAtPath(path)
+                da = mine.GetAttribute(DETAIL_ATTR) or mine.CreateAttribute(DETAIL_ATTR, Sdf.ValueTypeNames.String, True)
+                self._write(str(da.GetPath()), da, str(raw), tc, f)
+                seen.add(str(da.GetPath()))
+            for akey in self.known.setdefault(key, set()) - seen:                  # one it had and this frame does not
+                self._write(akey, final.GetAttributeAtPath(akey), _BLOCK, tc, f)
+            self.known[key] |= seen
+        for key, names in self.known.items():                                      # prims this frame lacks (a group's subset, a material): no values
+            if key not in here:
+                for akey in names:
+                    self._write(akey, final.GetAttributeAtPath(akey), _BLOCK, tc, f)
+        self.frames.append(f)
+
+    def _write(self, akey: str, tgt, v, tc, f: float) -> None:
+        Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
+        old = self.held.get(akey)
+        if old is None:
+            if self.frames:                                                        # first seen after the first frame: nothing before this
+                _put(tgt, _BLOCK, Usd.TimeCode(self.first))
+            _put(tgt, v, tc)
+        elif (old[0] is _BLOCK) == (v is _BLOCK) and (v is _BLOCK or old[0] == v):
+            self.held[akey] = (old[0], old[1], f)
+            return
+        else:
+            if old[1] != old[2]:
+                _put(tgt, old[0], Usd.TimeCode(old[2]))                            # keep the old value up to the frame before the change
+            _put(tgt, v, tc)
+        self.held[akey] = (v, f, f)
+
+    @staticmethod
+    def _varying(layer, attr) -> bool:
+        """An attribute this layer authors a plain value for (not a uniform one, nor a connection or a referenced network's)."""
+        Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
+        spec = layer.GetAttributeAtPath(attr.GetPath())
+        return bool(spec) and spec.variability != Sdf.VariabilityUniform and spec.HasInfo("default")
+
+    def _sampled(self, prim, tc, frame: float) -> None:
+        """Turn the single values of a prim just copied in (and of what is below it) into samples at ``tc``."""
+        Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
+        layer = self.final.GetRootLayer()
+        for sub in Usd.PrimRange(prim):
+            if not layer.GetPrimAtPath(sub.GetPath()):
+                continue
+            self.present.setdefault(str(sub.GetPath()), [])
+            known = self.known.setdefault(str(sub.GetPath()), set())
+            for attr in sub.GetAttributes():
+                if not self._varying(layer, attr):
+                    continue
+                v = attr.Get()
+                if v is None:
+                    continue
+                attr.ClearDefault()                                                 # the sample replaces the single value
+                if self.frames:                                                     # a prim that appears later: nothing before it
+                    _put(attr, _BLOCK, Usd.TimeCode(self.first))
+                attr.Set(v, tc)
+                self.held[str(attr.GetPath())] = (v, frame, frame)
+                known.add(str(attr.GetPath()))
+
+    def finish(self) -> None:
+        """Attributes that stayed the same to the end get their last frame written, and prims missing from some frames are hidden there."""
+        Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
+        for akey, (v, written, seen) in self.held.items():
+            if seen != written:
+                tgt = self.final.GetAttributeAtPath(akey)
+                if tgt:
+                    _put(tgt, v, Usd.TimeCode(seen))
+        for key, there in self.present.items():
+            if len(there) == len(self.frames) or not there:
+                continue
+            prim = self.final.GetPrimAtPath(key)
+            if not prim or not prim.IsA(UsdGeom.Imageable):
+                continue
+            vis = UsdGeom.Imageable(prim).CreateVisibilityAttr()
+            have = set(there)
+            for f in self.frames:
+                vis.Set(UsdGeom.Tokens.inherited if f in have else UsdGeom.Tokens.invisible, Usd.TimeCode(f))
+
+
+def write_animation(path, frames, fps: float = 24.0, graph: Optional[dict] = None, overwrite: bool = False, *, up_axis: str = "z",
+                    units: str = "meters", root: str = ROOT, materials: bool = True) -> WriteReport:
+    """Write an animation: ``frames`` yields ``(frame, outputs)`` one frame at a time (so only one is held in memory). Everything that
+    differs between frames (points, topology, attributes, whether a primitive exists at all) becomes time samples at that frame;
+    ``startTimeCode`` / ``endTimeCode`` / ``timeCodesPerSecond`` say how to play it. The report is the first frame's."""
+    Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
+    path = os.fspath(path)
+    _check_write_args(path, up_axis, units, overwrite)
+    mpu = UNITS[units]
+    top = valid_name(root) or ROOT
+    anchor = os.path.dirname(os.path.abspath(path))
+    tmp = path + ".part" + os.path.splitext(path)[1]
+    if os.path.exists(tmp):
+        os.remove(tmp)
+    try:
+        final = _new_stage(tmp, up_axis, mpu, top)
+        merge = _Samples(final)
+        report: Optional[WriteReport] = None
+        names: List[str] = []
+        for frame, outputs in frames:
+            fs = _new_stage(None, up_axis, mpu, top)
+            rep = WriteReport(path)
+            _author_outputs(fs, outputs, top, 1.0 / mpu, materials, anchor, rep)
+            if report is None:
+                report, names = rep, list(outputs)
+            merge.add(frame, fs)
+            del fs
+        if report is None:
+            raise ValueError("no frames to write")
+        merge.finish()
+        layer = final.GetRootLayer()
+        first, last = merge.frames[0], merge.frames[-1]
+        final.SetStartTimeCode(first)
+        final.SetEndTimeCode(last)
+        final.SetTimeCodesPerSecond(float(fps))
+        final.SetFramesPerSecond(float(fps))
+        layer.customLayerData = _layer_data(names, graph, first)
+        layer.documentation = "Exported from MiniHou"
+        layer.Save()
+        del final
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    report.frames = list(merge.frames)
     return report
 
 
@@ -688,9 +923,60 @@ def read_graph(path) -> Optional[dict]:
     return json.loads(g) if g else None
 
 
+PURPOSES = ("default", "render", "proxy", "guide")
+
+
+def parse_purposes(text) -> Tuple[str, ...]:
+    """Purposes named in ``text`` (words separated by spaces or commas; ``all`` is every one). Empty: ``default render``."""
+    words = [w for w in re.split(r"[\s,]+", str(text or "").lower()) if w]
+    if not words:
+        return ("default", "render")
+    if "all" in words:
+        return PURPOSES
+    bad = [w for w in words if w not in PURPOSES]
+    if bad:
+        raise ValueError(f"unknown purpose {bad[0]!r}: use {', '.join(PURPOSES)} or all")
+    return tuple(dict.fromkeys(words))
+
+
+def parse_prim_patterns(text) -> Tuple[List[str], List[str]]:
+    """``(include, exclude)`` from a prim pattern such as ``/World/Props /World/Set/chair* ^/World/Props/lights``: words separated by
+    spaces; ``*`` and ``?`` match within the path (``*`` also across ``/``); a leading ``^`` or ``-`` excludes. A pattern names the
+    prims it matches and everything below them."""
+    inc: List[str] = []
+    exc: List[str] = []
+    for w in str(text or "").split():
+        (exc if w[0] in "^-" else inc).append(w.lstrip("^-") if w[0] in "^-" else w)
+    for w in inc + exc:
+        if not w.startswith("/"):
+            raise ValueError(f"prim pattern {w!r} must start with /")
+    return inc, exc
+
+
+def _prim_filter(inc: List[str], exc: List[str]):
+    """A function ``(prim path string) -> bool`` for the patterns (a prim also counts when an ancestor matches)."""
+    import fnmatch
+
+    def hit(path: str, pats: List[str]) -> bool:
+        parts = path.split("/")
+        for k in range(2, len(parts) + 1):                      # "/a", "/a/b", ... the prim itself last
+            anc = "/".join(parts[:k])
+            for pat in pats:
+                if anc == pat or fnmatch.fnmatchcase(anc, pat):
+                    return True
+        return False
+
+    def keep(path: str) -> bool:
+        return (not inc or hit(path, inc)) and not (exc and hit(path, exc))
+    return keep
+
+
 def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_axis: str = "z", apply_units: bool = True,
-                  purposes=("default", "render")) -> Tuple[Geometry, ReadReport]:
-    """Read the meshes, curves and points under ``prim_path`` (default: the whole stage) into one Geometry in world space."""
+                  purposes=("default", "render"), prim_attrib: str = "") -> Tuple[Geometry, ReadReport]:
+    """Read the meshes, curves and points under ``prim_path`` (default: the whole stage) into one Geometry in world space.
+
+    ``prim_path`` is one prim path, or several prim patterns (see :func:`parse_prim_patterns`). ``prim_attrib`` (a name; empty: none)
+    adds that integer primitive attribute: which USD prim each primitive came from, as an index into the detail attribute ``usd_paths``."""
     Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
     path = os.fspath(path)
     try:
@@ -705,9 +991,17 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
     rep = ReadReport(up_axis=str(UsdGeom.GetStageUpAxis(stage)), meters_per_unit=mpu)
     meta = (stage.GetRootLayer().customLayerData or {}).get("minihou", {})
     rep.graph = meta.get("graph")
-    start = stage.GetPrimAtPath(prim_path) if prim_path else stage.GetPseudoRoot()
-    if not start or not start.IsValid():
-        raise ValueError(f"no prim {prim_path!r} in {os.path.basename(path)}")
+    inc, exc = parse_prim_patterns(prim_path)
+    keep = None
+    if len(inc) == 1 and not exc and not re.search(r"[*?]", inc[0]):
+        prim_path = inc[0].rstrip("/") or "/"
+        start = stage.GetPrimAtPath(prim_path) if prim_path != "/" else stage.GetPseudoRoot()
+        if not start or not start.IsValid():
+            raise ValueError(f"no prim {prim_path!r} in {os.path.basename(path)}")
+    else:
+        start = stage.GetPseudoRoot()
+        if inc or exc:
+            keep = _prim_filter(inc, exc)
     xcache = UsdGeom.XformCache(tm)
     M_up = np.eye(3)
     if up_axis == "z" and rep.up_axis == "Y":
@@ -718,15 +1012,22 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
         rep.notes.append(f"scaled by metersPerUnit {unit:g}")
     parts: List[Part] = []
     inst_names: List[str] = []                       # the objects the point instancers place, all instancers' prototypes in order
+    src_paths: List[str] = []                        # the USD prims primitives came from (for ``prim_attrib``)
     it = iter(Usd.PrimRange(start, Usd.TraverseInstanceProxies(Usd.PrimDefaultPredicate)))
     for prim in it:
         if not prim.IsA(UsdGeom.Imageable):
             continue
         purpose = UsdGeom.Imageable(prim).ComputePurpose()
         if purpose not in purposes:
-            if prim.IsA(UsdGeom.Gprim):
+            if prim.IsA(UsdGeom.Gprim) or prim.IsA(UsdGeom.PointInstancer):
                 rep.skipped.append(f"{prim.GetPath()} ({purpose} purpose)")
-            it.PruneChildren()
+                it.PruneChildren()
+            elif purpose != "default":
+                it.PruneChildren()                               # an explicit purpose reaches everything below
+            continue                                             # a plain container of default purpose: its children may name their own
+        vis = UsdGeom.Imageable(prim).GetVisibilityAttr()
+        if vis and vis.GetNumTimeSamples() and UsdGeom.Imageable(prim).ComputeVisibility(tm) == UsdGeom.Tokens.invisible:
+            it.PruneChildren()                                   # animated visibility: it is not there at this time
             continue
         kind = None
         if prim.IsA(UsdGeom.Mesh):
@@ -742,6 +1043,10 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
             it.PruneChildren()                                       # an instancer's children are its prototypes, not scene geometry
             continue
         else:
+            continue
+        if keep is not None and not keep(str(prim.GetPath())):
+            if kind == "instancer":
+                it.PruneChildren()
             continue
         instancer = None
         if kind == "instancer":
@@ -796,6 +1101,9 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
         for dropped in set(pa) | set(ca) | set(qa):
             if dropped not in part.point_attrs and dropped not in part.corner_attrs and dropped not in part.prim_attrs:
                 rep.notes.append(f"{prim.GetPath()}: primvar {dropped!r} has a size that fits no domain; skipped")
+        if prim_attrib and nq_ and prim_attrib not in part.prim_attrs:
+            part.prim_attrs[prim_attrib] = np.full(nq_, len(src_paths), np.int32)
+            src_paths.append(str(prim.GetPath()))
         if kind == "mesh":
             _add_subset_groups(UsdGeom.Mesh(prim), part, tm)
             _read_material_bindings(prim, part, tm, os.path.abspath(path), rep)
@@ -823,7 +1131,7 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
     geos = []
     for key, ps in groups.items():
         g = assemble(ps)
-        d = _output_detail(stage, key) if key else {}                              # each MiniHou output has its own name list
+        d = _output_detail(stage, key, tm) if key else {}                              # each MiniHou output has its own name list
         if isinstance(d.get("materials"), list) and d["materials"]:
             g = g.copy()
             g.detail["materials"] = [str(n) for n in d["materials"]]
@@ -836,11 +1144,13 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
         geo = merge(geos).freeze()
     else:
         geo = geos[0] if geos else assemble([])
-    detail = _read_detail(stage)
+    detail = _read_detail(stage, tm)
     for k in ("materials", "usd_materials"):                 # handled per output above
         detail.pop(k, None)
     if inst_names:
         geo.detail.setdefault("instance_objects", list(inst_names))
+    if src_paths:
+        geo.detail["usd_paths"] = src_paths
     if detail:
         geo.detail.update(detail)
     return geo, rep
@@ -889,31 +1199,38 @@ def _read_instancer(stage, inst, tm, part: Part, M: np.ndarray, unit: float, nam
         part.point_attrs["scale"] = (sc * k * unit).astype(np.float32)
 
 
-def _read_detail(stage) -> dict:
-    """Detail attributes of a MiniHou export (all outputs merged; the first output wins on a clash)."""
-    out: dict = {}
-    root = stage.GetPrimAtPath(f"/{ROOT}")
-    if not root or not root.IsValid():
-        return out
-    for child in root.GetChildren():
-        raw = child.GetCustomDataByKey("minihou:detail")
-        if raw:
-            try:
-                for k, v in json.loads(raw).items():
-                    out.setdefault(k, v)
-            except ValueError:
-                pass
-    return out
-
-
-def _output_detail(stage, path: str) -> dict:
-    """The detail attributes stored on one MiniHou output Xform."""
-    prim = stage.GetPrimAtPath(path)
-    raw = prim.GetCustomDataByKey("minihou:detail") if prim and prim.IsValid() else None
+def _detail_of(prim, tm) -> dict:
+    """The detail attributes stored on a MiniHou output Xform: the sampled attribute of an animation at ``tm``, else its customData."""
+    raw = None
+    a = prim.GetAttribute(DETAIL_ATTR)
+    if a and a.HasAuthoredValue():
+        raw = a.Get(tm)
+    if raw is None:
+        raw = prim.GetCustomDataByKey("minihou:detail")
     try:
         return json.loads(raw) if raw else {}
     except ValueError:
         return {}
+
+
+def _read_detail(stage, tm) -> dict:
+    """Detail attributes of a MiniHou export (all outputs merged; the first output wins on a clash)."""
+    out: dict = {}
+    root = stage.GetDefaultPrim()
+    if not root or not root.IsValid():
+        root = stage.GetPrimAtPath(f"/{ROOT}")
+    if not root or not root.IsValid():
+        return out
+    for child in root.GetChildren():
+        for k, v in _detail_of(child, tm).items():
+            out.setdefault(k, v)
+    return out
+
+
+def _output_detail(stage, path: str, tm) -> dict:
+    """The detail attributes stored on one MiniHou output Xform."""
+    prim = stage.GetPrimAtPath(path)
+    return _detail_of(prim, tm) if prim and prim.IsValid() else {}
 
 
 def _add_subset_groups(mesh, part: Part, tm) -> None:

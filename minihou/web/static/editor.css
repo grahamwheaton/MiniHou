@@ -591,3 +591,25 @@ path.hit.cut-mark {stroke:#ff6464;stroke-opacity:1;stroke-width:4px;}
 .sh-label {white-space:normal;overflow:visible;}
 
 .node .sub {color:var(--accent);}
+/* choosing files */
+.filepick { display: flex; gap: 4px; }
+.filepick input { flex: 1; min-width: 0; }
+.filepick .browse { padding: 0 8px; }
+.node-actions { margin: 4px 0 8px; }
+.file-dialog { width: min(720px, calc(100vw - 32px)); }
+.file-dialog .fd-top, .file-dialog .fd-bottom { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+.file-dialog .fd-top input, .file-dialog .fd-bottom input { flex: 1; }
+.file-dialog .fd-body { display: flex; gap: 8px; height: 320px; }
+.file-dialog .fd-places { display: flex; flex-direction: column; gap: 2px; width: 120px; overflow: auto; }
+.file-dialog .fd-places button { text-align: left; padding: 3px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-dialog .fd-list { flex: 1; overflow: auto; border: 1px solid var(--line); background: var(--bg); }
+.file-dialog .fd-row { display: flex; justify-content: space-between; gap: 8px; padding: 3px 8px; cursor: default; }
+.file-dialog .fd-row:hover { background: #ffffff10; }
+.file-dialog .fd-row.sel { background: var(--accent); color: #111; }
+.file-dialog .fd-row.dir .fd-n { color: var(--accent); }
+.file-dialog .fd-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-dialog .fd-s { flex: none; }
+.file-dialog .fd-note { min-height: 16px; font-size: 11px; }
+#drop-hint { position: fixed; inset: 24px; display: flex; align-items: center; justify-content: center; z-index: 60; pointer-events: none;
+  border: 2px dashed var(--accent); border-radius: 10px; background: #0007; color: var(--text); font-size: 18px; }
+#drop-hint.hidden { display: none; }

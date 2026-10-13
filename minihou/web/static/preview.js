@@ -1092,16 +1092,16 @@ window.MiniHouPreview = (() => {
       setSelectionHandles(list) { if (handleDrag) pendingSel = list || []; else { selHandles = list || []; schedule(); } },
       clearSelection() { change({}, "replace"); },
       pickAt(sx, sy, how) {                                                             // CSS pixels inside the canvas
-        if (!raw || sel.mode === "view") return false;
+        if (!raw || sel.mode === "view" || (api.canPick && !api.canPick())) return false;
         const cam = camera();
         if (sel.mode === "point") { const i = pickPoint(cam, sx, sy, 12); change({ points: i >= 0 ? [i] : [] }, i < 0 && how === "replace" ? "replace" : how); }
         else if (sel.mode === "edge") { const e = pickEdge(cam, sx, sy, 8); change({ edges: e ? [e] : [] }, !e && how === "replace" ? "replace" : how); }
         else { const f = pickFace(cam, sx, sy); change({ faces: f < 0 ? [] : sel.mode === "piece" ? piecesOf([f]) : [f] }, f < 0 && how === "replace" ? "replace" : how); }
         return true;
       },
-      boxSelect(x0, y0, x1, y1, how) { if (raw && sel.mode !== "view") change(boxPick(camera(), x0, y0, x1, y1), how || "replace"); },
+      boxSelect(x0, y0, x1, y1, how) { if (raw && sel.mode !== "view" && !(api.canPick && !api.canPick())) change(boxPick(camera(), x0, y0, x1, y1), how || "replace"); },
       selectAll() {
-        if (!raw || sel.mode === "view") return;
+        if (!raw || sel.mode === "view" || (api.canPick && !api.canPick())) return;
         const all = { points: [], edges: [], faces: [] };
         if (sel.mode === "point") for (let i = 0; i < raw.P.length / 3; i++) all.points.push(i);
         else if (sel.mode === "edge") for (let k = 0; k < raw.edge.length / 2; k++) all.edges.push([raw.edge[2 * k], raw.edge[2 * k + 1]]);
