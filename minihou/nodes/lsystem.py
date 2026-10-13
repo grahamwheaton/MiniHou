@@ -16,7 +16,7 @@ point, so the result is one connected network of curves with a ``width`` point a
 """
 import numpy as np
 
-from ..sdk import Float, Int, Str, node
+from ..sdk import Bool, Float, Int, Str, Vec3, node
 from . import _build as B
 
 MAX_SYMBOLS = 2_000_000
@@ -76,19 +76,30 @@ def _rot(a, b, ang):
     Str("rules", "F=FF-[-F+F+F]+[+F-F-F]", kind="code", doc="Rules 'A=...' separated by newlines or ';'"),
     Int("generations", 4, min=0, max=12),
     Float("angle", 22.5, soft_min=0.0, soft_max=90.0, doc="Degrees for + - & ^ \\ /"),
+    Bool("separate_angles", False, doc="Use independent yaw, pitch and roll angles instead of Angle"),
+    Float("yaw", 22.5, doc="Degrees for + (left) and - (right), in the turtle frame"),
+    Float("pitch", 22.5, doc="Degrees for & (down) and ^ (up), in the turtle frame"),
+    Float("roll", 137.5, doc="Degrees for backslash and /, around the current heading"),
+    Vec3("initial_orientation", (0, 0, 0), doc="Initial turtle yaw, pitch, roll in degrees, applied in that order; zero starts along +Z"),
     Float("step", 0.1, min=0.0, soft_max=2.0, doc="Length of F and f"),
     Float("step_scale", 0.9, min=0.0, soft_max=2.0, doc='Factor applied by "'),
     Float("width", 0.05, min=0.0, soft_max=1.0, doc="Starting width (point attribute 'width', used by sweep)"),
     Float("width_scale", 0.7, min=0.0, max=1.0, doc="Factor applied by !, and by each [ branch"),
     Int("seed", 0, doc="For stochastic rules"),
 ])
-def lsystem(premise, rules, generations, angle, step, step_scale, width, width_scale, seed):
+def lsystem(premise, rules, generations, angle, step, step_scale, width, width_scale, seed, separate_angles=False, yaw=22.5, pitch=22.5, roll=137.5, initial_orientation=(0, 0, 0)):
     """Grow plants and fractals from rewriting rules (Houdini's L-System). Output: curves along the turtle's path
-    (+Z is up) with a width attribute, and leaf points (group 'leaves') where J appears."""
+    (+Z is up) with a width attribute, and leaf points (group 'leaves') where J appears.
+    + / - yaw, & / ^ pitch, backslash / slash roll in the moving turtle frame.
+    Enable Separate Angles to control each axis independently. Branches restore the entire frame."""
     s = rewrite(premise, parse_rules(rules), generations, seed)
-    ang = np.radians(angle)
+    yaw_angle, pitch_angle, roll_angle = np.radians((yaw, pitch, roll) if separate_angles else (angle, angle, angle))
     pos = np.zeros(3)
     H, L, U = np.array([0.0, 0, 1]), np.array([-1.0, 0, 0]), np.array([0.0, -1, 0])   # heading up (+Z)
+    iy, ip, ir = np.radians(initial_orientation)
+    H, L = _rot(H, L, iy)
+    H, U = _rot(H, U, ip)
+    L, U = _rot(L, U, ir)
     w, st = float(width), float(step)
     pts, widths, leaf = [pos.copy()], [w], [False]
     normals = [H.copy()]
@@ -116,11 +127,11 @@ def lsystem(premise, rules, generations, angle, step, step_scale, width, width_s
             cur = len(pts) - 1
             current = None
         elif ch in "+-":
-            H, L = _rot(H, L, ang if ch == "+" else -ang)
+            H, L = _rot(H, L, yaw_angle if ch == "+" else -yaw_angle)
         elif ch in "&^":
-            H, U = _rot(H, U, ang if ch == "&" else -ang)
+            H, U = _rot(H, U, pitch_angle if ch == "&" else -pitch_angle)
         elif ch in "\\/":
-            L, U = _rot(L, U, ang if ch == "\\" else -ang)
+            L, U = _rot(L, U, roll_angle if ch == "\\" else -roll_angle)
         elif ch == "|":
             H, L = -H, -L
         elif ch == "[":
@@ -141,6 +152,8 @@ def lsystem(premise, rules, generations, angle, step, step_scale, width, width_s
             widths.append(w)
             leaf.append(True)
             normals.append(H.copy())
+    if stack:
+        raise ValueError("'[' without a matching ']'")
     curves = [c for c in curves if len(c) >= 2]
     used = np.zeros(len(pts), bool)
     for c in curves:

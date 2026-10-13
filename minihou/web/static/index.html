@@ -18,19 +18,6 @@
 </nav>
 <header id="topbar" aria-label="Command toolbar">
 
-  <div class="file">
-    <button id="file-btn" title="Open or create a graph file">
-      <span class="file-icon" aria-hidden="true">▱</span><span id="file-name">…</span><span class="caret">▾</span>
-    </button>
-    <div id="file-menu" class="menu hidden"></div>
-  </div>
-  <button id="undo-btn" title="Undo (Ctrl+Z)">↶</button>
-  <button id="redo-btn" title="Redo (Ctrl+Shift+Z)">↷</button>
-  <button id="add-btn" title="Add a node (Tab)">+ Node</button>
-  <button id="find-btn" title="Find a node (Ctrl+F)">Find</button>
-  <button id="note-btn" title="Add a sticky note">Note</button>
-  <button id="tidy-btn" title="Tidy the layout (L)">Tidy</button>
-  <button id="box-btn" title="Coloured frame around selected nodes (O); drag its header to move the group">Frame</button>
   <span class="frame" title="Current frame (@Frame, @Time). Blender's timeline sets it when connected.">
     <button id="frame-prev" title="Previous frame">◀</button><input id="frame-input" type="number" step="1" value="1" aria-label="Frame"><button id="frame-next" title="Next frame">▶</button><input id="frame-slider" type="range" min="1" max="250" step="1" value="1" aria-label="Frame slider" title="Scrub the frame (the range grows if you type a later frame)">
   </span>
@@ -88,6 +75,10 @@
       <label>New frame colour <input id="pref-frameColor" type="color"></label>
       <p class="muted">Frame (O) groups selected nodes. Right-click frames for fit, collapse and lock. Frame colours and notes are saved with the graph.</p>
     </fieldset>
+    <fieldset><legend>Python execution (this user)</legend>
+      <label><input id="pref-python-nodes" type="checkbox"> Enable Python nodes</label>
+      <p class="muted">Disabled by default. Python nodes execute graph code with your account permissions. Saved on this computer, separately from graphs and browser presets. CLI --allow-python remains available.</p>
+    </fieldset>
     <p id="preferences-storage" class="muted" role="status"></p>
     <div class="preferences-actions"><button id="preferences-reset" type="button">Restore defaults</button><button>Done</button></div>
   </form>
@@ -111,6 +102,21 @@
   <div id="work">
   <section id="canvas" tabindex="0" aria-label="Node graph">
     <div id="network-pane-header" class="pane-heading"><span>Node network</span><span class="flag-legend">M Mute · L Lock · T Template · D Display</span><span class="spacer"></span><label><input id="network-snap" type="checkbox"> Snap</label><button id="network-home" title="Frame all nodes" aria-label="Frame all nodes">⌂</button></div>
+    <div id="network-toolbar" aria-label="Node editor commands">
+  <div class="file">
+    <button id="file-btn" title="Open or create a graph file">
+      <span class="file-icon" aria-hidden="true">▱</span><span id="file-name">…</span><span class="caret">▾</span>
+    </button>
+    <div id="file-menu" class="menu hidden"></div>
+  </div>
+  <button id="undo-btn" title="Undo (Ctrl+Z)">↶</button>
+  <button id="redo-btn" title="Redo (Ctrl+Shift+Z)">↷</button>
+  <button id="add-btn" title="Add a node (Tab)">+ Node</button>
+  <button id="find-btn" title="Find a node (Ctrl+F)">Find</button>
+  <button id="note-btn" title="Add a sticky note">Note</button>
+  <button id="tidy-btn" title="Tidy the layout (L)">Tidy</button>
+  <button id="box-btn" title="Coloured frame around selected nodes (O); drag its header to move the group">Frame</button>
+    </div>
     <div id="world">
       <div id="boxes"></div>
       <svg id="wires" width="1" height="1"></svg>
@@ -139,6 +145,7 @@
           <button data-view="front" title="Front (Numpad 1, Ctrl for back)">Front</button><button data-view="right" title="Right (Numpad 3, Ctrl for left)">Right</button><button data-view="top" title="Top (Numpad 7, Ctrl for bottom)">Top</button><select id="pv-view-extra" aria-label="More axis views"><option value="">More views…</option><option value="back">Back</option><option value="left">Left</option><option value="bottom">Bottom</option></select><button id="pv-ortho" title="Perspective / orthographic (Numpad 5)">Persp</button><button id="pv-walk" title="Fly navigation: Shift+` or hold right mouse. WASD, Q/E, wheel speed." aria-pressed="false">Walk / Fly</button><button id="pv-frame-all" title="Frame all geometry">All</button><button id="pv-frame" title="Frame the selection, or everything (Numpad . / Home / double-click the view)">⌂</button>
         </span>
       </div>
+      <details id="pv-sketch"><summary>Sketch &amp; Measure</summary><div id="pv-sketch-panel"></div></details>
       <div class="pv-interaction" aria-label="Transform settings">
         <label>Orientation <select id="pv-orientation" title="Coordinate frame for selection transforms and curve constraints"><option value="global">Global</option><option value="local">Local</option><option value="normal">Normal</option><option value="view">View</option><option value="cursor">Cursor</option><option value="custom">Custom</option></select></label>
         <button id="pv-custom-frame" title="Capture the current selection normal as a custom orientation">Capture frame</button>
@@ -265,6 +272,7 @@
 <script src="/static/interaction.js"></script>
 <script src="/static/preview.js"></script>
 <script src="/static/curve-tool.js"></script>
+<script src="/static/sketch-tool.js"></script>
 <script src="/static/loop-tool.js"></script>
 <script src="/static/paint-tool.js"></script>
 <script src="/static/sheet.js"></script>

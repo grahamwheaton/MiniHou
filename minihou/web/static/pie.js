@@ -50,7 +50,8 @@
     polygons2: { title: "Polygons", items: [
       T("Divide", "divide", { sel: { face: "group" } }), T("Reverse", "reverse", { sel: { face: "group" } }),
       T("PolyReduce", "polyreduce"), T("PolyExpand2D", "polyexpand2d"), T("Subdivide", "subdivide"),
-      T("Clean", "clean"), T("Skin", "skin"), T("Convex Hull", "convex_hull")] },
+      T("Clean", "clean"), T("Skin", "skin"), P("Solid tools", "polygons3")] },
+    polygons3: {title:"Solid tools",items:[T("Push / Pull","pushpull",{sel:{face:"group"}}),T("Inset","inset",{sel:{face:"group"}}),T("Outset","outset",{sel:{face:"group"}}),T("Convex Hull","convex_hull"),null,null,null,null]},
 
     group: { title: "Group", items: [
       T("Group Promote", "group_promote"), T("Group by Range", "group_range"), T("Group Paint", null, { disabled: "Painting groups is not available yet" }),

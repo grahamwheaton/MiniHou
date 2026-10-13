@@ -381,6 +381,8 @@ def op_paint_assign(g: Graph, op: dict) -> dict:
 def op_display(g: Graph, op: dict) -> dict:
     _need_node(g, op["id"])
     g.display = op["id"]
+    for n in g.nodes.values():
+        n.meta.pop("display_extra", None)
     return {}
 
 
@@ -391,8 +393,13 @@ def op_flag(g: Graph, op: dict) -> dict:
     if not isinstance(value, bool):
         raise GraphError("flag value must be a boolean")
     if name == "display":
-        if value:
-            g.display = n.id
+        if op.get("additive", False):
+            if g._main_output() is None and value:
+                g.display = n.id
+            elif n.id != g._main_output():
+                n.meta["display_extra"] = value
+        elif value:
+            op_display(g, {"id": n.id})
         return {}
     if name == "render":
         g.render = n.id if value else None
@@ -424,7 +431,7 @@ def op_flag(g: Graph, op: dict) -> dict:
 
 def op_merge_templates(g: Graph, op: dict) -> dict:
     source = _need_node(g, op["id"]).id
-    refs = [nid for nid, n in g.nodes.items() if nid != source and n.meta.get("flags", {}).get("selectable_template")]
+    refs = [nid for nid, n in g.nodes.items() if nid != source and (n.meta.get("display_extra") or n.meta.get("flags", {}).get("selectable_template"))]
     if not refs:
         return {"id": source}
     protected = set(refs)
@@ -440,7 +447,8 @@ def op_merge_templates(g: Graph, op: dict) -> dict:
                            else nid if ref == source else ref for p, ref in consumer.inputs.items()}
     g.add_node(nid, "merge", inputs={"geos": [source, *refs]})
     for ref in refs:
-        g.nodes[ref].meta["flags"]["selectable_template"] = False
+        g.nodes[ref].meta.setdefault("flags", {})["selectable_template"] = False
+        g.nodes[ref].meta.pop("display_extra", None)
     if g.display == source:
         g.display = nid
     return {"id": nid}

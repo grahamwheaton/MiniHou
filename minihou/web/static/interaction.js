@@ -44,6 +44,16 @@ window.MiniInteraction = (() => {
       if(c.mode==='ALIGNED'||c.mode==='MIRRORED')c[other]=sub(c.p,mul(norm(d),c.mode==='MIRRORED'?length(d):length(sub(cs[index][other],c.p))));
     } return out;
   }
+  function transformControl(cs,index,part,tool,axis,amount,frame=identity()) {
+    const c=cs[index],pivot=c.p;
+    const transform=p=>{const v=sub(p,pivot);
+      if(tool==='rotate'){const n=frame[axis??2],a=amount*Math.PI/180;return add(pivot,add(add(mul(v,Math.cos(a)),mul(cross(n,v),Math.sin(a))),mul(n,dot(n,v)*(1-Math.cos(a)))));}
+      return add(pivot,axis===null?mul(v,amount):add(v,mul(frame[axis],dot(v,frame[axis])*(amount-1))));
+    };
+    if(part!=='p')return moveControl(cs,index,part,transform(c[part]));
+    const out=structuredClone(cs);out[index].left=transform(c.left);out[index].right=transform(c.right);
+    if(['AUTO','VECTOR'].includes(c.mode))out[index].mode='FREE';return out;
+  }
   function split(cs,index,closed) {
     if(index===cs.length-1&&!closed)return cs;
     const out=structuredClone(cs),a=out[index],b=out[(index+1)%out.length],lerp=(x,y)=>mul(add(x,y),0.5);
@@ -51,5 +61,5 @@ window.MiniInteraction = (() => {
     a.right=q0;a.mode='FREE';b.left=q2;b.mode='FREE';
     out.splice(index+1,0,{p:lerp(r0,r1),left:r0,right:r1,mode:'ALIGNED'});return out;
   }
-  return {add,sub,mul,dot,cross,length,norm,identity,world,frame,euler,normalFrame,controls,moveControl,split};
+  return {add,sub,mul,dot,cross,length,norm,identity,world,frame,euler,normalFrame,controls,moveControl,transformControl,split};
 })();

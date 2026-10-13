@@ -50,6 +50,22 @@ class WebTests(unittest.TestCase):
         except ValueError:
             return r.status, data
 
+    def test_python_preference_is_explicit_persistent_and_origin_checked(self):
+        from unittest.mock import patch
+        from minihou.nodes import python_node
+        from minihou import user_preferences
+        previous=python_node._ENABLED
+        self.addCleanup(python_node.set_allowed,previous)
+        with patch.dict(os.environ,{"MINIHOU_PREFERENCES_FILE":os.path.join(self.dir,"user-prefs.json")}):
+            self.assertEqual(self.req("POST","/api/preferences",{"python_nodes":"yes"})[0],400)
+            self.assertEqual(self.req("POST","/api/preferences",{"python_nodes":True},headers={"Origin":"https://example.com"})[0],403)
+            for enabled in (True,False):
+                status,data=self.req("POST","/api/preferences",{"python_nodes":enabled})
+                self.assertEqual(status,200)
+                self.assertEqual(data["python_nodes"],enabled)
+                self.assertEqual(user_preferences.read()["python_nodes"],enabled)
+                self.assertEqual(self.req("GET","/api/state")[1]["engine"]["python_nodes"],enabled)
+
     def test_state_has_everything_an_editor_needs(self):
         st, d = self.req("GET", "/api/state")
         self.assertEqual(st, 200)

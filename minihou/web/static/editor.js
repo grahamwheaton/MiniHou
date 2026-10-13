@@ -227,6 +227,7 @@
       S.menuExtras = (st.menu && st.menu.extras) || []; S.menuGroups = (st.menu && st.menu.groups) || [];
       setTypes(st.nodes, st.library);
       S.root = st.root;
+      $("#pref-python-nodes").checked = !!st.engine?.python_nodes;
       S.status = st.status;
       S.status.clients = st.link.clients;
       S.rev = -1;                                    // the engine may have restarted: accept its revision
@@ -352,11 +353,13 @@
     if (!ids.length) { S.view = { x: r.width / 2 - W / 2, y: r.height / 3, k: 1 }; applyView(); return; }
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const id of ids) { const [x, y] = pos(id); x0 = Math.min(x0, x); y0 = Math.min(y0, y - 30); x1 = Math.max(x1, x + W); y1 = Math.max(y1, y + nodeHeight(id) + 10); }
-    const pad = 60;
-    const k = Math.max(0.25, Math.min(1.3, (r.width - 2 * pad) / (x1 - x0), (r.height - 2 * pad) / (y1 - y0)));
-    S.view = { k, x: r.width / 2 - ((x0 + x1) / 2) * k, y: r.height / 2 - ((y0 + y1) / 2) * k };
+    const pad = 60, top = $("#network-toolbar").offsetTop + $("#network-toolbar").offsetHeight;
+    const k = Math.max(0.25, Math.min(1.3, (r.width - 2 * pad) / (x1 - x0), (r.height - top - 2 * pad) / (y1 - y0)));
+    S.view = { k, x: r.width / 2 - ((x0 + x1) / 2) * k, y: top + (r.height-top) / 2 - ((y0 + y1) / 2) * k };
     applyView();
   }
+
+  new ResizeObserver(()=>{$('#crumbs').style.top=($('#network-toolbar').offsetTop+$('#network-toolbar').offsetHeight+4)+'px';}).observe($('#network-toolbar'));
 
   // ---------------------------------------------------------------- rendering
   function render() {
@@ -1162,6 +1165,13 @@
     $("#pv-paint-btn").onclick = () => { if (paintTool.isOpen() && paintTool.active()) paintTool.close(); else paintTool.open("paint"), paintTool.setPaint(true); };
     $("#pv-assign-btn").onclick = () => { if (paintTool.isOpen() && !paintTool.active()) paintTool.close(); else { paintTool.setPaint(false); paintTool.open("assign"); } };
   }  const curveTool = pv?.ok && window.MiniCurveTool ? MiniCurveTool(pv,$('#pv-canvas'),(id,value)=>queueSet(id,'controls',value)) : null;
+  const sketchTool=pv?.ok&&window.MiniSketchTool?MiniSketchTool(pv,$('#pv-canvas'),async spec=>{
+    const id=uniqueId(spec.type),r=await edit([{op:'add',id,type:spec.type,params:spec.params,pos:[80,80],display:true}]);
+    if(!r)throw Error('Sketch could not be added to the graph');
+    pvKeepCameraNode=id;select([id]);
+  }):null;
+  if(sketchTool){$('#pv-sketch-panel').append(sketchTool.panel());const previous=pv.onOverlayDraw;pv.onOverlayDraw=()=>{previous?.();sketchTool.draw();};}
+
   let pvKeepCameraNode = null;
   let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false, pvReduced = null, pvTooBig = null;
   let pvSelection = { mode: "view", points: [], edges: [], faces: [] };
@@ -1301,12 +1311,12 @@
     pvDirty = true;
     if (pvTimer === null && !pvInFlight) pvTimer = setTimeout(runPreview, PB.playing ? 0 : 33);
   }
-  function flagTitle(name){return {display:'Display (R)',render:'Render (T; toggle off to follow Display)',template:'Template (E; Shift: add; Ctrl: selectable)',selectable_template:'Selectable Template (W)',bypass:'Mute (M)',lock:'Lock / Freeze geometry',unload:'Unload cached geometry'}[name];}
-  function flagState(id,name){const n=nodeOf(id);return name==='display'?id===displayNode():name==='render'?id===(S.graph.render||displayNode()):name==='lock'?!!n?.locked_geometry:!!n?.flags?.[name];}
+  function flagTitle(name){return {display:'Display (R; Shift-click: add/remove)',render:'Render (T; toggle off to follow Display)',template:'Template (E; Shift: add; Ctrl: selectable)',selectable_template:'Selectable Template (W)',bypass:'Mute (M)',lock:'Lock / Freeze geometry',unload:'Unload cached geometry'}[name];}
+  function flagState(id,name){const n=nodeOf(id);return name==='display'?(id===displayNode()||!!n?.display_extra):name==='render'?id===(S.graph.render||displayNode()):name==='lock'?!!n?.locked_geometry:!!n?.flags?.[name];}
   async function setNodeFlag(id,name,additive=false){
     if(!name)return;
     const ids=['display','render','template','selectable_template'].includes(name)?[id]:(S.sel.has(id)?[...S.sel]:[id]);
-    const value=name==='display'?true:name==='render'?S.graph.render!==id:!flagState(id,name);
+    const value=name==='display'?(additive?!flagState(id,name):true):name==='render'?S.graph.render!==id:!flagState(id,name);
     const result=await edit(ids.map(id=>({op:'flag',id,flag:name,value,additive})));
     if(result&&name==='display'){$('#pv-follow').value='display';pvKey=null;schedulePreview();}
   }
@@ -1382,7 +1392,9 @@
       params: (s) => ({ edges: edgePattern(s.edges) }) }],
     face: [
       { label: "Extrude", key: "e", type: "polyextrude", params: (s) => ({ group: rangePattern(s.faces), distance: 0.3 }) },
-      { label: "Inset", type: "polyextrude", params: (s) => ({ group: rangePattern(s.faces), distance: 0, inset: 0.15 }) },
+      { label: "Inset", type: "inset", params: (s) => ({ group: rangePattern(s.faces), amount: 0.15 }) },
+      { label: "Outset", type: "outset", params: (s) => ({ group: rangePattern(s.faces), amount: 0.15 }) },
+      { label: "Push / Pull", type: "pushpull", params: (s) => ({ group: rangePattern(s.faces), distance: 0.25 }) },
       { label: "Reverse", type: "reverse", params: (s) => ({ group: rangePattern(s.faces) }) },
       { label: "Group", type: "group_create", params: (s) => ({ name: "faces", domain: "primitives", method: "pattern", pattern: rangePattern(s.faces) }) },
       { label: "Delete", key: "x", type: "blast", params: (s) => ({ group: rangePattern(s.faces), domain: "primitives" }) }],
@@ -1420,7 +1432,7 @@
     const acts = n ? SELECTION_ACTIONS[s.mode] || [] : [];
     box.classList.toggle("hidden", !acts.length);
     box.replaceChildren(...acts.map((a) => h("button", { title: a.title || `${a.label} the selection: adds a ${a.type} node after ${pvNode || "the viewed node"}`,
-      dataset: { action: a.label }, onclick: () => applySelectionAction(a) }, a.label + (a.key ? ` (${a.key.toUpperCase()})` : ""))));
+      dataset: { action: a.label }, onclick: () => applySelectionAction(a) }, a.label + (a.key ? ` (${a.key === "e" ? "Shift+E" : a.key.toUpperCase()})` : ""))));
     refreshSelectionHandles();
   }
   // ---- a selection carries a move / rotate / scale gizmo; the first drag adds a transform node for it (group = the selected points)
@@ -1448,7 +1460,7 @@
     updateToolButtons();
   }
   function updateToolButtons() {
-    const has = pv.hasToolHandles();
+    const has = pv.hasToolHandles() || nodeOf(pvNode)?.type==='bezier';
     $("#pv-xform").classList.toggle("hidden", !has);
     document.querySelectorAll("#pv-xform [data-tool]").forEach((b) => b.classList.toggle("on", b.dataset.tool === pv.tool));
   }
@@ -1484,7 +1496,7 @@
       ? "Drag anchors / tangents: edit curve · X/Y/Z: constrain\nShift: precision · Ctrl: snap · Esc: cancel\nShift-double-click: append · Handle modes in inspector"
       : mode === "view"
       ? "Drag: orbit · Middle drag: pan · RMB: fly\nWASD + Q/E while flying · wheel: speed / dolly\nC: modeling tools · 1–4: component selection"
-      : "Click / drag box: select · Shift: add · Ctrl: path · Ctrl+Shift: remove\nMiddle: orbit · Shift-middle: pan · Alt-click: loop · Ctrl+Alt-click: ring\nW / E / R: move / rotate / scale · C: modeling tools";
+      : "Click / drag box: select · Shift: add · Ctrl: path · Ctrl+Shift: remove\nMiddle: orbit · Shift-middle: pan · Alt-click: loop · Ctrl+Alt-click: ring\nW / E / R: move / rotate / scale · Shift+E: extrude · C: modeling tools";
   }
   function setTool(t) { pv.setTool(t); updateToolButtons(); updateViewportHints(); }
   $('#pv-walk').onclick=()=>pv.toggleWalk();
@@ -1653,7 +1665,7 @@
       if(h.input_target){node=nodeOf(node)?.inputs?.[h.input_target];if(typeof node!=='string'||nodeOf(node)?.type!=='lattice_grid')return NaN;}
       const n = nodeOf(node), spec = ((S.types[(n || {}).type] || {}).params || []).find((p) => p.name === h.param);
       const cur = n && n.params && n.params[h.param] !== undefined ? n.params[h.param] : spec ? spec.default : undefined;
-      if(h.json_array){try{handleBase=JSON.parse(cur);}catch{handleBase=[];}if(!Array.isArray(handleBase)||handleBase.length!==h.json_array)handleBase=Array(h.json_array).fill(0);return Number(handleBase[h.comp]);}
+      if(h.json_array){try{handleBase=JSON.parse(cur);}catch{handleBase=[];}if(!Array.isArray(handleBase)||handleBase.length!==h.json_array)handleBase=Array(h.json_array).fill(0);return h.json_point!==undefined?handleBase.slice(h.json_point*3,h.json_point*3+3):Number(handleBase[h.comp]);}
       handleBase = Array.isArray(cur) ? cur.slice() : null;               // the other components of a vector stay as they were
       return h.kind==='plane'?handleBase:h.comp === null || h.comp === undefined ? Number(cur) : Number(Array.isArray(cur) ? cur[h.comp] : NaN);
     };
@@ -1692,6 +1704,7 @@
           ops.push({op:'disconnect',to:id,port});for(const from of refs)ops.push({op:'connect',from,to:id,port});
         }
         if(graph.display)ops.push({op:'display',id:graph.display});
+        for(const [id,n]of Object.entries(graph.nodes))if(n.display_extra)ops.push({op:'meta',id,set:{display_extra:true}});
         await edit(ops);select([previous]);
       }
     };
@@ -1700,8 +1713,16 @@
       if(h.input_target)node=nodeOf(node)?.inputs?.[h.input_target];
       if (!node || !nodeOf(node)) return;
       const spec = ((S.types[nodeOf(node).type] || {}).params || []).find((p) => p.name === h.param);
+      if(h.cage_sign && originalGraph && handleBase){
+        const source=originalGraph.nodes[node], params=source.params||{},center=(params.center||[0,0,0]).slice();
+        const delta=value-handleBase[h.comp];
+        center[h.comp]+=h.cage_sign*delta/2;
+        if(h.comp===2)center[2]-=({min:0.5,max:-0.5}[params.justify_z]||0)*delta;
+        queueSet(node,'center',center);
+      }
       if (spec && spec.kind === "int") value = Math.round(value);                       // an integer parameter takes whole steps
-      if (h.comp === null || h.comp === undefined) queueSet(node, h.param, value);
+      if(h.json_point!==undefined && handleBase){const values=handleBase.slice();values.splice(h.json_point*3,3,...value);queueSet(node,h.param,JSON.stringify(values));}
+      else if (h.comp === null || h.comp === undefined) queueSet(node, h.param, value);
       else if (handleBase) { const v = handleBase.slice(); v[h.comp] = value; queueSet(node, h.param, h.json_array?JSON.stringify(v):v); }
     };
     document.querySelectorAll("#preview [data-mode]").forEach((b) => { b.onclick = () => { if (b.dataset.mode !== "view" && blockedByReduced()) return; pv.setMode(b.dataset.mode); }; });
@@ -1710,8 +1731,8 @@
     wrap.addEventListener("pointerleave", () => { pvOver = false; });
     document.addEventListener("keydown", (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
-      if(loopTool?.active()||pv.isDragging()||curveTool?.active())return;
-      if (!pvOver || tag === "input" || tag === "textarea" || tag === "select") return;
+      if(sketchTool?.active()||loopTool?.active()||pv.isDragging()||curveTool?.active())return;
+      if (!pvOver || tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable) return;
       if(e.ctrlKey&&e.code==='KeyR'){e.preventDefault();e.stopImmediatePropagation();loopTool?.start();return;}
       const nav = { Numpad1: ["front"], Numpad3: ["right"], Numpad7: ["top"] }[e.code];          // Blender-style view keys; Ctrl = the opposite side
       if (nav && !e.altKey && !e.metaKey) { pv.viewAxis(nav[0], e.ctrlKey); e.preventDefault(); e.stopImmediatePropagation(); return; }
@@ -1734,9 +1755,9 @@
         if (pvSelection.mode !== "view" && !(pvSelection[SEL_KEY[pvSelection.mode]] || []).length) pv.setMode("view"); else pv.clearSelection();
         e.preventDefault(); e.stopImmediatePropagation(); return;
       }
-      const act = (SELECTION_ACTIONS[pvSelection.mode] || []).find((a) => a.key === k);
+      const act = (SELECTION_ACTIONS[pvSelection.mode] || []).find((a) => a.key === k && (k !== "e" || e.shiftKey));
       if (act && (pvSelection[SEL_KEY[pvSelection.mode]] || []).length) { applySelectionAction(act); e.preventDefault(); e.stopImmediatePropagation(); }
-      else if ((k === "w" || k === "e" || k === "r") && pv.hasToolHandles()) { setTool({ w: "move", e: "rotate", r: "scale" }[k]); e.preventDefault(); e.stopImmediatePropagation(); }
+      else if ((k === "w" || k === "e" || k === "r") && (pv.hasToolHandles() || nodeOf(pvNode)?.type==='bezier')) { setTool({ w: "move", e: "rotate", r: "scale" }[k]); e.preventDefault(); e.stopImmediatePropagation(); }
       else if (k === "a" && pvSelection.mode !== "view") { pv.selectAll(); e.preventDefault(); e.stopImmediatePropagation(); }
     }, true);
   }
@@ -1790,6 +1811,12 @@
   };
   $("#network-snap").onchange = e => { preferences.nodeSnap = e.target.checked; applyPreferences(true); };
   $("#network-home").onclick = () => frame(false);
+  $("#pref-python-nodes").onchange = async e => {
+    const input=e.target; input.disabled=true;
+    try { const result=await api('/api/preferences',{python_nodes:input.checked});input.checked=result.python_nodes;pvKey=null;schedulePreview(); }
+    catch(err){input.checked=!input.checked;toast(err.message);}
+    finally{input.disabled=false;}
+  };
   const preferencesDialog = $("#preferences");
   function preferencePage(page) {
     document.querySelectorAll("[data-preference-tab]").forEach(b => { const active = b.dataset.preferenceTab === page; b.setAttribute("aria-selected", active); b.tabIndex = active ? 0 : -1; });
@@ -2240,6 +2267,7 @@
   }
   canvas.addEventListener("pointermove", (e) => { S.mouse = [e.clientX, e.clientY]; });
   canvas.addEventListener("pointerdown", (e) => {
+    if(e.target.closest("#network-toolbar,#network-pane-header"))return;
     if (!$("#tabmenu").classList.contains("hidden")) closeMenu();
     canvas.focus({ preventScroll: true });
     const t = e.target;
@@ -2476,7 +2504,7 @@
       return;
     }
     const tag = (e.target.tagName || "").toLowerCase();
-    if (tag === "input" || tag === "textarea" || tag === "select") return;
+    if (tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable) return;
     if(!pvOver&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&S.sel.size){const flag={m:'bypass',e:'template',w:'selectable_template',r:'display'}[e.key.toLowerCase()];if(flag){e.preventDefault();setNodeFlag([...S.sel][0],flag,e.shiftKey);return;}}
     const mod = e.ctrlKey || e.metaKey;
     if (e.key === "Escape") { $("#help").classList.add("hidden"); $("#file-menu").classList.add("hidden"); }
@@ -2868,7 +2896,7 @@
     document.addEventListener("keydown", (e) => {
       if (e.code !== "Space" || !e.ctrlKey || e.altKey || e.metaKey) return;
       const tag = (e.target.tagName || "").toLowerCase();
-      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      if (tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable) return;
       if (L.max) set({ max: null }); else if (hover) set({ max: hover });
       e.preventDefault(); e.stopImmediatePropagation();
     }, true);

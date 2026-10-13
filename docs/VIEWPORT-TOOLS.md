@@ -6,9 +6,9 @@ Navigation preferences now default to Blender: middle mouse orbits, Shift-middle
 
 Ctrl-R over the viewport starts Loop Cut. Hover a quad edge for a cut preview; wheel changes count. Click to start sliding, click again or Enter to commit. Right-click during slide commits centered cuts; Escape cancels without creating a node. Uses the existing PolySplit engine and inserts into the displayed stream. Multiple cuts are evenly spaced; only single cuts slide. Stops at non-quad faces; this is not arbitrary knife cutting or full Blender edge-slide parity.
 
-Match Size exposes target translation and six target-box size handles with box guides. Enable Scale in the node to edit target dimensions. Uniform fitting still follows the node's uniform option: dragging a non-limiting dimension may not change the fitted result. Handles resize symmetrically, not Blender's opposite-face-anchored cage behavior.
+Match Size exposes target translation and six target-box size handles with box guides. Enable Scale in the node to edit target dimensions. Uniform fitting still follows the node's uniform option: dragging a non-limiting dimension may not change the fitted result. Face squares resize the target box while keeping the opposite face fixed when Translate is enabled; with Translate disabled resizing stays symmetric. Z justification is preserved. This is a six-face cage, not Blender's full corner/edge cage.
 
-Lattice Grid exposes XYZ displacement handles and cage guides. Connect an unmodified grid to Lattice rest and a second grid to deformed; selecting Lattice lets its handles edit a directly connected Lattice Grid. Other deformed-input node types should be edited at their source. Cages above 216 points omit handles for responsiveness; incompatible offsets reset when resolution changes. Curve anchors now have explicit orientation-aware axis handles in addition to tangent controls and Auto/Vector/Aligned/Mirrored/Free modes.
+Lattice Grid exposes XYZ displacement handles, free view-plane point handles and cage guides. X/Y/Z constrains a plane drag; Shift+axis excludes that axis. Esc/right-click cancels. Connect an unmodified grid to Lattice rest and a second grid to deformed; selecting Lattice lets its handles edit a directly connected Lattice Grid. Other deformed-input node types should be edited at their source. Cages above 216 points omit handles for responsiveness; incompatible offsets reset when resolution changes. Curve anchors now have explicit orientation-aware axis handles in addition to tangent controls and Auto/Vector/Aligned/Mirrored/Free modes.
 
 Selection: 1/2/3 choose points/edges/faces. Ctrl-click extends by shortest topological path (fewest edges, not geometric distance). Alt-click selects edge loops, Ctrl-Alt-click selects rings; Shift adds, Ctrl-Shift subtracts. Loops stop at non-four-valence vertices; rings traverse quads. Face selection derives the faces adjoining the chosen strip. These are not all of Blender's selection variants.
 
@@ -27,3 +27,14 @@ Loop-cut commits now retain the current camera, including right-click to center 
 
 
 F over the viewport frames the current component/object selection, or the displayed geometry if no components are selected. Wheel zoom uses the surface depth under the cursor when available, slowing near geometry; over empty background it falls back to distance-scaled zoom.
+
+
+## Interaction refinement
+
+Graph/file, Undo/Redo, Add Node, Find, Note, Tidy and Frame commands are inside the node editor pane. Shift-click D adds or removes extra visible nodes; plain click D chooses one display and clears extra displays. Extra visibility is preview-only and does not add export outputs. Selecting components from combined visible geometry creates an explicit merge when editing.
+
+In the viewport W/E/R selects Move/Rotate/Scale; Shift+E extrudes selected faces. Graph shortcuts remain scoped to the node pane. Text inputs do not invoke tools. Fly navigation consumes its own movement keys.
+
+Bezier anchors and selected tangents share oriented move axes, rotation rings and scale tips. Rotate/scale act around the anchor (selecting the anchor transforms both tangents). X/Y/Z constrains; Shift+axis excludes an axis for Move; Ctrl temporarily inverts snapping, using move/angle/scale increments as appropriate. Auto/Vector switches to Free on manual editing. Rotation without an axis uses the orientation Z axis. Surface snapping applies to Move; rotation/scale snap increments only.
+
+User preferences includes an explicit Python execution checkbox, off for a fresh user. It is stored in the user's MiniHou preferences.json separately from graphs and browser presets. CLI --allow-python and MINIHOU_PYTHON_NODES remain supported as startup overrides. Python executes with normal account permissions; enable only for trusted graphs.

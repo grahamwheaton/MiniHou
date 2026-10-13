@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "doc": "Small closed box: inset top face then negative Push/Pull to punch a through hole. Change distance to -0.4 for a pocket.",
+  "nodes": {
+    "box": {
+      "type": "box",
+      "params": {
+        "size": [
+          2,
+          2,
+          2
+        ]
+      },
+      "pos": [
+        80,
+        40
+      ]
+    },
+    "opening": {
+      "type": "inset",
+      "inputs": {
+        "geo": "box"
+      },
+      "params": {
+        "group": "1",
+        "amount": 0.4
+      },
+      "pos": [
+        80,
+        200
+      ]
+    },
+    "hole": {
+      "type": "pushpull",
+      "inputs": {
+        "geo": "opening"
+      },
+      "params": {
+        "group": "extrudeFront",
+        "distance": -3
+      },
+      "pos": [
+        80,
+        360
+      ]
+    }
+  },
+  "display": "hole"
+}

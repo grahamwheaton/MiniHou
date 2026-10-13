@@ -199,8 +199,37 @@ def _polyextrude(ins, out, p):
     offs = t.prim_offsets.astype(np.int64)
     pts = np.unique(np.concatenate([vp[offs[q]:offs[q + 1]] for q in prims.tolist()]))
     origin = src.P.astype(np.float64)[pts].mean(0)
+    normal = _mean_normal(src, prims)
+    corner = src.P.astype(float)[pts[0]]
+    inward = origin - corner
+    if np.linalg.norm(inward) < 1e-9:
+        inward = AXES[0]
+    inward /= np.linalg.norm(inward)
     return [{"id": "distance", "label": "distance", "param": "distance", "comp": None, "origin": origin,
-             "dir": _mean_normal(src, prims)}]
+             "dir": normal},
+            {"id": "inset", "label": "Inset / Outset amount", "param": "inset", "comp": None,
+             "origin": corner + normal * float(p.get("distance",0)), "dir": inward, "kind": "cage"}]
+
+
+@provider("pushpull")
+def _pushpull(ins, out, p):
+    return _polyextrude(ins,out,p)[:1]
+
+
+@provider("inset")
+def _inset(ins, out, p):
+    result = _polyextrude(ins,out,{**p,"distance":0})[1:]
+    for h in result:
+        h.update(id="amount",param="amount",label="Inset amount",min=0.)
+    return result
+
+
+@provider("outset")
+def _outset(ins, out, p):
+    result = _inset(ins,out,p)
+    for h in result:
+        h.update(label="Outset amount",dir=-h["dir"])
+    return result
 
 
 @provider("polybevel")
@@ -266,7 +295,8 @@ def _match_size(ins, out, p):
             for sign in (-1, 1):
                 result.append({"id": f"target_size_{i}_{sign}", "label": f"Target size {'XYZ'[i]}",
                                "param": "size", "comp": i, "origin": box_center + sign * AXES[i] * size[i] / 2,
-                               "dir": sign * AXES[i], "scale": 2.0, "min": 0.0001})
+                               "dir": sign * AXES[i], "scale": 1.0 if p.get("translate", True) else 2.0, "min": 0.0001,
+                               "cage_sign": sign if p.get("translate", True) else 0, "kind": "cage"})
     if result and p.get("scale", False):
         corners = [box_center + np.asarray(v) * size / 2 for v in __import__('itertools').product((-1, 1), repeat=3)]
         result[0]['guide_lines'] = [[a.tolist(), b.tolist()] for j, a in enumerate(corners) for b in corners[j+1:] if np.count_nonzero(a != b) == 1]
@@ -282,6 +312,11 @@ def _lattice_grid(ins, out, p):
              "param": "offsets", "comp": j * 3 + i, "origin": point, "dir": AXES[i],
              "json_array": out.npoints * 3, "axis_color": i}
             for j, point in enumerate(out.P) for i in range(3)]
+
+    result += [{"id": f"control_plane_{j}", "label": f"Control {j} view plane",
+                "param": "offsets", "comp": None, "origin": point, "dir": AXES[2],
+                "kind": "plane", "json_array": out.npoints * 3, "json_point": j}
+               for j, point in enumerate(out.P)]
 
     nx, ny, nz = (int(p.get(k, 2)) for k in ('columns', 'rows', 'layers'))
     lines = []
