@@ -2094,30 +2094,73 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_selector("#proxy-menu", state="hidden")      # the item closes it once the engine has answered
         self.assertTrue(until(lambda: self.s.link_tris == 0))
 
-    def test_a_big_geometry_is_drawn_reduced_with_full_res_on_request_and_selection_waits(self):
+    def big_grid(self, display_tris=3000, max_tris=None):
         from minihou import preview
-        old = preview.DISPLAY_TRIS
-        preview.DISPLAY_TRIS = 3000
-        self.addCleanup(setattr, preview, "DISPLAY_TRIS", old)
+        old = preview.DISPLAY_TRIS, preview.MAX_TRIS
+        preview.DISPLAY_TRIS = display_tris
+        if max_tris:
+            preview.MAX_TRIS = max_tris
+        self.addCleanup(lambda: (setattr(preview, "DISPLAY_TRIS", old[0]), setattr(preview, "MAX_TRIS", old[1])))
         self.s.edit([{"op": "replace", "graph": {"nodes": {"g": {"type": "grid", "params": {"columns": 100, "rows": 100}, "pos": [0, 0]}},
                                                  "display": "g"}}])
         self.page.wait_for_selector('.node[data-id="g"]')
-        banner = self.page.locator("#pv-proxy")
-        banner.wait_for(state="visible")
+        self.page.locator("#pv-proxy").wait_for(state="visible")
+
+    def test_a_big_geometry_is_drawn_reduced_and_selecting_loads_the_full_detail(self):
+        self.big_grid()
         self.assertIn("Reduced view", self.page.locator("#pv-proxy-text").inner_text())
         self.assertLessEqual(self.page.evaluate("minihou.preview.tris"), 3000)
-        self.assertTrue(self.page.locator('#preview [data-mode="point"]').is_disabled())
+        self.assertFalse(self.page.locator('#preview [data-mode="point"]').is_disabled())          # selecting is on offer
         self.page.locator("#canvas").focus()
         self.page.mouse.move(*self.center(self.page.locator("#pv-canvas")))
         self.page.keyboard.press("1")                                                           # asks for point selection
-        self.page.wait_for_function("document.querySelector('#pv-msg').textContent.includes('Selecting needs')")
-        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "view")
-        self.page.click("#pv-full")
-        self.assertTrue(until(lambda: self.page.evaluate("minihou.preview.tris") == 2 * 99 * 99, 8))
-        self.assertTrue(until(lambda: not self.page.locator('#preview [data-mode="point"]').is_disabled()))
+        self.assertTrue(until(lambda: self.page.evaluate("minihou.preview.tris") == 2 * 99 * 99, 8))     # the real geometry arrived
+        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "point")
         self.assertEqual(self.page.locator("#pv-proxy-text").inner_text(), "")
-        self.page.click('#preview [data-mode="point"]')
-        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "point")        # selecting works on the real geometry
+        self.page.keyboard.press("3")                                                           # faces: still full
+        self.page.keyboard.press("a")
+        self.assertTrue(until(lambda: self.page.evaluate("minihou.preview.selection().faces.length") == 99 * 99))
+        self.page.keyboard.press("x")                                                           # Delete: a blast node after the viewed node
+        self.assertTrue(until(lambda: any(n.type == "blast" for n in self.s.graph.nodes.values())))
+        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "face")
+        self.page.wait_for_function("minihou.preview.tris === 0 || minihou.preview.tris === 2 * 99 * 99")
+        self.assertEqual(self.page.locator("#pv-proxy-text").inner_text(), "")                     # it did not slip back to a reduced view
+
+    def test_detail_full_pins_the_full_view_and_fast_keeps_selection_off(self):
+        self.big_grid()
+        self.page.select_option("#pv-detail", "full")
+        self.assertTrue(until(lambda: self.page.evaluate("minihou.preview.tris") == 2 * 99 * 99, 8))
+        self.assertEqual(self.page.evaluate("localStorage.getItem('minihou.pvDetail')"), "full")
+        self.page.select_option("#pv-detail", "fast")
+        self.assertTrue(until(lambda: self.page.evaluate("minihou.preview.tris") <= 3000, 8))
+        self.assertTrue(self.page.locator('#preview [data-mode="point"]').is_disabled())
+        self.page.locator("#canvas").focus()
+        self.page.mouse.move(*self.center(self.page.locator("#pv-canvas")))
+        self.page.keyboard.press("1")
+        self.page.wait_for_function("document.querySelector('#pv-msg').textContent.includes('Detail is set to Fast')")
+        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "view")
+        self.page.select_option("#pv-detail", "auto")
+        self.assertTrue(until(lambda: not self.page.locator('#preview [data-mode="point"]').is_disabled()))
+
+    def test_selecting_says_so_when_the_geometry_is_too_big_even_for_full_detail(self):
+        self.big_grid(max_tris=5000)
+        self.page.locator("#canvas").focus()
+        self.page.mouse.move(*self.center(self.page.locator("#pv-canvas")))
+        self.page.keyboard.press("1")
+        self.page.wait_for_function("document.querySelector('#pv-msg').textContent.includes('more than the viewer can hold')")
+        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "view")
+        self.assertTrue(self.page.locator('#preview [data-mode="face"]').is_disabled())
+        self.assertIn("more than the viewer can hold", self.page.locator("#pv-proxy-text").inner_text())
+
+    def test_the_cook_proxy_can_be_set_from_the_viewport_options(self):
+        self.page.select_option("#pv-proxy-level", "0.1")
+        self.assertTrue(until(lambda: self.s.proxy_level == 0.1))
+        self.assertTrue(until(lambda: self.page.locator("#proxy-label").inner_text() == "10%"))
+        self.page.select_option("#pv-proxy-level", "full")
+        self.assertTrue(until(lambda: self.s.proxy_level == 1.0 and not self.s.proxy_auto))
+        self.page.select_option("#pv-proxy-level", "auto")
+        self.assertTrue(until(lambda: self.s.proxy_auto))
+        self.assertTrue(until(lambda: self.page.locator("#pv-proxy-level").input_value() == "auto"))
 
     def test_export_usd_from_the_file_menu(self):
         try:

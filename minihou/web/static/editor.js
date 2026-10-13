@@ -965,28 +965,52 @@
   const pvMsg = (text) => { const m = $("#pv-msg"); m.textContent = text || ""; m.classList.toggle("hidden", !text); };
   const pv = window.MiniHouPreview ? window.MiniHouPreview.create($("#pv-canvas"), pvMsg) : null;
   const curveTool = pv?.ok && window.MiniCurveTool ? MiniCurveTool(pv,$('#pv-canvas'),(id,value)=>queueSet(id,'controls',value)) : null;
-  let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false, pvFull = false, pvReduced = null;
+  let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false, pvReduced = null, pvTooBig = null;
+  let pvSelection = { mode: "view", points: [], edges: [], faces: [] };
+  // Viewport detail: auto draws a big geometry reduced, but at full detail while a selection mode is on (selecting needs the real points);
+  // full always asks for full detail; fast always reduces (selection off). Remembered between sessions.
+  let pvDetail = "auto";
+  try { const d = localStorage.getItem("minihou.pvDetail"); if (["auto", "full", "fast"].includes(d)) pvDetail = d; } catch (e) { /* no storage */ }
+  const wantFull = () => pvDetail === "full" || (pvDetail === "auto" && pvSelection.mode !== "view");
+  function setDetail(d) {
+    pvDetail = d;
+    try { localStorage.setItem("minihou.pvDetail", d); } catch (e) { /* no storage */ }
+    $("#pv-detail").value = d;
+    pvKey = null; schedulePreview(); setReducedView(pvReduced);
+  }
   const pct = (x) => (x >= 0.1 ? Math.round(x * 100) : Math.round(x * 1000) / 10) + "%";
-  // A big geometry is drawn reduced (clustered to a budget): say so, offer full detail, and keep selection off (the drawn points are not the real ones)
+  // A big geometry is drawn reduced (clustered to a budget). Selecting needs the real points, so a selection mode asks for full detail
+  // (auto) and only stays off when the geometry is too big even then, or detail is set to fast.
+  const tooBig = (p) => !!p && (p.full || p.tooBig);                      // reduced although full detail was asked for
+  function selectLock(p) { return !!p && (tooBig(p) || pvDetail === "fast"); }
   function setReducedView(p) {
     pvReduced = p;
-    $("#pv-proxy").classList.toggle("hidden", !p && !pvFull);
-    $("#pv-proxy-text").textContent = p ? `Reduced view: ${fmt(p.shown_tris)} of ${fmt(p.tris)} triangles` + (p.points > p.shown_points ? `, ${fmt(p.shown_points)} of ${fmt(p.points)} points` : "") : "";
-    $("#pv-full").classList.toggle("on", pvFull);
-    $("#pv-full").textContent = pvFull ? "Full res ✓" : "Full res";
+    $("#pv-proxy").classList.toggle("hidden", !p && pvDetail !== "full");
+    $("#pv-proxy-text").textContent = p ? `Reduced view: ${fmt(p.shown_tris)} of ${fmt(p.tris)} triangles` + (p.points > p.shown_points ? `, ${fmt(p.shown_points)} of ${fmt(p.points)} points` : "") + (tooBig(p) ? " (more than the viewer can hold)" : "") : "";
+    $("#pv-full").classList.toggle("on", pvDetail === "full");
+    $("#pv-full").textContent = pvDetail === "full" ? "Full res ✓" : "Full res";
+    $("#pv-detail").value = pvDetail;
+    const lock = selectLock(p), why = lockMessage(p);
     document.querySelectorAll("#preview [data-mode]").forEach((b) => {
-      const lock = !!p && b.dataset.mode !== "view";
-      b.disabled = lock; b.title = lock ? "Selecting works on the real geometry: this view is reduced. Use Full res, or lower the proxy level." : b.title;
+      const off = lock && b.dataset.mode !== "view";
+      if (!b.dataset.title) b.dataset.title = b.title;
+      b.disabled = off; b.title = off ? why : b.dataset.title;
     });
-    if (p && pvSelection.mode !== "view") pv.setMode("view");
+    if (lock && pvSelection.mode !== "view") { pv.setMode("view"); pvMsg(why); clearTimeout(blockedByReduced.t); blockedByReduced.t = setTimeout(() => pvMsg(""), 6000); }
+  }
+  function lockMessage(p) {
+    if (!p) return "";
+    if (tooBig(p)) return `Selecting needs the real geometry, and this one has ${fmt(p.tris)} triangles / ${fmt(p.points)} points, more than the viewer can hold (${fmt(p.max_tris)} / ${fmt(p.max_points)}). Cut it down first (Blast, or Group Create with a bounds box).`;
+    return "Detail is set to Fast, so the view is reduced and selecting is off. Set Detail to Auto or Full to select.";
   }
   function blockedByReduced() {
-    if (!pvReduced) return false;
-    pvMsg("Selecting needs the real geometry: this view is reduced. Click Full res, or lower the proxy level.");
-    clearTimeout(blockedByReduced.t); blockedByReduced.t = setTimeout(() => pvMsg(""), 3500);
+    if (!selectLock(pvReduced)) return false;
+    pvMsg(lockMessage(pvReduced));
+    clearTimeout(blockedByReduced.t); blockedByReduced.t = setTimeout(() => pvMsg(""), 6000);
     return true;
   }
-  $("#pv-full").onclick = () => { pvFull = !pvFull; pvKey = null; schedulePreview(); setReducedView(pvReduced); };
+  $("#pv-full").onclick = () => setDetail(pvDetail === "full" ? "auto" : "full");
+  $("#pv-detail").onchange = (e) => setDetail(e.target.value);
   let pvInFlight = false, pvDirty = false;
   function schedulePreview() {
     if (!pv || !pv.ok) return;
@@ -1012,12 +1036,13 @@
     const node = previewTarget(), documentId = S.documentId;
     $("#pv-node").textContent = node ? "· " + node : "";
     if (!node) { pv.clear(); pvMsg(""); pvKey = null; return; }
-    const key = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}:${pvFull}`;
+    const full = wantFull();
+    const key = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}:${full}`;
     if (key === pvKey) return;
     pvKey = key;
     let buf;
     try {
-      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full: pvFull }) });
+      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full }) });
       buf = await r.arrayBuffer();
     } catch (e) { pvKey = null; return; }
     // A completed frame of the same node is useful even if a newer edit arrived.
@@ -1031,7 +1056,11 @@
     }
     const empty = !head.points;
     pvMsg(empty ? "No geometry" : head.truncated ? "Showing part of a very large geometry." : "");
-    setReducedView(head.proxy && head.proxy.active ? head.proxy : null);
+    let rp = head.proxy && head.proxy.active ? head.proxy : null;
+    const sig = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}`;
+    if (rp && rp.full) pvTooBig = sig;                                           // full detail was refused for this result: say so on the next (reduced) view too
+    else if (rp && pvTooBig === sig) rp = { ...rp, tooBig: true };
+    setReducedView(rp);
     pv.set(head, arrays, pvNode === node && pvPath === S.path);
     pv.setHandles(head.handles || []);
     refreshSelectionHandles();                                                 // a kept selection moved with the geometry: so does its gizmo
@@ -1066,7 +1095,6 @@
   };
   const SEL_KEY = { point: "points", edge: "edges", face: "faces", piece: "faces" };
   SELECTION_ACTIONS.piece = SELECTION_ACTIONS.face;                          // a piece is a set of faces: the same actions
-  let pvSelection = { mode: "view", points: [], edges: [], faces: [] };
   async function applySelectionAction(a) {
     const s = pvSelection, node = pvNode;
     if (!node || !nodeOf(node)) { toast("Nothing to attach the new node to."); return; }
@@ -1076,7 +1104,12 @@
     if (r) { pv.clearSelection(); select([r.results[0].id]); }
   }
   function renderSelectionTools(s) {
+    const was = pvSelection.mode;
     pvSelection = s;
+    if (was !== s.mode && (was === "view" || s.mode === "view") && pvDetail === "auto") {          // selecting asks for full detail, leaving it lets go again
+      if (s.mode !== "view" && pvReduced && !selectLock(pvReduced)) { pvMsg("Loading full detail for selecting…"); }
+      schedulePreview();
+    }
     updateViewportHints();
     const n = (s[SEL_KEY[s.mode]] || []).length;
     $("#pv-selinfo").textContent = s.mode === "view" ? "" : s.mode === "piece" ? `${n} face${n === 1 ? "" : "s"} in the selected objects` : `${n} ${SEL_KEY[s.mode].replace(/s$/, "")}${n === 1 ? "" : "s"} selected`;
@@ -1230,6 +1263,7 @@
     document.querySelectorAll('.pv-cursor-angle').forEach(e=>{const i=Number(e.dataset.axis);e.value=pv.interaction.cursor[i];e.onchange=()=>{if(Number.isFinite(Number(e.value))){pv.interaction.cursor[i]=Number(e.value);store();}};});
     $('#pv-custom-frame').onclick=()=>{pv.interaction.orientation='normal';pv.interaction.custom=pv.orientationFrame();pv.interaction.orientation='custom';$('#pv-orientation').value='custom';store();};
     pv.onSelect = renderSelectionTools;
+    pv.canPick = () => !pvReduced;                                              // the drawn points of a reduced view are not the real ones
     // viewport handles: arrows in the view that scrub a parameter of the viewed node
     let handleBase = null, gizmoNode = null, createdNode=null, originalGraph=null, originalNode=null;
     const baseFor = (node, h) => {                                                       // the parameter's current value (or default) on that node
@@ -2157,10 +2191,19 @@
     if (p.auto) return PROXY_ROWS[1];
     return PROXY_ROWS.find((r) => !r.auto && Math.abs(r.level - p.level) < 1e-9) || { id: "custom", label: pct(p.level), level: p.level, auto: false };
   };
+  const pvLevel = $("#pv-proxy-level");                                         // the same cook proxy, reachable from the viewport's display options
+  for (const r of PROXY_ROWS) pvLevel.append(h("option", { value: r.id }, "Proxy: " + r.label));
+  pvLevel.onchange = async () => {
+    const r = PROXY_ROWS.find((x) => x.id === pvLevel.value);
+    try { S.status = Object.assign(S.status || {}, { proxy: await api("/api/proxy", { level: r.level, auto: r.auto }) }); } catch (e) { toast(e.message); }
+    renderProxy();
+  };
   function renderProxy() {
     const p = (S.status && S.status.proxy) || { level: 1, auto: false, link_tris: 0 };
     const row = proxyRow();
     $("#proxy-label").textContent = row.label;
+    if (![...pvLevel.options].some((o) => o.value === row.id)) pvLevel.append(h("option", { value: row.id }, "Proxy: " + row.label));
+    pvLevel.value = row.id;
     $("#proxy-btn").classList.toggle("on", row.id !== "full" || p.link_tris > 0 || !!(S.status && S.status.disk_cache));
     $("#proxy-btn").title = row.id === "full" ? "Proxy: work on a lighter version of a very large scene" : `Proxy ${row.label}: nodes cook a smaller version of the scene (counts, resolutions, voxel sizes scale)`;
     if (!$("#proxy-menu").classList.contains("hidden")) fillProxyMenu();
@@ -2169,7 +2212,7 @@
     const p = (S.status && S.status.proxy) || { level: 1, auto: false, link_tris: 0 }, cur = proxyRow().id, m = $("#proxy-menu");
     m.innerHTML = "";
     const head = document.createElement("div"); head.className = "head";
-    head.textContent = "Cook a lighter version of the scene while you work: grid and scatter counts, sphere bands, voxel sizes and spacings scale down. The viewport always draws within a budget of its own.";
+    head.textContent = "Cook a lighter version of the scene while you work: grid and scatter counts, sphere bands, voxel sizes and spacings scale down. The viewport has its own Detail setting (reduced above a budget, full while you select).";
     m.appendChild(head);
     for (const r of PROXY_ROWS) {
       const it = document.createElement("div"); it.className = "item" + (r.id === cur ? " cur" : ""); it.dataset.proxy = r.id;
