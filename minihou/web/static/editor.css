@@ -674,3 +674,13 @@ path.hit.cut-mark {stroke:#ff6464;stroke-opacity:1;stroke-width:4px;}
 .pv-sheet .sh-org:hover { color: var(--accent); text-decoration: underline; }
 .pv-sheet .sh-c.cs { background: #4c8fdd33; }
 .pv-sheet .sh-c.cs-active { outline: 1px solid var(--accent); outline-offset: -1px; }
+.pv-perf { position: absolute; right: 8px; bottom: 8px; z-index: 7; width: 300px; max-height: calc(100% - 16px); overflow: auto; padding: 6px 10px 8px; background: #22262bf0; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; box-shadow: 0 4px 16px #0009; }
+.pv-perf.hidden { display: none; }
+.pv-perf h4 { margin: 8px 0 3px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.pv-perf h4:first-child { margin-top: 0; }
+.pv-perf label { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: 3px 0; }
+.pv-perf label.chk { justify-content: flex-start; }
+.pv-perf label.inline { display: inline-flex; margin: 0; }
+.pv-perf select, .pv-perf input[type=number] { background: var(--bg); border: 1px solid var(--line); color: var(--text); padding: 1px 3px; }
+.pv-perf input[type=range] { width: 120px; }
+.pv-perf #pv-perf-stats { white-space: pre-wrap; font: var(--mono); font-size: 11px; }

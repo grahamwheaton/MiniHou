@@ -877,6 +877,9 @@ files on the editor to make the node. The **USD Export** node (settings, a frame
 **Save to Disk**; the **USD Import** node has Houdini-style settings (Primitives patterns, purposes, time offset and scale, path attribute,
 Reload). On a big scene the viewport's **Detail** setting (Auto / Full / Fast) and the cook **Proxy** are in its display options; selecting
 loads the full detail ([docs/PROXY.md](docs/PROXY.md)).
+Instances (copies of one shape, instance points, USD point instancers) are drawn as **impostors**: each shape once at three levels of detail and a
+transform per instance, with the level chosen by size on screen. The **Perf** menu in the viewport adds an impostor and display budget, culling of what
+is outside the view, cheaper drawing while the camera moves, near/far clip, a section plane and live statistics ([docs/PROXY.md](docs/PROXY.md#3-instances-as-impostors-display-only)).
 
 ## Disk cache (reopen big scenes quickly)
 

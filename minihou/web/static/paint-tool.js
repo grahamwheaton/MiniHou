@@ -79,8 +79,10 @@ window.MiniPaint = (pv, canvas, host) => {
   function raster() {
     const raw = pv.geometry(), cam = pv.camera(), S = 0.5, W = Math.max(1, Math.ceil(cam.w * S)), H = Math.max(1, Math.ceil(cam.h * S));
     const depth = new Float32Array(W * H).fill(Infinity), ids = new Int32Array(W * H).fill(-1), sp = projectAll(cam, raw.P), T = raw.tri;
+    const cut = pv.sectionPlane ? pv.sectionPlane() : null, hidden = (i) => cut.n[0] * raw.P[i] + cut.n[1] * raw.P[i + 1] + cut.n[2] * raw.P[i + 2] > cut.d;      // beyond the section plane
     for (let t = 0, nt = T.length / 3; t < nt; t++) {
       const a = T[3 * t] * 3, b = T[3 * t + 1] * 3, c = T[3 * t + 2] * 3;
+      if (cut && hidden(a) && hidden(b) && hidden(c)) continue;
       const za = sp[a + 2], zb = sp[b + 2], zc = sp[c + 2];
       if (za < 0 || zb < 0 || zc < 0) continue;
       const ax = sp[a] * S, ay = sp[a + 1] * S, bx = sp[b] * S, by = sp[b + 1] * S, cx = sp[c] * S, cy = sp[c + 1] * S;
@@ -190,6 +192,7 @@ window.MiniPaint = (pv, canvas, host) => {
     const nc = comps(), vals = ctx.vals, picks = [], allow = stroke.allow, seen = stroke.seen, wbuf = stroke.wbuf, no = ++stroke.dabNo, order = [];
     for (const c of mirrorCentres(hit.p)) {
       query(stroke.grid, c.p, r, (i, d) => {
+        if (stroke.cut && stroke.cut.n[0] * stroke.pos[3 * i] + stroke.cut.n[1] * stroke.pos[3 * i + 1] + stroke.cut.n[2] * stroke.pos[3 * i + 2] > stroke.cut.d) return;     // cut away by the section plane: not there to paint
         if (c.primary && st.visible) {                                                      // not through the surface: its depth at that pixel must be about the element's
           const q = stroke.proj ? stroke.proj(i) : null;
           if (q && q[2] > 0) {
@@ -286,7 +289,7 @@ window.MiniPaint = (pv, canvas, host) => {
     raster();
     const pos = elementPositions(raw, ctx.head), g = buildGrid(pos), cam = pv.camera();
     api.stats.beginMs = Math.round(performance.now() - t0);
-    stroke = { grid: g, touched: new Set(), fresh: new Set(), dirty: false, last: null, mode: modeFor(e), allow: masked.allow, seen: new Int32Array(ctx.n), wbuf: new Float32Array(ctx.n), dabNo: 0, proj: (i) => {
+    stroke = { grid: g, touched: new Set(), fresh: new Set(), dirty: false, last: null, mode: modeFor(e), allow: masked.allow, seen: new Int32Array(ctx.n), wbuf: new Float32Array(ctx.n), dabNo: 0, pos, cut: pv.sectionPlane ? pv.sectionPlane() : null, proj: (i) => {
       const x = pos[3 * i], y = pos[3 * i + 1], z = pos[3 * i + 2], m = cam.MV, pr = cam.P;
       const vx = m[0] * x + m[4] * y + m[8] * z + m[12], vy = m[1] * x + m[5] * y + m[9] * z + m[13], vz = m[2] * x + m[6] * y + m[10] * z + m[14];
       if (vz > -cam.near) return null;

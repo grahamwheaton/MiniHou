@@ -1173,6 +1173,10 @@
   // repeated shape, never keeps the old drawing. Remembered between sessions.
   let pvInstances = "auto";
   try { const d = localStorage.getItem("minihou.pvInstances"); if (["auto", "always", "never"].includes(d)) pvInstances = d; } catch (e) { /* no storage */ }
+  // Performance and clipping settings for very large scenes (the "Perf" menu); remembered between sessions.
+  const PERF_DEFAULT = { budget: 0, instBias: 1, instTris: 1500000, clipNear: 0, clipFar: 0, section: { on: false, axis: 2, offset: 0, flip: false }, cull: true, cullPx: 0, navQuality: "full" };
+  const perf = JSON.parse(JSON.stringify(PERF_DEFAULT));
+  try { const d = JSON.parse(localStorage.getItem("minihou.pvPerf") || "{}"); Object.assign(perf, d, { section: Object.assign({}, perf.section, d.section || {}, { on: false }) }); } catch (e) { /* no storage */ }
   const wantFull = () => pvDetail === "full" || (pvDetail === "auto" && (pvSelection.mode !== "view" || !!(paintTool && paintTool.active())));
   function setDetail(d) {
     pvDetail = d;
@@ -1212,6 +1216,80 @@
     clearTimeout(blockedByReduced.t); blockedByReduced.t = setTimeout(() => pvMsg(""), 6000);
     return true;
   }
+  function setInstances(v) {
+    pvInstances = v;
+    try { localStorage.setItem("minihou.pvInstances", v); } catch (e) { /* no storage */ }
+    pvKey = null; schedulePreview();
+  }
+  function buildPerfMenu() {
+    const wrap = $("#pv-canvas").parentElement, btn = $("#pv-perf-btn");
+    if (!pv || !pv.ok || !btn) return;
+    const menu = document.createElement("div");
+    menu.id = "pv-perf"; menu.className = "pv-perf hidden"; menu.setAttribute("role", "dialog"); menu.setAttribute("aria-label", "Viewport performance and clipping");
+    menu.innerHTML = `
+      <h4>Instances</h4>
+      <label>Impostors <select id="pv-instances" title="Auto: instance points always, and copies of one shape when the scene is over the display budget. Always: any repeated shape. Never: draw what the geometry is."><option value="auto">Auto</option><option value="always">Always</option><option value="never">Never</option></select></label>
+      <label>Impostor detail <input type="range" id="pv-inst-bias" min="-2" max="2" step="0.1" title="Higher keeps the detailed shapes for smaller instances"><span id="pv-inst-bias-val" class="muted"></span></label>
+      <label>Triangles for instances <select id="pv-inst-tris" title="All instances together draw at most this many triangles; far ones turn to boxes and dots first"><option value="250000">250k</option><option value="500000">500k</option><option value="1000000">1M</option><option value="1500000">1.5M</option><option value="3000000">3M</option></select></label>
+      <h4>Geometry</h4>
+      <label>Display budget <select id="pv-budget" title="A geometry with more triangles than this is drawn reduced (Full res and selecting still load everything the viewer can hold)"><option value="0">Default (250k)</option><option value="100000">100k</option><option value="500000">500k</option><option value="1000000">1M</option><option value="2500000">2.5M</option></select></label>
+      <label class="chk"><input type="checkbox" id="pv-cull"> Skip what is outside the view</label>
+      <label>Skip pieces smaller than <input type="number" id="pv-cullpx" min="0" step="0.5" style="width:52px"> px</label>
+      <label>While the camera moves <select id="pv-navq" title="Balanced draws at 60% resolution while you orbit, pan or zoom; Fast draws at 45% and hides the edges. A sharp frame follows when you stop."><option value="full">Full quality</option><option value="balanced">Balanced</option><option value="fast">Fast</option></select></label>
+      <h4>View clipping</h4>
+      <label>Camera clip <input type="number" id="pv-near" min="0" step="any" placeholder="auto" style="width:60px" title="Near clip distance (perspective view; empty = automatic)"> <input type="number" id="pv-far" min="0" step="any" placeholder="auto" style="width:60px" title="Far clip distance (empty = automatic)"></label>
+      <label class="chk"><input type="checkbox" id="pv-section"> Section plane <select id="pv-section-axis"><option value="0">X</option><option value="1">Y</option><option value="2">Z</option></select></label>
+      <label>Offset <input type="number" id="pv-section-offset" step="any" style="width:70px"> <label class="chk inline"><input type="checkbox" id="pv-section-flip"> flip</label> <button type="button" id="pv-section-centre" class="small" title="Cut through the middle of the geometry">Centre</button></label>
+      <h4>Statistics</h4><div id="pv-perf-stats" class="muted"></div>`;
+    wrap.append(menu);
+    const q = (id) => menu.querySelector("#" + id);
+    const save = () => { try { localStorage.setItem("minihou.pvPerf", JSON.stringify(perf)); } catch (e) { /* no storage */ } };
+    const apply = () => {
+      Object.assign(pv.opt, { instBias: perf.instBias, instTris: perf.instTris, clipNear: perf.clipNear, clipFar: perf.clipFar, cull: perf.cull, cullPx: perf.cullPx, navQuality: perf.navQuality });
+      pv.setSection(perf.section); pv.redraw();
+    };
+    const sync = () => {
+      q("pv-instances").value = pvInstances; q("pv-inst-bias").value = Math.log2(perf.instBias); q("pv-inst-bias-val").textContent = "×" + (Math.round(perf.instBias * 100) / 100);
+      q("pv-inst-tris").value = String(perf.instTris); q("pv-budget").value = String(perf.budget); q("pv-cull").checked = perf.cull; q("pv-cullpx").value = perf.cullPx;
+      q("pv-navq").value = perf.navQuality; q("pv-near").value = perf.clipNear || ""; q("pv-far").value = perf.clipFar || "";
+      q("pv-section").checked = perf.section.on; q("pv-section-axis").value = String(perf.section.axis); q("pv-section-offset").value = perf.section.offset; q("pv-section-flip").checked = perf.section.flip;
+    };
+    const num = (id, fn) => { q(id).onchange = (e) => { const v = Number(e.target.value); fn(Number.isFinite(v) && v >= 0 ? v : 0); save(); apply(); sync(); }; };
+    q("pv-instances").onchange = (e) => setInstances(e.target.value);
+    q("pv-inst-bias").oninput = (e) => { perf.instBias = Math.pow(2, Number(e.target.value)); q("pv-inst-bias-val").textContent = "×" + (Math.round(perf.instBias * 100) / 100); save(); apply(); };
+    q("pv-inst-tris").onchange = (e) => { perf.instTris = Number(e.target.value); save(); apply(); };
+    q("pv-budget").onchange = (e) => { perf.budget = Number(e.target.value); save(); pvKey = null; schedulePreview(); };
+    q("pv-cull").onchange = (e) => { perf.cull = e.target.checked; save(); apply(); };
+    num("pv-cullpx", (v) => (perf.cullPx = v));
+    q("pv-navq").onchange = (e) => { perf.navQuality = e.target.value; save(); apply(); };
+    num("pv-near", (v) => (perf.clipNear = v));
+    num("pv-far", (v) => (perf.clipFar = v));
+    const centre = () => { const b = pv.bounds(), a = perf.section.axis; return Math.round(((b[0][a] + b[1][a]) / 2) * 1e4) / 1e4; };
+    q("pv-section").onchange = (e) => { perf.section.on = e.target.checked; if (perf.section.on && !perf.section.offset) perf.section.offset = centre(); save(); apply(); sync(); };
+    q("pv-section-axis").onchange = (e) => { perf.section.axis = Number(e.target.value); perf.section.offset = centre(); save(); apply(); sync(); };
+    q("pv-section-offset").onchange = (e) => { const v = Number(e.target.value); perf.section.offset = Number.isFinite(v) ? v : 0; save(); apply(); };
+    q("pv-section-flip").onchange = (e) => { perf.section.flip = e.target.checked; save(); apply(); };
+    q("pv-section-centre").onclick = () => { perf.section.offset = centre(); save(); apply(); sync(); };
+    let timer = 0;
+    const fmtN = (x) => Math.round(x).toLocaleString();
+    const showStats = () => {
+      const d = pv.drawStats(), i = d.instances;
+      const lines = [`Triangles drawn: ${fmtN(d.tris)} of ${fmtN(d.trisTotal)}` + (d.chunks ? ` · pieces ${d.chunksDrawn}/${d.chunks}` : "")];
+      if (i.on) lines.push(`Instances: ${fmtN(i.visible)} of ${fmtN(i.count)} in view · detailed ${fmtN(i.lod[0])}, coarse ${fmtN(i.lod[1])}, boxes ${fmtN(i.lod[2])}, dots ${fmtN(i.lod[3])} · ${fmtN(i.tris)} triangles` + (i.approximate ? " · sizes guessed" : ""));
+      lines.push(`Frame: ${d.drawMs} ms` + (d.moving && d.scale < 1 ? ` · drawn at ${Math.round(d.scale * 100)}% while moving` : ""));
+      q("pv-perf-stats").textContent = lines.join("\n");
+    };
+    const open = (on) => {
+      menu.classList.toggle("hidden", !on); btn.setAttribute("aria-expanded", on ? "true" : "false"); btn.classList.toggle("on", on);
+      clearInterval(timer);
+      if (on) { sync(); showStats(); timer = setInterval(showStats, 400); }
+    };
+    btn.onclick = () => open(menu.classList.contains("hidden"));
+    menu.addEventListener("keydown", (e) => e.stopPropagation());                                          // typing in a field is not a viewer shortcut
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !menu.classList.contains("hidden")) { open(false); btn.focus(); } }, true);
+    sync(); apply();
+  }
+  buildPerfMenu();
   $("#pv-full").onclick = () => setDetail(pvDetail === "full" ? "auto" : "full");
   $("#pv-detail").onchange = (e) => setDetail(e.target.value);
   let pvInFlight = false, pvDirty = false;
@@ -1251,12 +1329,12 @@
     $("#pv-node").textContent = node ? "· " + node : "";
     if (!node) { pv.clear(); pvMsg(""); pvKey = null; return; }
     const full = wantFull(), attr = paintTool ? paintTool.wantAttr() : null, mask = paintTool ? paintTool.wantMask() : null;
-    const key = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}:${full}:${pvInstances}:${attr ? attr.name + "/" + attr.domain : ""}:${mask ? mask.name + "/" + mask.domain : ""}`;
+    const key = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}:${full}:${pvInstances}:${full ? 0 : perf.budget}:${attr ? attr.name + "/" + attr.domain : ""}:${mask ? mask.name + "/" + mask.domain : ""}`;
     if (key === pvKey) return;
     pvKey = key;
     let buf;
     try {
-      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full, templates:true, attr: attr || undefined, mask: mask || undefined, instances: pvInstances }) });
+      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full, templates:true, attr: attr || undefined, mask: mask || undefined, instances: pvInstances, tris: !full && perf.budget ? perf.budget : undefined }) });
       buf = await r.arrayBuffer();
     } catch (e) { pvKey = null; return; }
     // A completed frame of the same node is useful even if a newer edit arrived.

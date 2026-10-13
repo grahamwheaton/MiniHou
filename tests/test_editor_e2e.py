@@ -2457,6 +2457,126 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_function("minihou.preview.instanceStats().visible === 200")
         self.assertGreater(self.drawn_pixels(), 100)
 
+    # -- the Perf menu: budget, culling, clipping -------------------------------------------------------------------------------------
+    def open_perf(self):
+        if self.page.locator("#pv-perf").is_hidden():
+            self.page.click("#pv-perf-btn")
+        self.page.wait_for_selector("#pv-perf:not(.hidden)")
+
+    def stats(self):
+        return self.page.evaluate("minihou.preview.drawStats()")
+
+    def test_perf_menu_shows_statistics_and_switches_impostors_off(self):
+        self.instanced_scene(300)
+        self.page.wait_for_function("minihou.preview.instanceStats().on", timeout=20000)
+        self.open_perf()
+        self.page.wait_for_function("document.querySelector('#pv-perf-stats').textContent.includes('Instances:')")
+        self.assertIn("of 300 in view", self.page.locator("#pv-perf-stats").inner_text())
+        self.page.select_option("#pv-instances", "never")                                          # the geometry as it is (reduced to the display budget)
+        self.page.wait_for_function("!minihou.preview.instanceStats().on && minihou.preview.tris > 0", timeout=20000)
+        self.page.select_option("#pv-instances", "auto")
+        self.page.wait_for_function("minihou.preview.instanceStats().on", timeout=20000)
+        self.page.locator("#pv-inst-bias").evaluate("(e) => { e.value = -2; e.dispatchEvent(new Event('input')); }")
+        self.assertAlmostEqual(self.page.evaluate("minihou.preview.opt.instBias"), 0.25, places=3)
+        self.page.select_option("#pv-inst-tris", "250000")
+        self.assertEqual(self.page.evaluate("minihou.preview.opt.instTris"), 250000)
+        self.page.keyboard.press("Escape")
+        self.assertTrue(self.page.locator("#pv-perf").is_hidden())
+
+    def test_display_budget_reduces_a_big_geometry_further(self):
+        self.s.edit([{"op": "replace", "graph": {"nodes": {"g": {"type": "grid", "params": {"columns": 300, "rows": 300}, "pos": [0, 0]}}, "display": "g"}}])
+        self.page.wait_for_function("minihou.preview.tris === 299 * 299 * 2", timeout=20000)             # under the default 250k budget
+        self.open_perf()
+        self.page.select_option("#pv-budget", "100000")
+        self.page.wait_for_function("minihou.preview.tris > 0 && minihou.preview.tris <= 110000", timeout=20000)
+        self.assertIn("Reduced view", self.page.locator("#pv-proxy-text").inner_text())
+        self.page.select_option("#pv-budget", "0")
+        self.page.wait_for_function("minihou.preview.tris === 299 * 299 * 2", timeout=20000)
+
+    def test_triangles_outside_the_view_are_not_drawn_and_culling_can_be_switched_off(self):
+        self.s.edit([{"op": "replace", "graph": {"nodes": {"g": {"type": "grid", "params": {"columns": 300, "rows": 300}, "pos": [0, 0]}}, "display": "g"}}])
+        self.page.wait_for_function("minihou.preview.tris === 299 * 299 * 2", timeout=20000)
+        self.page.click("#pv-max")
+        self.page.evaluate("(() => { minihou.preview.opt.grid = false; minihou.preview.frameAll(); })()")
+        self.page.wait_for_function("minihou.preview.drawStats().trisTotal === 299 * 299 * 2")
+        whole = self.stats()
+        self.assertEqual(whole["tris"], whole["trisTotal"])                                           # everything is in view
+        self.assertGreater(whole["chunks"], 10)
+        self.page.evaluate("(() => { const v = minihou.preview.view; v.target = [-4.5, -4.5, 0]; v.dist = 0.8; minihou.preview.redraw(); })()")
+        self.page.wait_for_function("minihou.preview.drawStats().tris < minihou.preview.drawStats().trisTotal")
+        zoomed = self.stats()
+        self.assertLess(zoomed["chunksDrawn"], zoomed["chunks"])
+        self.assertGreater(self.drawn_pixels(), 100)                                                  # and something is on screen
+        self.open_perf()
+        self.page.uncheck("#pv-cull")
+        self.page.wait_for_function("minihou.preview.drawStats().tris === minihou.preview.drawStats().trisTotal")
+
+    def test_section_plane_hides_and_blocks_picking_and_painting(self):
+        box = self.start_painting(10, 10)
+        self.page.evaluate("minihou.preview.opt.grid = false")
+        lit = self.drawn_pixels()
+        self.assertGreater(lit, 500)
+        self.open_perf()
+        self.page.check("#pv-section")                                                                # Z axis, at the middle of the geometry (z = 0): the grid lies on it
+        self.page.fill("#pv-section-offset", "-1")
+        self.page.locator("#pv-section-offset").press("Tab")
+        self.page.wait_for_function("minihou.preview.sectionPlane() && minihou.preview.sectionPlane().d === -1")
+        self.assertLess(self.drawn_pixels(), 20)                                                      # the whole grid is beyond the plane: nothing drawn
+        cx, cy = box["width"] / 2, box["height"] / 2
+        self.stroke([(cx - 60, cy), (cx + 60, cy)])
+        self.page.wait_for_timeout(800)
+        self.assertFalse(any(n.type == "attrib_paint" for n in self.s.graph.nodes.values()))        # nothing there to paint
+        self.page.fill("#pv-section-offset", "1")                                                     # the plane moves behind the grid: it is back
+        self.page.locator("#pv-section-offset").press("Tab")
+        self.page.wait_for_function("minihou.preview.sectionPlane().d === 1")
+        self.assertGreater(self.drawn_pixels(), 500)
+        self.stroke([(cx - 60, cy), (cx + 60, cy)])
+        self.assertTrue(until(lambda: any(n.type == "attrib_paint" for n in self.s.graph.nodes.values())))
+        self.page.check("#pv-section-flip")                                                           # flipped: keeps the other side of the plane (z >= 1): the grid at z = 0 is gone
+        self.page.wait_for_function("minihou.preview.sectionPlane().n[2] === -1")
+        self.assertLess(self.drawn_pixels(), 20)
+        self.page.fill("#pv-section-offset", "-1")                                                    # z >= -1: everything again
+        self.page.locator("#pv-section-offset").press("Tab")
+        self.page.wait_for_function("minihou.preview.sectionPlane().d === 1")
+        self.assertGreater(self.drawn_pixels(), 500)
+        self.page.uncheck("#pv-section")
+        self.assertIsNone(self.page.evaluate("minihou.preview.sectionPlane()"))
+
+    def test_section_plane_cuts_a_solid_through_the_middle(self):
+        self.s.edit([{"op": "replace", "graph": {"nodes": {"s": {"type": "sphere", "params": {}, "pos": [0, 0]}}, "display": "s"}}])
+        self.page.wait_for_function("minihou.preview.points > 100")
+        self.page.click("#pv-max")
+        self.page.evaluate("(() => { minihou.preview.opt.grid = false; minihou.preview.opt.axes = false; minihou.preview.opt.edges = false; minihou.preview.frameAll(); })()")
+        count_back = """() => new Promise((resolve) => {
+            const c = document.querySelector('#pv-canvas'), gl = c.getContext('webgl2'); minihou.preview.redraw();
+            requestAnimationFrame(() => { const w = c.width, h = c.height, px = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+              let n = 0; for (let i = 0; i < px.length; i += 4) if (px[i] > px[i + 1] + 30 && px[i] > px[i + 2] + 60) n++; resolve(n); }); })"""     # the orange of back faces
+        before = self.page.evaluate(count_back)
+        self.assertLess(before, 100)                                                                 # a closed sphere shows (next to) no back faces
+        self.open_perf()
+        self.page.check("#pv-section")
+        self.page.select_option("#pv-section-axis", "2")                                              # Z, at the middle: the top half is cut away
+        self.page.wait_for_function("minihou.preview.sectionPlane() && minihou.preview.sectionPlane().n[2] === 1")
+        self.assertGreater(self.page.evaluate(count_back), before + 1000)                            # now we look into the lower half: its inside faces show
+
+    def test_camera_clip_distances_and_cheaper_drawing_while_moving(self):
+        self.grid_view(6, 5)
+        self.open_perf()
+        auto = self.page.evaluate("minihou.preview.camera().near")
+        self.page.fill("#pv-near", "0.5")
+        self.page.locator("#pv-near").press("Tab")
+        self.assertEqual(self.page.evaluate("minihou.preview.camera().near"), 0.5)
+        self.page.fill("#pv-far", "40")
+        self.page.locator("#pv-far").press("Tab")
+        self.assertEqual(self.page.evaluate("minihou.preview.camera().far"), 40)
+        self.page.fill("#pv-near", "")
+        self.page.locator("#pv-near").press("Tab")
+        self.assertAlmostEqual(self.page.evaluate("minihou.preview.camera().near"), auto, places=6)  # empty = automatic again
+        self.page.select_option("#pv-navq", "fast")
+        self.page.evaluate("(() => { const v = minihou.preview.view; v.yaw += 0.3; minihou.preview.redraw(); })()")
+        self.page.wait_for_function("minihou.preview.drawStats().moving && minihou.preview.drawStats().scale === 0.45")
+        self.page.wait_for_function("!minihou.preview.drawStats().moving && minihou.preview.drawStats().scale === 1", timeout=5000)     # a sharp frame once it stops
+
     def test_a_big_geometry_is_drawn_reduced_and_selecting_loads_the_full_detail(self):
         self.big_grid()
         self.assertIn("Reduced view", self.page.locator("#pv-proxy-text").inner_text())
