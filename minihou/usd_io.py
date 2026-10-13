@@ -532,34 +532,65 @@ def _write_group_subsets(mesh, geo: Geometry, mesh_prims: np.ndarray, pts: np.nd
             UsdGeom.Subset.SetFamilyType(mesh, family, UsdGeom.Tokens.unrestricted)
 
 
+UNITS = {"meters": 1.0, "centimeters": 0.01, "millimeters": 0.001, "inches": 0.0254, "feet": 0.3048}      # name -> metres per unit
+
+
+def _scaled(geo: Geometry, k: float) -> Geometry:
+    """``geo`` with its positions (and instance scales) multiplied by ``k``; the geometry itself when ``k`` is 1."""
+    if k == 1.0:
+        return geo
+    g = geo.copy()
+    g.point["P"] = (np.asarray(geo.P, np.float64) * k).astype(np.float32)
+    if "scale" in g.point and g.point["scale"].dtype.kind == "f":
+        g.point["scale"] = (np.asarray(g.point["scale"], np.float64) * k).astype(np.float32)
+    return g
+
+
 def write_stage(path, outputs: Dict[str, Geometry], graph: Optional[dict] = None, overwrite: bool = False,
-                frame: Optional[float] = None) -> WriteReport:
-    """Write ``outputs`` (name -> geometry) to the USD file ``path`` (.usd/.usda/.usdc)."""
+                frame: Optional[float] = None, *, up_axis: str = "z", units: str = "meters", root: str = ROOT,
+                materials: bool = True) -> WriteReport:
+    """Write ``outputs`` (name -> geometry) to the USD file ``path`` (.usd/.usda/.usdc).
+
+    ``up_axis``: ``z`` (MiniHou's own) or ``y`` (the stage is Y up, and the root Xform turns the Z-up geometry into it, so the numbers
+    stay as they are). ``units``: the unit the stage declares (a key of :data:`UNITS`); the geometry is scaled so a metre stays a metre.
+    ``root``: name of the default prim. ``materials``: bind faces to Material prims (off: geometry only)."""
     Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
     path = os.fspath(path)
     if not path.lower().endswith(USD_EXTENSIONS):
         raise ValueError("a USD file must end in .usd, .usda or .usdc")
+    if up_axis not in ("z", "y"):
+        raise ValueError("up_axis must be 'z' or 'y'")
+    if units not in UNITS:
+        raise ValueError(f"units must be one of {', '.join(UNITS)}")
     if os.path.exists(path) and not overwrite:
         raise FileExistsError(f"{os.path.basename(path)} already exists")
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    mpu = UNITS[units]
+    k = 1.0 / mpu
+    top = valid_name(root) or ROOT
     tmp = path + ".part" + os.path.splitext(path)[1]                   # write beside the target, then swap in: no half files
     if os.path.exists(tmp):
         os.remove(tmp)
     try:
         stage = Usd.Stage.CreateNew(tmp)
-        UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
-        UsdGeom.SetStageMetersPerUnit(stage, 1.0)
-        root = UsdGeom.Xform.Define(stage, f"/{ROOT}")
-        stage.SetDefaultPrim(root.GetPrim())
+        UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.y if up_axis == "y" else UsdGeom.Tokens.z)
+        UsdGeom.SetStageMetersPerUnit(stage, mpu)
+        rootx = UsdGeom.Xform.Define(stage, f"/{top}")
+        if up_axis == "y":
+            UsdGeom.XformCommonAPI(rootx).SetRotate(Gf.Vec3f(-90.0, 0.0, 0.0))     # (x, y, z) -> (x, z, -y)
+        stage.SetDefaultPrim(rootx.GetPrim())
         report = WriteReport(path)
         used: set = set()
         anchor = os.path.dirname(os.path.abspath(path))
-        looks = write_looks(stage, f"/{ROOT}/Looks", list(outputs.values()), anchor)      # shared by every output
-        used.add("Looks")
-        for name, geo in outputs.items():
+        geos = {name: _scaled(g, k) for name, g in outputs.items()}
+        looks: Dict[str, str] = {}
+        if materials:
+            looks = write_looks(stage, f"/{top}/Looks", list(geos.values()), anchor)      # shared by every output
+            used.add("Looks")
+        for name, geo in geos.items():
             base = valid_name(name)
             nm = _unique_name(base, used, "out")
-            report.outputs[name] = dict(write_geometry(stage, f"/{ROOT}/{nm}", geo, looks), prim=f"/{ROOT}/{nm}")
+            report.outputs[name] = dict(write_geometry(stage, f"/{top}/{nm}", geo, looks), prim=f"/{top}/{nm}")
         layer = stage.GetRootLayer()
         data = {"minihou": {"format": 1, "outputs": json.dumps(list(outputs))}}      # no lists: the text format cannot hold them
         if graph is not None:
@@ -892,7 +923,9 @@ def _read_instancer(stage, inst, tm, part: Part, M: np.ndarray, unit: float, nam
 def _read_detail(stage) -> dict:
     """Detail attributes of a MiniHou export (all outputs merged; the first output wins on a clash)."""
     out: dict = {}
-    root = stage.GetPrimAtPath(f"/{ROOT}")
+    root = stage.GetDefaultPrim()
+    if not root or not root.IsValid():
+        root = stage.GetPrimAtPath(f"/{ROOT}")
     if not root or not root.IsValid():
         return out
     for child in root.GetChildren():

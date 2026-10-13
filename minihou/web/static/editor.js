@@ -77,6 +77,83 @@
     if (!r.ok) throw new Error(data.error || r.statusText);
     return data;
   }
+
+  // ---------------------------------------------------------------- choosing files
+  // A page never learns the real path of a file, so the engine (on this machine) does the choosing: the desktop window's or the system's
+  // own dialog when there is one, otherwise the in-app browser below. What comes back is a workspace-relative path when the file is inside it.
+  const isAbs = (p) => /^([A-Za-z]:[\\/]|[\\/])/.test(p);
+  const sameCase = (a, b) => (S.root && /^[A-Za-z]:/.test(S.root) ? a.toLowerCase() === b.toLowerCase() : a === b);
+  function toParamPath(abs) {
+    const root = (S.root || "").replace(/\\/g, "/").replace(/\/$/, ""), p = abs.replace(/\\/g, "/");
+    if (root && p.length > root.length + 1 && sameCase(p.slice(0, root.length + 1), root + "/")) return p.slice(root.length + 1);
+    return abs;
+  }
+  const absPath = (v) => (!v ? (S.root || "") : isAbs(v) ? v : (S.root || "").replace(/[\\/]$/, "") + "/" + v);
+  const fmtBytes = (n) => (n >= 2 ** 30 ? (n / 2 ** 30).toFixed(1) + " GB" : n >= 2 ** 20 ? (n / 2 ** 20).toFixed(1) + " MB" : n >= 1024 ? Math.round(n / 1024) + " KB" : n + " B");
+  async function pickFile(opts) {                                // opts: {mode: "open"|"save", exts: [".usd"], title, start}; -> param path | null
+    try {
+      const r = await api("/api/pick_file", { mode: opts.mode, exts: opts.exts, title: opts.title, start: opts.start });
+      if (r.native) return r.cancelled ? null : r.path;
+    } catch (e) { toast(e.message); return null; }
+    return browseFile(opts);
+  }
+  function browseFile(opts) {
+    return new Promise((resolve) => {
+      const save = opts.mode === "save", exts = opts.exts || [];
+      const dialog = h("dialog", { class: "app-dialog file-dialog", "aria-label": opts.title || (save ? "Save file" : "Open file") });
+      const pathInput = h("input", { type: "text", class: "fd-path", "aria-label": "Folder" });
+      const list = h("div", { class: "fd-list", role: "listbox" }), places = h("div", { class: "fd-places" });
+      const nameInput = h("input", { type: "text", class: "fd-name", "aria-label": "File name", placeholder: save ? "file name" : "pick a file above" });
+      const note = h("div", { class: "fd-note muted" });
+      let dir = "", entries = [], sep = "/";
+      const joined = (name) => dir.replace(/[\\/]+$/, "") + sep + name;
+      async function go(target) {
+        let r = null;
+        try { r = await api("/api/browse?path=" + encodeURIComponent(target || "") + "&exts=" + encodeURIComponent(exts.join(",")) + "&fallback=1" + (places.childElementCount ? "" : "&places=1")); }
+        catch (e) { /* shown below */ }
+        if (!r) { note.textContent = "Cannot open that folder."; return; }
+        dir = r.path; sep = r.sep || "/"; entries = r.entries; pathInput.value = dir;
+        if (r.places && !places.childElementCount) places.append(...r.places.map((pl) => h("button", { type: "button", onclick: () => go(pl.path) }, pl.name)));
+        list.replaceChildren(...(r.parent ? [h("div", { class: "fd-row", onclick: () => go(r.parent), ondblclick: () => go(r.parent) }, h("span", { class: "fd-n" }, "⬑ .."))] : []),
+          ...entries.map((e) => h("div", { class: "fd-row" + (e.dir ? " dir" : ""), dataset: { name: e.name }, role: "option",
+            onclick: () => { if (!e.dir) { nameInput.value = e.name; list.querySelectorAll(".sel").forEach((x) => x.classList.remove("sel")); list.querySelector(`[data-name="${CSS.escape(e.name)}"]`)?.classList.add("sel"); } },
+            ondblclick: () => (e.dir ? go(joined(e.name)) : finish(e.name)) },
+            h("span", { class: "fd-n" }, (e.dir ? "📁 " : "") + e.name), h("span", { class: "fd-s muted" }, e.dir ? "" : fmtBytes(e.size)))));
+        note.textContent = r.truncated ? "Only the first entries are shown." : (!entries.length ? "Nothing here" + (exts.length ? " with " + exts.join(" ") : "") : "");
+      }
+      async function finish(nm) {
+        let name = (nm || nameInput.value || "").trim();
+        if (!name) return;
+        if (save && exts.length && !/\.[A-Za-z0-9]+$/.test(name)) name += exts[0];
+        if (save && entries.some((e) => !e.dir && e.name.toLowerCase() === name.toLowerCase()) && !(await appConfirm(name + " already exists. Replace it?"))) return;
+        dialog.close("ok"); dialog.dataset.result = toParamPath(joined(name));
+      }
+      const form = h("form", { method: "dialog" }, h("h2", null, opts.title || (save ? "Save as" : "Open")),
+        h("div", { class: "fd-top" }, h("button", { type: "button", title: "Up one folder", onclick: () => go(dir.replace(/[\\/][^\\/]*[\\/]?$/, "") || dir) }, "↑"), pathInput),
+        h("div", { class: "fd-body" }, places, list), note,
+        h("div", { class: "fd-bottom" }, nameInput, h("button", { type: "button", onclick: () => dialog.close("cancel") }, "Cancel"),
+          h("button", { type: "button", class: "primary", onclick: () => finish() }, save ? "Save" : "Open")));
+      form.append(h("button", { type: "submit", hidden: true, tabindex: -1 }));
+      form.onsubmit = (e) => { e.preventDefault(); if (document.activeElement === pathInput) go(pathInput.value.trim()); else finish(); };       // Enter in either field
+      dialog.append(form); document.body.append(dialog);
+      dialog.addEventListener("close", () => { const r = dialog.returnValue === "ok" ? dialog.dataset.result || null : null; dialog.remove(); resolve(r); }, { once: true });
+      dialog.showModal();
+      const start = opts.start ? absPath(opts.start) : "";
+      if (save && opts.start && !/[\\/]$/.test(opts.start)) nameInput.value = opts.start.split(/[\\/]/).pop();
+      go(start);
+    });
+  }
+  async function settle() { for (let i = 0; i < 100 && (setInFlight || pendingSet.size); i++) await new Promise((r) => setTimeout(r, 30)); }
+  async function pressAction(id, a, btn) {
+    btn.disabled = true;
+    try {
+      await settle();
+      const r = await api("/api/node_action", { node: id, action: a.name });
+      toast(r.message || a.label + " done", false);
+    } catch (err) { toast(err.message); }
+    finally { btn.disabled = false; }
+  }
+
   const recoveryKey = "minihou.unsent-edits";
   let recoveredEdits = [];
   try {
@@ -709,6 +786,11 @@
       }
     }
     if (t.params.length) out.push(h("div", { class: "section" }, "Parameters"));
+    if (t.actions && t.actions.length) out.push(h("div", { class: "pactions node-actions" }, t.actions.map((a) => {
+      const btn = h("button", { class: "primary", title: a.doc || "", dataset: { action: a.name } }, a.label);
+      btn.onclick = () => pressAction(id, a, btn);
+      return btn;
+    })));
     if(n.type==='bezier'&&curveTool)out.push(curveTool.panel());
     if (n.type === "rbd_solver") out.push(h("button", {
       onclick: () => queueSet(id, "reset", Number(n.params?.reset || 0) + 1),
@@ -718,6 +800,7 @@
     for (let i = 0; i < t.params.length; i++) {
       const p = t.params[i];
       if(n.type==='bezier'&&p.name==='controls')continue;
+      if (p.ui === "hidden") continue;
       if (p.ui === "outgroup") {                                     // Output Groups: a checkbox and the group's name side by side, like Houdini
         if (!ogHeader) { out.push(h("div", { class: "ogheader" }, "Output Groups")); ogHeader = true; }
         const q = t.params[i + 1], named = q && q.ui === "outgroup_name";
@@ -833,6 +916,15 @@
       const sel = h("select", { dataset: { role: "enum" }, onchange: (e) => queueSet(id, p.name, e.target.value) },
         p.choices.map((c) => h("option", { value: c, selected: c === v }, c)));
       widget = h("div", { class: "pw" }, sel);
+    } else if ((p.ui || "").startsWith("file:")) {
+      const [, mode, exts] = p.ui.split(":");
+      const inp = h("input", { type: "text", value: v, dataset: { role: "str" }, placeholder: mode === "save" ? "where to write" : "choose a file", onchange: (e) => queueSet(id, p.name, e.target.value) });
+      const browse = h("button", { type: "button", class: "pbtn browse", dataset: { role: "browse" }, title: mode === "save" ? "Choose where to save" : "Choose a file",
+        onclick: async () => {
+          const chosen = await pickFile({ mode, exts: (exts || "").split(",").filter(Boolean), title: (mode === "save" ? "Save " : "Open ") + (p.label || p.name), start: inp.value.trim() });
+          if (chosen) { inp.value = chosen; queueSet(id, p.name, chosen); }
+        } }, "📂");
+      widget = h("div", { class: "pw filepick" }, inp, browse);
     } else if (p.ui === "code") {
       const ta = h("textarea", { value: v, spellcheck: false, rows: Math.min(14, Math.max(3, String(v).split("\n").length + 1)), dataset: { role: "code" } });
       const apply = () => { ta.classList.remove("dirty"); if (ta.value !== effective(id, p)) queueSet(id, p.name, ta.value); };

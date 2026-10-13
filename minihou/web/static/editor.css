@@ -553,3 +553,23 @@ body.has-error #main {bottom:calc(var(--app-status-h) + 30px);}
 .app-dialog input {width:100%;padding:6px;background:var(--bg);border:1px solid var(--line);}
 .dialog-actions {display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--line);margin-top:18px;padding-top:12px;}
 .dialog-actions .primary {border-color:#a27c42;color:#f4d098;background:#4b4233;}
+
+/* choosing files */
+.filepick { display: flex; gap: 4px; }
+.filepick input { flex: 1; min-width: 0; }
+.filepick .browse { padding: 0 8px; }
+.node-actions { margin: 4px 0 8px; }
+.file-dialog { width: min(720px, calc(100vw - 32px)); }
+.file-dialog .fd-top, .file-dialog .fd-bottom { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+.file-dialog .fd-top input, .file-dialog .fd-bottom input { flex: 1; }
+.file-dialog .fd-body { display: flex; gap: 8px; height: 320px; }
+.file-dialog .fd-places { display: flex; flex-direction: column; gap: 2px; width: 120px; overflow: auto; }
+.file-dialog .fd-places button { text-align: left; padding: 3px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-dialog .fd-list { flex: 1; overflow: auto; border: 1px solid var(--line); background: var(--bg); }
+.file-dialog .fd-row { display: flex; justify-content: space-between; gap: 8px; padding: 3px 8px; cursor: default; }
+.file-dialog .fd-row:hover { background: #ffffff10; }
+.file-dialog .fd-row.sel { background: var(--accent); color: #111; }
+.file-dialog .fd-row.dir .fd-n { color: var(--accent); }
+.file-dialog .fd-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-dialog .fd-s { flex: none; }
+.file-dialog .fd-note { min-height: 16px; font-size: 11px; }

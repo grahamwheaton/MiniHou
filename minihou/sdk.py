@@ -206,6 +206,21 @@ def Enum(name, choices: Sequence[str], default=None, *, label="", doc=""):
     return Param(name, "enum", choices[0] if default is None else default, label=label, doc=doc, choices=choices)
 
 
+@dataclass(frozen=True)
+class Action:
+    """A button on a node (see :mod:`minihou.actions`): ``name`` is what the API calls it, ``label`` what the editor shows."""
+    name: str
+    label: str = ""
+    doc: str = ""
+
+    def __post_init__(self):
+        if not _NAME_RE.match(self.name):
+            raise ValueError(f"invalid action name {self.name!r}")
+
+    def describe(self) -> dict:
+        return {"name": self.name, "label": self.label or self.name.replace("_", " ").title(), "doc": self.doc}
+
+
 # ---------------------------------------------------------------------------
 # Viewport handles (draggable gizmos) declared on a node type
 # ---------------------------------------------------------------------------
@@ -292,6 +307,7 @@ class NodeType:
     code_hash: str = ""           # hash of that file: part of the cache key, so editing the code never serves stale results
     key_extra: Optional[Callable[[Dict[str, Any]], str]] = None   # extra cache-key material from outside the graph
     handles: Tuple["Handle", ...] = ()                              # viewport gizmos (cosmetic: never in the cache key)
+    actions: Tuple["Action", ...] = ()                              # buttons (cosmetic too; see minihou.actions)
     _param_index: Dict[str, Param] = field(default_factory=dict, repr=False, compare=False)
     proxy_params: Tuple[Param, ...] = field(default=(), repr=False, compare=False)    # the parameters a proxy cook level scales
 
@@ -324,6 +340,8 @@ class NodeType:
              "inputs": [i.__dict__ for i in self.inputs],
              "outputs": [o.__dict__ for o in self.outputs],
              "params": [p.describe() for p in self.params]}
+        if self.actions:
+            d["actions"] = [a.describe() for a in self.actions]
         if self.source:
             d["source"] = self.source
         from . import menu
@@ -395,7 +413,8 @@ _LOADING: Optional[Dict[str, str]] = None
 def node(name: str, *, inputs: Sequence[Union[str, Input]] = (), params: Sequence[Param] = (),
          outputs: Optional[Sequence[Union[str, Output]]] = None, version: int = 1, category: str = "",
          doc: str = "", registry: Optional[Registry] = None, replace: bool = False,
-         key_extra: Optional[Callable[[Dict[str, Any]], str]] = None, handles: Sequence["Handle"] = ()):
+         key_extra: Optional[Callable[[Dict[str, Any]], str]] = None, handles: Sequence["Handle"] = (),
+         actions: Sequence["Action"] = ()):
     """Decorator: turn a function into a registered node type.
 
     ``key_extra(params) -> str`` is for nodes whose result depends on data outside the graph (e.g. a Blender object
@@ -404,6 +423,7 @@ def node(name: str, *, inputs: Sequence[Union[str, Input]] = (), params: Sequenc
     outs = tuple(Output(o) if isinstance(o, str) else o for o in (outputs if outputs is not None else ["geo"]))
     params = tuple(params)
     handles = tuple(handles)
+    actions = tuple(actions)
 
     def deco(fn: Callable) -> Callable:
         if not _NAME_RE.match(name):
@@ -432,7 +452,7 @@ def node(name: str, *, inputs: Sequence[Union[str, Input]] = (), params: Sequenc
             raise ValueError(f"node {name!r}: handle ids must be unique (give two handles on one parameter an id=)")
         nt = NodeType(name=name, fn=fn, inputs=ins, params=params, outputs=outs, version=version, handles=handles,
                       category=category or ("custom" if src else ""), doc=doc or (inspect.getdoc(fn) or ""),
-                      source=src["file"] if src else "", code_hash=src["hash"] if src else "", key_extra=key_extra)
+                      source=src["file"] if src else "", code_hash=src["hash"] if src else "", key_extra=key_extra, actions=actions)
         reg.register(nt, replace=replace)
         fn.node_type = nt  # type: ignore[attr-defined]
         return fn

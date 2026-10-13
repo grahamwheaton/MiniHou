@@ -59,6 +59,7 @@ class EditorE2E(unittest.TestCase):
         self.addCleanup(self.lib.unload)
         self.s.attach_library(self.lib, interval=0.05)
         self.web = WebServer(self.s, "127.0.0.1", 0, root=self.dir)
+        self.web.pick_file = lambda *a: None                       # no operating system dialog in tests: the editor's own browser opens
         self.web.start()
         self.addCleanup(self.s.stop)
         self.addCleanup(self.web.stop)
@@ -2161,6 +2162,87 @@ class EditorE2E(unittest.TestCase):
         self.page.select_option("#pv-proxy-level", "auto")
         self.assertTrue(until(lambda: self.s.proxy_auto))
         self.assertTrue(until(lambda: self.page.locator("#pv-proxy-level").input_value() == "auto"))
+
+    # -- choosing files ------------------------------------------------------------------------------------------------------
+    def add_selected(self, nid, ntype, **params):
+        self.s.edit([{"op": "add", "type": ntype, "id": nid, "params": params, "pos": [200, 200]}])
+        self.page.wait_for_selector(f'.node[data-id="{nid}"]')
+        self.node(nid).locator(".title").click()
+        self.page.wait_for_selector(f'#params .prow[data-param="file"] .browse')
+
+    def test_a_file_parameter_has_a_browse_button_that_opens_the_in_app_browser(self):
+        os.makedirs(os.path.join(self.dir, "models", "deep"))
+        for name in ("models/car.usd", "models/notes.txt", "models/other.usda"):
+            with open(os.path.join(self.dir, name), "wb") as f:
+                f.write(b"x")
+        self.add_selected("imp", "usd_import")
+        self.page.click('#params .prow[data-param="file"] .browse')
+        dialog = self.page.locator(".file-dialog[open]")
+        dialog.wait_for()
+        dialog.locator('.fd-row[data-name="models"]').wait_for()
+        self.assertEqual(dialog.locator(".fd-path").input_value(), os.path.realpath(self.dir))
+        dialog.locator('.fd-row[data-name="models"]').dblclick()
+        dialog.locator('.fd-row[data-name="car.usd"]').wait_for()
+        names = dialog.locator(".fd-row[data-name]").evaluate_all("els => els.map(e => e.dataset.name)")
+        self.assertEqual(names, ["deep", "car.usd", "other.usda"])                               # only folders and the extensions asked for
+        dialog.locator('.fd-row[data-name="car.usd"]').click()
+        self.assertEqual(dialog.locator(".fd-name").input_value(), "car.usd")
+        dialog.get_by_role("button", name="Open", exact=True).click()
+        self.assertTrue(until(lambda: self.s.graph.nodes["imp"].params.get("file") == "models/car.usd"))       # relative: it is inside the workspace
+        self.page.wait_for_function("document.querySelector('#params .prow[data-param=file] input').value === 'models/car.usd'")
+
+    def test_the_browser_goes_anywhere_and_stores_an_outside_file_as_an_absolute_path(self):
+        outside = os.path.realpath(tempfile.mkdtemp(prefix="minihou_outside_"))
+        self.addCleanup(shutil.rmtree, outside, True)
+        with open(os.path.join(outside, "far.usdc"), "wb") as f:
+            f.write(b"x")
+        self.add_selected("imp", "usd_import")
+        self.page.click('#params .prow[data-param="file"] .browse')
+        dialog = self.page.locator(".file-dialog[open]")
+        dialog.wait_for()
+        dialog.locator(".fd-path").fill(outside)
+        dialog.locator(".fd-path").press("Enter")
+        dialog.locator('.fd-row[data-name="far.usdc"]').wait_for()
+        dialog.locator('.fd-row[data-name="far.usdc"]').dblclick()                                 # double click chooses it
+        self.assertTrue(until(lambda: self.s.graph.nodes["imp"].params.get("file") == os.path.join(outside, "far.usdc")))
+        self.page.click('#params .prow[data-param="file"] .browse')                                 # reopens where the file is
+        dialog = self.page.locator(".file-dialog[open]")
+        dialog.wait_for()
+        self.assertTrue(until(lambda: dialog.locator(".fd-path").input_value() == outside))
+        dialog.get_by_role("button", name="Cancel").click()
+        self.assertEqual(self.page.locator(".file-dialog[open]").count(), 0)
+        self.assertEqual(self.s.graph.nodes["imp"].params.get("file"), os.path.join(outside, "far.usdc"))     # cancelled: unchanged
+
+    def test_the_save_browser_adds_the_extension_and_asks_before_replacing(self):
+        with open(os.path.join(self.dir, "taken.usdc"), "wb") as f:
+            f.write(b"x")
+        self.add_selected("exp", "usd_export")
+        self.page.click('#params .prow[data-param="file"] .browse')
+        dialog = self.page.locator(".file-dialog[open]")
+        dialog.wait_for()
+        dialog.locator('.fd-row[data-name="taken.usdc"]').wait_for()
+        dialog.locator(".fd-name").fill("taken")
+        dialog.get_by_role("button", name="Save", exact=True).click()
+        confirm = self.page.locator(".app-dialog[open]:not(.file-dialog)")                          # "taken.usdc already exists. Replace it?"
+        confirm.wait_for()
+        self.assertIn("taken.usdc already exists", confirm.inner_text())
+        confirm.locator('button[type="submit"]').click()
+        self.assertTrue(until(lambda: self.s.graph.nodes["exp"].params.get("file") == "taken.usdc"))
+
+    def test_save_to_disk_button_writes_the_usd_file(self):
+        try:
+            from minihou import usd_io
+            usd_io.pxr()
+        except Exception:  # noqa: BLE001
+            self.skipTest("usd-core is not installed")
+        self.s.edit([{"op": "add", "type": "box", "id": "b"}, {"op": "add", "type": "usd_export", "id": "exp", "inputs": {"geo": "b"},
+                                                                  "params": {"file": "out/crate.usdc"}, "pos": [200, 200]}])
+        self.page.wait_for_selector('.node[data-id="exp"]')
+        self.node("exp").locator(".title").click()
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "out", "crate.usdc")))             # cooking wrote nothing
+        self.page.click('#params button[data-action="save"]')
+        self.page.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').textContent.includes('Saved 6 faces')")
+        self.assertTrue(os.path.isfile(os.path.join(self.dir, "out", "crate.usdc")))
 
     def test_export_usd_from_the_file_menu(self):
         try:

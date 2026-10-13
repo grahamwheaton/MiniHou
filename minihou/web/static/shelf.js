@@ -17,7 +17,7 @@
     ["Modify", "#5ea0e0", [
       T("Transform", "transform"), T("Merge", "merge"), T("Duplicate", "copy_transform", "duplicate"), T("Copy to Points", "copy_to_points"),
       T("Instance", "instance"), T("Switch", "switch"), T("Match Size", "match_size"), T("Bound", "bound"), T("Blast", "blast"),
-      T("Delete", "delete"), T("Fuse", "fuse"), T("Clean", "clean"), T("Sort", "sort"), T("Null", "null"), T("Output", "output"), T("Scene Objects", "scene_objects", "output"), T("Image Out", "image_out", "output"),
+      T("Delete", "delete"), T("Fuse", "fuse"), T("Clean", "clean"), T("Sort", "sort"), T("Null", "null"), T("Output", "output"), T("Scene Objects", "scene_objects", "output"), T("Image Out", "image_out", "output"), T("USD Export", "usd_export", "output"),
       T("Input", "input", "host")]],
     ["Model", "#d99a4e", [
       T("Boolean", "boolean"), T("Clip", "clip"), T("Mirror", "mirror"), T("Subdivide", "subdivide"), T("Skin", "skin"),

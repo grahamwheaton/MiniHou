@@ -20,6 +20,13 @@ live in the other and in Blender.
 ``POST /api/export_usd`` ``{path, node?, overwrite?, graph?}`` write the cooked geometry (always at full size, whatever the proxy level)
                        to a ``.usd`` / ``.usda`` / ``.usdc`` file under the root: the display output and each extra output, or just
                        ``node``; the graph is stored in the file unless ``graph`` is false (see :mod:`minihou.usd_io`)
+``POST /api/node_action`` ``{node, action}`` press a button of a node (``usd_export``: ``save``); returns the handler's dict (``message``...)
+``GET  /api/browse``   ``?path=&exts=.usd,.usda&places=1&fallback=1`` the folders and matching files of any folder (names only), for the file picker
+``POST /api/pick_file`` ``{mode: open|save, exts?, title?, start?}`` the operating system's file dialog on the engine's machine ->
+                       ``{native: true, path, cancelled}`` (``path`` relative to the workspace when inside it), or ``{native: false}`` when
+                       there is none (the editor then shows its own browser)
+``POST /api/upload``   ``?name=`` the raw bytes of a dropped file (header ``X-MiniHou-Upload: 1`` required, streamed to disk, up to 16 GB) into
+                       ``imports/`` under the root -> ``{path, size}``; ``.usd``/``.usda``/``.usdc``/``.usdz``/``.png`` only
 ``POST /api/disk_cache`` ``{enabled?, clear?}`` turn the disk cache of expensive results on (``.minihou_cache`` in the root) or off, or
                        clear it; returns ``{enabled, stats}``
 ``POST /api/proxy``    ``{level?, auto?, link_tris?}`` the proxy settings (cook level 0.001..1, auto refine, Blender triangle cap);
@@ -56,7 +63,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 from urllib.parse import parse_qs, urlparse
 
-from .. import blender_setup, usd_io
+from .. import actions, blender_setup, filedialog, paths, usd_io
 from ..edit import OP_NAMES, EditError
 from ..evaluator import NodeError
 from ..graph import GraphError
@@ -68,6 +75,8 @@ log = logging.getLogger("minihou.web")
 DEFAULT_HTTP_PORT = 8766
 STATIC_DIR = Path(__file__).with_name("static")
 MAX_BODY = 16 * 1024 * 1024
+MAX_UPLOAD = 16 * 2**30
+UPLOAD_EXTENSIONS = (".usd", ".usda", ".usdc", ".usdz", ".png")
 SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", "gui_test_output", ".pytest_cache"}
 CONTENT_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
                  ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
@@ -135,6 +144,8 @@ class WebServer:
         self.session, self.host, self.port, self.link = session, host, port, link
         self.root = Path(root or os.getcwd()).resolve()
         session.editor_root = self.root
+        paths.set_root(self.root)                 # relative file parameters of nodes start here
+        self.pick_file = None                     # the desktop window's native dialog: fn(mode, exts, title, start) -> {"path": ...} | None
         self.bind_retry_seconds = bind_retry_seconds
         self._httpd: Optional[_HTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -469,6 +480,49 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self._guard(self._post)
 
+    def _upload(self):
+        """A dropped file: stream the request body to ``imports/<name>`` under the root. A page cannot send this cross-site (the custom
+        header forces a CORS preflight, which is never granted), and the Origin was checked."""
+        if self.headers.get("X-MiniHou-Upload") != "1":
+            raise ApiError(403, "uploads need the X-MiniHou-Upload header")
+        name = os.path.basename(parse_qs(urlparse(self.path).query).get("name", [""])[0].replace("\\", "/"))
+        ext = os.path.splitext(name)[1].lower()
+        if not name or name.startswith(".") or ext not in UPLOAD_EXTENSIONS:
+            raise ApiError(400, f"a dropped file must be one of {', '.join(UPLOAD_EXTENSIONS)}")
+        try:
+            n = int(self.headers.get("Content-Length") or "")
+        except ValueError:
+            raise ApiError(411, "uploads need a Content-Length") from None
+        if n <= 0 or n > MAX_UPLOAD:
+            raise ApiError(413, f"a dropped file may be at most {MAX_UPLOAD // 2**30} GB")
+        folder = self.app.root / "imports"
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / name
+        k = 1
+        while target.exists():                                   # never replace a file that is already there
+            target = folder / f"{os.path.splitext(name)[0]}_{k}{ext}"
+            k += 1
+        part = target.with_name(target.name + ".part")
+        left = n
+        try:
+            with open(part, "wb") as f:
+                while left:
+                    chunk = self.rfile.read(min(1 << 20, left))
+                    if not chunk:
+                        raise ApiError(400, "the upload ended early")
+                    f.write(chunk)
+                    left -= len(chunk)
+            os.replace(part, target)
+        except BaseException:
+            try:
+                os.remove(part)
+            except OSError:
+                pass
+            self.close_connection = True
+            raise
+        self._body_read = True
+        self._json({"path": target.relative_to(self.app.root).as_posix(), "size": n})
+
     def _get(self):
         u = urlparse(self.path)
         path, q = u.path, parse_qs(u.query)
@@ -510,6 +564,13 @@ class _Handler(BaseHTTPRequestHandler):
                 return self._json({"path": p.relative_to(app.root).as_posix(), "graph": json.loads(p.read_text(encoding="utf-8"))})
             except (OSError, ValueError, UnicodeDecodeError) as e:
                 raise ApiError(400, f"cannot read {p.name}: {e}") from None
+        if path == "/api/browse":
+            try:
+                return self._json(filedialog.list_dir(q.get("path", [""])[0], filedialog.clean_exts(q.get("exts", [""])[0]), root=app.root,
+                                                      hidden=q.get("hidden", ["0"])[0] not in ("0", ""), places=q.get("places", ["0"])[0] not in ("0", ""),
+                                                      fallback=q.get("fallback", ["0"])[0] not in ("0", "")))
+            except FileNotFoundError as e:
+                raise ApiError(404, str(e)) from None
         if path == "/api/proxy":
             return self._json(self.app.session.proxy_info())
         if path == "/api/events":
@@ -520,6 +581,8 @@ class _Handler(BaseHTTPRequestHandler):
         if not self._origin_ok():
             raise ApiError(403, "cross-origin request refused")
         path = urlparse(self.path).path
+        if path == "/api/upload":
+            return self._upload()
         body = self._body()
         app, s = self.app, self.app.session
         origin = str(body.get("origin") or "api")[:32]
@@ -594,6 +657,34 @@ class _Handler(BaseHTTPRequestHandler):
             except (OSError, FileNotFoundError) as e:
                 return self._json({"ok": False, "message": f"could not start Blender: {e}"})
             return self._json({"ok": True, "message": f"Starting Blender {found[idx]['version'] or ''}; it connects to this engine by itself."})
+        if path == "/api/pick_file":
+            mode = "save" if body.get("mode") == "save" else "open"
+            exts = filedialog.clean_exts(body.get("exts"))
+            start = body.get("start")
+            start = paths.resolve(start) if isinstance(start, str) and start.strip() else str(app.root)
+            title = str(body.get("title") or "")[:120]
+            native = app.pick_file or filedialog.system_dialog
+            res = native(mode, exts, title, start)
+            if res is None:
+                return self._json({"native": False})
+            if res.get("busy"):
+                raise ApiError(409, "a file dialog is already open")
+            chosen = str(res.get("path") or "")
+            return self._json({"native": True, "cancelled": not chosen, "path": paths.to_param(chosen) if chosen else ""})
+        if path == "/api/node_action":
+            node, name = body.get("node"), body.get("action")
+            if not isinstance(node, str) or not isinstance(name, str):
+                raise ApiError(400, '"node" and "action" must be strings')
+            try:
+                return self._json(actions.run(s, node, name))
+            except FileExistsError as e:
+                raise ApiError(409, str(e)) from None
+            except usd_io.UsdUnavailable as e:
+                raise ApiError(501, str(e)) from None
+            except (GraphError, NodeError, ParamError, ValueError) as e:
+                raise ApiError(400, str(e)) from None
+            except OSError as e:
+                raise ApiError(409, f"cannot write the file: {e.strerror or e}") from None
         if path == "/api/export_usd":
             p = app.resolve(body.get("path"), usd_io.USD_EXTENSIONS)
             node = body.get("node")
