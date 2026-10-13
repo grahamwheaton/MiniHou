@@ -335,6 +335,49 @@ def op_set(g: Graph, op: dict) -> dict:
     return {"params": out}
 
 
+def op_paint_assign(g: Graph, op: dict) -> dict:
+    """Write painted values into an ``attrib_paint`` node (the viewer's strokes, Quick Assign and spreadsheet cells all end up here, one
+    undo step each). ``indices`` (element numbers) with ``values`` (one per element, a number or a list) or ``value`` (the same for all);
+    ``erase``: those elements go back to the input's value; ``clear``: forget everything painted; ``default``: also set the node's default
+    (a number or a vector), which is how 'assign to all' works."""
+    import numpy as np
+    from . import paint
+    inst = _need_node(g, op["id"])
+    if inst.type != "attrib_paint":
+        raise GraphError(f"{op['id']} is a {inst.type} node; paint_assign needs an attrib_paint node")
+    params = g.effective_params(op["id"])
+    nc = paint.comps(params["kind"])
+    data = params["data"]
+    if op.get("clear"):
+        data = ""
+    if "indices" in op:
+        idx = op["indices"]
+        if not isinstance(idx, list) or any(isinstance(i, bool) or not isinstance(i, int) for i in idx):
+            raise GraphError("indices must be a list of whole numbers")
+        if op.get("erase"):
+            data = paint.merge(data, nc, idx, erase=True)
+        elif idx:
+            if "values" in op:
+                vals = np.asarray(op["values"], np.float64)
+                if vals.size != len(idx) * nc:
+                    raise GraphError(f"values must hold {nc} number(s) for each of the {len(idx)} element(s)")
+            elif "value" in op:
+                vals = np.tile(np.asarray(op["value"], np.float64).reshape(-1), (len(idx), 1))
+                if vals.shape[1] != nc:
+                    raise GraphError(f"value must hold {nc} number(s)")
+            else:
+                raise GraphError("give value or values (or erase)")
+            if params["kind"] == "int":
+                vals = np.rint(vals)
+            data = paint.merge(data, nc, idx, vals)
+    g.set_param(op["id"], "data", data)
+    if "default" in op:
+        name = "default_vec" if params["kind"] == "vec3" else "default"
+        v = op["default"]
+        g.set_param(op["id"], name, [float(x) for x in v] if name == "default_vec" else float(v))
+    return {"edited": True, "bytes": len(data)}
+
+
 def op_display(g: Graph, op: dict) -> dict:
     _need_node(g, op["id"])
     g.display = op["id"]
@@ -512,7 +555,7 @@ def op_replace(g: Graph, op: dict) -> dict:
 
 
 _OPS = {"add": op_add, "loop": op_loop, "insert": op_insert, "remove": op_remove, "dissolve": op_dissolve, "rename": op_rename, "connect": op_connect,
-        "disconnect": op_disconnect, "set": op_set, "display": op_display, "flag": op_flag, "merge_templates": op_merge_templates, "expose": op_expose,
+        "disconnect": op_disconnect, "set": op_set, "paint_assign": op_paint_assign, "display": op_display, "flag": op_flag, "merge_templates": op_merge_templates, "expose": op_expose,
         "unexpose": op_unexpose, "move": op_move, "meta": op_meta, "replace": op_replace,
         "box_add": op_box_add, "box_set": op_box_set, "box_remove": op_box_remove}
 OP_NAMES = sorted(_OPS)

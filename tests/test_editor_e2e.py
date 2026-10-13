@@ -2579,6 +2579,254 @@ class EditorE2E(unittest.TestCase):
         self.page.click('#params button[data-action="reload"]')
         self.assertTrue(until(lambda: self.s.graph.nodes["imp"].params.get("reload") == 1))
 
+    # -- attribute paint, quick assign, the spreadsheet ------------------------------------------------------------------------
+    def grid_view(self, columns=6, rows=5):
+        self.s.edit([{"op": "replace", "graph": {"nodes": {"g": {"type": "grid", "params": {"columns": columns, "rows": rows}, "pos": [0, 0]}}, "display": "g"}}])
+        self.page.wait_for_selector('.node[data-id="g"]')
+        self.page.wait_for_function("minihou.preview.points === %d" % (columns * rows))
+
+    def test_the_spreadsheet_pages_rows_selects_elements_and_edits_cells(self):
+        self.grid_view(6, 5)
+        self.page.click("#pv-sheet-btn")
+        self.page.wait_for_selector("#sheet .sh-row")
+        self.assertEqual(self.page.locator("#sheet .sh-status").inner_text(), "30 rows")
+        heads = self.page.locator("#sheet .sh-h").all_inner_texts()
+        self.assertEqual(heads[:2], ["#", "P"])
+        self.page.click('#sheet .sh-tab[data-domain="prim"]')
+        self.page.wait_for_function("document.querySelector('#sheet .sh-status').textContent.startsWith('20 rows')")
+        self.page.click('#sheet .sh-tab[data-domain="point"]')
+        self.page.wait_for_function("document.querySelector('#sheet .sh-status').textContent.startsWith('30 rows')")
+        self.page.locator('#sheet .sh-row[data-id="7"] .sh-idx').click()                             # a row click selects that point
+        self.assertTrue(until(lambda: self.page.evaluate("minihou.preview.selection().points.join()") == "7"))
+        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "point")
+        self.page.locator("#sheet .sh-only").check()                                                 # selected only
+        self.page.wait_for_function("document.querySelector('#sheet .sh-status').textContent.startsWith('1 row')")
+        self.assertEqual(self.page.locator("#sheet .sh-row").count(), 1)
+        self.page.locator("#sheet .sh-only").uncheck()
+        self.page.click('#sheet .sh-tab[data-domain="detail"]')
+        self.page.wait_for_function("document.querySelectorAll('#sheet .sh-row').length >= 2")
+        self.assertIn("grid_columns", self.page.locator("#sheet .sh-rows").inner_text())
+        self.page.click("#sheet .sh-close")
+        self.assertTrue(self.page.locator("#sheet").is_hidden())
+
+    def test_the_spreadsheet_only_holds_the_rows_near_the_scroll_position(self):
+        self.grid_view(60, 50)                                                                       # 3,000 points
+        self.page.click("#pv-sheet-btn")
+        self.page.wait_for_selector("#sheet .sh-row")
+        self.assertLess(self.page.evaluate("minihou.sheet.rows()"), 60)
+        self.page.evaluate("document.querySelector('#sheet .sh-scroll').scrollTop = 2500 * 22")
+        self.page.wait_for_selector('#sheet .sh-row[data-id="2500"]')
+        self.assertLess(self.page.evaluate("minihou.sheet.rows()"), 60)
+
+    def stroke(self, points, shift=False, steps=6):
+        box = self.page.locator("#pv-canvas").bounding_box()
+        (x0, y0), rest = points[0], points[1:]
+        self.page.mouse.move(box["x"] + x0, box["y"] + y0)
+        if shift:
+            self.page.keyboard.down("Shift")
+        self.page.mouse.down()
+        for x, y in rest:
+            self.page.mouse.move(box["x"] + x, box["y"] + y, steps=steps)
+        self.page.mouse.up()
+        if shift:
+            self.page.keyboard.up("Shift")
+
+    def painted(self, node=None):
+        from minihou import Evaluator
+        node = node or next(i for i, n in self.s.graph.nodes.items() if n.type == "attrib_paint")
+        return Evaluator().cook(self.s.graph, node)
+
+    def start_painting(self, columns=10, rows=10):
+        self.grid_view(columns, rows)
+        self.page.click("#pv-max")                                                                   # the panel sits over the view: give it room
+        self.page.click("#pv-paint-btn")
+        self.page.wait_for_selector("#attr-card:not(.hidden)")
+        self.page.wait_for_function("minihou.paint.active() && minihou.paint.values() && minihou.paint.values().n === %d" % (columns * rows))
+        return self.page.locator("#pv-canvas").bounding_box()
+
+    def test_painting_points_is_one_edit_one_undo_step_and_erase_goes_back(self):
+        box = self.start_painting(10, 10)
+        cx, cy = box["width"] / 2, box["height"] / 2
+        self.page.fill("#attr-card .pa-attr", "weight")
+        self.page.locator("#attr-card .pa-attr").press("Tab")
+        self.page.wait_for_function("minihou.paint.state.attr === 'weight'")
+        self.page.locator("#attr-card .pa-radius").evaluate("(e) => { e.value = 60; e.dispatchEvent(new Event('input')); }")
+        before = len(self.s.graph.nodes)
+        self.stroke([(cx - 80, cy), (cx + 80, cy)])
+        self.assertTrue(until(lambda: any(n.type == "attrib_paint" for n in self.s.graph.nodes.values())))
+        self.assertEqual(len(self.s.graph.nodes), before + 1)
+        node = next(i for i, n in self.s.graph.nodes.items() if n.type == "attrib_paint")
+        self.assertEqual(self.s.graph.nodes[node].inputs["geo"], "g")
+        self.assertEqual(self.s.graph.display, node)                                              # inserted in the chain: the display node follows
+        out = self.painted(node)
+        w = out.point["weight"]
+        self.assertGreater(int((w > 0).sum()), 5)
+        self.assertLessEqual(float(w.max()), 1.0)
+        self.assertTrue(until(lambda: self.page.evaluate("minihou.S.sel.size") == 1))
+        painted_count = int((w > 0).sum())
+        self.page.wait_for_function("minihou.paint.values().node === %r" % node)                  # the view now shows the paint node
+        self.s.undo()                                                                            # the whole stroke, node and values: one step
+        self.assertTrue(until(lambda: not any(n.type == "attrib_paint" for n in self.s.graph.nodes.values())))
+        self.s.redo()
+        self.assertTrue(until(lambda: any(n.type == "attrib_paint" for n in self.s.graph.nodes.values())))
+        self.page.wait_for_function("minihou.paint.values() && minihou.paint.values().node === %r" % node)
+        self.stroke([(cx - 80, cy), (cx + 80, cy)], shift=True)                                    # Shift: erase back to the input (nothing there: zero)
+        self.assertTrue(until(lambda: int((self.painted(node).point["weight"] > 0).sum()) < painted_count))
+        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "view")
+
+    def test_painting_faces_and_edges_and_a_vector_colour(self):
+        box = self.start_painting(8, 8)
+        cx, cy = box["width"] / 2, box["height"] / 2
+        self.page.select_option("#attr-card .pa-domain", "prim")
+        self.page.fill("#attr-card .pa-attr", "mask")
+        self.page.locator("#attr-card .pa-attr").press("Tab")
+        self.page.wait_for_function("minihou.paint.values() && minihou.paint.values().n === 49")
+        self.stroke([(cx - 50, cy - 30), (cx + 50, cy + 30)])
+        self.assertTrue(until(lambda: any(n.type == "attrib_paint" for n in self.s.graph.nodes.values())))
+        out = self.painted()
+        self.assertEqual(out.prim["mask"].shape, (49,))
+        self.assertGreater(int((out.prim["mask"] > 0).sum()), 2)
+        self.page.wait_for_function("minihou.paint.values() && minihou.paint.values().n === 49")
+        self.page.select_option("#attr-card .pa-domain", "edge")
+        self.page.fill("#attr-card .pa-attr", "crease")
+        self.page.locator("#attr-card .pa-attr").press("Tab")
+        self.page.wait_for_function("minihou.paint.state.domain === 'edge' && minihou.paint.values() && minihou.paint.values().n === 2 * 8 * 7")
+        self.stroke([(cx - 60, cy), (cx + 60, cy)])
+        self.assertTrue(until(lambda: sum(n.type == "attrib_paint" for n in self.s.graph.nodes.values()) == 2))
+        edge_node = next(i for i, n in self.s.graph.nodes.items() if n.type == "attrib_paint" and n.params["domain"] == "edge")
+        from minihou import edges
+        self.assertGreater(int((edges.values(self.painted(edge_node), "edge_group_crease") != 0).sum()), 2)
+        self.page.select_option("#attr-card .pa-domain", "point")
+        self.page.select_option("#attr-card .pa-kind", "vec3")
+        self.page.fill("#attr-card .pa-attr", "Cd")
+        self.page.locator("#attr-card .pa-attr").press("Tab")
+        self.page.locator("#attr-card .pa-vec").first.fill("1")
+        self.page.locator("#attr-card .pa-vec").first.press("Tab")
+        self.page.wait_for_function("minihou.paint.values() && minihou.paint.values().n === 64")
+        self.stroke([(cx - 40, cy + 40), (cx + 40, cy + 40)])
+        self.assertTrue(until(lambda: sum(n.type == "attrib_paint" for n in self.s.graph.nodes.values()) == 3))
+        cd = next(self.painted(i).point["Cd"] for i, n in self.s.graph.nodes.items() if n.type == "attrib_paint" and n.params["kind"] == "vec3")
+        self.assertEqual(cd.shape, (64, 3))
+        self.assertGreater(float(cd[:, 0].max()), 0.5)
+
+    def test_quick_assign_gives_the_selection_a_value_and_all_clears_to_a_default(self):
+        self.grid_view(6, 5)
+        self.page.evaluate("minihou.preview.selectElements('point', [1, 2, 3], 'replace')")
+        self.page.click("#pv-assign-btn")
+        self.page.wait_for_selector("#attr-card:not(.hidden)")
+        self.assertIn("3 selected", self.page.locator("#attr-card .pa-selinfo").inner_text())
+        self.page.fill("#attr-card .pa-attr", "temp")
+        self.page.locator("#attr-card .pa-attr").press("Tab")
+        self.page.fill("#attr-card .pa-value", "2.5")
+        self.page.locator("#attr-card .pa-value").press("Tab")
+        self.page.click("#attr-card .pa-assign-sel")
+        self.assertTrue(until(lambda: any(n.type == "attrib_paint" for n in self.s.graph.nodes.values())))
+        w = self.painted().point["temp"]
+        self.assertEqual(w.nonzero()[0].tolist(), [1, 2, 3])
+        self.assertEqual(float(w[2]), 2.5)
+        self.page.fill("#attr-card .pa-value", "1")
+        self.page.locator("#attr-card .pa-value").press("Tab")
+        self.page.click("#attr-card .pa-assign-all")
+        self.assertTrue(until(lambda: bool((self.painted().point["temp"] == 1.0).all())))
+        self.page.click("#attr-card .pa-clear")
+        self.assertTrue(until(lambda: float(self.painted().point["temp"].max()) == 1.0))             # cleared the strokes, the default stays
+        self.assertEqual(sum(n.type == "attrib_paint" for n in self.s.graph.nodes.values()), 1)       # one node, reused
+
+    def test_spreadsheet_cells_are_edited_through_the_same_node(self):
+        self.grid_view(4, 3)
+        self.page.evaluate("minihou.preview.selectElements('point', [0], 'replace')")
+        self.s.edit([{"op": "insert", "after": "g", "type": "attrib_paint", "id": "w", "params": {"attribute": "w"}}])
+        self.page.click("#pv-sheet-btn")
+        self.page.locator("#sheet .sh-tab[data-domain='point']").click()
+        self.page.wait_for_function("[...document.querySelectorAll('#sheet .sh-h')].some((h) => h.textContent === 'w')")        # the paint node's column is in
+        self.page.wait_for_selector('#sheet .sh-row[data-id="5"] .sh-c.ed')
+        cell = self.page.locator('#sheet .sh-row[data-id="5"] .sh-c[data-col="w"]')
+        cell.dblclick()
+        self.page.locator("#sheet .sh-edit").fill("4.5")
+        self.page.locator("#sheet .sh-edit").press("Enter")
+        self.assertTrue(until(lambda: float(self.painted("w").point["w"][5]) == 4.5))
+        self.assertEqual(sum(n.type == "attrib_paint" for n in self.s.graph.nodes.values()), 1)
+        self.page.wait_for_function("(() => { const c = document.querySelector('#sheet .sh-row[data-id=\"5\"] .sh-c[data-col=\"w\"]'); return !!c && c.textContent === '4.5'; })()")
+
+    def test_paint_needs_the_real_geometry_and_the_full_cook(self):
+        self.big_grid()
+        self.page.click("#pv-paint-btn")                                                             # a reduced view: Detail auto loads the full one
+        self.page.wait_for_function("minihou.paint.active() && minihou.paint.values() && minihou.paint.values().n === 100 * 100")
+        self.assertEqual(self.page.locator("#pv-proxy-text").inner_text(), "")
+        self.page.click("#pv-paint-btn")                                                             # leaves paint mode (the card closes)
+        self.assertFalse(self.page.evaluate("minihou.paint.active()"))
+        self.page.select_option("#pv-detail", "fast")
+        self.assertTrue(until(lambda: self.page.evaluate("minihou.preview.tris") <= 3000, 8))
+        self.page.click("#pv-paint-btn")
+        self.page.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').textContent.includes('Detail is set to Fast')")
+        self.assertFalse(self.page.evaluate("minihou.paint.active()"))
+
+    def test_paint_refuses_while_the_cook_proxy_is_below_full(self):
+        box = self.start_painting(6, 6)
+        self.s.set_proxy(level=0.5)
+        self.assertTrue(until(lambda: self.page.evaluate("minihou.paint.values() && minihou.preview && true")))
+        self.page.wait_for_function("document.querySelector('#attr-card .pa-info').textContent.includes('Proxy')")
+        self.stroke([(box["width"] / 2 - 30, box["height"] / 2), (box["width"] / 2 + 30, box["height"] / 2)])
+        self.page.wait_for_function("document.querySelector('#toast') && document.querySelector('#toast').textContent.includes('Proxy')")
+        self.assertFalse(any(n.type == "attrib_paint" for n in self.s.graph.nodes.values()))
+
+    def test_paint_modes_keys_and_the_attribute_is_shown_as_colour(self):
+        box = self.start_painting(10, 10)
+        cx, cy = box["width"] / 2, box["height"] / 2
+        self.assertEqual(self.page.evaluate("minihou.preview.attrViewInfo().domain"), "point")
+        self.page.select_option("#attr-card .pa-mode", "add")
+        self.page.locator("#attr-card .pa-value").fill("0.6")
+        self.page.locator("#attr-card .pa-value").press("Tab")
+        self.page.locator("#attr-card .pa-radius").evaluate("(e) => { e.value = 50; e.dispatchEvent(new Event('input')); }")
+        self.stroke([(cx - 30, cy), (cx + 30, cy)])
+        self.assertTrue(until(lambda: any(n.type == "attrib_paint" for n in self.s.graph.nodes.values())))
+        node = next(i for i, n in self.s.graph.nodes.items() if n.type == "attrib_paint")
+        self.page.wait_for_function("minihou.paint.values() && minihou.paint.values().node === %r" % node)
+        first = float(self.painted(node).point["paint"].max())
+        self.assertTrue(0.1 < first < 1.3, first)                                                    # built up over the overlapping dabs, not one dab
+        self.stroke([(cx - 30, cy), (cx + 30, cy)])                                                  # added on top of what the paint node holds
+        self.assertTrue(until(lambda: float(self.painted(node).point["paint"].max()) > first + 0.1))
+        self.assertEqual(sum(n.type == "attrib_paint" for n in self.s.graph.nodes.values()), 1)       # the same node
+        before = self.page.evaluate("minihou.paint.state.radius")
+        self.page.mouse.move(box["x"] + cx, box["y"] + cy)
+        self.page.keyboard.press("]")
+        self.assertGreater(self.page.evaluate("minihou.paint.state.radius"), before)
+        self.page.keyboard.press("[")
+        self.assertAlmostEqual(self.page.evaluate("minihou.paint.state.radius"), before, places=3)
+        self.page.keyboard.press("Escape")
+        self.assertFalse(self.page.evaluate("minihou.paint.active()"))
+        self.page.keyboard.press("5")                                                                # over the view: paint mode again
+        self.assertTrue(until(lambda: self.page.evaluate("minihou.paint.active()")))
+        self.page.keyboard.press("2")                                                                # a selection mode ends paint mode
+        self.assertTrue(until(lambda: not self.page.evaluate("minihou.paint.active()")))
+        self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "edge")
+
+    def test_a_painted_attribute_can_be_shown_without_painting(self):
+        self.grid_view(6, 5)
+        self.page.click("#pv-max")
+        self.s.edit([{"op": "insert", "after": "g", "type": "attrib_paint", "id": "w", "params": {"attribute": "w"}},
+                     {"op": "paint_assign", "id": "w", "indices": [3, 4], "value": 1.0}])
+        self.page.click("#pv-assign-btn")                                                           # the panel without paint mode
+        self.page.wait_for_selector("#attr-card:not(.hidden)")
+        self.page.fill("#attr-card .pa-attr", "w")
+        self.page.locator("#attr-card .pa-attr").press("Tab")
+        self.page.wait_for_function("minihou.preview.attrViewInfo() && minihou.preview.attrViewInfo().values[3] === 1")
+        self.assertFalse(self.page.evaluate("minihou.paint.active()"))
+        self.page.click("#attr-card .pa-display summary")
+        self.page.uncheck("#attr-card .pa-show")
+        self.page.wait_for_function("!minihou.preview.attrViewInfo()")
+        self.page.check("#attr-card .pa-show")
+        self.page.wait_for_function("minihou.preview.attrViewInfo() && minihou.preview.attrViewInfo().values[3] === 1")
+        self.page.click("#attr-card .pa-close")                                                     # closing the panel stops colouring the geometry
+        self.page.wait_for_function("!minihou.preview.attrViewInfo()")
+
+    def test_geometry_is_not_coloured_by_an_attribute_when_the_panel_was_never_opened(self):
+        self.grid_view(6, 5)
+        self.assertIsNone(self.page.evaluate("minihou.preview.attrViewInfo()"))
+        self.s.edit([{"op": "insert", "after": "g", "type": "attrib_paint", "id": "paint", "params": {"attribute": "paint"}}])
+        self.page.wait_for_function("document.querySelector('#pv-node').textContent.includes('paint')")
+        self.assertIsNone(self.page.evaluate("minihou.preview.attrViewInfo()"))
+
     def test_export_usd_from_the_file_menu(self):
         try:
             from minihou import usd_io

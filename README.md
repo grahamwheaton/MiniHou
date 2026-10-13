@@ -859,6 +859,12 @@ MiniHou modifier (objects parented to the host object). Details and limits: [doc
 output; *Scene Objects* modes **curves** and **points** make real Blender curves and point clouds; `blender_image` / `image_file` bring **images** in as
 pixel grids (heightfield nodes work on them) and `image_out` writes a grid or baked points to a Blender image or a PNG. Details: [docs/EXCHANGE.md](docs/EXCHANGE.md).
 
+## Painting and assigning attributes
+
+**Paint** mode (key `5`) brushes any attribute onto points, faces or edges in the 3-D view; **Quick Assign** gives the selection a value; the
+**Spreadsheet** shows every point, vertex, primitive, edge and detail attribute and lets you edit cells. They all write to one node,
+`attrib_paint`, one undo step per stroke or assignment. Details and limits: [docs/PAINT.md](docs/PAINT.md).
+
 ## USD export and import
 
 File menu > *Export USD...* (also `POST /api/export_usd`, MCP `export_usd`) writes the cooked geometry, always at full size, as meshes,

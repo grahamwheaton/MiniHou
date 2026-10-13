@@ -129,6 +129,36 @@ def _arrays_for(geo, full: bool = False, tris: int = 0) -> Tuple[dict, Dict[str,
     return head, out
 
 
+def attr_arrays(geo, spec: dict, head: dict, arrays: Dict[str, np.ndarray]) -> None:
+    """Add one attribute's values to a preview (``spec``: ``{"name", "domain": point|prim|edge}``) so the viewer can colour by it: the array
+    ``attr`` (float32, one to three numbers per element, point order / primitive order / derived edge order) and the header's ``attr``
+    (name, domain, components, ranges). Only for a view that is not reduced: the numbers of a clustered view's elements are not the real ones."""
+    name, dom = str(spec.get("name") or ""), str(spec.get("domain") or "point")
+    info = {"name": name, "domain": dom}
+    head["attr"] = info
+    if head["proxy"]["active"]:
+        info["reduced"] = True
+        return
+    if dom == "edge":
+        from . import edges
+        a = edges.values(geo, edges.PREFIX + name) if edges.PREFIX + name in geo.vertex else None
+    elif dom in ("point", "prim"):
+        a = geo.table(dom).get(name)
+    else:
+        raise ValueError("domain must be point, prim or edge")
+    if a is None or a.dtype.kind not in "fiub":
+        info["missing"] = True
+        return
+    a2 = np.asarray(a).reshape(len(a), -1).astype(np.float32)[:, :3]
+    nc = a2.shape[1]
+    arrays["attr"] = np.ascontiguousarray(a2).reshape(-1)
+    info.update(comps=nc, count=int(len(a2)))
+    if len(a2):
+        info["min"], info["max"] = [float(x) for x in a2.min(0)], [float(x) for x in a2.max(0)]
+    else:
+        info["min"], info["max"] = [0.0] * nc, [0.0] * nc
+
+
 def pack(head: dict, arrays: Dict[str, np.ndarray]) -> bytes:
     """Serialise header fields and arrays in the wire format above."""
     table, blobs, offset = [], [], 0

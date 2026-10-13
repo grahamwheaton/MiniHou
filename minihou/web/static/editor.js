@@ -1064,7 +1064,83 @@
   const pvMsg = (text) => { const m = $("#pv-msg"); m.textContent = text || ""; m.classList.toggle("hidden", !text); };
   const pv = window.MiniHouPreview ? window.MiniHouPreview.create($("#pv-canvas"), pvMsg) : null;
   const loopTool=pv?.ok&&window.MiniLoopTool?MiniLoopTool(pv,$('#pv-canvas'),async params=>{if(!pvNode)return;const r=await edit([{op:'insert',after:pvNode,type:'polysplit',params}]);if(r){const id=r.results?.[0]?.id;if(id){pvKeepCameraNode=id;select([id]);}}}):null;
-  const curveTool = pv?.ok && window.MiniCurveTool ? MiniCurveTool(pv,$('#pv-canvas'),(id,value)=>queueSet(id,'controls',value)) : null;
+
+  let sheet = null;                                                           // the geometry spreadsheet (sheet.js)
+  let paintTool = null;                                                       // attribute paint and quick assign (paint-tool.js), made once the view exists
+  // ---- attribute paint and quick assign (paint-tool.js) and the spreadsheet (sheet.js)
+  const edgeIdMap = { raw: null, map: null };
+  function edgeIdsOf(pairs) {                                                // selected edges (endpoint pairs) as derived edge numbers, as the preview lists them
+    const raw = pv.geometry();
+    if (!raw) return [];
+    if (edgeIdMap.raw !== raw) {
+      const map = new Map(), E = raw.edge, n = raw.P.length / 3 + 1;
+      for (let k = 0; k < E.length / 2; k++) map.set(Math.min(E[2 * k], E[2 * k + 1]) * n + Math.max(E[2 * k], E[2 * k + 1]), k);
+      edgeIdMap.raw = raw; edgeIdMap.map = map;
+    }
+    const n = raw.P.length / 3 + 1;
+    return pairs.map(([a, b]) => edgeIdMap.map.get(Math.min(a, b) * n + Math.max(a, b))).filter((k) => k !== undefined).sort((x, y) => x - y);
+  }
+  const selectionFor = (domain) => {
+    const ids = domain === "point" ? pvSelection.points : domain === "prim" ? pvSelection.faces : domain === "edge" ? edgeIdsOf(pvSelection.edges) : [];
+    return ids && ids.length ? ids : null;
+  };
+  const paintHost = {
+    toast: (m) => toast(m), edit: (ops) => edit(ops), uniqueId: (b) => uniqueId(b), select: (ids) => select(ids),
+    viewedNode: () => (pvNode && nodeOf(pvNode) ? pvNode : null),
+    nodeInfo: (id) => { const n = nodeOf(id); if (!n) return null; const out = { type: n.type, params: {} }; for (const p of typeOf(id).params) out.params[p.name] = effective(id, p); return out; },
+    refresh: () => { pvKey = null; schedulePreview(); },
+    selectionFor,
+    reducedMessage: () => (pvReduced ? lockMessage(pvReduced) || "The view is reduced: painting needs the real geometry." : ""),
+    paintBlocked: () => {
+      if (!pvNode || !nodeOf(pvNode)) return "Show a node's geometry first.";
+      if (selectLock(pvReduced)) return lockMessage(pvReduced);
+      return "";
+    },
+    paintChanged: (on) => {
+      if (on && pvSelection.mode !== "view") pv.setMode("view");
+      $("#pv-paint-btn").classList.toggle("on", on);
+      pvKey = null; schedulePreview();
+    },
+    attributeNames: async (domain) => {
+      const node = pvNode;
+      if (!node) return [];
+      try {
+        const r = await api("/api/spreadsheet", { node, domain, start: 0, count: 0 });
+        return (r.columns || []).filter((c) => !c.computed && !(domain === "edge" && c.name === "faces")).map((c) => c.name).filter((n) => n !== "P");
+      } catch (e) { return []; }
+    },
+    fetchBase: async (node, spec) => {                                       // the attribute as the paint node's input has it (what Erase goes back to)
+      const info = nodeOf(node), src = info && info.type === "attrib_paint" ? ((info.inputs || {}).geo) : node;
+      if (!src || !nodeOf(src)) return { values: null, comps: 1 };
+      try {
+        const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node: src, full: true, attr: spec }) });
+        const { head, arrays } = window.MiniHouPreview.parse(await r.arrayBuffer());
+        if (!arrays || !head.attr || head.attr.missing || head.attr.reduced || !arrays.attr) return { values: null, comps: 1 };
+        return { values: new Float32Array(arrays.attr), comps: head.attr.comps };
+      } catch (e) { return { values: null, comps: 1 }; }
+    },
+  };
+  const sheetHost = {
+    viewedNode: () => (pvNode && nodeOf(pvNode) ? pvNode : null), post: (path, body) => api(path, body), toast: (m) => toast(m),
+    key: () => `${S.documentId}:${pvNode}:${S.rev}:${S.status ? S.status.cooked_rev : ""}`,
+    selectionFor, selectedSet: (domain) => { const ids = selectionFor(domain); return ids ? new Set(ids) : null; },
+    selectElements: (domain, ids, how) => pv.selectElements && pv.selectElements(domain, ids, how),
+    opened: (on) => { $("#pv-sheet-btn").classList.toggle("on", on); $("#preview").classList.toggle("sheet-open", on); },
+    assignCell: async (domain, col, id, nums) => {
+      if (!paintTool) return;
+      const float = col.dtype.startsWith("float"), kind = domain === "edge" ? "int" : col.comps === 3 && float ? "vec3" : col.comps === 1 ? (float ? "float" : "int") : null;
+      if (!kind) { toast("Only single numbers and 3-vectors can be edited here."); return; }
+      if (pvReduced || (S.status && S.status.proxy && S.status.proxy.cooked < 1)) { toast("Edit cells at full detail and full cook (Proxy: Full)."); return; }
+      await paintTool.assign({ attr: col.name, domain, kind }, [id], kind === "vec3" ? nums : nums[0]);
+    },
+  };
+  sheet = window.MiniSheet ? MiniSheet($("#sheet"), sheetHost) : null;
+  if (sheet) $("#pv-sheet-btn").onclick = () => sheet.toggle();
+  paintTool = pv?.ok && window.MiniPaint ? MiniPaint(pv, $("#pv-canvas"), paintHost) : null;
+  if (paintTool) {
+    $("#pv-paint-btn").onclick = () => { if (paintTool.isOpen() && paintTool.active()) paintTool.close(); else paintTool.open("paint"), paintTool.setPaint(true); };
+    $("#pv-assign-btn").onclick = () => { if (paintTool.isOpen() && !paintTool.active()) paintTool.close(); else { paintTool.setPaint(false); paintTool.open("assign"); } };
+  }  const curveTool = pv?.ok && window.MiniCurveTool ? MiniCurveTool(pv,$('#pv-canvas'),(id,value)=>queueSet(id,'controls',value)) : null;
   let pvKeepCameraNode = null;
   let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false, pvReduced = null, pvTooBig = null;
   let pvSelection = { mode: "view", points: [], edges: [], faces: [] };
@@ -1072,7 +1148,7 @@
   // full always asks for full detail; fast always reduces (selection off). Remembered between sessions.
   let pvDetail = "auto";
   try { const d = localStorage.getItem("minihou.pvDetail"); if (["auto", "full", "fast"].includes(d)) pvDetail = d; } catch (e) { /* no storage */ }
-  const wantFull = () => pvDetail === "full" || (pvDetail === "auto" && pvSelection.mode !== "view");
+  const wantFull = () => pvDetail === "full" || (pvDetail === "auto" && (pvSelection.mode !== "view" || !!(paintTool && paintTool.active())));
   function setDetail(d) {
     pvDetail = d;
     try { localStorage.setItem("minihou.pvDetail", d); } catch (e) { /* no storage */ }
@@ -1098,6 +1174,7 @@
       b.disabled = off; b.title = off ? why : b.dataset.title;
     });
     if (lock && pvSelection.mode !== "view") { pv.setMode("view"); pvMsg(why); clearTimeout(blockedByReduced.t); blockedByReduced.t = setTimeout(() => pvMsg(""), 6000); }
+    if (lock && paintTool && paintTool.active()) { paintTool.setPaint(false); pvMsg(why); clearTimeout(blockedByReduced.t); blockedByReduced.t = setTimeout(() => pvMsg(""), 6000); }
   }
   function lockMessage(p) {
     if (!p) return "";
@@ -1148,13 +1225,13 @@
     const node = previewTarget(), documentId = S.documentId;
     $("#pv-node").textContent = node ? "· " + node : "";
     if (!node) { pv.clear(); pvMsg(""); pvKey = null; return; }
-    const full = wantFull();
-    const key = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}:${full}`;
+    const full = wantFull(), attr = paintTool ? paintTool.wantAttr() : null;
+    const key = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}:${full}:${attr ? attr.name + "/" + attr.domain : ""}`;
     if (key === pvKey) return;
     pvKey = key;
     let buf;
     try {
-      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full, templates:true }) });
+      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full, templates:true, attr: attr || undefined }) });
       buf = await r.arrayBuffer();
     } catch (e) { pvKey = null; return; }
     // A completed frame of the same node is useful even if a newer edit arrived.
@@ -1181,6 +1258,8 @@
     refreshSelectionHandles();                                                 // a kept selection moved with the geometry: so does its gizmo
     updateToolButtons();
     pvNode = node; pvPath = S.path;
+    if (paintTool) paintTool.onPreview(head, arrays, node);                    // the painted attribute as colour, and the working copy for strokes
+    if (sheet) sheet.changed();
   }
 
   // ---- selecting points, edges and faces in the 3-D view and turning the selection into nodes (inserted after the viewed node)
@@ -1223,6 +1302,9 @@
   function renderSelectionTools(s) {
     const was = pvSelection.mode;
     pvSelection = s;
+    if (s.mode !== "view" && paintTool && paintTool.active()) paintTool.setPaint(false);          // a selection mode and paint mode exclude each other
+    if (paintTool && paintTool.isOpen()) paintTool.refreshInfo();
+    if (sheet) sheet.changed();
     if (was !== s.mode && (was === "view" || s.mode === "view") && pvDetail === "auto") {          // selecting asks for full detail, leaving it lets go again
       if (s.mode !== "view" && pvReduced && !selectLock(pvReduced)) { pvMsg("Loading full detail for selecting…"); }
       schedulePreview();
@@ -1542,6 +1624,7 @@
         if (e.shiftKey) { tlStop(); tlGoto(k === "arrowright" ? PB.end : PB.start); } else tlStep(k === "arrowright" ? 1 : -1);
         e.preventDefault(); e.stopImmediatePropagation(); return;
       }
+      if (k === "5" && paintTool) { paintTool.toggle(); e.preventDefault(); e.stopImmediatePropagation(); return; }          // paint attributes
       const mode = { "1": "point", "2": "edge", "3": "face", "4": "piece" }[k];
       if (mode) { if (!blockedByReduced()) pv.setMode(mode); e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (k === "escape") {
@@ -2892,5 +2975,5 @@
   applyView();
   try { recoveryButton(); } catch (e) { /* Browser storage may be disabled. */ }
   connectEvents();
-  window.minihou = { droppedPaths, importDropped, desktopCanClose: () => { document.activeElement?.blur(); return !desktopPendingEdits && !setInFlight && !pendingSet.size; }, S, edit, frame, clipboardText, pasteNodes, preview: pv, layout };                  // handy from the browser console
+  window.minihou = { get sheet() { return sheet; }, get paint() { return paintTool; }, droppedPaths, importDropped, desktopCanClose: () => { document.activeElement?.blur(); return !desktopPendingEdits && !setInFlight && !pendingSet.size; }, S, edit, frame, clipboardText, pasteNodes, preview: pv, layout };                  // handy from the browser console
 })();

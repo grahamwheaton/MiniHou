@@ -175,9 +175,101 @@ window.MiniHouPreview = (() => {
     let raw = null;                                                  // the geometry's typed arrays, for picking
     let raf = 0;
 
+    // ---------------------------------------------------------------- an attribute shown as colour (the painted one)
+    // attrView = {domain: point|prim|edge, comps, values (Float32Array), min, max, ramp: heat|gray}. Points reuse the colour buffer, primitives
+    // draw from an unwelded copy of the triangles (a point is shared by faces, a primitive's colour is not), edges are an overlay.
+    let attrView = null, cd0 = null, primCount = 0, aedCount = 0, ptCol = null, primColArr = null, primTriIdx = null;
+    const primVao = gl.createVertexArray(), primPos = gl.createBuffer(), primCol = gl.createBuffer();
+    gl.bindVertexArray(primVao); gl.bindBuffer(gl.ARRAY_BUFFER, primPos); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, primCol); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0); gl.bindVertexArray(null);
+    const aedVao = gl.createVertexArray(), aedBuf = gl.createBuffer(), aedIdx = gl.createBuffer();
+    gl.bindVertexArray(aedVao); gl.bindBuffer(gl.ARRAY_BUFFER, aedBuf);
+    for (const [loc, n, off] of [[0, 3, 0], [1, 3, 12], [2, 1, 24], [3, 1, 28]]) { gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, n, gl.FLOAT, false, 32, off); }
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, aedIdx); gl.bindVertexArray(null);
+    const HEAT = [[0.12, 0.2, 0.75], [0.1, 0.75, 0.85], [0.2, 0.8, 0.25], [0.95, 0.85, 0.15], [0.9, 0.2, 0.15]];
+    function colourOf(a, i, out, o) {                                    // the colour of element i of the attribute, into out[o..o+2]
+      const v = a.values, nc = a.comps;
+      if (nc >= 3) { out[o] = Math.min(1, Math.max(0, v[3 * i])); out[o + 1] = Math.min(1, Math.max(0, v[3 * i + 1])); out[o + 2] = Math.min(1, Math.max(0, v[3 * i + 2])); return; }
+      const span = a.max - a.min, t = span > 0 ? Math.min(1, Math.max(0, (v[nc * i] - a.min) / span)) : 0;
+      if (a.ramp === "gray") { out[o] = out[o + 1] = out[o + 2] = t; return; }
+      const f = t * (HEAT.length - 1), k = Math.min(HEAT.length - 2, Math.floor(f)), u = f - k;
+      for (let c = 0; c < 3; c++) out[o + c] = HEAT[k][c] * (1 - u) + HEAT[k + 1][c] * u;
+    }
+    function recolour() {
+      const a = attrView;
+      if (!a || !raw) return;
+      if (a.domain === "point") {
+        const n = data.npoints, col = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) colourOf(a, i, col, 3 * i);
+        gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, col, gl.DYNAMIC_DRAW); data.hasCd = true; ptCol = col;
+      } else if (a.domain === "prim") {
+        const T = raw.tri, TP = raw.triPrim, nt = T.length / 3;
+        if (primCount !== nt * 3) {                                       // the unwelded positions, once per geometry
+          const pos = new Float32Array(nt * 9);
+          for (let t = 0; t < nt; t++) for (let c = 0; c < 3; c++) { const v = T[3 * t + c] * 3; pos.set([raw.P[v], raw.P[v + 1], raw.P[v + 2]], 9 * t + 3 * c); }
+          gl.bindBuffer(gl.ARRAY_BUFFER, primPos); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW); primCount = nt * 3;
+        }
+        const col = new Float32Array(nt * 9), tmp = [0, 0, 0];
+        for (let t = 0; t < nt; t++) { colourOf(a, TP[t], tmp, 0); for (let c = 0; c < 3; c++) col.set(tmp, 9 * t + 3 * c); }
+        gl.bindBuffer(gl.ARRAY_BUFFER, primCol); gl.bufferData(gl.ARRAY_BUFFER, col, gl.DYNAMIC_DRAW); primColArr = col;
+        if (!primTriIdx || primTriIdx.raw !== raw) {                         // which triangles each primitive owns, for touch-ups
+          let np = 0; for (let t = 0; t < nt; t++) if (TP[t] >= np) np = TP[t] + 1;
+          const start = new Int32Array(np + 1), items = new Int32Array(nt);
+          for (let t = 0; t < nt; t++) start[TP[t] + 1]++;
+          for (let f = 0; f < np; f++) start[f + 1] += start[f];
+          const fill = start.slice(0, np);
+          for (let t = 0; t < nt; t++) items[fill[TP[t]]++] = t;
+          primTriIdx = { raw, start, items, np };
+        }
+      } else if (a.domain === "edge") {
+        const E = raw.edge, P = raw.P, m = [];                            // the edges that are in the group (one colour: the overlay has no per-edge colour)
+        for (let k = 0; k < E.length / 2; k++) if (k < a.values.length / a.comps && a.values[a.comps * k] !== 0) m.push(k);
+        const verts = new Float32Array(m.length * 32), idx = new Uint32Array(m.length * 6);
+        m.forEach((k, e) => {
+          const A = E[2 * k] * 3, B = E[2 * k + 1] * 3;
+          [[0, -1], [0, 1], [1, 1], [1, -1]].forEach(([t, side], j) => verts.set([P[A], P[A + 1], P[A + 2], P[B], P[B + 1], P[B + 2], t, side], (e * 4 + j) * 8));
+          idx.set([e * 4, e * 4 + 1, e * 4 + 2, e * 4, e * 4 + 2, e * 4 + 3], e * 6);
+        });
+        gl.bindBuffer(gl.ARRAY_BUFFER, aedBuf); gl.bufferData(gl.ARRAY_BUFFER, verts, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, aedIdx); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.DYNAMIC_DRAW);
+        aedCount = idx.length;
+      }
+      schedule();
+    }
+    function recolourTouched(ids) {                                       // after a dab: only the elements it changed, not the whole buffer
+      const a = attrView;
+      if (!a || !raw) return;
+      if (a.domain === "point" && ptCol && ptCol.length === data.npoints * 3) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+        for (const i of ids) { colourOf(a, i, ptCol, 3 * i); gl.bufferSubData(gl.ARRAY_BUFFER, i * 12, ptCol, 3 * i, 3); }
+      } else if (a.domain === "prim" && primColArr && primTriIdx && primTriIdx.raw === raw && primCount === data.ntris * 3) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, primCol);
+        const tmp = [0, 0, 0];
+        for (const f of ids) {
+          if (f >= primTriIdx.np) continue;
+          colourOf(a, f, tmp, 0);
+          for (let j = primTriIdx.start[f]; j < primTriIdx.start[f + 1]; j++) {
+            const t = primTriIdx.items[j];
+            for (let c = 0; c < 3; c++) primColArr.set(tmp, 9 * t + 3 * c);
+            gl.bufferSubData(gl.ARRAY_BUFFER, t * 36, primColArr, 9 * t, 9);
+          }
+        }
+      } else { recolour(); return; }
+      schedule();
+    }
+    function setAttrView(v) {
+      const was = attrView;
+      attrView = v || null;
+      if (was && was.domain === "point" && !attrView) {                    // back to the geometry's own colours
+        if (cd0) { gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, cd0, gl.STATIC_DRAW); }
+        data.hasCd = !!cd0;
+      }
+      if (was && was.domain === "edge" && !(attrView && attrView.domain === "edge")) aedCount = 0;
+      if (attrView) recolour(); else schedule();
+    }
     function upload(head, arrays) {
       gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, arrays.P, gl.STATIC_DRAW);
-      data.hasCd = !!arrays.Cd;
+      data.hasCd = !!arrays.Cd; cd0 = arrays.Cd || null; attrView = null; primCount = 0; aedCount = 0;
       if (arrays.Cd) { gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, arrays.Cd, gl.STATIC_DRAW); }
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arrays.tri, gl.STATIC_DRAW);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, edgeBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arrays.edge, gl.STATIC_DRAW);
@@ -509,9 +601,12 @@ window.MiniHouPreview = (() => {
         if (data.hasCd) gl.enableVertexAttribArray(1); else { gl.disableVertexAttribArray(1); gl.vertexAttrib3f(1, 1, 1, 1); }
       };
       if (opt.shaded && data.ntris) {
+        const primView = attrView && attrView.domain === "prim" && primCount === data.ntris * 3;
+        if (primView) { gl.bindVertexArray(primVao); data.hasCd = true; }
         setup(mesh, [0.62, 0.68, 0.76], true);
         gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1, 1);
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triBuf); gl.drawElements(gl.TRIANGLES, data.ntris * 3, gl.UNSIGNED_INT, 0);
+        if (primView) { gl.drawArrays(gl.TRIANGLES, 0, primCount); data.hasCd = !!cd0; gl.bindVertexArray(vao); }
+        else { gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triBuf); gl.drawElements(gl.TRIANGLES, data.ntris * 3, gl.UNSIGNED_INT, 0); }
         gl.disable(gl.POLYGON_OFFSET_FILL);
       }
       if ((opt.edges || sel.mode === "edge") && data.nedges) {
@@ -532,6 +627,15 @@ window.MiniHouPreview = (() => {
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,templateEdge);gl.drawElements(gl.LINES,templateRaw.edge.length,gl.UNSIGNED_INT,0);
         if(!templateRaw.edge.length)gl.drawArrays(gl.POINTS,0,templateRaw.P.length/3);
         gl.bindVertexArray(vao);
+      }
+      if (aedCount) {
+        gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        gl.useProgram(edgeProg.p); gl.bindVertexArray(aedVao);
+        gl.uniformMatrix4fv(edgeProg.u.uMV, false, cam.MV); gl.uniformMatrix4fv(edgeProg.u.uP, false, cam.P);
+        gl.uniform2f(edgeProg.u.uViewport, canvas.clientWidth, canvas.clientHeight); gl.uniform1f(edgeProg.u.uWidth, 3.2);
+        gl.uniform1f(edgeProg.u.uBias, 0.0015); gl.uniform4f(edgeProg.u.uColor, 0.95, 0.25, 0.75, 1);
+        gl.drawElements(gl.TRIANGLES, aedCount, gl.UNSIGNED_INT, 0);
+        gl.disable(gl.BLEND); gl.bindVertexArray(vao);
       }
       drawSelection(cam);
       if (opt.normals) { gl.bindVertexArray(null); drawNormals(cam); }
@@ -1021,6 +1125,16 @@ window.MiniHouPreview = (() => {
       geometry:()=>raw, quadStrip,
       project: p=>toScreen(camera(),...p),
       isDragging:()=>!!handleDrag||endingDrag,
+      selectElements(domain, ids, how) {                                                // the spreadsheet's row click: select these elements (points, primitives or edge numbers)
+        if (!raw) return false;
+        const mode = domain === "point" ? "point" : domain === "edge" ? "edge" : "face";
+        if (sel.mode !== mode) api.setMode(mode);
+        const found = domain === "point" ? { points: ids } : domain === "prim" ? { faces: ids } : { edges: ids.filter((k) => 2 * k + 1 < raw.edge.length).map((k) => [raw.edge[2 * k], raw.edge[2 * k + 1]]) };
+        change(found, how || "replace");
+        return true;
+      },
+      camera: () => camera(), rayAt: (sx, sy) => rayAt(camera(), sx, sy), setAttrView, attrDirty: recolour, attrTouch: recolourTouched, attrViewInfo: () => attrView,
+      edgeCount: () => data.nedges,
       view, opt, onSelect: null, onHandle: null, onHandleStart: null,
       setHandles(list) { if (handleDrag) pendingHandles = list || []; else { handles = list || []; schedule(); } },
       handleTips() {                                                                    // for tests: where each handle's grab point is, in canvas pixels

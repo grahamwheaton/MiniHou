@@ -752,6 +752,33 @@ class MeshWriterTests(unittest.TestCase):
         np.testing.assert_array_equal(read("pf", "value", 2), [5, 7])
         self.assertEqual(t["warnings"], [])
 
+    def test_painted_attributes_arrive_in_blender_with_the_right_types_and_domains(self):
+        from minihou import Evaluator, Graph, paint
+        from minihou.link.diff import DiffState
+        g = Graph.from_dict({"nodes": {
+            "g": {"type": "grid", "params": {"columns": 3, "rows": 3}},
+            "a": {"type": "attrib_paint", "inputs": {"geo": "g"}, "params": {"attribute": "layer", "domain": "point", "kind": "int",
+                                                                              "data": paint.merge("", 1, [2, 5], [[3], [7]])}},
+            "b": {"type": "attrib_paint", "inputs": {"geo": "a"}, "params": {"attribute": "wear", "domain": "prim", "kind": "float",
+                                                                              "data": paint.merge("", 1, [1], [[0.25]])}},
+            "c": {"type": "attrib_paint", "inputs": {"geo": "b"}, "params": {"attribute": "tint", "domain": "point", "kind": "vec3",
+                                                                              "data": paint.merge("", 3, [0], [[1, 0.5, 0]])}}}, "display": "c"})
+        geo = Evaluator().cook(g)
+        self.apply(geo, DiffState())
+        m = self.mesh
+        self.assertEqual((m.attributes["layer"].data_type, m.attributes["layer"].domain), ("INT", "POINT"))
+        self.assertEqual((m.attributes["wear"].data_type, m.attributes["wear"].domain), ("FLOAT", "FACE"))
+        self.assertEqual(m.attributes["tint"].data_type, "FLOAT_VECTOR")
+        layer = np.empty(9, np.int32)
+        m.attributes["layer"].data.foreach_get("value", layer)
+        self.assertEqual(layer.tolist(), [0, 0, 3, 0, 0, 7, 0, 0, 0])
+        wear = np.empty(4, np.float32)
+        m.attributes["wear"].data.foreach_get("value", wear)
+        self.assertEqual(wear.tolist(), [0, 0.25, 0, 0])
+        tint = np.empty(27, np.float32)
+        m.attributes["tint"].data.foreach_get("vector", tint)
+        self.assertEqual(tint[:3].tolist(), [1, 0.5, 0])
+
     def native_geo(self, cd_domain="point", uv_domain="point", with_n=True):
         from minihou import Geometry
         P = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0], [2, 0, 0], [2, 1, 0]], np.float32)

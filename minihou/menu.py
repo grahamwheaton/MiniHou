@@ -31,7 +31,7 @@ GROUPS: List[Tuple[str, str, List[str]]] = [
      ["group_create", "group_expand", "group_promote", "group_range", "blast", "delete"]),
     ("Attributes", "Create, change and measure data on points, faces and corners",
      ["wrangle", "attribute_create", "attribute_transfer", "attribute_promote", "attribute_randomize", "attribute_blur", "set_material",
-      "attribute_rename", "attribute_delete", "measure", "normal", "color", "connectivity", "sort", "ray", "python"]),
+      "attrib_paint", "attribute_rename", "attribute_delete", "measure", "normal", "color", "connectivity", "sort", "ray", "python"]),
     ("UV", "Texture coordinates", ["uv_project", "uv_flatten"]),
     ("Curves", "Curves and what to build from them",
      ["resample", "carve", "convert_line", "fillet", "polypath", "sweep"]),
@@ -112,6 +112,7 @@ ALIASES: Dict[str, str] = {
     "null": "named output pass through", "input": "system port", "output": "result display", "box": "cube", "sphere": "ball",
     "grid": "plane floor", "tube": "cylinder cone", "torus": "donut ring", "circle": "disc", "line": "segment",
     "curve": "polyline path", "bezier": "curve spline tangent handles control points path", "helix": "spiral coil", "lsystem": "plant tree fractal", "blender_object": "read import mesh curve curves hair point cloud", "blender_image": "texture picture bitmap pixels height map mask read import", "image_file": "png texture picture bitmap pixels height map mask load file", "image_out": "texture picture bitmap pixels bake export write png",
+    "attrib_paint": "paint attribute weight mask vertex colour color assign brush edit values spreadsheet",
     "usd_import": "usd usda usdc usdz open load file scene pixar omniverse houdini",
     "usd_export": "usd usda usdc save write export file scene pixar omniverse houdini rop",
     "modifier_input": "host geometry",
@@ -123,7 +124,7 @@ _TITLES = {"polyextrude": "PolyExtrude", "polybevel": "PolyBevel", "polysplit": 
            "lsystem": "L-System", "rbd_configure": "RBD Configure", "rbd_solver": "RBD Solver",
            "rbd_material_fracture": "RBD Material Fracture", "rbd_constraint": "RBD Constraint", "rbd_constraint_properties": "RBD Constraint Properties",
            "loop_block": "Repeat (Loop Block)", "for_each": "For Each", "points_to_surface": "Points to Surface",
-           "copy_to_points": "Copy to Points", "blender_object": "Blender Object", "blender_image": "Blender Image", "image_file": "Image File", "image_out": "Image Out", "usd_import": "USD Import", "usd_export": "USD Export", "scene_objects": "Scene Objects", "modifier_input": "Modifier Input"}
+           "copy_to_points": "Copy to Points", "blender_object": "Blender Object", "blender_image": "Blender Image", "image_file": "Image File", "image_out": "Image Out", "attrib_paint": "Attribute Paint", "usd_import": "USD Import", "usd_export": "USD Export", "scene_objects": "Scene Objects", "modifier_input": "Modifier Input"}
 
 _ORDER: Dict[str, Tuple[int, int]] = {}
 for _gi, (_g, _doc, _names) in enumerate(GROUPS):
