@@ -159,6 +159,32 @@ def attr_arrays(geo, spec: dict, head: dict, arrays: Dict[str, np.ndarray]) -> N
         info["min"], info["max"] = [0.0] * nc, [0.0] * nc
 
 
+def mask_arrays(geo, spec: dict, head: dict, arrays: Dict[str, np.ndarray]) -> None:
+    """Add a group's membership to a preview (``spec``: ``{"name", "domain": point|prim|edge}``) so the paint tool can limit a brush to it: the
+    array ``mask`` (uint32, 1 = member, one per element in point order / primitive order / derived edge order) and the header's ``mask``
+    (name, domain, count, members; ``missing`` when there is no such group). A point group asked for on primitives (or the other way round)
+    is converted like every group field does. Like :func:`attr_arrays`, only for a view that is not reduced."""
+    from . import edges, groups
+    name, dom = str(spec.get("name") or ""), str(spec.get("domain") or "point")
+    info = {"name": name, "domain": dom}
+    head["mask"] = info
+    if head["proxy"]["active"]:
+        info["reduced"] = True
+        return
+    if dom == "edge":
+        a = edges.values(geo, edges.PREFIX + name) if edges.PREFIX + name in geo.vertex else None
+        m = None if a is None else np.asarray(a).reshape(len(a), -1)[:, 0] != 0
+    elif dom in ("point", "prim"):
+        m = groups.member(geo, dom, name) if name else None
+    else:
+        raise ValueError("domain must be point, prim or edge")
+    if m is None:
+        info["missing"] = True
+        return
+    arrays["mask"] = np.ascontiguousarray(m, np.uint32)
+    info.update(count=int(len(m)), members=int(np.count_nonzero(m)))
+
+
 def pack(head: dict, arrays: Dict[str, np.ndarray]) -> bytes:
     """Serialise header fields and arrays in the wire format above."""
     table, blobs, offset = [], [], 0

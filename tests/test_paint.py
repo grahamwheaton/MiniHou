@@ -215,6 +215,32 @@ class Views(unittest.TestCase):
         preview.attr_arrays(geo, {"name": "w", "domain": "point"}, h4, dict(a4))
         self.assertTrue(h4["attr"].get("reduced"))
 
+    def test_preview_mask_arrays_are_group_membership_in_the_viewers_numbering(self):
+        from minihou import preview
+        g = Graph.from_dict({"nodes": {"g": {"type": "grid", "params": {"columns": 4, "rows": 3}},
+                                       "grp": {"type": "group_create", "inputs": {"geo": "g"},
+                                               "params": {"name": "left", "domain": "points", "method": "pattern", "pattern": "0-2 4-6"}}},
+                             "display": "grp"})
+        geo = Evaluator().cook(g)
+        head, arrays = preview.arrays_for(geo, full=True)
+        arrays = dict(arrays)
+        preview.mask_arrays(geo, {"name": "left", "domain": "point"}, head, arrays)
+        self.assertEqual(arrays["mask"].nonzero()[0].tolist(), [0, 1, 2, 4, 5, 6])
+        self.assertEqual((head["mask"]["count"], head["mask"]["members"]), (12, 6))
+        h2, a2 = preview.arrays_for(geo, full=True)
+        a2 = dict(a2)
+        preview.mask_arrays(geo, {"name": "left", "domain": "prim"}, h2, a2)                     # a point group on primitives: faces whose points are all in it
+        self.assertTrue(set(a2["mask"].nonzero()[0].tolist()) <= {0, 1, 3, 4})
+        self.assertGreater(h2["mask"]["members"], 0)
+        h3, a3 = preview.arrays_for(geo, full=True)
+        preview.mask_arrays(geo, {"name": "nope", "domain": "point"}, h3, dict(a3))
+        self.assertTrue(h3["mask"]["missing"])
+        h4, a4 = preview.arrays_for(geo, full=False, tris=4)
+        preview.mask_arrays(geo, {"name": "left", "domain": "point"}, h4, dict(a4))
+        self.assertTrue(h4["mask"].get("reduced"))
+        with self.assertRaises(ValueError):
+            preview.mask_arrays(geo, {"name": "left", "domain": "wire"}, *preview.arrays_for(geo, full=True))
+
     def test_http_spreadsheet_and_preview_attr(self):
         import http.client
         import json

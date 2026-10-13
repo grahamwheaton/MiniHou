@@ -657,3 +657,7 @@ path.hit.cut-mark {stroke:#ff6464;stroke-opacity:1;stroke-width:4px;}
 .pv-sheet .sh-edit { width: 100%; padding: 0 2px; font: inherit; background: var(--bg); border: 1px solid var(--accent); }
 .pv-sheet .sh-msg { padding: 6px 10px; }
 .pv-sheet .sh-msg.hidden { display: none; }
+.pv-attr-card .pa-maskbox { display: flex; gap: 3px; min-width: 0; }
+.pv-attr-card .pa-maskbox select { width: 82px; flex: none; }
+.pv-attr-card .pa-symaxes { display: flex; gap: 10px; }
+.pv-attr-card .pa-symlabel { display: inline-flex; gap: 3px; align-items: center; }

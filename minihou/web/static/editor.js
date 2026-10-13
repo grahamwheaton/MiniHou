@@ -1109,6 +1109,19 @@
         return (r.columns || []).filter((c) => !c.computed && !(domain === "edge" && c.name === "faces")).map((c) => c.name).filter((n) => n !== "P");
       } catch (e) { return []; }
     },
+    groupNames: async (domain) => {                                           // groups of the viewed geometry (point or primitive groups both work on either), or edge groups
+      const node = pvNode;
+      if (!node) return [];
+      try {
+        if (domain === "edge") return await paintHost.attributeNames("edge");
+        const out = new Set();
+        for (const d of ["point", "prim"]) {
+          const r = await api("/api/spreadsheet", { node, domain: d, start: 0, count: 0 });
+          for (const c of r.columns || []) if (c.name.startsWith("group_")) out.add(c.name.slice(6));
+        }
+        return [...out].sort();
+      } catch (e) { return []; }
+    },
     fetchBase: async (node, spec) => {                                       // the attribute as the paint node's input has it (what Erase goes back to)
       const info = nodeOf(node), src = info && info.type === "attrib_paint" ? ((info.inputs || {}).geo) : node;
       if (!src || !nodeOf(src)) return { values: null, comps: 1 };
@@ -1225,13 +1238,13 @@
     const node = previewTarget(), documentId = S.documentId;
     $("#pv-node").textContent = node ? "· " + node : "";
     if (!node) { pv.clear(); pvMsg(""); pvKey = null; return; }
-    const full = wantFull(), attr = paintTool ? paintTool.wantAttr() : null;
-    const key = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}:${full}:${attr ? attr.name + "/" + attr.domain : ""}`;
+    const full = wantFull(), attr = paintTool ? paintTool.wantAttr() : null, mask = paintTool ? paintTool.wantMask() : null;
+    const key = `${documentId}:${node}:${S.rev}:${S.status ? S.status.cooked_rev : ""}:${full}:${attr ? attr.name + "/" + attr.domain : ""}:${mask ? mask.name + "/" + mask.domain : ""}`;
     if (key === pvKey) return;
     pvKey = key;
     let buf;
     try {
-      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full, templates:true, attr: attr || undefined }) });
+      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full, templates:true, attr: attr || undefined, mask: mask || undefined }) });
       buf = await r.arrayBuffer();
     } catch (e) { pvKey = null; return; }
     // A completed frame of the same node is useful even if a newer edit arrived.

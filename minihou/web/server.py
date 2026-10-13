@@ -14,7 +14,7 @@ live in the other and in Blender.
 ``POST /api/edit``     ``{ops: [...], wait?: bool}`` -> ``{rev, results, changed, status?}`` (see :mod:`minihou.edit`)
 ``POST /api/undo``     also ``/api/redo``
 ``POST /api/inspect``  ``{node, detail?}`` -> geometry summary of any node
-``POST /api/preview``  ``{node, full?, tris?, attr?}`` -> positions, triangles and edges of any node for the 3-D view (binary, see
+``POST /api/preview``  ``{node, full?, tris?, attr?, mask?}`` -> positions, triangles and edges of any node for the 3-D view (binary, see
                        :mod:`minihou.preview`; a big one is reduced to the display budget unless ``full``, or to ``tris`` triangles),
                        or JSON ``{ok: false, error}``
 ``POST /api/export_usd`` ``{path, node?, overwrite?, graph?}`` write the cooked geometry (always at full size, whatever the proxy level)
@@ -623,10 +623,13 @@ class _Handler(BaseHTTPRequestHandler):
             from .. import preview
             head, arrays = preview.arrays_for(r["geo"], full=bool(body.get("full")), tris=_budget(body.get("tris")))
             head.update(node=node, rev=r["rev"], handles=r.get("handles", []), cook_level=s.view_level())
-            if isinstance(body.get("attr"), dict):
+            if isinstance(body.get("attr"), dict) or isinstance(body.get("mask"), dict):
                 arrays = dict(arrays)                                # the memoised arrays are shared: never add to them
                 try:
-                    preview.attr_arrays(r["geo"], body["attr"], head, arrays)
+                    if isinstance(body.get("attr"), dict):
+                        preview.attr_arrays(r["geo"], body["attr"], head, arrays)
+                    if isinstance(body.get("mask"), dict):
+                        preview.mask_arrays(r["geo"], body["mask"], head, arrays)
                 except ValueError as e:
                     raise ApiError(400, str(e)) from None
             head.update(selectable_templates=r.get("selectable", []), template_warnings=r.get("template_warnings", []))

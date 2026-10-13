@@ -11,7 +11,8 @@
 window.MiniPaint = (pv, canvas, host) => {
   const KEY = "minihou.paint";
   const DEFAULTS = { attr: "paint", domain: "point", kind: "float", value: 1, vec: [1, 0, 0], radius: 40, strength: 1, falloff: "smooth", mode: "set",
-    min: 0, max: 1, ramp: "heat", visible: true, show: true, tab: "paint" };
+    min: 0, max: 1, ramp: "heat", visible: true, show: true, tab: "paint",
+    mask: "none", maskGroup: "", maskInvert: false, symX: false, symY: false, symZ: false, symAbout: "origin" };
   const st = Object.assign({}, DEFAULTS);
   try { Object.assign(st, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) { /* no storage */ }
   st.on = false;                                                   // paint mode is never restored on its own
@@ -33,9 +34,14 @@ window.MiniPaint = (pv, canvas, host) => {
   function defaultValue() { return comps() === 3 ? st.vec.slice() : [st.domain === "edge" ? 0 : 0]; }
   const displayOn = () => st.on || (st.show && !!panel && !panel.classList.contains("hidden"));       // never colour geometry while the panel is closed
   function wantAttr() { return displayOn() ? { name: st.attr, domain: st.domain } : null; }
+  const panelOpen = () => !!panel && !panel.classList.contains("hidden");
+  function wantMask() { return st.mask === "group" && st.maskGroup && panelOpen() ? { name: st.maskGroup, domain: st.domain } : null; }
 
+  let maskArr = null, maskHead = null;                             // the masking group's membership as the viewer numbers the elements (from the preview)
   function onPreview(head, arrays, node) {
     ctx = null;
+    maskArr = null; maskHead = head.mask || null;
+    if (head.mask && arrays.mask && !head.mask.missing && !head.mask.reduced && head.mask.name === st.maskGroup && head.mask.domain === st.domain) maskArr = arrays.mask;
     if (!displayOn()) { pv.setAttrView(null); return; }
     if (!head.proxy || head.proxy.active) { pv.setAttrView(null); return; }          // a reduced view's elements are not the real ones
     const n = elementCount(head), nc = comps(), vals = new Float32Array(n * nc);
@@ -165,25 +171,41 @@ window.MiniPaint = (pv, canvas, host) => {
   // ---------------------------------------------------------------- one dab
   const falloffOf = (t) => (st.falloff === "constant" ? (t < 1 ? 1 : 0) : st.falloff === "linear" ? Math.max(0, 1 - t) : (1 - Math.min(1, t) ** 2) ** 2);
   let stroke = null;
+  function mirrorCentres(p) {                                      // the brush position and its reflections across the enabled planes
+    const axes = [st.symX, st.symY, st.symZ], on = [0, 1, 2].filter((a) => axes[a]);
+    const out = [{ p, primary: true }];
+    if (!on.length) return out;
+    const b = ctx.head.bounds, about = [0, 1, 2].map((a) => (st.symAbout === "bounds" && b ? (b[0][a] + b[1][a]) / 2 : 0));
+    for (let m = 1; m < 1 << on.length; m++) {
+      const q = p.slice();
+      on.forEach((a, k) => { if (m & (1 << k)) q[a] = 2 * about[a] - q[a]; });
+      out.push({ p: q, primary: false });
+    }
+    return out;
+  }
   function dab(sx, sy, mode) {
     const hit = surfaceAt(sx, sy);
     if (!hit) return;
     const cam = ras.cam, r = (st.radius * 2 * hit.depth) / (cam.P[5] * cam.h);          // the brush radius in world units at the surface
-    const nc = comps(), vals = ctx.vals, picks = [];
-    query(stroke.grid, hit.p, r, (i, d) => {
-      if (st.visible) {                                                                     // not through the surface: its depth at that pixel must be about the element's
-        const q = stroke.proj ? stroke.proj(i) : null;
-        if (q && q[2] > 0) {
-          const x = Math.floor(q[0] * ras.S), y = Math.floor(q[1] * ras.S);
-          if (x >= 0 && y >= 0 && x < ras.W && y < ras.H && q[2] > ras.depth[y * ras.W + x] + 0.03 * q[2] + r * 0.35) return;
-        }
-      }
-      picks.push(i, falloffOf(d / r) * st.strength);
-    });
+    const nc = comps(), vals = ctx.vals, picks = [], allow = stroke.allow, seen = stroke.seen, wbuf = stroke.wbuf, no = ++stroke.dabNo, order = [];
+    for (const c of mirrorCentres(hit.p)) {
+      query(stroke.grid, c.p, r, (i, d) => {
+        if (c.primary && st.visible) {                                                      // not through the surface: its depth at that pixel must be about the element's
+          const q = stroke.proj ? stroke.proj(i) : null;
+          if (q && q[2] > 0) {
+            const x = Math.floor(q[0] * ras.S), y = Math.floor(q[1] * ras.S);
+            if (x >= 0 && y >= 0 && x < ras.W && y < ras.H && q[2] > ras.depth[y * ras.W + x] + 0.03 * q[2] + r * 0.35) return;
+          }
+        }                                                                                   // a mirrored brush sits on the far side: there is no surface of ours to test it against
+        const w = falloffOf(d / r) * st.strength;
+        if (seen[i] !== no) { seen[i] = no; wbuf[i] = w; order.push(i); } else if (w > wbuf[i]) wbuf[i] = w;   // an element in reach of two brushes takes the stronger, not both
+      });
+    }
+    for (const i of order) picks.push(i, wbuf[i]);
     if (!picks.length) return;
     const target = comps() === 3 ? st.vec : [st.value];
     let avg = null;
-    if (mode === "smooth") {                                                                // the weighted mean of what is there now
+    if (mode === "smooth") {                                                                // the weighted mean of what is there now (masked-out neighbours still count)
       avg = new Float64Array(nc); let wsum = 0;
       for (let j = 0; j < picks.length; j += 2) { const i = picks[j], w = picks[j + 1]; wsum += w; for (let c = 0; c < nc; c++) avg[c] += vals[i * nc + c] * w; }
       if (wsum <= 0) return;
@@ -192,7 +214,7 @@ window.MiniPaint = (pv, canvas, host) => {
     const gain = mode === "add" || mode === "subtract" || mode === "multiply" ? 0.25 : 1;      // dabs overlap about four deep, so these build up at roughly Strength per pass
     for (let j = 0; j < picks.length; j += 2) {
       const i = picks[j], w = picks[j + 1] * gain;
-      if (w <= 0) continue;
+      if (w <= 0 || (allow && !allow[i])) continue;
       for (let c = 0; c < nc; c++) {
         const cur = vals[i * nc + c], t = target[c];
         let v;
@@ -210,6 +232,42 @@ window.MiniPaint = (pv, canvas, host) => {
   }
   const baseValue = (i, c) => (ctx.base ? ctx.base[i * comps() + c] : defaultNodeValue()[c]);
 
+  // ---------------------------------------------------------------- the mask: which elements a brush (or Assign) may change
+  function selectedForMask() {                                     // the viewport selection as elements of the painted domain (faces and edges stand for the points they use)
+    const raw = pv.geometry();
+    let ids = host.selectionFor(st.domain);
+    if (ids || !raw) return ids;
+    if (st.domain === "point") {
+      const faces = host.selectionFor("prim"), edges = host.selectionFor("edge");
+      if (faces) { const f = new Set(faces), out = new Set(); for (let t = 0; t < raw.triPrim.length; t++) if (f.has(raw.triPrim[t])) for (let c = 0; c < 3; c++) out.add(raw.tri[3 * t + c]); return [...out]; }
+      if (edges) { const out = new Set(); for (const k of edges) { out.add(raw.edge[2 * k]); out.add(raw.edge[2 * k + 1]); } return [...out]; }
+    }
+    return null;
+  }
+  let maskSnap = null;                                             // {domain, ids}: the selection taken as the mask (entering paint mode clears the viewport selection, this stays)
+  function snapshotMask(quiet) {
+    const ids = selectedForMask();
+    if (!ids || !ids.length) { if (!quiet) host.toast("Select some " + (st.domain === "point" ? "points or faces" : st.domain === "prim" ? "faces" : "edges") + " first (1, 2, 3), then set the mask."); return false; }
+    maskSnap = { domain: st.domain, ids: ids.slice() };
+    refreshInfo();
+    return true;
+  }
+  function buildAllow() {                                          // {allow: Uint8Array|null, why}: null allow = everything
+    if (st.mask === "none" || !ctx) return { allow: null, why: "" };
+    const n = ctx.n, allow = new Uint8Array(n), inv = st.maskInvert;
+    if (st.mask === "group") {
+      if (!st.maskGroup) return { allow: null, why: "Mask is set to a group: name the group." };
+      if (!maskArr || maskArr.length !== n) return { allow: null, why: maskHead && maskHead.missing ? `There is no group "${st.maskGroup}" on this geometry.` : `The mask group "${st.maskGroup}" has not loaded yet.` };
+      for (let i = 0; i < n; i++) allow[i] = (maskArr[i] !== 0) !== inv ? 1 : 0;
+    } else {
+      const ids = maskSnap && maskSnap.domain === st.domain ? maskSnap.ids : selectedForMask();
+      if (!ids || !ids.length) return { allow: null, why: "The mask is the selection, but there is none: select " + (st.domain === "point" ? "points or faces" : st.domain === "prim" ? "faces" : "edges") + ", then press Set from selection." };
+      if (inv) allow.fill(1);
+      for (const i of ids) if (i < n) allow[i] = inv ? 0 : 1;
+    }
+    return { allow, why: "" };
+  }
+
   // ---------------------------------------------------------------- the stroke: pointer events
   const modeFor = (e) => (e.shiftKey ? "erase" : e.ctrlKey || e.metaKey ? "smooth" : st.mode);
   function blocked() {
@@ -223,10 +281,12 @@ window.MiniPaint = (pv, canvas, host) => {
     if (why) { host.toast(why); return; }
     const raw = pv.geometry(), r = canvas.getBoundingClientRect();
     const t0 = performance.now();
+    const masked = buildAllow();
+    if (masked.why) { host.toast(masked.why); return; }
     raster();
     const pos = elementPositions(raw, ctx.head), g = buildGrid(pos), cam = pv.camera();
     api.stats.beginMs = Math.round(performance.now() - t0);
-    stroke = { grid: g, touched: new Set(), fresh: new Set(), dirty: false, last: null, mode: modeFor(e), proj: (i) => {
+    stroke = { grid: g, touched: new Set(), fresh: new Set(), dirty: false, last: null, mode: modeFor(e), allow: masked.allow, seen: new Int32Array(ctx.n), wbuf: new Float32Array(ctx.n), dabNo: 0, proj: (i) => {
       const x = pos[3 * i], y = pos[3 * i + 1], z = pos[3 * i + 2], m = cam.MV, pr = cam.P;
       const vx = m[0] * x + m[4] * y + m[8] * z + m[12], vy = m[1] * x + m[5] * y + m[9] * z + m[13], vz = m[2] * x + m[6] * y + m[10] * z + m[14];
       if (vz > -cam.near) return null;
@@ -325,6 +385,15 @@ window.MiniPaint = (pv, canvas, host) => {
   }
   async function assignAll() {
     const nc = comps(), val = nc === 3 ? st.vec.slice() : (kindOf() === "int" ? Math.round(st.value) : st.value);
+    if (st.mask !== "none") {                                      // with a mask, "all" is the masked elements
+      if (!ctx) { host.toast("Assigning through a mask needs the real geometry in the view."); return; }
+      const m = buildAllow();
+      if (m.why) { host.toast(m.why); return; }
+      const ids = []; for (let i = 0; i < ctx.n; i++) if (m.allow[i]) ids.push(i);
+      if (!ids.length) { host.toast("The mask holds no elements."); return; }
+      await assignSelection(ids);
+      return;
+    }
     await writeOps(specNow(), [{ clear: true, default: val }]);
   }
   async function clearPainted() { await writeOps(specNow(), [{ clear: true }]); }
@@ -342,7 +411,7 @@ window.MiniPaint = (pv, canvas, host) => {
     const attrInput = el("input", { type: "text", list: "paint-attr-names", class: "pa-attr", "aria-label": "Attribute name" });
     attrInput.value = st.attr;
     attrInput.onchange = () => { if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(attrInput.value) && attrInput.value !== "P") { st.attr = attrInput.value; save(); host.refresh(); } else { attrInput.value = st.attr; host.toast("An attribute name is letters, digits and _, and not P."); } };
-    const domainSel = select(() => st.domain, (v) => { st.domain = v; if (v === "edge") st.kind = "int"; kindSel.value = kindOf(); kindSel.disabled = v === "edge"; syncValueRows(); host.refresh(); },
+    const domainSel = select(() => st.domain, (v) => { st.domain = v; if (v === "edge") st.kind = "int"; kindSel.value = kindOf(); kindSel.disabled = v === "edge"; syncValueRows(); host.refresh(); host.groupNames(v).then(fillGroups); },
       [["point", "Points"], ["prim", "Faces / primitives"], ["edge", "Edges (edge group)"]], { class: "pa-domain", "aria-label": "Domain" });
     const kindSel = select(() => kindOf(), (v) => { st.kind = v; syncValueRows(); host.refresh(); }, [["float", "float"], ["int", "int"], ["vec3", "vector / colour"]], { class: "pa-kind", "aria-label": "Type" });
     kindSel.disabled = st.domain === "edge";
@@ -373,10 +442,29 @@ window.MiniPaint = (pv, canvas, host) => {
       st.min = lo; st.max = hi > lo ? hi : lo + 1; rmin.value = st.min; rmax.value = st.max; save(); applyView();
     } }, "Fit");
     const ramp = select(() => st.ramp, (v) => { st.ramp = v; applyView(); }, [["heat", "Heat"], ["gray", "Gray"]], { class: "pa-ramp", "aria-label": "Colour ramp" });
+    const maskSel = select(() => st.mask, (v) => { st.mask = v; if (v === "selection") snapshotMask(true); syncMask(); host.refresh(); }, [["none", "None"], ["selection", "Selection"], ["group", "Group"]], { class: "pa-mask", "aria-label": "Mask" });
+    const groupInput = el("input", { type: "text", list: "paint-group-names", class: "pa-maskgroup", "aria-label": "Mask group", placeholder: "group name" });
+    groupInput.value = st.maskGroup;
+    groupInput.onchange = () => { st.maskGroup = groupInput.value.trim(); save(); host.refresh(); };
+    const groupList = el("datalist", { id: "paint-group-names" });
+    const invert = el("input", { type: "checkbox", class: "pa-maskinvert" }); invert.checked = st.maskInvert; invert.onchange = () => { st.maskInvert = invert.checked; save(); refreshInfo(); };
+    const snap = el("button", { type: "button", class: "pa-masksnap", title: "Use the points, edges or faces selected now as the mask (it is kept when paint mode clears the selection)", onclick: () => snapshotMask(false) }, "Set from selection");
+    const maskRow = el("label", { class: "pa-row" }, "Mask", el("span", { class: "pa-maskbox" }, maskSel, groupInput, snap));
+    const invertRow = el("label", { class: "pa-row pa-check pa-maskoptions" }, invert, "Invert (paint outside the mask)");
+    const syncMask = () => {
+      groupInput.classList.toggle("hidden", st.mask !== "group"); snap.classList.toggle("hidden", st.mask !== "selection"); invertRow.classList.toggle("hidden", st.mask === "none");
+      const all = panel && panel.querySelector(".pa-assign-all"); if (all) all.textContent = st.mask === "none" ? "Assign to all" : "Assign to mask";
+      save(); refreshInfo();
+    };
+    const symBox = (key, label) => { const c = el("input", { type: "checkbox", class: "pa-sym pa-sym" + label.toLowerCase(), "aria-label": "Mirror " + label }); c.checked = st[key]; c.onchange = () => { st[key] = c.checked; save(); }; return el("label", { class: "pa-symlabel" }, c, label); };
+    const about = select(() => st.symAbout, (v) => (st.symAbout = v), [["origin", "World origin"], ["bounds", "Centre of the geometry"]], { class: "pa-symabout", "aria-label": "Mirror about" });
+    const symRow = el("div", { class: "pa-row pa-symrow" }, "Mirror", el("span", { class: "pa-symaxes" }, symBox("symX", "X"), symBox("symY", "Y"), symBox("symZ", "Z")));
+    const aboutRow = el("label", { class: "pa-row" }, "About", about);
     info = el("div", { class: "pa-info muted" });
     const paintTab = el("div", { class: "pa-tab pa-paint" },
       el("label", { class: "pa-row" }, "Mode", mode), el("label", { class: "pa-row" }, "Radius", radius), el("label", { class: "pa-row" }, "Strength", strength),
       el("label", { class: "pa-row" }, "Falloff", falloff), el("label", { class: "pa-row pa-check" }, visible, "Visible surface only"),
+      symRow, aboutRow,
       el("div", { class: "pa-hint muted" }, "Shift: erase · Ctrl: smooth · [ ]: radius · Esc: leave paint"));
     const assignTab = el("div", { class: "pa-tab pa-assign hidden" },
       el("div", { class: "pa-selinfo muted" }),
@@ -390,10 +478,11 @@ window.MiniPaint = (pv, canvas, host) => {
       el("span", { class: "spacer" }), el("button", { type: "button", class: "pa-close", title: "Close", "aria-label": "Close", onclick: () => api.close() }, "×"));
     const p = el("div", { class: "pv-attr-card hidden", id: "attr-card", role: "group", "aria-label": "Attribute paint and assign" }, tabs,
       el("label", { class: "pa-row" }, "Attribute", attrInput), attrList, el("label", { class: "pa-row" }, "Domain", domainSel), el("label", { class: "pa-row" }, "Type", kindSel),
-      scalarRow, vecRow, paintTab, assignTab,
+      scalarRow, vecRow, maskRow, groupList, invertRow, paintTab, assignTab,
       el("details", { class: "pa-display" }, el("summary", null, "Display"), el("label", { class: "pa-row pa-check" }, show, "Show the attribute as colour"),
         el("label", { class: "pa-row" }, "Range", el("span", { class: "pa-range" }, rmin, rmax, fit)), el("label", { class: "pa-row" }, "Ramp", ramp)), info);
     syncValueRows();
+    p.groupList = groupList; p.syncMask = syncMask;
     p.addEventListener("keydown", (e) => e.stopPropagation());              // typing in a field is not a viewer shortcut
     canvas.parentElement.append(p);
     p.attrList = attrList;
@@ -421,8 +510,12 @@ window.MiniPaint = (pv, canvas, host) => {
     const sel = panel.querySelector(".pa-selinfo"), ids = host.selectionFor(st.domain);
     if (sel) sel.textContent = ids ? `${ids.length} selected ${st.domain === "point" ? "point(s)" : st.domain === "prim" ? "face(s)" : "edge(s)"}` : "Nothing selected for this domain";
     const why = blocked();
-    info.textContent = ctx ? (ctx.existing ? `"${st.attr}" on ${ctx.n.toLocaleString()} ${st.domain === "prim" ? "faces" : st.domain === "edge" ? "edges" : "points"}` : `"${st.attr}" does not exist yet: it starts at ${defaultNodeValue().join(", ")}`) + (why ? " · " + why : "") : (host.reducedMessage() || "");
+    let mtxt = "";
+    if (st.mask === "group" && maskHead && !maskHead.reduced) mtxt = maskHead.missing ? ` · no group "${st.maskGroup}"` : maskArr ? ` · mask: ${(st.maskInvert ? maskHead.count - maskHead.members : maskHead.members).toLocaleString()} of ${maskHead.count.toLocaleString()}` : "";
+    else if (st.mask === "selection") { const ids = maskSnap && maskSnap.domain === st.domain ? maskSnap.ids : selectedForMask(); mtxt = ` · mask: ${ids ? ids.length.toLocaleString() : 0} selected`; }
+    info.textContent = ctx ? (ctx.existing ? `"${st.attr}" on ${ctx.n.toLocaleString()} ${st.domain === "prim" ? "faces" : st.domain === "edge" ? "edges" : "points"}` : `"${st.attr}" does not exist yet: it starts at ${defaultNodeValue().join(", ")}`) + (why ? " · " + why : "") + mtxt : (host.reducedMessage() || "");
   }
+  function fillGroups(names) { if (panel) panel.groupList.replaceChildren(...names.map((n) => el("option", { value: n }))); }
   function fillNames(names) {
     if (!panel) return;
     panel.attrList.replaceChildren(...names.map((n) => el("option", { value: n })));
@@ -459,7 +552,7 @@ window.MiniPaint = (pv, canvas, host) => {
   window.addEventListener("keydown", keydown, true);
 
   const api = {
-    state: st, wantAttr, onPreview, stats: { beginMs: 0, strokeMs: 0 },
+    state: st, wantAttr, wantMask, onPreview, stats: { beginMs: 0, strokeMs: 0 },
     active: () => active,
     open(tab) {
       if (!panel) { panel = buildPanel(); cursor = el("div", { class: "pv-brush hidden" }); canvas.parentElement.append(cursor); }
@@ -467,6 +560,8 @@ window.MiniPaint = (pv, canvas, host) => {
       setTab(tab || st.tab);
       host.refresh();
       host.attributeNames(st.domain).then(fillNames);
+      host.groupNames(st.domain).then(fillGroups);
+      panel.syncMask();
     },
     close() { api.setPaint(false); if (panel) panel.classList.add("hidden"); host.refresh(); },
     isOpen: () => !!panel && !panel.classList.contains("hidden"),
@@ -475,6 +570,7 @@ window.MiniPaint = (pv, canvas, host) => {
       if (on) {
         const why = host.paintBlocked();
         if (why) { host.toast(why); return false; }
+        if (st.mask === "selection" && !maskSnap) snapshotMask(true);              // paint mode clears the viewport selection: keep it as the mask first
         if (!panel || panel.classList.contains("hidden")) api.open("paint");
       }
       if (on === active) return active;
@@ -487,7 +583,7 @@ window.MiniPaint = (pv, canvas, host) => {
       return active;
     },
     toggle() { return api.setPaint(!active); },
-    refreshInfo, fillNames, applyView, blocked,
+    refreshInfo, fillNames, fillGroups, applyView, blocked, allowed: () => buildAllow(),
     assign: (spec, ids, value) => writeOps(spec, [{ indices: ids, value }]),                 // spreadsheet cells
     values: () => (ctx ? { vals: ctx.vals, n: ctx.n, node: ctx.node } : null),
     setBase: (b) => { if (ctx) ctx.base = b; },

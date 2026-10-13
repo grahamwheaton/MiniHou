@@ -42,6 +42,24 @@ Paint needs the real geometry, like selecting: with **Detail: Auto** the full de
 or Detail: Fast, refuses (the message says how big). It also refuses while the **cook Proxy** is below Full, because element numbers at a
 proxy level are not the real ones, and a keyboard shortcut or a selection mode (1-4) leaves paint mode.
 
+### Mask and mirror
+
+**Mask** (in the panel, for both tabs) limits what a brush or Assign may change:
+
+* *Group*: only members of a group of the viewed geometry. A point group masks faces whose points are all in it (and a face group masks
+  the points it uses), like every group field; for edges the mask is an edge group. The membership comes from the engine
+  (`POST /api/preview` takes `mask: {name, domain}` and returns the array `mask`), so it uses the viewer's numbering and needs the real geometry.
+  The group name box lists the groups the viewed geometry has.
+* *Selection*: the points, edges or faces selected in the view when you press **Set from selection** (selected faces or edges stand for
+  the points they use when painting points). Entering paint mode clears the viewport selection, so the mask keeps its own copy; set it first,
+  then paint.
+* *Invert* paints outside the mask. **Smooth** still averages over masked-out neighbours but only writes the masked ones; **Erase** respects the mask.
+* *Assign to all* becomes **Assign to mask** and writes the value into the masked elements only.
+
+**Mirror** (X / Y / Z, paint tab) reflects every dab across the enabled planes, about the world origin or the centre of the geometry's bounds.
+A mirrored dab does not look at the screen (its surface is usually on the far side), so *Visible surface only* applies to the dab under the
+cursor. An element in reach of two brushes takes the stronger weight rather than both. Quick Assign does not mirror.
+
 ## Quick Assign (the Assign button)
 
 Same panel, other tab. Pick the attribute, type and value, then **Assign to selection** (the viewport's selected points, edges or faces),

@@ -8,6 +8,8 @@ import tempfile
 import time
 import unittest
 
+import numpy as np
+
 from minihou import Graph
 from minihou.link.session import Session
 from minihou.web import WebServer
@@ -2708,6 +2710,119 @@ class EditorE2E(unittest.TestCase):
         cd = next(self.painted(i).point["Cd"] for i, n in self.s.graph.nodes.items() if n.type == "attrib_paint" and n.params["kind"] == "vec3")
         self.assertEqual(cd.shape, (64, 3))
         self.assertGreater(float(cd[:, 0].max()), 0.5)
+
+    def paint_scene(self, columns=10, rows=10, shift=0.0, group=None):
+        nodes = {"g": {"type": "grid", "params": {"columns": columns, "rows": rows}, "pos": [0, 0]}}
+        last = "g"
+        if shift:
+            nodes["t"] = {"type": "transform", "inputs": {"geo": last}, "params": {"translate": [shift, 0, 0]}, "pos": [0, 90]}
+            last = "t"
+        if group:
+            nodes["grp"] = {"type": "group_create", "inputs": {"geo": last}, "pos": [0, 180],
+                            "params": {"name": group[0], "domain": "points", "method": "pattern", "pattern": group[1]}}
+            last = "grp"
+        self.s.edit([{"op": "replace", "graph": {"nodes": nodes, "display": last}}])
+        self.page.wait_for_selector('.node[data-id="%s"]' % last)
+        self.page.wait_for_function("minihou.preview.points === %d" % (columns * rows))
+        self.page.click("#pv-max")
+        return last
+
+    def test_paint_mask_by_group_limits_the_brush_and_invert_flips_it(self):
+        self.paint_scene(10, 10, group=("half", "0-49"))
+        self.page.click("#pv-paint-btn")
+        self.page.wait_for_selector("#attr-card:not(.hidden)")
+        self.page.wait_for_function("minihou.paint.active() && minihou.paint.values() && minihou.paint.values().n === 100")
+        box = self.page.locator("#pv-canvas").bounding_box()
+        cx, cy = box["width"] / 2, box["height"] / 2
+        self.page.fill("#attr-card .pa-attr", "weight")
+        self.page.locator("#attr-card .pa-attr").press("Tab")
+        self.page.locator("#attr-card .pa-radius").evaluate("(e) => { e.value = 300; e.dispatchEvent(new Event('input')); }")
+        self.page.select_option("#attr-card .pa-mask", "group")
+        self.page.fill("#attr-card .pa-maskgroup", "half")
+        self.page.locator("#attr-card .pa-maskgroup").press("Tab")
+        self.page.wait_for_function("!minihou.paint.allowed().why")
+        self.assertIn("mask: 50 of 100", self.page.locator("#attr-card .pa-info").inner_text())
+        self.stroke([(cx - 100, cy), (cx + 100, cy)])
+        self.assertTrue(until(lambda: any(n.type == "attrib_paint" for n in self.s.graph.nodes.values())))
+        w = self.painted().point["weight"]
+        inside = set(np.flatnonzero(w > 0).tolist())
+        self.assertGreater(len(inside), 10)
+        self.assertTrue(inside <= set(range(50)), sorted(inside - set(range(50))))
+        self.page.locator("#attr-card .pa-maskinvert").check()
+        self.page.wait_for_function("minihou.paint.state.maskInvert")
+        self.stroke([(cx - 100, cy), (cx + 100, cy)])
+        self.assertTrue(until(lambda: len(np.flatnonzero(self.painted().point["weight"] > 0)) > len(inside)))
+        outside = set(np.flatnonzero(self.painted().point["weight"] > 0).tolist()) - inside
+        self.assertTrue(outside and min(outside) >= 50, sorted(outside))
+        self.page.fill("#attr-card .pa-maskgroup", "nothing_here")                                   # a group that does not exist: refuse, say so
+        self.page.locator("#attr-card .pa-maskgroup").press("Tab")
+        self.page.wait_for_function("minihou.paint.allowed().why.includes('no group')")
+        count = len(self.painted().point["weight"].nonzero()[0])
+        self.stroke([(cx - 100, cy + 20), (cx + 100, cy + 20)])
+        self.assertEqual(len(self.painted().point["weight"].nonzero()[0]), count)
+
+    def test_paint_mask_by_selection_survives_entering_paint_mode(self):
+        self.paint_scene(10, 10)
+        self.page.click("#pv-assign-btn")                                                            # the panel without paint mode keeps the selection
+        self.page.wait_for_selector("#attr-card:not(.hidden)")
+        self.page.evaluate("minihou.preview.selectElements('point', [0,1,2,3,4,10,11,12,13,14], 'replace')")
+        self.page.select_option("#attr-card .pa-mask", "selection")
+        self.page.click("#attr-card .pa-masksnap")
+        self.assertIn("mask: 10 selected", self.page.locator("#attr-card .pa-info").inner_text())
+        self.page.click('#attr-card .pa-tabbtn[data-tab="paint"]')
+        self.page.wait_for_function("minihou.paint.active() && minihou.paint.values() && minihou.paint.values().n === 100")
+        self.assertEqual(self.page.evaluate("minihou.preview.selection().points.length"), 0)          # paint mode cleared the selection; the mask kept it
+        box = self.page.locator("#pv-canvas").bounding_box()
+        cx, cy = box["width"] / 2, box["height"] / 2
+        self.page.locator("#attr-card .pa-radius").evaluate("(e) => { e.value = 300; e.dispatchEvent(new Event('input')); }")
+        self.stroke([(cx - 100, cy), (cx + 100, cy)])
+        self.assertTrue(until(lambda: any(n.type == "attrib_paint" for n in self.s.graph.nodes.values())))
+        painted = set(np.flatnonzero(self.painted().point["paint"] > 0).tolist())
+        self.assertTrue(painted and painted <= {0, 1, 2, 3, 4, 10, 11, 12, 13, 14}, sorted(painted))
+        self.page.click('#attr-card .pa-tabbtn[data-tab="assign"]')                                  # Assign to mask: the masked elements only
+        self.page.fill("#attr-card .pa-value", "7")
+        self.page.locator("#attr-card .pa-value").press("Tab")
+        self.assertEqual(self.page.locator("#attr-card .pa-assign-all").inner_text(), "Assign to mask")
+        self.page.click("#attr-card .pa-assign-all")
+        self.assertTrue(until(lambda: set(np.flatnonzero(self.painted().point["paint"] == 7).tolist()) == {0, 1, 2, 3, 4, 10, 11, 12, 13, 14}))
+
+    def mirrored_weights(self, shift, about):
+        self.paint_scene(10, 10, shift=shift)
+        self.page.click("#pv-paint-btn")
+        self.page.wait_for_selector("#attr-card:not(.hidden)")
+        self.page.wait_for_function("minihou.paint.active() && minihou.paint.values() && minihou.paint.values().n === 100")
+        box = self.page.locator("#pv-canvas").bounding_box()
+        cx, cy = box["width"] / 2, box["height"] / 2
+        self.page.locator("#attr-card .pa-radius").evaluate("(e) => { e.value = 28; e.dispatchEvent(new Event('input')); }")
+        self.stroke([(cx - 150, cy), (cx - 100, cy + 10)])                                          # off to one side, away from the middle
+        self.assertTrue(until(lambda: any(n.type == "attrib_paint" for n in self.s.graph.nodes.values())))
+        one_sided = self.painted().point["paint"].copy()
+        self.s.undo()
+        self.assertTrue(until(lambda: not any(n.type == "attrib_paint" for n in self.s.graph.nodes.values())))
+        self.page.wait_for_function("minihou.paint.values() && minihou.paint.values().node === 't' || minihou.paint.values().node === 'g'")
+        self.page.check("#attr-card .pa-symx")
+        self.page.select_option("#attr-card .pa-symabout", about)
+        self.stroke([(cx - 150, cy), (cx - 100, cy + 10)])
+        self.assertTrue(until(lambda: any(n.type == "attrib_paint" for n in self.s.graph.nodes.values())))
+        return one_sided, self.painted().point["paint"].copy(), self.painted().P.copy()
+
+    def test_mirror_paints_the_other_side_too(self):
+        one, both, P = self.mirrored_weights(0.0, "origin")
+        xs = P[:, 0]
+        self.assertTrue((xs[one > 0] < 0).all() or (xs[one > 0] > 0).all())                         # without it: one side only
+        self.assertGreater(int((both > 0).sum()), int((one > 0).sum()))
+        self.assertTrue((xs[both > 0] < -0.5).any() and (xs[both > 0] > 0.5).any())
+        for i in np.flatnonzero(both > 0):                                                           # every painted point has its mirror image painted the same
+            j = int(np.argmin(np.abs(P[:, 0] + P[i, 0]) + np.abs(P[:, 1] - P[i, 1])))
+            self.assertAlmostEqual(float(both[i]), float(both[j]), places=4)
+
+    def test_mirror_about_the_centre_of_the_geometry_follows_an_off_origin_object(self):
+        one, both, P = self.mirrored_weights(5.0, "bounds")
+        xs = P[:, 0]
+        self.assertGreater(int((both > 0).sum()), int((one > 0).sum()))
+        for i in np.flatnonzero(both > 0):                                                           # symmetric about x = 5, not about the world origin
+            j = int(np.argmin(np.abs(P[:, 0] - (10.0 - P[i, 0])) + np.abs(P[:, 1] - P[i, 1])))
+            self.assertAlmostEqual(float(both[i]), float(both[j]), places=4)
 
     def test_quick_assign_gives_the_selection_a_value_and_all_clears_to_a_default(self):
         self.grid_view(6, 5)
