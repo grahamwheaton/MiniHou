@@ -44,11 +44,11 @@ window.MiniInteraction = (() => {
       if(c.mode==='ALIGNED'||c.mode==='MIRRORED')c[other]=sub(c.p,mul(norm(d),c.mode==='MIRRORED'?length(d):length(sub(cs[index][other],c.p))));
     } return out;
   }
-  function transformControl(cs,index,part,tool,axis,amount,frame=identity()) {
+  function transformControl(cs,index,part,tool,axis,amount,frame=identity(),plane=false) {
     const c=cs[index],pivot=c.p;
     const transform=p=>{const v=sub(p,pivot);
       if(tool==='rotate'){const n=frame[axis??2],a=amount*Math.PI/180;return add(pivot,add(add(mul(v,Math.cos(a)),mul(cross(n,v),Math.sin(a))),mul(n,dot(n,v)*(1-Math.cos(a)))));}
-      return add(pivot,axis===null?mul(v,amount):add(v,mul(frame[axis],dot(v,frame[axis])*(amount-1))));
+      return add(pivot,axis===null?mul(v,amount):plane?add(v,mul(sub(v,mul(frame[axis],dot(v,frame[axis]))),amount-1)):add(v,mul(frame[axis],dot(v,frame[axis])*(amount-1))));
     };
     if(part!=='p')return moveControl(cs,index,part,transform(c[part]));
     const out=structuredClone(cs);out[index].left=transform(c.left);out[index].right=transform(c.right);
