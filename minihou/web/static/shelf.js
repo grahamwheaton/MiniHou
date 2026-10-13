@@ -46,6 +46,7 @@
       T("Attribute Promote", "attribute_promote", "attr"), T("Attribute Randomize", "attribute_randomize", "attr"),
       T("Attribute Blur", "attribute_blur", "attr"), T("Attribute Rename", "attribute_rename", "attr"),
       T("Attribute Delete", "attribute_delete", "attr"), T("Measure", "measure"), T("Connectivity", "connectivity"), T("Ray", "ray"),
+      T("Set Material", "set_material", "attr"),
       T("Python", "python", "code")]],
     ["Curves", "#7fd0a0", [
       T("Curve", "curve"), T("Line", "line"), T("Helix", "helix"), T("Resample", "resample"), T("Carve", "carve"),

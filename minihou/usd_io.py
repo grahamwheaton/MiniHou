@@ -15,6 +15,12 @@ usdview. ``pxr`` (``pip install usd-core``) is optional: nothing here imports it
   ``rot``, ``scale`` and the detail ``instance_objects``). Its prototypes are empty Xforms named after the objects, with
   ``minihou:blender_object``; the geometry stays in Blender.
 
+**Materials** are names (see :mod:`minihou.materials`). Each name a face uses becomes a ``Material`` under ``/MiniHou/Looks``
+(a small ``UsdPreviewSurface`` whose colour is the faces' ``Cd``, or grey) and the mesh is bound to it: directly when every face
+has the same one, otherwise through ``GeomSubset``s of the ``materialBind`` family. A name that was read from a file (the
+``usd_import`` node keeps where it came from) is *referenced* from that file instead, so its shading network and textures come
+through untouched. No shading is ever authored beyond that preview surface.
+
 Closed primitives with fewer than 3 corners and open ones with fewer than 2 cannot be drawn by USD; they are left out and counted
 in the Xform's ``customData`` (``minihou:dropped``).
 
@@ -44,6 +50,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from . import materials as M
 from .geometry import Geometry
 
 USD_EXTENSIONS = (".usd", ".usda", ".usdc")
@@ -64,6 +71,13 @@ def pxr():
     except ImportError as e:
         raise UsdUnavailable("USD support needs the 'usd-core' package: pip install usd-core") from e
     return Gf, Sdf, Tf, Usd, UsdGeom, Vt
+
+
+def shade():
+    """``pxr.UsdShade`` (materials and bindings)."""
+    pxr()
+    from pxr import UsdShade
+    return UsdShade
 
 
 def available() -> bool:
@@ -204,10 +218,107 @@ def _gather_table(table, idx: np.ndarray, exclude=()) -> Dict[str, np.ndarray]:
     return {n: np.ascontiguousarray(a[idx]) for n, a in table.items() if n not in exclude}
 
 
-def write_geometry(stage, path: str, geo: Geometry) -> dict:
-    """Write ``geo`` under the Xform ``path`` of ``stage``; returns the counts written."""
+def _material_color(geo: Geometry, name: str) -> Tuple[float, float, float]:
+    """The colour for a material's preview surface: the mean ``Cd`` of the faces that use it, else mid grey."""
+    lst = M.names(geo)
+    slots = [i for i, n in enumerate(lst) if n == name]
+    faces = np.flatnonzero(np.isin(M.indices(geo), slots))
+    cd = geo.prim.get("Cd")
+    if len(faces) and cd is not None and cd.ndim == 2 and cd.shape[1] >= 3:
+        c = np.asarray(cd, np.float64)[faces, :3].mean(0)
+    else:
+        cd = geo.point.get("Cd")
+        if len(faces) and cd is not None and cd.ndim == 2 and cd.shape[1] >= 3:
+            t = geo.topology
+            corners = np.concatenate([np.arange(t.prim_offsets[f], t.prim_offsets[f + 1]) for f in faces]) if len(faces) < 5000 else None
+            pts = np.unique(t.vertex_point[corners]) if corners is not None else np.arange(geo.npoints)
+            c = np.asarray(cd, np.float64)[pts, :3].mean(0)
+        else:
+            c = np.array([0.5, 0.5, 0.5])
+    c = np.clip(np.nan_to_num(c, nan=0.5), 0.0, 1.0)
+    return float(c[0]), float(c[1]), float(c[2])
+
+
+def _asset_path(source: str, anchor: Optional[str]) -> str:
+    """How the exported file refers to ``source``: relative to its own folder when it can be, else absolute."""
+    if anchor:
+        try:
+            return os.path.relpath(source, anchor).replace(os.sep, "/")
+        except ValueError:                                              # another drive on Windows
+            pass
+    return os.path.abspath(source).replace(os.sep, "/")
+
+
+def write_looks(stage, parent: str, geos: List[Geometry], anchor: Optional[str] = None) -> Dict[str, str]:
+    """A ``Material`` for every name the geometries' faces use, under the Scope ``parent``. Returns name -> prim path.
+    Names read from a USD file (``detail['usd_materials']``) are referenced from it; the others get a preview surface."""
+    Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
+    UsdShade = shade()
+    wanted: Dict[str, Geometry] = {}
+    for g in geos:
+        for name in M.used(g):
+            wanted.setdefault(name, g)
+    if not wanted:
+        return {}
+    UsdGeom.Scope.Define(stage, parent)
+    taken: set = set()
+    out: Dict[str, str] = {}
+    for name, g in wanted.items():
+        path = f"{parent}/{_unique_name(valid_name(name), taken, 'mat')}"
+        src = (g.detail.get("usd_materials") or {}).get(name) if isinstance(g.detail.get("usd_materials"), dict) else None
+        if isinstance(src, dict) and src.get("file") and src.get("prim") and os.path.isfile(str(src["file"])):
+            prim = stage.DefinePrim(path, "Material")
+            prim.GetReferences().AddReference(_asset_path(str(src["file"]), anchor), Sdf.Path(str(src["prim"])))
+        else:
+            mat = UsdShade.Material.Define(stage, path)
+            shader = UsdShade.Shader.Define(stage, f"{path}/PreviewSurface")
+            shader.CreateIdAttr("UsdPreviewSurface")
+            shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*_material_color(g, name)))
+            shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.5)
+            mat.CreateSurfaceOutput().ConnectToSource(shader.ConnectableAPI(), "surface")
+            prim = mat.GetPrim()
+        prim.SetCustomDataByKey("minihou:material", name)
+        out[name] = path
+    return out
+
+
+def _write_material_bindings(mesh, geo: Geometry, mesh_prims: np.ndarray, looks: Dict[str, str]) -> List[str]:
+    """Bind the mesh's faces to their materials: the whole mesh when one name covers every face, else ``materialBind`` subsets."""
+    Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
+    UsdShade = shade()
+    lst = M.names(geo)
+    idx = M.indices(geo)[mesh_prims]
+    faces: Dict[str, np.ndarray] = {}
+    for slot in np.unique(idx):
+        name = lst[slot] if 0 <= slot < len(lst) else ""
+        if not name or name not in looks:
+            continue
+        sel = np.flatnonzero(idx == slot)
+        faces[name] = np.union1d(faces[name], sel) if name in faces else sel
+    if not faces:
+        return []
+    stage = mesh.GetPrim().GetStage()
+    api = UsdShade.MaterialBindingAPI.Apply(mesh.GetPrim())
+    if len(faces) == 1 and len(next(iter(faces.values()))) == len(mesh_prims):
+        name = next(iter(faces))
+        api.Bind(UsdShade.Material(stage.GetPrimAtPath(looks[name])))
+        return [name]
+    used: set = set()
+    for name, sel in faces.items():
+        sub = UsdGeom.Subset.CreateGeomSubset(mesh, _unique_name("mat_" + valid_name(name), used, "sub"), "face",
+                                              Vt.IntArray.FromNumpy(sel.astype(np.int32)), "materialBind", UsdGeom.Tokens.nonOverlapping)
+        UsdShade.MaterialBindingAPI.Apply(sub.GetPrim()).Bind(UsdShade.Material(stage.GetPrimAtPath(looks[name])))
+    api.SetMaterialBindSubsetsFamilyType(UsdGeom.Tokens.nonOverlapping)
+    return list(faces)
+
+
+def write_geometry(stage, path: str, geo: Geometry, looks: Optional[Dict[str, str]] = None, anchor: Optional[str] = None) -> dict:
+    """Write ``geo`` under the Xform ``path`` of ``stage``; returns the counts written. ``looks`` (name -> Material prim path, from
+    :func:`write_looks`) binds faces to materials; when it is not given the geometry's own are made under ``<path>/Looks``."""
     Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
     xf = UsdGeom.Xform.Define(stage, path)
+    if looks is None:
+        looks = write_looks(stage, f"{path}/Looks", [geo], anchor)
     t = geo.topology
     n = geo.npoints
     P = np.ascontiguousarray(geo.P, np.float32)
@@ -256,6 +367,9 @@ def write_geometry(stage, path: str, geo: Geometry) -> dict:
                                  (_gather_table(geo.vertex, cv), "faceVarying", "vertex"),
                                  (_gather_table(geo.prim, mesh_prims), "uniform", "prim")])
         _write_group_subsets(mesh, geo, mesh_prims, pts)
+        bound = _write_material_bindings(mesh, geo, mesh_prims, looks)
+        if bound:
+            out["materials"] = bound
         out["faces"] = int(len(mesh_prims))
     # -- curves -------------------------------------------------------------------------------------------------------
     if len(curve_prims):
@@ -439,10 +553,13 @@ def write_stage(path, outputs: Dict[str, Geometry], graph: Optional[dict] = None
         stage.SetDefaultPrim(root.GetPrim())
         report = WriteReport(path)
         used: set = set()
+        anchor = os.path.dirname(os.path.abspath(path))
+        looks = write_looks(stage, f"/{ROOT}/Looks", list(outputs.values()), anchor)      # shared by every output
+        used.add("Looks")
         for name, geo in outputs.items():
             base = valid_name(name)
             nm = _unique_name(base, used, "out")
-            report.outputs[name] = dict(write_geometry(stage, f"/{ROOT}/{nm}", geo), prim=f"/{ROOT}/{nm}")
+            report.outputs[name] = dict(write_geometry(stage, f"/{ROOT}/{nm}", geo, looks), prim=f"/{ROOT}/{nm}")
         layer = stage.GetRootLayer()
         data = {"minihou": {"format": 1, "outputs": json.dumps(list(outputs))}}      # no lists: the text format cannot hold them
         if graph is not None:
@@ -473,6 +590,8 @@ class Part:
     prim_attrs: Dict[str, np.ndarray] = field(default_factory=dict)
     prim_index: Optional[np.ndarray] = None
     group: Optional[str] = None                      # the MiniHou output Xform it was exported under (None: a foreign prim)
+    materials: List[str] = field(default_factory=list)        # names for this part's material_index (read from bindings; foreign prims)
+    material_sources: Dict[str, dict] = field(default_factory=dict)     # where those materials live: {"file", "prim"}
 
 
 def _output_of(prim) -> Optional[str]:
@@ -679,6 +798,7 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
                 rep.notes.append(f"{prim.GetPath()}: primvar {dropped!r} has a size that fits no domain; skipped")
         if kind == "mesh":
             _add_subset_groups(UsdGeom.Mesh(prim), part, tm)
+            _read_material_bindings(prim, part, tm, os.path.abspath(path), rep)
         if kind == "instancer":
             _read_instancer(stage, instancer, tm, part, M @ _pad(M_up), unit, inst_names, rep, str(prim.GetPath()))
         # world space
@@ -700,13 +820,25 @@ def read_geometry(path, prim_path: str = "", time: Optional[float] = None, up_ax
     groups: Dict[Optional[str], List[Part]] = {}
     for part in parts:
         groups.setdefault(part.group, []).append(part)
-    geos = [assemble(ps) for ps in groups.values()]
+    geos = []
+    for key, ps in groups.items():
+        g = assemble(ps)
+        d = _output_detail(stage, key) if key else {}                              # each MiniHou output has its own name list
+        if isinstance(d.get("materials"), list) and d["materials"]:
+            g = g.copy()
+            g.detail["materials"] = [str(n) for n in d["materials"]]
+            if isinstance(d.get("usd_materials"), dict):
+                g.detail["usd_materials"] = d["usd_materials"]
+            g.freeze()
+        geos.append(g)
     if len(geos) > 1:
         from .nodes.merge import merge
         geo = merge(geos).freeze()
     else:
         geo = geos[0] if geos else assemble([])
     detail = _read_detail(stage)
+    for k in ("materials", "usd_materials"):                 # handled per output above
+        detail.pop(k, None)
     if inst_names:
         geo.detail.setdefault("instance_objects", list(inst_names))
     if detail:
@@ -774,11 +906,23 @@ def _read_detail(stage) -> dict:
     return out
 
 
+def _output_detail(stage, path: str) -> dict:
+    """The detail attributes stored on one MiniHou output Xform."""
+    prim = stage.GetPrimAtPath(path)
+    raw = prim.GetCustomDataByKey("minihou:detail") if prim and prim.IsValid() else None
+    try:
+        return json.loads(raw) if raw else {}
+    except ValueError:
+        return {}
+
+
 def _add_subset_groups(mesh, part: Part, tm) -> None:
     """Face / point ``GeomSubset``s as groups, when the file has no ``group_*`` primvar of that name already."""
     Gf, Sdf, Tf, Usd, UsdGeom, Vt = pxr()
     nq, npnt = len(part.sizes), len(part.P)
     for sub in UsdGeom.Subset.GetAllGeomSubsets(mesh):
+        if sub.GetFamilyNameAttr().Get() == "materialBind":              # material bindings, not groups (see _read_material_bindings)
+            continue
         ind = sub.GetIndicesAttr().Get(tm)
         if ind is None:
             continue
@@ -800,6 +944,76 @@ def _add_subset_groups(mesh, part: Part, tm) -> None:
             a = np.zeros(npnt, np.int32)
             a[ind[(ind >= 0) & (ind < npnt)]] = 1
             part.point_attrs[name] = a
+
+
+def _preview_color(mat) -> Optional[Tuple[float, float, float]]:
+    """The base colour a material would show: ``diffuseColor`` (UsdPreviewSurface) or ``base_color`` (MaterialX standard surface),
+    when it is a plain value on the surface shader. A texture or a network behind it gives nothing."""
+    UsdShade = shade()
+    try:
+        shader = mat.ComputeSurfaceSource()[0]
+    except Exception:  # noqa: BLE001 - odd material networks must not stop a read
+        return None
+    if not shader:
+        return None
+    for name in ("diffuseColor", "base_color"):
+        inp = shader.GetInput(name)
+        if inp:
+            v = inp.Get()
+            if v is not None and len(v) >= 3:
+                return float(v[0]), float(v[1]), float(v[2])
+    return None
+
+
+def _read_material_bindings(prim, part: Part, tm, file: str, rep: "ReadReport") -> None:
+    """Material bindings of a foreign mesh (direct, inherited from a parent, or per ``materialBind`` subset) as names and a
+    ``material_index``. MiniHou files keep their own ``material_index`` primvar and name list, which win. Where the mesh has
+    no colour of its own, the faces take their material's base colour as ``Cd``."""
+    UsdShade = shade()
+    nq = len(part.sizes)
+    if not nq or "material_index" in part.prim_attrs:
+        return
+    api = UsdShade.MaterialBindingAPI(prim)
+    names: List[str] = [""]
+    where: Dict[str, str] = {}                                         # prim path -> name
+    colors: List[Optional[Tuple[float, float, float]]] = [None]
+    sources: Dict[str, dict] = {}
+
+    def slot(mat) -> int:
+        path = str(mat.GetPath())
+        if path in where:
+            return names.index(where[path])
+        name = mat.GetPrim().GetName()
+        base, k = name, 2
+        while name in names:
+            name, k = f"{base}_{k}", k + 1
+        where[path] = name
+        names.append(name)
+        colors.append(_preview_color(mat))
+        sources[name] = {"file": file, "prim": path}
+        return len(names) - 1
+
+    index = np.zeros(nq, np.int32)
+    base_mat = api.ComputeBoundMaterial()[0]
+    if base_mat:
+        index[:] = slot(base_mat)
+    for sub in api.GetMaterialBindSubsets():
+        ind = sub.GetIndicesAttr().Get(tm)
+        mat = UsdShade.MaterialBindingAPI(sub.GetPrim()).ComputeBoundMaterial()[0]
+        if ind is None or not mat:
+            continue
+        ind = np.asarray(ind, np.int64)
+        index[ind[(ind >= 0) & (ind < nq)]] = slot(mat)
+    if len(names) == 1:
+        return
+    part.prim_attrs["material_index"] = index
+    part.materials = names
+    part.material_sources = sources
+    has_color = any("Cd" in t for t in (part.point_attrs, part.corner_attrs, part.prim_attrs))
+    if not has_color and any(c is not None for c in colors):
+        table = np.array([c if c is not None else (0.8, 0.8, 0.8) for c in colors], np.float32)
+        part.prim_attrs["Cd"] = table[index]
+        rep.notes.append(f"{prim.GetPath()}: faces coloured from their materials ({len(names) - 1} material(s))")
 
 
 def _reverse_winding(part: Part) -> Part:
@@ -887,6 +1101,14 @@ def assemble(parts: List[Part]) -> Geometry:
     sizes_all = np.concatenate(sizes) if sizes else np.zeros(0, np.int64)
     closed_all = np.concatenate(closed) if closed else np.zeros(0, bool)
     ca = _union([p.corner_attrs for p in parts], ncorner)
+    mat_names: List[str] = []
+    mat_sources: Dict[str, dict] = {}
+    if any(p.materials for p in parts):                    # bindings read from a foreign file: one name list for all parts
+        have = [p for p in parts if p.materials]
+        mat_names, remapped = M.combine([p.materials for p in have], [p.prim_attrs["material_index"] for p in have], first_empty=True)
+        for p, idx in zip(have, remapped):
+            p.prim_attrs["material_index"] = idx
+            mat_sources.update(p.material_sources)
     qa = _union([p.prim_attrs for p in parts], nprim)
     if all(p.prim_index is not None for p in parts if len(p.sizes)) and sum(nprim):
         order = np.argsort(np.concatenate([p.prim_index for p in parts if len(p.sizes)]), kind="stable")
@@ -905,6 +1127,9 @@ def assemble(parts: List[Part]) -> Geometry:
         geo.vertex[k] = v
     for k, v in qa.items():
         geo.prim[k] = v
+    if mat_names:
+        geo.detail["materials"] = mat_names
+        geo.detail["usd_materials"] = mat_sources
     geo.validate()
     return geo.freeze()
 

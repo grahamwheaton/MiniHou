@@ -62,7 +62,8 @@ Working on the objects only makes sense if they stay put, so:
 
 ## Limits and not done
 
-* Pieces carry the attributes you list; they do not create material slots (the engine only knows indices). A piece's mesh is rewritten when its shape or attributes
+* Pieces carry the attributes you list, and get material slots by name when the geometry has material names (see
+  [MATERIALS.md](MATERIALS.md); `set_material` before the node). A piece's mesh is rewritten when its shape or attributes
   change, which discards edits you made to that piece's mesh in edit mode (modifiers, materials set on the object, and transforms stay).
 * Up to 2 million points across all pieces.
 * Linked duplicates share the source's data: per-object modifiers, yes; per-object edits to the mesh itself, no (make single user).

@@ -18,7 +18,7 @@ import mathutils
 import numpy as np
 
 from . import scene_plan as sp
-from .mesh_writer import NATIVE, assert_main_thread, set_corner_verts, set_positions, write_attribute, write_native
+from .mesh_writer import NATIVE, apply_material_names, assert_main_thread, set_corner_verts, set_positions, write_attribute, write_native
 
 SESSION = "session"
 _pending: Dict[Tuple[str, str], Tuple[dict, str]] = {}      # (owner, node) -> (manifest, parent object name)
@@ -294,6 +294,10 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "", arrays: Option
                         _log(f"scene_objects {node!r}: {w}")
                 obj.data[DIGEST] = digest
                 rewritten += 1
+            for w in apply_material_names(obj.data, manifest.get("materials")):      # slots by name; existing ones are kept
+                if w not in warned:
+                    warned.add(w)
+                    _log(f"scene_objects {node!r}: {w}")
     for ident in plan.hide:
         _hide(objs[ident])
     for name in plan.duplicates:

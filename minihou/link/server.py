@@ -267,6 +267,9 @@ def _decode_object(h: dict, arrays) -> Geometry:
         if dom not in ("point", "vertex", "prim") or not name:
             raise ProtocolError(f"bad attribute key {key!r}")
         geo.table(dom)[name] = a
+    mats = h.get("materials")                                  # slot names of the Blender object (see minihou.materials)
+    if isinstance(mats, list) and mats:
+        geo.detail["materials"] = [str(m)[:63] for m in mats[:4096]]
     geo.validate()
     return geo
 

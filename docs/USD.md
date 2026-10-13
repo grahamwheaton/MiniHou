@@ -77,5 +77,6 @@ The **USD Import** node (`usd_import`, in the Create group) reads any USD file:
   is not read); an instancer under a sheared transform loses the shear on the instance rotations.
 * One frame per file (no time samples written); `time` on import reads them.
 * Edge groups are kept as primvars only (USD has edge subsets in newer versions, but few tools read them).
-* Materials, cameras, lights and skeletons are not read or written.
+* Cameras, lights and skeletons are not read or written. Materials are carried by name and binding, and shading networks by
+  reference, not authored: see [MATERIALS.md](MATERIALS.md).
 * A disk cache of cooked results as USD layers (reopen a huge scene instantly) is a possible next step, not built.

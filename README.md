@@ -434,6 +434,7 @@ The same edit operations are available to scripts over HTTP (`POST /api/edit`, s
 | `examples/graphs/curves_vine.json` | helix -> resample -> noise -> blur -> width ramp -> sweep; a wireframe sphere |
 | `examples/graphs/lsystem_tree.json` | an L-system tree: branches swept by width, leaves copied onto the `J` points |
 | `examples/graphs/eroded_terrain.json` | fractal hills -> droplet + thermal erosion; wet basins (flow) get the second material |
+| `examples/graphs/materials.json` | a fractured box: the cut faces get the material `Concrete Cut`, the outside `Painted Wall` (Blender slots and USD bindings by name) |
 | `examples/graphs/volumes.json` | a box minus a sphere with a smooth fillet (sdf_boolean), metaball blobs (points_to_surface) |
 
 All examples are cooked by the test-suite, so they keep working as nodes evolve.
@@ -553,6 +554,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `solver` | geo | feed each frame's result into the next (simulations, growth): deterministic, incremental playback, substeps |
 | `python` | geo, opinput1..3 | real Python inside the graph: geometry and variables piped in, you set `out`; **off unless the engine runs with `--allow-python`** |
 | `wrangle` | geo | VEX-like snippet over points, primitives or vertices (see below) |
+| `set_material` | geo | give a group of faces a material **by name**; the names travel through merges and booleans into Blender's material slots and USD's material bindings ([docs/MATERIALS.md](docs/MATERIALS.md)) |
 | `attribute_delete` | geo | delete attributes by name or wildcard (`N uv tmp_*`) |
 | `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |
 | `normal` | geo | area-weighted point normals, face normals (Newell, n-gon safe), or vertex normals with a cusp angle (hard edges stay sharp; Blender gets custom normals) |
@@ -661,7 +663,7 @@ just work (and the Geometry Nodes proxy carries them):
 | `uv` (any domain, 2+ components) | UV map **UVMap** on face corners, active for render |
 | `Cd` (3 or 4 components; points, vertices or faces) | color attribute **Color** (points or corners), active for render; use it in a shader with a *Color Attribute* node |
 | `N` (points, vertices or faces) | custom normals (Blender 4.5+: the `custom_normal` attribute, 7 ms for 1M points) |
-| `material_index` (primitives, int) | each face's material slot |
+| `material_index` (primitives, int) | each face's material slot; with the detail list `materials` (names), the slots are filled by name, see [docs/MATERIALS.md](docs/MATERIALS.md) |
 | `sharp_face` (primitives) | flat shading for those faces (others smooth) |
 | anything else | a generic attribute of that name: POINT / CORNER / FACE, float, float2, vector, color (4 floats), int, bool; read it with an *Attribute* shader node or Named Attribute in Geometry Nodes |
 
@@ -830,7 +832,7 @@ MiniHou modifier (objects parented to the host object). Details and limits: [doc
 
 File menu > *Export USD...* (also `POST /api/export_usd`, MCP `export_usd`) writes the cooked geometry, always at full size, as meshes,
 curves and points with attributes as primvars and groups as GeomSubsets; the graph is stored inside the file. The **USD Import** node
-reads USD files from other tools (transforms, Y-up, indexed primvars, subsets) and a MiniHou export comes back exactly. Needs
+reads USD files from other tools (transforms, Y-up, indexed primvars, subsets) and a MiniHou export comes back exactly. Material names are written as bound `Material` prims and read back from other tools' bindings; their shading networks stay in the original file and are referenced, not rewritten ([docs/MATERIALS.md](docs/MATERIALS.md)). Needs
 `pip install usd-core`. Graphs themselves stay JSON. Details and limits: [docs/USD.md](docs/USD.md).
 
 ## Disk cache (reopen big scenes quickly)

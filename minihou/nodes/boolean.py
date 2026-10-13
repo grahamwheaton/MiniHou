@@ -4,6 +4,7 @@ import numpy as np
 
 from .. import boolean as BL
 from .. import groups, topo
+from ..materials import merge_sources, unify as unify_materials
 from ..outgroups import OutGroup, OutGroups
 from ..sdk import Enum, node
 from . import _build as B
@@ -91,6 +92,7 @@ def boolean(a, b, operation, **og):
     faces from each input are in groups ``from_a`` / ``from_b``. Inputs must be closed and consistently wound."""
     for g, nm in ((a, "A"), (b, "B")):
         B.require_polygons(g, f"boolean input {nm}")
+    a, b = unify_materials([a, b])                          # both inputs' material indices share one name list
     if a.nprims == 0 or b.nprims == 0:
         empty = {"union": a if b.nprims == 0 else b, "subtract": a, "intersect": None}[operation]
         return empty if empty is not None else B.make(np.zeros((0, 3), np.float32), [], [0])
@@ -175,6 +177,7 @@ def boolean(a, b, operation, **og):
     prim = _combine(parts_prim, [len(x) for x in parts_size])
     side = np.concatenate(part_side)
     out = B.make(point["P"], np.concatenate(parts_v), B.offsets_from_sizes(sizes_o), point, vert, prim, a.detail)
+    merge_sources([a, b], out)
     out = OUT.write(out, og, "from_a", side == 0)
     out = OUT.write(out, og, "from_b", side == 1)
     if OUT.any_enabled(og, "seam", "seampoints"):

@@ -105,6 +105,7 @@ class InstanceManager:
                 digest.update(key.encode())
                 digest.update(str((array.dtype.str, array.shape)).encode())
                 digest.update(array.tobytes())
+            digest.update(repr(geometry.detail.get("materials")).encode())    # same faces, other material names: another input
             token = digest.hexdigest()
             feeds = {nid: (token, geometry.freeze()) for nid, node in graph.nodes.items()
                      if node.type == "modifier_input"}

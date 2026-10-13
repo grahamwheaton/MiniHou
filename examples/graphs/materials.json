@@ -1,0 +1,85 @@
+{
+ "version": 1,
+ "display": "out",
+ "doc": "Materials by name. A box is fractured and the cut faces (group 'inside') get the material 'Concrete Cut'; the outside faces get 'Painted Wall'. In Blender the output object's slots are filled with materials of those names (empty ones are made if the file has none); exported to USD they become bound Material prims.",
+ "nodes": {
+  "b": {
+   "type": "box",
+   "params": {
+    "size": [
+     2,
+     2,
+     2
+    ]
+   },
+   "pos": [
+    0,
+    0
+   ]
+  },
+  "pts": {
+   "type": "voronoi_fracture_points",
+   "inputs": {
+    "geo": "b"
+   },
+   "params": {
+    "count": 9,
+    "seed": 3
+   },
+   "pos": [
+    0,
+    110
+   ]
+  },
+  "f": {
+   "type": "voronoi_fracture",
+   "inputs": {
+    "geo": "b",
+    "points": "pts"
+   },
+   "params": {},
+   "pos": [
+    0,
+    220
+   ]
+  },
+  "cut": {
+   "type": "set_material",
+   "inputs": {
+    "geo": "f"
+   },
+   "params": {
+    "group": "inside",
+    "material": "Concrete Cut"
+   },
+   "pos": [
+    0,
+    330
+   ]
+  },
+  "skin": {
+   "type": "set_material",
+   "inputs": {
+    "geo": "cut"
+   },
+   "params": {
+    "group": "^inside",
+    "material": "Painted Wall"
+   },
+   "pos": [
+    0,
+    440
+   ]
+  },
+  "out": {
+   "type": "output",
+   "inputs": {
+    "geo": "skin"
+   },
+   "pos": [
+    0,
+    550
+   ]
+  }
+ }
+}

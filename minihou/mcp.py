@@ -53,8 +53,9 @@ points_to_surface, sdf_boolean), instancing of Blender objects (instance), PCG p
 point booleans pcg_difference/intersection/union, pcg_self_prune, density noise/filter, pcg_spawner), for_each (a
 system per piece), time (@Frame, solver; set_frame to check).
 To work on something the user made in Blender, start from a blender_object node
-(the object's name; its UV map, color attribute, vertex groups and material indices arrive as attributes, and it recooks live
-when they edit it); inspect_node on it shows what was read. Z is up; units are Blender metres. The user is
+(the object's name; its UV map, color attribute, vertex groups and material indices arrive as attributes, its material slot
+names as the detail list 'materials', and it recooks live when they edit it); inspect_node on it shows what was read.
+Give faces a material with set_material (a group and a name): Blender gets the slots by name, USD gets bound materials. Z is up; units are Blender metres. The user is
 watching the editor and Blender live and can undo your edits, so prefer small verified steps over huge batches."""
 
 OPS_DOC = """\

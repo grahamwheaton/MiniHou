@@ -12,6 +12,7 @@ the same objects instead of making new ones. See :func:`build_manifest` for the 
 """
 import numpy as np
 
+from .. import materials
 from ..geometry import Geometry, rows
 from ..sdk import Enum, Int, Str, node
 
@@ -58,7 +59,8 @@ def plan_pieces(geo: Geometry, piece_attrib: str, max_objects: int, attributes: 
     (counts per piece). Arrays: ``P`` float32 (points of all pieces, relative to their centres), ``vp`` int32 (corner -> point,
     local to the piece) and ``sizes`` int32 (corners per face), all pieces one after the other. Each wanted attribute that exists
     adds an array ``point:<name>`` (rows like ``P``), ``vertex:<name>`` (rows like ``vp``) or ``prim:<name>`` (rows like ``sizes``),
-    and the column ``attributes`` lists their keys."""
+    and the column ``attributes`` lists their keys. The column ``materials`` (when the geometry has material names) is the name
+    list for ``material_index``."""
     t = geo.topology
     offs = t.prim_offsets.astype(np.int64)
     sizes = np.diff(offs)
@@ -111,6 +113,9 @@ def plan_pieces(geo: Geometry, piece_attrib: str, max_objects: int, attributes: 
                 carried.append(f"{domain}:{name}")
     cols = {"sources": [], "id": uniq.tolist(), "loc": np.round(centre, 6).tolist(), "npts": npts.tolist(),
             "ncorner": ncorner.tolist(), "nprim": nprim.tolist(), "attributes": carried}
+    names = materials.names(geo)
+    if names:
+        cols["materials"] = names                         # slot i of every piece gets material names[i] (see minihou.materials)
     return cols, arrays
 
 

@@ -561,7 +561,8 @@ def pump(host=None, port=None, *, force=False, _only=None):
                     header, output = client.cook(ident, graph_path(mod), values, arrays,
                                                   frame=scene.frame_current + scene.frame_subframe,
                                                   fps=scene.render.fps / scene.render.fps_base,
-                                                  graph=json.loads(ng[GRAPH]))
+                                                  graph=json.loads(ng[GRAPH]),
+                                                  materials=[m.name if m is not None else "" for m in materials])
                     scene_arrays = {k: v for k, v in output.items() if k.startswith("scene:")}     # pieces' meshes, by node
                     output = {k: v for k, v in output.items() if not k.startswith("scene:")}
                     update = GeoUpdate.from_message(header, output)
