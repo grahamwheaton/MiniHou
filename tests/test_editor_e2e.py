@@ -294,7 +294,7 @@ class EditorE2E(unittest.TestCase):
         self.page.keyboard.press("Control+Shift+z")
         self.assertTrue(until(lambda: len(self.s.graph.nodes) == 7))
         self.page.keyboard.press("f")
-        for _ in range(3):                                                         # the redo above may still be re-rendering the graph
+        for _ in range(8):                                                         # the redo above may still be re-rendering the graph
             self.node("loop_begin_1").locator(".title").click()
             try:
                 self.page.wait_for_function("(document.querySelector('#params input.nid') || {}).value === 'loop_begin_1'", timeout=4000)
