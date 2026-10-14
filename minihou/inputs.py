@@ -74,7 +74,11 @@ class ObjectInputs:
     # -- Blender collections -------------------------------------------------------------------------
     def put_collection(self, name: str, objects, error: str = "") -> None:
         with self._lock:
-            self._collections[name] = CollectionData([str(o) for o in objects], error)
+            members = [str(o) for o in objects]
+            old = self._collections.get(name)
+            if old is not None and old.objects == members and old.error == error:
+                return                                      # unchanged (the add-on resends after every watch change): keep the token, no recook
+            self._collections[name] = CollectionData(members, error)
 
     def get_collection(self, name: str) -> Optional["CollectionData"]:
         if not _READ_ALLOWED.get():

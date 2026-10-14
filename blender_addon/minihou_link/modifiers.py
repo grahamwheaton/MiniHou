@@ -236,7 +236,7 @@ def set_object(mod, key, obj):
 
 def _picked(source):
     """(object name, its first collection's name): what the engine learns about a picked object (for scene_objects inputs)."""
-    return source.name, (source.users_collection[0].name if source.users_collection else "")
+    return source.name, next((c.name for c in source.users_collection if bpy.data.collections.get(c.name) is c), "")
 
 
 def _source_meshes(obj, mod, materials=None, names=None):

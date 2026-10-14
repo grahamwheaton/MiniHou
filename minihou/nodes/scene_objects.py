@@ -60,7 +60,10 @@ def scene_objects(geo, source_object, target_collection, mode, prefix, collectio
     a Clean up button in the MiniHou panel removes them for good."""
     sources = names_from(source_object, "source")
     coll = names_from(target_collection, "collection")
-    out = geo.copy() if (sources or coll) else geo          # untouched when nothing is wired: the geometry itself passes through
+    stale = SCENE_SOURCE in geo.detail or SCENE_COLLECTION in geo.detail          # left by an upstream scene_objects: not this node's wiring
+    out = geo.copy() if (sources or coll or stale) else geo          # untouched when nothing is wired: the geometry itself passes through
+    out.detail.pop(SCENE_SOURCE, None)
+    out.detail.pop(SCENE_COLLECTION, None)
     if sources:
         out.detail[SCENE_SOURCE] = sources
     if coll:

@@ -86,6 +86,16 @@ class SceneInputTests(unittest.TestCase):
         self.assertEqual(names_from(pts, "source"), ["Bush"])
         self.assertEqual(names_from(pts, "collection"), [])
 
+    def test_a_chained_scene_objects_does_not_inherit_the_upstream_wiring(self):
+        g = self.graph({"source_object": "one"})
+        nodes = {k: {"type": n.type, "inputs": dict(n.inputs), "params": dict(n.params)} for k, n in g.nodes.items()}
+        nodes["so2"] = {"type": "scene_objects", "inputs": {"geo": "so"}, "params": {"source": "Rock"}}
+        g = Graph.from_dict({"nodes": nodes, "display": "out"})
+        geo = Evaluator().cook(g, "so2")
+        self.assertNotIn("scene_source", geo.detail)
+        m, _ = build_manifest("so2", REGISTRY.get("scene_objects").coerce_params({"source": "Rock"}), geo, "k")
+        self.assertEqual(m["sources"], ["Rock"])
+
     def test_blender_collection_points(self):
         geo = Evaluator().cook(self.graph({}), "col")
         self.assertEqual(geo.detail["instance_objects"], ["Bush", "Rock", "Tree"])
