@@ -256,11 +256,17 @@
     for (const t of nodes) S.types[t.name] = t;
     S.typeList = nodes.slice().sort((a, b) => (a.category || "").localeCompare(b.category || "") || a.name.localeCompare(b.name));
     S.library = library || null;
+    // Graph SSE can arrive and be selected before its type schema. Rebuild all
+    // schema-dependent UI even if the following HTTP snapshot is not applied.
+    panelKey = null;
+    $('#pv-context').dataset.node = '';
+    for (const el of nodesEl.children) el._struct = null;
     if (window.MiniShelf) MiniShelf.refresh();
     const errs = new Set(((library && library.files) || []).filter((f) => f.error).map((f) => relPath(f.file) + ": " + f.error));
     const fresh = [...errs].filter((e) => !libErrors.has(e));
     if (fresh.length) toast("Node library: " + fresh.join("\n"));
     libErrors = errs;
+    render();
   }
   let lastRemembered = null;
   function applySnapshot(snap) {
@@ -292,9 +298,6 @@
     es.addEventListener("nodes", (e) => {
       const d = JSON.parse(e.data);
       setTypes(d.nodes, d.library);
-      panelKey = null;                               // parameter panels may show a reloaded node type
-      for (const el of nodesEl.children) el._struct = null;
-      render();
     });
     es.addEventListener("status", (e) => {
       S.status = JSON.parse(e.data);

@@ -33,6 +33,29 @@ class GroupEditorE2E(unittest.TestCase):
         except OSError:return None
         return saved.nodes[node].params if node in saved.nodes else None
 
+    def test_early_graph_selection_refreshes_when_type_schema_arrives(self):
+        self.scene({'b':{'type':'box'},'expr':{'type':'group_expression','inputs':{'geo':'b'},
+            'params':{'rules':[{'name':'left','expression':'@P.x < 0'},
+                               {'name':'right','expression':'@P.x > 0'}]}}},'expr')
+        held=[]
+        self.page.route('**/api/state',lambda route:held.append(route))
+        self.page.reload(wait_until='domcontentloaded')
+        self.page.wait_for_selector('.node[data-id="expr"]')
+        self.assertTrue(until(lambda:bool(held)))
+        self.assertTrue(self.page.evaluate('minihou.S.types.group_expression===undefined'))
+        self.node('expr').locator('.title').click()
+        self.assertEqual(self.page.evaluate('[...minihou.S.sel]'),['expr'])
+        self.assertEqual(self.page.locator('#params .rule-row').count(),0)
+        self.assertEqual(self.node('expr').locator('.port.in').count(),0)
+        for route in list(held):route.continue_()
+        self.page.unroute('**/api/state')
+        self.page.wait_for_function("minihou.S.types.group_expression?.params.some(p=>p.kind==='rules')")
+        self.page.wait_for_selector('#params > .prow[data-param="rules"] .rule-row')
+        self.assertEqual(self.page.locator('#params .rule-row').count(),2)
+        self.assertEqual(self.node('expr').locator('.port.in').count(),1)
+        self.assertEqual(self.page.evaluate('[...minihou.S.sel]'),['expr'])
+        self.assertIn('group',self.page.locator('#params .ptype').inner_text())
+
     def test_shelf_pie_and_search_are_real_tools(self):
         self.box_scene()
         self.page.click('#shelf .sh-tab[data-tab="Groups"]')
