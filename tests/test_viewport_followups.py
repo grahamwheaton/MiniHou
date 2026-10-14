@@ -101,3 +101,11 @@ class ViewportFollowups(unittest.TestCase):
             self.assertAlmostEqual(moved['pitch'],after['pitch']+10*.008,places=5)
             np.testing.assert_allclose(moved['target'],target,atol=1e-10)
             self.page.mouse.up(button='middle')
+    def test_new_source_adds_visibility_without_replacing_existing_output(self):
+        self.box_scene()
+        before=self.s.graph.display
+        self.page.evaluate("minihou.edit([{op:'add',id:'sphere_new',type:'sphere',params:{center:[2,0,0]},display:true}])")
+        self.assertTrue(f.until(lambda:'sphere_new' in self.s.graph.nodes))
+        self.assertEqual(self.s.graph.display,before)
+        self.assertTrue(self.s.graph.nodes['sphere_new'].meta.get('display_extra'))
+        self.assertEqual(self.s.graph.nodes['o'].inputs,{'geo':'b'})

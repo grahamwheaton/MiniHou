@@ -1448,6 +1448,7 @@ window.MiniHouPreview = (() => {
     Object.assign(api, {
       showFeedback(text){feedback.hidden=!text;feedback.textContent=text||'';if(!text)snapMark=null;schedule();},
       interaction, orientationFrame, snapPosition, planePoint,
+      sketchGeometry:()=>[raw,templateRaw].filter(Boolean),
       beginTransform(tool,clientX,clientY){
         api.setTool(tool);const hs=shown();let h=tool==='move'?hs.find(h=>h.kind==='plane'&&h.plane_axis===undefined):tool==='scale'?hs.find(h=>h.kind==='uniform'):hs.find(h=>h.kind==='ring'&&h.comp===2);
         if(tool==='rotate'){const rotation=hs.find(x=>x.param==='rotate');if(rotation)h={...rotation,kind:'plane',comp:null,rotateVector:true,plane_axis:undefined};}

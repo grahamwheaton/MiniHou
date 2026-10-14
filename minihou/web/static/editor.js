@@ -192,6 +192,10 @@
       while(ids.has(output))output='output'+(++i);
       const at=tail.pos||[0,0];ops=[...ops,{op:'add',id:output,type:'output',inputs:{geo:tail.id},pos:[at[0],at[1]+150],display:true}];
     }
+    if(Object.keys(S.graph.nodes).length&&ops[0]?.op==='add'&&S.types[ops[0].type]?.category==='source'){
+      const previous=displayNode(),added=ops.filter(op=>op.op==='add').at(-1);
+      if(previous&&added){ops=ops.map(op=>op.op==='add'?{...op,display:false}:op);ops.push({op:'flag',id:added.id,flag:'display',value:true,additive:true});}
+    }
     desktopPendingEdits++;
     try {
       const r = await api("/api/edit", { ops, origin: "editor", document_id: context.documentId, gesture:context.gesture });
