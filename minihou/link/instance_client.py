@@ -94,12 +94,15 @@ class InstanceClient:
         return self._request({"type": "instance_edit", "instance_id": instance_id,
                               "graph": graph, "params": params, "label": label, "frame": frame, "fps": fps}, arrays)[0]
 
-    def set_sources(self, instance_id, sources):
+    def set_sources(self, instance_id, sources, names=None):
         self.connect()
         if "object_inputs_v1" not in self.welcome.get("capabilities", []):
             raise RuntimeError("Restart the updated MiniHou app to load object inputs")
         arrays = {str(i) + "/" + key: value for i, values in enumerate(sources.values()) for key, value in values.items()}
-        return self._request({"type": "instance_sources", "instance_id": instance_id, "sources": list(sources)}, arrays)[0]
+        header = {"type": "instance_sources", "instance_id": instance_id, "sources": list(sources)}
+        if names:                                    # the Blender objects behind the pickers: {key: (object name, its collection)}
+            header["object_names"] = {str(k): [str(v[0])[:128], str(v[1])[:128]] for k, v in names.items() if k in sources}
+        return self._request(header, arrays)[0]
 
     def sync_live(self, instance_id, params):
         return self._request({"type": "instance_sync", "instance_id": instance_id, "params": params})[0]

@@ -135,6 +135,7 @@ def _bindings(obj, mod, path, node):
 def _sources(client, ident, bindings, materials):
     import numpy as np
     sources = {}
+    names = {}
     for key, source in bindings.items():
         if source is None:
             continue
@@ -150,7 +151,9 @@ def _sources(client, ident, bindings, materials):
             arrays["prim/material_index"] = np.asarray(mapping, dtype=np.int32)[
                 np.clip(arrays["prim/material_index"], 0, len(mapping) - 1)]
         sources[key] = arrays
+        names[key] = modifiers._picked(source)
     h = hashlib.sha256()
+    h.update(repr(sorted(names.items())).encode())
     for key, arrays in sources.items():
         h.update(key.encode())
         for name, array in sorted(arrays.items()):
@@ -158,7 +161,7 @@ def _sources(client, ident, bindings, materials):
             h.update(array.tobytes())
     token = h.hexdigest()
     if _source_sent.get(ident) != (client, token):
-        client.set_sources(ident, sources)
+        client.set_sources(ident, sources, names)
         _source_sent[ident] = (client, token)
     return token
 

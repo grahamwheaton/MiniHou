@@ -61,6 +61,24 @@ class LiveModifierTests(unittest.TestCase):
         other.edit_live("many", graph, {}, mesh())
         self.assertFalse(self.session.preview("monkey")["ok"])
 
+    def test_a_picked_object_feeds_scene_objects_by_name(self):
+        graph = {"nodes": {"input": {"type": "modifier_input"}, "rock": {"type": "object_input"},
+                           "so": {"type": "scene_objects", "inputs": {"geo": "input", "source_object": "rock", "target_collection": "rock"},
+                                  "params": {"mode": "instances"}}},
+                 "display": "so"}
+        self.client.set_sources("pick", {"rock": mesh(2)}, {"rock": ("Boulder.003", "Rocks")})
+        self.client.edit_live("pick", graph, {}, mesh())
+        geo = self.session.preview("rock")["geo"]
+        self.assertEqual((geo.detail["object_name"], geo.detail["object_collection"]), ("Boulder.003", "Rocks"))
+        from minihou.nodes.scene_objects import build_manifest
+        from minihou.sdk import REGISTRY
+        out = self.session.preview("so")["geo"]
+        m, _ = build_manifest("so", REGISTRY.get("scene_objects").coerce_params({}), out, "k")
+        self.assertEqual((m["sources"], m["collection"]), (["Boulder.003"], "Rocks"))
+        self.client.set_sources("pick", {"rock": mesh(2)}, {"rock": ("Other", "Rocks")})     # a new pick with identical geometry recooks
+        out = self.session.preview("so")["geo"]
+        self.assertEqual(out.detail["scene_source"], ["Other"])
+
     def test_float32_roundtrip_does_not_overwrite_editor_changes(self):
         from unittest.mock import patch
         self.bind()

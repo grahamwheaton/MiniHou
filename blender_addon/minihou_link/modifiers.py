@@ -234,7 +234,12 @@ def set_object(mod, key, obj):
     mod.id_data.update_tag()
 
 
-def _source_meshes(obj, mod, materials=None):
+def _picked(source):
+    """(object name, its first collection's name): what the engine learns about a picked object (for scene_objects inputs)."""
+    return source.name, next((c.name for c in source.users_collection if bpy.data.collections.get(c.name) is c), "")
+
+
+def _source_meshes(obj, mod, materials=None, names=None):
     sources = {}
     for key in _object_keys(mod):
         source = get_object(mod, key)
@@ -255,12 +260,16 @@ def _source_meshes(obj, mod, materials=None):
                 indices = arrays["prim/material_index"]
                 arrays["prim/material_index"] = np.asarray(mapping, dtype=np.int32)[np.clip(indices, 0, len(mapping) - 1)]
         sources[key] = arrays
+        if names is not None:
+            names[key] = _picked(source)
     return sources
 
 
 def _send_sources(client, obj, mod, materials=None):
-    sources = _source_meshes(obj, mod, materials)
+    names = {}
+    sources = _source_meshes(obj, mod, materials, names)
     digest = hashlib.blake2b(digest_size=16)
+    digest.update(repr(sorted(names.items())).encode())
     for name, arrays in sources.items():
         digest.update(name.encode())
         for key, array in sorted(arrays.items()):
@@ -268,7 +277,7 @@ def _send_sources(client, obj, mod, materials=None):
     token = digest.hexdigest()
     ident = instance_id(mod)
     if _source_digests.get(ident) != token:
-        client.set_sources(ident, sources)
+        client.set_sources(ident, sources, names)
         _source_digests[ident] = token
     return token
 

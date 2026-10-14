@@ -452,6 +452,7 @@ The same edit operations are available to scripts over HTTP (`POST /api/edit`, s
 | `examples/graphs/terrain_rocks.json` | 200x200 terrain with 5-octave noise, a valley wrangle, rocks scattered only above a height |
 | `examples/graphs/crater.json` | built by an AI through MCP: dunes, a crater wrangle, boulders kept only on the rim by a `delete` expression |
 | `examples/graphs/spiral_stairs.json` | uses the example library nodes `stairs` (spiral treads around a column) and `twist_height` |
+| `examples/graphs/road_network.json` | roads with intersections: centre-line curves into the `road_network` library node (`nodes/road_network.py`): a strip of road per edge and a patch at every junction (bends, T, Y, crossroads, any number of roads), trimmed so the edges meet cleanly; prim attributes `part` / `road` / `junction`, vertex `uv` |
 | `examples/graphs/rocky_hills.json` | hills plus the `rock_scatter` **system** (`nodes/rock_scatter.json`, a graph used as a node) |
 | `examples/graphs/scifi_panels.json` | random face groups extruded twice with insets, flat-shaded, a second material on the tops |
 | `examples/graphs/subd_pod.json` | box -> extruded dome and fin -> clip + mirror (symmetric, welded) -> Catmull-Clark |
@@ -479,6 +480,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | node | inputs | what it does |
 |---|---|---|
 | `blender_object` | - | a Blender object's evaluated mesh, **live**: edit it in Blender and the graph recooks (see below) |
+| `blender_collection` | - | every object of a Blender collection, live: points at their origins (a source list for `scene_objects`) or merged geometry |
 | `grid` | - | XY grid of quads; `uv` point attribute |
 | `box` | - | closed box, optional divisions (welded seams) |
 | `sphere` | - | UV sphere (triangle-fan poles), closed and outward-facing |
@@ -593,6 +595,17 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |
 | `normal` | geo | area-weighted point normals, face normals (Newell, n-gon safe), or vertex normals with a cusp angle (hard edges stay sharp; Blender gets custom normals) |
 | `scatter` | geo | area-weighted random points on the surface (`P`, `N`, `primnum`), or uniformly inside a closed mesh (mode volume: ray-parity inside test) |
+| `point_generate` | - | points from nothing: random in a box / on or in a sphere, or evenly on a line or circle; `id` |
+| `point_replicate` | geo | several points per point (a count or an attribute), optionally jittered; `copy`, `source` |
+| `point_velocity` | geo, previous | `v` from the earlier positions, a curl-noise field or a fixed direction |
+| `particle_trail` | geo | a curve behind each point along its velocity (optionally bent by gravity); `trail` 0..1 |
+| `cluster_points` | geo | k-means, grid or distance clusters: a `cluster` attribute, or one centroid point per cluster |
+| `point_cloud_measure` | geo | `neighbors`, `density`, `nn_dist`, `mean_dist` per point |
+| `point_cloud_normal` | geo | normals by plane fit to the nearest points; oriented outward / inward / to a viewpoint / up |
+| `point_cloud_reduce` | geo | thin a cloud: minimum distance (blue-noise), about N points, or a percentage |
+| `point_cloud_surface` | points, cloud | snap points onto the smooth surface a point cloud describes (moving least squares) |
+| `points_from_volume` | geo | fill a closed mesh with points: lattice, random or poisson; optionally only near the surface |
+| `scatter_in_texture_mask` | geo, mask | scatter on a surface where an image (pixel grid from `blender_image` / `image_file`) is bright |
 | `copy_to_points` | source, points | stamp `source` on every point, oriented by `orient` (quaternion), `rot`, or `N` + `up`, sized by `scale` x `pscale`; inherits point attributes |
 | `delete` | geo | delete points matching an expression (and primitives that use them), compacting all attributes |
 | `fuse` | geo | weld points closer than a distance |
@@ -1031,7 +1044,7 @@ minihou/                  the engine (numpy + stdlib, optional numba; never impo
   web/                    HTTP API + live events (server.py) and the node editor (static/)
   mcp.py                  MCP server for AI assistants (stdio, stdlib only)
   library.py              node libraries: load and hot-reload nodes/*.py, authoring guide
-nodes/                    example node library: twist_height.py, stairs.py (Python) and rock_scatter.json (a system)
+nodes/                    example node library: twist_height.py, stairs.py, road_network.py (Python) and rock_scatter.json (a system)
 blender_addon/minihou_link/
   runtime.py              main-thread timer, depsgraph handler, feedback-loop guards
   mesh_writer.py          foreach_set writer (fast attribute paths)

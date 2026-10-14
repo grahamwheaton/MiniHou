@@ -30,6 +30,10 @@ material slot names, when it has any; ``instance_cook`` carries the same field f
 arrays keyed like ``geo`` (``point/P``, the two ``topo/...`` arrays, ``<domain>/<name>``), or ``object_missing``
 ``{"object", "reason"}``.
 
+``watch_objects`` lists the Blender collections the graph reads (``blender_collection`` nodes) under ``"collections"``; their member objects
+are in ``"objects"`` too. The client answers each with ``collection_members`` ``{"collection", "objects": [names, children included],
+"error"}`` (``error`` set when there is no such collection) and again whenever the membership changes.
+
 ``watch_objects`` also lists the Blender images the graph reads (``blender_image`` nodes) under ``"images"``. The client answers each with
 ``image_data`` ``{"image", "width", "height", "is_float", "colorspace", "source"}`` plus the array ``pixels`` (float32, height x width x 4, rows
 from the bottom as Blender stores them) whenever the image changes, or ``image_missing`` ``{"image", "reason"}``. An ``image_out`` node reaches

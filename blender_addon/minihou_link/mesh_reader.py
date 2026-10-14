@@ -128,6 +128,8 @@ def read_object(obj, depsgraph) -> Tuple[dict, Dict[str, np.ndarray]]:
     info.setdefault("vertex_groups", [])
     info.setdefault("skipped", [])
     info["read_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+    import bpy
+    info["collection"] = next((c.name for c in obj.users_collection if bpy.data.collections.get(c.name) is c), "")   # not the scene's master collection
     M = [v for row in obj.matrix_world for v in row]
     return {"matrix": M, "info": info, "materials": slot_names(ev)}, arrays
 

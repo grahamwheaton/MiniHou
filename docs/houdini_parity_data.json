@@ -1715,6 +1715,9 @@
    "status": "ok",
    "title": "Blend Shapes 2.0 geometry node"
   },
+  "blender_collection": {
+   "status": "unmapped"
+  },
   "blender_image": {
    "category": "source",
    "handles": false,
@@ -3025,6 +3028,136 @@
    "status": "ok",
    "title": "Clip 2.0 geometry node"
   },
+  "cluster_points": {
+   "category": "modify",
+   "handles": false,
+   "has_inputs_section": true,
+   "hints": [
+    "First, connect the second input of the Cluster Points node to specify a set of point positions at which the Cluster Points node sho"
+   ],
+   "inputs_houdini": [
+    {
+     "label": "Points to cluster",
+     "text": "The input points to sort into clusters. This node will create an attribute (by default called cluster ) on each point containing the cluster number the point belongs to."
+    },
+    {
+     "label": "Rest Position",
+     "text": "Calculate the cluster centers based on the points in this input instead of the points to cluster. This is useful for calculating the cluster centers from a decimated point cloud (for performance) or from the point positions at a different f"
+    }
+   ],
+   "inputs_ok": true,
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "geo",
+     "optional": false
+    },
+    {
+     "multi": false,
+     "name": "rest",
+     "optional": true
+    }
+   ],
+   "output_groups_houdini": [],
+   "output_groups_ours": [],
+   "outputs_houdini": [],
+   "outputs_ok": true,
+   "outputs_ours": [
+    "geo"
+   ],
+   "params_matched": 3,
+   "params_missing": [
+    {
+     "folder": "",
+     "id": "attrib_name",
+     "label": "Output Attribute"
+    },
+    {
+     "folder": "",
+     "id": "color-output",
+     "label": "Color Output"
+    },
+    {
+     "folder": "",
+     "id": "cluster-filter",
+     "label": "Cluster Filter"
+    },
+    {
+     "folder": "",
+     "id": "num_controls",
+     "label": "Control Attributes"
+    },
+    {
+     "folder": "",
+     "id": "control_attrib",
+     "label": "Control Attribute"
+    },
+    {
+     "folder": "",
+     "id": "control_weight",
+     "label": "Weight"
+    },
+    {
+     "folder": "",
+     "id": "build-clusters",
+     "label": "Build Clusters"
+    },
+    {
+     "folder": "",
+     "id": "num_clusters",
+     "label": "Clusters"
+    },
+    {
+     "folder": "",
+     "id": "threshold_attrib",
+     "label": "Threshold Attribute"
+    },
+    {
+     "folder": "",
+     "id": "threshold_weight",
+     "label": "Weight"
+    },
+    {
+     "folder": "",
+     "id": "initial_threshold",
+     "label": "Initial Threshold"
+    },
+    {
+     "folder": "",
+     "id": "final_threshold",
+     "label": "Goal Threshold"
+    },
+    {
+     "folder": "",
+     "id": "copy-point-attributes-from-cluster",
+     "label": "Copy point attributes from cluster"
+    },
+    {
+     "folder": "",
+     "id": "max-sample-count",
+     "label": "Max Sample Count"
+    },
+    {
+     "folder": "",
+     "id": "size-attribute-name",
+     "label": "Size Attribute name"
+    },
+    {
+     "folder": "",
+     "id": "size_padding",
+     "label": "Padding min"
+    },
+    {
+     "folder": "",
+     "id": "size_padding2",
+     "label": "Padding max"
+    }
+   ],
+   "params_total": 20,
+   "slug": "clusterpoints",
+   "status": "ok",
+   "title": "Cluster Points geometry node"
+  },
   "color": {
    "category": "attribute",
    "handles": false,
@@ -3167,6 +3300,9 @@
    "slug": "connectivity",
    "status": "ok",
    "title": "Connectivity geometry node"
+  },
+  "contour": {
+   "status": "unmapped"
   },
   "convert_line": {
    "category": "curve",
@@ -3876,6 +4012,9 @@
    "slug": "curve",
    "status": "ok",
    "title": "Curve 2.0 geometry node"
+  },
+  "curve_simplify": {
+   "status": "unmapped"
   },
   "delaunay": {
    "category": "modify",
@@ -5080,6 +5219,9 @@
    "slug": "facet",
    "status": "ok",
    "title": "Facet geometry node"
+  },
+  "falloff": {
+   "status": "unmapped"
   },
   "fillet": {
    "category": "curve",
@@ -6773,6 +6915,9 @@
    "status": "ok",
    "title": "Instance geometry node"
   },
+  "knife": {
+   "status": "unmapped"
+  },
   "lattice": {
    "category": "deform",
    "handles": false,
@@ -8040,6 +8185,9 @@
    "handles": false,
    "status": "own"
   },
+  "occlusion": {
+   "status": "unmapped"
+  },
   "output": {
    "category": "output",
    "handles": false,
@@ -8426,6 +8574,525 @@
    "slug": "polyextrude",
    "status": "ok",
    "title": "Poly Extrude 2.0 geometry node"
+  },
+  "particle_trail": {
+   "category": "generate",
+   "handles": false,
+   "has_inputs_section": false,
+   "hints": [],
+   "inputs_houdini": [],
+   "inputs_ok": true,
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "geo",
+     "optional": false
+    }
+   ],
+   "output_groups_houdini": [],
+   "output_groups_ours": [],
+   "outputs_houdini": [],
+   "outputs_ok": true,
+   "outputs_ours": [
+    "geo"
+   ],
+   "params_matched": 1,
+   "params_missing": [
+    {
+     "folder": "",
+     "id": "quicksetup",
+     "label": "Quick Setups"
+    },
+    {
+     "folder": "",
+     "id": "group",
+     "label": "Group"
+    },
+    {
+     "folder": "",
+     "id": "substep",
+     "label": "Substeps"
+    },
+    {
+     "folder": "",
+     "id": "randattrib",
+     "label": "Seed Attribute"
+    },
+    {
+     "folder": "Alpha",
+     "id": "alpha",
+     "label": "Alpha"
+    },
+    {
+     "folder": "Alpha",
+     "id": "alpha_var",
+     "label": "Variation"
+    },
+    {
+     "folder": "Alpha",
+     "id": "alpha_seed",
+     "label": "Seed"
+    },
+    {
+     "folder": "Alpha",
+     "id": "enablealphalenscale",
+     "label": "Scale Along Length"
+    },
+    {
+     "folder": "Alpha",
+     "id": "alphalenscaleramp",
+     "label": "Alpha Along Length Ramp"
+    },
+    {
+     "folder": "Alpha",
+     "id": "enablealphaagescale",
+     "label": "Scale Over Normalized Age"
+    },
+    {
+     "folder": "Alpha",
+     "id": "alphaagescaleramp",
+     "label": "Alpha Over Normalized Age Ramp"
+    },
+    {
+     "folder": "Intensity",
+     "id": "kcolor",
+     "label": "Scale"
+    },
+    {
+     "folder": "Intensity",
+     "id": "kcolor_var",
+     "label": "Variation"
+    },
+    {
+     "folder": "Intensity",
+     "id": "kcolor_seed",
+     "label": "Seed"
+    },
+    {
+     "folder": "Intensity",
+     "id": "enableklenscale",
+     "label": "Scale Along Length"
+    },
+    {
+     "folder": "Intensity",
+     "id": "klenscaleramp",
+     "label": "Intensity Along Length Ramp"
+    },
+    {
+     "folder": "Intensity",
+     "id": "enablekagescale",
+     "label": "Scale Over Normalized Age"
+    },
+    {
+     "folder": "Intensity",
+     "id": "kagescaleramp",
+     "label": "Intensity Over Normalized Age Ramp"
+    },
+    {
+     "folder": "Color",
+     "id": "color",
+     "label": "Color"
+    },
+    {
+     "folder": "Color",
+     "id": "hueshift_var",
+     "label": "Hue Shift Variation"
+    },
+    {
+     "folder": "Color",
+     "id": "sat_var",
+     "label": "Saturation Variation"
+    },
+    {
+     "folder": "Color",
+     "id": "val_var",
+     "label": "Value Variation"
+    },
+    {
+     "folder": "Color",
+     "id": "colorramp",
+     "label": "Color Ramp"
+    },
+    {
+     "folder": "Color",
+     "id": "color_seed",
+     "label": "Seed"
+    },
+    {
+     "folder": "Color",
+     "id": "colorpalette",
+     "label": "Color Palette"
+    },
+    {
+     "folder": "Color",
+     "id": "nvalues",
+     "label": "Number of Colors"
+    },
+    {
+     "folder": "Color",
+     "id": "enablecolorlenscale",
+     "label": "Color Along Length"
+    },
+    {
+     "folder": "Color",
+     "id": "colorlenscaleramp",
+     "label": "Color Along Length Ramp"
+    },
+    {
+     "folder": "Color",
+     "id": "enablecoloragescale",
+     "label": "Color Over Normalized Age"
+    },
+    {
+     "folder": "Color",
+     "id": "coloragescaleramp",
+     "label": "Color Over Normalized Age Ramp"
+    },
+    {
+     "folder": "Split",
+     "id": "enablesplit",
+     "label": "Enable Split"
+    },
+    {
+     "folder": "Split",
+     "id": "splitpercent",
+     "label": "Percent to Split"
+    },
+    {
+     "folder": "Split",
+     "id": "splitpercent_seed",
+     "label": "Seed"
+    },
+    {
+     "folder": "Split",
+     "id": "deletesource",
+     "label": "Delete Source Trails after Splitting"
+    },
+    {
+     "folder": "Shape",
+     "id": "copynum",
+     "label": "Splits per Point"
+    },
+    {
+     "folder": "Shape",
+     "id": "copynum_var",
+     "label": "Variation"
+    },
+    {
+     "folder": "Shape",
+     "id": "copynum_seed",
+     "label": "Seed"
+    },
+    {
+     "folder": "Shape",
+     "id": "spreadmin",
+     "label": "Split Start Angle"
+    },
+    {
+     "folder": "Shape",
+     "id": "spreadmin_var",
+     "label": "Variation"
+    },
+    {
+     "folder": "Shape",
+     "id": "spreadmin_seed",
+     "label": "Seed"
+    },
+    {
+     "folder": "Shape",
+     "id": "spreadmax",
+     "label": "Split End Angle"
+    },
+    {
+     "folder": "Shape",
+     "id": "spreadmin_var",
+     "label": "Variation"
+    },
+    {
+     "folder": "Shape",
+     "id": "spreadmin_seed",
+     "label": "Seed"
+    },
+    {
+     "folder": "Shape",
+     "id": "vscale",
+     "label": "Split Velocity Scale"
+    },
+    {
+     "folder": "Shape",
+     "id": "vscale_var",
+     "label": "Variation"
+    },
+    {
+     "folder": "Shape",
+     "id": "vscale_seed",
+     "label": "Seed"
+    },
+    {
+     "folder": "Shape",
+     "id": "vscaleextent",
+     "label": "Offset per Split"
+    },
+    {
+     "folder": "Shape",
+     "id": "vscaleextent_seed",
+     "label": "Seed"
+    },
+    {
+     "folder": "Shape",
+     "id": "splitpath        Controls the movement of the split particles.",
+     "label": "Split Path"
+    },
+    {
+     "folder": "Shape",
+     "id": "drag",
+     "label": "Drag"
+    },
+    {
+     "folder": "Shape",
+     "id": "mass",
+     "label": "Mass"
+    },
+    {
+     "folder": "Shape",
+     "id": "clipheight",
+     "label": "Clip Height"
+    },
+    {
+     "folder": "Shape",
+     "id": "dospeedramp",
+     "label": "Enable Speed Ramp"
+    },
+    {
+     "folder": "Shape",
+     "id": "speedramp",
+     "label": "Speed Ramp"
+    },
+    {
+     "folder": "Duration",
+     "id": "splitdur",
+     "label": "Split Frame Duration"
+    },
+    {
+     "folder": "Duration",
+     "id": "splitdur_var",
+     "label": "Variation"
+    },
+    {
+     "folder": "Duration",
+     "id": "splitdur_seed",
+     "label": "Seed"
+    },
+    {
+     "folder": "Duration",
+     "id": "splitdurextent",
+     "label": "Offset per Split"
+    },
+    {
+     "folder": "Duration",
+     "id": "splitdurextent_seed",
+     "label": "Seed"
+    },
+    {
+     "folder": "Length",
+     "id": "trailtype",
+     "label": "Trail Method"
+    },
+    {
+     "folder": "Length",
+     "id": "framedur",
+     "label": "Frame Duration"
+    },
+    {
+     "folder": "Length",
+     "id": "shutteropen",
+     "label": "Shutter Open"
+    },
+    {
+     "folder": "Length",
+     "id": "shutterclose",
+     "label": "Shutter Close"
+    },
+    {
+     "folder": "Length",
+     "id": "lenstart",
+     "label": "Length Start"
+    },
+    {
+     "folder": "Length",
+     "id": "lenstart_var",
+     "label": "Variation"
+    },
+    {
+     "folder": "Length",
+     "id": "lenstart_seed",
+     "label": "Seed"
+    },
+    {
+     "folder": "Length",
+     "id": "lenend",
+     "label": "Length End"
+    },
+    {
+     "folder": "Length",
+     "id": "lenend_var",
+     "label": "Variation"
+    },
+    {
+     "folder": "Length",
+     "id": "lenend_seed",
+     "label": "Seed"
+    },
+    {
+     "folder": "Length",
+     "id": "bakecam",
+     "label": "Bake Camera Motion"
+    },
+    {
+     "folder": "Length",
+     "id": "addposnoise",
+     "label": "Add Positional Noise"
+    },
+    {
+     "folder": "Length",
+     "id": "posnoise_amplitude",
+     "label": "Amplitude"
+    },
+    {
+     "folder": "Length",
+     "id": "posnoise_elementsize",
+     "label": "Element Size"
+    },
+    {
+     "folder": "Length",
+     "id": "posnoise_offset",
+     "label": "Offset"
+    },
+    {
+     "folder": "Width",
+     "id": "width",
+     "label": "Width"
+    },
+    {
+     "folder": "Width",
+     "id": "tailwidth",
+     "label": "Tail Width"
+    },
+    {
+     "folder": "Width",
+     "id": "tailwidth_var",
+     "label": "Variation"
+    },
+    {
+     "folder": "Width",
+     "id": "tailwidth_seed",
+     "label": "Seed"
+    },
+    {
+     "folder": "Width",
+     "id": "headwidth",
+     "label": "Head Width"
+    },
+    {
+     "folder": "Width",
+     "id": "headwidth_var",
+     "label": "Variation"
+    },
+    {
+     "folder": "Width",
+     "id": "headwidth_seed",
+     "label": "Seed"
+    },
+    {
+     "folder": "Width",
+     "id": "enablewidthlenscale",
+     "label": "Scale Along Length"
+    },
+    {
+     "folder": "Width",
+     "id": "widthlenscaleramp",
+     "label": "Width Along Length Ramp"
+    },
+    {
+     "folder": "Width",
+     "id": "enablewidthagescale",
+     "label": "Scale Over Normalized Age"
+    },
+    {
+     "folder": "Width",
+     "id": "widthagescaleramp",
+     "label": "Width Over Normalized Age Ramp"
+    },
+    {
+     "folder": "Width",
+     "id": "scalewidthbynoise",
+     "label": "Scale by Noise"
+    },
+    {
+     "folder": "Width",
+     "id": "widthnoise_amplitude",
+     "label": "Amplitude"
+    },
+    {
+     "folder": "Width",
+     "id": "widthnoise_elementsize",
+     "label": "Element Size"
+    },
+    {
+     "folder": "Width",
+     "id": "widthnoise_offset",
+     "label": "Offset"
+    },
+    {
+     "folder": "Width",
+     "id": "clampminvalue",
+     "label": "Minimum Width"
+    },
+    {
+     "folder": "Trails",
+     "id": "createparticletrails",
+     "label": "Output Particle Trails"
+    },
+    {
+     "folder": "Trails",
+     "id": "createsplittrails",
+     "label": "Output Split Trails"
+    },
+    {
+     "folder": "Trails",
+     "id": "praticletrailgroupname",
+     "label": "Particle Trail Group"
+    },
+    {
+     "folder": "Trails",
+     "id": "splittrailgroupname",
+     "label": "Split Trail Group"
+    },
+    {
+     "folder": "Attributes",
+     "id": "splitidxattrib",
+     "label": "Split Index"
+    },
+    {
+     "folder": "Attributes",
+     "id": "splithashattrib",
+     "label": "Split Hash"
+    },
+    {
+     "folder": "Attributes",
+     "id": "splitnageattrib",
+     "label": "Normalized Split Age"
+    },
+    {
+     "folder": "Attributes",
+     "id": "relposattrib",
+     "label": "Relative Position"
+    }
+   ],
+   "params_total": 99,
+   "slug": "particletrail",
+   "status": "ok",
+   "title": "Particle Trail geometry node"
   },
   "path_deform": {
    "category": "deform",
@@ -9056,6 +9723,257 @@
    "status": "ok",
    "title": "Peak geometry node"
   },
+  "point_cloud_measure": {
+   "category": "modify",
+   "handles": false,
+   "has_inputs_section": true,
+   "hints": [],
+   "inputs_houdini": [
+    {
+     "label": "Points to Measure",
+     "text": "The point geometry to compute measurements for."
+    },
+    {
+     "label": "Optional Points to Sample",
+     "text": "Optional input point geometry to sample from when computing measurments."
+    }
+   ],
+   "inputs_ok": true,
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "geo",
+     "optional": false
+    },
+    {
+     "multi": false,
+     "name": "sample",
+     "optional": true
+    }
+   ],
+   "output_groups_houdini": [],
+   "output_groups_ours": [],
+   "outputs_houdini": [],
+   "outputs_ok": true,
+   "outputs_ours": [
+    "geo"
+   ],
+   "params_matched": 3,
+   "params_missing": [
+    {
+     "folder": "",
+     "id": "curvature",
+     "label": "Curvature"
+    },
+    {
+     "folder": "",
+     "id": "linear",
+     "label": "Linear Proportion"
+    },
+    {
+     "folder": "",
+     "id": "planar",
+     "label": "Planar Proportion"
+    },
+    {
+     "folder": "",
+     "id": "spherical",
+     "label": "Spherical Proportion"
+    },
+    {
+     "folder": "",
+     "id": "lineardensity",
+     "label": "Linear Density"
+    },
+    {
+     "folder": "",
+     "id": "areadensity",
+     "label": "Area Density"
+    },
+    {
+     "folder": "",
+     "id": "volumedensity",
+     "label": "Volume Density"
+    },
+    {
+     "folder": "",
+     "id": "eigenvalues",
+     "label": "Eigenvalues"
+    },
+    {
+     "folder": "",
+     "id": "eigenvectors",
+     "label": "Eigenvectors"
+    }
+   ],
+   "params_total": 12,
+   "slug": "pointcloudmeasure",
+   "status": "ok",
+   "title": "Point Cloud Measure geometry node"
+  },
+  "point_cloud_normal": {
+   "category": "modify",
+   "handles": false,
+   "has_inputs_section": false,
+   "hints": [],
+   "inputs_houdini": [],
+   "inputs_ok": true,
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "geo",
+     "optional": false
+    }
+   ],
+   "output_groups_houdini": [],
+   "output_groups_ours": [],
+   "outputs_houdini": [],
+   "outputs_ok": true,
+   "outputs_ours": [
+    "geo"
+   ],
+   "params_matched": 5,
+   "params_missing": [
+    {
+     "folder": "",
+     "id": "normalattrib",
+     "label": "Normal Attribute"
+    },
+    {
+     "folder": "",
+     "id": "compute",
+     "label": "Compute Normals"
+    },
+    {
+     "folder": "",
+     "id": "origifzero",
+     "label": "Keep Original Normal Where Computed Normal Is Zero"
+    },
+    {
+     "folder": "",
+     "id": "method",
+     "label": "Method"
+    },
+    {
+     "folder": "",
+     "id": "hint",
+     "label": "Guide Towards Hint"
+    },
+    {
+     "folder": "",
+     "id": "movehint",
+     "label": "Move Hint to Centroid"
+    }
+   ],
+   "params_total": 11,
+   "slug": "pointcloudnormal",
+   "status": "ok",
+   "title": "Point Cloud Normal geometry node"
+  },
+  "point_cloud_reduce": {
+   "category": "modify",
+   "handles": false,
+   "has_inputs_section": true,
+   "hints": [
+    "Optional reference VDB If you connect to this node\u2019s second input, the node uses the transform from the input VDB primitive."
+   ],
+   "inputs_houdini": [
+    {
+     "label": "Point Cloud",
+     "text": "When you connect to this node\u2019s first input, this is the point cloud to reduce. You can use any input geometry that has unorganized points."
+    },
+    {
+     "label": "Optional reference VDB",
+     "text": "If you connect to this node\u2019s second input, the node uses the transform from the input VDB primitive. You\u2019ll receive an error message if the input doesn\u2019t have a VDB primitive or if it has many VDB primitives with differing transforms."
+    }
+   ],
+   "inputs_ok": false,
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "geo",
+     "optional": false
+    }
+   ],
+   "output_groups_houdini": [],
+   "output_groups_ours": [],
+   "outputs_houdini": [],
+   "outputs_ok": true,
+   "outputs_ours": [
+    "geo"
+   ],
+   "params_matched": 2,
+   "params_missing": [
+    {
+     "folder": "",
+     "id": "group",
+     "label": "Group"
+    },
+    {
+     "folder": "",
+     "id": "samplemethod",
+     "label": "Sample Method"
+    },
+    {
+     "folder": "",
+     "id": "population",
+     "label": "Voxel Population"
+    }
+   ],
+   "params_total": 5,
+   "slug": "pointcloudreduce",
+   "status": "ok",
+   "title": "Point Cloud Reduce geometry node"
+  },
+  "point_cloud_surface": {
+   "category": "modify",
+   "handles": false,
+   "has_inputs_section": false,
+   "hints": [],
+   "inputs_houdini": [],
+   "inputs_ok": true,
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "points",
+     "optional": false
+    },
+    {
+     "multi": false,
+     "name": "cloud",
+     "optional": true
+    }
+   ],
+   "output_groups_houdini": [],
+   "output_groups_ours": [],
+   "outputs_houdini": [],
+   "outputs_ok": true,
+   "outputs_ours": [
+    "geo"
+   ],
+   "params_matched": 1,
+   "params_missing": [
+    {
+     "folder": "",
+     "id": "subdivisions",
+     "label": "Max Subdivisions"
+    },
+    {
+     "folder": "",
+     "id": "sampletarget",
+     "label": "Sample Target"
+    },
+    {
+     "folder": "",
+     "id": "boundary",
+     "label": "Boundary Type"
+    }
+   ],
+   "params_total": 4,
+   "slug": "pointcloudsurface",
+   "status": "ok",
+   "title": "Point Cloud Surface geometry node"
+  },
   "point_deform": {
    "category": "deform",
    "handles": false,
@@ -9173,6 +10091,89 @@
    "status": "ok",
    "title": "Point Deform geometry node"
   },
+  "point_generate": {
+   "category": "generate",
+   "handles": false,
+   "has_inputs_section": false,
+   "hints": [],
+   "inputs_houdini": [],
+   "inputs_ok": true,
+   "inputs_ours": [],
+   "output_groups_houdini": [],
+   "output_groups_ours": [],
+   "outputs_houdini": [],
+   "outputs_ok": true,
+   "outputs_ours": [
+    "geo"
+   ],
+   "params_matched": 1,
+   "params_missing": [
+    {
+     "folder": "",
+     "id": "gorup",
+     "label": "Group"
+    },
+    {
+     "folder": "",
+     "id": "keep",
+     "label": "Keep Original Geometry"
+    },
+    {
+     "folder": "",
+     "id": "ptsperpt",
+     "label": "Compute Number of Points"
+    },
+    {
+     "folder": "",
+     "id": "npts",
+     "label": "Number of Points"
+    },
+    {
+     "folder": "",
+     "id": "nptsperpt",
+     "label": "Points Per Point"
+    },
+    {
+     "folder": "",
+     "id": "attrib",
+     "label": "Generate From Attribute"
+    },
+    {
+     "folder": "",
+     "id": "ggroup",
+     "label": "Generated Points Group"
+    },
+    {
+     "folder": "",
+     "id": "spointnum",
+     "label": "Point Number Attribute"
+    },
+    {
+     "folder": "",
+     "id": "spointidx",
+     "label": "Point Index Attribute"
+    },
+    {
+     "folder": "",
+     "id": "docopyattribs",
+     "label": "Copy Source Attributes"
+    },
+    {
+     "folder": "",
+     "id": "attribstocopy",
+     "label": "Source Point Attributes"
+    },
+    {
+     "folder": "",
+     "id": "detailstocopy",
+     "label": "Source Detail Attributes"
+    }
+   ],
+   "params_total": 13,
+   "slug": "pointgenerate",
+   "status": "ok",
+   "title": "Point Generate geometry node"
+  },
   "point_jitter": {
    "category": "deform",
    "handles": false,
@@ -9194,13 +10195,8 @@
    "outputs_ours": [
     "geo"
    ],
-   "params_matched": 3,
+   "params_matched": 4,
    "params_missing": [
-    {
-     "folder": "",
-     "id": "mask",
-     "label": "Mask"
-    },
     {
      "folder": "",
      "id": "id-attribute",
@@ -9315,6 +10311,528 @@
    "slug": "relax",
    "status": "ok",
    "title": "Point Relax geometry node"
+  },
+  "point_replicate": {
+   "category": "generate",
+   "handles": false,
+   "has_inputs_section": false,
+   "hints": [],
+   "inputs_houdini": [],
+   "inputs_ok": true,
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "geo",
+     "optional": false
+    }
+   ],
+   "output_groups_houdini": [],
+   "output_groups_ours": [],
+   "outputs_houdini": [],
+   "outputs_ok": true,
+   "outputs_ours": [
+    "geo"
+   ],
+   "params_matched": 3,
+   "params_missing": [
+    {
+     "folder": "",
+     "id": "keep-input-geometry",
+     "label": "Keep Input Geometry"
+    },
+    {
+     "folder": "",
+     "id": "points-per-point",
+     "label": "Points Per Point"
+    },
+    {
+     "folder": "",
+     "id": "generate-from-attribute",
+     "label": "Generate From Attribute"
+    },
+    {
+     "folder": "",
+     "id": "attribute",
+     "label": "Attribute"
+    },
+    {
+     "folder": "",
+     "id": "shape",
+     "label": "Shape"
+    },
+    {
+     "folder": "",
+     "id": "orientation",
+     "label": "Orientation"
+    },
+    {
+     "folder": "",
+     "id": "center",
+     "label": "Center"
+    },
+    {
+     "folder": "",
+     "id": "size",
+     "label": "Size"
+    },
+    {
+     "folder": "",
+     "id": "uniform-scale",
+     "label": "Uniform Scale"
+    },
+    {
+     "folder": "",
+     "id": "velocity-stretch",
+     "label": "Velocity Stretch"
+    },
+    {
+     "folder": "",
+     "id": "velocity-scale",
+     "label": "Velocity Scale"
+    },
+    {
+     "folder": "",
+     "id": "quasi-stratified-sampling",
+     "label": "Quasi-Stratified Sampling"
+    },
+    {
+     "folder": "",
+     "id": "add-noise",
+     "label": "Add Noise"
+    },
+    {
+     "folder": "",
+     "id": "noise-type",
+     "label": "Noise Type"
+    },
+    {
+     "folder": "",
+     "id": "frequency",
+     "label": "Frequency"
+    },
+    {
+     "folder": "",
+     "id": "amplitude",
+     "label": "Amplitude"
+    },
+    {
+     "folder": "",
+     "id": "roughness",
+     "label": "Roughness"
+    },
+    {
+     "folder": "",
+     "id": "attenuation",
+     "label": "Attenuation"
+    },
+    {
+     "folder": "",
+     "id": "turbulence",
+     "label": "Turbulence"
+    },
+    {
+     "folder": "",
+     "id": "copy-source-attributes",
+     "label": "Copy Source Attributes"
+    },
+    {
+     "folder": "",
+     "id": "attributes",
+     "label": "Attributes"
+    },
+    {
+     "folder": "",
+     "id": "inherit-velocity",
+     "label": "Inherit Velocity"
+    },
+    {
+     "folder": "",
+     "id": "radial-velocity",
+     "label": "Radial Velocity"
+    },
+    {
+     "folder": "",
+     "id": "keep-source-attributes",
+     "label": "Keep Source Attributes"
+    },
+    {
+     "folder": "",
+     "id": "source-point-attribute",
+     "label": "Source Point Attribute"
+    },
+    {
+     "folder": "",
+     "id": "source-index-attribute",
+     "label": "Source Index Attribute"
+    },
+    {
+     "folder": "",
+     "id": "attributes-to-transform",
+     "label": "Attributes to Transform"
+    },
+    {
+     "folder": "",
+     "id": "create-output-group",
+     "label": "Create Output Group"
+    },
+    {
+     "folder": "",
+     "id": "output-group",
+     "label": "Output Group"
+    }
+   ],
+   "params_total": 32,
+   "slug": "pointreplicate",
+   "status": "ok",
+   "title": "Point Replicate geometry node"
+  },
+  "point_velocity": {
+   "category": "modify",
+   "handles": false,
+   "has_inputs_section": true,
+   "hints": [],
+   "inputs_houdini": [
+    {
+     "label": "Input",
+     "text": "Geometry whose point velocities to manipulate."
+    }
+   ],
+   "inputs_ok": true,
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "geo",
+     "optional": false
+    },
+    {
+     "multi": false,
+     "name": "previous",
+     "optional": true
+    }
+   ],
+   "output_groups_houdini": [],
+   "output_groups_ours": [],
+   "outputs_houdini": [
+    {
+     "label": "Output",
+     "text": "Modified geometry."
+    }
+   ],
+   "outputs_ok": true,
+   "outputs_ours": [
+    "geo"
+   ],
+   "params_matched": 6,
+   "params_missing": [
+    {
+     "folder": "",
+     "id": "addvel constvel",
+     "label": "Add Velocity"
+    },
+    {
+     "folder": "",
+     "id": "init",
+     "label": "Initialization"
+    },
+    {
+     "folder": "",
+     "id": "defval",
+     "label": "Default Value"
+    },
+    {
+     "folder": "",
+     "id": "inc",
+     "label": "Frame Sample"
+    },
+    {
+     "folder": "",
+     "id": "evalframe",
+     "label": "Evaluate Within Frame Range"
+    },
+    {
+     "folder": "",
+     "id": "framerange",
+     "label": "Frame Range"
+    },
+    {
+     "folder": "",
+     "id": "velapproximation",
+     "label": "Velocity Approximation"
+    },
+    {
+     "folder": "",
+     "id": "computeaccel",
+     "label": "Compute Acceleration"
+    },
+    {
+     "folder": "",
+     "id": "accelattribute",
+     "label": "Acceleration Attribute"
+    },
+    {
+     "folder": "",
+     "id": "computeangular",
+     "label": "Compute Angular Velocity"
+    },
+    {
+     "folder": "",
+     "id": "matchbyattribute",
+     "label": "Match by Attribute"
+    },
+    {
+     "folder": "",
+     "id": "attributetomatch",
+     "label": "Attribute to Match"
+    },
+    {
+     "folder": "",
+     "id": "attribname",
+     "label": "Attribute Name"
+    },
+    {
+     "folder": "",
+     "id": "addcurlnoise",
+     "label": "Add Curl Noise"
+    },
+    {
+     "folder": "",
+     "id": "animated",
+     "label": "Animated"
+    },
+    {
+     "folder": "",
+     "id": "pulseduration",
+     "label": "Pulse Duration"
+    },
+    {
+     "folder": "",
+     "id": "cnswirlsize",
+     "label": "Swirl Size"
+    },
+    {
+     "folder": "",
+     "id": "cnswirlscale",
+     "label": "Swirl Scale"
+    },
+    {
+     "folder": "",
+     "id": "cnoffset",
+     "label": "Offset"
+    },
+    {
+     "folder": "",
+     "id": "cnrough",
+     "label": "Grain"
+    },
+    {
+     "folder": "",
+     "id": "cnturbulence",
+     "label": "Turbulence"
+    },
+    {
+     "folder": "",
+     "id": "locattrib",
+     "label": "Location Attribute"
+    },
+    {
+     "folder": "",
+     "id": "addobjectmotion",
+     "label": "Add Object Motion"
+    },
+    {
+     "folder": "",
+     "id": "objpath",
+     "label": "Object Path"
+    },
+    {
+     "folder": "",
+     "id": "objsample",
+     "label": "Frame Sample"
+    },
+    {
+     "folder": "",
+     "id": "objapproximation",
+     "label": "Velocity Approximation"
+    },
+    {
+     "folder": "",
+     "id": "doconenoise",
+     "label": "Conical Noise"
+    },
+    {
+     "folder": "",
+     "id": "conemode",
+     "label": "Mode"
+    },
+    {
+     "folder": "",
+     "id": "coneangle",
+     "label": "Cone Angle"
+    },
+    {
+     "folder": "",
+     "id": "useconedirattrib conedirattrib",
+     "label": "Direction Attribute"
+    },
+    {
+     "folder": "",
+     "id": "useconedirbias conedirbias",
+     "label": "Directional Bias"
+    },
+    {
+     "folder": "",
+     "id": "coneseed",
+     "label": "Global Seed"
+    },
+    {
+     "folder": "",
+     "id": "useconeseedattrib coneseedattrib",
+     "label": "Seed Attribute"
+    }
+   ],
+   "params_total": 39,
+   "slug": "pointvelocity",
+   "status": "ok",
+   "title": "Point Velocity geometry node"
+  },
+  "points_from_volume": {
+   "category": "generate",
+   "handles": false,
+   "has_inputs_section": false,
+   "hints": [],
+   "inputs_houdini": [],
+   "inputs_ok": true,
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "geo",
+     "optional": false
+    }
+   ],
+   "output_groups_houdini": [],
+   "output_groups_ours": [],
+   "outputs_houdini": [],
+   "outputs_ok": true,
+   "outputs_ours": [
+    "geo"
+   ],
+   "params_matched": 0,
+   "params_missing": [
+    {
+     "folder": "",
+     "id": "source-type",
+     "label": "Source Type"
+    },
+    {
+     "folder": "",
+     "id": "construction-method",
+     "label": "Construction Method"
+    },
+    {
+     "folder": "",
+     "id": "invert-volume",
+     "label": "Invert Volume"
+    },
+    {
+     "folder": "",
+     "id": "point-configuration",
+     "label": "Point Configuration"
+    },
+    {
+     "folder": "",
+     "id": "point-separation",
+     "label": "Point Separation"
+    },
+    {
+     "folder": "",
+     "id": "isovalue",
+     "label": "Isovalue"
+    },
+    {
+     "folder": "",
+     "id": "min-isovalue",
+     "label": "Min Isovalue"
+    },
+    {
+     "folder": "",
+     "id": "jitter-seed",
+     "label": "Jitter Seed"
+    },
+    {
+     "folder": "",
+     "id": "jitter-scale",
+     "label": "Jitter Scale"
+    },
+    {
+     "folder": "",
+     "id": "convert-to-fog",
+     "label": "Convert To Fog"
+    },
+    {
+     "folder": "",
+     "id": "grid-offset",
+     "label": "Grid Offset"
+    },
+    {
+     "folder": "",
+     "id": "add-scale-attribute",
+     "label": "Add Scale Attribute"
+    },
+    {
+     "folder": "",
+     "id": "particle-radius-scale",
+     "label": "Particle Radius Scale"
+    },
+    {
+     "folder": "",
+     "id": "dither-surface",
+     "label": "Dither Surface"
+    },
+    {
+     "folder": "",
+     "id": "dither-normal",
+     "label": "Dither Normal"
+    },
+    {
+     "folder": "",
+     "id": "dither-angle",
+     "label": "Dither Angle"
+    },
+    {
+     "folder": "",
+     "id": "scatter-density",
+     "label": "Scatter Density"
+    },
+    {
+     "folder": "",
+     "id": "relax-iterations",
+     "label": "Relax Iterations"
+    },
+    {
+     "folder": "",
+     "id": "oversampling",
+     "label": "Oversampling"
+    },
+    {
+     "folder": "",
+     "id": "oversampling-bandwidth",
+     "label": "Oversampling Bandwidth"
+    },
+    {
+     "folder": "",
+     "id": "create-output-group",
+     "label": "Create Output Group"
+    },
+    {
+     "folder": "",
+     "id": "output-group",
+     "label": "Output Group"
+    }
+   ],
+   "params_total": 22,
+   "slug": "pointsfromvolume",
+   "status": "ok",
+   "title": "Points from Volume geometry node"
   },
   "points_to_surface": {
    "category": "volume",
@@ -14877,7 +16395,7 @@
    "outputs_ours": [
     "geo"
    ],
-   "params_matched": 1,
+   "params_matched": 3,
    "params_missing": [
     {
      "folder": "",
@@ -14903,11 +16421,6 @@
      "folder": "",
      "id": "densityscale",
      "label": "Density Scale"
-    },
-    {
-     "folder": "",
-     "id": "densityattrib",
-     "label": "Density Attribute"
     },
     {
      "folder": "",
@@ -14948,11 +16461,6 @@
      "folder": "",
      "id": "randomizeorder",
      "label": "Randomize Point Order"
-    },
-    {
-     "folder": "",
-     "id": "relaxiterations",
-     "label": "Relax Iterations"
     },
     {
      "folder": "",
@@ -15029,6 +16537,78 @@
    "slug": "scatter",
    "status": "ok",
    "title": "Scatter 2.0 geometry node"
+  },
+  "scatter_in_texture_mask": {
+   "category": "generate",
+   "handles": false,
+   "has_inputs_section": false,
+   "hints": [
+    "Texture Primitive Reads texture data from the texture primitive connected to this node\u2019s second input.",
+    "sk is Texture Primitive , the name of the texture primitive to read that\u2019s connected to this node\u2019s second input."
+   ],
+   "inputs_houdini": [],
+   "inputs_ok": true,
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "geo",
+     "optional": false
+    },
+    {
+     "multi": false,
+     "name": "mask",
+     "optional": false
+    }
+   ],
+   "output_groups_houdini": [],
+   "output_groups_ours": [],
+   "outputs_houdini": [],
+   "outputs_ok": true,
+   "outputs_ours": [
+    "geo"
+   ],
+   "params_matched": 1,
+   "params_missing": [
+    {
+     "folder": "",
+     "id": "maskoverride",
+     "label": "Mask"
+    },
+    {
+     "folder": "",
+     "id": "masktexture",
+     "label": "Texture"
+    },
+    {
+     "folder": "",
+     "id": "maskname",
+     "label": "Texture Name"
+    },
+    {
+     "folder": "",
+     "id": "maskthreshold",
+     "label": "Mask Threshold"
+    },
+    {
+     "folder": "",
+     "id": "multattrib",
+     "label": "Multiply by Attribute"
+    },
+    {
+     "folder": "",
+     "id": "relaxiterations",
+     "label": "Relax Iterations"
+    },
+    {
+     "folder": "",
+     "id": "constraintomask",
+     "label": "Constrain to Mask"
+    }
+   ],
+   "params_total": 8,
+   "slug": "scatterintexturemask",
+   "status": "ok",
+   "title": "Scatter in Texture Mask geometry node"
   },
   "scene_objects": {
    "category": "output",
@@ -15130,6 +16710,9 @@
    "slug": "vdbcombine",
    "status": "ok",
    "title": "VDB Combine geometry node"
+  },
+  "sdf_shape": {
+   "status": "unmapped"
   },
   "set_material": {
    "category": "attribute",
@@ -15370,6 +16953,9 @@
    "slug": "profile",
    "status": "ok",
    "title": "Spline Profile geometry node"
+  },
+  "slice": {
+   "status": "unmapped"
   },
   "smooth": {
    "category": "deform",
@@ -15652,6 +17238,9 @@
    "slug": "softxform",
    "status": "ok",
    "title": "Soft Transform geometry node"
+  },
+  "solidify": {
+   "status": "unmapped"
   },
   "solver": {
    "category": "time",
@@ -17367,6 +18956,9 @@
    "status": "ok",
    "title": "UV Project geometry node"
   },
+  "uv_transform": {
+   "status": "unmapped"
+  },
   "voronoi_adjacency": {
    "category": "model",
    "handles": false,
@@ -17939,5 +19531,16 @@
    "title": "Attribute Wrangle geometry node"
   }
  },
- "unmapped": []
+ "unmapped": [
+  "blender_collection",
+  "contour",
+  "curve_simplify",
+  "falloff",
+  "knife",
+  "occlusion",
+  "sdf_shape",
+  "slice",
+  "solidify",
+  "uv_transform"
+ ]
 }

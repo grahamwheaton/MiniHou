@@ -15,7 +15,7 @@ LIBRARY = "Library"
 GROUPS: List[Tuple[str, str, List[str]]] = [
     ("Create", "Shapes and curves from nothing, and the doors into a graph",
      ["box", "point", "sphere", "grid", "tube", "torus", "circle", "line", "bezier", "curve", "helix", "lsystem", "font", "lattice_grid",
-      "blender_object", "blender_image", "image_file", "usd_import", "modifier_input", "object_input"]),
+      "blender_object", "blender_collection", "blender_image", "image_file", "usd_import", "modifier_input", "object_input"]),
     ("Polygon Modelling", "Build and edit polygon surfaces",
      ["polyextrude", "pushpull", "inset", "outset", "polybevel", "polysplit", "knife", "polyfill", "polybridge", "polyexpand2d", "solidify", "subdivide", "mirror", "boolean",
       "clip", "dissolve", "divide", "reverse", "facet", "bridge", "skin", "skin_profiles", "revolve", "polyreduce", "clean",
@@ -36,7 +36,9 @@ GROUPS: List[Tuple[str, str, List[str]]] = [
     ("Curves", "Curves and what to build from them",
      ["resample", "curve_simplify", "carve", "convert_line", "fillet", "polypath", "sweep", "contour", "slice"]),
     ("Points", "Point clouds and what to do with them",
-     ["scatter", "fuse", "delaunay", "points_to_surface"]),
+     ["scatter", "scatter_in_texture_mask", "point_generate", "point_replicate", "points_from_volume", "point_velocity", "particle_trail",
+      "cluster_points", "point_cloud_measure", "point_cloud_normal", "point_cloud_reduce", "point_cloud_surface",
+      "fuse", "delaunay", "points_to_surface"]),
     ("Volumes & Terrain", "Remeshing, signed distance fields and terrain", ["remesh", "quad_remesh", "sdf_shape", "sdf_boolean", "heightfield_erode"]),
     ("Fracture & RBD", "Break things and simulate the pieces",
      ["rbd_material_fracture", "voronoi_fracture", "voronoi_fracture_points", "voronoi_split", "voronoi_adjacency",
@@ -66,6 +68,10 @@ CATEGORY_GROUP: Dict[str, str] = {
 
 # names a node is known by elsewhere (Houdini, Blender, everyday words): a search for any of them finds it
 ALIASES: Dict[str, str] = {
+    "points_from_volume": "fill inside lattice", "scatter_in_texture_mask": "image mask paint density",
+    "point_cloud_normal": "estimate orient pca", "point_cloud_reduce": "thin decimate poisson remove points", "point_cloud_surface": "snap project mls smooth",
+    "particle_trail": "streak motion lines", "cluster_points": "kmeans groups segment", "point_cloud_measure": "density neighbors crowded",
+    "point_generate": "create new points box sphere", "point_replicate": "duplicate copies multiply points", "point_velocity": "v motion curl noise",
     "building_rules": "building footprint facade grammar storeys windows balconies roof architecture",
     "region_identify": "connected islands regions flood fill connectivity",
     "region_transform": "regions islands random rotate scale extrude paving tiles stones damage",

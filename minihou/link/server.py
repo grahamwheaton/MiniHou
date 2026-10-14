@@ -74,8 +74,8 @@ class _Connection:
     def on_extra_error(self, name: str, message: str):
         self.post({"type": "error", "where": "output", "node": None, "message": f"output {name!r}: {message}"})
 
-    def on_watch(self, names, images=()):
-        self.post({"type": "watch_objects", "objects": list(names), "images": list(images)})
+    def on_watch(self, names, images=(), collections=()):
+        self.post({"type": "watch_objects", "objects": list(names), "images": list(images), "collections": list(collections)})
 
     # -- helpers -----------------------------------------------------------
     def post(self, header: dict, arrays=None):
@@ -139,7 +139,8 @@ class _Connection:
                        "graph_path": str(self.session.path.resolve()) if self.session.path else None})
             if self.instance_mode:
                 return
-            self.post({"type": "watch_objects", "objects": self.session.watched_objects(), "images": self.session.watched_images()})
+            self.post({"type": "watch_objects", "objects": self.session.watched_objects(), "images": self.session.watched_images(),
+                       "collections": self.session.watched_collections()})
             with self.cv:
                 self._iface_pending = True
                 self._want_result = True
@@ -158,6 +159,14 @@ class _Connection:
                         raise ValueError("invalid source inputs")
                     sources = {name: _decode_object({}, {k.split("/", 1)[1]: v for k, v in (_arrays or {}).items()
                                                        if k.startswith(str(i) + "/")}) for i, name in enumerate(names)}
+                    picked = h.get("object_names")
+                    if isinstance(picked, dict):
+                        for key, geo in sources.items():
+                            v = picked.get(key)
+                            if isinstance(v, list) and len(v) == 2 and all(isinstance(x, str) for x in v) and v[0]:
+                                geo.detail["object_name"] = v[0][:128]
+                                if v[1]:
+                                    geo.detail["object_collection"] = v[1][:128]
                     response, output = self.instances.set_sources(h.get("instance_id"), sources), None
                 elif t == "instance_edit":
                     response, output = self.instances.edit_live(h, _decode_object(h, _arrays or {})), None
@@ -220,6 +229,9 @@ class _Connection:
                 self.session.set_frame(float(h.get("frame", 1.0)), h.get("fps"))
             except (TypeError, ValueError):
                 self.post({"type": "error", "where": "set_frame", "message": f"bad frame {h.get('frame')!r}"})
+        elif t == "collection_members":
+            self.session.collection_received(str(h.get("collection", "")), [str(o) for o in h.get("objects", [])],
+                                             str(h.get("error", "")))
         elif t == "object_missing":
             self.session.object_received(str(h.get("object", "")), None, error=str(h.get("reason", "not found")))
         elif t == "geo_ack":

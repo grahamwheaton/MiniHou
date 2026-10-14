@@ -80,6 +80,9 @@ class Runtime:
         self._object_digest: Dict[str, str] = {}
         self._object_last: Dict[str, float] = {}
         self._object_present: Dict[str, bool] = {}
+        self.watched_collections: List[str] = []
+        self._collection_members: Dict[str, tuple] = {}   # last membership sent per watched collection
+        self._last_collection_poll = 0.0
         self.watched_images: List[str] = []
         self.dirty_images: set = set()
         self.images_sent = 0
@@ -166,6 +169,8 @@ class Runtime:
                 self._ui_dirty = True
             if self.params_dirty:
                 busy = self._forward_params() or busy
+            if self.watched_collections:
+                busy = self._send_collections() or busy
             if self.watched:
                 busy = self._send_objects() or busy
             if self.watched_images:
@@ -213,6 +218,9 @@ class Runtime:
             self._image_present.clear()
             if self.watched_images:
                 self._log(f"engine reads Blender images: {', '.join(self.watched_images)}")
+            self.watched_collections = [str(n) for n in e.get("collections", [])]
+            self._collection_members.clear()               # (re)send the membership: the engine may have restarted
+            self._last_collection_poll = 0.0
             self.watched = [str(n) for n in e.get("objects", [])]
             self.dirty_objects = set(self.watched)       # (re)send everything: the engine may have restarted
             self._object_digest.clear()
@@ -388,6 +396,29 @@ class Runtime:
                 sent = True
                 self.object_info["image:" + name] = (f"{header['width']} x {header['height']} px" if header["type"] == "image_data" else header["reason"])
                 self._ui_dirty = True
+        return sent
+
+    def _send_collections(self) -> bool:
+        """Tell the engine who is in each watched collection (children included) when that changes (main thread)."""
+        if self.client is None:
+            return False
+        now = time.monotonic()
+        if now - self._last_collection_poll < EXISTENCE_INTERVAL:
+            return False
+        self._last_collection_poll = now
+        sent = False
+        for name in self.watched_collections:
+            coll = bpy.data.collections.get(name)
+            if coll is None:
+                members, error = (), f"no collection named {name!r} in the Blender file"
+            else:
+                members, error = tuple(sorted(o.name for o in coll.all_objects)), ""
+            state = (members, error)
+            if self._collection_members.get(name) == state:
+                continue
+            if self.client.send({"type": "collection_members", "collection": name, "objects": list(members), "error": error}, None):
+                self._collection_members[name] = state
+                sent = True
         return sent
 
     def _send_objects(self) -> bool:

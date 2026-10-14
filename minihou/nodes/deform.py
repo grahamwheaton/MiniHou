@@ -81,13 +81,38 @@ def bend(geo, rest=None, *, origin, direction, length, up, bend, twist, taper, g
 @node("point_jitter", inputs=["geo"], category="deform", params=[
     Vec3("scale", (0.1, 0.1, 0.1), doc="Maximum offset along each axis"),
     Int("seed", 0),
+    Str("id_attrib", "", doc="Integer point attribute that fixes each point's random offset: it stays the same when other points "
+                            "come and go (empty: by point number)"),
+    Bool("use_pscale", False, doc="Multiply the offset by each point's pscale"),
+    Str("mask", "", doc="Scalar point attribute that scales the offset per point (0: stays, 1: full jitter)"),
     Str("group", ""),
 ])
-def point_jitter(geo, scale, seed, group):
+def point_jitter(geo, scale, seed, group, id_attrib="", use_pscale=False, mask=""):
     """Move points by a random offset (Houdini's Point Jitter)."""
-    rng = np.random.default_rng(int(seed) & 0xFFFFFFFF)
+    n = geo.npoints
+    ids = geo.point.get(id_attrib) if id_attrib else None
+    if id_attrib and (ids is None or ids.ndim != 1 or ids.dtype.kind not in "iu"):
+        raise ValueError(f"no integer point attribute {id_attrib!r} to seed the jitter by")
+    if ids is not None and n:
+        # a random number per id value, independent of how many points there are: the id picks the row of one long stream
+        top = int(ids.max()) + 1
+        if top > 50_000_000 or int(ids.min()) < 0:
+            raise ValueError(f"id attribute {id_attrib!r} must be between 0 and 50 million")
+        rnd = np.random.default_rng(int(seed) & 0xFFFFFFFF).random((top, 3))[ids.astype(np.int64)]
+    else:
+        rnd = np.random.default_rng(int(seed) & 0xFFFFFFFF).random((n, 3))
+    off = (rnd * 2 - 1) * np.asarray(scale, np.float32)
+    if use_pscale:
+        ps = geo.point.get("pscale")
+        if ps is not None and ps.ndim == 1:
+            off = off * ps[:, None]
+    if mask:
+        m = geo.point.get(mask)
+        if m is None or m.ndim != 1:
+            raise ValueError(f"no scalar point attribute {mask!r} to mask the jitter by")
+        off = off * m[:, None]
     out = geo.copy()
-    out.point["P"] = (geo.P + (rng.random((geo.npoints, 3)) * 2 - 1) * np.asarray(scale, np.float32)).astype(np.float32)
+    out.point["P"] = (geo.P + off).astype(np.float32)
     return groups.restrict(geo, out, "point", group)
 
 
