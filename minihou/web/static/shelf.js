@@ -40,9 +40,11 @@
     ["Texture", "#8f8fe6", [T("UV Project", "uv_project", "uv"), T("UV Flatten", "uv_flatten", "uv"), T("UV Transform", "uv_transform", "uv"), T("Color", "color")]],
     ["Groups", "#4fc3c3", [
       T("Group Create", "group_create", "group"), T("Group Expand", "group_expand", "group"), T("Group Promote", "group_promote", "group"),
-      T("Group by Range", "group_range", "group"), T("Blast", "blast"), T("Delete", "delete")]],
+      T("Group by Range", "group_range", "group"), T("Group from Attribute", "group_from_attribute", "group"), T("Blast", "blast"), T("Delete", "delete")]],
     ["Attributes", "#8bb9c9", [
-      T("Wrangle", "wrangle", "code"), T("Attribute Create", "attribute_create", "attr"), T("Attribute Transfer", "attribute_transfer", "attr"),
+      T("Wrangle", "wrangle", "code"), T("Attribute Create", "attribute_create", "attr"), T("Attribute Remap", "attribute_remap", "attr"),
+      T("Attribute Noise", "attribute_noise", "noise"), T("Attribute from Map", "attribute_from_map", "file"), T("Attribute from Group", "attribute_from_group", "attr"),
+      T("Attribute Transfer", "attribute_transfer", "attr"),
       T("Attribute Promote", "attribute_promote", "attr"), T("Attribute Randomize", "attribute_randomize", "attr"),
       T("Attribute Blur", "attribute_blur", "attr"), T("Attribute Rename", "attribute_rename", "attr"), T("Attribute Paint", "attrib_paint", "attr"),
       T("Attribute Delete", "attribute_delete", "attr"), T("Measure", "measure"), T("Connectivity", "connectivity"), T("Ray", "ray"), T("Falloff", "falloff"), T("Occlusion", "occlusion"),

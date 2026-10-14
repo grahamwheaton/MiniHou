@@ -33,8 +33,10 @@ URL = "https://www.sidefx.com/docs/houdini/nodes/sop/{}.html"
 # MiniHou node -> Houdini SOP slug(s), the first that exists wins. None: no Houdini equivalent (MiniHou's own node, or Blender / engine plumbing).
 MAP = {
     "assemble": "assemble", "attrib_paint": "attribpaint", "attribute_blur": "attribblur", "attribute_create": "attribcreate",
-    "attribute_delete": "attribdelete", "attribute_promote": "attribpromote", "attribute_randomize": "attribrandomize",
-    "attribute_rename": "attribute", "attribute_transfer": "attribtransfer", "bend": "bend", "bezier": "curve", "blast": "blast",
+    "attribute_delete": "attribdelete", "attribute_from_group": None, "attribute_from_map": "attribfrommap",
+    "attribute_noise": "attribnoise", "attribute_promote": "attribpromote", "attribute_randomize": "attribrandomize",
+    "attribute_remap": "attribremap", "attribute_rename": "attribute", "attribute_transfer": "attribtransfer",
+    "bend": "bend", "bezier": "curve", "blast": "blast",
     "blend": "blendshapes", "blender_image": None, "blender_object": None, "boolean": "boolean", "boolean_fracture": "booleanfracture",
     "bound": "bound", "box": "box", "bridge": "polybridge", "building_rules": None, "carve": "carve", "circle": "circle", "clean": "clean",
     "clip": "clip", "color": "color", "connectivity": "connectivity", "convert_line": "convertline",
@@ -44,7 +46,7 @@ MAP = {
     "edge_flip": "edgeflip", "edge_group": "groupcreate", "edge_group_promote": "grouppromote", "exploded_view": "explodedview",
     "facet": "facet", "fillet": "fillet", "font": "font", "for_each": "block_begin", "fuse": "fuse", "glue_cluster": "gluecluster",
     "goal_collision": None, "goal_gravity": None, "goal_length": None, "goal_pin": None, "goal_solve": None, "goal_surface": None,
-    "grid": "grid", "group_create": "groupcreate", "group_expand": "groupexpand", "group_promote": "grouppromote",
+    "grid": "grid", "group_create": "groupcreate", "group_expand": "groupexpand", "group_from_attribute": None, "group_promote": "grouppromote",
     "group_range": "grouprange", "heightfield_erode": "heightfield_erode", "helix": None, "image_file": None, "image_out": None,
     "input": None, "inset": "polyextrude", "instance": "instance", "lattice": "lattice", "lattice_grid": "lattice",
     "line": "line", "linear_taper": None, "loop_begin": "block_begin", "loop_end": "block_end", "lsystem": "lsystem",

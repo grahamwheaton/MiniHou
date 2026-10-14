@@ -631,6 +631,74 @@
    "status": "ok",
    "title": "Attribute Delete geometry node"
   },
+  "attribute_from_map": {
+   "category": "attribute",
+   "handles": false,
+   "has_inputs_section": true,
+   "hints": [
+    "Volume will sample from a 2D volume primitive on the second input geometry."
+   ],
+   "inputs_houdini": [
+    {
+     "label": "Points or Primitives",
+     "text": "Geometry to sample. If no UVs are found (on either vertices or points), a default Orthographic mapping operation is applied."
+    }
+   ],
+   "inputs_ok": true,
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "geo",
+     "optional": false
+    },
+    {
+     "multi": false,
+     "name": "texture_geo",
+     "optional": true
+    }
+   ],
+   "output_groups_houdini": [],
+   "output_groups_ours": [],
+   "outputs_houdini": [],
+   "outputs_ok": true,
+   "outputs_ours": [
+    "geo"
+   ],
+   "params_matched": 26,
+   "params_missing": [],
+   "params_total": 26,
+   "slug": "attribfrommap",
+   "status": "ok",
+   "title": "Attribute from Map geometry node"
+  },
+  "attribute_noise": {
+   "category": "attribute",
+   "handles": false,
+   "has_inputs_section": false,
+   "hints": [],
+   "inputs_houdini": [],
+   "inputs_ok": true,
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "geo",
+     "optional": false
+    }
+   ],
+   "output_groups_houdini": [],
+   "output_groups_ours": [],
+   "outputs_houdini": [],
+   "outputs_ok": true,
+   "outputs_ours": [
+    "geo"
+   ],
+   "params_matched": 62,
+   "params_missing": [],
+   "params_total": 62,
+   "slug": "attribnoise",
+   "status": "ok",
+   "title": "Attribute Noise 2.0 geometry node"
+  },
   "attribute_promote": {
    "category": "attribute",
    "handles": false,
@@ -768,6 +836,34 @@
    "slug": "attribrandomize",
    "status": "ok",
    "title": "Attribute Randomize geometry node"
+  },
+  "attribute_remap": {
+   "category": "attribute",
+   "handles": false,
+   "has_inputs_section": false,
+   "hints": [],
+   "inputs_houdini": [],
+   "inputs_ok": true,
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "geo",
+     "optional": false
+    }
+   ],
+   "output_groups_houdini": [],
+   "output_groups_ours": [],
+   "outputs_houdini": [],
+   "outputs_ok": true,
+   "outputs_ours": [
+    "geo"
+   ],
+   "params_matched": 13,
+   "params_missing": [],
+   "params_total": 13,
+   "slug": "attribremap",
+   "status": "ok",
+   "title": "Attribute Remap geometry node"
   },
   "attribute_rename": {
    "category": "attribute",

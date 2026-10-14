@@ -5,9 +5,9 @@ covered when MiniHou has a parameter of the same (or nearly the same) internal n
 read the lists as a checklist (the percentage is a floor: it counts differently named equivalents, and Houdini's many options for features MiniHou does not have, as missing).
 A `?` for Houdini's inputs means the page has no Inputs section (SideFX documents it only in the overview), so nothing could be compared automatically.
 
-122 nodes follow a Houdini SOP; 39 are MiniHou's own (no Houdini equivalent); 0 point at a page SideFX does not have.
+125 nodes follow a Houdini SOP; 39 are MiniHou's own (no Houdini equivalent); 0 point at a page SideFX does not have.
 
-Parameters: 311 of 3003 Houdini parameters covered (10%).
+Parameters: 412 of 3104 Houdini parameters covered (13%).
 
 ## Summary
 
@@ -18,8 +18,11 @@ Parameters: 311 of 3003 Houdini parameters covered (10%).
 | `attribute_blur` | [Attribute Blur geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/attribblur.html) | 1 / ? | 1 / 1 | 0 / 0 | 2 / 18 |  |
 | `attribute_create` | [Attribute Create 2.0 geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/attribcreate.html) | 1 / ? | 1 / 1 | 0 / 0 | 4 / 18 |  |
 | `attribute_delete` | [Attribute Delete geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/attribdelete.html) | 1 / ? | 1 / 1 | 0 / 0 | 0 / 7 |  |
+| `attribute_from_map` | [Attribute from Map geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/attribfrommap.html) | 2 / 1 | 1 / 1 | 0 / 0 | 26 / 26 |  |
+| `attribute_noise` | [Attribute Noise 2.0 geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/attribnoise.html) | 1 / ? | 1 / 1 | 0 / 0 | 62 / 62 |  |
 | `attribute_promote` | [Attribute Promote geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/attribpromote.html) | 1 / ? | 1 / 1 | 0 / 0 | 1 / 9 |  |
 | `attribute_randomize` | [Attribute Randomize geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/attribrandomize.html) | 1 / ? | 1 / 1 | 0 / 0 | 4 / 12 |  |
+| `attribute_remap` | [Attribute Remap geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/attribremap.html) | 1 / ? | 1 / 1 | 0 / 0 | 13 / 13 |  |
 | `attribute_rename` | [Attribute Rename geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/attribute.html) | 1 / ? | 1 / 1 | 0 / 0 | 0 / 18 |  |
 | `attribute_transfer` | [Attribute Transfer geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/attribtransfer.html) | 2 / ? | 1 / 1 | 0 / 0 | 1 / 16 |  |
 | `bend` | [Bend geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/bend.html) | 2 / 2 | 1 / 1 | 0 / 0 | 4 / 36 | yes |

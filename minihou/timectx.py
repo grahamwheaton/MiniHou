@@ -31,6 +31,9 @@ def seconds() -> float:
     return (f - 1.0) / rate
 
 
+time = seconds
+
+
 def time_inc() -> float:
     """Seconds per step: 1 / fps, or a solver substep's share of it (Houdini's @TimeInc)."""
     step = _STEP.get()
