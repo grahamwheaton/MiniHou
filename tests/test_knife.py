@@ -97,3 +97,40 @@ class KnifeTests(unittest.TestCase):
    self.assertAlmostEqual(volume(out),volume(source),places=6)
    self.assertGreater(np.count_nonzero(edges.values(out,'edge_group_knife')),7)
    self.assertTrue(np.isfinite(out.P).all())
+
+ def test_home_rounded_outline_exact_snapped_path(self):
+  from pathlib import Path
+  from minihou.nodes import _build as B
+  from minihou.nodes.knife import knife
+  from minihou import edges,topo
+  data=json.loads((Path(__file__).parent/'fixtures/knife_rounded_home_repro.json').read_text(encoding='utf-8'))
+  points=np.asarray(data['outline']);source=B.make(points,np.arange(len(points)),np.array([0,len(points)]))
+  source.point['field']=source.P.copy();source.vertex['uv']=source.P[:,:2].copy()
+  source.prim['material']=np.array([7],np.int32);source.prim['group_face']=np.array([1],np.int32)
+  out=knife(source,json.dumps(data['cuts']));out.validate()
+  def area(g):
+   total=0.
+   for start,end in zip(g.topology.prim_offsets,g.topology.prim_offsets[1:]):
+    q=g.P[g.topology.vertex_point[start:end]].astype(float)
+    signed=np.sum(np.cross(q,np.roll(q,-1,axis=0)),axis=0)[2]/2
+    self.assertGreater(signed,0);total+=signed
+   return total
+  self.assertAlmostEqual(area(out),area(source),places=6)
+  np.testing.assert_allclose(out.point['field'],out.P,atol=1e-7)
+  np.testing.assert_allclose(out.vertex['uv'],out.P[out.topology.vertex_point,:2],atol=1e-7)
+  self.assertTrue(np.all(out.prim['material']==7));self.assertTrue(np.all(out.prim['group_face']==1))
+  cut_edges=topo.edges(out).points[edges.values(out,'edge_group_knife')>0]
+  # Every intended stroke is represented continuously by tagged result edges,
+  # even if tessellation subdivides it into several shorter segments.
+  for cut in data['cuts']:
+   a,b=np.asarray(cut['a']),np.asarray(cut['b']);delta=b-a;length=np.linalg.norm(delta)
+   intervals=[]
+   for pair in cut_edges:
+    q=out.P[pair,:2].astype(float);t=(q-a)@delta/(length*length)
+    if np.max(np.linalg.norm(q-a-t[:,None]*delta,axis=1))<2e-7:
+     lo,hi=sorted(t);lo=max(0.,lo);hi=min(1.,hi)
+     if hi>lo:intervals.append((lo,hi))
+   covered=0.
+   for lo,hi in sorted(intervals):
+    self.assertLessEqual(lo,covered+2e-6);covered=max(covered,hi)
+   self.assertGreaterEqual(covered,1-2e-6)
