@@ -16,12 +16,21 @@ import numpy as np
 
 from .. import materials
 from ..geometry import Geometry, rows
-from ..sdk import Enum, Int, Str, node
+from ..sdk import Enum, Input, Int, Str, node
 
 MAX_OBJECTS_LIMIT = 10_000
 
 
-@node("scene_objects", inputs=["geo"], category="output", params=[
+SCENE_SOURCE = "scene_source"            # detail attributes scene_objects leaves on its output so the link can build the manifest
+SCENE_COLLECTION = "scene_collection"
+
+
+@node("scene_objects", inputs=["geo", Input("source_object", optional=True, doc="Which Blender object(s) to duplicate: a blender_object / "
+                                            "object_input (the object itself), a blender_collection (every object in it) or any geometry "
+                                            "with a 'source' name in its detail attributes. Overrides the 'source' parameter"),
+                           Input("target_collection", optional=True, doc="Where the objects go: a blender_object / blender_collection (its "
+                                 "collection), or any geometry with a 'collection' name in its detail attributes. Overrides the "
+                                 "'collection' parameter")], category="output", params=[
     Enum("mode", ["instances", "pieces", "curves", "points"],
          doc="instances: one Blender object per point (a linked duplicate of the object the point names), placed with the point's "
              "position, rot and scale; pieces: one mesh object per piece of the geometry (fracture pieces, say), origin at its centre; "
@@ -39,17 +48,50 @@ MAX_OBJECTS_LIMIT = 10_000
                                                   "that exist are sent; * is all of them): for pieces uv, Cd and N become Blender's UV map, "
                                                   "colour attribute and custom normals and material_index the face material; Cd on curves and "
                                                   "points becomes a colour attribute; anything else a generic attribute. radius and tilt always go"),
+    Enum("pick", ["cycle", "random", "first"], doc="instances from several source objects (a whole collection wired into 'source') and "
+                                                   "points that do not name one: cycle through them, pick at random, or always the first"),
+    Int("seed", 0, doc="pick = random: the random seed"),
     Int("max_objects", 2000, min=1, max=MAX_OBJECTS_LIMIT, doc="Safety limit: more points than this is refused, not truncated"),
 ])
-def scene_objects(geo, mode, prefix, collection, source, id_attrib, piece_attrib, attributes, max_objects):
+def scene_objects(geo, source_object, target_collection, mode, prefix, collection, source, id_attrib, piece_attrib, attributes, pick,
+                  seed, max_objects):
     """Make Blender objects out of points. The geometry passes through unchanged; what happens in Blender is described by the
     manifest the link sends (see the manual). Objects are never deleted by a cook: ones that are no longer needed are hidden, and
     a Clean up button in the MiniHou panel removes them for good."""
-    plan(geo, mode, source, id_attrib, max_objects, piece_attrib, attributes)       # validates: a bad setup is an error on this node
-    return geo
+    sources = names_from(source_object, "source")
+    coll = names_from(target_collection, "collection")
+    out = geo.copy() if (sources or coll) else geo          # untouched when nothing is wired: the geometry itself passes through
+    if sources:
+        out.detail[SCENE_SOURCE] = sources
+    if coll:
+        out.detail[SCENE_COLLECTION] = coll[0]
+    plan(out, mode, source, id_attrib, max_objects, piece_attrib, attributes, pick, seed)       # validates: a bad setup is an error here
+    return out
 
 
-def plan(geo: Geometry, mode: str, source: str, id_attrib: str, max_objects: int, piece_attrib: str = "piece", attributes: str = ""):
+def names_from(geo, kind: str) -> list:
+    """Blender object / collection names a wired input carries: ``kind`` is ``source`` or ``collection``.
+
+    Detail attributes are read in order: ``object_name`` (a blender_object / object_input: the one object), ``collection_objects``
+    (a blender_collection: every object in it), ``instance_objects`` (points from the instance node), and ``source`` /
+    ``collection`` / ``collection_name`` (a name you set yourself, a string or a list of them)."""
+    if geo is None:
+        return []
+    keys = ("object_name", "collection_objects", "instance_objects", "source") if kind == "source" else \
+           ("collection_name", "collection", "object_collection")
+    for k in keys:
+        v = geo.detail.get(k)
+        if isinstance(v, (list, tuple, np.ndarray)):
+            v = [str(x).strip() for x in v if str(x).strip()]
+            if v:
+                return v
+        elif isinstance(v, str) and v.strip():
+            return [v.strip()]
+    return []
+
+
+def plan(geo: Geometry, mode: str, source: str, id_attrib: str, max_objects: int, piece_attrib: str = "piece", attributes: str = "",
+         pick: str = "cycle", seed: int = 0):
     """The manifest columns for ``mode`` and the binary arrays that go with it (none for instances)."""
     if mode == "pieces":
         return plan_pieces(geo, piece_attrib, max_objects, attributes)
@@ -57,7 +99,7 @@ def plan(geo: Geometry, mode: str, source: str, id_attrib: str, max_objects: int
         return plan_curves(geo, attributes)
     if mode == "points":
         return plan_points(geo, attributes)
-    return plan_instances(geo, source, id_attrib, max_objects), {}
+    return plan_instances(geo, source, id_attrib, max_objects, pick, seed), {}
 
 
 MAX_PIECE_POINTS = 2_000_000
@@ -190,7 +232,7 @@ def plan_points(geo: Geometry, attributes: str = ""):
     return cols, arrays
 
 
-def plan_instances(geo: Geometry, source: str, id_attrib: str, max_objects: int) -> dict:
+def plan_instances(geo: Geometry, source: str, id_attrib: str, max_objects: int, pick: str = "cycle", seed: int = 0) -> dict:
     """Which points become objects, which Blender object each duplicates, their ids and transforms (columnar, JSON-ready)."""
     n = geo.npoints
     inst = geo.point.get("instance")
@@ -201,11 +243,19 @@ def plan_instances(geo: Geometry, source: str, id_attrib: str, max_objects: int)
         pick = np.flatnonzero((inst > 0) & (inst <= len(src_names)))
         src_index = inst[pick].astype(np.int64) - 1
     else:
-        if not str(source).strip():
-            raise ValueError("set 'source' to the Blender object to duplicate (or feed points from the instance node, which name their objects)")
-        src_names = [str(source).strip()]
+        wired = geo.detail.get(SCENE_SOURCE)
+        src_names = [str(x) for x in wired] if wired else ([str(source).strip()] if str(source).strip() else [])
+        if not src_names:
+            raise ValueError("set 'source' to the Blender object to duplicate, wire an object into the 'source' input (or feed points "
+                             "from the instance node, which name their objects)")
+        k = len(src_names)
+        if k == 1 or pick == "first":
+            src_index = np.zeros(n, np.int64)
+        elif pick == "random":
+            src_index = np.random.default_rng(int(seed)).integers(0, k, n)
+        else:
+            src_index = np.arange(n) % k
         pick = np.arange(n)
-        src_index = np.zeros(n, np.int64)
     if len(pick) > max_objects:
         raise ValueError(f"{len(pick):,} objects is more than max_objects ({max_objects:,}); raise the limit (at most "
                          f"{MAX_OBJECTS_LIMIT:,}) or make fewer points")
@@ -245,10 +295,11 @@ def build_manifest(node_id: str, params: dict, geo: Geometry, key: str):
     points, ``material`` (a name, ``""`` for none). Piece columns: see
     :func:`plan_pieces`."""
     body, arrays = plan(geo, params["mode"], params["source"], params["id_attrib"], params["max_objects"], params["piece_attrib"],
-                        params["attributes"])
+                        params["attributes"], params.get("pick", "cycle"), params.get("seed", 0))
     prefix = str(params["prefix"]).strip() or "MiniHou"
+    wired = geo.detail.get(SCENE_COLLECTION)
     header = dict(type="scene_objects", node=node_id, key=key, mode=params["mode"], prefix=prefix[:60],
-                  collection=(str(params["collection"]).strip() or prefix)[:60], **body)
+                  collection=(str(wired or params["collection"]).strip() or prefix)[:60], **body)
     return header, arrays
 
 

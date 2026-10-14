@@ -34,7 +34,7 @@ def blender_object(object, space, join_edges=True):
         raise ValueError(f"waiting for Blender object {object!r} (is Blender connected to this engine?)")
     if data.geo is None:
         raise ValueError(f"Blender object {object!r}: {data.error}")
-    geo = data.geo
+    geo = _named(data.geo, object, (data.info or {}).get("collection", ""))
     if join_edges and geo.topology.has_open and "curves" not in (data.info or {}).get("components", []):
         from .curves import polypath
         geo = polypath(geo)
@@ -54,6 +54,78 @@ def blender_object(object, space, join_edges=True):
             n /= np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
             out.table(dom)["N"] = n.astype(np.float32)
     return out
+
+
+def _named(geo, name: str, collection: str = ""):
+    """``geo`` with the object's name (detail ``object_name``, and ``object_collection`` when known) so a scene_objects node can
+    be fed the object itself."""
+    if geo.detail.get("object_name") == name and geo.detail.get("object_collection", "") == collection:
+        return geo
+    out = geo.copy()
+    out.detail["object_name"] = name
+    if collection:
+        out.detail["object_collection"] = collection
+    return out
+
+
+def _collection_token(p) -> str:
+    c = INPUTS.get_collection(p["collection"])
+    return INPUTS.collection_token(p["collection"]) + "".join(INPUTS.token(o) for o in (c.objects if c else ()))
+
+
+@node("blender_collection", category="source", key_extra=_collection_token, params=[
+    Str("collection", "", doc="Name of the Blender collection (its child collections are included)"),
+    Enum("output", ["points", "geometry"], doc="points: one point per object, at its origin, named so scene_objects / instance can pick "
+                                               "from them (attributes instance, rot, scale; detail instance_objects); geometry: the "
+                                               "geometry of every object merged together in world space"),
+    Str("pattern", "", doc="Only objects whose name matches this (space separated wildcards, ^ excludes); empty: all"),
+])
+def blender_collection(collection, output="points", pattern=""):
+    """Every object of a Blender collection, live. As points (the default) it is a list of the collection's objects: wire it into
+    scene_objects' ``source`` and each point duplicates one of them (cycle, random or first); as geometry it is all of them merged.
+    The detail attributes ``collection_name`` and ``collection_objects`` carry the names."""
+    from ..geometry import Geometry
+    from .instance import matrix_to_euler_xyz
+    if not collection:
+        raise ValueError("set 'collection' to the name of a Blender collection")
+    cdata = INPUTS.get_collection(collection)
+    if cdata is None:
+        raise ValueError(f"waiting for Blender collection {collection!r} (is Blender connected to this engine?)")
+    if cdata.error:
+        raise ValueError(f"Blender collection {collection!r}: {cdata.error}")
+    names = [n for n in cdata.objects if n not in OWN_OBJECTS]
+    if pattern.strip():
+        import fnmatch
+        pats = pattern.split()
+        inc = [p for p in pats if not p.startswith("^")]
+        exc = [p[1:] for p in pats if p.startswith("^")]
+        names = [n for n in names if (not inc or any(fnmatch.fnmatchcase(n, p) for p in inc))
+                 and not any(fnmatch.fnmatchcase(n, p) for p in exc)]
+    mats = []
+    datas = []
+    for n in names:
+        d = INPUTS.get(n)
+        datas.append(d)
+        mats.append(np.asarray(d.matrix, np.float64).reshape(4, 4) if d is not None and d.matrix is not None else np.eye(4))
+    if output == "geometry":
+        from .merge import merge
+        parts = [blender_object(n, "world") for n, d in zip(names, datas) if d is not None and d.geo is not None]
+        geo = merge(parts) if parts else Geometry()
+    else:
+        P = np.array([m[:3, 3] for m in mats], np.float64).reshape(-1, 3)
+        geo = Geometry.from_arrays(P.astype(np.float32), np.zeros(0, np.int32), np.zeros(1, np.int32))
+        n_ = len(names)
+        if n_:
+            scale = np.array([np.linalg.norm(m[:3, :3], axis=0) for m in mats], np.float32)
+            R = np.array([m[:3, :3] / np.maximum(np.linalg.norm(m[:3, :3], axis=0), 1e-12) for m in mats])
+            rot = matrix_to_euler_xyz(R).astype(np.float32)
+            geo.point["instance"] = np.arange(1, n_ + 1, dtype=np.int32)
+            geo.point["rot"] = rot
+            geo.point["scale"] = scale
+        geo.detail["instance_objects"] = list(names)
+    geo.detail["collection_name"] = collection
+    geo.detail["collection_objects"] = list(names)
+    return geo
 
 
 @node("modifier_input", category="source")

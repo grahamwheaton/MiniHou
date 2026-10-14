@@ -395,10 +395,31 @@ class Session:
 
     # -- Blender objects as inputs ---------------------------------------------------------------------
     def watched_objects(self) -> List[str]:
-        """Blender objects the graph reads (``blender_object`` nodes): the add-on streams exactly these."""
+        """Blender objects the graph reads (``blender_object`` nodes, and the members of watched collections): the add-on streams
+        exactly these."""
         with self.lock:
-            return sorted({str(inst.params.get("object") or "") for inst in self.graph.nodes.values()
-                           if inst.type == "blender_object"} - {""})
+            names = {str(inst.params.get("object") or "") for inst in self.graph.nodes.values() if inst.type == "blender_object"}
+            for c in {str(inst.params.get("collection") or "") for inst in self.graph.nodes.values() if inst.type == "blender_collection"} - {""}:
+                d = INPUTS.get_collection(c)
+                if d is not None and not d.error:
+                    names.update(d.objects)
+            return sorted(names - {""})
+
+    def watched_collections(self) -> List[str]:
+        """Blender collections the graph reads (``blender_collection`` nodes): the add-on reports who is in them."""
+        with self.lock:
+            return sorted({str(inst.params.get("collection") or "") for inst in self.graph.nodes.values()
+                           if inst.type == "blender_collection"} - {""})
+
+    def collection_received(self, name: str, objects, error: str = "") -> None:
+        """Who is in a Blender collection (or why there is no such collection). Recooks what depends on it; not a graph edit."""
+        INPUTS.put_collection(name, objects, error)
+        if name not in self.watched_collections():
+            return
+        self._check_watch()
+        with self.lock:
+            self._rev += 1
+            self._wake.set()
 
     def watched_images(self) -> List[str]:
         """Blender images the graph reads (``blender_image`` nodes): the add-on streams exactly these."""
@@ -436,17 +457,18 @@ class Session:
             self._wake.set()
 
     def _check_watch(self) -> None:
-        w, wi = self.watched_objects(), self.watched_images()
-        if w == self._watched and wi == getattr(self, "_watched_images", None):
+        w, wi, wc = self.watched_objects(), self.watched_images(), self.watched_collections()
+        if w == self._watched and wi == getattr(self, "_watched_images", None) and wc == getattr(self, "_watched_collections", None):
             return
-        self._watched, self._watched_images = w, wi
+        self._watched, self._watched_images, self._watched_collections = w, wi, wc
         INPUTS.retain(w)
         INPUTS.retain_images(wi)
+        INPUTS.retain_collections(wc)
         for l in list(self._listeners):
             fn = getattr(l, "on_watch", None)
             if fn:
                 try:
-                    fn(w, wi)
+                    fn(w, wi, collections=wc)
                 except Exception:  # noqa: BLE001
                     log.exception("listener failed")
 

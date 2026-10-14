@@ -57,11 +57,40 @@ class ImageData:
     token: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
+@dataclass
+class CollectionData:
+    objects: List[str]                            # names of the objects in the collection (children included), sorted
+    error: str = ""                               # why there are none (no such collection)
+    token: str = field(default_factory=lambda: uuid.uuid4().hex)
+
+
 class ObjectInputs:
     def __init__(self):
         self._lock = threading.Lock()
         self._data: Dict[str, ObjectData] = {}
         self._images: Dict[str, ImageData] = {}
+        self._collections: Dict[str, "CollectionData"] = {}
+
+    # -- Blender collections -------------------------------------------------------------------------
+    def put_collection(self, name: str, objects, error: str = "") -> None:
+        with self._lock:
+            self._collections[name] = CollectionData([str(o) for o in objects], error)
+
+    def get_collection(self, name: str) -> Optional["CollectionData"]:
+        if not _READ_ALLOWED.get():
+            raise ValueError("modifier graphs cannot read legacy Blender collections: feedback loop prevention")
+        with self._lock:
+            return self._collections.get(name)
+
+    def collection_token(self, name: str) -> str:
+        d = self.get_collection(name)
+        return d.token if d is not None else "none"
+
+    def retain_collections(self, names) -> None:
+        keep = set(names)
+        with self._lock:
+            for n in [n for n in self._collections if n not in keep]:
+                del self._collections[n]
 
     # -- Blender images ------------------------------------------------------------------------------
     def put_image(self, name: str, pixels, meta: Optional[dict] = None, error: str = "") -> None:
@@ -116,6 +145,7 @@ class ObjectInputs:
         with self._lock:
             self._data.clear()
             self._images.clear()
+            self._collections.clear()
 
 
 INPUTS = ObjectInputs()
