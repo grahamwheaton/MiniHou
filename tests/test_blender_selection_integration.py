@@ -86,3 +86,62 @@ class BlenderSelectionIntegrationTests(unittest.TestCase):
         shelf.dispatch_event('dragend',{'dataTransfer':transfer})
         self.assertEqual(set(self.s.graph.nodes),{'b','o'})
 
+    def test_sidebar_draw_curve_commits_a_bezier(self):
+        import json
+        self.box_scene()
+        self.page.locator('#pv-sketch summary').click()
+        self.page.get_by_label('Sketch grid').fill('0')
+        self.page.get_by_label('Sketch grid').press('Tab')
+        self.page.click('#pv-left-tools [data-sketch="bezier"]')
+        rect=self.page.locator('#pv-canvas').bounding_box()
+        self.page.keyboard.down('Control')
+        for x,y in [(.2,.65),(.5,.5),(.8,.65)]:
+            self.page.mouse.click(rect['x']+rect['width']*x,rect['y']+rect['height']*y)
+        self.page.keyboard.up('Control')
+        self.page.keyboard.press('Enter')
+        self.assertTrue(fixture.until(lambda:any(n.type=='bezier' for n in self.s.graph.nodes.values())))
+        node=next(n for n in self.s.graph.nodes.values() if n.type=='bezier')
+        controls=json.loads(node.params['controls'])
+        self.assertEqual(len(controls),3)
+        self.assertTrue(all(c['mode']=='AUTO' for c in controls))
+        self.assertFalse(node.params['closed'])
+        self.assertFalse(any(n.type=='curve' for n in self.s.graph.nodes.values()))
+        self.assertTrue(fixture.until(lambda:self.s.status()['ok']))
+
+    def exercise_modal_face_operation(self,shortcut,node_type,param):
+        self.box_scene()
+        self.page.click('#preview [data-mode="face"]')
+        self.page.mouse.click(*self.view_xy('face',self.top))
+        x,y=self.view_xy('face',self.top)
+        self.page.mouse.move(x,y)
+        self.page.keyboard.press(shortcut)
+        self.assertTrue(fixture.until(lambda:any(n.type==node_type for n in self.s.graph.nodes.values())))
+        nid=next(i for i,n in self.s.graph.nodes.items() if n.type==node_type)
+        self.page.mouse.move(x+35,y)
+        self.assertTrue(fixture.until(lambda:self.s.graph.nodes[nid].params.get(param,0)>0))
+        self.page.keyboard.press('Escape')
+        self.assertTrue(fixture.until(lambda:nid not in self.s.graph.nodes))
+        self.assertEqual(set(self.s.graph.nodes),{'b','o'})
+        self.assertEqual(self.s.graph.nodes['o'].inputs,{'geo':'b'})
+        self.page.wait_for_function("document.querySelector('#pv-node').innerText.includes('b')")
+        self.page.mouse.click(*self.view_xy('face',self.top))
+        x,y=self.view_xy('face',self.top)
+        self.page.mouse.move(x,y)
+        self.page.keyboard.press(shortcut)
+        self.assertTrue(fixture.until(lambda:any(n.type==node_type for n in self.s.graph.nodes.values())))
+        nid=next(i for i,n in self.s.graph.nodes.items() if n.type==node_type)
+        self.page.mouse.move(x+25,y)
+        self.assertTrue(fixture.until(lambda:self.s.graph.nodes[nid].params.get(param,0)>0))
+        self.page.keyboard.press('Enter')
+        self.page.wait_for_function("document.querySelector('.pv-drag-feedback').hidden")
+        self.assertIn(nid,self.s.graph.nodes)
+        self.assertEqual(self.s.graph.nodes[nid].inputs,{'geo':'b'})
+        self.assertEqual(self.s.graph.nodes['o'].inputs,{'geo':nid})
+        self.assertTrue(fixture.until(lambda:self.s.status()['ok']))
+
+    def test_i_inset_modal_cancel_and_confirm(self):
+        self.exercise_modal_face_operation('i','inset','amount')
+
+    def test_alt_e_pushpull_modal_cancel_and_confirm(self):
+        self.exercise_modal_face_operation('Alt+e','pushpull','distance')
+
