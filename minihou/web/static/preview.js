@@ -1457,6 +1457,7 @@ window.MiniHouPreview = (() => {
         if(!h)return false;startHandleDrag({button:0,modal:true,clientX,clientY,preventDefault(){},stopPropagation(){}},h);return true;
       },
       edgeAt:(x,y)=>raw?pickEdge(camera(),x,y,14):null,
+      pointAt:(x,y)=>raw?pickPoint(camera(),x,y,14):-1,
       geometry:()=>raw, quadStrip,
       project: p=>toScreen(camera(),...p),
       isDragging:()=>!!handleDrag||endingDrag,

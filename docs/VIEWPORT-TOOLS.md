@@ -70,3 +70,11 @@ In the viewport W/E/R selects Move/Rotate/Scale; Shift+E extrudes selected faces
 Bezier anchors and selected tangents share oriented move axes, rotation rings and scale tips. Rotate/scale act around the anchor (selecting the anchor transforms both tangents). X/Y/Z constrains; Shift+axis excludes an axis for Move; Ctrl temporarily inverts snapping, using move/angle/scale increments as appropriate. Auto/Vector switches to Free on manual editing. Rotation without an axis uses the orientation Z axis. Surface snapping applies to Move; rotation/scale snap increments only.
 
 User preferences includes an explicit Python execution checkbox, off for a fresh user. It is stored in the user's MiniHou preferences.json separately from graphs and browser presets. CLI --allow-python and MINIHOU_PYTHON_NODES remain supported as startup overrides. Python executes with normal account permissions; enable only for trusted graphs.
+
+## Viewport toolbar and vertex Knife
+
+The viewport uses a compact grouped two-column tool strip with consistent vector icons, accessible names, shortcut tooltips and focus outlines. Wide panes show labels; narrow panes use icons. Hints are reduced in narrow views to avoid covering the model. Display settings remain collapsible.
+
+Knife (K or the blade icon) previews cuts between existing non-neighbouring vertices belonging to the same polygon. Click vertices, Enter to create a PolySplit node, Backspace to remove the last point, or Escape/right-click to cancel. Middle mouse remains available for navigation. Switching toolbar tools cancels the pending cut. Commit is one undo step.
+
+This is a vertex-to-vertex face Knife, not full Blender Knife parity. Arbitrary edge-interior points, free face-interior cuts, automatic traversal through several faces and cut-through are not implemented. Use Loop Cut for quad-strip cuts. Existing geometry attributes are carried by the PolySplit engine.

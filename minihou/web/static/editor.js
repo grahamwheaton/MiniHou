@@ -1191,6 +1191,14 @@
     $("#pv-assign-btn").onclick = () => { if (paintTool.isOpen() && !paintTool.active()) paintTool.close(); else { paintTool.setPaint(false); paintTool.open("assign"); } };
   }  const curveTool = pv?.ok && window.MiniCurveTool ? MiniCurveTool(pv,$('#pv-canvas'),(id,value)=>queueSet(id,'controls',value)) : null;
   const selectionTool=pv?.ok&&window.MiniSelectionTool?MiniSelectionTool(pv,$('#pv-canvas')):null;
+  const knifeTool=pv?.ok?MiniKnifeTool(pv,$('#pv-canvas'),async params=>{
+    if(!pvNode)throw Error('Display a polygon mesh first.');
+    const r=await edit([{op:'insert',layout:'vertical',after:pvNode,type:'polysplit',params}]);
+    if(!r)throw Error('Cut failed. Pick non-neighbouring vertices of the same face.');
+    const id=r.results[0].id;pvKeepCameraNode=id;select([id]);
+  }):null;
+  $('#pv-left-tools').addEventListener('click',e=>{if(!e.target.closest('#pv-knife'))knifeTool?.cancel();},true);
+  $('#pv-knife').onclick=()=>{sketchTool?.cancel();selectionTool?.cancel();knifeTool?.start();};
   let sketchBezier=false;
   const sketchTool=pv?.ok&&window.MiniSketchTool?MiniSketchTool(pv,$('#pv-canvas'),async spec=>{
     if(sketchBezier){const points=spec.params.points.trim().split(/\s+/).map(p=>p.split(',').map(Number));spec={type:'bezier',params:{controls:JSON.stringify(points.map(p=>({p,left:p.slice(),right:p.slice(),mode:'AUTO'}))),closed:false}};sketchBezier=false;}
@@ -1204,6 +1212,7 @@
   document.addEventListener('dragend',()=>{shelfDragType=null;placementPreview?.hide();});
   document.addEventListener('keydown',e=>{if(e.key==='Escape')placementPreview?.hide();});
   if(placementPreview){const previous=pv.onOverlayDraw;pv.onOverlayDraw=()=>{previous?.();placementPreview.draw();};}
+  $('#preview').addEventListener('keydown',e=>{if(e.key.toLowerCase()==='k'&&!e.ctrlKey&&!e.altKey&&!e.target.closest('input,textarea,select,[contenteditable]')){e.preventDefault();$('#pv-knife').click();}},true);
   let viewportMouse=[0,0];$('#pv-canvas').parentElement.addEventListener('pointermove',e=>viewportMouse=[e.clientX,e.clientY]);
   function beginTransform(tool,x=viewportMouse[0],y=viewportMouse[1]){
     if(!pv?.ok)return;setTool(tool);
@@ -1802,7 +1811,7 @@
     wrap.addEventListener("pointerleave", () => { pvOver = false; });
     document.addEventListener("keydown", (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
-      if(modelTool?.active()||selectionTool?.active()||sketchTool?.active()||loopTool?.active()||pv.isDragging()||curveTool?.active())return;
+      if(knifeTool?.active()||modelTool?.active()||selectionTool?.active()||sketchTool?.active()||loopTool?.active()||pv.isDragging()||curveTool?.active())return;
       if (!pvOver || tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable) return;
       if((e.ctrlKey&&e.code==='KeyB')||(e.altKey&&e.code==='KeyE')||(!e.ctrlKey&&!e.altKey&&['KeyI','KeyE'].includes(e.code))){
         const kind=e.ctrlKey?'bevel':e.altKey?'pushpull':e.code==='KeyI'?'inset':'extrude';modelTool?.start(kind,...viewportMouse).catch(err=>toast(err.message));e.preventDefault();e.stopImmediatePropagation();return;
