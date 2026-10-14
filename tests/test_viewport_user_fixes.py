@@ -72,6 +72,8 @@ class ViewportFixesTests(unittest.TestCase):
         self.assertEqual(self.page.evaluate('minihou.preview.previewObjects.map(o=>o.node)'),['b','other'])
         self.page.evaluate('minihou.preview.clearSelection()')
         def pixels():
+            self.page.evaluate("""()=>{const pv=minihou.preview,g=pv.geometry(),T=g.tri.slice(),F=g.triPrim.slice(),order=[];if(!g._mixed){for(let i=0;i<12;i++)order.push(i,i+12);order.forEach((t,i)=>{g.tri.set(T.subarray(t*3,t*3+3),i*3);g.triPrim[i]=F[t];});g._mixed=true;}const values=new Float32Array(12*3);for(let i=0;i<12;i++)values.set([.62,.68,.76],i*3);pv.setAttrView({domain:'prim',comps:3,values,min:0,max:1});}""")
+            self.assertEqual(self.page.evaluate("minihou.preview.attrViewInfo()?.domain"),"prim")
             self.page.evaluate('minihou.preview.redraw()')
             self.page.wait_for_timeout(60)
             png=base64.b64encode(self.page.locator('#pv-canvas').screenshot()).decode('ascii')
@@ -79,7 +81,6 @@ class ViewportFixesTests(unittest.TestCase):
             return self.page.evaluate('''async ([png,points])=>{const img=new Image();img.src='data:image/png;base64,'+png;await img.decode();const c=document.createElement('canvas');c.width=img.width;c.height=img.height;const ctx=c.getContext('2d');ctx.drawImage(img,0,0);return points.map(p=>Array.from(ctx.getImageData(Math.round(p[0]),Math.round(p[1]),1,1).data).slice(0,3));}''',[png,coords])
         # Deliberately interleave object triangle owners, as Morton chunk ordering does.
         # Primitive colouring unwelds this order; isolation must use owner IDs, not a prefix.
-        self.page.evaluate("""()=>{const pv=minihou.preview,g=pv.geometry(),T=g.tri.slice(),F=g.triPrim.slice(),order=[];for(let i=0;i<12;i++)order.push(i,i+12);order.forEach((t,i)=>{g.tri.set(T.subarray(t*3,t*3+3),i*3);g.triPrim[i]=F[t];});const values=new Float32Array(12*3);for(let i=0;i<12;i++)values.set([.62,.68,.76],i*3);pv.setAttrView({domain:'prim',comps:3,values,min:0,max:1});}""")
         normal=pixels()
         self.page.click('[data-pv-menu="pv-menu-view"]');self.page.check('#pv-isolated');self.page.keyboard.press('Escape')
         dim=pixels()
