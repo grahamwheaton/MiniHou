@@ -168,6 +168,21 @@ def op_insert(g: Graph, op: dict) -> dict:
         meta["pos"] = _pos(op["pos"])
     elif isinstance(base.meta.get("pos"), list):
         meta["pos"] = [round(base.meta["pos"][0] + 190, 1), round(base.meta["pos"][1] + 70, 1)]
+    if op.get("layout") == "vertical" and isinstance(base.meta.get("pos"), list) and "pos" not in op:
+        x, y = base.meta["pos"]
+        meta["pos"] = [x, y + 150]
+        # Make room only in this downstream stream; leave unrelated layouts alone.
+        downstream = set(cid for cid, _, _ in readers)
+        changed = True
+        while changed:
+            changed = False
+            for cid, c in g.nodes.items():
+                if cid not in downstream and any(r in downstream for value in c.inputs.values() for r in (value if isinstance(value, list) else [value])):
+                    downstream.add(cid); changed = True
+        for cid in downstream:
+            p = g.nodes[cid].meta.get("pos")
+            if isinstance(p, list) and abs(p[0] - x) < 180 and p[1] >= y + 100:
+                g.nodes[cid].meta["pos"] = [p[0], p[1] + 150]
     if op.get("comment"):
         meta["comment"] = str(op["comment"])
     g.add_node(nid, t, op.get("params") or None, None, **meta)

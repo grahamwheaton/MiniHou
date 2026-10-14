@@ -452,13 +452,27 @@ window.MiniHouPreview = (() => {
     function quadStrip(edge,ring=true) {
       const es=[];for(let i=0;i<raw.edge.length;i+=2)es.push([raw.edge[i],raw.edge[i+1]]);
       const faces=new Map();for(let i=0;i<raw.tri.length;i+=3){const f=raw.triPrim[i/3];if(!faces.has(f))faces.set(f,new Set());for(let j=0;j<3;j++)faces.get(f).add(raw.tri[i+j]);}
-      const incident=e=>[...faces.values()].filter(v=>v.has(e[0])&&v.has(e[1]));
+      const at=new Map(),incidentFaces=new Map();
+      for(const e of es){for(const v of e){if(!at.has(v))at.set(v,[]);at.get(v).push(e);}incidentFaces.set(edgeKey(...e),[...faces.values()].filter(f=>f.has(e[0])&&f.has(e[1])));}
+      const incident=e=>incidentFaces.get(edgeKey(...e))||[];
       const found=new Map([[edgeKey(...edge),edge]]),queue=[edge];
       for(let i=0;i<queue.length;i++){
         const e=queue[i],fs=incident(e);if(fs.length>2)continue;
         let next=[];
         if(ring)for(const f of fs){if(f.size!==4)continue;const opposite=es.find(o=>f.has(o[0])&&f.has(o[1])&&!o.some(v=>e.includes(v)));if(opposite)next.push(opposite);}
-        else for(const v of e){const at=es.filter(o=>o.includes(v));if(at.length!==4)continue;next.push(...at.filter(o=>!o.some(x=>x!==v&&e.includes(x))&&!fs.some(f=>f.has(o[0])&&f.has(o[1]))));}
+        else for(const v of e){
+          const candidates=(at.get(v)||[]).filter(o=>edgeKey(...o)!==edgeKey(...e)&&incident(o).length<=2);
+          // Preserve the unambiguous topological continuation through regular quads.
+          const opposite=(at.get(v)||[]).length===4?candidates.filter(o=>!fs.some(f=>f.has(o[0])&&f.has(o[1]))):[];
+          if(opposite.length===1){next.push(opposite[0]);continue;}
+          // A cap perimeter is a coherent flow even when each vertex has valence 3.
+          const perimeter=candidates.filter(o=>fs.some(f=>f.size>4&&f.has(o[0])&&f.has(o[1])));
+          if(perimeter.length===1){next.push(perimeter[0]);continue;}
+          // Irregular wire/boundary flow: choose one clearly forward direction, never fan out.
+          const other=e[0]===v?e[1]:e[0],incoming=[0,1,2].map(k=>raw.P[v*3+k]-raw.P[other*3+k]),L=Math.hypot(...incoming);
+          const ranked=candidates.map(o=>{const w=o[0]===v?o[1]:o[0],d=[0,1,2].map(k=>raw.P[w*3+k]-raw.P[v*3+k]),D=Math.hypot(...d);return {edge:o,score:L&&D?dot(incoming,d)/(L*D):-1};}).sort((a,b)=>b.score-a.score);
+          if(ranked[0]?.score>.5&&(!ranked[1]||ranked[0].score-ranked[1].score>.15))next.push(ranked[0].edge);
+        }
         for(const n of next){const k=edgeKey(...n);if(!found.has(k)){found.set(k,n);queue.push(n);}}
       }return [...found.values()];
     }
@@ -1126,7 +1140,8 @@ window.MiniHouPreview = (() => {
         }
         if (h.min !== undefined) v = Math.max(h.min, v);
         if (h.max !== undefined) v = Math.min(h.max, v);
-        v = Math.round(v * 1e5) / 1e5;
+        const resolution=h.kind==='arrow'&&['amount','distance','thickness'].includes(h.param)&&!snapping?1000:1e5;
+        v = Math.round(v * resolution) / resolution;
         if (v !== drag.value) { drag.value = v; if (api.onHandle) api.onHandle(h, v, false); }
         feedback.textContent=`${h.label} · ${v.toFixed(3)}${snapping?' · SNAP '+interaction.element:''}${ev.shiftKey?' · PRECISE':''} · Esc cancels`;schedule();
       };
@@ -1416,11 +1431,10 @@ window.MiniHouPreview = (() => {
     canvas.addEventListener("pointerup", endDrag); canvas.addEventListener("pointercancel", endDrag);
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("wheel", (e) => { e.preventDefault(); if(fly){flySpeed=Math.max(.001,Math.min(100000,flySpeed*Math.exp(-e.deltaY*.0015)));flyHint();return;} const cam=camera(),r=canvas.getBoundingClientRect(),direction=rayAt(cam,e.clientX-r.left,e.clientY-r.top),hit=raw?raycast(cam.eye,direction):null;
-      if(hit && !view.ortho){
-        const fraction=1-Math.exp(-Math.max(-500,Math.min(500,e.deltaY))*.0012);
-        const step=hit.t*fraction;
-        for(let i=0;i<3;i++)view.target[i]-=direction[i]*step;
-      }else view.dist=Math.max(.0001,view.dist*Math.exp(Math.max(-500,Math.min(500,e.deltaY))*.0012));
+      const anchor=hit?IM.add(cam.eye,IM.mul(direction,hit.t)):planePoint(e.clientX-r.left,e.clientY-r.top,view.target);
+      const distance=Math.max(.0001,view.dist*Math.exp(Math.max(-500,Math.min(500,e.deltaY))*.0012)),factor=distance/view.dist;
+      if(anchor)for(let i=0;i<3;i++)view.target[i]=anchor[i]+(view.target[i]-anchor[i])*factor;
+      view.dist=distance;
       schedule(); }, { passive: false });
     canvas.addEventListener("dblclick", (e) => { if (sel.mode === "view") frameAll(); });
     if (window.ResizeObserver) new ResizeObserver(schedule).observe(canvas);
@@ -1497,10 +1511,27 @@ window.MiniHouPreview = (() => {
       toggleOrtho() { return api.setOrtho(!view.ortho); },
       setMode(m) {
         if (!["view", "point", "edge", "face", "piece"].includes(m)) return;
-        sel.mode = m;
-        canvas.style.cursor = m === "view" ? "grab" : "crosshair";
-        change({}, "replace");                                                          // a new mode starts with nothing selected
-        schedule();
+        const source=sel.mode==="view"?(sel.lastMode||"point"):sel.mode;
+        if(m==="view"){
+          sel.lastMode=source;sel.mode=m;canvas.style.cursor="grab";
+          ov.points=ov.edgeIdx=ov.faceIdx=0;if(api.onSelect)api.onSelect(summary());schedule();return;
+        }
+        const found={points:[],edges:[],faces:[]};
+        if(raw&&m!==source){
+          const es=[];for(let i=0;i<raw.edge.length;i+=2)es.push([raw.edge[i],raw.edge[i+1]]);
+          const faces=new Map();for(let i=0;i<raw.tri.length;i+=3){const f=raw.triPrim[i/3];if(!faces.has(f))faces.set(f,new Set());for(let j=0;j<3;j++)faces.get(f).add(raw.tri[i+j]);}
+          const points=source==="point"?new Set(sel.point):source==="edge"?new Set([...sel.edge.values()].flat()):new Set([...sel.face].flatMap(f=>[...(faces.get(f)||[])]));
+          if(m==="point")found.points=[...points];
+          else if(m==="edge")found.edges=es.filter(e=>source==="face"||source==="piece"?[...sel.face].some(f=>faces.get(f)?.has(e[0])&&faces.get(f)?.has(e[1])):points.has(e[0])&&points.has(e[1]));
+          else{
+            if(source==="face"||source==="piece")found.faces=[...sel.face];
+            else for(const [f,vs]of faces){const boundary=es.filter(e=>vs.has(e[0])&&vs.has(e[1]));
+              if(source==="point"?[...vs].every(v=>points.has(v)):boundary.length&&boundary.every(e=>sel.edge.has(edgeKey(...e))))found.faces.push(f);
+            }
+            if(m==="piece")found.faces=piecesOf(found.faces);
+          }
+        }else Object.assign(found,{points:[...sel.point],edges:[...sel.edge.values()],faces:[...sel.face]});
+        sel.mode=m;sel.lastMode=m;canvas.style.cursor="crosshair";change(found,"replace");schedule();
       },
       selection: summary,
       selectionInfo() {                                                                   // the selected points and where they are: the anchor of a move/rotate/scale gizmo

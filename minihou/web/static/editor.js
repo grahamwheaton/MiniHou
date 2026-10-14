@@ -185,6 +185,7 @@
   }
   let desktopPendingEdits = 0;
   async function edit(ops, context = { path: S.path, documentId: S.documentId }) {
+    ops=ops.map(op=>op.op==='add'&&op.type==='lsystem'?{...op,params:{premise:'A',rules:'A=F[&A]/[&A]/[&A]A',generations:4,separate_angles:true,yaw:33,pitch:42,roll:137.5,step:.3,width:.03,...op.params}}:op);
     desktopPendingEdits++;
     try {
       const r = await api("/api/edit", { ops, origin: "editor", document_id: context.documentId, gesture:context.gesture });
@@ -1080,7 +1081,7 @@
   // ---------------------------------------------------------------- 3-D preview of the selected (or display) node
   const pvMsg = (text) => { const m = $("#pv-msg"); m.textContent = text || ""; m.classList.toggle("hidden", !text); };
   const pv = window.MiniHouPreview ? window.MiniHouPreview.create($("#pv-canvas"), pvMsg) : null;
-  const loopTool=pv?.ok&&window.MiniLoopTool?MiniLoopTool(pv,$('#pv-canvas'),async params=>{if(!pvNode)return;const r=await edit([{op:'insert',after:pvNode,type:'polysplit',params}]);if(r){const id=r.results?.[0]?.id;if(id){pvKeepCameraNode=id;select([id]);}}}):null;
+  const loopTool=pv?.ok&&window.MiniLoopTool?MiniLoopTool(pv,$('#pv-canvas'),async params=>{if(!pvNode)return;const r=await edit([{op:'insert',layout:'vertical',after:pvNode,type:'polysplit',params}]);if(r){const id=r.results?.[0]?.id;if(id){pvKeepCameraNode=id;select([id]);}}}):null;
 
   let sheet = null;                                                           // the geometry spreadsheet (sheet.js)
   let paintTool = null;                                                       // attribute paint and quick assign (paint-tool.js), made once the view exists
@@ -1444,7 +1445,7 @@
     const params = a.params(s);
     if ((params.group || params.pattern || params.edges || "").length > 30000) { toast("That selection is too large to write into a node; select fewer elements."); return; }
     if(pv.selectableTemplates?.length){const merged=await edit([{op:'merge_templates',id:node}]);if(!merged)return;node=merged.results[0].id;pv.selectableTemplates=[];}
-    const r = await edit([{ op: "insert", after: node, type: a.type, params }]);
+    const r = await edit([{ op: "insert", layout:"vertical", after: node, type: a.type, params }]);
     if (r) { pv.clearSelection(); select([r.results[0].id]); }
   }
   const modelTool=pv?.ok&&window.MiniModalModelTool?MiniModalModelTool(pv,$('#pv-canvas'),{
@@ -1452,7 +1453,7 @@
       const mapping={bevel:'polybevel',inset:'inset',extrude:'polyextrude',pushpull:'pushpull'},type=mapping[kind],action=(SELECTION_ACTIONS[pvSelection.mode]||[]).find(a=>a.type===type);
       if(!action||!(pvSelection[SEL_KEY[pvSelection.mode]]||[]).length)throw Error(kind==='bevel'?'Select edges to bevel.':'Select faces for this tool.');
       const gesture='model-'+crypto.randomUUID(),documentId=S.documentId,source=pvNode,params=action.params(pvSelection),param=kind==='inset'?'amount':'distance';params[param]=0;
-      const r=await edit([{op:'insert',after:source,type,params}],{documentId,gesture});if(!r)throw Error('Could not create tool');const id=r.results[0].id;pvKeepCameraNode=id;pv.clearSelection();select([id]);
+      const r=await edit([{op:'insert',layout:'vertical',after:source,type,params}],{documentId,gesture});if(!r)throw Error('Could not create tool');const id=r.results[0].id;pvKeepCameraNode=id;pv.clearSelection();select([id]);
       return {id,gesture,documentId,source,param,value:0,divisions:1,scale:Math.max(.00001,(pv.bounds?.()?.radius||1)/200)};
     },
     async update(ctx,value,divisions){const params={[ctx.param]:ctx.param==='amount'||nodeOf(ctx.id)?.type==='polybevel'?Math.max(0,value):value};if(nodeOf(ctx.id)?.type==='polybevel')params.divisions=divisions;const r=await edit([{op:'set',id:ctx.id,params}],{documentId:ctx.documentId,gesture:ctx.gesture});if(!r)throw Error('Tool edit rejected');},
@@ -1592,7 +1593,7 @@
       if (r) select([id]);
       return;
     }
-    const r = await edit([{ op: "insert", after: target, type: item.type, params }]);
+    const r = await edit([{ op: "insert", layout:pieFromView?"vertical":undefined, after: target, type: item.type, params }]);
     if (r) { if (pv && pv.ok) pv.clearSelection(); select([r.results[0].id]); }
   }
   // ---- the tool shelf (shelf.js): the same tools as the pie, one click or drag away
@@ -1613,7 +1614,7 @@
     viewport.addEventListener('drop',async e=>{
       placementPreview?.hide();
       const raw=e.dataTransfer.getData('application/x-minihou-tool');if(!raw)return;e.preventDefault();
-      try{const tool=JSON.parse(raw),t=S.types[tool.type];if(!t||t.category!=='source'){toast('Drop a primitive from Create into the viewport.');return;}
+      try{const tool=JSON.parse(raw),t=S.types[tool.type];if(tool.type==='null'){if(!pvNode||!nodeOf(pvNode)){toast('Display geometry first to add a Null.');return;}const result=await edit([{op:'insert',layout:'vertical',after:pvNode,type:'null'}]);if(result)select([result.results[0].id]);return;}if(!t||t.category!=='source'){toast('Drop a primitive from Create into the viewport.');return;}
         const r=viewport.getBoundingClientRect(),point=pv.planePoint(e.clientX-r.left,e.clientY-r.top,[0,0,0],[0,0,1]);
         if(!point){toast('Look toward the construction grid to place a primitive.');return;}
         const id=uniqueId(tool.type),params={},hasCenter=t.params.some(p=>p.name==='center');
@@ -1735,7 +1736,7 @@
       if (h.tool==='move'&&cur.type === "transform" && (cur.params || {}).group === pattern && JSON.stringify(cur.params.axis_rotation||[0,0,0])===JSON.stringify(h.axis_rotation||[0,0,0])) gizmoNode = pvNode;
       else {
         const pivot = info.center.map((v) => Math.round(v * 1e5) / 1e5);
-        const r = await edit([{ op: "insert", after: pvNode, type: "transform", params: { group: pattern, pivot, axis_rotation:h.axis_rotation||[0,0,0],...proportionalParams() } }],handleContext);
+        const r = await edit([{ op: "insert", layout:"vertical", after: pvNode, type: "transform", params: { group: pattern, pivot, axis_rotation:h.axis_rotation||[0,0,0],...proportionalParams() } }],handleContext);
         if (!r) return NaN;
         gizmoNode = r.results[0].id;
         createdNode=gizmoNode;
@@ -1885,6 +1886,9 @@
     catch(err){input.checked=!input.checked;toast(err.message);}
     finally{input.disabled=false;}
   };
+  async function loadEnginePreferences(){const fields=['#pref-copy-memory','#pref-proxy-level','#pref-proxy-auto','#pref-proxy-cap'].map(id=>$(id));fields.forEach(f=>f.disabled=true);try{const p=await api('/api/preferences');$('#pref-copy-memory').value=p.copy_memory_limit_mib;$('#pref-proxy-level').value=p.proxy.level;$('#pref-proxy-auto').checked=p.proxy.auto;$('#pref-proxy-cap').value=p.proxy.link_tris;}catch(err){toast(err.message);}finally{fields.forEach(f=>f.disabled=false);}}
+  $('#pref-copy-memory').onchange=async e=>{try{const p=await api('/api/preferences',{copy_memory_limit_mib:Number(e.target.value)});e.target.value=p.copy_memory_limit_mib;pvKey=null;schedulePreview();}catch(err){toast(err.message);loadEnginePreferences();}};
+  for(const [id,key]of [['#pref-proxy-level','level'],['#pref-proxy-auto','auto'],['#pref-proxy-cap','link_tris']])$(id).onchange=async e=>{try{const p=await api('/api/proxy',{[key]:e.target.type==='checkbox'?e.target.checked:Number(e.target.value)});S.status=Object.assign(S.status||{},{proxy:p});renderProxy();}catch(err){toast(err.message);loadEnginePreferences();}};
   const preferencesDialog = $("#preferences");
   function preferencePage(page) {
     document.querySelectorAll("[data-preference-tab]").forEach(b => { const active = b.dataset.preferenceTab === page; b.setAttribute("aria-selected", active); b.tabIndex = active ? 0 : -1; });
@@ -1894,7 +1898,7 @@
     b.onclick = () => preferencePage(b.dataset.preferenceTab);
     b.onkeydown = e => { if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) { const page = e.key === "Home" ? "viewport" : e.key === "End" ? "network" : b.dataset.preferenceTab === "viewport" ? "network" : "viewport"; preferencePage(page); document.querySelector(`[data-preference-tab="${page}"]`).focus(); e.preventDefault(); } };
   });
-  $("#preferences-btn").onclick = () => { applyPreferences(); preferencesDialog.showModal(); preferencesDialog.scrollTop = 0; $("#preferences-preset").focus({ preventScroll: true }); };
+  $("#preferences-btn").onclick = () => { applyPreferences(); loadEnginePreferences(); preferencesDialog.showModal(); preferencesDialog.scrollTop = 0; $("#preferences-preset").focus({ preventScroll: true }); };
   $("#preferences-reset").onclick = () => { Object.assign(preferences, preferenceDefaults); applyPreferences(true); };
   preferencesDialog.addEventListener("keydown", e => e.stopPropagation());
   document.addEventListener("keydown", e => { if (preferencesDialog.open && e.target.dataset.preferenceTab) e.target.onkeydown(e); if (preferencesDialog.open) e.stopImmediatePropagation(); }, true);

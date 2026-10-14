@@ -76,6 +76,13 @@
       <label>New frame colour <input id="pref-frameColor" type="color"></label>
       <p class="muted">Frame (O) groups selected nodes. Right-click frames for fit, collapse and lock. Frame colours and notes are saved with the graph.</p>
     </fieldset>
+    <fieldset><legend>Memory and proxy (this user)</legend>
+      <label>Copy memory safety limit (MiB) <input id="pref-copy-memory" type="number" min="16" max="16384" step="1" value="256"></label>
+      <label>Cook proxy level <input id="pref-proxy-level" type="number" min="0.001" max="1" step="any" value="1"></label>
+      <label><input id="pref-proxy-auto" type="checkbox"> Automatically refine proxy</label>
+      <label>Blender triangle cap (0 = unlimited) <input id="pref-proxy-cap" type="number" min="0" step="1000" value="0"></label>
+      <p class="muted">Memory limit caps estimated realised-copy allocation, not total application memory. Proxy level 1 is full detail. These settings persist on this computer.</p>
+    </fieldset>
     <fieldset><legend>Python execution (this user)</legend>
       <label><input id="pref-python-nodes" type="checkbox"> Enable Python nodes</label>
       <p class="muted">Disabled by default. Python nodes execute graph code with your account permissions. Saved on this computer, separately from graphs and browser presets. CLI --allow-python remains available.</p>

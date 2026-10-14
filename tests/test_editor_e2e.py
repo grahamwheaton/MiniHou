@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -51,6 +52,8 @@ class EditorE2E(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="minihou_e2e_")
         self.addCleanup(shutil.rmtree, self.dir, True)
+        preference_env=patch.dict(os.environ, {'MINIHOU_PREFERENCES_FILE':os.path.join(self.dir,'user-preferences.json')})
+        preference_env.start();self.addCleanup(preference_env.stop)
         self.path = os.path.join(self.dir, "demo.json")
         shutil.copyfile(os.path.join(ROOT, "examples", "graphs", "demo.json"), self.path)
         self.s = Session(Graph.load(self.path, check=False))
@@ -3268,7 +3271,7 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: "mask: 10 selected" in self.page.locator("#attr-card .pa-info").inner_text(), timeout=15))
         self.page.click('#attr-card .pa-tabbtn[data-tab="paint"]')
         self.page.wait_for_function("minihou.paint.active() && minihou.paint.values() && minihou.paint.values().n === 100")
-        self.assertEqual(self.page.evaluate("minihou.preview.selection().points.length"), 0)          # paint mode cleared the selection; the mask kept it
+        self.assertEqual(self.page.evaluate("minihou.preview.selection().points.length"), 10)         # view mode now preserves selection; the mask keeps the same points
         box = self.page.locator("#pv-canvas").bounding_box()
         cx, cy = box["width"] / 2, box["height"] / 2
         self.page.locator("#attr-card .pa-radius").evaluate("(e) => { e.value = 300; e.dispatchEvent(new Event('input')); }")
