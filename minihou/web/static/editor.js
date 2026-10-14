@@ -1191,12 +1191,15 @@
     $("#pv-assign-btn").onclick = () => { if (paintTool.isOpen() && !paintTool.active()) paintTool.close(); else { paintTool.setPaint(false); paintTool.open("assign"); } };
   }  const curveTool = pv?.ok && window.MiniCurveTool ? MiniCurveTool(pv,$('#pv-canvas'),(id,value)=>queueSet(id,'controls',value)) : null;
   const selectionTool=pv?.ok&&window.MiniSelectionTool?MiniSelectionTool(pv,$('#pv-canvas')):null;
-  const knifeTool=pv?.ok?MiniKnifeTool(pv,$('#pv-canvas'),async params=>{
+  let pendingKnifeSelection=null;
+  const knifeContext=()=>({documentId:S.documentId,source:pvNode,signature:JSON.stringify(Object.entries(S.graph.nodes).map(([id,n])=>[id,n.type,n.inputs,n.params,n.flags,n.display_extra]))});
+  const knifeTool=pv?.ok?MiniKnifeTool(pv,$('#pv-canvas'),async (params,context)=>{
     if(!pvNode)throw Error('Display a polygon mesh first.');
-    const r=await edit([{op:'insert',layout:'vertical',after:pvNode,type:'polysplit',params}]);
-    if(!r)throw Error('Cut failed. Pick non-neighbouring vertices of the same face.');
-    const id=r.results[0].id;pvKeepCameraNode=id;select([id]);
-  }):null;
+    const current=knifeContext();if(context.documentId!==current.documentId||context.source!==current.source||context.signature!==current.signature)throw Error('Geometry changed during this cut. Escape and restart Knife.');
+    const r=await edit([{op:'knife',after:pvNode,merge_visible:!!pv.selectableTemplates?.length,params}]);
+    if(!r)throw Error('Cut failed; the graph was not changed.');
+    const id=r.results[0].id;pendingKnifeSelection={id,edges:r.results[0].cut_edges||[]};pvKeepCameraNode=id;select([id]);
+  },knifeContext):null;
   $('#pv-left-tools').addEventListener('click',e=>{if(!e.target.closest('#pv-knife'))knifeTool?.cancel();},true);
   $('#pv-knife').onclick=()=>{sketchTool?.cancel();selectionTool?.cancel();knifeTool?.start();};
   let sketchBezier=false;
@@ -1212,7 +1215,7 @@
   document.addEventListener('dragend',()=>{shelfDragType=null;placementPreview?.hide();});
   document.addEventListener('keydown',e=>{if(e.key==='Escape')placementPreview?.hide();});
   if(placementPreview){const previous=pv.onOverlayDraw;pv.onOverlayDraw=()=>{previous?.();placementPreview.draw();};}
-  $('#preview').addEventListener('keydown',e=>{if(e.key.toLowerCase()==='k'&&!e.ctrlKey&&!e.altKey&&!e.target.closest('input,textarea,select,[contenteditable]')){e.preventDefault();$('#pv-knife').click();}},true);
+  $('#preview').addEventListener('keydown',e=>{if(e.key.toLowerCase()==='k'&&!e.ctrlKey&&!e.altKey&&!e.target.closest('input,textarea,select,[contenteditable]')){e.preventDefault();if(knifeTool?.active())return;sketchTool?.cancel();selectionTool?.cancel();knifeTool?.start({selected:e.shiftKey});}},true);
   let viewportMouse=[0,0];$('#pv-canvas').parentElement.addEventListener('pointermove',e=>viewportMouse=[e.clientX,e.clientY]);
   function beginTransform(tool,x=viewportMouse[0],y=viewportMouse[1]){
     if(!pv?.ok)return;setTool(tool);
@@ -1424,6 +1427,7 @@
     refreshSelectionHandles();                                                 // a kept selection moved with the geometry: so does its gizmo
     updateToolButtons();
     pvNode = node; pvPath = S.path;
+    if(pendingKnifeSelection?.id===node){pv.selectElements("edge",pendingKnifeSelection.edges,"replace");pendingKnifeSelection=null;}
     if (paintTool) paintTool.onPreview(head, arrays, node);                    // the painted attribute as colour, and the working copy for strokes
     if (sheet) sheet.changed();
   }

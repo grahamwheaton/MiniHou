@@ -568,6 +568,24 @@ def op_merge_templates(g: Graph, op: dict) -> dict:
     return {"id": nid}
 
 
+def op_knife(g: Graph, op: dict) -> dict:
+    """Cook on the transaction copy: failed cuts never alter the user's graph."""
+    from . import Evaluator
+    source = op['after']
+    if op.get('merge_visible'):
+        source = op_merge_templates(g, {'id': source})['id']
+    result = op_insert(g, {'after': source, 'type': 'knife', 'layout': 'vertical', 'params': op['params']})
+    try:
+        geometry = Evaluator().cook(g, result['id'])
+        geometry.validate()
+    except Exception as exc:
+        raise GraphError(f'Knife could not apply this cut: {exc}') from exc
+    from . import edges
+    import numpy as np
+    result['cut_edges'] = np.flatnonzero(edges.values(geometry, 'edge_group_knife')).tolist()
+    return result
+
+
 def op_expose(g: Graph, op: dict) -> dict:
     nid, pname = op["id"], op["param"]
     inst = _need_node(g, nid)
@@ -676,7 +694,7 @@ def op_replace(g: Graph, op: dict) -> dict:
     return {"_graph": Graph.from_dict(op["graph"], g.registry, check=False)}
 
 
-_OPS = {"add": op_add, "loop": op_loop, "insert": op_insert, "remove": op_remove, "dissolve": op_dissolve, "detach": op_detach, "insert_existing": op_insert_existing, "rename": op_rename, "connect": op_connect,
+_OPS = {"knife": op_knife, "add": op_add, "loop": op_loop, "insert": op_insert, "remove": op_remove, "dissolve": op_dissolve, "detach": op_detach, "insert_existing": op_insert_existing, "rename": op_rename, "connect": op_connect,
         "disconnect": op_disconnect, "set": op_set, "paint_assign": op_paint_assign, "display": op_display, "flag": op_flag, "merge_templates": op_merge_templates, "expose": op_expose,
         "unexpose": op_unexpose, "move": op_move, "meta": op_meta, "replace": op_replace,
         "box_add": op_box_add, "box_set": op_box_set, "box_remove": op_box_remove}

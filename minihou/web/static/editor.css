@@ -806,3 +806,8 @@ svg.ic .fl { fill: currentColor; fill-opacity: .35; }
 #pv-hints {max-width:calc(100% - 120px);}
 #pv-hint-text {max-height:3em;overflow:hidden;}
 @container(max-width:650px){#preview .pv-left-tools{width:70px;}#pv-left-tools button.pv-tool{min-height:32px;padding:4px 1px;}#pv-left-tools button.pv-tool span{display:none;}#preview .pv-display-strip{width:144px;}#pv-hints{max-width:calc(100% - 100px);}#pv-hint-text{display:none;}}
+.pv-knife-options{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:7px 10px;background:#322d3c;border-bottom:1px solid #765989;font-size:11px;}.pv-knife-options[hidden]{display:none;}.pv-knife-options label{display:flex;gap:4px;align-items:center;}.pv-knife-options input[type=number]{width:48px;}
+
+[data-knife-active] .pv-handles{visibility:hidden;}
+[data-knife-active] .pv-drag-feedback{white-space:normal;width:max-content;max-width:calc(100% - 40px);text-align:center;box-sizing:border-box;}
+.pv-knife-options details{position:relative;}.pv-knife-options details>div{position:absolute;right:0;top:22px;width:330px;max-width:70vw;padding:12px;background:#24272d;border:1px solid #765989;line-height:1.7;z-index:30;}

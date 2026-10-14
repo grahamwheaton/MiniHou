@@ -71,10 +71,30 @@ Bezier anchors and selected tangents share oriented move axes, rotation rings an
 
 User preferences includes an explicit Python execution checkbox, off for a fresh user. It is stored in the user's MiniHou preferences.json separately from graphs and browser presets. CLI --allow-python and MINIHOU_PYTHON_NODES remain supported as startup overrides. Python executes with normal account permissions; enable only for trusted graphs.
 
-## Viewport toolbar and vertex Knife
+## Viewport toolbar and Knife
 
-The viewport uses a compact grouped two-column tool strip with consistent vector icons, accessible names, shortcut tooltips and focus outlines. Wide panes show labels; narrow panes use icons. Hints are reduced in narrow views to avoid covering the model. Display settings remain collapsible.
+The viewport uses a compact grouped two-column tool strip with vector icons, accessible names, shortcut tooltips and focus outlines. Wide panes show labels; narrow panes use icons. Display settings remain collapsible. Knife hides transform handles while active and has a compact options strip with a Controls disclosure.
 
-Knife (K or the blade icon) previews cuts between existing non-neighbouring vertices belonging to the same polygon. Click vertices, Enter to create a PolySplit node, Backspace to remove the last point, or Escape/right-click to cancel. Middle mouse remains available for navigation. Switching toolbar tools cancels the pending cut. Commit is one undo step.
+Press **K** or click Knife. Click vertices, edges, face interiors or empty space to build a cut; drag to draw a continuous stroke. Green markers preview crossings of mesh edges. Double-click closes a loop. Right-click finishes the current path so another can be drawn. Enter/Space applies all paths as one `knife` node and selects the resulting cut edges; Escape cancels. Ctrl+Z removes the previous click/stroke before commit. Graph Undo removes the entire committed operation. Middle mouse navigates and starts a new path.
 
-This is a vertex-to-vertex face Knife, not full Blender Knife parity. Arbitrary edge-interior points, free face-interior cuts, automatic traversal through several faces and cut-through are not implemented. Use Loop Cut for quad-strip cuts. Existing geometry attributes are carried by the PolySplit engine.
+| Blender Knife behaviour | MiniHou implementation |
+| --- | --- |
+| Free cuts across multiple faces, edge and face interiors | Perspective-correct projected cuts, including concave polygons, crossing paths, interior endpoints and closed loops |
+| Vertex/edge/prior-cut snapping | Automatic; Shift snaps edge midpoints; Ctrl temporarily ignores snapping |
+| Cut through / occlude | C or Cut through checkbox; visible-only is default. Toggle affects all pending strokes |
+| Selected only | Shift+K or checkbox; selected faces, or faces whose complete boundary is selected in point/edge mode |
+| Axis constraints | X/Y/Z cycles global axis, local axis, free |
+| Angle constraints | A cycles free, screen, face-relative; type increment or use its field. R cycles face reference edges |
+| Measurements | S cycles distance, angle, both, hidden |
+| X-ray cut overlay | V or checkbox; separate from whether the cut affects occluded geometry |
+| Multiple editable objects | Displayed/selectable geometries are merged before cutting, in the same undo transaction |
+| Data preservation | Float point/corner attributes interpolate; discrete attributes inherit a source; primitive attributes and split-edge crease/groups are retained |
+| Result selection | New cut edges are selected and stored in edge group `knife` |
+
+Comparison reference: [Blender Knife manual](https://docs.blender.org/manual/en/4.4/modeling/meshes/editing/mesh/knife_topology_tool.html).
+
+The implementation covers these interaction modes, but exact Blender equivalence is not claimed. MiniHou merges editable objects into one procedural stream rather than retaining Blender object edit datablocks. It cuts polygon meshes, not loose wire curves or instances. Non-planar faces follow MiniHou's tessellation; closed interior loops may need bridge edges because a polygon cannot contain a hole. X-ray-off overlay visibility is evaluated at path vertices, so a line crossing an occluder can differ from Blender's pixel-level overlay. Each operation accepts at most 512 segments; confirm and start another operation for longer cuts. This is not the separate Knife Project operator.
+
+Cuts are stored as view-projected segments. Changing upstream topology later recomputes their intersections; they are not a topology-independent sculpt history. A changed source during an uncommitted cut is rejected. Invalid cuts fail before the graph transaction is committed. Large or pathological meshes have not been benchmarked for Blender-level performance.
+
+`examples/graphs/knife_demo.json` demonstrates a closed interior cut plus a crossing stroke. Automated tests cover closed-shell/volume preservation, 40 seeded crossing-cut fixtures, perspective, concave faces, attributes, multi-object merging, failure rollback, and real Chromium click/drag/key/undo workflows. These tests are distinct from a manual packaged Windows EXE acceptance pass.
