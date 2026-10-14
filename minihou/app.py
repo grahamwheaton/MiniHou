@@ -38,6 +38,28 @@ def examples_source() -> Optional[Path]:
     return None
 
 
+def bundled_nodes_source() -> Optional[Path]:
+    """Read-only bundled helpers, separate from the workspace's editable node library."""
+    here = Path(__file__).resolve().parent
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", None) or Path(sys.executable).parent)
+        candidates = [base / "bundled_nodes", Path(sys.executable).parent / "bundled_nodes"]
+    else:
+        candidates = [here.parent / "nodes", here / "_nodes"]
+    return next((p for p in candidates if p.is_dir() and
+                 (any(p.glob("*.py")) or any(p.glob("*.json")))), None)
+
+
+def node_library_dirs(root: Path) -> List[str]:
+    """User files take precedence; bundled files are loaded in place and never copied over them."""
+    user = (root / "nodes").resolve()
+    bundled = bundled_nodes_source()
+    dirs = [str(user)]
+    if bundled is not None and bundled.resolve() != user:
+        dirs.append(str(bundled.resolve()))
+    return dirs
+
+
 def prepare_workspace(root: Path, fresh: bool = True) -> Optional[Path]:
     """Prepare folders and examples; create a new empty graph unless one was explicitly selected."""
     root.mkdir(parents=True, exist_ok=True)
@@ -118,7 +140,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not _port_free(args.host, args.http_port):
         args.http_port = 0
     ns = argparse.Namespace(graph=str(graph), host=args.host, port=args.port, http_port=args.http_port, root=str(root),
-                            desktop=desktop, open=args.browser and not args.no_browser, nodes=[str(root / "nodes")], cache_mb=2048.0, no_watch=False, no_save=False,
+                            desktop=desktop, open=args.browser and not args.no_browser, nodes=node_library_dirs(root), cache_mb=2048.0, no_watch=False, no_save=False,
                             allow_python=args.allow_python, disk_cache="auto" if args.disk_cache else None, disk_cache_gb=4.0)
     print(f"MiniHou workspace: {root}", flush=True)
     return _cmd_serve(ns)

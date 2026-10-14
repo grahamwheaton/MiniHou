@@ -131,12 +131,20 @@ class NodeLibrary:
     # -- scanning ----------------------------------------------------------------------------------
     def scan(self) -> List[Path]:
         """Python node files, then system graphs (*.json), per folder."""
-        out = []
-        for pattern in ("*.py", "*.json"):
-            for d in self.dirs:
-                if d.is_dir():
-                    out.extend(sorted(p for p in d.glob(pattern) if not p.name.startswith(("_", "."))))
-        return out
+        out, owners = [], {}
+        # Directory order defines precedence by file stem, across Python and JSON.
+        # Keep same-directory duplicates visible to the existing registration errors.
+        for d in self.dirs:
+            if d.is_dir():
+                for pattern in ("*.py", "*.json"):
+                    for p in sorted(d.glob(pattern)):
+                        if p.name.startswith(("_", ".")):
+                            continue
+                        owner = owners.setdefault(p.stem, d)
+                        if owner == d:
+                            out.append(p)
+        # All Python types must register before systems derive their dependencies.
+        return sorted(out, key=lambda p: (p.suffix != ".py", self.dirs.index(p.parent), p.name))
 
     def refresh(self) -> bool:
         """Load new or changed files, drop deleted ones. Returns True if node types or errors changed. Readers on other
