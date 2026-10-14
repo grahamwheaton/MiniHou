@@ -51,10 +51,10 @@ class PersistentPreferencesTests(unittest.TestCase):
 
     def test_defaults_legacy_and_malformed_settings(self):
         self.assertEqual(user_preferences.read(), user_preferences.defaults())
-        user_preferences.path().write_text('{"python_nodes":true}')
+        user_preferences.path().write_text('{"python_nodes":true}', encoding='utf-8')
         self.assertTrue(user_preferences.read()['python_nodes'])
         self.assertEqual(user_preferences.copy_limit_bytes(), 256*1024**2)
-        user_preferences.path().write_text('{"copy_memory_limit_mib":false,"proxy":{"level":"wrong","auto":true}}')
+        user_preferences.path().write_text('{"copy_memory_limit_mib":false,"proxy":{"level":"wrong","auto":true}}', encoding='utf-8')
         saved = user_preferences.read()
         self.assertEqual(saved['copy_memory_limit_mib'], 256)
         self.assertEqual(saved['proxy']['level'], 1)

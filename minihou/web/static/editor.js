@@ -1398,9 +1398,10 @@
     if (rp && rp.full) pvTooBig = sig;                                           // full detail was refused for this result: say so on the next (reduced) view too
     else if (rp && pvTooBig === sig) rp = { ...rp, tooBig: true };
     setReducedView(rp);
-    if (!pv.set(head, arrays, (pvNode === node && pvPath === S.path) || pvKeepCameraNode === node)) {   // it left out triangles the viewer no longer has
+    if (head.same_topology && pv.topology !== head.topology) {                  // it left out triangles the viewer no longer has: ask for everything
       pvKey = null; pvFresh = true; schedulePreview(); return;
     }
+    pv.set(head, arrays, (pvNode === node && pvPath === S.path) || pvKeepCameraNode === node);
     pvFresh = false;
     if(pvKeepCameraNode===node)pvKeepCameraNode=null;
     pv.selectableTemplates=head.selectable_templates||[];

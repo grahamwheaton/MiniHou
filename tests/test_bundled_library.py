@@ -33,7 +33,7 @@ class BundledLibraryTests(unittest.TestCase):
                 self.assertFalse([f for f in lib.status()['files'] if f['error']])
                 self.assertTrue(HELPERS <= {nt.name for nt in REGISTRY})
                 self.assertEqual([p.name for p in user.iterdir()],['notes.txt'])
-                self.assertEqual(sentinel.read_text(),'keep')
+                self.assertEqual(sentinel.read_text(encoding='utf-8'),'keep')
                 geo=Evaluator().cook(Graph.from_dict({'nodes':{'a':{'type':'array','params':{'count':2}}},'display':'a'}))
                 self.assertEqual(geo.npoints,16)
 
