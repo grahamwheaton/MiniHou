@@ -1022,9 +1022,12 @@ class EditorE2E(unittest.TestCase):
         self.page.keyboard.press('Enter')
         self.assertTrue(until(lambda: "polybevel1" in self.s.graph.nodes))
         self.page.wait_for_function("minihou.preview.handleTips().some(t => t.id === 'distance')")   # the new node has its arrow
+        # The modal bevel's queued updates must finish before recording the baseline.
+        self.page.wait_for_function("minihou.desktopCanClose() && !document.body.classList.contains('pv-dragging')")
         initial = self.s.graph.nodes["polybevel1"].params["distance"]
         tip = self.drag_handle("distance", 30)
-        self.assertTrue(until(lambda: self.s.graph.nodes["polybevel1"].params.get("distance", 0.1) != 0.1))
+        self.page.wait_for_function("minihou.desktopCanClose() && !document.body.classList.contains('pv-dragging')")
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes["polybevel1"].params["distance"] - (initial + 30 / tip["ppu"])) < 0.1))
         d = self.s.graph.nodes["polybevel1"].params["distance"]
         self.assertAlmostEqual(d, initial + 30 / tip["ppu"], delta=0.1)
         self.assertGreaterEqual(d, 0.0)
