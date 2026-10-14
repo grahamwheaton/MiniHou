@@ -47,7 +47,7 @@ class ShelfData(unittest.TestCase):
     def test_null_is_there_and_icons_exist_for_the_common_tools(self):
         create = next(t for t in self.data["tabs"] if t["name"] == "Create")
         self.assertIn("null", [t["type"] for t in create["tools"]])
-        for name in ("box", "sphere", "tube", "torus", "grid", "null", "line", "circle", "curve", "helix", "lsystem"):
+        for name in ("box", "sphere", "tube", "torus", "grid", "null", "line", "circle", "curve", "helix", "lsystem", "font"):
             self.assertIn(name, self.data["icons"])
 
     def test_icons_for_nodes_that_do_not_exist_are_not_kept(self):

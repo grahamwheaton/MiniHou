@@ -14,7 +14,7 @@ LIBRARY = "Library"
 # (group, what it is for, nodes)
 GROUPS: List[Tuple[str, str, List[str]]] = [
     ("Create", "Shapes and curves from nothing, and the doors into a graph",
-     ["box", "sphere", "grid", "tube", "torus", "circle", "line", "bezier", "curve", "helix", "lsystem", "lattice_grid",
+     ["box", "sphere", "grid", "tube", "torus", "circle", "line", "bezier", "curve", "helix", "lsystem", "font", "lattice_grid",
       "blender_object", "blender_image", "image_file", "usd_import", "modifier_input", "object_input"]),
     ("Polygon Modelling", "Build and edit polygon surfaces",
      ["polyextrude", "pushpull", "inset", "outset", "polybevel", "polysplit", "knife", "polyfill", "polybridge", "polyexpand2d", "solidify", "subdivide", "mirror", "boolean",
@@ -116,7 +116,7 @@ ALIASES: Dict[str, str] = {
     "scene_objects": "realize real objects scene export blender instances scatter",
     "null": "named output pass through", "input": "system port", "output": "result display", "box": "cube", "sphere": "ball",
     "grid": "plane floor", "tube": "cylinder cone", "torus": "donut ring", "circle": "disc", "line": "segment",
-    "curve": "polyline path", "bezier": "curve spline tangent handles control points path", "helix": "spiral coil", "lsystem": "plant tree fractal", "blender_object": "read import mesh curve curves hair point cloud", "blender_image": "texture picture bitmap pixels height map mask read import", "image_file": "png texture picture bitmap pixels height map mask load file", "image_out": "texture picture bitmap pixels bake export write png",
+    "curve": "polyline path", "bezier": "curve spline tangent handles control points path", "helix": "spiral coil", "lsystem": "plant tree fractal", "font": "text letters typography glyphs label type 2d string houdini font sop", "blender_object": "read import mesh curve curves hair point cloud", "blender_image": "texture picture bitmap pixels height map mask read import", "image_file": "png texture picture bitmap pixels height map mask load file", "image_out": "texture picture bitmap pixels bake export write png",
     "attrib_paint": "paint attribute weight mask vertex colour color assign brush edit values spreadsheet",
     "usd_import": "usd usda usdc usdz open load file scene pixar omniverse houdini",
     "usd_export": "usd usda usdc save write export file scene pixar omniverse houdini rop",
@@ -126,7 +126,7 @@ ALIASES: Dict[str, str] = {
 _TITLES = {"pushpull": "Push / Pull","polyextrude": "PolyExtrude", "polybevel": "PolyBevel", "polysplit": "PolySplit", "polyfill": "PolyFill",
            "polybridge": "PolyBridge", "polyexpand2d": "PolyExpand2D", "polyreduce": "PolyReduce", "polypath": "PolyPath",
            "uv_project": "UV Project", "uv_flatten": "UV Flatten", "sdf_boolean": "SDF Boolean", "sdf_shape": "SDF Shape", "uv_transform": "UV Transform", "pcg_points": "PCG Points",
-           "lsystem": "L-System", "rbd_configure": "RBD Configure", "rbd_solver": "RBD Solver",
+           "lsystem": "L-System", "font": "Font", "rbd_configure": "RBD Configure", "rbd_solver": "RBD Solver",
            "rbd_material_fracture": "RBD Material Fracture", "rbd_constraint": "RBD Constraint", "rbd_constraint_properties": "RBD Constraint Properties",
            "loop_block": "Repeat (Loop Block)", "for_each": "For Each", "points_to_surface": "Points to Surface",
            "copy_to_points": "Copy to Points", "blender_object": "Blender Object", "blender_image": "Blender Image", "image_file": "Image File", "image_out": "Image Out", "attrib_paint": "Attribute Paint", "usd_import": "USD Import", "usd_export": "USD Export", "scene_objects": "Scene Objects", "modifier_input": "Modifier Input"}

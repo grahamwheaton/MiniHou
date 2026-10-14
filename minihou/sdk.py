@@ -131,9 +131,10 @@ class Param:
                     raise ParamError(f"expected a string, got {type(value).__name__}")
                 return value
             if k == "vec3":
-                if isinstance(value, (str, bytes)) or not hasattr(value, "__len__") or len(value) != 3:
+                if isinstance(value, (str, bytes)) or not hasattr(value, "__len__") or len(value) not in (2, 3):
                     raise ParamError(f"expected 3 numbers, got {value!r}")
-                return tuple(self._check_range(self._num(c)) for c in value)
+                v = tuple(value) if len(value) == 3 else (value[0], value[1], 0.0)
+                return tuple(self._check_range(self._num(c)) for c in v)
             if k == "enum":
                 if value not in self.choices:
                     raise ParamError(f"expected one of {list(self.choices)}, got {value!r}")

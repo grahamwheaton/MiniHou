@@ -5175,6 +5175,28 @@
    "status": "ok",
    "title": "Spline Fillet geometry node"
   },
+  "font": {
+   "category": "source",
+   "handles": true,
+   "has_inputs_section": false,
+   "hints": [],
+   "inputs_houdini": [],
+   "inputs_ok": true,
+   "inputs_ours": [],
+   "output_groups_houdini": [],
+   "output_groups_ours": [],
+   "outputs_houdini": [],
+   "outputs_ok": true,
+   "outputs_ours": [
+    "geo"
+   ],
+   "params_matched": 20,
+   "params_missing": [],
+   "params_total": 20,
+   "slug": "font",
+   "status": "ok",
+   "title": "Font geometry node"
+  },
   "for_each": {
    "category": "combine",
    "handles": false,
