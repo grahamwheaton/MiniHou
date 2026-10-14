@@ -22,7 +22,7 @@
     ["Model", "#d99a4e", [
       T("Boolean", "boolean"), T("Clip", "clip"), T("Mirror", "mirror"), T("Subdivide", "subdivide"), T("Skin", "skin"),
       T("Skin Profiles", "skin_profiles", "skin"), T("Revolve", "revolve"), T("Sweep", "sweep"), T("Fillet", "fillet"),
-      T("PolyReduce", "polyreduce"), T("Convex Hull", "convex_hull"), T("Remesh", "remesh")]],
+      T("PolyReduce", "polyreduce"), T("Convex Hull", "convex_hull"), T("Remesh", "remesh"), T("Quad Remesh", "quad_remesh")]],
     ["Polygon", "#c97bd0", [
       T("PolyExtrude", "polyextrude"), T("Push / Pull", "pushpull", "polyextrude"), T("Inset", "inset", "polyexpand2d"), T("Outset", "outset", "polyexpand2d"), T("PolyBevel", "polybevel"), T("Solidify", "solidify", "polyextrude"), T("PolySplit", "polysplit"), T("Knife", "knife", "polysplit"), T("PolyFill", "polyfill"),
       T("PolyBridge", "polybridge"), T("PolyExpand2D", "polyexpand2d"), T("Dissolve", "dissolve"), T("Divide", "divide"),
@@ -124,6 +124,7 @@
     convex_hull: (c) => `<polygon points="16,3 29,13 24,28 8,28 3,13" fill="none" stroke="${c}" stroke-width="1.8"/><g fill="${NEUTRAL}"><circle cx="16" cy="14" r="2.2"/><circle cx="11" cy="20" r="2.2"/><circle cx="21" cy="19" r="2.2"/></g>`,
     hull: (c) => `<polygon points="16,3 29,13 24,28 8,28 3,13" fill="none" stroke="${c}" stroke-width="1.8"/><g fill="${NEUTRAL}"><circle cx="16" cy="14" r="2.2"/><circle cx="11" cy="20" r="2.2"/><circle cx="21" cy="19" r="2.2"/></g>`,
     remesh: (c) => `<polygon points="4,24 16,4 28,24" fill="${DARK}"/><path d="M10,14 H22 M7,19 H25 M16,4 V24 M10,14 L13,24 M22,14 L19,24" stroke="${NEUTRAL}" stroke-width="1.2"/>`,
+    quad_remesh: (c) => `<rect x="3" y="3" width="26" height="26" rx="3" fill="${DARK}" stroke="${NEUTRAL}" stroke-width="1.2"/><path d="M3,12 H29 M3,20 H29 M12,3 V29 M20,3 V29" stroke="${c}" stroke-width="1.6"/>`,
     polyextrude: (c) => `<polygon points="4,18 16,24 28,18 16,12" fill="${DARK}"/><polygon points="4,18 4,26 16,31 16,24" fill="${MID}"/><polygon points="16,24 16,31 28,26 28,18" fill="${DARK}"/><path d="M16,10 V2 M11,6 l5,-4 l5,4" stroke="${c}" stroke-width="2.4" fill="none"/>`,
     polybevel: (c) => `<path d="M5,27 V12 L12,5 H27 V27z" fill="${DARK}" stroke="${NEUTRAL}" stroke-width="1.6"/><path d="M5,12 L12,5" stroke="${c}" stroke-width="3.4"/>`,
     polysplit: (c) => `<rect x="5" y="5" width="22" height="22" fill="${DARK}"/><path d="M5,16 H27" stroke="${c}" stroke-width="2.6"/><circle cx="5" cy="16" r="2.2" fill="${NEUTRAL}"/><circle cx="27" cy="16" r="2.2" fill="${NEUTRAL}"/>`,

@@ -26,6 +26,18 @@ from ..sdk import Bool, Enum, Float, Handle, Param, Str, Vec3, node
 from . import _build as B
 from ._util import euler_xyz_matrix
 
+class _FontXYParam(Param):
+    """Font-only XY convenience; the shared Vec3 SDK contract stays strict."""
+    def coerce(self, value):
+        if not isinstance(value, (str, bytes)) and hasattr(value, '__len__') and len(value)==2:
+            value=(value[0],value[1],0.0)
+        return super().coerce(value)
+
+
+def _XY(name, default, *, label='', doc='', ui=''):
+    return _FontXYParam(name,'vec3',default,label=label,doc=doc,ui=ui)
+
+
 # ---------------------------------------------------------------------------------------------------------------------
 # Font Discovery and Loading
 # ---------------------------------------------------------------------------------------------------------------------
@@ -257,13 +269,13 @@ def _key(p) -> str:
          doc="If enabled, the alignment baseline is set to the descender rather than the font baseline"),
     Vec3("origin", (0.0, 0.0, 0.0), label="Origin", doc="Origin translation along X, Y, Z"),
     Vec3("rotate", (0.0, 0.0, 0.0), label="Rotate", doc="Euler rotation around X, Y, Z in degrees"),
-    Vec3("scale_xy", (1.0, 1.0, 1.0), label="Scale XY", doc="Scale factors along X and Y"),
-    Vec3("scale", (1.0, 1.0, 1.0), ui="hidden", label="Scale", doc="Alias for scale_xy"),
+    _XY("scale_xy", (1.0, 1.0, 1.0), label="Scale XY", doc="Scale factors along X and Y"),
+    _XY("scale", (1.0, 1.0, 1.0), ui="hidden", label="Scale", doc="Alias for scale_xy"),
     Float("font_size", 1.0, min=0.0001, soft_max=10.0, label="Font Size", doc="Overall font size scale factor"),
     Float("fontsize", 1.0, min=0.0001, soft_max=10.0, ui="hidden", label="Font Size", doc="Alias for font_size"),
-    Vec3("tracking_xy", (0.0, 0.0, 0.0), label="Tracking XY",
+    _XY("tracking_xy", (0.0, 0.0, 0.0), label="Tracking XY",
          doc="Tracking along X (extra letter spacing) and Y (leading/line spacing adjustment)"),
-    Vec3("tracking", (0.0, 0.0, 0.0), ui="hidden", label="Tracking", doc="Alias for tracking_xy"),
+    _XY("tracking", (0.0, 0.0, 0.0), ui="hidden", label="Tracking", doc="Alias for tracking_xy"),
     Float("oblique", 0.0, soft_min=-45.0, soft_max=45.0, label="Oblique Angle", doc="Amount of slant in degrees"),
     Float("lod", 1.0, min=0.01, soft_max=10.0, label="Level of Detail",
           doc="Controls the number of points in polygonal fonts"),
@@ -373,7 +385,7 @@ def font(**p):
             gname = cmap.get(code)
             glyph = gset[gname] if gname and gname in gset else None
             kern = _get_kerning(ttfont, prev_gname, gname) if (auto_kern and prev_gname and gname) else 0.0
-            
+
             contours = []
             width = 0.0
             if glyph is not None:

@@ -573,6 +573,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `uv_project` | geo | UVs by box (triplanar), planar, cylindrical or spherical projection; seams and poles handled |
 | `uv_flatten` | geo | unwrap UVs with least-squares conformal maps: islands cut at sharp edges (or where an attribute changes), closed shapes cut into discs automatically, packed into 0-1 at matching texel density; prim `island` |
 | `remesh` | geo | voxel remesh a closed mesh: even watertight quads, offset (grow/shrink), smoothing, attribute transfer |
+| `quad_remesh` | geo | field-aligned quad-dominant retopology (QRemeshify-style): edges follow the shape's own flow, even density, curvature adaptivity, attribute transfer |
 | `points_to_surface` | points | metaball surface around points (radius x pscale, blend), e.g. blobs and liquids |
 | `solidify` | geo | thickness for a surface: even wall at corners, offset -1..1 (outer, centred, inner), rim along open edges, optional group; output groups top / bottom / side |
 | `falloff` | geo, shape_mesh | a 0..1 point or primitive weight from a shape (sphere, directional ramp, radial angle, travelling wave, index, distance to / inside a mesh), with smooth, mirror, flip, min..max and a group |
@@ -654,6 +655,12 @@ input becomes a signed distance field on a voxel grid (exact distances near a cl
 flood-filling the outside), the field is offset, smoothed or combined, and surface nets turn it back into a watertight
 quad mesh (face saddles are resolved, so edges stay manifold). Booleans this way never fail on coplanar or messy input;
 edges are as sharp as the voxel size. Cost grows with (size / voxel size)^3, so start coarse.
+
+`quad_remesh` is the other retopology route, for animation-friendly topology rather than voxel-even quads: a smooth
+4-symmetry cross field is built over the surface, points are spread evenly along it (Poisson-disk), connected into
+triangles, and triangle pairs are merged into quads across the field, so edges follow the shape's natural directions.
+The result is quad-dominant (about 80% quads, the rest triangles at irregularities), watertight, and numpy-only; it is
+an approximation of QRemeshify / QuadWild rather than a port, so it is not strictly all-quad.
 
 ### Time, loops and solvers
 
