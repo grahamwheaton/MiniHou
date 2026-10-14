@@ -102,6 +102,11 @@ def _face_grid(n):
 def box_node(geo=None, size=(1,1,1), center=(0,0,0), divisions=1, rotate=(0,0,0), uniform_scale=1,
         axis_divisions=(0,0,0), consolidate=True, connectivity="quadrilaterals", primitive_type="polygons", add_vertex_normals=False):
     """Polygon box or surface points; optional input fits an axis-aligned bounding box before rotation."""
+    from .. import rust
+    if rust.enabled() and geo is None and not add_vertex_normals:
+        return rust.cook_node("box", size=list(size), center=list(center), divisions=divisions, rotate=list(rotate),
+                              uniform_scale=uniform_scale, axis_divisions=list(axis_divisions), consolidate=consolidate,
+                              connectivity=connectivity, primitive_type=primitive_type)
     if any(v != int(v) for v in axis_divisions):
         raise ValueError("Axis divisions must be integers")
     dims=[int(v) or divisions for v in axis_divisions]

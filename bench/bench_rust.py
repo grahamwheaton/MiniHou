@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np  # noqa: E402
 
-from minihou import Evaluator, Graph, accel, rust, topo  # noqa: E402
+from minihou import Evaluator, Graph, accel, preview, rust, topo  # noqa: E402
 from minihou.nodes import normal as normal_node  # noqa: E402
 from minihou.nodes._util import fbm3, fbm3_numpy  # noqa: E402
 
@@ -57,17 +57,70 @@ def py_cook(graph):
     return Evaluator().cook(g, g.output_node())                 # a fresh evaluator: no cache hits
 
 
+def engine_rows(side, repeat, row):
+    """What the editor and the link actually run: the Python engine cooking a graph, then preparing the viewport, with the Rust fast
+    paths on (the default when the extension is installed) and off (numba)."""
+    graph = grid_graph(side, ("noise", {"amplitude": [0.2, 0.2, 1.0], "octaves": 4}), ("transform", {"rotate": [0, 0, 30]}),
+                       ("normal", {}))
+
+    def cook():
+        return py_cook(graph)
+
+    def view_new():
+        preview._LAYOUTS.clear()
+        return preview._arrays_for(geo, full=True)
+
+    def view_moved():                                       # a deformer downstream: same topology, new positions
+        return preview._arrays_for(moved, full=True)
+
+    def first_and_median(fn):
+        return first_call(fn), timed(fn, repeat)
+
+    G = Graph.from_dict(graph)
+    seeds = iter(range(10_000))
+
+    def slider():                                           # a slider drag on the noise: the grid stays cached
+        G.nodes["n0"].params["seed"] = next(seeds)
+        return ev.cook(G, "n2")
+
+    out = {}
+    for label, ctx in (("numba", rust.disabled), ("rust", __import__("contextlib").nullcontext)):
+        with ctx():
+            ev = Evaluator()
+            ev.cook(G, "n2")
+            out[label, "slider"] = (None, timed(slider, repeat))
+            out[label, "cook"] = first_and_median(cook)
+            geo = cook()
+            moved = geo.copy()
+            moved.point["P"] = (geo.P * np.float32(1.01)).astype(np.float32)
+            out[label, "view"] = first_and_median(view_new)
+            preview._arrays_for(geo, full=True)
+            out[label, "moved"] = (None, timed(view_moved, repeat))
+    for key, case in (("cook", "engine: cook grid > noise > transform > normal"),
+                      ("slider", "engine: slider edit on noise (recook 3 nodes)"),
+                      ("view", "engine: viewport, new topology"), ("moved", "engine: viewport, positions only")):
+        first_n, first_r = out["numba", key][0], out["rust", key][0]
+        note = f"first call: numba {round(first_n * 1000)} ms, rust {round(first_r * 1000)} ms" if first_n is not None else ""
+        row(case, side, None, out["numba", key][1], out["rust", key][1], first_n, note)
+
+
 def point_normals_numpy(geo):
-    with accel.disabled():
+    with accel.disabled(), rust.disabled():
         return normal_node.normal(geo, "point").point["N"]
 
 
 def point_normals_numba(geo):
-    return normal_node.normal(geo, "point").point["N"]
+    with rust.disabled():
+        return normal_node.normal(geo, "point").point["N"]
 
 
 def edges_numpy(geo):
-    with accel.disabled():
+    with accel.disabled(), rust.disabled():
+        return topo.edges(geo)
+
+
+def edges_numba(geo):
+    with rust.disabled():
         return topo.edges(geo)
 
 
@@ -89,6 +142,7 @@ def main():
     ap.add_argument("--sizes", default="1000,2000", help="grid sides in quads (1000 = 1M quads)")
     ap.add_argument("--repeat", type=int, default=5)
     ap.add_argument("--json", help="write the results here")
+    ap.add_argument("--engine", action="store_true", help="also time the Python engine (cook + viewport) with Rust on and off")
     args = ap.parse_args()
     if not rust.available():
         sys.exit("the Rust core is not built: see rust/README.md")
@@ -100,11 +154,13 @@ def main():
                      "jit_s": jit_s, "note": note})
 
     for side in (int(s) for s in args.sizes.split(",")):
-        with accel.disabled():
+        with accel.disabled(), rust.disabled():
             geo = py_cook(grid_graph(side, ("noise", {"amplitude": [0.2, 0.2, 1.0]})))
-        jit = first_call(lambda: topo.edges(geo)) if numba else None
+        if args.engine:
+            engine_rows(side, args.repeat, row)
+        jit = first_call(lambda: edges_numba(geo)) if numba else None
         row("edges", side, timed(lambda: edges_numpy(geo), args.repeat),
-            timed(lambda: topo.edges(geo), args.repeat) if numba else None, timed(lambda: rust.edges(geo), args.repeat), jit)
+            timed(lambda: edges_numba(geo), args.repeat) if numba else None, timed(lambda: rust.edges(geo), args.repeat), jit)
 
         jit = first_call(lambda: point_normals_numba(geo)) if numba else None
         row("point normals", side, timed(lambda: point_normals_numpy(geo), args.repeat),
@@ -112,19 +168,26 @@ def main():
             timed(lambda: rust.point_normals(geo), args.repeat), jit)
 
         pos = np.ascontiguousarray(geo.P)
-        jit = first_call(lambda: fbm3(pos, 1, 4, 2.0, 0.5)) if numba else None
+        def fbm3_numba():
+            with rust.disabled():
+                return fbm3(pos, 1, 4, 2.0, 0.5)
+        jit = first_call(fbm3_numba) if numba else None
         row("fbm3 noise, 4 octaves", side, timed(lambda: fbm3_numpy(pos, 1, 4, 2.0, 0.5), args.repeat),
-            timed(lambda: fbm3(pos, 1, 4, 2.0, 0.5), args.repeat) if numba else None,
+            timed(fbm3_numba, args.repeat) if numba else None,
             timed(lambda: rust.fbm3(pos, 1, 4, 2.0, 0.5), args.repeat), jit, "per point")
 
         graph = grid_graph(side, ("noise", {"amplitude": [0.2, 0.2, 1.0], "octaves": 4}), ("transform", {"rotate": [0, 0, 30]}),
                            ("normal", {}))
 
         def py_graph():
-            with accel.disabled():
+            with accel.disabled(), rust.disabled():
+                py_cook(graph)
+
+        def numba_graph():
+            with rust.disabled():
                 py_cook(graph)
         row("graph: grid > noise > transform > normal", side, timed(py_graph, args.repeat),
-            timed(lambda: py_cook(graph), args.repeat) if numba else None,
+            timed(numba_graph, args.repeat) if numba else None,
             timed(lambda: rust.cook(graph), args.repeat), None, "whole cook, fresh evaluator; Rust includes building the Geometry")
 
     head = f"{'case':44} {'quads':>10} {'numpy':>9} {'numba':>9} {'rust':>9} {'rust vs best':>13}"
@@ -132,6 +195,8 @@ def main():
     print("-" * len(head))
     for r in rows:
         best = min(x for x in (r["numpy_s"], r["numba_s"]) if x is not None)
+        if r["note"].startswith("first call"):
+            print(f"{'':44} {'':>10} {r['note']}")
         fmt = lambda x: f"{x * 1000:8.1f}ms" if x is not None else f"{'-':>10}"            # noqa: E731
         print(f"{r['case']:44} {r['quads']:>10,} {fmt(r['numpy_s'])} {fmt(r['numba_s'])} {fmt(r['rust_s'])} "
               f"{best / r['rust_s']:12.1f}x")

@@ -124,6 +124,9 @@ def fbm3(p: np.ndarray, seed: int, octaves: int, lacunarity: float, gain: float)
     Uses the Numba kernel when available (same algorithm, parallel), else :func:`fbm3_numpy`. Only the low
     32 bits of ``seed`` matter to the hash, so it is reduced first (also keeps it in int64 range).
     """
+    from .. import rust
+    if rust.enabled():
+        return rust.fbm3(p, int(seed) & 0xFFFFFFFF, octaves, lacunarity, gain)
     k = accel.kernels()
     if k is not None:
         pos = np.ascontiguousarray(p, dtype=np.float32)

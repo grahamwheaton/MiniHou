@@ -8,9 +8,16 @@ from ._util import fbm3
 def _noise_fused(geo, attrib, mode, amplitude, frequency, offset, octaves, lacunarity, gain, seed):
     """One-pass Numba version for the vec3 cases (P displacement, or a vector attribute). Returns None to
     use the numpy path (acceleration off/failed, or the scalar-attribute case which is not hot)."""
-    k = accel.kernels()
+    from .. import rust
     vector = mode == "vector"
     add = attrib == "P"
+    if rust.enabled():
+        if not (add or vector):
+            return None                                   # the numpy path, with Rust's fbm3
+        res = geo.copy()                                  # one parallel pass, bit for bit the numpy path's result
+        res.point[attrib] = rust.noise_vec(geo.P, frequency, offset, amplitude, seed, octaves, lacunarity, gain, vector, add)
+        return res
+    k = accel.kernels()
     if k is None or not (add or vector):
         return None
     P = np.ascontiguousarray(geo.P)

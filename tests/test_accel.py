@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from minihou import Geometry, accel
+from minihou import Geometry, accel, rust
 from minihou.nodes import _util
 from tests import test_nodes
 from tests.helpers import quad_geo
@@ -20,6 +20,21 @@ needs_numba = unittest.skipUnless(accel.AVAILABLE, f"numba not available ({accel
 
 def rand_points(n, scale=20.0, seed=0):
     return ((np.random.default_rng(seed).random((n, 3), dtype=np.float32) - 0.5) * scale).astype(np.float32)
+
+
+_rust_off = None
+
+
+def setUpModule():
+    """These tests check the numba kernels against numpy; the Rust paths, which the engine prefers when the extension is installed,
+    are checked against both in tests/test_rust_parity.py."""
+    global _rust_off
+    _rust_off = rust.disabled()
+    _rust_off.__enter__()
+
+
+def tearDownModule():
+    _rust_off.__exit__(None, None, None)
 
 
 @needs_numba

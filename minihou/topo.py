@@ -91,6 +91,9 @@ class Edges(NamedTuple):
 
 def edges(geo) -> Edges:
     """Unique undirected edges of all primitives (open curves contribute their segments, not a closing edge)."""
+    from . import rust
+    if rust.enabled() and geo.npoints:
+        return rust.edges(geo)
     if geo.topology.nvertices >= _NUMBA_EDGES and geo.npoints:
         fast = _edges_numba(geo)
         if fast is not None:

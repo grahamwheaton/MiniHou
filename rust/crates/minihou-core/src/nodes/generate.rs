@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use rayon::prelude::*;
 use serde_json::json;
 
 use super::{linspace, InputSpec, Inputs, NodeSpec};
@@ -24,13 +25,13 @@ pub const GRID: NodeSpec = NodeSpec {
 /// `source_transform`: scale and rotate about `center`, in float64, back to float32.
 fn source_transform(p: &mut [f32], center: [f64; 3], rotate: [f64; 3], scale: [f64; 3], uniform_scale: f64) {
     let r = math::euler_xyz(rotate);
-    for q in p.chunks_exact_mut(3) {
+    p.par_chunks_exact_mut(3).for_each(|q| {
         let v = [0, 1, 2].map(|k| (q[k] as f64 - center[k]) * scale[k] * uniform_scale);
         let w = math::apply(&r, v);
         for k in 0..3 {
             q[k] = (w[k] + center[k]) as f32;
         }
-    }
+    });
 }
 
 fn grid(_inputs: &Inputs, p: &Params) -> Result<Geometry> {
@@ -49,23 +50,23 @@ fn grid(_inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let (sx, sy) = (size_x as f32, size_y as f32);
     let c32 = center.map(|c| c as f32);
     let n = rows * cols;
-    let mut pts = Vec::with_capacity(n * 3);
-    let mut uv = Vec::with_capacity(n * 2);
-    for &vj in &v {
-        for &ui in &u {
-            pts.extend_from_slice(&[(ui - 0.5) * sx + c32[0], (vj - 0.5) * sy + c32[1], c32[2]]);
-            uv.extend_from_slice(&[ui, vj]);
+    let mut pts = vec![0.0f32; n * 3];
+    let mut uv = vec![0.0f32; n * 2];
+    pts.par_chunks_mut(cols * 3).zip(uv.par_chunks_mut(cols * 2)).zip(v.par_iter()).for_each(|((prow, uvrow), &vj)| {
+        for (i, &ui) in u.iter().enumerate() {
+            prow[i * 3..i * 3 + 3].copy_from_slice(&[(ui - 0.5) * sx + c32[0], (vj - 0.5) * sy + c32[1], c32[2]]);
+            uvrow[i * 2..i * 2 + 2].copy_from_slice(&[ui, vj]);
         }
-    }
+    });
     let quads = (cols - 1) * (rows - 1);
-    let mut vp = Vec::with_capacity(quads * 4);
-    for j in 0..rows - 1 {
+    let mut vp = vec![0i32; quads * 4];
+    vp.par_chunks_mut((cols - 1) * 4).enumerate().for_each(|(j, row)| {
+        let c = cols as i32;
         for i in 0..cols - 1 {
             let b = (j * cols + i) as i32;
-            let c = cols as i32;
-            vp.extend_from_slice(&[b, b + 1, b + c + 1, b + c]);
+            row[i * 4..i * 4 + 4].copy_from_slice(&[b, b + 1, b + c + 1, b + c]);
         }
-    }
+    });
     let offs: Vec<i32> = (0..=quads as i32).map(|k| k * 4).collect();
     source_transform(&mut pts, center, p.v3("rotate")?, p.v3("scale")?, p.f("uniform_scale")?);
     let mut g = Geometry::from_arrays(pts, vp, offs, None)?;
@@ -170,7 +171,7 @@ pub fn fuse_points(geo: &Geometry, distance: f64) -> Geometry {
     let mut cell_of: HashMap<[i64; 3], i32> = HashMap::with_capacity(geo.npoints);
     let mut remap = Vec::with_capacity(geo.npoints);
     let mut keep = Vec::new();
-    for (i, q) in p.chunks_exact(3).enumerate() {
+    for (i, q) in p.as_chunks::<3>().0.iter().enumerate() {
         let key = [0, 1, 2].map(|k| (q[k] as f64 / d + 0.5).floor() as i64);
         let next = keep.len() as i32;
         let id = *cell_of.entry(key).or_insert_with(|| {

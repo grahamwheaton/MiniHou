@@ -78,3 +78,25 @@ pub fn fbm3(pos: &[f32], seed: i64, octaves: u32, lacunarity: f64, gain: f64) ->
         .map(|c| fbm3_one([c[0], c[1], c[2]], seed, octaves, lacunarity, gain))
         .collect()
 }
+
+/// The `noise` node's vector work in one parallel pass, bit for bit its numpy arithmetic: sample at `P * frequency + offset`,
+/// one fractal value times `amplitude` (scalar) or three decorrelated ones (`vector`, seeds `seed + 1013 * c`), and add the
+/// result to `P` (`add`) or return it on its own.
+#[allow(clippy::too_many_arguments)]
+pub fn noise_vec(p: &[f32], frequency: f32, offset: [f32; 3], amplitude: [f32; 3], seed: i64, octaves: u32, lacunarity: f64,
+                 gain: f64, vector: bool, add: bool) -> Vec<f32> {
+    let mut out = vec![0.0f32; p.len()];
+    out.par_chunks_exact_mut(3).zip(p.par_chunks_exact(3)).for_each(|(o, q)| {
+        let pos = [q[0] * frequency + offset[0], q[1] * frequency + offset[1], q[2] * frequency + offset[2]];
+        let v = if vector {
+            [0, 1, 2].map(|c| fbm3_one(pos, seed + 1013 * c as i64, octaves, lacunarity, gain) * amplitude[c])
+        } else {
+            let n = fbm3_one(pos, seed, octaves, lacunarity, gain);
+            [n * amplitude[0], n * amplitude[1], n * amplitude[2]]
+        };
+        for k in 0..3 {
+            o[k] = if add { q[k] + v[k] } else { v[k] };
+        }
+    });
+    out
+}

@@ -15,7 +15,9 @@ pub mod noise;
 pub mod nodes;
 pub mod normals;
 pub mod params;
+pub mod preview;
 pub mod topo;
+pub mod xform;
 
 pub use error::{Error, Result};
 pub use geometry::{Attr, AttrData, Geometry, Topology};

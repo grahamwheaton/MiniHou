@@ -142,12 +142,31 @@ def fan_triangles(geo, mask: Optional[np.ndarray] = None) -> Tuple[np.ndarray, n
     return tri, owner
 
 
+def draw_stats(t, npoints: int) -> Tuple[int, int, int]:
+    """``(fan triangles of the closed polygons, vertices of the open curves, points no primitive uses)`` of a topology. Cached on
+    the topology once its arrays are frozen (cooked geometry), so a deformer downstream, which shares its input's topology, gets
+    them for free."""
+    hit = t._draw_stats
+    if hit is not None and hit[0] == npoints:
+        return hit[1:]
+    sizes = np.diff(t.prim_offsets)
+    closed = t.closed_mask()
+    ntri = int(np.maximum(sizes - 2, 0)[closed].sum(dtype=np.int64)) if len(sizes) else 0
+    open_verts = int(sizes[~closed & (sizes >= 2)].sum(dtype=np.int64)) if len(sizes) else 0
+    used = np.zeros(npoints, bool)
+    if t.nvertices:
+        used[t.vertex_point] = True
+    loose = npoints - int(np.count_nonzero(used))
+    if not t.vertex_point.flags.writeable:
+        t._draw_stats = (npoints, ntri, open_verts, loose)
+    return ntri, open_verts, loose
+
+
 def triangle_count(geo) -> int:
     t = geo.topology
     if not t.nprims:
         return 0
-    sizes = np.diff(t.prim_offsets.astype(np.int64))
-    return int(np.maximum(sizes - 2, 0)[t.closed_mask()].sum())
+    return draw_stats(t, geo.npoints)[0]
 
 
 def _cells(P: np.ndarray, lo: np.ndarray, inv_size: float, res: int) -> np.ndarray:
@@ -231,19 +250,18 @@ def decimate(geo, max_tris: int, max_points: int) -> Reduced:
     from .geometry import AttrTable, Geometry, Topology
     t = geo.topology
     n = geo.npoints
-    ntri = triangle_count(geo)
+    ntri, open_verts, nloose = draw_stats(t, n) if t.nprims else (0, 0, n)
+    if ntri <= max_tris and open_verts + nloose <= max_points:
+        return Reduced(geo, np.arange(n), np.arange(t.nprims), False, n, ntri)
     vp = t.vertex_point.astype(np.int64)
     offs = t.prim_offsets.astype(np.int64)
     sizes = np.diff(offs)
     closed = t.closed_mask()
     open_prims = np.flatnonzero(~closed & (sizes >= 2))
-    open_verts = int(sizes[open_prims].sum()) if len(open_prims) else 0
     used = np.zeros(n, bool)
     if len(vp):
         used[vp] = True
     loose = np.flatnonzero(~used)
-    if ntri <= max_tris and open_verts + len(loose) <= max_points:
-        return Reduced(geo, np.arange(n), np.arange(t.nprims), False, n, ntri)
 
     # -- the mesh part ----------------------------------------------------------------------------------------------
     mesh = (closed & (sizes >= 3))

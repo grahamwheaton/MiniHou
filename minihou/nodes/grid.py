@@ -18,6 +18,10 @@ def grid(size_x, size_y, columns, rows, center, rotate=(0,0,0), scale=(1,1,1), u
 
     Writes point attributes ``P`` and ``uv`` (u along X, v along Y).
     """
+    from .. import rust
+    if rust.enabled():                                  # same result (tests/test_rust_parity.py), built in parallel
+        return rust.cook_node("grid", size_x=size_x, size_y=size_y, columns=columns, rows=rows, center=list(center),
+                              rotate=list(rotate), scale=list(scale), uniform_scale=uniform_scale)
     u = np.linspace(0.0, 1.0, columns, dtype=np.float32)
     v = np.linspace(0.0, 1.0, rows, dtype=np.float32)
     uu, vv = np.meshgrid(u, v)                                   # (rows, columns), row-major: j*columns + i

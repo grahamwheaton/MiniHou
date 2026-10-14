@@ -53,11 +53,21 @@ def transform(geo, translate, rotate, scale, uniform_scale, pivot, group="", axi
     M = B @ (R * s[None, :]) @ B.T             # scale/rotate in the chosen coordinate frame
     out = geo.copy()
     P = geo.P.astype(np.float32, copy=False)
-    out.point["P"] = (P - pv.astype(np.float32)) @ M.T.astype(np.float32) + (pv + B @ np.asarray(translate)).astype(np.float32)
+    shift = (pv + B @ np.asarray(translate)).astype(np.float32)
+    from .. import rust
+    fast = rust.enabled() and geo.npoints
+    if fast:                                   # one parallel pass instead of three numpy ones (same float32 arithmetic)
+        out.point["P"] = rust.affine(P, M.astype(np.float32), pv.astype(np.float32), shift)
+    else:
+        out.point["P"] = (P - pv.astype(np.float32)) @ M.T.astype(np.float32) + shift
     if "N" in geo.point:
         s_safe = np.where(np.abs(s) < 1e-12, 1.0, s)
         NM = B @ (R / s_safe[None, :]) @ B.T
-        out.point["N"] = normalize_rows(geo.point["N"] @ NM.T.astype(np.float32))
+        N = geo.point["N"]
+        if fast and N.ndim == 2 and N.shape[1] == 3:
+            out.point["N"] = rust.linear_normalized(N, NM.astype(np.float32))
+        else:
+            out.point["N"] = normalize_rows(N @ NM.T.astype(np.float32))
     return groups.restrict(geo, out, "point", group)
 
 

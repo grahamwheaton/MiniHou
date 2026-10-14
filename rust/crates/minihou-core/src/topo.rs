@@ -1,6 +1,11 @@
 //! Topology queries (`minihou/topo.py`).
 
+use std::sync::atomic::{AtomicU32, Ordering};
+
 use rayon::prelude::*;
+
+/// Points (or primitives) handled together by one parallel task.
+const RUN: usize = 1 << 14;
 
 use crate::geometry::Topology;
 
@@ -31,12 +36,11 @@ pub fn edges(topo: &Topology, npoints: usize) -> Edges {
     edges_raw(&topo.vertex_point, &topo.prim_offsets, topo.closed.as_deref(), npoints)
 }
 
-/// [`edges`] on borrowed arrays (the Python binding passes numpy buffers straight through). The arrays must form a valid
-/// topology ([`crate::geometry::validate_topology`]).
-pub fn edges_raw(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -> Edges {
+/// Half-edges bucketed by their lower point and sorted inside each bucket: `(start, sorted (higher point, vertex), RUN-sized runs of
+/// buckets with their number of distinct edges)`.
+fn bucketed(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -> (Vec<usize>, Vec<(u32, u32)>, Vec<usize>) {
     let nv = vp.len();
     let n = npoints.max(1);
-    const RUN: usize = 1 << 14;
 
     // half-edges as (lower, higher); `u32::MAX` marks "no edge". In parallel over runs of primitives, which own contiguous,
     // disjoint vertex ranges.
@@ -65,24 +69,34 @@ pub fn edges_raw(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usi
         });
     }
 
-    // counting sort by the lower point: start[lo]..start[lo + 1] are the half-edges leaving `lo`
-    let mut start = vec![0usize; n + 1];
-    for &(lo, _) in &half {
+    // counting sort by the lower point: start[lo]..start[lo + 1] are the half-edges leaving `lo`. Counting and scattering run in
+    // parallel with atomic counters: the order inside a bucket is then arbitrary, but each bucket is sorted below, so the result
+    // is the same every time.
+    let counts: Vec<AtomicU32> = (0..n).map(|_| AtomicU32::new(0)).collect();
+    half.par_iter().for_each(|&(lo, _)| {
         if lo != u32::MAX {
-            start[lo as usize + 1] += 1;
+            counts[lo as usize].fetch_add(1, Ordering::Relaxed);
         }
-    }
+    });
+    let mut start = vec![0usize; n + 1];
     for i in 0..n {
-        start[i + 1] += start[i];
+        start[i + 1] = start[i] + counts[i].load(Ordering::Relaxed) as usize;
     }
     let total = start[n];
-    let mut fill = start.clone();
+    let fill: Vec<AtomicU32> = start[..n].iter().map(|&s| AtomicU32::new(s as u32)).collect();
+    drop(counts);
     let mut sorted: Vec<(u32, u32)> = vec![(0, 0); total]; // (higher point, vertex)
-    for (v, &(lo, hi)) in half.iter().enumerate() {
-        if lo != u32::MAX {
-            sorted[fill[lo as usize]] = (hi, v as u32);
-            fill[lo as usize] += 1;
-        }
+    {
+        let out = SharedMut(sorted.as_mut_ptr());
+        half.par_iter().enumerate().for_each(|(v, &(lo, hi))| {
+            let out = &out;
+            if lo != u32::MAX {
+                let at = fill[lo as usize].fetch_add(1, Ordering::Relaxed) as usize;
+                // SAFETY: `fetch_add` hands every half-edge its own slot inside its bucket, and buckets do not overlap, so no
+                // two threads write the same element; `sorted` outlives the loop.
+                unsafe { *out.0.add(at) = (hi, v as u32) };
+            }
+        });
     }
     drop(fill);
     drop(half);
@@ -110,7 +124,20 @@ pub fn edges_raw(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usi
             edges
         })
         .collect();
+    (start, sorted, distinct)
+}
+
+/// [`edges`] on borrowed arrays (the Python binding passes numpy buffers straight through). The arrays must form a valid
+/// topology ([`crate::geometry::validate_topology`]).
+pub fn edges_raw(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -> Edges {
+    let n = npoints.max(1);
+    let nv = vp.len();
+    let (start, sorted, distinct) = bucketed(vp, offs, closed, npoints);
     let ne: usize = distinct.iter().sum();
+    let runs: Vec<(usize, &[(u32, u32)])> = (0..n).step_by(RUN).map(|first| {
+        let last = (first + RUN).min(n);
+        (first, &sorted[start[first]..start[last]])
+    }).collect();
 
     // number the edges in (lower, higher) order: each run writes its own slice of the edge arrays
     let mut points = vec![0i64; ne * 2];
@@ -120,10 +147,10 @@ pub fn edges_raw(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usi
     let mut jobs = Vec::with_capacity(runs.len());
     let (mut prest, mut crest): (&mut [i64], &mut [i64]) = (&mut points, &mut count);
     let mut edge_base = 0usize;
-    for ((first, run), k) in runs.iter().zip(&distinct) {
+    for (&(first, run), k) in runs.iter().zip(&distinct) {
         let (pp, pr) = prest.split_at_mut(k * 2);
         let (cc, cr) = crest.split_at_mut(*k);
-        jobs.push((*first, &**run, pp, cc, edge_base));
+        jobs.push((first, run, pp, cc, edge_base));
         prest = pr;
         crest = cr;
         edge_base += k;
@@ -151,6 +178,36 @@ pub fn edges_raw(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usi
     Edges { points, of_vertex, count }
 }
 
+/// Only the `(E * 2)` point numbers of [`edges_raw`], as `u32` (what the viewport draws), without the per-vertex and count arrays.
+pub fn edge_points_u32(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -> Vec<u32> {
+    let n = npoints.max(1);
+    let (start, sorted, distinct) = bucketed(vp, offs, closed, npoints);
+    let ne: usize = distinct.iter().sum();
+    let mut points = vec![0u32; ne * 2];
+    let mut jobs = Vec::with_capacity(distinct.len());
+    let mut rest: &mut [u32] = &mut points;
+    for (i, k) in distinct.iter().enumerate() {
+        let (pp, r) = rest.split_at_mut(k * 2);
+        jobs.push((i * RUN, pp));
+        rest = r;
+    }
+    jobs.into_par_iter().for_each(|(first, pp)| {
+        let mut e = 0;
+        for lo in first..(first + RUN).min(n) {
+            let mut prev: Option<u32> = None;
+            for &(hi, _) in &sorted[start[lo]..start[lo + 1]] {
+                if prev != Some(hi) {
+                    pp[e * 2] = lo as u32;
+                    pp[e * 2 + 1] = hi;
+                    e += 1;
+                    prev = Some(hi);
+                }
+            }
+        }
+    });
+    points
+}
+
 /// A raw pointer that may be shared by the threads of one parallel loop (each writes elements no other thread touches).
-struct SharedMut(*mut i64);
-unsafe impl Sync for SharedMut {}
+struct SharedMut<T>(*mut T);
+unsafe impl<T> Sync for SharedMut<T> {}

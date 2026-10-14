@@ -8,19 +8,52 @@ them to Rust without copying; anything else is converted first.
 """
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import threading
 from typing import Optional
 
 import numpy as np
 
 try:
+    if os.environ.get("MINIHOU_NO_RUST", "").strip().lower() in ("1", "true", "yes", "on"):
+        raise ImportError("disabled by MINIHOU_NO_RUST")
     import minihou_rs as _rs
 except ImportError:                                   # the normal case: the extension is optional
     _rs = None
 
+_lock = threading.Lock()
+_forced_off = 0                                       # > 0 inside `disabled()`
+
 
 def available() -> bool:
     return _rs is not None
+
+
+def enabled() -> bool:
+    """The engine's fast paths use Rust: the extension is installed, MINIHOU_NO_RUST is not set, and no :func:`disabled` is active.
+    The engine prefers Rust, then numba, then numpy; all three give the same results (tests/test_rust_parity.py)."""
+    return _rs is not None and _forced_off == 0
+
+
+@contextlib.contextmanager
+def disabled():
+    """Use the Python / numba paths inside this block (the parity tests use it to get the reference results)."""
+    global _forced_off
+    with _lock:
+        _forced_off += 1
+    try:
+        yield
+    finally:
+        with _lock:
+            _forced_off -= 1
+
+
+def status() -> str:
+    if _rs is None:
+        return "not installed"
+    return f"minihou_rs {_rs.__version__}" + ("" if _forced_off == 0 else " (disabled)")
 
 
 def version() -> Optional[str]:
@@ -56,15 +89,73 @@ def prim_normals(geo) -> np.ndarray:
     return _need().prim_normals(_f32x3(geo.P), _i32(t.vertex_point), _i32(t.prim_offsets))
 
 
+def point_prims(topology, npoints: int):
+    """``(start, prims)``: the primitives around each point (CSR, in primitive order). It depends only on the topology, so it is
+    cached on a frozen (cooked) topology: a deformer downstream shares its input's topology and reuses it."""
+    t = topology
+    hit = t._point_prims
+    if hit is not None and hit[0] == npoints:
+        return hit[1]
+    table = _need().point_prims(_i32(t.vertex_point), _i32(t.prim_offsets), int(npoints))
+    if not t.vertex_point.flags.writeable:
+        t._point_prims = (npoints, table)
+    return table
+
+
 def point_normals(geo) -> np.ndarray:
     """Unit point normals (float32) as the ``normal`` node makes them for ``domain='point'``."""
     t = geo.topology
-    return _need().point_normals(_f32x3(geo.P), _i32(t.vertex_point), _i32(t.prim_offsets))
+    return _need().point_normals(_f32x3(geo.P), _i32(t.vertex_point), _i32(t.prim_offsets), point_prims(t, geo.npoints))
 
 
 def fbm3(pos, seed: int, octaves: int, lacunarity: float, gain: float) -> np.ndarray:
     """:func:`minihou.nodes._util.fbm3_numpy` in Rust (float32)."""
     return _need().fbm3(_f32x3(pos), int(seed), int(octaves), float(lacunarity), float(gain))
+
+
+def noise_vec(P, frequency, offset, amplitude, seed, octaves, lacunarity, gain, vector: bool, add: bool) -> np.ndarray:
+    """The ``noise`` node's vector cases in one pass: ``P + noise`` (``add``) or the noise alone, float32 (n, 3)."""
+    return _need().noise_vec(_f32x3(P), float(np.float32(frequency)), [float(x) for x in np.asarray(offset, np.float32)],
+                             [float(x) for x in np.asarray(amplitude, np.float32)], int(seed) & 0xFFFFFFFF, int(octaves),
+                             float(lacunarity), float(gain), bool(vector), bool(add))
+
+
+def affine(P, M, pivot, shift) -> np.ndarray:
+    """``(P - pivot) @ M.T + shift`` in float32 (the transform node), one parallel pass."""
+    m = [[float(x) for x in row] for row in np.asarray(M, np.float32)]
+    return _need().affine(_f32x3(P), m, [float(x) for x in np.asarray(pivot, np.float32)], [float(x) for x in np.asarray(shift, np.float32)])
+
+
+def linear_normalized(V, M) -> np.ndarray:
+    """``normalize_rows(V @ M.T)`` in float32 (normals through the transform node)."""
+    m = [[float(x) for x in row] for row in np.asarray(M, np.float32)]
+    return _need().linear_normalized(_f32x3(V), m)
+
+
+def preview_layout(P, topology, max_tris: int, max_edges: int, chunk_min: int, chunk: int):
+    """``(tri, tri_prim, edge, table, truncated)`` for :func:`minihou.preview._arrays_for`: fan triangles, Morton-sorted into runs
+    with a bounds table (None below ``chunk_min`` triangles), and the edges; uint32 arrays, table float32 (rows, 8)."""
+    t = topology
+    closed = np.ascontiguousarray(t.closed_mask(), np.bool_) if t.has_open else None
+    tri, tri_prim, edge, table, truncated = _need().preview_layout(_f32x3(P), _i32(t.vertex_point), _i32(t.prim_offsets), closed,
+                                                                   int(max_tris), int(max_edges), int(chunk_min), int(chunk))
+    return tri, tri_prim, edge, (None if table is None else table.reshape(-1, 8)), bool(truncated)
+
+
+def bounds(P):
+    """``(P.min(0), P.max(0))`` as float32 arrays of 3, in one parallel pass."""
+    return _need().bounds(_f32x3(P))
+
+
+def chunk_bounds(P, tri, chunk: int) -> np.ndarray:
+    """:func:`minihou.preview.chunk_table` for triangles already in order: float32 (rows, 8)."""
+    tri = np.ascontiguousarray(np.asarray(tri).reshape(-1), np.uint32)
+    return _need().chunk_bounds(_f32x3(P), tri, int(chunk)).reshape(-1, 8)
+
+
+def cook_node(node_type: str, **params):
+    """One input-less node (``grid``, ``box``) cooked in Rust, as a Geometry."""
+    return cook({"version": 1, "nodes": {"n": {"type": node_type, "params": params}}, "display": "n"})
 
 
 def node_types() -> list:

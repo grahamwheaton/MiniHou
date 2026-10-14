@@ -34,7 +34,8 @@ python bench/bench_rust.py
 ```
 
 `minihou.rust.available()` says whether the extension is importable; MiniHou imports and runs the same without it (the parity
-tests skip).
+tests skip). `tests/test_rust_parity.py` also checks the engine with Rust on against the engine with Rust off, and the CI job runs
+the whole test suite with the extension installed.
 
 ## What is ported
 
@@ -62,40 +63,59 @@ Python engine picks between) as the oracle:
 * a seeded set of random parameters per node goes through both engines too;
 * malformed topology is a `ValueError`, not a crash.
 
-## First numbers
+## What the engine uses it for
 
-`bench/bench_rust.py`, median of 5 after a warm-up; Rust includes the Python <-> Rust calls. A 4-thread cloud VM (Xeon 2.1 GHz),
-Python 3.13, numpy 2.5, numba 0.68; raw data in `bench/results/rust_2026-10-14_cloud-4thread.json`.
+When `minihou_rs` is installed, the Python engine uses it automatically (`MINIHOU_NO_RUST=1` turns it off; `minihou.rust.disabled()`
+does the same inside a block). The order of preference is Rust, then numba, then numpy, and the results are the same:
 
-| | quads | numpy | numba | Rust |
-|---|---|---|---|---|
-| edges | 1M | 312 ms | 85 ms | **63 ms** |
-| point normals | 1M | 682 ms | 23 ms | 21 ms |
-| fbm3 noise, 4 octaves | 1M | 910 ms | 52 ms | 53 ms |
-| graph: grid > noise > transform > normal | 1M | 1755 ms | 249 ms | **121 ms** |
-| edges | 4M | 2197 ms | 374 ms | 384 ms |
-| point normals | 4M | 4380 ms | 166 ms | 213 ms |
-| fbm3 noise, 4 octaves | 4M | 5986 ms | 202 ms | 225 ms |
-| graph: grid > noise > transform > normal | 4M | 12517 ms | 914 ms | **751 ms** |
+| Where | What Rust does |
+|---|---|
+| `topo.edges` | the edge table (exact same numbering) |
+| viewport (`preview._arrays_for`) | the whole layout of a big mesh in one call: fan triangles, Morton order, run table, edges, as the final `u32` arrays; the run table again after a deformer; the bounding box |
+| `grid`, `box` nodes | built in Rust (parallel) |
+| `noise` node | one fused parallel pass, bit for bit the numpy result |
+| `transform` node | the matrix step for P and N in one pass |
+| `normal` node | face normals; point normals from a point-to-primitive table that is cached on the (frozen) topology, so a deformer upstream does not rebuild it |
 
-What this says, plainly:
+Two Python-side changes came out of the profiling too (they help without Rust as well): the viewport's "does this need reducing"
+check was converting the whole topology to int64 on every update; its counts are now computed once per topology and cached
+(`proxy.draw_stats`).
 
-* **Against numba, single kernels are a tie.** numba compiles the same loops to similar machine code; porting a kernel that
-  numba already handles buys little on its own. (Against plain numpy, which is what the default packaged build runs because it
-  leaves numba out, Rust is 5-30x faster.)
-* **Whole graphs gain more** (1.2-2x over numba here): no per-node Python, fewer temporary arrays, no conversions between nodes.
-  That points at the plan's Phase D (a native geometry core that keeps data on the Rust side across nodes) as where the real
-  win is, more than at swapping individual kernels.
-* **The packaged app** is the other easy win: shipping the Rust extension gives the default build numba-class speed without
-  numba's size or its first-call compile (0.5 s for edges on first use).
-* 4 threads is a small machine; Rayon's share grows with cores. These numbers need repeating on an artist's workstation, and
-  end to end with Blender (`RustPlan.md` section 3) before any decision.
+## Numbers
+
+`python bench/bench_rust.py --engine`: median of 5 after a warm-up, a 4-thread cloud VM (Xeon 2.1 GHz), Python 3.13, numpy 2.5,
+numba 0.68. "numba" is the engine as it was (numba installed); "Rust" is the same engine with the extension. Raw data:
+`bench/results/rust_2026-10-15_cloud-4thread.json` (the first round, kernels only: `rust_2026-10-14_cloud-4thread.json`).
+
+What an artist waits for, 4M quads (1M in brackets):
+
+| | numba | Rust | |
+|---|---|---|---|
+| slider edit on a noise node (re-cook noise > transform > normal) | 1051 ms (230) | **357 ms** (82) | 2.9x |
+| cook grid > noise > transform > normal from scratch | 1204 ms (311) | **542 ms** (125) | 2.2x |
+| viewport, a new mesh | 2130 ms (411) | **543 ms** (146) | 3.9x |
+| viewport, a deformer moved the points | 290 ms (72) | **73 ms** (17) | 4.0x |
+| first time after starting (no JIT warm-up): cook / viewport | 2.3 s / 4.9 s | **0.9 s / 0.9 s** | |
+
+Single kernels, 4M quads:
+
+| | numpy | numba | Rust |
+|---|---|---|---|
+| edges | 2032 ms | 335 ms | **214 ms** |
+| point normals (topology table cached) | 4253 ms | 106 ms | **71 ms** |
+| fbm3 noise, 4 octaves | 5262 ms | 193 ms | 204 ms |
+
+What this says:
+
+* The gain is in the **whole path**, not in single kernels: noise is compute-bound and ties numba; the wins come from fewer
+  passes over memory, no int64 temporaries, keeping per-topology tables, and parallel steps numba runs serially.
+* **No JIT warm-up**: numba's first call on a big mesh costs seconds; Rust is as fast the first time.
+* The packaged app (no numba) gets all of this; against plain numpy the engine paths are 10-30x faster.
+* 4 threads is a small machine; Rayon's share grows with cores. Repeat on an artist's workstation and end to end with Blender.
 
 ## Next steps
 
-1. Run `bench/bench_rust.py` on real hardware (8-24 cores) and add the Blender-side timings from the plan.
-2. Keep geometry on the Rust side between nodes: the evaluator calls the Rust cook for any run of consecutive Rust-capable nodes
-   and converts only at the boundaries (this is what the graph numbers above suggest).
-3. Opt-in use from the engine (`MINIHOU_RUST=1`) for `topo.edges` and the normal node, with the parity tests in CI.
-4. Port by measured need: the heavy nodes (booleans, subdivide, scatter + copy to points, remesh) once profiles show them on top.
-5. Package the wheel with the desktop build.
+1. Run `bench/bench_rust.py --engine` on real hardware (8-24 cores) and add the Blender-side timings from the plan (`bench/bench_link.py`).
+2. Package the wheel with the desktop build (the biggest win for people without numba).
+3. The live link's encode / diff of big arrays, and the Blender side's mesh update, are the next stages to measure.
+4. Port by measured need: the heavy nodes (subdivide, booleans, scatter + copy to points, remesh) once profiles show them on top.

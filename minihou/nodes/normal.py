@@ -87,6 +87,13 @@ def normal(geo, domain, cusp_angle=60.0):
             if "N" in table:
                 del table["N"]
         return out
+    from .. import rust
+    if rust.enabled() and geo.npoints:
+        if domain == "prim":
+            out.prim["N"] = normalize_rows(rust.prim_normals(geo))
+        else:
+            out.point["N"] = rust.point_normals(geo)
+        return out
     fast = _normals_numba(geo, domain)
     if fast is not None:
         if domain == "prim":

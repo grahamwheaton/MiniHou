@@ -15,29 +15,34 @@ env:
 
 jobs:
   rust:
-    name: Rust core (cargo test, clippy, Python parity)
+    name: Rust core (cargo test, clippy, parity, suite with Rust on)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: toolchain
-        run: rustup toolchain install stable --profile minimal --component clippy && rustup default stable
+      - name: toolchain (the version in rust/rust-toolchain.toml)
+        working-directory: rust
+        run: rustup toolchain install
       - name: cargo test
-        run: cargo test --manifest-path rust/Cargo.toml --release
+        working-directory: rust
+        run: cargo test --release
       - name: clippy
-        run: cargo clippy --manifest-path rust/Cargo.toml --all-targets -- -D warnings
+        working-directory: rust
+        run: cargo clippy --all-targets -- -D warnings
       - name: build the Python extension
         run: |
           python -m pip install numpy numba maturin
-          maturin build --release -m rust/crates/minihou-py/Cargo.toml -o rust-wheels
+          cd rust && maturin build --release -m crates/minihou-py/Cargo.toml -o ../rust-wheels && cd ..
           python -m pip install rust-wheels/*.whl
       - name: parity with the Python engine (numba and numpy oracles)
         run: |
           python -W error::EncodingWarning -m unittest tests.test_rust_parity -v
           MINIHOU_NO_NUMBA=1 python -W error::EncodingWarning -m unittest tests.test_rust_parity -v
+      - name: the whole test suite with the Rust paths on
+        run: python -m pip install usd-core scipy && python -W error::EncodingWarning -m unittest discover -s tests -t .
 
   engine:
     name: tests (${{ matrix.os }}, py${{ matrix.python }}, ${{ matrix.backend }})

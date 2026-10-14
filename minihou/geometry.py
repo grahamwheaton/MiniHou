@@ -136,7 +136,7 @@ class Topology:
     Houdini's open polygons); ``None`` means all closed, which is what most geometry is.
     """
 
-    __slots__ = ("vertex_point", "prim_offsets", "closed", "_digest")
+    __slots__ = ("vertex_point", "prim_offsets", "closed", "_digest", "_draw_stats", "_point_prims")
 
     def __init__(self, vertex_point=None, prim_offsets=None, closed=None):
         vp = np.zeros(0, _INT) if vertex_point is None else np.ascontiguousarray(vertex_point, dtype=_INT)
@@ -151,6 +151,8 @@ class Topology:
                 closed = None                             # canonical: all-closed is stored as None
         self.closed: Optional[np.ndarray] = closed
         self._digest: Optional[str] = None
+        self._draw_stats = None                           # proxy.draw_stats, cached once the arrays are frozen
+        self._point_prims = None                          # rust.point_prims (the primitives around each point), likewise
 
     @property
     def has_open(self) -> bool:

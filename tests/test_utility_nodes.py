@@ -44,7 +44,9 @@ class UtilityNodeTests(unittest.TestCase):
         r = cook({"t": {"type": "torus"}, "r": {"type": "transform", "inputs": {"geo": "t"},
                                                  "params": {"rotate": [30, 20, 10]}},
                   "b": {"type": "bound", "inputs": {"geo": "r"}, "params": {"oriented": True}}}, "b")
-        np.testing.assert_allclose(sorted(r.detail["bound_size"]), [0.5, 2.5, 2.5], atol=0.01)   # a 32-gon ring
+        # a 32-gon ring: the box goes across its corners (2.5) or across its flats (2.5 cos(pi/32) = 2.488), and the last
+        # float32 bit of the rotated points decides which (numpy's BLAS and the Rust kernel round differently)
+        np.testing.assert_allclose(sorted(r.detail["bound_size"]), [0.5, 2.5, 2.5], atol=0.015)
 
     def test_switch(self):
         nodes = {"a": {"type": "box"}, "s": {"type": "sphere"}}

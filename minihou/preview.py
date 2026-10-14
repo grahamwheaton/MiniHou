@@ -28,7 +28,7 @@ from typing import Dict, NamedTuple, Tuple
 
 import numpy as np
 
-from . import proxy
+from . import proxy, rust
 
 MAGIC = b"MHPV"
 # The editor's budget: more than this is reduced by :func:`proxy.decimate` (the whole shape, coarser), not cut off. A modern GPU draws
@@ -45,6 +45,10 @@ INSTANCE_POINTS = 500_000
 EXACT_PRIMS = 100_000            # up to this many primitives, polygons with more than 3 corners are triangulated exactly (concave ones too)
 CHUNK_MIN_TRIS = 100_000         # from this many triangles on, they are sorted along a space-filling curve and sent with a chunk table
 CHUNK_TRIS = 8192                # triangles per chunk
+
+
+def _rust_on() -> bool:
+    return rust.enabled()
 
 
 def _triangles(geo):
@@ -186,6 +190,8 @@ def _layout_put(token, lay):
 def chunk_table(P: np.ndarray, tri: np.ndarray) -> np.ndarray:
     """The run table of :func:`chunk_triangles` for triangles already in order (bounds from the current positions)."""
     n = len(tri)
+    if _rust_on() and n:
+        return rust.chunk_bounds(P, tri, CHUNK_TRIS)
     from . import accel
     k = accel.kernels()
     if k is not None and n:
@@ -248,7 +254,13 @@ def _arrays_for(geo, full: bool = False, tris: int = 0) -> Tuple[dict, Dict[str,
     # downstream (noise, transform, smooth...) shares the topology of its input, so they are kept per topology and only the run bounds are redone.
     token = f"{t.digest}:{n}" if not red.reduced and t.nprims else None
     lay = _layout_get(token)
-    if lay is None:
+    if lay is None and t.nprims > EXACT_PRIMS and _rust_on():
+        tri, tri_prim, edge, table, truncated = rust.preview_layout(shown.P, t, MAX_TRIS, MAX_EDGES, CHUNK_MIN_TRIS, CHUNK_TRIS)
+        if red.reduced and len(tri_prim):
+            tri_prim = np.ascontiguousarray(red.prim_src[tri_prim], np.uint32)
+        lay = _Layout(tri, tri_prim, edge, table is not None, truncated)
+        _layout_put(token, lay)
+    elif lay is None:
         tri, tri_prim = _triangles(shown)
         edge = topo.edges(shown).points.astype(np.int64) if t.nprims else np.zeros((0, 2), np.int64)
         truncated = False
@@ -276,7 +288,9 @@ def _arrays_for(geo, full: bool = False, tris: int = 0) -> Tuple[dict, Dict[str,
         out["Cd"] = np.ascontiguousarray(np.clip(cd[:, :3], 0.0, 1.0), np.float32).reshape(-1)
     if red.reduced:
         out["point_src"] = np.ascontiguousarray(red.point_src, np.uint32)
-    if geo.npoints:
+    if geo.npoints and _rust_on():
+        lo, hi = (x.astype(float).tolist() for x in rust.bounds(geo.P))
+    elif geo.npoints:
         lo, hi = geo.P.min(0).astype(float).tolist(), geo.P.max(0).astype(float).tolist()
     else:
         lo = hi = [0.0, 0.0, 0.0]

@@ -17,17 +17,25 @@ from minihou.sdk import REGISTRY
 NODE_TYPES = ["grid", "box", "transform", "normal", "noise", "merge", "null", "output"]
 
 
+@contextlib.contextmanager
+def _numpy_only():
+    with rust.disabled(), accel.disabled():
+        yield
+
+
 def paths():
-    """Context managers for the Python oracle's numpy path and, when available, its numba path."""
-    out = [("numpy", accel.disabled)]
+    """Context managers for the Python oracle's numpy path and, when available, its numba path (Rust off in both: the engine
+    itself uses Rust when it is installed)."""
+    out = [("numpy", _numpy_only)]
     if accel.enabled():
-        out.append(("numba", contextlib.nullcontext))
+        out.append(("numba", rust.disabled))
     return out
 
 
 def py_cook(graph: dict, node=None) -> Geometry:
     g = Graph.from_dict(graph)
-    return Evaluator().cook(g, node or g.output_node())
+    with rust.disabled():
+        return Evaluator().cook(g, node or g.output_node())
 
 
 def assert_same_geometry(tc, a: Geometry, b: Geometry, atol=1e-5):
@@ -175,9 +183,85 @@ class RustParityTests(unittest.TestCase):
         from minihou.nodes.normal import prim_normals
         from minihou.nodes._util import fbm3_numpy
         g = py_cook(chain(("noise", {"amplitude": [0.2, 0.3, 1]}), source={"type": "grid", "params": {"columns": 60, "rows": 50}}))
-        np.testing.assert_allclose(rust.prim_normals(g), prim_normals(g), rtol=1e-9, atol=1e-12)
+        with rust.disabled():
+            np.testing.assert_allclose(rust.prim_normals(g), prim_normals(g), rtol=1e-9, atol=1e-12)
         pos = np.random.default_rng(3).uniform(-50, 50, (5000, 3)).astype(np.float32)
         np.testing.assert_array_equal(rust.fbm3(pos, 5, 3, 2.0, 0.5), fbm3_numpy(pos, 5, 3, 2.0, 0.5))   # bit for bit
+
+    def test_viewport_layout_is_identical(self):
+        """The editor's arrays for big meshes (fan triangles in Morton order, run table, edges) are exactly the Python / numba ones."""
+        from minihou import preview
+        big = py_cook(chain(("noise", {"amplitude": [0.3, 0.3, 2], "frequency": 0.7}),
+                            source={"type": "grid", "params": {"columns": 420, "rows": 300, "size_x": 30, "size_y": 20}}))
+        tris = py_cook({"version": 1, "nodes": {"b": {"type": "box", "params": {"connectivity": "triangles", "divisions": 140}}},
+                        "display": "b"})
+        # quads, triangles and an open curve together, past the exact-triangulation size
+        mixed = py_cook({"version": 1, "nodes": {"a": {"type": "grid", "params": {"columns": 360, "rows": 300}}, "b": {"type": "box",
+                         "params": {"connectivity": "triangles", "divisions": 30}},
+                         "m": {"type": "merge", "inputs": {"geos": ["a", "b"]}}}, "display": "m"})
+        curve = Geometry.from_arrays(np.random.default_rng(1).random((5, 3)).astype(np.float32), np.arange(5, dtype=np.int32),
+                                     np.array([0, 5], np.int32), np.array([False]))
+        from minihou.nodes.merge import merge
+        mixed = merge([mixed, curve])
+        for geo in (big, tris, mixed):
+            for full, budget in ((True, 0), (False, 20000)):                   # full resolution, and a reduced (clustered) view
+                preview._LAYOUTS.clear()
+                h_rs, a_rs = preview._arrays_for(geo, full=full, tris=budget)
+                for name, ctx in paths():
+                    with self.subTest(prims=geo.nprims, full=full, oracle=name), ctx():
+                        preview._LAYOUTS.clear()
+                        h_py, a_py = preview._arrays_for(geo, full=full, tris=budget)
+                        self.assertEqual(h_rs, h_py)
+                        self.assertEqual(sorted(a_rs), sorted(a_py))
+                        for k in a_py:
+                            self.assertEqual(a_rs[k].dtype, a_py[k].dtype, k)
+                        self.same_layout(a_rs, a_py, exact_order=name == "numba")
+            # a deformer downstream (same topology): only the run bounds are redone
+            moved = geo.copy()
+            moved.point["P"] = (geo.P * np.float32(1.5)).astype(np.float32)
+            preview._LAYOUTS.clear()
+            preview._arrays_for(geo, full=True)
+            _, a_rs = preview._arrays_for(moved, full=True)
+            for name, ctx in paths():
+                with self.subTest(moved=True, oracle=name), ctx():
+                    preview._LAYOUTS.clear()
+                    preview._arrays_for(geo, full=True)
+                    _, a_py = preview._arrays_for(moved, full=True)
+                    self.same_layout(a_rs, a_py, exact_order=name == "numba")
+
+    def same_layout(self, a, b, exact_order):
+        """The numba path sorts triangles by the same Morton code as Rust, so the order and run table match exactly; the numpy
+        fallback quantises triangle centres a little differently, so against it the triangles must be the same set."""
+        if exact_order or "chunks" not in b:
+            for k in b:
+                np.testing.assert_array_equal(a[k], b[k], err_msg=k)
+            return
+        for k in b:
+            if k not in ("tri", "tri_prim", "chunks"):
+                np.testing.assert_array_equal(a[k], b[k], err_msg=k)
+        rows = lambda d: np.concatenate([d["tri"].reshape(-1, 3), d["tri_prim"][:, None]], 1)                     # noqa: E731
+        key = lambda r: r[np.lexsort(r.T[::-1])]                                                                   # noqa: E731
+        np.testing.assert_array_equal(key(rows(a)), key(rows(b)))
+        self.assertEqual(a["chunks"].shape, b["chunks"].shape)
+
+    def test_the_engine_with_rust_on_matches_the_engine_with_it_off(self):
+        """The Python engine uses the Rust kernels for grid, box, noise, transform, normal and edges when the extension is
+        installed: whole graphs (with nodes Rust does not have in between) must come out the same as without it."""
+        graphs = [chain(("noise", {"amplitude": [0.4, 0.2, 1.5], "octaves": 3, "seed": 9}), ("transform", {"rotate": [20, 40, 60],
+                         "scale": [2, 1, 0.5], "pivot": [1, 0, 0]}), ("normal", {}), ("transform", {"translate": [0, 0, 1]}),
+                        source={"type": "grid", "params": {"columns": 120, "rows": 90, "size_x": 8}}),
+                  chain(("noise", {"mode": "vector", "attrib": "v", "frequency": 2}), ("normal", {"domain": "prim"}),
+                        ("subdivide", {}), ("normal", {}), source={"type": "box", "params": {"divisions": 6}}),
+                  chain(("polyextrude", {"distance": 0.3}), ("noise", {"attrib": "P", "amplitude": [0.1, 0.1, 0.1]}),
+                        ("transform", {"axis_rotation": [0, 30, 0], "scale": [1, 2, 1]}), ("normal", {}),
+                        source={"type": "grid", "params": {"columns": 30, "rows": 20}})]
+        for graph in graphs:
+            with self.subTest(graph=list(graph["nodes"])):
+                g = Graph.from_dict(graph)
+                with_rust = Evaluator().cook(g, g.output_node())
+                with rust.disabled():
+                    without = Evaluator().cook(g, g.output_node())
+                assert_same_geometry(self, with_rust, without, atol=1e-5)
 
     def test_bad_input_is_an_error_not_a_crash(self):
         import minihou_rs

@@ -8,7 +8,7 @@ use super::{Inputs, NodeSpec, GEO};
 use crate::error::{Error, Result};
 use crate::geometry::{Attr, Geometry};
 use crate::params::Params;
-use crate::{math, noise, normals};
+use crate::{math, noise, normals, xform};
 
 pub const TRANSFORM: NodeSpec = NodeSpec {
     name: "transform",
@@ -26,19 +26,6 @@ pub const TRANSFORM: NodeSpec = NodeSpec {
     ),
     cook: transform,
 };
-
-/// `n` rows of 3 normalised in float32, as `normalize_rows` does (rows shorter than 1e-20 are left as they are).
-fn normalize_rows_f32(v: &mut [f32]) {
-    v.par_chunks_exact_mut(3).for_each(|r| {
-        let mut len = (r[0] * r[0] + r[1] * r[1] + r[2] * r[2]).sqrt();
-        if len < 1e-20 {
-            len = 1.0;
-        }
-        r[0] /= len;
-        r[1] /= len;
-        r[2] /= len;
-    });
-}
 
 fn mat_f32(m: &math::M3) -> [[f32; 3]; 3] {
     m.map(|row| row.map(|x| x as f32))
@@ -68,27 +55,12 @@ fn transform(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let shift: [f32; 3] = [0, 1, 2].map(|k| (pivot[k] + bt[k]) as f32);
     let pv: [f32; 3] = pivot.map(|x| x as f32);
     let mut out = (*geo).clone();
-    let src = geo.p();
-    let mut dst = vec![0.0f32; src.len()];
-    dst.par_chunks_exact_mut(3).zip(src.par_chunks_exact(3)).for_each(|(o, q)| {
-        let d = [q[0] - pv[0], q[1] - pv[1], q[2] - pv[2]];
-        for k in 0..3 {
-            o[k] = d[0] * m32[k][0] + d[1] * m32[k][1] + d[2] * m32[k][2] + shift[k];
-        }
-    });
-    out.set_p(dst);
+    out.set_p(xform::affine(geo.p(), m32, pv, shift));
     if let Some(n) = geo.point.get("N") {
         let n = n.as_f32().filter(|_| n.width == 3).ok_or_else(|| Error::new("point attribute N must be 3 floats"))?;
         // normals take the inverse scale: B (R / s) B^T, a zero scale counting as 1
         let nm = math::mul(&math::mul(&b, &scale_cols(&r, &|x| 1.0 / if x.abs() < 1e-12 { 1.0 } else { x })), &math::transpose(&b));
-        let nm32 = mat_f32(&nm);
-        let mut nn = vec![0.0f32; n.len()];
-        nn.par_chunks_exact_mut(3).zip(n.par_chunks_exact(3)).for_each(|(o, q)| {
-            for k in 0..3 {
-                o[k] = q[0] * nm32[k][0] + q[1] * nm32[k][1] + q[2] * nm32[k][2];
-            }
-        });
-        normalize_rows_f32(&mut nn);
+        let nn = xform::linear_normalized(n, mat_f32(&nm));
         out.point.insert("N".into(), Arc::new(Attr::f32(3, nn)));
     }
     Ok(out)
@@ -146,25 +118,19 @@ fn noise_node(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     }
     let (lac, gain, seed) = (p.f("lacunarity")?, p.f("gain")?, p.i("seed")?);
     let src = geo.p();
-    let pos: Vec<f32> = src.chunks_exact(3).flat_map(|q| [0, 1, 2].map(|k| q[k] * freq + offset[k])).collect();
-    let n = geo.npoints;
-    let vec: Vec<f32> = if mode == "scalar" {
-        let v = noise::fbm3(&pos, seed, octaves as u32, lac, gain);
-        if attrib != "P" {
-            let mut out = (*geo).clone();
-            out.point.insert(attrib, Arc::new(Attr::f32(1, v.iter().map(|x| x * amp[0]).collect())));
-            return Ok(out);
-        }
-        v.iter().flat_map(|x| [x * amp[0], x * amp[1], x * amp[2]]).collect()
-    } else {
-        let layers: Vec<Vec<f32>> = (0..3).map(|c| noise::fbm3(&pos, seed + 1013 * c, octaves as u32, lac, gain)).collect();
-        (0..n).flat_map(|i| [layers[0][i] * amp[0], layers[1][i] * amp[1], layers[2][i] * amp[2]]).collect()
-    };
     let mut out = (*geo).clone();
-    if attrib == "P" {
-        out.set_p(src.iter().zip(&vec).map(|(a, b)| a + b).collect());
+    if mode == "scalar" && attrib != "P" {
+        let pos: Vec<f32> = src.par_chunks_exact(3).flat_map_iter(|q| [0, 1, 2].map(|k| q[k] * freq + offset[k])).collect();
+        let v = noise::fbm3(&pos, seed, octaves as u32, lac, gain);
+        out.point.insert(attrib, Arc::new(Attr::f32(1, v.iter().map(|x| x * amp[0]).collect())));
+        return Ok(out);
+    }
+    let add = attrib == "P";
+    let v = noise::noise_vec(src, freq, offset, amp, seed, octaves as u32, lac, gain, mode == "vector", add);
+    if add {
+        out.set_p(v);
     } else {
-        out.point.insert(attrib, Arc::new(Attr::f32(3, vec)));
+        out.point.insert(attrib, Arc::new(Attr::f32(3, v)));
     }
     Ok(out)
 }
