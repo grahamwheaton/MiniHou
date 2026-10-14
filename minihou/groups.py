@@ -47,16 +47,32 @@ def attr_name(group: str) -> str:
 
 def names(geo, domain: str):
     """Group names on a domain (without the prefix)."""
+    if domain in ("edge", "vertex"):
+        from .nodes import group_rules
+        return group_rules.names(geo, domain)
     return sorted(n[len(PREFIX):] for n in geo.table(domain).names() if n.startswith(PREFIX))
 
 
 def member(geo, domain: str, group: str) -> Optional[np.ndarray]:
     """Bool membership of a group on ``domain`` (converting from the other domain), or None if there is no such group."""
+    if domain in ('vertex','edge'):
+        from .nodes import group_rules as rules
+        for src in (domain,)+tuple(d for d in ('point','prim','edge','vertex') if d!=domain):
+            found=rules.membership(geo,src,group)
+            if found is not None:return rules.convert(geo,found,src,domain,contained=False)
+        return None
     key = PREFIX + group
     for src in (domain, "prim" if domain == "point" else "point"):
         a = geo.table(src).get(key)
         if a is not None:
             return convert(geo, (a if a.ndim == 1 else a[:, 0]) != 0, src, domain)
+    # Other group domains are explicitly converted when used in an ordinary
+    # point/primitive group field. Same-domain groups above retain precedence.
+    from .nodes import group_rules
+    for src in ("edge", "vertex"):
+        found = group_rules.membership(geo, src, group)
+        if found is not None:
+            return group_rules.convert(geo, found, src, domain, contained=False)
     return None
 
 
@@ -64,6 +80,9 @@ def convert(geo, mask: np.ndarray, src: str, dst: str) -> np.ndarray:
     """Convert a membership mask between the point and primitive domains."""
     if src == dst:
         return mask
+    if src not in ('point','prim') or dst not in ('point','prim'):
+        from .nodes import group_rules
+        return group_rules.convert(geo,mask,src,dst)
     topo = geo.topology
     prim_of_v = np.repeat(np.arange(topo.nprims), topo.prim_sizes())
     if src == "prim":                                       # points used by selected prims
@@ -76,6 +95,10 @@ def convert(geo, mask: np.ndarray, src: str, dst: str) -> np.ndarray:
 
 def mask(geo, domain: str, pattern: str) -> Optional[np.ndarray]:
     """Elements of ``domain`` ("point" or "prim") selected by a group pattern; None means *all* (empty pattern)."""
+    if domain in ('vertex','edge'):
+        if not (pattern or '').replace(',',' ').strip():return None
+        from .nodes import group_rules
+        return group_rules.select(geo,domain,pattern)
     if domain not in ("point", "prim"):
         raise GroupError(f"groups live on points or primitives, not {domain!r}")
     pattern = (pattern or "").strip()
@@ -88,7 +111,7 @@ def mask(geo, domain: str, pattern: str) -> Optional[np.ndarray]:
     if not tokens:
         return None
     sel = np.full(n, tokens[0].startswith("^"))           # a pattern that starts by excluding starts from everything
-    known = set(names(geo, "point")) | set(names(geo, "prim"))
+    known = set().union(*(names(geo, d) for d in ("point", "prim", "edge", "vertex")))
     for tok in tokens:
         sub = tok.startswith("^")
         tok = tok[1:] if sub else tok
@@ -139,6 +162,9 @@ def expression_mask(geo, domain: str, expr: str) -> np.ndarray:
 
 def write(geo, domain: str, group: str, members: np.ndarray, combine: str = "replace"):
     """Return a copy of ``geo`` with the group set (``combine``: replace, union, intersect, subtract)."""
+    if domain in ('vertex','edge'):
+        from .nodes import group_rules
+        return group_rules.write(geo,domain,group,members,combine)
     key = attr_name(group)
     old = member(geo, domain, group) if key in geo.table(domain) else None
     m = np.asarray(members, bool)

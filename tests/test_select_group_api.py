@@ -57,8 +57,16 @@ class SelectGroupApiTests(unittest.TestCase):
         self.assertEqual(data, {'node': 'box', 'domain': 'edge', 'ids': [0, 2]})
 
     def test_invalid_requests_and_unsupported_domain(self):
-        for body in ({}, {'node': 'missing'}, {'node': 'box'}, {'node': 'vertex'}):
+        for body in ({}, {'node': 'missing'}, {'node': 'box'}):
             self.assertEqual(self.request(body)[0], 400)
+
+    def test_vertex_domain_and_explicit_group_field(self):
+        status,data=self.request({'node':'vertex'})
+        self.assertEqual(status,200)
+        self.assertEqual(data,{'node':'box','domain':'vertex','ids':list(range(24))})
+        status,data=self.request({'node':'move','domain':'vertex','pattern':'0-2'})
+        self.assertEqual(status,200)
+        self.assertEqual(data,{'node':'selected','domain':'vertex','ids':[0,1,2]})
 
     def test_expressions_unknown_groups_and_unconnected_inputs(self):
         with self.session.lock:

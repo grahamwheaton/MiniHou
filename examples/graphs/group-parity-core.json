@@ -1,0 +1,107 @@
+{
+  "nodes": {
+    "box": {
+      "type": "box",
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "seed": {
+      "type": "group_create",
+      "inputs": {
+        "geo": "box"
+      },
+      "params": {
+        "name": "seed",
+        "domain": "points",
+        "pattern": "0"
+      },
+      "pos": [
+        0,
+        120
+      ]
+    },
+    "promote": {
+      "type": "group_promote",
+      "inputs": {
+        "geo": "seed"
+      },
+      "params": {
+        "rules": [
+          {
+            "from": "auto",
+            "to": "primitives",
+            "name": "seed",
+            "new_name": "faces",
+            "keep_original": true
+          }
+        ]
+      },
+      "pos": [
+        0,
+        240
+      ]
+    },
+    "combine": {
+      "type": "group_combine",
+      "inputs": {
+        "geo": "promote"
+      },
+      "params": {
+        "rules": [
+          {
+            "domain": "auto",
+            "name": "result",
+            "base": "faces",
+            "operations": [
+              {
+                "op": "intersect",
+                "group": "0-3"
+              }
+            ]
+          }
+        ]
+      },
+      "pos": [
+        0,
+        360
+      ]
+    },
+    "move": {
+      "type": "transform",
+      "inputs": {
+        "geo": "combine"
+      },
+      "params": {
+        "group": "result",
+        "translate": [
+          0,
+          0,
+          1
+        ]
+      },
+      "pos": [
+        0,
+        480
+      ]
+    },
+    "blast": {
+      "type": "blast",
+      "inputs": {
+        "geo": "combine"
+      },
+      "params": {
+        "domain": "primitives",
+        "group": "result"
+      },
+      "pos": [
+        0,
+        600
+      ]
+    }
+  },
+  "display": "move",
+  "version": 1,
+  "doc": "Group parity example; see docs/GROUP-PARITY.md for exact semantics and limits."
+}

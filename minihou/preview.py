@@ -274,13 +274,16 @@ def _arrays_for(geo, full: bool = False, tris: int = 0) -> Tuple[dict, Dict[str,
     cd = shown.point.get("Cd")
     if cd is not None and cd.ndim == 2 and cd.shape[1] >= 3 and len(cd) == n:
         out["Cd"] = np.ascontiguousarray(np.clip(cd[:, :3], 0.0, 1.0), np.float32).reshape(-1)
+    if not red.reduced:
+        out["vertex_point"] = np.ascontiguousarray(geo.topology.vertex_point, np.uint32)
+        out["prim_offsets"] = np.ascontiguousarray(geo.topology.prim_offsets, np.uint32)
     if red.reduced:
         out["point_src"] = np.ascontiguousarray(red.point_src, np.uint32)
     if geo.npoints:
         lo, hi = geo.P.min(0).astype(float).tolist(), geo.P.max(0).astype(float).tolist()
     else:
         lo = hi = [0.0, 0.0, 0.0]
-    head = {"points": int(n0), "prims": int(geo.topology.nprims), "tris": int(len(tri)), "edges": int(len(edge)),
+    head = {"points": int(n0), "prims": int(geo.topology.nprims), "vertices":int(geo.nvertices), "tris": int(len(tri)), "edges": int(len(edge)),
             "bounds": [lo, hi], "truncated": truncated, "topology": token,
             "proxy": {"active": bool(red.reduced), "points": int(n0), "tris": int(tris0), "shown_points": int(n), "shown_tris": int(len(tri)),
                       "full": bool(full), "max_tris": MAX_TRIS, "max_points": MAX_POINTS}}
@@ -300,14 +303,14 @@ def attr_arrays(geo, spec: dict, head: dict, arrays: Dict[str, np.ndarray]) -> N
     if dom == "edge":
         from . import edges
         a = edges.values(geo, edges.PREFIX + name) if edges.PREFIX + name in geo.vertex else None
-    elif dom in ("point", "prim"):
+    elif dom in ("point", "prim", "vertex"):
         a = geo.table(dom).get(name)
     else:
-        raise ValueError("domain must be point, prim or edge")
+        raise ValueError("domain must be point, prim, vertex or edge")
     if a is None or a.dtype.kind not in "fiub":
         info["missing"] = True
         return
-    a2 = np.asarray(a).reshape(len(a), -1).astype(np.float32)[:, :3]
+    a2 = np.asarray(a).reshape(len(a), 1 if a.ndim == 1 else a.shape[1]).astype(np.float32)[:, :3]
     nc = a2.shape[1]
     arrays["attr"] = np.ascontiguousarray(a2).reshape(-1)
     info.update(comps=nc, count=int(len(a2)))
@@ -331,11 +334,11 @@ def mask_arrays(geo, spec: dict, head: dict, arrays: Dict[str, np.ndarray]) -> N
         return
     if dom == "edge":
         a = edges.values(geo, edges.PREFIX + name) if edges.PREFIX + name in geo.vertex else None
-        m = None if a is None else np.asarray(a).reshape(len(a), -1)[:, 0] != 0
-    elif dom in ("point", "prim"):
+        m = None if a is None else (a if a.ndim == 1 else a[:, 0]) != 0
+    elif dom in ("point", "prim", "vertex"):
         m = groups.member(geo, dom, name) if name else None
     else:
-        raise ValueError("domain must be point, prim or edge")
+        raise ValueError("domain must be point, prim, vertex or edge")
     if m is None:
         info["missing"] = True
         return

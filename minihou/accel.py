@@ -40,6 +40,7 @@ FAILED = object()                  # sentinel returned by call() when the caller
 
 _lock = threading.RLock()
 _disabled_reason: Optional[str] = None
+_successful_calls = {}  # process-local diagnostics; never affects cooked output/cache keys
 _forced_off = 0                    # >0 inside `disabled()`
 
 
@@ -90,12 +91,22 @@ def call(kernel: Callable, *args):
         return FAILED
     with _lock:
         try:
-            return kernel(*args)
+            result = kernel(*args)
+            name = getattr(kernel, "__name__", type(kernel).__name__)
+            _successful_calls[name] = _successful_calls.get(name, 0) + 1
+            return result
         except Exception as e:  # noqa: BLE001
             _disabled_reason = f"{type(e).__name__}: {e}"
             log.warning("numba kernel %s failed (%s); falling back to numpy for this process",
                         getattr(kernel, "__name__", kernel), _disabled_reason)
             return FAILED
+
+
+def diagnostics() -> dict:
+    """Read-only proof of the active backend and successful kernel execution."""
+    with _lock:
+        return {"available": AVAILABLE, "enabled": enabled(), "status": status(),
+                "import_error": IMPORT_ERROR, "successful_calls": dict(_successful_calls)}
 
 
 def warmup() -> float:

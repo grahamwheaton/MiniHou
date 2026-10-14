@@ -389,7 +389,7 @@ class Graph:
     # -- (de)serialisation -------------------------------------------------
     def copy(self) -> "Graph":
         g = Graph(self.registry)
-        g.nodes = {k: NodeInstance(v.id, v.type, dict(v.params),
+        g.nodes = {k: NodeInstance(v.id, v.type, copy.deepcopy(v.params),
                                    {p: (list(r) if isinstance(r, list) else r) for p, r in v.inputs.items()},
                                    copy.deepcopy(v.meta))
                    for k, v in self.nodes.items()}

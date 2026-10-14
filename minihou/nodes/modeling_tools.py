@@ -6,6 +6,7 @@ from .. import edges, groups, spatial, topo
 from ..outgroups import OutGroup, OutGroups, edge_mask
 from ..sdk import Bool, Enum, Float, Guide, Handle, Int, Str, Vec3, node
 from . import _build as B
+from . import group_rules as group_rules
 from ._util import normalize_rows
 from .bevel import twins
 from .capture_deform import _apply
@@ -137,22 +138,94 @@ def soft_peak(geo, distance, radius, falloff, group):
 @node("group_range", inputs=["geo"], category="group", params=[
     Str("name", "group1"),
     Enum("domain", ["primitives", "points"]),
+    Str("base_group", "", doc="Apply the range within this point or primitive selection"),
+    Enum("range_type", ["absolute", "relative", "length", "equal_partitions"],
+         doc="Element numbers, offsets from both ends, start plus length, or equal partitions"),
     Int("start", 0, min=0, doc="First element"),
     Int("end", -1, min=-1, doc="Last element (-1: the last one in the geometry)"),
+    Int("length", 1, min=0, doc="Number of elements for Start and Length"),
+    Int("partition", 0, min=0, doc="Zero-based partition for Equal Partitions"),
+    Int("num_partitions", 2, min=1, doc="Number of equal partitions"),
     Int("select", 1, min=1, doc="Select this many ..."),
     Int("every", 1, min=1, doc="... out of every this many (1 of 2 is every other element)"),
     Int("offset", 0, doc="Shift the pattern along"),
     Bool("invert", False),
+    Bool("disconnected_separately", False, doc="Restart the range independently on each connected region"),
     Enum("combine", ["replace", "union", "intersect", "subtract"]),
 ])
-def group_range(geo, name, domain, start, end, select, every, offset, invert, combine):
-    """Group a numeric range of points or primitives, optionally every Nth (Houdini's Group by Range)."""
+def group_range(geo, name, domain, base_group, range_type, start, end, length, partition,
+                num_partitions, select, every, offset, invert, disconnected_separately, combine):
+    """Group selected point/primitive ranges, optionally per disconnected region."""
+    if not name:
+        return geo
     dom = "point" if domain == "points" else "prim"
     n = geo.npoints if dom == "point" else geo.nprims
-    i = np.arange(n)
-    last = n - 1 if end < 0 else min(end, n - 1)
-    m = (i >= start) & (i <= last) & (((i - start + offset) % every) < min(select, every))
-    return groups.write(geo, dom, name, ~m if invert else m, combine)
+    selected = group_rules.select(geo, dom, base_group)
+    m = np.zeros(n, bool)
+    if disconnected_separately:
+        components = _range_components(geo, dom, selected)
+    else:
+        components = [np.flatnonzero(selected)]
+    for ids in components:
+        k = len(ids)
+        if not k:
+            continue
+        if range_type == "absolute":
+            first, last = start, (k - 1 if end < 0 else min(end, k - 1))
+        elif range_type == "relative":
+            first, last = start, k - 1 - max(end, 0)
+        elif range_type == "length":
+            first, last = start, start + length - 1
+        else:
+            if partition >= num_partitions:
+                continue
+            first = (partition * k + num_partitions - 1) // num_partitions
+            last = ((partition + 1) * k + num_partitions - 1) // num_partitions - 1
+        i = np.arange(k)
+        within = (i >= first) & (i <= last)
+        within &= ((i - first + offset) % every) < min(select, every)
+        if invert:
+            within = ~within
+        m[ids[within]] = True
+    return group_rules.write(geo, dom, name, m, combine)
+
+
+def _range_components(geo, dom, selected):
+    """Selected point islands use edges; primitive islands share a full edge."""
+    n = len(selected)
+    adjacent = [[] for _ in range(n)]
+    if dom == "point":
+        for a, b in topo.edges(geo).points:
+            a, b = int(a), int(b)
+            adjacent[a].append(b)
+            adjacent[b].append(a)
+    else:
+        edges = topo.edges(geo)
+        prim = topo.prim_of_vertex(geo)
+        at_edge = [[] for _ in range(len(edges.points))]
+        for v, e in enumerate(edges.of_vertex):
+            if e >= 0:
+                at_edge[int(e)].append(int(prim[v]))
+        for row in at_edge:
+            for a in row:
+                adjacent[a].extend(b for b in row if b != a)
+    visited = np.zeros(n, bool)
+    result = []
+    for start in np.flatnonzero(selected):
+        if visited[start]:
+            continue
+        stack = [int(start)]
+        visited[start] = True
+        region = []
+        while stack:
+            u = stack.pop()
+            region.append(u)
+            for v in adjacent[u]:
+                if selected[v] and not visited[v]:
+                    visited[v] = True
+                    stack.append(v)
+        result.append(np.asarray(sorted(region), np.int64))
+    return result
 
 
 # ---------------------------------------------------------------------------------------------------------- edges

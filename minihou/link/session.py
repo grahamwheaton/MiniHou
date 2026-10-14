@@ -251,6 +251,11 @@ class Session:
             finally:
                 ev.close()
         key = _merge_key(ops)
+        # Rule row actions and membership strokes are discrete edits, not slider drags.
+        if key and key[0]=='set' and key[1] in self.graph.nodes:
+            nt=self.graph.registry.get(self.graph.nodes[key[1]].type)
+            if any(nt.param(name).kind=='rules' or nt.param(name).ui=='membership' for name in key[2]):
+                key=None
         with self.lock:
             self._check_document(document_id)
             if capture_rev is not None and capture_rev != self._rev:

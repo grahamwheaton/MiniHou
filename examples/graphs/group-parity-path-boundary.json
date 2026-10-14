@@ -1,0 +1,88 @@
+{
+  "nodes": {
+    "grid": {
+      "type": "grid",
+      "params": {
+        "columns": 6,
+        "rows": 6,
+        "size_x": 4,
+        "size_y": 4
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "path": {
+      "type": "group_find_path",
+      "inputs": {
+        "geo": "grid"
+      },
+      "params": {
+        "domain": "edges",
+        "base_group": "0 59",
+        "name": "route"
+      },
+      "pos": [
+        0,
+        120
+      ]
+    },
+    "boundary": {
+      "type": "group_from_attribute_boundary",
+      "inputs": {
+        "geo": "path"
+      },
+      "params": {
+        "name": "border",
+        "include_unshared_edges": true
+      },
+      "pos": [
+        0,
+        240
+      ]
+    },
+    "promote": {
+      "type": "group_promote",
+      "inputs": {
+        "geo": "boundary"
+      },
+      "params": {
+        "rules": [
+          {
+            "from": "edges",
+            "to": "points",
+            "name": "route",
+            "new_name": "route_points",
+            "keep_original": true
+          }
+        ]
+      },
+      "pos": [
+        0,
+        360
+      ]
+    },
+    "move": {
+      "type": "transform",
+      "inputs": {
+        "geo": "promote"
+      },
+      "params": {
+        "group": "route_points",
+        "translate": [
+          0,
+          0,
+          0.25
+        ]
+      },
+      "pos": [
+        0,
+        480
+      ]
+    }
+  },
+  "display": "move",
+  "version": 1,
+  "doc": "Group parity example; see docs/GROUP-PARITY.md for exact semantics and limits."
+}

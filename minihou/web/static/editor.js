@@ -848,9 +848,16 @@
       onclick: () => queueSet(id, "reset", Number(n.params?.reset || 0) + 1),
       title: "Discard this simulation and replay from its initial geometry"
     }, "Reset simulation"));
+    if (n.type === 'group_promote') {
+      const active = !!n.params?.rules?.length;
+      out.push(h('details', { class: 'promote-legacy', open: !active, dataset: { active: String(active) } },
+        h('summary', null, active ? 'Legacy conversion (inactive while rules exist)' : 'Legacy conversion (used with empty Rules)'),
+        ...t.params.filter(p => ['name', 'to'].includes(p.name)).map(p => paramRow(id, p))));
+    }
     let ogHeader = false;
     for (let i = 0; i < t.params.length; i++) {
       const p = t.params[i];
+      if (n.type === 'group_promote' && ['name', 'to'].includes(p.name)) continue;
       if(n.type==='bezier'&&p.name==='controls')continue;
       if (p.ui === "hidden") continue;
       if (p.ui === "outgroup") {                                     // Output Groups: a checkbox and the group's name side by side, like Houdini
@@ -942,7 +949,10 @@
     const label = h("span", { class: "pl" + (isSet(id, p) ? " changed" : ""), title: (p.doc ? p.doc + "\n" : "") + p.name + " (" + p.kind + ")" }, (p.label || p.name)+(isLength?" ("+MiniUnits.unit+")":""));
     const row = h("div", { class: "prow " + p.kind + (p.ui === "code" ? " code" : ""), dataset: { param: p.name } });
     let widget;
-    if (S.graph.nodes[id].type === "for_each" && p.name === "body") {
+    if (p.kind === "rules") {
+      row.classList.add("rule-param");
+      widget = rulesWidget(id, p, v, value=>queueSet(id,p.name,value));
+    } else if (S.graph.nodes[id].type === "for_each" && p.name === "body") {
       const listId = "foreach-body-" + id;
       const choices = S.typeList.filter((t) => t.inputs.length);
       const input = h("input", { type: "search", value: v, placeholder: "Search nodes…", "aria-label": "Body node",
@@ -1000,14 +1010,92 @@
       const inp = h("input", { type: "text", value: v, dataset: { role: "str" }, onchange: (e) => queueSet(id, p.name, e.target.value) });
       widget = h("div", { class: "pw" }, inp);
     }
-    if(p.name==='group'&&p.kind==='str')widget.append(h('button',{class:'small',title:'Select this group on the input geometry',onclick:async()=>{
-      try { const result=await api('/api/select_group',{node:id});if(result.error){toast(result.error);return;}
-      $('#pv-follow').value='selection';$('#pv-follow').dispatchEvent(new Event('change'));select([result.node]);
-      const until=performance.now()+6000;while((pvNode!==result.node||pvInFlight||pvTimer!==null||pvDirty)&&performance.now()<until)await new Promise(r=>setTimeout(r,30));
-      if(pvNode===result.node&&!pvInFlight&&pvTimer===null&&!pvDirty)pv.selectElements(result.domain,result.ids,'replace');else toast('Input preview is not ready; try Select again.'); } catch(err) {toast(err.message);}
-    }},'Select'));
+    if (p.kind === 'str' && (p.name === 'group' || p.ui === 'group' || p.name === 'base_group'))
+      groupField(id, p, widget);
+    if (p.ui === 'membership') widget.append(
+      h('button', {class:'small', onclick:()=>captureMembership(id)}, 'Use viewport selection'),
+      h('button', {class:'small', onclick:()=>startGroupViewport(id)}, nodeOf(id).type === 'group_paint' ? 'Paint membership' : 'Lasso membership'));
     row.append(label, widget, EXPOSABLE.has(p.kind) ? exposeBtn(id, p) : h("span"), resetBtn(id, p));
     return row;
+  }
+  const groupDomain = (id, values={}) => {
+    const n=nodeOf(id), ps=Object.fromEntries(typeOf(id).params.map(p=>[p.name,effective(id,p)]));
+    const d=values.from || values.domain || ps.domain || ps.group_type || ps.run_over;
+    return ({points:'point',primitives:'prim',edges:'edge',vertices:'vertex',point:'point',prim:'prim',edge:'edge',vertex:'vertex'})[d] || (['transform','noise','peak'].includes(n.type)?'point':'auto');
+  };
+  async function selectGroupField(id,pattern,domain) {
+    try {
+      const result=await api('/api/select_group',{node:id,pattern,domain});
+      if(result.error){toast(result.error);return;}
+      $('#pv-follow').value='selection';$('#pv-follow').dispatchEvent(new Event('change'));select([result.node]);
+      const deadline=performance.now()+6000;
+      while((pvNode!==result.node||pvInFlight||pvTimer!==null||pvDirty)&&performance.now()<deadline)await new Promise(r=>setTimeout(r,30));
+      if(pvNode===result.node&&!pvInFlight&&pvTimer===null&&!pvDirty)pv.selectElements(result.domain,result.ids,'replace');
+      else toast('Input preview is not ready; try Select again.');
+    } catch(err) {toast(err.message);}
+  }
+  function groupField(id,p,widget,values={},getValue=null) {
+    const inp=widget.querySelector('input[type=text],input[type=search]');
+    if(!inp)return;
+    const domain=()=>groupDomain(id,typeof values==='function'?values():values),list=h('datalist',{id:'group-options-'+id+'-'+Math.random().toString(36).slice(2)});
+    inp.setAttribute('list',list.id);widget.append(list);
+    const populate=async()=>{try {const r=await api('/api/group_names',{node:id,domain:domain()});if(list.isConnected)list.replaceChildren(...(r.names||[]).map(n=>h('option',{value:n})));}catch{}};
+    inp.addEventListener('focus',populate);
+    widget.append(h('button',{class:'small',type:'button',title:'Select this group on the input geometry',onclick:()=>selectGroupField(id,getValue?getValue():inp.value,domain())},'Select'));
+  }
+  function rulesWidget(id,p,value,send,parents=[]) {
+    const root=h('div',{class:'rule-list',dataset:{value:JSON.stringify(value)}});
+    let rows=structuredClone(value || []);
+    const commit=()=>{root.dataset.value=JSON.stringify(rows);send(structuredClone(rows));};
+    const defaults=()=>Object.fromEntries(p.fields.map(f=>[f.name,structuredClone(f.default)]));
+    const draw=()=>{
+      root.replaceChildren(...rows.map((r,index)=>{
+        const box=h('fieldset',{class:'rule-row',dataset:{rule:index}});
+        const change=(name,v)=>{r[name]=v;commit();box.classList.toggle('disabled-rule',r.enabled===false);};
+        const move=(by)=>{[rows[index],rows[index+by]]=[rows[index+by],rows[index]];commit();draw();};
+        box.classList.toggle('disabled-rule',r.enabled===false);
+        box.append(h('legend',null,'Rule '+(index+1)),h('div',{class:'rule-actions'},
+          h('button',{type:'button',disabled:index===0,onclick:()=>move(-1),'aria-label':'Move rule up'},'?'),
+          h('button',{type:'button',disabled:index===rows.length-1,onclick:()=>move(1),'aria-label':'Move rule down'},'?'),
+          h('button',{type:'button',onclick:()=>{rows.splice(index,1);commit();draw();}},'Remove rule')));
+        for(const f of p.fields){
+          const v=r[f.name]??structuredClone(f.default),label=f.label||f.name;
+          let input;
+          if(f.kind==='rules')input=rulesWidget(id,f,v,x=>change(f.name,x),parents.concat(r));
+          else if(f.kind==='bool')input=h('input',{type:'checkbox',checked:!!v,onchange:e=>change(f.name,e.target.checked)});
+          else if(f.kind==='enum')input=h('select',{onchange:e=>change(f.name,e.target.value)},f.choices.map(c=>h('option',{value:c,selected:c===v},c)));
+          else if(f.kind==='vec3')input=h('div',{class:'vec'},v.map((x,i)=>h('input',{type:'number',value:x,step:'any',onchange:e=>{const n=[...r[f.name]||v];n[i]=Number(e.target.value);change(f.name,n);}})));
+          else input=h('input',{type:['float','int'].includes(f.kind)?'number':'text',value:v,step:f.kind==='int'?1:'any',min:f.min,max:f.max,onchange:e=>change(f.name,['float','int'].includes(f.kind)?Number(e.target.value):e.target.value)});
+          input.dataset.field=f.name;
+          input.setAttribute('aria-label',label);
+          const widget=h('div',{class:'pw'},input);
+          if(f.kind==='str'&&(f.ui==='group'||['base','group','name'].includes(f.name)&&f.name!=='name'||f.name==='name'&&['group_promote','group_delete','group_rename'].includes(nodeOf(id).type)))groupField(id,f,widget,()=>Object.assign({},...parents,r),()=>r[f.name]??v);
+          box.append(h('div',{class:'rule-field',dataset:{field:f.name}},h('span',{class:'pl',title:f.doc||''},label),widget));
+        }
+        return box;
+      }),h('button',{type:'button',class:'add-rule',onclick:()=>{rows.push(defaults());commit();draw();}},'+ Add rule'));
+    };
+    draw();return root;
+  }
+  async function captureMembership(id) {
+    if(!pvNode||selectLock(pvReduced)){toast('Show full input geometry before recording membership.');return;}
+    const source=inputs(id)[0]?.[1]?.[0];
+    if(![id,source].includes(pvNode)){toast('Select components on this node or its input first.');return;}
+    const ids=selectionFor(groupDomain(id))||[];
+    await edit([{op:'set',id,params:{selection:rangePattern(ids)}}]);
+  }
+  async function startGroupViewport(id) {
+    if(pvNode!==id){$('#pv-follow').value='selection';$('#pv-follow').dispatchEvent(new Event('change'));select([id]);}
+    const deadline=performance.now()+6000;while((pvNode!==id||pvInFlight)&&performance.now()<deadline)await new Promise(r=>setTimeout(r,30));
+    if(pvNode!==id){toast('Wait for geometry to load.');return;}
+    const dom=groupDomain(id);
+    if(nodeOf(id).type==='group_paint'){
+      if($('#pv-canvas').getBoundingClientRect().width<600)$('#pv-max').click();
+      paintTool?.configureGroup(id,dom,nodeOf(id).params.name||'group1');
+    }else{
+      pv.setMode(dom==='prim'?'face':dom==='edge'?'edge':'point');selectionTool?.start('lasso');
+      toast('Lasso components, then press Use viewport selection to save membership. Vertex mode records corners of selected faces or points.');
+    }
   }
   function rangeFor(p, v) {
     const span = Math.max(1, Math.abs(p.default) * 2, Math.abs(v) * 1.5);
@@ -1055,6 +1143,12 @@
   function syncParams(id, panel = $("#params")) {
     // Update values in place, keeping focus and in-progress drags.
     if (!id || !nodeOf(id)) return;
+    const legacy = panel.querySelector('.promote-legacy');
+    if (legacy) {
+      const active = !!nodeOf(id).params?.rules?.length;
+      if (legacy.dataset.active !== String(active)) { legacy.open = !active; legacy.dataset.active = String(active); }
+      legacy.querySelector('summary').textContent = active ? 'Legacy conversion (inactive while rules exist)' : 'Legacy conversion (used with empty Rules)';
+    }
     const err = panel.querySelector('[data-role="err"]');
     if (err) { const m = nodeErrorText(id); err.textContent = m; err.style.display = m ? "" : "none"; }
     for (const p of typeOf(id).params) {
@@ -1062,7 +1156,11 @@
       if (!row) continue;
       const v = effective(id, p);
       const set = (role, fn) => { const el = row.querySelector(`[data-role="${role}"]`); if (el && el !== document.activeElement) fn(el); };
-      if (p.kind === "float" || p.kind === "int") { if (!scrubbing) { set("num", (el) => (el.value = displayParam(id,p,v))); set("rng", (el) => (el.value = v)); } }
+      if(p.kind==='rules'){
+        const list=row.querySelector('.rule-list');
+        if(list&&list.dataset.value!==JSON.stringify(v)&&!list.contains(document.activeElement))list.replaceWith(rulesWidget(id,p,v,value=>queueSet(id,p.name,value)));
+      }
+      else if (p.kind === "float" || p.kind === "int") { if (!scrubbing) { set("num", (el) => (el.value = displayParam(id,p,v))); set("rng", (el) => (el.value = v)); } }
       else if (p.kind === "bool") set("bool", (el) => (el.checked = !!v));
       else if (p.kind === "vec3") { if (!scrubbing) [0, 1, 2].forEach((i) => set("v" + i, (el) => (el.value = displayParam(id,p,v[i])))); }
       else if (p.kind === "enum") set("enum", (el) => (el.value = v));
@@ -1136,7 +1234,13 @@
     return pairs.map(([a, b]) => edgeIdMap.map.get(Math.min(a, b) * n + Math.max(a, b))).filter((k) => k !== undefined).sort((x, y) => x - y);
   }
   const selectionFor = (domain) => {
-    const ids = domain === "point" ? pvSelection.points : domain === "prim" ? pvSelection.faces : domain === "edge" ? edgeIdsOf(pvSelection.edges) : [];
+    const ids = domain === "point" ? pvSelection.points : domain === "prim" ? pvSelection.faces : domain === "edge" ? edgeIdsOf(pvSelection.edges) : domain === "vertex" ? (()=>{
+      const exact=pv.vertexSelection?.();if(exact!==null&&exact!==undefined)return exact;
+      const raw=pv.geometry();if(!raw?.vertexPoint)return [];
+      const faces=new Set(pvSelection.faces),points=new Set(pvSelection.points),out=[];
+      for(let f=0;f<raw.primOffsets.length-1;f++)for(let i=raw.primOffsets[f];i<raw.primOffsets[f+1];i++)if(pvSelection.mode==='face'?faces.has(f):points.has(raw.vertexPoint[i]))out.push(i);
+      return out;
+    })() : [];
     return ids && ids.length ? ids : null;
   };
   const paintHost = {
@@ -1145,6 +1249,19 @@
     nodeInfo: (id) => { const n = nodeOf(id); if (!n) return null; const out = { type: n.type, params: {} }; for (const p of typeOf(id).params) out.params[p.name] = effective(id, p); return out; },
     refresh: () => { pvKey = null; schedulePreview(); },
     selectionFor,
+    writeGroup: async(spec,ops)=>{
+      const n=nodeOf(pvNode);if(n?.type!=='group_paint')return false;
+      const ps=Object.fromEntries(typeOf(pvNode).params.map(p=>[p.name,effective(pvNode,p)])),dom=groupDomain(pvNode);
+      if(spec.domain!==dom||spec.attr!==(dom==='edge'?ps.name:'group_'+ps.name))return false;
+      const selected=new Set();
+      if(ps.selection?.trim()){
+        const current=await api('/api/select_group',{node:pvNode,pattern:ps.selection,domain:dom});
+        if(current.error){toast(current.error);return true;}
+        for(const i of current.ids)selected.add(i);
+      }
+      for(const op of ops){if(op.clear){selected.clear();if(op.default){const raw=pv.geometry(),n=dom==='point'?raw.P.length/3:dom==='prim'?raw.primOffsets.length-1:dom==='vertex'?raw.vertexPoint.length:raw.edge.length/2;for(let i=0;i<n;i++)selected.add(i);}}(op.indices||[]).forEach((i,k)=>{const v=op.erase?0:op.values?op.values[k]:op.value;Number(v)!==0?selected.add(i):selected.delete(i);});}
+      await edit([{op:'set',id:pvNode,params:{selection:rangePattern([...selected].sort((a,b)=>a-b))}}]);return true;
+    },
     reducedMessage: () => (pvReduced ? lockMessage(pvReduced) || "The view is reduced: painting needs the real geometry." : ""),
     paintBlocked: () => {
       if (!pvNode || !nodeOf(pvNode)) return "Show a node's geometry first.";
@@ -1170,7 +1287,7 @@
       try {
         if (domain === "edge") return await paintHost.attributeNames("edge");
         const out = new Set();
-        for (const d of ["point", "prim"]) {
+        for (const d of domain === 'vertex' ? ['vertex'] : ["point", "prim", 'vertex']) {
           const r = await api("/api/spreadsheet", { node, domain: d, start: 0, count: 0 });
           for (const c of r.columns || []) if (c.name.startsWith("group_")) out.add(c.name.slice(6));
         }
@@ -1178,7 +1295,9 @@
       } catch (e) { return []; }
     },
     fetchBase: async (node, spec) => {                                       // the attribute as the paint node's input has it (what Erase goes back to)
-      const info = nodeOf(node), src = info && info.type === "attrib_paint" ? ((info.inputs || {}).geo) : node;
+      const info = nodeOf(node);
+      if(info?.type==='group_paint')return {values:null,comps:1}; // erase membership to zero
+      const src = info && info.type === "attrib_paint" ? ((info.inputs || {}).geo) : node;
       if (!src || !nodeOf(src)) return { values: null, comps: 1 };
       try {
         const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node: src, full: true, attr: spec }) });
@@ -1614,6 +1733,13 @@
   }
   // ---- the "C" pie menu (pie.js): a tool inserts its node after the viewed node, filled in from the 3-D selection
   let pieFromView = false;
+  // New editor tools start with the full promotion controls. Loading, duplicating
+  // and API edits retain their stored parameters, including legacy empty Rules.
+  function newToolParams(type, params = {}) {
+    if (type !== 'group_promote' || Object.hasOwn(params, 'rules')) return structuredClone(params);
+    const rules = S.types[type].params.find(p => p.name === 'rules');
+    return { rules: [Object.fromEntries(rules.fields.map(f => [f.name, structuredClone(f.default)]))], ...structuredClone(params) };
+  }
   function pieSelectionParams(item) {
     const s = pvSelection;
     if (!item.sel || !pv || !pv.ok || s.mode === "view" || !pv.selectionInfo()?.points.length) return {};
@@ -1635,7 +1761,7 @@
     if (!item) { if (note) toast(note); return; }
     const t = S.types[item.type];
     if (!t) { toast(`This engine has no ${item.type} node.`); return; }
-    const params = { ...(item.params || {}), ...pieSelectionParams(item) };
+    const params = newToolParams(item.type, { ...(item.params || {}), ...pieSelectionParams(item) });
     if(item.type==='blast' && pvSelection.mode!=='view'){
       const mode=pvSelection.mode, values=pvSelection[SEL_KEY[mode]]||[];
       if(values.length)Object.assign(params,{domain:mode==='edge'?'edges':mode==='point'?'points':'primitives',group:mode==='edge'?values.map(([a,b])=>`p${a}-${b}`).join(' '):rangePattern(values)});
@@ -1662,7 +1788,7 @@
     const t = S.types[tool.type];
     if (!t) { toast(`This engine has no ${tool.type} node.`); return; }
     const id = uniqueId(tool.type), [x, y] = toWorld(clientX, clientY);
-    const r = await edit([{ op: "add", type: tool.type, id, pos: [Math.round(x - W / 2), Math.round(y - 12)] }]);
+    const r = await edit([{ op: "add", type: tool.type, id, params: newToolParams(tool.type, tool.params), pos: [Math.round(x - W / 2), Math.round(y - 12)] }]);
     if (r) select([id]);
   }
   if (window.MiniShelf) {
@@ -2378,10 +2504,10 @@
     }
     const selectedSource=ctx.fromSel || (!ctx.from && !ctx.feeds && S.sel.size===1 ? [...S.sel][0] : null);
     if(selectedSource && t.inputs.length && t.category!=='source'){
-      const r=await edit([{op:'insert',after:selectedSource,type:t.name,id}]);
+      const r=await edit([{op:'insert',after:selectedSource,type:t.name,id,params:newToolParams(t.name)}]);
       if(r)select([id]);return;
     }
-    const op = { op: "add", type: t.name, id, pos: [x, y] };
+    const op = { op: "add", type: t.name, id, params: newToolParams(t.name), pos: [x, y] };
     const ops = [op];
     const first = t.inputs[0] && t.inputs[0].name;
     if (ctx.from && first) op.inputs = { [first]: ctx.from };
