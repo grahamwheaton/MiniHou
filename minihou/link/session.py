@@ -129,9 +129,11 @@ class Session:
         self._watched: List[str] = []
         self.frame = 1.0                 # current time (Blender's frame), for @Frame / @Time
         self.fps = timectx.DEFAULT_FPS
-        self.proxy_level = 1.0           # cook proxy: node parameters marked as proxy-able scale with it (1.0 = full)
-        self.proxy_auto = False          # auto: slow scenes cook at the proxy level first and refine to full when edits pause
-        self.link_tris = 0               # Blender link: reduce geometry above this many triangles (0 = send everything)
+        from .. import user_preferences
+        saved_proxy = user_preferences.read()['proxy']
+        self.proxy_level = saved_proxy['level']
+        self.proxy_auto = saved_proxy['auto']
+        self.link_tris = saved_proxy['link_tris']
         self._full_ms: Optional[float] = None   # how long the last full-level cook that did work took
         self._refining = False
         self._save_enabled = False
@@ -501,10 +503,15 @@ class Session:
         self._publish(Result(0, error={"node": node, "message": message}, rev=rev))
 
     # -- the proxy ---------------------------------------------------------
-    def set_proxy(self, level: Optional[float] = None, auto: Optional[bool] = None, link_tris: Optional[int] = None) -> dict:
+    def set_proxy(self, level: Optional[float] = None, auto: Optional[bool] = None, link_tris: Optional[int] = None, *, persist=False) -> dict:
         """Change the proxy settings and recook. ``level`` is the cook level (1 = full; ``auto`` cooks that level first when the
         full cook is slow, then the full one when edits pause); ``link_tris`` caps what Blender receives (0 = everything)."""
         with self.lock:
+            if persist:
+                from .. import user_preferences
+                values = {key: value for key, value in [('level', level), ('auto', auto), ('link_tris', link_tris)] if value is not None}
+                if values:
+                    user_preferences.update({'proxy': values})
             changed = False
             if level is not None:
                 lvl = proxy.clamp(level)

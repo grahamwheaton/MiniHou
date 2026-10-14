@@ -15,6 +15,8 @@ live in the other and in Blender.
                        Optional ``gesture`` token merges a modal drag into one undo entry. Send ``document_id`` to fence file switches.
 ``POST /api/gesture_cancel`` ``{gesture, document_id?}`` restores the drag's original graph, removes its undo entry and restores prior redo; refuses intervening graph edits
 ``POST /api/gesture_finish`` ``{gesture, document_id?}`` closes the drag, retaining one undo entry; closed tokens cannot continue editing
+``GET /api/preferences`` persistent Python, copy-memory-limit (MiB) and proxy settings, with copy limit range metadata
+``POST /api/preferences`` partial ``{python_nodes?, copy_memory_limit_mib?}``; user settings never come from a graph
 ``POST /api/undo``     also ``/api/redo``
 ``POST /api/inspect``  ``{node, detail?}`` -> geometry summary of any node
 ``POST /api/select_group`` ``{node}`` -> ``{node: first_input, domain: point|prim|edge, ids}``; resolves the group on input geometry without graph edits (at most 100000 ids)
@@ -589,6 +591,12 @@ class _Handler(BaseHTTPRequestHandler):
             return self._static(path[len("/static/"):])
         if path == "/api/state":
             return self._json(app.state())
+        if path == '/api/preferences':
+            from .. import user_preferences
+            from ..nodes import python_node
+            value = user_preferences.describe()
+            value['python_nodes'] = python_node.allowed()
+            return self._json(value)
         if path == "/api/nodes":
             return self._json([nt.describe() for nt in s.evaluator.registry])
         if path == "/api/graph":
@@ -645,17 +653,21 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/preferences":
             from .. import user_preferences
             from ..nodes import python_node
-            value = body.get("python_nodes")
-            if not isinstance(value, bool):
-                raise ApiError(400, "python_nodes must be a boolean")
+            values = {key: body[key] for key in ('python_nodes', 'copy_memory_limit_mib') if key in body}
             with s._cook_lock:
-                user_preferences.set_python(value)
-                python_node.set_allowed(value)
+                try:
+                    user_preferences.update(values)
+                except ValueError as e:
+                    raise ApiError(400, str(e)) from None
+                if 'python_nodes' in values:
+                    python_node.set_allowed(values['python_nodes'])
                 s.evaluator.cache.clear()
             with s.lock:
                 s._rev += 1
                 s._wake.set()
-            return self._json({"python_nodes": python_node.allowed()})
+            value = user_preferences.describe()
+            value['python_nodes'] = python_node.allowed()
+            return self._json(value)
         if path == "/api/cancel":
             s.cancel_cook()
             return self._json({"ok": True})
@@ -860,7 +872,7 @@ class _Handler(BaseHTTPRequestHandler):
                 cap = body.get("link_tris")
                 if cap is not None and (isinstance(cap, bool) or not isinstance(cap, int) or cap < 0):
                     raise ValueError('"link_tris" must be a whole number, 0 for no limit')
-                return self._json(s.set_proxy(level, auto, cap))
+                return self._json(s.set_proxy(level, auto, cap, persist=True))
             except ValueError as e:
                 raise ApiError(400, str(e)) from None
         if path == "/api/frame":
