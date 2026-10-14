@@ -1112,6 +1112,24 @@ class EditorE2E(unittest.TestCase):
         self.page.mouse.up()
         return tip
 
+    def test_a_deformer_edit_sends_only_new_positions(self):
+        self.handle_scene("transform", {"translate": [0, 0, 0]}, "h")
+        self.page.wait_for_function("minihou.preview.topology !== null")
+        token = self.page.evaluate("minihou.preview.topology")
+        self.s.edit([{"op": "set", "id": "h", "params": {"translate": [5, 0, 0]}}])
+        self.page.wait_for_function("minihou.preview.bounds()[0][0] > 3")                      # the box moved in the view
+        self.assertEqual(self.page.evaluate("minihou.preview.lastUpload"), "positions")        # without new triangles or edges
+        self.assertEqual(self.page.evaluate("minihou.preview.topology"), token)
+        self.assertEqual(self.page.evaluate("minihou.preview.tris"), 12)
+        box = self.page.locator("#pv-canvas").bounding_box()                                   # picking uses the moved points
+        self.page.click('#preview [data-mode="face"]')
+        self.page.evaluate("minihou.preview.frameAll()")
+        self.page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+        self.assertTrue(until(lambda: len(self.selection()["faces"]) == 1))
+        self.s.edit([{"op": "set", "id": "b", "params": {"divisions": 2}}])              # other topology: everything again
+        self.page.wait_for_function("minihou.preview.tris > 12")
+        self.assertEqual(self.page.evaluate("minihou.preview.lastUpload"), "all")
+
     def test_dragging_a_transform_arrow_moves_the_node_and_keeps_the_other_components(self):
         self.handle_scene("transform", {"translate": [0.5, 1.0, 2.0]}, "h")
         self.assertEqual(sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()")),

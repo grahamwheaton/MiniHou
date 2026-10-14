@@ -1184,6 +1184,7 @@
   let pvSelection = { mode: "view", points: [], edges: [], faces: [] };
   // Viewport detail: auto draws a big geometry reduced, but at full detail while a selection mode is on (selecting needs the real points);
   // full always asks for full detail; fast always reduces (selection off). Remembered between sessions.
+  let pvFresh = false;                                                         // ask for the whole geometry, not just new positions
   let pvDetail = "auto";
   try { const d = localStorage.getItem("minihou.pvDetail"); if (["auto", "full", "fast"].includes(d)) pvDetail = d; } catch (e) { /* no storage */ }
   // Instances (copies of one shape, instance points) are drawn as impostors: auto does it for big scenes and for instance points, always for any
@@ -1351,7 +1352,7 @@
     pvKey = key;
     let buf;
     try {
-      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full, templates:true, attr: attr || undefined, mask: mask || undefined, instances: pvInstances, tris: !full && perf.budget ? perf.budget : undefined }) });
+      const r = await fetch("/api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ node, full, templates:true, attr: attr || undefined, mask: mask || undefined, instances: pvInstances, tris: !full && perf.budget ? perf.budget : undefined, have: (!pvFresh && pv.topology) || undefined }) });
       buf = await r.arrayBuffer();
     } catch (e) { pvKey = null; return; }
     // A completed frame of the same node is useful even if a newer edit arrived.
@@ -1370,7 +1371,10 @@
     if (rp && rp.full) pvTooBig = sig;                                           // full detail was refused for this result: say so on the next (reduced) view too
     else if (rp && pvTooBig === sig) rp = { ...rp, tooBig: true };
     setReducedView(rp);
-    pv.set(head, arrays, (pvNode === node && pvPath === S.path) || pvKeepCameraNode === node);
+    if (!pv.set(head, arrays, (pvNode === node && pvPath === S.path) || pvKeepCameraNode === node)) {   // it left out triangles the viewer no longer has
+      pvKey = null; pvFresh = true; schedulePreview(); return;
+    }
+    pvFresh = false;
     if(pvKeepCameraNode===node)pvKeepCameraNode=null;
     pv.selectableTemplates=head.selectable_templates||[];
     if(head.template_warnings?.length)pvMsg(head.template_warnings.join('\n'));

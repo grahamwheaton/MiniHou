@@ -49,6 +49,40 @@ def has_next(geo) -> np.ndarray:
     return m
 
 
+_NUMBA_EDGES = 20_000          # from this many vertices on, the numba kernels (same result, linear time) replace np.unique
+
+
+def _edges_numba(geo):
+    """:class:`Edges` exactly as the np.unique path gives them, or None without numba."""
+    from . import accel
+    k = accel.kernels()
+    if k is None:
+        return None
+    t = geo.topology
+    n = max(geo.npoints, 1)
+    nv = t.nvertices
+    vp = np.ascontiguousarray(t.vertex_point, np.int64)
+    offs = np.ascontiguousarray(t.prim_offsets, np.int64)
+    closed = np.ascontiguousarray(t.closed_mask(), np.uint8)
+    lo, hi = np.empty(nv, np.int64), np.empty(nv, np.int64)
+    if accel.call(k.edges_halves, vp, offs, closed, lo, hi) is accel.FAILED:
+        return None
+    r = accel.call(k.edges_bucket, lo, hi, n)
+    if r is accel.FAILED:
+        return None
+    start, shi, sidx = r
+    per = np.empty(n, np.int64)
+    if accel.call(k.edges_sort_count, start, shi, sidx, n, per) is accel.FAILED:
+        return None
+    base = np.zeros(n, np.int64)
+    np.cumsum(per[:-1], out=base[1:])
+    ne = int(base[-1] + per[-1])
+    pts, count, of_vertex = np.empty((ne, 2), np.int64), np.empty(ne, np.int64), np.full(nv, -1, np.int64)
+    if accel.call(k.edges_number, start, shi, sidx, n, base, pts, count, of_vertex) is accel.FAILED:
+        return None
+    return Edges(pts, of_vertex, count)
+
+
 class Edges(NamedTuple):
     points: np.ndarray        # (E, 2) point indices, sorted within each edge
     of_vertex: np.ndarray     # (V,) edge id of each half-edge (vertex -> next vertex); -1 for the end of an open curve
@@ -57,6 +91,10 @@ class Edges(NamedTuple):
 
 def edges(geo) -> Edges:
     """Unique undirected edges of all primitives (open curves contribute their segments, not a closing edge)."""
+    if geo.topology.nvertices >= _NUMBA_EDGES and geo.npoints:
+        fast = _edges_numba(geo)
+        if fast is not None:
+            return fast
     vp = geo.topology.vertex_point.astype(np.int64)
     a, b = vp, vp[next_vertex(geo)]
     real = has_next(geo)

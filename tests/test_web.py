@@ -9,6 +9,8 @@ import threading
 import time
 import unittest
 
+import numpy as np
+
 from minihou import Graph
 from minihou.link.server import LinkServer
 from minihou.link.session import Session
@@ -86,6 +88,30 @@ class WebTests(unittest.TestCase):
         self.assertEqual(st, 400)
         self.assertEqual(d["index"], 0)
         self.assertIn("unknown node type", d["error"])
+
+    def test_preview_leaves_out_triangles_the_viewer_already_has(self):
+        from minihou import preview
+
+        def get(body):
+            c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+            c.request("POST", "/api/preview", json.dumps(body), {"Content-Type": "application/json"})
+            r = c.getresponse()
+            data = r.read()
+            c.close()
+            return preview.unpack(data)
+        head, arrays = get({"node": "ground"})
+        token = head["topology"]
+        self.assertTrue(token)
+        self.assertIn("tri", arrays)
+        head2, arrays2 = get({"node": "hills", "have": token})                # noise moves the points of the same grid
+        self.assertTrue(head2.get("same_topology"))
+        self.assertNotIn("tri", arrays2)
+        self.assertNotIn("edge", arrays2)
+        self.assertEqual(len(arrays2["P"]), len(arrays["P"]))
+        self.assertFalse(np.array_equal(arrays2["P"], arrays["P"]))
+        head3, arrays3 = get({"node": "hills", "have": "something else"})      # not what the viewer holds: everything
+        self.assertNotIn("same_topology", head3)
+        self.assertIn("tri", arrays3)
 
     def test_preview_returns_binary_geometry_or_a_json_error(self):
         from minihou import preview

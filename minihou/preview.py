@@ -12,7 +12,9 @@ primitive number of each triangle, for picking faces), ``Cd`` float32 (3 per poi
 ``CHUNK_TRIS`` triangles: first triangle, count, bounding box min xyz and max xyz; the triangles are then sorted so that runs are compact) from
 ``CHUNK_MIN_TRIS`` triangles on. A header with ``instances`` carries impostors, see :mod:`minihou.impostors`. ``points``, ``prims`` are the
 real counts; ``tris`` / ``edges`` what is drawn. ``proxy`` says whether the drawing was reduced to fit the budget (``active``), from
-how many points / triangles (``points``, ``tris``) to how many (``shown_points``, ``shown_tris``).
+how many points / triangles (``points``, ``tris``) to how many (``shown_points``, ``shown_tris``). ``topology`` (when not reduced) names the
+triangles and edges: a request that sends it back as ``have`` gets ``same_topology: true`` and no ``tri`` / ``tri_prim`` / ``edge`` arrays when
+they have not changed (a deformer moved the points), so the viewer only replaces positions.
 """
 from __future__ import annotations
 
@@ -21,7 +23,8 @@ import json
 import struct
 import threading
 import weakref
-from typing import Dict, Tuple
+from collections import OrderedDict
+from typing import Dict, NamedTuple, Tuple
 
 import numpy as np
 
@@ -74,11 +77,37 @@ def _spread_bits(v: np.ndarray) -> np.ndarray:
     return v
 
 
+def _chunk_numba(P, tri, tri_prim):
+    """:func:`chunk_triangles` with the numba kernels (linear time; the order is a stable sort of the same kind of Morton code), or None."""
+    from . import accel
+    k = accel.kernels()
+    if k is None or not len(tri):
+        return None
+    P = np.ascontiguousarray(P)
+    tri = np.ascontiguousarray(tri, np.int64).reshape(-1, 3)
+    used = P[: max(int(tri.max()) + 1, 1)]
+    lo = used.min(axis=0).astype(np.float64)
+    ext = used.max(axis=0).astype(np.float64) - lo
+    scale = 1023.0 / np.maximum(ext, 1e-12)
+    code = np.empty(len(tri), np.int64)
+    order = np.empty(len(tri), np.int64)
+    if accel.call(k.tri_morton, P, tri, lo, scale, code) is accel.FAILED or accel.call(k.radix_order30, code, order) is accel.FAILED:
+        return None
+    tri, tri_prim = tri[order], tri_prim[order]
+    table = np.empty(((len(tri) + CHUNK_TRIS - 1) // CHUNK_TRIS, 8), np.float32)
+    if accel.call(k.chunk_bounds, P, tri, CHUNK_TRIS, table) is accel.FAILED:
+        return None
+    return tri, tri_prim, table
+
+
 def chunk_triangles(P: np.ndarray, tri: np.ndarray, tri_prim: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """``(tri, tri_prim, table)``: the triangles sorted along a Morton curve of their centres, so triangles that are near each other are near
     in the list too, and a table with one row per run of ``CHUNK_TRIS`` of them: first triangle, triangle count, bounding box min xyz, max xyz
     (float32; the viewer skips the runs that are outside its view). The triangles are the same, only in another order."""
     n = len(tri)
+    fast = _chunk_numba(P, tri, tri_prim)
+    if fast is not None:
+        return fast
     corners = P[tri.reshape(-1)].reshape(n, 3, 3)
     c = corners.mean(axis=1)
     lo, hi = c.min(axis=0), c.max(axis=0)
@@ -92,6 +121,55 @@ def chunk_triangles(P: np.ndarray, tri: np.ndarray, tri_prim: np.ndarray) -> Tup
     tmax = np.maximum.reduceat(corners.max(axis=1), starts, axis=0)
     table = np.concatenate([starts[:, None], counts[:, None], tmin, tmax], axis=1).astype(np.float32)
     return tri, tri_prim, table
+
+
+class _Layout(NamedTuple):
+    tri: np.ndarray          # uint32, 3 per triangle, in drawing (chunk) order
+    tri_prim: np.ndarray     # uint32
+    edge: np.ndarray         # uint32, 2 per edge
+    chunked: bool
+    truncated: bool
+
+
+_LAYOUTS: "OrderedDict[str, _Layout]" = OrderedDict()                 # topology token -> layout; the last few (they can be large)
+_LAYOUT_KEEP = 3
+
+
+def _layout_get(token):
+    if token is None:
+        return None
+    key = (token, MAX_TRIS, MAX_EDGES, CHUNK_MIN_TRIS, CHUNK_TRIS)
+    with _MEMO_LOCK:
+        lay = _LAYOUTS.get(key)
+        if lay is not None:
+            _LAYOUTS.move_to_end(key)
+        return lay
+
+
+def _layout_put(token, lay):
+    if token is None:
+        return
+    with _MEMO_LOCK:
+        _LAYOUTS[(token, MAX_TRIS, MAX_EDGES, CHUNK_MIN_TRIS, CHUNK_TRIS)] = lay
+        while len(_LAYOUTS) > _LAYOUT_KEEP:
+            _LAYOUTS.popitem(last=False)
+
+
+def chunk_table(P: np.ndarray, tri: np.ndarray) -> np.ndarray:
+    """The run table of :func:`chunk_triangles` for triangles already in order (bounds from the current positions)."""
+    n = len(tri)
+    from . import accel
+    k = accel.kernels()
+    if k is not None and n:
+        table = np.empty(((n + CHUNK_TRIS - 1) // CHUNK_TRIS, 8), np.float32)
+        if accel.call(k.chunk_bounds, np.ascontiguousarray(P), np.ascontiguousarray(tri, np.int64), CHUNK_TRIS, table) is not accel.FAILED:
+            return table
+    corners = np.asarray(P)[np.asarray(tri, np.int64).reshape(-1)].reshape(n, 3, 3)
+    starts = np.arange(0, n, CHUNK_TRIS)
+    counts = np.minimum(starts + CHUNK_TRIS, n) - starts
+    tmin = np.minimum.reduceat(corners.min(axis=1), starts, axis=0)
+    tmax = np.maximum.reduceat(corners.max(axis=1), starts, axis=0)
+    return np.concatenate([starts[:, None], counts[:, None], tmin, tmax], axis=1).astype(np.float32)
 
 
 _MEMO: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()      # geometry -> {(full, tris): (header, arrays)}
@@ -138,21 +216,33 @@ def _arrays_for(geo, full: bool = False, tris: int = 0) -> Tuple[dict, Dict[str,
     n = shown.npoints
     out: Dict[str, np.ndarray] = {}
     out["P"] = np.ascontiguousarray(shown.P, np.float32).reshape(-1)
-    tri, tri_prim = _triangles(shown)
-    edge = topo.edges(shown).points.astype(np.int64) if t.nprims else np.zeros((0, 2), np.int64)
-    truncated = False
-    if len(tri) > MAX_TRIS:                                          # only if a caller asked for more than the cap
-        tri, tri_prim, truncated = tri[:MAX_TRIS], tri_prim[:MAX_TRIS], True
-    if len(edge) > MAX_EDGES:
-        edge, truncated = edge[:MAX_EDGES], True
-    if red.reduced:
-        tri_prim = red.prim_src[tri_prim] if len(tri_prim) else tri_prim
-    if len(tri) >= CHUNK_MIN_TRIS:
-        tri, tri_prim, table = chunk_triangles(shown.P, tri, tri_prim)
+    # Triangles, their order and the edges depend only on the topology (unless the drawing is reduced, which clusters by position): a deformer
+    # downstream (noise, transform, smooth...) shares the topology of its input, so they are kept per topology and only the run bounds are redone.
+    token = f"{t.digest}:{n}" if not red.reduced and t.nprims else None
+    lay = _layout_get(token)
+    if lay is None:
+        tri, tri_prim = _triangles(shown)
+        edge = topo.edges(shown).points.astype(np.int64) if t.nprims else np.zeros((0, 2), np.int64)
+        truncated = False
+        if len(tri) > MAX_TRIS:                                          # only if a caller asked for more than the cap
+            tri, tri_prim, truncated = tri[:MAX_TRIS], tri_prim[:MAX_TRIS], True
+        if len(edge) > MAX_EDGES:
+            edge, truncated = edge[:MAX_EDGES], True
+        if red.reduced:
+            tri_prim = red.prim_src[tri_prim] if len(tri_prim) else tri_prim
+        table = None
+        if len(tri) >= CHUNK_MIN_TRIS:
+            tri, tri_prim, table = chunk_triangles(shown.P, tri, tri_prim)
+        lay = _Layout(np.ascontiguousarray(tri, np.uint32).reshape(-1), np.ascontiguousarray(tri_prim, np.uint32),
+                      np.ascontiguousarray(edge, np.uint32).reshape(-1), table is not None, truncated)
+        _layout_put(token, lay)
+    else:
+        table = chunk_table(shown.P, lay.tri.reshape(-1, 3)) if lay.chunked else None
+    truncated = lay.truncated
+    if table is not None:
         out["chunks"] = np.ascontiguousarray(table).reshape(-1)
-    out["tri"] = np.ascontiguousarray(tri, np.uint32).reshape(-1)
-    out["tri_prim"] = np.ascontiguousarray(tri_prim, np.uint32)
-    out["edge"] = np.ascontiguousarray(edge, np.uint32).reshape(-1)
+    out["tri"], out["tri_prim"], out["edge"] = lay.tri, lay.tri_prim, lay.edge
+    tri, edge = lay.tri.reshape(-1, 3), lay.edge.reshape(-1, 2)
     cd = shown.point.get("Cd")
     if cd is not None and cd.ndim == 2 and cd.shape[1] >= 3 and len(cd) == n:
         out["Cd"] = np.ascontiguousarray(np.clip(cd[:, :3], 0.0, 1.0), np.float32).reshape(-1)
@@ -163,7 +253,7 @@ def _arrays_for(geo, full: bool = False, tris: int = 0) -> Tuple[dict, Dict[str,
     else:
         lo = hi = [0.0, 0.0, 0.0]
     head = {"points": int(n0), "prims": int(geo.topology.nprims), "tris": int(len(tri)), "edges": int(len(edge)),
-            "bounds": [lo, hi], "truncated": truncated,
+            "bounds": [lo, hi], "truncated": truncated, "topology": token,
             "proxy": {"active": bool(red.reduced), "points": int(n0), "tris": int(tris0), "shown_points": int(n), "shown_tris": int(len(tri)),
                       "full": bool(full), "max_tris": MAX_TRIS, "max_points": MAX_POINTS}}
     return head, out

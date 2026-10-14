@@ -513,3 +513,185 @@ def grid_intersect(o, d, tris, cstart, ccount, cell_tris, lo, hi, hv, dims, max_
             if cell[axis] < 0 or cell[axis] >= dims[axis]:
                 break
         out_t[i], out_tri[i], out_uv[i, 0], out_uv[i, 1] = bt, btri, bu, bv
+
+
+
+@njit(**_OPTS)
+def _sort_segment(hi, idx, a, b):
+    # sort hi[a:b] ascending, carrying idx; stable, and idx is ascending within a group on entry, so ties stay in half-edge order
+    if b - a <= 32:
+        for i in range(a + 1, b):
+            h, k = hi[i], idx[i]
+            j = i - 1
+            while j >= a and hi[j] > h:
+                hi[j + 1] = hi[j]
+                idx[j + 1] = idx[j]
+                j -= 1
+            hi[j + 1] = h
+            idx[j + 1] = k
+    else:
+        o = np.argsort(hi[a:b], kind="mergesort")
+        hs = hi[a:b][o]
+        ks = idx[a:b][o]
+        hi[a:b] = hs
+        idx[a:b] = ks
+
+
+
+@njit(parallel=True, **_OPTS)
+def edges_halves(vp, offs, closed, lo, hi):
+    """Per vertex, the half-edge to the next vertex of its primitive as (lo, hi) = (min, max) point; lo = -1 where there is none
+    (the last vertex of an open curve). ``closed``: uint8 per primitive."""
+    for f in prange(len(offs) - 1):
+        a, b = offs[f], offs[f + 1]
+        for v in range(a, b):
+            if v + 1 < b:
+                w = v + 1
+            elif closed[f]:
+                w = a
+            else:
+                lo[v] = -1
+                hi[v] = -1
+                continue
+            x, y = vp[v], vp[w]
+            if x <= y:
+                lo[v] = x
+                hi[v] = y
+            else:
+                lo[v] = y
+                hi[v] = x
+
+
+@njit(**_OPTS)
+def edges_bucket(lo, hi, n):
+    """Counting sort of the half-edges (lo >= 0) by lo. Returns (start (n + 1), hi and vertex of each, in that order)."""
+    start = np.zeros(n + 1, np.int64)
+    for v in range(len(lo)):
+        if lo[v] >= 0:
+            start[lo[v] + 1] += 1
+    for p in range(n):
+        start[p + 1] += start[p]
+    fill = start[:n].copy()
+    m = start[n]
+    shi = np.empty(m, np.int64)
+    sidx = np.empty(m, np.int64)
+    for v in range(len(lo)):
+        l = lo[v]
+        if l >= 0:
+            q = fill[l]
+            fill[l] = q + 1
+            shi[q] = hi[v]
+            sidx[q] = v
+    return start, shi, sidx
+
+@njit(parallel=True, **_OPTS)
+def edges_sort_count(start, shi, sidx, n, per):
+    """Sort each group by hi and count its distinct edges into per[p]."""
+    for p in prange(n):
+        a, b = start[p], start[p + 1]
+        if b - a > 1:
+            _sort_segment(shi, sidx, a, b)
+        c = 0
+        prev = -1
+        for q in range(a, b):
+            if shi[q] != prev:
+                c += 1
+                prev = shi[q]
+        per[p] = c
+
+
+@njit(parallel=True, **_OPTS)
+def edges_number(start, shi, sidx, n, base, out_points, out_count, inv):
+    """Number the distinct edges of each (sorted) group from base[p]: the order of sorting the keys lo * n + hi, as np.unique does."""
+    for p in prange(n):
+        e = base[p] - 1
+        prev = -1
+        for q in range(start[p], start[p + 1]):
+            if shi[q] != prev:
+                e += 1
+                prev = shi[q]
+                out_points[e, 0] = p
+                out_points[e, 1] = prev
+                out_count[e] = 0
+            out_count[e] += 1
+            inv[sidx[q]] = e
+
+
+@njit(**_OPTS)
+def _spread10(v):
+    v = (v | (v << 16)) & 0x030000FF
+    v = (v | (v << 8)) & 0x0300F00F
+    v = (v | (v << 4)) & 0x030C30C3
+    v = (v | (v << 2)) & 0x09249249
+    return v
+
+
+@njit(parallel=True, **_OPTS)
+def tri_morton(P, tri, lo, scale, code):
+    """30-bit Morton code of each triangle's centre, quantised to 1024 steps per axis from ``lo`` with ``scale`` (= 1023 / extent)."""
+    for t in prange(tri.shape[0]):
+        a, b, c = tri[t, 0], tri[t, 1], tri[t, 2]
+        m = np.int64(0)
+        for ax in range(3):
+            x = (np.float64(P[a, ax]) + np.float64(P[b, ax]) + np.float64(P[c, ax])) / 3.0
+            q = np.int64((x - lo[ax]) * scale[ax])
+            if q < 0:
+                q = 0
+            elif q > 1023:
+                q = 1023
+            m |= _spread10(q) << ax
+        code[t] = m
+
+
+@njit(**_OPTS)
+def radix_order30(code, order):
+    """``order``: the indices that stably sort the 30-bit ``code`` (two counting-sort passes of 15 bits: linear, same as a stable argsort)."""
+    n = len(code)
+    tmp = np.empty(n, np.int64)
+    for i in range(n):
+        tmp[i] = i
+    src, dst = tmp, order
+    for shift in (0, 15):
+        cnt = np.zeros(32769, np.int64)
+        for i in range(n):
+            cnt[((code[src[i]] >> shift) & 32767) + 1] += 1
+        for k in range(32768):
+            cnt[k + 1] += cnt[k]
+        for i in range(n):
+            j = src[i]
+            d = (code[j] >> shift) & 32767
+            dst[cnt[d]] = j
+            cnt[d] += 1
+        src, dst = dst, src
+    if src is not order:
+        for i in range(n):
+            order[i] = src[i]
+
+
+@njit(parallel=True, **_OPTS)
+def chunk_bounds(P, tri, size, table):
+    """One row per run of ``size`` triangles: first, count, min xyz, max xyz of their corners."""
+    n = tri.shape[0]
+    for k in prange(table.shape[0]):
+        a = k * size
+        b = min(n, a + size)
+        mn0 = mn1 = mn2 = np.inf
+        mx0 = mx1 = mx2 = -np.inf
+        for t in range(a, b):
+            for c in range(3):
+                p = tri[t, c]
+                x, y, z = P[p, 0], P[p, 1], P[p, 2]
+                mn0 = min(mn0, x)
+                mn1 = min(mn1, y)
+                mn2 = min(mn2, z)
+                mx0 = max(mx0, x)
+                mx1 = max(mx1, y)
+                mx2 = max(mx2, z)
+        table[k, 0] = a
+        table[k, 1] = b - a
+        table[k, 2] = mn0
+        table[k, 3] = mn1
+        table[k, 4] = mn2
+        table[k, 5] = mx0
+        table[k, 6] = mx1
+        table[k, 7] = mx2

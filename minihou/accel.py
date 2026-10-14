@@ -137,6 +137,21 @@ def warmup() -> float:
     call(k.grid_intersect, np.array([[0.2, 0.2, 1.0]]), np.array([[0.0, 0.0, -1.0]]), tris, zero_i,
          np.ones(1, np.int64), one_i, lo, hv, hv, dims, np.inf, np.empty(1), np.empty(1, np.int64),
          np.empty((1, 2)))
+    vp4 = np.array([0, 1, 2, 3], np.int64)
+    lo, hi = np.empty(4, np.int64), np.empty(4, np.int64)
+    call(k.edges_halves, vp4, np.array([0, 4], np.int64), np.ones(1, np.uint8), lo, hi)
+    r = call(k.edges_bucket, lo, hi, 4)
+    if r is not FAILED:
+        per = np.empty(4, np.int64)
+        call(k.edges_sort_count, *r, 4, per)
+        base = np.zeros(4, np.int64)
+        np.cumsum(per[:-1], out=base[1:])
+        call(k.edges_number, *r, 4, base, np.empty((int(per.sum()), 2), np.int64), np.empty(int(per.sum()), np.int64), np.full(4, -1, np.int64))
+    tri3 = np.array([[0, 1, 2]], np.int64)
+    code, order = np.empty(1, np.int64), np.empty(1, np.int64)
+    call(k.tri_morton, p, tri3, np.zeros(3), np.ones(3), code)
+    call(k.radix_order30, code, order)
+    call(k.chunk_bounds, p, tri3, 8192, np.empty((1, 8), np.float32))
     return time.perf_counter() - t0
 
 

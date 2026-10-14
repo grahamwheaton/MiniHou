@@ -421,3 +421,81 @@ class CopyNumpyBackend(_NumpyBackend, test_nodes.CopyToPointsTests):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@needs_numba
+class EdgesParityTests(unittest.TestCase):
+    """topo.edges' numba path numbers the edges exactly like np.unique (edge attributes, edge groups and the viewer's picking index into it)."""
+
+    def both(self, g):
+        from minihou import topo
+        fast = topo._edges_numba(g)
+        self.assertIsNotNone(fast)
+        with accel.disabled():
+            ref = topo.edges(g)
+        for name, a, b in zip(ref._fields, ref, fast):
+            self.assertEqual(a.dtype, b.dtype, name)
+            np.testing.assert_array_equal(a, b, err_msg=name)
+        return ref
+
+    def mesh(self, seed, npts, nprims, open_frac=0.0, max_size=7):
+        rng = np.random.default_rng(seed)
+        sizes = rng.integers(1, max_size + 1, nprims)
+        offs = np.concatenate([[0], np.cumsum(sizes)])
+        vp = rng.integers(0, npts, offs[-1])
+        closed = None if not open_frac else rng.random(nprims) >= open_frac
+        return Geometry.from_arrays(rng.random((npts, 3)).astype(np.float32), vp, offs, closed=closed)
+
+    def test_random_meshes_mixed_sizes_open_and_closed(self):
+        for seed in range(12):
+            npts = int(np.random.default_rng(seed).integers(1, 60))
+            g = self.mesh(seed, npts, 40, open_frac=(0.0, 0.3, 1.0)[seed % 3])
+            self.both(g)
+
+    def test_grid_isolated_points_and_degenerate_halves(self):
+        self.both(quad_geo())
+        g = self.mesh(5, 500, 300)                                     # many points no primitive uses
+        self.both(g)
+        g = Geometry.from_arrays(np.zeros((3, 3), np.float32), np.array([0, 0, 1, 2, 2]), np.array([0, 3, 5]))   # repeated points
+        self.both(g)
+
+    def test_a_point_with_hundreds_of_neighbours(self):
+        n = 400                                                        # a fan: the centre's group is long (the merge-sort branch)
+        rng = np.random.default_rng(3)
+        order = rng.permutation(n) + 1
+        vp = np.stack([np.zeros(n, np.int64), order, np.roll(order, 1)], 1).reshape(-1)
+        g = Geometry.from_arrays(rng.random((n + 1, 3)).astype(np.float32), vp, np.arange(0, 3 * n + 1, 3))
+        e = self.both(g)
+        self.assertEqual(int((e.points[:, 0] == 0).sum()), n)
+
+    def test_empty_and_the_dispatch(self):
+        from minihou import topo
+        g = Geometry.from_arrays(np.zeros((0, 3), np.float32), np.zeros(0, np.int64), np.zeros(1, np.int64))
+        self.assertEqual(len(topo.edges(g).points), 0)
+        big = self.mesh(1, 5000, topo._NUMBA_EDGES // 3)               # over the threshold: edges() takes the kernel path and agrees
+        ref = self.both(big)
+        np.testing.assert_array_equal(topo.edges(big).points, ref.points)
+
+
+@needs_numba
+class ChunkParityTests(unittest.TestCase):
+    """preview.chunk_triangles with the kernels: the same triangles (with their primitives), in a stable Morton order, bounds that hold them."""
+
+    def test_same_triangles_and_tight_bounds(self):
+        from minihou import preview
+        rng = np.random.default_rng(2)
+        P = (rng.random((3000, 3)) * [10, 4, 1]).astype(np.float32)
+        tri = rng.integers(0, 3000, (20000, 3))
+        tp = np.arange(20000) // 2
+        a, b, table = preview._chunk_numba(P, tri, tp)
+        with accel.disabled():
+            a0, b0, table0 = preview.chunk_triangles(P, tri, tp)
+        key = lambda t, p: np.lexsort(np.c_[t, p].T)
+        np.testing.assert_array_equal(np.c_[a, b][key(a, b)], np.c_[a0, b0][key(a0, b0)])
+        self.assertEqual(table.shape, table0.shape)
+        np.testing.assert_array_equal(table[:, :2], table0[:, :2])
+        for f, n, *box in table:
+            pts = P[a[int(f):int(f + n)].ravel()]
+            np.testing.assert_allclose(pts.min(0), box[:3]); np.testing.assert_allclose(pts.max(0), box[3:])
+        cx = P[a].mean(1)
+        self.assertLess(np.abs(np.diff(cx, axis=0)).sum(1).mean(), 2.0)     # neighbours in the list are near in space
