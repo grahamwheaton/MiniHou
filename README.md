@@ -594,6 +594,17 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `attribute_rename` | geo | rename an attribute, e.g. a Blender color attribute `Col` to `Cd` |
 | `normal` | geo | area-weighted point normals, face normals (Newell, n-gon safe), or vertex normals with a cusp angle (hard edges stay sharp; Blender gets custom normals) |
 | `scatter` | geo | area-weighted random points on the surface (`P`, `N`, `primnum`), or uniformly inside a closed mesh (mode volume: ray-parity inside test) |
+| `point_generate` | - | points from nothing: random in a box / on or in a sphere, or evenly on a line or circle; `id` |
+| `point_replicate` | geo | several points per point (a count or an attribute), optionally jittered; `copy`, `source` |
+| `point_velocity` | geo, previous | `v` from the earlier positions, a curl-noise field or a fixed direction |
+| `particle_trail` | geo | a curve behind each point along its velocity (optionally bent by gravity); `trail` 0..1 |
+| `cluster_points` | geo | k-means, grid or distance clusters: a `cluster` attribute, or one centroid point per cluster |
+| `point_cloud_measure` | geo | `neighbors`, `density`, `nn_dist`, `mean_dist` per point |
+| `point_cloud_normal` | geo | normals by plane fit to the nearest points; oriented outward / inward / to a viewpoint / up |
+| `point_cloud_reduce` | geo | thin a cloud: minimum distance (blue-noise), about N points, or a percentage |
+| `point_cloud_surface` | points, cloud | snap points onto the smooth surface a point cloud describes (moving least squares) |
+| `points_from_volume` | geo | fill a closed mesh with points: lattice, random or poisson; optionally only near the surface |
+| `scatter_in_texture_mask` | geo, mask | scatter on a surface where an image (pixel grid from `blender_image` / `image_file`) is bright |
 | `copy_to_points` | source, points | stamp `source` on every point, oriented by `orient` (quaternion), `rot`, or `N` + `up`, sized by `scale` x `pscale`; inherits point attributes |
 | `delete` | geo | delete points matching an expression (and primitives that use them), compacting all attributes |
 | `fuse` | geo | weld points closer than a distance |

@@ -39,6 +39,56 @@ def nearest(src: np.ndarray, query: np.ndarray, use_scipy: bool = True) -> Tuple
     return _grid_nearest(src, query)
 
 
+KNN_BRUTE_MAX = 40000        # without SciPy the neighbour search is brute force in chunks: cap the cloud so it stays interactive
+
+
+def knn(src: np.ndarray, query: np.ndarray, k: int, use_scipy: bool = True) -> Tuple[np.ndarray, np.ndarray]:
+    """The ``k`` nearest source points of each query point: (indices (m, k), distances (m, k)), nearest first, float64. Fewer than
+    ``k`` source points: the missing columns are -1 / inf. Uses SciPy's KD-tree when installed, else chunked brute force
+    (up to KNN_BRUTE_MAX source points; ties go to the lower index in both)."""
+    src = np.asarray(src, np.float64).reshape(-1, 3)
+    query = np.asarray(query, np.float64).reshape(-1, 3)
+    k = max(int(k), 1)
+    m, n = len(query), len(src)
+    idx = np.full((m, k), -1, np.int64)
+    dist = np.full((m, k), np.inf)
+    if m == 0 or n == 0:
+        return idx, dist
+    kk = min(k, n)
+    if _KDTree is not None and use_scipy:
+        d, i = _KDTree(src).query(query, k=kk)
+        i, d = np.asarray(i, np.int64).reshape(m, kk), np.asarray(d, np.float64).reshape(m, kk)
+        idx[:, :kk], dist[:, :kk] = i, d
+        return idx, dist
+    if n > KNN_BRUTE_MAX:
+        raise ValueError(f"neighbour search over {n:,} points needs SciPy (pip install scipy); without it the limit is {KNN_BRUTE_MAX:,}")
+    step = max(1, 4_000_000 // n)
+    for a in range(0, m, step):
+        q = query[a:a + step]
+        d2 = ((q[:, None, :] - src[None, :, :]) ** 2).sum(-1)
+        order = np.argsort(d2, axis=1, kind="stable")[:, :kk]
+        idx[a:a + step, :kk] = order
+        dist[a:a + step, :kk] = np.sqrt(np.take_along_axis(d2, order, 1))
+    return idx, dist
+
+
+def count_within(src: np.ndarray, query: np.ndarray, r: float) -> np.ndarray:
+    """How many source points lie within ``r`` of each query point (a source point at distance 0 counts)."""
+    src = np.asarray(src, np.float64).reshape(-1, 3)
+    query = np.asarray(query, np.float64).reshape(-1, 3)
+    if len(src) == 0 or len(query) == 0:
+        return np.zeros(len(query), np.int64)
+    if _KDTree is not None:
+        return np.asarray(_KDTree(src).query_ball_point(query, r, return_length=True), np.int64)
+    if len(src) > KNN_BRUTE_MAX:
+        raise ValueError(f"neighbour search over {len(src):,} points needs SciPy (pip install scipy); without it the limit is {KNN_BRUTE_MAX:,}")
+    out = np.zeros(len(query), np.int64)
+    step = max(1, 4_000_000 // len(src))
+    for a in range(0, len(query), step):
+        out[a:a + step] = (((query[a:a + step, None, :] - src[None]) ** 2).sum(-1) <= r * r).sum(1)
+    return out
+
+
 def _cell_sizes(src) -> np.ndarray:
     """Per-axis cell size: about two source points per cell in the dimensions the points actually span (a surface
     gets a single layer of cells across its thickness, a line a single row)."""

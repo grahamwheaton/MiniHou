@@ -2,7 +2,7 @@ import numpy as np
 
 from .. import accel
 from ..geometry import Geometry
-from ..sdk import Enum, Int, node
+from ..sdk import Bool, Enum, Int, Str, node
 from ._util import fan_triangulate, normalize_rows
 
 
@@ -50,7 +50,18 @@ def _scatter_numba(geo, count, seed):
     return _finish(pos, nrm, prim)
 
 
-def _scatter_numpy(geo, count, seed):
+def _tri_weights(geo, tris, tri_prim, name):
+    """Per-triangle density from a primitive attribute, or the mean of a point attribute over its corners."""
+    a = geo.prim.get(name)
+    if a is not None and a.ndim == 1:
+        return np.maximum(a.astype(np.float64)[tri_prim], 0.0)
+    a = geo.point.get(name)
+    if a is not None and a.ndim == 1:
+        return np.maximum(a.astype(np.float64)[geo.topology.vertex_point[tris]].mean(1), 0.0)
+    raise ValueError(f"no scalar primitive or point attribute {name!r} to scale the density by")
+
+
+def _scatter_numpy(geo, count, seed, density_attrib=""):
     tris, tri_prim = fan_triangulate(geo.topology)
     if tris.shape[0] == 0:
         return _empty()
@@ -59,6 +70,8 @@ def _scatter_numpy(geo, count, seed):
     a, b, c = P[pts[:, 0]], P[pts[:, 1]], P[pts[:, 2]]
     cross = np.cross(b - a, c - a)
     area = 0.5 * np.sqrt(np.einsum("ij,ij->i", cross, cross))
+    if density_attrib:
+        area = area * _tri_weights(geo, tris, tri_prim, density_attrib)
     cdf = np.cumsum(area)
     if cdf[-1] <= 0.0:
         return _empty()
@@ -104,8 +117,13 @@ def _scatter_volume(geo, count, seed):
     Int("count", 1000, min=0, soft_max=1000000, proxy="count"),
     Int("seed", 0),
     Enum("mode", ["surface", "volume"], doc="surface: on the faces (area weighted); volume: inside a closed mesh"),
+    Str("density_attrib", "", doc="surface: scalar primitive (or point) attribute that scales the density: faces with 2 get twice the points, "
+                                 "0 none"),
+    Int("relax_iterations", 0, min=0, soft_max=50, doc="Push the points apart this many times and back onto the surface (an even, blue-noise-like "
+                                                    "spread; see point_relax)"),
+    Bool("output_id", False, doc="Write the point attribute id (0, 1, 2...)"),
 ])
-def scatter(geo, count, seed, mode="surface"):
+def scatter(geo, count, seed, mode="surface", density_attrib="", relax_iterations=0, output_id=False):
     """Scatter points uniformly over the surface (area weighted), or inside a closed mesh.
 
     Output is a point cloud with ``P``, ``N`` (face normal; zero in volume mode) and ``primnum`` (source primitive;
@@ -118,5 +136,18 @@ def scatter(geo, count, seed, mode="surface"):
         from ._build import require_polygons
         require_polygons(geo, "scatter in volume mode")
         return _scatter_volume(geo, count, seed)
-    out = _scatter_numba(geo, count, seed)
-    return out if out is not None else _scatter_numpy(geo, count, seed)
+    out = None if density_attrib else _scatter_numba(geo, count, seed)
+    if out is None:
+        out = _scatter_numpy(geo, count, seed, density_attrib)
+    if relax_iterations and out.npoints > 1:
+        out = _relax(out, geo, relax_iterations)
+    if output_id:
+        out = out.copy()
+        out.point["id"] = np.arange(out.npoints, dtype=np.int32)
+    return out
+
+
+def _relax(points, surface, iterations):
+    from ..sdk import REGISTRY
+    nt = REGISTRY.get("point_relax")
+    return nt.fn(points, surface, **nt.coerce_params({"iterations": iterations}))

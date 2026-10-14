@@ -12,7 +12,7 @@
     ["Create", "#6fbf73", [
       T("Box", "box"), T("Sphere", "sphere"), T("Tube", "tube"), T("Torus", "torus"), T("Grid", "grid"), T("Null", "null"),
       T("Line", "line"), T("Circle", "circle"), T("Bezier", "bezier", "curve"), T("Polyline", "curve"), T("Helix", "helix"), T("L-System", "lsystem"),
-      T("Lattice Grid", "lattice_grid", "lattice"), T("Metaball", "points_to_surface"), T("Blender Object", "blender_object", "file"), T("Blender Image", "blender_image", "file"), T("Image File", "image_file", "file"), T("USD Import", "usd_import", "file"),
+      T("Lattice Grid", "lattice_grid", "lattice"), T("Metaball", "points_to_surface"), T("Blender Object", "blender_object", "file"), T("Blender Collection", "blender_collection", "file"), T("Blender Image", "blender_image", "file"), T("Image File", "image_file", "file"), T("USD Import", "usd_import", "file"),
       T("Host Mesh", "modifier_input", "host"), T("Object Input", "object_input", "host")]],
     ["Modify", "#5ea0e0", [
       T("Transform", "transform"), T("Merge", "merge"), T("Duplicate", "copy_transform", "duplicate"), T("Copy to Points", "copy_to_points"),
@@ -53,7 +53,12 @@
       T("Convert Line", "convert_line", "line"), T("PolyPath", "polypath", "curve"), T("Sweep", "sweep"), T("Fillet", "fillet")]],
     ["Points", "#d6d46f", [
       T("Scatter", "scatter"), T("Fuse", "fuse"), T("Delaunay", "delaunay", "hull"), T("Point Jitter", "point_jitter", "scatter"),
-      T("Point Relax", "point_relax", "scatter"), T("Points to Surface", "points_to_surface")]],
+      T("Point Relax", "point_relax", "scatter"), T("Points to Surface", "points_to_surface"),
+      T("Point Generate", "point_generate", "scatter"), T("Point Replicate", "point_replicate", "scatter"), T("Point Velocity", "point_velocity", "scatter"),
+      T("Particle Trail", "particle_trail", "curve"), T("Cluster Points", "cluster_points", "scatter"), T("Point Cloud Measure", "point_cloud_measure", "scatter"),
+      T("Point Cloud Normal", "point_cloud_normal", "scatter"), T("Point Cloud Reduce", "point_cloud_reduce", "scatter"),
+      T("Point Cloud Surface", "point_cloud_surface", "scatter"), T("Points from Volume", "points_from_volume", "scatter"),
+      T("Scatter in Texture Mask", "scatter_in_texture_mask", "scatter")]],
     ["Rigid Bodies", "#e88a7a", [
       T("RBD Material Fracture", "rbd_material_fracture", "fracture"), T("Voronoi Fracture", "voronoi_fracture", "fracture"),
       T("Voronoi Fracture Points", "voronoi_fracture_points", "scatter"), T("Voronoi Split", "voronoi_split", "fracture"),
