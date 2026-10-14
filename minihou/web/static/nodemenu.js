@@ -29,6 +29,8 @@
       if (s === null) return null;
       total += s;
     }
+    // Keep standalone tools first unless the user asks for Blender/native algorithms.
+    if (t.menu === "Blender Modelling" && !toks.some(tok => tok === "blender" || tok === "native")) total += 4;
     return total + Math.min(String(t.label || t.name).length, 40) / 100;
   }
 

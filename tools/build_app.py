@@ -36,6 +36,7 @@ def build(with_accel: bool, destination: Path = DIST) -> Path:
            "--collect-all", "pxr",
            "--icon", str(ROOT / "minihou/assets/minihou.ico"),
            "--add-data", f"{ROOT / 'minihou/assets'}{sep}minihou/assets",
+           "--add-data", f"{ROOT / 'minihou' / 'blender_mesh_catalog.py'}{sep}minihou",
            "--add-data", f"{ROOT / 'minihou' / 'web' / 'static'}{sep}minihou/web/static",
            "--add-data", f"{ROOT / 'blender_addon' / 'minihou_link'}{sep}blender_addon/minihou_link",
            "--add-data", f"{ROOT / 'examples' / 'graphs'}{sep}examples/graphs"]

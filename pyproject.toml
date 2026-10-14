@@ -19,7 +19,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["minihou*"]
+include = ["minihou*", "blender_addon.minihou_link*"]
 
 [tool.setuptools.package-data]
 "minihou" = ["assets/*.ico"]

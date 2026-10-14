@@ -63,6 +63,8 @@ class SearchTests(unittest.TestCase):
         first = lambda q: self.run_js(f"return M.search(types, {json.dumps(q)}).slice(0, 3).map(t => t.name);")
         self.assertEqual(first("extrude")[0], "polyextrude")
         self.assertEqual(first("bevel")[0], "polybevel")
+        self.assertIn("native_extrude", first("native extrude"))
+        self.assertIn("solidify", first("blender solidify"))
         self.assertEqual(first("mountain")[0], "noise")
         self.assertEqual(first("duplicate")[0], "copy_transform")
         self.assertIn("rbd_material_fracture", first("shatter"))

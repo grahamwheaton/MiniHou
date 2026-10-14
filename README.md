@@ -10,6 +10,10 @@ each native input subgraph on a disposable copy; the external engine computes it
 for downstream nodes. This is a staged interactive bridge, not a synchronous Python GN execution callback.
 See [usage, runnable example and supported limits](docs/GEONODES.md). Cook explicitly before rendering.
 
+### Blender modelling tools
+
+Native Blender-backed merge/split/connect/fill, solidify, triangles-to-quads, bevel, extrude, inset, bisect, spin and symmetry tools are available alongside standalone To Sphere and Shear. See the [coverage plan and runtime requirements](docs/BLENDER_MODELLING_PLAN.md); this does not yet claim complete Blender parity.
+
 ### Modelling workflows
 
 The modelling additions include edge groups, Poly Bridge, Dissolve, Skin/Loft,

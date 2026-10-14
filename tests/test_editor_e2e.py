@@ -266,6 +266,23 @@ class EditorE2E(unittest.TestCase):
         self.two_boxes();self.node('m').locator('.title').click();self.page.click('#add-btn');self.page.keyboard.type('subdivide');self.page.keyboard.press('Enter')
         self.assertTrue(until(lambda:self.s.graph.nodes['o'].inputs.get('geo')=='subdivide1'))
 
+    def test_native_blender_shelf_captures_face_selection_and_cooks(self):
+        from minihou.blender_setup import find_blender
+        if not find_blender(): self.skipTest("requires Blender executable")
+        self.two_boxes()
+        self.page.click('#preview [data-mode="face"]')
+        face = self.second_box_top()
+        self.page.mouse.click(*self.view_xy('face', face))
+        self.page.locator('#shelf .sh-tab').filter(has_text='Blender').click()
+        self.shelf_tool('Solidify').click()
+        self.assertTrue(until(lambda: any(n.type == 'solidify' for n in self.s.graph.nodes.values())))
+        added = next(n for n in self.s.graph.nodes.values() if n.type == 'solidify')
+        self.assertEqual(added.params['group'], str(face))
+        self.assertTrue(until(lambda: self.s.status()['ok'] and self.s.latest_good.geo.nprims > 12, 20))
+        self.page.locator('#canvas').focus()
+        self.page.keyboard.press('Control+z')
+        self.assertTrue(until(lambda: not any(n.type == 'solidify' for n in self.s.graph.nodes.values())))
+
     def test_blast_shelf_captures_face_selection(self):
         self.two_boxes();self.page.click('#preview [data-mode="face"]')
         face=self.second_box_top();self.page.mouse.click(*self.view_xy('face',face))

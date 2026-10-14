@@ -18,6 +18,10 @@ INPUTS = {
                "params": {"group": "0", "domain": "primitives", "delete_non_selected": True}},
 }
 SKIP = {"blender_object", "input", "output"}
+# Native Blender tools are external integrations, exercised with real meshes in
+# test_blender_modelling_tools rather than multiplied through the NumPy fuzz sweep.
+from minihou.nodes.blender_modeling import TOOLS as NATIVE_TOOLS
+SKIP.update({spec[0] for spec in NATIVE_TOOLS} | {"blender_mesh"})
 NUMPY_WORDS = ("reshape", "zero-size", "non-negative integer", "broadcast", "out of bounds", "axis",
                "could not convert", "index")
 
