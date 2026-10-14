@@ -27,7 +27,7 @@ class PushPullTests(unittest.TestCase):
         box=run('box',size=[2,2,2])
         inset=run('inset',box,group='1',amount=.4)
         self.solid(inset)
-        area=(2-2*.4/np.sqrt(2))**2
+        area=(2-2*.4)**2
         for distance,expected,euler in ((-.4,8-area*.4,2),(-3,8-area*2,0)):
             g=run('pushpull',inset,group='extrudeFront',distance=distance)
             self.solid(g)

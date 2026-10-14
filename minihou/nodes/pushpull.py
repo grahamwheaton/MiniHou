@@ -98,11 +98,11 @@ def pushpull(geo, group, distance):
 
 @node("inset", inputs=["geo"], category="model", params=[Str("group", ""), Float("amount", .1, min=0, soft_max=1), Enum("mode", ["connected","individual"])])
 def inset(geo, group, amount, mode):
-    """Inset selected faces without height; amount follows PolyExtrude's radial inset convention."""
+    """Inset selected faces without height; amount is the perpendicular distance from the original boundary."""
     return polyextrude(geo,group,0.,amount,mode,False)
 
 
 @node("outset", inputs=["geo"], category="model", params=[Str("group", ""), Float("amount", .1, min=0, soft_max=1), Enum("mode", ["connected","individual"])])
 def outset(geo, group, amount, mode):
-    """Expand selected faces radially, without height. Does not resolve collisions with neighbours."""
+    """Offset selected planar boundaries outward, without height. Does not resolve collisions with neighbours."""
     return polyextrude(geo,group,0.,-amount,mode,False)

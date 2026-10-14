@@ -401,7 +401,7 @@ EXTRUDE_OUT = OutGroups(
 @node("polyextrude", inputs=["geo"], category="modify", params=[
     Str("group", "", doc="Primitives to extrude (pattern; empty: all)"),
     Float("distance", 0.5, soft_min=-2.0, soft_max=2.0, doc="Along the face normals (negative: inwards)"),
-    Float("inset", 0.0, soft_min=0.0, soft_max=1.0, doc="Move the front edges in towards each face's centre"),
+    Float("inset", 0.0, soft_min=0.0, soft_max=1.0, doc="Constant perpendicular boundary offset; inset regions must be planar"),
     Enum("mode", ["connected", "individual"], doc="connected: neighbouring faces extrude as one region (Houdini's "
                                                   "'keep shared edges together'); individual: every face on its own"),
     Bool("output_back", False, doc="Keep the original faces as well (a closed shell)"),
@@ -431,12 +431,11 @@ def polyextrude(geo, group, distance, inset, mode, output_back, **og):
         new_of_vertex[sv] = np0 + np.arange(len(sv))
         src_point = vp[sv]
         offset = fn_unit[pv[sv]] * distance
-        cen = topo.prim_centroids(geo)
         base = P[src_point]
         if inset:
-            to_c = cen[pv[sv]] - base
-            dist = np.linalg.norm(to_c, axis=1)
-            base = base + to_c * (np.minimum(inset / np.maximum(dist, 1e-12), 1.0))[:, None]
+            from .planar_offset import offset_selected
+            shifted = offset_selected(geo, sel, inset, individual=True)
+            base = shifted[sv]
         newP = base + offset
         boundary_v = sv                                    # every edge of every face gets a wall
     else:
@@ -454,17 +453,12 @@ def polyextrude(geo, group, distance, inset, mode, output_back, **og):
         np.minimum.at(mincos, np.searchsorted(src_point, vp[vsel]), np.maximum(cosang, 0.25))
         newP = P[src_point] + pn * (distance / mincos)[:, None]
         if inset:
-            e = topo.edges(geo)
-            cnt = np.bincount(e.of_vertex[vsel], minlength=len(e.points))
-            bnd_pt = np.zeros(np0, bool)
-            bnd_pt[e.points[cnt == 1].ravel()] = True
-            cen = topo.prim_centroids(geo)
-            to_c = topo.segment_sum(cen[pv[vsel]] - P[vp[vsel]], vp[vsel], np0)[src_point]
-            k = np.maximum(np.bincount(vp[vsel], minlength=np0)[src_point], 1)[:, None]
-            to_c = to_c / k
-            dist = np.linalg.norm(to_c, axis=1)
-            move = to_c * np.minimum(inset / np.maximum(dist, 1e-12), 1.0)[:, None]
-            newP = newP + np.where(bnd_pt[src_point][:, None], move, 0.0)
+            from .planar_offset import offset_selected
+            shifted = offset_selected(geo, sel, inset, individual=False)
+            # The planar offset contributes only its in-plane displacement.
+            representative = np.full(np0, -1, np.int64)
+            representative[vp[vsel]] = np.flatnonzero(vsel)
+            newP += shifted[representative[src_point]] - P[src_point]
         e = topo.edges(geo)
         cnt = np.bincount(e.of_vertex[vsel], minlength=len(e.points))
         boundary_v = np.flatnonzero(vsel & (cnt[e.of_vertex] == 1))
