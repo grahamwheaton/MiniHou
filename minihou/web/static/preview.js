@@ -1042,7 +1042,7 @@ window.MiniHouPreview = (() => {
           const p = toScreen(cam, ...c(...a)), q = toScreen(cam, ...c(...b));
           if (p && q) kids.push(svg("line", { x1: p[0], y1: p[1], x2: q[0], y2: q[1], stroke: "#8fb3d9", "stroke-width": 1, "stroke-dasharray": "3 3", opacity: 0.7, "pointer-events": "none", class: "pv-bounds" }));
         }
-        const fmt = (v) => (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(3)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+        const fmt = (v) => window.MiniUnits?MiniUnits.format(v):(Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(3)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
         for (const [axis, a, b] of [[0, c(0,0,0), c(1,0,0)], [1, c(0,0,0), c(0,1,0)], [2, c(0,0,0), c(0,0,1)]]) {
           const m = toScreen(cam, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
           if (!m) continue;
@@ -1158,7 +1158,7 @@ window.MiniHouPreview = (() => {
         const resolution=h.kind==='arrow'&&['amount','distance','thickness'].includes(h.param)&&!snapping?1000:1e5;
         v = Math.round(v * resolution) / resolution;
         if (v !== drag.value) { drag.value = v; if (api.onHandle) api.onHandle(h, v, false); }
-        feedback.textContent=`${h.label} · ${v.toFixed(3)}${snapping?' · SNAP '+interaction.element:''}${ev.shiftKey?' · PRECISE':''} · Esc cancels`;schedule();
+        feedback.textContent=`${h.label} · ${h.length&&window.MiniUnits?MiniUnits.format(v):v.toFixed(3)}${snapping?' · SNAP '+interaction.element:''}${ev.shiftKey?' · PRECISE':''} · Esc cancels`;schedule();
       };
       const finish = () => {
         if (finished) return;
@@ -1250,7 +1250,7 @@ window.MiniHouPreview = (() => {
         const snapped=snapPosition(IM.add(anchor,d),x,y,ev.ctrlKey,anchor,axis!==null&&!plane?axis:null,frame);
         d=sub(snapped,anchor);if(axis!==null&&plane)d=sub(d,IM.mul(frame[axis],dot(d,frame[axis])));
         drag.value=base.map((v,i)=>Math.round((v+dot(d,frame[i]))*1e5)/1e5);
-        api.onHandle(h,drag.value,false);feedback.textContent=`Move ${axis===null?'view plane':(plane?'plane excluding ':'axis ')+'XYZ'[axis]} · ${drag.value.map(v=>v.toFixed(3)).join(', ')} · Esc cancels`;schedule();
+        api.onHandle(h,drag.value,false);feedback.textContent=`Move ${axis===null?'view plane':(plane?'plane excluding ':'axis ')+'XYZ'[axis]} · ${drag.value.map(v=>window.MiniUnits?MiniUnits.format(v):v.toFixed(3)).join(', ')} · Esc cancels`;schedule();
       }
       function finish(){if(!base)return;window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);window.removeEventListener('pointercancel',cancel);window.removeEventListener('contextmenu',cancel,true);window.removeEventListener('keydown',key,true);
         window.removeEventListener('pointerdown',right,true);
@@ -1338,7 +1338,7 @@ window.MiniHouPreview = (() => {
     let fly=null, flyRAF=0, flySpeed=0;
     const flyKeys=new Set();
     function flyForward(){return [-Math.cos(view.pitch)*Math.cos(view.yaw),-Math.cos(view.pitch)*Math.sin(view.yaw),-Math.sin(view.pitch)];}
-    function flyHint(){feedback.hidden=false;feedback.textContent=`Fly ${flySpeed.toFixed(2)} units/s · WASD · Q/E down/up · Shift fast · Ctrl slow · wheel speed · Enter accept · Esc cancel`;}
+    function flyHint(){feedback.hidden=false;feedback.textContent=`Fly ${window.MiniUnits?MiniUnits.format(flySpeed):flySpeed.toFixed(2)+" units"}/s · WASD · Q/E down/up · Shift fast · Ctrl slow · wheel speed · Enter accept · Esc cancel`;}
     function endFly(cancel=false){
       if(!fly)return;const old=fly;fly=null;flyKeys.clear();cancelAnimationFrame(flyRAF);
       if(cancel)Object.assign(view,old.saved,{target:old.saved.target.slice()});
