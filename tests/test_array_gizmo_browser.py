@@ -21,10 +21,15 @@ class ArrayGizmoBrowserTests(unittest.TestCase):
     def setUp(self):
         fixture.EditorE2E.setUp(self)
         root=Path(fixture.ROOT)
-        folder=Path(self.dir)/'nodes';folder.mkdir()
+        folder=Path(self.dir)/'nodes'
+        staged=Path(self.dir)/'library-ready';staged.mkdir()
         for name in ('array_points.py','circle_array.json'):
-            shutil.copyfile(root/'nodes'/name,folder/name)
-        self.lib.refresh()
+            shutil.copyfile(root/'nodes'/name,staged/name)
+        # Publish both complete files at once. Use the session's cook lock for
+        # refresh, like its watcher does; raw lib.refresh() races Registry.batch.
+        staged.rename(folder)
+        self.s._poll_library()
+        self.assertTrue(fixture.until(lambda:'circle_array' in self.s.evaluator.registry))
         self.assertFalse([f for f in self.lib.status()['files'] if f['error']])
         self.page.reload()
         self.page.wait_for_selector('.node[data-id="out"]')
