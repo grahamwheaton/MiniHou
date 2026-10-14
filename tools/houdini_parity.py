@@ -42,7 +42,7 @@ MAP = {
     "copy_transform": "copyxform", "crease": "crease", "curve": "curve", "delaunay": "triangulate2d", "delete": "delete",
     "dissolve": "dissolve", "dissolve_edges": "dissolve", "divide": "divide", "edge_collapse": "edgecollapse", "edge_cusp": "edgecusp",
     "edge_flip": "edgeflip", "edge_group": "groupcreate", "edge_group_promote": "grouppromote", "exploded_view": "explodedview",
-    "facet": "facet", "fillet": "fillet", "for_each": "block_begin", "fuse": "fuse", "glue_cluster": "gluecluster",
+    "facet": "facet", "fillet": "fillet", "font": "font", "for_each": "block_begin", "fuse": "fuse", "glue_cluster": "gluecluster",
     "goal_collision": None, "goal_gravity": None, "goal_length": None, "goal_pin": None, "goal_solve": None, "goal_surface": None,
     "grid": "grid", "group_create": "groupcreate", "group_expand": "groupexpand", "group_promote": "grouppromote",
     "group_range": "grouprange", "heightfield_erode": "heightfield_erode", "helix": None, "image_file": None, "image_out": None,

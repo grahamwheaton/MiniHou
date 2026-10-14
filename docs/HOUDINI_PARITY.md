@@ -5,9 +5,9 @@ covered when MiniHou has a parameter of the same (or nearly the same) internal n
 read the lists as a checklist (the percentage is a floor: it counts differently named equivalents, and Houdini's many options for features MiniHou does not have, as missing).
 A `?` for Houdini's inputs means the page has no Inputs section (SideFX documents it only in the overview), so nothing could be compared automatically.
 
-121 nodes follow a Houdini SOP; 39 are MiniHou's own (no Houdini equivalent); 0 point at a page SideFX does not have.
+122 nodes follow a Houdini SOP; 39 are MiniHou's own (no Houdini equivalent); 0 point at a page SideFX does not have.
 
-Parameters: 291 of 2983 Houdini parameters covered (10%).
+Parameters: 311 of 3003 Houdini parameters covered (10%).
 
 ## Summary
 
@@ -56,6 +56,7 @@ Parameters: 291 of 2983 Houdini parameters covered (10%).
 | `exploded_view` | [Exploded View 2.0 geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/explodedview.html) | 1 / ? | 1 / 1 | 0 / 0 | 2 / 7 |  |
 | `facet` | [Facet geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/facet.html) | 1 / ? | 1 / 1 | 0 / 0 | 3 / 17 |  |
 | `fillet` | [Spline Fillet geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/fillet.html) | 1 / ? | 1 / 1 | 0 / 0 | 1 / 14 |  |
+| `font` | [Font geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/font.html) | 0 / ? | 1 / 1 | 0 / 0 | 20 / 20 | yes |
 | `for_each` | [Block Begin geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/block_begin.html) | 1 / 1 | 1 / 1 | 0 / 0 | 0 / 4 |  |
 | `fuse` | [Fuse 2.0 geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/fuse.html) | 2 / ? | 1 / 1 | 2 / 0 | 0 / 37 |  |
 | `glue_cluster` | [Glue Cluster geometry node](https://www.sidefx.com/docs/houdini/nodes/sop/gluecluster.html) | 1 / 1 | 1 / 1 | 6 / 0 | 0 / 12 |  |

@@ -11,7 +11,7 @@
   const TABS = [
     ["Create", "#6fbf73", [
       T("Box", "box"), T("Point", "point"), T("Sphere", "sphere"), T("Tube", "tube"), T("Torus", "torus"), T("Grid", "grid"), T("Null", "null"),
-      T("Line", "line"), T("Circle", "circle"), T("Bezier", "bezier", "curve"), T("Polyline", "curve"), T("Helix", "helix"), T("L-System", "lsystem"),
+      T("Line", "line"), T("Circle", "circle"), T("Bezier", "bezier", "curve"), T("Polyline", "curve"), T("Helix", "helix"), T("L-System", "lsystem"), T("Font", "font"),
       T("Lattice Grid", "lattice_grid", "lattice"), T("Metaball", "points_to_surface"), T("Blender Object", "blender_object", "file"), T("Blender Image", "blender_image", "file"), T("Image File", "image_file", "file"), T("USD Import", "usd_import", "file"),
       T("Host Mesh", "modifier_input", "host"), T("Object Input", "object_input", "host")]],
     ["Modify", "#5ea0e0", [
@@ -95,6 +95,7 @@
     curve: (c) => `<path d="M5,24 C10,2 22,30 27,8" fill="none" stroke="${NEUTRAL}" stroke-width="2.2"/><circle cx="5" cy="24" r="2.6" fill="${c}"/><circle cx="27" cy="8" r="2.6" fill="${c}"/>`,
     helix: (c) => `<path d="M8,26 C24,26 24,21 8,21 C24,21 24,16 8,16 C24,16 24,11 8,11 C24,11 24,6 8,6" fill="none" stroke="${c}" stroke-width="2.2"/>`,
     lsystem: (c) => `<path d="M16,28 V14 M16,22 L9,15 M16,18 L23,11 M9,15 L7,8 M23,11 L25,5 M16,14 L16,6" stroke="${c}" stroke-width="2.2" fill="none"/>`,
+    font: (c) => `<path d="M7,26 L16,6 L25,26 M10,19 H22" fill="none" stroke="${c}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>`,
     lattice: (c) => `<g stroke="${DARK}" stroke-width="1.2"><path d="M6,6h20v20H6z M6,16h20 M16,6v20"/></g><g fill="${c}"><circle cx="6" cy="6" r="2.2"/><circle cx="16" cy="6" r="2.2"/><circle cx="26" cy="6" r="2.2"/><circle cx="6" cy="16" r="2.2"/><circle cx="16" cy="16" r="2.2"/><circle cx="26" cy="16" r="2.2"/><circle cx="6" cy="26" r="2.2"/><circle cx="16" cy="26" r="2.2"/><circle cx="26" cy="26" r="2.2"/></g>`,
     points_to_surface: (c) => `<circle cx="12" cy="17" r="8" fill="${c}"/><circle cx="21" cy="13" r="6" fill="${MID}"/><path d="M14,14 Q17,12 18,15" stroke="${c}" stroke-width="5" fill="none"/>`,
     file: (c) => `<path d="M4,9 h8 l3,3 h13 v14 H4z" fill="${c}"/><path d="M4,13 h24 v13 H4z" fill="${NEUTRAL}" opacity=".85"/>`,

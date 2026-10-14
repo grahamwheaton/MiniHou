@@ -13,6 +13,8 @@ physics = ["mujoco==3.15.0"]
 accel = ["numba>=0.60", "scipy>=1.11"]
 # Only for running the node editor's browser tests (tests/test_editor_e2e.py).
 browser-tests = ["playwright>=1.56"]
+fonts = ["fonttools>=4.40"]
+imaging = ["pillow>=10.0"]
 
 [build-system]
 requires = ["setuptools>=61"]
