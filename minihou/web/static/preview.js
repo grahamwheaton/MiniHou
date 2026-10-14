@@ -1552,8 +1552,8 @@ window.MiniHouPreview = (() => {
         // An inserted transform becomes the preview node mid-drag. Keep the
         // camera and selection stable while its asynchronous result arrives.
         keepCamera = keepCamera || !!handleDrag;
-        const same = keepCamera && data.npoints === arrays.P.length / 3 && data.ntris === arrays.tri.length / 3 &&
-          data.nedges === arrays.edge.length / 2;                                       // same node, same topology: indices still mean the same
+        const same = keepIndices || (keepCamera && data.npoints === arrays.P.length / 3 && data.ntris === arrays.tri.length / 3 &&
+          data.nedges === arrays.edge.length / 2);                                      // same topology: indices still mean the same, so the selection stays
         upload(head, arrays, keepIndices);
         api.lastUpload = keepIndices ? "positions" : "all";
         if (!keepCamera && !fly) frameAll(); else schedule();

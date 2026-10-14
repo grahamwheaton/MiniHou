@@ -139,11 +139,17 @@ class BlenderSelectionIntegrationTests(unittest.TestCase):
         self.assertEqual(set(self.s.graph.nodes),{'b','o'})
         self.assertEqual(self.s.graph.nodes['o'].inputs,{'geo':'b'})
         self.page.wait_for_function("document.querySelector('#pv-node').innerText.includes('b')")
+        # #pv-node names the node as soon as its preview is requested; a click before the box's own geometry is installed is dropped
+        # with the cancelled tool's geometry (other point numbers). Wait for the box itself.
+        from minihou import Evaluator
+        npts=Evaluator().cook(self.s.graph,'b').npoints
+        # the cancelled tool finishes in the browser after the server: it reloads and reselects its source node, which resets the 3-D selection
+        self.page.wait_for_function("(n) => minihou.desktopCanClose() && minihou.S.sel.has('b') && minihou.preview.points === n && !minihou.preview.isDragging()", arg=npts)
         self.page.mouse.click(*self.view_xy('face',self.top))
         x,y=self.view_xy('face',self.top)
         self.page.mouse.move(x,y)
         self.page.keyboard.press(shortcut)
-        self.assertTrue(fixture.until(lambda:any(n.type==node_type for n in self.s.graph.nodes.values())))
+        self.assertTrue(fixture.until(lambda:any(n.type==node_type for n in self.s.graph.nodes.values())), self.editor_state())
         nid=next(i for i,n in self.s.graph.nodes.items() if n.type==node_type)
         self.page.mouse.move(x+25,y)
         self.assertTrue(fixture.until(lambda:self.s.graph.nodes[nid].params.get(param,0)>0))
@@ -153,6 +159,16 @@ class BlenderSelectionIntegrationTests(unittest.TestCase):
         self.assertEqual(self.s.graph.nodes[nid].inputs,{'geo':'b'})
         self.assertEqual(self.s.graph.nodes['o'].inputs,{'geo':nid})
         self.assertTrue(fixture.until(lambda:self.s.status()['ok']))
+
+    def editor_state(self):
+        """What the editor looked like when a modal tool did not start (for the failure message)."""
+        return self.page.evaluate("""() => {
+          const t = document.querySelector('#toast'), e = document.querySelector('#errorbar'), a = document.activeElement, c = document.querySelector('#pv-canvas').getBoundingClientRect();
+          const st = minihou.S.status || {};
+          return {toast: t ? [getComputedStyle(t).display, t.textContent] : null, faces: minihou.preview.selection ? (minihou.preview.selection().faces || []).length : null,
+                  focus: a ? a.tagName + '#' + a.id : null, errorbar: [e.className, e.textContent], canvas: [c.left, c.top, c.width, c.height],
+                  dragging: document.body.classList.contains('pv-dragging'), status: [st.ok, st.busy, st.error && st.error.message], node: minihou.preview.node};
+        }""") | {"graph": sorted(self.s.graph.nodes)}
 
     def test_i_inset_modal_cancel_and_confirm(self):
         self.exercise_modal_face_operation('i','inset','amount')

@@ -6,6 +6,20 @@ Build with `python tools/build_app.py --with-accel`. The default delivery is the
 
 The 3-D view is laid out like Blender's. A **header** runs along the top: the selection-mode chip, the **View**, **Select** and **Add** menus, the transform orientation and snapping, and on the right the source (display flag or the selected node), the spreadsheet, frame-selected, the display-panel toggle and maximise. **View** holds the front/right/top/back/left/bottom viewpoints, perspective/orthographic, Walk / Fly, frame all/selected and the spreadsheet; **Select** switches between orbit-only, points, edges, faces and objects (and paint / quick assign); **Add** opens the node menu and search. The **tools** run down the left (selection modes, then Move / Rotate / Scale when a selection or handle node is active, then Paint and Assign). The **display settings** are a collapsible panel on the right (Shading, Overlays, Detail with the cook proxy and Performance, Sketch & Measure); the ☰ button in the header hides it and the browser remembers whether it is open and which sections are folded.
 
+Changes from the design review (14 October):
+
+* **Header**: the transform/snapping settings are behind the ⚙ button and the spreadsheet is the ▦ button. When the pane is
+  narrower than about 760 px the mode chip and the node name hide (the left toolbar and the Parameters panel show them).
+  The **Ctrl-click path** choice (most direct or shortest) is in the **Select** menu.
+* The **quick-parameter strip** under the header appears only when the Parameters panel is hidden (▤) or the view is maximised,
+  since otherwise it repeats the panel.
+* Tool hints never run into the axis gizmo; in a narrow view only their title shows.
+* The timeline stays on one row; its slider shrinks first.
+* The editor's layout buttons (Graph / Split / 3D, swap, stack, panel) sit at the right of the menu bar: one header row instead of two.
+* Opening a graph frames it at a readable zoom (85% or more). A graph too big for that shows its end, where the display node is;
+  **Home** or **F** still fit everything.
+* Pressing **Escape** to stop a cook shows a neutral notice, not a red error.
+
 Navigation preferences now default to Blender: middle mouse orbits, Shift-middle pans, Ctrl-middle dollies. Geometry-depth orbit is optional. Houdini / MiniHou retains the earlier Alt-left navigation. Right-mouse WASD free flight remains available in both modes.
 
 Ctrl-R over the viewport starts Loop Cut. Hover a quad edge for a cut preview; wheel changes count. Click to start sliding, click again or Enter to commit. Right-click during slide commits centered cuts; Escape cancels without creating a node. Uses the existing PolySplit engine and inserts into the displayed stream. Multiple cuts are evenly spaced; only single cuts slide. Stops at non-quad faces; this is not arbitrary knife cutting or full Blender edge-slide parity.
