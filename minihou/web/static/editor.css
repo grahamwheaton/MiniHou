@@ -779,3 +779,9 @@ svg.ic .fl { fill: currentColor; fill-opacity: .35; }
 #preview .pv-display-strip { width: 156px; }
 #preview .pv-left-tools { width: 46px; }
 @media (max-width: 1100px) { #preview .pv-display-strip { width: 148px; } }
+
+#pv-left-tools [data-op], #pv-left-tools [data-select], #pv-left-tools [data-sketch] {font-size:9px;padding:4px 1px;white-space:normal;overflow-wrap:anywhere;}
+.pv-path-setting {display:block;font-size:11px;padding:4px;}
+#pv-proportional {font-size:11px;padding:4px;}
+#pv-proportional label {white-space:normal;display:block;}
+#pv-proportional input[type=number] {width:65px;}

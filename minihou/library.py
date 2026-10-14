@@ -131,12 +131,20 @@ class NodeLibrary:
     # -- scanning ----------------------------------------------------------------------------------
     def scan(self) -> List[Path]:
         """Python node files, then system graphs (*.json), per folder."""
-        out = []
-        for pattern in ("*.py", "*.json"):
-            for d in self.dirs:
-                if d.is_dir():
-                    out.extend(sorted(p for p in d.glob(pattern) if not p.name.startswith(("_", "."))))
-        return out
+        out, owners = [], {}
+        # Directory order defines precedence by file stem, across Python and JSON.
+        # Keep same-directory duplicates visible to the existing registration errors.
+        for d in self.dirs:
+            if d.is_dir():
+                for pattern in ("*.py", "*.json"):
+                    for p in sorted(d.glob(pattern)):
+                        if p.name.startswith(("_", ".")):
+                            continue
+                        owner = owners.setdefault(p.stem, d)
+                        if owner == d:
+                            out.append(p)
+        # All Python types must register before systems derive their dependencies.
+        return sorted(out, key=lambda p: (p.suffix != ".py", self.dirs.index(p.parent), p.name))
 
     def refresh(self) -> bool:
         """Load new or changed files, drop deleted ones. Returns True if node types or errors changed. Readers on other
@@ -361,6 +369,41 @@ def _system_type(name: str, path: Path, graph, text: str, registry: Registry):
             pname += "_"
         params.append(replace(inner, name=pname, label=e.label or e.name, default=graph.get_param(e.node, e.param), proxy=""))
         pmap[pname] = (e.node, e.param)
+    # Exposed declarative gizmos are metadata, not global providers. Forward only
+    # specs whose parameter references are all public; hidden/internal references
+    # cannot be resolved against an outer system's parameter dictionary.
+    forwarded_handles, forwarded_guides = [], []
+    inner_to_public = {(nid, param): public for public, (nid, param) in pmap.items()}
+    for nid in dict.fromkeys(nid for nid, _ in pmap.values()):
+        nt = registry.get(graph.nodes[nid].type)
+        names = {param: public for (node_id, param), public in inner_to_public.items() if node_id == nid}
+        def reference(value):
+            if isinstance(value, str) and value.startswith("@"):
+                if value[1:] not in names:
+                    raise KeyError(value)
+                return "@" + names[value[1:]]
+            return value
+        def condition(value):
+            terms = []
+            for term in filter(None, (part.strip() for part in value.split("&"))):
+                name = term.split("!=")[0].split("=")[0].strip()
+                if name not in names:
+                    raise KeyError(name)
+                terms.append(names[name] + term[len(name):])
+            return "&".join(terms)
+        for spec in nt.handles:
+            try:
+                forwarded_handles.append(replace(spec, param=names[spec.param],
+                    at=reference(spec.at), axis=reference(spec.axis), when=condition(spec.when),
+                    id=nid + "_" + spec.key()))
+            except KeyError:
+                continue
+        for spec in nt.guides:
+            try:
+                forwarded_guides.append(replace(spec, at=reference(spec.at), axis=reference(spec.axis),
+                    size=reference(spec.size), when=condition(spec.when), id=nid + "_" + spec.key()))
+            except KeyError:
+                continue
     used = sorted({inst.type for inst in graph.nodes.values()})
     dep = ",".join(f"{t}:{registry.get(t).code_hash or registry.get(t).version}" if t in registry else f"{t}:missing"
                    for t in used)
@@ -390,6 +433,7 @@ def _system_type(name: str, path: Path, graph, text: str, registry: Registry):
                                                          for t in used)
     return NodeType(name=name, fn=run, inputs=tuple(inputs), params=tuple(params), outputs=(Output("geo"),),
                     category="system", doc=doc, source=str(path), code_hash=code_hash,
+                    handles=tuple(forwarded_handles), guides=tuple(forwarded_guides),
                     key_extra=_time_key if timed else None)
 
 

@@ -38,7 +38,8 @@ def build(with_accel: bool, destination: Path = DIST) -> Path:
            "--add-data", f"{ROOT / 'minihou/assets'}{sep}minihou/assets",
            "--add-data", f"{ROOT / 'minihou' / 'web' / 'static'}{sep}minihou/web/static",
            "--add-data", f"{ROOT / 'blender_addon' / 'minihou_link'}{sep}blender_addon/minihou_link",
-           "--add-data", f"{ROOT / 'examples' / 'graphs'}{sep}examples/graphs"]
+           "--add-data", f"{ROOT / 'examples' / 'graphs'}{sep}examples/graphs",
+           "--add-data", f"{ROOT / 'nodes'}{sep}bundled_nodes"]
     for example in sorted((ROOT / "examples").glob("*.json")):
         cmd += ["--add-data", f"{example}{sep}examples/graphs"]
     for mod in ("bpy", "tkinter", "matplotlib", "PIL", "IPython", "pytest", "playwright"):
@@ -85,6 +86,10 @@ def smoke(folder: Path, timeout: float = 90.0) -> None:
         get = lambda p: urllib.request.urlopen(url.rstrip("/") + p, timeout=30).read()
         state = json.loads(get("/api/state"))
         assert state["nodes"], "no node types"
+        helpers = {"array", "circle_array", "grid_array", "array_between_two_positions",
+                   "array_linear_points", "array_circle_points", "array_grid_points", "array_between_points"}
+        node_names = {node["name"] for node in state["nodes"]}
+        assert helpers <= node_names, "bundled array library helpers missing: " + str(sorted(helpers - node_names))
         assert b"MiniHou" in get("/"), "editor page missing"
         zdata = get("/addon/minihou_link.zip")
         assert zdata[:2] == b"PK" and len(zdata) > 10_000, "add-on zip missing"

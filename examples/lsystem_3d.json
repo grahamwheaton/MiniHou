@@ -1,0 +1,62 @@
+{
+  "version": 1,
+  "doc": "Spatial L-system starter: pitch and 137.5-degree roll create a non-planar branching skeleton. Legacy implicit defaults are unchanged.",
+  "nodes": {
+    "grow": {
+      "type": "lsystem",
+      "params": {
+        "premise": "A",
+        "rules": "A=F[&A]/[&A]/[&A]A",
+        "generations": 4,
+        "separate_angles": true,
+        "yaw": 33,
+        "pitch": 42,
+        "roll": 137.5,
+        "step": 0.3,
+        "width": 0.03
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "out": {
+      "type": "output",
+      "inputs": {
+        "geo": "grow"
+      },
+      "pos": [
+        0,
+        180
+      ]
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Generations",
+      "node": "grow",
+      "param": "generations"
+    },
+    {
+      "name": "Yaw",
+      "node": "grow",
+      "param": "yaw"
+    },
+    {
+      "name": "Pitch",
+      "node": "grow",
+      "param": "pitch"
+    },
+    {
+      "name": "Roll",
+      "node": "grow",
+      "param": "roll"
+    },
+    {
+      "name": "Step",
+      "node": "grow",
+      "param": "step"
+    }
+  ]
+}

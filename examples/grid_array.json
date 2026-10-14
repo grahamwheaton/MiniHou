@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "doc": "Grid Array: copies on an XY grid with signed spacing and an origin.",
+  "nodes": {
+    "source": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.3,
+          0.3,
+          0.3
+        ]
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "array": {
+      "type": "grid_array",
+      "inputs": {
+        "source": "source"
+      },
+      "pos": [
+        0,
+        130
+      ]
+    },
+    "out": {
+      "type": "output",
+      "inputs": {
+        "geo": "array"
+      },
+      "pos": [
+        0,
+        260
+      ]
+    }
+  },
+  "display": "out"
+}

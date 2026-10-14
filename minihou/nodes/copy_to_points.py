@@ -1,6 +1,6 @@
 import numpy as np
 
-from .. import accel
+from .. import accel, user_preferences
 from ..geometry import Geometry, Topology
 from ..sdk import Bool, Input, node
 from ._util import normalize_rows, rotation_from_z_to
@@ -74,7 +74,8 @@ def _copy_positions_numpy(src, tP, N, orient, scale, use_scale, T, S):
     return (world + tP[:, None, :]).reshape(T * S, 3)
 
 
-@node("copy_to_points", inputs=[Input("source"), Input("points")], category="generate", params=[
+@node("copy_to_points", inputs=[Input("source"), Input("points")], category="generate", version=2,
+      key_extra=lambda params: str(user_preferences.copy_limit_bytes()), params=[
     Bool("orient", True, doc="Rotate each copy by the target point's orient (quaternion), rot (Euler, from the "
                              "instance node), or N (+Z) and up (+Y)"),
     Bool("use_pscale", True, doc="Scale each copy by the target point's pscale (if present); 'scale' (a vector) "
@@ -95,9 +96,11 @@ def copy_to_points(source, points, orient, use_pscale):
         source_bytes += sum(array.nbytes for _, array in domain.items())
     estimate = T * source_bytes + T * S * 72
     estimate += S * sum(array.nbytes for name, array in points.point.items() if name not in _TRANSFORM_ATTRS)
-    if estimate > 256 * 1024**2:
+    limit = user_preferences.copy_limit_bytes()
+    if estimate > limit:
         raise ValueError(f"Copy to Points would require approximately {estimate / 1024**3:.2f} GiB for {T:,} copies; "
-                         "the safety limit is 256 MiB. Reduce the point count or use Instance instead.")
+                         f"the safety limit is {limit // 1024**2} MiB. Reduce the point count, use Instance, "
+                         "or adjust the user Copy memory limit in Preferences.")
     nv, npr = source.nvertices, source.nprims
     if T == 0 or S == 0:
         out = Geometry.from_arrays(np.zeros((0, 3), np.float32))

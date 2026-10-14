@@ -1,11 +1,11 @@
 import numpy as np
 
 from .. import groups
-from ..sdk import Bool, Float, Handle, Int, Str, Vec3, node
+from ..sdk import Bool, Enum, Float, Handle, Int, Str, Vec3, node
 from ._util import euler_xyz_matrix, normalize_rows
 
 
-@node("transform", inputs=["geo"], category="modify", params=[
+@node("transform", inputs=["geo"], category="modify", version=2, params=[
     Vec3("translate", (0.0, 0.0, 0.0)),
     Vec3("rotate", (0.0, 0.0, 0.0), doc="Euler XYZ in degrees (X applied first)"),
     Vec3("scale", (1.0, 1.0, 1.0)),
@@ -14,13 +14,42 @@ from ._util import euler_xyz_matrix, normalize_rows
     Vec3("axis_rotation", (0.0, 0.0, 0.0), doc="Transform coordinate frame: Euler XYZ degrees. Translation, rotation and scale use these axes"),
     Str("group", "", doc="Only move these points: group names, ^exclusions, numbers/ranges or '@P.z > 0' (a primitive "
                          "group moves its points). Empty: all"),
+    Bool("proportional_enabled", False),
+    Float("proportional_radius", 1.0, min=1e-8),
+    Enum("proportional_falloff", ['smooth', 'sphere', 'root', 'sharp', 'linear', 'constant', 'random']),
+    Bool("proportional_connected", False, doc="Distance along mesh/curve edges"),
+    Bool("proportional_projected", False, doc="Ignore view-depth distance; connected mode takes precedence"),
+    Vec3("proportional_view_direction", (0.0, 0.0, 1.0)),
 ])
-def transform(geo, translate, rotate, scale, uniform_scale, pivot, group="", axis_rotation=(0.0, 0.0, 0.0)):
+def transform(geo, translate, rotate, scale, uniform_scale, pivot, group="", axis_rotation=(0.0, 0.0, 0.0),
+              proportional_enabled=False, proportional_radius=1.0, proportional_falloff='smooth',
+              proportional_connected=False, proportional_projected=False, proportional_view_direction=(0, 0, 1)):
     """Scale, then rotate, then translate about ``pivot``. Also rotates ``N`` if present."""
     s = np.asarray(scale, np.float64) * uniform_scale
     R = euler_xyz_matrix(rotate)
     pv = np.asarray(pivot, np.float64)
     B = euler_xyz_matrix(axis_rotation)
+    if proportional_enabled:
+        from ..proportional import selection_weights, weighted_rotate
+        selected = groups.mask(geo, 'point', group)
+        selected = np.ones(geo.npoints, bool) if selected is None else selected
+        weights = selection_weights(geo, selected, proportional_radius, proportional_falloff,
+                                    proportional_connected, proportional_projected, proportional_view_direction)
+        out = geo.copy()
+        local_scale = 1.0 + weights[:, None]*(s-1.0)
+        local = (geo.P.astype(float)-pv) @ B
+        result = weighted_rotate(local*local_scale, rotate, weights) @ B.T + pv
+        result += weights[:, None]*(B @ np.asarray(translate))
+        active = weights > 0
+        result[~active] = geo.P[~active]
+        out.point['P'] = result.astype(np.float32)
+        if 'N' in geo.point:
+            safe = np.where(np.abs(local_scale) < 1e-12, 1.0, local_scale)
+            normals = weighted_rotate((geo.point['N'] @ B)/safe, rotate, weights) @ B.T
+            normals = normalize_rows(normals).astype(np.float32)
+            normals[~active] = geo.point['N'][~active]
+            out.point['N'] = normals
+        return out
     M = B @ (R * s[None, :]) @ B.T             # scale/rotate in the chosen coordinate frame
     out = geo.copy()
     P = geo.P.astype(np.float32, copy=False)
