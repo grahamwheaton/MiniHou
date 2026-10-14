@@ -1504,7 +1504,7 @@
     async start(kind){
       const mapping={bevel:'polybevel',inset:'inset',extrude:'polyextrude',pushpull:'pushpull'},type=mapping[kind],action=(SELECTION_ACTIONS[pvSelection.mode]||[]).find(a=>a.type===type);
       if(!action||!(pvSelection[SEL_KEY[pvSelection.mode]]||[]).length)throw Error(kind==='bevel'?'Select edges to bevel.':'Select faces for this tool.');
-      const gesture='model-'+crypto.randomUUID(),documentId=S.documentId,source=pvNode,params=action.params(pvSelection),param=kind==='inset'?'amount':'distance';params[param]=0;
+      const gesture='model-'+crypto.randomUUID(),documentId=S.documentId,source=nodeOf(pvNode)?pvNode:previewTarget(),params=action.params(pvSelection),param=kind==='inset'?'amount':'distance';params[param]=0;
       const r=await edit([{op:'insert',layout:'vertical',after:source,type,params}],{documentId,gesture});if(!r)throw Error('Could not create tool');const id=r.results[0].id;pvKeepCameraNode=id;pv.clearSelection();select([id]);
       return {id,gesture,documentId,source,param,value:0,divisions:1,scale:Math.max(.00001,(pv.bounds?.()?.radius||1)/200)};
     },
