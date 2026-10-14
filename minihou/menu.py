@@ -14,7 +14,7 @@ LIBRARY = "Library"
 # (group, what it is for, nodes)
 GROUPS: List[Tuple[str, str, List[str]]] = [
     ("Create", "Shapes and curves from nothing, and the doors into a graph",
-     ["box", "sphere", "grid", "tube", "torus", "circle", "line", "bezier", "curve", "helix", "lsystem", "lattice_grid",
+     ["box", "point", "sphere", "grid", "tube", "torus", "circle", "line", "bezier", "curve", "helix", "lsystem", "lattice_grid",
       "blender_object", "blender_image", "image_file", "usd_import", "modifier_input", "object_input"]),
     ("Polygon Modelling", "Build and edit polygon surfaces",
      ["polyextrude", "pushpull", "inset", "outset", "polybevel", "polysplit", "knife", "polyfill", "polybridge", "polyexpand2d", "solidify", "subdivide", "mirror", "boolean",

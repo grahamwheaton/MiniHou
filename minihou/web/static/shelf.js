@@ -10,7 +10,7 @@
   // [tab, colour, tools]. Every built-in node is on at least one tab (tests/test_shelf.py checks).
   const TABS = [
     ["Create", "#6fbf73", [
-      T("Box", "box"), T("Sphere", "sphere"), T("Tube", "tube"), T("Torus", "torus"), T("Grid", "grid"), T("Null", "null"),
+      T("Box", "box"), T("Point", "point"), T("Sphere", "sphere"), T("Tube", "tube"), T("Torus", "torus"), T("Grid", "grid"), T("Null", "null"),
       T("Line", "line"), T("Circle", "circle"), T("Bezier", "bezier", "curve"), T("Polyline", "curve"), T("Helix", "helix"), T("L-System", "lsystem"),
       T("Lattice Grid", "lattice_grid", "lattice"), T("Metaball", "points_to_surface"), T("Blender Object", "blender_object", "file"), T("Blender Image", "blender_image", "file"), T("Image File", "image_file", "file"), T("USD Import", "usd_import", "file"),
       T("Host Mesh", "modifier_input", "host"), T("Object Input", "object_input", "host")]],
@@ -83,6 +83,7 @@
   // ---- icons: small drawings in a 32 x 32 box; tools without one get a tinted chip with their initials
   const NEUTRAL = "#cfd6dd", DARK = "#7d8791", MID = "#a8b1ba";
   const ICONS = {
+    point: (c) => `<path d="M16,3v7M16,22v7M3,16h7M22,16h7" stroke="${NEUTRAL}" stroke-width="1.3"/><circle cx="16" cy="16" r="4" fill="${c}"/>`,
     box: (c) => `<polygon points="16,4 28,10 16,16 4,10" fill="${NEUTRAL}"/><polygon points="4,10 16,16 16,29 4,23" fill="${MID}"/><polygon points="28,10 16,16 16,29 28,23" fill="${DARK}"/>`,
     sphere: (c) => `<defs><radialGradient id="g-sph" cx="35%" cy="30%" r="75%"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="${DARK}"/></radialGradient></defs><circle cx="16" cy="16" r="12" fill="url(#g-sph)"/>`,
     tube: (c) => `<rect x="8" y="8" width="16" height="16" fill="${MID}"/><ellipse cx="16" cy="24" rx="8" ry="3.5" fill="${DARK}"/><ellipse cx="16" cy="8" rx="8" ry="3.5" fill="${NEUTRAL}"/>`,

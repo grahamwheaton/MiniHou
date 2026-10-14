@@ -8,6 +8,14 @@ from . import _build as B
 from ._util import euler_xyz_matrix
 
 
+@node("point", category="source", params=[
+    Vec3("center", (0.0, 0.0, 0.0), label="Position", doc="Position of the single point in model coordinates"),
+], handles=[Handle("center", axis=axis, at="@center", comp=i, tool="move") for i, axis in enumerate("xyz")])
+def point_node(center=(0.0, 0.0, 0.0)):
+    """Create one editable point, with no edges or faces. Useful as a copy target or graph seed."""
+    return Geometry.from_arrays(np.asarray([center], dtype=np.float32))
+
+
 def fuse_points(geo: Geometry, distance: float, counts_out: list = None) -> Geometry:
     """Weld points closer than ``distance`` (grid-snapped: points in the same cell of size ``distance`` merge).
     The first point of each cluster is kept with its attributes; primitives are re-pointed. Degenerate repeated

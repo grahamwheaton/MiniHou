@@ -13,7 +13,9 @@
       }
       a.forEach((q,i)=>line(q,a[(i+1)%a.length])); return a;
     };
-    if(type==='box') {
+    if(type==='point') {
+      for(let k=0;k<3;k++){const a=[0,0,0],b=[0,0,0];a[k]=-.05;b[k]=.05;line(a,b);}
+    } else if(type==='box') {
       const s=p.size||[1,1,1], a=[];
       for(let i=0;i<8;i++)a.push(s.map((v,k)=>v*((i>>k)&1?0.5:-0.5)));
       for(let i=0;i<8;i++)for(let k=0;k<3;k++)if(!(i&(1<<k)))line(a[i],a[i|(1<<k)]);
