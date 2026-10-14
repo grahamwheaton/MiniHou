@@ -143,7 +143,7 @@ class BlenderSelectionIntegrationTests(unittest.TestCase):
         x,y=self.view_xy('face',self.top)
         self.page.mouse.move(x,y)
         self.page.keyboard.press(shortcut)
-        self.assertTrue(fixture.until(lambda:any(n.type==node_type for n in self.s.graph.nodes.values())))
+        self.assertTrue(fixture.until(lambda:any(n.type==node_type for n in self.s.graph.nodes.values())), self.editor_state())
         nid=next(i for i,n in self.s.graph.nodes.items() if n.type==node_type)
         self.page.mouse.move(x+25,y)
         self.assertTrue(fixture.until(lambda:self.s.graph.nodes[nid].params.get(param,0)>0))
@@ -153,6 +153,16 @@ class BlenderSelectionIntegrationTests(unittest.TestCase):
         self.assertEqual(self.s.graph.nodes[nid].inputs,{'geo':'b'})
         self.assertEqual(self.s.graph.nodes['o'].inputs,{'geo':nid})
         self.assertTrue(fixture.until(lambda:self.s.status()['ok']))
+
+    def editor_state(self):
+        """What the editor looked like when a modal tool did not start (for the failure message)."""
+        return self.page.evaluate("""() => {
+          const t = document.querySelector('#toast'), e = document.querySelector('#errorbar'), a = document.activeElement, c = document.querySelector('#pv-canvas').getBoundingClientRect();
+          const st = minihou.S.status || {};
+          return {toast: t ? [getComputedStyle(t).display, t.textContent] : null, faces: minihou.preview.selection ? (minihou.preview.selection().faces || []).length : null,
+                  focus: a ? a.tagName + '#' + a.id : null, errorbar: [e.className, e.textContent], canvas: [c.left, c.top, c.width, c.height],
+                  dragging: document.body.classList.contains('pv-dragging'), status: [st.ok, st.busy, st.error && st.error.message], node: minihou.preview.node};
+        }""") | {"graph": sorted(self.s.graph.nodes)}
 
     def test_i_inset_modal_cancel_and_confirm(self):
         self.exercise_modal_face_operation('i','inset','amount')
