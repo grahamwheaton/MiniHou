@@ -185,13 +185,23 @@ class ViewportFixesTests(unittest.TestCase):
         self.hover();self.page.keyboard.press('s');self.page.mouse.move(750,320)
         self.page.wait_for_function("Object.values(minihou.S.graph.nodes).some(n=>n.type==='transform')")
         self.page.wait_for_function("minihou.S.graph.nodes[minihou.preview.primaryNode]?.type==='transform' && minihou.preview.previewObjects.length===1")
+        # The graph event and restored geometry can arrive before the cancel response
+        # restores the saved active object. Exercise that ordering deliberately.
+        self.page.evaluate("""()=>{const original=window.fetch;window.fetch=async(...args)=>{
+            const response=await original(...args);
+            if(args[0]==='/api/gesture_cancel')await new Promise(resolve=>window.releaseObjectCancel=resolve);
+            return response;
+        };}""")
         self.page.keyboard.press('Escape')
+        self.page.wait_for_function("typeof window.releaseObjectCancel === 'function'")
         self.assertTrue(until(lambda:self.s._gesture is None))
         self.page.wait_for_function("!Object.values(minihou.S.graph.nodes).some(n=>n.type==='transform')")
         np.testing.assert_allclose(self.s.preview('b',templates=True)['geo'].P,before)
         self.page.wait_for_function("minihou.preview.primaryNode==='o' && minihou.preview.previewObjects.length===3")
         self.page.wait_for_function('minihou.preview.selectionInfo()?.points.length===3')
         self.assertEqual(self.page.evaluate('minihou.preview.selectionInfo().points'),[9,10,11])
+        self.page.evaluate('window.releaseObjectCancel()')
+        self.page.wait_for_function("minihou.preview.activeObject === 'l'")
         self.assertEqual(self.page.evaluate('minihou.preview.activeObject'),'l')
         self.page.click('#preview [data-mode="edge"]');self.hover();self.page.keyboard.press('a')
         self.assertEqual(self.selection()['edges'],[[9,10],[10,11]])

@@ -248,7 +248,8 @@ class EditorE2E(unittest.TestCase):
         self.page.mouse.move(*xy)
         eyes=[self.page.evaluate('minihou.preview.navigationState().eye')]
         for _ in range(4):
-            self.page.mouse.wheel(0,-100);self.page.wait_for_timeout(60)
+            self.page.mouse.wheel(0,-100)
+            self.page.wait_for_function("before => Math.hypot(...minihou.preview.navigationState().eye.map((v,i)=>v-before[i])) > 1e-8", arg=eyes[-1])
             eyes.append(self.page.evaluate('minihou.preview.navigationState().eye'))
         distances=[math.dist(a,b) for a,b in zip(eyes,eyes[1:])]
         self.assertGreater(distances[0],0)
@@ -488,8 +489,22 @@ class EditorE2E(unittest.TestCase):
         self.page.mouse.up()
         self.assertTrue(until(lambda:self.s.graph.nodes['o'].inputs.get('geo')=='loose'))
         self.assertEqual(self.s.graph.nodes['loose'].inputs['geo'],'h')
+        self.assertNotIn('crease_source',self.s.graph.nodes['loose'].inputs)
         self.page.keyboard.press('Control+z')
         self.assertTrue(until(lambda:self.s.graph.to_dict()==before))
+
+    def test_network_interaction_refuses_insertion_with_two_required_inputs(self):
+        self.network_stream_scene()
+        self.s.edit([{'op':'add','id':'ambiguous','type':'attribute_transfer','pos':[320,300]}])
+        self.page.wait_for_selector('.node[data-id="ambiguous"]')
+        before=self.s.graph.to_dict()
+        target=self.page.locator('path.hit[data-from="h"][data-to="o"]').evaluate('(p)=>{const q=p.getPointAtLength(p.getTotalLength()/2).matrixTransform(p.getScreenCTM());return [q.x,q.y]}')
+        title=self.node('ambiguous').locator('.title').bounding_box()
+        self.page.mouse.move(title['x']+10,title['y']+5);self.page.mouse.down()
+        self.page.mouse.move(*target,steps=8)
+        self.assertEqual(self.page.locator('path.insert-target').count(),0)
+        self.page.keyboard.press('Escape');self.page.mouse.up()
+        self.assertEqual(self.s.graph.to_dict(),before)
 
     def test_network_interaction_cancel_wire_insertion(self):
         self.network_stream_scene()
@@ -848,7 +863,7 @@ class EditorE2E(unittest.TestCase):
     def test_delayed_slider_edit_is_recovered_after_external_graph_switch(self):
         import json
         target = os.path.join(self.dir, "other.json")
-        Graph.load(self.path).save(target)  # same node IDs: a stale edit could silently hit the wrong graph
+        Graph.load(self.path, check=False).save(target)  # Preserve editable loose nodes and identical IDs in both documents.
         self.node("hills").locator(".title").click()
         held = []
         self.page.route("**/api/edit", lambda route: held.append(route))
@@ -873,7 +888,7 @@ class EditorE2E(unittest.TestCase):
         self.errors[:] = [e for e in self.errors if "400 (Bad Request)" not in e]
 
     def test_renders_graph_status_and_inspector(self):
-        self.assertEqual(self.page.locator(".node").count(), 9)
+        self.assertEqual(set(self.page.locator('.node').evaluate_all('els=>els.map(e=>e.dataset.id)')),set(self.s.graph.nodes))
         self.page.wait_for_function("document.querySelector('#cook-status').classList.contains('ok')")
         self.assertIn("pts", self.page.inner_text("#cook-status"))
         self.assertIn("display", self.node("out").get_attribute("class"))
@@ -2338,7 +2353,7 @@ class EditorE2E(unittest.TestCase):
         self.s.edit([{"op": "replace", "graph": graph}])
         self.page.wait_for_selector('.node[data-id="s"]')
         self.node("s").locator(".title").click()
-        self.page.wait_for_function("minihou.preview.handleTips().length === 1")
+        self.page.wait_for_function("minihou.preview.handleTips().some(h=>h.id==='radius')")
         self.drag_handle("radius", -400)                                                    # far inwards: the radius cannot go negative
         self.assertTrue(until(lambda: self.s.graph.nodes["s"].params.get("radius", 0.5) < 0.5))
         self.assertGreaterEqual(self.s.graph.nodes["s"].params["radius"], 0.0)

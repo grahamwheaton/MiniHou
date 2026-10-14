@@ -47,6 +47,8 @@ body.has-error #main { bottom: 30px; }
 .netbox { position: absolute; border: 1px solid var(--bc); border-radius: 8px; background: color-mix(in srgb, var(--bc) 14%, transparent); pointer-events: none; }
 .netbox .hdr { position: absolute; left: 0; top: 0; right: 0; height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 8px;
   background: color-mix(in srgb, var(--bc) 45%, transparent); border-radius: 7px 7px 0 0; cursor: grab; pointer-events: auto; user-select: none; }
+/* Frame controls stay reachable where incoming wires cross their header/corner. */
+.netbox .hdr, .netbox .grip { z-index: 1; }
 .netbox .hdr .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; font-size: 12px; }
 .netbox .hdr .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--bc); border: 1px solid #fff6; cursor: pointer; }
 .netbox .hdr .x { cursor: pointer; color: var(--muted); padding: 0 3px; }

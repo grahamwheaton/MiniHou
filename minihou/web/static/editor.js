@@ -2552,10 +2552,12 @@
       const bounds=path.getBoundingClientRect();if(e.clientX<bounds.left-22||e.clientX>bounds.right+22||e.clientY<bounds.top-22||e.clientY>bounds.bottom+22)continue;
       const source=typeOf(path.dataset.from),dest=typeOf(path.dataset.to).inputs.find(p=>p.name===path.dataset.port);
       const compatible=model.inputs.filter(p=>p.type===source.outputs?.[0]?.type);
-      if(compatible.length!==1||model.inputs.some(p=>p!==compatible[0]&&!p.optional)||model.outputs?.length!==1||model.outputs[0].type!==dest?.type)continue;
+      const required=compatible.filter(p=>!p.optional);
+      const input=required.length===1?required[0]:compatible.length===1?compatible[0]:null;
+      if(!input||model.inputs.some(p=>p!==input&&!p.optional)||model.outputs?.length!==1||model.outputs[0].type!==dest?.type)continue;
       const matrix=path.getScreenCTM(),len=path.getTotalLength();let best=Infinity;
       for(let k=0;k<=24;k++){const q=path.getPointAtLength(len*k/24).matrixTransform(matrix);best=Math.min(best,Math.hypot(q.x-e.clientX,q.y-e.clientY));}
-      if(best<22)candidates.push({from:path.dataset.from,to:path.dataset.to,port:path.dataset.port,index:Number(path.dataset.index),input:compatible[0].name,distance:best});
+      if(best<22)candidates.push({from:path.dataset.from,to:path.dataset.to,port:path.dataset.port,index:Number(path.dataset.index),input:input.name,distance:best});
     }
     candidates.sort((a,b)=>a.distance-b.distance);
     if(candidates.length>1&&candidates[1].distance-candidates[0].distance<5)return null;

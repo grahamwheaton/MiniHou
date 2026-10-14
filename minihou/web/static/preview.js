@@ -1488,12 +1488,15 @@ window.MiniHouPreview = (() => {
     };
     canvas.addEventListener("pointerup", endDrag); canvas.addEventListener("pointercancel", endDrag);
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
-    canvas.addEventListener("wheel", (e) => { e.preventDefault(); if(fly){flySpeed=Math.max(.001,Math.min(100000,flySpeed*Math.exp(-e.deltaY*.0015)));flyHint();return;} const cam=camera(),r=canvas.getBoundingClientRect(),direction=rayAt(cam,e.clientX-r.left,e.clientY-r.top),hit=raw?raycast(cam.eye,direction):null;
+    const navigationWheel = (e) => { e.preventDefault(); if(fly){flySpeed=Math.max(.001,Math.min(100000,flySpeed*Math.exp(-e.deltaY*.0015)));flyHint();return;} const cam=camera(),r=canvas.getBoundingClientRect(),direction=rayAt(cam,e.clientX-r.left,e.clientY-r.top),hit=raw?raycast(cam.eye,direction):null;
       const anchor=hit?IM.add(cam.eye,IM.mul(direction,hit.t)):planePoint(e.clientX-r.left,e.clientY-r.top,view.target);
       const distance=Math.max(.0001,view.dist*Math.exp(Math.max(-500,Math.min(500,e.deltaY))*.0012)),factor=distance/view.dist;
       if(anchor)for(let i=0;i<3;i++)view.target[i]=anchor[i]+(view.target[i]-anchor[i])*factor;
       view.dist=distance;
-      schedule(); }, { passive: false });
+      schedule(); };
+    canvas.addEventListener("wheel", navigationWheel, { passive: false });
+    // Source handles are sibling SVG hit areas, so their wheel events do not reach the canvas.
+    hsvg.addEventListener("wheel", navigationWheel, { passive: false });
     canvas.addEventListener("dblclick", (e) => { if (sel.mode === "view") frameAll(); });
     if (window.ResizeObserver) new ResizeObserver(schedule).observe(canvas);
 

@@ -47,6 +47,22 @@ class ViewportFollowups(unittest.TestCase):
             projected=self.page.evaluate('(p)=>minihou.preview.project(p)',anchor)
             self.assertAlmostEqual(projected[0],x,delta=1)
             self.assertAlmostEqual(projected[1],y,delta=1)
+    def test_wheel_over_source_handle_dollies_the_camera(self):
+        self.box_scene()
+        self.page.wait_for_function('minihou.preview.handleTips().length > 0')
+        target = self.page.evaluate("""()=>{
+            const r=document.querySelector('#pv-canvas').getBoundingClientRect();
+            return minihou.preview.handleTips().map(t=>({x:r.left+t.tip[0],y:r.top+t.tip[1]}))
+                .find(p=>document.elementFromPoint(p.x,p.y)?.closest('.pv-handle'));
+        }""")
+        self.assertIsNotNone(target, 'a source handle must have a visible hit area')
+        self.page.mouse.move(target['x'], target['y'])
+        self.assertTrue(self.page.evaluate("([x,y])=>!!document.elementFromPoint(x,y)?.closest('.pv-handle')", [target['x'], target['y']]))
+        before = self.page.evaluate('minihou.preview.view.dist')
+        self.page.mouse.wheel(0, -100)
+        self.page.wait_for_function('before => minihou.preview.view.dist < before', arg=before)
+        self.assertLess(self.page.evaluate('minihou.preview.view.dist'), before)
+
     def test_memory_and_proxy_preferences_persist_from_ui(self):
         import json, os
         self.page.locator('#preferences-btn').click()
