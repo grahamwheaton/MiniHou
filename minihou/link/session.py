@@ -46,8 +46,8 @@ UNDO_LIMIT = 200
 MERGE_SECONDS = 1.5          # consecutive edits of the same thing within this window form one undo step
 REFINE_DELAY = 0.3           # auto proxy: how long edits must pause before the full cook starts
 
-NEW_GRAPH = {"version": 1, "nodes": {"grid1": {"type": "grid", "pos": [0, 0]},
-                                     "output1": {"type": "output", "inputs": {"geo": "grid1"}, "pos": [0, 110]}},
+NEW_GRAPH = {"version": 1, "nodes": {"box1": {"type": "box", "pos": [0, 0]},
+                                     "output1": {"type": "output", "inputs": {"geo": "box1"}, "pos": [0, 150]}},
              "display": "output1"}
 
 

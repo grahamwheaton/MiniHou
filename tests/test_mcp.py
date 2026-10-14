@@ -205,7 +205,7 @@ class ToolTests(unittest.TestCase):
         text, err = call(self.m, "open_graph", path=f"nodes/{name}.json", create=True)
         self.assertFalse(err, text)
         text, err = call(self.m, "edit_graph", ops=[
-            {"op": "add", "type": "input", "id": "ground", "inputs": {"preview": "grid1"}, "params": {"name": "ground"}},
+            {"op": "add", "type": "input", "id": "ground", "inputs": {"preview": "box1"}, "params": {"name": "ground"}},
             {"op": "add", "type": "scatter", "id": "spots", "inputs": {"geo": "ground"}, "params": {"count": 5}},
             {"op": "add", "type": "box", "id": "pillar", "params": {"size": [0.2, 0.2, 2]}},
             {"op": "add", "type": "copy_to_points", "id": "pillars", "inputs": {"source": "pillar", "points": "spots"},
@@ -313,14 +313,14 @@ class StartEngineTests(unittest.TestCase):
             self.assertIn("Started the MiniHou engine", text)
             self.assertIn("Engine running", text)
             self.assertIn("Cook OK", text)
-            text, err = call(m, "edit_graph", ops=[{"op": "set", "id": "grid1", "params": {"rows": 3}}])
+            text, err = call(m, "edit_graph", ops=[{"op": "set", "id": "box1", "params": {"size": [3,3,3]}}])
             self.assertFalse(err, text)
         finally:
             pid = EngineClient(f"http://127.0.0.1:{port}").get("/api/state")["engine"]["pid"]
             os.kill(pid, signal.SIGTERM)
             m.engine_process.wait(15)
         with open(os.path.join(ws, "graphs", "fresh.json"), encoding="utf-8") as f:
-            self.assertEqual(json.load(f)["nodes"]["grid1"]["params"]["rows"], 3)
+            self.assertEqual(json.load(f)["nodes"]["box1"]["params"]["size"], [3,3,3])
 
 
 if __name__ == "__main__":

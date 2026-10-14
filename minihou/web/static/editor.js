@@ -186,6 +186,12 @@
   let desktopPendingEdits = 0;
   async function edit(ops, context = { path: S.path, documentId: S.documentId }) {
     ops=ops.map(op=>op.op==='add'&&op.type==='lsystem'?{...op,params:{premise:'A',rules:'A=F[&A]/[&A]/[&A]A',generations:4,separate_angles:true,yaw:33,pitch:42,roll:137.5,step:.3,width:.03,...op.params}}:op);
+    // Bootstrap only an empty editor graph, keeping source + output in one undo step.
+    if(!Object.keys(S.graph.nodes).length&&ops[0]?.op==='add'&&S.types[ops[0].type]?.category==='source'&&!ops.some(op=>op.type==='output')){
+      const tail=ops.filter(op=>op.op==='add').at(-1),ids=new Set(ops.map(op=>op.id));let output='output1',i=1;
+      while(ids.has(output))output='output'+(++i);
+      const at=tail.pos||[0,0];ops=[...ops,{op:'add',id:output,type:'output',inputs:{geo:tail.id},pos:[at[0],at[1]+150],display:true}];
+    }
     desktopPendingEdits++;
     try {
       const r = await api("/api/edit", { ops, origin: "editor", document_id: context.documentId, gesture:context.gesture });
