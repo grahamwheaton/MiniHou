@@ -84,5 +84,12 @@
   },
   "display": "move",
   "version": 1,
-  "doc": "Group parity example; see docs/GROUP-PARITY.md for exact semantics and limits."
+  "doc": "Group parity example; see docs/GROUP-PARITY.md for exact semantics and limits.",
+  "exposed": [
+    {
+      "name": "Path Translation",
+      "node": "move",
+      "param": "translate"
+    }
+  ]
 }

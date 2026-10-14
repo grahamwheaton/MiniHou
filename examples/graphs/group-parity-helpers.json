@@ -110,5 +110,12 @@
   },
   "display": "move",
   "version": 1,
-  "doc": "Group parity example; see docs/GROUP-PARITY.md for exact semantics and limits."
+  "doc": "Group parity example; see docs/GROUP-PARITY.md for exact semantics and limits.",
+  "exposed": [
+    {
+      "name": "Proximity Distance",
+      "node": "near",
+      "param": "distance"
+    }
+  ]
 }
