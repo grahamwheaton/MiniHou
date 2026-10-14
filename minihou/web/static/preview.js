@@ -4,10 +4,10 @@
 window.MiniHouPreview = (() => {
   const VS = `#version 300 es
   in vec3 aPos; in vec3 aCol;
-  uniform mat4 uMV, uP; uniform float uPointSize, uBias, uIsolate, uActiveEnd;
+  uniform mat4 uMV, uP; uniform float uPointSize, uBias, uIsolate, uActiveStart, uActiveEnd;
   out float vDim;
   out vec3 vView; out vec3 vCol; out vec3 vWorld;
-  void main() { vDim = gl_VertexID >= int(uActiveEnd) ? uIsolate : 0.0; vec4 v = uMV * vec4(aPos, 1.0); vView = v.xyz; vCol = aCol; vWorld = aPos; gl_Position = uP * v;
+  void main() { vDim = (gl_VertexID < int(uActiveStart) || gl_VertexID >= int(uActiveEnd)) ? uIsolate : 0.0; vec4 v = uMV * vec4(aPos, 1.0); vView = v.xyz; vCol = aCol; vWorld = aPos; gl_Position = uP * v;
                 gl_Position.z -= uBias * gl_Position.w; gl_PointSize = uPointSize; }`;
   // selected edges: each edge is a quad that is widened in screen space, so selections read as thick lines
   const VS_EDGE = `#version 300 es
@@ -58,13 +58,13 @@ window.MiniHouPreview = (() => {
                 vec4 v = uMV * vec4(w, 1.0); vView = v.xyz; vCol = aCol; vWorld = w; gl_Position = uP * v; }`;
   const FS_INST = `#version 300 es
   precision highp float;
-  in vec3 vView; in vec3 vCol; ${CLIP_DECL} uniform vec3 uBase; uniform float uUseCol, uLighting; out vec4 o;
+  in vec3 vView; in vec3 vCol; ${CLIP_DECL} uniform vec3 uBase; uniform float uUseCol, uLighting, uDim; out vec4 o;
   void main() {
     ${CLIP_TEST}
     vec3 n = normalize(cross(dFdx(vView), dFdy(vView)));
     float d = abs(n.z);
     vec3 base = mix(uBase, vCol, uUseCol);
-    o = vec4(base * (0.28 + 0.72 * d * uLighting) + vec3(0.10) * pow(1.0 - d, 3.0), 1.0);
+    o = vec4(mix(base * (0.28 + 0.72 * d * uLighting) + vec3(0.10) * pow(1.0 - d, 3.0),vec3(0.22),uDim), 1.0);
   }`;
 
   // Infinite Z-up construction plane, drawn as a background so it never hides geometry.
@@ -154,7 +154,7 @@ window.MiniHouPreview = (() => {
       return { p, u };
     };
     const CLIP_U = ["uClip", "uClipOn"];
-    const MESH_U = ["uIsolate", "uActiveEnd","uMV", "uP", "uPointSize", "uBase", "uUseCol", "uAlpha", "uBias", "uLighting", ...CLIP_U];
+    const MESH_U = ["uIsolate", "uActiveStart", "uActiveEnd","uMV", "uP", "uPointSize", "uBase", "uUseCol", "uAlpha", "uBias", "uLighting", ...CLIP_U];
     let mesh, flat, edgeProg, colorProg, gridProg, instProg;
     try {
       gridProg = prog(VS_GRID, FS_GRID, [], ["uMV", "uP", "uEye", "uTarget", "uSpacing", "uRange", "uOpacity", "uAxes"]);
@@ -162,7 +162,7 @@ window.MiniHouPreview = (() => {
       flat = prog(VS, FS_FLAT, ["aPos", "aCol"], MESH_U);
       edgeProg = prog(VS_EDGE, FS_COLOR, ["aA", "aB", "aT", "aS"], ["uMV", "uP", "uViewport", "uWidth", "uBias", "uColor", ...CLIP_U]);
       colorProg = prog(VS, FS_COLOR, ["aPos", "aCol"], ["uMV", "uP", "uPointSize", "uBias", "uColor", ...CLIP_U]);
-      instProg = prog(VS_INST, FS_INST, ["aPos", "aR0", "aR1", "aR2", "aCol"], ["uMV", "uP", "uBase", "uUseCol", "uLighting", ...CLIP_U]);
+      instProg = prog(VS_INST, FS_INST, ["aPos", "aR0", "aR1", "aR2", "aCol"], ["uMV", "uP", "uBase", "uUseCol", "uLighting", "uDim", ...CLIP_U]);
     } catch (e) { if (onMessage) onMessage("3-D preview unavailable: " + e.message); api.ok = false; return api; }
 
     const vao = gl.createVertexArray(), posBuf = gl.createBuffer(), colBuf = gl.createBuffer();
@@ -534,7 +534,13 @@ window.MiniHouPreview = (() => {
       }
       return out;
     }
+    function activeObject(){return api.previewObjects?.find(o=>o.node===api.activeObject)||api.previewObjects?.[0];}
     function change(found, how) {                                    // found: {points, edges, faces}; how: replace | add | subtract
+      if(how!=="subtract"){
+        const f=found.faces?.at(-1),p=found.points?.at(-1)??found.edges?.at(-1)?.[1];
+        const object=api.previewObjects?.find(o=>f!==undefined?f>=o.prim_start&&f<o.prim_start+o.prim_count:p!==undefined&&p>=o.point_start&&p<o.point_start+o.point_count);
+        if(object)api.activeObject=object.node;
+      }
       if (how === "replace") { sel.point.clear(); sel.edge.clear(); sel.face.clear(); }
       for (const i of found.points || []) how === "subtract" ? sel.point.delete(i) : sel.point.add(i);
       for (const [a, b] of found.edges || []) how === "subtract" ? sel.edge.delete(edgeKey(a, b)) : sel.edge.set(edgeKey(a, b), a < b ? [a, b] : [b, a]);
@@ -795,6 +801,7 @@ window.MiniHouPreview = (() => {
       gl.enable(gl.DEPTH_TEST);
       gl.useProgram(instProg.p);
       gl.uniformMatrix4fv(instProg.u.uMV, false, cam.MV); gl.uniformMatrix4fv(instProg.u.uP, false, cam.P);
+      const dim=opt.isolated&&api.activeObject!==api.previewObjects?.[0]?.node?Math.max(0,Math.min(1,opt.isolated_knockback??.75)):0;gl.uniform1f(instProg.u.uDim,dim);
       gl.uniform3fv(instProg.u.uBase, [0.62, 0.68, 0.76]); gl.uniform1f(instProg.u.uUseCol, inst.col ? 1 : 0); gl.uniform1f(instProg.u.uLighting, opt.lighting);
       const meshes = inst.head.meshes;
       for (const [mesh, b] of inst.buckets) {
@@ -805,7 +812,7 @@ window.MiniHouPreview = (() => {
       if (inst.dots.n) {
         gl.useProgram(colorProg.p); gl.bindVertexArray(inst.dots.vao);
         gl.uniformMatrix4fv(colorProg.u.uMV, false, cam.MV); gl.uniformMatrix4fv(colorProg.u.uP, false, cam.P);
-        gl.uniform1f(colorProg.u.uBias, 0); gl.uniform1f(colorProg.u.uPointSize, 2); gl.uniform4f(colorProg.u.uColor, 0.62, 0.68, 0.76, 1);
+        gl.uniform1f(colorProg.u.uBias, 0); gl.uniform1f(colorProg.u.uPointSize, 2); gl.uniform4f(colorProg.u.uColor, 0.62*(1-dim)+.22*dim, 0.68*(1-dim)+.22*dim, 0.76*(1-dim)+.22*dim, 1);
         gl.drawArrays(gl.POINTS, 0, inst.dots.n);
       }
       gl.bindVertexArray(null);
@@ -861,7 +868,7 @@ window.MiniHouPreview = (() => {
         gl.uniform3fv(pr.u.uBase, base); gl.uniform1f(pr.u.uUseCol, useCol && data.hasCd ? 1 : 0);
         gl.uniform1f(pr.u.uPointSize, opt.pointSize);
         gl.uniform1f(pr.u.uIsolate,opt.isolated?Math.max(0,Math.min(1,opt.isolated_knockback??.75)):0);
-        gl.uniform1f(pr.u.uActiveEnd,api.previewObjects?.[0]?.point_count??data.npoints);
+        const active=activeObject();gl.uniform1f(pr.u.uActiveStart,active?.point_start??0);gl.uniform1f(pr.u.uActiveEnd,active?active.point_start+active.point_count:data.npoints);
         if (pr.u.uLighting) gl.uniform1f(pr.u.uLighting, opt.lighting); gl.uniform1f(pr.u.uBias, 0);
         if (pr.u.uAlpha) gl.uniform1f(pr.u.uAlpha, alpha === undefined ? 1 : alpha);
         if (data.hasCd) gl.enableVertexAttribArray(1); else { gl.disableVertexAttribArray(1); gl.vertexAttrib3f(1, 1, 1, 1); }
@@ -870,7 +877,7 @@ window.MiniHouPreview = (() => {
         const primView = attrView && attrView.domain === "prim" && primCount === data.ntris * 3;
         if (primView) { gl.bindVertexArray(primVao); data.hasCd = true; }
         setup(mesh, [0.62, 0.68, 0.76], true);
-        if(primView)gl.uniform1f(mesh.u.uActiveEnd,raw.triPrim.reduce((n,f)=>n+(f<(api.previewObjects?.[0]?.prim_count??Infinity)?3:0),0));
+        if(primView){const a=activeObject(),start=a?.prim_start??0,end=a?start+a.prim_count:Infinity;gl.uniform1f(mesh.u.uActiveStart,raw.triPrim.reduce((n,f)=>n+(f<start?3:0),0));gl.uniform1f(mesh.u.uActiveEnd,raw.triPrim.reduce((n,f)=>n+(f<end?3:0),0));}
         gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1, 1);
         const runs = triangleRuns(cam);                                                       // null = every triangle (no chunk table, or culling is off)
         stats.trisTotal = data.ntris;
@@ -1552,7 +1559,7 @@ window.MiniHouPreview = (() => {
       setTool(t) { if (["move", "rotate", "scale"].includes(t)) { api.tool = t; schedule(); } },
       set(head, arrays, keepCamera) {
         measurementCache=null;
-        api.previewObjects=head.proxy?.active?[]:(head.preview_objects||[]);api.referenceObjects=head.template_reduced?[]:(head.reference_objects||[]);
+        api.previewObjects=head.proxy?.active?[]:(head.preview_objects||[]);api.referenceObjects=head.template_reduced?[]:(head.reference_objects||[]);if(!api.previewObjects.some(o=>o.node===api.activeObject))api.activeObject=api.previewObjects[0]?.node;
         let keepIndices = false;
         if (head.same_topology) {                                                         // only positions (and colours) came: reuse the rest
           if (!raw || raw.topology !== head.topology || raw.P.length !== arrays.P.length) return false;
@@ -1645,11 +1652,11 @@ window.MiniHouPreview = (() => {
       boxSelect(x0, y0, x1, y1, how) { if (raw && sel.mode !== "view" && !(api.canPick && !api.canPick())) change(boxPick(camera(), x0, y0, x1, y1), how || "replace"); },
       selectAll() {
         if (!raw || sel.mode === "view" || (api.canPick && !api.canPick())) return;
-        const all = { points: [], edges: [], faces: [] }, active=api.previewObjects?.[0], pointEnd=active?active.point_count:raw.P.length/3, primEnd=active?active.prim_count:Infinity;
-        if (sel.mode === "point") for (let i = 0; i < pointEnd; i++) all.points.push(i);
-        else if (sel.mode === "edge") {for (let k = 0; k < raw.edge.length / 2; k++) if(raw.edge[2*k]<pointEnd&&raw.edge[2*k+1]<pointEnd)all.edges.push([raw.edge[2 * k], raw.edge[2 * k + 1]]);}
-        else all.faces = [...new Set(raw.triPrim)].filter(f=>sel.mode==="piece"||f<primEnd);
-        change(all, "replace");
+        const all = { points: [], edges: [], faces: [] }, active=activeObject(),pointStart=active?.point_start??0, pointEnd=active?pointStart+active.point_count:raw.P.length/3,primStart=active?.prim_start??0, primEnd=active?primStart+active.prim_count:Infinity;
+        if (sel.mode === "point") for (let i = pointStart; i < pointEnd; i++) all.points.push(i);
+        else if (sel.mode === "edge") {for (let k = 0; k < raw.edge.length / 2; k++) if(raw.edge[2*k]>=pointStart&&raw.edge[2*k+1]>=pointStart&&raw.edge[2*k]<pointEnd&&raw.edge[2*k+1]<pointEnd)all.edges.push([raw.edge[2 * k], raw.edge[2 * k + 1]]);}
+        else all.faces = [...new Set(raw.triPrim)].filter(f=>sel.mode==="piece"||(f>=primStart&&f<primEnd));
+        const keepActive=api.activeObject;change(all, "replace");api.activeObject=keepActive;
       },
       // where an element is on screen (CSS pixels in the canvas): for tests and for anchoring tools
       screenOf(kind, id) {

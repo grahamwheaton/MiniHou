@@ -57,3 +57,58 @@ class ViewportFixesTests(unittest.TestCase):
         self.assertEqual(self.selection()['faces'],[0,2])
         self.page.keyboard.press('Control+z')
         self.page.wait_for_function("!Object.values(minihou.S.graph.nodes).some(n=>n.type==='reverse')")
+
+    def test_isolated_pixels_follow_picked_object_and_nonselectable_reference(self):
+        import base64
+        self.box_scene()
+        self.page.evaluate("minihou.edit([{op:'add',id:'other',type:'box',params:{center:[4,0,0]}},{op:'flag',id:'other',flag:'display',value:true,additive:true},{op:'add',id:'reference',type:'box',params:{center:[-4,0,0]}},{op:'flag',id:'reference',flag:'template',value:true,additive:true},{op:'add',id:'hidden',type:'box',params:{center:[8,0,0]}},{op:'flag',id:'hidden',flag:'display',value:false,additive:true}])")
+        self.page.evaluate("minihou.edit([{op:'flag',id:'hidden',flag:'display',value:false,additive:true}])")
+        self.page.wait_for_function('minihou.preview.points===16 && minihou.preview.templatePoints===8')
+        self.page.evaluate("minihou.preview.viewAxis('top',false,true);minihou.preview.frameAll();minihou.preview.opt.grid=false;minihou.preview.opt.axes=false")
+        self.page.click('#preview [data-mode="piece"]')
+        self.hover()
+        self.page.keyboard.press('a')
+        self.assertEqual(len(self.selection()['faces']),12)
+        self.assertEqual(self.page.evaluate('minihou.preview.previewObjects.map(o=>o.node)'),['b','other'])
+        self.page.evaluate('minihou.preview.clearSelection()')
+        def pixels():
+            self.page.evaluate('minihou.preview.redraw()')
+            self.page.wait_for_timeout(60)
+            png=base64.b64encode(self.page.locator('#pv-canvas').screenshot()).decode('ascii')
+            coords=self.page.evaluate('[[.2,.2,1],[4.2,.2,.5]].map(p=>minihou.preview.project(p))')
+            return self.page.evaluate('''async ([png,points])=>{const img=new Image();img.src='data:image/png;base64,'+png;await img.decode();const c=document.createElement('canvas');c.width=img.width;c.height=img.height;const ctx=c.getContext('2d');ctx.drawImage(img,0,0);return points.map(p=>Array.from(ctx.getImageData(Math.round(p[0]),Math.round(p[1]),1,1).data).slice(0,3));}''',[png,coords])
+        normal=pixels()
+        self.page.click('[data-pv-menu="pv-menu-view"]');self.page.check('#pv-isolated');self.page.keyboard.press('Escape')
+        dim=pixels()
+        self.assertEqual(normal[0],dim[0])
+        self.assertGreater(sum(normal[1]),sum(dim[1])+30)
+        # Real object pick transfers active identity without changing graph display flags.
+        x,y=self.view_xy('face',self.top+6)
+        self.page.mouse.click(x,y)
+        self.assertEqual(self.page.evaluate('minihou.preview.activeObject'),'other')
+        self.page.evaluate('minihou.preview.clearSelection()')
+        switched=pixels()
+        self.assertEqual(normal[1],switched[1])
+        self.assertGreater(sum(normal[0]),sum(switched[0])+30)
+        self.page.click('#preview [data-mode="point"]');self.hover();self.page.keyboard.press('a')
+        self.assertEqual(self.selection()['points'],list(range(8,16)))
+
+    def test_flip_extra_object_face_only(self):
+        import numpy as np
+        from minihou import Evaluator
+        self.box_scene()
+        self.page.evaluate("minihou.edit([{op:'add',id:'other',type:'box',params:{center:[4,0,0]}},{op:'flag',id:'other',flag:'display',value:true,additive:true}])")
+        self.page.wait_for_function('minihou.preview.points===16')
+        before=self.s.preview('b',templates=True)['geo']
+        self.page.evaluate('minihou.preview.selectElements("prim",[6])');self.hover();self.page.keyboard.press('Alt+n')
+        self.page.wait_for_function("Object.values(minihou.S.graph.nodes).some(n=>n.type==='reverse')")
+        self.page.wait_for_function('minihou.preview.selection().faces.length===1')
+        self.assertEqual(self.selection()['faces'],[6])
+        target=next(n.id for n in self.s.graph.nodes.values() if n.type=='reverse')
+        after=Evaluator().cook(self.s.graph,target)
+        off=before.topology.prim_offsets
+        for i in range(before.nprims):
+            a,b=off[i:i+2]
+            expected=before.topology.vertex_point[a:b]
+            np.testing.assert_array_equal(after.topology.vertex_point[a:b],expected[::-1] if i==6 else expected)
+        np.testing.assert_array_equal(after.P,before.P)
