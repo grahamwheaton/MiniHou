@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "nodes": {
+    "box1": {"type": "box", "params": {"size": [0.2, 0.2, 0.2]}, "pos": [-180, 0]},
+    "point1": {"type": "point", "params": {"center": [1, 0, 0.5]}, "pos": [180, 0]},
+    "copy1": {"type": "copy_to_points", "inputs": {"source": "box1", "points": "point1"}, "pos": [0, 180]},
+    "output1": {"type": "output", "inputs": {"geo": "copy1"}, "pos": [0, 360]}
+  },
+  "display": "output1",
+  "exposed": [{"name": "Point Position", "node": "point1", "param": "center"}]
+}

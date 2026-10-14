@@ -910,9 +910,13 @@
     return details;
   }
 
+  const lengthParam = (id,p) => !!window.MiniUnits && !!window.MiniLengthParams?.has(nodeOf(id)?.type,p.name);
+  const displayParam = (id,p,v) => lengthParam(id,p) ? MiniUnits.display(v) : v;
+  window.addEventListener('minihou-units-changed',()=>{panelKey=null;$('#pv-context').dataset.node='';renderParams();});
   function paramRow(id, p) {
-    const v = effective(id, p);
-    const label = h("span", { class: "pl" + (isSet(id, p) ? " changed" : ""), title: (p.doc ? p.doc + "\n" : "") + p.name + " (" + p.kind + ")" }, p.label || p.name);
+    const v = effective(id, p), isLength=lengthParam(id,p);
+    const show=x=>isLength?MiniUnits.display(x):x, read=x=>isLength?MiniUnits.parse(String(x)):Number(x);
+    const label = h("span", { class: "pl" + (isSet(id, p) ? " changed" : ""), title: (p.doc ? p.doc + "\n" : "") + p.name + " (" + p.kind + ")" }, (p.label || p.name)+(isLength?" ("+MiniUnits.unit+")":""));
     const row = h("div", { class: "prow " + p.kind + (p.ui === "code" ? " code" : ""), dataset: { param: p.name } });
     let widget;
     if (S.graph.nodes[id].type === "for_each" && p.name === "body") {
@@ -925,22 +929,22 @@
     } else if (p.kind === "float" || p.kind === "int") {
       const [lo, hi] = rangeFor(p, v);
       const isInt = p.kind === "int";
-      const num = h("input", { type: "number", step: isInt ? 1 : "any", value: v, dataset: { role: "num" } });
+      const num = h("input", { type: "number", step: isInt ? 1 : "any", value: show(v), dataset: { role: "num" } });
       const rng = h("input", { type: "range", min: lo, max: hi, step: isInt ? 1 : (hi - lo) / 1000, value: v, dataset: { role: "rng" } });
-      rng.addEventListener("input", () => { const x = isInt ? Math.round(+rng.value) : round(+rng.value); num.value = x; queueSet(id, p.name, x); });
-      num.addEventListener("change", () => { if (num.value === "") return; const x = isInt ? Math.round(+num.value) : +num.value; rng.value = x; queueSet(id, p.name, x); });
+      rng.addEventListener("input", () => { const x = isInt ? Math.round(+rng.value) : round(+rng.value); num.value = show(x); queueSet(id, p.name, x); });
+      num.addEventListener("change", () => { if (num.value === "") return; const x = isInt ? Math.round(read(num.value)) : read(num.value); rng.value = x; queueSet(id, p.name, x); });
       widget = h("div", { class: "pw" }, rng, num);
-      scrubber(label, () => +num.value, (x) => { x = isInt ? Math.round(x) : round(x); num.value = x; rng.value = x; queueSet(id, p.name, x); }, isInt ? 1 / 6 : (hi - lo) / 300, p);
+      scrubber(label, () => read(num.value), (x) => { x = isInt ? Math.round(x) : round(x); num.value = show(x); rng.value = x; queueSet(id, p.name, x); }, isInt ? 1 / 6 : (hi - lo) / 300, p);
     } else if (p.kind === "bool") {
       const cb = h("input", { type: "checkbox", checked: !!v, dataset: { role: "bool" }, onchange: (e) => queueSet(id, p.name, e.target.checked) });
       widget = h("div", { class: "pw" }, cb);
     } else if (p.kind === "vec3") {
-      const fields = [0, 1, 2].map((i) => h("input", { type: "number", step: "any", value: v[i], title: "XYZ"[i], dataset: { role: "v" + i } }));
-      const send = () => queueSet(id, p.name, fields.map((f) => +f.value || 0));
+      const fields = [0, 1, 2].map((i) => h("input", { type: "number", step: "any", value: show(v[i]), title: "XYZ"[i]+(isLength?" ("+MiniUnits.unit+")":""), dataset: { role: "v" + i } }));
+      const send = () => queueSet(id, p.name, fields.map((f) => read(f.value) || 0));
       fields.forEach((f) => f.addEventListener("change", send));
       widget = h("div", { class: "pw" }, h("div", { class: "vec" }, fields));
       const span = Math.max(1, ...v.map((c) => Math.abs(c)), ...p.default.map((c) => Math.abs(c)));
-      fields.forEach((f, i) => scrubber(f, () => +f.value, (x) => { f.value = round(x); send(); }, span / 300, p, true));
+      fields.forEach((f, i) => scrubber(f, () => read(f.value), (x) => { f.value = show(round(x)); send(); }, span / 300, p, true));
     } else if (p.kind === "enum") {
       const sel = h("select", { dataset: { role: "enum" }, onchange: (e) => queueSet(id, p.name, e.target.value) },
         p.choices.map((c) => h("option", { value: c, selected: c === v }, c)));
@@ -1035,9 +1039,9 @@
       if (!row) continue;
       const v = effective(id, p);
       const set = (role, fn) => { const el = row.querySelector(`[data-role="${role}"]`); if (el && el !== document.activeElement) fn(el); };
-      if (p.kind === "float" || p.kind === "int") { if (!scrubbing) { set("num", (el) => (el.value = v)); set("rng", (el) => (el.value = v)); } }
+      if (p.kind === "float" || p.kind === "int") { if (!scrubbing) { set("num", (el) => (el.value = displayParam(id,p,v))); set("rng", (el) => (el.value = v)); } }
       else if (p.kind === "bool") set("bool", (el) => (el.checked = !!v));
-      else if (p.kind === "vec3") { if (!scrubbing) [0, 1, 2].forEach((i) => set("v" + i, (el) => (el.value = v[i]))); }
+      else if (p.kind === "vec3") { if (!scrubbing) [0, 1, 2].forEach((i) => set("v" + i, (el) => (el.value = displayParam(id,p,v[i])))); }
       else if (p.kind === "enum") set("enum", (el) => (el.value = v));
       else if (p.ui === "code") set("code", (el) => { if (!el.classList.contains("dirty")) el.value = v; });
       else set("str", (el) => (el.value = v));

@@ -54,6 +54,10 @@ class EditorE2E(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.dir, True)
         preference_env=patch.dict(os.environ, {'MINIHOU_PREFERENCES_FILE':os.path.join(self.dir,'user-preferences.json')})
         preference_env.start();self.addCleanup(preference_env.stop)
+        # Legacy geometry interaction fixtures type model-unit lengths. Dedicated units
+        # tests opt into the production millimetre default explicitly.
+        from pathlib import Path
+        Path(os.environ['MINIHOU_PREFERENCES_FILE']).write_text('{"length_unit":"m","unit_scale":1}', encoding='utf-8')
         self.path = os.path.join(self.dir, "demo.json")
         shutil.copyfile(os.path.join(ROOT, "examples", "graphs", "demo.json"), self.path)
         self.s = Session(Graph.load(self.path, check=False))
@@ -75,6 +79,7 @@ class EditorE2E(unittest.TestCase):
         self.page.on("console", lambda m: m.type == "error" and self.errors.append(m.text))
         self.page.goto(self.web.url)
         self.page.wait_for_selector('.node[data-id="out"]')
+        self.page.evaluate("window.MiniUnits?.configure({length_unit:'m',unit_scale:1})")
         # Historical viewport tests explicitly opt into inspecting the selection.
         if not self._testMethodName.startswith('test_network_interaction_'):
             self.page.select_option('#pv-follow', 'selection')

@@ -5,8 +5,8 @@ root.MiniModalModelTool=function(pv,canvas,hooks){
  let state=null,serial=0;
  const typing=e=>e.target.closest?.('input,textarea,select,[contenteditable]');
  function consume(e){e.preventDefault();e.stopImmediatePropagation();}
- function hint(s){pv.showFeedback?.(`${s.type}: ${s.typed!==''?s.typed:s.value.toFixed(3)}${s.type==='bevel'?` / ${s.divisions} divisions`:''} | mouse: 1 mm steps, type exact value, Ctrl snap, Shift precision, Enter/click confirm, Esc/right cancel`);}
- function valueOf(s){const typed=Number(s.typed);return s.typed!==''&&Number.isFinite(typed)?typed:Math.round(s.raw/(s.ctrl?.1:.001))*(s.ctrl?.1:.001);}
+ function hint(s){pv.showFeedback?.(`${s.type}: ${s.typed!==''?s.typed:(root.MiniUnits?.format(s.value)??s.value.toFixed(3))}${s.type==='bevel'?` / ${s.divisions} divisions`:''} | mouse: 1 mm steps, type exact value, Ctrl snap, Shift precision, Enter/click confirm, Esc/right cancel`);}
+ function valueOf(s){let typed=NaN;try{typed=root.MiniUnits?root.MiniUnits.parse(s.typed):Number(s.typed);}catch{}const step=(s.ctrl?.1:.001)/(root.MiniUnits?.scale||1);return s.typed!==''&&Number.isFinite(typed)?typed:Math.round(s.raw/step)*step;}
  function changed(s){s.value=valueOf(s);hint(s);s.pending={value:s.value,divisions:s.divisions};pump(s);}
  async function pump(s){
   if(!s.context||s.updating||s.finishing)return;s.updating=true;
@@ -31,7 +31,7 @@ root.MiniModalModelTool=function(pv,canvas,hooks){
  function up(e){if(!state)return;consume(e);if(e.type==='pointercancel')finish(true);}
  function key(e){if(!state||typing(e))return;const s=state;
   if(e.key==='Escape'||e.key==='Enter'){consume(e);finish(e.key==='Escape');}
-  else if(e.type==='keydown'&&!e.ctrlKey&&!e.altKey&&(/^[0-9.\-]$/.test(e.key)||e.key==='Backspace')){consume(e);s.typed=e.key==='Backspace'?s.typed.slice(0,-1):s.typed+e.key;changed(s);}
+  else if(e.type==='keydown'&&!e.ctrlKey&&!e.altKey&&(/^[0-9.\-]$/.test(e.key)||(s.typed!==''&&/^[a-z ]$/i.test(e.key))||e.key==='Backspace')){consume(e);s.typed=e.key==='Backspace'?s.typed.slice(0,-1):s.typed+e.key;changed(s);}
   else if(e.key==='Control'){consume(e);s.ctrl=e.type==='keydown';changed(s);}
  }
  function wheel(e){const s=state;if(!s||s.finishing)return;consume(e);if(s.type==='bevel'){const step=e.deltaY<0?1:-1;s.divisionDelta+=step;s.divisions=Math.max(1,Math.min(64,s.divisions+step));changed(s);}}
