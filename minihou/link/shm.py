@@ -10,15 +10,6 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-# Neutralize multiprocessing.resource_tracker on Windows / embedded Blender Python
-# to prevent rogue helper subprocess spawning and unlinking errors on exit.
-try:
-    from multiprocessing import resource_tracker
-    resource_tracker.register = lambda *a, **kw: None
-    resource_tracker.unregister = lambda *a, **kw: None
-except Exception:
-    pass
-
 from multiprocessing import shared_memory
 
 SHM_THRESHOLD = 64 * 1024  # 64 KB hybrid threshold
@@ -159,8 +150,8 @@ class ShmRing:
                 if not alt_slot.busy:
                     slot = alt_slot
                 else:
-                    # Both busy: overwrite the older unconsumed slot
-                    slot = self.slots[preferred_idx]
+                    # Never overwrite a frame the consumer may still be reading.
+                    raise BufferError("shared memory slots are awaiting acknowledgement")
             name, buf = slot.prepare(required_bytes, seq)
             return slot.slot_id, name, buf
 
@@ -179,40 +170,66 @@ class ShmRing:
                 s.close()
 
 
-class ShmReader:
-    """Maintains cached attachments to shared memory segments for zero-copy reading."""
+class _Mapping:
+    """Shared by the cache and array owners; closes after the final view dies."""
+    def __init__(self, name):
+        options = {"track": False} if sys.version_info >= (3, 13) else {}
+        self.shm = shared_memory.SharedMemory(name=name, create=False, **options)
 
+    def __del__(self):
+        self.shm.close()
+
+
+class _ArrayOwner:
+    # np.asarray retains this object as .base, including through subsequent slices
+    # and np.asarray calls. Drop the exported buffer BEFORE releasing its mapping.
+    def __init__(self, array, mapping):
+        self.array, self.mapping = array, mapping
+        self.__array_interface__ = array.__array_interface__
+
+    def __del__(self):
+        self.array = None
+        self.mapping = None
+
+
+class ShmReader:
+    """Cached attachments whose lifetimes also belong to outstanding array views."""
     def __init__(self):
-        self._attached: Dict[str, shared_memory.SharedMemory] = {}
+        self._attached = {}
+        self._slots = {}
         self._lock = threading.Lock()
 
-    def get_buffer(self, name: str) -> memoryview:
-        with self._lock:
-            shm = self._attached.get(name)
-            if shm is None:
-                shm = shared_memory.SharedMemory(name=name, create=False)
-                self._attached[name] = shm
-            return shm.buf
+    def _mapping(self, name):
+        mapping = self._attached.get(name)
+        if mapping is None:
+            mapping = _Mapping(name)
+            self._attached[name] = mapping
+        return mapping
 
-    def release_older_than(self, active_names: set) -> None:
-        """Close attachments to SHM segments that are no longer active."""
+    def get_buffer(self, name):
         with self._lock:
-            stale = [name for name in self._attached if name not in active_names]
-            for name in stale:
-                try:
-                    self._attached[name].close()
-                except Exception:
-                    pass
+            return self._mapping(name).shm.buf
+
+    def read(self, name, descriptors, slot=None):
+        with self._lock:
+            mapping = self._mapping(name)
+            arrays = read_arrays_from_buffer(mapping.shm.buf, descriptors)
+            if slot is not None:
+                previous = self._slots.get(slot)
+                self._slots[slot] = name
+                if previous and previous != name:
+                    self._attached.pop(previous, None)
+            return {key: np.asarray(_ArrayOwner(value, mapping)) for key, value in arrays.items()}
+
+    def release_older_than(self, active_names):
+        with self._lock:
+            for name in set(self._attached) - active_names:
                 del self._attached[name]
 
-    def close(self) -> None:
+    def close(self):
         with self._lock:
-            for shm in self._attached.values():
-                try:
-                    shm.close()
-                except Exception:
-                    pass
             self._attached.clear()
+            self._slots.clear()
 
 
 def encode_shm_message(header: dict, arrays: Dict[str, np.ndarray], shm_ring: ShmRing, seq: int = 0) -> List[object]:
@@ -240,12 +257,16 @@ def send_shm_or_tcp_message(sock, header: dict, arrays: Optional[Dict[str, np.nd
     if shm_ring is not None and arrays:
         nbytes = calculate_arrays_size(arrays)
         if nbytes >= SHM_THRESHOLD:
-            bufs = encode_shm_message(header, arrays, shm_ring, seq)
-            total = 0
-            for b in bufs:
-                sock.sendall(b)
-                total += len(b)
-            return total
+            try:
+                bufs = encode_shm_message(header, arrays, shm_ring, seq)
+            except BufferError:
+                bufs = None  # Both slots busy: bounded, lossless TCP fallback.
+            if bufs is not None:
+                total = 0
+                for b in bufs:
+                    sock.sendall(b)
+                    total += len(b)
+                return total
     h = dict(header)
     h.setdefault("transport", "tcp")
     return send_message(sock, h, arrays)
@@ -256,15 +277,8 @@ def unpack_shm_payload(header: dict, shm_reader: Optional[ShmReader] = None) -> 
     shm_name = header.get("shm_name")
     if not shm_name:
         raise ValueError("shm transport message missing shm_name")
-    if shm_reader is None:
-        r = ShmReader()
-        try:
-            buf = r.get_buffer(shm_name)
-            return read_arrays_from_buffer(buf, header.get("arrays", []))
-        finally:
-            r.close()
-    buf = shm_reader.get_buffer(shm_name)
-    return read_arrays_from_buffer(buf, header.get("arrays", []))
+    reader = shm_reader if shm_reader is not None else ShmReader()
+    return reader.read(shm_name, header.get("arrays", []), header.get("shm_slot"))
 
 
 def recv_shm_or_tcp_message(sock, shm_reader: Optional[ShmReader] = None) -> Tuple[dict, Dict[str, np.ndarray]]:

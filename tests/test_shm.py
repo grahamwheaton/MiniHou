@@ -258,3 +258,62 @@ if __name__ == "__main__":
     unittest.main()
 
 
+
+class ShmLifetimeTests(unittest.TestCase):
+    def test_views_outlive_reader_close_without_unraisable_errors(self):
+        import gc
+        import sys
+        from unittest.mock import patch
+        from minihou.link.shm import unpack_shm_payload
+        ring = ShmRing()
+        self.addCleanup(ring.close)
+        _, name, buf = ring.get_slot_for_write(1024, 1)
+        desc, _ = write_arrays_to_buffer(buf, {"a": np.arange(20, dtype=np.float32)})
+        errors = []
+        with patch.object(sys, "unraisablehook", errors.append):
+            reader = ShmReader()
+            arrays = unpack_shm_payload({"shm_name": name, "arrays": desc}, reader)
+            alias = np.asarray(arrays["a"])[2:8]
+            reader.close()
+            del arrays, reader
+            gc.collect()
+            np.testing.assert_array_equal(alias, np.arange(2, 8))
+            del alias
+            gc.collect()
+        self.assertEqual(errors, [])
+
+    def test_readerless_unpack_owns_its_mapping(self):
+        import gc
+        import sys
+        from unittest.mock import patch
+        from minihou.link.shm import unpack_shm_payload
+        ring = ShmRing()
+        self.addCleanup(ring.close)
+        _, name, buf = ring.get_slot_for_write(1024, 1)
+        desc, _ = write_arrays_to_buffer(buf, {"a": np.arange(20, dtype=np.float32)})
+        errors = []
+        with patch.object(sys, "unraisablehook", errors.append):
+            arrays = unpack_shm_payload({"shm_name": name, "arrays": desc})
+            gc.collect()
+            np.testing.assert_array_equal(arrays["a"], np.arange(20))
+            del arrays
+            gc.collect()
+        self.assertEqual(errors, [])
+
+    def test_full_ring_falls_back_without_overwriting_pending_frames(self):
+        import socket
+        import threading
+        from minihou.link.shm import send_shm_or_tcp_message, recv_shm_or_tcp_message
+        ring = ShmRing(); self.addCleanup(ring.close)
+        reader = ShmReader(); self.addCleanup(reader.close)
+        sender, receiver = socket.socketpair()
+        self.addCleanup(sender.close);self.addCleanup(receiver.close)
+        received = []
+        def read():
+            for _ in range(3):received.append(recv_shm_or_tcp_message(receiver, reader))
+        thread = threading.Thread(target=read);thread.start()
+        for seq in range(1,4):
+            send_shm_or_tcp_message(sender, {"type":"geo","seq":seq}, {"a":np.full(20000,seq,np.float32)},ring,seq)
+        thread.join(5);self.assertFalse(thread.is_alive())
+        self.assertEqual([h['transport'] for h,a in received],['shm','shm','tcp'])
+        for seq,(h,arrays) in enumerate(received,1):np.testing.assert_array_equal(arrays['a'],seq)

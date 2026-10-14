@@ -620,8 +620,16 @@ class EditorE2E(unittest.TestCase):
 
     # -- helpers ---------------------------------------------------------------------
     def read_file(self):
-        with open(self.path, encoding="utf-8") as f:
-            return f.read()
+        # Atomic save replacement can briefly deny opens on Windows. Retry only
+        # sharing violations; a persistently unreadable file must still fail.
+        for attempt in range(20):
+            try:
+                with open(self.path, encoding="utf-8") as f:
+                    return f.read()
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                time.sleep(0.01)
 
     def node(self, nid):
         return self.page.locator(f'.node[data-id="{nid}"]')
