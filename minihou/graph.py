@@ -105,6 +105,7 @@ class Graph:
         self.display: Optional[str] = None
         self.render: Optional[str] = None  # None follows display; explicit id separates render output.
         self.exposed: List[Exposed] = []
+        self.measurements: List[Dict[str, Any]] = []
         self.doc: str = ""                    # what the graph does (systems show it as their node doc)
         self.boxes: List[Dict[str, Any]] = []  # network boxes: coloured, titled rectangles behind the nodes (cosmetic)
 
@@ -397,6 +398,7 @@ class Graph:
         g.exposed = [Exposed(e.name, e.node, e.param, e.label) for e in self.exposed]
         g.doc = self.doc
         g.boxes = copy.deepcopy(self.boxes)
+        g.measurements = copy.deepcopy(self.measurements)
         return g
 
     def to_dict(self) -> dict:
@@ -417,6 +419,8 @@ class Graph:
         if self.doc:
             out["doc"] = self.doc
         out["nodes"] = nodes
+        if self.measurements:
+            out["measurements"] = copy.deepcopy(self.measurements)
         if self.boxes:
             out["boxes"] = copy.deepcopy(self.boxes)
         if self.display:
@@ -436,6 +440,8 @@ class Graph:
         if version != GRAPH_VERSION:
             raise GraphError(f"unsupported graph version {version!r} (this build reads {GRAPH_VERSION})")
         g = cls(registry)
+        from .measurements import clean_measurements
+        g.measurements = clean_measurements(data.get("measurements", []))
         errs: List[str] = []
         for nid, nd in data["nodes"].items():
             if not isinstance(nd, dict) or "type" not in nd:

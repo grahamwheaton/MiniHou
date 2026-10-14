@@ -277,6 +277,7 @@
     if (fileChanged && snap.path) updateTrail(snap.path);                           // a snapshot without a file (transient) leaves the path alone
     if (snap.path && snap.path !== lastRemembered && S.root) { lastRemembered = snap.path; rememberFile(relPath(snap.path)); }
     S.rev = snap.rev; S.graph = snap.graph; S.path = snap.path; S.documentId = snap.document_id;
+    sketchTool?.setMeasurements(S.graph.measurements||[]);
     S.canUndo = snap.can_undo; S.canRedo = snap.can_redo;
     for (const id of [...S.sel]) if (!S.graph.nodes[id]) S.sel.delete(id);
     if (S.wireSel && !wireExists(S.wireSel)) S.wireSel = null;
@@ -1208,11 +1209,11 @@
   $('#pv-knife').onclick=()=>{sketchTool?.cancel();selectionTool?.cancel();knifeTool?.start();};
   let sketchBezier=false;
   const sketchTool=pv?.ok&&window.MiniSketchTool?MiniSketchTool(pv,$('#pv-canvas'),async spec=>{
-    if(sketchBezier){const points=spec.params.points.trim().split(/\s+/).map(p=>p.split(',').map(Number));spec={type:'bezier',params:{controls:JSON.stringify(points.map(p=>({p,left:p.slice(),right:p.slice(),mode:'AUTO'}))),closed:false}};sketchBezier=false;}
+    if(sketchBezier){const points=spec.params.points.trim().split(/\s+/).map(p=>p.split(',').map(Number));spec={type:'bezier',params:{controls:JSON.stringify(points.map(p=>({p,left:p.slice(),right:p.slice(),mode:'AUTO'}))),closed:false}};}
     const id=uniqueId(spec.type),r=await edit([{op:'add',id,type:spec.type,params:spec.params,pos:[80,80],display:true}]);
     if(!r)throw Error('Sketch could not be added to the graph');
     pvKeepCameraNode=id;select([id]);
-  }):null;
+  },{nodes:()=>S.graph.nodes,save:async values=>{const r=await edit([{op:'measurements',values}]);if(!r)throw Error('Measurement edit could not be saved.');}}):null;
   const placementPreview=pv?.ok&&window.MiniPlacementPreview?MiniPlacementPreview(pv,$('#pv-canvas')):null;
   let shelfDragType=null;
   document.addEventListener('dragstart',e=>{shelfDragType=e.target.closest('[data-type]')?.dataset.type||null;});
@@ -1923,7 +1924,10 @@
     catch(err){input.checked=!input.checked;toast(err.message);}
     finally{input.disabled=false;}
   };
-  async function loadEnginePreferences(){const fields=['#pref-copy-memory','#pref-proxy-level','#pref-proxy-auto','#pref-proxy-cap'].map(id=>$(id));fields.forEach(f=>f.disabled=true);try{const p=await api('/api/preferences');$('#pref-copy-memory').value=p.copy_memory_limit_mib;$('#pref-proxy-level').value=p.proxy.level;$('#pref-proxy-auto').checked=p.proxy.auto;$('#pref-proxy-cap').value=p.proxy.link_tris;}catch(err){toast(err.message);}finally{fields.forEach(f=>f.disabled=false);}}
+  function applyUnitPreferences(p){MiniUnits.configure(p);$('#pref-length-unit').value=p.length_unit;$('#pref-unit-scale').value=p.unit_scale;$('#pref-isolated-knockback').value=p.isolated_knockback;if(pv?.ok){pv.opt.isolated_knockback=p.isolated_knockback;pv.redraw();}sketchTool?.draw();}
+  for(const [id,key] of [['#pref-length-unit','length_unit'],['#pref-unit-scale','unit_scale'],['#pref-isolated-knockback','isolated_knockback']])$(id).onchange=async e=>{try{applyUnitPreferences(await api('/api/preferences',{[key]:key==='length_unit'?e.target.value:Number(e.target.value)}));}catch(err){toast(err.message);loadEnginePreferences();}};
+  api('/api/preferences').then(applyUnitPreferences).catch(err=>toast(err.message));
+  async function loadEnginePreferences(){const fields=['#pref-copy-memory','#pref-proxy-level','#pref-proxy-auto','#pref-proxy-cap'].map(id=>$(id));fields.forEach(f=>f.disabled=true);try{const p=await api('/api/preferences');applyUnitPreferences(p);$('#pref-copy-memory').value=p.copy_memory_limit_mib;$('#pref-proxy-level').value=p.proxy.level;$('#pref-proxy-auto').checked=p.proxy.auto;$('#pref-proxy-cap').value=p.proxy.link_tris;}catch(err){toast(err.message);}finally{fields.forEach(f=>f.disabled=false);}}
   $('#pref-copy-memory').onchange=async e=>{try{const p=await api('/api/preferences',{copy_memory_limit_mib:Number(e.target.value)});e.target.value=p.copy_memory_limit_mib;pvKey=null;schedulePreview();}catch(err){toast(err.message);loadEnginePreferences();}};
   for(const [id,key]of [['#pref-proxy-level','level'],['#pref-proxy-auto','auto'],['#pref-proxy-cap','link_tris']])$(id).onchange=async e=>{try{const p=await api('/api/proxy',{[key]:e.target.type==='checkbox'?e.target.checked:Number(e.target.value)});S.status=Object.assign(S.status||{},{proxy:p});renderProxy();}catch(err){toast(err.message);loadEnginePreferences();}};
   const preferencesDialog = $("#preferences");
