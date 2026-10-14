@@ -18,6 +18,10 @@ class MeasurementDataTests(unittest.TestCase):
         session.edit([{'op':'measurements','values':[item]}])
         identity=session.graph.measurements[0]['refs'][0]['identity']
         self.assertEqual(session.graph.nodes['box'].meta['measurement_identity'],identity)
+        session.edit([{'op':'rename','id':'box','to':'renamed'}])
+        self.assertEqual(session.graph.measurements[0]['refs'][0]['node'],'renamed')
+        session.undo()
+        self.assertEqual(session.graph.measurements[0]['refs'][0]['node'],'box')
         restored=Graph.from_dict(session.graph.to_dict())
         self.assertEqual(restored.measurements,session.graph.measurements)
         copied=restored.copy();copied.measurements[0]['label']='Changed'

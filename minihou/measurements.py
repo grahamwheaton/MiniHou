@@ -35,3 +35,43 @@ def clean_measurements(value):
             if not vector(weights, len(indices)) or any(w < -1e-6 or w > 1+1e-6 for w in weights) or abs(sum(weights)-1) > 1e-6:
                 raise GraphError('invalid attachment interpolation weights')
     return out
+
+def resolve_session(session):
+    """Resolve saved coordinates even when a target is not the current preview.
+
+    Only attachment coordinates are returned; no mesh buffers are copied to the client.
+    Connectivity changes never rebind an endpoint to an unrelated element.
+    """
+    from . import proxy, timectx
+    with session.lock:
+        graph = session.graph.copy()
+        revision = session._rev
+        frame, fps = session.frame, session.fps
+        feeds = session._modifier_feeds(graph)
+    resolved, cache = {}, {}
+    with session._cook_lock, timectx.at(frame, fps), proxy.using(session.view_level()):
+        for item in graph.measurements:
+            points = []
+            for endpoint, ref in zip(item['points'], item.get('refs', [None, None])):
+                result = {'point': endpoint, 'status': 'Free'}
+                points.append(result)
+                if not ref:
+                    continue
+                node = graph.nodes.get(ref['node'])
+                if node is None or node.meta.get('measurement_identity') != ref.get('identity'):
+                    result['status'] = 'Unavailable: target deleted or replaced'
+                    continue
+                try:
+                    if ref['node'] not in cache:
+                        cache[ref['node']] = session.evaluator.cook(graph, ref['node'], feeds=feeds)
+                    geo = cache[ref['node']]
+                    token = f'{geo.npoints * 3}:{geo.topology.digest}'
+                    if token != ref['topology'] or any(i >= geo.npoints for i in ref['indices']):
+                        result['status'] = 'Detached: topology changed'
+                        continue
+                    result['point'] = [sum(float(geo.P[i, k]) * w for i, w in zip(ref['indices'], ref['weights'])) for k in range(3)]
+                    result['status'] = 'Attached: ' + ref['node']
+                except (ValueError, RuntimeError, KeyError, IndexError) as error:
+                    result['status'] = 'Unavailable: ' + str(error)[:160]
+            resolved[item['id']] = points
+    return {'rev': revision, 'measurements': resolved}

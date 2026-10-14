@@ -1,15 +1,19 @@
 """Actual pointer editing and attachment tracking in Chromium, small geometry fixtures."""
 from pathlib import Path
 import unittest
-from playwright.sync_api import sync_playwright
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    sync_playwright=None
 ROOT=Path(__file__).resolve().parents[1]
+@unittest.skipIf(sync_playwright is None,'playwright unavailable')
 class MeasurementBrowserTests(unittest.TestCase):
     def setUp(self):
         self.pw=sync_playwright().start();self.browser=self.pw.chromium.launch();self.page=self.browser.new_page()
         self.addCleanup(self.pw.stop);self.addCleanup(self.browser.close)
         self.page.set_content('<div style="position:relative;width:500px;height:400px"><canvas width="500" height="400" tabindex="0"></canvas></div><aside></aside>')
         for name in ('units','sketch-tool'):self.page.add_script_tag(path=str(ROOT/f'minihou/web/static/{name}.js'))
-        self.page.evaluate('''()=>{window.saved=[];window.commits=[];window.nodes={box:{measurement_identity:'id1'}};window.geos=[{node:'box',topology:'v1',P:[0,0,0,2,0,0,0,2,0],edge:[0,1,1,2,2,0],tri:[0,1,2]}];window.tool=MiniSketchTool({showFeedback:t=>window.hint=t,project:p=>[p[0]*50+100,p[1]*50+100],measurementGeometry:()=>geos,planePoint:(x,y)=>[(x-100)/50,(y-100)/50,0]},document.querySelector('canvas'),s=>commits.push(s),{nodes:()=>nodes,save:values=>{values=structuredClone(values);for(const d of values)for(const r of d.refs||[])if(r)r.identity='id1';saved=values;tool.setMeasurements(values);}});document.querySelector('aside').append(tool.panel());}''')
+        self.page.evaluate('''()=>{window.saved=[];window.commits=[];window.nodes={box:{measurement_identity:'id1'}};window.geos=[{node:'box',topology:'v1',P:[0,0,0,2,0,0,0,2,0],edge:[0,1,1,2,2,0],tri:[0,1,2]}];window.tool=MiniSketchTool({showFeedback:t=>window.hint=t,project:p=>[p[0]*50+100,p[1]*50+100],measurementGeometry:()=>geos,planePoint:(x,y)=>[(x-100)/50,(y-100)/50,0]},document.querySelector('canvas'),s=>commits.push(s),{nodes:()=>nodes,save:async values=>{if(window.delaySave)await new Promise(r=>(window.saveWaiters??=[]).push(r));values=structuredClone(values);for(const d of values)for(const r of d.refs||[])if(r)r.identity='id1';saved=values;tool.setMeasurements(values);}});document.querySelector('aside').append(tool.panel());}''')
 
     def test_measure_edit_deform_topology_and_replacement(self):
         p=self.page;c=p.locator('canvas');p.evaluate("tool.start('tape')")
@@ -47,6 +51,23 @@ class MeasurementBrowserTests(unittest.TestCase):
         self.assertEqual(p.evaluate('MiniUnits.format(1)'),'1 mm')
         self.assertEqual(p.evaluate("MiniUnits.parse('25')"),25)
 
+    def test_edits_queue_without_losing_later_values(self):
+        p=self.page;c=p.locator('canvas');p.evaluate("tool.start('tape')")
+        c.click(position={'x':100,'y':100});c.click(position={'x':200,'y':100})
+        p.wait_for_function('saved.length===1');p.evaluate('window.delaySave=true')
+        p.get_by_label('Measurement label',exact=True).fill('Queued');p.get_by_label('Measurement label',exact=True).press('Tab')
+        p.wait_for_function('window.saveWaiters?.length===1')
+        p.get_by_label('Label X offset (pixels)').fill('55');p.get_by_label('Label X offset (pixels)').press('Tab')
+        p.evaluate('saveWaiters.shift()()');p.wait_for_function('saveWaiters.length===1');p.evaluate('saveWaiters.shift()()')
+        p.wait_for_function("saved[0].label==='Queued'&&saved[0].label_offset[0]===55")
+
+    def test_perspective_edge_face_and_nearest_overlap(self):
+        p=self.page
+        result=p.evaluate("""()=>{const M=MiniSketchMath,project=p=>[p[0]/p[2]*100,p[1]/p[2]*100,p[2]],g={node:'oblique',P:[0,0,1,4,0,2,0,4,2],edge:[0,1],tri:[0,1,2]};return [M.infer([0,0,0],null,project,[100,0],g,{grid:0}),M.infer([0,0,0],null,project,[50,50],g,{grid:0}),M.infer([0,0,0],null,project,[50,50],[{...g,node:'far',P:g.P.map(x=>x*2)},g],{grid:0})]}""")
+        self.assertAlmostEqual(result[0]['ref']['weights'][1],1/3)
+        self.assertAlmostEqual(result[1]['ref']['weights'][0],2/3)
+        self.assertEqual(result[2]['ref']['node'],'oblique')
+
     def test_right_click_chain_commits_and_escape_only_cancels_pending(self):
         p=self.page;c=p.locator('canvas');p.evaluate("tool.start('line',{snap:false,grid:0})")
         c.click(position={'x':100,'y':100});c.click(position={'x':150,'y':100});c.click(position={'x':170,'y':120},button='right')
@@ -61,6 +82,7 @@ class MeasurementBrowserTests(unittest.TestCase):
         self.assertFalse(p.evaluate('tool.active()'));self.assertEqual(p.evaluate('commits.length'),2)
 
 from tests import test_editor_e2e as fixture
+@unittest.skipIf(sync_playwright is None,'playwright unavailable')
 class MeasurementEditorTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):fixture.EditorE2E.setUpClass.__func__(cls)
@@ -77,6 +99,21 @@ class MeasurementEditorTests(unittest.TestCase):
         p.locator('#pv-left-tools [data-sketch="tape"]').first.click()
         p.mouse.click(*self.view_xy('point',self.top_points[0]));p.mouse.click(*self.view_xy('point',self.top_points[1]))
         self.assertTrue(fixture.until(lambda:len(self.s.graph.measurements)==1))
+        self.assertIsNotNone(self.s.graph.measurements[0]['refs'][0])
+        ref=self.s.graph.measurements[0]['refs'][0]
+        self.assertEqual(ref['node'],'b')
+        self.assertIn('identity',ref)
+        original_label=p.locator('[data-measurement]').text_content()
+        self.s.edit([{'op':'set','id':'b','params':{'size':[4,4,4]}}])
+        p.wait_for_function("minihou.preview.geometry().P.some(v=>Math.abs(v)>1.5)")
+        p.wait_for_function("document.querySelector('[data-measurement]').textContent!=="+repr(original_label))
+        self.assertNotIn('[detached]',p.locator('[data-measurement]').text_content())
+        self.s.edit([{'op':'set','id':'b','params':{'axis_divisions':[2,2,2]}}])
+        p.wait_for_function("document.querySelector('[data-measurement]').textContent.includes('[detached]')")
+        self.s.undo()
+        p.wait_for_function("!document.querySelector('[data-measurement]').textContent.includes('[detached]')")
+        self.s.undo()
+        p.wait_for_function("document.querySelector('[data-measurement]').textContent==="+repr(original_label))
         p.get_by_label('Measurement label',exact=True).fill('Roof');p.get_by_label('Measurement label',exact=True).press('Tab')
         self.assertTrue(fixture.until(lambda:self.s.graph.measurements[0]['label']=='Roof'))
         p.get_by_role('button',name='Delete measurement',exact=True).click()
@@ -91,3 +128,27 @@ class MeasurementEditorTests(unittest.TestCase):
         self.assertEqual(p.evaluate("MiniUnits.format(1)"),'1 mm')
         p.reload();p.wait_for_function('MiniUnits.scale===.001')
         self.assertEqual(list(self.s.graph.nodes['b'].params['size']),[2,2,2])
+    def test_multi_object_attachment_moves_renames_deletes_and_undoes(self):
+        self.box_scene();p=self.page
+        p.evaluate("minihou.edit([{op:'add',id:'other',type:'box',params:{center:[4,0,0]}},{op:'flag',id:'other',flag:'display',value:true,additive:true}])")
+        p.wait_for_function('minihou.preview.points===16')
+        p.evaluate("minihou.preview.frameAll();minihou.preview.viewAxis('top',false,true)")
+        p.locator('#pv-left-tools [data-sketch="tape"]').first.click()
+        p.mouse.click(*self.view_xy('point',self.top_points[0]));p.mouse.click(*self.view_xy('point',self.top_points[0]+8))
+        self.assertTrue(fixture.until(lambda:len(self.s.graph.measurements)==1))
+        refs=self.s.graph.measurements[0]['refs']
+        self.assertEqual([r['node'] for r in refs],['b','other'])
+        before=p.locator('[data-measurement]').text_content()
+        self.s.edit([{'op':'set','id':'other','params':{'center':[5,0,0]}}])
+        p.wait_for_function("document.querySelector('[data-measurement]').textContent!=="+repr(before))
+        self.assertNotIn('[detached]',p.locator('[data-measurement]').text_content())
+        self.s.edit([{'op':'rename','id':'other','to':'renamed'}])
+        self.assertEqual(self.s.graph.measurements[0]['refs'][1]['node'],'renamed')
+        p.wait_for_function("minihou.preview.measurementGeometry().some(g=>g.node==='renamed')")
+        self.assertNotIn('[detached]',p.locator('[data-measurement]').text_content())
+        self.s.edit([{'op':'remove','id':'renamed'}])
+        p.wait_for_function("document.querySelector('[data-measurement]').textContent.includes('[detached]')")
+        self.s.undo()
+        p.wait_for_function("!document.querySelector('[data-measurement]').textContent.includes('[detached]')")
+        p.reload();p.wait_for_selector('[data-measurement]')
+        p.wait_for_function("!document.querySelector('[data-measurement]').textContent.includes('[detached]')")

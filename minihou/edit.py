@@ -367,6 +367,10 @@ def op_rename(g: Graph, op: dict) -> dict:
         raise GraphError(f"a node called {new!r} already exists")
     g.nodes = {(new if k == old else k): v for k, v in g.nodes.items()}
     g.nodes[new].id = new
+    for measurement in g.measurements:
+        for ref in measurement.get('refs', []):
+            if ref and ref.get('node') == old:
+                ref['node'] = new
     for n in g.nodes.values():
         for port, ref in list(n.inputs.items()):
             n.inputs[port] = [new if r == old else r for r in ref] if isinstance(ref, list) else (new if ref == old else ref)

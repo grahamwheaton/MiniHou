@@ -278,6 +278,7 @@
     if (snap.path && snap.path !== lastRemembered && S.root) { lastRemembered = snap.path; rememberFile(relPath(snap.path)); }
     S.rev = snap.rev; S.graph = snap.graph; S.path = snap.path; S.documentId = snap.document_id;
     sketchTool?.setMeasurements(S.graph.measurements||[]);
+    scheduleMeasurementResolve();
     S.canUndo = snap.can_undo; S.canRedo = snap.can_redo;
     for (const id of [...S.sel]) if (!S.graph.nodes[id]) S.sel.delete(id);
     if (S.wireSel && !wireExists(S.wireSel)) S.wireSel = null;
@@ -1214,6 +1215,8 @@
     if(!r)throw Error('Sketch could not be added to the graph');
     pvKeepCameraNode=id;select([id]);
   },{nodes:()=>S.graph.nodes,save:async values=>{const r=await edit([{op:'measurements',values}]);if(!r)throw Error('Measurement edit could not be saved.');}}):null;
+  let measurementResolveTimer=null;
+  function scheduleMeasurementResolve(){clearTimeout(measurementResolveTimer);if(!S.graph.measurements?.length)return;const rev=S.rev,documentId=S.documentId;measurementResolveTimer=setTimeout(async()=>{try{const r=await api('/api/measurement_positions');if(S.rev===rev&&r.rev===rev&&S.documentId===documentId)sketchTool?.setResolved(r.measurements);}catch(err){pvMsg('Measurements: '+err.message);}},80);}
   const placementPreview=pv?.ok&&window.MiniPlacementPreview?MiniPlacementPreview(pv,$('#pv-canvas')):null;
   let shelfDragType=null;
   document.addEventListener('dragstart',e=>{shelfDragType=e.target.closest('[data-type]')?.dataset.type||null;});
@@ -1930,8 +1933,9 @@
     catch(err){input.checked=!input.checked;toast(err.message);}
     finally{input.disabled=false;}
   };
-  function applyUnitPreferences(p){MiniUnits.configure(p);$('#pref-length-unit').value=p.length_unit;$('#pref-unit-scale').value=p.unit_scale;$('#pref-isolated-knockback').value=p.isolated_knockback;if(pv?.ok){pv.opt.isolated_knockback=p.isolated_knockback;pv.redraw();}sketchTool?.draw();}
-  for(const [id,key] of [['#pref-length-unit','length_unit'],['#pref-unit-scale','unit_scale'],['#pref-isolated-knockback','isolated_knockback']])$(id).onchange=async e=>{try{applyUnitPreferences(await api('/api/preferences',{[key]:key==='length_unit'?e.target.value:Number(e.target.value)}));}catch(err){toast(err.message);loadEnginePreferences();}};
+  let unitPreferenceQueue=Promise.resolve();
+  function applyUnitPreferences(p){MiniUnits.configure(p);for(const [id,key] of [['#pref-length-unit','length_unit'],['#pref-unit-scale','unit_scale'],['#pref-isolated-knockback','isolated_knockback']]){const input=$(id);if(document.activeElement!==input)input.value=p[key];}if(pv?.ok){pv.opt.isolated_knockback=p.isolated_knockback;pv.redraw();}sketchTool?.draw();}
+  for(const [id,key] of [['#pref-length-unit','length_unit'],['#pref-unit-scale','unit_scale'],['#pref-isolated-knockback','isolated_knockback']])$(id).onchange=e=>{const value=key==='length_unit'?e.target.value:Number(e.target.value);unitPreferenceQueue=unitPreferenceQueue.then(async()=>{try{applyUnitPreferences(await api('/api/preferences',{[key]:value}));}catch(err){toast(err.message);loadEnginePreferences();}});};
   api('/api/preferences').then(applyUnitPreferences).catch(err=>toast(err.message));
   async function loadEnginePreferences(){const fields=['#pref-copy-memory','#pref-proxy-level','#pref-proxy-auto','#pref-proxy-cap'].map(id=>$(id));fields.forEach(f=>f.disabled=true);try{const p=await api('/api/preferences');applyUnitPreferences(p);$('#pref-copy-memory').value=p.copy_memory_limit_mib;$('#pref-proxy-level').value=p.proxy.level;$('#pref-proxy-auto').checked=p.proxy.auto;$('#pref-proxy-cap').value=p.proxy.link_tris;}catch(err){toast(err.message);}finally{fields.forEach(f=>f.disabled=false);}}
   $('#pref-copy-memory').onchange=async e=>{try{const p=await api('/api/preferences',{copy_memory_limit_mib:Number(e.target.value)});e.target.value=p.copy_memory_limit_mib;pvKey=null;schedulePreview();}catch(err){toast(err.message);loadEnginePreferences();}};

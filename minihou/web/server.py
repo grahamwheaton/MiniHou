@@ -589,6 +589,9 @@ class _Handler(BaseHTTPRequestHandler):
             return self._static("index.html")
         if path.startswith("/static/"):
             return self._static(path[len("/static/"):])
+        if path == "/api/measurement_positions":
+            from ..measurements import resolve_session
+            return self._json(resolve_session(s))
         if path == "/api/state":
             return self._json(app.state())
         if path == '/api/preferences':
