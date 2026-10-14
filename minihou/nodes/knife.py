@@ -61,7 +61,8 @@ def cut_triangle(tri,a,b):
         for t in earclip(ids,xy):
             out=[xy[i] for i in t]
             if sign<0:out.reverse()
-            result.append(out)
+            if abs(cross(out[1]-out[0],out[2]-out[0])) > EPS*max(np.linalg.norm(out[1]-out[0]),np.linalg.norm(out[2]-out[0])):
+                result.append(out)
     return result
 
 @node('knife',inputs=['geo'],category='model',params=[Str('cuts','[]',doc='Interactive view-space cut segments, captured by the viewport Knife.')])
@@ -130,6 +131,11 @@ def knife(geo,cuts):
                 made=[]
                 for tri in rows[ti]:
                     q=np.array(tri)@P[ids];h=np.c_[q,np.ones(3)]@matrix.T;xy=h[:,:2]/h[:,3,None]
+                    # Do not reproject/reinterpolate unaffected rows: snapped strokes
+                    # often run along an existing edge and round trips create slivers.
+                    if clip(start,end,xy) is None:
+                        made.append(tri)
+                        continue
                     parts=cut_triangle(list(xy),start,end)
                     # A stroke can coincide with the temporary tessellation diagonal.
                     # Still materialise that diagonal when it is not a polygon boundary.
@@ -138,19 +144,35 @@ def knife(geo,cuts):
                     for part in parts:
                         weights=[]
                         for p in part:
-                            bc=bary(p,xy)/h[:,3];bc/=sum(bc);weights.append(bc@np.array(tri))
+                            bc=bary(p,xy)
+                            if bc is None:
+                                raise ValueError('Knife encountered a degenerate projected face; change the view or remove zero-area faces')
+                            bc=bc/h[:,3];total=sum(bc)
+                            if not np.isfinite(total) or abs(total)<1e-14:
+                                raise ValueError('Knife intersection lies on the camera plane; change the view')
+                            bc/=total;weights.append(bc@np.array(tri))
                         made.append(weights)
                 rows[ti]=made
     if not touched:return geo
     # Key by original point weights, never by position: coincident disconnected shells stay disconnected.
     positions=list(P);pointweights=[{i:1.} for i in range(len(P))];keys={((i,1.),):i for i in range(len(P))};faces=[];sources=[];vertexweights=[]
+    supports={tuple(row):[i] for i,row in enumerate(pointweights)}
     def point(cs,weights):
         mapping={}
         for c,v in zip(cs,weights):
             if abs(v)>1e-7:mapping[int(vp[c])]=mapping.get(int(vp[c]),0)+float(v)
+        total=sum(mapping.values())
+        mapping={i:v/total for i,v in mapping.items()}
+        support=tuple(sorted(mapping))
+        # Adjacent original triangles can compute the same snapped intersection
+        # a few ulps apart. Compare weights within the same support (never weld
+        # spatially coincident disconnected shells).
+        for index in supports.get(support,[]):
+            if max(abs(mapping[i]-pointweights[index][i]) for i in support)<2e-7:
+                return index
         key=tuple(sorted((i,round(v,7)) for i,v in mapping.items()))
         if key not in keys:
-            keys[key]=len(positions);positions.append(sum(P[i]*v for i,v in mapping.items()));pointweights.append(mapping)
+            keys[key]=len(positions);supports.setdefault(support,[]).append(len(positions));positions.append(sum(P[i]*v for i,v in mapping.items()));pointweights.append(mapping)
         return keys[key]
     for ti,(face,cs) in enumerate(original):
         if face not in touched:continue
@@ -170,6 +192,28 @@ def knife(geo,cuts):
             if a>=len(P) or b>=len(P):continue
             for idx,weights in sorted(edgepoints.get(tuple(sorted((a,b))),[]),key=lambda r:r[1].get(b,0)):
                 t=weights.get(b,0);aw=vertexweights[fi][j];bw=vertexweights[fi][(j+1)%len(face)];mix={k:aw.get(k,0)*(1-t)+bw.get(k,0)*t for k in aw.keys()|bw.keys()};expanded.append(idx);attrs.append(mix)
+        faces[fi]=expanded;vertexweights[fi]=attrs
+    # Successive snapped strokes may end on an earlier cut edge. Stitch those
+    # endpoints into every coplanar sibling, not just into original mesh edges.
+    # Scope candidates to the original face so coincident shells stay separate.
+    face_points={}
+    for face,source in zip(faces,sources):face_points.setdefault(source,set()).update(face)
+    positions_array=np.asarray(positions)
+    tolerance=max(float(np.ptp(P,axis=0).max())*1e-8,1e-12)
+    for fi,face in enumerate(faces):
+        candidates=np.asarray(sorted(face_points[sources[fi]]),dtype=int)
+        expanded=[];attrs=[]
+        for j,a in enumerate(face):
+            b=face[(j+1)%len(face)];expanded.append(a);attrs.append(vertexweights[fi][j])
+            delta=positions_array[b]-positions_array[a];den=float(delta@delta)
+            if den<=tolerance*tolerance:continue
+            relative=positions_array[candidates]-positions_array[a]
+            fractions=relative@delta/den
+            on=(fractions>1e-8)&(fractions<1-1e-8)&(np.linalg.norm(relative-fractions[:,None]*delta,axis=1)<tolerance)
+            for index in np.flatnonzero(on)[np.argsort(fractions[on])]:
+                idx=int(candidates[index]);t=float(fractions[index])
+                aw=vertexweights[fi][j];bw=vertexweights[fi][(j+1)%len(face)]
+                expanded.append(idx);attrs.append({k:aw.get(k,0)*(1-t)+bw.get(k,0)*t for k in aw.keys()|bw.keys()})
         faces[fi]=expanded;vertexweights[fi]=attrs
     def protected(a,b):
         for seg in segments:

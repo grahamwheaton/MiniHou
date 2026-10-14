@@ -82,3 +82,18 @@ class KnifeTests(unittest.TestCase):
   weights=edges.values(out,edges.CREASE)
   self.assertGreater(np.count_nonzero(weights),12)
   self.assertTrue(np.all(weights[edges.values(out,'edge_group_knife')>0]==0))
+
+ def test_seven_segment_snapped_bevel_path_degenerate_tessellation(self):
+  # Reproduced None / float: segment six retraces a tessellation diagonal and
+  # leaves a zero-area ear. Subsequent cuts must preserve all earlier endpoints.
+  from tests.test_nodes import run
+  from minihou.nodes.knife import knife
+  from minihou import edges
+  source=run('polybevel',run('box'),edges='0-1 0-2 1-3 2-3',divisions=8,distance=.2)
+  path=[[-.49666106700897217,-.49666106700897217],[.3736189305782318,.3736189305782318],[.48595765233039856,-.48595765233039856],[-.29412065636450413,.1783291491516698],[-.46739909052848816,.46739909052848816],[-.30000001192092896,-.30000001192092896],[.30000001192092896,.30000001192092896],[.4094419479370117,.4094419479370117]]
+  for through in (False,True):
+   out=knife(source,json.dumps([self.segment(a,b,through) for a,b in zip(path,path[1:])]))
+   out.validate();closed_shell(self,out)
+   self.assertAlmostEqual(volume(out),volume(source),places=6)
+   self.assertGreater(np.count_nonzero(edges.values(out,'edge_group_knife')),7)
+   self.assertTrue(np.isfinite(out.P).all())

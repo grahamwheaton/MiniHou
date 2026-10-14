@@ -66,3 +66,29 @@ class KnifeUI(unittest.TestCase):
   self.page.keyboard.press('Enter')
   self.page.wait_for_function("document.querySelector('.pv-drag-feedback').textContent.includes('Geometry changed')")
   self.assertEqual(set(self.s.graph.nodes),{'b','o'});self.page.keyboard.press('Escape')
+
+ def test_beveled_mesh_seven_segment_snapped_path(self):
+  from minihou import Evaluator
+  from tests.test_bevel import closed_shell,volume
+  self.box_scene()
+  self.s.edit([{'op':'replace','graph':{'nodes':{'b':{'type':'box','params':{'size':[2,2,2]}},'bevel':{'type':'polybevel','inputs':{'geo':'b'},'params':{'edges':'0-1 0-2 1-3 2-3','distance':.3,'divisions':8}},'o':{'type':'output','inputs':{'geo':'bevel'}}},'display':'o'}}])
+  self.page.wait_for_selector('.node[data-id="bevel"]');self.node('bevel').locator('.title').click()
+  self.page.wait_for_function("document.querySelector('#pv-node').innerText.includes('bevel') && minihou.preview.tris>12")
+  self.page.mouse.move(*self.xy([0,0,1]));self.page.keyboard.press('Numpad7')
+  self.page.wait_for_timeout(150)
+  self.page.click('#pv-knife')
+  # Start/end on actual vertices; interior points retrace a prior cut and make
+  # a chain through the rounded portion. Real pointer events exercise snapping.
+  source=Evaluator().cook(self.s.graph,'bevel')
+  points=source.P[source.P[:,2]>.99]
+  left=min(points,key=lambda p:float(p[0]+p[1]))
+  right=max(points,key=lambda p:float(p[0]+p[1]))
+  path=[left.tolist(),[-.35,-.2,1],[.35,-.2,1],[.35,.35,1],[-.35,.35,1],[-.35,-.2,1],[0,.65,1],right.tolist()]
+  for point in path:self.page.mouse.click(*self.xy(point))
+  self.page.keyboard.press('Enter');node=self.cutnode()
+  self.assertEqual(len(json.loads(node.params['cuts'])),7,node.params['cuts'])
+  out=Evaluator().cook(self.s.graph,node.id)
+  out.validate();closed_shell(self,out);self.assertAlmostEqual(volume(out),volume(source),places=5)
+  self.page.click('#undo-btn');self.assertTrue(f.until(lambda:not any(n.type=='knife' for n in self.s.graph.nodes.values())))
+
+
