@@ -12,6 +12,9 @@ live in the other and in Blender.
 ``GET  /api/events``   Server-Sent Events: ``graph`` (snapshot) and ``status`` events, latest-wins
 ``GET  /api/files``    graph files under the workspace root
 ``POST /api/edit``     ``{ops: [...], wait?: bool}`` -> ``{rev, results, changed, status?}`` (see :mod:`minihou.edit`)
+                       Optional ``gesture`` token merges a modal drag into one undo entry. Send ``document_id`` to fence file switches.
+``POST /api/gesture_cancel`` ``{gesture, document_id?}`` restores the drag's original graph, removes its undo entry and restores prior redo; refuses intervening graph edits
+``POST /api/gesture_finish`` ``{gesture, document_id?}`` closes the drag, retaining one undo entry; closed tokens cannot continue editing
 ``POST /api/undo``     also ``/api/redo``
 ``POST /api/inspect``  ``{node, detail?}`` -> geometry summary of any node
 ``POST /api/select_group`` ``{node}`` -> ``{node: first_input, domain: point|prim|edge, ids}``; resolves the group on input geometry without graph edits (at most 100000 ids)
@@ -663,12 +666,17 @@ class _Handler(BaseHTTPRequestHandler):
             ops = body.get("ops")
             if not isinstance(ops, list):
                 raise ApiError(400, '"ops" must be a list of edit operations')
-            out = s.edit(ops, origin=origin, document_id=body.get("document_id"))
+            out = s.edit(ops, origin=origin, document_id=body.get("document_id"), gesture=body.get('gesture'))
             if body.get("wait"):
                 s.wait_idle(float(body.get("timeout", 30)))
                 out["status"] = s.status()
                 s.flush()                                 # callers that wait may read the file next
             out["graph"] = s.snapshot()
+            return self._json(out)
+        if path in ('/api/gesture_cancel', '/api/gesture_finish'):
+            out = s.gesture_finish(body.get('gesture'), origin=origin, document_id=body.get('document_id'),
+                                   cancel=path == '/api/gesture_cancel')
+            out['graph'] = s.snapshot()
             return self._json(out)
         if path in ("/api/undo", "/api/redo"):
             ok = (s.undo if path == "/api/undo" else s.redo)(origin=origin, document_id=body.get("document_id"))

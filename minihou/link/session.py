@@ -119,6 +119,8 @@ class Session:
         self._watch_thread: Optional[threading.Thread] = None
         self._undo: List[tuple] = []                  # (graph dict, merge key, time)
         self._redo: List[dict] = []
+        self._gesture = None
+        self._closed_gestures = []                 # bounded fence for delayed modal requests
         self.path: Optional[Path] = None
         self._dirty = False                           # in-memory graph differs from the file
         self._file_text: Optional[str] = None         # last text read from / written to the file
@@ -226,11 +228,13 @@ class Session:
         self._notify_graph(origin)
         return v
 
-    def edit(self, ops: List[dict], origin: str = "api", document_id=None) -> dict:
+    def edit(self, ops: List[dict], origin: str = "api", document_id=None, gesture=None) -> dict:
         """Apply a batch of :mod:`minihou.edit` ops atomically. Raises :class:`~minihou.edit.EditError`.
 
         Returns ``{"rev", "results", "changed"}``. Interface changes (including exposed values) are pushed to link
         clients, so Blender follows edits made in the editor or by an AI."""
+        if gesture is not None:
+            self._validate_gesture(gesture)
         capture_rev = None
         if any(op.get("op") == "flag" and op.get("flag") == "lock" and op.get("value", True) for op in ops):
             from ..flags import freeze_geometry
@@ -250,23 +254,84 @@ class Session:
             if capture_rev is not None and capture_rev != self._rev:
                 raise GraphError("Graph changed while locking geometry; try again")
             before = self.graph.to_dict()
+            if gesture is not None:
+                if gesture in self._closed_gestures:
+                    raise GraphError('Gesture is closed or was interrupted by another edit')
+                if self._gesture is not None:
+                    self._check_gesture(gesture, before)
             new, results = apply_ops(self.graph, ops)
             changed = new.to_dict() != before
             if changed:
                 now = time.monotonic()
                 top = self._undo[-1] if self._undo else None
-                if not (key and top and top[1] == key and now - top[2] < MERGE_SECONDS):
+                if gesture is not None:
+                    if self._gesture is None:
+                        key = ('gesture', gesture, self._document_id)
+                        self._gesture = {'token': gesture, 'key': key, 'after': before,
+                                         'document': self._document_id, 'redo': list(self._redo)}
+                        self._undo.append((before, key, now))
+                        del self._undo[:-UNDO_LIMIT]
+                    else:
+                        key = self._gesture['key']
+                        self._undo[-1] = (top[0], key, now)
+                    self._gesture['after'] = new.to_dict()
+                elif not (key and top and top[1] == key and now - top[2] < MERGE_SECONDS):
+                    self._close_gesture()
                     self._undo.append((before, key, now))
                     del self._undo[:-UNDO_LIMIT]
                 else:
                     self._undo[-1] = (top[0], key, now)
                 self._redo.clear()
                 self.graph = new
-                self._changed()
+                self._changed(preserve_gesture=gesture is not None)
             rev = self._rev
         if changed:
             self._after_structural_change(origin)
         return {"rev": rev, "results": results, "changed": changed}
+
+    @staticmethod
+    def _validate_gesture(gesture):
+        if not isinstance(gesture, str) or not gesture.strip() or len(gesture) > 128:
+            raise GraphError('gesture must be a nonempty string of at most 128 characters')
+
+    def _close_gesture(self):
+        if self._gesture is not None:
+            self._closed_gestures.append(self._gesture['token'])
+            del self._closed_gestures[:-128]
+            self._gesture = None
+
+    def _check_gesture(self, gesture, current=None):
+        active = self._gesture
+        if (active is None or active['token'] != gesture or active['document'] != self._document_id
+                or not self._undo or self._undo[-1][1] != active['key']
+                or (self.graph.to_dict() if current is None else current) != active['after']):
+            raise GraphError('Gesture is no longer the most recent edit; refusing to overwrite other changes')
+
+    def gesture_finish(self, gesture, origin='api', document_id=None, cancel=False):
+        """Close a modal edit, or restore it without creating undo/redo artifacts.
+
+        Cancellation is fenced by document, undo-entry identity and exact current graph.
+        Intervening graph edits are never overwritten. Tokens are bounded to 128 characters;
+        the last 128 closed tokens reject delayed requests.
+        """
+        self._validate_gesture(gesture)
+        with self.lock:
+            self._check_document(document_id)
+            self._check_gesture(gesture)
+            active = self._gesture
+            before, _, stamp = self._undo[-1]
+            if cancel:
+                self.graph = Graph.from_dict(before, self.graph.registry, check=False)
+                self._undo.pop()
+                self._redo[:] = active['redo']
+                self._changed()
+            else:
+                self._undo[-1] = (before, None, stamp)
+            self._close_gesture()
+            rev = self._rev
+        if cancel:
+            self._after_structural_change(origin)
+        return {'ok': True, 'rev': rev, 'cancelled': bool(cancel)}
 
     def _check_document(self, document_id):
         if document_id is not None and document_id != self._document_id:
@@ -283,6 +348,7 @@ class Session:
             self._check_document(document_id)
             if not src:
                 return False
+            self._close_gesture()
             entry = src.pop()
             data = entry[0] if isinstance(entry, tuple) else entry
             cur = self.graph.to_dict()
@@ -295,6 +361,7 @@ class Session:
     def replace_graph(self, graph: Graph, origin: str = "file", save: bool = False) -> None:
         layout_missing(graph)
         with self.lock:
+            self._close_gesture()
             self.graph = graph
             if self.live_modifier is not None:
                 self.live_modifier.graph = graph.copy()
@@ -304,8 +371,10 @@ class Session:
                 self._dirty = True
         self._after_structural_change(origin)
 
-    def _changed(self) -> None:
+    def _changed(self, preserve_gesture=False) -> None:
         """Call with the lock held after mutating the graph."""
+        if not preserve_gesture:
+            self._close_gesture()
         if self.live_modifier is not None:
             self.live_modifier.graph = self.graph.copy()
         self._rev += 1
@@ -1056,6 +1125,7 @@ class Session:
             self.save_error = None
             self._undo.clear()
             self._redo.clear()
+            self._close_gesture()
             self._document_id += 1
             self._dirty = layout_missing(g)
             self.replace_graph(g, origin="open")
