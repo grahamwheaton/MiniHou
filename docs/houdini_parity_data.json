@@ -7190,8 +7190,29 @@
      "text": "This geometry is used by the in() function to check bounding regions (for topiaries)."
     }
    ],
-   "inputs_ok": false,
-   "inputs_ours": [],
+   "inputs_ok": true,
+   "inputs_ours": [
+    {
+     "multi": false,
+     "name": "leaf_j",
+     "optional": true
+    },
+    {
+     "multi": false,
+     "name": "leaf_k",
+     "optional": true
+    },
+    {
+     "multi": false,
+     "name": "leaf_m",
+     "optional": true
+    },
+    {
+     "multi": false,
+     "name": "meta_test",
+     "optional": true
+    }
+   ],
    "output_groups_houdini": [],
    "output_groups_ours": [],
    "outputs_houdini": [],
@@ -7199,138 +7220,8 @@
    "outputs_ours": [
     "geo"
    ],
-   "params_matched": 4,
+   "params_matched": 40,
    "params_missing": [
-    {
-     "folder": "",
-     "id": "type",
-     "label": "Type"
-    },
-    {
-     "folder": "",
-     "id": "start-position",
-     "label": "Start Position"
-    },
-    {
-     "folder": "",
-     "id": "random-scale",
-     "label": "Random Scale"
-    },
-    {
-     "folder": "",
-     "id": "random-seed",
-     "label": "Random Seed"
-    },
-    {
-     "folder": "",
-     "id": "continuous-angles",
-     "label": "Continuous Angles"
-    },
-    {
-     "folder": "",
-     "id": "continuous-length",
-     "label": "Continuous Length"
-    },
-    {
-     "folder": "",
-     "id": "continuous-width",
-     "label": "Continuous Width"
-    },
-    {
-     "folder": "",
-     "id": "apply-color",
-     "label": "Apply Color"
-    },
-    {
-     "folder": "",
-     "id": "image-file",
-     "label": "Image File"
-    },
-    {
-     "folder": "",
-     "id": "uv-increment",
-     "label": "UV Increment"
-    },
-    {
-     "folder": "",
-     "id": "point-attributes",
-     "label": "Point Attributes"
-    },
-    {
-     "folder": "",
-     "id": "rows",
-     "label": "Rows"
-    },
-    {
-     "folder": "",
-     "id": "cols",
-     "label": "Cols"
-    },
-    {
-     "folder": "",
-     "id": "tension",
-     "label": "Tension"
-    },
-    {
-     "folder": "",
-     "id": "branch-blend",
-     "label": "Branch Blend"
-    },
-    {
-     "folder": "",
-     "id": "thickness",
-     "label": "Thickness"
-    },
-    {
-     "folder": "",
-     "id": "thickness-scale",
-     "label": "Thickness Scale"
-    },
-    {
-     "folder": "",
-     "id": "apply-tube-texture-coordinates",
-     "label": "Apply Tube Texture Coordinates"
-    },
-    {
-     "folder": "",
-     "id": "vertical-increment",
-     "label": "Vertical Increment"
-    },
-    {
-     "folder": "",
-     "id": "step-size",
-     "label": "Step Size"
-    },
-    {
-     "folder": "",
-     "id": "step-size-scale",
-     "label": "Step Size Scale"
-    },
-    {
-     "folder": "",
-     "id": "angle-scale",
-     "label": "Angle Scale"
-    },
-    {
-     "folder": "",
-     "id": "variable-b",
-     "label": "Variable b"
-    },
-    {
-     "folder": "",
-     "id": "variable-c",
-     "label": "Variable c"
-    },
-    {
-     "folder": "",
-     "id": "variable-d",
-     "label": "Variable d"
-    },
-    {
-     "folder": "",
-     "id": "gravity",
-     "label": "Gravity"
-    },
     {
      "folder": "",
      "id": "number-of-variables",
@@ -7348,58 +7239,8 @@
     },
     {
      "folder": "",
-     "id": "pic-image-file",
-     "label": "Pic Image File"
-    },
-    {
-     "folder": "",
-     "id": "group-prefix",
-     "label": "Group Prefix"
-    },
-    {
-     "folder": "",
-     "id": "channel-prefix",
-     "label": "Channel Prefix"
-    },
-    {
-     "folder": "",
-     "id": "leaf-param-a",
-     "label": "Leaf Param A"
-    },
-    {
-     "folder": "",
-     "id": "leaf-param-b",
-     "label": "Leaf Param B"
-    },
-    {
-     "folder": "",
-     "id": "leaf-param-c",
-     "label": "Leaf Param C"
-    },
-    {
-     "folder": "",
-     "id": "read-rules-from-file",
-     "label": "Read Rules From File"
-    },
-    {
-     "folder": "",
      "id": "write-rule-parameters-to-file",
      "label": "Write Rule Parameters to File"
-    },
-    {
-     "folder": "",
-     "id": "rule-file",
-     "label": "Rule File"
-    },
-    {
-     "folder": "",
-     "id": "context-ignore",
-     "label": "Context Ignore"
-    },
-    {
-     "folder": "",
-     "id": "context-includes-siblings",
-     "label": "Context Includes Siblings"
     }
    ],
    "params_total": 44,

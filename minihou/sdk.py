@@ -195,15 +195,15 @@ def Str(name, default="", *, kind="", label="", doc=""):
     return Param(name, "str", default, label=label, doc=doc, ui=kind)
 
 
-def Vec3(name, default=(0.0, 0.0, 0.0), *, min=None, max=None, label="", doc=""):
-    return Param(name, "vec3", default, min, max, label=label, doc=doc)
+def Vec3(name, default=(0.0, 0.0, 0.0), *, min=None, max=None, label="", doc="", ui=""):
+    return Param(name, "vec3", default, min, max, label=label, doc=doc, ui=ui)
 
 
-def Enum(name, choices: Sequence[str], default=None, *, label="", doc=""):
+def Enum(name, choices: Sequence[str], default=None, *, label="", doc="", ui=""):
     choices = tuple(choices)
     if not choices:
         raise ValueError("Enum needs at least one choice")
-    return Param(name, "enum", choices[0] if default is None else default, label=label, doc=doc, choices=choices)
+    return Param(name, "enum", choices[0] if default is None else default, label=label, doc=doc, choices=choices, ui=ui)
 
 
 @dataclass(frozen=True)

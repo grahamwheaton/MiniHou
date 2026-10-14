@@ -1156,9 +1156,15 @@ class EditorE2E(unittest.TestCase):
         self.page.evaluate("minihou.preview.frameAll()")
         self.page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
         self.assertTrue(until(lambda: len(self.selection()["faces"]) == 1))
+        self.node("b").locator(".title").click()                                               # view the box: another node, the same topology...
+        self.page.wait_for_function("minihou.preview.bounds()[0][0] < 0")
+        self.assertEqual(self.page.evaluate("minihou.preview.lastUpload"), "positions")
+        self.assertEqual(len(self.selection()["faces"]), 1)                                    # ...so the selected face still means the same face
+        self.page.evaluate("""() => { const pv = minihou.preview, set = pv.set.bind(pv); window.uploads = [];
+                                      pv.set = (...a) => { const r = set(...a); window.uploads.push([pv.lastUpload, pv.tris]); return r; }; }""")
         self.s.edit([{"op": "set", "id": "b", "params": {"divisions": 2}}])              # other topology: everything again
         self.page.wait_for_function("minihou.preview.tris > 12")
-        self.assertEqual(self.page.evaluate("minihou.preview.lastUpload"), "all")
+        self.assertIn("all", [u for u, t in self.page.evaluate("window.uploads") if t > 12])  # later same-topology refreshes may follow
 
     def test_dragging_a_transform_arrow_moves_the_node_and_keeps_the_other_components(self):
         self.handle_scene("transform", {"translate": [0.5, 1.0, 2.0]}, "h")
@@ -2644,6 +2650,8 @@ class EditorE2E(unittest.TestCase):
         self.page.locator('#pv-normals').uncheck()
         self.page.evaluate("async () => { await minihou.edit([{op:'insert',after:'b',type:'polybevel',params:{distance:0.1}}]); }")
         self.node('polybevel1').click()
+        self.assertFalse(self.page.locator('#pv-context').is_visible())                     # the Parameters panel already shows them
+        self.page.click('#lay-side')                                                        # hide it: the view's strip takes over
         field = self.page.locator('#pv-context [data-param="distance"] input[type="number"]')
         field.fill('0.23')
         field.press('Tab')

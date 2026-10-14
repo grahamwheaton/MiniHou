@@ -114,7 +114,7 @@
   <div id="work">
   <section id="canvas" tabindex="0" aria-label="Node graph">
     <div id="network-gesture-status" role="status" aria-live="polite"></div>
-    <div id="network-pane-header" class="pane-heading"><span>Node network</span><span class="flag-legend">M Mute · L Lock · T Template · D Display</span><span class="spacer"></span><label title="Gentle visual movement while dragging; respects reduced motion"><input id="network-dynamic" type="checkbox"> Dynamic Nodes</label><label><input id="network-snap" type="checkbox"> Snap</label><button id="network-home" title="Frame all nodes" aria-label="Frame all nodes">⌂</button></div>
+    <div id="network-pane-header" class="pane-heading"><span>Node network</span><span class="spacer"></span><label title="Gentle visual movement while dragging; respects reduced motion"><input id="network-dynamic" type="checkbox"> Dynamic Nodes</label><label><input id="network-snap" type="checkbox"> Snap</label><button id="network-home" title="Frame all nodes" aria-label="Frame all nodes">⌂</button></div>
     <div id="network-toolbar" aria-label="Node editor commands">
   <div class="file">
     <button id="file-btn" title="Open or create a graph file">
@@ -155,7 +155,7 @@
         <select id="pv-orientation" aria-label="Transform orientation" title="Transform orientation: coordinate frame for selection transforms and curve constraints"><option value="global">Global</option><option value="local">Local</option><option value="normal">Normal</option><option value="view">View</option><option value="cursor">Cursor</option><option value="custom">Custom</option></select>
         <label class="pv-check" title="Snap (Ctrl toggles while dragging)"><input id="pv-snap" type="checkbox"> Snap</label>
         <select id="pv-snap-element" aria-label="Snap element"><option value="increment">Increment</option><option value="grid">Grid</option><option value="vertex">Vertex</option><option value="vertex,face">Vertex + Face</option><option value="edge">Edge</option><option value="midpoint">Edge midpoint</option><option value="perpendicular">Edge perpendicular</option><option value="face">Face</option></select>
-        <details class="pv-settings-pop"><summary title="Transform and snapping settings">Settings</summary><div class="pv-settings">
+        <details class="pv-settings-pop"><summary title="Transform and snapping settings" aria-label="Transform and snapping settings">⚙</summary><div class="pv-settings">
           <label>Snap base <select id="pv-snap-target" aria-label="Snap base"><option value="center">Center</option><option value="median">Median</option><option value="active">Active</option><option value="closest">Closest vertex</option></select></label>
           <button id="pv-custom-frame" title="Capture the current selection normal as a custom orientation">Capture custom orientation</button>
           <label>Move increment <input id="pv-move-step" type="number" min="0.000001" step="0.1" value="0.1"></label>
@@ -170,7 +170,7 @@
         <span id="pv-selinfo" class="muted small"></span>
         <select id="pv-follow" aria-label="Preview source" title="What the viewport shows"><option value="display">Display flag</option><option value="selection">Inspect selected node</option></select>
         <span id="pv-node" class="muted small"></span>
-        <button id="pv-sheet-btn" class="small" title="Geometry spreadsheet: every point, vertex, primitive, edge and detail attribute">Sheet</button>
+        <button id="pv-sheet-btn" class="small" title="Geometry spreadsheet: every point, vertex, primitive, edge and detail attribute" aria-label="Spreadsheet">▦</button>
         <button id="pv-frame" title="Frame the selection, or everything (Numpad . / Home / double-click the view)" aria-label="Frame selection">⌂</button>
         <button id="pv-side-btn" class="on" title="Show or hide the display settings panel" aria-label="Display settings" aria-pressed="true">☰</button>
         <button id="pv-max" class="small" title="Maximize viewport (Ctrl+Space)" aria-label="Maximize">⛶</button>
@@ -197,6 +197,8 @@
         <button data-pv-proxy="#pv-tool-edge" role="menuitem">Edges <span class="menu-shortcut">2</span></button>
         <button data-pv-proxy="#pv-tool-face" role="menuitem">Faces <span class="menu-shortcut">3</span></button>
         <button data-pv-proxy="#pv-tool-piece" role="menuitem">Objects <span class="menu-shortcut">4</span></button>
+        <div class="pv-menu-h">Ctrl-click path</div>
+        <label class="pv-path-setting pv-menu-field"><select id="pv-path-mode"><option value="direct">Most direct</option><option value="shortest">Shortest (fewest steps)</option></select></label>
         <div class="pv-menu-h">Attributes</div>
         <button data-pv-proxy="#pv-paint-btn" role="menuitem">Paint <span class="menu-shortcut">5</span></button>
         <button data-pv-proxy="#pv-assign-btn" role="menuitem">Quick assign</button>
@@ -249,7 +251,6 @@
             <select id="pv-proxy-level" aria-label="Cook proxy level" title="Cook proxy: nodes cook a lighter version of the scene (counts, resolutions and voxel sizes scale). Full is the real thing."></select>
             <button id="pv-perf-btn" class="small" aria-haspopup="dialog" aria-expanded="false" title="Performance and view clipping for very large scenes: impostors for instances, display budget, culling, near/far clip, section plane">Performance ▾</button>
           </details>
-                <label class="pv-path-setting">Ctrl-click path <select id="pv-path-mode"><option value="direct">Most direct</option><option value="shortest">Shortest (fewest steps)</option></select></label>
       <details id="pv-proportional"><summary>Proportional editing</summary><label><input id="pv-proportional-enabled" type="checkbox"> Enable (O)</label><label>Radius <input id="pv-proportional-radius" type="number" min="0.0001" value="1" step="0.1"></label><select id="pv-proportional-falloff"><option>smooth</option><option>sphere</option><option>root</option><option>sharp</option><option>linear</option><option>constant</option><option>random</option></select><label><input id="pv-proportional-connected" type="checkbox"> Connected only</label><label><input id="pv-proportional-projected" type="checkbox"> Projected</label></details>
           <details id="pv-sketch" class="pv-sec"><summary>Sketch &amp; Measure</summary><div id="pv-sketch-panel"></div></details>
         </div>

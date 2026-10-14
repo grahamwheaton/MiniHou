@@ -862,3 +862,51 @@ svg.ic .fl { fill: currentColor; fill-opacity: .35; }
 #pv-sketch[open] #pv-sketch-panel label {font-size:12px;}
 #pv-sketch[open] #pv-sketch-panel input,#pv-sketch[open] #pv-sketch-panel select {min-height:28px;font-size:12px;}
 #preview .pv-wrap {overflow:hidden;}
+/* ---- Design pass (critique of 14 Oct): more room for the graph and the view, calmer colour, readable text. ---- */
+:root { --muted: #9aa2ab; --app-header-h: 26px; }                  /* muted text now passes WCAG AA (4.5:1) on every panel */
+/* The layout switcher and the two icons live at the right end of the menu bar: one header row instead of two. */
+#topbar { position: absolute; top: 0; right: 0; height: 26px; z-index: 20; padding: 0 6px; background: transparent; border: 0; }
+#topbar button { padding: 1px 6px; }
+#app-menubar { padding-right: 320px; }
+#app-document { min-width: 0; }
+/* Orange means selected or active, nothing else: node titles are plain text, their subtitle muted. */
+.node .title { color: #e6e9ed; }
+.node .sub { color: var(--muted); }
+.node.selected .title { color: var(--accent); }
+/* One heading style for the panes. */
+#info > .panel-title { text-transform: none; letter-spacing: 0; }
+#info > .panel-title label { text-transform: none; font-weight: 400; color: var(--muted); }
+#network-pane-header > span:first-child { white-space: nowrap; }
+#network-pane-header button { min-width: 22px; min-height: 22px; }
+#network-pane-header label { min-height: 22px; }
+/* A cancelled cook is a notice, not an error. */
+#errorbar.notice { background: #2c3742; border-top-color: #4f6b85; color: #d7e3ef; cursor: default; }
+/* Node descriptions: three lines, click for the rest. */
+.pdoc { max-height: none; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; cursor: pointer; }
+.pdoc.open { display: block; -webkit-line-clamp: unset; }
+/* Viewport header: compact controls; what only repeats other information goes first when the pane is narrow. */
+#preview { container: pv / inline-size; }
+.pv-header .pv-chip strong { max-width: 110px; }
+.pv-header #pv-orientation { max-width: 74px; }
+.pv-header #pv-snap-element { max-width: 84px; }
+.pv-header #pv-follow { max-width: 104px; }
+.pv-header #pv-sheet-btn, .pv-header .pv-settings-pop > summary { padding: 2px 6px; font-size: 13px; }
+.pv-menu-field { display: block; padding: 2px 6px 4px; }
+.pv-menu-field select { width: 100%; margin: 0; }
+@container pv (max-width: 760px) { #pv-mode-btn, #pv-node, #pv-selinfo { display: none; } }
+/* The quick-parameter strip repeats the Parameters panel: it shows only when that panel is hidden or the view is maximised. */
+body:not(.side-hidden) #work:not(.max-view) #pv-context { display: none !important; }
+/* Hints never run into the axis gizmo; a narrow view keeps only their title. */
+.pv-wrap { container: pvwrap / inline-size; }
+.pv-hints { max-width: min(320px, calc(100% - 130px)); }
+@container pvwrap (max-width: 420px) { #pv-hint-text { display: none; } }
+/* The timeline stays on one row: the slider gives way first. */
+.pv-time { flex-wrap: nowrap; overflow: hidden; }
+.pv-time input[type=range] { flex: 1 1 40px; min-width: 24px; }
+.pv-time #tl-frame { width: 54px; }
+.pv-time .tl-range input { width: 40px; }
+#preview > .pv-header { gap: 3px; }
+.pv-header > button[data-pv-menu] { padding: 2px 6px; }
+.pv-header #pv-follow { max-width: 96px; }
+.pv-header #pv-snap-element { max-width: 78px; }
+.pv-header > .spacer { min-width: 0; }
