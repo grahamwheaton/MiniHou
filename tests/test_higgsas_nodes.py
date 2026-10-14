@@ -47,6 +47,22 @@ class SolidifyTests(unittest.TestCase):
         o = one("solidify", {"thickness": 0.1, "offset": 1.0})
         self.assertAlmostEqual(volume(o), 1.2 ** 3 - 1.0, places=5)
 
+    def test_negative_thickness_is_the_other_way_and_stays_a_valid_solid(self):
+        for offset in (-1.0, 0.0, 1.0):
+            neg = one("solidify", {"thickness": -0.1, "offset": offset})
+            pos = one("solidify", {"thickness": 0.1, "offset": -offset})
+            closed(self, neg)
+            self.assertGreater(volume(neg), 0.0)
+            self.assertAlmostEqual(volume(neg), volume(pos), places=6)
+            np.testing.assert_allclose(np.sort(neg.P, axis=0), np.sort(pos.P, axis=0), atol=1e-6)
+        grown = one("solidify", {"thickness": 0.1, "offset": 1.0})
+        self.assertAlmostEqual(volume(grown), 1.2 ** 3 - 1.0, places=5)
+        closed(self, grown)
+        plate = {"type": "grid", "params": {"size_x": 2, "size_y": 2, "rows": 3, "columns": 3}}
+        g = one("solidify", {"thickness": -0.2}, src=plate)
+        closed(self, g)
+        self.assertGreater(volume(g), 0.0)
+
     def test_even_thickness_keeps_the_wall_the_same_at_corners(self):
         even = one("solidify", {"thickness": 0.1, "even": True})
         flat = one("solidify", {"thickness": 0.1, "even": False})
@@ -258,6 +274,21 @@ class ContourTests(unittest.TestCase):
         f = one("contour", {"attribute": "h", "level": 3.0, "fill": True}, src=GRID, extra=extra, inputs={"geo": "w"})
         self.assertFalse(f.topology.has_open)
         self.assertAlmostEqual(area(f), np.pi * 9, delta=1.0)
+
+    def test_the_outline_is_an_ordinary_open_curve_for_sweep_resample_and_the_link(self):
+        extra = with_h("f@h = length(@P);")
+        extra["c"] = {"type": "contour", "inputs": {"geo": "w"}, "params": {"attribute": "h", "level": 3.0}}
+        swept = one("sweep", {"radius": 0.1}, src=GRID, extra=extra, inputs={"geo": "c"})
+        self.assertEqual(swept.npoints, 21 * 8)                                          # 20 segments + the point that closes it, 8 sides each
+        resampled = one("resample", {"length": 0.5}, src=GRID, extra=extra, inputs={"geo": "c"})
+        self.assertEqual(resampled.nprims, 1)
+        from minihou.link.diff import DiffState
+        from minihou.link.protocol import GeoUpdate, Mirror
+        c = cook({"s": GRID, **extra}, "c")
+        h, arrays = DiffState().build(c.freeze(), 1)
+        m = Mirror()
+        m.apply(GeoUpdate.from_message(h, arrays))
+        self.assertEqual(m.prim_closed.tolist(), [False])                                # a curve in Blender too, not a face
 
     def test_several_levels_each_carry_their_level(self):
         extra = with_h("f@h = length(@P);")

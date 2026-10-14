@@ -15,7 +15,7 @@ SOLID_OUT = OutGroups(
 
 
 @node("solidify", inputs=["geo"], category="model", params=[
-    Float("thickness", 0.1, soft_min=-1.0, soft_max=1.0, doc="How thick the shell is, along the normals (negative: the other way)"),
+    Float("thickness", 0.1, soft_min=-1.0, soft_max=1.0, doc="How thick the shell is (negative: the shell grows the other way, as if the offset were mirrored)"),
     Float("offset", -1.0, min=-1.0, max=1.0, doc="Where the original surface sits: -1: it stays the outer surface and the shell grows "
                                                   "against the normals; 0: the shell is centred on it; 1: it is the inner surface"),
     Bool("even", True, doc="Keep the thickness the same at corners and creases (move points further out where faces meet at an angle)"),
@@ -28,6 +28,8 @@ def solidify(geo, thickness, offset, even, rim, group, **og):
     the opposite winding, and a rim of quads along every open edge. Closed meshes become a hollow shell (two nested surfaces).
     Attributes ride along (points and corners copied to the inner surface; the rim takes those of the face it closes);
     N is removed. Curves in the input pass through untouched."""
+    if thickness < 0:                                    # the other way: the same shell with the offset mirrored (faces keep facing outward)
+        thickness, offset = -thickness, -offset
     t = geo.topology
     sizes = t.prim_sizes()
     sel = groups.mask(geo, "prim", group)
