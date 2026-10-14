@@ -1151,6 +1151,10 @@ class EditorE2E(unittest.TestCase):
         self.page.evaluate("minihou.preview.frameAll()")
         self.page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
         self.assertTrue(until(lambda: len(self.selection()["faces"]) == 1))
+        self.node("b").locator(".title").click()                                               # view the box: another node, the same topology...
+        self.page.wait_for_function("minihou.preview.bounds()[0][0] < 0")
+        self.assertEqual(self.page.evaluate("minihou.preview.lastUpload"), "positions")
+        self.assertEqual(len(self.selection()["faces"]), 1)                                    # ...so the selected face still means the same face
         self.page.evaluate("""() => { const pv = minihou.preview, set = pv.set.bind(pv); window.uploads = [];
                                       pv.set = (...a) => { const r = set(...a); window.uploads.push([pv.lastUpload, pv.tris]); return r; }; }""")
         self.s.edit([{"op": "set", "id": "b", "params": {"divisions": 2}}])              # other topology: everything again
