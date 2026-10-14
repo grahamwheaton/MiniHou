@@ -48,6 +48,10 @@
       <button id="preferences-network-tab" type="button" role="tab" aria-selected="false" aria-controls="preferences-network-page" data-preference-tab="network" tabindex="-1">Node editor</button>
     </div>
     <fieldset id="preferences-viewport-page" role="tabpanel" aria-labelledby="preferences-viewport-tab" data-preference-page="viewport"><legend>3D viewport</legend>
+      <label>Length display <select id="pref-length-unit"><option>mm</option><option>cm</option><option>m</option><option>km</option><option>in</option><option>ft</option></select></label>
+      <label>Unit scale <input id="pref-unit-scale" type="number" min="0.000000001" max="1000000000" step="any" value="1"></label>
+      <p>Display only: scale 1 means one model unit is one metre (1000 mm). Existing geometry is never resized. Explicit length suffixes are accepted by measurement editing.</p>
+      <label>Isolated knockback <input id="pref-isolated-knockback" type="range" min="0" max="1" step="0.05" value="0.75"></label>
       <label>Navigation <select id="pref-navigation"><option value="blender">Blender (middle mouse orbit)</option><option value="houdini">Houdini / MiniHou</option></select></label>
       <label><input id="pref-orbitDepth" type="checkbox"> Orbit around geometry depth under the mouse</label>
       <label>Display mode <select id="pref-display-mode"><option value="shaded">Shaded</option><option value="edges">Shaded + edges</option><option value="wire">Wireframe</option><option value="points">Points</option></select></label>
@@ -333,6 +337,7 @@
 <script src="/static/pie.js"></script>
 <script src="/static/shelf.js"></script>
 <script src="/static/interaction.js"></script>
+<script src="/static/units.js"></script>
 <script src="/static/modal-model-tool.js"></script>
 <script src="/static/viewport-placement.js"></script>
 <script src="/static/selection-tools.js"></script>

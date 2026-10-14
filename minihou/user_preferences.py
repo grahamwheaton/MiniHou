@@ -14,7 +14,22 @@ _LOCK = threading.RLock()
 
 def defaults():
     return {'python_nodes': False, 'copy_memory_limit_mib': COPY_LIMIT_DEFAULT,
+            'length_unit': 'mm', 'unit_scale': 1.0, 'isolated_knockback': .75,
             'proxy': {'level': 1.0, 'auto': False, 'link_tris': 0}}
+
+
+def _display_preference(key, value):
+    if key == 'length_unit':
+        if value not in ('mm', 'cm', 'm', 'km', 'in', 'ft'):
+            raise ValueError('unsupported length unit')
+        return value
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f'{key} must be finite')
+    if key == 'unit_scale' and not 1e-9 <= value <= 1e9:
+        raise ValueError('unit_scale must be between 1e-9 and 1e9')
+    if key == 'isolated_knockback' and not 0 <= value <= 1:
+        raise ValueError('isolated_knockback must be between 0 and 1')
+    return float(value)
 
 
 def _copy_limit(value):
@@ -58,6 +73,12 @@ def read():
             out['copy_memory_limit_mib'] = _copy_limit(data.get('copy_memory_limit_mib', COPY_LIMIT_DEFAULT))
         except ValueError:
             pass
+        for key in ('length_unit', 'unit_scale', 'isolated_knockback'):
+            if key in data:
+                try:
+                    out[key] = _display_preference(key, data[key])
+                except ValueError:
+                    pass
         saved_proxy = data.get('proxy', {})
         if isinstance(saved_proxy, dict):
             for key in out['proxy']:
@@ -80,9 +101,12 @@ def describe():
 
 def update(values):
     """Validate a partial update and atomically preserve all other known settings."""
-    if not isinstance(values, dict) or not values or set(values)-{'python_nodes', 'copy_memory_limit_mib', 'proxy'}:
+    if not isinstance(values, dict) or not values or set(values)-{'python_nodes', 'copy_memory_limit_mib', 'proxy', 'length_unit', 'unit_scale', 'isolated_knockback'}:
         raise ValueError('preferences requires python_nodes, copy_memory_limit_mib or proxy')
     clean = {}
+    for key in ('length_unit', 'unit_scale', 'isolated_knockback'):
+        if key in values:
+            clean[key] = _display_preference(key, values[key])
     if 'python_nodes' in values:
         if not isinstance(values['python_nodes'], bool):
             raise ValueError('python_nodes must be a boolean')

@@ -653,7 +653,7 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/preferences":
             from .. import user_preferences
             from ..nodes import python_node
-            values = {key: body[key] for key in ('python_nodes', 'copy_memory_limit_mib') if key in body}
+            values = {key: body[key] for key in ('python_nodes', 'copy_memory_limit_mib', 'length_unit', 'unit_scale', 'isolated_knockback') if key in body}
             with s._cook_lock:
                 try:
                     user_preferences.update(values)
