@@ -146,7 +146,7 @@ def draw_stats(t, npoints: int) -> Tuple[int, int, int]:
     """``(fan triangles of the closed polygons, vertices of the open curves, points no primitive uses)`` of a topology. Cached on
     the topology once its arrays are frozen (cooked geometry), so a deformer downstream, which shares its input's topology, gets
     them for free."""
-    hit = t._draw_stats
+    hit = getattr(t, "_draw_stats", None)
     if hit is not None and hit[0] == npoints:
         return hit[1:]
     sizes = np.diff(t.prim_offsets)

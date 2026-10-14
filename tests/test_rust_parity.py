@@ -193,6 +193,9 @@ class RustParityTests(unittest.TestCase):
         from minihou import preview
         big = py_cook(chain(("noise", {"amplitude": [0.3, 0.3, 2], "frequency": 0.7}),
                             source={"type": "grid", "params": {"columns": 420, "rows": 300, "size_x": 30, "size_y": 20}}))
+        with rust.disabled():                                             # the reduced view below really takes the Rust branch
+            red = preview.proxy.decimate(big, 150000, 300000)
+        self.assertTrue(red.reduced and red.geo.nprims > preview.EXACT_PRIMS, (red.reduced, red.geo.nprims))
         tris = py_cook({"version": 1, "nodes": {"b": {"type": "box", "params": {"connectivity": "triangles", "divisions": 140}}},
                         "display": "b"})
         # quads, triangles and an open curve together, past the exact-triangulation size
@@ -204,7 +207,11 @@ class RustParityTests(unittest.TestCase):
         from minihou.nodes.merge import merge
         mixed = merge([mixed, curve])
         for geo in (big, tris, mixed):
-            for full, budget in ((True, 0), (False, 20000)):                   # full resolution, and a reduced (clustered) view
+            # full resolution; a reduced (clustered) view that stays above preview.EXACT_PRIMS, so the Rust layout maps the
+            # clustered primitives back (red.prim_src); and one small enough for the Python exact triangulation
+            for full, budget in ((True, 0), (False, 150000 if geo is big else 0), (False, 20000)):
+                if not full and not budget:
+                    continue
                 preview._LAYOUTS.clear()
                 h_rs, a_rs = preview._arrays_for(geo, full=full, tris=budget)
                 for name, ctx in paths():

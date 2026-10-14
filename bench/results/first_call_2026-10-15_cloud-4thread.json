@@ -1,0 +1,56 @@
+[
+  {
+    "start": 0.3599721219998173,
+    "cook": 4.015341106000051,
+    "view": 1.715898486000242,
+    "numba": "numpy only (disabled by MINIHOU_NO_NUMBA)",
+    "rust": "not installed",
+    "backend": "numpy",
+    "quads": 1000000
+  },
+  {
+    "start": 0.7217874240000128,
+    "cook": 0.32106813499967757,
+    "view": 0.416603878999922,
+    "numba": "numba 0.68.0",
+    "rust": "not installed",
+    "backend": "numba",
+    "quads": 1000000
+  },
+  {
+    "start": 0.7916170560001774,
+    "cook": 0.20723230700014028,
+    "view": 0.20250081899985162,
+    "numba": "numba 0.68.0",
+    "rust": "minihou_rs 0.1.0",
+    "backend": "rust",
+    "quads": 1000000
+  },
+  {
+    "start": 0.37626554999997097,
+    "cook": 19.327148502,
+    "view": 8.035626117999982,
+    "numba": "numpy only (disabled by MINIHOU_NO_NUMBA)",
+    "rust": "not installed",
+    "backend": "numpy",
+    "quads": 4000000
+  },
+  {
+    "start": 0.6897481760001938,
+    "cook": 1.104858527000033,
+    "view": 2.125201007999749,
+    "numba": "numba 0.68.0",
+    "rust": "not installed",
+    "backend": "numba",
+    "quads": 4000000
+  },
+  {
+    "start": 0.7132733080002254,
+    "cook": 0.6729882610002278,
+    "view": 0.8046188550001716,
+    "numba": "numba 0.68.0",
+    "rust": "minihou_rs 0.1.0",
+    "backend": "rust",
+    "quads": 4000000
+  }
+]

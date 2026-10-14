@@ -93,7 +93,7 @@ def point_prims(topology, npoints: int):
     """``(start, prims)``: the primitives around each point (CSR, in primitive order). It depends only on the topology, so it is
     cached on a frozen (cooked) topology: a deformer downstream shares its input's topology and reuses it."""
     t = topology
-    hit = t._point_prims
+    hit = getattr(t, "_point_prims", None)
     if hit is not None and hit[0] == npoints:
         return hit[1]
     table = _need().point_prims(_i32(t.vertex_point), _i32(t.prim_offsets), int(npoints))
