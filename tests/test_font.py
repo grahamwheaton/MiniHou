@@ -4,6 +4,7 @@ import unittest
 import numpy as np
 
 from minihou import Evaluator, Graph, timectx
+from minihou.nodes.font import HAVE_FONTTOOLS
 from minihou.sdk import REGISTRY
 
 
@@ -17,6 +18,7 @@ def cook_font(**params):
     }))
 
 
+@unittest.skipUnless(HAVE_FONTTOOLS, "fontTools is required for font node tests")
 class FontTests(unittest.TestCase):
     def test_default_creation(self):
         g = cook_font()

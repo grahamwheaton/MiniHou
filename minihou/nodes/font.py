@@ -11,8 +11,14 @@ import sys
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from fontTools.pens.basePen import BasePen
-from fontTools.ttLib import TTFont
+try:
+    from fontTools.pens.basePen import BasePen
+    from fontTools.ttLib import TTFont
+    HAVE_FONTTOOLS = True
+except ImportError:
+    HAVE_FONTTOOLS = False
+    BasePen = object  # type: ignore
+    TTFont = object  # type: ignore
 
 from .. import paths, timectx
 from ..boolean import _area2, _inside_poly, earclip, holes_into
@@ -299,6 +305,9 @@ def font(**p):
     alignment, letter and line tracking, kerning, oblique slant, arbitrary scaling and rotation,
     and textsymbol/textindex primitive attributes.
     """
+    if not HAVE_FONTTOOLS:
+        raise RuntimeError("The 'font' node requires 'fonttools' to parse font files: pip install fonttools")
+
     def _pick(primary, alias, default):
         if primary in p and p[primary] != default:
             return p[primary]
