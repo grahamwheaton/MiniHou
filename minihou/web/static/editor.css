@@ -811,3 +811,42 @@ svg.ic .fl { fill: currentColor; fill-opacity: .35; }
 [data-knife-active] .pv-handles{visibility:hidden;}
 [data-knife-active] .pv-drag-feedback{white-space:normal;width:max-content;max-width:calc(100% - 40px);text-align:center;box-sizing:border-box;}
 .pv-knife-options details{position:relative;}.pv-knife-options details>div{position:absolute;right:0;top:22px;width:330px;max-width:70vw;padding:12px;background:#24272d;border:1px solid #765989;line-height:1.7;z-index:30;}
+
+/* Long preference groups use one scroll surface; flex-shrinking fieldsets can
+   otherwise paint their contents over the following group in Chromium. */
+#preferences {box-sizing:border-box;max-height:90vh;overflow:auto;}
+#preferences form {display:block;max-height:none;overflow:visible;}
+#preferences form > * {flex-shrink:0;}
+#preferences fieldset {min-width:0;min-height:auto;max-height:none;overflow:visible;margin:12px 0;padding:4px 6px;}
+#preferences fieldset:not([data-preference-page]) {border-top:1px solid var(--line);padding-top:10px;}
+#preferences fieldset:not([data-preference-page]) legend {display:block;font-size:12px;font-weight:600;padding:0 4px;}
+#preferences label {white-space:normal;line-height:1.5;}
+#preferences label input:not([type=checkbox]),#preferences label select {flex-shrink:0;max-width:50%;box-sizing:border-box;}
+#preferences .preference-tabs {margin-top:10px;}
+#preferences .preferences-actions:last-child {margin-top:12px;}
+
+/* Keep the viewport inspector vertically scrollable without shrinking sections
+   or allowing long measurement labels and numeric inputs to extend sideways. */
+#preview .pv-stage {min-height:0;}
+#preview .pv-display-strip {min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden;box-sizing:border-box;scrollbar-gutter:stable;}
+#preview .pv-display-strip > * {flex:0 0 auto;min-width:0;max-width:100%;box-sizing:border-box;}
+#preview .pv-display-strip label {white-space:normal;overflow-wrap:anywhere;}
+#pv-sketch {padding:0;}
+#pv-sketch-panel {box-sizing:border-box;min-width:0;}
+#pv-sketch-panel > div {min-width:0;align-items:stretch;}
+#pv-sketch-panel p {white-space:normal;overflow-wrap:anywhere;line-height:1.4;}
+#pv-sketch-panel label {display:block !important;width:100%;min-width:0;white-space:normal;line-height:1.4;margin:5px 0;}
+#pv-sketch-panel input,#pv-sketch-panel select {display:block;box-sizing:border-box;width:100% !important;max-width:100%;min-width:0;background:var(--bg);color:var(--text);border:1px solid var(--line);padding:4px;}
+#pv-sketch-panel [data-measurements] {width:100%;min-width:0;flex-basis:100%;}
+#pv-sketch-panel button {max-width:100%;white-space:normal;overflow-wrap:normal;margin:2px 0;}
+#pv-sketch-panel [data-measurements] > button {display:block;width:100%;}
+#preview .pv-display-strip select,#preview .pv-display-strip input[type=number] {min-width:0;max-width:100%;box-sizing:border-box;}
+#preview .pv-display-strip .pv-path-setting {display:block;padding:5px 8px;}
+#preview .pv-display-strip .pv-path-setting select {display:block;width:100%;margin-top:4px;}
+#preview .pv-display-strip #pv-proportional {padding:0 8px;}
+#preferences h2 {margin-bottom:8px;}
+#preferences form > p {margin-bottom:10px;}
+#preferences,#preview .pv-display-strip {scrollbar-width:thin;scrollbar-color:#707987 #252a30;}
+#preferences::-webkit-scrollbar,#preview .pv-display-strip::-webkit-scrollbar {width:8px;}
+#preferences::-webkit-scrollbar-thumb,#preview .pv-display-strip::-webkit-scrollbar-thumb {background:#707987;border-radius:4px;}
+#preferences::-webkit-scrollbar-track,#preview .pv-display-strip::-webkit-scrollbar-track {background:#252a30;}
