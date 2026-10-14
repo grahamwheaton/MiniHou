@@ -416,6 +416,13 @@ def polyextrude(geo, group, distance, inset, mode, output_back, **og):
         for key in ("front", "back", "side"):                      # the switched-on groups still exist, empty
             geo = EXTRUDE_OUT.write(geo, og, key, np.zeros(geo.nprims, bool))
         return geo
+    if distance == 0 and inset == 0 and not output_back:
+        # A zero amount must not manufacture coincident points/zero-area walls.
+        out = geo.copy()
+        out = EXTRUDE_OUT.write(out, og, "front", sel)
+        for key in ("back", "side"):
+            out = EXTRUDE_OUT.write(out, og, key, np.zeros(geo.nprims, bool))
+        return out
     t = geo.topology
     vp = t.vertex_point.astype(np.int64)
     pv = topo.prim_of_vertex(geo)

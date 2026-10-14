@@ -69,3 +69,30 @@ class PlanarInsetTests(unittest.TestCase):
         with accel.disabled():reference=run('inset',geo,amount=.06)
         np.testing.assert_array_equal(fast.P,reference.P)
         np.testing.assert_array_equal(fast.topology.vertex_point,reference.topology.vertex_point)
+
+    def test_scale_invariance_and_zero_amount_topology(self):
+        reference=run('inset',rounded_face(),amount=.06)
+        for scale in (1e-6,1e-3,1e3,1e6):
+            geo=rounded_face();geo.point['P']*=scale
+            out=run('inset',geo,amount=.06*scale)
+            np.testing.assert_allclose(out.P/scale,reference.P,atol=2e-7)
+        for tool in ('inset','outset'):
+            geo=rounded_face();out=run(tool,geo,amount=0)
+            np.testing.assert_array_equal(out.P,geo.P)
+            np.testing.assert_array_equal(out.topology.vertex_point,geo.topology.vertex_point)
+            self.assertEqual(out.nprims,geo.nprims)
+            self.assertTrue(np.all(out.prim['group_extrudeFront']==1))
+            self.assertTrue(np.all(out.prim['group_extrudeSide']==0))
+
+    def test_hole_region_normal_winding_and_negative_extrude(self):
+        points=np.array([[-2,-2,0],[2,-2,0],[2,2,0],[-2,2,0],[-1,-1,0],[1,-1,0],[1,1,0],[-1,1,0]])
+        faces=np.array([0,1,5,4,1,2,6,5,2,3,7,6,3,0,4,7])
+        geo=B.make(points,faces,np.arange(0,17,4))
+        from minihou.nodes.normal import prim_normals
+        for distance in (-.3,.3):
+            out=run('polyextrude',geo,distance=distance,inset=.1)
+            np.testing.assert_allclose(prim_normals(out)[:4]/np.linalg.norm(prim_normals(out)[:4],axis=1)[:,None],np.tile([0,0,1],(4,1)),atol=1e-7)
+            np.testing.assert_allclose(out.P[out.topology.vertex_point[:16],2],distance,atol=1e-7)
+        clockwise=run('reverse',geo)
+        out=run('inset',clockwise,amount=.1)
+        np.testing.assert_allclose(prim_normals(out)[:4]/np.linalg.norm(prim_normals(out)[:4],axis=1)[:,None],np.tile([0,0,-1],(4,1)),atol=1e-7)

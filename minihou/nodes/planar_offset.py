@@ -24,11 +24,11 @@ def _validate_loops(loops, tolerance):
             if abs(denominator) <= tolerance*tolerance:
                 if abs(_cross(c-a, ab)) <= tolerance*np.linalg.norm(ab):
                     lo, hi = sorted(((c-a)@ab/(ab@ab), (d-a)@ab/(ab@ab)))
-                    if min(hi, 1)-max(lo, 0) > tolerance:
+                    if min(hi, 1)-max(lo, 0) > tolerance/np.linalg.norm(ab):
                         raise ValueError('Inset boundary overlaps itself; reduce the amount')
                 continue
             t, u = _cross(c-a, cd)/denominator, _cross(c-a, ab)/denominator
-            if -tolerance <= t <= 1+tolerance and -tolerance <= u <= 1+tolerance:
+            if -tolerance/np.linalg.norm(ab) <= t <= 1+tolerance/np.linalg.norm(ab) and -tolerance/np.linalg.norm(cd) <= u <= 1+tolerance/np.linalg.norm(cd):
                 raise ValueError('Inset boundary self-intersects; reduce the amount or split the region')
 
 
