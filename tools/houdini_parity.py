@@ -164,7 +164,7 @@ NOTES = {
     "remesh": "No rest geometry: the voxel remesher has no attributes to carry over.",
     "points_to_surface": "Collision and mask volumes are not supported.",
     "lattice_grid": "MiniHou's lattice is the lattice_grid/lattice pair (rest, deformed), not Houdini's one node with three sources.",
-    "lsystem": "Leaf geometry inputs are not supported (the generated tree has no leaf instancing).",
+    "lsystem": "All 4 inputs supported (leaf geometry J, K, M and meta test bounding envelope).",
     "rbd_constraint": "A manual link generator (kind, bodies, anchors), not Houdini's rule-based RBD Constraints From Rules.",
 }
 
@@ -230,7 +230,19 @@ def compare(mh: dict, hou: dict, slug: str) -> dict:
 def run(offline: bool, refresh: bool) -> dict:
     mh = load_minihou()
     if offline:
-        return json.loads(DATA.read_text(encoding="utf-8"))
+        result = json.loads(DATA.read_text(encoding="utf-8"))
+        for name, spec in mh.items():
+            slug = MAP.get(name)
+            if slug and isinstance(slug, str):
+                cf = CACHE / f"{slug}.html"
+                if cf.exists():
+                    txt = cf.read_text(encoding="utf-8", errors="replace")
+                    if txt:
+                        info = compare(spec, parse(txt), slug)
+                        info.update(status="ok", category=spec["category"], handles=spec["handles"])
+                        result["nodes"][name] = info
+        DATA.write_text(json.dumps(result, indent=1, sort_keys=True), encoding="utf-8")
+        return result
     slugs = {}
     for name in mh:
         v = MAP.get(name, "?")

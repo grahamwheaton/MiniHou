@@ -6,20 +6,42 @@ Enable **Separate Angles** to expose independent **Yaw**, **Pitch** and **Roll**
 
 | Symbol | Operation |
 | --- | --- |
-| `F`, `f` | Advance along heading, drawing / without drawing |
-| `+`, `-` | Yaw left / right |
-| `&`, `^` | Pitch down / up |
-| `\`, `/` | Roll left / right around the heading; changes the plane of subsequent turns |
-| `\|` | Turn heading and left vectors around |
-| `[`, `]` | Save / restore position, full orientation, step and width |
-| `!`, `"` | Multiply width / step by their scale parameters |
-| `J` | Emit a leaf point with heading in `N` |
+| `F(l,w,s,d)`, `H` | Advance drawing along heading (`H` moves half length); optional override length, width, tube cols, tube rows |
+| `f(l)`, `h` | Move along heading without drawing (`h` half length) |
+| `G(l)` | Move along heading without recording a vertex |
+| `+`, `-` | Yaw left / right in local frame (by angle, or `+(deg)`) |
+| `&`, `^` | Pitch down / up in local frame (by angle, or `&(deg)`) |
+| `\`, `/` | Roll left / right around heading (by angle, or `/(deg)`); changes the plane of subsequent turns |
+| `\|` | Turn 180 degrees around heading |
+| `*` | Roll 180 degrees |
+| `~(a)` | Random pitch, yaw, roll up to `a` degrees (default 180) |
+| `[`, `]` | Push / pop turtle branch (position, full frame, step, width, groups, attributes) |
+| `%` | Truncate / cut off remainder of current branch |
+| `!`, `?` | Multiply / divide thickness by scale factor (or `!(factor)`) |
+| `"`, `_` | Multiply / divide step size by scale factor (or `"(factor)`) |
+| `;`, `@` | Multiply / divide turning angle by scale factor (or `;(factor)`) |
+| `T(g)` | Tropism towards -Z (gravity) |
+| `$(x,y,z)` | Re-orient turtle frame towards up-ref, or point heading directly at (x,y,z) |
+| `'`, `#` | Increment color lookup U / V coordinate |
+| `g(i)` | Start primitive group `<prefix><i>` |
+| `a("name",v1,v2,v3)` | Set custom point attribute |
+| `{`, `.`, `}` | Polygon creation: mark vertices with `.` and construct closed polygon |
+| `J`, `K`, `M(s,x,a,b,c)` | Stamp input geometry (Leaf J, K, M) scaled by `s` and stamped with parameters `a`, `b`, `c`. Without input, `J` emits a leaf point |
 
-The starting frame is heading +Z, left -X and up -Y. Turns use the moving local frame, not fixed world axes. A positive 90-degree yaw sends the initial heading toward -X; positive pitch sends it toward -Y. Roll does not move the turtle. Branches restore all three frame vectors, including roll. Unbalanced brackets report an error.
+The starting frame is heading +Z, left -X and up -Y. Turns use the moving local frame, not fixed world axes. A positive 90-degree yaw sends the initial heading toward -X; positive pitch sends it toward -Y. Roll does not move the turtle. Branches restore all frame vectors, step size, width, and active attributes. Unbalanced brackets report an error.
 
-Open `examples/graphs/lsystem_3d_tree.json` for a radial tree (137.5-degree roll), or `examples/graphs/lsystem_3d_coral.json` for differently oriented branching. Both examples produce deterministic genuinely non-planar curves; connect a Sweep node to obtain tubes using their width attribute. Change Generations cautiously because rewriting grows exponentially.
+Open `examples/graphs/lsystem_3d_tree.json` for a radial tree (137.5-degree roll), or `examples/graphs/lsystem_3d_coral.json` for differently oriented branching. Connect a Sweep node to sweep skeleton curves or set Type to Tube (`type="tube"`) for direct quad polygon tube meshes.
 
-Compatibility: existing planar grammars and Angle values are unchanged. This is a single-symbol rewriting turtle, not full Houdini L-System parity: no parameterized symbols, context-sensitive rules, tropism, collision avoidance or interactive turtle handles. Independent angles are global per node, not per symbol occurrence. The examples are curve skeletons rather than botanical simulations.
+## Houdini Parity
+
+MiniHou brings high-fidelity parity with Houdini's L-System SOP:
+- **Rule Grammar**: `[left<]symbol[(vars)][>right][:condition]=replacement[:probability]`. Context matching traverses branches and respects `context_ignore` and `context_includes_siblings`. Probabilities support both 0-1 and 0-100 scales.
+- **Parametric Expressions**: Variables `a`, `b`, `c`, `d`, `g`, `i`, `t`, `x`, `y`, `z`, `A`, `L`, `T`, `U`, `V`, `W`, plus custom user variables and `chan(i)`. Functions include `sin`, `cos`, `tan`, `asin`, `acos`, `min`, `max`, `abs`, `sqrt`, `floor`, `ceil`, `pow`, `exp`, `log`, `rand`, `pic`, and `inside`/`in(x,y,z)`.
+- **4 Inputs**: `leaf_j`, `leaf_k`, `leaf_m` for instancing modeled leaf/flower geometry, and `meta_test` for bounding envelope containment pruning via `in(x,y,z)`.
+- **Geometry Types**: `skeleton` (curves with optional point attributes `segs`, `div`, `lage`, `arc`, `up`, `gen`) and `tube` (quad polygon tubes with customizable `rows`, `cols`, and vertex `uv` texturing coordinates).
+- **Fractional Generations**: Fractional `generations` interpolate growth of angles, lengths, and widths on the newest rewrite iteration when continuous options are active.
+- **Parameter Aliases**: Supports Houdini standard names (`type`, `random_seed`, `thickness`, `thickness_scale`, `step_size`, `step_size_scale`) alongside backwards-compatible MiniHou legacy names (`geometry_type`, `seed`, `width`, `width_scale`, `step`, `step_scale`).
+- **Rule File I/O**: Read rules directly from text files or use the `write_rules` action to save rules to disk.
 
 ## Why a tree can still look flat
 
