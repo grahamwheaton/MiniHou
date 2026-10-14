@@ -3,20 +3,21 @@ import unittest
 import numpy as np
 from minihou import Evaluator, Graph
 from minihou.nodes import group_rules as R
-from tests.test_editor_e2e import EditorE2E, until, sync_playwright
+from tests import test_editor_e2e as editor_fixture
+from tests.test_editor_e2e import until, sync_playwright
 
 @unittest.skipIf(sync_playwright is None,'playwright not installed')
 class GroupEditorE2E(unittest.TestCase):
-    setUpClass=classmethod(EditorE2E.setUpClass.__func__)
-    tearDownClass=classmethod(EditorE2E.tearDownClass.__func__)
-    setUp=EditorE2E.setUp
-    tearDown=EditorE2E.tearDown
-    node=EditorE2E.node
-    box_scene=EditorE2E.box_scene
-    view_xy=EditorE2E.view_xy
-    stroke=EditorE2E.stroke
-    pie_slot_xy=EditorE2E.pie_slot_xy
-    empty_spot=EditorE2E.empty_spot
+    setUpClass=classmethod(editor_fixture.EditorE2E.setUpClass.__func__)
+    tearDownClass=classmethod(editor_fixture.EditorE2E.tearDownClass.__func__)
+    setUp=editor_fixture.EditorE2E.setUp
+    tearDown=editor_fixture.EditorE2E.tearDown
+    node=editor_fixture.EditorE2E.node
+    box_scene=editor_fixture.EditorE2E.box_scene
+    view_xy=editor_fixture.EditorE2E.view_xy
+    stroke=editor_fixture.EditorE2E.stroke
+    pie_slot_xy=editor_fixture.EditorE2E.pie_slot_xy
+    empty_spot=editor_fixture.EditorE2E.empty_spot
 
     def scene(self,nodes,display):
         self.s.edit([{'op':'replace','graph':{'nodes':nodes,'display':display}}])
