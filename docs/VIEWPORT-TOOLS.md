@@ -48,6 +48,9 @@ A selected node shows its **handles** (drag to change a parameter) and **guides*
 | `copy_transform` | translate | |
 | `group_create` | box centre and size (box method or bounds filter) | the bounding box, or the sphere |
 | `match_size` | target position and size | target box |
+| `falloff` | radius arrow (sphere) | falloff sphere, ramp line and start plane, axis, wave direction (by shape) |
+| `slice` | plane spacing | first plane |
+| `sdf_shape` | radius arrow | bounds |
 | `curve`, `bezier` | (viewport curve tool) | |
 
 With a bounding object connected to `group_create`, the guide shows that object's bounds and the box arrows go away (their parameters are ignored).
