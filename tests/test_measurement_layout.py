@@ -1,5 +1,6 @@
 """Preferences and long measurement inspectors remain readable and scrollable."""
 from pathlib import Path
+import base64
 import unittest
 from tests import test_editor_e2e as fixture
 
@@ -26,6 +27,13 @@ class MeasurementLayoutTests(unittest.TestCase):
                 self.assertGreaterEqual(bounds['x'],0);self.assertLessEqual(bounds['x']+bounds['width'],width)
                 self.assertGreaterEqual(bounds['y'],0);self.assertLessEqual(bounds['y']+bounds['height'],height)
         p.set_viewport_size({'width':1400,'height':960});p.locator('#pref-length-unit').scroll_into_view_if_needed()
+        p.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+        # Bounds alone cannot catch stale top-layer compositor tiles after resize.
+        # Verify actual painted glyph pixels for heading, left label and select arrow.
+        painted=p.evaluate("""async encoded=>{const image=new Image();image.src='data:image/png;base64,'+encoded;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const c=canvas.getContext('2d');c.drawImage(image,0,0);const title=document.querySelector('#preferences-title').getBoundingClientRect(),input=document.querySelector('#pref-length-unit'),range=document.createRange();range.selectNodeContents(input.parentElement.firstChild);const label=range.getBoundingClientRect(),r=input.getBoundingClientRect();return [title,label,{x:r.right-20,y:r.y,width:20,height:r.height}].map(b=>{const pixels=c.getImageData(Math.floor(b.x),Math.floor(b.y),Math.ceil(b.width),Math.ceil(b.height)).data;let n=0;for(let i=0;i<pixels.length;i+=4)if(pixels[i]>150&&pixels[i+1]>150&&pixels[i+2]>150)n++;return n;});}""",base64.b64encode(p.screenshot()).decode('ascii'))
+        self.assertGreater(painted[0],20,'Preferences heading did not paint')
+        self.assertGreater(painted[1],10,'Length display label did not paint')
+        self.assertGreater(painted[2],3,'Length selector right edge did not paint')
         destination=Path(__file__).resolve().parents[2]/'user-fixes-20261014'
         if destination.is_dir():p.screenshot(path=str(destination/'unit-preferences-layout-mm.png'))
 
