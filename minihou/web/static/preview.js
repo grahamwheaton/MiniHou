@@ -354,9 +354,9 @@ window.MiniHouPreview = (() => {
     }
 
     // ---------------------------------------------------------------- selection (points, edges, faces)
-    const sel = { mode: "view", point: new Set(), edge: new Map(), face: new Set() };
+    const sel = { mode: "view", point: new Set(), edge: new Map(), face: new Set(), objects:new Set() };
     const edgeKey = (a, b) => (a < b ? a + "-" + b : b + "-" + a);
-    const summary = () => ({ mode: sel.mode, points: [...sel.point].sort((a, b) => a - b),
+    const summary = () => ({ mode: sel.mode, objects:[...sel.objects], points: [...sel.point].sort((a, b) => a - b),
       edges: [...sel.edge.values()].sort((x, y) => x[0] - y[0] || x[1] - y[1]), faces: [...sel.face].sort((a, b) => a - b) });
     function toScreen(cam, x, y, z) {                                // [sx, sy, depth] in CSS pixels, null behind the camera
       const m = cam.MV, vx = m[0] * x + m[4] * y + m[8] * z + m[12], vy = m[1] * x + m[5] * y + m[9] * z + m[13];
@@ -535,19 +535,34 @@ window.MiniHouPreview = (() => {
         }
         out.faces = sel.mode === "piece" ? piecesOf(faces) : [...faces];
       }
+      if(sel.mode==="piece")for(let i=0;i<sp.length/3;i++)if(sp[3*i+2]>=0&&inside(sp[3*i],sp[3*i+1]))out.points.push(i);
       return out;
     }
     function activeObject(){return api.previewObjects?.find(o=>o.node===api.activeObject)||api.previewObjects?.[0];}
     function change(found, how) {                                    // found: {points, edges, faces}; how: replace | add | subtract
+      if(sel.mode==='piece'&&raw&&api.previewObjects?.length){
+        const points=new Set(found.points||[]),faces=new Set(piecesOf(found.faces||[])),objects=new Set();
+        for(const e of found.edges||[])for(const p of e)points.add(p);
+        const explicit=(found.objects||[]).length&&!points.size&&!faces.size;
+        for(const o of api.previewObjects){
+          const hit=[...points].some(p=>p>=o.point_start&&p<o.point_start+o.point_count),hasFaces=raw.triPrim.some(f=>f>=o.prim_start&&f<o.prim_start+o.prim_count);
+          if(explicit&&found.objects.includes(o.node)||hit&&!hasFaces){for(let p=o.point_start;p<o.point_start+o.point_count;p++)points.add(p);for(let f=o.prim_start;f<o.prim_start+o.prim_count;f++)faces.add(f);}
+        }
+        for(let i=0;i<raw.tri.length;i+=3)if(faces.has(raw.triPrim[i/3]))for(let c=0;c<3;c++)points.add(raw.tri[i+c]);
+        for(const o of api.previewObjects)if([...points].some(p=>p>=o.point_start&&p<o.point_start+o.point_count))objects.add(o.node);
+        const edges=[];for(let i=0;i<raw.edge.length;i+=2)if(points.has(raw.edge[i])&&points.has(raw.edge[i+1]))edges.push([raw.edge[i],raw.edge[i+1]]);
+        found={points:[...points],faces:[...faces],edges,objects:[...objects]};
+      }
       if(how!=="subtract"){
         const f=found.faces?.at(-1),p=found.points?.at(-1)??found.edges?.at(-1)?.[1];
         const object=api.previewObjects?.find(o=>f!==undefined?f>=o.prim_start&&f<o.prim_start+o.prim_count:p!==undefined&&p>=o.point_start&&p<o.point_start+o.point_count);
         if(object)api.activeObject=object.node;
       }
-      if (how === "replace") { sel.point.clear(); sel.edge.clear(); sel.face.clear(); }
+      if (how === "replace") { sel.point.clear(); sel.edge.clear(); sel.face.clear();sel.objects.clear(); }
       for (const i of found.points || []) how === "subtract" ? sel.point.delete(i) : sel.point.add(i);
       for (const [a, b] of found.edges || []) how === "subtract" ? sel.edge.delete(edgeKey(a, b)) : sel.edge.set(edgeKey(a, b), a < b ? [a, b] : [b, a]);
       for (const f of found.faces || []) how === "subtract" ? sel.face.delete(f) : sel.face.add(f);
+      for(const id of found.objects||[])how==="subtract"?sel.objects.delete(id):sel.objects.add(id);
       rebuildOverlay();
       if (api.onSelect) api.onSelect(summary());
     }
@@ -906,6 +921,7 @@ window.MiniHouPreview = (() => {
         gl.uniform1f(flat.u.uBias, 0.0004);
         gl.drawArrays(gl.POINTS, 0, data.npoints);
       }
+      if(!opt.points&&sel.mode!=="point")for(const o of api.previewObjects||[])if(!o.prim_count&&o.point_count&&!(inst.on&&o.node===api.primaryNode)){setup(flat,[.95,.75,.3],true);gl.drawArrays(gl.POINTS,o.point_start,o.point_count);}
       drawInstances(cam);
       gl.bindVertexArray(vao);
       if(templateRaw){
@@ -1608,15 +1624,15 @@ window.MiniHouPreview = (() => {
         if(raw&&m!==source){
           const es=[];for(let i=0;i<raw.edge.length;i+=2)es.push([raw.edge[i],raw.edge[i+1]]);
           const faces=new Map();for(let i=0;i<raw.tri.length;i+=3){const f=raw.triPrim[i/3];if(!faces.has(f))faces.set(f,new Set());for(let j=0;j<3;j++)faces.get(f).add(raw.tri[i+j]);}
-          const points=source==="point"?new Set(sel.point):source==="edge"?new Set([...sel.edge.values()].flat()):new Set([...sel.face].flatMap(f=>[...(faces.get(f)||[])]));
+          const points=(source==="point"||source==="piece")?new Set(sel.point):source==="edge"?new Set([...sel.edge.values()].flat()):new Set([...sel.face].flatMap(f=>[...(faces.get(f)||[])]));
           if(m==="point")found.points=[...points];
-          else if(m==="edge")found.edges=es.filter(e=>source==="face"||source==="piece"?[...sel.face].some(f=>faces.get(f)?.has(e[0])&&faces.get(f)?.has(e[1])):points.has(e[0])&&points.has(e[1]));
+          else if(m==="edge")found.edges=es.filter(e=>source==="face"?[...sel.face].some(f=>faces.get(f)?.has(e[0])&&faces.get(f)?.has(e[1])):points.has(e[0])&&points.has(e[1]));
           else{
             if(source==="face"||source==="piece")found.faces=[...sel.face];
             else for(const [f,vs]of faces){const boundary=es.filter(e=>vs.has(e[0])&&vs.has(e[1]));
               if(source==="point"?[...vs].every(v=>points.has(v)):boundary.length&&boundary.every(e=>sel.edge.has(edgeKey(...e))))found.faces.push(f);
             }
-            if(m==="piece")found.faces=piecesOf(found.faces);
+            if(m==="piece"){found.faces=piecesOf(found.faces);found.points=[...points];}
           }
         }else Object.assign(found,{points:[...sel.point],edges:[...sel.edge.values()],faces:[...sel.face]});
         sel.mode=m;sel.lastMode=m;canvas.style.cursor="crosshair";change(found,"replace");schedule();
@@ -1625,7 +1641,7 @@ window.MiniHouPreview = (() => {
       selectionInfo() {                                                                   // the selected points and where they are: the anchor of a move/rotate/scale gizmo
         if (!raw) return null;
         const ids = new Set();
-        if (sel.mode === "point") for (const i of sel.point) ids.add(i);
+        if (sel.mode === "point" || sel.mode === "piece") for (const i of sel.point) ids.add(i);
         else if (sel.mode === "edge") for (const [, e] of sel.edge) { ids.add(e[0]); ids.add(e[1]); }
         else if (sel.mode === "face" || sel.mode === "piece") {
           if (sel.face.size) for (let i = 0; i < raw.triPrim.length; i++) if (sel.face.has(raw.triPrim[i])) for (let c = 0; c < 3; c++) ids.add(raw.tri[3 * i + c]);
@@ -1649,7 +1665,7 @@ window.MiniHouPreview = (() => {
         const cam = camera();
         if (sel.mode === "point") { const i = pickPoint(cam, sx, sy, 12); change({ points: i >= 0 ? [i] : [] }, i < 0 && how === "replace" ? "replace" : how); }
         else if (sel.mode === "edge") { const e = pickEdge(cam, sx, sy, 8); change({ edges: e ? [e] : [] }, !e && how === "replace" ? "replace" : how); }
-        else { const f = pickFace(cam, sx, sy); change({ faces: f < 0 ? [] : sel.mode === "piece" ? piecesOf([f]) : [f] }, f < 0 && how === "replace" ? "replace" : how); }
+        else { const f = pickFace(cam, sx, sy);if(sel.mode==='piece'){const p=pickPoint(cam,sx,sy,12),e=pickEdge(cam,sx,sy,8);change({faces:f<0?[]:[f],points:f<0&&p>=0?[p]:[],edges:f<0&&p<0&&e?[e]:[]},how);}else change({faces:f<0?[]:[f]},how); }
         return true;
       },
       boxSelect(x0, y0, x1, y1, how) { if (raw && sel.mode !== "view" && !(api.canPick && !api.canPick())) change(boxPick(camera(), x0, y0, x1, y1), how || "replace"); },
@@ -1659,6 +1675,7 @@ window.MiniHouPreview = (() => {
         if (sel.mode === "point") for (let i = pointStart; i < pointEnd; i++) all.points.push(i);
         else if (sel.mode === "edge") {for (let k = 0; k < raw.edge.length / 2; k++) if(raw.edge[2*k]>=pointStart&&raw.edge[2*k+1]>=pointStart&&raw.edge[2*k]<pointEnd&&raw.edge[2*k+1]<pointEnd)all.edges.push([raw.edge[2 * k], raw.edge[2 * k + 1]]);}
         else all.faces = [...new Set(raw.triPrim)].filter(f=>sel.mode==="piece"||(f>=primStart&&f<primEnd));
+        if(sel.mode==="piece"){all.objects=(api.previewObjects||[]).filter(o=>o.point_count>0).map(o=>o.node);all.points=[];all.edges=[];all.faces=[];if(!api.previewObjects?.length)all.points=Array.from({length:raw.P.length/3},(_,i)=>i);}
         const keepActive=api.activeObject;change(all, "replace");api.activeObject=keepActive;
       },
       // where an element is on screen (CSS pixels in the canvas): for tests and for anchoring tools

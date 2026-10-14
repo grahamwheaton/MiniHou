@@ -140,3 +140,54 @@ class ViewportFixesTests(unittest.TestCase):
         switched=samples()
         self.assertGreater(sum(normal[0]),sum(switched[0])+30)
         self.assertEqual(normal[1],switched[1])
+
+    def test_object_a_includes_point_and_open_line_move_and_undo(self):
+        import numpy as np
+        from minihou import Evaluator
+        self.box_scene()
+        self.s.edit([{"op":"add","id":"p","type":"point","params":{"center":[4,0,0]}},
+                     {"op":"add","id":"l","type":"line","params":{"origin":[6,0,0],"direction":[1,0,0],"length":2,"points":3}},
+                     {"op":"flag","id":"p","flag":"display","value":True,"additive":True},
+                     {"op":"flag","id":"l","flag":"display","value":True,"additive":True}])
+        self.page.wait_for_function('minihou.preview.points===12')
+        self.page.click('#preview [data-mode="piece"]');self.hover();self.page.keyboard.press('a')
+        self.assertEqual(set(self.selection()['objects']),{'b','p','l'})
+        self.assertEqual(self.page.evaluate('minihou.preview.selectionInfo().points'),list(range(12)))
+        before=self.s.preview('b',templates=True)['geo'].P.copy()
+        self.page.keyboard.press('g');self.page.mouse.move(700,300);self.page.keyboard.press('Enter')
+        self.page.wait_for_function("Object.values(minihou.S.graph.nodes).some(n=>n.type==='transform')")
+        target=next(n.id for n in self.s.graph.nodes.values() if n.type=='transform')
+        self.page.wait_for_function("Object.values(minihou.S.graph.nodes).some(n=>n.type==='transform'&&n.params.translate?.some(v=>Math.abs(v)>.001))")
+        after=Evaluator().cook(self.s.graph,target).P
+        delta=after-before
+        np.testing.assert_allclose(delta,np.broadcast_to(delta[0],delta.shape),atol=1e-5)
+        from tests.test_editor_e2e import until
+        self.assertTrue(until(lambda:self.s._gesture is None))
+        self.assertGreater(float(np.linalg.norm(delta[0])),.001)
+        self.page.keyboard.press('Control+z')
+        self.page.wait_for_function("!Object.values(minihou.S.graph.nodes).some(n=>n.type==='transform')")
+        np.testing.assert_allclose(self.s.preview('b',templates=True)['geo'].P,before)
+        # Pick a displayed point object, then component A remains scoped to it.
+        self.page.wait_for_function('minihou.preview.points===12')
+        self.page.evaluate("minihou.preview.viewAxis('top',false,true);minihou.preview.frameAll();minihou.preview.clearSelection()")
+        self.page.mouse.click(*self.view_xy('point',8))
+        self.assertEqual(self.selection()['objects'],['p'])
+        self.page.click('#preview [data-mode="point"]');self.hover();self.page.keyboard.press('a')
+        self.assertEqual(self.selection()['points'],[8])
+
+
+        self.page.click('#preview [data-mode="piece"]');self.page.evaluate('minihou.preview.clearSelection()')
+        self.page.mouse.click(*self.view_xy('point',10))
+        self.assertEqual(self.selection()['objects'],['l'])
+        self.assertEqual(self.page.evaluate('minihou.preview.selectionInfo().points'),[9,10,11])
+        self.hover();self.page.keyboard.press('s');self.page.mouse.move(750,320)
+        self.page.wait_for_function("Object.values(minihou.S.graph.nodes).some(n=>n.type==='transform')")
+        self.page.keyboard.press('Escape')
+        self.assertTrue(until(lambda:self.s._gesture is None))
+        self.page.wait_for_function("!Object.values(minihou.S.graph.nodes).some(n=>n.type==='transform')")
+        np.testing.assert_allclose(self.s.preview('b',templates=True)['geo'].P,before)
+        self.page.wait_for_function('minihou.preview.points===12')
+        self.page.wait_for_function('minihou.preview.selectionInfo()?.points.length===3')
+        self.assertEqual(self.page.evaluate('minihou.preview.selectionInfo().points'),[9,10,11])
+        self.page.click('#preview [data-mode="edge"]');self.hover();self.page.keyboard.press('a')
+        self.assertEqual(self.selection()['edges'],[[9,10],[10,11]])

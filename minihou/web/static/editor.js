@@ -1236,7 +1236,7 @@
   $('#pv-path-mode').onchange=e=>pv.interaction.pathMode=e.target.value;
   if(sketchTool){$('#pv-sketch-panel').addEventListener('click',()=>sketchBezier=false,true);$('#pv-sketch-panel').append(sketchTool.panel());const previous=pv.onOverlayDraw;pv.onOverlayDraw=()=>{previous?.();sketchTool.draw();};}
 
-  let pvKeepCameraNode = null;
+  let pvKeepCameraNode = null, pendingViewportSelection=null;
   let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false, pvReduced = null, pvTooBig = null;
   let pvSelection = { mode: "view", points: [], edges: [], faces: [] };
   // Viewport detail: auto draws a big geometry reduced, but at full detail while a selection mode is on (selecting needs the real points);
@@ -1443,6 +1443,7 @@
     refreshSelectionHandles();                                                 // a kept selection moved with the geometry: so does its gizmo
     updateToolButtons();
     pvNode = node; pvPath = S.path;
+    if(pendingViewportSelection?.id===node){const saved=pendingViewportSelection;pendingViewportSelection=null;pv.restoreSelection(saved.selection);pv.activeObject=saved.active;pv.redraw();}
     if(pendingKnifeSelection?.id===node){pv.selectElements("edge",pendingKnifeSelection.edges,"replace");pendingKnifeSelection=null;}
     if (paintTool) paintTool.onPreview(head, arrays, node);                    // the painted attribute as colour, and the working copy for strokes
     if (sheet) sheet.changed();
@@ -1510,7 +1511,7 @@
     }
     updateViewportHints();
     const n = (s[SEL_KEY[s.mode]] || []).length;
-    $("#pv-selinfo").textContent = s.mode === "view" ? "" : s.mode === "piece" ? `${n} face${n === 1 ? "" : "s"} in the selected objects` : `${n} ${SEL_KEY[s.mode].replace(/s$/, "")}${n === 1 ? "" : "s"} selected`;
+    $("#pv-selinfo").textContent = s.mode === "view" ? "" : s.mode === "piece" ? `${s.objects?.length||0} object${s.objects?.length===1?"":"s"} selected` : `${n} ${SEL_KEY[s.mode].replace(/s$/, "")}${n === 1 ? "" : "s"} selected`;
     document.querySelectorAll("#preview [data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === s.mode));
     const box = $("#pv-actions");
     const acts = n ? SELECTION_ACTIONS[s.mode] || [] : [];
@@ -1594,7 +1595,7 @@
   let pieFromView = false;
   function pieSelectionParams(item) {
     const s = pvSelection;
-    if (!item.sel || !pv || !pv.ok || s.mode === "view" || !(s[SEL_KEY[s.mode]] || []).length) return {};
+    if (!item.sel || !pv || !pv.ok || s.mode === "view" || !pv.selectionInfo()?.points.length) return {};
     const mode = s.mode === "piece" ? "face" : s.mode;
     let spec = item.sel[mode];
     if (!spec) return {};
@@ -1618,7 +1619,7 @@
       const mode=pvSelection.mode, values=pvSelection[SEL_KEY[mode]]||[];
       if(values.length)Object.assign(params,{domain:mode==='edge'?'edges':mode==='point'?'points':'primitives',group:mode==='edge'?values.map(([a,b])=>`p${a}-${b}`).join(' '):rangePattern(values)});
     }
-    if (item.center && pv && pv.ok && pvSelection.mode !== "view" && (pvSelection[SEL_KEY[pvSelection.mode]] || []).length) {
+    if (item.center && pv && pv.ok && pvSelection.mode !== "view" && pv.selectionInfo()?.points.length) {
       const info = pv.selectionInfo();
       if (info) params[item.center] = info.center.map((v) => Math.round(v * 1e5) / 1e5);
     }
@@ -1792,7 +1793,7 @@
     }
     pv.onHandleStart = async (h) => {
       await handleFinishing;while(setInFlight||pendingSet.size)await new Promise(resolve=>setTimeout(resolve,20));
-      handleContext={path:S.path,documentId:S.documentId,gesture:'transform-'+crypto.randomUUID(),changed:false,values:new Map()};
+      handleContext={path:S.path,documentId:S.documentId,gesture:'transform-'+crypto.randomUUID(),changed:false,values:new Map(),selection:structuredClone(pv.selection()),active:pv.activeObject};
       gizmoNode=null;createdTemplateMerge=null;createdNode=null;originalGraph=structuredClone(S.graph);originalNode=pvNode;
       try{
         const value=h.pending?await startSelectionDrag(h):baseFor(pvNode,h);
@@ -1808,7 +1809,7 @@
       const context=handleContext,previous=originalNode;if(!context||context.finishing)return handleFinishing;context.finishing=true;
       desktopPendingEdits++;
       handleFinishing=(async()=>{while(setInFlight||pendingSet.size)await new Promise(resolve=>setTimeout(resolve,20));
-        if(context.changed){const r=await api(cancel?'/api/gesture_cancel':'/api/gesture_finish',{gesture:context.gesture,document_id:context.documentId});applySnapshot(r.graph);if(cancel&&nodeOf(previous))select([previous]);}
+        if(context.changed){const r=await api(cancel?'/api/gesture_cancel':'/api/gesture_finish',{gesture:context.gesture,document_id:context.documentId});if(cancel)pendingViewportSelection={id:previous,selection:context.selection,active:context.active};applySnapshot(r.graph);if(cancel&&nodeOf(previous)){pvKeepCameraNode=previous;select([previous]);pvKey=null;schedulePreview();}}
       })().catch(error=>toast(error.message)).finally(()=>{desktopPendingEdits--;if(handleContext===context){handleContext=null;gizmoNode=null;}});
       return handleFinishing;
     }
@@ -1864,7 +1865,7 @@
       const mode = { "1": "point", "2": "edge", "3": "face", "4": "piece" }[k];
       if (mode) { if (!blockedByReduced()) pv.setMode(mode); e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (k === "escape") {
-        if (pvSelection.mode !== "view" && !(pvSelection[SEL_KEY[pvSelection.mode]] || []).length) pv.setMode("view"); else pv.clearSelection();
+        if (pvSelection.mode !== "view" && !pv.selectionInfo()?.points.length) pv.setMode("view"); else pv.clearSelection();
         e.preventDefault(); e.stopImmediatePropagation(); return;
       }
       const act = (SELECTION_ACTIONS[pvSelection.mode] || []).find((a) => a.key === k && (k !== "e" || e.shiftKey));

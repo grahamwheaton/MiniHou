@@ -1893,7 +1893,7 @@ class EditorE2E(unittest.TestCase):
         sel = self.selection()
         self.assertEqual(sel["mode"], "piece")
         self.assertEqual(sorted(sel["faces"]), list(range(6, 12)))                              # all six faces of that box, nothing of the other
-        self.assertEqual(self.page.locator("#pv-selinfo").inner_text(), "6 faces in the selected objects")
+        self.assertEqual(self.page.locator("#pv-selinfo").inner_text(), "1 object selected")
         info = self.page.evaluate("minihou.preview.selectionInfo()")
         self.assertEqual(info["points"], list(range(8, 16)))
         self.assertEqual([round(v, 3) for v in info["center"]], [2.0, 0.0, 0.0])
