@@ -1058,8 +1058,8 @@
         const move=(by)=>{[rows[index],rows[index+by]]=[rows[index+by],rows[index]];commit();draw();};
         box.classList.toggle('disabled-rule',r.enabled===false);
         box.append(h('legend',null,'Rule '+(index+1)),h('div',{class:'rule-actions'},
-          h('button',{type:'button',disabled:index===0,onclick:()=>move(-1),'aria-label':'Move rule up'},'?'),
-          h('button',{type:'button',disabled:index===rows.length-1,onclick:()=>move(1),'aria-label':'Move rule down'},'?'),
+          h('button',{type:'button',disabled:index===0,onclick:()=>move(-1),'aria-label':'Move rule up',title:'Move rule up'},'Up'),
+          h('button',{type:'button',disabled:index===rows.length-1,onclick:()=>move(1),'aria-label':'Move rule down',title:'Move rule down'},'Down'),
           h('button',{type:'button',onclick:()=>{rows.splice(index,1);commit();draw();}},'Remove rule')));
         for(const f of p.fields){
           const v=r[f.name]??structuredClone(f.default),label=f.label||f.name;
