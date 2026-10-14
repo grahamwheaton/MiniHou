@@ -6,7 +6,7 @@ import numpy as np
 
 from .. import groups, spatial, topo
 from ..geometry import rows
-from ..sdk import Bool, Enum, Float, Int, Str, Vec3, node
+from ..sdk import Bool, Enum, Float, Guide, Input, Int, Str, Vec3, node
 from . import _build as B
 from .normal import prim_normals
 from ._util import normalize_rows
@@ -287,18 +287,25 @@ def smooth(geo, iterations, strength, method, pin_boundary, group):
 
 
 # -- match size -------------------------------------------------------------------------------------------------
-@node("match_size", inputs=["geo"], category="modify", params=[
+@node("match_size", inputs=["geo", Input("target", optional=True, doc="Destination size: its bounding box gives the target centre and size")],
+      category="modify", params=[
     Bool("translate", True, doc="Move the bounding box to the target"),
     Vec3("center", (0.0, 0.0, 0.0), doc="Target position (of the box centre, or its bottom with justify_z = min)"),
     Enum("justify_z", ["center", "min", "max"], doc="min: sit on the target (e.g. the ground at Z = 0)"),
     Bool("scale", False, doc="Scale to the target size"),
     Vec3("size", (1.0, 1.0, 1.0), min=0.0),
     Bool("uniform", True, doc="Keep proportions: the largest fitting uniform scale"),
-])
-def match_size(geo, translate, center, justify_z, scale, size, uniform):
-    """Fit geometry to a target position and size (Houdini's Match Size)."""
+], guides=[Guide("box", at="@center", size="@size", when="scale", id="target", label="target size")])
+def match_size(geo, target=None, *, translate, center, justify_z, scale, size, uniform):
+    """Fit geometry to a target position and size (Houdini's Match Size). A second input replaces the target
+    position and size with its own bounding box."""
     if geo.npoints == 0:
         return geo
+    if target is not None and target.npoints:
+        T = target.P.astype(np.float64)
+        tlo, thi = T.min(0), T.max(0)
+        size = tuple(thi - tlo)
+        center = tuple((tlo + thi) / 2.0) if justify_z == "center" else (*((tlo + thi)[:2] / 2.0), tlo[2] if justify_z == "min" else thi[2])
     P = geo.P.astype(np.float64)
     lo, hi = P.min(0), P.max(0)
     mid = (lo + hi) / 2.0

@@ -4,7 +4,7 @@ import json
 import numpy as np
 from .. import groups, topo
 from ..geometry import Geometry
-from ..sdk import Enum, Float, Int, Str, Vec3, node
+from ..sdk import Enum, Float, Guide, Handle, Int, Str, Vec3, node
 from ._util import euler_xyz_matrix, normalize_rows
 
 
@@ -58,7 +58,8 @@ def _apply(geo, mapping, group):
     Vec3('translate',(0,0,0)), Vec3('rotate',(0,0,0),doc='Euler XYZ degrees'), Vec3('scale',(1,1,1)),
     Enum('falloff',['smooth','linear']),
     Str('group','',doc='Only these points can move; distance is Euclidean from center'),
-])
+], handles=[Handle("translate", kind="arrow", axis="x", at="@center", comp=0, tool="move"), Handle("translate", kind="arrow", axis="y", at="@center", comp=1, tool="move"), Handle("translate", kind="arrow", axis="z", at="@center", comp=2, tool="move"), Handle("rotate", kind="ring", axis="x", at="@center", comp=0, tool="rotate"), Handle("rotate", kind="ring", axis="y", at="@center", comp=1, tool="rotate"), Handle("rotate", kind="ring", axis="z", at="@center", comp=2, tool="rotate"), Handle("scale", kind="scale", axis="x", at="@center", comp=0, tool="scale"), Handle("scale", kind="scale", axis="y", at="@center", comp=1, tool="scale"), Handle("scale", kind="scale", axis="z", at="@center", comp=2, tool="scale"), Handle("radius", axis="x", at="@center", reach=True, min=0.0)], guides=[Guide("sphere", at="@center", size="@radius", id="region", label="falloff region")])
+
 def soft_transform(geo, center, radius, translate, rotate, scale, falloff, group):
     """Transform with radial smoothstep/linear falloff. No geodesic distance or selection-centred multi-source capture."""
     center = np.asarray(center,float)

@@ -89,6 +89,10 @@ Rules
   "scale", axis="x"/"y"/"z"/"-x"/vector/"@vec3_param", at="center"/"origin"/"top"/"bottom"/vector/"@vec3_param", comp=, scale=,
   reach=, min=, max=)`: an arrow's `scale` is parameter units per world unit dragged, `reach=True` puts its root at
   `at + axis * value / scale` so it rides on the dimension it edits, a ring edits an angle in degrees, an Int parameter moves in whole steps.
+  `when="mode=box"` (or "flag", "a!=b", joined by "&") shows it only while that holds.
+* Viewport guides (optional): `@node(..., guides=[Guide("sphere", at="@center", size="@radius")])` outlines a region in the 3-D view (not
+  grabbable). `Guide(shape, at=, axis=, size=, when=)`: shape is "box" / "sphere" / "circle" / "plane" / "line" / "bounds" / "axes"; `size` is a number or
+  "@parameter" (a radius, a length, or a Vec3 of full sizes for a box or ellipsoid).
 
 Geometry API
 * geo.P -> (n, 3) float32 positions; geo.npoints, geo.nprims, geo.nvertices

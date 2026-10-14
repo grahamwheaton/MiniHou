@@ -4,7 +4,7 @@ import numpy as np
 
 from .. import edges, groups, spatial, topo
 from ..outgroups import OutGroup, OutGroups, edge_mask
-from ..sdk import Bool, Enum, Float, Int, Str, Vec3, node
+from ..sdk import Bool, Enum, Float, Guide, Handle, Int, Str, Vec3, node
 from . import _build as B
 from ._util import normalize_rows
 from .bevel import twins
@@ -45,7 +45,8 @@ def null(geo, label=""):
     Vec3("origin", (0.0, 0.0, 0.0), doc="The twist is zero here"),
     Vec3("direction", (0.0, 1.0, 0.0), doc="Twist axis"),
     Str("group", "", doc="Only these points"),
-])
+], handles=[Handle("strength", kind="ring", axis="@direction", at="@origin")], guides=[Guide("line", at="@origin", axis="@direction", id="axis", label="twist axis")])
+
 def twist(geo, strength, origin, direction, group):
     """Rotate points about an axis by an angle that grows with the distance along it (Houdini's Twist)."""
     d, o = _unit(direction), np.asarray(origin, np.float64)
@@ -69,7 +70,8 @@ def twist(geo, strength, origin, direction, group):
     Vec3("up", (0.0, 0.0, 1.0), doc="Orients the two perpendicular axes"),
     Bool("symmetric", False, doc="Taper the same way on the other side of the origin"),
     Str("group", "", doc="Only these points"),
-])
+], handles=[Handle("length", axis="@direction", at="@origin", reach=True, min=1e-6)], guides=[Guide("line", at="@origin", axis="@direction", size="@length", id="axis", label="taper length"), Guide("plane", at="@origin", axis="@direction", id="start", label="taper start")])
+
 def linear_taper(geo, taper_x, taper_y, length, dropoff, origin, direction, up, symmetric, group):
     """Scale points across an axis by an amount that blends from 1 at the origin to ``taper`` at ``length`` (Houdini's
     Linear Taper); past the length the scale keeps going."""
@@ -93,7 +95,8 @@ def linear_taper(geo, taper_x, taper_y, length, dropoff, origin, direction, up, 
     Vec3("center", (0.0, 0.0, 0.0)),
     Vec3("direction", (0.0, 1.0, 0.0), doc="Squash axis"),
     Str("group", "", doc="Only these points"),
-])
+], handles=[Handle("amount", kind="scale", axis="@direction", at="@center")], guides=[Guide("line", at="@center", axis="@direction", id="axis", label="squash axis")])
+
 def squash_stretch(geo, amount, preserve_volume, center, direction, group):
     """Scale along an axis and (optionally) compensate across it (Houdini's Squash and Stretch)."""
     d, c = _unit(direction), np.asarray(center, np.float64)

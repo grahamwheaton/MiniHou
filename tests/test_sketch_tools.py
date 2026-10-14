@@ -11,7 +11,7 @@ NODE = shutil.which('node') or 'C:/Program Files/nodejs/node.exe'
 class SketchTests(unittest.TestCase):
     def js(self, expression):
         script = "require('./minihou/web/static/sketch-tool.js'); const M=MiniSketchMath; console.log(JSON.stringify(" + expression + "));"
-        return json.loads(subprocess.check_output([NODE, '-e', script], cwd=ROOT, text=True))
+        return json.loads(subprocess.check_output([NODE, '-e', script], cwd=ROOT, text=True, encoding='utf-8'))
     def test_shapes_cook_with_existing_curve(self):
         for mode, count in [('line',2),('rectangle',4),('circle',32)]:
             for plane in ['XY','XZ','YZ']:

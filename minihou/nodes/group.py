@@ -5,7 +5,7 @@ import numpy as np
 
 from .. import edges as edgelib, groups, topo
 from ..geometry import Geometry, Topology
-from ..sdk import Bool, Enum, Float, Int, Str, Vec3, node
+from ..sdk import Bool, Enum, Float, Guide, Handle, Input, Int, Str, Vec3, node
 from . import _build as B
 from .delete import keep_points
 from .normal import prim_normals
@@ -65,6 +65,16 @@ def _edge_normals(geo):
     cos_all = np.einsum("ij,ij->i", N[pv[ok]], n_first[e.of_vertex[ok]])
     np.minimum.at(cosmin, e.of_vertex[ok], cos_all)
     return avg, np.degrees(np.arccos(np.clip(cosmin, -1.0, 1.0)))
+
+
+def region_from(bounds, center, size):
+    """The bounding region of a group node: the bounding box of the optional ``bounds`` input (Houdini's Bounding
+    Object input) when it has points, else the node's own centre and size."""
+    if bounds is not None and bounds.npoints:
+        P = bounds.P.astype(np.float64)
+        lo, hi = P.min(0), P.max(0)
+        return tuple((lo + hi) / 2), tuple(np.maximum(hi - lo, 1e-9))
+    return center, size
 
 
 def _filters(geo, dom, name, p):
@@ -153,7 +163,8 @@ def _boundary_edge_mask(geo, dom, member):
     return both & (e.count == 1)
 
 
-@node("group_create", inputs=["geo"], category="group", params=[
+@node("group_create", inputs=["geo", Input("bounds", optional=True, doc="Bounding object: when connected, its bounding box replaces box_center/box_size")],
+      category="group", params=[
     Str("name", "group1", doc="Group name; wrangles read it as @group_<name>"),
     Enum("domain", ["points", "primitives", "edges"], doc="What the group holds (an edge group is stored like the edge_group node's)"),
     Enum("method", ["pattern", "bounding_box", "normal", "random", "boundary", "filters"],
@@ -188,8 +199,22 @@ def _boundary_edge_mask(geo, dom, member):
     Bool("boundary_groups", False, doc="filters: also make '<name>_boundary', the edge group around what was selected"),
     Bool("random_enable", False, doc="filters: Keep by Random Chance (percent and seed above)"),
     Str("seed_attrib", "", doc="filters: a point or primitive attribute that seeds each element separately (empty: by element number)"),
-])
-def group_create(geo, name, domain, method, pattern, box_center, box_size, direction, angle, percent, seed, combine,
+], handles=[Handle("box_center", axis="x", at="@box_center", comp=0, id="box_center_x", when="method=bounding_box&_inputs!=2"),
+                 Handle("box_center", axis="y", at="@box_center", comp=1, id="box_center_y", when="method=bounding_box&_inputs!=2"),
+                 Handle("box_center", axis="z", at="@box_center", comp=2, id="box_center_z", when="method=bounding_box&_inputs!=2"),
+                 Handle("box_size", axis="x", at="@box_center", comp=0, reach=True, scale=2.0, min=0.0, id="box_size_x", when="method=bounding_box&_inputs!=2"),
+                 Handle("box_size", axis="y", at="@box_center", comp=1, reach=True, scale=2.0, min=0.0, id="box_size_y", when="method=bounding_box&_inputs!=2"),
+                 Handle("box_size", axis="z", at="@box_center", comp=2, reach=True, scale=2.0, min=0.0, id="box_size_z", when="method=bounding_box&_inputs!=2"),
+                 Handle("box_center", axis="x", at="@box_center", comp=0, id="box_center_x_f", when="method=filters&bounds_enable&_inputs!=2"),
+                 Handle("box_center", axis="y", at="@box_center", comp=1, id="box_center_y_f", when="method=filters&bounds_enable&_inputs!=2"),
+                 Handle("box_center", axis="z", at="@box_center", comp=2, id="box_center_z_f", when="method=filters&bounds_enable&_inputs!=2"),
+                 Handle("box_size", axis="x", at="@box_center", comp=0, reach=True, scale=2.0, min=0.0, id="box_size_x_f", when="method=filters&bounds_enable&_inputs!=2"),
+                 Handle("box_size", axis="y", at="@box_center", comp=1, reach=True, scale=2.0, min=0.0, id="box_size_y_f", when="method=filters&bounds_enable&_inputs!=2"),
+                 Handle("box_size", axis="z", at="@box_center", comp=2, reach=True, scale=2.0, min=0.0, id="box_size_z_f", when="method=filters&bounds_enable&_inputs!=2")],
+   guides=[Guide("box", at="@box_center", size="@box_size", when="method=bounding_box", id="region", label="bounding box"),
+           Guide("box", at="@box_center", size="@box_size", when="method=filters&bounds_enable&bounds_type=box", id="region_f", label="bounding region"),
+           Guide("sphere", at="@box_center", size="@box_size", when="method=filters&bounds_enable&bounds_type=sphere", id="region_s", label="bounding region")])
+def group_create(geo, bounds=None, *, name, domain, method, pattern, box_center, box_size, direction, angle, percent, seed, combine,
                  base_enable=True, bounds_enable=False, bounds_type="box", bounds_partial=False, normals_enable=False,
                  backface_from="", normals_opposite=False, edges_enable=False, min_edge_angle_on=False, min_edge_angle=20.0,
                  max_edge_angle_on=False, max_edge_angle=20.0, min_edge_length_on=False, min_edge_length=0.0,
@@ -198,6 +223,7 @@ def group_create(geo, name, domain, method, pattern, box_center, box_size, direc
     """Make a named group of points, primitives or edges (stored as the int attribute group_<name>, 1 = member; edge
     groups as edge_group_<name>). Most nodes take a group field, and Blender gets each group as a boolean attribute."""
     dom = DOMAIN[domain]
+    box_center, box_size = region_from(bounds, box_center, box_size)
     if method == "filters" or dom == "edge":
         m = _filters(geo, dom, name, dict(
             pattern=pattern, base_enable=base_enable or method != "filters", bounds_enable=bounds_enable, bounds_type=bounds_type,

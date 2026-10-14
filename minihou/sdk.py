@@ -252,14 +252,81 @@ class Handle:
     id: str = ""
     radius: Optional[float] = None            # rings: world radius (default: from the output's size)
     tool: str = ""                            # "move" | "rotate" | "scale": handles under the same tool buttons as transform's
+    when: str = ""                            # show only while these hold: "flag" (a Bool parameter is on), "name=value", "name!=value", joined by "&"
 
     def key(self) -> str:
         return self.id or self.param + (f"_{'xyz'[self.comp]}" if self.comp is not None else "")
 
 
+GUIDE_SHAPES = ("box", "sphere", "circle", "plane", "line", "bounds", "axes")
+
+
+@dataclass(frozen=True)
+class Guide:
+    """A helper drawn in the 3-D view while the node is selected: an outline of a region the node works on (a bounding box, a
+    radius, a cutting plane...). Not draggable and cosmetic (never in the cache key); pair it with ``Handle``s that edit the
+    same parameters. ``shape``: "box" (``size`` is the full size), "sphere" (``size`` a radius, or a Vec3 of full sizes for an
+    ellipsoid), "circle" (``size`` a radius, round ``axis``), "plane" (a square of side ``size`` with a normal tick), "line"
+    (``size`` long along ``axis``), "bounds" (the bounding box of the node's output) or "axes" (three short lines).
+
+    ``at`` is where it stands (as for ``Handle``), ``size`` is a number, "@name" for a parameter holding it, or None (fitted to
+    the output). ``when``: "flag" (a Bool parameter is on), "name=value" or "name!=value", joined by "&", for the guide to show.
+    ``color``: "x"/"y"/"z" or a hex colour."""
+    shape: str
+    at: Any = "center"
+    axis: Any = "z"
+    size: Any = None
+    id: str = ""
+    label: str = ""
+    color: str = ""
+    when: str = ""
+
+    def key(self) -> str:
+        return self.id or self.shape
+
+
+def _check_when(where: str, when: str, by: Dict[str, Param]) -> None:
+    for term in filter(None, (t.strip() for t in when.split("&"))):
+        name = term.split("!=")[0].split("=")[0].strip()
+        if name.startswith("_"):                  # a value the viewer adds (e.g. "_inputs": how many inputs are connected)
+            continue
+        if name not in by:
+            raise ValueError(f"{where}: when={when!r} names no parameter {name!r}")
+        if "=" not in term and by[name].kind != "bool":
+            raise ValueError(f"{where}: when={when!r}: {name!r} is not a Bool parameter (write {name}=value)")
+
+
+def holds(when: str, params: Dict[str, Any]) -> bool:
+    """Whether every term of a ``when`` condition holds for the given parameter values."""
+    for term in filter(None, (t.strip() for t in when.split("&"))):
+        if "!=" in term:
+            name, value = (s.strip() for s in term.split("!=", 1))
+            ok = str(params.get(name)) != value
+        elif "=" in term:
+            name, value = (s.strip() for s in term.split("=", 1))
+            ok = str(params.get(name)) == value
+        else:
+            ok = bool(params.get(term))
+        if not ok:
+            return False
+    return True
+
+
+def _check_guide(node_name: str, g: "Guide", params: Sequence[Param]) -> None:
+    by = {p.name: p for p in params}
+    where = f"node {node_name!r} guide {g.key()!r}"
+    if g.shape not in GUIDE_SHAPES:
+        raise ValueError(f"{where}: shape must be one of {GUIDE_SHAPES}")
+    for what, v in (("at", g.at), ("axis", g.axis), ("size", g.size)):
+        if isinstance(v, str) and v.startswith("@") and v[1:] not in by:
+            raise ValueError(f"{where}: {what} {v!r} names no parameter")
+    _check_when(where, g.when, by)
+
+
 def _check_handle(node_name: str, h: "Handle", params: Sequence[Param]) -> None:
     by = {p.name: p for p in params}
     where = f"node {node_name!r} handle {h.key()!r}"
+    _check_when(where, h.when, by)
     if h.param not in by:
         raise ValueError(f"{where}: no parameter {h.param!r}")
     p = by[h.param]
@@ -307,6 +374,7 @@ class NodeType:
     code_hash: str = ""           # hash of that file: part of the cache key, so editing the code never serves stale results
     key_extra: Optional[Callable[[Dict[str, Any]], str]] = None   # extra cache-key material from outside the graph
     handles: Tuple["Handle", ...] = ()                              # viewport gizmos (cosmetic: never in the cache key)
+    guides: Tuple["Guide", ...] = ()                                # viewport helpers (outlines of regions; cosmetic too)
     actions: Tuple["Action", ...] = ()                              # buttons (cosmetic too; see minihou.actions)
     _param_index: Dict[str, Param] = field(default_factory=dict, repr=False, compare=False)
     proxy_params: Tuple[Param, ...] = field(default=(), repr=False, compare=False)    # the parameters a proxy cook level scales
@@ -414,6 +482,7 @@ def node(name: str, *, inputs: Sequence[Union[str, Input]] = (), params: Sequenc
          outputs: Optional[Sequence[Union[str, Output]]] = None, version: int = 1, category: str = "",
          doc: str = "", registry: Optional[Registry] = None, replace: bool = False,
          key_extra: Optional[Callable[[Dict[str, Any]], str]] = None, handles: Sequence["Handle"] = (),
+         guides: Sequence["Guide"] = (),
          actions: Sequence["Action"] = ()):
     """Decorator: turn a function into a registered node type.
 
@@ -423,6 +492,7 @@ def node(name: str, *, inputs: Sequence[Union[str, Input]] = (), params: Sequenc
     outs = tuple(Output(o) if isinstance(o, str) else o for o in (outputs if outputs is not None else ["geo"]))
     params = tuple(params)
     handles = tuple(handles)
+    guides = tuple(guides)
     actions = tuple(actions)
 
     def deco(fn: Callable) -> Callable:
@@ -447,10 +517,15 @@ def node(name: str, *, inputs: Sequence[Union[str, Input]] = (), params: Sequenc
                              "choose another name")
         for h in handles:
             _check_handle(name, h, params)
+        for g in guides:
+            _check_guide(name, g, params)
+        gkeys = [g.key() for g in guides]
+        if len(set(gkeys)) != len(gkeys):
+            raise ValueError(f"node {name!r}: guide ids must be unique (give two guides of one shape an id=)")
         keys = [h.key() for h in handles]
         if len(set(keys)) != len(keys):
             raise ValueError(f"node {name!r}: handle ids must be unique (give two handles on one parameter an id=)")
-        nt = NodeType(name=name, fn=fn, inputs=ins, params=params, outputs=outs, version=version, handles=handles,
+        nt = NodeType(name=name, fn=fn, inputs=ins, params=params, outputs=outs, version=version, handles=handles, guides=guides,
                       category=category or ("custom" if src else ""), doc=doc or (inspect.getdoc(fn) or ""),
                       source=src["file"] if src else "", code_hash=src["hash"] if src else "", key_extra=key_extra, actions=actions)
         reg.register(nt, replace=replace)

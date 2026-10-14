@@ -197,7 +197,7 @@ window.MiniHouPreview = (() => {
 
     const view = { yaw: -0.6, pitch: 0.45, dist: 5, target: [0, 0, 0], ortho: false };
     const PITCH_MAX = 1.5707, FOV = Math.PI / 4, ORTHO_FOV = 0.03;     // "orthographic" is a very narrow lens far away: the same maths, so picking and handles keep working
-    const opt = { navigation: "blender", orbitDepth: true, shaded: true, edges: true, points: false, normals: false, grid: true, background: "#212429", gridOpacity: 1, axes: true, lighting: 1, pointSize: 4, gridSpacing: 0,
+    const opt = { bounds: false, navigation: "blender", orbitDepth: true, shaded: true, edges: true, points: false, normals: false, grid: true, background: "#212429", gridOpacity: 1, axes: true, lighting: 1, pointSize: 4, gridSpacing: 0,
       instBias: 1, instTris: 1500000,
       clipNear: 0, clipFar: 0,                                       // camera clip distances (0 = automatic from the scene's size)
       section: { on: false, axis: 2, offset: 0, flip: false },       // a cutting plane: what lies beyond it is hidden (and cannot be picked or painted)
@@ -977,12 +977,42 @@ window.MiniHouPreview = (() => {
       return [o[0] + u[0] * c + v[0] * d, o[1] + u[1] * c + v[1] * d, o[2] + u[2] * c + v[2] * d];
     }
     const RING_STEPS = 72;
-    const shown = () => (selHandles.length ? selHandles : handles).filter((h) => !h.tool || h.tool === api.tool).map(h=>{
+    const shown = () => (selHandles.length ? selHandles : handles).filter((h) => h.kind !== "guide" && (!h.tool || h.tool === api.tool)).map(h=>{
       if(h.pending&&interaction.orientation==='view'){const frame=handleDrag?.h.axis_rotation?IM.frame(handleDrag.h.axis_rotation):orientationFrame();return {...h,dir:frame[h.comp??2],axis_rotation:IM.euler(frame)};}return h;
     });
     function renderHandles(cam) {
       hsvg.setAttribute("width", cam.w); hsvg.setAttribute("height", cam.h);
       const kids = [];
+      for (const gd of handles) {                                                            // guides: outlines of the regions a node works on (not grabbable)
+        if (gd.kind !== "guide") continue;
+        const col = gd.color || "#e8b565";
+        for (const line of gd.lines || []) {
+          let d = "", pen = false;
+          for (const q of line) {
+            const sp = toScreen(cam, q[0], q[1], q[2]);
+            d += sp ? (pen ? "L" : "M") + sp[0].toFixed(1) + " " + sp[1].toFixed(1) : "";
+            pen = !!sp;
+          }
+          if (d) kids.push(svg("path", { d, fill: "none", stroke: col, "stroke-width": 1.5, "stroke-dasharray": "6 4", "stroke-opacity": 0.85, "pointer-events": "none", class: "pv-guide", "data-id": gd.id }));
+        }
+      }
+      if (opt.bounds && data.npoints) {                                                      // bounding box of the displayed geometry, with its size
+        const [lo, hi] = data.bounds, c = (i, j, k) => [i ? hi[0] : lo[0], j ? hi[1] : lo[1], k ? hi[2] : lo[2]];
+        const edges = [];
+        for (const [a, b] of [[[0,0,0],[1,0,0]],[[0,1,0],[1,1,0]],[[0,0,1],[1,0,1]],[[0,1,1],[1,1,1]],[[0,0,0],[0,1,0]],[[1,0,0],[1,1,0]],[[0,0,1],[0,1,1]],[[1,0,1],[1,1,1]],
+                              [[0,0,0],[0,0,1]],[[1,0,0],[1,0,1]],[[0,1,0],[0,1,1]],[[1,1,0],[1,1,1]]]) {
+          const p = toScreen(cam, ...c(...a)), q = toScreen(cam, ...c(...b));
+          if (p && q) kids.push(svg("line", { x1: p[0], y1: p[1], x2: q[0], y2: q[1], stroke: "#8fb3d9", "stroke-width": 1, "stroke-dasharray": "3 3", opacity: 0.7, "pointer-events": "none", class: "pv-bounds" }));
+        }
+        const fmt = (v) => (Math.abs(v) >= 100 ? v.toFixed(0) : Math.abs(v) >= 10 ? v.toFixed(1) : v.toFixed(3)).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+        for (const [axis, a, b] of [[0, c(0,0,0), c(1,0,0)], [1, c(0,0,0), c(0,1,0)], [2, c(0,0,0), c(0,0,1)]]) {
+          const m = toScreen(cam, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
+          if (!m) continue;
+          const t = svg("text", { x: m[0] + 4, y: m[1] - 4, fill: AXIS_COLOUR[axis], "font-size": 11, "pointer-events": "none", class: "pv-bounds-label" });
+          t.textContent = "XYZ"[axis] + " " + fmt(hi[axis] - lo[axis]);
+          kids.push(t);
+        }
+      }
       for(const h of shown())for(const line of h.guide_lines||[]){const a=toScreen(cam,...line[0]),b=toScreen(cam,...line[1]);if(a&&b)kids.push(svg('line',{x1:a[0],y1:a[1],x2:b[0],y2:b[1],stroke:'#e8b565','stroke-width':1,'pointer-events':'none',opacity:.65}));}
       for (const h of shown()) {
         const active=handleDrag?.h.id===h.id;
@@ -1383,6 +1413,7 @@ window.MiniHouPreview = (() => {
       edgeCount: () => data.nedges,
       view, opt, onSelect: null, onHandle: null, onHandleStart: null,
       setHandles(list) { if (handleDrag) pendingHandles = list || []; else { handles = list || []; schedule(); } },
+      guideCount() { return handles.filter((h) => h.kind === "guide").length; },
       handleTips() {                                                                    // for tests: where each handle's grab point is, in canvas pixels
         const cam = camera();
         return shown().map((h) => {

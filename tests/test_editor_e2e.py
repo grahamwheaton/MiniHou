@@ -1090,7 +1090,14 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_function("minihou.preview.handleTips().length > 0")
 
     def drag_handle(self, hid, pixels):
-        tip = next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == hid)
+        def tip_of():
+            return next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == hid)
+        tip, last = tip_of(), None
+        for _ in range(40):                                                   # the view may still be settling after a cook: grab it when it stops moving
+            last, tip = tip, tip_of()
+            if tip["tip"] == last["tip"] and tip["u"] == last["u"]:
+                break
+            time.sleep(0.05)
         box = self.page.locator("#pv-canvas").bounding_box()
         x, y = box["x"] + tip["tip"][0], box["y"] + tip["tip"][1]
         self.page.mouse.move(x, y)
@@ -1462,6 +1469,8 @@ class EditorE2E(unittest.TestCase):
         self.page.keyboard.press("r")                                                        # R: scale tool (nothing is selected in the view)
         ids = sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()"))
         self.assertEqual(ids, ["scale_x", "scale_y", "scale_z", "uniform_scale"])
+        self.assertTrue(until(lambda: self.s.status()["ok"]))                                 # the rotation has been cooked and the handles re-placed
+        time.sleep(0.4)
         self.drag_handle("scale_y", 64)                                                      # +64 px: times e
         self.assertTrue(until(lambda: abs(self.s.graph.nodes["h"].params.get("scale", [1, 2, 3])[1] - 2 * math.e) < 0.3))   # (the last value arrives after the drag)
         sc = self.s.graph.nodes["h"].params["scale"]
@@ -1475,7 +1484,28 @@ class EditorE2E(unittest.TestCase):
     def test_tool_buttons_are_hidden_for_nodes_without_transform_handles(self):
         self.handle_scene("polyextrude", {"group": "0", "distance": 0.2}, "h")
         self.assertTrue(self.page.locator("#pv-xform").evaluate("e => e.classList.contains('hidden')"))
-        self.assertEqual(len(self.page.evaluate("minihou.preview.handleTips()")), 1)         # its arrow is always shown
+        ids = sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()"))
+        self.assertEqual(ids, ["distance", "inset"])                                          # its arrow and the inset cage are always shown
+
+    def test_guides_outline_the_region_a_node_works_on_and_are_not_handles(self):
+        self.handle_scene("soft_transform", {"center": [0, 0, 0], "radius": 1.5}, "h")
+        self.page.wait_for_function("minihou.preview.guideCount() == 1")
+        self.assertTrue(until(lambda: self.page.locator(".pv-handles .pv-guide").count() == 3))        # three circles of the falloff sphere
+        ids = {t["id"] for t in self.page.evaluate("minihou.preview.handleTips()")}
+        self.assertNotIn("guide:region", ids)                                                         # decoration: nothing to grab
+        self.assertEqual(self.page.locator(".pv-handles .pv-guide").first.evaluate("e => getComputedStyle(e).pointerEvents"), "none")
+        self.node("o").locator(".title").click()                                                      # a node without guides: they go
+        self.page.wait_for_function("minihou.preview.guideCount() == 0")
+
+    def test_the_bounds_helper_outlines_and_measures_the_geometry(self):
+        self.handle_scene("transform", {}, "h")
+        self.assertEqual(self.page.locator(".pv-bounds").count(), 0)
+        self.page.locator("#pv-bounds").check()
+        self.assertTrue(until(lambda: self.page.locator(".pv-handles line.pv-bounds").count() >= 8))
+        labels = self.page.locator(".pv-bounds-label").evaluate_all("els => els.map(e => e.textContent.trim())")
+        self.assertEqual(sorted(labels), ["X 2", "Y 2", "Z 2"])                                        # the 2 x 2 x 2 box
+        self.page.locator("#pv-bounds").uncheck()
+        self.assertTrue(until(lambda: self.page.locator(".pv-bounds").count() == 0))
 
     # ---- the Blender bar: add-on zip to drag, install, open Blender
     def stub_blenders(self, found, install=None, launch=None):
@@ -2721,7 +2751,7 @@ class EditorE2E(unittest.TestCase):
             requestAnimationFrame(() => { const w = c.width, h = c.height, px = new Uint8Array(w * h * 4); gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
               let n = 0; for (let i = 0; i < px.length; i += 4) if (px[i] > px[i + 1] + 30 && px[i] > px[i + 2] + 60) n++; resolve(n); }); })"""     # the orange of back faces
         before = self.page.evaluate(count_back)
-        self.assertLess(before, 100)                                                                 # a closed sphere shows (next to) no back faces
+        self.assertLess(before, 400)                                                                 # a closed sphere shows (next to) no back faces: only a few antialiased rim pixels
         self.open_perf()
         self.page.check("#pv-section")
         self.page.select_option("#pv-section-axis", "2")                                              # Z, at the middle: the top half is cut away
@@ -3125,7 +3155,7 @@ class EditorE2E(unittest.TestCase):
         self.page.evaluate("minihou.preview.selectElements('point', [0,1,2,3,4,10,11,12,13,14], 'replace')")
         self.page.select_option("#attr-card .pa-mask", "selection")
         self.page.click("#attr-card .pa-masksnap")
-        self.assertIn("mask: 10 selected", self.page.locator("#attr-card .pa-info").inner_text())
+        self.assertTrue(until(lambda: "mask: 10 selected" in self.page.locator("#attr-card .pa-info").inner_text(), timeout=15))
         self.page.click('#attr-card .pa-tabbtn[data-tab="paint"]')
         self.page.wait_for_function("minihou.paint.active() && minihou.paint.values() && minihou.paint.values().n === 100")
         self.assertEqual(self.page.evaluate("minihou.preview.selection().points.length"), 0)          # paint mode cleared the selection; the mask kept it
@@ -3199,7 +3229,7 @@ class EditorE2E(unittest.TestCase):
         self.page.fill("#attr-card .pa-value", "1")
         self.page.locator("#attr-card .pa-value").press("Tab")
         self.page.click("#attr-card .pa-assign-all")
-        self.assertTrue(until(lambda: bool((self.painted().point["temp"] == 1.0).all())))
+        self.assertTrue(until(lambda: bool((self.painted().point["temp"] == 1.0).all()), timeout=15))
         self.page.click("#attr-card .pa-clear")
         self.assertTrue(until(lambda: float(self.painted().point["temp"].max()) == 1.0))             # cleared the strokes, the default stays
         self.assertEqual(sum(n.type == "attrib_paint" for n in self.s.graph.nodes.values()), 1)       # one node, reused

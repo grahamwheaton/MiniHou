@@ -25,6 +25,18 @@ def max_slope(g, rows=64, cols=64, cell=10 / 63):
 
 
 class HeightfieldTests(unittest.TestCase):
+    def test_many_droplets_on_a_coarse_grid_stay_bounded(self):
+        """Hundreds of droplets per cell used to carve the same cell over and over until the heights overflowed."""
+        nodes = {"g": {"type": "grid", "params": {"columns": 16, "rows": 16, "size_x": 10, "size_y": 10}},
+                 "n": {"type": "noise", "inputs": {"geo": "g"}, "params": {"amplitude": [0, 0, 2], "frequency": 0.2, "octaves": 3, "seed": 3}},
+                 "e": {"type": "heightfield_erode", "inputs": {"geo": "n"}, "params": {"iterations": 10, "droplets": 20000, "thermal_iterations": 0}},
+                 "o": {"type": "output", "inputs": {"geo": "e"}}}
+        ev = Evaluator()
+        g = Graph.from_dict({"nodes": nodes, "display": "o"})
+        out, src = ev.cook(g), ev.cook(g, "n")
+        self.assertTrue(np.isfinite(out.P).all())
+        self.assertLess(float(np.abs(out.P[:, 2] - src.P[:, 2]).max()), float(np.ptp(src.P[:, 2])))
+
     def test_droplets_carve_and_deposit_deterministically(self):
         params = {"iterations": 6, "droplets": 1500, "thermal_iterations": 0, "seed": 2}
         a, src = cook(params)

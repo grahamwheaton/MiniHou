@@ -1845,6 +1845,7 @@
       $(id).checked = pv.opt[key];
       $(id).onchange = (e) => { preferences[key] = e.target.checked; applyPreferences(true); };
     }
+    $("#pv-bounds").onchange = (e) => { pv.opt.bounds = e.target.checked; pv.redraw(); };               // a helper, not a saved preference
     $("#pv-frame-all").onclick = () => pv.frameAll();
     $("#pv-view-extra").onchange = (e) => { if (e.target.value) pv.viewAxis(e.target.value, false); e.target.value = ""; };
     $("#pv-hints-toggle").onclick = (e) => {

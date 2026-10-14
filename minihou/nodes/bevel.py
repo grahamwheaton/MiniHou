@@ -11,7 +11,7 @@ import numpy as np
 
 from .. import edges as edgelib, groups, spatial, topo
 from ..outgroups import OutGroup, OutGroups, edge_mask
-from ..sdk import Bool, Enum, Float, Int, Str, node
+from ..sdk import Bool, Enum, Float, Input, Int, Str, node
 from . import _build as B
 from .normal import prim_normals
 
@@ -139,7 +139,37 @@ OUT = OutGroups(
 )
 
 
-@node("polybevel", inputs=["geo"], category="model", params=[
+def profile_samples(curve, count):
+    """The cross-section curve as ``count + 1`` evenly spaced (along, bulge) pairs: its first-to-last point is the chord
+    (along 0 to 1), and the bulge is the offset from it in chord lengths, positive towards the corner being rounded."""
+    t = curve.topology
+    sizes = t.prim_sizes()
+    ok = np.flatnonzero(sizes >= 2)
+    if not len(ok):
+        raise ValueError("polybevel: the cross-section curve input has no curve")
+    pr = int(ok[0])
+    o = int(t.prim_offsets[pr])
+    pts = curve.P.astype(np.float64)[t.vertex_point[o:o + int(sizes[pr])].astype(np.int64)]
+    a, z = pts[0], pts[-1]
+    chord = z - a
+    L = float(np.linalg.norm(chord))
+    if L < 1e-12:
+        raise ValueError("polybevel: the cross-section curve starts and ends at the same point")
+    x = chord / L
+    q = pts - a
+    # the bulge axis: the direction in the curve's plane perpendicular to the chord (the farthest point's side is +)
+    perp = q - np.outer(q @ x, x)
+    k = int(np.argmax(np.linalg.norm(perp, axis=1)))
+    y = perp[k] / max(float(np.linalg.norm(perp[k])), 1e-30) if np.linalg.norm(perp[k]) > 1e-12 else np.zeros(3)
+    u = np.stack([(q @ x) / L, (q @ y) / L], 1)
+    seg = np.r_[0.0, np.cumsum(np.linalg.norm(np.diff(u, axis=0), axis=1))]
+    want = np.linspace(0.0, seg[-1], count + 1)
+    return np.stack([np.interp(want, seg, u[:, 0]), np.interp(want, seg, u[:, 1])], 1)
+
+
+@node("polybevel", inputs=["geo", Input("profile", optional=True, doc="Cross-section curve (Houdini's second input): the bevel's profile, from "
+                                                                     "the first to the last point; bulging towards the corner. Replaces shape/convexity")],
+      category="model", params=[
     Float("distance", 0.1, min=0.0, soft_max=1.0, doc="How far the bevel cuts into the faces on each side"),
     Int("divisions", 1, min=1, max=64, doc="Segments across each bevel strip. One preserves the original chamfer."),
     Enum("shape", ["round", "flat"], doc="Round uses a tangent circular profile; flat subdivides the chamfer."),
@@ -157,7 +187,7 @@ OUT = OutGroups(
     Str("output_group", "bevel", doc="Primitive group for all the new bevel faces (empty: none)"),
     *OUT.params(),
 ])
-def polybevel(geo, distance, min_angle, group, group_type, edges, output_group, divisions=1, shape="round", convexity=1.0, limit_overlap=True, exclude_edges="", **og):
+def polybevel(geo, profile=None, *, distance, min_angle, group, group_type, edges, output_group, divisions=1, shape="round", convexity=1.0, limit_overlap=True, exclude_edges="", **og):
     """Bevel polygon edges with segmented round or flat profiles. Keep ``distance`` below half
     the shortest bevelled face edge, or the cuts overlap. N is removed (recompute it with a normal node)."""
     B.require_polygons(geo, "polybevel")
@@ -298,7 +328,8 @@ def polybevel(geo, distance, min_angle, group, group_type, edges, output_group, 
     out = OUT.write(out, og, "offsetedges", lambda: edge_mask(out, offset_pairs))
     out = OUT.write(out, og, "pointfilletedges", lambda: edge_mask(out, _ring_pairs(walk, rlen)))
     if divisions > 1:
-        out = _segments(out, t.nprims, nq, int(divisions), shape, float(convexity), geo.P[vp[corner]], og)
+        out = _segments(out, t.nprims, nq, int(divisions), shape, float(convexity), geo.P[vp[corner]], og,
+                         None if profile is None else profile_samples(profile, int(divisions)))
     out = B.drop_degenerate(out)
     if dangling.any():
         used = np.unique(out.topology.vertex_point)
@@ -328,7 +359,7 @@ def _outputs(geo, og, _unused):
     return geo
 
 
-def _segments(geo, first_strip, strip_count, count, shape, convexity, homes, og):
+def _segments(geo, first_strip, strip_count, count, shape, convexity, homes, og, profile=None):
     """Refine strips with shared profile chains; corner fans close the same chains.
 
     Float attributes interpolate; discrete attributes retain their source identity.
@@ -370,7 +401,11 @@ def _segments(geo, first_strip, strip_count, count, shape, convexity, homes, og)
             linear = left*(1-t) + right*t
             denom = (1-t)**2 + 2*weight*t*(1-t) + t*t
             arc = ((1-t)**2*left + 2*weight*t*(1-t)*control + t*t*right) / max(denom, _EPS)
-            position = linear if shape == 'flat' else linear + convexity*(arc-linear)
+            if profile is not None:
+                bulge = _unit(control - midpoint) * np.linalg.norm(right - left)
+                position = left + (right - left) * profile[j][0] + bulge * profile[j][1]
+            else:
+                position = linear if shape == 'flat' else linear + convexity*(arc-linear)
             result.append(add_point(position, a, b, t))
         result.append(b)
         chains[key] = result

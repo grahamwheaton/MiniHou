@@ -21,13 +21,38 @@ PolyBevel now has Divisions (1–64), Round/Flat shape, Convexity (0 flat to 1 r
 
 Corners where three or more bevelled edges meet are built the way Blender's vertex mesh is (`bmesh_bevel.cc`, `adj_vmesh`): each corner of the corner polygon owns a grid of quads, and the grids meet in the middle, at a point for an even number of divisions and at a polygon (a triangle for a box corner) for an odd number. The boundary is the profile of the strips that end there; the inside is a Coons patch pushed onto the sphere through that boundary, so the corner of a box is an exact octant of a sphere (and the corner arches like the edges do) for any number of divisions. Convexity blends that sphere toward the flat patch, Flat shape keeps the patch flat, and a corner no sphere fits (a saddle where convex and concave edges meet, or where the edges are almost flat) stays a plain Coons patch. A corner that is a cap (an open end of a bevel) is still closed with a simple fan.
 
-Round strips use tangent rational quadratic profiles. Corner junctions use shared-boundary triangle fans, not a rolling-ball patch solver. Houdini-specific custom profile ramps, slide-on-ring overrides, asymmetry tolerance, distance scaling modes, and global collision merging are not implemented; controls for unsupported algorithms are not shown. Terminating selected edges now create endpoint caps, including single box edges.
+Round strips use tangent rational quadratic profiles. Corner junctions use shared-boundary triangle fans, not a rolling-ball patch solver. A cross-section curve on the second input (as in Houdini) replaces Shape and Convexity: the curve runs from the first to the last point, which are the bevel's two ends, and its offset from that chord, measured in chord lengths and positive towards the corner being rounded, is the profile, sampled at Divisions segments (a bulge of 0.207 is the quarter circle). Houdini-specific profile ramps, slide-on-ring overrides, asymmetry tolerance, distance scaling modes, and global collision merging are not implemented; controls for unsupported algorithms are not shown. Terminating selected edges now create endpoint caps, including single box edges.
 
 Loop-cut commits now retain the current camera, including right-click to center the cut.
 
 
 F over the viewport frames the current component/object selection, or the displayed geometry if no components are selected. Wheel zoom uses the surface depth under the cursor when available, slowing near geometry; over empty background it falls back to distance-scaled zoom.
 
+
+## Gizmos and helpers
+
+A selected node shows its **handles** (drag to change a parameter) and **guides** (outlines of the region it works on, dashed, not grabbable) in the 3-D view, and the **bounds** checkbox in the viewer's top bar outlines the displayed geometry's bounding box with its X/Y/Z size.
+
+| node | handles | guides |
+|---|---|---|
+| `circle`, `torus` | radius arrow (rides on the shape) | |
+| `grid` | size X / size Y arrows on the edges | |
+| `soft_transform` | move / rotate / scale (W, E, R), radius arrow | falloff sphere |
+| `twist` | strength ring | axis |
+| `squash_stretch` | amount (multiplies) | axis |
+| `linear_taper` | length arrow | axis, start plane |
+| `bend` | length, bend and twist | capture region, start plane |
+| `clip`, `mirror` | origin x / y / z | the plane, with a normal tick |
+| `revolve` | angle ring, origin | axis |
+| `uv_project` | move / rotate / scale of the projection frame | projection centre |
+| `copy_transform` | translate | |
+| `group_create` | box centre and size (box method or bounds filter) | the bounding box, or the sphere |
+| `match_size` | target position and size | target box |
+| `curve`, `bezier` | (viewport curve tool) | |
+
+With a bounding object connected to `group_create`, the guide shows that object's bounds and the box arrows go away (their parameters are ignored).
+
+Library nodes declare both in code: `@node(..., handles=[Handle("radius", axis="x", at="@center", reach=True, when="mode=sphere")], guides=[Guide("sphere", at="@center", size="@radius")])`. `Guide(shape, at, axis, size, id, label, color, when)` draws a `box` (size = full size, Vec3 or number), `sphere` (size = radius, or a Vec3 of full sizes for an ellipsoid), `circle`, `plane` (a square with a normal tick), `line`, `bounds` (of the node's output) or `axes`; `at` and `axis` take the same forms as for `Handle`, `size` is a number or `"@parameter"`, and `when` ("flag", "name=value", "name!=value", joined by "&") shows a handle or guide only while its condition holds. Providers in `minihou/handles.py` can return guides too (`handles.guide(id, label, lines)`).
 
 ## Interaction refinement
 

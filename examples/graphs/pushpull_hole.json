@@ -45,5 +45,12 @@
       ]
     }
   },
-  "display": "hole"
+  "display": "hole",
+  "exposed": [
+    {
+      "name": "Hole Depth",
+      "node": "hole",
+      "param": "distance"
+    }
+  ]
 }

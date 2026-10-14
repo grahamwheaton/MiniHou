@@ -3,7 +3,7 @@ import numpy as np
 
 from ..geometry import Geometry, Topology
 from ..outgroups import OutGroup, OutGroups
-from ..sdk import Bool, Enum, Float, Handle, Input, Int, Vec3, node
+from ..sdk import Bool, Enum, Float, Guide, Handle, Input, Int, Vec3, node
 from . import _build as B
 from ._util import euler_xyz_matrix
 
@@ -46,9 +46,25 @@ FUSE_OUT = OutGroups(
 )
 
 
-@node("fuse", inputs=["geo"], category="modify", params=[Float("distance", 0.001, min=0.0, soft_max=1.0), *FUSE_OUT.params()])
-def fuse(geo, distance, **og):
-    """Weld points that lie within ``distance`` of each other (snapped to a grid of that size)."""
+@node("fuse", inputs=["geo", Input("targets", optional=True, doc="Snap targets: points of the first input within the distance move onto the nearest point here")],
+      category="modify", params=[Float("distance", 0.001, min=0.0, soft_max=1.0), *FUSE_OUT.params()], version=2)
+def fuse(geo, targets=None, *, distance, **og):
+    """Weld points that lie within ``distance`` of each other (snapped to a grid of that size). With a second input
+    the first input's points are only snapped onto the nearest point of the second (within ``distance``): the
+    second input is not modified, and the first input's points are not welded to each other."""
+    if targets is not None:
+        from .. import spatial
+        out = geo.copy()
+        if geo.npoints and targets.npoints:
+            idx, dist = spatial.nearest(targets.P, geo.P)
+            hit = dist <= max(float(distance), 1e-12)
+            P = geo.P.copy()
+            P[hit] = targets.P[idx[hit]]
+            out.point["P"] = P
+        else:
+            hit = np.zeros(geo.npoints, bool)
+        out = FUSE_OUT.write(out, og, "fused", lambda: hit)
+        return FUSE_OUT.write(out, og, "unique", lambda: ~hit)
     counts = []
     out = fuse_points(geo, distance, counts)
     c = counts[0] if counts else np.zeros(0, np.int64)
@@ -145,7 +161,8 @@ def sphere(radius, center, rows, columns, rotate=(0,0,0), scale=(1,1,1), uniform
     Vec3("center", (0.0, 0.0, 0.0)),
     Vec3("rotate", (0.0, 0.0, 0.0), doc="Euler XYZ degrees; the circle lies in XY facing +Z before rotation"),
     Int("divisions", 32, min=3, max=100000, proxy="count"),
-])
+], handles=[Handle("radius", axis="x", at="@center", reach=True, min=0.0)])
+
 def circle(radius, center, rotate, divisions):
     """A single filled n-gon."""
     t = np.linspace(0, 2 * np.pi, divisions, endpoint=False)
@@ -210,7 +227,8 @@ def tube(radius_bottom, radius_top, height, center, rows, columns, caps, rotate=
     Vec3("rotate", (0,0,0)), Vec3("scale", (1,1,1)), Float("uniform_scale", 1., min=0),
     Int("rows", 12, min=3, max=4096, soft_max=200, doc="segments around the tube", proxy="res2"),
     Int("columns", 32, min=3, max=4096, soft_max=400, doc="segments around the ring", proxy="res2"),
-])
+], handles=[Handle("radius", axis="x", at="@center", reach=True, min=0.0)])
+
 def torus(radius, thickness, center, rows, columns, rotate=(0,0,0), scale=(1,1,1), uniform_scale=1):
     """Torus in the XY plane (Houdini's Torus), outward-facing quads with vertex uvs; closed."""
     phi = np.linspace(0, 2 * np.pi, rows, endpoint=False)[:, None]        # around the tube

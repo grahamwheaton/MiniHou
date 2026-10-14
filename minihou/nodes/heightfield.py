@@ -7,7 +7,7 @@ gathered: rivers, 0..1), ``erosion`` and ``deposit`` (how much material left or 
 """
 import numpy as np
 
-from ..sdk import Float, Int, node
+from ..sdk import Float, Input, Int, node
 
 _NEIGHBOURS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
 
@@ -118,13 +118,17 @@ def hydraulic(H, cell, iterations, rain, capacity, erode_rate, deposit_rate, eva
             # erode with a small brush around the nearest point
             cy = np.clip(np.round(y[idx]).astype(np.int64), 0, h - 1)
             cx = np.clip(np.round(x[idx]).astype(np.int64), 0, w - 1)
-            for by, bx, wgt in brush:
-                if wgt <= 0:
-                    continue
-                yy, xx = np.clip(cy + by, 0, h - 1), np.clip(cx + bx, 0, w - 1)
-                take = amount_ero * (wgt / bsum)
-                np.add.at(H, (yy, xx), -take)
-                np.add.at(eroded, (yy, xx), take)
+            # all droplets of a step read the same heights, so on a coarse grid many of them can carve one cell at once: a
+            # cell gives up at most half its height above its lowest neighbour per step (otherwise it runs away)
+            cells = [(np.clip(cy + by, 0, h - 1), np.clip(cx + bx, 0, w - 1), amount_ero * (wgt / bsum)) for by, bx, wgt in brush if wgt > 0]
+            want = np.zeros_like(H)
+            for yy, xx, take in cells:
+                np.add.at(want, (yy, xx), take)
+            room = 0.5 * np.maximum(H - np.min([_shift(H, dy, dx, np.inf) for dy, dx in _NEIGHBOURS], axis=0), 0.0)
+            allow = np.where(want > room, room / np.where(want > 0, want, 1.0), 1.0)
+            H -= want * allow
+            eroded += want * allow
+            amount_ero = sum(take * allow[yy, xx] for yy, xx, take in cells)
             sed[idx] += amount_ero - amount_dep
             vel[idx] = np.sqrt(np.maximum(vel[idx] ** 2 - dh * gravity, 0.0))
             water[idx] *= 1.0 - evaporation
@@ -134,7 +138,9 @@ def hydraulic(H, cell, iterations, rain, capacity, erode_rate, deposit_rate, eva
     return H, flow, eroded, deposited
 
 
-@node("heightfield_erode", inputs=["geo"], category="terrain", params=[
+@node("heightfield_erode", inputs=["geo", Input("mask", optional=True, doc="Same-size grid whose float point attribute 'mask' (0..1) says where erosion may "
+                                                                       "act: 0 keeps the terrain as it was, 1 erodes fully")],
+      category="terrain", version=2, params=[
     Int("iterations", 30, min=0, soft_max=300, doc="Rounds of rain (each drops 'droplets' droplets)"),
     Int("droplets", 4096, min=1, soft_max=100000),
     Float("rain", 0.01, min=0.0, soft_max=0.1, doc="Water per droplet (scales how much each one can carry)"),
@@ -148,11 +154,17 @@ def hydraulic(H, cell, iterations, rain, capacity, erode_rate, deposit_rate, eva
     Float("talus_angle", 35.0, min=0.0, max=89.0, doc="Slopes steeper than this slump"),
     Float("thermal_rate", 0.5, min=0.0, max=1.0),
 ])
-def heightfield_erode(geo, iterations, droplets, rain, capacity, erode_rate, deposit_rate, evaporation, inertia, seed,
+def heightfield_erode(geo, mask=None, *, iterations, droplets, rain, capacity, erode_rate, deposit_rate, evaporation, inertia, seed,
                       thermal_iterations, talus_angle, thermal_rate):
     """Erode a terrain grid: rivers cut valleys and lay down fans of sediment, then over-steep slopes slump. Writes
-    flow (river mask 0..1), erosion and deposit point attributes for shading."""
+    flow (river mask 0..1), erosion and deposit point attributes for shading. A second input with a 'mask' point
+    attribute restricts the change: the result is blended with the original terrain by the mask."""
     rows, cols = lattice(geo)
+    keep = None
+    if mask is not None:
+        if mask.npoints != geo.npoints or "mask" not in mask.point:
+            raise ValueError(f"heightfield_erode: the mask input needs the same {geo.npoints} points and a 'mask' point attribute")
+        keep = np.clip(mask.point["mask"].reshape(geo.npoints, -1)[:, 0].astype(np.float64), 0.0, 1.0).reshape(rows, cols)
     P = geo.P.astype(np.float64)
     H = P[:, 2].reshape(rows, cols).copy()
     cell = (max(abs(P[cols, 1] - P[0, 1]), 1e-9) if rows > 1 else 1.0,
@@ -165,6 +177,9 @@ def heightfield_erode(geo, iterations, droplets, rain, capacity, erode_rate, dep
                                                evaporation, droplets=droplets, inertia=inertia, seed=seed)
     if thermal_iterations:
         H = thermal(H, cell, talus_angle, thermal_rate, thermal_iterations)
+    if keep is not None:
+        H = P[:, 2].reshape(rows, cols) + (H - P[:, 2].reshape(rows, cols)) * keep
+        flow, eroded, deposited = flow * keep, eroded * keep, deposited * keep
     out = geo.copy()
     newP = P.copy()
     newP[:, 2] = H.ravel()
