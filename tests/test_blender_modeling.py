@@ -80,10 +80,14 @@ class BlenderModelingTests(unittest.TestCase):
         self.mesh.polygons.foreach_get('material_index',material)
         np.testing.assert_array_equal(material,geo.prim['material_index'])
         attr=self.mesh.attributes['edge_group_a']
-        self.assertEqual(attr.domain,'CORNER')
-        data=np.empty(geo.nvertices,np.int32)
+        self.assertEqual((attr.domain,attr.data_type),('EDGE','BOOLEAN'))
+        from minihou import edges,topo
+        source_values=edges.values(geo,'edge_group_a')!=0
+        by_pair={tuple(pair):value for pair,value in zip(topo.edges(geo).points,source_values)}
+        expected=[by_pair[tuple(sorted(edge.vertices))] for edge in self.mesh.edges]
+        data=np.empty(len(self.mesh.edges),bool)
         attr.data.foreach_get('value',data)
-        np.testing.assert_array_equal(data,geo.vertex['edge_group_a'])
+        np.testing.assert_array_equal(data,expected)
         self.assertEqual(self.mesh.attributes['group_keep'].data_type,'BOOLEAN')
         moved=run('transform',geo,translate=[3,4,5])
         self.assertFalse(self.send(moved)['rebuilt'])

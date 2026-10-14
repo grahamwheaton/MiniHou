@@ -12,6 +12,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path[:0] = [ROOT, os.path.join(ROOT, "blender_addon")]
 
 import bpy  # noqa: E402
+import minihou  # noqa: E402
+print("MINIHOU_IMPORT", minihou.__file__, flush=True)
 
 print(f"[selftest] Blender {bpy.app.version_string}, Python {sys.version.split()[0]}, engine python: "
       f"{os.environ.get('MINIHOU_ENGINE_PYTHON', sys.executable)}", flush=True)
@@ -25,6 +27,7 @@ suite = unittest.defaultTestLoader.loadTestsFromNames([
     "tests.test_blender_collections",
     "tests.test_blender_materials",
     "tests.test_blender_geometry_exchange",
+    "tests.test_group_blender_export",
 ])
 result = unittest.TextTestRunner(verbosity=2).run(suite)
 sys.stdout.flush()
