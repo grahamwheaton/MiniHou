@@ -54,7 +54,7 @@ class TransformGestureEditorTests(unittest.TestCase):
 
     def test_existing_transform_proportional_controls_apply(self):
         self.page.evaluate("""()=>{const check=document.querySelector('#pv-proportional-enabled');check.checked=true;check.dispatchEvent(new Event('change'));
-          const radius=document.querySelector('#pv-proportional-radius');radius.value='2.5';radius.dispatchEvent(new Event('change'));}""")
+          const radius=document.querySelector('#pv-proportional-radius');radius.value=String(MiniUnits.display(2.5));radius.dispatchEvent(new Event('change'));}""")
         self.page.wait_for_function("minihou.S.graph.nodes.move.params.proportional_radius===2.5")
         params = self.s.graph.nodes['move'].params
         self.assertTrue(params['proportional_enabled'])
