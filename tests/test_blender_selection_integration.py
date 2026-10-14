@@ -139,6 +139,12 @@ class BlenderSelectionIntegrationTests(unittest.TestCase):
         self.assertEqual(set(self.s.graph.nodes),{'b','o'})
         self.assertEqual(self.s.graph.nodes['o'].inputs,{'geo':'b'})
         self.page.wait_for_function("document.querySelector('#pv-node').innerText.includes('b')")
+        # #pv-node names the node as soon as its preview is requested; a click before the box's own geometry is installed is dropped
+        # with the cancelled tool's geometry (other point numbers). Wait for the box itself.
+        from minihou import Evaluator
+        npts=Evaluator().cook(self.s.graph,'b').npoints
+        # the cancelled tool finishes in the browser after the server: it reloads and reselects its source node, which resets the 3-D selection
+        self.page.wait_for_function("(n) => minihou.desktopCanClose() && minihou.S.sel.has('b') && minihou.preview.points === n && !minihou.preview.isDragging()", arg=npts)
         self.page.mouse.click(*self.view_xy('face',self.top))
         x,y=self.view_xy('face',self.top)
         self.page.mouse.move(x,y)
