@@ -55,8 +55,22 @@ class BlenderSelectionIntegrationTests(unittest.TestCase):
         self.box_scene()
         self.s.edit([{'op':'add','type':'transform','id':'group_transform','inputs':{'geo':'b'},'params':{'group':'0 2','translate':[4,0,0]},'pos':[250,100]}])
         self.page.wait_for_selector('.node[data-id="group_transform"]')
+        # Hold a stale preview in flight while Select requests the input geometry.
+        self.page.evaluate("""() => {
+            const original = window.fetch;
+            window.fetch = async (...args) => {
+                const response = await original(...args);
+                if (args[0] === '/api/preview' && JSON.parse(args[1].body).node === 'group_transform')
+                    await new Promise(resolve => window.releaseGroupPreview = resolve);
+                return response;
+            };
+        }""")
         self.node('group_transform').locator('.title').click()
+        self.page.wait_for_function("typeof window.releaseGroupPreview === 'function'")
         self.page.locator('.prow[data-param="group"]').get_by_role('button',name='Select',exact=True).click()
+        self.page.wait_for_function("minihou.S.sel.has('b')")
+        self.assertNotEqual(self.selection()['points'], [0, 2])
+        self.page.evaluate("window.releaseGroupPreview()")
         self.page.wait_for_function("minihou.preview.selection().points.join(',')==='0,2'")
         self.assertEqual(self.selection()['mode'],'point')
         self.assertIn('b',self.page.inner_text('#pv-node'))

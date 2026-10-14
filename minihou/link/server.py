@@ -23,6 +23,7 @@ from ..geometry import Geometry
 from .protocol import (DEFAULT_PORT, PROTOCOL_VERSION, TOPO_KEYS, TOPO_PRIM_CLOSED, TOPO_PRIM_OFFSETS, TOPO_VERTEX_POINT,
                        ProtocolError,
                        attr_key, recv_message, send_message, split_key)
+from .shm import ShmRing, send_shm_or_tcp_message
 from .session import Result, Session
 from .instances import InstanceManager
 
@@ -50,6 +51,8 @@ class _Connection:
         self._scene_nodes: Optional[List[str]] = None
         self.name = "?"
         self.bytes_sent = 0
+        self.shm_enabled = False
+        self.shm_ring: Optional[ShmRing] = None
         self.threads = [threading.Thread(target=self._read_loop, name=f"minihou-r-{addr[1]}", daemon=True),
                         threading.Thread(target=self._write_loop, name=f"minihou-w-{addr[1]}", daemon=True)]
 
@@ -88,6 +91,9 @@ class _Connection:
             self.cv.notify_all()
         self.session.remove_listener(self)
         self.instances.clear()
+        if self.shm_ring is not None:
+            self.shm_ring.close()
+            self.shm_ring = None
         try:
             self.sock.shutdown(socket.SHUT_RDWR)
         except OSError:
@@ -120,8 +126,16 @@ class _Connection:
             self.name = str(h.get("client", "?"))
             log.info("client %s connected (%s)", self.addr, self.name)
             self.instance_mode = h.get("mode") == "instances"
+            caps = ["instances_v1", "live_modifier_v1", "object_inputs_v1", "scene_objects_v1", "image_exchange_v1"]
+            is_local = self.addr[0] in ("127.0.0.1", "::1", "localhost")
+            client_caps = h.get("capabilities", [])
+            if is_local:
+                caps.append("shm_v1")
+                if "shm_v1" in client_caps:
+                    self.shm_enabled = True
+                    self.shm_ring = ShmRing(prefix=f"minihou_shm_{os.getpid()}_{self.addr[1]}")
             self.post({"type": "welcome", "protocol": PROTOCOL_VERSION, "server": "minihou",
-                       "capabilities": ["instances_v1", "live_modifier_v1", "object_inputs_v1", "scene_objects_v1", "image_exchange_v1"], "editor_url": self.server.editor_url,
+                       "capabilities": caps, "editor_url": self.server.editor_url,
                        "graph_path": str(self.session.path.resolve()) if self.session.path else None})
             if self.instance_mode:
                 return
@@ -154,6 +168,7 @@ class _Connection:
                 else:
                     response, output = self.instances.cook(h, _decode_object(h, _arrays or {}))
                 response.update(request_id=h.get("request_id"), instance_id=h.get("instance_id"))
+                response["seq"] = int(h.get("request_id", response.get("seq", 1)))
                 self.post(response, output)
             except Exception as e:
                 self.post({"type": "instance_error", "request_id": h.get("request_id"),
@@ -207,6 +222,9 @@ class _Connection:
                 self.post({"type": "error", "where": "set_frame", "message": f"bad frame {h.get('frame')!r}"})
         elif t == "object_missing":
             self.session.object_received(str(h.get("object", "")), None, error=str(h.get("reason", "not found")))
+        elif t == "geo_ack":
+            if self.shm_ring is not None:
+                self.shm_ring.on_ack(int(h.get("seq", 0)), h.get("slot"))
         elif t == "ping":
             self.post({"type": "pong", "t": h.get("t")})
         else:
@@ -225,9 +243,10 @@ class _Connection:
                     want, self._want_result = self._want_result, False
                     iface, self._iface_pending = self._iface_pending, False
                 for header, arrays in outbox:
-                    self.bytes_sent += send_message(self.sock, header, arrays)
+                    self.bytes_sent += send_shm_or_tcp_message(self.sock, header, arrays,
+                                                               shm_ring=self.shm_ring, seq=header.get("seq", 0))
                 if iface and self.session.live_modifier is None:
-                    self.bytes_sent += send_message(self.sock, self.session.interface())
+                    self.bytes_sent += send_shm_or_tcp_message(self.sock, self.session.interface())
                 if want:
                     self._send_results()
         except (OSError, ConnectionError) as e:
@@ -258,7 +277,8 @@ class _Connection:
         if good is not None and good.seq > self._sent_good_seq:
             header, arrays = self.diff.build(self.session.link_geometry(good), good.seq, good.cook)
             self._sent_good_seq = good.seq
-            self.bytes_sent += send_message(self.sock, header, arrays)
+            self.bytes_sent += send_shm_or_tcp_message(self.sock, header, arrays,
+                                                       shm_ring=self.shm_ring, seq=good.seq)
             self._send_scene(good)
             names = sorted(good.extras)
             if names != self._sent_names:                    # which extra outputs exist (the add-on removes the others)
@@ -273,7 +293,13 @@ class _Connection:
                     continue
                 self._extra_keys[name] = key
                 header, arrays = self.extra_diffs.setdefault(name, DiffState()).build(geo, good.seq, good.cook, output=name)
-                self.bytes_sent += send_message(self.sock, header, arrays)
+                self.bytes_sent += send_shm_or_tcp_message(self.sock, header, arrays,
+                                                           shm_ring=self.shm_ring, seq=good.seq)
+        if err is not None and err.seq > self._sent_error_seq:
+            self._sent_error_seq = err.seq
+            self.bytes_sent += send_message(self.sock, {"type": "error", "where": "cook", "seq": err.seq,
+                                                        "node": err.error.get("node"),
+                                                        "message": err.error["message"]})
         if err is not None and err.seq > self._sent_error_seq:
             self._sent_error_seq = err.seq
             self.bytes_sent += send_message(self.sock, {"type": "error", "where": "cook", "seq": err.seq,

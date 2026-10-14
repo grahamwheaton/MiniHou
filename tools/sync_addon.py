@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SHARED = ["protocol.py", "client.py", "instance_client.py"]
+SHARED = ["protocol.py", "client.py", "instance_client.py", "shm.py"]
 SRC = ROOT / "minihou" / "link"
 DST = ROOT / "blender_addon" / "minihou_link"
 

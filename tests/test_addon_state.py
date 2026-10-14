@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 class AddonSyncTests(unittest.TestCase):
     def test_shared_files_are_identical_copies(self):
-        for name in ("protocol.py", "client.py", "instance_client.py"):
+        for name in ("protocol.py", "client.py", "instance_client.py", "shm.py"):
             self.assertEqual((ROOT / "minihou" / "link" / name).read_bytes(), (ADDON_DIR / name).read_bytes(),
                              f"{name} drifted; run: python tools/sync_addon.py")
 
@@ -42,7 +42,7 @@ class AddonSyncTests(unittest.TestCase):
                     self.assertNotEqual(m.split(".")[0], "bpy", f"{py} imports bpy")
 
     def test_only_listed_addon_modules_import_bpy(self):
-        for name in ("state.py", "protocol.py", "client.py", "instance_client.py", "server_control.py"):
+        for name in ("state.py", "protocol.py", "client.py", "instance_client.py", "server_control.py", "shm.py"):
             for node in ast.walk(ast.parse((ADDON_DIR / name).read_text(encoding="utf-8"))):
                 mods = ([a.name for a in node.names] if isinstance(node, ast.Import)
                         else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])

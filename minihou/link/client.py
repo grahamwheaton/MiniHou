@@ -15,6 +15,7 @@ from typing import Callable, Dict, Optional
 import numpy as np
 
 from .protocol import DEFAULT_PORT, PROTOCOL_VERSION, ProtocolError, recv_message, send_message
+from .shm import ShmReader, recv_shm_or_tcp_message
 
 MessageCallback = Callable[[dict, Dict[str, np.ndarray]], None]
 StateCallback = Callable[[str, str], None]
@@ -38,6 +39,7 @@ class LinkClient:
         self._send_lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._shm_reader = ShmReader()
 
     # -- lifecycle ---------------------------------------------------------
     def start(self) -> None:
@@ -59,6 +61,7 @@ class LinkClient:
                 s.close()
             except OSError:
                 pass
+        self._shm_reader.close()
         if self._thread and self._thread is not threading.current_thread():
             self._thread.join(timeout)
         self._set_state(self.DISCONNECTED, "stopped")
@@ -103,10 +106,11 @@ class LinkClient:
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 self._sock = sock
                 with self._send_lock:
-                    send_message(sock, {"type": "hello", "protocol": PROTOCOL_VERSION, "client": self.client_name})
+                    send_message(sock, {"type": "hello", "protocol": PROTOCOL_VERSION, "client": self.client_name,
+                                        "capabilities": ["shm_v1"]})
                 self._set_state(self.CONNECTED, "")
                 while not self._stop.is_set():
-                    header, arrays = recv_message(sock)
+                    header, arrays = recv_shm_or_tcp_message(sock, shm_reader=self._shm_reader)
                     try:
                         self.on_message(header, arrays)
                     except Exception as e:  # noqa: BLE001

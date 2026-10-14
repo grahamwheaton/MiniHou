@@ -140,6 +140,44 @@ class AnimationTests(unittest.TestCase):
         stage = Usd.Stage.Open(self.path)
         self.assertEqual(stage.GetPrimAtPath("/MiniHou/crate/mesh").GetAttribute("points").GetNumTimeSamples(), 0)
 
+    def test_point_instancer_animation_merges_prototypes_and_time_samples(self):
+        from minihou.geometry import Geometry
+
+        def make_inst(names, count):
+            P = np.arange(count * 3, dtype=np.float32).reshape(count, 3)
+            g = Geometry.from_arrays(P, np.zeros(0, np.int32), np.array([0], np.int32))
+            g.point["instance"] = (np.arange(count) % len(names) + 1).astype(np.int32)
+            g.point["rot"] = np.zeros((count, 3), np.float32)
+            g.point["scale"] = np.ones((count, 3), np.float32)
+            g.point["id"] = np.arange(10, 10 + count, dtype=np.int32)
+            g.detail["instance_objects"] = list(names)
+            return g.freeze()
+
+        def frames():
+            # Frame 1: only Tree
+            yield 1.0, {"forest": make_inst(["Tree"], 2)}
+            # Frame 2: Tree and Rock with 3 points
+            yield 2.0, {"forest": make_inst(["Tree", "Rock"], 3)}
+
+        rep = usd_io.write_animation(self.path, frames(), fps=24)
+        stage = Usd.Stage.Open(self.path)
+        inst = UsdGeom.PointInstancer(stage.GetPrimAtPath("/MiniHou/forest/instances"))
+        # Both prototypes present on the uniform relationship
+        target_names = [t.name for t in inst.GetPrototypesRel().GetTargets()]
+        self.assertIn("Tree", target_names)
+        self.assertIn("Rock", target_names)
+
+        # Read back frame 1
+        g1, _ = usd_io.read_geometry(self.path, time=1.0)
+        self.assertEqual(g1.npoints, 2)
+        np.testing.assert_array_equal(g1.point["id"], [10, 11])
+
+        # Read back frame 2
+        g2, _ = usd_io.read_geometry(self.path, time=2.0)
+        self.assertEqual(g2.npoints, 3)
+        np.testing.assert_array_equal(g2.point["id"], [10, 11, 12])
+
+
 
 if __name__ == "__main__":
     unittest.main()

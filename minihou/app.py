@@ -1,7 +1,7 @@
 """The packed application: ``MiniHou`` (or ``python -m minihou app``) -- one program that starts the engine and opens the editor.
 
 It keeps everything in one workspace folder (default ``~/MiniHou``): ``graphs/`` for your graphs (startup creates a fresh
-empty graph), examples copied separately, and ``nodes/`` for your own node files. The editor's top bar offers to install the
+Box connected to Output graph), examples copied separately, and ``nodes/`` for your own node files. The editor's top bar offers to install the
 Blender add-on and to open Blender connected, so nothing has to be set up by hand.
 """
 from __future__ import annotations
@@ -61,7 +61,7 @@ def node_library_dirs(root: Path) -> List[str]:
 
 
 def prepare_workspace(root: Path, fresh: bool = True) -> Optional[Path]:
-    """Prepare folders and examples; create a new empty graph unless one was explicitly selected."""
+    """Prepare folders and examples; create a new Box connected to Output graph unless one was explicitly selected."""
     root.mkdir(parents=True, exist_ok=True)
     (root / "graphs").mkdir(exist_ok=True)
     (root / "nodes").mkdir(exist_ok=True)
@@ -82,7 +82,10 @@ def prepare_workspace(root: Path, fresh: bool = True) -> Optional[Path]:
         starter = root / "graphs" / name
         try:
             with starter.open("x", encoding="utf-8") as stream:
-                stream.write('{"version": 1, "nodes": {}}\n')
+                from .link.session import NEW_GRAPH
+                import json
+                json.dump(NEW_GRAPH, stream)
+                stream.write("\n")
             return starter
         except FileExistsError:
             index += 1
@@ -108,7 +111,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     from .link.protocol import DEFAULT_PORT
     from .web.server import DEFAULT_HTTP_PORT
     ap = argparse.ArgumentParser(prog="minihou app", description=__doc__.split("\n\n")[0])
-    ap.add_argument("graph", nargs="?", help="graph file to open (default: a fresh empty graph)")
+    ap.add_argument("graph", nargs="?", help="graph file to open (default: a fresh Box connected to Output graph)")
     ap.add_argument("--workspace", default=None, help="folder for graphs and nodes (default: ~/MiniHou)")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT, help="live-link port Blender connects to (another is used if busy)")

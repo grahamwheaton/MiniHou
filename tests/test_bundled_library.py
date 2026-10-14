@@ -33,7 +33,7 @@ class BundledLibraryTests(unittest.TestCase):
                 self.assertFalse([f for f in lib.status()['files'] if f['error']])
                 self.assertTrue(HELPERS <= {nt.name for nt in REGISTRY})
                 self.assertEqual([p.name for p in user.iterdir()],['notes.txt'])
-                self.assertEqual(sentinel.read_text(),'keep')
+                self.assertEqual(sentinel.read_text(encoding='utf-8'),'keep')
                 geo=Evaluator().cook(Graph.from_dict({'nodes':{'a':{'type':'array','params':{'count':2}}},'display':'a'}))
                 self.assertEqual(geo.npoints,16)
 
@@ -64,7 +64,7 @@ class BundledLibraryTests(unittest.TestCase):
                 write(user,user_suffix,2);write(bundle,bundle_suffix,9)
             lib=NodeLibrary([user,bundle]);self.addCleanup(lib.unload);lib.refresh()
             self.assertFalse([f for f in lib.status()['files'] if f['error']])
-            self.assertTrue(all(p.parent==user for p in lib.scan()))
+            self.assertTrue(all(p.parent==user.resolve() for p in lib.scan()))
             for name in ['delivery_py','delivery_json','delivery_cross']:
                 geo=Evaluator().cook(Graph.from_dict({'nodes':{'n':{'type':name}},'display':'n'}))
                 self.assertAlmostEqual(float(geo.P[:,0].max()),1.)

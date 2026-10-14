@@ -297,7 +297,8 @@ class EditorE2E(unittest.TestCase):
         self.two_boxes()
         self.page.locator('#pv-canvas').evaluate("""el=>{const d=new DataTransfer();d.setData('application/x-minihou-tool',JSON.stringify({type:'box'}));const r=el.getBoundingClientRect();el.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:d,clientX:r.left+r.width/2,clientY:r.top+r.height/2}));}""")
         self.assertTrue(until(lambda:'box1' in self.s.graph.nodes))
-        self.assertEqual(self.s.graph.display,'box1')
+        self.assertEqual(self.s.graph.display,'o')
+        self.assertTrue(self.s.graph.nodes['box1'].meta.get('display_extra'))
         self.assertIn('center',self.s.graph.nodes['box1'].params)
 
     def test_network_interaction_selection_keeps_display_and_x_undo(self):
@@ -620,8 +621,16 @@ class EditorE2E(unittest.TestCase):
 
     # -- helpers ---------------------------------------------------------------------
     def read_file(self):
-        with open(self.path, encoding="utf-8") as f:
-            return f.read()
+        # Atomic save replacement can briefly deny opens on Windows. Retry only
+        # sharing violations; a persistently unreadable file must still fail.
+        for attempt in range(20):
+            try:
+                with open(self.path, encoding="utf-8") as f:
+                    return f.read()
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                time.sleep(0.01)
 
     def node(self, nid):
         return self.page.locator(f'.node[data-id="{nid}"]')
@@ -1013,9 +1022,12 @@ class EditorE2E(unittest.TestCase):
         self.page.keyboard.press('Enter')
         self.assertTrue(until(lambda: "polybevel1" in self.s.graph.nodes))
         self.page.wait_for_function("minihou.preview.handleTips().some(t => t.id === 'distance')")   # the new node has its arrow
+        # The modal bevel's queued updates must finish before recording the baseline.
+        self.page.wait_for_function("minihou.desktopCanClose() && !document.body.classList.contains('pv-dragging')")
         initial = self.s.graph.nodes["polybevel1"].params["distance"]
         tip = self.drag_handle("distance", 30)
-        self.assertTrue(until(lambda: self.s.graph.nodes["polybevel1"].params.get("distance", 0.1) != 0.1))
+        self.page.wait_for_function("minihou.desktopCanClose() && !document.body.classList.contains('pv-dragging')")
+        self.assertTrue(until(lambda: abs(self.s.graph.nodes["polybevel1"].params["distance"] - (initial + 30 / tip["ppu"])) < 0.1))
         d = self.s.graph.nodes["polybevel1"].params["distance"]
         self.assertAlmostEqual(d, initial + 30 / tip["ppu"], delta=0.1)
         self.assertGreaterEqual(d, 0.0)
@@ -2008,6 +2020,10 @@ class EditorE2E(unittest.TestCase):
         gid = next(i for i, n in self.s.graph.nodes.items() if n.type == "grid")
         self.assertEqual(self.s.graph.nodes[gid].inputs, {})
         self.page.wait_for_selector(f'.node[data-id="{gid}"].selected')
+        self.assertTrue(self.s.graph.nodes[gid].meta.get('display_extra'))
+        # Source creation is additive. Explicitly isolate the two-box stream for
+        # this test's following face-selection/extrude operation.
+        self.page.evaluate("minihou.edit([{op:'display',id:'m'}])")
         self.node("m").locator(".title").click()
         self.page.wait_for_function("minihou.preview.tris === 24")
         self.page.click('#preview [data-mode="face"]')
@@ -2410,7 +2426,7 @@ class EditorE2E(unittest.TestCase):
         self.page.locator("#file-menu .fm-foot button", has_text="New graph").click()
         self.answer_app_dialog("graphs/fresh.json")
         self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == "fresh.json"))
-        self.page.wait_for_selector('.node[data-id="grid1"]')
+        self.page.wait_for_selector('.node[data-id="box1"]')
         self.assertTrue(os.path.exists(os.path.join(self.dir, "graphs", "fresh.json")))
         self.page.click("#file-btn")
         self.page.locator('#file-menu .frow[data-path="demo.json"]').click()
@@ -3183,6 +3199,23 @@ class EditorE2E(unittest.TestCase):
         self.stroke([(cx - 80, cy), (cx + 80, cy)], shift=True)                                    # Shift: erase back to the input (nothing there: zero)
         self.assertTrue(until(lambda: int((self.painted(node).point["weight"] > 0).sum()) < painted_count))
         self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "view")
+
+    def test_preview_refresh_does_not_erase_an_active_paint_stroke(self):
+        box = self.start_painting(8, 8)
+        cx, cy = box["width"] / 2, box["height"] / 2
+        self.page.mouse.move(box["x"] + cx, box["y"] + cy)
+        self.page.mouse.down()
+        self.page.mouse.move(box["x"] + cx + 50, box["y"] + cy, steps=6)
+        before = self.page.evaluate("Array.from(minihou.paint.values().vals)")
+        self.assertTrue(any(v > 0 for v in before))
+        with self.page.expect_request_finished(lambda r: '/api/preview' in r.url):
+            self.page.evaluate("document.querySelector('#pv-follow').dispatchEvent(new Event('change'))")
+        self.page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+        self.assertTrue(self.page.evaluate("minihou.paint.isStroking()"))
+        self.assertEqual(self.page.evaluate("Array.from(minihou.paint.values().vals)"), before)
+        self.page.mouse.up()
+        self.assertTrue(until(lambda: any(n.type == "attrib_paint" for n in self.s.graph.nodes.values())))
+        self.assertFalse(self.page.evaluate("minihou.paint.isStroking()"))
 
     def test_painting_faces_and_edges_and_a_vector_colour(self):
         box = self.start_painting(8, 8)

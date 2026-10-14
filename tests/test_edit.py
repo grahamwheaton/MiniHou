@@ -11,8 +11,14 @@ from minihou.link.session import Session
 from tests.helpers import graph_from
 
 def _load(path):
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
+    for attempt in range(20):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except PermissionError:
+            if attempt == 19:
+                raise
+            time.sleep(0.01)
 
 
 BASE = {"g": {"type": "grid", "params": {"columns": 4, "rows": 4}},
@@ -421,8 +427,8 @@ class SessionFileTests(unittest.TestCase):
         self.assertFalse(snap["can_undo"])
         self.assertTrue(self.s.wait_idle())
         self.assertTrue(self.s.status()["ok"])
-        self.s.edit([{"op": "set", "id": "grid1", "params": {"rows": 3}}])
-        self.assertTrue(self.wait(lambda: _load(other)["nodes"]["grid1"].get("params", {}).get("rows") == 3))
+        self.s.edit([{"op": "set", "id": "box1", "params": {"size": [3, 2, 1]}}])
+        self.assertTrue(self.wait(lambda: _load(other)["nodes"]["box1"].get("params", {}).get("size") == [3, 2, 1]))
         with self.assertRaises(Exception):
             self.s.open_file(os.path.join(self.dir.name, "missing.json"))
 

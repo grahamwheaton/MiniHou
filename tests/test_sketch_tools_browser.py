@@ -36,3 +36,23 @@ class SketchBrowserTests(unittest.TestCase):
                 self.assertTrue(page.evaluate('tool.active()'))
                 self.assertEqual(page.locator('#text').input_value(),'xyz123')
             finally:browser.close()
+    def test_path_snaps_to_objects_outside_grid_plane(self):
+        with sync_playwright() as pw:
+            browser=pw.chromium.launch()
+            try:
+                page=browser.new_page()
+                page.set_content('<div style="position:relative;width:500px;height:400px"><canvas width="500" height="400" tabindex="0"></canvas></div>')
+                page.add_script_tag(path=str(Path(__file__).resolve().parents[1]/'minihou/web/static/sketch-tool.js'))
+                page.evaluate('''()=>{window.commits=[];window.tool=MiniSketchTool({showFeedback:t=>window.hint=t,project:p=>[p[0]*50+100,p[1]*50+100],sketchGeometry:()=>[{P:[0,0,2,2,0,2,2,2,2],edge:[0,1,1,2]}],planePoint:(x,y)=>[(x-100)/50,(y-100)/50,0]},document.querySelector('canvas'),s=>commits.push(s));tool.start('line');}''')
+                c=page.locator('canvas')
+                for x,y in [(101,101),(201,101),(201,201)]:c.click(position={'x':x,'y':y})
+                self.assertEqual(page.evaluate('commits.length'),0)
+                page.keyboard.press('Enter')
+                self.assertEqual(page.evaluate('commits[0].params.points'),'0,0,2 2,0,2 2,2,2')
+                page.evaluate("tool.start('tape')")
+                c.click(position={'x':101,'y':101});c.click(position={'x':201,'y':201})
+                self.assertEqual(page.evaluate('tool.dimensions()[0]'),[[0,0,2],[2,2,2]])
+                page.evaluate("tool.start('rectangle')")
+                c.click(position={'x':101,'y':101});c.click(position={'x':201,'y':201})
+                self.assertEqual(page.evaluate('commits[1].params.points'),'0,0,2 2,0,2 2,2,2 0,2,2')
+            finally:browser.close()

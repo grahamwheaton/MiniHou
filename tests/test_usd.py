@@ -682,6 +682,58 @@ class UsdInstancingTests(unittest.TestCase):
         self.assertEqual(g.detail["instance_objects"], ["A", "B", "C"])
         np.testing.assert_array_equal(g.point["instance"], [1, 2, 3, 3])
 
+    def test_point_instancer_round_trips_ids_velocities_and_invisible_ids(self):
+        g = instanced().copy()
+        keep = g.point["instance"] > 0
+        n_inst = int(keep.sum())
+        # Add id, v, w, and group_invisible
+        g.point["id"] = np.arange(100, 100 + g.npoints, dtype=np.int32)
+        g.point["v"] = np.ones((g.npoints, 3), dtype=np.float32) * 2.5
+        g.point["w"] = np.ones((g.npoints, 3), dtype=np.float32) * 0.5  # radians/sec
+        invis = np.zeros(g.npoints, dtype=np.int32)
+        # Mark first 5 instances invisible
+        inst_indices = np.flatnonzero(keep)
+        invis[inst_indices[:5]] = 1
+        g.point["group_invisible"] = invis
+
+        p = os.path.join(self.dir, "inst_full.usda")
+        rep = usd_io.write_stage(p, {"forest": g})
+        stage = Usd.Stage.Open(p)
+        inst = UsdGeom.PointInstancer(stage.GetPrimAtPath("/MiniHou/forest/instances"))
+        self.assertTrue(inst.GetIdsAttr().HasAuthoredValue())
+        self.assertTrue(inst.GetVelocitiesAttr().HasAuthoredValue())
+        self.assertTrue(inst.GetAngularVelocitiesAttr().HasAuthoredValue())
+        self.assertTrue(inst.GetInvisibleIdsAttr().HasAuthoredValue())
+
+        # Verify angular velocity was converted to degrees/sec
+        w_authored = np.asarray(inst.GetAngularVelocitiesAttr().Get())
+        np.testing.assert_allclose(w_authored, np.degrees(0.5), atol=1e-3)
+
+        # Read back
+        back, info = usd_io.read_geometry(p)
+        self.assertEqual(back.npoints, g.npoints)  # points not pruned!
+        np.testing.assert_array_equal(back.point["id"], g.point["id"])
+        np.testing.assert_allclose(back.point["v"], g.point["v"], atol=1e-5)
+        np.testing.assert_allclose(back.point["w"], g.point["w"], atol=1e-5)
+        np.testing.assert_array_equal(back.point["group_invisible"], g.point["group_invisible"])
+
+    def test_foreign_point_instancer_invisible_ids_maps_to_group_invisible(self):
+        p = os.path.join(self.dir, "foreign_invis.usda")
+        s = Usd.Stage.CreateNew(p)
+        inst = UsdGeom.PointInstancer.Define(s, "/Scatter")
+        m = UsdGeom.Mesh.Define(s, "/Scatter/Prototypes/Cube")
+        inst.CreatePrototypesRel().SetTargets([Sdf.Path("/Scatter/Prototypes/Cube")])
+        inst.CreatePositionsAttr([(0, 0, 0), (1, 0, 0), (2, 0, 0), (3, 0, 0)])
+        inst.CreateProtoIndicesAttr([0, 0, 0, 0])
+        # Mark index 1 and 3 as invisible without authored ids
+        inst.CreateInvisibleIdsAttr([1, 3])
+        s.GetRootLayer().Save()
+
+        g, rep = usd_io.read_geometry(p, up_axis="keep")
+        self.assertEqual(g.npoints, 4)  # All 4 points kept!
+        self.assertIn("group_invisible", g.point)
+        np.testing.assert_array_equal(g.point["group_invisible"], [0, 1, 0, 1])
+
 
 class UsdMissingTests(unittest.TestCase):
     def test_a_missing_pxr_is_a_clear_error(self):
