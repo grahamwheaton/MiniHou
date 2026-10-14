@@ -785,3 +785,29 @@ svg.ic .fl { fill: currentColor; fill-opacity: .35; }
 #pv-proportional {font-size:11px;padding:4px;}
 #pv-proportional label {white-space:normal;display:block;}
 #pv-proportional input[type=number] {width:65px;}
+/* Viewport refresh: compact grouped tools and unobstructed canvas. */
+#preview .pv-left-tools {width:60px;gap:8px;padding:6px 4px;background:#252a30;scrollbar-width:thin;}
+#pv-left-tools button.pv-tool {min-height:42px;padding:5px 2px;gap:3px;}
+#pv-left-tools button.pv-tool span {font-size:9px;white-space:normal;overflow-wrap:normal;line-height:1.15;}
+#pv-left-tools [data-op],#pv-left-tools [data-select],#pv-left-tools [data-sketch] {overflow-wrap:normal;}
+#pv-left-tools .ic {width:21px;height:21px;}
+#preview .pv-header {gap:5px;padding:5px 8px;background:#292e35;}
+#preview .pv-display-strip {width:176px;background:#252a30;}
+#pv-hints {max-width:min(420px,60%);font-size:11px;opacity:.78;background:linear-gradient(90deg,#20252bcc,transparent);border-radius:5px;padding:8px 10px;pointer-events:none;}
+#pv-hint-text {line-height:1.5;}
+.pv-context {padding:5px 8px;background:#252a30;border-bottom:1px solid #15191e;}
+#pv-left-tools button:focus-visible {outline:2px solid #e3b466;outline-offset:-2px;}
+@media(max-width:1000px){#preview .pv-left-tools{width:48px;}#pv-left-tools button.pv-tool span{display:none;}#preview .pv-display-strip{width:150px;}#pv-hint-text{max-height:48px;overflow:hidden;}}
+#preview {container-type:inline-size;}
+#preview .pv-left-tools {width:88px;}
+#pv-left-tools .pv-tool-strip {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:3px;}
+#pv-left-tools button.pv-tool {min-height:46px;}
+#pv-left-tools button.pv-tool span {font-size:8px;}
+#pv-hints {max-width:calc(100% - 120px);}
+#pv-hint-text {max-height:3em;overflow:hidden;}
+@container(max-width:650px){#preview .pv-left-tools{width:70px;}#pv-left-tools button.pv-tool{min-height:32px;padding:4px 1px;}#pv-left-tools button.pv-tool span{display:none;}#preview .pv-display-strip{width:144px;}#pv-hints{max-width:calc(100% - 100px);}#pv-hint-text{display:none;}}
+.pv-knife-options{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:7px 10px;background:#322d3c;border-bottom:1px solid #765989;font-size:11px;}.pv-knife-options[hidden]{display:none;}.pv-knife-options label{display:flex;gap:4px;align-items:center;}.pv-knife-options input[type=number]{width:48px;}
+
+[data-knife-active] .pv-handles{visibility:hidden;}
+[data-knife-active] .pv-drag-feedback{white-space:normal;width:max-content;max-width:calc(100% - 40px);text-align:center;box-sizing:border-box;}
+.pv-knife-options details{position:relative;}.pv-knife-options details>div{position:absolute;right:0;top:22px;width:330px;max-width:70vw;padding:12px;background:#24272d;border:1px solid #765989;line-height:1.7;z-index:30;}

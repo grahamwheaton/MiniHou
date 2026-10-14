@@ -128,7 +128,7 @@ class WebTests(unittest.TestCase):
         st, d = self.req("POST", "/api/open", {"path": "graphs/new.json", "create": True})
         self.assertEqual(st, 200)
         self.assertTrue(os.path.exists(os.path.join(self.dir, "graphs", "new.json")))
-        self.assertIn("grid1", d["graph"]["nodes"])
+        self.assertIn("box1", d["graph"]["nodes"])
         for bad, code in [("../escape.json", 403), ("/etc/passwd", 400), ("x.txt", 400), ("missing.json", 404)]:
             with self.subTest(path=bad):
                 st, d = self.req("POST", "/api/open", {"path": bad, "create": bad != "missing.json"})

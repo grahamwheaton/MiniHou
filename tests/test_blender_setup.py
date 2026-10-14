@@ -144,7 +144,7 @@ class WorkspaceTests(TempCase):
         old = ws / "graphs" / "welcome.json"
         old.write_text("invalid saved graph", encoding="utf-8")
         graph = app.prepare_workspace(ws)
-        self.assertEqual(json.loads(graph.read_text(encoding="utf-8"))["nodes"], {})
+        self.assertEqual(json.loads(graph.read_text(encoding="utf-8"))["nodes"]["box1"]["type"], "box")
         self.assertEqual(old.read_text(encoding="utf-8"), "invalid saved graph")
 
     def test_first_run_creates_folders_examples_and_a_welcome_graph(self):
@@ -162,7 +162,7 @@ class WorkspaceTests(TempCase):
         (ws / "examples" / "crater.json").write_text("edited", encoding="utf-8")
         again = app.prepare_workspace(ws)
         self.assertNotEqual(again, graph)
-        self.assertEqual(json.loads(again.read_text(encoding="utf-8"))["nodes"], {})
+        self.assertEqual(json.loads(again.read_text(encoding="utf-8"))["nodes"]["output1"]["inputs"], {"geo":"box1"})
         self.assertIn("mine", graph.read_text(encoding="utf-8"))
         self.assertEqual((ws / "examples" / "crater.json").read_text(encoding="utf-8"), "edited")
 
@@ -173,14 +173,14 @@ class WorkspaceTests(TempCase):
             g = app.prepare_workspace(self.root / "bare")
         finally:
             app.examples_source = orig
-        self.assertEqual(json.loads(g.read_text(encoding="utf-8"))["nodes"], {})
+        self.assertEqual(json.loads(g.read_text(encoding="utf-8"))["display"], "output1")
 
     def test_the_program_starts_serves_the_editor_and_the_zip(self):
         ws = self.root / "ws"
         env = dict(os.environ, PYTHONUNBUFFERED="1", MINIHOU_HOME=str(self.root / "home"))
         log = self.root / "out.log"
         with open(log, "w", encoding="utf-8") as lf:
-            p = subprocess.Popen([sys.executable, "-m", "minihou", "app", "--no-browser", "--workspace", str(ws), "--http-port", "0",
+            p = subprocess.Popen([sys.executable, "-c", f"import sys,runpy;sys.path.insert(0,{str(ROOT)!r});runpy.run_module('minihou',run_name='__main__')", "app", "--no-browser", "--workspace", str(ws), "--http-port", "0",
                                   "--port", "0"], stdout=lf, stderr=subprocess.STDOUT, env=env, cwd=str(ROOT))
         self.addCleanup(lambda: (p.terminate(), p.wait(15)))
         url = None

@@ -309,3 +309,18 @@ class VertexNormalTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MiterSymmetryTests(unittest.TestCase):
+    def test_box_face_loop_profiles_remain_symmetric_at_every_division(self):
+        for divisions in (2,3,4,8,16):
+            g=bevel({'type':'box'},distance=.403,divisions=divisions,edges='0-1 0-2 1-3 2-3')
+            closed_shell(self,g)
+            # Each miter lies in its diagonal plane; no clockwise twist.
+            interior=g.P[(g.P[:,2]>.09701)&(g.P[:,2]<.49999)]
+            self.assertEqual(len(interior),4*(divisions-1))
+            np.testing.assert_allclose(abs(interior[:,0]),abs(interior[:,1]),atol=1e-6)
+            for p in g.P:
+                rotated=np.array([-p[1],p[0],p[2]])
+                self.assertLess(np.linalg.norm(g.P-rotated,axis=1).min(),1e-6)
+            self.assertTrue(np.isfinite(g.P).all())

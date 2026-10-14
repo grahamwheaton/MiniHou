@@ -2418,7 +2418,7 @@ class EditorE2E(unittest.TestCase):
         self.page.locator("#file-menu .fm-foot button", has_text="New graph").click()
         self.answer_app_dialog("graphs/fresh.json")
         self.assertTrue(until(lambda: self.s.path is not None and self.s.path.name == "fresh.json"))
-        self.page.wait_for_selector('.node[data-id="grid1"]')
+        self.page.wait_for_selector('.node[data-id="box1"]')
         self.assertTrue(os.path.exists(os.path.join(self.dir, "graphs", "fresh.json")))
         self.page.click("#file-btn")
         self.page.locator('#file-menu .frow[data-path="demo.json"]').click()

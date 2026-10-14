@@ -373,6 +373,13 @@ def _segments(geo, first_strip, strip_count, count, shape, convexity, homes, og,
     point_rows = {name: list(a) for name, a in geo.point.items() if name != 'P'}
     ancestry = [(i, i, 0.) for i in range(geo.npoints)]
     chains = {}
+    # A two-edge miter is shared by adjacent strips. Its tangent intersection
+    # is the original vertex, not a projection along whichever strip runs first.
+    shared_ends = {}
+    for a, b, c, d in faces[first_strip:first_strip+strip_count]:
+        for end in ((a, d), (b, c)):
+            key = tuple(sorted(end))
+            shared_ends[key] = shared_ends.get(key, 0) + 1
 
     def add_point(position, a, b, fraction):
         index = len(positions)
@@ -392,7 +399,7 @@ def _segments(geo, first_strip, strip_count, count, shape, convexity, homes, og,
         left, right = P[a], P[b]
         midpoint = (left + right) / 2
         direction = _unit(np.asarray(axis))
-        control = homes[a] - direction * np.dot(homes[a] - midpoint, direction)
+        control = homes[a] if shared_ends[key] > 1 else homes[a] - direction * np.dot(homes[a] - midpoint, direction)
         u, v = _unit(left-control), _unit(right-control)
         weight = float(np.sqrt(max(0., (1.-np.clip(np.dot(u,v),-1.,1.))/2.)))
         result = [a]

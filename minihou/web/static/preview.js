@@ -1381,9 +1381,15 @@ window.MiniHouPreview = (() => {
       const selecting = sel.mode !== "view" && e.button === 0 && !(opt.navigation==="houdini" && e.altKey) && raw;
       if(opt.navigation!=="houdini" && e.button===0 && !selecting && !e.altKey)return;
       const pan = opt.navigation!=="houdini" ? (e.button===1 && e.shiftKey || e.button===2) : sel.mode === "view" ? (e.button === 1 || e.button === 2 || e.shiftKey) : (e.button === 2 || (e.button === 1 && e.shiftKey));
-      if(opt.orbitDepth && e.button===1 && !e.shiftKey && !e.ctrlKey && raw){
+      if(opt.orbitDepth && !pan && e.button===1 && !e.shiftKey && !e.ctrlKey && raw){
         const cam=camera(),direction=rayAt(cam,e.clientX-r.left,e.clientY-r.top),hit=raycast(cam.eye,direction);
-        if(hit){const target=cam.eye.map((v,i)=>v+direction[i]*hit.t),offset=sub(cam.eye,target);view.target=target;view.dist=Math.hypot(...offset);view.yaw=Math.atan2(offset[1],offset[0]);view.pitch=Math.asin(offset[2]/view.dist);}
+        if(hit){
+          // Use surface depth along the existing view axis, not the off-centre hit
+          // as a new look-at target: retargeting changes orientation on mouse-down.
+          const forward=norm(sub(view.target,cam.eye)),depth=dot(IM.mul(direction,hit.t),forward);
+          const lensScale=view.ortho?Math.tan(FOV/2)/Math.tan(ORTHO_FOV/2):1;
+          if(depth>1e-6){view.target=IM.add(cam.eye,IM.mul(forward,depth));view.dist=depth/lensScale;}
+        }
       }
       dragging = { x: e.clientX, y: e.clientY, zoom: opt.navigation!=="houdini" && e.button===1 && e.ctrlKey, pan, select: !!selecting, x0: e.clientX - r.left, y0: e.clientY - r.top, moved: false,
         loop: e.altKey, ring: e.ctrlKey, path: e.ctrlKey && !e.altKey && !e.shiftKey, how: e.ctrlKey && e.shiftKey ? "subtract" : e.shiftKey ? "add" : (e.ctrlKey || e.metaKey) ? "subtract" : "replace" };
@@ -1442,6 +1448,7 @@ window.MiniHouPreview = (() => {
     Object.assign(api, {
       showFeedback(text){feedback.hidden=!text;feedback.textContent=text||'';if(!text)snapMark=null;schedule();},
       interaction, orientationFrame, snapPosition, planePoint,
+      sketchGeometry:()=>[raw,templateRaw].filter(Boolean),
       beginTransform(tool,clientX,clientY){
         api.setTool(tool);const hs=shown();let h=tool==='move'?hs.find(h=>h.kind==='plane'&&h.plane_axis===undefined):tool==='scale'?hs.find(h=>h.kind==='uniform'):hs.find(h=>h.kind==='ring'&&h.comp===2);
         if(tool==='rotate'){const rotation=hs.find(x=>x.param==='rotate');if(rotation)h={...rotation,kind:'plane',comp:null,rotateVector:true,plane_axis:undefined};}
@@ -1450,6 +1457,39 @@ window.MiniHouPreview = (() => {
         if(!h)return false;startHandleDrag({button:0,modal:true,clientX,clientY,preventDefault(){},stopPropagation(){}},h);return true;
       },
       edgeAt:(x,y)=>raw?pickEdge(camera(),x,y,14):null,
+      pointAt:(x,y)=>raw?pickPoint(camera(),x,y,14):-1,
+      knifeSelectedFaces(){
+        if(sel.mode==='face'||sel.mode==='piece')return [...sel.face];if(!raw)return [];
+        const faces=new Map();for(let i=0;i<raw.tri.length;i++){const f=raw.triPrim[Math.floor(i/3)];if(!faces.has(f))faces.set(f,new Set());faces.get(f).add(raw.tri[i]);}
+        return [...faces].filter(([f,ids])=>{if(sel.mode==='point')return [...ids].every(i=>sel.point.has(i));if(sel.mode!=='edge')return false;
+          for(let i=0;i<raw.edge.length;i+=2)if(ids.has(raw.edge[i])&&ids.has(raw.edge[i+1])&&!sel.edge.has(edgeKey(raw.edge[i],raw.edge[i+1])))return false;return true;}).map(([f])=>f);
+      },
+      knifeProjection(){const c=camera();return {matrix:Array.from(mat4mul(c.P,c.MV)),width:c.w,height:c.h};},
+      knifeLinePoint(a,b,t){
+        const m=mat4mul(camera().P,camera().MV),w=p=>m[3]*p[0]+m[7]*p[1]+m[11]*p[2]+m[15],u=(1-t)/w(a),v=t/w(b);return a.map((x,i)=>(x*u+b[i]*v)/(u+v));
+      },
+      knifeCrossings(a,b,through){
+        if(!raw)return [];const c=camera(),u=toScreen(c,...a),v=toScreen(c,...b);if(!u||!v)return [];const dx=v[0]-u[0],dy=v[1]-u[1],out=[];
+        for(let i=0;i<raw.edge.length;i+=2){const p=Array.from(raw.P.slice(raw.edge[i]*3,raw.edge[i]*3+3)),q=Array.from(raw.P.slice(raw.edge[i+1]*3,raw.edge[i+1]*3+3)),s=toScreen(c,...p),t=toScreen(c,...q);if(!s||!t)continue;
+          const ex=t[0]-s[0],ey=t[1]-s[1],den=dx*ey-dy*ex;if(Math.abs(den)<1e-8)continue;const ax=s[0]-u[0],ay=s[1]-u[1],f=(ax*ey-ay*ex)/den,g=(ax*dy-ay*dx)/den;
+          if(f<0||f>1||g<0||g>1)continue;const world=api.knifeLinePoint(p,q,g),screen=[u[0]+dx*f,u[1]+dy*f];if(!through){const ray=rayAt(c,...screen),h=raycast(c.eye,ray);if(h&&IM.length(sub(world,IM.add(c.eye,IM.mul(ray,h.t))))>1e-4)continue;}out.push(screen);
+        }return out;
+      },
+      knifeFrame(anchor,reference=0){
+        if(!raw)return null;const c=camera(),s=toScreen(c,...anchor);if(!s)return null;const h=raycast(c.eye,rayAt(c,s[0],s[1]));if(!h)return null;
+        const tri=Array.from(raw.tri.slice(h.tri*3,h.tri*3+3)),pts=tri.map(i=>Array.from(raw.P.slice(i*3,i*3+3))),normal=norm(cross(sub(pts[1],pts[0]),sub(pts[2],pts[0])));
+        const face=raw.triPrim[h.tri],ids=new Set();for(let i=0;i<raw.tri.length;i+=3)if(raw.triPrim[i/3]===face)for(let j=0;j<3;j++)ids.add(raw.tri[i+j]);
+        const refs=[];for(let i=0;i<raw.edge.length;i+=2)if(ids.has(raw.edge[i])&&ids.has(raw.edge[i+1])){const a=Array.from(raw.P.slice(raw.edge[i]*3,raw.edge[i]*3+3)),b=Array.from(raw.P.slice(raw.edge[i+1]*3,raw.edge[i+1]*3+3));refs.push({a,b,distance:IM.length(sub(anchor,IM.mul(IM.add(a,b),.5)))});}
+        refs.sort((a,b)=>a.distance-b.distance);const edge=refs[reference%refs.length];return edge?{normal,u:norm(sub(edge.b,edge.a)),edge:[edge.a,edge.b]}:null;
+      },
+      knifePick(x,y,midpoint=false,ignore=false){
+        const c=camera();let p=null,label='Face';
+        if(!ignore&&raw){if(!midpoint){const id=pickPoint(c,x,y,12);if(id>=0){p=Array.from(raw.P.slice(id*3,id*3+3));label='Vertex';}}
+          if(!p){p=snapSource(raw,x,y,[0,0,0],true,midpoint?'midpoint':'edge');if(p)label=midpoint?'Midpoint':'Edge';}}
+        if(!p&&raw){const d=rayAt(c,x,y),h=raycast(c.eye,d);if(h)p=IM.add(c.eye,IM.mul(d,h.t));}
+        if(!p){p=planePoint(x,y,view.target);label='Through space';}
+        return p?{point:p,screen:toScreen(c,...p).slice(0,2),label}:null;
+      },
       geometry:()=>raw, quadStrip,
       project: p=>toScreen(camera(),...p),
       isDragging:()=>!!handleDrag||endingDrag,

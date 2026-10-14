@@ -186,6 +186,16 @@
   let desktopPendingEdits = 0;
   async function edit(ops, context = { path: S.path, documentId: S.documentId }) {
     ops=ops.map(op=>op.op==='add'&&op.type==='lsystem'?{...op,params:{premise:'A',rules:'A=F[&A]/[&A]/[&A]A',generations:4,separate_angles:true,yaw:33,pitch:42,roll:137.5,step:.3,width:.03,...op.params}}:op);
+    // Bootstrap only an empty editor graph, keeping source + output in one undo step.
+    if(!Object.keys(S.graph.nodes).length&&ops[0]?.op==='add'&&S.types[ops[0].type]?.category==='source'&&!ops.some(op=>op.type==='output')){
+      const tail=ops.filter(op=>op.op==='add').at(-1),ids=new Set(ops.map(op=>op.id));let output='output1',i=1;
+      while(ids.has(output))output='output'+(++i);
+      const at=tail.pos||[0,0];ops=[...ops,{op:'add',id:output,type:'output',inputs:{geo:tail.id},pos:[at[0],at[1]+150],display:true}];
+    }
+    if(Object.keys(S.graph.nodes).length&&ops[0]?.op==='add'&&S.types[ops[0].type]?.category==='source'){
+      const previous=displayNode(),added=ops.filter(op=>op.op==='add').at(-1);
+      if(previous&&added){ops=ops.map(op=>op.op==='add'?{...op,display:false}:op);ops.push({op:'flag',id:added.id,flag:'display',value:true,additive:true});}
+    }
     desktopPendingEdits++;
     try {
       const r = await api("/api/edit", { ops, origin: "editor", document_id: context.documentId, gesture:context.gesture });
@@ -1181,6 +1191,17 @@
     $("#pv-assign-btn").onclick = () => { if (paintTool.isOpen() && !paintTool.active()) paintTool.close(); else { paintTool.setPaint(false); paintTool.open("assign"); } };
   }  const curveTool = pv?.ok && window.MiniCurveTool ? MiniCurveTool(pv,$('#pv-canvas'),(id,value)=>queueSet(id,'controls',value)) : null;
   const selectionTool=pv?.ok&&window.MiniSelectionTool?MiniSelectionTool(pv,$('#pv-canvas')):null;
+  let pendingKnifeSelection=null;
+  const knifeContext=()=>({documentId:S.documentId,source:pvNode,signature:JSON.stringify(Object.entries(S.graph.nodes).map(([id,n])=>[id,n.type,n.inputs,n.params,n.flags,n.display_extra]))});
+  const knifeTool=pv?.ok?MiniKnifeTool(pv,$('#pv-canvas'),async (params,context)=>{
+    if(!pvNode)throw Error('Display a polygon mesh first.');
+    const current=knifeContext();if(context.documentId!==current.documentId||context.source!==current.source||context.signature!==current.signature)throw Error('Geometry changed during this cut. Escape and restart Knife.');
+    const r=await edit([{op:'knife',after:pvNode,merge_visible:!!pv.selectableTemplates?.length,params}]);
+    if(!r)throw Error('Cut failed; the graph was not changed.');
+    const id=r.results[0].id;pendingKnifeSelection={id,edges:r.results[0].cut_edges||[]};pvKeepCameraNode=id;select([id]);
+  },knifeContext):null;
+  $('#pv-left-tools').addEventListener('click',e=>{if(!e.target.closest('#pv-knife'))knifeTool?.cancel();},true);
+  $('#pv-knife').onclick=()=>{sketchTool?.cancel();selectionTool?.cancel();knifeTool?.start();};
   let sketchBezier=false;
   const sketchTool=pv?.ok&&window.MiniSketchTool?MiniSketchTool(pv,$('#pv-canvas'),async spec=>{
     if(sketchBezier){const points=spec.params.points.trim().split(/\s+/).map(p=>p.split(',').map(Number));spec={type:'bezier',params:{controls:JSON.stringify(points.map(p=>({p,left:p.slice(),right:p.slice(),mode:'AUTO'}))),closed:false}};sketchBezier=false;}
@@ -1194,6 +1215,7 @@
   document.addEventListener('dragend',()=>{shelfDragType=null;placementPreview?.hide();});
   document.addEventListener('keydown',e=>{if(e.key==='Escape')placementPreview?.hide();});
   if(placementPreview){const previous=pv.onOverlayDraw;pv.onOverlayDraw=()=>{previous?.();placementPreview.draw();};}
+  $('#preview').addEventListener('keydown',e=>{if(e.key.toLowerCase()==='k'&&!e.ctrlKey&&!e.altKey&&!e.target.closest('input,textarea,select,[contenteditable]')){e.preventDefault();if(knifeTool?.active())return;sketchTool?.cancel();selectionTool?.cancel();knifeTool?.start({selected:e.shiftKey});}},true);
   let viewportMouse=[0,0];$('#pv-canvas').parentElement.addEventListener('pointermove',e=>viewportMouse=[e.clientX,e.clientY]);
   function beginTransform(tool,x=viewportMouse[0],y=viewportMouse[1]){
     if(!pv?.ok)return;setTool(tool);
@@ -1405,6 +1427,7 @@
     refreshSelectionHandles();                                                 // a kept selection moved with the geometry: so does its gizmo
     updateToolButtons();
     pvNode = node; pvPath = S.path;
+    if(pendingKnifeSelection?.id===node){pv.selectElements("edge",pendingKnifeSelection.edges,"replace");pendingKnifeSelection=null;}
     if (paintTool) paintTool.onPreview(head, arrays, node);                    // the painted attribute as colour, and the working copy for strokes
     if (sheet) sheet.changed();
   }
@@ -1792,7 +1815,7 @@
     wrap.addEventListener("pointerleave", () => { pvOver = false; });
     document.addEventListener("keydown", (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
-      if(modelTool?.active()||selectionTool?.active()||sketchTool?.active()||loopTool?.active()||pv.isDragging()||curveTool?.active())return;
+      if(knifeTool?.active()||modelTool?.active()||selectionTool?.active()||sketchTool?.active()||loopTool?.active()||pv.isDragging()||curveTool?.active())return;
       if (!pvOver || tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable) return;
       if((e.ctrlKey&&e.code==='KeyB')||(e.altKey&&e.code==='KeyE')||(!e.ctrlKey&&!e.altKey&&['KeyI','KeyE'].includes(e.code))){
         const kind=e.ctrlKey?'bevel':e.altKey?'pushpull':e.code==='KeyI'?'inset':'extrude';modelTool?.start(kind,...viewportMouse).catch(err=>toast(err.message));e.preventDefault();e.stopImmediatePropagation();return;
