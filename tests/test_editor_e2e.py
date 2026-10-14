@@ -1653,7 +1653,7 @@ class EditorE2E(unittest.TestCase):
         self.page.locator("#pv-bounds").check()
         self.assertTrue(until(lambda: self.page.locator(".pv-handles line.pv-bounds").count() >= 8))
         labels = self.page.locator(".pv-bounds-label").evaluate_all("els => els.map(e => e.textContent.trim())")
-        self.assertEqual(sorted(labels), ["X 2", "Y 2", "Z 2"])                                        # the 2 x 2 x 2 box
+        self.assertEqual(sorted(labels), ["X 2 m", "Y 2 m", "Z 2 m"])                                        # the 2 x 2 x 2 box
         self.page.locator("#pv-bounds").uncheck()
         self.assertTrue(until(lambda: self.page.locator(".pv-bounds").count() == 0))
 
@@ -2079,7 +2079,7 @@ class EditorE2E(unittest.TestCase):
         self.assertIn("Library", tabs)
         self.assertEqual(self.page.locator("#shelf .sh-tab.on").inner_text(), "Create")
         labels = self.page.eval_on_selector_all("#shelf .sh-tool", "els => els.map(e => e.dataset.label)")
-        self.assertEqual(labels[:6], ["Box", "Sphere", "Tube", "Torus", "Grid", "Null"])                     # Null is there
+        self.assertEqual(labels[:7], ["Box", "Point", "Sphere", "Tube", "Torus", "Grid", "Null"])                     # Null is there
         self.assertGreater(self.page.locator("#shelf .sh-tool svg").count(), 10)
         # the shelf takes room: the panes start below it
         self.assertGreater(self.page.locator("#main").bounding_box()["y"], 120)
