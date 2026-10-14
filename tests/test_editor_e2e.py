@@ -247,7 +247,7 @@ class EditorE2E(unittest.TestCase):
         self.assertFalse(end['active']);self.assertEqual(start['eye'],end['eye'])
 
     def test_wasd_toggle_and_blur_release(self):
-        self.two_boxes();self.page.click('#pv-walk')
+        self.two_boxes();self.view_menu();self.page.click('#pv-walk')
         self.assertTrue(self.page.evaluate('minihou.preview.navigationState().active'))
         self.page.keyboard.down('w');self.page.evaluate("window.dispatchEvent(new Event('blur'))")
         self.assertFalse(self.page.evaluate('minihou.preview.navigationState().active'))
@@ -938,6 +938,10 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(self.page.locator("#info-body .flow.mod").count() >= 1)
 
     # -- selecting in the 3-D view and turning the selection into nodes ------------------------------------------
+    def view_menu(self):
+        """Open the viewport's View menu (the camera and frame controls live in it, as in Blender)."""
+        self.page.click('#preview [data-pv-menu="pv-menu-view"]')
+
     def box_scene(self, **params):
         """Replace the graph by a single box into an output, select the box node and wait for the 3-D view to show it."""
         if not self.page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
@@ -2480,6 +2484,7 @@ class EditorE2E(unittest.TestCase):
         self.page.click('#pv-hints-toggle')
         self.assertFalse(self.page.locator('#pv-hints').is_visible())
         self.page.click('#pv-hints-toggle')
+        self.view_menu()
         self.page.select_option('#pv-view-extra', 'back')
         self.page.wait_for_function('Math.abs(minihou.preview.view.yaw - Math.PI / 2) < 0.001')
         self.page.locator('#pv-normals').check()
@@ -2498,15 +2503,18 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(field.input_value(), '0.31')
         field.press('Tab')
         self.assertTrue(until(lambda: self.s.graph.nodes['polybevel1'].params.get('distance') == 0.31))
+        self.view_menu()
         self.page.click('#pv-frame-all')
         self.page.screenshot(path=os.path.join(ROOT, 'build', 'validation', 'viewport-tool-strips.png'))
 
     def test_axis_views_ortho_gizmo_and_frame_selection(self):
         import math
         self.box_scene()
+        self.view_menu()
         self.page.click('#preview [data-view="front"]')
         self.page.wait_for_function("Math.abs(minihou.preview.view.yaw + Math.PI / 2) < 1e-3")
         self.assertAlmostEqual(self.view_angles()[1], 0, places=3)
+        self.view_menu()
         self.page.click('#preview [data-view="top"]')
         self.page.wait_for_function("minihou.preview.view.pitch > 1.57")
         box = self.page.locator("#pv-canvas").bounding_box()
@@ -2519,7 +2527,7 @@ class EditorE2E(unittest.TestCase):
         self.page.wait_for_function("minihou.preview.view.pitch > 1.57")
         # orthographic: parallel edges stay parallel, so the box's top face is a rectangle on screen
         self.page.keyboard.press("Numpad5")
-        self.assertEqual(self.page.locator("#pv-ortho").inner_text(), "Ortho")
+        self.assertEqual(self.page.locator("#pv-ortho").text_content().strip(), "Ortho")
         self.assertTrue(self.page.evaluate("minihou.preview.view.ortho"))
         pts = [self.page.evaluate("([k, i]) => minihou.preview.screenOf(k, i)", ["point", i]) for i in self.top_points]
         xs, ys = sorted({round(p[0]) for p in pts}), sorted({round(p[1]) for p in pts})

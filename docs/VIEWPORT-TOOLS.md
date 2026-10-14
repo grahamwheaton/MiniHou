@@ -2,6 +2,10 @@
 
 Build with `python tools/build_app.py --with-accel`. The default delivery is the ready-to-run `dist/MiniHou` folder; ZIPs require `--zip`. `--output` selects a distribution directory. The new app is smoke-tested before replacing the previous folder, which is preserved under build/app-previous-*.
 
+## Viewport layout
+
+The 3-D view is laid out like Blender's. A **header** runs along the top: the selection-mode chip, the **View**, **Select** and **Add** menus, the transform orientation and snapping, and on the right the source (display flag or the selected node), the spreadsheet, frame-selected, the display-panel toggle and maximise. **View** holds the front/right/top/back/left/bottom viewpoints, perspective/orthographic, Walk / Fly, frame all/selected and the spreadsheet; **Select** switches between orbit-only, points, edges, faces and objects (and paint / quick assign); **Add** opens the node menu and search. The **tools** run down the left (selection modes, then Move / Rotate / Scale when a selection or handle node is active, then Paint and Assign). The **display settings** are a collapsible panel on the right (Shading, Overlays, Detail with the cook proxy and Performance, Sketch & Measure); the ☰ button in the header hides it and the browser remembers whether it is open and which sections are folded.
+
 Navigation preferences now default to Blender: middle mouse orbits, Shift-middle pans, Ctrl-middle dollies. Geometry-depth orbit is optional. Houdini / MiniHou retains the earlier Alt-left navigation. Right-mouse WASD free flight remains available in both modes.
 
 Ctrl-R over the viewport starts Loop Cut. Hover a quad edge for a cut preview; wheel changes count. Click to start sliding, click again or Enter to commit. Right-click during slide commits centered cuts; Escape cancels without creating a node. Uses the existing PolySplit engine and inserts into the displayed stream. Multiple cuts are evenly spaced; only single cuts slide. Stops at non-quad faces; this is not arbitrary knife cutting or full Blender edge-slide parity.
