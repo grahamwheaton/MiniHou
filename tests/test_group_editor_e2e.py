@@ -27,6 +27,11 @@ class GroupEditorE2E(unittest.TestCase):
     def field(self,row,name):return row.locator('> .rule-field[data-field="%s"] [data-field="%s"]'%(name,name)).first
     def set_text(self,loc,value):loc.fill(value);loc.press('Tab')
     def output(self,node):return self.s.evaluator.cook(self.s.graph,node)
+    def saved_params(self,node):
+        # Windows may briefly deny opening a destination during atomic replace.
+        try:saved=Graph.load(self.path,check=False)
+        except OSError:return None
+        return saved.nodes[node].params if node in saved.nodes else None
 
     def test_shelf_pie_and_search_are_real_tools(self):
         self.box_scene()
@@ -41,6 +46,65 @@ class GroupEditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda:any(n.type=='group_paint' for n in self.s.graph.nodes.values())))
         self.assertEqual(self.page.evaluate("MiniPie.find('group_expression').type"),'group_expression')
         self.assertIn('Cd colour',self.page.evaluate("minihou.S.types.group_by_color.keywords"))
+
+    def test_new_promote_shelf_pie_search_and_drag_start_with_full_rules(self):
+        for surface in ('shelf', 'pie', 'search', 'drag'):
+            with self.subTest(surface=surface):
+                self.scene({'b':{'type':'box'},'a':{'type':'group_paint','inputs':{'geo':'b'},
+                    'params':{'name':'seed','selection':'0'}}},'a')
+                if surface == 'shelf':
+                    self.page.click('#shelf .sh-tab[data-tab="Groups"]')
+                    self.page.locator('#shelf .sh-tool[data-label="Group Promote"]').click()
+                elif surface == 'pie':
+                    self.page.locator('#canvas').focus();self.page.mouse.move(*self.empty_spot())
+                    self.page.keyboard.press('c');self.page.wait_for_selector('#pie:not(.hidden)')
+                    self.page.keyboard.press('4');self.page.wait_for_function("MiniPie.state().page==='group'")
+                    self.page.mouse.click(*self.pie_slot_xy(0))
+                elif surface == 'search':
+                    self.page.locator('#canvas').focus();self.page.mouse.move(*self.empty_spot())
+                    self.page.keyboard.press('Tab');self.page.locator('#tab-search').fill('Group Promote')
+                    self.page.locator('#tab-list .it[data-name="group_promote"]').dispatch_event('mousedown')
+                else:
+                    x,y=self.empty_spot()
+                    self.page.evaluate("([x,y])=>{const d=new DataTransfer();d.setData('application/x-minihou-tool',JSON.stringify({type:'group_promote',label:'Group Promote'}));document.querySelector('#canvas').dispatchEvent(new DragEvent('drop',{bubbles:true,clientX:x,clientY:y,dataTransfer:d}));}",[x,y])
+                self.assertTrue(until(lambda:any(n.type=='group_promote' for n in self.s.graph.nodes.values())))
+                ident=next(k for k,n in self.s.graph.nodes.items() if n.type=='group_promote')
+                self.assertTrue(until(lambda:len(self.s.graph.nodes[ident].params.get('rules',[]))==1))
+                self.page.wait_for_selector('#params > .prow[data-param="rules"] .rule-row')
+                rule=self.s.graph.nodes[ident].params['rules'][0]
+                expected=self.page.evaluate("Object.fromEntries(minihou.S.types.group_promote.params.find(p=>p.name==='rules').fields.map(f=>[f.name,f.default]))")
+                self.assertEqual(rule,expected)
+                self.assertEqual(self.row().locator('> .rule-field').count(),len(expected))
+                self.assertEqual(self.field(self.row(),'from').input_value(),'auto')
+                self.assertEqual(self.field(self.row(),'to').locator('option').count(),4)
+                self.assertFalse(self.page.locator('#params .promote-legacy').evaluate('e=>e.open'))
+                self.assertIn('inactive',self.page.locator('#params .promote-legacy summary').inner_text())
+                self.page.locator('#params > .prow[data-param="rules"] > .rule-list > .add-rule').click()
+                self.assertTrue(until(lambda:len(self.s.graph.nodes[ident].params['rules'])==2))
+                self.page.reload();self.page.wait_for_selector('.node[data-id="%s"]'%ident)
+                self.node(ident).locator('.title').click()
+                self.assertEqual(self.page.locator('#params > .prow[data-param="rules"] > .rule-list > .rule-row').count(),2)
+
+    def test_legacy_promote_reload_and_duplicate_keep_empty_rule_semantics(self):
+        for params in ({},{'name':'group1','to':'points'},{'name':'group1','to':'points','rules':[]}):
+            with self.subTest(params=params):
+                self.scene({'b':{'type':'box'},'a':{'type':'group_paint','inputs':{'geo':'b'},
+                    'params':{'name':'group1','domain':'primitives','selection':'0'}},
+                    'p':{'type':'group_promote','inputs':{'geo':'a'},'params':params}},'p')
+                before=self.output('p')
+                self.assertEqual(int(R.membership(before,'point','group1').sum()),4)
+                self.assertNotIn('group1',R.names(before,'prim'))
+                self.assertEqual(self.page.locator('#params .rule-row').count(),0)
+                self.assertTrue(self.page.locator('#params .promote-legacy').evaluate('e=>e.open'))
+                self.page.reload();self.page.wait_for_selector('.node[data-id="p"]')
+                self.node('p').locator('.title').click()
+                self.page.locator('#params > .pactions').get_by_role('button',name='Duplicate',exact=True).click()
+                self.assertTrue(until(lambda:sum(n.type=='group_promote' for n in self.s.graph.nodes.values())==2))
+                clone=next(k for k,n in self.s.graph.nodes.items() if n.type=='group_promote' and k!='p')
+                self.assertEqual(self.s.graph.nodes[clone].params,params)
+                np.testing.assert_array_equal(R.membership(self.output(clone),'point','group1'),R.membership(before,'point','group1'))
+                self.assertNotIn('group1',R.names(self.output(clone),'prim'))
+                self.assertTrue(until(lambda:self.saved_params(clone)==params))
 
     def test_rule_add_remove_reorder_enable_undo_reload(self):
         self.scene({'b':{'type':'box'},'a':{'type':'group_paint','inputs':{'geo':'b'},'params':{'name':'a','selection':'0-2'}},'d':{'type':'group_delete','inputs':{'geo':'a'}}},'d')
@@ -86,8 +150,10 @@ class GroupEditorE2E(unittest.TestCase):
     def test_combine_nested_operations_and_expression_controls(self):
         self.scene({'b':{'type':'box'},'a':{'type':'group_paint','inputs':{'geo':'b'},'params':{'name':'a','selection':'0-2'}},'k':{'type':'group_combine','inputs':{'geo':'a'},'params':{'rules':[{'domain':'points','name':'r','base':'a'}]}},'e':{'type':'group_expression','inputs':{'geo':'k'}}},'k')
         self.row().locator('.rule-field[data-field="operations"] .add-rule').click()
+        self.assertTrue(until(lambda:len(self.s.graph.nodes['k'].params['rules'][0].get('operations',[]))==1))
         operation=self.row().locator('.rule-field[data-field="operations"] .rule-row')
         operation.locator('select[data-field="op"]').select_option('subtract')
+        self.assertTrue(until(lambda:self.s.graph.nodes['k'].params['rules'][0]['operations'][0].get('op')=='subtract'))
         self.set_text(operation.locator('input[data-field="group"]'),'0')
         self.assertTrue(until(lambda:self.s.graph.nodes['k'].params['rules'][0]['operations'][0]['group']=='0'))
         self.assertEqual(np.flatnonzero(R.membership(self.output('k'),'point','r')).tolist(),[1,2])

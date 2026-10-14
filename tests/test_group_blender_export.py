@@ -35,6 +35,36 @@ class GroupBlenderExport(unittest.TestCase):
         self.send(g)
         for name,domain,count in [('group_points','POINT',1),('group_faces','FACE',1),('group_corners','CORNER',1),('edge_group_edges','EDGE',2)]:
             a=self.mesh.attributes[name];self.assertEqual((a.domain,a.data_type),(domain,'BOOLEAN'));self.assertEqual(self.vals(name).sum(),count)
+        # Evaluate real Geometry Nodes fields, not only mesh attribute metadata.
+        tree=bpy.data.node_groups.new('GroupNamedAttributeRead','GeometryNodeTree')
+        obj=bpy.data.objects.new('GroupNamedAttributeRead',self.mesh)
+        bpy.context.scene.collection.objects.link(obj)
+        evaluated=None
+        try:
+            tree.interface.new_socket(name='Geometry',in_out='INPUT',socket_type='NodeSocketGeometry')
+            tree.interface.new_socket(name='Geometry',in_out='OUTPUT',socket_type='NodeSocketGeometry')
+            incoming=tree.nodes.new('NodeGroupInput');outgoing=tree.nodes.new('NodeGroupOutput')
+            current=incoming.outputs['Geometry']
+            for name,domain in [('group_points','POINT'),('group_faces','FACE'),('group_corners','CORNER'),('edge_group_edges','EDGE')]:
+                read=tree.nodes.new('GeometryNodeInputNamedAttribute');read.data_type='BOOLEAN'
+                read.inputs['Name'].default_value=name
+                store=tree.nodes.new('GeometryNodeStoreNamedAttribute');store.data_type='BOOLEAN';store.domain=domain
+                store.inputs['Name'].default_value='read_'+name
+                tree.links.new(current,store.inputs['Geometry'])
+                tree.links.new(read.outputs['Attribute'],store.inputs['Value'])
+                current=store.outputs['Geometry']
+            tree.links.new(current,outgoing.inputs['Geometry'])
+            modifier=obj.modifiers.new('Read Group Attributes','NODES');modifier.node_group=tree
+            evaluated=obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
+            mesh=evaluated.to_mesh()
+            for name in ['group_points','group_faces','group_corners','edge_group_edges']:
+                actual=np.empty(len(mesh.attributes['read_'+name].data),bool)
+                mesh.attributes['read_'+name].data.foreach_get('value',actual)
+                np.testing.assert_array_equal(actual,self.vals(name),err_msg='Named Attribute '+name)
+        finally:
+            if evaluated is not None:evaluated.to_mesh_clear()
+            bpy.data.objects.remove(obj,do_unlink=True)
+            bpy.data.node_groups.remove(tree)
         # Attribute-only update changes EDGE membership without replacing mesh topology.
         m=np.zeros(R.count(g,'edge'),bool);m[-1]=True;g=R.write(g,'edge','edges',m)
         self.assertFalse(self.send(g)['rebuilt']);self.assertEqual(self.vals('edge_group_edges').sum(),1)

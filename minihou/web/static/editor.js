@@ -848,9 +848,16 @@
       onclick: () => queueSet(id, "reset", Number(n.params?.reset || 0) + 1),
       title: "Discard this simulation and replay from its initial geometry"
     }, "Reset simulation"));
+    if (n.type === 'group_promote') {
+      const active = !!n.params?.rules?.length;
+      out.push(h('details', { class: 'promote-legacy', open: !active, dataset: { active: String(active) } },
+        h('summary', null, active ? 'Legacy conversion (inactive while rules exist)' : 'Legacy conversion (used with empty Rules)'),
+        ...t.params.filter(p => ['name', 'to'].includes(p.name)).map(p => paramRow(id, p))));
+    }
     let ogHeader = false;
     for (let i = 0; i < t.params.length; i++) {
       const p = t.params[i];
+      if (n.type === 'group_promote' && ['name', 'to'].includes(p.name)) continue;
       if(n.type==='bezier'&&p.name==='controls')continue;
       if (p.ui === "hidden") continue;
       if (p.ui === "outgroup") {                                     // Output Groups: a checkbox and the group's name side by side, like Houdini
@@ -1136,6 +1143,12 @@
   function syncParams(id, panel = $("#params")) {
     // Update values in place, keeping focus and in-progress drags.
     if (!id || !nodeOf(id)) return;
+    const legacy = panel.querySelector('.promote-legacy');
+    if (legacy) {
+      const active = !!nodeOf(id).params?.rules?.length;
+      if (legacy.dataset.active !== String(active)) { legacy.open = !active; legacy.dataset.active = String(active); }
+      legacy.querySelector('summary').textContent = active ? 'Legacy conversion (inactive while rules exist)' : 'Legacy conversion (used with empty Rules)';
+    }
     const err = panel.querySelector('[data-role="err"]');
     if (err) { const m = nodeErrorText(id); err.textContent = m; err.style.display = m ? "" : "none"; }
     for (const p of typeOf(id).params) {
@@ -1720,6 +1733,13 @@
   }
   // ---- the "C" pie menu (pie.js): a tool inserts its node after the viewed node, filled in from the 3-D selection
   let pieFromView = false;
+  // New editor tools start with the full promotion controls. Loading, duplicating
+  // and API edits retain their stored parameters, including legacy empty Rules.
+  function newToolParams(type, params = {}) {
+    if (type !== 'group_promote' || Object.hasOwn(params, 'rules')) return structuredClone(params);
+    const rules = S.types[type].params.find(p => p.name === 'rules');
+    return { rules: [Object.fromEntries(rules.fields.map(f => [f.name, structuredClone(f.default)]))], ...structuredClone(params) };
+  }
   function pieSelectionParams(item) {
     const s = pvSelection;
     if (!item.sel || !pv || !pv.ok || s.mode === "view" || !pv.selectionInfo()?.points.length) return {};
@@ -1741,7 +1761,7 @@
     if (!item) { if (note) toast(note); return; }
     const t = S.types[item.type];
     if (!t) { toast(`This engine has no ${item.type} node.`); return; }
-    const params = { ...(item.params || {}), ...pieSelectionParams(item) };
+    const params = newToolParams(item.type, { ...(item.params || {}), ...pieSelectionParams(item) });
     if(item.type==='blast' && pvSelection.mode!=='view'){
       const mode=pvSelection.mode, values=pvSelection[SEL_KEY[mode]]||[];
       if(values.length)Object.assign(params,{domain:mode==='edge'?'edges':mode==='point'?'points':'primitives',group:mode==='edge'?values.map(([a,b])=>`p${a}-${b}`).join(' '):rangePattern(values)});
@@ -1768,7 +1788,7 @@
     const t = S.types[tool.type];
     if (!t) { toast(`This engine has no ${tool.type} node.`); return; }
     const id = uniqueId(tool.type), [x, y] = toWorld(clientX, clientY);
-    const r = await edit([{ op: "add", type: tool.type, id, pos: [Math.round(x - W / 2), Math.round(y - 12)] }]);
+    const r = await edit([{ op: "add", type: tool.type, id, params: newToolParams(tool.type, tool.params), pos: [Math.round(x - W / 2), Math.round(y - 12)] }]);
     if (r) select([id]);
   }
   if (window.MiniShelf) {
@@ -2484,10 +2504,10 @@
     }
     const selectedSource=ctx.fromSel || (!ctx.from && !ctx.feeds && S.sel.size===1 ? [...S.sel][0] : null);
     if(selectedSource && t.inputs.length && t.category!=='source'){
-      const r=await edit([{op:'insert',after:selectedSource,type:t.name,id}]);
+      const r=await edit([{op:'insert',after:selectedSource,type:t.name,id,params:newToolParams(t.name)}]);
       if(r)select([id]);return;
     }
-    const op = { op: "add", type: t.name, id, pos: [x, y] };
+    const op = { op: "add", type: t.name, id, params: newToolParams(t.name), pos: [x, y] };
     const ops = [op];
     const first = t.inputs[0] && t.inputs[0].name;
     if (ctx.from && first) op.inputs = { [first]: ctx.from };

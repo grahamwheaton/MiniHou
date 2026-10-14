@@ -210,6 +210,41 @@ class GroupByProximityTests(unittest.TestCase):
         out = run("group_by_proximity", query, target, distance=.1)
         np.testing.assert_array_equal(selected(out, "points"), [False])
 
+    def test_exact_u_notch_and_reversed_winding(self):
+        P = np.array([[0,0,0],[3,0,0],[3,3,0],[2,3,0],
+                      [2,1,0],[1,1,0],[1,3,0],[0,3,0]], np.float32)
+        query = Geometry.points_only(np.array([[1.5,2,0],[.5,2,0]], np.float32))
+        for order in (list(range(8)), list(reversed(range(8)))):
+            target = Geometry.from_arrays(P, order, [0,8])
+            for mode in ('surface', 'auto'):
+                out = run('group_by_proximity', query, target, target_mode=mode, distance=.1)
+                np.testing.assert_array_equal(selected(out,'points'), [False,True])
+            triangles = group_helpers._surface_triangles(target)
+            self.assertAlmostEqual(float(np.linalg.norm(np.cross(triangles[:,1]-triangles[:,0],triangles[:,2]-triangles[:,0]),axis=1).sum()/2),7)
+
+    def test_bridged_hole_preserves_empty_hole_and_surface_area(self):
+        # Outer square with a clockwise hole, joined by a repeated diagonal bridge.
+        P = np.array([[0,0,0],[4,0,0],[4,4,0],[0,4,0],
+                      [1,1,0],[1,3,0],[3,3,0],[3,1,0]], np.float32)
+        order = [0,1,2,3,0,4,5,6,7,4]
+        query = Geometry.points_only(np.array([[2,2,0],[.5,2,0],[.5,.5,0]],np.float32))
+        for winding in (order, list(reversed(order))):
+            target = Geometry.from_arrays(P,winding,[0,len(winding)])
+            for mode in ('surface','auto'):
+                out = run('group_by_proximity',query,target,target_mode=mode,distance=.1)
+                np.testing.assert_array_equal(selected(out,'points'),[False,True,True])
+            triangles = group_helpers._surface_triangles(target)
+            area = np.linalg.norm(np.cross(triangles[:,1]-triangles[:,0],triangles[:,2]-triangles[:,0]),axis=1).sum()/2
+            self.assertAlmostEqual(float(area),12)
+
+    def test_repeated_degenerate_face_is_not_filled(self):
+        target = Geometry.from_arrays(np.array([[0,0,0],[1,0,0],[2,0,0]],np.float32),
+                                      [0,1,2,1,0],[0,5])
+        query = Geometry.points_only(np.array([[.5,0,0]],np.float32))
+        with self.assertRaisesRegex(ValueError,'no polygon faces or curve segments'):
+            run('group_by_proximity',query,target,target_mode='surface',distance=.1)
+        np.testing.assert_array_equal(selected(run('group_by_proximity',query,target,distance=.1),'points'),[False])
+
     def test_open_curve_segments_and_missing_target(self):
         target = Geometry.from_arrays(np.array([[0, 0, 0], [2, 0, 0]], np.float32),
                                       [0, 1], [0, 2], closed=[False])

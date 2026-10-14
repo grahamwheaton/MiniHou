@@ -234,11 +234,72 @@ def _segment_hits(query, a, b, radius):
     return result
 
 
+def _bridged_face_triangles(points):
+    """Ear clip a planar face with repeated bridge endpoints, preserving holes.
+
+    A bridge visits the same position twice. Those duplicate corners must not
+    block an otherwise valid ear merely because they coincide with its corners.
+    Unlike the general model fallback, an unresolved boundary is an error.
+    """
+    normal = np.cross(points, np.roll(points, -1, axis=0)).sum(axis=0)
+    if np.linalg.norm(normal) <= 1e-20:
+        return np.empty((0, 3), np.int64)
+    q = np.delete(points, int(np.argmax(np.abs(normal))), axis=1)
+    scale = max(float(np.ptp(q, axis=0).max()), 1e-15)
+    eps = 1e-12 * scale * scale
+    area = float(np.sum(q[:, 0] * np.roll(q[:, 1], -1) - q[:, 1] * np.roll(q[:, 0], -1)))
+    sign = 1 if area > 0 else -1
+    def turn(a, b, c):
+        ab, ac = q[b] - q[a], q[c] - q[a]
+        return float(ab[0] * ac[1] - ab[1] * ac[0]) * sign
+    remaining = list(range(len(q)))
+    triangles = []
+    while len(remaining) > 3:
+        for k, b in enumerate(remaining):
+            a, c = remaining[k - 1], remaining[(k + 1) % len(remaining)]
+            if turn(a, b, c) <= eps:
+                continue
+            blocked = False
+            for p in remaining:
+                if any(np.array_equal(q[p], q[v]) for v in (a, b, c)):
+                    continue
+                if min(turn(a, b, p), turn(b, c, p), turn(c, a, p)) >= -eps:
+                    blocked = True
+                    break
+            if not blocked:
+                triangles.append((a, b, c)); del remaining[k]
+                break
+        else:
+            # Zero-length sides and collinear corners carry no surface area.
+            removable = next((k for k, b in enumerate(remaining)
+                              if abs(turn(remaining[k - 1], b, remaining[(k + 1) % len(remaining)])) <= eps), None)
+            if removable is None:
+                raise ValueError('proximity surface cannot triangulate this bridged polygon')
+            del remaining[removable]
+    if len(remaining) == 3 and turn(*remaining) > eps:
+        triangles.append(tuple(remaining))
+    total = sum(turn(*tri) for tri in triangles)
+    if not np.isclose(total, abs(area), rtol=1e-9, atol=eps * max(len(q), 1)):
+        raise ValueError('proximity surface bridged polygon triangulation does not preserve area')
+    return np.asarray(triangles, np.int64).reshape((-1, 3))
+
+
 def _surface_triangles(target):
     """Actual nondegenerate polygon triangles, including already triangular faces."""
     closed = target.topology.closed_mask()
     sizes = target.topology.prim_sizes()
-    tri, _, _ = triangulate(target, closed)
+    P = np.asarray(target.P, np.float64)
+    bridged = np.zeros(target.nprims, bool)
+    extra = []
+    for p in np.flatnonzero(closed & (sizes > 3)):
+        lo, hi = target.topology.prim_offsets[p:p + 2]
+        pos = P[target.topology.vertex_point[lo:hi]]
+        if len(np.unique(pos, axis=0)) < len(pos):
+            bridged[p] = True
+            extra.extend((_bridged_face_triangles(pos) + lo).tolist())
+    tri, _, _ = triangulate(target, closed & ~bridged)
+    if extra:
+        tri = np.concatenate((tri, np.asarray(extra, np.int64)))
     already = np.flatnonzero(closed & (sizes == 3))
     if len(already):
         first = target.topology.prim_offsets[already].astype(np.int64)
@@ -246,7 +307,6 @@ def _surface_triangles(target):
         tri = np.concatenate((tri, single)) if len(tri) else single
     if not len(tri):
         return np.zeros((0, 3, 3), np.float64)
-    P = np.asarray(target.P, np.float64)
     triangles = P[target.topology.vertex_point[tri]]
     area2 = np.linalg.norm(np.cross(triangles[:, 1] - triangles[:, 0],
                                     triangles[:, 2] - triangles[:, 0]), axis=1)
