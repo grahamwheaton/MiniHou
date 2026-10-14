@@ -36,7 +36,10 @@
       "pos": [
         150,
         110
-      ]
+      ],
+      "inputs": {
+        "source": "source"
+      }
     },
     "copies": {
       "type": "copy_to_points",
@@ -89,6 +92,11 @@
       "name": "Origin",
       "node": "targets",
       "param": "origin"
+    },
+    {
+      "name": "Relative Spacing",
+      "node": "targets",
+      "param": "relative_spacing"
     }
   ]
 }

@@ -36,7 +36,10 @@
       "pos": [
         150,
         110
-      ]
+      ],
+      "inputs": {
+        "source": "source"
+      }
     },
     "copies": {
       "type": "copy_to_points",
@@ -79,6 +82,36 @@
       "name": "Origin",
       "node": "targets",
       "param": "origin"
+    },
+    {
+      "name": "Distance",
+      "node": "targets",
+      "param": "distance"
+    },
+    {
+      "name": "Relative Offset",
+      "node": "targets",
+      "param": "relative_offset"
+    },
+    {
+      "name": "End",
+      "node": "targets",
+      "param": "end"
+    },
+    {
+      "name": "Use Distance",
+      "node": "targets",
+      "param": "use_distance"
+    },
+    {
+      "name": "Relative Spacing",
+      "node": "targets",
+      "param": "relative_spacing"
+    },
+    {
+      "name": "Use End Point",
+      "node": "targets",
+      "param": "use_end_point"
     }
   ]
 }
