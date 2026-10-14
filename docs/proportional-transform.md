@@ -1,0 +1,11 @@
+# Proportional editing engine
+
+Transform keeps all previous parameter defaults. Enable `proportional_enabled` to use the `group` as the fully affected seed selection; an empty group selects everything, and an empty resolved selection moves nothing. `proportional_radius` uses geometry units and the nearest seed distance. Falloffs are `smooth`, `sphere`, `root`, `sharp`, `linear`, `constant`, and `random`. Random samples are deterministic for stable drags and cached evaluation.
+
+`proportional_connected` uses shortest paths along actual polygon edges and open curve segments, with a multi-source Dijkstra search stopped at the radius. Disconnected geometry stays fixed. `proportional_projected` removes the depth component along `proportional_view_direction`, a direction in geometry coordinates. Connected mode takes precedence over projected mode.
+
+Rotation scales Euler XYZ angles by influence, retaining circular arcs and full turns. Scale factors blend from identity; translation blends from zero. The existing pivot and axis frame apply throughout. Fully selected points receive the original transform. Point normals receive the weighted rotation/inverse scale, preserving unaffected normals.
+
+Parity limits: connected distance follows edges rather than a continuous surface geodesic or Blender's face-diagonal propagation. Projected distances are orthographic plane distances, without perspective depth compensation. Multi-axis rotations use weighted Euler angles, rather than arbitrary-axis quaternion interpolation. Random falloff is deterministic MiniHou sampling, not Blender's random sequence. Point normals use the local affine transform and do not include the spatial derivative of influence; primitive/vertex normals retain existing Transform behavior. The older Soft Transform remains a distinct radial centre-based deformer.
+
+Euclidean queries use SciPy's KD tree when available. The portable NumPy fallback bounds intermediate queries to 256 points by 256 seeds (bounded memory but quadratic runtime); connected adjacency requires storage proportional to mesh edges. Tiny engine tests cover influence, old behavior, rotation arcs, scaling, axes/normals, disconnected paths, projected depth, and random stability. Host viewport interaction requires separate validation.
