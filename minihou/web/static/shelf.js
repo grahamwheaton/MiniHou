@@ -24,7 +24,7 @@
       T("Skin Profiles", "skin_profiles", "skin"), T("Revolve", "revolve"), T("Sweep", "sweep"), T("Fillet", "fillet"),
       T("PolyReduce", "polyreduce"), T("Convex Hull", "convex_hull"), T("Remesh", "remesh")]],
     ["Polygon", "#c97bd0", [
-      T("PolyExtrude", "polyextrude"), T("Push / Pull", "pushpull", "polyextrude"), T("Inset", "inset", "polyexpand2d"), T("Outset", "outset", "polyexpand2d"), T("PolyBevel", "polybevel"), T("PolySplit", "polysplit"), T("PolyFill", "polyfill"),
+      T("PolyExtrude", "polyextrude"), T("Push / Pull", "pushpull", "polyextrude"), T("Inset", "inset", "polyexpand2d"), T("Outset", "outset", "polyexpand2d"), T("PolyBevel", "polybevel"), T("Solidify", "solidify", "polyextrude"), T("PolySplit", "polysplit"), T("PolyFill", "polyfill"),
       T("PolyBridge", "polybridge"), T("PolyExpand2D", "polyexpand2d"), T("Dissolve", "dissolve"), T("Divide", "divide"),
       T("Reverse", "reverse"), T("Facet", "facet"), T("Bridge", "bridge", "polybridge"), T("Normal", "normal")]],
     ["Edges", "#e0c05a", [
@@ -37,7 +37,7 @@
       T("Mountain", "noise"), T("Lattice", "lattice"), T("Point Deform", "point_deform", "lattice"), T("Path Deform", "path_deform", "curve"),
       T("Point Jitter", "point_jitter", "scatter"), T("Point Relax", "point_relax", "scatter"), T("Blend", "blend"),
       T("Exploded View", "exploded_view", "fracture")]],
-    ["Texture", "#8f8fe6", [T("UV Project", "uv_project", "uv"), T("UV Flatten", "uv_flatten", "uv"), T("Color", "color")]],
+    ["Texture", "#8f8fe6", [T("UV Project", "uv_project", "uv"), T("UV Flatten", "uv_flatten", "uv"), T("UV Transform", "uv_transform", "uv"), T("Color", "color")]],
     ["Groups", "#4fc3c3", [
       T("Group Create", "group_create", "group"), T("Group Expand", "group_expand", "group"), T("Group Promote", "group_promote", "group"),
       T("Group by Range", "group_range", "group"), T("Blast", "blast"), T("Delete", "delete")]],
@@ -45,11 +45,11 @@
       T("Wrangle", "wrangle", "code"), T("Attribute Create", "attribute_create", "attr"), T("Attribute Transfer", "attribute_transfer", "attr"),
       T("Attribute Promote", "attribute_promote", "attr"), T("Attribute Randomize", "attribute_randomize", "attr"),
       T("Attribute Blur", "attribute_blur", "attr"), T("Attribute Rename", "attribute_rename", "attr"), T("Attribute Paint", "attrib_paint", "attr"),
-      T("Attribute Delete", "attribute_delete", "attr"), T("Measure", "measure"), T("Connectivity", "connectivity"), T("Ray", "ray"),
+      T("Attribute Delete", "attribute_delete", "attr"), T("Measure", "measure"), T("Connectivity", "connectivity"), T("Ray", "ray"), T("Falloff", "falloff"), T("Occlusion", "occlusion"),
       T("Set Material", "set_material", "attr"),
       T("Python", "python", "code")]],
     ["Curves", "#7fd0a0", [
-      T("Bezier", "bezier", "curve"), T("Polyline", "curve"), T("Line", "line"), T("Helix", "helix"), T("Resample", "resample"), T("Carve", "carve"),
+      T("Bezier", "bezier", "curve"), T("Polyline", "curve"), T("Line", "line"), T("Helix", "helix"), T("Resample", "resample"), T("Simplify Curve", "curve_simplify"), T("Contour", "contour", "curve"), T("Slice", "slice", "curve"), T("Carve", "carve"),
       T("Convert Line", "convert_line", "line"), T("PolyPath", "polypath", "curve"), T("Sweep", "sweep"), T("Fillet", "fillet")]],
     ["Points", "#d6d46f", [
       T("Scatter", "scatter"), T("Fuse", "fuse"), T("Delaunay", "delaunay", "hull"), T("Point Jitter", "point_jitter", "scatter"),
@@ -64,7 +64,7 @@
       T("RBD Constraint", "rbd_constraint", "constraint"), T("Glue Cluster", "glue_cluster", "constraint"), T("RBD Constraint Properties", "rbd_constraint_properties", "constraint"),
       T("Voronoi Adjacency", "voronoi_adjacency", "constraint")]],
     ["Terrain FX", "#9c8b6a", [T("Grid", "grid"), T("Mountain", "noise"), T("Heightfield Erode", "heightfield_erode", "terrain"), T("Scatter", "scatter")]],
-    ["Volume", "#6ab0e0", [T("Remesh", "remesh"), T("SDF Boolean", "sdf_boolean", "boolean"), T("Points to Surface", "points_to_surface")]],
+    ["Volume", "#6ab0e0", [T("Remesh", "remesh"), T("SDF Shape", "sdf_shape"), T("SDF Boolean", "sdf_boolean", "boolean"), T("Points to Surface", "points_to_surface")]],
     ["PCG", "#79c27a", null],                                                   // every pcg_* node (filled in from the engine's types)
     ["Procedural", "#79c2ad", [
       T("Building Rules", "building_rules", "box"), T("Region Identify", "region_identify", "connectivity"),

@@ -676,3 +676,127 @@ def path_deform(geo, curve, axis, frame, up, offset, stretch, twist):
     if "N" in geo.point:
         out.point["N"] = np.einsum("nij,nj->ni", F, geo.point["N"].astype(np.float64)).astype(np.float32)
     return out
+
+
+# -- curve_simplify ---------------------------------------------------------------------------------------------
+def _rdp(P, lo, hi, tol, keep):
+    """Ramer-Douglas-Peucker on P[lo..hi] (both ends kept): marks keep[i] for the points that stay."""
+    stack = [(lo, hi)]
+    while stack:
+        a, b = stack.pop()
+        if b - a < 2:
+            continue
+        seg = P[b] - P[a]
+        ln = float(seg @ seg)
+        q = P[a + 1:b] - P[a]
+        if ln < 1e-24:
+            dist = np.linalg.norm(q, axis=1)
+        else:
+            u = np.clip((q @ seg) / ln, 0.0, 1.0)
+            dist = np.linalg.norm(q - u[:, None] * seg, axis=1)
+        k = int(np.argmax(dist))
+        if dist[k] > tol:
+            keep[a + 1 + k] = True
+            stack.append((a, a + 1 + k))
+            stack.append((a + 1 + k, b))
+
+
+def _by_angle(P, closed, angle):
+    """Keep a point once the direction has turned by `angle` degrees in total since the last kept one."""
+    n = len(P)
+    keep = np.zeros(n, bool)
+    keep[0] = True
+    if not closed:
+        keep[-1] = True
+    seg = np.diff(np.vstack([P, P[:1]]) if closed else P, axis=0)
+    ln = np.linalg.norm(seg, axis=1)
+    d = seg / np.where(ln > 1e-30, ln, 1.0)[:, None]
+    total = 0.0
+    lim = np.radians(angle)
+    last = n if closed else n - 1
+    for i in range(1, last):
+        total += float(np.arccos(np.clip(d[i - 1] @ d[i], -1.0, 1.0)))
+        if total >= lim:
+            keep[i] = True
+            total = 0.0
+    return keep
+
+
+@node("curve_simplify", inputs=["geo"], category="curve", params=[
+    Enum("method", ["distance", "angle"], doc="distance: Ramer-Douglas-Peucker, keep points that stray more than the tolerance from the simplified line; "
+                                              "angle: keep a point once the curve has turned by the angle since the last kept one"),
+    Float("tolerance", 0.01, min=0.0, soft_max=1.0, doc="distance method: the largest distance the original may be from the simplified curve"),
+    Float("angle", 10.0, min=0.0, max=180.0, doc="angle method: degrees of turning between kept points"),
+    Int("smooth", 0, min=0, soft_max=20, doc="Relax the kept points towards their neighbours this many times (ends stay put)"),
+    Str("keep", "", doc="A point group that always stays"),
+])
+def curve_simplify(geo, method, tolerance, angle, smooth, keep):
+    """Fewer points on a curve with the same shape (the opposite of resample): the points that matter stay, with their attributes. Open
+    curves keep their ends; closed loops keep at least three points. Run it on curves (convert_line, resample, ...), not on a mesh."""
+    t = geo.topology
+    sizes = t.prim_sizes()
+    if not (sizes >= 3).any():
+        raise ValueError("curve_simplify needs curves with at least three points")
+    pin = groups.mask(geo, "point", keep)
+    vp = t.vertex_point.astype(np.int64)
+    offs = t.prim_offsets.astype(np.int64)
+    closed_m = t.closed_mask()
+    P = geo.P.astype(np.float64)
+    rows_out, sizes_out, src_prim = [], [], []
+    for p in range(t.nprims):
+        rows = np.arange(offs[p], offs[p + 1])
+        n = len(rows)
+        cl = bool(closed_m[p])
+        if n < 3 or (cl and n <= 3):
+            rows_out.append(rows); sizes_out.append(n); src_prim.append(p)
+            continue
+        Q = P[vp[rows]]
+        if method == "angle":
+            kp = _by_angle(Q, cl, angle)
+        else:
+            kp = np.zeros(n, bool)
+            kp[0] = True
+            if cl:
+                far = int(np.argmax(np.linalg.norm(Q - Q[0], axis=1)))
+                kp[far] = True
+                _rdp(Q, 0, far, tolerance, kp)
+                ring = np.vstack([Q, Q[:1]])
+                tmp = np.zeros(n + 1, bool)
+                _rdp(ring, far, n, tolerance, tmp)
+                kp |= tmp[:n]
+            else:
+                kp[-1] = True
+                _rdp(Q, 0, n - 1, tolerance, kp)
+        if pin is not None:
+            kp |= pin[vp[rows]]
+        if cl and kp.sum() < 3:
+            kp[[0, n // 3, 2 * n // 3]] = True
+        rows_out.append(rows[kp]); sizes_out.append(int(kp.sum())); src_prim.append(p)
+    allrows = np.concatenate(rows_out) if rows_out else np.zeros(0, np.int64)
+    new_vp = vp[allrows]
+    used = np.unique(new_vp)
+    remap = np.full(geo.npoints, -1, np.int64)
+    remap[used] = np.arange(len(used))
+    newP = P[used].copy()
+    if smooth:
+        # relax the points of every curve towards their new neighbours (1-2-1); ends of open curves and pinned points stay
+        offs2 = B.offsets_from_sizes(sizes_out).astype(np.int64)
+        v2 = remap[new_vp]
+        sz = np.diff(offs2)
+        pr = np.repeat(np.arange(len(sz)), sz)
+        k = np.arange(len(v2)) - offs2[:-1][pr]
+        clp = closed_m[np.asarray(src_prim, np.int64)][pr]
+        prev = np.where(k == 0, offs2[:-1][pr] + sz[pr] - 1, np.arange(len(v2)) - 1)
+        nxt = np.where(k == sz[pr] - 1, offs2[:-1][pr], np.arange(len(v2)) + 1)
+        move = (sz[pr] >= 3) & (clp | ((k > 0) & (k < sz[pr] - 1)))
+        if pin is not None:
+            move &= ~pin[used[v2]]
+        for _ in range(int(smooth)):
+            tgt = 0.5 * newP[v2] + 0.25 * (newP[v2[prev]] + newP[v2[nxt]])
+            upd = newP.copy()
+            upd[v2[move]] = tgt[move]
+            newP = upd
+    point = {nm: arr[used] for nm, arr in geo.point.items() if nm != "P"}
+    closed = closed_m[src_prim] if t.has_open else None
+    return B.make(newP.astype(np.float32), remap[new_vp], B.offsets_from_sizes(sizes_out), point, B.gather(geo.vertex, allrows),
+                  B.gather(geo.prim, np.asarray(src_prim, np.int64)), geo.detail, closed)

@@ -7,7 +7,7 @@ Blender the result is the UV map 'UVMap'.
 import numpy as np
 
 from .. import topo
-from ..sdk import Enum, Float, Guide, Handle, Str, Vec3, node
+from ..sdk import Bool, Enum, Float, Guide, Handle, Int, Str, Vec3, node
 from .normal import prim_normals
 from ._util import euler_xyz_matrix, normalize_rows
 
@@ -180,4 +180,148 @@ def uv_flatten(geo, seam_angle, split_attrib, padding, island_attrib):
     out.vertex["uv"] = uv[uid].astype(np.float32)
     if island_attrib:
         out.prim[island_attrib] = label.astype(np.int32)
+    return out
+
+
+# -- uv_transform -----------------------------------------------------------------------------------------------
+def _uv_corners(geo, name):
+    t = geo.topology
+    vp = t.vertex_point.astype(np.int64)
+    uv = geo.vertex.get(name)
+    if uv is None and name in geo.point and geo.point[name].ndim == 2 and geo.point[name].shape[1] >= 2:
+        uv = geo.point[name][vp]
+    if uv is None or uv.ndim != 2 or uv.shape[1] < 2:
+        raise ValueError(f"uv_transform: no uv attribute {name!r} (project or unwrap first, e.g. uv_project or uv_flatten)")
+    return uv[:, :2].astype(np.float64)
+
+
+def uv_islands(geo, uv):
+    """Island number per primitive: faces that share a mesh edge and the same uv at both ends of it are one island."""
+    from .. import spatial
+    t = geo.topology
+    vp = t.vertex_point.astype(np.int64)
+    pv = topo.prim_of_vertex(geo).astype(np.int64)
+    nxt = topo.next_vertex(geo).astype(np.int64)
+    a, b = vp, vp[nxt]
+    n = max(geo.npoints, 1)
+    key = np.minimum(a, b) * n + np.maximum(a, b)
+    order = np.argsort(key, kind="stable")
+    k = key[order]
+    same = np.flatnonzero(k[1:] == k[:-1])                 # consecutive half-edges on the same mesh edge
+    h1, h2 = order[same], order[same + 1]
+    # the two half-edges meet if both ends carry the same uv: corner (face, point) uvs, compared at point a and point b
+    ua1, ub1 = uv[h1], uv[nxt[h1]]
+    first = np.where(a[h2] == a[h1], h2, nxt[h2])           # the corner of h2 that sits on point a[h1]
+    second = np.where(a[h2] == a[h1], nxt[h2], h2)
+    close = (np.abs(ua1 - uv[first]).max(1) < 1e-6) & (np.abs(ub1 - uv[second]).max(1) < 1e-6)
+    return spatial.components(t.nprims, pv[h1[close]], pv[h2[close]])
+
+
+def _align_angles(geo, uv, label, count, direction):
+    """Per label, the angle (radians) of the uv image of a 3-D direction (area weighted over the faces), nan if undefined."""
+    t = geo.topology
+    sizes = t.prim_sizes()
+    offs = t.prim_offsets.astype(np.int64)
+    ok = np.flatnonzero(sizes >= 3)
+    c0, c1, c2 = offs[ok], offs[ok] + 1, offs[ok] + 2
+    vp = t.vertex_point.astype(np.int64)
+    P = geo.P.astype(np.float64)
+    e1, e2 = P[vp[c1]] - P[vp[c0]], P[vp[c2]] - P[vp[c0]]
+    u1, u2 = uv[c1] - uv[c0], uv[c2] - uv[c0]
+    nrm = np.cross(e1, e2)
+    area = np.linalg.norm(nrm, axis=1)
+    nn = nrm / np.where(area > 0, area, 1.0)[:, None]
+    d = np.asarray(direction, np.float64)
+    dp = d[None, :] - (nn @ d)[:, None] * nn
+    g11, g12, g22 = (e1 * e1).sum(1), (e1 * e2).sum(1), (e2 * e2).sum(1)
+    r1, r2 = (dp * e1).sum(1), (dp * e2).sum(1)
+    det = g11 * g22 - g12 * g12
+    good = (np.abs(det) > 1e-18) & (np.linalg.norm(dp, axis=1) > 1e-9)
+    a = np.where(good, (r1 * g22 - r2 * g12) / np.where(good, det, 1.0), 0.0)
+    b = np.where(good, (g11 * r2 - g12 * r1) / np.where(good, det, 1.0), 0.0)
+    w = a[:, None] * u1 + b[:, None] * u2
+    ln = np.linalg.norm(w, axis=1)
+    w = w / np.where(ln > 1e-12, ln, 1.0)[:, None] * (good & (ln > 1e-12))[:, None] * (area / 2.0)[:, None]
+    acc = np.zeros((count, 2))
+    np.add.at(acc, label[ok], w)
+    ang = np.arctan2(acc[:, 1], acc[:, 0])
+    return np.where(np.linalg.norm(acc, axis=1) > 1e-12, ang, np.nan)
+
+
+@node("uv_transform", inputs=["geo"], category="attribute", params=[
+    Str("uv", "uv", doc="The uv attribute to change (face-corner uv, or a point uv)"),
+    Enum("scope", ["whole", "island", "face"], doc="whole: all selected faces as one; island: every uv island on its own (own centre as pivot); face: every face on its own"),
+    Vec3("translate", (0.0, 0.0, 0.0), doc="Move in u and v (x and y)"),
+    Float("rotate", 0.0, soft_min=-360.0, soft_max=360.0, doc="Turn about the pivot, degrees (counter-clockwise)"),
+    Vec3("scale", (1.0, 1.0, 1.0), doc="Scale in u and v (x and y) about the pivot"),
+    Bool("flip_u", False, doc="Mirror in u about the pivot"),
+    Bool("flip_v", False, doc="Mirror in v about the pivot"),
+    Enum("pivot", ["center", "custom"], doc="center: the middle of the uv bounds of each island/face/everything; custom: pivot_uv"),
+    Vec3("pivot_uv", (0.5, 0.5, 0.0), doc="custom pivot (u, v)"),
+    Bool("align", False, doc="First turn each island so the uv image of `direction` (a 3-D direction) points along the axis below"),
+    Vec3("direction", (0.0, 0.0, 1.0), doc="The 3-D direction to line up (e.g. up, or a wood grain direction)"),
+    Enum("align_axis", ["v", "u"], doc="Which uv axis the direction lines up with"),
+    Vec3("random_translate", (0.0, 0.0, 0.0), doc="Random shift per island/face, up to this much each way (u, v)"),
+    Float("random_rotate", 0.0, min=0.0, soft_max=180.0, doc="Random turn per island/face, up to this many degrees each way"),
+    Float("random_scale", 0.0, min=0.0, max=0.99, doc="Random scale per island/face, up to this fraction each way"),
+    Int("seed", 0),
+    Str("group", "", doc="Only these primitives"),
+])
+def uv_transform(geo, uv, scope, translate, rotate, scale, flip_u, flip_v, pivot, pivot_uv, align, direction, align_axis,
+                 random_translate, random_rotate, random_scale, seed, group):
+    """Move, rotate, scale, flip and randomise texture coordinates, all together or per island or face, optionally lining a 3-D direction
+    up with a uv axis first. Writes the result as face-corner uv (the attribute named in `uv`)."""
+    from .. import groups
+    t = geo.topology
+    uvc = _uv_corners(geo, uv)
+    pv = topo.prim_of_vertex(geo).astype(np.int64)
+    nprim = t.nprims
+    if align and float(np.linalg.norm(direction)) < 1e-12:
+        raise ValueError("uv_transform: the direction is zero")
+    sel = groups.mask(geo, "prim", group)
+    sel = np.ones(nprim, bool) if sel is None else sel
+    if scope == "whole":
+        label, count = np.zeros(nprim, np.int64), 1
+    elif scope == "face":
+        label, count = np.arange(nprim, dtype=np.int64), nprim
+    else:
+        label = uv_islands(geo, uvc).astype(np.int64)
+        count = int(label.max()) + 1 if nprim else 0
+    corner_label = label[pv]
+    on = sel[pv]
+    new = uvc.copy()
+    if not on.any():
+        out = geo.copy()
+        out.vertex[uv] = uvc.astype(np.float32)
+        return out
+    # pivots: the centre of each label's selected uv bounds, or the given point
+    if pivot == "custom":
+        piv = np.tile(np.asarray(pivot_uv[:2], np.float64), (count, 1))
+    else:
+        lo = np.full((count, 2), np.inf)
+        hi = np.full((count, 2), -np.inf)
+        np.minimum.at(lo, corner_label[on], uvc[on])
+        np.maximum.at(hi, corner_label[on], uvc[on])
+        with np.errstate(invalid="ignore"):
+            piv = np.where(np.isfinite(lo), (lo + hi) / 2.0, 0.0)
+    rot = np.full(count, np.radians(rotate))
+    if align:
+        ang = _align_angles(geo, uvc, label, count, direction)
+        target = np.pi / 2.0 if align_axis == "v" else 0.0
+        rot = rot + np.where(np.isnan(ang), 0.0, target - ang)
+    rng = np.random.default_rng(int(seed) & 0xFFFFFFFF)
+    rnd = rng.random((count, 4)) * 2.0 - 1.0
+    rot = rot + np.radians(random_rotate) * rnd[:, 0]
+    sc = np.tile(np.asarray(scale[:2], np.float64), (count, 1)) * (1.0 + random_scale * rnd[:, 1:2])
+    sc[:, 0] *= -1.0 if flip_u else 1.0
+    sc[:, 1] *= -1.0 if flip_v else 1.0
+    tr = np.asarray(translate[:2], np.float64)[None, :] + np.asarray(random_translate[:2], np.float64)[None, :] * rnd[:, 2:4]
+    d = (uvc - piv[corner_label]) * sc[corner_label]
+    c, s = np.cos(rot[corner_label]), np.sin(rot[corner_label])
+    moved = np.stack([d[:, 0] * c - d[:, 1] * s, d[:, 0] * s + d[:, 1] * c], 1) + piv[corner_label] + tr[corner_label]
+    new[on] = moved[on]
+    out = geo.copy()
+    if uv in out.point:
+        del out.point[uv]
+    out.vertex[uv] = new.astype(np.float32)
     return out
