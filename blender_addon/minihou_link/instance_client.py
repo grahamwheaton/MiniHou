@@ -3,6 +3,7 @@ from __future__ import annotations
 import socket
 import threading
 from .protocol import PROTOCOL_VERSION, ProtocolError, recv_message, send_message
+from .shm import ShmReader, unpack_shm_payload
 
 
 class InstanceClient:
@@ -12,6 +13,7 @@ class InstanceClient:
         self.lock = threading.RLock()
         self.sequence = 0
         self.welcome = {}
+        self.shm_reader = ShmReader()
 
     def connect(self):
         with self.lock:
@@ -21,7 +23,8 @@ class InstanceClient:
             self.sock = sock
             try:
                 send_message(sock, {"type": "hello", "protocol": PROTOCOL_VERSION,
-                                    "mode": "instances", "client": "Blender modifiers"})
+                                    "mode": "instances", "client": "Blender modifiers",
+                                    "capabilities": ["shm_v1"]})
                 header, _ = recv_message(sock)
                 if (header.get("type") != "welcome" or header.get("server") != "minihou"
                         or header.get("protocol") != PROTOCOL_VERSION
@@ -40,6 +43,7 @@ class InstanceClient:
                     self.sock.close()
                 finally:
                     self.sock = None
+            self.shm_reader.close()
 
     def _request(self, header, arrays=None):
         with self.lock:
@@ -49,6 +53,8 @@ class InstanceClient:
             try:
                 send_message(self.sock, header, arrays)
                 reply, output = recv_message(self.sock)
+                if reply and reply.get("transport") == "shm":
+                    output = unpack_shm_payload(reply, self.shm_reader)
                 if reply.get("request_id") != self.sequence:
                     raise ProtocolError("modifier response request ID mismatch")
                 if reply.get("instance_id") != header.get("instance_id"):
@@ -97,3 +103,12 @@ class InstanceClient:
 
     def sync_live(self, instance_id, params):
         return self._request({"type": "instance_sync", "instance_id": instance_id, "params": params})[0]
+
+    def ack(self, seq: int, slot: Optional[int] = None) -> None:
+        with self.lock:
+            if self.sock is not None:
+                try:
+                    send_message(self.sock, {"type": "geo_ack", "seq": seq, "slot": slot})
+                except Exception:
+                    pass
+

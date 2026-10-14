@@ -490,6 +490,27 @@ def _write_instancer(stage, path: str, geo: Geometry, rows: np.ndarray, names: L
     inst.CreateOrientationsfAttr().Set(Vt.QuatfArray.FromNumpy(_mat_to_quat(R).astype(np.float32)))
     inst.CreateScalesAttr().Set(Vt.Vec3fArray.FromNumpy(S))
     inst.CreateExtentAttr().Set(Vt.Vec3fArray.FromNumpy(np.stack([P.min(0), P.max(0)]).astype(np.float32)))
+    id_attr = geo.point.get("id")
+    if id_attr is not None and id_attr.ndim == 1:
+        inst.CreateIdsAttr().Set(Vt.Int64Array.FromNumpy(id_attr[rows].astype(np.int64)))
+    v_attr = geo.point.get("v")
+    if v_attr is not None and v_attr.ndim == 2 and v_attr.shape[1] == 3:
+        inst.CreateVelocitiesAttr().Set(Vt.Vec3fArray.FromNumpy(np.ascontiguousarray(v_attr[rows], np.float32)))
+    w_attr = geo.point.get("w")
+    if w_attr is not None and w_attr.ndim == 2 and w_attr.shape[1] == 3:
+        w_deg = np.degrees(w_attr[rows].astype(np.float64)).astype(np.float32)
+        inst.CreateAngularVelocitiesAttr().Set(Vt.Vec3fArray.FromNumpy(np.ascontiguousarray(w_deg)))
+    invis_attr = geo.point.get("group_invisible")
+    if invis_attr is None:
+        invis_attr = geo.point.get("invisible")
+    if invis_attr is not None and invis_attr.ndim == 1:
+        invis_mask = (invis_attr[rows] != 0)
+        if invis_mask.any():
+            if id_attr is not None and id_attr.ndim == 1:
+                invis_ids = id_attr[rows][invis_mask].astype(np.int64)
+            else:
+                invis_ids = np.flatnonzero(invis_mask).astype(np.int64)
+            inst.CreateInvisibleIdsAttr().Set(Vt.Int64Array.FromNumpy(invis_ids))
     prim = inst.GetPrim()
     _set_primvar(prim, "minihou:point_index", rows.astype(np.int32), "vertex", "")
     _write_attributes(prim, [(_gather_table(geo.point, rows, ("P",)), "vertex", "point")])      # incl. instance / rot / scale, exactly
@@ -670,6 +691,22 @@ class _Samples:
                 Sdf.CopySpec(flayer, path, layer, path)                            # the whole subtree: relationships, references, metadata
                 self._sampled(final.GetPrimAtPath(path), tc, f)
             self.present.setdefault(key, []).append(f)
+            remap_proto = False
+            proto_map = None
+            if prim.IsA(UsdGeom.PointInstancer):
+                inst = UsdGeom.PointInstancer(prim)
+                final_inst = UsdGeom.PointInstancer(final.GetPrimAtPath(path))
+                frame_targets = list(inst.GetPrototypesRel().GetTargets())
+                final_targets = list(final_inst.GetPrototypesRel().GetTargets())
+                for t in frame_targets:
+                    if t not in final_targets:
+                        if not layer.GetPrimAtPath(t) and flayer.GetPrimAtPath(t):
+                            Sdf.CopySpec(flayer, t, layer, t)
+                        final_targets.append(t)
+                final_inst.CreatePrototypesRel().SetTargets(final_targets)
+                if frame_targets != final_targets:
+                    remap_proto = True
+                    proto_map = np.array([final_targets.index(t) for t in frame_targets], dtype=np.int32)
             seen = set()
             for attr in prim.GetAttributes():
                 akey = str(attr.GetPath())
@@ -678,6 +715,9 @@ class _Samples:
                 v = attr.Get()
                 if v is None:
                     continue
+                if remap_proto and attr.GetName() == "protoIndices" and proto_map is not None:
+                    arr = np.asarray(v, np.int64)
+                    v = Vt.IntArray.FromNumpy(proto_map[arr])
                 seen.add(akey)
                 tgt = final.GetAttributeAtPath(akey)
                 if not tgt:                                                         # an attribute this prim did not have before
@@ -1216,7 +1256,11 @@ def _read_instancer(stage, inst, tm, part: Part, M: np.ndarray, unit: float, nam
         if q is None or not len(q):
             q = inst.GetOrientationsAttr().Get(tm)
         if q is not None and len(q) == n:
-            R = _quat_to_mat(np.asarray(q, np.float64).reshape(-1, 4))
+            try:
+                raw_q = np.asarray(q, np.float64).reshape(-1, 4)
+            except Exception:
+                raw_q = np.array([[float(x.GetImaginary()[0]), float(x.GetImaginary()[1]), float(x.GetImaginary()[2]), float(x.GetReal())] for x in q], dtype=np.float64)
+            R = _quat_to_mat(raw_q)
         else:
             R = np.tile(np.eye(3), (n, 1, 1))
         part.point_attrs["rot"] = matrix_to_euler_xyz(Rp @ R).astype(np.float32)
@@ -1224,6 +1268,26 @@ def _read_instancer(stage, inst, tm, part: Part, M: np.ndarray, unit: float, nam
         sc = inst.GetScalesAttr().Get(tm)
         sc = np.asarray(sc, np.float64).reshape(-1, 3) if sc is not None and len(sc) == n else np.ones((n, 3))
         part.point_attrs["scale"] = (sc * k * unit).astype(np.float32)
+    if "id" not in part.point_attrs:
+        ids = inst.GetIdsAttr().Get(tm)
+        if ids is not None and len(ids) == n:
+            part.point_attrs["id"] = np.asarray(ids, np.int64).astype(np.int32)
+    if "v" not in part.point_attrs:
+        vels = inst.GetVelocitiesAttr().Get(tm)
+        if vels is not None and len(vels) == n:
+            part.point_attrs["v"] = (np.asarray(vels, np.float32).reshape(-1, 3) * unit).astype(np.float32)
+    if "w" not in part.point_attrs:
+        ang = inst.GetAngularVelocitiesAttr().Get(tm)
+        if ang is not None and len(ang) == n:
+            part.point_attrs["w"] = np.radians(np.asarray(ang, np.float64).reshape(-1, 3)).astype(np.float32)
+    invis = inst.GetInvisibleIdsAttr().Get(tm)
+    if invis is not None and len(invis):
+        invis_ids = np.asarray(invis, np.int64)
+        if "id" in part.point_attrs:
+            mask = np.isin(part.point_attrs["id"].astype(np.int64), invis_ids)
+        else:
+            mask = np.isin(np.arange(n, dtype=np.int64), invis_ids)
+        part.point_attrs["group_invisible"] = mask.astype(np.int32)
 
 
 def _detail_of(prim, tm) -> dict:
