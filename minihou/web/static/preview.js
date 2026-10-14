@@ -1381,9 +1381,15 @@ window.MiniHouPreview = (() => {
       const selecting = sel.mode !== "view" && e.button === 0 && !(opt.navigation==="houdini" && e.altKey) && raw;
       if(opt.navigation!=="houdini" && e.button===0 && !selecting && !e.altKey)return;
       const pan = opt.navigation!=="houdini" ? (e.button===1 && e.shiftKey || e.button===2) : sel.mode === "view" ? (e.button === 1 || e.button === 2 || e.shiftKey) : (e.button === 2 || (e.button === 1 && e.shiftKey));
-      if(opt.orbitDepth && e.button===1 && !e.shiftKey && !e.ctrlKey && raw){
+      if(opt.orbitDepth && !pan && e.button===1 && !e.shiftKey && !e.ctrlKey && raw){
         const cam=camera(),direction=rayAt(cam,e.clientX-r.left,e.clientY-r.top),hit=raycast(cam.eye,direction);
-        if(hit){const target=cam.eye.map((v,i)=>v+direction[i]*hit.t),offset=sub(cam.eye,target);view.target=target;view.dist=Math.hypot(...offset);view.yaw=Math.atan2(offset[1],offset[0]);view.pitch=Math.asin(offset[2]/view.dist);}
+        if(hit){
+          // Use surface depth along the existing view axis, not the off-centre hit
+          // as a new look-at target: retargeting changes orientation on mouse-down.
+          const forward=norm(sub(view.target,cam.eye)),depth=dot(IM.mul(direction,hit.t),forward);
+          const lensScale=view.ortho?Math.tan(FOV/2)/Math.tan(ORTHO_FOV/2):1;
+          if(depth>1e-6){view.target=IM.add(cam.eye,IM.mul(forward,depth));view.dist=depth/lensScale;}
+        }
       }
       dragging = { x: e.clientX, y: e.clientY, zoom: opt.navigation!=="houdini" && e.button===1 && e.ctrlKey, pan, select: !!selecting, x0: e.clientX - r.left, y0: e.clientY - r.top, moved: false,
         loop: e.altKey, ring: e.ctrlKey, path: e.ctrlKey && !e.altKey && !e.shiftKey, how: e.ctrlKey && e.shiftKey ? "subtract" : e.shiftKey ? "add" : (e.ctrlKey || e.metaKey) ? "subtract" : "replace" };

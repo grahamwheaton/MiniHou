@@ -82,3 +82,22 @@ class ViewportFollowups(unittest.TestCase):
         self.page.evaluate("minihou.edit([{op:'add',id:'box2',type:'box'}])")
         self.assertTrue(f.until(lambda:len(self.s.graph.nodes)==3))
         self.assertEqual(sum(n.type=='output' for n in self.s.graph.nodes.values()),1)
+    def test_orbit_surface_depth_has_no_mouse_down_camera_jump(self):
+        self.box_scene()
+        for ortho in (False,True):
+            self.page.evaluate('(v)=>{minihou.preview.view.ortho=v;minihou.preview.redraw()}',ortho)
+            x,y=self.view_xy('face',self.top)
+            self.page.mouse.move(x,y)
+            before=self.page.evaluate('minihou.preview.navigationState()')
+            self.page.mouse.down(button='middle')
+            after=self.page.evaluate('minihou.preview.navigationState()')
+            self.assertAlmostEqual(before['yaw'],after['yaw'],places=10)
+            self.assertAlmostEqual(before['pitch'],after['pitch'],places=10)
+            np.testing.assert_allclose(before['eye'],after['eye'],atol=1e-8)
+            target=after['target']
+            self.page.mouse.move(x+24,y+10,steps=8)
+            moved=self.page.evaluate('minihou.preview.navigationState()')
+            self.assertAlmostEqual(moved['yaw'],after['yaw']-24*.008,places=5)
+            self.assertAlmostEqual(moved['pitch'],after['pitch']+10*.008,places=5)
+            np.testing.assert_allclose(moved['target'],target,atol=1e-10)
+            self.page.mouse.up(button='middle')
