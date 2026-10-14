@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.7,<2"]
+build-backend = "maturin"
+
+[project]
+name = "minihou-rs"
+description = "MiniHou's Rust compute core (optional accelerator; MiniHou runs without it)"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26"]
+dynamic = ["version"]
+
+[tool.maturin]
+module-name = "minihou_rs"
+features = ["pyo3/extension-module"]

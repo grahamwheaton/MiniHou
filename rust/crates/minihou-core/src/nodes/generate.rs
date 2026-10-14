@@ -1,0 +1,204 @@
+//! Source nodes: `grid` (`minihou/nodes/grid.py`) and `box` (`minihou/nodes/primitives.py`).
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use serde_json::json;
+
+use super::{linspace, InputSpec, Inputs, NodeSpec};
+use crate::error::{Error, Result};
+use crate::geometry::{Attr, Geometry};
+use crate::math;
+use crate::params::Params;
+
+pub const GRID: NodeSpec = NodeSpec {
+    name: "grid",
+    inputs: &[],
+    params: crate::params!(
+        "size_x": 10.0; "size_y": 10.0; "columns": 10; "rows": 10; "center": [0.0, 0.0, 0.0];
+        "rotate": [0.0, 0.0, 0.0]; "scale": [1.0, 1.0, 1.0]; "uniform_scale": 1.0;
+    ),
+    cook: grid,
+};
+
+/// `source_transform`: scale and rotate about `center`, in float64, back to float32.
+fn source_transform(p: &mut [f32], center: [f64; 3], rotate: [f64; 3], scale: [f64; 3], uniform_scale: f64) {
+    let r = math::euler_xyz(rotate);
+    for q in p.chunks_exact_mut(3) {
+        let v = [0, 1, 2].map(|k| (q[k] as f64 - center[k]) * scale[k] * uniform_scale);
+        let w = math::apply(&r, v);
+        for k in 0..3 {
+            q[k] = (w[k] + center[k]) as f32;
+        }
+    }
+}
+
+fn grid(_inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    let (size_x, size_y) = (p.f("size_x")?, p.f("size_y")?);
+    let (columns, rows) = (p.i("columns")?, p.i("rows")?);
+    if !(2..=20000).contains(&columns) || !(2..=20000).contains(&rows) {
+        return Err(Error::new("columns and rows must be between 2 and 20000"));
+    }
+    if size_x < 0.0 || size_y < 0.0 {
+        return Err(Error::new("size_x and size_y must not be negative"));
+    }
+    let (cols, rows) = (columns as usize, rows as usize);
+    let center = p.v3("center")?;
+    let u: Vec<f32> = linspace(0.0, 1.0, cols).into_iter().map(|x| x as f32).collect();
+    let v: Vec<f32> = linspace(0.0, 1.0, rows).into_iter().map(|x| x as f32).collect();
+    let (sx, sy) = (size_x as f32, size_y as f32);
+    let c32 = center.map(|c| c as f32);
+    let n = rows * cols;
+    let mut pts = Vec::with_capacity(n * 3);
+    let mut uv = Vec::with_capacity(n * 2);
+    for &vj in &v {
+        for &ui in &u {
+            pts.extend_from_slice(&[(ui - 0.5) * sx + c32[0], (vj - 0.5) * sy + c32[1], c32[2]]);
+            uv.extend_from_slice(&[ui, vj]);
+        }
+    }
+    let quads = (cols - 1) * (rows - 1);
+    let mut vp = Vec::with_capacity(quads * 4);
+    for j in 0..rows - 1 {
+        for i in 0..cols - 1 {
+            let b = (j * cols + i) as i32;
+            let c = cols as i32;
+            vp.extend_from_slice(&[b, b + 1, b + c + 1, b + c]);
+        }
+    }
+    let offs: Vec<i32> = (0..=quads as i32).map(|k| k * 4).collect();
+    source_transform(&mut pts, center, p.v3("rotate")?, p.v3("scale")?, p.f("uniform_scale")?);
+    let mut g = Geometry::from_arrays(pts, vp, offs, None)?;
+    g.point.insert("uv".into(), Arc::new(Attr::f32(2, uv)));
+    g.detail.insert("grid_columns".into(), json!(cols));
+    g.detail.insert("grid_rows".into(), json!(rows));
+    Ok(g)
+}
+
+pub const BOX: NodeSpec = NodeSpec {
+    name: "box",
+    inputs: &[InputSpec { name: "geo", multi: false, optional: true }],
+    params: crate::params!(
+        "primitive_type": "polygons"; "connectivity": "quadrilaterals"; "consolidate": true; "size": [1.0, 1.0, 1.0];
+        "center": [0.0, 0.0, 0.0]; "rotate": [0.0, 0.0, 0.0]; "uniform_scale": 1.0; "divisions": 1;
+        "axis_divisions": [0.0, 0.0, 0.0]; "add_vertex_normals": false, unsupported;
+    ),
+    cook: box_node,
+};
+
+fn box_node(inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    if !inputs[0].is_empty() {
+        return Err(Error::new("box with an input to bound is not supported by the Rust backend yet"));
+    }
+    let primitive_type = p.e("primitive_type", &["polygons", "points"])?;
+    let connectivity = p.e("connectivity", &["quadrilaterals", "triangles"])?;
+    let size = p.v3("size")?;
+    let center = p.v3("center")?;
+    let us = p.f("uniform_scale")?;
+    let divisions = p.i("divisions")?;
+    if !(1..=1000).contains(&divisions) || us < 0.0 || size.iter().any(|&s| s < 0.0) {
+        return Err(Error::new("divisions must be 1..1000; size and uniform_scale must not be negative"));
+    }
+    let ad = p.v3("axis_divisions")?;
+    if ad.iter().any(|v| v.fract() != 0.0) {
+        return Err(Error::new("Axis divisions must be integers"));
+    }
+    let dims: [usize; 3] = ad.map(|v| if v as i64 != 0 { v as i64 } else { divisions }.max(0) as usize);
+    if [(0, 1), (1, 2), (0, 2)].iter().map(|&(i, j)| dims[i] * dims[j]).sum::<usize>() > 1_000_000 {
+        return Err(Error::new("Box exceeds one million face cells"));
+    }
+    let mut pts: Vec<[f64; 3]> = Vec::new();
+    let mut quads: Vec<[i32; 4]> = Vec::new();
+    for (u, v, w, sign) in [(0, 1, 2, 1.0), (1, 0, 2, -1.0), (1, 2, 0, 1.0), (2, 1, 0, -1.0), (2, 0, 1, 1.0), (0, 2, 1, -1.0)] {
+        let (nu, nv) = (dims[u], dims[v]);
+        let lu = linspace(-0.5, 0.5, nu + 1);
+        let lv = linspace(-0.5, 0.5, nv + 1);
+        let offset = pts.len() as i32;
+        for &y in &lv {
+            for &x in &lu {
+                let mut q = [0.0; 3];
+                q[u] = x;
+                q[v] = y;
+                q[w] = sign * 0.5;
+                pts.push(q);
+            }
+        }
+        for j in 0..nv {
+            for i in 0..nu {
+                let q = (j * (nu + 1) + i) as i32 + offset;
+                let s = (nu + 1) as i32;
+                quads.push([q, q + 1, q + s + 1, q + s]);
+            }
+        }
+    }
+    let r = math::euler_xyz(p.v3("rotate")?);
+    let mut flat = Vec::with_capacity(pts.len() * 3);
+    for q in &pts {
+        let scaled = [0, 1, 2].map(|k| q[k] * size[k] * us);
+        let w = math::apply(&r, scaled);
+        flat.extend((0..3).map(|k| (w[k] + center[k]) as f32));
+    }
+    let (vp, offs) = if connectivity == "triangles" {
+        let mut vp: Vec<i32> = quads.iter().flat_map(|q| [q[0], q[1], q[2]]).collect();
+        vp.extend(quads.iter().flat_map(|q| [q[0], q[2], q[3]]));
+        let n = vp.len() as i32 / 3;
+        (vp, (0..=n).map(|k| k * 3).collect::<Vec<i32>>())
+    } else {
+        let n = quads.len() as i32;
+        (quads.iter().flatten().copied().collect(), (0..=n).map(|k| k * 4).collect())
+    };
+    let mut g = Geometry::from_arrays(flat, vp, offs, None)?;
+    if p.b("consolidate")? {
+        let biggest = size.iter().cloned().fold(f64::NEG_INFINITY, f64::max) * us;
+        g = fuse_points(&g, 1e-6 * biggest.max(1.0));
+    }
+    if primitive_type == "points" {
+        return Geometry::points_only(g.p().to_vec());
+    }
+    Ok(g)
+}
+
+/// Weld points that fall in the same cell of size `distance` (`floor(P / d + 0.5)`), keeping the first point of each cell
+/// with its attributes, survivors in order of first appearance (`primitives.fuse_points`). Vertex and primitive attributes
+/// are untouched.
+pub fn fuse_points(geo: &Geometry, distance: f64) -> Geometry {
+    if geo.npoints == 0 {
+        return geo.clone();
+    }
+    let d = distance.max(1e-12);
+    let p = geo.p();
+    let mut cell_of: HashMap<[i64; 3], i32> = HashMap::with_capacity(geo.npoints);
+    let mut remap = Vec::with_capacity(geo.npoints);
+    let mut keep = Vec::new();
+    for (i, q) in p.chunks_exact(3).enumerate() {
+        let key = [0, 1, 2].map(|k| (q[k] as f64 / d + 0.5).floor() as i64);
+        let next = keep.len() as i32;
+        let id = *cell_of.entry(key).or_insert_with(|| {
+            keep.push(i);
+            next
+        });
+        remap.push(id);
+    }
+    let topo = &geo.topology;
+    let mut out = geo.clone();
+    out.npoints = keep.len();
+    out.topology = Arc::new(crate::geometry::Topology {
+        vertex_point: topo.vertex_point.iter().map(|&v| remap[v as usize]).collect(),
+        prim_offsets: topo.prim_offsets.clone(),
+        closed: topo.closed.clone(),
+    });
+    for a in out.point.values_mut() {
+        *a = Arc::new(take_rows(a, &keep));
+    }
+    out
+}
+
+/// The rows `idx` of an attribute.
+pub fn take_rows(a: &Attr, idx: &[usize]) -> Attr {
+    use crate::geometry::AttrData::*;
+    let w = a.width;
+    match &a.data {
+        F32(v) => Attr::f32(w, idx.iter().flat_map(|&i| v[i * w..(i + 1) * w].iter().copied()).collect()),
+        I32(v) => Attr::i32(w, idx.iter().flat_map(|&i| v[i * w..(i + 1) * w].iter().copied()).collect()),
+    }
+}

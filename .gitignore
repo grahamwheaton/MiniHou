@@ -12,3 +12,6 @@ gui_test_output/
 .minihou_cache/
 .houdini_docs_cache/
 graphs/
+
+# Rust build output
+rust/target/
