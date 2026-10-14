@@ -99,5 +99,12 @@
   },
   "display": "delete",
   "version": 1,
-  "doc": "Group parity example; see docs/GROUP-PARITY.md for exact semantics and limits."
+  "doc": "Group parity example; see docs/GROUP-PARITY.md for exact semantics and limits.",
+  "exposed": [
+    {
+      "name": "Range Partition",
+      "node": "range",
+      "param": "partition"
+    }
+  ]
 }
