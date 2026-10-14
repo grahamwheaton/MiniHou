@@ -29,6 +29,8 @@ BASE = {
 
 def draw(p, rng):
     """One random value for parameter ``p``: mostly inside its range, sometimes at an edge."""
+    if p.kind == "rules":
+        return [{field.name: draw(field, rng) for field in p.fields} for _ in range(rng.randrange(3))]
     if p.kind == "bool":
         return rng.random() < 0.5
     if p.kind == "enum":
