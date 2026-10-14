@@ -885,6 +885,8 @@ class Session:
                     if instance_sources is None:
                         geo = preview_instances(geo, sources)
                 references, selectable, warnings = [], [], []
+                reference_objects = []
+                objects = [dict(node=node, point_start=0, point_count=geo.npoints, prim_start=0, prim_count=geo.nprims, topology=geo.topology.digest)]
                 if templates:
                     from ..nodes.merge import merge
                     for nid, n in snapshot.nodes.items():
@@ -898,8 +900,10 @@ class Session:
                                 ref = preview_instances(ref, sources)
                             if n.meta.get("display_extra") or flags.get("selectable_template"):
                                 selectable.append(nid)
+                                objects.append(dict(node=nid, point_start=geo.npoints, point_count=ref.npoints, prim_start=geo.nprims, prim_count=ref.nprims, topology=ref.topology.digest))
                                 geo = merge([geo, ref])
                             else:
+                                reference_objects.append(dict(node=nid, point_start=sum(g.npoints for g in references), point_count=ref.npoints, prim_start=sum(g.nprims for g in references), prim_count=ref.nprims, topology=ref.topology.digest, selectable=False))
                                 references.append(ref)
                         except (NodeError, GraphError, ParamError, ValueError) as exc:
                             warnings.append(f"Template {nid}: {exc}")
@@ -910,7 +914,7 @@ class Session:
             return {"ok": False, "node": node, "rev": rev,
                     "error": {"node": getattr(e, "node_id", None), "message": str(e)}}
         return {"ok": True, "node": node, "rev": rev, "geo": geo, "handles": handles, "instance_sources": instance_sources,
-                "reference": reference if templates else None, "selectable": selectable, "template_warnings": warnings}
+                "reference": reference if templates else None, "selectable": selectable, "template_warnings": warnings, "preview_objects": objects, "reference_objects": reference_objects}
 
     def start(self, cook_immediately: bool = True) -> None:
         if self._thread and self._thread.is_alive():

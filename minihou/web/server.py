@@ -739,12 +739,13 @@ class _Handler(BaseHTTPRequestHandler):
                     and not (iset is not None and iset.replaces)):
                 arrays = {k: v for k, v in arrays.items() if k not in ("tri", "tri_prim", "edge")}   # the viewer has these already
                 head["same_topology"] = True
-            head.update(selectable_templates=r.get("selectable", []), template_warnings=r.get("template_warnings", []))
+            head.update(reference_objects=r.get("reference_objects", []), preview_objects=r.get("preview_objects", []), selectable_templates=r.get("selectable", []), template_warnings=r.get("template_warnings", []))
             if r.get("reference") is not None:
                 refhead, refs = preview.arrays_for(r["reference"], full=bool(body.get("full")), tris=_budget(body.get("tris")))
-                for key in ("P", "edge", "tri"):
+                for key in ("P", "edge", "tri", "tri_prim"):
                     arrays["template_" + key] = refs[key]
                 head["template_points"] = refhead["points"]
+                head["template_reduced"] = refhead.get("proxy", {}).get("active", False)
                 if refhead["points"]:
                     if not head["points"]:
                         head["bounds"] = refhead["bounds"]

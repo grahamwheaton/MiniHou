@@ -26,7 +26,7 @@
     ["Polygon", "#c97bd0", [
       T("PolyExtrude", "polyextrude"), T("Push / Pull", "pushpull", "polyextrude"), T("Inset", "inset", "polyexpand2d"), T("Outset", "outset", "polyexpand2d"), T("PolyBevel", "polybevel"), T("Solidify", "solidify", "polyextrude"), T("PolySplit", "polysplit"), T("Knife", "knife", "polysplit"), T("PolyFill", "polyfill"),
       T("PolyBridge", "polybridge"), T("PolyExpand2D", "polyexpand2d"), T("Dissolve", "dissolve"), T("Divide", "divide"),
-      T("Reverse", "reverse"), T("Facet", "facet"), T("Bridge", "bridge", "polybridge"), T("Normal", "normal")]],
+      T("Flip Faces", "reverse"), T("Facet", "facet"), T("Bridge", "bridge", "polybridge"), T("Normal", "normal")]],
     ["Edges", "#e0c05a", [
       T("Dissolve Edges", "dissolve_edges", "dissolve"), T("Edge Collapse", "edge_collapse"), T("Edge Flip", "edge_flip"),
       T("Edge Cusp", "edge_cusp"), T("Crease", "crease"), T("Edge Group", "edge_group", "group"),

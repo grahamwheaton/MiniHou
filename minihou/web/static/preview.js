@@ -4,9 +4,10 @@
 window.MiniHouPreview = (() => {
   const VS = `#version 300 es
   in vec3 aPos; in vec3 aCol;
-  uniform mat4 uMV, uP; uniform float uPointSize, uBias;
+  uniform mat4 uMV, uP; uniform float uPointSize, uBias, uIsolate, uActiveEnd;
+  out float vDim;
   out vec3 vView; out vec3 vCol; out vec3 vWorld;
-  void main() { vec4 v = uMV * vec4(aPos, 1.0); vView = v.xyz; vCol = aCol; vWorld = aPos; gl_Position = uP * v;
+  void main() { vDim = gl_VertexID >= int(uActiveEnd) ? uIsolate : 0.0; vec4 v = uMV * vec4(aPos, 1.0); vView = v.xyz; vCol = aCol; vWorld = aPos; gl_Position = uP * v;
                 gl_Position.z -= uBias * gl_Position.w; gl_PointSize = uPointSize; }`;
   // selected edges: each edge is a quad that is widened in screen space, so selections read as thick lines
   const VS_EDGE = `#version 300 es
@@ -33,7 +34,7 @@ window.MiniHouPreview = (() => {
   void main() { ${CLIP_TEST} o = uColor; }`;
   const FS_MESH = `#version 300 es
   precision highp float;
-  in vec3 vView; in vec3 vCol; ${CLIP_DECL} uniform vec3 uBase; uniform float uUseCol, uLighting; out vec4 o;
+  in float vDim; in vec3 vView; in vec3 vCol; ${CLIP_DECL} uniform vec3 uBase; uniform float uUseCol, uLighting; out vec4 o;
   void main() {
     ${CLIP_TEST}
     vec3 n = normalize(cross(dFdx(vView), dFdy(vView)));
@@ -41,12 +42,12 @@ window.MiniHouPreview = (() => {
     vec3 base = mix(uBase, vCol, uUseCol);
     vec3 col = base * (0.28 + 0.72 * d * uLighting) + vec3(0.10) * pow(1.0 - d, 3.0);
     if (!gl_FrontFacing) col = mix(col, vec3(0.95, 0.45, 0.18), 0.55);   // back faces: flipped normals show up orange
-    o = vec4(col, 1.0);
+    o = vec4(mix(col, vec3(0.22), vDim), 1.0);
   }`;
   const FS_FLAT = `#version 300 es
   precision highp float;
-  in vec3 vView; in vec3 vCol; ${CLIP_DECL} uniform vec3 uBase; uniform float uUseCol; uniform float uAlpha; out vec4 o;
-  void main() { ${CLIP_TEST} o = vec4(mix(uBase, vCol, uUseCol), uAlpha); }`;
+  in float vDim; in vec3 vView; in vec3 vCol; ${CLIP_DECL} uniform vec3 uBase; uniform float uUseCol; uniform float uAlpha; out vec4 o;
+  void main() { ${CLIP_TEST} o = vec4(mix(mix(uBase, vCol, uUseCol),vec3(0.22),vDim), uAlpha); }`;
 
   // Instances drawn as impostors: one transform per instance (three rows of a 3x4 matrix) on shared shape meshes. Two-sided: a mirrored instance flips its winding.
   const VS_INST = `#version 300 es
@@ -153,7 +154,7 @@ window.MiniHouPreview = (() => {
       return { p, u };
     };
     const CLIP_U = ["uClip", "uClipOn"];
-    const MESH_U = ["uMV", "uP", "uPointSize", "uBase", "uUseCol", "uAlpha", "uBias", "uLighting", ...CLIP_U];
+    const MESH_U = ["uIsolate", "uActiveEnd","uMV", "uP", "uPointSize", "uBase", "uUseCol", "uAlpha", "uBias", "uLighting", ...CLIP_U];
     let mesh, flat, edgeProg, colorProg, gridProg, instProg;
     try {
       gridProg = prog(VS_GRID, FS_GRID, [], ["uMV", "uP", "uEye", "uTarget", "uSpacing", "uRange", "uOpacity", "uAxes"]);
@@ -204,6 +205,7 @@ window.MiniHouPreview = (() => {
       cull: true, cullPx: 0,                                         // skip the runs of triangles outside the view (and, if cullPx > 0, ones smaller than that on screen)
       navQuality: "full" };                                          // full | balanced | fast: draw cheaper while the camera moves                              // impostors: > 1 keeps detail to smaller instances; the most triangles all instances may draw together
     let data = { npoints: 0, ntris: 0, nedges: 0, hasCd: false, bounds: [[-1, -1, -1], [1, 1, 1]] };
+    let measurementCache=null;
     let raw = null;                                                  // the geometry's typed arrays, for picking
     let raf = 0;
 
@@ -858,6 +860,8 @@ window.MiniHouPreview = (() => {
         gl.uniformMatrix4fv(pr.u.uMV, false, MV); gl.uniformMatrix4fv(pr.u.uP, false, P);
         gl.uniform3fv(pr.u.uBase, base); gl.uniform1f(pr.u.uUseCol, useCol && data.hasCd ? 1 : 0);
         gl.uniform1f(pr.u.uPointSize, opt.pointSize);
+        gl.uniform1f(pr.u.uIsolate,opt.isolated?Math.max(0,Math.min(1,opt.isolated_knockback??.75)):0);
+        gl.uniform1f(pr.u.uActiveEnd,api.previewObjects?.[0]?.point_count??data.npoints);
         if (pr.u.uLighting) gl.uniform1f(pr.u.uLighting, opt.lighting); gl.uniform1f(pr.u.uBias, 0);
         if (pr.u.uAlpha) gl.uniform1f(pr.u.uAlpha, alpha === undefined ? 1 : alpha);
         if (data.hasCd) gl.enableVertexAttribArray(1); else { gl.disableVertexAttribArray(1); gl.vertexAttrib3f(1, 1, 1, 1); }
@@ -866,6 +870,7 @@ window.MiniHouPreview = (() => {
         const primView = attrView && attrView.domain === "prim" && primCount === data.ntris * 3;
         if (primView) { gl.bindVertexArray(primVao); data.hasCd = true; }
         setup(mesh, [0.62, 0.68, 0.76], true);
+        if(primView)gl.uniform1f(mesh.u.uActiveEnd,raw.triPrim.reduce((n,f)=>n+(f<(api.previewObjects?.[0]?.prim_count??Infinity)?3:0),0));
         gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1, 1);
         const runs = triangleRuns(cam);                                                       // null = every triangle (no chunk table, or culling is off)
         stats.trisTotal = data.ntris;
@@ -894,7 +899,7 @@ window.MiniHouPreview = (() => {
       drawInstances(cam);
       gl.bindVertexArray(vao);
       if(templateRaw){
-        gl.bindVertexArray(templateVao);setup(flat,[0.72,0.38,0.52],false,0.8);
+        gl.bindVertexArray(templateVao);setup(flat,[0.72,0.38,0.52],false,0.8);gl.uniform1f(flat.u.uActiveEnd,0);
         gl.uniform1f(flat.u.uBias,0.0003);
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,templateEdge);gl.drawElements(gl.LINES,templateRaw.edge.length,gl.UNSIGNED_INT,0);
         if(!templateRaw.edge.length)gl.drawArrays(gl.POINTS,0,templateRaw.P.length/3);
@@ -1503,6 +1508,15 @@ window.MiniHouPreview = (() => {
         return p?{point:p,screen:toScreen(c,...p).slice(0,2),label}:null;
       },
       geometry:()=>raw, quadStrip,
+      measurementGeometry(){
+        if(!raw)return [];
+        if(measurementCache)return measurementCache;
+        const split=(source,objects)=>objects.map(o=>{const start=o.point_start,end=start+o.point_count,tri=[],edge=[];
+          for(let i=0;i<source.tri.length;i+=3)if(source.triPrim[i/3]>=o.prim_start&&source.triPrim[i/3]<o.prim_start+o.prim_count)tri.push(source.tri[i]-start,source.tri[i+1]-start,source.tri[i+2]-start);
+          for(let i=0;i<source.edge.length;i+=2)if(source.edge[i]>=start&&source.edge[i]<end&&source.edge[i+1]>=start&&source.edge[i+1]<end)edge.push(source.edge[i]-start,source.edge[i+1]-start);
+          return {...o,P:source.P.subarray(start*3,end*3),tri:new Uint32Array(tri),edge:new Uint32Array(edge)};});
+        return measurementCache=[...split(raw,api.previewObjects||[]),...(templateRaw?.triPrim?split(templateRaw,api.referenceObjects||[]):[])];
+      },
       project: p=>toScreen(camera(),...p),
       isDragging:()=>!!handleDrag||endingDrag,
       selectElements(domain, ids, how) {                                                // the spreadsheet's row click: select these elements (points, primitives or edge numbers)
@@ -1537,13 +1551,15 @@ window.MiniHouPreview = (() => {
       tool: "move", hasToolHandles() { return (selHandles.length ? selHandles : handles).some((h) => h.tool); },
       setTool(t) { if (["move", "rotate", "scale"].includes(t)) { api.tool = t; schedule(); } },
       set(head, arrays, keepCamera) {
+        measurementCache=null;
+        api.previewObjects=head.proxy?.active?[]:(head.preview_objects||[]);api.referenceObjects=head.template_reduced?[]:(head.reference_objects||[]);
         let keepIndices = false;
         if (head.same_topology) {                                                         // only positions (and colours) came: reuse the rest
           if (!raw || raw.topology !== head.topology || raw.P.length !== arrays.P.length) return false;
           arrays = Object.assign({}, arrays, { tri: raw.tri, edge: raw.edge, tri_prim: raw.triPrim });
           keepIndices = true;
         }
-        templateRaw=arrays.template_P?{P:arrays.template_P,edge:arrays.template_edge,tri:arrays.template_tri}:null;
+        templateRaw=arrays.template_P?{P:arrays.template_P,edge:arrays.template_edge,tri:arrays.template_tri,triPrim:arrays.template_tri_prim}:null;
         api.templatePoints=templateRaw?templateRaw.P.length/3:0;
         gl.bindVertexArray(templateVao);
         gl.bindBuffer(gl.ARRAY_BUFFER,templatePos);gl.bufferData(gl.ARRAY_BUFFER,templateRaw?.P||new Float32Array(),gl.STATIC_DRAW);
@@ -1564,8 +1580,10 @@ window.MiniHouPreview = (() => {
       instanceStats, sectionPlane, isClipped,
       setSection(o) { Object.assign(opt.section, o); schedule(); },
       drawStats() { return { ...stats, instances: instanceStats() }; },
-      clear() { clearInstances(); templateRaw=null;api.templatePoints=0;api.selectableTemplates=[];handles = []; data.npoints = 0; raw = null; Object.assign(api, { tris: 0, edges: 0, points: 0 }); change({}, "replace"); schedule(); },
-      frameAll, frameSelection, viewAxis, redraw: schedule, bounds: () => data.bounds,
+      clear() { measurementCache=null;clearInstances(); templateRaw=null;api.templatePoints=0;api.selectableTemplates=[];handles = []; data.npoints = 0; raw = null; Object.assign(api, { tris: 0, edges: 0, points: 0 }); change({}, "replace"); schedule(); },
+      frameAll, frameSelection, viewAxis,
+      oppositeView(){const key=Object.keys(VIEWS).find(k=>Math.abs(Math.sin((view.yaw-VIEWS[k][0])/2))<1e-5&&Math.abs(view.pitch-VIEWS[k][1])<1e-5);view.ortho=true;if(key)viewAxis(key,true,true);else goTo(view.yaw+Math.PI,-view.pitch,true);schedule();},
+      redraw: schedule, bounds: () => data.bounds,
       normalSegments() { if (nrmDirty) buildNormals(); return Array.from(nrmLines); },   // for tests: [cx, cy, cz, tx, ty, tz] per primitive
       setOrtho(on) { view.ortho = !!on; schedule(); return view.ortho; },
       toggleOrtho() { return api.setOrtho(!view.ortho); },
@@ -1627,10 +1645,10 @@ window.MiniHouPreview = (() => {
       boxSelect(x0, y0, x1, y1, how) { if (raw && sel.mode !== "view" && !(api.canPick && !api.canPick())) change(boxPick(camera(), x0, y0, x1, y1), how || "replace"); },
       selectAll() {
         if (!raw || sel.mode === "view" || (api.canPick && !api.canPick())) return;
-        const all = { points: [], edges: [], faces: [] };
-        if (sel.mode === "point") for (let i = 0; i < raw.P.length / 3; i++) all.points.push(i);
-        else if (sel.mode === "edge") for (let k = 0; k < raw.edge.length / 2; k++) all.edges.push([raw.edge[2 * k], raw.edge[2 * k + 1]]);
-        else all.faces = [...new Set(raw.triPrim)];
+        const all = { points: [], edges: [], faces: [] }, active=api.previewObjects?.[0], pointEnd=active?active.point_count:raw.P.length/3, primEnd=active?active.prim_count:Infinity;
+        if (sel.mode === "point") for (let i = 0; i < pointEnd; i++) all.points.push(i);
+        else if (sel.mode === "edge") {for (let k = 0; k < raw.edge.length / 2; k++) if(raw.edge[2*k]<pointEnd&&raw.edge[2*k+1]<pointEnd)all.edges.push([raw.edge[2 * k], raw.edge[2 * k + 1]]);}
+        else all.faces = [...new Set(raw.triPrim)].filter(f=>sel.mode==="piece"||f<primEnd);
         change(all, "replace");
       },
       // where an element is on screen (CSS pixels in the canvas): for tests and for anchoring tools

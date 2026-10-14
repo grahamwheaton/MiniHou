@@ -1464,7 +1464,7 @@
       { label: "Inset", shortcut:"I", type: "inset", params: (s) => ({ group: rangePattern(s.faces), amount: 0.15 }) },
       { label: "Outset", type: "outset", params: (s) => ({ group: rangePattern(s.faces), amount: 0.15 }) },
       { label: "Push / Pull", shortcut:"Alt+E", type: "pushpull", params: (s) => ({ group: rangePattern(s.faces), distance: 0.25 }) },
-      { label: "Reverse", type: "reverse", params: (s) => ({ group: rangePattern(s.faces) }) },
+      { label: "Flip Faces", shortcut:"Alt+N", type: "reverse", params: (s) => ({ group: rangePattern(s.faces) }) },
       { label: "Group", type: "group_create", params: (s) => ({ name: "faces", domain: "primitives", method: "pattern", pattern: rangePattern(s.faces) }) },
       { label: "Delete", key: "x", type: "blast", params: (s) => ({ group: rangePattern(s.faces), domain: "primitives" }) }],
     point: [
@@ -1481,7 +1481,7 @@
     if ((params.group || params.pattern || params.edges || "").length > 30000) { toast("That selection is too large to write into a node; select fewer elements."); return; }
     if(pv.selectableTemplates?.length){const merged=await edit([{op:'merge_templates',id:node}]);if(!merged)return;node=merged.results[0].id;pv.selectableTemplates=[];}
     const r = await edit([{ op: "insert", layout:"vertical", after: node, type: a.type, params }]);
-    if (r) { pv.clearSelection(); select([r.results[0].id]); }
+    if (r) {const saved={...s,faces:[...s.faces]};pv.clearSelection();select([r.results[0].id]);if(a.type==='reverse'){const target=r.results[0].id;pvKeepCameraNode=target;for(let i=0;i<100&&pvNode!==target;i++)await new Promise(resolve=>setTimeout(resolve,20));if(pvNode===target)pv.restoreSelection(saved);}}
   }
   const modelTool=pv?.ok&&window.MiniModalModelTool?MiniModalModelTool(pv,$('#pv-canvas'),{
     async start(kind){
@@ -1833,6 +1833,8 @@
         const kind=e.ctrlKey?'bevel':e.altKey?'pushpull':e.code==='KeyI'?'inset':'extrude';modelTool?.start(kind,...viewportMouse).catch(err=>toast(err.message));e.preventDefault();e.stopImmediatePropagation();return;
       }
       if(e.ctrlKey&&e.code==='KeyR'){e.preventDefault();e.stopImmediatePropagation();loopTool?.start();return;}
+      if(e.altKey&&!e.ctrlKey&&!e.metaKey&&e.code==='KeyN'){e.preventDefault();e.stopImmediatePropagation();const action=(SELECTION_ACTIONS[pvSelection.mode]||[]).find(a=>a.type==='reverse');if(action&&pvSelection.faces.length)applySelectionAction(action);else toast('Select faces to flip.');return;}
+      if(e.code==='Numpad9'&&!e.altKey&&!e.metaKey&&!e.ctrlKey){pv.oppositeView();e.preventDefault();e.stopImmediatePropagation();return;}
       const nav = { Numpad1: ["front"], Numpad3: ["right"], Numpad7: ["top"] }[e.code];          // Blender-style view keys; Ctrl = the opposite side
       if (nav && !e.altKey && !e.metaKey) { pv.viewAxis(nav[0], e.ctrlKey); e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (e.code === "Numpad5" || e.code === "NumpadDecimal" || e.key === "Home") {
@@ -1942,6 +1944,7 @@
       $(id).checked = pv.opt[key];
       $(id).onchange = (e) => { preferences[key] = e.target.checked; applyPreferences(true); };
     }
+    $("#pv-isolated").onchange=e=>{pv.opt.isolated=e.target.checked;pv.redraw();};
     $("#pv-bounds").onchange = (e) => { pv.opt.bounds = e.target.checked; pv.redraw(); };               // a helper, not a saved preference
     $("#pv-frame-all").onclick = () => pv.frameAll();
     $("#pv-view-extra").onchange = (e) => { if (e.target.value) pv.viewAxis(e.target.value, false); e.target.value = ""; };

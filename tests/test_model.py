@@ -52,6 +52,19 @@ class ReverseFacetDivideTests(unittest.TestCase):
         part = chain(("reverse", {"group": "0"}), src=BOX)
         self.assertFalse(np.allclose(prim_normals(part)[1:], -prim_normals(cook(BOX))[1:]))
 
+    def test_reverse_selected_corner_attributes_and_unaffected_faces(self):
+        from minihou.nodes.model import reverse
+        b = cook(BOX).copy()
+        b.vertex["uv"] = np.arange(b.nvertices * 2, dtype=np.float32).reshape(-1, 2)
+        b.prim["material_id"] = np.arange(b.nprims, dtype=np.int32)
+        result = reverse(b, "0", True)
+        result.validate()
+        end = b.topology.prim_offsets[1]
+        np.testing.assert_array_equal(result.vertex["uv"][:end], b.vertex["uv"][:end][::-1])
+        np.testing.assert_array_equal(result.vertex["uv"][end:], b.vertex["uv"][end:])
+        np.testing.assert_array_equal(result.topology.vertex_point[end:], b.topology.vertex_point[end:])
+        np.testing.assert_array_equal(result.prim["material_id"], b.prim["material_id"])
+
     def test_facet_unique_points(self):
         g = chain(("facet", {"compute_normals": True}))
         self.assertEqual(g.npoints, g.nvertices)
