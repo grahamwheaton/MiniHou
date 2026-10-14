@@ -1,0 +1,138 @@
+{
+ "version": 1,
+ "doc": "Roads with intersections: centre-line curves (a main street with a bend, a crossroads, a T and a side street that rejoins) go into the road_network library node (nodes/road_network.py), which builds the road surface and a patch at every junction.",
+ "nodes": {
+  "main_street": {
+   "type": "curve",
+   "params": {
+    "points": "-24,0,0 -12,2,0 0,0,0 12,-2,0 24,0,0"
+   },
+   "pos": [
+    0,
+    0
+   ]
+  },
+  "cross_street": {
+   "type": "curve",
+   "inputs": {
+    "geo": "main_street"
+   },
+   "params": {
+    "points": "0,-20,0 0,0,0 0,20,0"
+   },
+   "pos": [
+    0,
+    100
+   ]
+  },
+  "side_street": {
+   "type": "curve",
+   "inputs": {
+    "geo": "cross_street"
+   },
+   "params": {
+    "points": "12,-2,0 12,-14,0 22,-18,0"
+   },
+   "pos": [
+    0,
+    200
+   ]
+  },
+  "ring_road": {
+   "type": "curve",
+   "inputs": {
+    "geo": "side_street"
+   },
+   "params": {
+    "points": "0,20,0 14,18,0 22,10,0 24,0,0"
+   },
+   "pos": [
+    0,
+    300
+   ]
+  },
+  "roads": {
+   "type": "road_network",
+   "inputs": {
+    "curves": "ring_road"
+   },
+   "params": {
+    "width": 4.0,
+    "weld": 0.05
+   },
+   "pos": [
+    0,
+    400
+   ]
+  },
+  "ground": {
+   "type": "grid",
+   "params": {
+    "columns": 2,
+    "rows": 2
+   },
+   "pos": [
+    220,
+    400
+   ]
+  },
+  "ground_size": {
+   "type": "transform",
+   "inputs": {
+    "geo": "ground"
+   },
+   "params": {
+    "scale": [
+     6,
+     6,
+     1
+    ],
+    "translate": [
+     0,
+     0,
+     -0.05
+    ]
+   },
+   "pos": [
+    220,
+    500
+   ]
+  },
+  "scene": {
+   "type": "merge",
+   "inputs": {
+    "geos": [
+     "roads",
+     "ground_size"
+    ]
+   },
+   "pos": [
+    100,
+    600
+   ]
+  },
+  "output": {
+   "type": "output",
+   "inputs": {
+    "geo": "scene"
+   },
+   "pos": [
+    100,
+    700
+   ]
+  }
+ },
+ "display": "output",
+ "exposed": [
+  {
+   "name": "Road Width",
+   "node": "roads",
+   "param": "width"
+  },
+  {
+   "name": "Junction Extra",
+   "node": "roads",
+   "param": "corner_extra"
+  }
+ ]
+}
