@@ -396,12 +396,57 @@ def _polybevel(ins, out, p):
              "min": 0.0}]
 
 
+@provider("solidify")
+def _solidify(ins, out, p):
+    from . import groups
+    src = ins[0] if ins else None
+    if src is None or not src.nprims:
+        return []
+    selected = groups.mask(src, "prim", p.get("group", ""))
+    prims = np.arange(src.nprims) if selected is None else np.flatnonzero(selected)
+    if not len(prims):
+        return []
+    from .nodes.normal import prim_normals
+    face = prims[0]
+    offsets = src.topology.prim_offsets
+    points = src.topology.vertex_point[offsets[face]:offsets[face+1]]
+    origin = src.P[points].mean(axis=0).astype(float)
+    normal = prim_normals(src)[face].astype(float)
+    normal /= max(np.linalg.norm(normal), 1e-12)
+    if np.linalg.norm(normal) < 1e-9:
+        return []
+    offset = float(p.get("offset", -1))
+    coefficient = (offset + (1 if offset >= 0 else -1)) / 2
+    thickness = float(p.get("thickness", .1))
+    return [{"id": "thickness", "label": "Shell thickness", "param": "thickness", "comp": None,
+             "origin": origin + normal*coefficient*thickness,
+             "dir": normal*np.sign(coefficient), "scale": 1/abs(coefficient)}]
+
+
+@provider("ray")
+def _ray(ins, out, p):
+    hit = out.point.get("hitprim")
+    normals = out.point.get("hitN")
+    if hit is None or normals is None:
+        return []
+    ids = np.flatnonzero(hit >= 0)
+    if not len(ids):
+        return []
+    return [{"id": "lift", "label": "Surface lift", "param": "lift", "comp": None,
+             "origin": out.P[ids[0]], "dir": normals[ids[0]]}]
+
+
 @provider("sphere")
 def _sphere(ins, out, p):
     c = np.asarray(p.get("center", (0, 0, 0)), np.float64)
     r = float(p.get("radius", 1.0))
     return [{"id": "radius", "label": "radius", "param": "radius", "comp": None, "origin": c + [r, 0, 0], "dir": AXES[0],
-             "min": 0.0}]
+             "min": 0.0}] + _center_handles(c)
+
+
+def _center_handles(center):
+    return [{"id": f"center_{axis}", "label": f"Center {axis.upper()}", "param": "center", "comp": i,
+             "origin": center, "dir": AXES[i], "tool": "move"} for i, axis in enumerate("xyz")]
 
 
 @provider("box")
@@ -409,7 +454,7 @@ def _box(ins, out, p):
     c = np.asarray(p.get("center", (0, 0, 0)), np.float64)
     s = np.asarray(p.get("size", (1, 1, 1)), np.float64)
     return [{"id": f"size_{'xyz'[i]}", "label": f"size {'xyz'[i]}", "param": "size", "comp": i, "origin": c + AXES[i] * s[i] / 2,
-             "dir": AXES[i], "scale": 2.0, "min": 0.0} for i in range(3)]
+             "dir": AXES[i], "scale": 2.0, "min": 0.0} for i in range(3)] + _center_handles(c)
 
 
 @provider("match_size")

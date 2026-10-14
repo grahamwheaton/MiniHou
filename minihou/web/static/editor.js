@@ -1870,7 +1870,7 @@
       const nav = { Numpad1: ["front"], Numpad3: ["right"], Numpad7: ["top"] }[e.code];          // Blender-style view keys; Ctrl = the opposite side
       if (nav && !e.altKey && !e.metaKey) { pv.viewAxis(nav[0], e.ctrlKey); e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (e.code === "Numpad5" || e.code === "NumpadDecimal" || e.key === "Home") {
-        if (e.code === "Numpad5") toggleOrtho(); else pv.frameSelection();
+        if (e.code === "Numpad5") toggleOrtho(); else if (e.key === "Home") pv.frameAll(); else pv.frameSelection();
         e.preventDefault(); e.stopImmediatePropagation(); return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -2719,7 +2719,7 @@
     } else if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); undo(e.shiftKey); }
     else if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); undo(true); }
     else if (!pvOver && mod && e.key.toLowerCase() === "x") { e.preventDefault(); if(S.sel.size)edit([{op:"dissolve",id:[...S.sel]}]); }
-    else if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); if (S.sel.size) duplicate([...S.sel]); }
+    else if ((mod || (!pvOver && e.shiftKey && !e.altKey)) && e.key.toLowerCase() === "d") { e.preventDefault(); if (S.sel.size) duplicate([...S.sel]); }
     else if (mod && e.key.toLowerCase() === "g") { e.preventDefault(); saveSelectionAsNode(); }                // Houdini's collapse to subnet
     else if (mod && e.key.toLowerCase() === "a") { e.preventDefault(); select(Object.keys(S.graph.nodes)); }
     else if (e.key === "Delete" || e.key === "Backspace" || (!pvOver && !mod && e.key.toLowerCase() === "x")) { e.preventDefault(); deleteSelection(); }

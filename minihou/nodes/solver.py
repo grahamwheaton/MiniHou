@@ -5,7 +5,7 @@ import weakref
 from collections import OrderedDict
 
 from .. import proxy, timectx
-from ..sdk import REGISTRY, Int, Str, node
+from ..sdk import REGISTRY, Input, Int, Str, node
 
 MAX_FRAMES = 1000          # frames remembered per solver input (playback steps from the nearest one)
 _MEMO: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()   # input geometry -> {settings: OrderedDict}
@@ -27,13 +27,14 @@ def _key(params) -> str:
     return body + "|" + timectx.key()                     # a solver always depends on the frame
 
 
-@node("solver", inputs=["geo"], category="time", key_extra=_key, params=[
+@node("solver", inputs=["geo", Input("input2", optional=True), Input("input3", optional=True),
+      Input("input4", optional=True)], category="time", key_extra=_key, version=2, params=[
     Str("body", "", doc="Node type applied once per step to the previous result: a system or e.g. 'wrangle'"),
     Str("params", "{}", doc='Parameters for the body as JSON, e.g. {"snippet": "@P.z += @TimeInc"}'),
     Int("start_frame", 1, doc="At and before this frame the solver outputs its input unchanged"),
     Int("substeps", 1, min=1, max=100, doc="Steps per frame (@TimeInc shrinks accordingly)"),
 ])
-def solver(geo, body, params, start_frame, substeps):
+def solver(geo, input2=None, input3=None, input4=None, *, body, params, start_frame, substeps):
     """Run 'body' on the previous frame's result, frame after frame, from start_frame to the current frame (Houdini's
     Solver). Deterministic: any frame gives the same result however you got there; playback is incremental (recent
     frames are remembered), jumping ahead steps from the nearest remembered frame, and going back before it restarts
@@ -50,6 +51,12 @@ def solver(geo, body, params, start_frame, substeps):
         return geo
     settings = json.dumps([body, nt.code_hash, nt.version, sorted(values.items()), start_frame, substeps,
                            timectx.fps()], default=str)
+    sources = (input2, input3, input4)
+    if any(s is not None for s in sources[max(0, len(nt.inputs)-1):]):
+        raise ValueError("solver body has no input port for one of the connected auxiliary geometries")
+    # Retain geometry objects in the memo key: identity is safe for frozen inputs
+    # and prevents reuse of simulated frames after an auxiliary source changes.
+    settings = (settings, *sources)
     with _LOCK:
         per_input = _MEMO.setdefault(geo, {})
         frames = per_input.setdefault(settings, OrderedDict())
@@ -59,7 +66,9 @@ def solver(geo, body, params, start_frame, substeps):
             start = max(known)
             state = frames[start]
     dt = 1.0 / (timectx.fps() * substeps)
-    extra = [None] * (len(nt.inputs) - 1)
+    extra = [sources[i] if i < len(sources) else None for i in range(len(nt.inputs)-1)]
+    extra = [([g] if g is not None else []) if port.multi else g
+             for port, g in zip(nt.inputs[1:], extra)]
     for f in range(start + 1, target + 1):
         for k in range(substeps):
             sub = f - 1 + (k + 1) / substeps

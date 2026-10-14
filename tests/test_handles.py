@@ -201,7 +201,9 @@ class PreviewHandlesTests(unittest.TestCase):
         self.assertEqual(sorted(h["id"] for h in t["handles"]), ["rotate_x", "rotate_y", "rotate_z", "scale_x", "scale_y", "scale_z", "translate_plane_0", "translate_plane_1", "translate_plane_2", "translate_x", "translate_y", "translate_z", "uniform_scale"])
         np.testing.assert_allclose(t["handles"][0]["origin"], [1, 2, 3], atol=1e-5)
         self.assertEqual(s.preview("n")["handles"], [])
-        self.assertEqual(len(s.preview("b")["handles"]), 3)
+        box_handles = s.preview("b")["handles"]
+        self.assertEqual(len(box_handles), 6)
+        self.assertEqual({h['param'] for h in box_handles}, {'size', 'center'})
 
     def test_the_http_preview_carries_them_in_its_header(self):
         from tests.test_web import WebTests

@@ -10,7 +10,7 @@ import numpy as np
 
 from .. import edges, topo
 from ..outgroups import OutGroup, OutGroups
-from ..sdk import Bool, Enum, Float, Int, Str, node
+from ..sdk import Bool, Enum, Float, Input, Int, Str, node
 from . import _build as B
 
 MAX_FACES = 20_000_000
@@ -134,7 +134,8 @@ SUBDIVIDE_OUT = OutGroups(
 )
 
 
-@node("subdivide", inputs=["geo"], category="modify", version=2, params=[
+@node("subdivide", inputs=["geo", Input("crease_source", optional=True,
+      doc="Matching mesh supplying creaseweight, cornerweight and named crease edge groups")], category="modify", version=3, params=[
     Int("depth", 1, min=0, max=6, doc="Levels; each multiplies the face count by about 4"),
     Enum("algorithm", ["catmull_clark", "linear"], doc="catmull_clark smooths; linear only splits faces"),
     Bool("use_creases", True, doc="Use outgoing-corner creaseweight and point cornerweight; sharpness decays each level"),
@@ -144,7 +145,7 @@ SUBDIVIDE_OUT = OutGroups(
     Float("crease_weight", 1.0, min=0.0, soft_max=10.0, doc="Sharpness for the 'creases' edges when overriding"),
     *SUBDIVIDE_OUT.params(),
 ])
-def subdivide(geo, depth, algorithm, use_creases=True, creases="", override_crease_weight=False, crease_weight=1.0, **og):
+def subdivide(geo, crease_source=None, *, depth, algorithm, use_creases=True, creases="", override_crease_weight=False, crease_weight=1.0, **og):
     """Subdivide polygons into quads (Houdini's Subdivide). Catmull-Clark smooths towards a limit surface and keeps open
     boundaries as smooth curves; linear splits without moving anything. Faces with fewer than 3 points are dropped."""
     faces = geo.nvertices * 4 ** max(depth - 1, 0)
@@ -152,11 +153,21 @@ def subdivide(geo, depth, algorithm, use_creases=True, creases="", override_crea
         raise ValueError(f"depth {depth} would make about {faces:,} faces (limit {MAX_FACES:,}); lower the depth")
     B.require_polygons(geo, "subdivide")
     out = geo
+    if crease_source is not None:
+        if (crease_source.npoints != geo.npoints or
+                crease_source.topology.digest != geo.topology.digest):
+            raise ValueError("subdivide crease source must have matching point correspondence and topology")
+        out = geo.copy()
+        for name, data in crease_source.vertex.items():
+            if name == edges.CREASE or name.startswith(edges.PREFIX):
+                out.vertex[name] = data
+        if 'cornerweight' in crease_source.point:
+            out.point['cornerweight'] = crease_source.point['cornerweight']
     if (creases or "").strip():                                        # the Creases field: crease these edges for this node only
-        w = edges.values(geo, edges.CREASE)
-        pick = edges.mask(geo, creases)
+        w = edges.values(out, edges.CREASE)
+        pick = edges.mask(out, creases)
         w[pick] = crease_weight if override_crease_weight else np.where(w[pick] > 0, w[pick], 1.0)
-        out = edges.write(geo, edges.CREASE, w.astype(np.float32))
+        out = edges.write(out, edges.CREASE, w.astype(np.float32))
         use_creases = True
     for _ in range(depth):
         out = subdivide_once(out, algorithm == "catmull_clark", use_creases)

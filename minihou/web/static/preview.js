@@ -1495,8 +1495,8 @@ window.MiniHouPreview = (() => {
       beginTransform(tool,clientX,clientY){
         api.setTool(tool);const hs=shown();let h=tool==='move'?hs.find(h=>h.kind==='plane'&&h.plane_axis===undefined):tool==='scale'?hs.find(h=>h.kind==='uniform'):hs.find(h=>h.kind==='ring'&&h.comp===2);
         if(tool==='rotate'){const rotation=hs.find(x=>x.param==='rotate');if(rotation)h={...rotation,kind:'plane',comp:null,rotateVector:true,plane_axis:undefined};}
-        if(tool==='scale'){const scale=hs.find(x=>x.param==='scale');if(scale)h={...scale,kind:'plane',comp:null,scaleVector:true,plane_axis:undefined};}
-        if(!h&&tool==='move'){const arrow=hs.find(h=>h.param==='translate');if(arrow)h={...arrow,kind:'plane',comp:null};}
+        if(tool==='scale'){const scale=hs.find(x=>x.param==='scale'||x.param==='size');if(scale)h={...scale,kind:'plane',comp:null,scaleVector:true,plane_axis:undefined};else if(!h){const radius=hs.find(x=>x.param==='radius'&&x.comp===null);if(radius)h={...radius,kind:'uniform'};}}
+        if(!h&&tool==='move'){const arrow=hs.find(h=>h.param==='translate'||h.param==='center');if(arrow)h={...arrow,kind:'plane',comp:null};}
         if(!h)return false;startHandleDrag({button:0,modal:true,clientX,clientY,preventDefault(){},stopPropagation(){}},h);return true;
       },
       edgeAt:(x,y)=>raw?pickEdge(camera(),x,y,14):null,

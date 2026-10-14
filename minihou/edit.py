@@ -322,6 +322,9 @@ def op_insert_existing(g: Graph, op: dict) -> dict:
     candidates = [p for p in inputs if p.type == output.type]
     requested = op.get("input")
     if requested is None:
+        required = [p for p in candidates if not p.optional]
+        if len(required) == 1:
+            candidates = required
         if len(candidates) != 1:
             raise GraphError("Insertion is ambiguous: choose one compatible node input")
         chosen = candidates[0]

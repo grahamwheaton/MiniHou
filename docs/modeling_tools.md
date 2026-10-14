@@ -4,6 +4,28 @@ These are useful initial implementations, not full Houdini SOP parity. All nodes
 appear in the editor from their SDK registry declarations and carry parameter help.
 No dependencies beyond NumPy are required. Inputs are never modified.
 
+PolyExtrude's Divisions control creates evenly spaced extrusion steps, retaining every wall segment and only
+the original back cap. Front, Side and Back output groups describe the complete result. Divisions default to
+one, with a limit of 64 and a guard against more than one million source corner samples.
+
+Subdivision's optional Crease Source accepts a mesh with matching point correspondence and topology. It supplies
+corner weights, edge crease weights and named edge groups; geometry positions still come from the primary input.
+Box and Sphere centre handles edit their source parameters directly, including modal G movement. Solidify's
+thickness arrow follows a selected face normal and accounts for the shell offset. Ray's lift arrow follows a hit normal.
+
+Scatter accepts a primitive Group and a scalar point or primitive Density attribute in surface mode. Point density
+is interpolated linearly inside the sampled triangles; zero density excludes an area. These controls retain the
+requested point count when positive area exists. Existing Density Attribute (`density_attrib`) graphs keep their
+triangle-average weighting. Use either Density or Density Attribute; setting both raises a clear error. Both controls
+compose with primitive Group, relaxation iterations and output IDs. UV Flatten's Seams field accepts named edge groups, edge IDs,
+or endpoint pairs, supplementing angle and attribute seams.
+
+Attribute Delete can use reference geometry to identify attributes separately on each domain, select an attribute
+class and invert the match to keep chosen attributes. P is protected. Attribute Blur has an optional matching
+Rest mesh and inverse-distance weighting; Uniform remains the default. Solver passes Input 2–4 to its body's
+corresponding auxiliary ports and resets cached simulations when those sources change. Auxiliary inputs are
+static for a cook, rather than independently sampled animation at each simulated frame.
+
 ## Edges, Bridge and Dissolve
 
 `topo.edges(geo)` derives unique undirected edges, sorted by endpoint point ids.
