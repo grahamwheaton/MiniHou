@@ -66,15 +66,17 @@ def _cmd_cook(args) -> int:
     _python_switch(args)
     _library(args)
     try:
-        g = Graph.load(args.graph)
+        # Saved editor graphs can contain unfinished side branches. The evaluator
+        # validates every node required by the requested output, just as serve does.
+        g = Graph.load(args.graph, check=False)
+        ev = Evaluator()
+        for i in range(args.repeat):
+            geo = ev.cook(g, args.node or (g.render_node() if args.render else None))
+            s = ev.last_stats
+            print(f"cook {i + 1}: {s.total_ms:.1f} ms  cooked={s.cooked}  cached={s.cached}")
     except GraphError as e:
         print("graph error:\n  " + "\n  ".join(e.errors), file=sys.stderr)
         return 2
-    ev = Evaluator()
-    for i in range(args.repeat):
-        geo = ev.cook(g, args.node or (g.render_node() if args.render else None))
-        s = ev.last_stats
-        print(f"cook {i + 1}: {s.total_ms:.1f} ms  cooked={s.cooked}  cached={s.cached}")
     print(geo)
     return 0
 

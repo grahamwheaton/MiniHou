@@ -137,6 +137,23 @@ def font_smoke(api):
             'textsymbol_attribute': head['attr']}
 
 
+def imaging_smoke(api, scratch):
+    """Read an image with the frozen L-system, exercising packaged Pillow plugins."""
+    import zlib
+    def chunk(kind, data):
+        return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+    image = scratch / 'lsystem-pic.png'
+    image.write_bytes(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 2, 1, 8, 2, 0, 0, 0)) +
+                      chunk(b'IDAT', zlib.compress(b'\x00\x00\x00\x00\xff\xff\xff')) + chunk(b'IEND', b''))
+    api.replace({'nodes': {'tree': {'type': 'lsystem', 'params': {
+        'premise': 'A', 'rules': 'A=F(pic(1,0,0)*2)', 'generations': 1, 'pic_image_file': str(image)}}}, 'display': 'tree'})
+    head, arrays, _ = api.preview('tree')
+    positions = struct.unpack('<' + 'f' * (len(arrays['P']) // 4), arrays['P'])
+    require(head['points'] == 2 and abs(max(positions[2::3]) - 2) < 1e-5,
+            f'packaged L-system image sampling failed: {head}, {positions}')
+    return {'points': head['points'], 'maximum_z': max(positions[2::3]), 'png_read': True}
+
+
 def native_smoke(api, internal):
     """Use Blender only as a disposable background worker with factory settings."""
     worker = internal / 'blender_addon/minihou_link/native_mesh_worker.py'
@@ -299,6 +316,7 @@ def main():
             finally:
                 browser.close()
         report['font'] = font_smoke(api)
+        report['imaging'] = imaging_smoke(api, scratch)
         report['native'] = native_smoke(api, exe.parent / '_internal')
         report['ok'] = True
     except Exception as error:

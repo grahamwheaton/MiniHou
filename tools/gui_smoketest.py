@@ -214,7 +214,7 @@ def evaluated_P():
 def expected_P(values):
     """Cook the graph file in this process with the given exposed values (the engine's numpy reference)."""
     from minihou import Evaluator, Graph
-    g = Graph.load(ARGS.graph)
+    g = Graph.load(ARGS.graph, check=False)  # match the engine: cook the displayed branch
     for name, v in values.items():
         g.set_exposed(name, list(v) if isinstance(v, tuple) else v)
     return Evaluator().cook(g).P

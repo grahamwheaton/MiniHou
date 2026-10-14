@@ -159,7 +159,7 @@ class OpsTests(unittest.TestCase):
         self.assertEqual(Graph.from_dict(g3.to_dict()).nodes["t"].meta["pos"], [5.0, 6.0])   # round-trips
 
     def test_layout_op_tidies_everything(self):
-        g = Graph.load(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "examples", "graphs", "demo.json"))
+        g = Graph.load(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "examples", "graphs", "demo.json"), check=False)
         for n in g.nodes.values():
             n.meta["pos"] = [0.0, 0.0]                                    # everything piled up
         g2, _ = apply_ops(g, [{"op": "layout"}])

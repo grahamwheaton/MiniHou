@@ -1,7 +1,7 @@
 """Build the packed MiniHou application with PyInstaller (ready-to-run folder), then smoke-test it.
 
-    py -m pip install pyinstaller numpy
-    py tools/build_app.py                  # -> dist/MiniHou/, numpy-only (small, portable)
+    py -m pip install pyinstaller numpy fonttools pillow pywebview mujoco usd-core
+    py tools/build_app.py                  # -> dist/MiniHou/, without optional accelerators
     py tools/build_app.py --with-accel     # also bundle numba and scipy (several times larger; faster heavy nodes)
     py tools/build_app.py --no-smoke       # skip starting the built program and fetching its pages
 
@@ -35,6 +35,7 @@ def build(with_accel: bool, destination: Path = DIST) -> Path:
            "--collect-all", "mujoco",
            "--collect-all", "pxr",
            "--collect-all", "fontTools",
+           "--collect-all", "PIL",
            "--icon", str(ROOT / "minihou/assets/minihou.ico"),
            "--add-data", f"{ROOT / 'minihou/assets'}{sep}minihou/assets",
            "--add-data", f"{ROOT / 'minihou' / 'blender_mesh_catalog.py'}{sep}minihou",
@@ -44,7 +45,7 @@ def build(with_accel: bool, destination: Path = DIST) -> Path:
            "--add-data", f"{ROOT / 'nodes'}{sep}bundled_nodes"]
     for example in sorted((ROOT / "examples").glob("*.json")):
         cmd += ["--add-data", f"{example}{sep}examples/graphs"]
-    for mod in ("bpy", "tkinter", "matplotlib", "PIL", "IPython", "pytest", "playwright"):
+    for mod in ("bpy", "tkinter", "matplotlib", "IPython", "pytest", "playwright"):
         cmd += ["--exclude-module", mod]
     if with_accel:
         for pkg in ("numba", "llvmlite", "scipy"):
