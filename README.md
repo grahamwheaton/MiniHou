@@ -452,6 +452,7 @@ The same edit operations are available to scripts over HTTP (`POST /api/edit`, s
 | `examples/graphs/terrain_rocks.json` | 200x200 terrain with 5-octave noise, a valley wrangle, rocks scattered only above a height |
 | `examples/graphs/crater.json` | built by an AI through MCP: dunes, a crater wrangle, boulders kept only on the rim by a `delete` expression |
 | `examples/graphs/spiral_stairs.json` | uses the example library nodes `stairs` (spiral treads around a column) and `twist_height` |
+| `examples/graphs/road_network.json` | roads with intersections: centre-line curves into the `road_network` library node (`nodes/road_network.py`): a strip of road per edge and a patch at every junction (bends, T, Y, crossroads, any number of roads), trimmed so the edges meet cleanly; prim attributes `part` / `road` / `junction`, vertex `uv` |
 | `examples/graphs/rocky_hills.json` | hills plus the `rock_scatter` **system** (`nodes/rock_scatter.json`, a graph used as a node) |
 | `examples/graphs/scifi_panels.json` | random face groups extruded twice with insets, flat-shaded, a second material on the tops |
 | `examples/graphs/subd_pod.json` | box -> extruded dome and fin -> clip + mirror (symmetric, welded) -> Catmull-Clark |
@@ -1024,7 +1025,7 @@ minihou/                  the engine (numpy + stdlib, optional numba; never impo
   web/                    HTTP API + live events (server.py) and the node editor (static/)
   mcp.py                  MCP server for AI assistants (stdio, stdlib only)
   library.py              node libraries: load and hot-reload nodes/*.py, authoring guide
-nodes/                    example node library: twist_height.py, stairs.py (Python) and rock_scatter.json (a system)
+nodes/                    example node library: twist_height.py, stairs.py, road_network.py (Python) and rock_scatter.json (a system)
 blender_addon/minihou_link/
   runtime.py              main-thread timer, depsgraph handler, feedback-loop guards
   mesh_writer.py          foreach_set writer (fast attribute paths)
