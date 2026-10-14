@@ -142,28 +142,18 @@
   <div id="work-split" title="Drag to resize"></div>
 
   <section id="preview" class="panel pane" aria-label="3D view">
-      <div class="panel-title">
-        <span>3D <span id="pv-node" class="muted"></span></span>
-        <button id="pv-max" class="small" title="Maximize viewport (Ctrl+Space)">⛶</button>
-      </div>
-      <div class="pv-tools"><strong id="pv-state">View</strong>
-        <select id="pv-follow" aria-label="Preview source"><option value="display">Display flag</option><option value="selection">Inspect selected node</option></select>
-        <span id="pv-selinfo" class="muted small"></span><button id="pv-sheet-btn" class="small" title="Geometry spreadsheet: every point, vertex, primitive, edge and detail attribute">Spreadsheet</button>
-        <span class="spacer"></span>
-        <span class="pv-nav" role="group" aria-label="View">
-          <button data-view="front" title="Front (Numpad 1, Ctrl for back)">Front</button><button data-view="right" title="Right (Numpad 3, Ctrl for left)">Right</button><button data-view="top" title="Top (Numpad 7, Ctrl for bottom)">Top</button><select id="pv-view-extra" aria-label="More axis views"><option value="">More views…</option><option value="back">Back</option><option value="left">Left</option><option value="bottom">Bottom</option></select><button id="pv-ortho" title="Perspective / orthographic (Numpad 5)">Persp</button><button id="pv-walk" title="Fly navigation: Shift+` or hold right mouse. WASD, Q/E, wheel speed." aria-pressed="false">Walk / Fly</button><button id="pv-frame-all" title="Frame all geometry">All</button><button id="pv-frame" title="Frame the selection, or everything (Numpad . / Home / double-click the view)">⌂</button>
-        </span>
-      </div>
-      <label class="pv-path-setting">Ctrl-click path <select id="pv-path-mode"><option value="direct">Most direct</option><option value="shortest">Shortest (fewest steps)</option></select></label>
-      <details id="pv-proportional"><summary>Proportional editing</summary><label><input id="pv-proportional-enabled" type="checkbox"> Enable (O)</label><label>Radius <input id="pv-proportional-radius" type="number" min="0.0001" value="1" step="0.1"></label><select id="pv-proportional-falloff"><option>smooth</option><option>sphere</option><option>root</option><option>sharp</option><option>linear</option><option>constant</option><option>random</option></select><label><input id="pv-proportional-connected" type="checkbox"> Connected only</label><label><input id="pv-proportional-projected" type="checkbox"> Projected</label></details>
-      <details id="pv-sketch"><summary>Sketch &amp; Measure</summary><div id="pv-sketch-panel"></div></details>
-      <div class="pv-interaction" aria-label="Transform settings">
-        <label>Orientation <select id="pv-orientation" title="Coordinate frame for selection transforms and curve constraints"><option value="global">Global</option><option value="local">Local</option><option value="normal">Normal</option><option value="view">View</option><option value="cursor">Cursor</option><option value="custom">Custom</option></select></label>
-        <button id="pv-custom-frame" title="Capture the current selection normal as a custom orientation">Capture frame</button>
-        <label><input id="pv-snap" type="checkbox"> Snap</label>
+      <div class="pv-header" role="toolbar" aria-label="3D viewport header">
+        <button id="pv-mode-btn" class="pv-chip" data-pv-menu="pv-menu-select" aria-haspopup="menu" aria-expanded="false" title="Selection mode"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3l11 7-5 1.2L7.6 16z"/></svg><strong id="pv-state">View</strong><span class="caret">▾</span></button>
+        <button data-pv-menu="pv-menu-view" aria-haspopup="menu" aria-expanded="false">View</button>
+        <button data-pv-menu="pv-menu-select" aria-haspopup="menu" aria-expanded="false">Select</button>
+        <button data-pv-menu="pv-menu-add" aria-haspopup="menu" aria-expanded="false">Add</button>
+        <span class="pv-sep"></span>
+        <select id="pv-orientation" aria-label="Transform orientation" title="Transform orientation: coordinate frame for selection transforms and curve constraints"><option value="global">Global</option><option value="local">Local</option><option value="normal">Normal</option><option value="view">View</option><option value="cursor">Cursor</option><option value="custom">Custom</option></select>
+        <label class="pv-check" title="Snap (Ctrl toggles while dragging)"><input id="pv-snap" type="checkbox"> Snap</label>
         <select id="pv-snap-element" aria-label="Snap element"><option value="increment">Increment</option><option value="grid">Grid</option><option value="vertex">Vertex</option><option value="vertex,face">Vertex + Face</option><option value="edge">Edge</option><option value="midpoint">Edge midpoint</option><option value="perpendicular">Edge perpendicular</option><option value="face">Face</option></select>
-        <select id="pv-snap-target" aria-label="Snap base"><option value="center">Center</option><option value="median">Median</option><option value="active">Active</option><option value="closest">Closest vertex</option></select>
-        <details><summary>Settings</summary><div class="pv-settings">
+        <details class="pv-settings-pop"><summary title="Transform and snapping settings">Settings</summary><div class="pv-settings">
+          <label>Snap base <select id="pv-snap-target" aria-label="Snap base"><option value="center">Center</option><option value="median">Median</option><option value="active">Active</option><option value="closest">Closest vertex</option></select></label>
+          <button id="pv-custom-frame" title="Capture the current selection normal as a custom orientation">Capture custom orientation</button>
           <label>Move increment <input id="pv-move-step" type="number" min="0.000001" step="0.1" value="0.1"></label>
           <label>Angle increment <input id="pv-angle-step" type="number" min="0.001" step="1" value="15"> degrees</label>
           <label>Scale increment <input id="pv-scale-step" type="number" min="0.001" step="0.1" value="0.1"></label>
@@ -172,35 +162,92 @@
           <label>Cursor orientation XYZ <input class="pv-cursor-angle" data-axis="0" type="number" value="0" aria-label="Cursor rotation X"><input class="pv-cursor-angle" data-axis="1" type="number" value="0" aria-label="Cursor rotation Y"><input class="pv-cursor-angle" data-axis="2" type="number" value="0" aria-label="Cursor rotation Z"></label>
           <p>Ctrl temporarily toggles snapping; Shift gives precision. Geometry snapping applies to move and curve handles. Rotation and scale use increments. Object selects connected mesh islands.</p>
         </div></details>
+        <span class="spacer"></span>
+        <span id="pv-selinfo" class="muted small"></span>
+        <select id="pv-follow" aria-label="Preview source" title="What the viewport shows"><option value="display">Display flag</option><option value="selection">Inspect selected node</option></select>
+        <span id="pv-node" class="muted small"></span>
+        <button id="pv-sheet-btn" class="small" title="Geometry spreadsheet: every point, vertex, primitive, edge and detail attribute">Sheet</button>
+        <button id="pv-frame" title="Frame the selection, or everything (Numpad . / Home / double-click the view)" aria-label="Frame selection">⌂</button>
+        <button id="pv-side-btn" class="on" title="Show or hide the display settings panel" aria-label="Display settings" aria-pressed="true">☰</button>
+        <button id="pv-max" class="small" title="Maximize viewport (Ctrl+Space)" aria-label="Maximize">⛶</button>
+      </div>
+      <div id="pv-menu-view" class="pv-menu hidden" role="menu">
+        <div class="pv-menu-h">Viewpoint</div>
+        <div class="pv-menu-row pv-nav" role="group" aria-label="View"><button data-view="front" title="Front (Numpad 1, Ctrl for back)">Front</button><button data-view="right" title="Right (Numpad 3, Ctrl for left)">Right</button><button data-view="top" title="Top (Numpad 7, Ctrl for bottom)">Top</button></div>
+        <select id="pv-view-extra" aria-label="More axis views"><option value="">Back / Left / Bottom…</option><option value="back">Back</option><option value="left">Left</option><option value="bottom">Bottom</option></select>
+        <div class="pv-menu-h">Camera</div>
+        <button id="pv-ortho" role="menuitem" title="Perspective / orthographic (Numpad 5)">Persp</button>
+        <button id="pv-walk" role="menuitem" title="Fly navigation: Shift+` or hold right mouse. WASD, Q/E, wheel speed." aria-pressed="false">Walk / Fly</button>
+        <div class="pv-menu-h">Frame</div>
+        <button id="pv-frame-all" role="menuitem" title="Frame all geometry">Frame all</button>
+        <button data-pv-proxy="#pv-frame" role="menuitem">Frame selected <span class="menu-shortcut">Numpad .</span></button>
+        <div class="pv-menu-h">Area</div>
+        <button data-pv-proxy="#pv-max" role="menuitem">Maximize viewport <span class="menu-shortcut">Ctrl+Space</span></button>
+        <button data-pv-proxy="#pv-sheet-btn" role="menuitem">Spreadsheet</button>
+        <button data-pv-proxy="#pv-hints-toggle" role="menuitem">Tool hints</button>
+      </div>
+      <div id="pv-menu-select" class="pv-menu hidden" role="menu">
+        <button data-pv-proxy="#pv-tool-view" role="menuitem">Orbit only <span class="menu-shortcut">Esc</span></button>
+        <button data-pv-proxy="#pv-tool-point" role="menuitem">Points <span class="menu-shortcut">1</span></button>
+        <button data-pv-proxy="#pv-tool-edge" role="menuitem">Edges <span class="menu-shortcut">2</span></button>
+        <button data-pv-proxy="#pv-tool-face" role="menuitem">Faces <span class="menu-shortcut">3</span></button>
+        <button data-pv-proxy="#pv-tool-piece" role="menuitem">Objects <span class="menu-shortcut">4</span></button>
+        <div class="pv-menu-h">Attributes</div>
+        <button data-pv-proxy="#pv-paint-btn" role="menuitem">Paint <span class="menu-shortcut">5</span></button>
+        <button data-pv-proxy="#pv-assign-btn" role="menuitem">Quick assign</button>
+      </div>
+      <div id="pv-menu-add" class="pv-menu hidden" role="menu">
+        <button data-pv-proxy="#add-btn" role="menuitem">Node menu… <span class="menu-shortcut">Tab</span></button>
+        <button data-pv-proxy="#find-btn" role="menuitem">Find node… <span class="menu-shortcut">Ctrl+F</span></button>
+        <div class="pv-menu-h">The shelf above holds one-click tools; <kbd>Shift+C</kbd> opens the modelling pie.</div>
       </div>
       <div id="pv-context" class="pv-context hidden" aria-label="Active node parameters"></div>
       <div class="pv-stage">
-        <div class="pv-left-tools">
+        <div id="pv-left-tools" class="pv-left-tools" role="toolbar" aria-label="Viewport tools" aria-orientation="vertical">
         <span class="pv-modes pv-tool-strip" role="group" aria-label="Selection mode">
-          <button data-mode="view" class="on" title="Orbit only (default)">View</button><button data-mode="point" title="Select points (1)">Pts</button><button data-mode="edge" title="Select edges (2)">Edges</button><button data-mode="face" title="Select faces (3)">Faces</button><button data-mode="piece" title="Select whole connected objects (4): drag the gizmo to move, rotate or scale them">Object</button><button id="pv-paint-btn" title="Paint an attribute onto points, faces or edges (5)">Paint</button><button id="pv-assign-btn" title="Quick assign: give the selection an attribute value">Assign</button>
+          <button id="pv-tool-view" data-mode="view" class="pv-tool on" title="Orbit only (default)" aria-label="Orbit"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3l11 7-5 1.2L7.6 16z"/></svg><span>Orbit</span></button>
+          <button id="pv-tool-point" data-mode="point" class="pv-tool" title="Select points (1)" aria-label="Points"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><circle cx="5" cy="14" r="2" class="f"/><circle cx="15" cy="6" r="2" class="f"/><circle cx="14" cy="15" r="2" class="f"/></svg><span>Points</span></button>
+          <button id="pv-tool-edge" data-mode="edge" class="pv-tool" title="Select edges (2)" aria-label="Edges"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 15L16 5"/><circle cx="4" cy="15" r="2" class="f"/><circle cx="16" cy="5" r="2" class="f"/></svg><span>Edges</span></button>
+          <button id="pv-tool-face" data-mode="face" class="pv-tool" title="Select faces (3)" aria-label="Faces"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 15l5-10h9l-5 10z" class="fl"/></svg><span>Faces</span></button>
+          <button id="pv-tool-piece" data-mode="piece" class="pv-tool" title="Select whole connected objects (4): drag the gizmo to move, rotate or scale them" aria-label="Object"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3l7 3.5v7L10 17l-7-3.5v-7z"/><path d="M3 6.5L10 10l7-3.5M10 10v7"/></svg><span>Object</span></button>
         </span>
-        <span id="pv-xform" class="pv-nav hidden" role="group" aria-label="Handle tool">
-          <button data-tool="move" class="on" title="Move (G)">Move</button><button data-tool="rotate" title="Rotate (R)">Rotate</button><button data-tool="scale" title="Scale (S)">Scale</button>
+        <span id="pv-xform" class="pv-nav pv-tool-strip hidden" role="group" aria-label="Handle tool">
+          <button data-tool="move" class="pv-tool on" title="Move (G)" aria-label="Move"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2v16M2 10h16M10 2l-2 3M10 2l2 3M10 18l-2-3M10 18l2-3M2 10l3-2M2 10l3 2M18 10l-3-2M18 10l-3 2"/></svg><span>Move</span></button>
+          <button data-tool="rotate" class="pv-tool" title="Rotate (R)" aria-label="Rotate"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M16 10a6 6 0 1 1-2-4.5"/><path d="M16 3v4h-4"/></svg><span>Rotate</span></button>
+          <button data-tool="scale" class="pv-tool" title="Scale (S)" aria-label="Scale"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="9" width="8" height="8"/><path d="M11 9l6-6M12 3h5v5"/></svg><span>Scale</span></button>
         </span>
-        </div>
-        <div class="pv-wrap"><div id="pv-left-tools" aria-label="Viewport tools">
+        <span class="pv-tool-strip" role="group" aria-label="Modelling and selection tools">
 <button data-op="move" title="Move (G)">Move</button><button data-op="rotate" title="Rotate (R)">Rotate</button><button data-op="scale" title="Scale (S)">Scale</button>
 <button data-select="box" title="Box select (B)">Box select</button><button data-select="circle" title="Circle / paint select (C)">Circle select</button><button data-select="lasso">Lasso</button>
 <button data-sketch="line">Line</button><button data-sketch="rectangle">Rectangle</button><button data-sketch="circle">Circle</button><button data-sketch="bezier">Draw curve</button><button data-sketch="tape">Dimension</button><button data-sketch="tape">Tape measure</button>
-</div><div id="pv-hints" class="pv-hints"><strong id="pv-hint-title">View</strong><div id="pv-hint-text"></div></div><canvas id="pv-canvas" aria-label="3D preview"></canvas><div id="pv-msg" class="muted hidden"></div><div id="pv-proxy" class="hidden"><span id="pv-proxy-text"></span><button id="pv-full" class="small">Full res</button></div></div>
-        <div class="pv-opts pv-display-strip" role="group" aria-label="Display options">
-          <select id="pv-detail" aria-label="Viewport detail" title="Detail: Auto draws a big geometry reduced but at full detail while you select; Full always draws everything the viewer can hold; Fast always reduces"><option value="auto">Detail: Auto</option><option value="full">Detail: Full</option><option value="fast">Detail: Fast</option></select>
-          <select id="pv-proxy-level" aria-label="Cook proxy level" title="Cook proxy: nodes cook a lighter version of the scene (counts, resolutions and voxel sizes scale). Full is the real thing."></select>
-          <select id="pv-display-mode" aria-label="Viewport display mode"><option value="shaded">Shaded</option><option value="edges">Shaded + edges</option><option value="wire">Wireframe</option><option value="points">Points</option></select>
-          <label class="small"><input type="checkbox" id="pv-shaded" checked> shaded</label>
-          <label class="small"><input type="checkbox" id="pv-edges" checked> edges</label>
-          <label class="small"><input type="checkbox" id="pv-points"> points</label>
-          <label class="small" title="Show the ground grid and world axes"><input type="checkbox" id="pv-grid" checked> grid</label>
-          <label class="small" title="Draw each face's normal (from its winding) as a line from its centre"><input type="checkbox" id="pv-normals"> normals</label>
-          <label class="small" title="Outline the bounding box of the displayed geometry and label its size"><input type="checkbox" id="pv-bounds"> bounds</label>
-          <button id="pv-perf-btn" class="small" aria-haspopup="dialog" aria-expanded="false" title="Performance and view clipping for very large scenes: impostors for instances, display budget, culling, near/far clip, section plane">Perf ▾</button>
+</span>
+        <span class="pv-tool-strip" role="group" aria-label="Attribute tools">
+          <button id="pv-paint-btn" class="pv-tool" title="Paint an attribute onto points, faces or edges (5)" aria-label="Paint"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M13 3l4 4-7 7H6v-4z"/><path d="M5 17c2 0 3-1 3-3" /></svg><span>Paint</span></button>
+          <button id="pv-assign-btn" class="pv-tool" title="Quick assign: give the selection an attribute value" aria-label="Assign"><svg class="ic" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10V4h6l8 8-6 6z"/><circle cx="6.5" cy="7.5" r="1" class="f"/></svg><span>Assign</span></button>
+        </span>
         </div>
-        <button id="pv-hints-toggle" title="Show tool hints" aria-label="Show tool hints" aria-pressed="true">?</button>
+        <div class="pv-wrap"><div id="pv-hints" class="pv-hints"><strong id="pv-hint-title">View</strong><div id="pv-hint-text"></div></div><canvas id="pv-canvas" aria-label="3D preview"></canvas><div id="pv-msg" class="muted hidden"></div><div id="pv-proxy" class="hidden"><span id="pv-proxy-text"></span><button id="pv-full" class="small">Full res</button></div><button id="pv-hints-toggle" title="Show tool hints" aria-label="Show tool hints" aria-pressed="true">?</button></div>
+        <div class="pv-opts pv-display-strip" id="pv-side" role="group" aria-label="Display settings">
+          <details class="pv-sec" open><summary>Shading</summary>
+            <select id="pv-display-mode" aria-label="Viewport display mode"><option value="shaded">Shaded</option><option value="edges">Shaded + edges</option><option value="wire">Wireframe</option><option value="points">Points</option></select>
+            <label><input type="checkbox" id="pv-shaded" checked> Shaded</label>
+            <label><input type="checkbox" id="pv-edges" checked> Edges</label>
+            <label><input type="checkbox" id="pv-points"> Points</label>
+          </details>
+          <details class="pv-sec" open><summary>Overlays</summary>
+            <label title="Show the ground grid and world axes"><input type="checkbox" id="pv-grid" checked> Grid</label>
+            <label title="Draw each face's normal (from its winding) as a line from its centre"><input type="checkbox" id="pv-normals"> Face normals</label>
+            <label title="Outline the bounding box of the displayed geometry and label its size"><input type="checkbox" id="pv-bounds"> Bounds</label>
+          </details>
+          <details class="pv-sec" open><summary>Detail</summary>
+            <select id="pv-detail" aria-label="Viewport detail" title="Detail: Auto draws a big geometry reduced but at full detail while you select; Full always draws everything the viewer can hold; Fast always reduces"><option value="auto">Detail: Auto</option><option value="full">Detail: Full</option><option value="fast">Detail: Fast</option></select>
+            <select id="pv-proxy-level" aria-label="Cook proxy level" title="Cook proxy: nodes cook a lighter version of the scene (counts, resolutions and voxel sizes scale). Full is the real thing."></select>
+            <button id="pv-perf-btn" class="small" aria-haspopup="dialog" aria-expanded="false" title="Performance and view clipping for very large scenes: impostors for instances, display budget, culling, near/far clip, section plane">Performance ▾</button>
+          </details>
+                <label class="pv-path-setting">Ctrl-click path <select id="pv-path-mode"><option value="direct">Most direct</option><option value="shortest">Shortest (fewest steps)</option></select></label>
+      <details id="pv-proportional"><summary>Proportional editing</summary><label><input id="pv-proportional-enabled" type="checkbox"> Enable (O)</label><label>Radius <input id="pv-proportional-radius" type="number" min="0.0001" value="1" step="0.1"></label><select id="pv-proportional-falloff"><option>smooth</option><option>sphere</option><option>root</option><option>sharp</option><option>linear</option><option>constant</option><option>random</option></select><label><input id="pv-proportional-connected" type="checkbox"> Connected only</label><label><input id="pv-proportional-projected" type="checkbox"> Projected</label></details>
+          <details id="pv-sketch" class="pv-sec"><summary>Sketch &amp; Measure</summary><div id="pv-sketch-panel"></div></details>
+        </div>
       </div>
       <div id="sheet" class="pv-sheet hidden" aria-label="Geometry spreadsheet"></div>
       <div id="pv-actions" class="pv-actions hidden"></div>
@@ -290,6 +337,7 @@
 <script src="/static/viewport-placement.js"></script>
 <script src="/static/selection-tools.js"></script>
 <script src="/static/preview.js"></script>
+<script src="/static/viewport-ui.js"></script>
 <script src="/static/curve-tool.js"></script>
 <script src="/static/sketch-tool.js"></script>
 <script src="/static/loop-tool.js"></script>

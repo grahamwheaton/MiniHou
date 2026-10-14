@@ -706,9 +706,82 @@ path.hit.cut-mark {stroke:#ff6464;stroke-opacity:1;stroke-width:4px;}
 #network-pane-header .flag-legend {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 #network-pane-header label {white-space:nowrap;flex-shrink:0;}
 
-#pv-left-tools {position:absolute;z-index:8;left:4px;top:60px;display:flex;flex-direction:column;gap:2px;max-height:calc(100% - 70px);overflow-y:auto;background:#252a30dd;padding:3px;border-radius:4px;}
-#pv-left-tools button {font-size:10px;padding:3px 5px;text-align:left;}
-.pv-path-setting {font-size:11px;padding:3px 8px;}
+/* 3-D viewport in Blender's layout: header menus on top, tools down the left, display settings on the right. */
+#preview > .pv-header { flex: none; display: flex; align-items: center; gap: 4px; min-height: 28px; padding: 2px 6px; background: #2d3238; border-bottom: 1px solid #13171b; font-size: 11px; flex-wrap: wrap; }
+.pv-header > button, .pv-header > details > summary { background: transparent; border: 1px solid transparent; padding: 2px 8px; font-size: 12px; border-radius: 3px; }
+.pv-header > button:hover:not(:disabled), .pv-header > button[aria-expanded=true], .pv-header > details[open] > summary, .pv-header > details > summary:hover { background: #3d434a; border-color: #565e68; }
+.pv-header select { font-size: 11px; padding: 1px 3px; max-width: 130px; }
+.pv-header .pv-chip { display: inline-flex; align-items: center; gap: 5px; background: #3b4048; border-color: #4a515a; padding: 2px 8px; margin-right: 4px; }
+.pv-header .pv-chip strong { font-size: 11px; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.pv-header .pv-chip .caret { margin: 0; }
+.pv-header button.on { background: #4b4233; border-color: #a27c42; color: #f4d098; }
+.pv-header .pv-check { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; white-space: nowrap; cursor: pointer; }
+.pv-header .pv-sep { width: 1px; align-self: stretch; margin: 2px 4px; background: #454a51; }
+.pv-header .spacer { flex: 1; }
+.pv-header #pv-node { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pv-header #pv-frame, .pv-header #pv-side-btn, .pv-header #pv-max { padding: 2px 7px; font-size: 13px; }
+.pv-header .pv-settings-pop { position: relative; }
+.pv-header .pv-settings-pop summary { list-style: none; cursor: default; user-select: none; }
+.pv-header .pv-settings-pop summary::-webkit-details-marker { display: none; }
+.pv-header .pv-settings { top: 26px; left: 0; right: auto; }
+.pv-header .pv-settings button { margin-bottom: 4px; }
+svg.ic { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+svg.ic .f { fill: currentColor; stroke: none; }
+svg.ic .fl { fill: currentColor; fill-opacity: .35; }
+.pv-chip svg.ic { width: 14px; height: 14px; }
 
-#preview .pv-wrap {margin-left:90px;}
-#pv-left-tools {left:-88px;top:4px;width:80px;max-height:calc(100% - 8px);}
+.pv-menu { position: fixed; z-index: 190; min-width: 210px; padding: 4px; background: #2c3137; border: 1px solid #555d67; border-radius: 3px; box-shadow: 0 5px 18px #0008; display: flex; flex-direction: column; gap: 1px; }
+.pv-menu.hidden { display: none; }
+.pv-menu > button { display: flex; justify-content: space-between; gap: 24px; width: 100%; text-align: left; padding: 5px 10px; border: 0; background: transparent; }
+.pv-menu > button:hover, .pv-menu > button:focus-visible { background: #484238; color: #ffdc9e; outline: 0; }
+.pv-menu > button[aria-pressed=true] { color: #f4d098; }
+.pv-menu select { margin: 2px 6px 4px; }
+.pv-menu-h { padding: 6px 10px 2px; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); max-width: 260px; }
+.pv-menu-row { display: flex; gap: 2px; padding: 2px 6px; }
+.pv-menu-row button { flex: 1; }
+
+#preview .pv-stage { gap: 0; }
+#preview .pv-left-tools { width: 50px; padding: 4px 3px; gap: 6px; background: #292e34; border-right: 1px solid #161a1e; overflow-y: auto; }
+.pv-left-tools .pv-tool-strip { display: flex; flex-direction: column; gap: 2px; padding-bottom: 6px; border-bottom: 1px solid #3a4047; }
+.pv-left-tools .pv-tool-strip:last-child { border-bottom: 0; }
+.pv-left-tools .pv-tool-strip.hidden { display: none; }
+.pv-left-tools button.pv-tool { display: flex; flex-direction: column; align-items: center; gap: 1px; width: 100%; padding: 4px 0 2px; border: 1px solid transparent; background: transparent; border-radius: 3px !important; font-size: 9px; line-height: 1.1; color: #c3c9d0; }
+.pv-left-tools button.pv-tool:hover:not(:disabled) { background: #3d434a; border-color: #565e68; }
+.pv-left-tools button.pv-tool.on { background: #4b4233; border-color: #a27c42; color: #f4d098; }
+.pv-left-tools button.pv-tool span { pointer-events: none; }
+
+#preview .pv-display-strip { display: flex; flex-direction: column; align-items: stretch; gap: 0; width: 190px; flex: none; padding: 0; background: #292e34; border-left: 1px solid #161a1e; overflow-y: auto; }
+#preview .pv-display-strip.hidden { display: none; }
+.pv-sec { border-bottom: 1px solid #1c2025; }
+.pv-sec > summary { padding: 5px 8px; font-size: 11px; font-weight: 600; background: #2d3238; color: #c8cdd3; cursor: default; user-select: none; list-style: none; }
+.pv-sec > summary::before { content: "▸"; display: inline-block; width: 12px; color: var(--muted); }
+.pv-sec[open] > summary::before { content: "▾"; }
+.pv-sec > summary::-webkit-details-marker { display: none; }
+.pv-sec > summary:hover { background: #363c43; }
+.pv-sec > select, .pv-sec > button { display: block; width: calc(100% - 16px); margin: 5px 8px; font-size: 11px; }
+.pv-sec > label { display: flex; align-items: center; gap: 6px; margin: 4px 8px; font-size: 11px; white-space: nowrap; cursor: pointer; }
+#preview .pv-display-strip label { font-size: 11px; }
+#pv-display-mode { max-width: none; font-size: 11px; }
+#pv-sketch { border-bottom: 0; }
+#pv-sketch > summary { border: 0; }
+#pv-sketch-panel { padding: 0 8px 8px; }
+#pv-sketch-panel input { width: 52px; }
+#pv-sketch-panel button { padding: 2px 5px; }
+#preview .pv-wrap { position: relative; }
+#pv-hints-toggle { right: 8px; bottom: 8px; }
+@media (max-width: 1100px) { #preview .pv-display-strip { width: 160px; } #preview .pv-left-tools { width: 44px; } }
+.pv-header #pv-snap-element { max-width: 92px; }
+.pv-header #pv-follow { max-width: 118px; }
+.pv-header #pv-orientation { max-width: 80px; }
+.pv-settings label select { width: 140px; }
+#pv-view-extra{width:calc(100% - 12px);max-width:none;}
+
+#preview .pv-display-strip { width: 156px; }
+#preview .pv-left-tools { width: 46px; }
+@media (max-width: 1100px) { #preview .pv-display-strip { width: 148px; } }
+
+#pv-left-tools [data-op], #pv-left-tools [data-select], #pv-left-tools [data-sketch] {font-size:9px;padding:4px 1px;white-space:normal;overflow-wrap:anywhere;}
+.pv-path-setting {display:block;font-size:11px;padding:4px;}
+#pv-proportional {font-size:11px;padding:4px;}
+#pv-proportional label {white-space:normal;display:block;}
+#pv-proportional input[type=number] {width:65px;}
