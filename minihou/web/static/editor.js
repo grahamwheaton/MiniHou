@@ -1436,7 +1436,7 @@
     if(pvKeepCameraNode===node)pvKeepCameraNode=null;
     pv.selectableTemplates=head.selectable_templates||[];
     if(head.template_warnings?.length)pvMsg(head.template_warnings.join('\n'));
-    pv.setHandles(head.handles || []);
+    pv.setHandles((head.handles || []).map(h=>({...h,length:!!window.MiniLengthParams?.has(nodeOf(node)?.type,h.param)})));
     refreshSelectionHandles();                                                 // a kept selection moved with the geometry: so does its gizmo
     updateToolButtons();
     pvNode = node; pvPath = S.path;
@@ -1737,7 +1737,13 @@
     try {const saved=JSON.parse(localStorage.getItem('minihou.interaction')||'{}');if(saved.custom?.length===3&&saved.custom.every(v=>v.length===3&&v.every(Number.isFinite)))pv.interaction.custom=MiniInteraction.normalFrame(saved.custom[2],saved.custom[0]);}catch{}
     for(const key of ['moveStep','angleStep','scaleStep'])if(!Number.isFinite(pv.interaction[key])||pv.interaction[key]<=0)pv.interaction[key]=key==='angleStep'?15:0.1;
     const store=()=>{localStorage.setItem('minihou.interaction',JSON.stringify(pv.interaction));refreshSelectionHandles();pv.redraw();};
-    for(const [selector,key] of controls){const e=$(selector);if(e.type==='checkbox')e.checked=pv.interaction[key];else e.value=pv.interaction[key];e.onchange=()=>{let v=e.type==='checkbox'?e.checked:e.type==='number'?Number(e.value):e.value;if(e.type==='number'&&(!Number.isFinite(v)||v<=0)){e.value=pv.interaction[key];return;}pv.interaction[key]=v;store();if(key.startsWith('proportional_'))pv.onProportional?.();};}
+    const lengthKeys=new Set(['moveStep','proportional_radius']);
+    for(const [selector,key] of controls){const e=$(selector),isLength=lengthKeys.has(key),show=v=>isLength&&window.MiniUnits?MiniUnits.display(v):v;
+      let suffix;if(isLength){suffix=h('span',{class:'muted small'});e.after(suffix);}
+      const sync=()=>{if(e.type==='checkbox')e.checked=pv.interaction[key];else if(document.activeElement!==e)e.value=show(pv.interaction[key]);if(suffix)suffix.textContent=' '+(window.MiniUnits?.unit||'model units');};sync();
+      if(isLength)window.addEventListener('minihou-units-changed',sync);
+      e.onchange=()=>{if(isLength&&e.value===''){e.value=show(pv.interaction[key]);return;}let v=e.type==='checkbox'?e.checked:e.type==='number'?(isLength&&window.MiniUnits?MiniUnits.parse(e.value):Number(e.value)):e.value;if(e.type==='number'&&(!Number.isFinite(v)||v<=0)){e.value=show(pv.interaction[key]);return;}pv.interaction[key]=v;store();if(key.startsWith('proportional_'))pv.onProportional?.();};}
+
     document.querySelectorAll('.pv-cursor-angle').forEach(e=>{const i=Number(e.dataset.axis);e.value=pv.interaction.cursor[i];e.onchange=()=>{if(Number.isFinite(Number(e.value))){pv.interaction.cursor[i]=Number(e.value);store();}};});
     $('#pv-custom-frame').onclick=()=>{pv.interaction.orientation='normal';pv.interaction.custom=pv.orientationFrame();pv.interaction.orientation='custom';$('#pv-orientation').value='custom';store();};
     pv.onSelect = renderSelectionTools;
@@ -1761,7 +1767,7 @@
       return h.kind==='plane'?handleBase:h.comp === null || h.comp === undefined ? Number(cur) : Number(Array.isArray(cur) ? cur[h.comp] : NaN);
     };
     function proportionalParams(){const i=pv.interaction,m=pv.camera().MV;return {proportional_enabled:i.proportional_enabled,proportional_radius:i.proportional_radius,proportional_falloff:i.proportional_falloff,proportional_connected:i.proportional_connected,proportional_projected:i.proportional_projected,proportional_view_direction:[m[2],m[6],m[10]]};}
-    pv.onProportional=()=>{const id=handleContext?(gizmoNode||originalNode):pvNode;if(nodeOf(id)?.type==='transform')for(const [k,v]of Object.entries(proportionalParams())){if(k==='proportional_view_direction'&&!(pv.interaction.proportional_enabled&&pv.interaction.proportional_projected))continue;handleSet(id,k,v);}$('#pv-proportional-radius').value=pv.interaction.proportional_radius;};
+    pv.onProportional=()=>{const id=handleContext?(gizmoNode||originalNode):pvNode;if(nodeOf(id)?.type==='transform')for(const [k,v]of Object.entries(proportionalParams())){if(k==='proportional_view_direction'&&!(pv.interaction.proportional_enabled&&pv.interaction.proportional_projected))continue;handleSet(id,k,v);}$('#pv-proportional-radius').value=window.MiniUnits?MiniUnits.display(pv.interaction.proportional_radius):pv.interaction.proportional_radius;};
     async function startSelectionDrag(h) {                                // the first drag on a selection's gizmo creates the transform node
       const info = pv.selectionInfo();
       if (!info || !pvNode || !nodeOf(pvNode)) return NaN;

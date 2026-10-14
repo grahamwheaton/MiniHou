@@ -50,6 +50,18 @@ class LengthFieldBrowserTests(unittest.TestCase):
         self.assertIn('(cm)',self.page.locator('#params .prow[data-param="size"] .pl').inner_text())
         self.assertEqual(self.s.graph.nodes['b'].params['size'][0],2.5)
 
+    def test_snap_increment_and_proportional_radius_use_display_units(self):
+        self.box_scene()
+        self.page.evaluate("MiniUnits.configure({length_unit:'mm',unit_scale:1})")
+        self.page.evaluate("document.querySelector('#pv-move-step').value='25';document.querySelector('#pv-move-step').dispatchEvent(new Event('change'))")
+        self.assertAlmostEqual(self.page.evaluate('minihou.preview.interaction.moveStep'),.025)
+        self.page.evaluate("document.querySelector('#pv-proportional-radius').value='500';document.querySelector('#pv-proportional-radius').dispatchEvent(new Event('change'))")
+        self.assertAlmostEqual(self.page.evaluate('minihou.preview.interaction.proportional_radius'),.5)
+        self.assertEqual(float(self.page.locator('#pv-angle-step').input_value()),15)
+        self.page.evaluate("MiniUnits.configure({length_unit:'cm',unit_scale:1})")
+        self.assertEqual(float(self.page.locator('#pv-move-step').input_value()),2.5)
+        self.assertEqual(float(self.page.locator('#pv-proportional-radius').input_value()),50)
+
     def test_modal_explicit_length_and_exact_typed_value(self):
         self.page.evaluate("MiniUnits.configure({length_unit:'mm',unit_scale:1})")
         self.page.evaluate("""()=>{window.unitUpdates=[];window.unitTool=MiniModalModelTool({showFeedback:t=>window.unitHint=t},document.querySelector('#pv-canvas'),{start:async()=>({value:0,scale:.01}),update:async(c,v)=>unitUpdates.push(v),finish:async()=>{}});unitTool.start('extrude',100,100);}""")
