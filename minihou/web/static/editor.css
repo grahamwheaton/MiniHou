@@ -850,3 +850,15 @@ svg.ic .fl { fill: currentColor; fill-opacity: .35; }
 #preferences::-webkit-scrollbar,#preview .pv-display-strip::-webkit-scrollbar {width:8px;}
 #preferences::-webkit-scrollbar-thumb,#preview .pv-display-strip::-webkit-scrollbar-thumb {background:#707987;border-radius:4px;}
 #preferences::-webkit-scrollbar-track,#preview .pv-display-strip::-webkit-scrollbar-track {background:#252a30;}
+
+/* Editing measurements needs a form-sized inspector, not the compact display
+   strip. Size against the viewport pane, including split-editor layouts. */
+#preview .pv-display-strip:has(#pv-sketch[open] [data-measurement-status]) {
+  width:clamp(240px,52cqw,320px);
+  max-width:calc(100% - 76px);
+}
+#pv-sketch[open] {padding:0 10px 10px;}
+#pv-sketch[open] #pv-sketch-panel {font-size:12px;}
+#pv-sketch[open] #pv-sketch-panel label {font-size:12px;}
+#pv-sketch[open] #pv-sketch-panel input,#pv-sketch[open] #pv-sketch-panel select {min-height:28px;font-size:12px;}
+#preview .pv-wrap {overflow:hidden;}

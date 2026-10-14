@@ -16,7 +16,7 @@ class MeasurementLayoutTests(unittest.TestCase):
     def test_preferences_groups_never_overlap_and_all_controls_reachable(self):
         self.box_scene();p=self.page;p.click('#preferences-btn')
         p.select_option('#pref-length-unit','mm');p.wait_for_function("MiniUnits.unit==='mm'")
-        for width,height in [(1400,960),(1000,700)]:
+        for width,height in [(1400,950),(1000,700)]:
             p.set_viewport_size({'width':width,'height':height})
             groups=p.evaluate("""()=>[...document.querySelectorAll('#preferences fieldset:not([hidden])')].map(f=>{const r=f.getBoundingClientRect();return {top:r.top,bottom:r.bottom,content:[...f.querySelectorAll('label,p')].map(e=>e.getBoundingClientRect().bottom)}})""")
             for a,b in zip(groups,groups[1:]):self.assertLessEqual(a['bottom'],b['top']+1)
@@ -42,15 +42,26 @@ class MeasurementLayoutTests(unittest.TestCase):
         with p.expect_response('**/api/measurement_positions'):
             self.s.edit([{'op':'measurements','values':[{'id':'width','points':[[-1,-1,1],[1,-1,1]],'refs':[None,None],'label':'Box width','label_offset':[8,-8]}]}])
         p.wait_for_selector('[data-measurement="width"]');p.locator('[data-measurement="width"]').click()
-        for width,height in [(1400,960),(1000,700)]:
+        for width,height in [(1400,950),(1000,700)]:
             p.set_viewport_size({'width':width,'height':height})
+            self.assertGreaterEqual(p.locator('.pv-display-strip').bounding_box()['width'],220)
             for selector in ['[aria-label="Measurement label"]','[aria-label^="Endpoint 1 X"]','[aria-label^="Endpoint 2 Z"]','[aria-label="Label Y offset (pixels)"]']:
                 input=p.locator(selector);input.scroll_into_view_if_needed()
                 a=input.bounding_box();b=p.locator('.pv-display-strip').bounding_box()
                 self.assertGreaterEqual(a['x'],b['x']);self.assertLessEqual(a['x']+a['width'],b['x']+b['width'])
                 self.assertGreaterEqual(a['y'],b['y']);self.assertLessEqual(a['y']+a['height'],b['y']+b['height'])
             self.assertTrue(p.evaluate("document.querySelector('.pv-display-strip').scrollWidth<=document.querySelector('.pv-display-strip').clientWidth+1"))
-        p.set_viewport_size({'width':1400,'height':960});p.get_by_label('Measurement label',exact=True).scroll_into_view_if_needed()
+            # Actually edit at the small split size, not just inspect rectangles.
+            label=p.get_by_label('Measurement label',exact=True)
+            label.fill('Readable width');label.press('Tab')
+            self.assertTrue(fixture.until(lambda:self.s.graph.measurements[0]['label']=='Readable width'))
+            endpoint=p.locator('[aria-label^="Endpoint 2 X"]')
+            endpoint.click()
+            self.assertTrue(endpoint.evaluate('(el)=>document.activeElement===el'))
+            endpoint.fill('1500 mm');endpoint.press('Tab')
+            self.assertTrue(fixture.until(lambda:self.s.graph.measurements[0]['points'][1][0]==1.5))
+        p.set_viewport_size({'width':1400,'height':950});p.get_by_label('Measurement label',exact=True).scroll_into_view_if_needed()
+        p.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
         destination=Path(__file__).resolve().parents[2]/'user-fixes-20261014'
         if destination.is_dir():p.screenshot(path=str(destination/'measurement-editor-layout.png'))
         p.get_by_role('button',name='Delete measurement',exact=True).click()
