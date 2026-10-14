@@ -44,6 +44,7 @@
       close();
       if (target) target.click();
     });
+    pop.addEventListener("change", close);                      // picking from a dropdown inside a menu finishes it too
     pop.addEventListener("keydown", (e) => {
       if (!["ArrowDown", "ArrowUp"].includes(e.key)) return;
       const items = [...pop.querySelectorAll("button:not(:disabled)")], at = items.indexOf(document.activeElement);

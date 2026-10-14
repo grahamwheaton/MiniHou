@@ -775,3 +775,15 @@ svg.ic .fl { fill: currentColor; fill-opacity: .35; }
 .pv-header #pv-orientation { max-width: 80px; }
 .pv-settings label select { width: 140px; }
 #pv-view-extra{width:calc(100% - 12px);max-width:none;}
+
+/* The display panel floats over the right edge of the view (Blender's sidebar overlaps its viewport too), so a narrow
+   split layout keeps its drawing area; the overlays that sit at the right edge step aside while it is open. */
+#preview .pv-display-strip { position: absolute; right: 0; top: 0; bottom: 0; z-index: 4; background: #292e34ee; }
+.pv-stage:has(#pv-side:not(.hidden)) .pv-gizmo,
+.pv-stage:has(#pv-side:not(.hidden)) .pv-attr-card,
+.pv-stage:has(#pv-side:not(.hidden)) .pv-perf { right: 198px; }
+.pv-stage:has(#pv-side:not(.hidden)) #pv-hints-toggle { right: 198px; }
+@media (max-width: 1100px) {
+  .pv-stage:has(#pv-side:not(.hidden)) .pv-gizmo, .pv-stage:has(#pv-side:not(.hidden)) .pv-attr-card,
+  .pv-stage:has(#pv-side:not(.hidden)) .pv-perf, .pv-stage:has(#pv-side:not(.hidden)) #pv-hints-toggle { right: 168px; }
+}
