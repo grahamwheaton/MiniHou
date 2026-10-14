@@ -53,9 +53,9 @@ Sphere UV Mapping | HAVE |  | uv_project spherical
 Triplanar UV Mapping | HAVE |  | uv_project box
 Face UV | PART |  | uv_flatten gives per-island unwrap + packing; "one island per face" is uv_flatten with split by face
 Mesh UV Unfold | HAVE |  | uv_flatten (LSCM unwrap + island packing)
-UV Transform | NATIVE | 1 | uv_transform :: uv_transform: translate/rotate/scale/flip UVs per island or selection, with random per island. Basic UV tool MiniHou lacks
-UV Mirror | NATIVE | 2 | uv_transform :: folded into uv_transform (mirror about an axis)
-UV Align to Direction | NATIVE | 2 | uv_transform :: folded into uv_transform (rotate each island so a direction points up)
+UV Transform | HAVE | | built: uv_transform
+UV Mirror | HAVE | | built: uv_transform
+UV Align to Direction | HAVE | | built: uv_transform
 UV Seam | PART |  | uv_flatten seam_angle; "seam where uv is discontinuous" is a measure/group option
 UV Measure | NATIVE | 3 | measure (uv options) :: folded into measure (uv area vs 3-D area, distortion, island count)
 UV Tangent | FN | 3 | wrangle snippet / attribute
@@ -85,7 +85,7 @@ Curve Intersection | LIB | 3 | segment/segment intersection test with an Interse
 Curve Mesh Boolean | SKIP |  | exists in spirit as clip/boolean on polygons; low demand
 Curve Offset | PART | 2 | polyexpand2d offsets 2-D outlines; a 3-D offset with axis rotation and duplicate count is new
 Curve Point Angle | FN | 3 | measure option / wrangle (turning angle per point)
-Decimate Curve | NATIVE | 1 | curve_simplify :: curve_simplify (Ramer-Douglas-Peucker by angle/distance + smooth). resample only goes the other way
+Decimate Curve | HAVE | | built: curve_simplify
 Dynamic Catenary Splines | LIB | 2 | hanging cables between points: catenary solve per spline (cable/rope scenes)
 Edge Bundling | LIB | 3 | force-directed bundling of curves
 Tubes to Splines | LIB | 2 | recovers the centre curve of tube meshes (inverse of sweep)
@@ -125,11 +125,11 @@ Triangle Mesh to Voronoi | NATIVE | 2 | dual :: dual mesh (Voronoi cells of a tr
 Connect Points | LIB | 3 | edges between points within a distance
 Cube Recursive Subdivision | LIB | 3 | generative art
 Edge Offset | PART | 3 | polyextrude of edges + inset; "offset/extrude/duplicate" modes on edge selections is new
-Marching Squares Isolines | NATIVE | 1 | contour :: contour node: iso-lines of a point attribute on a mesh (squares or triangles, linear interpolation, multiple lines). Four Higgsas nodes (squares/triangles x isolines/surface) are one MiniHou node
-Marching Squares Surface | NATIVE | 1 | contour :: contour node, mode "surface" (cut the mesh where an attribute crosses a threshold)
-Marching Triangles Isolines | NATIVE | 1 | contour :: contour node
-Marching Triangles Surface | NATIVE | 1 | contour :: contour node
-Mesh Contours | NATIVE | 1 | slice :: slice node: curves from planes through a mesh at a spacing (topographic lines, 3-D print slicing), optional fill. Needs topology access, slow in a node-tree
+Marching Squares Isolines | HAVE | | built: contour
+Marching Squares Surface | HAVE | | built: contour
+Marching Triangles Isolines | HAVE | | built: contour
+Marching Triangles Surface | HAVE | | built: contour
+Mesh Contours | HAVE | | built: slice
 Mesh Smooth Delete | LIB | 3 | remove faces under a smoothed threshold
 Mesh Auxetic Structure | LIB | 3 | rotating-squares mesh
 Mesh Face Divider | LIB | 3 | random face splitting (buildings, circuit boards)
@@ -139,7 +139,7 @@ Mesh Unfold | LIB | 3 | animated unfolding of a mesh along faces
 Maze Solver | LIB | 3 | maze generation/solve on a mesh
 Mesh to Ascii | SKIP |  | novelty, render-side
 Shortest Points Path | LIB | 3 | path graph over points
-Solidify | NATIVE | 1 | solidify :: solidify: thickness (even), offset, rim/top/bottom groups. The single biggest basic modelling gap; Blender's Solidify modifier, Houdini's PolyExtrude with thickness
+Solidify | HAVE | | built: solidify
 Spheres Intersections | LIB | 3 | points + radii to blobby mesh
 Tessellate Mesh | LIB | 2 | tile instances on faces by topology (greebles, fabric)
 Tessellate Mesh Smooth | LIB | 2 | same with subdivision
@@ -161,12 +161,12 @@ Instances Index Ratio | LIB | 3 | choose instance index by weighted ratios; inst
 Instances Tile | LIB | 3 | tiled instances with culling
 Mesh Islands to Instances | LIB | 2 | each connected piece becomes an instance (connectivity + pivot at piece centre); useful for fracture/explode
 Place Instances on Ground | LIB | 2 | drop instances onto the ground with an orientation bias (ray + normal blend)
-Directional Falloff | NATIVE | 1 | falloff :: falloff: one node writes a 0..1 point attribute from a shape (sphere, directional, radial, wave, index, mesh distance, object); Higgsas has eight field nodes for this
-Spherical Falloff | NATIVE | 1 | falloff :: falloff
-Radial Falloff | NATIVE | 1 | falloff :: falloff
-Wave Falloff | NATIVE | 1 | falloff :: falloff (animated wave front, time driven)
-Index Falloff | NATIVE | 1 | falloff :: falloff
-Mesh Falloff | NATIVE | 1 | falloff :: falloff (distance to / inside a mesh)
+Directional Falloff | HAVE | | built: falloff
+Spherical Falloff | HAVE | | built: falloff
+Radial Falloff | HAVE | | built: falloff
+Wave Falloff | HAVE | | built: falloff
+Index Falloff | HAVE | | built: falloff
+Mesh Falloff | HAVE | | built: falloff
 Object Directional Falloff | SKIP |  | falloff with a Blender object transform: use the plain falloff and drive it from the object through the Blender link
 Object Spherical Falloff | SKIP |  | same
 Curl Noise 2D | FN | 1 | wrangle function curlnoise(p): divergence-free flow; noise() exists
@@ -177,8 +177,8 @@ Gradient Direction | FN | 2 | gradient of a point attribute over the mesh: a mea
 Face Tangent | FN | 3 | attribute from the first edge; measure option
 Geometry Center | FN | 3 | bound already gives centre; mean/median/vertex-centre options would cover it
 Set Center | LIB | 3 | move pivots to an edge or face centre
-Mesh Ambient Occlusion | NATIVE | 1 | occlusion :: occlusion: ray-cast AO as a point attribute (rays, spread, blur), optional external mesh. Same engine as Mesh Thickness
-Mesh Thickness | NATIVE | 1 | occlusion :: occlusion mode "thickness" (inward rays); masks for wear, dirt, SSS, 3-D print checks
+Mesh Ambient Occlusion | HAVE | | built: occlusion
+Mesh Thickness | HAVE | | built: occlusion
 Mesh Fresnel | FN | 3 | dot of normal and view vector: wrangle one-liner
 Mesh Tension | LIB | 3 | rest-position edge length ratio
 Planarize Face | NATIVE | 2 | planarize :: planarize: iterative projection of face points onto the best-fit plane (for quad panels, glass, CAD-like surfaces)
@@ -229,16 +229,16 @@ Points to SDF | PART |  | points_to_surface
 Points to SDF Metaballs | PART |  | points_to_surface blend
 SDF Boolean | HAVE |  | sdf_boolean (union/subtract/intersect with smooth)
 SDF to Mesh | PART |  | the SDF nodes mesh internally (mesh in, mesh out)
-SDF Sphere | NATIVE | 1 | sdf_shape :: sdf_shape: analytic SDF primitives (sphere, box, cylinder, capsule, ellipsoid, torus, round cone, polygon, heart, spiral) meshed with surface nets, with bevel/transition and rotation
-SDF Cube | NATIVE | 1 | sdf_shape :: sdf_shape
-SDF Cylinder | NATIVE | 1 | sdf_shape :: sdf_shape
-SDF Capsule | NATIVE | 1 | sdf_shape :: sdf_shape
-SDF Ellipsoid | NATIVE | 1 | sdf_shape :: sdf_shape
-SDF Torus | NATIVE | 1 | sdf_shape :: sdf_shape
-SDF Round Cone | NATIVE | 1 | sdf_shape :: sdf_shape
-SDF Polygon | NATIVE | 2 | sdf_shape :: sdf_shape
-SDF Heart | NATIVE | 3 | sdf_shape :: sdf_shape
-SDF Spiral | NATIVE | 3 | sdf_shape :: sdf_shape
+SDF Sphere | HAVE | | built: sdf_shape
+SDF Cube | HAVE | | built: sdf_shape
+SDF Cylinder | HAVE | | built: sdf_shape
+SDF Capsule | HAVE | | built: sdf_shape
+SDF Ellipsoid | HAVE | | built: sdf_shape
+SDF Torus | HAVE | | built: sdf_shape
+SDF Round Cone | HAVE | | built: sdf_shape
+SDF Polygon | HAVE | | built: sdf_shape
+SDF Heart | NATIVE | 3 | sdf_shape :: a heart and a spiral shape: not in sdf_shape yet (sphere, box, cylinder, capsule, ellipsoid, torus, round cone and prism are)
+SDF Spiral | NATIVE | 3 | sdf_shape :: a heart and a spiral shape: not in sdf_shape yet (sphere, box, cylinder, capsule, ellipsoid, torus, round cone and prism are)
 SDF Gyroid | NATIVE | 1 | sdf_lattice :: sdf_lattice: triply periodic minimal surfaces (gyroid, Schwarz P/D, IWP, Lidinoid) with scale, thickness, translate and rotate, clipped by a mesh. Very hot for lattices and 3-D printing
 SDF Schwarz P | NATIVE | 1 | sdf_lattice :: sdf_lattice
 SDF Schwarz D | NATIVE | 1 | sdf_lattice :: sdf_lattice

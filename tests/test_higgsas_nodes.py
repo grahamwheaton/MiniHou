@@ -71,8 +71,6 @@ class SolidifyTests(unittest.TestCase):
         self.assertFalse((top & bottom).any() or (top & side).any() or (bottom & side).any())
 
     def test_attributes_ride_along(self):
-        nodes = {"w": {"type": "wrangle", "inputs": {"geo": "s"}, "params": {"snippet": "@Cd = set(@P.x, 0, 0);"}},
-                 "m": {"type": "set_material", "inputs": {"geo": "w"}, "params": {}}}
         src = {"type": "grid", "params": {"rows": 3, "columns": 3}}
         g = one("solidify", {"thickness": 0.1}, src=src, extra={"w": {"type": "wrangle", "inputs": {"geo": "s"}, "params": {"snippet": "@Cd = set(@P.x, 0, 0);"}}},
                 inputs={"geo": "w"})
@@ -342,6 +340,190 @@ class SliceTests(unittest.TestCase):
             one("slice", {"normal": [0, 0, 0]})
         empty = one("slice", {"origin": [0, 0, 9]})
         self.assertEqual(empty.nprims, 0)
+
+
+def shape(**params):
+    params.setdefault("voxel_size", 0.05)
+    return cook({"n": {"type": "sdf_shape", "params": params}}, "n")
+
+
+class SdfShapeTests(unittest.TestCase):
+    def test_sphere_matches_the_exact_volume_and_is_a_closed_quad_mesh(self):
+        g = shape(shape="sphere", radius=0.5)
+        closed(self, g)
+        self.assertTrue((g.topology.prim_sizes() == 4).all())
+        self.assertAlmostEqual(volume(g), 4 / 3 * np.pi * 0.5 ** 3, delta=0.03 * 4 / 3 * np.pi * 0.5 ** 3)
+        r = np.linalg.norm(g.P, axis=1)
+        self.assertLess(float(np.abs(r - 0.5).max()), 0.03)
+
+    def test_box_size_center_rotation_and_bevel(self):
+        g = shape(shape="box", size=[1.0, 2.0, 0.5], center=[1.0, 0.0, 0.0])
+        lo, hi = g.P.min(0), g.P.max(0)
+        np.testing.assert_allclose(hi - lo, [1.0, 2.0, 0.5], atol=0.06)
+        np.testing.assert_allclose((hi + lo) / 2, [1.0, 0.0, 0.0], atol=0.03)
+        rot = shape(shape="box", size=[1.0, 2.0, 0.5], rotate=[0, 0, 90])
+        np.testing.assert_allclose(rot.P.max(0) - rot.P.min(0), [2.0, 1.0, 0.5], atol=0.06)
+        sharp = volume(shape(shape="box", size=[1, 1, 1]))
+        round_ = volume(shape(shape="box", size=[1, 1, 1], bevel=0.2))
+        exact = 1 - (12 * (1 - 2 * 0.2) * 0.2 ** 2 * (1 - np.pi / 4) + 8 * 0.2 ** 3 * (1 - np.pi / 6))
+        self.assertLess(round_, sharp)
+        self.assertAlmostEqual(round_, exact, delta=0.04)
+
+    def test_cylinder_capsule_ellipsoid_torus_cone_prism(self):
+        cyl = shape(shape="cylinder", radius=0.4, depth=1.0)
+        self.assertAlmostEqual(volume(cyl), np.pi * 0.16, delta=0.04 * np.pi * 0.16)
+        cap = shape(shape="capsule", radius=0.3, depth=0.8)
+        self.assertAlmostEqual(volume(cap), np.pi * 0.09 * 0.8 + 4 / 3 * np.pi * 0.027, delta=0.05)
+        self.assertAlmostEqual(float(cap.P[:, 2].max()), 0.7, delta=0.04)
+        ell = shape(shape="ellipsoid", size=[1.0, 0.6, 0.4])
+        self.assertAlmostEqual(volume(ell), 4 / 3 * np.pi * 0.5 * 0.3 * 0.2, delta=0.02)
+        tor = shape(shape="torus", radius=0.5, minor_radius=0.15)
+        self.assertAlmostEqual(volume(tor), 2 * np.pi ** 2 * 0.5 * 0.15 ** 2, delta=0.03)
+        closed(self, tor)
+        cone = shape(shape="round_cone", radius=0.3, radius2=0.1, depth=1.0)
+        self.assertAlmostEqual(float(cone.P[:, 2].min()), -0.5 - 0.3, delta=0.05)
+        self.assertAlmostEqual(float(cone.P[:, 2].max()), 0.5 + 0.1, delta=0.05)
+        sq = shape(shape="prism", sides=4, radius=0.5, depth=1.0)
+        self.assertAlmostEqual(volume(sq), 0.5 * 1.0, delta=0.04)                           # a square of circumradius 0.5 has area 0.5
+
+    def test_smoothing_and_limits(self):
+        g = shape(shape="box", size=[1, 1, 1], smooth=3)
+        sharp = shape(shape="box", size=[1, 1, 1])
+        self.assertLess(volume(g), volume(sharp))
+        with self.assertRaises(Exception):
+            shape(shape="sphere", radius=50.0, voxel_size=0.01)                               # more voxels than allowed
+        with self.assertRaises(Exception):
+            shape(shape="sphere", voxel_size=0.0)
+
+
+def corner_uv(g):
+    return g.vertex["uv"].astype(np.float64) if "uv" in g.vertex else g.point["uv"][g.topology.vertex_point].astype(np.float64)
+
+
+class UvTransformTests(unittest.TestCase):
+    SRC = {"type": "grid", "params": {"size_x": 2, "size_y": 2, "rows": 3, "columns": 3}}              # point uv 0..1, u along x
+
+    def base(self):
+        return corner_uv(cook({"s": self.SRC}, "s"))
+
+    def test_scale_translate_rotate_flip_about_the_pivot(self):
+        b = self.base()
+        g = one("uv_transform", {"scale": [2, 3, 1], "translate": [0.1, 0.2, 0], "pivot": "custom", "pivot_uv": [0, 0, 0]}, src=self.SRC)
+        np.testing.assert_allclose(corner_uv(g), b * [2, 3] + [0.1, 0.2], atol=1e-6)
+        r = one("uv_transform", {"rotate": 90.0}, src=self.SRC)                                       # about the centre of the uv bounds
+        d = b - 0.5
+        np.testing.assert_allclose(corner_uv(r), np.stack([-d[:, 1], d[:, 0]], 1) + 0.5, atol=1e-6)
+        f = one("uv_transform", {"flip_u": True}, src=self.SRC)
+        np.testing.assert_allclose(corner_uv(f), np.stack([1 - b[:, 0], b[:, 1]], 1), atol=1e-6)
+        v = one("uv_transform", {"flip_v": True}, src=self.SRC)
+        np.testing.assert_allclose(corner_uv(v), np.stack([b[:, 0], 1 - b[:, 1]], 1), atol=1e-6)
+        self.assertNotIn("uv", f.point)                                                                 # now a face-corner attribute
+
+    def test_islands_each_scale_about_their_own_centre(self):
+        extra = {"p": {"type": "uv_project", "inputs": {"geo": "s"}, "params": {"method": "box"}}}
+        src = {"type": "box"}
+        p = one("uv_project", {"method": "box"}, src=src)
+        g = one("uv_transform", {"scope": "island", "scale": [0.5, 0.5, 1]}, src=src, extra=extra, inputs={"geo": "p"})
+        t = g.topology
+        for i in range(g.nprims):
+            rows = slice(t.prim_offsets[i], t.prim_offsets[i + 1])
+            before, after = corner_uv(p)[rows], corner_uv(g)[rows]
+            np.testing.assert_allclose((before.max(0) + before.min(0)) / 2, (after.max(0) + after.min(0)) / 2, atol=1e-6)   # each face is its own island
+            np.testing.assert_allclose(np.ptp(after, axis=0), np.ptp(before, axis=0) * 0.5, atol=1e-6)
+        from minihou.nodes.uv import uv_islands
+        self.assertEqual(int(uv_islands(p, corner_uv(p)).max()) + 1, 6)
+        self.assertEqual(int(uv_islands(cook({"s": self.SRC}, "s"), self.base()).max()) + 1, 1)
+
+    def test_random_per_face_is_seeded_and_group_limited(self):
+        a = one("uv_transform", {"scope": "face", "random_translate": [0.3, 0.3, 0], "random_rotate": 45.0, "random_scale": 0.3, "seed": 5}, src=self.SRC)
+        b = one("uv_transform", {"scope": "face", "random_translate": [0.3, 0.3, 0], "random_rotate": 45.0, "random_scale": 0.3, "seed": 5}, src=self.SRC)
+        c = one("uv_transform", {"scope": "face", "random_translate": [0.3, 0.3, 0], "random_rotate": 45.0, "random_scale": 0.3, "seed": 6}, src=self.SRC)
+        np.testing.assert_array_equal(a.vertex["uv"], b.vertex["uv"])
+        self.assertGreater(float(np.abs(a.vertex["uv"] - c.vertex["uv"]).max()), 0.01)
+        extra = {"gc": {"type": "group_create", "inputs": {"geo": "s"}, "params": {"name": "g", "domain": "primitives", "method": "pattern", "pattern": "0"}}}
+        g = one("uv_transform", {"translate": [1, 0, 0], "scope": "face", "group": "g"}, src=self.SRC, extra=extra, inputs={"geo": "gc"})
+        moved = np.abs(corner_uv(g) - self.base()).max(1) > 1e-6
+        self.assertEqual(moved.reshape(-1, 4).all(1).tolist(), [True, False, False, False])
+
+    def test_align_turns_the_islands_so_a_direction_follows_a_uv_axis(self):
+        g = one("uv_transform", {"align": True, "direction": [1, 0, 0], "align_axis": "v"}, src=self.SRC)
+        uv, P = corner_uv(g), cook({"s": self.SRC}, "s").P[cook({"s": self.SRC}, "s").topology.vertex_point]
+        self.assertGreater(float(np.corrcoef(P[:, 0], uv[:, 1])[0, 1]), 0.999)                           # v now grows with x
+        self.assertLess(abs(float(np.corrcoef(P[:, 0], uv[:, 0])[0, 1])), 1e-6)
+        same = one("uv_transform", {"align": True, "direction": [0, 1, 0], "align_axis": "v"}, src=self.SRC)
+        np.testing.assert_allclose(corner_uv(same), self.base(), atol=1e-6)                              # already up
+        u = one("uv_transform", {"align": True, "direction": [0, 1, 0], "align_axis": "u"}, src=self.SRC)
+        self.assertGreater(float(np.corrcoef(P[:, 1], corner_uv(u)[:, 0])[0, 1]), 0.999)
+
+    def test_errors(self):
+        with self.assertRaises(Exception):
+            one("uv_transform", {"uv": "nope"}, src=self.SRC)
+        with self.assertRaises(Exception):
+            one("uv_transform", {"align": True, "direction": [0, 0, 0]}, src=self.SRC)
+
+
+def polyline_distance(points, line, closed):
+    """Distance of each point from the polyline through ``line``."""
+    seg_a = line
+    seg_b = np.roll(line, -1, axis=0) if closed else line[1:]
+    seg_a = line if closed else line[:-1]
+    d = seg_b - seg_a
+    ln = (d * d).sum(1)
+    q = points[:, None, :] - seg_a[None]
+    u = np.clip((q * d[None]).sum(2) / np.maximum(ln, 1e-30)[None], 0, 1)
+    return np.linalg.norm(q - u[..., None] * d[None], axis=2).min(1)
+
+
+class CurveSimplifyTests(unittest.TestCase):
+    CIRCLE = {"type": "circle", "params": {"divisions": 360, "radius": 1.0}}
+
+    def test_distance_method_stays_within_the_tolerance(self):
+        orig = cook({"s": self.CIRCLE}, "s")
+        for tol in (0.05, 0.01):
+            g = one("curve_simplify", {"tolerance": tol}, src=self.CIRCLE)
+            self.assertLess(g.npoints, orig.npoints // 5)
+            self.assertFalse(g.topology.has_open)                                                    # still a closed loop
+            self.assertLessEqual(float(polyline_distance(orig.P.astype(np.float64), g.P.astype(np.float64), True).max()), tol + 1e-6)
+
+    def test_open_curves_keep_their_ends_and_a_straight_line_becomes_two_points(self):
+        noisy = {"type": "line", "params": {"points": 50, "length": 4.0}}
+        g = one("curve_simplify", {"tolerance": 0.001}, src=noisy)
+        self.assertEqual(g.npoints, 2)
+        np.testing.assert_allclose(g.P[[0, 1], 2], [0.0, 4.0], atol=1e-6)
+        h = one("curve_simplify", {"tolerance": 0.01}, src={"type": "helix", "params": {"points": 200}})
+        self.assertTrue(h.topology.has_open)
+        orig = cook({"s": {"type": "helix", "params": {"points": 200}}}, "s")
+        np.testing.assert_allclose(h.P[0], orig.P[0], atol=1e-6)
+        np.testing.assert_allclose(h.P[-1], orig.P[-1], atol=1e-6)
+        self.assertLess(h.npoints, 100)
+
+    def test_angle_method_counts_turning(self):
+        g = one("curve_simplify", {"method": "angle", "angle": 10.0}, src=self.CIRCLE)
+        self.assertTrue(30 <= g.npoints <= 40)
+        coarse = one("curve_simplify", {"method": "angle", "angle": 45.0}, src=self.CIRCLE)
+        self.assertLess(coarse.npoints, g.npoints)
+
+    def test_attributes_ride_with_the_kept_points_and_a_group_pins_points(self):
+        extra = {"w": {"type": "wrangle", "inputs": {"geo": "s"}, "params": {"snippet": "i@orig = @ptnum;"}}}
+        g = one("curve_simplify", {"tolerance": 0.01}, src=self.CIRCLE, extra=extra, inputs={"geo": "w"})
+        orig = cook({"s": self.CIRCLE}, "s")
+        np.testing.assert_allclose(g.P, orig.P[g.point["orig"]], atol=1e-6)
+        self.assertEqual(g.point["orig"][0], 0)
+        extra["gc"] = {"type": "group_create", "inputs": {"geo": "w"}, "params": {"name": "pin", "domain": "points", "method": "pattern", "pattern": "7"}}
+        k = one("curve_simplify", {"tolerance": 0.01, "keep": "pin"}, src=self.CIRCLE, extra=extra, inputs={"geo": "gc"})
+        self.assertIn(7, k.point["orig"].tolist())
+
+    def test_smooth_moves_interior_points_but_not_the_ends(self):
+        src = {"type": "helix", "params": {"points": 120}}
+        a = one("curve_simplify", {"tolerance": 0.02}, src=src)
+        b = one("curve_simplify", {"tolerance": 0.02, "smooth": 4}, src=src)
+        self.assertEqual(a.npoints, b.npoints)
+        np.testing.assert_allclose(a.P[[0, -1]], b.P[[0, -1]], atol=1e-6)
+        self.assertGreater(float(np.abs(a.P[1:-1] - b.P[1:-1]).max()), 1e-4)
+
+    def test_errors(self):
+        with self.assertRaises(Exception):
+            one("curve_simplify", {}, src={"type": "curve", "params": {"points": "0,0,0 1,0,0"}})              # two points: nothing to simplify
 
 
 if __name__ == "__main__":

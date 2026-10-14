@@ -45,10 +45,11 @@ geo/input1..3 and variables a b c d i j v s flag) exists too, but it only runs w
 node-library files. To make something reusable, build it as a *system*: a graph
 saved in nodes/ (e.g. nodes/rock_scatter.json) with `input` nodes and exposed parameters becomes a node type that any
 graph can use (details in node_library). Houdini-style toolkit: groups (group_create, group_expand; most nodes take a group pattern
-like 'top ^side', '0-9' or '@P.z > 0'), modelling (boolean, polyextrude, polybevel, subdivide, clip, mirror, polyfill, delaunay, convex_hull, dissolve, skin, revolve, bridge;
+like 'top ^side', '0-9' or '@P.z > 0'), modelling (boolean, polyextrude, polybevel, solidify, subdivide, clip, mirror, polyfill, delaunay, convex_hull, dissolve, skin, revolve, bridge;
 tube and torus sources; smooth, peak, match_size, bound, copy_transform, switch; voronoi_fracture + exploded_view;
 polyreduce; normal with domain 'vertex' keeps hard edges crisp), attributes (attribute_transfer, promote, blur,
-measure, color, ray; uv_project, uv_flatten), curves (line, helix, resample, sweep, path_deform), volumes (remesh,
+measure, color, ray, falloff (0..1 weights), occlusion (AO / thickness); uv_project, uv_flatten, uv_transform), curves (line, helix, resample,
+curve_simplify, contour, slice, sweep, path_deform), volumes (remesh, sdf_shape,
 points_to_surface, sdf_boolean), instancing of Blender objects (instance), PCG point graphs (pcg_* nodes: samplers,
 point booleans pcg_difference/intersection/union, pcg_self_prune, density noise/filter, pcg_spawner), for_each (a
 system per piece), time (@Frame, solver; set_frame to check).

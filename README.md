@@ -574,6 +574,14 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `uv_flatten` | geo | unwrap UVs with least-squares conformal maps: islands cut at sharp edges (or where an attribute changes), closed shapes cut into discs automatically, packed into 0-1 at matching texel density; prim `island` |
 | `remesh` | geo | voxel remesh a closed mesh: even watertight quads, offset (grow/shrink), smoothing, attribute transfer |
 | `points_to_surface` | points | metaball surface around points (radius x pscale, blend), e.g. blobs and liquids |
+| `solidify` | geo | thickness for a surface: even wall at corners, offset -1..1 (outer, centred, inner), rim along open edges, optional group; output groups top / bottom / side |
+| `falloff` | geo, shape_mesh | a 0..1 point or primitive weight from a shape (sphere, directional ramp, radial angle, travelling wave, index, distance to / inside a mesh), with smooth, mirror, flip, min..max and a group |
+| `occlusion` | geo, occluders | ray-cast ambient occlusion or wall thickness per point (cone of rays, distance limit, extra occluders, blur): masks for dirt, wear, subsurface, print checks |
+| `contour` | geo | iso-lines (several levels, marching squares with saddle handling, or triangles) or a cut surface of a point attribute; lines carry `level` |
+| `slice` | geo | parallel planes through a mesh as curves (topographic lines, layers), `cover` to span the whole height, optional filled loops |
+| `curve_simplify` | geo | fewer points on a curve: Ramer-Douglas-Peucker by distance or turning angle, pinned points, smoothing |
+| `uv_transform` | geo | move, rotate, scale, flip and randomise uv per island or face, line a 3-D direction up with a uv axis |
+| `sdf_shape` | - | sphere, box, cylinder, capsule, ellipsoid, torus, round cone or n-sided prism from its exact distance field, rounded edges, as an all-quad watertight mesh |
 | `sdf_boolean` | a, b | union / subtract / intersect of closed meshes through distance fields, with smooth fillets |
 | `for_each` | geo | run a node or a system on every piece (connected pieces, an attribute's values, or each primitive) and merge |
 | `solver` | geo | feed each frame's result into the next (simulations, growth): deterministic, incremental playback, substeps |
