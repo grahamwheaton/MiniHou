@@ -239,16 +239,29 @@ def _laplacian(v, a, b, deg, move, factors):
     return v
 
 
-@node("attribute_blur", inputs=["geo"], category="attribute", params=[
+@node("attribute_blur", inputs=["geo", Input("rest", optional=True,
+      doc="Matching rest mesh used to compute fixed edge-distance weights")], category="attribute", version=2, params=[
     Str("names", "P", doc="Point attributes to smooth along edges (P smooths the shape), space separated"),
     Int("iterations", 5, min=0, soft_max=100),
     Float("strength", 0.5, min=0.0, max=1.0, doc="How far each step moves towards the neighbours' average"),
     Bool("pin_boundary", True, doc="Keep points on open edges, and the ends of curves, in place"),
     Str("group", "", doc="Only these points"),
+    Enum("weighting", ["uniform", "distance"], doc="Uniform neighbours or inverse rest-edge-length weighting"),
 ])
-def attribute_blur(geo, names, iterations, strength, pin_boundary, group):
+def attribute_blur(geo, rest=None, names="P", iterations=5, strength=0.5, pin_boundary=True, group="", weighting="uniform"):
     """Laplacian smoothing of point attributes over the mesh edges (Houdini's Attribute Blur)."""
     a, b, deg, move = _edge_smoother(geo, pin_boundary, group)
+    if rest is not None and (rest.npoints != geo.npoints or
+            not np.array_equal(rest.topology.vertex_point, geo.topology.vertex_point) or
+            not np.array_equal(rest.topology.prim_offsets, geo.topology.prim_offsets)):
+        raise ValueError("attribute_blur rest geometry must have matching point correspondence and topology")
+    weights = None
+    if weighting == "distance":
+        positions = (rest if rest is not None else geo).P.astype(np.float64)
+        lengths = np.linalg.norm(positions[a] - positions[b], axis=1)
+        weights = 1.0 / np.maximum(lengths, 1e-12)
+        deg = np.maximum(np.bincount(a, weights=weights, minlength=geo.npoints) +
+                         np.bincount(b, weights=weights, minlength=geo.npoints), 1e-12)
     out = geo.copy()
     for nm in names.replace(",", " ").split():
         arr = geo.point.get(nm)
@@ -256,7 +269,15 @@ def attribute_blur(geo, names, iterations, strength, pin_boundary, group):
             raise ValueError(f"no point attribute {nm!r}")
         if arr.dtype.kind != "f":
             raise ValueError(f"{nm!r} is not a float attribute; only floats can be blurred")
-        v = _laplacian(rows(arr).astype(np.float64), a, b, deg, move, [strength] * iterations)
+        v = rows(arr).astype(np.float64)
+        if weights is None:
+            v = _laplacian(v, a, b, deg, move, [strength] * iterations)
+        else:
+            for _ in range(iterations):
+                total = np.stack([np.bincount(a, weights=weights*v[b, c], minlength=geo.npoints) +
+                                  np.bincount(b, weights=weights*v[a, c], minlength=geo.npoints)
+                                  for c in range(v.shape[1])], axis=1)
+                v = np.where(move[:, None], v + strength*(total/deg[:, None] - v), v)
         out.point[nm] = v.astype(np.float32).reshape(arr.shape)
     return out
 

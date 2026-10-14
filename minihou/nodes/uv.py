@@ -118,14 +118,15 @@ def _pins(Pu, island_of, k):
     return np.asarray(pins, np.int64), np.asarray(puv, np.float64).reshape(-1, 2)
 
 
-@node("uv_flatten", inputs=["geo"], category="attribute", params=[
+@node("uv_flatten", inputs=["geo"], category="attribute", version=2, params=[
     Float("seam_angle", 70.0, min=0.0, max=180.0,
           doc="Cut along edges whose faces meet at more than this many degrees (180: only mesh borders)"),
     Str("split_attrib", "", doc="Primitive attribute: also cut where its value changes (e.g. from connectivity)"),
     Float("padding", 0.02, min=0.0, max=0.2, doc="Space around and between islands (fraction of the layout)"),
     Str("island_attrib", "island", doc="Primitive int attribute with each face's island (empty: none)"),
+    Str("seams", "", doc="Additional seam edges: edge groups, edge ids/ranges or pA-B pairs"),
 ])
-def uv_flatten(geo, seam_angle, split_attrib, padding, island_attrib):
+def uv_flatten(geo, seam_angle, split_attrib, padding, island_attrib, seams=""):
     """Unwrap UVs with least-squares conformal maps (Houdini's UV Flatten): low-distortion islands cut at sharp edges
     (closed shapes are cut automatically), scaled to keep their relative size and packed into 0-1. Writes vertex
     ``uv`` (Blender's 'UVMap')."""
@@ -145,6 +146,12 @@ def uv_flatten(geo, seam_angle, split_attrib, padding, island_attrib):
     un = normalize_rows(fn).astype(np.float64)
     tw = np.maximum(twin, 0)
     seam = (twin < 0) | (np.einsum("ij,ij->i", un[pv], un[pv[tw]]) < np.cos(np.radians(seam_angle)) - 1e-9)
+    if seams.strip():
+        from .. import edges
+        edge_topology = topo.edges(geo)
+        selected_edges = edges.mask(geo, seams)
+        valid = edge_topology.of_vertex >= 0
+        seam[valid] |= selected_edges[edge_topology.of_vertex[valid]]
     if split_attrib:
         a = geo.prim.get(split_attrib)
         if a is None:

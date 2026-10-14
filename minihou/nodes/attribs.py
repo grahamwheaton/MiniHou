@@ -1,7 +1,7 @@
 """Attribute housekeeping: delete and rename (Houdini's Attribute Delete / Attribute Rename)."""
 import fnmatch
 
-from ..sdk import Str, node
+from ..sdk import Bool, Enum, Input, Str, node
 
 DOMAINS = ("point", "vertex", "prim")
 
@@ -10,22 +10,32 @@ def _patterns(text):
     return [p for p in text.replace(",", " ").split() if p]
 
 
-@node("attribute_delete", inputs=["geo"], category="attribute", params=[
+@node("attribute_delete", inputs=["geo", Input("reference", optional=True,
+      doc="Delete attributes present on this geometry, matched separately on each domain")], category="attribute", version=2, params=[
     Str("names", "", doc="Attributes to delete, space separated; wildcards work (e.g. 'N uv tmp_*'). P is never deleted"),
+    Enum("domain", ["all", "point", "vertex", "prim", "detail"], doc="Attribute class to delete"),
+    Bool("invert", False, doc="Keep matching attributes and delete the others; P is always kept"),
 ])
-def attribute_delete(geo, names):
+def attribute_delete(geo, reference=None, names="", domain="all", invert=False):
     """Delete attributes by name or wildcard on every domain (also detail). Useful to stop an attribute reaching Blender,
     e.g. delete N to let Blender compute its own normals."""
+    if isinstance(reference, str):  # compatibility with direct Python calls before the second port existed
+        names, reference = reference, None
     pats = _patterns(names)
     out = geo.copy()
     for dom in DOMAINS:
+        if domain not in ("all", dom):
+            continue
         table = out.table(dom)
         for name in list(table.names()):
-            if name != "P" and any(fnmatch.fnmatchcase(name, p) for p in pats):
+            match = any(fnmatch.fnmatchcase(name, p) for p in pats) or (reference is not None and name in reference.table(dom))
+            if name != "P" and match != invert:
                 del table[name]
-    for name in list(out.detail):
-        if any(fnmatch.fnmatchcase(name, p) for p in pats):
-            del out.detail[name]
+    if domain in ("all", "detail"):
+        for name in list(out.detail):
+            match = any(fnmatch.fnmatchcase(name, p) for p in pats) or (reference is not None and name in reference.detail)
+            if match != invert:
+                del out.detail[name]
     return out
 
 

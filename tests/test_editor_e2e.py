@@ -34,6 +34,51 @@ def until(pred, timeout=5.0):
 
 @unittest.skipIf(sync_playwright is None, "playwright not installed")
 class EditorE2E(unittest.TestCase):
+    def test_sphere_modal_scale_edits_radius(self):
+        self.s.edit([{'op': 'replace', 'graph': {'nodes': {
+            'sphere': {'type': 'sphere', 'params': {'radius': 1}},
+            'out': {'type': 'output', 'inputs': {'geo': 'sphere'}}}, 'display': 'out'}}])
+        self.page.wait_for_selector('.node[data-id="sphere"]')
+        self.node('sphere').locator('.title').click()
+        self.page.wait_for_function("minihou.preview.handleTips().some(h=>h.id==='radius')")
+        rect = self.page.locator('#pv-canvas').bounding_box()
+        x, y = rect['x']+rect['width']/2, rect['y']+rect['height']/2
+        self.page.mouse.move(x, y)
+        self.page.keyboard.press('s')
+        self.page.mouse.move(x+40, y, steps=8)
+        self.page.keyboard.press('Enter')
+        self.assertTrue(until(lambda: self.s.graph.nodes['sphere'].params.get('radius', 1) > 1))
+        self.page.wait_for_function('minihou.desktopCanClose()')
+        self.assertEqual(set(self.s.graph.nodes), {'sphere', 'out'})
+
+    def test_box_modal_move_edits_center_and_cancel_restores_it(self):
+        self.box_scene()
+        rect = self.page.locator('#pv-canvas').bounding_box()
+        x, y = rect['x']+rect['width']/2, rect['y']+rect['height']/2
+        self.page.mouse.move(x, y)
+        self.page.keyboard.press('g')
+        self.page.mouse.move(x+50, y+15, steps=8)
+        self.page.keyboard.press('Enter')
+        self.assertTrue(until(lambda: self.s.graph.nodes['b'].params.get('center', [0,0,0]) != [0,0,0]))
+        self.page.wait_for_function('minihou.desktopCanClose()')
+        before = self.s.graph.to_dict()
+        self.page.keyboard.press('g')
+        self.page.mouse.move(x+100, y+30, steps=8)
+        self.page.keyboard.press('Escape')
+        self.page.wait_for_function('!minihou.preview.isDragging() && minihou.desktopCanClose()')
+        self.assertEqual(self.s.graph.to_dict(), before)
+        self.assertEqual(set(self.s.graph.nodes), {'b', 'o'})
+
+    def test_shift_d_duplicates_network_selection_and_undoes(self):
+        self.s.edit([{'op': 'replace', 'graph': {'nodes': {'source': {'type': 'box'}}, 'display': 'source'}}])
+        self.page.wait_for_selector('.node[data-id="source"]')
+        self.node('source').locator('.title').click()
+        self.page.keyboard.press('Shift+D')
+        self.assertTrue(until(lambda: len(self.s.graph.nodes) == 2))
+        self.assertTrue(all(n.type == 'box' for n in self.s.graph.nodes.values()))
+        self.page.keyboard.press('Control+z')
+        self.assertTrue(until(lambda: list(self.s.graph.nodes) == ['source']))
+
     @classmethod
     def setUpClass(cls):
         try:
@@ -2700,7 +2745,10 @@ class EditorE2E(unittest.TestCase):
         d_all = self.page.evaluate("minihou.preview.view.dist")
         self.page.keyboard.press("NumpadDecimal")
         self.assertLess(self.page.evaluate("minihou.preview.view.dist"), d_all)
+        selection_distance = self.page.evaluate("minihou.preview.view.dist")
         self.page.keyboard.press("Home")
+        self.assertGreater(self.page.evaluate("minihou.preview.view.dist"), selection_distance)
+        self.assertEqual(self.page.evaluate("minihou.preview.view.target"), [0, 0, 0])
         self.page.click('#preview [data-mode="view"]')
         self.page.keyboard.press("Home")
 

@@ -58,7 +58,7 @@ def cook(node_type, src, params, level=None):
     nt = REGISTRY.get(node_type)
     inputs = {}
     for i, spec in enumerate(nt.inputs):
-        inputs[spec.name] = [src, "box"] if spec.multi else (src if i == 0 else "sphere")
+        inputs[spec.name] = [src, "box"] if spec.multi else (src if i == 0 or spec.name in ('rest', 'crease_source') else "sphere")
     nodes = dict(BASE)
     nodes["x"] = {"type": node_type, "inputs": inputs, "params": params}
     nodes["o"] = {"type": "output", "inputs": {"geo": "x"}}

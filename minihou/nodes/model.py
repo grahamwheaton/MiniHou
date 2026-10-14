@@ -7,7 +7,7 @@ import numpy as np
 
 from .. import groups, topo
 from ..outgroups import OutGroup, OutGroups
-from ..sdk import Bool, Enum, Float, Guide, Handle, Str, Vec3, node
+from ..sdk import Bool, Enum, Float, Guide, Handle, Int, Str, Vec3, node
 from . import _build as B
 from .normal import prim_normals
 from ._util import normalize_rows
@@ -398,19 +398,22 @@ EXTRUDE_OUT = OutGroups(
 )
 
 
-@node("polyextrude", inputs=["geo"], category="modify", params=[
+@node("polyextrude", inputs=["geo"], category="modify", version=2, params=[
     Str("group", "", doc="Primitives to extrude (pattern; empty: all)"),
     Float("distance", 0.5, soft_min=-2.0, soft_max=2.0, doc="Along the face normals (negative: inwards)"),
     Float("inset", 0.0, soft_min=0.0, soft_max=1.0, doc="Constant perpendicular boundary offset; inset regions must be planar"),
     Enum("mode", ["connected", "individual"], doc="connected: neighbouring faces extrude as one region (Houdini's "
                                                   "'keep shared edges together'); individual: every face on its own"),
     Bool("output_back", False, doc="Keep the original faces as well (a closed shell)"),
+    Int("divisions", 1, min=1, max=64, soft_max=8, doc="Number of segments along the extrusion"),
     *EXTRUDE_OUT.params(),
 ])
-def polyextrude(geo, group, distance, inset, mode, output_back, **og):
+def polyextrude(geo, group, distance, inset, mode, output_back, divisions=1, **og):
     """Extrude faces along their normals with optional inset (Houdini's PolyExtrude). Side walls are added on the
     region's boundary; groups extrudeFront and extrudeSide hold the new faces."""
     B.require_polygons(geo, "polyextrude")
+    if divisions > 1:
+        return _segmented_extrude(geo, group, distance, inset, mode, output_back, divisions, og)
     sel = _prim_sel(geo, group)
     if not sel.any():
         for key in ("front", "back", "side"):                      # the switched-on groups still exist, empty
@@ -514,3 +517,31 @@ def polyextrude(geo, group, distance, inset, mode, output_back, **og):
     if "N" in out.point:                                   # stale after moving points; recompute with a normal node
         del out.point["N"]
     return compact_points(out)
+
+
+def _segmented_extrude(geo, group, distance, inset, mode, output_back, divisions, og):
+    """Advance only the front each step; retain all side segments and the first back."""
+    if geo.nvertices * divisions > 1_000_000:
+        raise ValueError("extrusion divisions exceed one million source corner samples")
+    stem = '_extrude_work'
+    while any(name.startswith('group_'+stem) for name in geo.prim.names()):
+        stem += '_'
+    internal = {f'outgrp_{key}': True for key in ('front', 'side', 'back')}
+    internal.update({f'outgrp_{key}_name': stem+'_'+key for key in ('front', 'side', 'back')})
+    side_attr, back_attr = 'group_'+stem+'_allside', 'group_'+stem+'_allback'
+    out = geo.copy()
+    out.prim[side_attr] = np.zeros(out.nprims, np.int32)
+    out.prim[back_attr] = np.zeros(out.nprims, np.int32)
+    for step in range(divisions):
+        out = polyextrude(out, group if step == 0 else stem+'_front', distance/divisions,
+                          inset/divisions, mode, output_back and step == 0, **internal)
+        out.prim[side_attr] = np.maximum(out.prim[side_attr], out.prim['group_'+stem+'_side'])
+        out.prim[back_attr] = np.maximum(out.prim[back_attr], out.prim['group_'+stem+'_back'])
+    members = {'front': out.prim['group_'+stem+'_front'].astype(bool),
+               'side': out.prim[side_attr].astype(bool), 'back': out.prim[back_attr].astype(bool)}
+    for name in list(out.prim.names()):
+        if name.startswith('group_'+stem):
+            del out.prim[name]
+    for key, mask in members.items():
+        out = EXTRUDE_OUT.write(out, og, key, mask)
+    return out
