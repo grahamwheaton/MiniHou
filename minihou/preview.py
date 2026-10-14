@@ -31,13 +31,17 @@ import numpy as np
 from . import proxy
 
 MAGIC = b"MHPV"
-# The editor's budget: more than this is reduced by :func:`proxy.decimate` (the whole shape, coarser), not cut off.
-DISPLAY_TRIS = 250_000
-DISPLAY_POINTS = 500_000
+# The editor's budget: more than this is reduced by :func:`proxy.decimate` (the whole shape, coarser), not cut off. A modern GPU draws
+# this many triangles at interactive rates; the Perf menu's display budget lowers it for weaker ones.
+DISPLAY_TRIS = 4_000_000
+DISPLAY_POINTS = 4_000_000
 # "Full resolution" on request: the most the viewer is asked to hold (past this it reduces too, so a request can never hang the browser)
-MAX_TRIS = 2_500_000
-MAX_EDGES = 5_000_000
-MAX_POINTS = 4_000_000
+MAX_TRIS = 16_000_000
+MAX_EDGES = 32_000_000
+MAX_POINTS = 16_000_000
+# Instances are drawn as impostors (see :mod:`minihou.impostors`) from this many triangles on; the Blender link uses it the same way.
+INSTANCE_TRIS = 250_000
+INSTANCE_POINTS = 500_000
 EXACT_PRIMS = 100_000            # up to this many primitives, polygons with more than 3 corners are triangulated exactly (concave ones too)
 CHUNK_MIN_TRIS = 100_000         # from this many triangles on, they are sorted along a space-filling curve and sent with a chunk table
 CHUNK_TRIS = 8192                # triangles per chunk
@@ -65,8 +69,29 @@ def _triangles(geo):
         if not parts:
             return np.zeros((0, 3), np.int64), np.zeros(0, np.int64)
         return np.concatenate(parts), np.concatenate(owners)
-    tri_v, owner = proxy.fan_triangles(geo)                         # a big mesh: fans (concave polygons may show a wrong diagonal)
+    fast = _fan_numba(t)                                             # a big mesh: fans (concave polygons may show a wrong diagonal)
+    if fast is not None:
+        return fast
+    tri_v, owner = proxy.fan_triangles(geo)
     return vp[tri_v], owner.astype(np.int64)
+
+
+def _fan_numba(t):
+    """:func:`proxy.fan_triangles` as point triples, in one parallel pass; None without numba."""
+    from . import accel
+    k = accel.kernels()
+    if k is None:
+        return None
+    offs = np.ascontiguousarray(t.prim_offsets, np.int64)
+    closed = np.ascontiguousarray(t.closed_mask(), np.uint8)
+    counts = np.where(closed.astype(bool), np.maximum(np.diff(offs) - 2, 0), 0)
+    first = np.zeros(len(counts), np.int64)
+    np.cumsum(counts[:-1], out=first[1:])
+    total = int(counts.sum())
+    tri, owner = np.empty((total, 3), np.int64), np.empty(total, np.int64)
+    if accel.call(k.fan_point_triangles, np.ascontiguousarray(t.vertex_point, np.int64), offs, closed, first, tri, owner) is accel.FAILED:
+        return None
+    return tri, owner
 
 
 def _spread_bits(v: np.ndarray) -> np.ndarray:
@@ -93,7 +118,10 @@ def _chunk_numba(P, tri, tri_prim):
     order = np.empty(len(tri), np.int64)
     if accel.call(k.tri_morton, P, tri, lo, scale, code) is accel.FAILED or accel.call(k.radix_order30, code, order) is accel.FAILED:
         return None
-    tri, tri_prim = tri[order], tri_prim[order]
+    tri_s, tp_s = np.empty_like(tri), np.empty(len(order), np.asarray(tri_prim).dtype)
+    if accel.call(k.gather_rows3, tri, order, tri_s) is accel.FAILED or accel.call(k.gather1, np.ascontiguousarray(tri_prim), order, tp_s) is accel.FAILED:
+        return None
+    tri, tri_prim = tri_s, tp_s
     table = np.empty(((len(tri) + CHUNK_TRIS - 1) // CHUNK_TRIS, 8), np.float32)
     if accel.call(k.chunk_bounds, P, tri, CHUNK_TRIS, table) is accel.FAILED:
         return None

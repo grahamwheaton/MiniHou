@@ -901,8 +901,9 @@ Off by default; the **Proxy** menu in the editor also switches it on and off and
 
 ## Very large scenes (proxies)
 
-The 3-D view draws any geometry within a budget (250k triangles / 500k points) by clustering it, so the whole shape stays
-visible and the browser stays responsive; the view says "Reduced view" with a **Full res** button. The **Proxy** menu in the top bar
+The 3-D view draws up to 4M triangles / 4M points as they are (16M with **Full res**); past that it clusters the geometry, so the
+whole shape stays visible and the browser stays responsive, and says "Reduced view". Edits that only move points (deformers) send
+just the new positions to the view. The **Proxy** menu in the top bar
 cooks a lighter version of the scene (Full, Auto, 50% ... 1%): counts, resolutions and voxel sizes scale, the cache keys follow, and
 **Auto** cooks a small version first on slow scenes and the real one when you pause. A cap on the triangles sent to Blender is in the
 same menu. Details, limits and measurements: [docs/PROXY.md](docs/PROXY.md).

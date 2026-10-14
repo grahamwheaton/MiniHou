@@ -2712,7 +2712,7 @@ class EditorE2E(unittest.TestCase):
 
     def test_display_budget_reduces_a_big_geometry_further(self):
         self.s.edit([{"op": "replace", "graph": {"nodes": {"g": {"type": "grid", "params": {"columns": 300, "rows": 300}, "pos": [0, 0]}}, "display": "g"}}])
-        self.page.wait_for_function("minihou.preview.tris === 299 * 299 * 2", timeout=20000)             # under the default 250k budget
+        self.page.wait_for_function("minihou.preview.tris === 299 * 299 * 2", timeout=20000)             # under the default 4M budget
         self.open_perf()
         self.page.select_option("#pv-budget", "100000")
         self.page.wait_for_function("minihou.preview.tris > 0 && minihou.preview.tris <= 110000", timeout=20000)

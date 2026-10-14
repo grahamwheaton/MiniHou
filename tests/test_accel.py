@@ -499,3 +499,17 @@ class ChunkParityTests(unittest.TestCase):
             np.testing.assert_allclose(pts.min(0), box[:3]); np.testing.assert_allclose(pts.max(0), box[3:])
         cx = P[a].mean(1)
         self.assertLess(np.abs(np.diff(cx, axis=0)).sum(1).mean(), 2.0)     # neighbours in the list are near in space
+
+
+@needs_numba
+class FanParityTests(unittest.TestCase):
+    def test_same_fans_as_the_numpy_path(self):
+        from minihou import preview, proxy
+        rng = np.random.default_rng(4)
+        sizes = rng.integers(1, 8, 300)
+        offs = np.concatenate([[0], np.cumsum(sizes)])
+        g = Geometry.from_arrays(rng.random((50, 3)).astype(np.float32), rng.integers(0, 50, offs[-1]), offs, closed=rng.random(300) > 0.2)
+        tri, owner = preview._fan_numba(g.topology)
+        tv, ow = proxy.fan_triangles(g)
+        np.testing.assert_array_equal(tri, g.topology.vertex_point[tv])
+        np.testing.assert_array_equal(owner, ow)

@@ -6,8 +6,10 @@ means at full size.
 ## 1. The viewport always draws within a budget (display proxy)
 
 `minihou/proxy.py` `decimate()` reduces any geometry to a budget of triangles and points. The 3-D view asks for
-250,000 triangles / 500,000 points (`preview.DISPLAY_TRIS`, `DISPLAY_POINTS`); "Full res" in the view raises that to
-2,500,000 / 4,000,000 (`MAX_*`); past those the same reduction applies, so a request can never hang the browser.
+4,000,000 triangles / 4,000,000 points (`preview.DISPLAY_TRIS`, `DISPLAY_POINTS`); "Full res" in the view raises that to
+16,000,000 / 16,000,000 (`MAX_*`); past those the same reduction applies, so a request can never hang the browser. The Perf
+menu's **Display budget** lowers the default for a weaker GPU (100k to 16M). Instances still turn into impostors from 250,000
+triangles (`preview.INSTANCE_TRIS`), as before.
 
 * **Meshes**: vertex clustering. Points that fall in the same cell of a 3-D grid merge into their mean; the cell size is
   searched (on a sample of the points, then checked on all of them) so the triangles that survive are just under the budget.
@@ -18,7 +20,7 @@ means at full size.
   takes the first member; primitive and vertex attributes follow the triangle that survived.
 * The preview header says what happened: `proxy: {active, points, tris, shown_points, shown_tris}`; `point_src` and
   `tri_prim` map what is drawn back to original point and primitive numbers.
-* The view shows "Reduced view: 250,000 of 3,996,002 triangles" with a **Full res** button. Selecting needs the real points, so
+* The view shows "Reduced view: 4,000,000 of 31,996,002 triangles" with a **Full res** button. Selecting needs the real points, so
   the **Detail** setting in the viewport's display options decides what happens (it is remembered): **Auto** (default) draws
   big geometry reduced but loads the full detail the moment you turn a selection mode on (1-4 or the Pts/Edges/Faces buttons)
   and goes back to the reduced view when you leave it; **Full** always asks for everything the viewer can hold; **Fast** always
@@ -34,7 +36,27 @@ means at full size.
   Meshes with more than 100,000 primitives are fan-triangulated instead of ear-clipped (a concave polygon may show the
   wrong diagonal in that case; nothing else is affected).
 
-`POST /api/preview` takes `full` and `tris` (a custom triangle budget).
+`POST /api/preview` takes `full`, `tris` (a custom triangle budget) and `have` (the `topology` token of what the viewer holds).
+
+### Keeping big views fast
+
+* **Edges and drawing order** are built by linear-time numba kernels (`topo.edges`, `preview.chunk_triangles`, fan
+  triangulation): the same edge numbering as the numpy path, which stays as the fallback. `bench/bench_viewport.py` measures it.
+* **Positions only.** Triangles, their drawing order and edges depend only on the topology, and a deformer (noise, transform,
+  smooth, mountain...) keeps the topology of its input. The preview remembers them per topology (`topology` in the header: its
+  digest and point count) and only redoes the run bounds from the new positions. The viewer sends back the token it holds as
+  `have`; when it matches, the reply has `same_topology: true` and no `tri` / `tri_prim` / `edge`, and the viewer swaps the
+  positions into its GPU buffer. A reduced view never does this (clustering depends on positions).
+* Measured in this sandbox (4 cores, no GPU; quad grid with noise, full resolution):
+
+  | | new topology | after a deformer |
+  |---|---|---|
+  | 1M quads (2M triangles) | 1.1 s, 60 MB | 0.13 s, 12 MB |
+  | 4M quads (8M triangles) | 4.7 s, 240 MB | 0.5 s, 48 MB |
+
+  Before, 4M quads took 8.5 s and were reduced to 2.4M triangles (87 MB) for every edit. Drawing speed depends on the GPU:
+  the Perf menu's statistics show triangles drawn and frame time.
+* Colouring by a primitive attribute (paint) unwelds the triangles, so the view refuses it past 4M triangles; points and edges still work.
 
 ## 2. Cook a lighter version (cook proxy)
 

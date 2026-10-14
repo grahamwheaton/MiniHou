@@ -152,6 +152,10 @@ def warmup() -> float:
     call(k.tri_morton, p, tri3, np.zeros(3), np.ones(3), code)
     call(k.radix_order30, code, order)
     call(k.chunk_bounds, p, tri3, 8192, np.empty((1, 8), np.float32))
+    call(k.fan_point_triangles, vp4, np.array([0, 4], np.int64), np.ones(1, np.uint8), np.zeros(1, np.int64),
+         np.empty((2, 3), np.int64), np.empty(2, np.int64))
+    call(k.gather_rows3, tri3, order, np.empty((1, 3), np.int64))
+    call(k.gather1, code, order, np.empty(1, np.int64))
     return time.perf_counter() - t0
 
 

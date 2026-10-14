@@ -335,8 +335,8 @@ def plan(geo, mode: str = "auto", full: bool = False, tri_cap: int = 0, sources:
         return iset
     if full or geo.topology.nprims < MIN_INSTANCES * MIN_BLOCK_PRIMS:
         return None
-    cap = int(tri_cap) if tri_cap else preview.DISPLAY_TRIS
-    if mode == "auto" and proxy.triangle_count(geo) <= cap and geo.npoints <= preview.DISPLAY_POINTS:
+    cap = int(tri_cap) if tri_cap else preview.INSTANCE_TRIS
+    if mode == "auto" and proxy.triangle_count(geo) <= cap and geo.npoints <= preview.INSTANCE_POINTS:
         return None                                                # small enough to draw as it is
     iset = blocks(geo)
     if iset is not None:

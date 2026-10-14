@@ -695,3 +695,35 @@ def chunk_bounds(P, tri, size, table):
         table[k, 5] = mx0
         table[k, 6] = mx1
         table[k, 7] = mx2
+
+
+@njit(parallel=True, **_OPTS)
+def fan_point_triangles(vp, offs, closed, first, tri, owner):
+    """Fan triangles of the closed polygons with 3+ corners, as point triples: polygon f writes its sizes - 2 triangles from first[f]
+    (an exclusive prefix sum of those counts), the same triangles in the same order as :func:`minihou.proxy.fan_triangles`."""
+    for f in prange(len(offs) - 1):
+        a, b = offs[f], offs[f + 1]
+        if not closed[f] or b - a < 3:
+            continue
+        o = first[f]
+        p0 = vp[a]
+        for k in range(b - a - 2):
+            tri[o + k, 0] = p0
+            tri[o + k, 1] = vp[a + k + 1]
+            tri[o + k, 2] = vp[a + k + 2]
+            owner[o + k] = f
+
+
+@njit(parallel=True, **_OPTS)
+def gather_rows3(src, order, out):
+    for i in prange(len(order)):
+        j = order[i]
+        out[i, 0] = src[j, 0]
+        out[i, 1] = src[j, 1]
+        out[i, 2] = src[j, 2]
+
+
+@njit(parallel=True, **_OPTS)
+def gather1(src, order, out):
+    for i in prange(len(order)):
+        out[i] = src[order[i]]

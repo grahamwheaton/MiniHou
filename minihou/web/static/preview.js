@@ -218,6 +218,7 @@ window.MiniHouPreview = (() => {
     gl.bindVertexArray(aedVao); gl.bindBuffer(gl.ARRAY_BUFFER, aedBuf);
     for (const [loc, n, off] of [[0, 3, 0], [1, 3, 12], [2, 1, 24], [3, 1, 28]]) { gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, n, gl.FLOAT, false, 32, off); }
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, aedIdx); gl.bindVertexArray(null);
+    const MAX_PRIM_COLOUR_TRIS = 4000000;
     const HEAT = [[0.12, 0.2, 0.75], [0.1, 0.75, 0.85], [0.2, 0.8, 0.25], [0.95, 0.85, 0.15], [0.9, 0.2, 0.15]];
     function colourOf(a, i, out, o) {                                    // the colour of element i of the attribute, into out[o..o+2]
       const v = a.values, nc = a.comps;
@@ -236,6 +237,10 @@ window.MiniHouPreview = (() => {
         gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, col, gl.DYNAMIC_DRAW); data.hasCd = true; ptCol = col;
       } else if (a.domain === "prim") {
         const T = raw.tri, TP = raw.triPrim, nt = T.length / 3;
+        if (nt > MAX_PRIM_COLOUR_TRIS) {                                  // unwelding would need 72 bytes per triangle: too much for the tab
+          if (onMessage) onMessage(`Too many faces to colour by primitive (${nt.toLocaleString()} triangles); points and edges still work.`);
+          return;
+        }
         if (primCount !== nt * 3) {                                       // the unwelded positions, once per geometry
           const pos = new Float32Array(nt * 9);
           for (let t = 0; t < nt; t++) for (let c = 0; c < 3; c++) { const v = T[3 * t + c] * 3; pos.set([raw.P[v], raw.P[v + 1], raw.P[v + 2]], 9 * t + 3 * c); }

@@ -92,7 +92,7 @@ def _budget(v) -> int:
     """A triangle budget from a request (0: the default)."""
     if v is None or isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v < 1000:
         return 0
-    return int(min(v, 5_000_000))
+    return int(min(v, 16_000_000))
 
 
 class ApiError(Exception):
