@@ -3197,6 +3197,23 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: int((self.painted(node).point["weight"] > 0).sum()) < painted_count))
         self.assertEqual(self.page.evaluate("minihou.preview.selection().mode"), "view")
 
+    def test_preview_refresh_does_not_erase_an_active_paint_stroke(self):
+        box = self.start_painting(8, 8)
+        cx, cy = box["width"] / 2, box["height"] / 2
+        self.page.mouse.move(box["x"] + cx, box["y"] + cy)
+        self.page.mouse.down()
+        self.page.mouse.move(box["x"] + cx + 50, box["y"] + cy, steps=6)
+        before = self.page.evaluate("Array.from(minihou.paint.values().vals)")
+        self.assertTrue(any(v > 0 for v in before))
+        with self.page.expect_request_finished(lambda r: '/api/preview' in r.url):
+            self.page.evaluate("document.querySelector('#pv-follow').dispatchEvent(new Event('change'))")
+        self.page.evaluate("() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))")
+        self.assertTrue(self.page.evaluate("minihou.paint.isStroking()"))
+        self.assertEqual(self.page.evaluate("Array.from(minihou.paint.values().vals)"), before)
+        self.page.mouse.up()
+        self.assertTrue(until(lambda: any(n.type == "attrib_paint" for n in self.s.graph.nodes.values())))
+        self.assertFalse(self.page.evaluate("minihou.paint.isStroking()"))
+
     def test_painting_faces_and_edges_and_a_vector_colour(self):
         box = self.start_painting(8, 8)
         cx, cy = box["width"] / 2, box["height"] / 2

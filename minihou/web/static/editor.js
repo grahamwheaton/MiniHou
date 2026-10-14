@@ -976,8 +976,8 @@
     if(p.name==='group'&&p.kind==='str')widget.append(h('button',{class:'small',title:'Select this group on the input geometry',onclick:async()=>{
       try { const result=await api('/api/select_group',{node:id});if(result.error){toast(result.error);return;}
       $('#pv-follow').value='selection';$('#pv-follow').dispatchEvent(new Event('change'));select([result.node]);
-      const until=performance.now()+6000;while(pvNode!==result.node&&performance.now()<until)await new Promise(r=>setTimeout(r,30));
-      if(pvNode===result.node)pv.selectElements(result.domain,result.ids,'replace');else toast('Input preview is not ready; try Select again.'); } catch(err) {toast(err.message);}
+      const until=performance.now()+6000;while((pvNode!==result.node||pvInFlight||pvTimer!==null||pvDirty)&&performance.now()<until)await new Promise(r=>setTimeout(r,30));
+      if(pvNode===result.node&&!pvInFlight&&pvTimer===null&&!pvDirty)pv.selectElements(result.domain,result.ids,'replace');else toast('Input preview is not ready; try Select again.'); } catch(err) {toast(err.message);}
     }},'Select'));
     row.append(label, widget, EXPOSABLE.has(p.kind) ? exposeBtn(id, p) : h("span"), resetBtn(id, p));
     return row;
@@ -1406,6 +1406,9 @@
     // A completed frame of the same node is useful even if a newer edit arrived.
     // Never install geometry from the previous selection or document, though.
     if (documentId !== S.documentId || node !== previewTarget()) { pvKey = null; return; }
+    // A refresh must not replace the brush's working values halfway through a stroke.
+    // Retry after the stroke; its commit is still a single undoable edit.
+    if (paintTool?.isStroking()) { pvKey = null; pvDirty = true; return; }
     const { head, arrays } = window.MiniHouPreview.parse(buf);
     if (!arrays) {
       pv.clear();
