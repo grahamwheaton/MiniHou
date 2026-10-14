@@ -6,7 +6,7 @@ This describes the combined `build/blender-interactions` source checkout. Restar
 
 Use the left strip or **1 / 2 / 3 / 4** for points, edges, faces or Object. Object selects a connected mesh island. Click to select, Shift to add, and Ctrl+Shift to remove. Work at full preview detail/full cook when an operation reports that reduced geometry cannot be edited.
 
-**G / R / S** starts a modal Move / Rotate / Scale with the pointer over the viewport. The left Move / Rotate / Scale buttons also start these operations. Move the pointer, then click or Enter to confirm; Escape/right-click cancels. Dragging the visible gizmo remains available and confirms on release. Shift provides continuous precision; Ctrl temporarily reverses the Snap toggle. Move supports X/Y/Z axis constraints and Shift+X/Y/Z complementary planes; repeating a constraint releases it. Rotation/scale constraints depend on the available parameter handles. Numeric transform typing and trackball rotation are not implemented.
+**G / R / S** starts a modal Move / Rotate / Scale with the pointer over the viewport. The left Move / Rotate / Scale buttons also start these operations. Move the pointer, then click or Enter to confirm; Escape/right-click cancels. Dragging the visible gizmo remains available and confirms on release. Shift provides continuous precision; Ctrl temporarily reverses the Snap toggle. Move supports X/Y/Z axis constraints and Shift+X/Y/Z complementary planes; repeating a constraint releases it. Unconstrained modal rotation follows the view normal; X/Y/Z chooses an orientation axis. Scale supports axis and complementary-plane constraints. Numeric transform typing and trackball rotation are not implemented.
 
 If no suitable transform target is available, the editor switches to point mode and attempts to select all geometry. Selection transforms create or reuse graph Transform nodes. Existing parameter handles still edit their own parameters.
 
@@ -25,9 +25,11 @@ Select a starting element, then **Ctrl-click** the destination to select a conne
 
 Most direct is not an edge-loop recognizer and irregular topology can produce ambiguous alternatives. Disconnected endpoints have no route. See [selection details](viewport-selection.md).
 
+For a node with a **Group** field, its **Select** button resolves that group on the first input, switches the viewport to that input and selects the matching points, edges or faces. Unsupported domains report an error rather than guessing IDs.
+
 ## Snapping and picked move base
 
-Enable **Snap**, choose its element and base, and use Settings for increments, selected-geometry inclusion and face backface culling. Elements include Increment, Grid, Vertex, Edge, Edge midpoint, Edge perpendicular, Face and the combined **Vertex + Face** preset. Base choices are bounds Center, point-average Median, Active and Closest vertex. Targets come from the previewed geometry, frozen at mesh gesture start. Geometry snapping applies to movement/curve controls; rotation and scale use their increments.
+Fresh settings default to **Vertex** with snapping **off**; existing saved preferences are retained. Enable **Snap**, choose its element and base, and use Settings for increments, selected-geometry inclusion and face backface culling. Elements include Increment, Grid, Vertex, Edge, Edge midpoint, Edge perpendicular, Face and the combined **Vertex + Face** preset. Base choices are bounds Center, point-average Median, Active and Closest vertex. Targets come from the previewed geometry, frozen at mesh gesture start. Geometry snapping applies to movement/curve controls; rotation and scale use their increments.
 
 For a picked move base: select geometry, start **G**, press **B**, point at the desired source base, then click to set it. Continue moving and click/Enter to confirm. Escape while picking returns to movement; Escape again cancels the transform. This is a temporary base for the active move gesture. It is not a reusable reference point or a rotation/scale pivot, and curve-control transforms do not provide this picked-base workflow. An axis/plane constraint projects the snap displacement into the allowed direction, so it can prevent reaching the target exactly.
 
@@ -39,7 +41,7 @@ Select seed geometry, open **Proportional editing**, enable it (or press **O** w
 
 Falloffs are Smooth, Sphere, Root, Sharp, Linear, Constant and deterministic Random. Radius uses geometry units and distance to the nearest selected seed. **Connected only** follows actual mesh/curve edges and leaves disconnected geometry unchanged. **Projected** removes depth along the captured view direction; Connected takes precedence when both are enabled. An empty Transform group means all geometry is selected, so choose a subset to see a falloff.
 
-There is currently no drawn influence-radius circle or weight-colour overlay, and proportional editing does not affect Bezier control editing. Connected distance is an edge path rather than a continuous surface geodesic. Projected distance is an orthographic plane metric; weighted rotations use Euler angles. Random is stable MiniHou sampling rather than Blender's sequence. Point normals receive the local weighted transform, without derivatives of the influence field. See [engine behavior and performance limits](proportional-transform.md).
+A dashed radius guide is drawn around the transform pivot; it is not the exact union of seed influence regions. There is no weight-colour overlay, and proportional editing does not affect Bezier control editing. Connected distance is an edge path rather than a continuous surface geodesic. Projected distance is an orthographic plane metric; weighted rotations use Euler angles. Random is stable MiniHou sampling rather than Blender's sequence. Point normals receive the local weighted transform, without derivatives of the influence field. See [engine behavior and performance limits](proportional-transform.md).
 
 ## Modeling, curves and navigation
 
@@ -80,7 +82,7 @@ Counts are 1–10,000; grid total is also limited to 10,000. The existing Copy t
 | --- | --- | --- |
 | Blender-style transforms | G/R/S, gizmos, constraints, precision, confirmation/cancellation | No numeric modal entry, trackball, complete Blender pivot/keymap parity |
 | Pick snap base with B | Temporary base in mesh modal Move | Not curve controls, rotation/scale pivots or saved references |
-| Proportional editing | Seven falloffs, radius/wheel, connected/projected, weighted transforms | No radius/weight overlay; metric/rotation/normal differences above |
+| Proportional editing | Seven falloffs, radius/wheel, connected/projected, weighted transforms | Radius guide only, no weight overlay; metric/rotation/normal differences above |
 | Viewport selection | Box/lasso/circle, direct and shortest route choices | Through-selection semantics; no full loop recognition |
 | Modeling interaction | Extrude/inset/bevel/push-pull scalar modal gestures | Limited operation options and topology-specific restrictions |
 | Curve editing | Bezier controls and tangent modes; drawing creates curves | Single-control editing; no NURBS/tilt/radius |

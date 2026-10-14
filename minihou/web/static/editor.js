@@ -187,7 +187,8 @@
   async function edit(ops, context = { path: S.path, documentId: S.documentId }) {
     desktopPendingEdits++;
     try {
-      const r = await api("/api/edit", { ops, origin: "editor", document_id: context.documentId });
+      const r = await api("/api/edit", { ops, origin: "editor", document_id: context.documentId, gesture:context.gesture });
+      if(context.gesture&&r.changed)context.changed=true;
       applySnapshot(r.graph);
       return r;
     } catch (e) {
@@ -201,20 +202,20 @@
   const pendingSet = new Map();
   let pendingContext = null;
   let setInFlight = false;
-  function queueSet(id, name, value) {
-    if (!pendingContext) pendingContext = { path: S.path, documentId: S.documentId };
-    const p = pendingSet.get(id) || {};
-    p[name] = value;
-    pendingSet.set(id, p);
+  function queueSet(id, name, value, context = { path: S.path, documentId: S.documentId }) {
+    const key=JSON.stringify([context.documentId,context.gesture||'',id]);
+    const entry=pendingSet.get(key)||{id,params:{},context};
+    entry.params[name]=value;
+    pendingSet.set(key,entry);
+    pendingContext=pendingSet.values().next().value.context;
     if (!setInFlight) flushSets();
   }
   async function flushSets() {
     if (!pendingSet.size) return;
     setInFlight = true;
-    const ops = [...pendingSet].map(([id, params]) => ({ op: "set", id, params }));
-    const context = pendingContext;
-    pendingSet.clear();
-    pendingContext = null;
+    const context=pendingSet.values().next().value.context,ops=[];
+    for(const [key,entry]of pendingSet)if(entry.context.documentId===context.documentId&&entry.context.gesture===context.gesture){ops.push({op:'set',id:entry.id,params:entry.params});pendingSet.delete(key);}
+    pendingContext=pendingSet.size?pendingSet.values().next().value.context:null;
     await edit(ops, context);
     setInFlight = false;
     if (pendingSet.size) flushSets();
@@ -254,7 +255,7 @@
   function applySnapshot(snap) {
     if (!snap || snap.rev < S.rev) return;
     if (S.documentId !== null && snap.document_id !== S.documentId && pendingSet.size) {
-      stashEdits([...pendingSet].map(([id, params]) => ({ op: "set", id, params })), pendingContext);
+      for(const entry of pendingSet.values())stashEdits([{op:'set',id:entry.id,params:entry.params}],entry.context);
       pendingSet.clear(); pendingContext = null;
     }
     const fileChanged = snap.path !== S.path;
@@ -961,6 +962,12 @@
       const inp = h("input", { type: "text", value: v, dataset: { role: "str" }, onchange: (e) => queueSet(id, p.name, e.target.value) });
       widget = h("div", { class: "pw" }, inp);
     }
+    if(p.name==='group'&&p.kind==='str')widget.append(h('button',{class:'small',title:'Select this group on the input geometry',onclick:async()=>{
+      try { const result=await api('/api/select_group',{node:id});if(result.error){toast(result.error);return;}
+      $('#pv-follow').value='selection';$('#pv-follow').dispatchEvent(new Event('change'));select([result.node]);
+      const until=performance.now()+6000;while(pvNode!==result.node&&performance.now()<until)await new Promise(r=>setTimeout(r,30));
+      if(pvNode===result.node)pv.selectElements(result.domain,result.ids,'replace');else toast('Input preview is not ready; try Select again.'); } catch(err) {toast(err.message);}
+    }},'Select'));
     row.append(label, widget, EXPOSABLE.has(p.kind) ? exposeBtn(id, p) : h("span"), resetBtn(id, p));
     return row;
   }
@@ -1172,12 +1179,31 @@
     $("#pv-paint-btn").onclick = () => { if (paintTool.isOpen() && paintTool.active()) paintTool.close(); else paintTool.open("paint"), paintTool.setPaint(true); };
     $("#pv-assign-btn").onclick = () => { if (paintTool.isOpen() && !paintTool.active()) paintTool.close(); else { paintTool.setPaint(false); paintTool.open("assign"); } };
   }  const curveTool = pv?.ok && window.MiniCurveTool ? MiniCurveTool(pv,$('#pv-canvas'),(id,value)=>queueSet(id,'controls',value)) : null;
+  const selectionTool=pv?.ok&&window.MiniSelectionTool?MiniSelectionTool(pv,$('#pv-canvas')):null;
+  let sketchBezier=false;
   const sketchTool=pv?.ok&&window.MiniSketchTool?MiniSketchTool(pv,$('#pv-canvas'),async spec=>{
+    if(sketchBezier){const points=spec.params.points.trim().split(/\s+/).map(p=>p.split(',').map(Number));spec={type:'bezier',params:{controls:JSON.stringify(points.map(p=>({p,left:p.slice(),right:p.slice(),mode:'AUTO'}))),closed:false}};sketchBezier=false;}
     const id=uniqueId(spec.type),r=await edit([{op:'add',id,type:spec.type,params:spec.params,pos:[80,80],display:true}]);
     if(!r)throw Error('Sketch could not be added to the graph');
     pvKeepCameraNode=id;select([id]);
   }):null;
-  if(sketchTool){$('#pv-sketch-panel').append(sketchTool.panel());const previous=pv.onOverlayDraw;pv.onOverlayDraw=()=>{previous?.();sketchTool.draw();};}
+  const placementPreview=pv?.ok&&window.MiniPlacementPreview?MiniPlacementPreview(pv,$('#pv-canvas')):null;
+  let shelfDragType=null;
+  document.addEventListener('dragstart',e=>{shelfDragType=e.target.closest('[data-type]')?.dataset.type||null;});
+  document.addEventListener('dragend',()=>{shelfDragType=null;placementPreview?.hide();});
+  document.addEventListener('keydown',e=>{if(e.key==='Escape')placementPreview?.hide();});
+  if(placementPreview){const previous=pv.onOverlayDraw;pv.onOverlayDraw=()=>{previous?.();placementPreview.draw();};}
+  let viewportMouse=[0,0];$('#pv-canvas').parentElement.addEventListener('pointermove',e=>viewportMouse=[e.clientX,e.clientY]);
+  function beginTransform(tool,x=viewportMouse[0],y=viewportMouse[1]){
+    if(!pv?.ok)return;setTool(tool);
+    if(curveTool?.beginTransform(tool,x,y))return;
+    if(!pv.beginTransform(tool,x,y)){pv.setMode('point');pv.selectAll();if(!pv.beginTransform(tool,x,y))toast('Select geometry or a transform node first.');}
+  }
+  document.querySelectorAll('#pv-left-tools [data-op]').forEach(b=>b.onclick=()=>{const r=$('#pv-canvas').getBoundingClientRect();beginTransform(b.dataset.op,r.left+r.width/2,r.top+r.height/2);});
+  document.querySelectorAll('#pv-left-tools [data-select]').forEach(b=>b.onclick=()=>{sketchTool?.cancel();if(pv.mode==='view')pv.setMode('face');selectionTool?.start(b.dataset.select);});
+  document.querySelectorAll('#pv-left-tools [data-sketch]').forEach(b=>b.onclick=()=>{selectionTool?.cancel();sketchBezier=b.dataset.sketch==='bezier';sketchTool?.start(sketchBezier?'pen':b.dataset.sketch);});
+  $('#pv-path-mode').onchange=e=>pv.interaction.pathMode=e.target.value;
+  if(sketchTool){$('#pv-sketch-panel').addEventListener('click',()=>sketchBezier=false,true);$('#pv-sketch-panel').append(sketchTool.panel());const previous=pv.onOverlayDraw;pv.onOverlayDraw=()=>{previous?.();sketchTool.draw();};}
 
   let pvKeepCameraNode = null;
   let pvTimer = null, pvSeq = 0, pvKey = null, pvNode = null, pvPath = null, pvOver = false, pvReduced = null, pvTooBig = null;
@@ -1395,13 +1421,13 @@
   };
   const edgePattern = (edges) => edges.map(([a, b]) => `${a}-${b}`).join(" ");
   const SELECTION_ACTIONS = {
-    edge: [{label:"Delete",key:"x",type:"blast",params:s=>({group:s.edges.map(([a,b])=>`p${a}-${b}`).join(' '),domain:"edges"})}, { label: "Bevel", key: "b", type: "polybevel", title: "Bevel the selected edges (a loop, or edges that meet or reach a border)",
+    edge: [{label:"Delete",key:"x",type:"blast",params:s=>({group:s.edges.map(([a,b])=>`p${a}-${b}`).join(' '),domain:"edges"})}, { label: "Bevel", shortcut:"Ctrl+B", type: "polybevel", title: "Bevel the selected edges (a loop, or edges that meet or reach a border)",
       params: (s) => ({ edges: edgePattern(s.edges) }) }],
     face: [
-      { label: "Extrude", key: "e", type: "polyextrude", params: (s) => ({ group: rangePattern(s.faces), distance: 0.3 }) },
-      { label: "Inset", type: "inset", params: (s) => ({ group: rangePattern(s.faces), amount: 0.15 }) },
+      { label: "Extrude", shortcut:"E", type: "polyextrude", params: (s) => ({ group: rangePattern(s.faces), distance: 0.3 }) },
+      { label: "Inset", shortcut:"I", type: "inset", params: (s) => ({ group: rangePattern(s.faces), amount: 0.15 }) },
       { label: "Outset", type: "outset", params: (s) => ({ group: rangePattern(s.faces), amount: 0.15 }) },
-      { label: "Push / Pull", type: "pushpull", params: (s) => ({ group: rangePattern(s.faces), distance: 0.25 }) },
+      { label: "Push / Pull", shortcut:"Alt+E", type: "pushpull", params: (s) => ({ group: rangePattern(s.faces), distance: 0.25 }) },
       { label: "Reverse", type: "reverse", params: (s) => ({ group: rangePattern(s.faces) }) },
       { label: "Group", type: "group_create", params: (s) => ({ name: "faces", domain: "primitives", method: "pattern", pattern: rangePattern(s.faces) }) },
       { label: "Delete", key: "x", type: "blast", params: (s) => ({ group: rangePattern(s.faces), domain: "primitives" }) }],
@@ -1421,6 +1447,17 @@
     const r = await edit([{ op: "insert", after: node, type: a.type, params }]);
     if (r) { pv.clearSelection(); select([r.results[0].id]); }
   }
+  const modelTool=pv?.ok&&window.MiniModalModelTool?MiniModalModelTool(pv,$('#pv-canvas'),{
+    async start(kind){
+      const mapping={bevel:'polybevel',inset:'inset',extrude:'polyextrude',pushpull:'pushpull'},type=mapping[kind],action=(SELECTION_ACTIONS[pvSelection.mode]||[]).find(a=>a.type===type);
+      if(!action||!(pvSelection[SEL_KEY[pvSelection.mode]]||[]).length)throw Error(kind==='bevel'?'Select edges to bevel.':'Select faces for this tool.');
+      const gesture='model-'+crypto.randomUUID(),documentId=S.documentId,source=pvNode,params=action.params(pvSelection),param=kind==='inset'?'amount':'distance';params[param]=0;
+      const r=await edit([{op:'insert',after:source,type,params}],{documentId,gesture});if(!r)throw Error('Could not create tool');const id=r.results[0].id;pvKeepCameraNode=id;pv.clearSelection();select([id]);
+      return {id,gesture,documentId,source,param,value:0,divisions:1,scale:Math.max(.00001,(pv.bounds?.()?.radius||1)/200)};
+    },
+    async update(ctx,value,divisions){const params={[ctx.param]:ctx.param==='amount'||nodeOf(ctx.id)?.type==='polybevel'?Math.max(0,value):value};if(nodeOf(ctx.id)?.type==='polybevel')params.divisions=divisions;const r=await edit([{op:'set',id:ctx.id,params}],{documentId:ctx.documentId,gesture:ctx.gesture});if(!r)throw Error('Tool edit rejected');},
+    async finish(ctx,cancel){const r=await api(cancel?'/api/gesture_cancel':'/api/gesture_finish',{gesture:ctx.gesture,document_id:ctx.documentId});await loadState();if(cancel)select([ctx.source]);}
+  }):null;
   function renderSelectionTools(s) {
     const was = pvSelection.mode;
     pvSelection = s;
@@ -1439,7 +1476,7 @@
     const acts = n ? SELECTION_ACTIONS[s.mode] || [] : [];
     box.classList.toggle("hidden", !acts.length);
     box.replaceChildren(...acts.map((a) => h("button", { title: a.title || `${a.label} the selection: adds a ${a.type} node after ${pvNode || "the viewed node"}`,
-      dataset: { action: a.label }, onclick: () => applySelectionAction(a) }, a.label + (a.key ? ` (${a.key === "e" ? "Shift+E" : a.key.toUpperCase()})` : ""))));
+      dataset: { action: a.label }, onclick: () => {const kind={polybevel:'bevel',inset:'inset',polyextrude:'extrude',pushpull:'pushpull'}[a.type];if(kind)modelTool.start(kind,...viewportMouse).catch(err=>toast(err.message));else applySelectionAction(a);} }, a.label + (a.shortcut?' ('+a.shortcut+')':'') + (a.key ? ` (${a.key === "e" ? "Shift+E" : a.key.toUpperCase()})` : ""))));
     refreshSelectionHandles();
   }
   // ---- a selection carries a move / rotate / scale gizmo; the first drag adds a transform node for it (group = the selected points)
@@ -1503,7 +1540,7 @@
       ? "Drag anchors / tangents: edit curve · X/Y/Z: constrain\nShift: precision · Ctrl: snap · Esc: cancel\nShift-double-click: append · Handle modes in inspector"
       : mode === "view"
       ? "Drag: orbit · Middle drag: pan · RMB: fly\nWASD + Q/E while flying · wheel: speed / dolly\nC: modeling tools · 1–4: component selection"
-      : "Click / drag box: select · Shift: add · Ctrl: path · Ctrl+Shift: remove\nMiddle: orbit · Shift-middle: pan · Alt-click: loop · Ctrl+Alt-click: ring\nW / E / R: move / rotate / scale · Shift+E: extrude · C: modeling tools";
+      : "Click / drag box: select · Shift: add · Ctrl: path · Ctrl+Shift: remove\nMiddle: orbit · Shift-middle: pan · Alt-click: loop · Ctrl+Alt-click: ring\nG / R / S: move / rotate / scale · E: extrude · Alt+E: push/pull · C: circle select";
   }
   function setTool(t) { pv.setTool(t); updateToolButtons(); updateViewportHints(); }
   $('#pv-walk').onclick=()=>pv.toggleWalk();
@@ -1571,8 +1608,10 @@
       onPick: (tool, item) => { pieFromView = false; pieTool(item || { label: tool.label, type: tool.type }, null, { floating: true }); } });
     canvas.addEventListener("dragover", (e) => { if ([...(e.dataTransfer.types || [])].includes("application/x-minihou-tool")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } });
     const viewport=$('#pv-canvas');
-    viewport.addEventListener('dragover',e=>{if([...e.dataTransfer.types].includes('application/x-minihou-tool')){e.preventDefault();e.dataTransfer.dropEffect='copy';}});
+    viewport.addEventListener('dragleave',()=>placementPreview?.hide());
+    viewport.addEventListener('dragover',e=>{if([...e.dataTransfer.types].includes('application/x-minihou-tool')){e.preventDefault();e.dataTransfer.dropEffect='copy';const r=viewport.getBoundingClientRect(),point=pv.planePoint(e.clientX-r.left,e.clientY-r.top,[0,0,0],[0,0,1]);if(point&&shelfDragType){const params=Object.fromEntries((S.types[shelfDragType]?.params||[]).map(p=>[p.name,p.default]));placementPreview?.show(shelfDragType,point,params);}}});
     viewport.addEventListener('drop',async e=>{
+      placementPreview?.hide();
       const raw=e.dataTransfer.getData('application/x-minihou-tool');if(!raw)return;e.preventDefault();
       try{const tool=JSON.parse(raw),t=S.types[tool.type];if(!t||t.category!=='source'){toast('Drop a primitive from Create into the viewport.');return;}
         const r=viewport.getBoundingClientRect(),point=pv.planePoint(e.clientX-r.left,e.clientY-r.top,[0,0,0],[0,0,1]);
@@ -1653,21 +1692,29 @@
 
   if (window.MiniPie) {
     MiniPie.init({ types: () => S.types, onPick: pieTool, onOpen: () => { pieFromView = pvOver; },
-      blocked: () => !$("#tabmenu").classList.contains("hidden") || !$("#help").classList.contains("hidden") });
+      blocked: () => pvOver || !$("#tabmenu").classList.contains("hidden") || !$("#help").classList.contains("hidden") });
   }
   function wireSelectionTools() {
-    const controls=[['#pv-orientation','orientation'],['#pv-snap','snap'],['#pv-snap-element','element'],['#pv-snap-target','target'],['#pv-move-step','moveStep'],['#pv-angle-step','angleStep'],['#pv-scale-step','scaleStep'],['#pv-snap-backface','backface'],['#pv-snap-selected','includeSelected']];
+    const controls=[['#pv-orientation','orientation'],['#pv-proportional-enabled','proportional_enabled'],['#pv-proportional-radius','proportional_radius'],['#pv-proportional-falloff','proportional_falloff'],['#pv-proportional-connected','proportional_connected'],['#pv-proportional-projected','proportional_projected'],['#pv-snap','snap'],['#pv-snap-element','element'],['#pv-snap-target','target'],['#pv-move-step','moveStep'],['#pv-angle-step','angleStep'],['#pv-scale-step','scaleStep'],['#pv-snap-backface','backface'],['#pv-snap-selected','includeSelected']];
     try {const saved=JSON.parse(localStorage.getItem('minihou.interaction')||'{}');for(const [,key]of controls)if(typeof saved[key]===typeof pv.interaction[key])pv.interaction[key]=saved[key];if(saved.cursor?.length===3&&saved.cursor.every(Number.isFinite))pv.interaction.cursor=saved.cursor;}catch{}
     try {const saved=JSON.parse(localStorage.getItem('minihou.interaction')||'{}');if(saved.custom?.length===3&&saved.custom.every(v=>v.length===3&&v.every(Number.isFinite)))pv.interaction.custom=MiniInteraction.normalFrame(saved.custom[2],saved.custom[0]);}catch{}
     for(const key of ['moveStep','angleStep','scaleStep'])if(!Number.isFinite(pv.interaction[key])||pv.interaction[key]<=0)pv.interaction[key]=key==='angleStep'?15:0.1;
     const store=()=>{localStorage.setItem('minihou.interaction',JSON.stringify(pv.interaction));refreshSelectionHandles();pv.redraw();};
-    for(const [selector,key] of controls){const e=$(selector);if(e.type==='checkbox')e.checked=pv.interaction[key];else e.value=pv.interaction[key];e.onchange=()=>{let v=e.type==='checkbox'?e.checked:e.type==='number'?Number(e.value):e.value;if(e.type==='number'&&(!Number.isFinite(v)||v<=0)){e.value=pv.interaction[key];return;}pv.interaction[key]=v;store();};}
+    for(const [selector,key] of controls){const e=$(selector);if(e.type==='checkbox')e.checked=pv.interaction[key];else e.value=pv.interaction[key];e.onchange=()=>{let v=e.type==='checkbox'?e.checked:e.type==='number'?Number(e.value):e.value;if(e.type==='number'&&(!Number.isFinite(v)||v<=0)){e.value=pv.interaction[key];return;}pv.interaction[key]=v;store();if(key.startsWith('proportional_'))pv.onProportional?.();};}
     document.querySelectorAll('.pv-cursor-angle').forEach(e=>{const i=Number(e.dataset.axis);e.value=pv.interaction.cursor[i];e.onchange=()=>{if(Number.isFinite(Number(e.value))){pv.interaction.cursor[i]=Number(e.value);store();}};});
     $('#pv-custom-frame').onclick=()=>{pv.interaction.orientation='normal';pv.interaction.custom=pv.orientationFrame();pv.interaction.orientation='custom';$('#pv-orientation').value='custom';store();};
     pv.onSelect = renderSelectionTools;
     pv.canPick = () => !pvReduced;                                              // the drawn points of a reduced view are not the real ones
     // viewport handles: arrows in the view that scrub a parameter of the viewed node
     let handleBase = null, gizmoNode = null, createdNode=null, originalGraph=null, originalNode=null, createdTemplateMerge=null;
+    let handleContext=null,handleFinishing=Promise.resolve();
+    function handleSet(node,key,value){
+      const spec=S.types[nodeOf(node)?.type]?.params.find(p=>p.name===key),current=nodeOf(node)?.params?.[key]??spec?.default;
+      const valueKey=node+':'+key,pending=pendingSet.get(JSON.stringify([handleContext?.documentId??S.documentId,handleContext?.gesture||'',node]));
+      if(JSON.stringify(handleContext?.values.get(valueKey)??pending?.params?.[key]??current)===JSON.stringify(value))return;
+      handleContext?.values.set(valueKey,value);
+      queueSet(node,key,value,handleContext||undefined);
+    }
     const baseFor = (node, h) => {                                                       // the parameter's current value (or default) on that node
       if(h.input_target){node=nodeOf(node)?.inputs?.[h.input_target];if(typeof node!=='string'||nodeOf(node)?.type!=='lattice_grid')return NaN;}
       const n = nodeOf(node), spec = ((S.types[(n || {}).type] || {}).params || []).find((p) => p.name === h.param);
@@ -1676,47 +1723,52 @@
       handleBase = Array.isArray(cur) ? cur.slice() : null;               // the other components of a vector stay as they were
       return h.kind==='plane'?handleBase:h.comp === null || h.comp === undefined ? Number(cur) : Number(Array.isArray(cur) ? cur[h.comp] : NaN);
     };
+    function proportionalParams(){const i=pv.interaction,m=pv.camera().MV;return {proportional_enabled:i.proportional_enabled,proportional_radius:i.proportional_radius,proportional_falloff:i.proportional_falloff,proportional_connected:i.proportional_connected,proportional_projected:i.proportional_projected,proportional_view_direction:[m[2],m[6],m[10]]};}
+    pv.onProportional=()=>{const id=handleContext?(gizmoNode||originalNode):pvNode;if(nodeOf(id)?.type==='transform')for(const [k,v]of Object.entries(proportionalParams())){if(k==='proportional_view_direction'&&!(pv.interaction.proportional_enabled&&pv.interaction.proportional_projected))continue;handleSet(id,k,v);}$('#pv-proportional-radius').value=pv.interaction.proportional_radius;};
     async function startSelectionDrag(h) {                                // the first drag on a selection's gizmo creates the transform node
       const info = pv.selectionInfo();
       if (!info || !pvNode || !nodeOf(pvNode)) return NaN;
       const pattern = rangePattern(info.points);
-      if(pv.selectableTemplates?.length){const merged=await edit([{op:'merge_templates',id:pvNode}]);if(!merged)return NaN;pvNode=merged.results[0].id;createdTemplateMerge=pvNode;pv.selectableTemplates=[];}
+      if(pv.selectableTemplates?.length){const merged=await edit([{op:'merge_templates',id:pvNode}],handleContext);if(!merged)return NaN;pvNode=merged.results[0].id;createdTemplateMerge=pvNode;pv.selectableTemplates=[];}
       if (pattern.length > 30000) { toast("That selection is too large to write into a node; select fewer elements."); return NaN; }
       const cur = nodeOf(pvNode);
       if (h.tool==='move'&&cur.type === "transform" && (cur.params || {}).group === pattern && JSON.stringify(cur.params.axis_rotation||[0,0,0])===JSON.stringify(h.axis_rotation||[0,0,0])) gizmoNode = pvNode;
       else {
         const pivot = info.center.map((v) => Math.round(v * 1e5) / 1e5);
-        const r = await edit([{ op: "insert", after: pvNode, type: "transform", params: { group: pattern, pivot, axis_rotation:h.axis_rotation||[0,0,0] } }]);
+        const r = await edit([{ op: "insert", after: pvNode, type: "transform", params: { group: pattern, pivot, axis_rotation:h.axis_rotation||[0,0,0],...proportionalParams() } }],handleContext);
         if (!r) return NaN;
         gizmoNode = r.results[0].id;
         createdNode=gizmoNode;
         select([gizmoNode]);
       }
+      pv.onProportional?.();
       return baseFor(gizmoNode, h);
     }
-    pv.onHandleStart = (h) => {createdTemplateMerge=null;createdNode=null;originalGraph=structuredClone(S.graph);originalNode=pvNode;return h.pending ? startSelectionDrag(h) : baseFor(pvNode, h);};
+    pv.onHandleStart = async (h) => {
+      await handleFinishing;while(setInFlight||pendingSet.size)await new Promise(resolve=>setTimeout(resolve,20));
+      handleContext={path:S.path,documentId:S.documentId,gesture:'transform-'+crypto.randomUUID(),changed:false,values:new Map()};
+      gizmoNode=null;createdTemplateMerge=null;createdNode=null;originalGraph=structuredClone(S.graph);originalNode=pvNode;
+      try{
+        const value=h.pending?await startSelectionDrag(h):baseFor(pvNode,h);
+        if(!(Number.isFinite(value)||(Array.isArray(value)&&value.length===3&&value.every(Number.isFinite)))){await finishHandle(true);return value;}
+        if(!h.pending)pv.onProportional?.();return value;
+      }catch(error){await finishHandle(true);throw error;}
+    };
     pv.onHandleAxis = h => {
       const node=h.pending?gizmoNode:originalNode,n=originalGraph.nodes[node],spec=typeOf(h.pending?gizmoNode:originalNode).params.find(p=>p.name===h.param),cur=n?.params?.[h.param]??spec?.default;
       handleBase=Array.isArray(cur)?cur.slice():null;return Number(handleBase?handleBase[h.comp]:cur);
     };
-    pv.onHandleCancel = async (h,base) => {
-      const created=createdNode,graph=originalGraph,previous=originalNode;
-      if(Number.isFinite(base)||Array.isArray(base))pv.onHandle(h,base,true);
-      while(setInFlight||pendingSet.size)await new Promise(resolve=>setTimeout(resolve,20));
-      if(created&&nodeOf(created)){
-        const ops=[{op:'remove',id:created}];
-        if(createdTemplateMerge){ops.push({op:'remove',id:createdTemplateMerge});for(const [id,n]of Object.entries(graph.nodes))if(n.flags)ops.push({op:'meta',id,set:{flags:n.flags}});}
-        for(const [id,n] of Object.entries(graph.nodes))for(const [port,ref] of Object.entries(n.inputs||{})){
-          const refs=Array.isArray(ref)?ref:[ref];if(!refs.includes(previous))continue;
-          ops.push({op:'disconnect',to:id,port});for(const from of refs)ops.push({op:'connect',from,to:id,port});
-        }
-        if(graph.display)ops.push({op:'display',id:graph.display});
-        for(const [id,n]of Object.entries(graph.nodes))if(n.display_extra)ops.push({op:'meta',id,set:{display_extra:true}});
-        await edit(ops);select([previous]);
-      }
-    };
-    pv.onHandle = (h, value) => {
-      let node = h.pending ? gizmoNode : pvNode;
+    function finishHandle(cancel){
+      const context=handleContext,previous=originalNode;if(!context||context.finishing)return handleFinishing;context.finishing=true;
+      desktopPendingEdits++;
+      handleFinishing=(async()=>{while(setInFlight||pendingSet.size)await new Promise(resolve=>setTimeout(resolve,20));
+        if(context.changed){const r=await api(cancel?'/api/gesture_cancel':'/api/gesture_finish',{gesture:context.gesture,document_id:context.documentId});applySnapshot(r.graph);if(cancel&&nodeOf(previous))select([previous]);}
+      })().catch(error=>toast(error.message)).finally(()=>{desktopPendingEdits--;if(handleContext===context){handleContext=null;gizmoNode=null;}});
+      return handleFinishing;
+    }
+    pv.onHandleCancel = () => finishHandle(true);
+    pv.onHandle = (h, value,done=false) => {
+      let node = h.pending ? gizmoNode : originalNode;
       if(h.input_target)node=nodeOf(node)?.inputs?.[h.input_target];
       if (!node || !nodeOf(node)) return;
       const spec = ((S.types[nodeOf(node).type] || {}).params || []).find((p) => p.name === h.param);
@@ -1725,12 +1777,13 @@
         const delta=value-handleBase[h.comp];
         center[h.comp]+=h.cage_sign*delta/2;
         if(h.comp===2)center[2]-=({min:0.5,max:-0.5}[params.justify_z]||0)*delta;
-        queueSet(node,'center',center);
+        handleSet(node,'center',center);
       }
       if (spec && spec.kind === "int") value = Math.round(value);                       // an integer parameter takes whole steps
-      if(h.json_point!==undefined && handleBase){const values=handleBase.slice();values.splice(h.json_point*3,3,...value);queueSet(node,h.param,JSON.stringify(values));}
-      else if (h.comp === null || h.comp === undefined) queueSet(node, h.param, value);
-      else if (handleBase) { const v = handleBase.slice(); v[h.comp] = value; queueSet(node, h.param, h.json_array?JSON.stringify(v):v); }
+      if(h.json_point!==undefined && handleBase){const values=handleBase.slice();values.splice(h.json_point*3,3,...value);handleSet(node,h.param,JSON.stringify(values));}
+      else if (h.comp === null || h.comp === undefined) handleSet(node, h.param, value);
+      else if (handleBase) { const v = handleBase.slice(); v[h.comp] = value; handleSet(node, h.param, h.json_array?JSON.stringify(v):v); }
+      if(done)finishHandle(false);
     };
     document.querySelectorAll("#preview [data-mode]").forEach((b) => { b.onclick = () => { if (b.dataset.mode !== "view" && blockedByReduced()) return; pv.setMode(b.dataset.mode); }; });
     const wrap = $("#pv-canvas").parentElement;                         // the canvas and the overlays on it (gizmo, handles) count as one
@@ -1738,8 +1791,11 @@
     wrap.addEventListener("pointerleave", () => { pvOver = false; });
     document.addEventListener("keydown", (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
-      if(sketchTool?.active()||loopTool?.active()||pv.isDragging()||curveTool?.active())return;
+      if(modelTool?.active()||selectionTool?.active()||sketchTool?.active()||loopTool?.active()||pv.isDragging()||curveTool?.active())return;
       if (!pvOver || tag === "input" || tag === "textarea" || tag === "select" || e.target.isContentEditable) return;
+      if((e.ctrlKey&&e.code==='KeyB')||(e.altKey&&e.code==='KeyE')||(!e.ctrlKey&&!e.altKey&&['KeyI','KeyE'].includes(e.code))){
+        const kind=e.ctrlKey?'bevel':e.altKey?'pushpull':e.code==='KeyI'?'inset':'extrude';modelTool?.start(kind,...viewportMouse).catch(err=>toast(err.message));e.preventDefault();e.stopImmediatePropagation();return;
+      }
       if(e.ctrlKey&&e.code==='KeyR'){e.preventDefault();e.stopImmediatePropagation();loopTool?.start();return;}
       const nav = { Numpad1: ["front"], Numpad3: ["right"], Numpad7: ["top"] }[e.code];          // Blender-style view keys; Ctrl = the opposite side
       if (nav && !e.altKey && !e.metaKey) { pv.viewAxis(nav[0], e.ctrlKey); e.preventDefault(); e.stopImmediatePropagation(); return; }
@@ -1749,6 +1805,7 @@
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const k = e.key.toLowerCase();
+      if(k==='o'){pv.interaction.proportional_enabled=!pv.interaction.proportional_enabled;$('#pv-proportional-enabled').checked=pv.interaction.proportional_enabled;$('#pv-proportional-enabled').dispatchEvent(new Event('change'));pv.redraw();e.preventDefault();e.stopImmediatePropagation();return;}
       if (k === "f") { pv.frameSelection(); e.preventDefault(); e.stopImmediatePropagation(); return; }
       if (k === " ") { tlToggle(); e.preventDefault(); e.stopImmediatePropagation(); return; }                        // timeline, with the pointer over the view
       if (k === "arrowright" || k === "arrowleft") {
@@ -1764,7 +1821,8 @@
       }
       const act = (SELECTION_ACTIONS[pvSelection.mode] || []).find((a) => a.key === k && (k !== "e" || e.shiftKey));
       if (act && (pvSelection[SEL_KEY[pvSelection.mode]] || []).length) { applySelectionAction(act); e.preventDefault(); e.stopImmediatePropagation(); }
-      else if ((k === "w" || k === "e" || k === "r") && (pv.hasToolHandles() || nodeOf(pvNode)?.type==='bezier')) { setTool({ w: "move", e: "rotate", r: "scale" }[k]); e.preventDefault(); e.stopImmediatePropagation(); }
+      else if (['g','r','s'].includes(k)) { beginTransform({g:'move',r:'rotate',s:'scale'}[k]); e.preventDefault(); e.stopImmediatePropagation(); }
+      else if (k==='b'||k==='c'){if(pv.mode==='view')pv.setMode('face');selectionTool?.start(k==='b'?'box':'circle');e.preventDefault();e.stopImmediatePropagation();}
       else if (k === "a" && pvSelection.mode !== "view") { pv.selectAll(); e.preventDefault(); e.stopImmediatePropagation(); }
     }, true);
   }

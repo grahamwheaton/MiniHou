@@ -177,6 +177,9 @@ class EditorE2E(unittest.TestCase):
         self.page.click('#preview [data-mode="edge"]')
         self.page.mouse.click(*self.view_xy('edge',self.top_edges[0]))
         self.page.click('#pv-actions button[data-action="Bevel"]')
+        self.page.mouse.move(*self.view_xy('edge', self.top_edges[0]))
+        self.page.mouse.move(self.page.locator('#pv-canvas').bounding_box()['x']+400,400,steps=5)
+        self.page.keyboard.press('Enter')
         self.assertTrue(until(lambda:'polybevel1' in self.s.graph.nodes))
         self.page.wait_for_function("document.querySelector('#pv-node').textContent.includes('polybevel1')")
         self.page.wait_for_function('minihou.preview.points === 10')
@@ -976,6 +979,9 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(sorted(map(tuple, self.selection()["edges"])), sorted(self.top_edges))
         self.assertIn("4 edges selected", self.page.inner_text("#pv-selinfo"))
         self.page.click('#pv-actions button[data-action="Bevel"]')
+        self.page.mouse.move(*self.view_xy('edge', self.top_edges[0]))
+        self.page.mouse.move(self.page.locator('#pv-canvas').bounding_box()['x']+400,400,steps=5)
+        self.page.keyboard.press('Enter')
         self.assertTrue(until(lambda: "polybevel1" in self.s.graph.nodes))
         g = self.s.graph.nodes
         self.assertEqual(g["polybevel1"].inputs, {"geo": "b"})
@@ -995,12 +1001,16 @@ class EditorE2E(unittest.TestCase):
             self.page.mouse.click(*self.view_xy("edge", list(e)))
             self.page.keyboard.up("Shift") if n else None
         self.page.click('#pv-actions button[data-action="Bevel"]')
+        self.page.mouse.move(*self.view_xy('edge', self.top_edges[0]))
+        self.page.mouse.move(self.page.locator('#pv-canvas').bounding_box()['x']+400,400,steps=5)
+        self.page.keyboard.press('Enter')
         self.assertTrue(until(lambda: "polybevel1" in self.s.graph.nodes))
         self.page.wait_for_function("minihou.preview.handleTips().some(t => t.id === 'distance')")   # the new node has its arrow
+        initial = self.s.graph.nodes["polybevel1"].params["distance"]
         tip = self.drag_handle("distance", 30)
         self.assertTrue(until(lambda: self.s.graph.nodes["polybevel1"].params.get("distance", 0.1) != 0.1))
         d = self.s.graph.nodes["polybevel1"].params["distance"]
-        self.assertAlmostEqual(d, 0.1 + 30 / tip["ppu"], delta=0.1)
+        self.assertAlmostEqual(d, initial + 30 / tip["ppu"], delta=0.1)
         self.assertGreaterEqual(d, 0.0)
         self.assertTrue(until(lambda: self.s.status()["ok"], 5))
 
@@ -1009,7 +1019,9 @@ class EditorE2E(unittest.TestCase):
         self.page.click('#preview [data-mode="edge"]')
         self.page.mouse.click(*self.view_xy("edge", list([self.top_points[0],self.top_points[1]])))
         self.assertEqual(len(self.selection()["edges"]), 1)
-        self.page.keyboard.press("b")                                                        # the shortcut, with the mouse over the view
+        self.page.keyboard.press("Control+b")
+        self.page.mouse.move(*self.view_xy("edge", self.top_edges[-1]))
+        self.page.keyboard.press("Enter")
         self.assertTrue(until(lambda: "polybevel1" in self.s.graph.nodes))
         self.page.wait_for_function('minihou.preview.points === 10')
         self.assertTrue(until(lambda:self.s.status()['ok']))
@@ -1227,10 +1239,103 @@ class EditorE2E(unittest.TestCase):
         self.page.locator('.curve-grab[data-point="1"][data-part="p"]').click()
         self.page.select_option('#pv-follow','selection')
         self.page.wait_for_function('minihou.preview.points === 49')
-        self.page.keyboard.press('e')
+        self.page.keyboard.press('r')
         self.assertEqual(self.page.evaluate('minihou.preview.tool'),'rotate')
+        self.page.keyboard.press('Escape')
         self.assertFalse(any(n.type=='polyextrude' for n in self.s.graph.nodes.values()))
         self.page.wait_for_selector('.curve-grab[data-axis="2"]')
+
+    def test_gizmo_planes_stay_bounded_when_axis_faces_camera(self):
+        self.handle_scene('transform',{'translate':[0,0,0]},'h')
+        maximum=self.page.evaluate("""async()=>{const p=minihou.preview;let maximum=0;for(const yaw of [0,.01,.4,1.56,2.1,3.1])for(const pitch of [.01,.5,1.2]){p.view.yaw=yaw;p.view.pitch=pitch;p.redraw();await new Promise(requestAnimationFrame);const origin=p.project([0,0,0]);for(const polygon of document.querySelectorAll('.pv-handle[data-id^=translate_plane] polygon'))for(const q of polygon.points){maximum=Math.max(maximum,Math.hypot(q.x-origin[0],q.y-origin[1]));}}return maximum;}""")
+        self.assertLess(maximum,65)
+
+    def test_blender_scale_plane_and_proportional_move(self):
+        self.handle_scene('transform',{'scale':[1,1,1]},'h')
+        r=self.page.locator('#pv-canvas').bounding_box();x,y=r['x']+r['width']*.6,r['y']+r['height']*.5
+        self.page.mouse.move(x,y);self.page.keyboard.press('s');self.page.keyboard.press('Shift+z')
+        self.page.mouse.move(x+40,y,steps=5);self.page.keyboard.press('Enter')
+        self.assertTrue(until(lambda:self.s.graph.nodes['h'].params['scale'][0]>1.05))
+        values=self.s.graph.nodes['h'].params['scale'];self.assertAlmostEqual(values[0],values[1]);self.assertAlmostEqual(values[2],1)
+        self.page.wait_for_function('minihou.desktopCanClose()')
+        self.page.evaluate("minihou.preview.selectElements('point',[0],'replace')")
+        self.page.mouse.move(x,y);self.page.keyboard.press('o');self.page.wait_for_selector('.pv-proportional-radius');self.page.keyboard.press('g')
+        self.page.mouse.move(x+20,y-10,steps=4);self.page.mouse.wheel(0,120);self.page.keyboard.press('Enter')
+        self.assertTrue(until(lambda:any(n.type=='transform' and n.params.get('proportional_enabled') for n in self.s.graph.nodes.values())))
+        node=next(n for n in self.s.graph.nodes.values() if n.id!='h' and n.type=='transform' and n.params.get('proportional_enabled'))
+        self.assertTrue(until(lambda:self.s.graph.nodes[node.id].params['proportional_radius']>1))
+
+    def test_modal_move_snap_base_and_multisnap_priority(self):
+        import numpy as np
+        self.two_boxes()
+        self.page.click('#preview [data-mode="piece"]')
+        self.page.mouse.click(*self.view_xy('face',self.second_box_top()))
+        self.page.check('#pv-snap')
+        self.page.select_option('#pv-snap-element','vertex,face')
+        self.page.evaluate('document.activeElement.blur()')
+        hit=self.page.evaluate("() => {const p=minihou.preview;p.interaction.includeSelected=true;const q=p.screenOf('point',8);return p.snapPosition([99,99,99],q[0],q[1],false,[0,0,0],null);}")
+        np.testing.assert_allclose(hit,self.merged.P[8],atol=1e-5)
+        before=self.s.graph.to_dict()
+        rect=self.page.locator('#pv-canvas').bounding_box()
+        self.page.mouse.move(rect['x']+rect['width']/2,rect['y']+rect['height']/2);self.page.keyboard.press('g')
+        self.page.wait_for_function('minihou.preview.isDragging()')
+        self.page.keyboard.press('b')
+        self.page.mouse.move(*self.view_xy('point',8))
+        self.page.wait_for_function("document.querySelector('.pv-drag-feedback').textContent.includes('Pick snap base')")
+        self.page.mouse.click(*self.view_xy('point',8))
+        self.assertTrue(self.page.evaluate('minihou.preview.isDragging()'))
+        self.page.mouse.move(*self.view_xy('point',0),steps=5)
+        self.assertTrue(until(lambda:any(n.type=='transform' and abs(n.params.get('translate',[0,0,0])[0]+4)<1e-4 for n in self.s.graph.nodes.values())))
+        self.page.keyboard.press('Escape')
+        self.page.wait_for_function('!minihou.preview.isDragging() && minihou.desktopCanClose()')
+        self.assertEqual(self.s.graph.to_dict(),before)
+
+    def test_modal_rotate_works_with_z_axis_edge_on(self):
+        self.handle_scene('transform',{'rotate':[0,0,0]},'h')
+        self.page.evaluate('minihou.preview.view.pitch=0;minihou.preview.view.yaw=0;minihou.preview.redraw()')
+        r=self.page.locator('#pv-canvas').bounding_box()
+        o=self.page.evaluate('minihou.preview.project([0,0,0])')
+        x,y=r['x']+o[0],r['y']+o[1]
+        self.page.mouse.move(x+50,y);self.page.keyboard.press('r')
+        self.page.mouse.move(x+35,y-35,steps=8);self.page.keyboard.press('Enter')
+        self.assertTrue(until(lambda:abs(self.s.graph.nodes['h'].params['rotate'][0])>20))
+        self.page.wait_for_function('minihou.desktopCanClose()')
+        before=self.s.graph.to_dict()
+        self.page.keyboard.press('r');self.page.mouse.move(x,y-50,steps=5);self.page.keyboard.press('Escape')
+        self.page.wait_for_function('!minihou.preview.isDragging() && minihou.desktopCanClose()')
+        self.assertEqual(self.s.graph.to_dict(),before)
+
+    def test_vertex_snap_default_and_multisnap_setting(self):
+        self.assertEqual(self.page.evaluate('minihou.preview.interaction.element'),'vertex')
+        self.assertFalse(self.page.locator('#pv-snap').is_checked())
+        self.page.select_option('#pv-snap-element','vertex,face')
+        self.assertEqual(self.page.evaluate('minihou.preview.interaction.element'),'vertex,face')
+
+    def test_blender_modal_g_move_and_cancel(self):
+        self.handle_scene('transform',{'translate':[0,0,0]},'h')
+        r=self.page.locator('#pv-canvas').bounding_box();x,y=r['x']+r['width']*.6,r['y']+r['height']*.5
+        self.page.mouse.move(x,y);self.page.keyboard.press('g')
+        self.assertTrue(self.page.evaluate('minihou.preview.isDragging()'))
+        self.page.mouse.move(x+45,y-15,steps=6);self.page.keyboard.press('Enter')
+        self.assertTrue(until(lambda:self.s.graph.nodes['h'].params['translate']!=[0,0,0]))
+        self.page.wait_for_function('minihou.desktopCanClose()')
+        before=self.s.graph.to_dict()
+        self.page.keyboard.press('g');self.page.mouse.move(x+80,y+20,steps=6);self.page.keyboard.press('Escape')
+        self.page.wait_for_function('!minihou.preview.isDragging() && minihou.desktopCanClose()')
+        self.assertEqual(self.s.graph.to_dict(),before)
+
+    def test_blender_modal_bevel_wheel_and_cancel(self):
+        self.box_scene()
+        self.page.click('#preview [data-mode="edge"]')
+        self.page.mouse.click(*self.view_xy('edge',self.top_edges[0]))
+        self.page.keyboard.press('Control+b')
+        self.assertTrue(until(lambda:any(n.type=='polybevel' for n in self.s.graph.nodes.values())))
+        node=next(n for n in self.s.graph.nodes.values() if n.type=='polybevel')
+        self.page.mouse.move(*self.view_xy('edge',self.top_edges[1]))
+        self.page.mouse.wheel(0,-120)
+        self.assertTrue(until(lambda:self.s.graph.nodes[node.id].params.get('divisions',1)>1))
+        self.page.keyboard.press('Escape')
+        self.assertTrue(until(lambda:not any(n.type=='polybevel' for n in self.s.graph.nodes.values())))
 
     def test_bezier_tangent_plane_gizmo_commits_and_undo(self):
         import json
@@ -1330,6 +1435,7 @@ class EditorE2E(unittest.TestCase):
         self.page.select_option('#pv-orientation','cursor')
         self.page.locator('[aria-label="Cursor rotation Z"]').evaluate("e=>{e.value=90;e.dispatchEvent(new Event('change'));}")
         self.page.check('#pv-snap')
+        self.page.select_option('#pv-snap-element','increment')
         self.page.locator('#pv-move-step').evaluate("e=>{e.value=0.5;e.dispatchEvent(new Event('change'));}")
         self.drag_handle('translate_x',55)
         self.assertTrue(until(lambda:any(n.type=='transform' for n in self.s.graph.nodes.values())))
@@ -1466,7 +1572,8 @@ class EditorE2E(unittest.TestCase):
         # scale cubes: a pixel drag multiplies that component only
         self.page.keyboard.press("Escape")
         self.page.mouse.move(box["x"] + 20, box["y"] + 20)
-        self.page.keyboard.press("r")                                                        # R: scale tool (nothing is selected in the view)
+        self.page.keyboard.press("s")
+        self.page.keyboard.press("Escape") # keep scale tool, cancel modal gesture
         ids = sorted(t["id"] for t in self.page.evaluate("minihou.preview.handleTips()"))
         self.assertEqual(ids, ["scale_x", "scale_y", "scale_z", "uniform_scale"])
         self.assertTrue(until(lambda: self.s.status()["ok"]))                                 # the rotation has been cooked and the handles re-placed
@@ -1478,7 +1585,8 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: self.s.status()["ok"]))
         self.drag_handle("uniform_scale", 60)                                                # the square: drag up and to the right
         self.assertTrue(until(lambda: self.s.graph.nodes["h"].params.get("uniform_scale", 1.0) > 1.2))
-        self.page.keyboard.press("w")
+        self.page.keyboard.press("g")
+        self.page.keyboard.press("Escape")
         self.assertEqual(len(self.page.evaluate("minihou.preview.handleTips()")), 6)         # W: back to the move arrows
 
     def test_tool_buttons_are_hidden_for_nodes_without_transform_handles(self):
@@ -1768,7 +1876,9 @@ class EditorE2E(unittest.TestCase):
         # the new node is now the viewed one and shows its own handles at the moved points; selecting again edits the same node
         self.page.wait_for_function(f"document.querySelector('#pv-node').innerText.includes({tid!r})")
         self.page.click('#preview [data-mode="piece"]')
+        self.page.keyboard.down('Shift') # select through the centre move handle
         self.page.mouse.click(*self.view_xy("face", face))
+        self.page.keyboard.up('Shift')
         self.assertEqual(sorted(self.selection()["faces"]), list(range(6, 12)))
         before = self.s.graph.nodes[tid].params["translate"][2]
         ppu = next(t for t in self.page.evaluate("minihou.preview.handleTips()") if t["id"] == "translate_z")["ppu"]
@@ -1899,14 +2009,14 @@ class EditorE2E(unittest.TestCase):
         self.assertEqual(self.selection()["faces"], [face])
         box = self.page.locator("#pv-canvas").bounding_box()
         self.page.mouse.move(box["x"] + 40, box["y"] + 60)
-        self.page.keyboard.press("c")
-        self.page.keyboard.press("3")                                                           # Polygons
-        self.page.mouse.click(*self.pie_slot_xy(2))                                              # PolyExtrude
+        self.page.keyboard.press("e")
+        self.page.mouse.move(box["x"]+100,box["y"]+60,steps=5)
+        self.page.keyboard.press("Enter")
         self.assertTrue(until(lambda: any(n.type == "polyextrude" for n in self.s.graph.nodes.values())))
         n = next(n for n in self.s.graph.nodes.values() if n.type == "polyextrude")
         self.assertEqual(n.inputs, {"geo": "m"})
         self.assertEqual(n.params["group"], str(face))
-        self.assertEqual(n.params["distance"], 0.3)
+        self.assertGreater(n.params["distance"], 0)
 
     # -- the tool shelf ----------------------------------------------------------------------
     def shelf_tool(self, label):
