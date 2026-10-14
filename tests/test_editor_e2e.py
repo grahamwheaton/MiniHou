@@ -297,7 +297,8 @@ class EditorE2E(unittest.TestCase):
         self.two_boxes()
         self.page.locator('#pv-canvas').evaluate("""el=>{const d=new DataTransfer();d.setData('application/x-minihou-tool',JSON.stringify({type:'box'}));const r=el.getBoundingClientRect();el.dispatchEvent(new DragEvent('drop',{bubbles:true,dataTransfer:d,clientX:r.left+r.width/2,clientY:r.top+r.height/2}));}""")
         self.assertTrue(until(lambda:'box1' in self.s.graph.nodes))
-        self.assertEqual(self.s.graph.display,'box1')
+        self.assertEqual(self.s.graph.display,'o')
+        self.assertTrue(self.s.graph.nodes['box1'].meta.get('display_extra'))
         self.assertIn('center',self.s.graph.nodes['box1'].params)
 
     def test_network_interaction_selection_keeps_display_and_x_undo(self):
@@ -2016,6 +2017,10 @@ class EditorE2E(unittest.TestCase):
         gid = next(i for i, n in self.s.graph.nodes.items() if n.type == "grid")
         self.assertEqual(self.s.graph.nodes[gid].inputs, {})
         self.page.wait_for_selector(f'.node[data-id="{gid}"].selected')
+        self.assertTrue(self.s.graph.nodes[gid].meta.get('display_extra'))
+        # Source creation is additive. Explicitly isolate the two-box stream for
+        # this test's following face-selection/extrude operation.
+        self.page.evaluate("minihou.edit([{op:'display',id:'m'}])")
         self.node("m").locator(".title").click()
         self.page.wait_for_function("minihou.preview.tris === 24")
         self.page.click('#preview [data-mode="face"]')

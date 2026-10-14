@@ -17,7 +17,7 @@ GROUPS: List[Tuple[str, str, List[str]]] = [
      ["box", "sphere", "grid", "tube", "torus", "circle", "line", "bezier", "curve", "helix", "lsystem", "lattice_grid",
       "blender_object", "blender_image", "image_file", "usd_import", "modifier_input", "object_input"]),
     ("Polygon Modelling", "Build and edit polygon surfaces",
-     ["polyextrude", "pushpull", "inset", "outset", "polybevel", "polysplit", "polyfill", "polybridge", "polyexpand2d", "solidify", "subdivide", "mirror", "boolean",
+     ["polyextrude", "pushpull", "inset", "outset", "polybevel", "polysplit", "knife", "polyfill", "polybridge", "polyexpand2d", "solidify", "subdivide", "mirror", "boolean",
       "clip", "dissolve", "divide", "reverse", "facet", "bridge", "skin", "skin_profiles", "revolve", "polyreduce", "clean",
       "convex_hull"]),
     ("Edges", "Work on edges and creases",

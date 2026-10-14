@@ -32,5 +32,12 @@
       ]
     }
   },
-  "display": "output1"
+  "display": "output1",
+  "exposed": [
+    {
+      "name": "Box Size",
+      "node": "box1",
+      "param": "size"
+    }
+  ]
 }
