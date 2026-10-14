@@ -218,6 +218,7 @@ window.MiniHouPreview = (() => {
     gl.bindVertexArray(aedVao); gl.bindBuffer(gl.ARRAY_BUFFER, aedBuf);
     for (const [loc, n, off] of [[0, 3, 0], [1, 3, 12], [2, 1, 24], [3, 1, 28]]) { gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, n, gl.FLOAT, false, 32, off); }
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, aedIdx); gl.bindVertexArray(null);
+    const MAX_PRIM_COLOUR_TRIS = 4000000;
     const HEAT = [[0.12, 0.2, 0.75], [0.1, 0.75, 0.85], [0.2, 0.8, 0.25], [0.95, 0.85, 0.15], [0.9, 0.2, 0.15]];
     function colourOf(a, i, out, o) {                                    // the colour of element i of the attribute, into out[o..o+2]
       const v = a.values, nc = a.comps;
@@ -236,6 +237,10 @@ window.MiniHouPreview = (() => {
         gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, col, gl.DYNAMIC_DRAW); data.hasCd = true; ptCol = col;
       } else if (a.domain === "prim") {
         const T = raw.tri, TP = raw.triPrim, nt = T.length / 3;
+        if (nt > MAX_PRIM_COLOUR_TRIS) {                                  // unwelding would need 72 bytes per triangle: too much for the tab
+          if (onMessage) onMessage(`Too many faces to colour by primitive (${nt.toLocaleString()} triangles); points and edges still work.`);
+          return;
+        }
         if (primCount !== nt * 3) {                                       // the unwelded positions, once per geometry
           const pos = new Float32Array(nt * 9);
           for (let t = 0; t < nt; t++) for (let c = 0; c < 3; c++) { const v = T[3 * t + c] * 3; pos.set([raw.P[v], raw.P[v + 1], raw.P[v + 2]], 9 * t + 3 * c); }
@@ -299,16 +304,21 @@ window.MiniHouPreview = (() => {
       if (was && was.domain === "edge" && !(attrView && attrView.domain === "edge")) aedCount = 0;
       if (attrView) recolour(); else schedule();
     }
-    function upload(head, arrays) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf); gl.bufferData(gl.ARRAY_BUFFER, arrays.P, gl.STATIC_DRAW);
+    function upload(head, arrays, keepIndices) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+      if (keepIndices && raw && raw.P.length === arrays.P.length) gl.bufferSubData(gl.ARRAY_BUFFER, 0, arrays.P);   // only the points moved
+      else gl.bufferData(gl.ARRAY_BUFFER, arrays.P, gl.STATIC_DRAW);
       data.hasCd = !!arrays.Cd; cd0 = arrays.Cd || null; attrView = null; primCount = 0; aedCount = 0;
       if (arrays.Cd) { gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, arrays.Cd, gl.STATIC_DRAW); }
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arrays.tri, gl.STATIC_DRAW);
-      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, edgeBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arrays.edge, gl.STATIC_DRAW);
+      if (!keepIndices) {
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, triBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arrays.tri, gl.STATIC_DRAW);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, edgeBuf); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, arrays.edge, gl.STATIC_DRAW);
+      }
       data.npoints = arrays.P.length / 3; data.ntris = arrays.tri.length / 3; data.nedges = arrays.edge.length / 2;
       data.bounds = head.bounds; nrmDirty = true;
       uploadInstances(head, arrays);
-      raw = { P: arrays.P, tri: arrays.tri, edge: arrays.edge, triPrim: arrays.tri_prim || new Uint32Array(arrays.tri.length / 3), chunks: arrays.chunks || null };
+      raw = { P: arrays.P, tri: arrays.tri, edge: arrays.edge, triPrim: arrays.tri_prim || new Uint32Array(arrays.tri.length / 3), chunks: arrays.chunks || null,
+              topology: head.topology || null };
       Object.assign(api, { tris: data.ntris, edges: data.nedges, points: data.npoints });
     }
     function frameAll() {
@@ -1445,6 +1455,8 @@ window.MiniHouPreview = (() => {
     canvas.addEventListener("dblclick", (e) => { if (sel.mode === "view") frameAll(); });
     if (window.ResizeObserver) new ResizeObserver(schedule).observe(canvas);
 
+    // The triangles and edges the viewer holds (see minihou/preview.py): the server leaves them out of a reply when they have not changed.
+    Object.defineProperty(api, "topology", { get: () => (raw ? raw.topology : null), enumerable: true });
     Object.assign(api, {
       showFeedback(text){feedback.hidden=!text;feedback.textContent=text||'';if(!text)snapMark=null;schedule();},
       interaction, orientationFrame, snapPosition, planePoint,
@@ -1525,6 +1537,12 @@ window.MiniHouPreview = (() => {
       tool: "move", hasToolHandles() { return (selHandles.length ? selHandles : handles).some((h) => h.tool); },
       setTool(t) { if (["move", "rotate", "scale"].includes(t)) { api.tool = t; schedule(); } },
       set(head, arrays, keepCamera) {
+        let keepIndices = false;
+        if (head.same_topology) {                                                         // only positions (and colours) came: reuse the rest
+          if (!raw || raw.topology !== head.topology || raw.P.length !== arrays.P.length) return false;
+          arrays = Object.assign({}, arrays, { tri: raw.tri, edge: raw.edge, tri_prim: raw.triPrim });
+          keepIndices = true;
+        }
         templateRaw=arrays.template_P?{P:arrays.template_P,edge:arrays.template_edge,tri:arrays.template_tri}:null;
         api.templatePoints=templateRaw?templateRaw.P.length/3:0;
         gl.bindVertexArray(templateVao);
@@ -1536,10 +1554,12 @@ window.MiniHouPreview = (() => {
         keepCamera = keepCamera || !!handleDrag;
         const same = keepCamera && data.npoints === arrays.P.length / 3 && data.ntris === arrays.tri.length / 3 &&
           data.nedges === arrays.edge.length / 2;                                       // same node, same topology: indices still mean the same
-        upload(head, arrays);
+        upload(head, arrays, keepIndices);
+        api.lastUpload = keepIndices ? "positions" : "all";
         if (!keepCamera && !fly) frameAll(); else schedule();
         if (!same && (sel.point.size || sel.edge.size || sel.face.size)) change({}, "replace");   // other geometry: drop the selection
         else rebuildOverlay();
+        return true;
       },
       instanceStats, sectionPlane, isClipped,
       setSection(o) { Object.assign(opt.section, o); schedule(); },

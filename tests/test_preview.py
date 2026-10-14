@@ -155,3 +155,43 @@ class PreviewArraysTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TopologyReuseTests(unittest.TestCase):
+    """A deformer shares its input's topology: the triangles, their drawing order and the edges are reused, only the run bounds follow P."""
+
+    def setUp(self):
+        self.old = preview.CHUNK_MIN_TRIS
+        preview.CHUNK_MIN_TRIS = 100                                     # small meshes still get a run table
+        self.addCleanup(setattr, preview, "CHUNK_MIN_TRIS", self.old)
+
+    def test_same_topology_reuses_layout_and_redoes_bounds(self):
+        grid = run("grid", columns=40, rows=40)
+        moved = run("transform", grid, translate=[3, 0, 0])
+        self.assertIs(moved.topology, grid.topology)
+        h1, a1 = preview._arrays_for(grid)
+        h2, a2 = preview._arrays_for(moved)
+        self.assertIsNotNone(h1["topology"])
+        self.assertEqual(h1["topology"], h2["topology"])
+        self.assertIs(a1["tri"], a2["tri"])                               # the same arrays, not rebuilt
+        self.assertIs(a1["edge"], a2["edge"])
+        t1, t2 = a1["chunks"].reshape(-1, 8), a2["chunks"].reshape(-1, 8)
+        np.testing.assert_array_equal(t1[:, :2], t2[:, :2])
+        np.testing.assert_allclose(t2[:, 2], t1[:, 2] + 3, atol=1e-5)     # the bounds moved with the points
+        P = a2["P"].reshape(-1, 3)
+        for f, n, *box in t2:
+            pts = P[a2["tri"].reshape(-1, 3)[int(f):int(f + n)].ravel()]
+            np.testing.assert_allclose(pts.min(0), box[:3], atol=1e-6)
+
+    def test_other_topology_or_a_reduced_view_has_another_or_no_token(self):
+        a = preview._arrays_for(run("grid", columns=10, rows=10))[0]["topology"]
+        b = preview._arrays_for(run("grid", columns=11, rows=10))[0]["topology"]
+        self.assertNotEqual(a, b)
+        old = preview.DISPLAY_TRIS
+        preview.DISPLAY_TRIS = 50
+        try:
+            h = preview._arrays_for(run("grid", columns=30, rows=30))[0]
+        finally:
+            preview.DISPLAY_TRIS = old
+        self.assertTrue(h["proxy"]["active"])
+        self.assertIsNone(h["topology"])                                  # clustering depends on positions: never reused

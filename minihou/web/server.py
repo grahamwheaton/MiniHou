@@ -98,7 +98,7 @@ def _budget(v) -> int:
     """A triangle budget from a request (0: the default)."""
     if v is None or isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v < 1000:
         return 0
-    return int(min(v, 5_000_000))
+    return int(min(v, 16_000_000))
 
 
 class ApiError(Exception):
@@ -735,6 +735,10 @@ class _Handler(BaseHTTPRequestHandler):
                         preview.mask_arrays(r["geo"], body["mask"], head, arrays)
                 except ValueError as e:
                     raise ApiError(400, str(e)) from None
+            if (isinstance(body.get("have"), str) and head.get("topology") == body["have"] and not head.get("instances")
+                    and not (iset is not None and iset.replaces)):
+                arrays = {k: v for k, v in arrays.items() if k not in ("tri", "tri_prim", "edge")}   # the viewer has these already
+                head["same_topology"] = True
             head.update(selectable_templates=r.get("selectable", []), template_warnings=r.get("template_warnings", []))
             if r.get("reference") is not None:
                 refhead, refs = preview.arrays_for(r["reference"], full=bool(body.get("full")), tris=_budget(body.get("tris")))

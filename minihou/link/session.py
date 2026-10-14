@@ -880,7 +880,7 @@ class Session:
                     from .live import preview_instances
                     if instances != "never":
                         from .. import impostors, preview as _preview
-                        if instances == "always" or impostors.estimate_tris(geo, sources) > _preview.DISPLAY_TRIS:
+                        if instances == "always" or impostors.estimate_tris(geo, sources) > _preview.INSTANCE_TRIS:
                             instance_sources = dict(sources)
                     if instance_sources is None:
                         geo = preview_instances(geo, sources)
