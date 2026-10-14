@@ -93,6 +93,41 @@ class MeasurementEditorTests(unittest.TestCase):
     node=fixture.EditorE2E.node
     box_scene=fixture.EditorE2E.box_scene
     view_xy=fixture.EditorE2E.view_xy
+    def test_attached_dimension_follows_a_gizmo_created_transform(self):
+        self.box_scene(); p = self.page
+        p.locator('#pv-sketch summary').click()
+        p.locator('#pv-left-tools [data-sketch="tape"]').first.click()
+        a, b = self.top_points[:2]
+        p.mouse.click(*self.view_xy('point', a)); p.mouse.click(*self.view_xy('point', b))
+        self.assertTrue(fixture.until(lambda: len(self.s.graph.measurements) == 1))
+        original = self.s.graph.to_dict()
+        from minihou.measurements import resolve_session
+        before = resolve_session(self.s)['measurements'][self.s.graph.measurements[0]['id']]
+        # Exercise the actual browser gizmo callbacks: insertion and parameter updates
+        # run through the same gesture transaction as pointer/keyboard transforms.
+        p.evaluate('''async index => {
+          const pv = minihou.preview;
+          pv.selectElements('point', [index], 'replace');
+          const h = {param:'translate',kind:'plane',comp:null,tool:'move',pending:true,axis_rotation:[0,0,0]};
+          await pv.onHandleStart(h);
+          pv.onHandle(h, [0.5,0,0], true);
+        }''', a)
+        self.assertTrue(fixture.until(lambda: self.s._gesture is None and any(
+            n.type == 'transform' and list(n.params.get('translate', [])) == [.5, 0, 0]
+            for n in self.s.graph.nodes.values())))
+        item = self.s.graph.measurements[0]
+        self.assertEqual(self.s.graph.nodes[item['refs'][0]['node']].type, 'transform')
+        after = resolve_session(self.s)['measurements'][item['id']]
+        self.assertAlmostEqual(after[0]['point'][0], before[0]['point'][0] + .5)
+        self.assertEqual(after[1]['point'], before[1]['point'])
+        self.assertTrue(all(v['status'].startswith('Attached') for v in after))
+        p.locator('#pv-canvas').focus(); p.keyboard.press('Control+z')
+        self.assertTrue(fixture.until(lambda: self.s.graph.to_dict() == original))
+        p.keyboard.press('Control+Shift+z')
+        self.assertTrue(fixture.until(lambda: self.s.graph.measurements[0]['refs'][0]['node'] != 'b'))
+        p.reload(); p.wait_for_selector('[data-measurement]')
+        self.assertEqual(resolve_session(self.s)['measurements'][item['id']], after)
+
     def test_measurement_saved_edited_undone_and_reloaded(self):
         self.box_scene();p=self.page
         p.locator('#pv-sketch summary').click()

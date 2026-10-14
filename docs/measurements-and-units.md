@@ -13,3 +13,13 @@ https://docs.blender.org/manual/en/latest/scene_layout/scene/properties.html#uni
 https://docs.blender.org/manual/en/4.4/editors/3dview/toolbar/measure.html
 
 While drawing a line or curve, right-click commits the valid current chain and stays in the tool, ready for a disconnected chain. A single pending point is discarded by right-click. Escape cancels only the pending chain and exits; previously committed chains remain available to Undo. Enter commits and exits. Draw Curve keeps creating Bezier chains after right-click.
+# Following viewport edits
+
+Viewport transforms carry snapped endpoints to the transformed output. When a drag
+combines displayed objects, their verified point ranges are remapped into the merged
+geometry. These changes are part of the same gesture transaction, including undo,
+redo, cancellation and save/reload. Flip Faces preserves point correspondence too.
+Other modelling operations keep attachments only when correspondence can be verified;
+otherwise the endpoint is marked detached and can be picked again. Network edits do
+not automatically retarget measurements to arbitrary branches.
+

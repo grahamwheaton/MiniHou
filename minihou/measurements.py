@@ -1,7 +1,90 @@
 """Validated graph-owned measurements (editor annotations, never cooked)."""
 import copy
 import math
+import uuid
+from contextlib import contextmanager
+from contextvars import ContextVar
 from .graph import GraphError
+
+_feeds = ContextVar('measurement_edit_feeds', default=None)
+
+
+@contextmanager
+def edit_context(feeds, frame, fps):
+    from . import timectx
+    token = _feeds.set(feeds)
+    try:
+        with timectx.at(frame, fps):
+            yield
+    finally:
+        _feeds.reset(token)
+
+
+def follow_operation(graph, source, target):
+    """Follow viewport edits when element correspondence can be verified."""
+    old_identity = graph.nodes[source].meta.get('measurement_identity')
+    matches = [ref for item in graph.measurements for ref in item.get('refs', [])
+               if ref and ref['node'] == source and ref.get('identity') == old_identity]
+    if not matches:
+        return
+    identity = graph.nodes[target].meta.setdefault('measurement_identity', uuid.uuid4().hex)
+    new_token = old_token = None
+    reason = None
+    if graph.nodes[target].type != 'transform':
+        from .evaluator import Evaluator
+        evaluator = Evaluator(registry=graph.registry)
+        try:
+            before = evaluator.cook(graph, source, feeds=_feeds.get())
+            after = evaluator.cook(graph, target, feeds=_feeds.get())
+            old_token = f'{before.npoints*3}:{before.topology.digest}'
+            new_token = f'{after.npoints*3}:{after.topology.digest}'
+            # Reverse only changes corner winding; its point indices stay intact.
+            if new_token != old_token and not (
+                    graph.nodes[target].type == 'reverse' and before.npoints == after.npoints):
+                reason = 'Geometry changed; pick the endpoint again'
+        except (ValueError, RuntimeError, KeyError):
+            reason = 'Geometry could not be verified; pick the endpoint again'
+        finally:
+            evaluator.close()
+    for ref in matches:
+        ref.update(node=target, identity=identity)
+        if old_token is not None and ref['topology'] != old_token:
+            ref['detached_reason'] = 'Topology changed; pick the endpoint again'
+        elif reason:
+            ref['detached_reason'] = reason
+        elif new_token is not None and not ref.get('detached_reason'):
+            ref['topology'] = new_token
+
+
+def follow_merge(graph, sources, target):
+    """Preserve verified element correspondence when a viewport drag combines objects."""
+    refs = [ref for item in graph.measurements for ref in item.get('refs', [])
+            if ref and ref['node'] in sources]
+    if not refs:
+        return
+    from .evaluator import Evaluator
+    evaluator = Evaluator(registry=graph.registry)
+    try:
+        merged = evaluator.cook(graph, target, feeds=_feeds.get())
+        layouts, offset = {}, 0
+        for source in sources:
+            geo = evaluator.cook(graph, source, feeds=_feeds.get())
+            layouts[source] = (offset, f'{geo.npoints * 3}:{geo.topology.digest}')
+            offset += geo.npoints
+        token = f'{merged.npoints * 3}:{merged.topology.digest}'
+        identity = graph.nodes[target].meta.setdefault('measurement_identity', uuid.uuid4().hex)
+        for ref in refs:
+            source = ref['node']
+            base, old_token = layouts[source]
+            if (ref.get('detached_reason') or ref.get('identity') != graph.nodes[source].meta.get('measurement_identity')
+                    or ref['topology'] != old_token):
+                continue  # Already detached: never guess a correspondence.
+            ref.update(node=target, identity=identity, topology=token,
+                       indices=[base + i for i in ref['indices']])
+    except (ValueError, RuntimeError, KeyError) as error:
+        raise GraphError(f'Cannot preserve snapped measurements while combining objects: {error}') from error
+    finally:
+        evaluator.close()
 
 
 def clean_measurements(value):
@@ -27,6 +110,9 @@ def clean_measurements(value):
         for ref in refs:
             if ref is None:
                 continue
+            if ref.get('detached_reason') is not None and (
+                    not isinstance(ref['detached_reason'], str) or len(ref['detached_reason']) > 300):
+                raise GraphError('invalid measurement detachment status')
             if not isinstance(ref, dict) or not isinstance(ref.get('node'), str) or not isinstance(ref.get('topology'), str):
                 raise GraphError('invalid measurement attachment')
             indices, weights = ref.get('indices'), ref.get('weights')
@@ -56,6 +142,9 @@ def resolve_session(session):
                 result = {'point': endpoint, 'status': 'Free'}
                 points.append(result)
                 if not ref:
+                    continue
+                if ref.get('detached_reason'):
+                    result['status'] = 'Detached: ' + ref['detached_reason']
                     continue
                 node = graph.nodes.get(ref['node'])
                 if node is None or node.meta.get('measurement_identity') != ref.get('identity'):

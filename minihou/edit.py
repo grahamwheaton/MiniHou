@@ -196,6 +196,9 @@ def op_insert(g: Graph, op: dict) -> dict:
             c.inputs[p_] = nid
     if g.display == src:
         g.display = nid
+    if op.get('follow_measurements'):
+        from .measurements import follow_operation
+        follow_operation(g, src, nid)
     return {"id": nid, "rewired": len(readers)}
 
 
@@ -569,6 +572,9 @@ def op_merge_templates(g: Graph, op: dict) -> dict:
         g.nodes[ref].meta.pop("display_extra", None)
     if g.display == source:
         g.display = nid
+    if op.get('follow_measurements'):
+        from .measurements import follow_merge
+        follow_merge(g, [source, *refs], nid)
     return {"id": nid}
 
 

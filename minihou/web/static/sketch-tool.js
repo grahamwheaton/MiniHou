@@ -22,6 +22,7 @@ function specification(mode,points,plane='XY',segments=32){
 function topology(geo){return geo.P.length+':'+String(geo.topology||JSON.stringify([geo.P?.length,Array.from(geo.edge||[]),Array.from(geo.tri||[])]));}
 function resolve(endpoint,ref,geometries,nodes){
  if(!ref)return {point:endpoint,status:'Free'};
+ if(ref.detached_reason)return {point:endpoint,status:'Detached: '+ref.detached_reason};
  if(nodes&&(!nodes[ref.node]||(ref.identity&&nodes[ref.node].measurement_identity!==ref.identity)))return {point:endpoint,status:'Unavailable: target deleted or replaced'};
  const geo=geometries.find(g=>g.node===ref.node);
  if(!geo)return {point:endpoint,status:'Unavailable: target not displayed'};

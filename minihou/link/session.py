@@ -261,7 +261,9 @@ class Session:
                     raise GraphError('Gesture is closed or was interrupted by another edit')
                 if self._gesture is not None:
                     self._check_gesture(gesture, before)
-            new, results = apply_ops(self.graph, ops)
+            from ..measurements import edit_context
+            with edit_context(self._modifier_feeds(self.graph), self.frame, self.fps):
+                new, results = apply_ops(self.graph, ops)
             changed = new.to_dict() != before
             if changed:
                 now = time.monotonic()

@@ -1633,7 +1633,7 @@
       if (r) select([id]);
       return;
     }
-    const r = await edit([{ op: "insert", layout:pieFromView?"vertical":undefined, after: target, type: item.type, params }]);
+    const r = await edit([{ op: "insert", layout:pieFromView?"vertical":undefined, after: target, type: item.type, params, follow_measurements:pieFromView }]);
     if (r) { if (pv && pv.ok) pv.clearSelection(); select([r.results[0].id]); }
   }
   // ---- the tool shelf (shelf.js): the same tools as the pie, one click or drag away
@@ -1776,13 +1776,13 @@
       const info = pv.selectionInfo();
       if (!info || !pvNode || !nodeOf(pvNode)) return NaN;
       const pattern = rangePattern(info.points);
-      if(pv.selectableTemplates?.length){const merged=await edit([{op:'merge_templates',id:pvNode}],handleContext);if(!merged)return NaN;pvNode=merged.results[0].id;createdTemplateMerge=pvNode;pv.selectableTemplates=[];}
+      if(pv.selectableTemplates?.length){const merged=await edit([{op:'merge_templates',id:pvNode,follow_measurements:true}],handleContext);if(!merged)return NaN;pvNode=merged.results[0].id;createdTemplateMerge=pvNode;pv.selectableTemplates=[];}
       if (pattern.length > 30000) { toast("That selection is too large to write into a node; select fewer elements."); return NaN; }
       const cur = nodeOf(pvNode);
       if (h.tool==='move'&&cur.type === "transform" && (cur.params || {}).group === pattern && JSON.stringify(cur.params.axis_rotation||[0,0,0])===JSON.stringify(h.axis_rotation||[0,0,0])) gizmoNode = pvNode;
       else {
         const pivot = info.center.map((v) => Math.round(v * 1e5) / 1e5);
-        const r = await edit([{ op: "insert", layout:"vertical", after: pvNode, type: "transform", params: { group: pattern, pivot, axis_rotation:h.axis_rotation||[0,0,0],...proportionalParams() } }],handleContext);
+        const r = await edit([{ op: "insert", layout:"vertical", after: pvNode, type: "transform", follow_measurements:true, params: { group: pattern, pivot, axis_rotation:h.axis_rotation||[0,0,0],...proportionalParams() } }],handleContext);
         if (!r) return NaN;
         gizmoNode = r.results[0].id;
         createdNode=gizmoNode;
