@@ -2359,6 +2359,7 @@
     return Math.max(a[0],b[0])>=Math.min(c[0],d[0]) && Math.max(c[0],d[0])>=Math.min(a[0],b[0]) && Math.max(a[1],b[1])>=Math.min(c[1],d[1]) && Math.max(c[1],d[1])>=Math.min(a[1],b[1]) && cross(a,b,c)*cross(a,b,d)<=0 && cross(c,d,a)*cross(c,d,b)<=0;
   }
   function cancelNetworkDrag(){if(!drag)return;drag=null;gestureHint();S.dragPos.clear();updateDynamics();S.boxDrag=null;overlay.replaceChildren();$('#boxsel').classList.add('hidden');canvas.classList.remove('panning','wiring','detaching');window.removeEventListener('pointermove',onDrag);window.removeEventListener('pointerup',onDrop);renderNodes();renderBoxes();}
+  window.addEventListener('pointerdown',e=>{if(drag?.kind==='wire'&&e.button===2){e.preventDefault();e.stopImmediatePropagation();suppressContextUntil=performance.now()+500;cancelNetworkDrag();}},true);
   window.addEventListener('pointercancel',cancelNetworkDrag);
   window.addEventListener('blur',cancelNetworkDrag);
 
@@ -2397,7 +2398,10 @@
     } else if (e.button !== 0) {
       return;
     } else if (port && port.classList.contains("out")) {
-      drag = { kind: "wire", from: port.dataset.node };
+      const from=port.dataset.node;
+      const sources=S.sel.has(from)&&S.sel.size>1?[...S.sel].sort((a,b)=>pos(a)[0]-pos(b)[0]||pos(a)[1]-pos(b)[1]||a.localeCompare(b)):[from];
+      if(sources.length>1&&sources.some(id=>typeOf(id).outputs?.[0]?.type!==S.types.merge.inputs[0].type)){toast('Multi-node merge requires geometry outputs on every selected node.');return;}
+      drag = { kind: "wire", from, sources, x0:e.clientX, y0:e.clientY };
     } else if (port) {
       const id = port.dataset.node, pname = port.dataset.port;
       const ref = (nodeOf(id).inputs || {})[pname];
@@ -2481,12 +2485,13 @@
       const r = canvas.getBoundingClientRect();
       const m = [e.clientX - r.left, e.clientY - r.top];
       let d;
-      if (drag.kind === "wire") d = wirePathScreen(toScreen(outPortCenter(drag.from)), m);
+      if (drag.kind === "wire") d = (drag.sources||[drag.from]).map(id=>wirePathScreen(toScreen(outPortCenter(id)), m)).join(" ");
       else {
         const i = typeOf(drag.to).inputs.findIndex((s) => s.name === drag.port);
         d = wirePathScreen(m, toScreen(inPortCenter(drag.to, i)));
       }
       overlay.replaceChildren(svgEl("path", { d }));
+      if(drag.sources?.length>1){overlay.append(svgEl('circle',{cx:m[0],cy:m[1],r:5,fill:'#e8a33d',stroke:'#fff'}));gestureHint(drag.sources.length+' outputs · drop to merge · Esc cancels');}
       document.querySelectorAll(".port.target").forEach((el) => el.classList.remove("target"));
       const { port } = portUnder(e.clientX, e.clientY);
       if (port && (drag.kind === "wire") === port.classList.contains("in")) port.classList.add("target");
@@ -2542,6 +2547,20 @@
       } else S.dragPos.clear();
     } else if (d.kind === "wire") {
       const { port, node } = portUnder(e.clientX, e.clientY);
+      if(d.sources?.length>1){
+        if(Math.hypot(e.clientX-d.x0,e.clientY-d.y0)<5)return;
+        const target=port?.classList.contains('in')?port.dataset.node:node?.dataset.id;
+        if(target&&d.sources.includes(target)){toast('Cannot merge selected outputs into a selected node.');return;}
+        const spec=target?(port?.classList.contains('in')?typeOf(target).inputs.find(p=>p.name===port.dataset.port):typeOf(target).inputs.find(p=>p.type===S.types.merge.outputs[0].type)):null;
+        if(target&&(!spec||spec.type!==S.types.merge.outputs[0].type)){toast('Drop on a geometry input or empty network space.');return;}
+        if(!target&&!canvas.contains(document.elementFromPoint(e.clientX,e.clientY)))return;
+        if(target&&!spec.multi&&nodeOf(target).inputs?.[spec.name]){toast('That input is already connected. Use an empty input or a Merge input.');return;}
+        if(spec?.multi){await edit(d.sources.map(from=>({op:'connect',from,to:target,port:spec.name})));return;}
+        const id=uniqueId('merge'),[x,y]=toWorld(e.clientX,e.clientY);
+        const ops=[{op:'add',id,type:'merge',pos:[Math.round(x-W/2),Math.round(y+(target?40:0))],inputs:{geos:d.sources}}];
+        if(target)ops.push({op:'connect',from:id,to:target,port:spec.name});
+        const result=await edit(ops);if(result)select([id]);return;
+      }
       const ops = d.pickup ? [{ op: "disconnect", to: d.pickup.to, port: d.pickup.port, from: d.pickup.from }] : [];
       if (port && port.classList.contains("in") && port.dataset.node !== d.from) {
         if (d.pickup && d.pickup.to === port.dataset.node && d.pickup.port === port.dataset.port) { renderWires(); return; }
