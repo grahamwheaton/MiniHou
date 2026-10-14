@@ -5,8 +5,8 @@
     "stand_in": {
       "type": "grid",
       "params": {
-        "size_x": 8,
-        "size_y": 8,
+        "size_x": 20,
+        "size_y": 20,
         "columns": 30,
         "rows": 30
       },
@@ -48,11 +48,11 @@
     "rock": {
       "type": "sphere",
       "params": {
-        "radius": 0.25,
-        "rows": 6,
-        "columns": 10
+        "radius": 0.426,
+        "rows": 41,
+        "columns": 72
       },
-      "pos": [-71, 220]
+      "pos": [-144, 144]
     },
     "rough": {
       "type": "noise",
@@ -64,7 +64,7 @@
       "inputs": {
         "geo": "rock"
       },
-      "pos": [-71, 330]
+      "pos": [-148, 237]
     },
     "rocks": {
       "type": "copy_to_points",
@@ -72,24 +72,34 @@
         "orient": true
       },
       "inputs": {
-        "source": "rough",
+        "source": "attribute_randomize1",
         "points": "sizes"
       },
-      "pos": [24, 440]
+      "pos": [3, 448]
     },
     "all": {
       "type": "merge",
       "inputs": {
         "geos": ["ground", "rocks"]
       },
-      "pos": [59, 550]
+      "pos": [60, 550]
     },
     "out": {
       "type": "output",
       "inputs": {
         "geo": "all"
       },
-      "pos": [59, 660]
+      "pos": [56, 704]
+    },
+    "attribute_randomize1": {
+      "type": "attribute_randomize",
+      "params": {
+        "domain": "primitives"
+      },
+      "inputs": {
+        "geo": "rough"
+      },
+      "pos": [-142, 344]
     }
   },
   "display": "out",

@@ -8,23 +8,21 @@
         "size_y": 10,
         "columns": 60,
         "rows": 60
-      }
+      },
+      "pos": [110, 2]
     },
     "hills": {
       "type": "noise",
       "params": {
-        "amplitude": [
-          0,
-          0,
-          1.2
-        ],
+        "amplitude": [0.23, 0, 1.2],
         "frequency": 0.35,
         "octaves": 3,
         "seed": 7
       },
       "inputs": {
         "geo": "ground"
-      }
+      },
+      "pos": [110, 112]
     },
     "ripple": {
       "type": "wrangle",
@@ -33,7 +31,8 @@
       },
       "inputs": {
         "geo": "hills"
-      }
+      },
+      "pos": [110, 222]
     },
     "points": {
       "type": "scatter",
@@ -43,7 +42,8 @@
       },
       "inputs": {
         "geo": "ripple"
-      }
+      },
+      "pos": [110, 332]
     },
     "spike": {
       "type": "grid",
@@ -52,47 +52,45 @@
         "size_y": 0.2,
         "columns": 2,
         "rows": 2
-      }
+      },
+      "pos": [-80, 222]
     },
     "spike_up": {
       "type": "transform",
       "params": {
-        "translate": [
-          0,
-          0,
-          0.25
-        ],
-        "scale": [
-          1,
-          1,
-          1
-        ]
+        "translate": [0, 0, 0.25],
+        "scale": [1, 1, 1]
       },
       "inputs": {
         "geo": "spike"
-      }
+      },
+      "pos": [-80, 332]
     },
     "copies": {
       "type": "copy_to_points",
       "inputs": {
         "source": "spike_up",
         "points": "points"
-      }
+      },
+      "pos": [15, 442]
     },
     "all": {
       "type": "merge",
       "inputs": {
-        "geos": [
-          "ripple",
-          "copies"
-        ]
-      }
+        "geos": ["ripple", "copies"]
+      },
+      "pos": [62, 552]
     },
     "out": {
       "type": "output",
       "inputs": {
         "geo": "all"
-      }
+      },
+      "pos": [62, 662]
+    },
+    "attribute_transfer1": {
+      "type": "attribute_transfer",
+      "pos": [262, 364]
     }
   },
   "display": "out",
