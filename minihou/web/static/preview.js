@@ -234,7 +234,12 @@ window.MiniHouPreview = (() => {
     function recolour() {
       const a = attrView;
       if (!a || !raw) return;
-      if (a.domain === "point") {
+      if(a.domain==='vertex' && raw.vertexPoint){
+        const n=data.npoints,col=new Float32Array(n*3),counts=new Uint32Array(n),tmp=[0,0,0];
+        for(let i=0;i<raw.vertexPoint.length;i++){const p=raw.vertexPoint[i];colourOf(a,i,tmp,0);counts[p]++;for(let c=0;c<3;c++)col[p*3+c]+=tmp[c];}
+        for(let p=0;p<n;p++)if(counts[p])for(let c=0;c<3;c++)col[p*3+c]/=counts[p];
+        gl.bindBuffer(gl.ARRAY_BUFFER,colBuf);gl.bufferData(gl.ARRAY_BUFFER,col,gl.DYNAMIC_DRAW);data.hasCd=true;ptCol=col;
+      } else if (a.domain === "point") {
         const n = data.npoints, col = new Float32Array(n * 3);
         for (let i = 0; i < n; i++) colourOf(a, i, col, 3 * i);
         gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, col, gl.DYNAMIC_DRAW); data.hasCd = true; ptCol = col;
@@ -302,7 +307,7 @@ window.MiniHouPreview = (() => {
     function setAttrView(v) {
       const was = attrView;
       attrView = v || null;
-      if (was && was.domain === "point" && !attrView) {                    // back to the geometry's own colours
+      if (was && ["point","vertex"].includes(was.domain) && !attrView) {                    // back to the geometry's own colours
         if (cd0) { gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, cd0, gl.STATIC_DRAW); }
         data.hasCd = !!cd0;
       }
@@ -322,8 +327,9 @@ window.MiniHouPreview = (() => {
       data.npoints = arrays.P.length / 3; data.ntris = arrays.tri.length / 3; data.nedges = arrays.edge.length / 2;
       data.bounds = head.bounds; nrmDirty = true;
       uploadInstances(head, arrays);
+      if(raw?.topology!==head.topology)selectedVertexIds=null;
       raw = { P: arrays.P, tri: arrays.tri, edge: arrays.edge, triPrim: arrays.tri_prim || new Uint32Array(arrays.tri.length / 3), chunks: arrays.chunks || null,
-              topology: head.topology || null };
+              topology: head.topology || null, vertexPoint:arrays.vertex_point || raw?.vertexPoint, primOffsets:arrays.prim_offsets || raw?.primOffsets };
       Object.assign(api, { tris: data.ntris, edges: data.nedges, points: data.npoints });
     }
     function frameAll() {
@@ -354,6 +360,7 @@ window.MiniHouPreview = (() => {
     }
 
     // ---------------------------------------------------------------- selection (points, edges, faces)
+    let selectedVertexIds=null; // exact API-selected corners; point overlay is only their display
     const sel = { mode: "view", point: new Set(), edge: new Map(), face: new Set(), objects:new Set() };
     const edgeKey = (a, b) => (a < b ? a + "-" + b : b + "-" + a);
     const summary = () => ({ mode: sel.mode, objects:[...sel.objects], points: [...sel.point].sort((a, b) => a - b),
@@ -539,7 +546,8 @@ window.MiniHouPreview = (() => {
       return out;
     }
     function activeObject(){return api.previewObjects?.find(o=>o.node===api.activeObject)||api.previewObjects?.[0];}
-    function change(found, how) {                                    // found: {points, edges, faces}; how: replace | add | subtract
+    function change(found, how) {
+      selectedVertexIds=null;                                    // found: {points, edges, faces}; how: replace | add | subtract
       if(sel.mode==='piece'&&raw&&api.previewObjects?.length){
         const points=new Set(found.points||[]),faces=new Set(piecesOf(found.faces||[])),objects=new Set();
         for(const e of found.edges||[])for(const p of e)points.add(p);
@@ -1547,12 +1555,24 @@ window.MiniHouPreview = (() => {
       isDragging:()=>!!handleDrag||endingDrag,
       selectElements(domain, ids, how) {                                                // the spreadsheet's row click: select these elements (points, primitives or edge numbers)
         if (!raw) return false;
+        let exactVertices=null;
+        if(domain==='vertex'){
+          if(!raw.vertexPoint)return false;
+          const incoming=ids.filter(i=>i>=0&&i<raw.vertexPoint.length),picked=new Set(incoming);
+          if(how && how!=='replace'){
+            const old=selectedVertexIds??Array.from(raw.vertexPoint.keys()).filter(i=>sel.point.has(raw.vertexPoint[i]));
+            exactVertices=how==='subtract'?old.filter(i=>!picked.has(i)):[...new Set(old.concat(incoming))];
+          }else exactVertices=incoming;
+          ids=[...new Set(exactVertices.map(i=>raw.vertexPoint[i]))];domain='point';
+        }
         const mode = domain === "point" ? "point" : domain === "edge" ? "edge" : "face";
         if (sel.mode !== mode) api.setMode(mode);
         const found = domain === "point" ? { points: ids } : domain === "prim" ? { faces: ids } : { edges: ids.filter((k) => 2 * k + 1 < raw.edge.length).map((k) => [raw.edge[2 * k], raw.edge[2 * k + 1]]) };
-        change(found, how || "replace");
+        change(found, exactVertices ? "replace" : how || "replace");
+        if(exactVertices)selectedVertexIds=exactVertices.slice();
         return true;
       },
+      vertexSelection:()=>selectedVertexIds?.slice()??null,
       camera: () => camera(), rayAt: (sx, sy) => rayAt(camera(), sx, sy), setAttrView, attrDirty: recolour, attrTouch: recolourTouched, attrViewInfo: () => attrView,
       edgeCount: () => data.nedges,
       view, opt, onSelect: null, onHandle: null, onHandleStart: null,

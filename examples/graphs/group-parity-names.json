@@ -1,0 +1,103 @@
+{
+  "nodes": {
+    "grid": {
+      "type": "grid",
+      "params": {
+        "columns": 4,
+        "rows": 4
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "range": {
+      "type": "group_range",
+      "inputs": {
+        "geo": "grid"
+      },
+      "params": {
+        "name": "first",
+        "domain": "primitives",
+        "range_type": "equal_partitions",
+        "partition": 0
+      },
+      "pos": [
+        0,
+        120
+      ]
+    },
+    "assemble": {
+      "type": "assemble",
+      "inputs": {
+        "geo": "range"
+      },
+      "params": {
+        "source": "groups",
+        "groups": "first",
+        "output_attrib": "piece",
+        "unshare_points": false
+      },
+      "pos": [
+        0,
+        240
+      ]
+    },
+    "names": {
+      "type": "groups_from_name",
+      "inputs": {
+        "geo": "assemble"
+      },
+      "params": {
+        "attribute": "piece",
+        "prefix": "named_",
+        "invalid_names": "force_valid"
+      },
+      "pos": [
+        0,
+        360
+      ]
+    },
+    "rename": {
+      "type": "group_rename",
+      "inputs": {
+        "geo": "names"
+      },
+      "params": {
+        "rules": [
+          {
+            "domain": "primitives",
+            "name": "named_*",
+            "new_name": "part_*"
+          }
+        ]
+      },
+      "pos": [
+        0,
+        480
+      ]
+    },
+    "delete": {
+      "type": "group_delete",
+      "inputs": {
+        "geo": "rename"
+      },
+      "params": {
+        "rules": [
+          {
+            "name": "first",
+            "domain": "any"
+          }
+        ],
+        "delete_unused": true
+      },
+      "pos": [
+        0,
+        600
+      ]
+    }
+  },
+  "display": "delete",
+  "version": 1,
+  "doc": "Group parity example; see docs/GROUP-PARITY.md for exact semantics and limits."
+}

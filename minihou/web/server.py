@@ -19,7 +19,7 @@ live in the other and in Blender.
 ``POST /api/preferences`` partial ``{python_nodes?, copy_memory_limit_mib?}``; user settings never come from a graph
 ``POST /api/undo``     also ``/api/redo``
 ``POST /api/inspect``  ``{node, detail?}`` -> geometry summary of any node
-``POST /api/select_group`` ``{node}`` -> ``{node: first_input, domain: point|prim|edge, ids}``; resolves the group on input geometry without graph edits (at most 100000 ids)
+``POST /api/select_group`` ``{node}`` -> ``{node: first_input, domain: point|prim|edge|vertex, ids}``; resolves the group on input geometry without graph edits (at most 100000 ids)
 ``POST /api/preview``  ``{node, full?, tris?, attr?, mask?, instances?}`` -> positions, triangles and edges of any node for the 3-D view (binary, see
                        :mod:`minihou.preview`; a big one is reduced to the display budget unless ``full``, or to ``tris`` triangles),
                        or JSON ``{ok: false, error}``
@@ -202,7 +202,7 @@ class WebServer:
             return []
         return [c.name for c in self.link.clients]
 
-    def select_group(self, node):
+    def select_group(self, node, pattern=None, domain=None):
         """Resolve component ids against the group's input, never the modified output."""
         from .. import groups, edges, proxy, timectx
         import numpy as np
@@ -218,14 +218,15 @@ class WebServer:
         inst = graph.nodes[node]
         nt = s.evaluator.registry.get(inst.type)
         params = graph.effective_params(node)
-        if 'group' not in params:
+        if pattern is None and 'group' not in params:
             raise ApiError(400, 'node has no group parameter')
         source = inst.inputs.get(nt.inputs[0].name) if nt.inputs else None
         if not isinstance(source, str) or source not in graph.nodes:
             raise ApiError(400, 'group selection requires one connected first input')
-        raw_domain = next((params[k] for k in ('group_type', 'domain', 'run_over') if k in params), None)
+        raw_domain = domain or next((params[k] for k in ('group_type', 'domain', 'run_over') if k in params), None)
         aliases = {'point': 'point', 'points': 'point', 'prim': 'prim', 'primitives': 'prim',
-                   'edge': 'edge', 'edges': 'edge'}
+                   'edge': 'edge', 'edges': 'edge', 'vertex':'vertex','vertices':'vertex'}
+        if raw_domain in ('auto','any'): raw_domain=None
         if raw_domain is not None:
             if raw_domain not in aliases:
                 raise ApiError(400, f'component selection does not support domain {raw_domain!r}')
@@ -239,8 +240,15 @@ class WebServer:
         try:
             with s._cook_lock, timectx.at(frame, fps), proxy.using(s.view_level()):
                 geo = s.evaluator.cook(graph, source, feeds=feeds)
-                mask = edges.mask(geo, params['group']) if domain == 'edge' else groups.mask(geo, domain, params['group'])
-                total = (geo.npoints if domain == 'point' else geo.nprims) if mask is None else int(np.count_nonzero(mask))
+                from ..nodes import group_rules as gr
+                selection = params.get('group','') if pattern is None else pattern
+                if not isinstance(selection,str): raise ValueError('group pattern must be text')
+                if raw_domain is None and pattern is not None:
+                    for candidate in ('point','prim','edge','vertex'):
+                        if any(__import__('fnmatch').fnmatchcase(n, token) for n in gr.names(geo,candidate) for token in selection.split()):
+                            domain=candidate;break
+                mask = gr.mask(geo, domain, selection)
+                total = gr.count(geo,domain) if mask is None else int(np.count_nonzero(mask))
                 if total > 100000:
                     raise ApiError(400, 'group selection exceeds the 100000 component limit; narrow the group')
                 ids = list(range(total)) if mask is None else np.flatnonzero(mask).tolist()
@@ -249,6 +257,25 @@ class WebServer:
         except (ValueError, KeyError, RuntimeError) as e:
             raise ApiError(400, str(e)) from None
         return {'node': source, 'domain': domain, 'ids': ids}
+
+    def group_names(self,node,domain='auto'):
+        if not isinstance(node,str): raise ApiError(400,'node must be a node id')
+        from ..nodes import group_rules as gr
+        from .. import proxy, timectx
+        s=self.session
+        with s.lock:
+            graph=s.graph.copy();frame,fps=s.frame,s.fps;feeds=s._modifier_feeds(graph)
+        if node not in graph.nodes: raise ApiError(400,'no such node')
+        inst=graph.nodes[node];nt=s.evaluator.registry.get(inst.type)
+        source=inst.inputs.get(nt.inputs[0].name) if nt.inputs else None
+        if not isinstance(source,str): return {'names':[]}
+        domains=('point','prim','edge','vertex') if domain in ('auto','any') else (domain,)
+        if any(d not in ('point','prim','edge','vertex') for d in domains): raise ApiError(400,'invalid group domain')
+        try:
+            with s._cook_lock,timectx.at(frame,fps),proxy.using(s.view_level()):
+                geo=s.evaluator.cook(graph,source,feeds=feeds)
+                return {'names':sorted({name for d in domains for name in gr.names(geo,d)})}
+        except (ValueError,KeyError,RuntimeError) as e: raise ApiError(400,str(e)) from None
 
     def blender_info(self) -> dict:
         found = blender_setup.list_blenders()
@@ -702,7 +729,9 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ApiError(400, '"node" must be a node id')
             return self._json(s.inspect(node, bool(body.get("detail"))))
         if path == "/api/select_group":
-            return self._json(app.select_group(body.get('node')))
+            return self._json(app.select_group(body.get('node'),body.get('pattern'),body.get('domain')))
+        if path == '/api/group_names':
+            return self._json(app.group_names(body.get('node'),body.get('domain','auto')))
         if path == "/api/preview":
             node = body.get("node")
             if not isinstance(node, str):

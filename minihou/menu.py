@@ -28,7 +28,7 @@ GROUPS: List[Tuple[str, str, List[str]]] = [
      ["bend", "twist", "linear_taper", "squash_stretch", "soft_transform", "soft_peak", "peak", "smooth", "noise", "lattice",
       "point_deform", "path_deform", "point_jitter", "point_relax", "blend", "exploded_view"]),
     ("Groups & Selection", "Pick parts of the geometry, delete or keep them",
-     ["group_create", "group_expand", "group_promote", "group_range", "blast", "delete"]),
+     ['group_create', 'group_lasso', 'group_range', 'group_combine', 'group_copy', 'group_delete', 'group_expand', 'group_expression', 'group_find_path', 'group_from_attribute_boundary', 'group_invert', 'group_paint', 'group_promote', 'group_rename', 'group_transfer', 'groups_from_name', 'group_by_color', 'group_by_normal', 'group_by_proximity', 'blast', 'delete']),
     ("Attributes", "Create, change and measure data on points, faces and corners",
      ["wrangle", "attribute_create", "attribute_transfer", "attribute_promote", "attribute_randomize", "attribute_blur", "set_material",
       "attrib_paint", "attribute_rename", "attribute_delete", "measure", "normal", "color", "connectivity", "sort", "ray", "falloff", "occlusion", "python"]),
@@ -91,6 +91,8 @@ ALIASES: Dict[str, str] = {
     "point_deform": "capture cage", "path_deform": "curve warp bend along", "point_jitter": "random move", "point_relax": "spread even",
     "blend": "morph shape keys blendshape", "exploded_view": "separate pieces",
     "group_create": "select group make", "group_expand": "grow shrink selection", "group_promote": "convert group points primitives",
+    "group_by_color":"Cd colour color tolerance RGB attribute selection", "group_by_normal":"normal direction angle facing selection", "group_by_proximity":"near distance surface selection",
+    "group_delete":"delete remove groups metadata wildcard", "group_combine":"boolean union intersect subtract xor selection", "group_lasso":"lasso persist selection", "group_paint":"paint brush membership selection",
     "group_range": "every other nth", "blast": "delete extract keep", "delete": "remove",
     "wrangle": "vex expression code snippet attribwrangle", "attribute_create": "add attribute", "attribute_transfer": "copy nearest project",
     "attribute_promote": "convert move domain", "attribute_randomize": "random", "attribute_blur": "smooth average",
@@ -123,7 +125,7 @@ ALIASES: Dict[str, str] = {
     "modifier_input": "host geometry",
 }
 
-_TITLES = {"pushpull": "Push / Pull","polyextrude": "PolyExtrude", "polybevel": "PolyBevel", "polysplit": "PolySplit", "polyfill": "PolyFill",
+_TITLES = {"group_by_color":"Group by Cd Colour", "group_lasso":"Group by Lasso", "group_from_attribute_boundary":"Group from Attribute Boundary","pushpull": "Push / Pull","polyextrude": "PolyExtrude", "polybevel": "PolyBevel", "polysplit": "PolySplit", "polyfill": "PolyFill",
            "polybridge": "PolyBridge", "polyexpand2d": "PolyExpand2D", "polyreduce": "PolyReduce", "polypath": "PolyPath",
            "uv_project": "UV Project", "uv_flatten": "UV Flatten", "sdf_boolean": "SDF Boolean", "sdf_shape": "SDF Shape", "uv_transform": "UV Transform", "pcg_points": "PCG Points",
            "lsystem": "L-System", "rbd_configure": "RBD Configure", "rbd_solver": "RBD Solver",

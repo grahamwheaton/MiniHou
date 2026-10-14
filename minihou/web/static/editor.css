@@ -910,3 +910,6 @@ body:not(.side-hidden) #work:not(.max-view) #pv-context { display: none !importa
 .pv-header #pv-follow { max-width: 96px; }
 .pv-header #pv-snap-element { max-width: 78px; }
 .pv-header > .spacer { min-width: 0; }
+
+/* Structured group rule controls. */
+.prow.rule-param{display:block}.rule-list{display:grid;gap:8px;width:100%;min-width:0}.rule-row{min-width:0;border:1px solid var(--line,#555);border-radius:4px;padding:6px}.rule-actions{display:flex;gap:5px;justify-content:flex-end}.rule-field{display:grid;grid-template-columns:minmax(90px,1fr) minmax(100px,1.6fr);gap:5px;align-items:center;margin:5px 0}.rule-field .pw{min-width:0}.rule-field input:not([type=checkbox]),.rule-field select{width:100%;min-width:0}.rule-field .rule-list{grid-column:1/-1}.rule-row.disabled-rule{opacity:.65}.rule-row legend{font-weight:600}.add-rule{justify-self:start}

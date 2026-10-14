@@ -11,7 +11,7 @@ import numpy as np
 from . import material_slots
 from .protocol import GeoUpdate, Mirror, TOPO_KEYS, attr_key, split_key
 
-_DOMAIN = {"point": "POINT", "vertex": "CORNER", "prim": "FACE"}
+_DOMAIN = {"point": "POINT", "vertex": "CORNER", "prim": "FACE", "edge":"EDGE"}
 CUSTOM_ATTRS_KEY = "minihou_attrs"          # names of attributes we created, so we can remove stale ones
 
 # Engine attribute names that become Blender-native data (Houdini name -> Blender meaning). Anything else is written as a
@@ -216,7 +216,7 @@ def _blender_name(engine_name: str) -> str:
 
 def write_attribute(mesh, domain: str, name: str, arr: np.ndarray) -> bool:
     """Create/replace one generic attribute and fill it. Returns False if it cannot be represented."""
-    if name.startswith(GROUP_PREFIX) and arr.ndim == 1 and arr.dtype.kind in "iub":
+    if (name.startswith(GROUP_PREFIX) or name.startswith("edge_group_")) and arr.ndim == 1 and arr.dtype.kind in "iub":
         arr = arr != 0                                    # engine groups (group_<name> ints) become Blender booleans
     spec = attribute_spec(arr)
     if spec is None or name.startswith(".") or name == "position":
@@ -348,6 +348,29 @@ class PolygonView:
             yield dom, name, a
 
 
+def write_edge_group(mesh, mirror, name, values):
+    """Map outgoing corner storage to Blender EDGE booleans by endpoint pair.
+
+    Uses the original mirror so open curves survive PolygonView's face filtering.
+    Repeated/nonmanifold half-edges merge membership by logical OR.
+    """
+    vp=mirror.vertex_point
+    offsets=mirror.prim_offsets
+    closed=mirror.prim_closed
+    lookup={}
+    for f in range(len(offsets)-1):
+        start,end=int(offsets[f]),int(offsets[f+1])
+        is_closed=True if closed is None else bool(closed[f])
+        for i in range(start,end if is_closed else max(start,end-1)):
+            j=start if i+1==end else i+1
+            a,b=sorted((int(vp[i]),int(vp[j])))
+            if a!=b:lookup[(a,b)]=lookup.get((a,b),False) or bool(values[i])
+    pairs=np.empty(len(mesh.edges)*2,np.int32)
+    mesh.edges.foreach_get('vertices',pairs)
+    mask=np.fromiter((lookup.get(tuple(sorted(map(int,p))),False) for p in pairs.reshape(-1,2)),bool,count=len(mesh.edges))
+    return write_attribute(mesh,'edge',name,mask)
+
+
 def apply_update(mesh, mirror: Mirror, u: GeoUpdate) -> Dict[str, object]:
     """Apply an already-mirrored update to ``mesh``. Rebuilds topology only when it changed (or the
     counts no longer match the mesh); otherwise rewrites just the arrays that arrived.
@@ -356,6 +379,7 @@ def apply_update(mesh, mirror: Mirror, u: GeoUpdate) -> Dict[str, object]:
     """
     assert_main_thread()
     pc = time.perf_counter
+    edge_source = mirror
     closed = mirror.prim_closed
     view = PolygonView(mirror, closed) if closed is not None else None
     loose = view.edges if view is not None else np.zeros((0, 2), np.int32)
@@ -405,6 +429,8 @@ def apply_update(mesh, mirror: Mirror, u: GeoUpdate) -> Dict[str, object]:
         if key not in written:
             continue
         arr = mirror.arrays[key]
+        if domain == "vertex" and name.startswith("edge_group_"):
+            continue # written onto EDGE after mesh.update constructs the derived edges
         if name in NATIVE:
             done = write_native(mesh, mirror, domain, name, arr)
             if done:
@@ -430,6 +456,14 @@ def apply_update(mesh, mirror: Mirror, u: GeoUpdate) -> Dict[str, object]:
 
     t = pc()
     mesh.update(calc_edges=rebuild)
+    for key,arr in edge_source.arrays.items():
+        if key.startswith('vertex/edge_group_'):
+            name=key.split('/',1)[1]
+            if rebuild or key in u.arrays:
+                if write_edge_group(mesh,edge_source,name,arr):wanted.add(name)
+                else:out['warnings'].append(f'edge group {name!r} cannot be represented in Blender')
+            live_names.add(name)
+    mesh[CUSTOM_ATTRS_KEY] = sorted((set(ours) & live_names) | wanted)
     out["update_ms"] = (pc() - t) * 1000
     return out
 

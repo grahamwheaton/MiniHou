@@ -1,0 +1,114 @@
+{
+  "nodes": {
+    "grid": {
+      "type": "grid",
+      "params": {
+        "columns": 12,
+        "rows": 12,
+        "size_x": 4,
+        "size_y": 4
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "color": {
+      "type": "color",
+      "inputs": {
+        "geo": "grid"
+      },
+      "params": {
+        "color": [
+          1,
+          0,
+          0
+        ]
+      },
+      "pos": [
+        0,
+        120
+      ]
+    },
+    "red": {
+      "type": "group_by_color",
+      "inputs": {
+        "geo": "color"
+      },
+      "params": {
+        "name": "red",
+        "color": [
+          1,
+          0,
+          0
+        ],
+        "tolerance": 0.01
+      },
+      "pos": [
+        0,
+        240
+      ]
+    },
+    "up": {
+      "type": "group_by_normal",
+      "inputs": {
+        "geo": "red"
+      },
+      "params": {
+        "name": "up",
+        "base_group": "red",
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "angle": 5
+      },
+      "pos": [
+        0,
+        360
+      ]
+    },
+    "near": {
+      "type": "group_by_proximity",
+      "inputs": {
+        "geo": "up"
+      },
+      "params": {
+        "name": "near",
+        "base_group": "up",
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "distance": 1
+      },
+      "pos": [
+        0,
+        480
+      ]
+    },
+    "move": {
+      "type": "transform",
+      "inputs": {
+        "geo": "near"
+      },
+      "params": {
+        "group": "near",
+        "translate": [
+          0,
+          0,
+          0.5
+        ]
+      },
+      "pos": [
+        0,
+        600
+      ]
+    }
+  },
+  "display": "move",
+  "version": 1,
+  "doc": "Group parity example; see docs/GROUP-PARITY.md for exact semantics and limits."
+}

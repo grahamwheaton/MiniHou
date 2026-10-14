@@ -54,17 +54,18 @@
     polygons3: {title:"Solid tools",items:[T("Push / Pull","pushpull",{sel:{face:"group"}}),T("Inset","inset",{sel:{face:"group"}}),T("Outset","outset",{sel:{face:"group"}}),T("Convex Hull","convex_hull"),null,null,null,null]},
 
     group: { title: "Group", items: [
-      T("Group Promote", "group_promote"), T("Group by Range", "group_range"), T("Group Paint", null, { disabled: "Painting groups is not available yet" }),
+      T("Group Promote", "group_promote"), T("Group by Range", "group_range"), T("Group Paint", "group_paint"),
       T("Group Create", "group_create", { sel: { face: { pattern: "$", domain: "primitives", method: "pattern", name: "faces" },
         point: { pattern: "$", domain: "points", method: "pattern", name: "points" },
         edge: { pattern: "$", domain: "edges", method: "pattern", name: "edges" } } }),
-      T("Group Expression", "group_create", { params: { name: "group1", domain: "points", method: "pattern", pattern: "@P.y > 0" },
-        tip: "A group made from an expression, e.g. @P.y > 0" }),
+      T("Group Expression", "group_expression"),
       T("Group Expand", "group_expand"), T("Edge Group", "edge_group"), P("»", "group2")] },
     group2: { title: "Group", items: [
-      T("Edge Group Promote", "edge_group_promote"), T("Blast", "blast", { sel: { face: { group: "$", domain: "primitives" },
-        point: { group: "$", domain: "points" } } }), T("Crease", "crease", { sel: { edge: "group" } }),
-      null, null, null, null, null] },
+      T("Group by Lasso","group_lasso"),T("Group Combine","group_combine"),T("Group Copy","group_copy"),T("Group Delete","group_delete"),
+      T("Group Invert","group_invert"),T("Group Rename","group_rename"),T("Group Transfer","group_transfer"),P("?","group3")] },
+    group3: {title:"Group",items:[T("Group Find Path","group_find_path"),T("Group from Attribute Boundary","group_from_attribute_boundary"),
+      T("Groups from Name","groups_from_name"),T("Group by Cd Colour","group_by_color"),T("Group by Normal","group_by_normal"),T("Group by Proximity","group_by_proximity"),
+      T("Edge Group Promote","edge_group_promote"),T("Blast","blast")]},
 
     create: { title: "Create", items: [
       T("Null", "null", { tip: "A named pass-through" }), T("Circle", "circle", { source: true }), T("Tube", "tube", { source: true }),

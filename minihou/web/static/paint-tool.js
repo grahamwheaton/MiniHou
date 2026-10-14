@@ -30,7 +30,7 @@ window.MiniPaint = (pv, canvas, host) => {
 
   // ---------------------------------------------------------------- what is shown and what the node holds
   let ctx = null;                                                  // {node, head, vals, base, n}: the viewed geometry and the working copy of the attribute
-  const elementCount = (head) => (st.domain === "point" ? head.points : st.domain === "prim" ? head.prims : head.edges);
+  const elementCount = (head) => (st.domain === "point" ? head.points : st.domain === "prim" ? head.prims : st.domain === "vertex" ? head.vertices : head.edges);
   function defaultValue() { return comps() === 3 ? st.vec.slice() : [st.domain === "edge" ? 0 : 0]; }
   const displayOn = () => st.on || (st.show && !!panel && !panel.classList.contains("hidden"));       // never colour geometry while the panel is closed
   function wantAttr() { return displayOn() ? { name: st.attr, domain: st.domain } : null; }
@@ -122,6 +122,11 @@ window.MiniPaint = (pv, canvas, host) => {
   // ---------------------------------------------------------------- the elements, in a grid, with their positions
   function elementPositions(raw, head) {
     if (st.domain === "point") return raw.P;
+    if(st.domain==='vertex'){
+      const out=new Float32Array(raw.vertexPoint.length*3);
+      for(let i=0;i<raw.vertexPoint.length;i++)out.set(raw.P.subarray(raw.vertexPoint[i]*3,raw.vertexPoint[i]*3+3),i*3);
+      return out;
+    }
     const out = [];
     if (st.domain === "edge") {
       const E = raw.edge, n = E.length / 2, o = new Float32Array(n * 3);
@@ -353,6 +358,7 @@ window.MiniPaint = (pv, canvas, host) => {
     return { id: null, after: v };
   }
   async function writeOps(spec, extra) {                           // extra: paint_assign ops without the node id
+    if(host.writeGroup && await host.writeGroup(spec,extra))return host.viewedNode();
     const t = target(spec), ops = [];
     let id = t.id;
     if (!id) {
@@ -415,7 +421,7 @@ window.MiniPaint = (pv, canvas, host) => {
     attrInput.value = st.attr;
     attrInput.onchange = () => { if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(attrInput.value) && attrInput.value !== "P") { st.attr = attrInput.value; save(); host.refresh(); } else { attrInput.value = st.attr; host.toast("An attribute name is letters, digits and _, and not P."); } };
     const domainSel = select(() => st.domain, (v) => { st.domain = v; if (v === "edge") st.kind = "int"; kindSel.value = kindOf(); kindSel.disabled = v === "edge"; syncValueRows(); host.refresh(); host.groupNames(v).then(fillGroups); },
-      [["point", "Points"], ["prim", "Faces / primitives"], ["edge", "Edges (edge group)"]], { class: "pa-domain", "aria-label": "Domain" });
+      [["point", "Points"], ["prim", "Faces / primitives"], ["edge", "Edges (edge group)"], ["vertex", "Vertices / corners"]], { class: "pa-domain", "aria-label": "Domain" });
     const kindSel = select(() => kindOf(), (v) => { st.kind = v; syncValueRows(); host.refresh(); }, [["float", "float"], ["int", "int"], ["vec3", "vector / colour"]], { class: "pa-kind", "aria-label": "Type" });
     kindSel.disabled = st.domain === "edge";
     const valueNum = numberInput(() => st.value, (v) => (st.value = v), { class: "pa-value", "aria-label": "Value" });
@@ -555,6 +561,13 @@ window.MiniPaint = (pv, canvas, host) => {
   window.addEventListener("keydown", keydown, true);
 
   const api = {
+    configureGroup(id,domain,name){
+      api.close();
+      Object.assign(st,{domain,attr:domain==='edge'?name:'group_'+name,kind:'int',value:1,strength:1,falloff:'constant',mode:'set',mask:'none',show:true});
+      // Build fresh ordinary controls for this group; edits go to its membership parameter.
+      if(panel){panel.remove();panel=null;}
+      ctx=null;api.open('paint');host.refresh();
+    },
     state: st, wantAttr, wantMask, onPreview, stats: { beginMs: 0, strokeMs: 0 },
     active: () => active,
     isStroking: () => stroke !== null,

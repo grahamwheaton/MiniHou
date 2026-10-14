@@ -1,0 +1,90 @@
+{
+  "nodes": {
+    "source_box": {
+      "type": "box",
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "group": {
+      "type": "group_paint",
+      "inputs": {
+        "geo": "source_box"
+      },
+      "params": {
+        "domain": "primitives",
+        "name": "topology_face",
+        "selection": "0"
+      },
+      "pos": [
+        0,
+        120
+      ]
+    },
+    "destination": {
+      "type": "box",
+      "params": {
+        "center": [
+          0.1,
+          0,
+          0
+        ]
+      },
+      "pos": [
+        0,
+        240
+      ]
+    },
+    "copy": {
+      "type": "group_copy",
+      "inputs": {
+        "geo": "destination",
+        "source": "group"
+      },
+      "params": {
+        "prim_prefix": "copied_"
+      },
+      "pos": [
+        0,
+        360
+      ]
+    },
+    "transfer": {
+      "type": "group_transfer",
+      "inputs": {
+        "geo": "copy",
+        "source": "group"
+      },
+      "params": {
+        "prim_prefix": "near_",
+        "distance_threshold": 0.2
+      },
+      "pos": [
+        0,
+        480
+      ]
+    },
+    "move": {
+      "type": "transform",
+      "inputs": {
+        "geo": "transfer"
+      },
+      "params": {
+        "group": "near_topology_face",
+        "translate": [
+          0,
+          0,
+          0.5
+        ]
+      },
+      "pos": [
+        0,
+        600
+      ]
+    }
+  },
+  "display": "move",
+  "version": 1,
+  "doc": "Group parity example; see docs/GROUP-PARITY.md for exact semantics and limits."
+}

@@ -476,6 +476,8 @@ Rendered in Blender (Cycles) straight from the engine's output:
 
 ## Nodes
 
+See [Group parity support matrix and examples](docs/GROUP-PARITY.md) for the complete group tool set, multi-rule editor controls and exact Houdini differences.
+
 | node | inputs | what it does |
 |---|---|---|
 | `blender_object` | - | a Blender object's evaluated mesh, **live**: edit it in Blender and the graph recooks (see below) |
@@ -502,8 +504,8 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | `blend` | geo, targets* | morph the base towards shapes with the same points (shape keys / Blend Shapes): `amount`, per-target `weights` as numbers or expressions (`smoothstep(1, 49, @Frame)`, `sin(@Time * 3) * 0.5 + 0.5`), which attributes (`P`, `N`, `*`), a per-point `mask`, a `group`; several targets add their offsets |
 | `bound` | geo | bounding box, world-aligned or fitted to the principal axes; detail `bound_min/max/size` |
 | `noise` | geo | fractal Perlin noise; displaces `P` or writes any attribute (scalar or vector mode); optional group |
-| `group_create` | geo | a named point or primitive group: pattern/expression, bounding box, normal direction, random %, boundary |
-| `group_promote` | geo | convert groups between points and primitives |
+| `group_create` | geo, bounds? | point, primitive, edge or corner groups: pattern, bounds, normal, random and filters |
+| `group_promote` | geo | sequential promotion rules across all four domains; preserves legacy contained defaults |
 | `group_expand` | geo | grow or shrink a group by rings of neighbours (by points or edges); then `grown ^orig` selects the border ring |
 | `group_expand` | geo | grow or shrink a group by rings of neighbours (points or edges); `^` patterns then select the border ring |
 | `blast` | geo | delete a group of primitives or points (or keep only it) |

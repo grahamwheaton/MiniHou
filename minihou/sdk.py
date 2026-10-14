@@ -30,6 +30,8 @@ attribute arrays.
 from __future__ import annotations
 
 import contextlib
+import copy
+import json
 import inspect
 import math
 import numbers
@@ -78,7 +80,7 @@ class Param:
     """
 
     name: str
-    kind: str                       # float | int | bool | str | vec3 | enum
+    kind: str                       # float | int | bool | str | vec3 | enum | rules
     default: Any
     min: Optional[float] = None
     max: Optional[float] = None
@@ -89,6 +91,8 @@ class Param:
     choices: Tuple[str, ...] = ()
     ui: str = ""                    # free-form hint, e.g. "code" for expression/snippet text
     proxy: str = ""                 # how a proxy cook level scales this parameter (see minihou.proxy.KINDS); "" = not at all
+
+    fields: Tuple["Param", ...] = () # structured repeatable row schema (optional)
 
     def __post_init__(self):
         if not _NAME_RE.match(self.name):
@@ -107,6 +111,25 @@ class Param:
         """Validate ``value`` and return its canonical (JSON-friendly) form."""
         k = self.kind
         try:
+            if k == "rules":
+                if isinstance(value, str):
+                    try:
+                        value = json.loads(value)
+                    except (ValueError, TypeError):
+                        raise ParamError("expected a list of rule rows") from None
+                if not isinstance(value, (list, tuple)) or len(value) > 1000:
+                    raise ParamError("expected at most 1000 rule rows")
+                known = {p.name: p for p in self.fields}
+                rows = []
+                for i, row in enumerate(value):
+                    if not isinstance(row, dict):
+                        raise ParamError(f"rule {i + 1} must be an object")
+                    unknown = set(row) - set(known)
+                    if unknown:
+                        raise ParamError(f"rule {i + 1}: unknown fields {sorted(unknown)}")
+                    rows.append({name: p.to_json_value(p.coerce(row.get(name, copy.deepcopy(p.default))))
+                                 for name, p in known.items()})
+                return rows
             if k == "float":
                 v = self._num(value)
                 return self._check_range(v)
@@ -159,7 +182,7 @@ class Param:
         return v
 
     def to_json_value(self, v: Any) -> Any:
-        return list(v) if self.kind == "vec3" else v
+        return list(v) if self.kind == "vec3" else copy.deepcopy(v) if self.kind == "rules" else v
 
     def describe(self) -> dict:
         d = {"name": self.name, "kind": self.kind, "default": self.to_json_value(self.default),
@@ -167,6 +190,8 @@ class Param:
         for key in ("min", "max", "soft_min", "soft_max"):
             if getattr(self, key) is not None:
                 d[key] = getattr(self, key)
+        if self.kind == "rules":
+            d["fields"] = [p.describe() for p in self.fields]
         if self.choices:
             d["choices"] = list(self.choices)
         if self.ui:
@@ -204,6 +229,19 @@ def Enum(name, choices: Sequence[str], default=None, *, label="", doc="", ui="")
     if not choices:
         raise ValueError("Enum needs at least one choice")
     return Param(name, "enum", choices[0] if default is None else default, label=label, doc=doc, choices=choices, ui=ui)
+
+
+def Rules(name, fields, default=None, *, label="", doc=""):
+    """Repeatable structured rows, rendered as ordinary controls by the editor.
+
+    Lists are graph-owned JSON values. Old JSON strings are accepted for migration.
+    Fields may include nested Rules (for example chained Group Combine operations).
+    """
+    fields = tuple(fields)
+    if len({p.name for p in fields}) != len(fields):
+        raise ValueError("Rules fields must have unique names")
+    return Param(name, "rules", [] if default is None else default,
+                 label=label, doc=doc, fields=fields)
 
 
 @dataclass(frozen=True)
@@ -393,7 +431,7 @@ class NodeType:
         return [i.name for i in self.inputs]
 
     def default_params(self) -> Dict[str, Any]:
-        return {p.name: p.default for p in self.params}
+        return {p.name: copy.deepcopy(p.default) if p.kind == "rules" else p.default for p in self.params}
 
     def coerce_params(self, given: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         """Fill defaults, validate, and return params in declaration order."""
@@ -401,7 +439,7 @@ class NodeType:
         unknown = set(given) - set(self._param_index)
         if unknown:
             raise ParamError(f"node type {self.name!r} has no parameter(s) {sorted(unknown)}")
-        return {p.name: (p.coerce(given[p.name]) if p.name in given else p.default) for p in self.params}
+        return {p.name: (p.coerce(given[p.name]) if p.name in given else copy.deepcopy(p.default) if p.kind == "rules" else p.default) for p in self.params}
 
     def describe(self) -> dict:
         d = {"name": self.name, "version": self.version, "category": self.category, "doc": self.doc,
