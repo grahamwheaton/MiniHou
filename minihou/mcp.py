@@ -49,7 +49,7 @@ like 'top ^side', '0-9' or '@P.z > 0'), modelling (boolean, polyextrude, polybev
 tube and torus sources; smooth, peak, match_size, bound, copy_transform, switch; voronoi_fracture + exploded_view;
 polyreduce; normal with domain 'vertex' keeps hard edges crisp), attributes (attribute_transfer, promote, blur,
 measure, color, ray, falloff (0..1 weights), occlusion (AO / thickness); uv_project, uv_flatten, uv_transform), curves (line, helix, resample,
-curve_simplify, contour, slice, sweep, path_deform), volumes (remesh, sdf_shape,
+curve_simplify, contour, slice, sweep, path_deform), volumes (remesh, quad_remesh, sdf_shape,
 points_to_surface, sdf_boolean), instancing of Blender objects (instance), PCG point graphs (pcg_* nodes: samplers,
 point booleans pcg_difference/intersection/union, pcg_self_prune, density noise/filter, pcg_spawner), for_each (a
 system per piece), time (@Frame, solver; set_frame to check).
