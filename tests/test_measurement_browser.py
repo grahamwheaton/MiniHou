@@ -61,6 +61,54 @@ class MeasurementBrowserTests(unittest.TestCase):
         p.evaluate('saveWaiters.shift()()');p.wait_for_function('saveWaiters.length===1');p.evaluate('saveWaiters.shift()()')
         p.wait_for_function("saved[0].label==='Queued'&&saved[0].label_offset[0]===55")
 
+    def test_resolution_and_save_refresh_keep_inspector_controls_attached(self):
+        p=self.page;c=p.locator('canvas');p.evaluate("tool.start('tape')")
+        c.click(position={'x':100,'y':100});c.click(position={'x':200,'y':100})
+        p.wait_for_function('saved.length===1')
+        p.evaluate('''()=>{
+            window.controls=[...document.querySelectorAll('aside input,aside select,aside button')];
+            tool.setResolved({});tool.setMeasurements(structuredClone(saved));
+        }''')
+        self.assertTrue(p.evaluate("controls.every(e=>e.isConnected)&&controls.every((e,i)=>e===document.querySelectorAll('aside input,aside select,aside button')[i])"))
+        label=p.get_by_label('Measurement label',exact=True)
+        label.fill('Draft width')
+        p.evaluate('geos[0].P[3]=3;tool.setResolved({})')
+        self.assertEqual(label.input_value(),'Draft width')
+        self.assertTrue(label.evaluate('(e)=>document.activeElement===e'))
+        self.assertEqual(p.get_by_label('Endpoint 2 X (mm)').input_value(),p.evaluate('String(MiniUnits.display(3))'))
+        label.press('Tab')
+        p.wait_for_function("saved[0].label==='Draft width'")
+        self.assertTrue(p.evaluate('controls.every(e=>e.isConnected)'))
+        self.assertEqual(p.get_by_label('Measurement',exact=True).input_value(),p.evaluate('saved[0].id'))
+
+    def test_focused_endpoint_edit_uses_latest_resolved_position(self):
+        p=self.page;c=p.locator('canvas');p.evaluate("tool.start('tape')")
+        c.click(position={'x':100,'y':100});c.click(position={'x':200,'y':100})
+        p.wait_for_function('saved.length===1')
+        endpoint=p.get_by_label('Endpoint 2 Y (mm)')
+        endpoint.fill('500 mm')
+        p.evaluate('geos[0].P[3]=3;tool.setResolved({})')
+        self.assertEqual(endpoint.input_value(),'500 mm')
+        endpoint.press('Tab')
+        p.wait_for_function('saved[0].points[1][1]===.5')
+        self.assertEqual(p.evaluate('saved[0].points[1]'),[3,.5,0])
+        self.assertIsNone(p.evaluate('saved[0].refs[1]'))
+
+    def test_inspector_switch_and_delete_target_selected_measurement(self):
+        p=self.page
+        p.evaluate("tool.setMeasurements([{id:'a',points:[[0,0,0],[1,0,0]],label:'First'},{id:'b',points:[[0,0,0],[2,0,0]],label:'Second'}])")
+        p.get_by_label('Measurement',exact=True).select_option('a')
+        p.get_by_label('Measurement label',exact=True).fill('Renamed')
+        p.get_by_label('Measurement label',exact=True).press('Tab')
+        p.wait_for_function("saved[0].label==='Renamed'")
+        self.assertEqual(p.get_by_label('Measurement',exact=True).input_value(),'a')
+        p.get_by_label('Measurement',exact=True).select_option('b')
+        self.assertEqual(p.get_by_label('Measurement label',exact=True).input_value(),'Second')
+        p.get_by_role('button',name='Delete measurement',exact=True).click()
+        p.wait_for_function("saved.length===1&&saved[0].id==='a'")
+        self.assertEqual(p.get_by_label('Measurement',exact=True).input_value(),'')
+        self.assertEqual(p.get_by_label('Measurement label',exact=True).count(),0)
+
     def test_perspective_edge_face_and_nearest_overlap(self):
         p=self.page
         result=p.evaluate("""()=>{const M=MiniSketchMath,project=p=>[p[0]/p[2]*100,p[1]/p[2]*100,p[2]],g={node:'oblique',P:[0,0,1,4,0,2,0,4,2],edge:[0,1],tri:[0,1,2]};return [M.infer([0,0,0],null,project,[100,0],g,{grid:0}),M.infer([0,0,0],null,project,[50,50],g,{grid:0}),M.infer([0,0,0],null,project,[50,50],[{...g,node:'far',P:g.P.map(x=>x*2)},g],{grid:0})]}""")

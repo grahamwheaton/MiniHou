@@ -34,7 +34,7 @@ class MeasurementLayoutTests(unittest.TestCase):
         self.assertGreater(painted[0],20,'Preferences heading did not paint')
         self.assertGreater(painted[1],10,'Length display label did not paint')
         self.assertGreater(painted[2],3,'Length selector right edge did not paint')
-        destination=Path(__file__).resolve().parents[2]/'user-fixes-20261014'
+        destination=Path(__file__).resolve().parents[1]/'build'/'user-fixes-20261014'
         if destination.is_dir():p.screenshot(path=str(destination/'unit-preferences-layout-mm.png'))
 
     def test_measurement_fields_fit_sidebar_and_delete_reachable(self):
@@ -62,7 +62,7 @@ class MeasurementLayoutTests(unittest.TestCase):
             self.assertTrue(fixture.until(lambda:self.s.graph.measurements[0]['points'][1][0]==1.5))
         p.set_viewport_size({'width':1400,'height':950});p.get_by_label('Measurement label',exact=True).scroll_into_view_if_needed()
         p.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
-        destination=Path(__file__).resolve().parents[2]/'user-fixes-20261014'
+        destination=Path(__file__).resolve().parents[1]/'build'/'user-fixes-20261014'
         if destination.is_dir():p.screenshot(path=str(destination/'measurement-editor-layout.png'))
         p.get_by_role('button',name='Delete measurement',exact=True).click()
         self.assertTrue(fixture.until(lambda:not self.s.graph.measurements))

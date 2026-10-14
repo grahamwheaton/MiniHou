@@ -168,7 +168,9 @@ class ViewportFixesTests(unittest.TestCase):
         self.page.wait_for_function("!Object.values(minihou.S.graph.nodes).some(n=>n.type==='transform')")
         np.testing.assert_allclose(self.s.preview('b',templates=True)['geo'].P,before)
         # Pick a displayed point object, then component A remains scoped to it.
-        self.page.wait_for_function('minihou.preview.points===12')
+        # The merged transform also has 12 points. Undo's graph snapshot arrives
+        # before its preview, so wait for restored object ownership before picking.
+        self.page.wait_for_function("minihou.preview.primaryNode==='o' && minihou.preview.previewObjects.length===3")
         self.page.evaluate("minihou.preview.viewAxis('top',false,true);minihou.preview.frameAll();minihou.preview.clearSelection()")
         self.page.mouse.click(*self.view_xy('point',8))
         self.assertEqual(self.selection()['objects'],['p'])
@@ -182,12 +184,14 @@ class ViewportFixesTests(unittest.TestCase):
         self.assertEqual(self.page.evaluate('minihou.preview.selectionInfo().points'),[9,10,11])
         self.hover();self.page.keyboard.press('s');self.page.mouse.move(750,320)
         self.page.wait_for_function("Object.values(minihou.S.graph.nodes).some(n=>n.type==='transform')")
+        self.page.wait_for_function("minihou.S.graph.nodes[minihou.preview.primaryNode]?.type==='transform' && minihou.preview.previewObjects.length===1")
         self.page.keyboard.press('Escape')
         self.assertTrue(until(lambda:self.s._gesture is None))
         self.page.wait_for_function("!Object.values(minihou.S.graph.nodes).some(n=>n.type==='transform')")
         np.testing.assert_allclose(self.s.preview('b',templates=True)['geo'].P,before)
-        self.page.wait_for_function('minihou.preview.points===12')
+        self.page.wait_for_function("minihou.preview.primaryNode==='o' && minihou.preview.previewObjects.length===3")
         self.page.wait_for_function('minihou.preview.selectionInfo()?.points.length===3')
         self.assertEqual(self.page.evaluate('minihou.preview.selectionInfo().points'),[9,10,11])
+        self.assertEqual(self.page.evaluate('minihou.preview.activeObject'),'l')
         self.page.click('#preview [data-mode="edge"]');self.hover();self.page.keyboard.press('a')
         self.assertEqual(self.selection()['edges'],[[9,10],[10,11]])
