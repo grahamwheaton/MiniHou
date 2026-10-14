@@ -3,11 +3,11 @@
 "use strict";
 window.MiniHouPreview = (() => {
   const VS = `#version 300 es
-  in vec3 aPos; in vec3 aCol;
-  uniform mat4 uMV, uP; uniform float uPointSize, uBias, uIsolate, uActiveStart, uActiveEnd;
+  in vec3 aPos; in vec3 aCol; in float aOwner;
+  uniform mat4 uMV, uP; uniform float uPointSize, uBias, uIsolate, uActiveStart, uActiveEnd, uOwnerMode;
   out float vDim;
   out vec3 vView; out vec3 vCol; out vec3 vWorld;
-  void main() { vDim = (gl_VertexID < int(uActiveStart) || gl_VertexID >= int(uActiveEnd)) ? uIsolate : 0.0; vec4 v = uMV * vec4(aPos, 1.0); vView = v.xyz; vCol = aCol; vWorld = aPos; gl_Position = uP * v;
+  void main() { float owner = uOwnerMode > 0.5 ? aOwner : float(gl_VertexID); vDim = (owner < uActiveStart || owner >= uActiveEnd) ? uIsolate : 0.0; vec4 v = uMV * vec4(aPos, 1.0); vView = v.xyz; vCol = aCol; vWorld = aPos; gl_Position = uP * v;
                 gl_Position.z -= uBias * gl_Position.w; gl_PointSize = uPointSize; }`;
   // selected edges: each edge is a quad that is widened in screen space, so selections read as thick lines
   const VS_EDGE = `#version 300 es
@@ -154,12 +154,12 @@ window.MiniHouPreview = (() => {
       return { p, u };
     };
     const CLIP_U = ["uClip", "uClipOn"];
-    const MESH_U = ["uIsolate", "uActiveStart", "uActiveEnd","uMV", "uP", "uPointSize", "uBase", "uUseCol", "uAlpha", "uBias", "uLighting", ...CLIP_U];
+    const MESH_U = ["uOwnerMode", "uIsolate", "uActiveStart", "uActiveEnd","uMV", "uP", "uPointSize", "uBase", "uUseCol", "uAlpha", "uBias", "uLighting", ...CLIP_U];
     let mesh, flat, edgeProg, colorProg, gridProg, instProg;
     try {
       gridProg = prog(VS_GRID, FS_GRID, [], ["uMV", "uP", "uEye", "uTarget", "uSpacing", "uRange", "uOpacity", "uAxes"]);
-      mesh = prog(VS, FS_MESH, ["aPos", "aCol"], MESH_U);
-      flat = prog(VS, FS_FLAT, ["aPos", "aCol"], MESH_U);
+      mesh = prog(VS, FS_MESH, ["aPos", "aCol", "aOwner"], MESH_U);
+      flat = prog(VS, FS_FLAT, ["aPos", "aCol", "aOwner"], MESH_U);
       edgeProg = prog(VS_EDGE, FS_COLOR, ["aA", "aB", "aT", "aS"], ["uMV", "uP", "uViewport", "uWidth", "uBias", "uColor", ...CLIP_U]);
       colorProg = prog(VS, FS_COLOR, ["aPos", "aCol"], ["uMV", "uP", "uPointSize", "uBias", "uColor", ...CLIP_U]);
       instProg = prog(VS_INST, FS_INST, ["aPos", "aR0", "aR1", "aR2", "aCol"], ["uMV", "uP", "uBase", "uUseCol", "uLighting", "uDim", ...CLIP_U]);
@@ -213,14 +213,15 @@ window.MiniHouPreview = (() => {
     // attrView = {domain: point|prim|edge, comps, values (Float32Array), min, max, ramp: heat|gray}. Points reuse the colour buffer, primitives
     // draw from an unwelded copy of the triangles (a point is shared by faces, a primitive's colour is not), edges are an overlay.
     let attrView = null, cd0 = null, primCount = 0, aedCount = 0, ptCol = null, primColArr = null, primTriIdx = null;
-    const primVao = gl.createVertexArray(), primPos = gl.createBuffer(), primCol = gl.createBuffer();
+    const primVao = gl.createVertexArray(), primPos = gl.createBuffer(), primCol = gl.createBuffer(), primOwner = gl.createBuffer();
     gl.bindVertexArray(primVao); gl.bindBuffer(gl.ARRAY_BUFFER, primPos); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
-    gl.bindBuffer(gl.ARRAY_BUFFER, primCol); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0); gl.bindVertexArray(null);
+    gl.bindBuffer(gl.ARRAY_BUFFER, primCol); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER,primOwner);gl.enableVertexAttribArray(2);gl.vertexAttribPointer(2,1,gl.FLOAT,false,0,0);gl.bindVertexArray(null);
     const aedVao = gl.createVertexArray(), aedBuf = gl.createBuffer(), aedIdx = gl.createBuffer();
     gl.bindVertexArray(aedVao); gl.bindBuffer(gl.ARRAY_BUFFER, aedBuf);
     for (const [loc, n, off] of [[0, 3, 0], [1, 3, 12], [2, 1, 24], [3, 1, 28]]) { gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, n, gl.FLOAT, false, 32, off); }
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, aedIdx); gl.bindVertexArray(null);
-    const MAX_PRIM_COLOUR_TRIS = 4000000;
+    const MAX_PRIM_COLOUR_TRIS = Math.floor(4000000 * 72 / 84); // retain the previous 288 MB buffer budget
     const HEAT = [[0.12, 0.2, 0.75], [0.1, 0.75, 0.85], [0.2, 0.8, 0.25], [0.95, 0.85, 0.15], [0.9, 0.2, 0.15]];
     function colourOf(a, i, out, o) {                                    // the colour of element i of the attribute, into out[o..o+2]
       const v = a.values, nc = a.comps;
@@ -239,12 +240,14 @@ window.MiniHouPreview = (() => {
         gl.bindBuffer(gl.ARRAY_BUFFER, colBuf); gl.bufferData(gl.ARRAY_BUFFER, col, gl.DYNAMIC_DRAW); data.hasCd = true; ptCol = col;
       } else if (a.domain === "prim") {
         const T = raw.tri, TP = raw.triPrim, nt = T.length / 3;
-        if (nt > MAX_PRIM_COLOUR_TRIS) {                                  // unwelding would need 72 bytes per triangle: too much for the tab
+        if (nt > MAX_PRIM_COLOUR_TRIS) {                                  // unwelding needs 84 bytes per triangle including explicit corner owners: too much for the tab
           if (onMessage) onMessage(`Too many faces to colour by primitive (${nt.toLocaleString()} triangles); points and edges still work.`);
           return;
         }
         if (primCount !== nt * 3) {                                       // the unwelded positions, once per geometry
-          const pos = new Float32Array(nt * 9);
+          const pos = new Float32Array(nt * 9), owner = new Float32Array(nt * 3);
+          for(let t=0;t<nt;t++)owner.fill(TP[t],t*3,t*3+3);
+          gl.bindBuffer(gl.ARRAY_BUFFER,primOwner);gl.bufferData(gl.ARRAY_BUFFER,owner,gl.STATIC_DRAW);
           for (let t = 0; t < nt; t++) for (let c = 0; c < 3; c++) { const v = T[3 * t + c] * 3; pos.set([raw.P[v], raw.P[v + 1], raw.P[v + 2]], 9 * t + 3 * c); }
           gl.bindBuffer(gl.ARRAY_BUFFER, primPos); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW); primCount = nt * 3;
         }
@@ -801,7 +804,7 @@ window.MiniHouPreview = (() => {
       gl.enable(gl.DEPTH_TEST);
       gl.useProgram(instProg.p);
       gl.uniformMatrix4fv(instProg.u.uMV, false, cam.MV); gl.uniformMatrix4fv(instProg.u.uP, false, cam.P);
-      const dim=opt.isolated&&api.activeObject!==api.previewObjects?.[0]?.node?Math.max(0,Math.min(1,opt.isolated_knockback??.75)):0;gl.uniform1f(instProg.u.uDim,dim);
+      const dim=opt.isolated&&api.activeObject!==(api.primaryNode??api.previewObjects?.[0]?.node)?Math.max(0,Math.min(1,opt.isolated_knockback??.75)):0;gl.uniform1f(instProg.u.uDim,dim);
       gl.uniform3fv(instProg.u.uBase, [0.62, 0.68, 0.76]); gl.uniform1f(instProg.u.uUseCol, inst.col ? 1 : 0); gl.uniform1f(instProg.u.uLighting, opt.lighting);
       const meshes = inst.head.meshes;
       for (const [mesh, b] of inst.buckets) {
@@ -868,7 +871,7 @@ window.MiniHouPreview = (() => {
         gl.uniform3fv(pr.u.uBase, base); gl.uniform1f(pr.u.uUseCol, useCol && data.hasCd ? 1 : 0);
         gl.uniform1f(pr.u.uPointSize, opt.pointSize);
         gl.uniform1f(pr.u.uIsolate,opt.isolated?Math.max(0,Math.min(1,opt.isolated_knockback??.75)):0);
-        const active=activeObject();gl.uniform1f(pr.u.uActiveStart,active?.point_start??0);gl.uniform1f(pr.u.uActiveEnd,active?active.point_start+active.point_count:data.npoints);
+        gl.uniform1f(pr.u.uOwnerMode,0);const active=activeObject();gl.uniform1f(pr.u.uActiveStart,active?.point_start??0);gl.uniform1f(pr.u.uActiveEnd,active?active.point_start+active.point_count:data.npoints);
         if (pr.u.uLighting) gl.uniform1f(pr.u.uLighting, opt.lighting); gl.uniform1f(pr.u.uBias, 0);
         if (pr.u.uAlpha) gl.uniform1f(pr.u.uAlpha, alpha === undefined ? 1 : alpha);
         if (data.hasCd) gl.enableVertexAttribArray(1); else { gl.disableVertexAttribArray(1); gl.vertexAttrib3f(1, 1, 1, 1); }
@@ -877,7 +880,7 @@ window.MiniHouPreview = (() => {
         const primView = attrView && attrView.domain === "prim" && primCount === data.ntris * 3;
         if (primView) { gl.bindVertexArray(primVao); data.hasCd = true; }
         setup(mesh, [0.62, 0.68, 0.76], true);
-        if(primView){const a=activeObject(),start=a?.prim_start??0,end=a?start+a.prim_count:Infinity;gl.uniform1f(mesh.u.uActiveStart,raw.triPrim.reduce((n,f)=>n+(f<start?3:0),0));gl.uniform1f(mesh.u.uActiveEnd,raw.triPrim.reduce((n,f)=>n+(f<end?3:0),0));}
+        if(primView){const a=activeObject(),start=a?.prim_start??0,end=a?start+a.prim_count:1e30;gl.uniform1f(mesh.u.uOwnerMode,1);gl.uniform1f(mesh.u.uActiveStart,start);gl.uniform1f(mesh.u.uActiveEnd,end);}
         gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1, 1);
         const runs = triangleRuns(cam);                                                       // null = every triangle (no chunk table, or culling is off)
         stats.trisTotal = data.ntris;
@@ -1559,7 +1562,7 @@ window.MiniHouPreview = (() => {
       setTool(t) { if (["move", "rotate", "scale"].includes(t)) { api.tool = t; schedule(); } },
       set(head, arrays, keepCamera) {
         measurementCache=null;
-        api.previewObjects=head.proxy?.active?[]:(head.preview_objects||[]);api.referenceObjects=head.template_reduced?[]:(head.reference_objects||[]);if(!api.previewObjects.some(o=>o.node===api.activeObject))api.activeObject=api.previewObjects[0]?.node;
+        api.previewObjects=head.proxy?.active?[]:(head.preview_objects||[]);api.referenceObjects=head.template_reduced?[]:(head.reference_objects||[]);if(!api.previewObjects.some(o=>o.node===api.activeObject))api.activeObject=api.previewObjects[0]?.node??head.node;api.primaryNode=head.node;
         let keepIndices = false;
         if (head.same_topology) {                                                         // only positions (and colours) came: reuse the rest
           if (!raw || raw.topology !== head.topology || raw.P.length !== arrays.P.length) return false;

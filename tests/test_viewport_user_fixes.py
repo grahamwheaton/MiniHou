@@ -77,6 +77,9 @@ class ViewportFixesTests(unittest.TestCase):
             png=base64.b64encode(self.page.locator('#pv-canvas').screenshot()).decode('ascii')
             coords=self.page.evaluate('[[.2,.2,1],[4.2,.2,.5],[-4,-.5,.5]].map(p=>minihou.preview.project(p))')
             return self.page.evaluate('''async ([png,points])=>{const img=new Image();img.src='data:image/png;base64,'+png;await img.decode();const c=document.createElement('canvas');c.width=img.width;c.height=img.height;const ctx=c.getContext('2d');ctx.drawImage(img,0,0);return points.map(p=>Array.from(ctx.getImageData(Math.round(p[0]),Math.round(p[1]),1,1).data).slice(0,3));}''',[png,coords])
+        # Deliberately interleave object triangle owners, as Morton chunk ordering does.
+        # Primitive colouring unwelds this order; isolation must use owner IDs, not a prefix.
+        self.page.evaluate("""()=>{const pv=minihou.preview,g=pv.geometry(),T=g.tri.slice(),F=g.triPrim.slice(),order=[];for(let i=0;i<12;i++)order.push(i,i+12);order.forEach((t,i)=>{g.tri.set(T.subarray(t*3,t*3+3),i*3);g.triPrim[i]=F[t];});const values=new Float32Array(12*3);for(let i=0;i<12;i++)values.set([.62,.68,.76],i*3);pv.setAttrView({domain:'prim',comps:3,values,min:0,max:1});}""")
         normal=pixels()
         self.page.click('[data-pv-menu="pv-menu-view"]');self.page.check('#pv-isolated');self.page.keyboard.press('Escape')
         dim=pixels()
@@ -113,3 +116,26 @@ class ViewportFixesTests(unittest.TestCase):
             expected=before.topology.vertex_point[a:b]
             np.testing.assert_array_equal(after.topology.vertex_point[a:b],expected[::-1] if i==6 else expected)
         np.testing.assert_array_equal(after.P,before.P)
+
+    def test_primary_instance_shader_dims_when_other_displayed_mesh_is_active(self):
+        self.box_scene()
+        self.s.edit([{"op":"replace","graph":{"nodes":{
+            "p":{"type":"point","params":{}},
+            "i":{"type":"instance","inputs":{"points":"p"},"params":{"objects":"Tree","scale_min":1,"scale_max":1}},
+            "other":{"type":"box","params":{"center":[4,0,0]},"display_extra":True}},"display":"i"}}])
+        self.page.wait_for_function('minihou.preview.instanceStats().on && minihou.preview.tris===12')
+        self.page.evaluate("minihou.preview.viewAxis('top',false,true);minihou.preview.frameAll();minihou.preview.opt.grid=false;minihou.preview.opt.axes=false;minihou.preview.opt.points=false;minihou.preview.redraw()")
+        def samples():
+            return self.page.evaluate("""()=>new Promise(resolve=>{const pv=minihou.preview,c=document.querySelector('#pv-canvas'),gl=c.getContext('webgl2');pv.redraw();requestAnimationFrame(()=>{const out=[[.15,.15,.5],[4.15,.15,.5]].map(p=>{const s=pv.project(p),v=new Uint8Array(4);gl.readPixels(Math.round(s[0]*c.width/c.clientWidth),c.height-1-Math.round(s[1]*c.height/c.clientHeight),1,1,gl.RGBA,gl.UNSIGNED_BYTE,v);return Array.from(v).slice(0,3);});resolve(out);});})""")
+        normal=samples()
+        self.page.click('[data-pv-menu="pv-menu-view"]');self.page.check('#pv-isolated');self.page.keyboard.press('Escape')
+        dim=samples()
+        self.assertEqual(normal[0],dim[0])
+        self.assertGreater(sum(normal[1]),sum(dim[1])+30)
+        self.page.click('#preview [data-mode="piece"]')
+        self.page.mouse.click(*self.view_xy('face',self.top))
+        self.assertEqual(self.page.evaluate('minihou.preview.activeObject'),'other')
+        self.page.evaluate('minihou.preview.clearSelection()')
+        switched=samples()
+        self.assertGreater(sum(normal[0]),sum(switched[0])+30)
+        self.assertEqual(normal[1],switched[1])
