@@ -121,6 +121,7 @@ class BlenderSelectionIntegrationTests(unittest.TestCase):
         self.assertTrue(fixture.until(lambda:self.s.graph.nodes[nid].params.get(param,0)>0))
         self.page.keyboard.press('Escape')
         self.assertTrue(fixture.until(lambda:nid not in self.s.graph.nodes))
+        self.page.wait_for_function("document.querySelector('.pv-drag-feedback').hidden")
         self.assertEqual(set(self.s.graph.nodes),{'b','o'})
         self.assertEqual(self.s.graph.nodes['o'].inputs,{'geo':'b'})
         self.page.wait_for_function("document.querySelector('#pv-node').innerText.includes('b')")
