@@ -168,6 +168,7 @@ class GroupEditorE2E(unittest.TestCase):
         self.page.wait_for_selector('.node[data-id="l"]');self.node('l').locator('.title').click()
         self.page.wait_for_function("minihou.preview.geometry()?.vertexPoint?.length===24")
         self.page.click('#params button:text-is("Lasso membership")')
+        self.page.wait_for_function("document.querySelector('.pv-drag-feedback')?.textContent.includes('lasso select')")
         # Use the real lasso tool across the complete canvas interior.
         b=self.page.locator('#pv-canvas').bounding_box();x,y,w,h=b['x'],b['y'],b['width'],b['height']
         self.page.mouse.move(x+10,y+10);self.page.mouse.down()

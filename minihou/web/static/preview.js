@@ -1049,7 +1049,8 @@ window.MiniHouPreview = (() => {
       return [o[0] + u[0] * c + v[0] * d, o[1] + u[1] * c + v[1] * d, o[2] + u[2] * c + v[2] * d];
     }
     const RING_STEPS = 72;
-    const shown = () => (selHandles.length ? selHandles : handles).filter((h) => h.kind !== "guide" && (!h.tool || h.tool === api.tool)).map(h=>{
+    // Source center gizmos leave component picking clear until selection handles exist.
+    const shown = () => (selHandles.length ? selHandles : handles).filter((h) => h.kind !== "guide" && (!h.tool || h.tool === api.tool) && !(sel.mode !== "view" && !selHandles.length && h.tool && h.param === "center")).map(h=>{
       if(h.pending&&interaction.orientation==='view'){const frame=handleDrag?.h.axis_rotation?IM.frame(handleDrag.h.axis_rotation):orientationFrame();return {...h,dir:frame[h.comp??2],axis_rotation:IM.euler(frame)};}return h;
     });
     function renderHandles(cam) {
@@ -1148,9 +1149,11 @@ window.MiniHouPreview = (() => {
       hsvg.replaceChildren(...kids);
     }
     function startHandleDrag(e, h) {
+      // SVG handle hit areas must leave canvas navigation reachable.
+      if (!e.modal && (e.button === 1 || e.button === 2 || (e.button === 0 && e.altKey))) { e.stopPropagation(); beginCanvasDrag(e); return; }
       if(e.button!==0||handleDrag||endingDrag)return;
-      // Add/subtract selection must reach geometry even when a handle overlaps it.
-      if (!e.modal && sel.mode !== "view" && (e.shiftKey || e.ctrlKey || e.metaKey)) {
+      // Component picking must also work before a mode change redraws old source gizmos.
+      if (!e.modal && sel.mode !== "view" && ((!selHandles.length && h.tool && h.param === "center") || e.shiftKey || e.ctrlKey || e.metaKey)) {
         e.stopPropagation(); beginCanvasDrag(e); return;
       }
       if(h.kind==='plane'){startPlaneDrag(e,h);return;}
