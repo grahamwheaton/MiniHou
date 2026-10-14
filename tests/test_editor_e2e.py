@@ -1002,9 +1002,11 @@ class EditorE2E(unittest.TestCase):
         self.assertTrue(until(lambda: "polybevel1" in self.s.graph.nodes))
         self.page.wait_for_function("minihou.preview.handleTips().some(t => t.id === 'distance')")   # the new node has its arrow
         tip = self.drag_handle("distance", 30)
-        self.assertTrue(until(lambda: self.s.graph.nodes["polybevel1"].params.get("distance", 0.1) != 0.1))
+        want = 0.1 + 30 / tip["ppu"]
+        # the drag streams intermediate values into the graph: wait for the released one, not the first change
+        until(lambda: abs(self.s.graph.nodes["polybevel1"].params.get("distance", 0.1) - want) < 0.1, 5)
         d = self.s.graph.nodes["polybevel1"].params["distance"]
-        self.assertAlmostEqual(d, 0.1 + 30 / tip["ppu"], delta=0.1)
+        self.assertAlmostEqual(d, want, delta=0.1)
         self.assertGreaterEqual(d, 0.0)
         self.assertTrue(until(lambda: self.s.status()["ok"], 5))
 
