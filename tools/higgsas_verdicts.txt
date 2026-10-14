@@ -1,0 +1,271 @@
+# name | verdict | priority | note
+# HAVE: MiniHou has it. PART: partly. NATIVE: worth building into the engine. LIB: library node (nodes/*.py). FN: wrangle function/snippet. SKIP: not applicable.
+Bend | HAVE |  | bend
+Stretch | HAVE |  | squash_stretch
+Taper | HAVE |  | linear_taper
+Twist | HAVE |  | twist
+Curve Deform | HAVE |  | path_deform
+Cube Deform | HAVE |  | lattice / lattice_grid
+Fit Size | HAVE |  | match_size
+Mirror | HAVE |  | mirror
+Spin | HAVE |  | revolve
+Inset Face | HAVE |  | inset / outset
+Face Offset | PART |  | polyextrude / pushpull move faces along normals; per-face even offset is close but not identical
+Mesh Offset | HAVE |  | peak (offset along normals)
+Mesh Relax | HAVE |  | smooth (laplacian, pin_boundary)
+Boundary Edge Smooth | PART |  | smooth with pin_boundary off + a boundary group; a Boundary Smooth option on smooth would cover it
+Displace | PART |  | noise node and wrangle cover texture displacement; image-texture input is not available
+Edge Bisect | HAVE |  | clip (plane, cut groups)
+Curve Bisect | PART |  | clip handles polygons; curves not tested
+3D Fill Curve | HAVE |  | polyfill
+Poly Arc | HAVE |  | fillet (rounds corners with arcs)
+Loft Splines | HAVE |  | skin
+Splines Patch | PART |  | skin lofts one direction; a bilinear Coons patch from four boundary splines is new (Houdini's skin has the V cross-section input; it is on the parity list)
+Even Curve to Mesh | PART | 3 | sweep (cross-section on input 2, uv along the curve); the "even" thickness through bends is not claimed
+UV Curve to Mesh | HAVE |  | sweep writes uv (u along, v around)
+Mix Splines | PART |  | blend morphs between equal-length curves; Mix Splines also resamples to a common count
+Mesh Face Subdivide | PART |  | divide / subdivide; per-face U/V counts not covered
+Mesh Measure | HAVE |  | measure (area, perimeter, curvature, piece area/volume)
+Mesh Curvature | HAVE |  | measure curvature (signed/gaussian/mean split would be an addition)
+Mesh Points Fracture | HAVE |  | voronoi_fracture
+Voxel Remesh | HAVE |  | remesh
+Points Relax on Surface | HAVE |  | point_relax (surface on input 2)
+Points Relax in Volume | PART |  | point_relax relaxes in space; no inside-a-mesh confinement
+Random Points | HAVE |  | scatter / pcg_points
+Volume Points Grid | HAVE |  | pcg_volume_sampler
+3D Points Grid | PART | 3 | pcg_volume_sampler / lattice_grid make point grids; a plain points-in-a-box grid with a per-axis count is new
+Distribute Points in Volume | HAVE |  | scatter mode volume
+Array | PART | 2 | copy_transform makes one linear/rotating series; a 3-axis array with relative offset is chained copies today
+Circular Array | PART | 3 | copy_transform covers it with a rotation about the pivot; a Pick Instance index is new
+Instances Bounding Box | HAVE |  | bound
+Boundary Edge | HAVE |  | group_create method boundary
+Bounding Region Selection | HAVE |  | group_create bounds filter
+Box Selection | HAVE |  | group_create bounding box (+ bounding object input)
+Edge Angle Selection | HAVE |  | group_create edges filter (min/max edge angle)
+Select by Normal | HAVE |  | group_create normals filter
+Index Selection | HAVE |  | group_range
+Index String Selection | HAVE |  | group patterns ("0-5 10 ^3")
+Expand / Contract Selection | HAVE |  | group_expand
+Checker Selection | PART | 3 | group_range every/offset covers 1-in-N; a selected/deselected run pattern is new (two more parameters)
+Is Inside Volume | NATIVE | 2 | group_create (method inside) :: group_create method "inside": points or faces inside a closed mesh on input 2 (winding number or ray parity). Small, general, and the bounding object input is already there
+Cylinder UV Mapping | HAVE |  | uv_project cylindrical
+Sphere UV Mapping | HAVE |  | uv_project spherical
+Triplanar UV Mapping | HAVE |  | uv_project box
+Face UV | PART |  | uv_flatten gives per-island unwrap + packing; "one island per face" is uv_flatten with split by face
+Mesh UV Unfold | HAVE |  | uv_flatten (LSCM unwrap + island packing)
+UV Transform | NATIVE | 1 | uv_transform :: uv_transform: translate/rotate/scale/flip UVs per island or selection, with random per island. Basic UV tool MiniHou lacks
+UV Mirror | NATIVE | 2 | uv_transform :: folded into uv_transform (mirror about an axis)
+UV Align to Direction | NATIVE | 2 | uv_transform :: folded into uv_transform (rotate each island so a direction points up)
+UV Seam | PART |  | uv_flatten seam_angle; "seam where uv is discontinuous" is a measure/group option
+UV Measure | NATIVE | 3 | measure (uv options) :: folded into measure (uv area vs 3-D area, distortion, island count)
+UV Tangent | FN | 3 | wrangle snippet / attribute
+UV Deform | LIB | 3 | moves a mesh using another mesh's uv as the map (Surface Bind in uv space); attribute_transfer on uv does most of it
+Correct UV | LIB | 3 | repairs uv after a deform by a rest position; needs a rest-attribute workflow
+Direction Object Space to UV Space Transform | FN | 3 | a few lines of vector maths; wrangle
+Camera UV Coordinates | SKIP |  | needs a Blender camera object
+Camera Culling | SKIP |  | needs a Blender camera object (could return as camera_frustum with the camera passed as numbers)
+Camera Grid | SKIP |  | Blender camera
+Camera Perspective Shift | SKIP |  | Blender camera
+Camera Perspective to Orthographic Transform | SKIP |  | Blender camera
+Camera View Flatten | SKIP |  | Blender camera
+Camera View Transform | SKIP |  | Blender camera
+Fit in Camera | SKIP |  | Blender camera
+Bezier Extend | LIB | 3 | extend a Bezier by tangent; MiniHou's bezier is an editable node, the extend is a few lines on control points
+Bezier Resample | LIB | 3 | resample that keeps handles; resample covers the polyline case
+Blend Curves | LIB | 2 | joins nearby curve ends with a smooth blend (fillet + connect); pairs with fuse
+Curve Circle Arc Tangent | LIB | 3 | arc-joined path through circles; maths helpers exist in the file already
+Curve Circle Line Tangent | LIB | 3 | belt/pulley outline around circles
+Curves Inverse Kinematics | LIB | 2 | FABRIK solver on curve chains with target and pole: a rigging tool Houdini has as a solver
+Curve Forward Kinematics | LIB | 3 | per-joint rotation down a chain
+Curve Median Axis 2D | LIB | 2 | medial axis of a 2-D outline via Delaunay/Voronoi (both exist)
+Advect Splines | LIB | 2 | grow splines through a vector field in steps (pairs with curl noise)
+Align Curve to Surface | LIB | 3 | curve tilt/normal from the surface under it (ray node)
+Curve Banking | LIB | 3 | tilt from curvature (roads, rails, roller-coasters)
+Curve Intersection | LIB | 3 | segment/segment intersection test with an Intersection Point group
+Curve Mesh Boolean | SKIP |  | exists in spirit as clip/boolean on polygons; low demand
+Curve Offset | PART | 2 | polyexpand2d offsets 2-D outlines; a 3-D offset with axis rotation and duplicate count is new
+Curve Point Angle | FN | 3 | measure option / wrangle (turning angle per point)
+Decimate Curve | NATIVE | 1 | curve_simplify :: curve_simplify (Ramer-Douglas-Peucker by angle/distance + smooth). resample only goes the other way
+Dynamic Catenary Splines | LIB | 2 | hanging cables between points: catenary solve per spline (cable/rope scenes)
+Edge Bundling | LIB | 3 | force-directed bundling of curves
+Tubes to Splines | LIB | 2 | recovers the centre curve of tube meshes (inverse of sweep)
+Twist Curve | LIB | 3 | twist curve strands around a spine (rope/cable)
+Even Grid Profile Surface | LIB | 3 | quad grid fitted to a profile curve
+Capareda Curve | LIB | 3 | closed-form curve
+Dragon Curve | LIB | 2 | L-system-like fractal (lsystem node can do the dragon curve; a ready preset is cheaper)
+Dubins CSC Path | LIB | 3 | shortest car path between two oriented points
+Heart | LIB | 3 | parametric curve
+Hilbert Curve | LIB | 2 | space-filling curve (2-D/3-D); useful for scan lines, textures, paths
+Infinite Cube | LIB | 3 | parametric curve
+Lissajous Curve | LIB | 2 | parametric curve
+Spherical Spiral | LIB | 2 | parametric curve
+Super Ellipse | LIB | 2 | parametric curve (Lamé)
+Torus Knot | LIB | 2 | (p,q) knot as curve and tube mesh
+Capsule | NATIVE | 2 | capsule :: capsule source (radius, depth, caps) with Top/Side/Bottom groups; a basic primitive that Houdini has (Tube with round caps) and MiniHou lacks
+Pyramid | NATIVE | 3 | pyramid (or tube option) :: pyramid/cone source with steps; tube with radius_top 0 covers a round one
+Rounded Cube | NATIVE | 2 | box (rounded option) :: box with rounded corners: box + polybevel does it, but a one-node source with uv is handy
+Rounded Cone | LIB | 3 | tube with round ends
+Quad Sphere | NATIVE | 2 | sphere (quad mode) :: cube-sphere (all quads, even, good for subdivision/sculpt); sphere has a UV and a poly mode but no all-quad cube mapping
+Quad Disk | LIB | 3 | all-quad disk
+Super Ellipsoid | LIB | 3 | parametric surface
+Gabriels Horn | LIB | 3 | parametric surface
+Klein Bottle | LIB | 3 | parametric surface
+Oloid | LIB | 3 | developable surface pair
+Spur Gear | LIB | 2 | involute gear with profile curve output: a classic procedural part
+Torus | HAVE |  | torus
+Bricks Grid | LIB | 2 | tile generators share maths: one library file with all of them
+Cairo Tile Grid | LIB | 3 | tile generator
+Herringbone Tile Grid | LIB | 3 | tile generator
+Hexagon Grid | LIB | 2 | tile generator
+Hopscotch Tile Grid | LIB | 3 | tile generator
+Isometric Tile Grid | LIB | 3 | tile generator
+Triangle Grid | LIB | 2 | tile generator
+2D Triangular Remesh | LIB | 2 | isotropic triangulation of a planar face (Delaunay + relax)
+Triangle Mesh to Voronoi | NATIVE | 2 | dual :: dual mesh (Voronoi cells of a triangle mesh); voronoi_adjacency is the point-based sibling
+Connect Points | LIB | 3 | edges between points within a distance
+Cube Recursive Subdivision | LIB | 3 | generative art
+Edge Offset | PART | 3 | polyextrude of edges + inset; "offset/extrude/duplicate" modes on edge selections is new
+Marching Squares Isolines | NATIVE | 1 | contour :: contour node: iso-lines of a point attribute on a mesh (squares or triangles, linear interpolation, multiple lines). Four Higgsas nodes (squares/triangles x isolines/surface) are one MiniHou node
+Marching Squares Surface | NATIVE | 1 | contour :: contour node, mode "surface" (cut the mesh where an attribute crosses a threshold)
+Marching Triangles Isolines | NATIVE | 1 | contour :: contour node
+Marching Triangles Surface | NATIVE | 1 | contour :: contour node
+Mesh Contours | NATIVE | 1 | slice :: slice node: curves from planes through a mesh at a spacing (topographic lines, 3-D print slicing), optional fill. Needs topology access, slow in a node-tree
+Mesh Smooth Delete | LIB | 3 | remove faces under a smoothed threshold
+Mesh Auxetic Structure | LIB | 3 | rotating-squares mesh
+Mesh Face Divider | LIB | 3 | random face splitting (buildings, circuit boards)
+Mesh Face Recursive Subdivision | LIB | 3 | generative art
+Mesh Topology Face Strips | LIB | 3 | groups faces into strips (quad loops)
+Mesh Unfold | LIB | 3 | animated unfolding of a mesh along faces
+Maze Solver | LIB | 3 | maze generation/solve on a mesh
+Mesh to Ascii | SKIP |  | novelty, render-side
+Shortest Points Path | LIB | 3 | path graph over points
+Solidify | NATIVE | 1 | solidify :: solidify: thickness (even), offset, rim/top/bottom groups. The single biggest basic modelling gap; Blender's Solidify modifier, Houdini's PolyExtrude with thickness
+Spheres Intersections | LIB | 3 | points + radii to blobby mesh
+Tessellate Mesh | LIB | 2 | tile instances on faces by topology (greebles, fabric)
+Tessellate Mesh Smooth | LIB | 2 | same with subdivision
+Tessellate Topology Helper | SKIP |  | internal helper of Tessellate
+Triangle Mesh Circle Packing | LIB | 3 | relaxation on triangle meshes
+Spheres Intersections | LIB | 3 | see above
+Face Points Grid Distribution | LIB | 2 | even point grid on each face (UV-aligned), with tangents/rotation: scatter's regular sibling
+Distribute Points on Edges | NATIVE | 2 | scatter (mode edges) :: scatter mode "edges" (by length, or count per edge) with a group; scatter has surface and volume only
+Homogeneous Disk | LIB | 3 | evenly spaced points on a disk (hex packing)
+Homogeneous Sphere | LIB | 2 | evenly spaced points on a sphere
+Phyllotaxis Disk | LIB | 2 | sunflower pattern
+Phyllotaxis Sphere | LIB | 2 | Fibonacci sphere
+Phyllotaxis Profile Surface | LIB | 3 | phyllotaxis points over a revolved profile
+Circle Packing | LIB | 2 | relaxation of radii (inside a mesh or free)
+2D Distance to Edge Circle Packing | LIB | 3 | circle packing inside an outline
+Points Cluster | NATIVE | 2 | cluster :: cluster: k-means of points into N groups with centroid attributes (useful for fracture, palettes, instancing)
+Instances AABB Colision | LIB | 3 | push apart overlapping instance boxes
+Instances Index Ratio | LIB | 3 | choose instance index by weighted ratios; instance pick random/cycle/attribute covers most
+Instances Tile | LIB | 3 | tiled instances with culling
+Mesh Islands to Instances | LIB | 2 | each connected piece becomes an instance (connectivity + pivot at piece centre); useful for fracture/explode
+Place Instances on Ground | LIB | 2 | drop instances onto the ground with an orientation bias (ray + normal blend)
+Directional Falloff | NATIVE | 1 | falloff :: falloff: one node writes a 0..1 point attribute from a shape (sphere, directional, radial, wave, index, mesh distance, object); Higgsas has eight field nodes for this
+Spherical Falloff | NATIVE | 1 | falloff :: falloff
+Radial Falloff | NATIVE | 1 | falloff :: falloff
+Wave Falloff | NATIVE | 1 | falloff :: falloff (animated wave front, time driven)
+Index Falloff | NATIVE | 1 | falloff :: falloff
+Mesh Falloff | NATIVE | 1 | falloff :: falloff (distance to / inside a mesh)
+Object Directional Falloff | SKIP |  | falloff with a Blender object transform: use the plain falloff and drive it from the object through the Blender link
+Object Spherical Falloff | SKIP |  | same
+Curl Noise 2D | FN | 1 | wrangle function curlnoise(p): divergence-free flow; noise() exists
+Curl Noise 3D | FN | 1 | wrangle function curlnoise(p)
+Surface Curl Noise | LIB | 2 | curl noise tangent to a surface (projects onto the normal plane)
+Mesh Curves Direction Guide | LIB | 3 | direction field from guide curves
+Gradient Direction | FN | 2 | gradient of a point attribute over the mesh: a measure option ("gradient") and a wrangle function
+Face Tangent | FN | 3 | attribute from the first edge; measure option
+Geometry Center | FN | 3 | bound already gives centre; mean/median/vertex-centre options would cover it
+Set Center | LIB | 3 | move pivots to an edge or face centre
+Mesh Ambient Occlusion | NATIVE | 1 | occlusion :: occlusion: ray-cast AO as a point attribute (rays, spread, blur), optional external mesh. Same engine as Mesh Thickness
+Mesh Thickness | NATIVE | 1 | occlusion :: occlusion mode "thickness" (inward rays); masks for wear, dirt, SSS, 3-D print checks
+Mesh Fresnel | FN | 3 | dot of normal and view vector: wrangle one-liner
+Mesh Tension | LIB | 3 | rest-position edge length ratio
+Planarize Face | NATIVE | 2 | planarize :: planarize: iterative projection of face points onto the best-fit plane (for quad panels, glass, CAD-like surfaces)
+Flatten Geometry | LIB | 3 | project to a plane with a factor: wrangle one-liner; a node adds nothing
+To Sphere | LIB | 3 | cast to sphere: wrangle one-liner (Houdini's Cast SOP)
+Rotate Element | PART | 3 | region_transform rotates pieces about their centre with random amounts; fixed-axis and per-selection are not exposed
+Sharpen Mesh | LIB | 3 | unsharp-mask on positions (smooth, then push back)
+Surface Bind | LIB | 2 | bind geometry to a rest surface and follow its deformation (barycentric); point_deform covers lattices, attribute_transfer approximates
+Wrap | PART | 2 | ray node projects along directions with offset; "shrinkwrap" (nearest surface, follow normals, z-scale) is new: a shrinkwrap mode on ray
+Sphere Plane Intersection | FN | 3 | geometry maths helper
+Sphere Sphere Intersection | FN | 3 | geometry maths helper
+Plane Plane Intersection | FN | 3 | geometry maths helper
+3 Planes Intersection | FN | 3 | geometry maths helper
+Line Plane Intersection | FN | 3 | geometry maths helper
+Line Line Intersection | FN | 3 | geometry maths helper
+Ray Sphere Intersection | FN | 3 | geometry maths helper
+4 Points Sphere | FN | 3 | geometry maths helper
+Triangle Circumcircle | FN | 3 | geometry maths helper
+Triangle Incircle | FN | 3 | geometry maths helper
+Triangle Tangent Circles | FN | 3 | geometry maths helper
+Circles Arc Tangent | FN | 3 | geometry maths helper
+Circles Line Tangent | FN | 3 | geometry maths helper
+Bounding Box AABB Collision | FN | 3 | geometry maths helper
+Fit Plane | NATIVE | 2 | fit_plane :: fit_plane: least-squares plane/line of points or a group, written as detail attributes (centre, normal) and usable as clip/mirror/planarize input
+Fit Line 2D | NATIVE | 2 | fit_plane :: fit_plane line mode
+Projectile Trajectory | FN | 3 | closed-form ballistic path: wrangle snippet
+Cartesian to Polar | FN | 2 | wrangle functions topolar() / frompolar()
+Polar to Cartesian | FN | 2 | wrangle functions
+Random Normal Distribution | FN | 2 | wrangle function gauss(seed)
+Easing | FN | 1 | wrangle function ease(type, t); also usable as a Remap/ramp helper
+Bezier Easing | FN | 2 | wrangle function cubic_bezier_ease
+2D Looped Noise Texture | FN | 3 | tileable-in-time noise: wrangle function loopnoise
+Looped Noise Texture | FN | 3 | tileable-in-time noise
+Scales Texture | LIB | 3 | procedural texture
+Distance to Edge Voronoi | LIB | 3 | voronoi_adjacency + distance
+Mesh Face Groups Relax | LIB | 3 | relax the border between face groups
+Mobius Transformation | LIB | 2 | deformer (conformal maps): nice for generative art
+Stereographic Projection | LIB | 2 | deformer
+Shadow Mask | LIB | 3 | ray from a light: ray node + attribute
+TSP Mesh | LIB | 3 | travelling-salesman path on points
+Strange Attractors | LIB | 2 | Lorenz, Rössler, Thomas, Aizawa, etc. as curves: one library node
+Geometry Visualizer | SKIP |  | debugging overlay (index numbers, normals); the viewer has normals and the spreadsheet
+Direction Visualize | SKIP |  | debugging overlay (could be a guide)
+Volume Grid Visualize | SKIP |  | Blender volume grids; MiniHou has no volume grids
+Documentation Higgsas Geo Nodes | SKIP |  | link node
+Mesh To SDF | PART |  | sdf_boolean / remesh voxelise meshes internally; a stand-alone SDF value has no representation
+Points to SDF | PART |  | points_to_surface
+Points to SDF Metaballs | PART |  | points_to_surface blend
+SDF Boolean | HAVE |  | sdf_boolean (union/subtract/intersect with smooth)
+SDF to Mesh | PART |  | the SDF nodes mesh internally (mesh in, mesh out)
+SDF Sphere | NATIVE | 1 | sdf_shape :: sdf_shape: analytic SDF primitives (sphere, box, cylinder, capsule, ellipsoid, torus, round cone, polygon, heart, spiral) meshed with surface nets, with bevel/transition and rotation
+SDF Cube | NATIVE | 1 | sdf_shape :: sdf_shape
+SDF Cylinder | NATIVE | 1 | sdf_shape :: sdf_shape
+SDF Capsule | NATIVE | 1 | sdf_shape :: sdf_shape
+SDF Ellipsoid | NATIVE | 1 | sdf_shape :: sdf_shape
+SDF Torus | NATIVE | 1 | sdf_shape :: sdf_shape
+SDF Round Cone | NATIVE | 1 | sdf_shape :: sdf_shape
+SDF Polygon | NATIVE | 2 | sdf_shape :: sdf_shape
+SDF Heart | NATIVE | 3 | sdf_shape :: sdf_shape
+SDF Spiral | NATIVE | 3 | sdf_shape :: sdf_shape
+SDF Gyroid | NATIVE | 1 | sdf_lattice :: sdf_lattice: triply periodic minimal surfaces (gyroid, Schwarz P/D, IWP, Lidinoid) with scale, thickness, translate and rotate, clipped by a mesh. Very hot for lattices and 3-D printing
+SDF Schwarz P | NATIVE | 1 | sdf_lattice :: sdf_lattice
+SDF Schwarz D | NATIVE | 1 | sdf_lattice :: sdf_lattice
+SDF IWP | NATIVE | 2 | sdf_lattice :: sdf_lattice
+SDF IWP Skeletal | NATIVE | 2 | sdf_lattice :: sdf_lattice
+SDF Lidinoid | NATIVE | 2 | sdf_lattice :: sdf_lattice
+SDF Volume Points Fracture | HAVE |  | voronoi_fracture (the voxel version is smoother; "smooth" option on the boolean fracture covers it partly)
+Belousov-Zhabotinsky Reaction | LIB | 3 | solver-based simulation on a mesh
+Differential Growth | LIB | 1 | curve growth with repulsion and relaxation (solver node + spatial): one of the most-requested generative effects
+Directional Reaction Diffusion | LIB | 2 | Gray-Scott with a direction: on a mesh via the solver node
+Reaction Diffusion Solver | LIB | 1 | Gray-Scott reaction-diffusion on a mesh (presets for spots, stripes, worms): solver + attribute_blur
+Ripples Solver | LIB | 2 | wave equation on a mesh
+Snow Crystal Growth | LIB | 3 | Reiter's snowflake model on a mesh
+Splines Packing | LIB | 3 | packing simulation
+Image Points Stippling | LIB | 3 | weighted Voronoi stipples from image_file grids
+Image String Art | LIB | 3 | greedy string art from an image
+Image Thinning | LIB | 3 | skeletonisation of image grids
+Image Grid | HAVE |  | image_file / blender_image (pixels as a point grid with Cd, uv)
+Image Dithering | LIB | 2 | operates on image_file pixel grids (Floyd-Steinberg, ordered...): a few vectorised functions
+Image Pixel Sorting | LIB | 3 | glitch effect on image grids
+Image Color Palette | LIB | 2 | k-means palette (pairs with cluster)
+Image Quad Tree | LIB | 3 | quadtree mosaic from an image grid
+Image Hilbert Curve | LIB | 3 | image traced along a Hilbert curve (needs Hilbert Curve)
+Image Trace | LIB | 3 | threshold contours of an image: the contour node does it
+Image Points Distribute | LIB | 3 | density-weighted scatter from an image (scatter with density attribute does most of it)
+Image Box Mapping | SKIP |  | texture sampling in a material, not geometry
+Image to Ascii | SKIP |  | novelty
+VDM Brush | SKIP |  | needs an image texture sampler and Blender guide objects
+VDM Points Scatter | SKIP |  | needs an image texture sampler
+Easing | FN | 1 | wrangle function (see above)

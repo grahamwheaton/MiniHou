@@ -11,7 +11,7 @@ NODE = shutil.which('node') or 'C:/Program Files/nodejs/node.exe'
 class DynamicNodesTests(unittest.TestCase):
     def js(self, body):
         script = "require('./minihou/web/static/dynamic-nodes.js');" + body
-        return json.loads(subprocess.check_output([NODE, '-e', script], cwd=ROOT, text=True))
+        return json.loads(subprocess.check_output([NODE, '-e', script], cwd=ROOT, text=True, encoding='utf-8'))
 
     def test_default_enabled_bounded_and_no_layout_mutation(self):
         result = self.js("""
