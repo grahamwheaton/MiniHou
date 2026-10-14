@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "doc": "Array Between Two Positions: count includes start and end; one copy uses start.",
+  "nodes": {
+    "source": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.3,
+          0.3,
+          0.3
+        ]
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "array": {
+      "type": "array_between_two_positions",
+      "inputs": {
+        "source": "source"
+      },
+      "pos": [
+        0,
+        130
+      ]
+    },
+    "out": {
+      "type": "output",
+      "inputs": {
+        "geo": "array"
+      },
+      "pos": [
+        0,
+        260
+      ]
+    }
+  },
+  "display": "out"
+}

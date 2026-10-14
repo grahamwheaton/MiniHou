@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "doc": "Array: evenly spaced copies by an XYZ offset, including the original at origin. Counts are bounded to 10000 targets; realised geometry uses the Copy to Points memory guard.",
+  "nodes": {
+    "stand_in": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.3,
+          0.3,
+          0.3
+        ]
+      },
+      "pos": [
+        -150,
+        0
+      ],
+      "comment": "Preview source only; an external source replaces it."
+    },
+    "source": {
+      "type": "input",
+      "params": {
+        "name": "source",
+        "index": 0
+      },
+      "inputs": {
+        "preview": "stand_in"
+      },
+      "pos": [
+        -150,
+        110
+      ]
+    },
+    "targets": {
+      "type": "array_linear_points",
+      "pos": [
+        150,
+        110
+      ]
+    },
+    "copies": {
+      "type": "copy_to_points",
+      "inputs": {
+        "source": "source",
+        "points": "targets"
+      },
+      "params": {
+        "orient": true
+      },
+      "pos": [
+        0,
+        250
+      ]
+    },
+    "out": {
+      "type": "output",
+      "inputs": {
+        "geo": "copies"
+      },
+      "pos": [
+        0,
+        360
+      ]
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Count",
+      "node": "targets",
+      "param": "count"
+    },
+    {
+      "name": "Offset",
+      "node": "targets",
+      "param": "offset"
+    },
+    {
+      "name": "Origin",
+      "node": "targets",
+      "param": "origin"
+    }
+  ]
+}

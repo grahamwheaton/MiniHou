@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "doc": "Grid Array: copies on an XY grid with signed spacing and an origin. Counts are bounded to 10000 targets; realised geometry uses the Copy to Points memory guard.",
+  "nodes": {
+    "stand_in": {
+      "type": "box",
+      "params": {
+        "size": [
+          0.3,
+          0.3,
+          0.3
+        ]
+      },
+      "pos": [
+        -150,
+        0
+      ],
+      "comment": "Preview source only; an external source replaces it."
+    },
+    "source": {
+      "type": "input",
+      "params": {
+        "name": "source",
+        "index": 0
+      },
+      "inputs": {
+        "preview": "stand_in"
+      },
+      "pos": [
+        -150,
+        110
+      ]
+    },
+    "targets": {
+      "type": "array_grid_points",
+      "pos": [
+        150,
+        110
+      ]
+    },
+    "copies": {
+      "type": "copy_to_points",
+      "inputs": {
+        "source": "source",
+        "points": "targets"
+      },
+      "params": {
+        "orient": true
+      },
+      "pos": [
+        0,
+        250
+      ]
+    },
+    "out": {
+      "type": "output",
+      "inputs": {
+        "geo": "copies"
+      },
+      "pos": [
+        0,
+        360
+      ]
+    }
+  },
+  "display": "out",
+  "exposed": [
+    {
+      "name": "Columns",
+      "node": "targets",
+      "param": "columns"
+    },
+    {
+      "name": "Rows",
+      "node": "targets",
+      "param": "rows"
+    },
+    {
+      "name": "Spacing X",
+      "node": "targets",
+      "param": "spacing_x"
+    },
+    {
+      "name": "Spacing Y",
+      "node": "targets",
+      "param": "spacing_y"
+    },
+    {
+      "name": "Origin",
+      "node": "targets",
+      "param": "origin"
+    }
+  ]
+}
