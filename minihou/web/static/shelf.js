@@ -32,7 +32,7 @@
       T("Edge Cusp", "edge_cusp"), T("Crease", "crease"), T("Edge Group", "edge_group", "group"),
       T("Edge Group Promote", "edge_group_promote", "group")]],
     ["Deform", "#e0705a", [
-      T("Bend", "bend"), T("Twist", "twist"), T("Linear Taper", "linear_taper", "taper"), T("Squash and Stretch", "squash_stretch", "squash"),
+      T("To Sphere", "to_sphere", "sphere"), T("Shear", "shear", "transform"), T("Bend", "bend"), T("Twist", "twist"), T("Linear Taper", "linear_taper", "taper"), T("Squash and Stretch", "squash_stretch", "squash"),
       T("Soft Transform", "soft_transform", "transform"), T("Soft Peak", "soft_peak", "peak"), T("Peak", "peak"), T("Smooth", "smooth"),
       T("Mountain", "noise"), T("Lattice", "lattice"), T("Point Deform", "point_deform", "lattice"), T("Path Deform", "path_deform", "curve"),
       T("Point Jitter", "point_jitter", "scatter"), T("Point Relax", "point_relax", "scatter"), T("Blend", "blend"),
@@ -80,9 +80,10 @@
     ["Flow", "#c4a35a", [
       T("Repeat", "loop_block", "loop"), T("Loop Begin", "loop_begin", "loop"), T("Loop End", "loop_end", "loop"), T("For Each", "for_each", "loop"),
       T("Solver", "solver", "loop"), T("Switch", "switch")]],
+    ["Blender", "#e7a05b", [T('Merge Vertices', 'merge_vertices'), T('Merge By Distance', 'merge_by_distance'), T('Split Geometry', 'split_geometry'), T('Split Edges', 'split_edges'), T('Connect Vertices', 'connect_vertices'), T('Make Faces', 'make_faces'), T('Grid Fill', 'grid_fill'), T('Native Solidify', 'native_solidify'), T('Poke Faces', 'poke_faces'), T('Triangles To Quads', 'triangles_to_quads'), T('Limited Dissolve', 'limited_dissolve'), T('Symmetrize', 'symmetrize'), T('Spin', 'spin'), T('Native Bevel', 'native_bevel'), T('Native Extrude', 'native_extrude'), T('Native Inset', 'native_inset'), T('Native Bisect', 'native_bisect'), T('Native Wireframe', 'native_wireframe'), T('Blender Mesh', 'blender_mesh')]],
     ["Library", "#e8a33d", null],                                              // your own nodes and saved systems
   ];
-  const ALWAYS = ["Create", "Modify", "Model", "Polygon", "Deform", "Texture", "Rigid Bodies", "Constraints", "Library"];
+  const ALWAYS = ["Create", "Modify", "Model", "Polygon", "Deform", "Texture", "Rigid Bodies", "Constraints", "Blender", "Library"];
   const KEY = "minihou.shelf";
 
   // ---- icons: small drawings in a 32 x 32 box; tools without one get a tinted chip with their initials

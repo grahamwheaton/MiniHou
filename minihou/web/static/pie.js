@@ -51,7 +51,32 @@
       T("Divide", "divide", { sel: { face: "group" } }), T("Reverse", "reverse", { sel: { face: "group" } }),
       T("PolyReduce", "polyreduce"), T("PolyExpand2D", "polyexpand2d"), T("Subdivide", "subdivide"),
       T("Clean", "clean"), T("Skin", "skin"), P("Solid tools", "polygons3")] },
-    polygons3: {title:"Solid tools",items:[T("Push / Pull","pushpull",{sel:{face:"group"}}),T("Inset","inset",{sel:{face:"group"}}),T("Outset","outset",{sel:{face:"group"}}),T("Convex Hull","convex_hull"),null,null,null,null]},
+    polygons3: {title:"Solid tools",items:[T("Push / Pull","pushpull",{sel:{face:"group"}}),T("Inset","inset",{sel:{face:"group"}}),T("Outset","outset",{sel:{face:"group"}}),T("Convex Hull","convex_hull"),null,null,null,P("Blender tools","blender")]},
+
+    blender: { title: "Blender modelling", items: [
+      T("Native Solidify", "native_solidify", { sel: { face: "group" } }),
+      T("Merge Vertices", "merge_vertices", { sel: { point: "group", edge: POINTS("group"), face: POINTS("group") } }),
+      T("Split Edges", "split_edges", { sel: { edge: "group" } }),
+      T("Connect Vertices", "connect_vertices", { sel: { point: "group" } }),
+      T("Make Face", "make_faces", { sel: { point: "group", edge: POINTS("group") } }),
+      T("Grid Fill", "grid_fill", { sel: { edge: "group" } }),
+      T("Triangles to Quads", "triangles_to_quads", { sel: { face: "group" } }), P("More", "blender2")] },
+    blender2: { title: "Native topology", items: [
+      T("Native Bevel", "native_bevel", { sel: { edge: "group" } }),
+      T("Native Extrude", "native_extrude", { sel: { face: "group" } }),
+      T("Native Inset", "native_inset", { sel: { face: "group" } }),
+      T("Bisect", "native_bisect", { sel: { face: "group" } }),
+      T("Symmetrize", "symmetrize", { sel: { point: "group", face: POINTS("group") } }),
+      T("Spin", "spin", { sel: { point: "group", edge: POINTS("group") } }),
+      T("Wireframe", "native_wireframe", { sel: { face: "group" } }), P("More", "blender3")] },
+    blender3: { title: "Mesh finishing", items: [
+      T("Poke Faces", "poke_faces", { sel: { face: "group" } }),
+      T("Merge by Distance", "merge_by_distance", { sel: { point: "group", face: POINTS("group") } }),
+      T("Split Geometry", "split_geometry", { sel: { face: "group" } }),
+      T("Limited Dissolve", "limited_dissolve", { sel: { edge: "group" } }),
+      T("To Sphere", "to_sphere", { sel: { point: "group", edge: POINTS("group"), face: POINTS("group") } }),
+      T("Shear", "shear", { sel: { point: "group", edge: POINTS("group"), face: POINTS("group") } }),
+      T("Advanced Native Mesh", "blender_mesh"), null] },
 
     group: { title: "Group", items: [
       T("Group Promote", "group_promote"), T("Group by Range", "group_range"), T("Group Paint", null, { disabled: "Painting groups is not available yet" }),

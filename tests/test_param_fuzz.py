@@ -13,6 +13,10 @@ from minihou.sdk import REGISTRY
 
 SKIP = {"blender_object", "input", "output", "modifier_input", "python", "rbd_solver", "usd_import", "solver", "for_each",
         "loop_begin", "loop_end", "lsystem"}                         # need a partner node, a file, a simulation or an outside engine
+# Native Blender tools are external integrations, exercised with real meshes in
+# test_blender_modelling_tools rather than multiplied through the NumPy fuzz sweep.
+from minihou.nodes.blender_modeling import TOOLS as NATIVE_TOOLS
+SKIP.update({spec[0] for spec in NATIVE_TOOLS} | {"blender_mesh"})
 SLOW_SECONDS = 30.0                                                  # one cook taking longer than this is a finding, hung or not
 import os
 DRAWS = int(os.environ.get("MINIHOU_FUZZ_DRAWS", "3"))                       # more draws for a longer hunt: MINIHOU_FUZZ_DRAWS=20

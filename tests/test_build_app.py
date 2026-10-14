@@ -5,6 +5,19 @@ from unittest.mock import patch
 from tools import build_app
 
 class BuildDeliveryTests(unittest.TestCase):
+    def test_native_worker_and_catalog_are_delivered_as_source_data(self):
+        import os
+        with tempfile.TemporaryDirectory() as directory, patch.object(build_app.subprocess, 'run') as run:
+            build_app.build(False, Path(directory))
+        command=run.call_args.args[0]
+        data=[command[i+1] for i, part in enumerate(command[:-1]) if part=='--add-data']
+        collected=[command[i+1] for i, part in enumerate(command[:-1]) if part=='--collect-all']
+        self.assertIn('fontTools',collected)
+        self.assertIn(str(build_app.ROOT/'nodes')+os.pathsep+'bundled_nodes',data)
+        self.assertIn(str(build_app.ROOT/'blender_addon'/'minihou_link')+os.pathsep+'blender_addon/minihou_link',data)
+        self.assertTrue((build_app.ROOT/'blender_addon'/'minihou_link'/'native_mesh_worker.py').is_file())
+        self.assertIn(str(build_app.ROOT/'minihou'/'blender_mesh_catalog.py')+os.pathsep+'minihou',data)
+
     def test_default_is_unpacked_and_preserves_previous(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);(root/'build').mkdir();dist=root/'dist';(dist/'MiniHou').mkdir(parents=True)

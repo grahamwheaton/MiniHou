@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "nodes": {
+    "panel": {
+      "type": "grid",
+      "params": {
+        "columns": 2,
+        "rows": 2
+      },
+      "pos": [
+        0,
+        0
+      ]
+    },
+    "border": {
+      "type": "native_inset",
+      "inputs": {
+        "geo": "panel"
+      },
+      "params": {
+        "amount": 0.15
+      },
+      "pos": [
+        0,
+        110
+      ]
+    },
+    "raised": {
+      "type": "native_extrude",
+      "inputs": {
+        "geo": "border"
+      },
+      "params": {
+        "group": "native_selection",
+        "offset": [
+          0,
+          0,
+          0.25
+        ]
+      },
+      "pos": [
+        0,
+        220
+      ]
+    },
+    "normal": {
+      "type": "normal",
+      "inputs": {
+        "geo": "raised"
+      },
+      "pos": [
+        0,
+        330
+      ]
+    }
+  },
+  "display": "normal",
+  "exposed": [
+    {
+      "name": "Inset",
+      "node": "border",
+      "param": "amount"
+    },
+    {
+      "name": "Offset",
+      "node": "raised",
+      "param": "offset"
+    }
+  ]
+}
