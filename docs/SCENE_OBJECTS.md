@@ -41,6 +41,29 @@ map, colours, custom normals, material index; others as generic attributes), and
   the graph runs, and the scene objects are made **parented to the host object**, with their transforms in its local space, so
   moving or scaling the host moves the scatter. The modifier's own mesh result still works as before.
 
+## Wiring the source and the collection in
+
+`scene_objects` has two optional inputs next to the points:
+
+* **`source_object`**: which Blender object(s) to duplicate. Wire in a `blender_object` (the object itself), an `object_input`
+  (the object picked on the MiniHou modifier, so changing the picker in Blender changes the duplicated object), a
+  `blender_collection` (every object in a collection) or any geometry whose detail attributes carry `object_name`,
+  `collection_objects`, `instance_objects` or `source` (a string, or a list of names). It overrides the `source` parameter, but
+  points that name their object themselves (`instance` attribute from the instance node) still win.
+* **`target_collection`**: where the objects go. Wire in an object (the collection it lives in) or a `blender_collection`
+  (that collection), or geometry with a `collection_name` / `collection` detail attribute. It overrides the `collection` parameter.
+
+With several source objects the `pick` parameter says which point gets which: `cycle` (point number modulo count), `random`
+(`seed`) or `first`.
+
+`blender_collection` reads a Blender collection live (children included; `pattern` filters by name with `^` to exclude). As
+`points` it gives one point per object at its origin, with `instance`, `rot`, `scale` and the detail `instance_objects`, so it
+works with `instance`/`copy` style nodes too; as `geometry` it merges every object in world space.
+
+In a MiniHou modifier the object picker (`object_input`) is the Blender-side control: the add-on sends the picked object's
+name and collection with its mesh, so re-picking changes what `scene_objects` duplicates. A separate collection picker is not
+built: use the picked object's collection (`target_collection` wired to the `object_input`) instead.
+
 ## What survives, and what is never deleted
 
 Working on the objects only makes sense if they stay put, so:

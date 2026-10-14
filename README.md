@@ -480,6 +480,7 @@ Rendered in Blender (Cycles) straight from the engine's output:
 | node | inputs | what it does |
 |---|---|---|
 | `blender_object` | - | a Blender object's evaluated mesh, **live**: edit it in Blender and the graph recooks (see below) |
+| `blender_collection` | - | every object of a Blender collection, live: points at their origins (a source list for `scene_objects`) or merged geometry |
 | `grid` | - | XY grid of quads; `uv` point attribute |
 | `box` | - | closed box, optional divisions (welded seams) |
 | `sphere` | - | UV sphere (triangle-fan poles), closed and outward-facing |

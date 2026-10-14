@@ -159,6 +159,14 @@ class _Connection:
                         raise ValueError("invalid source inputs")
                     sources = {name: _decode_object({}, {k.split("/", 1)[1]: v for k, v in (_arrays or {}).items()
                                                        if k.startswith(str(i) + "/")}) for i, name in enumerate(names)}
+                    picked = h.get("object_names")
+                    if isinstance(picked, dict):
+                        for key, geo in sources.items():
+                            v = picked.get(key)
+                            if isinstance(v, list) and len(v) == 2 and all(isinstance(x, str) for x in v) and v[0]:
+                                geo.detail["object_name"] = v[0][:128]
+                                if v[1]:
+                                    geo.detail["object_collection"] = v[1][:128]
                     response, output = self.instances.set_sources(h.get("instance_id"), sources), None
                 elif t == "instance_edit":
                     response, output = self.instances.edit_live(h, _decode_object(h, _arrays or {})), None

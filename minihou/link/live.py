@@ -31,7 +31,7 @@ class LiveModifier:
 
 
 def object_feeds(graph, sources):
-    return {nid: (input_token(sources[key]), sources[key])
+    return {nid: (input_token(sources[key]) + str(sources[key].detail.get("object_name", "")), sources[key])
             for nid, n in graph.nodes.items() if n.type == "object_input"
             for key in [n.params.get("binding") or nid] if key in sources}
 
