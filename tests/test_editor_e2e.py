@@ -2639,6 +2639,8 @@ class EditorE2E(unittest.TestCase):
         self.page.locator('#pv-normals').uncheck()
         self.page.evaluate("async () => { await minihou.edit([{op:'insert',after:'b',type:'polybevel',params:{distance:0.1}}]); }")
         self.node('polybevel1').click()
+        self.assertFalse(self.page.locator('#pv-context').is_visible())                     # the Parameters panel already shows them
+        self.page.click('#lay-side')                                                        # hide it: the view's strip takes over
         field = self.page.locator('#pv-context [data-param="distance"] input[type="number"]')
         field.fill('0.23')
         field.press('Tab')

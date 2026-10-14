@@ -281,7 +281,7 @@
     for (const id of [...S.sel]) if (!S.graph.nodes[id]) S.sel.delete(id);
     if (S.wireSel && !wireExists(S.wireSel)) S.wireSel = null;
     render();
-    if (fileChanged || !S.framed) { frame(false); S.framed = true; requestAnimationFrame(() => { if (!drag && !S.sel.size) frame(false); }); }
+    if (fileChanged || !S.framed) { frame(false, true); S.framed = true; requestAnimationFrame(() => { if (!drag && !S.sel.size) frame(false, true); }); }
   }
   function connectEvents() {
     const es = new EventSource("/api/events");
@@ -365,15 +365,28 @@
     canvas.style.backgroundSize = `${(Number(canvas.dataset.gridSpacing) || 24) * (canvas.dataset.backdrop === "checker" ? 2 : 1) * k}px ${(Number(canvas.dataset.gridSpacing) || 24) * (canvas.dataset.backdrop === "checker" ? 2 : 1) * k}px`;
     canvas.style.backgroundPosition = `${x}px ${y}px`;
   }
-  function frame(selectedOnly) {
+  // An automatic framing (opening a graph, a pane changing shape) never zooms out so far that node titles are unreadable: when the whole graph
+  // does not fit at READABLE_ZOOM it keeps that zoom and centres the display node. Home / F still fit everything.
+  const READABLE_ZOOM = 0.85;
+  function frame(selectedOnly, auto = false) {
     const ids = selectedOnly && S.sel.size ? [...S.sel] : Object.keys(S.graph.nodes);
     const r = canvas.getBoundingClientRect();
     if (!ids.length) { S.view = { x: r.width / 2 - W / 2, y: r.height / 3, k: 1 }; applyView(); return; }
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const id of ids) { const [x, y] = pos(id); x0 = Math.min(x0, x); y0 = Math.min(y0, y - 30); x1 = Math.max(x1, x + W); y1 = Math.max(y1, y + nodeHeight(id) + 10); }
     const pad = 60, top = $("#network-toolbar").offsetTop + $("#network-toolbar").offsetHeight;
-    const k = Math.max(0.25, Math.min(1.3, (r.width - 2 * pad) / (x1 - x0), (r.height - top - 2 * pad) / (y1 - y0)));
-    S.view = { k, x: r.width / 2 - ((x0 + x1) / 2) * k, y: top + (r.height-top) / 2 - ((y0 + y1) / 2) * k };
+    const fit = Math.min(1.3, (r.width - 2 * pad) / (x1 - x0), (r.height - top - 2 * pad) / (y1 - y0));
+    const k = Math.max(auto ? READABLE_ZOOM : 0.25, fit);
+    let x = r.width / 2 - ((x0 + x1) / 2) * k, y = top + (r.height - top) / 2 - ((y0 + y1) / 2) * k;
+    const d = auto && fit < READABLE_ZOOM ? displayNode() : null;
+    if (d && nodeOf(d)) {                                             // too big to show readably: show the end of the graph, where the result comes out
+      const [dx, dy] = pos(d);
+      x = r.width / 2 - (dx + W / 2) * k;
+      y = r.height - pad - y1 * k;                                    // the bottom of the graph at the bottom of the pane
+      const sy = dy * k + y;
+      if (sy < top + pad || sy > r.height - pad) y = top + (r.height - top) * 0.7 - (dy + nodeHeight(d) / 2) * k;   // unless that hides the display node
+    }
+    S.view = { k, x, y };
     applyView();
   }
 
@@ -549,11 +562,14 @@
     const root = (S.root || "").replace(/\\/g, "/").replace(/\/$/, ""), q = String(p).replace(/\\/g, "/");
     return root && q.startsWith(root + "/") ? q.slice(root.length + 1) : q;
   }
+  const isCancel = (err) => !!err && /^Cook cancelled/.test(err.message || "");   // Escape stopped the cook (minihou/cancellation.py)
   function renderStatus() {
     const st = S.status;
     const c = $("#cook-status"), txt = c.querySelector(".text");
     if (!S.online || !st) return;
-    if (st.ok === false) {
+    if (st.ok === false && isCancel(st.error)) {                                // you asked for it: not an error
+      c.className = "status"; txt.textContent = "cook cancelled";
+    } else if (st.ok === false) {
       c.className = "status err";
       txt.textContent = "error" + (st.error && st.error.node ? " in " + st.error.node : "");
     } else if (st.busy) {
@@ -577,10 +593,15 @@
     b.title = clients.length ? "Connected: " + clients.join(", ") : "No Blender connected. Run tools/launch_blender.py, or Connect in Blender's MiniHou tab.";
     updateBlenderBar(blender.length > 0);
     const bar = $("#errorbar");
-    const err = st.ok === false && st.error;
+    const err = st.ok === false && st.error, cancelled = isCancel(err);
     bar.classList.toggle("hidden", !err);
+    bar.classList.toggle("notice", cancelled);
     document.body.classList.toggle("has-error", !!err);
-    if (err) { bar.textContent = (err.node ? err.node + ": " : "") + err.message; bar.dataset.node = err.node || ""; }
+    if (err) {
+      bar.textContent = cancelled ? "Cook cancelled (Escape). Edit any parameter to cook again."
+        : (err.node ? err.node + ": " : "") + err.message;
+      bar.dataset.node = cancelled ? "" : err.node || "";
+    }
   }
 
   // ---------------------------------------------------------------- Blender bar: install the add-on, open Blender connected
@@ -766,7 +787,7 @@
       } });
     out.push(h("div", { class: "ph" }, nid));
     out.push(h("div", { class: "ptype" }, n.type + (t.category ? " · " + t.category : "") + (t.source ? " · " + relPath(t.source) : "")));
-    if (t.doc) out.push(h("div", { class: "pdoc" }, t.doc));
+    if (t.doc) out.push(h("div", { class: "pdoc", title: "Click to show all", onclick: (e) => e.currentTarget.classList.toggle("open") }, t.doc));
     if (n.type === "loop_begin" || n.type === "loop_end") {
       const end = n.type === "loop_end" ? id : Object.keys(S.graph.nodes).find(k => nodeOf(k).type === "loop_end" && nodeOf(k).inputs?.begin === id);
       const begin = end && nodeOf(end).inputs?.begin;
@@ -3018,7 +3039,7 @@
     }
     function set(patch) {
       Object.assign(L, patch); apply(); save();
-      if (L.max !== "view") setTimeout(() => frame(false), 30);                         // the graph pane changed shape: show all of it again
+      if (L.max !== "view") setTimeout(() => frame(false, true), 30);                         // the graph pane changed shape: show all of it again
     }
     function dragSplit(el, onMove, cursorClass) {
       el.addEventListener("pointerdown", (e) => {
