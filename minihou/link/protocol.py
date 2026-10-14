@@ -171,6 +171,8 @@ def decode_payload(buf, hlen: int) -> Tuple[dict, Dict[str, np.ndarray]]:
         raise ProtocolError(f"bad header: {e}") from None
     if not isinstance(header, dict) or "type" not in header:
         raise ProtocolError("header must be an object with a 'type'")
+    if header.get("transport") == "shm":
+        return header, {}
     arrays: Dict[str, np.ndarray] = {}
     blob_len = len(mv) - hlen
     for d in header.get("arrays", ()):
@@ -194,10 +196,10 @@ class GeoUpdate:
     """A decoded ``geo`` message."""
 
     __slots__ = ("seq", "full", "counts", "topology_changed", "manifest", "arrays", "detail", "cook",
-                 "t_sent", "t_recv", "output")
+                 "t_sent", "t_recv", "output", "transport", "shm_slot")
 
     def __init__(self, seq=0, full=False, counts=None, topology_changed=False, manifest=None, arrays=None,
-                 detail=None, cook=None, t_sent=0.0, t_recv=0.0, output=None):
+                 detail=None, cook=None, t_sent=0.0, t_recv=0.0, output=None, transport="tcp", shm_slot=None):
         self.seq = seq
         self.full = full
         self.counts = counts or {"point": 0, "vertex": 0, "prim": 0}
@@ -209,13 +211,16 @@ class GeoUpdate:
         self.t_sent = t_sent
         self.t_recv = t_recv
         self.output = output                 # None: the main output; else the Blender object name of an extra output
+        self.transport = transport
+        self.shm_slot = shm_slot
 
     @classmethod
     def from_message(cls, header: dict, arrays: Dict[str, np.ndarray]) -> "GeoUpdate":
         return cls(seq=header["seq"], full=header.get("full", False), counts=header["counts"],
                    topology_changed=header.get("topology_changed", False), manifest=header["manifest"],
                    arrays=arrays, detail=header.get("detail", {}), cook=header.get("cook", {}),
-                   t_sent=header.get("t_sent", 0.0), t_recv=time.time(), output=header.get("output"))
+                   t_sent=header.get("t_sent", 0.0), t_recv=time.time(), output=header.get("output"),
+                   transport=header.get("transport", "tcp"), shm_slot=header.get("shm_slot"))
 
     def header(self) -> dict:
         h = {"type": "geo", "seq": self.seq, "full": self.full, "counts": self.counts,
@@ -223,6 +228,10 @@ class GeoUpdate:
              "detail": self.detail, "cook": self.cook, "t_sent": self.t_sent}
         if self.output is not None:
             h["output"] = self.output
+        if self.transport != "tcp":
+            h["transport"] = self.transport
+        if self.shm_slot is not None:
+            h["shm_slot"] = self.shm_slot
         return h
 
     @property
@@ -242,7 +251,8 @@ def merge_updates(older: GeoUpdate, newer: GeoUpdate) -> GeoUpdate:
     return GeoUpdate(seq=newer.seq, full=older.full or newer.full, counts=newer.counts,
                      topology_changed=older.topology_changed or newer.topology_changed,
                      manifest=newer.manifest, arrays=arrays, detail=newer.detail, cook=newer.cook,
-                     t_sent=newer.t_sent, t_recv=newer.t_recv, output=newer.output)
+                     t_sent=newer.t_sent, t_recv=newer.t_recv, output=newer.output,
+                     transport=newer.transport, shm_slot=newer.shm_slot)
 
 
 class Mirror:

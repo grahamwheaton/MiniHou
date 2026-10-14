@@ -238,60 +238,70 @@ class Runtime:
 
     def _apply_geo(self, u: GeoUpdate) -> None:
         try:
-            self.mirror.apply(u)
-        except ProtocolError as e:
-            self.last_error = f"out of sync ({e}); requesting full resend"
-            self._log(self.last_error)
-            self.mirror = Mirror()
-            if self.client:
-                self.client.resync()
-            return
-        out, _proxy, mod = proxy.ensure_objects()
-        t0 = time.perf_counter()
-        timings = mesh_writer.apply_update(out.data, self.mirror, u)
-        timings["warnings"].extend(mesh_writer.write_detail(out, self.mirror.detail))
-        names = self.mirror.detail.get("instance_objects") or []
-        missing = proxy.sync_instances(mod.node_group, [str(n) for n in names] if isinstance(names, list) else [])
-        if missing and missing != self._missing_instances:
-            self._log(f"instance objects not found in the Blender file: {', '.join(missing)}")
-        self._missing_instances = missing
-        timings["total_ms"] = (time.perf_counter() - t0) * 1000
-        self.last_timings = timings
-        self.applied_count += 1
-        self.counts = dict(u.counts)
-        self.last_cook_ms = float(u.cook.get("ms", 0.0))
-        if u.t_sent:
-            self.last_latency_ms = (time.time() - u.t_sent) * 1000
-        for w in timings["warnings"]:
-            self._log(w)
-        if self.last_error.startswith("cook"):
-            self.last_error = ""
-        self._ui_dirty = True
+            try:
+                self.mirror.apply(u)
+            except ProtocolError as e:
+                self.last_error = f"out of sync ({e}); requesting full resend"
+                self._log(self.last_error)
+                self.mirror = Mirror()
+                if self.client:
+                    self.client.resync()
+                return
+            out, _proxy, mod = proxy.ensure_objects()
+            t0 = time.perf_counter()
+            timings = mesh_writer.apply_update(out.data, self.mirror, u)
+            timings["warnings"].extend(mesh_writer.write_detail(out, self.mirror.detail))
+            names = self.mirror.detail.get("instance_objects") or []
+            missing = proxy.sync_instances(mod.node_group, [str(n) for n in names] if isinstance(names, list) else [])
+            if missing and missing != self._missing_instances:
+                self._log(f"instance objects not found in the Blender file: {', '.join(missing)}")
+            self._missing_instances = missing
+            timings["total_ms"] = (time.perf_counter() - t0) * 1000
+            self.last_timings = timings
+            self.applied_count += 1
+            self.counts = dict(u.counts)
+            self.last_cook_ms = float(u.cook.get("ms", 0.0))
+            if u.t_sent:
+                self.last_latency_ms = (time.time() - u.t_sent) * 1000
+            for w in timings["warnings"]:
+                self._log(w)
+            if self.last_error.startswith("cook"):
+                self.last_error = ""
+            self._ui_dirty = True
+        finally:
+            if getattr(u, "transport", "tcp") == "shm" and self.client:
+                self.client.send({"type": "geo_ack", "seq": u.seq, "slot": getattr(u, "shm_slot", 0)})
+                u.arrays.clear()
 
     def _apply_extra(self, name: str, u: GeoUpdate) -> None:
         """A named output of the graph: its own mesh object, updated like the main output."""
         mirror = self.extras.setdefault(name, Mirror())
         try:
-            mirror.apply(u)
-        except ProtocolError as e:
-            self._log(f"output {name!r} out of sync ({e}); requesting full resend")
-            self.extras.pop(name, None)
-            if self.client:
-                self.client.resync()
-            return
-        obj = mesh_writer.ensure_extra_object(name)
-        if obj is None:
-            if name not in self._refused_extras:
-                self._refused_extras.add(name)
-                self._log(f"output {name!r}: an object with that name already exists in the file and was not made by "
-                          f"MiniHou; pick another object name")
-            return
-        self._refused_extras.discard(name)
-        timings = mesh_writer.apply_update(obj.data, mirror, u)
-        for w in timings["warnings"] + mesh_writer.write_detail(obj, mirror.detail):
-            self._log(f"output {name!r}: {w}")
-        self.applied_count += 1
-        self._ui_dirty = True
+            try:
+                mirror.apply(u)
+            except ProtocolError as e:
+                self._log(f"output {name!r} out of sync ({e}); requesting full resend")
+                self.extras.pop(name, None)
+                if self.client:
+                    self.client.resync()
+                return
+            obj = mesh_writer.ensure_extra_object(name)
+            if obj is None:
+                if name not in self._refused_extras:
+                    self._refused_extras.add(name)
+                    self._log(f"output {name!r}: an object with that name already exists in the file and was not made by "
+                              f"MiniHou; pick another object name")
+                return
+            self._refused_extras.discard(name)
+            timings = mesh_writer.apply_update(obj.data, mirror, u)
+            for w in timings["warnings"] + mesh_writer.write_detail(obj, mirror.detail):
+                self._log(f"output {name!r}: {w}")
+            self.applied_count += 1
+            self._ui_dirty = True
+        finally:
+            if getattr(u, "transport", "tcp") == "shm" and self.client:
+                self.client.send({"type": "geo_ack", "seq": u.seq, "slot": getattr(u, "shm_slot", 0)})
+                u.arrays.clear()
 
     def _forward_params(self) -> bool:
         """Forward changed modifier values. Returns True if anything was sent."""

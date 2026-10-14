@@ -557,6 +557,7 @@ window.MiniPaint = (pv, canvas, host) => {
   const api = {
     state: st, wantAttr, wantMask, onPreview, stats: { beginMs: 0, strokeMs: 0 },
     active: () => active,
+    isStroking: () => stroke !== null,
     open(tab) {
       if (!panel) { panel = buildPanel(); cursor = el("div", { class: "pv-brush hidden" }); canvas.parentElement.append(cursor); }
       panel.classList.remove("hidden");

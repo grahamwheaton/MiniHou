@@ -763,7 +763,13 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                     cache.data.materials.clear()
                     for material in materials:
                         cache.data.materials.append(material)
-                    mesh_writer.apply_update(cache.data, mirror, update)
+                    try:
+                        mesh_writer.apply_update(cache.data, mirror, update)
+                    finally:
+                        if getattr(update, "transport", "tcp") == "shm":
+                            client.ack(update.seq, getattr(update, "shm_slot", 0))
+                            output.clear()
+                            update.arrays.clear()
                     _interface(mod, header, activate=True)
                     proxy.sync_instances(ng, names, objects=objects)
                     # scene_objects nodes: real objects, parented to this object. Only queued here (pump can run from a
