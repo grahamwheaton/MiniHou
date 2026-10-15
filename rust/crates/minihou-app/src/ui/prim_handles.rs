@@ -1142,6 +1142,8 @@ mod tests {
             geo: None,
             blender: &blender,
             flags: &flags,
+            units: crate::units::UnitSettings::default(),
+            repeat_label: None,
         };
 
         let ctx = egui::Context::default();

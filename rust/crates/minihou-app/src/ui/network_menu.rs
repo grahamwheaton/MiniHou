@@ -13,6 +13,7 @@ impl MenuState {
         Self { at, target, add, pie: false, category: None, query: String::new(), active: 0, focus: true }
     }
     pub(super) fn pie(at: Pos2) -> Self { let mut menu = Self::new(at, None, true); menu.pie = true; menu }
+    pub(super) fn query(&self) -> &str { &self.query }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,7 +94,11 @@ fn activate(entry: Entry, menu: &mut MenuState, v: &View, out: &mut Actions) -> 
 }
 
 pub(super) fn show(ctx: &egui::Context, id: Id, menu: &mut MenuState, v: &View, out: &mut Actions) -> Option<Choice> {
-    if ctx.input(|i| i.key_pressed(Key::Escape)) {
+    if ctx.input(|i| i.key_pressed(Key::Escape)) || (!menu.focus && ctx.input(|i| i.key_pressed(Key::Tab))) {
+        ctx.input_mut(|i| {
+            i.consume_key(egui::Modifiers::default(), Key::Escape);
+            i.consume_key(egui::Modifiers::default(), Key::Tab);
+        });
         return Some(Choice::Close);
     }
     let mut chosen = None;
@@ -134,7 +139,8 @@ pub(super) fn show(ctx: &egui::Context, id: Id, menu: &mut MenuState, v: &View, 
         });
     });
     if let Some(entry) = chosen { return activate(entry, menu, v, out); }
-    if !menu.focus && ctx.input(|i| i.pointer.any_pressed()) && !area.response.rect.contains(ctx.input(|i| i.pointer.interact_pos().unwrap_or(Pos2::ZERO))) {
+    let (any_pressed, interact_pos) = ctx.input(|i| (i.pointer.any_pressed(), i.pointer.interact_pos()));
+    if !menu.focus && any_pressed && !area.response.rect.contains(interact_pos.unwrap_or(Pos2::ZERO)) {
         return Some(Choice::Close);
     }
     if !menu.add { menu.focus = false; }

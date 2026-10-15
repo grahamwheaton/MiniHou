@@ -1,6 +1,6 @@
 //! Projected transform handles over the cooked viewport image.
 use super::{Actions, CameraInfo, Orientation, Pivot, Tool, TransformOp, UiAction, View};
-use eframe::egui::{self, pos2, vec2, Align2, FontId, Pos2, Rect, Sense, Stroke, Vec2};
+use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 
 pub fn project(camera: CameraInfo, rect: Rect, point: [f32; 3]) -> Option<Pos2> {
     let m = camera.projection;
@@ -125,10 +125,45 @@ fn pivot(v: &View) -> [f32; 3] {
 }
 pub fn cursor(ui: &egui::Ui, rect: Rect, v: &View) {
     let Some(at) = project(v.camera, rect, v.editor.cursor) else { return; };
-    let p = ui.painter_at(rect); let color = v.theme.accent;
-    p.circle_stroke(at, 6., Stroke::new(1_f32, color));
-    p.line_segment([at + vec2(-11., 0.), at + vec2(11., 0.)], Stroke::new(1_f32, color));
-    p.line_segment([at + vec2(0., -11.), at + vec2(0., 11.)], Stroke::new(1_f32, color));
+    let p = ui.painter_at(rect);
+
+    // Crosshair extending through the ring with dark outline for contrast
+    let ch_len = 14.0;
+    let ch_gap = 2.0;
+    let ch_dark = Color32::from_black_alpha(200);
+    let ch_light = Color32::WHITE;
+
+    for (start, end) in [
+        (at + vec2(-ch_len, 0.), at + vec2(-ch_gap, 0.)),
+        (at + vec2(ch_gap, 0.), at + vec2(ch_len, 0.)),
+        (at + vec2(0., -ch_len), at + vec2(0., -ch_gap)),
+        (at + vec2(0., ch_gap), at + vec2(0., ch_len)),
+    ] {
+        p.line_segment([start, end], Stroke::new(2.5_f32, ch_dark));
+        p.line_segment([start, end], Stroke::new(1.0_f32, ch_light));
+    }
+    p.circle_filled(at, 1.2, ch_light);
+
+    // Blender's red/white dashed ring (16 alternating segments)
+    let radius = 10.0;
+    let n_segments = 16;
+    let red = Color32::from_rgb(220, 40, 40);
+    let white = Color32::WHITE;
+    let stroke_width = 1.8_f32;
+
+    let sub_steps = 3;
+    for i in 0..n_segments {
+        let color = if i % 2 == 0 { red } else { white };
+        let mut pts = Vec::with_capacity(sub_steps + 1);
+        for s in 0..=sub_steps {
+            let t = (i as f32 + s as f32 / sub_steps as f32) / n_segments as f32;
+            let angle = t * std::f32::consts::TAU;
+            pts.push(at + vec2(angle.cos() * radius, angle.sin() * radius));
+        }
+        for w in pts.windows(2) {
+            p.line_segment([w[0], w[1]], Stroke::new(stroke_width, color));
+        }
+    }
 }
 
 pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool {
@@ -192,7 +227,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
         else {
             let events = ui.input(|i| i.events.clone());
             for event in events { match event {
-                egui::Event::Text(s) if s.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-') => d.typed.push_str(&s),
+                egui::Event::Text(s) if s.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-' || matches!(c, 'm'|'c'|'k'|'i'|'n'|'f'|'t'|'M'|'C'|'K'|'I'|'N'|'F'|'T'|' ')) => d.typed.push_str(&s),
                 egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => { d.typed.pop(); },
                 _ => {}
             } }
@@ -202,7 +237,11 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
             let projected = project(v.camera, rect, add(origin, mul(frame[d.axis], span)))
                 .map(|p| p - center).filter(|delta| delta.length() > 1.).unwrap_or(vec2(1., 0.));
             let pixels = (pointer - d.start).dot(projected.normalized());
-            let typed = d.typed.parse::<f32>().ok().map(|x| if d.kind == Tool::Scale { x - 1. } else { x });
+            let typed = if d.kind == Tool::Move {
+                crate::units::parse(&d.typed, v.units).map(|x| x as f32)
+            } else {
+                d.typed.parse::<f32>().ok().map(|x| if d.kind == Tool::Scale { x - 1. } else { x })
+            };
             let raw = typed.unwrap_or_else(|| if d.kind == Tool::Rotate { d.swept }
                 else if d.kind == Tool::Move { projected_distance(pixels, span, projected.length()) }
             else { value(d.kind, pixels) });
@@ -221,7 +260,12 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
                 d.last = current;
             }
             let shown = if d.kind == Tool::Scale { current + 1. } else { current };
-            p.text(pointer + vec2(12., -12.), Align2::LEFT_BOTTOM, format!("{shown:.3}"), FontId::monospace(12.), v.theme.text);
+            let shown_text = if d.kind == Tool::Move {
+                crate::units::format(shown as f64, v.units)
+            } else {
+                format!("{shown:.3}")
+            };
+            p.text(pointer + vec2(12., -12.), Align2::LEFT_BOTTOM, shown_text, FontId::monospace(12.), v.theme.text);
             ui.ctx().data_mut(|data| data.insert_temp(id, d));
         }
     }
@@ -270,5 +314,46 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
             - ring.iter().map(|p| p.0.y).fold(f32::INFINITY, f32::min);
         assert!(height(&rings[0]) > 20. && height(&rings[1]) < 1. && height(&rings[2]) > 20.);
         assert_eq!(ring_hit(&rings, rings[2][12].0), Some(2));
+    }
+    #[test] fn move_drag_shows_units() {
+        let mut f = crate::ui::testing::Fixture::new();
+        f.camera.projection = [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]];
+        let editor = crate::ui::EditorState { tool: Tool::Move, ..Default::default() };
+        let mut view = f.view();
+        view.editor = &editor;
+        let mut actions = Actions::default();
+        let id = egui::Id::new("transform_gizmo_drag");
+        let d = Drag {
+            axis: 0, kind: Tool::Move, start: Pos2::ZERO, last_pointer: Pos2::ZERO,
+            swept: 0., typed: "1000".into(), last: 0.0,
+        };
+        let ctx = egui::Context::default();
+        ctx.data_mut(|data| data.insert_temp(id, d));
+        f.theme.apply(&ctx);
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0., 0.), vec2(1280., 800.))),
+            events: vec![egui::Event::PointerButton { pos: Pos2::ZERO, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }],
+            ..Default::default()
+        };
+        let full = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                show(ui, ui.max_rect(), &view, &mut actions);
+            });
+        });
+        fn extract_texts(shapes: &[egui::epaint::ClippedShape], out: &mut Vec<String>) {
+            for s in shapes {
+                match &s.shape {
+                    egui::epaint::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+                    egui::epaint::Shape::Vec(subs) => {
+                        let clipped: Vec<egui::epaint::ClippedShape> = subs.iter().map(|sub| egui::epaint::ClippedShape { clip_rect: s.clip_rect, shape: sub.clone() }).collect();
+                        extract_texts(&clipped, out);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut texts = Vec::new();
+        extract_texts(&full.shapes, &mut texts);
+        assert!(texts.iter().any(|t| t.contains("1000 mm")), "expected 1000 mm in {texts:?}");
     }
 }

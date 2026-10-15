@@ -35,6 +35,7 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Alt+E | Push / pull | Viewport |
 | Ctrl+R | Loop cut | Viewport |
 | Alt+N | Flip faces | Viewport |
+| Shift+C | Reset 3D cursor and frame all | Viewport |
 | Tab | Add node menu | Viewport |
 | Home | Frame selected | Viewport |
 | Space | Play / pause | Viewport |
@@ -42,6 +43,8 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Right | Next frame | Viewport |
 | Shift+Left | First frame | Viewport |
 | Shift+Right | Last frame | Viewport |
+| Shift+R | Repeat last | Viewport |
+| Shift+R | Repeat last | Network |
 | Tab | Add node menu | Network |
 | Alt+1 | Front | Viewport |
 | Ctrl+Alt+1 | Back | Viewport |
@@ -60,7 +63,6 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | M | Mute flag | Network |
 | E | Template flag | Network |
 | W | Selectable template flag | Network |
-| Shift+R | Display flag | Network |
 | Ctrl+Z | Undo | Everywhere |
 | Ctrl+Y | Redo | Everywhere |
 | Ctrl+Shift+Z | Redo | Everywhere |

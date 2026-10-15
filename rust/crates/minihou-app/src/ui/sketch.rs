@@ -102,7 +102,7 @@ fn measurements(ui: &egui::Ui, rect: Rect, v: &View) {
         let (Some(a), Some(b)) = (coords("a"), coords("b")) else { continue; };
         let (Some(pa), Some(pb)) = (transform_gizmo::project(v.camera, rect, a), transform_gizmo::project(v.camera, rect, b)) else { continue; };
         p.line_segment([pa, pb], Stroke::new(1.5_f32, v.theme.tpl));
-        p.text(pa.lerp(pb, 0.5) + vec2(8., -8.), Align2::LEFT_BOTTOM, format!("{:.3}", length(sub(b, a))), FontId::monospace(12.), v.theme.tpl);
+        p.text(pa.lerp(pb, 0.5) + vec2(8., -8.), Align2::LEFT_BOTTOM, crate::units::format(length(sub(b, a)) as f64, v.units), FontId::monospace(12.), v.theme.tpl);
     }
 }
 pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
@@ -120,7 +120,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
             let ctrl = ctx.input(|i| i.modifiers.ctrl);
             let mut p = grid_snap(p, s.plane, if v.editor.snap.enabled != ctrl { v.editor.snap.increment } else { 0. });
             if let (Some(a), Some(axis)) = (anchor, s.axis) { p = axis_lock(p, a, axis, s.plane); }
-            if let (Some(a), Ok(amount)) = (anchor, s.numeric.parse::<f32>()) { p = numeric_length(p, a, amount); }
+            if let (Some(a), Some(amount)) = (anchor, crate::units::parse(&s.numeric, v.units).map(|x| x as f32)) { p = numeric_length(p, a, amount); }
             p
         });
     } else { s.hover = None; }
@@ -130,7 +130,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } => { if !s.numeric.is_empty() { if let Some(p) = s.hover { s.points.push(p); } s.numeric.clear(); } finish(&mut s, out); },
         egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => { if s.numeric.is_empty() { s.points.pop(); } else { s.numeric.pop(); } },
         egui::Event::Key { key, pressed: true, .. } if matches!(key, egui::Key::X | egui::Key::Y | egui::Key::Z) => { let axis = match key { egui::Key::X => 0, egui::Key::Y => 1, _ => 2 }; s.axis = if s.axis == Some(axis) { None } else { Some(axis) }; },
-        egui::Event::Text(t) if t.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-') => s.numeric.push_str(&t),
+        egui::Event::Text(t) if t.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-' || matches!(c, 'm'|'c'|'k'|'i'|'n'|'f'|'t'|'M'|'C'|'K'|'I'|'N'|'F'|'T'|' ')) => s.numeric.push_str(&t),
         egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, .. } if safe.contains(pos) => {
             if let Some(p) = s.hover { if s.points.last().is_none_or(|a| length(sub(*a, p)) > 1e-7) {
                 if mode == SketchMode::Polygon && s.points.len() >= 3 && length(sub(s.points[0], p)) < v.bounds.1 * 0.015 { finish(&mut s, out); }
@@ -145,6 +145,11 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     for pair in screen.windows(2) { p.line_segment([pair[0], pair[1]], Stroke::new(2_f32, v.theme.warn)); }
     if matches!(mode, SketchMode::Polygon | SketchMode::Rectangle | SketchMode::Circle) && screen.len() >= 3 { p.line_segment([*screen.last().unwrap(), screen[0]], Stroke::new(2_f32, v.theme.warn)); }
     for q in &screen { p.circle_filled(*q, 3., v.theme.warn); }
+    if mode == SketchMode::Tape && screen.len() == 2 {
+        if let (Some(&a), Some(h)) = (s.points.first(), s.hover) {
+            p.text(screen[0].lerp(screen[1], 0.5) + vec2(8., -8.), Align2::LEFT_BOTTOM, crate::units::format(length(sub(h, a)) as f64, v.units), FontId::monospace(12.), v.theme.warn);
+        }
+    }
     let chip = Rect::from_min_size(pos2(rect.left() + 56., rect.top() + 48.), vec2(265., 28.));
     p.rect_filled(chip, 2., v.theme.panel); p.rect_stroke(chip, 2., Stroke::new(1_f32, v.theme.stroke), egui::StrokeKind::Inside);
     p.text(chip.left_center() + vec2(8., 0.), Align2::LEFT_CENTER, format!("{} · {}  {}  Enter finish · Esc cancel", mode.name(), s.plane.label(), s.numeric), FontId::monospace(10.), v.theme.text);
@@ -196,5 +201,40 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
             assert!(matches!(&out.0[..], [UiAction::SketchCommit { points, closed: c, .. }]
                 if points.len() == expected_len && *c == closed), "{mode:?}");
         }
+    }
+    #[test] fn measurements_render_with_units() {
+        let mut f = crate::ui::testing::Fixture::new();
+        f.camera.projection = [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]];
+        let mut doc = f.doc.value().clone();
+        doc["measurements"] = serde_json::json!([
+            { "a": [0.0, 0.0, 0.0], "b": [1.0, 0.0, 0.0] }
+        ]);
+        f.doc = minihou_app::Document::parse(doc.to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        let ctx = egui::Context::default();
+        f.theme.apply(&ctx);
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0., 0.), vec2(1280., 800.))), ..Default::default() };
+        let mut out = Actions::default();
+        let v = f.view();
+        let full = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                show(ui, ui.max_rect(), &v, &mut out);
+            });
+        });
+        fn extract_texts(shapes: &[egui::epaint::ClippedShape], out: &mut Vec<String>) {
+            for s in shapes {
+                match &s.shape {
+                    egui::epaint::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+                    egui::epaint::Shape::Vec(subs) => {
+                        let clipped: Vec<egui::epaint::ClippedShape> = subs.iter().map(|sub| egui::epaint::ClippedShape { clip_rect: s.clip_rect, shape: sub.clone() }).collect();
+                        extract_texts(&clipped, out);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut texts = Vec::new();
+        extract_texts(&full.shapes, &mut texts);
+        assert!(texts.iter().any(|t| t.contains("1000 mm")), "expected 1000 mm in {texts:?}");
     }
 }
