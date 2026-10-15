@@ -5,6 +5,7 @@ use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, Co
 use minihou_core::Graph;
 use serde_json::json;
 use std::{collections::HashMap, path::PathBuf, time::Duration};
+use ui::keymap::{KeyContext, Keymap, Preferences, ThemePref};
 use ui::{theme::Theme, Actions, BlenderStatus, CameraInfo, EditorState, GeoSummary, NodeFlags, UiAction, View};
 use viewport::{Gpu, Mode, Scene, Target};
 
@@ -17,6 +18,7 @@ struct App {
     theme: Theme, flags: HashMap<String, NodeFlags>, themed: bool,
     editor_state: EditorState,
     geo: Option<GeoSummary>, blender: BlenderStatus,
+    prefs: Preferences, keymap: Keymap, prefs_open: bool, viewport_hover: bool, network_hover: bool,
 }
 impl App {
     fn new(doc: Document, path: PathBuf, state: egui_wgpu::RenderState) -> Result<Self> {
@@ -25,7 +27,16 @@ impl App {
         let mut app = Self { selected:display.clone(), display, editor:EditorDocument::new(doc, path), worker,
             cooking:CookState::default(), state,gpu:None,target:None,
             camera:Camera::frame([0.;3],1.),bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new(),
-            theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default() };
+            theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),
+            prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false };
+        app.prefs = Preferences::load();
+        app.keymap = Keymap::from_overrides_json(&app.prefs.keymap_overrides);
+        app.keymap.emulate_numpad = app.prefs.emulate_numpad;
+        if app.prefs.theme == ThemePref::Light { app.theme = Theme::light(); }
+        app.editor_state.snap.increment = app.prefs.snap_increment;
+        app.editor_state.overlays.grid = app.prefs.viewport.show_grid;
+        app.editor_state.overlays.axes = app.prefs.viewport.show_axes;
+        app.editor_state.overlays.stats = app.prefs.show_stats;
         app.send(Edit::Display(app.display.clone()));
         Ok(app)
     }
@@ -90,6 +101,26 @@ impl App {
             Err(e) => self.file_status = format!("Could not add {node_type}: {e}"),
         }
     }
+    /// Keymap commands that have no dedicated action.
+    fn command(&mut self, name: &str) {
+        use ui::EditorChange as C;
+        let e = self.editor_state;
+        match name {
+            "xray" => self.editor_state.apply(C::Xray(!e.xray)),
+            "snap" => self.editor_state.apply(C::SnapEnabled(!e.snap.enabled)),
+            "proportional" => self.editor_state.apply(C::ProportionalEnabled(!e.proportional.enabled)),
+            "toggle_projection" => {
+                let next = if self.camera.is_ortho() { StandardView::Perspective } else { StandardView::Front };
+                self.camera.set_view(next);
+            }
+            "shade_next" | "shade_previous" => {
+                const ORDER: [Mode; 4] = [Mode::Solid, Mode::Shaded, Mode::Wire, Mode::ShadedWire];
+                let i = ORDER.iter().position(|m| *m == self.mode).unwrap_or(1);
+                self.mode = ORDER[if name == "shade_next" { (i + 1) % 4 } else { (i + 3) % 4 }];
+            }
+            _ => self.file_status = format!("Command {name} is not wired up yet"),
+        }
+    }
     /// Apply what the panels asked for this frame.
     fn apply(&mut self, ctx: &egui::Context, actions: Vec<UiAction>) {
         for action in actions {
@@ -125,11 +156,13 @@ impl App {
                     if let ui::EditorChange::View(v) = change { self.camera.set_view(standard_view(v)); }
                 }
                 UiAction::ViewPreset(v) => { self.editor_state.apply(ui::EditorChange::View(v)); self.camera.set_view(standard_view(v)); }
+                UiAction::OpenPreferences => self.prefs_open = true,
+                UiAction::Command(name) => self.command(&name),
                 UiAction::Orbit { yaw, pitch } => self.camera.orbit_degrees(yaw, pitch),
                 UiAction::Pan { dx, dy } => self.camera.pan(dx, dy),
                 UiAction::Zoom(factor) => self.camera.zoom_factor(factor),
                 UiAction::DeleteNode(_) | UiAction::DuplicateNode(_) | UiAction::ConnectNodes { .. } | UiAction::DisconnectInput { .. }
-                | UiAction::TidyNetwork | UiAction::OpenPreferences | UiAction::Command(_)
+                | UiAction::TidyNetwork
                 | UiAction::BlenderInstall(_) | UiAction::BlenderOpen | UiAction::BlenderDownloadAddon | UiAction::BlenderBar(_) => self.file_status = "That command is not wired up yet".into(),
                 UiAction::ToggleLocked(id) => { let f = self.flags.entry(id).or_default(); f.locked = !f.locked; }
                 UiAction::ToggleTemplate(id) => { let f = self.flags.entry(id).or_default(); f.template = !f.template; }
@@ -153,9 +186,8 @@ impl eframe::App for App {
         if self.cooking.cooking() { ctx.request_repaint_after(Duration::from_millis(16)); }
         let graph = Graph::from_value(self.editor.doc.value()).expect("validated document");
         let mut out = Actions::default();
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) { out.push(UiAction::Undo); }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Y)) { out.push(UiAction::Redo); }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::S)) { out.push(UiAction::Save); }
+        let kctx = KeyContext { viewport_hovered: self.viewport_hover, network_hovered: self.network_hover, selected: Some(&self.selected) };
+        for action in self.keymap.poll(ctx, &kctx) { out.push(action); }
         if !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::F)) { out.push(UiAction::Frame); }
         {
             let v = View { graph: &graph, doc: self.editor.doc.value(), path: &self.editor.path, dirty: self.editor.dirty(),
@@ -166,7 +198,8 @@ impl eframe::App for App {
             egui::TopBottomPanel::top("toolbar").show(ctx, |ui| ui::topbar::show(ui, &v, &mut out));
             egui::TopBottomPanel::top("shelf").show(ctx, |ui| ui::shelf::show(ui, &v, &mut out));
             egui::TopBottomPanel::bottom("stats").show(ctx, |ui| ui::status::show(ui, &v, &mut out));
-            egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| ui::network::show(ui, &v, &mut out));
+            let net = egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| ui::network::show(ui, &v, &mut out));
+            self.network_hover = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| net.response.rect.contains(p));
             egui::SidePanel::right("parameters").default_width(320.).show(ctx, |ui| ui::params::show(ui, &v, &mut out));
             egui::CentralPanel::default().show(ctx, |ui| {
                 let size = ui.available_size().max(egui::vec2(1., 1.));
@@ -188,8 +221,14 @@ impl eframe::App for App {
                     gpu.draw(&self.state, target, &self.camera, self.mode);
                     ui.painter().image(target.id, rect, egui::Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.)), egui::Color32::WHITE);
                 }
+                self.viewport_hover = response.hovered();
                 ui::viewport_ui::overlay(ui, rect, &v, &mut out);
             });
+        }
+        if self.prefs_open && ui::keymap::show_preferences(ctx, &mut self.prefs_open, &mut self.prefs, &mut self.keymap, &self.theme) {
+            self.prefs.keymap_overrides = self.keymap.overrides_json();
+            self.prefs.emulate_numpad = self.keymap.emulate_numpad;
+            if let Err(e) = self.prefs.save() { self.file_status = format!("Could not save preferences: {e}"); }
         }
         if !ctx.input(|i| i.pointer.primary_down()) { self.editor.history.finish(&self.editor.doc); }
         self.apply(ctx, out.0);

@@ -3,6 +3,7 @@
 //! document or the GPU directly, which is what lets each one be built and tested alone (see `ui::testing`).
 #![allow(dead_code)] // the skeleton: each panel is filled in one at a time
 pub mod editor_state;
+pub mod keymap;
 pub mod network;
 pub mod params;
 pub mod shelf;
