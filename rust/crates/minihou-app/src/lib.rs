@@ -244,6 +244,8 @@ impl Camera {
         self.yaw = yaw; self.pitch = pitch; self.ortho = ortho;
     }
     pub fn is_ortho(&self) -> bool { self.ortho }
+    /// Orbit angles in radians (yaw about +Y, pitch up) for the view gizmo.
+    pub fn angles(&self) -> (f32, f32) { (self.yaw, self.pitch) }
     pub fn orbit_degrees(&mut self, yaw: f32, pitch: f32) {
         self.ortho = false;
         self.yaw -= yaw.to_radians(); self.pitch = (self.pitch + pitch.to_radians()).clamp(-1.55, 1.55);

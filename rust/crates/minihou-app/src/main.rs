@@ -5,7 +5,7 @@ use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, Co
 use minihou_core::Graph;
 use serde_json::json;
 use std::{collections::HashMap, path::PathBuf, time::Duration};
-use ui::{theme::Theme, Actions, EditorState, NodeFlags, UiAction, View};
+use ui::{theme::Theme, Actions, CameraInfo, EditorState, NodeFlags, UiAction, View};
 use viewport::{Gpu, Mode, Scene, Target};
 
 struct App {
@@ -159,7 +159,8 @@ impl eframe::App for App {
             let v = View { graph: &graph, doc: self.editor.doc.value(), path: &self.editor.path, dirty: self.editor.dirty(),
                 can_undo: self.editor.history.can_undo(), can_redo: self.editor.history.can_redo(),
                 selected: &self.selected, display: &self.display, cooking: &self.cooking, file_status: &self.file_status,
-                mode: self.mode, theme: &self.theme, editor: &self.editor_state, flags: &self.flags };
+                mode: self.mode, theme: &self.theme, editor: &self.editor_state, flags: &self.flags,
+                camera: { let (yaw, pitch) = self.camera.angles(); CameraInfo { yaw, pitch, ortho: self.camera.is_ortho() } } };
             egui::TopBottomPanel::top("toolbar").show(ctx, |ui| ui::topbar::show(ui, &v, &mut out));
             egui::TopBottomPanel::top("shelf").show(ctx, |ui| ui::shelf::show(ui, &v, &mut out));
             egui::TopBottomPanel::bottom("stats").show(ctx, |ui| ui::status::show(ui, &v, &mut out));
