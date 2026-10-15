@@ -48,12 +48,11 @@ fn vs_surf(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>) -> VOut {
 }
 
 @fragment
-fn fs_surf(i: VOut) -> @location(0) vec4<f32> {
+fn fs_surf(i: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     // The unit vector from this point to the eye (view space: the eye is at the origin). In a perspective view it is NOT
     // (0, 0, 1): near the edges of the screen the ray is angled, and testing against the z axis misjudges grazing faces.
     let v = normalize(-i.vpos);
-    // The geometric normal of the face under this pixel (screen-space derivatives), turned toward the eye: it says which side
-    // of the surface is visible.
+    // The geometric normal of the face under this pixel (screen-space derivatives), turned toward the eye.
     let ng_raw = cross(dpdx(i.vpos), dpdy(i.vpos));
     var ng = v;
     if (dot(ng_raw, ng_raw) > 1e-30) {
@@ -62,12 +61,15 @@ fn fs_surf(i: VOut) -> @location(0) vec4<f32> {
     if (dot(ng, v) < 0.0) { ng = -ng; }
     var n = ng;
     if (u.flat_shading == 0u && dot(i.vnorm, i.vnorm) > 1e-20) {
-        // smooth (Shaded): the interpolated vertex normal. Where it points away from the visible side of the face (a fold, a
-        // sharp ridge) it is bent back smoothly into the tangent plane instead of flipped: a flip makes a hard-edged patch.
+        // smooth (Shaded): the interpolated vertex normal. The vertex normals come from the triangles' winding, so a triangle
+        // seen from its back (front == false) gets the same smooth normal turned to face the eye: it stays smooth, where
+        // using the face normal here would show every triangle. Where it still points a little away from the eye (a silhouette
+        // or a sharp ridge) it is bent back toward the eye plane, which is continuous, instead of flipped.
         n = normalize(i.vnorm);
-        let d = dot(n, ng);
+        if (!front) { n = -n; }
+        let d = dot(n, v);
         if (d < 0.0) {
-            n = normalize(n - ng * d * 1.25);
+            n = normalize(n - v * d * 1.25);
         }
     }
     return out_color(u.base.rgb * light(n));
