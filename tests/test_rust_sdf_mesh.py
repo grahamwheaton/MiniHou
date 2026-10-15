@@ -29,6 +29,7 @@ class RustSdfMeshTests(unittest.TestCase):
 
     def test_box(self):
         self.check_mesh(self.primitive('box', {}))
+        self.check_mesh(self.primitive('box', {}), h=0.17, pad_voxels=4)
 
     def test_sphere(self):
         self.check_mesh(self.primitive('sphere', {'rows': 9, 'columns': 12}))

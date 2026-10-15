@@ -52,7 +52,7 @@ struct Corner { p:[f64;3], index:usize, axis:usize, left:Option<usize>, right:Op
 struct Corners { nodes:Vec<Corner>, root:Option<usize> }
 impl Corners {
     fn new(tris:&[f64])->Self {
-        let mut points:Vec<([f64;3],usize)>=tris.chunks_exact(3).enumerate().map(|(i,p)|([p[0],p[1],p[2]],i)).collect();
+        let mut points:Vec<([f64;3],usize)>=tris.as_chunks::<3>().0.iter().enumerate().map(|(i,p)|([p[0],p[1],p[2]],i)).collect();
         let mut tree=Self{nodes:Vec::new(),root:None}; tree.root=tree.build(&mut points,0);tree
     }
     fn build(&mut self,p:&mut [([f64;3],usize)],depth:usize)->Option<usize> {
@@ -80,7 +80,7 @@ impl Grid {
     fn new(tris:&[f64])->Self {
         let mut lo=[f64::INFINITY;3]; let mut hi=[f64::NEG_INFINITY;3];
         let mut bounds=Vec::new(); let mut spans=Vec::new(); let mut area=0.0;
-        for t in tris.chunks_exact(9) {
+        for t in tris.as_chunks::<9>().0.iter() {
             let tl=std::array::from_fn(|a|t[a].min(t[a+3]).min(t[a+6]));
             let th=std::array::from_fn(|a|t[a].max(t[a+3]).max(t[a+6]));
             for a in 0..3 {lo[a]=lo[a].min(tl[a]);hi[a]=hi[a].max(th[a]);}
@@ -111,8 +111,8 @@ impl Grid {
         }
         grid
     }
-    fn query(&self,p:[f64;3],tris:&[f64])->([f64;3],f64,usize) {
-        let qc=self.cell(p); let (mut cp,mut best,mut tri)=self.corners.query(p);
+    fn query(&self,p:[f64;3],tris:&[f64],seed:([f64;3],f64,usize))->([f64;3],f64,usize) {
+        let qc=self.cell(p); let (mut cp,mut best,mut tri)=seed;
         let outside:[f64;3]=std::array::from_fn(|a|(self.lo[a]-p[a]).max(p[a]-self.hi[a]).max(0.0).powi(2));
         let total=outside[0]+outside[1]+outside[2];
         for r in 0..=*self.dims.iter().max().unwrap()+2 {
@@ -147,21 +147,31 @@ impl Grid {
 }
 
 /// Signed distances on a caller-selected grid; triangles are a flat `(T,3,3)` buffer.
+pub struct MeshResult { pub values:Vec<f32>, pub ambiguous:Vec<usize> }
+
 pub fn from_mesh(tris:&[f64],origin:[f64;3],dims:[usize;3],h:f64,band:f64)->Result<Vec<f32>,String> {
+    Ok(from_mesh_with_ties(tris,origin,dims,h,band)?.values)
+}
+
+/// The sparse ambiguous list identifies wall samples where a nearest-corner tie
+/// can choose the normal. The caller resolves these with its spatial backend's
+/// own tie ordering, then passes those seeds to resolve_seed_ties.
+pub fn from_mesh_with_ties(tris:&[f64],origin:[f64;3],dims:[usize;3],h:f64,band:f64)->Result<MeshResult,String> {
+    let mut ambiguous=Vec::new();
     if !tris.len().is_multiple_of(9) {return Err("triangles must have shape (T, 3, 3)".into());}
     if !h.is_finite() || h<=0.0 {return Err("voxel size must be positive and finite".into());}
     let size=dims.iter().try_fold(1usize,|n,&d|n.checked_mul(d)).ok_or("grid size overflow")?;
     if size>24_000_000 {return Err("too many voxels; use a larger voxel size".into());}
-    let mut values=vec![band as f32;size]; if tris.is_empty() || size==0 {return Ok(values);}
+    let mut values=vec![band as f32;size]; if tris.is_empty() || size==0 {return Ok(MeshResult{values,ambiguous});}
     // A collapsed mesh has zero normals, hence every voxel is outside. Avoid a
     // pathological million-cell TriGrid for its artificial 1e-9 extent.
     let first=vertex(tris,0);
-    if tris.chunks_exact(3).all(|p|p==first) {
+    if tris.as_chunks::<3>().0.iter().all(|p|*p==first) {
         for (i,value) in values.iter_mut().enumerate() {
             let c=coords(i,dims);let p=std::array::from_fn(|a|origin[a]+c[a] as f64*h);
             let delta=sub(p,first);*value=dot(delta,delta).sqrt().min(band) as f32;
         }
-        return Ok(values);
+        return Ok(MeshResult{values,ambiguous});
     }
     let grid=Grid::new(tris); let mut candidates=vec![false;size];let mut count=0usize;
     for &(tl,th) in &grid.bounds {
@@ -176,21 +186,38 @@ pub fn from_mesh(tris:&[f64],origin:[f64;3],dims:[usize;3],h:f64,band:f64)->Resu
     let mut wall_sign=vec![false;size];
     for i in 0..size {if candidates[i] {
         let c=coords(i,dims);let p=std::array::from_fn(|a|origin[a]+c[a] as f64*h);
-        let (cp,dist,ti)=grid.query(p,tris);values[i]=dist.min(band) as f32;
+        let seed=grid.corners.query(p);let (cp,dist,ti)=grid.query(p,tris,seed);values[i]=dist.min(band) as f32;
         if values[i]<threshold {
+            if dist==seed.1 {ambiguous.push(i);}
             let t=&tris[ti*9..ti*9+9];let n=cross(sub(vertex(t,1),vertex(t,0)),sub(vertex(t,2),vertex(t,0)));
             wall_sign[i]=dot(sub(p,cp),n)<0.0;
         }
     }}
     let free:Vec<bool>=values.iter().map(|&v|v>=threshold).collect();let outside=flood(&free,dims);
     for i in 0..size {if if free[i] {!outside[i]}else{wall_sign[i]} {values[i] = -values[i];}}
-    Ok(values)
+    Ok(MeshResult{values,ambiguous})
+}
+
+/// Repeat only sparse wall queries with exact seeds supplied by the host's
+/// nearest-neighbour implementation. This preserves SciPy's unspecified ties.
+pub fn resolve_seed_ties(tris:&[f64],points:&[f64],seed_indices:&[i64],seed_distances:&[f64],band:f64)->Vec<f32> {
+    if points.is_empty() {return Vec::new();}
+    let grid=Grid::new(tris);
+    points.as_chunks::<3>().0.iter().enumerate().map(|(i,&p)| {
+        let index=seed_indices[i] as usize;
+        let seed=([tris[index*3],tris[index*3+1],tris[index*3+2]],seed_distances[i],index/3);
+        let (cp,dist,ti)=grid.query(p,tris,seed);
+        let t=&tris[ti*9..ti*9+9];let n=cross(sub(vertex(t,1),vertex(t,0)),sub(vertex(t,2),vertex(t,0)));
+        let value=dist.min(band) as f32;
+        if dot(sub(p,cp),n)<0.0 {-value}else{value}
+    }).collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn flood_enclosed() {let mut f=vec![true;125]; for i in 0..125 {let c=coords(i,[5;3]);if c.iter().all(|&v|v>0&&v<4)&&c.iter().any(|&v|v==1||v==3){f[i]=false;}}let r=flood(&f,[5;3]);assert!(!r[62]);assert!(r[0]);}
+    #[test] fn flood_enclosed() {let mut f=vec![true;125]; for (i,value) in f.iter_mut().enumerate() {let c=coords(i,[5;3]);if c.iter().all(|&v|v>0&&v<4)&&c.iter().any(|&v|v==1||v==3){*value=false;}}let r=flood(&f,[5;3]);assert!(!r[62]);assert!(r[0]);}
     #[test] fn empty_mesh() {assert_eq!(from_mesh(&[],[0.0;3],[2;3],1.0,3.0).unwrap(),vec![3.0;8]);}
     #[test] fn triangle() {let t=[0.,0.,0.,1.,0.,0.,0.,1.,0.];assert_eq!(closest([0.2,0.2,1.0],&t),[0.19999999999999998,0.19999999999999998,0.0]);}
 }
+
