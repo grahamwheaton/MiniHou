@@ -1,0 +1,1 @@
+{"nodes":{"g":{"type":"grid","params":{"columns":3,"rows":3},"position":[10,20],"comment":"keep me"},"n":{"type":"noise","inputs":{"geo":"g"},"flags":{"selected":true}},"o":{"type":"output","inputs":{"geo":"n"}}},"display":"o","exposed":[],"extra":{"keep":true}}
