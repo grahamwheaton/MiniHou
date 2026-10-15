@@ -8,7 +8,7 @@ pub use prefs_ui::show as show_preferences;
 
 use eframe::egui::{self, Key, Modifiers};
 use serde_json::{json, Value};
-use super::{EditorChange, SelectionMode, UiAction, ViewPreset};
+use super::{EditorChange, SelectionMode, Tool, UiAction, ViewPreset};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Chord { pub key: Key, pub ctrl: bool, pub shift: bool, pub alt: bool }
@@ -165,6 +165,18 @@ impl Keymap {
                 if let Some(action) = b.command.to_action(kctx) { out.push(action); }
             }
         });
+        if kctx.viewport_hovered {
+            for (key, tool) in [(Key::Q, Tool::Select), (Key::W, Tool::Move), (Key::E, Tool::Rotate),
+                (Key::R, Tool::Scale), (Key::T, Tool::Transform), (Key::M, Tool::Measure), (Key::C, Tool::Cursor)] {
+                if ctx.input(|i| i.key_pressed(key) && !i.modifiers.any()) { out.push(UiAction::Editor(EditorChange::Tool(tool))); }
+            }
+            for (key, mode) in [(Key::L, super::sketch::SketchMode::Line), (Key::P, super::sketch::SketchMode::Pen), (Key::G, super::sketch::SketchMode::Polygon)] {
+                if ctx.input(|i| i.key_pressed(key) && !i.modifiers.any()) { out.push(UiAction::StartSketch(mode)); }
+            }
+            for (key, mode) in [(Key::R, super::sketch::SketchMode::Rectangle), (Key::C, super::sketch::SketchMode::Circle)] {
+                if ctx.input(|i| i.key_pressed(key) && i.modifiers.shift && !i.modifiers.ctrl && !i.modifiers.alt) { out.push(UiAction::StartSketch(mode)); }
+            }
+        }
         out
     }
     pub fn overrides_json(&self) -> Value {

@@ -9,14 +9,17 @@ pub mod keymap;
 pub mod network;
 pub mod params;
 pub mod proxy_ui;
+pub mod selection_region;
 pub mod shelf;
 pub mod status;
+pub mod sketch;
 pub mod theme;
 pub mod topbar;
+pub mod transform_gizmo;
 pub mod viewport_ui;
 
 #[allow(unused_imports)]
-pub use editor_state::{EditorChange, EditorState, Falloff, Orientation, Overlays, Pivot, Proxy, SelectionMode, Snap, SnapTo, ViewPreset, Proportional};
+pub use editor_state::{EditorChange, EditorState, Falloff, Orientation, Overlays, Pivot, Proxy, SelectionMode, Snap, SnapTo, Tool, ViewPreset, Proportional};
 use crate::viewport::Mode;
 use minihou_app::{CookState, Edit};
 use minihou_core::Graph;
@@ -26,6 +29,12 @@ use std::path::Path;
 /// What a panel asks the app to do.
 #[derive(Clone, Debug)]
 pub enum UiAction {
+    StartSketch(sketch::SketchMode),
+    TransformNode { node: String, op: TransformOp, continuous: bool },
+    CancelTransform,
+    SketchCommit { name: String, points: Vec<[f32; 3]>, closed: bool },
+    AddMeasurement { a: [f32; 3], b: [f32; 3] },
+    RegionSelect { rect: eframe::egui::Rect, extend: bool, subtract: bool },
     Open,
     Save,
     SaveAs,
@@ -74,6 +83,8 @@ pub enum UiAction {
     /// A named command from the keymap that has no dedicated action yet (kept for forward compatibility).
     Command(String),
 }
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TransformOp { Move([f32; 3]), Rotate([f32; 3]), Scale([f32; 3]) }
 
 #[derive(Default)]
 pub struct Actions(pub Vec<UiAction>);
@@ -113,7 +124,8 @@ impl BlenderStatus { pub fn connected(&self) -> bool { self.clients.iter().any(|
 
 /// What the view gizmo needs of the camera.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct CameraInfo { pub yaw: f32, pub pitch: f32, pub ortho: bool }
+pub struct CameraInfo { pub yaw: f32, pub pitch: f32, pub ortho: bool,
+    pub projection: [[f32; 4]; 4], pub ray_origin: [f32; 3], pub ray_forward: [f32; 3], pub ray_right: [f32; 3], pub ray_up: [f32; 3] }
 
 pub struct View<'a> {
     pub graph: &'a Graph,
@@ -131,6 +143,8 @@ pub struct View<'a> {
     pub theme: &'a theme::Theme,
     pub editor: &'a EditorState,
     pub camera: CameraInfo,
+    pub bounds: ([f32; 3], f32),
+    pub selection_center: Option<[f32; 3]>,
     pub geo: Option<&'a GeoSummary>,
     pub blender: &'a BlenderStatus,
     /// Flags per node id (Locked, Template); ids not present have none set.
@@ -151,19 +165,19 @@ pub mod testing {
     use std::collections::HashMap;
 
     pub struct Fixture { pub doc: Document, pub graph: Graph, pub cooking: CookState, pub theme: theme::Theme,
-        pub flags: HashMap<String, NodeFlags>, pub selected: String, pub display: String, pub mode: Mode, pub editor: EditorState, pub camera: CameraInfo, pub geo: Option<GeoSummary>, pub blender: BlenderStatus }
+        pub flags: HashMap<String, NodeFlags>, pub selected: String, pub display: String, pub mode: Mode, pub editor: EditorState, pub camera: CameraInfo, pub bounds: ([f32; 3], f32), pub geo: Option<GeoSummary>, pub blender: BlenderStatus }
     impl Fixture {
         pub fn new() -> Self {
             let doc = Document::parse(include_str!("../default_graph.json").to_owned()).unwrap();
             let graph = Graph::from_value(doc.value()).unwrap();
             let display = graph.main_output().unwrap();
             Self { doc, graph, cooking: CookState::default(), theme: theme::Theme::dark(), flags: HashMap::new(),
-                selected: display.clone(), display, mode: Mode::Shaded, editor: EditorState::default(), camera: CameraInfo::default(), geo: None, blender: BlenderStatus::default() }
+                selected: display.clone(), display, mode: Mode::Shaded, editor: EditorState::default(), camera: CameraInfo::default(), bounds: ([0.; 3], 1.), geo: None, blender: BlenderStatus::default() }
         }
         pub fn view(&self) -> View<'_> {
             View { graph: &self.graph, doc: self.doc.value(), path: Path::new("untitled.json"), dirty: false, can_undo: false, can_redo: false,
                 selected: &self.selected, display: &self.display, cooking: &self.cooking, file_status: "", mode: self.mode,
-                theme: &self.theme, editor: &self.editor, camera: self.camera, geo: self.geo.as_ref(), blender: &self.blender, flags: &self.flags }
+                theme: &self.theme, editor: &self.editor, camera: self.camera, bounds: self.bounds, selection_center: None, geo: self.geo.as_ref(), blender: &self.blender, flags: &self.flags }
         }
         /// One frame of `panel` in a 1280 x 800 window; returns the actions it pushed.
         pub fn run(&self, panel: impl Fn(&mut egui::Ui, &View, &mut Actions)) -> Vec<UiAction> {

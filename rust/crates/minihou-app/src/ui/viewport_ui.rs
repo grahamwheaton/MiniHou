@@ -1,7 +1,7 @@
 //! Viewport chrome drawn over the 3-D view (design: Viewport.dc.html): header bar (selection modes, orientation, pivot,
 //! snapping, proportional editing, overlays, X-ray, shading, Frame), left tool strip, bottom timeline, stats chip, view gizmo,
 //! error and dense-mesh notes. `rect` is the viewport's area; the 3-D image is already painted into it.
-use super::{theme::Theme, Actions, EditorChange, Falloff, Orientation, Pivot, SelectionMode, SnapTo, UiAction, View};
+use super::{theme::Theme, Actions, EditorChange, Falloff, Orientation, Pivot, SelectionMode, SnapTo, Tool, UiAction, View};
 use crate::viewport::Mode;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 #[path = "view_gizmo.rs"] mod view_gizmo;
@@ -18,10 +18,10 @@ const FRAME_END: u32 = 240;
 
 /// UI-only viewport state (nothing here reaches the engine yet).
 #[derive(Clone)]
-struct VpState { tool: usize, popover: Option<Popover>, frame: u32, playing: bool, clock: f32 }
+struct VpState { popover: Option<Popover>, frame: u32, playing: bool, clock: f32 }
 impl Default for VpState {
     fn default() -> Self {
-        Self { tool: 0, popover: None, frame: 48, playing: false, clock: 0. }
+        Self { popover: None, frame: 48, playing: false, clock: 0. }
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -131,7 +131,7 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
             y += 5.;
         }
         let r = Rect::from_min_size(Pos2::new(strip.left() + 4., y), Vec2::splat(28.));
-        if button(ui, th, r, ("vp_tool", i), st.tool == i, name, *icon) { st.tool = i; }
+        if button(ui, th, r, ("vp_tool", i), ed.tool == Tool::ALL[i], name, *icon) { out.push(UiAction::Editor(EditorChange::Tool(Tool::ALL[i]))); }
         y += 28.;
     }
 
