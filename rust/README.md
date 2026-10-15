@@ -158,8 +158,9 @@ What this adds:
 
 * **28 and 32 threads are close** across the new runs. Their Rust times are about **1.5-6x** faster than the 4-thread VM,
   depending on the row; adding four more threads does not show a clear gain.
-* Numba's fresh-process warm-up takes **9.2 s** on the desktop and **0.9 s** on the laptop; Rust starts in **under 1 s** on
-  both. The first cook and viewport times are listed separately above.
+* Numba's start plus warm-up depends on its on-disk cache: **9.2 s** on the desktop's very first run (empty cache), then
+  about **0.8-1.2 s** on repeats; on the laptop **0.9-3.3 s** across runs. Rust starts in **0.7-1.0 s** every time.
+  The first cook and viewport times are listed separately above.
 * **fbm3 noise is roughly tied** with numba on both Windows machines.
 * At **1M quads**, the desktop cook and slider edit improve by **1.4x** and **1.1x** respectively.
 
