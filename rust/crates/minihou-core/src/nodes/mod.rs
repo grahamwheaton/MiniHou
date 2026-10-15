@@ -53,6 +53,7 @@ pub fn registry() -> &'static [NodeSpec] {
         generate::SPHERE,
         generate::TUBE,
         generate::TORUS,
+        generate::BOUND,
         modify::TRANSFORM,
         modify::NORMAL,
         modify::NOISE,

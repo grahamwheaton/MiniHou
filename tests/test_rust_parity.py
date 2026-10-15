@@ -15,7 +15,7 @@ from minihou import Evaluator, Geometry, Graph, accel, proxy, rust, topo
 from minihou.geometry import Topology
 from minihou.sdk import REGISTRY
 
-NODE_TYPES = ["grid", "box", "point", "curve", "line", "circle", "sphere", "tube", "torus", "transform", "normal", "noise", "merge", "null", "output"]
+NODE_TYPES = ["grid", "box", "point", "curve", "line", "circle", "sphere", "tube", "torus", "bound", "transform", "normal", "noise", "merge", "null", "output"]
 
 
 @contextlib.contextmanager
@@ -86,6 +86,7 @@ class RustParityTests(unittest.TestCase):
         for graph in (chain(("transform", {"proportional_enabled": True, "proportional_falloff": "random"})),
                       chain(("normal", {"domain": "vertex"})),
                       chain(("noise", {"group": "0-3"})),
+                      chain(("bound", {"oriented": True})),
                       {"version": 1, "nodes": {"b": {"type": "box", "params": {"add_vertex_normals": True}}}, "display": "b"},
                       {"version": 1, "nodes": {"w": {"type": "wrangle"}}, "display": "w"}):
             with self.subTest(graph=json.dumps(graph)[:90]), self.assertRaises(RuntimeError) as cm:
@@ -105,6 +106,24 @@ class RustParityTests(unittest.TestCase):
                        {"primitive_type": "points", "divisions": 2}, {"uniform_scale": 3.0}):
             with self.subTest(params=params):
                 self.same({"version": 1, "nodes": {"b": {"type": "box", "params": params}}, "display": "b"})
+
+    def test_bound(self):
+        sources = ({"type": "grid", "params": {"columns": 7, "rows": 5}},
+                   {"type": "grid", "params": {"columns": 4, "rows": 3, "size_x": 3, "size_y": 2, "center": [1, -2, 0.5],
+                                               "rotate": [10, 25, -40]}},
+                   {"type": "box", "params": {"divisions": 3, "size": [2, 1, 0.5], "center": [1, 2, 3]}},
+                   {"type": "curve", "params": {"points": "0,0,0 1,2,3 2,1,0", "closed": True}},
+                   {"type": "point", "params": {"center": [1.25, -2, 3]}})
+        for source in sources:
+            for padding in ([0, 0, 0], [0.1, 0.2, 0.3]):
+                with self.subTest(source=source, padding=padding):
+                    self.same(chain(("bound", {"padding": padding}), source=source))
+        self.same(chain(("noise", {"amplitude": [0.3, 0.4, 0.5], "frequency": 2}),
+                        ("bound", {"padding": [0.5, 0, 0.25]})))
+        # empty input: a plain unit box of one welded point, with no detail attributes
+        empty = {"version": 1, "nodes": {"g": {"type": "grid", "flags": {"bypass": True}},
+                                         "b": {"type": "bound", "inputs": {"geo": "g"}}}, "display": "b"}
+        self.same(empty)
 
     def test_curve_line_circle(self):
         for source in ({"type": "point"}, {"type": "point", "params": {"center": [1.25, -2, 3]}},

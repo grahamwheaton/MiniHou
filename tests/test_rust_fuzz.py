@@ -60,7 +60,7 @@ def _random_graph(seed):
         prev = name
         for j in range(int(rng.integers(1, 4))):
             name = f"b{i}_{j}"
-            kind = str(rng.choice(["transform", "noise", "normal", "null"]))
+            kind = str(rng.choice(["transform", "noise", "normal", "bound", "null"]))
             if kind == "transform":
                 params = {"translate": _v3(rng, -2, 2), "rotate": _v3(rng, -45, 45),
                           "scale": _v3(rng, 0.6, 1.5)}
@@ -75,6 +75,8 @@ def _random_graph(seed):
                           "mode": str(rng.choice(["scalar", "vector"]))}
             elif kind == "normal":
                 params = {"domain": str(rng.choice(["point", "prim"]))}
+            elif kind == "bound":
+                params = {"padding": _v3(rng, 0, 0.5)}
             else:
                 params = {}
             nodes[name] = {"type": kind, "params": params, "inputs": {"geo": prev}}
@@ -134,6 +136,8 @@ class RustFuzzTests(unittest.TestCase):
             chain(("transform", {"group": "0", "proportional_enabled": True, "proportional_connected": True,
                                   "proportional_radius": 0.5, "translate": [1,0,0]}),
                   source={"type": "line", "params": {"points": 2, "length": 0}}),
+            chain(("bound", {}), source={"type": "point", "params": {"center": [1.25, -2, 3]}}),
+            chain(("bound", {"padding": [0.1, 0.2, 0.3]}), source={"type": "curve", "params": {"points": "0,0,0 0,0,0"}}),
             chain(source={"type": "curve", "params": {"points": "0,0,0 0,0,0"}}),
             chain(source={"type": "circle", "params": {"divisions": 3, "radius": 0}}),
             chain(source={"type": "sphere", "params": {"rows": 2, "columns": 3, "radius": 0}}),
@@ -213,6 +217,7 @@ class RustFuzzTests(unittest.TestCase):
         cases = [chain(("transform", {"proportional_enabled": True, "proportional_falloff": "random"})),
                  chain(("normal", {"domain": "vertex"})),
                  chain(("noise", {"group": "0-3"})),
+                 chain(("bound", {"oriented": True})),
                  chain(source={"type": "box", "params": {"add_vertex_normals": True}}),
                  _graph({"g": {"type": "grid"}, "b": {"type": "box", "inputs": {"geo": "g"}}}, "b")]
         for i, graph in enumerate(cases):
