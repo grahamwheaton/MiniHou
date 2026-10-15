@@ -52,6 +52,37 @@ pub fn add(value: &Value, ty: &str, after: Option<&str>) -> Option<(Value, Strin
     Some((value, id))
 }
 
+/// Adds a node placed at world position `pos`. If `ty` is a primitive with a `center` parameter,
+/// sets `center` to `pos`. If `ty` is a primitive without `center`, adds the node and then adds a
+/// `transform` node after it with `translate` set to `pos`. For non-primitives, behaves like `add`.
+pub fn add_at(value: &Value, ty: &str, after: Option<&str>, pos: [f32; 3]) -> Option<(Value, String)> {
+    if !crate::picking::is_primitive_node(ty) {
+        return add(value, ty, after);
+    }
+    if crate::picking::node_has_center_param(ty) {
+        let (mut val, id) = add(value, ty, after)?;
+        let all = nodes_mut(&mut val)?;
+        let node = all.get_mut(&id)?;
+        if let Some(params) = node.get_mut("params").and_then(|p| p.as_object_mut()) {
+            params.insert("center".into(), json!([pos[0], pos[1], pos[2]]));
+        } else {
+            node["params"] = json!({"center": [pos[0], pos[1], pos[2]]});
+        }
+        Some((val, id))
+    } else {
+        let (val, id) = add(value, ty, after)?;
+        let (mut val, xform_id) = add(&val, "transform", Some(&id))?;
+        let all = nodes_mut(&mut val)?;
+        let node = all.get_mut(&xform_id)?;
+        if let Some(params) = node.get_mut("params").and_then(|p| p.as_object_mut()) {
+            params.insert("translate".into(), json!([pos[0], pos[1], pos[2]]));
+        } else {
+            node["params"] = json!({"translate": [pos[0], pos[1], pos[2]]});
+        }
+        Some((val, xform_id))
+    }
+}
+
 /// Add a sketch to an existing cooked node, or as a standalone curve when there is no usable source.
 pub fn add_sketch(value: &Value, name: &str, points: &[[f32; 3]], closed: bool, selected: &str) -> Option<(Value, String)> {
     if points.len() < if closed { 3 } else { 2 } || points.iter().flatten().any(|x| !x.is_finite()) { return None; }

@@ -1,6 +1,6 @@
 //! Projected transform handles over the cooked viewport image.
 use super::{Actions, CameraInfo, Orientation, Pivot, Tool, TransformOp, UiAction, View};
-use eframe::egui::{self, pos2, vec2, Align2, FontId, Pos2, Rect, Sense, Stroke, Vec2};
+use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
 
 pub fn project(camera: CameraInfo, rect: Rect, point: [f32; 3]) -> Option<Pos2> {
     let m = camera.projection;
@@ -125,10 +125,45 @@ fn pivot(v: &View) -> [f32; 3] {
 }
 pub fn cursor(ui: &egui::Ui, rect: Rect, v: &View) {
     let Some(at) = project(v.camera, rect, v.editor.cursor) else { return; };
-    let p = ui.painter_at(rect); let color = v.theme.accent;
-    p.circle_stroke(at, 6., Stroke::new(1_f32, color));
-    p.line_segment([at + vec2(-11., 0.), at + vec2(11., 0.)], Stroke::new(1_f32, color));
-    p.line_segment([at + vec2(0., -11.), at + vec2(0., 11.)], Stroke::new(1_f32, color));
+    let p = ui.painter_at(rect);
+
+    // Crosshair extending through the ring with dark outline for contrast
+    let ch_len = 14.0;
+    let ch_gap = 2.0;
+    let ch_dark = Color32::from_black_alpha(200);
+    let ch_light = Color32::WHITE;
+
+    for (start, end) in [
+        (at + vec2(-ch_len, 0.), at + vec2(-ch_gap, 0.)),
+        (at + vec2(ch_gap, 0.), at + vec2(ch_len, 0.)),
+        (at + vec2(0., -ch_len), at + vec2(0., -ch_gap)),
+        (at + vec2(0., ch_gap), at + vec2(0., ch_len)),
+    ] {
+        p.line_segment([start, end], Stroke::new(2.5_f32, ch_dark));
+        p.line_segment([start, end], Stroke::new(1.0_f32, ch_light));
+    }
+    p.circle_filled(at, 1.2, ch_light);
+
+    // Blender's red/white dashed ring (16 alternating segments)
+    let radius = 10.0;
+    let n_segments = 16;
+    let red = Color32::from_rgb(220, 40, 40);
+    let white = Color32::WHITE;
+    let stroke_width = 1.8_f32;
+
+    let sub_steps = 3;
+    for i in 0..n_segments {
+        let color = if i % 2 == 0 { red } else { white };
+        let mut pts = Vec::with_capacity(sub_steps + 1);
+        for s in 0..=sub_steps {
+            let t = (i as f32 + s as f32 / sub_steps as f32) / n_segments as f32;
+            let angle = t * std::f32::consts::TAU;
+            pts.push(at + vec2(angle.cos() * radius, angle.sin() * radius));
+        }
+        for w in pts.windows(2) {
+            p.line_segment([w[0], w[1]], Stroke::new(stroke_width, color));
+        }
+    }
 }
 
 pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool {

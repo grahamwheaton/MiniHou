@@ -63,11 +63,13 @@ fn proportional_params(params: &mut Value, state: &EditorState) {
     }
 }
 
-fn viewport_tool_drop(ctx: &egui::Context, rect: egui::Rect) -> (Option<std::sync::Arc<ui::ToolDrag>>, bool) {
-    let over = ctx.input(|i| i.pointer.latest_pos().is_some_and(|p| rect.contains(p)));
+fn viewport_tool_drop(ctx: &egui::Context, rect: egui::Rect) -> (Option<std::sync::Arc<ui::ToolDrag>>, bool, Option<egui::Pos2>) {
+    let pointer_pos = ctx.input(|i| i.pointer.latest_pos());
+    let over = pointer_pos.is_some_and(|p| rect.contains(p));
     let dragging = over && egui::DragAndDrop::has_payload_of_type::<ui::ToolDrag>(ctx);
     let released = ctx.input(|i| i.pointer.any_released());
-    (if dragging && released { egui::DragAndDrop::take_payload::<ui::ToolDrag>(ctx) } else { None }, dragging && !released)
+    let dropped = if dragging && released { egui::DragAndDrop::take_payload::<ui::ToolDrag>(ctx) } else { None };
+    (dropped, dragging && !released, if released { pointer_pos } else { None })
 }
 fn apply_transform_step(doc: &mut Document, first: bool, value: Value, target: &str, name: &str, param_value: Value) -> std::result::Result<Vec<Edit>, String> {
     let param = Edit::Param { node: target.into(), name: name.into(), value: param_value };
@@ -294,7 +296,10 @@ impl App {
     }
     /// A shelf tool: a new node of `node_type` wired to `after` (its first input) and made the displayed node; one undo step.
     fn add_node(&mut self, node_type: &str, after: Option<&str>) {
-        let Some((value, id)) = graph_edit::add(self.editor.doc.value(), node_type, after) else {
+        self.add_node_at(node_type, after, self.editor_state.cursor);
+    }
+    fn add_node_at(&mut self, node_type: &str, after: Option<&str>, pos: [f32; 3]) {
+        let Some((value, id)) = graph_edit::add_at(self.editor.doc.value(), node_type, after, pos) else {
             self.file_status = format!("The Rust core has no {node_type} node yet");
             return;
         };
@@ -614,6 +619,10 @@ impl App {
             "box_select" => ui::selection_region::arm(ctx),
             "timeline_toggle" | "timeline_previous" | "timeline_next" | "timeline_start" | "timeline_end" => ui::viewport_ui::timeline_command(ctx, name),
             "pie_menu" => ui::network::open_pie_menu(ctx, &self.editor.path),
+            "reset_cursor" => {
+                self.editor_state.cursor = [0.0, 0.0, 0.0];
+                self.frame_mesh();
+            }
             "display_flag" => {
                 if let Some(value) = graph_edit::set_display(self.editor.doc.value(), &self.selected, ctx.input(|i| i.modifiers.shift)) {
                     self.commit_document(value, "set display flag");
@@ -704,6 +713,7 @@ impl App {
                     self.edit(edit, continuous);
                 }
                 UiAction::AddNode { node_type, after } => self.add_node(&node_type, after.as_deref()),
+                UiAction::AddNodeAt { node_type, after, pos } => self.add_node_at(&node_type, after.as_deref(), pos),
                 UiAction::SetMode(mode) => self.mode = mode,
                 UiAction::Editor(change) => {
                     if let ui::EditorChange::Selection(mode) = change { if mode != ui::SelectionMode::Object { self.last_edit_selection = mode; } }
@@ -898,6 +908,7 @@ impl eframe::App for App {
                     }
                 }
                 if let (Some(gpu), Some(target)) = (&self.gpu, &self.target) {
+                    let selected_object = !self.object_hidden && !self.selected.is_empty() && self.editor.doc.display_nodes().contains(&self.selected);
                     gpu.draw(
                         &self.state,
                         target,
@@ -910,37 +921,13 @@ impl eframe::App for App {
                             wireframe: self.editor_state.overlays.wireframe,
                         },
                         self.editor_state.selection,
+                        selected_object,
                     );
                     if !self.object_hidden {
                         ui.painter().image(target.id, rect, egui::Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.)), egui::Color32::WHITE);
                     }
                 }
-                // Silhouette stroke for selected object (Item 2)
-                if !self.object_hidden {
-                    let displayed_nodes = self.editor.doc.display_nodes();
-                    if displayed_nodes.contains(&self.selected) {
-                        if let Some(scene) = &self.scene {
-                            let silhouettes = picking::silhouette_edges(
-                                scene.positions(),
-                                scene.triangle_indices(),
-                                v.camera.ray_origin,
-                                v.camera.ortho,
-                                v.camera.ray_forward,
-                            );
-                            let stroke = egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(0xff, 0xa0, 0x28));
-                            for [u, w] in silhouettes {
-                                let pa = picking::at(scene.positions(), u);
-                                let pb = picking::at(scene.positions(), w);
-                                if let (Some(sa), Some(sb)) = (
-                                    ui::transform_gizmo::project(v.camera, rect, pa),
-                                    ui::transform_gizmo::project(v.camera, rect, pb),
-                                ) {
-                                    ui.painter().line_segment([sa, sb], stroke);
-                                }
-                            }
-                        }
-                    }
-                }
+
 
                 // Hover pre-selection highlight (Item 4)
                 let hover_pos = ctx.input(|i| i.pointer.latest_pos());
@@ -1103,15 +1090,32 @@ impl eframe::App for App {
                         self.selection_dirty = true;
                     }
                 }
-                if response.clicked_by(egui::PointerButton::Primary) && self.modal.is_none() && self.editor_state.tool == ui::Tool::Cursor {
+                let shift_rmb = response.clicked_by(egui::PointerButton::Secondary) && ctx.input(|i| i.modifiers.shift);
+                let cursor_tool_click = response.clicked_by(egui::PointerButton::Primary) && self.editor_state.tool == ui::Tool::Cursor;
+                if (shift_rmb || cursor_tool_click) && self.modal.is_none() {
                     if let Some(at) = response.interact_pointer_pos() {
-                        let (o,d) = ui::transform_gizmo::ray(v.camera, rect, at);
-                        if d[2].abs() > 1e-5 { let t = -o[2] / d[2]; if t >= 0. { out.push(UiAction::Editor(ui::EditorChange::Cursor([0,1,2].map(|k| o[k] + t*d[k])))); } }
+                        let (o, d) = ui::transform_gizmo::ray(v.camera, rect, at);
+                        let (mesh_p, mesh_tri) = self.scene.as_ref().map(|s| (s.positions(), s.triangle_indices())).unzip();
+                        let new_cursor = picking::cursor_hit_position(o, d, mesh_p, mesh_tri, self.editor_state.cursor, v.camera.ray_forward);
+                        out.push(UiAction::Editor(ui::EditorChange::Cursor(new_cursor)));
                     }
                 }
-                let (dropped, tool_hover) = viewport_tool_drop(ctx, rect);
+                let (dropped, tool_hover, drop_pos) = viewport_tool_drop(ctx, rect);
                 if let Some(tool) = dropped {
-                    out.push(ui::shelf::dropped_tool(&tool, &self.selected));
+                    let final_pos = if let Some(pos) = drop_pos {
+                        let (o, d) = ui::transform_gizmo::ray(v.camera, rect, pos);
+                        let (mesh_p, mesh_tri) = self.scene.as_ref().map(|s| (s.positions(), s.triangle_indices())).unzip();
+                        let (hit_pos, surface_hit) = picking::drop_world_position(o, d, mesh_p, mesh_tri, self.editor_state.cursor);
+                        let offset = if surface_hit { picking::primitive_rest_offset(&tool.0) } else { 0.0 };
+                        [hit_pos[0], hit_pos[1] + offset, hit_pos[2]]
+                    } else {
+                        self.editor_state.cursor
+                    };
+                    out.push(UiAction::AddNodeAt {
+                        node_type: tool.0.clone(),
+                        after: Some(v.selected.to_owned()),
+                        pos: final_pos,
+                    });
                 }
                 ui::viewport_ui::overlay(ui, rect, &v, &mut out);
                 if tool_hover {
@@ -1126,8 +1130,9 @@ impl eframe::App for App {
                                 let (o, d) = ui::transform_gizmo::ray(v.camera, rect, pointer_pos);
                                 let hit_pos = {
                                     let (mesh_p, mesh_tri) = self.scene.as_ref().map(|s| (s.positions(), s.triangle_indices())).unzip();
-                                    let scene_radius = self.scene.as_ref().map(|s| s.radius).unwrap_or(1.0);
-                                    picking::intersect_ground_or_mesh(o, d, mesh_p, mesh_tri, (scene_radius * 2.0).max(5.0))
+                                    let (pos, surface_hit) = picking::drop_world_position(o, d, mesh_p, mesh_tri, self.editor_state.cursor);
+                                    let offset = if surface_hit { picking::primitive_rest_offset(&tool.0) } else { 0.0 };
+                                    [pos[0], pos[1] + offset, pos[2]]
                                 };
                                 let scene_radius = self.scene.as_ref().map(|s| s.radius).unwrap_or(1.0);
                                 if let Some(prim) = get_primitive_preview(&tool.0) {
@@ -1261,9 +1266,10 @@ mod tools_tests {
         });
         let _ = ctx.run(RawInput { events: vec![Event::PointerButton { pos: at, button: PointerButton::Primary,
             pressed: false, modifiers: Default::default() }], ..Default::default() }, |ctx| {
-            let (tool, hover) = viewport_tool_drop(ctx, rect);
+            let (tool, hover, drop_pos) = viewport_tool_drop(ctx, rect);
             assert_eq!(tool.unwrap().0, "box");
             assert!(!hover);
+            assert_eq!(drop_pos, Some(at));
         });
     }
 

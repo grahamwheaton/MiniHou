@@ -1687,6 +1687,7 @@ dependencies = [
  "bytemuck",
  "eframe",
  "minihou-core",
+ "pollster 0.4.0",
  "rfd",
  "serde_json",
  "wgpu 27.0.1",
