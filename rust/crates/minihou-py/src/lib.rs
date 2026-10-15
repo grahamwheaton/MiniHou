@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use minihou_core::geometry::{validate_topology, AttrData, AttrTable, Geometry, Topology};
-use minihou_core::{noise, nodes, normals, topo, Graph};
+use minihou_core::{heightfield, noise, nodes, normals, topo, Graph};
 use numpy::{PyArray1, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -21,6 +21,10 @@ fn slice2<'a, T: numpy::Element>(a: &'a PyReadonlyArray2<'_, T>, width: usize, w
     if a.shape()[1] != width {
         return Err(PyValueError::new_err(format!("{what} must have {width} columns")));
     }
+    a.as_slice().map_err(|_| PyValueError::new_err(format!("{what} must be a contiguous array")))
+}
+
+fn slice2d<'a, T: numpy::Element>(a: &'a PyReadonlyArray2<'_, T>, what: &str) -> PyResult<&'a [T]> {
     a.as_slice().map_err(|_| PyValueError::new_err(format!("{what} must be a contiguous array")))
 }
 
@@ -133,6 +137,111 @@ fn linear_normalized<'py>(py: Python<'py>, v: PyReadonlyArray2<'py, f32>, m: [[f
     let vv = slice2(&v, 3, "v")?;
     let out = py.detach(|| minihou_core::xform::linear_normalized(vv, m));
     array(py, out, 3)
+}
+
+/// Hydraulic erosion state holding H, flow, eroded, deposited across iterations.
+#[pyclass]
+struct Hydraulic {
+    inner: heightfield::HydraulicState,
+}
+
+type QuadArray<'py> = (
+    Bound<'py, PyAny>,
+    Bound<'py, PyAny>,
+    Bound<'py, PyAny>,
+    Bound<'py, PyAny>,
+);
+
+#[pymethods]
+impl Hydraulic {
+    #[new]
+    fn new(h: PyReadonlyArray2<'_, f64>) -> PyResult<Self> {
+        let shape = h.shape();
+        let rows = shape[0];
+        let cols = shape[1];
+        let hs = slice2d(&h, "H")?;
+        Ok(Hydraulic {
+            inner: heightfield::HydraulicState::new(hs.to_vec(), rows, cols),
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn step(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray1<'_, f64>,
+        y: PyReadonlyArray1<'_, f64>,
+        cell: (f64, f64),
+        rain: f64,
+        capacity: f64,
+        erode_rate: f64,
+        deposit_rate: f64,
+        evaporation: f64,
+        lifetime: usize,
+        inertia: f64,
+        gravity: f64,
+        min_slope: f64,
+    ) -> PyResult<()> {
+        let xs = slice1(&x, "x")?;
+        let ys = slice1(&y, "y")?;
+        if xs.len() != ys.len() {
+            return Err(PyValueError::new_err("x and y must have the same length"));
+        }
+        py.detach(|| {
+            self.inner.step(
+                xs,
+                ys,
+                cell,
+                rain,
+                capacity,
+                erode_rate,
+                deposit_rate,
+                evaporation,
+                lifetime,
+                inertia,
+                gravity,
+                min_slope,
+            );
+        });
+        Ok(())
+    }
+
+    fn finish<'py>(&mut self, py: Python<'py>) -> PyResult<QuadArray<'py>> {
+        let cols = self.inner.cols;
+        let (h, flow, eroded, deposited) = std::mem::replace(
+            &mut self.inner,
+            heightfield::HydraulicState::new(Vec::new(), 0, 0),
+        )
+        .finish();
+        Ok((
+            array(py, h, cols)?,
+            array(py, flow, cols)?,
+            array(py, eroded, cols)?,
+            array(py, deposited, cols)?,
+        ))
+    }
+}
+
+/// Material steeper than the talus angle slides to lower neighbours.
+#[pyfunction]
+fn thermal<'py>(
+    py: Python<'py>,
+    h: PyReadonlyArray2<'py, f64>,
+    tan: f64,
+    dist: PyReadonlyArray1<'py, f64>,
+    rate: f64,
+    iterations: usize,
+) -> PyResult<Bound<'py, PyAny>> {
+    let shape = h.shape();
+    let rows = shape[0];
+    let cols = shape[1];
+    let hs = slice2d(&h, "H")?;
+    let ds = slice1(&dist, "dist")?;
+    if ds.len() != 8 {
+        return Err(PyValueError::new_err("dist must have 8 elements"));
+    }
+    let out = py.detach(|| heightfield::thermal(hs, rows, cols, tan, ds, rate, iterations));
+    array(py, out, cols)
 }
 
 fn table<'py>(py: Python<'py>, t: AttrTable) -> PyResult<Bound<'py, PyDict>> {
@@ -342,6 +451,8 @@ fn minihou_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(chunk_bounds, m)?)?;
     m.add_function(wrap_pyfunction!(bounds, m)?)?;
     m.add_function(wrap_pyfunction!(draw_stats, m)?)?;
+    m.add_class::<Hydraulic>()?;
+    m.add_function(wrap_pyfunction!(thermal, m)?)?;
     m.add_function(wrap_pyfunction!(node_types, m)?)?;
     m.add_function(wrap_pyfunction!(node_params, m)?)?;
     Ok(())
