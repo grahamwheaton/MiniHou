@@ -66,7 +66,7 @@ impl Graph {
             let params = nd.get("params").and_then(Value::as_object).cloned();
             nodes.push((id.clone(), NodeDef { node_type, inputs, params, bypass }));
         }
-        let display = obj.get("display").and_then(Value::as_str).map(str::to_string);
+        let display = obj.get("display").and_then(|v| v.as_str().or_else(|| v.as_array()?.iter().find_map(Value::as_str))).map(str::to_string);
         Ok(Graph { nodes, display })
     }
 

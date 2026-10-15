@@ -63,15 +63,17 @@ fn apply_transform_step(doc: &mut Document, first: bool, value: Value, target: &
 }
 fn ensure_transform_target(value: &mut Value, source: &str, object_mode: bool, active: Option<&str>) -> Option<String> {
     if let Some(id) = active { return Some(id.to_owned()); }
-    let current_display = value["display"].as_str().unwrap_or_default().to_owned();
+    let mut displayed = minihou_app::display_nodes(value);
     let nodes = value["nodes"].as_object_mut()?;
     if object_mode && nodes.get(source).and_then(|n| n["type"].as_str()) == Some("transform") { return Some(source.to_owned()); }
     if object_mode {
-        if let Some(id) = nodes.iter().find(|(id, n)| id.as_str() == current_display && n["type"] == "transform" && n["inputs"]["geo"] == source).map(|(id, _)| id.clone()) { return Some(id); }
+        if let Some(id) = nodes.iter().find(|(id, n)| displayed.iter().any(|shown| shown == *id) && n["type"] == "transform" && n["inputs"]["geo"] == source).map(|(id, _)| id.clone()) { return Some(id); }
     }
     let id = (1..).map(|n| format!("transform{n}")).find(|id| !nodes.contains_key(id))?;
     nodes.insert(id.clone(), json!({"type":"transform", "inputs":{"geo":source}}));
-    value["display"] = json!(id);
+    if let Some(index) = displayed.iter().position(|shown| shown == source) { displayed[index] = id.clone(); }
+    else { displayed = vec![id.clone()]; }
+    value["display"] = if displayed.len() == 1 { json!(displayed[0]) } else { json!(displayed) };
     Some(id)
 }
 fn toggle_edit_mode(current: ui::SelectionMode, last: &mut ui::SelectionMode) -> ui::SelectionMode {
@@ -151,7 +153,7 @@ impl App {
         app.blender.installs = installs.iter().map(|(label, path)| (label.clone(), path.display().to_string())).collect();
         app.blender_paths = installs.into_iter().map(|(_, p)| p).collect();
         app.blender.addon_installed = false;
-        app.send(Edit::Display(app.display.clone()));
+        app.send(Edit::Replace(app.editor.doc.value().clone()));
         Ok(app)
     }
     fn send(&mut self, edit: Edit) {
@@ -273,7 +275,7 @@ impl App {
         if let Some(before) = self.transform_before.take() {
             self.editor.doc = before;
             self.send(Edit::Replace(self.editor.doc.value().clone()));
-            self.display = self.editor.doc.value()["display"].as_str().unwrap_or(&self.display).to_owned();
+            self.display = Graph::from_value(self.editor.doc.value()).ok().and_then(|g| g.main_output().ok()).unwrap_or_else(|| self.display.clone());
         }
         self.transform_target = None;
     }
@@ -363,6 +365,32 @@ impl App {
             "hide" => { self.object_hidden = true; self.selection.clear(); self.selection_dirty = true; }
             "reveal" => self.object_hidden = false,
             "add_menu" => ui::network::open_add_menu(ctx, &self.editor.path),
+            "box_select" => ui::selection_region::arm(ctx),
+            "timeline_toggle" | "timeline_previous" | "timeline_next" | "timeline_start" | "timeline_end" => ui::viewport_ui::timeline_command(ctx, name),
+            "pie_menu" => ui::network::open_pie_menu(ctx, &self.editor.path),
+            "display_flag" => {
+                if let Some(value) = graph_edit::set_display(self.editor.doc.value(), &self.selected, ctx.input(|i| i.modifiers.shift)) {
+                    self.commit_document(value, "set display flag");
+                }
+            }
+            "mute_flag" => {
+                let bypass = self.editor.doc.value()["nodes"][&self.selected]["flags"]["bypass"].as_bool().unwrap_or(false);
+                self.edit(Edit::Bypass { node: self.selected.clone(), flag: !bypass }, false);
+            }
+            "template_flag" => { let f = self.flags.entry(self.selected.clone()).or_default(); f.template = !f.template; }
+            "extrude" | "inset" | "bevel" | "pushpull" | "loop_cut" => {
+                let ty = match name { "extrude" => "polyextrude", "inset" => "inset", "bevel" => "polybevel", "pushpull" => "pushpull", _ => "loop_cut" };
+                let after = self.selected.clone(); self.add_node(ty, Some(&after));
+            }
+            "opposite_view" => {
+                let next = match self.editor_state.view {
+                    ui::ViewPreset::Front => ui::ViewPreset::Back, ui::ViewPreset::Back => ui::ViewPreset::Front,
+                    ui::ViewPreset::Right => ui::ViewPreset::Left, ui::ViewPreset::Left => ui::ViewPreset::Right,
+                    ui::ViewPreset::Top => ui::ViewPreset::Bottom, ui::ViewPreset::Bottom => ui::ViewPreset::Top,
+                    _ => ui::ViewPreset::Back,
+                };
+                self.editor_state.apply(C::View(next)); self.camera.set_view(standard_view(next));
+            }
             "toggle_params" => self.params_open = !self.params_open,
             "xray" => self.editor_state.apply(C::Xray(!e.xray)),
             "snap" => self.editor_state.apply(C::SnapEnabled(!e.snap.enabled)),
@@ -409,11 +437,19 @@ impl App {
                 }
                 UiAction::Frame => self.frame_mesh(),
                 UiAction::FrameSelected => self.frame_selected(),
+                UiAction::FrameNetwork => ui::network::frame(ctx, &self.editor.path),
                 UiAction::Select(id) => self.selected = id,
                 UiAction::SetDisplay(id) => {
                     self.display = id.clone();
                     self.editor.history.finish(&self.editor.doc);
                     self.edit(Edit::Display(id), false);
+                }
+                UiAction::ToggleDisplay(id) => {
+                    if let Some(value) = graph_edit::set_display(self.editor.doc.value(), &id, true) {
+                        if self.commit_document(value, "toggle display") {
+                            self.display = Graph::from_value(self.editor.doc.value()).ok().and_then(|g| g.main_output().ok()).unwrap_or(id);
+                        }
+                    }
                 }
                 UiAction::Edit { edit, continuous } => {
                     if !continuous { self.editor.history.finish(&self.editor.doc); }
@@ -516,7 +552,7 @@ impl eframe::App for App {
         let mut out = Actions::default();
         let kctx = KeyContext { viewport_hovered: self.viewport_hover, network_hovered: self.network_hover,
             in_edit_mode: self.editor_state.selection != ui::SelectionMode::Object, selected: Some(&self.selected) };
-        if !ui::sketch::active(ctx) && !ui::transform_gizmo::active(ctx) { for action in self.keymap.poll(ctx, &kctx) { out.push(action); } }
+        if !ui::sketch::active(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) { for action in self.keymap.poll(ctx, &kctx) { out.push(action); } }
         {
             let v = View { graph: &graph, doc: self.editor.doc.value(), path: &self.editor.path, dirty: self.editor.dirty(),
                 can_undo: self.editor.history.can_undo(), can_redo: self.editor.history.can_redo(),
@@ -550,9 +586,20 @@ impl eframe::App for App {
                 let delta = ctx.input(|i| i.pointer.delta());
                 if response.dragged() && !ui::sketch::active(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx)
                     && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::transform_gizmo::hit(rect, &v, p)) {
-                    if response.dragged_by(egui::PointerButton::Middle) || response.dragged_by(egui::PointerButton::Secondary) || ctx.input(|i| i.modifiers.shift) {
-                        self.camera.pan(delta.x, delta.y);
-                    } else { self.camera.orbit(delta.x, delta.y); }
+                    let modifiers = ctx.input(|i| i.modifiers);
+                    match self.prefs.viewport.navigation {
+                        ui::keymap::Navigation::Blender if response.dragged_by(egui::PointerButton::Middle) => {
+                            if modifiers.ctrl { self.camera.zoom(delta.y); }
+                            else if modifiers.shift { self.camera.pan(delta.x, delta.y); }
+                            else { self.camera.orbit(delta.x, delta.y); }
+                        }
+                        ui::keymap::Navigation::Houdini if modifiers.alt => {
+                            if response.dragged_by(egui::PointerButton::Primary) { self.camera.orbit(delta.x, delta.y); }
+                            else if response.dragged_by(egui::PointerButton::Middle) { self.camera.pan(delta.x, delta.y); }
+                            else if response.dragged_by(egui::PointerButton::Secondary) { self.camera.zoom(delta.y); }
+                        }
+                        _ => {}
+                    }
                 }
                 if response.hovered() { self.camera.zoom(ctx.input(|i| i.smooth_scroll_delta.y)); }
                 let limit = self.state.device.limits().max_texture_dimension_2d;
@@ -566,6 +613,9 @@ impl eframe::App for App {
                     if !self.object_hidden { ui.painter().image(target.id, rect, egui::Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.)), egui::Color32::WHITE); }
                 }
                 self.viewport_hover = response.hovered();
+                if response.hovered() && !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
+                    out.push(UiAction::Command("add_menu".into()));
+                }
                 if response.clicked_by(egui::PointerButton::Primary) && !ui::sketch::active(ctx) && !ui::selection_region::active(ctx) && self.editor_state.tool == ui::Tool::Select {
                     if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {
                         let (nx, ny) = (((at.x - rect.left()) / rect.width()) * 2. - 1., 1. - ((at.y - rect.top()) / rect.height()) * 2.);

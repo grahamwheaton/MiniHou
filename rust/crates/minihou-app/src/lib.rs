@@ -45,8 +45,15 @@ impl Document {
         Ok(())
     }
     pub fn set_display(&mut self, node: &str) -> Result<()> {
-        if self.value["nodes"].get(node).is_none() { return Err(format!("no such node '{node}'").into()); }
-        self.set(&["display"], json!(node)); Ok(())
+        self.set_display_nodes(&[node.to_owned()])
+    }
+    pub fn display_nodes(&self) -> Vec<String> { display_nodes(&self.value) }
+    pub fn set_display_nodes(&mut self, nodes: &[String]) -> Result<()> {
+        if nodes.is_empty() { return Err("display set cannot be empty".into()); }
+        for node in nodes {
+            if self.value["nodes"].get(node).is_none() { return Err(format!("no such node '{node}'").into()); }
+        }
+        self.set(&["display"], if nodes.len() == 1 { json!(nodes[0]) } else { json!(nodes) }); Ok(())
     }
     fn set(&mut self, path: &[&str], value: Value) {
         let mut spans = HashMap::new();
@@ -75,6 +82,13 @@ impl Document {
     }
     fn value_at(&self, keys: &[String]) -> &Value {
         keys.iter().fold(&self.value, |v,k| &v[k])
+    }
+}
+pub fn display_nodes(value: &Value) -> Vec<String> {
+    match &value["display"] {
+        Value::String(s) => vec![s.clone()],
+        Value::Array(xs) => xs.iter().filter_map(Value::as_str).map(str::to_owned).collect(),
+        _ => Vec::new(),
     }
 }
 fn nest(keys: &[&str], mut value: Value) -> Value {
@@ -404,8 +418,13 @@ pub fn cook_batch<T>(session: &mut Session, target: &mut String, requests: Vec<C
                 Edit::Bypass { node, flag } => session.set_bypass(&node, flag)?,
                 Edit::Display(node) => *target = node,
                 Edit::Replace(value) => {
-                    let graph = Graph::from_value(&value)?;
-                    *target = graph.main_output()?;
+                    let mut graph = Graph::from_value(&value)?;
+                    let displayed = display_nodes(&value);
+                    *target = if displayed.len() > 1 {
+                        let id = (0..).map(|i| format!("__display_merge_{i}")).find(|id| !graph.nodes.iter().any(|(name, _)| name == id)).unwrap();
+                        graph.nodes.push((id.clone(), minihou_core::graph::NodeDef { node_type: "merge".into(), inputs: vec![("geos".into(), displayed)], params: None, bypass: false }));
+                        id
+                    } else { graph.main_output()? };
                     *session = Session::new(graph);
                 }
             }

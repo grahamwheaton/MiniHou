@@ -38,6 +38,10 @@ pub fn show(ctx: &egui::Context, open: &mut bool, prefs: &mut Preferences, keyma
                         }
                         Tab::Viewport => {
                             heading(ui,"Viewport",theme);
+                            ui.horizontal(|ui| { ui.label("Navigation"); egui::ComboBox::from_id_salt("navigation").selected_text(match prefs.viewport.navigation { super::prefs::Navigation::Blender => "Blender (middle mouse orbit)", super::prefs::Navigation::Houdini => "Houdini / MiniHou" }).show_ui(ui, |ui| {
+                                changed |= ui.selectable_value(&mut prefs.viewport.navigation, super::prefs::Navigation::Blender, "Blender (middle mouse orbit)").changed();
+                                changed |= ui.selectable_value(&mut prefs.viewport.navigation, super::prefs::Navigation::Houdini, "Houdini / MiniHou").changed();
+                            }); });
                             ui.horizontal(|ui| { ui.label("Default shading");
                                 egui::ComboBox::from_id_salt("default_shading").selected_text(&prefs.viewport.default_shading).show_ui(ui, |ui| {
                                     for mode in ["Shaded","Wireframe","Solid"] {

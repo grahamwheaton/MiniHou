@@ -7,11 +7,12 @@ use eframe::egui::{self, pos2, Color32, FontId, Id, Key, Order, Pos2, RichText, 
 use shelf_data::TABS;
 
 #[derive(Clone)]
-pub(super) struct MenuState { at: Pos2, target: Option<String>, add: bool, category: Option<usize>, query: String, active: usize, focus: bool }
+pub(super) struct MenuState { at: Pos2, target: Option<String>, add: bool, pie: bool, category: Option<usize>, query: String, active: usize, focus: bool }
 impl MenuState {
     pub(super) fn new(at: Pos2, target: Option<String>, add: bool) -> Self {
-        Self { at, target, add, category: None, query: String::new(), active: 0, focus: true }
+        Self { at, target, add, pie: false, category: None, query: String::new(), active: 0, focus: true }
     }
+    pub(super) fn pie(at: Pos2) -> Self { let mut menu = Self::new(at, None, true); menu.pie = true; menu }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -37,6 +38,14 @@ fn entries(menu: &MenuState) -> Vec<(String, Entry)> {
         if let Some(tab) = TABS.get(index) {
             return tab.tools.iter().map(|tool| (tool.label.to_owned(), Entry::Tool(tool.node_type))).collect();
         }
+    }
+    if menu.pie {
+        return ["Adjust", "Deform", "Polygons", "Group", "Create", "Build", "Edges", "Modify"].into_iter().enumerate()
+            .map(|(slot, name)| {
+                let catalog = ["Model", "Deform", "Polygon", "Groups", "Create", "Model", "Edges", "Modify"][slot];
+                let index = TABS.iter().position(|tab| tab.name == catalog).unwrap_or(0);
+                (format!("{}  {name}", slot + 1), Entry::Category(index))
+            }).collect();
     }
     TABS.iter().enumerate().filter(|(_, tab)| !tab.tools.is_empty())
         .map(|(index, tab)| (format!("{}  ›", tab.name), Entry::Category(index))).collect()
@@ -85,11 +94,16 @@ fn activate(entry: Entry, menu: &mut MenuState, v: &View, out: &mut Actions) -> 
 
 pub(super) fn show(ctx: &egui::Context, id: Id, menu: &mut MenuState, v: &View, out: &mut Actions) -> Option<Choice> {
     if ctx.input(|i| i.key_pressed(Key::Escape)) {
-        if menu.add && menu.category.is_some() && menu.query.is_empty() { menu.category = None; return None; }
         return Some(Choice::Close);
     }
     let mut chosen = None;
     let mut shown = entries(menu);
+    if menu.pie {
+        for (slot, key) in [Key::Num1, Key::Num2, Key::Num3, Key::Num4, Key::Num5, Key::Num6, Key::Num7, Key::Num8].into_iter().enumerate() {
+            if ctx.input(|i| i.key_pressed(key)) { chosen = shown.get(slot).map(|(_, entry)| *entry); break; }
+        }
+        if let Some(entry) = chosen { return activate(entry, menu, v, out); }
+    }
     if !shown.is_empty() { menu.active = menu.active.min(shown.len() - 1); }
     if ctx.input(|i| i.key_pressed(Key::ArrowDown)) && !shown.is_empty() { menu.active = (menu.active + 1) % shown.len(); }
     if ctx.input(|i| i.key_pressed(Key::ArrowUp)) && !shown.is_empty() { menu.active = (menu.active + shown.len() - 1) % shown.len(); }
@@ -140,5 +154,10 @@ mod tests {
         let mut menu = MenuState::new(Pos2::ZERO, None, true);
         menu.query = "grid".into();
         assert!(entries(&menu).iter().any(|(_, entry)| matches!(entry, Entry::Tool("grid"))));
+    }
+    #[test] fn pie_number_slots_follow_web_main_page() {
+        let menu = MenuState::pie(Pos2::ZERO);
+        let labels: Vec<_> = entries(&menu).into_iter().map(|(label, _)| label).collect();
+        assert_eq!(labels, ["1  Adjust", "2  Deform", "3  Polygons", "4  Group", "5  Create", "6  Build", "7  Edges", "8  Modify"]);
     }
 }

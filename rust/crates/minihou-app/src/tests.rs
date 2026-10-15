@@ -60,6 +60,18 @@ fn display_selection_is_saved_and_does_not_change_other_fields() {
     assert_eq!(doc.session().unwrap().cook(None).unwrap().npoints,9);
 }
 #[test]
+fn display_list_round_trip_and_cooks_merged_outputs() {
+    let mut doc = Document::parse(json!({"version":1,"nodes":{"box1":{"type":"box"},"sphere1":{"type":"sphere"}},"display":"box1"}).to_string()).unwrap();
+    doc.set_display_nodes(&["box1".into(), "sphere1".into()]).unwrap();
+    let restored = Document::parse(doc.text().to_owned()).unwrap();
+    assert_eq!(restored.display_nodes(), vec!["box1", "sphere1"]);
+    let mut session = restored.session().unwrap();
+    let mut target = "box1".to_owned();
+    let response = cook_batch(&mut session, &mut target, vec![request(1, Edit::Replace(restored.value().clone()))], |_| ());
+    assert!(response.error.is_none(), "{:?}", response.error);
+    assert!(response.geometry.unwrap().npoints > session.cook(Some("box1")).unwrap().npoints);
+}
+#[test]
 fn invalid_edits_leave_document_unchanged() {
     let mut doc=Document::parse(SMALL.into()).unwrap();
     let mut session=doc.session().unwrap();

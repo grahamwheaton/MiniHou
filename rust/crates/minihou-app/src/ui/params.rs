@@ -132,7 +132,7 @@ fn header(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &st
         ("Mute", bypass, v.theme.warn, 56.),
         ("Locked", locked, v.theme.dim, 65.),
         ("Template", template, v.theme.tpl, 78.),
-        ("Visible", v.display == id, v.theme.accent, 68.),
+        ("Visible", minihou_app::display_nodes(v.doc).iter().any(|node| node == id), v.theme.accent, 68.),
     ] {
         if label == "Template" {
             ui.painter().line_segment([Pos2::new(fx + 2., fy + 4.), Pos2::new(fx + 2., fy + 20.)], Stroke::new(1.0_f32, v.theme.stroke));
@@ -148,7 +148,7 @@ fn header(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &st
                 "Mute" => out.push(UiAction::Edit { edit: Edit::Bypass { node: id.to_owned(), flag: !bypass }, continuous: false }),
                 "Locked" => out.push(UiAction::ToggleLocked(id.to_owned())),
                 "Template" => out.push(UiAction::ToggleTemplate(id.to_owned())),
-                _ => out.push(UiAction::SetDisplay(id.to_owned())),
+                _ => out.push(if ui.input(|i| i.modifiers.shift) { UiAction::ToggleDisplay(id.to_owned()) } else { UiAction::SetDisplay(id.to_owned()) }),
             }
         }
         fx += width + 6.;

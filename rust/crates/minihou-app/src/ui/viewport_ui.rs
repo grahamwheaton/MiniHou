@@ -19,6 +19,22 @@ const FRAME_END: u32 = 240;
 /// UI-only viewport state (nothing here reaches the engine yet).
 #[derive(Clone)]
 struct VpState { popover: Option<Popover>, frame: u32, playing: bool, clock: f32 }
+pub fn timeline_command(ctx: &egui::Context, command: &str) {
+    let id = egui::Id::new("viewport_ui_state");
+    ctx.data_mut(|d| {
+        let mut st: VpState = d.get_temp(id).unwrap_or_default();
+        match command {
+            "timeline_toggle" => st.playing = !st.playing,
+            "timeline_previous" => st.frame = st.frame.saturating_sub(1).max(FRAME_START),
+            "timeline_next" => st.frame = (st.frame + 1).min(FRAME_END),
+            "timeline_start" => { st.playing = false; st.frame = FRAME_START; }
+            "timeline_end" => { st.playing = false; st.frame = FRAME_END; }
+            _ => return,
+        }
+        d.insert_temp(id, st);
+    });
+    ctx.request_repaint();
+}
 impl Default for VpState {
     fn default() -> Self {
         Self { popover: None, frame: 48, playing: false, clock: 0. }
@@ -104,7 +120,7 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     for x in &h.seps { painter.line_segment([Pos2::new(*x, rect.top() + 9.), Pos2::new(*x, rect.top() + HEADER_H - 9.)], stroke); }
     for (i, r) in h.modes.iter().enumerate() {
         let mode = SelectionMode::ALL[i];
-        if button(ui, th, *r, ("vp_mode", i), ed.selection == mode, ["Object mode (Tab)", "Points (1)", "Edges (2)", "Faces (3)"][i], [Icon::Object, Icon::Points, Icon::Edges, Icon::Faces][i]) { out.push(UiAction::Editor(EditorChange::Selection(mode))); }
+        if button(ui, th, *r, ("vp_mode", i), ed.selection == mode, ["Objects (4)", "Points (1)", "Edges (2)", "Faces (3)"][i], [Icon::Object, Icon::Points, Icon::Edges, Icon::Faces][i]) { out.push(UiAction::Editor(EditorChange::Selection(mode))); }
     }
     if button_text(ui, th, h.orient, "vp_orient", st.popover == Some(Popover::Orientation), "Transform orientation", Icon::Orient, (Some(ed.orientation.label()), true)) { st.popover = toggle_popover(st.popover, Popover::Orientation); }
     if button_text(ui, th, h.pivot, "vp_pivot", st.popover == Some(Popover::Pivot), "Pivot point", Icon::Pivot, (None, true)) { st.popover = toggle_popover(st.popover, Popover::Pivot); }
@@ -434,6 +450,16 @@ fn icon(p: &egui::Painter, ic: Icon, r: Rect, col: Color32, tick: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn timeline_shortcuts_step_and_jump() {
+        let ctx = egui::Context::default();
+        timeline_command(&ctx, "timeline_start");
+        timeline_command(&ctx, "timeline_previous");
+        assert_eq!(ctx.data(|d| d.get_temp::<VpState>(egui::Id::new("viewport_ui_state")).unwrap().frame), FRAME_START);
+        timeline_command(&ctx, "timeline_next");
+        assert_eq!(ctx.data(|d| d.get_temp::<VpState>(egui::Id::new("viewport_ui_state")).unwrap().frame), FRAME_START + 1);
+        timeline_command(&ctx, "timeline_end");
+        assert_eq!(ctx.data(|d| d.get_temp::<VpState>(egui::Id::new("viewport_ui_state")).unwrap().frame), FRAME_END);
+    }
 
     fn overlap(a: &Rect, b: &Rect) -> bool { a.shrink(0.5).intersects(b.shrink(0.5)) }
 

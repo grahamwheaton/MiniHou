@@ -6,6 +6,10 @@ use eframe::egui::{self, pos2, Rect, Stroke, StrokeKind};
 struct State { armed: bool, start: Option<egui::Pos2>, extend: bool, subtract: bool }
 fn id() -> egui::Id { egui::Id::new("viewport_region_select") }
 pub fn active(ctx: &egui::Context) -> bool { ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| s.armed)) }
+pub fn arm(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(id(), State { armed: true, ..Default::default() }));
+    ctx.request_repaint();
+}
 pub fn show(ui: &mut egui::Ui, viewport: Rect, v: &View, out: &mut Actions) {
     let ctx = ui.ctx().clone(); let mut s: State = ctx.data_mut(|d| d.get_temp(id())).unwrap_or_default();
     if !s.armed && v.editor.tool == super::Tool::Select && ui.input(|i| i.key_pressed(egui::Key::B) && !i.modifiers.any()) { s.armed = true; }

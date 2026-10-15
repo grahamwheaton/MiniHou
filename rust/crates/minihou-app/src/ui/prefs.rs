@@ -5,13 +5,15 @@ use std::{fs, io, path::{Path, PathBuf}};
 pub const SCHEMA: u32 = 1;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThemePref { Dark, Light, System }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Navigation { Blender, Houdini }
 impl ThemePref {
     pub const ALL: [Self; 3] = [Self::Dark, Self::Light, Self::System];
     pub fn label(self) -> &'static str { match self { Self::Dark => "Dark", Self::Light => "Light", Self::System => "System" } }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct ViewportPreferences { pub default_shading: String, pub show_grid: bool, pub show_axes: bool, pub auto_budget: u32 }
-impl Default for ViewportPreferences { fn default() -> Self { Self { default_shading: "Shaded".into(), show_grid: true, show_axes: true, auto_budget: 400_000 } } }
+pub struct ViewportPreferences { pub default_shading: String, pub navigation: Navigation, pub show_grid: bool, pub show_axes: bool, pub auto_budget: u32 }
+impl Default for ViewportPreferences { fn default() -> Self { Self { default_shading: "Shaded".into(), navigation: Navigation::Blender, show_grid: true, show_axes: true, auto_budget: 400_000 } } }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub theme: ThemePref, pub ui_scale: f32, pub emulate_numpad: bool, pub snap_increment: f32,
@@ -51,6 +53,7 @@ impl Preferences {
         "keymap_overrides": self.keymap_overrides,
         "recent_files": self.recent_files.iter().take(10).collect::<Vec<_>>(),
         "viewport": { "default_shading": self.viewport.default_shading,
+            "navigation": match self.viewport.navigation { Navigation::Blender => "blender", Navigation::Houdini => "houdini" },
             "show_grid": self.viewport.show_grid, "show_axes": self.viewport.show_axes, "auto_budget": self.viewport.auto_budget },
     }) }
     fn from_json(v: &Value) -> Self {
@@ -66,6 +69,7 @@ impl Preferences {
             p.recent_files = xs.iter().filter_map(Value::as_str).take(10).map(PathBuf::from).collect();
         }
         if let Some(view) = v.get("viewport") {
+            if let Some(x) = view.get("navigation").and_then(Value::as_str) { p.viewport.navigation = if x == "houdini" { Navigation::Houdini } else { Navigation::Blender }; }
             if let Some(x) = view.get("default_shading").and_then(Value::as_str) { p.viewport.default_shading = x.to_owned(); }
             if let Some(x) = view.get("show_grid").and_then(Value::as_bool) { p.viewport.show_grid = x; }
             if let Some(x) = view.get("show_axes").and_then(Value::as_bool) { p.viewport.show_axes = x; }
@@ -97,5 +101,10 @@ impl Preferences {
     #[test] fn missing_fields_default_and_unknown_fields_ignored() {
         let p = Preferences::from_json(&json!({"schema":0,"theme":"Dark","unknown":42}));
         assert_eq!(p.theme,ThemePref::Dark); assert_eq!(p.ui_scale,1.); assert!(p.viewport.show_grid);
+    }
+    #[test] fn navigation_defaults_and_round_trips() {
+        assert_eq!(Preferences::default().viewport.navigation, Navigation::Blender);
+        let mut p = Preferences::default(); p.viewport.navigation = Navigation::Houdini;
+        assert_eq!(Preferences::from_json(&p.to_json()).viewport.navigation, Navigation::Houdini);
     }
 }

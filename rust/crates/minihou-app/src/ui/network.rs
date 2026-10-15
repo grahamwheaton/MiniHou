@@ -33,12 +33,32 @@ pub fn tidy(ctx: &egui::Context, path: &Path) {
     });
     ctx.request_repaint();
 }
+pub fn frame(ctx: &egui::Context, path: &Path) {
+    let id = state_id(path);
+    ctx.data_mut(|d| {
+        let mut state = d.get_persisted::<State>(id).unwrap_or_default();
+        state.zoom = -1.0;
+        d.insert_persisted(id, state);
+    });
+    ctx.request_repaint();
+}
 pub fn open_add_menu(ctx: &egui::Context, path: &Path) {
     let id = state_id(path);
     ctx.data_mut(|d| {
         let mut state = d.get_persisted::<State>(id).unwrap_or_default();
         state.list = false;
-        state.menu = Some(network_menu::MenuState::new(pos2(160., 190.), None, true));
+        let at = ctx.input(|i| i.pointer.hover_pos()).unwrap_or(pos2(160., 190.));
+        state.menu = Some(network_menu::MenuState::new(at, None, true));
+        d.insert_persisted(id, state);
+    });
+    ctx.request_repaint();
+}
+pub fn open_pie_menu(ctx: &egui::Context, path: &Path) {
+    let id = state_id(path);
+    ctx.data_mut(|d| {
+        let mut state = d.get_persisted::<State>(id).unwrap_or_default();
+        let at = ctx.input(|i| i.pointer.hover_pos()).unwrap_or(pos2(160., 190.));
+        state.menu = Some(network_menu::MenuState::pie(at));
         d.insert_persisted(id, state);
     });
     ctx.request_repaint();
@@ -157,7 +177,9 @@ fn list_ui(ui: &mut egui::Ui, r: Rect, v: &View, out: &mut Actions) {
     egui::ScrollArea::vertical().show(&mut child, |ui| {
         for (id, node) in &v.graph.nodes {
             ui.horizontal(|ui| {
-                if ui.radio(v.display == id, "").on_hover_text("Display this node").clicked() { out.push(UiAction::SetDisplay(id.clone())); }
+                if ui.radio(minihou_app::display_nodes(v.doc).iter().any(|node| node == id), "").on_hover_text("Display this node (Shift adds or removes)").clicked() {
+                    out.push(if ui.input(|i| i.modifiers.shift) { UiAction::ToggleDisplay(id.clone()) } else { UiAction::SetDisplay(id.clone()) });
+                }
                 if ui.selectable_label(v.selected == id, format!("{id}  {}", node.node_type)).clicked() { out.push(UiAction::Select(id.clone())); }
                 let mut bypass = node.bypass;
                 if ui.checkbox(&mut bypass, "").on_hover_text("Mute (bypass)").changed() {
@@ -232,7 +254,7 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
             for flag in 0..4 {
                 if ui.interact(flag_rect(card, flag), id.with(("flag", node_id, flag)), Sense::click())
                     .on_hover_text(["Mute", "Locked", "Template", "Visible"][flag]).clicked() {
-                    out.push(flag_action(flag, node_id, node.bypass));
+                    out.push(if flag == 3 && ctx.input(|i| i.modifiers.shift) { UiAction::ToggleDisplay(node_id.clone()) } else { flag_action(flag, node_id, node.bypass) });
                 }
             }
             card_ui(&p, card, node_id, node, v, state.zoom);
@@ -346,7 +368,7 @@ fn card_ui(p: &egui::Painter, r: Rect, id: &str, node: &NodeDef, v: &View, zoom:
     let flags = v.flags_of(id);
     let unsupported = !v.runs_on_rust(&node.node_type);
     let error = v.cooking.error.as_deref().filter(|e| e.contains(&format!("node '{id}'")));
-    let visible = v.display == id;
+    let visible = minihou_app::display_nodes(v.doc).iter().any(|node| node == id);
     let fill = if node.bypass { t.panel } else if error.is_some() { t.err_bg } else if visible { t.accent_bg } else { t.card };
     let border = if node.bypass { t.stroke } else if error.is_some() { t.err } else if unsupported { t.warn } else if flags.template { t.tpl } else if visible || v.cooking.cooking() { t.accent } else { t.stroke2 };
     p.rect_filled(r, 6.0 * zoom, fill);

@@ -1,14 +1,14 @@
-# MiniHou native editor
+﻿# MiniHou native editor
 
 Open a graph JSON file by passing its path to `minihou-app.exe`, or start the app without arguments for the demo graph. The top bar opens and saves files, changes shading, and opens Preferences. The shelf adds tools to the selected node; drag a tool into the network or viewport to add it there. The network editor selects, connects, duplicates, deletes, copies, and pastes nodes. The right panel edits parameters and shows geometry information. The centre viewport supports orbit, pan, zoom, mesh picking, view presets, and display proxy levels. The bottom strip shows cook state, file messages, and the Blender triangle cap when set.
 
-Click a shelf tool to add it; tools with a required input connect after the selected node, while generators remain unwired. In the network editor, `Ctrl+C` copies the selected node and `Ctrl+V` pastes it with a fresh ID. The internal wire mapping is preserved when a copied set contains more than one node. Drag from a node output to an input to connect it; use a node menu to disconnect an input.
+Click a shelf tool to add it; tools with a required input connect after the selected node, while generators remain unwired and join the displayed set. Click a blue Visible flag to show one node, or Shift-click to add or remove it from the displayed set. The graph stores one displayed node as a string and several as a list. Tab over the network or viewport opens the add menu at the pointer; type to filter, use arrows and Enter to add, or Esc to close it. In the network editor, `Ctrl+C` copies the selected node and `Ctrl+V` pastes it with a fresh ID. The internal wire mapping is preserved when a copied set contains more than one node. Drag from a node output to an input to connect it; use a node menu to disconnect an input.
 
-Preferences are available from the top bar or `Ctrl+,`. The Viewport tab contains the Auto proxy triangle budget. The viewport proxy menu has the Blender triangle cap; zero means unlimited. Preferences are stored in `%APPDATA%\MiniHou\preferences.json` on Windows.
+Preferences are available from the top bar. The Viewport tab contains the Blender and Houdini / MiniHou navigation styles and the Auto proxy triangle budget. Blender navigation (the default) uses middle mouse to orbit, Shift+middle to pan, Ctrl+middle to zoom, and the wheel to zoom. Houdini / MiniHou uses Alt+left to orbit, Alt+middle to pan, and Alt+right to zoom. The viewport proxy menu has the Blender triangle cap; zero means unlimited. Preferences are stored in `%APPDATA%\MiniHou\preferences.json` on Windows.
 
 ## Default keymap
 
-The table below is checked against `Keymap::blender()` by a unit test. Shortcuts in the Network context work while the pointer is over the network editor; viewport shortcuts work over the viewport. Alt+digit, Alt+Period, and Alt+Plus/Minus are numpad fallbacks because egui cannot distinguish numpad keys. Emulate Numpad uses plain digits for navigation and Shift+1/2/3 for element selection.
+The table below is checked against `Keymap::blender()` by a unit test. Shortcuts in the Network context work while the pointer is over the network editor; viewport shortcuts work over the viewport. Alt+1/3/5/7/9 and Alt+Period are numpad fallbacks because egui cannot distinguish numpad keys. Emulate Numpad uses plain 1/3/5/7/9 for views and Shift+1/2/3/4/5 for viewport modes. In the modeling menu, 1-8 choose a numbered category or tool.
 
 <!-- keymap:start -->
 | Shortcut | Command | Context |
@@ -16,19 +16,31 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | 1 | Points | Viewport |
 | 2 | Edges | Viewport |
 | 3 | Faces | Viewport |
-| Q | Select tool | Viewport |
+| 4 | Object | Viewport |
 | G | Move tool | Viewport |
 | R | Rotate tool | Viewport |
 | S | Scale tool | Viewport |
-| Tab | Toggle Object / edit mode | Viewport |
+| B | Box select | Viewport |
+| C | Circle select | Viewport |
 | A | Select all | Viewport |
-| Alt+A | Select none | Viewport |
-| H | Hide selected | Viewport |
-| Alt+H | Reveal hidden | Viewport |
-| Shift+A | Add node menu | Viewport |
-| N | Toggle parameters | Viewport |
-| Home | Frame all | Viewport |
-| Alt+Period | Frame selected | Viewport |
+| F | Frame selected | Viewport |
+| O | Proportional editing | Viewport |
+| 5 | Paint | Viewport |
+| E | Extrude | Viewport |
+| I | Inset | Viewport |
+| Escape | Select none | Viewport |
+| Ctrl+B | Bevel | Viewport |
+| Alt+E | Push / pull | Viewport |
+| Ctrl+R | Loop cut | Viewport |
+| Alt+N | Flip faces | Viewport |
+| Tab | Add node menu | Viewport |
+| Home | Frame selected | Viewport |
+| Space | Play / pause | Viewport |
+| Left | Previous frame | Viewport |
+| Right | Next frame | Viewport |
+| Shift+Left | First frame | Viewport |
+| Shift+Right | Last frame | Viewport |
+| Tab | Add node menu | Network |
 | Alt+1 | Front | Viewport |
 | Ctrl+Alt+1 | Back | Viewport |
 | Alt+3 | Right | Viewport |
@@ -36,36 +48,31 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Alt+7 | Top | Viewport |
 | Ctrl+Alt+7 | Bottom | Viewport |
 | Alt+5 | Toggle perspective / ortho | Viewport |
-| Alt+2 | Orbit down | Viewport |
-| Alt+4 | Orbit left | Viewport |
-| Alt+6 | Orbit right | Viewport |
-| Alt+8 | Orbit up | Viewport |
-| Ctrl+Alt+4 | Pan left | Viewport |
-| Ctrl+Alt+6 | Pan right | Viewport |
-| Ctrl+Alt+8 | Pan up | Viewport |
-| Ctrl+Alt+2 | Pan down | Viewport |
-| Alt+Plus | Zoom in | Viewport |
-| Alt+Minus | Zoom out | Viewport |
-| Alt+Z | X-ray | Viewport |
-| Shift+Tab | Snapping | Viewport |
-| O | Proportional editing | Viewport |
-| Z | Next shading | Viewport |
+| Alt+9 | Opposite view | Viewport |
+| Alt+Period | Frame selected | Viewport |
+| F | Frame all | Network |
+| L | Tidy network | Network |
+| O | Network box | Network |
+| C | Modeling pie menu | Network |
+| R | Display flag | Network |
+| M | Mute flag | Network |
+| E | Template flag | Network |
+| W | Selectable template flag | Network |
+| Shift+R | Display flag | Network |
 | Ctrl+Z | Undo | Everywhere |
 | Ctrl+Y | Redo | Everywhere |
 | Ctrl+Shift+Z | Redo | Everywhere |
 | Ctrl+S | Save | Everywhere |
 | Ctrl+Shift+S | Save as | Everywhere |
 | Ctrl+O | Open | Everywhere |
-| Ctrl+Comma | Preferences | Everywhere |
+| Ctrl+D | Duplicate node | Network |
 | Ctrl+C | Copy nodes | Network |
 | Ctrl+V | Paste nodes | Network |
-| Ctrl+L | Tidy network | Network |
-| X | Delete node | Viewport |
-| X | Delete node | Network |
-| Delete | Delete node | Viewport |
+| Ctrl+A | Select all | Network |
+| Ctrl+F | Find node | Network |
 | Delete | Delete node | Network |
-| Shift+D | Duplicate node | Viewport |
-| Shift+D | Duplicate node | Network |
+| Backspace | Delete node | Network |
+| X | Delete node | Network |
 <!-- keymap:end -->
 
 ## Known limitations

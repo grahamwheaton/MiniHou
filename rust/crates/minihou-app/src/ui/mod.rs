@@ -43,9 +43,11 @@ pub enum UiAction {
     /// Frame the mesh in the viewport.
     Frame,
     FrameSelected,
+    FrameNetwork,
     Select(String),
     /// "Visible" flag: make this node the displayed one.
     SetDisplay(String),
+    ToggleDisplay(String),
     /// A document edit (parameter, mute/bypass, display, whole-graph replace). `continuous` is true while a drag is in progress.
     Edit { edit: Edit, continuous: bool },
     /// A shelf tool: add a node of this type (after `after`, wired to it, when given).

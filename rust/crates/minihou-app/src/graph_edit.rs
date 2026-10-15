@@ -15,18 +15,40 @@ fn nodes_mut(value: &mut Value) -> Option<&mut Map<String, Value>> { value.get_m
 fn fresh_id(nodes: &Map<String, Value>, ty: &str) -> String {
     (1..).map(|n| format!("{ty}{n}")).find(|id| !nodes.contains_key(id)).unwrap()
 }
+pub fn set_display(value: &Value, id: &str, additive: bool) -> Option<Value> {
+    nodes(value)?.get(id)?;
+    let mut next = value.clone();
+    let mut displayed = minihou_app::display_nodes(value);
+    if additive {
+        if displayed.iter().any(|node| node == id) {
+            if displayed.len() > 1 { displayed.retain(|node| node != id); }
+        } else { displayed.push(id.to_owned()); }
+    } else { displayed = vec![id.to_owned()]; }
+    if displayed.is_empty() { next.as_object_mut()?.remove("display"); }
+    else { next["display"] = if displayed.len() == 1 { json!(displayed[0]) } else { json!(displayed) }; }
+    Some(next)
+}
 
 pub fn add(value: &Value, ty: &str, after: Option<&str>) -> Option<(Value, String)> {
     let spec = nodes::get(ty)?;
     let mut value = value.clone();
+    let displayed = minihou_app::display_nodes(&value);
     let all = nodes_mut(&mut value)?;
     let id = fresh_id(all, ty);
     let mut node = json!({"type": ty});
-    if let (Some(after), Some(port)) = (after.filter(|id| all.contains_key(*id)), spec.inputs.first().filter(|p| !p.optional)) {
+    let source = after.filter(|id| all.contains_key(*id));
+    if let (Some(after), Some(port)) = (source, spec.inputs.first().filter(|p| !p.optional)) {
         node["inputs"] = if port.multi { json!({port.name: [after]}) } else { json!({port.name: after}) };
     }
     all.insert(id.clone(), node);
-    value["display"] = json!(id);
+    let mut next = displayed;
+    if spec.inputs.iter().all(|port| port.optional) {
+        next.push(id.clone());
+    } else if let Some(source) = source {
+        if let Some(index) = next.iter().position(|item| item == source) { next[index] = id.clone(); }
+        else { next = vec![id.clone()]; }
+    } else { next = vec![id.clone()]; }
+    value["display"] = if next.len() == 1 { json!(next[0]) } else { json!(next) };
     Some((value, id))
 }
 
@@ -57,10 +79,11 @@ pub fn delete(value: &Value, id: &str) -> Option<Value> {
         });
     }
     let first = all.keys().next().cloned();
-    if value["display"] == id {
-        if let Some(first) = first { value["display"] = json!(first); }
-        else { value.as_object_mut()?.remove("display"); }
-    }
+    let mut displayed = minihou_app::display_nodes(&value);
+    displayed.retain(|item| item != id);
+    if displayed.is_empty() { if let Some(first) = first { displayed.push(first); } }
+    if displayed.is_empty() { value.as_object_mut()?.remove("display"); }
+    else { value["display"] = if displayed.len() == 1 { json!(displayed[0]) } else { json!(displayed) }; }
     Some(value)
 }
 
@@ -160,10 +183,24 @@ mod tests {
     }}) }
     #[test] fn add_and_duplicate_find_unused_ids() {
         let (v, id) = add(&graph(), "box", Some("box1")).unwrap();
-        assert_eq!(id, "box3"); assert_eq!(v["display"], id);
+        assert_eq!(id, "box3"); assert_eq!(minihou_app::display_nodes(&v), vec!["merge1", "box3"]);
         assert!(v["nodes"][&id].get("inputs").is_none()); validated(v.clone()).unwrap();
         let (v, next) = duplicate(&v, "box1").unwrap();
         assert_eq!(next, "box4"); assert_eq!(v["nodes"]["box4"], v["nodes"]["box1"]); validated(v).unwrap();
+    }
+    #[test] fn displayed_set_adds_generators_and_replaces_modifier_input() {
+        let base = json!({"version":1,"nodes":{"box1":{"type":"box"}},"display":"box1"});
+        let (two, sphere) = add(&base, "sphere", Some("box1")).unwrap();
+        assert_eq!(minihou_app::display_nodes(&two), vec!["box1", sphere.as_str()]);
+        assert!(two["nodes"][&sphere].get("inputs").is_none());
+        let (modified, transform) = add(&two, "transform", Some(&sphere)).unwrap();
+        assert_eq!(minihou_app::display_nodes(&modified), vec!["box1", transform.as_str()]);
+        assert_eq!(modified["nodes"][&transform]["inputs"]["geo"], sphere);
+        let removed = set_display(&modified, "box1", true).unwrap();
+        assert_eq!(minihou_app::display_nodes(&removed), vec![transform.as_str()]);
+        let only = set_display(&modified, "box1", false).unwrap();
+        assert_eq!(minihou_app::display_nodes(&only), vec!["box1"]);
+        assert_eq!(set_display(&only, "box1", true).unwrap()["display"], "box1");
     }
     #[test] fn only_required_first_inputs_are_wired_on_add() {
         let (v, id) = add(&graph(), "transform", Some("box1")).unwrap();
@@ -178,7 +215,7 @@ mod tests {
         assert_eq!(v["nodes"][&id]["inputs"]["geo"], "box1");
         assert_eq!(v["nodes"][&id]["params"]["points"], "0,0,0 1,0,0 1,1,0");
         assert_eq!(v["nodes"][&id]["params"]["closed"], true);
-        assert_eq!(v["display"], id);
+        assert_eq!(minihou_app::display_nodes(&v), vec!["merge1", id.as_str()]);
         validated(v).unwrap();
         let (v, id) = add_sketch(&graph(), "Line", &points[..2], false, "missing").unwrap();
         assert!(v["nodes"][&id].get("inputs").is_none());
