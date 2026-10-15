@@ -45,21 +45,22 @@ def _grad(h, x, y, z):
 
 @njit(**_OPTS)
 def _perlin(px, py, pz, seed_mix):
-    # px.. are float32 (cell selection must match numpy's float32 floor exactly)
+    # Every step after the floor is float32, as in _util.perlin3.
     fx0, fy0, fz0 = np.floor(px), np.floor(py), np.floor(pz)
-    fx, fy, fz = np.float64(px - fx0), np.float64(py - fy0), np.float64(pz - fz0)
+    fx, fy, fz = np.float32(px - fx0), np.float32(py - fy0), np.float32(pz - fz0)
     ix, iy, iz = np.int64(fx0), np.int64(fy0), np.int64(fz0)
-    ux = fx * fx * fx * (fx * (fx * 6.0 - 15.0) + 10.0)
-    uy = fy * fy * fy * (fy * (fy * 6.0 - 15.0) + 10.0)
-    uz = fz * fz * fz * (fz * (fz * 6.0 - 15.0) + 10.0)
+    six, fifteen, ten, one = np.float32(6), np.float32(15), np.float32(10), np.float32(1)
+    ux = fx * fx * fx * (fx * (fx * six - fifteen) + ten)
+    uy = fy * fy * fy * (fy * (fy * six - fifteen) + ten)
+    uz = fz * fz * fz * (fz * (fz * six - fifteen) + ten)
     g000 = _grad(_hash3(ix, iy, iz, seed_mix), fx, fy, fz)
-    g100 = _grad(_hash3(ix + 1, iy, iz, seed_mix), fx - 1.0, fy, fz)
-    g010 = _grad(_hash3(ix, iy + 1, iz, seed_mix), fx, fy - 1.0, fz)
-    g110 = _grad(_hash3(ix + 1, iy + 1, iz, seed_mix), fx - 1.0, fy - 1.0, fz)
-    g001 = _grad(_hash3(ix, iy, iz + 1, seed_mix), fx, fy, fz - 1.0)
-    g101 = _grad(_hash3(ix + 1, iy, iz + 1, seed_mix), fx - 1.0, fy, fz - 1.0)
-    g011 = _grad(_hash3(ix, iy + 1, iz + 1, seed_mix), fx, fy - 1.0, fz - 1.0)
-    g111 = _grad(_hash3(ix + 1, iy + 1, iz + 1, seed_mix), fx - 1.0, fy - 1.0, fz - 1.0)
+    g100 = _grad(_hash3(ix + 1, iy, iz, seed_mix), fx - one, fy, fz)
+    g010 = _grad(_hash3(ix, iy + 1, iz, seed_mix), fx, fy - one, fz)
+    g110 = _grad(_hash3(ix + 1, iy + 1, iz, seed_mix), fx - one, fy - one, fz)
+    g001 = _grad(_hash3(ix, iy, iz + 1, seed_mix), fx, fy, fz - one)
+    g101 = _grad(_hash3(ix + 1, iy, iz + 1, seed_mix), fx - one, fy, fz - one)
+    g011 = _grad(_hash3(ix, iy + 1, iz + 1, seed_mix), fx, fy - one, fz - one)
+    g111 = _grad(_hash3(ix + 1, iy + 1, iz + 1, seed_mix), fx - one, fy - one, fz - one)
     x00 = g000 + ux * (g100 - g000)
     x10 = g010 + ux * (g110 - g010)
     x01 = g001 + ux * (g101 - g001)
@@ -72,16 +73,16 @@ def _perlin(px, py, pz, seed_mix):
 @njit(**_OPTS)
 def _fbm_at(px, py, pz, seed, octaves, lacunarity, gain, norm):
     """Normalised fractal Perlin at one (float32) position. ``seed`` is already reduced to 32 bits."""
-    total = 0.0
+    total = np.float32(0)
     amp = 1.0
     freq = 1.0
     for o in range(octaves):
         f32 = np.float32(freq)
         seed_mix = (np.uint64(seed + o * 7919) * np.uint64(0x9E3779B1)) & _M
-        total += amp * _perlin(px * f32, py * f32, pz * f32, seed_mix)
+        total += np.float32(amp) * _perlin(px * f32, py * f32, pz * f32, seed_mix)
         amp *= gain
         freq *= lacunarity
-    return np.float32(total / norm) if norm > 0 else np.float32(total)
+    return total / np.float32(norm) if norm > 0 else total
 
 
 @njit(**_OPTS)

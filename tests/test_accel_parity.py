@@ -8,7 +8,7 @@ import unittest
 
 import numpy as np
 
-from minihou import Geometry, accel, lscm, preview, rust, topo
+from minihou import Evaluator, Geometry, Graph, accel, lscm, preview, rust, topo
 from minihou.nodes._util import fbm3
 from minihou.nodes.copy_to_points import copy_to_points
 from minihou.nodes.noise import noise
@@ -60,12 +60,65 @@ class AccelParityTests(unittest.TestCase):
                 p = rng.uniform(-4, 4, (size, 3)).astype(np.float32)
                 label = f"noise/_util.fbm3 seed={seed} size={size}"
                 ref, fast = _pair(lambda: fbm3(p, seed, 3, 2.1, 0.45))
-                _compare_array(ref, fast, label)
+                self.assertTrue(np.array_equal(ref, fast), label)
                 g = Geometry.points_only(p)
                 for mode, attr in (("scalar", "P"), ("vector", "flow"), ("scalar", "height")):
                     kw = (g, attr, mode, (0.3, 0.7, 1.1), 1.3, (0.2, -0.4, 0.1), 3, 2.1, 0.45, seed)
                     ref, fast = _pair(lambda: noise(*kw))
-                    _compare_geo(ref, fast, f"{label} mode={mode} attr={attr}")
+                    self.assertEqual(set(ref.point.names()), set(fast.point.names()))
+                    for name in ref.point.names():
+                        self.assertTrue(np.array_equal(ref.point[name], fast.point[name]),
+                                        f"{label} mode={mode} attr={attr} field={name}")
+
+    def test_noise_graph_exact(self):
+        rng = np.random.default_rng(781)
+        cases = [
+            {"seed": 0, "octaves": 1, "frequency": 0.0, "amplitude": [0, 0, 3.5]},
+            {"seed": -17, "octaves": 6, "frequency": 3.3, "offset": [0.25, -1.2, 2.1],
+             "amplitude": [-0.4, 0.7, 1.3], "lacunarity": 2.1, "gain": 0.45},
+            {"seed": 0xFFFFFFFF + 19, "octaves": 8, "frequency": 0.11,
+             "offset": [-1.3, 0.2, 0.7], "amplitude": [1.2, -0.7, 2.4],
+             "lacunarity": 1.7, "gain": 0.8},
+        ]
+        for _ in range(3):
+            cases.append({"seed": int(rng.integers(-10000, 10000)),
+                          "octaves": int(rng.integers(1, 9)),
+                          "frequency": float(rng.uniform(0.03, 4)),
+                          "offset": rng.uniform(-3, 3, 3).tolist(),
+                          "amplitude": rng.uniform(-2, 2, 3).tolist(),
+                          "lacunarity": float(rng.uniform(1, 3.5)),
+                          "gain": float(rng.uniform(0.1, 0.95))})
+        for rows, columns in ((2, 3), (37, 41), (128, 129)):
+            for case in cases:
+                for mode in ("scalar", "vector"):
+                    for attrib in ("P", "height", "velocity"):
+                        graph = Graph.from_dict({"version": 1, "nodes": {
+                            "grid": {"type": "grid", "params": {"rows": rows, "columns": columns,
+                                                                "size_x": 20, "size_y": 13}},
+                            "noise": {"type": "noise", "inputs": {"geo": "grid"},
+                                      "params": {**case, "mode": mode, "attrib": attrib}},
+                        }, "display": "noise"})
+                        with self.subTest(shape=(rows, columns), seed=case["seed"], mode=mode, attrib=attrib):
+                            ref, fast = _pair(lambda: Evaluator().cook(graph, "noise"))
+                            self.assertEqual(set(ref.point.names()), set(fast.point.names()))
+                            for name in ref.point.names():
+                                self.assertTrue(np.array_equal(ref.point[name], fast.point[name]), name)
+
+    def test_noise_then_erosion_graph_exact(self):
+        graph = Graph.from_dict({"version": 1, "nodes": {
+            "grid": {"type": "grid", "params": {"rows": 40, "columns": 40,
+                                                 "size_x": 10, "size_y": 10}},
+            "noise": {"type": "noise", "inputs": {"geo": "grid"},
+                      "params": {"amplitude": [0, 0, 3.5], "frequency": 0.11,
+                                 "octaves": 6, "seed": 4}},
+            "erode": {"type": "heightfield_erode", "inputs": {"geo": "noise"},
+                      "params": {"iterations": 2, "droplets": 300,
+                                 "thermal_iterations": 2, "seed": 17}},
+        }, "display": "erode"})
+        ref, fast = _pair(lambda: Evaluator().cook(graph, "erode"))
+        self.assertEqual(set(ref.point.names()), set(fast.point.names()))
+        for name in ref.point.names():
+            self.assertTrue(np.array_equal(ref.point[name], fast.point[name]), name)
 
     def test_scatter(self):
         for seed in (1, 9, 31):
