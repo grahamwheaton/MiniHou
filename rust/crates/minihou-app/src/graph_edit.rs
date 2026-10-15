@@ -1,0 +1,187 @@
+//! Pure document changes used by the network editor.
+use minihou_app::Document;
+use minihou_core::nodes;
+use serde_json::{json, Map, Value};
+use std::collections::{HashMap, HashSet};
+
+pub fn validated(value: Value) -> Result<Document, String> {
+    let text = serde_json::to_string_pretty(&value).map_err(|e| e.to_string())?;
+    Document::parse(text).map_err(|e| e.to_string())
+}
+
+fn nodes(value: &Value) -> Option<&Map<String, Value>> { value.get("nodes")?.as_object() }
+fn nodes_mut(value: &mut Value) -> Option<&mut Map<String, Value>> { value.get_mut("nodes")?.as_object_mut() }
+
+fn fresh_id(nodes: &Map<String, Value>, ty: &str) -> String {
+    (1..).map(|n| format!("{ty}{n}")).find(|id| !nodes.contains_key(id)).unwrap()
+}
+
+pub fn add(value: &Value, ty: &str, after: Option<&str>) -> Option<(Value, String)> {
+    let spec = nodes::get(ty)?;
+    let mut value = value.clone();
+    let all = nodes_mut(&mut value)?;
+    let id = fresh_id(all, ty);
+    let mut node = json!({"type": ty});
+    if let (Some(after), Some(port)) = (after.filter(|id| all.contains_key(*id)), spec.inputs.first()) {
+        node["inputs"] = if port.multi { json!({port.name: [after]}) } else { json!({port.name: after}) };
+    }
+    all.insert(id.clone(), node);
+    value["display"] = json!(id);
+    Some((value, id))
+}
+
+pub fn delete(value: &Value, id: &str) -> Option<Value> {
+    let mut value = value.clone();
+    let all = nodes_mut(&mut value)?;
+    all.remove(id)?;
+    for node in all.values_mut() {
+        let Some(inputs) = node.get_mut("inputs").and_then(Value::as_object_mut) else { continue };
+        inputs.retain(|_, source| match source {
+            Value::String(s) => s != id,
+            Value::Array(a) => { a.retain(|x| x.as_str() != Some(id)); !a.is_empty() }
+            _ => true,
+        });
+    }
+    let first = all.keys().next().cloned();
+    if value["display"] == id {
+        if let Some(first) = first { value["display"] = json!(first); }
+        else { value.as_object_mut()?.remove("display"); }
+    }
+    Some(value)
+}
+
+pub fn duplicate(value: &Value, id: &str) -> Option<(Value, String)> {
+    let mut value = value.clone();
+    let all = nodes_mut(&mut value)?;
+    let src = all.get(id)?.clone();
+    let ty = src.get("type").and_then(Value::as_str).unwrap_or("node");
+    let new_id = fresh_id(all, ty);
+    all.insert(new_id.clone(), src);
+    Some((value, new_id))
+}
+
+pub fn connect(value: &Value, from: &str, to: &str, port: Option<&str>) -> Option<Value> {
+    if from == to { return None; }
+    let all = nodes(value)?;
+    if !all.contains_key(from) { return None; }
+    let ty = all.get(to)?.get("type")?.as_str()?;
+    let spec = nodes::get(ty)?;
+    let input = match port { Some(name) => spec.inputs.iter().find(|p| p.name == name)?, None => spec.inputs.first()? };
+    let mut value = value.clone();
+    let target = nodes_mut(&mut value)?.get_mut(to)?;
+    if target.get("inputs").is_none() { target["inputs"] = json!({}); }
+    let inputs = target.get_mut("inputs")?.as_object_mut()?;
+    if input.multi {
+        let list = inputs.entry(input.name).or_insert_with(|| json!([]));
+        if let Some(a) = list.as_array_mut() { if !a.iter().any(|x| x.as_str() == Some(from)) { a.push(json!(from)); } }
+        else { *list = json!([from]); }
+    } else { inputs.insert(input.name.to_owned(), json!(from)); }
+    Some(value)
+}
+
+pub fn disconnect(value: &Value, node: &str, port: &str) -> Option<Value> {
+    let mut value = value.clone();
+    nodes_mut(&mut value)?.get_mut(node)?.get_mut("inputs")?.as_object_mut()?.remove(port)?;
+    Some(value)
+}
+
+/// The clipboard contains node definitions. References outside the copied set are dropped.
+pub fn copy(value: &Value, ids: &[String]) -> Option<Value> {
+    let all = nodes(value)?;
+    let selected: HashSet<_> = ids.iter().map(String::as_str).collect();
+    let mut copied = Map::new();
+    for id in ids {
+        let mut node = all.get(id)?.clone();
+        retain_wires(&mut node, &selected);
+        copied.insert(id.clone(), node);
+    }
+    (!copied.is_empty()).then(|| json!({"nodes": copied}))
+}
+
+fn retain_wires(node: &mut Value, ids: &HashSet<&str>) {
+    if let Some(inputs) = node.get_mut("inputs").and_then(Value::as_object_mut) {
+        inputs.retain(|_, source| match source {
+            Value::String(s) => ids.contains(s.as_str()),
+            Value::Array(a) => { a.retain(|x| x.as_str().is_some_and(|s| ids.contains(s))); !a.is_empty() }
+            _ => false,
+        });
+    }
+}
+
+pub fn paste(value: &Value, clipboard: &Value) -> Option<(Value, Vec<String>)> {
+    let copied = nodes(clipboard)?;
+    if copied.is_empty() { return None; }
+    let mut value = value.clone();
+    let all = nodes_mut(&mut value)?;
+    let mut ids = HashMap::new();
+    for (old, node) in copied {
+        let ty = node.get("type")?.as_str()?;
+        let id = fresh_id(all, ty);
+        all.insert(id.clone(), json!({"type": ty}));
+        ids.insert(old.as_str(), id);
+    }
+    for (old, src) in copied {
+        let mut node = src.clone();
+        if let Some(inputs) = node.get_mut("inputs").and_then(Value::as_object_mut) {
+            for source in inputs.values_mut() {
+                match source {
+                    Value::String(s) => if let Some(id) = ids.get(s.as_str()) { *s = id.clone(); },
+                    Value::Array(a) => for item in a { if let Some(id) = item.as_str().and_then(|s| ids.get(s)) { *item = json!(id); } },
+                    _ => {},
+                }
+            }
+        }
+        all.insert(ids[old.as_str()].clone(), node);
+    }
+    let new_ids = copied.keys().map(|old| ids[old.as_str()].clone()).collect();
+    Some((value, new_ids))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn graph() -> Value { json!({"version": 1, "display": "merge1", "nodes": {
+        "box1": {"type": "box"}, "box2": {"type": "box"},
+        "merge1": {"type": "merge", "inputs": {"geos": ["box1", "box2"]}}
+    }}) }
+    #[test] fn add_and_duplicate_find_unused_ids() {
+        let (v, id) = add(&graph(), "box", Some("box1")).unwrap();
+        assert_eq!(id, "box3"); assert_eq!(v["display"], id); validated(v.clone()).unwrap();
+        let (v, next) = duplicate(&v, "box1").unwrap();
+        assert_eq!(next, "box4"); assert_eq!(v["nodes"]["box4"], v["nodes"]["box1"]); validated(v).unwrap();
+    }
+    #[test] fn delete_cleans_wires_and_display() {
+        let v = delete(&graph(), "box1").unwrap();
+        assert_eq!(v["nodes"]["merge1"]["inputs"]["geos"], json!(["box2"])); validated(v).unwrap();
+        let v = delete(&graph(), "merge1").unwrap();
+        assert_ne!(v["display"], "merge1"); validated(v).unwrap();
+    }
+    #[test] fn connect_multi_and_disconnect() {
+        let v = connect(&graph(), "box1", "merge1", Some("geos")).unwrap();
+        assert_eq!(v["nodes"]["merge1"]["inputs"]["geos"], json!(["box1", "box2"]));
+        let v = disconnect(&v, "merge1", "geos").unwrap();
+        assert!(v["nodes"]["merge1"]["inputs"].get("geos").is_none()); validated(v).unwrap();
+    }
+    #[test] fn single_input_replaces_its_wire_and_invalid_commit_is_rejected() {
+        let mut v = graph();
+        v["nodes"]["transform1"] = json!({"type": "transform", "inputs": {"geo": "box1"}});
+        let v = connect(&v, "box2", "transform1", Some("geo")).unwrap();
+        assert_eq!(v["nodes"]["transform1"]["inputs"]["geo"], "box2");
+        assert!(connect(&v, "missing", "transform1", None).is_none());
+        assert!(connect(&v, "box2", "transform1", Some("missing")).is_none());
+        validated(v).unwrap();
+        let mut invalid = graph();
+        invalid["nodes"] = json!([]);
+        assert!(validated(invalid).is_err());
+    }
+    #[test] fn paste_remaps_only_internal_wires_and_ids_remain_unique() {
+        let source = graph();
+        let clip = copy(&source, &["box1".into(), "merge1".into()]).unwrap();
+        assert_eq!(clip["nodes"]["merge1"]["inputs"]["geos"], json!(["box1"]));
+        let (v, ids) = paste(&source, &clip).unwrap();
+        assert_eq!(ids, ["box3", "merge2"]);
+        assert_eq!(v["nodes"]["merge2"]["inputs"]["geos"], json!(["box3"]));
+        let (v, ids) = paste(&v, &clip).unwrap();
+        assert_eq!(ids, ["box4", "merge3"]); validated(v).unwrap();
+    }
+}

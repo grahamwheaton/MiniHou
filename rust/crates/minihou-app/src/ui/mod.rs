@@ -186,4 +186,48 @@ pub mod testing {
         assert!(f.run(super::params::show).is_empty());
         assert!(f.run(super::status::show).is_empty());
     }
+
+    #[test]
+    fn every_panel_renders_in_both_themes() {
+        for theme in [theme::Theme::dark(), theme::Theme::light()] {
+            let mut f = Fixture::new();
+            f.theme = theme;
+            for panel in [super::topbar::show as fn(&mut egui::Ui, &View, &mut Actions),
+                super::shelf::show, super::network::show, super::params::show,
+                super::status::show, super::geo_info::show, super::blender_ui::indicator,
+                super::proxy_ui::menu] {
+                assert!(f.run(panel).is_empty());
+            }
+            assert!(f.run(|ui, v, out| super::viewport_ui::overlay(ui, ui.max_rect(), v, out)).is_empty());
+            assert!(f.run(|ui, v, out| { let mut shown = true; super::blender_ui::bar(ui, v, out, &mut shown); }).is_empty());
+            let ctx = egui::Context::default();
+            f.theme.apply(&ctx);
+            let mut open = true;
+            let mut prefs = super::keymap::Preferences::default();
+            let mut keymap = super::keymap::Keymap::blender();
+            let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280., 800.))), ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                assert!(!super::keymap::show_preferences(ctx, &mut open, &mut prefs, &mut keymap, &f.theme));
+            });
+        }
+    }
+    #[test]
+    fn light_theme_ink_is_legible_on_selected_fills() {
+        fn luminance(color: egui::Color32) -> f32 {
+            let channel = |value: u8| {
+                let x = f32::from(value) / 255.;
+                if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) }
+            };
+            0.2126 * channel(color.r()) + 0.7152 * channel(color.g()) + 0.0722 * channel(color.b())
+        }
+        fn contrast(a: egui::Color32, b: egui::Color32) -> f32 {
+            let (lo, hi) = (luminance(a), luminance(b));
+            (hi.max(lo) + 0.05) / (hi.min(lo) + 0.05)
+        }
+        let t = theme::Theme::light();
+        assert!(contrast(t.text, t.accent_bg) >= 4.5);
+        for (ink, fill) in [(t.sel, t.warn), (t.card, t.dim), (t.sel, t.tpl), (t.sel, t.accent)] {
+            assert!(contrast(ink, fill) >= 3., "{ink:?} on {fill:?}");
+        }
+    }
 }

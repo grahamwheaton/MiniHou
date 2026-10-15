@@ -10,8 +10,8 @@ impl ThemePref {
     pub fn label(self) -> &'static str { match self { Self::Dark => "Dark", Self::Light => "Light", Self::System => "System" } }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct ViewportPreferences { pub default_shading: String, pub show_grid: bool, pub show_axes: bool }
-impl Default for ViewportPreferences { fn default() -> Self { Self { default_shading: "Shaded".into(), show_grid: true, show_axes: true } } }
+pub struct ViewportPreferences { pub default_shading: String, pub show_grid: bool, pub show_axes: bool, pub auto_budget: u32 }
+impl Default for ViewportPreferences { fn default() -> Self { Self { default_shading: "Shaded".into(), show_grid: true, show_axes: true, auto_budget: 400_000 } } }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub theme: ThemePref, pub ui_scale: f32, pub emulate_numpad: bool, pub snap_increment: f32,
@@ -51,7 +51,7 @@ impl Preferences {
         "keymap_overrides": self.keymap_overrides,
         "recent_files": self.recent_files.iter().take(10).collect::<Vec<_>>(),
         "viewport": { "default_shading": self.viewport.default_shading,
-            "show_grid": self.viewport.show_grid, "show_axes": self.viewport.show_axes },
+            "show_grid": self.viewport.show_grid, "show_axes": self.viewport.show_axes, "auto_budget": self.viewport.auto_budget },
     }) }
     fn from_json(v: &Value) -> Self {
         let mut p = Self { theme: match v.get("theme").and_then(Value::as_str) {
@@ -69,6 +69,7 @@ impl Preferences {
             if let Some(x) = view.get("default_shading").and_then(Value::as_str) { p.viewport.default_shading = x.to_owned(); }
             if let Some(x) = view.get("show_grid").and_then(Value::as_bool) { p.viewport.show_grid = x; }
             if let Some(x) = view.get("show_axes").and_then(Value::as_bool) { p.viewport.show_axes = x; }
+            if let Some(x) = view.get("auto_budget").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()) { p.viewport.auto_budget = x.max(1); }
         }
         p
     }
@@ -82,7 +83,8 @@ impl Preferences {
     fn test_path(name: &str) -> PathBuf { std::env::temp_dir().join(format!("minihou-{name}-{}",std::process::id())).join("preferences.json") }
     #[test] fn round_trip() {
         let path = test_path("prefs-roundtrip");
-        let p = Preferences { theme: ThemePref::Light, ui_scale: 1.25, recent_files: vec![PathBuf::from("a.hou")], ..Default::default() };
+        let mut p = Preferences { theme: ThemePref::Light, ui_scale: 1.25, recent_files: vec![PathBuf::from("a.hou")], ..Default::default() };
+        p.viewport.auto_budget = 250_000;
         p.save_to(&path).unwrap(); p.save_to(&path).unwrap(); assert_eq!(Preferences::load_from(&path),p);
         let _ = fs::remove_file(path);
     }

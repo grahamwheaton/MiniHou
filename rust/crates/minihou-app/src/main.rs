@@ -1,10 +1,11 @@
 mod picking;
+mod graph_edit;
 mod ui;
 mod viewport;
 use eframe::{egui, egui_wgpu};
 use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, CookRequest, CookState, StandardView};
 use minihou_core::Graph;
-use serde_json::json;
+use serde_json::Value;
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 use ui::keymap::{KeyContext, Keymap, Preferences, ThemePref};
 use ui::{theme::Theme, Actions, BlenderStatus, CameraInfo, EditorState, GeoSummary, NodeFlags, UiAction, View};
@@ -24,6 +25,7 @@ struct App {
     scene: Option<Scene>, shown_level: f32, geo_rev: u64,
     blender_paths: Vec<PathBuf>, blender_bar: bool,
     selection: picking::Selection, selection_dirty: bool,
+    clipboard: Option<Value>,
 }
 impl App {
     fn new(doc: Document, path: PathBuf, state: egui_wgpu::RenderState) -> Result<Self> {
@@ -34,7 +36,7 @@ impl App {
             camera:Camera::frame([0.;3],1.),bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new(),
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
-            scene:None,shown_level:1.0,geo_rev:u64::MAX,blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false };
+            scene:None,shown_level:1.0,geo_rev:u64::MAX,blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,clipboard:None };
         app.prefs = Preferences::load();
         app.keymap = Keymap::from_overrides_json(&app.prefs.keymap_overrides);
         app.keymap.emulate_numpad = app.prefs.emulate_numpad;
@@ -88,23 +90,14 @@ impl App {
     /// The fraction of triangles to show: the menu's level, or one picked from the triangle count when Auto is on.
     fn proxy_level(&self, triangles: usize) -> f32 {
         let p = self.editor_state.proxy;
-        if p.auto { ui::proxy_ui::proxy::auto_level(triangles, 400_000) } else { p.level }
+        if p.auto { ui::proxy_ui::proxy::auto_level(triangles, self.prefs.viewport.auto_budget as usize) } else { p.level }
     }
     /// A shelf tool: a new node of `node_type` wired to `after` (its first input) and made the displayed node; one undo step.
     fn add_node(&mut self, node_type: &str, after: Option<&str>) {
-        let Some(spec) = minihou_core::nodes::get(node_type) else {
+        let Some((value, id)) = graph_edit::add(self.editor.doc.value(), node_type, after) else {
             self.file_status = format!("The Rust core has no {node_type} node yet");
             return;
         };
-        let mut value = self.editor.doc.value().clone();
-        let Some(nodes) = value.get_mut("nodes").and_then(|n| n.as_object_mut()) else { return };
-        let id = (1..).map(|n| format!("{node_type}{n}")).find(|id| !nodes.contains_key(id)).unwrap();
-        let mut node = json!({ "type": node_type });
-        if let (Some(after), Some(port)) = (after.filter(|a| nodes.contains_key(*a)), spec.inputs.first()) {
-            node["inputs"] = if port.multi { json!({ port.name: [after] }) } else { json!({ port.name: after }) };
-        }
-        nodes.insert(id.clone(), node);
-        value["display"] = json!(id);
         if self.commit_document(value, &format!("add {node_type}")) {
             self.selected = id.clone();
             self.display = id;
@@ -112,8 +105,7 @@ impl App {
     }
     /// Make `value` the document as one undo step and send it to the cook worker; false (with a status message) when it is invalid.
     fn commit_document(&mut self, value: serde_json::Value, what: &str) -> bool {
-        let doc = serde_json::to_string_pretty(&value).map_err(|e| e.to_string()).and_then(|t| Document::parse(t).map_err(|e| e.to_string()));
-        match doc {
+        match graph_edit::validated(value) {
             Ok(new) => {
                 self.editor.history.replace(&mut self.editor.doc, new);
                 self.send(Edit::Replace(self.editor.doc.value().clone()));
@@ -124,21 +116,7 @@ impl App {
     }
     /// Delete a node and every wire into it.
     fn delete_node(&mut self, id: &str) {
-        let mut value = self.editor.doc.value().clone();
-        let Some(nodes) = value.get_mut("nodes").and_then(|n| n.as_object_mut()) else { return };
-        if nodes.remove(id).is_none() { return; }
-        for node in nodes.values_mut() {
-            let Some(inputs) = node.get_mut("inputs").and_then(|i| i.as_object_mut()) else { continue };
-            inputs.retain(|_, v| match v {
-                serde_json::Value::String(s) => s != id,
-                serde_json::Value::Array(a) => { a.retain(|x| x != id); !a.is_empty() }
-                _ => true,
-            });
-        }
-        let first = nodes.keys().next().cloned();
-        if value["display"] == json!(id) {
-            match first { Some(f) => value["display"] = json!(f), None => { value.as_object_mut().map(|o| o.remove("display")); } }
-        }
+        let Some(value) = graph_edit::delete(self.editor.doc.value(), id) else { return };
         if self.commit_document(value, "delete the node") {
             if let Ok(g) = Graph::from_value(self.editor.doc.value()) {
                 if self.selected == id { self.selected = g.nodes.first().map(|(n, _)| n.clone()).unwrap_or_default(); }
@@ -148,45 +126,34 @@ impl App {
     }
     /// Copy a node (parameters and inputs) under a fresh id and select the copy.
     fn duplicate_node(&mut self, id: &str) {
-        let mut value = self.editor.doc.value().clone();
-        let Some(nodes) = value.get_mut("nodes").and_then(|n| n.as_object_mut()) else { return };
-        let Some(src) = nodes.get(id).cloned() else { return };
-        let ty = src["type"].as_str().unwrap_or("node").to_owned();
-        let new_id = (1..).map(|n| format!("{ty}{n}")).find(|c| !nodes.contains_key(c)).unwrap();
-        nodes.insert(new_id.clone(), src);
+        let Some((value, new_id)) = graph_edit::duplicate(self.editor.doc.value(), id) else { return };
         if self.commit_document(value, "duplicate the node") { self.selected = new_id; }
     }
     /// Wire `from` into input `port` of `to` (its first input when `port` is None); multi inputs gain one more wire.
     fn connect_nodes(&mut self, from: &str, to: &str, port: Option<&str>) {
-        let Some(ty) = Graph::from_value(self.editor.doc.value()).ok()
-            .and_then(|g| g.nodes.iter().find(|(n, _)| n == to).map(|(_, d)| d.node_type.clone())) else { return };
-        let Some(spec) = minihou_core::nodes::get(&ty) else { self.file_status = format!("The Rust core has no {ty} node yet"); return };
-        let Some(input) = port.and_then(|p| spec.inputs.iter().find(|i| i.name == p)).or_else(|| spec.inputs.first()) else {
-            self.file_status = format!("{to} has no inputs");
-            return;
-        };
-        if from == to { return; }
-        let mut value = self.editor.doc.value().clone();
-        let Some(node) = value["nodes"].get_mut(to) else { return };
-        if node.get("inputs").is_none() { node["inputs"] = json!({}); }
-        if input.multi {
-            let list = node["inputs"].as_object_mut().unwrap().entry(input.name).or_insert_with(|| json!([]));
-            if let Some(a) = list.as_array_mut() { if !a.iter().any(|x| x == from) { a.push(json!(from)); } } else { *list = json!([from]); }
-        } else {
-            node["inputs"][input.name] = json!(from);
-        }
+        let Some(value) = graph_edit::connect(self.editor.doc.value(), from, to, port) else { return };
         self.commit_document(value, "connect the nodes");
     }
     fn disconnect_input(&mut self, node: &str, port: &str) {
-        let mut value = self.editor.doc.value().clone();
-        let removed = value["nodes"].get_mut(node).and_then(|n| n.get_mut("inputs")).and_then(|i| i.as_object_mut()).and_then(|i| i.remove(port));
-        if removed.is_some() { self.commit_document(value, "disconnect the input"); }
+        if let Some(value) = graph_edit::disconnect(self.editor.doc.value(), node, port) { self.commit_document(value, "disconnect the input"); }
     }
     /// Keymap commands that have no dedicated action.
     fn command(&mut self, name: &str) {
         use ui::EditorChange as C;
         let e = self.editor_state;
         match name {
+            "copy" => {
+                self.clipboard = graph_edit::copy(self.editor.doc.value(), std::slice::from_ref(&self.selected));
+                if self.clipboard.is_some() { self.file_status = "Node copied".into(); }
+            }
+            "paste" => {
+                if let Some((value, ids)) = self.clipboard.as_ref().and_then(|clip| graph_edit::paste(self.editor.doc.value(), clip)) {
+                    if self.commit_document(value, "paste nodes") {
+                        self.selected = ids[0].clone();
+                        self.file_status = format!("Pasted {} node(s)", ids.len());
+                    }
+                }
+            }
             "xray" => self.editor_state.apply(C::Xray(!e.xray)),
             "snap" => self.editor_state.apply(C::SnapEnabled(!e.snap.enabled)),
             "proportional" => self.editor_state.apply(C::ProportionalEnabled(!e.proportional.enabled)),
@@ -346,7 +313,7 @@ impl eframe::App for App {
             let net = egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| ui::network::show(ui, &v, &mut out));
             self.network_hover = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| net.response.rect.contains(p));
             if let Some(tool) = net.response.dnd_release_payload::<ui::ToolDrag>() {
-                out.push(UiAction::AddNode { node_type: tool.0.clone(), after: Some(self.selected.clone()) });
+                out.push(ui::shelf::dropped_tool(&tool, &self.selected));
             }
             egui::SidePanel::right("parameters").default_width(320.).show(ctx, |ui| {
                 egui::TopBottomPanel::bottom("geometry_info").resizable(true).default_height(220.).show_inside(ui, |ui| ui::geo_info::show(ui, &v, &mut out));
@@ -387,7 +354,7 @@ impl eframe::App for App {
                     }
                 }
                 if let Some(tool) = response.dnd_release_payload::<ui::ToolDrag>() {
-                    out.push(UiAction::AddNode { node_type: tool.0.clone(), after: Some(self.selected.clone()) });
+                    out.push(ui::shelf::dropped_tool(&tool, &self.selected));
                 }
                 ui::viewport_ui::overlay(ui, rect, &v, &mut out);
                 // proxy level, under the view gizmo

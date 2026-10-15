@@ -351,7 +351,9 @@ fn card_ui(p: &egui::Painter, r: Rect, id: &str, node: &NodeDef, v: &View, zoom:
         if !flag.is_multiple_of(2) { p.line_segment([pos2(fr.left(), fr.top()), pos2(fr.right(), fr.top())], Stroke::new(1.0_f32, t.stroke)); }
         let on = match flag { 0 => node.bypass, 1 => flags.locked, 2 => flags.template, _ => visible };
         if on { p.rect_filled(fr.shrink(1.0), 2.0 * zoom, [t.warn, t.dim, t.tpl, t.accent][flag]); }
-        flag_icon(p, fr.center(), flag, if on { Color32::WHITE } else { t.dim.gamma_multiply(if v.selected == id { 0.85 } else { 0.5 }) }, zoom);
+        let ink = if on { if flag == 1 && !t.dark { t.card } else { t.sel } }
+            else { t.dim.gamma_multiply(if v.selected == id { 0.85 } else { 0.5 }) };
+        flag_icon(p, fr.center(), flag, ink, zoom);
     }
     let face = Rect::from_min_max(pos2(left + 10.0 * zoom, r.top() + 7.0 * zoom), pos2(right - 10.0 * zoom, r.bottom() - 7.0 * zoom));
     let text = if node.bypass { t.faint } else { t.text };

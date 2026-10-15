@@ -32,17 +32,17 @@ pub enum Command {
     OrbitDown, OrbitLeft, OrbitRight, OrbitUp,
     PanLeft, PanRight, PanUp, PanDown, ZoomIn, ZoomOut,
     Xray, Snap, Proportional, ShadeNext, ShadePrevious,
-    Undo, Redo, Save, SaveAs, Open, DeleteNode, DuplicateNode,
+    Undo, Redo, Save, SaveAs, Open, Copy, Paste, DeleteNode, DuplicateNode,
     TidyNetwork, Preferences,
 }
 impl Command {
-    pub const ALL: [Self; 37] = [Self::Points, Self::Edges, Self::Faces, Self::Object,
+    pub const ALL: [Self; 39] = [Self::Points, Self::Edges, Self::Faces, Self::Object,
         Self::FrameAll, Self::FrameSelected, Self::Front, Self::Back, Self::Right, Self::Left,
         Self::Top, Self::Bottom, Self::ToggleProjection, Self::OrbitDown, Self::OrbitLeft,
         Self::OrbitRight, Self::OrbitUp, Self::PanLeft, Self::PanRight, Self::PanUp,
         Self::PanDown, Self::ZoomIn, Self::ZoomOut, Self::Xray, Self::Snap,
         Self::Proportional, Self::ShadeNext, Self::ShadePrevious, Self::Undo, Self::Redo,
-        Self::Save, Self::SaveAs, Self::Open, Self::DeleteNode, Self::DuplicateNode,
+        Self::Save, Self::SaveAs, Self::Open, Self::Copy, Self::Paste, Self::DeleteNode, Self::DuplicateNode,
         Self::TidyNetwork, Self::Preferences];
     pub fn label(self) -> &'static str { match self {
         Self::Points => "Points", Self::Edges => "Edges", Self::Faces => "Faces", Self::Object => "Object",
@@ -54,6 +54,7 @@ impl Command {
         Self::ZoomIn => "Zoom in", Self::ZoomOut => "Zoom out", Self::Xray => "X-ray", Self::Snap => "Snapping",
         Self::Proportional => "Proportional editing", Self::ShadeNext => "Next shading", Self::ShadePrevious => "Previous shading",
         Self::Undo => "Undo", Self::Redo => "Redo", Self::Save => "Save", Self::SaveAs => "Save as", Self::Open => "Open",
+        Self::Copy => "Copy nodes", Self::Paste => "Paste nodes",
         Self::DeleteNode => "Delete node", Self::DuplicateNode => "Duplicate node", Self::TidyNetwork => "Tidy network",
         Self::Preferences => "Preferences",
     } }
@@ -66,7 +67,7 @@ impl Command {
         Self::PanUp => "pan_up", Self::PanDown => "pan_down", Self::ZoomIn => "zoom_in", Self::ZoomOut => "zoom_out",
         Self::Xray => "xray", Self::Snap => "snap", Self::Proportional => "proportional", Self::ShadeNext => "shade_next",
         Self::ShadePrevious => "shade_previous", Self::Undo => "undo", Self::Redo => "redo", Self::Save => "save",
-        Self::SaveAs => "save_as", Self::Open => "open", Self::DeleteNode => "delete_node", Self::DuplicateNode => "duplicate_node",
+        Self::SaveAs => "save_as", Self::Open => "open", Self::Copy => "copy", Self::Paste => "paste", Self::DeleteNode => "delete_node", Self::DuplicateNode => "duplicate_node",
         Self::TidyNetwork => "tidy_network", Self::Preferences => "preferences",
     } }
     pub fn to_action(self, kctx: &KeyContext<'_>) -> Option<UiAction> { Some(match self {
@@ -87,6 +88,7 @@ impl Command {
         Self::SaveAs => UiAction::SaveAs, Self::Open => UiAction::Open,
         Self::DeleteNode => UiAction::DeleteNode(kctx.selected?.to_owned()),
         Self::DuplicateNode => UiAction::DuplicateNode(kctx.selected?.to_owned()),
+        Self::Copy | Self::Paste => UiAction::Command(self.id().to_owned()),
         Self::TidyNetwork => UiAction::TidyNetwork, Self::Preferences => UiAction::OpenPreferences,
         _ => UiAction::Command(self.id().to_owned()),
     }) }
@@ -119,7 +121,8 @@ impl Keymap {
         for (key,ctrl,shift,cmd) in [(K::Z,true,false,C::Undo),(K::Y,true,false,C::Redo),
             (K::Z,true,true,C::Redo),(K::S,true,false,C::Save),(K::S,true,true,C::SaveAs),
             (K::O,true,false,C::Open),(K::Comma,true,false,C::Preferences)] { add(key,ctrl,shift,false,cmd,X::Everywhere); }
-        for (key,ctrl,shift,cmd) in [(K::X,false,false,C::DeleteNode),(K::Delete,false,false,C::DeleteNode),
+        for (key,ctrl,shift,cmd) in [(K::C,true,false,C::Copy),(K::V,true,false,C::Paste),
+            (K::X,false,false,C::DeleteNode),(K::Delete,false,false,C::DeleteNode),
             (K::D,false,true,C::DuplicateNode),(K::L,true,false,C::TidyNetwork)] { add(key,ctrl,shift,false,cmd,X::Network); }
         Self { bindings: b, emulate_numpad: false }
     }
@@ -195,8 +198,22 @@ impl Keymap {
 }
 fn parse_key(name: &str) -> Option<Key> { Key::ALL.iter().copied().find(|k| format!("{k:?}") == name) }
 
+#[cfg(test)]
+fn default_keymap_table() -> String {
+    let mut rows = String::from("| Shortcut | Command | Context |\n| --- | --- | --- |\n");
+    for binding in Keymap::blender().bindings {
+        rows.push_str(&format!("| {} | {} | {:?} |\n", binding.chord.label(), binding.command.label(), binding.context));
+    }
+    rows
+}
+
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn guide_keymap_matches_defaults() {
+        let guide = include_str!("../../docs/NATIVE_EDITOR.md");
+        let table = guide.split_once("<!-- keymap:start -->\n").unwrap().1.split_once("<!-- keymap:end -->").unwrap().0;
+        assert_eq!(table, default_keymap_table());
+    }
     #[test] fn defaults_are_unambiguous() {
         let map = Keymap::blender();
         for (i,a) in map.bindings.iter().enumerate() { for b in &map.bindings[i+1..] {
@@ -217,6 +234,14 @@ fn parse_key(name: &str) -> Option<Key> { Key::ALL.iter().copied().find(|k| form
         let value = map.overrides_json(); assert_eq!(value["bindings"].as_array().unwrap().len(),1);
         assert_eq!(Keymap::from_overrides_json(&value).overrides_json(),value);
         map.reset(); assert_eq!(map.overrides_json()["bindings"].as_array().unwrap().len(),0);
+    }
+    #[test] fn copy_and_paste_are_network_commands() {
+        let map = Keymap::blender();
+        for (key, command) in [(Key::C, "copy"), (Key::V, "paste")] {
+            let binding = map.bindings.iter().find(|b| b.chord == Chord::new(key, true, false, false)).unwrap();
+            assert_eq!(binding.context, Context::Network);
+            assert!(matches!(binding.command.to_action(&KeyContext::default()), Some(UiAction::Command(name)) if name == command));
+        }
     }
     #[test] fn alternate_shortcut_round_trips_and_emulation_moves_selection() {
         let mut map = Keymap::blender();

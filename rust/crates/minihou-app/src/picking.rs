@@ -99,6 +99,7 @@ pub fn highlight(p: &[f32], tri: &[u32], sel: &Selection, size: f32) -> (Vec<f32
 #[cfg(test)]
 mod tests {
     use super::*;
+    use minihou_app::{Camera, StandardView};
 
     // two triangles forming a unit square in the z = 0 plane
     const P: [f32; 12] = [0., 0., 0., 1., 0., 0., 1., 1., 0., 0., 1., 0.];
@@ -153,5 +154,19 @@ mod tests {
         let (faces, lines) = highlight(&P, &T, &sel, 0.05);
         assert_eq!(faces.len(), 9);
         assert_eq!(lines.len(), 6 + 18);
+    }
+
+    #[test]
+    fn camera_center_ray_hits_mesh_in_perspective_and_orthographic_views() {
+        let vertices = [-1., -1., 0., 1., -1., 0., 0., 1., 0.];
+        let triangles = [0, 1, 2];
+        let mut camera = Camera::frame([0., 0., 0.], 1.);
+        for view in [StandardView::Perspective, StandardView::Front] {
+            camera.set_view(view);
+            let (origin, direction) = camera.ray(0., 0., 16. / 9.);
+            let hit = pick_triangle(&vertices, &triangles, origin, direction).unwrap();
+            assert_eq!(hit.tri, 0);
+            assert!(hit.t > 0.);
+        }
     }
 }

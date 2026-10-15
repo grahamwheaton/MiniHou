@@ -19,6 +19,8 @@ fn span(p: &egui::Painter, x: &mut f32, y: f32, text: &str, mono: bool, color: C
     *x += galley.size().x;
 }
 
+fn blender_cap_text(cap: u32) -> Option<String> { (cap > 0).then(|| format!("Blender cap: {cap} tris")) }
+
 pub fn show(ui: &mut egui::Ui, v: &View, _out: &mut Actions) {
     let (bar, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.), Sense::hover());
     let p = ui.painter();
@@ -54,6 +56,10 @@ pub fn show(ui: &mut egui::Ui, v: &View, _out: &mut Actions) {
             span(p, &mut x, y, &v.cooking.stats.cached.join(", "), true, v.theme.dim);
         }
     }
+    if let Some(cap) = blender_cap_text(v.editor.proxy.link_tris) {
+        x += 14.;
+        span(p, &mut x, y, &cap, true, v.theme.dim);
+    }
     let right = bar.right() - 10.;
     let file_width = if v.file_status.is_empty() { 0. } else { p.layout_no_wrap(v.file_status.to_owned(), FontId::proportional(12.), v.theme.dim).size().x + 14. };
     let chip = Rect::from_center_size(Pos2::new(right - file_width - 42., y), Vec2::new(84., 18.));
@@ -72,4 +78,8 @@ mod tests {
         assert_eq!(error_parts("unexpected failure"), (None, "unexpected failure"));
     }
     #[test] fn draws_a_frame() { assert!(Fixture::new().run(show).is_empty()); }
+    #[test] fn blender_cap_is_reported_when_enabled() {
+        assert_eq!(blender_cap_text(0), None);
+        assert_eq!(blender_cap_text(12_000).as_deref(), Some("Blender cap: 12000 tris"));
+    }
 }

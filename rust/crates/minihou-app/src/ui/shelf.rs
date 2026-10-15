@@ -1,10 +1,16 @@
 //! The two-row tool shelf.
 #[path = "shelf_data.rs"]
 mod shelf_data;
+#[path = "shelf_icons.rs"] mod shelf_icons;
 
 use super::{Actions, UiAction, View};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2};
 use shelf_data::{TABS, Tool};
+
+fn drag_payload(tool: &Tool) -> super::ToolDrag { super::ToolDrag(tool.node_type.to_owned()) }
+pub fn dropped_tool(tool: &super::ToolDrag, selected: &str) -> UiAction {
+    UiAction::AddNode { node_type: tool.0.clone(), after: Some(selected.to_owned()) }
+}
 
 fn line(p: &egui::Painter, o: Pos2, points: &[(f32, f32)], color: Color32) {
     for pair in points.windows(2) {
@@ -38,6 +44,7 @@ fn icon(p: &egui::Painter, r: Rect, tool: &Tool, color: Color32, accent: Color32
         "points_to_surface" => { p.circle_filled(o + Vec2::new(9.5, 13.), 6., accent); p.circle_filled(o + Vec2::new(16.5, 9.), 4.5, color.gamma_multiply(0.6)); }
         "file" => { line(p, o, &[(3., 19.), (3., 7.), (10., 7.), (12., 9.5), (21., 9.5), (21., 19.), (3., 19.)], color); }
         "host" => { p.rect_stroke(Rect::from_min_size(o + Vec2::new(11., 6.), Vec2::new(10., 12.)), 1., Stroke::new(1.5_f32, color), StrokeKind::Inside); line(p, o, &[(2.5, 12.), (15., 12.)], color); line(p, o, &[(10., 7.5), (14.5, 12.), (10., 16.5)], color); }
+        _ if shelf_icons::draw(p, o, tool.icon, color, accent) => {}
         _ => { let chip = Rect::from_center_size(c, Vec2::splat(22.)); p.rect_stroke(chip, 5., Stroke::new(1.5_f32, color), StrokeKind::Inside); let initials = initials(tool.label); p.text(c, Align2::CENTER_CENTER, initials, FontId::proportional(10.), color); }
     }
 }
@@ -117,7 +124,7 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
                 ui.spacing_mut().item_spacing.x = 2.;
                 for tool in TABS[active].tools {
                     let (r, response) = ui.allocate_exact_size(Vec2::new(54., 50.), Sense::click_and_drag());
-                    response.dnd_set_drag_payload(super::ToolDrag(tool.node_type.to_owned()));
+                    response.dnd_set_drag_payload(drag_payload(tool));
                     if response.hovered() { ui.painter().rect_filled(r, 5., v.theme.input); ui.painter().rect_stroke(r, 5., Stroke::new(1.0_f32, v.theme.stroke), StrokeKind::Inside); }
                     let icon_rect = Rect::from_center_size(r.center_top() + Vec2::new(0., 12.), Vec2::splat(22.));
                     icon(ui.painter(), icon_rect, tool, v.theme.text, v.theme.c_src);
@@ -135,7 +142,7 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
         });
     });
     dot(ui.painter(), row.right_center(), -101., 0., 2.5, v.theme.ok);
-    ui.painter().text(row.right_center() - Vec2::new(92., 0.), Align2::LEFT_CENTER, "runs on Rust", FontId::proportional(11.), v.theme.faint);
+    ui.painter().text(row.right_center() - Vec2::new(92., 0.), Align2::LEFT_CENTER, "runs on Rust", FontId::proportional(11.), v.theme.dim);
 }
 
 fn wrap_label(label: &str) -> String {
@@ -150,4 +157,22 @@ mod tests {
     #[test] fn shelf_lists_are_complete() { assert_eq!(TABS.len(), 19); assert_eq!(TABS[0].name, "Create"); assert!(TABS[0].tools.iter().any(|t| t.node_type == "box")); }
     #[test] fn labels_and_initials() { assert_eq!(wrap_label("Blender Object"), "Blender\nObject"); assert_eq!(initials("Blender Object"), "BO"); }
     #[test] fn draws_a_frame() { assert!(Fixture::new().run(show).is_empty()); }
+    #[test] fn drag_payload_requests_the_same_tool_on_drop() {
+        let payload = drag_payload(&TABS[0].tools[0]);
+        assert!(matches!(dropped_tool(&payload, "grid1"), UiAction::AddNode { node_type, after }
+            if node_type == "box" && after.as_deref() == Some("grid1")));
+    }
+    #[test] fn web_icon_table_is_covered_and_unknown_tools_keep_initials() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                for tool in TABS.iter().flat_map(|tab| tab.tools) {
+                    let built_in = matches!(tool.icon, "box" | "point" | "sphere" | "tube" | "torus" | "grid" | "null" |
+                        "line" | "circle" | "curve" | "bezier" | "helix" | "lsystem" | "lattice" | "points_to_surface" | "file" | "host");
+                    let fallback = matches!(tool.icon, "clean" | "clip" | "curve_simplify" | "falloff" | "occlusion" | "sdf_shape");
+                    assert!(built_in || fallback || shelf_icons::draw(ui.painter(), Pos2::ZERO, tool.icon, Color32::WHITE, Color32::WHITE), "{}", tool.icon);
+                }
+            });
+        });
+    }
 }
