@@ -55,8 +55,21 @@ pub fn specification(mode: SketchMode, points: &[[f32; 3]], plane: Plane) -> Opt
             let q = points[(i+1)%points.len()]; area += dot(*p,u)*dot(q,v) - dot(*p,v)*dot(q,u);
         }
         if area.abs() < 1e-8 { return None; }
+        let xy: Vec<[f32; 2]> = points.iter().map(|p| [dot(*p,u), dot(*p,v)]).collect();
+        if outline_crosses(&xy) { return None; }
     }
     Some((points,closed))
+}
+fn outline_crosses(points: &[[f32; 2]]) -> bool {
+    let cross = |a: [f32; 2], b: [f32; 2], c: [f32; 2]| (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0]);
+    for i in 0..points.len() {
+        for j in i+2..points.len() {
+            if i == 0 && j == points.len()-1 { continue; }
+            let (a,b,c,d) = (points[i], points[(i+1)%points.len()], points[j], points[(j+1)%points.len()]);
+            if cross(a,b,c)*cross(a,b,d) < 0. && cross(c,d,a)*cross(c,d,b) < 0. { return true; }
+        }
+    }
+    false
 }
 fn plane_hit(ray: ([f32; 3], [f32; 3]), plane: Plane, origin: [f32; 3]) -> Option<[f32; 3]> {
     let (_, _, n) = plane.basis(); let denom = dot(ray.1, n);
@@ -156,6 +169,17 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         assert_eq!(shape(SketchMode::Circle, &[[0.;3], [1.,0.,0.]], Plane::XY, 32).len(), 32);
         assert!(specification(SketchMode::Polygon, &[[0.;3],[1.,0.,0.],[2.,0.,0.]], Plane::XY).is_none());
         assert!(specification(SketchMode::Polygon, &[[0.;3],[1.,0.,0.],[0.,1.,0.]], Plane::XY).is_some());
+        assert!(specification(SketchMode::Polygon, &[[0.,0.,0.],[3.,2.,0.],[0.,2.,0.],[2.,0.,0.]], Plane::XY).is_none());
     }
     #[test] fn headless_frame() { let f = crate::ui::testing::Fixture::new(); assert!(f.run(|ui,v,out| show(ui, ui.max_rect(), v, out)).is_empty()); }
+    #[test] fn finishing_a_line_and_tape_emits_document_actions() {
+        let mut line = State { mode: Some(SketchMode::Line), points: vec![[0.; 3], [2., 0., 0.]], ..Default::default() };
+        let mut out = Actions::default();
+        finish(&mut line, &mut out);
+        assert!(matches!(&out.0[..], [UiAction::SketchCommit { points, closed: false, .. }] if points.len() == 2));
+        let mut tape = State { mode: Some(SketchMode::Tape), points: vec![[0.; 3], [0., 3., 0.]], ..Default::default() };
+        let mut out = Actions::default();
+        finish(&mut tape, &mut out);
+        assert!(matches!(&out.0[..], [UiAction::AddMeasurement { a, b }] if *a == [0.; 3] && *b == [0., 3., 0.]));
+    }
 }

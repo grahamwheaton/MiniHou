@@ -31,3 +31,28 @@ pub fn show(ui: &mut egui::Ui, viewport: Rect, v: &View, out: &mut Actions) {
     }
     ctx.data_mut(|d| d.insert_temp(id(), s));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{Event, Key, PointerButton, Pos2, RawInput};
+
+    #[test]
+    fn box_gesture_requests_region_selection() {
+        let f = crate::ui::testing::Fixture::new();
+        let ctx = egui::Context::default();
+        let viewport = Rect::from_min_max(pos2(0., 0.), pos2(800., 600.));
+        let frame = |events: Vec<Event>| {
+            let input = RawInput { screen_rect: Some(viewport), events, ..Default::default() };
+            let mut out = Actions::default();
+            let _ = ctx.run(input, |ctx| { egui::CentralPanel::default().show(ctx, |ui| show(ui, viewport, &f.view(), &mut out)); });
+            out.0
+        };
+        let key = Event::Key { key: Key::B, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() };
+        assert!(frame(vec![key]).is_empty());
+        let a = Pos2::new(100., 100.); let b = Pos2::new(210., 160.);
+        assert!(frame(vec![Event::PointerMoved(a), Event::PointerButton { pos: a, button: PointerButton::Primary, pressed: true, modifiers: Default::default() }]).is_empty());
+        let actions = frame(vec![Event::PointerMoved(b), Event::PointerButton { pos: b, button: PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
+        assert!(matches!(&actions[..], [UiAction::RegionSelect { rect, extend: false, subtract: false }] if *rect == Rect::from_two_pos(a, b)));
+    }
+}

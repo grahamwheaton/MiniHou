@@ -31,12 +31,15 @@ struct Drag { axis: usize, kind: Tool, start: Pos2, last: f32, typed: String }
 struct PlaneDrag { a: usize, b: usize, start: Pos2, last: [f32; 3] }
 pub fn active(ctx: &egui::Context) -> bool { ctx.data(|d| d.get_temp::<Drag>(egui::Id::new("transform_gizmo_drag")).is_some()
     || d.get_temp::<PlaneDrag>(egui::Id::new("transform_plane_drag")).is_some()) }
-fn value(kind: Tool, pixels: f32, radius: f32) -> f32 {
-    match kind { Tool::Rotate => pixels * 0.65, Tool::Scale => (pixels / 120.).exp() - 1., _ => pixels * radius / 120. }
+fn projected_distance(pixels: f32, world_span: f32, screen_span: f32) -> f32 {
+    pixels * world_span / screen_span.max(1.)
+}
+fn value(kind: Tool, pixels: f32) -> f32 {
+    match kind { Tool::Scale => (pixels / 120.).exp() - 1., _ => pixels }
 }
 fn snapped(x: f32, step: f32, enabled: bool) -> f32 { if enabled && step > 0. { (x / step).round() * step } else { x } }
 fn op(kind: Tool, axis: usize, amount: f32) -> TransformOp {
-    let mut v = [0.; 3]; v[axis] = amount;
+    let mut v = if kind == Tool::Scale { [1.; 3] } else { [0.; 3] }; v[axis] = amount;
     match kind { Tool::Rotate => TransformOp::Rotate(v), Tool::Scale => TransformOp::Scale(v), _ => TransformOp::Move(v) }
 }
 fn axis_frame(v: &View) -> [[f32; 3]; 3] {
@@ -154,19 +157,24 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
                 _ => {}
             } }
             let pointer = ui.input(|i| i.pointer.interact_pos()).unwrap_or(d.start);
-            let axis_screen = project(v.camera, rect, add(origin, mul(frame[d.axis], v.bounds.1.max(0.1) * 0.4))).map(|p| p - center).unwrap_or(vec2(1., 0.)).normalized();
-            let pixels = (pointer - d.start).dot(axis_screen);
+            let span = v.bounds.1.max(0.1) * 0.4;
+            let projected = project(v.camera, rect, add(origin, mul(frame[d.axis], span)))
+                .map(|p| p - center).filter(|delta| delta.length() > 1.).unwrap_or(vec2(1., 0.));
+            let pixels = (pointer - d.start).dot(projected.normalized());
             let typed = d.typed.parse::<f32>().ok().map(|x| if d.kind == Tool::Scale { x - 1. } else { x });
             let raw = typed.unwrap_or_else(|| if d.kind == Tool::Rotate {
                 let a = d.start - center; let b = pointer - center;
                 (a.x * b.y - a.y * b.x).atan2(a.dot(b)).to_degrees()
-            } else { value(d.kind, pixels, v.bounds.1.max(0.1)) });
+            } else if d.kind == Tool::Move { projected_distance(pixels, span, projected.length()) }
+            else { value(d.kind, pixels) });
             let ctrl = ui.input(|i| i.modifiers.ctrl);
             let step = if d.kind == Tool::Rotate { 15. } else if d.kind == Tool::Scale { 0.1 } else { v.editor.snap.increment };
             let current = snapped(raw, step, v.editor.snap.enabled != ctrl);
             if (current - d.last).abs() > 1e-6 {
                 let delta = current - d.last;
-                let operation = if d.kind == Tool::Move { TransformOp::Move(mul(frame[d.axis], delta)) } else { op(d.kind, d.axis, delta) };
+                let operation = if d.kind == Tool::Move { TransformOp::Move(mul(frame[d.axis], delta)) }
+                    else if d.kind == Tool::Scale { op(d.kind, d.axis, current + 1.) }
+                    else { op(d.kind, d.axis, delta) };
                 out.push(UiAction::TransformNode { node: v.selected.into(), op: operation, continuous: true });
                 d.last = current;
             }
@@ -180,8 +188,11 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
         if !down || ui.input(|i| i.key_pressed(egui::Key::Escape)) { ui.ctx().data_mut(|data| data.remove::<PlaneDrag>(plane_id)); if ui.input(|i| i.key_pressed(egui::Key::Escape)) { out.push(UiAction::CancelTransform); } }
         else {
             let pointer = ui.input(|i| i.pointer.hover_pos()).unwrap_or(d.start);
-            let unit = v.bounds.1.max(0.1) * 0.4 / 58.;
-            let (x,y) = plane_delta(pointer - d.start, screen_axis(rect,v,center,frame,d.a), screen_axis(rect,v,center,frame,d.b), unit);
+            let span = v.bounds.1.max(0.1) * 0.4;
+            let projected_axis = |axis| project(v.camera, rect, add(origin, mul(frame[axis], span)))
+                .map(|p| p - center).filter(|delta| delta.length() > 1.)
+                .unwrap_or_else(|| screen_axis(rect, v, center, frame, axis) * 58.);
+            let (x,y) = plane_delta(pointer - d.start, projected_axis(d.a), projected_axis(d.b), span);
             let snap = v.editor.snap.enabled != ui.input(|i| i.modifiers.ctrl);
             let world = add(mul(frame[d.a], snapped(x,v.editor.snap.increment,snap)), mul(frame[d.b], snapped(y,v.editor.snap.increment,snap)));
             let delta = [0,1,2].map(|k| world[k] - d.last[k]);
@@ -194,6 +205,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
 
 #[cfg(test)] mod tests {
     use super::*;
-    #[test] fn snap_and_op() { assert_eq!(snapped(0.62, 0.25, true), 0.5); assert_eq!(op(Tool::Move, 1, 2.), TransformOp::Move([0., 2., 0.])); }
+    #[test] fn snap_and_op() { assert_eq!(snapped(0.62, 0.25, true), 0.5); assert_eq!(op(Tool::Move, 1, 2.), TransformOp::Move([0., 2., 0.])); assert_eq!(op(Tool::Scale, 1, 2.), TransformOp::Scale([1., 2., 1.])); }
     #[test] fn plane_projection() { assert_eq!(plane_delta(vec2(20., -10.), vec2(1.,0.), vec2(0.,-1.), 0.1), (2., 1.)); }
+    #[test] fn axis_drag_uses_projected_world_span() { assert_eq!(projected_distance(40., 2., 80.), 1.); }
 }

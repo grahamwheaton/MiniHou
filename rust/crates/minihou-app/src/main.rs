@@ -10,6 +10,10 @@ use ui::keymap::{KeyContext, Keymap, Preferences, ThemePref};
 use ui::{theme::Theme, Actions, BlenderStatus, CameraInfo, EditorState, GeoSummary, NodeFlags, TransformOp, UiAction, View};
 use viewport::{Gpu, Mode, Overlay, Scene, Target};
 
+fn scaled_from_initial(initial: &serde_json::Value, factor: [f32; 3]) -> [f32; 3] {
+    [0,1,2].map(|i| initial.get(i).and_then(|x| x.as_f64()).unwrap_or(1.) as f32 * factor[i])
+}
+
 struct App {
     editor: EditorDocument, worker: CookWorker<Scene>, cooking: CookState,
     selected: String, display: String,
@@ -144,6 +148,7 @@ impl App {
         }
     }
     fn selected_points(&self) -> Vec<u32> {
+        if self.editor_state.selection == ui::SelectionMode::Object { return Vec::new(); }
         let mut ids = self.selection.points.clone();
         for &(a, b) in &self.selection.edges { ids.extend([a, b]); }
         if let Some(scene) = &self.scene { for &t in &self.selection.tris {
@@ -160,15 +165,27 @@ impl App {
         (count > 0.).then(|| sum.map(|x| x / count))
     }
     fn transform_node(&mut self, node: &str, op: TransformOp) {
+        let group = self.selected_points().iter().map(u32::to_string).collect::<Vec<_>>().join(" ");
+        if self.editor_state.selection != ui::SelectionMode::Object && group.is_empty() {
+            self.file_status = "Select points, edges, or faces to transform".into();
+            return;
+        }
+        if !group.is_empty() && minihou_core::nodes::get("transform")
+            .and_then(|spec| spec.params.iter().find(|param| param.name == "group"))
+            .is_none_or(|param| !param.supported) {
+            self.file_status = "Element transforms need Rust core support for transform.group".into();
+            return;
+        }
         let first = self.transform_before.is_none();
         if first { self.editor.history.finish(&self.editor.doc); self.transform_before = Some(self.editor.doc.clone()); }
         let mut value = self.editor.doc.value().clone();
+        let source = if group.is_empty() { node } else { &self.display };
         let target = if let Some(id) = &self.transform_target { id.clone() } else {
             let Some(nodes) = value["nodes"].as_object_mut() else { return; };
-            if nodes.get(node).and_then(|n| n["type"].as_str()) == Some("transform") { node.to_owned() }
+            if group.is_empty() && nodes.get(source).and_then(|n| n["type"].as_str()) == Some("transform") { source.to_owned() }
             else {
                 let id = (1..).map(|n| format!("transform{n}")).find(|id| !nodes.contains_key(id)).unwrap();
-                nodes.insert(id.clone(), json!({"type":"transform", "inputs":{"geo":node}}));
+                nodes.insert(id.clone(), json!({"type":"transform", "inputs":{"geo":source}}));
                 value["display"] = json!(id); id
             }
         };
@@ -178,9 +195,16 @@ impl App {
         let params = &mut value["nodes"][&target]["params"];
         if !params.is_object() { *params = json!({}); }
         let before = std::array::from_fn::<f32, 3, _>(|i| params[name].get(i).and_then(|n| n.as_f64()).map_or(defaults[i], |n| n as f32));
-        params[name] = json!([0,1,2].map(|i| before[i] + delta[i]));
+        let updated = match op {
+            TransformOp::Scale(factor) => {
+                let initial = self.transform_before.as_ref().map(|doc| &doc.value()["nodes"][&target]["params"]["scale"])
+                    .unwrap_or(&serde_json::Value::Null);
+                scaled_from_initial(initial, factor)
+            }
+            _ => [0,1,2].map(|i| before[i] + delta[i]),
+        };
+        params[name] = json!(updated);
         if first {
-            let group = self.selected_points().iter().map(u32::to_string).collect::<Vec<_>>().join(" ");
             if !group.is_empty() { params["group"] = json!(group); }
             params["pivot"] = json!(if self.editor_state.pivot == ui::Pivot::Cursor { self.editor_state.cursor } else { self.selection_center().unwrap_or(self.bounds.0) });
         }
@@ -205,6 +229,10 @@ impl App {
         self.transform_target = None;
     }
     fn sketch_commit(&mut self, name: &str, points: &[[f32; 3]], closed: bool) {
+        if minihou_core::nodes::get("curve").is_none() {
+            self.file_status = "Sketches need the Rust core curve node".into();
+            return;
+        }
         let mut value = self.editor.doc.value().clone();
         let Some(nodes) = value["nodes"].as_object_mut() else { return; };
         let id = (1..).map(|n| format!("curve{n}")).find(|id| !nodes.contains_key(id)).unwrap();
@@ -315,7 +343,12 @@ impl App {
     fn apply(&mut self, ctx: &egui::Context, actions: Vec<UiAction>) {
         for action in actions {
             match action {
-                UiAction::StartSketch(mode) => { self.editor_state.apply(ui::EditorChange::Tool(ui::Tool::Select)); ui::sketch::start(ctx, mode); }
+                UiAction::StartSketch(mode) => {
+                    if minihou_core::nodes::get("curve").is_some() {
+                        self.editor_state.apply(ui::EditorChange::Tool(ui::Tool::Select));
+                        ui::sketch::start(ctx, mode);
+                    } else { self.file_status = "Sketches need the Rust core curve node".into(); }
+                },
                 UiAction::TransformNode { node, op, continuous } => { self.transform_node(&node, op); if !continuous { self.finish_transform(); } },
                 UiAction::CancelTransform => self.cancel_transform(),
                 UiAction::SketchCommit { name, points, closed } => self.sketch_commit(&name, &points, closed),
@@ -566,6 +599,17 @@ fn main() {
             rfd::MessageDialog::new().set_level(rfd::MessageLevel::Error).set_title("MiniHou").set_description(e.to_string()).show();
         }
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tools_tests {
+    use super::*;
+
+    #[test]
+    fn scaling_uses_the_drag_start_values() {
+        assert_eq!(scaled_from_initial(&json!([2., 3., 4.]), [1., 2., 1.]), [2., 6., 4.]);
+        assert_eq!(scaled_from_initial(&serde_json::Value::Null, [1., 0.5, 1.]), [1., 0.5, 1.]);
     }
 }
 
