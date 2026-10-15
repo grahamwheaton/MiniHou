@@ -43,8 +43,9 @@ fn bucketed(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -
     let n = npoints.max(1);
 
     // half-edges as (lower, higher); `u32::MAX` marks "no edge". In parallel over runs of primitives, which own contiguous,
-    // disjoint vertex ranges.
-    let mut half: Vec<(u32, u32)> = vec![(u32::MAX, 0); nv];
+    // disjoint vertex ranges. Every big array here starts zeroed: the OS hands those pages out lazily, so touching them happens
+    // in the parallel loops instead of in a serial fill (which was half the time on many cores).
+    let mut half: Vec<(u32, u32)> = vec![(0, 0); nv];
     {
         let np = offs.len() - 1;
         let mut parts: Vec<(usize, &mut [(u32, u32)])> = Vec::with_capacity(np / RUN + 1);
@@ -61,7 +62,14 @@ fn bucketed(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -
                 let (s, e) = (offs[p] as usize, offs[p + 1] as usize);
                 let closed = closed.is_none_or(|c| c[p]);
                 for v in s..e {
-                    let w = if v + 1 < e { v + 1 } else if closed { s } else { continue };
+                    let w = if v + 1 < e {
+                        v + 1
+                    } else if closed {
+                        s
+                    } else {
+                        part[v - base] = (u32::MAX, 0);
+                        continue;
+                    };
                     let (a, b) = (vp[v] as u32, vp[w] as u32);
                     part[v - base] = (a.min(b), a.max(b));
                 }
@@ -72,19 +80,34 @@ fn bucketed(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -
     // counting sort by the lower point: start[lo]..start[lo + 1] are the half-edges leaving `lo`. Counting and scattering run in
     // parallel with atomic counters: the order inside a bucket is then arbitrary, but each bucket is sorted below, so the result
     // is the same every time.
-    let counts: Vec<AtomicU32> = (0..n).map(|_| AtomicU32::new(0)).collect();
+    let fill: Vec<AtomicU32> = (0..n).into_par_iter().map(|_| AtomicU32::new(0)).collect();
     half.par_iter().for_each(|&(lo, _)| {
         if lo != u32::MAX {
-            counts[lo as usize].fetch_add(1, Ordering::Relaxed);
+            fill[lo as usize].fetch_add(1, Ordering::Relaxed);
         }
     });
-    let mut start = vec![0usize; n + 1];
-    for i in 0..n {
-        start[i + 1] = start[i] + counts[i].load(Ordering::Relaxed) as usize;
+    // prefix sum in two parallel passes over runs of points (a serial scan over the run totals in between); the counters become
+    // each bucket's next free slot
+    let run_total: Vec<usize> = (0..n.div_ceil(RUN))
+        .into_par_iter()
+        .map(|r| fill[r * RUN..((r + 1) * RUN).min(n)].iter().map(|c| c.load(Ordering::Relaxed) as usize).sum())
+        .collect();
+    let mut run_start = Vec::with_capacity(run_total.len());
+    let mut total = 0usize;
+    for t in &run_total {
+        run_start.push(total);
+        total += t;
     }
-    let total = start[n];
-    let fill: Vec<AtomicU32> = start[..n].iter().map(|&s| AtomicU32::new(s as u32)).collect();
-    drop(counts);
+    let mut start = vec![0usize; n + 1];
+    start[..n].par_chunks_mut(RUN).zip(fill.par_chunks(RUN)).zip(run_start.par_iter()).for_each(|((st, c), &s0)| {
+        let mut s = s0;
+        for (st, c) in st.iter_mut().zip(c) {
+            *st = s;
+            s += c.load(Ordering::Relaxed) as usize;
+            c.store(*st as u32, Ordering::Relaxed);
+        }
+    });
+    start[n] = total;
     let mut sorted: Vec<(u32, u32)> = vec![(0, 0); total]; // (higher point, vertex)
     {
         let out = SharedMut(sorted.as_mut_ptr());
@@ -142,7 +165,11 @@ pub fn edges_raw(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usi
     // number the edges in (lower, higher) order: each run writes its own slice of the edge arrays
     let mut points = vec![0i64; ne * 2];
     let mut count = vec![0i64; ne];
-    let mut of_vertex = vec![-1i64; nv];
+    // every vertex gets its edge below, except the last vertex of an open curve: only then is the -1 fill needed
+    let mut of_vertex = vec![0i64; nv];
+    if closed.is_some() {
+        of_vertex.par_iter_mut().for_each(|x| *x = -1);
+    }
     let ov = SharedMut(of_vertex.as_mut_ptr());
     let mut jobs = Vec::with_capacity(runs.len());
     let (mut prest, mut crest): (&mut [i64], &mut [i64]) = (&mut points, &mut count);
@@ -209,5 +236,5 @@ pub fn edge_points_u32(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoint
 }
 
 /// A raw pointer that may be shared by the threads of one parallel loop (each writes elements no other thread touches).
-struct SharedMut<T>(*mut T);
+pub(crate) struct SharedMut<T>(pub(crate) *mut T);
 unsafe impl<T> Sync for SharedMut<T> {}

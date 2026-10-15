@@ -149,14 +149,18 @@ def draw_stats(t, npoints: int) -> Tuple[int, int, int]:
     hit = getattr(t, "_draw_stats", None)
     if hit is not None and hit[0] == npoints:
         return hit[1:]
-    sizes = np.diff(t.prim_offsets)
-    closed = t.closed_mask()
-    ntri = int(np.maximum(sizes - 2, 0)[closed].sum(dtype=np.int64)) if len(sizes) else 0
-    open_verts = int(sizes[~closed & (sizes >= 2)].sum(dtype=np.int64)) if len(sizes) else 0
-    used = np.zeros(npoints, bool)
-    if t.nvertices:
-        used[t.vertex_point] = True
-    loose = npoints - int(np.count_nonzero(used))
+    from . import rust
+    if rust.enabled():
+        ntri, open_verts, loose = rust.draw_stats(t, npoints)
+    else:
+        sizes = np.diff(t.prim_offsets)
+        closed = t.closed_mask()
+        ntri = int(np.maximum(sizes - 2, 0)[closed].sum(dtype=np.int64)) if len(sizes) else 0
+        open_verts = int(sizes[~closed & (sizes >= 2)].sum(dtype=np.int64)) if len(sizes) else 0
+        used = np.zeros(npoints, bool)
+        if t.nvertices:
+            used[t.vertex_point] = True
+        loose = npoints - int(np.count_nonzero(used))
     if not t.vertex_point.flags.writeable:
         t._draw_stats = (npoints, ntri, open_verts, loose)
     return ntri, open_verts, loose

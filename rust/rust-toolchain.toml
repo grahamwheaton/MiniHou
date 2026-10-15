@@ -1,5 +1,0 @@
-# The toolchain CI builds, lints and tests with: a new clippy release can add lints, so moving up is a deliberate change.
-[toolchain]
-channel = "1.99.0"
-components = ["clippy"]
-profile = "minimal"

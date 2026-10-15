@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import numpy as np  # noqa: E402
 
 from minihou import Evaluator, Graph, accel, preview, rust, topo  # noqa: E402
+from minihou.geometry import Topology  # noqa: E402
 from minihou.nodes import normal as normal_node  # noqa: E402
 from minihou.nodes._util import fbm3, fbm3_numpy  # noqa: E402
 
@@ -66,9 +67,24 @@ def engine_rows(side, repeat, row):
     def cook():
         return py_cook(graph)
 
+    def new_meshes(k):
+        # copies of the cooked geometry, each with its own (frozen) topology: a really new mesh has no layout, digest or draw
+        # counts cached yet, which is what the viewport pays when a node changes the topology. Made before timing.
+        out = []
+        for _ in range(k):
+            vp, po = geo.topology.vertex_point.copy(), geo.topology.prim_offsets.copy()
+            vp.setflags(write=False)
+            po.setflags(write=False)
+            g = geo.copy()
+            g.topology = Topology(vp, po, geo.topology.closed)
+            out.append(g)
+        return out
+
+    fresh = []
+
     def view_new():
         preview._LAYOUTS.clear()
-        return preview._arrays_for(geo, full=True)
+        return preview._arrays_for(fresh.pop(), full=True)
 
     def view_moved():                                       # a deformer downstream: same topology, new positions
         return preview._arrays_for(moved, full=True)
@@ -93,7 +109,9 @@ def engine_rows(side, repeat, row):
             geo = cook()
             moved = geo.copy()
             moved.point["P"] = (geo.P * np.float32(1.01)).astype(np.float32)
+            fresh[:] = new_meshes(repeat + 2)
             out[label, "view"] = first_and_median(view_new)
+            fresh.clear()
             preview._arrays_for(geo, full=True)
             out[label, "moved"] = (None, timed(view_moved, repeat))
     for key, case in (("cook", "engine: cook grid > noise > transform > normal"),

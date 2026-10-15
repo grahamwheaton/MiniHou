@@ -1,9 +1,11 @@
 //! The viewport's drawing layout for big meshes (`minihou/preview.py`): fan triangles, sorted along a Morton curve of their
 //! centres into runs with bounding boxes, plus the unique edges, all as the final `u32` arrays the editor receives.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use rayon::prelude::*;
 
-use crate::topo;
+use crate::topo::{self, SharedMut};
 
 /// What the viewer draws for one topology.
 pub struct Layout {
@@ -27,20 +29,16 @@ pub fn fan_triangles(vp: &[i32], offs: &[i32], closed: Option<&[bool]>) -> (Vec<
         let n = (offs[f + 1] - offs[f]) as usize;
         if closed.is_none_or(|c| c[f]) && n >= 3 { n - 2 } else { 0 }
     };
-    let mut first = vec![0usize; np + 1];
-    for f in 0..np {
-        first[f + 1] = first[f] + count(f);
-    }
-    let total = first[np];
+    // runs of polygons own contiguous, disjoint ranges of the output; only the runs' triangle totals are needed up front
+    const RUN: usize = 1 << 14;
+    let run_tris: Vec<usize> = (0..np.div_ceil(RUN)).into_par_iter().map(|r| (r * RUN..((r + 1) * RUN).min(np)).map(count).sum()).collect();
+    let total: usize = run_tris.iter().sum();
     let mut tri = vec![0u32; total * 3];
     let mut owner = vec![0u32; total];
-    // runs of polygons own contiguous, disjoint ranges of the output
-    const RUN: usize = 1 << 14;
-    let mut jobs = Vec::with_capacity(np / RUN + 1);
+    let mut jobs = Vec::with_capacity(run_tris.len());
     let (mut trest, mut orest): (&mut [u32], &mut [u32]) = (&mut tri, &mut owner);
-    for f0 in (0..np).step_by(RUN) {
+    for (f0, &k) in (0..np).step_by(RUN).zip(&run_tris) {
         let f1 = (f0 + RUN).min(np);
-        let k = first[f1] - first[f0];
         let (t, tr) = trest.split_at_mut(k * 3);
         let (o, or) = orest.split_at_mut(k);
         jobs.push((f0, f1, t, o));
@@ -63,6 +61,26 @@ pub fn fan_triangles(vp: &[i32], offs: &[i32], closed: Option<&[bool]>) -> (Vec<
         }
     });
     (tri, owner)
+}
+
+/// `(fan triangles of the closed polygons, vertices of the open curves, points no primitive uses)`, as `proxy.draw_stats`.
+pub fn draw_stats(vp: &[i32], offs: &[i32], closed: Option<&[bool]>, npoints: usize) -> (u64, u64, u64) {
+    let (tris, open) = (0..offs.len() - 1)
+        .into_par_iter()
+        .map(|f| {
+            let n = (offs[f + 1] - offs[f]) as u64;
+            if closed.is_none_or(|c| c[f]) { (n.saturating_sub(2), 0) } else if n >= 2 { (0, n) } else { (0, 0) }
+        })
+        .reduce(|| (0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
+    let used: Vec<AtomicBool> = (0..npoints).into_par_iter().map(|_| AtomicBool::new(false)).collect();
+    vp.par_iter().for_each(|&q| {
+        let u = &used[q as usize];
+        if !u.load(Ordering::Relaxed) {
+            u.store(true, Ordering::Relaxed);
+        }
+    });
+    let loose = used.par_iter().filter(|u| !u.load(Ordering::Relaxed)).count() as u64;
+    (tris, open, loose)
 }
 
 /// numpy's `minimum` / `maximum`: a NaN wins.
@@ -105,6 +123,54 @@ fn spread10(v: u64) -> u64 {
     v
 }
 
+/// Stable sort of `(code << 32) | index` keys by their 30-bit code: a parallel LSD radix sort, three passes of 10 bits. Each
+/// pass gives every block of keys its own write positions per digit (digit-major, block-minor), so the order of equal codes is
+/// kept, and the result is the same as sorting the whole keys. A pass whose digit is the same for every key is skipped.
+fn radix_sort_codes(keys: &mut Vec<u64>) {
+    const BITS: u32 = 10;
+    const B: usize = 1 << BITS;
+    let n = keys.len();
+    let block = n.div_ceil(rayon::current_num_threads() * 4).max(1 << 14);
+    let mut buf = vec![0u64; n];
+    for pass in 0..3 {
+        let shift = 32 + pass * BITS;
+        let digit = move |k: u64| ((k >> shift) as usize) & (B - 1);
+        let hist: Vec<Vec<u32>> = keys
+            .par_chunks(block)
+            .map(|c| {
+                let mut h = vec![0u32; B];
+                for &k in c {
+                    h[digit(k)] += 1;
+                }
+                h
+            })
+            .collect();
+        if (0..B).any(|d| hist.iter().map(|h| h[d] as usize).sum::<usize>() == n) {
+            continue;
+        }
+        let mut at: Vec<Vec<usize>> = vec![vec![0; B]; hist.len()];
+        let mut s = 0;
+        for d in 0..B {
+            for (a, h) in at.iter_mut().zip(&hist) {
+                a[d] = s;
+                s += h[d] as usize;
+            }
+        }
+        let out = SharedMut(buf.as_mut_ptr());
+        keys.par_chunks(block).zip(at.into_par_iter()).for_each(|(c, mut a)| {
+            let out = &out;
+            for &k in c {
+                let d = digit(k);
+                // SAFETY: the positions handed to the blocks for each digit are disjoint ranges that together cover 0..n
+                // exactly once, so every write goes to its own element of `buf`, which outlives the loop.
+                unsafe { *out.0.add(a[d]) = k };
+                a[d] += 1;
+            }
+        });
+        std::mem::swap(keys, &mut buf);
+    }
+}
+
 /// Sort triangles along a 30-bit Morton curve of their centres (stable, so equal codes keep their order) and build the run
 /// table: exactly `preview._chunk_numba`.
 pub fn chunk_sort(p: &[f32], tri: &mut Vec<u32>, tri_prim: &mut Vec<u32>, chunk: usize) -> Vec<f32> {
@@ -117,8 +183,7 @@ pub fn chunk_sort(p: &[f32], tri: &mut Vec<u32>, tri_prim: &mut Vec<u32>, chunk:
     let (lo, hi) = bounds(&p[..top * 3]);
     let lo64 = lo.map(|x| x as f64);
     let scale = [0, 1, 2].map(|k| 1023.0 / (hi[k] as f64 - lo64[k]).max(1e-12));
-    // code in the high 32 bits, triangle number in the low: sorting these distinct keys (unstable is fine) is the stable sort by
-    // code that the numba radix sort does
+    // code in the high 32 bits, triangle number in the low (the keys are made in triangle order)
     let mut keyed: Vec<u64> = tri
         .par_chunks_exact(3)
         .enumerate()
@@ -132,7 +197,7 @@ pub fn chunk_sort(p: &[f32], tri: &mut Vec<u32>, tri_prim: &mut Vec<u32>, chunk:
             (m << 32) | t as u64
         })
         .collect();
-    keyed.par_sort_unstable();
+    radix_sort_codes(&mut keyed);
     let old_tri = std::mem::take(tri);
     let old_prim = std::mem::take(tri_prim);
     let mut new_tri = vec![0u32; old_tri.len()];

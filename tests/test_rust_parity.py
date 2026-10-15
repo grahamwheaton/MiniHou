@@ -11,7 +11,8 @@ import unittest
 import numpy as np
 
 import minihou  # noqa: F401
-from minihou import Evaluator, Geometry, Graph, accel, rust, topo
+from minihou import Evaluator, Geometry, Graph, accel, proxy, rust, topo
+from minihou.geometry import Topology
 from minihou.sdk import REGISTRY
 
 NODE_TYPES = ["grid", "box", "transform", "normal", "noise", "merge", "null", "output"]
@@ -178,6 +179,11 @@ class RustParityTests(unittest.TestCase):
                     np.testing.assert_array_equal(r.of_vertex, e.of_vertex)
                     np.testing.assert_array_equal(r.count, e.count)
                     self.assertEqual(r.points.dtype, e.points.dtype)
+            # the viewport's counts (fan triangles, open-curve vertices, loose points); a writeable copy is not cached
+            t = g.topology
+            with rust.disabled():
+                expect = proxy.draw_stats(Topology(t.vertex_point.copy(), t.prim_offsets.copy(), t.closed), g.npoints)
+            self.assertEqual(rust.draw_stats(t, g.npoints), expect)
 
     def test_normal_and_noise_kernels(self):
         from minihou.nodes.normal import prim_normals

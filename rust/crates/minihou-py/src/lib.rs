@@ -224,6 +224,16 @@ fn bounds<'py>(py: Python<'py>, p: PyReadonlyArray2<'py, f32>) -> PyResult<Bound
     Ok((array(py, lo.to_vec(), 0)?, array(py, hi.to_vec(), 0)?).into_pyobject(py)?.into_any())
 }
 
+/// `(fan triangles of the closed polygons, vertices of the open curves, points no primitive uses)`: `proxy.draw_stats`.
+#[pyfunction]
+fn draw_stats(py: Python<'_>, vertex_point: PyReadonlyArray1<'_, i32>, prim_offsets: PyReadonlyArray1<'_, i32>,
+              closed: Option<PyReadonlyArray1<'_, bool>>, npoints: usize) -> PyResult<(u64, u64, u64)> {
+    let (vp, offs) = (slice1(&vertex_point, "vertex_point")?, slice1(&prim_offsets, "prim_offsets")?);
+    let cl = match &closed { Some(c) => Some(slice1(c, "closed")?), None => None };
+    check(vp, offs, cl, npoints)?;
+    Ok(py.detach(|| minihou_core::preview::draw_stats(vp, offs, cl, npoints)))
+}
+
 /// Node types this build can cook.
 #[pyfunction]
 fn node_types() -> Vec<&'static str> {
@@ -256,6 +266,7 @@ fn minihou_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(preview_layout, m)?)?;
     m.add_function(wrap_pyfunction!(chunk_bounds, m)?)?;
     m.add_function(wrap_pyfunction!(bounds, m)?)?;
+    m.add_function(wrap_pyfunction!(draw_stats, m)?)?;
     m.add_function(wrap_pyfunction!(node_types, m)?)?;
     m.add_function(wrap_pyfunction!(node_params, m)?)?;
     Ok(())

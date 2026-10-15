@@ -196,13 +196,16 @@ class Topology:
     def digest(self) -> str:
         """Content digest (cached). Used to decide whether topology changed."""
         if self._digest is None:
+            # the arrays' own buffers, not .tobytes() copies (the same bytes, so the same digest); hashlib releases the GIL
+            def buf(a):
+                return memoryview(np.ascontiguousarray(a)).cast("B")
             h = hashlib.blake2b(digest_size=16)
-            h.update(self.vertex_point.tobytes())
+            h.update(buf(self.vertex_point))
             h.update(b"|")
-            h.update(self.prim_offsets.tobytes())
+            h.update(buf(self.prim_offsets))
             if self.closed is not None:
                 h.update(b"|open|")
-                h.update(self.closed.tobytes())
+                h.update(buf(self.closed))
             self._digest = h.hexdigest()
         return self._digest
 

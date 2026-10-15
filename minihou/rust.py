@@ -143,6 +143,13 @@ def preview_layout(P, topology, max_tris: int, max_edges: int, chunk_min: int, c
     return tri, tri_prim, edge, (None if table is None else table.reshape(-1, 8)), bool(truncated)
 
 
+def draw_stats(topology, npoints: int):
+    """:func:`minihou.proxy.draw_stats` computed in Rust (parallel): ``(fan triangles, open-curve vertices, loose points)``."""
+    t = topology
+    closed = np.ascontiguousarray(t.closed_mask(), np.bool_) if t.has_open else None
+    return _need().draw_stats(_i32(t.vertex_point), _i32(t.prim_offsets), closed, int(npoints))
+
+
 def bounds(P):
     """``(P.min(0), P.max(0))`` as float32 arrays of 3, in one parallel pass."""
     return _need().bounds(_f32x3(P))

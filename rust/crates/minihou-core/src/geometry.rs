@@ -11,6 +11,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use rayon::prelude::*;
 use serde_json::{Map, Value};
 
 use crate::error::{Error, Result};
@@ -119,7 +120,7 @@ pub fn validate_topology(vertex_point: &[i32], prim_offsets: &[i32], closed: Opt
     if prim_offsets.first() != Some(&0) {
         return Err(Error::new("prim_offsets must start with 0"));
     }
-    if prim_offsets.windows(2).any(|w| w[1] < w[0]) {
+    if prim_offsets.par_windows(2).any(|w| w[1] < w[0]) {
         return Err(Error::new("prim_offsets must not decrease"));
     }
     if *prim_offsets.last().unwrap() as usize != vertex_point.len() {
@@ -128,7 +129,7 @@ pub fn validate_topology(vertex_point: &[i32], prim_offsets: &[i32], closed: Opt
     if closed.is_some_and(|c| c.len() != prim_offsets.len() - 1) {
         return Err(Error::new("closed needs one entry per primitive"));
     }
-    if vertex_point.iter().any(|&p| p < 0 || p as usize >= npoints) {
+    if vertex_point.par_iter().any(|&p| p < 0 || p as usize >= npoints) {
         return Err(Error::new(format!("vertex_point has indices outside [0, {npoints})")));
     }
     Ok(())

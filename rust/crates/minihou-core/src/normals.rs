@@ -125,5 +125,4 @@ pub fn point_normals_with(p: &[f32], vp: &[i32], offs: &[i32], start: &[u32], pr
     n
 }
 
-struct SharedMut(*mut u32);
-unsafe impl Sync for SharedMut {}
+use crate::topo::SharedMut;

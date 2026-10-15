@@ -10,26 +10,28 @@ rust/
   crates/minihou-core/          the core library (no Python)
     src/geometry.rs             columnar geometry, the same layout as minihou/geometry.py
     src/topo.rs                 edges (numbered exactly like minihou.topo.edges)
+    src/preview.rs              the viewport's layout: fan triangles, Morton order (radix sort), run table, draw counts
     src/normals.rs              Newell face normals, area-weighted point normals
     src/noise.rs                Perlin / fractal noise, bit for bit the numpy float32 arithmetic
     src/nodes/                  grid, box, transform, normal, noise, merge, null, output
     src/graph.rs                reads graph JSON and cooks it (pull evaluation, each node once per cook)
     tests/core.rs               Rust-only checks
-    examples/profile_edges.rs   kernel timing without Python
+    examples/profile_*.rs       kernel timing without Python (RAYON_NUM_THREADS=1 shows what does not scale)
   crates/minihou-py/            PyO3 bindings: the Python module minihou_rs
 minihou/rust.py                 the Python side: optional import, wrappers that return MiniHou types
+rust-toolchain.toml             the pinned toolchain (at the repository root, so it applies wherever cargo or maturin runs)
 tests/test_rust_parity.py       the same graphs cooked by both engines, compared
 bench/bench_rust.py             numpy vs numba vs Rust, 1M and 4M quads
 ```
 
 ## Build
 
-Needs a Rust toolchain (`rustup`, stable) and `pip install maturin`.
+Needs `rustup` (it fetches the pinned toolchain itself) and `pip install maturin`.
 
 ```
 cargo test --manifest-path rust/Cargo.toml                 # the core on its own
 maturin build --release -m rust/crates/minihou-py/Cargo.toml -o rust-wheels
-pip install rust-wheels/minihou_rs-*.whl                   # or: maturin develop --release (in a virtualenv)
+pip install --force-reinstall --no-deps rust-wheels/minihou_rs-*.whl   # or: maturin develop --release (in a virtualenv)
 python -m unittest tests.test_rust_parity -v
 python bench/bench_rust.py
 ```
@@ -40,11 +42,12 @@ repository root, with the same Python that runs the engine):
 ```
 py -m pip install maturin
 maturin build --release -m rust\crates\minihou-py\Cargo.toml -o rust-wheels
-py -m pip install --force-reinstall --no-index --find-links rust-wheels minihou-rs
+py -m pip install --force-reinstall --no-deps --no-index --find-links rust-wheels minihou-rs
 py -c "from minihou import rust; print(rust.status())"     # minihou_rs 0.1.0
 ```
 
 `--force-reinstall` matters after a rebuild: the version number does not change, so pip would otherwise keep the old build.
+`--no-deps` stops it reinstalling numpy too (which is not in `rust-wheels`, so `--no-index` would fail).
 The engine prints `compute backend: numba ...; rust: minihou_rs 0.1.0` when it starts. The engine Blender starts is whichever
 Python the add-on's "External Python / Portable Runtime" preference names (or the one `tools/launch_blender.py` runs under), so
 the wheel has to be installed into that one. `MINIHOU_NO_RUST=1` turns it off again without uninstalling.
@@ -102,58 +105,81 @@ check was converting the whole topology to int64 on every update; its counts are
 
 ## Numbers
 
-`python bench/bench_rust.py --engine`: median of 5 after a warm-up, a 4-thread cloud VM (Xeon 2.1 GHz), Python 3.13, numpy 2.5,
-numba 0.68. "numba" is the engine as it was (numba installed); "Rust" is the same engine with the extension. Raw data:
-`bench/results/rust_2026-10-15_cloud-4thread.json` (the first round, kernels only: `rust_2026-10-14_cloud-4thread.json`).
+`python bench/bench_rust.py --engine` (median of 5 after a warm-up) and `python bench/bench_first_call.py` (each backend in a fresh
+process). "numba" is the engine as it was with numba installed; "Rust" is the same engine with the extension. Two machines:
 
-What an artist waits for, 4M quads (1M in brackets):
+* **laptop**: MSI, i7-14700HX (20 cores / 28 threads), 16 GB, Windows 11, Python 3.14, numpy 2.4, numba 0.68
+  (`bench/results/rust_2026-10-15_msi-28thread.json`, `first_call_2026-10-15_msi-28thread.json`);
+* **cloud**: a 4-thread VM (Xeon 2.1 GHz), Linux, Python 3.13, numpy 2.5, numba 0.68 (`rust_2026-10-15_cloud-4thread.json`,
+  `first_call_2026-10-15_cloud-4thread.json`).
 
-| | numba | Rust | |
-|---|---|---|---|
-| slider edit on a noise node (re-cook noise > transform > normal) | 1051 ms (230) | **357 ms** (82) | 2.9x |
-| cook grid > noise > transform > normal from scratch | 1204 ms (311) | **542 ms** (125) | 2.2x |
-| viewport, a new mesh | 2130 ms (411) | **543 ms** (146) | 3.9x |
-| viewport, a deformer moved the points | 290 ms (72) | **73 ms** (17) | 4.0x |
+What an artist waits for, 4M quads (1M in brackets), numba -> Rust:
 
-The numba column already includes this round's Python-side fix (`proxy.draw_stats`): before it, the positions-only update
-took 461 ms at 4M quads with numba.
+| | laptop, 28 threads | | cloud, 4 threads | |
+|---|---|---|---|---|
+| slider edit on a noise node (re-cook noise > transform > normal) | 272 -> **98 ms** (67 -> 27) | 2.8x | 1051 -> **357 ms** | 2.9x |
+| cook grid > noise > transform > normal from scratch | 620 -> **208 ms** (150 -> 52) | 3.0x | 1204 -> **542 ms** | 2.2x |
+| viewport, a new mesh | 1200 -> **223 ms** (322 -> 44) | 5.4x | 2130 -> **543 ms** | 3.9x |
+| viewport, a deformer moved the points | 202 -> **24 ms** (67 -> 5.9) | 8.4x | 290 -> **73 ms** | 4.0x |
+| first cook after the engine starts | 1.01 -> **0.18 s** (0.24 -> 0.06) | 5.6x | 1.10 -> **0.67 s** | 1.6x |
+| first viewport after the engine starts | 2.25 -> **0.30 s** (0.42 -> 0.09) | 7.5x | 2.13 -> **0.80 s** | 2.7x |
 
-The first cook and viewport right after the engine starts, each backend in a fresh process (`python bench/bench_first_call.py`;
-`bench/results/first_call_2026-10-15_cloud-4thread.json`):
+Plain numpy (the packaged app has no numba) on the laptop at 4M quads: first cook 13.6 s, first viewport 12.4 s.
 
-| 4M quads (1M) | numpy only | numba | Rust |
-|---|---|---|---|
-| first cook | 19.3 s (4.0) | 1.10 s (0.32) | **0.67 s** (0.21) |
-| first viewport | 8.0 s (1.7) | 2.13 s (0.42) | **0.80 s** (0.20) |
+Single kernels, 4M quads, numpy / numba / Rust:
 
-Single kernels, 4M quads:
-
-| | numpy | numba | Rust |
-|---|---|---|---|
-| edges | 2032 ms | 335 ms | **214 ms** |
-| point normals (topology table cached) | 4253 ms | 106 ms | **71 ms** |
-| fbm3 noise, 4 octaves | 5262 ms | 193 ms | 204 ms |
+| | laptop | cloud |
+|---|---|---|
+| edges | 2827 / 314 / **146 ms** | 2032 / 335 / **214 ms** |
+| point normals (topology table cached) | 2026 / 112 / **40 ms** | 4253 / 106 / **71 ms** |
+| fbm3 noise, 4 octaves | 5211 / 50 / **33 ms** | 5262 / 193 / 204 ms |
 
 What this says:
 
-* The gain is in the **whole path**, not in single kernels: noise is compute-bound and ties numba; the wins come from fewer
-  passes over memory, no int64 temporaries, keeping per-topology tables, and parallel steps numba runs serially.
-* **No first-call penalty**: numba's first real call on a big mesh costs extra even after its warm-up (the viewport: 2.1 s
-  first, 0.4 s at 1M); Rust is as fast the first time.
-* The packaged app (no numba) gets all of this; against plain numpy the engine paths are 10-30x faster.
-* 4 threads is a small machine; Rayon's share grows with cores. Repeat on an artist's workstation and end to end with Blender.
+* The gain is in the **whole path**, not in single kernels: the wins come from fewer passes over memory, no int64 temporaries,
+  keeping per-topology tables, and parallel steps numba runs serially.
+* **No first-call penalty**: numba's first real call on a big mesh costs extra even after its warm-up; Rust is as fast the
+  first time.
+* More cores help noise and normals a lot (6x and 1.8x from 4 to 28 threads), but edges and the new-mesh viewport only 1.5x and
+  2.4x: they had serial steps. The round below removed most of them.
+
+### Scaling round (after the laptop numbers)
+
+Profiling with `RAYON_NUM_THREADS=1` against 4 showed half the edge table and a good part of the viewport layout running on one
+thread. Fixed, with identical results (the parity tests compare every array exactly):
+
+* big arrays filled with a non-zero value up front (`vec![-1; n]`, 128 MB each at 4M quads) are now zero-allocated and written
+  by the parallel loops; the counting sort's prefix sums and counters are parallel;
+* the Morton sort is a parallel LSD radix sort (3 passes of 10 bits, stable) instead of a comparison sort of 64-bit keys;
+* the topology check every Rust call makes (16M indices at 4M quads) is parallel;
+* `proxy.draw_stats` (the viewport's triangle / loose point counts) is a parallel Rust pass instead of a numpy scatter, and the
+  topology digest hashes the arrays in place instead of copying them first (same digest).
+
+Same 4-thread VM, previous build against this one back to back, 4M quads, a new topology each time (the benchmark's "new mesh"
+row now really uses a new topology; before it reused the digest and counts cached on the old one):
+
+| | before | after |
+|---|---|---|
+| viewport, a new mesh | 867 ms | **589 ms** |
+| edges | 363 ms | **253 ms** |
+| cook grid > noise > transform > normal | 618 ms | **540 ms** |
+
+The removed steps were serial, so a many-core machine gains more than these 4 threads show. What is left serial in a new-mesh
+viewport is the topology digest (blake2b over the index arrays: about 135 ms here at 4M quads).
 
 ## Known gaps
 
-* **Only built and tested on Linux so far.** CI builds the extension on Windows too, but the numbers above are from Linux.
+* **Two machines measured** (above); the laptop numbers predate the scaling round.
 * **Nobody gets it yet**: `minihou_rs` is not in the desktop build or the requirements; it has to be built (see Build).
 * **Memory**: the cached point-to-primitive table is about 80 MB for a 4M-quad topology, held with the cooked geometry and not
   counted by the evaluator's memory budget yet.
 
 ## Next steps
 
-1. Run `bench/bench_rust.py --engine` on real hardware (8-24 cores) and add the Blender-side timings from the plan (`bench/bench_link.py`).
-2. Package the wheel with the desktop build (the biggest win for people without numba), after the Windows job is green.
+1. Re-run the laptop benchmarks after the scaling round; decide on the topology digest (a parallel hash would change the digest
+   of big meshes, which saved measurement references and RBD bake caches use).
+2. Package the wheel with the desktop build (the biggest win for people without numba: 12-14 s down to 0.2-0.3 s at 4M quads).
 3. Count the per-topology caches (`_draw_stats`, `_point_prims`) in the evaluator's memory budget.
-4. The live link's encode / diff of big arrays, and the Blender side's mesh update, are the next stages to measure.
+4. An end-to-end Blender test with a real mesh (engine and link together): `bench/bench_link.py` sends made-up point arrays and
+   never runs the engine, so it cannot show engine changes. On the laptop a link update of 1M points costs about 5 ms.
 5. Port by measured need: the heavy nodes (subdivide, booleans, scatter + copy to points, remesh) once profiles show them on top.

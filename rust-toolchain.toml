@@ -1,0 +1,6 @@
+# The Rust toolchain for rust/ (at the repository root so cargo and maturin pick it up from here too). CI builds, lints and tests
+# with it: a new clippy release can add lints, so moving up is a deliberate change.
+[toolchain]
+channel = "1.99.0"
+components = ["clippy"]
+profile = "minimal"
