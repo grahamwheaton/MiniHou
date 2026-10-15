@@ -14,10 +14,30 @@ const CARD: Vec2 = vec2(220.0, 56.0);
 
 #[derive(Clone)]
 struct State { list: bool, zoom: f32, pan: Vec2, moved: HashMap<String, Pos2>, snap: bool, tidied: bool,
-    drag: Option<(String, Pos2)>, menu: Option<network_menu::MenuState> }
+    drag: Option<(String, Pos2)>, wiggle: Option<WiggleDetector>, box_start: Option<Pos2>, alt_pan: bool, toast: Option<(String, f64)>, menu: Option<network_menu::MenuState> }
 impl Default for State {
     fn default() -> Self { Self { list: false, zoom: 1.0, pan: Vec2::ZERO, moved: HashMap::new(), snap: true,
-        tidied: false, drag: None, menu: None } }
+        tidied: false, drag: None, wiggle: None, box_start: None, alt_pan: false, toast: None, menu: None } }
+}
+
+/// The web editor samples pointer X in 18 px chunks and detaches after three
+/// reversals within 650 ms of the preceding reversal.
+#[derive(Clone, Default)]
+pub struct WiggleDetector { x: f32, anchor: f32, direction: i8, turns: u8, last_turn: f64 }
+impl WiggleDetector {
+    pub fn push(&mut self, time: f64, dx: f32) -> bool {
+        self.x += dx;
+        let delta = self.x - self.anchor;
+        if delta.abs() < 18.0 { return false; }
+        let direction = if delta > 0.0 { 1 } else { -1 };
+        if self.direction != 0 && direction != self.direction {
+            self.turns = if time - self.last_turn > 0.650 { 1 } else { self.turns + 1 };
+            self.last_turn = time;
+        }
+        self.direction = direction;
+        self.anchor = self.x;
+        self.turns >= 3
+    }
 }
 
 fn state_id(path: &Path) -> Id { Id::new(("network", path.to_string_lossy().as_ref())) }
@@ -180,7 +200,7 @@ fn list_ui(ui: &mut egui::Ui, r: Rect, v: &View, out: &mut Actions) {
                 if ui.radio(minihou_app::display_nodes(v.doc).iter().any(|node| node == id), "").on_hover_text("Display this node (Shift adds or removes)").clicked() {
                     out.push(if ui.input(|i| i.modifiers.shift) { UiAction::ToggleDisplay(id.clone()) } else { UiAction::SetDisplay(id.clone()) });
                 }
-                if ui.selectable_label(v.selected == id, format!("{id}  {}", node.node_type)).clicked() { out.push(UiAction::Select(id.clone())); }
+                if ui.selectable_label(v.selected_set.contains(id), format!("{id}  {}", node.node_type)).clicked() { out.push(if ui.input(|i| i.modifiers.shift || i.modifiers.ctrl) { UiAction::ToggleSelect(id.clone()) } else { UiAction::Select(id.clone()) }); }
                 let mut bypass = node.bypass;
                 if ui.checkbox(&mut bypass, "").on_hover_text("Mute (bypass)").changed() {
                     out.push(UiAction::Edit { edit: Edit::Bypass { node: id.clone(), flag: bypass }, continuous: false });
@@ -198,15 +218,22 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
     let positions = network_layout::layout(v.graph, |node| state.moved.get(node).copied().or_else(|| (!state.tidied).then(|| json_pos(v, node)).flatten()));
     let bounds = content_bounds(&positions);
     if state.zoom < 0.0 || (over && ctx.input(|i| i.key_pressed(egui::Key::Home))) { frame_all(state, r, bounds); }
+    if !ctx.input(|i| i.pointer.primary_down()) { state.alt_pan = false; }
+    if over && ctx.input(|i| i.pointer.button_pressed(PointerButton::Primary) && i.modifiers.alt) {
+        let on_card = pointer.is_some_and(|at| positions.iter().any(|(_, pos)| Rect::from_min_size(screen(r, state, *pos), CARD * state.zoom).contains(at)));
+        if !on_card { state.alt_pan = true; }
+    }
     if over {
-        let (zoom_delta, scroll, delta, dragging) = ctx.input(|i| (i.zoom_delta(), i.smooth_scroll_delta, i.pointer.delta(),
-            i.pointer.middle_down() || (i.key_down(egui::Key::Space) && i.pointer.primary_down())));
-        if zoom_delta != 1.0 {
+        let (zoom_delta, scroll, delta, dragging, ctrl) = ctx.input(|i| (i.zoom_delta(), i.smooth_scroll_delta, i.pointer.delta(),
+            i.pointer.middle_down() || state.alt_pan || (i.key_down(egui::Key::Space) && i.pointer.primary_down()), i.modifiers.ctrl));
+        let trackpad_pan = !ctrl && scroll.x != 0.0 && scroll.y.abs() < 50.0;
+        let factor = if zoom_delta != 1.0 { zoom_delta } else if !trackpad_pan && scroll.y != 0.0 { (scroll.y * if ctrl { 0.01 } else { 0.0015 }).exp() } else { 1.0 };
+        if factor != 1.0 {
             let at = pointer.unwrap_or(r.center());
             let old = state.zoom;
-            state.zoom = (old * zoom_delta).clamp(0.25, 2.0);
+            state.zoom = (old * factor).clamp(0.25, 2.0);
             state.pan = (at - r.min) - (at - r.min - state.pan) * (state.zoom / old);
-        } else { state.pan += scroll; }
+        } else if trackpad_pan { state.pan += scroll; }
         if dragging { state.pan += delta; }
     }
     let right_click = over && ctx.input(|i| i.pointer.button_pressed(PointerButton::Secondary));
@@ -220,6 +247,12 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
     let p = ui.painter().with_clip_rect(r);
     p.rect_filled(r, 0.0, v.theme.base);
     grid(&p, r, state, v.theme.grid);
+    let background = ui.interact(r, id.with("box_selection"), Sense::click_and_drag());
+    let background_hit_card = pointer.is_some_and(|at| positions.iter().any(|(_, pos)| Rect::from_min_size(screen(r, state, *pos), CARD * state.zoom).contains(at)));
+    if background.double_clicked() && !background_hit_card {
+        state.menu = Some(network_menu::MenuState::new(pointer.unwrap_or(r.center()), None, true));
+    }
+    if background.drag_started_by(PointerButton::Primary) && !state.alt_pan { state.box_start = background.interact_pointer_pos(); }
     if positions.is_empty() {
         p.text(pos2(r.center().x, r.center().y - 12.0), Align2::CENTER_CENTER, "The network is empty", FontId::proportional(15.0), v.theme.text);
         let hint = p.layout("Open a graph file, press Tab, or pick a tool from the shelf above.".into(), FontId::proportional(12.0), v.theme.dim, (r.width() - 80.0).max(80.0));
@@ -235,9 +268,18 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
             let response = ui.interact(face, id.with(("node", node_id)), Sense::click_and_drag())
                 .on_hover_text(format!("{} · {} · {} params", node_id, node.node_type, node.params.as_ref().map_or(0, |p| p.len())));
             if response.double_clicked() { out.push(UiAction::SetDisplay(node_id.clone())); }
-            else if response.clicked() { out.push(UiAction::Select(node_id.clone())); }
-            if response.drag_started_by(PointerButton::Primary) { state.drag = Some((node_id.clone(), *at)); }
+            else if response.clicked() { out.push(if ctx.input(|i| i.modifiers.shift || i.modifiers.ctrl) { UiAction::ToggleSelect(node_id.clone()) } else { UiAction::Select(node_id.clone()) }); }
+            if response.drag_started_by(PointerButton::Primary) {
+                if !v.selected_set.contains(node_id) { out.push(UiAction::Select(node_id.clone())); }
+                state.drag = Some((node_id.clone(), *at)); state.wiggle = Some(WiggleDetector::default()); state.box_start = None;
+            }
             if response.dragged_by(PointerButton::Primary) && !ctx.input(|i| i.key_down(egui::Key::Space)) {
+                let (time, dx) = ctx.input(|i| (i.time, i.pointer.delta().x));
+                if state.wiggle.as_mut().is_some_and(|wiggle| wiggle.push(time, dx)) {
+                    out.push(UiAction::DisconnectAll(node_id.clone()));
+                    state.toast = Some((node_id.clone(), time + 1.2));
+                    state.wiggle = None;
+                }
                 let delta = ctx.input(|i| i.pointer.delta()) / state.zoom;
                 let raw = if let Some((active, raw)) = &mut state.drag {
                     if active == node_id { *raw += delta; *raw } else { *at + delta }
@@ -249,21 +291,52 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
                 let (next, lines) = if enabled { align_to_cards(base, &peers, CARD, 6.0 / state.zoom) } else { (base, Guides::default()) };
                 guide = Some(lines);
                 state.moved.insert(node_id.clone(), next);
+                if v.selected_set.contains(node_id) {
+                    let offset = next - *at;
+                    for (peer, peer_at) in &positions {
+                        if peer != node_id && v.selected_set.contains(peer) { state.moved.insert(peer.clone(), *peer_at + offset); }
+                    }
+                }
             }
-            if response.drag_stopped_by(PointerButton::Primary) { state.drag = None; }
+            if response.drag_stopped_by(PointerButton::Primary) { state.drag = None; state.wiggle = None; }
             for flag in 0..4 {
                 if ui.interact(flag_rect(card, flag), id.with(("flag", node_id, flag)), Sense::click())
                     .on_hover_text(["Mute", "Locked", "Template", "Visible"][flag]).clicked() {
-                    out.push(if flag == 3 && ctx.input(|i| i.modifiers.shift) { UiAction::ToggleDisplay(node_id.clone()) } else { flag_action(flag, node_id, node.bypass) });
+                    if v.selected_set.contains(node_id) && v.selected_set.len() > 1 {
+                        match flag {
+                            0 => out.push(UiAction::Command("mute_flag".into())),
+                            1 => for peer in v.selected_set { out.push(UiAction::ToggleLocked(peer.clone())); },
+                            2 => for peer in v.selected_set { out.push(UiAction::ToggleTemplate(peer.clone())); },
+                            _ => out.push(UiAction::Command("display_flag".into())),
+                        }
+                    } else {
+                        out.push(if flag == 3 && ctx.input(|i| i.modifiers.shift) { UiAction::ToggleDisplay(node_id.clone()) } else { flag_action(flag, node_id, node.bypass) });
+                    }
                 }
             }
             card_ui(&p, card, node_id, node, v, state.zoom);
+            if state.toast.as_ref().is_some_and(|(shown, until)| shown == node_id && ctx.input(|i| i.time) < *until) {
+                p.text(card.center_top() + vec2(0.0, -9.0), Align2::CENTER_BOTTOM, "disconnected", FontId::proportional(12.0), v.theme.accent);
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            }
         }
         if let Some(lines) = guide {
             if let Some(x) = lines.x { let x = screen(r, state, pos2(x, 0.0)).x; p.line_segment([pos2(x, r.top()), pos2(x, r.bottom())], Stroke::new(1.0_f32, v.theme.accent)); }
             if let Some(y) = lines.y { let y = screen(r, state, pos2(0.0, y)).y; p.line_segment([pos2(r.left(), y), pos2(r.right(), y)], Stroke::new(1.0_f32, v.theme.accent)); }
         }
         minimap(ui, r, state, v, &positions, id);
+    }
+    if let (Some(start), Some(end)) = (state.box_start, pointer) {
+        if background.dragged_by(PointerButton::Primary) {
+            let box_rect = Rect::from_two_pos(start, end);
+            p.rect_stroke(box_rect, 0.0, Stroke::new(1.0_f32, v.theme.accent), StrokeKind::Inside);
+        }
+        if background.drag_stopped_by(PointerButton::Primary) {
+            let box_rect = Rect::from_two_pos(start, end);
+            let ids = positions.iter().filter(|(_, at)| Rect::from_min_size(screen(r, state, *at), CARD * state.zoom).intersects(box_rect)).map(|(id, _)| id.clone()).collect();
+            out.push(UiAction::SelectSet { ids, extend: ctx.input(|i| i.modifiers.shift) });
+            state.box_start = None;
+        }
     }
     if let Some(menu) = &mut state.menu {
         if let Some(choice) = network_menu::show(ctx, id.with("menu"), menu, v, out) {
@@ -374,7 +447,7 @@ fn card_ui(p: &egui::Painter, r: Rect, id: &str, node: &NodeDef, v: &View, zoom:
     p.rect_filled(r, 6.0 * zoom, fill);
     if node.bypass || unsupported || flags.template { dashed_rect(p, r, border); }
     else { p.rect_stroke(r, 6.0 * zoom, Stroke::new(1.0_f32, border), StrokeKind::Inside); }
-    if v.selected == id { p.rect_stroke(r.expand(2.0), 8.0 * zoom, Stroke::new(2.0_f32, t.sel), StrokeKind::Outside); }
+    if v.selected_set.contains(id) { p.rect_stroke(r.expand(2.0), 8.0 * zoom, Stroke::new(2.0_f32, t.sel), StrokeKind::Outside); }
     let left = r.left() + 20.0 * zoom;
     let right = r.right() - 20.0 * zoom;
     for x in [left, right] { p.line_segment([pos2(x, r.top()), pos2(x, r.bottom())], Stroke::new(1.0_f32, t.stroke)); }
@@ -566,5 +639,23 @@ mod tests {
         state.moved.insert("box1".into(), pos2(123.0, 45.0));
         tidy_state(&mut state);
         assert!(state.moved.is_empty() && state.tidied && state.zoom < 0.0);
+    }
+    #[test]
+    fn wiggle_needs_three_fast_reversals() {
+        let mut w = WiggleDetector::default();
+        assert!(!w.push(0.0, 17.0));
+        assert!(!w.push(0.1, 19.0));
+        assert!(!w.push(0.2, -36.0));
+        assert!(!w.push(0.3, 36.0));
+        assert!(w.push(0.4, -36.0));
+    }
+    #[test]
+    fn wiggle_ignores_small_and_slow_changes() {
+        let mut w = WiggleDetector::default();
+        for i in 0..12 { assert!(!w.push(i as f64 * 0.1, if i % 2 == 0 { 10.0 } else { -10.0 })); }
+        assert!(!w.push(2.0, 25.0));
+        assert!(!w.push(2.8, -25.0));
+        assert!(!w.push(3.6, 25.0));
+        assert!(!w.push(4.4, -25.0));
     }
 }
