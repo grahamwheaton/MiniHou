@@ -304,6 +304,16 @@ def match_size(geo, target=None, *, translate, center, justify_z, scale, size, u
     position and size with its own bounding box."""
     if geo.npoints == 0:
         return geo
+    from .. import rust
+    N = geo.point.get("N")
+    if rust.enabled() and (N is None or (N.ndim == 2 and N.shape[1] == 3)):
+        tgt = target.P if (target is not None and target.npoints) else None
+        P, newN = rust.match_size(geo.P, tgt, translate, center, justify_z, scale, size, uniform, N)
+        out = geo.copy()
+        out.point["P"] = P
+        if newN is not None:
+            out.point["N"] = newN
+        return out
     if target is not None and target.npoints:
         T = target.P.astype(np.float64)
         tlo, thi = T.min(0), T.max(0)

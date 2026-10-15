@@ -60,7 +60,7 @@ def _random_graph(seed):
         prev = name
         for j in range(int(rng.integers(1, 4))):
             name = f"b{i}_{j}"
-            kind = str(rng.choice(["transform", "noise", "normal", "bound", "null"]))
+            kind = str(rng.choice(["transform", "noise", "normal", "bound", "match_size", "null"]))
             if kind == "transform":
                 params = {"translate": _v3(rng, -2, 2), "rotate": _v3(rng, -45, 45),
                           "scale": _v3(rng, 0.6, 1.5)}
@@ -77,6 +77,11 @@ def _random_graph(seed):
                 params = {"domain": str(rng.choice(["point", "prim"]))}
             elif kind == "bound":
                 params = {"padding": _v3(rng, 0, 0.5)}
+            elif kind == "match_size":
+                params = {"translate": bool(rng.integers(2)), "center": _v3(rng, -2, 2),
+                          "justify_z": str(rng.choice(["center", "min", "max"])),
+                          "scale": bool(rng.integers(2)), "size": [float(x) for x in rng.uniform(0.0, 3, 3)],
+                          "uniform": bool(rng.integers(2))}
             else:
                 params = {}
             nodes[name] = {"type": kind, "params": params, "inputs": {"geo": prev}}
@@ -148,6 +153,21 @@ class RustFuzzTests(unittest.TestCase):
             *[chain(("noise", {"octaves": octaves, "frequency": frequency,
                       "amplitude": [amplitude] * 3}))
               for octaves, frequency, amplitude in ((1, 0, 1), (12, 2, 0))],
+            # match_size: degenerate extents leave the scale at 1, non-uniform rescales N, an empty target is ignored
+            chain(("match_size", {"scale": True, "size": [2, 2, 2], "uniform": True}),
+                  source={"type": "box", "params": {"divisions": 1, "size": [0, 0, 0]}}),
+            chain(("match_size", {"scale": True, "size": [1, 2, 3], "uniform": False}),
+                  source={"type": "grid", "params": {"columns": 2, "rows": 7, "size_x": 0}}),
+            chain(("match_size", {"scale": True, "size": [0.5, 2, 1], "uniform": False, "translate": True,
+                                  "center": [1, -2, 3]}),
+                  source={"type": "point", "params": {"center": [0.2, -0.5, 1.5]}}),
+            chain(("normal", {}), ("match_size", {"scale": True, "size": [1.5, 0.5, 2], "uniform": False})),
+            chain(("match_size", {"translate": True, "center": [0, 0, 0], "justify_z": "min"}),
+                  source={"type": "grid", "flags": {"bypass": True}}),
+            {"version": 1, "nodes": {"g": {"type": "box", "params": {"divisions": 1}},
+                                     "t": {"type": "grid", "flags": {"bypass": True}},
+                                     "m": {"type": "match_size", "inputs": {"geo": "g", "target": "t"}}},
+             "display": "m"},
         ]
         for i, graph in enumerate(cases):
             self.check_graph(graph, f"degenerate-{i}")

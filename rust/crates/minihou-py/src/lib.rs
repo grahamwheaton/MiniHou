@@ -139,6 +139,22 @@ fn linear_normalized<'py>(py: Python<'py>, v: PyReadonlyArray2<'py, f32>, m: [[f
     array(py, out, 3)
 }
 
+/// The `match_size` body (`minihou.nodes.attrib_tools.match_size`): the new `P` `(n, 3)` float32, and, when the scale is not
+/// uniform, the rescaled + renormalised `N`, else None. `target` is the second input's nonempty points, `normals` the point `N`.
+#[pyfunction]
+#[pyo3(signature = (p, target, translate, center, justify_z, scale, size, uniform, normals=None))]
+#[allow(clippy::too_many_arguments)]
+fn match_size<'py>(py: Python<'py>, p: PyReadonlyArray2<'py, f32>, target: Option<PyReadonlyArray2<'py, f32>>,
+                   translate: bool, center: [f64; 3], justify_z: &str, scale: bool, size: [f64; 3], uniform: bool,
+                   normals: Option<PyReadonlyArray2<'py, f32>>) -> PyResult<Bound<'py, PyAny>> {
+    let pp = slice2(&p, 3, "P")?;
+    let tt = match &target { Some(t) => Some(slice2(t, 3, "target")?), None => None };
+    let nn = match &normals { Some(n) => Some(slice2(n, 3, "N")?), None => None };
+    let out = py.detach(|| minihou_core::nodes::match_size_points(pp, tt, translate, center, justify_z, scale, size, uniform, nn));
+    let n = match out.n { Some(v) => array(py, v, 3)?, None => py.None().into_bound(py) };
+    Ok((array(py, out.p, 3)?, n).into_pyobject(py)?.into_any())
+}
+
 /// Hydraulic erosion state holding H, flow, eroded, deposited across iterations.
 #[pyclass]
 struct Hydraulic {
@@ -579,6 +595,7 @@ fn minihou_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(noise_vec, m)?)?;
     m.add_function(wrap_pyfunction!(affine, m)?)?;
     m.add_function(wrap_pyfunction!(linear_normalized, m)?)?;
+    m.add_function(wrap_pyfunction!(match_size, m)?)?;
     m.add_function(wrap_pyfunction!(cook, m)?)?;
     m.add_class::<Session>()?;
     m.add_function(wrap_pyfunction!(preview_layout, m)?)?;

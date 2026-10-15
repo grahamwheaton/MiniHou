@@ -15,7 +15,7 @@ from minihou import Evaluator, Geometry, Graph, accel, proxy, rust, topo
 from minihou.geometry import Topology
 from minihou.sdk import REGISTRY
 
-NODE_TYPES = ["grid", "box", "point", "curve", "line", "circle", "sphere", "tube", "torus", "bound", "transform", "normal", "noise", "merge", "null", "output"]
+NODE_TYPES = ["grid", "box", "point", "curve", "line", "circle", "sphere", "tube", "torus", "bound", "transform", "normal", "noise", "match_size", "merge", "null", "output"]
 
 
 @contextlib.contextmanager
@@ -200,6 +200,37 @@ class RustParityTests(unittest.TestCase):
                 self.same(chain(("noise", params), source={"type": "grid", "params": {"columns": 40, "rows": 33,
                                                                                          "size_x": 7, "size_y": 5}}))
 
+    def test_match_size(self):
+        # translate + non-uniform scale to a centre and size, then uniform keeping proportions
+        for params in ({"translate": True, "center": [1, 2, 3], "scale": True, "size": [2, 1, 4], "uniform": False},
+                       {"translate": False, "center": [0, 0, 0], "scale": True, "size": [2, 2, 4], "uniform": True},
+                       {"translate": True, "center": [0, 0, 5], "justify_z": "min", "scale": True, "size": [1, 1, 1],
+                        "uniform": True},
+                       {"justify_z": "max", "center": [0, 0, 3]},
+                       {"scale": True, "size": [0.5, 2, 3], "uniform": False},
+                       {}):
+            with self.subTest(params=params):
+                self.same(chain(("match_size", params)))
+        # normals: a non-uniform scale rescales and renormalises N, a uniform one leaves it alone
+        for uniform in (True, False):
+            with self.subTest(uniform=uniform):
+                self.same(chain(("normal", {"domain": "point"}),
+                                ("match_size", {"scale": True, "size": [2, 0.5, 1], "uniform": uniform})))
+        # a second input replaces the target position and size with its bounding box
+        for justify in ("center", "min", "max"):
+            with self.subTest(justify=justify):
+                graph = {"version": 1, "nodes": {
+                    "b": {"type": "box", "params": {"divisions": 2}},
+                    "c": {"type": "curve", "params": {"points": "0,0,0 2,4,6"}},
+                    "m": {"type": "match_size", "inputs": {"geo": "b", "target": "c"},
+                          "params": {"scale": True, "size": [1, 1, 1], "uniform": False, "justify_z": justify}}},
+                    "display": "m"}
+                self.same(graph)
+        # an empty geometry passes straight through
+        empty = {"version": 1, "nodes": {"g": {"type": "grid", "flags": {"bypass": True}},
+                                         "m": {"type": "match_size", "inputs": {"geo": "g"}}}, "display": "m"}
+        self.same(empty)
+
     def test_merge_null_output_and_bypass(self):
         graph = {"version": 1, "nodes": {
             "g": {"type": "grid", "params": {"columns": 4, "rows": 3}},
@@ -336,7 +367,9 @@ class RustParityTests(unittest.TestCase):
                         ("subdivide", {}), ("normal", {}), source={"type": "box", "params": {"divisions": 6}}),
                   chain(("polyextrude", {"distance": 0.3}), ("noise", {"attrib": "P", "amplitude": [0.1, 0.1, 0.1]}),
                         ("transform", {"axis_rotation": [0, 30, 0], "scale": [1, 2, 1]}), ("normal", {}),
-                        source={"type": "grid", "params": {"columns": 30, "rows": 20}})]
+                        source={"type": "grid", "params": {"columns": 30, "rows": 20}}),
+                  chain(("normal", {}), ("match_size", {"scale": True, "size": [2, 1, 3], "uniform": False,
+                         "center": [1, 2, 3]}), source={"type": "grid", "params": {"columns": 20, "rows": 15}})]
         for graph in graphs:
             with self.subTest(graph=list(graph["nodes"])):
                 g = Graph.from_dict(graph)

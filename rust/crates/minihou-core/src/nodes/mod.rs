@@ -13,6 +13,8 @@ mod groups;
 mod merge;
 mod modify;
 
+pub use modify::{match_size_points, MatchSizeOut};
+
 /// One input port.
 pub struct InputSpec {
     pub name: &'static str,
@@ -57,6 +59,7 @@ pub fn registry() -> &'static [NodeSpec] {
         modify::TRANSFORM,
         modify::NORMAL,
         modify::NOISE,
+        modify::MATCH_SIZE,
         merge::MERGE,
         NodeSpec { name: "null", inputs: GEO, params: crate::params!("label": ""), cook: pass_through },
         NodeSpec { name: "output", inputs: GEO, params: crate::params!("object": ""), cook: pass_through },
