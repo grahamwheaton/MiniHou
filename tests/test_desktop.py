@@ -66,3 +66,12 @@ class DesktopFileTests(unittest.TestCase):
         on_drop({"dataTransfer": {"files": [{"name": "a.usd"}]}})
         on_drop(None)
         self.assertEqual(len(sent), 1)
+
+    def test_webview2_is_asked_for_the_fast_gpu_unless_told_not_to(self):
+        self.assertEqual(desktop.browser_arguments({}), "--force_high_performance_gpu")
+        self.assertEqual(desktop.browser_arguments({"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS": "--foo"}),
+                         "--foo --force_high_performance_gpu")
+        already = {"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS": "--force_high_performance_gpu --foo"}
+        self.assertEqual(desktop.browser_arguments(already), already["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"])
+        self.assertEqual(desktop.browser_arguments({"MINIHOU_GPU": "default", "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS": "--foo"}),
+                         "--foo")

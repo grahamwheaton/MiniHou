@@ -63,11 +63,27 @@ def drop_handler(window):
     return on_drop
 
 
+GPU_FLAG = "--force_high_performance_gpu"
+
+
+def browser_arguments(environ=os.environ):
+    """The WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS value with the fast GPU asked for.
+
+    On a laptop with an integrated and a discrete GPU, WebView2 draws the viewport on the integrated one (measured on an
+    i7-14700HX + RTX 4060: 4x slower frames at 4M quads). Arguments already set are kept; ``MINIHOU_GPU=default`` leaves
+    the system's choice alone."""
+    existing = environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "")
+    if environ.get("MINIHOU_GPU", "").strip().lower() in ("default", "system", "low") or GPU_FLAG in existing:
+        return existing
+    return (existing + " " + GPU_FLAG).strip()
+
+
 def run(server, workspace):
     import webview
     if os.name == 'nt':
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('MiniHou.Desktop')
+        os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = browser_arguments()   # read when the WebView2 environment is made
     window = webview.create_window('MiniHou', server.url, width=1440, height=940,
                                    min_size=(850, 560), background_color='#24282d',
                                    confirm_close=True)
