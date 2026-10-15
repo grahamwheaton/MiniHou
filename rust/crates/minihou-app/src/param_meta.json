@@ -1,0 +1,357 @@
+{
+ "box": {
+  "add_vertex_normals": {
+   "default": false,
+   "doc": "",
+   "kind": "bool"
+  },
+  "axis_divisions": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Cells per axis; zero uses Divisions. Integer values required.",
+   "kind": "vec3",
+   "max": 1000,
+   "min": 0
+  },
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "connectivity": {
+   "default": "quadrilaterals",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "quadrilaterals",
+    "triangles"
+   ]
+  },
+  "consolidate": {
+   "default": true,
+   "doc": "",
+   "kind": "bool"
+  },
+  "divisions": {
+   "default": 1,
+   "doc": "Legacy uniform cell divisions; used when axis divisions are zero",
+   "kind": "int",
+   "max": 1000,
+   "min": 1,
+   "soft_max": 50
+  },
+  "primitive_type": {
+   "default": "polygons",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "polygons",
+    "points"
+   ]
+  },
+  "rotate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "size": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "",
+   "kind": "vec3",
+   "min": 0.0
+  },
+  "uniform_scale": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0
+  }
+ },
+ "grid": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "columns": {
+   "default": 10,
+   "doc": "",
+   "kind": "int",
+   "max": 20000,
+   "min": 2,
+   "soft_max": 1000
+  },
+  "rotate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "rows": {
+   "default": 10,
+   "doc": "",
+   "kind": "int",
+   "max": 20000,
+   "min": 2,
+   "soft_max": 1000
+  },
+  "scale": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "size_x": {
+   "default": 10.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 100.0
+  },
+  "size_y": {
+   "default": 10.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 100.0
+  },
+  "uniform_scale": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0
+  }
+ },
+ "merge": {},
+ "noise": {
+  "amplitude": {
+   "default": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "attrib": {
+   "default": "P",
+   "doc": "Point attribute to write. 'P' displaces; any other name is set (not added).",
+   "kind": "str"
+  },
+  "frequency": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 20.0
+  },
+  "gain": {
+   "default": 0.5,
+   "doc": "",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "group": {
+   "default": "",
+   "doc": "Only change these points: group names, ^exclusions, numbers/ranges or '@P.z > 0'. Empty: all",
+   "kind": "str"
+  },
+  "lacunarity": {
+   "default": 2.0,
+   "doc": "",
+   "kind": "float",
+   "min": 1.0,
+   "soft_max": 4.0
+  },
+  "mode": {
+   "default": "scalar",
+   "doc": "scalar: one noise value times 'amplitude'. vector: three decorrelated values times 'amplitude'.",
+   "kind": "enum",
+   "options": [
+    "scalar",
+    "vector"
+   ]
+  },
+  "octaves": {
+   "default": 1,
+   "doc": "",
+   "kind": "int",
+   "max": 12,
+   "min": 1
+  },
+  "offset": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Added to the sample position after frequency scaling",
+   "kind": "vec3"
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  }
+ },
+ "normal": {
+  "cusp_angle": {
+   "default": 60.0,
+   "doc": "vertex: faces meeting at more than this many degrees stay sharp",
+   "kind": "float",
+   "max": 180.0,
+   "min": 0.0
+  },
+  "domain": {
+   "default": "point",
+   "doc": "point: area-weighted average of adjacent faces; prim: face normals; vertex: averages that stop at edges sharper than the cusp angle (hard edges, smooth elsewhere)",
+   "kind": "enum",
+   "options": [
+    "point",
+    "prim",
+    "vertex"
+   ]
+  }
+ },
+ "null": {
+  "label": {
+   "default": "",
+   "doc": "A note for yourself; the geometry passes through untouched",
+   "kind": "str"
+  }
+ },
+ "output": {
+  "object": {
+   "default": "",
+   "doc": "Blender object that shows this output (created and updated live). Empty: the main output, shown through the MiniHou proxy; only the display node is the main output",
+   "kind": "str"
+  }
+ },
+ "transform": {
+  "axis_rotation": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Transform coordinate frame: Euler XYZ degrees. Translation, rotation and scale use these axes",
+   "kind": "vec3"
+  },
+  "group": {
+   "default": "",
+   "doc": "Only move these points: group names, ^exclusions, numbers/ranges or '@P.z > 0' (a primitive group moves its points). Empty: all",
+   "kind": "str"
+  },
+  "pivot": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "proportional_connected": {
+   "default": false,
+   "doc": "Distance along mesh/curve edges",
+   "kind": "bool"
+  },
+  "proportional_enabled": {
+   "default": false,
+   "doc": "",
+   "kind": "bool"
+  },
+  "proportional_falloff": {
+   "default": "smooth",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "smooth",
+    "sphere",
+    "root",
+    "sharp",
+    "linear",
+    "constant",
+    "random"
+   ]
+  },
+  "proportional_projected": {
+   "default": false,
+   "doc": "Ignore view-depth distance; connected mode takes precedence",
+   "kind": "bool"
+  },
+  "proportional_radius": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "min": 1e-08
+  },
+  "proportional_view_direction": {
+   "default": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "rotate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Euler XYZ in degrees (X applied first)",
+   "kind": "vec3"
+  },
+  "scale": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "translate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "uniform_scale": {
+   "default": 1.0,
+   "doc": "Multiplies scale",
+   "kind": "float"
+  }
+ }
+}
