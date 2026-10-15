@@ -1088,7 +1088,7 @@ impl eframe::App for App {
 
                 self.viewport_hover = response.hovered();
                 if self.modal.is_none() && response.hovered() && !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
-                    out.push(UiAction::Command("add_menu".into()));
+                    out.push(UiAction::Command(if self.editor_state.selection != ui::SelectionMode::Object { "toggle_edit".into() } else { "add_menu".into() }));
                 }
                 if response.clicked_by(egui::PointerButton::Primary) && self.modal.is_none() && !ui::sketch::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && self.editor_state.tool == ui::Tool::Select {
                     if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {

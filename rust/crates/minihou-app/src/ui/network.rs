@@ -44,20 +44,21 @@ pub fn frame(ctx: &egui::Context, path: &Path) {
 }
 pub fn open_add_menu(ctx: &egui::Context, path: &Path) {
     let id = state_id(path);
+    let at = ctx.input(|i| i.pointer.hover_pos()).unwrap_or(pos2(160., 190.));
     ctx.data_mut(|d| {
         let mut state = d.get_persisted::<State>(id).unwrap_or_default();
         state.list = false;
-        let at = ctx.input(|i| i.pointer.hover_pos()).unwrap_or(pos2(160., 190.));
-        state.menu = Some(network_menu::MenuState::new(at, None, true));
+        state.menu = if state.menu.is_some() { None } else { Some(network_menu::MenuState::new(at, None, true)) };
         d.insert_persisted(id, state);
     });
+    ctx.input_mut(|i| i.consume_key(egui::Modifiers::default(), egui::Key::Tab));
     ctx.request_repaint();
 }
 pub fn open_pie_menu(ctx: &egui::Context, path: &Path) {
     let id = state_id(path);
+    let at = ctx.input(|i| i.pointer.hover_pos()).unwrap_or(pos2(160., 190.));
     ctx.data_mut(|d| {
         let mut state = d.get_persisted::<State>(id).unwrap_or_default();
-        let at = ctx.input(|i| i.pointer.hover_pos()).unwrap_or(pos2(160., 190.));
         state.menu = Some(network_menu::MenuState::pie(at));
         d.insert_persisted(id, state);
     });
@@ -216,6 +217,7 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
         let target = if right_click { positions.iter().rev().find(|(_, pos)| Rect::from_min_size(screen(r, state, *pos), CARD * state.zoom).contains(at))
             .map(|(id, _)| id.clone()) } else { None };
         state.menu = Some(network_menu::MenuState::new(at, target, tab));
+        if tab { ctx.input_mut(|i| i.consume_key(egui::Modifiers::default(), egui::Key::Tab)); }
     }
     let p = ui.painter().with_clip_rect(r);
     p.rect_filled(r, 0.0, v.theme.base);
@@ -567,4 +569,182 @@ mod tests {
         tidy_state(&mut state);
         assert!(state.moved.is_empty() && state.tidied && state.zoom < 0.0);
     }
+    #[test]
+    fn open_add_menu_no_deadlock() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let ctx = egui::Context::default();
+            open_add_menu(&ctx, Path::new("scene.json"));
+            tx.send(()).unwrap();
+        });
+        assert!(rx.recv_timeout(std::time::Duration::from_millis(500)).is_ok(), "open_add_menu deadlocked on nested ctx lock");
+    }
+    #[test]
+    fn menu_can_open_and_close_fifty_times() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let ctx = egui::Context::default();
+            let path = Path::new("fifty_cycles.json");
+            let id = state_id(path);
+            for i in 0..50 {
+                open_add_menu(&ctx, path);
+                let is_open = ctx.data_mut(|d| d.get_persisted::<State>(id).and_then(|s| s.menu).is_some());
+                assert!(is_open, "Failed to open menu on iteration {i}");
+                open_add_menu(&ctx, path);
+                let is_open = ctx.data_mut(|d| d.get_persisted::<State>(id).and_then(|s| s.menu).is_some());
+                assert!(!is_open, "Failed to close menu on iteration {i}");
+            }
+            tx.send(()).unwrap();
+        });
+        assert!(rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok(), "Menu 50 open/close cycles timed out!");
+    }
+    #[test]
+    fn viewport_tab_in_edit_mode_toggles_mode() {
+        use crate::ui::keymap::{Command, KeyContext};
+        let kctx_edit = KeyContext { viewport_hovered: true, network_hovered: false, in_edit_mode: true, selected: Some("box1") };
+        assert!(matches!(Command::AddMenu.to_action(&kctx_edit), Some(UiAction::Command(cmd)) if cmd == "toggle_edit"));
+
+        let kctx_obj = KeyContext { viewport_hovered: true, network_hovered: false, in_edit_mode: false, selected: Some("box1") };
+        assert!(matches!(Command::AddMenu.to_action(&kctx_obj), Some(UiAction::Command(cmd)) if cmd == "add_menu"));
+
+        let kctx_net = KeyContext { viewport_hovered: false, network_hovered: true, in_edit_mode: true, selected: Some("box1") };
+        assert!(matches!(Command::AddMenu.to_action(&kctx_net), Some(UiAction::Command(cmd)) if cmd == "add_menu"));
+    }
+    #[test]
+    fn headless_tab_opens_menu_filters_adds_node_and_closes() {
+        use crate::ui::keymap::{KeyContext, Keymap};
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let f = Fixture::new();
+            let ctx = egui::Context::default();
+            f.theme.apply(&ctx);
+            let path = std::path::Path::new("untitled.json");
+            let keymap = Keymap::blender();
+
+            // Frame 1: Tab over network area opens menu without deadlocking
+            let mut out = Actions::default();
+            let p_network = pos2(200.0, 300.0);
+            let input1 = egui::RawInput {
+                events: vec![
+                    egui::Event::PointerMoved(p_network),
+                    egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() },
+                ],
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280., 800.))),
+                ..Default::default()
+            };
+            let v = f.view();
+            let _ = ctx.run(input1, |ctx| {
+                let kctx = KeyContext { viewport_hovered: false, network_hovered: true, in_edit_mode: false, selected: Some(&f.selected) };
+                for a in keymap.poll(ctx, &kctx) { out.push(a); }
+                egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| {
+                    show(ui, &v, &mut out);
+                });
+            });
+            for a in &out.0 {
+                if let UiAction::Command(cmd) = a {
+                    if cmd == "add_menu" { open_add_menu(&ctx, path); }
+                }
+            }
+            let id = state_id(path);
+            let menu_is_open = ctx.data_mut(|d| d.get_persisted::<State>(id).and_then(|s| s.menu).is_some());
+            assert!(menu_is_open, "Tab should open menu");
+
+            // Frame 2: Show menu so TextEdit requests focus
+            let input2 = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280., 800.))), ..Default::default() };
+            let _ = ctx.run(input2, |ctx| {
+                egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| {
+                    show(ui, &v, &mut Actions::default());
+                });
+            });
+
+            // Frame 3: Type "transform" into the focused TextEdit to filter
+            let input3 = egui::RawInput {
+                events: vec![
+                    egui::Event::Text("transform".into()),
+                ],
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280., 800.))),
+                ..Default::default()
+            };
+            let _ = ctx.run(input3, |ctx| {
+                egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| {
+                    show(ui, &v, &mut Actions::default());
+                });
+            });
+            let query = ctx.data_mut(|d| d.get_persisted::<State>(id).and_then(|s| s.menu).map(|m| m.query().to_owned())).unwrap_or_default();
+            assert_eq!(query, "transform");
+
+            // Frame 4: Press Enter to add the filtered node
+            let mut out4 = Actions::default();
+            let input4 = egui::RawInput {
+                events: vec![
+                    egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() },
+                ],
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280., 800.))),
+                ..Default::default()
+            };
+            let _ = ctx.run(input4, |ctx| {
+                egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| {
+                    show(ui, &v, &mut out4);
+                });
+            });
+            assert!(out4.0.iter().any(|a| matches!(a, UiAction::AddNode { node_type, .. } if node_type == "transform")));
+            let menu_is_open = ctx.data_mut(|d| d.get_persisted::<State>(id).and_then(|s| s.menu).is_some());
+            assert!(!menu_is_open, "Enter should close menu");
+
+            // Frame 4: Open menu again, then close with Tab
+            open_add_menu(&ctx, path);
+            assert!(ctx.data_mut(|d| d.get_persisted::<State>(id).and_then(|s| s.menu).is_some()));
+            let input4a = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280., 800.))), ..Default::default() };
+            let _ = ctx.run(input4a, |ctx| {
+                egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| {
+                    show(ui, &v, &mut Actions::default());
+                });
+            });
+            let mut out4b = Actions::default();
+            let input4b = egui::RawInput {
+                events: vec![
+                    egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() },
+                ],
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280., 800.))),
+                ..Default::default()
+            };
+            let _ = ctx.run(input4b, |ctx| {
+                let kctx = KeyContext { viewport_hovered: false, network_hovered: true, in_edit_mode: false, selected: Some(&f.selected) };
+                for a in keymap.poll(ctx, &kctx) { out4b.push(a); }
+                egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| {
+                    show(ui, &v, &mut out4b);
+                });
+            });
+            for a in &out4b.0 {
+                if let UiAction::Command(cmd) = a {
+                    if cmd == "add_menu" { open_add_menu(&ctx, path); }
+                }
+            }
+            assert!(ctx.data_mut(|d| d.get_persisted::<State>(id).and_then(|s| s.menu).is_none()), "Tab should close open menu");
+
+            // Frame 5: Open menu again, then close with Escape
+            open_add_menu(&ctx, path);
+            assert!(ctx.data_mut(|d| d.get_persisted::<State>(id).and_then(|s| s.menu).is_some()));
+            let mut out5 = Actions::default();
+            let input5 = egui::RawInput {
+                events: vec![
+                    egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() },
+                ],
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1280., 800.))),
+                ..Default::default()
+            };
+            let _ = ctx.run(input5, |ctx| {
+                let kctx = KeyContext { viewport_hovered: false, network_hovered: true, in_edit_mode: false, selected: Some(&f.selected) };
+                for a in keymap.poll(ctx, &kctx) { out5.push(a); }
+                egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| {
+                    show(ui, &v, &mut out5);
+                });
+            });
+            assert!(ctx.data_mut(|d| d.get_persisted::<State>(id).and_then(|s| s.menu).is_none()), "Escape should close menu");
+
+            tx.send(()).unwrap();
+        });
+        assert!(rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok(), "Test timed out!");
+    }
 }
+
