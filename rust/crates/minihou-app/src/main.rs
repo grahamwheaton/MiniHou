@@ -560,7 +560,7 @@ impl eframe::App for App {
         let mut out = Actions::default();
         let kctx = KeyContext { viewport_hovered: self.viewport_hover, network_hovered: self.network_hover,
             in_edit_mode: self.editor_state.selection != ui::SelectionMode::Object, selected: Some(&self.selected) };
-        if !ui::sketch::active(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) { for action in self.keymap.poll(ctx, &kctx) { out.push(action); } }
+        if !ui::sketch::active(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) { for action in self.keymap.poll(ctx, &kctx) { out.push(action); } }
         {
             let v = View { graph: &graph, doc: self.editor.doc.value(), path: &self.editor.path, dirty: self.editor.dirty(),
                 can_undo: self.editor.history.can_undo(), can_redo: self.editor.history.can_redo(),
@@ -592,8 +592,8 @@ impl eframe::App for App {
                 let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
                 self.last_viewport = rect;
                 let delta = ctx.input(|i| i.pointer.delta());
-                if response.dragged() && !ui::sketch::active(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx)
-                    && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::transform_gizmo::hit(rect, &v, p)) {
+                if response.dragged() && !ui::sketch::active(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx)
+                    && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::transform_gizmo::hit(rect, &v, p) || ui::prim_handles::hit(rect, &v, p)) {
                     let modifiers = ctx.input(|i| i.modifiers);
                     match self.prefs.viewport.navigation {
                         ui::keymap::Navigation::Blender if response.dragged_by(egui::PointerButton::Middle) => {
@@ -624,7 +624,7 @@ impl eframe::App for App {
                 if response.hovered() && !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
                     out.push(UiAction::Command("add_menu".into()));
                 }
-                if response.clicked_by(egui::PointerButton::Primary) && !ui::sketch::active(ctx) && !ui::selection_region::active(ctx) && self.editor_state.tool == ui::Tool::Select {
+                if response.clicked_by(egui::PointerButton::Primary) && !ui::sketch::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && self.editor_state.tool == ui::Tool::Select {
                     if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {
                         let (nx, ny) = (((at.x - rect.left()) / rect.width()) * 2. - 1., 1. - ((at.y - rect.top()) / rect.height()) * 2.);
                         let (o, d) = self.camera.ray(nx, ny, rect.width() / rect.height());
@@ -657,6 +657,7 @@ impl eframe::App for App {
                 }
                 ui::transform_gizmo::cursor(ui, rect, &v);
                 ui::transform_gizmo::show(ui, rect, &v, &mut out);
+                ui::prim_handles::show(ui, rect, &v, &mut out);
                 ui::sketch::show(ui, rect, &v, &mut out);
                 ui::selection_region::show(ui, rect, &v, &mut out);
             });

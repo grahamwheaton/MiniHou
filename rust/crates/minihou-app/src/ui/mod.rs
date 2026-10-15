@@ -8,6 +8,7 @@ pub mod geo_info;
 pub mod keymap;
 pub mod network;
 pub mod params;
+pub mod prim_handles;
 pub mod proxy_ui;
 pub mod selection_region;
 pub mod shelf;

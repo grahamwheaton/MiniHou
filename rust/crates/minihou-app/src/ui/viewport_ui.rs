@@ -6,6 +6,11 @@ use crate::viewport::Mode;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 #[path = "view_gizmo.rs"] mod view_gizmo;
 
+/// Render primitive handles over the viewport when a primitive generator is selected.
+pub fn handles(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool {
+    super::prim_handles::show(ui, rect, v, out)
+}
+
 const HEADER_H: f32 = 36.;
 const TIMELINE_H: f32 = 44.;
 const TOOLS: [(&str, Icon); 7] = [
