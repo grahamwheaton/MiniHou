@@ -129,7 +129,7 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     }
     if button_text(ui, th, h.orient, "vp_orient", st.popover == Some(Popover::Orientation), "Transform orientation", Icon::Orient, (Some(ed.orientation.label()), true)) { st.popover = toggle_popover(st.popover, Popover::Orientation); }
     if button_text(ui, th, h.pivot, "vp_pivot", st.popover == Some(Popover::Pivot), "Pivot point", Icon::Pivot, (None, true)) { st.popover = toggle_popover(st.popover, Popover::Pivot); }
-    let snap_label = format!("{}", ed.snap.increment);
+    let snap_label = crate::units::format(ed.snap.increment as f64, v.units);
     let snap_main = Rect::from_min_max(h.snap.min, Pos2::new(h.snap.right() - 16., h.snap.bottom()));
     if button_text(ui, th, snap_main, "vp_snap_toggle", ed.snap.enabled, "Toggle snapping (Shift+Tab)", Icon::Magnet, (if ed.snap.enabled && h.snap.width() > 44. { Some(snap_label.as_str()) } else { None }, false)) { out.push(UiAction::Editor(EditorChange::SnapEnabled(!ed.snap.enabled))); }
     if caret_button(ui, th, h.snap, "vp_snap_menu", st.popover == Some(Popover::Snap)) { st.popover = toggle_popover(st.popover, Popover::Snap); }
@@ -280,7 +280,7 @@ fn pop_row(ui: &mut egui::Ui, r: Rect, id: impl std::hash::Hash, label: &str, se
     resp.clicked()
 }
 
-fn numeric_row(ui: &mut egui::Ui, r: Rect, id: &'static str, label: &str, value: f32, th: &Theme) -> Option<f32> {
+fn numeric_row(ui: &mut egui::Ui, r: Rect, id: &'static str, label: &str, value: f32, th: &Theme, units: Option<crate::units::UnitSettings>) -> Option<f32> {
     let p = ui.painter();
     p.text(Pos2::new(r.left() + 8., r.center().y), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(12.), th.text);
     let box_r = Rect::from_min_size(Pos2::new(r.right() - 88., r.center().y - 11.), Vec2::new(80., 22.));
@@ -291,17 +291,34 @@ fn numeric_row(ui: &mut egui::Ui, r: Rect, id: &'static str, label: &str, value:
         if !resp.has_focus() && !resp.lost_focus() { resp.request_focus(); }
         if resp.lost_focus() {
             ui.ctx().data_mut(|d| d.remove::<String>(edit_id));
-            return text.trim().parse::<f32>().ok().filter(|x| x.is_finite()).map(|x| x.max(1e-4));
+            let parsed = if let Some(u) = units {
+                u.parse(&text).map(|x| x as f32)
+            } else {
+                text.trim().parse::<f32>().ok()
+            };
+            return parsed.filter(|x| x.is_finite()).map(|x| x.max(1e-4));
         }
         ui.ctx().data_mut(|d| d.insert_temp(edit_id, text));
     } else {
         let resp = ui.interact(box_r, edit_id, Sense::click_and_drag());
-        if resp.double_clicked() { ui.ctx().data_mut(|d| d.insert_temp(edit_id, format!("{value}"))); }
+        if resp.double_clicked() {
+            let initial = if let Some(u) = units {
+                u.format(value as f64)
+            } else {
+                format!("{value}")
+            };
+            ui.ctx().data_mut(|d| d.insert_temp(edit_id, initial));
+        }
         if resp.dragged() {
             let dx = ui.ctx().input(|i| i.pointer.delta().x);
             if dx != 0. { return Some((value + dx * value.max(0.1) * 0.01).max(1e-4)); }
         }
-        p.text(Pos2::new(box_r.right() - 6., box_r.center().y), egui::Align2::RIGHT_CENTER, format!("{value:.2}"), egui::FontId::monospace(12.), th.text);
+        let display_str = if let Some(u) = units {
+            u.format(value as f64)
+        } else {
+            format!("{value:.2}")
+        };
+        p.text(Pos2::new(box_r.right() - 6., box_r.center().y), egui::Align2::RIGHT_CENTER, display_str, egui::FontId::monospace(12.), th.text);
     }
     None
 }
@@ -342,7 +359,7 @@ fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover,
             for (i, to) in SnapTo::ALL.iter().enumerate() {
                 if pop_row(ui, row(2 + i), ("snap_to", i), to.label(), *to == ed.snap.to, false, "", th) { out.push(UiAction::Editor(EditorChange::SnapTo(*to))); }
             }
-            if let Some(x) = numeric_row(ui, row(8), "snap_increment", "Increment", ed.snap.increment, th) { out.push(UiAction::Editor(EditorChange::SnapIncrement(x))); }
+            if let Some(x) = numeric_row(ui, row(8), "snap_increment", "Increment", ed.snap.increment, th, Some(v.units)) { out.push(UiAction::Editor(EditorChange::SnapIncrement(x))); }
             // The final two rows extend the standard spacing so both toggles remain readable.
             let extra = row(9);
             if pop_row(ui, extra, ("snap_align", 0), "Align rotation to target", ed.snap.align_rotation, true, "", th) { out.push(UiAction::Editor(EditorChange::SnapAlignRotation(!ed.snap.align_rotation))); }
@@ -357,7 +374,7 @@ fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover,
                 let pts = falloff_samples(*falloff).iter().enumerate().map(|(j, y)| Pos2::new(r.right() - 34. + j as f32 * 2., r.center().y + 6. - y * 12.)).collect();
                 ui.painter().add(egui::Shape::line(pts, Stroke::new(1.0_f32, th.dim)));
             }
-            if let Some(x) = numeric_row(ui, row(10), "prop_radius", "Radius", ed.proportional.radius, th) { out.push(UiAction::Editor(EditorChange::ProportionalRadius(x))); }
+            if let Some(x) = numeric_row(ui, row(10), "prop_radius", "Radius", ed.proportional.radius, th, Some(v.units)) { out.push(UiAction::Editor(EditorChange::ProportionalRadius(x))); }
             if pop_row(ui, row(11), ("prop_connected", 0), "Connected only", ed.proportional.connected_only, true, "", th) { out.push(UiAction::Editor(EditorChange::ProportionalConnected(!ed.proportional.connected_only))); }
         }
         Popover::Overlays => {
@@ -574,5 +591,37 @@ mod tests {
             assert_eq!(samples[12], 0.);
         }
         assert!((falloff_samples(Falloff::Linear)[6] - 0.5).abs() < 1e-5);
+    }
+
+    #[test]
+    fn snap_increment_shows_units_in_header() {
+        let mut f = super::super::testing::Fixture::new();
+        let mut editor = crate::ui::EditorState::default();
+        editor.snap.enabled = true;
+        editor.snap.increment = 0.25;
+        f.editor = editor;
+        let viewport = Rect::from_min_size(Pos2::ZERO, Vec2::new(900., 600.));
+        let mut out = Actions::default();
+        let ctx = egui::Context::default();
+        f.theme.apply(&ctx);
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280., 800.))), ..Default::default() };
+        let full = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| overlay(ui, viewport, &f.view(), &mut out));
+        });
+        fn extract_texts(shapes: &[egui::epaint::ClippedShape], out: &mut Vec<String>) {
+            for s in shapes {
+                match &s.shape {
+                    egui::epaint::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+                    egui::epaint::Shape::Vec(subs) => {
+                        let clipped: Vec<egui::epaint::ClippedShape> = subs.iter().map(|sub| egui::epaint::ClippedShape { clip_rect: s.clip_rect, shape: sub.clone() }).collect();
+                        extract_texts(&clipped, out);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut texts = Vec::new();
+        extract_texts(&full.shapes, &mut texts);
+        assert!(texts.iter().any(|t| t.contains("250 mm")), "expected 250 mm in {texts:?}");
     }
 }
