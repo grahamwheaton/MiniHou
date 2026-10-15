@@ -33,12 +33,6 @@ from minihou.wrangle import WrangleError
 # already confirmed bugs; entries in KNOWN are reported but do not fail the test.
 # Left EMPTY by default: the caller will fill it.
 KNOWN: Dict[Tuple[str, str], str] = {
-    # Found by this test (2026-10-15): a target with no triangles reaches an index into an empty array.
-    ("ray", "single_point"): "ray.py:83 tri_p[np.maximum(tri, 0)] on an empty triangle array: raw IndexError",
-    ("ray", "open_curve"): "ray.py:83 tri_p[np.maximum(tri, 0)] on an empty triangle array: raw IndexError",
-    ("ray", "coincident_curve"): "ray.py:83 tri_p[np.maximum(tri, 0)] on an empty triangle array: raw IndexError",
-    ("point_relax", "open_curve"): "deform.py:131 grid.tris[tri] on an empty triangle array: raw IndexError",
-    ("point_relax", "coincident_curve"): "deform.py:131 grid.tris[tri] on an empty triangle array: raw IndexError",
 }
 
 
