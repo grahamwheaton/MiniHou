@@ -122,8 +122,7 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
                     icon(ui.painter(), icon_rect, tool, v.theme.text, v.theme.c_src);
                     let label = wrap_label(tool.label);
                     // one line at a time: egui left-aligns the lines of a multi-line string inside its block
-                    for (i, text) in label.split('
-').enumerate() {
+                    for (i, text) in label.lines().enumerate() {
                         ui.painter().with_clip_rect(r).text(r.center_top() + Vec2::new(0., 27. + i as f32 * 11.), Align2::CENTER_TOP, text, FontId::proportional(9.5), v.theme.text);
                     }
                     if v.runs_on_rust(tool.node_type) { dot(ui.painter(), r.min, r.width() - 7., 5., 2.5, v.theme.ok); }
