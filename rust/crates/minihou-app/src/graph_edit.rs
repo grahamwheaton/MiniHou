@@ -197,6 +197,10 @@ pub fn dissolve_set(value: &Value, ids: &[String]) -> Option<Value> {
 }
 
 #[cfg(test)]
+pub fn dissolve(value: &Value, id: &str) -> Option<Value> {
+    dissolve_set(value, &[id.to_owned()])
+}
+#[cfg(test)]
 pub fn duplicate(value: &Value, id: &str) -> Option<(Value, String)> {
     let mut value = value.clone();
     let all = nodes_mut(&mut value)?;
@@ -426,5 +430,16 @@ mod tests {
         assert!(next.get("display").is_none());
         assert!(next["nodes"].as_object().unwrap().is_empty());
         validated(next).unwrap();
+    }
+    #[test] fn dissolve_reconnects_input_to_consumers() {
+        let mut v = graph();
+        v["nodes"]["transform1"] = json!({"type": "transform", "inputs": {"geo": "box1"}});
+        v["nodes"]["merge1"]["inputs"]["geos"] = json!(["transform1", "box2"]);
+        v["display"] = json!("transform1");
+        let v = dissolve(&v, "transform1").unwrap();
+        assert!(v["nodes"].get("transform1").is_none());
+        assert_eq!(v["nodes"]["merge1"]["inputs"]["geos"], json!(["box1", "box2"]));
+        assert_eq!(v["display"], "box1");
+        validated(v).unwrap();
     }
 }
