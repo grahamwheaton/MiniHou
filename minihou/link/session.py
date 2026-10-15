@@ -738,6 +738,8 @@ class Session:
                 cook = {"ms": round(ms, 3), "cooked": d["cooked"], "cached": d["cached"], "node_ms": d["node_ms"]}
                 if d["disk"]:
                     cook["disk"] = d["disk"]                  # which results came back from the disk cache
+                if d["backend"]:
+                    cook["backend"] = d["backend"]            # rust / fallback / python, for the editor's node tags
                 if level < 1.0:
                     cook["proxy"] = level
                 published = Result(0, geo, stats.key, cook, rev=rev, extras=extras, proxy=level, scene=scene,

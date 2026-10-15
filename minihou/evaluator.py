@@ -23,7 +23,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from . import proxy, timectx
+from . import proxy, rust, timectx
 from .geometry import Geometry
 from .inputs import input_cache_scope
 from .diskcache import VOLATILE_TYPES
@@ -76,11 +76,12 @@ class CookStats:
     cached: List[str] = field(default_factory=list)     # nodes served from cache (memory or disk)
     disk: List[str] = field(default_factory=list)       # the ones of those that came from the disk cache
     node_ms: Dict[str, float] = field(default_factory=dict)
+    backend: Dict[str, str] = field(default_factory=dict)   # with the Rust core available: "rust" / "fallback" / "python"
     total_ms: float = 0.0
 
     def to_dict(self) -> dict:
         return {"target": self.target, "cooked": list(self.cooked), "cached": list(self.cached), "disk": list(self.disk),
-                "node_ms": {k: round(v, 3) for k, v in self.node_ms.items()},
+                "node_ms": {k: round(v, 3) for k, v in self.node_ms.items()}, "backend": dict(self.backend),
                 "total_ms": round(self.total_ms, 3)}
 
 
@@ -327,6 +328,7 @@ class Evaluator:
             stats.cached.extend(body_stats.cached)
             for body_id, ms in body_stats.node_ms.items():
                 stats.node_ms[body_id] = stats.node_ms.get(body_id, 0.0) + ms
+            stats.backend.update(body_stats.backend)
         if count:
             state = state.copy()
             # Restore the containing block's metadata after nested loops, and keep
@@ -361,6 +363,7 @@ class Evaluator:
                 args.append(results[ref])
         params = proxy.scale_params(nt, nt.coerce_params(inst.params))
         t0 = time.perf_counter()
+        rust_calls = rust.calls()
         try:
             from .rbd import owned
             with owned(self.rbd, nid):
@@ -373,6 +376,9 @@ class Evaluator:
         except Exception as e:  # noqa: BLE001 - re-raised with node context
             raise NodeError(nid, inst.type, e) from e
         stats.node_ms[nid] = (time.perf_counter() - t0) * 1000.0
+        backend = rust.backend_of(inst.type, rust.calls() - rust_calls)
+        if backend:
+            stats.backend[nid] = backend
         stats.cooked.append(nid)
         self.cache.put(key, out, nt.name)
         if not inst.meta.get("flags", {}).get("unload"):

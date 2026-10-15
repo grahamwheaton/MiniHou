@@ -51,6 +51,27 @@ def disabled():
             _forced_off -= 1
 
 
+# Node types whose Python function calls a Rust kernel. The evaluator records which backend each node used on its last cook
+# (CookStats.backend) so the editor can show it: "rust" (a kernel ran), "fallback" (this node type has a Rust path, but this
+# cook ran the Python / numba one: unsupported settings or no points) and "python" (no Rust path).
+NODE_TYPES = frozenset({"grid", "box", "transform", "normal", "noise"})
+_tls = threading.local()
+
+
+def calls() -> int:
+    """How many Rust kernels this thread has called so far (the evaluator reads it before and after each node)."""
+    return getattr(_tls, "calls", 0)
+
+
+def backend_of(node_type: str, calls_made: int) -> Optional[str]:
+    """``"rust"``, ``"fallback"`` or ``"python"`` for a node that has just cooked; None when Rust is not in use."""
+    if not enabled():
+        return None
+    if node_type in NODE_TYPES:
+        return "rust" if calls_made > 0 else "fallback"
+    return "python"
+
+
 def status() -> str:
     if _rs is None:
         return "off (MINIHOU_NO_RUST)" if _off_by_env else "not installed"
@@ -64,6 +85,7 @@ def version() -> Optional[str]:
 def _need():
     if _rs is None:
         raise RuntimeError("the Rust core (minihou_rs) is not built: see rust/README.md")
+    _tls.calls = getattr(_tls, "calls", 0) + 1
     return _rs
 
 

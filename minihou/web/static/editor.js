@@ -416,9 +416,19 @@
   }
   function exposedOf(id) { return (S.graph.exposed || []).filter((e) => e.node === id); }
 
+  // Which backend each node last cooked with ("rust" / "fallback" / "python"). Kept across cooks that served it from the
+  // cache; cleared when a cook ran nodes without the Rust core.
+  const backendOf = {};
+  const BACKEND_TAG = {
+    rust: ["Rust", "Cooked by the Rust core"],
+    fallback: ["Rust\u2192Py", "Has a Rust path, but this cook used Python (unsupported settings or no points)"],
+    python: ["Py", "Python / numba: no Rust path for this node"],
+  };
   function renderNodes() {
     const st = S.status || {}, errNode = st.ok === false && st.error ? st.error.node : null;
     const cook = st.cook || {}, nodeMs = cook.node_ms || {}, cached = new Set(cook.cached || []);
+    if (cook.backend) Object.assign(backendOf, cook.backend);
+    else if ((cook.cooked || []).length) for (const k of Object.keys(backendOf)) delete backendOf[k];
     const live = upstreamOfDisplay(), disp = displayNode();
     const keep = new Set();
     for (const [id, n] of Object.entries(S.graph.nodes)) {
@@ -435,15 +445,15 @@
       const ex = exposedOf(id);
       // Rebuild a node's DOM only when its structure changes (wiring, comment, flags); status updates touch just the
       // status line. Stable elements keep hover state and never vanish under a click or a drag.
-      const subSig = JSON.stringify([id === errNode && st.error.message, nodeMs[id], cached.has(id), n.type]);
+      const subSig = JSON.stringify([id === errNode && st.error.message, nodeMs[id], cached.has(id), n.type, backendOf[id]]);
       const structSig = JSON.stringify([n.flags,!!n.locked_geometry,S.graph.render,inputMembers(id).map(([key, child]) => [key, child.input_label]), n.type, n.inputs, n.comment, ex.map((e) => e.name), t.inputs.length, id === disp, t.category === "system" && !!t.source]);
       if (el._struct === structSig) {
-        if (el._sub !== subSig) { el._sub = subSig; el.querySelector(".sub").replaceChildren(...subLine(id, n, st, errNode, nodeMs, cached)); }
+        if (el._sub !== subSig) { el._sub = subSig; el.querySelector(".sub").replaceChildren(...subLine(id, n, st, errNode, nodeMs, cached, backendOf[id])); }
         continue;
       }
       el._struct = structSig; el._sub = subSig;
       const kids = [h("div", { class: "band" }), h("div", { class: "title", title: id }, id),
-        h("div", { class: "sub" }, subLine(id, n, st, errNode, nodeMs, cached)),
+        h("div", { class: "sub" }, subLine(id, n, st, errNode, nodeMs, cached, backendOf[id])),
         ...['bypass','lock','template','display'].map(name=>h('button',{class:'flag flag-'+name+(flagState(id,name)?' on':''),dataset:{flag:name},title:flagTitle(name), 'aria-label':flagTitle(name),'aria-pressed':String(flagState(id,name))}, ({bypass:'M',lock:'L',template:'T',display:'D'})[name]))];
       el.classList.toggle('bypassed',!!n.flags?.bypass);
       el.classList.toggle('templated',!!(n.flags?.template||n.flags?.selectable_template));
@@ -471,11 +481,12 @@
     for (const el of [...nodesEl.children]) if (!keep.has(el.dataset.id)) el.remove();
     renderWires();
   }
-  function subLine(id, n, st, errNode, nodeMs, cached) {
+  function subLine(id, n, st, errNode, nodeMs, cached, backend) {
     if (id === errNode) return [h("span", null, "⚠ " + shortError(st.error.message))];
-    if (nodeMs[id] != null) return [n.type, " · ", h("span", { class: "ms" }, nodeMs[id].toFixed(1) + " ms")];
-    if (cached.has(id)) return [n.type, " · cached"];
-    return [n.type];
+    const tag = BACKEND_TAG[backend] ? [" ", h("span", { class: "rs rs-" + backend, title: BACKEND_TAG[backend][1] }, BACKEND_TAG[backend][0])] : [];
+    if (nodeMs[id] != null) return [n.type, " · ", h("span", { class: "ms" }, nodeMs[id].toFixed(1) + " ms"), ...tag];
+    if (cached.has(id)) return [n.type, " · cached", ...tag];
+    return [n.type, ...tag];
   }
   function shortError(msg) { const m = String(msg || ""); return m.length > 60 ? m.slice(0, 57) + "…" : m; }
   function wireExists(w) {
