@@ -12,8 +12,8 @@ impl ThemePref {
     pub fn label(self) -> &'static str { match self { Self::Dark => "Dark", Self::Light => "Light", Self::System => "System" } }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct ViewportPreferences { pub default_shading: String, pub navigation: Navigation, pub show_grid: bool, pub show_axes: bool, pub auto_budget: u32 }
-impl Default for ViewportPreferences { fn default() -> Self { Self { default_shading: "Shaded".into(), navigation: Navigation::Blender, show_grid: true, show_axes: true, auto_budget: 400_000 } } }
+pub struct ViewportPreferences { pub default_shading: String, pub navigation: Navigation, pub show_grid: bool, pub show_axes: bool, pub auto_budget: u32, pub view_distance: f32 }
+impl Default for ViewportPreferences { fn default() -> Self { Self { default_shading: "Shaded".into(), navigation: Navigation::Blender, show_grid: true, show_axes: true, auto_budget: 400_000, view_distance: 20.0 } } }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub theme: ThemePref, pub ui_scale: f32, pub emulate_numpad: bool, pub snap_increment: f32,
@@ -54,7 +54,8 @@ impl Preferences {
         "recent_files": self.recent_files.iter().take(10).collect::<Vec<_>>(),
         "viewport": { "default_shading": self.viewport.default_shading,
             "navigation": match self.viewport.navigation { Navigation::Blender => "blender", Navigation::Houdini => "houdini" },
-            "show_grid": self.viewport.show_grid, "show_axes": self.viewport.show_axes, "auto_budget": self.viewport.auto_budget },
+            "show_grid": self.viewport.show_grid, "show_axes": self.viewport.show_axes, "auto_budget": self.viewport.auto_budget,
+            "view_distance": self.viewport.view_distance },
     }) }
     fn from_json(v: &Value) -> Self {
         let mut p = Self { theme: match v.get("theme").and_then(Value::as_str) {
@@ -74,6 +75,7 @@ impl Preferences {
             if let Some(x) = view.get("show_grid").and_then(Value::as_bool) { p.viewport.show_grid = x; }
             if let Some(x) = view.get("show_axes").and_then(Value::as_bool) { p.viewport.show_axes = x; }
             if let Some(x) = view.get("auto_budget").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()) { p.viewport.auto_budget = x.max(1); }
+            if let Some(x) = view.get("view_distance").and_then(Value::as_f64) { p.viewport.view_distance = (x as f32).clamp(3.0, 1000.0); }
         }
         p
     }
@@ -89,6 +91,7 @@ impl Preferences {
         let path = test_path("prefs-roundtrip");
         let mut p = Preferences { theme: ThemePref::Light, ui_scale: 1.25, recent_files: vec![PathBuf::from("a.hou")], ..Default::default() };
         p.viewport.auto_budget = 250_000;
+        p.viewport.view_distance = 100.0;
         p.save_to(&path).unwrap(); p.save_to(&path).unwrap(); assert_eq!(Preferences::load_from(&path),p);
         let _ = fs::remove_file(path);
     }
@@ -101,10 +104,20 @@ impl Preferences {
     #[test] fn missing_fields_default_and_unknown_fields_ignored() {
         let p = Preferences::from_json(&json!({"schema":0,"theme":"Dark","unknown":42}));
         assert_eq!(p.theme,ThemePref::Dark); assert_eq!(p.ui_scale,1.); assert!(p.viewport.show_grid);
+        assert_eq!(p.viewport.view_distance, 20.0);
     }
     #[test] fn navigation_defaults_and_round_trips() {
         assert_eq!(Preferences::default().viewport.navigation, Navigation::Blender);
         let mut p = Preferences::default(); p.viewport.navigation = Navigation::Houdini;
         assert_eq!(Preferences::from_json(&p.to_json()).viewport.navigation, Navigation::Houdini);
+    }
+    #[test] fn view_distance_defaults_and_round_trips() {
+        assert_eq!(Preferences::default().viewport.view_distance, 20.0);
+        let p = Preferences::from_json(&json!({"viewport": {"view_distance": 50.0}}));
+        assert_eq!(p.viewport.view_distance, 50.0);
+        let p_clamp = Preferences::from_json(&json!({"viewport": {"view_distance": 1.0}}));
+        assert_eq!(p_clamp.viewport.view_distance, 3.0);
+        let p_max = Preferences::from_json(&json!({"viewport": {"view_distance": 2000.0}}));
+        assert_eq!(p_max.viewport.view_distance, 1000.0);
     }
 }

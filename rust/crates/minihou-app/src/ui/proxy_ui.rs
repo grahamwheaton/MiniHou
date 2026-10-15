@@ -47,6 +47,23 @@ pub fn menu(ui: &mut egui::Ui, v: &View, out: &mut Actions, compact: bool) {
                 out.push(UiAction::Editor(EditorChange::ProxyLinkTris(cap)));
             }
             ui.label(RichText::new("0 = unlimited").size(11.).color(v.theme.dim));
+            ui.separator();
+            ui.label("View distance");
+            ui.horizontal_wrapped(|ui| {
+                for (name, val) in [("Short 5", 5.0), ("Normal 20", 20.0), ("Long 100", 100.0), ("Max 1000", 1000.0)] {
+                    let active = (p.view_distance - val).abs() < 0.1;
+                    if ui.selectable_label(active, name).clicked() {
+                        out.push(UiAction::Editor(EditorChange::ViewDistance(val)));
+                    }
+                }
+            });
+            let mut vd = p.view_distance;
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Scene radius:").size(11.).color(v.theme.dim));
+                if ui.add(egui::DragValue::new(&mut vd).range(3.0..=1000.0).speed(1.0).suffix(" x")).changed() {
+                    out.push(UiAction::Editor(EditorChange::ViewDistance(vd)));
+                }
+            });
         });
     });
 }

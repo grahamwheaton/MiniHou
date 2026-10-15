@@ -75,8 +75,8 @@ impl ViewPreset {
 /// `/api/proxy` (level 1 = full, 0.5 = half ... ; `auto` picks the level from the triangle count; `link_tris` caps what is
 /// sent to Blender, 0 = unlimited).
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub struct Proxy { pub level: f32, pub auto: bool, pub link_tris: u32, pub clustered: bool }
-impl Default for Proxy { fn default() -> Self { Self { level: 1.0, auto: false, link_tris: 0, clustered: false } } }
+pub struct Proxy { pub level: f32, pub auto: bool, pub link_tris: u32, pub clustered: bool, pub view_distance: f32 }
+impl Default for Proxy { fn default() -> Self { Self { level: 1.0, auto: false, link_tris: 0, clustered: false, view_distance: 20.0 } } }
 
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct EditorState {
@@ -118,6 +118,7 @@ pub enum EditorChange {
     ProxyAuto(bool),
     ProxyLinkTris(u32),
     ProxyClustered(bool),
+    ViewDistance(f32),
 }
 
 impl EditorState {
@@ -144,6 +145,7 @@ impl EditorState {
             EditorChange::ProxyAuto(a) => self.proxy.auto = a,
             EditorChange::ProxyLinkTris(n) => self.proxy.link_tris = n,
             EditorChange::ProxyClustered(b) => self.proxy.clustered = b,
+            EditorChange::ViewDistance(d) => self.proxy.view_distance = d.clamp(3.0, 1000.0),
         }
     }
 }
@@ -161,6 +163,7 @@ mod tests {
         assert_eq!(s.pivot, Pivot::MedianPoint);
         assert!(!s.snap.enabled && !s.proportional.enabled && !s.xray);
         assert!(s.overlays.grid && s.overlays.axes && !s.overlays.normals && !s.overlays.bounds);
+        assert_eq!(s.proxy.view_distance, 20.0);
     }
 
     #[test]
@@ -174,5 +177,17 @@ mod tests {
         assert_eq!(s.tool, Tool::Move);
         assert!(s.proportional.radius > 0.);
         assert!(s.xray);
+    }
+
+    #[test]
+    fn view_distance_change_and_clamping() {
+        let mut s = EditorState::default();
+        assert_eq!(s.proxy.view_distance, 20.0);
+        s.apply(EditorChange::ViewDistance(100.0));
+        assert_eq!(s.proxy.view_distance, 100.0);
+        s.apply(EditorChange::ViewDistance(1.0));
+        assert_eq!(s.proxy.view_distance, 3.0);
+        s.apply(EditorChange::ViewDistance(2000.0));
+        assert_eq!(s.proxy.view_distance, 1000.0);
     }
 }

@@ -52,6 +52,7 @@ pub fn show(ctx: &egui::Context, open: &mut bool, prefs: &mut Preferences, keyma
                             changed |= ui.checkbox(&mut prefs.viewport.show_grid,"Show grid").changed();
                             changed |= ui.checkbox(&mut prefs.viewport.show_axes,"Show axes").changed();
                             changed |= ui.add(egui::DragValue::new(&mut prefs.viewport.auto_budget).range(1..=u32::MAX).speed(1_000.).prefix("Auto proxy triangle budget  ")).changed();
+                            changed |= ui.add(egui::DragValue::new(&mut prefs.viewport.view_distance).range(3.0..=1000.0).speed(1.0).prefix("View distance  ").suffix(" x")).changed();
                         }
                         Tab::Keymap => {
                             heading(ui,"Keymap",theme);

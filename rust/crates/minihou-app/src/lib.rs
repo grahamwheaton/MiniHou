@@ -211,6 +211,7 @@ pub struct Camera {
     pitch: f32,
     radius: f32,
     ortho: bool,
+    view_distance: f32,
 }
 
 impl Camera {
@@ -218,13 +219,29 @@ impl Camera {
     pub fn distance(&self) -> f32 {
         self.dist
     }
+    pub fn clip_planes(&self) -> (f32, f32) {
+        let far = (self.dist + self.radius * self.view_distance).max(1e-4);
+        let mut near = (self.radius * 1e-4).max(self.dist * 0.001).min(self.dist * 0.5);
+        near = near.max(far / 1e6).min(far * 0.99);
+        (near, far)
+    }
     pub fn lod_camera(&self, size: [u32; 2]) -> minihou_core::lod::Camera {
         let (view_projection, _) = self.matrices(size[0].max(1) as f32 / size[1].max(1) as f32);
+        let (near, _) = self.clip_planes();
         minihou_core::lod::Camera { view_projection, eye: self.eye(), viewport_height_px: size[1] as f32,
-            near: (self.dist - self.radius * 1.5).max(self.radius * 0.001).max(1e-4), orthographic:self.ortho }
+            near, orthographic: self.ortho }
     }
     pub fn frame(center: [f32; 3], radius: f32) -> Self {
-        let radius = radius.max(1e-3); Camera { target: center, dist: radius * 2.6, yaw: 0.6, pitch: 0.5, radius, ortho: false }
+        let radius = radius.max(1e-3); Camera { target: center, dist: radius * 2.6, yaw: 0.6, pitch: 0.5, radius, ortho: false, view_distance: 20.0 }
+    }
+    pub fn set_view_distance(&mut self, view_distance: f32) {
+        self.view_distance = view_distance.clamp(3.0, 1000.0);
+    }
+    pub fn view_distance(&self) -> f32 {
+        self.view_distance
+    }
+    pub fn set_dist(&mut self, dist: f32) {
+        self.dist = dist;
     }
 
     pub fn eye(&self) -> [f32; 3] {
@@ -243,9 +260,8 @@ impl Camera {
 
     pub fn matrices(&self, aspect: f32) -> (M4, M4) {
         let view = look_at(self.eye(), self.target, [0.0, 1.0, 0.0]);
-        let near = (self.dist - self.radius * 1.5).max(self.radius * 0.001).max(1e-4);
-        let far = self.dist + self.radius * 3.0;
-        let proj = if self.ortho { orthographic(0.8, self.dist, aspect, 1e-3_f32.min(near), far) } else { perspective(0.8, aspect, near, far) };
+        let (near, far) = self.clip_planes();
+        let proj = if self.ortho { orthographic(0.8, self.dist, aspect, near, far) } else { perspective(0.8, aspect, near, far) };
         (mul(&proj, &view), view)
     }
 }
