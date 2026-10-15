@@ -15,10 +15,8 @@ class RustSdfFieldTests(unittest.TestCase):
         np.testing.assert_array_equal(actual.origin, expected.origin)
         self.assertEqual(actual.h, expected.h)
         self.assertEqual(actual.values.dtype, expected.values.dtype)
-        # Scalar libm pow versus numpy's vector power can differ in float64's last bit.
-        # These differences almost always disappear on float32 storage, but cancellation
-        # at the threshold can preserve them in near-zero voxels.
-        np.testing.assert_allclose(actual.values, expected.values, atol=1e-6, rtol=0)
+        # Preserve NumPy power, chunked add.at order, and pairwise radius mean.
+        np.testing.assert_array_equal(actual.values, expected.values)
 
     def test_from_points_single_huge_voxels_zero_blend(self):
         for h in (0.13, 100.0):
