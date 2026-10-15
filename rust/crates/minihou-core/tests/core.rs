@@ -25,6 +25,30 @@ fn box_is_eight_welded_points_and_six_quads() {
 }
 
 #[test]
+fn bound_wraps_its_input_in_a_box() {
+    let g = cook(json!({"nodes": {"b": {"type": "box"}, "x": {"type": "bound", "inputs": {"geo": "b"}}}, "display": "x"})).unwrap();
+    assert_eq!((g.npoints, g.nprims()), (8, 6));
+    assert_eq!(g.detail["bound_min"], json!([-0.5, -0.5, -0.5]));
+    assert_eq!(g.detail["bound_max"], json!([0.5, 0.5, 0.5]));
+    assert_eq!(g.detail["bound_size"], json!([1.0, 1.0, 1.0]));
+    let pad = cook(json!({"nodes": {"b": {"type": "box"}, "x": {"type": "bound", "inputs": {"geo": "b"},
+        "params": {"padding": [0.1, 0.2, 0.3]}}}, "display": "x"})).unwrap();
+    let size: Vec<f64> = pad.detail["bound_size"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+    for (got, want) in size.iter().zip([1.2, 1.4, 1.6]) {
+        assert!((got - want).abs() < 1e-12, "{got} != {want}");
+    }
+    // an empty input is a plain unit box with no detail attributes
+    let empty = cook(json!({"nodes": {"g": {"type": "grid", "flags": {"bypass": true}},
+        "x": {"type": "bound", "inputs": {"geo": "g"}}}, "display": "x"})).unwrap();
+    assert_eq!((empty.npoints, empty.nprims()), (1, 6));
+    assert!(empty.detail.is_empty());
+    // oriented is refused loudly
+    let err = cook(json!({"nodes": {"b": {"type": "box"}, "x": {"type": "bound", "inputs": {"geo": "b"},
+        "params": {"oriented": true}}}, "display": "x"})).unwrap_err();
+    assert!(err.0.contains("not supported by the Rust backend"), "{err}");
+}
+
+#[test]
 fn edges_of_a_closed_box_are_shared_twice_and_sorted() {
     let g = cook(json!({"nodes": {"b": {"type": "box", "params": {"divisions": 4}}}, "display": "b"})).unwrap();
     let e = topo::edges(&g.topology, g.npoints);

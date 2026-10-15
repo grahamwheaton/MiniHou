@@ -13,7 +13,7 @@ rust/
     src/preview.rs              the viewport's layout: fan triangles, Morton order (radix sort), run table, draw counts
     src/normals.rs              Newell face normals, area-weighted point normals
     src/noise.rs                Perlin / fractal noise, bit for bit the numpy float32 arithmetic
-    src/nodes/                  grid, box, point, curve, line, circle, transform, normal, noise, merge, null, output
+    src/nodes/                  grid, box, point, curve, line, circle, bound, transform, normal, noise, merge, null, output
     src/graph.rs                reads graph JSON and cooks it (pull evaluation, each node once per cook)
     tests/core.rs               Rust-only checks
     examples/profile_*.rs       kernel timing without Python (RAYON_NUM_THREADS=1 shows what does not scale)
@@ -66,6 +66,7 @@ the whole test suite with the extension installed.
 | `curve` | typed points, open/closed topology, optional input append | |
 | `line` | origin, direction, length, points | |
 | `circle` | radius, center, rotation, divisions | |
+| `bound` | padding; the world-axis box and its `bound_min`/`bound_max`/`bound_size` detail | `oriented` (a principal-axis fit needs `np.linalg.svd`) |
 | `transform` | translate, rotate, scale, uniform scale, pivot, axis rotation, N; point/primitive named groups, numeric ranges and exclusions; simple `@P.x/y/z` comparisons; proportional editing with smooth, sphere, root, sharp, linear and constant falloffs, connected and projected distances | general wrangle group expressions, random falloff |
 | `normal` | point, prim | vertex (cusped) |
 | `noise` | scalar / vector, P or any attribute, octaves, lacunarity, gain, seed | `group` |
@@ -100,6 +101,7 @@ flats instead of across its corners; both are correct):
 | `topo.edges` | the edge table (exact same numbering) |
 | viewport (`preview._arrays_for`) | the whole layout of a big mesh in one call: fan triangles, Morton order, run table, edges, as the final `u32` arrays; the run table again after a deformer; the bounding box |
 | `grid`, `box` nodes | built in Rust (parallel) |
+| `bound` node | the world-axis box is a `box` kernel call (the min/max and the final placement stay in numpy) |
 | `noise` node | one fused parallel pass, bit for bit the numpy result |
 | `transform` node | the matrix step for P and N in one pass |
 | `normal` node | face normals; point normals from a point-to-primitive table that is cached on the (frozen) topology, so a deformer upstream does not rebuild it |

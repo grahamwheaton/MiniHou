@@ -23,11 +23,13 @@ class BackendMarkerTests(unittest.TestCase):
             "g": {"type": "grid"},                                                       # runs in Rust
             "b": {"type": "box", "params": {"add_vertex_normals": True}},                # has a Rust path, refuses this
             "s": {"type": "sphere"},                                                     # no Rust path
+            "d": {"type": "bound", "inputs": {"geo": "g"}},                              # runs in Rust (its box is a kernel)
         }
-        got = cook_backends(dict(nodes, m={"type": "merge", "inputs": {"geos": ["g", "b", "s"]}}), "m")
+        got = cook_backends(dict(nodes, m={"type": "merge", "inputs": {"geos": ["g", "b", "s", "d"]}}), "m")
         self.assertEqual(got["g"], "rust")
         self.assertEqual(got["b"], "fallback")
         self.assertEqual(got["s"], "python")
+        self.assertEqual(got["d"], "rust")
 
     def test_the_stats_dict_carries_it(self):
         g = Graph.from_dict({"version": 1, "nodes": {"g": {"type": "grid"}}, "display": "g"})

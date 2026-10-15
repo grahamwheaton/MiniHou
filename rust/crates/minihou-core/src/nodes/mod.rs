@@ -50,6 +50,7 @@ pub fn registry() -> &'static [NodeSpec] {
         generate::CURVE,
         generate::LINE,
         generate::CIRCLE,
+        generate::BOUND,
         modify::TRANSFORM,
         modify::NORMAL,
         modify::NOISE,
