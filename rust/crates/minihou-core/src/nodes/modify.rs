@@ -89,8 +89,7 @@ impl Ord for Distance { fn cmp(&self, other: &Self) -> Ordering { self.0.total_c
 fn proportional_weights(geo: &Geometry, selected: &[bool], p: &Params) -> Result<Vec<f64>> {
     let radius = p.f("proportional_radius")?;
     if !radius.is_finite() || radius <= 0.0 { return Err(Error::new("proportional radius must be positive and finite")); }
-    let falloff = p.e("proportional_falloff", &["smooth", "sphere", "root", "sharp", "linear", "constant", "random"])?;
-    if falloff == "random" { return Err(Error::new("random proportional falloff is not supported by the Rust backend")); }
+    let falloff = p.e("proportional_falloff", &["smooth", "sphere", "root", "inverse_square", "sharp", "linear", "constant", "random"])?;
     let pos: Vec<[f64; 3]> = geo.p().as_chunks::<3>().0.iter().map(|q| [q[0] as f64, q[1] as f64, q[2] as f64]).collect();
     if pos.iter().flatten().any(|x| !x.is_finite()) { return Err(Error::new("proportional editing requires finite positions")); }
     let connected = p.b("proportional_connected")?;
@@ -132,13 +131,15 @@ fn proportional_weights(geo: &Geometry, selected: &[bool], p: &Params) -> Result
             }
         }
     }
-    Ok(distance.into_iter().zip(selected).map(|(d, &sel)| {
+    Ok(distance.into_iter().zip(selected).enumerate().map(|(i, (d, &sel))| {
         if sel { return 1.0; }
         if d >= radius { return 0.0; }
         let x = (1.0 - d/radius).clamp(0.0, 1.0);
         match falloff.as_str() {
             "smooth" => x*x*(3.0-2.0*x), "sphere" => (2.0*x-x*x).sqrt(), "root" => x.sqrt(),
-            "sharp" => x*x, "constant" => 1.0, _ => x,
+            "inverse_square" => x*x/(2.0-x*x), "sharp" => x*x, "constant" => 1.0,
+            "random" => x * ((i as u64).wrapping_mul(0x9e3779b97f4a7c15).rotate_left(17) as f64 / u64::MAX as f64),
+            _ => x,
         }
     }).collect())
 }

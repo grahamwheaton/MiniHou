@@ -135,7 +135,10 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
                     }
                     if v.runs_on_rust(tool.node_type) { dot(ui.painter(), r.min, r.width() - 7., 5., 2.5, v.theme.ok); }
                     if response.on_hover_text(format!("{} ({})", tool.label, tool.node_type)).clicked() {
-                        out.push(UiAction::AddNode { node_type: tool.node_type.to_owned(), after: Some(v.selected.to_owned()) });
+                        if active == 0 && matches!(tool.node_type, "line" | "circle" | "curve") {
+                            let mode = match tool.node_type { "line" => super::sketch::SketchMode::Line, "circle" => super::sketch::SketchMode::Circle, _ => super::sketch::SketchMode::Pen };
+                            out.push(UiAction::StartSketch(mode));
+                        } else { out.push(UiAction::AddNode { node_type: tool.node_type.to_owned(), after: Some(v.selected.to_owned()) }); }
                     }
                 }
             });

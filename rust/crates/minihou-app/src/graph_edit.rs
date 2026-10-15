@@ -30,6 +30,19 @@ pub fn add(value: &Value, ty: &str, after: Option<&str>) -> Option<(Value, Strin
     Some((value, id))
 }
 
+/// Add a sketch to an existing cooked node, or as a standalone curve when there is no usable source.
+pub fn add_sketch(value: &Value, name: &str, points: &[[f32; 3]], closed: bool, selected: &str) -> Option<(Value, String)> {
+    if points.len() < if closed { 3 } else { 2 } || points.iter().flatten().any(|x| !x.is_finite()) { return None; }
+    let after = nodes(value)?.get(selected).and_then(|node| node.get("type")?.as_str())
+        .filter(|ty| nodes::get(ty).is_some()).map(|_| selected);
+    let (mut value, id) = add(value, "curve", after)?;
+    let text = points.iter().map(|p| format!("{},{},{}", p[0], p[1], p[2])).collect::<Vec<_>>().join(" ");
+    let node = nodes_mut(&mut value)?.get_mut(&id)?;
+    node["params"] = json!({"points": text, "closed": closed});
+    node["name"] = json!(name);
+    Some((value, id))
+}
+
 pub fn delete(value: &Value, id: &str) -> Option<Value> {
     let mut value = value.clone();
     let all = nodes_mut(&mut value)?;
@@ -149,6 +162,19 @@ mod tests {
         assert_eq!(id, "box3"); assert_eq!(v["display"], id); validated(v.clone()).unwrap();
         let (v, next) = duplicate(&v, "box1").unwrap();
         assert_eq!(next, "box4"); assert_eq!(v["nodes"]["box4"], v["nodes"]["box1"]); validated(v).unwrap();
+    }
+    #[test] fn sketch_wires_after_a_cooked_node_and_can_stand_alone() {
+        let points = [[0.,0.,0.], [1.,0.,0.], [1.,1.,0.]];
+        let (v, id) = add_sketch(&graph(), "Polygon", &points, true, "box1").unwrap();
+        assert_eq!(v["nodes"][&id]["inputs"]["geo"], "box1");
+        assert_eq!(v["nodes"][&id]["params"]["points"], "0,0,0 1,0,0 1,1,0");
+        assert_eq!(v["nodes"][&id]["params"]["closed"], true);
+        assert_eq!(v["display"], id);
+        validated(v).unwrap();
+        let (v, id) = add_sketch(&graph(), "Line", &points[..2], false, "missing").unwrap();
+        assert!(v["nodes"][&id].get("inputs").is_none());
+        validated(v).unwrap();
+        assert!(add_sketch(&graph(), "Bad", &[[f32::NAN,0.,0.]; 2], false, "box1").is_none());
     }
     #[test] fn delete_cleans_wires_and_display() {
         let v = delete(&graph(), "box1").unwrap();

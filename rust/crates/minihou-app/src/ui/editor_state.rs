@@ -5,6 +5,9 @@
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum SelectionMode { #[default] Object, Points, Edges, Faces }
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Tool { #[default] Select, Cursor, Move, Rotate, Scale, Transform, Measure }
+impl Tool { pub const ALL: [Self; 7] = [Self::Select, Self::Cursor, Self::Move, Self::Rotate, Self::Scale, Self::Transform, Self::Measure]; }
 impl SelectionMode {
     pub const ALL: [SelectionMode; 4] = [Self::Object, Self::Points, Self::Edges, Self::Faces];
     pub fn label(self) -> &'static str { match self { Self::Object => "Object", Self::Points => "Points", Self::Edges => "Edges", Self::Faces => "Faces" } }
@@ -77,6 +80,8 @@ impl Default for Proxy { fn default() -> Self { Self { level: 1.0, auto: false, 
 
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct EditorState {
+    pub tool: Tool,
+    pub cursor: [f32; 3],
     pub selection: SelectionMode,
     pub orientation: Orientation,
     pub pivot: Pivot,
@@ -92,6 +97,8 @@ pub struct EditorState {
 /// One change to the state, as a panel or the keymap asks for it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EditorChange {
+    Tool(Tool),
+    Cursor([f32; 3]),
     Selection(SelectionMode),
     Orientation(Orientation),
     Pivot(Pivot),
@@ -115,6 +122,8 @@ pub enum EditorChange {
 impl EditorState {
     pub fn apply(&mut self, change: EditorChange) {
         match change {
+            EditorChange::Tool(t) => self.tool = t,
+            EditorChange::Cursor(p) => self.cursor = p,
             EditorChange::Selection(m) => self.selection = m,
             EditorChange::Orientation(o) => self.orientation = o,
             EditorChange::Pivot(p) => self.pivot = p,
@@ -145,6 +154,7 @@ mod tests {
     fn defaults_follow_blender() {
         let s = EditorState::default();
         assert_eq!(s.selection, SelectionMode::Object);
+        assert_eq!(s.tool, Tool::Select);
         assert_eq!(s.orientation, Orientation::Global);
         assert_eq!(s.pivot, Pivot::MedianPoint);
         assert!(!s.snap.enabled && !s.proportional.enabled && !s.xray);
@@ -155,9 +165,11 @@ mod tests {
     fn changes_apply_and_radius_stays_positive() {
         let mut s = EditorState::default();
         s.apply(EditorChange::Selection(SelectionMode::Faces));
+        s.apply(EditorChange::Tool(Tool::Move));
         s.apply(EditorChange::ProportionalRadius(-3.));
         s.apply(EditorChange::Xray(true));
         assert_eq!(s.selection, SelectionMode::Faces);
+        assert_eq!(s.tool, Tool::Move);
         assert!(s.proportional.radius > 0.);
         assert!(s.xray);
     }

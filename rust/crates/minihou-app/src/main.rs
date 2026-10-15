@@ -5,11 +5,44 @@ mod viewport;
 use eframe::{egui, egui_wgpu};
 use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, CookRequest, CookState, StandardView};
 use minihou_core::Graph;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 use ui::keymap::{KeyContext, Keymap, Preferences, ThemePref};
-use ui::{theme::Theme, Actions, BlenderStatus, CameraInfo, EditorState, GeoSummary, NodeFlags, UiAction, View};
+use ui::{theme::Theme, Actions, BlenderStatus, CameraInfo, EditorState, GeoSummary, NodeFlags, TransformOp, UiAction, View};
 use viewport::{Gpu, Mode, Overlay, Scene, Target};
+
+fn scaled_from_initial(initial: &serde_json::Value, factor: [f32; 3]) -> [f32; 3] {
+    [0,1,2].map(|i| initial.get(i).and_then(|x| x.as_f64()).unwrap_or(1.) as f32 * factor[i])
+}
+
+/// Picking records displayed triangle numbers; transform groups use the triangle's point numbers.
+fn selected_point_ids(selection: &picking::Selection, mode: ui::SelectionMode, triangles: &[u32]) -> Vec<u32> {
+    let mut ids = match mode {
+        ui::SelectionMode::Object => Vec::new(),
+        ui::SelectionMode::Points => selection.points.clone(),
+        ui::SelectionMode::Edges => selection.edges.iter().flat_map(|&(a, b)| [a, b]).collect(),
+        ui::SelectionMode::Faces => selection.tris.iter().flat_map(|&t| {
+            triangles.get(t as usize * 3..t as usize * 3 + 3).unwrap_or(&[]).iter().copied()
+        }).collect(),
+    };
+    ids.sort_unstable(); ids.dedup(); ids
+}
+
+fn group_text(ids: &[u32]) -> String { ids.iter().map(u32::to_string).collect::<Vec<_>>().join(",") }
+
+fn proportional_params(params: &mut Value, state: &EditorState) {
+    let p = state.proportional;
+    params["proportional_enabled"] = json!(p.enabled);
+    if p.enabled {
+        params["proportional_radius"] = json!(p.radius);
+        params["proportional_falloff"] = json!(match p.falloff {
+            ui::Falloff::Smooth => "smooth", ui::Falloff::Sphere => "sphere", ui::Falloff::Root => "root",
+            ui::Falloff::InverseSquare => "inverse_square", ui::Falloff::Sharp => "sharp", ui::Falloff::Linear => "linear",
+            ui::Falloff::Constant => "constant", ui::Falloff::Random => "random",
+        });
+        params["proportional_connected"] = json!(p.connected_only);
+    }
+}
 
 struct App {
     editor: EditorDocument, worker: CookWorker<Scene>, cooking: CookState,
@@ -26,8 +59,40 @@ struct App {
     blender_paths: Vec<PathBuf>, blender_bar: bool,
     selection: picking::Selection, selection_dirty: bool,
     clipboard: Option<Value>,
+    last_viewport: egui::Rect,
+    transform_before: Option<Document>, transform_target: Option<String>,
 }
 impl App {
+    fn camera_info(&self) -> CameraInfo {
+        let (yaw, pitch) = self.camera.angles(); let (projection, _) = self.camera.matrices(1.);
+        let (ray_origin, ray_forward) = self.camera.ray(0., 0., 1.);
+        let (rx, dx) = self.camera.ray(1., 0., 1.); let (ry, dy) = self.camera.ray(0., 1., 1.);
+        let ray_right = if self.camera.is_ortho() { [0,1,2].map(|i| rx[i] - ray_origin[i]) } else { [0,1,2].map(|i| dx[i] - ray_forward[i]) };
+        let ray_up = if self.camera.is_ortho() { [0,1,2].map(|i| ry[i] - ray_origin[i]) } else { [0,1,2].map(|i| dy[i] - ray_forward[i]) };
+        CameraInfo { yaw, pitch, ortho: self.camera.is_ortho(), projection, ray_origin, ray_forward, ray_right, ray_up }
+    }
+    fn region_select(&mut self, rect: egui::Rect, extend: bool, subtract: bool) {
+        let Some(scene) = &self.scene else { return; };
+        let camera = self.camera_info(); let points = scene.positions(); let tris = scene.triangle_indices();
+        let position = |i: u32| -> Option<[f32; 3]> { let k = i as usize * 3; let a = points.get(k..k + 3)?; Some([a[0], a[1], a[2]]) };
+        let inside = |p: [f32; 3]| ui::transform_gizmo::project(camera, self.last_viewport, p).is_some_and(|q| rect.contains(q));
+        let mode = self.editor_state.selection;
+        let mut found = picking::Selection { mode, ..Default::default() };
+        match mode {
+            ui::SelectionMode::Points => { for i in 0..points.len()/3 { if position(i as u32).is_some_and(inside) { found.points.push(i as u32); } } }
+            ui::SelectionMode::Edges => {
+                let mut edges = std::collections::BTreeSet::new();
+                for t in tris.as_chunks::<3>().0 { for (a,b) in [(t[0],t[1]),(t[1],t[2]),(t[2],t[0])] { edges.insert((a.min(b), a.max(b))); } }
+                for (a,b) in edges { if let (Some(pa), Some(pb)) = (position(a), position(b)) { if inside([0,1,2].map(|k| (pa[k] + pb[k]) * 0.5)) { found.edges.push((a,b)); } } }
+            }
+            ui::SelectionMode::Faces => { for (i,t) in tris.as_chunks::<3>().0.iter().enumerate() { if let (Some(a), Some(b), Some(c)) = (position(t[0]), position(t[1]), position(t[2])) { if inside([0,1,2].map(|k| (a[k]+b[k]+c[k])/3.)) { found.tris.push(i as u32); } } } }
+            ui::SelectionMode::Object => { if inside(self.bounds.0) { self.selected = self.display.clone(); } }
+        }
+        if subtract { self.selection.points.retain(|x| !found.points.contains(x)); self.selection.edges.retain(|x| !found.edges.contains(x)); self.selection.tris.retain(|x| !found.tris.contains(x)); }
+        else if extend { for x in found.points { if !self.selection.points.contains(&x) { self.selection.points.push(x); } } for x in found.edges { if !self.selection.edges.contains(&x) { self.selection.edges.push(x); } } for x in found.tris { if !self.selection.tris.contains(&x) { self.selection.tris.push(x); } } }
+        else { self.selection = found; }
+        self.selection_dirty = true;
+    }
     fn new(doc: Document, path: PathBuf, state: egui_wgpu::RenderState) -> Result<Self> {
         let display = Graph::from_value(doc.value())?.main_output()?;
         let worker = CookWorker::start(&doc, Scene::new)?;
@@ -36,7 +101,8 @@ impl App {
             camera:Camera::frame([0.;3],1.),bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new(),
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
-            scene:None,shown_level:1.0,geo_rev:u64::MAX,blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,clipboard:None };
+            scene:None,shown_level:1.0,geo_rev:u64::MAX,blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,
+            clipboard:None,transform_before:None,transform_target:None,last_viewport:egui::Rect::NOTHING };
         app.prefs = Preferences::load();
         app.keymap = Keymap::from_overrides_json(&app.prefs.keymap_overrides);
         app.keymap.emulate_numpad = app.prefs.emulate_numpad;
@@ -102,6 +168,88 @@ impl App {
             self.selected = id.clone();
             self.display = id;
         }
+    }
+    fn selected_points(&self) -> Vec<u32> {
+        selected_point_ids(&self.selection, self.editor_state.selection,
+            self.scene.as_ref().map_or(&[], Scene::triangle_indices))
+    }
+    fn selection_center(&self) -> Option<[f32; 3]> {
+        let scene = self.scene.as_ref()?; let points = scene.positions(); let ids = self.selected_points();
+        if ids.is_empty() { return None; }
+        let mut sum = [0.; 3]; let mut count = 0.;
+        for id in ids { let k = id as usize * 3; if let Some(p) = points.get(k..k + 3) { for a in 0..3 { sum[a] += p[a]; } count += 1.; } }
+        (count > 0.).then(|| sum.map(|x| x / count))
+    }
+    fn transform_node(&mut self, node: &str, op: TransformOp) {
+        let group = group_text(&self.selected_points());
+        if self.editor_state.selection != ui::SelectionMode::Object && group.is_empty() {
+            self.file_status = "Select points, edges, or faces to transform".into();
+            return;
+        }
+        let first = self.transform_before.is_none();
+        if first { self.editor.history.finish(&self.editor.doc); self.transform_before = Some(self.editor.doc.clone()); }
+        let mut value = self.editor.doc.value().clone();
+        let source = if group.is_empty() { node } else { &self.display };
+        let target = if let Some(id) = &self.transform_target { id.clone() } else {
+            let Some(nodes) = value["nodes"].as_object_mut() else { return; };
+            if group.is_empty() && nodes.get(source).and_then(|n| n["type"].as_str()) == Some("transform") { source.to_owned() }
+            else {
+                let id = (1..).map(|n| format!("transform{n}")).find(|id| !nodes.contains_key(id)).unwrap();
+                nodes.insert(id.clone(), json!({"type":"transform", "inputs":{"geo":source}}));
+                value["display"] = json!(id); id
+            }
+        };
+        let name = match op { TransformOp::Move(_) => "translate", TransformOp::Rotate(_) => "rotate", TransformOp::Scale(_) => "scale" };
+        let delta = match op { TransformOp::Move(d) | TransformOp::Rotate(d) | TransformOp::Scale(d) => d };
+        let defaults = if name == "scale" { [1.; 3] } else { [0.; 3] };
+        let params = &mut value["nodes"][&target]["params"];
+        if !params.is_object() { *params = json!({}); }
+        let before = std::array::from_fn::<f32, 3, _>(|i| params[name].get(i).and_then(|n| n.as_f64()).map_or(defaults[i], |n| n as f32));
+        let updated = match op {
+            TransformOp::Scale(factor) => {
+                let initial = self.transform_before.as_ref().map(|doc| &doc.value()["nodes"][&target]["params"]["scale"])
+                    .unwrap_or(&serde_json::Value::Null);
+                scaled_from_initial(initial, factor)
+            }
+            _ => [0,1,2].map(|i| before[i] + delta[i]),
+        };
+        params[name] = json!(updated);
+        if first {
+            params["group"] = json!(group);
+            proportional_params(params, &self.editor_state);
+            params["pivot"] = json!(if self.editor_state.pivot == ui::Pivot::Cursor { self.editor_state.cursor } else { self.selection_center().unwrap_or(self.bounds.0) });
+        }
+        match serde_json::to_string(&value).ok().and_then(|s| Document::parse(s).ok()) {
+            Some(doc) => { self.editor.doc = doc; self.transform_target = Some(target.clone()); self.display = target; self.send(Edit::Replace(value)); }
+            None => self.file_status = "Could not transform node".into(),
+        }
+    }
+    fn finish_transform(&mut self) {
+        if let Some(before) = self.transform_before.take() {
+            let final_doc = self.editor.doc.clone(); self.editor.doc = before;
+            self.editor.history.replace(&mut self.editor.doc, final_doc);
+        }
+        if let Some(target) = self.transform_target.take() { self.selected = target; }
+    }
+    fn cancel_transform(&mut self) {
+        if let Some(before) = self.transform_before.take() {
+            self.editor.doc = before;
+            self.send(Edit::Replace(self.editor.doc.value().clone()));
+            self.display = self.editor.doc.value()["display"].as_str().unwrap_or(&self.display).to_owned();
+        }
+        self.transform_target = None;
+    }
+    fn sketch_commit(&mut self, name: &str, points: &[[f32; 3]], closed: bool) {
+        let Some((value, id)) = graph_edit::add_sketch(self.editor.doc.value(), name, points, closed, &self.selected) else {
+            self.file_status = "Could not add sketch".into(); return;
+        };
+        if self.commit_document(value, "add sketch") { self.selected = id.clone(); self.display = id; }
+    }
+    fn add_measurement(&mut self, a: [f32; 3], b: [f32; 3]) {
+        let mut value = self.editor.doc.value().clone();
+        if !value["measurements"].is_array() { value["measurements"] = json!([]); }
+        if let Some(rows) = value["measurements"].as_array_mut() { rows.push(json!({"a":a,"b":b})); }
+        self.commit_document(value, "add measurement");
     }
     /// Make `value` the document as one undo step and send it to the cook worker; false (with a status message) when it is invalid.
     fn commit_document(&mut self, value: serde_json::Value, what: &str) -> bool {
@@ -173,6 +321,17 @@ impl App {
     fn apply(&mut self, ctx: &egui::Context, actions: Vec<UiAction>) {
         for action in actions {
             match action {
+                UiAction::StartSketch(mode) => {
+                    if minihou_core::nodes::get("curve").is_some() {
+                        self.editor_state.apply(ui::EditorChange::Tool(ui::Tool::Select));
+                        ui::sketch::start(ctx, mode);
+                    } else { self.file_status = "Sketches need the Rust core curve node".into(); }
+                },
+                UiAction::TransformNode { node, op, continuous } => { self.transform_node(&node, op); if !continuous { self.finish_transform(); } },
+                UiAction::CancelTransform => self.cancel_transform(),
+                UiAction::SketchCommit { name, points, closed } => self.sketch_commit(&name, &points, closed),
+                UiAction::AddMeasurement { a, b } => self.add_measurement(a, b),
+                UiAction::RegionSelect { rect, extend, subtract } => self.region_select(rect, extend, subtract),
                 UiAction::Open => if let Some(path) = rfd::FileDialog::new().add_filter("MiniHou graph", &["json"]).pick_file() { self.open(path); },
                 UiAction::Save => self.save_to(self.editor.path.clone()),
                 UiAction::SaveAs => {
@@ -292,14 +451,15 @@ impl eframe::App for App {
         let graph = Graph::from_value(self.editor.doc.value()).expect("validated document");
         let mut out = Actions::default();
         let kctx = KeyContext { viewport_hovered: self.viewport_hover, network_hovered: self.network_hover, selected: Some(&self.selected) };
-        for action in self.keymap.poll(ctx, &kctx) { out.push(action); }
+        if !ui::sketch::active(ctx) && !ui::transform_gizmo::active(ctx) { for action in self.keymap.poll(ctx, &kctx) { out.push(action); } }
         if !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::F)) { out.push(UiAction::Frame); }
         {
             let v = View { graph: &graph, doc: self.editor.doc.value(), path: &self.editor.path, dirty: self.editor.dirty(),
                 can_undo: self.editor.history.can_undo(), can_redo: self.editor.history.can_redo(),
                 selected: &self.selected, display: &self.display, cooking: &self.cooking, file_status: &self.file_status,
                 mode: self.mode, theme: &self.theme, editor: &self.editor_state, flags: &self.flags, geo: self.geo.as_ref(), blender: &self.blender,
-                camera: { let (yaw, pitch) = self.camera.angles(); CameraInfo { yaw, pitch, ortho: self.camera.is_ortho() } } };
+                bounds: self.bounds, selection_center: self.selection_center(),
+                camera: self.camera_info() };
             egui::TopBottomPanel::top("toolbar").show(ctx, |ui| ui::topbar::show(ui, &v, &mut out));
             if self.blender_bar {
                 let mut shown = true;
@@ -322,8 +482,10 @@ impl eframe::App for App {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let size = ui.available_size().max(egui::vec2(1., 1.));
                 let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+                self.last_viewport = rect;
                 let delta = ctx.input(|i| i.pointer.delta());
-                if response.dragged() {
+                if response.dragged() && !ui::sketch::active(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx)
+                    && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::transform_gizmo::hit(rect, &v, p)) {
                     if response.dragged_by(egui::PointerButton::Middle) || response.dragged_by(egui::PointerButton::Secondary) || ctx.input(|i| i.modifiers.shift) {
                         self.camera.pan(delta.x, delta.y);
                     } else { self.camera.orbit(delta.x, delta.y); }
@@ -340,7 +502,7 @@ impl eframe::App for App {
                     ui.painter().image(target.id, rect, egui::Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.)), egui::Color32::WHITE);
                 }
                 self.viewport_hover = response.hovered();
-                if response.clicked_by(egui::PointerButton::Primary) {
+                if response.clicked_by(egui::PointerButton::Primary) && !ui::sketch::active(ctx) && !ui::selection_region::active(ctx) && self.editor_state.tool == ui::Tool::Select {
                     if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {
                         let (nx, ny) = (((at.x - rect.left()) / rect.width()) * 2. - 1., 1. - ((at.y - rect.top()) / rect.height()) * 2.);
                         let (o, d) = self.camera.ray(nx, ny, rect.width() / rect.height());
@@ -353,10 +515,20 @@ impl eframe::App for App {
                         self.selection_dirty = true;
                     }
                 }
+                if response.clicked_by(egui::PointerButton::Primary) && self.editor_state.tool == ui::Tool::Cursor {
+                    if let Some(at) = response.interact_pointer_pos() {
+                        let (o,d) = ui::transform_gizmo::ray(v.camera, rect, at);
+                        if d[2].abs() > 1e-5 { let t = -o[2] / d[2]; if t >= 0. { out.push(UiAction::Editor(ui::EditorChange::Cursor([0,1,2].map(|k| o[k] + t*d[k])))); } }
+                    }
+                }
                 if let Some(tool) = response.dnd_release_payload::<ui::ToolDrag>() {
                     out.push(ui::shelf::dropped_tool(&tool, &self.selected));
                 }
                 ui::viewport_ui::overlay(ui, rect, &v, &mut out);
+                ui::transform_gizmo::cursor(ui, rect, &v);
+                ui::transform_gizmo::show(ui, rect, &v, &mut out);
+                ui::sketch::show(ui, rect, &v, &mut out);
+                ui::selection_region::show(ui, rect, &v, &mut out);
                 // proxy level, under the view gizmo
                 egui::Area::new(egui::Id::new("proxy_menu")).fixed_pos(egui::pos2(rect.right() - 150., rect.top() + 130.)).order(egui::Order::Foreground)
                     .show(ctx, |ui| ui::proxy_ui::menu(ui, &v, &mut out));
@@ -369,6 +541,7 @@ impl eframe::App for App {
         }
         if !ctx.input(|i| i.pointer.primary_down()) { self.editor.history.finish(&self.editor.doc); }
         self.apply(ctx, out.0);
+        if !ctx.input(|i| i.pointer.primary_down()) { self.finish_transform(); }
         if self.cooking.cooking() { ctx.request_repaint_after(Duration::from_millis(16)); }
     }
 }
@@ -404,6 +577,43 @@ fn main() {
             rfd::MessageDialog::new().set_level(rfd::MessageLevel::Error).set_title("MiniHou").set_description(e.to_string()).show();
         }
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tools_tests {
+    use super::*;
+
+    #[test]
+    fn scaling_uses_the_drag_start_values() {
+        assert_eq!(scaled_from_initial(&json!([2., 3., 4.]), [1., 2., 1.]), [2., 6., 4.]);
+        assert_eq!(scaled_from_initial(&serde_json::Value::Null, [1., 0.5, 1.]), [1., 0.5, 1.]);
+    }
+    #[test]
+    fn element_groups_use_point_ids_in_each_selection_mode() {
+        let selection = picking::Selection { mode: ui::SelectionMode::Faces,
+            points: vec![99], edges: vec![(8, 7)], tris: vec![1, 0] };
+        let triangles = [2, 1, 0, 2, 3, 4];
+        assert_eq!(selected_point_ids(&selection, ui::SelectionMode::Points, &triangles), [99]);
+        assert_eq!(selected_point_ids(&selection, ui::SelectionMode::Edges, &triangles), [7, 8]);
+        assert_eq!(selected_point_ids(&selection, ui::SelectionMode::Faces, &triangles), [0, 1, 2, 3, 4]);
+        assert_eq!(group_text(&selected_point_ids(&selection, ui::SelectionMode::Faces, &triangles)), "0,1,2,3,4");
+        assert!(selected_point_ids(&selection, ui::SelectionMode::Object, &triangles).is_empty());
+    }
+    #[test]
+    fn proportional_settings_use_core_parameter_names() {
+        let mut state = EditorState::default();
+        state.proportional.enabled = true;
+        state.proportional.radius = 2.5;
+        state.proportional.falloff = ui::Falloff::InverseSquare;
+        state.proportional.connected_only = true;
+        let mut params = json!({});
+        proportional_params(&mut params, &state);
+        assert_eq!(params, json!({"proportional_enabled": true, "proportional_radius": 2.5,
+            "proportional_falloff": "inverse_square", "proportional_connected": true}));
+        state.proportional.falloff = ui::Falloff::Random;
+        proportional_params(&mut params, &state);
+        assert_eq!(params["proportional_falloff"], "random");
     }
 }
 

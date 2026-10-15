@@ -17,6 +17,11 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | 2 | Edges | Viewport |
 | 3 | Faces | Viewport |
 | 4 | Object | Viewport |
+| Q | Select tool | Viewport |
+| W | Move tool | Viewport |
+| E | Rotate tool | Viewport |
+| R | Scale tool | Viewport |
+| T | Transform tool | Viewport |
 | Home | Frame all | Viewport |
 | Alt+Period | Frame selected | Viewport |
 | Alt+1 | Front | Viewport |
@@ -57,5 +62,7 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 <!-- keymap:end -->
 
 ## Known limitations
+
+Element transforms write a `group` of point numbers. Edge selection includes both endpoints; face selection maps each picked display triangle to its three point numbers. Object transforms leave `group` empty. Proportional radius, falloff, and connected mode are saved on the transform node when proportional editing is enabled.
 
 The Rust core currently cooks only the nodes marked with a green dot on the shelf. Copy and paste currently operate on the single selected network node. egui does not distinguish numpad digits from the number row, so Alt+digit represents numpad keys; Preferences can emulate the numpad with plain digits. Lock and template flags are session state. Auto proxy reduces the displayed mesh; the Blender cap is a separate setting for the link.
