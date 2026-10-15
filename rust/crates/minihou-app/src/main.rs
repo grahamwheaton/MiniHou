@@ -90,16 +90,82 @@ impl App {
         }
         nodes.insert(id.clone(), node);
         value["display"] = json!(id);
+        if self.commit_document(value, &format!("add {node_type}")) {
+            self.selected = id.clone();
+            self.display = id;
+        }
+    }
+    /// Make `value` the document as one undo step and send it to the cook worker; false (with a status message) when it is invalid.
+    fn commit_document(&mut self, value: serde_json::Value, what: &str) -> bool {
         let doc = serde_json::to_string_pretty(&value).map_err(|e| e.to_string()).and_then(|t| Document::parse(t).map_err(|e| e.to_string()));
         match doc {
             Ok(new) => {
                 self.editor.history.replace(&mut self.editor.doc, new);
                 self.send(Edit::Replace(self.editor.doc.value().clone()));
-                self.selected = id.clone();
-                self.display = id;
+                true
             }
-            Err(e) => self.file_status = format!("Could not add {node_type}: {e}"),
+            Err(e) => { self.file_status = format!("Could not {what}: {e}"); false }
         }
+    }
+    /// Delete a node and every wire into it.
+    fn delete_node(&mut self, id: &str) {
+        let mut value = self.editor.doc.value().clone();
+        let Some(nodes) = value.get_mut("nodes").and_then(|n| n.as_object_mut()) else { return };
+        if nodes.remove(id).is_none() { return; }
+        for node in nodes.values_mut() {
+            let Some(inputs) = node.get_mut("inputs").and_then(|i| i.as_object_mut()) else { continue };
+            inputs.retain(|_, v| match v {
+                serde_json::Value::String(s) => s != id,
+                serde_json::Value::Array(a) => { a.retain(|x| x != id); !a.is_empty() }
+                _ => true,
+            });
+        }
+        let first = nodes.keys().next().cloned();
+        if value["display"] == json!(id) {
+            match first { Some(f) => value["display"] = json!(f), None => { value.as_object_mut().map(|o| o.remove("display")); } }
+        }
+        if self.commit_document(value, "delete the node") {
+            if let Ok(g) = Graph::from_value(self.editor.doc.value()) {
+                if self.selected == id { self.selected = g.nodes.first().map(|(n, _)| n.clone()).unwrap_or_default(); }
+                self.display = g.main_output().unwrap_or_else(|_| self.selected.clone());
+            }
+        }
+    }
+    /// Copy a node (parameters and inputs) under a fresh id and select the copy.
+    fn duplicate_node(&mut self, id: &str) {
+        let mut value = self.editor.doc.value().clone();
+        let Some(nodes) = value.get_mut("nodes").and_then(|n| n.as_object_mut()) else { return };
+        let Some(src) = nodes.get(id).cloned() else { return };
+        let ty = src["type"].as_str().unwrap_or("node").to_owned();
+        let new_id = (1..).map(|n| format!("{ty}{n}")).find(|c| !nodes.contains_key(c)).unwrap();
+        nodes.insert(new_id.clone(), src);
+        if self.commit_document(value, "duplicate the node") { self.selected = new_id; }
+    }
+    /// Wire `from` into input `port` of `to` (its first input when `port` is None); multi inputs gain one more wire.
+    fn connect_nodes(&mut self, from: &str, to: &str, port: Option<&str>) {
+        let Some(ty) = Graph::from_value(self.editor.doc.value()).ok()
+            .and_then(|g| g.nodes.iter().find(|(n, _)| n == to).map(|(_, d)| d.node_type.clone())) else { return };
+        let Some(spec) = minihou_core::nodes::get(&ty) else { self.file_status = format!("The Rust core has no {ty} node yet"); return };
+        let Some(input) = port.and_then(|p| spec.inputs.iter().find(|i| i.name == p)).or_else(|| spec.inputs.first()) else {
+            self.file_status = format!("{to} has no inputs");
+            return;
+        };
+        if from == to { return; }
+        let mut value = self.editor.doc.value().clone();
+        let Some(node) = value["nodes"].get_mut(to) else { return };
+        if node.get("inputs").is_none() { node["inputs"] = json!({}); }
+        if input.multi {
+            let list = node["inputs"].as_object_mut().unwrap().entry(input.name).or_insert_with(|| json!([]));
+            if let Some(a) = list.as_array_mut() { if !a.iter().any(|x| x == from) { a.push(json!(from)); } } else { *list = json!([from]); }
+        } else {
+            node["inputs"][input.name] = json!(from);
+        }
+        self.commit_document(value, "connect the nodes");
+    }
+    fn disconnect_input(&mut self, node: &str, port: &str) {
+        let mut value = self.editor.doc.value().clone();
+        let removed = value["nodes"].get_mut(node).and_then(|n| n.get_mut("inputs")).and_then(|i| i.as_object_mut()).and_then(|i| i.remove(port));
+        if removed.is_some() { self.commit_document(value, "disconnect the input"); }
     }
     /// Keymap commands that have no dedicated action.
     fn command(&mut self, name: &str) {
@@ -161,8 +227,11 @@ impl App {
                 UiAction::Orbit { yaw, pitch } => self.camera.orbit_degrees(yaw, pitch),
                 UiAction::Pan { dx, dy } => self.camera.pan(dx, dy),
                 UiAction::Zoom(factor) => self.camera.zoom_factor(factor),
-                UiAction::DeleteNode(_) | UiAction::DuplicateNode(_) | UiAction::ConnectNodes { .. } | UiAction::DisconnectInput { .. }
-                | UiAction::TidyNetwork
+                UiAction::DeleteNode(id) => self.delete_node(&id),
+                UiAction::DuplicateNode(id) => self.duplicate_node(&id),
+                UiAction::ConnectNodes { from, to, port } => self.connect_nodes(&from, &to, port.as_deref()),
+                UiAction::DisconnectInput { node, port } => self.disconnect_input(&node, &port),
+                UiAction::TidyNetwork => ui::network::tidy(ctx, &self.editor.path),
                 | UiAction::BlenderInstall(_) | UiAction::BlenderOpen | UiAction::BlenderDownloadAddon | UiAction::BlenderBar(_) => self.file_status = "That command is not wired up yet".into(),
                 UiAction::ToggleLocked(id) => { let f = self.flags.entry(id).or_default(); f.locked = !f.locked; }
                 UiAction::ToggleTemplate(id) => { let f = self.flags.entry(id).or_default(); f.template = !f.template; }
