@@ -210,10 +210,13 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
             let step = if d.kind == Tool::Rotate { 15. } else if d.kind == Tool::Scale { 0.1 } else { v.editor.snap.increment };
             let current = snapped(raw, step, v.editor.snap.enabled != ctrl);
             if (current - d.last).abs() > 1e-6 {
-                let delta = current - d.last;
-                let operation = if d.kind == Tool::Move { TransformOp::Move(mul(frame[d.axis], delta)) }
+                let operation = if d.kind == Tool::Move { TransformOp::Move(mul(frame[d.axis], current)) }
                     else if d.kind == Tool::Scale { op(d.kind, d.axis, current + 1.) }
-                    else { op(d.kind, d.axis, delta) };
+                    else {
+                        let mut v = [0.; 3];
+                        v[d.axis] = current;
+                        TransformOp::Rotate(v)
+                    };
                 out.push(UiAction::TransformNode { op: operation });
                 d.last = current;
             }
@@ -238,8 +241,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
             let (x,y) = plane_delta(pointer - d.start, projected_axis(d.a), projected_axis(d.b), span);
             let snap = v.editor.snap.enabled != ui.input(|i| i.modifiers.ctrl);
             let world = add(mul(frame[d.a], snapped(x,v.editor.snap.increment,snap)), mul(frame[d.b], snapped(y,v.editor.snap.increment,snap)));
-            let delta = [0,1,2].map(|k| world[k] - d.last[k]);
-            if delta.iter().any(|x| x.abs() > 1e-6) { out.push(UiAction::TransformNode { op: TransformOp::Move(delta) }); d.last = world; }
+            if (0..3).any(|k| (world[k] - d.last[k]).abs() > 1e-6) { out.push(UiAction::TransformNode { op: TransformOp::Move(world) }); d.last = world; }
             ui.ctx().data_mut(|data| data.insert_temp(plane_id, d));
         }
     }

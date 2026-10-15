@@ -1,5 +1,6 @@
 //! Window-independent editor state and lossless JSON edits.
 pub mod cluster_lod;
+pub mod transform_math;
 use minihou_core::{session::Session, lod::ClusterLod, Graph};
 use serde_json::{json, Value};
 use std::{collections::HashMap, ops::Range, path::Path, time::Instant};

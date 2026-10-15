@@ -141,9 +141,12 @@ impl Modal {
         (values, pivot)
     }
     pub fn step(&mut self, values: [f32; 3]) -> TransformOp {
-        let previous = self.last; self.last = values;
-        match self.kind { Kind::Move => TransformOp::Move([0,1,2].map(|i| values[i] - previous[i])),
-            Kind::Rotate => TransformOp::Rotate([0,1,2].map(|i| values[i] - previous[i])), Kind::Scale => TransformOp::Scale(values) }
+        self.last = values;
+        match self.kind {
+            Kind::Move => TransformOp::Move(values),
+            Kind::Rotate => TransformOp::Rotate(values),
+            Kind::Scale => TransformOp::Scale(values),
+        }
     }
 }
 pub fn snap_value(value: f32, step: f32) -> f32 { if step <= 0. { value } else { (value / step).round() * step } }

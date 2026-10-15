@@ -94,8 +94,8 @@ fn gizmo_axis_drag_emits_move_steps_and_finishes() {
 fn viewport_drag_cooks_move_rotate_scale_for_object_and_point_groups() {
     for point_mode in [false, true] {
         for (name, steps, expected) in [
-            ("translate", [TransformOp::Move([0.5, 0., 0.]); 3], json!([1.5, 0., 0.])),
-            ("rotate", [TransformOp::Rotate([0., 0., 15.]); 3], json!([0., 0., 45.])),
+            ("translate", [TransformOp::Move([0.5, 0., 0.]), TransformOp::Move([1.0, 0., 0.]), TransformOp::Move([1.5, 0., 0.])], json!([1.5, 0., 0.])),
+            ("rotate", [TransformOp::Rotate([0., 0., 15.]), TransformOp::Rotate([0., 0., 30.]), TransformOp::Rotate([0., 0., 45.])], json!([0., 0., 45.])),
             ("scale", [TransformOp::Scale([1.2, 1., 1.]), TransformOp::Scale([1.5, 1., 1.]), TransformOp::Scale([2., 1., 1.])], json!([2., 1., 1.])),
         ] {
             let mut doc = Document::parse(include_str!("default_graph.json").to_owned()).unwrap();

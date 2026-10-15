@@ -2,6 +2,7 @@ mod picking;
 mod graph_edit;
 mod ui;
 mod viewport;
+mod transform_math;
 #[cfg(test)] mod transform_tests;
 use eframe::{egui, egui_wgpu};
 use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, CookRequest, CookState, StandardView};
@@ -13,25 +14,51 @@ use ui::{theme::Theme, Actions, BlenderStatus, CameraInfo, EditorState, GeoSumma
 use ui::modal_transform::{Modal, Kind as ModalKind, SketchStage, Constraint};
 use viewport::{Gpu, Mode, Overlay, Scene, Target};
 
+#[allow(dead_code)]
 fn scaled_from_initial(initial: &serde_json::Value, factor: [f32; 3]) -> [f32; 3] {
     [0,1,2].map(|i| initial.get(i).and_then(|x| x.as_f64()).unwrap_or(1.) as f32 * factor[i])
 }
 
-/// Move and Rotate actions carry per-frame deltas. Scale actions carry a factor
-/// relative to the start of the drag, including when the pointer moves back.
+#[allow(dead_code)]
 fn transform_parameter(value: &Value, initial: &Document, target: &str, op: TransformOp) -> (&'static str, Value) {
-    let (name, delta, default) = match op {
-        TransformOp::Move(delta) => ("translate", delta, 0.),
-        TransformOp::Rotate(delta) => ("rotate", delta, 0.),
-        TransformOp::Scale(factor) => ("scale", factor, 1.),
-    };
-    let current = &value["nodes"][target]["params"][name];
-    let next = if name == "scale" {
-        scaled_from_initial(&initial.value()["nodes"][target]["params"][name], delta)
+    let mut initial_trs = if initial.value()["nodes"].get(target).is_some() {
+        transform_math::TrsParams::from_params(&initial.value()["nodes"][target]["params"])
     } else {
-        [0, 1, 2].map(|i| current.get(i).and_then(Value::as_f64).unwrap_or(default) as f32 + delta[i])
+        transform_math::TrsParams::default()
     };
-    (name, json!(next))
+    if let Some(pivot) = value["nodes"][target]["params"].get("pivot") {
+        if let Some(arr) = pivot.as_array() {
+            initial_trs.pivot = [
+                arr.first().and_then(Value::as_f64).unwrap_or(0.),
+                arr.get(1).and_then(Value::as_f64).unwrap_or(0.),
+                arr.get(2).and_then(Value::as_f64).unwrap_or(0.),
+            ];
+        }
+    }
+    match op {
+        TransformOp::Move(delta) => {
+            let new_trs = transform_math::compose_translate(&initial_trs, [delta[0] as f64, delta[1] as f64, delta[2] as f64]);
+            ("translate", json!(new_trs.translate.map(|x| x as f32)))
+        }
+        TransformOp::Rotate(delta) => {
+            let axis = (0..3).max_by(|&a, &b| delta[a].abs().total_cmp(&delta[b].abs())).unwrap_or(0);
+            let new_trs = transform_math::compose_rotate_axis(&initial_trs, transform_math::Frame::global(), axis, delta[axis] as f64, false);
+            ("rotate", json!(new_trs.rotate.map(|x| x as f32)))
+        }
+        TransformOp::Scale(factor) => {
+            let new_trs = match transform_math::compose_scale(
+                &initial_trs,
+                transform_math::Frame::global(),
+                [factor[0] as f64, factor[1] as f64, factor[2] as f64],
+                true,
+                1e-4,
+            ) {
+                transform_math::ScaleResult::Direct(trs) => trs,
+                transform_math::ScaleResult::ShearNeedsSecondNode { second_node, .. } => second_node,
+            };
+            ("scale", json!(new_trs.scale.map(|x| x as f32)))
+        }
+    }
 }
 
 /// Picking records displayed triangle numbers; transform groups use the triangle's point numbers.
@@ -342,8 +369,27 @@ impl App {
         for id in ids { let k = id as usize * 3; if let Some(p) = points.get(k..k + 3) { for a in 0..3 { sum[a] += p[a]; } count += 1.; } }
         (count > 0.).then(|| sum.map(|x| x / count))
     }
-    fn transform_node(&mut self, op: TransformOp) { self.transform_node_at(op, None, None); }
-    fn transform_node_at(&mut self, op: TransformOp, pivot: Option<[f32; 3]>, axis_rotation: Option<[f32;3]>) {
+    fn orientation_frame(&self, rotation_deg: [f64; 3]) -> transform_math::Frame {
+        match self.editor_state.orientation {
+            ui::Orientation::View => {
+                let c = self.camera_info();
+                transform_math::Frame::from_f32([c.ray_right, c.ray_up, c.ray_forward])
+            }
+            ui::Orientation::Local | ui::Orientation::Gimbal | ui::Orientation::Normal => {
+                let r = transform_math::euler_xyz(rotation_deg);
+                transform_math::Frame {
+                    axes: [
+                        [r[0][0], r[1][0], r[2][0]],
+                        [r[0][1], r[1][1], r[2][1]],
+                        [r[0][2], r[1][2], r[2][2]],
+                    ],
+                }
+            }
+            _ => transform_math::Frame::global(),
+        }
+    }
+    fn transform_node(&mut self, op: TransformOp) { self.transform_node_at(op, None); }
+    fn transform_node_at(&mut self, op: TransformOp, pivot: Option<[f32; 3]>) {
         let group = group_text(&self.selected_points());
         if self.editor_state.selection != ui::SelectionMode::Object && group.is_empty() {
             self.file_status = "Select points, edges, or faces to transform".into();
@@ -351,22 +397,85 @@ impl App {
         }
         let first = self.transform_before.is_none();
         if first { self.editor.history.finish(&self.editor.doc); self.transform_before = Some(self.editor.doc.clone()); }
+        let before_doc = self.transform_before.as_ref().unwrap();
         let mut value = self.editor.doc.value().clone();
-        // The viewport handle is positioned on the displayed geometry. A graph
-        // selection may name an unrelated node, so always transform what is shown.
         let source = &self.display;
-        let Some(target) = ensure_transform_target(&mut value, source, group.is_empty(), self.transform_target.as_deref()) else { return; };
-        let (name, param_value) = transform_parameter(&value, self.transform_before.as_ref().unwrap(), &target, op);
+        let orientation = self.editor_state.orientation;
+        let is_local = matches!(orientation, ui::Orientation::Local | ui::Orientation::Gimbal);
+
+        let mut can_reuse = group.is_empty();
+        if let TransformOp::Scale(factors) = op {
+            if !is_local {
+                if let Some(source_node) = before_doc.value()["nodes"].get(source) {
+                    if source_node["type"] == "transform" {
+                        let trs = transform_math::TrsParams::from_params(&source_node["params"]);
+                        let frame = self.orientation_frame(trs.rotate);
+                        let factors_f64 = [factors[0] as f64, factors[1] as f64, factors[2] as f64];
+                        if let transform_math::ScaleResult::ShearNeedsSecondNode { .. } =
+                            transform_math::compose_scale(&trs, frame, factors_f64, false, 1e-4) {
+                            can_reuse = false;
+                        }
+                    }
+                }
+            }
+        }
+
+        let Some(target) = ensure_transform_target(&mut value, source, can_reuse, self.transform_target.as_deref()) else { return; };
+
+        let resolved_pivot = pivot.unwrap_or_else(|| {
+            if self.editor_state.pivot == ui::Pivot::Cursor {
+                self.editor_state.cursor
+            } else {
+                self.selection_center().unwrap_or(self.bounds.0)
+            }
+        });
+
+        let initial_trs = if before_doc.value()["nodes"].get(&target).is_some() {
+            transform_math::TrsParams::from_params(&before_doc.value()["nodes"][&target]["params"])
+        } else {
+            transform_math::TrsParams {
+                pivot: resolved_pivot.map(|x| x as f64),
+                ..Default::default()
+            }
+        };
+
+        let frame = self.orientation_frame(initial_trs.rotate);
+
+        let (name, param_value) = match op {
+            TransformOp::Move(delta) => {
+                let new_trs = transform_math::compose_translate(&initial_trs, [delta[0] as f64, delta[1] as f64, delta[2] as f64]);
+                ("translate", json!(new_trs.translate.map(|x| x as f32)))
+            }
+            TransformOp::Rotate(angles) => {
+                let non_zero_count = angles.iter().filter(|a| a.abs() > 1e-6).count();
+                let new_trs = if non_zero_count <= 1 {
+                    let axis = (0..3).max_by(|&a, &b| angles[a].abs().total_cmp(&angles[b].abs())).unwrap_or(0);
+                    transform_math::compose_rotate_axis(&initial_trs, frame, axis, angles[axis] as f64, is_local)
+                } else {
+                    transform_math::compose_rotate_euler(&initial_trs, frame, [angles[0] as f64, angles[1] as f64, angles[2] as f64], is_local)
+                };
+                ("rotate", json!(new_trs.rotate.map(|x| x as f32)))
+            }
+            TransformOp::Scale(factors) => {
+                let factors_f64 = [factors[0] as f64, factors[1] as f64, factors[2] as f64];
+                let new_trs = match transform_math::compose_scale(&initial_trs, frame, factors_f64, is_local, 1e-4) {
+                    transform_math::ScaleResult::Direct(trs) => trs,
+                    transform_math::ScaleResult::ShearNeedsSecondNode { second_node, .. } => second_node,
+                };
+                ("scale", json!(new_trs.scale.map(|x| x as f32)))
+            }
+        };
+
         let params = &mut value["nodes"][&target]["params"];
         if !params.is_object() { *params = json!({}); }
         params[name] = param_value.clone();
         let old_pivot = self.editor.doc.value()["nodes"][&target]["params"]["pivot"].clone();
-        let old_axis=self.editor.doc.value()["nodes"][&target]["params"]["axis_rotation"].clone();
+
         if first {
             params["group"] = json!(group);
             proportional_params(params, &self.editor_state);
-            params["pivot"] = json!(pivot.unwrap_or_else(|| if self.editor_state.pivot == ui::Pivot::Cursor { self.editor_state.cursor } else { self.selection_center().unwrap_or(self.bounds.0) }));
-            if let Some(rotation)=axis_rotation { params["axis_rotation"]=json!(rotation); }
+            params["pivot"] = json!(resolved_pivot);
+            params["axis_rotation"] = json!([0.0, 0.0, 0.0]);
         }
         match apply_transform_step(&mut self.editor.doc, first, value, &target, name, param_value) {
             Ok(edits) => {
@@ -374,10 +483,6 @@ impl App {
                 if !first {
                     if let Some(pivot) = pivot { let value = json!(pivot); if old_pivot != value {
                         let edit = Edit::Param { node: target.clone(), name: "pivot".into(), value };
-                        if self.editor.doc.edit(&edit).is_ok() { self.send(edit); }
-                    } }
-                    if let Some(rotation)=axis_rotation { let value=json!(rotation); if old_axis!=value {
-                        let edit=Edit::Param {node:target, name:"axis_rotation".into(),value};
                         if self.editor.doc.edit(&edit).is_ok() { self.send(edit); }
                     } }
                     let mut desired=self.editor.doc.value()["nodes"][&self.display]["params"].clone();
@@ -547,9 +652,7 @@ impl App {
             self.editor.doc.value()["nodes"][target]["params"]["pivot"]!=json!(pivot));
         if values!=modal.last || pivot_changed {
             let op=modal.step(values);
-            let axis_rotation=(modal.kind!=ModalKind::Move).then_some(
-                if matches!(orientation,ui::Orientation::Local|ui::Orientation::Normal|ui::Orientation::Gimbal) {modal.rotation} else {[0.;3]});
-            self.transform_node_at(op,Some(pivot),axis_rotation);
+            self.transform_node_at(op,Some(pivot));
         }
         if confirm { self.finish_modal(modal); } else { self.modal=Some(modal); ctx.request_repaint(); }
     }
