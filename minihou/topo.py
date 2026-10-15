@@ -92,7 +92,10 @@ class Edges(NamedTuple):
 def edges(geo) -> Edges:
     """Unique undirected edges of all primitives (open curves contribute their segments, not a closing edge)."""
     from . import rust
-    if rust.enabled() and geo.npoints:
+    # The Rust kernel is parallel and has a fixed cost per call (about 0.15-0.25 ms: waking the thread pool), so on the many
+    # small meshes of a fracture or a scatter it is slower than numpy. Below the numba threshold numpy is used; the
+    # numbering is identical on every path (tests/test_rust_parity.py, tests/test_rust_small_inputs.py).
+    if rust.enabled() and geo.npoints and geo.topology.nvertices >= _NUMBA_EDGES:
         return rust.edges(geo)
     if geo.topology.nvertices >= _NUMBA_EDGES and geo.npoints:
         fast = _edges_numba(geo)
