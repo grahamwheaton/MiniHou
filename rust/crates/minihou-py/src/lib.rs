@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use minihou_core::geometry::{validate_topology, AttrData, AttrTable, Geometry, Topology};
-use minihou_core::{noise, nodes, normals, topo, Graph};
+use minihou_core::{heightfield, noise, nodes, normals, topo, Graph};
 use numpy::{PyArray1, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
@@ -21,6 +21,10 @@ fn slice2<'a, T: numpy::Element>(a: &'a PyReadonlyArray2<'_, T>, width: usize, w
     if a.shape()[1] != width {
         return Err(PyValueError::new_err(format!("{what} must have {width} columns")));
     }
+    a.as_slice().map_err(|_| PyValueError::new_err(format!("{what} must be a contiguous array")))
+}
+
+fn slice2d<'a, T: numpy::Element>(a: &'a PyReadonlyArray2<'_, T>, what: &str) -> PyResult<&'a [T]> {
     a.as_slice().map_err(|_| PyValueError::new_err(format!("{what} must be a contiguous array")))
 }
 
@@ -133,6 +137,111 @@ fn linear_normalized<'py>(py: Python<'py>, v: PyReadonlyArray2<'py, f32>, m: [[f
     let vv = slice2(&v, 3, "v")?;
     let out = py.detach(|| minihou_core::xform::linear_normalized(vv, m));
     array(py, out, 3)
+}
+
+/// Hydraulic erosion state holding H, flow, eroded, deposited across iterations.
+#[pyclass]
+struct Hydraulic {
+    inner: heightfield::HydraulicState,
+}
+
+type QuadArray<'py> = (
+    Bound<'py, PyAny>,
+    Bound<'py, PyAny>,
+    Bound<'py, PyAny>,
+    Bound<'py, PyAny>,
+);
+
+#[pymethods]
+impl Hydraulic {
+    #[new]
+    fn new(h: PyReadonlyArray2<'_, f64>) -> PyResult<Self> {
+        let shape = h.shape();
+        let rows = shape[0];
+        let cols = shape[1];
+        let hs = slice2d(&h, "H")?;
+        Ok(Hydraulic {
+            inner: heightfield::HydraulicState::new(hs.to_vec(), rows, cols),
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn step(
+        &mut self,
+        py: Python<'_>,
+        x: PyReadonlyArray1<'_, f64>,
+        y: PyReadonlyArray1<'_, f64>,
+        cell: (f64, f64),
+        rain: f64,
+        capacity: f64,
+        erode_rate: f64,
+        deposit_rate: f64,
+        evaporation: f64,
+        lifetime: usize,
+        inertia: f64,
+        gravity: f64,
+        min_slope: f64,
+    ) -> PyResult<()> {
+        let xs = slice1(&x, "x")?;
+        let ys = slice1(&y, "y")?;
+        if xs.len() != ys.len() {
+            return Err(PyValueError::new_err("x and y must have the same length"));
+        }
+        py.detach(|| {
+            self.inner.step(
+                xs,
+                ys,
+                cell,
+                rain,
+                capacity,
+                erode_rate,
+                deposit_rate,
+                evaporation,
+                lifetime,
+                inertia,
+                gravity,
+                min_slope,
+            );
+        });
+        Ok(())
+    }
+
+    fn finish<'py>(&mut self, py: Python<'py>) -> PyResult<QuadArray<'py>> {
+        let cols = self.inner.cols;
+        let (h, flow, eroded, deposited) = std::mem::replace(
+            &mut self.inner,
+            heightfield::HydraulicState::new(Vec::new(), 0, 0),
+        )
+        .finish();
+        Ok((
+            array(py, h, cols)?,
+            array(py, flow, cols)?,
+            array(py, eroded, cols)?,
+            array(py, deposited, cols)?,
+        ))
+    }
+}
+
+/// Material steeper than the talus angle slides to lower neighbours.
+#[pyfunction]
+fn thermal<'py>(
+    py: Python<'py>,
+    h: PyReadonlyArray2<'py, f64>,
+    tan: f64,
+    dist: PyReadonlyArray1<'py, f64>,
+    rate: f64,
+    iterations: usize,
+) -> PyResult<Bound<'py, PyAny>> {
+    let shape = h.shape();
+    let rows = shape[0];
+    let cols = shape[1];
+    let hs = slice2d(&h, "H")?;
+    let ds = slice1(&dist, "dist")?;
+    if ds.len() != 8 {
+        return Err(PyValueError::new_err("dist must have 8 elements"));
+    }
+    let out = py.detach(|| heightfield::thermal(hs, rows, cols, tan, ds, rate, iterations));
+    array(py, out, cols)
 }
 
 fn table<'py>(py: Python<'py>, t: AttrTable) -> PyResult<Bound<'py, PyDict>> {
@@ -309,6 +418,128 @@ fn draw_stats(py: Python<'_>, vertex_point: PyReadonlyArray1<'_, i32>, prim_offs
 }
 
 /// Node types this build can cook.
+fn check_grid(len: usize, dims: [usize; 3]) -> PyResult<()> {
+    let size = dims.iter().try_fold(1usize, |n, &d| n.checked_mul(d));
+    if size != Some(len) {
+        return Err(PyValueError::new_err("grid dimensions do not match values"));
+    }
+    Ok(())
+}
+
+#[pyfunction]
+fn sdf_from_mesh<'py>(py: Python<'py>, tris: PyReadonlyArray1<'py, f64>, origin: [f64; 3],
+                     dims: [usize; 3], h: f64, band: f64) -> PyResult<Bound<'py, PyAny>> {
+    let t = slice1(&tris, "triangles")?;
+    let out = py.detach(|| minihou_core::sdf_mesh::from_mesh_with_ties(t, origin, dims, h, band))
+        .map_err(PyValueError::new_err)?;
+    Ok((array(py, out.values, 0)?, array(py, out.ambiguous.into_iter().map(|i| i as i64).collect(), 0)?)
+        .into_pyobject(py)?.into_any())
+}
+
+#[pyfunction]
+fn sdf_resolve_seed_ties<'py>(py: Python<'py>, tris: PyReadonlyArray1<'py, f64>, points: PyReadonlyArray1<'py, f64>,
+                            seeds: PyReadonlyArray1<'py, i64>, distances: PyReadonlyArray1<'py, f64>, band: f64)
+                            -> PyResult<Bound<'py, PyAny>> {
+    let t = slice1(&tris, "triangles")?;
+    let p = slice1(&points, "points")?;
+    let s = slice1(&seeds, "seeds")?;
+    let d = slice1(&distances, "distances")?;
+    if t.is_empty() || !t.len().is_multiple_of(9) || p.len() != s.len() * 3 || s.len() != d.len()
+        || s.iter().any(|&i| i < 0 || i as usize >= t.len() / 3) {
+        return Err(PyValueError::new_err("invalid nearest-corner seeds"));
+    }
+    array(py, py.detach(|| minihou_core::sdf_mesh::resolve_seed_ties(t, p, s, d, band)), 0)
+}
+
+#[pyfunction]
+fn sdf_flood<'py>(py: Python<'py>, free: PyReadonlyArray1<'py, bool>, dims: [usize; 3]) -> PyResult<Bound<'py, PyAny>> {
+    let v = slice1(&free, "free")?;
+    check_grid(v.len(), dims)?;
+    array(py, py.detach(|| minihou_core::sdf_mesh::flood(v, dims)), 0)
+}
+
+#[pyfunction]
+fn sdf_from_points<'py>(py: Python<'py>, points: PyReadonlyArray1<'py, f64>, radius: PyReadonlyArray1<'py, f64>,
+                       h: f64, blend: f64) -> PyResult<Bound<'py, PyAny>> {
+    let p = slice1(&points, "points")?;
+    let r = slice1(&radius, "radius")?;
+    let field = py.detach(|| minihou_core::sdf_field::from_points(p, r, h, blend)).map_err(PyValueError::new_err)?;
+    Ok((field.origin, field.dims, array(py, field.values, 0)?).into_pyobject(py)?.into_any())
+}
+
+#[pyfunction]
+fn sdf_blur<'py>(py: Python<'py>, values: PyReadonlyArray1<'py, f32>, dims: [usize; 3], iterations: usize)
+                -> PyResult<Bound<'py, PyAny>> {
+    let v = slice1(&values, "values")?;
+    check_grid(v.len(), dims)?;
+    array(py, py.detach(|| minihou_core::sdf_field::blur(v, dims, iterations)), 0)
+}
+
+#[pyfunction]
+fn sdf_resample_to<'py>(py: Python<'py>, values: PyReadonlyArray1<'py, f32>, src_dims: [usize; 3], offset: [i64; 3],
+                       dims: [usize; 3], fill: f32) -> PyResult<Bound<'py, PyAny>> {
+    let v = slice1(&values, "values")?;
+    check_grid(v.len(), src_dims)?;
+    if dims.iter().try_fold(1usize, |n, &d| n.checked_mul(d)).is_none_or(|n| n > 24_000_000)
+        || (0..3).any(|a| offset[a].checked_add(dims[a] as i64).is_none()) {
+        return Err(PyValueError::new_err("resampled grid is too large"));
+    }
+    array(py, py.detach(|| minihou_core::sdf_field::resample_to(v, src_dims, offset, dims, fill)), 0)
+}
+
+#[pyfunction]
+fn sdf_smooth_min_f32<'py>(py: Python<'py>, a: PyReadonlyArray1<'py, f32>, b: PyReadonlyArray1<'py, f32>, k: f32)
+                         -> PyResult<Bound<'py, PyAny>> {
+    let a = slice1(&a, "a")?;
+    let b = slice1(&b, "b")?;
+    if a.len() != b.len() { return Err(PyValueError::new_err("broadcast input sizes differ")); }
+    array(py, py.detach(|| minihou_core::sdf_field::smooth_min_f32(a, b, k)), 0)
+}
+
+#[pyfunction]
+fn sdf_smooth_min_f64<'py>(py: Python<'py>, a: PyReadonlyArray1<'py, f64>, b: PyReadonlyArray1<'py, f64>, k: f64)
+                         -> PyResult<Bound<'py, PyAny>> {
+    let a = slice1(&a, "a")?;
+    let b = slice1(&b, "b")?;
+    if a.len() != b.len() { return Err(PyValueError::new_err("broadcast input sizes differ")); }
+    array(py, py.detach(|| minihou_core::sdf_field::smooth_min_f64(a, b, k)), 0)
+}
+
+#[pyfunction]
+fn sdf_smooth_min_f32_k64<'py>(py: Python<'py>, a: PyReadonlyArray1<'py, f64>, b: PyReadonlyArray1<'py, f64>, k: f64)
+                             -> PyResult<Bound<'py, PyAny>> {
+    let a = slice1(&a, "a")?;
+    let b = slice1(&b, "b")?;
+    if a.len() != b.len() { return Err(PyValueError::new_err("broadcast input sizes differ")); }
+    array(py, py.detach(|| minihou_core::sdf_field::smooth_min_f32_k64(a, b, k)), 0)
+}
+
+#[pyfunction]
+fn sdf_resolve_face_saddles<'py>(py: Python<'py>, values: PyReadonlyArray1<'py, f64>, dims: [usize; 3], max_rounds: usize)
+                               -> PyResult<Bound<'py, PyAny>> {
+    let v = slice1(&values, "values")?;
+    check_grid(v.len(), dims)?;
+    array(py, py.detach(|| minihou_core::sdf_nets::resolve_face_saddles(v, dims, max_rounds)), 0)
+}
+
+#[pyfunction]
+fn sdf_resolve_face_saddles_f32<'py>(py: Python<'py>, values: PyReadonlyArray1<'py, f32>, dims: [usize; 3], max_rounds: usize)
+                                   -> PyResult<Bound<'py, PyAny>> {
+    let v = slice1(&values, "values")?;
+    check_grid(v.len(), dims)?;
+    array(py, py.detach(|| minihou_core::sdf_nets::resolve_face_saddles_f32(v, dims, max_rounds)), 0)
+}
+
+#[pyfunction]
+fn sdf_surface_nets<'py>(py: Python<'py>, values: PyReadonlyArray1<'py, f64>, dims: [usize; 3], origin: [f64; 3], h: f64)
+                        -> PyResult<Bound<'py, PyAny>> {
+    let v = slice1(&values, "values")?;
+    check_grid(v.len(), dims)?;
+    let (p, q) = py.detach(|| minihou_core::sdf_nets::surface_nets(v, dims, origin, h));
+    Ok((array(py, p, 3)?, array(py, q, 4)?).into_pyobject(py)?.into_any())
+}
+
+/// Node types this build can cook.
 #[pyfunction]
 fn node_types() -> Vec<&'static str> {
     nodes::registry().iter().map(|n| n.name).collect()
@@ -327,6 +558,18 @@ fn node_params<'py>(py: Python<'py>, node_type: &str) -> PyResult<Bound<'py, PyD
 
 #[pymodule]
 fn minihou_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(sdf_from_mesh, m)?)?;
+    m.add_function(wrap_pyfunction!(sdf_resolve_seed_ties, m)?)?;
+    m.add_function(wrap_pyfunction!(sdf_flood, m)?)?;
+    m.add_function(wrap_pyfunction!(sdf_from_points, m)?)?;
+    m.add_function(wrap_pyfunction!(sdf_blur, m)?)?;
+    m.add_function(wrap_pyfunction!(sdf_resample_to, m)?)?;
+    m.add_function(wrap_pyfunction!(sdf_smooth_min_f32, m)?)?;
+    m.add_function(wrap_pyfunction!(sdf_smooth_min_f64, m)?)?;
+    m.add_function(wrap_pyfunction!(sdf_smooth_min_f32_k64, m)?)?;
+    m.add_function(wrap_pyfunction!(sdf_resolve_face_saddles, m)?)?;
+    m.add_function(wrap_pyfunction!(sdf_resolve_face_saddles_f32, m)?)?;
+    m.add_function(wrap_pyfunction!(sdf_surface_nets, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
     m.add_function(wrap_pyfunction!(edges, m)?)?;
     m.add_function(wrap_pyfunction!(prim_normals, m)?)?;
@@ -342,6 +585,8 @@ fn minihou_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(chunk_bounds, m)?)?;
     m.add_function(wrap_pyfunction!(bounds, m)?)?;
     m.add_function(wrap_pyfunction!(draw_stats, m)?)?;
+    m.add_class::<Hydraulic>()?;
+    m.add_function(wrap_pyfunction!(thermal, m)?)?;
     m.add_function(wrap_pyfunction!(node_types, m)?)?;
     m.add_function(wrap_pyfunction!(node_params, m)?)?;
     Ok(())

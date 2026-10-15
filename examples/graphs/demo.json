@@ -87,10 +87,6 @@
         "geo": "all"
       },
       "pos": [62, 662]
-    },
-    "attribute_transfer1": {
-      "type": "attribute_transfer",
-      "pos": [262, 364]
     }
   },
   "display": "out",

@@ -11,6 +11,7 @@
 pub mod error;
 pub mod geometry;
 pub mod graph;
+pub mod heightfield;
 pub mod math;
 pub mod noise;
 pub mod nodes;
@@ -18,6 +19,9 @@ pub mod normals;
 pub mod params;
 pub mod preview;
 pub mod session;
+pub mod sdf_mesh;
+pub mod sdf_nets;
+pub mod sdf_field;
 pub mod topo;
 pub mod xform;
 

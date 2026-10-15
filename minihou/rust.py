@@ -54,7 +54,8 @@ def disabled():
 # Node types whose Python function calls a Rust kernel. The evaluator records which backend each node used on its last cook
 # (CookStats.backend) so the editor can show it: "rust" (a kernel ran), "fallback" (this node type has a Rust path, but this
 # cook ran the Python / numba one: unsupported settings or no points) and "python" (no Rust path).
-NODE_TYPES = frozenset({"grid", "box", "transform", "normal", "noise"})
+NODE_TYPES = frozenset({"grid", "box", "transform", "normal", "noise", "heightfield_erode",
+                        "remesh", "points_to_surface", "sdf_boolean", "sdf_shape"})
 _tls = threading.local()
 
 
@@ -95,6 +96,108 @@ def _i32(a) -> np.ndarray:
 
 def _f32x3(a) -> np.ndarray:
     return np.ascontiguousarray(np.asarray(a, np.float32).reshape(-1, 3))
+
+
+def _sdf_array(values, dtype):
+    a = np.asarray(values, dtype=dtype)
+    if a.ndim != 3:
+        raise ValueError("SDF values must have three dimensions")
+    return np.ascontiguousarray(a).reshape(-1), a.shape
+
+
+def sdf_from_mesh(tris, h, band_voxels=3.0, pad_voxels=2, grid=None):
+    from .sdf import Volume, grid_for
+    tris = np.asarray(tris, np.float64)
+    if tris.shape != (len(tris), 3, 3):
+        raise ValueError("triangles must have shape (T, 3, 3)")
+    band = band_voxels * h
+    if grid is not None:
+        lo, dims = np.asarray(grid[0], np.float64), np.asarray(grid[1], np.int64)
+    elif len(tris):
+        lo, dims = grid_for(tris.reshape(-1, 3).min(0), tris.reshape(-1, 3).max(0), h, band + pad_voxels * h)
+    else:
+        lo, dims = np.zeros(3), np.array([2, 2, 2], np.int64)
+    flat_tris = np.ascontiguousarray(tris).reshape(-1)
+    values, ambiguous = _need().sdf_from_mesh(flat_tris, lo.tolist(), tuple(int(x) for x in dims), float(h), float(band))
+    if len(ambiguous):
+        # SciPy's nearest-corner tie order is part of the reference sign convention.
+        # Only wall voxels whose vertex seed survived the native triangle search need it.
+        from .spatial import nearest
+        ny, nz = dims[1:]
+        idx = np.stack([ambiguous // (ny * nz), (ambiguous // nz) % ny, ambiguous % nz], 1)
+        points = lo + idx * h
+        seeds, distances = nearest(tris.reshape(-1, 3), points)
+        values[ambiguous] = _need().sdf_resolve_seed_ties(flat_tris, np.ascontiguousarray(points).reshape(-1),
+                                                       np.ascontiguousarray(seeds, np.int64),
+                                                       np.ascontiguousarray(distances, np.float64), float(band))
+    return Volume(lo, float(h), values.reshape(dims))
+
+
+def sdf_flood(free):
+    values, dims = _sdf_array(free, np.bool_)
+    if 0 in dims:
+        raise ValueError("cannot flood an empty grid axis")
+    return _need().sdf_flood(values, dims).reshape(dims)
+
+
+def sdf_from_points(P, radius, h, blend=1.0):
+    from .sdf import Volume
+    P = np.asarray(P, np.float64).reshape(-1, 3)
+    radius = np.broadcast_to(np.asarray(radius, np.float64), (len(P),))
+    lo, dims, values = _need().sdf_from_points(np.ascontiguousarray(P).reshape(-1),
+                                             np.ascontiguousarray(radius), float(h), float(blend))
+    return Volume(np.asarray(lo, np.float64), float(h), values.reshape(dims))
+
+
+def sdf_blur(vol, iterations):
+    from .sdf import Volume
+    values, dims = _sdf_array(vol.values, np.float32)
+    if iterations > 0 and 0 in dims:
+        raise ValueError("can't extend empty axis using modes other than 'constant' or 'empty'")
+    out = _need().sdf_blur(values, dims, max(0, int(iterations)))
+    return Volume(vol.origin, vol.h, out.reshape(dims))
+
+
+def sdf_resample_to(vol, origin, dims, h, fill):
+    off = np.round((np.asarray(origin) - vol.origin) / h).astype(np.int64)
+    values, src_dims = _sdf_array(vol.values, np.float32)
+    dims = tuple(int(x) for x in dims)
+    out = _need().sdf_resample_to(values, src_dims, off.tolist(), dims, float(fill))
+    return out.reshape(dims)
+
+
+def sdf_smooth_min(a, b, k):
+    # Resolve dtype with NumPy's scalar-promotion rules using empty arrays; no field arithmetic here.
+    base_dtype = dtype = np.result_type(a, b)
+    if not k <= 0:
+        dtype = (np.empty(0, dtype=dtype) / k).dtype
+    if dtype not in (np.dtype("float32"), np.dtype("float64")):
+        from . import sdf
+        with disabled():
+            return sdf.smooth_min(a, b, k)
+    a, b = np.broadcast_arrays(np.asarray(a, dtype=dtype), np.asarray(b, dtype=dtype))
+    if base_dtype == np.dtype("float32") and dtype == np.dtype("float64"):
+        fn = _need().sdf_smooth_min_f32_k64
+    else:
+        fn = _need().sdf_smooth_min_f32 if dtype == np.dtype("float32") else _need().sdf_smooth_min_f64
+    result = fn(np.ascontiguousarray(a).reshape(-1), np.ascontiguousarray(b).reshape(-1), float(k))
+    return result.reshape(a.shape)
+
+
+def sdf_resolve_face_saddles(v, max_rounds=16):
+    dtype = np.asarray(v).dtype
+    if dtype not in (np.dtype("float32"), np.dtype("float64")):
+        from . import sdf
+        with disabled():
+            return sdf._resolve_face_saddles(v, max_rounds)
+    values, dims = _sdf_array(v, dtype)
+    fn = _need().sdf_resolve_face_saddles_f32 if dtype == np.dtype("float32") else _need().sdf_resolve_face_saddles
+    return fn(values, dims, max(0, int(max_rounds))).reshape(dims)
+
+
+def sdf_surface_nets(vol):
+    values, dims = _sdf_array(vol.values, np.float64)
+    return _need().sdf_surface_nets(values, dims, np.asarray(vol.origin, np.float64).tolist(), float(vol.h))
 
 
 def edges(geo):
@@ -182,10 +285,54 @@ def chunk_bounds(P, tri, chunk: int) -> np.ndarray:
     tri = np.ascontiguousarray(np.asarray(tri).reshape(-1), np.uint32)
     return _need().chunk_bounds(_f32x3(P), tri, int(chunk)).reshape(-1, 8)
 
+def _f64x2(a) -> np.ndarray:
+    return np.ascontiguousarray(np.asarray(a, np.float64))
+
+
+def _f64x1(a) -> np.ndarray:
+    return np.ascontiguousarray(np.asarray(a, np.float64).reshape(-1))
+
+
+def hydraulic_state(H: np.ndarray):
+    """A state object in the Rust core for the hydraulic erosion loop."""
+    return _need().Hydraulic(_f64x2(H))
+
+
+def thermal(H: np.ndarray, cell, talus_deg: float, rate: float, iterations: int) -> np.ndarray:
+    """:func:`minihou.nodes.heightfield.thermal` computed in the Rust core."""
+    _NEIGHBOURS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+    tan = float(np.tan(np.radians(talus_deg)))
+    dist = np.ascontiguousarray([np.hypot(dy * cell[0], dx * cell[1]) for dy, dx in _NEIGHBOURS], np.float64)
+    return _need().thermal(_f64x2(H), tan, dist, float(rate), int(iterations))
+
+
+def hydraulic(H: np.ndarray, cell, iterations: int, rain: float, capacity: float, erode_rate: float,
+              deposit_rate: float, evaporation: float, droplets: int = 4096, lifetime: int = 48,
+              inertia: float = 0.1, gravity: float = 4.0, min_slope: float = 0.01, seed: int = 0):
+    """:func:`minihou.nodes.heightfield.hydraulic` computed in the Rust core with draws from Python."""
+    h, w = H.shape
+    state = hydraulic_state(H)
+    rng = np.random.default_rng(int(seed) & 0xFFFFFFFF)
+    w_bound = float(w - 1.001)
+    h_bound = float(h - 1.001)
+    for _ in range(iterations):
+        x = np.ascontiguousarray(rng.random(droplets) * w_bound, np.float64)
+        y = np.ascontiguousarray(rng.random(droplets) * h_bound, np.float64)
+        state.step(x, y, (float(cell[0]), float(cell[1])), float(rain), float(capacity),
+                   float(erode_rate), float(deposit_rate), float(evaporation), int(lifetime),
+                   float(inertia), float(gravity), float(min_slope))
+    return state.finish()
+
 
 def cook_node(node_type: str, **params):
     """One input-less node (``grid``, ``box``) cooked in Rust, as a Geometry."""
-    return cook({"version": 1, "nodes": {"n": {"type": node_type, "params": params}}, "display": "n"})
+    try:
+        return cook({"version": 1, "nodes": {"n": {"type": node_type, "params": params}}, "display": "n"})
+    except RuntimeError as exc:
+        # the core words errors as "node 'n' (type): ..." for the one-node graph above; the evaluator adds the real node
+        # context, so the message is the same text the Python body raises
+        message, prefix = str(exc), f"node 'n' ({node_type}): "
+        raise ValueError(message[len(prefix):] if message.startswith(prefix) else message) from exc
 
 
 def node_types() -> list:
