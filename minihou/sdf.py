@@ -1,4 +1,4 @@
-"""Signed distance fields on dense voxel grids (the engine's take on Houdini's VDB workflow), numpy only.
+"""Signed distance fields on dense voxel grids (the engine's take on Houdini's VDB workflow), with optional Rust kernels.
 
 * :func:`from_mesh`    -- exact distances in a narrow band around a *closed* mesh (closest points via
   :mod:`minihou.raycast`), signed by flood-filling the outside from the grid border with the surface as a wall
@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+
+from . import rust
 
 MAX_VOXELS = 24_000_000
 MAX_POINT_WORK = 150_000_000          # points x kernel voxels for metaballs
@@ -53,6 +55,8 @@ def mesh_work(tris: np.ndarray, h: float, band_voxels: float = 3.0) -> int:
 
 def from_mesh(tris: np.ndarray, h: float, band_voxels: float = 3.0, pad_voxels: int = 2, grid=None) -> Volume:
     """SDF of a closed triangle mesh (T, 3, 3), on its own padded grid or on ``grid`` = (origin, dims)."""
+    if rust.enabled():
+        return rust.sdf_from_mesh(tris, h, band_voxels, pad_voxels, grid)
     from .raycast import TriGrid
     tris = np.asarray(tris, np.float64)
     band = band_voxels * h
@@ -102,6 +106,8 @@ def from_mesh(tris: np.ndarray, h: float, band_voxels: float = 3.0, pad_voxels: 
 
 def _flood(free: np.ndarray) -> np.ndarray:
     """Voxels of ``free`` connected (6-neighbourhood) to the grid border."""
+    if rust.enabled():
+        return rust.sdf_flood(free)
     try:
         from scipy import ndimage
         seed = np.zeros_like(free)
@@ -130,6 +136,8 @@ def _flood(free: np.ndarray) -> np.ndarray:
 def from_points(P: np.ndarray, radius: np.ndarray, h: float, blend: float = 1.0) -> Volume:
     """Metaballs: each point adds a smooth kernel reaching radius x (1 + blend); the threshold is chosen so a lone
     point gives a sphere of exactly its radius, and nearby points melt together (more with a larger blend)."""
+    if rust.enabled():
+        return rust.sdf_from_points(P, radius, h, blend)
     P = np.asarray(P, np.float64).reshape(-1, 3)
     r = np.broadcast_to(np.asarray(radius, np.float64), (len(P),)).astype(np.float64)
     R = r * (1.0 + max(blend, 0.0))                     # kernel support
@@ -162,6 +170,8 @@ def from_points(P: np.ndarray, radius: np.ndarray, h: float, blend: float = 1.0)
 # -- operations -------------------------------------------------------------------------------------------------
 def blur(vol: Volume, iterations: int) -> Volume:
     """Mean-curvature-like smoothing: repeated 3-tap box blur along each axis."""
+    if rust.enabled():
+        return rust.sdf_blur(vol, iterations)
     v = vol.values.astype(np.float32)
     for _ in range(iterations):
         for ax in range(3):
@@ -175,6 +185,8 @@ def blur(vol: Volume, iterations: int) -> Volume:
 
 def resample_to(vol: Volume, origin: np.ndarray, dims, h: float, fill: float) -> np.ndarray:
     """Values of ``vol`` on another grid (same voxel size, integer-aligned): pads with ``fill``."""
+    if rust.enabled():
+        return rust.sdf_resample_to(vol, origin, dims, h, fill)
     off = np.round((np.asarray(origin) - vol.origin) / h).astype(np.int64)
     out = np.full(tuple(dims), fill, np.float32)
     src = vol.values
@@ -189,6 +201,8 @@ def resample_to(vol: Volume, origin: np.ndarray, dims, h: float, fill: float) ->
 
 
 def smooth_min(a, b, k):
+    if rust.enabled():
+        return rust.sdf_smooth_min(a, b, k)
     if k <= 0:
         return np.minimum(a, b)
     h = np.clip(0.5 + 0.5 * (b - a) / k, 0.0, 1.0)
@@ -200,6 +214,8 @@ def _resolve_face_saddles(v: np.ndarray, max_rounds: int = 16) -> np.ndarray:
     """Remove face saddles (a cell face whose corners alternate inside/outside diagonally): there all four face edges
     are crossed and four quads would share one mesh edge (non-manifold). The corner nearest to zero is nudged across;
     it changes the field by less than its own tiny value. Repeated in case a nudge creates a saddle next door."""
+    if rust.enabled():
+        return rust.sdf_resolve_face_saddles(v, max_rounds)
     v = v.copy()
     for _ in range(max_rounds):
         found = False
@@ -238,6 +254,8 @@ def _resolve_face_saddles(v: np.ndarray, max_rounds: int = 16) -> np.ndarray:
 def surface_nets(vol: Volume):
     """(points (n, 3), quads (m, 4) point indices) of the zero level, quads wound counter-clockwise seen from outside.
     Edge-manifold: face saddles are resolved first."""
+    if rust.enabled():
+        return rust.sdf_surface_nets(vol)
     v = _resolve_face_saddles(vol.values.astype(np.float64))
     nx, ny, nz = v.shape
     inside = v < 0

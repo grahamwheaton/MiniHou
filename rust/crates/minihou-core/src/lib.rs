@@ -19,6 +19,9 @@ pub mod normals;
 pub mod params;
 pub mod preview;
 pub mod session;
+pub mod sdf_mesh;
+pub mod sdf_nets;
+pub mod sdf_field;
 pub mod topo;
 pub mod xform;
 

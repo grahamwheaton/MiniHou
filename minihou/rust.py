@@ -54,7 +54,8 @@ def disabled():
 # Node types whose Python function calls a Rust kernel. The evaluator records which backend each node used on its last cook
 # (CookStats.backend) so the editor can show it: "rust" (a kernel ran), "fallback" (this node type has a Rust path, but this
 # cook ran the Python / numba one: unsupported settings or no points) and "python" (no Rust path).
-NODE_TYPES = frozenset({"grid", "box", "transform", "normal", "noise", "heightfield_erode"})
+NODE_TYPES = frozenset({"grid", "box", "transform", "normal", "noise", "heightfield_erode",
+                        "remesh", "points_to_surface", "sdf_boolean", "sdf_shape"})
 _tls = threading.local()
 
 
@@ -95,6 +96,108 @@ def _i32(a) -> np.ndarray:
 
 def _f32x3(a) -> np.ndarray:
     return np.ascontiguousarray(np.asarray(a, np.float32).reshape(-1, 3))
+
+
+def _sdf_array(values, dtype):
+    a = np.asarray(values, dtype=dtype)
+    if a.ndim != 3:
+        raise ValueError("SDF values must have three dimensions")
+    return np.ascontiguousarray(a).reshape(-1), a.shape
+
+
+def sdf_from_mesh(tris, h, band_voxels=3.0, pad_voxels=2, grid=None):
+    from .sdf import Volume, grid_for
+    tris = np.asarray(tris, np.float64)
+    if tris.shape != (len(tris), 3, 3):
+        raise ValueError("triangles must have shape (T, 3, 3)")
+    band = band_voxels * h
+    if grid is not None:
+        lo, dims = np.asarray(grid[0], np.float64), np.asarray(grid[1], np.int64)
+    elif len(tris):
+        lo, dims = grid_for(tris.reshape(-1, 3).min(0), tris.reshape(-1, 3).max(0), h, band + pad_voxels * h)
+    else:
+        lo, dims = np.zeros(3), np.array([2, 2, 2], np.int64)
+    flat_tris = np.ascontiguousarray(tris).reshape(-1)
+    values, ambiguous = _need().sdf_from_mesh(flat_tris, lo.tolist(), tuple(int(x) for x in dims), float(h), float(band))
+    if len(ambiguous):
+        # SciPy's nearest-corner tie order is part of the reference sign convention.
+        # Only wall voxels whose vertex seed survived the native triangle search need it.
+        from .spatial import nearest
+        ny, nz = dims[1:]
+        idx = np.stack([ambiguous // (ny * nz), (ambiguous // nz) % ny, ambiguous % nz], 1)
+        points = lo + idx * h
+        seeds, distances = nearest(tris.reshape(-1, 3), points)
+        values[ambiguous] = _need().sdf_resolve_seed_ties(flat_tris, np.ascontiguousarray(points).reshape(-1),
+                                                       np.ascontiguousarray(seeds, np.int64),
+                                                       np.ascontiguousarray(distances, np.float64), float(band))
+    return Volume(lo, float(h), values.reshape(dims))
+
+
+def sdf_flood(free):
+    values, dims = _sdf_array(free, np.bool_)
+    if 0 in dims:
+        raise ValueError("cannot flood an empty grid axis")
+    return _need().sdf_flood(values, dims).reshape(dims)
+
+
+def sdf_from_points(P, radius, h, blend=1.0):
+    from .sdf import Volume
+    P = np.asarray(P, np.float64).reshape(-1, 3)
+    radius = np.broadcast_to(np.asarray(radius, np.float64), (len(P),))
+    lo, dims, values = _need().sdf_from_points(np.ascontiguousarray(P).reshape(-1),
+                                             np.ascontiguousarray(radius), float(h), float(blend))
+    return Volume(np.asarray(lo, np.float64), float(h), values.reshape(dims))
+
+
+def sdf_blur(vol, iterations):
+    from .sdf import Volume
+    values, dims = _sdf_array(vol.values, np.float32)
+    if iterations > 0 and 0 in dims:
+        raise ValueError("can't extend empty axis using modes other than 'constant' or 'empty'")
+    out = _need().sdf_blur(values, dims, max(0, int(iterations)))
+    return Volume(vol.origin, vol.h, out.reshape(dims))
+
+
+def sdf_resample_to(vol, origin, dims, h, fill):
+    off = np.round((np.asarray(origin) - vol.origin) / h).astype(np.int64)
+    values, src_dims = _sdf_array(vol.values, np.float32)
+    dims = tuple(int(x) for x in dims)
+    out = _need().sdf_resample_to(values, src_dims, off.tolist(), dims, float(fill))
+    return out.reshape(dims)
+
+
+def sdf_smooth_min(a, b, k):
+    # Resolve dtype with NumPy's scalar-promotion rules using empty arrays; no field arithmetic here.
+    base_dtype = dtype = np.result_type(a, b)
+    if not k <= 0:
+        dtype = (np.empty(0, dtype=dtype) / k).dtype
+    if dtype not in (np.dtype("float32"), np.dtype("float64")):
+        from . import sdf
+        with disabled():
+            return sdf.smooth_min(a, b, k)
+    a, b = np.broadcast_arrays(np.asarray(a, dtype=dtype), np.asarray(b, dtype=dtype))
+    if base_dtype == np.dtype("float32") and dtype == np.dtype("float64"):
+        fn = _need().sdf_smooth_min_f32_k64
+    else:
+        fn = _need().sdf_smooth_min_f32 if dtype == np.dtype("float32") else _need().sdf_smooth_min_f64
+    result = fn(np.ascontiguousarray(a).reshape(-1), np.ascontiguousarray(b).reshape(-1), float(k))
+    return result.reshape(a.shape)
+
+
+def sdf_resolve_face_saddles(v, max_rounds=16):
+    dtype = np.asarray(v).dtype
+    if dtype not in (np.dtype("float32"), np.dtype("float64")):
+        from . import sdf
+        with disabled():
+            return sdf._resolve_face_saddles(v, max_rounds)
+    values, dims = _sdf_array(v, dtype)
+    fn = _need().sdf_resolve_face_saddles_f32 if dtype == np.dtype("float32") else _need().sdf_resolve_face_saddles
+    return fn(values, dims, max(0, int(max_rounds))).reshape(dims)
+
+
+def sdf_surface_nets(vol):
+    values, dims = _sdf_array(vol.values, np.float64)
+    return _need().sdf_surface_nets(values, dims, np.asarray(vol.origin, np.float64).tolist(), float(vol.h))
 
 
 def edges(geo):
