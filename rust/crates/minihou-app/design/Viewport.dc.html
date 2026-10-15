@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Viewport</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0}
+.vp{position:relative;overflow:hidden;background:var(--vbg);font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:12px;color:var(--ptext);box-sizing:border-box}
+.vp-dark{--vbg:#2b2e34;--vfloor:#3b3f47;--vedge:rgba(14,16,20,.55);--vwire:#c4c9d1;--pbg:#23262b;--pbg2:#2b2f35;--pstroke:#3a3f47;--ptext:#d8dce2;--pdim:#9aa1ab;--pacc:#4f9cf0;--paccbg:#243a57;--perr:#ef5b52;--perrbg:#3b2224;--pwarn:#e8a23a;--pwarnbg:#3a2f1d;--xax:#c4584f;--zax:#4f86d0;--yax:#6cb56c}
+.vp-light{--vbg:#b3b8c0;--vfloor:#c6cbd2;--vedge:rgba(24,28,34,.5);--vwire:#2a2e34;--pbg:#f4f5f7;--pbg2:#ffffff;--pstroke:#c4c9d1;--ptext:#1f2329;--pdim:#566070;--pacc:#2a74d6;--paccbg:#dbe8fb;--perr:#c8362d;--perrbg:#fbe3e1;--pwarn:#a86a05;--pwarnbg:#fbefd6;--xax:#c4584f;--zax:#3d76c4;--yax:#3f9a45}
+.floor-minor{stroke:var(--vfloor);stroke-width:1;fill:none}
+.floor-x{stroke:var(--xax);stroke-width:1.5;fill:none;opacity:.8}
+.floor-z{stroke:var(--zax);stroke-width:1.5;fill:none;opacity:.8}
+.edges{stroke:var(--vedge);stroke-width:1;fill:none;stroke-linejoin:round}
+.sh-solid .f path{fill:#cdd0d6}
+.sh-solid .edges{display:none}
+.sh-shaded .edges{display:none}
+.sh-wire .f path{fill:var(--vbg)}
+.sh-wire .edges{stroke:var(--vwire);stroke-width:1}
+.dense .edges{opacity:.12}
+.err .mesh{opacity:.55}
+.bn-err{background:var(--perrbg);border-color:var(--perr);--bnc:var(--perr)}
+.bn-warn{background:var(--pwarnbg);border-color:var(--pwarn);--bnc:var(--pwarn)}
+.chip{position:absolute;display:flex;align-items:center;gap:8px;box-sizing:border-box;background:var(--pbg);border:1px solid var(--pstroke);border-radius:6px;color:var(--ptext)}
+.seg-row{display:flex;padding:2px;gap:2px}
+.seg{font:500 12px 'IBM Plex Sans',system-ui,sans-serif;color:var(--pdim);background:transparent;border:0;border-radius:4px;height:24px;padding:0 10px;cursor:default}
+.seg.on{background:var(--paccbg);color:var(--ptext);box-shadow:inset 0 0 0 1px var(--pacc)}
+.ibtn{display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;font:500 12px 'IBM Plex Sans',system-ui,sans-serif;color:var(--ptext);background:var(--pbg);border:1px solid var(--pstroke);border-radius:6px}
+.ibtn.on{border-color:var(--pacc);background:var(--paccbg)}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+.chk{display:flex;align-items:center;gap:8px;height:24px;font-size:12px}
+.box{width:14px;height:14px;box-sizing:border-box;border:1px solid var(--pdim);border-radius:3px;display:flex;align-items:center;justify-content:center}
+.chk.on .box{background:var(--pacc);border-color:var(--pacc)}
+.chk .k{margin-left:auto;color:var(--pdim);font-size:11px}
+.vp{--tlh:0px}
+.vp.has-tl{--tlh:44px}
+.hdr{position:absolute;left:0;right:0;top:0;height:36px;display:flex;align-items:center;gap:3px;padding:0 6px;background:var(--pbg);border-bottom:1px solid var(--pstroke);box-sizing:border-box}
+.hgrp{display:flex;align-items:center;gap:1px;padding:2px;background:var(--pbg2);border:1px solid var(--pstroke);border-radius:5px;box-sizing:border-box}
+.hb{display:flex;align-items:center;justify-content:center;gap:5px;height:26px;min-width:26px;padding:0 5px;border:0;border-radius:4px;background:transparent;color:var(--ptext);font:500 12px 'IBM Plex Sans',system-ui,sans-serif;cursor:default}
+.hgrp .hb{height:22px;min-width:22px;padding:0 3px}
+.hb.on{background:var(--paccbg);box-shadow:inset 0 0 0 1px var(--pacc)}
+.hsep{width:1px;height:18px;background:var(--pstroke);margin:0 2px;flex:none}
+.tl{position:absolute;left:0;right:0;bottom:0;height:44px;display:flex;align-items:center;gap:10px;padding:0 10px;background:var(--pbg);border-top:1px solid var(--pstroke);box-sizing:border-box}
+.tl .val{height:22px;min-width:44px;padding:0 6px;display:flex;align-items:center;justify-content:flex-end;background:var(--pbg2);border:1px solid var(--pstroke);border-radius:4px;font:400 12px 'IBM Plex Mono',ui-monospace,monospace;box-sizing:border-box}
+.tlbar{position:relative;flex:1;min-width:60px;height:24px;background:var(--pbg2);border:1px solid var(--pstroke);border-radius:4px;box-sizing:border-box;background-image:repeating-linear-gradient(90deg,var(--pstroke) 0,var(--pstroke) 1px,transparent 1px,transparent 24px);background-position:bottom;background-size:100% 8px;background-repeat:no-repeat}
+.tlbar .tlkf{position:absolute;top:7px;width:8px;height:8px;margin-left:-4px;transform:rotate(45deg);background:var(--pwarn)}
+.tlbar .tlph{position:absolute;top:-1px;bottom:-1px;width:2px;margin-left:-1px;background:var(--pacc)}
+.tools{flex-direction:column;align-items:stretch;gap:2px;padding:4px}
+.tbtn{display:flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;color:var(--pdim);background:transparent;border:0;border-radius:4px;cursor:default}
+.tbtn.on{background:var(--paccbg);color:var(--ptext);box-shadow:inset 0 0 0 1px var(--pacc)}
+.tsep{height:1px;margin:2px 4px;background:var(--pstroke)}
+</style>
+</helmet>
+<div class="vp {{themeClass}} {{shadeClass}} {{stateClass}} {{tlClass}}" style="width: {{w}}px; height: {{h}}px">
+  <svg viewBox="0 0 1000 560" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style="position:absolute;left:0;top:0" aria-hidden="true">
+    <path class="floor-minor" d="M56.4 364.1L652.6 61.1M46.3 349.5L462.4 514.2M97.5 379.9L683.9 106.7M70.6 336.5L485.0 509.2M135.5 394.6L711.4 146.8M96.5 322.8L508.4 504.0M171.0 408.3L735.8 182.5M123.9 308.2L532.7 498.7M204.0 421.1L757.7 214.4M153.2 292.6L558.0 493.1M234.9 433.0L777.3 243.1M184.4 276.0L584.3 487.3M263.8 444.2L795.1 269.1M217.8 258.2L611.6 481.3M316.4 464.5L826.0 314.2M292.1 218.6L669.7 468.6M340.5 473.8L839.5 333.9M333.6 196.6L700.6 461.8M363.2 482.5L852.0 352.1M378.5 172.7L732.9 454.7M384.7 490.8L863.4 368.8M427.2 146.8L766.6 447.3M405.0 498.7L874.1 384.3M480.1 118.6L801.8 439.5M424.3 506.1L883.9 398.7M537.9 87.8L838.7 431.4M442.6 513.2L893.1 412.1M601.3 54.1L877.4 422.9"></path>
+    <path class="floor-x" d="M290.9 454.6L811.3 292.7"></path>
+    <path class="floor-z" d="M253.6 239.1L640.1 475.1"></path>
+    <sc-if value="{{showMesh}}" hint-placeholder-val="{{ true }}">
+    <g class="mesh">
+      <g class="f">
+<path fill="#b5b5b9" d="M448.5 443.5L472.0 434.4L489.8 430.9L466.8 436.6Z"></path>
+<path fill="#c6c6ca" d="M472.0 434.4L496.4 413.6L513.7 424.6L489.8 430.9Z"></path>
+<path fill="#e2e2e6" d="M496.4 413.6L521.4 394.3L538.4 415.0L513.7 424.6Z"></path>
+<path fill="#d1d1d5" d="M429.4 434.8L453.1 430.4L472.0 434.4L448.5 443.5Z"></path>
+<path fill="#d5d5d9" d="M453.1 430.4L478.1 412.2L496.4 413.6L472.0 434.4Z"></path>
+<path fill="#d7d7db" d="M521.4 394.3L547.5 392.5L564.3 410.3L538.4 415.0Z"></path>
+<path fill="#e0e0e4" d="M409.5 422.9L433.7 410.4L453.1 430.4L429.4 434.8Z"></path>
+<path fill="#ceced2" d="M478.1 412.2L503.7 394.3L521.4 394.3L496.4 413.6Z"></path>
+<path fill="#e8e8ec" d="M433.7 410.4L458.8 396.5L478.1 412.2L453.1 430.4Z"></path>
+<path fill="#b3b3b7" d="M547.5 392.5L575.7 407.1L591.9 416.3L564.3 410.3Z"></path>
+<path fill="#bcbcc0" d="M503.7 394.3L530.2 388.3L547.5 392.5L521.4 394.3Z"></path>
+<path fill="#d3d3d7" d="M387.8 419.1L412.7 402.5L433.7 410.4L409.5 422.9Z"></path>
+<path fill="#d8d8dc" d="M458.8 396.5L484.7 391.5L503.7 394.3L478.1 412.2Z"></path>
+<path fill="#d9d9dd" d="M412.7 402.5L438.2 387.0L458.8 396.5L433.7 410.4Z"></path>
+<path fill="#b9b9bd" d="M530.2 388.3L558.2 389.1L575.7 407.1L547.5 392.5Z"></path>
+<path fill="#b2b2b6" d="M575.7 407.1L605.7 417.1L621.2 423.7L591.9 416.3Z"></path>
+<path fill="#b9b9bd" d="M484.7 391.5L511.8 390.9L530.2 388.3L503.7 394.3Z"></path>
+<path fill="#dbdbdf" d="M366.2 396.9L390.4 392.8L412.7 402.5L387.8 419.1Z"></path>
+<path fill="#d0d0d4" d="M438.2 387.0L464.5 380.0L484.7 391.5L458.8 396.5Z"></path>
+<path fill="#d5d5d9" d="M605.7 417.1L635.6 404.1L650.9 415.9L621.2 423.7Z"></path>
+<path fill="#dadade" d="M558.2 389.1L587.5 383.7L605.7 417.1L575.7 407.1Z"></path>
+<path fill="#c7c7cb" d="M390.4 392.8L415.5 391.4L438.2 387.0L412.7 402.5Z"></path>
+<path fill="#bbbbbf" d="M511.8 390.9L540.1 380.0L558.2 389.1L530.2 388.3Z"></path>
+<path fill="#d8d8dc" d="M343.9 371.8L367.8 369.5L390.4 392.8L366.2 396.9Z"></path>
+<path fill="#d3d3d7" d="M464.5 380.0L491.9 372.5L511.8 390.9L484.7 391.5Z"></path>
+<path fill="#e0e0e4" d="M635.6 404.1L664.9 374.9L679.9 391.1L650.9 415.9Z"></path>
+<path fill="#e8e8ec" d="M587.5 383.7L617.5 369.3L635.6 404.1L605.7 417.1Z"></path>
+<path fill="#dcdce0" d="M540.1 380.0L569.0 355.1L587.5 383.7L558.2 389.1Z"></path>
+<path fill="#b4b4b8" d="M415.5 391.4L442.4 383.4L464.5 380.0L438.2 387.0Z"></path>
+<path fill="#e5e5e9" d="M664.9 374.9L695.5 351.5L709.5 366.3L679.9 391.1Z"></path>
+<path fill="#e6e6ea" d="M491.9 372.5L520.5 353.9L540.1 380.0L511.8 390.9Z"></path>
+<path fill="#c1c1c5" d="M367.8 369.5L392.2 378.2L415.5 391.4L390.4 392.8Z"></path>
+<path fill="#c2c2c6" d="M318.1 365.5L342.3 361.8L367.8 369.5L343.9 371.8Z"></path>
+<path fill="#e5e5e9" d="M617.5 369.3L648.9 356.8L664.9 374.9L635.6 404.1Z"></path>
+<path fill="#ececf0" d="M569.0 355.1L598.7 331.9L617.5 369.3L587.5 383.7Z"></path>
+<path fill="#d5d5d9" d="M695.5 351.5L729.5 344.0L742.3 356.3L709.5 366.3Z"></path>
+<path fill="#c4c4c8" d="M442.4 383.4L470.9 357.1L491.9 372.5L464.5 380.0Z"></path>
+<path fill="#ebebef" d="M520.5 353.9L549.9 329.8L569.0 355.1L540.1 380.0Z"></path>
+<path fill="#d2d2d6" d="M648.9 356.8L682.8 353.6L695.5 351.5L664.9 374.9Z"></path>
+<path fill="#e0e0e4" d="M470.9 357.1L500.0 320.0L520.5 353.9L491.9 372.5Z"></path>
+<path fill="#dadade" d="M598.7 331.9L631.0 327.6L648.9 356.8L617.5 369.3Z"></path>
+<path fill="#cbcbcf" d="M392.2 378.2L418.9 376.6L442.4 383.4L415.5 391.4Z"></path>
+<path fill="#bfbfc3" d="M342.3 361.8L367.6 360.6L392.2 378.2L367.8 369.5Z"></path>
+<path fill="#e6e6ea" d="M549.9 329.8L580.7 315.8L598.7 331.9L569.0 355.1Z"></path>
+<path fill="#bdbdc1" d="M291.5 351.4L314.6 356.2L342.3 361.8L318.1 365.5Z"></path>
+<path fill="#ececf0" d="M500.0 320.0L529.7 295.4L549.9 329.8L520.5 353.9Z"></path>
+<path fill="#d7d7db" d="M418.9 376.6L448.2 349.2L470.9 357.1L442.4 383.4Z"></path>
+<path fill="#adadb1" d="M682.8 353.6L718.8 350.7L729.5 344.0L695.5 351.5Z"></path>
+<path fill="#c0c0c4" d="M580.7 315.8L614.1 318.2L631.0 327.6L598.7 331.9Z"></path>
+<path fill="#d5d5d9" d="M448.2 349.2L478.3 309.8L500.0 320.0L470.9 357.1Z"></path>
+<path fill="#bbbbbf" d="M631.0 327.6L667.2 340.1L682.8 353.6L648.9 356.8Z"></path>
+<path fill="#cfcfd3" d="M529.7 295.4L561.3 297.0L580.7 315.8L549.9 329.8Z"></path>
+<path fill="#e0e0e4" d="M367.6 360.6L395.2 347.0L418.9 376.6L392.2 378.2Z"></path>
+<path fill="#d8d8dc" d="M478.3 309.8L508.8 284.8L529.7 295.4L500.0 320.0Z"></path>
+<path fill="#c0c0c4" d="M314.6 356.2L340.5 350.9L367.6 360.6L342.3 361.8Z"></path>
+<path fill="#cfcfd3" d="M263.4 335.0L287.6 330.4L314.6 356.2L291.5 351.4Z"></path>
+<path fill="#ececf0" d="M395.2 347.0L424.8 321.0L448.2 349.2L418.9 376.6Z"></path>
+<path fill="#b9b9bd" d="M508.8 284.8L540.9 283.9L561.3 297.0L529.7 295.4Z"></path>
+<path fill="#adadb1" d="M614.1 318.2L650.4 325.8L667.2 340.1L631.0 327.6Z"></path>
+<path fill="#d9d9dd" d="M340.5 350.9L369.6 325.7L395.2 347.0L367.6 360.6Z"></path>
+<path fill="#eaeaee" d="M424.8 321.0L455.0 299.7L478.3 309.8L448.2 349.2Z"></path>
+<path fill="#a7a7ab" d="M561.3 297.0L596.2 314.2L614.1 318.2L580.7 315.8Z"></path>
+<path fill="#b5b5b9" d="M667.2 340.1L705.5 347.7L718.8 350.7L682.8 353.6Z"></path>
+<path fill="#e2e2e6" d="M287.6 330.4L314.1 318.7L340.5 350.9L314.6 356.2Z"></path>
+<path fill="#c0c0c4" d="M229.7 337.2L257.3 313.6L287.6 330.4L263.4 335.0Z"></path>
+<path fill="#e7e7eb" d="M369.6 325.7L399.8 295.9L424.8 321.0L395.2 347.0Z"></path>
+<path fill="#c1c1c5" d="M455.0 299.7L486.1 294.3L508.8 284.8L478.3 309.8Z"></path>
+<path fill="#e9e9ed" d="M314.1 318.7L342.7 299.7L369.6 325.7L340.5 350.9Z"></path>
+<path fill="#e0e0e4" d="M399.8 295.9L430.0 283.2L455.0 299.7L424.8 321.0Z"></path>
+<path fill="#e1e1e5" d="M257.3 313.6L287.0 281.4L314.1 318.7L287.6 330.4Z"></path>
+<path fill="#c8c8cc" d="M650.4 325.8L688.1 322.2L705.5 347.7L667.2 340.1Z"></path>
+<path fill="#ababaf" d="M540.9 283.9L575.8 293.2L596.2 314.2L561.3 297.0Z"></path>
+<path fill="#a5a5a9" d="M596.2 314.2L633.4 321.5L650.4 325.8L614.1 318.2Z"></path>
+<path fill="#96969a" d="M486.1 294.3L519.3 294.9L540.9 283.9L508.8 284.8Z"></path>
+<path fill="#e0e0e4" d="M342.7 299.7L371.8 287.0L399.8 295.9L369.6 325.7Z"></path>
+<path fill="#e9e9ed" d="M287.0 281.4L315.7 260.5L342.7 299.7L314.1 318.7Z"></path>
+<path fill="#b6b6ba" d="M430.0 283.2L461.2 289.1L486.1 294.3L455.0 299.7Z"></path>
+<path fill="#b4b4b8" d="M371.8 287.0L401.6 286.9L430.0 283.2L399.8 295.9Z"></path>
+<path fill="#c4c4c8" d="M633.4 321.5L670.9 306.0L688.1 322.2L650.4 325.8Z"></path>
+<path fill="#c6c6ca" d="M575.8 293.2L612.9 293.3L633.4 321.5L596.2 314.2Z"></path>
+<path fill="#c8c8cc" d="M315.7 260.5L342.7 264.8L371.8 287.0L342.7 299.7Z"></path>
+<path fill="#a1a1a5" d="M519.3 294.9L554.4 283.2L575.8 293.2L540.9 283.9Z"></path>
+<path fill="#a9a9ad" d="M461.2 289.1L495.0 292.2L519.3 294.9L486.1 294.3Z"></path>
+<path fill="#9f9fa3" d="M401.6 286.9L433.6 287.0L461.2 289.1L430.0 283.2Z"></path>
+<path fill="#dedee2" d="M612.9 293.3L651.6 281.7L670.9 306.0L633.4 321.5Z"></path>
+<path fill="#d2d2d6" d="M554.4 283.2L590.8 258.2L612.9 293.3L575.8 293.2Z"></path>
+<path fill="#a6a6aa" d="M342.7 264.8L370.6 283.6L401.6 286.9L371.8 287.0Z"></path>
+<path fill="#bfbfc3" d="M495.0 292.2L531.1 273.6L554.4 283.2L519.3 294.9Z"></path>
+<path fill="#e6e6ea" d="M590.8 258.2L629.3 239.0L651.6 281.7L612.9 293.3Z"></path>
+<path fill="#bcbcc0" d="M433.6 287.0L468.6 270.0L495.0 292.2L461.2 289.1Z"></path>
+<path fill="#d1d1d5" d="M531.1 273.6L568.5 241.1L590.8 258.2L554.4 283.2Z"></path>
+<path fill="#a6a6aa" d="M370.6 283.6L402.9 286.7L433.6 287.0L401.6 286.9Z"></path>
+<path fill="#e3e3e7" d="M468.6 270.0L505.4 238.6L531.1 273.6L495.0 292.2Z"></path>
+<path fill="#d8d8dc" d="M568.5 241.1L607.8 216.4L629.3 239.0L590.8 258.2Z"></path>
+<path fill="#e9e9ed" d="M505.4 238.6L543.8 212.0L568.5 241.1L531.1 273.6Z"></path>
+<path fill="#c0c0c4" d="M402.9 286.7L439.5 257.3L468.6 270.0L433.6 287.0Z"></path>
+<path fill="#d5d5d9" d="M439.5 257.3L477.8 213.1L505.4 238.6L468.6 270.0Z"></path>
+<path fill="#d5d5d9" d="M543.8 212.0L584.9 200.3L607.8 216.4L568.5 241.1Z"></path>
+<path fill="#e2e2e6" d="M477.8 213.1L517.1 181.2L543.8 212.0L505.4 238.6Z"></path>
+<path fill="#d7d7db" d="M517.1 181.2L558.9 166.4L584.9 200.3L543.8 212.0Z"></path>
+      </g>
+      <path class="edges" d="M229.7 337.2L263.4 335.0L291.5 351.4L318.1 365.5L343.9 371.8L366.2 396.9L387.8 419.1L409.5 422.9L429.4 434.8L448.5 443.5L466.8 436.6M257.3 313.6L287.6 330.4L314.6 356.2L342.3 361.8L367.8 369.5L390.4 392.8L412.7 402.5L433.7 410.4L453.1 430.4L472.0 434.4L489.8 430.9M287.0 281.4L314.1 318.7L340.5 350.9L367.6 360.6L392.2 378.2L415.5 391.4L438.2 387.0L458.8 396.5L478.1 412.2L496.4 413.6L513.7 424.6M315.7 260.5L342.7 299.7L369.6 325.7L395.2 347.0L418.9 376.6L442.4 383.4L464.5 380.0L484.7 391.5L503.7 394.3L521.4 394.3L538.4 415.0M342.7 264.8L371.8 287.0L399.8 295.9L424.8 321.0L448.2 349.2L470.9 357.1L491.9 372.5L511.8 390.9L530.2 388.3L547.5 392.5L564.3 410.3M370.6 283.6L401.6 286.9L430.0 283.2L455.0 299.7L478.3 309.8L500.0 320.0L520.5 353.9L540.1 380.0L558.2 389.1L575.7 407.1L591.9 416.3M402.9 286.7L433.6 287.0L461.2 289.1L486.1 294.3L508.8 284.8L529.7 295.4L549.9 329.8L569.0 355.1L587.5 383.7L605.7 417.1L621.2 423.7M439.5 257.3L468.6 270.0L495.0 292.2L519.3 294.9L540.9 283.9L561.3 297.0L580.7 315.8L598.7 331.9L617.5 369.3L635.6 404.1L650.9 415.9M477.8 213.1L505.4 238.6L531.1 273.6L554.4 283.2L575.8 293.2L596.2 314.2L614.1 318.2L631.0 327.6L648.9 356.8L664.9 374.9L679.9 391.1M517.1 181.2L543.8 212.0L568.5 241.1L590.8 258.2L612.9 293.3L633.4 321.5L650.4 325.8L667.2 340.1L682.8 353.6L695.5 351.5L709.5 366.3M558.9 166.4L584.9 200.3L607.8 216.4L629.3 239.0L651.6 281.7L670.9 306.0L688.1 322.2L705.5 347.7L718.8 350.7L729.5 344.0L742.3 356.3M229.7 337.2L257.3 313.6L287.0 281.4L315.7 260.5L342.7 264.8L370.6 283.6L402.9 286.7L439.5 257.3L477.8 213.1L517.1 181.2L558.9 166.4M263.4 335.0L287.6 330.4L314.1 318.7L342.7 299.7L371.8 287.0L401.6 286.9L433.6 287.0L468.6 270.0L505.4 238.6L543.8 212.0L584.9 200.3M291.5 351.4L314.6 356.2L340.5 350.9L369.6 325.7L399.8 295.9L430.0 283.2L461.2 289.1L495.0 292.2L531.1 273.6L568.5 241.1L607.8 216.4M318.1 365.5L342.3 361.8L367.6 360.6L395.2 347.0L424.8 321.0L455.0 299.7L486.1 294.3L519.3 294.9L554.4 283.2L590.8 258.2L629.3 239.0M343.9 371.8L367.8 369.5L392.2 378.2L418.9 376.6L448.2 349.2L478.3 309.8L508.8 284.8L540.9 283.9L575.8 293.2L612.9 293.3L651.6 281.7M366.2 396.9L390.4 392.8L415.5 391.4L442.4 383.4L470.9 357.1L500.0 320.0L529.7 295.4L561.3 297.0L596.2 314.2L633.4 321.5L670.9 306.0M387.8 419.1L412.7 402.5L438.2 387.0L464.5 380.0L491.9 372.5L520.5 353.9L549.9 329.8L580.7 315.8L614.1 318.2L650.4 325.8L688.1 322.2M409.5 422.9L433.7 410.4L458.8 396.5L484.7 391.5L511.8 390.9L540.1 380.0L569.0 355.1L598.7 331.9L631.0 327.6L667.2 340.1L705.5 347.7M429.4 434.8L453.1 430.4L478.1 412.2L503.7 394.3L530.2 388.3L558.2 389.1L587.5 383.7L617.5 369.3L648.9 356.8L682.8 353.6L718.8 350.7M448.5 443.5L472.0 434.4L496.4 413.6L521.4 394.3L547.5 392.5L575.7 407.1L605.7 417.1L635.6 404.1L664.9 374.9L695.5 351.5L729.5 344.0M466.8 436.6L489.8 430.9L513.7 424.6L538.4 415.0L564.3 410.3L591.9 416.3L621.2 423.7L650.9 415.9L679.9 391.1L709.5 366.3L742.3 356.3"></path>
+    </g>
+    </sc-if>
+  </svg>
+
+  <div class="hdr" role="toolbar" aria-label="Viewport header">
+    <div class="hgrp" role="group" aria-label="Selection mode">
+    <button class="hb {{mObj}}" type="button" title="Object mode (1)" aria-label="Object mode (1)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M8 1.5l5.5 2.8v7.4L8 14.5l-5.5-2.8V4.3z"/><path d="M2.5 4.3L8 7.2l5.5-2.9M8 7.2v7.3"/></svg></button>
+    <button class="hb {{mPt}}" type="button" title="Points (2)" aria-label="Points (2)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M4 4h8v8H4z" opacity=".35"/><circle cx="4" cy="4" r="1.7" fill="currentColor"/><circle cx="12" cy="4" r="1.7" fill="currentColor"/><circle cx="4" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/></svg></button>
+    <button class="hb {{mEd}}" type="button" title="Edges (3)" aria-label="Edges (3)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M3 3h10v10H3z" opacity=".4"/><path d="M3 13V3h10" stroke-width="2.2"/></svg></button>
+    <button class="hb {{mFc}}" type="button" title="Faces (4)" aria-label="Faces (4)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M3 3h10v10H3z" fill="currentColor" fill-opacity=".4"/></svg></button>
+    </div>
+    <span class="hsep"></span>
+    <button class="hb " type="button" title="Transform orientation" aria-label="Transform orientation"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M4 12V3M4 12h9M4 12l-2.2 2.2"/></svg><span>Global</span><svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M1.5 3l2.5 2.5L6.5 3"/></svg></button>
+    <button class="hb " type="button" title="Pivot point" aria-label="Pivot point"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M8 2v12M2 8h12"/><circle cx="8" cy="8" r="2.4" fill="var(--pbg)"/></svg><svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M1.5 3l2.5 2.5L6.5 3"/></svg></button>
+    <button class="hb {{snapCls}}" type="button" title="Snapping (Shift+Tab)" aria-label="Snapping (Shift+Tab)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M4 2v6a4 4 0 008 0V2H9.5v6a1.5 1.5 0 01-3 0V2z"/></svg><span class="mono" style="font-size:11px;color:var(--pdim)">{{snapTxt}}</span><svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M1.5 3l2.5 2.5L6.5 3"/></svg></button>
+    <button class="hb {{propCls}}" type="button" title="Proportional editing (O)" aria-label="Proportional editing (O)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="2" fill="currentColor"/><circle cx="8" cy="8" r="6"/></svg><svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M1.5 3l2.5 2.5L6.5 3"/></svg></button>
+    <div style="flex:1"></div>
+    <button class="hb {{ovCls}}" type="button" title="Overlays" aria-label="Overlays"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><circle cx="6" cy="8" r="3.6"/><circle cx="10" cy="8" r="3.6"/></svg><svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M1.5 3l2.5 2.5L6.5 3"/></svg></button>
+    <button class="hb " type="button" title="X-ray (Alt+Z)" aria-label="X-ray (Alt+Z)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M3 3h8v8H3z" stroke-dasharray="2 2"/><path d="M6 6h7v7H6z"/></svg></button>
+    <span class="hsep"></span>
+    <div class="hgrp" role="group" aria-label="Shading">
+    <button class="hb {{sSol}}" type="button" title="Solid" aria-label="Solid"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="currentColor"/></svg></button>
+    <button class="hb {{sSha}}" type="button" title="Shaded" aria-label="Shaded"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 010 11z" fill="currentColor"/></svg></button>
+    <button class="hb {{sWir}}" type="button" title="Wire" aria-label="Wire"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/><ellipse cx="8" cy="8" rx="5.5" ry="2.2"/><path d="M8 2.5v11"/></svg></button>
+    <button class="hb {{sSW}}" type="button" title="Shaded + Wire" aria-label="Shaded + Wire"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="currentColor" fill-opacity=".45"/><ellipse cx="8" cy="8" rx="5.5" ry="2.2"/><path d="M8 2.5v11"/></svg></button>
+    </div>
+    <span class="hsep"></span>
+    <button class="hb " type="button" title="Frame the mesh (F)" aria-label="Frame the mesh (F)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M1.5 4.5V1.5h3M11.5 1.5h3v3M14.5 11.5v3h-3M4.5 14.5h-3v-3"/><rect x="5.5" y="5.5" width="5" height="5" rx=".6"/></svg></button>
+  </div>
+
+  <div class="chip tools" style="left: 12px; top: 48px" role="toolbar" aria-label="Viewport tools" aria-orientation="vertical">
+    <button class="tbtn {{tSel}}" type="button" title="Select (Q)" aria-label="Select (Q)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M4 2l8 5.6-3.7.9 2.2 3.7-1.6.9-2.2-3.7L4 12.6z"></path></svg></button>
+    <button class="tbtn {{tCur}}" type="button" title="3D cursor (C)" aria-label="3D cursor (C)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"></circle><path d="M8 1.5v3M8 11.5v3M1.5 8h3M11.5 8h3"></path></svg></button>
+    <div class="tsep"></div>
+    <button class="tbtn {{tMov}}" type="button" title="Move (W)" aria-label="Move (W)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M8 1.5v13M1.5 8h13M8 1.5l-2 2M8 1.5l2 2M8 14.5l-2-2M8 14.5l2-2M1.5 8l2-2M1.5 8l2 2M14.5 8l-2-2M14.5 8l-2 2"></path></svg></button>
+    <button class="tbtn {{tRot}}" type="button" title="Rotate (E)" aria-label="Rotate (E)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M13 8a5 5 0 11-1.8-3.8M13 2.5v3h-3"></path></svg></button>
+    <button class="tbtn {{tScl}}" type="button" title="Scale (R)" aria-label="Scale (R)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><rect x="2" y="7" width="7" height="7" rx=".6"></rect><path d="M7 9l7-7M9.5 2H14v4.5"></path></svg></button>
+    <button class="tbtn {{tXfm}}" type="button" title="Transform (T)" aria-label="Transform (T)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9"></rect><rect x="1.5" y="1.5" width="3" height="3" fill="currentColor"></rect><rect x="11.5" y="1.5" width="3" height="3" fill="currentColor"></rect><rect x="1.5" y="11.5" width="3" height="3" fill="currentColor"></rect><rect x="11.5" y="11.5" width="3" height="3" fill="currentColor"></rect></svg></button>
+    <div class="tsep"></div>
+    <button class="tbtn {{tMea}}" type="button" title="Measure (M)" aria-label="Measure (M)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M1.5 11.5l10-10 3 3-10 10z"></path><path d="M4 9l1.5 1.5M6.5 6.5L8 8M9 4l1.5 1.5"></path></svg></button>
+  </div>
+
+  <sc-if value="{{popover}}" hint-placeholder-val="{{ false }}">
+  <div class="chip" style="right: 80px; top: 40px; width: 232px; flex-direction: column; align-items: stretch; gap: 0; padding: 8px 12px 10px">
+    <div style="font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--pdim);padding:2px 0 6px">Overlays</div>
+    <sc-for list="{{ovs}}" as="o" hint-placeholder-count="6">
+      <div class="chk {{o.cls}}">
+        <span class="box"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#fff" stroke-width="1.8" aria-hidden="true" style="display:{{o.tick}}"><path d="M1.8 5.2l2.2 2.2 4.2-4.6"></path></svg></span>
+        <span>{{o.label}}</span>
+        <span class="k mono">{{o.key}}</span>
+      </div>
+    </sc-for>
+    <div style="border-top:1px solid var(--pstroke);margin-top:8px;padding-top:8px;color:var(--pdim);font-size:11px;line-height:1.4">Edges fade out above 40,000 prims to keep the view readable.</div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{showError}}" hint-placeholder-val="{{ false }}">
+  <div class="chip {{bnCls}}" style="left: 56px; top: 48px; max-width: calc(100% - 68px); padding: 8px 12px; align-items: flex-start">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--bnc)" stroke-width="1.6" aria-hidden="true" style="flex:none;margin-top:1px"><circle cx="8" cy="8" r="6.5"></circle><path d="M8 4.5v4M8 11v.5"></path></svg>
+    <div style="line-height:1.4"><span style="font-weight:600">{{errTitle}} <span class="mono">{{errNode}}</span>.</span> <span style="color:var(--pdim)">Showing the last good mesh.</span><br><span class="mono" style="font-size:11px">{{errText}}</span></div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{showDense}}" hint-placeholder-val="{{ false }}">
+  <div class="chip" style="left: 56px; bottom: calc(44px + var(--tlh)); padding: 7px 12px; border-color: var(--pwarn); background: var(--pwarnbg); max-width: calc(100% - 184px)">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--pwarn)" stroke-width="1.6" aria-hidden="true" style="flex:none"><path d="M8 1.8l6.5 11.4h-13z"></path><path d="M8 6.5v3M8 11.2v.4"></path></svg>
+    <span style="line-height:1.35">Mesh is dense. Edges are fading out. Zoom in or lower rows and columns to see them.</span>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{showEmpty}}" hint-placeholder-val="{{ false }}">
+  <div style="position:absolute;left:0;right:0;top:0;bottom:0;display:flex;align-items:center;justify-content:center;padding:0 24px">
+    <div style="text-align:center;display:flex;flex-direction:column;gap:10px;align-items:center;max-width:300px">
+      <div style="font-size:15px;font-weight:600">No file open</div>
+      <div style="color:var(--pdim);line-height:1.45">Open a MiniHou graph to see its geometry here, or start from a Grid node.</div>
+      <button class="ibtn on" type="button" style="margin-top:4px;height:30px">Open file <span class="mono" style="color:var(--pdim)">Ctrl+O</span></button>
+    </div>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{stats}}" hint-placeholder-val="{{ true }}">
+  <div class="chip mono" style="left: 12px; bottom: calc(12px + var(--tlh)); padding: 5px 10px; font-size: 11px; gap: 14px">
+    <span><span style="color:var(--pdim)">Points</span> {{pts}}</span>
+    <span><span style="color:var(--pdim)">Prims</span> {{prims}}</span>
+    <span><span style="color:var(--pdim)">Cook</span> {{ms}}</span>
+  </div>
+  </sc-if>
+
+  <sc-if value="{{timeline}}" hint-placeholder-val="{{ true }}">
+  <div class="tl" role="region" aria-label="Timeline">
+    <div class="hgrp">
+      <button class="hb " type="button" title="Jump to start" aria-label="Jump to start"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M3.5 3v10M13 3.5v9L6 8z"/></svg></button>
+      <button class="hb " type="button" title="Previous frame" aria-label="Previous frame"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M12 3.5v9L5 8z"/></svg></button>
+      <button class="hb on" type="button" title="Play (Space)" aria-label="Play (Space)"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M5 3v10l8-5z" fill="currentColor"/></svg></button>
+      <button class="hb " type="button" title="Next frame" aria-label="Next frame"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M4 3.5v9L11 8z"/></svg></button>
+      <button class="hb " type="button" title="Jump to end" aria-label="Jump to end"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round" aria-hidden="true"><path d="M12.5 3v10M3 3.5v9L10 8z"/></svg></button>
+    </div>
+    <span class="mono" style="color:var(--pdim);font-size:11px">Frame</span><span class="val">{{frame}}</span>
+    <div class="tlbar" aria-hidden="true"><i class="tlkf" style="left:0%"></i><i class="tlkf" style="left:35%"></i><i class="tlkf" style="left:70%"></i><i class="tlph" style="left:{{phPct}}%"></i></div>
+    <span class="mono" style="color:var(--pdim);font-size:11px;white-space:nowrap">Start <span style="color:var(--ptext)">1</span>  End <span style="color:var(--ptext)">240</span>  <span style="color:var(--ptext)">24</span> fps</span>
+  </div>
+  </sc-if>
+
+  <svg width="76" height="64" viewBox="0 0 76 64" style="position:absolute;right:10px;bottom:calc(10px + var(--tlh))" role="img" aria-label="Axis gizmo: X red, Y green, Z blue">
+    <g stroke-width="2.4" stroke-linecap="round">
+      <path d="M38 36L58 29" stroke="var(--xax)"></path>
+      <path d="M38 36L38 15" stroke="var(--yax)"></path>
+      <path d="M38 36L25 45" stroke="var(--zax)"></path>
+    </g>
+    <circle cx="38" cy="36" r="2.5" fill="var(--pdim)"></circle>
+    <g font-family="IBM Plex Mono, monospace" font-size="10" font-weight="500" text-anchor="middle">
+      <text x="66" y="30" fill="var(--xax)">X</text>
+      <text x="38" y="11" fill="var(--yax)">Y</text>
+      <text x="18" y="52" fill="var(--zax)">Z</text>
+    </g>
+  </svg>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"w":{"editor":"int","default":920,"min":300,"max":2000},"h":{"editor":"int","default":580,"min":240,"max":1400},"theme":{"editor":"enum","default":"dark","options":["dark","light"]},"shading":{"editor":"enum","default":"shaded_wire","options":["solid","shaded","wire","shaded_wire"]},"mode":{"editor":"enum","default":"normal","options":["normal","empty","error"]},"tool":{"editor":"enum","default":"select","options":["select","cursor","move","rotate","scale","transform","measure"]},"popover":{"editor":"boolean","default":true},"timeline":{"editor":"boolean","default":true},"selmode":{"editor":"enum","default":"object","options":["object","points","edges","faces"]},"snap":{"editor":"boolean","default":false},"prop":{"editor":"boolean","default":false},"stats":{"editor":"boolean","default":true},"dense":{"editor":"boolean","default":false},"$preview":{"width":920,"height":580}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const p = this.props;
+    const b = (v, d) => (v === undefined || v === null ? d : v === true || v === 'true');
+    const theme = p.theme === 'light' ? 'light' : 'dark';
+    const shading = p.shading || 'shaded_wire';
+    const mode = p.mode || 'normal';
+    const dense = b(p.dense, false);
+    const popover = b(p.popover, true);
+    const tool = p.tool || 'select';
+    const sel = p.selmode || 'object';
+    const timeline = b(p.timeline, true);
+    const snap = b(p.snap, false), prop = b(p.prop, false);
+    const on = (k) => (tool === k ? 'on' : '');
+    const segDefs = [['solid', 'Solid'], ['shaded', 'Shaded'], ['wire', 'Wire'], ['shaded_wire', 'Shaded + Wire']];
+    const wireOn = shading === 'wire' || shading === 'shaded_wire';
+    const ovDefs = [
+      ['Grid floor', true, 'G'],
+      ['Axis gizmo', true, ''],
+      ['Wireframe overlay', wireOn, 'W'],
+      ['Stats', b(p.stats, true), 'I'],
+      ['Normals', false, 'N'],
+      ['Bounding box', false, 'B']
+    ];
+    return {
+      errNode: p.errNode || 'noise1',
+      errTitle: p.errTitle || 'Cook failed at',
+      errText: p.errText || 'ValueError: frequency must be greater than 0',
+      bnCls: p.tone === 'warn' ? 'bn-warn' : 'bn-err',
+      w: p.w ?? 920,
+      h: p.h ?? 580,
+      themeClass: theme === 'light' ? 'vp-light' : 'vp-dark',
+      shadeClass: 'sh-' + (shading === 'shaded_wire' ? 'sw' : shading),
+      stateClass: (dense ? 'dense ' : '') + (mode === 'error' ? 'err' : ''),
+      showMesh: mode !== 'empty',
+      showError: mode === 'error',
+      showEmpty: mode === 'empty',
+      showDense: dense && mode === 'normal',
+      popover: popover,
+      timeline: timeline, tlClass: timeline ? 'has-tl' : '', frame: '48', phPct: 20,
+      mObj: sel === 'object' ? 'on' : '', mPt: sel === 'points' ? 'on' : '', mEd: sel === 'edges' ? 'on' : '', mFc: sel === 'faces' ? 'on' : '',
+      snapCls: snap ? 'on' : '', snapTxt: snap ? '0.25' : '', propCls: prop ? 'on' : '',
+      sSol: shading === 'solid' ? 'on' : '', sSha: shading === 'shaded' ? 'on' : '', sWir: shading === 'wire' ? 'on' : '', sSW: shading === 'shaded_wire' ? 'on' : '',
+      tSel: on('select'), tCur: on('cursor'), tMov: on('move'), tRot: on('rotate'), tScl: on('scale'), tXfm: on('transform'), tMea: on('measure'),
+      stats: b(p.stats, true) && mode !== 'empty',
+      ovCls: popover ? 'on' : '',
+      pts: dense ? '263,169' : '9,409',
+      prims: dense ? '262,144' : '9,025',
+      ms: dense ? '41 ms' : '3.2 ms',
+      segs: segDefs.map(([k, label]) => ({ label, cls: k === shading ? 'on' : '' })),
+      ovs: ovDefs.map(([label, on, key]) => ({ label, key, cls: on ? 'on' : '', tick: on ? 'block' : 'none' }))
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Node card states</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+.ws-dark{--base:#1b1d21;--grid:#212429;--panel:#23262b;--panel2:#2b2f35;--input:#181a1e;--stroke:#3a3f47;--stroke2:#555c67;--text:#d8dce2;--dim:#9aa1ab;--faint:#6f7681;--accent:#4f9cf0;--accentbg:#243a57;--card:#2e323a;--sel:#f2f4f7;--wire:#6b727e;--c-src:#3fb59a;--c-mod:#8b7cf0;--c-attr:#9bb84a;--c-comb:#d4688a;--c-out:#8693a3;--ok:#4cb782;--okbg:#1d3a2e;--warn:#e8a23a;--warnbg:#3a2f1d;--err:#ef5b52;--errbg:#3b2224;--tpl:#5bb8c9}
+.ws{width:1200px;height:900px;background:var(--panel);color:var(--text);font:400 12px/1.35 'IBM Plex Sans',system-ui,sans-serif;box-sizing:border-box;padding:28px 32px;display:flex;flex-direction:column;gap:22px;overflow:hidden}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+h1{margin:0;font:600 20px 'IBM Plex Sans',system-ui,sans-serif}
+h2{margin:0 0 10px;font:600 11px 'IBM Plex Sans',system-ui,sans-serif;letter-spacing:.07em;text-transform:uppercase;color:var(--dim)}
+.cv{background-color:var(--base);background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:32px 32px;border:1px solid var(--stroke);border-radius:6px;box-sizing:border-box}
+.node{position:absolute;left:6px;top:10px;width:220px;height:56px;box-sizing:border-box;background:var(--card);border:1px solid var(--stroke2);border-radius:6px;padding:0;display:flex}
+.face{flex:1;min-width:0;padding:7px 10px;display:flex;flex-direction:column;justify-content:space-between}
+.node.sel{outline:2px solid var(--sel);outline-offset:2px}
+.node.disp{background:var(--accentbg);border-color:var(--accent)}
+.node.mute{background:var(--panel);border:1px dashed var(--stroke)}
+.node.mute .face{opacity:.55}
+.node.mute .nid,.node.mute .ntype,.node.mute .nt{color:var(--faint)}
+.node.mute .cat{background:var(--faint)!important}
+.node.mute .tag{border-color:var(--stroke);color:var(--faint);background:transparent}
+.node.err{border-color:var(--err);background:var(--errbg)}
+.node.unsup{border:1px dashed var(--warn);background:var(--panel)}
+.node.tpl{border:1px dashed var(--tpl)}
+.node.cook{border-color:var(--accent)}
+.r1,.r2{display:flex;align-items:center;gap:7px;min-width:0}
+.cat{width:10px;height:10px;border-radius:2px;flex:none}
+.nid{font:600 12.5px 'IBM Plex Mono',ui-monospace,monospace;flex:1;white-space:nowrap}
+.ntype{color:var(--dim);font-size:11px;flex:1;white-space:nowrap}
+.nt{font:400 11px 'IBM Plex Mono',ui-monospace,monospace;color:var(--dim)}
+.nt.bad{color:var(--err)}
+.nt.slow{color:var(--warn)}
+.tag{font:500 10px 'IBM Plex Mono',ui-monospace,monospace;padding:0 5px;border-radius:3px;border:1px solid var(--stroke2);color:var(--dim);line-height:15px}
+.tag:empty{display:none}
+.tag.rs{color:var(--ok);border-color:var(--ok);background:var(--okbg)}
+.tag.pys{color:var(--warn);border-color:var(--warn);background:var(--warnbg)}
+.port{position:absolute;left:50%;margin-left:-5px;width:10px;height:10px;box-sizing:border-box;border-radius:50%;background:var(--base);border:1.5px solid var(--stroke2)}
+.port.in{top:-6px}
+.port.out{bottom:-6px}
+.ftab{width:20px;flex:none;display:flex;flex-direction:column}
+.ftab.l{border-right:1px solid var(--stroke)}
+.ftab.r{border-left:1px solid var(--stroke)}
+.flag{flex:1;box-sizing:border-box;display:flex;align-items:center;justify-content:center;opacity:.5;color:var(--dim)}
+.flag+.flag{border-top:1px solid var(--stroke)}
+.ftab.l .flag:first-child{border-top-left-radius:5px}.ftab.l .flag:last-child{border-bottom-left-radius:5px}
+.ftab.r .flag:first-child{border-top-right-radius:5px}.ftab.r .flag:last-child{border-bottom-right-radius:5px}
+.node.sel .flag{opacity:.85}
+.flag.on{opacity:1;color:#fff}
+.f-d.on{background:var(--accent)}
+.f-t.on{background:var(--tpl)}
+.f-b.on{background:var(--warn)}
+.f-l.on{background:var(--dim)}
+.errmsg{position:absolute;left:18px;top:62px;width:184px;box-sizing:border-box;padding:3px 8px;border-radius:4px;border:1px solid var(--err);background:var(--errbg);font:400 11px/1.3 'IBM Plex Mono',ui-monospace,monospace}
+.cell{display:flex;flex-direction:column;gap:2px}
+.cap{font-weight:600;font-size:12px}
+.sub{color:var(--dim);font-size:11px;line-height:1.35}
+.slot{position:relative;height:100px;width:230px}
+.progress{position:absolute;left:1px;right:1px;bottom:1px;height:2px;border-radius:0 0 5px 5px;background:var(--stroke)}
+.progress i{display:block;width:38%;height:100%;background:var(--accent);margin-left:30%}
+.badge{position:absolute;width:18px;height:18px;border-radius:9px;background:var(--accent);color:#0c1624;font:600 11px/18px 'IBM Plex Sans',system-ui,sans-serif;text-align:center;margin:-9px 0 0 -9px}
+.leg{display:grid;grid-template-columns:18px 1fr;gap:4px 8px;font-size:12px;line-height:1.35}
+.leg b{display:block;width:18px;height:18px;border-radius:9px;background:var(--accent);color:#0c1624;font:600 11px/18px 'IBM Plex Sans',system-ui,sans-serif;text-align:center}
+.tip{position:absolute;box-sizing:border-box;padding:7px 10px;border-radius:5px;background:var(--panel2);border:1px solid var(--stroke2);font-size:12px;line-height:1.4;width:250px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{animation:spin 1s linear infinite;transform-origin:50% 50%}
+@media (prefers-reduced-motion: reduce){.spin{animation:none}}
+</style>
+</helmet>
+<div class="ws ws-dark">
+  <div style="display:flex;align-items:baseline;gap:14px">
+    <h1>Node card</h1>
+    <span class="sub">184 x 56 px face plus two 20 px flag gutters at 100% zoom. Flat fill, 1px stroke, 6px radius. Every state is a stroke, fill or opacity change, so it paints with plain rect shapes.</span>
+  </div>
+
+  <div style="display:flex;gap:28px;align-items:flex-start">
+
+    <div style="width:430px;flex:none">
+      <h2>Anatomy</h2>
+      <div class="cv" style="position:relative;width:430px;height:250px">
+        <div style="position:absolute;left:48px;top:70px;zoom:1.6;width:230px;height:70px">
+          <div class="slot" style="height:70px;margin:0">
+            <div class="node" style="left:0;top:0"><span class="port in"></span><div class="ftab l"><span class="flag f-b" title="Mute"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M1 5h7M5.5 2.2L8.3 5 5.5 7.8"/></svg></span><span class="flag f-l" title="Locked"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="4.5" width="6" height="4.2" rx=".8"/><path d="M3.4 4.5V3.2a1.6 1.6 0 013.2 0v1.3"/></svg></span></div><div class="face"><div class="r1"><span class="cat" style="background:var(--c-mod)"></span><span class="nid">noise1</span><span class="tag rs">Rs</span></div><div class="r2"><span class="ntype">noise</span><span class="nt">6.8 ms</span></div></div><div class="ftab r"><span class="flag f-t" title="Template"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg></span><span class="flag f-d on" title="Visible"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M.8 5S2.4 2 5 2s4.2 3 4.2 3S7.6 8 5 8 .8 5 .8 5z"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg></span></div><span class="port out"></span></div>
+          </div>
+        </div>
+        <span class="badge" style="left:195px;top:44px">1</span>
+        <span class="badge" style="left:26px;top:100px">2</span>
+        <span class="badge" style="left:118px;top:52px">3</span>
+        <span class="badge" style="left:258px;top:52px">4</span>
+        <span class="badge" style="left:104px;top:178px">5</span>
+        <span class="badge" style="left:262px;top:178px">6</span>
+        <span class="badge" style="left:195px;top:196px">7</span>
+        <span class="badge" style="left:388px;top:140px">8</span>
+      </div>
+      <div class="leg" style="margin-top:12px">
+        <b>1</b><span>Input port, top edge. Several inputs spread evenly along it.</span>
+        <b>2</b><span>Category chip, 10 px. Colour comes from the node category.</span>
+        <b>3</b><span>Node id in mono, semibold. Never truncated: the card widens.</span>
+        <b>4</b><span>Backend tag: Rs, Py* or Py (see below).</span>
+        <b>5</b><span>Node type, dim. Hidden below 70% zoom.</span>
+        <b>6</b><span>Cook time, or the word cached, or failed.</span>
+        <b>7</b><span>Output port, bottom edge. Output nodes have none.</span>
+        <b>8</b><span>Flag gutters on both sides of the card: Mute and Locked on the left, Template and Visible on the right. Active flags are solid; inactive ones stay as faint ghosts so each one can be clicked.</span>
+      </div>
+    </div>
+
+    <div style="flex:1;min-width:0">
+      <h2>States</h2>
+      <div class="cv" style="padding:14px 16px;display:grid;grid-template-columns:repeat(3,230px);gap:6px 14px;justify-content:space-between">
+
+        <div class="cell"><span class="cap">Normal</span>
+          <div class="slot"><div class="node"><span class="port in"></span><div class="ftab l"><span class="flag f-b" title="Mute"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M1 5h7M5.5 2.2L8.3 5 5.5 7.8"/></svg></span><span class="flag f-l" title="Locked"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="4.5" width="6" height="4.2" rx=".8"/><path d="M3.4 4.5V3.2a1.6 1.6 0 013.2 0v1.3"/></svg></span></div><div class="face"><div class="r1"><span class="cat" style="background:var(--c-src)"></span><span class="nid">grid1</span><span class="tag rs">Rs</span></div><div class="r2"><span class="ntype">grid</span><span class="nt">cached</span></div></div><div class="ftab r"><span class="flag f-t" title="Template"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg></span><span class="flag f-d" title="Visible"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M.8 5S2.4 2 5 2s4.2 3 4.2 3S7.6 8 5 8 .8 5 .8 5z"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg></span></div><span class="port out"></span></div></div>
+          <span class="sub">Card fill, stroke2.</span></div>
+
+        <div class="cell"><span class="cap">Selected</span>
+          <div class="slot"><div class="node sel"><span class="port in"></span><div class="ftab l"><span class="flag f-b" title="Mute"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M1 5h7M5.5 2.2L8.3 5 5.5 7.8"/></svg></span><span class="flag f-l" title="Locked"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="4.5" width="6" height="4.2" rx=".8"/><path d="M3.4 4.5V3.2a1.6 1.6 0 013.2 0v1.3"/></svg></span></div><div class="face"><div class="r1"><span class="cat" style="background:var(--c-mod)"></span><span class="nid">noise1</span><span class="tag rs">Rs</span></div><div class="r2"><span class="ntype">noise</span><span class="nt">6.8 ms</span></div></div><div class="ftab r"><span class="flag f-t" title="Template"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg></span><span class="flag f-d" title="Visible"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M.8 5S2.4 2 5 2s4.2 3 4.2 3S7.6 8 5 8 .8 5 .8 5z"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg></span></div><span class="port out"></span></div></div>
+          <span class="sub">2px outline, 2px outside. The four flag ghosts brighten.</span></div>
+
+        <div class="cell"><span class="cap">Visible node</span>
+          <div class="slot"><div class="node disp"><span class="port in"></span><div class="ftab l"><span class="flag f-b" title="Mute"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M1 5h7M5.5 2.2L8.3 5 5.5 7.8"/></svg></span><span class="flag f-l" title="Locked"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="4.5" width="6" height="4.2" rx=".8"/><path d="M3.4 4.5V3.2a1.6 1.6 0 013.2 0v1.3"/></svg></span></div><div class="face"><div class="r1"><span class="cat" style="background:var(--c-out)"></span><span class="nid">output1</span><span class="tag">Py</span></div><div class="r2"><span class="ntype">output</span><span class="nt">0.1 ms</span></div></div><div class="ftab r"><span class="flag f-t" title="Template"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg></span><span class="flag f-d on" title="Visible"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M.8 5S2.4 2 5 2s4.2 3 4.2 3S7.6 8 5 8 .8 5 .8 5z"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg></span></div></div></div>
+          <span class="sub">Accent fill and stroke, solid blue eye (Visible flag). The node shown in the viewport; one per graph.</span></div>
+
+        <div class="cell"><span class="cap">Muted</span>
+          <div class="slot"><div class="node mute"><span class="port in"></span><div class="ftab l"><span class="flag f-b on" title="Mute"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M1 5h7M5.5 2.2L8.3 5 5.5 7.8"/></svg></span><span class="flag f-l" title="Locked"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="4.5" width="6" height="4.2" rx=".8"/><path d="M3.4 4.5V3.2a1.6 1.6 0 013.2 0v1.3"/></svg></span></div><div class="face"><div class="r1"><span class="cat" style="background:var(--c-mod)"></span><span class="nid">transform1</span></div><div class="r2"><span class="ntype">transform</span><span class="nt">muted</span></div></div><div class="ftab r"><span class="flag f-t" title="Template"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg></span><span class="flag f-d" title="Visible"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M.8 5S2.4 2 5 2s4.2 3 4.2 3S7.6 8 5 8 .8 5 .8 5z"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg></span></div><span class="port out"></span></div></div>
+          <span class="sub">Grayed out: grey fill, dashed grey stroke, faint text and chip, amber Mute flag. Input passes straight through.</span></div>
+
+        <div class="cell"><span class="cap">Error</span>
+          <div class="slot"><div class="node err"><span class="port in"></span><div class="ftab l"><span class="flag f-b" title="Mute"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M1 5h7M5.5 2.2L8.3 5 5.5 7.8"/></svg></span><span class="flag f-l" title="Locked"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="4.5" width="6" height="4.2" rx=".8"/><path d="M3.4 4.5V3.2a1.6 1.6 0 013.2 0v1.3"/></svg></span></div><div class="face"><div class="r1"><span class="cat" style="background:var(--c-mod)"></span><span class="nid">noise1</span><span class="tag pys">Py*</span></div><div class="r2"><span class="ntype">noise</span><span class="nt bad">failed</span></div></div><div class="ftab r"><span class="flag f-t" title="Template"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg></span><span class="flag f-d" title="Visible"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M.8 5S2.4 2 5 2s4.2 3 4.2 3S7.6 8 5 8 .8 5 .8 5z"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg></span></div><span class="port out"></span>
+            <div class="errmsg">ValueError: frequency must be greater than 0</div></div></div>
+          <span class="sub">Red stroke, tinted fill. The message sits under the card, never truncated mid-word.</span></div>
+
+        <div class="cell"><span class="cap">Cooking</span>
+          <div class="slot"><div class="node cook"><span class="port in"></span><div class="ftab l"><span class="flag f-b" title="Mute"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M1 5h7M5.5 2.2L8.3 5 5.5 7.8"/></svg></span><span class="flag f-l" title="Locked"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="4.5" width="6" height="4.2" rx=".8"/><path d="M3.4 4.5V3.2a1.6 1.6 0 013.2 0v1.3"/></svg></span></div><div class="face"><div class="r1"><span class="cat" style="background:var(--c-attr)"></span><span class="nid">normal1</span></div><div class="r2"><span class="ntype">normal</span>
+              <span class="nt" style="display:flex;align-items:center;gap:5px;color:var(--accent)"><svg class="spin" width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 1.5a4.5 4.5 0 104.5 4.5" stroke-linecap="round"/></svg>cooking</span></div></div><div class="ftab r"><span class="flag f-t" title="Template"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg></span><span class="flag f-d" title="Visible"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M.8 5S2.4 2 5 2s4.2 3 4.2 3S7.6 8 5 8 .8 5 .8 5z"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg></span></div><span class="port out"></span><span class="progress"><i></i></span></div></div>
+          <span class="sub">Accent stroke, spinner, indeterminate 2px bar. Shown only while the cook runs.</span></div>
+
+        <div class="cell"><span class="cap">Locked</span>
+          <div class="slot"><div class="node"><span class="port in"></span><div class="ftab l"><span class="flag f-b" title="Mute"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M1 5h7M5.5 2.2L8.3 5 5.5 7.8"/></svg></span><span class="flag f-l on" title="Locked"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="4.5" width="6" height="4.2" rx=".8"/><path d="M3.4 4.5V3.2a1.6 1.6 0 013.2 0v1.3"/></svg></span></div><div class="face"><div class="r1"><span class="cat" style="background:var(--c-src)"></span><span class="nid">grid2</span><span class="tag rs">Rs</span></div><div class="r2"><span class="ntype">grid</span><span class="nt">cached</span></div></div><div class="ftab r"><span class="flag f-t" title="Template"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg></span><span class="flag f-d" title="Visible"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M.8 5S2.4 2 5 2s4.2 3 4.2 3S7.6 8 5 8 .8 5 .8 5z"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg></span></div><span class="port out"></span></div></div>
+          <span class="sub">Grey padlock (Locked flag). Card looks normal; parameters turn read-only.</span></div>
+
+        <div class="cell"><span class="cap">Template</span>
+          <div class="slot"><div class="node tpl"><span class="port in"></span><div class="ftab l"><span class="flag f-b" title="Mute"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M1 5h7M5.5 2.2L8.3 5 5.5 7.8"/></svg></span><span class="flag f-l" title="Locked"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="4.5" width="6" height="4.2" rx=".8"/><path d="M3.4 4.5V3.2a1.6 1.6 0 013.2 0v1.3"/></svg></span></div><div class="face"><div class="r1"><span class="cat" style="background:var(--c-src)"></span><span class="nid">box1</span><span class="tag rs">Rs</span></div><div class="r2"><span class="ntype">box</span><span class="nt">2.0 ms</span></div></div><div class="ftab r"><span class="flag f-t on" title="Template"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg></span><span class="flag f-d" title="Visible"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M.8 5S2.4 2 5 2s4.2 3 4.2 3S7.6 8 5 8 .8 5 .8 5z"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg></span></div><span class="port out"></span></div></div>
+          <span class="sub">Teal dashed stroke (Template flag). Geometry is drawn ghosted in the viewport.</span></div>
+
+        <div class="cell"><span class="cap">Unsupported type</span>
+          <div class="slot"><div class="node unsup"><span class="port in"></span><div class="ftab l"><span class="flag f-b" title="Mute"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M1 5h7M5.5 2.2L8.3 5 5.5 7.8"/></svg></span><span class="flag f-l" title="Locked"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="4.5" width="6" height="4.2" rx=".8"/><path d="M3.4 4.5V3.2a1.6 1.6 0 013.2 0v1.3"/></svg></span></div><div class="face"><div class="r1"><span class="cat" style="background:var(--dim)"></span><span class="nid">relax1</span></div><div class="r2"><span class="ntype">relax_points</span><span class="nt" style="color:var(--warn)">unsupported</span></div></div><div class="ftab r"><span class="flag f-t" title="Template"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg></span><span class="flag f-d" title="Visible"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M.8 5S2.4 2 5 2s4.2 3 4.2 3S7.6 8 5 8 .8 5 .8 5z"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg></span></div><span class="port out"></span></div></div>
+          <span class="sub">Amber dashed stroke, grey chip. Kept in the file, never cooked.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:28px;align-items:flex-start">
+    <div style="width:430px;flex:none">
+      <h2>Backend tag</h2>
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <div style="display:flex;gap:10px;align-items:flex-start"><span class="tag rs" style="margin-top:2px">Rs</span><span>Cooked by the Rust core in this cook.</span></div>
+        <div style="display:flex;gap:10px;align-items:flex-start"><span class="tag pys" style="margin-top:2px">Py*</span><span>A Rust path exists, but this cook used Python. Hover shows why.</span></div>
+        <div style="display:flex;gap:10px;align-items:flex-start"><span class="tag" style="margin-top:2px">Py</span><span>No Rust implementation. Always cooked by Python.</span></div>
+        <div class="cv" style="position:relative;height:74px;margin-top:2px">
+          <div class="slot" style="position:absolute;left:8px;top:2px"><div class="node" style="width:184px;top:4px;height:44px;justify-content:center"><div class="face" style="justify-content:center"><div class="r1"><span class="cat" style="background:var(--c-mod)"></span><span class="nid">noise1</span><span class="tag pys">Py*</span></div></div></div></div>
+          <div class="tip" style="left:206px;top:10px">Cooked by Python. Noise type <span class="mono">Worley</span> is not supported by the Rust backend yet.</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="width:330px;flex:none">
+      <h2>Cook time and cache</h2>
+      <div style="display:grid;grid-template-columns:96px 1fr;gap:8px 10px;align-items:center">
+        <span class="nt">6.8 ms</span><span class="sub">Cooked this time.</span>
+        <span class="nt slow">180 ms</span><span class="sub">Amber when above 100 ms.</span>
+        <span class="nt">cached</span><span class="sub">Result reused, node did not run.</span>
+        <span class="nt bad">failed</span><span class="sub">Red, with the message under the card.</span>
+        <span class="nt">not cooked</span><span class="sub">Downstream of a failure or off the display path.</span>
+      </div>
+    </div>
+
+    <div style="flex:1;min-width:0">
+      <h2>Zoom levels</h2>
+      <div class="cv" style="position:relative;height:150px;padding:0">
+        <div style="position:absolute;left:14px;top:14px;width:190px;height:60px">
+          <div class="node" style="left:0;top:0;"><span class="port in"></span><div class="ftab l"><span class="flag f-b" title="Mute"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M1 5h7M5.5 2.2L8.3 5 5.5 7.8"/></svg></span><span class="flag f-l" title="Locked"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="4.5" width="6" height="4.2" rx=".8"/><path d="M3.4 4.5V3.2a1.6 1.6 0 013.2 0v1.3"/></svg></span></div><div class="face"><div class="r1"><span class="cat" style="background:var(--c-mod)"></span><span class="nid">noise1</span><span class="tag rs">Rs</span></div><div class="r2"><span class="ntype">noise</span><span class="nt">6.8 ms</span></div></div><div class="ftab r"><span class="flag f-t" title="Template"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg></span><span class="flag f-d" title="Visible"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M.8 5S2.4 2 5 2s4.2 3 4.2 3S7.6 8 5 8 .8 5 .8 5z"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg></span></div><span class="port out"></span></div>
+        </div>
+        <div style="position:absolute;left:226px;top:14px;width:116px;height:30px;box-sizing:border-box;background:var(--card);border:1px solid var(--stroke2);border-radius:5px;display:flex;align-items:center;gap:6px;padding:0 8px">
+          <span class="cat" style="background:var(--c-mod)"></span><span class="nid" style="font-size:12px">noise1</span></div>
+        <div style="position:absolute;left:226px;top:78px;width:116px;height:30px;box-sizing:border-box;background:var(--errbg);border:1px solid var(--err);border-radius:5px;display:flex;align-items:center;gap:6px;padding:0 8px">
+          <span class="cat" style="background:var(--c-mod)"></span><span class="nid" style="font-size:12px">noise1</span></div>
+        <div style="position:absolute;left:366px;top:14px;width:44px;height:18px;box-sizing:border-box;background:var(--c-mod);border-radius:3px"></div>
+        <div style="position:absolute;left:366px;top:78px;width:44px;height:18px;box-sizing:border-box;background:var(--c-mod);border-radius:3px;outline:2px solid var(--sel);outline-offset:1px"></div>
+        <span class="sub" style="position:absolute;left:14px;top:84px;width:190px">100%: full card.</span>
+        <span class="sub" style="position:absolute;left:226px;top:116px;width:130px">60%: chip and id. Error shows red.</span>
+        <span class="sub" style="position:absolute;left:366px;top:104px;width:110px">35%: colour block. Selection outline stays.</span>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

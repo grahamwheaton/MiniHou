@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Viewport shading and density</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+.cap{font:600 13px 'IBM Plex Sans',system-ui,sans-serif;color:#d8dce2}
+.sub{font:400 12px/1.4 'IBM Plex Sans',system-ui,sans-serif;color:#9aa1ab}
+</style>
+</helmet>
+<div style="width: 1360px; height: 860px; box-sizing: border-box; background: #1b1d21; padding: 16px 28px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; align-content: start">
+
+  <div style="display:flex;flex-direction:column;gap:4px">
+    <div style="display:flex;gap:10px;align-items:baseline"><span class="cap">Shaded + Wire</span><span class="sub">Default. Matte grey faces lit from the upper left, thin dark edges.</span></div>
+    <dc-import name="Viewport" w="640" h="360" theme="dark" shading="shaded_wire" mode="normal" popover="false" stats="true" dense="false" hint-size="640px,360px"></dc-import>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:4px">
+    <div style="display:flex;gap:10px;align-items:baseline"><span class="cap">Solid</span><span class="sub">One flat grey, no light, no edges. Stats hidden in the overlays popover.</span></div>
+    <dc-import name="Viewport" w="640" h="360" theme="dark" shading="solid" mode="normal" popover="false" stats="false" dense="false" hint-size="640px,360px"></dc-import>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:4px">
+    <div style="display:flex;gap:10px;align-items:baseline"><span class="cap">Wire</span><span class="sub">Edges only, hidden lines removed by filling faces with the background.</span></div>
+    <dc-import name="Viewport" w="640" h="360" theme="dark" shading="wire" mode="normal" popover="false" stats="true" dense="false" hint-size="640px,360px"></dc-import>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:4px">
+    <div style="display:flex;gap:10px;align-items:baseline"><span class="cap">Dense mesh</span><span class="sub">Above 40,000 prims the edges fade to 12% and a note explains why.</span></div>
+    <dc-import name="Viewport" w="640" h="360" theme="dark" shading="shaded_wire" mode="normal" popover="false" stats="true" dense="true" hint-size="640px,360px"></dc-import>
+  </div>
+
+  <div style="grid-column: 1 / -1; display:flex; gap: 40px; padding-top: 4px">
+    <div class="sub" style="flex:1;min-width:0"><span class="cap" style="font-size:12px">Toolbar</span><br>One header bar, left to right: selection mode (Object, Points, Edges, Faces), transform orientation, pivot, snapping and proportional editing, then Overlays, X-ray, the four shading modes and Frame. Tool strip down the left edge: Select, 3D cursor, Move, Rotate, Scale, Transform, Measure. Timeline along the bottom: transport, frame field, key diamonds, playhead, range and fps. The header stays whole at every viewport width above 600 px.</div>
+    <div class="sub" style="flex:1;min-width:0"><span class="cap" style="font-size:12px">Readouts</span><br>Stats bottom left in mono: points, prims, cook time of the display node. Axis gizmo bottom right, 76 x 64 px, not interactive. Notes stack upward from the stats.</div>
+    <div class="sub" style="flex:1;min-width:0"><span class="cap" style="font-size:12px">Floor</span><br>Light grey grid, 1 unit spacing, X axis red and Z axis blue at 80% opacity. It sits one unit below the mesh bounds and is drawn first.</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":860}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

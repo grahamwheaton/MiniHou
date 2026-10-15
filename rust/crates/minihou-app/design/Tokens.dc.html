@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Design tokens</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+.ws{width:1100px;height:900px;background:#1b1d21;color:#d8dce2;font:400 12px/1.35 'IBM Plex Sans',system-ui,sans-serif;box-sizing:border-box;padding:24px 28px;display:flex;gap:32px;overflow:hidden}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+h1{margin:0 0 4px;font:600 20px 'IBM Plex Sans',system-ui,sans-serif}
+h2{margin:0 0 8px;font:600 11px 'IBM Plex Sans',system-ui,sans-serif;letter-spacing:.07em;text-transform:uppercase;color:#9aa1ab}
+.sub{color:#9aa1ab;font-size:11.5px;line-height:1.4}
+.col{display:flex;flex-direction:column;min-width:0}
+.row{display:grid;grid-template-columns:78px 104px 104px 1fr;gap:10px;align-items:center;height:27px;border-bottom:1px solid #2b2f35}
+.sw{display:flex;align-items:center;gap:7px}
+.sw i{width:20px;height:16px;border-radius:3px;border:1px solid #555c67;flex:none}
+.sw span{font:400 11px 'IBM Plex Mono',ui-monospace,monospace;color:#d8dce2}
+.use{color:#9aa1ab;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.th{height:22px;font-size:11px;color:#9aa1ab;font-weight:600}
+.kv{display:grid;grid-template-columns:96px 1fr;gap:4px 10px;font-size:11.5px}
+.kv span:nth-child(odd){color:#9aa1ab}
+.bar{display:flex;align-items:flex-end;gap:10px}
+.bar div{background:#4f9cf0;border-radius:2px;width:22px}
+.bar span{font:400 10px 'IBM Plex Mono',ui-monospace,monospace;color:#9aa1ab}
+.rad{width:44px;height:30px;border:1px solid #555c67;background:#2e323a}
+code{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px}
+</style>
+</helmet>
+<div class="ws">
+  <div class="col" style="width:560px;flex:none">
+    <h1>Design tokens</h1>
+    <div class="sub" style="margin-bottom:14px">Flat fills, 1 px strokes, simple rounded rectangles. No blur, shadow or gradient. Every value maps to one egui colour or style field.</div>
+
+    <h2>Colour</h2>
+    <div class="row th"><span>Token</span><span>Dark</span><span>Light</span><span>Used for</span></div>
+    <sc-for list="{{colors}}" as="t" hint-placeholder-count="20">
+      <div class="row">
+        <span class="mono" style="font-size:11.5px">{{t.name}}</span>
+        <span class="sw"><i style="background: {{t.dark}}"></i><span>{{t.dark}}</span></span>
+        <span class="sw"><i style="background: {{t.light}}"></i><span>{{t.light}}</span></span>
+        <span class="use">{{t.use}}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <div class="col" style="flex:1;min-width:0;gap:20px">
+    <div>
+      <h2>Node categories</h2>
+      <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px">
+        <sc-for list="{{cats}}" as="c" hint-placeholder-count="5">
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;gap:4px"><i style="flex:1;height:22px;border-radius:3px;background: {{c.dark}}"></i><i style="flex:1;height:22px;border-radius:3px;background: {{c.light}}"></i></div>
+            <span style="font-weight:600;font-size:12px">{{c.name}}</span>
+            <span class="sub" style="font-size:11px">{{c.eg}}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div class="sub" style="margin-top:8px">Shown only as the 10 px chip on cards and the 3 px stripe in the List tab. Never a card fill.</div>
+    </div>
+
+    <div>
+      <h2>Spacing, 4 px base</h2>
+      <div class="bar">
+        <div style="height:2px"></div><span>2</span>
+        <div style="height:4px"></div><span>4</span>
+        <div style="height:6px"></div><span>6</span>
+        <div style="height:8px"></div><span>8</span>
+        <div style="height:12px"></div><span>12</span>
+        <div style="height:16px"></div><span>16</span>
+        <div style="height:24px"></div><span>24</span>
+      </div>
+    </div>
+
+    <div>
+      <h2>Corner radius</h2>
+      <div style="display:flex;gap:16px;align-items:flex-end">
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start"><div class="rad" style="border-radius:3px"></div><span class="sub">3 tags, flags, checkbox</span></div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start"><div class="rad" style="border-radius:4px"></div><span class="sub">4 fields</span></div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start"><div class="rad" style="border-radius:6px"></div><span class="sub">6 cards, popups</span></div>
+        <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start"><div class="rad" style="border-radius:15px"></div><span class="sub">pill chips</span></div>
+      </div>
+    </div>
+
+    <div>
+      <h2>Type</h2>
+      <div style="display:flex;flex-direction:column;gap:5px">
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="width:96px;color:#9aa1ab;font-size:11px">15 / semibold</span><span style="font-size:15px;font-weight:600">Heading and empty states</span></div>
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="width:96px;color:#9aa1ab;font-size:11px">12 / regular</span><span style="font-size:12px">Body, buttons, labels, group headers</span></div>
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="width:96px;color:#9aa1ab;font-size:11px">11 / regular</span><span style="font-size:11px">Small: captions, node type, tooltips</span></div>
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="width:96px;color:#9aa1ab;font-size:11px">12.5 / mono 600</span><span class="mono" style="font-size:12.5px;font-weight:600">noise1 transform1 output1</span></div>
+        <div style="display:flex;align-items:baseline;gap:12px"><span style="width:96px;color:#9aa1ab;font-size:11px">11 / mono 400</span><span class="mono" style="font-size:11px">6.8 ms · 9,409 pts · cached</span></div>
+      </div>
+      <div class="sub" style="margin-top:6px">IBM Plex Sans and Plex Mono, embedded with <code>FontDefinitions</code>. The egui default fonts are an acceptable fallback; widths shift by a few percent.</div>
+    </div>
+
+    <div>
+      <h2>Stroke and size</h2>
+      <div class="kv">
+        <span>Border</span><span>1 px, stroke or stroke2</span>
+        <span>Selection</span><span>2 px sel, 2 px outside the card</span>
+        <span>Wire</span><span>1.5 px, accent when touching the selection</span>
+        <span>Controls</span><span>22 px fields, 24 px small buttons, 28 px buttons and rows</span>
+        <span>Bars</span><span>40 top, 32 panel header, 26 group header, 24 status</span>
+        <span>Columns</span><span>400 network, flexible viewport, 320 parameters</span>
+      </div>
+    </div>
+
+    <div>
+      <h2>egui mapping</h2>
+      <div class="kv">
+        <span>panel_fill</span><span><code>panel</code></span>
+        <span>window_fill</span><span><code>panel2</code>, shadows off</span>
+        <span>extreme_bg_color</span><span><code>input</code></span>
+        <span>faint_bg_color</span><span><code>panel2</code></span>
+        <span>selection</span><span>fill <code>accentbg</code>, stroke <code>accent</code></span>
+        <span>noninteractive stroke</span><span><code>stroke</code></span>
+        <span>error / warn colour</span><span><code>err</code> / <code>warn</code></span>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1100,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const c = (name, dark, light, use) => ({ name, dark, light, use });
+    return {
+      colors: [
+        c('base', '#1b1d21', '#e4e7eb', 'Network canvas, gaps between panels'),
+        c('grid', '#212429', '#d8dce1', 'Network grid lines, 32 px'),
+        c('panel', '#23262b', '#f4f5f7', 'Side panels, top bar'),
+        c('panel2', '#2b2f35', '#e9ebee', 'Panel and group headers, popups, status bar'),
+        c('input', '#181a1e', '#ffffff', 'Field wells, slider tracks'),
+        c('stroke', '#3a3f47', '#c4c9d1', 'Separators, field borders'),
+        c('stroke2', '#555c67', '#a1a9b4', 'Card borders, ports, hover borders'),
+        c('text', '#d8dce2', '#1f2329', 'Primary text'),
+        c('dim', '#9aa1ab', '#566070', 'Labels, node type, captions'),
+        c('faint', '#6f7681', '#8a919c', 'Disabled controls only'),
+        c('accent', '#4f9cf0', '#2a74d6', 'Slider fill, focus, Visible flag, active tab'),
+        c('accentbg', '#243a57', '#dbe8fb', 'Visible (display) node fill, active segment'),
+        c('card', '#2e323a', '#ffffff', 'Node card fill'),
+        c('sel', '#f2f4f7', '#1f2329', 'Selected node outline'),
+        c('wire', '#6b727e', '#8a929e', 'Wires'),
+        c('ok', '#4cb782', '#1f8a55', 'Rs tag, ready indicator'),
+        c('warn', '#e8a23a', '#a86a05', 'Py* tag, Mute flag, unsupported, slow cook'),
+        c('err', '#ef5b52', '#c8362d', 'Failed node, invalid field, error banner'),
+        c('okbg / warnbg / errbg', '#3b2224', '#fbe3e1', 'Tinted fills: ok #1d3a2e, warn #3a2f1d, err'),
+        c('tpl', '#5bb8c9', '#2a8ea1', 'Template flag'),
+        c('locked', '#9aa1ab', '#566070', 'Locked flag (the dim grey)')
+      ],
+      cats: [
+        { name: 'Source', dark: '#3fb59a', light: '#1f8f77', eg: 'grid, box' },
+        { name: 'Modify', dark: '#8b7cf0', light: '#6a58d6', eg: 'noise, transform' },
+        { name: 'Attribute', dark: '#9bb84a', light: '#6f8a1f', eg: 'normal' },
+        { name: 'Combine', dark: '#d4688a', light: '#bf3f6a', eg: 'merge' },
+        { name: 'Output', dark: '#8693a3', light: '#5f6b7a', eg: 'output' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

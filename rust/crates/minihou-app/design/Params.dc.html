@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Parameter widgets</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+body{margin:0}
+.ws-dark{--base:#1b1d21;--panel:#23262b;--panel2:#2b2f35;--input:#181a1e;--stroke:#3a3f47;--stroke2:#555c67;--text:#d8dce2;--dim:#9aa1ab;--faint:#6f7681;--accent:#4f9cf0;--accentbg:#243a57;--c-mod:#8b7cf0;--ok:#4cb782;--okbg:#1d3a2e;--warn:#e8a23a;--warnbg:#3a2f1d;--err:#ef5b52;--errbg:#3b2224;--xax:#e0766d;--yax:#7cc47c;--zax:#6a9ee0}
+.ws{width:1120px;height:1120px;background:var(--base);color:var(--text);font:400 12px/1.35 'IBM Plex Sans',system-ui,sans-serif;box-sizing:border-box;padding:20px;display:flex;gap:24px;overflow:hidden}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+h2{margin:0 0 8px;font:600 11px 'IBM Plex Sans',system-ui,sans-serif;letter-spacing:.07em;text-transform:uppercase;color:var(--dim)}
+.col{display:flex;flex-direction:column;min-width:0}
+.panel{background:var(--panel);border:1px solid var(--stroke);box-sizing:border-box}
+.ph{height:32px;flex:none;display:flex;align-items:center;padding:0 10px;background:var(--panel2);border-bottom:1px solid var(--stroke);box-sizing:border-box;font-weight:600}
+.grp{display:flex;align-items:center;gap:6px;height:26px;padding:0 10px;background:var(--panel2);border-top:1px solid var(--stroke);border-bottom:1px solid var(--stroke);font-weight:600;box-sizing:border-box}
+.prow{display:grid;grid-template-columns:92px 1fr 22px 20px;align-items:center;column-gap:6px;height:28px;padding:0 6px 0 16px;box-sizing:border-box;position:relative}
+.prow .lbl{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prow.mod .lbl{color:var(--text)}
+.prow .dot{position:absolute;left:6px;top:11px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.ctl{display:flex;align-items:center;gap:6px;min-width:0}
+.trk{position:relative;flex:1;height:6px;border-radius:3px;background:var(--input);border:1px solid var(--stroke);box-sizing:border-box}
+.fill{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--accent)}
+.knob{position:absolute;top:-4px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:var(--text);border:1px solid var(--stroke2);box-sizing:border-box}
+.val{height:22px;min-width:52px;padding:0 6px;display:flex;align-items:center;justify-content:flex-end;background:var(--input);border:1px solid var(--stroke);border-radius:4px;font:400 12px 'IBM Plex Mono',ui-monospace,monospace;box-sizing:border-box;gap:4px}
+.val.l{justify-content:flex-start;flex:1}
+.val.sel{justify-content:space-between;flex:1;font-family:'IBM Plex Sans',system-ui,sans-serif}
+.v3{display:flex;gap:4px;flex:1;min-width:0}
+.v3 .val{flex:1;min-width:0;padding:0 5px;justify-content:flex-start}
+.px{color:var(--xax)}.py{color:var(--yax)}.pz{color:var(--zax)}
+.xp{width:20px;height:20px;border:0;border-radius:4px;background:transparent;color:var(--dim);opacity:.4;display:flex;align-items:center;justify-content:center;padding:0}
+.xp.on{opacity:1;color:var(--accent);background:var(--accentbg)}
+.rst{width:20px;height:20px;border:0;border-radius:4px;background:transparent;color:var(--dim);display:flex;align-items:center;justify-content:center;padding:0}
+.chkb{width:16px;height:16px;box-sizing:border-box;border:1px solid var(--stroke2);border-radius:3px;background:var(--input);display:flex;align-items:center;justify-content:center}
+.chkb.on{background:var(--accent);border-color:var(--accent)}
+.prow.dis .lbl{color:var(--faint)}
+.prow.dis .val,.prow.dis .chkb,.prow.dis .trk{opacity:.5}
+.prow.bad .val{border-color:var(--err);box-shadow:inset 0 0 0 1px var(--err)}
+.prow.hov .trk{border-color:var(--stroke2)}
+.prow.hov .knob{border-color:var(--accent)}
+.prow.act .val{border-color:var(--accent)}
+.prow.act .knob{border-color:var(--accent);box-shadow:0 0 0 3px var(--accentbg)}
+.menu{width:250px;box-sizing:border-box;background:var(--panel2);border:1px solid var(--stroke2);border-radius:6px;padding:4px}
+.mi{display:flex;align-items:center;gap:8px;height:26px;padding:0 8px;border-radius:3px}
+.mi .k{margin-left:auto;color:var(--faint);font:400 11px 'IBM Plex Mono',ui-monospace,monospace}
+.msep{height:1px;background:var(--stroke);margin:4px 2px}
+.rad{width:12px;height:12px;box-sizing:border-box;border-radius:50%;border:1px solid var(--stroke2);background:var(--input);flex:none}
+.rad.on{border:4px solid var(--accent)}
+.tag{font:500 10px 'IBM Plex Mono',ui-monospace,monospace;padding:0 5px;border-radius:3px;border:1px solid var(--stroke2);color:var(--dim);line-height:15px}
+.tag.rs{color:var(--ok);border-color:var(--ok);background:var(--okbg)}
+.tag.pys{color:var(--warn);border-color:var(--warn);background:var(--warnbg)}
+.cap{font-size:11px;color:var(--dim);margin:10px 0 3px}
+.tip{box-sizing:border-box;padding:8px 10px;border-radius:5px;background:var(--panel2);border:1px solid var(--stroke2);font-size:12px;line-height:1.45;width:300px}
+.sub{color:var(--dim);font-size:11px;line-height:1.4}
+table{border-collapse:collapse;width:100%}
+td,th{text-align:left;vertical-align:top;padding:6px 8px 6px 0;border-bottom:1px solid var(--stroke);font-size:11.5px;line-height:1.4}
+th{font-weight:600;color:var(--dim);font-size:11px}
+code{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11px;color:var(--text)}
+</style>
+</helmet>
+<div class="ws ws-dark">
+
+  <div class="col" style="width:320px;flex:none">
+    <h2>Panel at 320 px</h2>
+    <div class="panel col" style="height:1046px">
+      <div class="ph">Parameters</div>
+      <div style="padding:10px 12px 12px;display:flex;flex-direction:column;gap:8px;border-bottom:1px solid var(--stroke)">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="width:10px;height:10px;border-radius:2px;background:var(--c-mod)"></span>
+          <span class="val l mono" style="font-weight:600;height:26px;font-size:13px">noise1</span>
+          <span class="tag rs">Rs</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;color:var(--dim)">
+          <span>Noise</span><span>·</span><span class="mono">6.8 ms</span>
+          <div style="flex:1"></div>
+          <span class="val" style="height:24px;min-width:0;padding:0 8px;font-family:'IBM Plex Sans',system-ui,sans-serif;font-weight:500;color:var(--text)">Reset all</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px" aria-label="Node flags">
+          <span class="val" style="height:24px;min-width:0;padding:0 7px;gap:5px;font-family:'IBM Plex Sans',system-ui,sans-serif;font-weight:500;color:var(--dim)"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M1 5h7M5.5 2.2L8.3 5 5.5 7.8"/></svg>Mute</span>
+          <span class="val" style="height:24px;min-width:0;padding:0 7px;gap:5px;font-family:'IBM Plex Sans',system-ui,sans-serif;font-weight:500;color:var(--dim)"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="4.5" width="6" height="4.2" rx=".8"/><path d="M3.4 4.5V3.2a1.6 1.6 0 013.2 0v1.3"/></svg>Locked</span>
+          <span style="width:1px;height:16px;background:var(--stroke);flex:none"></span>
+          <span class="val" style="height:24px;min-width:0;padding:0 7px;gap:5px;font-family:'IBM Plex Sans',system-ui,sans-serif;font-weight:500;color:var(--dim)"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" stroke-dasharray="2 1.5" aria-hidden="true"><rect x="1.5" y="1.5" width="7" height="7" rx="1"/></svg>Template</span>
+          <span class="val" style="height:24px;min-width:0;padding:0 7px;gap:5px;font-family:'IBM Plex Sans',system-ui,sans-serif;font-weight:500;color:var(--dim)"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path d="M.8 5S2.4 2 5 2s4.2 3 4.2 3S7.6 8 5 8 .8 5 .8 5z"/><circle cx="5" cy="5" r="1.2" fill="currentColor"/></svg>Visible</span>
+        </div>
+      </div>
+
+      <div class="grp"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 3.5l3 3 3-3"/></svg>Noise</div>
+      <div style="padding:6px 0">
+        <div class="prow mod"><i class="dot"></i><span class="lbl">Amplitude</span>
+          <div class="ctl"><div class="trk"><div class="fill" style="width:32%"></div><div class="knob" style="left:32%"></div></div><span class="val mono">1.60</span></div>
+          <button class="rst" type="button" aria-label="Reset Amplitude to 1.00"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2.5 6a3.6 3.6 0 106-2.6M2 2.2V4.8h2.6"/></svg></button><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+        <div class="prow"><span class="lbl">Frequency</span>
+          <div class="ctl"><div class="trk"><div class="fill" style="width:20%"></div><div class="knob" style="left:20%"></div></div><span class="val mono">0.80</span></div><span></span><button class="xp on" type="button" title="Exposed: click to change or remove" aria-label="Exposed: click to change or remove"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+        <div class="prow"><span class="lbl">Octaves</span>
+          <div class="ctl"><span class="val sel mono"><span style="color:var(--dim)">‹</span>4<span style="color:var(--dim)">›</span></span></div><span></span><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+        <div class="prow"><span class="lbl">Seed</span>
+          <div class="ctl"><span class="val sel mono"><span style="color:var(--dim)">‹</span>17<span style="color:var(--dim)">›</span></span></div><span></span><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+        <div class="prow"><span class="lbl">Type</span>
+          <div class="ctl"><span class="val sel">Simplex<svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--dim)" stroke-width="1.5" aria-hidden="true"><path d="M2 3.5l3 3 3-3"/></svg></span></div><span></span><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+        <div class="prow dis"><span class="lbl">Domain warp</span>
+          <div class="ctl"><span class="chkb"></span></div><span></span><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+      </div>
+
+      <div class="grp"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2 3.5l3 3 3-3"/></svg>Transform</div>
+      <div style="padding:6px 0">
+        <div class="prow"><span class="lbl">Offset</span>
+          <div class="ctl"><div class="v3"><span class="val mono"><span class="px">X</span>0.00</span><span class="val mono"><span class="py">Y</span>0.00</span><span class="val mono"><span class="pz">Z</span>0.00</span></div></div><span></span><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+        <div class="prow"><span class="lbl">Scale</span>
+          <div class="ctl"><div class="v3"><span class="val mono"><span class="px">X</span>1.00</span><span class="val mono"><span class="py">Y</span>1.00</span><span class="val mono"><span class="pz">Z</span>1.00</span></div></div><span></span><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+        <div class="prow"><span class="lbl">Animate</span>
+          <div class="ctl"><span class="chkb on"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#fff" stroke-width="1.8" aria-hidden="true"><path d="M1.8 5.2l2.2 2.2 4.2-4.6"/></svg></span></div><span></span><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+        <div class="prow"><span class="lbl">Group</span>
+          <div class="ctl"><span class="val l">terrain_base</span></div><span></span><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+      </div>
+
+      <div class="grp"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3.5 2l3 3-3 3"/></svg>Mask</div>
+      <div class="grp" style="border-top:0"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3.5 2l3 3-3 3"/></svg>Advanced</div>
+    </div>
+  </div>
+
+  <div class="col" style="width:360px;flex:none">
+    <h2>Slider states</h2>
+    <div class="panel" style="width:320px;padding-bottom:6px">
+      <div class="cap" style="padding:0 12px;margin-top:6px">Default</div>
+      <div class="prow"><span class="lbl">Frequency</span><div class="ctl"><div class="trk"><div class="fill" style="width:20%"></div><div class="knob" style="left:20%"></div></div><span class="val mono">0.80</span></div><span></span><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+      <div class="cap" style="padding:0 12px">Hover: track stroke strengthens, knob gets an accent stroke</div>
+      <div class="prow hov"><span class="lbl">Frequency</span><div class="ctl"><div class="trk"><div class="fill" style="width:20%"></div><div class="knob" style="left:20%"></div></div><span class="val mono">0.80</span></div><span></span><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+      <div class="cap" style="padding:0 12px">Dragging or typing</div>
+      <div class="prow act"><span class="lbl">Frequency</span><div class="ctl"><div class="trk"><div class="fill" style="width:34%"></div><div class="knob" style="left:34%"></div></div><span class="val mono">1.36</span></div><span></span><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+      <div class="cap" style="padding:0 12px">Modified: dot, bright label, reset button</div>
+      <div class="prow mod"><i class="dot"></i><span class="lbl">Frequency</span><div class="ctl"><div class="trk"><div class="fill" style="width:34%"></div><div class="knob" style="left:34%"></div></div><span class="val mono">1.36</span></div>
+        <button class="rst" type="button" aria-label="Reset Frequency to 0.80"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M2.5 6a3.6 3.6 0 106-2.6M2 2.2V4.8h2.6"/></svg></button><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+      <div class="cap" style="padding:0 12px">Invalid</div>
+      <div class="prow bad mod"><i class="dot"></i><span class="lbl">Frequency</span><div class="ctl"><div class="trk"><div class="fill" style="width:0%"></div><div class="knob" style="left:0%"></div></div><span class="val mono">0.00</span></div><span></span><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+      <div class="cap" style="padding:0 12px">Disabled</div>
+      <div class="prow dis"><span class="lbl">Frequency</span><div class="ctl"><div class="trk"><div class="fill" style="width:20%"></div><div class="knob" style="left:20%"></div></div><span class="val mono">0.80</span></div><span></span><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+    </div>
+
+    <h2 style="margin-top:18px">Hover documentation</h2>
+    <div class="tip">
+      <div class="mono" style="font-weight:600;margin-bottom:2px">amplitude</div>
+      Height of the noise displacement in scene units.
+      <div class="sub" style="margin-top:4px">Default 1.00 · Range 0 to 10 · Double-click to type</div>
+    </div>
+
+    <h2 style="margin-top:18px">Disabled with reason</h2>
+    <div class="panel" style="width:320px">
+      <div class="prow dis"><span class="lbl">Domain warp</span><div class="ctl"><span class="chkb"></span></div><span></span><button class="xp" type="button" title="Expose parameter" aria-label="Expose parameter"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3.5V10h6.5"/><path d="M5 7L10 2M6.5 2H10v3.5"/></svg></button></div>
+    </div>
+    <div class="tip" style="margin-top:4px;border-color:var(--warn)">
+      <div style="font-weight:600;margin-bottom:2px">Not supported by the Rust backend yet</div>
+      The value is stored in the file and ignored while the Rust core is in use.
+    </div>
+
+    <h2 style="margin-top:18px">Enum popup</h2>
+    <div style="width:180px;box-sizing:border-box;background:var(--panel2);border:1px solid var(--stroke2);border-radius:5px;padding:4px">
+      <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 6px;border-radius:3px;background:var(--accentbg)"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" stroke-width="1.8" aria-hidden="true"><path d="M1.8 5.2l2.2 2.2 4.2-4.6"/></svg>Simplex</div>
+      <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 6px 0 24px">Perlin</div>
+      <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 6px 0 24px">Value</div>
+      <div style="display:flex;align-items:center;gap:8px;height:24px;padding:0 6px 0 24px">Worley <span class="tag pys" style="margin-left:auto">Py</span></div>
+    </div>
+  </div>
+
+  <div class="col" style="flex:1;min-width:0">
+    <h2 style="margin-top:6px">Expose parameter</h2>
+    <div class="sub" style="margin-bottom:6px">The icon at the right end of each row opens this. Lit means exposed.</div>
+    <div class="menu">
+      <div class="mono" style="padding:4px 8px 6px;color:var(--dim);font-size:11px">noise1 · frequency</div>
+      <div class="mi"><span class="chkb on"><svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="#fff" stroke-width="1.8" aria-hidden="true"><path d="M1.8 5.2l2.2 2.2 4.2-4.6"/></svg></span>Expose parameter<span class="k">E</span></div>
+      <div class="mi" style="margin-top:2px"><span class="rad on"></span>Graph input</div>
+      <div class="mi"><span class="rad"></span>Modifier control (Blender)</div>
+      <div class="mi" style="height:30px"><span style="color:var(--dim);width:44px">Name</span><span class="val l mono" style="height:22px">frequency</span></div>
+      <div class="mi" style="height:30px"><span style="color:var(--dim);width:44px">Range</span><span class="val mono" style="height:22px;flex:1;justify-content:flex-start">0.00</span><span class="val mono" style="height:22px;flex:1;justify-content:flex-start">10.00</span></div>
+      <div class="msep"></div>
+      <div class="mi">Remove from inputs</div>
+      <div class="mi">Reset to default<span class="k">Alt+click</span></div>
+      <div class="mi">Copy value<span class="k">Ctrl+C</span></div>
+      <div class="mi" style="color:var(--faint)">Paste value<span class="k">Ctrl+V</span></div>
+    </div>
+    <div class="sub" style="margin:6px 0 14px;width:250px">Exposed parameters are pinned to the top of the panel under Exposed and become the node's inputs in the graph and controls on the Blender modifier.</div>
+
+    <h2>Row layout</h2>
+    <div class="sub" style="margin-bottom:10px">Four columns: label 92 px, control, 22 px reset slot, 20 px expose slot. Row height 28 px, 6 px padding above and below each group, 16 px left indent for the modified dot.</div>
+
+    <h2 style="margin-top:6px">Widget map</h2>
+    <table>
+      <tr><th>Parameter</th><th>egui widget</th></tr>
+      <tr><td>float, ranged</td><td><code>Slider</code> with <code>show_value(false)</code>, plus a <code>DragValue</code> in the value box</td></tr>
+      <tr><td>int</td><td><code>DragValue</code> with <code>range</code>; the arrows are painted, drag and click-to-type come from egui</td></tr>
+      <tr><td>bool</td><td><code>checkbox</code> with an empty label</td></tr>
+      <tr><td>enum</td><td><code>ComboBox</code>, <code>selected_text</code>, one <code>selectable_value</code> per option</td></tr>
+      <tr><td>vec3</td><td><code>columns(3)</code> of <code>DragValue</code>, <code>prefix("X ")</code> coloured per axis</td></tr>
+      <tr><td>string</td><td><code>TextEdit::singleline</code> with <code>desired_width(f32::INFINITY)</code></td></tr>
+      <tr><td>group</td><td><code>CollapsingHeader</code>, <code>default_open(true)</code>, state saved per node id</td></tr>
+      <tr><td>disabled</td><td><code>add_enabled(false, ..)</code> and <code>on_disabled_hover_text</code></td></tr>
+      <tr><td>docs</td><td><code>on_hover_ui</code> on the label with a short delay</td></tr>
+      <tr><td>modified dot</td><td><code>painter().circle_filled</code> at the row's left edge</td></tr>
+      <tr><td>reset</td><td><code>small_button</code> drawn only when value differs from default; Alt+click on a slider resets too</td></tr>
+    </table>
+
+    <h2 style="margin-top:16px">Rules</h2>
+    <div class="sub" style="display:flex;flex-direction:column;gap:6px">
+      <span>A parameter is modified when it differs from the node type's default. The dot and the reset button depend on that alone.</span>
+      <span>Edits apply on drag with the cook debounced, so the viewport follows the slider and the cook indicator shows in the status bar.</span>
+      <span>Invalid values are kept in the field, outlined red, and explained under the group. They do not reach the engine.</span>
+      <span>The disabled reason is always the tooltip text, never a separate label in the row.</span>
+      <span>Groups open or closed state belongs to the node type, not to each node.</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1120,"height":1120}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
