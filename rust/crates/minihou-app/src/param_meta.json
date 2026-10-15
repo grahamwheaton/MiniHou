@@ -82,6 +82,51 @@
    "min": 0.0
   }
  },
+ "circle": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "divisions": {
+   "default": 32,
+   "doc": "",
+   "kind": "int",
+   "max": 100000,
+   "min": 3
+  },
+  "radius": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0
+  },
+  "rotate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Euler XYZ degrees; the circle lies in XY facing +Z before rotation",
+   "kind": "vec3"
+  }
+ },
+ "curve": {
+  "closed": {
+   "default": false,
+   "doc": "",
+   "kind": "bool"
+  },
+  "points": {
+   "default": "0,0,0  1,0,0  1,1,0  2,1,1",
+   "doc": "Point positions 'x,y,z' separated by spaces",
+   "kind": "str"
+  }
+ },
  "grid": {
   "center": {
    "default": [
@@ -145,6 +190,40 @@
    "doc": "",
    "kind": "float",
    "min": 0
+  }
+ },
+ "line": {
+  "direction": {
+   "default": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "length": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "soft_max": 10.0,
+   "soft_min": 0.0
+  },
+  "origin": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "points": {
+   "default": 10,
+   "doc": "",
+   "kind": "int",
+   "min": 2,
+   "soft_max": 1000
   }
  },
  "merge": {},
@@ -251,6 +330,17 @@
    "default": "",
    "doc": "Blender object that shows this output (created and updated live). Empty: the main output, shown through the MiniHou proxy; only the display node is the main output",
    "kind": "str"
+  }
+ },
+ "point": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Position of the single point in model coordinates",
+   "kind": "vec3"
   }
  },
  "transform": {

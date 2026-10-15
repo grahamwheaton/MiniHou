@@ -15,7 +15,7 @@ from minihou import Evaluator, Geometry, Graph, accel, proxy, rust, topo
 from minihou.geometry import Topology
 from minihou.sdk import REGISTRY
 
-NODE_TYPES = ["grid", "box", "transform", "normal", "noise", "merge", "null", "output"]
+NODE_TYPES = ["grid", "box", "point", "curve", "line", "circle", "transform", "normal", "noise", "merge", "null", "output"]
 
 
 @contextlib.contextmanager
@@ -83,8 +83,7 @@ class RustParityTests(unittest.TestCase):
                 self.assertEqual(rs, py)
 
     def test_unsupported_settings_are_refused(self):
-        for graph in (chain(("transform", {"group": "0-3"})),
-                      chain(("transform", {"proportional_enabled": True})),
+        for graph in (chain(("transform", {"proportional_enabled": True, "proportional_falloff": "random"})),
                       chain(("normal", {"domain": "vertex"})),
                       chain(("noise", {"group": "0-3"})),
                       {"version": 1, "nodes": {"b": {"type": "box", "params": {"add_vertex_normals": True}}}, "display": "b"},
@@ -107,6 +106,15 @@ class RustParityTests(unittest.TestCase):
             with self.subTest(params=params):
                 self.same({"version": 1, "nodes": {"b": {"type": "box", "params": params}}, "display": "b"})
 
+    def test_curve_line_circle(self):
+        for source in ({"type": "point"}, {"type": "point", "params": {"center": [1.25, -2, 3]}},
+                       {"type": "curve"}, {"type": "curve", "params": {"points": "0,0,0 1,2,3 2,1,0", "closed": True}},
+                       {"type": "line"}, {"type": "line", "params": {"origin": [1,2,3], "direction": [1,2,3], "points": 7}},
+                       {"type": "circle"}, {"type": "circle", "params": {"divisions": 7, "rotate": [15,30,45], "center": [1,2,3]}}):
+            with self.subTest(source=source):
+                self.same(chain(source=source))
+        self.same(chain(("curve", {"points": "0,0,0 1,0,0"})))
+
     def test_transform(self):
         for params in ({"translate": [1, 2, 3]}, {"rotate": [30, -45, 60], "scale": [2, 0.5, 1], "pivot": [0.3, -1, 2]},
                        {"axis_rotation": [0, 0, 45], "scale": [2, 1, 1], "uniform_scale": 0.5, "translate": [1, 0, 0]},
@@ -114,6 +122,26 @@ class RustParityTests(unittest.TestCase):
             with self.subTest(params=params):
                 self.same(chain(("transform", params)))
                 self.same(chain(("normal", {}), ("transform", params)))           # N is transformed too
+
+    def test_transform_group_and_proportional(self):
+        for params in ({"group": "0-3", "translate": [0,0,2]},
+                       {"group": "^0-3", "translate": [1,0,0]},
+                       {"group": "@P.x > 0", "translate": [0,1,0]},
+                       {"group": "3", "proportional_enabled": True, "proportional_radius": 3,
+                        "proportional_falloff": "smooth", "translate": [0,0,2]},
+                       {"group": "3", "proportional_enabled": True, "proportional_radius": 3,
+                        "proportional_falloff": "root", "proportional_connected": True, "rotate": [0,0,45]},
+                       {"group": "3", "proportional_enabled": True, "proportional_radius": 3,
+                        "proportional_projected": True, "translate": [0,0,2]}):
+            with self.subTest(params=params):
+                self.same(chain(("transform", params), source={"type": "line", "params": {"points": 6, "length": 5,
+                                                                                    "direction": [1,0,0]}}))
+        for falloff in ("smooth", "sphere", "root", "sharp", "linear", "constant"):
+            with self.subTest(falloff=falloff):
+                params = {"group": "3", "proportional_enabled": True, "proportional_radius": 3,
+                          "proportional_falloff": falloff, "translate": [0.2, 0.3, 1],
+                          "rotate": [10, 25, 45], "scale": [1.2, 0.8, 1.5]}
+                self.same(chain(("normal", {}), ("transform", params)))
 
     def test_normal(self):
         for domain in ("point", "prim"):

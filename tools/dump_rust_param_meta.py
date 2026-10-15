@@ -12,7 +12,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-TYPES = ["grid", "box", "transform", "normal", "noise", "merge", "null", "output"]
+TYPES = ["grid", "box", "point", "curve", "line", "circle", "transform", "normal", "noise", "merge", "null", "output"]
 TARGET = os.path.join(ROOT, "rust", "crates", "minihou-app", "src", "param_meta.json")
 
 

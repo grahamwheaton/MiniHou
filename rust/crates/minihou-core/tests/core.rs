@@ -57,15 +57,28 @@ fn transform_moves_and_merge_concatenates() {
 }
 
 #[test]
-fn unsupported_parameters_are_refused_not_ignored() {
-    let err = cook(json!({"nodes": {"a": {"type": "grid"}, "t": {"type": "transform", "inputs": {"geo": "a"}, "params": {"group": "0-3"}}},
-                          "display": "t"})).unwrap_err();
-    assert!(err.0.contains("not supported by the Rust backend"), "{err}");
-    // the default value is fine
-    cook(json!({"nodes": {"a": {"type": "grid"}, "t": {"type": "transform", "inputs": {"geo": "a"}, "params": {"group": ""}}},
-                "display": "t"})).unwrap();
+fn supported_group_and_unsupported_node() {
+    let g = cook(json!({"nodes": {"a": {"type": "line", "params": {"points": 3}},
+        "t": {"type": "transform", "inputs": {"geo": "a"}, "params": {"group": "1", "translate": [1,0,0]}}}, "display": "t"})).unwrap();
+    assert_eq!(g.p(), &[0.0,0.0,0.0,1.0,0.0,0.5,0.0,0.0,1.0]);
     let err = cook(json!({"nodes": {"w": {"type": "wrangle"}}, "display": "w"})).unwrap_err();
     assert!(err.0.contains("not in the Rust backend"), "{err}");
+}
+
+#[test]
+fn curve_line_circle_and_proportional() {
+    let point = cook(json!({"nodes": {"p": {"type": "point", "params": {"center": [1,2,3]}}}, "display": "p"})).unwrap();
+    assert_eq!((point.npoints, point.nprims()), (1, 0));
+    assert_eq!(point.p(), &[1.0, 2.0, 3.0]);
+    let curve = cook(json!({"nodes": {"c": {"type": "curve", "params": {"points": "0,0,0 1,0,0 1,1,0", "closed": true}}}, "display": "c"})).unwrap();
+    assert_eq!(curve.topology.vertex_point, [0,1,2]);
+    assert_eq!(curve.topology.closed, Some(vec![true]));
+    let circle = cook(json!({"nodes": {"c": {"type": "circle", "params": {"divisions": 4}}}, "display": "c"})).unwrap();
+    assert_eq!((circle.npoints, circle.nprims()), (4,1));
+    let g = cook(json!({"nodes": {"a": {"type": "line", "params": {"points": 3, "length": 2}},
+        "t": {"type": "transform", "inputs": {"geo": "a"}, "params": {"group": "0", "proportional_enabled": true,
+            "proportional_radius": 2, "proportional_falloff": "linear", "translate": [1,0,0]}}}, "display": "t"})).unwrap();
+    assert_eq!(g.p(), &[1.0,0.0,0.0,0.5,0.0,1.0,0.0,0.0,2.0]);
 }
 
 #[test]

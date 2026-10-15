@@ -25,14 +25,24 @@ def _random_graph(seed):
     leaves = []
     for i in range(int(rng.integers(2, 4))):
         name = f"s{i}"
-        if rng.integers(2):
+        source_kind = int(rng.integers(5))
+        if source_kind == 0:
             params = {"columns": int(rng.integers(2, 9)), "rows": int(rng.integers(2, 9)),
                       "size_x": float(rng.uniform(0.5, 5)), "size_y": float(rng.uniform(0.5, 5))}
             kind = "grid"
-        else:
+        elif source_kind == 1:
             params = {"divisions": int(rng.integers(1, 4)), "size": _v3(rng, 0.5, 3),
                       "connectivity": str(rng.choice(["triangles", "quadrilaterals"]))}
             kind = "box"
+        elif source_kind == 2:
+            params = {"points": "0,0,0 1,0,0 1,1,0", "closed": bool(rng.integers(2))}
+            kind = "curve"
+        elif source_kind == 3:
+            params = {"points": int(rng.integers(2, 12)), "direction": _v3(rng, -1, 1)}
+            kind = "line"
+        else:
+            params = {"divisions": int(rng.integers(3, 20)), "radius": float(rng.uniform(0.1, 3))}
+            kind = "circle"
         nodes[name] = {"type": kind, "params": params}
         prev = name
         for j in range(int(rng.integers(1, 4))):
@@ -41,6 +51,11 @@ def _random_graph(seed):
             if kind == "transform":
                 params = {"translate": _v3(rng, -2, 2), "rotate": _v3(rng, -45, 45),
                           "scale": _v3(rng, 0.6, 1.5)}
+                if rng.integers(3) == 0:
+                    params.update({"group": "0", "proportional_enabled": True,
+                                   "proportional_radius": float(rng.uniform(0.5, 3)),
+                                   "proportional_falloff": str(rng.choice(["smooth", "sphere", "root", "sharp", "linear", "constant"])),
+                                   "proportional_connected": bool(rng.integers(2))})
             elif kind == "noise":
                 params = {"amplitude": _v3(rng, 0.05, 0.3), "frequency": float(rng.uniform(0.3, 2)),
                           "octaves": int(rng.integers(1, 5)), "seed": int(rng.integers(-100, 100)),
@@ -103,6 +118,11 @@ class RustFuzzTests(unittest.TestCase):
             *[chain(source={"type": "box", "params": {"divisions": 1, "size": [0, 0, 0],
                    "connectivity": connectivity}}) for connectivity in ("triangles", "quadrilaterals")],
             chain(("normal", {}), ("transform", {"scale": [0, 0, 0]})),
+            chain(("transform", {"group": "0", "proportional_enabled": True, "proportional_connected": True,
+                                  "proportional_radius": 0.5, "translate": [1,0,0]}),
+                  source={"type": "line", "params": {"points": 2, "length": 0}}),
+            chain(source={"type": "curve", "params": {"points": "0,0,0 0,0,0"}}),
+            chain(source={"type": "circle", "params": {"divisions": 3, "radius": 0}}),
             chain(("transform", {"translate": [1e6, -1e6, 1e6]}),
                   source={"type": "box", "params": {"size": [2, 2, 2]}}),
             *[chain(("noise", {"octaves": octaves, "frequency": frequency,
@@ -174,8 +194,7 @@ class RustFuzzTests(unittest.TestCase):
         self.assertEqual(json.loads(default.stdout.splitlines()[-1]), json.loads(single.stdout.splitlines()[-1]), case)
 
     def test_refused_settings_fall_back(self):
-        cases = [chain(("transform", {"group": "0-3"})),
-                 chain(("transform", {"proportional_enabled": True})),
+        cases = [chain(("transform", {"proportional_enabled": True, "proportional_falloff": "random"})),
                  chain(("normal", {"domain": "vertex"})),
                  chain(("noise", {"group": "0-3"})),
                  chain(source={"type": "box", "params": {"add_vertex_normals": True}}),
