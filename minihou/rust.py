@@ -197,17 +197,60 @@ def node_params(node_type: str) -> dict:
     return {k: (json.loads(v), bool(s)) for k, (v, s) in _need().node_params(node_type).items()}
 
 
-def cook(graph, node: Optional[str] = None):
-    """Cook a graph (a dict in graph JSON form, or a :class:`~minihou.graph.Graph`) with the Rust nodes; returns a Geometry.
-    Raises RuntimeError with the cook error (a node type or parameter the Rust core does not have yet, say)."""
+def _geometry(r):
+    """A MiniHou Geometry from the dict ``minihou_rs.cook`` / ``Session.cook`` return."""
     from .geometry import Geometry, Topology
-    if hasattr(graph, "to_dict"):
-        graph = graph.to_dict()
-    r = _need().cook(json.dumps(graph), node)
-    closed = r["closed"]
-    g = Geometry(int(r["npoints"]), Topology(r["vertex_point"], r["prim_offsets"], closed))
+    g = Geometry(int(r["npoints"]), Topology(r["vertex_point"], r["prim_offsets"], r["closed"]))
     for domain in ("point", "vertex", "prim"):
         for name, a in r[domain].items():
             g.table(domain)[name] = a
     g.detail.update(json.loads(r["detail_json"]))
     return g
+
+
+class Session:
+    """An incremental evaluator in the Rust core: edit a parameter, cook again, and only the nodes whose recipe changed run
+    (see ``rust/crates/minihou-core/src/session.rs``). ``cook`` gives the same result as :func:`cook` on the edited graph.
+
+    ``last_stats`` is ``{"cooked": [...], "cached": [...], "node_ms": {...}}`` for the last cook. The returned Geometry owns
+    copies of the arrays (the cache keeps its own).
+    """
+
+    def __init__(self, graph):
+        if hasattr(graph, "to_dict"):
+            graph = graph.to_dict()
+        self._s = _need().Session(graph if isinstance(graph, str) else json.dumps(graph))
+
+    def set_param(self, node: str, name: str, value) -> None:
+        self._s.set_param(node, name, json.dumps(value))
+
+    def set_bypass(self, node: str, flag: bool) -> None:
+        self._s.set_bypass(node, bool(flag))
+
+    def cook(self, target: Optional[str] = None):
+        return _geometry(self._s.cook(target))
+
+    @property
+    def last_stats(self) -> dict:
+        return self._s.stats()
+
+    def cache_bytes(self) -> int:
+        return int(self._s.cache_bytes())
+
+    def set_budget_bytes(self, n: Optional[int]) -> None:
+        self._s.set_budget_bytes(None if not n else int(n))
+
+    def clear(self) -> None:
+        self._s.clear()
+
+    def set_keep_versions(self, n: int) -> None:
+        """Results kept per node (default 2: the current one and the previous one)."""
+        self._s.set_keep_versions(int(n))
+
+
+def cook(graph, node: Optional[str] = None):
+    """Cook a graph (a dict in graph JSON form, its JSON text, or a :class:`~minihou.graph.Graph`) with the Rust nodes; returns a Geometry.
+    Raises RuntimeError with the cook error (a node type or parameter the Rust core does not have yet, say)."""
+    if hasattr(graph, "to_dict"):
+        graph = graph.to_dict()
+    return _geometry(_need().cook(graph if isinstance(graph, str) else json.dumps(graph), node))

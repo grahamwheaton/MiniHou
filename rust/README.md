@@ -103,6 +103,27 @@ Two Python-side changes came out of the profiling too (they help without Rust as
 check was converting the whole topology to int64 on every update; its counts are now computed once per topology and cached
 (`proxy.draw_stats`).
 
+## Incremental cook (`Session`)
+
+`Graph::cook` builds its cache per call. `minihou_core::session::Session` keeps it: edit a parameter, cook again, and only the
+nodes whose recipe changed run. Each node's result is cached under a content key (type, parameters as canonical JSON, bypass
+flag, the keys of what it reads), so there are no dirty flags and going back to an earlier value is a cache hit. Python:
+
+```python
+s = rust.Session(graph)             # a dict, JSON text or a minihou Graph
+geo = s.cook()                      # same result as rust.cook(graph)
+s.set_param('noise1', 'frequency', 2.5)
+geo = s.cook()                      # only noise1 and what reads it run; s.last_stats says which
+```
+
+* The cache keeps the newest 2 results per node (`set_keep_versions`) and can take a byte budget (`set_budget_bytes`, LRU).
+  Without the per-node limit a slider drag piled up about 600 MB per tick at 4M quads (6 GB after 7 edits).
+* At 4M quads (laptop): an edit of the noise node runs noise, transform and normal in about 100 ms; the grid is a cache hit.
+  The Python call also copies the arrays into numpy (about 50 ms here), which a native caller does not pay; returning views
+  of the cached arrays is the next step for Python.
+* Checked by `rust/crates/minihou-core/tests/session.rs` and `tests/test_rust_session.py` (edit sequences against a fresh cook,
+  byte for byte, stats, errors, budget, threads).
+
 ## Numbers
 
 `python bench/bench_rust.py --engine` (median after a warm-up) and `python bench/bench_first_call.py` (each backend in a fresh

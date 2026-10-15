@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use minihou_core::geometry::{validate_topology, AttrData, AttrTable, Topology};
+use minihou_core::geometry::{validate_topology, AttrData, AttrTable, Geometry, Topology};
 use minihou_core::{noise, nodes, normals, topo, Graph};
 use numpy::{PyArray1, PyArrayMethods, PyReadonlyArray1, PyReadonlyArray2, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -160,6 +160,11 @@ fn cook<'py>(py: Python<'py>, graph_json: &str, node: Option<String>) -> PyResul
         .map_err(|e| PyRuntimeError::new_err(e.0))?;
     // the cook's other results are gone, so this is normally the only reference: take it apart without copying
     let geo = Arc::try_unwrap(geo).unwrap_or_else(|shared| (*shared).clone());
+    geometry_dict(py, geo)
+}
+
+/// The dict `cook` returns, from a geometry this call owns (moves the arrays into numpy without copying).
+fn geometry_dict<'py>(py: Python<'py>, geo: Geometry) -> PyResult<Bound<'py, PyDict>> {
     let out = PyDict::new(py);
     out.set_item("npoints", geo.npoints)?;
     let t: Topology = Arc::try_unwrap(geo.topology).unwrap_or_else(|shared| (*shared).clone());
@@ -174,6 +179,75 @@ fn cook<'py>(py: Python<'py>, graph_json: &str, node: Option<String>) -> PyResul
     out.set_item("prim", table(py, geo.prim)?)?;
     out.set_item("detail_json", serde_json_string(&geo.detail))?;
     Ok(out)
+}
+
+/// An incremental evaluator (`minihou_core::session`): edit a parameter, cook again, and only the nodes whose recipe
+/// changed run. `cook` returns the same dict as the module-level `cook`; the arrays are copies (the cache keeps its own), made
+/// with the GIL released.
+#[pyclass]
+struct Session {
+    inner: minihou_core::session::Session,
+}
+
+#[pymethods]
+impl Session {
+    #[new]
+    fn new(graph_json: &str) -> PyResult<Self> {
+        let inner = minihou_core::session::Session::from_json(graph_json).map_err(|e| PyValueError::new_err(e.0))?;
+        Ok(Session { inner })
+    }
+
+    /// Set one parameter; `value_json` is the value as JSON text. ValueError for an unknown node or parameter.
+    fn set_param(&mut self, node: &str, name: &str, value_json: &str) -> PyResult<()> {
+        let value: serde_json::Value = serde_json::from_str(value_json)
+            .map_err(|e| PyValueError::new_err(format!("value is not valid JSON: {e}")))?;
+        self.inner.set_param(node, name, value).map_err(|e| PyValueError::new_err(e.0))
+    }
+
+    fn set_bypass(&mut self, node: &str, flag: bool) -> PyResult<()> {
+        self.inner.set_bypass(node, flag).map_err(|e| PyValueError::new_err(e.0))
+    }
+
+    #[pyo3(signature = (target=None))]
+    fn cook<'py>(&mut self, py: Python<'py>, target: Option<String>) -> PyResult<Bound<'py, PyDict>> {
+        let inner = &mut self.inner;
+        let geo = py.detach(move || inner.cook(target.as_deref()).map(|g| (*g).clone()))
+            .map_err(|e| PyRuntimeError::new_err(e.0))?;
+        geometry_dict(py, geo)
+    }
+
+    /// `{"cooked": [ids], "cached": [ids], "node_ms": {id: ms}}` of the last cook.
+    fn stats<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let s = self.inner.last_stats();
+        let out = PyDict::new(py);
+        out.set_item("cooked", s.cooked.clone())?;
+        out.set_item("cached", s.cached.clone())?;
+        let ms = PyDict::new(py);
+        for (id, t) in &s.node_ms {
+            ms.set_item(id, *t)?;
+        }
+        out.set_item("node_ms", ms)?;
+        Ok(out)
+    }
+
+    fn cache_bytes(&self) -> usize {
+        self.inner.cache_bytes()
+    }
+
+    /// LRU budget in bytes; `None` or 0 means unlimited.
+    #[pyo3(signature = (n=None))]
+    fn set_budget_bytes(&mut self, n: Option<usize>) {
+        self.inner.set_budget_bytes(n);
+    }
+
+    fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    /// Results kept per node (default 2: current and previous).
+    fn set_keep_versions(&mut self, n: usize) {
+        self.inner.set_keep_versions(n);
+    }
 }
 
 fn serde_json_string(m: &serde_json::Map<String, serde_json::Value>) -> String {
@@ -263,6 +337,7 @@ fn minihou_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(affine, m)?)?;
     m.add_function(wrap_pyfunction!(linear_normalized, m)?)?;
     m.add_function(wrap_pyfunction!(cook, m)?)?;
+    m.add_class::<Session>()?;
     m.add_function(wrap_pyfunction!(preview_layout, m)?)?;
     m.add_function(wrap_pyfunction!(chunk_bounds, m)?)?;
     m.add_function(wrap_pyfunction!(bounds, m)?)?;

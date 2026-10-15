@@ -70,7 +70,7 @@ impl Graph {
         Ok(Graph { nodes, display })
     }
 
-    fn node(&self, id: &str) -> Option<&NodeDef> {
+    pub(crate) fn node(&self, id: &str) -> Option<&NodeDef> {
         self.nodes.iter().find(|(n, _)| n == id).map(|(_, d)| d)
     }
 
@@ -95,6 +95,20 @@ impl Graph {
         let mut ev = Cook { graph: self, done: HashMap::new(), active: HashSet::new() };
         ev.node(&target)
     }
+}
+
+/// Run one node on inputs that are already cooked: a bypassed node passes its first input through (nothing connected: empty
+/// geometry), any other resolves its parameters, cooks and validates. Errors name the node. Shared by [`Graph::cook`] and
+/// [`crate::session::Session`] so the two can not drift apart.
+pub(crate) fn run_node(id: &str, def: &NodeDef, spec: &nodes::NodeSpec, inputs: &nodes::Inputs) -> Result<Geometry> {
+    let result = if def.bypass {
+        Ok(inputs.first().and_then(|i| i.first()).map(|g| (**g).clone()).unwrap_or_else(|| Geometry::points_only(Vec::new()).expect("empty geometry")))
+    } else {
+        Params::resolve(spec.params, def.params.as_ref())
+            .and_then(|p| (spec.cook)(inputs, &p))
+            .and_then(|g| g.validate().map(|_| g))
+    };
+    result.map_err(|e| e.in_node(id, &def.node_type))
 }
 
 struct Cook<'a> {
@@ -133,15 +147,7 @@ impl Cook<'_> {
             }
             inputs.push(got);
         }
-        let result = if def.bypass {
-            // a bypassed node passes its first input through (nothing connected: empty geometry)
-            Ok(inputs.first().and_then(|i| i.first()).map(|g| (**g).clone()).unwrap_or_else(|| Geometry::points_only(Vec::new()).expect("empty geometry")))
-        } else {
-            Params::resolve(spec.params, def.params.as_ref())
-                .and_then(|p| (spec.cook)(&inputs, &p))
-                .and_then(|g| g.validate().map(|_| g))
-        };
-        let geo = Arc::new(result.map_err(|e| e.in_node(id, &def.node_type))?);
+        let geo = Arc::new(run_node(id, def, spec, &inputs)?);
         self.active.remove(id);
         self.done.insert(id.to_string(), geo.clone());
         Ok(geo)
