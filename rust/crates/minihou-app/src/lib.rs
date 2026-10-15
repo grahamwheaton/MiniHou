@@ -244,6 +244,22 @@ impl Camera {
         self.yaw = yaw; self.pitch = pitch; self.ortho = ortho;
     }
     pub fn is_ortho(&self) -> bool { self.ortho }
+    /// The world-space ray through a point of the viewport: `nx`, `ny` in -1..1 (right, up), `aspect` = width / height.
+    pub fn ray(&self, nx: f32, ny: f32, aspect: f32) -> ([f32; 3], [f32; 3]) {
+        let eye = self.eye();
+        let f = norm(sub(self.target, eye));
+        let right = norm(cross(f, [0., 1., 0.]));
+        let up = cross(right, f);
+        let tan_half = (0.8_f32 / 2.0).tan();
+        if self.ortho {
+            let h = self.dist * tan_half;
+            let o = [0, 1, 2].map(|k| eye[k] + right[k] * nx * aspect * h + up[k] * ny * h);
+            (o, f)
+        } else {
+            let d = [0, 1, 2].map(|k| f[k] + right[k] * nx * aspect * tan_half + up[k] * ny * tan_half);
+            (eye, norm(d))
+        }
+    }
     /// Orbit angles in radians (yaw about +Y, pitch up) for the view gizmo.
     pub fn angles(&self) -> (f32, f32) { (self.yaw, self.pitch) }
     pub fn orbit_degrees(&mut self, yaw: f32, pitch: f32) {

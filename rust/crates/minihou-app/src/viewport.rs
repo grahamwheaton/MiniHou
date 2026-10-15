@@ -34,6 +34,8 @@ impl Scene {
         }
     }
     pub fn triangles(&self) -> usize { self.tri.len() / 3 }
+    pub fn positions(&self) -> &[f32] { &self.p }
+    pub fn triangle_indices(&self) -> &[u32] { &self.tri }
     pub fn new(g: &Geometry) -> Self {
         let (p,t) = (g.p(), &g.topology);
         let l = preview::layout(p, &t.vertex_point, &t.prim_offsets, t.closed.as_deref(), g.npoints, usize::MAX, usize::MAX, 100_000,8192);
@@ -96,7 +98,9 @@ fn make_depth(device: &wgpu::Device, w: u32, h: u32) -> wgpu::TextureView {
 
 pub struct Gpu {
     pipe_surf: wgpu::RenderPipeline, pipe_surf_bias: wgpu::RenderPipeline, pipe_wire: wgpu::RenderPipeline,
-    pipe_xray: wgpu::RenderPipeline, pipe_normals: wgpu::RenderPipeline, pipe_bounds: wgpu::RenderPipeline,
+    pipe_xray: wgpu::RenderPipeline, pipe_normals: wgpu::RenderPipeline, pipe_bounds: wgpu::RenderPipeline, pipe_select: wgpu::RenderPipeline,
+    /// Selection highlight: face triangles and line segments (positions, with a zero normal buffer of the same length).
+    sel_face: wgpu::Buffer, sel_face_n: u32, sel_line: wgpu::Buffer, sel_line_n: u32, zeros: wgpu::Buffer,
     nl_p: wgpu::Buffer, nl_n: wgpu::Buffer, nl_count: u32, bb_p: wgpu::Buffer, bb_n: wgpu::Buffer, bb_i: wgpu::Buffer,
     bind: wgpu::BindGroup, ubuf: wgpu::Buffer,
     vp: wgpu::Buffer, vn: wgpu::Buffer, ib: wgpu::Buffer, eb: wgpu::Buffer,
@@ -182,13 +186,17 @@ impl Gpu {
         let pipe_xray = mk("xray", "vs_surf", "fs_xray", &surf_bufs, wgpu::PrimitiveTopology::TriangleList, 0, true);
         let pipe_normals = mk("normals", "vs_wire", "fs_normals", &wire_bufs, wgpu::PrimitiveTopology::LineList, 0, false);
         let pipe_bounds = mk("bounds", "vs_wire", "fs_bounds", &wire_bufs, wgpu::PrimitiveTopology::LineList, 0, false);
+        let pipe_select = mk("select", "vs_surf", "fs_select", &surf_bufs, wgpu::PrimitiveTopology::TriangleList, 2, true);
+        let sel_face = buf("sel_face", bytemuck::cast_slice(&[0f32; 3]), wgpu::BufferUsages::VERTEX);
+        let sel_line = buf("sel_line", bytemuck::cast_slice(&[0f32; 3]), wgpu::BufferUsages::VERTEX);
+        let zeros = buf("zeros", bytemuck::cast_slice(&vec![0f32; 3 * 6 * 4096]), wgpu::BufferUsages::VERTEX);
         let nl_p = buf("nl_p", bytemuck::cast_slice(&sc.nlp), wgpu::BufferUsages::VERTEX);
         let nl_n = buf("nl_n", bytemuck::cast_slice(&sc.nln), wgpu::BufferUsages::VERTEX);
         let bb_p = buf("bb_p", bytemuck::cast_slice(&sc.bbp), wgpu::BufferUsages::VERTEX);
         let bb_n = buf("bb_n", bytemuck::cast_slice(&[0f32; 24]), wgpu::BufferUsages::VERTEX);
         let bb_i = buf("bb_i", bytemuck::cast_slice(&BOX_EDGES), wgpu::BufferUsages::INDEX);
 
-        Self { pipe_surf,pipe_surf_bias,pipe_wire,pipe_xray,pipe_normals,pipe_bounds,nl_p,nl_n,nl_count:(sc.nlp.len()/3) as u32,bb_p,bb_n,bb_i,bind,ubuf,vp,vn,ib,eb,ntri_idx:sc.tri.len() as u32,nedge_idx:sc.edge.len() as u32,edge_world:edge_world_of(sc) }
+        Self { pipe_surf,pipe_surf_bias,pipe_wire,pipe_xray,pipe_normals,pipe_bounds,pipe_select,sel_face,sel_face_n:0,sel_line,sel_line_n:0,zeros,nl_p,nl_n,nl_count:(sc.nlp.len()/3) as u32,bb_p,bb_n,bb_i,bind,ubuf,vp,vn,ib,eb,ntri_idx:sc.tri.len() as u32,nedge_idx:sc.edge.len() as u32,edge_world:edge_world_of(sc) }
     }
     pub fn upload(&mut self, device: &wgpu::Device, sc: &Scene) {
         let buf = |label, data: &[u8], usage| device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -205,6 +213,18 @@ impl Gpu {
         self.nl_n=buf("nl_n",bytemuck::cast_slice(&sc.nln),wgpu::BufferUsages::VERTEX);
         self.nl_count=(sc.nlp.len()/3) as u32;
         self.bb_p=buf("bb_p",bytemuck::cast_slice(&sc.bbp),wgpu::BufferUsages::VERTEX);
+    }
+    /// Show the selection: `faces` = 3 positions per triangle, `lines` = 2 positions per segment (flat xyz).
+    pub fn set_selection(&mut self, device: &wgpu::Device, faces: &[f32], lines: &[f32]) {
+        let buf = |label, data: &[f32]| device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label), contents: if data.is_empty() { &[0u8; 12] } else { bytemuck::cast_slice(data) }, usage: wgpu::BufferUsages::VERTEX });
+        // the normal buffer must cover every vertex: grow the zero buffer when a selection is larger than it
+        let need = faces.len().max(lines.len()) * 4;
+        if need as u64 > self.zeros.size() { self.zeros = buf("zeros", &vec![0f32; faces.len().max(lines.len()).next_power_of_two()]); }
+        self.sel_face = buf("sel_face", faces);
+        self.sel_face_n = (faces.len() / 3) as u32;
+        self.sel_line = buf("sel_line", lines);
+        self.sel_line_n = (lines.len() / 3) as u32;
     }
     pub fn draw(&self, state: &egui_wgpu::RenderState, target: &Target, cam: &Camera, mode: Mode, overlay: Overlay) {
         let (view_proj,view) = cam.matrices(target.size[0] as f32/target.size[1] as f32);
@@ -239,6 +259,16 @@ impl Gpu {
                 pass.set_pipeline(&self.pipe_wire); pass.set_vertex_buffer(0,self.vp.slice(..)); pass.set_vertex_buffer(1,self.vn.slice(..));
                 pass.set_index_buffer(self.eb.slice(..),wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..self.nedge_idx,0,0..1);
+            }
+            if self.sel_face_n > 0 {
+                pass.set_pipeline(&self.pipe_select);
+                pass.set_vertex_buffer(0,self.sel_face.slice(..)); pass.set_vertex_buffer(1,self.zeros.slice(..));
+                pass.draw(0..self.sel_face_n,0..1);
+            }
+            if self.sel_line_n > 0 {
+                pass.set_pipeline(&self.pipe_bounds);
+                pass.set_vertex_buffer(0,self.sel_line.slice(..)); pass.set_vertex_buffer(1,self.zeros.slice(..));
+                pass.draw(0..self.sel_line_n,0..1);
             }
             if overlay.normals && self.nl_count > 0 {
                 pass.set_pipeline(&self.pipe_normals);

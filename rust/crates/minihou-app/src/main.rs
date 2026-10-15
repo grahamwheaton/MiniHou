@@ -1,3 +1,4 @@
+mod picking;
 mod ui;
 mod viewport;
 use eframe::{egui, egui_wgpu};
@@ -22,6 +23,7 @@ struct App {
     /// The last cooked scene at full detail, and the proxy level it is currently uploaded at.
     scene: Option<Scene>, shown_level: f32, geo_rev: u64,
     blender_paths: Vec<PathBuf>, blender_bar: bool,
+    selection: picking::Selection, selection_dirty: bool,
 }
 impl App {
     fn new(doc: Document, path: PathBuf, state: egui_wgpu::RenderState) -> Result<Self> {
@@ -32,7 +34,7 @@ impl App {
             camera:Camera::frame([0.;3],1.),bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new(),
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
-            scene:None,shown_level:1.0,geo_rev:u64::MAX,blender_paths:Vec::new(),blender_bar:false };
+            scene:None,shown_level:1.0,geo_rev:u64::MAX,blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false };
         app.prefs = Preferences::load();
         app.keymap = Keymap::from_overrides_json(&app.prefs.keymap_overrides);
         app.keymap.emulate_numpad = app.prefs.emulate_numpad;
@@ -302,6 +304,17 @@ impl eframe::App for App {
                 self.shown_level = level;
             }
         }
+        // the selection highlight: rebuilt when the pick changed or the mode switched
+        if self.selection.mode != self.editor_state.selection { self.selection.clear(); self.selection.mode = self.editor_state.selection; self.selection_dirty = true; }
+        if self.selection_dirty {
+            if let (Some(gpu), Some(scene)) = (&mut self.gpu, &self.scene) {
+                let size = scene.radius * 0.012;
+                let (faces, lines) = picking::highlight(scene.positions(), scene.triangle_indices(), &self.selection, size);
+                gpu.set_selection(&self.state.device, &faces, &lines);
+                self.file_status = if self.selection.is_empty() { String::new() } else { format!("{} selected", self.selection.count()) };
+            }
+            self.selection_dirty = false;
+        }
         // the geometry summary of the displayed node, refreshed after each cook
         if self.geo_rev != self.cooking.completed {
             if let Some(g) = &self.cooking.geometry {
@@ -332,6 +345,9 @@ impl eframe::App for App {
             egui::TopBottomPanel::bottom("stats").show(ctx, |ui| ui::status::show(ui, &v, &mut out));
             let net = egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| ui::network::show(ui, &v, &mut out));
             self.network_hover = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| net.response.rect.contains(p));
+            if let Some(tool) = net.response.dnd_release_payload::<ui::ToolDrag>() {
+                out.push(UiAction::AddNode { node_type: tool.0.clone(), after: Some(self.selected.clone()) });
+            }
             egui::SidePanel::right("parameters").default_width(320.).show(ctx, |ui| {
                 egui::TopBottomPanel::bottom("geometry_info").resizable(true).default_height(220.).show_inside(ui, |ui| ui::geo_info::show(ui, &v, &mut out));
                 ui::params::show(ui, &v, &mut out);
@@ -357,6 +373,22 @@ impl eframe::App for App {
                     ui.painter().image(target.id, rect, egui::Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.)), egui::Color32::WHITE);
                 }
                 self.viewport_hover = response.hovered();
+                if response.clicked_by(egui::PointerButton::Primary) {
+                    if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {
+                        let (nx, ny) = (((at.x - rect.left()) / rect.width()) * 2. - 1., 1. - ((at.y - rect.top()) / rect.height()) * 2.);
+                        let (o, d) = self.camera.ray(nx, ny, rect.width() / rect.height());
+                        let mode = self.editor_state.selection;
+                        let extend = ctx.input(|i| i.modifiers.shift);
+                        let new = picking::pick_triangle(scene.positions(), scene.triangle_indices(), o, d)
+                            .map(|hit| picking::element_of(hit, scene.triangle_indices(), mode))
+                            .unwrap_or(picking::Selection { mode, ..Default::default() });
+                        if extend && !new.is_empty() { picking::extend(&mut self.selection, &new); } else { self.selection = new; }
+                        self.selection_dirty = true;
+                    }
+                }
+                if let Some(tool) = response.dnd_release_payload::<ui::ToolDrag>() {
+                    out.push(UiAction::AddNode { node_type: tool.0.clone(), after: Some(self.selected.clone()) });
+                }
                 ui::viewport_ui::overlay(ui, rect, &v, &mut out);
                 // proxy level, under the view gizmo
                 egui::Area::new(egui::Id::new("proxy_menu")).fixed_pos(egui::pos2(rect.right() - 150., rect.top() + 130.)).order(egui::Order::Foreground)

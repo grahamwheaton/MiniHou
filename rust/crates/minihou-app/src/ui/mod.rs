@@ -81,6 +81,10 @@ impl Actions {
     pub fn push(&mut self, action: UiAction) { self.0.push(action); }
 }
 
+/// Drag payload of a shelf tool: dropped on the viewport or the network it adds that node type.
+#[derive(Clone, Debug)]
+pub struct ToolDrag(pub String);
+
 /// UI-only per-node state (not part of the graph file).
 #[derive(Clone, Default, Debug)]
 pub struct NodeFlags { pub locked: bool, pub template: bool }

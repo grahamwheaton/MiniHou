@@ -107,6 +107,10 @@ fn fs_wire(i: WOut) -> @location(0) vec4<f32> {
     return out_color(lit);
 }
 
+// Selected faces: a flat orange wash
+@fragment
+fn fs_select(i: VOut) -> @location(0) vec4<f32> { return vec4<f32>(out_color(vec3<f32>(1.0, 0.55, 0.12)).rgb, 0.65); }
+
 // X-ray: the same shading, drawn see-through
 @fragment
 fn fs_xray(i: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {

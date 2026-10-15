@@ -116,7 +116,8 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.;
                 for tool in TABS[active].tools {
-                    let (r, response) = ui.allocate_exact_size(Vec2::new(54., 50.), Sense::click());
+                    let (r, response) = ui.allocate_exact_size(Vec2::new(54., 50.), Sense::click_and_drag());
+                    response.dnd_set_drag_payload(super::ToolDrag(tool.node_type.to_owned()));
                     if response.hovered() { ui.painter().rect_filled(r, 5., v.theme.input); ui.painter().rect_stroke(r, 5., Stroke::new(1.0_f32, v.theme.stroke), StrokeKind::Inside); }
                     let icon_rect = Rect::from_center_size(r.center_top() + Vec2::new(0., 12.), Vec2::splat(22.));
                     icon(ui.painter(), icon_rect, tool, v.theme.text, v.theme.c_src);
