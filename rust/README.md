@@ -105,13 +105,18 @@ check was converting the whole topology to int64 on every update; its counts are
 
 ## Numbers
 
-`python bench/bench_rust.py --engine` (median of 5 after a warm-up) and `python bench/bench_first_call.py` (each backend in a fresh
-process). "numba" is the engine as it was with numba installed; "Rust" is the same engine with the extension. Two machines:
+`python bench/bench_rust.py --engine` (median after a warm-up) and `python bench/bench_first_call.py` (each backend in a fresh
+process). "numba" is the engine as it was with numba installed; "Rust" is the same engine with the extension. Three machines:
 
 * **laptop**: MSI, i7-14700HX (20 cores / 28 threads), 16 GB, Windows 11, Python 3.14, numpy 2.4, numba 0.68
   (`bench/results/rust_2026-10-15_msi-28thread.json`, `first_call_2026-10-15_msi-28thread.json`);
 * **cloud**: a 4-thread VM (Xeon 2.1 GHz), Linux, Python 3.13, numpy 2.5, numba 0.68 (`rust_2026-10-15_cloud-4thread.json`,
   `first_call_2026-10-15_cloud-4thread.json`).
+* **work desktop**: i9-13900KS (24 cores / 32 threads), 128 GB, Windows 11, Python 3.13.16, numpy 2.5.4, numba 0.68.0;
+  9 repeats (`rust_2026-10-15_bob-32thread-4be6e0b.json`, `first_call_2026-10-15_bob-32thread-4be6e0b.json`).
+
+The laptop was also rerun quietly with 9 repeats on Python 3.14.4, numpy 2.4.4, and numba 0.68.0
+(`rust_2026-10-15_msi-28thread-e127d6e.json`, `first_call_2026-10-15_msi-28thread-e127d6e.json`).
 
 What an artist waits for, 4M quads (1M in brackets), numba -> Rust:
 
@@ -134,14 +139,29 @@ Single kernels, 4M quads, numpy / numba / Rust:
 | point normals (topology table cached) | 2026 / 112 / **40 ms** | 4253 / 106 / **71 ms** |
 | fbm3 noise, 4 octaves | 5211 / 50 / **33 ms** | 5262 / 193 / 204 ms |
 
-What this says:
+Same engine, three machines (4M quads, median ms, numba -> Rust, speed-up):
 
-* The gain is in the **whole path**, not in single kernels: the wins come from fewer passes over memory, no int64 temporaries,
-  keeping per-topology tables, and parallel steps numba runs serially.
-* **No first-call penalty**: numba's first real call on a big mesh costs extra even after its warm-up; Rust is as fast the
-  first time.
-* More cores help noise and normals a lot (6x and 1.8x from 4 to 28 threads), but edges and the new-mesh viewport only 1.5x and
-  2.4x: they had serial steps. The round below removed most of them.
+| | cloud 4 threads | laptop 28 threads | work desktop 32 threads |
+|---|---|---|---|
+| cook grid > noise > transform > normal | 1204 -> **542 ms**, 2.2x | 565 -> **216 ms**, 2.6x | 692 -> **257 ms**, 2.7x |
+| slider edit on noise | 1051 -> **357 ms**, 2.9x | 295 -> **123 ms**, 2.4x | 291 -> **151 ms**, 1.9x |
+| viewport new mesh | 2130 -> **543 ms**, 3.9x | 1414 -> **295 ms**, 4.8x | 1517 -> **307 ms**, 4.9x |
+| viewport positions only | 290 -> **73 ms**, 4.0x | 218 -> **32 ms**, 6.7x | 238 -> **36 ms**, 6.5x |
+| edges | 335 -> **214 ms**, 1.6x | 305 -> **86 ms**, 3.5x | 285 -> **90 ms**, 3.2x |
+| point normals | 106 -> **71 ms**, 1.5x | 109 -> **34 ms**, 3.2x | 106 -> **39 ms**, 2.7x |
+| fbm3 noise | 193 -> 204 ms, 0.9x | 37 -> **36 ms**, 1.0x | 48 -> **42 ms**, 1.1x |
+| whole graph from scratch | - | 605 -> **126 ms**, 4.8x | 718 -> **177 ms**, 4.1x |
+| first cook (fresh process) | 1100 -> **670 ms**, 1.6x | 569 -> **176 ms**, 3.2x | 499 -> **145 ms**, 3.4x |
+| first viewport (fresh process) | 2130 -> **800 ms**, 2.7x | 1285 -> **216 ms**, 6.0x | 1083 -> **192 ms**, 5.6x |
+
+What this adds:
+
+* **28 and 32 threads are close** across the new runs. Their Rust times are about **1.5-6x** faster than the 4-thread VM,
+  depending on the row; adding four more threads does not show a clear gain.
+* Numba's fresh-process warm-up takes **9.2 s** on the desktop and **0.9 s** on the laptop; Rust starts in **under 1 s** on
+  both. The first cook and viewport times are listed separately above.
+* **fbm3 noise is roughly tied** with numba on both Windows machines.
+* At **1M quads**, the desktop cook and slider edit improve by **1.4x** and **1.1x** respectively.
 
 ### Scaling round (after the laptop numbers)
 
@@ -169,14 +189,15 @@ viewport is the topology digest (blake2b over the index arrays: about 135 ms her
 
 ## Known gaps
 
-* **Two machines measured** (above); the laptop numbers predate the scaling round.
+* **Three machines measured** (above). The Rust extension has been built and tested on Windows with Python 3.13 and 3.14.
 * **Nobody gets it yet**: `minihou_rs` is not in the desktop build or the requirements; it has to be built (see Build).
 * **Memory**: the cached point-to-primitive table is about 80 MB for a 4M-quad topology, held with the cooked geometry and not
   counted by the evaluator's memory budget yet.
 
 ## Next steps
 
-1. Re-run the laptop benchmarks after the scaling round; decide on the topology digest (a parallel hash would change the digest
+1. The laptop was rerun after the scaling round and the work desktop was measured. Test end to end with a real Blender scene;
+   GPU choice in the desktop host is a separate question. Decide on the topology digest (a parallel hash would change the digest
    of big meshes, which saved measurement references and RBD bake caches use).
 2. Package the wheel with the desktop build (the biggest win for people without numba: 12-14 s down to 0.2-0.3 s at 4M quads).
 3. Count the per-topology caches (`_draw_stats`, `_point_prims`) in the evaluator's memory budget.
