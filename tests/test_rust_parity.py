@@ -15,7 +15,7 @@ from minihou import Evaluator, Geometry, Graph, accel, proxy, rust, topo
 from minihou.geometry import Topology
 from minihou.sdk import REGISTRY
 
-NODE_TYPES = ["grid", "box", "point", "curve", "line", "circle", "sphere", "tube", "torus", "bound", "transform", "normal", "noise", "merge", "null", "output"]
+NODE_TYPES = ["grid", "box", "point", "curve", "line", "circle", "sphere", "tube", "torus", "bound", "delete", "transform", "normal", "noise", "merge", "null", "output"]
 
 
 @contextlib.contextmanager
@@ -51,12 +51,11 @@ def assert_same_geometry(tc, a: Geometry, b: Geometry, atol=1e-5):
             x, y = np.asarray(ta[name]), np.asarray(tb[name])
             tc.assertEqual(x.shape, y.shape, f"{domain} {name}")
             tc.assertEqual(x.dtype, y.dtype, f"{domain} {name}")
+            np.testing.assert_allclose(x, y, rtol=atol, atol=atol, err_msg=f"{domain} {name}")
     tc.assertEqual(sorted(a.detail.keys()), sorted(b.detail.keys()), "detail keys")
     for k in a.detail:
         va, vb = a.detail[k], b.detail[k]
-        if isinstance(va, (list, tuple, np.ndarray)) and isinstance(vb, (list, tuple, np.ndarray)):
-            np.testing.assert_allclose(va, vb, rtol=atol, atol=atol, err_msg=f"detail {k}")
-        elif isinstance(va, (int, float, np.number)) and isinstance(vb, (int, float, np.number)):
+        if k in ("bound_min", "bound_max", "bound_size"):
             np.testing.assert_allclose(va, vb, rtol=atol, atol=atol, err_msg=f"detail {k}")
         else:
             tc.assertEqual(va, vb, f"detail {k}")
@@ -94,6 +93,8 @@ class RustParityTests(unittest.TestCase):
                       chain(("normal", {"domain": "vertex"})),
                       chain(("noise", {"group": "0-3"})),
                       chain(("bound", {"oriented": True})),
+                      chain(("delete", {"expr": "rand(@ptnum, 1) < 0.5"})),
+                      chain(("delete", {"expr": "@nope > 0"})),
                       {"version": 1, "nodes": {"b": {"type": "box", "params": {"add_vertex_normals": True}}}, "display": "b"},
                       {"version": 1, "nodes": {"w": {"type": "wrangle"}}, "display": "w"}):
             with self.subTest(graph=json.dumps(graph)[:90]), self.assertRaises(RuntimeError) as cm:
@@ -198,6 +199,23 @@ class RustParityTests(unittest.TestCase):
                 self.same({"version": 1, "nodes": {"b": {"type": "box", "params": {"divisions": 3}},
                                                    "n": {"type": "normal", "inputs": {"geo": "b"}, "params": {"domain": domain}}},
                            "display": "n"})
+    def test_delete(self):
+        for expr in ("@P.x > 0", "@P.y <= 0.2", "@P.z >= -0.5", "(@P.x < -0.1)", "", "0", "1"):
+            for invert in (False, True):
+                with self.subTest(expr=expr, invert=invert):
+                    self.same(chain(("delete", {"expr": expr, "invert": invert})))
+        # polygon drop and attribute compaction on box
+        self.same(chain(("normal", {"domain": "point"}), ("normal", {"domain": "prim"}),
+                        ("delete", {"expr": "@P.y > 0"}), source={"type": "box", "params": {"divisions": 2}}))
+        # open curve run splitting and runs < 2 dropped
+        self.same(chain(("delete", {"expr": "@P.x > 1.5"}),
+                        source={"type": "curve", "params": {"points": "0,0,0 1,0,0 2,0,0 3,0,0 4,0,0", "closed": False}}))
+        # closed curve: any vertex deleted drops the primitive
+        self.same(chain(("delete", {"expr": "@P.x > 0.5"}),
+                        source={"type": "curve", "params": {"points": "0,0,0 1,0,0 1,1,0 0,1,0", "closed": True}}))
+        # point source
+        self.same(chain(("delete", {"expr": "@P.x > 0"}), source={"type": "point", "params": {"center": [1, 2, 3]}}))
+        self.same(chain(("delete", {"expr": "@P.x > 0"}), source={"type": "point", "params": {"center": [-1, 2, 3]}}))
 
     def test_noise(self):
         for params in ({}, {"amplitude": [0.5, 0.2, 1.5], "frequency": 3.3, "octaves": 4, "seed": 7},

@@ -13,7 +13,7 @@ rust/
     src/preview.rs              the viewport's layout: fan triangles, Morton order (radix sort), run table, draw counts
     src/normals.rs              Newell face normals, area-weighted point normals
     src/noise.rs                Perlin / fractal noise, bit for bit the numpy float32 arithmetic
-    src/nodes/                  grid, box, point, curve, line, circle, sphere, tube, torus, bound, transform, normal, noise, merge, null, output
+    src/nodes/                  grid, box, point, curve, line, circle, sphere, tube, torus, bound, delete, transform, normal, noise, merge, null, output
     src/graph.rs                reads graph JSON and cooks it (pull evaluation, each node once per cook)
     tests/core.rs               Rust-only checks
     examples/profile_*.rs       kernel timing without Python (RAYON_NUM_THREADS=1 shows what does not scale)
@@ -70,6 +70,7 @@ the whole test suite with the extension installed.
 | `tube` | radius_bottom, radius_top, height, center, rotate, scale, uniform scale, rows, columns, caps | |
 | `torus` | radius, thickness, center, rotate, scale, uniform scale, rows, columns | |
 | `bound` | padding; the world-axis box and its `bound_min`/`bound_max`/`bound_size` detail | `oriented` (a principal-axis fit needs `np.linalg.svd`) |
+| `delete` | expr (@P.x/y/z comparisons, empty, 0 and 1 literals), invert, point/primitive/vertex attribute compaction, curve splitting | general wrangles / attribute expressions |
 | `transform` | translate, rotate, scale, uniform scale, pivot, axis rotation, N; point/primitive named groups, numeric ranges and exclusions; simple `@P.x/y/z` comparisons; proportional editing with smooth, sphere, root, sharp, linear and constant falloffs, connected and projected distances | general wrangle group expressions, random falloff |
 | `normal` | point, prim | vertex (cusped) |
 | `noise` | scalar / vector, P or any attribute, octaves, lacunarity, gain, seed | `group` |
@@ -85,9 +86,11 @@ Python node's parameters with the same defaults, and a test compares them with `
 `tests/test_rust_parity.py` cooks the same graphs in Python and Rust, with both Python paths (numpy and numba, which the
 Python engine picks between) as the oracle:
 
-* topology, attribute names, dtypes, shapes and detail must match exactly; edges are numbered identically on both paths
+* topology, attribute names, dtypes, shapes and detail must match exactly (non-float detail attributes and float detail attributes outside bounding box limits are bit-exact); edges are numbered identically on both paths
   (below and above the 20k-vertex numba threshold, with open curves, one-vertex and empty primitives);
-* floats within 1e-5 (positions differ by 1-2 float32 ulps after a matrix product); `fbm3` matches numpy bit for bit;
+* floats within 1e-5 (positions differ by 1-2 float32 ulps after a matrix product or fused JIT operations); `fbm3` matches numpy bit for bit;
+* `bound` detail attributes (`bound_min`, `bound_max`, `bound_size`) are bit-exact against the NumPy oracle; however, when `bound` is placed downstream of a node that computes positions with JIT-fused floating point operations (such as Numba's noise kernel), the bounding box min/max coordinates naturally inherit the ~1e-7 float32 rounding differences of the upstream points under the Numba oracle;
+* `serde_json` with the `float_roundtrip` feature ensures bit-exact IEEE-754 roundtripping of float numbers in JSON graph inputs and outputs;
 * a seeded set of random parameters per node goes through both engines too;
 * malformed topology is a `ValueError`, not a crash.
 

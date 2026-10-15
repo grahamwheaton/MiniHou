@@ -144,6 +144,18 @@
    "kind": "str"
   }
  },
+ "delete": {
+  "expr": {
+   "default": "@P.z < 0",
+   "doc": "Wrangle expression over points; matching points are deleted",
+   "kind": "str"
+  },
+  "invert": {
+   "default": false,
+   "doc": "Delete the points that do NOT match instead",
+   "kind": "bool"
+  }
+ },
  "grid": {
   "center": {
    "default": [
