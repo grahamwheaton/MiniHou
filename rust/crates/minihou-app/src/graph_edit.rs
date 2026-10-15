@@ -87,6 +87,85 @@ pub fn delete(value: &Value, id: &str) -> Option<Value> {
     Some(value)
 }
 
+pub fn delete_set(value: &Value, ids: &[String]) -> Option<Value> {
+    let mut next = value.clone();
+    let mut changed = false;
+    for id in ids {
+        if let Some(deleted) = delete(&next, id) { next = deleted; changed = true; }
+    }
+    changed.then_some(next)
+}
+
+/// Remove every incoming and outgoing wire of a node without removing the card.
+pub fn disconnect_all(value: &Value, id: &str) -> Option<Value> {
+    nodes(value)?.get(id)?;
+    let mut next = value.clone();
+    nodes_mut(&mut next)?.get_mut(id)?.as_object_mut()?.remove("inputs");
+    for node in nodes_mut(&mut next)?.values_mut() {
+        if let Some(inputs) = node.get_mut("inputs").and_then(Value::as_object_mut) {
+            inputs.retain(|_, source| match source {
+                Value::String(s) => s != id,
+                Value::Array(a) => { a.retain(|item| item.as_str() != Some(id)); !a.is_empty() },
+                _ => true,
+            });
+        }
+    }
+    Some(next)
+}
+
+/// Dissolve nodes in order, replacing each use with its first input source.
+/// `connect` supplies the same target-port validity check as an ordinary wire.
+pub fn dissolve_set(value: &Value, ids: &[String]) -> Option<Value> {
+    let mut next = value.clone();
+    let mut changed = false;
+    for id in ids {
+        let Some(node) = nodes(&next)?.get(id) else { continue };
+        let source = node.get("inputs").and_then(Value::as_object)
+            .and_then(|inputs| {
+                let ty = node.get("type")?.as_str()?;
+                let spec = nodes::get(ty)?;
+                spec.inputs.iter().find_map(|port| inputs.get(port.name)).or_else(|| inputs.values().next())
+            })
+            .and_then(|input| input.as_str().or_else(|| input.as_array()?.iter().find_map(Value::as_str)))
+            .map(str::to_owned);
+        let consumers: Vec<(String, String)> = nodes(&next)?.iter().filter(|(target, _)| *target != id)
+            .flat_map(|(target, node)| node.get("inputs").and_then(Value::as_object).into_iter()
+                .flat_map(move |inputs| inputs.iter().filter(move |(_, v)| v.as_str() == Some(id)
+                    || v.as_array().is_some_and(|a| a.iter().any(|x| x.as_str() == Some(id))))
+                    .map(move |(port, _)| (target.clone(), port.clone()))))
+            .collect();
+        if let Some(source) = source.as_deref() {
+            for (target, port) in consumers {
+                if connect(&next, source, &target, Some(&port)).is_some() {
+                    let input = nodes_mut(&mut next)?.get_mut(&target)?.get_mut("inputs")?.get_mut(&port)?;
+                    match input {
+                        Value::String(s) if s == id => *s = source.to_owned(),
+                        Value::Array(items) => {
+                            for item in items.iter_mut() { if item.as_str() == Some(id) { *item = json!(source); } }
+                            let mut seen = HashSet::new();
+                            items.retain(|item| item.as_str().is_some_and(|s| seen.insert(s.to_owned())));
+                        },
+                        _ => {},
+                    }
+                }
+            }
+        }
+        let displayed = minihou_app::display_nodes(&next);
+        next = delete(&next, id)?;
+        if displayed.iter().any(|shown| shown == id) && source.as_deref().is_some_and(|s| nodes(&next).is_some_and(|n| n.contains_key(s))) {
+            let mut replacement = displayed;
+            for shown in &mut replacement { if shown == id { *shown = source.clone().unwrap(); } }
+            replacement.retain(|shown| nodes(&next).is_some_and(|n| n.contains_key(shown)));
+            let mut seen = HashSet::new();
+            replacement.retain(|shown| seen.insert(shown.clone()));
+            next["display"] = if replacement.len() == 1 { json!(replacement[0]) } else { json!(replacement) };
+        }
+        changed = true;
+    }
+    changed.then_some(next)
+}
+
+#[cfg(test)]
 pub fn duplicate(value: &Value, id: &str) -> Option<(Value, String)> {
     let mut value = value.clone();
     let all = nodes_mut(&mut value)?;
@@ -255,5 +334,66 @@ mod tests {
         assert_eq!(v["nodes"]["merge2"]["inputs"]["geos"], json!(["box3"]));
         let (v, ids) = paste(&v, &clip).unwrap();
         assert_eq!(ids, ["box4", "merge3"]); validated(v).unwrap();
+    }
+    #[test] fn dissolve_chain_branch_and_display() {
+        let v = json!({"version":1,"display":"transform1","nodes":{
+            "box1":{"type":"box"},
+            "transform1":{"type":"transform","inputs":{"geo":"box1"}},
+            "transform2":{"type":"transform","inputs":{"geo":"transform1"}},
+            "transform3":{"type":"transform","inputs":{"geo":"transform1"}}
+        }});
+        let next = dissolve_set(&v, &["transform1".into()]).unwrap();
+        assert!(next["nodes"].get("transform1").is_none());
+        assert_eq!(next["nodes"]["transform2"]["inputs"]["geo"], "box1");
+        assert_eq!(next["nodes"]["transform3"]["inputs"]["geo"], "box1");
+        assert_eq!(next["display"], "box1");
+        validated(next).unwrap();
+    }
+    #[test] fn dissolve_multi_input_and_generator() {
+        let next = dissolve_set(&graph(), &["merge1".into()]).unwrap();
+        assert_eq!(next["display"], "box1");
+        let next = dissolve_set(&graph(), &["box1".into()]).unwrap();
+        assert_eq!(next["nodes"]["merge1"]["inputs"]["geos"], json!(["box2"]));
+        validated(next).unwrap();
+        let mut v = graph();
+        v["nodes"]["transform1"] = json!({"type":"transform","inputs":{"geo":"box1"}});
+        v["nodes"]["merge1"]["inputs"]["geos"] = json!(["transform1","box2","box1"]);
+        let next = dissolve_set(&v, &["transform1".into()]).unwrap();
+        assert_eq!(next["nodes"]["merge1"]["inputs"]["geos"], json!(["box1","box2"]));
+        validated(next).unwrap();
+    }
+    #[test] fn dissolve_selected_chain_and_delete_set_are_atomic_values() {
+        let v = json!({"version":1,"display":"transform2","nodes":{
+            "box1":{"type":"box"},
+            "transform1":{"type":"transform","inputs":{"geo":"box1"}},
+            "transform2":{"type":"transform","inputs":{"geo":"transform1"}},
+            "transform3":{"type":"transform","inputs":{"geo":"transform2"}}
+        }});
+        let ids = ["transform1".into(), "transform2".into()];
+        let next = dissolve_set(&v, &ids).unwrap();
+        assert_eq!(next["nodes"]["transform3"]["inputs"]["geo"], "box1");
+        assert_eq!(next["display"], "box1");
+        validated(next).unwrap();
+        let deleted = delete_set(&v, &ids).unwrap();
+        assert!(deleted["nodes"]["transform3"]["inputs"].as_object().unwrap().is_empty());
+        validated(deleted).unwrap();
+    }
+    #[test] fn disconnect_all_keeps_node_and_clears_both_sides() {
+        let v = json!({"version":1,"display":"transform2","nodes":{
+            "box1":{"type":"box"},
+            "transform1":{"type":"transform","inputs":{"geo":"box1"}},
+            "transform2":{"type":"transform","inputs":{"geo":"transform1"}}
+        }});
+        let next = disconnect_all(&v, "transform1").unwrap();
+        assert!(next["nodes"]["transform1"].get("inputs").is_none());
+        assert!(next["nodes"]["transform2"]["inputs"].as_object().unwrap().is_empty());
+        validated(next).unwrap();
+    }
+    #[test] fn delete_last_node_leaves_valid_empty_graph() {
+        let v = json!({"version":1,"display":"box1","nodes":{"box1":{"type":"box"}}});
+        let next = delete_set(&v, &["box1".into()]).unwrap();
+        assert!(next.get("display").is_none());
+        assert!(next["nodes"].as_object().unwrap().is_empty());
+        validated(next).unwrap();
     }
 }

@@ -98,6 +98,27 @@ fn ensure_transform_target(value: &mut Value, source: &str, object_mode: bool, a
 fn toggle_edit_mode(current: ui::SelectionMode, last: &mut ui::SelectionMode) -> ui::SelectionMode {
     if current == ui::SelectionMode::Object { *last } else { *last = current; ui::SelectionMode::Object }
 }
+fn select_nodes(set: &mut std::collections::BTreeSet<String>, ids: impl IntoIterator<Item = String>, extend: bool, toggle: bool) {
+    if !extend && !toggle { set.clear(); }
+    for id in ids {
+        if toggle { if !set.remove(&id) { set.insert(id); } }
+        else { set.insert(id); }
+    }
+}
+#[cfg(test)]
+#[test]
+fn selection_set_replaces_toggles_and_extends() {
+    let mut set = std::collections::BTreeSet::new();
+    select_nodes(&mut set, ["a".into()], false, false);
+    select_nodes(&mut set, ["b".into()], false, true);
+    assert_eq!(set, std::collections::BTreeSet::from(["a".into(), "b".into()]));
+    select_nodes(&mut set, ["a".into()], false, true);
+    assert_eq!(set, std::collections::BTreeSet::from(["b".into()]));
+    select_nodes(&mut set, ["c".into()], true, false);
+    assert_eq!(set.len(), 2);
+    select_nodes(&mut set, ["d".into()], false, false);
+    assert_eq!(set, std::collections::BTreeSet::from(["d".into()]));
+}
 
 #[derive(Clone)]
 struct PrimitivePreview {
@@ -167,7 +188,7 @@ fn get_primitive_preview(node_type: &str) -> Option<PrimitivePreview> {
 
 struct App {
     editor: EditorDocument, worker: CookWorker<Scene>, cooking: CookState,
-    selected: String, display: String,
+    selected: String, selected_set: std::collections::BTreeSet<String>, display: String,
     state: egui_wgpu::RenderState, gpu: Option<Gpu>, target: Option<Target>,
     camera: Camera, bounds: ([f32;3], f32), mode: Mode,
     file_status: String,
@@ -210,7 +231,7 @@ impl App {
                 for (a,b) in edges { if let (Some(pa), Some(pb)) = (position(a), position(b)) { if inside([0,1,2].map(|k| (pa[k] + pb[k]) * 0.5)) { found.edges.push((a,b)); } } }
             }
             ui::SelectionMode::Faces => { for (i,t) in tris.as_chunks::<3>().0.iter().enumerate() { if let (Some(a), Some(b), Some(c)) = (position(t[0]), position(t[1]), position(t[2])) { if inside([0,1,2].map(|k| (a[k]+b[k]+c[k])/3.)) { found.tris.push(i as u32); } } } }
-            ui::SelectionMode::Object => { if inside(self.bounds.0) { self.selected = self.display.clone(); } }
+            ui::SelectionMode::Object => { if inside(self.bounds.0) { self.selected = self.display.clone(); select_nodes(&mut self.selected_set, [self.display.clone()], extend, false); } }
         }
         if subtract { self.selection.points.retain(|x| !found.points.contains(x)); self.selection.edges.retain(|x| !found.edges.contains(x)); self.selection.tris.retain(|x| !found.tris.contains(x)); }
         else if extend { for x in found.points { if !self.selection.points.contains(&x) { self.selection.points.push(x); } } for x in found.edges { if !self.selection.edges.contains(&x) { self.selection.edges.push(x); } } for x in found.tris { if !self.selection.tris.contains(&x) { self.selection.tris.push(x); } } }
@@ -220,7 +241,7 @@ impl App {
     fn new(doc: Document, path: PathBuf, state: egui_wgpu::RenderState) -> Result<Self> {
         let display = Graph::from_value(doc.value())?.main_output()?;
         let worker = CookWorker::start(&doc, Scene::new)?;
-        let mut app = Self { selected:display.clone(), display, editor:EditorDocument::new(doc, path), worker,
+        let mut app = Self { selected:display.clone(), selected_set: std::collections::BTreeSet::from([display.clone()]), display, editor:EditorDocument::new(doc, path), worker,
             cooking:CookState::default(), state,gpu:None,target:None,
             camera:Camera::frame([0.;3],1.),bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new(),
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),
@@ -300,6 +321,7 @@ impl App {
         };
         if self.commit_document(value, &format!("add {node_type}")) {
             self.selected = id.clone();
+            self.selected_set = std::collections::BTreeSet::from([id.clone()]);
             self.display = id;
         }
     }
@@ -369,7 +391,7 @@ impl App {
         if let Some(before) = self.transform_before.take() {
             self.editor.history.record(before, &self.editor.doc);
         }
-        if let Some(target) = self.transform_target.take() { self.selected = target; }
+        if let Some(target) = self.transform_target.take() { self.selected_set = std::collections::BTreeSet::from([target.clone()]); self.selected = target; }
     }
     fn cancel_transform(&mut self) {
         if let Some(before) = self.transform_before.take() {
@@ -529,7 +551,7 @@ impl App {
         let Some((value, id)) = graph_edit::add_sketch(self.editor.doc.value(), name, points, closed, &self.selected) else {
             self.file_status = "Could not add sketch".into(); return;
         };
-        if self.commit_document(value, "add sketch") { self.selected = id.clone(); self.display = id; }
+        if self.commit_document(value, "add sketch") { self.selected = id.clone(); self.selected_set = std::collections::BTreeSet::from([id.clone()]); self.display = id; }
     }
     fn add_measurement(&mut self, a: [f32; 3], b: [f32; 3]) {
         let mut value = self.editor.doc.value().clone();
@@ -550,18 +572,22 @@ impl App {
     }
     /// Delete a node and every wire into it.
     fn delete_node(&mut self, id: &str) {
-        let Some(value) = graph_edit::delete(self.editor.doc.value(), id) else { return };
+        let ids = if self.selected_set.contains(id) { self.selected_set.iter().cloned().collect::<Vec<_>>() } else { vec![id.to_owned()] };
+        let Some(value) = graph_edit::delete_set(self.editor.doc.value(), &ids) else { return };
         if self.commit_document(value, "delete the node") {
             if let Ok(g) = Graph::from_value(self.editor.doc.value()) {
-                if self.selected == id { self.selected = g.nodes.first().map(|(n, _)| n.clone()).unwrap_or_default(); }
+                self.selected_set.retain(|node| !ids.contains(node));
+                if ids.contains(&self.selected) { self.selected = g.nodes.first().map(|(n, _)| n.clone()).unwrap_or_default(); }
                 self.display = g.main_output().unwrap_or_else(|_| self.selected.clone());
             }
         }
     }
     /// Copy a node (parameters and inputs) under a fresh id and select the copy.
     fn duplicate_node(&mut self, id: &str) {
-        let Some((value, new_id)) = graph_edit::duplicate(self.editor.doc.value(), id) else { return };
-        if self.commit_document(value, "duplicate the node") { self.selected = new_id; }
+        let ids = if self.selected_set.contains(id) { self.selected_set.iter().cloned().collect::<Vec<_>>() } else { vec![id.to_owned()] };
+        let Some(clip) = graph_edit::copy(self.editor.doc.value(), &ids) else { return };
+        let Some((value, new_ids)) = graph_edit::paste(self.editor.doc.value(), &clip) else { return };
+        if self.commit_document(value, "duplicate the node") { self.selected = new_ids[0].clone(); self.selected_set = new_ids.into_iter().collect(); }
     }
     /// Wire `from` into input `port` of `to` (its first input when `port` is None); multi inputs gain one more wire.
     fn connect_nodes(&mut self, from: &str, to: &str, port: Option<&str>) {
@@ -577,13 +603,13 @@ impl App {
         let e = self.editor_state;
         match name {
             "copy" => {
-                self.clipboard = graph_edit::copy(self.editor.doc.value(), std::slice::from_ref(&self.selected));
+                self.clipboard = graph_edit::copy(self.editor.doc.value(), &self.selected_set.iter().cloned().collect::<Vec<_>>());
                 if self.clipboard.is_some() { self.file_status = "Node copied".into(); }
             }
             "paste" => {
                 if let Some((value, ids)) = self.clipboard.as_ref().and_then(|clip| graph_edit::paste(self.editor.doc.value(), clip)) {
                     if self.commit_document(value, "paste nodes") {
-                        self.selected = ids[0].clone();
+                        self.selected = ids[0].clone(); self.selected_set = ids.iter().cloned().collect();
                         self.file_status = format!("Pasted {} node(s)", ids.len());
                     }
                 }
@@ -592,8 +618,13 @@ impl App {
                 let mode = toggle_edit_mode(e.selection, &mut self.last_edit_selection);
                 self.editor_state.apply(C::Selection(mode));
             }
-            "select_none" => { self.selection.clear(); self.selection_dirty = true; }
+            "select_none" => { self.selection.clear(); self.selection_dirty = true; self.selected_set.clear(); }
             "select_all" => {
+                if self.network_hover {
+                    self.selected_set = self.editor.doc.value()["nodes"].as_object().map(|n| n.keys().cloned().collect()).unwrap_or_default();
+                    self.selected = self.selected_set.iter().next().cloned().unwrap_or_default();
+                    return;
+                }
                 if let Some(scene) = &self.scene {
                     match e.selection {
                         ui::SelectionMode::Points => self.selection.points = (0..scene.positions().len() / 3).map(|i| i as u32).collect(),
@@ -603,7 +634,7 @@ impl App {
                             for t in scene.triangle_indices().as_chunks::<3>().0 { for (a,b) in [(t[0],t[1]),(t[1],t[2]),(t[2],t[0])] { edges.insert((a.min(b),a.max(b))); } }
                             self.selection.edges = edges.into_iter().collect();
                         }
-                        ui::SelectionMode::Object => self.object_hidden = false,
+                        ui::SelectionMode::Object => { self.object_hidden = false; self.selected_set = self.editor.doc.value()["nodes"].as_object().map(|n| n.keys().cloned().collect()).unwrap_or_default(); },
                     }
                     self.selection_dirty = true;
                 }
@@ -615,15 +646,37 @@ impl App {
             "timeline_toggle" | "timeline_previous" | "timeline_next" | "timeline_start" | "timeline_end" => ui::viewport_ui::timeline_command(ctx, name),
             "pie_menu" => ui::network::open_pie_menu(ctx, &self.editor.path),
             "display_flag" => {
-                if let Some(value) = graph_edit::set_display(self.editor.doc.value(), &self.selected, ctx.input(|i| i.modifiers.shift)) {
-                    self.commit_document(value, "set display flag");
+                let mut value = self.editor.doc.value().clone();
+                let mut changed = false;
+                for (index, id) in self.selected_set.iter().enumerate() {
+                    if let Some(next) = graph_edit::set_display(&value, id, index > 0 || ctx.input(|i| i.modifiers.shift)) { value = next; changed = true; }
+                }
+                if changed && self.commit_document(value, "set display flag") {
+                    self.display = minihou_app::display_nodes(self.editor.doc.value()).first().cloned().unwrap_or_default();
                 }
             }
             "mute_flag" => {
-                let bypass = self.editor.doc.value()["nodes"][&self.selected]["flags"]["bypass"].as_bool().unwrap_or(false);
-                self.edit(Edit::Bypass { node: self.selected.clone(), flag: !bypass }, false);
+                let mut value = self.editor.doc.value().clone();
+                for id in &self.selected_set {
+                    let bypass = value["nodes"][id]["flags"]["bypass"].as_bool().unwrap_or(false);
+                    value["nodes"][id]["flags"]["bypass"] = json!(!bypass);
+                }
+                if !self.selected_set.is_empty() { self.commit_document(value, "mute nodes"); }
             }
-            "template_flag" => { let f = self.flags.entry(self.selected.clone()).or_default(); f.template = !f.template; }
+            "template_flag" => { for id in &self.selected_set { let f = self.flags.entry(id.clone()).or_default(); f.template = !f.template; } }
+            "selectable_template_flag" => self.file_status = "Selectable template flags are not supported yet".into(),
+            "delete_selection" => {
+                if self.viewport_hover && self.editor_state.selection != ui::SelectionMode::Object {
+                    self.file_status = "Component deletion is not supported by the Rust graph yet".into();
+                } else if let Some(id) = self.selected_set.iter().next().cloned() { self.delete_node(&id); }
+            }
+            "duplicate_selection" => { if let Some(id) = self.selected_set.iter().next().cloned() { self.duplicate_node(&id); } }
+            "dissolve_selection" => {
+                let ids = self.selected_set.iter().cloned().collect::<Vec<_>>();
+                if let Some(value) = graph_edit::dissolve_set(self.editor.doc.value(), &ids) {
+                    if self.commit_document(value, "dissolve nodes") { self.selected_set.clear(); self.display = minihou_app::display_nodes(self.editor.doc.value()).first().cloned().unwrap_or_default(); self.selected = self.display.clone(); }
+                }
+            }
             "extrude" | "inset" | "bevel" | "pushpull" | "loop_cut" => {
                 let ty = match name { "extrude" => "polyextrude", "inset" => "inset", "bevel" => "polybevel", "pushpull" => "pushpull", _ => "loop_cut" };
                 let after = self.selected.clone(); self.add_node(ty, Some(&after));
@@ -679,14 +732,17 @@ impl App {
                     let undo = matches!(action, UiAction::Undo);
                     let command = if undo { self.editor.history.undo(&mut self.editor.doc) } else { self.editor.history.redo(&mut self.editor.doc) };
                     if let Some(command) = command {
-                        self.display = Graph::from_value(self.editor.doc.value()).unwrap().main_output().unwrap();
+                        self.display = Graph::from_value(self.editor.doc.value()).ok().and_then(|g| g.main_output().ok()).unwrap_or_default();
+                        self.selected_set.retain(|id| self.editor.doc.value()["nodes"].get(id).is_some());
                         self.send(command);
                     }
                 }
                 UiAction::Frame => self.frame_mesh(),
                 UiAction::FrameSelected => self.frame_selected(),
                 UiAction::FrameNetwork => ui::network::frame(ctx, &self.editor.path),
-                UiAction::Select(id) => self.selected = id,
+                UiAction::Select(id) => { select_nodes(&mut self.selected_set, [id.clone()], false, false); self.selected = id; },
+                UiAction::ToggleSelect(id) => { select_nodes(&mut self.selected_set, [id], false, true); self.selected = self.selected_set.iter().next().cloned().unwrap_or_default(); },
+                UiAction::SelectSet { ids, extend } => { select_nodes(&mut self.selected_set, ids, extend, false); self.selected = self.selected_set.iter().next().cloned().unwrap_or_default(); },
                 UiAction::SetDisplay(id) => {
                     self.display = id.clone();
                     self.editor.history.finish(&self.editor.doc);
@@ -718,6 +774,7 @@ impl App {
                 UiAction::Zoom(factor) => self.camera.zoom_factor(factor),
                 UiAction::DeleteNode(id) => self.delete_node(&id),
                 UiAction::DuplicateNode(id) => self.duplicate_node(&id),
+                UiAction::DisconnectAll(id) => { if let Some(value) = graph_edit::disconnect_all(self.editor.doc.value(), &id) { self.commit_document(value, "disconnect node"); } },
                 UiAction::ConnectNodes { from, to, port } => self.connect_nodes(&from, &to, port.as_deref()),
                 UiAction::DisconnectInput { node, port } => self.disconnect_input(&node, &port),
                 UiAction::TidyNetwork => ui::network::tidy(ctx, &self.editor.path),
@@ -831,7 +888,7 @@ impl eframe::App for App {
         {
             let v = View { graph: &graph, doc: self.editor.doc.value(), path: &self.editor.path, dirty: self.editor.dirty(),
                 can_undo: self.editor.history.can_undo(), can_redo: self.editor.history.can_redo(),
-                selected: &self.selected, display: &self.display, cooking: &self.cooking, file_status: &self.file_status,
+                selected: &self.selected, selected_set: &self.selected_set, display: &self.display, cooking: &self.cooking, file_status: &self.file_status,
                 mode: self.mode, theme: &self.theme, editor: &self.editor_state, flags: &self.flags, geo: self.geo.as_ref(), blender: &self.blender,
                 bounds: self.bounds, selection_center: self.selection_center(),
                 camera: self.camera_info() };
@@ -1096,10 +1153,14 @@ impl eframe::App for App {
                         let (o, d) = self.camera.ray(nx, ny, rect.width() / rect.height());
                         let mode = self.editor_state.selection;
                         let extend = ctx.input(|i| i.modifiers.shift);
-                        let new = picking::pick_triangle(scene.positions(), scene.triangle_indices(), o, d)
-                            .map(|hit| picking::element_of(hit, scene.triangle_indices(), mode))
+                        let hit = picking::pick_triangle(scene.positions(), scene.triangle_indices(), o, d);
+                        let hit_object = hit.is_some();
+                        let new = hit.map(|hit| picking::element_of(hit, scene.triangle_indices(), mode))
                             .unwrap_or(picking::Selection { mode, ..Default::default() });
                         if extend && !new.is_empty() { picking::extend(&mut self.selection, &new); } else { self.selection = new; }
+                        if mode == ui::SelectionMode::Object && hit_object {
+                            out.push(UiAction::SelectSet { ids: vec![self.display.clone()], extend });
+                        }
                         self.selection_dirty = true;
                     }
                 }

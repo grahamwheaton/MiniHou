@@ -1120,6 +1120,7 @@ mod tests {
             ortho: true,
             ..Default::default()
         };
+        let selected_set = std::collections::BTreeSet::from(["box1".to_owned()]);
         let view = View {
             graph: &graph,
             doc: &doc,
@@ -1128,6 +1129,7 @@ mod tests {
             can_undo: false,
             can_redo: false,
             selected: "box1",
+            selected_set: &selected_set,
             display: "box1",
             cooking: &cooking,
             file_status: "",
