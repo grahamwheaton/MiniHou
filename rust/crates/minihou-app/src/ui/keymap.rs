@@ -36,9 +36,10 @@ pub enum Command {
     Undo, Redo, Save, SaveAs, Open, Copy, Paste, DeleteNode, DissolveNode, DuplicateNode,
     TidyNetwork, Preferences, BoxSelect, CircleSelect, Paint, Extrude, Inset, Bevel, PushPull, LoopCut, FlipFaces, OppositeView, NetworkBox, PieMenu, DisplayFlag, MuteFlag, TemplateFlag, SelectableTemplateFlag, FindNode,
     TimelineToggle, TimelinePrevious, TimelineNext, TimelineStart, TimelineEnd,
+    RepeatLast,
 }
 impl Command {
-    pub const ALL: [Self; 74] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
+    pub const ALL: [Self; 75] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
         Self::ToolSelect, Self::ToolMove, Self::ToolRotate, Self::ToolScale, Self::ToolTransform,
         Self::FrameAll, Self::FrameSelected, Self::Front, Self::Back, Self::Right, Self::Left,
         Self::Top, Self::Bottom, Self::ToggleProjection, Self::OrbitDown, Self::OrbitLeft,
@@ -47,7 +48,8 @@ impl Command {
         Self::Proportional, Self::ShadeNext, Self::ShadePrevious, Self::Undo, Self::Redo,
         Self::Save, Self::SaveAs, Self::Open, Self::Copy, Self::Paste, Self::DeleteNode, Self::DissolveNode, Self::DuplicateNode,
         Self::TidyNetwork, Self::Preferences, Self::BoxSelect, Self::CircleSelect, Self::Paint, Self::Extrude, Self::Inset, Self::Bevel, Self::PushPull, Self::LoopCut, Self::FlipFaces, Self::OppositeView, Self::NetworkBox, Self::PieMenu, Self::DisplayFlag, Self::MuteFlag, Self::TemplateFlag, Self::SelectableTemplateFlag, Self::FindNode,
-        Self::TimelineToggle, Self::TimelinePrevious, Self::TimelineNext, Self::TimelineStart, Self::TimelineEnd];
+        Self::TimelineToggle, Self::TimelinePrevious, Self::TimelineNext, Self::TimelineStart, Self::TimelineEnd,
+        Self::RepeatLast];
     pub fn label(self) -> &'static str { match self {
         Self::Points => "Points", Self::Edges => "Edges", Self::Faces => "Faces", Self::Object => "Object", Self::ToggleEdit => "Toggle Object / edit mode",
         Self::SelectAll => "Select all", Self::SelectNone => "Select none", Self::Hide => "Hide selected", Self::Reveal => "Reveal hidden", Self::AddMenu => "Add node menu", Self::ToggleParams => "Toggle parameters",
@@ -71,6 +73,7 @@ impl Command {
         Self::MuteFlag => "Mute flag", Self::TemplateFlag => "Template flag", Self::SelectableTemplateFlag => "Selectable template flag",
         Self::FindNode => "Find node", Self::TimelineToggle => "Play / pause", Self::TimelinePrevious => "Previous frame",
         Self::TimelineNext => "Next frame", Self::TimelineStart => "First frame", Self::TimelineEnd => "Last frame",
+        Self::RepeatLast => "Repeat last",
     } }
     fn id(self) -> &'static str { match self {
         Self::Points => "points", Self::Edges => "edges", Self::Faces => "faces", Self::Object => "object", Self::ToggleEdit => "toggle_edit",
@@ -93,6 +96,7 @@ impl Command {
         Self::MuteFlag => "mute_flag", Self::TemplateFlag => "template_flag", Self::SelectableTemplateFlag => "selectable_template_flag",
         Self::FindNode => "find_node", Self::TimelineToggle => "timeline_toggle", Self::TimelinePrevious => "timeline_previous",
         Self::TimelineNext => "timeline_next", Self::TimelineStart => "timeline_start", Self::TimelineEnd => "timeline_end",
+        Self::RepeatLast => "repeat_last",
     } }
     pub fn to_action(self, kctx: &KeyContext<'_>) -> Option<UiAction> { Some(match self {
         Self::Points => UiAction::Editor(EditorChange::Selection(SelectionMode::Points)),
@@ -122,6 +126,7 @@ impl Command {
         Self::DuplicateNode => UiAction::Command("duplicate_selection".into()),
         Self::Copy | Self::Paste => UiAction::Command(self.id().to_owned()),
         Self::TidyNetwork => UiAction::TidyNetwork, Self::Preferences => UiAction::OpenPreferences,
+        Self::RepeatLast => UiAction::RepeatLast,
         _ => UiAction::Command(self.id().to_owned()),
     }) }
 }
@@ -154,6 +159,7 @@ impl Keymap {
             (K::ArrowRight,false,C::TimelineNext),(K::ArrowLeft,true,C::TimelineStart),(K::ArrowRight,true,C::TimelineEnd)] {
             add(key,false,shift,false,cmd,X::Viewport);
         }
+        add(K::R,false,true,false,C::RepeatLast,X::Viewport);
         add(K::Tab,false,false,false,C::AddMenu,X::Network);
         // Numpad 1/3/7 and their opposite views, 5 projection, 9 flip, decimal frame.
         // egui reports number-row and numpad digits alike; Alt is the default fallback.
@@ -164,7 +170,7 @@ impl Keymap {
         for (key,cmd) in [(K::F,C::FrameAll),(K::L,C::TidyNetwork),(K::O,C::NetworkBox),
             (K::C,C::PieMenu),(K::R,C::DisplayFlag),(K::M,C::MuteFlag),(K::E,C::TemplateFlag),
             (K::W,C::SelectableTemplateFlag)] { add(key,false,false,false,cmd,X::Network); }
-        add(K::R,false,true,false,C::DisplayFlag,X::Network);
+        add(K::R,false,true,false,C::RepeatLast,X::Network);
         for (key,ctrl,shift,cmd) in [(K::Z,true,false,C::Undo),(K::Y,true,false,C::Redo),
             (K::Z,true,true,C::Redo),(K::S,true,false,C::Save),(K::S,true,true,C::SaveAs),
             (K::O,true,false,C::Open)] {
@@ -357,7 +363,9 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
                 && b.command == command && b.context == Context::Network));
         }
         assert!(map.bindings.iter().any(|b| b.chord == Chord::new(Key::R, false, true, false)
-            && b.command == Command::DisplayFlag && b.context == Context::Network));
+            && b.command == Command::RepeatLast && b.context == Context::Network));
+        assert!(map.bindings.iter().any(|b| b.chord == Chord::new(Key::R, false, true, false)
+            && b.command == Command::RepeatLast && b.context == Context::Viewport));
         assert!(!map.bindings.iter().any(|b| b.command == Command::ToggleEdit));
     }
     #[test] fn alternate_shortcut_round_trips_and_emulation_moves_selection() {

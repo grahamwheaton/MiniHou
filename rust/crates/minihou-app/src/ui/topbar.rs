@@ -21,9 +21,10 @@ fn icon(p: &egui::Painter, r: Rect, kind: &str, color: Color32) {
     }
 }
 
-fn button(ui: &mut egui::Ui, label: &str, kind: &str, enabled: bool, outlined: bool, v: &View) -> bool {
-    let width = match label { "Save As" => 86., "Open" => 67., _ => 65. };
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 28.), if enabled { Sense::click() } else { Sense::hover() });
+fn button(ui: &mut egui::Ui, label: &str, kind: &str, enabled: bool, outlined: bool, v: &View, tooltip: Option<&str>) -> bool {
+    let width = match label { "Save As" => 86., "Open" => 67., "Repeat" => 75., _ => 65. };
+    let (rect, mut response) = ui.allocate_exact_size(Vec2::new(width, 28.), if enabled { Sense::click() } else { Sense::hover() });
+    if let Some(tip) = tooltip { response = response.on_hover_text(tip); }
     let p = ui.painter();
     if outlined || response.hovered() && enabled {
         p.rect_filled(rect, 5., if response.hovered() { v.theme.input } else { v.theme.panel2 });
@@ -50,11 +51,13 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
             let (name, _) = ui.allocate_exact_size(Vec2::new(55., 20.), Sense::hover());
             ui.painter().text(name.left_center(), Align2::LEFT_CENTER, "MiniHou", FontId::proportional(13.), v.theme.text);
             separator(ui, v);
-            if button(ui, "Open", "open", true, true, v) { out.push(UiAction::Open); }
-            if button(ui, "Save As", "save", true, true, v) { out.push(UiAction::SaveAs); }
+            if button(ui, "Open", "open", true, true, v, None) { out.push(UiAction::Open); }
+            if button(ui, "Save As", "save", true, true, v, None) { out.push(UiAction::SaveAs); }
             separator(ui, v);
-            if button(ui, "Undo", "undo", v.can_undo, false, v) { out.push(UiAction::Undo); }
-            if button(ui, "Redo", "redo", v.can_redo, false, v) { out.push(UiAction::Redo); }
+            if button(ui, "Undo", "undo", v.can_undo, false, v, None) { out.push(UiAction::Undo); }
+            if button(ui, "Redo", "redo", v.can_redo, false, v, None) { out.push(UiAction::Redo); }
+            let repeat_tip = v.repeat_label.unwrap_or("Nothing to repeat (Shift+R)");
+            if button(ui, "Repeat", "redo", v.repeat_label.is_some(), false, v, Some(repeat_tip)) { out.push(UiAction::RepeatLast); }
             let filename = v.path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default();
             let trailing = 12. * filename.len() as f32 * 0.61 + if v.dirty { 18. } else { 0. };
             ui.add_space((ui.available_width() - trailing).max(0.));

@@ -79,11 +79,14 @@ pub enum UiAction {
     DeleteNode(String),
     DuplicateNode(String),
     DisconnectAll(String),
+    DissolveNode(String),
     /// Wire `from`'s output to `to`'s input `port`; `None` port = its first input.
     ConnectNodes { from: String, to: String, port: Option<String> },
     DisconnectInput { node: String, port: String },
     /// Re-run the automatic layout for the whole network (card positions are UI state).
     TidyNetwork,
+    /// Repeat the last confirmed operator with the same settings (Shift+R).
+    RepeatLast,
     // ---- application
     OpenPreferences,
     /// Blender link bar: install the add-on into the chosen installation (index into `BlenderStatus::installs`).
@@ -163,6 +166,8 @@ pub struct View<'a> {
     /// Flags per node id (Locked, Template); ids not present have none set.
     pub flags: &'a std::collections::HashMap<String, NodeFlags>,
     pub units: crate::units::UnitSettings,
+    /// Description of the repeatable last operator, if any.
+    pub repeat_label: Option<&'a str>,
 }
 impl View<'_> {
     pub fn flags_of(&self, id: &str) -> NodeFlags { self.flags.get(id).cloned().unwrap_or_default() }
@@ -191,7 +196,7 @@ pub mod testing {
         pub fn view(&self) -> View<'_> {
             View { graph: &self.graph, doc: self.doc.value(), path: Path::new("untitled.json"), dirty: false, can_undo: false, can_redo: false,
                 selected: &self.selected, selected_set: &self.selected_set, display: &self.display, cooking: &self.cooking, file_status: "", mode: self.mode,
-                theme: &self.theme, editor: &self.editor, camera: self.camera, bounds: self.bounds, selection_center: None, geo: self.geo.as_ref(), blender: &self.blender, flags: &self.flags, units: self.units }
+                theme: &self.theme, editor: &self.editor, camera: self.camera, bounds: self.bounds, selection_center: None, geo: self.geo.as_ref(), blender: &self.blender, flags: &self.flags, units: self.units, repeat_label: None }
         }
         /// One frame of `panel` in a 1280 x 800 window; returns the actions it pushed.
         pub fn run(&self, panel: impl Fn(&mut egui::Ui, &View, &mut Actions)) -> Vec<UiAction> {
