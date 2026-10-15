@@ -37,9 +37,10 @@ fn gizmo_axis_drag_emits_move_steps_and_finishes() {
     let theme = Theme::dark();
     let blender = BlenderStatus::default();
     let flags = HashMap::new();
+    let selected_set = std::collections::BTreeSet::from(["hidden_transform".to_owned()]);
     let camera = CameraInfo { projection: [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]], ..Default::default() };
     let view = View { graph: &graph, doc: doc.value(), path: std::path::Path::new("demo.json"), dirty: false,
-        can_undo: false, can_redo: false, selected: "hidden_transform", display: "output1", cooking: &cooking,
+        can_undo: false, can_redo: false, selected: "hidden_transform", selected_set: &selected_set, display: "output1", cooking: &cooking,
         file_status: "", mode: Mode::Shaded, theme: &theme, editor: &editor, camera,
         bounds: ([0.;3], 1.), selection_center: None, geo: None, blender: &blender, flags: &flags };
     let ctx = egui::Context::default();
