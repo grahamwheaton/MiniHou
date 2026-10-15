@@ -25,7 +25,7 @@ def _random_graph(seed):
     leaves = []
     for i in range(int(rng.integers(2, 4))):
         name = f"s{i}"
-        source_kind = int(rng.integers(5))
+        source_kind = int(rng.integers(8))
         if source_kind == 0:
             params = {"columns": int(rng.integers(2, 9)), "rows": int(rng.integers(2, 9)),
                       "size_x": float(rng.uniform(0.5, 5)), "size_y": float(rng.uniform(0.5, 5))}
@@ -40,9 +40,22 @@ def _random_graph(seed):
         elif source_kind == 3:
             params = {"points": int(rng.integers(2, 12)), "direction": _v3(rng, -1, 1)}
             kind = "line"
-        else:
+        elif source_kind == 4:
             params = {"divisions": int(rng.integers(3, 20)), "radius": float(rng.uniform(0.1, 3))}
             kind = "circle"
+        elif source_kind == 5:
+            params = {"rows": int(rng.integers(2, 8)), "columns": int(rng.integers(3, 10)),
+                      "radius": float(rng.uniform(0.2, 3))}
+            kind = "sphere"
+        elif source_kind == 6:
+            params = {"rows": int(rng.integers(1, 6)), "columns": int(rng.integers(3, 10)),
+                      "radius_bottom": float(rng.uniform(0.0, 2.0)), "radius_top": float(rng.uniform(0.0, 2.0)),
+                      "height": float(rng.uniform(0.5, 3.0)), "caps": bool(rng.integers(2))}
+            kind = "tube"
+        else:
+            params = {"rows": int(rng.integers(3, 8)), "columns": int(rng.integers(3, 10)),
+                      "radius": float(rng.uniform(1.0, 3.0)), "thickness": float(rng.uniform(0.1, 0.8))}
+            kind = "torus"
         nodes[name] = {"type": kind, "params": params}
         prev = name
         for j in range(int(rng.integers(1, 4))):
@@ -123,6 +136,9 @@ class RustFuzzTests(unittest.TestCase):
                   source={"type": "line", "params": {"points": 2, "length": 0}}),
             chain(source={"type": "curve", "params": {"points": "0,0,0 0,0,0"}}),
             chain(source={"type": "circle", "params": {"divisions": 3, "radius": 0}}),
+            chain(source={"type": "sphere", "params": {"rows": 2, "columns": 3, "radius": 0}}),
+            chain(source={"type": "tube", "params": {"rows": 1, "columns": 3, "radius_bottom": 0, "radius_top": 0}}),
+            chain(source={"type": "torus", "params": {"rows": 3, "columns": 3, "thickness": 0}}),
             chain(("transform", {"translate": [1e6, -1e6, 1e6]}),
                   source={"type": "box", "params": {"size": [2, 2, 2]}}),
             *[chain(("noise", {"octaves": octaves, "frequency": frequency,

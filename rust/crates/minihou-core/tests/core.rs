@@ -82,6 +82,21 @@ fn curve_line_circle_and_proportional() {
 }
 
 #[test]
+fn sphere_tube_torus_cook() {
+    let sphere = cook(json!({"nodes": {"s": {"type": "sphere", "params": {"rows": 4, "columns": 6}}}, "display": "s"})).unwrap();
+    assert_eq!((sphere.npoints, sphere.nprims()), (20, 24));
+
+    let tube = cook(json!({"nodes": {"t": {"type": "tube", "params": {"rows": 2, "columns": 4, "caps": true}}}, "display": "t"})).unwrap();
+    assert_eq!((tube.npoints, tube.nprims()), (12, 10));
+
+    let cone = cook(json!({"nodes": {"t": {"type": "tube", "params": {"radius_bottom": 0.0, "radius_top": 1.0, "rows": 2, "columns": 4, "caps": true}}}, "display": "t"})).unwrap();
+    assert_eq!((cone.npoints, cone.nprims()), (9, 9));
+
+    let torus = cook(json!({"nodes": {"t": {"type": "torus", "params": {"rows": 3, "columns": 4}}}, "display": "t"})).unwrap();
+    assert_eq!((torus.npoints, torus.nprims()), (12, 12));
+}
+
+#[test]
 fn errors_name_the_node_and_cycles_are_caught() {
     let err = cook(json!({"nodes": {"t": {"type": "transform"}}, "display": "t"})).unwrap_err();
     assert_eq!(err.0, "node 't' (transform): input 'geo' is not connected");
