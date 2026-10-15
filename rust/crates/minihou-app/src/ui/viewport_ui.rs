@@ -447,6 +447,15 @@ fn icon(p: &egui::Painter, ic: Icon, r: Rect, col: Color32, tick: bool) {
     }
 }
 
+/// Compact Blender-style status strip for the active viewport transform.
+pub fn modal_status(ui: &egui::Ui, rect: egui::Rect, status: &str) {
+    let painter = ui.painter_at(rect);
+    let bar = egui::Rect::from_min_max(egui::pos2(rect.left(), rect.bottom()-29.), rect.right_bottom());
+    painter.rect_filled(bar, 0., egui::Color32::from_black_alpha(205));
+    painter.text(bar.left_center()+egui::vec2(10.,0.), egui::Align2::LEFT_CENTER, status,
+        egui::FontId::proportional(13.), egui::Color32::WHITE);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

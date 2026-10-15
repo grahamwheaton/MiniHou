@@ -16,6 +16,8 @@ pub mod sketch;
 pub mod theme;
 pub mod topbar;
 pub mod transform_gizmo;
+pub mod modal_transform;
+pub mod transform_overlay;
 pub mod viewport_ui;
 
 #[allow(unused_imports)]
@@ -31,6 +33,7 @@ use std::path::Path;
 pub enum UiAction {
     StartSketch(sketch::SketchMode),
     TransformNode { op: TransformOp },
+    StartModal(modal_transform::Kind),
     FinishTransform,
     CancelTransform,
     SketchCommit { name: String, points: Vec<[f32; 3]>, closed: bool },

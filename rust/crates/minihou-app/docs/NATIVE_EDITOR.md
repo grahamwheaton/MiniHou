@@ -17,9 +17,9 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | 2 | Edges | Viewport |
 | 3 | Faces | Viewport |
 | 4 | Object | Viewport |
-| G | Move tool | Viewport |
-| R | Rotate tool | Viewport |
-| S | Scale tool | Viewport |
+| G | Move (modal) | Viewport |
+| R | Rotate (modal) | Viewport |
+| S | Scale (modal) | Viewport |
 | B | Box select | Viewport |
 | C | Circle select | Viewport |
 | A | Select all | Viewport |
@@ -75,8 +75,37 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | X | Delete node | Network |
 <!-- keymap:end -->
 
+## Modal transforms
+
+With the pointer in the viewport and an object or edit-mode elements selected, G, R, and S begin a modal transform. The object updates as the pointer moves. The bottom viewport strip shows values, constraint, and snap state. The coloured constraint line passes through the pivot. Confirm creates one undo step; cancel restores the previous graph. The existing toolbar gizmo handles remain available. The following table is checked against the modal key list by a unit test.
+
+<!-- modal:start -->
+| Input | During modal transform |
+| --- | --- |
+| G / R / S | Begin move / rotate / scale while the pointer is in the viewport |
+| LMB / Enter / Space | Confirm |
+| RMB / Escape | Cancel |
+| X / Y / Z | Axis; again local axis; third press clears |
+| Shift+X / Y / Z | Plane excluding axis |
+| Middle mouse | Choose closest motion axis; again clears |
+| Digits / . / - / Backspace | Enter exact distance, angle in degrees, or scale factor |
+| Tab | Next move numeric field |
+| Ctrl | Invert snapping |
+| Shift | Precision movement |
+| O | Toggle proportional editing |
+| Wheel / PageUp / PageDown | Change proportional radius |
+| B while moving | Cycle Increment / Vertex / Edge / Face snap target |
+| Ctrl+Shift+LMB while moving | Pick snap reference point |
+| R while rotating | Toggle trackball |
+| B while rotating | Pick two-point pivot, reference, then angle |
+| C while scaling | Toggle scale cage; click a handle, move, click to confirm |
+| Alt while scaling | Individual origins is not yet supported for multiple displayed objects |
+<!-- modal:end -->
+
 ## Known limitations
 
 Element transforms write a `group` of point numbers. Edge selection includes both endpoints; face selection maps each picked display triangle to its three point numbers. Object transforms leave `group` empty. Proportional radius, falloff, and connected mode are saved on the transform node when proportional editing is enabled.
+
+Modal rotation uses the nearest Cartesian axis to the view direction for its default axis. Face-normal sketch rotation, cursor orientation rotation, and scale individual origins across multiple displayed objects are not available yet. The scale cage creates `match_size` for one displayed object when it can represent the result with nonnegative scales; otherwise it keeps the transform node.
 
 The Rust core currently cooks only the nodes marked with a green dot on the shelf. Copy and paste currently operate on the single selected network node. egui does not distinguish numpad digits from the number row, so Alt+digit represents numpad keys; Preferences can emulate the numpad with plain digits. Lock and template flags are session state. Auto proxy reduces the displayed mesh; the Blender cap is a separate setting for the link.
