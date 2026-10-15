@@ -76,10 +76,11 @@ body.has-error #main { bottom: 30px; }
 .node .title { position: absolute; left: 12px; right: 22px; top: 5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .node .sub { position: absolute; left: 12px; right: 22px; top: 24px; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .node .sub .ms { color: #b5bdc6; }
-.node .sub .rs { font-size: 9px; font-weight: 700; padding: 0 3px; border-radius: 3px; vertical-align: 1px; }
-.node .sub .rs-rust { background: #3f7d4e; color: #e8f5ea; }
-.node .sub .rs-fallback { background: #8a6a2a; color: #fbefd2; }
-.node .sub .rs-python { background: #3a3f45; color: #9aa3ad; }
+.node .rs-chip { position: absolute; left: -5px; bottom: -6px; font-size: 9px; line-height: 12px; font-weight: 700; padding: 0 3px; border-radius: 3px; pointer-events: auto; }
+.node .rs-chip[hidden] { display: none; }
+.node .rs-rust { background: #3f7d4e; color: #e8f5ea; }
+.node .rs-fallback { background: #8a6a2a; color: #fbefd2; }
+.node .rs-python { background: #3a3f45; color: #9aa3ad; }
 .node .flag { position: absolute; right: 0; top: 0; bottom: 0; width: 15px; border-left: 1px solid #0005; border-radius: 0 6px 6px 0; cursor: pointer; background: #2f3338; }
 .node .flag:hover { background: #3b4f6a; }
 .node.display .flag-display { background: var(--display); }

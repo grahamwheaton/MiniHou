@@ -420,10 +420,19 @@
   // cache; cleared when a cook ran nodes without the Rust core.
   const backendOf = {};
   const BACKEND_TAG = {
-    rust: ["Rust", "Cooked by the Rust core"],
-    fallback: ["Rust\u2192Py", "Has a Rust path, but this cook used Python (unsupported settings or no points)"],
+    rust: ["Rs", "Cooked by the Rust core"],
+    fallback: ["Py*", "Has a Rust path, but this cook used Python (unsupported settings or no points)"],
     python: ["Py", "Python / numba: no Rust path for this node"],
   };
+  function setBackendChip(el, backend) {
+    const chip = el.querySelector(".rs-chip"), tag = BACKEND_TAG[backend];
+    if (!chip) return;
+    chip.hidden = !tag;
+    if (!tag) return;
+    chip.className = "rs-chip rs-" + backend;
+    chip.textContent = tag[0];
+    chip.title = tag[1];
+  }
   function renderNodes() {
     const st = S.status || {}, errNode = st.ok === false && st.error ? st.error.node : null;
     const cook = st.cook || {}, nodeMs = cook.node_ms || {}, cached = new Set(cook.cached || []);
@@ -445,15 +454,16 @@
       const ex = exposedOf(id);
       // Rebuild a node's DOM only when its structure changes (wiring, comment, flags); status updates touch just the
       // status line. Stable elements keep hover state and never vanish under a click or a drag.
-      const subSig = JSON.stringify([id === errNode && st.error.message, nodeMs[id], cached.has(id), n.type, backendOf[id]]);
+      const subSig = JSON.stringify([id === errNode && st.error.message, nodeMs[id], cached.has(id), n.type]);
       const structSig = JSON.stringify([n.flags,!!n.locked_geometry,S.graph.render,inputMembers(id).map(([key, child]) => [key, child.input_label]), n.type, n.inputs, n.comment, ex.map((e) => e.name), t.inputs.length, id === disp, t.category === "system" && !!t.source]);
       if (el._struct === structSig) {
-        if (el._sub !== subSig) { el._sub = subSig; el.querySelector(".sub").replaceChildren(...subLine(id, n, st, errNode, nodeMs, cached, backendOf[id])); }
+        if (el._sub !== subSig) { el._sub = subSig; el.querySelector(".sub").replaceChildren(...subLine(id, n, st, errNode, nodeMs, cached)); }
+        setBackendChip(el, backendOf[id]);
         continue;
       }
       el._struct = structSig; el._sub = subSig;
       const kids = [h("div", { class: "band" }), h("div", { class: "title", title: id }, id),
-        h("div", { class: "sub" }, subLine(id, n, st, errNode, nodeMs, cached, backendOf[id])),
+        h("div", { class: "sub" }, subLine(id, n, st, errNode, nodeMs, cached)),
         ...['bypass','lock','template','display'].map(name=>h('button',{class:'flag flag-'+name+(flagState(id,name)?' on':''),dataset:{flag:name},title:flagTitle(name), 'aria-label':flagTitle(name),'aria-pressed':String(flagState(id,name))}, ({bypass:'M',lock:'L',template:'T',display:'D'})[name]))];
       el.classList.toggle('bypassed',!!n.flags?.bypass);
       el.classList.toggle('templated',!!(n.flags?.template||n.flags?.selectable_template));
@@ -476,17 +486,17 @@
       if (n.comment) kids.push(h("div", { class: "comment" }, String(n.comment)));
       if (t.category === "system" && t.source) kids.push(h("div", { class: "groupmark", title: "A group: double-click to open it" }, "▣"));
       if (ex.length) kids.push(h("div", { class: "badge", title: "Exposed to Blender: " + ex.map((e) => e.name).join(", ") }, "B"));
-      el.replaceChildren(...kids);
+      el.replaceChildren(...kids, h("span", { class: "rs-chip", hidden: true }));
+      setBackendChip(el, backendOf[id]);
     }
     for (const el of [...nodesEl.children]) if (!keep.has(el.dataset.id)) el.remove();
     renderWires();
   }
-  function subLine(id, n, st, errNode, nodeMs, cached, backend) {
+  function subLine(id, n, st, errNode, nodeMs, cached) {
     if (id === errNode) return [h("span", null, "⚠ " + shortError(st.error.message))];
-    const tag = BACKEND_TAG[backend] ? [" ", h("span", { class: "rs rs-" + backend, title: BACKEND_TAG[backend][1] }, BACKEND_TAG[backend][0])] : [];
-    if (nodeMs[id] != null) return [n.type, " · ", h("span", { class: "ms" }, nodeMs[id].toFixed(1) + " ms"), ...tag];
-    if (cached.has(id)) return [n.type, " · cached", ...tag];
-    return [n.type, ...tag];
+    if (nodeMs[id] != null) return [n.type, " · ", h("span", { class: "ms" }, nodeMs[id].toFixed(1) + " ms")];
+    if (cached.has(id)) return [n.type, " · cached"];
+    return [n.type];
   }
   function shortError(msg) { const m = String(msg || ""); return m.length > 60 ? m.slice(0, 57) + "…" : m; }
   function wireExists(w) {
