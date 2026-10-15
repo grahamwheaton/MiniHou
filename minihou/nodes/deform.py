@@ -108,6 +108,8 @@ def point_relax(points, surface, iterations, radius, update_normals):
     if surface is not None and surface.nprims:
         from .ray import target_grid
         grid, _, tri_p = target_grid(surface)
+        if grid.tris.shape[0] == 0:
+            return points
         area = float(np.linalg.norm(np.cross(grid.tris[:, 1] - grid.tris[:, 0], grid.tris[:, 2] - grid.tris[:, 0]),
                                     axis=1).sum() / 2)
         r = radius or np.sqrt(area / n) * 1.07

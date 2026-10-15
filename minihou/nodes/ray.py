@@ -56,6 +56,32 @@ def ray(geo, target, method, direction, both_ways, max_distance, scale, lift, tr
     sel = groups.mask(geo, "point", group)
     idx = np.arange(geo.npoints) if sel is None else np.flatnonzero(sel)
     P = geo.P.astype(np.float64)[idx]
+    if grid.tris.shape[0] == 0:
+        out = geo.copy()
+        out.point["hitdist"] = np.full(geo.npoints, -1.0, np.float32)
+        out.point["hitprim"] = np.full(geo.npoints, -1, np.int32)
+        out.point["hitN"] = np.zeros((geo.npoints, 3), np.float32)
+        out = groups.write(out, "point", "rayHit", np.zeros(geo.npoints, bool))
+        if import_attribs:
+            pats = import_attribs.replace(",", " ").split()
+            for dom, table in (("point", target.point), ("prim", target.prim), ("vertex", target.vertex)):
+                for nm in table.names():
+                    if nm == "P" or not any(fnmatch.fnmatchcase(nm, p) for p in pats):
+                        continue
+                    a = table[nm]
+                    own = out.point.get(nm)
+                    if own is None or own.shape[1:] != a.shape[1:]:
+                        out.point[nm] = np.zeros((geo.npoints,) + a.shape[1:], a.dtype)
+                    for other in ("prim", "vertex"):
+                        if nm in out.table(other):
+                            del out.table(other)[nm]
+        if delete_misses and len(idx):
+            from .delete import keep_points
+
+            keep = np.ones(geo.npoints, bool)
+            keep[idx] = False
+            out = keep_points(out, keep)
+        return out
     if method == "minimum_distance":
         hitP, dist, tri = grid.closest(P)
         ok = (tri >= 0) & (dist <= max_distance)
@@ -145,4 +171,3 @@ def _barycentric(p, tri):
     v = (d11 * d20 - d01 * d21) / den
     w = (d00 * d21 - d01 * d20) / den
     return np.c_[1 - v - w, v, w]
-
