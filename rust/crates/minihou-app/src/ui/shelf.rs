@@ -87,7 +87,7 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
                     });
                 });
             });
-            ui.menu_button("+", |ui| {
+            ui.allocate_ui_with_layout(Vec2::new(26., 24.), egui::Layout::left_to_right(egui::Align::Center), |ui| { ui.menu_button("+", |ui| {
                 for (idx, tab) in TABS.iter().enumerate() {
                     let mut shown = visible & (1 << idx) != 0;
                     if ui.checkbox(&mut shown, tab.name).changed() {
@@ -96,9 +96,9 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
                         if visible & (1 << active) == 0 { active = (0..TABS.len()).find(|i| visible & (1 << i) != 0).unwrap_or(0); }
                     }
                 }
-            });
-            let (fold, response) = ui.allocate_exact_size(Vec2::new(20., 20.), Sense::click());
-            let y = if folded { 7. } else { 12. };
+            }); });
+            let (fold, response) = ui.allocate_exact_size(Vec2::new(20., 24.), Sense::click());
+            let y = if folded { 9. } else { 14. };
             let pts = if folded { [(4., y), (10., y + 6.), (16., y)] } else { [(4., y), (10., y - 6.), (16., y)] };
             line(ui.painter(), fold.min, &pts, v.theme.dim);
             if response.clicked() { folded = !folded; }
@@ -118,10 +118,10 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
                 for tool in TABS[active].tools {
                     let (r, response) = ui.allocate_exact_size(Vec2::new(54., 48.), Sense::click());
                     if response.hovered() { ui.painter().rect_filled(r, 5., v.theme.input); ui.painter().rect_stroke(r, 5., Stroke::new(1.0_f32, v.theme.stroke), StrokeKind::Inside); }
-                    let icon_rect = Rect::from_center_size(r.center_top() + Vec2::new(0., 15.), Vec2::splat(22.));
+                    let icon_rect = Rect::from_center_size(r.center_top() + Vec2::new(0., 13.), Vec2::splat(22.));
                     icon(ui.painter(), icon_rect, tool, v.theme.text, v.theme.c_src);
                     let label = wrap_label(tool.label);
-                    ui.painter().with_clip_rect(r).text(r.center_bottom() - Vec2::new(0., if label.contains('\n') { 15. } else { 9. }), Align2::CENTER_CENTER, label, FontId::proportional(10.5), v.theme.text);
+                    ui.painter().with_clip_rect(r).text(r.center_top() + Vec2::new(0., 26.), Align2::CENTER_TOP, label, FontId::proportional(10.), v.theme.text);
                     if v.runs_on_rust(tool.node_type) { dot(ui.painter(), r.min, r.width() - 7., 5., 2.5, v.theme.ok); }
                     if response.on_hover_text(format!("{} ({})", tool.label, tool.node_type)).clicked() {
                         out.push(UiAction::AddNode { node_type: tool.node_type.to_owned(), after: Some(v.selected.to_owned()) });

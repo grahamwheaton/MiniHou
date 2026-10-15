@@ -219,7 +219,7 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
 
     if control.width() > 4. {
         if reason.is_some() { ui.painter().rect_stroke(control, 4., Stroke::new(1.0_f32, v.theme.err), StrokeKind::Outside); }
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(control).id_salt((id, param.name, "widget")));
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(control).id_salt((id, param.name, "widget")).layout(egui::Layout::left_to_right(egui::Align::Center)));
         child.set_width(control.width());
         child.spacing_mut().item_spacing.x = 4.;
         let enabled = param.supported && !locked;
