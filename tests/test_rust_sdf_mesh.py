@@ -49,7 +49,7 @@ class RustSdfMeshTests(unittest.TestCase):
     def test_degenerate_triangles(self):
         for t in (np.zeros((1, 3, 3)), np.array([[[0., 0., 0.], [1., 0., 0.], [2., 0., 0.]]])):
             with self.subTest(tris=t.tolist()):
-                self.check_mesh(t)
+                self.check_mesh(t, grid=([0., 0., 0.], [1, 1, 1]))
 
     def test_single_voxel_and_huge_voxel(self):
         tris = self.primitive('box', {})
