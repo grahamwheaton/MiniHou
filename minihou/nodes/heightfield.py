@@ -7,6 +7,7 @@ gathered: rivers, 0..1), ``erosion`` and ``deposit`` (how much material left or 
 """
 import numpy as np
 
+from .. import rust
 from ..sdk import Float, Input, Int, node
 
 _NEIGHBOURS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
@@ -173,10 +174,17 @@ def heightfield_erode(geo, mask=None, *, iterations, droplets, rain, capacity, e
     eroded = np.zeros_like(H)
     deposited = np.zeros_like(H)
     if iterations:
-        H, flow, eroded, deposited = hydraulic(H, cell, iterations, rain, capacity, erode_rate, deposit_rate,
-                                               evaporation, droplets=droplets, inertia=inertia, seed=seed)
+        if rust.enabled():
+            H, flow, eroded, deposited = rust.hydraulic(H, cell, iterations, rain, capacity, erode_rate, deposit_rate,
+                                                        evaporation, droplets=droplets, inertia=inertia, seed=seed)
+        else:
+            H, flow, eroded, deposited = hydraulic(H, cell, iterations, rain, capacity, erode_rate, deposit_rate,
+                                                   evaporation, droplets=droplets, inertia=inertia, seed=seed)
     if thermal_iterations:
-        H = thermal(H, cell, talus_angle, thermal_rate, thermal_iterations)
+        if rust.enabled():
+            H = rust.thermal(H, cell, talus_angle, thermal_rate, thermal_iterations)
+        else:
+            H = thermal(H, cell, talus_angle, thermal_rate, thermal_iterations)
     if keep is not None:
         H = P[:, 2].reshape(rows, cols) + (H - P[:, 2].reshape(rows, cols)) * keep
         flow, eroded, deposited = flow * keep, eroded * keep, deposited * keep

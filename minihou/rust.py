@@ -54,7 +54,7 @@ def disabled():
 # Node types whose Python function calls a Rust kernel. The evaluator records which backend each node used on its last cook
 # (CookStats.backend) so the editor can show it: "rust" (a kernel ran), "fallback" (this node type has a Rust path, but this
 # cook ran the Python / numba one: unsupported settings or no points) and "python" (no Rust path).
-NODE_TYPES = frozenset({"grid", "box", "transform", "normal", "noise"})
+NODE_TYPES = frozenset({"grid", "box", "transform", "normal", "noise", "heightfield_erode"})
 _tls = threading.local()
 
 
@@ -181,6 +181,44 @@ def chunk_bounds(P, tri, chunk: int) -> np.ndarray:
     """:func:`minihou.preview.chunk_table` for triangles already in order: float32 (rows, 8)."""
     tri = np.ascontiguousarray(np.asarray(tri).reshape(-1), np.uint32)
     return _need().chunk_bounds(_f32x3(P), tri, int(chunk)).reshape(-1, 8)
+
+def _f64x2(a) -> np.ndarray:
+    return np.ascontiguousarray(np.asarray(a, np.float64))
+
+
+def _f64x1(a) -> np.ndarray:
+    return np.ascontiguousarray(np.asarray(a, np.float64).reshape(-1))
+
+
+def hydraulic_state(H: np.ndarray):
+    """A state object in the Rust core for the hydraulic erosion loop."""
+    return _need().Hydraulic(_f64x2(H))
+
+
+def thermal(H: np.ndarray, cell, talus_deg: float, rate: float, iterations: int) -> np.ndarray:
+    """:func:`minihou.nodes.heightfield.thermal` computed in the Rust core."""
+    _NEIGHBOURS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+    tan = float(np.tan(np.radians(talus_deg)))
+    dist = np.ascontiguousarray([np.hypot(dy * cell[0], dx * cell[1]) for dy, dx in _NEIGHBOURS], np.float64)
+    return _need().thermal(_f64x2(H), tan, dist, float(rate), int(iterations))
+
+
+def hydraulic(H: np.ndarray, cell, iterations: int, rain: float, capacity: float, erode_rate: float,
+              deposit_rate: float, evaporation: float, droplets: int = 4096, lifetime: int = 48,
+              inertia: float = 0.1, gravity: float = 4.0, min_slope: float = 0.01, seed: int = 0):
+    """:func:`minihou.nodes.heightfield.hydraulic` computed in the Rust core with draws from Python."""
+    h, w = H.shape
+    state = hydraulic_state(H)
+    rng = np.random.default_rng(int(seed) & 0xFFFFFFFF)
+    w_bound = float(w - 1.001)
+    h_bound = float(h - 1.001)
+    for _ in range(iterations):
+        x = np.ascontiguousarray(rng.random(droplets) * w_bound, np.float64)
+        y = np.ascontiguousarray(rng.random(droplets) * h_bound, np.float64)
+        state.step(x, y, (float(cell[0]), float(cell[1])), float(rain), float(capacity),
+                   float(erode_rate), float(deposit_rate), float(evaporation), int(lifetime),
+                   float(inertia), float(gravity), float(min_slope))
+    return state.finish()
 
 
 def cook_node(node_type: str, **params):

@@ -66,6 +66,7 @@ the whole test suite with the extension installed.
 | `normal` | point, prim | vertex (cusped) |
 | `noise` | scalar / vector, P or any attribute, octaves, lacunarity, gain, seed | `group` |
 | `merge` | topology, attributes zero-filled, curves, detail | materials / instance lists in the detail, mixed float/int attributes |
+| `heightfield_erode` | hydraulic and thermal erosion loops (kernels only; node post-processing and randomness stay in Python) | graph JSON direct cook (Python engine coordinates kernels) |
 | `null`, `output` | pass through | |
 
 Graph JSON: `bypass` flags work; locked geometry and every other node type are refused. Each Rust node declares all of the
@@ -98,6 +99,7 @@ flats instead of across its corners; both are correct):
 | `noise` node | one fused parallel pass, bit for bit the numpy result |
 | `transform` node | the matrix step for P and N in one pass |
 | `normal` node | face normals; point normals from a point-to-primitive table that is cached on the (frozen) topology, so a deformer upstream does not rebuild it |
+| `heightfield_erode` node | hydraulic and thermal erosion loops in Rust (bit-identical to numpy) |
 
 Two Python-side changes came out of the profiling too (they help without Rust as well): the viewport's "does this need reducing"
 check was converting the whole topology to int64 on every update; its counts are now computed once per topology and cached
@@ -159,6 +161,14 @@ Single kernels, 4M quads, numpy / numba / Rust:
 | edges | 2827 / 314 / **146 ms** | 2032 / 335 / **214 ms** |
 | point normals (topology table cached) | 2026 / 112 / **40 ms** | 4253 / 106 / **71 ms** |
 | fbm3 noise, 4 octaves | 5211 / 50 / **33 ms** | 5262 / 193 / 204 ms |
+
+Heightfield erosion (512x512 terrain, 262k points, `python bench/bench_heightfield.py`):
+
+| | numpy | Rust | Speed-up |
+|---|---|---|---|
+| thermal (20 iterations) | 925.6 ms | **15.3 ms** | 60.7x |
+| hydraulic (30 iters x 4096 droplets) | 22.33 s | **2.08 s** | 10.7x |
+| whole `heightfield_erode` node (30 hyd + 20 thm) | 23.72 s | **1.71 s** | 13.9x |
 
 Same engine, three machines (4M quads, median ms, numba -> Rust, speed-up):
 
