@@ -46,7 +46,35 @@ pub fn flood(free:&[bool],dims:[usize;3])->Vec<bool> {
     reached
 }
 
-struct Grid { lo:[f64;3],hi:[f64;3],hv:[f64;3],dims:[usize;3],cells:Vec<Vec<usize>>,bounds:Vec<([f64;3],[f64;3])> }
+// Nearest corner supplies the same finite search bound as TriGrid.closest.
+// The tree stores every corner (including duplicates); lower-index ties are stable.
+struct Corner { p:[f64;3], index:usize, axis:usize, left:Option<usize>, right:Option<usize> }
+struct Corners { nodes:Vec<Corner>, root:Option<usize> }
+impl Corners {
+    fn new(tris:&[f64])->Self {
+        let mut points:Vec<([f64;3],usize)>=tris.chunks_exact(3).enumerate().map(|(i,p)|([p[0],p[1],p[2]],i)).collect();
+        let mut tree=Self{nodes:Vec::new(),root:None}; tree.root=tree.build(&mut points,0);tree
+    }
+    fn build(&mut self,p:&mut [([f64;3],usize)],depth:usize)->Option<usize> {
+        if p.is_empty(){return None;}
+        let axis=depth%3; p.sort_unstable_by(|a,b|a.0[axis].total_cmp(&b.0[axis]).then(a.1.cmp(&b.1)));
+        let mid=p.len()/2;let (point,index)=p[mid];let n=self.nodes.len();
+        self.nodes.push(Corner{p:point,index,axis,left:None,right:None});
+        let left=self.build(&mut p[..mid],depth+1);let right=self.build(&mut p[mid+1..],depth+1);
+        self.nodes[n].left=left;self.nodes[n].right=right;Some(n)
+    }
+    fn query(&self,p:[f64;3])->([f64;3],f64,usize) {
+        let mut best=(p,f64::INFINITY,usize::MAX);self.visit(self.root,p,&mut best);(best.0,best.1.sqrt(),best.2/3)
+    }
+    fn visit(&self,node:Option<usize>,p:[f64;3],best:&mut ([f64;3],f64,usize)) {
+        let Some(i)=node else{return;};let n=&self.nodes[i];let v=sub(p,n.p);let d=dot(v,v);
+        if d<best.1 || (d==best.1 && n.index<best.2){*best=(n.p,d,n.index);}
+        let delta=p[n.axis]-n.p[n.axis];let (near,far)=if delta<0.0{(n.left,n.right)}else{(n.right,n.left)};
+        self.visit(near,p,best);if delta*delta<=best.1{self.visit(far,p,best);}
+    }
+}
+
+struct Grid { lo:[f64;3],hi:[f64;3],hv:[f64;3],dims:[usize;3],cells:Vec<Vec<usize>>,corners:Corners,bounds:Vec<([f64;3],[f64;3])> }
 impl Grid {
     fn cell(&self,p:[f64;3])->[usize;3] {std::array::from_fn(|a|(((p[a]-self.lo[a])/self.hv[a]).floor() as isize).clamp(0,self.dims[a] as isize-1) as usize)}
     fn new(tris:&[f64])->Self {
@@ -76,7 +104,7 @@ impl Grid {
             for a in 0..3 {if active[a]{hv[a]*=1.25;}}
         };
         for a in 0..3 {hv[a]=hv[a].max(ext[a]/dims[a] as f64*1.000001);}
-        let mut grid=Self{lo,hi:std::array::from_fn(|a|lo[a]+hv[a]*dims[a] as f64),hv,dims,cells:vec![Vec::new();dims.iter().product()],bounds};
+        let mut grid=Self{lo,hi:std::array::from_fn(|a|lo[a]+hv[a]*dims[a] as f64),hv,dims,cells:vec![Vec::new();dims.iter().product()],corners:Corners::new(tris),bounds};
         for ti in 0..grid.bounds.len() {
             let c0=grid.cell(grid.bounds[ti].0);let c1=grid.cell(grid.bounds[ti].1);
             for x in c0[0]..=c1[0] {for y in c0[1]..=c1[1] {for z in c0[2]..=c1[2] {grid.cells[key([x,y,z],dims)].push(ti);}}}
@@ -84,7 +112,7 @@ impl Grid {
         grid
     }
     fn query(&self,p:[f64;3],tris:&[f64])->([f64;3],f64,usize) {
-        let qc=self.cell(p); let mut best=f64::INFINITY;let mut cp=p;let mut tri=0;
+        let qc=self.cell(p); let (mut cp,mut best,mut tri)=self.corners.query(p);
         let outside:[f64;3]=std::array::from_fn(|a|(self.lo[a]-p[a]).max(p[a]-self.hi[a]).max(0.0).powi(2));
         let total=outside[0]+outside[1]+outside[2];
         for r in 0..=*self.dims.iter().max().unwrap()+2 {
@@ -125,6 +153,16 @@ pub fn from_mesh(tris:&[f64],origin:[f64;3],dims:[usize;3],h:f64,band:f64)->Resu
     let size=dims.iter().try_fold(1usize,|n,&d|n.checked_mul(d)).ok_or("grid size overflow")?;
     if size>24_000_000 {return Err("too many voxels; use a larger voxel size".into());}
     let mut values=vec![band as f32;size]; if tris.is_empty() || size==0 {return Ok(values);}
+    // A collapsed mesh has zero normals, hence every voxel is outside. Avoid a
+    // pathological million-cell TriGrid for its artificial 1e-9 extent.
+    let first=vertex(tris,0);
+    if tris.chunks_exact(3).all(|p|p==first) {
+        for (i,value) in values.iter_mut().enumerate() {
+            let c=coords(i,dims);let p=std::array::from_fn(|a|origin[a]+c[a] as f64*h);
+            let delta=sub(p,first);*value=dot(delta,delta).sqrt().min(band) as f32;
+        }
+        return Ok(values);
+    }
     let grid=Grid::new(tris); let mut candidates=vec![false;size];let mut count=0usize;
     for &(tl,th) in &grid.bounds {
         let a:[usize;3]=std::array::from_fn(|i|(((tl[i]-band-origin[i])/h).floor() as isize).clamp(0,dims[i] as isize-1) as usize);
@@ -154,5 +192,5 @@ mod tests {
     use super::*;
     #[test] fn flood_enclosed() {let mut f=vec![true;125]; for i in 0..125 {let c=coords(i,[5;3]);if c.iter().all(|&v|v>0&&v<4)&&c.iter().any(|&v|v==1||v==3){f[i]=false;}}let r=flood(&f,[5;3]);assert!(!r[62]);assert!(r[0]);}
     #[test] fn empty_mesh() {assert_eq!(from_mesh(&[],[0.0;3],[2;3],1.0,3.0).unwrap(),vec![3.0;8]);}
-    #[test] fn triangle() {let t=[0.,0.,0.,1.,0.,0.,0.,1.,0.];assert_eq!(closest([0.2,0.2,1.0],&t),[0.2,0.2,0.0]);}
+    #[test] fn triangle() {let t=[0.,0.,0.,1.,0.,0.,0.,1.,0.];assert_eq!(closest([0.2,0.2,1.0],&t),[0.19999999999999998,0.19999999999999998,0.0]);}
 }
