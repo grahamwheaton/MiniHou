@@ -290,6 +290,15 @@ impl History {
         }
         Ok(())
     }
+    /// A structural change (adding a node): `doc` becomes `new` as one undo step.
+    pub fn replace(&mut self, doc: &mut Document, new: Document) {
+        self.finish(doc);
+        if doc.text != new.text {
+            self.undo.push((doc.clone(), new.clone()));
+            self.redo.clear();
+            *doc = new;
+        }
+    }
     /// Called at the end of a drag, or immediately for discrete edits.
     pub fn finish(&mut self, doc: &Document) {
         if let Some(before) = self.pending.take() {

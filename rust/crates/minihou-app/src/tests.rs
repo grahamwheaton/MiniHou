@@ -306,3 +306,21 @@ fn the_built_in_demo_graph_opens_and_cooks() {
     let doc = Document::parse(include_str!("default_graph.json").to_owned()).expect("default graph parses");
     assert!(selftest(&doc).expect("default graph cooks")["points"].as_u64().unwrap() > 0);
 }
+
+#[test]
+fn adding_a_node_is_one_undo_step() {
+    use crate::History;
+    let mut doc = Document::parse(include_str!("default_graph.json").to_owned()).unwrap();
+    let before = doc.text().to_owned();
+    let mut value = doc.value().clone();
+    value["nodes"]["extra1"] = json!({"type": "null", "inputs": {"geo": "grid1"}});
+    let new = Document::parse(serde_json::to_string_pretty(&value).unwrap()).unwrap();
+    let mut history = History::default();
+    history.replace(&mut doc, new);
+    assert!(doc.value()["nodes"].get("extra1").is_some());
+    assert!(history.can_undo());
+    assert!(history.undo(&mut doc).is_some());
+    assert_eq!(doc.text(), before);
+    assert!(history.redo(&mut doc).is_some());
+    assert!(doc.value()["nodes"].get("extra1").is_some());
+}

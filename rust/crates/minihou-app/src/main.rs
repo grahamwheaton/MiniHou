@@ -3,6 +3,7 @@ mod viewport;
 use eframe::{egui, egui_wgpu};
 use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, CookRequest, CookState};
 use minihou_core::Graph;
+use serde_json::json;
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 use ui::{theme::Theme, Actions, NodeFlags, UiAction, View};
 use viewport::{Gpu, Mode, Scene, Target};
@@ -56,6 +57,32 @@ impl App {
     }
 }
 impl App {
+    /// A shelf tool: a new node of `node_type` wired to `after` (its first input) and made the displayed node; one undo step.
+    fn add_node(&mut self, node_type: &str, after: Option<&str>) {
+        let Some(spec) = minihou_core::nodes::get(node_type) else {
+            self.file_status = format!("The Rust core has no {node_type} node yet");
+            return;
+        };
+        let mut value = self.editor.doc.value().clone();
+        let Some(nodes) = value.get_mut("nodes").and_then(|n| n.as_object_mut()) else { return };
+        let id = (1..).map(|n| format!("{node_type}{n}")).find(|id| !nodes.contains_key(id)).unwrap();
+        let mut node = json!({ "type": node_type });
+        if let (Some(after), Some(port)) = (after.filter(|a| nodes.contains_key(*a)), spec.inputs.first()) {
+            node["inputs"] = if port.multi { json!({ port.name: [after] }) } else { json!({ port.name: after }) };
+        }
+        nodes.insert(id.clone(), node);
+        value["display"] = json!(id);
+        let doc = serde_json::to_string_pretty(&value).map_err(|e| e.to_string()).and_then(|t| Document::parse(t).map_err(|e| e.to_string()));
+        match doc {
+            Ok(new) => {
+                self.editor.history.replace(&mut self.editor.doc, new);
+                self.send(Edit::Replace(self.editor.doc.value().clone()));
+                self.selected = id.clone();
+                self.display = id;
+            }
+            Err(e) => self.file_status = format!("Could not add {node_type}: {e}"),
+        }
+    }
     /// Apply what the panels asked for this frame.
     fn apply(&mut self, ctx: &egui::Context, actions: Vec<UiAction>) {
         for action in actions {
@@ -84,7 +111,7 @@ impl App {
                     if !continuous { self.editor.history.finish(&self.editor.doc); }
                     self.edit(edit, continuous);
                 }
-                UiAction::AddNode { node_type, .. } => self.file_status = format!("Adding a {node_type} node from the shelf is not wired yet"),
+                UiAction::AddNode { node_type, after } => self.add_node(&node_type, after.as_deref()),
                 UiAction::SetMode(mode) => self.mode = mode,
                 UiAction::ToggleLocked(id) => { let f = self.flags.entry(id).or_default(); f.locked = !f.locked; }
                 UiAction::ToggleTemplate(id) => { let f = self.flags.entry(id).or_default(); f.template = !f.template; }
