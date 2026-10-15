@@ -44,6 +44,40 @@ fn proportional_params(params: &mut Value, state: &EditorState) {
     }
 }
 
+fn viewport_tool_drop(ctx: &egui::Context, rect: egui::Rect) -> (Option<std::sync::Arc<ui::ToolDrag>>, bool) {
+    let over = ctx.input(|i| i.pointer.latest_pos().is_some_and(|p| rect.contains(p)));
+    let dragging = over && egui::DragAndDrop::has_payload_of_type::<ui::ToolDrag>(ctx);
+    let released = ctx.input(|i| i.pointer.any_released());
+    (if dragging && released { egui::DragAndDrop::take_payload::<ui::ToolDrag>(ctx) } else { None }, dragging && !released)
+}
+fn apply_transform_step(doc: &mut Document, first: bool, value: Value, target: &str, name: &str, param_value: Value) -> std::result::Result<Vec<Edit>, String> {
+    let param = Edit::Param { node: target.into(), name: name.into(), value: param_value };
+    if first {
+        let text = serde_json::to_string(&value).map_err(|e| e.to_string())?;
+        *doc = Document::parse(text).map_err(|e| e.to_string())?;
+        Ok(vec![Edit::Replace(value), param])
+    } else {
+        doc.edit(&param).map_err(|e| e.to_string())?;
+        Ok(vec![param])
+    }
+}
+fn ensure_transform_target(value: &mut Value, source: &str, object_mode: bool, active: Option<&str>) -> Option<String> {
+    if let Some(id) = active { return Some(id.to_owned()); }
+    let current_display = value["display"].as_str().unwrap_or_default().to_owned();
+    let nodes = value["nodes"].as_object_mut()?;
+    if object_mode && nodes.get(source).and_then(|n| n["type"].as_str()) == Some("transform") { return Some(source.to_owned()); }
+    if object_mode {
+        if let Some(id) = nodes.iter().find(|(id, n)| id.as_str() == current_display && n["type"] == "transform" && n["inputs"]["geo"] == source).map(|(id, _)| id.clone()) { return Some(id); }
+    }
+    let id = (1..).map(|n| format!("transform{n}")).find(|id| !nodes.contains_key(id))?;
+    nodes.insert(id.clone(), json!({"type":"transform", "inputs":{"geo":source}}));
+    value["display"] = json!(id);
+    Some(id)
+}
+fn toggle_edit_mode(current: ui::SelectionMode, last: &mut ui::SelectionMode) -> ui::SelectionMode {
+    if current == ui::SelectionMode::Object { *last } else { *last = current; ui::SelectionMode::Object }
+}
+
 struct App {
     editor: EditorDocument, worker: CookWorker<Scene>, cooking: CookState,
     selected: String, display: String,
@@ -61,6 +95,7 @@ struct App {
     clipboard: Option<Value>,
     last_viewport: egui::Rect,
     transform_before: Option<Document>, transform_target: Option<String>,
+    last_edit_selection: ui::SelectionMode, params_open: bool, object_hidden: bool,
 }
 impl App {
     fn camera_info(&self) -> CameraInfo {
@@ -102,7 +137,8 @@ impl App {
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
             scene:None,shown_level:1.0,geo_rev:u64::MAX,blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,
-            clipboard:None,transform_before:None,transform_target:None,last_viewport:egui::Rect::NOTHING };
+            clipboard:None,transform_before:None,transform_target:None,last_viewport:egui::Rect::NOTHING,
+            last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false };
         app.prefs = Preferences::load();
         app.keymap = Keymap::from_overrides_json(&app.prefs.keymap_overrides);
         app.keymap.emulate_numpad = app.prefs.emulate_numpad;
@@ -132,6 +168,15 @@ impl App {
         }
     }
     fn frame_mesh(&mut self) { self.camera = Camera::frame(self.bounds.0,self.bounds.1); }
+    fn frame_selected(&mut self) {
+        if let (Some(scene), Some(center)) = (&self.scene, self.selection_center()) {
+            let points = scene.positions();
+            let radius = self.selected_points().into_iter().filter_map(|id| points.get(id as usize * 3..id as usize * 3 + 3))
+                .map(|p| ((0..3).map(|i| (p[i] - center[i]).powi(2)).sum::<f32>()).sqrt())
+                .fold(0_f32, f32::max).max(self.bounds.1 * 0.05);
+            self.camera = Camera::frame(center, radius);
+        } else { self.frame_mesh(); }
+    }
     fn save_to(&mut self, path: PathBuf) {
         self.editor.history.finish(&self.editor.doc);
         match self.editor.save_to(path) {
@@ -190,15 +235,7 @@ impl App {
         if first { self.editor.history.finish(&self.editor.doc); self.transform_before = Some(self.editor.doc.clone()); }
         let mut value = self.editor.doc.value().clone();
         let source = if group.is_empty() { node } else { &self.display };
-        let target = if let Some(id) = &self.transform_target { id.clone() } else {
-            let Some(nodes) = value["nodes"].as_object_mut() else { return; };
-            if group.is_empty() && nodes.get(source).and_then(|n| n["type"].as_str()) == Some("transform") { source.to_owned() }
-            else {
-                let id = (1..).map(|n| format!("transform{n}")).find(|id| !nodes.contains_key(id)).unwrap();
-                nodes.insert(id.clone(), json!({"type":"transform", "inputs":{"geo":source}}));
-                value["display"] = json!(id); id
-            }
-        };
+        let Some(target) = ensure_transform_target(&mut value, source, group.is_empty(), self.transform_target.as_deref()) else { return; };
         let name = match op { TransformOp::Move(_) => "translate", TransformOp::Rotate(_) => "rotate", TransformOp::Scale(_) => "scale" };
         let delta = match op { TransformOp::Move(d) | TransformOp::Rotate(d) | TransformOp::Scale(d) => d };
         let defaults = if name == "scale" { [1.; 3] } else { [0.; 3] };
@@ -213,15 +250,16 @@ impl App {
             }
             _ => [0,1,2].map(|i| before[i] + delta[i]),
         };
-        params[name] = json!(updated);
+        let param_value = json!(updated);
+        params[name] = param_value.clone();
         if first {
             params["group"] = json!(group);
             proportional_params(params, &self.editor_state);
             params["pivot"] = json!(if self.editor_state.pivot == ui::Pivot::Cursor { self.editor_state.cursor } else { self.selection_center().unwrap_or(self.bounds.0) });
         }
-        match serde_json::to_string(&value).ok().and_then(|s| Document::parse(s).ok()) {
-            Some(doc) => { self.editor.doc = doc; self.transform_target = Some(target.clone()); self.display = target; self.send(Edit::Replace(value)); }
-            None => self.file_status = "Could not transform node".into(),
+        match apply_transform_step(&mut self.editor.doc, first, value, &target, name, param_value) {
+            Ok(edits) => { self.transform_target = Some(target.clone()); self.display = target; for edit in edits { self.send(edit); } }
+            Err(e) => self.file_status = format!("Could not transform node: {e}"),
         }
     }
     fn finish_transform(&mut self) {
@@ -286,7 +324,7 @@ impl App {
         if let Some(value) = graph_edit::disconnect(self.editor.doc.value(), node, port) { self.commit_document(value, "disconnect the input"); }
     }
     /// Keymap commands that have no dedicated action.
-    fn command(&mut self, name: &str) {
+    fn command(&mut self, name: &str, ctx: &egui::Context) {
         use ui::EditorChange as C;
         let e = self.editor_state;
         match name {
@@ -302,6 +340,30 @@ impl App {
                     }
                 }
             }
+            "toggle_edit" => {
+                let mode = toggle_edit_mode(e.selection, &mut self.last_edit_selection);
+                self.editor_state.apply(C::Selection(mode));
+            }
+            "select_none" => { self.selection.clear(); self.selection_dirty = true; }
+            "select_all" => {
+                if let Some(scene) = &self.scene {
+                    match e.selection {
+                        ui::SelectionMode::Points => self.selection.points = (0..scene.positions().len() / 3).map(|i| i as u32).collect(),
+                        ui::SelectionMode::Faces => self.selection.tris = (0..scene.triangle_indices().len() / 3).map(|i| i as u32).collect(),
+                        ui::SelectionMode::Edges => {
+                            let mut edges = std::collections::BTreeSet::new();
+                            for t in scene.triangle_indices().as_chunks::<3>().0 { for (a,b) in [(t[0],t[1]),(t[1],t[2]),(t[2],t[0])] { edges.insert((a.min(b),a.max(b))); } }
+                            self.selection.edges = edges.into_iter().collect();
+                        }
+                        ui::SelectionMode::Object => self.object_hidden = false,
+                    }
+                    self.selection_dirty = true;
+                }
+            }
+            "hide" => { self.object_hidden = true; self.selection.clear(); self.selection_dirty = true; }
+            "reveal" => self.object_hidden = false,
+            "add_menu" => ui::network::open_add_menu(ctx, &self.editor.path),
+            "toggle_params" => self.params_open = !self.params_open,
             "xray" => self.editor_state.apply(C::Xray(!e.xray)),
             "snap" => self.editor_state.apply(C::SnapEnabled(!e.snap.enabled)),
             "proportional" => self.editor_state.apply(C::ProportionalEnabled(!e.proportional.enabled)),
@@ -346,6 +408,7 @@ impl App {
                     }
                 }
                 UiAction::Frame => self.frame_mesh(),
+                UiAction::FrameSelected => self.frame_selected(),
                 UiAction::Select(id) => self.selected = id,
                 UiAction::SetDisplay(id) => {
                     self.display = id.clone();
@@ -359,12 +422,13 @@ impl App {
                 UiAction::AddNode { node_type, after } => self.add_node(&node_type, after.as_deref()),
                 UiAction::SetMode(mode) => self.mode = mode,
                 UiAction::Editor(change) => {
+                    if let ui::EditorChange::Selection(mode) = change { if mode != ui::SelectionMode::Object { self.last_edit_selection = mode; } }
                     self.editor_state.apply(change);
                     if let ui::EditorChange::View(v) = change { self.camera.set_view(standard_view(v)); }
                 }
                 UiAction::ViewPreset(v) => { self.editor_state.apply(ui::EditorChange::View(v)); self.camera.set_view(standard_view(v)); }
                 UiAction::OpenPreferences => self.prefs_open = true,
-                UiAction::Command(name) => self.command(&name),
+                UiAction::Command(name) => self.command(&name, ctx),
                 UiAction::Orbit { yaw, pitch } => self.camera.orbit_degrees(yaw, pitch),
                 UiAction::Pan { dx, dy } => self.camera.pan(dx, dy),
                 UiAction::Zoom(factor) => self.camera.zoom_factor(factor),
@@ -450,9 +514,9 @@ impl eframe::App for App {
         }
         let graph = Graph::from_value(self.editor.doc.value()).expect("validated document");
         let mut out = Actions::default();
-        let kctx = KeyContext { viewport_hovered: self.viewport_hover, network_hovered: self.network_hover, selected: Some(&self.selected) };
+        let kctx = KeyContext { viewport_hovered: self.viewport_hover, network_hovered: self.network_hover,
+            in_edit_mode: self.editor_state.selection != ui::SelectionMode::Object, selected: Some(&self.selected) };
         if !ui::sketch::active(ctx) && !ui::transform_gizmo::active(ctx) { for action in self.keymap.poll(ctx, &kctx) { out.push(action); } }
-        if !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::F)) { out.push(UiAction::Frame); }
         {
             let v = View { graph: &graph, doc: self.editor.doc.value(), path: &self.editor.path, dirty: self.editor.dirty(),
                 can_undo: self.editor.history.can_undo(), can_redo: self.editor.history.can_redo(),
@@ -475,10 +539,10 @@ impl eframe::App for App {
             if let Some(tool) = net.response.dnd_release_payload::<ui::ToolDrag>() {
                 out.push(ui::shelf::dropped_tool(&tool, &self.selected));
             }
-            egui::SidePanel::right("parameters").default_width(320.).show(ctx, |ui| {
+            if self.params_open { egui::SidePanel::right("parameters").default_width(320.).show(ctx, |ui| {
                 egui::TopBottomPanel::bottom("geometry_info").resizable(true).default_height(220.).show_inside(ui, |ui| ui::geo_info::show(ui, &v, &mut out));
                 ui::params::show(ui, &v, &mut out);
-            });
+            }); }
             egui::CentralPanel::default().show(ctx, |ui| {
                 let size = ui.available_size().max(egui::vec2(1., 1.));
                 let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
@@ -499,7 +563,7 @@ impl eframe::App for App {
                 }
                 if let (Some(gpu), Some(target)) = (&self.gpu, &self.target) {
                     gpu.draw(&self.state, target, &self.camera, self.mode, Overlay { normals: self.editor_state.overlays.normals, bounds: self.editor_state.overlays.bounds, xray: self.editor_state.xray });
-                    ui.painter().image(target.id, rect, egui::Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.)), egui::Color32::WHITE);
+                    if !self.object_hidden { ui.painter().image(target.id, rect, egui::Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.)), egui::Color32::WHITE); }
                 }
                 self.viewport_hover = response.hovered();
                 if response.clicked_by(egui::PointerButton::Primary) && !ui::sketch::active(ctx) && !ui::selection_region::active(ctx) && self.editor_state.tool == ui::Tool::Select {
@@ -521,17 +585,22 @@ impl eframe::App for App {
                         if d[2].abs() > 1e-5 { let t = -o[2] / d[2]; if t >= 0. { out.push(UiAction::Editor(ui::EditorChange::Cursor([0,1,2].map(|k| o[k] + t*d[k])))); } }
                     }
                 }
-                if let Some(tool) = response.dnd_release_payload::<ui::ToolDrag>() {
+                let (dropped, tool_hover) = viewport_tool_drop(ctx, rect);
+                if let Some(tool) = dropped {
                     out.push(ui::shelf::dropped_tool(&tool, &self.selected));
                 }
                 ui::viewport_ui::overlay(ui, rect, &v, &mut out);
+                if tool_hover {
+                    ui.painter().rect_stroke(rect.shrink(3.), 4., egui::Stroke::new(2_f32, v.theme.accent), egui::StrokeKind::Inside);
+                    if let Some(tool) = egui::DragAndDrop::payload::<ui::ToolDrag>(ctx) {
+                        let hint = format!("Add {}", tool.0);
+                        ui.painter().text(rect.center_top() + egui::vec2(0., 60.), egui::Align2::CENTER_TOP, hint, egui::FontId::proportional(15.), v.theme.accent);
+                    }
+                }
                 ui::transform_gizmo::cursor(ui, rect, &v);
                 ui::transform_gizmo::show(ui, rect, &v, &mut out);
                 ui::sketch::show(ui, rect, &v, &mut out);
                 ui::selection_region::show(ui, rect, &v, &mut out);
-                // proxy level, under the view gizmo
-                egui::Area::new(egui::Id::new("proxy_menu")).fixed_pos(egui::pos2(rect.right() - 150., rect.top() + 130.)).order(egui::Order::Foreground)
-                    .show(ctx, |ui| ui::proxy_ui::menu(ui, &v, &mut out));
             });
         }
         if self.prefs_open && ui::keymap::show_preferences(ctx, &mut self.prefs_open, &mut self.prefs, &mut self.keymap, &self.theme) {
@@ -585,9 +654,66 @@ mod tools_tests {
     use super::*;
 
     #[test]
+    fn sixty_transform_updates_use_param_edits_and_one_undo_step() {
+        let mut doc = Document::parse(include_str!("default_graph.json").to_owned()).unwrap();
+        let before = doc.clone();
+        let source = doc.value()["display"].as_str().unwrap().to_owned();
+        let mut value = doc.value().clone();
+        let target = ensure_transform_target(&mut value, &source, true, None).unwrap();
+        value["nodes"][&target]["params"] = json!({"translate":[0.,0.,0.]});
+        let mut edits = apply_transform_step(&mut doc, true, value, &target, "translate", json!([0.,0.,0.])).unwrap();
+        for i in 1..60 {
+            let mut value = doc.value().clone();
+            assert_eq!(ensure_transform_target(&mut value, &source, true, Some(&target)), Some(target.clone()));
+            let param = json!([i as f32 / 10., 0., 0.]);
+            edits.extend(apply_transform_step(&mut doc, false, value, &target, "translate", param).unwrap());
+        }
+        assert_eq!(doc.value()["nodes"].as_object().unwrap().len(), before.value()["nodes"].as_object().unwrap().len() + 1);
+        assert_eq!(edits.iter().filter(|e| matches!(e, Edit::Replace(_))).count(), 1);
+        assert_eq!(edits.iter().filter(|e| matches!(e, Edit::Param { .. })).count(), 60);
+        let mut history = minihou_app::History::default();
+        let final_doc = doc.clone();
+        doc = before.clone();
+        history.replace(&mut doc, final_doc);
+        assert!(history.undo(&mut doc).is_some());
+        assert_eq!(doc.value(), before.value());
+        assert!(history.undo(&mut doc).is_none());
+        let mut reused = before.value().clone();
+        let id = ensure_transform_target(&mut reused, &source, true, None).unwrap();
+        assert_eq!(ensure_transform_target(&mut reused, &source, true, None), Some(id.clone()));
+        assert_eq!(ensure_transform_target(&mut reused, &id, true, None).as_deref(), Some(id.as_str()));
+        assert_eq!(reused["nodes"].as_object().unwrap().len(), before.value()["nodes"].as_object().unwrap().len() + 1);
+    }
+
+    #[test]
+    fn viewport_accepts_tool_drag_even_with_overlay_widgets() {
+        use egui::{Event, PointerButton, RawInput};
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_min_size(egui::pos2(400., 100.), egui::vec2(300., 300.));
+        let at = egui::pos2(500., 200.);
+        let _ = ctx.run(RawInput { events: vec![Event::PointerMoved(at)], ..Default::default() }, |ctx| {
+            egui::DragAndDrop::set_payload(ctx, ui::ToolDrag("box".into()));
+            assert!(viewport_tool_drop(ctx, rect).1);
+        });
+        let _ = ctx.run(RawInput { events: vec![Event::PointerButton { pos: at, button: PointerButton::Primary,
+            pressed: false, modifiers: Default::default() }], ..Default::default() }, |ctx| {
+            let (tool, hover) = viewport_tool_drop(ctx, rect);
+            assert_eq!(tool.unwrap().0, "box");
+            assert!(!hover);
+        });
+    }
+
+    #[test]
     fn scaling_uses_the_drag_start_values() {
         assert_eq!(scaled_from_initial(&json!([2., 3., 4.]), [1., 2., 1.]), [2., 6., 4.]);
         assert_eq!(scaled_from_initial(&serde_json::Value::Null, [1., 0.5, 1.]), [1., 0.5, 1.]);
+    }
+    #[test]
+    fn tab_restores_the_last_element_mode() {
+        let mut last = ui::SelectionMode::Points;
+        assert_eq!(toggle_edit_mode(ui::SelectionMode::Object, &mut last), ui::SelectionMode::Points);
+        assert_eq!(toggle_edit_mode(ui::SelectionMode::Faces, &mut last), ui::SelectionMode::Object);
+        assert_eq!(toggle_edit_mode(ui::SelectionMode::Object, &mut last), ui::SelectionMode::Faces);
     }
     #[test]
     fn element_groups_use_point_ids_in_each_selection_mode() {
