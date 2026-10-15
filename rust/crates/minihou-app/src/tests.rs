@@ -299,3 +299,10 @@ fn failed_save_as_retains_path_and_dirty_state() {
     assert_eq!(editor.path, std::path::PathBuf::from("original.json"));
     assert!(editor.dirty());
 }
+
+#[test]
+fn the_built_in_demo_graph_opens_and_cooks() {
+    // main.rs opens this when the app is started without arguments (a double-click).
+    let doc = Document::parse(include_str!("default_graph.json").to_owned()).expect("default graph parses");
+    assert!(selftest(&doc).expect("default graph cooks")["points"].as_u64().unwrap() > 0);
+}

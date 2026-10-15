@@ -245,12 +245,13 @@ impl eframe::App for App {
 }
 fn run() -> Result<()> {
     let args:Vec<_>=std::env::args_os().skip(1).collect();
-    let (headless,path)=match args.as_slice() {
-        [flag,path] if flag=="--selftest" => (true,PathBuf::from(path)),
-        [path] => (false,PathBuf::from(path)),
-        _ => return Err("usage: minihou-app [--selftest] GRAPH.json".into()),
+    // Started with no arguments (a double-click): open the built-in demo graph rather than exit with a usage line nobody sees.
+    let (headless,path,doc)=match args.as_slice() {
+        [flag,path] if flag=="--selftest" => { let path=PathBuf::from(path); let doc=Document::open(&path)?; (true,path,doc) }
+        [path] => { let path=PathBuf::from(path); let doc=Document::open(&path)?; (false,path,doc) }
+        [] => (false,PathBuf::from("untitled.json"),Document::parse(include_str!("default_graph.json").to_owned())?),
+        _ => return Err("usage: minihou-app [--selftest] [GRAPH.json]".into()),
     };
-    let doc=Document::open(&path)?;
     if headless { println!("{}",minihou_app::selftest(&doc)?); return Ok(()); }
     let options=eframe::NativeOptions { renderer:eframe::Renderer::Wgpu,viewport:egui::ViewportBuilder::default().with_inner_size([1280.,800.]),..Default::default() };
     eframe::run_native("MiniHou",options,Box::new(move |cc| {
@@ -260,7 +261,12 @@ fn run() -> Result<()> {
     Ok(())
 }
 fn main() {
-    if let Err(e)=run() { eprintln!("{e}"); std::process::exit(1); }
+    if let Err(e)=run() {
+        eprintln!("{e}");
+        // A double-clicked build has no terminal: say why it did not start.
+        rfd::MessageDialog::new().set_level(rfd::MessageLevel::Error).set_title("MiniHou").set_description(e.to_string()).show();
+        std::process::exit(1);
+    }
 }
 
 
