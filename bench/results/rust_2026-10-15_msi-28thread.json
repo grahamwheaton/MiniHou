@@ -1,0 +1,158 @@
+{
+  "machine": {
+    "cpu": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+    "threads": 28,
+    "python": "3.14.4",
+    "numpy": "2.4.4",
+    "numba": "numba 0.68.0",
+    "rust": "0.1.0",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "repeat": 5,
+  "results": [
+    {
+      "case": "engine: cook grid > noise > transform > normal",
+      "quads": 1000000,
+      "numpy_s": null,
+      "numba_s": 0.14962359998025931,
+      "rust_s": 0.05208019999554381,
+      "jit_s": 0.17921640002168715,
+      "note": "first call: numba 179 ms, rust 54 ms"
+    },
+    {
+      "case": "engine: slider edit on noise (recook 3 nodes)",
+      "quads": 1000000,
+      "numpy_s": null,
+      "numba_s": 0.06680289999349043,
+      "rust_s": 0.02652509999461472,
+      "jit_s": null,
+      "note": ""
+    },
+    {
+      "case": "engine: viewport, new topology",
+      "quads": 1000000,
+      "numpy_s": null,
+      "numba_s": 0.3221147999865934,
+      "rust_s": 0.044017800013534725,
+      "jit_s": 0.49686310000834055,
+      "note": "first call: numba 497 ms, rust 81 ms"
+    },
+    {
+      "case": "engine: viewport, positions only",
+      "quads": 1000000,
+      "numpy_s": null,
+      "numba_s": 0.06744549999712035,
+      "rust_s": 0.005865400016773492,
+      "jit_s": null,
+      "note": ""
+    },
+    {
+      "case": "edges",
+      "quads": 1000000,
+      "numpy_s": 0.2595463000179734,
+      "numba_s": 0.06997219999902882,
+      "rust_s": 0.03545329999178648,
+      "jit_s": 0.06538710001041181,
+      "note": ""
+    },
+    {
+      "case": "point normals",
+      "quads": 1000000,
+      "numpy_s": 0.437032799993176,
+      "numba_s": 0.033176800003275275,
+      "rust_s": 0.011165200005052611,
+      "jit_s": 0.02515750000020489,
+      "note": ""
+    },
+    {
+      "case": "fbm3 noise, 4 octaves",
+      "quads": 1000000,
+      "numpy_s": 1.1122149000002537,
+      "numba_s": 0.012078900006599724,
+      "rust_s": 0.009011399990413338,
+      "jit_s": 0.41387469999608584,
+      "note": "per point"
+    },
+    {
+      "case": "graph: grid > noise > transform > normal",
+      "quads": 1000000,
+      "numpy_s": 1.6930053999822121,
+      "numba_s": 0.14689520001411438,
+      "rust_s": 0.040369800000917166,
+      "jit_s": null,
+      "note": "whole cook, fresh evaluator; Rust includes building the Geometry"
+    },
+    {
+      "case": "engine: cook grid > noise > transform > normal",
+      "quads": 4000000,
+      "numpy_s": null,
+      "numba_s": 0.6199014000012539,
+      "rust_s": 0.20814819997758605,
+      "jit_s": 0.6016987999901175,
+      "note": "first call: numba 602 ms, rust 200 ms"
+    },
+    {
+      "case": "engine: slider edit on noise (recook 3 nodes)",
+      "quads": 4000000,
+      "numpy_s": null,
+      "numba_s": 0.27232209997600876,
+      "rust_s": 0.09779739999794401,
+      "jit_s": null,
+      "note": ""
+    },
+    {
+      "case": "engine: viewport, new topology",
+      "quads": 4000000,
+      "numpy_s": null,
+      "numba_s": 1.199735000001965,
+      "rust_s": 0.22316540000610985,
+      "jit_s": 1.7864143000042532,
+      "note": "first call: numba 1786 ms, rust 364 ms"
+    },
+    {
+      "case": "engine: viewport, positions only",
+      "quads": 4000000,
+      "numpy_s": null,
+      "numba_s": 0.20201360000646673,
+      "rust_s": 0.024122400005580857,
+      "jit_s": null,
+      "note": ""
+    },
+    {
+      "case": "edges",
+      "quads": 4000000,
+      "numpy_s": 2.8271753000153694,
+      "numba_s": 0.3141285000019707,
+      "rust_s": 0.14558489999035373,
+      "jit_s": 0.29000949999317527,
+      "note": ""
+    },
+    {
+      "case": "point normals",
+      "quads": 4000000,
+      "numpy_s": 2.0263697000045795,
+      "numba_s": 0.11189680002280511,
+      "rust_s": 0.04007839999394491,
+      "jit_s": 0.09816419999697246,
+      "note": ""
+    },
+    {
+      "case": "fbm3 noise, 4 octaves",
+      "quads": 4000000,
+      "numpy_s": 5.210780599998543,
+      "numba_s": 0.050391600001603365,
+      "rust_s": 0.03331539998180233,
+      "jit_s": 0.03559429998858832,
+      "note": "per point"
+    },
+    {
+      "case": "graph: grid > noise > transform > normal",
+      "quads": 4000000,
+      "numpy_s": 14.915731400018558,
+      "numba_s": 0.9304149000090547,
+      "rust_s": 0.3070039000012912,
+      "jit_s": null,
+      "note": "whole cook, fresh evaluator; Rust includes building the Geometry"
+    }
+  ]
+}
