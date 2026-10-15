@@ -195,11 +195,11 @@ class RustSessionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             session.set_param("noise", "missing", 1)
         session.cook()
-        session.set_param("transform", "group", "0-3")
+        session.set_param("noise", "group", "0-3")
         with self.assertRaisesRegex(RuntimeError, "Rust backend"):
             session.cook()
-        session.set_param("transform", "group", "")
-        graph["nodes"]["transform"]["params"]["group"] = ""
+        session.set_param("noise", "group", "")
+        graph["nodes"]["noise"]["params"]["group"] = ""
         _same_bytes(self, session.cook(), rust.cook(graph))
 
     def test_budget_and_clear(self):
