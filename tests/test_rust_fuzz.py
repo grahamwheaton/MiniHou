@@ -167,10 +167,10 @@ class RustFuzzTests(unittest.TestCase):
         env = os.environ.copy()
         env.pop("RAYON_NUM_THREADS", None)
         default = subprocess.run([sys.executable, "-c", script, case], env=env, check=True,
-                                 capture_output=True, text=True, timeout=15)
+                                 capture_output=True, text=True, encoding="utf-8", timeout=15)
         env["RAYON_NUM_THREADS"] = "1"
         single = subprocess.run([sys.executable, "-c", script, case], env=env, check=True,
-                                capture_output=True, text=True, timeout=15)
+                                capture_output=True, text=True, encoding="utf-8", timeout=15)
         self.assertEqual(json.loads(default.stdout.splitlines()[-1]), json.loads(single.stdout.splitlines()[-1]), case)
 
     def test_refused_settings_fall_back(self):
