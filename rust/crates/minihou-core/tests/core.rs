@@ -106,7 +106,7 @@ fn curve_line_circle_and_proportional() {
 }
 
 #[test]
-fn additional_proportional_falloffs_cook_and_random_is_deterministic() {
+fn additional_proportional_falloffs_cook_and_random_is_refused() {
     let graph = |falloff| json!({"nodes": {
         "a": {"type": "line", "params": {"points": 3, "length": 2}},
         "t": {"type": "transform", "inputs": {"geo": "a"}, "params": {"group": "0",
@@ -115,9 +115,8 @@ fn additional_proportional_falloffs_cook_and_random_is_deterministic() {
     }, "display": "t"});
     let inverse = cook(graph("inverse_square")).unwrap();
     assert!(inverse.p()[3] > 0.0 && inverse.p()[3] < 1.0);
-    let random = cook(graph("random")).unwrap();
-    assert_eq!(random.p(), cook(graph("random")).unwrap().p());
-
+    let err = cook(graph("random")).unwrap_err();
+    assert!(err.0.contains("not supported by the Rust backend"));
 }
 
 #[test]

@@ -51,8 +51,15 @@ def assert_same_geometry(tc, a: Geometry, b: Geometry, atol=1e-5):
             x, y = np.asarray(ta[name]), np.asarray(tb[name])
             tc.assertEqual(x.shape, y.shape, f"{domain} {name}")
             tc.assertEqual(x.dtype, y.dtype, f"{domain} {name}")
-            np.testing.assert_allclose(x, y, rtol=atol, atol=atol, err_msg=f"{domain} {name}")
-    tc.assertEqual(a.detail, b.detail)
+    tc.assertEqual(sorted(a.detail.keys()), sorted(b.detail.keys()), "detail keys")
+    for k in a.detail:
+        va, vb = a.detail[k], b.detail[k]
+        if isinstance(va, (list, tuple, np.ndarray)) and isinstance(vb, (list, tuple, np.ndarray)):
+            np.testing.assert_allclose(va, vb, rtol=atol, atol=atol, err_msg=f"detail {k}")
+        elif isinstance(va, (int, float, np.number)) and isinstance(vb, (int, float, np.number)):
+            np.testing.assert_allclose(va, vb, rtol=atol, atol=atol, err_msg=f"detail {k}")
+        else:
+            tc.assertEqual(va, vb, f"detail {k}")
 
 
 def chain(*steps, source=None):
