@@ -87,6 +87,73 @@ pub fn delete(value: &Value, id: &str) -> Option<Value> {
     Some(value)
 }
 
+pub fn dissolve(value: &Value, id: &str) -> Option<Value> {
+    let mut value = value.clone();
+    let all = nodes(&value)?;
+    let target = all.get(id)?;
+    let upstream = target.get("inputs").and_then(Value::as_object).and_then(|inputs| {
+        inputs.values().find_map(|v| match v {
+            Value::String(s) => Some(s.clone()),
+            Value::Array(a) => a.first().and_then(Value::as_str).map(String::from),
+            _ => None,
+        })
+    });
+    let first = {
+        let all_mut = nodes_mut(&mut value)?;
+        all_mut.remove(id)?;
+        for node in all_mut.values_mut() {
+            let Some(inputs) = node.get_mut("inputs").and_then(Value::as_object_mut) else { continue };
+            inputs.retain(|_, source| match source {
+                Value::String(s) => {
+                    if s == id {
+                        if let Some(up) = &upstream {
+                            *s = up.clone();
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        true
+                    }
+                }
+                Value::Array(a) => {
+                    if let Some(up) = &upstream {
+                        for item in a.iter_mut() {
+                            if item.as_str() == Some(id) {
+                                *item = json!(up);
+                            }
+                        }
+                    } else {
+                        a.retain(|x| x.as_str() != Some(id));
+                    }
+                    !a.is_empty()
+                }
+                _ => true,
+            });
+        }
+        all_mut.keys().next().cloned()
+    };
+    let mut displayed = minihou_app::display_nodes(&value);
+    if let Some(pos) = displayed.iter().position(|item| item == id) {
+        if let Some(up) = &upstream {
+            displayed[pos] = up.clone();
+        } else {
+            displayed.remove(pos);
+        }
+    }
+    if displayed.is_empty() {
+        if let Some(first) = first {
+            displayed.push(first);
+        }
+    }
+    if displayed.is_empty() {
+        value.as_object_mut()?.remove("display");
+    } else {
+        value["display"] = if displayed.len() == 1 { json!(displayed[0]) } else { json!(displayed) };
+    }
+    Some(value)
+}
+
 pub fn duplicate(value: &Value, id: &str) -> Option<(Value, String)> {
     let mut value = value.clone();
     let all = nodes_mut(&mut value)?;
@@ -255,5 +322,16 @@ mod tests {
         assert_eq!(v["nodes"]["merge2"]["inputs"]["geos"], json!(["box3"]));
         let (v, ids) = paste(&v, &clip).unwrap();
         assert_eq!(ids, ["box4", "merge3"]); validated(v).unwrap();
+    }
+    #[test] fn dissolve_reconnects_input_to_consumers() {
+        let mut v = graph();
+        v["nodes"]["transform1"] = json!({"type": "transform", "inputs": {"geo": "box1"}});
+        v["nodes"]["merge1"]["inputs"]["geos"] = json!(["transform1", "box2"]);
+        v["display"] = json!("transform1");
+        let v = dissolve(&v, "transform1").unwrap();
+        assert!(v["nodes"].get("transform1").is_none());
+        assert_eq!(v["nodes"]["merge1"]["inputs"]["geos"], json!(["box1", "box2"]));
+        assert_eq!(v["display"], "box1");
+        validated(v).unwrap();
     }
 }

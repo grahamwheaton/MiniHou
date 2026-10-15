@@ -41,7 +41,7 @@ fn gizmo_axis_drag_emits_move_steps_and_finishes() {
     let view = View { graph: &graph, doc: doc.value(), path: std::path::Path::new("demo.json"), dirty: false,
         can_undo: false, can_redo: false, selected: "hidden_transform", display: "output1", cooking: &cooking,
         file_status: "", mode: Mode::Shaded, theme: &theme, editor: &editor, camera,
-        bounds: ([0.;3], 1.), selection_center: None, geo: None, blender: &blender, flags: &flags };
+        bounds: ([0.;3], 1.), selection_center: None, geo: None, blender: &blender, flags: &flags, repeat_label: None };
     let ctx = egui::Context::default();
     let frame = |events| {
         let mut actions = Actions::default();
@@ -235,4 +235,85 @@ fn modal_g_x_r_y_numeric_and_s_cage_cook_through_incremental_edits() {
     let (matched_lo,matched_hi,_)=cooked(&worker,&mut state);
     assert!((matched_lo[0]-scaled_lo[0]).abs()<1e-3);
     assert!((matched_hi[0]-scaled_hi[0]).abs()<1e-3);
+}
+
+#[test]
+fn repeat_move_three_times_cooks_incrementally_with_single_transform_node() {
+    let source_doc = Document::parse(include_str!("default_graph.json").to_owned()).unwrap();
+    let worker = CookWorker::start(&source_doc, Scene::new).unwrap();
+    let mut state = CookState::default();
+    send(&worker, &mut state, Edit::Replace(source_doc.value().clone()));
+    let (_, original_hi, original_points) = cooked(&worker, &mut state);
+
+    // Initial operator: Move by [1.0, 0.0, 0.0]
+    let mut doc = source_doc.clone();
+    let mut graph = doc.value().clone();
+    let source = doc.display_nodes()[0].clone();
+    let target = ensure_transform_target(&mut graph, &source, true, None).unwrap();
+    let op = LastOperator::Move {
+        delta: [1.0, 0.0, 0.0],
+        constraint: None,
+        orientation: ui::Orientation::Global,
+        proportional: None,
+    };
+    let initial_op = TransformOp::Move([1.0, 0.0, 0.0]);
+    let (name, param) = transform_parameter(&graph, &source_doc, &target, initial_op);
+    graph["nodes"][&target]["params"] = json!({"pivot": [0., 0., 0.], "group": ""});
+    graph["nodes"][&target]["params"][name] = param.clone();
+
+    let mut history = minihou_app::History::default();
+    let before_initial = doc.clone();
+    for edit in apply_transform_step(&mut doc, true, graph, &target, name, param).unwrap() {
+        send(&worker, &mut state, edit);
+    }
+    history.record(before_initial, &doc);
+    history.finish(&doc);
+
+    let (_, hi1, points1) = cooked(&worker, &mut state);
+    assert!((hi1[0] - original_hi[0] - 1.0).abs() < 1e-3);
+    assert_ne!(points1, original_points);
+
+    // 3 repeats of the move operator
+    for i in 1..=3 {
+        let before_repeat = doc.clone();
+        let edit = repeat::apply_repeat_transform(&mut doc, &target, &op).unwrap();
+        assert!(matches!(edit, Edit::Param { .. }));
+        send(&worker, &mut state, edit);
+        history.record(before_repeat, &doc);
+        history.finish(&doc);
+
+        let (_, hi, _) = cooked(&worker, &mut state);
+        let expected_delta = 1.0 + (i as f32); // 2.0, 3.0, 4.0
+        assert!((hi[0] - original_hi[0] - expected_delta).abs() < 1e-3, "step {i}: hi[0]={} vs expected={}", hi[0], original_hi[0] + expected_delta);
+        assert!(state.stats.cached.contains(&source), "repeat step {i} had no upstream cache hit: {:?}", state.stats);
+        assert!(state.stats.cooked.contains(&target), "repeat step {i} did not cook target: {:?}", state.stats);
+    }
+
+    // Verify only a SINGLE new transform node was created (reused across all 3 repeats)
+    let initial_transforms = source_doc.value()["nodes"]
+        .as_object()
+        .unwrap()
+        .values()
+        .filter(|n| n["type"] == "transform")
+        .count();
+    let transform_node_count = doc.value()["nodes"]
+        .as_object()
+        .unwrap()
+        .values()
+        .filter(|n| n["type"] == "transform")
+        .count();
+    assert_eq!(transform_node_count, initial_transforms + 1);
+    assert_eq!(doc.value()["nodes"][&target]["params"]["translate"], json!([4.0, 0.0, 0.0]));
+
+    // Undo walkback: undo step 3 (back to 3.0), step 2 (back to 2.0), step 1 (back to 1.0), initial (back to 0.0)
+    for expected_delta in [3.0, 2.0, 1.0, 0.0] {
+        let undo = history.undo(&mut doc).unwrap();
+        send(&worker, &mut state, undo);
+        let (_, hi, points) = cooked(&worker, &mut state);
+        assert!((hi[0] - original_hi[0] - expected_delta).abs() < 1e-3);
+        if expected_delta == 0.0 {
+            assert_eq!(points, original_points);
+        }
+    }
+    assert!(history.undo(&mut doc).is_none());
 }

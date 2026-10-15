@@ -1,4 +1,4 @@
-﻿# MiniHou native editor
+# MiniHou native editor
 
 Open a graph JSON file by passing its path to `minihou-app.exe`, or start the app without arguments for the demo graph. The top bar opens and saves files, changes shading, and opens Preferences. The shelf adds tools to the selected node; drag a tool into the network or viewport to add it there. The network editor selects, connects, duplicates, deletes, copies, and pastes nodes. The right panel edits parameters and shows geometry information. The centre viewport supports orbit, pan, zoom, mesh picking, view presets, and display proxy levels. The bottom strip shows cook state, file messages, and the Blender triangle cap when set.
 
@@ -40,6 +40,7 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Right | Next frame | Viewport |
 | Shift+Left | First frame | Viewport |
 | Shift+Right | Last frame | Viewport |
+| Shift+R | Repeat last | Viewport |
 | Tab | Add node menu | Network |
 | Alt+1 | Front | Viewport |
 | Ctrl+Alt+1 | Back | Viewport |
@@ -58,7 +59,7 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | M | Mute flag | Network |
 | E | Template flag | Network |
 | W | Selectable template flag | Network |
-| Shift+R | Display flag | Network |
+| Shift+R | Repeat last | Network |
 | Ctrl+Z | Undo | Everywhere |
 | Ctrl+Y | Redo | Everywhere |
 | Ctrl+Shift+Z | Redo | Everywhere |

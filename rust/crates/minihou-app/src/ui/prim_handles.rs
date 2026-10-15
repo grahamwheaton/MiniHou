@@ -1140,6 +1140,7 @@ mod tests {
             geo: None,
             blender: &blender,
             flags: &flags,
+            repeat_label: None,
         };
 
         let ctx = egui::Context::default();

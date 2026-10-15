@@ -2,6 +2,8 @@ mod picking;
 mod graph_edit;
 mod ui;
 mod viewport;
+mod repeat;
+pub use repeat::LastOperator;
 #[cfg(test)] mod transform_tests;
 use eframe::{egui, egui_wgpu};
 use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, CookRequest, CookState, StandardView};
@@ -184,6 +186,7 @@ struct App {
     last_viewport: egui::Rect,
     transform_before: Option<Document>, transform_target: Option<String>,
     modal: Option<Modal>,
+    pub last_operator: Option<LastOperator>,
     last_edit_selection: ui::SelectionMode, params_open: bool, object_hidden: bool,
 }
 impl App {
@@ -226,7 +229,7 @@ impl App {
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
             scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,
-            clipboard:None,transform_before:None,transform_target:None,modal:None,last_viewport:egui::Rect::NOTHING,
+            clipboard:None,transform_before:None,transform_target:None,modal:None,last_operator:None,last_viewport:egui::Rect::NOTHING,
             last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false };
         app.prefs = Preferences::load();
         app.keymap = Keymap::from_overrides_json(&app.prefs.keymap_overrides);
@@ -301,6 +304,10 @@ impl App {
         if self.commit_document(value, &format!("add {node_type}")) {
             self.selected = id.clone();
             self.display = id;
+            self.last_operator = Some(LastOperator::AddNode {
+                node_type: node_type.to_string(),
+                after_selection: after.is_some(),
+            });
         }
     }
     fn selected_points(&self) -> Vec<u32> {
@@ -366,7 +373,53 @@ impl App {
         }
     }
     fn finish_transform(&mut self) {
+        self.finish_transform_from(false);
+    }
+    fn finish_transform_from(&mut self, is_modal: bool) {
         if let Some(before) = self.transform_before.take() {
+            if !is_modal {
+                if let Some(target) = &self.transform_target {
+                    let cur_p = &self.editor.doc.value()["nodes"][target]["params"];
+                    let bef_p = &before.value()["nodes"][target]["params"];
+                    let t_cur: [f32; 3] = [0, 1, 2].map(|i| cur_p["translate"].get(i).and_then(Value::as_f64).unwrap_or(0.) as f32);
+                    let t_bef: [f32; 3] = [0, 1, 2].map(|i| bef_p["translate"].get(i).and_then(Value::as_f64).unwrap_or(0.) as f32);
+                    let t_delta = [t_cur[0] - t_bef[0], t_cur[1] - t_bef[1], t_cur[2] - t_bef[2]];
+
+                    let r_cur: [f32; 3] = [0, 1, 2].map(|i| cur_p["rotate"].get(i).and_then(Value::as_f64).unwrap_or(0.) as f32);
+                    let r_bef: [f32; 3] = [0, 1, 2].map(|i| bef_p["rotate"].get(i).and_then(Value::as_f64).unwrap_or(0.) as f32);
+                    let r_delta = [r_cur[0] - r_bef[0], r_cur[1] - r_bef[1], r_cur[2] - r_bef[2]];
+
+                    let s_cur: [f32; 3] = [0, 1, 2].map(|i| cur_p["scale"].get(i).and_then(Value::as_f64).unwrap_or(1.) as f32);
+                    let s_bef: [f32; 3] = [0, 1, 2].map(|i| bef_p["scale"].get(i).and_then(Value::as_f64).unwrap_or(1.) as f32);
+                    let s_factor = [
+                        if s_bef[0].abs() > 1e-6 { s_cur[0] / s_bef[0] } else { s_cur[0] },
+                        if s_bef[1].abs() > 1e-6 { s_cur[1] / s_bef[1] } else { s_cur[1] },
+                        if s_bef[2].abs() > 1e-6 { s_cur[2] / s_bef[2] } else { s_cur[2] },
+                    ];
+                    let pivot = [0, 1, 2].map(|i| cur_p["pivot"].get(i).and_then(Value::as_f64).unwrap_or(0.) as f32);
+
+                    if t_delta.iter().any(|&v| v.abs() > 1e-6) {
+                        self.last_operator = Some(LastOperator::Move {
+                            delta: t_delta,
+                            constraint: None,
+                            orientation: self.editor_state.orientation,
+                            proportional: if self.editor_state.proportional.enabled { Some(self.editor_state.proportional) } else { None },
+                        });
+                    } else if r_delta.iter().any(|&v| v.abs() > 1e-6) {
+                        self.last_operator = Some(LastOperator::Rotate {
+                            angle: r_delta,
+                            pivot,
+                            orientation: self.editor_state.orientation,
+                            axis_rotation: None,
+                        });
+                    } else if s_factor.iter().any(|&v| (v - 1.0).abs() > 1e-6) {
+                        self.last_operator = Some(LastOperator::Scale {
+                            factor: s_factor,
+                            pivot,
+                        });
+                    }
+                }
+            }
             self.editor.history.record(before, &self.editor.doc);
         }
         if let Some(target) = self.transform_target.take() { self.selected = target; }
@@ -426,7 +479,7 @@ impl App {
             && modal.last.iter().all(|v| *v >= 0.) {
             if let Some(target) = &self.transform_target {
                 if self.transform_before.as_ref().is_some_and(|before|before.value()["nodes"][target]["type"]=="transform") {
-                    self.finish_transform(); return;
+                    self.finish_transform_from(true); return;
                 }
                 let pivot=[0,1,2].map(|i|self.editor.doc.value()["nodes"][target]["params"]["pivot"].get(i)
                     .and_then(Value::as_f64).unwrap_or(modal.pivot[i] as f64) as f32);
@@ -438,7 +491,35 @@ impl App {
                 if let Ok(doc)=Document::parse(value.to_string()) { self.editor.doc=doc; self.send(Edit::Replace(value)); }
             }
         }
-        self.finish_transform();
+        self.last_operator = Some(match modal.kind {
+            ModalKind::Move => LastOperator::Move {
+                delta: modal.last,
+                constraint: if modal.constraint == Constraint::Free { None } else { Some(modal.constraint) },
+                orientation: if matches!(modal.constraint, Constraint::Axis(_, true) | Constraint::Plane(_, true)) {
+                    ui::Orientation::Local
+                } else {
+                    self.editor_state.orientation
+                },
+                proportional: if modal.proportional { Some(self.editor_state.proportional) } else { None },
+            },
+            ModalKind::Rotate => LastOperator::Rotate {
+                angle: modal.last,
+                pivot: modal.sketch_pivot.unwrap_or(modal.pivot),
+                orientation: self.editor_state.orientation,
+                axis_rotation: (modal.kind != ModalKind::Move).then_some(
+                    if matches!(self.editor_state.orientation, ui::Orientation::Local | ui::Orientation::Normal | ui::Orientation::Gimbal) {
+                        modal.rotation
+                    } else {
+                        [0.; 3]
+                    }
+                ),
+            },
+            ModalKind::Scale => LastOperator::Scale {
+                factor: modal.last,
+                pivot: modal.pivot,
+            },
+        });
+        self.finish_transform_from(true);
     }
     fn update_modal(&mut self, ctx: &egui::Context) {
         let Some(mut modal)=self.modal.take() else { return; };
@@ -556,26 +637,149 @@ impl App {
                 if self.selected == id { self.selected = g.nodes.first().map(|(n, _)| n.clone()).unwrap_or_default(); }
                 self.display = g.main_output().unwrap_or_else(|_| self.selected.clone());
             }
+            self.last_operator = Some(LastOperator::Delete);
         }
     }
     /// Copy a node (parameters and inputs) under a fresh id and select the copy.
     fn duplicate_node(&mut self, id: &str) {
         let Some((value, new_id)) = graph_edit::duplicate(self.editor.doc.value(), id) else { return };
-        if self.commit_document(value, "duplicate the node") { self.selected = new_id; }
+        if self.commit_document(value, "duplicate the node") {
+            self.selected = new_id;
+            self.last_operator = Some(LastOperator::Duplicate);
+        }
+    }
+    /// Dissolve a node, rewiring its inputs to consumers.
+    fn dissolve_node(&mut self, id: &str) {
+        let Some(value) = graph_edit::dissolve(self.editor.doc.value(), id) else { return; };
+        if self.commit_document(value, "dissolve the node") {
+            if let Ok(g) = Graph::from_value(self.editor.doc.value()) {
+                if self.selected == id { self.selected = g.nodes.first().map(|(n, _)| n.clone()).unwrap_or_default(); }
+                self.display = g.main_output().unwrap_or_else(|_| self.selected.clone());
+            }
+            self.last_operator = Some(LastOperator::Dissolve);
+        }
     }
     /// Wire `from` into input `port` of `to` (its first input when `port` is None); multi inputs gain one more wire.
     fn connect_nodes(&mut self, from: &str, to: &str, port: Option<&str>) {
         let Some(value) = graph_edit::connect(self.editor.doc.value(), from, to, port) else { return };
-        self.commit_document(value, "connect the nodes");
+        if self.commit_document(value, "connect the nodes") {
+            self.last_operator = Some(LastOperator::Connect {
+                from: from.to_string(),
+                to: to.to_string(),
+                port: port.map(ToString::to_string),
+            });
+        }
     }
     fn disconnect_input(&mut self, node: &str, port: &str) {
         if let Some(value) = graph_edit::disconnect(self.editor.doc.value(), node, port) { self.commit_document(value, "disconnect the input"); }
+    }
+    fn repeat_last(&mut self, ctx: &egui::Context) {
+        let Some(op) = self.last_operator.clone() else {
+            self.file_status = "Nothing to repeat".into();
+            return;
+        };
+        match op {
+            LastOperator::Move { .. } | LastOperator::Rotate { .. } | LastOperator::Scale { .. } => {
+                let group = group_text(&self.selected_points());
+                let is_object = self.editor_state.selection == ui::SelectionMode::Object;
+                if !is_object && group.is_empty() {
+                    self.file_status = "Select points, edges, or faces to transform".into();
+                    return;
+                }
+                self.editor.history.finish(&self.editor.doc);
+                let before = self.editor.doc.clone();
+                let source = self.display.clone();
+                let mut value = self.editor.doc.value().clone();
+
+                let can_reuse = if let Some(node) = value["nodes"].get(&source) {
+                    if node["type"] == "transform" {
+                        if is_object {
+                            node["params"].get("group").and_then(Value::as_str).unwrap_or("").is_empty()
+                        } else {
+                            node["params"].get("group").and_then(Value::as_str) == Some(&group)
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
+
+                let target = if can_reuse {
+                    source
+                } else {
+                    let Some(t) = ensure_transform_target(&mut value, &source, is_object, None) else { return; };
+                    let params = &mut value["nodes"][&t]["params"];
+                    if !params.is_object() { *params = json!({}); }
+                    if !is_object {
+                        params["group"] = json!(group);
+                    }
+                    match &op {
+                        LastOperator::Rotate { pivot, axis_rotation, .. } => {
+                            params["pivot"] = json!(pivot);
+                            if let Some(rot) = axis_rotation {
+                                params["axis_rotation"] = json!(rot);
+                            }
+                        }
+                        LastOperator::Scale { pivot, .. } => {
+                            params["pivot"] = json!(pivot);
+                        }
+                        LastOperator::Move { proportional: Some(_), .. } => {
+                            proportional_params(params, &self.editor_state);
+                        }
+                        _ => {}
+                    }
+                    if let Ok(doc) = Document::parse(value.to_string()) {
+                        self.editor.doc = doc;
+                        self.send(Edit::Replace(value));
+                    }
+                    t
+                };
+
+                match repeat::apply_repeat_transform(&mut self.editor.doc, &target, &op) {
+                    Ok(edit) => {
+                        self.send(edit);
+                        self.editor.history.record(before, &self.editor.doc);
+                        self.editor.history.finish(&self.editor.doc);
+                        self.selected = target.clone();
+                        self.display = target;
+                    }
+                    Err(e) => {
+                        self.file_status = format!("Could not repeat transform: {e}");
+                    }
+                }
+            }
+            LastOperator::AddNode { node_type, after_selection } => {
+                let after = if after_selection { Some(self.selected.clone()) } else { None };
+                self.add_node(&node_type, after.as_deref());
+            }
+            LastOperator::Duplicate => {
+                let sel = self.selected.clone();
+                self.duplicate_node(&sel);
+            }
+            LastOperator::Dissolve => {
+                let sel = self.selected.clone();
+                self.dissolve_node(&sel);
+            }
+            LastOperator::Delete => {
+                let sel = self.selected.clone();
+                self.delete_node(&sel);
+            }
+            LastOperator::Connect { from, to, port } => {
+                self.connect_nodes(&from, &to, port.as_deref());
+            }
+            LastOperator::Tidy => {
+                ui::network::tidy(ctx, &self.editor.path);
+                self.last_operator = Some(LastOperator::Tidy);
+            }
+        }
     }
     /// Keymap commands that have no dedicated action.
     fn command(&mut self, name: &str, ctx: &egui::Context) {
         use ui::EditorChange as C;
         let e = self.editor_state;
         match name {
+            "repeat_last" => self.repeat_last(ctx),
             "copy" => {
                 self.clipboard = graph_edit::copy(self.editor.doc.value(), std::slice::from_ref(&self.selected));
                 if self.clipboard.is_some() { self.file_status = "Node copied".into(); }
@@ -718,9 +922,14 @@ impl App {
                 UiAction::Zoom(factor) => self.camera.zoom_factor(factor),
                 UiAction::DeleteNode(id) => self.delete_node(&id),
                 UiAction::DuplicateNode(id) => self.duplicate_node(&id),
+                UiAction::DissolveNode(id) => self.dissolve_node(&id),
                 UiAction::ConnectNodes { from, to, port } => self.connect_nodes(&from, &to, port.as_deref()),
                 UiAction::DisconnectInput { node, port } => self.disconnect_input(&node, &port),
-                UiAction::TidyNetwork => ui::network::tidy(ctx, &self.editor.path),
+                UiAction::TidyNetwork => {
+                    ui::network::tidy(ctx, &self.editor.path);
+                    self.last_operator = Some(LastOperator::Tidy);
+                }
+                UiAction::RepeatLast => self.repeat_last(ctx),
                 UiAction::BlenderBar(on) => self.blender_bar = on,
                 UiAction::BlenderInstall(i) => {
                     use ui::blender_ui::blender_link as bl;
@@ -829,12 +1038,14 @@ impl eframe::App for App {
             in_edit_mode: self.editor_state.selection != ui::SelectionMode::Object, selected: Some(&self.selected) };
         if self.modal.is_none() && !ui::sketch::active(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) { for action in self.keymap.poll(ctx, &kctx) { out.push(action); } }
         {
+            let repeat_desc = self.last_operator.as_ref().map(LastOperator::description);
             let v = View { graph: &graph, doc: self.editor.doc.value(), path: &self.editor.path, dirty: self.editor.dirty(),
                 can_undo: self.editor.history.can_undo(), can_redo: self.editor.history.can_redo(),
                 selected: &self.selected, display: &self.display, cooking: &self.cooking, file_status: &self.file_status,
                 mode: self.mode, theme: &self.theme, editor: &self.editor_state, flags: &self.flags, geo: self.geo.as_ref(), blender: &self.blender,
                 bounds: self.bounds, selection_center: self.selection_center(),
-                camera: self.camera_info() };
+                camera: self.camera_info(),
+                repeat_label: repeat_desc.as_deref() };
             egui::TopBottomPanel::top("toolbar").show(ctx, |ui| ui::topbar::show(ui, &v, &mut out));
             if self.blender_bar {
                 let mut shown = true;
