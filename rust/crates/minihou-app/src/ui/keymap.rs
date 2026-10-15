@@ -210,7 +210,7 @@ fn default_keymap_table() -> String {
 #[cfg(test)] mod tests {
     use super::*;
     #[test] fn guide_keymap_matches_defaults() {
-        let guide = include_str!("../../docs/NATIVE_EDITOR.md");
+        let guide = include_str!("../../docs/NATIVE_EDITOR.md").replace("\r\n", "\n");
         let table = guide.split_once("<!-- keymap:start -->\n").unwrap().1.split_once("<!-- keymap:end -->").unwrap().0;
         assert_eq!(table, default_keymap_table());
     }
