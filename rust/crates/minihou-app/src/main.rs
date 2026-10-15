@@ -21,6 +21,7 @@ struct App {
     prefs: Preferences, keymap: Keymap, prefs_open: bool, viewport_hover: bool, network_hover: bool,
     /// The last cooked scene at full detail, and the proxy level it is currently uploaded at.
     scene: Option<Scene>, shown_level: f32, geo_rev: u64,
+    blender_paths: Vec<PathBuf>, blender_bar: bool,
 }
 impl App {
     fn new(doc: Document, path: PathBuf, state: egui_wgpu::RenderState) -> Result<Self> {
@@ -31,7 +32,7 @@ impl App {
             camera:Camera::frame([0.;3],1.),bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new(),
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
-            scene:None,shown_level:1.0,geo_rev:u64::MAX };
+            scene:None,shown_level:1.0,geo_rev:u64::MAX,blender_paths:Vec::new(),blender_bar:false };
         app.prefs = Preferences::load();
         app.keymap = Keymap::from_overrides_json(&app.prefs.keymap_overrides);
         app.keymap.emulate_numpad = app.prefs.emulate_numpad;
@@ -40,6 +41,10 @@ impl App {
         app.editor_state.overlays.grid = app.prefs.viewport.show_grid;
         app.editor_state.overlays.axes = app.prefs.viewport.show_axes;
         app.editor_state.overlays.stats = app.prefs.show_stats;
+        let installs = ui::blender_ui::blender_link::find_installs();
+        app.blender.installs = installs.iter().map(|(label, path)| (label.clone(), path.display().to_string())).collect();
+        app.blender_paths = installs.into_iter().map(|(_, p)| p).collect();
+        app.blender.addon_installed = false;
         app.send(Edit::Display(app.display.clone()));
         Ok(app)
     }
@@ -240,7 +245,31 @@ impl App {
                 UiAction::ConnectNodes { from, to, port } => self.connect_nodes(&from, &to, port.as_deref()),
                 UiAction::DisconnectInput { node, port } => self.disconnect_input(&node, &port),
                 UiAction::TidyNetwork => ui::network::tidy(ctx, &self.editor.path),
-                | UiAction::BlenderInstall(_) | UiAction::BlenderOpen | UiAction::BlenderDownloadAddon | UiAction::BlenderBar(_) => self.file_status = "That command is not wired up yet".into(),
+                UiAction::BlenderBar(on) => self.blender_bar = on,
+                UiAction::BlenderInstall(i) => {
+                    use ui::blender_ui::blender_link as bl;
+                    self.blender.message = match (self.blender_paths.get(i), bl::addon_zip()) {
+                        (Some(exe), Some(zip)) => bl::install_addon(exe, &zip).unwrap_or_else(|e| format!("Install failed: {e}")),
+                        (None, _) => "No Blender installation selected.".into(),
+                        (_, None) => "The add-on ZIP (MiniHou_Link*.zip) was not found next to the app or under dist.".into(),
+                    };
+                    self.blender_bar = true;
+                }
+                UiAction::BlenderOpen => {
+                    use ui::blender_ui::blender_link as bl;
+                    self.blender.message = match self.blender_paths.first() {
+                        Some(exe) => match bl::open_blender(exe, &self.editor.path) { Ok(_) => "Starting Blender...".into(), Err(e) => format!("Could not start Blender: {e}") },
+                        None => "No Blender installation found.".into(),
+                    };
+                    self.blender_bar = true;
+                }
+                UiAction::BlenderDownloadAddon => {
+                    self.blender.message = match ui::blender_ui::blender_link::addon_zip() {
+                        Some(zip) => { let _ = std::process::Command::new("explorer").arg("/select,").arg(&zip).spawn(); format!("Add-on: {}", zip.display()) }
+                        None => "The add-on ZIP was not found next to the app or under dist.".into(),
+                    };
+                    self.blender_bar = true;
+                }
                 UiAction::ToggleLocked(id) => { let f = self.flags.entry(id).or_default(); f.locked = !f.locked; }
                 UiAction::ToggleTemplate(id) => { let f = self.flags.entry(id).or_default(); f.template = !f.template; }
             }
@@ -292,6 +321,13 @@ impl eframe::App for App {
                 mode: self.mode, theme: &self.theme, editor: &self.editor_state, flags: &self.flags, geo: self.geo.as_ref(), blender: &self.blender,
                 camera: { let (yaw, pitch) = self.camera.angles(); CameraInfo { yaw, pitch, ortho: self.camera.is_ortho() } } };
             egui::TopBottomPanel::top("toolbar").show(ctx, |ui| ui::topbar::show(ui, &v, &mut out));
+            if self.blender_bar {
+                let mut shown = true;
+                egui::TopBottomPanel::top("blender_bar").show(ctx, |ui| ui::blender_ui::bar(ui, &v, &mut out, &mut shown));
+                if !shown { out.push(UiAction::BlenderBar(false)); }
+            }
+            egui::Area::new(egui::Id::new("blender_indicator")).fixed_pos(egui::pos2(ctx.content_rect().right() - 330., 9.)).order(egui::Order::Foreground)
+                .show(ctx, |ui| ui::blender_ui::indicator(ui, &v, &mut out));
             egui::TopBottomPanel::top("shelf").show(ctx, |ui| ui::shelf::show(ui, &v, &mut out));
             egui::TopBottomPanel::bottom("stats").show(ctx, |ui| ui::status::show(ui, &v, &mut out));
             let net = egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| ui::network::show(ui, &v, &mut out));

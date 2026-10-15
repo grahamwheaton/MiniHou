@@ -2,6 +2,7 @@
 //! it reads the immutable `View` and pushes `UiAction`s; `App::update` applies them. A panel never touches the engine, the
 //! document or the GPU directly, which is what lets each one be built and tested alone (see `ui::testing`).
 #![allow(dead_code)] // the skeleton: each panel is filled in one at a time
+pub mod blender_ui;
 pub mod editor_state;
 pub mod geo_info;
 pub mod keymap;
