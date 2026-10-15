@@ -116,12 +116,16 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.;
                 for tool in TABS[active].tools {
-                    let (r, response) = ui.allocate_exact_size(Vec2::new(54., 48.), Sense::click());
+                    let (r, response) = ui.allocate_exact_size(Vec2::new(54., 50.), Sense::click());
                     if response.hovered() { ui.painter().rect_filled(r, 5., v.theme.input); ui.painter().rect_stroke(r, 5., Stroke::new(1.0_f32, v.theme.stroke), StrokeKind::Inside); }
-                    let icon_rect = Rect::from_center_size(r.center_top() + Vec2::new(0., 13.), Vec2::splat(22.));
+                    let icon_rect = Rect::from_center_size(r.center_top() + Vec2::new(0., 12.), Vec2::splat(22.));
                     icon(ui.painter(), icon_rect, tool, v.theme.text, v.theme.c_src);
                     let label = wrap_label(tool.label);
-                    ui.painter().with_clip_rect(r).text(r.center_top() + Vec2::new(0., 26.), Align2::CENTER_TOP, label, FontId::proportional(10.), v.theme.text);
+                    // one line at a time: egui left-aligns the lines of a multi-line string inside its block
+                    for (i, text) in label.split('
+').enumerate() {
+                        ui.painter().with_clip_rect(r).text(r.center_top() + Vec2::new(0., 27. + i as f32 * 11.), Align2::CENTER_TOP, text, FontId::proportional(9.5), v.theme.text);
+                    }
                     if v.runs_on_rust(tool.node_type) { dot(ui.painter(), r.min, r.width() - 7., 5., 2.5, v.theme.ok); }
                     if response.on_hover_text(format!("{} ({})", tool.label, tool.node_type)).clicked() {
                         out.push(UiAction::AddNode { node_type: tool.node_type.to_owned(), after: Some(v.selected.to_owned()) });

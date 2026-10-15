@@ -318,16 +318,36 @@ fn boxed(ui: &mut egui::Ui, width: f32, t: &Theme) -> (Rect, Rect) {
     ui.painter().rect(r, 4., t.input, Stroke::new(1.0_f32, t.stroke), StrokeKind::Inside);
     (r, r.shrink2(Vec2::new(2., 1.)))
 }
-/// A drag value drawn without its own frame inside `rect`.
-fn drag_in(ui: &mut egui::Ui, rect: Rect, drag: egui::DragValue<'_>) -> bool {
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
-    let w = &mut child.visuals_mut().widgets;
-    for s in [&mut w.inactive, &mut w.hovered, &mut w.active, &mut w.noninteractive] {
-        s.bg_fill = Color32::TRANSPARENT;
-        s.weak_bg_fill = Color32::TRANSPARENT;
-        s.bg_stroke = Stroke::NONE;
+/// A number you drag sideways to change and double-click to type, painted in `rect` (the design's mono 12 px value).
+#[allow(clippy::too_many_arguments)] // painter-style helper, called from three places
+fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: f64, range: &std::ops::RangeInclusive<f64>, integer: bool, align: Align2, t: &Theme) -> bool {
+    let edit_id = id.with("edit");
+    let editing: Option<String> = ui.ctx().data(|d| d.get_temp(edit_id));
+    let mut changed = false;
+    let clamp = |x: f64| { let x = x.clamp(*range.start(), *range.end()); if integer { x.round() } else { x } };
+    let anchor = match align { Align2::LEFT_CENTER => Pos2::new(rect.left() + 2., rect.center().y), Align2::RIGHT_CENTER => Pos2::new(rect.right() - 2., rect.center().y), _ => rect.center() };
+    if let Some(mut text) = editing {
+        let response = ui.put(rect, egui::TextEdit::singleline(&mut text).font(egui::FontId::monospace(12.)).frame(false).margin(Vec2::new(2., 0.)).id(id.with("text")));
+        if !response.has_focus() && !response.lost_focus() { response.request_focus(); }
+        if response.lost_focus() {
+            if let Ok(x) = text.trim().parse::<f64>() { *v = clamp(x); changed = true; }
+            ui.ctx().data_mut(|d| d.remove::<String>(edit_id));
+        } else { ui.ctx().data_mut(|d| d.insert_temp(edit_id, text)); }
+    } else {
+        let response = ui.interact(rect, id, Sense::click_and_drag());
+        if response.hovered() || response.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal); }
+        if response.dragged() {
+            let step = response.drag_delta().x as f64 * speed;
+            if step != 0. { let next = clamp(*v + step); if next != *v { *v = next; changed = true; } }
+        }
+        if response.double_clicked() {
+            let text = if integer { format!("{}", *v as i64) } else { format!("{v}") };
+            ui.ctx().data_mut(|d| d.insert_temp(edit_id, text));
+        }
+        let text = if integer { format!("{}", *v as i64) } else { format!("{:.2}", *v) };
+        ui.painter().text(anchor, align, text, egui::FontId::monospace(12.), if ui.is_enabled() { t.text } else { t.faint });
     }
-    child.add_sized([rect.width(), rect.height()], drag).changed()
+    changed
 }
 
 /// One editing widget for a parameter value; returns true when the value changed.
@@ -356,7 +376,17 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
                 if let Some(range) = slider_range(meta) {
                     let (min, max) = (*range.start(), *range.end());
                     ui.spacing_mut().slider_width = (width - 58.).max(8.);
-                    let response = ui.add(egui::Slider::new(&mut v, range).show_value(false).clamping(egui::SliderClamping::Edits));
+                    let response = ui.scope(|ui| {
+                        let w = &mut ui.visuals_mut().widgets;
+                        for s in [&mut w.inactive, &mut w.hovered, &mut w.active, &mut w.noninteractive] {
+                            s.bg_fill = Color32::TRANSPARENT;
+                            s.weak_bg_fill = Color32::TRANSPARENT;
+                            s.bg_stroke = Stroke::NONE;
+                            s.fg_stroke = Stroke::NONE;
+                        }
+                        ui.visuals_mut().slider_trailing_fill = false;
+                        ui.add(egui::Slider::new(&mut v, range).show_value(false).clamping(egui::SliderClamping::Edits))
+                    }).inner;
                     changed |= response.changed();
                     if let Some(t) = theme {
                         let track = Rect::from_center_size(response.rect.center(), Vec2::new((response.rect.width() - 12.).max(4.), 6.));
@@ -375,12 +405,16 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
                     }
                 }
             }
-            if integer { if let Some(t) = theme { ui.label(egui::RichText::new("‹").color(t.dim).monospace()); } }
             let drag_width = if integer { width - if theme.is_some() { 32. } else { 0. } }
                 else if slider_range(meta).is_some() { 52. } else { width };
-            changed |= ui.add_sized([drag_width.max(24.), 22.], egui::DragValue::new(&mut v).speed(if integer { 1. } else { 0.01 })
-                .range(meta["min"].as_f64().unwrap_or(f64::NEG_INFINITY)..=meta["max"].as_f64().unwrap_or(f64::INFINITY))).changed();
-            if integer { if let Some(t) = theme { ui.label(egui::RichText::new("›").color(t.dim).monospace()); } }
+            let range = meta["min"].as_f64().unwrap_or(f64::NEG_INFINITY)..=meta["max"].as_f64().unwrap_or(f64::INFINITY);
+            if let (Some(t), false) = (theme, integer) {
+                let (outer, inner) = boxed(ui, drag_width.max(24.), t);
+                let drag_speed = slider_range(meta).map_or(0.01, |r| ((r.end() - r.start()) / 400.).clamp(0.001, 1.));
+                changed |= drag_number(ui, inner, ui.id().with(("num", meta["default"].to_string(), outer.min.x as i32, outer.min.y as i32)), &mut v, drag_speed, &range, false, Align2::RIGHT_CENTER, t);
+            } else {
+                changed |= ui.add_sized([drag_width.max(24.), 22.], egui::DragValue::new(&mut v).speed(if integer { 1. } else { 0.01 }).range(range)).changed();
+            }
             if changed {
                 v = clamp_parameter(meta, v);
                 *value = if integer { json!(v.round() as i64) } else { json!(v) };
@@ -401,7 +435,15 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
                 let c = outer.center().y;
                 p.add(egui::Shape::line(vec![Pos2::new(outer.left() + 9., c - 3.), Pos2::new(outer.left() + 6., c), Pos2::new(outer.left() + 9., c + 3.)], Stroke::new(1.3_f32, t.dim)));
                 p.add(egui::Shape::line(vec![Pos2::new(outer.right() - 9., c - 3.), Pos2::new(outer.right() - 6., c), Pos2::new(outer.right() - 9., c + 3.)], Stroke::new(1.3_f32, t.dim)));
-                drag_in(ui, inner.shrink2(Vec2::new(14., 0.)), egui::DragValue::new(&mut v).speed(1))
+                let range = meta.and_then(|m| m["min"].as_f64()).unwrap_or(f64::NEG_INFINITY)..=meta.and_then(|m| m["max"].as_f64()).unwrap_or(f64::INFINITY);
+                let mut x = v as f64;
+                let mut hit = ui.interact(Rect::from_min_size(outer.min, Vec2::new(16., 22.)), ui.id().with(("dec", outer.min.x as i32, outer.min.y as i32)), Sense::click()).clicked().then_some(x - 1.);
+                if hit.is_none() { hit = ui.interact(Rect::from_min_size(Pos2::new(outer.right() - 16., outer.top()), Vec2::new(16., 22.)), ui.id().with(("inc", outer.min.x as i32, outer.min.y as i32)), Sense::click()).clicked().then_some(x + 1.); }
+                let mut moved = false;
+                if let Some(n) = hit { x = n.clamp(*range.start(), *range.end()); moved = true; }
+                moved |= drag_number(ui, inner.shrink2(Vec2::new(16., 0.)), ui.id().with(("int", outer.min.x as i32, outer.min.y as i32)), &mut x, 0.1, &range, true, Align2::CENTER_CENTER, t);
+                if moved { v = x as i64; }
+                moved
             } else {
                 ui.add_sized([width.max(24.), 22.], egui::DragValue::new(&mut v).speed(1)).changed()
             };
@@ -428,7 +470,8 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
                         let (outer, inner) = boxed(ui, axis_width, t);
                         ui.painter().text(Pos2::new(outer.left() + 6., outer.center().y), Align2::LEFT_CENTER, ["X", "Y", "Z"][i],
                             egui::FontId::monospace(11.), [t.x_axis, t.y_axis, t.z_axis][i]);
-                        changed |= drag_in(ui, Rect::from_min_max(Pos2::new(inner.left() + 12., inner.top()), inner.max), egui::DragValue::new(x).speed(0.01).range(range.clone()));
+                        changed |= drag_number(ui, Rect::from_min_max(Pos2::new(inner.left() + 12., inner.top()), inner.max),
+                            ui.id().with(("v3", i, outer.min.x as i32, outer.min.y as i32)), x, 0.01, &range, false, Align2::LEFT_CENTER, t);
                     } else {
                         changed |= ui.add_sized([axis_width, 22.], egui::DragValue::new(x).speed(0.01).range(range.clone())).changed();
                     }
