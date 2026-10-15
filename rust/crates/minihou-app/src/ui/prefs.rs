@@ -2,6 +2,8 @@
 use serde_json::{json, Value};
 use std::{fs, io, path::{Path, PathBuf}};
 
+use crate::units::{LengthUnit, UnitSettings};
+
 pub const SCHEMA: u32 = 1;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThemePref { Dark, Light, System }
@@ -19,11 +21,13 @@ pub struct Preferences {
     pub theme: ThemePref, pub ui_scale: f32, pub emulate_numpad: bool, pub snap_increment: f32,
     pub show_stats: bool, pub autosave_minutes: Option<u32>, pub keymap_overrides: Value,
     pub recent_files: Vec<PathBuf>, pub viewport: ViewportPreferences,
+    pub units: UnitSettings,
 }
 impl Default for Preferences { fn default() -> Self { Self {
     theme: ThemePref::System, ui_scale: 1., emulate_numpad: false, snap_increment: 0.25,
     show_stats: true, autosave_minutes: Some(5), keymap_overrides: json!({"bindings": []}),
     recent_files: Vec::new(), viewport: ViewportPreferences::default(),
+    units: UnitSettings::default(),
 } } }
 impl Preferences {
     pub fn path() -> PathBuf {
@@ -55,6 +59,9 @@ impl Preferences {
         "viewport": { "default_shading": self.viewport.default_shading,
             "navigation": match self.viewport.navigation { Navigation::Blender => "blender", Navigation::Houdini => "houdini" },
             "show_grid": self.viewport.show_grid, "show_axes": self.viewport.show_axes, "auto_budget": self.viewport.auto_budget },
+        "length_unit": self.units.display.symbol(),
+        "unit_scale": self.units.unit_scale,
+        "units": { "length_unit": self.units.display.symbol(), "unit_scale": self.units.unit_scale },
     }) }
     fn from_json(v: &Value) -> Self {
         let mut p = Self { theme: match v.get("theme").and_then(Value::as_str) {
@@ -75,6 +82,10 @@ impl Preferences {
             if let Some(x) = view.get("show_axes").and_then(Value::as_bool) { p.viewport.show_axes = x; }
             if let Some(x) = view.get("auto_budget").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()) { p.viewport.auto_budget = x.max(1); }
         }
+        let unit_sym = v.get("length_unit").or_else(|| v.get("units").and_then(|u| u.get("length_unit"))).and_then(Value::as_str);
+        if let Some(u) = unit_sym.and_then(LengthUnit::parse_symbol) { p.units.display = u; }
+        let scale_val = v.get("unit_scale").or_else(|| v.get("units").and_then(|u| u.get("unit_scale"))).and_then(Value::as_f64);
+        if let Some(scale) = scale_val { if (1e-9..=1e9).contains(&scale) { p.units.unit_scale = scale; } }
         p
     }
     pub fn add_recent(&mut self, path: PathBuf) {
@@ -89,6 +100,7 @@ impl Preferences {
         let path = test_path("prefs-roundtrip");
         let mut p = Preferences { theme: ThemePref::Light, ui_scale: 1.25, recent_files: vec![PathBuf::from("a.hou")], ..Default::default() };
         p.viewport.auto_budget = 250_000;
+        p.units = UnitSettings { display: LengthUnit::Cm, unit_scale: 0.1 };
         p.save_to(&path).unwrap(); p.save_to(&path).unwrap(); assert_eq!(Preferences::load_from(&path),p);
         let _ = fs::remove_file(path);
     }
@@ -101,10 +113,20 @@ impl Preferences {
     #[test] fn missing_fields_default_and_unknown_fields_ignored() {
         let p = Preferences::from_json(&json!({"schema":0,"theme":"Dark","unknown":42}));
         assert_eq!(p.theme,ThemePref::Dark); assert_eq!(p.ui_scale,1.); assert!(p.viewport.show_grid);
+        assert_eq!(p.units.display, LengthUnit::Mm);
+        assert_eq!(p.units.unit_scale, 1.0);
     }
     #[test] fn navigation_defaults_and_round_trips() {
         assert_eq!(Preferences::default().viewport.navigation, Navigation::Blender);
         let mut p = Preferences::default(); p.viewport.navigation = Navigation::Houdini;
         assert_eq!(Preferences::from_json(&p.to_json()).viewport.navigation, Navigation::Houdini);
+    }
+    #[test] fn units_preferences_deserialize() {
+        let p = Preferences::from_json(&json!({"length_unit": "in", "unit_scale": 0.0254}));
+        assert_eq!(p.units.display, LengthUnit::In);
+        assert!((p.units.unit_scale - 0.0254).abs() < 1e-9);
+        let p2 = Preferences::from_json(&json!({"units": {"length_unit": "ft", "unit_scale": 0.3048}}));
+        assert_eq!(p2.units.display, LengthUnit::Ft);
+        assert!((p2.units.unit_scale - 0.3048).abs() < 1e-9);
     }
 }

@@ -19,9 +19,11 @@ fn text(ui: &egui::Ui, x: f32, y: f32, value: &str, color: egui::Color32) {
 
 fn fmt(value: f64) -> String { format!("{value:.3}") }
 
-fn vec3(v: [f32; 3]) -> String { format!("{}, {}, {}", fmt(f64::from(v[0])), fmt(f64::from(v[1])), fmt(f64::from(v[2]))) }
+fn vec3(v: [f32; 3], units: crate::units::UnitSettings) -> String {
+    format!("{}, {}, {}", crate::units::format(v[0] as f64, units), crate::units::format(v[1] as f64, units), crate::units::format(v[2] as f64, units))
+}
 
-fn stats(ui: &mut egui::Ui, s: &GeoSummary, theme: &Theme) {
+fn stats(ui: &mut egui::Ui, s: &GeoSummary, theme: &Theme, units: crate::units::UnitSettings) {
     let r = line(ui, ROW + 4.);
     text(ui, r.left() + 10., r.center().y, "POINTS", theme.dim);
     text(ui, r.left() + 68., r.center().y, &s.points.to_string(), theme.text);
@@ -33,7 +35,7 @@ fn stats(ui: &mut egui::Ui, s: &GeoSummary, theme: &Theme) {
         for (label, value) in [("Min", min), ("Max", max), ("Size", [max[0] - min[0], max[1] - min[1], max[2] - min[2]])] {
             let r = line(ui, ROW);
             text(ui, r.left() + 10., r.center().y, label, theme.dim);
-            text(ui, r.left() + 48., r.center().y, &vec3(value), theme.text);
+            text(ui, r.left() + 48., r.center().y, &vec3(value, units), theme.text);
         }
     }
 }
@@ -119,7 +121,7 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, _out: &mut Actions) {
         egui::ScrollArea::both().id_salt("geo_info_scroll").max_height(HEIGHT - HEADER - 22.).show(ui, |ui| {
             ui.set_min_width(if ranges { 400. } else { width });
             ui.spacing_mut().item_spacing = Vec2::ZERO;
-            stats(ui, s, v.theme);
+            stats(ui, s, v.theme, v.units);
             attribute_table(ui, "Point", &s.point_attrs, ranges, v.theme);
             attribute_table(ui, "Vertex", &s.vertex_attrs, ranges, v.theme);
             attribute_table(ui, "Primitive", &s.prim_attrs, ranges, v.theme);
@@ -144,5 +146,38 @@ mod tests {
         assert!(f.run(show).is_empty());
         f.theme = Theme::light();
         assert!(f.run(show).is_empty());
+    }
+
+    #[test]
+    fn bounds_display_with_units() {
+        let mut f = Fixture::new();
+        f.geo = Some(GeoSummary {
+            node: f.display.clone(), points: 3, vertices: 3, prims: 1,
+            bounds: Some(([0.; 3], [1.; 3])), ..Default::default()
+        });
+        let mut out = Actions::default();
+        let ctx = egui::Context::default();
+        f.theme.apply(&ctx);
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280., 800.))), ..Default::default() };
+        let full = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                show(ui, &f.view(), &mut out);
+            });
+        });
+        fn extract_texts(shapes: &[egui::epaint::ClippedShape], out: &mut Vec<String>) {
+            for s in shapes {
+                match &s.shape {
+                    egui::epaint::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+                    egui::epaint::Shape::Vec(subs) => {
+                        let clipped: Vec<egui::epaint::ClippedShape> = subs.iter().map(|sub| egui::epaint::ClippedShape { clip_rect: s.clip_rect, shape: sub.clone() }).collect();
+                        extract_texts(&clipped, out);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut texts = Vec::new();
+        extract_texts(&full.shapes, &mut texts);
+        assert!(texts.iter().any(|t| t.contains("1000 mm")), "expected 1000 mm in bounds: {texts:?}");
     }
 }

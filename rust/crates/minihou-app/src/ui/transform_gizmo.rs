@@ -192,7 +192,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
         else {
             let events = ui.input(|i| i.events.clone());
             for event in events { match event {
-                egui::Event::Text(s) if s.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-') => d.typed.push_str(&s),
+                egui::Event::Text(s) if s.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-' || matches!(c, 'm'|'c'|'k'|'i'|'n'|'f'|'t'|'M'|'C'|'K'|'I'|'N'|'F'|'T'|' ')) => d.typed.push_str(&s),
                 egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => { d.typed.pop(); },
                 _ => {}
             } }
@@ -202,7 +202,11 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
             let projected = project(v.camera, rect, add(origin, mul(frame[d.axis], span)))
                 .map(|p| p - center).filter(|delta| delta.length() > 1.).unwrap_or(vec2(1., 0.));
             let pixels = (pointer - d.start).dot(projected.normalized());
-            let typed = d.typed.parse::<f32>().ok().map(|x| if d.kind == Tool::Scale { x - 1. } else { x });
+            let typed = if d.kind == Tool::Move {
+                crate::units::parse(&d.typed, v.units).map(|x| x as f32)
+            } else {
+                d.typed.parse::<f32>().ok().map(|x| if d.kind == Tool::Scale { x - 1. } else { x })
+            };
             let raw = typed.unwrap_or_else(|| if d.kind == Tool::Rotate { d.swept }
                 else if d.kind == Tool::Move { projected_distance(pixels, span, projected.length()) }
             else { value(d.kind, pixels) });
@@ -218,7 +222,12 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
                 d.last = current;
             }
             let shown = if d.kind == Tool::Scale { current + 1. } else { current };
-            p.text(pointer + vec2(12., -12.), Align2::LEFT_BOTTOM, format!("{shown:.3}"), FontId::monospace(12.), v.theme.text);
+            let shown_text = if d.kind == Tool::Move {
+                crate::units::format(shown as f64, v.units)
+            } else {
+                format!("{shown:.3}")
+            };
+            p.text(pointer + vec2(12., -12.), Align2::LEFT_BOTTOM, shown_text, FontId::monospace(12.), v.theme.text);
             ui.ctx().data_mut(|data| data.insert_temp(id, d));
         }
     }
@@ -268,5 +277,46 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
             - ring.iter().map(|p| p.0.y).fold(f32::INFINITY, f32::min);
         assert!(height(&rings[0]) > 20. && height(&rings[1]) < 1. && height(&rings[2]) > 20.);
         assert_eq!(ring_hit(&rings, rings[2][12].0), Some(2));
+    }
+    #[test] fn move_drag_shows_units() {
+        let mut f = crate::ui::testing::Fixture::new();
+        f.camera.projection = [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]];
+        let editor = crate::ui::EditorState { tool: Tool::Move, ..Default::default() };
+        let mut view = f.view();
+        view.editor = &editor;
+        let mut actions = Actions::default();
+        let id = egui::Id::new("transform_gizmo_drag");
+        let d = Drag {
+            axis: 0, kind: Tool::Move, start: Pos2::ZERO, last_pointer: Pos2::ZERO,
+            swept: 0., typed: "1000".into(), last: 0.0,
+        };
+        let ctx = egui::Context::default();
+        ctx.data_mut(|data| data.insert_temp(id, d));
+        f.theme.apply(&ctx);
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(pos2(0., 0.), vec2(1280., 800.))),
+            events: vec![egui::Event::PointerButton { pos: Pos2::ZERO, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }],
+            ..Default::default()
+        };
+        let full = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                show(ui, ui.max_rect(), &view, &mut actions);
+            });
+        });
+        fn extract_texts(shapes: &[egui::epaint::ClippedShape], out: &mut Vec<String>) {
+            for s in shapes {
+                match &s.shape {
+                    egui::epaint::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+                    egui::epaint::Shape::Vec(subs) => {
+                        let clipped: Vec<egui::epaint::ClippedShape> = subs.iter().map(|sub| egui::epaint::ClippedShape { clip_rect: s.clip_rect, shape: sub.clone() }).collect();
+                        extract_texts(&clipped, out);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut texts = Vec::new();
+        extract_texts(&full.shapes, &mut texts);
+        assert!(texts.iter().any(|t| t.contains("1000 mm")), "expected 1000 mm in {texts:?}");
     }
 }

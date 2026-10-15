@@ -209,8 +209,9 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     let reset_rect = Rect::from_min_size(Pos2::new(expose_rect.left() - 28., r.top() + 4.), Vec2::splat(20.));
     let control = Rect::from_min_max(Pos2::new(label.right() + 6., r.top() + 3.), Pos2::new(reset_rect.left() - 6., r.bottom() - 3.));
     if modified { ui.painter().circle_filled(Pos2::new(r.left() + 9., r.center().y), 3., v.theme.accent); }
+    let is_length = crate::units::is_length_param(typ, param.name);
     let ink = if !param.supported { v.theme.faint } else if modified { v.theme.text } else { v.theme.dim };
-    let label_text = title(param.name);
+    let label_text = if is_length { format!("{} ({})", title(param.name), v.units.display.symbol()) } else { title(param.name) };
     paint_text(ui, Pos2::new(label.left(), label.center().y), &label_text, 12., false, ink, Align2::LEFT_CENTER);
     let label_response = ui.interact(label, ui.id().with((id, param.name, "label")), Sense::hover());
     let doc = meta.and_then(|m| m["doc"].as_str()).unwrap_or("");
@@ -223,7 +224,8 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
         child.set_width(control.width());
         child.spacing_mut().item_spacing.x = 4.;
         let enabled = param.supported && !locked;
-        let response = child.add_enabled_ui(enabled, |ui| widget_styled(ui, kind, meta, &mut value, Some(v.theme), control.width())).response;
+        let units_opt = if is_length { Some(v.units) } else { None };
+        let response = child.add_enabled_ui(enabled, |ui| widget_styled(ui, kind, meta, &mut value, Some(v.theme), control.width(), units_opt)).response;
         if !enabled { response.on_disabled_hover_text(if locked { "Locked" } else { DISABLED }); }
     }
     if param.supported && !locked && value != old {
@@ -320,7 +322,7 @@ fn boxed(ui: &mut egui::Ui, width: f32, t: &Theme) -> (Rect, Rect) {
 }
 /// A number you drag sideways to change and double-click to type, painted in `rect` (the design's mono 12 px value).
 #[allow(clippy::too_many_arguments)] // painter-style helper, called from three places
-fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: f64, range: &std::ops::RangeInclusive<f64>, integer: bool, align: Align2, t: &Theme) -> bool {
+fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: f64, range: &std::ops::RangeInclusive<f64>, integer: bool, align: Align2, t: &Theme, units: Option<crate::units::UnitSettings>) -> bool {
     let edit_id = id.with("edit");
     let editing: Option<String> = ui.ctx().data(|d| d.get_temp(edit_id));
     let mut changed = false;
@@ -330,21 +332,41 @@ fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: 
         let response = ui.put(rect, egui::TextEdit::singleline(&mut text).font(egui::FontId::monospace(12.)).frame(false).margin(Vec2::new(2., 0.)).id(id.with("text")));
         if !response.has_focus() && !response.lost_focus() { response.request_focus(); }
         if response.lost_focus() {
-            if let Ok(x) = text.trim().parse::<f64>() { *v = clamp(x); changed = true; }
+            if let Some(u) = units {
+                if let Some(x) = u.parse(&text) { *v = clamp(x); changed = true; }
+            } else if let Ok(x) = text.trim().parse::<f64>() {
+                *v = clamp(x); changed = true;
+            }
             ui.ctx().data_mut(|d| d.remove::<String>(edit_id));
         } else { ui.ctx().data_mut(|d| d.insert_temp(edit_id, text)); }
     } else {
         let response = ui.interact(rect, id, Sense::click_and_drag());
         if response.hovered() || response.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal); }
         if response.dragged() {
-            let step = response.drag_delta().x as f64 * speed;
+            let step = if let Some(u) = units {
+                response.drag_delta().x as f64 * speed * u.display.metres() / u.unit_scale
+            } else {
+                response.drag_delta().x as f64 * speed
+            };
             if step != 0. { let next = clamp(*v + step); if next != *v { *v = next; changed = true; } }
         }
         if response.double_clicked() {
-            let text = if integer { format!("{}", *v as i64) } else { format!("{v}") };
+            let text = if let Some(u) = units {
+                u.format(*v)
+            } else if integer {
+                format!("{}", *v as i64)
+            } else {
+                format!("{v}")
+            };
             ui.ctx().data_mut(|d| d.insert_temp(edit_id, text));
         }
-        let text = if integer { format!("{}", *v as i64) } else { format!("{:.2}", *v) };
+        let text = if let Some(u) = units {
+            u.format(*v)
+        } else if integer {
+            format!("{}", *v as i64)
+        } else {
+            format!("{:.2}", *v)
+        };
         ui.painter().text(anchor, align, text, egui::FontId::monospace(12.), if ui.is_enabled() { t.text } else { t.faint });
     }
     changed
@@ -353,10 +375,15 @@ fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: 
 /// One editing widget for a parameter value; returns true when the value changed.
 pub fn widget(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value: &mut Value) -> bool {
     let width = ui.available_width();
-    widget_styled(ui, kind, meta, value, None, width)
+    widget_styled(ui, kind, meta, value, None, width, None)
 }
 
-fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value: &mut Value, theme: Option<&Theme>, width: f32) -> bool {
+pub fn widget_with_units(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value: &mut Value, units: Option<crate::units::UnitSettings>) -> bool {
+    let width = ui.available_width();
+    widget_styled(ui, kind, meta, value, None, width, units)
+}
+
+fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value: &mut Value, theme: Option<&Theme>, width: f32, units: Option<crate::units::UnitSettings>) -> bool {
     if let Some(meta) = meta {
         if meta["kind"] == "enum" {
             let before = value.clone();
@@ -375,7 +402,8 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
             if !integer {
                 if let Some(range) = slider_range(meta) {
                     let (min, max) = (*range.start(), *range.end());
-                    ui.spacing_mut().slider_width = (width - 58.).max(8.);
+                    let box_w = if units.is_some() { 68. } else { 52. };
+                    ui.spacing_mut().slider_width = (width - box_w - 6.).max(8.);
                     let response = ui.scope(|ui| {
                         let w = &mut ui.visuals_mut().widgets;
                         for s in [&mut w.inactive, &mut w.hovered, &mut w.active, &mut w.noninteractive] {
@@ -405,13 +433,16 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
                     }
                 }
             }
+            let box_w = if units.is_some() { 68. } else { 52. };
             let drag_width = if integer { width - if theme.is_some() { 32. } else { 0. } }
-                else if slider_range(meta).is_some() { 52. } else { width };
+                else if slider_range(meta).is_some() { box_w } else { width };
             let range = meta["min"].as_f64().unwrap_or(f64::NEG_INFINITY)..=meta["max"].as_f64().unwrap_or(f64::INFINITY);
             if let (Some(t), false) = (theme, integer) {
                 let (outer, inner) = boxed(ui, drag_width.max(24.), t);
                 let drag_speed = slider_range(meta).map_or(0.01, |r| ((r.end() - r.start()) / 400.).clamp(0.001, 1.));
-                changed |= drag_number(ui, inner, ui.id().with(("num", meta["default"].to_string(), outer.min.x as i32, outer.min.y as i32)), &mut v, drag_speed, &range, false, Align2::RIGHT_CENTER, t);
+                changed |= drag_number(ui, inner, ui.id().with(("num", meta["default"].to_string(), outer.min.x as i32, outer.min.y as i32)), &mut v, drag_speed, &range, false, Align2::RIGHT_CENTER, t, units);
+            } else if let Some(u) = units {
+                changed |= ui.add_sized([drag_width.max(24.), 22.], egui::DragValue::new(&mut v).speed(0.01).range(range).suffix(format!(" {}", u.display.symbol()))).changed();
             } else {
                 changed |= ui.add_sized([drag_width.max(24.), 22.], egui::DragValue::new(&mut v).speed(if integer { 1. } else { 0.01 }).range(range)).changed();
             }
@@ -441,7 +472,7 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
                 if hit.is_none() { hit = ui.interact(Rect::from_min_size(Pos2::new(outer.right() - 16., outer.top()), Vec2::new(16., 22.)), ui.id().with(("inc", outer.min.x as i32, outer.min.y as i32)), Sense::click()).clicked().then_some(x + 1.); }
                 let mut moved = false;
                 if let Some(n) = hit { x = n.clamp(*range.start(), *range.end()); moved = true; }
-                moved |= drag_number(ui, inner.shrink2(Vec2::new(16., 0.)), ui.id().with(("int", outer.min.x as i32, outer.min.y as i32)), &mut x, 0.1, &range, true, Align2::CENTER_CENTER, t);
+                moved |= drag_number(ui, inner.shrink2(Vec2::new(16., 0.)), ui.id().with(("int", outer.min.x as i32, outer.min.y as i32)), &mut x, 0.1, &range, true, Align2::CENTER_CENTER, t, None);
                 if moved { v = x as i64; }
                 moved
             } else {
@@ -452,7 +483,15 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
         }
         ParamKind::Float => {
             let mut v = value.as_f64().unwrap_or(0.);
-            if ui.add_sized([width, 22.], egui::DragValue::new(&mut v).speed(0.01)).changed() { *value = json!(v); true } else { false }
+            let changed = if let Some(t) = theme {
+                let (outer, inner) = boxed(ui, width.max(24.), t);
+                drag_number(ui, inner, ui.id().with(("f_num", outer.min.x as i32, outer.min.y as i32)), &mut v, 0.01, &(f64::NEG_INFINITY..=f64::INFINITY), false, Align2::RIGHT_CENTER, t, units)
+            } else if let Some(u) = units {
+                ui.add_sized([width, 22.], egui::DragValue::new(&mut v).speed(0.01).suffix(format!(" {}", u.display.symbol()))).changed()
+            } else {
+                ui.add_sized([width, 22.], egui::DragValue::new(&mut v).speed(0.01)).changed()
+            };
+            if changed { *value = json!(v); true } else { false }
         }
         ParamKind::String => {
             let mut v = value.as_str().unwrap_or("").to_owned();
@@ -471,7 +510,9 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
                         ui.painter().text(Pos2::new(outer.left() + 6., outer.center().y), Align2::LEFT_CENTER, ["X", "Y", "Z"][i],
                             egui::FontId::monospace(11.), [t.x_axis, t.y_axis, t.z_axis][i]);
                         changed |= drag_number(ui, Rect::from_min_max(Pos2::new(inner.left() + 12., inner.top()), inner.max),
-                            ui.id().with(("v3", i, outer.min.x as i32, outer.min.y as i32)), x, 0.01, &range, false, Align2::LEFT_CENTER, t);
+                            ui.id().with(("v3", i, outer.min.x as i32, outer.min.y as i32)), x, 0.01, &range, false, Align2::LEFT_CENTER, t, units);
+                    } else if let Some(u) = units {
+                        changed |= ui.add_sized([axis_width, 22.], egui::DragValue::new(x).speed(0.01).range(range.clone()).suffix(format!(" {}", u.display.symbol()))).changed();
                     } else {
                         changed |= ui.add_sized([axis_width, 22.], egui::DragValue::new(x).speed(0.01).range(range.clone())).changed();
                     }
@@ -516,5 +557,51 @@ mod tests {
         assert!(f.run(show).is_empty());
         f.flags.insert("noise1".into(), super::super::NodeFlags { locked: true, template: false });
         assert!(f.run(show).is_empty());
+    }
+
+    #[test]
+    fn parameter_panel_shows_mm_for_length_params() {
+        let mut f = Fixture::new();
+        f.doc = minihou_app::Document::parse(json!({
+            "version": 1,
+            "display": "box1",
+            "nodes": {
+                "box1": {
+                    "type": "box",
+                    "params": {
+                        "size": [1.0, 1.0, 1.0]
+                    }
+                }
+            }
+        }).to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected = "box1".into();
+        f.display = "box1".into();
+        f.units = crate::units::UnitSettings { display: crate::units::LengthUnit::Mm, unit_scale: 1.0 };
+
+        let ctx = egui::Context::default();
+        f.theme.apply(&ctx);
+        let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0., 0.), egui::vec2(1280., 800.))), ..Default::default() };
+        let mut out = Actions::default();
+        let v = f.view();
+        let full_output = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &v, &mut out));
+        });
+
+        fn extract_texts(shapes: &[egui::epaint::ClippedShape], out: &mut Vec<String>) {
+            for s in shapes {
+                match &s.shape {
+                    egui::epaint::Shape::Text(t) => out.push(t.galley.text().to_owned()),
+                    egui::epaint::Shape::Vec(subs) => {
+                        let clipped: Vec<egui::epaint::ClippedShape> = subs.iter().map(|sub| egui::epaint::ClippedShape { clip_rect: s.clip_rect, shape: sub.clone() }).collect();
+                        extract_texts(&clipped, out);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let mut texts = Vec::new();
+        extract_texts(&full_output.shapes, &mut texts);
+        assert!(texts.iter().any(|t| t == "1000 mm"), "expected '1000 mm' in painted texts, got: {texts:?}");
     }
 }

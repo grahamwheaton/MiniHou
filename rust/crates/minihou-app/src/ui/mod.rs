@@ -153,6 +153,7 @@ pub struct View<'a> {
     pub blender: &'a BlenderStatus,
     /// Flags per node id (Locked, Template); ids not present have none set.
     pub flags: &'a std::collections::HashMap<String, NodeFlags>,
+    pub units: crate::units::UnitSettings,
 }
 impl View<'_> {
     pub fn flags_of(&self, id: &str) -> NodeFlags { self.flags.get(id).cloned().unwrap_or_default() }
@@ -169,19 +170,19 @@ pub mod testing {
     use std::collections::HashMap;
 
     pub struct Fixture { pub doc: Document, pub graph: Graph, pub cooking: CookState, pub theme: theme::Theme,
-        pub flags: HashMap<String, NodeFlags>, pub selected: String, pub display: String, pub mode: Mode, pub editor: EditorState, pub camera: CameraInfo, pub bounds: ([f32; 3], f32), pub geo: Option<GeoSummary>, pub blender: BlenderStatus }
+        pub flags: HashMap<String, NodeFlags>, pub selected: String, pub display: String, pub mode: Mode, pub editor: EditorState, pub camera: CameraInfo, pub bounds: ([f32; 3], f32), pub geo: Option<GeoSummary>, pub blender: BlenderStatus, pub units: crate::units::UnitSettings }
     impl Fixture {
         pub fn new() -> Self {
             let doc = Document::parse(include_str!("../default_graph.json").to_owned()).unwrap();
             let graph = Graph::from_value(doc.value()).unwrap();
             let display = graph.main_output().unwrap();
             Self { doc, graph, cooking: CookState::default(), theme: theme::Theme::dark(), flags: HashMap::new(),
-                selected: display.clone(), display, mode: Mode::Shaded, editor: EditorState::default(), camera: CameraInfo::default(), bounds: ([0.; 3], 1.), geo: None, blender: BlenderStatus::default() }
+                selected: display.clone(), display, mode: Mode::Shaded, editor: EditorState::default(), camera: CameraInfo::default(), bounds: ([0.; 3], 1.), geo: None, blender: BlenderStatus::default(), units: crate::units::UnitSettings::default() }
         }
         pub fn view(&self) -> View<'_> {
             View { graph: &self.graph, doc: self.doc.value(), path: Path::new("untitled.json"), dirty: false, can_undo: false, can_redo: false,
                 selected: &self.selected, display: &self.display, cooking: &self.cooking, file_status: "", mode: self.mode,
-                theme: &self.theme, editor: &self.editor, camera: self.camera, bounds: self.bounds, selection_center: None, geo: self.geo.as_ref(), blender: &self.blender, flags: &self.flags }
+                theme: &self.theme, editor: &self.editor, camera: self.camera, bounds: self.bounds, selection_center: None, geo: self.geo.as_ref(), blender: &self.blender, flags: &self.flags, units: self.units }
         }
         /// One frame of `panel` in a 1280 x 800 window; returns the actions it pushed.
         pub fn run(&self, panel: impl Fn(&mut egui::Ui, &View, &mut Actions)) -> Vec<UiAction> {

@@ -5,6 +5,9 @@ use std::{collections::HashMap, ops::Range, path::Path, time::Instant};
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+pub mod units;
+pub use units::{LengthUnit, UnitSettings};
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum ParamKind { Bool, Integer, Float, String, Vec3, Unsupported }
 pub fn param_kind(default: &Value) -> ParamKind {

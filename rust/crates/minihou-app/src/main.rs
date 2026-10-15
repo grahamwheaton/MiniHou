@@ -4,6 +4,7 @@ mod ui;
 mod viewport;
 #[cfg(test)] mod transform_tests;
 use eframe::{egui, egui_wgpu};
+pub use minihou_app::units;
 use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, CookRequest, CookState, StandardView};
 use minihou_core::Graph;
 use serde_json::{json, Value};
@@ -567,7 +568,8 @@ impl eframe::App for App {
                 selected: &self.selected, display: &self.display, cooking: &self.cooking, file_status: &self.file_status,
                 mode: self.mode, theme: &self.theme, editor: &self.editor_state, flags: &self.flags, geo: self.geo.as_ref(), blender: &self.blender,
                 bounds: self.bounds, selection_center: self.selection_center(),
-                camera: self.camera_info() };
+                camera: self.camera_info(),
+                units: self.prefs.units };
             egui::TopBottomPanel::top("toolbar").show(ctx, |ui| ui::topbar::show(ui, &v, &mut out));
             if self.blender_bar {
                 let mut shown = true;
