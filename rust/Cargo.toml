@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/minihou-core", "crates/minihou-py"]
+members = ["crates/minihou-core", "crates/minihou-py", "crates/minihou-view"]
 
 [workspace.package]
 edition = "2021"
