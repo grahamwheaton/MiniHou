@@ -221,7 +221,7 @@ impl Camera {
         let radius = radius.max(1e-3); Camera { target: center, dist: radius * 2.6, yaw: 0.6, pitch: 0.5, radius, ortho: false }
     }
 
-    fn eye(&self) -> [f32; 3] {
+    pub fn eye(&self) -> [f32; 3] {
         // +Y up
         let (cp, sp) = (self.pitch.cos(), self.pitch.sin());
         [
@@ -229,6 +229,10 @@ impl Camera {
             self.target[1] + self.dist * sp,
             self.target[2] + self.dist * cp * self.yaw.cos(),
         ]
+    }
+
+    pub fn forward(&self) -> [f32; 3] {
+        norm(sub(self.target, self.eye()))
     }
 
     pub fn matrices(&self, aspect: f32) -> (M4, M4) {

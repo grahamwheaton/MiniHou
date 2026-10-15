@@ -43,7 +43,7 @@ impl Default for VpState {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Popover { Orientation, Pivot, Snap, Proportional, Overlays }
 fn toggle_popover(open: Option<Popover>, next: Popover) -> Option<Popover> { if open == Some(next) { None } else { Some(next) } }
-const OVERLAYS: [(&str, &str); 6] = [("Grid floor", ""), ("Axis gizmo", ""), ("Wireframe overlay", ""), ("Stats", ""), ("Normals", ""), ("Bounding box", "")];
+const OVERLAYS: [(&str, &str); 6] = [("Grid floor", ""), ("Axis gizmo", ""), ("Edges in solid", ""), ("Stats", ""), ("Normals", ""), ("Bounding box", "")];
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Icon { Object, Points, Edges, Faces, Orient, Pivot, Magnet, Prop, Overlays, Xray, Solid, Shaded, Wire, ShadedWire, Frame,

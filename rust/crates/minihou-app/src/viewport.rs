@@ -9,7 +9,7 @@ pub enum Mode { Solid, Shaded, Wire, ShadedWire }
 
 /// Overlay switches the renderer draws itself (the grid, axes and stats are painted by the UI).
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
-pub struct Overlay { pub normals: bool, pub bounds: bool, pub xray: bool }
+pub struct Overlay { pub normals: bool, pub bounds: bool, pub xray: bool, pub wireframe: bool }
 
 pub struct Scene {
     p: Vec<f32>, n: Vec<f32>, tri: Vec<u32>, edge: Vec<u32>,
@@ -226,14 +226,18 @@ impl Gpu {
         self.sel_line = buf("sel_line", lines);
         self.sel_line_n = (lines.len() / 3) as u32;
     }
-    pub fn draw(&self, state: &egui_wgpu::RenderState, target: &Target, cam: &Camera, mode: Mode, overlay: Overlay) {
+    pub fn draw(&self, state: &egui_wgpu::RenderState, target: &Target, cam: &Camera, mode: Mode, overlay: Overlay, selection_mode: crate::ui::SelectionMode) {
         let (view_proj,view) = cam.matrices(target.size[0] as f32/target.size[1] as f32);
         // 0 when the average edge is under about 1.5 px on screen, 1 from about 10 px (smoothstep): a dense mesh reads as shading
         let px_per_unit = target.size[1] as f32 / (2.0 * (0.8f32 / 2.0).tan() * cam.distance().max(1e-6));
         let t = ((self.edge_world * px_per_unit - 1.5) / 8.5).clamp(0.0, 1.0);
         let fade = t * t * (3.0 - 2.0 * t);
+        let is_shaded_wire = mode == Mode::ShadedWire
+            || (overlay.wireframe && (mode == Mode::Solid || mode == Mode::Shaded))
+            || selection_mode == crate::ui::SelectionMode::Edges;
+        let show_wire = mode == Mode::Wire || is_shaded_wire || overlay.xray;
         // wire.a selects the line look in the shader: 1 = a darker version of the surface (Shaded+Wire), 0 = lit lines (Wire)
-        let u = Uniforms { view_proj,view,base:[0.72,0.74,0.78,1.],wire:[0.,0.,0.,if mode==Mode::ShadedWire {1.} else {0.}],flat_shading:(mode==Mode::Solid) as u32,wire_fade:fade,_pad:[1,0] };
+        let u = Uniforms { view_proj,view,base:[0.72,0.74,0.78,1.],wire:[0.,0.,0.,if is_shaded_wire {1.} else {0.}],flat_shading:(mode==Mode::Solid) as u32,wire_fade:fade,_pad:[1,0] };
         state.queue.write_buffer(&self.ubuf,0,bytemuck::bytes_of(&u));
         let mut enc = state.device.create_command_encoder(&Default::default());
         {
@@ -250,12 +254,12 @@ impl Gpu {
             });
             pass.set_bind_group(0,&self.bind,&[]);
             if mode != Mode::Wire && self.ntri_idx > 0 {
-                pass.set_pipeline(if overlay.xray { &self.pipe_xray } else if mode==Mode::ShadedWire { &self.pipe_surf_bias } else { &self.pipe_surf });
+                pass.set_pipeline(if overlay.xray { &self.pipe_xray } else if is_shaded_wire { &self.pipe_surf_bias } else { &self.pipe_surf });
                 pass.set_vertex_buffer(0,self.vp.slice(..)); pass.set_vertex_buffer(1,self.vn.slice(..));
                 pass.set_index_buffer(self.ib.slice(..),wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..self.ntri_idx,0,0..1);
             }
-            if (mode==Mode::Wire || mode==Mode::ShadedWire || overlay.xray) && self.nedge_idx > 0 {
+            if show_wire && self.nedge_idx > 0 {
                 pass.set_pipeline(&self.pipe_wire); pass.set_vertex_buffer(0,self.vp.slice(..)); pass.set_vertex_buffer(1,self.vn.slice(..));
                 pass.set_index_buffer(self.eb.slice(..),wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..self.nedge_idx,0,0..1);
