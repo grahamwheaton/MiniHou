@@ -16,6 +16,7 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
+use std::any::Any;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Instant;
@@ -25,6 +26,7 @@ use serde_json::Value;
 use crate::error::{Error, Result};
 use crate::geometry::{AttrData, Geometry};
 use crate::graph::{run_node, Graph};
+use crate::{lod::{ClusterLod, BuildError}, params::Params, preview};
 use crate::nodes;
 
 /// What the last cook did: which nodes ran, which were served from the cache, and how long each cook took (ms).
@@ -38,6 +40,7 @@ pub struct CookStats {
 struct Entry {
     node: String,
     geo: Arc<Geometry>,
+    side: Option<Arc<dyn Any + Send + Sync>>,
     bytes: usize,
     used: u64,
 }
@@ -115,6 +118,16 @@ impl Session {
 
     pub fn cache_len(&self) -> usize {
         self.cache.len()
+    }
+
+    /// Typed side result for a node's current content key. It is evicted with its geometry.
+    pub fn side_payload<T: Any + Send + Sync>(&self, node: &str) -> Option<Arc<T>> {
+        let key = key_of(&self.graph, node, &mut HashMap::new(), &mut HashSet::new()).ok()?;
+        self.cache.get(&key)?.side.as_ref()?.clone().downcast::<T>().ok()
+    }
+    pub fn cached_geometry(&self, node: &str) -> Option<Arc<Geometry>> {
+        let key = key_of(&self.graph, node, &mut HashMap::new(), &mut HashSet::new()).ok()?;
+        Some(self.cache.get(&key)?.geo.clone())
     }
 
     /// `None` or `Some(0)`: unlimited.
@@ -273,10 +286,34 @@ impl Run<'_> {
         }
         let t0 = Instant::now();
         let geo = Arc::new(run_node(id, def, spec, &inputs)?);
+        let mut side: Option<Arc<dyn Any + Send + Sync>> = None;
+        let mut side_bytes = 0;
+        if def.node_type == "lod_bake" && !def.bypass {
+            let params = Params::resolve(spec.params, def.params.as_ref()).map_err(|e| e.in_node(id, &def.node_type))?;
+            let cluster_size = params.i("cluster_size").map_err(|e| e.in_node(id, &def.node_type))?;
+            let min_triangles = params.i("min_triangles").map_err(|e| e.in_node(id, &def.node_type))?;
+            let error_px = params.f("error_px").map_err(|e| e.in_node(id, &def.node_type))?;
+            if !(16..=128).contains(&cluster_size) || min_triangles < 0 || !(error_px as f32).is_finite() || error_px <= 0.0 {
+                return Err(Error::new("cluster_size must be 16..128, min_triangles must be nonnegative, and error_px must be positive and finite").in_node(id, &def.node_type));
+            }
+            if params.b("enabled").map_err(|e| e.in_node(id, &def.node_type))? {
+                let g = inputs[0].first().expect("validated by pass-through");
+                let (tris, _) = preview::fan_triangles(&g.topology.vertex_point, &g.topology.prim_offsets, g.topology.closed.as_deref());
+                if tris.len() / 3 >= min_triangles as usize && !tris.is_empty() {
+                    let positions: Vec<[f32; 3]> = g.p().as_chunks::<3>().0.to_vec();
+                    let triangles = tris.as_chunks::<3>().0.to_vec();
+                    let mut lod = ClusterLod::build_with_cluster_size(positions, triangles, cluster_size as usize)
+                        .map_err(|e| Error::new(match e { BuildError::InvalidIndices => "invalid triangle indices", BuildError::NonFinitePosition => "non-finite position", BuildError::EmptyMesh => "empty mesh" }).in_node(id, &def.node_type))?;
+                    lod.error_px = error_px as f32;
+                    side_bytes = lod.bytes();
+                    side = Some(Arc::new(lod));
+                }
+            }
+        }
         self.stats.cooked.push(id.to_string());
         self.stats.node_ms.push((id.to_string(), t0.elapsed().as_secs_f64() * 1000.0));
-        let bytes = geometry_bytes(&geo);
-        if let Some(old) = self.cache.insert(key, Entry { node: id.to_string(), geo: geo.clone(), bytes, used: self.clock }) {
+        let bytes = geometry_bytes(&geo) + side_bytes;
+        if let Some(old) = self.cache.insert(key, Entry { node: id.to_string(), geo: geo.clone(), side, bytes, used: self.clock }) {
             *self.bytes -= old.bytes;
         }
         *self.bytes += bytes;

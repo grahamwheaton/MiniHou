@@ -2,7 +2,17 @@
 
 ## Scope and references
 
-This is a cached-mesh viewport proxy inspired by Nanite, not a Nanite renderer. The immutable result of a MiniHou cook is the asset input. The prototype is CPU-only in `rust/crates/minihou-app/src/cluster_lod.rs`; `minihou-core` continues to own geometry and cooking. The existing reduced-triangle proxy remains the renderer path until the later integration milestone.
+This is a cached-mesh viewport proxy inspired by Nanite, not a Nanite renderer. The immutable result of a MiniHou cook is the asset input. The CPU builder is `minihou-core::lod`; `minihou-app::cluster_lod` re-exports it. The existing reduced-triangle proxy remains the default viewport mode.
+
+## Bake node
+
+`lod_bake` appears as **LOD Bake** in the Modify shelf and **Nanite proxy** on its node card. It has one required `geo` input and returns the input `Geometry` unchanged, including topology, attributes, groups, and detail metadata. Downstream nodes always operate on the full mesh. `cluster_size` defaults to 128 (allowed 16–128), `error_px` to 1.0, `enabled` to true, and `min_triangles` to 50,000. Disable the node with `enabled=false` or the standard bypass flag. Below the triangle threshold it forwards geometry without a side payload. Invalid numeric settings and invalid input positions return node-scoped errors.
+
+The node's hierarchy is an `Arc<ClusterLod>` held as a typed `Arc<dyn Any + Send + Sync>` side payload on its `Session` cache entry. The entry's content key includes the node's parameters, bypass flag, and upstream content keys; the payload is charged to the same byte budget and evicted with that entry. An unchanged second cook reuses the same payload. Editing an upstream parameter changes the key and rebuilds it. Display and camera changes do not alter the bake key. The cook worker attaches the nearest upstream bake payload, including the displayed bake itself, to its response when the displayed mesh still shares that bake's position attribute and topology. A downstream geometry change must use a later bake. The viewport uses the payload only when **Proxy: Clustered LOD** is chosen; reduced triangles remains the default.
+
+The viewport packs selected clusters into one index buffer with a range per cluster and reselects those ranges from the current camera at most every 50 ms. Source geometry remains in memory for picking and downstream operations. The cluster builder and renderer currently use position indices and source point normals; face-varying UVs, materials, and seam preservation need a further quality pass. A document replacement creates a new `Session` and therefore rebuilds the hierarchy even if the replacement graph is identical; parameter and display edits on the existing session retain the cache.
+
+Two tempting alternatives were rejected. Storing all LOD levels inside `Geometry` attributes would mix incompatible topologies into one mesh and break ordinary downstream nodes. Rebuilding the hierarchy for each display or camera change repeats the measured 37.9 s 4M-triangle CPU build. The side payload keeps the bake explicit while preserving the geometry contract.
 
 Epic's [SIGGRAPH 2021 deep dive](https://advances.realtimerendering.com/s2021/Karis_Nanite_SIGGRAPH_Advances_2021_final.pdf) describes clusters of roughly 128 triangles, group-level simplification with retained group boundaries, a hierarchy of errors and bounds, GPU visibility determination, hardware and software rasterization paths, a visibility buffer, and demand-paged geometry. [meshoptimizer's clusterlod reference](https://github.com/zeux/meshoptimizer/blob/master/demo/clusterlod.h) shows a practical build and projected-error formula; its [simplification documentation](https://github.com/zeux/meshoptimizer#simplification) discusses border locking and the reduction stalls it can cause. The MiniHou prototype implements only the CPU cluster build and group-atomic selection.
 
@@ -15,17 +25,17 @@ Epic's [SIGGRAPH 2021 deep dive](https://advances.realtimerendering.com/s2021/Ka
 
 ## Build from a cooked `Geometry`
 
-1. Validate `P` and topology. Triangulate closed polygons with the viewport's existing triangulation; preserve material and corner-attribute seams as separate simplification constraints. Curves and point-only geometry bypass clustered LOD. Reject degenerate or non-manifold regions, or keep those regions at full detail. The current `ClusterLod::build` accepts an already indexed triangle mesh and has only position data; this adapter and attribute support are still needed.
+1. Validate `P` and topology. The bake node triangulates closed polygons with the viewport's existing fan triangulation and skips curves and point-only geometry. The builder rejects non-finite positions and invalid indices. Material and corner-attribute seams are not yet simplification constraints; degenerate and non-manifold regions need a stronger fallback.
 2. Sort triangle centroids by Morton code; partition into clusters of at most 128 triangles. This is spatially coherent for regular terrain, though a connectivity-aware meshlet builder should replace it for arbitrary assets.
 3. Group approximately four base clusters, merge their triangles, lock boundary vertices, compute plane quadrics, choose low-cost interior edge collapses to approximately half the triangles, and split the result into new clusters. Then pair group nodes (typically two clusters each), repeat, and stop at one root or at a locked-boundary stall. The prototype retains an existing endpoint on each collapse. It uses independent collapse batches and repeats up to eight passes. It does not yet enforce the full link condition, protect folded normals or UV/material seams, or guarantee a tight error bound.
 4. Store each group's child links, representative clusters, source-covering sphere, and accumulated error. The prototype's accumulated sum of the largest collapsed edge per pass is monotonic and deliberately conservative as a positional displacement estimate. Production quality needs a formally validated error bound, ideally using a measured source-to-simplified distance and attribute terms.
-5. Build on a worker after a successful cook. Cache the result by the `Session` node content key plus proxy format/version and seam policy. `Session` computes the key internally (`session.rs::key_of`) but does not expose it; integration needs a read-only key accessor or a key carried in `CookResponse`. Reuse an unchanged cooked asset and evict the proxy alongside its geometry under a separate byte budget. Cancel or discard stale revisions exactly as the cook worker already does.
+5. Build in the cook worker as a `Session` side payload, charged to the same LRU budget as the node result. The content key covers parameters and upstream geometry. Stale worker responses are discarded by revision.
 
 ## CPU selection and wgpu drawing
 
-`select(view_projection, eye, viewport_height_px, near, error_px)` traverses roots. Frustum-test the node's source-covering sphere. Estimate projected error as `object_error * abs(projection[1][1]) * viewport_height / (2 * max(distance(eye,center)-radius, near))`. Draw the group's clusters if this is within the pixel budget; otherwise visit every child. This is conservative for perspective and deliberately simple for the prototype. Orthographic projection needs a separate constant world-units-to-pixels scale before renderer integration. Hysteresis and temporal stability are later work.
+`select(view_projection, eye, viewport_height_px, near, error_px)` traverses roots. Frustum-test the node's source-covering sphere. Estimate projected error as `object_error * abs(projection[1][1]) * viewport_height / (2 * max(distance(eye,center)-radius, near))` for perspective, or omit the distance divisor for orthographic. Draw the group's clusters if this is within the pixel budget; otherwise visit every child. Hysteresis and temporal stability are later work.
 
-For wgpu 27, pack level vertices and indices into large immutable buffers, with a range for each cluster. A simple first renderer can loop over selected ranges and call `draw_indexed`; after measuring CPU draw overhead, write indirect arguments and call `draw_indexed_indirect` for each range or a supported multi-draw variant. Culling stays on CPU initially. Keep source meshes available for precise picking, edit previews, and modes that need original topology. Each cooked display node has its own transform and cache key. Frustum culling is in the prototype; an HZB occlusion pass is optional later. The old proxy's even-triangle sampling can remain as a low-memory fallback.
+For wgpu 27, the renderer packs selected cluster indices into one index buffer, with a range for each selected cluster. Because all selected ranges currently share one material, it draws the contiguous cut in one `draw_indexed` call. It uses the source position/normal buffers. Culling stays on CPU. Source meshes remain available for precise picking and edit previews. Wire edges are generated from selected clusters when wire display is active. Material-aware ranges, HZB occlusion, and more efficient wire generation are later work. The old proxy's even-triangle sampling remains the default and low-memory fallback.
 
 Portable WGSL/wgpu does not provide Nanite's full mesh-shader pipeline or portable 64-bit atomic visibility-buffer encoding. Native extensions may evolve, but v1 should use conventional hardware triangle rasterization and the existing shading path. A software rasterizer, two-path hardware/software selection, visibility buffer material resolve, GPU persistent traversal, and disk streaming are outside v1.
 
@@ -53,11 +63,23 @@ Release build on the development Windows machine, running the ignored `benchmark
 
 The 4M-triangle near selection is below 2 ms in this run. This does not include upload, drawing, scene updates, or GPU time. The 2000² root **node** still holds 613 clusters / 78,354 triangles; it is not a single root cluster. The 10% old proxy would draw 200,000 / 399,879 / 800,000 triangles on these inputs at any camera distance.
 
+### Parallel bake timing (this branch)
+
+The same ignored release benchmark ran on this machine with `RAYON_NUM_THREADS=32` (`[Environment]::ProcessorCount` reported 32). The original serial build was measured immediately before the change; the new build sorts triangles in parallel, builds base clusters in parallel, and simplifies independent groups in parallel at each level. Group results are collected in stable order, then IDs assigned serially. Morton ties also sort by triangle indices, so a 1-thread versus 4-thread test compares the exact hierarchy.
+
+| Grid | Triangles | Before | After | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| 1000² | 2,000,000 | 16.49 s | 1.39 s | 11.9× |
+| 1414² | 3,998,792 | 37.89 s | 3.05 s | 12.4× |
+| 2000² | 8,000,000 | 73.66 s | 8.39 s | 8.8× |
+
+The 4M < 6 s and 8M < 12 s goals pass for this procedural input. These timings measure hierarchy construction only; geometry fan triangulation, scene preparation, GPU upload, and draw time are outside the timer. At large scales, group boundary locks leave many clusters at upper levels, increasing work and persistent size. Memory traffic and allocation are also likely contributors, but were not profiled.
+
 ## Staged milestones and acceptance
 
-1. **CPU prototype (this change):** cluster and group construction, monotonic errors, group-atomic projected-error selection, tests for grid and closed sphere cuts, determinism, distance response, and ignored timing report. The requested 4M-triangle selection target is under 2 ms in release; report the actual measurement. Any unachieved criterion must stay open.
+1. **CPU prototype:** cluster and group construction, monotonic errors, group-atomic projected-error selection, tests for grid and closed sphere cuts, determinism, distance response, and ignored timing report.
 2. **Robust asset builder:** `Geometry` adapter; connected clustering; seam/material/normal preservation; manifold and link-condition checks; validated positional error; deterministic parallel build if profiling warrants it. Acceptance: a 4M-quad noised grid builds without cracks, survives arbitrary mixed cuts, reports bounded peak memory and build latency, and cleanly handles malformed/non-manifold input.
-3. **Viewport integration:** expose the `Session` content key, build/cache off the UI thread, pack contiguous buffers, add a default-off preference `Proxy mode: Reduced triangles | Clustered LOD`, and retain the old mode. Acceptance: no UI stall on cooking or orbiting, revision-safe cancellation, correct appearance and picking, and all current app tests passing.
+3. **Viewport integration:** bake/cache off the UI thread, pack contiguous buffers, add a default-off `Clustered LOD` proxy choice, and retain the old mode. Host-app orbit, appearance, and picking validation remain open.
 4. **Performance and quality:** benchmark draw counts and upload size; add batching/indirect draws, hysteresis, orthographic error, optional HZB, and memory eviction. Acceptance: stable frame time and no visible cracks across camera motion on the 4M-quad demo; quality and timing recorded on real hardware.
 
 ## Known prototype limits

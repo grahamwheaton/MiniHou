@@ -18,16 +18,25 @@ fn choose(level: f32, auto: bool, out: &mut Actions) {
 /// 26 px header dropdown; its choices mirror the old editor's proxy rows.
 pub fn menu(ui: &mut egui::Ui, v: &View, out: &mut Actions, compact: bool) {
     let p = v.editor.proxy;
+    let cluster_label = if compact { "LOD" } else { "Proxy: Clustered LOD" };
     let label = if compact { if p.auto { "Auto".into() } else { format!("{}%", (p.level * 100.).round()) } }
         else { format!("Proxy: {}  ▾", active_label(p.level, p.auto)) };
+    let label = if p.clustered { cluster_label.to_owned() } else { label };
     ui.scope(|ui| {
         ui.style_mut().spacing.interact_size.y = 26.;
         ui.menu_button(RichText::new(label).size(12.).color(v.theme.text), |ui| {
             ui.set_min_width(180.);
+            if ui.selectable_label(p.clustered, "Clustered LOD").clicked() {
+                out.push(UiAction::Editor(EditorChange::ProxyClustered(true)));
+                ui.close();
+            }
+            ui.separator();
+            ui.label("Reduced triangles");
             for (_, label, level, auto) in proxy::LEVELS {
-                let active = if auto { p.auto } else { !p.auto && (p.level - level).abs() < 1e-6 };
+                let active = !p.clustered && if auto { p.auto } else { !p.auto && (p.level - level).abs() < 1e-6 };
                 if ui.selectable_label(active, label).clicked() {
                     choose(level, auto, out);
+                    out.push(UiAction::Editor(EditorChange::ProxyClustered(false)));
                     ui.close();
                 }
             }

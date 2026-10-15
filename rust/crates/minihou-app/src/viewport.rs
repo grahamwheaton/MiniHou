@@ -2,6 +2,7 @@ use eframe::{egui, egui_wgpu::{self, wgpu}};
 use wgpu::util::DeviceExt;
 use bytemuck::{Pod, Zeroable};
 use minihou_core::{Geometry, normals, preview};
+use minihou_core::lod::{ClusterLod, ClusterId};
 use minihou_app::Camera;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -105,6 +106,7 @@ pub struct Gpu {
     bind: wgpu::BindGroup, ubuf: wgpu::Buffer,
     vp: wgpu::Buffer, vn: wgpu::Buffer, ib: wgpu::Buffer, eb: wgpu::Buffer,
     ntri_idx: u32, nedge_idx: u32,
+    lod_active: bool, selected_ranges: Vec<std::ops::Range<u32>>,
     /// Average edge length in world units: sizes the edge fade.
     edge_world: f32,
 }
@@ -113,6 +115,11 @@ fn edge_world_of(sc: &Scene) -> f32 {
     (2.0 * sc.radius) / ((sc.edge.len().max(2) as f32) / 2.0).sqrt()
 }
 impl Gpu {
+    pub fn new_lod(device: &wgpu::Device, sc: &Scene) -> Self {
+        let mut gpu=Self::new(device,&sc.proxied(0.0));
+        gpu.lod_active=true;
+        gpu
+    }
     pub fn new(device: &wgpu::Device, sc: &Scene) -> Self {
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let buf = |label, data: &[u8], usage| {
@@ -196,9 +203,10 @@ impl Gpu {
         let bb_n = buf("bb_n", bytemuck::cast_slice(&[0f32; 24]), wgpu::BufferUsages::VERTEX);
         let bb_i = buf("bb_i", bytemuck::cast_slice(&BOX_EDGES), wgpu::BufferUsages::INDEX);
 
-        Self { pipe_surf,pipe_surf_bias,pipe_wire,pipe_xray,pipe_normals,pipe_bounds,pipe_select,sel_face,sel_face_n:0,sel_line,sel_line_n:0,zeros,nl_p,nl_n,nl_count:(sc.nlp.len()/3) as u32,bb_p,bb_n,bb_i,bind,ubuf,vp,vn,ib,eb,ntri_idx:sc.tri.len() as u32,nedge_idx:sc.edge.len() as u32,edge_world:edge_world_of(sc) }
+        Self { pipe_surf,pipe_surf_bias,pipe_wire,pipe_xray,pipe_normals,pipe_bounds,pipe_select,sel_face,sel_face_n:0,sel_line,sel_line_n:0,zeros,nl_p,nl_n,nl_count:(sc.nlp.len()/3) as u32,bb_p,bb_n,bb_i,bind,ubuf,vp,vn,ib,eb,ntri_idx:sc.tri.len() as u32,nedge_idx:sc.edge.len() as u32,lod_active:false,selected_ranges:Vec::new(),edge_world:edge_world_of(sc) }
     }
     pub fn upload(&mut self, device: &wgpu::Device, sc: &Scene) {
+        self.lod_active=false; self.selected_ranges.clear();
         let buf = |label, data: &[u8], usage| device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label:Some(label), contents:if data.is_empty() { &[0;4] } else { data }, usage
         });
@@ -213,6 +221,27 @@ impl Gpu {
         self.nl_n=buf("nl_n",bytemuck::cast_slice(&sc.nln),wgpu::BufferUsages::VERTEX);
         self.nl_count=(sc.nlp.len()/3) as u32;
         self.bb_p=buf("bb_p",bytemuck::cast_slice(&sc.bbp),wgpu::BufferUsages::VERTEX);
+    }
+    /// Retain the source vertex attributes but start with no triangles; selection uploads a cut.
+    pub fn upload_lod(&mut self, device: &wgpu::Device, sc: &Scene) {
+        self.upload(device,&sc.proxied(0.0));
+        self.lod_active=true;
+    }
+    pub fn select_lod(&mut self, device: &wgpu::Device, lod: &ClusterLod, ids: &[ClusterId], wire: bool) {
+        let (indices, ranges)=packed_cut(lod, ids);
+        self.selected_ranges=ranges;
+        self.ib=device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label:Some("selected LOD triangles"), contents:if indices.is_empty() { &[0u8;4] } else { bytemuck::cast_slice(&indices) }, usage:wgpu::BufferUsages::INDEX });
+        self.ntri_idx=indices.len() as u32;
+        if wire {
+            let mut edges = std::collections::BTreeSet::new();
+            for &id in ids { for tri in &lod.clusters[id as usize].triangles {
+                for (a,b) in [(tri[0],tri[1]),(tri[1],tri[2]),(tri[2],tri[0])] { edges.insert((a.min(b),a.max(b))); }
+            } }
+            let mut indices=Vec::with_capacity(edges.len()*2);
+            for (a,b) in edges { indices.extend_from_slice(&[a,b]); }
+            self.eb=device.create_buffer_init(&wgpu::util::BufferInitDescriptor { label:Some("LOD edges"), contents:if indices.is_empty() { &[0u8;4] } else { bytemuck::cast_slice(&indices) }, usage:wgpu::BufferUsages::INDEX });
+            self.nedge_idx=indices.len() as u32;
+        } else { self.nedge_idx=0; }
     }
     /// Show the selection: `faces` = 3 positions per triangle, `lines` = 2 positions per segment (flat xyz).
     pub fn set_selection(&mut self, device: &wgpu::Device, faces: &[f32], lines: &[f32]) {
@@ -253,7 +282,9 @@ impl Gpu {
                 pass.set_pipeline(if overlay.xray { &self.pipe_xray } else if mode==Mode::ShadedWire { &self.pipe_surf_bias } else { &self.pipe_surf });
                 pass.set_vertex_buffer(0,self.vp.slice(..)); pass.set_vertex_buffer(1,self.vn.slice(..));
                 pass.set_index_buffer(self.ib.slice(..),wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..self.ntri_idx,0,0..1);
+                // All selected ranges are adjacent and share the same material for now.
+                let end=if self.lod_active { self.selected_ranges.last().map_or(0, |r| r.end) } else { self.ntri_idx };
+                if end > 0 { pass.draw_indexed(0..end,0,0..1); }
             }
             if (mode==Mode::Wire || mode==Mode::ShadedWire || overlay.xray) && self.nedge_idx > 0 {
                 pass.set_pipeline(&self.pipe_wire); pass.set_vertex_buffer(0,self.vp.slice(..)); pass.set_vertex_buffer(1,self.vn.slice(..));
@@ -285,6 +316,17 @@ impl Gpu {
         state.queue.submit([enc.finish()]);
     }
 }
+/// Only the selected clusters enter the GPU index buffer; ranges stay contiguous.
+fn packed_cut(lod: &ClusterLod, ids: &[ClusterId]) -> (Vec<u32>, Vec<std::ops::Range<u32>>) {
+    let mut indices=Vec::with_capacity(lod.selected_triangles(ids)*3);
+    let mut ranges=Vec::with_capacity(ids.len());
+    for &id in ids {
+        let start=indices.len() as u32;
+        for tri in &lod.clusters[id as usize].triangles { indices.extend_from_slice(tri); }
+        ranges.push(start..indices.len() as u32);
+    }
+    (indices,ranges)
+}
 pub struct Target {
     color: wgpu::TextureView, depth: wgpu::TextureView,
     pub id: egui::TextureId, pub size: [u32;2],
@@ -299,6 +341,24 @@ impl Target {
         let depth = make_depth(&state.device,size[0],size[1]);
         let id = state.renderer.write().register_native_texture(&state.device,&color,wgpu::FilterMode::Linear);
         Self { color,depth,id,size }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use minihou_core::lod::{Cluster, Sphere};
+
+    #[test]
+    fn gpu_cut_contains_only_selected_clusters_and_contiguous_ranges() {
+        let cluster = |triangles| Cluster { triangles, bounds:Sphere::default(), error:0., level:0 };
+        let lod = ClusterLod { clusters:vec![cluster(vec![[0,1,2]]),cluster(vec![[3,4,5],[5,6,7]])], ..Default::default() };
+        let (indices,ranges)=packed_cut(&lod,&[1]);
+        assert_eq!(indices,vec![3,4,5,5,6,7]);
+        assert_eq!(ranges,vec![0..6]);
+        let (indices,ranges)=packed_cut(&lod,&[0,1]);
+        assert_eq!(indices,vec![0,1,2,3,4,5,5,6,7]);
+        assert_eq!(ranges,vec![0..3,3..9]);
     }
 }
 

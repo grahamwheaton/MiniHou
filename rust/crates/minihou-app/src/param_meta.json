@@ -1,4 +1,10 @@
 {
+ "lod_bake": {
+  "cluster_size": {"default": 128, "doc": "Maximum triangles per cluster (16 to 128)", "kind": "int", "min": 16, "max": 128},
+  "error_px": {"default": 1.0, "doc": "Screen-space error budget in pixels", "kind": "float", "min": 0.01, "soft_max": 16.0},
+  "enabled": {"default": true, "doc": "Build and use the clustered LOD payload", "kind": "bool"},
+  "min_triangles": {"default": 50000, "doc": "Skip the build for smaller meshes", "kind": "int", "min": 0, "soft_max": 1000000}
+ },
  "bound": {
   "oriented": {
    "default": false,

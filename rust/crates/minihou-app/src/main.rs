@@ -6,7 +6,7 @@ use eframe::{egui, egui_wgpu};
 use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, CookRequest, CookState, StandardView};
 use minihou_core::Graph;
 use serde_json::{json, Value};
-use std::{collections::HashMap, path::PathBuf, time::Duration};
+use std::{collections::HashMap, path::PathBuf, time::{Duration, Instant}};
 use ui::keymap::{KeyContext, Keymap, Preferences, ThemePref};
 use ui::{theme::Theme, Actions, BlenderStatus, CameraInfo, EditorState, GeoSummary, NodeFlags, TransformOp, UiAction, View};
 use viewport::{Gpu, Mode, Overlay, Scene, Target};
@@ -92,6 +92,7 @@ struct App {
     prefs: Preferences, keymap: Keymap, prefs_open: bool, viewport_hover: bool, network_hover: bool,
     /// The last cooked scene at full detail, and the proxy level it is currently uploaded at.
     scene: Option<Scene>, shown_level: f32, geo_rev: u64,
+    lod_uploaded: bool, last_lod_view: Option<([[f32;4];4], [u32;2], bool)>, last_lod_select: Instant,
     blender_paths: Vec<PathBuf>, blender_bar: bool,
     selection: picking::Selection, selection_dirty: bool,
     clipboard: Option<Value>,
@@ -138,7 +139,7 @@ impl App {
             camera:Camera::frame([0.;3],1.),bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new(),
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
-            scene:None,shown_level:1.0,geo_rev:u64::MAX,blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,
+            scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,
             clipboard:None,transform_before:None,transform_target:None,last_viewport:egui::Rect::NOTHING,
             last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false };
         app.prefs = Preferences::load();
@@ -513,9 +514,17 @@ impl eframe::App for App {
                 let first = self.gpu.is_none();
                 self.bounds = (scene.center, scene.radius);
                 let level = self.proxy_level(scene.triangles());
-                let shown = if level < 1.0 { scene.proxied(level) } else { scene.proxied(1.0) };
-                if let Some(gpu) = &mut self.gpu { gpu.upload(&self.state.device, &shown); }
-                else { self.gpu = Some(Gpu::new(&self.state.device, &shown)); }
+                let use_lod = self.editor_state.proxy.clustered && self.cooking.lod.is_some();
+                if use_lod {
+                    if let Some(gpu) = &mut self.gpu { gpu.upload_lod(&self.state.device, &scene); }
+                    else { self.gpu = Some(Gpu::new_lod(&self.state.device, &scene)); }
+                } else {
+                    let shown = scene.proxied(level);
+                    if let Some(gpu) = &mut self.gpu { gpu.upload(&self.state.device, &shown); }
+                    else { self.gpu = Some(Gpu::new(&self.state.device, &shown)); }
+                }
+                self.lod_uploaded = use_lod;
+                self.last_lod_view = None;
                 self.shown_level = level;
                 self.scene = Some(scene);
                 if first { self.frame_mesh(); }
@@ -525,7 +534,16 @@ impl eframe::App for App {
         // the proxy level changed (menu, auto budget): re-upload the reduced scene
         if let Some(scene) = &self.scene {
             let level = self.proxy_level(scene.triangles());
-            if (level - self.shown_level).abs() > 1e-6 {
+            let use_lod = self.editor_state.proxy.clustered && self.cooking.lod.is_some();
+            if use_lod != self.lod_uploaded {
+                if let Some(gpu) = &mut self.gpu {
+                    if use_lod { gpu.upload_lod(&self.state.device, scene); }
+                    else { gpu.upload(&self.state.device, &scene.proxied(level)); }
+                }
+                self.lod_uploaded = use_lod;
+                self.last_lod_view = None;
+                self.shown_level = level;
+            } else if !use_lod && (level - self.shown_level).abs() > 1e-6 {
                 if let Some(gpu) = &mut self.gpu { gpu.upload(&self.state.device, &scene.proxied(level)); }
                 self.shown_level = level;
             }
@@ -607,6 +625,20 @@ impl eframe::App for App {
                 if self.target.as_ref().is_none_or(|t| t.size != pixels) {
                     if let Some(old) = self.target.take() { self.state.renderer.write().free_texture(&old.id); }
                     self.target = Some(Target::new(&self.state, pixels));
+                }
+                if self.lod_uploaded {
+                    if let (Some(lod), Some(gpu)) = (&self.cooking.lod, &mut self.gpu) {
+                        let view = self.camera.matrices(pixels[0] as f32 / pixels[1] as f32).0;
+                        let wire = self.mode == Mode::Wire || self.mode == Mode::ShadedWire || self.editor_state.xray;
+                        let signature = (view, pixels, wire);
+                        if self.last_lod_view.as_ref() != Some(&signature)
+                            && (self.last_lod_view.is_none() || self.last_lod_select.elapsed() >= Duration::from_millis(50)) {
+                            let ids = lod.select(self.camera.lod_camera(pixels), lod.error_px);
+                            gpu.select_lod(&self.state.device, lod, &ids, wire);
+                            self.last_lod_view = Some(signature);
+                            self.last_lod_select = Instant::now();
+                        }
+                    }
                 }
                 if let (Some(gpu), Some(target)) = (&self.gpu, &self.target) {
                     gpu.draw(&self.state, target, &self.camera, self.mode, Overlay { normals: self.editor_state.overlays.normals, bounds: self.editor_state.overlays.bounds, xray: self.editor_state.xray });

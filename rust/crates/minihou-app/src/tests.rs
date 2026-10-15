@@ -138,7 +138,7 @@ fn bom_open_save_strips_bom_and_preserves_crlf() {
 }
 #[test]
 fn metadata_covers_all_node_types_and_parameters() {
-    assert_eq!(nodes::registry().len(), 16);
+    assert_eq!(nodes::registry().len(), 17);
     for spec in nodes::registry() {
         for param in spec.params {
             let meta = param_meta(spec.name, param.name).expect("missing registry parameter");
@@ -203,6 +203,34 @@ fn stale_response_never_overwrites_newest_request() {
     assert!(state.accept(cook_batch(&mut session, &mut target, vec![request(1, columns(json!(3)))], |_| ())).is_none());
     assert!(state.geometry.is_none());
     assert!(state.cooking());
+}
+#[test]
+fn displayed_downstream_node_carries_nearest_bake_payload() {
+    let graph = json!({"nodes": {
+        "g": {"type":"grid", "params":{"columns":24,"rows":24}},
+        "b": {"type":"lod_bake", "inputs":{"geo":"g"}, "params":{"min_triangles":0}},
+        "o": {"type":"output", "inputs":{"geo":"b"}}
+    }, "display":"o"});
+    let mut session = minihou_core::session::Session::new(minihou_core::Graph::from_value(&graph).unwrap());
+    let mut target = "o".to_owned();
+    let first = cook_batch(&mut session, &mut target, vec![request(1, Edit::Display("o".into()))], |_| ());
+    assert!(first.error.is_none());
+    let payload = first.lod.unwrap();
+    assert!(!payload.clusters.is_empty());
+    let second = cook_batch(&mut session, &mut target, vec![request(2, Edit::Display("o".into()))], |_| ());
+    assert!(second.stats.cooked.is_empty());
+    assert!(std::sync::Arc::ptr_eq(&payload, &second.lod.unwrap()));
+
+    let changed = json!({"nodes": {
+        "g": {"type":"grid", "params":{"columns":24,"rows":24}},
+        "b": {"type":"lod_bake", "inputs":{"geo":"g"}, "params":{"min_triangles":0}},
+        "t": {"type":"transform", "inputs":{"geo":"b"}, "params":{"translate":[1.0,0.0,0.0]}},
+        "o": {"type":"output", "inputs":{"geo":"t"}}
+    }, "display":"o"});
+    let mut session = minihou_core::session::Session::new(minihou_core::Graph::from_value(&changed).unwrap());
+    let response = cook_batch(&mut session, &mut target, vec![request(3, Edit::Display("o".into()))], |_| ());
+    assert!(response.error.is_none());
+    assert!(response.lod.is_none(), "transformed bounds must not be reused");
 }
 #[test]
 fn undo_redo_restore_exact_json_and_text_including_omitted_members() {

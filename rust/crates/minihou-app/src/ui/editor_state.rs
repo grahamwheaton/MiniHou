@@ -75,8 +75,8 @@ impl ViewPreset {
 /// `/api/proxy` (level 1 = full, 0.5 = half ... ; `auto` picks the level from the triangle count; `link_tris` caps what is
 /// sent to Blender, 0 = unlimited).
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub struct Proxy { pub level: f32, pub auto: bool, pub link_tris: u32 }
-impl Default for Proxy { fn default() -> Self { Self { level: 1.0, auto: false, link_tris: 0 } } }
+pub struct Proxy { pub level: f32, pub auto: bool, pub link_tris: u32, pub clustered: bool }
+impl Default for Proxy { fn default() -> Self { Self { level: 1.0, auto: false, link_tris: 0, clustered: false } } }
 
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct EditorState {
@@ -117,6 +117,7 @@ pub enum EditorChange {
     ProxyLevel(f32),
     ProxyAuto(bool),
     ProxyLinkTris(u32),
+    ProxyClustered(bool),
 }
 
 impl EditorState {
@@ -142,6 +143,7 @@ impl EditorState {
             EditorChange::ProxyLevel(l) => self.proxy.level = l.clamp(0.001, 1.0),
             EditorChange::ProxyAuto(a) => self.proxy.auto = a,
             EditorChange::ProxyLinkTris(n) => self.proxy.link_tris = n,
+            EditorChange::ProxyClustered(b) => self.proxy.clustered = b,
         }
     }
 }
