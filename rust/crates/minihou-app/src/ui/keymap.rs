@@ -39,7 +39,7 @@ pub enum Command {
     ResetCursor,
 }
 impl Command {
-    pub const ALL: [Self; 74] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
+    pub const ALL: [Self; 75] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
         Self::ToolSelect, Self::ToolMove, Self::ToolRotate, Self::ToolScale, Self::ToolTransform,
         Self::FrameAll, Self::FrameSelected, Self::Front, Self::Back, Self::Right, Self::Left,
         Self::Top, Self::Bottom, Self::ToggleProjection, Self::OrbitDown, Self::OrbitLeft,
