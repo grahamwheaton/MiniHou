@@ -9,6 +9,7 @@ use crate::geometry::Geometry;
 use crate::params::{ParamSpec, Params};
 
 mod generate;
+mod groups;
 mod merge;
 mod modify;
 
@@ -45,6 +46,10 @@ pub fn registry() -> &'static [NodeSpec] {
     static NODES: &[NodeSpec] = &[
         generate::GRID,
         generate::BOX,
+        generate::POINT,
+        generate::CURVE,
+        generate::LINE,
+        generate::CIRCLE,
         modify::TRANSFORM,
         modify::NORMAL,
         modify::NOISE,

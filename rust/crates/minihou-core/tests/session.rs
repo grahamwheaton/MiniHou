@@ -108,10 +108,12 @@ fn errors_leave_the_cache_usable() {
     assert!(s.set_param("nope", "x", json!(1)).is_err());
     assert!(s.set_param("n", "nope", json!(1)).is_err());
     s.cook(None).unwrap();
-    s.set_param("t", "group", json!("0-3")).unwrap(); // refused at cook time
+    s.set_param("t", "proportional_enabled", json!(true)).unwrap();
+    s.set_param("t", "proportional_falloff", json!("random")).unwrap(); // refused at cook time
     let e = s.cook(None).unwrap_err();
     assert!(e.0.contains("Rust backend"), "{e}");
-    s.set_param("t", "group", json!("")).unwrap();
+    s.set_param("t", "proportional_enabled", json!(false)).unwrap();
+    s.set_param("t", "proportional_falloff", json!("smooth")).unwrap();
     same(&s.cook(None).unwrap(), &fresh(&chain()));
 }
 

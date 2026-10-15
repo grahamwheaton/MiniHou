@@ -13,7 +13,7 @@ rust/
     src/preview.rs              the viewport's layout: fan triangles, Morton order (radix sort), run table, draw counts
     src/normals.rs              Newell face normals, area-weighted point normals
     src/noise.rs                Perlin / fractal noise, bit for bit the numpy float32 arithmetic
-    src/nodes/                  grid, box, transform, normal, noise, merge, null, output
+    src/nodes/                  grid, box, point, curve, line, circle, transform, normal, noise, merge, null, output
     src/graph.rs                reads graph JSON and cooks it (pull evaluation, each node once per cook)
     tests/core.rs               Rust-only checks
     examples/profile_*.rs       kernel timing without Python (RAYON_NUM_THREADS=1 shows what does not scale)
@@ -62,7 +62,11 @@ the whole test suite with the extension installed.
 |---|---|---|
 | `grid` | everything | |
 | `box` | divisions, axis divisions, triangles, consolidate, points, rotate, scale | an input to bound, `add_vertex_normals` |
-| `transform` | translate, rotate, scale, uniform scale, pivot, axis rotation, N | `group`, proportional editing |
+| `point` | one point at `center` | |
+| `curve` | typed points, open/closed topology, optional input append | |
+| `line` | origin, direction, length, points | |
+| `circle` | radius, center, rotation, divisions | |
+| `transform` | translate, rotate, scale, uniform scale, pivot, axis rotation, N; point/primitive named groups, numeric ranges and exclusions; simple `@P.x/y/z` comparisons; proportional editing with smooth, sphere, root, sharp, linear and constant falloffs, connected and projected distances | general wrangle group expressions, random falloff |
 | `normal` | point, prim | vertex (cusped) |
 | `noise` | scalar / vector, P or any attribute, octaves, lacunarity, gain, seed | `group` |
 | `merge` | topology, attributes zero-filled, curves, detail | materials / instance lists in the detail, mixed float/int attributes |

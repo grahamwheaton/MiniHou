@@ -12,6 +12,90 @@ use crate::geometry::{Attr, Geometry};
 use crate::math;
 use crate::params::Params;
 
+pub const CURVE: NodeSpec = NodeSpec {
+    name: "curve",
+    inputs: &[InputSpec { name: "geo", multi: false, optional: true }],
+    params: crate::params!("points": "0,0,0  1,0,0  1,1,0  2,1,1"; "closed": false;),
+    cook: curve,
+};
+
+pub const POINT: NodeSpec = NodeSpec {
+    name: "point", inputs: &[], params: crate::params!("center": [0.0, 0.0, 0.0];), cook: point,
+};
+
+fn point(_inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    Geometry::points_only(p.v3("center")?.map(|v| v as f32).to_vec())
+}
+
+fn curve(inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    let mut positions = Vec::new();
+    for token in p.s("points")?.split_whitespace() {
+        let coords: Vec<&str> = token.split(',').collect();
+        if coords.len() != 3 {
+            return Err(Error::new("give at least two points, each as x,y,z"));
+        }
+        for c in coords {
+            positions.push(c.parse::<f64>().map_err(|_| Error::new("points must look like 'x,y,z x,y,z ...'"))? as f32);
+        }
+    }
+    let n = positions.len() / 3;
+    if n < 2 {
+        return Err(Error::new("give at least two points, each as x,y,z"));
+    }
+    let new = Geometry::from_arrays(positions, (0..n as i32).collect(), vec![0, n as i32], Some(vec![p.b("closed")?]))?;
+    if let Some(input) = inputs[0].first() {
+        let params = Params::resolve(&[], None)?;
+        super::merge::merge(&[vec![input.clone(), Arc::new(new)]], &params)
+    } else {
+        Ok(new)
+    }
+}
+
+pub const LINE: NodeSpec = NodeSpec {
+    name: "line", inputs: &[],
+    params: crate::params!("origin": [0.0, 0.0, 0.0]; "direction": [0.0, 0.0, 1.0]; "length": 1.0; "points": 10;),
+    cook: line,
+};
+
+fn line(_inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    let n = p.i("points")?;
+    if !(2..=1_000_000).contains(&n) {
+        return Err(Error::new("line points must be between 2 and 1000000"));
+    }
+    let n = n as usize;
+    let origin = p.v3("origin")?;
+    let mut d = p.v3("direction")?;
+    let len = d.iter().map(|x| x * x).sum::<f64>().sqrt().max(1e-12);
+    for x in &mut d { *x /= len; }
+    let mut pos = Vec::with_capacity(n * 3);
+    for t in linspace(0.0, p.f("length")?, n) {
+        pos.extend((0..3).map(|k| (origin[k] + t * d[k]) as f32));
+    }
+    Geometry::from_arrays(pos, (0..n as i32).collect(), vec![0, n as i32], Some(vec![false]))
+}
+
+pub const CIRCLE: NodeSpec = NodeSpec {
+    name: "circle", inputs: &[],
+    params: crate::params!("radius": 1.0; "center": [0.0, 0.0, 0.0]; "rotate": [0.0, 0.0, 0.0]; "divisions": 32;),
+    cook: circle,
+};
+
+fn circle(_inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    let n = p.i("divisions")?;
+    if !(3..=100_000).contains(&n) { return Err(Error::new("circle divisions must be between 3 and 100000")); }
+    let n = n as usize;
+    let r = p.f("radius")?;
+    let center = p.v3("center")?;
+    let m = math::euler_xyz(p.v3("rotate")?);
+    let mut pos = Vec::with_capacity(n * 3);
+    for i in 0..n {
+        let angle = i as f64 * (2.0 * std::f64::consts::PI / n as f64);
+        let q = math::apply(&m, [r * angle.cos(), r * angle.sin(), 0.0]);
+        pos.extend((0..3).map(|k| (q[k] + center[k]) as f32));
+    }
+    Geometry::from_arrays(pos, (0..n as i32).collect(), vec![0, n as i32], None)
+}
+
 pub const GRID: NodeSpec = NodeSpec {
     name: "grid",
     inputs: &[],

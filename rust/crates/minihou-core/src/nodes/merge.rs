@@ -17,7 +17,7 @@ pub const MERGE: NodeSpec = NodeSpec {
 /// Detail entries the Python merge treats specially (material lists, instance objects); not ported yet.
 const SPECIAL_DETAIL: &[&str] = &["materials", "usd_materials", "instance_objects"];
 
-fn merge(inputs: &Inputs, _p: &Params) -> Result<Geometry> {
+pub(super) fn merge(inputs: &Inputs, _p: &Params) -> Result<Geometry> {
     let geos = &inputs[0];
     if geos.is_empty() {
         return Err(Error::new("input 'geos' is not connected"));
