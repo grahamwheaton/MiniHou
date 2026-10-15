@@ -15,7 +15,7 @@ fn numpy_sum(a: &[f64]) -> f64 {
         let mut r = [0.0; 8];
         r.copy_from_slice(&a[..8]);
         let end = a.len() - a.len() % 8;
-        for chunk in a[8..end].chunks_exact(8) {
+        for chunk in a[8..end].as_chunks::<8>().0.iter() {
             for j in 0..8 {
                 r[j] += chunk[j];
             }
@@ -50,8 +50,8 @@ pub fn from_points(p: &[f64], radius: &[f64], h: f64, blend: f64) -> Result<Fiel
     let mut origin = [0.0; 3];
     let mut dims = [0; 3];
     for ax in 0..3 {
-        let lo = p.chunks_exact(3).map(|p| p[ax]).fold(f64::INFINITY, f64::min);
-        let hi = p.chunks_exact(3).map(|p| p[ax]).fold(f64::NEG_INFINITY, f64::max);
+        let lo = p.as_chunks::<3>().0.iter().map(|p| p[ax]).fold(f64::INFINITY, f64::min);
+        let hi = p.as_chunks::<3>().0.iter().map(|p| p[ax]).fold(f64::NEG_INFINITY, f64::max);
         origin[ax] = (lo - reach_world) - 2.0 * h;
         let upper = (hi + reach_world) + 2.0 * h;
         let d = ((upper - origin[ax]) / h).floor() + 2.0;
@@ -70,7 +70,7 @@ pub fn from_points(p: &[f64], radius: &[f64], h: f64, blend: f64) -> Result<Fiel
         return Err("too much point work; use a larger voxel_size or a smaller radius".into());
     }
     let mut field = vec![0.0f64; total];
-    let bases: Vec<[i64; 3]> = p.chunks_exact(3).map(|p| {
+    let bases: Vec<[i64; 3]> = p.as_chunks::<3>().0.iter().map(|p| {
         std::array::from_fn(|ax| ((p[ax] - origin[ax]) / h).floor() as i64)
     }).collect();
     // np.array_split uses this many chunks, placing the longer chunks first.
@@ -81,7 +81,7 @@ pub fn from_points(p: &[f64], radius: &[f64], h: f64, blend: f64) -> Result<Fiel
     let mut start = 0;
     for chunk in 0..chunks {
         let end = start + short + usize::from(chunk < extra);
-        for ((p, base), support) in p.chunks_exact(3).zip(&bases).zip(&support) {
+        for ((p, base), support) in p.as_chunks::<3>().0.iter().zip(&bases).zip(&support) {
             let support2 = support * support;
             for index in start..end {
                 let off = [index / (width * width), (index / width) % width, index % width];
