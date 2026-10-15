@@ -7,7 +7,7 @@ use serde_json::json;
 use std::{collections::HashMap, path::PathBuf, time::Duration};
 use ui::keymap::{KeyContext, Keymap, Preferences, ThemePref};
 use ui::{theme::Theme, Actions, BlenderStatus, CameraInfo, EditorState, GeoSummary, NodeFlags, UiAction, View};
-use viewport::{Gpu, Mode, Scene, Target};
+use viewport::{Gpu, Mode, Overlay, Scene, Target};
 
 struct App {
     editor: EditorDocument, worker: CookWorker<Scene>, cooking: CookState,
@@ -287,7 +287,7 @@ impl eframe::App for App {
                     self.target = Some(Target::new(&self.state, pixels));
                 }
                 if let (Some(gpu), Some(target)) = (&self.gpu, &self.target) {
-                    gpu.draw(&self.state, target, &self.camera, self.mode);
+                    gpu.draw(&self.state, target, &self.camera, self.mode, Overlay { normals: self.editor_state.overlays.normals, bounds: self.editor_state.overlays.bounds, xray: self.editor_state.xray });
                     ui.painter().image(target.id, rect, egui::Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.)), egui::Color32::WHITE);
                 }
                 self.viewport_hover = response.hovered();

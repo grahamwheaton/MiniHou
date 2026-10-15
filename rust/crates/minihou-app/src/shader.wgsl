@@ -47,8 +47,7 @@ fn vs_surf(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>) -> VOut {
     return o;
 }
 
-@fragment
-fn fs_surf(i: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+fn shade_surf(i: VOut, front: bool) -> vec3<f32> {
     // The unit vector from this point to the eye (view space: the eye is at the origin). In a perspective view it is NOT
     // (0, 0, 1): near the edges of the screen the ray is angled, and testing against the z axis misjudges grazing faces.
     let v = normalize(-i.vpos);
@@ -72,7 +71,12 @@ fn fs_surf(i: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32
             n = normalize(n - v * d * 1.25);
         }
     }
-    return out_color(u.base.rgb * light(n));
+    return u.base.rgb * light(n);
+}
+
+@fragment
+fn fs_surf(i: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    return out_color(shade_surf(i, front));
 }
 
 struct WOut {
@@ -102,3 +106,16 @@ fn fs_wire(i: WOut) -> @location(0) vec4<f32> {
     }
     return out_color(lit);
 }
+
+// X-ray: the same shading, drawn see-through
+@fragment
+fn fs_xray(i: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let c = out_color(shade_surf(i, front));
+    return vec4<f32>(c.rgb, 0.32);
+}
+
+// Overlay lines in one flat colour: the point normals and the bounding box
+@fragment
+fn fs_normals(i: WOut) -> @location(0) vec4<f32> { return out_color(vec3<f32>(0.25, 0.78, 0.92)); }
+@fragment
+fn fs_bounds(i: WOut) -> @location(0) vec4<f32> { return out_color(vec3<f32>(0.95, 0.72, 0.25)); }
