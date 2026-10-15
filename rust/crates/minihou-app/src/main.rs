@@ -1,11 +1,11 @@
 mod ui;
 mod viewport;
 use eframe::{egui, egui_wgpu};
-use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, CookRequest, CookState};
+use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, CookRequest, CookState, StandardView};
 use minihou_core::Graph;
 use serde_json::json;
 use std::{collections::HashMap, path::PathBuf, time::Duration};
-use ui::{theme::Theme, Actions, NodeFlags, UiAction, View};
+use ui::{theme::Theme, Actions, EditorState, NodeFlags, UiAction, View};
 use viewport::{Gpu, Mode, Scene, Target};
 
 struct App {
@@ -15,6 +15,7 @@ struct App {
     camera: Camera, bounds: ([f32;3], f32), mode: Mode,
     file_status: String,
     theme: Theme, flags: HashMap<String, NodeFlags>, themed: bool,
+    editor_state: EditorState,
 }
 impl App {
     fn new(doc: Document, path: PathBuf, state: egui_wgpu::RenderState) -> Result<Self> {
@@ -23,7 +24,7 @@ impl App {
         let mut app = Self { selected:display.clone(), display, editor:EditorDocument::new(doc, path), worker,
             cooking:CookState::default(), state,gpu:None,target:None,
             camera:Camera::frame([0.;3],1.),bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new(),
-            theme:Theme::dark(),flags:HashMap::new(),themed:false };
+            theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default() };
         app.send(Edit::Display(app.display.clone()));
         Ok(app)
     }
@@ -55,6 +56,11 @@ impl App {
             Err(e) => self.file_status = format!("Open failed: {e}"),
         }
     }
+}
+fn standard_view(v: ui::ViewPreset) -> StandardView {
+    use ui::ViewPreset as P;
+    match v { P::Perspective => StandardView::Perspective, P::Front => StandardView::Front, P::Back => StandardView::Back,
+        P::Right => StandardView::Right, P::Left => StandardView::Left, P::Top => StandardView::Top, P::Bottom => StandardView::Bottom }
 }
 impl App {
     /// A shelf tool: a new node of `node_type` wired to `after` (its first input) and made the displayed node; one undo step.
@@ -113,6 +119,16 @@ impl App {
                 }
                 UiAction::AddNode { node_type, after } => self.add_node(&node_type, after.as_deref()),
                 UiAction::SetMode(mode) => self.mode = mode,
+                UiAction::Editor(change) => {
+                    self.editor_state.apply(change);
+                    if let ui::EditorChange::View(v) = change { self.camera.set_view(standard_view(v)); }
+                }
+                UiAction::ViewPreset(v) => { self.editor_state.apply(ui::EditorChange::View(v)); self.camera.set_view(standard_view(v)); }
+                UiAction::Orbit { yaw, pitch } => self.camera.orbit_degrees(yaw, pitch),
+                UiAction::Pan { dx, dy } => self.camera.pan(dx, dy),
+                UiAction::Zoom(factor) => self.camera.zoom_factor(factor),
+                UiAction::DeleteNode(_) | UiAction::DuplicateNode(_) | UiAction::ConnectNodes { .. } | UiAction::DisconnectInput { .. }
+                | UiAction::TidyNetwork | UiAction::OpenPreferences | UiAction::Command(_) => self.file_status = "That command is not wired up yet".into(),
                 UiAction::ToggleLocked(id) => { let f = self.flags.entry(id).or_default(); f.locked = !f.locked; }
                 UiAction::ToggleTemplate(id) => { let f = self.flags.entry(id).or_default(); f.template = !f.template; }
             }
@@ -143,7 +159,7 @@ impl eframe::App for App {
             let v = View { graph: &graph, doc: self.editor.doc.value(), path: &self.editor.path, dirty: self.editor.dirty(),
                 can_undo: self.editor.history.can_undo(), can_redo: self.editor.history.can_redo(),
                 selected: &self.selected, display: &self.display, cooking: &self.cooking, file_status: &self.file_status,
-                mode: self.mode, theme: &self.theme, flags: &self.flags };
+                mode: self.mode, theme: &self.theme, editor: &self.editor_state, flags: &self.flags };
             egui::TopBottomPanel::top("toolbar").show(ctx, |ui| ui::topbar::show(ui, &v, &mut out));
             egui::TopBottomPanel::top("shelf").show(ctx, |ui| ui::shelf::show(ui, &v, &mut out));
             egui::TopBottomPanel::bottom("stats").show(ctx, |ui| ui::status::show(ui, &v, &mut out));

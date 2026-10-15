@@ -1,7 +1,7 @@
 //! Viewport chrome drawn over the 3-D view (design: Viewport.dc.html): header bar (selection modes, orientation, pivot,
 //! snapping, proportional editing, overlays, X-ray, shading, Frame), left tool strip, bottom timeline, stats chip, axis gizmo,
 //! error and dense-mesh notes. `rect` is the viewport's area; the 3-D image is already painted into it.
-use super::{theme::Theme, Actions, UiAction, View};
+use super::{theme::Theme, Actions, EditorChange, SelectionMode, UiAction, View};
 use crate::viewport::Mode;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 
@@ -17,10 +17,10 @@ const FRAME_END: u32 = 240;
 
 /// UI-only viewport state (nothing here reaches the engine yet).
 #[derive(Clone)]
-struct VpState { tool: usize, selmode: usize, snap: bool, prop: bool, xray: bool, overlays_open: bool, show: [bool; 6], frame: u32, playing: bool, clock: f32 }
+struct VpState { tool: usize, overlays_open: bool, frame: u32, playing: bool, clock: f32 }
 impl Default for VpState {
     fn default() -> Self {
-        Self { tool: 0, selmode: 0, snap: false, prop: false, xray: false, overlays_open: false, show: [true, true, true, true, false, false], frame: 48, playing: false, clock: 0. }
+        Self { tool: 0, overlays_open: false, frame: 48, playing: false, clock: 0. }
     }
 }
 const OVERLAYS: [(&str, &str); 6] = [("Grid floor", "G"), ("Axis gizmo", ""), ("Wireframe overlay", "W"), ("Stats", "I"), ("Normals", "N"), ("Bounding box", "B")];
@@ -91,18 +91,22 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     // ---- header bar
     painter.rect_filled(Rect::from_min_size(rect.min, Vec2::new(rect.width(), HEADER_H)), 0., th.panel);
     painter.line_segment([Pos2::new(rect.left(), rect.top() + HEADER_H), Pos2::new(rect.right(), rect.top() + HEADER_H)], stroke);
-    let h = header_layout(rect.left(), rect.top(), rect.width(), st.snap);
+    let ed = v.editor;
+    let show = [ed.overlays.grid, ed.overlays.axes, ed.overlays.wireframe, ed.overlays.stats, ed.overlays.normals, ed.overlays.bounds];
+    let h = header_layout(rect.left(), rect.top(), rect.width(), ed.snap.enabled);
     for g in &h.groups { painter.rect(*g, 5., th.panel2, stroke, StrokeKind::Inside); }
     for x in &h.seps { painter.line_segment([Pos2::new(*x, rect.top() + 9.), Pos2::new(*x, rect.top() + HEADER_H - 9.)], stroke); }
     for (i, r) in h.modes.iter().enumerate() {
-        if button(ui, th, *r, ("vp_mode", i), st.selmode == i, ["Object mode (1)", "Points (2)", "Edges (3)", "Faces (4)"][i], [Icon::Object, Icon::Points, Icon::Edges, Icon::Faces][i]) { st.selmode = i; }
+        let mode = SelectionMode::ALL[i];
+        if button(ui, th, *r, ("vp_mode", i), ed.selection == mode, ["Object mode (4)", "Points (1)", "Edges (2)", "Faces (3)"][i], [Icon::Object, Icon::Points, Icon::Edges, Icon::Faces][i]) { out.push(UiAction::Editor(EditorChange::Selection(mode))); }
     }
-    button_text(ui, th, h.orient, "vp_orient", false, "Transform orientation", Icon::Orient, (Some("Global"), true));
+    button_text(ui, th, h.orient, "vp_orient", false, "Transform orientation", Icon::Orient, (Some(ed.orientation.label()), true));
     button_text(ui, th, h.pivot, "vp_pivot", false, "Pivot point", Icon::Pivot, (None, true));
-    if button_text(ui, th, h.snap, "vp_snap", st.snap, "Snapping (Shift+Tab)", Icon::Magnet, (if st.snap { Some("0.25") } else { None }, true)) { st.snap = !st.snap; }
-    if button_text(ui, th, h.prop, "vp_prop", st.prop, "Proportional editing (O)", Icon::Prop, (None, true)) { st.prop = !st.prop; }
+    let snap_label = format!("{}", ed.snap.increment);
+    if button_text(ui, th, h.snap, "vp_snap", ed.snap.enabled, "Snapping (Shift+Tab)", Icon::Magnet, (if ed.snap.enabled { Some(snap_label.as_str()) } else { None }, true)) { out.push(UiAction::Editor(EditorChange::SnapEnabled(!ed.snap.enabled))); }
+    if button_text(ui, th, h.prop, "vp_prop", ed.proportional.enabled, "Proportional editing (O)", Icon::Prop, (None, true)) { out.push(UiAction::Editor(EditorChange::ProportionalEnabled(!ed.proportional.enabled))); }
     if button_text(ui, th, h.overlays, "vp_overlays", st.overlays_open, "Overlays", Icon::Overlays, (None, true)) { st.overlays_open = !st.overlays_open; }
-    if button(ui, th, h.xray, ("vp_xray", 0), st.xray, "X-ray (Alt+Z)", Icon::Xray) { st.xray = !st.xray; }
+    if button(ui, th, h.xray, ("vp_xray", 0), ed.xray, "X-ray (Alt+Z)", Icon::Xray) { out.push(UiAction::Editor(EditorChange::Xray(!ed.xray))); }
     for (i, (mode, name, icon)) in [(Mode::Solid, "Solid", Icon::Solid), (Mode::Shaded, "Shaded", Icon::Shaded), (Mode::Wire, "Wire", Icon::Wire), (Mode::ShadedWire, "Shaded + Wire", Icon::ShadedWire)].into_iter().enumerate() {
         if button(ui, th, h.shading[i], ("vp_shading", i), v.mode == mode, name, icon) { out.push(UiAction::SetMode(mode)); }
     }
@@ -179,14 +183,14 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
 
     // ---- stats chip, axis gizmo
     let (points, prims) = v.cooking.geometry.as_ref().map_or((0, 0), |g| (g.npoints, g.nprims()));
-    if st.show[3] {
+    if show[3] {
         let text = format!("Points {points}   Prims {prims}   Cook {:.1} ms", v.cooking.milliseconds);
         let g = painter.layout_no_wrap(text, mono.clone(), th.text);
         let chip = Rect::from_min_size(Pos2::new(rect.left() + 12., tl.top() - 12. - 26.), Vec2::new(g.size().x + 20., 26.));
         painter.rect(chip, 6., th.panel, stroke, StrokeKind::Inside);
         painter.galley(Pos2::new(chip.left() + 10., chip.center().y - g.size().y / 2.), g, th.text);
     }
-    if st.show[1] { gizmo(&painter, th, Pos2::new(rect.right() - 10. - 76., tl.top() - 10. - 64.)); }
+    if show[1] { gizmo(&painter, th, Pos2::new(rect.right() - 10. - 76., tl.top() - 10. - 64.)); }
 
     // ---- notes
     if let Some(error) = &v.cooking.error {
@@ -209,11 +213,15 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
             let resp = ui.interact(r, egui::Id::new(("vp_ov", i)), Sense::click());
             if resp.hovered() { painter.rect_filled(r, 3., th.panel2); }
             let bx = Rect::from_center_size(Pos2::new(r.left() + 13., r.center().y), Vec2::splat(14.));
-            if st.show[i] { painter.rect(bx, 3., th.accent, Stroke::new(1.0_f32, th.accent), StrokeKind::Inside); icon(&painter, Icon::Frame, bx.shrink(2.), Color32::WHITE, true); }
+            if show[i] { painter.rect(bx, 3., th.accent, Stroke::new(1.0_f32, th.accent), StrokeKind::Inside); icon(&painter, Icon::Frame, bx.shrink(2.), Color32::WHITE, true); }
             else { painter.rect_stroke(bx, 3., Stroke::new(1.0_f32, th.dim), StrokeKind::Inside); }
             painter.text(Pos2::new(r.left() + 30., r.center().y), egui::Align2::LEFT_CENTER, *name, egui::FontId::proportional(12.), th.text);
             if !key.is_empty() { painter.text(Pos2::new(r.right() - 8., r.center().y), egui::Align2::RIGHT_CENTER, *key, mono.clone(), th.dim); }
-            if resp.clicked() { st.show[i] = !st.show[i]; }
+            if resp.clicked() {
+                let mut o = ed.overlays;
+                match i { 0 => o.grid = !o.grid, 1 => o.axes = !o.axes, 2 => o.wireframe = !o.wireframe, 3 => o.stats = !o.stats, 4 => o.normals = !o.normals, _ => o.bounds = !o.bounds }
+                out.push(UiAction::Editor(EditorChange::Overlays(o)));
+            }
         }
     }
     ctx.data_mut(|d| d.insert_temp(id, st));

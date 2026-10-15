@@ -163,6 +163,18 @@ fn look_at(eye: [f32; 3], at: [f32; 3], up: [f32; 3]) -> M4 {
 }
 
 /// Right-handed, depth 0..1 (wgpu).
+/// Orthographic projection that shows the same height as `perspective(fovy)` does at distance `dist`.
+fn orthographic(fovy: f32, dist: f32, aspect: f32, near: f32, far: f32) -> M4 {
+    let h = dist * (fovy / 2.0).tan();
+    let w = h * aspect;
+    [
+        [1.0 / w, 0.0, 0.0, 0.0],
+        [0.0, 1.0 / h, 0.0, 0.0],
+        [0.0, 0.0, 1.0 / (near - far), 0.0],
+        [0.0, 0.0, near / (near - far), 1.0],
+    ]
+}
+
 fn perspective(fovy: f32, aspect: f32, near: f32, far: f32) -> M4 {
     let t = 1.0 / (fovy / 2.0).tan();
     [
@@ -173,12 +185,17 @@ fn perspective(fovy: f32, aspect: f32, near: f32, far: f32) -> M4 {
     ]
 }
 
+/// The views on the numpad (perspective keeps the current angles).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StandardView { Perspective, Front, Back, Right, Left, Top, Bottom }
+
 pub struct Camera {
     target: [f32; 3],
     dist: f32,
     yaw: f32,
     pitch: f32,
     radius: f32,
+    ortho: bool,
 }
 
 impl Camera {
@@ -187,7 +204,7 @@ impl Camera {
         self.dist
     }
     pub fn frame(center: [f32; 3], radius: f32) -> Self {
-        let radius = radius.max(1e-3); Camera { target: center, dist: radius * 2.6, yaw: 0.6, pitch: 0.5, radius }
+        let radius = radius.max(1e-3); Camera { target: center, dist: radius * 2.6, yaw: 0.6, pitch: 0.5, radius, ortho: false }
     }
 
     fn eye(&self) -> [f32; 3] {
@@ -204,13 +221,35 @@ impl Camera {
         let view = look_at(self.eye(), self.target, [0.0, 1.0, 0.0]);
         let near = (self.dist - self.radius * 1.5).max(self.radius * 0.001).max(1e-4);
         let far = self.dist + self.radius * 3.0;
-        (mul(&perspective(0.8, aspect, near, far), &view), view)
+        let proj = if self.ortho { orthographic(0.8, self.dist, aspect, 1e-3_f32.min(near), far) } else { perspective(0.8, aspect, near, far) };
+        (mul(&proj, &view), view)
     }
 }
 
 
 impl Camera {
-    pub fn orbit(&mut self, dx: f32, dy: f32) { self.yaw -= dx * 0.008; self.pitch = (self.pitch + dy * 0.008).clamp(-1.55,1.55); }
+    /// Snap to one of Blender's standard views (+Y is up; Front looks along -Z). Top and bottom stop just short of the pole.
+    pub fn set_view(&mut self, view: crate::StandardView) {
+        use crate::StandardView as V;
+        const POLE: f32 = 1.5698;
+        let (yaw, pitch, ortho) = match view {
+            V::Perspective => (self.yaw, self.pitch, false),
+            V::Front => (0., 0., true),
+            V::Back => (std::f32::consts::PI, 0., true),
+            V::Right => (std::f32::consts::FRAC_PI_2, 0., true),
+            V::Left => (-std::f32::consts::FRAC_PI_2, 0., true),
+            V::Top => (0., POLE, true),
+            V::Bottom => (0., -POLE, true),
+        };
+        self.yaw = yaw; self.pitch = pitch; self.ortho = ortho;
+    }
+    pub fn is_ortho(&self) -> bool { self.ortho }
+    pub fn orbit_degrees(&mut self, yaw: f32, pitch: f32) {
+        self.ortho = false;
+        self.yaw -= yaw.to_radians(); self.pitch = (self.pitch + pitch.to_radians()).clamp(-1.55, 1.55);
+    }
+    pub fn zoom_factor(&mut self, factor: f32) { if factor.is_finite() && factor > 0.0 { self.dist = (self.dist / factor).clamp(self.radius * 0.05, self.radius * 60.0); } }
+    pub fn orbit(&mut self, dx: f32, dy: f32) { self.ortho = false; self.yaw -= dx * 0.008; self.pitch = (self.pitch + dy * 0.008).clamp(-1.55,1.55); }
     pub fn pan(&mut self, dx: f32, dy: f32) {
         let f = norm(sub(self.target,self.eye())); let s = norm(cross(f,[0.,1.,0.])); let u = cross(s,f);
         for i in 0..3 { self.target[i] += (-s[i]*dx+u[i]*dy)*self.dist*0.0011; }
