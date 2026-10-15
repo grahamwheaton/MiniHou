@@ -138,7 +138,7 @@ fn bom_open_save_strips_bom_and_preserves_crlf() {
 }
 #[test]
 fn metadata_covers_all_node_types_and_parameters() {
-    assert_eq!(nodes::registry().len(), 16);
+    assert_eq!(nodes::registry().len(), 17);
     for spec in nodes::registry() {
         for param in spec.params {
             let meta = param_meta(spec.name, param.name).expect("missing registry parameter");

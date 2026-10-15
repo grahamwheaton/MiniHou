@@ -55,7 +55,7 @@ def disabled():
 # (CookStats.backend) so the editor can show it: "rust" (a kernel ran), "fallback" (this node type has a Rust path, but this
 # cook ran the Python / numba one: unsupported settings or no points) and "python" (no Rust path).
 NODE_TYPES = frozenset({"grid", "box", "point", "curve", "line", "circle", "sphere", "tube", "torus", "bound", "transform", "normal", "noise", "heightfield_erode",
-                        "remesh", "points_to_surface", "sdf_boolean", "sdf_shape"})
+                        "match_size", "remesh", "points_to_surface", "sdf_boolean", "sdf_shape"})
 _tls = threading.local()
 
 
@@ -256,6 +256,14 @@ def linear_normalized(V, M) -> np.ndarray:
     """``normalize_rows(V @ M.T)`` in float32 (normals through the transform node)."""
     m = [[float(x) for x in row] for row in np.asarray(M, np.float32)]
     return _need().linear_normalized(_f32x3(V), m)
+
+
+def match_size(P, target, translate, center, justify_z, scale, size, uniform, N=None):
+    """The ``match_size`` node body in float64: ``(P (n, 3) float32, N (n, 3) float32 or None)``. ``target`` is the second
+    input's nonempty points and ``N`` the point normals; N is rescaled only when the scale is not uniform."""
+    return _need().match_size(_f32x3(P), None if target is None else _f32x3(target), bool(translate),
+                              [float(x) for x in center], str(justify_z), bool(scale), [float(x) for x in size], bool(uniform),
+                              None if N is None else _f32x3(N))
 
 
 def preview_layout(P, topology, max_tris: int, max_edges: int, chunk_min: int, chunk: int):

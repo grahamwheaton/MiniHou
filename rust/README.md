@@ -13,7 +13,7 @@ rust/
     src/preview.rs              the viewport's layout: fan triangles, Morton order (radix sort), run table, draw counts
     src/normals.rs              Newell face normals, area-weighted point normals
     src/noise.rs                Perlin / fractal noise, bit for bit the numpy float32 arithmetic
-    src/nodes/                  grid, box, point, curve, line, circle, sphere, tube, torus, bound, transform, normal, noise, merge, null, output
+    src/nodes/                  grid, box, point, curve, line, circle, sphere, tube, torus, bound, transform, normal, noise, match_size, merge, null, output
     src/graph.rs                reads graph JSON and cooks it (pull evaluation, each node once per cook)
     tests/core.rs               Rust-only checks
     examples/profile_*.rs       kernel timing without Python (RAYON_NUM_THREADS=1 shows what does not scale)
@@ -73,6 +73,7 @@ the whole test suite with the extension installed.
 | `transform` | translate, rotate, scale, uniform scale, pivot, axis rotation, N; point/primitive named groups, numeric ranges and exclusions; simple `@P.x/y/z` comparisons; proportional editing with smooth, sphere, root, sharp, linear and constant falloffs, connected and projected distances | general wrangle group expressions, random falloff |
 | `normal` | point, prim | vertex (cusped) |
 | `noise` | scalar / vector, P or any attribute, octaves, lacunarity, gain, seed | `group` |
+| `match_size` | translate, center, justify_z, scale, size, uniform, point `N` (rescaled only for a non-uniform scale); a second input as the target bounding box | |
 | `merge` | topology, attributes zero-filled, curves, detail | materials / instance lists in the detail, mixed float/int attributes |
 | `heightfield_erode` | hydraulic and thermal erosion loops (kernels only; node post-processing and randomness stay in Python) | graph JSON direct cook (Python engine coordinates kernels) |
 | `null`, `output` | pass through | |

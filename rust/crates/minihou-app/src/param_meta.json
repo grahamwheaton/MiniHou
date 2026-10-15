@@ -243,6 +243,52 @@
    "soft_max": 1000
   }
  },
+ "match_size": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Target position (of the box centre, or its bottom with justify_z = min)",
+   "kind": "vec3"
+  },
+  "justify_z": {
+   "default": "center",
+   "doc": "min: sit on the target (e.g. the ground at Z = 0)",
+   "kind": "enum",
+   "options": [
+    "center",
+    "min",
+    "max"
+   ]
+  },
+  "scale": {
+   "default": false,
+   "doc": "Scale to the target size",
+   "kind": "bool"
+  },
+  "size": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "",
+   "kind": "vec3",
+   "min": 0.0
+  },
+  "translate": {
+   "default": true,
+   "doc": "Move the bounding box to the target",
+   "kind": "bool"
+  },
+  "uniform": {
+   "default": true,
+   "doc": "Keep proportions: the largest fitting uniform scale",
+   "kind": "bool"
+  }
+ },
  "merge": {},
  "noise": {
   "amplitude": {
