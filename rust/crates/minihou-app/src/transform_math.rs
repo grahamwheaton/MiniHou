@@ -72,8 +72,31 @@ pub fn det3(m: &Mat3) -> f64 {
         + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
 }
 
+pub fn inverse_affine(m: &Mat4) -> Option<Mat4> {
+    let a = [[m[0][0], m[0][1], m[0][2]], [m[1][0], m[1][1], m[1][2]], [m[2][0], m[2][1], m[2][2]]];
+    let det = det3(&a);
+    if det.abs() < 1e-12 { return None; }
+    let mut inv = IDENTITY_4;
+    for (i, row) in inv.iter_mut().enumerate().take(3) { for (j, cell) in row.iter_mut().enumerate().take(3) {
+        let r = (j + 1) % 3;
+        let s = (j + 2) % 3;
+        let c = (i + 1) % 3;
+        let d = (i + 2) % 3;
+        *cell = (a[r][c] * a[s][d] - a[r][d] * a[s][c]) / det;
+    }}
+    let t = apply3(&[[inv[0][0], inv[0][1], inv[0][2]],
+        [inv[1][0], inv[1][1], inv[1][2]], [inv[2][0], inv[2][1], inv[2][2]]],
+        [m[0][3], m[1][3], m[2][3]]);
+    for i in 0..3 { inv[i][3] = -t[i]; }
+    Some(inv)
+}
+
 pub fn dot3(a: Vec3, b: Vec3) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+pub fn cross3(a: Vec3, b: Vec3) -> Vec3 {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 }
 
 pub fn length3(v: Vec3) -> f64 {
@@ -175,6 +198,41 @@ pub fn unwrap_deg(angle_deg: f64, target_deg: f64) -> f64 {
 /// Decompose a 3x3 rotation matrix into Euler angles in `order`.
 /// Chooses the solution closest to `current_deg` to prevent 180° flips.
 pub fn matrix_to_euler(m: &Mat3, current_deg: Vec3, order: RotationOrder) -> Vec3 {
+    let (first, middle, last, pole) = match order {
+        RotationOrder::Xyz => (0, 1, 2, m[2][0]),
+        RotationOrder::Xzy => (0, 2, 1, m[1][0]),
+        RotationOrder::Yxz => (1, 0, 2, m[2][1]),
+        RotationOrder::Yzx => (1, 2, 0, m[0][1]),
+        RotationOrder::Zxy => (2, 0, 1, m[1][2]),
+        RotationOrder::Zyx => (2, 1, 0, m[0][2]),
+    };
+    if pole.abs() > 1.0 - 1e-10 {
+        let alpha = current_deg[first];
+        let mut best = None::<(f64, Vec3)>;
+        for beta in [-90.0_f64, 90.0] {
+            let mut a = [0.0; 3];
+            a[first] = -alpha;
+            let inverse_first = euler_to_matrix(a, order);
+            a = [0.0; 3];
+            a[middle] = -beta;
+            let inverse_middle = euler_to_matrix(a, order);
+            let c = mul3(&mul3(m, &inverse_first), &inverse_middle);
+            let gamma = match last {
+                0 => c[2][1].atan2(c[1][1]),
+                1 => c[0][2].atan2(c[0][0]),
+                _ => c[1][0].atan2(c[0][0]),
+            }.to_degrees();
+            let mut candidate = [0.0; 3];
+            candidate[first] = alpha;
+            candidate[middle] = unwrap_deg(beta, current_deg[middle]);
+            candidate[last] = unwrap_deg(gamma, current_deg[last]);
+            let reconstructed = euler_to_matrix(candidate, order);
+            let error: f64 = (0..3).flat_map(|i| (0..3).map(move |j| (i, j)))
+                .map(|(i, j)| (reconstructed[i][j] - m[i][j]).powi(2)).sum();
+            if best.is_none_or(|(old, _)| error < old) { best = Some((error, candidate)); }
+        }
+        return best.unwrap().1;
+    }
     let r = m;
     let (cand1, cand2) = match order {
         RotationOrder::Xyz => {
@@ -370,6 +428,26 @@ impl Frame {
         self.axes[a]
     }
 
+    pub fn from_rotation(r: &Mat3) -> Self {
+        Self { axes: [
+            [r[0][0], r[1][0], r[2][0]],
+            [r[0][1], r[1][1], r[2][1]],
+            [r[0][2], r[1][2], r[2][2]],
+        ] }
+    }
+
+    pub fn from_normal(normal: Vec3, tangent_hint: Vec3) -> Self {
+        let z = normalize3(normal);
+        if length3(z) < 1e-9 { return Self::global(); }
+        let mut x = [0, 1, 2].map(|i| tangent_hint[i] - dot3(tangent_hint, z) * z[i]);
+        if length3(x) < 1e-9 {
+            let fallback = if z[0].abs() < 0.8 { [1., 0., 0.] } else { [0., 1., 0.] };
+            x = [0, 1, 2].map(|i| fallback[i] - dot3(fallback, z) * z[i]);
+        }
+        let x = normalize3(x);
+        Self { axes: [x, cross3(z, x), z] }
+    }
+
     /// Matrix with columns equal to frame axes.
     pub fn matrix(&self) -> Mat3 {
         [
@@ -465,8 +543,57 @@ impl TrsParams {
         ]
     }
 
+    pub fn world_rotation(&self) -> Mat3 {
+        let b = euler_xyz(self.axis_rotation);
+        mul3(&mul3(&b, &euler_xyz(self.rotate)), &transpose3(&b))
+    }
+
+    pub fn world_pivot(&self) -> Vec3 {
+        let bt = apply3(&euler_xyz(self.axis_rotation), self.translate);
+        [self.pivot[0] + bt[0], self.pivot[1] + bt[1], self.pivot[2] + bt[2]]
+    }
+
+    /// The pivot parameter can change without moving the geometry.
+    pub fn with_pivot_preserving_matrix(mut self, pivot: Vec3) -> Self {
+        let matrix = self.to_matrix();
+        self.pivot = pivot;
+        let linear_pivot = [0, 1, 2].map(|i| (0..3).map(|j| matrix[i][j] * pivot[j]).sum::<f64>());
+        let world_offset = [0, 1, 2].map(|i| matrix[i][3] + linear_pivot[i] - pivot[i]);
+        self.translate = apply3(&transpose3(&euler_xyz(self.axis_rotation)), world_offset);
+        self
+    }
+
+    pub fn with_world_pivot_preserving_matrix(self, world_pivot: Vec3) -> Self {
+        let Some(inverse) = inverse_affine(&self.to_matrix()) else { return self; };
+        let input_pivot = [0, 1, 2].map(|i| inverse[i][3] +
+            (0..3).map(|j| inverse[i][j] * world_pivot[j]).sum::<f64>());
+        self.with_pivot_preserving_matrix(input_pivot)
+    }
+
+    pub fn decompose_like(&self, m: &Mat4) -> Self {
+        let b = euler_xyz(self.axis_rotation);
+        let bt = transpose3(&b);
+        let l = [[m[0][0], m[0][1], m[0][2]], [m[1][0], m[1][1], m[1][2]], [m[2][0], m[2][1], m[2][2]]];
+        let local = mul3(&mul3(&bt, &l), &b);
+        let columns = [0, 1, 2].map(|j| [local[0][j], local[1][j], local[2][j]]);
+        let mut scales = columns.map(length3);
+        if det3(&local) < 0.0 { scales[0] = -scales[0]; }
+        let mut rotation = IDENTITY_3;
+        for i in 0..3 { for j in 0..3 {
+            rotation[i][j] = if scales[j].abs() > 1e-12 { local[i][j] / scales[j] } else { IDENTITY_3[i][j] };
+        }}
+        let lp = apply3(&l, self.pivot);
+        let offset = [0, 1, 2].map(|i| m[i][3] + lp[i] - self.pivot[i]);
+        let translated = apply3(&bt, offset);
+        let mut out = *self;
+        out.translate = translated;
+        out.rotate = matrix_to_euler_xyz(&rotation, self.rotate);
+        out.scale = [0, 1, 2].map(|i| scales[i] / self.uniform_scale);
+        out
+    }
+
     /// Exact 4x4 matrix representation matching minihou engine's `transform` node.
-    pub fn to_matrix(&self) -> Mat4 {
+    pub fn to_matrix(self) -> Mat4 {
         let s = self.effective_scale();
         let r = euler_xyz(self.rotate);
         let b = euler_xyz(self.axis_rotation);
@@ -556,60 +683,45 @@ pub fn compose(
 ) -> TrsParams {
     let curr_mat = current.to_matrix();
     let composed = mul4(delta_matrix, &curr_mat);
-    TrsParams::from_matrix(&composed, current.pivot, current.rotate, RotationOrder::Xyz)
+    current.decompose_like(&composed)
 }
 
 /// Compose a translation along axis `a` of `frame` by `distance` units.
 pub fn compose_translate_axis(current: &TrsParams, frame: Frame, axis: usize, distance: f64) -> TrsParams {
     let dir = frame.axis(axis);
-    let mut out = *current;
-    out.translate[0] += dir[0] * distance;
-    out.translate[1] += dir[1] * distance;
-    out.translate[2] += dir[2] * distance;
-    out
+    compose_translate(current, dir.map(|x| x * distance))
 }
 
 /// Compose a world translation displacement vector.
 pub fn compose_translate(current: &TrsParams, delta_world: Vec3) -> TrsParams {
     let mut out = *current;
-    out.translate[0] += delta_world[0];
-    out.translate[1] += delta_world[1];
-    out.translate[2] += delta_world[2];
+    let local = apply3(&transpose3(&euler_xyz(current.axis_rotation)), delta_world);
+    for (item, delta) in out.translate.iter_mut().zip(local) { *item += delta; }
     out
 }
 
 /// Compose a rotation by `angle_deg` about axis `a` of `frame` through the pivot.
 pub fn compose_rotate_axis(current: &TrsParams, frame: Frame, axis: usize, angle_deg: f64, is_local: bool) -> TrsParams {
-    let mut out = *current;
-    let r_current = euler_xyz(current.rotate);
-    let r_new = if is_local {
-        let local_axis = match axis { 0 => [1.0, 0.0, 0.0], 1 => [0.0, 1.0, 0.0], _ => [0.0, 0.0, 1.0] };
-        let r_delta = axis_angle_matrix(local_axis, angle_deg);
-        mul3(&r_current, &r_delta)
-    } else {
-        let r_delta = axis_angle_matrix(frame.axis(axis), angle_deg);
-        mul3(&r_delta, &r_current)
-    };
-    out.rotate = matrix_to_euler_xyz(&r_new, current.rotate);
-    out
+    let world_axis = if is_local { Frame::from_rotation(&current.world_rotation()).axis(axis) } else { frame.axis(axis) };
+    let delta = affine_about_pivot(axis_angle_matrix(world_axis, angle_deg), current.world_pivot());
+    compose(current, &delta, frame)
 }
 
 /// Compose rotation by Euler angles vector through the pivot.
 pub fn compose_rotate_euler(current: &TrsParams, frame: Frame, angles_deg: Vec3, is_local: bool) -> TrsParams {
-    let mut out = *current;
-    let r_current = euler_xyz(current.rotate);
-    let r_new = if is_local {
-        let r_delta = euler_xyz(angles_deg);
-        mul3(&r_current, &r_delta)
-    } else {
-        let r_delta_local = euler_xyz(angles_deg);
-        let f = frame.matrix();
-        let ft = transpose3(&f);
-        let r_delta_world = mul3(&mul3(&f, &r_delta_local), &ft);
-        mul3(&r_delta_world, &r_current)
-    };
-    out.rotate = matrix_to_euler_xyz(&r_new, current.rotate);
-    out
+    let basis = if is_local { Frame::from_rotation(&current.world_rotation()).matrix() } else { frame.matrix() };
+    let delta_rotation = mul3(&mul3(&basis, &euler_xyz(angles_deg)), &transpose3(&basis));
+    compose(current, &affine_about_pivot(delta_rotation, current.world_pivot()), frame)
+}
+
+pub fn affine_about_pivot(linear: Mat3, pivot: Vec3) -> Mat4 {
+    let moved = apply3(&linear, pivot);
+    [
+        [linear[0][0], linear[0][1], linear[0][2], pivot[0] - moved[0]],
+        [linear[1][0], linear[1][1], linear[1][2], pivot[1] - moved[1]],
+        [linear[2][0], linear[2][1], linear[2][2], pivot[2] - moved[2]],
+        [0.0, 0.0, 0.0, 1.0],
+    ]
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -632,12 +744,9 @@ pub fn compose_scale(
     is_local: bool,
     eps: f64,
 ) -> ScaleResult {
-    let unrotated = current.rotate.iter().all(|a| a.abs() < 1e-6);
-    if is_local || unrotated {
+    if is_local {
         let mut out = *current;
-        for i in 0..3 {
-            out.scale[i] *= factors[i];
-        }
+        for (item, factor) in out.scale.iter_mut().zip(factors) { *item *= factor; }
         return ScaleResult::Direct(out);
     }
 
@@ -646,19 +755,20 @@ pub fn compose_scale(
     let mut s_diag = IDENTITY_3;
     for i in 0..3 { s_diag[i][i] = factors[i]; }
     let s_world = mul3(&mul3(&f, &s_diag), &ft);
-    let r = euler_xyz(current.rotate);
-    let mut s_curr = IDENTITY_3;
-    let eff = current.effective_scale();
-    for i in 0..3 { s_curr[i][i] = eff[i]; }
-    let l_curr = mul3(&r, &s_curr);
-    let l_new = mul3(&s_world, &l_curr);
+    let delta = affine_about_pivot(s_world, current.world_pivot());
+    let composed = mul4(&delta, &current.to_matrix());
+    let b = euler_xyz(current.axis_rotation);
+    let linear = [[composed[0][0], composed[0][1], composed[0][2]],
+        [composed[1][0], composed[1][1], composed[1][2]],
+        [composed[2][0], composed[2][1], composed[2][2]]];
+    let l_new = mul3(&mul3(&transpose3(&b), &linear), &b);
 
     if has_shear_3(&l_new, eps) {
-        let world_pivot = [
-            current.pivot[0] + current.translate[0],
-            current.pivot[1] + current.translate[1],
-            current.pivot[2] + current.translate[2],
-        ];
+        let world_pivot = current.world_pivot();
+        let mut frame_rotation = frame.matrix();
+        if det3(&frame_rotation) < 0.0 {
+            for row in &mut frame_rotation { row[2] = -row[2]; }
+        }
         ScaleResult::ShearNeedsSecondNode {
             frozen_current: *current,
             second_node: TrsParams {
@@ -667,26 +777,11 @@ pub fn compose_scale(
                 scale: factors,
                 uniform_scale: 1.0,
                 pivot: world_pivot,
-                axis_rotation: [0.0, 0.0, 0.0],
+                axis_rotation: matrix_to_euler_xyz(&frame_rotation, [0.0; 3]),
             },
         }
     } else {
-        let c0 = [l_new[0][0], l_new[1][0], l_new[2][0]];
-        let c1 = [l_new[0][1], l_new[1][1], l_new[2][1]];
-        let c2 = [l_new[0][2], l_new[1][2], l_new[2][2]];
-        let s0 = length3(c0);
-        let s1 = length3(c1);
-        let s2 = length3(c2);
-        let r_new = [
-            [c0[0]/s0, c1[0]/s1, c2[0]/s2],
-            [c0[1]/s0, c1[1]/s1, c2[1]/s2],
-            [c0[2]/s0, c1[2]/s1, c2[2]/s2],
-        ];
-        let mut out = *current;
-        out.scale = [s0, s1, s2];
-        out.uniform_scale = 1.0;
-        out.rotate = matrix_to_euler_xyz(&r_new, current.rotate);
-        ScaleResult::Direct(out)
+        ScaleResult::Direct(current.decompose_like(&composed))
     }
 }
 
@@ -816,6 +911,50 @@ mod tests {
         assert!((p_out[0] - 0.0).abs() < 1e-6);
         assert!((p_out[1] - 5.0).abs() < 1e-6);
         assert!((p_out[2] - 0.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn axis_rotation_uniform_scale_and_rebased_pivot_compose_exactly() {
+        let start = TrsParams {
+            translate: [1.0, -0.4, 0.8], rotate: [15.0, 25.0, -40.0],
+            scale: [1.5, 0.8, 2.0], uniform_scale: 1.3,
+            pivot: [0.2, 0.3, -0.1], axis_rotation: [0.0, 0.0, 35.0],
+        };
+        let rebased = start.with_pivot_preserving_matrix([1.0, -0.5, 0.25]);
+        assert!(mat4_diff(&rebased.to_matrix(), &start.to_matrix()) < 1e-10);
+        let world_rebased = start.with_world_pivot_preserving_matrix([2., -1., 0.5]);
+        assert!(mat4_diff(&world_rebased.to_matrix(), &start.to_matrix()) < 1e-10);
+        for (actual, expected) in world_rebased.world_pivot().into_iter().zip([2., -1., 0.5]) {
+            assert!((actual - expected).abs() < 1e-10);
+        }
+        let local = Frame::from_rotation(&rebased.world_rotation());
+        let moved = compose_translate_axis(&rebased, local, 0, 2.0);
+        let mut move_delta = IDENTITY_4;
+        for (i, row) in move_delta.iter_mut().enumerate().take(3) { row[3] = local.axis(0)[i] * 2.0; }
+        let expected = mul4(&move_delta, &start.to_matrix());
+        assert!(mat4_diff(&moved.to_matrix(), &expected) < 1e-10);
+        let rotated = compose_rotate_axis(&moved, Frame::global(), 1, 37.0, false);
+        let expected = mul4(&affine_about_pivot(axis_angle_matrix([0., 1., 0.], 37.), moved.world_pivot()), &expected);
+        assert!(mat4_diff(&rotated.to_matrix(), &expected) < 1e-9);
+        let inverse = inverse_affine(&start.to_matrix()).unwrap();
+        assert!(mat4_diff(&mul4(&start.to_matrix(), &inverse), &IDENTITY_4) < 1e-10);
+    }
+
+    #[test]
+    fn view_scale_second_node_matches_matrix_delta() {
+        let current = TrsParams { rotate: [20., 35., 10.], translate: [1., 2., -1.],
+            pivot: [0.2, -0.3, 0.5], ..Default::default() };
+        let frame = Frame::from_rotation(&euler_xyz([15., -20., 30.]));
+        let factors = [2., 0.7, 1.3];
+        let ScaleResult::ShearNeedsSecondNode { second_node, .. } =
+            compose_scale(&current, frame, factors, false, 1e-6) else { panic!("expected shear"); };
+        let mut diagonal = IDENTITY_3;
+        for (i, row) in diagonal.iter_mut().enumerate() { row[i] = factors[i]; }
+        let f = frame.matrix();
+        let delta = affine_about_pivot(mul3(&mul3(&f, &diagonal), &transpose3(&f)), current.world_pivot());
+        assert!(mat4_diff(&second_node.to_matrix(), &delta) < 1e-9);
+        assert!(mat4_diff(&mul4(&second_node.to_matrix(), &current.to_matrix()),
+            &mul4(&delta, &current.to_matrix())) < 1e-9);
     }
 
     #[test]
@@ -1053,4 +1192,3 @@ mod tests {
         }
     }
 }
-

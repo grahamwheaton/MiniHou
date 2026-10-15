@@ -82,6 +82,7 @@ impl Default for Proxy { fn default() -> Self { Self { level: 1.0, auto: false, 
 pub struct EditorState {
     pub tool: Tool,
     pub cursor: [f32; 3],
+    pub cursor_rotation: [f32; 3],
     pub selection: SelectionMode,
     pub orientation: Orientation,
     pub pivot: Pivot,

@@ -42,7 +42,7 @@ fn gizmo_axis_drag_emits_move_steps_and_finishes() {
     let view = View { graph: &graph, doc: doc.value(), path: std::path::Path::new("demo.json"), dirty: false,
         can_undo: false, can_redo: false, selected: "hidden_transform", selected_set: &selected_set, display: "output1", cooking: &cooking,
         file_status: "", mode: Mode::Shaded, theme: &theme, editor: &editor, camera,
-        bounds: ([0.;3], 1.), selection_center: None, geo: None, blender: &blender, flags: &flags,
+        bounds: ([0.;3], 1.), selection_center: None, normal_frame: [[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]], geo: None, blender: &blender, flags: &flags,
         units: crate::units::UnitSettings::default(), repeat_label: None };
     let ctx = egui::Context::default();
     let frame = |events| {
@@ -318,4 +318,82 @@ fn repeat_move_three_times_cooks_incrementally_with_single_transform_node() {
         }
     }
     assert!(history.undo(&mut doc).is_none());
+}
+
+#[test]
+fn composed_global_local_view_sequence_cooks_expected_bounds() {
+    use transform_math::{affine_about_pivot, axis_angle_matrix, compose_rotate_axis,
+        compose_scale, compose_translate_axis, euler_xyz, mul4, Frame, ScaleResult, TrsParams};
+    let source = Document::parse(json!({"version":1,"display":"box1",
+        "nodes":{"box1":{"type":"box"}}}).to_string()).unwrap();
+    let worker = CookWorker::start(&source, Scene::new).unwrap();
+    let mut state = CookState::default();
+    send(&worker, &mut state, Edit::Replace(source.value().clone()));
+    let (_, _, points) = cooked(&worker, &mut state);
+    let mut trs = TrsParams { pivot: [0.25, -0.5, 0.1], axis_rotation: [0., 0., 25.],
+        uniform_scale: 1.2, ..Default::default() };
+    let mut truth = trs.to_matrix();
+    let r = axis_angle_matrix([0., 0., 1.], 90.);
+    truth = mul4(&affine_about_pivot(r, trs.world_pivot()), &truth);
+    trs = compose_rotate_axis(&trs, Frame::global(), 2, 90., false);
+    let local = Frame::from_rotation(&trs.world_rotation());
+    let direction = local.axis(0);
+    let mut move_delta = transform_math::IDENTITY_4;
+    for i in 0..3 { move_delta[i][3] = direction[i] * 2.; }
+    truth = mul4(&move_delta, &truth);
+    trs = compose_translate_axis(&trs, local, 0, 2.);
+    let r = axis_angle_matrix([1., 0., 0.], 45.);
+    truth = mul4(&affine_about_pivot(r, trs.world_pivot()), &truth);
+    trs = compose_rotate_axis(&trs, Frame::global(), 0, 45., false);
+    let view = Frame::from_rotation(&euler_xyz([25., -15., 10.]));
+    let mut scale = transform_math::IDENTITY_3;
+    for (i, row) in scale.iter_mut().enumerate() { row[i] = 1.5; }
+    truth = mul4(&affine_about_pivot(scale, trs.world_pivot()), &truth);
+    trs = match compose_scale(&trs, view, [1.5; 3], false, 1e-6) {
+        ScaleResult::Direct(trs) => trs,
+        _ => panic!("uniform scale must fit one node"),
+    };
+    let mut value = source.value().clone();
+    let target = ensure_transform_target(&mut value, "box1", true, None).unwrap();
+    value["nodes"][&target]["params"] = json!({"pivot":trs.pivot,
+        "translate":trs.translate,"rotate":trs.rotate,"scale":trs.scale,
+        "uniform_scale":trs.uniform_scale,"axis_rotation":trs.axis_rotation});
+    send(&worker, &mut state, Edit::Replace(value));
+    let (lo, hi, _) = cooked(&worker, &mut state);
+    let mut expected = Vec::new();
+    for point in points.as_chunks::<3>().0 {
+        for row in truth.iter().take(3) { expected.push((row[3] + (0..3).map(|j| row[j] * point[j] as f64).sum::<f64>()) as f32); }
+    }
+    let (expected_lo, expected_hi) = preview::bounds(&expected);
+    for i in 0..3 {
+        assert!((lo[i] - expected_lo[i]).abs() < 1e-4, "lower bound axis {i}");
+        assert!((hi[i] - expected_hi[i]).abs() < 1e-4, "upper bound axis {i}");
+    }
+}
+
+#[test]
+fn shearing_scale_appends_one_transform_node_and_cooks() {
+    use transform_math::{compose_scale, Frame, ScaleResult, TrsParams};
+    let source = Document::parse(json!({"version":1,"display":"transform1",
+        "nodes":{"box1":{"type":"box"},"transform1":{"type":"transform",
+            "inputs":{"geo":"box1"},"params":{"rotate":[0.,0.,45.]}}}}).to_string()).unwrap();
+    let current = TrsParams::from_params(&source.value()["nodes"]["transform1"]["params"]);
+    let ScaleResult::ShearNeedsSecondNode { frozen_current, second_node } =
+        compose_scale(&current, Frame::global(), [2., 1., 1.], false, 1e-6) else {
+            panic!("global nonuniform scale after rotation must need a second node");
+        };
+    assert_eq!(frozen_current, current);
+    let mut value = source.value().clone();
+    let target = ensure_transform_target(&mut value, "transform1", false, None).unwrap();
+    assert_ne!(target, "transform1");
+    assert_eq!(value["nodes"][&target]["inputs"]["geo"], "transform1");
+    value["nodes"][&target]["params"] = json!({"translate":second_node.translate,
+        "rotate":second_node.rotate,"scale":second_node.scale,"uniform_scale":second_node.uniform_scale,
+        "pivot":second_node.pivot,"axis_rotation":second_node.axis_rotation});
+    let worker = CookWorker::start(&source, Scene::new).unwrap();
+    let mut state = CookState::default();
+    send(&worker, &mut state, Edit::Replace(value));
+    let (lo, hi, _) = cooked(&worker, &mut state);
+    assert!((lo[0] + hi[0]).abs() < 1e-4);
+    assert!((hi[0] - lo[0] - 2.0_f32.sqrt() * 2.).abs() < 1e-4);
 }

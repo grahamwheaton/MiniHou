@@ -1139,6 +1139,7 @@ mod tests {
             camera,
             bounds: ([0.; 3], 1.0),
             selection_center: None,
+            normal_frame: [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
             geo: None,
             blender: &blender,
             flags: &flags,

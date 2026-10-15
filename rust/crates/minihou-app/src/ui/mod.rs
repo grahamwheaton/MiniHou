@@ -163,6 +163,7 @@ pub struct View<'a> {
     pub camera: CameraInfo,
     pub bounds: ([f32; 3], f32),
     pub selection_center: Option<[f32; 3]>,
+    pub normal_frame: [[f32; 3]; 3],
     pub geo: Option<&'a GeoSummary>,
     pub blender: &'a BlenderStatus,
     /// Flags per node id (Locked, Template); ids not present have none set.
@@ -198,7 +199,8 @@ pub mod testing {
         pub fn view(&self) -> View<'_> {
             View { graph: &self.graph, doc: self.doc.value(), path: Path::new("untitled.json"), dirty: false, can_undo: false, can_redo: false,
                 selected: &self.selected, selected_set: &self.selected_set, display: &self.display, cooking: &self.cooking, file_status: "", mode: self.mode,
-                theme: &self.theme, editor: &self.editor, camera: self.camera, bounds: self.bounds, selection_center: None, geo: self.geo.as_ref(), blender: &self.blender, flags: &self.flags, units: self.units, repeat_label: None }
+                theme: &self.theme, editor: &self.editor, camera: self.camera, bounds: self.bounds, selection_center: None,
+                normal_frame: [[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]], geo: self.geo.as_ref(), blender: &self.blender, flags: &self.flags, units: self.units, repeat_label: None }
         }
         /// One frame of `panel` in a 1280 x 800 window; returns the actions it pushed.
         pub fn run(&self, panel: impl Fn(&mut egui::Ui, &View, &mut Actions)) -> Vec<UiAction> {

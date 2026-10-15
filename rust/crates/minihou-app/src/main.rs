@@ -236,6 +236,9 @@ struct App {
     clipboard: Option<Value>,
     last_viewport: egui::Rect,
     transform_before: Option<Document>, transform_target: Option<String>,
+    transform_delta: Option<LastOperator>,
+    transform_pivot: Option<[f32; 3]>,
+    transform_orientation: Option<ui::Orientation>,
     modal: Option<Modal>,
     pub last_operator: Option<LastOperator>,
     last_edit_selection: ui::SelectionMode, params_open: bool, object_hidden: bool,
@@ -280,7 +283,7 @@ impl App {
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
             scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,
-            clipboard:None,transform_before:None,transform_target:None,modal:None,last_operator:None,last_viewport:egui::Rect::NOTHING,
+            clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,last_operator:None,last_viewport:egui::Rect::NOTHING,
             last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false };
         app.prefs = Preferences::load();
         app.keymap = Keymap::from_overrides_json(&app.prefs.keymap_overrides);
@@ -382,27 +385,43 @@ impl App {
         for id in ids { let k = id as usize * 3; if let Some(p) = points.get(k..k + 3) { for a in 0..3 { sum[a] += p[a]; } count += 1.; } }
         (count > 0.).then(|| sum.map(|x| x / count))
     }
-    fn orientation_frame(&self, rotation_deg: [f64; 3]) -> transform_math::Frame {
-        match self.editor_state.orientation {
+    fn selection_normal_frame(&self, trs: &transform_math::TrsParams) -> transform_math::Frame {
+        let local = transform_math::Frame::from_rotation(&trs.world_rotation());
+        let Some(scene) = &self.scene else { return local; };
+        let ids = self.selected_points();
+        if ids.is_empty() { return local; }
+        let mut normal = [0.0_f64; 3];
+        for id in ids {
+            if let Some(n) = scene.normals().get(id as usize * 3..id as usize * 3 + 3) {
+                for i in 0..3 { normal[i] += n[i] as f64; }
+            }
+        }
+        if transform_math::length3(normal) < 1e-9 { return local; }
+        transform_math::Frame::from_normal(normal, local.axis(0))
+    }
+    fn orientation_frame(&self, orientation: ui::Orientation, trs: &transform_math::TrsParams) -> transform_math::Frame {
+        match orientation {
             ui::Orientation::View => {
                 let c = self.camera_info();
                 transform_math::Frame::from_f32([c.ray_right, c.ray_up, c.ray_forward])
             }
-            ui::Orientation::Local | ui::Orientation::Gimbal | ui::Orientation::Normal => {
-                let r = transform_math::euler_xyz(rotation_deg);
-                transform_math::Frame {
-                    axes: [
-                        [r[0][0], r[1][0], r[2][0]],
-                        [r[0][1], r[1][1], r[2][1]],
-                        [r[0][2], r[1][2], r[2][2]],
-                    ],
-                }
+            ui::Orientation::Local | ui::Orientation::Gimbal => {
+                transform_math::Frame::from_rotation(&trs.world_rotation())
             }
+            ui::Orientation::Normal => self.selection_normal_frame(trs),
+            ui::Orientation::Cursor => transform_math::Frame::from_rotation(
+                &transform_math::euler_xyz(self.editor_state.cursor_rotation.map(f64::from))),
             _ => transform_math::Frame::global(),
         }
     }
-    fn transform_node(&mut self, op: TransformOp) { self.transform_node_at(op, None); }
-    fn transform_node_at(&mut self, op: TransformOp, pivot: Option<[f32; 3]>) {
+    fn transform_node(&mut self, op: TransformOp) {
+        let pivot = if matches!(op, TransformOp::Move(_)) { None }
+            else if let Some(pivot) = self.transform_pivot { Some(pivot) }
+            else if self.editor_state.pivot == ui::Pivot::Cursor { Some(self.editor_state.cursor) }
+            else { Some(self.selection_center().unwrap_or(self.bounds.0)) };
+        self.transform_node_at(op, pivot, self.transform_orientation);
+    }
+    fn transform_node_at(&mut self, op: TransformOp, pivot: Option<[f32; 3]>, orientation_override: Option<ui::Orientation>) {
         let group = group_text(&self.selected_points());
         if self.editor_state.selection != ui::SelectionMode::Object && group.is_empty() {
             self.file_status = "Select points, edges, or faces to transform".into();
@@ -412,29 +431,13 @@ impl App {
         if first { self.editor.history.finish(&self.editor.doc); self.transform_before = Some(self.editor.doc.clone()); }
         let before_doc = self.transform_before.as_ref().unwrap();
         let mut value = self.editor.doc.value().clone();
-        let source = &self.display;
-        let orientation = self.editor_state.orientation;
-        let is_local = matches!(orientation, ui::Orientation::Local | ui::Orientation::Gimbal);
-
-        let mut can_reuse = group.is_empty();
-        if let TransformOp::Scale(factors) = op {
-            if !is_local {
-                if let Some(source_node) = before_doc.value()["nodes"].get(source) {
-                    if source_node["type"] == "transform" {
-                        let trs = transform_math::TrsParams::from_params(&source_node["params"]);
-                        let frame = self.orientation_frame(trs.rotate);
-                        let factors_f64 = [factors[0] as f64, factors[1] as f64, factors[2] as f64];
-                        if let transform_math::ScaleResult::ShearNeedsSecondNode { .. } =
-                            transform_math::compose_scale(&trs, frame, factors_f64, false, 1e-4) {
-                            can_reuse = false;
-                        }
-                    }
-                }
-            }
-        }
-
-        let Some(target) = ensure_transform_target(&mut value, source, can_reuse, self.transform_target.as_deref()) else { return; };
-
+        // The displayed node changes to the new node during a drag. Keep reading
+        // the original matrix from the document saved at drag start.
+        let source = if before_doc.value()["nodes"].get(&self.display).is_some() {
+            self.display.clone()
+        } else {
+            value["nodes"][&self.display]["inputs"]["geo"].as_str().unwrap_or(&self.display).to_owned()
+        };
         let resolved_pivot = pivot.unwrap_or_else(|| {
             if self.editor_state.pivot == ui::Pivot::Cursor {
                 self.editor_state.cursor
@@ -442,67 +445,93 @@ impl App {
                 self.selection_center().unwrap_or(self.bounds.0)
             }
         });
-
-        let initial_trs = if before_doc.value()["nodes"].get(&target).is_some() {
+        if first { self.transform_pivot = Some(resolved_pivot); }
+        let orientation = orientation_override.unwrap_or(self.editor_state.orientation);
+        if first { self.transform_orientation = Some(orientation); }
+        let is_local = matches!(orientation, ui::Orientation::Local | ui::Orientation::Gimbal);
+        let base = if before_doc.value()["nodes"][&source]["type"] == "transform" {
+            transform_math::TrsParams::from_params(&before_doc.value()["nodes"][&source]["params"])
+        } else { transform_math::TrsParams::default() };
+        let scale_base = if pivot.is_some() && matches!(op, TransformOp::Scale(_)) {
+            base.with_world_pivot_preserving_matrix(resolved_pivot.map(f64::from))
+        } else { base };
+        let base_frame = self.orientation_frame(orientation, &base);
+        let shear_second = group.is_empty() && !is_local &&
+            before_doc.value()["nodes"][&source]["type"] == "transform" &&
+            matches!(op, TransformOp::Scale(f) if matches!(
+                transform_math::compose_scale(&scale_base, base_frame, f.map(|x| x as f64), false, 1e-6),
+                transform_math::ScaleResult::ShearNeedsSecondNode { .. }));
+        let Some(target) = ensure_transform_target(&mut value, &source, group.is_empty() && !shear_second,
+            self.transform_target.as_deref()) else { return; };
+        let target_existed = before_doc.value()["nodes"].get(&target).is_some();
+        let mut initial = if target_existed {
             transform_math::TrsParams::from_params(&before_doc.value()["nodes"][&target]["params"])
+        } else { transform_math::TrsParams { pivot: resolved_pivot.map(f64::from), ..Default::default() } };
+        if target_existed && pivot.is_some() && !matches!(op, TransformOp::Move(_)) {
+            initial = initial.with_world_pivot_preserving_matrix(resolved_pivot.map(f64::from));
+        }
+        let frame = if shear_second { base_frame } else { self.orientation_frame(orientation, &initial) };
+        let new_trs = if shear_second {
+            let TransformOp::Scale(factors) = op else { unreachable!() };
+            let transform_math::ScaleResult::ShearNeedsSecondNode { second_node, .. } =
+                transform_math::compose_scale(&scale_base, base_frame, factors.map(f64::from), false, 1e-6)
+                else { unreachable!() };
+            second_node
         } else {
-            transform_math::TrsParams {
-                pivot: resolved_pivot.map(|x| x as f64),
-                ..Default::default()
-            }
-        };
-
-        let frame = self.orientation_frame(initial_trs.rotate);
-
-        let (name, param_value) = match op {
-            TransformOp::Move(delta) => {
-                let new_trs = transform_math::compose_translate(&initial_trs, [delta[0] as f64, delta[1] as f64, delta[2] as f64]);
-                ("translate", json!(new_trs.translate.map(|x| x as f32)))
-            }
-            TransformOp::Rotate(angles) => {
-                let non_zero_count = angles.iter().filter(|a| a.abs() > 1e-6).count();
-                let new_trs = if non_zero_count <= 1 {
-                    let axis = (0..3).max_by(|&a, &b| angles[a].abs().total_cmp(&angles[b].abs())).unwrap_or(0);
-                    transform_math::compose_rotate_axis(&initial_trs, frame, axis, angles[axis] as f64, is_local)
-                } else {
-                    transform_math::compose_rotate_euler(&initial_trs, frame, [angles[0] as f64, angles[1] as f64, angles[2] as f64], is_local)
-                };
-                ("rotate", json!(new_trs.rotate.map(|x| x as f32)))
-            }
-            TransformOp::Scale(factors) => {
-                let factors_f64 = [factors[0] as f64, factors[1] as f64, factors[2] as f64];
-                let new_trs = match transform_math::compose_scale(&initial_trs, frame, factors_f64, is_local, 1e-4) {
+            match op {
+                TransformOp::Move(delta) => transform_math::compose_translate(&initial, delta.map(f64::from)),
+                TransformOp::Rotate(angles) => {
+                    let count = angles.iter().filter(|x| x.abs() > 1e-6).count();
+                    if count == 1 {
+                        let axis = angles.iter().position(|x| x.abs() > 1e-6).unwrap();
+                        transform_math::compose_rotate_axis(&initial, frame, axis, angles[axis] as f64, is_local)
+                    } else {
+                        transform_math::compose_rotate_euler(&initial, frame, angles.map(f64::from), is_local)
+                    }
+                }
+                TransformOp::Scale(factors) => match transform_math::compose_scale(&initial, frame,
+                    factors.map(f64::from), is_local, 1e-6) {
                     transform_math::ScaleResult::Direct(trs) => trs,
                     transform_math::ScaleResult::ShearNeedsSecondNode { second_node, .. } => second_node,
-                };
-                ("scale", json!(new_trs.scale.map(|x| x as f32)))
+                },
             }
         };
-
+        let name = match op { TransformOp::Move(_) => "translate", TransformOp::Rotate(_) => "rotate",
+            TransformOp::Scale(_) => "scale" };
+        let delta = transform_math::mul4(&new_trs.to_matrix(),
+            &transform_math::inverse_affine(&initial.to_matrix()).unwrap_or(transform_math::IDENTITY_4));
+        self.transform_delta = Some(LastOperator::MatrixDelta { delta, frame,
+            label: match op { TransformOp::Move(_) => "Move", TransformOp::Rotate(_) => "Rotate",
+                TransformOp::Scale(_) => "Scale" } });
         let params = &mut value["nodes"][&target]["params"];
         if !params.is_object() { *params = json!({}); }
-        params[name] = param_value.clone();
-        let old_pivot = self.editor.doc.value()["nodes"][&target]["params"]["pivot"].clone();
-
+        params["translate"] = json!(new_trs.translate);
+        params["rotate"] = json!(new_trs.rotate);
+        params["scale"] = json!(new_trs.scale);
+        params["uniform_scale"] = json!(new_trs.uniform_scale);
+        params["pivot"] = json!(new_trs.pivot);
+        params["axis_rotation"] = json!(new_trs.axis_rotation);
         if first {
             params["group"] = json!(group);
             proportional_params(params, &self.editor_state);
-            params["pivot"] = json!(resolved_pivot);
-            params["axis_rotation"] = json!([0.0, 0.0, 0.0]);
         }
+        let param_value = params[name].clone();
         match apply_transform_step(&mut self.editor.doc, first, value, &target, name, param_value) {
             Ok(edits) => {
                 self.transform_target = Some(target.clone()); self.display = target.clone(); for edit in edits { self.send(edit); }
                 if !first {
-                    if let Some(pivot) = pivot { let value = json!(pivot); if old_pivot != value {
-                        let edit = Edit::Param { node: target.clone(), name: "pivot".into(), value };
-                        if self.editor.doc.edit(&edit).is_ok() { self.send(edit); }
-                    } }
-                    let mut desired=self.editor.doc.value()["nodes"][&self.display]["params"].clone();
+                    let mut desired=self.editor.doc.value()["nodes"][&target]["params"].clone();
+                    desired["translate"] = json!(new_trs.translate);
+                    desired["rotate"] = json!(new_trs.rotate);
+                    desired["scale"] = json!(new_trs.scale);
+                    desired["uniform_scale"] = json!(new_trs.uniform_scale);
+                    desired["pivot"] = json!(new_trs.pivot);
+                    desired["axis_rotation"] = json!(new_trs.axis_rotation);
                     proportional_params(&mut desired,&self.editor_state);
-                    for name in ["proportional_enabled","proportional_radius","proportional_falloff","proportional_connected"] {
-                        if desired[name] != self.editor.doc.value()["nodes"][&self.display]["params"][name] {
-                            let edit=Edit::Param { node:self.display.clone(), name:name.into(), value:desired[name].clone() };
+                    for name in ["translate", "rotate", "scale", "uniform_scale", "pivot", "axis_rotation",
+                        "proportional_enabled","proportional_radius","proportional_falloff","proportional_connected"] {
+                        if desired[name] != self.editor.doc.value()["nodes"][&target]["params"][name] {
+                            let edit=Edit::Param { node:target.clone(), name:name.into(), value:desired[name].clone() };
                             if self.editor.doc.edit(&edit).is_ok() { self.send(edit); }
                         }
                     }
@@ -516,52 +545,13 @@ impl App {
     }
     fn finish_transform_from(&mut self, is_modal: bool) {
         if let Some(before) = self.transform_before.take() {
-            if !is_modal {
-                if let Some(target) = &self.transform_target {
-                    let cur_p = &self.editor.doc.value()["nodes"][target]["params"];
-                    let bef_p = &before.value()["nodes"][target]["params"];
-                    let t_cur: [f32; 3] = [0, 1, 2].map(|i| cur_p["translate"].get(i).and_then(Value::as_f64).unwrap_or(0.) as f32);
-                    let t_bef: [f32; 3] = [0, 1, 2].map(|i| bef_p["translate"].get(i).and_then(Value::as_f64).unwrap_or(0.) as f32);
-                    let t_delta = [t_cur[0] - t_bef[0], t_cur[1] - t_bef[1], t_cur[2] - t_bef[2]];
-
-                    let r_cur: [f32; 3] = [0, 1, 2].map(|i| cur_p["rotate"].get(i).and_then(Value::as_f64).unwrap_or(0.) as f32);
-                    let r_bef: [f32; 3] = [0, 1, 2].map(|i| bef_p["rotate"].get(i).and_then(Value::as_f64).unwrap_or(0.) as f32);
-                    let r_delta = [r_cur[0] - r_bef[0], r_cur[1] - r_bef[1], r_cur[2] - r_bef[2]];
-
-                    let s_cur: [f32; 3] = [0, 1, 2].map(|i| cur_p["scale"].get(i).and_then(Value::as_f64).unwrap_or(1.) as f32);
-                    let s_bef: [f32; 3] = [0, 1, 2].map(|i| bef_p["scale"].get(i).and_then(Value::as_f64).unwrap_or(1.) as f32);
-                    let s_factor = [
-                        if s_bef[0].abs() > 1e-6 { s_cur[0] / s_bef[0] } else { s_cur[0] },
-                        if s_bef[1].abs() > 1e-6 { s_cur[1] / s_bef[1] } else { s_cur[1] },
-                        if s_bef[2].abs() > 1e-6 { s_cur[2] / s_bef[2] } else { s_cur[2] },
-                    ];
-                    let pivot = [0, 1, 2].map(|i| cur_p["pivot"].get(i).and_then(Value::as_f64).unwrap_or(0.) as f32);
-
-                    if t_delta.iter().any(|&v| v.abs() > 1e-6) {
-                        self.last_operator = Some(LastOperator::Move {
-                            delta: t_delta,
-                            constraint: None,
-                            orientation: self.editor_state.orientation,
-                            proportional: if self.editor_state.proportional.enabled { Some(self.editor_state.proportional) } else { None },
-                        });
-                    } else if r_delta.iter().any(|&v| v.abs() > 1e-6) {
-                        self.last_operator = Some(LastOperator::Rotate {
-                            angle: r_delta,
-                            pivot,
-                            orientation: self.editor_state.orientation,
-                            axis_rotation: None,
-                        });
-                    } else if s_factor.iter().any(|&v| (v - 1.0).abs() > 1e-6) {
-                        self.last_operator = Some(LastOperator::Scale {
-                            factor: s_factor,
-                            pivot,
-                        });
-                    }
-                }
-            }
+            if let Some(delta) = self.transform_delta.take() { self.last_operator = Some(delta); }
             self.editor.history.record(before, &self.editor.doc);
         }
+        let _ = is_modal;
         if let Some(target) = self.transform_target.take() { self.selected_set = std::collections::BTreeSet::from([target.clone()]); self.selected = target; }
+        self.transform_pivot = None;
+        self.transform_orientation = None;
     }
     fn cancel_transform(&mut self) {
         if let Some(before) = self.transform_before.take() {
@@ -570,6 +560,9 @@ impl App {
             self.display = Graph::from_value(self.editor.doc.value()).ok().and_then(|g| g.main_output().ok()).unwrap_or_else(|| self.display.clone());
         }
         self.transform_target = None;
+        self.transform_delta = None;
+        self.transform_pivot = None;
+        self.transform_orientation = None;
     }
     fn start_modal(&mut self, ctx: &egui::Context, kind: ModalKind) {
         if self.modal.is_some() || self.display.is_empty() || self.scene.is_none() { return; }
@@ -589,8 +582,8 @@ impl App {
             else { self.selection_center().unwrap_or([0,1,2].map(|i|(lo[i]+hi[i])*0.5)) };
         let mut modal=Modal::new(kind,pointer,pivot,(lo,hi),self.editor_state.snap.to,
             self.editor_state.proportional.enabled,self.editor_state.proportional.radius);
-        modal.rotation=[0,1,2].map(|i|self.editor.doc.value()["nodes"][&self.display]["params"]["rotate"].get(i)
-            .and_then(Value::as_f64).unwrap_or(0.) as f32);
+        let trs = transform_math::TrsParams::from_params(&self.editor.doc.value()["nodes"][&self.display]["params"]);
+        modal.rotation = transform_math::matrix_to_euler_xyz(&trs.world_rotation(), [0.; 3]).map(|x| x as f32);
         self.modal=Some(modal);
         ctx.request_repaint();
     }
@@ -670,7 +663,13 @@ impl App {
         let camera=self.camera_info();
         let orientation=if matches!(modal.constraint,Constraint::Axis(_,true)|Constraint::Plane(_,true))
             { ui::Orientation::Local } else { self.editor_state.orientation };
-        let frame=ui::modal_transform::orientation_frame(orientation,camera,modal.rotation);
+        let frame=if orientation == ui::Orientation::Cursor {
+            transform_math::Frame::from_rotation(&transform_math::euler_xyz(self.editor_state.cursor_rotation.map(f64::from)))
+                .axes.map(|axis| axis.map(|x| x as f32))
+        } else if orientation == ui::Orientation::Normal {
+            let trs = transform_math::TrsParams::from_params(&self.editor.doc.value()["nodes"][&self.display]["params"]);
+            self.selection_normal_frame(&trs).axes.map(|axis| axis.map(|x| x as f32))
+        } else { ui::modal_transform::orientation_frame(orientation,camera,modal.rotation) };
         for event in events {
             match event {
                 egui::Event::Key { key, pressed:true, modifiers:m, .. } => {
@@ -735,12 +734,21 @@ impl App {
         let center=ui::transform_gizmo::project(camera,self.last_viewport,modal.pivot).unwrap_or(self.last_viewport.center());
         let unit=ui::transform_gizmo::project(camera,self.last_viewport,[modal.pivot[0]+1.,modal.pivot[1],modal.pivot[2]])
             .map(|p|(p-center).length()).unwrap_or(80.).max(1.);
+        let orientation=if matches!(modal.constraint,Constraint::Axis(_,true)|Constraint::Plane(_,true))
+            { ui::Orientation::Local } else { self.editor_state.orientation };
+        let frame=if orientation == ui::Orientation::Cursor {
+            transform_math::Frame::from_rotation(&transform_math::euler_xyz(self.editor_state.cursor_rotation.map(f64::from)))
+                .axes.map(|axis| axis.map(|x| x as f32))
+        } else if orientation == ui::Orientation::Normal {
+            let trs = transform_math::TrsParams::from_params(&self.editor.doc.value()["nodes"][&self.display]["params"]);
+            self.selection_normal_frame(&trs).axes.map(|axis| axis.map(|x| x as f32))
+        } else { ui::modal_transform::orientation_frame(orientation,camera,modal.rotation) };
         let (values,pivot)=modal.desired(center,unit,frame,camera,snap,self.editor_state.snap.increment,modifiers.shift);
         let pivot_changed=self.transform_target.as_ref().is_some_and(|target|
             self.editor.doc.value()["nodes"][target]["params"]["pivot"]!=json!(pivot));
         if values!=modal.last || pivot_changed {
             let op=modal.step(values);
-            self.transform_node_at(op,Some(pivot));
+            self.transform_node_at(op,Some(pivot),Some(orientation));
         }
         if confirm { self.finish_modal(modal); } else { self.modal=Some(modal); ctx.request_repaint(); }
     }
@@ -824,6 +832,61 @@ impl App {
             return;
         };
         match op {
+            LastOperator::MatrixDelta { delta, frame, .. } => {
+                let group = group_text(&self.selected_points());
+                let object_mode = self.editor_state.selection == ui::SelectionMode::Object;
+                if !object_mode && group.is_empty() {
+                    self.file_status = "Select points, edges, or faces to transform".into();
+                    return;
+                }
+                self.editor.history.finish(&self.editor.doc);
+                let before = self.editor.doc.clone();
+                let source = self.display.clone();
+                let mut value = self.editor.doc.value().clone();
+                let source_is_transform = value["nodes"][&source]["type"] == "transform";
+                let current = transform_math::TrsParams::from_params(&value["nodes"][&source]["params"]);
+                let composed = transform_math::mul4(&delta, &current.to_matrix());
+                let candidate = current.decompose_like(&composed);
+                let rebuilt = candidate.to_matrix();
+                let representable = (0..4).all(|i| (0..4).all(|j|
+                    (rebuilt[i][j] - composed[i][j]).abs() < 1e-6));
+                let reuse = object_mode && source_is_transform &&
+                    value["nodes"][&source]["params"]["group"].as_str().unwrap_or("").is_empty() && representable;
+                let Some(target) = ensure_transform_target(&mut value, &source, reuse, None) else { return; };
+                let result = if target == source { candidate } else {
+                    let basis = frame.matrix();
+                    let mut right_handed = basis;
+                    if transform_math::det3(&basis) < 0.0 {
+                        for row in &mut right_handed { row[2] = -row[2]; }
+                    }
+                    let reference = transform_math::TrsParams {
+                        axis_rotation: transform_math::matrix_to_euler_xyz(&right_handed, [0.; 3]),
+                        ..Default::default()
+                    };
+                    reference.decompose_like(&delta)
+                };
+                let params = &mut value["nodes"][&target]["params"];
+                if !params.is_object() { *params = json!({}); }
+                params["translate"] = json!(result.translate);
+                params["rotate"] = json!(result.rotate);
+                params["scale"] = json!(result.scale);
+                params["uniform_scale"] = json!(result.uniform_scale);
+                params["pivot"] = json!(result.pivot);
+                params["axis_rotation"] = json!(result.axis_rotation);
+                if target != source { params["group"] = json!(group); }
+                match Document::parse(value.to_string()) {
+                    Ok(doc) => {
+                        self.editor.doc = doc;
+                        self.send(Edit::Replace(value));
+                        self.editor.history.record(before, &self.editor.doc);
+                        self.editor.history.finish(&self.editor.doc);
+                        self.display = target.clone();
+                        self.selected = target.clone();
+                        self.selected_set = std::collections::BTreeSet::from([target]);
+                    }
+                    Err(e) => self.file_status = format!("Could not repeat transform: {e}"),
+                }
+            }
             LastOperator::Move { .. } | LastOperator::Rotate { .. } | LastOperator::Scale { .. } => {
                 let group = group_text(&self.selected_points());
                 let is_object = self.editor_state.selection == ui::SelectionMode::Object;
@@ -1220,11 +1283,13 @@ impl eframe::App for App {
         if self.modal.is_none() && !ui::sketch::active(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) { for action in self.keymap.poll(ctx, &kctx) { out.push(action); } }
         {
             let repeat_desc = self.last_operator.as_ref().map(LastOperator::description);
+            let display_trs = transform_math::TrsParams::from_params(&self.editor.doc.value()["nodes"][&self.display]["params"]);
+            let normal_frame = self.selection_normal_frame(&display_trs).axes.map(|axis| axis.map(|x| x as f32));
             let v = View { graph: &graph, doc: self.editor.doc.value(), path: &self.editor.path, dirty: self.editor.dirty(),
                 can_undo: self.editor.history.can_undo(), can_redo: self.editor.history.can_redo(),
                 selected: &self.selected, selected_set: &self.selected_set, display: &self.display, cooking: &self.cooking, file_status: &self.file_status,
                 mode: self.mode, theme: &self.theme, editor: &self.editor_state, flags: &self.flags, geo: self.geo.as_ref(), blender: &self.blender,
-                bounds: self.bounds, selection_center: self.selection_center(),
+                bounds: self.bounds, selection_center: self.selection_center(), normal_frame,
                 camera: self.camera_info(),
                 units: self.prefs.units,
                 repeat_label: repeat_desc.as_deref() };

@@ -8,6 +8,11 @@ use serde_json::{json, Value};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum LastOperator {
+    MatrixDelta {
+        delta: crate::transform_math::Mat4,
+        frame: crate::transform_math::Frame,
+        label: &'static str,
+    },
     Move {
         delta: [f32; 3],
         constraint: Option<Constraint>,
@@ -42,6 +47,7 @@ pub enum LastOperator {
 impl LastOperator {
     pub fn description(&self) -> String {
         match self {
+            Self::MatrixDelta { label, .. } => format!("Repeat {label} (Shift+R)"),
             Self::Move { .. } => "Repeat Move (Shift+R)".to_string(),
             Self::Rotate { .. } => "Repeat Rotate (Shift+R)".to_string(),
             Self::Scale { .. } => "Repeat Scale (Shift+R)".to_string(),

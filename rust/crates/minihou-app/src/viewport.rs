@@ -36,6 +36,7 @@ impl Scene {
     }
     pub fn triangles(&self) -> usize { self.tri.len() / 3 }
     pub fn positions(&self) -> &[f32] { &self.p }
+    pub fn normals(&self) -> &[f32] { &self.n }
     pub fn triangle_indices(&self) -> &[u32] { &self.tri }
     pub fn new(g: &Geometry) -> Self {
         let (p,t) = (g.p(), &g.topology);

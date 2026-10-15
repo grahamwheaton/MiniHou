@@ -55,9 +55,11 @@ fn ring_hit(rings: &[Vec<(Pos2, bool)>; 3], pointer: Pos2) -> Option<usize> {
 }
 
 #[derive(Clone)]
-struct Drag { axis: usize, kind: Tool, start: Pos2, last_pointer: Pos2, swept: f32, last: f32, typed: String }
+struct Drag { axis: usize, kind: Tool, start: Pos2, last_pointer: Pos2, swept: f32, last: f32, typed: String,
+    origin: [f32; 3], frame: [[f32; 3]; 3], span: f32 }
 #[derive(Clone)]
-struct PlaneDrag { a: usize, b: usize, start: Pos2, last: [f32; 3] }
+struct PlaneDrag { a: usize, b: usize, start: Pos2, last: [f32; 3],
+    origin: [f32; 3], frame: [[f32; 3]; 3], span: f32 }
 pub fn active(ctx: &egui::Context) -> bool { ctx.data(|d| d.get_temp::<Drag>(egui::Id::new("transform_gizmo_drag")).is_some()
     || d.get_temp::<PlaneDrag>(egui::Id::new("transform_plane_drag")).is_some()) }
 fn projected_distance(pixels: f32, world_span: f32, screen_span: f32) -> f32 {
@@ -74,11 +76,14 @@ fn op(kind: Tool, axis: usize, amount: f32) -> TransformOp {
 fn axis_frame(v: &View) -> [[f32; 3]; 3] {
     match v.editor.orientation {
         Orientation::View => { let c = v.camera; [normal(c.ray_right), normal(c.ray_up), normal(c.ray_forward)] }
+        Orientation::Cursor => {
+            let r = crate::transform_math::euler_xyz(v.editor.cursor_rotation.map(f64::from));
+            crate::transform_math::Frame::from_rotation(&r).axes.map(|axis| axis.map(|x| x as f32))
+        }
+        Orientation::Normal => v.normal_frame,
         Orientation::Local | Orientation::Gimbal => {
-            let r = &v.doc["nodes"][v.display]["params"]["rotate"];
-            let deg = [0,1,2].map(|i| r.get(i).and_then(|x| x.as_f64()).unwrap_or(0.) as f32);
-            let [x,y,z] = deg.map(f32::to_radians); let (sx,cx) = x.sin_cos(); let (sy,cy) = y.sin_cos(); let (sz,cz) = z.sin_cos();
-            [[cz*cy, sz*cy, -sy], [cz*sy*sx-sz*cx, sz*sy*sx+cz*cx, cy*sx], [cz*sy*cx+sz*sx, sz*sy*cx-cz*sx, cy*cx]]
+            let trs = crate::transform_math::TrsParams::from_params(&v.doc["nodes"][v.display]["params"]);
+            crate::transform_math::Frame::from_rotation(&trs.world_rotation()).axes.map(|v| v.map(|x| x as f32))
         }
         _ => [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
     }
@@ -188,7 +193,8 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
             let over = ui.input(|i| i.pointer.hover_pos()).is_some_and(|q| r.contains(q));
             p.rect(r, 0., if over { v.theme.accent_bg } else { v.theme.panel2 }, Stroke::new(1_f32, if over { v.theme.sel } else { v.theme.stroke2 }), egui::StrokeKind::Inside);
             if over && ui.input(|i| i.pointer.primary_pressed()) && plane_drag.is_none() {
-                plane_drag = Some(PlaneDrag { a, b, start: ui.input(|i| i.pointer.hover_pos()).unwrap_or(r.center()), last: [0.;3] }); consumed = true;
+                plane_drag = Some(PlaneDrag { a, b, start: ui.input(|i| i.pointer.hover_pos()).unwrap_or(r.center()),
+                    last: [0.;3], origin, frame, span: v.bounds.1.max(0.1) * 0.4 }); consumed = true;
             }
         }
     }
@@ -213,7 +219,8 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
             if tool == Tool::Scale { p.rect_filled(hit.shrink(4.), 1., color); }
             else { p.add(egui::Shape::convex_polygon(vec![tip, tip - dir.normalized() * 10. + dir.rot90().normalized() * 5., tip - dir.normalized() * 10. - dir.rot90().normalized() * 5.], color, Stroke::NONE)); }
         }
-        if ((tool != Tool::Rotate && response.drag_started()) || (over && ui.input(|i| i.pointer.primary_pressed()))) && drag.is_none() { let start = pointer.unwrap_or(tip); drag = Some(Drag { axis, kind: if tool == Tool::Transform { Tool::Move } else { tool }, start, last_pointer: start, swept: 0., last: 0., typed: String::new() }); consumed = true; }
+        if ((tool != Tool::Rotate && response.drag_started()) || (over && ui.input(|i| i.pointer.primary_pressed()))) && drag.is_none() { let start = pointer.unwrap_or(tip); drag = Some(Drag { axis, kind: if tool == Tool::Transform { Tool::Move } else { tool }, start, last_pointer: start, swept: 0., last: 0., typed: String::new(),
+            origin, frame, span: v.bounds.1.max(0.1) * 0.4 }); consumed = true; }
     }
     p.circle_filled(center, 4., v.theme.accent);
     if let Some(mut d) = drag {
@@ -232,10 +239,11 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
                 _ => {}
             } }
             let pointer = ui.input(|i| i.pointer.latest_pos()).unwrap_or(d.start);
-            if d.kind == Tool::Rotate { d.swept += swept_degrees(d.last_pointer, pointer, center); d.last_pointer = pointer; }
-            let span = v.bounds.1.max(0.1) * 0.4;
-            let projected = project(v.camera, rect, add(origin, mul(frame[d.axis], span)))
-                .map(|p| p - center).filter(|delta| delta.length() > 1.).unwrap_or(vec2(1., 0.));
+            let drag_center = project(v.camera, rect, d.origin).unwrap_or(center);
+            if d.kind == Tool::Rotate { d.swept += swept_degrees(d.last_pointer, pointer, drag_center); d.last_pointer = pointer; }
+            let span = d.span;
+            let projected = project(v.camera, rect, add(d.origin, mul(d.frame[d.axis], span)))
+                .map(|p| p - drag_center).filter(|delta| delta.length() > 1.).unwrap_or(vec2(1., 0.));
             let pixels = (pointer - d.start).dot(projected.normalized());
             let typed = if d.kind == Tool::Move {
                 crate::units::parse(&d.typed, v.units).map(|x| x as f32)
@@ -249,7 +257,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
             let step = if d.kind == Tool::Rotate { 15. } else if d.kind == Tool::Scale { 0.1 } else { v.editor.snap.increment };
             let current = snapped(raw, step, v.editor.snap.enabled != ctrl);
             if (current - d.last).abs() > 1e-6 {
-                let operation = if d.kind == Tool::Move { TransformOp::Move(mul(frame[d.axis], current)) }
+                let operation = if d.kind == Tool::Move { TransformOp::Move(mul(d.frame[d.axis], current)) }
                     else if d.kind == Tool::Scale { op(d.kind, d.axis, current + 1.) }
                     else {
                         let mut v = [0.; 3];
@@ -278,13 +286,14 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
         }
         else {
             let pointer = ui.input(|i| i.pointer.hover_pos()).unwrap_or(d.start);
-            let span = v.bounds.1.max(0.1) * 0.4;
-            let projected_axis = |axis| project(v.camera, rect, add(origin, mul(frame[axis], span)))
-                .map(|p| p - center).filter(|delta| delta.length() > 1.)
-                .unwrap_or_else(|| screen_axis(rect, v, center, frame, axis) * 58.);
+            let span = d.span;
+            let drag_center = project(v.camera, rect, d.origin).unwrap_or(center);
+            let projected_axis = |axis| project(v.camera, rect, add(d.origin, mul(d.frame[axis], span)))
+                .map(|p| p - drag_center).filter(|delta| delta.length() > 1.)
+                .unwrap_or_else(|| screen_axis(rect, v, drag_center, d.frame, axis) * 58.);
             let (x,y) = plane_delta(pointer - d.start, projected_axis(d.a), projected_axis(d.b), span);
             let snap = v.editor.snap.enabled != ui.input(|i| i.modifiers.ctrl);
-            let world = add(mul(frame[d.a], snapped(x,v.editor.snap.increment,snap)), mul(frame[d.b], snapped(y,v.editor.snap.increment,snap)));
+            let world = add(mul(d.frame[d.a], snapped(x,v.editor.snap.increment,snap)), mul(d.frame[d.b], snapped(y,v.editor.snap.increment,snap)));
             if (0..3).any(|k| (world[k] - d.last[k]).abs() > 1e-6) { out.push(UiAction::TransformNode { op: TransformOp::Move(world) }); d.last = world; }
             ui.ctx().data_mut(|data| data.insert_temp(plane_id, d));
         }
@@ -326,6 +335,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
         let d = Drag {
             axis: 0, kind: Tool::Move, start: Pos2::ZERO, last_pointer: Pos2::ZERO,
             swept: 0., typed: "1000".into(), last: 0.0,
+            origin: [0.; 3], frame: [[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]], span: 0.4,
         };
         let ctx = egui::Context::default();
         ctx.data_mut(|data| data.insert_temp(id, d));
