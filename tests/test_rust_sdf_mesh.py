@@ -14,7 +14,8 @@ class RustSdfMeshTests(unittest.TestCase):
         np.testing.assert_array_equal(actual.origin, expected.origin)
         self.assertEqual(actual.h, expected.h)
         self.assertEqual(actual.values.dtype, np.dtype('float32'))
-        np.testing.assert_allclose(actual.values, expected.values, atol=1e-6, rtol=0)
+        np.testing.assert_array_equal(actual.values, expected.values)
+        np.testing.assert_array_equal(actual.values.view(np.uint32), expected.values.view(np.uint32))
         np.testing.assert_array_equal(actual.values < 0, expected.values < 0)
         if accel.enabled():
             with rust.disabled():

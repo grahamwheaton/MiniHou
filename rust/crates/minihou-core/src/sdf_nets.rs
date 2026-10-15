@@ -13,7 +13,7 @@ fn others(ax: usize) -> [usize; 2] {
 }
 
 fn resolve(values: &[f64], dims: [usize; 3], max_rounds: usize, f32_output: bool) -> Vec<f64> {
-    assert_eq!(values.len(), dims.iter().product());
+    assert_eq!(values.len(), dims.iter().product::<usize>());
     let mut v = values.to_vec();
     for _ in 0..max_rounds {
         // The Python signs are a snapshot of the whole round, not recomputed per axis.

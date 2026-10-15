@@ -98,6 +98,56 @@ flats instead of across its corners; both are correct):
 | `noise` node | one fused parallel pass, bit for bit the numpy result |
 | `transform` node | the matrix step for P and N in one pass |
 | `normal` node | face normals; point normals from a point-to-primitive table that is cached on the (frozen) topology, so a deformer upstream does not rebuild it |
+| `remesh`, `sdf_boolean` | narrow-band triangle distances, outside flood, field smoothing/combine and surface nets |
+| `points_to_surface` | metaball accumulation, field smoothing and surface nets |
+| `sdf_shape` | field smoothing and surface nets (analytic distance functions stay in Python) |
+
+### SDF kernel parity
+
+`sdf_mesh.rs`, `sdf_field.rs` and `sdf_nets.rs` port the kernels from `minihou/sdf.py`; these are Python-engine
+accelerators, not new standalone Rust graph nodes. The original NumPy bodies remain available with `rust.disabled()`.
+The wrappers increment the backend counter and all four volume node types are registered for the editor marker.
+
+* Mesh fields match float32 bits in the synthetic parity cases, including a box-edge sign regression at voxel size 0.17.
+  Most work is native: candidate marking, nearest-corner tree, triangle-grid traversal, distances, flood and signs.
+  Sparse wall samples whose vertex seed was not improved use the existing Python `spatial.nearest` to preserve the host
+  backend's nearest-corner tie order, followed by a native requery. SciPy's unspecified tie order can otherwise select
+  a different triangle normal and flip a near-zero side test. The pure core convenience API uses its own deterministic
+  seed choice; host-equivalent signs require `from_mesh_with_ties` plus `resolve_seed_ties`, as the binding does.
+* Surface nets preserves exact float64 positions, point order and quad topology in the tests. It retains NumPy's
+  offset-major accumulation order, per-round sign snapshots and batched saddle assignments, including duplicate targets.
+* Points, blur, resample and polynomial smooth minimum match exactly on this Windows / NumPy 2.5.4 machine.
+  Metaballs retain chunk/point accumulation order, pairwise radius reduction and scalar `pow`, which matches NumPy's
+  vector power here (100,000 sampled cubic inputs). Replacing it with multiplication changes last bits.
+  Mixed float32 inputs with float64 smoothing scalars retain the float32 subtraction before promotion.
+  There are no exp/log calls in this version of `sdf.py`.
+
+Coverage: `tests.test_rust_sdf_mesh` (13 methods), `tests.test_rust_sdf_field` (9), `tests.test_rust_sdf_nets` (6),
+and `tests.test_rust_sdf_nodes` (8). These include boxes/spheres/tori, random fields and clouds, empty and single-voxel
+inputs, large voxel sizes, all boolean modes with and without smoothing/attribute transfer, all analytic shapes,
+backend markers, malformed binding arrays and the shipped volume graph's exact output arrays/topology digest.
+
+### SDF boolean timings
+
+`python bench/bench_sdf.py --repeat 3 --json bench/results/sdf_2026-10-15_bob.json`, Windows work desktop,
+Python 3.13.16 / NumPy 2.5.4. Median of three runs after warm-up, two overlapping subdivided boxes (8 divisions),
+union, smooth 0, attribute transfer off. Timings cover the full boolean node including triangulation, both fields and
+meshing; source construction is excluded. NumPy has both Rust and numba disabled. Both outputs are checked for exact
+topology and positions within 1e-6 absolute. Rust times include Python wrappers and sparse nearest-seed correction.
+
+| Grid | Voxels | Voxel size | NumPy | Rust | Speed-up |
+|---|---:|---:|---:|---:|---:|
+| 105 × 100 × 95 | 997,500 | 0.01393617 | 4.181 s | 0.418 s | 10.0× |
+| 211 × 199 × 190 | 7,977,910 | 0.00655000 | 16.926 s | 2.085 s | 8.1× |
+
+Validation on this checkout (2026-10-15): release Cargo tests 25 passed; release Clippy with `--all-targets -- -D warnings`
+clean. Python combined run: 76 tests, 75 passed and one existing `tests.test_examples` error because `demo.json` contains
+an `attribute_transfer1` with unconnected `geo`/`source` inputs. That file matches `rust-node-marker` and is unchanged;
+the same graph-load error occurs with Rust disabled. The combined run included `test_rust_parity`, `test_rust_fuzz`,
+`test_rust_session`, `test_backend_marker`, `test_nodes_degenerate_smoke`, `test_nodes_param_boundaries`, `test_examples`
+and all four new SDF modules. The parity/fuzz/marker plus SDF modules also passed with `MINIHOU_NO_NUMBA=1` (62 tests),
+and with `MINIHOU_NO_RUST=1` (62 tests, 59 skipped). Node parity was rerun after adding nonconstant point-color transfer
+coverage: all 8 tests passed.
 
 Two Python-side changes came out of the profiling too (they help without Rust as well): the viewport's "does this need reducing"
 check was converting the whole topology to int64 on every update; its counts are now computed once per topology and cached
