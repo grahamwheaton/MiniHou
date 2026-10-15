@@ -1,9 +1,10 @@
 //! Viewport chrome drawn over the 3-D view (design: Viewport.dc.html): header bar (selection modes, orientation, pivot,
-//! snapping, proportional editing, overlays, X-ray, shading, Frame), left tool strip, bottom timeline, stats chip, axis gizmo,
+//! snapping, proportional editing, overlays, X-ray, shading, Frame), left tool strip, bottom timeline, stats chip, view gizmo,
 //! error and dense-mesh notes. `rect` is the viewport's area; the 3-D image is already painted into it.
-use super::{theme::Theme, Actions, EditorChange, SelectionMode, UiAction, View};
+use super::{theme::Theme, Actions, EditorChange, Falloff, Orientation, Pivot, SelectionMode, SnapTo, UiAction, View};
 use crate::viewport::Mode;
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
+#[path = "view_gizmo.rs"] mod view_gizmo;
 
 const HEADER_H: f32 = 36.;
 const TIMELINE_H: f32 = 44.;
@@ -17,12 +18,15 @@ const FRAME_END: u32 = 240;
 
 /// UI-only viewport state (nothing here reaches the engine yet).
 #[derive(Clone)]
-struct VpState { tool: usize, overlays_open: bool, frame: u32, playing: bool, clock: f32 }
+struct VpState { tool: usize, popover: Option<Popover>, frame: u32, playing: bool, clock: f32 }
 impl Default for VpState {
     fn default() -> Self {
-        Self { tool: 0, overlays_open: false, frame: 48, playing: false, clock: 0. }
+        Self { tool: 0, popover: None, frame: 48, playing: false, clock: 0. }
     }
 }
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Popover { Orientation, Pivot, Snap, Proportional, Overlays }
+fn toggle_popover(open: Option<Popover>, next: Popover) -> Option<Popover> { if open == Some(next) { None } else { Some(next) } }
 const OVERLAYS: [(&str, &str); 6] = [("Grid floor", "G"), ("Axis gizmo", ""), ("Wireframe overlay", "W"), ("Stats", "I"), ("Normals", "N"), ("Bounding box", "B")];
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -100,12 +104,16 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         let mode = SelectionMode::ALL[i];
         if button(ui, th, *r, ("vp_mode", i), ed.selection == mode, ["Object mode (4)", "Points (1)", "Edges (2)", "Faces (3)"][i], [Icon::Object, Icon::Points, Icon::Edges, Icon::Faces][i]) { out.push(UiAction::Editor(EditorChange::Selection(mode))); }
     }
-    button_text(ui, th, h.orient, "vp_orient", false, "Transform orientation", Icon::Orient, (Some(ed.orientation.label()), true));
-    button_text(ui, th, h.pivot, "vp_pivot", false, "Pivot point", Icon::Pivot, (None, true));
+    if button_text(ui, th, h.orient, "vp_orient", st.popover == Some(Popover::Orientation), "Transform orientation", Icon::Orient, (Some(ed.orientation.label()), true)) { st.popover = toggle_popover(st.popover, Popover::Orientation); }
+    if button_text(ui, th, h.pivot, "vp_pivot", st.popover == Some(Popover::Pivot), "Pivot point", Icon::Pivot, (None, true)) { st.popover = toggle_popover(st.popover, Popover::Pivot); }
     let snap_label = format!("{}", ed.snap.increment);
-    if button_text(ui, th, h.snap, "vp_snap", ed.snap.enabled, "Snapping (Shift+Tab)", Icon::Magnet, (if ed.snap.enabled { Some(snap_label.as_str()) } else { None }, true)) { out.push(UiAction::Editor(EditorChange::SnapEnabled(!ed.snap.enabled))); }
-    if button_text(ui, th, h.prop, "vp_prop", ed.proportional.enabled, "Proportional editing (O)", Icon::Prop, (None, true)) { out.push(UiAction::Editor(EditorChange::ProportionalEnabled(!ed.proportional.enabled))); }
-    if button_text(ui, th, h.overlays, "vp_overlays", st.overlays_open, "Overlays", Icon::Overlays, (None, true)) { st.overlays_open = !st.overlays_open; }
+    let snap_main = Rect::from_min_max(h.snap.min, Pos2::new(h.snap.right() - 16., h.snap.bottom()));
+    if button_text(ui, th, snap_main, "vp_snap_toggle", ed.snap.enabled, "Toggle snapping (Shift+Tab)", Icon::Magnet, (if ed.snap.enabled { Some(snap_label.as_str()) } else { None }, false)) { out.push(UiAction::Editor(EditorChange::SnapEnabled(!ed.snap.enabled))); }
+    if caret_button(ui, th, h.snap, "vp_snap_menu", st.popover == Some(Popover::Snap)) { st.popover = toggle_popover(st.popover, Popover::Snap); }
+    let prop_main = Rect::from_min_max(h.prop.min, Pos2::new(h.prop.right() - 16., h.prop.bottom()));
+    if button_text(ui, th, prop_main, "vp_prop_toggle", ed.proportional.enabled, "Toggle proportional editing (O)", Icon::Prop, (None, false)) { out.push(UiAction::Editor(EditorChange::ProportionalEnabled(!ed.proportional.enabled))); }
+    if caret_button(ui, th, h.prop, "vp_prop_menu", st.popover == Some(Popover::Proportional)) { st.popover = toggle_popover(st.popover, Popover::Proportional); }
+    if button_text(ui, th, h.overlays, "vp_overlays", st.popover == Some(Popover::Overlays), "Overlays", Icon::Overlays, (None, true)) { st.popover = toggle_popover(st.popover, Popover::Overlays); }
     if button(ui, th, h.xray, ("vp_xray", 0), ed.xray, "X-ray (Alt+Z)", Icon::Xray) { out.push(UiAction::Editor(EditorChange::Xray(!ed.xray))); }
     for (i, (mode, name, icon)) in [(Mode::Solid, "Solid", Icon::Solid), (Mode::Shaded, "Shaded", Icon::Shaded), (Mode::Wire, "Wire", Icon::Wire), (Mode::ShadedWire, "Shaded + Wire", Icon::ShadedWire)].into_iter().enumerate() {
         if button(ui, th, h.shading[i], ("vp_shading", i), v.mode == mode, name, icon) { out.push(UiAction::SetMode(mode)); }
@@ -190,7 +198,7 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         painter.rect(chip, 6., th.panel, stroke, StrokeKind::Inside);
         painter.galley(Pos2::new(chip.left() + 10., chip.center().y - g.size().y / 2.), g, th.text);
     }
-    if show[1] { gizmo(&painter, th, Pos2::new(rect.right() - 10. - 76., tl.top() - 10. - 64.)); }
+    if show[1] { view_gizmo::show(ui, rect, v, out); }
 
     // ---- notes
     if let Some(error) = &v.cooking.error {
@@ -201,28 +209,11 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         note(&painter, th, Pos2::new(rect.left() + 56., tl.top() - 12. - 40.), (th.warn, th.warn_bg), ("Mesh is dense.", "Edges are fading out. Zoom in or lower rows and columns to see them."), rect.width() - 190.);
     }
 
-    // ---- overlays popover
-    if st.overlays_open {
-        let w = 232.;
-        let x = (h.overlays.right() - w).max(rect.left() + 6.);
-        let pop = Rect::from_min_size(Pos2::new(x, h.overlays.bottom() + 4.), Vec2::new(w, 8. + 20. + OVERLAYS.len() as f32 * 24. + 10.));
-        painter.rect(pop, 6., th.panel, stroke, StrokeKind::Inside);
-        painter.text(pop.left_top() + Vec2::new(12., 12.), egui::Align2::LEFT_CENTER, "OVERLAYS", egui::FontId::proportional(11.), th.dim);
-        for (i, (name, key)) in OVERLAYS.iter().enumerate() {
-            let r = Rect::from_min_size(Pos2::new(pop.left() + 6., pop.top() + 28. + i as f32 * 24.), Vec2::new(w - 12., 24.));
-            let resp = ui.interact(r, egui::Id::new(("vp_ov", i)), Sense::click());
-            if resp.hovered() { painter.rect_filled(r, 3., th.panel2); }
-            let bx = Rect::from_center_size(Pos2::new(r.left() + 13., r.center().y), Vec2::splat(14.));
-            if show[i] { painter.rect(bx, 3., th.accent, Stroke::new(1.0_f32, th.accent), StrokeKind::Inside); icon(&painter, Icon::Frame, bx.shrink(2.), Color32::WHITE, true); }
-            else { painter.rect_stroke(bx, 3., Stroke::new(1.0_f32, th.dim), StrokeKind::Inside); }
-            painter.text(Pos2::new(r.left() + 30., r.center().y), egui::Align2::LEFT_CENTER, *name, egui::FontId::proportional(12.), th.text);
-            if !key.is_empty() { painter.text(Pos2::new(r.right() - 8., r.center().y), egui::Align2::RIGHT_CENTER, *key, mono.clone(), th.dim); }
-            if resp.clicked() {
-                let mut o = ed.overlays;
-                match i { 0 => o.grid = !o.grid, 1 => o.axes = !o.axes, 2 => o.wireframe = !o.wireframe, 3 => o.stats = !o.stats, 4 => o.normals = !o.normals, _ => o.bounds = !o.bounds }
-                out.push(UiAction::Editor(EditorChange::Overlays(o)));
-            }
-        }
+    if let Some(which) = st.popover {
+        let anchor = match which { Popover::Orientation => h.orient, Popover::Pivot => h.pivot, Popover::Snap => h.snap, Popover::Proportional => h.prop, Popover::Overlays => h.overlays };
+        let pop = show_popover(ui, rect, anchor, which, v, out);
+        let dismiss = ctx.input(|i| i.key_pressed(egui::Key::Escape) || (i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !pop.contains(p) && !anchor.contains(p))));
+        if dismiss { st.popover = None; }
     }
     ctx.data_mut(|d| d.insert_temp(id, st));
 }
@@ -237,13 +228,136 @@ fn note(p: &egui::Painter, th: &Theme, at: Pos2, (edge, fill): (Color32, Color32
     p.galley(r.min + Vec2::new(12., 8. + t.size().y), b, th.dim);
 }
 
-fn gizmo(p: &egui::Painter, th: &Theme, origin: Pos2) {
-    let c = origin + Vec2::new(38., 36.);
-    for (to, col, label, lp) in [(Vec2::new(20., -7.), th.x_axis, "X", Vec2::new(28., -6.)), (Vec2::new(0., -21.), th.y_axis, "Y", Vec2::new(0., -25.)), (Vec2::new(-13., 9.), th.z_axis, "Z", Vec2::new(-20., 16.))] {
-        p.line_segment([c, c + to], Stroke::new(2.4_f32, col));
-        p.text(c + lp, egui::Align2::CENTER_CENTER, label, egui::FontId::monospace(10.), col);
+fn caret_button(ui: &mut egui::Ui, th: &Theme, whole: Rect, id: &'static str, active: bool) -> bool {
+    let r = Rect::from_min_max(Pos2::new(whole.right() - 16., whole.top()), whole.max);
+    let resp = ui.interact(r, egui::Id::new(id), Sense::click());
+    if active { ui.painter().rect_filled(r, 4., th.accent_bg); }
+    else if resp.hovered() { ui.painter().rect_filled(r, 4., th.panel2); }
+    let c = r.center();
+    ui.painter().add(egui::Shape::line(vec![c + Vec2::new(-3., -1.5), c + Vec2::new(0., 1.5), c + Vec2::new(3., -1.5)], Stroke::new(1.3_f32, th.dim)));
+    resp.clicked()
+}
+
+#[allow(clippy::too_many_arguments)] // one compact painter call keeps the menu rows consistent
+fn pop_row(ui: &mut egui::Ui, r: Rect, id: impl std::hash::Hash, label: &str, selected: bool, check: bool, key: &str, th: &Theme) -> bool {
+    let resp = ui.interact(r, egui::Id::new(("vp_pop_row", id)), Sense::click());
+    let p = ui.painter();
+    if resp.hovered() { p.rect_filled(r, 3., th.panel2); }
+    let mark = Rect::from_center_size(Pos2::new(r.left() + 13., r.center().y), Vec2::splat(14.));
+    if check {
+        p.rect(mark, 3., if selected { th.accent } else { th.panel }, Stroke::new(1.0_f32, if selected { th.accent } else { th.dim }), StrokeKind::Inside);
+        if selected { icon(p, Icon::Frame, mark.shrink(2.), th.panel, true); }
+    } else if selected { p.text(mark.center(), egui::Align2::CENTER_CENTER, "✓", egui::FontId::proportional(13.), th.accent); }
+    p.text(Pos2::new(r.left() + 30., r.center().y), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(12.), th.text);
+    if !key.is_empty() { p.text(Pos2::new(r.right() - 8., r.center().y), egui::Align2::RIGHT_CENTER, key, egui::FontId::monospace(11.), th.dim); }
+    resp.clicked()
+}
+
+fn numeric_row(ui: &mut egui::Ui, r: Rect, id: &'static str, label: &str, value: f32, th: &Theme) -> Option<f32> {
+    let p = ui.painter();
+    p.text(Pos2::new(r.left() + 8., r.center().y), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(12.), th.text);
+    let box_r = Rect::from_min_size(Pos2::new(r.right() - 88., r.center().y - 11.), Vec2::new(80., 22.));
+    p.rect(box_r, 4., th.input, Stroke::new(1.0_f32, th.stroke), StrokeKind::Inside);
+    let edit_id = egui::Id::new(("vp_number_edit", id));
+    if let Some(mut text) = ui.ctx().data(|d| d.get_temp::<String>(edit_id)) {
+        let resp = ui.put(box_r.shrink2(Vec2::new(3., 1.)), egui::TextEdit::singleline(&mut text).font(egui::FontId::monospace(12.)).frame(false).id(edit_id.with("text")));
+        if !resp.has_focus() && !resp.lost_focus() { resp.request_focus(); }
+        if resp.lost_focus() {
+            ui.ctx().data_mut(|d| d.remove::<String>(edit_id));
+            return text.trim().parse::<f32>().ok().filter(|x| x.is_finite()).map(|x| x.max(1e-4));
+        }
+        ui.ctx().data_mut(|d| d.insert_temp(edit_id, text));
+    } else {
+        let resp = ui.interact(box_r, edit_id, Sense::click_and_drag());
+        if resp.double_clicked() { ui.ctx().data_mut(|d| d.insert_temp(edit_id, format!("{value}"))); }
+        if resp.dragged() {
+            let dx = ui.ctx().input(|i| i.pointer.delta().x);
+            if dx != 0. { return Some((value + dx * value.max(0.1) * 0.01).max(1e-4)); }
+        }
+        p.text(Pos2::new(box_r.right() - 6., box_r.center().y), egui::Align2::RIGHT_CENTER, format!("{value:.2}"), egui::FontId::monospace(12.), th.text);
     }
-    p.circle_filled(c, 2.5, th.dim);
+    None
+}
+
+fn falloff_value(f: Falloff, x: f32) -> f32 {
+    let t = (1. - x).clamp(0., 1.);
+    match f {
+        Falloff::Smooth => t * t * (3. - 2. * t), Falloff::Sphere => (1. - x * x).max(0.).sqrt(),
+        Falloff::Root => t.sqrt(), Falloff::InverseSquare => t * t, Falloff::Sharp => t * t * t,
+        Falloff::Linear => t, Falloff::Constant => if x < 1. { 1. } else { 0. },
+        Falloff::Random => ((x * 37.).sin() * 0.35 + 0.55) * t,
+    }
+}
+fn falloff_samples(f: Falloff) -> [f32; 13] { std::array::from_fn(|i| falloff_value(f, i as f32 / 12.)) }
+
+fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover, v: &View, out: &mut Actions) -> Rect {
+    let th = v.theme;
+    let ed = v.editor;
+    let rows = match which { Popover::Orientation => 6, Popover::Pivot => 5, Popover::Snap => 11, Popover::Proportional => 12, Popover::Overlays => 7 };
+    let height = 30. + rows as f32 * 24. + 10. + if which == Popover::Overlays { 38. } else { 0. };
+    let x = (anchor.right() - 232.).clamp(viewport.left() + 6., (viewport.right() - 238.).max(viewport.left() + 6.));
+    let pop = Rect::from_min_size(Pos2::new(x, anchor.bottom() + 4.), Vec2::new(232., height));
+    let p = ui.painter();
+    p.rect(pop, 6., th.panel, Stroke::new(1.0_f32, th.stroke), StrokeKind::Inside);
+    let title = match which { Popover::Orientation => "ORIENTATION", Popover::Pivot => "PIVOT POINT", Popover::Snap => "SNAPPING", Popover::Proportional => "PROPORTIONAL EDITING", Popover::Overlays => "OVERLAYS" };
+    p.text(pop.min + Vec2::new(12., 17.), egui::Align2::LEFT_CENTER, title, egui::FontId::proportional(11.), th.dim);
+    let row = |i: usize| Rect::from_min_size(pop.min + Vec2::new(6., 28. + i as f32 * 24.), Vec2::new(220., 24.));
+    match which {
+        Popover::Orientation => for (i, o) in Orientation::ALL.iter().enumerate() {
+            if pop_row(ui, row(i), ("orientation", i), o.label(), *o == ed.orientation, false, "", th) { out.push(UiAction::Editor(EditorChange::Orientation(*o))); }
+        },
+        Popover::Pivot => for (i, pivot) in Pivot::ALL.iter().enumerate() {
+            if pop_row(ui, row(i), ("pivot", i), pivot.label(), *pivot == ed.pivot, false, "", th) { out.push(UiAction::Editor(EditorChange::Pivot(*pivot))); }
+        },
+        Popover::Snap => {
+            if pop_row(ui, row(0), ("snap_enabled", 0), "Enable snapping", ed.snap.enabled, true, "", th) { out.push(UiAction::Editor(EditorChange::SnapEnabled(!ed.snap.enabled))); }
+            section(ui, row(1), "SNAP TO", th);
+            for (i, to) in SnapTo::ALL.iter().enumerate() {
+                if pop_row(ui, row(2 + i), ("snap_to", i), to.label(), *to == ed.snap.to, false, "", th) { out.push(UiAction::Editor(EditorChange::SnapTo(*to))); }
+            }
+            if let Some(x) = numeric_row(ui, row(8), "snap_increment", "Increment", ed.snap.increment, th) { out.push(UiAction::Editor(EditorChange::SnapIncrement(x))); }
+            // The final two rows extend the standard spacing so both toggles remain readable.
+            let extra = row(9);
+            if pop_row(ui, extra, ("snap_align", 0), "Align rotation to target", ed.snap.align_rotation, true, "", th) { out.push(UiAction::Editor(EditorChange::SnapAlignRotation(!ed.snap.align_rotation))); }
+            if pop_row(ui, row(10), ("snap_backface", 0), "Backface culling", ed.snap.backface_culling, true, "", th) { out.push(UiAction::Editor(EditorChange::SnapBackfaceCulling(!ed.snap.backface_culling))); }
+        }
+        Popover::Proportional => {
+            if pop_row(ui, row(0), ("prop_enabled", 0), "Enable proportional editing", ed.proportional.enabled, true, "", th) { out.push(UiAction::Editor(EditorChange::ProportionalEnabled(!ed.proportional.enabled))); }
+            section(ui, row(1), "FALLOFF", th);
+            for (i, falloff) in Falloff::ALL.iter().enumerate() {
+                let r = row(2 + i);
+                if pop_row(ui, r, ("falloff", i), falloff.label(), *falloff == ed.proportional.falloff, false, "", th) { out.push(UiAction::Editor(EditorChange::ProportionalFalloff(*falloff))); }
+                let pts = falloff_samples(*falloff).iter().enumerate().map(|(j, y)| Pos2::new(r.right() - 34. + j as f32 * 2., r.center().y + 6. - y * 12.)).collect();
+                ui.painter().add(egui::Shape::line(pts, Stroke::new(1.0_f32, th.dim)));
+            }
+            if let Some(x) = numeric_row(ui, row(10), "prop_radius", "Radius", ed.proportional.radius, th) { out.push(UiAction::Editor(EditorChange::ProportionalRadius(x))); }
+            if pop_row(ui, row(11), ("prop_connected", 0), "Connected only", ed.proportional.connected_only, true, "", th) { out.push(UiAction::Editor(EditorChange::ProportionalConnected(!ed.proportional.connected_only))); }
+        }
+        Popover::Overlays => {
+            let values = [ed.overlays.grid, ed.overlays.axes, ed.overlays.wireframe, ed.overlays.stats, ed.overlays.normals, ed.overlays.bounds];
+            for i in 0..4 {
+                if pop_row(ui, row(i), ("overlay", i), OVERLAYS[i].0, values[i], true, OVERLAYS[i].1, th) { toggle_overlay(i, ed.overlays, out); }
+            }
+            section(ui, row(4), "MESH", th);
+            for i in 4..6 {
+                if pop_row(ui, row(i + 1), ("overlay", i), OVERLAYS[i].0, values[i], true, OVERLAYS[i].1, th) { toggle_overlay(i, ed.overlays, out); }
+            }
+            let foot_y = row(7).top() + 8.;
+            ui.painter().line_segment([Pos2::new(pop.left() + 12., foot_y), Pos2::new(pop.right() - 12., foot_y)], Stroke::new(1.0_f32, th.stroke));
+            ui.painter().text(Pos2::new(pop.left() + 12., foot_y + 9.), egui::Align2::LEFT_TOP, "Edges fade out above 40,000 prims\nto keep the view readable.", egui::FontId::proportional(11.), th.dim);
+        }
+    }
+    pop
+}
+
+fn section(ui: &egui::Ui, r: Rect, label: &str, th: &Theme) {
+    ui.painter().line_segment([r.left_top() + Vec2::new(7., 1.), r.right_top() + Vec2::new(-7., 1.)], Stroke::new(1.0_f32, th.stroke));
+    ui.painter().text(r.min + Vec2::new(8., 13.), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(11.), th.dim);
+}
+
+fn toggle_overlay(i: usize, mut o: super::Overlays, out: &mut Actions) {
+    match i { 0 => o.grid = !o.grid, 1 => o.axes = !o.axes, 2 => o.wireframe = !o.wireframe, 3 => o.stats = !o.stats, 4 => o.normals = !o.normals, _ => o.bounds = !o.bounds }
+    out.push(UiAction::Editor(EditorChange::Overlays(o)));
 }
 
 /// Icon-only button with a tooltip; true when clicked.
@@ -361,5 +475,56 @@ mod tests {
         let f = super::super::testing::Fixture::new();
         let acts = f.run(|ui, v, out| overlay(ui, Rect::from_min_size(Pos2::ZERO, Vec2::new(900., 600.)), v, out));
         assert!(acts.is_empty());
+    }
+
+    #[test]
+    fn popover_switches_and_closes() {
+        let mut open = None;
+        open = toggle_popover(open, Popover::Orientation);
+        assert_eq!(open, Some(Popover::Orientation));
+        open = toggle_popover(open, Popover::Pivot);
+        assert_eq!(open, Some(Popover::Pivot));
+        assert_eq!(toggle_popover(open, Popover::Pivot), None);
+    }
+
+    #[test]
+    fn popover_closes_on_escape_and_outside_click() {
+        use egui::{Event, PointerButton, RawInput};
+        let f = super::super::testing::Fixture::new();
+        let ctx = egui::Context::default();
+        f.theme.apply(&ctx);
+        let id = egui::Id::new("viewport_ui_state");
+        let viewport = Rect::from_min_size(Pos2::ZERO, Vec2::new(900., 600.));
+        let mut frame = |events: Vec<Event>| {
+            let input = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280., 800.))), events, ..Default::default() };
+            let mut out = Actions::default();
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| overlay(ui, viewport, &f.view(), &mut out));
+            });
+        };
+        let click = |p: Pos2, frame: &mut dyn FnMut(Vec<Event>)| {
+            frame(vec![Event::PointerMoved(p), Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+            frame(vec![Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
+        };
+        let h = header_layout(0., 0., 900., false);
+        frame(vec![]);
+        click(h.orient.center(), &mut frame);
+        assert_eq!(ctx.data(|d| d.get_temp::<VpState>(id)).unwrap().popover, Some(Popover::Orientation));
+        frame(vec![Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }]);
+        assert_eq!(ctx.data(|d| d.get_temp::<VpState>(id)).unwrap().popover, None);
+        click(h.pivot.center(), &mut frame);
+        assert_eq!(ctx.data(|d| d.get_temp::<VpState>(id)).unwrap().popover, Some(Popover::Pivot));
+        click(Pos2::new(450., 400.), &mut frame);
+        assert_eq!(ctx.data(|d| d.get_temp::<VpState>(id)).unwrap().popover, None);
+    }
+
+    #[test]
+    fn falloff_curves_have_finite_samples_and_end_at_zero() {
+        for falloff in Falloff::ALL {
+            let samples = falloff_samples(falloff);
+            assert!(samples.iter().all(|x| x.is_finite() && (0. ..=1.).contains(x)));
+            assert_eq!(samples[12], 0.);
+        }
+        assert!((falloff_samples(Falloff::Linear)[6] - 0.5).abs() < 1e-5);
     }
 }
