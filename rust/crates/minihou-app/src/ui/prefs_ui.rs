@@ -2,9 +2,10 @@
 use eframe::egui::{self, RichText};
 use super::{Chord, Keymap, Preferences, ThemePref};
 use super::super::theme::Theme;
+use crate::units::LengthUnit;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum Tab { #[default] Interface, Viewport, Keymap, Files }
+enum Tab { #[default] Interface, Units, Viewport, Keymap, Files }
 #[derive(Clone, Default)]
 struct State { tab: Tab, search: String, capture: Option<usize>, conflict: String }
 
@@ -19,7 +20,7 @@ pub fn show(ctx: &egui::Context, open: &mut bool, prefs: &mut Preferences, keyma
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.set_min_width(130.);
-                    for (tab,label) in [(Tab::Interface,"Interface"),(Tab::Viewport,"Viewport"),(Tab::Keymap,"Keymap"),(Tab::Files,"Files")] {
+                    for (tab,label) in [(Tab::Interface,"Interface"),(Tab::Units,"Units"),(Tab::Viewport,"Viewport"),(Tab::Keymap,"Keymap"),(Tab::Files,"Files")] {
                         if ui.selectable_label(state.tab == tab, label).clicked() { state.tab = tab; state.capture = None; state.conflict.clear(); }
                     }
                 });
@@ -35,6 +36,20 @@ pub fn show(ctx: &egui::Context, open: &mut bool, prefs: &mut Preferences, keyma
                             changed |= ui.add(egui::Slider::new(&mut prefs.ui_scale,0.5..=3.).text("UI scale").step_by(0.05)).changed();
                             changed |= ui.add(egui::DragValue::new(&mut prefs.snap_increment).range(0.0001..=1000.).speed(0.01).prefix("Snap increment  ")).changed();
                             changed |= ui.checkbox(&mut prefs.show_stats,"Show statistics").changed();
+                        }
+                        Tab::Units => {
+                            heading(ui,"Units",theme);
+                            ui.horizontal(|ui| {
+                                ui.label("Length display");
+                                egui::ComboBox::from_id_salt("length_unit").selected_text(prefs.units.display.symbol()).show_ui(ui, |ui| {
+                                    for unit in LengthUnit::ALL {
+                                        changed |= ui.selectable_value(&mut prefs.units.display, unit, unit.symbol()).changed();
+                                    }
+                                });
+                            });
+                            changed |= ui.add(egui::DragValue::new(&mut prefs.units.unit_scale).range(1e-9..=1e9).speed(0.01).prefix("Unit scale  ")).changed();
+                            ui.add_space(4.);
+                            ui.label(RichText::new("Display only: scale 1 means one model unit is one metre (1000 mm). Existing geometry is never resized. Explicit length suffixes are accepted by measurement editing.").color(theme.dim));
                         }
                         Tab::Viewport => {
                             heading(ui,"Viewport",theme);

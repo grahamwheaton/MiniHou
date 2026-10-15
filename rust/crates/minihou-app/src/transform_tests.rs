@@ -42,7 +42,8 @@ fn gizmo_axis_drag_emits_move_steps_and_finishes() {
     let view = View { graph: &graph, doc: doc.value(), path: std::path::Path::new("demo.json"), dirty: false,
         can_undo: false, can_redo: false, selected: "hidden_transform", selected_set: &selected_set, display: "output1", cooking: &cooking,
         file_status: "", mode: Mode::Shaded, theme: &theme, editor: &editor, camera,
-        bounds: ([0.;3], 1.), selection_center: None, geo: None, blender: &blender, flags: &flags };
+        bounds: ([0.;3], 1.), selection_center: None, geo: None, blender: &blender, flags: &flags,
+        units: crate::units::UnitSettings::default() };
     let ctx = egui::Context::default();
     let frame = |events| {
         let mut actions = Actions::default();
