@@ -68,6 +68,13 @@ impl ViewPreset {
     }
 }
 
+/// Viewport/cook proxy: show (and later cook) a lighter version of a very large scene. Mirrors the old editor's
+/// `/api/proxy` (level 1 = full, 0.5 = half ... ; `auto` picks the level from the triangle count; `link_tris` caps what is
+/// sent to Blender, 0 = unlimited).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Proxy { pub level: f32, pub auto: bool, pub link_tris: u32 }
+impl Default for Proxy { fn default() -> Self { Self { level: 1.0, auto: false, link_tris: 0 } } }
+
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub struct EditorState {
     pub selection: SelectionMode,
@@ -79,6 +86,7 @@ pub struct EditorState {
     pub xray: bool,
     /// Last standard view selected (the camera itself belongs to the app).
     pub view: ViewPreset,
+    pub proxy: Proxy,
 }
 
 /// One change to the state, as a panel or the keymap asks for it.
@@ -99,6 +107,9 @@ pub enum EditorChange {
     Overlays(Overlays),
     Xray(bool),
     View(ViewPreset),
+    ProxyLevel(f32),
+    ProxyAuto(bool),
+    ProxyLinkTris(u32),
 }
 
 impl EditorState {
@@ -119,6 +130,9 @@ impl EditorState {
             EditorChange::Overlays(o) => self.overlays = o,
             EditorChange::Xray(b) => self.xray = b,
             EditorChange::View(v) => self.view = v,
+            EditorChange::ProxyLevel(l) => self.proxy.level = l.clamp(0.001, 1.0),
+            EditorChange::ProxyAuto(a) => self.proxy.auto = a,
+            EditorChange::ProxyLinkTris(n) => self.proxy.link_tris = n,
         }
     }
 }

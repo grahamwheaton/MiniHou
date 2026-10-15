@@ -5,7 +5,7 @@ use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, Co
 use minihou_core::Graph;
 use serde_json::json;
 use std::{collections::HashMap, path::PathBuf, time::Duration};
-use ui::{theme::Theme, Actions, CameraInfo, EditorState, NodeFlags, UiAction, View};
+use ui::{theme::Theme, Actions, BlenderStatus, CameraInfo, EditorState, GeoSummary, NodeFlags, UiAction, View};
 use viewport::{Gpu, Mode, Scene, Target};
 
 struct App {
@@ -16,6 +16,7 @@ struct App {
     file_status: String,
     theme: Theme, flags: HashMap<String, NodeFlags>, themed: bool,
     editor_state: EditorState,
+    geo: Option<GeoSummary>, blender: BlenderStatus,
 }
 impl App {
     fn new(doc: Document, path: PathBuf, state: egui_wgpu::RenderState) -> Result<Self> {
@@ -24,7 +25,7 @@ impl App {
         let mut app = Self { selected:display.clone(), display, editor:EditorDocument::new(doc, path), worker,
             cooking:CookState::default(), state,gpu:None,target:None,
             camera:Camera::frame([0.;3],1.),bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new(),
-            theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default() };
+            theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default() };
         app.send(Edit::Display(app.display.clone()));
         Ok(app)
     }
@@ -128,7 +129,8 @@ impl App {
                 UiAction::Pan { dx, dy } => self.camera.pan(dx, dy),
                 UiAction::Zoom(factor) => self.camera.zoom_factor(factor),
                 UiAction::DeleteNode(_) | UiAction::DuplicateNode(_) | UiAction::ConnectNodes { .. } | UiAction::DisconnectInput { .. }
-                | UiAction::TidyNetwork | UiAction::OpenPreferences | UiAction::Command(_) => self.file_status = "That command is not wired up yet".into(),
+                | UiAction::TidyNetwork | UiAction::OpenPreferences | UiAction::Command(_)
+                | UiAction::BlenderInstall(_) | UiAction::BlenderOpen | UiAction::BlenderDownloadAddon | UiAction::BlenderBar(_) => self.file_status = "That command is not wired up yet".into(),
                 UiAction::ToggleLocked(id) => { let f = self.flags.entry(id).or_default(); f.locked = !f.locked; }
                 UiAction::ToggleTemplate(id) => { let f = self.flags.entry(id).or_default(); f.template = !f.template; }
             }
@@ -159,7 +161,7 @@ impl eframe::App for App {
             let v = View { graph: &graph, doc: self.editor.doc.value(), path: &self.editor.path, dirty: self.editor.dirty(),
                 can_undo: self.editor.history.can_undo(), can_redo: self.editor.history.can_redo(),
                 selected: &self.selected, display: &self.display, cooking: &self.cooking, file_status: &self.file_status,
-                mode: self.mode, theme: &self.theme, editor: &self.editor_state, flags: &self.flags,
+                mode: self.mode, theme: &self.theme, editor: &self.editor_state, flags: &self.flags, geo: self.geo.as_ref(), blender: &self.blender,
                 camera: { let (yaw, pitch) = self.camera.angles(); CameraInfo { yaw, pitch, ortho: self.camera.is_ortho() } } };
             egui::TopBottomPanel::top("toolbar").show(ctx, |ui| ui::topbar::show(ui, &v, &mut out));
             egui::TopBottomPanel::top("shelf").show(ctx, |ui| ui::shelf::show(ui, &v, &mut out));

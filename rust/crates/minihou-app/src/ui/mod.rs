@@ -12,7 +12,7 @@ pub mod topbar;
 pub mod viewport_ui;
 
 #[allow(unused_imports)]
-pub use editor_state::{EditorChange, EditorState, Falloff, Orientation, Overlays, Pivot, SelectionMode, Snap, SnapTo, ViewPreset, Proportional};
+pub use editor_state::{EditorChange, EditorState, Falloff, Orientation, Overlays, Pivot, Proxy, SelectionMode, Snap, SnapTo, ViewPreset, Proportional};
 use crate::viewport::Mode;
 use minihou_app::{CookState, Edit};
 use minihou_core::Graph;
@@ -61,6 +61,12 @@ pub enum UiAction {
     TidyNetwork,
     // ---- application
     OpenPreferences,
+    /// Blender link bar: install the add-on into the chosen installation (index into `BlenderStatus::installs`).
+    BlenderInstall(usize),
+    BlenderOpen,
+    BlenderDownloadAddon,
+    /// Show or hide the Blender bar.
+    BlenderBar(bool),
     /// A named command from the keymap that has no dedicated action yet (kept for forward compatibility).
     Command(String),
 }
@@ -74,6 +80,28 @@ impl Actions {
 /// UI-only per-node state (not part of the graph file).
 #[derive(Clone, Default, Debug)]
 pub struct NodeFlags { pub locked: bool, pub template: bool }
+
+/// One attribute of a geometry, for the Geometry info panel (Houdini-style: name, type, tuple size, value range).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AttrInfo { pub name: String, pub kind: String, pub components: usize, pub min: Option<f64>, pub max: Option<f64> }
+/// Counts, bounds and attributes of the geometry the app has for the selected node (the displayed node's cook today).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GeoSummary {
+    pub node: String,
+    pub points: usize, pub vertices: usize, pub prims: usize,
+    pub bounds: Option<([f32; 3], [f32; 3])>,
+    pub point_attrs: Vec<AttrInfo>, pub vertex_attrs: Vec<AttrInfo>, pub prim_attrs: Vec<AttrInfo>, pub detail_attrs: Vec<AttrInfo>,
+}
+/// The Blender live link as the top bar's indicator and bar show it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BlenderStatus {
+    pub clients: Vec<String>,
+    /// Blender installations the add-on can be installed into (name, path).
+    pub installs: Vec<(String, String)>,
+    pub addon_installed: bool,
+    pub message: String,
+}
+impl BlenderStatus { pub fn connected(&self) -> bool { self.clients.iter().any(|c| c.to_lowercase().starts_with("blender")) } }
 
 /// What the view gizmo needs of the camera.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -95,6 +123,8 @@ pub struct View<'a> {
     pub theme: &'a theme::Theme,
     pub editor: &'a EditorState,
     pub camera: CameraInfo,
+    pub geo: Option<&'a GeoSummary>,
+    pub blender: &'a BlenderStatus,
     /// Flags per node id (Locked, Template); ids not present have none set.
     pub flags: &'a std::collections::HashMap<String, NodeFlags>,
 }
@@ -113,19 +143,19 @@ pub mod testing {
     use std::collections::HashMap;
 
     pub struct Fixture { pub doc: Document, pub graph: Graph, pub cooking: CookState, pub theme: theme::Theme,
-        pub flags: HashMap<String, NodeFlags>, pub selected: String, pub display: String, pub mode: Mode, pub editor: EditorState, pub camera: CameraInfo }
+        pub flags: HashMap<String, NodeFlags>, pub selected: String, pub display: String, pub mode: Mode, pub editor: EditorState, pub camera: CameraInfo, pub geo: Option<GeoSummary>, pub blender: BlenderStatus }
     impl Fixture {
         pub fn new() -> Self {
             let doc = Document::parse(include_str!("../default_graph.json").to_owned()).unwrap();
             let graph = Graph::from_value(doc.value()).unwrap();
             let display = graph.main_output().unwrap();
             Self { doc, graph, cooking: CookState::default(), theme: theme::Theme::dark(), flags: HashMap::new(),
-                selected: display.clone(), display, mode: Mode::Shaded, editor: EditorState::default(), camera: CameraInfo::default() }
+                selected: display.clone(), display, mode: Mode::Shaded, editor: EditorState::default(), camera: CameraInfo::default(), geo: None, blender: BlenderStatus::default() }
         }
         pub fn view(&self) -> View<'_> {
             View { graph: &self.graph, doc: self.doc.value(), path: Path::new("untitled.json"), dirty: false, can_undo: false, can_redo: false,
                 selected: &self.selected, display: &self.display, cooking: &self.cooking, file_status: "", mode: self.mode,
-                theme: &self.theme, editor: &self.editor, camera: self.camera, flags: &self.flags }
+                theme: &self.theme, editor: &self.editor, camera: self.camera, geo: self.geo.as_ref(), blender: &self.blender, flags: &self.flags }
         }
         /// One frame of `panel` in a 1280 x 800 window; returns the actions it pushed.
         pub fn run(&self, panel: impl Fn(&mut egui::Ui, &View, &mut Actions)) -> Vec<UiAction> {
