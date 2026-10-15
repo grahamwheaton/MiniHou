@@ -99,6 +99,72 @@ fn toggle_edit_mode(current: ui::SelectionMode, last: &mut ui::SelectionMode) ->
     if current == ui::SelectionMode::Object { *last } else { *last = current; ui::SelectionMode::Object }
 }
 
+#[derive(Clone)]
+struct PrimitivePreview {
+    lines: Vec<([f32; 3], [f32; 3])>,
+    radius: f32,
+}
+
+fn get_primitive_preview(node_type: &str) -> Option<PrimitivePreview> {
+    use std::sync::Mutex;
+    static CACHE: Mutex<Option<HashMap<String, PrimitivePreview>>> = Mutex::new(None);
+    let mut guard = CACHE.lock().ok()?;
+    let map = guard.get_or_insert_with(HashMap::new);
+    if !map.contains_key(node_type) {
+        let val = serde_json::json!({
+            "nodes": {
+                "n": { "type": node_type }
+            }
+        });
+        if let Ok(graph) = minihou_core::Graph::from_value(&val) {
+            if let Ok(geo) = graph.cook(Some("n")) {
+                let (p, t) = (geo.p(), &geo.topology);
+                let l = minihou_core::preview::layout(
+                    p,
+                    &t.vertex_point,
+                    &t.prim_offsets,
+                    t.closed.as_deref(),
+                    geo.npoints,
+                    usize::MAX,
+                    usize::MAX,
+                    10_000,
+                    1024,
+                );
+                let mut lines = Vec::new();
+                for pair in l.edge.as_chunks::<2>().0 {
+                    let a = pair[0] as usize * 3;
+                    let b = pair[1] as usize * 3;
+                    if a + 2 < p.len() && b + 2 < p.len() {
+                        lines.push(([p[a], p[a + 1], p[a + 2]], [p[b], p[b + 1], p[b + 2]]));
+                    }
+                }
+                if lines.is_empty() && geo.npoints > 0 {
+                    for i in 0..geo.npoints {
+                        let k = i * 3;
+                        let pt = [p[k], p[k + 1], p[k + 2]];
+                        for axis in 0..3 {
+                            let mut lo = pt;
+                            let mut hi = pt;
+                            lo[axis] -= 0.1;
+                            hi[axis] += 0.1;
+                            lines.push((lo, hi));
+                        }
+                    }
+                }
+                let (_, radius) = if geo.npoints == 0 {
+                    ([0.; 3], 1.0)
+                } else {
+                    let (lo, hi) = minihou_core::preview::bounds(p);
+                    let r = (0..3).map(|k| (hi[k] - lo[k]).powi(2)).sum::<f32>().sqrt() * 0.5;
+                    ([0.; 3], r.max(1e-3))
+                };
+                map.insert(node_type.to_string(), PrimitivePreview { lines, radius });
+            }
+        }
+    }
+    map.get(node_type).cloned()
+}
+
 struct App {
     editor: EditorDocument, worker: CookWorker<Scene>, cooking: CookState,
     selected: String, display: String,
@@ -736,7 +802,17 @@ impl eframe::App for App {
                 let size = scene.radius * 0.012;
                 let (faces, lines) = picking::highlight(scene.positions(), scene.triangle_indices(), &self.selection, size);
                 gpu.set_selection(&self.state.device, &faces, &lines);
-                self.file_status = if self.selection.is_empty() { String::new() } else { format!("{} selected", self.selection.count()) };
+                let dec_notice = if self.editor_state.selection == ui::SelectionMode::Points {
+                    picking::decimate_dots(scene.positions().len() / 3).status
+                } else {
+                    None
+                };
+                self.file_status = match (self.selection.is_empty(), dec_notice) {
+                    (true, None) => String::new(),
+                    (false, None) => format!("{} selected", self.selection.count()),
+                    (true, Some(d)) => d.to_string(),
+                    (false, Some(d)) => format!("{d} · {} selected", self.selection.count()),
+                };
             }
             self.selection_dirty = false;
         }
@@ -822,9 +898,194 @@ impl eframe::App for App {
                     }
                 }
                 if let (Some(gpu), Some(target)) = (&self.gpu, &self.target) {
-                    gpu.draw(&self.state, target, &self.camera, self.mode, Overlay { normals: self.editor_state.overlays.normals, bounds: self.editor_state.overlays.bounds, xray: self.editor_state.xray });
-                    if !self.object_hidden { ui.painter().image(target.id, rect, egui::Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.)), egui::Color32::WHITE); }
+                    gpu.draw(
+                        &self.state,
+                        target,
+                        &self.camera,
+                        self.mode,
+                        Overlay {
+                            normals: self.editor_state.overlays.normals,
+                            bounds: self.editor_state.overlays.bounds,
+                            xray: self.editor_state.xray,
+                            wireframe: self.editor_state.overlays.wireframe,
+                        },
+                        self.editor_state.selection,
+                    );
+                    if !self.object_hidden {
+                        ui.painter().image(target.id, rect, egui::Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.)), egui::Color32::WHITE);
+                    }
                 }
+                // Silhouette stroke for selected object (Item 2)
+                if !self.object_hidden {
+                    let displayed_nodes = self.editor.doc.display_nodes();
+                    if displayed_nodes.contains(&self.selected) {
+                        if let Some(scene) = &self.scene {
+                            let silhouettes = picking::silhouette_edges(
+                                scene.positions(),
+                                scene.triangle_indices(),
+                                v.camera.ray_origin,
+                                v.camera.ortho,
+                                v.camera.ray_forward,
+                            );
+                            let stroke = egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(0xff, 0xa0, 0x28));
+                            for [u, w] in silhouettes {
+                                let pa = picking::at(scene.positions(), u);
+                                let pb = picking::at(scene.positions(), w);
+                                if let (Some(sa), Some(sb)) = (
+                                    ui::transform_gizmo::project(v.camera, rect, pa),
+                                    ui::transform_gizmo::project(v.camera, rect, pb),
+                                ) {
+                                    ui.painter().line_segment([sa, sb], stroke);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Hover pre-selection highlight (Item 4)
+                let hover_pos = ctx.input(|i| i.pointer.latest_pos());
+                let hover_in_viewport = hover_pos.is_some_and(|p| rect.contains(p))
+                    && !ui::sketch::active(ctx)
+                    && !ui::selection_region::active(ctx);
+
+                let hover_elem = if hover_in_viewport {
+                    if let (Some(pos), Some(scene)) = (hover_pos, &self.scene) {
+                        let (o, d) = ui::transform_gizmo::ray(v.camera, rect, pos);
+                        picking::pick_triangle(scene.positions(), scene.triangle_indices(), o, d)
+                            .map(|hit| picking::element_of(hit, scene.triangle_indices(), self.editor_state.selection))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
+                // Elements in edit modes 1/2/3 (Item 4)
+                if !self.object_hidden {
+                    if let Some(scene) = &self.scene {
+                        let pos = scene.positions();
+                        let tris = scene.triangle_indices();
+                        let orange = egui::Color32::from_rgb(0xff, 0xa0, 0x28);
+                        let white = egui::Color32::WHITE;
+
+                        match self.editor_state.selection {
+                            ui::SelectionMode::Object => {}
+                            ui::SelectionMode::Points => {
+                                let npoints = pos.len() / 3;
+                                let dec = picking::decimate_dots(npoints);
+                                let base_fill = egui::Color32::from_rgb(0x40, 0x50, 0x70);
+                                let base_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x90, 0xa5, 0xc0));
+
+                                if !dec.hidden {
+                                    for i in (0..npoints).step_by(dec.stride) {
+                                        let pt = picking::at(pos, i as u32);
+                                        if let Some(sp) = ui::transform_gizmo::project(v.camera, rect, pt) {
+                                            let id = i as u32;
+                                            let is_sel = self.selection.points.contains(&id);
+                                            let is_hov = hover_elem.as_ref().is_some_and(|e| e.points.contains(&id));
+                                            if is_hov {
+                                                ui.painter().circle_filled(sp, 4.5_f32, white);
+                                                ui.painter().circle_stroke(sp, 4.5_f32, egui::Stroke::new(1.0_f32, orange));
+                                            } else if is_sel {
+                                                ui.painter().circle_filled(sp, 3.5_f32, orange);
+                                            } else {
+                                                ui.painter().circle_filled(sp, 2.0_f32, base_fill);
+                                                ui.painter().circle_stroke(sp, 2.0_f32, base_stroke);
+                                            }
+                                        }
+                                    }
+                                }
+                                for &id in &self.selection.points {
+                                    if (id as usize) < npoints {
+                                        let pt = picking::at(pos, id);
+                                        if let Some(sp) = ui::transform_gizmo::project(v.camera, rect, pt) {
+                                            ui.painter().circle_filled(sp, 3.5_f32, orange);
+                                        }
+                                    }
+                                }
+                                if let Some(hov) = &hover_elem {
+                                    for &id in &hov.points {
+                                        if (id as usize) < npoints {
+                                            let pt = picking::at(pos, id);
+                                            if let Some(sp) = ui::transform_gizmo::project(v.camera, rect, pt) {
+                                                ui.painter().circle_filled(sp, 4.5_f32, white);
+                                                ui.painter().circle_stroke(sp, 4.5_f32, egui::Stroke::new(1.0_f32, orange));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            ui::SelectionMode::Edges => {
+                                if let Some(hov) = &hover_elem {
+                                    for &(a, b) in &hov.edges {
+                                        let pa = picking::at(pos, a);
+                                        let pb = picking::at(pos, b);
+                                        if let (Some(sa), Some(sb)) = (
+                                            ui::transform_gizmo::project(v.camera, rect, pa),
+                                            ui::transform_gizmo::project(v.camera, rect, pb),
+                                        ) {
+                                            ui.painter().line_segment([sa, sb], egui::Stroke::new(3.0_f32, white));
+                                        }
+                                    }
+                                }
+                                for &(a, b) in &self.selection.edges {
+                                    let pa = picking::at(pos, a);
+                                    let pb = picking::at(pos, b);
+                                    if let (Some(sa), Some(sb)) = (
+                                        ui::transform_gizmo::project(v.camera, rect, pa),
+                                        ui::transform_gizmo::project(v.camera, rect, pb),
+                                    ) {
+                                        ui.painter().line_segment([sa, sb], egui::Stroke::new(2.5_f32, orange));
+                                    }
+                                }
+                            }
+                            ui::SelectionMode::Faces => {
+                                let ntri = tris.len() / 3;
+                                let center_fill = egui::Color32::from_rgb(0x30, 0x38, 0x48);
+                                let center_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x80, 0x90, 0xa8));
+                                let stride = if ntri > 50_000 { (ntri / 20_000).max(2) } else { 1 };
+                                for i in (0..ntri).step_by(stride) {
+                                    let t = &tris[i * 3..i * 3 + 3];
+                                    let (a, b, c) = (picking::at(pos, t[0]), picking::at(pos, t[1]), picking::at(pos, t[2]));
+                                    let center = [0, 1, 2].map(|k| (a[k] + b[k] + c[k]) / 3.0_f32);
+                                    if let Some(sp) = ui::transform_gizmo::project(v.camera, rect, center) {
+                                        let id = i as u32;
+                                        let is_sel = self.selection.tris.contains(&id);
+                                        let is_hov = hover_elem.as_ref().is_some_and(|e| e.tris.contains(&id));
+                                        if is_hov {
+                                            ui.painter().circle_filled(sp, 4.0_f32, white);
+                                            ui.painter().circle_stroke(sp, 4.0_f32, egui::Stroke::new(1.0_f32, orange));
+                                        } else if is_sel {
+                                            ui.painter().circle_filled(sp, 3.5_f32, orange);
+                                        } else {
+                                            ui.painter().circle_filled(sp, 2.0_f32, center_fill);
+                                            ui.painter().circle_stroke(sp, 2.0_f32, center_stroke);
+                                        }
+                                    }
+                                }
+                                if let Some(hov) = &hover_elem {
+                                    for &t_idx in &hov.tris {
+                                        if let Some(chunk) = tris.as_chunks::<3>().0.get(t_idx as usize) {
+                                            let (a, b, c) = (picking::at(pos, chunk[0]), picking::at(pos, chunk[1]), picking::at(pos, chunk[2]));
+                                            if let (Some(sa), Some(sb), Some(sc)) = (
+                                                ui::transform_gizmo::project(v.camera, rect, a),
+                                                ui::transform_gizmo::project(v.camera, rect, b),
+                                                ui::transform_gizmo::project(v.camera, rect, c),
+                                            ) {
+                                                ui.painter().add(egui::Shape::convex_polygon(
+                                                    vec![sa, sb, sc],
+                                                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 60),
+                                                    egui::Stroke::new(1.5_f32, white),
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 self.viewport_hover = response.hovered();
                 if self.modal.is_none() && response.hovered() && !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
                     out.push(UiAction::Command("add_menu".into()));
@@ -858,6 +1119,37 @@ impl eframe::App for App {
                     if let Some(tool) = egui::DragAndDrop::payload::<ui::ToolDrag>(ctx) {
                         let hint = format!("Add {}", tool.0);
                         ui.painter().text(rect.center_top() + egui::vec2(0., 60.), egui::Align2::CENTER_TOP, hint, egui::FontId::proportional(15.), v.theme.accent);
+
+                        // Item 1: Wireframe preview while dragging a primitive
+                        if let Some(pointer_pos) = ctx.input(|i| i.pointer.latest_pos()) {
+                            if rect.contains(pointer_pos) {
+                                let (o, d) = ui::transform_gizmo::ray(v.camera, rect, pointer_pos);
+                                let hit_pos = {
+                                    let (mesh_p, mesh_tri) = self.scene.as_ref().map(|s| (s.positions(), s.triangle_indices())).unzip();
+                                    let scene_radius = self.scene.as_ref().map(|s| s.radius).unwrap_or(1.0);
+                                    picking::intersect_ground_or_mesh(o, d, mesh_p, mesh_tri, (scene_radius * 2.0).max(5.0))
+                                };
+                                let scene_radius = self.scene.as_ref().map(|s| s.radius).unwrap_or(1.0);
+                                if let Some(prim) = get_primitive_preview(&tool.0) {
+                                    let target_radius = (scene_radius * 0.25).clamp(0.5, 10.0);
+                                    let scale = if prim.radius > 1e-3 { (target_radius / prim.radius).clamp(0.1, 10.0) } else { 1.0 };
+                                    let stroke = egui::Stroke::new(1.5_f32, v.theme.accent);
+                                    for &(pa, pb) in &prim.lines {
+                                        let wa = [hit_pos[0] + pa[0] * scale, hit_pos[1] + pa[1] * scale, hit_pos[2] + pa[2] * scale];
+                                        let wb = [hit_pos[0] + pb[0] * scale, hit_pos[1] + pb[1] * scale, hit_pos[2] + pb[2] * scale];
+                                        if let (Some(sa), Some(sb)) = (
+                                            ui::transform_gizmo::project(v.camera, rect, wa),
+                                            ui::transform_gizmo::project(v.camera, rect, wb),
+                                        ) {
+                                            ui.painter().line_segment([sa, sb], stroke);
+                                        }
+                                    }
+                                    if let Some(sp) = ui::transform_gizmo::project(v.camera, rect, hit_pos) {
+                                        ui.painter().circle_stroke(sp, 3.0_f32, stroke);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 ui::transform_gizmo::cursor(ui, rect, &v);
