@@ -47,7 +47,7 @@ def stage_probe(P, params):
 @unittest.skipUnless(rust.available(), "the Rust core is not built")
 class RustNoiseExactTests(unittest.TestCase):
     def test_terrain_stage_probe(self):
-        data = json.loads((Path(__file__).resolve().parents[1] / "examples/graphs/eroded_terrain.json").read_text())
+        data = json.loads((Path(__file__).resolve().parents[1] / "examples/graphs/eroded_terrain.json").read_text(encoding="utf-8"))
         graph = Graph.from_dict(data)
         with rust.disabled(), accel.disabled():
             source = Evaluator().cook(graph, "land")
