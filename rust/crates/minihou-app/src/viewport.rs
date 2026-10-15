@@ -24,6 +24,16 @@ const NORMAL_LINES: usize = 60_000;
 /// Corner order of `Scene::bbp`; the 12 edges as index pairs.
 const BOX_EDGES: [u32; 24] = [0,1, 1,3, 3,2, 2,0, 4,5, 5,7, 7,6, 6,4, 0,4, 1,5, 2,6, 3,7];
 impl Scene {
+    /// The same scene showing only `level` (0..1) of its triangles and edges (the viewport proxy); points, normals and bounds stay.
+    pub fn proxied(&self, level: f32) -> Scene {
+        Scene {
+            p: self.p.clone(), n: self.n.clone(),
+            tri: crate::ui::proxy_ui::proxy::reduced_triangles(&self.tri, level),
+            edge: crate::ui::proxy_ui::proxy::reduced_edges(&self.edge, level),
+            nlp: self.nlp.clone(), nln: self.nln.clone(), bbp: self.bbp, center: self.center, radius: self.radius,
+        }
+    }
+    pub fn triangles(&self) -> usize { self.tri.len() / 3 }
     pub fn new(g: &Geometry) -> Self {
         let (p,t) = (g.p(), &g.topology);
         let l = preview::layout(p, &t.vertex_point, &t.prim_offsets, t.closed.as_deref(), g.npoints, usize::MAX, usize::MAX, 100_000,8192);

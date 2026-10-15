@@ -19,6 +19,8 @@ struct App {
     editor_state: EditorState,
     geo: Option<GeoSummary>, blender: BlenderStatus,
     prefs: Preferences, keymap: Keymap, prefs_open: bool, viewport_hover: bool, network_hover: bool,
+    /// The last cooked scene at full detail, and the proxy level it is currently uploaded at.
+    scene: Option<Scene>, shown_level: f32, geo_rev: u64,
 }
 impl App {
     fn new(doc: Document, path: PathBuf, state: egui_wgpu::RenderState) -> Result<Self> {
@@ -28,7 +30,8 @@ impl App {
             cooking:CookState::default(), state,gpu:None,target:None,
             camera:Camera::frame([0.;3],1.),bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new(),
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),
-            prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false };
+            prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
+            scene:None,shown_level:1.0,geo_rev:u64::MAX };
         app.prefs = Preferences::load();
         app.keymap = Keymap::from_overrides_json(&app.prefs.keymap_overrides);
         app.keymap.emulate_numpad = app.prefs.emulate_numpad;
@@ -75,6 +78,11 @@ fn standard_view(v: ui::ViewPreset) -> StandardView {
         P::Right => StandardView::Right, P::Left => StandardView::Left, P::Top => StandardView::Top, P::Bottom => StandardView::Bottom }
 }
 impl App {
+    /// The fraction of triangles to show: the menu's level, or one picked from the triangle count when Auto is on.
+    fn proxy_level(&self, triangles: usize) -> f32 {
+        let p = self.editor_state.proxy;
+        if p.auto { ui::proxy_ui::proxy::auto_level(triangles, 400_000) } else { p.level }
+    }
     /// A shelf tool: a new node of `node_type` wired to `after` (its first input) and made the displayed node; one undo step.
     fn add_node(&mut self, node_type: &str, after: Option<&str>) {
         let Some(spec) = minihou_core::nodes::get(node_type) else {
@@ -247,12 +255,31 @@ impl eframe::App for App {
             if let Some(scene) = self.cooking.accept(response) {
                 let first = self.gpu.is_none();
                 self.bounds = (scene.center, scene.radius);
-                if let Some(gpu) = &mut self.gpu { gpu.upload(&self.state.device, &scene); }
-                else { self.gpu = Some(Gpu::new(&self.state.device, &scene)); }
+                let level = self.proxy_level(scene.triangles());
+                let shown = if level < 1.0 { scene.proxied(level) } else { scene.proxied(1.0) };
+                if let Some(gpu) = &mut self.gpu { gpu.upload(&self.state.device, &shown); }
+                else { self.gpu = Some(Gpu::new(&self.state.device, &shown)); }
+                self.shown_level = level;
+                self.scene = Some(scene);
                 if first { self.frame_mesh(); }
             }
         }
         if self.cooking.cooking() { ctx.request_repaint_after(Duration::from_millis(16)); }
+        // the proxy level changed (menu, auto budget): re-upload the reduced scene
+        if let Some(scene) = &self.scene {
+            let level = self.proxy_level(scene.triangles());
+            if (level - self.shown_level).abs() > 1e-6 {
+                if let Some(gpu) = &mut self.gpu { gpu.upload(&self.state.device, &scene.proxied(level)); }
+                self.shown_level = level;
+            }
+        }
+        // the geometry summary of the displayed node, refreshed after each cook
+        if self.geo_rev != self.cooking.completed {
+            if let Some(g) = &self.cooking.geometry {
+                self.geo = Some(ui::geo_info::geo_summary::summarize(&self.display, g));
+                self.geo_rev = self.cooking.completed;
+            }
+        }
         let graph = Graph::from_value(self.editor.doc.value()).expect("validated document");
         let mut out = Actions::default();
         let kctx = KeyContext { viewport_hovered: self.viewport_hover, network_hovered: self.network_hover, selected: Some(&self.selected) };
@@ -269,7 +296,10 @@ impl eframe::App for App {
             egui::TopBottomPanel::bottom("stats").show(ctx, |ui| ui::status::show(ui, &v, &mut out));
             let net = egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| ui::network::show(ui, &v, &mut out));
             self.network_hover = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| net.response.rect.contains(p));
-            egui::SidePanel::right("parameters").default_width(320.).show(ctx, |ui| ui::params::show(ui, &v, &mut out));
+            egui::SidePanel::right("parameters").default_width(320.).show(ctx, |ui| {
+                egui::TopBottomPanel::bottom("geometry_info").resizable(true).default_height(220.).show_inside(ui, |ui| ui::geo_info::show(ui, &v, &mut out));
+                ui::params::show(ui, &v, &mut out);
+            });
             egui::CentralPanel::default().show(ctx, |ui| {
                 let size = ui.available_size().max(egui::vec2(1., 1.));
                 let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
@@ -292,6 +322,9 @@ impl eframe::App for App {
                 }
                 self.viewport_hover = response.hovered();
                 ui::viewport_ui::overlay(ui, rect, &v, &mut out);
+                // proxy level, under the view gizmo
+                egui::Area::new(egui::Id::new("proxy_menu")).fixed_pos(egui::pos2(rect.right() - 150., rect.top() + 130.)).order(egui::Order::Foreground)
+                    .show(ctx, |ui| ui::proxy_ui::menu(ui, &v, &mut out));
             });
         }
         if self.prefs_open && ui::keymap::show_preferences(ctx, &mut self.prefs_open, &mut self.prefs, &mut self.keymap, &self.theme) {

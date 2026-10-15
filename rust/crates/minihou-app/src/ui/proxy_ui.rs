@@ -1,7 +1,8 @@
 //! Viewport proxy control. The integrator places `menu` in the viewport header.
 use super::{Actions, EditorChange, UiAction, View};
 use eframe::egui::{self, RichText};
-#[path = "../proxy.rs"] mod proxy;
+#[path = "../proxy.rs"]
+pub mod proxy;
 
 fn active_label(level: f32, auto: bool) -> String {
     if auto { return "Auto".into(); }
