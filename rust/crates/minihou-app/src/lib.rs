@@ -20,9 +20,11 @@ pub fn param_kind(default: &Value) -> ParamKind {
 
 /// Keeps original spelling, whitespace and unknown fields. Edits replace only
 /// the corresponding JSON token (or insert an omitted member).
+#[derive(Clone)]
 pub struct Document { value: Value, text: String }
 impl Document {
     pub fn parse(text: String) -> Result<Self> {
+        let text = text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned();
         let value = serde_json::from_str(&text)?;
         Graph::from_value(&value)?;
         Ok(Self { value, text })
@@ -218,3 +220,209 @@ impl Camera {
 
 #[cfg(test)]
 mod tests;
+
+/// Generated registry metadata; unknown parameters retain the generic widget.
+pub fn param_meta(node_type: &str, name: &str) -> Option<&'static Value> {
+    static META: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    META.get_or_init(|| serde_json::from_str(include_str!("param_meta.json")).expect("generated metadata"))
+        .get(node_type)?.get(name)
+}
+pub fn metadata_kind(meta: &Value, default: &Value) -> ParamKind {
+    match meta["kind"].as_str() {
+        Some("int") => ParamKind::Integer,
+        Some("float") => ParamKind::Float,
+        Some("bool") => ParamKind::Bool,
+        Some("str" | "enum") => ParamKind::String,
+        Some("vec3") => ParamKind::Vec3,
+        _ => param_kind(default),
+    }
+}
+pub fn slider_range(meta: &Value) -> Option<std::ops::RangeInclusive<f64>> {
+    Some(meta["min"].as_f64()?..=meta["max"].as_f64().or_else(|| meta["soft_max"].as_f64())?)
+}
+/// soft_max affects presentation only, never the accepted value.
+pub fn clamp_parameter(meta: &Value, value: f64) -> f64 {
+    value.max(meta["min"].as_f64().unwrap_or(f64::NEG_INFINITY))
+        .min(meta["max"].as_f64().unwrap_or(f64::INFINITY))
+}
+
+#[derive(Clone, Debug)]
+pub enum Edit {
+    Param { node: String, name: String, value: Value },
+    Bypass { node: String, flag: bool },
+    Display(String),
+    Replace(Value),
+}
+impl Document {
+    /// Validate edits without creating or cooking a Session on the UI thread.
+    pub fn edit(&mut self, edit: &Edit) -> Result<()> {
+        match edit {
+            Edit::Param { node, name, value } => {
+                let typ = self.value["nodes"][node]["type"].as_str().ok_or("no such node")?;
+                let spec = minihou_core::nodes::get(typ).ok_or("unsupported node")?;
+                if !spec.params.iter().any(|p| p.name == name) { return Err("unknown parameter".into()); }
+                self.set(&["nodes", node, "params", name], value.clone());
+            }
+            Edit::Bypass { node, flag } => {
+                if self.value["nodes"].get(node).is_none() { return Err("no such node".into()); }
+                self.set(&["nodes", node, "flags", "bypass"], json!(flag));
+            }
+            Edit::Display(node) => self.set_display(node)?,
+            Edit::Replace(_) => return Err("replace uses document snapshots".into()),
+        }
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct History {
+    undo: Vec<(Document, Document)>,
+    redo: Vec<(Document, Document)>,
+    pending: Option<Document>,
+}
+impl History {
+    pub fn edit(&mut self, doc: &mut Document, edit: &Edit) -> Result<()> {
+        let before = doc.clone();
+        doc.edit(edit)?;
+        if before.text != doc.text {
+            self.pending.get_or_insert(before);
+            self.redo.clear();
+        }
+        Ok(())
+    }
+    /// Called at the end of a drag, or immediately for discrete edits.
+    pub fn finish(&mut self, doc: &Document) {
+        if let Some(before) = self.pending.take() {
+            if before.text != doc.text { self.undo.push((before, doc.clone())); }
+        }
+    }
+    pub fn can_undo(&self) -> bool { !self.undo.is_empty() || self.pending.is_some() }
+    pub fn can_redo(&self) -> bool { !self.redo.is_empty() }
+    pub fn undo(&mut self, doc: &mut Document) -> Option<Edit> {
+        self.finish(doc);
+        let pair = self.undo.pop()?;
+        *doc = pair.0.clone();
+        self.redo.push(pair);
+        Some(Edit::Replace(doc.value.clone()))
+    }
+    pub fn redo(&mut self, doc: &mut Document) -> Option<Edit> {
+        self.finish(doc);
+        let pair = self.redo.pop()?;
+        *doc = pair.1.clone();
+        self.undo.push(pair);
+        Some(Edit::Replace(doc.value.clone()))
+    }
+}
+
+use minihou_core::{Geometry, session::CookStats};
+use std::sync::{Arc, Mutex, mpsc};
+pub struct CookRequest { pub revision: u64, pub edit: Edit }
+pub struct CookResponse<T> {
+    pub revision: u64,
+    pub geometry: Option<Arc<Geometry>>,
+    pub prepared: Option<T>,
+    pub stats: CookStats,
+    pub error: Option<String>,
+    pub milliseconds: f64,
+}
+/// Apply every queued edit in order, then cook just the final state.
+/// This preserves independent edits while the last edit of any parameter wins.
+pub fn cook_batch<T>(session: &mut Session, target: &mut String, requests: Vec<CookRequest>, prepare: impl FnOnce(&Geometry) -> T) -> CookResponse<T> {
+    let revision = requests.last().map_or(0, |r| r.revision);
+    let start = Instant::now();
+    let mut error = None;
+    for request in requests {
+        let result: Result<()> = (|| {
+            match request.edit {
+                Edit::Param { node, name, value } => session.set_param(&node, &name, value)?,
+                Edit::Bypass { node, flag } => session.set_bypass(&node, flag)?,
+                Edit::Display(node) => *target = node,
+                Edit::Replace(value) => {
+                    let graph = Graph::from_value(&value)?;
+                    *target = graph.main_output()?;
+                    *session = Session::new(graph);
+                }
+            }
+            Ok(())
+        })();
+        if let Err(e) = result { error = Some(e.to_string()); }
+    }
+    let geometry = match session.cook(Some(target)) {
+        Ok(g) => Some(g),
+        Err(e) => { error = Some(e.to_string()); None }
+    };
+    let milliseconds = start.elapsed().as_secs_f64() * 1000.;
+    let prepared = geometry.as_ref().map(|g| prepare(g));
+    CookResponse { revision, geometry, prepared, stats: session.last_stats().clone(), error, milliseconds }
+}
+#[derive(Default)]
+pub struct CookState {
+    pub requested: u64,
+    pub completed: u64,
+    pub geometry: Option<Arc<Geometry>>,
+    pub stats: CookStats,
+    pub error: Option<String>,
+    pub milliseconds: f64,
+}
+impl CookState {
+    pub fn cooking(&self) -> bool { self.completed < self.requested }
+    pub fn accept<T>(&mut self, response: CookResponse<T>) -> Option<T> {
+        if response.revision != self.requested { return None; }
+        self.completed = response.revision;
+        self.error = response.error;
+        self.stats = response.stats;
+        self.milliseconds = response.milliseconds;
+        if let Some(g) = response.geometry { self.geometry = Some(g); }
+        response.prepared
+    }
+}
+/// One result slot bounds memory even if the UI is occupied by a native dialog.
+/// Dropping the sender shuts the worker down after its current cook; never joins on the UI.
+pub struct CookWorker<T> {
+    sender: mpsc::Sender<CookRequest>,
+    latest: Arc<Mutex<Option<CookResponse<T>>>>,
+}
+impl<T: Send + 'static> CookWorker<T> {
+    pub fn start(doc: &Document, prepare: impl Fn(&Geometry) -> T + Send + 'static) -> Result<Self> {
+        let mut session = doc.session()?;
+        let mut target = session.graph().main_output()?;
+        let (sender, receiver) = mpsc::channel();
+        let latest = Arc::new(Mutex::new(None));
+        let output = latest.clone();
+        std::thread::Builder::new().name("minihou-cook".into()).spawn(move || {
+            while let Ok(first) = receiver.recv() {
+                let mut batch = vec![first];
+                batch.extend(receiver.try_iter());
+                let response = cook_batch(&mut session, &mut target, batch, &prepare);
+                *output.lock().unwrap() = Some(response);
+            }
+        })?;
+        Ok(Self { sender, latest })
+    }
+    pub fn send(&self, request: CookRequest) -> Result<()> { self.sender.send(request).map_err(|_| "cook worker stopped".into()) }
+    pub fn poll(&self) -> Option<CookResponse<T>> { self.latest.lock().unwrap().take() }
+}
+
+/// File identity, save point and history are replaced together on a successful Open.
+pub struct EditorDocument {
+    pub doc: Document,
+    pub history: History,
+    pub path: std::path::PathBuf,
+    saved: String,
+}
+impl EditorDocument {
+    pub fn new(doc: Document, path: std::path::PathBuf) -> Self {
+        Self { saved:doc.text().into(), doc, path, history:History::default() }
+    }
+    pub fn dirty(&self) -> bool { self.doc.text() != self.saved }
+    pub fn title(&self) -> String {
+        format!("MiniHou - {}{}", self.path.file_name().unwrap_or_default().to_string_lossy(), if self.dirty() { " *" } else { "" })
+    }
+    pub fn save_to(&mut self, path: std::path::PathBuf) -> Result<()> {
+        self.history.finish(&self.doc);
+        self.doc.save(&path)?;
+        self.path = path;
+        self.saved = self.doc.text().into();
+        Ok(())
+    }
+}

@@ -1,51 +1,87 @@
 mod viewport;
 use eframe::{egui, egui_wgpu};
-use minihou_app::{Camera, Document, ParamKind, Result, param_kind};
-use minihou_core::{nodes, session::Session};
+use minihou_app::{Camera, Document, ParamKind, Result, param_kind, param_meta, metadata_kind, slider_range, clamp_parameter, Edit, EditorDocument, CookWorker, CookRequest, CookState};
+use minihou_core::{nodes, Graph};
 use serde_json::{Value, json};
-use std::{path::PathBuf, time::Instant};
+use std::{path::PathBuf, time::Duration};
 use viewport::{Gpu, Mode, Scene, Target};
 
 struct App {
-    doc: Document, session: Session, path: PathBuf, selected: String, display: String,
+    editor: EditorDocument, worker: CookWorker<Scene>, cooking: CookState,
+    selected: String, display: String,
     state: egui_wgpu::RenderState, gpu: Option<Gpu>, target: Option<Target>,
     camera: Camera, bounds: ([f32;3], f32), mode: Mode,
-    cook_ms: f64, cook_error: Option<String>, file_status: String, dirty: bool,
+    file_status: String,
 }
 impl App {
     fn new(doc: Document, path: PathBuf, state: egui_wgpu::RenderState) -> Result<Self> {
-        let session = doc.session()?;
-        let display = session.graph().main_output()?;
-        let mut app = Self { selected:display.clone(),display,doc,session,path,state,gpu:None,target:None,
-            camera:Camera::frame([0.;3],1.),bounds:([0.;3],1.),mode:Mode::Shaded,
-            cook_ms:0.,cook_error:None,file_status:String::new(),dirty:false };
-        app.cook();
-        app.frame_mesh();
+        let display = Graph::from_value(doc.value())?.main_output()?;
+        let worker = CookWorker::start(&doc, Scene::new)?;
+        let mut app = Self { selected:display.clone(), display, editor:EditorDocument::new(doc, path), worker,
+            cooking:CookState::default(), state,gpu:None,target:None,
+            camera:Camera::frame([0.;3],1.),bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new() };
+        app.send(Edit::Display(app.display.clone()));
         Ok(app)
     }
-    fn cook(&mut self) {
-        let t = Instant::now();
-        let result = self.session.cook(Some(&self.display));
-        self.cook_ms = t.elapsed().as_secs_f64()*1000.;
-        match result {
-            Ok(g) => {
-                let scene = Scene::new(&g);
-                self.bounds = (scene.center,scene.radius);
-                if let Some(gpu)=&mut self.gpu { gpu.upload(&self.state.device,&scene); } else { self.gpu = Some(Gpu::new(&self.state.device,&scene)); }
-                self.cook_error = None;
-            }
-            Err(e) => { self.cook_error = Some(e.to_string()); self.gpu = None; }
+    fn send(&mut self, edit: Edit) {
+        self.cooking.requested += 1;
+        if let Err(e) = self.worker.send(CookRequest { revision:self.cooking.requested, edit }) {
+            self.cooking.completed = self.cooking.requested;
+            self.cooking.error = Some(e.to_string());
+        }
+    }
+    fn edit(&mut self, edit: Edit, continuous: bool) {
+        match self.editor.history.edit(&mut self.editor.doc, &edit) {
+            Ok(()) => { self.send(edit); if !continuous { self.editor.history.finish(&self.editor.doc); } }
+            Err(e) => self.file_status = e.to_string(),
         }
     }
     fn frame_mesh(&mut self) { self.camera = Camera::frame(self.bounds.0,self.bounds.1); }
-    fn save(&mut self) {
-        match self.doc.save(&self.path) {
-            Ok(()) => { self.dirty = false; self.file_status = "Saved".into(); }
+    fn save_to(&mut self, path: PathBuf) {
+        self.editor.history.finish(&self.editor.doc);
+        match self.editor.save_to(path) {
+            Ok(()) => { self.file_status = "Saved".into(); }
             Err(e) => self.file_status = format!("Save failed: {e}"),
         }
     }
+    fn open(&mut self, path: PathBuf) {
+        let replacement = Document::open(&path).and_then(|doc| Self::new(doc, path, self.state.clone()));
+        match replacement {
+            Ok(mut app) => { app.target = self.target.take(); *self = app; }
+            Err(e) => self.file_status = format!("Open failed: {e}"),
+        }
+    }
 }
-fn widget(ui: &mut egui::Ui, kind: ParamKind, value: &mut Value) -> bool {
+fn widget(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value: &mut Value) -> bool {
+    if let Some(meta) = meta {
+        if meta["kind"] == "enum" {
+            let before = value.clone();
+            egui::ComboBox::from_id_salt("enum").selected_text(value.as_str().unwrap_or(""))
+                .show_ui(ui, |ui| {
+                    if let Some(options) = meta["options"].as_array() {
+                        for option in options { ui.selectable_value(value, option.clone(), option.as_str().unwrap_or("")); }
+                    }
+                });
+            return *value != before;
+        }
+        if matches!(kind, ParamKind::Integer | ParamKind::Float) {
+            let mut v = value.as_f64().unwrap_or(0.);
+            let integer = kind == ParamKind::Integer;
+            let mut changed = false;
+            if let Some(range) = slider_range(meta) {
+                let mut slider = egui::Slider::new(&mut v, range).show_value(false).clamping(egui::SliderClamping::Edits);
+                if integer { slider = slider.integer(); }
+                changed |= ui.add(slider).changed();
+            }
+            changed |= ui.add(egui::DragValue::new(&mut v).speed(if integer {1.} else {0.01})
+                .range(meta["min"].as_f64().unwrap_or(f64::NEG_INFINITY)..=meta["max"].as_f64().unwrap_or(f64::INFINITY))).changed();
+            if changed {
+                v = clamp_parameter(meta, v);
+                *value = if integer { json!(v.round() as i64) } else { json!(v) };
+            }
+            return changed;
+        }
+    }
     match kind {
         ParamKind::Bool => {
             let mut v = value.as_bool().unwrap_or(false);
@@ -66,7 +102,8 @@ fn widget(ui: &mut egui::Ui, kind: ParamKind, value: &mut Value) -> bool {
         ParamKind::Vec3 => {
             let mut v = [0,1,2].map(|i|value.get(i).and_then(Value::as_f64).unwrap_or(0.));
             let mut changed=false;
-            ui.horizontal(|ui| { for x in &mut v { changed |= ui.add(egui::DragValue::new(x).speed(0.01)).changed(); } });
+            ui.horizontal(|ui| { for x in &mut v { changed |= ui.add(egui::DragValue::new(x).speed(0.01).range(
+                meta.and_then(|m| m["min"].as_f64()).unwrap_or(f64::NEG_INFINITY)..=meta.and_then(|m| m["max"].as_f64()).unwrap_or(f64::INFINITY))).changed(); } });
             if changed { *value=json!(v); } changed
         }
         ParamKind::Unsupported => { ui.label(value.to_string()); false }
@@ -74,28 +111,51 @@ fn widget(ui: &mut egui::Ui, kind: ParamKind, value: &mut Value) -> bool {
 }
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
-        let mut recook = false;
+        if let Some(response) = self.worker.poll() {
+            if let Some(scene) = self.cooking.accept(response) {
+                let first = self.gpu.is_none();
+                self.bounds = (scene.center, scene.radius);
+                if let Some(gpu) = &mut self.gpu { gpu.upload(&self.state.device, &scene); }
+                else { self.gpu = Some(Gpu::new(&self.state.device, &scene)); }
+                if first { self.frame_mesh(); }
+            }
+        }
+        if self.cooking.cooking() { ctx.request_repaint_after(Duration::from_millis(16)); }
+        let graph = Graph::from_value(self.editor.doc.value()).expect("validated document");
+        let mut open = false;
+        let mut save_as = false;
+        let mut undo = ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Z));
+        let mut redo = ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Y));
         let mut save = ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL,egui::Key::S));
         let mut frame = !ctx.wants_keyboard_input() && ctx.input(|i|i.key_pressed(egui::Key::F));
         egui::TopBottomPanel::top("toolbar").show(ctx,|ui| {
             ui.horizontal(|ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Open...").clicked() { open = true; ui.close(); }
+                    if ui.button("Save").clicked() { save = true; ui.close(); }
+                    if ui.button("Save As...").clicked() { save_as = true; ui.close(); }
+                });
+                ui.menu_button("Edit", |ui| {
+                    if ui.add_enabled(self.editor.history.can_undo(), egui::Button::new("Undo (Ctrl+Z)")).clicked() { undo = true; ui.close(); }
+                    if ui.add_enabled(self.editor.history.can_redo(), egui::Button::new("Redo (Ctrl+Y)")).clicked() { redo = true; ui.close(); }
+                });
                 for (mode,label) in [(Mode::Solid,"Solid"),(Mode::Shaded,"Shaded"),(Mode::Wire,"Wire"),(Mode::ShadedWire,"Shaded+Wire")] {
                     ui.selectable_value(&mut self.mode,mode,label);
                 }
                 frame |= ui.button("Frame (F)").clicked();
                 save |= ui.button("Save (Ctrl+S)").clicked();
-                ui.label(format!("{}{}",self.path.display(),if self.dirty {" *"} else {""}));
+                ui.label(format!("{}{}",self.editor.path.display(),if self.editor.dirty() {" *"} else {""}));
             });
         });
         egui::SidePanel::left("nodes").default_width(220.).show(ctx,|ui| {
             ui.heading("Nodes");
             egui::ScrollArea::vertical().show(ui,|ui| {
-                for (id,node) in &self.session.graph().nodes {
+                for (id,node) in &graph.nodes {
                     ui.horizontal(|ui| {
                         if ui.radio(self.display==*id,"").on_hover_text("Display this node").clicked() {
                             self.display=id.clone();
-                            if let Err(e)=self.doc.set_display(id) { self.file_status=e.to_string(); }
-                            self.dirty=true; recook=true;
+                            self.editor.history.finish(&self.editor.doc);
+                            self.edit(Edit::Display(id.clone()), false);
                         }
                         if ui.selectable_label(self.selected==*id,format!("{id}  {}",node.node_type)).clicked() { self.selected=id.clone(); }
                         if node.bypass { ui.small("[bypass]"); }
@@ -106,31 +166,29 @@ impl eframe::App for App {
         egui::SidePanel::right("parameters").default_width(300.).show(ctx,|ui| {
             ui.heading(&self.selected);
             let selected=self.selected.clone();
-            let node = self.session.graph().nodes.iter().find(|(id,_)|id==&selected).map(|(_,n)|(n.node_type.clone(),n.bypass));
+            let node = graph.nodes.iter().find(|(id,_)|id==&selected).map(|(_,n)|(n.node_type.clone(),n.bypass));
             if let Some((typ,mut bypass))=node {
                 ui.label(&typ);
                 if ui.checkbox(&mut bypass,"Bypass").changed() {
-                    match self.doc.set_bypass(&mut self.session,&selected,bypass) {
-                        Ok(()) => {recook=true;self.dirty=true;},
-                        Err(e) => self.file_status=e.to_string(),
-                    }
+                    self.editor.history.finish(&self.editor.doc);
+                    self.edit(Edit::Bypass { node:selected.clone(), flag:bypass }, false);
                 }
                 egui::ScrollArea::vertical().show(ui,|ui| {
                     if let Some(spec)=nodes::get(&typ) {
                         for param in spec.params {
                             ui.push_id(param.name,|ui| {
-                                ui.label(param.name);
+                                let meta = param_meta(&typ, param.name);
+                                let doc = meta.and_then(|m| m["doc"].as_str()).unwrap_or("");
+                                ui.label(param.name).on_hover_text(doc);
                                 let default=(param.default)();
-                                let mut value=self.doc.value()["nodes"][&selected]["params"].get(param.name).unwrap_or(&default).clone();
-                                let response = ui.add_enabled_ui(param.supported,|ui|widget(ui,param_kind(&default),&mut value)).response;
+                                let mut value=self.editor.doc.value()["nodes"][&selected]["params"].get(param.name).unwrap_or(&default).clone();
+                                let response = ui.add_enabled_ui(param.supported,|ui|widget(ui,meta.map_or_else(|| param_kind(&default), |m| metadata_kind(m, &default)),meta,&mut value)).response;
+                                let response = response.on_hover_text(doc);
                                 if !param.supported { response.on_hover_text("The Rust backend does not support it yet").on_disabled_hover_text("The Rust backend does not support it yet"); }
                                 // Response.changed is not propagated by a scope; inspect the value instead.
-                                let old=self.doc.value()["nodes"][&selected]["params"].get(param.name).unwrap_or(&default);
+                                let old=self.editor.doc.value()["nodes"][&selected]["params"].get(param.name).unwrap_or(&default);
                                 if param.supported && &value!=old {
-                                    match self.doc.set_param(&mut self.session,&selected,param.name,value) {
-                                        Ok(()) => {recook=true;self.dirty=true;},
-                                        Err(e) => self.file_status=e.to_string(),
-                                    }
+                                    self.edit(Edit::Param { node:selected.clone(), name:param.name.into(), value }, ctx.input(|i| i.pointer.primary_down()));
                                 }
 
                             });
@@ -139,14 +197,27 @@ impl eframe::App for App {
                 });
             }
         });
-        // Batch all edits made in this egui frame into one synchronous cook.
-        if recook { self.cook(); }
+        if !ctx.input(|i| i.pointer.primary_down()) { self.editor.history.finish(&self.editor.doc); }
+        let command = if undo { self.editor.history.undo(&mut self.editor.doc) } else if redo { self.editor.history.redo(&mut self.editor.doc) } else { None };
+        if let Some(command) = command {
+            self.display = Graph::from_value(self.editor.doc.value()).unwrap().main_output().unwrap();
+            self.send(command);
+        }
         if frame { self.frame_mesh(); }
-        if save { self.save(); }
+        if save { self.save_to(self.editor.path.clone()); }
+        if save_as {
+            if let Some(path) = rfd::FileDialog::new().add_filter("MiniHou graph", &["json"]).set_file_name(self.editor.path.file_name().unwrap_or_default().to_string_lossy()).save_file() { self.save_to(path); }
+        }
+        if open {
+            if let Some(path) = rfd::FileDialog::new().add_filter("MiniHou graph", &["json"]).pick_file() { self.open(path); }
+        }
+        if self.cooking.cooking() { ctx.request_repaint_after(Duration::from_millis(16)); }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.editor.title()));
         egui::TopBottomPanel::bottom("stats").show(ctx,|ui| {
-            let stats=self.session.last_stats();
-            ui.label(format!("cooked: {} in {:.1} ms; cached: {}",stats.cooked.join(", "),self.cook_ms,stats.cached.join(", ")));
-            if let Some(error)=&self.cook_error { ui.colored_label(egui::Color32::RED,error); }
+            let stats=&self.cooking.stats;
+            if self.cooking.cooking() { ui.label("cooking..."); }
+            ui.label(format!("cooked: {} in {:.1} ms; cached: {}",stats.cooked.join(", "),self.cooking.milliseconds,stats.cached.join(", ")));
+            if let Some(error)=&self.cooking.error { ui.colored_label(egui::Color32::RED,error); }
             if !self.file_status.is_empty() { ui.label(&self.file_status); }
         });
         egui::CentralPanel::default().show(ctx,|ui| {
