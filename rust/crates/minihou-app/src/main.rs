@@ -2,6 +2,7 @@ mod picking;
 mod graph_edit;
 mod ui;
 mod viewport;
+#[cfg(test)] mod transform_tests;
 use eframe::{egui, egui_wgpu};
 use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, CookRequest, CookState, StandardView};
 use minihou_core::Graph;
@@ -13,6 +14,23 @@ use viewport::{Gpu, Mode, Overlay, Scene, Target};
 
 fn scaled_from_initial(initial: &serde_json::Value, factor: [f32; 3]) -> [f32; 3] {
     [0,1,2].map(|i| initial.get(i).and_then(|x| x.as_f64()).unwrap_or(1.) as f32 * factor[i])
+}
+
+/// Move and Rotate actions carry per-frame deltas. Scale actions carry a factor
+/// relative to the start of the drag, including when the pointer moves back.
+fn transform_parameter(value: &Value, initial: &Document, target: &str, op: TransformOp) -> (&'static str, Value) {
+    let (name, delta, default) = match op {
+        TransformOp::Move(delta) => ("translate", delta, 0.),
+        TransformOp::Rotate(delta) => ("rotate", delta, 0.),
+        TransformOp::Scale(factor) => ("scale", factor, 1.),
+    };
+    let current = &value["nodes"][target]["params"][name];
+    let next = if name == "scale" {
+        scaled_from_initial(&initial.value()["nodes"][target]["params"][name], delta)
+    } else {
+        [0, 1, 2].map(|i| current.get(i).and_then(Value::as_f64).unwrap_or(default) as f32 + delta[i])
+    };
+    (name, json!(next))
 }
 
 /// Picking records displayed triangle numbers; transform groups use the triangle's point numbers.
@@ -227,7 +245,7 @@ impl App {
         for id in ids { let k = id as usize * 3; if let Some(p) = points.get(k..k + 3) { for a in 0..3 { sum[a] += p[a]; } count += 1.; } }
         (count > 0.).then(|| sum.map(|x| x / count))
     }
-    fn transform_node(&mut self, node: &str, op: TransformOp) {
+    fn transform_node(&mut self, op: TransformOp) {
         let group = group_text(&self.selected_points());
         if self.editor_state.selection != ui::SelectionMode::Object && group.is_empty() {
             self.file_status = "Select points, edges, or faces to transform".into();
@@ -236,23 +254,13 @@ impl App {
         let first = self.transform_before.is_none();
         if first { self.editor.history.finish(&self.editor.doc); self.transform_before = Some(self.editor.doc.clone()); }
         let mut value = self.editor.doc.value().clone();
-        let source = if group.is_empty() { node } else { &self.display };
+        // The viewport handle is positioned on the displayed geometry. A graph
+        // selection may name an unrelated node, so always transform what is shown.
+        let source = &self.display;
         let Some(target) = ensure_transform_target(&mut value, source, group.is_empty(), self.transform_target.as_deref()) else { return; };
-        let name = match op { TransformOp::Move(_) => "translate", TransformOp::Rotate(_) => "rotate", TransformOp::Scale(_) => "scale" };
-        let delta = match op { TransformOp::Move(d) | TransformOp::Rotate(d) | TransformOp::Scale(d) => d };
-        let defaults = if name == "scale" { [1.; 3] } else { [0.; 3] };
+        let (name, param_value) = transform_parameter(&value, self.transform_before.as_ref().unwrap(), &target, op);
         let params = &mut value["nodes"][&target]["params"];
         if !params.is_object() { *params = json!({}); }
-        let before = std::array::from_fn::<f32, 3, _>(|i| params[name].get(i).and_then(|n| n.as_f64()).map_or(defaults[i], |n| n as f32));
-        let updated = match op {
-            TransformOp::Scale(factor) => {
-                let initial = self.transform_before.as_ref().map(|doc| &doc.value()["nodes"][&target]["params"]["scale"])
-                    .unwrap_or(&serde_json::Value::Null);
-                scaled_from_initial(initial, factor)
-            }
-            _ => [0,1,2].map(|i| before[i] + delta[i]),
-        };
-        let param_value = json!(updated);
         params[name] = param_value.clone();
         if first {
             params["group"] = json!(group);
@@ -266,8 +274,7 @@ impl App {
     }
     fn finish_transform(&mut self) {
         if let Some(before) = self.transform_before.take() {
-            let final_doc = self.editor.doc.clone(); self.editor.doc = before;
-            self.editor.history.replace(&mut self.editor.doc, final_doc);
+            self.editor.history.record(before, &self.editor.doc);
         }
         if let Some(target) = self.transform_target.take() { self.selected = target; }
     }
@@ -417,7 +424,8 @@ impl App {
                         ui::sketch::start(ctx, mode);
                     } else { self.file_status = "Sketches need the Rust core curve node".into(); }
                 },
-                UiAction::TransformNode { node, op, continuous } => { self.transform_node(&node, op); if !continuous { self.finish_transform(); } },
+                UiAction::TransformNode { op } => self.transform_node(op),
+                UiAction::FinishTransform => self.finish_transform(),
                 UiAction::CancelTransform => self.cancel_transform(),
                 UiAction::SketchCommit { name, points, closed } => self.sketch_commit(&name, &points, closed),
                 UiAction::AddMeasurement { a, b } => self.add_measurement(a, b),
