@@ -52,13 +52,7 @@ def assert_same_geometry(tc, a: Geometry, b: Geometry, atol=1e-5):
             tc.assertEqual(x.shape, y.shape, f"{domain} {name}")
             tc.assertEqual(x.dtype, y.dtype, f"{domain} {name}")
             np.testing.assert_allclose(x, y, rtol=atol, atol=atol, err_msg=f"{domain} {name}")
-    tc.assertEqual(sorted(a.detail.keys()), sorted(b.detail.keys()), "detail keys")
-    for k in a.detail:
-        va, vb = a.detail[k], b.detail[k]
-        if k in ("bound_min", "bound_max", "bound_size"):
-            np.testing.assert_allclose(va, vb, rtol=atol, atol=atol, err_msg=f"detail {k}")
-        else:
-            tc.assertEqual(va, vb, f"detail {k}")
+    tc.assertEqual(a.detail, b.detail)
 
 
 def chain(*steps, source=None):
