@@ -170,3 +170,69 @@ fn viewport_transform_replaces_only_its_entry_in_a_display_set() {
     let (_, hi, _) = cooked(&worker, &mut state);
     assert!((hi[0] - original_hi[0] - 2.).abs() < 1e-3);
 }
+
+#[test]
+fn modal_g_x_r_y_numeric_and_s_cage_cook_through_incremental_edits() {
+    use ui::modal_transform::{CageHandle, Kind, Modal};
+    use egui::{pos2, vec2, Key};
+    let source_doc = Document::parse(include_str!("default_graph.json").to_owned()).unwrap();
+    let camera = CameraInfo { ray_right:[1.,0.,0.], ray_up:[0.,1.,0.], ray_forward:[0.,0.,-1.], ..Default::default() };
+    let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
+    let initial_worker=CookWorker::start(&source_doc,Scene::new).unwrap();
+    let mut initial_state=CookState::default();
+    send(&initial_worker,&mut initial_state,Edit::Replace(source_doc.value().clone()));
+    let (lo,hi,original)=cooked(&initial_worker,&mut initial_state);
+    let pivot=[0,1,2].map(|i|(lo[i]+hi[i])*0.5);
+    for (kind,axis,number) in [(Kind::Move,0,2),(Kind::Rotate,1,9)] {
+        let mut modal=Modal::new(kind,pos2(100.,100.),pivot,(lo,hi),ui::SnapTo::Increment,false,1.);
+        modal.toggle_axis(axis,false);
+        assert!(modal.type_key(if number==2 {Key::Num2} else {Key::Num9},false));
+        if kind==Kind::Rotate { modal.type_key(Key::Num0,false); }
+        let (values,at)=modal.desired(pos2(100.,100.),100.,frame,camera,false,0.25,false);
+        let op=modal.step(values);
+        let mut doc=source_doc.clone(); let mut graph=doc.value().clone();
+        let target=ensure_transform_target(&mut graph,&source_doc.display_nodes()[0],true,None).unwrap();
+        let (name,param)=transform_parameter(&graph,&source_doc,&target,op);
+        graph["nodes"][&target]["params"]=json!({"pivot":at,"group":""});
+        graph["nodes"][&target]["params"][name]=param.clone();
+        let worker=CookWorker::start(&source_doc,Scene::new).unwrap(); let mut state=CookState::default();
+        for edit in apply_transform_step(&mut doc,true,graph,&target,name,param).unwrap() { send(&worker,&mut state,edit); }
+        let (_,_,points)=cooked(&worker,&mut state);
+        assert_ne!(points,original);
+        assert_eq!(doc.value()["nodes"][&target]["type"],"transform");
+        if kind==Kind::Move { assert!((points[0]-original[0]-2.).abs()<1e-3); }
+        else { assert!((doc.value()["nodes"][&target]["params"]["rotate"][1].as_f64().unwrap()-90.).abs()<1e-3); }
+        let mut history=minihou_app::History::default();
+        history.record(source_doc.clone(),&doc);
+        let undo=history.undo(&mut doc).unwrap();
+        send(&worker,&mut state,undo);
+        assert_eq!(cooked(&worker,&mut state).2,original);
+        assert!(history.undo(&mut doc).is_none());
+    }
+    let mut modal=Modal::new(Kind::Scale,pos2(100.,100.),pivot,(lo,hi),ui::SnapTo::Increment,false,1.);
+    modal.cage=true; modal.cage_handle=Some(CageHandle::Face(0,true)); modal.cage_start=pos2(100.,100.);
+    modal.pointer=pos2(100.,100.)+vec2(100.,0.);
+    let (values,cage_pivot)=modal.desired(pos2(100.,100.),100.,frame,camera,false,0.25,false);
+    assert_eq!(cage_pivot[0],lo[0]); assert!(values[0]>1.);
+    let op=modal.step(values);
+    let mut doc=source_doc.clone(); let mut graph=doc.value().clone();
+    let target=ensure_transform_target(&mut graph,&source_doc.display_nodes()[0],true,None).unwrap();
+    let (name,param)=transform_parameter(&graph,&source_doc,&target,op);
+    graph["nodes"][&target]["params"]=json!({"pivot":cage_pivot,"group":""});
+    graph["nodes"][&target]["params"][name]=param.clone();
+    let worker=CookWorker::start(&source_doc,Scene::new).unwrap(); let mut state=CookState::default();
+    for edit in apply_transform_step(&mut doc,true,graph,&target,name,param).unwrap() { send(&worker,&mut state,edit); }
+    let (scaled_lo,scaled_hi,_)=cooked(&worker,&mut state);
+    assert!((scaled_lo[0]-lo[0]).abs()<1e-3);
+    assert!(scaled_hi[0]>hi[0]);
+    assert!(minihou_core::nodes::get("match_size").is_some());
+    let (center,size)=ui::modal_transform::cage_target((lo,hi),cage_pivot,values);
+    let mut matched=doc.value().clone();
+    matched["nodes"][&target]["type"]=json!("match_size");
+    matched["nodes"][&target]["params"]=json!({"translate":true,"center":center,"justify_z":"center",
+        "scale":true,"size":size,"uniform":false});
+    send(&worker,&mut state,Edit::Replace(matched));
+    let (matched_lo,matched_hi,_)=cooked(&worker,&mut state);
+    assert!((matched_lo[0]-scaled_lo[0]).abs()<1e-3);
+    assert!((matched_hi[0]-scaled_hi[0]).abs()<1e-3);
+}

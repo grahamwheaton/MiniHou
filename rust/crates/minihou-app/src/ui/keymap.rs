@@ -51,8 +51,8 @@ impl Command {
     pub fn label(self) -> &'static str { match self {
         Self::Points => "Points", Self::Edges => "Edges", Self::Faces => "Faces", Self::Object => "Object", Self::ToggleEdit => "Toggle Object / edit mode",
         Self::SelectAll => "Select all", Self::SelectNone => "Select none", Self::Hide => "Hide selected", Self::Reveal => "Reveal hidden", Self::AddMenu => "Add node menu", Self::ToggleParams => "Toggle parameters",
-        Self::ToolSelect => "Select tool", Self::ToolMove => "Move tool", Self::ToolRotate => "Rotate tool",
-        Self::ToolScale => "Scale tool", Self::ToolTransform => "Transform tool",
+        Self::ToolSelect => "Select tool", Self::ToolMove => "Move (modal)", Self::ToolRotate => "Rotate (modal)",
+        Self::ToolScale => "Scale (modal)", Self::ToolTransform => "Transform tool",
         Self::FrameAll => "Frame all", Self::FrameSelected => "Frame selected",
         Self::Front => "Front", Self::Back => "Back", Self::Right => "Right", Self::Left => "Left",
         Self::Top => "Top", Self::Bottom => "Bottom", Self::ToggleProjection => "Toggle perspective / ortho",
@@ -101,9 +101,9 @@ impl Command {
         Self::Object => UiAction::Editor(EditorChange::Selection(SelectionMode::Object)),
         Self::ToggleEdit | Self::SelectAll | Self::SelectNone | Self::Hide | Self::Reveal | Self::AddMenu | Self::ToggleParams => UiAction::Command(self.id().to_owned()),
         Self::ToolSelect => UiAction::Editor(EditorChange::Tool(Tool::Select)),
-        Self::ToolMove => UiAction::Editor(EditorChange::Tool(Tool::Move)),
-        Self::ToolRotate => UiAction::Editor(EditorChange::Tool(Tool::Rotate)),
-        Self::ToolScale => UiAction::Editor(EditorChange::Tool(Tool::Scale)),
+        Self::ToolMove => UiAction::StartModal(super::modal_transform::Kind::Move),
+        Self::ToolRotate => UiAction::StartModal(super::modal_transform::Kind::Rotate),
+        Self::ToolScale => UiAction::StartModal(super::modal_transform::Kind::Scale),
         Self::ToolTransform => UiAction::Editor(EditorChange::Tool(Tool::Transform)),
         Self::FrameAll => if kctx.network_hovered { UiAction::FrameNetwork } else { UiAction::Frame },
         Self::FrameSelected => UiAction::FrameSelected,
@@ -257,12 +257,43 @@ fn default_keymap_table() -> String {
     rows
 }
 
+#[cfg(test)]
+fn modal_keymap_table() -> String {
+    let mut rows=String::from("| Input | During modal transform |\n| --- | --- |\n");
+    for (key,action) in MODAL_KEYS { rows.push_str(&format!("| {key} | {action} |\n")); }
+    rows
+}
+
+/// These inputs are consumed by the modal operator before normal keymap dispatch.
+pub const MODAL_KEYS: &[(&str,&str)] = &[
+    ("G / R / S", "Begin move / rotate / scale while the pointer is in the viewport"),
+    ("LMB / Enter / Space", "Confirm"), ("RMB / Escape", "Cancel"),
+    ("X / Y / Z", "Axis; again local axis; third press clears"),
+    ("Shift+X / Y / Z", "Plane excluding axis"),
+    ("Middle mouse", "Choose closest motion axis; again clears"),
+    ("Digits / . / - / Backspace", "Enter exact distance, angle in degrees, or scale factor"),
+    ("Tab", "Next move numeric field"), ("Ctrl", "Invert snapping"),
+    ("Shift", "Precision movement"), ("O", "Toggle proportional editing"),
+    ("Wheel / PageUp / PageDown", "Change proportional radius"),
+    ("B while moving", "Cycle Increment / Vertex / Edge / Face snap target"),
+    ("Ctrl+Shift+LMB while moving", "Pick snap reference point"),
+    ("R while rotating", "Toggle trackball"),
+    ("B while rotating", "Pick two-point pivot, reference, then angle"),
+    ("C while scaling", "Toggle scale cage; click a handle, move, click to confirm"),
+    ("Alt while scaling", "Individual origins is not yet supported for multiple displayed objects"),
+];
+
 #[cfg(test)] mod tests {
     use super::*;
     #[test] fn guide_keymap_matches_defaults() {
         let guide = include_str!("../../docs/NATIVE_EDITOR.md").replace("\r\n", "\n");
         let table = guide.split_once("<!-- keymap:start -->\n").unwrap().1.split_once("<!-- keymap:end -->").unwrap().0;
         assert_eq!(table, default_keymap_table());
+    }
+    #[test] fn guide_modal_table_matches_keys() {
+        let guide=include_str!("../../docs/NATIVE_EDITOR.md").replace("\r\n","\n");
+        let table=guide.split_once("<!-- modal:start -->\n").unwrap().1.split_once("<!-- modal:end -->").unwrap().0;
+        assert_eq!(table,modal_keymap_table());
     }
     #[test] fn defaults_are_unambiguous() {
         let map = Keymap::blender();
