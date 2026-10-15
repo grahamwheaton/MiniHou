@@ -1,35 +1,63 @@
 //! Network canvas and flat list, following Main.dc.html and NodeStates.dc.html.
 #[path = "network_layout.rs"]
 mod network_layout;
+#[path = "network_menu.rs"]
+mod network_menu;
 
 use super::{Actions, UiAction, View};
 use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Id, PointerButton, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 use minihou_app::Edit;
 use minihou_core::graph::NodeDef;
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 const CARD: Vec2 = vec2(220.0, 56.0);
 
 #[derive(Clone)]
-struct State { list: bool, zoom: f32, pan: Vec2, moved: HashMap<String, Pos2> }
+struct State { list: bool, zoom: f32, pan: Vec2, moved: HashMap<String, Pos2>, snap: bool, tidied: bool,
+    drag: Option<(String, Pos2)>, menu: Option<network_menu::MenuState> }
 impl Default for State {
-    fn default() -> Self { Self { list: false, zoom: 1.0, pan: Vec2::ZERO, moved: HashMap::new() } }
+    fn default() -> Self { Self { list: false, zoom: 1.0, pan: Vec2::ZERO, moved: HashMap::new(), snap: true,
+        tidied: false, drag: None, menu: None } }
+}
+
+fn state_id(path: &Path) -> Id { Id::new(("network", path.to_string_lossy().as_ref())) }
+
+/// Clear manual positions for a document. The action dispatcher should call this when it receives
+/// `UiAction::TidyNetwork` from the keymap, then request a repaint.
+pub fn tidy(ctx: &egui::Context, path: &Path) {
+    let id = state_id(path);
+    ctx.data_mut(|d| {
+        let mut state = d.get_persisted::<State>(id).unwrap_or_default();
+        tidy_state(&mut state);
+        d.insert_persisted(id, state);
+    });
+    ctx.request_repaint();
+}
+fn tidy_state(state: &mut State) {
+    state.moved.clear();
+    state.drag = None;
+    state.tidied = true;
+    state.zoom = -1.0;
 }
 
 pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
     let old_spacing = ui.spacing().item_spacing;
     ui.spacing_mut().item_spacing.y = 0.0;
-    let id = Id::new(("network", v.path.to_string_lossy().as_ref()));
+    let id = state_id(v.path);
     let mut state = ui.ctx().data_mut(|d| d.get_persisted::<State>(id).unwrap_or_default());
     let (header, _) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::hover());
-    header_ui(ui, header, v, &mut state);
+    header_ui(ui, header, v, out, &mut state);
     let (body, _) = ui.allocate_exact_size(ui.available_size(), Sense::hover());
-    if state.list { list_ui(ui, body, v, out); } else { canvas_ui(ui, body, v, out, &mut state, id); }
+    if state.list { list_ui(ui, body, v, out); } else {
+        let (crumb, canvas) = split_breadcrumb(body);
+        breadcrumb_ui(ui, crumb, canvas, v, out, &mut state);
+        canvas_ui(ui, canvas, v, out, &mut state, id);
+    }
     ui.ctx().data_mut(|d| d.insert_persisted(id, state));
     ui.spacing_mut().item_spacing = old_spacing;
 }
 
-fn header_ui(ui: &egui::Ui, r: Rect, v: &View, state: &mut State) {
+fn header_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut State) {
     let p = ui.painter();
     p.rect_filled(r, 0.0, v.theme.panel2);
     p.line_segment([pos2(r.left(), r.bottom() - 0.5), pos2(r.right(), r.bottom() - 0.5)], Stroke::new(1.0_f32, v.theme.stroke));
@@ -40,10 +68,77 @@ fn header_ui(ui: &egui::Ui, r: Rect, v: &View, state: &mut State) {
         p.text(pos2(x, r.center().y), Align2::LEFT_CENTER, label, FontId::proportional(12.0), if state.list == *list { v.theme.text } else { v.theme.dim });
         if state.list == *list { p.line_segment([pos2(tab.left(), tab.bottom() - 1.0), pos2(tab.right(), tab.bottom() - 1.0)], Stroke::new(2.0_f32, v.theme.accent)); }
     }
+    let snap_rect = Rect::from_min_size(pos2(r.right() - 142.0, r.top() + 5.0), vec2(52.0, 22.0));
+    if ui.interact(snap_rect, ui.id().with("snap"), Sense::click()).on_hover_text("Snap cards (Ctrl to invert)").clicked() { state.snap = !state.snap; }
+    let sc = if state.snap { v.theme.accent } else { v.theme.dim };
+    magnet_icon(p, pos2(snap_rect.left() + 9.0, snap_rect.center().y), sc);
+    p.text(pos2(snap_rect.left() + 19.0, snap_rect.center().y), Align2::LEFT_CENTER, "Snap", FontId::proportional(11.0), sc);
+    let tidy_rect = Rect::from_min_size(pos2(r.right() - 88.0, r.top() + 5.0), vec2(44.0, 22.0));
+    if ui.interact(tidy_rect, ui.id().with("tidy"), Sense::click()).on_hover_text("Tidy network").clicked() {
+        tidy_state(state);
+        out.push(UiAction::TidyNetwork);
+    }
+    tidy_icon(p, pos2(tidy_rect.left() + 9.0, tidy_rect.center().y), v.theme.text);
+    p.text(pos2(tidy_rect.left() + 18.0, tidy_rect.center().y), Align2::LEFT_CENTER, "Tidy", FontId::proportional(11.0), v.theme.text);
     let fit = Rect::from_min_size(pos2(r.right() - 34.0, r.top() + 5.0), vec2(24.0, 22.0));
     if ui.interact(fit, ui.id().with("fit"), Sense::click()).on_hover_text("Fit network to view").clicked() { state.zoom = -1.0; }
     fit_icon(p, fit.center(), v.theme.text);
-    p.text(pos2(fit.left() - 8.0, r.center().y), Align2::RIGHT_CENTER, format!("{}%", (state.zoom.max(0.25) * 100.0).round() as i32), FontId::monospace(11.0), v.theme.dim);
+    p.text(pos2(snap_rect.left() - 5.0, r.center().y), Align2::RIGHT_CENTER, format!("{}%", (state.zoom.max(0.25) * 100.0).round() as i32), FontId::monospace(11.0), v.theme.dim);
+}
+
+fn magnet_icon(p: &egui::Painter, c: Pos2, color: Color32) {
+    let s = Stroke::new(1.4_f32, color);
+    p.line_segment([c + vec2(-4.0, -4.0), c + vec2(-4.0, 1.0)], s);
+    p.line_segment([c + vec2(4.0, -4.0), c + vec2(4.0, 1.0)], s);
+    p.add(egui::Shape::line(vec![c + vec2(-4.0, 1.0), c + vec2(-3.0, 4.0), c + vec2(0.0, 5.0), c + vec2(3.0, 4.0), c + vec2(4.0, 1.0)], s));
+}
+fn tidy_icon(p: &egui::Painter, c: Pos2, color: Color32) {
+    let s = Stroke::new(1.0_f32, color);
+    for d in [-3.0, 0.0, 3.0] {
+        p.line_segment([c + vec2(-4.0, d), c + vec2(4.0, d)], s);
+        p.line_segment([c + vec2(d, -4.0), c + vec2(d, 4.0)], s);
+    }
+}
+
+fn split_breadcrumb(body: Rect) -> (Rect, Rect) {
+    (Rect::from_min_size(body.min, vec2(body.width(), 22.0)), Rect::from_min_max(body.min + vec2(0.0, 22.0), body.max))
+}
+fn crumbs(path: &Path, nested: &[String], selected: &str, has_selected: bool) -> Vec<String> {
+    let mut parts = vec![path.file_stem().and_then(|s| s.to_str()).unwrap_or("Untitled").to_owned()];
+    parts.extend_from_slice(nested);
+    if has_selected && !selected.is_empty() { parts.push(selected.to_owned()); }
+    parts
+}
+fn breadcrumb_ui(ui: &egui::Ui, r: Rect, canvas: Rect, v: &View, out: &mut Actions, state: &mut State) {
+    let p = ui.painter();
+    p.rect_filled(r, 0.0, v.theme.panel);
+    p.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0_f32, v.theme.stroke));
+    let names = crumbs(v.path, &[], v.selected, v.graph.nodes.iter().any(|(id, _)| id == v.selected));
+    let mut x = r.left() + 10.0;
+    p.text(pos2(x, r.center().y), Align2::LEFT_CENTER, "/", FontId::monospace(11.0), v.theme.dim);
+    x += 14.0;
+    for (index, name) in names.iter().enumerate() {
+        let width = (name.chars().count() as f32 * 6.8 + 8.0).min((r.right() - x).max(0.0));
+        if width <= 0.0 { break; }
+        let hit = Rect::from_min_size(pos2(x, r.top()), vec2(width, r.height()));
+        if ui.interact(hit, ui.id().with(("crumb", index)), Sense::click()).clicked() {
+            if index == 0 { state.zoom = -1.0; }
+            else if index + 1 == names.len() && v.graph.nodes.iter().any(|(id, _)| id == name) {
+                out.push(UiAction::Select(name.clone()));
+                frame_node(state, canvas, name, v);
+            }
+        }
+        p.text(pos2(x, r.center().y), Align2::LEFT_CENTER, name, FontId::monospace(11.0), v.theme.dim);
+        x += width;
+        if index + 1 < names.len() {
+            p.text(pos2(x, r.center().y), Align2::LEFT_CENTER, ">", FontId::monospace(11.0), v.theme.dim);
+            x += 14.0;
+        }
+    }
+}
+fn frame_node(state: &mut State, canvas: Rect, node: &str, v: &View) {
+    let positions = network_layout::layout(v.graph, |id| state.moved.get(id).copied().or_else(|| (!state.tidied).then(|| json_pos(v, id)).flatten()));
+    if let Some((_, at)) = positions.iter().find(|(id, _)| id == node) { frame_all(state, canvas, Rect::from_min_size(*at, CARD)); }
 }
 
 fn list_ui(ui: &mut egui::Ui, r: Rect, v: &View, out: &mut Actions) {
@@ -68,7 +163,7 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
     if v.cooking.cooking() { ctx.request_repaint_after(std::time::Duration::from_millis(16)); }
     let pointer = ctx.input(|i| i.pointer.hover_pos());
     let over = pointer.is_some_and(|at| r.contains(at));
-    let positions = network_layout::layout(v.graph, |node| state.moved.get(node).copied().or_else(|| json_pos(v, node)));
+    let positions = network_layout::layout(v.graph, |node| state.moved.get(node).copied().or_else(|| (!state.tidied).then(|| json_pos(v, node)).flatten()));
     let bounds = content_bounds(&positions);
     if state.zoom < 0.0 || (over && ctx.input(|i| i.key_pressed(egui::Key::F))) { frame_all(state, r, bounds); }
     if over {
@@ -82,6 +177,14 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
         } else { state.pan += scroll; }
         if dragging { state.pan += delta; }
     }
+    let right_click = over && ctx.input(|i| i.pointer.button_pressed(PointerButton::Secondary));
+    let tab = over && state.menu.is_none() && ctx.input(|i| i.key_pressed(egui::Key::Tab));
+    if right_click || tab {
+        let at = pointer.unwrap_or(r.center());
+        let target = if right_click { positions.iter().rev().find(|(_, pos)| Rect::from_min_size(screen(r, state, *pos), CARD * state.zoom).contains(at))
+            .map(|(id, _)| id.clone()) } else { None };
+        state.menu = Some(network_menu::MenuState::new(at, target, tab));
+    }
     let p = ui.painter().with_clip_rect(r);
     p.rect_filled(r, 0.0, v.theme.base);
     grid(&p, r, state, v.theme.grid);
@@ -91,6 +194,7 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
         p.galley(pos2(r.center().x - hint.size().x * 0.5, r.center().y + 5.0), hint, v.theme.dim);
     } else {
         wires(&p, r, state, v, &positions);
+        let mut guide = None;
         for (node_id, at) in &positions {
             let Some((_, node)) = v.graph.nodes.iter().find(|(n, _)| n == node_id) else { continue };
             let card = Rect::from_min_size(screen(r, state, *at), CARD * state.zoom);
@@ -100,10 +204,21 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
                 .on_hover_text(format!("{} · {} · {} params", node_id, node.node_type, node.params.as_ref().map_or(0, |p| p.len())));
             if response.double_clicked() { out.push(UiAction::SetDisplay(node_id.clone())); }
             else if response.clicked() { out.push(UiAction::Select(node_id.clone())); }
+            if response.drag_started_by(PointerButton::Primary) { state.drag = Some((node_id.clone(), *at)); }
             if response.dragged_by(PointerButton::Primary) && !ctx.input(|i| i.key_down(egui::Key::Space)) {
-                let delta = ctx.input(|i| i.pointer.delta());
-                state.moved.insert(node_id.clone(), *at + delta / state.zoom);
+                let delta = ctx.input(|i| i.pointer.delta()) / state.zoom;
+                let raw = if let Some((active, raw)) = &mut state.drag {
+                    if active == node_id { *raw += delta; *raw } else { *at + delta }
+                } else { *at + delta };
+                let invert = ctx.input(|i| i.modifiers.ctrl);
+                let enabled = state.snap ^ invert;
+                let base = snap(raw, 32.0, state.snap, invert);
+                let peers: Vec<_> = positions.iter().filter(|(id, _)| id != node_id).map(|(_, at)| *at).collect();
+                let (next, lines) = if enabled { align_to_cards(base, &peers, CARD, 6.0 / state.zoom) } else { (base, Guides::default()) };
+                guide = Some(lines);
+                state.moved.insert(node_id.clone(), next);
             }
+            if response.drag_stopped_by(PointerButton::Primary) { state.drag = None; }
             for flag in 0..4 {
                 if ui.interact(flag_rect(card, flag), id.with(("flag", node_id, flag)), Sense::click())
                     .on_hover_text(["Mute", "Locked", "Template", "Visible"][flag]).clicked() {
@@ -112,9 +227,49 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
             }
             card_ui(&p, card, node_id, node, v, state.zoom);
         }
+        if let Some(lines) = guide {
+            if let Some(x) = lines.x { let x = screen(r, state, pos2(x, 0.0)).x; p.line_segment([pos2(x, r.top()), pos2(x, r.bottom())], Stroke::new(1.0_f32, v.theme.accent)); }
+            if let Some(y) = lines.y { let y = screen(r, state, pos2(0.0, y)).y; p.line_segment([pos2(r.left(), y), pos2(r.right(), y)], Stroke::new(1.0_f32, v.theme.accent)); }
+        }
         minimap(ui, r, state, v, &positions, id);
     }
+    if let Some(menu) = &mut state.menu {
+        if let Some(choice) = network_menu::show(ctx, id.with("menu"), menu, v, out) {
+            match choice {
+                network_menu::Choice::Close => state.menu = None,
+                network_menu::Choice::FrameAll => { frame_all(state, r, content_bounds(&positions)); state.menu = None; },
+                network_menu::Choice::Tidy => { tidy_state(state); out.push(UiAction::TidyNetwork); state.menu = None; },
+            }
+        }
+    }
     p.text(pos2(r.left() + 10.0, r.bottom() - 8.0), Align2::LEFT_BOTTOM, "Tab add node · F frame all · Del delete", FontId::proportional(11.0), v.theme.faint);
+}
+
+fn snap(pos: Pos2, grid: f32, enabled: bool, invert: bool) -> Pos2 {
+    if !(enabled ^ invert) || grid <= 0.0 { return pos; }
+    pos2((pos.x / grid).round() * grid, (pos.y / grid).round() * grid)
+}
+
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+struct Guides { x: Option<f32>, y: Option<f32> }
+fn align_to_cards(pos: Pos2, peers: &[Pos2], size: Vec2, tolerance: f32) -> (Pos2, Guides) {
+    let mut best_x: Option<(f32, f32, f32)> = None;
+    let mut best_y: Option<(f32, f32)> = None;
+    for peer in peers {
+        for peer_offset in [0.0, size.x * 0.5, size.x] {
+            for own_offset in [0.0, size.x * 0.5, size.x] {
+                let guide = peer.x + peer_offset;
+                let distance = (pos.x + own_offset - guide).abs();
+                if distance <= tolerance && best_x.is_none_or(|(d, _, _)| distance < d) {
+                    best_x = Some((distance, guide - own_offset, guide));
+                }
+            }
+        }
+        let distance = (pos.y - peer.y).abs();
+        if distance <= tolerance && best_y.is_none_or(|(d, _)| distance < d) { best_y = Some((distance, peer.y)); }
+    }
+    let next = pos2(best_x.map_or(pos.x, |(_, x, _)| x), best_y.map_or(pos.y, |(_, y)| y));
+    (next, Guides { x: best_x.map(|(_, _, guide)| guide), y: best_y.map(|(_, y)| y) })
 }
 
 fn json_pos(v: &View, id: &str) -> Option<Pos2> {
@@ -324,6 +479,9 @@ mod tests {
     fn panel_runs_and_status_precedence() {
         let f = Fixture::new();
         assert!(f.run(show).is_empty());
+        let mut light = Fixture::new();
+        light.theme = crate::ui::theme::Theme::light();
+        assert!(light.run(show).is_empty());
         let v = f.view();
         assert_eq!(node_status(&v, "grid1", true, false, false).0, "muted");
         assert_eq!(node_status(&v, "grid1", false, true, false).0, "unsupported");
@@ -343,5 +501,36 @@ mod tests {
         assert!(matches!(flag_action(1, "a", false), UiAction::ToggleLocked(node) if node == "a"));
         assert!(matches!(flag_action(2, "a", false), UiAction::ToggleTemplate(node) if node == "a"));
         assert!(matches!(flag_action(3, "a", false), UiAction::SetDisplay(node) if node == "a"));
+    }
+    #[test]
+    fn grid_snap_and_ctrl_inversion() {
+        let at = pos2(47.0, -17.0);
+        assert_eq!(snap(at, 32.0, true, false), pos2(32.0, -32.0));
+        assert_eq!(snap(at, 32.0, true, true), at);
+        assert_eq!(snap(at, 32.0, false, false), at);
+        assert_eq!(snap(at, 32.0, false, true), pos2(32.0, -32.0));
+    }
+    #[test]
+    fn card_guides_snap_left_center_right_and_top() {
+        let size = vec2(220.0, 56.0);
+        let peers = [pos2(100.0, 80.0)];
+        assert_eq!(align_to_cards(pos2(105.0, 75.0), &peers, size, 6.0).0, pos2(100.0, 80.0));
+        assert_eq!(align_to_cards(pos2(96.0, 90.0), &peers, size, 6.0).1.x, Some(100.0));
+        assert_eq!(align_to_cards(pos2(319.0, 90.0), &peers, size, 6.0), (pos2(320.0, 90.0), Guides { x: Some(320.0), y: None }));
+        assert_eq!(align_to_cards(pos2(-9.0, 90.0), &peers, size, 6.0).0.x, -10.0);
+        assert_eq!(align_to_cards(pos2(107.0, 80.0), &peers, size, 6.0).1.x, None);
+    }
+    #[test]
+    fn breadcrumbs_are_ready_for_nested_paths() {
+        let nested = vec!["subnet".to_owned(), "inner".to_owned()];
+        assert_eq!(crumbs(Path::new("C:/work/scene.json"), &nested, "box1", true), vec!["scene", "subnet", "inner", "box1"]);
+        assert_eq!(crumbs(Path::new("scene.json"), &[], "gone", false), vec!["scene"]);
+    }
+    #[test]
+    fn tidy_clears_manual_positions() {
+        let mut state = State::default();
+        state.moved.insert("box1".into(), pos2(123.0, 45.0));
+        tidy_state(&mut state);
+        assert!(state.moved.is_empty() && state.tidied && state.zoom < 0.0);
     }
 }
