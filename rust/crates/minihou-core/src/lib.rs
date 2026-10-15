@@ -12,6 +12,7 @@ pub mod error;
 pub mod geometry;
 pub mod graph;
 pub mod heightfield;
+pub mod lod;
 pub mod math;
 pub mod noise;
 pub mod nodes;

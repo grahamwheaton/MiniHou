@@ -62,6 +62,7 @@ pub fn registry() -> &'static [NodeSpec] {
         modify::MATCH_SIZE,
         modify::DELETE,
         merge::MERGE,
+        NodeSpec { name: "lod_bake", inputs: GEO, params: crate::params!("cluster_size": 128; "error_px": 1.0; "enabled": true; "min_triangles": 50000), cook: lod_bake },
         NodeSpec { name: "null", inputs: GEO, params: crate::params!("label": ""), cook: pass_through },
         NodeSpec { name: "output", inputs: GEO, params: crate::params!("object": ""), cook: pass_through },
     ];
@@ -74,6 +75,17 @@ pub fn get(name: &str) -> Option<&'static NodeSpec> {
 
 fn pass_through(inputs: &Inputs, _p: &Params) -> Result<Geometry> {
     inputs[0].first().map(|g| (**g).clone()).ok_or_else(|| Error::new("input 'geo' is not connected"))
+}
+
+fn lod_bake(inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    let cluster_size=p.i("cluster_size")?;
+    let min_triangles=p.i("min_triangles")?;
+    let error_px=p.f("error_px")?;
+    p.b("enabled")?;
+    if !(16..=128).contains(&cluster_size) || min_triangles < 0 || !(error_px as f32).is_finite() || error_px <= 0.0 {
+        return Err(Error::new("cluster_size must be 16..128, min_triangles must be nonnegative, and error_px must be positive and finite"));
+    }
+    pass_through(inputs,p)
 }
 
 /// `np.linspace(start, stop, num)` in float64: `i * step + start`, with the last value exactly `stop`.

@@ -1,5 +1,6 @@
 //! Window-independent editor state and lossless JSON edits.
-use minihou_core::{session::Session, Graph};
+pub mod cluster_lod;
+use minihou_core::{session::Session, lod::ClusterLod, Graph};
 use serde_json::{json, Value};
 use std::{collections::HashMap, ops::Range, path::Path, time::Instant};
 
@@ -217,6 +218,11 @@ impl Camera {
     pub fn distance(&self) -> f32 {
         self.dist
     }
+    pub fn lod_camera(&self, size: [u32; 2]) -> minihou_core::lod::Camera {
+        let (view_projection, _) = self.matrices(size[0].max(1) as f32 / size[1].max(1) as f32);
+        minihou_core::lod::Camera { view_projection, eye: self.eye(), viewport_height_px: size[1] as f32,
+            near: (self.dist - self.radius * 1.5).max(self.radius * 0.001).max(1e-4), orthographic:self.ortho }
+    }
     pub fn frame(center: [f32; 3], radius: f32) -> Self {
         let radius = radius.max(1e-3); Camera { target: center, dist: radius * 2.6, yaw: 0.6, pitch: 0.5, radius, ortho: false }
     }
@@ -408,6 +414,7 @@ pub struct CookRequest { pub revision: u64, pub edit: Edit }
 pub struct CookResponse<T> {
     pub revision: u64,
     pub geometry: Option<Arc<Geometry>>,
+    pub lod: Option<Arc<ClusterLod>>,
     pub prepared: Option<T>,
     pub stats: CookStats,
     pub error: Option<String>,
@@ -444,15 +451,41 @@ pub fn cook_batch<T>(session: &mut Session, target: &mut String, requests: Vec<C
         Ok(g) => Some(g),
         Err(e) => { error = Some(e.to_string()); None }
     };
+    let lod = if geometry.is_some() {
+        // Breadth first finds the closest bake to the displayed node, including itself.
+        let mut queue = std::collections::VecDeque::from([target.clone()]);
+        let mut seen = std::collections::HashSet::new();
+        let mut found = None;
+        while let Some(id) = queue.pop_front() {
+            if !seen.insert(id.clone()) { continue; }
+            if let Some(def) = session.graph().nodes.iter().find(|(name, _)| name == &id).map(|(_, def)| def) {
+                if def.node_type == "lod_bake" {
+                    if !def.bypass {
+                        if let (Some(source), Some(displayed)) = (session.cached_geometry(&id), geometry.as_ref()) {
+                            let same_points = source.point.get("P").zip(displayed.point.get("P"))
+                                .is_some_and(|(a,b)| Arc::ptr_eq(a,b));
+                            if same_points && Arc::ptr_eq(&source.topology,&displayed.topology) {
+                                found = session.side_payload::<ClusterLod>(&id);
+                            }
+                        }
+                    }
+                    break;
+                }
+                for (_, refs) in &def.inputs { queue.extend(refs.iter().cloned()); }
+            }
+        }
+        found
+    } else { None };
     let milliseconds = start.elapsed().as_secs_f64() * 1000.;
     let prepared = geometry.as_ref().map(|g| prepare(g));
-    CookResponse { revision, geometry, prepared, stats: session.last_stats().clone(), error, milliseconds }
+    CookResponse { revision, geometry, lod, prepared, stats: session.last_stats().clone(), error, milliseconds }
 }
 #[derive(Default)]
 pub struct CookState {
     pub requested: u64,
     pub completed: u64,
     pub geometry: Option<Arc<Geometry>>,
+    pub lod: Option<Arc<ClusterLod>>,
     pub stats: CookStats,
     pub error: Option<String>,
     pub milliseconds: f64,
@@ -465,6 +498,7 @@ impl CookState {
         self.error = response.error;
         self.stats = response.stats;
         self.milliseconds = response.milliseconds;
+        self.lod = response.lod;
         if let Some(g) = response.geometry { self.geometry = Some(g); }
         response.prepared
     }

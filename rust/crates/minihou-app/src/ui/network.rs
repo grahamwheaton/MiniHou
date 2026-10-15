@@ -399,11 +399,11 @@ fn card_ui(p: &egui::Painter, r: Rect, id: &str, node: &NodeDef, v: &View, zoom:
             let tag = Rect::from_min_size(pos2(face.right() - tag_width, face.top()), vec2(tag_width, 15.0 * zoom));
             p.rect_filled(tag, 3.0 * zoom, t.ok_bg);
             p.rect_stroke(tag, 3.0 * zoom, Stroke::new(1.0_f32, t.ok), StrokeKind::Inside);
-            p.text(tag.center(), Align2::CENTER_CENTER, "Rs", FontId::monospace(10.0 * zoom), t.ok);
+            p.text(tag.center(), Align2::CENTER_CENTER, if node.node_type == "lod_bake" { "LOD" } else { "Rs" }, FontId::monospace(10.0 * zoom), t.ok);
         }
         p.text(pos2(face.left() + 17.0 * zoom, face.top()), Align2::LEFT_TOP, ellipsis(id, face.width() - 17.0 * zoom - tag_width, 12.5 * zoom), FontId::monospace(12.5 * zoom), text);
         let (status, status_color) = node_status(v, id, node.bypass, unsupported, error.is_some());
-        p.text(pos2(face.left(), face.bottom()), Align2::LEFT_BOTTOM, ellipsis(&node.node_type, 92.0 * zoom, 11.0 * zoom), FontId::proportional(11.0 * zoom), dim);
+        p.text(pos2(face.left(), face.bottom()), Align2::LEFT_BOTTOM, ellipsis(if node.node_type == "lod_bake" { "Nanite proxy" } else { &node.node_type }, 92.0 * zoom, 11.0 * zoom), FontId::proportional(11.0 * zoom), dim);
         p.text(pos2(face.right(), face.bottom()), Align2::RIGHT_BOTTOM, status, FontId::monospace(11.0 * zoom), status_color);
         if v.cooking.cooking() && !node.bypass {
             let time = p.ctx().input(|i| i.time as f32);

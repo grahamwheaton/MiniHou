@@ -26,6 +26,7 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "Point", node_type: "point", icon: "point" },
     ] },
     Tab { name: "Modify", tools: &[
+        Tool { label: "LOD Bake", node_type: "lod_bake", icon: "null" },
         Tool { label: "Transform", node_type: "transform", icon: "transform" },
         Tool { label: "Merge", node_type: "merge", icon: "merge" },
         Tool { label: "Duplicate", node_type: "copy_transform", icon: "duplicate" },
