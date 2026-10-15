@@ -38,7 +38,7 @@ fn icon(p: &egui::Painter, r: Rect, tool: &Tool, color: Color32, accent: Color32
         "points_to_surface" => { p.circle_filled(o + Vec2::new(9.5, 13.), 6., accent); p.circle_filled(o + Vec2::new(16.5, 9.), 4.5, color.gamma_multiply(0.6)); }
         "file" => { line(p, o, &[(3., 19.), (3., 7.), (10., 7.), (12., 9.5), (21., 9.5), (21., 19.), (3., 19.)], color); }
         "host" => { p.rect_stroke(Rect::from_min_size(o + Vec2::new(11., 6.), Vec2::new(10., 12.)), 1., Stroke::new(1.5_f32, color), StrokeKind::Inside); line(p, o, &[(2.5, 12.), (15., 12.)], color); line(p, o, &[(10., 7.5), (14.5, 12.), (10., 16.5)], color); }
-        _ => { let chip = Rect::from_center_size(c, Vec2::splat(22.)); p.rect_filled(chip, 5., accent); let initials = initials(tool.label); p.text(c, Align2::CENTER_CENTER, initials, FontId::proportional(10.), color); }
+        _ => { let chip = Rect::from_center_size(c, Vec2::splat(22.)); p.rect_stroke(chip, 5., Stroke::new(1.5_f32, color), StrokeKind::Inside); let initials = initials(tool.label); p.text(c, Align2::CENTER_CENTER, initials, FontId::proportional(10.), color); }
     }
 }
 

@@ -290,7 +290,10 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
         let key = egui::Id::new(("params_group", typ));
         let mut open = ui.ctx().data_mut(|d| d.get_persisted::<bool>(key).unwrap_or(true));
         if response.clicked() { open = !open; ui.ctx().data_mut(|d| d.insert_persisted(key, open)); }
-        paint_text(ui, Pos2::new(r.left() + 10., r.center().y), if open { "⌄" } else { "›" }, 14., false, v.theme.text, Align2::LEFT_CENTER);
+        let (cx, cy) = (r.left() + 14., r.center().y);
+        let chevron: [Pos2; 3] = if open { [Pos2::new(cx - 3., cy - 1.5), Pos2::new(cx, cy + 1.5), Pos2::new(cx + 3., cy - 1.5)] }
+            else { [Pos2::new(cx - 1.5, cy - 3.), Pos2::new(cx + 1.5, cy), Pos2::new(cx - 1.5, cy + 3.)] };
+        ui.painter().add(egui::Shape::line(chevron.to_vec(), Stroke::new(1.5_f32, v.theme.text)));
         paint_text(ui, Pos2::new(r.left() + 26., r.center().y), &title(typ), 12., false, v.theme.text, Align2::LEFT_CENTER);
         if open {
             ui.add_space(6.);
@@ -307,6 +310,24 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
             }
         }
     });
+}
+
+/// A 22 px value box in the design's style (input fill, 1 px stroke, 4 px radius); returns the outer and inner rects.
+fn boxed(ui: &mut egui::Ui, width: f32, t: &Theme) -> (Rect, Rect) {
+    let (r, _) = ui.allocate_exact_size(Vec2::new(width, 22.), Sense::hover());
+    ui.painter().rect(r, 4., t.input, Stroke::new(1.0_f32, t.stroke), StrokeKind::Inside);
+    (r, r.shrink2(Vec2::new(2., 1.)))
+}
+/// A drag value drawn without its own frame inside `rect`.
+fn drag_in(ui: &mut egui::Ui, rect: Rect, drag: egui::DragValue<'_>) -> bool {
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    let w = &mut child.visuals_mut().widgets;
+    for s in [&mut w.inactive, &mut w.hovered, &mut w.active, &mut w.noninteractive] {
+        s.bg_fill = Color32::TRANSPARENT;
+        s.weak_bg_fill = Color32::TRANSPARENT;
+        s.bg_stroke = Stroke::NONE;
+    }
+    child.add_sized([rect.width(), rect.height()], drag).changed()
 }
 
 /// One editing widget for a parameter value; returns true when the value changed.
@@ -374,9 +395,16 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
         }
         ParamKind::Integer => {
             let mut v = value.as_i64().or_else(|| value.as_f64().map(|f| f as i64)).unwrap_or(0);
-            if let Some(t) = theme { ui.label(egui::RichText::new("‹").color(t.dim).monospace()); }
-            let changed = ui.add_sized([(width - if theme.is_some() { 32. } else { 0. }).max(24.), 22.], egui::DragValue::new(&mut v).speed(1)).changed();
-            if let Some(t) = theme { ui.label(egui::RichText::new("›").color(t.dim).monospace()); }
+            let changed = if let Some(t) = theme {
+                let (outer, inner) = boxed(ui, width.max(40.), t);
+                let p = ui.painter();
+                let c = outer.center().y;
+                p.add(egui::Shape::line(vec![Pos2::new(outer.left() + 9., c - 3.), Pos2::new(outer.left() + 6., c), Pos2::new(outer.left() + 9., c + 3.)], Stroke::new(1.3_f32, t.dim)));
+                p.add(egui::Shape::line(vec![Pos2::new(outer.right() - 9., c - 3.), Pos2::new(outer.right() - 6., c), Pos2::new(outer.right() - 9., c + 3.)], Stroke::new(1.3_f32, t.dim)));
+                drag_in(ui, inner.shrink2(Vec2::new(14., 0.)), egui::DragValue::new(&mut v).speed(1))
+            } else {
+                ui.add_sized([width.max(24.), 22.], egui::DragValue::new(&mut v).speed(1)).changed()
+            };
             if changed { *value = json!(v); }
             changed
         }
@@ -392,14 +420,18 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
             let mut v = [0, 1, 2].map(|i| value.get(i).and_then(Value::as_f64).unwrap_or(0.));
             let mut changed = false;
             let axis_width = ((width - 8.) / 3.).max(22.);
+            let range = meta.and_then(|m| m["min"].as_f64()).unwrap_or(f64::NEG_INFINITY)..=meta.and_then(|m| m["max"].as_f64()).unwrap_or(f64::INFINITY);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.;
                 for (i, x) in v.iter_mut().enumerate() {
                     if let Some(t) = theme {
-                        ui.label(egui::RichText::new(["X", "Y", "Z"][i]).color([t.x_axis, t.y_axis, t.z_axis][i]).monospace());
+                        let (outer, inner) = boxed(ui, axis_width, t);
+                        ui.painter().text(Pos2::new(outer.left() + 6., outer.center().y), Align2::LEFT_CENTER, ["X", "Y", "Z"][i],
+                            egui::FontId::monospace(11.), [t.x_axis, t.y_axis, t.z_axis][i]);
+                        changed |= drag_in(ui, Rect::from_min_max(Pos2::new(inner.left() + 12., inner.top()), inner.max), egui::DragValue::new(x).speed(0.01).range(range.clone()));
+                    } else {
+                        changed |= ui.add_sized([axis_width, 22.], egui::DragValue::new(x).speed(0.01).range(range.clone())).changed();
                     }
-                    changed |= ui.add_sized([if theme.is_some() { axis_width - 13. } else { axis_width }, 22.], egui::DragValue::new(x).speed(0.01).range(
-                        meta.and_then(|m| m["min"].as_f64()).unwrap_or(f64::NEG_INFINITY)..=meta.and_then(|m| m["max"].as_f64()).unwrap_or(f64::INFINITY))).changed();
                 }
             });
             if changed { *value = json!(v); }
