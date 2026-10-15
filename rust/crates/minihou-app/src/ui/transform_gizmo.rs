@@ -75,7 +75,7 @@ fn axis_frame(v: &View) -> [[f32; 3]; 3] {
     match v.editor.orientation {
         Orientation::View => { let c = v.camera; [normal(c.ray_right), normal(c.ray_up), normal(c.ray_forward)] }
         Orientation::Local | Orientation::Gimbal => {
-            let r = &v.doc["nodes"][v.selected]["params"]["rotate"];
+            let r = &v.doc["nodes"][v.display]["params"]["rotate"];
             let deg = [0,1,2].map(|i| r.get(i).and_then(|x| x.as_f64()).unwrap_or(0.) as f32);
             let [x,y,z] = deg.map(f32::to_radians); let (sx,cx) = x.sin_cos(); let (sy,cy) = y.sin_cos(); let (sz,cz) = z.sin_cos();
             [[cz*cy, sz*cy, -sy], [cz*sy*sx-sz*cx, sz*sy*sx+cz*cx, cy*sx], [cz*sy*cx+sz*sx, sz*sy*cx-cz*sx, cy*cx]]
@@ -84,7 +84,7 @@ fn axis_frame(v: &View) -> [[f32; 3]; 3] {
     }
 }
 pub fn hit(rect: Rect, v: &View, pointer: Pos2) -> bool {
-    if !matches!(v.editor.tool, Tool::Move | Tool::Rotate | Tool::Scale | Tool::Transform) || v.selected.is_empty() { return false; }
+    if !matches!(v.editor.tool, Tool::Move | Tool::Rotate | Tool::Scale | Tool::Transform) || v.display.is_empty() { return false; }
     let origin = pivot(v);
     let Some(center) = project(v.camera, rect, origin) else { return false; };
     let frame = axis_frame(v);
@@ -133,7 +133,7 @@ pub fn cursor(ui: &egui::Ui, rect: Rect, v: &View) {
 
 pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool {
     let tool = v.editor.tool;
-    if !matches!(tool, Tool::Move | Tool::Rotate | Tool::Scale | Tool::Transform) || v.selected.is_empty() { return false; }
+    if !matches!(tool, Tool::Move | Tool::Rotate | Tool::Scale | Tool::Transform) || v.display.is_empty() { return false; }
     let origin = pivot(v);
     let Some(center) = project(v.camera, rect, origin) else { return false; };
     let p = ui.painter_at(rect);
@@ -187,10 +187,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
         if escape || !down {
             ui.ctx().data_mut(|data| data.remove::<Drag>(id));
             if escape { out.push(UiAction::CancelTransform); }
-            else if d.last.abs() > 1e-6 {
-                let final_op = if d.kind == Tool::Scale { op(d.kind, d.axis, d.last + 1.) } else { op(d.kind, d.axis, 0.) };
-                out.push(UiAction::TransformNode { node: v.selected.into(), op: final_op, continuous: false });
-            }
+            else if d.last.abs() > 1e-6 { out.push(UiAction::FinishTransform); }
         }
         else {
             let events = ui.input(|i| i.events.clone());
@@ -217,7 +214,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
                 let operation = if d.kind == Tool::Move { TransformOp::Move(mul(frame[d.axis], delta)) }
                     else if d.kind == Tool::Scale { op(d.kind, d.axis, current + 1.) }
                     else { op(d.kind, d.axis, delta) };
-                out.push(UiAction::TransformNode { node: v.selected.into(), op: operation, continuous: true });
+                out.push(UiAction::TransformNode { op: operation });
                 d.last = current;
             }
             let shown = if d.kind == Tool::Scale { current + 1. } else { current };
@@ -230,7 +227,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
         if !down || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             ui.ctx().data_mut(|data| data.remove::<PlaneDrag>(plane_id));
             if ui.input(|i| i.key_pressed(egui::Key::Escape)) { out.push(UiAction::CancelTransform); }
-            else if d.last.iter().any(|x| x.abs() > 1e-6) { out.push(UiAction::TransformNode { node: v.selected.into(), op: TransformOp::Move([0.;3]), continuous: false }); }
+            else if d.last.iter().any(|x| x.abs() > 1e-6) { out.push(UiAction::FinishTransform); }
         }
         else {
             let pointer = ui.input(|i| i.pointer.hover_pos()).unwrap_or(d.start);
@@ -242,7 +239,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
             let snap = v.editor.snap.enabled != ui.input(|i| i.modifiers.ctrl);
             let world = add(mul(frame[d.a], snapped(x,v.editor.snap.increment,snap)), mul(frame[d.b], snapped(y,v.editor.snap.increment,snap)));
             let delta = [0,1,2].map(|k| world[k] - d.last[k]);
-            if delta.iter().any(|x| x.abs() > 1e-6) { out.push(UiAction::TransformNode { node: v.selected.into(), op: TransformOp::Move(delta), continuous: true }); d.last = world; }
+            if delta.iter().any(|x| x.abs() > 1e-6) { out.push(UiAction::TransformNode { op: TransformOp::Move(delta) }); d.last = world; }
             ui.ctx().data_mut(|data| data.insert_temp(plane_id, d));
         }
     }

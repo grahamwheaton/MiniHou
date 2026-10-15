@@ -30,7 +30,8 @@ use std::path::Path;
 #[derive(Clone, Debug)]
 pub enum UiAction {
     StartSketch(sketch::SketchMode),
-    TransformNode { node: String, op: TransformOp, continuous: bool },
+    TransformNode { op: TransformOp },
+    FinishTransform,
     CancelTransform,
     SketchCommit { name: String, points: Vec<[f32; 3]>, closed: bool },
     AddMeasurement { a: [f32; 3], b: [f32; 3] },

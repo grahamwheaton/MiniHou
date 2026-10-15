@@ -370,6 +370,14 @@ impl History {
             *doc = new;
         }
     }
+    /// Record a completed drag whose document was already updated in place.
+    pub fn record(&mut self, before: Document, after: &Document) {
+        self.finish(after);
+        if before.text != after.text {
+            self.undo.push((before, after.clone()));
+            self.redo.clear();
+        }
+    }
     /// Called at the end of a drag, or immediately for discrete edits.
     pub fn finish(&mut self, doc: &Document) {
         if let Some(before) = self.pending.take() {
