@@ -1,4 +1,4 @@
-use crate::{param_kind, selftest, Camera, Document, ParamKind};
+use crate::{param_kind, selftest, Camera, Document, ParamKind, StandardView};
 use minihou_core::nodes;
 use serde_json::{json, Value};
 
@@ -118,6 +118,73 @@ fn camera_frame_orbit_pan_zoom_are_finite() {
     assert!(next.0.iter().flatten().all(|f|f.is_finite()));
     camera.zoom(-1e10);
     assert!(camera.matrices(0.1).0.iter().flatten().all(|f|f.is_finite()));
+}
+
+#[test]
+fn clip_planes_several_pairs_and_ratio_clamp() {
+    let test_cases = [
+        (10.0, 5.0, 20.0),
+        (0.01, 10.0, 20.0),
+        (1000.0, 0.1, 20.0),
+        (100.0, 10000.0, 20.0),
+        (0.0001, 1000.0, 20.0),
+        (50.0, 25.0, 5.0),
+        (50.0, 25.0, 100.0),
+        (50.0, 25.0, 1000.0),
+    ];
+    for (dist, radius, vd) in test_cases {
+        let mut camera = Camera::frame([0., 0., 0.], radius);
+        camera.set_dist(dist);
+        camera.set_view_distance(vd);
+        let (near, far) = camera.clip_planes();
+        assert!(near > 0.0, "near must be positive, got {near} for dist={dist}, radius={radius}");
+        assert!(near < far, "near {near} must be < far {far} for dist={dist}, radius={radius}");
+        let ratio = far / near;
+        assert!(ratio <= 1_000_000.0 + 1e-1, "ratio {ratio} must not exceed 1e6 for dist={dist}, radius={radius}");
+    }
+}
+
+#[test]
+fn clip_planes_ratio_clamp_triggers() {
+    let mut camera = Camera::frame([0., 0., 0.], 10000.0);
+    camera.set_dist(0.001);
+    camera.set_view_distance(20.0);
+    let (near, far) = camera.clip_planes();
+    assert!((far / near - 1_000_000.0).abs() < 1.0, "far/near ratio should be clamped to 1e6, got {}", far / near);
+}
+
+#[test]
+fn point_at_15_radii_in_front_of_camera_inside_frustum() {
+    let radius = 10.0;
+    let camera = Camera::frame([0., 0., 0.], radius);
+    assert_eq!(camera.view_distance(), 20.0);
+
+    let (near, far) = camera.clip_planes();
+    let pt_dist = 15.0 * radius;
+    assert!(pt_dist > near && pt_dist < far, "pt_dist {pt_dist} should be between near {near} and far {far}");
+
+    let (view_proj, _) = camera.matrices(1.0);
+    let eye = camera.eye();
+    let fwd = camera.forward();
+    let pt = [eye[0] + fwd[0] * pt_dist, eye[1] + fwd[1] * pt_dist, eye[2] + fwd[2] * pt_dist];
+    let clip_z = view_proj[0][2] * pt[0] + view_proj[1][2] * pt[1] + view_proj[2][2] * pt[2] + view_proj[3][2];
+    let clip_w = view_proj[0][3] * pt[0] + view_proj[1][3] * pt[1] + view_proj[2][3] * pt[2] + view_proj[3][3];
+    assert!(clip_w > 0.0);
+    let ndc_z = clip_z / clip_w;
+    assert!((0.0..=1.0).contains(&ndc_z), "ndc_z {ndc_z} must be in [0, 1] for point inside frustum");
+
+    let old_far = camera.distance() + radius * 3.0;
+    assert!(pt_dist > old_far, "point at 15 radii should be beyond old far {old_far}");
+}
+
+#[test]
+fn orthographic_uses_same_clip_planes() {
+    let mut camera = Camera::frame([0., 0., 0.], 10.0);
+    let (p_near, p_far) = camera.clip_planes();
+    camera.set_view(StandardView::Front);
+    assert!(camera.is_ortho());
+    let (o_near, o_far) = camera.clip_planes();
+    assert_eq!((p_near, p_far), (o_near, o_far));
 }
 
 

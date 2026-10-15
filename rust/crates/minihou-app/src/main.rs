@@ -236,6 +236,8 @@ impl App {
         app.editor_state.overlays.grid = app.prefs.viewport.show_grid;
         app.editor_state.overlays.axes = app.prefs.viewport.show_axes;
         app.editor_state.overlays.stats = app.prefs.show_stats;
+        app.editor_state.proxy.view_distance = app.prefs.viewport.view_distance;
+        app.camera.set_view_distance(app.editor_state.proxy.view_distance);
         let installs = ui::blender_ui::blender_link::find_installs();
         app.blender.installs = installs.iter().map(|(label, path)| (label.clone(), path.display().to_string())).collect();
         app.blender_paths = installs.into_iter().map(|(_, p)| p).collect();
@@ -256,7 +258,10 @@ impl App {
             Err(e) => self.file_status = e.to_string(),
         }
     }
-    fn frame_mesh(&mut self) { self.camera = Camera::frame(self.bounds.0,self.bounds.1); }
+    fn frame_mesh(&mut self) {
+        self.camera = Camera::frame(self.bounds.0, self.bounds.1);
+        self.camera.set_view_distance(self.editor_state.proxy.view_distance);
+    }
     fn frame_selected(&mut self) {
         if let (Some(scene), Some(center)) = (&self.scene, self.selection_center()) {
             let points = scene.positions();
@@ -264,6 +269,7 @@ impl App {
                 .map(|p| ((0..3).map(|i| (p[i] - center[i]).powi(2)).sum::<f32>()).sqrt())
                 .fold(0_f32, f32::max).max(self.bounds.1 * 0.05);
             self.camera = Camera::frame(center, radius);
+            self.camera.set_view_distance(self.editor_state.proxy.view_distance);
         } else { self.frame_mesh(); }
     }
     fn save_to(&mut self, path: PathBuf) {
@@ -709,6 +715,7 @@ impl App {
                     if let ui::EditorChange::Selection(mode) = change { if mode != ui::SelectionMode::Object { self.last_edit_selection = mode; } }
                     self.editor_state.apply(change);
                     if let ui::EditorChange::View(v) = change { self.camera.set_view(standard_view(v)); }
+                    if let ui::EditorChange::ViewDistance(d) = change { self.camera.set_view_distance(d); }
                 }
                 UiAction::ViewPreset(v) => { self.editor_state.apply(ui::EditorChange::View(v)); self.camera.set_view(standard_view(v)); }
                 UiAction::OpenPreferences => self.prefs_open = true,
@@ -756,6 +763,7 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         if !self.themed { self.theme.apply(ctx); self.themed = true; }
+        self.camera.set_view_distance(self.editor_state.proxy.view_distance);
         if let Some(response) = self.worker.poll() {
             if let Some(scene) = self.cooking.accept(response) {
                 let first = self.gpu.is_none();
@@ -1169,6 +1177,8 @@ impl eframe::App for App {
         if self.prefs_open && ui::keymap::show_preferences(ctx, &mut self.prefs_open, &mut self.prefs, &mut self.keymap, &self.theme) {
             self.prefs.keymap_overrides = self.keymap.overrides_json();
             self.prefs.emulate_numpad = self.keymap.emulate_numpad;
+            self.editor_state.proxy.view_distance = self.prefs.viewport.view_distance;
+            self.camera.set_view_distance(self.editor_state.proxy.view_distance);
             if let Err(e) = self.prefs.save() { self.file_status = format!("Could not save preferences: {e}"); }
         }
         if self.modal.is_some() { self.update_modal(ctx); }
