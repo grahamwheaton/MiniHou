@@ -85,6 +85,22 @@ class RustSdfFieldTests(unittest.TestCase):
                     self.assertEqual(actual.dtype, expected.dtype)
                     np.testing.assert_array_equal(actual, expected)
 
+    def test_smooth_min_typed_k_promotion(self):
+        rng = np.random.default_rng(1171)
+        a = rng.normal(size=(11, 1)).astype(np.float32)
+        b = rng.normal(size=(1, 13)).astype(np.float32)
+        cases = [(a, b), (np.float32(.2), np.float32(.3)),
+                 (.2, b), (a, .3), (a.astype(np.float64), b)]
+        for a, b in cases:
+            for k in (np.float32(.37), np.float64(.37), np.array(.37, np.float64),
+                      np.float64(0.), np.float64(np.nan)):
+                with self.subTest(a_type=type(a), b_type=type(b), k_type=type(k), k=k):
+                    with rust.disabled():
+                        expected = sdf.smooth_min(a, b, k)
+                    actual = rust.sdf_smooth_min(a, b, k)
+                    self.assertEqual(np.asarray(actual).dtype, np.asarray(expected).dtype)
+                    np.testing.assert_array_equal(actual, expected)
+
     def test_smooth_min_nan_signed_zero_empty_scalars(self):
         for dtype in (np.float32, np.float64):
             cases = [(np.array([np.nan, 0., -0., 2.], dtype), np.array([1., -0., 0., np.nan], dtype)),
