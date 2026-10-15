@@ -15,7 +15,7 @@ from minihou import Evaluator, Geometry, Graph, accel, proxy, rust, topo
 from minihou.geometry import Topology
 from minihou.sdk import REGISTRY
 
-NODE_TYPES = ["grid", "box", "point", "curve", "line", "circle", "transform", "normal", "noise", "merge", "null", "output"]
+NODE_TYPES = ["grid", "box", "point", "curve", "line", "circle", "sphere", "tube", "torus", "transform", "normal", "noise", "merge", "null", "output"]
 
 
 @contextlib.contextmanager
@@ -114,6 +114,28 @@ class RustParityTests(unittest.TestCase):
             with self.subTest(source=source):
                 self.same(chain(source=source))
         self.same(chain(("curve", {"points": "0,0,0 1,0,0"})))
+
+    def test_sphere(self):
+        for params in ({}, {"rows": 4, "columns": 6}, {"radius": 2.5, "rows": 8, "columns": 16},
+                       {"center": [1, -2, 3], "rotate": [15, -30, 45], "scale": [2, 0.5, 1.5], "uniform_scale": 0.8},
+                       {"rows": 2, "columns": 3}):
+            with self.subTest(params=params):
+                self.same(chain(source={"type": "sphere", "params": params}))
+
+    def test_tube(self):
+        for params in ({}, {"rows": 3, "columns": 8}, {"caps": False},
+                       {"radius_bottom": 0.0, "radius_top": 1.5, "height": 3.0},
+                       {"radius_bottom": 2.0, "radius_top": 0.0, "caps": False},
+                       {"radius_bottom": 0.0, "radius_top": 0.0},
+                       {"center": [-1, 2, 0.5], "rotate": [20, 40, -10], "scale": [0.5, 1, 2], "uniform_scale": 1.5}):
+            with self.subTest(params=params):
+                self.same(chain(source={"type": "tube", "params": params}))
+
+    def test_torus(self):
+        for params in ({}, {"rows": 6, "columns": 8}, {"radius": 3.0, "thickness": 0.8},
+                       {"center": [0.5, -1, 2], "rotate": [-15, 30, 60], "scale": [1, 2, 0.5], "uniform_scale": 0.7}):
+            with self.subTest(params=params):
+                self.same(chain(source={"type": "torus", "params": params}))
 
     def test_transform(self):
         for params in ({"translate": [1, 2, 3]}, {"rotate": [30, -45, 60], "scale": [2, 0.5, 1], "pivot": [0.3, -1, 2]},

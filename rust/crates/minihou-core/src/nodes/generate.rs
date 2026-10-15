@@ -287,3 +287,353 @@ pub fn take_rows(a: &Attr, idx: &[usize]) -> Attr {
         I32(v) => Attr::i32(w, idx.iter().flat_map(|&i| v[i * w..(i + 1) * w].iter().copied()).collect()),
     }
 }
+
+/// Drop repeated corners, then polygons with < 3 corners and curves with < 2 (points are kept).
+pub fn drop_degenerate(geo: &Geometry) -> Geometry {
+    if geo.nprims() == 0 {
+        return geo.clone();
+    }
+    let topo = &geo.topology;
+    let nprims = geo.nprims();
+    let vp = &topo.vertex_point;
+    let offs = &topo.prim_offsets;
+    let closed_mask = topo.closed_mask();
+
+    let mut keep_v = Vec::with_capacity(vp.len());
+    let mut good_prims = Vec::with_capacity(nprims);
+    let mut new_sizes = Vec::with_capacity(nprims);
+
+    for p in 0..nprims {
+        let start = offs[p] as usize;
+        let end = offs[p + 1] as usize;
+        let size = end - start;
+        if size == 0 {
+            continue;
+        }
+        let is_closed = closed_mask[p];
+
+        let mut kept_for_p = Vec::with_capacity(size);
+        for i in 0..size {
+            let v = vp[start + i];
+            let is_dup = if i + 1 < size {
+                v == vp[start + i + 1]
+            } else {
+                is_closed && size > 1 && v == vp[start]
+            };
+            if !is_dup {
+                kept_for_p.push(start + i);
+            }
+        }
+
+        let new_size = kept_for_p.len();
+        let is_good = if is_closed { new_size >= 3 } else { new_size >= 2 };
+        if is_good {
+            good_prims.push(p);
+            new_sizes.push(new_size as i32);
+            keep_v.extend(kept_for_p);
+        }
+    }
+
+    let mut new_offs = Vec::with_capacity(good_prims.len() + 1);
+    new_offs.push(0);
+    let mut acc = 0;
+    for &s in &new_sizes {
+        acc += s;
+        new_offs.push(acc);
+    }
+
+    let new_vp: Vec<i32> = keep_v.iter().map(|&idx| vp[idx]).collect();
+    let new_closed = topo.closed.as_ref().map(|c| {
+        good_prims.iter().map(|&p| c[p]).collect()
+    });
+
+    let mut out = geo.clone();
+    out.topology = Arc::new(crate::geometry::Topology {
+        vertex_point: new_vp,
+        prim_offsets: new_offs,
+        closed: new_closed,
+    });
+
+    for a in out.vertex.values_mut() {
+        *a = Arc::new(take_rows(a, &keep_v));
+    }
+    for a in out.prim.values_mut() {
+        *a = Arc::new(take_rows(a, &good_prims));
+    }
+    out
+}
+
+pub const SPHERE: NodeSpec = NodeSpec {
+    name: "sphere",
+    inputs: &[],
+    params: crate::params!(
+        "radius": 1.0; "center": [0.0, 0.0, 0.0]; "rotate": [0.0, 0.0, 0.0];
+        "scale": [1.0, 1.0, 1.0]; "uniform_scale": 1.0; "rows": 16; "columns": 32;
+    ),
+    cook: sphere,
+};
+
+fn sphere(_inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    let radius = p.f("radius")?;
+    let center = p.v3("center")?;
+    let rotate = p.v3("rotate")?;
+    let scale = p.v3("scale")?;
+    let uniform_scale = p.f("uniform_scale")?;
+    let rows = p.i("rows")?;
+    let columns = p.i("columns")?;
+
+    if !(2..=4096).contains(&rows) || !(3..=4096).contains(&columns) {
+        return Err(Error::new("sphere rows must be 2..4096 and columns 3..4096"));
+    }
+
+    let (rows, columns) = (rows as usize, columns as usize);
+    let npoints = 1 + (rows - 1) * columns + 1;
+    let mut pts = Vec::with_capacity(npoints * 3);
+
+    // North pole (+Z): [0, 0, 1] * radius + center
+    pts.push(center[0] as f32);
+    pts.push(center[1] as f32);
+    pts.push((radius + center[2]) as f32);
+
+    // Rings from +Z pole down
+    for r in 1..rows {
+        let lat = r as f64 * (std::f64::consts::PI / rows as f64);
+        let sl = lat.sin();
+        let cl = lat.cos();
+        for c in 0..columns {
+            let lon = c as f64 * (2.0 * std::f64::consts::PI / columns as f64);
+            let x = (sl * lon.cos()) * radius + center[0];
+            let y = (sl * lon.sin()) * radius + center[1];
+            let z = cl * radius + center[2];
+            pts.push(x as f32);
+            pts.push(y as f32);
+            pts.push(z as f32);
+        }
+    }
+
+    // South pole (-Z): [0, 0, -1] * radius + center
+    pts.push(center[0] as f32);
+    pts.push(center[1] as f32);
+    pts.push((-radius + center[2]) as f32);
+
+    let top = 0i32;
+    let bottom = (1 + (rows - 1) * columns) as i32;
+
+    let quads_count = (rows - 2) * columns;
+    let total_v = columns * 3 + quads_count * 4 + columns * 3;
+    let total_prims = columns + quads_count + columns;
+
+    let mut vp = Vec::with_capacity(total_v);
+    let mut offs = Vec::with_capacity(total_prims + 1);
+    offs.push(0);
+
+    // Top triangles: [top, 1 + c, 1 + ((c + 1) % columns)]
+    for c in 0..columns as i32 {
+        let cn = (c + 1) % columns as i32;
+        vp.extend([top, 1 + c, 1 + cn]);
+        offs.push(vp.len() as i32);
+    }
+
+    // Quads:
+    for r in 0..(rows - 2) as i32 {
+        let a = 1 + r * columns as i32;
+        let b = 1 + (r + 1) * columns as i32;
+        for c in 0..columns as i32 {
+            let cn = (c + 1) % columns as i32;
+            vp.extend([a + c, b + c, b + cn, a + cn]);
+            offs.push(vp.len() as i32);
+        }
+    }
+
+    // Bottom triangles: [bottom, r0 + cn, r0 + c]
+    let r0 = 1 + ((rows - 2) * columns) as i32;
+    for c in 0..columns as i32 {
+        let cn = (c + 1) % columns as i32;
+        vp.extend([bottom, r0 + cn, r0 + c]);
+        offs.push(vp.len() as i32);
+    }
+
+    source_transform(&mut pts, center, rotate, scale, uniform_scale);
+    Geometry::from_arrays(pts, vp, offs, None)
+}
+
+pub const TUBE: NodeSpec = NodeSpec {
+    name: "tube",
+    inputs: &[],
+    params: crate::params!(
+        "radius_bottom": 1.0; "radius_top": 1.0; "height": 2.0; "center": [0.0, 0.0, 0.0];
+        "rotate": [0.0, 0.0, 0.0]; "scale": [1.0, 1.0, 1.0]; "uniform_scale": 1.0;
+        "rows": 1; "columns": 24; "caps": true;
+    ),
+    cook: tube,
+};
+
+fn tube(_inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    let radius_bottom = p.f("radius_bottom")?;
+    let radius_top = p.f("radius_top")?;
+    let height = p.f("height")?;
+    let center = p.v3("center")?;
+    let rotate = p.v3("rotate")?;
+    let scale = p.v3("scale")?;
+    let uniform_scale = p.f("uniform_scale")?;
+    let rows = p.i("rows")?;
+    let columns = p.i("columns")?;
+    let caps = p.b("caps")?;
+
+    if !(1..=4096).contains(&rows) || !(3..=4096).contains(&columns) {
+        return Err(Error::new("tube rows must be 1..4096 and columns 3..4096"));
+    }
+
+    let (rows, columns) = (rows as usize, columns as usize);
+    let npoints = (rows + 1) * columns;
+    let mut pts = Vec::with_capacity(npoints * 3);
+
+    let t = linspace(0.0, 1.0, rows + 1);
+    for &tr in &t {
+        let rad = radius_bottom + (radius_top - radius_bottom) * tr;
+        let z = (tr - 0.5) * height + center[2];
+        for c in 0..columns {
+            let ang = c as f64 * (2.0 * std::f64::consts::PI / columns as f64);
+            let x = rad * ang.cos() + center[0];
+            let y = rad * ang.sin() + center[1];
+            pts.push(x as f32);
+            pts.push(y as f32);
+            pts.push(z as f32);
+        }
+    }
+
+    // Quads and UVs
+    let quads_count = rows * columns;
+    let cap_v = if caps { columns * 2 } else { 0 };
+    let mut vp = Vec::with_capacity(quads_count * 4 + cap_v);
+    let mut offs = Vec::with_capacity(quads_count + if caps { 2 } else { 0 } + 1);
+    offs.push(0);
+    let mut uv = Vec::with_capacity((quads_count * 4 + cap_v) * 2);
+
+    for r in 0..rows {
+        for c in 0..columns {
+            let r1 = r + 1;
+            let c1 = (c + 1) % columns;
+            let q0 = (r * columns + c) as i32;
+            let q1 = (r * columns + c1) as i32;
+            let q2 = (r1 * columns + c1) as i32;
+            let q3 = (r1 * columns + c) as i32;
+            vp.extend([q0, q1, q2, q3]);
+            offs.push(vp.len() as i32);
+
+            let u0 = c as f64 / columns as f64;
+            let u1 = (c + 1) as f64 / columns as f64;
+            let v0 = r as f64 / rows as f64;
+            let v1 = (r + 1) as f64 / rows as f64;
+            uv.extend([u0 as f32, v0 as f32, u1 as f32, v0 as f32, u1 as f32, v1 as f32, u0 as f32, v1 as f32]);
+        }
+    }
+
+    if caps {
+        // Bottom cap: np.arange(columns)[::-1] (faces -Z)
+        for i in (0..columns).rev() {
+            vp.push(i as i32);
+            let ang = i as f64 * (2.0 * std::f64::consts::PI / columns as f64);
+            uv.push((ang.cos() * 0.5 + 0.5) as f32);
+            uv.push((ang.sin() * 0.5 + 0.5) as f32);
+        }
+        offs.push(vp.len() as i32);
+
+        // Top cap: rows * columns + np.arange(columns) (faces +Z)
+        let top_base = (rows * columns) as i32;
+        for i in 0..columns {
+            vp.push(top_base + i as i32);
+            let ang = i as f64 * (2.0 * std::f64::consts::PI / columns as f64);
+            uv.push((ang.cos() * 0.5 + 0.5) as f32);
+            uv.push((ang.sin() * 0.5 + 0.5) as f32);
+        }
+        offs.push(vp.len() as i32);
+    }
+
+    let mut g = Geometry::from_arrays(pts, vp, offs, None)?;
+    g.vertex.insert("uv".into(), Arc::new(Attr::f32(2, uv)));
+
+    if radius_bottom.min(radius_top) <= 0.0 {
+        let weld_dist = 1e-7 * 1.0f64.max(radius_bottom).max(radius_top).max(height);
+        g = drop_degenerate(&fuse_points(&g, weld_dist));
+    }
+
+    let mut transformed_p = g.p().to_vec();
+    source_transform(&mut transformed_p, center, rotate, scale, uniform_scale);
+    g.set_p(transformed_p);
+    Ok(g)
+}
+
+pub const TORUS: NodeSpec = NodeSpec {
+    name: "torus",
+    inputs: &[],
+    params: crate::params!(
+        "radius": 1.0; "thickness": 0.25; "center": [0.0, 0.0, 0.0];
+        "rotate": [0.0, 0.0, 0.0]; "scale": [1.0, 1.0, 1.0]; "uniform_scale": 1.0;
+        "rows": 12; "columns": 32;
+    ),
+    cook: torus,
+};
+
+fn torus(_inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    let radius = p.f("radius")?;
+    let thickness = p.f("thickness")?;
+    let center = p.v3("center")?;
+    let rotate = p.v3("rotate")?;
+    let scale = p.v3("scale")?;
+    let uniform_scale = p.f("uniform_scale")?;
+    let rows = p.i("rows")?;
+    let columns = p.i("columns")?;
+
+    if !(3..=4096).contains(&rows) || !(3..=4096).contains(&columns) {
+        return Err(Error::new("torus rows and columns must be between 3 and 4096"));
+    }
+
+    let (rows, columns) = (rows as usize, columns as usize);
+    let npoints = rows * columns;
+    let mut pts = Vec::with_capacity(npoints * 3);
+
+    for r in 0..rows {
+        let phi = r as f64 * (2.0 * std::f64::consts::PI / rows as f64);
+        let w = radius + thickness * phi.cos();
+        let z = thickness * phi.sin() + center[2];
+        for c in 0..columns {
+            let th = c as f64 * (2.0 * std::f64::consts::PI / columns as f64);
+            let x = w * th.cos() + center[0];
+            let y = w * th.sin() + center[1];
+            pts.push(x as f32);
+            pts.push(y as f32);
+            pts.push(z as f32);
+        }
+    }
+
+    let quads_count = rows * columns;
+    let mut vp = Vec::with_capacity(quads_count * 4);
+    let mut offs = Vec::with_capacity(quads_count + 1);
+    offs.push(0);
+    let mut uv = Vec::with_capacity(quads_count * 4 * 2);
+
+    for r in 0..rows {
+        for c in 0..columns {
+            let r1 = (r + 1) % rows;
+            let c1 = (c + 1) % columns;
+            let q0 = (r * columns + c) as i32;
+            let q1 = (r * columns + c1) as i32;
+            let q2 = (r1 * columns + c1) as i32;
+            let q3 = (r1 * columns + c) as i32;
+            vp.extend([q0, q1, q2, q3]);
+            offs.push(vp.len() as i32);
+
+            let u0 = c as f64 / columns as f64;
+            let u1 = (c + 1) as f64 / columns as f64;
+            let v0 = r as f64 / rows as f64;
+            let v1 = (r + 1) as f64 / rows as f64;
+            uv.extend([u0 as f32, v0 as f32, u1 as f32, v0 as f32, u1 as f32, v1 as f32, u0 as f32, v1 as f32]);
+        }
+    }
+
+    source_transform(&mut pts, center, rotate, scale, uniform_scale);
+    let mut g = Geometry::from_arrays(pts, vp, offs, None)?;
+    g.vertex.insert("uv".into(), Arc::new(Attr::f32(2, uv)));
+    Ok(g)
+}

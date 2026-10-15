@@ -343,6 +343,128 @@
    "kind": "vec3"
   }
  },
+ "sphere": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "columns": {
+   "default": 32,
+   "doc": "longitude segments",
+   "kind": "int",
+   "max": 4096,
+   "min": 3,
+   "soft_max": 400
+  },
+  "radius": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0
+  },
+  "rotate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "rows": {
+   "default": 16,
+   "doc": "latitude bands",
+   "kind": "int",
+   "max": 4096,
+   "min": 2,
+   "soft_max": 200
+  },
+  "scale": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "uniform_scale": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0
+  }
+ },
+ "torus": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "columns": {
+   "default": 32,
+   "doc": "segments around the ring",
+   "kind": "int",
+   "max": 4096,
+   "min": 3,
+   "soft_max": 400
+  },
+  "radius": {
+   "default": 1.0,
+   "doc": "From the centre to the middle of the tube",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 10.0
+  },
+  "rotate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "rows": {
+   "default": 12,
+   "doc": "segments around the tube",
+   "kind": "int",
+   "max": 4096,
+   "min": 3,
+   "soft_max": 200
+  },
+  "scale": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "thickness": {
+   "default": 0.25,
+   "doc": "Radius of the tube",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 5.0
+  },
+  "uniform_scale": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0
+  }
+ },
  "transform": {
   "axis_rotation": {
    "default": [
@@ -442,6 +564,83 @@
    "default": 1.0,
    "doc": "Multiplies scale",
    "kind": "float"
+  }
+ },
+ "tube": {
+  "caps": {
+   "default": true,
+   "doc": "Close the ends with n-gons (a zero radius ends in a point instead)",
+   "kind": "bool"
+  },
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "columns": {
+   "default": 24,
+   "doc": "segments around",
+   "kind": "int",
+   "max": 4096,
+   "min": 3,
+   "soft_max": 200
+  },
+  "height": {
+   "default": 2.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 20.0
+  },
+  "radius_bottom": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 10.0
+  },
+  "radius_top": {
+   "default": 1.0,
+   "doc": "0 makes a cone",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 10.0
+  },
+  "rotate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "rows": {
+   "default": 1,
+   "doc": "segments along the height",
+   "kind": "int",
+   "max": 4096,
+   "min": 1,
+   "soft_max": 100
+  },
+  "scale": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "uniform_scale": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0
   }
  }
 }

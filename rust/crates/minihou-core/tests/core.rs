@@ -93,6 +93,23 @@ fn additional_proportional_falloffs_cook_and_random_is_deterministic() {
     assert!(inverse.p()[3] > 0.0 && inverse.p()[3] < 1.0);
     let random = cook(graph("random")).unwrap();
     assert_eq!(random.p(), cook(graph("random")).unwrap().p());
+
+}
+
+#[test]
+fn sphere_tube_torus_cook() {
+    let sphere = cook(json!({"nodes": {"s": {"type": "sphere", "params": {"rows": 4, "columns": 6}}}, "display": "s"})).unwrap();
+    assert_eq!((sphere.npoints, sphere.nprims()), (20, 24));
+
+    let tube = cook(json!({"nodes": {"t": {"type": "tube", "params": {"rows": 2, "columns": 4, "caps": true}}}, "display": "t"})).unwrap();
+    assert_eq!((tube.npoints, tube.nprims()), (12, 10));
+
+    let cone = cook(json!({"nodes": {"t": {"type": "tube", "params": {"radius_bottom": 0.0, "radius_top": 1.0, "rows": 2, "columns": 4, "caps": true}}}, "display": "t"})).unwrap();
+    assert_eq!((cone.npoints, cone.nprims()), (9, 9));
+
+    let torus = cook(json!({"nodes": {"t": {"type": "torus", "params": {"rows": 3, "columns": 4}}}, "display": "t"})).unwrap();
+    assert_eq!((torus.npoints, torus.nprims()), (12, 12));
+
 }
 
 #[test]

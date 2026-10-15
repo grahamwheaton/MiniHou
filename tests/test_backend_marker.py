@@ -22,7 +22,7 @@ class BackendMarkerTests(unittest.TestCase):
         nodes = {
             "g": {"type": "grid"},                                                       # runs in Rust
             "b": {"type": "box", "params": {"add_vertex_normals": True}},                # has a Rust path, refuses this
-            "s": {"type": "sphere"},                                                     # no Rust path
+            "s": {"type": "helix"},                                                      # no Rust path
         }
         got = cook_backends(dict(nodes, m={"type": "merge", "inputs": {"geos": ["g", "b", "s"]}}), "m")
         self.assertEqual(got["g"], "rust")
