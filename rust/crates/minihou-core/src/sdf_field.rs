@@ -163,6 +163,19 @@ macro_rules! smooth_min_impl {
 smooth_min_impl!(smooth_min_f32, f32);
 smooth_min_impl!(smooth_min_f64, f64);
 
+/// Float32 operands with a strong float64 smoothing scalar: NumPy widens only
+/// at division by k, after subtraction and multiplication by 0.5 rounded to f32.
+/// The wrapper supplies original values as f64 so a weak Python scalar retains
+/// its original precision when multiplied by the promoted h later in the formula.
+pub fn smooth_min_f32_k64(a: &[f64], b: &[f64], k: f64) -> Vec<f64> {
+    a.iter().zip(b).map(|(&a, &b)| {
+        let numerator = 0.5f32 * (b as f32 - a as f32);
+        let h = (0.5 + f64::from(numerator) / k).clamp(0.0, 1.0);
+        (b * (1.0 - h) + a * h) - ((k * h) * (1.0 - h))
+    }).collect()
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
