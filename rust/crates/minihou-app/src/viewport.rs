@@ -162,7 +162,7 @@ impl Gpu {
         let t = ((self.edge_world * px_per_unit - 1.5) / 8.5).clamp(0.0, 1.0);
         let fade = t * t * (3.0 - 2.0 * t);
         // wire.a selects the line look in the shader: 1 = a darker version of the surface (Shaded+Wire), 0 = lit lines (Wire)
-        let u = Uniforms { view_proj,view,base:[0.72,0.74,0.78,1.],wire:[0.,0.,0.,if mode==Mode::ShadedWire {1.} else {0.}],flat_shading:(mode==Mode::Solid) as u32,wire_fade:fade,_pad:[0;2] };
+        let u = Uniforms { view_proj,view,base:[0.72,0.74,0.78,1.],wire:[0.,0.,0.,if mode==Mode::ShadedWire {1.} else {0.}],flat_shading:(mode==Mode::Solid) as u32,wire_fade:fade,_pad:[1,0] };
         state.queue.write_buffer(&self.ubuf,0,bytemuck::bytes_of(&u));
         let mut enc = state.device.create_command_encoder(&Default::default());
         {
@@ -170,7 +170,7 @@ impl Gpu {
                 label:Some("MiniHou viewport"),
                 color_attachments:&[Some(wgpu::RenderPassColorAttachment {
                     view:&target.color,depth_slice:None,resolve_target:None,
-                    ops:wgpu::Operations { load:wgpu::LoadOp::Clear(wgpu::Color { r:0.045,g:0.05,b:0.06,a:1. }),store:wgpu::StoreOp::Store },
+                    ops:wgpu::Operations { load:wgpu::LoadOp::Clear(wgpu::Color { r:0.244,g:0.256,b:0.278,a:1. }),store:wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment:Some(wgpu::RenderPassDepthStencilAttachment {
                     view:&target.depth,depth_ops:Some(wgpu::Operations { load:wgpu::LoadOp::Clear(1.),store:wgpu::StoreOp::Discard }),stencil_ops:None,
