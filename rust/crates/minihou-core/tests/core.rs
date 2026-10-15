@@ -160,7 +160,51 @@ fn every_node_declares_defaults() {
             let _ = (p.default)();
         }
     }
-    assert!(nodes::get("grid").is_some() && nodes::get("wrangle").is_none());
+    assert!(nodes::get("grid").is_some() && nodes::get("delete").is_some() && nodes::get("wrangle").is_none());
+}
+
+#[test]
+fn delete_points_and_dependent_primitives() {
+    let graph = |expr: &str, invert: bool| json!({
+        "nodes": {
+            "g": {"type": "grid", "params": {"columns": 4, "rows": 4}},
+            "d": {"type": "delete", "inputs": {"geo": "g"}, "params": {"expr": expr, "invert": invert}},
+        },
+        "display": "d"
+    });
+    let d = cook(graph("@P.x > 0", false)).unwrap();
+    assert_eq!((d.npoints, d.nprims(), d.nvertices()), (8, 3, 12));
+    for q in d.p().as_chunks::<3>().0 {
+        assert!(q[0] <= 0.0);
+    }
+
+    let kept = cook(graph("@P.x > 0", true)).unwrap();
+    assert_eq!((kept.npoints, kept.nprims(), kept.nvertices()), (8, 3, 12));
+    for q in kept.p().as_chunks::<3>().0 {
+        assert!(q[0] > 0.0);
+    }
+
+    let none = cook(graph("@P.x > 1000", false)).unwrap();
+    assert_eq!((none.npoints, none.nprims(), none.nvertices()), (16, 9, 36));
+
+    let empty = cook(graph("", false)).unwrap();
+    assert_eq!((empty.npoints, empty.nprims(), empty.nvertices()), (16, 9, 36));
+
+    let all = cook(graph("1", false)).unwrap();
+    assert_eq!((all.npoints, all.nprims(), all.nvertices()), (0, 0, 0));
+
+    let curve_graph = |expr: &str| json!({
+        "nodes": {
+            "c": {"type": "curve", "params": {"points": "0,0,0 1,0,0 2,0,0 3,0,0 4,0,0", "closed": false}},
+            "d": {"type": "delete", "inputs": {"geo": "c"}, "params": {"expr": expr}},
+        },
+        "display": "d"
+    });
+    let split = cook(curve_graph("@P.x == 2")).unwrap();
+    assert_eq!((split.npoints, split.nprims(), split.nvertices()), (4, 2, 4));
+
+    let err = cook(graph("rand(@ptnum, 1) < 0.5", false)).unwrap_err();
+    assert!(err.0.contains("not supported by the Rust backend"));
 }
 
 fn extents(g: &minihou_core::Geometry) -> ([f32; 3], [f32; 3]) {

@@ -150,6 +150,10 @@ class RustFuzzTests(unittest.TestCase):
             chain(source={"type": "torus", "params": {"rows": 3, "columns": 3, "thickness": 0}}),
             chain(("transform", {"translate": [1e6, -1e6, 1e6]}),
                   source={"type": "box", "params": {"size": [2, 2, 2]}}),
+            chain(("delete", {"expr": "@P.x > 0"}), source={"type": "point", "params": {"center": [1, 0, 0]}}),
+            chain(("delete", {"expr": "1"}), source={"type": "box", "params": {"divisions": 1}}),
+            chain(("delete", {"expr": ""}), source={"type": "grid", "params": {"columns": 2, "rows": 2}}),
+            chain(("delete", {"expr": "@P.z > 100", "invert": True}), source={"type": "curve", "params": {"points": "0,0,0 1,1,1"}}),
             *[chain(("noise", {"octaves": octaves, "frequency": frequency,
                       "amplitude": [amplitude] * 3}))
               for octaves, frequency, amplitude in ((1, 0, 1), (12, 2, 0))],

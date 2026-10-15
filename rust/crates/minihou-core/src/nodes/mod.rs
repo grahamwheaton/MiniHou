@@ -60,6 +60,7 @@ pub fn registry() -> &'static [NodeSpec] {
         modify::NORMAL,
         modify::NOISE,
         modify::MATCH_SIZE,
+        modify::DELETE,
         merge::MERGE,
         NodeSpec { name: "null", inputs: GEO, params: crate::params!("label": ""), cook: pass_through },
         NodeSpec { name: "output", inputs: GEO, params: crate::params!("object": ""), cook: pass_through },

@@ -54,7 +54,7 @@ def disabled():
 # Node types whose Python function calls a Rust kernel. The evaluator records which backend each node used on its last cook
 # (CookStats.backend) so the editor can show it: "rust" (a kernel ran), "fallback" (this node type has a Rust path, but this
 # cook ran the Python / numba one: unsupported settings or no points) and "python" (no Rust path).
-NODE_TYPES = frozenset({"grid", "box", "point", "curve", "line", "circle", "sphere", "tube", "torus", "bound", "transform", "normal", "noise", "heightfield_erode",
+NODE_TYPES = frozenset({"grid", "box", "point", "curve", "line", "circle", "sphere", "tube", "torus", "bound", "delete", "transform", "normal", "noise", "heightfield_erode",
                         "match_size", "remesh", "points_to_surface", "sdf_boolean", "sdf_shape"})
 _tls = threading.local()
 
