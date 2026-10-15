@@ -25,9 +25,14 @@ fn dot(a: [f32; 3], b: [f32; 3]) -> f32 { a.iter().zip(b).map(|(a, b)| a * b).su
 fn nearest_view(yaw: f32, pitch: f32) -> ViewPreset {
     axes(yaw, pitch).into_iter().max_by(|a, b| a.depth.total_cmp(&b.depth)).unwrap().preset
 }
+fn layout(viewport: Rect) -> (Rect, Rect) {
+    let area = Rect::from_min_size(Pos2::new(viewport.right() - 88., viewport.top() + 48.), Vec2::splat(76.));
+    let label = Rect::from_min_size(Pos2::new(area.left(), area.bottom() + 8.), Vec2::new(76., 18.));
+    (area, label)
+}
 
 pub fn show(ui: &mut egui::Ui, viewport: Rect, v: &View, out: &mut Actions) {
-    let area = Rect::from_min_size(Pos2::new(viewport.right() - 88., viewport.top() + 48.), Vec2::splat(76.));
+    let (area, label) = layout(viewport);
     let center = area.center();
     let mut balls = axes(v.camera.yaw, v.camera.pitch);
     balls.sort_by(|a, b| a.depth.total_cmp(&b.depth));
@@ -59,7 +64,6 @@ pub fn show(ui: &mut egui::Ui, viewport: Rect, v: &View, out: &mut Actions) {
         if delta != Vec2::ZERO { out.push(UiAction::Orbit { yaw: delta.x * 0.4, pitch: delta.y * 0.4 }); }
     }
     if response.drag_stopped() { ui.ctx().data_mut(|d| d.remove::<bool>(drag_id)); }
-    let label = Rect::from_min_size(Pos2::new(area.left(), area.bottom() + 2.), Vec2::new(76., 18.));
     let resp = ui.interact(label, egui::Id::new("vp_gizmo_projection"), Sense::click());
     if resp.hovered() { p.rect_filled(label, 3., v.theme.panel2); }
     p.text(label.center(), egui::Align2::CENTER_CENTER, if v.camera.ortho { "Ortho" } else { "Persp" }, egui::FontId::monospace(11.), v.theme.text);
@@ -82,5 +86,15 @@ mod tests {
     fn default_camera_is_closest_to_front() {
         assert_eq!(nearest_view(0.6, 0.5), ViewPreset::Front);
         assert_eq!(nearest_view(std::f32::consts::FRAC_PI_2, 0.), ViewPreset::Right);
+    }
+    #[test]
+    fn caption_stays_clear_of_navigation_balls_and_header() {
+        let viewport = Rect::from_min_size(Pos2::ZERO, Vec2::new(640., 480.));
+        let (area, caption) = layout(viewport);
+        assert!(area.top() >= 36. + 8.);
+        assert!(caption.top() - area.bottom() >= 8.);
+        for ball in axes(0.6, 0.5) {
+            assert!(area.center().y + ball.xy.y + 8. + 8. <= caption.top());
+        }
     }
 }

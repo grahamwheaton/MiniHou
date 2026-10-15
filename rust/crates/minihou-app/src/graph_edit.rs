@@ -22,7 +22,7 @@ pub fn add(value: &Value, ty: &str, after: Option<&str>) -> Option<(Value, Strin
     let all = nodes_mut(&mut value)?;
     let id = fresh_id(all, ty);
     let mut node = json!({"type": ty});
-    if let (Some(after), Some(port)) = (after.filter(|id| all.contains_key(*id)), spec.inputs.first()) {
+    if let (Some(after), Some(port)) = (after.filter(|id| all.contains_key(*id)), spec.inputs.first().filter(|p| !p.optional)) {
         node["inputs"] = if port.multi { json!({port.name: [after]}) } else { json!({port.name: after}) };
     }
     all.insert(id.clone(), node);
@@ -36,6 +36,7 @@ pub fn add_sketch(value: &Value, name: &str, points: &[[f32; 3]], closed: bool, 
     let after = nodes(value)?.get(selected).and_then(|node| node.get("type")?.as_str())
         .filter(|ty| nodes::get(ty).is_some()).map(|_| selected);
     let (mut value, id) = add(value, "curve", after)?;
+    if let Some(after) = after { value = connect(&value, after, &id, Some("geo"))?; }
     let text = points.iter().map(|p| format!("{},{},{}", p[0], p[1], p[2])).collect::<Vec<_>>().join(" ");
     let node = nodes_mut(&mut value)?.get_mut(&id)?;
     node["params"] = json!({"points": text, "closed": closed});
@@ -159,9 +160,17 @@ mod tests {
     }}) }
     #[test] fn add_and_duplicate_find_unused_ids() {
         let (v, id) = add(&graph(), "box", Some("box1")).unwrap();
-        assert_eq!(id, "box3"); assert_eq!(v["display"], id); validated(v.clone()).unwrap();
+        assert_eq!(id, "box3"); assert_eq!(v["display"], id);
+        assert!(v["nodes"][&id].get("inputs").is_none()); validated(v.clone()).unwrap();
         let (v, next) = duplicate(&v, "box1").unwrap();
         assert_eq!(next, "box4"); assert_eq!(v["nodes"]["box4"], v["nodes"]["box1"]); validated(v).unwrap();
+    }
+    #[test] fn only_required_first_inputs_are_wired_on_add() {
+        let (v, id) = add(&graph(), "transform", Some("box1")).unwrap();
+        assert_eq!(v["nodes"][&id]["inputs"]["geo"], "box1");
+        let (v, id) = add(&v, "box", Some("transform1")).unwrap();
+        assert!(v["nodes"][&id].get("inputs").is_none());
+        validated(v).unwrap();
     }
     #[test] fn sketch_wires_after_a_cooked_node_and_can_stand_alone() {
         let points = [[0.,0.,0.], [1.,0.,0.], [1.,1.,0.]];

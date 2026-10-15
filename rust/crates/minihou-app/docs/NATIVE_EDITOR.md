@@ -2,13 +2,13 @@
 
 Open a graph JSON file by passing its path to `minihou-app.exe`, or start the app without arguments for the demo graph. The top bar opens and saves files, changes shading, and opens Preferences. The shelf adds tools to the selected node; drag a tool into the network or viewport to add it there. The network editor selects, connects, duplicates, deletes, copies, and pastes nodes. The right panel edits parameters and shows geometry information. The centre viewport supports orbit, pan, zoom, mesh picking, view presets, and display proxy levels. The bottom strip shows cook state, file messages, and the Blender triangle cap when set.
 
-Click a shelf tool to add it after the selected node. In the network editor, `Ctrl+C` copies the selected node and `Ctrl+V` pastes it with a fresh ID. The internal wire mapping is preserved when a copied set contains more than one node. Drag from a node output to an input to connect it; use a node menu to disconnect an input.
+Click a shelf tool to add it; tools with a required input connect after the selected node, while generators remain unwired. In the network editor, `Ctrl+C` copies the selected node and `Ctrl+V` pastes it with a fresh ID. The internal wire mapping is preserved when a copied set contains more than one node. Drag from a node output to an input to connect it; use a node menu to disconnect an input.
 
 Preferences are available from the top bar or `Ctrl+,`. The Viewport tab contains the Auto proxy triangle budget. The viewport proxy menu has the Blender triangle cap; zero means unlimited. Preferences are stored in `%APPDATA%\MiniHou\preferences.json` on Windows.
 
 ## Default keymap
 
-The table below is checked against `Keymap::blender()` by a unit test. Shortcuts in the Network context work while the pointer is over the network editor; viewport shortcuts work over the viewport.
+The table below is checked against `Keymap::blender()` by a unit test. Shortcuts in the Network context work while the pointer is over the network editor; viewport shortcuts work over the viewport. Alt+digit, Alt+Period, and Alt+Plus/Minus are numpad fallbacks because egui cannot distinguish numpad keys. Emulate Numpad uses plain digits for navigation and Shift+1/2/3 for element selection.
 
 <!-- keymap:start -->
 | Shortcut | Command | Context |
@@ -16,12 +16,17 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | 1 | Points | Viewport |
 | 2 | Edges | Viewport |
 | 3 | Faces | Viewport |
-| 4 | Object | Viewport |
 | Q | Select tool | Viewport |
-| W | Move tool | Viewport |
-| E | Rotate tool | Viewport |
-| R | Scale tool | Viewport |
-| T | Transform tool | Viewport |
+| G | Move tool | Viewport |
+| R | Rotate tool | Viewport |
+| S | Scale tool | Viewport |
+| Tab | Toggle Object / edit mode | Viewport |
+| A | Select all | Viewport |
+| Alt+A | Select none | Viewport |
+| H | Hide selected | Viewport |
+| Alt+H | Reveal hidden | Viewport |
+| Shift+A | Add node menu | Viewport |
+| N | Toggle parameters | Viewport |
 | Home | Frame all | Viewport |
 | Alt+Period | Frame selected | Viewport |
 | Alt+1 | Front | Viewport |
@@ -45,7 +50,6 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Shift+Tab | Snapping | Viewport |
 | O | Proportional editing | Viewport |
 | Z | Next shading | Viewport |
-| Shift+Z | Previous shading | Viewport |
 | Ctrl+Z | Undo | Everywhere |
 | Ctrl+Y | Redo | Everywhere |
 | Ctrl+Shift+Z | Redo | Everywhere |
@@ -55,10 +59,13 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Ctrl+Comma | Preferences | Everywhere |
 | Ctrl+C | Copy nodes | Network |
 | Ctrl+V | Paste nodes | Network |
-| X | Delete node | Network |
-| Delete | Delete node | Network |
-| Shift+D | Duplicate node | Network |
 | Ctrl+L | Tidy network | Network |
+| X | Delete node | Viewport |
+| X | Delete node | Network |
+| Delete | Delete node | Viewport |
+| Delete | Delete node | Network |
+| Shift+D | Duplicate node | Viewport |
+| Shift+D | Duplicate node | Network |
 <!-- keymap:end -->
 
 ## Known limitations

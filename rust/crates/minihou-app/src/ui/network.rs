@@ -33,6 +33,16 @@ pub fn tidy(ctx: &egui::Context, path: &Path) {
     });
     ctx.request_repaint();
 }
+pub fn open_add_menu(ctx: &egui::Context, path: &Path) {
+    let id = state_id(path);
+    ctx.data_mut(|d| {
+        let mut state = d.get_persisted::<State>(id).unwrap_or_default();
+        state.list = false;
+        state.menu = Some(network_menu::MenuState::new(pos2(160., 190.), None, true));
+        d.insert_persisted(id, state);
+    });
+    ctx.request_repaint();
+}
 fn tidy_state(state: &mut State) {
     state.moved.clear();
     state.drag = None;
@@ -165,7 +175,7 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
     let over = pointer.is_some_and(|at| r.contains(at));
     let positions = network_layout::layout(v.graph, |node| state.moved.get(node).copied().or_else(|| (!state.tidied).then(|| json_pos(v, node)).flatten()));
     let bounds = content_bounds(&positions);
-    if state.zoom < 0.0 || (over && ctx.input(|i| i.key_pressed(egui::Key::F))) { frame_all(state, r, bounds); }
+    if state.zoom < 0.0 || (over && ctx.input(|i| i.key_pressed(egui::Key::Home))) { frame_all(state, r, bounds); }
     if over {
         let (zoom_delta, scroll, delta, dragging) = ctx.input(|i| (i.zoom_delta(), i.smooth_scroll_delta, i.pointer.delta(),
             i.pointer.middle_down() || (i.key_down(egui::Key::Space) && i.pointer.primary_down())));
@@ -242,7 +252,7 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
             }
         }
     }
-    p.text(pos2(r.left() + 10.0, r.bottom() - 8.0), Align2::LEFT_BOTTOM, "Tab add node · F frame all · Del delete", FontId::proportional(11.0), v.theme.faint);
+    p.text(pos2(r.left() + 10.0, r.bottom() - 8.0), Align2::LEFT_BOTTOM, "Tab add node · Home frame all · Del delete", FontId::proportional(11.0), v.theme.faint);
 }
 
 fn snap(pos: Pos2, grid: f32, enabled: bool, invert: bool) -> Pos2 {

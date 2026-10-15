@@ -51,7 +51,7 @@ pub fn show(ctx: &egui::Context, open: &mut bool, prefs: &mut Preferences, keyma
                         }
                         Tab::Keymap => {
                             heading(ui,"Keymap",theme);
-                            ui.label(RichText::new("egui cannot distinguish numpad digits from number row keys. Alt+digit is the numpad substitute; Emulate Numpad makes plain digits navigate and moves selection modes to Shift+1–4.").color(theme.dim));
+                            ui.label(RichText::new("Numpad fallback: Alt+digit, Alt+Period, and Alt+Plus/Minus. Emulate Numpad uses plain digits to navigate and Shift+1/2/3 for edit mode selection.").color(theme.dim));
                             if ui.checkbox(&mut prefs.emulate_numpad,"Emulate Numpad").changed() { keymap.emulate_numpad = prefs.emulate_numpad; changed = true; }
                             ui.horizontal(|ui| {
                                 ui.add(egui::TextEdit::singleline(&mut state.search).hint_text("Search commands"));

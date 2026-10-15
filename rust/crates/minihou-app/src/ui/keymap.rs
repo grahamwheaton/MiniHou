@@ -27,7 +27,7 @@ impl Chord {
 pub enum Context { Everywhere, Viewport, Network }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Command {
-    Points, Edges, Faces, Object, FrameAll, FrameSelected,
+    Points, Edges, Faces, Object, ToggleEdit, SelectAll, SelectNone, Hide, Reveal, AddMenu, ToggleParams, FrameAll, FrameSelected,
     ToolSelect, ToolMove, ToolRotate, ToolScale, ToolTransform,
     Front, Back, Right, Left, Top, Bottom, ToggleProjection,
     OrbitDown, OrbitLeft, OrbitRight, OrbitUp,
@@ -37,7 +37,7 @@ pub enum Command {
     TidyNetwork, Preferences,
 }
 impl Command {
-    pub const ALL: [Self; 44] = [Self::Points, Self::Edges, Self::Faces, Self::Object,
+    pub const ALL: [Self; 51] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
         Self::ToolSelect, Self::ToolMove, Self::ToolRotate, Self::ToolScale, Self::ToolTransform,
         Self::FrameAll, Self::FrameSelected, Self::Front, Self::Back, Self::Right, Self::Left,
         Self::Top, Self::Bottom, Self::ToggleProjection, Self::OrbitDown, Self::OrbitLeft,
@@ -47,7 +47,8 @@ impl Command {
         Self::Save, Self::SaveAs, Self::Open, Self::Copy, Self::Paste, Self::DeleteNode, Self::DuplicateNode,
         Self::TidyNetwork, Self::Preferences];
     pub fn label(self) -> &'static str { match self {
-        Self::Points => "Points", Self::Edges => "Edges", Self::Faces => "Faces", Self::Object => "Object",
+        Self::Points => "Points", Self::Edges => "Edges", Self::Faces => "Faces", Self::Object => "Object", Self::ToggleEdit => "Toggle Object / edit mode",
+        Self::SelectAll => "Select all", Self::SelectNone => "Select none", Self::Hide => "Hide selected", Self::Reveal => "Reveal hidden", Self::AddMenu => "Add node menu", Self::ToggleParams => "Toggle parameters",
         Self::ToolSelect => "Select tool", Self::ToolMove => "Move tool", Self::ToolRotate => "Rotate tool",
         Self::ToolScale => "Scale tool", Self::ToolTransform => "Transform tool",
         Self::FrameAll => "Frame all", Self::FrameSelected => "Frame selected",
@@ -63,7 +64,8 @@ impl Command {
         Self::Preferences => "Preferences",
     } }
     fn id(self) -> &'static str { match self {
-        Self::Points => "points", Self::Edges => "edges", Self::Faces => "faces", Self::Object => "object",
+        Self::Points => "points", Self::Edges => "edges", Self::Faces => "faces", Self::Object => "object", Self::ToggleEdit => "toggle_edit",
+        Self::SelectAll => "select_all", Self::SelectNone => "select_none", Self::Hide => "hide", Self::Reveal => "reveal", Self::AddMenu => "add_menu", Self::ToggleParams => "toggle_params",
         Self::ToolSelect => "tool_select", Self::ToolMove => "tool_move", Self::ToolRotate => "tool_rotate",
         Self::ToolScale => "tool_scale", Self::ToolTransform => "tool_transform",
         Self::FrameAll => "frame_all", Self::FrameSelected => "frame_selected", Self::Front => "front", Self::Back => "back",
@@ -77,16 +79,18 @@ impl Command {
         Self::TidyNetwork => "tidy_network", Self::Preferences => "preferences",
     } }
     pub fn to_action(self, kctx: &KeyContext<'_>) -> Option<UiAction> { Some(match self {
-        Self::Points => UiAction::Editor(EditorChange::Selection(SelectionMode::Points)),
-        Self::Edges => UiAction::Editor(EditorChange::Selection(SelectionMode::Edges)),
-        Self::Faces => UiAction::Editor(EditorChange::Selection(SelectionMode::Faces)),
+        Self::Points => { if !kctx.in_edit_mode { return None; } UiAction::Editor(EditorChange::Selection(SelectionMode::Points)) },
+        Self::Edges => { if !kctx.in_edit_mode { return None; } UiAction::Editor(EditorChange::Selection(SelectionMode::Edges)) },
+        Self::Faces => { if !kctx.in_edit_mode { return None; } UiAction::Editor(EditorChange::Selection(SelectionMode::Faces)) },
         Self::Object => UiAction::Editor(EditorChange::Selection(SelectionMode::Object)),
+        Self::ToggleEdit | Self::SelectAll | Self::SelectNone | Self::Hide | Self::Reveal | Self::AddMenu | Self::ToggleParams => UiAction::Command(self.id().to_owned()),
         Self::ToolSelect => UiAction::Editor(EditorChange::Tool(Tool::Select)),
         Self::ToolMove => UiAction::Editor(EditorChange::Tool(Tool::Move)),
         Self::ToolRotate => UiAction::Editor(EditorChange::Tool(Tool::Rotate)),
         Self::ToolScale => UiAction::Editor(EditorChange::Tool(Tool::Scale)),
         Self::ToolTransform => UiAction::Editor(EditorChange::Tool(Tool::Transform)),
-        Self::FrameAll | Self::FrameSelected => UiAction::Frame,
+        Self::FrameAll => UiAction::Frame,
+        Self::FrameSelected => UiAction::FrameSelected,
         Self::Front => UiAction::ViewPreset(ViewPreset::Front), Self::Back => UiAction::ViewPreset(ViewPreset::Back),
         Self::Right => UiAction::ViewPreset(ViewPreset::Right), Self::Left => UiAction::ViewPreset(ViewPreset::Left),
         Self::Top => UiAction::ViewPreset(ViewPreset::Top), Self::Bottom => UiAction::ViewPreset(ViewPreset::Bottom),
@@ -107,7 +111,7 @@ impl Command {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Binding { pub chord: Chord, pub command: Command, pub context: Context }
 #[derive(Clone, Copy, Debug, Default)]
-pub struct KeyContext<'a> { pub viewport_hovered: bool, pub network_hovered: bool, pub selected: Option<&'a str> }
+pub struct KeyContext<'a> { pub viewport_hovered: bool, pub network_hovered: bool, pub in_edit_mode: bool, pub selected: Option<&'a str> }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Conflict { pub command: Command, pub chord: Chord, pub context: Context }
 #[derive(Clone, Debug)]
@@ -117,8 +121,11 @@ impl Keymap {
         use Command as C; use Context as X; use Key as K;
         let mut b = Vec::new();
         let mut add = |key, ctrl, shift, alt, command, context| b.push(Binding { chord: Chord::new(key, ctrl, shift, alt), command, context });
-        for (key, cmd) in [(K::Num1,C::Points),(K::Num2,C::Edges),(K::Num3,C::Faces),(K::Num4,C::Object)] { add(key,false,false,false,cmd,X::Viewport); }
-        for (key, cmd) in [(K::Q,C::ToolSelect),(K::W,C::ToolMove),(K::E,C::ToolRotate),(K::R,C::ToolScale),(K::T,C::ToolTransform)] { add(key,false,false,false,cmd,X::Viewport); }
+        for (key, cmd) in [(K::Num1,C::Points),(K::Num2,C::Edges),(K::Num3,C::Faces)] { add(key,false,false,false,cmd,X::Viewport); }
+        for (key, cmd) in [(K::Q,C::ToolSelect),(K::G,C::ToolMove),(K::R,C::ToolRotate),(K::S,C::ToolScale)] { add(key,false,false,false,cmd,X::Viewport); }
+        for (key, ctrl, shift, alt, cmd) in [(K::Tab,false,false,false,C::ToggleEdit),(K::A,false,false,false,C::SelectAll),
+            (K::A,false,false,true,C::SelectNone),(K::H,false,false,false,C::Hide),(K::H,false,false,true,C::Reveal),
+            (K::A,false,true,false,C::AddMenu),(K::N,false,false,false,C::ToggleParams)] { add(key,ctrl,shift,alt,cmd,X::Viewport); }
         add(K::Home,false,false,false,C::FrameAll,X::Viewport);
         add(K::Period,false,false,true,C::FrameSelected,X::Viewport);
         for (key, ctrl, cmd) in [(K::Num1,false,C::Front),(K::Num1,true,C::Back),(K::Num3,false,C::Right),
@@ -128,14 +135,16 @@ impl Keymap {
             (K::Num6,true,C::PanRight),(K::Num8,true,C::PanUp),(K::Num2,true,C::PanDown),
             (K::Plus,false,C::ZoomIn),(K::Minus,false,C::ZoomOut)] { add(key,ctrl,false,true,cmd,X::Viewport); }
         for (key,ctrl,shift,alt,cmd) in [(K::Z,false,false,true,C::Xray),(K::Tab,false,true,false,C::Snap),
-            (K::O,false,false,false,C::Proportional),(K::Z,false,false,false,C::ShadeNext),
-            (K::Z,false,true,false,C::ShadePrevious)] { add(key,ctrl,shift,alt,cmd,X::Viewport); }
+            (K::O,false,false,false,C::Proportional),(K::Z,false,false,false,C::ShadeNext)] { add(key,ctrl,shift,alt,cmd,X::Viewport); }
         for (key,ctrl,shift,cmd) in [(K::Z,true,false,C::Undo),(K::Y,true,false,C::Redo),
             (K::Z,true,true,C::Redo),(K::S,true,false,C::Save),(K::S,true,true,C::SaveAs),
             (K::O,true,false,C::Open),(K::Comma,true,false,C::Preferences)] { add(key,ctrl,shift,false,cmd,X::Everywhere); }
         for (key,ctrl,shift,cmd) in [(K::C,true,false,C::Copy),(K::V,true,false,C::Paste),
-            (K::X,false,false,C::DeleteNode),(K::Delete,false,false,C::DeleteNode),
-            (K::D,false,true,C::DuplicateNode),(K::L,true,false,C::TidyNetwork)] { add(key,ctrl,shift,false,cmd,X::Network); }
+            (K::L,true,false,C::TidyNetwork)] { add(key,ctrl,shift,false,cmd,X::Network); }
+        for (key,shift,cmd) in [(K::X,false,C::DeleteNode),(K::Delete,false,C::DeleteNode),(K::D,true,C::DuplicateNode)] {
+            add(key,false,shift,false,cmd,X::Viewport);
+            add(key,false,shift,false,cmd,X::Network);
+        }
         Self { bindings: b, emulate_numpad: false }
     }
     pub fn reset(&mut self) { *self = Self::blender(); }
@@ -157,7 +166,7 @@ impl Keymap {
         if self.emulate_numpad {
             let mut extra = Vec::new();
             for entry in &mut b {
-                if matches!(entry.command, Command::Points | Command::Edges | Command::Faces | Command::Object) { entry.chord.shift = true; }
+                if matches!(entry.command, Command::Points | Command::Edges | Command::Faces) { entry.chord.shift = true; }
                 if entry.context == Context::Viewport && entry.chord.alt &&
                     matches!(entry.chord.key, Key::Num1 | Key::Num2 | Key::Num3 | Key::Num4 | Key::Num5 | Key::Num6 | Key::Num7 | Key::Num8 | Key::Plus | Key::Minus | Key::Period) {
                     let mut plain = *entry; plain.chord.alt = false; extra.push(plain);
@@ -180,17 +189,6 @@ impl Keymap {
                 if let Some(action) = b.command.to_action(kctx) { out.push(action); }
             }
         });
-        if kctx.viewport_hovered {
-            for (key, tool) in [(Key::M, Tool::Measure), (Key::C, Tool::Cursor)] {
-                if ctx.input(|i| i.key_pressed(key) && !i.modifiers.any()) { out.push(UiAction::Editor(EditorChange::Tool(tool))); }
-            }
-            for (key, mode) in [(Key::L, super::sketch::SketchMode::Line), (Key::P, super::sketch::SketchMode::Pen), (Key::G, super::sketch::SketchMode::Polygon)] {
-                if ctx.input(|i| i.key_pressed(key) && !i.modifiers.any()) { out.push(UiAction::StartSketch(mode)); }
-            }
-            for (key, mode) in [(Key::R, super::sketch::SketchMode::Rectangle), (Key::C, super::sketch::SketchMode::Circle)] {
-                if ctx.input(|i| i.key_pressed(key) && i.modifiers.shift && !i.modifiers.ctrl && !i.modifiers.alt) { out.push(UiAction::StartSketch(mode)); }
-            }
-        }
         out
     }
     pub fn overrides_json(&self) -> Value {
@@ -268,13 +266,17 @@ fn default_keymap_table() -> String {
     }
     #[test] fn tool_shortcuts_are_viewport_bindings() {
         let map = Keymap::blender();
-        for (key, tool) in [(Key::Q, Tool::Select), (Key::W, Tool::Move), (Key::E, Tool::Rotate),
-            (Key::R, Tool::Scale), (Key::T, Tool::Transform)] {
+        for (key, tool) in [(Key::Q, Tool::Select), (Key::G, Tool::Move), (Key::R, Tool::Rotate), (Key::S, Tool::Scale)] {
             let binding = map.bindings.iter().find(|b| b.chord == Chord::new(key, false, false, false)).unwrap();
             assert_eq!(binding.context, Context::Viewport);
             assert!(matches!(binding.command.to_action(&KeyContext::default()),
                 Some(UiAction::Editor(EditorChange::Tool(t))) if t == tool));
         }
+        for key in [Key::W, Key::E, Key::T, Key::F12] {
+            assert!(!map.bindings.iter().any(|b| b.chord == Chord::new(key, false, false, false)));
+        }
+        assert!(map.bindings.iter().any(|b| b.command == Command::ToggleEdit && b.chord == Chord::new(Key::Tab,false,false,false)));
+        assert!(map.bindings.iter().any(|b| b.command == Command::AddMenu && b.chord == Chord::new(Key::A,false,true,false)));
     }
     #[test] fn alternate_shortcut_round_trips_and_emulation_moves_selection() {
         let mut map = Keymap::blender();
@@ -295,6 +297,10 @@ fn default_keymap_table() -> String {
         let mut found = Vec::new();
         let _ = ctx.run(input, |ctx| { found = Keymap::blender().poll(ctx,&KeyContext { viewport_hovered: true, ..Default::default() });
             assert!(!ctx.input(|i| i.key_pressed(Key::Num1))); });
+        assert!(found.is_empty());
+        let input = egui::RawInput { events: vec![egui::Event::Key { key: Key::Num1, physical_key: None,
+            pressed: true, repeat: false, modifiers: Modifiers::default() }], ..Default::default() };
+        let _ = ctx.run(input, |ctx| { found = Keymap::blender().poll(ctx,&KeyContext { viewport_hovered: true, in_edit_mode: true, ..Default::default() }); });
         assert!(matches!(found.as_slice(),[UiAction::Editor(EditorChange::Selection(SelectionMode::Points))]));
     }
 }

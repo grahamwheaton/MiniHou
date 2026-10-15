@@ -9,8 +9,8 @@ use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 const HEADER_H: f32 = 36.;
 const TIMELINE_H: f32 = 44.;
 const TOOLS: [(&str, Icon); 7] = [
-    ("Select (Q)", Icon::Select), ("3D cursor (C)", Icon::Cursor), ("Move (W)", Icon::Move), ("Rotate (E)", Icon::Rotate),
-    ("Scale (R)", Icon::Scale), ("Transform (T)", Icon::Transform), ("Measure (M)", Icon::Measure),
+    ("Select (Q)", Icon::Select), ("3D cursor", Icon::Cursor), ("Move (G)", Icon::Move), ("Rotate (R)", Icon::Rotate),
+    ("Scale (S)", Icon::Scale), ("Transform", Icon::Transform), ("Measure", Icon::Measure),
 ];
 const DENSE_PRIMS: usize = 40_000;
 const FRAME_START: u32 = 1;
@@ -27,7 +27,7 @@ impl Default for VpState {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Popover { Orientation, Pivot, Snap, Proportional, Overlays }
 fn toggle_popover(open: Option<Popover>, next: Popover) -> Option<Popover> { if open == Some(next) { None } else { Some(next) } }
-const OVERLAYS: [(&str, &str); 6] = [("Grid floor", "G"), ("Axis gizmo", ""), ("Wireframe overlay", "W"), ("Stats", "I"), ("Normals", "N"), ("Bounding box", "B")];
+const OVERLAYS: [(&str, &str); 6] = [("Grid floor", ""), ("Axis gizmo", ""), ("Wireframe overlay", ""), ("Stats", ""), ("Normals", ""), ("Bounding box", "")];
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Icon { Object, Points, Edges, Faces, Orient, Pivot, Magnet, Prop, Overlays, Xray, Solid, Shaded, Wire, ShadedWire, Frame,
@@ -35,7 +35,7 @@ enum Icon { Object, Points, Edges, Faces, Orient, Pivot, Magnet, Prop, Overlays,
 
 /// Where every header control sits, from the viewport's left/top/width. Pure so it can be tested at any width.
 #[derive(Debug)]
-struct HeaderLayout { modes: [Rect; 4], orient: Rect, pivot: Rect, snap: Rect, prop: Rect, overlays: Rect, xray: Rect, shading: [Rect; 4], frame: Rect, seps: Vec<f32>, groups: Vec<Rect> }
+struct HeaderLayout { modes: [Rect; 4], orient: Rect, pivot: Rect, snap: Rect, prop: Rect, proxy: Rect, overlays: Rect, xray: Rect, shading: [Rect; 4], frame: Rect, seps: Vec<f32>, groups: Vec<Rect> }
 fn header_layout(left: f32, top: f32, width: f32, snap_on: bool) -> HeaderLayout {
     let cy = top + HEADER_H / 2.;
     let mk = |x: f32, w: f32, h: f32| Rect::from_min_size(Pos2::new(x, cy - h / 2.), Vec2::new(w, h));
@@ -50,7 +50,7 @@ fn header_layout(left: f32, top: f32, width: f32, snap_on: bool) -> HeaderLayout
     x += 4.; seps.push(x); x += 5.;
     let orient = mk(x, 82., 26.); x += 82. + 3.;
     let pivot = mk(x, 44., 26.); x += 44. + 3.;
-    let snap_w = if snap_on { 76. } else { 44. };
+    let snap_w = if snap_on && width > 720. { 76. } else { 44. };
     let snap = mk(x, snap_w, 26.); x += snap_w + 3.;
     let prop = mk(x, 44., 26.);
     // right end, laid from the right edge inwards
@@ -65,7 +65,9 @@ fn header_layout(left: f32, top: f32, width: f32, snap_on: bool) -> HeaderLayout
     seps.push(r - 4.); r -= 9.;
     let xray = mk(r - 26., 26., 26.); r -= 26. + 3.;
     let overlays = mk(r - 44., 44., 26.);
-    HeaderLayout { modes, orient, pivot, snap, prop, overlays, xray, shading, frame, seps, groups }
+    let proxy_width = (overlays.left() - prop.right() - 16.).clamp(0., 100.);
+    let proxy = mk(overlays.left() - 8. - proxy_width, proxy_width, 26.);
+    HeaderLayout { modes, orient, pivot, snap, prop, proxy, overlays, xray, shading, frame, seps, groups }
 }
 
 /// "node 'noise1' (noise): ValueError: ..." -> (Some("noise1"), "ValueError: ...")
@@ -102,23 +104,27 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     for x in &h.seps { painter.line_segment([Pos2::new(*x, rect.top() + 9.), Pos2::new(*x, rect.top() + HEADER_H - 9.)], stroke); }
     for (i, r) in h.modes.iter().enumerate() {
         let mode = SelectionMode::ALL[i];
-        if button(ui, th, *r, ("vp_mode", i), ed.selection == mode, ["Object mode (4)", "Points (1)", "Edges (2)", "Faces (3)"][i], [Icon::Object, Icon::Points, Icon::Edges, Icon::Faces][i]) { out.push(UiAction::Editor(EditorChange::Selection(mode))); }
+        if button(ui, th, *r, ("vp_mode", i), ed.selection == mode, ["Object mode (Tab)", "Points (1)", "Edges (2)", "Faces (3)"][i], [Icon::Object, Icon::Points, Icon::Edges, Icon::Faces][i]) { out.push(UiAction::Editor(EditorChange::Selection(mode))); }
     }
     if button_text(ui, th, h.orient, "vp_orient", st.popover == Some(Popover::Orientation), "Transform orientation", Icon::Orient, (Some(ed.orientation.label()), true)) { st.popover = toggle_popover(st.popover, Popover::Orientation); }
     if button_text(ui, th, h.pivot, "vp_pivot", st.popover == Some(Popover::Pivot), "Pivot point", Icon::Pivot, (None, true)) { st.popover = toggle_popover(st.popover, Popover::Pivot); }
     let snap_label = format!("{}", ed.snap.increment);
     let snap_main = Rect::from_min_max(h.snap.min, Pos2::new(h.snap.right() - 16., h.snap.bottom()));
-    if button_text(ui, th, snap_main, "vp_snap_toggle", ed.snap.enabled, "Toggle snapping (Shift+Tab)", Icon::Magnet, (if ed.snap.enabled { Some(snap_label.as_str()) } else { None }, false)) { out.push(UiAction::Editor(EditorChange::SnapEnabled(!ed.snap.enabled))); }
+    if button_text(ui, th, snap_main, "vp_snap_toggle", ed.snap.enabled, "Toggle snapping (Shift+Tab)", Icon::Magnet, (if ed.snap.enabled && h.snap.width() > 44. { Some(snap_label.as_str()) } else { None }, false)) { out.push(UiAction::Editor(EditorChange::SnapEnabled(!ed.snap.enabled))); }
     if caret_button(ui, th, h.snap, "vp_snap_menu", st.popover == Some(Popover::Snap)) { st.popover = toggle_popover(st.popover, Popover::Snap); }
     let prop_main = Rect::from_min_max(h.prop.min, Pos2::new(h.prop.right() - 16., h.prop.bottom()));
     if button_text(ui, th, prop_main, "vp_prop_toggle", ed.proportional.enabled, "Toggle proportional editing (O)", Icon::Prop, (None, false)) { out.push(UiAction::Editor(EditorChange::ProportionalEnabled(!ed.proportional.enabled))); }
     if caret_button(ui, th, h.prop, "vp_prop_menu", st.popover == Some(Popover::Proportional)) { st.popover = toggle_popover(st.popover, Popover::Proportional); }
+    ui.scope_builder(egui::UiBuilder::new().max_rect(h.proxy), |ui| {
+        ui.set_clip_rect(h.proxy);
+        super::proxy_ui::menu(ui, v, out, h.proxy.width() < 80.);
+    });
     if button_text(ui, th, h.overlays, "vp_overlays", st.popover == Some(Popover::Overlays), "Overlays", Icon::Overlays, (None, true)) { st.popover = toggle_popover(st.popover, Popover::Overlays); }
     if button(ui, th, h.xray, ("vp_xray", 0), ed.xray, "X-ray (Alt+Z)", Icon::Xray) { out.push(UiAction::Editor(EditorChange::Xray(!ed.xray))); }
     for (i, (mode, name, icon)) in [(Mode::Solid, "Solid", Icon::Solid), (Mode::Shaded, "Shaded", Icon::Shaded), (Mode::Wire, "Wire", Icon::Wire), (Mode::ShadedWire, "Shaded + Wire", Icon::ShadedWire)].into_iter().enumerate() {
         if button(ui, th, h.shading[i], ("vp_shading", i), v.mode == mode, name, icon) { out.push(UiAction::SetMode(mode)); }
     }
-    if button(ui, th, h.frame, ("vp_frame", 0), false, "Frame the mesh (F)", Icon::Frame) { out.push(UiAction::Frame); }
+    if button(ui, th, h.frame, ("vp_frame", 0), false, "Frame the mesh (Home)", Icon::Frame) { out.push(UiAction::Frame); }
 
     // ---- tool strip
     let strip_h = TOOLS.len() as f32 * 28. + 2. * 5. + 8.;
@@ -437,7 +443,7 @@ mod tests {
             for snap in [false, true] {
                 let h = header_layout(0., 0., width, snap);
                 let mut rects: Vec<Rect> = h.modes.to_vec();
-                rects.extend([h.orient, h.pivot, h.snap, h.prop, h.overlays, h.xray, h.frame]);
+                rects.extend([h.orient, h.pivot, h.snap, h.prop, h.proxy, h.overlays, h.xray, h.frame]);
                 rects.extend(h.shading);
                 for (i, a) in rects.iter().enumerate() {
                     assert!(a.left() >= 0. && a.right() <= width, "width {width}: {a:?} outside");
@@ -445,6 +451,8 @@ mod tests {
                 }
                 // the left cluster ends before the right cluster starts
                 assert!(h.prop.right() < h.overlays.left(), "width {width} snap {snap}: clusters collide");
+                assert!(h.prop.right() + 8. <= h.proxy.left() && h.proxy.right() + 8. <= h.overlays.left());
+                assert!(h.proxy.width() >= 50., "width {width} snap {snap}: proxy chip too narrow");
             }
         }
     }

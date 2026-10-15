@@ -42,6 +42,7 @@ pub enum UiAction {
     Redo,
     /// Frame the mesh in the viewport.
     Frame,
+    FrameSelected,
     Select(String),
     /// "Visible" flag: make this node the displayed one.
     SetDisplay(String),
@@ -208,10 +209,10 @@ pub mod testing {
             f.theme = theme;
             for panel in [super::topbar::show as fn(&mut egui::Ui, &View, &mut Actions),
                 super::shelf::show, super::network::show, super::params::show,
-                super::status::show, super::geo_info::show, super::blender_ui::indicator,
-                super::proxy_ui::menu] {
+                super::status::show, super::geo_info::show, super::blender_ui::indicator] {
                 assert!(f.run(panel).is_empty());
             }
+            assert!(f.run(|ui, v, out| super::proxy_ui::menu(ui, v, out, false)).is_empty());
             assert!(f.run(|ui, v, out| super::viewport_ui::overlay(ui, ui.max_rect(), v, out)).is_empty());
             assert!(f.run(|ui, v, out| { let mut shown = true; super::blender_ui::bar(ui, v, out, &mut shown); }).is_empty());
             let ctx = egui::Context::default();

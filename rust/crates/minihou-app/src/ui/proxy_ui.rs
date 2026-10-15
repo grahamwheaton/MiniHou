@@ -16,9 +16,10 @@ fn choose(level: f32, auto: bool, out: &mut Actions) {
 }
 
 /// 26 px header dropdown; its choices mirror the old editor's proxy rows.
-pub fn menu(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
+pub fn menu(ui: &mut egui::Ui, v: &View, out: &mut Actions, compact: bool) {
     let p = v.editor.proxy;
-    let label = format!("Proxy: {}  ▾", active_label(p.level, p.auto));
+    let label = if compact { if p.auto { "Auto".into() } else { format!("{}%", (p.level * 100.).round()) } }
+        else { format!("Proxy: {}  ▾", active_label(p.level, p.auto)) };
     ui.scope(|ui| {
         ui.style_mut().spacing.interact_size.y = 26.;
         ui.menu_button(RichText::new(label).size(12.).color(v.theme.text), |ui| {
@@ -73,6 +74,6 @@ mod tests {
 
     #[test]
     fn menu_runs_without_action() {
-        assert!(Fixture::new().run(menu).is_empty());
+        assert!(Fixture::new().run(|ui, v, out| menu(ui, v, out, false)).is_empty());
     }
 }
