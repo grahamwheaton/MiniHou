@@ -185,7 +185,13 @@ def chunk_bounds(P, tri, chunk: int) -> np.ndarray:
 
 def cook_node(node_type: str, **params):
     """One input-less node (``grid``, ``box``) cooked in Rust, as a Geometry."""
-    return cook({"version": 1, "nodes": {"n": {"type": node_type, "params": params}}, "display": "n"})
+    try:
+        return cook({"version": 1, "nodes": {"n": {"type": node_type, "params": params}}, "display": "n"})
+    except RuntimeError as exc:
+        # the core words errors as "node 'n' (type): ..." for the one-node graph above; the evaluator adds the real node
+        # context, so the message is the same text the Python body raises
+        message, prefix = str(exc), f"node 'n' ({node_type}): "
+        raise ValueError(message[len(prefix):] if message.startswith(prefix) else message) from exc
 
 
 def node_types() -> list:

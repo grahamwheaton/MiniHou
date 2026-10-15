@@ -27,26 +27,6 @@ from minihou.wrangle import WrangleError
 # Mapping of (node_type, param_name, repr(value)) to a short reason and file:line
 # for confirmed bugs; entries are reported but do not fail the test.
 KNOWN: Dict[Tuple[str, str, str], str] = {
-    ("attribute_blur", "group", repr(" ")): (
-        "groups.mask(' ') returns None; _edge_smoother attempts move &= ~topo.boundary_points "
-        "(attrib_tools.py:226)"
-    ),
-    ("attribute_create", "group", repr(" ")): (
-        "truthy whitespace ' ' passes 'if group' but groups.mask(' ') returns None, calling "
-        "sel.reshape() on None (attrib_tools.py:59)"
-    ),
-    ("smooth", "group", repr(" ")): (
-        "groups.mask(' ') returns None; _edge_smoother attempts move &= ~topo.boundary_points "
-        "(attrib_tools.py:226)"
-    ),
-    ("box", "divisions", "1000"): (
-        "Rust core raises raw RuntimeError instead of ValueError when face cells exceed 1M "
-        "(rust.py:206)"
-    ),
-    ("box", "divisions", "999"): (
-        "Rust core raises raw RuntimeError instead of ValueError when face cells exceed 1M "
-        "(rust.py:206)"
-    ),
 }
 
 # ---------------------------------------------------------------------------

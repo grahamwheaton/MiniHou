@@ -59,7 +59,8 @@ def attribute_create(geo, name, domain, type, value, group):
     arr = np.full((n, width), v, dtype) if width > 1 else np.full(n, v[0], dtype)
     if group and dom in ("point", "prim"):
         sel = groups.mask(geo, dom, group)
-        arr = np.where(sel.reshape((-1,) + (1,) * (arr.ndim - 1)), arr, 0).astype(dtype)
+        if sel is not None:
+            arr = np.where(sel.reshape((-1,) + (1,) * (arr.ndim - 1)), arr, 0).astype(dtype)
     return _set(geo, dom, name, arr)
 
 
@@ -221,7 +222,9 @@ def _edge_smoother(geo, pin_boundary, group):
     a, b = e.points[:, 0], e.points[:, 1]
     n = geo.npoints
     count = np.bincount(np.r_[a, b], minlength=n)
-    move = np.ones(n, bool) if group == "" else groups.mask(geo, "point", group)
+    move = groups.mask(geo, "point", group)
+    if move is None:
+        move = np.ones(n, bool)
     if pin_boundary:                                     # open polygon edges, and the ends of curves
         move &= ~topo.boundary_points(geo)
         move &= count != 1
