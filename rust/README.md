@@ -1,7 +1,8 @@
 # MiniHou Rust core (first steps)
 
 The start of a native compute backend, following `RustPlan.md`: **benchmark first, port one piece at a time, keep Python as the
-reference and the fallback**. Nothing in MiniHou uses it yet; it builds and tests beside the Python engine.
+reference and the fallback**. When the extension is installed in the Python that runs the engine, the engine uses it
+automatically for its slowest steps (see "What the engine uses it for"); without it, MiniHou runs exactly as before.
 
 ```
 rust/
@@ -32,6 +33,21 @@ pip install rust-wheels/minihou_rs-*.whl                   # or: maturin develop
 python -m unittest tests.test_rust_parity -v
 python bench/bench_rust.py
 ```
+
+`cargo build` on its own makes nothing Python can load: the wheel is what the engine needs. On Windows (PowerShell, from the
+repository root, with the same Python that runs the engine):
+
+```
+py -m pip install maturin
+maturin build --release -m rust\crates\minihou-py\Cargo.toml -o rust-wheels
+py -m pip install --force-reinstall --no-index --find-links rust-wheels minihou-rs
+py -c "from minihou import rust; print(rust.status())"     # minihou_rs 0.1.0
+```
+
+`--force-reinstall` matters after a rebuild: the version number does not change, so pip would otherwise keep the old build.
+The engine prints `compute backend: numba ...; rust: minihou_rs 0.1.0` when it starts. The engine Blender starts is whichever
+Python the add-on's "External Python / Portable Runtime" preference names (or the one `tools/launch_blender.py` runs under), so
+the wheel has to be installed into that one. `MINIHOU_NO_RUST=1` turns it off again without uninstalling.
 
 `minihou.rust.available()` says whether the extension is importable; MiniHou imports and runs the same without it (the parity
 tests skip). `tests/test_rust_parity.py` also checks the engine with Rust on against the engine with Rust off, and the CI job runs

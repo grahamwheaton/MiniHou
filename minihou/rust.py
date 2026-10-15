@@ -16,8 +16,9 @@ from typing import Optional
 
 import numpy as np
 
+_off_by_env = os.environ.get("MINIHOU_NO_RUST", "").strip().lower() in ("1", "true", "yes", "on")
 try:
-    if os.environ.get("MINIHOU_NO_RUST", "").strip().lower() in ("1", "true", "yes", "on"):
+    if _off_by_env:
         raise ImportError("disabled by MINIHOU_NO_RUST")
     import minihou_rs as _rs
 except ImportError:                                   # the normal case: the extension is optional
@@ -52,7 +53,7 @@ def disabled():
 
 def status() -> str:
     if _rs is None:
-        return "not installed"
+        return "off (MINIHOU_NO_RUST)" if _off_by_env else "not installed"
     return f"minihou_rs {_rs.__version__}" + ("" if _forced_off == 0 else " (disabled)")
 
 

@@ -102,8 +102,8 @@ def _cmd_serve(args) -> int:
     except (GraphError, OSError) as e:
         print("graph error:\n  " + "\n  ".join(getattr(e, "errors", [str(e)])), file=sys.stderr)
         return 2
-    from . import accel
-    print(f"compute backend: {accel.status()}", flush=True)
+    from . import accel, rust
+    print(f"compute backend: {accel.status()}; rust: {rust.status()}", flush=True)
     from .nodes import python_node
     if python_node.allowed():
         print("python nodes: ENABLED (graphs can run Python code)", flush=True)
