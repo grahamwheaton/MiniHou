@@ -101,7 +101,8 @@ struct Uniforms {
     base: [f32; 4],
     wire: [f32; 4],
     flat_shading: u32,
-    _pad: [u32; 3],
+    wire_fade: f32,
+    _pad: [u32; 2],
 }
 
 // ---- tiny column-major matrix helpers (enough for an orbit camera)
@@ -263,6 +264,8 @@ struct Gpu {
     eb: wgpu::Buffer,
     ntri_idx: u32,
     nedge_idx: u32,
+    /// Average edge length in world units (bounding diagonal over the square root of the edge count): sizes the edge fade.
+    edge_world: f32,
     adapter_info: wgpu::AdapterInfo,
 }
 
@@ -366,7 +369,7 @@ impl Gpu {
             attributes: a,
         };
         let surf_bufs = [Some(vb(&POS)), Some(vb(&NRM))];
-        let wire_bufs = [Some(vb(&POS))];
+        let wire_bufs = [Some(vb(&POS)), Some(vb(&NRM))];
         let target = [Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL })];
         let mk = |label, vs, fs, bufs: &[Option<wgpu::VertexBufferLayout>], topo, bias: i32| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -408,6 +411,7 @@ impl Gpu {
             eb,
             ntri_idx: sc.tri.len() as u32,
             nedge_idx: sc.edge.len() as u32,
+            edge_world: (2.0 * sc.radius) / (sc.edge.len().max(2) as f32 / 2.0).sqrt(),
             adapter_info,
         }
     }
@@ -420,6 +424,13 @@ impl Gpu {
         self.config.height = h;
         self.surface.configure(&self.device, &self.config);
         self.depth = make_depth(&self.device, w, h);
+    }
+
+    /// 0 when the average edge is under about 1.5 px on screen, 1 from about 10 px: smoothstep in between.
+    fn wire_fade(&self, cam: &Camera) -> f32 {
+        let px_per_unit = self.config.height as f32 / (2.0 * (0.8f32 / 2.0).tan() * cam.dist.max(1e-6));
+        let t = ((self.edge_world * px_per_unit - 1.5) / (10.0 - 1.5)).clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
     }
 
     fn draw(&mut self, cam: &Camera, mode: Mode) -> bool {
@@ -438,9 +449,11 @@ impl Gpu {
             view_proj,
             view,
             base: [0.72, 0.74, 0.78, 1.0],
-            wire: if mode == Mode::Wire { [0.85, 0.87, 0.9, 1.0] } else { [0.05, 0.06, 0.08, 1.0] },
+            // wire.a selects the line look in the shader: 1 = a darker version of the surface (Shaded+Wire), 0 = lit lines (Wire)
+            wire: [0.0, 0.0, 0.0, if mode == Mode::ShadedWire { 1.0 } else { 0.0 }],
             flat_shading: (mode == Mode::Solid) as u32,
-            _pad: [0; 3],
+            wire_fade: self.wire_fade(cam),
+            _pad: [0; 2],
         };
         self.queue.write_buffer(&self.ubuf, 0, bytemuck::bytes_of(&u));
         let view_tex = frame.texture.create_view(&Default::default());
@@ -477,6 +490,7 @@ impl Gpu {
             if mode == Mode::Wire || mode == Mode::ShadedWire {
                 pass.set_pipeline(&self.pipe_wire);
                 pass.set_vertex_buffer(0, self.vp.slice(..));
+                pass.set_vertex_buffer(1, self.vn.slice(..));
                 pass.set_index_buffer(self.eb.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..self.nedge_idx, 0, 0..1);
             }
