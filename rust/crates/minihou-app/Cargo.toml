@@ -9,3 +9,6 @@ minihou-core = { path = "../minihou-core" }
 serde_json = { version = "1", features = ["preserve_order"] }
 eframe = { version = "=0.33.3", default-features = false, features = ["wgpu", "default_fonts", "x11", "wayland"] }
 bytemuck = { version = "1.25.2", features = ["derive"] }
+# eframe is used with default features off, which leaves wgpu with no backend compiled in (a panic at start-up on Windows).
+# Naming wgpu here, at the version eframe pins, turns on DX12 and Vulkan for the one copy in the build.
+wgpu = { version = "27.0.1", default-features = false, features = ["dx12", "vulkan", "wgsl"] }
