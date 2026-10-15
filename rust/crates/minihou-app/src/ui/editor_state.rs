@@ -9,7 +9,7 @@ pub enum SelectionMode { #[default] Object, Points, Edges, Faces }
 pub enum Tool { #[default] Select, Cursor, Move, Rotate, Scale, Transform, Measure }
 impl Tool { pub const ALL: [Self; 7] = [Self::Select, Self::Cursor, Self::Move, Self::Rotate, Self::Scale, Self::Transform, Self::Measure]; }
 impl SelectionMode {
-    pub const ALL: [SelectionMode; 4] = [Self::Object, Self::Points, Self::Edges, Self::Faces];
+    pub const ALL: [SelectionMode; 4] = [Self::Points, Self::Edges, Self::Faces, Self::Object];
     pub fn label(self) -> &'static str { match self { Self::Object => "Object", Self::Points => "Points", Self::Edges => "Edges", Self::Faces => "Faces" } }
 }
 

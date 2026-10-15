@@ -125,7 +125,7 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     for x in &h.seps { painter.line_segment([Pos2::new(*x, rect.top() + 9.), Pos2::new(*x, rect.top() + HEADER_H - 9.)], stroke); }
     for (i, r) in h.modes.iter().enumerate() {
         let mode = SelectionMode::ALL[i];
-        if button(ui, th, *r, ("vp_mode", i), ed.selection == mode, ["Objects (4)", "Points (1)", "Edges (2)", "Faces (3)"][i], [Icon::Object, Icon::Points, Icon::Edges, Icon::Faces][i]) { out.push(UiAction::Editor(EditorChange::Selection(mode))); }
+        if button(ui, th, *r, ("vp_mode", i), ed.selection == mode, ["Points (1)", "Edges (2)", "Faces (3)", "Objects (4)"][i], [Icon::Points, Icon::Edges, Icon::Faces, Icon::Object][i]) { out.push(UiAction::Editor(EditorChange::Selection(mode))); }
     }
     if button_text(ui, th, h.orient, "vp_orient", st.popover == Some(Popover::Orientation), "Transform orientation", Icon::Orient, (Some(ed.orientation.label()), true)) { st.popover = toggle_popover(st.popover, Popover::Orientation); }
     if button_text(ui, th, h.pivot, "vp_pivot", st.popover == Some(Popover::Pivot), "Pivot point", Icon::Pivot, (None, true)) { st.popover = toggle_popover(st.popover, Popover::Pivot); }
