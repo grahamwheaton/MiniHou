@@ -36,6 +36,7 @@ pub enum Command {
     Undo, Redo, Save, SaveAs, Open, Copy, Paste, DeleteNode, DissolveNode, DuplicateNode,
     TidyNetwork, Preferences, BoxSelect, CircleSelect, Paint, Extrude, Inset, Bevel, PushPull, LoopCut, FlipFaces, OppositeView, NetworkBox, PieMenu, DisplayFlag, MuteFlag, TemplateFlag, SelectableTemplateFlag, FindNode,
     TimelineToggle, TimelinePrevious, TimelineNext, TimelineStart, TimelineEnd,
+    ResetCursor,
 }
 impl Command {
     pub const ALL: [Self; 74] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
@@ -47,7 +48,8 @@ impl Command {
         Self::Proportional, Self::ShadeNext, Self::ShadePrevious, Self::Undo, Self::Redo,
         Self::Save, Self::SaveAs, Self::Open, Self::Copy, Self::Paste, Self::DeleteNode, Self::DissolveNode, Self::DuplicateNode,
         Self::TidyNetwork, Self::Preferences, Self::BoxSelect, Self::CircleSelect, Self::Paint, Self::Extrude, Self::Inset, Self::Bevel, Self::PushPull, Self::LoopCut, Self::FlipFaces, Self::OppositeView, Self::NetworkBox, Self::PieMenu, Self::DisplayFlag, Self::MuteFlag, Self::TemplateFlag, Self::SelectableTemplateFlag, Self::FindNode,
-        Self::TimelineToggle, Self::TimelinePrevious, Self::TimelineNext, Self::TimelineStart, Self::TimelineEnd];
+        Self::TimelineToggle, Self::TimelinePrevious, Self::TimelineNext, Self::TimelineStart, Self::TimelineEnd,
+        Self::ResetCursor];
     pub fn label(self) -> &'static str { match self {
         Self::Points => "Points", Self::Edges => "Edges", Self::Faces => "Faces", Self::Object => "Object", Self::ToggleEdit => "Toggle Object / edit mode",
         Self::SelectAll => "Select all", Self::SelectNone => "Select none", Self::Hide => "Hide selected", Self::Reveal => "Reveal hidden", Self::AddMenu => "Add node menu", Self::ToggleParams => "Toggle parameters",
@@ -71,6 +73,7 @@ impl Command {
         Self::MuteFlag => "Mute flag", Self::TemplateFlag => "Template flag", Self::SelectableTemplateFlag => "Selectable template flag",
         Self::FindNode => "Find node", Self::TimelineToggle => "Play / pause", Self::TimelinePrevious => "Previous frame",
         Self::TimelineNext => "Next frame", Self::TimelineStart => "First frame", Self::TimelineEnd => "Last frame",
+        Self::ResetCursor => "Reset 3D cursor and frame all",
     } }
     fn id(self) -> &'static str { match self {
         Self::Points => "points", Self::Edges => "edges", Self::Faces => "faces", Self::Object => "object", Self::ToggleEdit => "toggle_edit",
@@ -93,6 +96,7 @@ impl Command {
         Self::MuteFlag => "mute_flag", Self::TemplateFlag => "template_flag", Self::SelectableTemplateFlag => "selectable_template_flag",
         Self::FindNode => "find_node", Self::TimelineToggle => "timeline_toggle", Self::TimelinePrevious => "timeline_previous",
         Self::TimelineNext => "timeline_next", Self::TimelineStart => "timeline_start", Self::TimelineEnd => "timeline_end",
+        Self::ResetCursor => "reset_cursor",
     } }
     pub fn to_action(self, kctx: &KeyContext<'_>) -> Option<UiAction> { Some(match self {
         Self::Points => UiAction::Editor(EditorChange::Selection(SelectionMode::Points)),
@@ -147,6 +151,7 @@ impl Keymap {
         }
         for (key,ctrl,alt,cmd) in [(K::B,true,false,C::Bevel),(K::E,false,true,C::PushPull),
             (K::R,true,false,C::LoopCut),(K::N,false,true,C::FlipFaces)] { add(key,ctrl,false,alt,cmd,X::Viewport); }
+        add(K::C, false, true, false, C::ResetCursor, X::Viewport);
         for (key,cmd) in [(K::Tab,C::AddMenu),(K::Home,C::FrameSelected)] {
             add(key,false,false,false,cmd,X::Viewport);
         }
@@ -358,6 +363,8 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
         }
         assert!(map.bindings.iter().any(|b| b.chord == Chord::new(Key::R, false, true, false)
             && b.command == Command::DisplayFlag && b.context == Context::Network));
+        assert!(map.bindings.iter().any(|b| b.chord == Chord::new(Key::C, false, true, false)
+            && b.command == Command::ResetCursor && b.context == Context::Viewport));
         assert!(!map.bindings.iter().any(|b| b.command == Command::ToggleEdit));
     }
     #[test] fn alternate_shortcut_round_trips_and_emulation_moves_selection() {

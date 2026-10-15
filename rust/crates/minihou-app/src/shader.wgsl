@@ -123,3 +123,10 @@ fn fs_xray(i: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32
 fn fs_normals(i: WOut) -> @location(0) vec4<f32> { return out_color(vec3<f32>(0.25, 0.78, 0.92)); }
 @fragment
 fn fs_bounds(i: WOut) -> @location(0) vec4<f32> { return out_color(vec3<f32>(0.95, 0.72, 0.25)); }
+
+// Object mask for silhouette outline: single-channel write
+@fragment
+fn fs_mask(i: VOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+}
+

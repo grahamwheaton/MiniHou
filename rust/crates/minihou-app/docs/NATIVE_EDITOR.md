@@ -35,6 +35,7 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Alt+E | Push / pull | Viewport |
 | Ctrl+R | Loop cut | Viewport |
 | Alt+N | Flip faces | Viewport |
+| Shift+C | Reset 3D cursor and frame all | Viewport |
 | Tab | Add node menu | Viewport |
 | Home | Frame selected | Viewport |
 | Space | Play / pause | Viewport |

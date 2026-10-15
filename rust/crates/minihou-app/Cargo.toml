@@ -14,3 +14,7 @@ bytemuck = { version = "1.25.2", features = ["derive"] }
 wgpu = { version = "27.0.1", default-features = false, features = ["dx12", "vulkan", "wgsl"] }
 
 rfd = "=0.15.4"
+
+[dev-dependencies]
+pollster = "0.4"
+

@@ -60,6 +60,8 @@ pub enum UiAction {
     Edit { edit: Edit, continuous: bool },
     /// A shelf tool: add a node of this type (after `after`, wired to it, when given).
     AddNode { node_type: String, after: Option<String> },
+    /// A shelf tool dropped with a specific world position.
+    AddNodeAt { node_type: String, after: Option<String>, pos: [f32; 3] },
     SetMode(Mode),
     /// Selection mode, orientation, pivot, snapping, proportional editing, overlays, X-ray, view preset.
     Editor(EditorChange),
