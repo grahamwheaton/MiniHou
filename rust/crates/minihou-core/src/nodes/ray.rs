@@ -241,6 +241,23 @@ impl Target {
         hit
     }
 }
+/// Shared exact triangle ray query for attribute nodes.
+pub(super) struct RayMesh(Target);
+impl RayMesh {
+    pub(super) fn new(g: &Geometry) -> Self { Self(Target::new(g, &vec![true; g.nprims()])) }
+    pub(super) fn first_hit_distance(&self, origin: [f64; 3], direction: [f64; 3], limit: f64) -> Option<f64> {
+        self.0.cast(origin, direction, limit, false, 0.0).map(|h| h.dist)
+    }
+    pub(super) fn contains(&self, point:[f64;3], scale:f64)->bool {
+        let dirs=[[0.5774,0.4122,0.7046],[-0.3313,0.8661,0.3742],[0.7421,-0.5167,-0.4271]];
+        let mut votes=0;let eps=1e-7*scale.max(1e-12);
+        for raw in dirs {let d=unit(raw);let mut origin=point;let mut parity=0;
+            for _ in 0..1024 {let Some(t)=self.first_hit_distance(origin,d,f64::INFINITY) else{break};
+                parity^=1;origin=add(origin,mul(d,t+eps));
+            } votes+=parity;
+        } votes>=2
+    }
+}
 fn bary(p: V, t: [V; 3]) -> V {
     let a = sub(t[1], t[0]);
     let b = sub(t[2], t[0]);

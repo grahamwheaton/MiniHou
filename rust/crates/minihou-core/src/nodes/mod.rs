@@ -15,6 +15,7 @@ mod generate;
 mod groups;
 mod group;
 mod curves;
+mod lsystem;
 mod copy_to_points;
 mod instance;
 mod foreach;
@@ -43,8 +44,10 @@ mod bevel;
 mod knife;
 mod volume;
 mod fracture_voronoi;
+mod voronoi_points;
 mod fracture_tools;
 mod ray;
+mod occlusion;
 pub(crate) mod r#loop;
 mod scalar_expr;
 mod wrangle;
@@ -137,8 +140,10 @@ pub fn registry() -> &'static [NodeSpec] {
         volume::SDF_BOOLEAN,
         fracture_voronoi::VORONOI_FRACTURE,
         fracture_voronoi::VORONOI_SPLIT,
+        voronoi_points::VORONOI_FRACTURE_POINTS,
         fracture_tools::VORONOI_ADJACENCY,
         ray::RAY,
+        occlusion::OCCLUSION,
         modify::TRANSFORM,
         modify::NORMAL,
         modify::NOISE,
@@ -147,6 +152,7 @@ pub fn registry() -> &'static [NodeSpec] {
         merge::MERGE,
         curves::BEZIER,
         curves::HELIX,
+        lsystem::LSYSTEM,
         curves::CONVERT_LINE,
         curves::POLYPATH,
         curves::RESAMPLE,
