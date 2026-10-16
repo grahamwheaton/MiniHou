@@ -94,7 +94,8 @@ class Host:
         cargo = shutil.which("cargo") or str(Path.home() / ".cargo/bin/cargo.exe")
         if not Path(cargo).is_file():
             raise unittest.SkipTest("Cargo is required for the Rust TCP integration host")
-        env = dict(os.environ, CARGO_TARGET_DIR=str(ROOT / "rust/target_inst"))
+        env = dict(os.environ)
+        env.setdefault("CARGO_TARGET_DIR", str(ROOT / "rust/target_inst"))
         self.log = (self.path / "cargo.log").open("w", encoding="utf-8")
         # cargo run only builds/runs the headless example; never the desktop binary.
         self.process = subprocess.Popen([cargo, "run", "--quiet", "-p", "minihou-app", "--example", "link_selftest", "--",
@@ -157,6 +158,33 @@ class RustLinkTests(unittest.TestCase):
         host = Host(graph)
         self.addCleanup(host.close)
         return host
+
+    def test_chained_placements_reuse_only_unchanged_cooks(self):
+        host = self.host()
+        client = host.instances()
+        client.connect()
+        source = mesh()
+
+        def cook(a_move, b_scale):
+            ah, a = client.cook("placement-A", "", {"Move": [a_move, 0, 0]}, source, graph=MODIFIER)
+            bh, b = client.cook("placement-B", "", {"Scale": b_scale}, a, graph=MODIFIER)
+            return ah, bh, a, b
+
+        ah, bh, a, b = cook(2, 3)
+        np.testing.assert_array_equal(a["point/P"][:, 0], [3, 3, 3])
+        np.testing.assert_array_equal(b["point/P"][:, 0], [9, 9, 9])
+        self.assertIn("move", ah["cook"]["cooked"])
+        self.assertIn("move", bh["cook"]["cooked"])
+
+        ah, bh, _, b = cook(2, 5)
+        self.assertNotIn("move", ah["cook"]["cooked"])
+        self.assertIn("move", bh["cook"]["cooked"])
+        np.testing.assert_array_equal(b["point/P"][:, 0], [15, 15, 15])
+
+        ah, bh, _, b = cook(4, 5)
+        self.assertIn("move", ah["cook"]["cooked"])
+        self.assertIn("move", bh["cook"]["cooked"])
+        np.testing.assert_array_equal(b["point/P"][:, 0], [25, 25, 25])
 
     def test_exposure_interface_roundtrip_and_native_history(self):
         host = self.host()
