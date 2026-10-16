@@ -170,6 +170,7 @@ pub fn registry() -> &'static [NodeSpec] {
         falloff::FALLOFF,
         deform::BEND,
         uv::UV_PROJECT,
+        uv::UV_FLATTEN,
         uv::UV_TRANSFORM,
         model::REVERSE,
         model::FACET,

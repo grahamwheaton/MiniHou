@@ -6126,6 +6126,32 @@
    ]
   }
  },
+ "uv_flatten": {
+  "island_attrib": {
+   "default": "island",
+   "doc": "Primitive int attribute with each face's island (empty: none)",
+   "kind": "str"
+  },
+  "padding": {
+   "default": 0.02,
+   "doc": "Space around and between islands (fraction of the layout)",
+   "kind": "float",
+   "max": 0.2,
+   "min": 0.0
+  },
+  "seam_angle": {
+   "default": 70.0,
+   "doc": "Cut along edges whose faces meet at more than this many degrees (180: only mesh borders)",
+   "kind": "float",
+   "max": 180.0,
+   "min": 0.0
+  },
+  "split_attrib": {
+   "default": "",
+   "doc": "Primitive attribute: also cut where its value changes (e.g. from connectivity)",
+   "kind": "str"
+  }
+ },
  "uv_project": {
   "center": {
    "default": [
