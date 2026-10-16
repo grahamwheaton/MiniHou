@@ -12,6 +12,12 @@ pub enum ExternalInput {
 }
 pub type ExternalInputs = HashMap<String, ExternalInput>;
 pub const BLENDER_OBJECT: NodeSpec = NodeSpec { name:"blender_object", inputs:&[], params:crate::params!("object":""; "space":"world"; "join_edges":true), cook:waiting_object };
+/// Dynamic Blender interface schema stored on modifier_input graph nodes.
+/// Geometry is the node's regular output; scalar values resolve through parameter links.
+pub const MODIFIER_INPUT_KINDS: &[&str] = &[
+    "float", "int", "bool", "vector", "color", "rotation", "matrix", "string", "menu",
+    "object", "collection", "material", "image", "texture", "geometry", "bundle", "closure",
+];
 pub const MODIFIER_INPUT: NodeSpec = NodeSpec { name:"modifier_input", inputs:&[], params:&[], cook:modifier_input };
 pub const OBJECT_INPUT: NodeSpec = NodeSpec { name:"object_input", inputs:&[], params:crate::params!("binding":""), cook:object_input };
 fn object_input(_: &Inputs, _: &Params) -> Result<Geometry> { Err(Error::new("Choose an object in this modifier's Object input picker in Blender")) }

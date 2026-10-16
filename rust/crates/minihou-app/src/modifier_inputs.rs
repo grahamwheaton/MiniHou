@@ -3,10 +3,7 @@ use serde_json::{json, Value};
 use std::collections::HashSet;
 use crate::Result;
 
-pub const KINDS: &[&str] = &[
-    "float", "int", "bool", "vector", "color", "rotation", "matrix", "string", "menu",
-    "object", "collection", "material", "image", "texture", "geometry", "bundle", "closure",
-];
+pub const KINDS: &[&str] = minihou_core::nodes::blender_input::MODIFIER_INPUT_KINDS;
 
 pub fn default_for(kind: &str) -> Value {
     match kind {
@@ -122,6 +119,7 @@ mod tests {
 
     #[test]
     fn stable_input_ids_survive_rename_and_value_edits() {
+        assert_eq!(crate::param_meta("modifier_input", "__dynamic_inputs__").unwrap()["types"], json!(KINDS));
         let mut doc = Document::parse(json!({"display":"input","nodes":{"input":{"type":"modifier_input"}}}).to_string()).unwrap();
         let input = json!({"id":"a","name":"Amount","kind":"float","default":1.0,"min":0.0});
         doc.edit(&Edit::ModifierInputs { node:"input".into(), inputs:vec![input.clone()] }).unwrap();
