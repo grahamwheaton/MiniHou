@@ -2805,6 +2805,324 @@
    "min": 0
   }
  },
+ "lsystem": {
+  "angle": {
+   "default": 22.5,
+   "doc": "Degrees for + - & ^ \\ /; also the variable a",
+   "kind": "float",
+   "soft_max": 90.0,
+   "soft_min": 0.0
+  },
+  "angle_scale": {
+   "default": 1.0,
+   "doc": "Factor applied by ; (and divided by @)",
+   "kind": "float",
+   "soft_max": 2.0,
+   "soft_min": 0.0
+  },
+  "apply_color": {
+   "default": false,
+   "doc": "Give every point a colour Cd looked up in the Image File at the turtle's U and V",
+   "kind": "bool"
+  },
+  "apply_tube_texture_coordinates": {
+   "default": false,
+   "doc": "Tube only: write vertex uv (around the tube, along its length)",
+   "kind": "bool"
+  },
+  "branch_blend": {
+   "default": 0.0,
+   "doc": "Accepted for Houdini parity. Tubes do not blend into their parent yet",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "channel_prefix": {
+   "default": "lsys",
+   "doc": "chan(i) reads the variable named <prefix><i>",
+   "kind": "str"
+  },
+  "cols": {
+   "default": 3,
+   "doc": "Cross sections one F is cut into",
+   "kind": "int",
+   "max": 256,
+   "min": 1
+  },
+  "context_ignore": {
+   "default": "F+-",
+   "doc": "Symbols skipped when matching the context of a rule",
+   "kind": "str"
+  },
+  "context_includes_siblings": {
+   "default": false,
+   "doc": "Let rule contexts see across branches ([A]Q[B])",
+   "kind": "bool"
+  },
+  "continuous_angles": {
+   "default": true,
+   "doc": "Scale the angles turned by the last rewrite by the fractional part of Generations",
+   "kind": "bool"
+  },
+  "continuous_length": {
+   "default": true,
+   "doc": "Scale the lengths moved by the last rewrite by the fractional part of Generations",
+   "kind": "bool"
+  },
+  "continuous_width": {
+   "default": true,
+   "doc": "Scale the widths made by the last rewrite by the fractional part of Generations",
+   "kind": "bool"
+  },
+  "generations": {
+   "default": 4.0,
+   "doc": "Rewrites to apply. A fraction grows the last rewrite partway when the Continuous options are on",
+   "kind": "float",
+   "max": 12.0,
+   "min": 0.0
+  },
+  "geometry_type": {
+   "default": "skeleton",
+   "doc": "Alias for type; kept for backwards compatibility",
+   "kind": "enum",
+   "options": [
+    "skeleton",
+    "tube"
+   ]
+  },
+  "gravity": {
+   "default": 0.0,
+   "doc": "Tropism of T towards -Z; also the variable T",
+   "kind": "float",
+   "soft_max": 1.0,
+   "soft_min": -1.0
+  },
+  "group_prefix": {
+   "default": "lsys",
+   "doc": "The g command makes primitive groups named <prefix><number>",
+   "kind": "str"
+  },
+  "image_file": {
+   "default": "",
+   "doc": "Image for Apply Color",
+   "kind": "str"
+  },
+  "initial_orientation": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Initial turtle yaw, pitch, roll in degrees, applied in that order; zero starts along +Z",
+   "kind": "vec3"
+  },
+  "leaf_param_a": {
+   "default": "lsys",
+   "doc": "Point attribute that receives the 3rd value of J/K/M(s,x,a,b,c)",
+   "kind": "str"
+  },
+  "leaf_param_b": {
+   "default": "",
+   "doc": "Point attribute that receives the 4th value of J/K/M(s,x,a,b,c)",
+   "kind": "str"
+  },
+  "leaf_param_c": {
+   "default": "",
+   "doc": "Point attribute that receives the 5th value of J/K/M(s,x,a,b,c)",
+   "kind": "str"
+  },
+  "pic_image_file": {
+   "default": "",
+   "doc": "Image read by the pic() function",
+   "kind": "str"
+  },
+  "pitch": {
+   "default": 22.5,
+   "doc": "Degrees for & (down) and ^ (up), in the turtle frame",
+   "kind": "float"
+  },
+  "point_attributes": {
+   "default": false,
+   "doc": "Skeleton only: also write segs, div, lage, arc, up and gen on the points",
+   "kind": "bool"
+  },
+  "premise": {
+   "default": "F",
+   "doc": "The starting string",
+   "kind": "str"
+  },
+  "random_scale": {
+   "default": 0.0,
+   "doc": "Randomly scales the lengths of F and the other moves by up to this fraction",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "random_seed": {
+   "default": 0,
+   "doc": "For stochastic rules, ~ and Random Scale",
+   "kind": "int"
+  },
+  "read_rules_from_file": {
+   "default": false,
+   "doc": "Read the rules from the Rule File instead of the Rules box",
+   "kind": "bool"
+  },
+  "roll": {
+   "default": 137.5,
+   "doc": "Degrees for backslash and /, around the current heading",
+   "kind": "float"
+  },
+  "rows": {
+   "default": 3,
+   "doc": "Sides of a tube (3: swept triangles)",
+   "kind": "int",
+   "max": 256,
+   "min": 3
+  },
+  "rule_file": {
+   "default": "./rules.txt",
+   "doc": "One rule per line; blank lines and lines starting with # are ignored",
+   "kind": "str"
+  },
+  "rules": {
+   "default": "F=FF-[-F+F+F]+[+F-F-F]",
+   "doc": "Rules, one per line: [left<]A[>right][:condition]=replacement[:probability]",
+   "kind": "str"
+  },
+  "seed": {
+   "default": 0,
+   "doc": "Alias for random_seed; kept for backwards compatibility",
+   "kind": "int"
+  },
+  "separate_angles": {
+   "default": false,
+   "doc": "Use independent yaw, pitch and roll angles instead of Angle",
+   "kind": "bool"
+  },
+  "start_position": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Where the turtle starts",
+   "kind": "vec3"
+  },
+  "step": {
+   "default": 0.1,
+   "doc": "Alias for step_size; kept for backwards compatibility",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 2.0
+  },
+  "step_scale": {
+   "default": 0.9,
+   "doc": "Alias for step_size_scale; kept for backwards compatibility",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 2.0
+  },
+  "step_size": {
+   "default": 0.1,
+   "doc": "Length of F and f",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 2.0
+  },
+  "step_size_scale": {
+   "default": 0.9,
+   "doc": "Factor applied by \" (and divided by _)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 2.0
+  },
+  "tension": {
+   "default": 3.0,
+   "doc": "Accepted for Houdini parity. Tubes are straight per F, so it has no effect yet",
+   "kind": "float",
+   "min": 0.0
+  },
+  "thickness": {
+   "default": 0.05,
+   "doc": "Starting width (point attribute 'width', used by sweep; a tube's diameter)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 1.0
+  },
+  "thickness_scale": {
+   "default": 0.7,
+   "doc": "Factor applied by !, and by each [ branch",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "type": {
+   "default": "skeleton",
+   "doc": "skeleton: polyline curves; tube: polygon tubes around them",
+   "kind": "enum",
+   "options": [
+    "skeleton",
+    "tube"
+   ]
+  },
+  "uv_increment_u": {
+   "default": 0.1,
+   "doc": "What the ' command adds to U",
+   "kind": "float"
+  },
+  "uv_increment_v": {
+   "default": 0.1,
+   "doc": "What the # command adds to V",
+   "kind": "float"
+  },
+  "variable_b": {
+   "default": 1.0,
+   "doc": "The expression variable b",
+   "kind": "float"
+  },
+  "variable_c": {
+   "default": 1.0,
+   "doc": "The expression variable c",
+   "kind": "float"
+  },
+  "variable_d": {
+   "default": 1.0,
+   "doc": "The expression variable d",
+   "kind": "float"
+  },
+  "variables": {
+   "default": "",
+   "doc": "More expression variables, one 'name=value' per line (a name is letters, digits and _; chan(i) reads <Channel Prefix>i)",
+   "kind": "str"
+  },
+  "vertical_increment": {
+   "default": 0.1,
+   "doc": "What lage and the tube's V coordinate grow by per F",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 1.0
+  },
+  "width": {
+   "default": 0.05,
+   "doc": "Alias for thickness; kept for backwards compatibility",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 1.0
+  },
+  "width_scale": {
+   "default": 0.7,
+   "doc": "Alias for thickness_scale; kept for backwards compatibility",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "yaw": {
+   "default": 22.5,
+   "doc": "Degrees for + (left) and - (right), in the turtle frame",
+   "kind": "float"
+  }
+ },
  "match_size": {
   "center": {
    "default": [

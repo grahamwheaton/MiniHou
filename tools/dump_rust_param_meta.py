@@ -19,7 +19,7 @@ TARGET = os.path.join(ROOT, "rust", "crates", "minihou-app", "src", "param_meta.
 TYPES += ["loop_begin", "loop_end", "input", "object_input", "wrangle", "blend", "exploded_view", "usd_export", "usd_import"]
 
 # Procedural / instancing ports; retain the other workers' type lists above.
-TYPES += ["bezier", "helix", "convert_line", "polypath", "resample", "carve",
+TYPES += ["bezier", "helix", "lsystem", "convert_line", "polypath", "resample", "carve",
           "copy_to_points", "instance", "for_each", "group_promote", "attribute_delete",
           "attribute_rename", "attribute_create", "attribute_promote", "attribute_blur",
           "connectivity", "smooth", "falloff", "bend", "uv_project", "uv_transform",

@@ -15,6 +15,7 @@ mod generate;
 mod groups;
 mod group;
 mod curves;
+mod lsystem;
 mod copy_to_points;
 mod instance;
 mod foreach;
@@ -150,6 +151,7 @@ pub fn registry() -> &'static [NodeSpec] {
         merge::MERGE,
         curves::BEZIER,
         curves::HELIX,
+        lsystem::LSYSTEM,
         curves::CONVERT_LINE,
         curves::POLYPATH,
         curves::RESAMPLE,
