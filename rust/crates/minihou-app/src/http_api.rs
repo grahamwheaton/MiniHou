@@ -77,7 +77,10 @@ impl HttpServer {
                 while !stopped.load(Ordering::Relaxed) {
                     match listener.accept() {
                         Ok((socket, _)) => {
-                            let _ = sockets_tx.try_send(socket);
+                            // Accepted sockets can inherit the listener's nonblocking mode on Windows.
+                            if socket.set_nonblocking(false).is_ok() {
+                                let _ = sockets_tx.try_send(socket);
+                            }
                         }
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                             std::thread::sleep(Duration::from_millis(10))
