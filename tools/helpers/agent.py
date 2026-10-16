@@ -183,10 +183,24 @@ def rows():
     return out
 
 
+def codex_usage():
+    """Latest rate-limit snapshot Codex itself recorded (same numbers as /status)."""
+    files = sorted((Path.home() / ".codex" / "sessions").rglob("*.jsonl"), key=lambda p: p.stat().st_mtime)
+    for f in reversed(files[-5:]):
+        hits = re.findall(r'"primary":\{"used_percent":([\d.]+),"window_minutes":(\d+),"resets_at":(\d+)\},'
+                          r'"secondary":\{"used_percent":([\d.]+),"window_minutes":(\d+),"resets_at":(\d+)',
+                          f.read_text(encoding="utf-8", errors="replace"))
+        if hits:
+            a, _, ar, b, _, br = hits[-1]
+            t = lambda x: time.strftime("%a %H:%M", time.localtime(int(x)))
+            return f"Codex: 5h window {float(a):.0f}% used (resets {t(ar)}) | weekly {float(b):.0f}% used (resets {t(br)})"
+    return "Codex: no usage snapshot found"
+
+
 def dash(html):
-    hdr = ("agent/id", "cli", "task", "status", "tokens used", "updated")
+    hdr = ("agent/id", "cli", "task", "status", "tokens", "updated")
     r = rows()
-    note = "usage remaining: not exposed by the codex/agy CLIs (check /status in codex, agy usage page)"
+    note = codex_usage() + " | agy: no CLI usage readout"
     if not html:
         w = [max(len(str(x[i])) for x in [hdr, *r]) for i in range(6)]
         for x in [hdr, *r]:
