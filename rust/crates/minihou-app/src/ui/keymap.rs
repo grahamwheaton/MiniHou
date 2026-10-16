@@ -34,14 +34,14 @@ pub enum Command {
     PanLeft, PanRight, PanUp, PanDown, ZoomIn, ZoomOut,
     Xray, Snap, Proportional, ShadeNext, ShadePrevious, ShadePie,
     Undo, Redo, Save, SaveAs, Open, Copy, Paste, DeleteNode, DissolveNode, DuplicateNode,
-    TidyNetwork, Preferences, BoxSelect, CircleSelect, LassoSelect, Paint, Extrude, Inset, Bevel, PushPull, LoopCut, Knife, FlipFaces, OppositeView, NetworkBox, PieMenu, DisplayFlag, MuteFlag, TemplateFlag, SelectableTemplateFlag, FindNode,
+    TidyNetwork, Preferences, BoxSelect, CircleSelect, LassoSelect, Paint, Extrude, Inset, Bevel, PushPull, LoopCut, Knife, FlipFaces, Mirror, OppositeView, NetworkBox, PieMenu, DisplayFlag, MuteFlag, TemplateFlag, SelectableTemplateFlag, FindNode,
     TimelineToggle, TimelinePrevious, TimelineNext, TimelineStart, TimelineEnd,
     ResetCursor,
     RepeatLast,
     SketchLine, SketchPolyline, SketchPolygon, SketchRectangle, SketchCircle,
 }
 impl Command {
-    pub const ALL: [Self; 84] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
+    pub const ALL: [Self; 85] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
         Self::ToolSelect, Self::ToolMove, Self::ToolRotate, Self::ToolScale, Self::ToolTransform,
         Self::FrameAll, Self::FrameSelected, Self::Front, Self::Back, Self::Right, Self::Left,
         Self::Top, Self::Bottom, Self::ToggleProjection, Self::OrbitDown, Self::OrbitLeft,
@@ -49,7 +49,7 @@ impl Command {
         Self::PanDown, Self::ZoomIn, Self::ZoomOut, Self::Xray, Self::Snap,
         Self::Proportional, Self::ShadeNext, Self::ShadePrevious, Self::Undo, Self::Redo,
         Self::Save, Self::SaveAs, Self::Open, Self::Copy, Self::Paste, Self::DeleteNode, Self::DissolveNode, Self::DuplicateNode,
-        Self::TidyNetwork, Self::Preferences, Self::BoxSelect, Self::CircleSelect, Self::LassoSelect, Self::Paint, Self::Extrude, Self::Inset, Self::Bevel, Self::PushPull, Self::LoopCut, Self::Knife, Self::FlipFaces, Self::OppositeView, Self::NetworkBox, Self::PieMenu, Self::DisplayFlag, Self::MuteFlag, Self::TemplateFlag, Self::SelectableTemplateFlag, Self::FindNode,
+        Self::TidyNetwork, Self::Preferences, Self::BoxSelect, Self::CircleSelect, Self::LassoSelect, Self::Paint, Self::Extrude, Self::Inset, Self::Bevel, Self::PushPull, Self::LoopCut, Self::Knife, Self::FlipFaces, Self::Mirror, Self::OppositeView, Self::NetworkBox, Self::PieMenu, Self::DisplayFlag, Self::MuteFlag, Self::TemplateFlag, Self::SelectableTemplateFlag, Self::FindNode,
         Self::TimelineToggle, Self::TimelinePrevious, Self::TimelineNext, Self::TimelineStart, Self::TimelineEnd,
         Self::ResetCursor, Self::RepeatLast,
         Self::SketchLine, Self::SketchPolyline, Self::SketchPolygon, Self::SketchRectangle, Self::SketchCircle, Self::ShadePie];
@@ -71,7 +71,7 @@ impl Command {
         Self::Preferences => "Preferences",
         Self::BoxSelect => "Box select", Self::CircleSelect => "Circle select", Self::LassoSelect => "Lasso select", Self::Paint => "Paint",
         Self::Extrude => "Extrude (modal)", Self::Inset => "Inset", Self::Bevel => "Bevel (modal)", Self::PushPull => "Push / pull (modal)",
-        Self::Knife => "Knife", Self::LoopCut => "Loop cut", Self::FlipFaces => "Flip faces", Self::OppositeView => "Opposite view",
+        Self::Knife => "Knife", Self::LoopCut => "Loop cut", Self::FlipFaces => "Flip faces", Self::Mirror => "Mirror tool", Self::OppositeView => "Opposite view",
         Self::NetworkBox => "Network box", Self::PieMenu => "Modeling pie menu", Self::DisplayFlag => "Display flag",
         Self::MuteFlag => "Mute flag", Self::TemplateFlag => "Template flag", Self::SelectableTemplateFlag => "Selectable template flag",
         Self::FindNode => "Find node", Self::TimelineToggle => "Play / pause", Self::TimelinePrevious => "Previous frame",
@@ -98,7 +98,7 @@ impl Command {
         Self::TidyNetwork => "tidy_network", Self::Preferences => "preferences",
         Self::BoxSelect => "box_select", Self::CircleSelect => "circle_select", Self::LassoSelect => "lasso_select", Self::Paint => "paint",
         Self::Extrude => "extrude", Self::Inset => "inset", Self::Bevel => "bevel", Self::PushPull => "pushpull",
-        Self::Knife => "knife", Self::LoopCut => "loop_cut", Self::FlipFaces => "flip_faces", Self::OppositeView => "opposite_view",
+        Self::Knife => "knife", Self::LoopCut => "loop_cut", Self::FlipFaces => "flip_faces", Self::Mirror => "mirror_tool", Self::OppositeView => "opposite_view",
         Self::NetworkBox => "network_box", Self::PieMenu => "pie_menu", Self::DisplayFlag => "display_flag",
         Self::MuteFlag => "mute_flag", Self::TemplateFlag => "template_flag", Self::SelectableTemplateFlag => "selectable_template_flag",
         Self::FindNode => "find_node", Self::TimelineToggle => "timeline_toggle", Self::TimelinePrevious => "timeline_previous",
@@ -162,7 +162,7 @@ impl Keymap {
             add(key,false,false,false,cmd,X::Viewport);
         }
         for (key,ctrl,alt,cmd) in [(K::B,true,false,C::Bevel),(K::E,false,true,C::PushPull),
-            (K::R,true,false,C::LoopCut),(K::N,false,true,C::FlipFaces)] { add(key,ctrl,false,alt,cmd,X::Viewport); }
+            (K::R,true,false,C::LoopCut),(K::N,false,true,C::FlipFaces),(K::M,false,true,C::Mirror)] { add(key,ctrl,false,alt,cmd,X::Viewport); }
         add(K::C, false, true, false, C::ResetCursor, X::Viewport);
         for (key,cmd) in [(K::Tab,C::AddMenu),(K::Home,C::FrameSelected)] {
             add(key,false,false,false,cmd,X::Viewport);
