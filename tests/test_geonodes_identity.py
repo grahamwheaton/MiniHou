@@ -256,6 +256,8 @@ class PlacementIdentityTests(unittest.TestCase):
              patch.object(gn, "_bindings", return_value={}), \
              patch.object(gn, "_sources", return_value="sources"), \
              patch.object(gn.modifiers, "_connection", return_value=Client(), create=True), \
+             patch.object(gn.proxy, "canonical", lambda _kind, value: value, create=True), \
+             patch.object(gn.proxy, "reference_metadata", lambda *args, **kwargs: {}, create=True), \
              patch.object(gn.proxy, "sync_instances", lambda *args, **kwargs: None, create=True), \
              patch.object(gn, "_cache", side_effect=lambda tree: caches[tree[gn.KEY]]), \
              patch.object(gn, "instance_payload", side_effect=lambda header, output: (output, [])), \

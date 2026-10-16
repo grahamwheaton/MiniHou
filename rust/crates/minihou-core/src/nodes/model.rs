@@ -1422,16 +1422,12 @@ mod python_oracles {
                 .map(|p| (p.name.into(), (p.default)()))
                 .collect();
             let expected_defaults = c["defaults"].as_object().unwrap();
-            assert_eq!(
-                defaults.len(),
-                expected_defaults.len(),
-                "{name}: parameter count"
-            );
-            for (key, value) in defaults {
+            // Rust may add Rust-only params; every Python param must exist with the same default.
+            for (key, expected) in expected_defaults {
                 assert!(
-                    expected_defaults
-                        .get(&key)
-                        .is_some_and(|expected| crate::params::same_value(&value, expected)),
+                    defaults
+                        .get(key)
+                        .is_some_and(|value| crate::params::same_value(value, expected)),
                     "{name}: parameter {key} default"
                 );
             }

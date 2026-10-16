@@ -152,14 +152,15 @@ def _placement_values(root, mod, path, node, obj):
     values = {}
     for p in json.loads(node.node_tree[modifiers.PARAMS]):
         socket = node.inputs[p["name"]]
-        if p["kind"] == "geometry":
+        kind = p.get("kind", "geometry" if p.get("node") else "")
+        if kind == "geometry":
             values[p["name"]] = "@input:" + p["node"] + ":" + p["id"] if socket.is_linked else ""
-        elif p["kind"] in {"bundle", "closure"}:
+        elif kind in {"bundle", "closure"}:
             if socket.is_linked:
-                raise ValueError(f"{p['name']}: linked {p['kind']} data cannot cross the MiniHou mesh bridge")
+                raise ValueError(f"{p['name']}: linked {kind} data cannot cross the MiniHou mesh bridge")
             values[p["name"]] = ""
         else:
-            values[p["name"]] = proxy.canonical(p["kind"], _value(root, mod, path, socket, obj=obj))
+            values[p["name"]] = proxy.canonical(kind, _value(root, mod, path, socket, obj=obj))
     return values
 
 
@@ -171,7 +172,7 @@ def _placement_references(root, mod, path, node, obj):
 def _geometry_sources(obj, mod, path, node):
     sources = {}
     for p in json.loads(node.node_tree[modifiers.PARAMS]):
-        if p["kind"] == "geometry" and node.inputs[p["name"]].is_linked:
+        if p.get("kind") == "geometry" and node.inputs[p["name"]].is_linked:
             sources["input:" + p["node"] + ":" + p["id"]] = _probe(obj, mod, path, p["name"])[0]
     return sources
 
