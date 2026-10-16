@@ -85,3 +85,8 @@ Goal: Blender-linked meshes display base-colour/albedo images with correct UV se
 4. **L — Native opaque rendering.** App `viewport.rs`, `shader.wgsl`, `main.rs`, `proxy.rs`, `cluster_lod.rs`, core preview provenance integration; mip/upload cache and headless fixtures. Gate: textured seam mesh, multiple slots and stable selection. Uses 1; fixture-driven work parallels 2/3, end-to-end acceptance waits for both.
 5. **M — UI and MVP acceptance.** App `ui/{viewport_ui,prefs,editor_state}.rs`, new inspector, render/link tests and status docs. Gate: toggle, budgets, reload/reconnect and real Blender smoke test; UI scaffold can parallel 4, release validation follows 2–4.
 6. **L — Later channels/interchange.** Material exporter/service/shader plus tangent helpers and core `usd_io.rs`/`usd_io/reader.rs`: add normal/roughness/metallic/emission, MASK/BLEND, then supported UsdUVTexture extraction/export and explicit asset packaging. Separate acceptance per feature; USD adapter work can parallel renderer channels after the schema stabilizes. UDIM, SHM and textured clustered LOD remain separately scoped follow-ups.
+
+## Decisions (user, 2026-10-16)
+
+- Textured surfaces disable clustered LOD simplification for now. A seam- and material-aware textured LOD is a wanted future feature.
+- A missing, unsupported or still-loading image is drawn with a UV-style checker map (not the plain factor colour), together with the inspector warning, so the problem is visible in the viewport.
