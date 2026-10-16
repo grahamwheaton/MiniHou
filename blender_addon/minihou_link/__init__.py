@@ -1,7 +1,7 @@
 bl_info = {
     "name": "MiniHou Link",
     "author": "MiniHou",
-    "version": (0, 2, 0),
+    "version": (0, 2, 1),
     "blender": (4, 2, 0),
     "location": "Properties > Modifiers > MiniHou",
     "description": "Live link to the MiniHou procedural geometry engine",
@@ -416,23 +416,41 @@ class MINIHOU_PT_modifier_sources(bpy.types.Panel):
             box.label(text=mod.name, icon="MODIFIER")
             network_ui.draw(box, mod)
             box.label(text=modifiers.status(mod)[:160])
-        # A converted modifier remains a normal GN modifier: its first node
-        # still uses the native modifier inputs. Show later placements here.
+        # Every placement of a Geometry Nodes modifier gets its own collapsible section with its own values (its node
+        # sockets; a socket wired to the modifier's Group Input shows that modifier input). Rename a section by
+        # editing its Label field (the node label).
         from . import geonodes
         for mod in context.object.modifiers:
-            if mod.type != "NODES" or mod.node_group is None or modifiers.is_modifier(mod):
+            if mod.type != "NODES" or modifiers.is_modifier(mod):
                 continue
-            placements = list(geonodes._placements(mod.node_group))
-            for index, (path, node) in enumerate(placements[1:], 2):
-                section = self.layout.box()
-                section.label(text=f"{mod.name} / MiniHou {index}: {' / '.join(path)}")
-                for param in json.loads(node.node_tree.get(modifiers.PARAMS, "[]")):
-                    socket = node.inputs.get(param["name"])
-                    if socket is not None:
-                        if socket.is_linked:
-                            section.label(text=f"{param['name']}: linked")
-                        else:
-                            section.prop(socket, "default_value", text=param.get("label", param["name"]))
+            try:
+                sections = geonodes.placement_controls(mod)
+            except (ReferenceError, ValueError, KeyError):
+                continue
+            for section in sections:
+                draw_placement(self.layout, mod, section)
+
+
+def draw_placement(layout, mod, section):
+    node = section["node"]
+    title = f"{mod.name} / {section['title']}"
+    body = None
+    if hasattr(layout, "panel"):                           # Blender 4.1+: real collapsible sub-panel
+        header, body = layout.panel(f"minihou_{mod.name}_{section['key']}"[:60], default_closed=False)
+        header.label(text=title, icon="NODETREE")
+    else:
+        body = layout.box()
+        body.label(text=title, icon="NODETREE")
+    if body is None:
+        return
+    body.prop(node, "label", text="Label")
+    from . import geonodes
+    body.label(text=geonodes.status(node)[:160])
+    for label, data, prop in section["rows"]:
+        if data is None:
+            body.label(text=f"{label}: {prop}")
+        else:
+            body.prop(data, prop, text=label)
 
 
 _classes = (MINIHOU_Preferences, MINIHOU_OT_start_server, MINIHOU_OT_stop_server, MINIHOU_OT_open_editor,
