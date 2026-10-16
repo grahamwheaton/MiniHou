@@ -24,6 +24,7 @@ pub mod session;
 pub mod sdf_mesh;
 pub mod sdf_nets;
 pub mod sdf_field;
+pub mod select_topo;
 pub mod timectx;
 pub mod topo;
 pub mod xform;

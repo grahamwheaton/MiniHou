@@ -119,6 +119,10 @@ pub(super) const TABS: &[Tab] = &[
     Tab { name: "Groups", tools: &[
         Tool { label: "Group Create", node_type: "group_create", icon: "group" },
         Tool { label: "Group Expand", node_type: "group_expand", icon: "group" },
+        Tool { label: "Grow / Shrink", node_type: "grow", icon: "group" },
+        Tool { label: "Select Path", node_type: "select_path", icon: "group" },
+        Tool { label: "Select Loop", node_type: "select_loop", icon: "group" },
+        Tool { label: "Select Ring", node_type: "select_ring", icon: "group" },
         Tool { label: "Group Promote", node_type: "group_promote", icon: "group" },
         Tool { label: "Group by Range", node_type: "group_range", icon: "group" },
         Tool { label: "Blast", node_type: "blast", icon: "blast" },

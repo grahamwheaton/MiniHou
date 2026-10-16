@@ -39,9 +39,10 @@ pub enum Command {
     ResetCursor,
     RepeatLast,
     SketchLine, SketchPolyline, SketchPolygon, SketchRectangle, SketchCircle,
+    SelectMore, SelectLess,
 }
 impl Command {
-    pub const ALL: [Self; 85] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
+    pub const ALL: [Self; 87] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
         Self::ToolSelect, Self::ToolMove, Self::ToolRotate, Self::ToolScale, Self::ToolTransform,
         Self::FrameAll, Self::FrameSelected, Self::Front, Self::Back, Self::Right, Self::Left,
         Self::Top, Self::Bottom, Self::ToggleProjection, Self::OrbitDown, Self::OrbitLeft,
@@ -52,7 +53,7 @@ impl Command {
         Self::TidyNetwork, Self::Preferences, Self::BoxSelect, Self::CircleSelect, Self::LassoSelect, Self::Paint, Self::Extrude, Self::Inset, Self::Bevel, Self::PushPull, Self::LoopCut, Self::Knife, Self::FlipFaces, Self::Mirror, Self::OppositeView, Self::NetworkBox, Self::PieMenu, Self::DisplayFlag, Self::MuteFlag, Self::TemplateFlag, Self::SelectableTemplateFlag, Self::FindNode,
         Self::TimelineToggle, Self::TimelinePrevious, Self::TimelineNext, Self::TimelineStart, Self::TimelineEnd,
         Self::ResetCursor, Self::RepeatLast,
-        Self::SketchLine, Self::SketchPolyline, Self::SketchPolygon, Self::SketchRectangle, Self::SketchCircle, Self::ShadePie];
+        Self::SketchLine, Self::SketchPolyline, Self::SketchPolygon, Self::SketchRectangle, Self::SketchCircle, Self::ShadePie, Self::SelectMore, Self::SelectLess];
     pub fn label(self) -> &'static str { match self {
         Self::Points => "Points", Self::Edges => "Edges", Self::Faces => "Faces", Self::Object => "Object", Self::ToggleEdit => "Toggle Object / edit mode",
         Self::SelectAll => "Select all", Self::SelectNone => "Select none", Self::Hide => "Hide selected", Self::Reveal => "Reveal hidden", Self::AddMenu => "Add node menu", Self::ToggleParams => "Toggle parameters",
@@ -81,6 +82,7 @@ impl Command {
         Self::RepeatLast => "Repeat last",
         Self::SketchLine => "Sketch line", Self::SketchPolyline => "Sketch polyline", Self::SketchPolygon => "Sketch polygon",
         Self::SketchRectangle => "Sketch rectangle", Self::SketchCircle => "Sketch circle",
+        Self::SelectMore => "Select more (grow selection)", Self::SelectLess => "Select less (shrink selection)",
     } }
     fn id(self) -> &'static str { match self {
         Self::Points => "points", Self::Edges => "edges", Self::Faces => "faces", Self::Object => "object", Self::ToggleEdit => "toggle_edit",
@@ -108,13 +110,15 @@ impl Command {
         Self::RepeatLast => "repeat_last",
         Self::SketchLine => "sketch_line", Self::SketchPolyline => "sketch_polyline", Self::SketchPolygon => "sketch_polygon",
         Self::SketchRectangle => "sketch_rectangle", Self::SketchCircle => "sketch_circle",
+        Self::SelectMore => "select_more", Self::SelectLess => "select_less",
     } }
     pub fn to_action(self, kctx: &KeyContext<'_>) -> Option<UiAction> { Some(match self {
         Self::Points => UiAction::Editor(EditorChange::Selection(SelectionMode::Points)),
         Self::Edges => UiAction::Editor(EditorChange::Selection(SelectionMode::Edges)),
         Self::Faces => UiAction::Editor(EditorChange::Selection(SelectionMode::Faces)),
         Self::ToggleEdit | Self::SelectAll | Self::SelectNone | Self::Hide | Self::Reveal | Self::ToggleParams => UiAction::Command(self.id().to_owned()),
-        Self::AddMenu => if kctx.in_edit_mode && kctx.viewport_hovered { UiAction::Command("toggle_edit".to_owned()) } else { UiAction::Command("add_menu".to_owned()) },
+        // Tab opens the add menu in the viewport too, in every selection mode; Ctrl+Tab toggles object / edit mode.
+        Self::AddMenu => UiAction::Command("add_menu".to_owned()),
         Self::ToolSelect => UiAction::Editor(EditorChange::Tool(Tool::Select)),
         Self::ToolMove => UiAction::StartModal(super::modal_transform::Kind::Move),
         Self::ToolRotate => UiAction::StartModal(super::modal_transform::Kind::Rotate),
@@ -207,6 +211,11 @@ impl Keymap {
         add(K::Z,false,true,false,C::ShadeNext,X::Viewport);
         add(K::Z,false,true,true,C::ShadePrevious,X::Viewport);
         add(K::Z,false,false,true,C::Xray,X::Viewport);
+        // Tab is the add menu in the viewport; the object / edit toggle moves to Ctrl+Tab. Ctrl+Numpad +/- grow and
+        // shrink the viewport selection only (docs/RUST_SELECT_NODES.md); the grow node comes from the Tab menu.
+        add(K::Tab,true,false,false,C::ToggleEdit,X::Viewport);
+        add(K::Plus,true,false,true,C::SelectMore,X::Viewport);
+        add(K::Minus,true,false,true,C::SelectLess,X::Viewport);
         Self { bindings: b, emulate_numpad: false }
     }
     pub fn reset(&mut self) { *self = Self::blender(); }
@@ -492,7 +501,8 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
             && b.command == Command::RepeatLast && b.context == Context::Network));
         assert!(map.bindings.iter().any(|b| b.chord == Chord::new(Key::C, false, true, false)
             && b.command == Command::ResetCursor && b.context == Context::Viewport));
-        assert!(!map.bindings.iter().any(|b| b.command == Command::ToggleEdit));
+        assert!(map.bindings.iter().any(|b| b.chord == Chord::new(Key::Tab, true, false, false)
+            && b.command == Command::ToggleEdit && b.context == Context::Viewport));
     }
     #[test] fn alternate_shortcut_round_trips_and_emulation_moves_selection() {
         let mut map = Keymap::blender();
@@ -505,6 +515,24 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
         let effective = map.effective();
         assert!(effective.iter().any(|b| b.command == Command::Front && b.chord == Chord::new(Key::Num1,false,false,false)));
         assert!(effective.iter().any(|b| b.command == Command::Points && b.chord == Chord::new(Key::Num1,false,true,false)));
+    }
+    #[test] fn tab_is_the_node_menu_and_ctrl_tab_toggles_edit_mode() {
+        let poll = |modifiers: Modifiers, kctx: KeyContext<'static>| {
+            let ctx = egui::Context::default();
+            let mut actions = Vec::new();
+            let _ = ctx.run(egui::RawInput { modifiers, events: vec![egui::Event::Key { key: Key::Tab, physical_key: None,
+                pressed: true, repeat: false, modifiers }], ..Default::default() }, |ctx| { actions = Keymap::blender().poll(ctx, &kctx); });
+            match actions.as_slice() { [UiAction::Command(name)] => name.clone(), other => panic!("{other:?}") }
+        };
+        for edit in [false, true] {
+            assert_eq!(poll(Modifiers::NONE, KeyContext { viewport_hovered: true, in_edit_mode: edit, ..Default::default() }), "add_menu");
+            assert_eq!(poll(Modifiers::CTRL, KeyContext { viewport_hovered: true, in_edit_mode: edit, ..Default::default() }), "toggle_edit");
+            assert_eq!(poll(Modifiers::NONE, KeyContext { network_hovered: true, in_edit_mode: edit, ..Default::default() }), "add_menu");
+        }
+        // the toggle stays rebindable like every command
+        let mut map = Keymap::blender();
+        map.rebind(Command::ToggleEdit, Chord::new(Key::Backtick, false, false, false)).unwrap();
+        assert!(Keymap::from_overrides_json(&map.overrides_json()).bindings.iter().any(|b| b.command == Command::ToggleEdit && b.chord.key == Key::Backtick));
     }
     #[test] fn poll_consumes_key() {
         let ctx = egui::Context::default();

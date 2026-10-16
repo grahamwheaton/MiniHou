@@ -116,6 +116,10 @@ pub(super) const TABS: &[Category] = &[
     Category { name: "Groups", tools: &[
         Tool { label: "Group Create", node_type: "group_create" },
         Tool { label: "Group Expand", node_type: "group_expand" },
+        Tool { label: "Grow / Shrink", node_type: "grow" },
+        Tool { label: "Select Path", node_type: "select_path" },
+        Tool { label: "Select Loop", node_type: "select_loop" },
+        Tool { label: "Select Ring", node_type: "select_ring" },
         Tool { label: "Group Promote", node_type: "group_promote" },
         Tool { label: "Group by Range", node_type: "group_range" },
         Tool { label: "Blast", node_type: "blast" },

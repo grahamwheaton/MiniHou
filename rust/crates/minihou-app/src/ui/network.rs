@@ -1445,10 +1445,12 @@ mod tests {
         assert!(rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok(), "Menu 50 open/close cycles timed out!");
     }
     #[test]
-    fn viewport_tab_in_edit_mode_toggles_mode() {
+    fn viewport_tab_in_edit_mode_opens_the_add_menu() {
         use crate::ui::keymap::{Command, KeyContext};
+        // Tab is the node menu in edit mode too; the object / edit toggle is Ctrl+Tab (Command::ToggleEdit)
         let kctx_edit = KeyContext { viewport_hovered: true, network_hovered: false, in_edit_mode: true, selected: Some("box1") };
-        assert!(matches!(Command::AddMenu.to_action(&kctx_edit), Some(UiAction::Command(cmd)) if cmd == "toggle_edit"));
+        assert!(matches!(Command::AddMenu.to_action(&kctx_edit), Some(UiAction::Command(cmd)) if cmd == "add_menu"));
+        assert!(matches!(Command::ToggleEdit.to_action(&kctx_edit), Some(UiAction::Command(cmd)) if cmd == "toggle_edit"));
 
         let kctx_obj = KeyContext { viewport_hovered: true, network_hovered: false, in_edit_mode: false, selected: Some("box1") };
         assert!(matches!(Command::AddMenu.to_action(&kctx_obj), Some(UiAction::Command(cmd)) if cmd == "add_menu"));

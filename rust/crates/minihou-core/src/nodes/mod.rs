@@ -83,6 +83,7 @@ mod material_tables;
 #[cfg(test)]
 mod stage1_provenance_tests;
 mod dissolve;
+mod select_nodes;
 
 pub use modify::{match_size_points, MatchSizeOut};
 pub use modeling_tools::{loop_cut_fractions, LoopRing, LoopTopology, LOOP_CUT_MAX};
@@ -172,6 +173,10 @@ pub fn registry() -> &'static [NodeSpec] {
         group::GROUP_PROMOTE,
         group::GROUP_CREATE,
         group::GROUP_EXPAND,
+        select_nodes::GROW,
+        select_nodes::SELECT_PATH,
+        select_nodes::SELECT_LOOP,
+        select_nodes::SELECT_RING,
         group::BLAST,
         attribs::ATTRIBUTE_DELETE,
         attribs::ATTRIBUTE_RENAME,
