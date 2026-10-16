@@ -2,7 +2,7 @@
 """Detached worker launcher for codex / agy. No dependencies, no server.
 
   agent.py start codex|agy <prompt-file|-> [--cwd DIR] [--model M] [--effort E] [--name N]
-  agent.py list | status [ID] | tail ID [N] | result ID | send ID "text" | cancel ID
+  agent.py dash [--html] | list | status [ID] | tail ID [N] | result ID | send ID "text" | cancel ID
 
 State lives in ~/.multi-agent/<repo-name>/<id>/ on the machine running the agents:
   task.json (immutable), status.json (atomic), inbox.jsonl (append-only), worker.log, prompt.txt
@@ -167,8 +167,47 @@ def summary(d):
            f"pending={pend} {s.get('reason') or s.get('note') or ''}".rstrip()
 
 
+def rows():
+    out = []
+    for d in sorted(ROOT.glob("*/*"), key=lambda p: p.stat().st_mtime):
+        if not d.is_dir() or not (d / "task.json").exists():
+            continue
+        t, s = jread(d / "task.json", {}), jread(d / "status.json", {})
+        state = s.get("state")
+        if state == "running" and not pid_alive(s.get("pid")):
+            state = "died"
+        task = (d / "prompt.txt").read_text(encoding="utf-8", errors="replace").strip().splitlines()[0][:60]
+        log = (d / "worker.log").read_text(encoding="utf-8", errors="replace") if (d / "worker.log").exists() else ""
+        used = re.findall(r"tokens used\s*([\d,]+)", log)
+        out.append((t.get("id"), t.get("agent"), task, state, (used[-1] if used else "-"), s.get("updated", "")[11:]))
+    return out
+
+
+def dash(html):
+    hdr = ("agent/id", "cli", "task", "status", "tokens used", "updated")
+    r = rows()
+    note = "usage remaining: not exposed by the codex/agy CLIs (check /status in codex, agy usage page)"
+    if not html:
+        w = [max(len(str(x[i])) for x in [hdr, *r]) for i in range(6)]
+        for x in [hdr, *r]:
+            print("  ".join(str(v).ljust(w[i]) for i, v in enumerate(x)))
+        print(note)
+        return
+    col = {"running": "#d29922", "completed": "#3fb950", "failed": "#f85149", "died": "#f85149", "blocked": "#f85149"}
+    body = "".join("<tr>" + "".join(f"<td style='color:{col.get(v, '')}'>{v}</td>" if i == 3 else f"<td>{v}</td>"
+                                    for i, v in enumerate(x)) + "</tr>" for x in r)
+    page = ("<meta charset=utf-8><meta http-equiv=refresh content=5><title>Agents</title>"
+            "<body style='font:14px sans-serif;background:#161b22;color:#c9d1d9;padding:16px'><table cellpadding=6>"
+            f"<tr>{''.join(f'<th align=left>{h}</th>' for h in hdr)}</tr>{body}</table><p>{note}</p>")
+    f = ROOT / "dash.html"
+    f.write_text(page, encoding="utf-8")
+    print(f)
+
+
 def main():
     c, a = sys.argv[1], sys.argv[2:]
+    if c == "dash":
+        return dash("--html" in a)
     if c == "_run":
         try:
             return supervise(a[0])
