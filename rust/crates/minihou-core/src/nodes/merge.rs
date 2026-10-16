@@ -28,7 +28,8 @@ pub(super) fn merge(inputs: &Inputs, _p: &Params) -> Result<Geometry> {
     if let Some(k) = geos.iter().flat_map(|g| g.detail.keys()).find(|k| SPECIAL_DETAIL.contains(&k.as_str())) {
         return Err(Error::new(format!("merging geometry with detail {k:?} (materials / instances) is not supported by the Rust backend yet")));
     }
-    let reconciled = super::material_tables::reconcile(&geos.iter().map(|g| (**g).clone()).collect::<Vec<_>>())?;
+    let mut reconciled = super::material_tables::reconcile(&geos.iter().map(|g| (**g).clone()).collect::<Vec<_>>())?;
+    super::model::promote_corner_uv_sets(&mut reconciled);
     let geos: Vec<_> = reconciled.iter().collect();
     let npoints: usize = geos.iter().map(|g| g.npoints).sum();
     let nverts: usize = geos.iter().map(|g| g.nvertices()).sum();
@@ -150,6 +151,17 @@ mod tests {
         assert_eq!(out.prim["material_index"].as_i32().unwrap(), &[0,1]);
         assert_eq!(out.detail["usd_materials"]["Mat"], "/A");
         assert_eq!(out.detail["usd_materials"]["Mat (2)"], "/B");
+    }
+
+    #[test]
+    fn merge_promotes_point_uv_when_other_input_uses_corners() {
+        let mut a = Geometry::from_arrays(vec![0.,0.,0., 1.,0.,0., 0.,1.,0.], vec![0,1,2], vec![0,3], None).unwrap();
+        a.vertex.insert("uv".into(), Arc::new(Attr::f32(2,vec![0.,0.,1.,0.,0.,1.])));
+        let mut b = a.clone();
+        b.vertex.remove("uv");
+        b.point.insert("uv".into(), Arc::new(Attr::f32(2,vec![0.2,0.3,1.,0.,0.,1.])));
+        let out = merge(&[vec![Arc::new(a),Arc::new(b)]],&Params::resolve(&[],None).unwrap()).unwrap();
+        assert_eq!(&out.vertex["uv"].as_f32().unwrap()[6..8], &[0.2,0.3]);
     }
 
     #[test]
