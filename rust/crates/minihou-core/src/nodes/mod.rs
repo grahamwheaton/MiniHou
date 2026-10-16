@@ -37,6 +37,8 @@ mod boolean_fracture;
 mod reduce;
 #[cfg(test)]
 mod boolean_parity;
+#[cfg(test)]
+mod oracle_material_detail;
 mod solidify;
 mod edge_tools;
 mod subdivide;

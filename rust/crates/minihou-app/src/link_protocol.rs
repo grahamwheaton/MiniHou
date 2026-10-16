@@ -88,6 +88,9 @@ pub fn geometry_arrays(geo: &Geometry) -> Arrays {
     for (domain, table) in [("point", &geo.point), ("vertex", &geo.vertex), ("prim", &geo.prim)] {
         for (name, attr) in table {
             let (dtype, bytes) = match &attr.data {
+                AttrData::F32(v) if domain == "vertex" && matches!(attr.width, 2 | 3)
+                    && !matches!(name.as_str(), "N" | "Cd" | "P") =>
+                    ("<f4", v.iter().flat_map(|x| (if x.is_finite() { *x } else { 0.0 }).to_le_bytes()).collect()),
                 AttrData::F32(v) => ("<f4", v.iter().flat_map(|x| x.to_le_bytes()).collect()),
                 AttrData::I32(v) => ("<i4", v.iter().flat_map(|x| x.to_le_bytes()).collect()),
             };
@@ -273,6 +276,16 @@ mod tests {
         assert_eq!(arrays["vertex/uv"].shape,vec![1,2]);
         assert_eq!(arrays["prim/group"].dtype,"<i4");
         assert_eq!(arrays[TOPO[1]].bytes.as_slice(), &[0,0,0,0,1,0,0,0]);
+    }
+    #[test]
+    fn blender_mesh_arrays_replace_invalid_corner_uvs() {
+        let mut geo = Geometry::from_arrays(vec![0.,0.,0., 1.,0.,0., 0.,1.,0.], vec![0,1,2], vec![0,3], None).unwrap();
+        geo.vertex.insert("uv".into(), Arc::new(minihou_core::Attr::f32(2, vec![f32::NAN, f32::INFINITY, 0.25, 0.75, 1., 0.])));
+        let arrays = geometry_arrays(&geo);
+        let uv = &arrays["vertex/uv"].bytes;
+        let values: Vec<_> = uv.chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect();
+        assert_eq!(values, vec![0., 0., 0.25, 0.75, 1., 0.]);
+        assert!(geo.vertex["uv"].as_f32().unwrap()[0].is_nan());
     }
     #[test]
     fn round_trip_all_dtypes_alignment_and_fragmented_reads() {

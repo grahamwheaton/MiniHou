@@ -44,8 +44,8 @@ pub fn triangulate_geometry(g: &Geometry) -> TriangleProvenance {
                     let src = g.vertex.get(name).map(|a| (a, c)).or_else(|| g.point.get(name).map(|a| (a, p)));
                     if let Some((attr, row)) = src {
                         let data = attr.as_f32().unwrap();
-                        values.extend_from_slice(&data[row * attr.width..row * attr.width + 2]);
-                    } else { values.extend([f32::NAN; 2]); }
+                        values.extend(data[row * attr.width..row * attr.width + 2].iter().map(|v| if v.is_finite() { *v } else { 0.0 }));
+                    } else { values.extend([0.0; 2]); }
                 }
             }
         }
@@ -75,6 +75,14 @@ mod texture_provenance_tests {
         assert_eq!(&tris.uv_sets["uv"][0..2], &[0.,0.]);
         assert_eq!(&tris.uv_sets["uv"][6..8], &[0.5,0.5]);
         assert_eq!(&tris.uv_sets["Second"][6..8], &[0.2,0.3]);
+    }
+    #[test]
+    fn invalid_corner_uvs_are_finite_in_preview() {
+        let mut g = Geometry::from_arrays(vec![0.,0.,0., 1.,0.,0., 0.,1.,0.], vec![0,1,2], vec![0,3], None).unwrap();
+        g.vertex.insert("uv".into(), Arc::new(Attr::f32(2, vec![f32::NAN, f32::NAN, 1., 0., 0., 1.])));
+        let tris = triangulate_geometry(&g);
+        assert_eq!(&tris.uv_sets["uv"][..2], &[0., 0.]);
+        assert!(tris.uv_sets["uv"].iter().all(|v| v.is_finite()));
     }
 }
 

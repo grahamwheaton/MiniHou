@@ -1292,21 +1292,30 @@ mod python_oracles {
             b.topology.closed_mask(),
             "{name}: closed flags"
         );
-        assert_eq!(a.detail, b.detail, "{name}: detail");
+        // Python lacks the new neutral slot and binding metadata; its detail keys still match exactly.
+        super::super::oracle_material_detail::compare(name, a, b);
+        let (original_a, original_b) = (a, b);
         for domain in ["point", "vertex", "prim"] {
             let (a, b) = (a.table(domain), b.table(domain));
+            let neutral_index = domain == "prim" && super::super::oracle_material_detail::neutral_index_added(original_a, original_b);
             assert_eq!(
-                a.keys().collect::<Vec<_>>(),
+                a.keys().filter(|key| !neutral_index || key.as_str() != "material_index").collect::<Vec<_>>(),
                 b.keys().collect::<Vec<_>>(),
                 "{name}: {domain} attribute names"
             );
             for (key, a) in a {
+                if neutral_index && key == "material_index" { continue; }
                 let b = &b[key];
+                let invalid_uv = if domain == "vertex" {
+                    super::super::oracle_material_detail::invalid_uv_rows(
+                        original_a, original_b, key, &(0..a.rows()).collect::<Vec<_>>())
+                } else { vec![false; a.rows()] };
                 assert_eq!(a.width, b.width, "{name}: {domain} {key} width");
                 match (&a.data, &b.data) {
                     (AttrData::F32(a), AttrData::F32(b)) => {
                         assert_eq!(a.len(), b.len(), "{name}: {domain} {key} length");
                         for (i, (&a, &b)) in a.iter().zip(b).enumerate() {
+                            if invalid_uv[i / original_a.table(domain)[key].width] && a.is_nan() && b == 0. { continue; }
                             assert!(
                                 (a - b).abs() <= 1e-5 + 1e-5 * b.abs(),
                                 "{name}: {domain} {key}[{i}]: Rust {a}, Python {b}"
@@ -1324,6 +1333,7 @@ mod python_oracles {
     #[test]
     fn modeling_matches_python_topology_attributes_and_defaults() {
         // Regenerate only with tools/dump_rust_modeling_fixtures.py; Python is the oracle.
+        // New source-less faces may add a neutral slot and NaN UV where Python stored zero.
         let cases: Value =
             serde_json::from_str(include_str!("test_data/modeling_parity.json")).unwrap();
         for c in cases.as_array().unwrap() {
