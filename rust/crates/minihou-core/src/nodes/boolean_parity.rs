@@ -118,7 +118,7 @@ fn crossings(g: &Geometry) -> usize {
     }
     bad
 }
-fn attr_rows(a: &Attr, b: &Attr, indices: &[usize], tol: f64, label: &str) {
+fn attr_rows(a: &Attr, b: &Attr, indices: &[usize], tol: f64, label: &str, invalid_rows: Option<&[bool]>) {
     assert_eq!(a.width, b.width, "{label} width");
     assert_eq!(a.rows(), b.rows(), "{label} rows");
     for (i, &j) in indices.iter().enumerate() {
@@ -126,6 +126,8 @@ fn attr_rows(a: &Attr, b: &Attr, indices: &[usize], tol: f64, label: &str) {
             match (&a.data, &b.data) {
                 (AttrData::F32(av), AttrData::F32(bv)) => {
                     let (a, b) = (av[i * a.width + c], bv[j * b.width + c]);
+                    // Source-less neutral faces carry invalid UVs; Python wrote zero there.
+                    if invalid_rows.is_some_and(|rows| rows[i]) && a.is_nan() && b == 0. { continue; }
                     assert!(
                         (a as f64 - b as f64).abs() <= tol * (1. + (b as f64).abs()),
                         "{label} row {i} -> {j} component {c}: {a} != {b}"
@@ -236,16 +238,25 @@ fn canonical_compare(name: &str, a: &Geometry, b: &Geometry, tol: f64) {
             vmap[v] = br.start + (i + k) % br.len();
         }
     }
-    assert_eq!(a.detail, b.detail, "{name} detail");
+    // Python lacks neutral provenance metadata; compare its material names and other keys exactly.
+    super::oracle_material_detail::compare(name, a, b);
     for (domain, idx) in [("point", pmap), ("vertex", vmap), ("prim", primmap)] {
         let (at, bt) = (a.table(domain), b.table(domain));
+        let neutral_index = domain == "prim" && super::oracle_material_detail::neutral_index_added(a, b);
         assert_eq!(
-            at.keys().collect::<Vec<_>>(),
+            at.keys().filter(|key| !neutral_index || key.as_str() != "material_index").collect::<Vec<_>>(),
             bt.keys().collect::<Vec<_>>(),
             "{name}: {domain} names"
         );
         for (key, aa) in at {
-            attr_rows(aa, &bt[key], &idx, tol, &format!("{name}: {domain} {key}"));
+            if neutral_index && key == "material_index" { continue; }
+            if domain == "prim" && key == "material_index" && a.detail.get("materials") != b.detail.get("materials") {
+                // Reconciled neutral slots can shift numeric IDs; the resolved face name must match.
+                super::oracle_material_detail::compare_material_indices(name, a, b, &idx);
+                continue;
+            }
+            let invalid_rows = if domain == "vertex" { super::oracle_material_detail::invalid_uv_rows(a, b, key, &idx) } else { vec![false; aa.rows()] };
+            attr_rows(aa, &bt[key], &idx, tol, &format!("{name}: {domain} {key}"), Some(&invalid_rows));
         }
     }
 }
@@ -346,6 +357,7 @@ fn cases(ty: &str) {
 }
 #[test]
 fn boolean_python_parity() {
+    // Neutral slots and invalid UVs on source-less faces differ from the older Python oracle.
     cases("boolean");
 }
 #[test]
@@ -358,6 +370,7 @@ fn pushpull_python_parity() {
 }
 #[test]
 fn boolean_fracture_python_parity() {
+    // Fracture may add empty neutral slots; named slots and each face's material still match Python.
     cases("boolean_fracture");
 }
 #[test]

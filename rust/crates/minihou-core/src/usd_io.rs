@@ -118,6 +118,17 @@ fn attr_values(a: &Attr, rows: &[usize], factor: f64) -> String {
         }
     }))
 }
+#[cfg(test)]
+mod invalid_uv_export_tests {
+    use super::*;
+    #[test]
+    fn usd_uv_values_replace_invalid_markers() {
+        let uv = Attr::f32(2, vec![f32::NAN, f32::INFINITY, 0.25, 0.75]);
+        let encoded = attr_values(&uv, &[0, 1], 1.);
+        assert_eq!(encoded, "[(0.0, 0.0), (0.25, 0.75)]");
+        assert!(!encoded.contains("NaN"));
+    }
+}
 fn attr_type(a: &Attr, name: &str) -> String {
     let base = match &a.data {
         AttrData::F32(_) => "float",
