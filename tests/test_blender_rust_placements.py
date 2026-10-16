@@ -8,7 +8,7 @@ The engine is the debug ``link_selftest`` Cargo example (production ``blender_li
 window/GPU), started per test class on an ephemeral port. It never touches a running
 minihou-app.exe. Build it first:
 
-    cd rust; $env:CARGO_TARGET_DIR="..\\rust\\target_place"; cargo build -p minihou-app --example link_selftest
+    $env:CARGO_TARGET_DIR="rust/target_chain2"; cargo build --manifest-path rust/Cargo.toml -p minihou-app --example link_selftest
 
 Override the executable with MINIHOU_LINK_SELFTEST. Set MINIHOU_RUST_FULL_GN=1 to also run
 the whole tests/test_blender_geonodes.py placement suite against the Rust server.
@@ -56,7 +56,7 @@ SOURCES = {"version": 1, "nodes": {
 def selftest_executable():
     explicit = os.environ.get("MINIHOU_LINK_SELFTEST")
     candidates = [Path(explicit)] if explicit else []
-    for target in ("target_place", "target_inst"):
+    for target in ("target_chain2", "target_place", "target_inst"):
         candidates.append(ROOT / "rust" / target / "debug" / "examples" / "link_selftest.exe")
         candidates.append(ROOT / "rust" / target / "debug" / "examples" / "link_selftest")
     for path in candidates:
@@ -344,6 +344,43 @@ class RustChainedPlacementTests(unittest.TestCase):
         self.assertEqual(self.cook(), 2)
         self.assertEqual(self.order(), [self.ident(a), self.ident(copy)])
         self.assertEqual(self.evaluated(obj)[:, 0].max(), 5.0)
+
+    def test_modifier_plumbing_duplicate_keeps_panel_on_first_and_sockets_on_second(self):
+        obj = self.plane()
+        mod = self.m.add_modifier(obj, str(TRANSFORM), port=self.engine.port)
+        tree = mod.node_group
+        self.proxy.write_values(mod, tree, self.m.parameters(mod),
+                                {"Scale": 2, "Translate": [0, 0, 0], "Rotate": [0, 0, 0]})
+        self.cook()
+        first = self.proxy.plumbing_node(tree)
+        area, region, _ = self.node_editor(tree)
+        for node in tree.nodes:
+            node.select = node == first
+        tree.nodes.active = first
+        with bpy.context.temp_override(area=area, region=region):
+            self.assertEqual(bpy.ops.node.duplicate(), {"FINISHED"})
+        second = tree.nodes.active
+        gout = next(n for n in tree.nodes if n.bl_idname == "NodeGroupOutput")
+        self.chain(tree, first, second, gout)
+        self.assertEqual(self.cook(), 2)
+        self.assertTrue(first.inputs["Scale"].is_linked)
+        self.assertFalse(second.inputs["Scale"].is_linked)
+        self.assertEqual(second.inputs["Scale"].default_value, 2)
+        self.assertEqual([c["params"]["Scale"] for c in self.cooks], [2, 2])
+        np.testing.assert_allclose(self.evaluated(obj)[:, 0].max(), 4)
+        second.inputs["Scale"].default_value = 4
+        self.assertEqual(self.cook(), 1)
+        self.assertEqual(self.order(), [self.ident(second)])
+        self.assertEqual(self.cooks[0]["params"]["Scale"], 4)
+        self.proxy.write_values(mod, tree, self.m.parameters(mod), {"Scale": 3})
+        self.assertEqual(self.cook(), 2)
+        self.assertEqual([c["params"]["Scale"] for c in self.cooks], [3, 4])
+        self.assertEqual(second.inputs["Scale"].default_value, 4)
+        gin = next(n for n in tree.nodes if n.bl_idname == "NodeGroupInput")
+        tree.links.new(gin.outputs["Scale"], second.inputs["Scale"])
+        self.assertEqual(self.cook(), 1)
+        self.assertEqual(self.cooks[0]["params"]["Scale"], 3)
+        self.assertEqual(self.order(), [self.ident(second)])
 
     def test_plain_shared_group_reference_and_operator_duplicate(self):
         obj = self.plane()

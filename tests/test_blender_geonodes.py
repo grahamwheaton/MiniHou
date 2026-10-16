@@ -224,16 +224,19 @@ class GeometryNodesPlacementTests(unittest.TestCase):
         self.cook(force=True)
         self.assert_x(obj, [34])
 
-    def test_linked_parameter_math_is_rejected_without_destroying_valid_output(self):
+    def test_linked_parameter_math_drives_placement(self):
         obj, tree, _, first, _ = self.mixed()
         self.cook()
         math = tree.nodes.new("ShaderNodeMath")
+        math.operation = "ADD"
         math.inputs[0].default_value = 10
+        math.inputs[1].default_value = 0
         tree.links.new(math.outputs[0], first.inputs["Scale"])
-        self.g.pump(port=self.engine.port)
-        self.assertTrue(self.g.last_error())
-        self.assertTrue(self.g.status(first))
-        self.assert_x(obj, [16])
+        self.cook()
+        self.assert_x(obj, [40])  # ((1+2)*10+1)+4+5
+        math.inputs[0].default_value = 3
+        self.cook()
+        self.assert_x(obj, [19])
 
 
     def test_non_mesh_curve_component_is_rejected_and_cache_retained(self):

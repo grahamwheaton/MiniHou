@@ -127,7 +127,7 @@ def _bindings(obj, mod, path, node):
     result = {}
     for key in modifiers._object_keys(adapter):
         item = modifiers._object_socket(adapter, key)
-        source = _value(mod.node_group, mod, path[:-1], _socket(node.inputs, item.identifier))
+        source = _value(mod.node_group, mod, path[:-1], _socket(node.inputs, item.identifier), obj=obj)
         if source is not None:
             modifiers._validate_source(obj, source)
         result[key] = source
@@ -201,7 +201,7 @@ def edit_live(obj, node):
     arrays, materials, _ = _probe(obj, mod, path)
     materials = list(materials)
     _sources(client, tree[KEY], _bindings(obj, mod, path, node), materials)
-    values = {p["name"]: _value(mod.node_group, mod, path[:-1], node.inputs[p["name"]])
+    values = {p["name"]: _value(mod.node_group, mod, path[:-1], node.inputs[p["name"]], obj=obj)
               for p in json.loads(tree[modifiers.PARAMS])}
     scene = bpy.context.scene
     header = client.edit_live(tree[KEY], json.loads(tree[modifiers.GRAPH]), values, arrays,
@@ -261,18 +261,23 @@ def _promote_wired_modifier(mod):
         if geometry is not None and len(geometry.links) == 1 \
                 and geometry.links[0].from_node.bl_idname == "NodeGroupInput":
             return
+    # Shift+D duplicates the links but Blender does not guarantee that the
+    # duplicate's hidden socket defaults equal the source's effective values.
+    # Capture those values before changing any links. The original keeps its
+    # Group Input bindings, including modifier property animation and drivers.
+    source = next((node for node in nodes if node.name == proxy.PLUMBING_NODE), nodes[0])
+    values = {socket.identifier: _value(root, mod, (), socket)
+              for socket in source.inputs if socket.type != "GEOMETRY" and
+              (not socket.is_linked or socket.links[0].from_node.bl_idname == "NodeGroupInput")}
     for node in nodes:
-        # The modifier's interface previously drove every copy through Group
-        # Input. Preserve its current values on each occurrence, then expose
-        # independent node sockets for subsequent edits.
-        for socket in node.inputs:
-            if socket.type == "GEOMETRY" or len(socket.links) != 1:
-                continue
-            link = socket.links[0]
-            if link.from_node.bl_idname == "NodeGroupInput":
-                value = _value(root, mod, (), socket)
-                root.links.remove(link)
-                socket.default_value = value
+        if node is not source:
+            for socket in node.inputs:
+                if socket.identifier not in values:
+                    continue
+                if len(socket.links) == 1 and socket.links[0].from_node.bl_idname == "NodeGroupInput":
+                    root.links.remove(socket.links[0])
+                if not socket.is_linked:
+                    socket.default_value = values[socket.identifier]
         inner = node.node_tree
         if inner.users - int(inner.use_fake_user) > 1:
             inner = inner.copy()
@@ -358,7 +363,7 @@ def _order(root):
     return ordered
 
 
-def _value(root, mod, path, socket, seen=None):
+def _value(root, mod, path, socket, seen=None, obj=None):
     seen = set() if seen is None else seen
     key = (path, socket.as_pointer())
     if key in seen:
@@ -370,11 +375,11 @@ def _value(root, mod, path, socket, seen=None):
     link = socket.links[0]
     node, source = link.from_node, link.from_socket
     if node.bl_idname == "NodeReroute":
-        return _value(root, mod, path, node.inputs[0], seen)
+        return _value(root, mod, path, node.inputs[0], seen, obj)
     if node.bl_idname == "NodeGroupInput":
         if path:
             parent = _tree(root, path[:-1]).nodes[path[-1]]
-            return _value(root, mod, path[:-1], _socket(parent.inputs, source.identifier), seen)
+            return _value(root, mod, path[:-1], _socket(parent.inputs, source.identifier), seen, obj)
         owner = proxy.input_owner(mod, source.identifier)
         if owner is not None and owner[1] == "value":
             if getattr(owner[0], "type", "VALUE") != "VALUE":
@@ -388,8 +393,83 @@ def _value(root, mod, path, socket, seen=None):
         return list(value) if source.type == "VECTOR" else value
     if node.bl_idname == "ShaderNodeValue":
         return source.default_value
-    raise ValueError("MiniHou parameters support literal values, Value nodes, reroutes and Group Input bindings; "
-                     "computed fields/linked expressions are unsupported: " + socket.name)
+    if obj is not None:
+        return _probe_value(obj, mod, path, socket)
+    raise ValueError("A linked computed parameter requires an owning Blender object: " + socket.name)
+
+
+def _probe_value(obj, mod, path, socket):
+    """Evaluate a linked Blender output on the placement's wired mesh as a uniform value."""
+    kinds = {"VALUE": ("FLOAT", "value"), "INT": ("INT", "value"),
+             "BOOLEAN": ("BOOLEAN", "value"), "VECTOR": ("FLOAT_VECTOR", "vector")}
+    if socket.type not in kinds:
+        raise ValueError("Unsupported linked MiniHou parameter socket: " + socket.name)
+    copies = []
+    temp = obj.copy()
+    temp.name = "__MiniHou_value_probe__"
+    temp.hide_render = True
+    temp.hide_viewport = False
+    try:
+        index = list(obj.modifiers).index(mod)
+        for suffix in list(temp.modifiers)[index + 1:]:
+            temp.modifiers.remove(suffix)
+        root = mod.node_group.copy()
+        copies.append(root)
+        temp.modifiers[index].node_group = root
+        tree, ancestors = root, []
+        for name in path:
+            node = tree.nodes[name]
+            child = node.node_tree.copy()
+            copies.append(child)
+            node.node_tree = child
+            ancestors.append((tree, node))
+            tree = child
+        placement = tree.nodes[socket.node.name]
+        value = _socket(placement.inputs, socket.identifier)
+        geometry = placement.inputs["Geometry"]
+        if len(value.links) != 1 or len(geometry.links) != 1:
+            raise ValueError("Linked MiniHou parameter requires one value and one Geometry input")
+        realize = tree.nodes.new("GeometryNodeRealizeInstances")
+        tree.links.new(geometry.links[0].from_socket, realize.inputs["Geometry"])
+        store = tree.nodes.new("GeometryNodeStoreNamedAttribute")
+        store.data_type = kinds[socket.type][0]
+        store.domain = "POINT"
+        name = "__MiniHou_parameter_probe__"
+        store.inputs["Name"].default_value = name
+        tree.links.new(realize.outputs["Geometry"], store.inputs["Geometry"])
+        tree.links.new(value.links[0].from_socket, store.inputs["Value"])
+        source = store.outputs["Geometry"]
+        for parent, node in reversed(ancestors):
+            item = tree.interface.new_socket(name, in_out="OUTPUT", socket_type="NodeSocketGeometry")
+            tree.links.new(source, _socket(_output(tree).inputs, item.identifier))
+            source = _socket(node.outputs, item.identifier)
+            tree = parent
+        target = next(s for s in _output(root).inputs if s.type == "GEOMETRY")
+        for link in list(target.links):
+            root.links.remove(link)
+        root.links.new(source, target)
+        bpy.context.scene.collection.objects.link(temp)
+        temp.hide_set(False)
+        bpy.context.view_layer.update()
+        dg = bpy.context.evaluated_depsgraph_get()
+        evaluated = temp.evaluated_get(dg)
+        mesh = evaluated.to_mesh(preserve_all_data_layers=True, depsgraph=dg)
+        try:
+            attr = mesh.attributes.get(name)
+            if attr is None or not len(attr.data):
+                raise ValueError("Linked MiniHou parameter produced no mesh point value: " + socket.name)
+            field = kinds[socket.type][1]
+            values = [tuple(getattr(row, field)) if field == "vector" else getattr(row, field)
+                      for row in attr.data]
+            if any(not proxy.same_value(values[0], value) for value in values[1:]):
+                raise ValueError("MiniHou parameter must be uniform across the wired mesh: " + socket.name)
+            return list(values[0]) if field == "vector" else values[0]
+        finally:
+            evaluated.to_mesh_clear()
+    finally:
+        bpy.data.objects.remove(temp, do_unlink=True)
+        for tree in copies:
+            bpy.data.node_groups.remove(tree)
 
 
 def _validate(obj, tree, mod):
@@ -542,13 +622,13 @@ def _cook_tree(obj, mod, host, port, force):
                     if preceding.type in {"CLOTH", "SOFT_BODY", "FLUID", "PARTICLE_SYSTEM", "MESH_SEQUENCE_CACHE"} or (
                             preceding.type == "NODES" and modifiers._animated_nodes(preceding.node_group)):
                         raise ValueError("RBD requires static input; animated upstream modifiers are unsupported")
-            values = {p["name"]: _value(root, mod, path[:-1], node.inputs[p["name"]])
+            values = {p["name"]: _value(root, mod, path[:-1], node.inputs[p["name"]], obj=obj)
                       for p in json.loads(tree[modifiers.PARAMS])}
             client = modifiers._connection(host, port)
             if tree[KEY] in _live:
                 _apply_live(node, client.sync_live(tree[KEY], values))
                 graph = json.loads(tree[modifiers.GRAPH])
-                values = {p["name"]: _value(root, mod, path[:-1], node.inputs[p["name"]])
+                values = {p["name"]: _value(root, mod, path[:-1], node.inputs[p["name"]], obj=obj)
                           for p in json.loads(tree[modifiers.PARAMS])}
             # Validate pickers before evaluating any staged geometry.
             bindings = _bindings(obj, mod, path, node)

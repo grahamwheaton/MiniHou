@@ -1,12 +1,14 @@
 bl_info = {
     "name": "MiniHou Link",
     "author": "MiniHou",
-    "version": (0, 1, 7),
+    "version": (0, 1, 8),
     "blender": (4, 2, 0),
     "location": "Properties > Modifiers > MiniHou",
     "description": "Live link to the MiniHou procedural geometry engine",
     "category": "Object",
 }
+
+import json
 
 import bpy
 from bpy.app.handlers import persistent
@@ -414,6 +416,23 @@ class MINIHOU_PT_modifier_sources(bpy.types.Panel):
             box.label(text=mod.name, icon="MODIFIER")
             network_ui.draw(box, mod)
             box.label(text=modifiers.status(mod)[:160])
+        # A converted modifier remains a normal GN modifier: its first node
+        # still uses the native modifier inputs. Show later placements here.
+        from . import geonodes
+        for mod in context.object.modifiers:
+            if mod.type != "NODES" or mod.node_group is None or modifiers.is_modifier(mod):
+                continue
+            placements = list(geonodes._placements(mod.node_group))
+            for index, (path, node) in enumerate(placements[1:], 2):
+                section = self.layout.box()
+                section.label(text=f"{mod.name} / MiniHou {index}: {' / '.join(path)}")
+                for param in json.loads(node.node_tree.get(modifiers.PARAMS, "[]")):
+                    socket = node.inputs.get(param["name"])
+                    if socket is not None:
+                        if socket.is_linked:
+                            section.label(text=f"{param['name']}: linked")
+                        else:
+                            section.prop(socket, "default_value", text=param.get("label", param["name"]))
 
 
 _classes = (MINIHOU_Preferences, MINIHOU_OT_start_server, MINIHOU_OT_stop_server, MINIHOU_OT_open_editor,
