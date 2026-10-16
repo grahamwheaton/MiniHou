@@ -259,6 +259,527 @@ fn truncate_with_ellipsis(ui: &egui::Ui, text: &str, font: &FontId, max_w: f32) 
     best
 }
 
+/// Parse a color value into RGBA `[f32; 4]`, number of components (3 or 4), and whether it was a hex string.
+pub fn parse_color_value(value: &Value) -> Option<([f32; 4], usize, bool)> {
+    if let Some(arr) = value.as_array() {
+        if arr.len() == 3 && arr.iter().all(Value::is_number) {
+            let r = arr[0].as_f64()? as f32;
+            let g = arr[1].as_f64()? as f32;
+            let b = arr[2].as_f64()? as f32;
+            return Some(([r, g, b, 1.0], 3, false));
+        } else if arr.len() == 4 && arr.iter().all(Value::is_number) {
+            let r = arr[0].as_f64()? as f32;
+            let g = arr[1].as_f64()? as f32;
+            let b = arr[2].as_f64()? as f32;
+            let a = arr[3].as_f64()? as f32;
+            return Some(([r, g, b, a], 4, false));
+        }
+    } else if let Some(s) = value.as_str() {
+        let s = s.trim();
+        if let Some(hex_part) = s.strip_prefix('#') {
+            if hex_part.len() == 6 {
+                if let (Ok(r), Ok(g), Ok(b)) = (
+                    u8::from_str_radix(&hex_part[0..2], 16),
+                    u8::from_str_radix(&hex_part[2..4], 16),
+                    u8::from_str_radix(&hex_part[4..6], 16),
+                ) {
+                    return Some(([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0], 3, true));
+                }
+            } else if hex_part.len() == 8 {
+                if let (Ok(r), Ok(g), Ok(b), Ok(a)) = (
+                    u8::from_str_radix(&hex_part[0..2], 16),
+                    u8::from_str_radix(&hex_part[2..4], 16),
+                    u8::from_str_radix(&hex_part[4..6], 16),
+                    u8::from_str_radix(&hex_part[6..8], 16),
+                ) {
+                    return Some(([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, a as f32 / 255.0], 4, true));
+                }
+            } else if hex_part.len() == 3 {
+                if let (Ok(r), Ok(g), Ok(b)) = (
+                    u8::from_str_radix(&hex_part[0..1], 16),
+                    u8::from_str_radix(&hex_part[1..2], 16),
+                    u8::from_str_radix(&hex_part[2..3], 16),
+                ) {
+                    return Some(([
+                        (r * 17) as f32 / 255.0,
+                        (g * 17) as f32 / 255.0,
+                        (b * 17) as f32 / 255.0,
+                        1.0,
+                    ], 3, true));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Serialize RGBA back into the original format (array of 3/4 floats or hex string).
+pub fn serialize_color_value(rgba: [f32; 4], comps: usize, is_hex: bool) -> Value {
+    if is_hex {
+        let r = (rgba[0] * 255.0).clamp(0.0, 255.0).round() as u8;
+        let g = (rgba[1] * 255.0).clamp(0.0, 255.0).round() as u8;
+        let b = (rgba[2] * 255.0).clamp(0.0, 255.0).round() as u8;
+        if comps == 4 {
+            let a = (rgba[3] * 255.0).clamp(0.0, 255.0).round() as u8;
+            json!(format!("#{r:02x}{g:02x}{b:02x}{a:02x}"))
+        } else {
+            json!(format!("#{r:02x}{g:02x}{b:02x}"))
+        }
+    } else if comps == 4 {
+        json!([rgba[0], rgba[1], rgba[2], rgba[3]])
+    } else {
+        json!([rgba[0], rgba[1], rgba[2]])
+    }
+}
+
+/// Check if a parameter represents a colour.
+pub fn is_color_param(param_name: &str, meta: Option<&Value>, value: &Value) -> bool {
+    if meta.and_then(|m| m["kind"].as_str()) == Some("color") {
+        return true;
+    }
+    let name_is_color = param_name == "color"
+        || param_name == "color2"
+        || param_name == "colour"
+        || param_name.ends_with("_color")
+        || param_name.ends_with("_colour")
+        || param_name == "tint"
+        || param_name == "diffuse"
+        || param_name == "specular";
+    if name_is_color && parse_color_value(value).is_some() {
+        return true;
+    }
+    if param_name.is_empty() && value.as_str().is_some_and(|s| s.starts_with('#')) && parse_color_value(value).is_some() {
+        return true;
+    }
+    false
+}
+
+/// Check if a parameter represents a file path.
+pub fn is_file_param(param_name: &str, meta: Option<&Value>) -> bool {
+    if let Some(m) = meta {
+        if m["kind"].as_str() == Some("file") {
+            return true;
+        }
+        if m["ui"].as_str().is_some_and(|ui| ui.starts_with("file:")) {
+            return true;
+        }
+    }
+    param_name == "file"
+        || param_name == "path"
+        || param_name == "rule_file"
+        || param_name == "image_file"
+        || param_name.ends_with("_file")
+        || param_name.ends_with("_path")
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RampInterpolation {
+    Linear,
+    Constant,
+    Smooth,
+}
+
+impl RampInterpolation {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Linear => "linear",
+            Self::Constant => "constant",
+            Self::Smooth => "smooth",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "constant" | "step" | "hold" => Self::Constant,
+            "smooth" | "catmull-rom" | "catmullrom" | "monotone_cubic" | "ease" | "bezier" => Self::Smooth,
+            _ => Self::Linear,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum RampValue {
+    Float(f32),
+    Color([f32; 3]),
+    ColorAlpha([f32; 4]),
+}
+
+impl RampValue {
+    pub fn as_float(&self) -> f32 {
+        match self {
+            Self::Float(f) => *f,
+            Self::Color(c) => (c[0] + c[1] + c[2]) / 3.0,
+            Self::ColorAlpha(c) => (c[0] + c[1] + c[2]) / 3.0,
+        }
+    }
+
+    pub fn as_rgba(&self) -> [f32; 4] {
+        match self {
+            Self::Color(c) => [c[0], c[1], c[2], 1.0],
+            Self::ColorAlpha(c) => *c,
+            Self::Float(f) => [*f, *f, *f, 1.0],
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RampStop {
+    pub pos: f32,
+    pub value: RampValue,
+    pub interp: Option<RampInterpolation>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RampFormat {
+    StopsObject,       // {"stops": [...], "interpolation": "..."}
+    KeysValuesObject,  // {"keys": [...], "values": [...], "basis": "..."}
+    ArrayOfPairs,      // [[pos, val], ...]
+    ArrayOfStops,      // [{"pos": ..., "value"/"color": ...}, ...]
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct RampData {
+    pub is_color: bool,
+    pub stops: Vec<RampStop>,
+    pub interpolation: RampInterpolation,
+    pub format: RampFormat,
+}
+
+impl RampData {
+    pub fn is_ramp_value(value: &Value) -> bool {
+        if let Some(obj) = value.as_object() {
+            if obj.contains_key("stops") || (obj.contains_key("keys") && obj.contains_key("values")) {
+                return true;
+            }
+        } else if let Some(arr) = value.as_array() {
+            if !arr.is_empty() {
+                if let Some(first) = arr.first() {
+                    if first.as_array().is_some_and(|pair| pair.len() == 2 && pair[0].is_number()) {
+                        return true;
+                    }
+                    if first.as_object().is_some_and(|item| item.contains_key("pos") || item.contains_key("position")) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    pub fn from_value(value: &Value, is_color_hint: bool) -> Self {
+        let mut stops = Vec::new();
+        let mut interpolation = RampInterpolation::Linear;
+        let mut format = RampFormat::StopsObject;
+        let mut is_color = is_color_hint;
+
+        if let Some(obj) = value.as_object() {
+            if let Some(interp_str) = obj.get("interpolation").or_else(|| obj.get("basis")).and_then(Value::as_str) {
+                interpolation = RampInterpolation::from_str(interp_str);
+            }
+            if let Some(stops_arr) = obj.get("stops").and_then(Value::as_array) {
+                format = RampFormat::StopsObject;
+                for item in stops_arr {
+                    if let Some(stop) = Self::parse_stop_object(item, &mut is_color) {
+                        stops.push(stop);
+                    }
+                }
+            } else if let (Some(keys), Some(vals)) = (obj.get("keys").and_then(Value::as_array), obj.get("values").and_then(Value::as_array)) {
+                format = RampFormat::KeysValuesObject;
+                for (k, v) in keys.iter().zip(vals) {
+                    if let Some(pos) = k.as_f64().map(|f| f as f32) {
+                        let r_val = Self::parse_ramp_value(v, &mut is_color);
+                        stops.push(RampStop { pos: pos.clamp(0.0, 1.0), value: r_val, interp: None });
+                    }
+                }
+            }
+        } else if let Some(arr) = value.as_array() {
+            if let Some(first) = arr.first() {
+                if first.as_array().is_some() {
+                    format = RampFormat::ArrayOfPairs;
+                    for item in arr {
+                        if let Some(pair) = item.as_array() {
+                            if pair.len() >= 2 {
+                                if let Some(pos) = pair[0].as_f64().map(|f| f as f32) {
+                                    let r_val = Self::parse_ramp_value(&pair[1], &mut is_color);
+                                    stops.push(RampStop { pos: pos.clamp(0.0, 1.0), value: r_val, interp: None });
+                                }
+                            }
+                        }
+                    }
+                } else if first.as_object().is_some() {
+                    format = RampFormat::ArrayOfStops;
+                    for item in arr {
+                        if let Some(stop) = Self::parse_stop_object(item, &mut is_color) {
+                            stops.push(stop);
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut data = Self {
+            is_color,
+            stops,
+            interpolation,
+            format,
+        };
+        data.ensure_valid_defaults();
+        data.sort_stops();
+        data
+    }
+
+    fn parse_ramp_value(v: &Value, is_color: &mut bool) -> RampValue {
+        if let Some(arr) = v.as_array() {
+            if arr.len() == 4 && arr.iter().all(Value::is_number) {
+                *is_color = true;
+                return RampValue::ColorAlpha([
+                    arr[0].as_f64().unwrap_or(0.) as f32,
+                    arr[1].as_f64().unwrap_or(0.) as f32,
+                    arr[2].as_f64().unwrap_or(0.) as f32,
+                    arr[3].as_f64().unwrap_or(1.) as f32,
+                ]);
+            } else if arr.len() == 3 && arr.iter().all(Value::is_number) {
+                *is_color = true;
+                return RampValue::Color([
+                    arr[0].as_f64().unwrap_or(0.) as f32,
+                    arr[1].as_f64().unwrap_or(0.) as f32,
+                    arr[2].as_f64().unwrap_or(0.) as f32,
+                ]);
+            }
+        } else if let Some(n) = v.as_f64() {
+            return RampValue::Float(n as f32);
+        } else if let Some(s) = v.as_str() {
+            if let Some((rgba, _, _)) = parse_color_value(&Value::String(s.to_owned())) {
+                *is_color = true;
+                return RampValue::Color([rgba[0], rgba[1], rgba[2]]);
+            }
+        }
+        if *is_color {
+            RampValue::Color([0.0, 0.0, 0.0])
+        } else {
+            RampValue::Float(0.0)
+        }
+    }
+
+    fn parse_stop_object(item: &Value, is_color: &mut bool) -> Option<RampStop> {
+        let obj = item.as_object()?;
+        let pos = obj.get("pos")
+            .or_else(|| obj.get("position"))
+            .or_else(|| obj.get("t"))?
+            .as_f64()? as f32;
+        let interp = obj.get("interpolation")
+            .or_else(|| obj.get("interp"))
+            .and_then(Value::as_str)
+            .map(RampInterpolation::from_str);
+        let value = if let Some(c) = obj.get("color").or_else(|| obj.get("colour")) {
+            Self::parse_ramp_value(c, is_color)
+        } else if let Some(v) = obj.get("value").or_else(|| obj.get("val")) {
+            Self::parse_ramp_value(v, is_color)
+        } else {
+            Self::parse_ramp_value(&Value::Null, is_color)
+        };
+        Some(RampStop { pos: pos.clamp(0.0, 1.0), value, interp })
+    }
+
+    fn ensure_valid_defaults(&mut self) {
+        if self.stops.is_empty() {
+            if self.is_color {
+                self.stops = vec![
+                    RampStop { pos: 0.0, value: RampValue::Color([0.0, 0.0, 0.0]), interp: None },
+                    RampStop { pos: 1.0, value: RampValue::Color([1.0, 1.0, 1.0]), interp: None },
+                ];
+            } else {
+                self.stops = vec![
+                    RampStop { pos: 0.0, value: RampValue::Float(0.0), interp: None },
+                    RampStop { pos: 1.0, value: RampValue::Float(1.0), interp: None },
+                ];
+            }
+        }
+    }
+
+    pub fn to_value(&self) -> Value {
+        match self.format {
+            RampFormat::ArrayOfPairs => {
+                let pairs: Vec<Value> = self.stops.iter().map(|s| {
+                    let v = match &s.value {
+                        RampValue::Float(f) => json!(*f),
+                        RampValue::Color(c) => json!([c[0], c[1], c[2]]),
+                        RampValue::ColorAlpha(c) => json!([c[0], c[1], c[2], c[3]]),
+                    };
+                    json!([s.pos, v])
+                }).collect();
+                json!(pairs)
+            }
+            RampFormat::ArrayOfStops => {
+                let stops: Vec<Value> = self.stops.iter().map(|s| {
+                    let mut map = serde_json::Map::new();
+                    map.insert("pos".into(), json!(s.pos));
+                    match &s.value {
+                        RampValue::Float(f) => { map.insert("value".into(), json!(*f)); }
+                        RampValue::Color(c) => { map.insert("color".into(), json!([c[0], c[1], c[2]])); }
+                        RampValue::ColorAlpha(c) => { map.insert("color".into(), json!([c[0], c[1], c[2], c[3]])); }
+                    }
+                    if let Some(interp) = &s.interp {
+                        map.insert("interpolation".into(), json!(interp.as_str()));
+                    }
+                    Value::Object(map)
+                }).collect();
+                json!(stops)
+            }
+            RampFormat::KeysValuesObject => {
+                let keys: Vec<f32> = self.stops.iter().map(|s| s.pos).collect();
+                let values: Vec<Value> = self.stops.iter().map(|s| {
+                    match &s.value {
+                        RampValue::Float(f) => json!(*f),
+                        RampValue::Color(c) => json!([c[0], c[1], c[2]]),
+                        RampValue::ColorAlpha(c) => json!([c[0], c[1], c[2], c[3]]),
+                    }
+                }).collect();
+                json!({
+                    "keys": keys,
+                    "values": values,
+                    "basis": self.interpolation.as_str()
+                })
+            }
+            RampFormat::StopsObject => {
+                let stops: Vec<Value> = self.stops.iter().map(|s| {
+                    let mut map = serde_json::Map::new();
+                    map.insert("pos".into(), json!(s.pos));
+                    match &s.value {
+                        RampValue::Float(f) => { map.insert("value".into(), json!(*f)); }
+                        RampValue::Color(c) => { map.insert("color".into(), json!([c[0], c[1], c[2]])); }
+                        RampValue::ColorAlpha(c) => { map.insert("color".into(), json!([c[0], c[1], c[2], c[3]])); }
+                    }
+                    if let Some(interp) = &s.interp {
+                        map.insert("interpolation".into(), json!(interp.as_str()));
+                    }
+                    Value::Object(map)
+                }).collect();
+                json!({
+                    "stops": stops,
+                    "interpolation": self.interpolation.as_str()
+                })
+            }
+        }
+    }
+
+    pub fn sort_stops(&mut self) {
+        self.stops.sort_by(|a, b| a.pos.partial_cmp(&b.pos).unwrap_or(std::cmp::Ordering::Equal));
+    }
+
+    pub fn eval_float(&self, t: f32) -> f32 {
+        if self.stops.is_empty() { return 0.0; }
+        if self.stops.len() == 1 || t <= self.stops[0].pos {
+            return self.stops[0].value.as_float();
+        }
+        let last = self.stops.last().unwrap();
+        if t >= last.pos {
+            return last.value.as_float();
+        }
+        for i in 0..self.stops.len() - 1 {
+            let s0 = &self.stops[i];
+            let s1 = &self.stops[i + 1];
+            if t >= s0.pos && t <= s1.pos {
+                let u = ((t - s0.pos) / (s1.pos - s0.pos).max(1e-6)).clamp(0.0, 1.0);
+                let interp = s0.interp.unwrap_or(self.interpolation);
+                let v0 = s0.value.as_float();
+                let v1 = s1.value.as_float();
+                return match interp {
+                    RampInterpolation::Constant => v0,
+                    RampInterpolation::Linear => (1.0 - u) * v0 + u * v1,
+                    RampInterpolation::Smooth => {
+                        let s = u * u * (3.0 - 2.0 * u);
+                        (1.0 - s) * v0 + s * v1
+                    }
+                };
+            }
+        }
+        0.0
+    }
+
+    pub fn eval_color(&self, t: f32) -> [f32; 4] {
+        if self.stops.is_empty() { return [0.0, 0.0, 0.0, 1.0]; }
+        if self.stops.len() == 1 || t <= self.stops[0].pos {
+            return self.stops[0].value.as_rgba();
+        }
+        let last = self.stops.last().unwrap();
+        if t >= last.pos {
+            return last.value.as_rgba();
+        }
+        for i in 0..self.stops.len() - 1 {
+            let s0 = &self.stops[i];
+            let s1 = &self.stops[i + 1];
+            if t >= s0.pos && t <= s1.pos {
+                let u = ((t - s0.pos) / (s1.pos - s0.pos).max(1e-6)).clamp(0.0, 1.0);
+                let interp = s0.interp.unwrap_or(self.interpolation);
+                let c0 = s0.value.as_rgba();
+                let c1 = s1.value.as_rgba();
+                let factor = match interp {
+                    RampInterpolation::Constant => 0.0,
+                    RampInterpolation::Linear => u,
+                    RampInterpolation::Smooth => u * u * (3.0 - 2.0 * u),
+                };
+                return [
+                    (1.0 - factor) * c0[0] + factor * c1[0],
+                    (1.0 - factor) * c0[1] + factor * c1[1],
+                    (1.0 - factor) * c0[2] + factor * c1[2],
+                    (1.0 - factor) * c0[3] + factor * c1[3],
+                ];
+            }
+        }
+        [0.0, 0.0, 0.0, 1.0]
+    }
+
+    pub fn add_stop(&mut self, pos: f32) -> usize {
+        let pos = pos.clamp(0.0, 1.0);
+        let val = if self.is_color {
+            let c = self.eval_color(pos);
+            RampValue::Color([c[0], c[1], c[2]])
+        } else {
+            RampValue::Float(self.eval_float(pos))
+        };
+        let new_stop = RampStop { pos, value: val, interp: None };
+        self.stops.push(new_stop);
+        self.sort_stops();
+        self.stops.iter().position(|s| (s.pos - pos).abs() < 1e-4).unwrap_or(0)
+    }
+
+    pub fn delete_stop(&mut self, index: usize) -> bool {
+        if self.stops.len() <= 1 || index >= self.stops.len() {
+            return false;
+        }
+        self.stops.remove(index);
+        true
+    }
+
+    pub fn move_stop(&mut self, index: usize, new_pos: f32) -> usize {
+        if index >= self.stops.len() { return index; }
+        let new_pos = new_pos.clamp(0.0, 1.0);
+        self.stops[index].pos = new_pos;
+        let target_stop = self.stops[index].clone();
+        self.sort_stops();
+        self.stops.iter().position(|s| s.pos == target_stop.pos && s.value == target_stop.value).unwrap_or(0)
+    }
+}
+
+pub fn is_ramp_param(param_name: &str, meta: Option<&Value>, value: &Value) -> bool {
+    if let Some(m) = meta {
+        if let Some(k) = m["kind"].as_str() {
+            if k == "float_ramp" || k == "color_ramp" || k == "ramp" {
+                return true;
+            }
+        }
+    }
+    if param_name == "ramp"
+        || param_name == "float_ramp"
+        || param_name == "color_ramp"
+        || param_name.ends_with("_ramp")
+    {
+        return true;
+    }
+    RampData::is_ramp_value(value)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, param: &ParamSpec, locked: bool, errors: &mut Vec<String>) {
     let default = (param.default)();
@@ -288,13 +809,18 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
         error.to_lowercase().contains(&param.name.replace('_', " ")).then(|| error.to_owned())
     }));
     if let Some(reason) = &reason { errors.push(format!("{}: {reason}", title(param.name))); }
-    let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
+    let is_ramp = is_ramp_param(param.name, meta, &value);
+    let is_color = !is_ramp && is_color_param(param.name, meta, &value);
+    let is_file = !is_ramp && !is_color && is_file_param(param.name, meta);
+
+    let row_height = if is_ramp { 76.0 } else { 28.0 };
+    let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), Sense::hover());
     let layout = ParamRowLayout::compute(r);
 
     let enabled = param.supported && !locked && condition_enabled;
     if modified {
         ui.painter().circle_filled(
-            Pos2::new(r.left() + 9., r.center().y),
+            Pos2::new(r.left() + 9., if is_ramp { r.top() + 14. } else { r.center().y }),
             3.,
             if enabled { v.theme.accent } else { v.theme.accent.gamma_multiply(0.5) },
         );
@@ -317,9 +843,10 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
 
     if !is_bool {
         // Houdini layout: labels are RIGHT-aligned and vertically centred against the row
+        let label_pos_y = if is_ramp { r.top() + 14. } else { r.center().y };
         paint_text(
             ui,
-            Pos2::new(layout.label_rect.right(), r.center().y),
+            Pos2::new(layout.label_rect.right(), label_pos_y),
             &displayed_label,
             12.,
             false,
@@ -398,16 +925,24 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
             None
         };
         let response = child.add_enabled_ui(enabled, |ui| {
-            widget_styled(
-                ui,
-                kind,
-                meta,
-                &mut value,
-                Some(v.theme),
-                layout.control_rect.width(),
-                units_opt,
-                bool_label.as_deref(),
-            )
+            if is_ramp {
+                ramp_widget(ui, &mut value, meta, v.theme, layout.control_rect.width(), id, param.name)
+            } else if is_color {
+                color_widget(ui, &mut value, meta, Some(v.theme), layout.control_rect.width(), id, param.name)
+            } else if is_file {
+                file_widget(ui, &mut value, meta, typ, param.name, layout.control_rect.width())
+            } else {
+                widget_styled(
+                    ui,
+                    kind,
+                    meta,
+                    &mut value,
+                    Some(v.theme),
+                    layout.control_rect.width(),
+                    units_opt,
+                    bool_label.as_deref(),
+                )
+            }
         }).response;
         if !enabled {
             response.on_disabled_hover_text(if locked {
@@ -700,6 +1235,385 @@ fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: 
     changed
 }
 
+fn color_widget(
+    ui: &mut egui::Ui,
+    value: &mut Value,
+    _meta: Option<&Value>,
+    theme: Option<&Theme>,
+    width: f32,
+    _id: &str,
+    _param_name: &str,
+) -> bool {
+    let Some((mut rgba, comps, is_hex)) = parse_color_value(value) else {
+        return false;
+    };
+    let mut changed = false;
+    let swatch_w = 26.0_f32;
+    let gap = 4.0_f32;
+    let remaining_w = (width - swatch_w - gap).max(20.0);
+
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        // 1. Color swatch button with picker popup
+        if comps == 4 {
+            let mut arr = rgba;
+            let resp = ui.color_edit_button_rgba_unmultiplied(&mut arr);
+            if resp.changed() {
+                rgba = arr;
+                changed = true;
+            }
+        } else {
+            let mut rgb = [rgba[0].clamp(0., 1.), rgba[1].clamp(0., 1.), rgba[2].clamp(0., 1.)];
+            let resp = ui.color_edit_button_rgb(&mut rgb);
+            if resp.changed() {
+                rgba[0] = rgb[0];
+                rgba[1] = rgb[1];
+                rgba[2] = rgb[2];
+                changed = true;
+            }
+        }
+
+        // 2. Numeric / Hex fields beside swatch
+        if is_hex {
+            let mut hex_str = if let Some(s) = value.as_str() { s.to_owned() } else { serialize_color_value(rgba, comps, true).as_str().unwrap_or("").to_owned() };
+            let resp = ui.add_sized([remaining_w, 22.], egui::TextEdit::singleline(&mut hex_str));
+            if resp.changed() {
+                if let Some((parsed, _, _)) = parse_color_value(&Value::String(hex_str.clone())) {
+                    rgba = parsed;
+                    changed = true;
+                }
+                *value = json!(hex_str);
+                return;
+            }
+        } else {
+            let n = comps;
+            let axis_spacing = 3.0_f32;
+            let comp_w = ((remaining_w - axis_spacing * (n as f32 - 1.0)) / n as f32).max(18.0);
+            let labels = ["R", "G", "B", "A"];
+            for i in 0..n {
+                let comp_color = if let Some(t) = theme {
+                    match i {
+                        0 => t.x_axis,
+                        1 => t.y_axis,
+                        2 => t.z_axis,
+                        _ => t.dim,
+                    }
+                } else {
+                    Color32::GRAY
+                };
+                if let Some(t) = theme {
+                    let (outer, inner) = boxed(ui, comp_w, t);
+                    ui.painter().text(
+                        Pos2::new(outer.left() + 4., outer.center().y),
+                        Align2::LEFT_CENTER,
+                        labels[i],
+                        FontId::monospace(10.),
+                        comp_color,
+                    );
+                    let mut val_f64 = rgba[i] as f64;
+                    let speed = 0.01;
+                    let range = 0.0..=1.0;
+                    if drag_number(
+                        ui,
+                        Rect::from_min_max(Pos2::new(inner.left() + 10., inner.top()), inner.max),
+                        ui.id().with(("col_c", i, outer.min.x as i32, outer.min.y as i32)),
+                        &mut val_f64,
+                        speed,
+                        &range,
+                        false,
+                        Align2::LEFT_CENTER,
+                        t,
+                        None,
+                    ) {
+                        rgba[i] = val_f64 as f32;
+                        changed = true;
+                    }
+                } else {
+                    let mut val = rgba[i];
+                    if ui.add_sized([comp_w, 22.], egui::DragValue::new(&mut val).speed(0.01).range(0.0..=1.0).prefix(format!("{}: ", labels[i]))).changed() {
+                        rgba[i] = val;
+                        changed = true;
+                    }
+                }
+            }
+        }
+    });
+
+    if changed {
+        *value = serialize_color_value(rgba, comps, is_hex);
+    }
+    changed
+}
+
+fn file_widget(
+    ui: &mut egui::Ui,
+    value: &mut Value,
+    meta: Option<&Value>,
+    typ: &str,
+    param_name: &str,
+    width: f32,
+) -> bool {
+    let mut text = value.as_str().unwrap_or("").to_owned();
+    let btn_w = 26.0_f32;
+    let gap = 4.0_f32;
+    let text_w = (width - btn_w - gap).max(30.0);
+    let mut changed = false;
+
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = gap;
+        let text_resp = ui.add_sized([text_w, 22.], egui::TextEdit::singleline(&mut text).desired_width(f32::INFINITY));
+        if text_resp.changed() {
+            *value = json!(text);
+            changed = true;
+        }
+
+        let browse_resp = ui.add_sized([btn_w, 22.], egui::Button::new("...")).on_hover_text("Browse files");
+        if browse_resp.clicked() {
+            let is_save = typ.contains("export")
+                || typ.contains("out")
+                || meta.and_then(|m| m["ui"].as_str()).is_some_and(|ui| ui.starts_with("file:save"));
+            let mut dialog = rfd::FileDialog::new();
+            let path_ref = std::path::Path::new(&text);
+            if let Some(parent) = path_ref.parent().filter(|p| p.is_dir()) {
+                dialog = dialog.set_directory(parent);
+            }
+            if let Some(file_name) = path_ref.file_name().and_then(|f| f.to_str()) {
+                if !file_name.is_empty() {
+                    dialog = dialog.set_file_name(file_name);
+                }
+            }
+            if typ.contains("usd") {
+                dialog = dialog.add_filter("USD files", &["usd", "usda", "usdc", "usdz"]);
+            } else if typ.contains("image") || typ.contains("blender_image") {
+                dialog = dialog.add_filter("Image files", &["png", "jpg", "jpeg", "tga", "bmp", "tif", "tiff"]);
+            } else if typ.contains("gltf") {
+                dialog = dialog.add_filter("glTF files", &["gltf", "glb"]);
+            } else if param_name == "rule_file" {
+                dialog = dialog.add_filter("Rules", &["txt"]);
+            }
+            dialog = dialog.add_filter("All files", &["*"]);
+            let picked = if is_save { dialog.save_file() } else { dialog.pick_file() };
+            if let Some(path) = picked {
+                let p_str = path.to_string_lossy().to_string();
+                *value = json!(p_str);
+                changed = true;
+            }
+        }
+    });
+
+    changed
+}
+
+fn ramp_widget(
+    ui: &mut egui::Ui,
+    value: &mut Value,
+    meta: Option<&Value>,
+    theme: &Theme,
+    width: f32,
+    id: &str,
+    param_name: &str,
+) -> bool {
+    let is_color_hint = meta.and_then(|m| m["kind"].as_str()) == Some("color_ramp")
+        || param_name.contains("color");
+    let mut ramp = RampData::from_value(value, is_color_hint);
+    let mut changed = false;
+
+    let total_w = width.max(100.0);
+    let bar_h = 24.0_f32;
+    let markers_h = 16.0_f32;
+    let controls_h = 24.0_f32;
+
+    let ramp_id = ui.id().with((id, param_name, "ramp"));
+    let sel_id = ramp_id.with("selected_stop");
+    let mut selected_stop: usize = ui.ctx().data(|d| d.get_temp(sel_id)).unwrap_or(0);
+    if selected_stop >= ramp.stops.len() {
+        selected_stop = ramp.stops.len().saturating_sub(1);
+    }
+
+    let (outer_rect, _) = ui.allocate_exact_size(Vec2::new(total_w, bar_h + markers_h + controls_h), Sense::hover());
+    let bar_rect = Rect::from_min_size(outer_rect.min, Vec2::new(total_w, bar_h));
+    let markers_rect = Rect::from_min_size(Pos2::new(outer_rect.left(), bar_rect.bottom()), Vec2::new(total_w, markers_h));
+    let controls_rect = Rect::from_min_max(Pos2::new(outer_rect.left(), markers_rect.bottom() + 4.0), outer_rect.max);
+
+    // 1. Paint preview bar
+    if ramp.is_color {
+        let n_steps = 50.min((total_w / 3.0) as usize).max(10);
+        let step_w = total_w / n_steps as f32;
+        for s in 0..n_steps {
+            let t = (s as f32 + 0.5) / n_steps as f32;
+            let c = ramp.eval_color(t);
+            let col = Color32::from_rgba_premultiplied(
+                (c[0].clamp(0., 1.) * 255.0) as u8,
+                (c[1].clamp(0., 1.) * 255.0) as u8,
+                (c[2].clamp(0., 1.) * 255.0) as u8,
+                (c[3].clamp(0., 1.) * 255.0) as u8,
+            );
+            let sub_rect = Rect::from_min_size(
+                Pos2::new(bar_rect.left() + s as f32 * step_w, bar_rect.top()),
+                Vec2::new(step_w + 0.5, bar_h),
+            );
+            ui.painter().rect_filled(sub_rect, 0.0, col);
+        }
+    } else {
+        ui.painter().rect_filled(bar_rect, 2.0, theme.input);
+        let n_steps = 50.min((total_w / 3.0) as usize).max(10);
+        let mut pts = Vec::with_capacity(n_steps + 1);
+        for s in 0..=n_steps {
+            let t = s as f32 / n_steps as f32;
+            let val = ramp.eval_float(t).clamp(0.0, 1.0);
+            let x = bar_rect.left() + t * bar_rect.width();
+            let y = bar_rect.bottom() - 2.0 - val * (bar_h - 4.0);
+            pts.push(Pos2::new(x, y));
+        }
+        ui.painter().add(egui::Shape::line(pts, Stroke::new(1.5_f32, theme.accent)));
+    }
+    ui.painter().rect_stroke(bar_rect, 3.0, Stroke::new(1.0_f32, theme.stroke), StrokeKind::Inside);
+
+    // 2. Stop Markers & Interaction
+    let interact_rect = bar_rect.union(markers_rect);
+    let resp = ui.interact(interact_rect, ramp_id, Sense::click_and_drag());
+
+    // Paint markers
+    for (i, stop) in ramp.stops.iter().enumerate() {
+        let sx = bar_rect.left() + stop.pos * bar_rect.width();
+        let top_y = bar_rect.bottom() + 1.0;
+        let bot_y = markers_rect.bottom() - 1.0;
+        let is_sel = i == selected_stop;
+
+        let fill = if ramp.is_color {
+            let c = ramp.eval_color(stop.pos);
+            Color32::from_rgb((c[0].clamp(0., 1.) * 255.) as u8, (c[1].clamp(0., 1.) * 255.) as u8, (c[2].clamp(0., 1.) * 255.) as u8)
+        } else {
+            let f = ramp.eval_float(stop.pos).clamp(0., 1.);
+            Color32::from_gray((f * 255.) as u8)
+        };
+        let shape = vec![
+            Pos2::new(sx, top_y),
+            Pos2::new(sx + 4.0, top_y + 5.0),
+            Pos2::new(sx + 4.0, bot_y),
+            Pos2::new(sx - 4.0, bot_y),
+            Pos2::new(sx - 4.0, top_y + 5.0),
+        ];
+        ui.painter().add(egui::Shape::convex_polygon(
+            shape,
+            fill,
+            Stroke::new(if is_sel { 2.0_f32 } else { 1.0_f32 }, if is_sel { theme.accent } else { theme.stroke2 }),
+        ));
+    }
+
+    // Handle clicks / drags
+    if resp.clicked() || resp.drag_started() {
+        if let Some(pos) = resp.interact_pointer_pos() {
+            let mut clicked_marker = None;
+            for (i, stop) in ramp.stops.iter().enumerate() {
+                let sx = bar_rect.left() + stop.pos * bar_rect.width();
+                if (pos.x - sx).abs() <= 8.0 && pos.y >= bar_rect.top() && pos.y <= markers_rect.bottom() {
+                    clicked_marker = Some(i);
+                    break;
+                }
+            }
+
+            if ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Secondary)) {
+                // Right-click delete
+                if let Some(idx) = clicked_marker {
+                    if ramp.delete_stop(idx) {
+                        selected_stop = selected_stop.saturating_sub(1);
+                        changed = true;
+                    }
+                }
+            } else if let Some(idx) = clicked_marker {
+                selected_stop = idx;
+            } else if pos.y <= bar_rect.bottom() + 4.0 {
+                // Clicked on preview bar to add
+                let new_pos = ((pos.x - bar_rect.left()) / bar_rect.width()).clamp(0.0, 1.0);
+                selected_stop = ramp.add_stop(new_pos);
+                changed = true;
+            }
+        }
+    }
+
+    if resp.dragged_by(egui::PointerButton::Primary) {
+        if let Some(pos) = resp.interact_pointer_pos() {
+            let new_pos = ((pos.x - bar_rect.left()) / bar_rect.width()).clamp(0.0, 1.0);
+            selected_stop = ramp.move_stop(selected_stop, new_pos);
+            changed = true;
+        }
+    }
+
+    // Delete key to remove selected stop
+    if ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) && ramp.stops.len() > 1 {
+        if ramp.delete_stop(selected_stop) {
+            selected_stop = selected_stop.saturating_sub(1);
+            changed = true;
+        }
+    }
+
+    // 3. Selected Stop Controls
+    if selected_stop < ramp.stops.len() {
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(controls_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        child.spacing_mut().item_spacing.x = 4.0;
+
+        child.label(format!("#{}", selected_stop + 1));
+
+        let mut stop_pos = ramp.stops[selected_stop].pos;
+        if child.add(egui::DragValue::new(&mut stop_pos).speed(0.01).range(0.0..=1.0).prefix("Pos: ")).changed() {
+            selected_stop = ramp.move_stop(selected_stop, stop_pos);
+            changed = true;
+        }
+
+        if ramp.is_color {
+            let mut rgb = match &ramp.stops[selected_stop].value {
+                RampValue::Color(c) => *c,
+                RampValue::ColorAlpha(c) => [c[0], c[1], c[2]],
+                RampValue::Float(f) => [*f, *f, *f],
+            };
+            if child.color_edit_button_rgb(&mut rgb).changed() {
+                ramp.stops[selected_stop].value = RampValue::Color(rgb);
+                changed = true;
+            }
+        } else {
+            let mut val = ramp.stops[selected_stop].value.as_float();
+            if child.add(egui::DragValue::new(&mut val).speed(0.01).range(0.0..=1.0).prefix("Val: ")).changed() {
+                ramp.stops[selected_stop].value = RampValue::Float(val);
+                changed = true;
+            }
+        }
+
+        // Interpolation ComboBox
+        let current_interp = ramp.interpolation;
+        egui::ComboBox::from_id_salt(ramp_id.with("interp_combo"))
+            .selected_text(current_interp.as_str())
+            .width(65.0)
+            .show_ui(&mut child, |ui| {
+                for opt in [RampInterpolation::Linear, RampInterpolation::Constant, RampInterpolation::Smooth] {
+                    if ui.selectable_label(ramp.interpolation == opt, opt.as_str()).clicked() {
+                        ramp.interpolation = opt;
+                        changed = true;
+                    }
+                }
+            });
+
+        // Delete button
+        if child.add_enabled(ramp.stops.len() > 1, egui::Button::new("×")).on_hover_text("Delete stop").clicked() {
+            if ramp.delete_stop(selected_stop) {
+                selected_stop = selected_stop.saturating_sub(1);
+                changed = true;
+            }
+        }
+    }
+
+    ui.ctx().data_mut(|d| d.insert_temp(sel_id, selected_stop));
+
+    if changed {
+        *value = ramp.to_value();
+    }
+    changed
+}
+
 /// One editing widget for a parameter value; returns true when the value changed.
 pub fn widget(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value: &mut Value) -> bool {
     let width = ui.available_width();
@@ -773,6 +1687,18 @@ fn render_vector_fields(
 }
 
 fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value: &mut Value, theme: Option<&Theme>, width: f32, units: Option<crate::units::UnitSettings>, bool_label: Option<&str>) -> bool {
+    let param_name = meta.and_then(|m| m["name"].as_str()).unwrap_or("");
+    if is_ramp_param(param_name, meta, value) {
+        let default_theme = Theme::dark();
+        let t = theme.unwrap_or(&default_theme);
+        return ramp_widget(ui, value, meta, t, width, "widget", "param");
+    }
+    if is_color_param(param_name, meta, value) {
+        return color_widget(ui, value, meta, theme, width, "widget", "param");
+    }
+    if is_file_param(param_name, meta) {
+        return file_widget(ui, value, meta, "", param_name, width);
+    }
     if let Some(meta) = meta {
         if meta["kind"] == "enum" {
             let before = value.clone();
@@ -1141,5 +2067,247 @@ mod tests {
         assert!(consolidate_text.is_some(), "Consolidate toggle text should be present");
         let (_, pos) = consolidate_text.unwrap();
         assert!(pos.x >= row_layout.label_rect.right(), "Checkbox text pos ({}) must sit at/after field column start ({})", pos.x, row_layout.label_rect.right());
+    }
+
+    #[test]
+    fn color_deserialization_and_serialization() {
+        // 3-component RGB array
+        let rgb_val = json!([0.2, 0.4, 0.6]);
+        let (rgba, comps, is_hex) = parse_color_value(&rgb_val).expect("parse rgb");
+        assert_eq!(comps, 3);
+        assert!(!is_hex);
+        assert!((rgba[0] - 0.2).abs() < 1e-4);
+        assert!((rgba[1] - 0.4).abs() < 1e-4);
+        assert!((rgba[2] - 0.6).abs() < 1e-4);
+        assert_eq!(rgba[3], 1.0);
+        let ser_rgb = serialize_color_value(rgba, comps, is_hex);
+        assert_eq!(ser_rgb, rgb_val);
+
+        // 4-component RGBA array
+        let rgba_val = json!([0.1, 0.2, 0.3, 0.8]);
+        let (rgba, comps, is_hex) = parse_color_value(&rgba_val).expect("parse rgba");
+        assert_eq!(comps, 4);
+        assert!(!is_hex);
+        assert!((rgba[0] - 0.1).abs() < 1e-4);
+        assert!((rgba[3] - 0.8).abs() < 1e-4);
+        let ser_rgba = serialize_color_value(rgba, comps, is_hex);
+        assert_eq!(ser_rgba, rgba_val);
+
+        // 6-digit hex string
+        let hex_val = json!("#336699");
+        let (rgba, comps, is_hex) = parse_color_value(&hex_val).expect("parse hex");
+        assert_eq!(comps, 3);
+        assert!(is_hex);
+        assert_eq!((rgba[0] * 255.0).round() as u8, 0x33);
+        assert_eq!((rgba[1] * 255.0).round() as u8, 0x66);
+        assert_eq!((rgba[2] * 255.0).round() as u8, 0x99);
+        let ser_hex = serialize_color_value(rgba, comps, is_hex);
+        assert_eq!(ser_hex, hex_val);
+
+        // 8-digit hex string
+        let hex_alpha_val = json!("#336699cc");
+        let (rgba, comps, is_hex) = parse_color_value(&hex_alpha_val).expect("parse hex alpha");
+        assert_eq!(comps, 4);
+        assert!(is_hex);
+        assert_eq!((rgba[3] * 255.0).round() as u8, 0xcc);
+        let ser_hex_alpha = serialize_color_value(rgba, comps, is_hex);
+        assert_eq!(ser_hex_alpha, hex_alpha_val);
+
+        // 3-digit shorthand hex string
+        let hex3_val = json!("#369");
+        let (rgba, comps, is_hex) = parse_color_value(&hex3_val).expect("parse hex3");
+        assert_eq!(comps, 3);
+        assert!(is_hex);
+        assert_eq!((rgba[0] * 255.0).round() as u8, 0x33);
+        assert_eq!((rgba[1] * 255.0).round() as u8, 0x66);
+        assert_eq!((rgba[2] * 255.0).round() as u8, 0x99);
+        let ser_hex3 = serialize_color_value(rgba, comps, is_hex);
+        assert_eq!(ser_hex3, json!("#336699"));
+
+        // Invalid values
+        assert!(parse_color_value(&json!("not-a-color")).is_none());
+        assert!(parse_color_value(&json!([1.0, 2.0])).is_none());
+        assert!(parse_color_value(&json!(123)).is_none());
+    }
+
+    #[test]
+    fn ramp_deserialization_and_serialization() {
+        // Format 1: StopsObject {"stops": [...], "interpolation": "..."}
+        let stops_obj = json!({
+            "stops": [
+                {"pos": 0.0, "value": 0.2},
+                {"pos": 1.0, "value": 0.8}
+            ],
+            "interpolation": "smooth"
+        });
+        let ramp1 = RampData::from_value(&stops_obj, false);
+        assert_eq!(ramp1.format, RampFormat::StopsObject);
+        assert_eq!(ramp1.stops.len(), 2);
+        assert_eq!(ramp1.interpolation, RampInterpolation::Smooth);
+        assert_eq!(ramp1.stops[0].value, RampValue::Float(0.2));
+        assert_eq!(ramp1.stops[1].value, RampValue::Float(0.8));
+        let ser1 = ramp1.to_value();
+        assert_eq!(ser1["stops"].as_array().unwrap().len(), 2);
+        assert_eq!(ser1["interpolation"], "smooth");
+
+        // Format 2: KeysValuesObject {"keys": [...], "values": [...], "basis": "..."}
+        let keys_obj = json!({
+            "keys": [0.0, 0.5, 1.0],
+            "values": [0.0, 0.4, 1.0],
+            "basis": "linear"
+        });
+        let ramp2 = RampData::from_value(&keys_obj, false);
+        assert_eq!(ramp2.format, RampFormat::KeysValuesObject);
+        assert_eq!(ramp2.stops.len(), 3);
+        assert_eq!(ramp2.interpolation, RampInterpolation::Linear);
+        let ser2 = ramp2.to_value();
+        assert_eq!(ser2["keys"].as_array().unwrap().len(), 3);
+        assert_eq!(ser2["values"].as_array().unwrap().len(), 3);
+        assert_eq!(ser2["basis"], "linear");
+
+        // Format 3: ArrayOfPairs [[pos, val], ...]
+        let pairs = json!([
+            [0.0, 0.1],
+            [1.0, 0.9]
+        ]);
+        let ramp3 = RampData::from_value(&pairs, false);
+        assert_eq!(ramp3.format, RampFormat::ArrayOfPairs);
+        assert_eq!(ramp3.stops.len(), 2);
+        let ser3 = ramp3.to_value();
+        assert_eq!(ser3, pairs);
+
+        // Format 4: ArrayOfStops [{"pos": 0.0, "color": [...]}, ...]
+        let stops_arr = json!([
+            {"pos": 0.0, "color": [1.0, 0.0, 0.0]},
+            {"pos": 1.0, "color": [0.0, 0.0, 1.0]}
+        ]);
+        let ramp4 = RampData::from_value(&stops_arr, true);
+        assert_eq!(ramp4.format, RampFormat::ArrayOfStops);
+        assert!(ramp4.is_color);
+        assert_eq!(ramp4.stops.len(), 2);
+        let ser4 = ramp4.to_value();
+        assert_eq!(ser4[0]["pos"], 0.0);
+        assert_eq!(ser4[0]["color"], json!([1.0, 0.0, 0.0]));
+        assert_eq!(ser4[1]["pos"], 1.0);
+        assert_eq!(ser4[1]["color"], json!([0.0, 0.0, 1.0]));
+    }
+
+    #[test]
+    fn ramp_stop_add_delete_sort_and_eval() {
+        let mut ramp = RampData {
+            is_color: false,
+            stops: vec![
+                RampStop { pos: 0.0, value: RampValue::Float(0.0), interp: None },
+                RampStop { pos: 1.0, value: RampValue::Float(1.0), interp: None },
+            ],
+            interpolation: RampInterpolation::Linear,
+            format: RampFormat::ArrayOfPairs,
+        };
+
+        // Linear evaluation
+        assert!((ramp.eval_float(0.0) - 0.0).abs() < 1e-4);
+        assert!((ramp.eval_float(0.5) - 0.5).abs() < 1e-4);
+        assert!((ramp.eval_float(1.0) - 1.0).abs() < 1e-4);
+
+        // Constant evaluation
+        ramp.interpolation = RampInterpolation::Constant;
+        assert!((ramp.eval_float(0.49) - 0.0).abs() < 1e-4);
+        assert!((ramp.eval_float(0.99) - 0.0).abs() < 1e-4);
+
+        // Smooth evaluation
+        ramp.interpolation = RampInterpolation::Smooth;
+        assert!((ramp.eval_float(0.5) - 0.5).abs() < 1e-4);
+
+        // Add stop at 0.5
+        let idx = ramp.add_stop(0.5);
+        assert_eq!(ramp.stops.len(), 3);
+        assert_eq!(idx, 1);
+        assert_eq!(ramp.stops[1].pos, 0.5);
+
+        // Move stop 1 to 0.2 (verify sorted order)
+        let new_idx = ramp.move_stop(1, 0.2);
+        assert_eq!(new_idx, 1);
+        assert_eq!(ramp.stops[1].pos, 0.2);
+
+        // Move stop 1 to 0.8 (verify re-sort)
+        let moved_idx = ramp.move_stop(1, 0.8);
+        assert_eq!(moved_idx, 1);
+        assert_eq!(ramp.stops[1].pos, 0.8);
+
+        // Delete stop
+        assert!(ramp.delete_stop(1));
+        assert_eq!(ramp.stops.len(), 2);
+
+        // Cannot delete below 2 stops
+        assert!(ramp.delete_stop(0));
+        assert_eq!(ramp.stops.len(), 1);
+        assert!(!ramp.delete_stop(0)); // Cannot delete the last stop
+        assert_eq!(ramp.stops.len(), 1);
+
+        // Color eval test
+        let color_ramp = RampData {
+            is_color: true,
+            stops: vec![
+                RampStop { pos: 0.0, value: RampValue::Color([0.0, 0.2, 0.4]), interp: None },
+                RampStop { pos: 1.0, value: RampValue::Color([1.0, 0.8, 0.6]), interp: None },
+            ],
+            interpolation: RampInterpolation::Linear,
+            format: RampFormat::ArrayOfPairs,
+        };
+        let mid = color_ramp.eval_color(0.5);
+        assert!((mid[0] - 0.5).abs() < 1e-3);
+        assert!((mid[1] - 0.5).abs() < 1e-3);
+        assert!((mid[2] - 0.5).abs() < 1e-3);
+        assert_eq!(mid[3], 1.0);
+    }
+
+    #[test]
+    fn param_type_detection() {
+        // Color
+        assert!(is_color_param("color", None, &json!([1.0, 1.0, 1.0])));
+        assert!(is_color_param("tint", None, &json!("#ff0000")));
+        assert!(is_color_param("diffuse", None, &json!([0.5, 0.5, 0.5])));
+        assert!(is_color_param("custom", Some(&json!({"kind": "color"})), &json!(null)));
+        assert!(!is_color_param("translate", None, &json!([1.0, 2.0, 3.0])));
+
+        // File
+        assert!(is_file_param("file", None));
+        assert!(is_file_param("path", None));
+        assert!(is_file_param("rule_file", None));
+        assert!(is_file_param("custom", Some(&json!({"kind": "file"}))));
+        assert!(is_file_param("custom", Some(&json!({"ui": "file:open"}))));
+        assert!(!is_file_param("scale", None));
+
+        // Ramp
+        assert!(is_ramp_param("float_ramp", None, &json!(null)));
+        assert!(is_ramp_param("color_ramp", None, &json!(null)));
+        assert!(is_ramp_param("custom", Some(&json!({"kind": "float_ramp"})), &json!(null)));
+        assert!(is_ramp_param("custom", Some(&json!({"kind": "color_ramp"})), &json!(null)));
+        assert!(is_ramp_param("my_ramp", None, &json!(null)));
+        assert!(is_ramp_param("custom", None, &json!({"stops": []})));
+        assert!(!is_ramp_param("scale", None, &json!(1.0)));
+    }
+
+    #[test]
+    fn widget_styled_renders_color_file_and_ramp() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // Color widget
+                let mut col_val = json!([0.2, 0.4, 0.6]);
+                let changed_col = widget(ui, ParamKind::Unsupported, Some(&json!({"kind": "color"})), &mut col_val);
+                assert!(!changed_col);
+
+                // File widget
+                let mut file_val = json!("models/teapot.obj");
+                let changed_file = widget(ui, ParamKind::String, Some(&json!({"kind": "file"})), &mut file_val);
+                assert!(!changed_file);
+
+                // Ramp widget
+                let mut ramp_val = json!({"stops": [{"pos": 0.0, "value": 0.0}, {"pos": 1.0, "value": 1.0}]});
+                let changed_ramp = widget(ui, ParamKind::Unsupported, Some(&json!({"kind": "float_ramp"})), &mut ramp_val);
+                assert!(!changed_ramp);
+            });
+        });
     }
 }
