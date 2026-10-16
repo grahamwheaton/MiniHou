@@ -8,7 +8,7 @@ pub const RBD_MATERIAL_FRACTURE: NodeSpec = NodeSpec {
     params: crate::params!(
         "material":"concrete"; "density":1000.; "friction":0.6; "restitution":0.1; "glue_strength":1.0e7;
         "pieces":24; "fracture_level":1; "sub_pieces":4; "seed":0; "surface_fraction":0.15; "relax":2;
-        "gap":0.; "convex_parts":false,unsupported; "max_concavity":0.05,unsupported;
+        "gap":0.; "convex_parts":false; "max_concavity":0.05;
         "interior_detail":false,unsupported; "detail_divisions":4,unsupported;
         "detail_amplitude":0.02,unsupported; "detail_frequency":4.,unsupported;
         "glue":true; "clusters":0; "strength_scale":1.; "mass_scale":1.; "output":"pieces";
@@ -107,6 +107,31 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         return glue(split,p,strength,"constraints");
     }
     let mut out=if p.b("glue")? && p.i("clusters")?>0 {glue(split,p,strength,"pieces")?} else {split};
+    let mut compound=false;
+    if p.b("convex_parts")? {
+        let labels=piece_ids(&out)?;let mut parts=Vec::new();
+        for k in 0..n {
+            let part=super::group::keep_prims(&out,&labels.iter().map(|&id|id==k as i32).collect::<Vec<_>>(),false)?;
+            if part.nprims()==0 {continue;}
+            let concavity=super::convex_decomposition::missing(&part)?/volume(&part).max(1e-300);
+            if concavity>p.f("max_concavity")? {
+                let source_piece=part.prim["piece"].as_i32().unwrap()[0];
+                let source_cluster=part.prim.get("cluster").and_then(|a|a.as_i32()).map(|v|v[0]);
+                let mut dec=invoke(&super::convex_decomposition::CONVEX_DECOMPOSITION,&[vec![Arc::new(part)]],
+                    serde_json::json!({"max_concavity":p.f("max_concavity")?,"max_pieces":16,"min_volume":0.001,
+                        "search":8,"piece_attrib":"part","outgrp_inside":p.b("outgrp_inside")?,
+                        "outgrp_inside_name":p.s("outgrp_inside_name")?,"outgrp_outside":p.b("outgrp_outside")?,
+                        "outgrp_outside_name":p.s("outgrp_outside_name")?,"outgrp_cutpoints":p.b("outgrp_cutpoints")?,
+                        "outgrp_cutpoints_name":p.s("outgrp_cutpoints_name")?,"outgrp_cutedges":p.b("outgrp_cutedges")?,
+                        "outgrp_cutedges_name":p.s("outgrp_cutedges_name")?}))?;
+                dec.prim.insert("piece".into(),Arc::new(Attr::i32(1,vec![source_piece;dec.nprims()])));
+                if let Some(cluster)=source_cluster {dec.prim.insert("cluster".into(),Arc::new(Attr::i32(1,vec![cluster;dec.nprims()])));}
+                parts.push(Arc::new(dec));compound=true;
+            } else {parts.push(Arc::new(part));}
+        }
+        if !parts.is_empty() {out=invoke(&super::merge::MERGE,&[parts],serde_json::json!({}))?;}
+    }
+    let ids=piece_ids(&out)?;
     let body=out.prim.get("cluster").and_then(|a|a.as_i32()).map(|v|v.to_vec()).unwrap_or_else(||ids.clone());
     let body_mass:Vec<f64>=ids.iter().map(|&id| {
         if out.prim.contains_key("cluster") {let cluster=body[ids.iter().position(|&v|v==id).unwrap()];
@@ -117,7 +142,8 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let np=out.nprims(); let clustered=out.prim.contains_key("cluster");
     let mut put_i=|name:&str,v:Vec<i32>|{out.prim.insert(name.into(),Arc::new(Attr::i32(1,v)));};
     put_i("rbd_id",body);put_i("rbd_active",vec![1;np]);
-    if clustered {put_i("rbd_compound",vec![1;np]);}
+    if clustered || compound {put_i("rbd_compound",vec![1;np]);}
+    if compound {put_i("rbd_hull",vec![1;np]);}
     for (name,v) in [("rbd_mass",body_mass.iter().map(|&v|v as f32).collect()),
         ("rbd_friction",vec![friction as f32;np]),("rbd_restitution",vec![restitution as f32;np]),
         ("rbd_linear_damping",vec![0.05;np]),("rbd_angular_damping",vec![0.1;np])] {
@@ -141,12 +167,15 @@ mod tests {
         let params=Params::resolve(RBD_MATERIAL_FRACTURE.params,
             serde_json::json!({"pieces":2,"seed":2,"surface_fraction":0,"relax":0,"glue":false}).as_object()).unwrap();
         let out=cook(&[vec![Arc::new(box_geo)]],&params).unwrap();
-        assert_eq!((out.npoints,out.nprims()),(16,12));
+        let oracle:serde_json::Value=serde_json::from_str(include_str!("test_data/last_nodes_parity.json")).unwrap();
+        let expected=&oracle["material_box"];
+        assert_eq!(out.npoints,expected["points"].as_u64().unwrap() as usize);
+        assert_eq!(out.nprims(),expected["prims"].as_u64().unwrap() as usize);
         assert_eq!(piece_ids(&out).unwrap(),[vec![0;6],vec![1;6]].concat());
         assert_eq!(out.detail["rbd_material"],"concrete");
         let masses=out.prim["rbd_mass"].as_f32().unwrap();
-        assert!((masses[0]-1144.223).abs()<0.1,"{masses:?}");
-        assert!((masses[6]-1255.777).abs()<0.1,"{masses:?}");
+        assert!((masses[0]-expected["mass"][0].as_f64().unwrap() as f32).abs()<0.1,"{masses:?}");
+        assert!((masses[6]-expected["mass"][1].as_f64().unwrap() as f32).abs()<0.1,"{masses:?}");
         assert!(out.prim.contains_key("group_inside"));
     }
 }

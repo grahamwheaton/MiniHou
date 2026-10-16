@@ -4959,6 +4959,84 @@
    "kind": "str"
   }
  },
+ "python": {
+  "a": {
+   "default": 0.0,
+   "doc": "Variable a (float): sliders you can expose to Blender",
+   "kind": "float",
+   "soft_max": 10.0,
+   "soft_min": -10.0
+  },
+  "animated": {
+   "default": false,
+   "doc": "Recook when the frame changes (the code reads Frame, Time or TimeInc)",
+   "kind": "bool"
+  },
+  "b": {
+   "default": 1.0,
+   "doc": "Variable b (float)",
+   "kind": "float",
+   "soft_max": 10.0,
+   "soft_min": -10.0
+  },
+  "c": {
+   "default": 0.0,
+   "doc": "Variable c (float)",
+   "kind": "float",
+   "soft_max": 10.0,
+   "soft_min": -10.0
+  },
+  "code": {
+   "default": "# geo, input1, input2, input3: Geometry (or None when nothing is wired). They are read-only: copy before changing.\n# Variables from the parameters: a b c d (floats)  i j (ints)  v (x, y, z)  s (text)  flag (bool), and any `name = value`\n# lines of the Variables field. Frame, Time, TimeInc give the time (tick \"animated\" so the node recooks on every frame).\n# Set `out` to the result Geometry; leave it out to pass `geo` through.\nP = geo.P.astype(np.float64)\nP[:, 2] += a * np.sin(P[:, 0] * b)\nout = geo.copy()\nout.point[\"P\"] = P.astype(np.float32)\n",
+   "doc": "Python run on every cook. See the comment at the top of the default code.",
+   "kind": "str"
+  },
+  "d": {
+   "default": 0.0,
+   "doc": "Variable d (float)",
+   "kind": "float",
+   "soft_max": 10.0,
+   "soft_min": -10.0
+  },
+  "flag": {
+   "default": false,
+   "doc": "Variable flag: a bool",
+   "kind": "bool"
+  },
+  "i": {
+   "default": 0,
+   "doc": "Variable i (int)",
+   "kind": "int",
+   "soft_max": 100,
+   "soft_min": 0
+  },
+  "j": {
+   "default": 0,
+   "doc": "Variable j (int)",
+   "kind": "int",
+   "soft_max": 100,
+   "soft_min": 0
+  },
+  "s": {
+   "default": "",
+   "doc": "Variable s: text",
+   "kind": "str"
+  },
+  "v": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Variable v: a tuple (x, y, z)",
+   "kind": "vec3"
+  },
+  "variables": {
+   "default": "",
+   "doc": "Named values, one `name = value` per line (numbers, text, lists, True/False): e.g. radius = 2.5 or names = ['a', 'b']",
+   "kind": "str"
+  }
+ },
  "ray": {
   "bias": {
    "default": 0.0,

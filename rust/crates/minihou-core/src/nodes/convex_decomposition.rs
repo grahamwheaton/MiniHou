@@ -9,7 +9,7 @@ pub const CONVEX_DECOMPOSITION:NodeSpec=NodeSpec{name:"convex_decomposition",inp
         "outgrp_inside":true;"outgrp_inside_name":"inside";"outgrp_outside":false;"outgrp_outside_name":"outside";
         "outgrp_cutpoints":false;"outgrp_cutpoints_name":"cutpoints";"outgrp_cutedges":false;"outgrp_cutedges_name":"cutedges"),cook:cook};
 
-fn signed_volume(g:&Geometry)->f64 {let pts=positions(g);let vp=&g.topology.vertex_point;let mut v=0.;
+pub(super) fn signed_volume(g:&Geometry)->f64 {let pts=positions(g);let vp=&g.topology.vertex_point;let mut v=0.;
     for f in 0..g.nprims(){let r=range(g,f);if r.len()<3{continue;}let a=pts[vp[r.start] as usize];
         for k in r.start+1..r.end-1 {v+=dot(a,cross(pts[vp[k] as usize],pts[vp[k+1] as usize]))/6.;}}
     v}
@@ -19,7 +19,7 @@ fn hull_volume(g:&Geometry)->Result<f64>{let p=Params::resolve(super::surface::C
     let cloud=Geometry::points_only(xyz)?;
     let h=(super::surface::CONVEX_HULL.cook)(&[vec![Arc::new(cloud)]],&p)?;
     Ok(signed_volume(&h).abs())}
-fn missing(g:&Geometry)->Result<f64>{Ok((hull_volume(g)?-signed_volume(g).abs()).max(0.))}
+pub(super) fn missing(g:&Geometry)->Result<f64>{Ok((hull_volume(g)?-signed_volume(g).abs()).max(0.))}
 fn closed(g:&Geometry)->bool{!g.topology.has_open()&&topo::edges(&g.topology,g.npoints).count.iter().all(|&v|v==2)}
 fn plane_candidates(g:&Geometry,search:usize)->Vec<([f64;3],[f64;3])>{
     let pts=positions(g);let vp=&g.topology.vertex_point;let mut faces=Vec::new();
@@ -105,7 +105,9 @@ fn cook(inputs:&Inputs,p:&Params)->Result<Geometry>{
         let bp=Params::resolve(super::super::generate::BOX.params,None).unwrap();
         let g=(super::super::generate::BOX.cook)(&[vec![]],&bp).unwrap();
         let p=Params::resolve(CONVEX_DECOMPOSITION.params,None).unwrap();let out=cook(&[vec![Arc::new(g)]],&p).unwrap();
-        assert_eq!((out.npoints,out.nprims()),(8,6));
+        let oracle:serde_json::Value=serde_json::from_str(include_str!("test_data/last_nodes_parity.json")).unwrap();
+        assert_eq!(out.npoints,oracle["convex_box"]["points"].as_u64().unwrap() as usize);
+        assert_eq!(out.nprims(),oracle["convex_box"]["prims"].as_u64().unwrap() as usize);
         assert_eq!(out.prim["piece"].data,AttrData::I32(vec![0;6]));
         assert_eq!(out.prim["group_inside"].data,AttrData::I32(vec![0;6]));
     }

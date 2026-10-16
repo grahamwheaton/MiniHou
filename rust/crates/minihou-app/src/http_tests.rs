@@ -158,7 +158,7 @@ fn http_batch_real_socket_history_worker_inspection_and_python_mcp() {
         .any(|a| a["name"] == "P" && a["components"] == 3 && a["mean"] == json!([0., 0., 0.])));
     let (_, before) = http(address, "GET", "/api/graph", json!({}));
     for bad in [
-        json!([{"op":"set","id":"shape","params":{"size":[9,9,9]}},{"op":"add","id":"invalid","type":"python"}]),
+        json!([{"op":"set","id":"shape","params":{"size":[9,9,9]}},{"op":"add","id":"invalid","type":"unknown_node_type"}]),
         json!([{"op":"set","id":"shape","params":{"size":[9,9,9]}},{"op":"connect","from":"output1","to":"shape","port":"bogus"}]),
     ] {
         let (code, error) = http(address, "POST", "/api/edit", json!({"ops":bad,"wait":true}));

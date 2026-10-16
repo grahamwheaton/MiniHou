@@ -1,0 +1,42 @@
+{
+  "convex_box": {
+    "inside": 0,
+    "pieces": [
+      6
+    ],
+    "points": 8,
+    "prims": 6
+  },
+  "l_prism": {
+    "input_volume": 3.0,
+    "output_volume": 3.0,
+    "python_pieces": 4
+  },
+  "material_box": {
+    "mass": [
+      1144.2230224609375,
+      1255.7769775390625
+    ],
+    "material": "concrete",
+    "pieces": [
+      6,
+      6
+    ],
+    "points": 16,
+    "prim_attributes": [
+      "group_inside",
+      "piece",
+      "pivot",
+      "rbd_active",
+      "rbd_angular_damping",
+      "rbd_friction",
+      "rbd_id",
+      "rbd_linear_damping",
+      "rbd_mass",
+      "rbd_restitution",
+      "rbd_v",
+      "rbd_w"
+    ],
+    "prims": 12
+  }
+}

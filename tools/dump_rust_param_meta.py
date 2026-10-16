@@ -62,7 +62,7 @@ TYPES += ["goal_length", "goal_collision", "goal_surface", "goal_gravity", "goal
           "solver", "rbd_configure", "rbd_constraint", "rbd_solver", "rbd_constraint_properties", "glue_cluster"]
 
 # Last node ports.
-TYPES += ["rbd_material_fracture", "convex_decomposition"]
+TYPES += ["rbd_material_fracture", "convex_decomposition", "python"]
 
 
 def meta() -> dict:
