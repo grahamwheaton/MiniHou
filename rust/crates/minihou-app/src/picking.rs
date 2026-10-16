@@ -303,23 +303,6 @@ pub fn primitive_rest_offset(node_type: &str) -> f32 {
     }
 }
 
-/// Whether the node type has a native `center` parameter (box, sphere, tube, torus, grid, circle, point).
-pub fn node_has_center_param(node_type: &str) -> bool {
-    matches!(
-        node_type,
-        "box" | "sphere" | "tube" | "torus" | "grid" | "circle" | "point"
-    )
-}
-
-/// Whether the node type is a primitive generator.
-pub fn is_primitive_node(node_type: &str) -> bool {
-    node_has_center_param(node_type)
-        || matches!(
-            node_type,
-            "line" | "curve" | "bezier" | "helix" | "lsystem" | "null" | "lattice_grid"
-        )
-}
-
 /// Intersects a ray with the ground plane y = 0.
 /// Returns distance t along the ray if hit in front (t > 0).
 pub fn intersect_ground_plane(origin: [f32; 3], dir: [f32; 3]) -> Option<f32> {

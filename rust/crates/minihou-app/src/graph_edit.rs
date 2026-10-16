@@ -129,11 +129,17 @@ fn add_impl(value: &Value, ty: &str, after: Option<&str>, splice: bool) -> Optio
 /// Adds a node placed at world position `pos`. If `ty` is a primitive with a `center` parameter,
 /// sets `center` to `pos`. If `ty` is a primitive without `center`, adds the node and then adds a
 /// `transform` node after it with `translate` set to `pos`. For non-primitives, behaves like `add`.
+fn node_has_center_param(ty: &str) -> bool {
+    matches!(ty, "box" | "sphere" | "tube" | "torus" | "grid" | "circle" | "point")
+}
+fn is_primitive_node(ty: &str) -> bool {
+    node_has_center_param(ty) || matches!(ty, "line" | "curve" | "bezier" | "helix" | "lsystem" | "null" | "lattice_grid")
+}
 pub fn add_at(value: &Value, ty: &str, after: Option<&str>, pos: [f32; 3]) -> Option<(Value, String)> {
-    if !crate::picking::is_primitive_node(ty) {
+    if !is_primitive_node(ty) {
         return add(value, ty, after);
     }
-    if crate::picking::node_has_center_param(ty) {
+    if node_has_center_param(ty) {
         let (mut val, id) = add(value, ty, after)?;
         let all = nodes_mut(&mut val)?;
         let node = all.get_mut(&id)?;
@@ -361,6 +367,7 @@ pub fn insert_existing(value: &Value, id: &str, wire: &WireRef) -> Option<Value>
         if refs.iter().any(|r| r.as_str() == Some(id)) { return None; }
         let index = refs.iter().position(|r| r.as_str() == Some(&wire.from))?;
         refs[index] = json!(id);
+        refs.retain(|r| r.as_str() != Some(&wire.from));
     } else if edge.as_str() == Some(&wire.from) { *edge = json!(id); }
     else { return None; }
     Some(next)
@@ -757,6 +764,35 @@ mod noodle_tests {
     use std::collections::BTreeSet;
     fn wire(from: &str, to: &str, port: &str) -> WireRef {
         WireRef { from: from.into(), to: to.into(), port: port.into() }
+    }
+    #[test]
+    fn transform_drop_splices_exact_edge_once() {
+        let base = json!({"nodes": {
+            "grid1":{"type":"grid"},
+            "noise1":{"type":"noise","inputs":{"geo":"grid1"}},
+            "transform1":{"type":"transform","inputs":{"geo":"noise1"}},
+            "normal1":{"type":"normal","inputs":{"geo":"transform1"}},
+            "transform2":{"type":"transform","inputs":{"geo":"normal1"}},
+            "output1":{"type":"output","inputs":{"geo":"transform2"}}
+        },"display":"output1"});
+        let (added, id) = add(&base, "transform", None).unwrap();
+        assert_eq!(id, "transform3");
+        let next = insert_existing(&added, &id, &wire("transform2", "output1", "geo")).unwrap();
+        let graph = minihou_core::Graph::from_value(&next).unwrap();
+        let edges: Vec<_> = graph.nodes.iter().flat_map(|(to, def)| def.inputs.iter().flat_map(move |(port, sources)|
+            sources.iter().map(move |from| (from.as_str(), to.as_str(), port.as_str())))).collect();
+        assert_eq!(edges.iter().filter(|(from, to, _)| *from == "transform2" && *to == "output1").count(), 0);
+        assert_eq!(edges.iter().filter(|(from, to, _)| *from == "transform2" && *to == "transform3").count(), 1);
+        assert_eq!(edges.iter().filter(|(from, to, _)| *from == "transform3" && *to == "output1").count(), 1);
+        assert_eq!(next["nodes"]["transform3"]["inputs"], json!({"geo":"transform2"}));
+        assert_eq!(next["nodes"]["output1"]["inputs"], json!({"geo":"transform3"}));
+        let duplicate = json!({"nodes": {
+            "grid1":{"type":"grid"},
+            "merge1":{"type":"merge","inputs":{"geos":["grid1","grid1"]}},
+            "transform1":{"type":"transform"}
+        }});
+        let deduped = insert_existing(&duplicate, "transform1", &wire("grid1", "merge1", "geos")).unwrap();
+        assert_eq!(deduped["nodes"]["merge1"]["inputs"]["geos"], json!(["transform1"]));
     }
     #[test]
     fn noodle_insert_exact_edge_and_position_are_one_history_edit() {

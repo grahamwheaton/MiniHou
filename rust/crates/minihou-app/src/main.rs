@@ -1,6 +1,6 @@
 mod picking;
 mod element_select;
-mod graph_edit;
+use minihou_app::graph_edit;
 mod noodle_hit;
 mod http_ui;
 mod ui;

@@ -315,7 +315,7 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
     let mut tool_dropped = false;
     if over && ctx.input(|i| i.pointer.any_released()) {
         if let Some(tool) = egui::DragAndDrop::take_payload::<super::ToolDrag>(ctx) {
-            let at = shelf_drop_position(pointer.unwrap(), r, state.pan, state.zoom, &positions);
+            let at = shelf_drop_position(pointer.unwrap(), r, state.pan, state.zoom, state.snap, ctx.input(|i| i.modifiers.ctrl));
             let mut action = super::shelf::dropped_tool(&tool, at);
             if let Some((added, node)) = crate::graph_edit::add(v.doc, &tool.0, None) {
                 if let UiAction::AddNetworkNode { wire, .. } = &mut action {
@@ -409,8 +409,7 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
             let on_map = Rect::from_min_size(pos2(r.right() - 106.0, r.bottom() - 130.0), vec2(96.0, 120.0)).contains(at);
             if !on_card && !on_map {
                 let world = ((at - r.min - state.pan) / state.zoom).to_pos2();
-                let occupied: Vec<_> = positions.iter().map(|(_, at)| *at).collect();
-                let world = network_layout::free_position(world, &occupied);
+                let world = snap(world - CARD * 0.5, 32.0, state.snap, ctx.input(|i| i.modifiers.ctrl));
                 state.menu = Some(network_menu::MenuState::connected(at, source, world));
             }
         }
@@ -560,17 +559,22 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
         state.drag_before = None;
     }
     // Shelf and Tab-menu drag payloads share the same preview and drop edit.
-    if let (Some(tool), Some(at)) = (egui::DragAndDrop::payload::<super::ToolDrag>(ctx), pointer.filter(|_| over)) {
-        let world = shelf_drop_position(at, r, state.pan, state.zoom, &positions);
-        let rect = Rect::from_min_size(screen(r, state, world), CARD * state.zoom);
-        p.rect_stroke(rect, 6.0, Stroke::new(1.5_f32, v.theme.accent), StrokeKind::Inside);
-        if let Some((value, node)) = crate::graph_edit::add(v.doc, &tool.0, None) {
-            if let Some(wire) = insertion_candidate_at_point(&value, &node, at, &drawn_wires) {
-                if let Some((_, points)) = drawn_wires.iter().find(|(w, _)| w == &wire) {
-                    p.add(egui::Shape::line(points.clone(), Stroke::new(3.5_f32, v.theme.accent)));
+    if let (Some(tool), Some(at)) = (egui::DragAndDrop::payload::<super::ToolDrag>(ctx), pointer) {
+        if over {
+            if let Some((value, node)) = crate::graph_edit::add(v.doc, &tool.0, None) {
+                if let Some(wire) = insertion_candidate_at_point(&value, &node, at, &drawn_wires) {
+                    if let Some((_, points)) = drawn_wires.iter().find(|(w, _)| w == &wire) {
+                        p.add(egui::Shape::line(points.clone(), Stroke::new(3.5_f32, v.theme.accent)));
+                    }
                 }
             }
         }
+        let rect = if over {
+            let world = shelf_drop_position(at, r, state.pan, state.zoom, state.snap, ctx.input(|i| i.modifiers.ctrl));
+            Rect::from_min_size(screen(r, state, world), CARD * state.zoom)
+        } else { Rect::from_center_size(at, CARD) };
+        let ghost = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, id.with("tool_ghost")));
+        ghost_card(&ghost, rect, &tool.0, v, if over { state.zoom } else { 1.0 });
     }
     if let (Some(start), Some(end)) = (state.box_start, pointer) {
         if background.dragged_by(PointerButton::Primary) {
@@ -637,12 +641,8 @@ fn insertion_candidate_at_point(doc: &serde_json::Value, node: &str, at: Pos2, w
     crate::noodle_hit::closest_at_point(wires, at, 8.0, |wire| crate::graph_edit::insert_existing(doc, node, wire).is_some())
 }
 
-pub fn insert_added(ctx: &egui::Context, path: &Path, old: &serde_json::Value, next: &mut serde_json::Value, node: &str, pos: [f32; 2], drop_wire: Option<&WireRef>) -> bool {
-    let state = ctx.data_mut(|d| d.get_persisted::<State>(state_id(path)).unwrap_or_default());
-    let Ok(graph) = minihou_core::Graph::from_value(old) else { return false };
-    let positions = positions_for(&state, &graph, old);
-    let wires = curves_for(Rect::ZERO, &State::default(), &graph, &positions);
-    let candidate = drop_wire.cloned().or_else(|| insertion_candidate(next, node, Rect::from_min_size(pos2(pos[0], pos[1]), CARD), &wires));
+pub fn insert_added(_ctx: &egui::Context, _path: &Path, old: &serde_json::Value, next: &mut serde_json::Value, node: &str, _pos: [f32; 2], drop_wire: Option<&WireRef>) -> bool {
+    let candidate = drop_wire.cloned();
     if let Some(wire) = candidate {
         if let Some(mut inserted) = crate::graph_edit::insert_existing(next, node, &wire) {
             // A stream insertion keeps the existing display/output flags.
@@ -655,10 +655,18 @@ pub fn insert_added(ctx: &egui::Context, path: &Path, old: &serde_json::Value, n
     false
 }
 
-fn shelf_drop_position(at: Pos2, canvas: Rect, pan: Vec2, zoom: f32, positions: &[(String, Pos2)]) -> Pos2 {
-    let world = ((at - canvas.min - pan) / zoom).to_pos2();
-    let occupied: Vec<_> = positions.iter().map(|(_, at)| *at).collect();
-    network_layout::free_position(world, &occupied)
+fn shelf_drop_position(at: Pos2, canvas: Rect, pan: Vec2, zoom: f32, snap_enabled: bool, invert: bool) -> Pos2 {
+    let center = ((at - canvas.min - pan) / zoom).to_pos2();
+    snap(center - CARD * 0.5, 32.0, snap_enabled, invert)
+}
+
+fn ghost_card(p: &egui::Painter, rect: Rect, node_type: &str, v: &View, zoom: f32) {
+    let theme = v.theme;
+    p.rect_filled(rect, 6.0 * zoom, theme.card.gamma_multiply(0.7));
+    p.rect_stroke(rect, 6.0 * zoom, Stroke::new(1.5, theme.accent.gamma_multiply(0.8)), StrokeKind::Inside);
+    let dot = pos2(rect.left() + 35.0 * zoom, rect.center().y);
+    p.circle_filled(dot, 5.0 * zoom, theme.category_color(node_type).gamma_multiply(0.8));
+    p.text(dot + vec2(13.0 * zoom, 0.0), Align2::LEFT_CENTER, node_type, FontId::proportional(13.0 * zoom), theme.text.gamma_multiply(0.8));
 }
 
 /// Persist insertion layout in the add's document edit, using the actual canvas
@@ -807,6 +815,7 @@ fn wire_curves(canvas: Rect, state: &State, v: &View, positions: &[(String, Pos2
 }
 fn curves_for(canvas: Rect, state: &State, graph: &minihou_core::Graph, positions: &[(String, Pos2)]) -> Vec<(WireRef, Vec<Pos2>)> {
     let mut wires = Vec::new();
+    let mut seen = BTreeSet::new();
     let lookup: HashMap<&str, Pos2> = positions.iter().map(|(id, at)| (id.as_str(), *at)).collect();
     for (target, def) in &graph.nodes {
         let Some(&end) = lookup.get(target.as_str()) else { continue };
@@ -819,7 +828,8 @@ fn curves_for(canvas: Rect, state: &State, graph: &minihou_core::Graph, position
             let Some(&start) = lookup.get(source.as_str()) else { continue };
             let a = screen(canvas, state, start + vec2(CARD.x * 0.5, CARD.y));
             let b = screen(canvas, state, end + input_offset(index, slots.len()));
-            wires.push((WireRef { from: source.clone(), to: target.clone(), port: port.clone() }, network_wires::curve(a,b)));
+            let wire = WireRef { from: source.clone(), to: target.clone(), port: port.clone() };
+            if seen.insert(wire.clone()) { wires.push((wire, network_wires::curve(a,b))); }
         }
     }
     wires
@@ -1018,14 +1028,14 @@ mod tests {
     use super::*;
     use crate::ui::testing::Fixture;
 
-    #[test] fn shelf_drop_converts_pan_zoom_and_reserves_a_free_grid_slot() {
+    #[test] fn shelf_drop_centers_card_and_only_snaps_when_enabled() {
         let canvas = Rect::from_min_size(pos2(100., 80.), vec2(1000., 700.));
         let pan = vec2(-40., 25.);
         let zoom = 0.5;
         let pointer = canvas.min + pan + vec2(645., -61.) * zoom;
-        assert_eq!(shelf_drop_position(pointer, canvas, pan, zoom, &[]), pos2(640., -64.));
-        let occupied = vec![("selected".into(), pos2(640., -64.))];
-        assert_eq!(shelf_drop_position(pointer, canvas, pan, zoom, &occupied), pos2(640., 32.));
+        assert_eq!(shelf_drop_position(pointer, canvas, pan, zoom, true, false), pos2(544., -96.));
+        assert_eq!(shelf_drop_position(pointer, canvas, pan, zoom, false, false), pos2(535., -89.));
+        assert_eq!(shelf_drop_position(pointer, canvas, pan, zoom, true, true), pos2(535., -89.));
     }
 
     #[test] fn shelf_payload_release_on_canvas_creates_a_standalone_node_at_pointer() {
@@ -1048,7 +1058,7 @@ mod tests {
             });
         }
         assert!(matches!(out.0.as_slice(), [UiAction::AddNetworkNode { node_type, pos, .. }]
-            if node_type == "transform" && *pos == [640., 320.]));
+            if node_type == "transform" && *pos == [544., 288.]));
         assert!(!egui::DragAndDrop::has_payload_of_type::<super::super::ToolDrag>(&ctx));
     }
 
@@ -1188,12 +1198,12 @@ mod tests {
                 assert!(out.0.is_empty());
                 let (connection, at) = state.menu.as_ref().unwrap().connect_to.as_ref().unwrap();
                 assert_eq!(connection, &source);
-                assert_eq!(*at, pos2(704., 416.));
+                assert_eq!(*at, pos2(608., 384.));
                 match finish {
                     0 => {
                         frame(vec![egui::Event::Text("transform".into())], &mut state, &mut out);
                         frame(vec![key(egui::Key::Enter)], &mut state, &mut out);
-                        assert!(matches!(out.0.as_slice(), [UiAction::AddConnectedNode { node_type, connection, pos }] if node_type == "transform" && connection == &source && *pos == [704., 416.]));
+                        assert!(matches!(out.0.as_slice(), [UiAction::AddConnectedNode { node_type, connection, pos }] if node_type == "transform" && connection == &source && *pos == [608., 384.]));
                     }
                     1 => frame(vec![key(egui::Key::Escape)], &mut state, &mut out),
                     _ => frame(vec![egui::Event::PointerMoved(pos2(20., 650.)), button(pos2(20., 650.), true)], &mut state, &mut out),
@@ -1686,7 +1696,7 @@ mod noodle_selection_tests {
         frame(&ctx,&f,&mut state,at,None,egui::Modifiers::NONE);
         let actions = frame(&ctx,&f,&mut state,at,Some((PointerButton::Primary,false)),egui::Modifiers::NONE);
         assert!(matches!(actions.as_slice(),[UiAction::AddNetworkNode { node_type,pos, .. }]
-            if node_type == "transform" && *pos == [96.,256.]), "actions: {actions:?}");
+            if node_type == "transform" && *pos == [0.,224.]), "actions: {actions:?}");
         assert!(state.menu.is_none());
     }
     #[test]
@@ -1716,9 +1726,9 @@ mod noodle_selection_tests {
         let wires = vec![(far,vec![pos2(110.,200.),pos2(110.,350.)]),(near.clone(),vec![pos2(210.,200.),pos2(210.,350.)])];
         assert_eq!(insertion_candidate(&value,&id,rect,&wires),Some(near));
         let ctx = egui::Context::default();
-        insert_added(&ctx,Path::new("drop.mhou"),f.doc.value(),&mut value,&id,[100.,240.],None);
-        assert_eq!(value["nodes"]["out"]["inputs"]["geo"],id.as_str());
-        assert_eq!(value["display"],f.doc.value()["display"]);
+        assert!(!insert_added(&ctx,Path::new("drop.mhou"),f.doc.value(),&mut value,&id,[100.,240.],None));
+        assert_eq!(value["nodes"]["out"]["inputs"]["geo"],"a");
+        assert_eq!(value["display"],id.as_str());
     }
     #[test]
     fn noodle_shift_rmb_cuts_on_release_and_plain_rmb_opens_menu() {

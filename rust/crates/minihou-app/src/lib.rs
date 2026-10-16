@@ -1,4 +1,5 @@
 //! Window-independent editor state and lossless JSON edits.
+extern crate self as minihou_app;
 pub mod cluster_lod;
 pub mod link_protocol;
 pub mod http_api;
@@ -7,6 +8,7 @@ pub mod http_geometry;
 #[cfg(test)] mod http_tests;
 pub mod transform_math;
 pub mod noodle_hit;
+pub mod graph_edit;
 use minihou_core::{session::Session, lod::ClusterLod, Graph};
 use serde_json::{json, Value};
 use std::{collections::HashMap, ops::Range, path::Path, time::Instant};
