@@ -120,6 +120,7 @@ pub fn registry() -> &'static [NodeSpec] {
         r#loop::LOOP_BEGIN,
         r#loop::LOOP_END,
         image_nodes::BLENDER_IMAGE,
+        image_nodes::IMAGE_FILE,
         image_nodes::IMAGE_OUT,
         scene_objects::SCENE_OBJECTS,
         generate::GRID,
