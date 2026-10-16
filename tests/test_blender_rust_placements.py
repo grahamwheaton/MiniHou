@@ -142,7 +142,10 @@ class RustChainedPlacementTests(unittest.TestCase):
             header, output = original(client, instance_id, graph_path, params, arrays, **kw)
             recorder.append({"id": instance_id, "params": dict(params),
                              "input": np.array(arrays["point/P"], np.float64),
-                             "output": np.array(output["point/P"], np.float64)})
+                             "input_vertex_point": np.array(arrays["topo/vertex_point"], np.int32),
+                             "input_prim_offsets": np.array(arrays["topo/prim_offsets"], np.int32),
+                             "output": np.array(output["point/P"], np.float64),
+                             "output_prim_offsets": np.array(output["topo/prim_offsets"], np.int32)})
             return header, output
         InstanceClient.cook = cook
         self.addCleanup(setattr, InstanceClient, "cook", original)
@@ -222,6 +225,20 @@ class RustChainedPlacementTests(unittest.TestCase):
         return area, region, space
 
     # -- tests ----------------------------------------------------------------------------------
+    def test_plane_export_and_wired_cook_keep_one_quad(self):
+        obj = self.plane()
+        self.assertEqual([face.loop_total for face in obj.data.polygons], [4])
+        tree, gin, gout = self.tree()
+        node = self.add(tree)
+        self.chain(tree, gin, node, gout)
+        self.attach(obj, tree)
+        self.assertEqual(self.cook(), 1)
+        self.assertEqual(self.cooks[0]["input_vertex_point"].tolist(), [0, 1, 2, 3])
+        self.assertEqual(self.cooks[0]["input_prim_offsets"].tolist(), [0, 4])
+        self.assertEqual(self.cooks[0]["output_prim_offsets"].tolist(), [0, 4])
+        evaluated = obj.evaluated_get(bpy.context.evaluated_depsgraph_get()).data
+        self.assertEqual([face.loop_total for face in evaluated.polygons], [4])
+
     def test_chained_example_placements_cook_in_order_with_independent_controls(self):
         obj = self.plane()
         tree, gin, gout = self.tree()
