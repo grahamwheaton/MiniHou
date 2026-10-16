@@ -11,7 +11,7 @@ Follow-ups: neither CLI accepts input while a turn runs, so `send` appends to th
 inbox and the supervisor delivers it at the next checkpoint (end of the running turn)
 with `codex exec resume <session>`; agy uses --continue. Max 3 resume rounds per task.
 """
-import json, os, re, shutil, subprocess, sys, time, traceback, uuid
+import io, json, os, re, shutil, subprocess, sys, time, traceback, uuid
 from pathlib import Path
 
 ROOT = Path.home() / ".multi-agent"
@@ -219,6 +219,7 @@ def dash(html):
 
 
 def main():
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     c, a = sys.argv[1], sys.argv[2:]
     if c == "dash":
         return dash("--html" in a)
