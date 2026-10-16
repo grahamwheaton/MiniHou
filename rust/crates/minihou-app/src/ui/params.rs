@@ -175,6 +175,90 @@ fn icon(ui: &mut egui::Ui, rect: Rect, id: egui::Id, reset: bool, on: bool, them
     response
 }
 
+/// Houdini parameter pane row layout helper.
+/// Every row is [label | fields]:
+/// - Fixed label column width (about 28-35% of the panel, minimum 110px, clamped).
+/// - Labels right-aligned and vertically centred against the row.
+/// - All field widgets left-aligned starting at the same x forming a clean column.
+pub struct ParamRowLayout {
+    pub row_rect: Rect,
+    pub label_rect: Rect,
+    pub control_rect: Rect,
+    pub expose_rect: Rect,
+    pub reset_rect: Rect,
+}
+
+impl ParamRowLayout {
+    pub fn compute(row_rect: Rect) -> Self {
+        let total_w = row_rect.width();
+        let left_pad = 16.0_f32;
+        let right_buttons_w = 54.0_f32;
+        let gap = 8.0_f32;
+        let min_field_w = 60.0_f32;
+
+        let avail_content = (total_w - left_pad - right_buttons_w - gap).max(20.0);
+        let max_label_w = (avail_content - min_field_w).max(30.0);
+        // Fixed label column width: about 28-35% of the panel, minimum 110px, clamped
+        let label_w = ((total_w * 0.30).clamp(110.0, 240.0)).min(max_label_w);
+
+        let label_rect = Rect::from_min_size(
+            Pos2::new(row_rect.left() + left_pad, row_rect.top()),
+            Vec2::new(label_w, row_rect.height()),
+        );
+
+        let expose_rect = Rect::from_min_size(
+            Pos2::new(row_rect.right() - 26., row_rect.top() + 4.),
+            Vec2::splat(20.),
+        );
+        let reset_rect = Rect::from_min_size(
+            Pos2::new(expose_rect.left() - 28., row_rect.top() + 4.),
+            Vec2::splat(20.),
+        );
+
+        let fields_x = label_rect.right() + gap;
+        let fields_right = reset_rect.left() - 6.0;
+        let control_rect = Rect::from_min_max(
+            Pos2::new(fields_x, row_rect.top() + 3.),
+            Pos2::new(fields_right.max(fields_x + 10.0), row_rect.bottom() - 3.),
+        );
+
+        Self {
+            row_rect,
+            label_rect,
+            control_rect,
+            expose_rect,
+            reset_rect,
+        }
+    }
+}
+
+fn truncate_with_ellipsis(ui: &egui::Ui, text: &str, font: &FontId, max_w: f32) -> String {
+    if max_w <= 6.0 { return String::new(); }
+    let g = ui.painter().layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE);
+    if g.size().x <= max_w {
+        return text.to_owned();
+    }
+    let ellipsis = "…";
+    let chars: Vec<char> = text.chars().collect();
+    let mut low = 0;
+    let mut high = chars.len();
+    let mut best = ellipsis.to_owned();
+    while low <= high {
+        let mid = (low + high) / 2;
+        let candidate: String = chars[..mid].iter().collect::<String>() + ellipsis;
+        let g = ui.painter().layout_no_wrap(candidate.clone(), font.clone(), Color32::WHITE);
+        if g.size().x <= max_w {
+            best = candidate;
+            low = mid + 1;
+        } else if mid == 0 {
+            break;
+        } else {
+            high = mid - 1;
+        }
+    }
+    best
+}
+
 #[allow(clippy::too_many_arguments)]
 fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, param: &ParamSpec, locked: bool, errors: &mut Vec<String>) {
     let default = (param.default)();
@@ -205,70 +289,154 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     }));
     if let Some(reason) = &reason { errors.push(format!("{}: {reason}", title(param.name))); }
     let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 28.), Sense::hover());
-    let label = Rect::from_min_size(Pos2::new(r.left() + 16., r.top()), Vec2::new(92., 28.));
-    let expose_rect = Rect::from_min_size(Pos2::new(r.right() - 26., r.top() + 4.), Vec2::splat(20.));
-    let reset_rect = Rect::from_min_size(Pos2::new(expose_rect.left() - 28., r.top() + 4.), Vec2::splat(20.));
-    let control = Rect::from_min_max(Pos2::new(label.right() + 6., r.top() + 3.), Pos2::new(reset_rect.left() - 6., r.bottom() - 3.));
-    if modified { ui.painter().circle_filled(Pos2::new(r.left() + 9., r.center().y), 3., v.theme.accent); }
+    let layout = ParamRowLayout::compute(r);
+
+    let enabled = param.supported && !locked && condition_enabled;
+    if modified {
+        ui.painter().circle_filled(
+            Pos2::new(r.left() + 9., r.center().y),
+            3.,
+            if enabled { v.theme.accent } else { v.theme.accent.gamma_multiply(0.5) },
+        );
+    }
+
     let is_length = crate::units::is_length_param(typ, param.name);
     let units_opt = if is_length { Some(v.units) } else { None };
-    let ink = if !param.supported || !condition_enabled { v.theme.faint } else if modified { v.theme.text } else { v.theme.dim };
+    let ink = if !enabled { v.theme.faint } else if modified { v.theme.text } else { v.theme.dim };
     let label_text = if is_length { format!("{} ({})", title(param.name), v.units.display.symbol()) } else { title(param.name) };
-    paint_text(ui, Pos2::new(label.left(), label.center().y), &label_text, 12., false, ink, Align2::LEFT_CENTER);
 
-    let is_vec3 = kind == ParamKind::Vec3;
-    let label_sense = if is_vec3 && param.supported && !locked && condition_enabled { Sense::click_and_drag() } else { Sense::hover() };
-    let label_response = ui.interact(label, ui.id().with((id, param.name, "label")), label_sense);
-    let doc = meta.and_then(|m| m["doc"].as_str()).unwrap_or("");
-    if !param.supported { label_response.clone().on_hover_text(DISABLED); }
-    else if !doc.is_empty() { label_response.clone().on_hover_text(doc); }
+    let is_bool = kind == ParamKind::Bool;
+    let is_vector = kind == ParamKind::Vec3 || value.as_array().is_some_and(|a| (2..=4).contains(&a.len()) && a.iter().all(Value::is_number));
 
-    if is_vec3 && param.supported && !locked && condition_enabled {
-        if label_response.hovered() || label_response.dragged() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    let font = FontId::proportional(12.);
+    let displayed_label = if !is_bool {
+        truncate_with_ellipsis(ui, &label_text, &font, layout.label_rect.width())
+    } else {
+        String::new()
+    };
+
+    if !is_bool {
+        // Houdini layout: labels are RIGHT-aligned and vertically centred against the row
+        paint_text(
+            ui,
+            Pos2::new(layout.label_rect.right(), r.center().y),
+            &displayed_label,
+            12.,
+            false,
+            ink,
+            Align2::RIGHT_CENTER,
+        );
+
+        let label_sense = if is_vector && enabled { Sense::click_and_drag() } else { Sense::hover() };
+        let label_response = ui.interact(layout.label_rect, ui.id().with((id, param.name, "label")), label_sense);
+        let doc = meta.and_then(|m| m["doc"].as_str()).unwrap_or("");
+        if !param.supported {
+            label_response.clone().on_hover_text(DISABLED);
+        } else if !doc.is_empty() {
+            label_response.clone().on_hover_text(doc);
+        } else if displayed_label != label_text {
+            label_response.clone().on_hover_text(&label_text);
         }
-        if label_response.dragged_by(egui::PointerButton::Middle) {
-            let mut delta = ui.ctx().input(|i| i.pointer.delta());
-            let screen = ui.ctx().screen_rect();
-            if screen.width() > 10.0 && screen.height() > 10.0 {
-                crate::wrap_drag(ui.ctx(), screen, &mut delta);
+
+        if is_vector && enabled {
+            if label_response.hovered() || label_response.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
             }
-            let speed = meta.and_then(slider_range).map_or(0.01, |r| ((r.end() - r.start()) / 400.).clamp(0.001, 1.));
-            let step = if let Some(u) = units_opt {
-                delta.x as f64 * speed * u.display.metres() / u.unit_scale
-            } else {
-                delta.x as f64 * speed
-            };
-            if step != 0. {
-                let range = meta.and_then(|m| m["min"].as_f64()).unwrap_or(f64::NEG_INFINITY)..=meta.and_then(|m| m["max"].as_f64()).unwrap_or(f64::INFINITY);
-                let mut v = [0, 1, 2].map(|i| value.get(i).and_then(Value::as_f64).unwrap_or(0.));
-                for x in &mut v {
-                    *x = (*x + step).clamp(*range.start(), *range.end());
+            if label_response.dragged_by(egui::PointerButton::Middle) {
+                let mut delta = ui.ctx().input(|i| i.pointer.delta());
+                let screen = ui.ctx().content_rect();
+                if screen.width() > 10.0 && screen.height() > 10.0 {
+                    crate::wrap_drag(ui.ctx(), screen, &mut delta);
                 }
-                value = json!(v);
+                let speed = meta.and_then(slider_range).map_or(0.01, |r| ((r.end() - r.start()) / 400.).clamp(0.001, 1.));
+                let step = if let Some(u) = units_opt {
+                    delta.x as f64 * speed * u.display.metres() / u.unit_scale
+                } else {
+                    delta.x as f64 * speed
+                };
+                if step != 0. {
+                    let range = meta.and_then(|m| m["min"].as_f64()).unwrap_or(f64::NEG_INFINITY)..=meta.and_then(|m| m["max"].as_f64()).unwrap_or(f64::INFINITY);
+                    if let Some(arr) = value.as_array() {
+                        let mut v: Vec<f64> = arr.iter().map(|item| item.as_f64().unwrap_or(0.)).collect();
+                        for x in &mut v {
+                            *x = (*x + step).clamp(*range.start(), *range.end());
+                        }
+                        value = json!(v);
+                    } else {
+                        let mut v = [0, 1, 2].map(|i| value.get(i).and_then(Value::as_f64).unwrap_or(0.));
+                        for x in &mut v {
+                            *x = (*x + step).clamp(*range.start(), *range.end());
+                        }
+                        value = json!(v);
+                    }
+                }
             }
         }
     }
 
-    if control.width() > 4. {
-        if reason.is_some() { ui.painter().rect_stroke(control, 4., Stroke::new(1.0_f32, v.theme.err), StrokeKind::Outside); }
-        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(control).id_salt((id, param.name, "widget")).layout(egui::Layout::left_to_right(egui::Align::Center)));
-        child.set_width(control.width());
+    if layout.control_rect.width() > 4. {
+        if reason.is_some() {
+            ui.painter().rect_stroke(layout.control_rect, 4., Stroke::new(1.0_f32, v.theme.err), StrokeKind::Outside);
+        }
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(layout.control_rect)
+                .id_salt((id, param.name, "widget"))
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        child.set_width(layout.control_rect.width());
         child.spacing_mut().item_spacing.x = 4.;
-        let enabled = param.supported && !locked && condition_enabled;
-        let response = child.add_enabled_ui(enabled, |ui| widget_styled(ui, kind, meta, &mut value, Some(v.theme), control.width(), units_opt)).response;
-        if !enabled { response.on_disabled_hover_text(if locked { "Locked" } else if !condition_enabled { "Enable the controlling parameter first" } else { DISABLED }); }
+        if !enabled {
+            child.visuals_mut().override_text_color = Some(v.theme.faint);
+            child.visuals_mut().widgets.noninteractive.fg_stroke.color = v.theme.faint;
+            child.visuals_mut().widgets.inactive.fg_stroke.color = v.theme.faint;
+        }
+        let bool_label = if is_bool {
+            let max_w = (layout.control_rect.width() - 24.0).max(10.0);
+            Some(truncate_with_ellipsis(ui, &label_text, &font, max_w))
+        } else {
+            None
+        };
+        let response = child.add_enabled_ui(enabled, |ui| {
+            widget_styled(
+                ui,
+                kind,
+                meta,
+                &mut value,
+                Some(v.theme),
+                layout.control_rect.width(),
+                units_opt,
+                bool_label.as_deref(),
+            )
+        }).response;
+        if !enabled {
+            response.on_disabled_hover_text(if locked {
+                "Locked"
+            } else if !condition_enabled {
+                "Enable the controlling parameter first"
+            } else {
+                DISABLED
+            });
+        } else if is_bool {
+            let doc = meta.and_then(|m| m["doc"].as_str()).unwrap_or("");
+            if !doc.is_empty() {
+                response.on_hover_text(doc);
+            } else if bool_label.as_deref().is_some_and(|l| l != label_text) {
+                response.on_hover_text(&label_text);
+            }
+        }
     }
+
     if param.supported && !locked && value != old {
         let dragging = ui.ctx().input(|input| input.pointer.primary_down() || input.pointer.middle_down());
         out.push(UiAction::Edit { edit: Edit::Param { node: id.to_owned(), name: param.name.to_owned(), value }, continuous: dragging });
     }
-    if modified && !locked && icon(ui, reset_rect, ui.id().with((id, param.name, "reset")), true, false, v.theme)
+    if modified && !locked && icon(ui, layout.reset_rect, ui.id().with((id, param.name, "reset")), true, false, v.theme)
         .on_hover_text(format!("Reset {} to {}", label_text, default)).clicked() {
         out.push(UiAction::Edit { edit: Edit::Param { node: id.to_owned(), name: param.name.to_owned(), value: default.clone() }, continuous: false });
     }
     let on = minihou_app::is_exposed(v.doc, id, param.name);
-    if icon(ui, expose_rect, ui.id().with((id, param.name, "expose")), false, on, v.theme)
+    if icon(ui, layout.expose_rect, ui.id().with((id, param.name, "expose")), false, on, v.theme)
         .on_hover_text(if on { "Exposed: click to remove" } else { "Expose parameter" }).clicked() {
         out.push(UiAction::Edit { edit: minihou_app::toggle_exposed(v.doc, id, param.name), continuous: false });
     }
@@ -469,7 +637,12 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
 /// A 22 px value box in the design's style (input fill, 1 px stroke, 4 px radius); returns the outer and inner rects.
 fn boxed(ui: &mut egui::Ui, width: f32, t: &Theme) -> (Rect, Rect) {
     let (r, _) = ui.allocate_exact_size(Vec2::new(width, 22.), Sense::hover());
-    ui.painter().rect(r, 4., t.input, Stroke::new(1.0_f32, t.stroke), StrokeKind::Inside);
+    let (bg, stroke) = if ui.is_enabled() {
+        (t.input, t.stroke)
+    } else {
+        (t.input.gamma_multiply(0.5), t.stroke.gamma_multiply(0.5))
+    };
+    ui.painter().rect(r, 4., bg, Stroke::new(1.0_f32, stroke), StrokeKind::Inside);
     (r, r.shrink2(Vec2::new(2., 1.)))
 }
 /// A number you drag sideways to change and double-click to type, painted in `rect` (the design's mono 12 px value).
@@ -527,19 +700,81 @@ fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: 
 /// One editing widget for a parameter value; returns true when the value changed.
 pub fn widget(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value: &mut Value) -> bool {
     let width = ui.available_width();
-    widget_styled(ui, kind, meta, value, None, width, None)
+    widget_styled(ui, kind, meta, value, None, width, None, None)
 }
 
 pub fn widget_with_units(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value: &mut Value, units: Option<crate::units::UnitSettings>) -> bool {
     let width = ui.available_width();
-    widget_styled(ui, kind, meta, value, None, width, units)
+    widget_styled(ui, kind, meta, value, None, width, units, None)
 }
 
-fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value: &mut Value, theme: Option<&Theme>, width: f32, units: Option<crate::units::UnitSettings>) -> bool {
+fn render_vector_fields(
+    ui: &mut egui::Ui,
+    value: &mut Value,
+    n: usize,
+    meta: Option<&Value>,
+    theme: Option<&Theme>,
+    width: f32,
+    units: Option<crate::units::UnitSettings>,
+) -> bool {
+    let axis_labels = ["X", "Y", "Z", "W"];
+    let mut v: Vec<f64> = (0..n).map(|i| value.get(i).and_then(Value::as_f64).unwrap_or(0.)).collect();
+    let mut changed = false;
+    let spacing = 4.0_f32;
+    let total_spacing = spacing * (n as f32 - 1.0);
+    let axis_width = ((width - total_spacing) / n as f32).max(22.0);
+    let range = meta.and_then(|m| m["min"].as_f64()).unwrap_or(f64::NEG_INFINITY)..=meta.and_then(|m| m["max"].as_f64()).unwrap_or(f64::INFINITY);
+
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = spacing;
+        for (i, x) in v.iter_mut().enumerate() {
+            if let Some(t) = theme {
+                let axis_color = match i {
+                    0 => t.x_axis,
+                    1 => t.y_axis,
+                    2 => t.z_axis,
+                    _ => t.dim,
+                };
+                let (outer, inner) = boxed(ui, axis_width, t);
+                let label = if i < axis_labels.len() { axis_labels[i] } else { "?" };
+                ui.painter().text(
+                    Pos2::new(outer.left() + 6., outer.center().y),
+                    Align2::LEFT_CENTER,
+                    label,
+                    egui::FontId::monospace(11.),
+                    axis_color,
+                );
+                changed |= drag_number(
+                    ui,
+                    Rect::from_min_max(Pos2::new(inner.left() + 12., inner.top()), inner.max),
+                    ui.id().with(("v", i, outer.min.x as i32, outer.min.y as i32)),
+                    x,
+                    0.01,
+                    &range,
+                    false,
+                    Align2::LEFT_CENTER,
+                    t,
+                    units,
+                );
+            } else if let Some(u) = units {
+                changed |= ui.add_sized([axis_width, 22.], egui::DragValue::new(x).speed(0.01).range(range.clone()).suffix(format!(" {}", u.display.symbol()))).changed();
+            } else {
+                changed |= ui.add_sized([axis_width, 22.], egui::DragValue::new(x).speed(0.01).range(range.clone())).changed();
+            }
+        }
+    });
+    if changed {
+        *value = json!(v);
+    }
+    changed
+}
+
+fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value: &mut Value, theme: Option<&Theme>, width: f32, units: Option<crate::units::UnitSettings>, bool_label: Option<&str>) -> bool {
     if let Some(meta) = meta {
         if meta["kind"] == "enum" {
             let before = value.clone();
-            egui::ComboBox::from_id_salt("enum").width(width).selected_text(value.as_str().unwrap_or(""))
+            let combo_w = width.min(180.0).max(50.0);
+            egui::ComboBox::from_id_salt("enum").width(combo_w).selected_text(value.as_str().unwrap_or(""))
                 .show_ui(ui, |ui| {
                     if let Some(options) = meta["options"].as_array() {
                         for option in options { ui.selectable_value(value, option.clone(), option.as_str().unwrap_or("")); }
@@ -558,11 +793,29 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
                     None
                 }
             });
+            let box_w: f32 = if units.is_some() { 84. } else { 68. };
+            let drag_width = if integer {
+                if theme.is_some() { width - 32. } else { width }
+            } else if s_range.is_some() {
+                box_w.min((width - 24.).max(36.))
+            } else {
+                width
+            };
+            let range = meta["min"].as_f64().or_else(|| if s_range.is_some() { Some(0.0) } else { None }).unwrap_or(f64::NEG_INFINITY)..=meta["max"].as_f64().unwrap_or(f64::INFINITY);
+            if let (Some(t), false) = (theme, integer) {
+                let (outer, inner) = boxed(ui, drag_width.max(24.), t);
+                let drag_speed = s_range.as_ref().map_or(0.01, |r| ((r.end() - r.start()) / 400.).clamp(0.001, 1.));
+                changed |= drag_number(ui, inner, ui.id().with(("num", meta["default"].to_string(), outer.min.x as i32, outer.min.y as i32)), &mut v, drag_speed, &range, false, Align2::RIGHT_CENTER, t, units);
+            } else if let Some(u) = units {
+                changed |= ui.add_sized([drag_width.max(24.), 22.], egui::DragValue::new(&mut v).speed(0.01).range(range.clone()).suffix(format!(" {}", u.display.symbol()))).changed();
+            } else {
+                changed |= ui.add_sized([drag_width.max(24.), 22.], egui::DragValue::new(&mut v).speed(if integer { 1. } else { 0.01 }).range(range.clone())).changed();
+            }
             if !integer {
                 if let Some(range) = s_range.clone() {
                     let (min, max) = (*range.start(), *range.end());
-                    let box_w = if units.is_some() { 84. } else { 68. };
-                    ui.spacing_mut().slider_width = (width - box_w - 6.).max(8.);
+                    let slider_w = (width - drag_width - ui.spacing().item_spacing.x).max(8.);
+                    ui.spacing_mut().slider_width = slider_w;
                     let response = ui.scope(|ui| {
                         let w = &mut ui.visuals_mut().widgets;
                         for s in [&mut w.inactive, &mut w.hovered, &mut w.active, &mut w.noninteractive] {
@@ -592,19 +845,6 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
                     }
                 }
             }
-            let box_w = if units.is_some() { 84. } else { 68. };
-            let drag_width = if integer { width - if theme.is_some() { 32. } else { 0. } }
-                else if s_range.is_some() { box_w } else { width };
-            let range = meta["min"].as_f64().or_else(|| if s_range.is_some() { Some(0.0) } else { None }).unwrap_or(f64::NEG_INFINITY)..=meta["max"].as_f64().unwrap_or(f64::INFINITY);
-            if let (Some(t), false) = (theme, integer) {
-                let (outer, inner) = boxed(ui, drag_width.max(24.), t);
-                let drag_speed = s_range.map_or(0.01, |r| ((r.end() - r.start()) / 400.).clamp(0.001, 1.));
-                changed |= drag_number(ui, inner, ui.id().with(("num", meta["default"].to_string(), outer.min.x as i32, outer.min.y as i32)), &mut v, drag_speed, &range, false, Align2::RIGHT_CENTER, t, units);
-            } else if let Some(u) = units {
-                changed |= ui.add_sized([drag_width.max(24.), 22.], egui::DragValue::new(&mut v).speed(0.01).range(range).suffix(format!(" {}", u.display.symbol()))).changed();
-            } else {
-                changed |= ui.add_sized([drag_width.max(24.), 22.], egui::DragValue::new(&mut v).speed(if integer { 1. } else { 0.01 }).range(range)).changed();
-            }
             if changed {
                 v = clamp_parameter(meta, v);
                 *value = if integer { json!(v.round() as i64) } else { json!(v) };
@@ -615,7 +855,7 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
     match kind {
         ParamKind::Bool => {
             let mut v = value.as_bool().unwrap_or(false);
-            if ui.checkbox(&mut v, "").changed() { *value = json!(v); true } else { false }
+            if ui.checkbox(&mut v, bool_label.unwrap_or("")).changed() { *value = json!(v); true } else { false }
         }
         ParamKind::Integer => {
             let mut v = value.as_i64().or_else(|| value.as_f64().map(|f| f as i64)).unwrap_or(0);
@@ -657,30 +897,17 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
             if ui.add_sized([width, 22.], egui::TextEdit::singleline(&mut v).desired_width(f32::INFINITY)).changed() { *value = json!(v); true } else { false }
         }
         ParamKind::Vec3 => {
-            let mut v = [0, 1, 2].map(|i| value.get(i).and_then(Value::as_f64).unwrap_or(0.));
-            let mut changed = false;
-            let axis_width = ((width - 8.) / 3.).max(22.);
-            let range = meta.and_then(|m| m["min"].as_f64()).unwrap_or(f64::NEG_INFINITY)..=meta.and_then(|m| m["max"].as_f64()).unwrap_or(f64::INFINITY);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.;
-                for (i, x) in v.iter_mut().enumerate() {
-                    if let Some(t) = theme {
-                        let (outer, inner) = boxed(ui, axis_width, t);
-                        ui.painter().text(Pos2::new(outer.left() + 6., outer.center().y), Align2::LEFT_CENTER, ["X", "Y", "Z"][i],
-                            egui::FontId::monospace(11.), [t.x_axis, t.y_axis, t.z_axis][i]);
-                        changed |= drag_number(ui, Rect::from_min_max(Pos2::new(inner.left() + 12., inner.top()), inner.max),
-                            ui.id().with(("v3", i, outer.min.x as i32, outer.min.y as i32)), x, 0.01, &range, false, Align2::LEFT_CENTER, t, units);
-                    } else if let Some(u) = units {
-                        changed |= ui.add_sized([axis_width, 22.], egui::DragValue::new(x).speed(0.01).range(range.clone()).suffix(format!(" {}", u.display.symbol()))).changed();
-                    } else {
-                        changed |= ui.add_sized([axis_width, 22.], egui::DragValue::new(x).speed(0.01).range(range.clone())).changed();
-                    }
-                }
-            });
-            if changed { *value = json!(v); }
-            changed
+            let n = value.as_array().map_or(3, |a| a.len().clamp(2, 4));
+            render_vector_fields(ui, value, n, meta, theme, width, units)
         }
-        ParamKind::Unsupported => { ui.label(value.to_string()); false }
+        ParamKind::Unsupported => {
+            if let Some(arr) = value.as_array().filter(|a| (2..=4).contains(&a.len()) && a.iter().all(Value::is_number)) {
+                render_vector_fields(ui, value, arr.len(), meta, theme, width, units)
+            } else {
+                ui.label(value.to_string());
+                false
+            }
+        }
     }
 }
 
@@ -814,5 +1041,102 @@ mod tests {
         f.selected = "transform1".into();
         f.display = "transform1".into();
         assert!(f.run(show).is_empty());
+    }
+
+    #[test]
+    fn houdini_row_layout_geometry() {
+        // Standard width 400px: label width is ~30% (120px)
+        let r400 = Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 28.));
+        let l400 = ParamRowLayout::compute(r400);
+        assert!((l400.label_rect.width() - 120.0).abs() < 1e-3);
+        assert_eq!(l400.label_rect.left(), 16.0);
+        assert_eq!(l400.control_rect.left(), l400.label_rect.right() + 8.0);
+        assert!(l400.control_rect.width() > 60.0);
+
+        // Narrow width 350px: label width clamps to min 110px
+        let r350 = Rect::from_min_size(Pos2::ZERO, Vec2::new(350., 28.));
+        let l350 = ParamRowLayout::compute(r350);
+        assert_eq!(l350.label_rect.width(), 110.0);
+        assert_eq!(l350.control_rect.left(), l350.label_rect.right() + 8.0);
+
+        // Wide width 1200px: label width clamps to max 240px
+        let r1200 = Rect::from_min_size(Pos2::ZERO, Vec2::new(1200., 28.));
+        let l1200 = ParamRowLayout::compute(r1200);
+        assert_eq!(l1200.label_rect.width(), 240.0);
+        assert_eq!(l1200.control_rect.left(), l1200.label_rect.right() + 8.0);
+
+        // Very narrow width 180px: fields shrink gracefully to minimum
+        let r180 = Rect::from_min_size(Pos2::ZERO, Vec2::new(180., 28.));
+        let l180 = ParamRowLayout::compute(r180);
+        assert!(l180.label_rect.width() >= 30.0);
+        assert!(l180.control_rect.width() >= 10.0);
+        assert_eq!(l180.control_rect.left(), l180.label_rect.right() + 8.0);
+    }
+
+    #[test]
+    fn label_truncation_helper() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let font = FontId::proportional(12.);
+                let full = "Consolidate Corner Points";
+                let untruncated = truncate_with_ellipsis(ui, full, &font, 300.0);
+                assert_eq!(untruncated, full);
+
+                let truncated = truncate_with_ellipsis(ui, full, &font, 50.0);
+                assert!(truncated.ends_with('…'));
+                assert!(truncated.len() < full.len());
+            });
+        });
+    }
+
+    #[test]
+    fn boolean_row_omits_label_column_and_renders_toggle_at_field_column() {
+        let mut f = Fixture::new();
+        f.doc = minihou_app::Document::parse(json!({
+            "version": 1,
+            "display": "box1",
+            "nodes": {
+                "box1": {
+                    "type": "box",
+                    "params": {
+                        "consolidate": true
+                    }
+                }
+            }
+        }).to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected = "box1".into();
+        f.display = "box1".into();
+
+        let ctx = egui::Context::default();
+        f.theme.apply(&ctx);
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(500., 400.))), ..Default::default() };
+        let mut out = Actions::default();
+        let v = f.view();
+        let full_output = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &v, &mut out));
+        });
+
+        let mut label_texts = Vec::new();
+        fn collect_texts(shapes: &[egui::epaint::ClippedShape], out: &mut Vec<(String, Pos2)>) {
+            for s in shapes {
+                match &s.shape {
+                    egui::epaint::Shape::Text(t) => out.push((t.galley.text().to_owned(), t.pos)),
+                    egui::epaint::Shape::Vec(subs) => {
+                        let clipped: Vec<egui::epaint::ClippedShape> = subs.iter().map(|sub| egui::epaint::ClippedShape { clip_rect: s.clip_rect, shape: sub.clone() }).collect();
+                        collect_texts(&clipped, out);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        collect_texts(&full_output.shapes, &mut label_texts);
+
+        let row_layout = ParamRowLayout::compute(Rect::from_min_size(Pos2::ZERO, Vec2::new(500., 28.)));
+        let consolidate_text = label_texts.iter().find(|(t, _)| t.contains("Consolidate"));
+        assert!(consolidate_text.is_some(), "Consolidate toggle text should be present");
+        let (_, pos) = consolidate_text.unwrap();
+        assert!(pos.x >= row_layout.label_rect.right(), "Checkbox text pos ({}) must sit at/after field column start ({})", pos.x, row_layout.label_rect.right());
     }
 }
