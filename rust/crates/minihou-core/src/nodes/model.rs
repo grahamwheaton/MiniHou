@@ -366,7 +366,7 @@ pub const CLIP: NodeSpec = NodeSpec {
 pub const POLYEXTRUDE: NodeSpec = NodeSpec {
     name: "polyextrude",
     inputs: GEO,
-    params: crate::params!("group":"";"distance":0.5;"inset":0.;"mode":"connected";"output_back":false;"outgrp_front":true;"outgrp_front_name":"extrudeFront";"outgrp_back":false;"outgrp_back_name":"extrudeBack";"outgrp_side":true;"outgrp_side_name":"extrudeSide"),
+    params: crate::params!("group":"";"distance":0.5;"direction":[0.,0.,0.];"inset":0.;"mode":"connected";"output_back":false;"outgrp_front":true;"outgrp_front_name":"extrudeFront";"outgrp_back":false;"outgrp_back_name":"extrudeBack";"outgrp_side":true;"outgrp_side_name":"extrudeSide"),
     cook: polyextrude,
 };
 fn negate(t: &mut AttrTable, mask: &[bool]) {
@@ -898,7 +898,8 @@ fn clip(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 }
 fn polyextrude(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let g = POLYEXTRUDE.one(inputs, 0)?;
-    extrude(
+    let direction = p.v3("direction")?;
+    extrude_with_direction(
         &g,
         &p.s("group")?,
         p.f("distance")?,
@@ -906,6 +907,7 @@ fn polyextrude(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         &p.e("mode", &["connected", "individual"])?,
         p.b("output_back")?,
         Some(p),
+        direction,
     )
 }
 pub(super) fn extrude(
@@ -916,6 +918,12 @@ pub(super) fn extrude(
     mode: &str,
     back: bool,
     params: Option<&Params>,
+) -> Result<Geometry> {
+    extrude_with_direction(g, group, distance, inset, mode, back, params, [0.; 3])
+}
+fn extrude_with_direction(
+    g: &Geometry, group: &str, distance: f64, inset: f64, mode: &str,
+    back: bool, params: Option<&Params>, direction: [f64; 3],
 ) -> Result<Geometry> {
     polygons(g, "polyextrude")?;
     let sel = prim_mask(g, group)?;
@@ -971,7 +979,7 @@ pub(super) fn extrude(
         for (i, &v) in selected.iter().enumerate() {
             nv[v] = g.npoints + i;
             let base = shifted.as_ref().map_or(pos[vp[v] as usize], |q| q[v]);
-            newp.push(add(base, mul(fu[pv[v]], distance)));
+            newp.push(add(base, mul(if len(direction) > 0. { direction } else { fu[pv[v]] }, distance)));
         }
     } else {
         let mut map = vec![0; g.npoints];
@@ -993,7 +1001,7 @@ pub(super) fn extrude(
             mincos[q] = mincos[q].min(dot(pn[q], fu[pv[v]]).max(0.25));
         }
         for &q in &src {
-            let mut point = add(pos[q], mul(pn[q], distance / mincos[q]));
+            let mut point = add(pos[q], if len(direction) > 0. { mul(direction, distance) } else { mul(pn[q], distance / mincos[q]) });
             if let Some(sh) = &shifted {
                 point = add(point, sub(sh[repr[q]], pos[q]));
             }
@@ -1123,6 +1131,15 @@ mod tests {
         let z = cook(&POLYEXTRUDE, g.clone(), json!({"distance":0.}));
         assert_eq!(z.p(), g.p());
         assert_eq!(z.topology, g.topology);
+    }
+    #[test]
+    fn polyextrude_axis_direction_changes_preview_geometry() {
+        let g=quad();
+        let normal=cook(&POLYEXTRUDE,g.clone(),json!({"distance":1.}));
+        let axis=cook(&POLYEXTRUDE,g,json!({"distance":1.,"direction":[1.,0.,0.]}));
+        assert_eq!(normal.nprims(),axis.nprims());
+        assert!(axis.p().chunks_exact(3).any(|p|p[0]>2.9));
+        assert_ne!(normal.p(),axis.p());
     }
     #[test]
     fn clip_shared_intersections_and_int_sources() {

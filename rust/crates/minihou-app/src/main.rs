@@ -772,15 +772,22 @@ impl App {
             if selection.edges.is_empty() { self.file_status="Select edges to bevel".into(); return; }
             json!({"edges":selection.edges.iter().map(|(a,b)|format!("{a}-{b}")).collect::<Vec<_>>().join(" "),"distance":0.,"divisions":1})
         } else {
-            if selection.mode!=ui::SelectionMode::Faces || selection.tris.is_empty() {
-                self.file_status="Select faces for this tool".into(); return;
+            if kind==ModelKind::Extrude && selection.mode!=ui::SelectionMode::Faces {
+                let points=selected_point_ids(&selection,selection.mode,scene.triangle_indices());
+                selection.tris=scene.triangle_indices().chunks_exact(3).enumerate()
+                    .filter(|(_,tri)| tri.iter().any(|p| points.contains(p)))
+                    .map(|(tri,_)|tri as u32).collect();
+                selection.mode=ui::SelectionMode::Faces;
+            }
+            if selection.tris.is_empty() {
+                self.file_status="Select mesh elements for this tool".into(); return;
             }
             let faces=element_select::cached(&self.elem_topo,scene).polys_of(&selection.tris);
             let mut params=json!({"group":group_text(&faces)});
             params[kind.parameter()]=json!(0.);
             params
         };
-        let source=self.selected.clone();
+        let source=if self.selected.is_empty() { self.display.clone() } else { self.selected.clone() };
         let Some((doc,id))=ui::modal_model::insert_graph(&self.editor.doc,&source,kind,params) else {
             self.file_status=format!("Could not add {}",kind.node()); return;
         };
@@ -793,7 +800,33 @@ impl App {
         self.display=Graph::from_value(self.editor.doc.value()).ok().and_then(|g|g.main_output().ok()).unwrap_or(id.clone());
         let pointer=ctx.input(|i|i.pointer.hover_pos()).unwrap_or(self.last_viewport.center());
         let radius=self.bounds.1.max(0.001);
-        self.model_modal=Some((ModelState::new(kind,pointer,(radius/200.).max(0.00001)),before,id,previous));
+        let mut state=ModelState::new(kind,pointer,(radius/200.).max(0.00001));
+        if kind==ModelKind::Extrude {
+            let scene=self.scene.as_ref().unwrap();
+            let tris=scene.triangle_indices(); let positions=scene.positions();
+            let mut normal=[0f32;3]; let mut center=[0f32;3]; let mut count=0f32;
+            for &tri in &selection.tris {
+                if let Some(ids)=tris.get(tri as usize*3..tri as usize*3+3) {
+                    let a=picking::at(positions,ids[0]); let b=picking::at(positions,ids[1]); let c=picking::at(positions,ids[2]);
+                    let u=[0,1,2].map(|k|b[k]-a[k]); let v=[0,1,2].map(|k|c[k]-a[k]);
+                    let n=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]];
+                    for k in 0..3 { normal[k]+=n[k]; center[k]+=(a[k]+b[k]+c[k])/3.; }
+                    count+=1.;
+                }
+            }
+            if count>0. {
+                center=center.map(|x|x/count);
+                let length=normal.iter().map(|x|x*x).sum::<f32>().sqrt();
+                if length>1e-6 {
+                    normal=normal.map(|x|x/length);
+                    let tip=[0,1,2].map(|k|center[k]+normal[k]*radius*0.25);
+                    if let (Some(a),Some(b))=(ui::transform_gizmo::project(self.camera_info(),self.last_viewport,center),ui::transform_gizmo::project(self.camera_info(),self.last_viewport,tip)) {
+                        let delta=b-a; if delta.length()>1. { state.screen_axis=delta.normalized(); }
+                    }
+                }
+            }
+        }
+        self.model_modal=Some((state,before,id,previous));
     }
     fn finish_model_modal(&mut self) {
         if let Some((_,before,_,_))=self.model_modal.take() { self.editor.history.record(before,&self.editor.doc); }
@@ -832,6 +865,13 @@ impl App {
         if state.kind==ModelKind::Bevel && self.editor.doc.value()["nodes"][&id]["params"]["divisions"]!=json!(state.divisions) {
             let edit=Edit::Param { node:id.clone(),name:"divisions".into(),value:json!(state.divisions) };
             if self.editor.doc.edit(&edit).is_ok() { self.send(edit); }
+        }
+        if state.kind==ModelKind::Extrude {
+            let direction=state.axis.map(|axis| [0,1,2].map(|k|if k==axis {1.} else {0.})).unwrap_or([0.;3]);
+            if self.editor.doc.value()["nodes"][&id]["params"]["direction"]!=json!(direction) {
+                let edit=Edit::Param { node:id.clone(),name:"direction".into(),value:json!(direction) };
+                if self.editor.doc.edit(&edit).is_ok() { self.send(edit); }
+            }
         }
         self.model_modal=Some((state,before,id,previous));
         if confirm { self.finish_model_modal(); } else { ctx.request_repaint(); }
@@ -1484,7 +1524,7 @@ impl App {
             "extrude" | "inset" | "bevel" | "pushpull" => {
                 let kind=match name { "extrude"=>ModelKind::Extrude,"inset"=>ModelKind::Inset,
                     "bevel"=>ModelKind::Bevel,_=>ModelKind::PushPull };
-                let has_selection=if kind==ModelKind::Bevel { !self.selection.is_empty() }
+                let has_selection=if matches!(kind,ModelKind::Extrude | ModelKind::Bevel) { !self.selection.is_empty() }
                     else { self.editor_state.selection==ui::SelectionMode::Faces && !self.selection.tris.is_empty() };
                 if self.editor_state.selection==ui::SelectionMode::Object || !has_selection {
                     let after=self.selected.clone(); self.add_node(ctx,kind.node(),Some(&after));
@@ -2063,7 +2103,6 @@ impl eframe::App for App {
                 if !self.object_hidden && !self.mode.bounds() {
                     if let Some(scene) = &self.scene {
                         let pos = scene.positions();
-                        let tris = scene.triangle_indices();
                         let orange = egui::Color32::from_rgb(0xff, 0xa0, 0x28);
                         let white = egui::Color32::WHITE;
 
@@ -2096,19 +2135,18 @@ impl eframe::App for App {
                                 }
                             }
                             ui::SelectionMode::Faces => {
-                                let ntri = tris.len() / 3;
+                                let topo = element_select::cached(&self.elem_topo, scene);
                                 let center_fill = egui::Color32::from_rgb(0x30, 0x38, 0x48);
                                 let center_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x80, 0x90, 0xa8));
-                                let stride = if ntri > 50_000 { (ntri / 20_000).max(2) } else { 1 };
-                                for i in (0..ntri).step_by(stride) {
-                                    let t = &tris[i * 3..i * 3 + 3];
-                                    if !t.iter().all(|id| point_pickable(self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,*id)) { continue; }
-                                    let (a, b, c) = (picking::at(pos, t[0]), picking::at(pos, t[1]), picking::at(pos, t[2]));
-                                    let center = [0, 1, 2].map(|k| (a[k] + b[k] + c[k]) / 3.0_f32);
+                                let npoly = topo.polygons().len();
+                                let stride = if npoly > 50_000 { (npoly / 20_000).max(2) } else { 1 };
+                                for poly in topo.polygons().step_by(stride) {
+                                    let vertices = topo.polygon_vertices(poly);
+                                    if vertices.is_empty() || !vertices.iter().all(|id| point_pickable(self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,*id)) { continue; }
+                                    let center = [0, 1, 2].map(|k| vertices.iter().map(|&id| picking::at(pos, id)[k]).sum::<f32>() / vertices.len() as f32);
                                     if let Some(sp) = ui::transform_gizmo::project(v.camera, rect, center) {
-                                        let id = i as u32;
-                                        let is_sel = self.selection.tris.contains(&id);
-                                        let is_hov = hover_elem.as_ref().is_some_and(|e| e.tris.contains(&id));
+                                        let is_sel = topo.poly_tris(poly).iter().any(|id| self.selection.tris.contains(id));
+                                        let is_hov = hover_elem.as_ref().is_some_and(|e| topo.poly_tris(poly).iter().any(|id| e.tris.contains(id)));
                                         if is_hov {
                                             ui.painter().circle_filled(sp, 4.0_f32, white);
                                             ui.painter().circle_stroke(sp, 4.0_f32, egui::Stroke::new(1.0_f32, orange));
@@ -2121,19 +2159,13 @@ impl eframe::App for App {
                                     }
                                 }
                                 if let Some(hov) = &hover_elem {
-                                    for &t_idx in &hov.tris {
-                                        if let Some(chunk) = tris.as_chunks::<3>().0.get(t_idx as usize) {
-                                            let (a, b, c) = (picking::at(pos, chunk[0]), picking::at(pos, chunk[1]), picking::at(pos, chunk[2]));
-                                            if let (Some(sa), Some(sb), Some(sc)) = (
-                                                ui::transform_gizmo::project(v.camera, rect, a),
-                                                ui::transform_gizmo::project(v.camera, rect, b),
-                                                ui::transform_gizmo::project(v.camera, rect, c),
+                                    for poly in topo.polys_of(&hov.tris) {
+                                        for (a, b) in topo.polygon_edges(poly) {
+                                            if let (Some(sa), Some(sb)) = (
+                                                ui::transform_gizmo::project(v.camera, rect, picking::at(pos, a)),
+                                                ui::transform_gizmo::project(v.camera, rect, picking::at(pos, b)),
                                             ) {
-                                                ui.painter().add(egui::Shape::convex_polygon(
-                                                    vec![sa, sb, sc],
-                                                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 60),
-                                                    egui::Stroke::new(1.5_f32, white),
-                                                ));
+                                                ui.painter().line_segment([sa, sb], egui::Stroke::new(1.5_f32, white));
                                             }
                                         }
                                     }

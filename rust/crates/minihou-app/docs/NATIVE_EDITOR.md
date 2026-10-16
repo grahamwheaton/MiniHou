@@ -42,7 +42,7 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | F | Frame selected | Viewport |
 | O | Proportional editing | Viewport |
 | 5 | Paint | Viewport |
-| E | Extrude | Viewport |
+| E | Extrude (modal) | Viewport |
 | I | Inset | Viewport |
 | K | Knife | Viewport |
 | Escape | Select none | Viewport |
@@ -135,7 +135,7 @@ The popover follows Blender's split control and grouping using MiniHou's theme a
 
 With the pointer in the viewport and an object or edit-mode elements selected, G, R, and S begin a modal transform. The object updates as the pointer moves. The bottom viewport strip shows values, constraint, and snap state. The coloured constraint line passes through the pivot. Confirm creates one undo step; cancel restores the previous graph. The existing toolbar gizmo handles remain available. The following table is checked against the modal key list by a unit test.
 
-In edit mode, E, I, Alt+E, and Ctrl+B start node-backed Extrude, Inset, Push/Pull, and Bevel gestures on selected geometry. Move the pointer to set distance or offset; Shift gives precision and Ctrl quantises to 0.1. Bevel uses wheel, PageUp/PageDown, or +/- to change Divisions from 1 to 64. Digits and decimal point enter an exact value. LMB or Enter confirms as one undo step; RMB or Escape restores the graph. The bottom viewport strip shows the current offset and divisions.
+In edit mode, E starts PolyExtrude on selected faces, edges, or points. Drag along the projected surface normal; X, Y, or Z constrains the extrusion to a world axis. I and Ctrl+B start Inset and Bevel. Shift gives precision and Ctrl quantises to 0.1. Bevel uses wheel or PageUp/PageDown to change Divisions from 1 to 64. Digits and decimal point enter an exact value. LMB or Enter confirms as one undo step; RMB or Escape restores the graph. The bottom viewport strip shows the current distance or offset and divisions where available.
 
 <!-- modal:start -->
 | Input | During modal transform |
