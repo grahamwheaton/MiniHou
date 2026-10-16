@@ -186,3 +186,23 @@ fn voronoi_fracture_marks_new_interiors_neutral() {
         }
     }
 }
+
+#[test]
+fn voronoi_split_has_only_source_faces() {
+    let seeds = Geometry::points_only(vec![-0.5,0.,0., 0.5,0.,0.]).unwrap();
+    let out = cook("voronoi_split", vec![vec![Arc::new(cube())],vec![Arc::new(seeds)]], json!({}));
+    assert!(out.nprims() > 6);
+    inherited(&out);
+}
+
+#[test]
+fn boolean_fracture_keeps_source_slots_on_both_sides() {
+    let a = cube();
+    let mut b = cube();
+    let mut p = b.p().to_vec();
+    for xyz in p.chunks_exact_mut(3) { xyz[0] += 0.5; }
+    b.set_p(p);
+    let out = cook("boolean_fracture", vec![vec![Arc::new(a)],vec![Arc::new(b)]], json!({}));
+    assert!(out.nprims() > 0);
+    inherited(&out);
+}
