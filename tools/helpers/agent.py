@@ -2,7 +2,7 @@
 """Detached worker launcher for codex / agy. No dependencies, no server.
 
   agent.py start codex|agy <prompt-file|-> [--cwd DIR] [--model M] [--effort E] [--name N]
-  agent.py dash [--html] | list | status [ID] | tail ID [N] | result ID | send ID "text" | cancel ID
+  agent.py dash [--html] | clear [--all] | list | status [ID] | tail ID [N] | result ID | send ID "text" | cancel ID
 
 State lives in ~/.multi-agent/<repo-name>/<id>/ on the machine running the agents:
   task.json (immutable), status.json (atomic), inbox.jsonl (append-only), worker.log, prompt.txt
@@ -170,7 +170,7 @@ def summary(d):
 def rows():
     out = []
     for d in sorted(ROOT.glob("*/*"), key=lambda p: p.stat().st_mtime):
-        if not d.is_dir() or not (d / "task.json").exists():
+        if d.parent.name == "archive" or not d.is_dir() or not (d / "task.json").exists():
             continue
         t, s = jread(d / "task.json", {}), jread(d / "status.json", {})
         state = s.get("state")
@@ -218,9 +218,23 @@ def dash(html):
     print(f)
 
 
+def clear(states):
+    """Move finished tasks out of the dash into ~/.multi-agent/archive (logs kept)."""
+    n = 0
+    for d in list(ROOT.glob("*/*")):
+        if d.is_dir() and d.parent.name != "archive" and (d / "task.json").exists() and summary(d).split()[3] in states:
+            dest = ROOT / "archive" / d.parent.name
+            dest.mkdir(parents=True, exist_ok=True)
+            d.rename(dest / d.name)
+            n += 1
+    print(f"archived {n}")
+
+
 def main():
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     c, a = sys.argv[1], sys.argv[2:]
+    if c == "clear":
+        return clear({"died", "failed", "cancelled", "blocked"} | ({"completed"} if "--all" in a else set()))
     if c == "dash":
         return dash("--html" in a)
     if c == "_run":
