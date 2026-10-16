@@ -6511,6 +6511,147 @@
    "kind": "str"
   }
  },
+ "voronoi_fracture_points": {
+  "cluster_amount": {
+   "default": 0.0,
+   "doc": "Share of the interior points gathered round random cluster centres, so the shape breaks into fine pieces in a few places",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "cluster_radius": {
+   "default": 0.25,
+   "doc": "Spread of each cluster",
+   "kind": "float",
+   "min": 1e-06,
+   "soft_max": 2.0
+  },
+  "clusters": {
+   "default": 3,
+   "doc": "How many cluster centres",
+   "kind": "int",
+   "max": 64,
+   "min": 1
+  },
+  "count": {
+   "default": 20,
+   "doc": "Number of points to scatter (the extra input's points come on top)",
+   "kind": "int",
+   "min": 1,
+   "soft_max": 500
+  },
+  "impact_radius": {
+   "default": 0.4,
+   "doc": "impacts: spread of the points round each impact",
+   "kind": "float",
+   "min": 1e-06,
+   "soft_max": 2.0
+  },
+  "impact_share": {
+   "default": 0.7,
+   "doc": "impacts: share of the points placed at impacts (the rest are scattered everywhere)",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "merge_clusters": {
+   "default": 0,
+   "doc": "Group the points into this many clusters (by distance, a k-means style pass) in the int point attribute 'cluster'; voronoi_fracture cluster_pieces merges their cells (0: -1 everywhere)",
+   "kind": "int",
+   "max": 1000,
+   "min": 0
+  },
+  "min_distance": {
+   "default": 0.0,
+   "doc": "Keep points at least this far apart (0: off)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 1.0
+  },
+  "outgrp_clustered": {
+   "default": false,
+   "doc": "Points placed around a cluster centre",
+   "kind": "bool"
+  },
+  "outgrp_clustered_name": {
+   "default": "clustered",
+   "doc": "Name of the clustered points group",
+   "kind": "str"
+  },
+  "outgrp_extra": {
+   "default": false,
+   "doc": "Points that came in on the second input",
+   "kind": "bool"
+  },
+  "outgrp_extra_name": {
+   "default": "extrapoints",
+   "doc": "Name of the extra input points group",
+   "kind": "str"
+  },
+  "outgrp_impact": {
+   "default": false,
+   "doc": "impacts mode: points placed round an impact",
+   "kind": "bool"
+  },
+  "outgrp_impact_name": {
+   "default": "impactpoints",
+   "doc": "Name of the impact points group",
+   "kind": "str"
+  },
+  "outgrp_interior": {
+   "default": false,
+   "doc": "Points placed inside the shape",
+   "kind": "bool"
+  },
+  "outgrp_interior_name": {
+   "default": "interior",
+   "doc": "Name of the interior points group",
+   "kind": "str"
+  },
+  "outgrp_surface": {
+   "default": false,
+   "doc": "Points placed on the shape's surface",
+   "kind": "bool"
+  },
+  "outgrp_surface_name": {
+   "default": "surface",
+   "doc": "Name of the surface points group",
+   "kind": "str"
+  },
+  "piece_attrib": {
+   "default": "piece",
+   "doc": "Point int attribute numbering the points (empty: none)",
+   "kind": "str"
+  },
+  "relax": {
+   "default": 0,
+   "doc": "Lloyd relaxation passes on the interior points: pieces become more even in size",
+   "kind": "int",
+   "max": 50,
+   "min": 0
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  },
+  "source": {
+   "default": "scatter",
+   "doc": "impacts: the second input holds impact points (optional float 'impulse' = how hard); the fracture points gather round them",
+   "kind": "enum",
+   "options": [
+    "scatter",
+    "impacts"
+   ]
+  },
+  "surface_fraction": {
+   "default": 0.0,
+   "doc": "Share of the points placed on the surface instead of inside: more, smaller pieces at the outside, as in a shattering shell",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
  "voronoi_split": {
   "outgrp_cutedges": {
    "default": false,

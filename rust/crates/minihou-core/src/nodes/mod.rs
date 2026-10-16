@@ -43,6 +43,7 @@ mod bevel;
 mod knife;
 mod volume;
 mod fracture_voronoi;
+mod voronoi_points;
 mod fracture_tools;
 mod ray;
 mod occlusion;
@@ -137,6 +138,7 @@ pub fn registry() -> &'static [NodeSpec] {
         volume::SDF_BOOLEAN,
         fracture_voronoi::VORONOI_FRACTURE,
         fracture_voronoi::VORONOI_SPLIT,
+        voronoi_points::VORONOI_FRACTURE_POINTS,
         fracture_tools::VORONOI_ADJACENCY,
         ray::RAY,
         occlusion::OCCLUSION,

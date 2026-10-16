@@ -37,7 +37,7 @@ TYPES += ["reverse", "facet", "divide", "mirror", "clip", "polyfill", "polyextru
 # Solid/volume ports; regenerate metadata once all parallel ports are integrated.
 TYPES += ["boolean", "polyreduce", "pushpull", "boolean_fracture"]
 TYPES += ["sdf_shape", "sdf_boolean", "voronoi_fracture", "voronoi_split",
-          "voronoi_adjacency", "ray", "occlusion"]
+          "voronoi_adjacency", "voronoi_fracture_points", "ray", "occlusion"]
 
 # PCG, procedural systems, and assemble ports.
 TYPES += ["pcg_points", "pcg_transform", "pcg_bounds", "pcg_union", "pcg_difference",
