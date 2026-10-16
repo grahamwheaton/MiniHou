@@ -2,10 +2,81 @@
 //! centres into runs with bounding boxes, plus the unique edges, all as the final `u32` arrays the editor receives.
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::BTreeMap;
 
 use rayon::prelude::*;
 
 use crate::topo::{self, SharedMut};
+use crate::geometry::Geometry;
+
+/// Fan triangles with the source corner for every drawn vertex. UV values are
+/// flattened XY pairs in triangle order; point UVs are used only when that
+/// named corner attribute is absent. Existing point-only preview paths remain
+/// unchanged.
+#[derive(Debug, Default)]
+pub struct TriangleProvenance {
+    pub point: Vec<u32>,
+    pub prim: Vec<u32>,
+    pub corner: Vec<u32>,
+    pub material_slot: Vec<i32>,
+    pub uv_sets: BTreeMap<String, Vec<f32>>,
+}
+
+pub fn triangulate_geometry(g: &Geometry) -> TriangleProvenance {
+    let mut out = TriangleProvenance::default();
+    let uv_names: Vec<_> = g.vertex.iter().chain(&g.point)
+        .filter(|(name, a)| !matches!(name.as_str(), "N" | "Cd" | "P") && matches!(a.width, 2 | 3) && a.as_f32().is_some())
+        .map(|(name, _)| name.clone()).collect();
+    for name in uv_names { out.uv_sets.entry(name).or_default(); }
+    let slots = g.prim.get("material_index").and_then(|a| a.as_i32());
+    for prim in 0..g.nprims() {
+        if !g.topology.is_closed(prim) { continue; }
+        let a = g.topology.prim_offsets[prim] as usize;
+        let n = (g.topology.prim_offsets[prim + 1] - g.topology.prim_offsets[prim]) as usize;
+        for k in 1..n.saturating_sub(1) {
+            out.prim.push(prim as u32);
+            out.material_slot.push(slots.and_then(|s| s.get(prim)).copied().unwrap_or(0));
+            for c in [a, a + k, a + k + 1] {
+                let p = g.topology.vertex_point[c] as usize;
+                out.point.push(p as u32);
+                out.corner.push(c as u32);
+                for (name, values) in &mut out.uv_sets {
+                    let src = g.vertex.get(name).map(|a| (a, c)).or_else(|| g.point.get(name).map(|a| (a, p)));
+                    if let Some((attr, row)) = src {
+                        let data = attr.as_f32().unwrap();
+                        values.extend_from_slice(&data[row * attr.width..row * attr.width + 2]);
+                    } else { values.extend([f32::NAN; 2]); }
+                }
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod texture_provenance_tests {
+    use super::*;
+    use std::sync::Arc;
+    use crate::geometry::Attr;
+
+    #[test]
+    fn shared_point_has_distinct_corner_uvs() {
+        let mut g = Geometry::from_arrays(
+            vec![0.,0.,0., 1.,0.,0., 0.,1.,0., -1.,0.,0., 0.,-1.,0.],
+            vec![0,1,2, 0,3,4], vec![0,3,6], None).unwrap();
+        g.vertex.insert("uv".into(), Arc::new(Attr::f32(2, vec![0.,0., 1.,0., 0.,1., 0.5,0.5, 1.,1., 0.,1.])));
+        g.vertex.insert("Second".into(), Arc::new(Attr::f32(3, vec![0.,0.,7., 1.,0.,7., 0.,1.,7., 0.2,0.3,8., 1.,1.,8., 0.,1.,8.])));
+        g.prim.insert("material_index".into(), Arc::new(Attr::i32(1, vec![3,5])));
+        let tris = triangulate_geometry(&g);
+        assert_eq!(tris.point, vec![0,1,2,0,3,4]);
+        assert_eq!(tris.corner, vec![0,1,2,3,4,5]);
+        assert_eq!(tris.prim, vec![0,1]);
+        assert_eq!(tris.material_slot, vec![3,5]);
+        assert_eq!(&tris.uv_sets["uv"][0..2], &[0.,0.]);
+        assert_eq!(&tris.uv_sets["uv"][6..8], &[0.5,0.5]);
+        assert_eq!(&tris.uv_sets["Second"][6..8], &[0.2,0.3]);
+    }
+}
 
 /// What the viewer draws for one topology.
 pub struct Layout {
