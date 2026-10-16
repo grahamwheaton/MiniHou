@@ -3,7 +3,7 @@ use super::{InputSpec,Inputs,NodeSpec,model::*,fracture_tools::{extent,pairs,con
 use crate::{error::{Error,Result},geometry::{Attr,AttrData,AttrTable,Geometry},params::Params,topo};
 use std::{collections::{BTreeMap,BTreeSet},sync::Arc};
 const PORTS:&[InputSpec]=&[InputSpec{name:"geo",multi:false,optional:false},InputSpec{name:"points",multi:false,optional:false}];
-const INSIDE:&str="vfinsidetmp";
+pub(super) const INSIDE:&str="vfinsidetmp";
 pub const VORONOI_FRACTURE:NodeSpec=NodeSpec{
     name:"voronoi_fracture",inputs:PORTS,
     params:crate::params!("piece_attrib":"piece";"inside_group":"inside";"gap":0.;"create_inside":true;"cluster_pieces":false;"cluster_attrib":"cluster";
@@ -23,7 +23,7 @@ fn member(g:&Geometry,name:&str)->Vec<bool>{
 fn pad(t:&AttrTable,n:usize)->AttrTable{
     let tail=t.iter().map(|(k,a)|(k.clone(),Arc::new(a.zeros_like(n)))).collect();concat(t,&tail)
 }
-fn cap_plane(g:Geometry,o:[f64;3],n:[f64;3],eps:f64)->Result<Geometry>{
+pub(super) fn cap_plane(g:Geometry,o:[f64;3],n:[f64;3],eps:f64)->Result<Geometry>{
     let e=topo::edges(&g.topology,g.npoints);let (_,nx,_)=corners(&g);let vp=&g.topology.vertex_point;
     let mut succ=vec![None;g.npoints];let mut starts=Vec::new();
     for v in 0..g.nvertices(){let edge=e.of_vertex[v];if edge>=0 && e.count[edge as usize]==1 {

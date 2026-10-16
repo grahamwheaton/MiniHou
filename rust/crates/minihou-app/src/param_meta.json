@@ -1222,6 +1222,81 @@
    "kind": "bool"
   }
  },
+ "convex_decomposition": {
+  "max_concavity": {
+   "default": 0.02,
+   "doc": "A piece is convex enough when its convex hull holds at most this share more volume than it does",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "max_pieces": {
+   "default": 32,
+   "doc": "Stop splitting at this many pieces",
+   "kind": "int",
+   "max": 1000,
+   "min": 1
+  },
+  "min_volume": {
+   "default": 0.001,
+   "doc": "No cut may leave a piece smaller than this share of the whole shape",
+   "kind": "float",
+   "max": 0.5,
+   "min": 0.0
+  },
+  "outgrp_cutedges": {
+   "default": false,
+   "doc": "The edges where the inside meets the outside",
+   "kind": "bool"
+  },
+  "outgrp_cutedges_name": {
+   "default": "cutedges",
+   "doc": "Name of the cut edges group",
+   "kind": "str"
+  },
+  "outgrp_cutpoints": {
+   "default": false,
+   "doc": "The points where the inside meets the outside",
+   "kind": "bool"
+  },
+  "outgrp_cutpoints_name": {
+   "default": "cutpoints",
+   "doc": "Name of the cut points group",
+   "kind": "str"
+  },
+  "outgrp_inside": {
+   "default": true,
+   "doc": "The faces the cuts created",
+   "kind": "bool"
+  },
+  "outgrp_inside_name": {
+   "default": "inside",
+   "doc": "Name of the inside faces group",
+   "kind": "str"
+  },
+  "outgrp_outside": {
+   "default": false,
+   "doc": "The faces that came from the input's own surface",
+   "kind": "bool"
+  },
+  "outgrp_outside_name": {
+   "default": "outside",
+   "doc": "Name of the outside faces group",
+   "kind": "str"
+  },
+  "piece_attrib": {
+   "default": "piece",
+   "doc": "Primitive int attribute numbering the pieces (empty: none)",
+   "kind": "str"
+  },
+  "search": {
+   "default": 16,
+   "doc": "Cutting planes tried for each split (more is slower and finds better cuts)",
+   "kind": "int",
+   "max": 200,
+   "min": 1
+  }
+ },
  "convex_hull": {
   "group": {
    "default": "",

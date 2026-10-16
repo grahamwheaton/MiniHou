@@ -69,6 +69,7 @@ mod rbd;
 pub mod rbd_engine;
 mod rbd_fracture_tools;
 mod rbd_material_fracture;
+mod convex_decomposition;
 #[cfg(test)]
 mod solver_parity;
 mod delaunay;
@@ -261,6 +262,7 @@ pub fn registry() -> &'static [NodeSpec] {
         rbd::RBD_SOLVER,
         rbd_fracture_tools::RBD_CONSTRAINT_PROPERTIES,
         rbd_material_fracture::RBD_MATERIAL_FRACTURE,
+        convex_decomposition::CONVEX_DECOMPOSITION,
         NodeSpec { name: "lod_bake", inputs: GEO, params: crate::params!("cluster_size": 128; "error_px": 1.0; "enabled": true; "min_triangles": 50000), cook: lod_bake },
         NodeSpec { name: "null", inputs: GEO, params: crate::params!("label": ""), cook: pass_through },
         delaunay::DELAUNAY,
