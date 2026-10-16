@@ -29,6 +29,7 @@ mod merge;
 mod modify;
 mod output;
 mod model;
+mod mirror;
 mod planar_offset;
 mod pushpull;
 mod boolean;
