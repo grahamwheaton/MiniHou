@@ -416,6 +416,8 @@ pub fn clamp_parameter(meta: &Value, value: f64) -> f64 {
 #[derive(Clone, Debug)]
 pub enum Edit {
     Param { node: String, name: String, value: Value },
+    Channel { node: String, path: String, expression: Option<String> },
+    LockParam { node: String, path: String, locked: bool },
     Bypass { node: String, flag: bool },
     Display(String),
     Replace(Value),
@@ -439,6 +441,18 @@ impl Document {
                 let spec = minihou_core::nodes::get(typ).ok_or("unsupported node")?;
                 if !spec.params.iter().any(|p| p.name == name) { return Err("unknown parameter".into()); }
                 self.set(&["nodes", node, "params", name], value.clone());
+            }
+            Edit::Channel { node, path, expression } => {
+                let mut check=self.session()?;
+                check.set_channel(node,path,expression.clone())?;
+                let channels=check.graph().node_channels(node).ok_or("no such node")?;
+                self.set(&["nodes",node,"channels"],json!(channels));
+            }
+            Edit::LockParam { node, path, locked } => {
+                let mut check=self.session()?;
+                check.set_locked_param(node,path,*locked)?;
+                let locks=check.graph().node_locks(node).ok_or("no such node")?;
+                self.set(&["nodes",node,"locked_params"],json!(locks));
             }
             Edit::Bypass { node, flag } => {
                 if self.value["nodes"].get(node).is_none() { return Err("no such node".into()); }
@@ -579,6 +593,8 @@ pub fn cook_batch<T>(session: &mut Session, target: &mut String, requests: Vec<C
         let result: Result<()> = (|| {
             match request.edit {
                 Edit::Param { node, name, value } => session.set_param(&node, &name, value)?,
+                Edit::Channel { node, path, expression } => session.set_channel(&node,&path,expression)?,
+                Edit::LockParam { node, path, locked } => session.set_locked_param(&node,&path,locked)?,
                 Edit::Bypass { node, flag } => session.set_bypass(&node, flag)?,
                 Edit::Display(node) => *target = node,
                 Edit::External { name, input } => session.set_external(name,input),
@@ -599,7 +615,7 @@ pub fn cook_batch<T>(session: &mut Session, target: &mut String, requests: Vec<C
                     let displayed = display_nodes(&value);
                     *target = if displayed.len() > 1 {
                         let id = (0..).map(|i| format!("__display_merge_{i}")).find(|id| !graph.nodes.iter().any(|(name, _)| name == id)).unwrap();
-                        graph.nodes.push((id.clone(), minihou_core::graph::NodeDef { node_type: "merge".into(), inputs: vec![("geos".into(), displayed)], params: None, bypass: false }));
+                        graph.nodes.push((id.clone(), minihou_core::graph::NodeDef { node_type: "merge".into(), inputs: vec![("geos".into(), displayed)], params: None, channels: None, locked_params: None, bypass: false }));
                         id
                     } else { graph.main_output()? };
                     session.replace_graph(graph);
@@ -707,6 +723,41 @@ fn append_cook_stats(out:&mut CookStats, more:&CookStats) {
     for id in &more.cooked {if !out.cooked.contains(id){out.cooked.push(id.clone());}}
     for id in &more.cached {if !out.cached.contains(id)&&!out.cooked.contains(id){out.cached.push(id.clone());}}
     out.node_ms.extend(more.node_ms.iter().cloned());
+    for diag in &more.param_diags {if !out.param_diags.contains(diag){out.param_diags.push(diag.clone());}}
+}
+
+#[cfg(test)]
+mod channel_document_tests {
+    use super::*;
+    #[test]
+    fn channels_and_locks_roundtrip_through_lossless_document_history() {
+        let original="{\n  \"nodes\": {\"driver\": {\"type\": \"box\"}, \"out\": {\"type\": \"box\", \"params\": {\"size\": [1,2,3]}, \"custom\": 42}},\n  \"display\": \"out\", \"unknown\": \"stay\"\n}";
+        let mut doc=Document::parse(original.into()).unwrap();
+        let mut history=History::default();
+        history.edit(&mut doc,&Edit::Channel{node:"out".into(),path:"size.y".into(),expression:Some("ch('../driver/size.y')".into())}).unwrap();
+        history.edit(&mut doc,&Edit::LockParam{node:"out".into(),path:"size.y".into(),locked:true}).unwrap();
+        history.finish(&doc);
+        assert!(doc.text().contains("\"custom\": 42"));
+        assert!(doc.text().contains("\"unknown\": \"stay\""));
+        let loaded=Document::parse(doc.text().into()).unwrap();
+        assert_eq!(loaded.value()["nodes"]["out"]["channels"]["size.y"],json!("ch('../driver/size.y')"));
+        assert_eq!(loaded.value()["nodes"]["out"]["locked_params"],json!(["size.y"]));
+        let graph=Graph::from_value(loaded.value()).unwrap();
+        assert_eq!(graph.to_value()["nodes"]["out"]["channels"]["size.y"],json!("ch('../driver/size.y')"));
+        history.undo(&mut doc);
+        assert_eq!(doc.text(),original);
+        history.redo(&mut doc);
+        assert_eq!(doc.value()["nodes"]["out"]["locked_params"],json!(["size.y"]));
+    }
+    #[test]
+    fn cook_response_exposes_broken_channel_diagnostic() {
+        let doc=Document::parse(json!({"nodes":{"out":{"type":"box","params":{"size":[1,2,3]},"channels":{"size.y":"ch('../gone/size.y')"}}},"display":"out"}).to_string()).unwrap();
+        let mut session=doc.session().unwrap();
+        let mut target="out".to_string();
+        let response=cook_batch(&mut session,&mut target,vec![CookRequest{revision:1,edit:Edit::Time{frame:1.,fps:24.}}],|_|());
+        assert!(response.error.is_none(),"{:?}",response.error);
+        assert!(response.stats.param_diags.iter().any(|d|d.node=="out"&&d.param=="size.y"&&d.kind==minihou_core::channels::ParamDiagKind::BadReference));
+    }
 }
 #[derive(Default)]
 pub struct CookState {
