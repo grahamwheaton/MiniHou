@@ -1161,6 +1161,38 @@ fn serve_client(
 mod tests {
     use super::*;
 
+    #[test]
+    fn linked_quad_stays_one_polygon_through_transform_and_output() {
+        let graph = json!({"display":"out","nodes":{
+            "input":{"type":"modifier_input"},
+            "move":{"type":"transform","inputs":{"geo":"input"},"params":{"translate":[1,0,0]}},
+            "out":{"type":"output","inputs":{"geo":"move"}}
+        }});
+        let original = Document::parse(graph.to_string()).unwrap();
+        let mut editor = minihou_app::EditorDocument::new(original.clone(), PathBuf::from("quad.json"));
+        let mut server = LinkServer::bind("127.0.0.1:0", &original, Path::new("quad.json")).unwrap();
+        let quad = Geometry::from_arrays(
+            vec![-1.,-1.,0., 1.,-1.,0., 1.,1.,0., -1.,1.,0.],
+            vec![0,1,2,3], vec![0,4], None).unwrap();
+        let request = LinkRequest { peer:0,
+            message:json!({"type":"live_activate","path":"quad.json","graph":graph,"params":{}}),
+            arrays:link_protocol::geometry_arrays(&quad), completion:None };
+        let edits = server.handle_live(&request, &mut editor).unwrap();
+        let mut session = editor.doc.session().unwrap();
+        let mut target = session.graph().main_output().unwrap();
+        let requests = edits.into_iter().enumerate().map(|(i, edit)| minihou_app::CookRequest { revision:i as u64 + 1, edit }).collect();
+        let cooked = minihou_app::cook_batch(&mut session, &mut target, requests, |_| ());
+        assert!(cooked.error.is_none(), "{:?}", cooked.error);
+        let geo = cooked.geometry.unwrap();
+        assert_eq!(geo.nprims(), 1);
+        assert_eq!(geo.topology.prim_offsets.as_slice(), [0,4]);
+        let display = minihou_core::preview::layout(geo.p(), &geo.topology.vertex_point,
+            &geo.topology.prim_offsets, geo.topology.closed.as_deref(), geo.npoints,
+            usize::MAX, usize::MAX, 100_000, 8192);
+        assert_eq!(display.tri.len() / 3, 2, "rendering may use two fan triangles");
+        assert_eq!(display.edge.len() / 2, 4, "display edges must exclude the fan diagonal");
+    }
+
     fn receive(socket: &mut TcpStream, kind: &str) -> (Value, Arrays) {
         // Allows interface/geo broadcasts to interleave with solicited pong replies.
         for _ in 0..16 {

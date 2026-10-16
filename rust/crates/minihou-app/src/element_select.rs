@@ -115,6 +115,11 @@ impl Topology {
     pub fn edge_of(&self, a: u32, b: u32) -> Option<u32> { self.edge_id.get(&key(a, b)).copied() }
     pub fn poly_of_tri(&self, tri: u32) -> Option<u32> { self.tri_poly.get(tri as usize).copied().filter(|&p| p != NONE) }
     pub fn poly_tris(&self, poly: u32) -> &[u32] { self.poly_tris.get(poly) }
+    pub fn polygons(&self) -> std::ops::Range<u32> { 0..self.npolys }
+    pub fn polygon_vertices(&self, poly: u32) -> &[u32] { self.poly_verts.get(poly) }
+    pub fn polygon_edges(&self, poly: u32) -> impl Iterator<Item = (u32, u32)> + '_ {
+        self.poly_edges.get(poly).iter().map(|&id| self.edges[id as usize])
+    }
     fn poly_has(&self, poly: u32, v: u32) -> bool { self.poly_verts.get(poly).binary_search(&v).is_ok() }
     fn poly_has_edge_points(&self, poly: u32, e: u32) -> bool { let (a, b) = self.edges[e as usize]; self.poly_has(poly, a) && self.poly_has(poly, b) }
     fn other(&self, e: u32, v: u32) -> u32 { let (a, b) = self.edges[e as usize]; if a == v { b } else { a } }
@@ -516,6 +521,17 @@ mod tests {
         assert_ne!(t.poly_of_tri(1), t.poly_of_tri(2));
         assert_eq!(t.poly_tris(t.poly_of_tri(4).unwrap()), &[4, 5]);
         assert!(t.edge_of(0, 5).is_none()); // diagonal of the first quad
+    }
+
+    #[test]
+    fn face_overlay_uses_one_quad_and_only_its_perimeter() {
+        let m = grid(1, 1);
+        let topology = topo(&m);
+        assert_eq!(topology.polygons().len(), 1);
+        assert_eq!(topology.polygon_vertices(0), &[0, 1, 2, 3]);
+        assert_eq!(topology.polygon_edges(0).count(), 4);
+        assert!(!topology.polygon_edges(0).any(|(a, b)| (a, b) == (0, 3)));
+        assert_eq!(topology.polys_of(&[0, 1]), vec![0]);
     }
 
     #[test]
