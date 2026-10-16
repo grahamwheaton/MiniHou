@@ -521,12 +521,13 @@ mod tests {
         let ctx = egui::Context::default();
         f.theme.apply(&ctx);
         // Persist Spreadsheet tab
-        ctx.data_mut(|d| d.insert_persisted(egui::Id::new("geo_info").with("tab"), GeoTab::Spreadsheet));
+        // The panel keys its state on the enclosing ui id, so set the tab inside the frame.
 
         let mut out = Actions::default();
         let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(1280., 800.))), ..Default::default() };
         let full = ctx.run(input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
+                ui.ctx().data_mut(|d| d.insert_persisted(ui.id().with("geo_info").with("tab"), GeoTab::Spreadsheet));
                 show(ui, &f.view(), &mut out);
             });
         });
