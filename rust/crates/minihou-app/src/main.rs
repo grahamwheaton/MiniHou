@@ -311,6 +311,7 @@ struct App {
     transform_orientation: Option<ui::Orientation>,
     modal: Option<Modal>,
     model_modal: Option<(ModelState, Document, String, String)>,
+    pushpull_pick: bool,
     pub last_operator: Option<LastOperator>,
     last_edit_selection: ui::SelectionMode, params_open: bool, object_hidden: bool,
 }
@@ -392,7 +393,7 @@ impl App {
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),link:None,blender_job:None,
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
             display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
-            clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,model_modal:None,last_operator:None,last_viewport:egui::Rect::NOTHING,
+            clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,model_modal:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
             last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false };
         app.prefs = Preferences::load();
         app.mode=Mode::parse(&app.prefs.viewport.default_shading);
@@ -801,7 +802,7 @@ impl App {
         let pointer=ctx.input(|i|i.pointer.hover_pos()).unwrap_or(self.last_viewport.center());
         let radius=self.bounds.1.max(0.001);
         let mut state=ModelState::new(kind,pointer,(radius/200.).max(0.00001));
-        if kind==ModelKind::Extrude {
+        if matches!(kind,ModelKind::Extrude | ModelKind::PushPull) {
             let scene=self.scene.as_ref().unwrap();
             let tris=scene.triangle_indices(); let positions=scene.positions();
             let mut normal=[0f32;3]; let mut center=[0f32;3]; let mut count=0f32;
@@ -1524,6 +1525,12 @@ impl App {
             "extrude" | "inset" | "bevel" | "pushpull" => {
                 let kind=match name { "extrude"=>ModelKind::Extrude,"inset"=>ModelKind::Inset,
                     "bevel"=>ModelKind::Bevel,_=>ModelKind::PushPull };
+                if kind==ModelKind::PushPull {
+                    if self.scene.is_none() { self.file_status="Wait for the mesh to cook".into(); return; }
+                    self.pushpull_pick=true;
+                    self.file_status="Push / Pull: hover a face and click to pick it".into();
+                    return;
+                }
                 let has_selection=if matches!(kind,ModelKind::Extrude | ModelKind::Bevel) { !self.selection.is_empty() }
                     else { self.editor_state.selection==ui::SelectionMode::Faces && !self.selection.tris.is_empty() };
                 if self.editor_state.selection==ui::SelectionMode::Object || !has_selection {
@@ -1912,7 +1919,7 @@ impl eframe::App for App {
                 self.geo_rev = self.cooking.completed;
             }
         }
-        let busy = self.modal.is_some() || self.model_modal.is_some() || (ui::sketch::active(ctx) || self.editor_state.tool.drawing()) || ui::transform_gizmo::active(ctx) || ui::prim_handles::active(ctx);
+        let busy = self.modal.is_some() || self.model_modal.is_some() || self.pushpull_pick || (ui::sketch::active(ctx) || self.editor_state.tool.drawing()) || ui::transform_gizmo::active(ctx) || ui::prim_handles::active(ctx);
         let fly_frame = viewport_input::fly(ctx, self.last_viewport, &mut self.camera,
             self.prefs.viewport.fly_navigation && !busy && !ui::selection_region::active(ctx) && !ctx.wants_keyboard_input());
         if busy && !fly_frame && !ui::sketch::active(ctx) && !self.editor_state.tool.drawing() {
@@ -1931,10 +1938,29 @@ impl eframe::App for App {
             }
         }
         // Process confirmation before constructing View so the same click can reach selection.
+        let mut started_pushpull=false;
+        if self.pushpull_pick {
+            if ctx.input(|i| i.key_pressed(egui::Key::Escape) || i.pointer.secondary_pressed()) {
+                self.pushpull_pick=false; self.file_status.clear();
+            } else if let Some(at)=ctx.input(|i| if i.pointer.primary_pressed() { i.pointer.latest_pos() } else { None }) {
+                if self.last_viewport.contains(at) {
+                    if let Some(scene)=self.scene.as_ref() {
+                        let (o,d)=ui::transform_gizmo::ray(self.camera_info(),self.last_viewport,at);
+                        if let Some(hit)=pick_displayed(scene,o,d,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set) {
+                            let picked=element_select::cached(&self.elem_topo,scene).pick(scene.positions(),scene.triangle_indices(),hit,[0,1,2].map(|k|o[k]+d[k]*hit.t),ui::SelectionMode::Faces);
+                            self.selection=picked; self.editor_state.selection=ui::SelectionMode::Faces;
+                            self.selection_dirty=true; self.pushpull_pick=false; self.file_status.clear();
+                            self.start_model_modal(ctx,ModelKind::PushPull);
+                            started_pushpull=true;
+                        }
+                    }
+                }
+            }
+        }
         let modal_frame = self.modal.is_some();
         if modal_frame { self.update_modal(ctx); }
         let model_modal_frame=self.model_modal.is_some();
-        if model_modal_frame { self.update_model_modal(ctx); }
+        if model_modal_frame && !started_pushpull { self.update_model_modal(ctx); }
         if (modal_frame || model_modal_frame) && self.modal.is_none() && self.model_modal.is_none() && ctx.input(|i| i.pointer.primary_pressed()) {
             ctx.data_mut(|d| d.insert_temp(egui::Id::new("modal_confirm_click"), true));
         }
@@ -2078,7 +2104,7 @@ impl eframe::App for App {
                 let hover_elem = if hover_in_viewport {
                     if let (Some(pos), Some(scene)) = (hover_pos, &self.scene) {
                         let (o, d) = ui::transform_gizmo::ray(v.camera, rect, pos);
-                        let mode = self.editor_state.selection;
+                        let mode = if self.pushpull_pick { ui::SelectionMode::Faces } else { self.editor_state.selection };
                         let mods = ctx.input(|i| i.modifiers);
                         pick_displayed(scene,o,d,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set)
                             .map(|hit| {
@@ -2086,7 +2112,7 @@ impl eframe::App for App {
                                 // Polygon-aware hover; Alt (Blender navigation) previews the loop, Ctrl+Alt the ring.
                                 let topo = element_select::cached(&self.elem_topo, scene);
                                 let point = [0,1,2].map(|k| o[k] + d[k] * hit.t);
-                                let loop_preview = mods.alt && self.prefs.viewport.navigation == ui::keymap::Navigation::Blender;
+                                let loop_preview = !self.pushpull_pick && mods.alt && self.prefs.viewport.navigation == ui::keymap::Navigation::Blender;
                                 match topo.nearest_edge(scene.positions(), hit.tri as u32, point) {
                                     Some(edge) if loop_preview => topo.loop_selection(scene.positions(), edge, mods.ctrl, mode),
                                     _ => topo.pick(scene.positions(), scene.triangle_indices(), hit, point, mode),
@@ -2106,7 +2132,7 @@ impl eframe::App for App {
                         let orange = egui::Color32::from_rgb(0xff, 0xa0, 0x28);
                         let white = egui::Color32::WHITE;
 
-                        match self.editor_state.selection {
+                        match if self.pushpull_pick { ui::SelectionMode::Faces } else { self.editor_state.selection } {
                             ui::SelectionMode::Object => {}
                             ui::SelectionMode::Points => {}
                             ui::SelectionMode::Edges => {

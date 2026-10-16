@@ -275,4 +275,14 @@ mod tests {
         assert!(o.prim.contains_key("group_extrudeFront"));
         assert!(o.prim.contains_key("group_extrudeSide"));
     }
+    #[test]
+    fn pushpull_distance_cooks_live_preview_from_connected_box() {
+        let box_params=Params::resolve(super::super::generate::BOX.params,None).unwrap();
+        let g=(super::super::generate::BOX.cook)(&[vec![]],&box_params).unwrap();
+        let zero=apply(&g,"0",0.).unwrap();
+        let moved=apply(&g,"0",0.25).unwrap();
+        assert_eq!(zero.p(),g.p());
+        assert_ne!(moved.p(),g.p());
+        moved.validate().unwrap();
+    }
 }

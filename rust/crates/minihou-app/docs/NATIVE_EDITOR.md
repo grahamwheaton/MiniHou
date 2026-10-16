@@ -47,7 +47,7 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | K | Knife | Viewport |
 | Escape | Select none | Viewport |
 | Ctrl+B | Bevel (modal) | Viewport |
-| Alt+E | Push / pull | Viewport |
+| Alt+E | Push / pull (modal) | Viewport |
 | Ctrl+R | Loop cut | Viewport |
 | Alt+N | Flip faces | Viewport |
 | Shift+C | Reset 3D cursor and frame all | Viewport |
@@ -135,7 +135,7 @@ The popover follows Blender's split control and grouping using MiniHou's theme a
 
 With the pointer in the viewport and an object or edit-mode elements selected, G, R, and S begin a modal transform. The object updates as the pointer moves. The bottom viewport strip shows values, constraint, and snap state. The coloured constraint line passes through the pivot. Confirm creates one undo step; cancel restores the previous graph. The existing toolbar gizmo handles remain available. The following table is checked against the modal key list by a unit test.
 
-In edit mode, E starts PolyExtrude on selected faces, edges, or points. Drag along the projected surface normal; X, Y, or Z constrains the extrusion to a world axis. I and Ctrl+B start Inset and Bevel. Shift gives precision and Ctrl quantises to 0.1. Bevel uses wheel or PageUp/PageDown to change Divisions from 1 to 64. Digits and decimal point enter an exact value. LMB or Enter confirms as one undo step; RMB or Escape restores the graph. The bottom viewport strip shows the current distance or offset and divisions where available.
+In edit mode, E starts PolyExtrude on selected faces, edges, or points. Drag along the projected surface normal; X, Y, or Z constrains the extrusion to a world axis. Alt+E starts Push/Pull: hover a face, click to pick it, then drag along its normal. I and Ctrl+B start Inset and Bevel. Shift gives precision and Ctrl quantises to 0.1. Bevel uses wheel or PageUp/PageDown to change Divisions from 1 to 64. Digits and decimal point enter an exact value. LMB or Enter confirms as one undo step; RMB or Escape restores the graph. The bottom viewport strip shows the current distance or offset and divisions where available.
 
 <!-- modal:start -->
 | Input | During modal transform |

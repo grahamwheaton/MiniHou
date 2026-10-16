@@ -70,7 +70,7 @@ impl Command {
         Self::DeleteNode => "Delete nodes", Self::DissolveNode => "Dissolve nodes", Self::DuplicateNode => "Duplicate nodes", Self::TidyNetwork => "Tidy network",
         Self::Preferences => "Preferences",
         Self::BoxSelect => "Box select", Self::CircleSelect => "Circle select", Self::LassoSelect => "Lasso select", Self::Paint => "Paint",
-        Self::Extrude => "Extrude (modal)", Self::Inset => "Inset", Self::Bevel => "Bevel (modal)", Self::PushPull => "Push / pull",
+        Self::Extrude => "Extrude (modal)", Self::Inset => "Inset", Self::Bevel => "Bevel (modal)", Self::PushPull => "Push / pull (modal)",
         Self::Knife => "Knife", Self::LoopCut => "Loop cut", Self::FlipFaces => "Flip faces", Self::OppositeView => "Opposite view",
         Self::NetworkBox => "Network box", Self::PieMenu => "Modeling pie menu", Self::DisplayFlag => "Display flag",
         Self::MuteFlag => "Mute flag", Self::TemplateFlag => "Template flag", Self::SelectableTemplateFlag => "Selectable template flag",

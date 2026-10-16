@@ -126,5 +126,23 @@ pub fn insert_graph(before: &Document, source: &str, kind: Kind, params: Value) 
         cancelled.edit(&Edit::Param{node:id,name:"distance".into(),value:json!(1.)}).unwrap();
         cancelled=base.clone(); assert_eq!(cancelled.value(),base.value());
     }
-
+    #[test] fn pushpull_inserts_connected_before_output_and_restores_on_cancel() {
+        use minihou_app::{Edit,History};
+        use serde_json::json;
+        let base=Document::parse(json!({"version":1,"nodes":{"box1":{"type":"box"},"out":{"type":"output","inputs":{"geo":"box1"}}},"display":"out"}).to_string()).unwrap();
+        let (mut doc,id)=insert_graph(&base,"out",Kind::PushPull,json!({"group":"0","distance":0.})).unwrap();
+        assert_eq!(doc.value()["nodes"]["out"]["inputs"]["geo"],id);
+        assert_eq!(doc.value()["nodes"][&id]["inputs"]["geo"],"box1");
+        doc.edit(&Edit::Param{node:id.clone(),name:"distance".into(),value:json!(0.5)}).unwrap();
+        let mut history=History::default(); history.record(base.clone(),&doc);
+        assert!(history.undo(&mut doc).is_some()); assert_eq!(doc.value(),base.value());
+        assert!(history.undo(&mut doc).is_none());
+        let (mut cancelled,id)=insert_graph(&base,"out",Kind::PushPull,json!({"group":"0","distance":0.})).unwrap();
+        cancelled.edit(&Edit::Param{node:id,name:"distance".into(),value:json!(0.5)}).unwrap();
+        cancelled=base.clone(); assert_eq!(cancelled.value(),base.value());
+        let mut s=State::new(Kind::PushPull,pos2(0.,0.),0.01);
+        s.move_to(pos2(10.,-10.),false,false); assert!(s.value>0.);
+        s.key_event(Key::Num3,false); assert_eq!(s.value,3.);
+        assert_eq!(s.key_event(Key::Escape,false),Outcome::Cancel);
+    }
 }
