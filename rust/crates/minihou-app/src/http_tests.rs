@@ -10,6 +10,22 @@ use std::{
 fn base() -> Value {
     json!({"version":1,"nodes":{"box1":{"type":"box","pos":[0,0]},"output1":{"type":"output","inputs":{"geo":"box1"},"pos":[0,150]}},"display":"output1"})
 }
+#[test]
+fn http_ops_attrib_paint_assign_roundtrip() {
+    let graph = json!({"version":1,"nodes":{"g":{"type":"grid","params":{"columns":2,"rows":2}},"p":{"type":"attrib_paint","inputs":{"geo":"g"},"params":{"attribute":"w"}}},"display":"p"});
+    let (graph, results) = http_ops::apply_ops(&graph, &json!([
+        {"op":"paint_assign","id":"p","indices":[0,2],"values":[0.25,0.75]},
+        {"op":"paint_assign","id":"p","indices":[2],"value":1.0}
+    ])).unwrap();
+    let data = graph["nodes"]["p"]["params"]["data"].as_str().unwrap();
+    assert_eq!(results[1]["bytes"], data.len());
+    assert_eq!(minihou_core::nodes::attrib_paint::decode(data, 1).unwrap(), vec![(0,vec![0.25]),(2,vec![1.0])]);
+    let doc = Document::parse(graph.to_string()).unwrap();
+    let out = doc.session().unwrap().cook(None).unwrap();
+    assert_eq!(out.point["w"].as_f32().unwrap(), &[0.25, 0., 1., 0.]);
+    let (graph, _) = http_ops::apply_ops(&graph, &json!([{"op":"paint_assign","id":"p","indices":[0],"erase":true}])).unwrap();
+    assert_eq!(minihou_core::nodes::attrib_paint::decode(graph["nodes"]["p"]["params"]["data"].as_str().unwrap(), 1).unwrap(), vec![(2,vec![1.0])]);
+}
 fn http(address: std::net::SocketAddr, method: &str, path: &str, body: Value) -> (u16, Value) {
     let mut socket = TcpStream::connect(address).unwrap();
     socket

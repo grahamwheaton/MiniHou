@@ -81,6 +81,54 @@
    "kind": "bool"
   }
  },
+ "attrib_paint": {
+  "attribute": {
+   "default": "paint",
+   "doc": "Name of the attribute to paint (made if the input has none; an edge attribute is an edge group of this name)",
+   "kind": "str"
+  },
+  "data": {
+   "default": "",
+   "doc": "What was painted: element numbers and values (written by the viewer's Paint mode, Quick Assign and the spreadsheet)",
+   "kind": "str"
+  },
+  "default": {
+   "default": 0.0,
+   "doc": "float / int: the value of elements that were not painted and the input has no value for",
+   "kind": "float",
+   "soft_max": 1.0,
+   "soft_min": -1.0
+  },
+  "default_vec": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "vec3: the same for a vector attribute",
+   "kind": "vec3"
+  },
+  "domain": {
+   "default": "point",
+   "doc": "point; prim (faces and other primitives); edge (the derived edges: painted as membership of an edge group)",
+   "kind": "enum",
+   "options": [
+    "point",
+    "prim",
+    "edge"
+   ]
+  },
+  "kind": {
+   "default": "float",
+   "doc": "float, int or vec3 (a colour or a direction)",
+   "kind": "enum",
+   "options": [
+    "float",
+    "int",
+    "vec3"
+   ]
+  }
+ },
  "attribute_blur": {
   "group": {
    "default": "",
