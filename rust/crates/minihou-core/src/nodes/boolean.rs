@@ -156,6 +156,23 @@ pub(super) fn combine(parts: &[(AttrTable, usize)]) -> Result<AttrTable> {
     }
     Ok(out)
 }
+pub(super) fn combine_vertices(parts: &[(AttrTable, usize)]) -> Result<AttrTable> {
+    let mut out = combine(parts)?;
+    for (name, attr) in &mut out {
+        if matches!(name.as_str(), "N" | "Cd" | "P") || !matches!(attr.width, 2 | 3) { continue; }
+        let Some(values) = attr.as_f32() else { continue; };
+        let mut values = values.to_vec();
+        let mut start = 0;
+        for (table, count) in parts {
+            if !table.contains_key(name) {
+                values[start..start + count * attr.width].fill(f32::NAN);
+            }
+            start += count * attr.width;
+        }
+        *attr = Arc::new(Attr::f32(attr.width, values));
+    }
+    Ok(out)
+}
 fn blend(table: &AttrTable, idx: &[[usize; 3]], weights: &[[f64; 3]]) -> AttrTable {
     table
         .iter()
@@ -317,6 +334,7 @@ fn outline(loops: Vec<Vec<usize>>, v: &[usize], p: &[[f64; 3]]) -> Option<Vec<Ve
 }
 pub(super) fn unify(a: &Geometry, b: &Geometry) -> Result<(Geometry, Geometry)> {
     let mut gs = super::material_tables::reconcile(&[a.clone(), b.clone()])?;
+    super::model::promote_corner_uv_sets(&mut gs);
     let b = gs.pop().unwrap();
     Ok((gs.pop().unwrap(), b))
 }
@@ -522,7 +540,7 @@ pub(super) fn boolean(
         point,
         vout.iter().map(|&i| i as i32).collect(),
         &sizes_out,
-        combine(&vertex_parts)?,
+        combine_vertices(&vertex_parts)?,
         combine(&prim_parts)?,
         a.detail.clone(),
         None,

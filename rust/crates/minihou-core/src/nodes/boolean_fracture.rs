@@ -188,7 +188,7 @@ fn merge_pair(a: &Geometry, b: &Geometry) -> Result<Geometry> {
         combine(&[(a.point.clone(), a.npoints), (b.point.clone(), b.npoints)])?,
         vp,
         &sizes,
-        combine(&[
+        boolean::combine_vertices(&[
             (a.vertex.clone(), a.nvertices()),
             (b.vertex.clone(), b.nvertices()),
         ])?,
