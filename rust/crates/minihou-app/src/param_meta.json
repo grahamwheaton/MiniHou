@@ -2447,6 +2447,71 @@
    "min": 0
   }
  },
+ "grow": {
+  "domain": {
+   "default": "primitives",
+   "doc": "Element type of the selection (Blender's vertex / edge / face select mode); edge groups are edge_group_ attributes",
+   "kind": "enum",
+   "options": [
+    "points",
+    "edges",
+    "primitives"
+   ]
+  },
+  "face_step": {
+   "default": true,
+   "doc": "Step across polygons through shared points (Blender's Face Step); off: neighbours share an edge (faces) or a point (edges)",
+   "kind": "bool"
+  },
+  "group": {
+   "default": "",
+   "doc": "Selection to grow or shrink: group name or pattern in the chosen domain (empty: everything)",
+   "kind": "str"
+  },
+  "keep_selection": {
+   "default": true,
+   "doc": "Write the whole resulting selection to Result Group",
+   "kind": "bool"
+  },
+  "mode": {
+   "default": "grow",
+   "doc": "grow: Select More (add neighbours); shrink: Select Less (keep elements whose neighbours are all selected)",
+   "kind": "enum",
+   "options": [
+    "grow",
+    "shrink"
+   ]
+  },
+  "output_group": {
+   "default": false,
+   "doc": "Also write only the change: the elements added by growing or removed by shrinking",
+   "kind": "bool"
+  },
+  "output_group_name": {
+   "default": "grown",
+   "doc": "Group for the added / removed elements",
+   "enabled_if": {
+    "output_group": true
+   },
+   "kind": "str"
+  },
+  "result_group_name": {
+   "default": "",
+   "doc": "Group for the resulting selection (empty: the input group's name, or 'selection' for patterns)",
+   "enabled_if": {
+    "keep_selection": true
+   },
+   "kind": "str"
+  },
+  "steps": {
+   "default": 1,
+   "doc": "How many grow / shrink steps (0: unchanged)",
+   "kind": "int",
+   "max": 100000,
+   "min": 0,
+   "soft_max": 10
+  }
+ },
  "heightfield_erode": {
   "capacity": {
    "default": 4.0,
@@ -5760,6 +5825,156 @@
    "kind": "float",
    "min": 0.0001,
    "soft_max": 1.0
+  }
+ },
+ "select_loop": {
+  "combine": {
+   "default": "replace",
+   "doc": "replace: write only this selection; union: add it to an existing group of the same name",
+   "kind": "enum",
+   "options": [
+    "replace",
+    "union"
+   ]
+  },
+  "direction": {
+   "default": "both",
+   "doc": "both: walk from both ends of each seed; forward / backward: start only towards the seed's higher / lower point (rings: second / first face)",
+   "kind": "enum",
+   "options": [
+    "both",
+    "forward",
+    "backward"
+   ]
+  },
+  "domain": {
+   "default": "edges",
+   "doc": "Output elements: the loop's edges, their points, or the face loop's primitives",
+   "kind": "enum",
+   "options": [
+    "points",
+    "edges",
+    "primitives"
+   ]
+  },
+  "group_name": {
+   "default": "loop",
+   "doc": "Group that receives the loop",
+   "kind": "str"
+  },
+  "mode": {
+   "default": "edge_loop",
+   "doc": "edge_loop: through valence-4 points, stopping at poles and borders; boundary_loop: follow the open border of a boundary seed",
+   "kind": "enum",
+   "options": [
+    "edge_loop",
+    "boundary_loop"
+   ]
+  },
+  "seeds": {
+   "default": "",
+   "doc": "Seed edges: edge ids, p<a>-<b> point pairs, edge group names or wildcards (empty: nothing selected)",
+   "kind": "str"
+  }
+ },
+ "select_path": {
+  "closed": {
+   "default": false,
+   "doc": "Route from the last waypoint back to the first",
+   "kind": "bool"
+  },
+  "combine": {
+   "default": "replace",
+   "doc": "replace: write only this selection; union: add it to an existing group of the same name",
+   "kind": "enum",
+   "options": [
+    "replace",
+    "union"
+   ]
+  },
+  "domain": {
+   "default": "points",
+   "doc": "Element type of the selection (Blender's vertex / edge / face select mode); edge groups are edge_group_ attributes",
+   "kind": "enum",
+   "options": [
+    "points",
+    "edges",
+    "primitives"
+   ]
+  },
+  "end": {
+   "default": 1,
+   "doc": "Last element number (used when Waypoints is empty)",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 1000
+  },
+  "group_name": {
+   "default": "path",
+   "doc": "Group that receives the path",
+   "kind": "str"
+  },
+  "method": {
+   "default": "shortest_distance",
+   "doc": "fewest_steps: fewest connections (topological); shortest_distance: geometrically shortest by edge length",
+   "kind": "enum",
+   "options": [
+    "fewest_steps",
+    "shortest_distance"
+   ]
+  },
+  "start": {
+   "default": 0,
+   "doc": "First element number (used when Waypoints is empty)",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 1000
+  },
+  "waypoints": {
+   "default": "",
+   "doc": "Ordered elements to route through: ids (edges also p<a>-<b>) keep their order; group names add members in element order",
+   "kind": "str"
+  }
+ },
+ "select_ring": {
+  "combine": {
+   "default": "replace",
+   "doc": "replace: write only this selection; union: add it to an existing group of the same name",
+   "kind": "enum",
+   "options": [
+    "replace",
+    "union"
+   ]
+  },
+  "direction": {
+   "default": "both",
+   "doc": "both: walk from both ends of each seed; forward / backward: start only towards the seed's higher / lower point (rings: second / first face)",
+   "kind": "enum",
+   "options": [
+    "both",
+    "forward",
+    "backward"
+   ]
+  },
+  "domain": {
+   "default": "edges",
+   "doc": "Output elements: the ring's edges, their points, or the quads between them",
+   "kind": "enum",
+   "options": [
+    "points",
+    "edges",
+    "primitives"
+   ]
+  },
+  "group_name": {
+   "default": "ring",
+   "doc": "Group that receives the ring",
+   "kind": "str"
+  },
+  "seeds": {
+   "default": "",
+   "doc": "Seed edges: edge ids, p<a>-<b> point pairs, edge group names or wildcards (empty: nothing selected)",
+   "kind": "str"
   }
  },
  "set_material": {

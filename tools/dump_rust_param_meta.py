@@ -101,6 +101,57 @@ def meta() -> dict:
         "enabled": {"default": True, "doc": "Build and use the clustered LOD payload", "kind": "bool"},
         "min_triangles": {"default": 50000, "doc": "Skip the build for smaller meshes", "kind": "int", "min": 0, "soft_max": 1000000},
     }
+    # Selection nodes (docs/RUST_SELECT_NODES.md): Blender's Select More/Less, Shortest Path, Loop and Ring.
+    _domain = {"default": "primitives", "kind": "enum", "options": ["points", "edges", "primitives"],
+               "doc": "Element type of the selection (Blender's vertex / edge / face select mode); edge groups are edge_group_ attributes"}
+    _combine = {"default": "replace", "kind": "enum", "options": ["replace", "union"],
+                "doc": "replace: write only this selection; union: add it to an existing group of the same name"}
+    _direction = {"default": "both", "kind": "enum", "options": ["both", "forward", "backward"],
+                  "doc": "both: walk from both ends of each seed; forward / backward: start only towards the seed's higher / lower point (rings: second / first face)"}
+    _seeds = {"default": "", "kind": "str",
+              "doc": "Seed edges: edge ids, p<a>-<b> point pairs, edge group names or wildcards (empty: nothing selected)"}
+    out["grow"] = {
+        "group": {"default": "", "kind": "str", "doc": "Selection to grow or shrink: group name or pattern in the chosen domain (empty: everything)"},
+        "domain": dict(_domain),
+        "mode": {"default": "grow", "kind": "enum", "options": ["grow", "shrink"],
+                 "doc": "grow: Select More (add neighbours); shrink: Select Less (keep elements whose neighbours are all selected)"},
+        "steps": {"default": 1, "kind": "int", "min": 0, "max": 100000, "soft_max": 10, "doc": "How many grow / shrink steps (0: unchanged)"},
+        "face_step": {"default": True, "kind": "bool",
+                      "doc": "Step across polygons through shared points (Blender's Face Step); off: neighbours share an edge (faces) or a point (edges)"},
+        "keep_selection": {"default": True, "kind": "bool", "doc": "Write the whole resulting selection to Result Group"},
+        "result_group_name": {"default": "", "kind": "str", "enabled_if": {"keep_selection": True},
+                              "doc": "Group for the resulting selection (empty: the input group's name, or 'selection' for patterns)"},
+        "output_group": {"default": False, "kind": "bool", "doc": "Also write only the change: the elements added by growing or removed by shrinking"},
+        "output_group_name": {"default": "grown", "kind": "str", "enabled_if": {"output_group": True}, "doc": "Group for the added / removed elements"},
+    }
+    out["select_path"] = {
+        "domain": dict(_domain, default="points"),
+        "start": {"default": 0, "kind": "int", "min": 0, "soft_max": 1000, "doc": "First element number (used when Waypoints is empty)"},
+        "end": {"default": 1, "kind": "int", "min": 0, "soft_max": 1000, "doc": "Last element number (used when Waypoints is empty)"},
+        "waypoints": {"default": "", "kind": "str",
+                      "doc": "Ordered elements to route through: ids (edges also p<a>-<b>) keep their order; group names add members in element order"},
+        "method": {"default": "shortest_distance", "kind": "enum", "options": ["fewest_steps", "shortest_distance"],
+                   "doc": "fewest_steps: fewest connections (topological); shortest_distance: geometrically shortest by edge length"},
+        "closed": {"default": False, "kind": "bool", "doc": "Route from the last waypoint back to the first"},
+        "group_name": {"default": "path", "kind": "str", "doc": "Group that receives the path"},
+        "combine": dict(_combine),
+    }
+    out["select_loop"] = {
+        "seeds": dict(_seeds),
+        "domain": dict(_domain, default="edges", doc="Output elements: the loop's edges, their points, or the face loop's primitives"),
+        "mode": {"default": "edge_loop", "kind": "enum", "options": ["edge_loop", "boundary_loop"],
+                 "doc": "edge_loop: through valence-4 points, stopping at poles and borders; boundary_loop: follow the open border of a boundary seed"},
+        "direction": dict(_direction),
+        "group_name": {"default": "loop", "kind": "str", "doc": "Group that receives the loop"},
+        "combine": dict(_combine),
+    }
+    out["select_ring"] = {
+        "seeds": dict(_seeds),
+        "domain": dict(_domain, default="edges", doc="Output elements: the ring's edges, their points, or the quads between them"),
+        "direction": dict(_direction),
+        "group_name": {"default": "ring", "kind": "str", "doc": "Group that receives the ring"},
+        "combine": dict(_combine),
+    }
     out["convex_hull"] = {
         "group": {"default": "", "doc": "Points or primitives to compute the hull from (empty: all)", "kind": "str"},
         "type": {"default": "3d", "doc": "3D convex hull mesh or 2D convex hull polygon", "kind": "enum", "options": ["3d", "2d"]},
