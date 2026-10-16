@@ -570,6 +570,8 @@ class InterfaceSyncTests(unittest.TestCase):
         self.proxy = proxy
         self.out, self.obj, self.mod = proxy.ensure_objects()
         self.ng = self.mod.node_group
+        self.assertTrue(proxy.is_nested(self.ng))          # 0.2.1: same nested layout as stack modifiers
+        self.tree = proxy.plumbing(self.ng)                # generated nodes live in the plumbing tree
 
     def p(self, name, kind="float", value=1.0, **kw):
         return dict(name=name, kind=kind, value=value, **kw)
@@ -599,7 +601,7 @@ class InterfaceSyncTests(unittest.TestCase):
         self.assertNotEqual(m["B"], old["B"])                       # type changed -> new socket
         self.assertFalse(self.proxy.has_input(self.mod, old["A"]))
         self.assertNotIn("A", m)
-        self.assertEqual(len([n for n in self.ng.nodes if n.name.startswith(self.proxy.USE_NODE_PREFIX)]), 2)
+        self.assertEqual(len([n for n in self.tree.nodes if n.name.startswith(self.proxy.USE_NODE_PREFIX)]), 2)
         self.assertIsInstance(self.proxy.get_input(self.mod, m["B"]), bool)              # the property exists with the new type...
         sock = next(i for i in self.ng.interface.items_tree if getattr(i, "identifier", "") == m["B"])
         self.assertIs(sock.default_value, True)                     # ...values themselves are written by the runtime
@@ -654,19 +656,20 @@ class InterfaceSyncTests(unittest.TestCase):
         params = [self.p("A"), self.p("V", "vec3", [0, 0, 1]), self.p("N", "int", 2), self.p("F", "bool", False)]
         self.proxy.sync_interface(self.ng, self.out, params, "s1")
         m = self.proxy.mapping(self.ng)
-        gout = next(n for n in self.ng.nodes if n.bl_idname == "NodeGroupOutput")
+        gout = next(n for n in self.tree.nodes if n.bl_idname == "NodeGroupOutput")
         # walk back from the output: Object Info must be reached through one store node per input
         node, seen = gout.inputs["Geometry"].links[0].from_node, []
         while node.bl_idname == "GeometryNodeStoreNamedAttribute":
             seen.append(node.inputs["Value"].links[0].from_socket.identifier)
             node = node.inputs["Geometry"].links[0].from_node
         self.assertEqual(node.bl_idname, "GeometryNodeObjectInfo")
-        self.assertEqual(sorted(seen), sorted(m.values()))
+        inner = json.loads(self.tree[self.proxy.PLUMBING_KEY])    # outer -> plumbing input identifiers
+        self.assertEqual(sorted(seen), sorted(inner[v] for v in m.values()))
         sock = next(i for i in self.ng.interface.items_tree if getattr(i, "identifier", "") == m["A"])
         self.assertEqual(sock.structure_type, "SINGLE")
         # remove one input: its store node goes, chain stays intact
         self.proxy.sync_interface(self.ng, self.out, [params[0], params[2]], "s2")
-        stores = [n for n in self.ng.nodes if n.name.startswith(self.proxy.USE_NODE_PREFIX)]
+        stores = [n for n in self.tree.nodes if n.name.startswith(self.proxy.USE_NODE_PREFIX)]
         self.assertEqual(len(stores), 2)
         # the proxy's evaluated mesh has no extra attributes
         import numpy as np
@@ -681,11 +684,11 @@ class InterfaceSyncTests(unittest.TestCase):
 
     def test_object_info_still_wired(self):
         self.proxy.sync_interface(self.ng, self.out, [self.p("A")], "s1")
-        info = next(n for n in self.ng.nodes if n.bl_idname == "GeometryNodeObjectInfo")
+        info = next(n for n in self.tree.nodes if n.bl_idname == "GeometryNodeObjectInfo")
         self.assertEqual(info.inputs["Object"].default_value.name, self.proxy.OUTPUT_OBJECT)
-        self.assertEqual(sum(1 for l in self.ng.links if l.from_node == info), 1)
+        self.assertEqual(sum(1 for l in self.tree.links if l.from_node == info), 1)
         self.proxy.sync_interface(self.ng, self.out, [], "s0")          # no inputs: Object Info straight to output
-        gout = next(n for n in self.ng.nodes if n.bl_idname == "NodeGroupOutput")
+        gout = next(n for n in self.tree.nodes if n.bl_idname == "NodeGroupOutput")
         self.assertEqual(gout.inputs["Geometry"].links[0].from_node.bl_idname, "GeometryNodeObjectInfo")
 
 

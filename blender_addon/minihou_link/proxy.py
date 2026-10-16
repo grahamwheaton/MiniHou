@@ -7,7 +7,8 @@
 
 The helpers here also build stack-modifier and wired-placement groups. Those use a nested layout (see
 ``ensure_nested``): the generated nodes live in a private inner "Plumbing" tree, so every node operation goes through
-``plumbing(ng)`` while interface sockets and custom properties stay on the outer group. The legacy proxy stays flat.
+``plumbing(ng)`` while interface sockets and custom properties stay on the outer group. Since 0.2.1 the live-link proxy
+(``ensure_node_group``) uses the same nested layout; its flat groups from older add-ons migrate in place.
 """
 from __future__ import annotations
 
@@ -130,10 +131,14 @@ def ensure_objects():
     if proxy.name not in col.objects:
         col.objects.link(proxy)
 
-    ng = ensure_node_group(out)
     mod = proxy.modifiers.get(MODIFIER)
     if mod is None:
         mod = proxy.modifiers.new(MODIFIER, "NODES")
+    # Keep the group the modifier already uses when it is the session group (possibly renamed or made private by a
+    # copy): re-pointing the modifier at another group on every update orphaned a copy per sync, and each orphan kept
+    # a user on the nested plumbing tree (an ever-growing user count).
+    current = mod.node_group
+    ng = ensure_node_group(out, current if current is not None and SESSION_KEY in current else None)
     if mod.node_group is None or mod.node_group.name != ng.name:
         mod.node_group = ng
     return out, proxy, mod
@@ -144,17 +149,35 @@ def output_mesh():
     return obj.data if obj else None
 
 
-def ensure_node_group(output_obj):
-    ng = bpy.data.node_groups.get(GROUP)
+SESSION_KEY = "minihou_session_group"   # marks the live-link proxy's group, whatever its name
+
+
+def ensure_node_group(output_obj, ng=None):
+    """The session proxy's group, in the nested layout built by the same code as the Add MiniHou Modifier button.
+
+    Flat groups from add-ons before 0.2.1 migrate in place (outer interface, modifier values and drivers kept).
+    Idempotent and write-free when nothing changed.
+    """
+    if ng is None:
+        ng = next((g for g in bpy.data.node_groups if SESSION_KEY in g and g.library is None), None) \
+            or bpy.data.node_groups.get(GROUP)
     if ng is None:
         ng = bpy.data.node_groups.new(GROUP, "GeometryNodeTree")
-        _build_nodes(ng, output_obj)
+    if SESSION_KEY not in ng:
+        ng[SESSION_KEY] = 1
+    if not is_nested(ng):
+        if cache_info(ng) is None:
+            _build_nodes(ng, output_obj)          # flat first, so the migration wires the cache (not a passthrough)
+        ensure_nested(ng)
     else:
+        ensure_plumbing(ng)
+    info = cache_info(ng)
+    if info is None:
+        _build_nodes(ng, output_obj)
         info = cache_info(ng)
-        if info is not None:
-            cur = info.inputs["Object"].default_value
-            if cur is None or cur.name != output_obj.name:
-                info.inputs["Object"].default_value = output_obj
+    cur = info.inputs["Object"].default_value
+    if cur is None or cur.name != output_obj.name:
+        info.inputs["Object"].default_value = output_obj
     return ng
 
 
@@ -200,6 +223,8 @@ def plumbing(ng):
 
 
 def plumbing_name(ng) -> str:
+    if SESSION_KEY in ng:
+        return "MiniHou Session Plumbing"          # never confused with a modifier's "MiniHou Plumbing"
     return (ng.name.strip() or "MiniHou") + " Plumbing"
 
 
@@ -269,7 +294,7 @@ def ensure_plumbing(ng):
     if node is None:
         return ng
     inner = node.node_tree
-    if inner.users - int(inner.use_fake_user) > 1:
+    if shared(inner):
         inner = inner.copy()
         inner.use_fake_user = False
         inner.name = plumbing_name(ng)
@@ -361,11 +386,90 @@ def link_passthrough(ng) -> None:
     _link(tree, gin.outputs["Geometry"], _chain_target(ng))
 
 
-def cleanup_plumbing() -> None:
-    """Remove plumbing trees whose outer group is gone (removed or orphaned)."""
-    for tree in list(bpy.data.node_groups):
-        if PLUMBING_KEY in tree and tree.users == 0:
-            bpy.data.node_groups.remove(tree)
+# Custom properties that mark a group as MiniHou-owned (modifier, placement, plumbing, session proxy).
+OWNED_KEYS = ("minihou_modifier_id", "minihou_gn_id", PLUMBING_KEY, SESSION_KEY)
+
+
+def _kept(tree) -> bool:
+    """A root the user keeps on purpose even when nothing evaluates it."""
+    return bool(tree.use_fake_user or getattr(tree, "asset_data", None) is not None
+                or getattr(tree, "is_tool", False))
+
+
+def _live_trees() -> Dict[int, object]:
+    """Every node group reachable from an object's modifier or a kept root, by pointer."""
+    live, stack = {}, []
+    for obj in bpy.data.objects:
+        for mod in getattr(obj, "modifiers", ()):
+            group = getattr(mod, "node_group", None)
+            if group is not None:
+                stack.append(group)
+    stack.extend(t for t in bpy.data.node_groups if _kept(t))
+    while stack:
+        tree = stack.pop()
+        if tree.as_pointer() in live:
+            continue
+        live[tree.as_pointer()] = tree
+        for node in tree.nodes:
+            child = getattr(node, "node_tree", None)
+            if child is not None:
+                stack.append(child)
+    return live
+
+
+def shared(tree) -> bool:
+    """True when ``tree`` is really used from more than one place.
+
+    ``ID.users`` also counts references held by orphaned groups (unassigned copies that Blender keeps until the file
+    is saved and reopened), so it over-reports. Trusting it made every sync copy a "shared" group again, which
+    orphaned one more copy, which raised the count again. Only references from live trees and modifiers count here.
+    """
+    if tree.users - int(tree.use_fake_user) <= 1:
+        return False                     # cheap common case: ``users`` never under-reports
+    ptr, count = tree.as_pointer(), 0
+    for obj in bpy.data.objects:
+        for mod in getattr(obj, "modifiers", ()):
+            group = getattr(mod, "node_group", None)
+            if group is not None and group.as_pointer() == ptr:
+                count += 1
+    for parent in _live_trees().values():
+        for node in parent.nodes:
+            child = getattr(node, "node_tree", None)
+            if child is not None and child.as_pointer() == ptr:
+                count += 1
+    return count > 1
+
+
+def _owned(tree, seen=None) -> bool:
+    """Made by MiniHou, or a container holding a MiniHou group (e.g. a GN tree whose placements were promoted)."""
+    seen = set() if seen is None else seen
+    if tree.as_pointer() in seen:
+        return False
+    seen.add(tree.as_pointer())
+    return any(key in tree for key in OWNED_KEYS) or any(
+        _owned(child, seen) for child in (getattr(n, "node_tree", None) for n in tree.nodes) if child is not None)
+
+
+def cleanup_plumbing() -> int:
+    """Remove MiniHou-owned groups nothing live uses any more. Returns how many were removed.
+
+    That is plumbing trees whose outer group is gone, and orphaned MiniHou groups that are only referenced by other
+    orphans (left by older add-ons on each sync); removing them releases the users they held. Groups with a fake
+    user, asset or tool flag are kept, as are groups not made by MiniHou.
+    """
+    removed = 0
+    while True:
+        live = _live_trees()
+        dead = [t for t in bpy.data.node_groups if t.as_pointer() not in live and t.library is None
+                and not _kept(t) and _owned(t)]
+        if not dead:
+            return removed
+        if hasattr(bpy.data, "batch_remove"):
+            bpy.data.batch_remove(dead)
+        else:
+            for tree in dead:
+                bpy.data.node_groups.remove(tree)
+        removed += len(dead)
 
 
 def _build_nodes(ng, output_obj) -> None:
