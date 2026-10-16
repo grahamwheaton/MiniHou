@@ -95,13 +95,23 @@ impl Graph {
     /// Current engine edits over the original document, preserving layout and metadata.
     pub fn to_value(&self) -> Value {
         let mut value = self.source.clone();
+        let baseline = Graph::from_value(&self.source).ok();
         let nodes = value["nodes"].as_object_mut().expect("validated graph");
         nodes.retain(|id, _| self.nodes.iter().any(|(n, _)| n == id));
         for (id, def) in &self.nodes {
             let nd = nodes.entry(id.clone()).or_insert_with(|| serde_json::json!({}));
             nd["type"] = Value::String(def.node_type.clone());
-            if nd.get("params").and_then(Value::as_object) != def.params.as_ref() {
-                if let Some(p) = &def.params { nd["params"] = Value::Object(p.clone()); }
+            let mut params = def.params.clone();
+            if let (Some(params), Some(original), Some(baseline)) = (&mut params,
+                nd.get("params").and_then(Value::as_object), baseline.as_ref().and_then(|g| g.node(id)).and_then(|d| d.params.as_ref())) {
+                for (name, link) in original {
+                    if link.get("modifier_input").is_some() && params.get(name) == baseline.get(name) {
+                        params.insert(name.clone(), link.clone());
+                    }
+                }
+            }
+            if nd.get("params").and_then(Value::as_object) != params.as_ref() {
+                if let Some(p) = &params { nd["params"] = Value::Object(p.clone()); }
                 else { nd.as_object_mut().unwrap().remove("params"); }
             }
             if nd["bypass"].as_bool().unwrap_or(false) != def.bypass { nd["bypass"] = Value::Bool(def.bypass); }

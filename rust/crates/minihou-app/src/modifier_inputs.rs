@@ -145,6 +145,7 @@ mod tests {
         }});
         let parsed = minihou_core::Graph::from_value(&graph).unwrap();
         assert_eq!(parsed.nodes.iter().find(|(name,_)| name == "move").unwrap().1.params.as_ref().unwrap()["translate"], json!([3,4,5]));
+        assert_eq!(parsed.to_value()["nodes"]["move"]["params"]["translate"], graph["nodes"]["move"]["params"]["translate"]);
         let mut broken = graph;
         broken["nodes"]["input"]["modifier_inputs"] = json!([]);
         assert!(minihou_core::Graph::from_value(&broken).err().unwrap().to_string().contains("is missing"));
