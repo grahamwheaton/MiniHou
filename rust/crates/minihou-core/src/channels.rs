@@ -30,7 +30,9 @@ impl Address {
 struct Resolver<'a> {
     graph: &'a Graph,
     result: ResolvedChannels,
-    memo: HashMap<Address, Value>,
+    // Keep the failure as well as its literal fallback. A later dependent must
+    // not mistake a failed channel's memoized literal for a successful link.
+    memo: HashMap<Address, (Value, Option<ParamDiagKind>)>,
     active: HashSet<Address>,
 }
 
@@ -79,7 +81,9 @@ impl Resolver<'_> {
         self.result.diagnostics.push(ParamDiag{node:a.node.clone(),param:a.label(),kind,message});
     }
     fn resolve(&mut self,a:&Address)->std::result::Result<Value,ParamDiagKind> {
-        if let Some(v)=self.memo.get(a){return Ok(v.clone());}
+        if let Some((value, failure))=self.memo.get(a) {
+            return match failure { Some(kind)=>Err(kind.clone()), None=>Ok(value.clone()) };
+        }
         if !self.active.insert(a.clone()) {return Err(ParamDiagKind::CycleDetected);}
         let fallback=match self.literal(a){Some(v)=>v,None=>{self.active.remove(a);return Err(ParamDiagKind::BadReference)}};
         let expected=self.graph.node(&a.node).and_then(|d|nodes::get(&d.node_type)).and_then(|s|s.params.iter().find(|p|p.name==a.param)).map(|p|(p.default)()).unwrap_or(Value::Null);
@@ -115,7 +119,7 @@ impl Resolver<'_> {
         match result {
             Ok(mut v)=>{
                 if has_expr && a.component.is_none() && v.as_array().is_some_and(|xs|xs.len()==3) {
-                    self.memo.insert(a.clone(),v.clone());
+                    self.memo.insert(a.clone(),(v.clone(),None));
                     for i in 0..3 {
                         let component=Address{node:a.node.clone(),param:a.param.clone(),component:Some(i)};
                         if self.expression(&component).is_some(){
@@ -123,9 +127,9 @@ impl Resolver<'_> {
                         }
                     }
                 }
-                self.memo.insert(a.clone(),v.clone());Ok(v)
+                self.memo.insert(a.clone(),(v.clone(),None));Ok(v)
             }
-            Err((kind,message))=>{self.diag(a,kind.clone(),message);self.memo.insert(a.clone(),fallback.clone());Err(kind)}
+            Err((kind,message))=>{self.diag(a,kind.clone(),message);self.memo.insert(a.clone(),(fallback,Some(kind.clone())));Err(kind)}
         }
     }
     fn evaluate(&mut self,a:&Address,source:&str)->std::result::Result<Value,(ParamDiagKind,String)> {
@@ -200,6 +204,19 @@ mod tests {
         assert_eq!(r.params["a"]["size"][1],json!(4));
         assert!(r.diagnostics.iter().any(|d|d.kind==ParamDiagKind::BadReference&&d.node=="a"&&d.param=="size.y"));
         assert!(r.diagnostics.iter().any(|d|d.kind==ParamDiagKind::CycleDetected));
+    }
+    #[test]
+    fn previously_resolved_broken_link_does_not_drive_a_dependent() {
+        // JSON object order resolves "a" first. Its failed channel is memoized
+        // before "z" reads it; "z" must still get a failed dependency.
+        let r=resolve(json!({"nodes":{
+            "a":{"type":"box","params":{"size":[3,1,1]},"channels":{"size.x":"ch('../missing/size.x')"}},
+            "z":{"type":"box","params":{"size":[9,1,1]},"channels":{"size.x":"ch('../a/size.x') + 1"}}
+        }}));
+        assert_eq!(r.params["a"]["size"][0],json!(3));
+        assert_eq!(r.params["z"]["size"][0],json!(9));
+        assert!(r.diagnostics.iter().any(|d|d.node=="a"&&d.param=="size.x"&&d.kind==ParamDiagKind::BadReference));
+        assert!(r.diagnostics.iter().any(|d|d.node=="z"&&d.param=="size.x"&&d.kind==ParamDiagKind::BadReference));
     }
     #[test]
     fn channel_time_aliases_and_bad_expression() {
