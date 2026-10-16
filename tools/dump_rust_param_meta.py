@@ -61,6 +61,9 @@ TYPES += ["scatter", "point_jitter", "point_relax", "sort", "switch", "clean",
 TYPES += ["goal_length", "goal_collision", "goal_surface", "goal_gravity", "goal_pin", "goal_solve",
           "solver", "rbd_configure", "rbd_constraint", "rbd_solver", "rbd_constraint_properties", "glue_cluster"]
 
+# Last node ports.
+TYPES += ["rbd_material_fracture"]
+
 
 def meta() -> dict:
     import minihou  # noqa: F401 - registers the node types

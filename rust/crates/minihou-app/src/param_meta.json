@@ -5380,6 +5380,213 @@
    "min": 0.0
   }
  },
+ "rbd_material_fracture": {
+  "clusters": {
+   "default": 0,
+   "doc": "Merge strongly stuck pieces into this many rigid clusters (needs glue; 0: none)",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 50
+  },
+  "convex_parts": {
+   "default": false,
+   "doc": "Split pieces that are not convex (a concave input) into convex parts, so the body still simulates",
+   "kind": "bool"
+  },
+  "density": {
+   "default": 1000.0,
+   "doc": "custom: kg per cubic metre",
+   "kind": "float",
+   "min": 1.0,
+   "soft_max": 10000.0
+  },
+  "detail_amplitude": {
+   "default": 0.02,
+   "doc": "interior_detail: how far the noise moves points",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 0.5
+  },
+  "detail_divisions": {
+   "default": 4,
+   "doc": "interior_detail: each inside triangle is cut into this many squared pieces",
+   "kind": "int",
+   "max": 16,
+   "min": 1
+  },
+  "detail_frequency": {
+   "default": 4.0,
+   "doc": "interior_detail: noise frequency",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 20.0
+  },
+  "fracture_level": {
+   "default": 1,
+   "doc": "Fracture each piece again this many times in all (each pass breaks the previous pieces)",
+   "kind": "int",
+   "max": 4,
+   "min": 1
+  },
+  "friction": {
+   "default": 0.6,
+   "doc": "custom: friction",
+   "kind": "float",
+   "max": 10.0,
+   "min": 0.0
+  },
+  "gap": {
+   "default": 0.0,
+   "doc": "A gap between pieces (needs max_gap in the glue)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 0.05
+  },
+  "glue": {
+   "default": true,
+   "doc": "Glue the pieces together (output = constraints gives the links)",
+   "kind": "bool"
+  },
+  "glue_strength": {
+   "default": 10000000.0,
+   "doc": "custom: glue strength in newtons per square metre of contact",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 1000000000.0
+  },
+  "interior_detail": {
+   "default": false,
+   "doc": "Roughen the new inside faces with noise (render geometry: such pieces are not convex, so they cannot go to the solver)",
+   "kind": "bool"
+  },
+  "mass_scale": {
+   "default": 1.0,
+   "doc": "Multiplies the pieces' mass (units are metres and kilograms)",
+   "kind": "float",
+   "min": 0.0001,
+   "soft_max": 10.0
+  },
+  "material": {
+   "default": "concrete",
+   "doc": "Density, friction, bounce and how firmly the pieces are glued (custom: the four numbers below)",
+   "kind": "enum",
+   "options": [
+    "concrete",
+    "brick",
+    "stone",
+    "wood",
+    "glass",
+    "ceramic",
+    "ice",
+    "metal",
+    "custom"
+   ]
+  },
+  "max_concavity": {
+   "default": 0.05,
+   "doc": "convex_parts: how concave a piece may stay",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "outgrp_cutedges": {
+   "default": false,
+   "doc": "The outline of every cut face (with interior_detail: where the inside meets the outside)",
+   "kind": "bool"
+  },
+  "outgrp_cutedges_name": {
+   "default": "cutedges",
+   "doc": "Name of the cut edges group",
+   "kind": "str"
+  },
+  "outgrp_cutpoints": {
+   "default": false,
+   "doc": "Points on the cuts",
+   "kind": "bool"
+  },
+  "outgrp_cutpoints_name": {
+   "default": "cutpoints",
+   "doc": "Name of the cut points group",
+   "kind": "str"
+  },
+  "outgrp_inside": {
+   "default": true,
+   "doc": "The new faces made by the fracture",
+   "kind": "bool"
+  },
+  "outgrp_inside_name": {
+   "default": "inside",
+   "doc": "Name of the inside faces group",
+   "kind": "str"
+  },
+  "outgrp_outside": {
+   "default": false,
+   "doc": "The faces that came from the input's own surface",
+   "kind": "bool"
+  },
+  "outgrp_outside_name": {
+   "default": "outside",
+   "doc": "Name of the outside faces group",
+   "kind": "str"
+  },
+  "output": {
+   "default": "pieces",
+   "doc": "pieces: the fractured, configured bodies for the solver's first input; constraints: the glue links for its third",
+   "kind": "enum",
+   "options": [
+    "pieces",
+    "constraints"
+   ]
+  },
+  "pieces": {
+   "default": 24,
+   "doc": "How many pieces to break the shape into (at the first level)",
+   "kind": "int",
+   "max": 2000,
+   "min": 2,
+   "soft_max": 200
+  },
+  "relax": {
+   "default": 2,
+   "doc": "Relaxation passes: more even pieces",
+   "kind": "int",
+   "max": 20,
+   "min": 0
+  },
+  "restitution": {
+   "default": 0.1,
+   "doc": "custom: bounce",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  },
+  "strength_scale": {
+   "default": 1.0,
+   "doc": "Multiplies the material's glue strength",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 10.0
+  },
+  "sub_pieces": {
+   "default": 4,
+   "doc": "Pieces each piece breaks into at the second level and beyond",
+   "kind": "int",
+   "max": 64,
+   "min": 2
+  },
+  "surface_fraction": {
+   "default": 0.15,
+   "doc": "Share of the fracture points on the surface (finer pieces at the outside)",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
  "rbd_solver": {
   "cache_mb": {
    "default": 32,
