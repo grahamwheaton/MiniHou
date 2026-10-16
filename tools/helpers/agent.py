@@ -176,7 +176,7 @@ def rows():
         state = s.get("state")
         if state == "running" and not pid_alive(s.get("pid")):
             state = "died"
-        task = (d / "prompt.txt").read_text(encoding="utf-8", errors="replace").strip().splitlines()[0][:60]
+        task = ((d / "prompt.txt").read_text(encoding="utf-8", errors="replace").strip().splitlines()[:1] or [""])[0][:60]
         log = (d / "worker.log").read_text(encoding="utf-8", errors="replace") if (d / "worker.log").exists() else ""
         used = re.findall(r"tokens used\s*([\d,]+)", log)
         out.append((t.get("id"), t.get("agent"), task, state, (used[-1] if used else "-"), s.get("updated", "")[11:]))
