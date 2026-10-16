@@ -159,6 +159,45 @@ class RustLinkTests(unittest.TestCase):
         self.addCleanup(host.close)
         return host
 
+    def test_dynamic_modifier_inputs_roundtrip(self):
+        definitions = [
+            ("f", "Float", "float", 1.0), ("i", "Integer", "int", 2),
+            ("b", "Enabled", "bool", False), ("v", "Offset", "vector", [0, 0, 0]),
+            ("c", "Tint", "color", [1, 1, 1, 1]), ("s", "Label", "string", ""),
+            ("o", "Asset", "object", ""),
+        ]
+        graph = {"nodes": {
+            "input": {"type": "modifier_input", "modifier_inputs": [
+                {"id": ident, "name": name, "kind": kind, "default": default}
+                for ident, name, kind, default in definitions]},
+            "asset": {"type": "object_input", "params": {"binding": "input:input:o"}},
+            "move": {"type": "transform", "inputs": {"geo": "input"}, "params": {
+                "translate": {"modifier_input": {"node": "input", "id": "v"}},
+                "uniform_scale": {"modifier_input": {"node": "input", "id": "f"}}}},
+            "merge": {"type": "merge", "inputs": {"geos": ["move", "asset"]}},
+            "out": {"type": "output", "inputs": {"geo": "merge"}}}, "display": "out"}
+        host = self.host()
+        client = host.instances()
+        client.set_sources("A", {"input:input:o": mesh(20)})
+        values = {"Float": 2.0, "Integer": 7, "Enabled": True, "Offset": [3, 4, 5],
+                  "Tint": [0.1, 0.2, 0.3, 0.4], "Label": "hello", "Asset": "Cube"}
+        refs = {"input:input:o": {"kind": "object", "name": "Cube", "matrix":
+                [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]}}
+        header, arrays = client.cook("A", "", values, mesh(), graph=graph, references=refs)
+        self.assertEqual(header["type"], "instance_result")
+        self.assertEqual(header["input_references"], refs)
+        got = {p["name"]: p["value"] for p in header["interface"]}
+        self.assertEqual(got, values)
+        self.assertEqual(arrays["point/P"].shape[0], 6)
+        self.assertAlmostEqual(arrays["point/P"][0, 0], 5)
+        self.assertAlmostEqual(arrays["point/P"][3, 0], 20)
+        client.set_sources("B", {"input:input:o": mesh(30)})
+        other, other_arrays = client.cook("B", "", {"Float": 4, "Offset": [0, 0, 0], "Asset": "Sphere"}, mesh(), graph=graph)
+        self.assertEqual(other["interface"][0]["value"], 4)
+        self.assertEqual(other_arrays["point/P"][3, 0], 30)
+        again, _ = client.cook("A", "", values, mesh(), graph=graph)
+        self.assertEqual({p["name"]: p["value"] for p in again["interface"]}, values)
+
     def test_chained_placements_reuse_only_unchanged_cooks(self):
         host = self.host()
         client = host.instances()

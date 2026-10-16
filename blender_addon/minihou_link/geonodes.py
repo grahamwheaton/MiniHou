@@ -90,12 +90,12 @@ def add_group(tree, graph_path, *, host=None, port=None):
 def reload_graph(node, *, host=None, port=None):
     tree = node.node_tree
     header = modifiers._connection(host, port).describe(tree[modifiers.PATH])
-    old = {s.name: s.default_value[:] if s.type == "VECTOR" else s.default_value
+    old = {s.identifier: tuple(s.default_value) if s.type in {"VECTOR", "RGBA"} else s.default_value
            for s in node.inputs if hasattr(s, "default_value")}
     proxy.sync_interface(tree, _cache(tree), header["interface"], json.dumps(header["interface"]))
     for s in node.inputs:
-        if s.name in old and hasattr(s, "default_value"):
-            s.default_value = old[s.name]
+        if s.identifier in old and hasattr(s, "default_value"):
+            s.default_value = old[s.identifier]
     tree[modifiers.GRAPH] = json.dumps(header["graph"])
     tree[modifiers.PARAMS] = json.dumps(header["interface"])
     _object_interface(tree)
@@ -132,12 +132,53 @@ def _bindings(obj, mod, path, node):
         if source is not None:
             modifiers._validate_source(obj, source)
         result[key] = source
+    for p in json.loads(tree[modifiers.PARAMS]):
+        if p["kind"] not in {"object", "collection"} or not p.get("id"):
+            continue
+        ref = _value(mod.node_group, mod, path[:-1], node.inputs[p["name"]], obj=obj)
+        key = "input:" + p["node"] + ":" + p["id"]
+        if p["kind"] == "object":
+            if ref is not None:
+                modifiers._validate_source(obj, ref)
+            result[key] = ref
+        elif ref is not None:
+            for member in ref.all_objects:
+                modifiers._validate_source(obj, member)
+                result[key + ":" + member.name] = member
     return result
 
 
-def _sources(client, ident, bindings, materials):
-    import numpy as np
+def _placement_values(root, mod, path, node, obj):
+    values = {}
+    for p in json.loads(node.node_tree[modifiers.PARAMS]):
+        socket = node.inputs[p["name"]]
+        if p["kind"] == "geometry":
+            values[p["name"]] = "@input:" + p["node"] + ":" + p["id"] if socket.is_linked else ""
+        elif p["kind"] in {"bundle", "closure"}:
+            if socket.is_linked:
+                raise ValueError(f"{p['name']}: linked {p['kind']} data cannot cross the MiniHou mesh bridge")
+            values[p["name"]] = ""
+        else:
+            values[p["name"]] = proxy.canonical(p["kind"], _value(root, mod, path, socket, obj=obj))
+    return values
+
+
+def _placement_references(root, mod, path, node, obj):
+    params = json.loads(node.node_tree[modifiers.PARAMS])
+    return proxy.reference_metadata(params, lambda p: _value(root, mod, path, node.inputs[p["name"]], obj=obj))
+
+
+def _geometry_sources(obj, mod, path, node):
     sources = {}
+    for p in json.loads(node.node_tree[modifiers.PARAMS]):
+        if p["kind"] == "geometry" and node.inputs[p["name"]].is_linked:
+            sources["input:" + p["node"] + ":" + p["id"]] = _probe(obj, mod, path, p["name"])[0]
+    return sources
+
+
+def _sources(client, ident, bindings, materials, extra=None):
+    import numpy as np
+    sources = dict(extra or {})
     for key, source in bindings.items():
         if source is None:
             continue
@@ -173,14 +214,15 @@ def _apply_live(node, header):
     tree = node.node_tree
     graph = json.dumps(header["graph"])
     if tree[modifiers.GRAPH] != graph or tree[modifiers.PARAMS] != json.dumps(header["interface"]):
+        old = {s.identifier: s.default_value for s in node.inputs if hasattr(s, "default_value") and not s.is_linked}
         tree[modifiers.GRAPH] = graph
         tree[modifiers.PARAMS] = json.dumps(header["interface"])
         proxy.sync_interface(tree, _cache(tree), header["interface"], json.dumps(header["interface"]))
         _object_interface(tree)
         for p in header["interface"]:
             socket = node.inputs.get(p["name"])
-            if socket is not None and not socket.is_linked:
-                socket.default_value = p["value"]
+            if socket is not None and not socket.is_linked and hasattr(socket, "default_value"):
+                socket.default_value = old.get(socket.identifier, p["value"])
         _digests.pop(tree[KEY], None)
     tree[modifiers.PATH] = header["path"]
 
@@ -201,14 +243,15 @@ def edit_live(obj, node):
     client = modifiers._connection()
     arrays, materials, _ = _probe(obj, mod, path)
     materials = list(materials)
-    _sources(client, tree[KEY], _bindings(obj, mod, path, node), materials)
-    values = {p["name"]: _value(mod.node_group, mod, path[:-1], node.inputs[p["name"]], obj=obj)
-              for p in json.loads(tree[modifiers.PARAMS])}
+    _sources(client, tree[KEY], _bindings(obj, mod, path, node), materials,
+             _geometry_sources(obj, mod, path, node))
+    values = _placement_values(mod.node_group, mod, path[:-1], node, obj)
     scene = bpy.context.scene
     header = client.edit_live(tree[KEY], json.loads(tree[modifiers.GRAPH]), values, arrays,
                               label=obj.name + " / " + " / ".join(path),
                               frame=scene.frame_current + scene.frame_subframe,
-                              fps=scene.render.fps / scene.render.fps_base)
+                              fps=scene.render.fps / scene.render.fps_base,
+                              references=_placement_references(mod.node_group, mod, path[:-1], node, obj))
     _live.add(tree[KEY])
     _apply_live(node, header)
     return {"state": "ready", "editor_url": client.welcome.get("editor_url", ""),
@@ -371,6 +414,8 @@ def _value(root, mod, path, socket, seen=None, obj=None):
         raise ValueError("Cyclic parameter binding")
     seen.add(key)
     if not socket.is_linked:
+        if not hasattr(socket, "default_value"):
+            raise ValueError(f"{socket.name}: this Blender socket has no uniform value; MiniHou cannot sample it")
         value = socket.default_value
         return list(value) if socket.type == "VECTOR" else value
     link = socket.links[0]
@@ -511,10 +556,10 @@ def _validate(obj, tree, mod):
             check(proxy.get_input(mod, socket.identifier))
 
 
-def _probe(obj, mod, path):
-    """Lift the placement's wired input through temporary ancestor output sockets."""
+def _probe(obj, mod, path, input_name="Geometry"):
+    """Lift a placement geometry input through temporary ancestor output sockets."""
     placement = _tree(mod.node_group, path[:-1]).nodes[path[-1]]
-    if not placement.inputs["Geometry"].links:
+    if not placement.inputs[input_name].links:
         return ({"point/P": np.empty((0, 3), np.float32),
                  "topo/vertex_point": np.empty(0, np.int32),
                  "topo/prim_offsets": np.array([0], np.int32)},
@@ -547,9 +592,9 @@ def _probe(obj, mod, path):
             ancestors.append((tree, node))
             tree = child
         placement = tree.nodes[path[-1]]
-        geometry = placement.inputs["Geometry"]
+        geometry = placement.inputs[input_name]
         if len(geometry.links) != 1:
-            raise ValueError("MiniHou Geometry input must have at most one mesh link")
+            raise ValueError(f"MiniHou {input_name} input must have at most one mesh link")
         source = geometry.links[0].from_socket
         for parent, node in reversed(ancestors):
             item = tree.interface.new_socket("__MiniHou_probe__", in_out="OUTPUT", socket_type="NodeSocketGeometry")
@@ -627,19 +672,18 @@ def _cook_tree(obj, mod, host, port, force):
                     if preceding.type in {"CLOTH", "SOFT_BODY", "FLUID", "PARTICLE_SYSTEM", "MESH_SEQUENCE_CACHE"} or (
                             preceding.type == "NODES" and modifiers._animated_nodes(preceding.node_group)):
                         raise ValueError("RBD requires static input; animated upstream modifiers are unsupported")
-            values = {p["name"]: _value(root, mod, path[:-1], node.inputs[p["name"]], obj=obj)
-                      for p in json.loads(tree[modifiers.PARAMS])}
+            values = _placement_values(root, mod, path[:-1], node, obj)
             client = modifiers._connection(host, port)
             if tree[KEY] in _live:
                 _apply_live(node, client.sync_live(tree[KEY], values))
                 graph = json.loads(tree[modifiers.GRAPH])
-                values = {p["name"]: _value(root, mod, path[:-1], node.inputs[p["name"]], obj=obj)
-                          for p in json.loads(tree[modifiers.PARAMS])}
+                values = _placement_values(root, mod, path[:-1], node, obj)
             # Validate pickers before evaluating any staged geometry.
             bindings = _bindings(obj, mod, path, node)
             arrays, materials, info = _probe(obj, mod, path)
             materials = list(materials)
-            source_digest = _sources(client, tree[KEY], bindings, materials)
+            source_digest = _sources(client, tree[KEY], bindings, materials,
+                                     _geometry_sources(obj, mod, path, node))
             signature = _signature(tree, arrays, values, materials) + source_digest
             names = json.loads(tree.get(proxy.INST_KEY, "[]"))
             objects = [bindings.get(name[1:]) for name in names]
@@ -656,7 +700,8 @@ def _cook_tree(obj, mod, host, port, force):
                 tree[KEY], tree[modifiers.PATH], values, arrays,
                 frame=scene.frame_current + scene.frame_subframe,
                 fps=scene.render.fps / scene.render.fps_base, graph=graph,
-                materials=[m.name if m is not None else "" for m in materials])
+                materials=[m.name if m is not None else "" for m in materials],
+                references=_placement_references(root, mod, path[:-1], node, obj))
             output, manifests = instance_payload(header, output)
             update = GeoUpdate.from_message(header, output)
             names = update.detail.get("instance_objects", [])

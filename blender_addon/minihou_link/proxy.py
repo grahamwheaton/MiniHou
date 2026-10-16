@@ -25,10 +25,27 @@ GROUP = "MiniHou"
 MODIFIER = "MiniHou"
 STRUCTURE_KEY = "minihou_structure"
 MAP_KEY = "minihou_map"
+IDS_KEY = "minihou_input_ids"
 
 _SOCKET_TYPES = {"float": "NodeSocketFloat", "int": "NodeSocketInt", "bool": "NodeSocketBool",
-                 "vec3": "NodeSocketVector"}
-_STORE_TYPES = {"float": "FLOAT", "int": "INT", "bool": "BOOLEAN", "vec3": "FLOAT_VECTOR"}
+                 "vec3": "NodeSocketVector", "vector": "NodeSocketVector", "color": "NodeSocketColor",
+                 "rotation": "NodeSocketRotation", "matrix": "NodeSocketMatrix", "string": "NodeSocketString",
+                 "menu": "NodeSocketMenu", "object": "NodeSocketObject", "collection": "NodeSocketCollection",
+                 "material": "NodeSocketMaterial", "image": "NodeSocketImage", "texture": "NodeSocketTexture",
+                 "geometry": "NodeSocketGeometry", "bundle": "NodeSocketBundle", "closure": "NodeSocketClosure"}
+_STORE_TYPES = {"float": "FLOAT", "int": "INT", "bool": "BOOLEAN", "vec3": "FLOAT_VECTOR",
+                "vector": "FLOAT_VECTOR", "color": "FLOAT_COLOR", "string": "STRING"}
+_VECTOR_SUBTYPES = {"translation": "NodeSocketVectorTranslation", "xyz": "NodeSocketVectorXYZ",
+                    "euler": "NodeSocketVectorEuler", "direction": "NodeSocketVectorDirection"}
+
+
+def _socket_type(p):
+    if p["kind"] == "vector":
+        subtype = str(p.get("subtype", "")).lower()
+        if subtype and subtype not in _VECTOR_SUBTYPES:
+            raise ValueError(f"Unsupported vector subtype {subtype!r} for {p['name']}")
+        return _VECTOR_SUBTYPES.get(subtype, "NodeSocketVector")
+    return _SOCKET_TYPES[p["kind"]]
 USE_NODE_PREFIX = "MH_use_"
 INST_PREFIX = "MH_inst_"
 INST_KEY = "minihou_instances"
@@ -343,7 +360,8 @@ def _build_nodes(ng, output_obj) -> None:
 
 
 def _active_inputs(ng):
-    return [i for i in _sockets(ng, "INPUT") if i.socket_type not in {"NodeSocketGeometry", "NodeSocketObject"}]
+    return [i for i in _sockets(ng, "INPUT") if i.name != "Geometry" and i.name != "Source Object"
+            and not i.name.startswith("Object: ")]
 
 
 def _remove_input(ng, item) -> None:
@@ -366,8 +384,19 @@ def _configure_socket(s, p: dict) -> None:
     desc = p.get("doc", "")
     if s.description != desc:
         s.description = desc                 # tooltip
-    want = {"default_value": bool(p["value"]) if kind == "bool" else
-            (tuple(float(c) for c in p["value"]) if kind == "vec3" else p["value"])}
+    want = {}
+    if kind not in {"geometry", "bundle", "closure"} and hasattr(s, "default_value"):
+        value = p["value"]
+        if kind == "bool": value = bool(value)
+        elif kind in {"vec3", "vector", "rotation", "color"}: value = tuple(float(c) for c in value)
+        elif kind == "matrix":
+            values = list(value)
+            value = tuple(tuple(float(values[r * 4 + c]) for c in range(4)) for r in range(4))
+        elif kind in {"object", "collection", "material", "image", "texture"} and isinstance(value, str):
+            collection = getattr(bpy.data, {"object":"objects", "collection":"collections", "material":"materials", "image":"images", "texture":"textures"}[kind])
+            value = collection.get(value)
+        if kind != "menu" or value:
+            want["default_value"] = value
     if kind != "bool":
         # Blender sockets only have hard limits; the engine's hard limits map straight onto them.
         for src, dst in (("min", "min_value"), ("max", "max_value")):
@@ -375,9 +404,14 @@ def _configure_socket(s, p: dict) -> None:
                 want[dst] = p[src]
     for attr, v in want.items():
         cur = getattr(s, attr)
-        cur = tuple(cur) if kind == "vec3" and attr == "default_value" else cur
+        if cur is not None and attr == "default_value":
+            if kind in {"vec3", "vector", "rotation", "color"}: cur = tuple(cur)
+            elif kind == "matrix": cur = tuple(tuple(row) for row in cur)
         if cur != v:
-            setattr(s, attr, v)
+            try:
+                setattr(s, attr, v)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Blender cannot set {kind} input {p['name']!r} {attr}: {exc}") from exc
 
 
 def sync_interface(ng, output_obj, params: List[dict], structure: str) -> None:
@@ -392,18 +426,38 @@ def sync_interface(ng, output_obj, params: List[dict], structure: str) -> None:
     assert_main_thread()
     iface = ng.interface
     _build_nodes(ng, output_obj)
-    wanted = {p["name"]: _SOCKET_TYPES[p["kind"]] for p in params}
-    for item in _active_inputs(ng):
-        if wanted.get(item.name) != item.socket_type:
-            _remove_input(ng, item)
-    existing = {i.name: i for i in _active_inputs(ng)}
-    ids = {}
     for p in params:
-        item = existing.get(p["name"]) or iface.new_socket(p["name"], in_out="INPUT", socket_type=wanted[p["name"]])
+        socket_type = _socket_type(p)
+        if socket_type is None or (p["kind"] in {"bundle", "closure"} and bpy.app.version < (5, 0, 0)):
+            raise ValueError(f"Blender {bpy.app.version_string} does not support {p['kind']} input sockets")
+        if hasattr(bpy, "types") and hasattr(bpy.types, "NodeSocketFloat") and not hasattr(bpy.types, socket_type):
+            raise ValueError(f"Blender {bpy.app.version_string} does not support {socket_type}")
+    def stable(p):
+        return str(p.get("node", "")) + ":" + str(p["id"]) if p.get("id") else p["name"]
+    old_ids = json.loads(ng.get(IDS_KEY, "{}"))
+    current = {i.identifier: i for i in _active_inputs(ng)}
+    claimed = set()
+    chosen = []
+    for p in params:
+        wanted = _socket_type(p)
+        item = current.get(old_ids.get(stable(p))) or next((i for i in current.values() if i.name == p["name"]), None)
+        if item is not None and item.socket_type != wanted:
+            _remove_input(ng, item); item = None
+        if item is None:
+            item = iface.new_socket(p["name"], in_out="INPUT", socket_type=wanted)
+        if item.name != p["name"]:
+            item.name = p["name"]  # same identifier: modifier values, drivers and GN links survive a rename
+        claimed.add(item.identifier)
+        chosen.append(item)
+    for item in _active_inputs(ng):
+        if item.identifier not in claimed:
+            _remove_input(ng, item)
+    ids = {}
+    for p, item in zip(params, chosen):
         _configure_socket(item, p)
         ids[p["name"]] = item.identifier
     for k, p in enumerate(params):                    # order: Geometry input, then the engine's order
-        geo_in = next(i for i in _sockets(ng, "INPUT") if i.socket_type == "NodeSocketGeometry")
+        geo_in = next(i for i in _sockets(ng, "INPUT") if i.name == "Geometry")
         item = next(i for i in _sockets(ng, "INPUT") if i.identifier == ids[p["name"]])
         target = geo_in.position + 1 + k
         if item.position != target:
@@ -412,6 +466,9 @@ def sync_interface(ng, output_obj, params: List[dict], structure: str) -> None:
     new_map = json.dumps(ids)
     if ng.get(MAP_KEY) != new_map:
         ng[MAP_KEY] = new_map
+    new_ids = json.dumps({stable(p): ids[p["name"]] for p in params})
+    if ng.get(IDS_KEY) != new_ids:
+        ng[IDS_KEY] = new_ids
     if ng.get(STRUCTURE_KEY) != structure:
         ng[STRUCTURE_KEY] = structure
 
@@ -431,7 +488,7 @@ def _sync_usage_chain(ng, params: List[dict], ids: Dict[str, str]) -> None:
     inner_ids = json.loads(tree.get(PLUMBING_KEY, "{}")) if tree is not ng else None
     nodes = {n.bl_idname: n for n in tree.nodes}
     gin, gout = nodes["NodeGroupInput"], nodes["NodeGroupOutput"]
-    params = list(params)
+    params = [p for p in params if p["kind"] in _STORE_TYPES]
     ids = dict(ids)
     # Reference-only comparison is available from Blender 5.2. Older versions
     # must not evaluate object geometry merely to mark a socket as used.
@@ -607,13 +664,42 @@ def mapping(ng) -> Dict[str, str]:
 
 
 def canonical(kind: str, v):
-    if kind == "vec3":
+    if kind in {"vec3", "vector", "rotation", "color"}:
         return tuple(float(c) for c in v)
+    if kind == "matrix":
+        return tuple(float(c) for row in v for c in row) if len(v) == 4 else tuple(float(c) for c in v)
     if kind == "bool":
         return bool(v)
     if kind == "int":
         return int(v)
-    return float(v)
+    if kind == "float":
+        return float(v)
+    if kind in {"object", "collection", "material", "image", "texture"}:
+        return v.name if v is not None else ""
+    if kind in {"geometry", "bundle", "closure"}:
+        raise ValueError(f"{kind} input cannot be read as a uniform modifier value; connect a supported value source")
+    return str(v)
+
+
+def reference_metadata(params, value_of):
+    """JSON-safe Blender ID identity and transforms; geometry arrays travel via instance_sources."""
+    result = {}
+    for p in params:
+        if p["kind"] not in {"object", "collection", "material", "image", "texture"} or not p.get("id"):
+            continue
+        ref = value_of(p)
+        key = "input:" + p["node"] + ":" + p["id"]
+        entry = {"kind": p["kind"], "name": ref.name if ref is not None else ""}
+        if p["kind"] == "object" and ref is not None:
+            entry["matrix"] = [float(v) for row in ref.matrix_world for v in row]
+        elif p["kind"] == "collection" and ref is not None:
+            entry["objects"] = [{"name": obj.name,
+                                  "matrix": [float(v) for row in obj.matrix_world for v in row]}
+                                 for obj in ref.all_objects]
+        elif p["kind"] == "image" and ref is not None:
+            entry["size"] = list(ref.size)
+        result[key] = entry
+    return result
 
 
 # Modifier input values. Up to Blender 5.1 they are ID properties on the modifier (``mod["Socket_2"]``); Blender 5.2
@@ -666,8 +752,14 @@ def write_values(mod, ng, params: List[dict], values: Dict[str, object]) -> None
         if ident is None or p["name"] not in values or not has_input(mod, ident):
             continue
         v = values[p["name"]]
+        if p["kind"] in {"geometry", "bundle", "closure"}:
+            continue
         if not same_value(canonical(p["kind"], get_input(mod, ident)), v):
-            set_input(mod, ident, tuple(v) if p["kind"] == "vec3" else v)
+            if p["kind"] in {"object", "collection", "material", "image", "texture"} and isinstance(v, str):
+                v = getattr(bpy.data, {"object":"objects", "collection":"collections", "material":"materials", "image":"images", "texture":"textures"}[p["kind"]]).get(v)
+            if p["kind"] == "matrix":
+                v = tuple(tuple(v[r * 4 + c] for c in range(4)) for r in range(4))
+            set_input(mod, ident, tuple(v) if p["kind"] in {"vec3", "vector", "rotation", "color"} else v)
             changed = True
     if changed:
         mod.id_data.update_tag()
@@ -680,6 +772,8 @@ def read_values(mod, ng, params: List[dict]) -> Dict[str, object]:
     for p in params:
         ident = m.get(p["name"])
         if ident is None or not has_input(mod, ident):
+            continue
+        if p["kind"] in {"geometry", "bundle", "closure"}:
             continue
         out[p["name"]] = canonical(p["kind"], get_input(mod, ident))
     return out

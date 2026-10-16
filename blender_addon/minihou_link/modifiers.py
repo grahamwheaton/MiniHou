@@ -238,8 +238,20 @@ def set_object(mod, key, obj):
 
 def _source_meshes(obj, mod, materials=None):
     sources = {}
-    for key in _object_keys(mod):
-        source = get_object(mod, key)
+    inputs = [(key, get_object(mod, key)) for key in _object_keys(mod)]
+    for p in parameters(mod):
+        if p["kind"] not in {"object", "collection"} or not p.get("id"):
+            continue
+        ident = proxy.mapping(mod.node_group).get(p["name"])
+        if ident is None or not proxy.has_input(mod, ident):
+            continue
+        ref = proxy.get_input(mod, ident)
+        key = "input:" + p["node"] + ":" + p["id"]
+        if p["kind"] == "object":
+            inputs.append((key, ref))
+        elif ref is not None:
+            inputs.extend((key + ":" + member.name, member) for member in ref.all_objects)
+    for key, source in inputs:
         if source is None:
             continue
         _validate_source(obj, source)
@@ -258,6 +270,13 @@ def _source_meshes(obj, mod, materials=None):
                 arrays["prim/material_index"] = np.asarray(mapping, dtype=np.int32)[np.clip(indices, 0, len(mapping) - 1)]
         sources[key] = arrays
     return sources
+
+
+def _input_references(mod):
+    def value_of(p):
+        ident = proxy.mapping(mod.node_group).get(p["name"])
+        return proxy.get_input(mod, ident) if ident is not None and proxy.has_input(mod, ident) else None
+    return proxy.reference_metadata(parameters(mod), value_of)
 
 
 def _send_sources(client, obj, mod, materials=None):
@@ -398,7 +417,10 @@ def _interface(mod, header, initial=False, activate=False):
     passthrough = initial or proxy.passthrough(ng)
     # Plumbing lives in one private nested group; flat groups from older add-ons migrate here.
     proxy.ensure_nested(ng)
-    old = proxy.read_values(mod, ng, parameters(mod)) if not initial else {}
+    previous = parameters(mod) if not initial else []
+    old = proxy.read_values(mod, ng, previous) if not initial else {}
+    old_ids = {p["node"] + ":" + p["id"]: old[p["name"]] for p in previous
+               if p.get("id") and p.get("node") and p["name"] in old}
     params = header["interface"]
     cache = _cache(mod)
     proxy.sync_interface(ng, cache, params, json.dumps([(p["name"], p["kind"]) for p in params]))
@@ -418,7 +440,8 @@ def _interface(mod, header, initial=False, activate=False):
     if ng.get("minihou_object_usage_version") != USAGE_VERSION:
         ng["minihou_object_usage_version"] = USAGE_VERSION
     ng[PARAMS] = json.dumps(params)
-    values = {p["name"]: old.get(p["name"], p["value"]) for p in params}
+    values = {p["name"]: old_ids.get(p.get("node", "") + ":" + p.get("id", ""),
+              old.get(p["name"], p["value"])) for p in params}
     proxy.write_values(mod, ng, params, values)
     # sync_interface uses the proxy's relative cache convention; stack caches always stay local.
     proxy.cache_info(ng).transform_space = "ORIGINAL"
@@ -455,7 +478,8 @@ def edit_live(obj, mod):
                               proxy.read_values(mod, mod.node_group, parameters(mod)), arrays,
                               label=obj.name + " / " + mod.name,
                               frame=scene.frame_current + scene.frame_subframe,
-                              fps=scene.render.fps / scene.render.fps_base)
+                              fps=scene.render.fps / scene.render.fps_base,
+                              references=_input_references(mod))
     _live_ids.add(instance_id(mod))
     _apply_live(mod, header)
     return {"state": "ready", "editor_url": client.welcome.get("editor_url", ""),
@@ -740,7 +764,10 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                     values = proxy.read_values(mod, ng, parameters(mod))
                     source_token = ""
                     graph_data = json.loads(ng[GRAPH])
-                    has_imports = any(n.get("type") == "object_input" for n in graph_data.get("nodes", {}).values())
+                    has_imports = any(n.get("type") == "object_input" or
+                                      (n.get("type") == "modifier_input" and any(
+                                          p.get("kind") in {"object", "collection"} for p in n.get("modifier_inputs", [])))
+                                      for n in graph_data.get("nodes", {}).values())
                     if instance_id(mod) in _live_ids or has_imports:
                         source_token = _send_sources(client, obj, mod, materials)
                     signature = _digest(mod, arrays, values, materials) + source_token + (":render" if render else ":display")
@@ -767,7 +794,8 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                                                   frame=scene.frame_current + scene.frame_subframe,
                                                   fps=scene.render.fps / scene.render.fps_base,
                                                   graph=json.loads(ng[GRAPH]),
-                                                  materials=[m.name if m is not None else "" for m in materials], render=render)
+                                                  materials=[m.name if m is not None else "" for m in materials], render=render,
+                                                  references=_input_references(mod))
                     output, manifests = instance_payload(header, output)
                     update = GeoUpdate.from_message(header, output)
                     names = update.detail.get("instance_objects", [])
