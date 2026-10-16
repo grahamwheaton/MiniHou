@@ -4,6 +4,10 @@
 * ``MiniHou_Proxy``  -- the object users work with. It carries a Geometry Nodes modifier whose
   node group reads the output object through an *Object Info* node. The group's inputs mirror the
   exposed engine parameters (they appear as ordinary modifier sliders).
+
+The helpers here also build stack-modifier and wired-placement groups. Those use a nested layout (see
+``ensure_nested``): the generated nodes live in a private inner "Plumbing" tree, so every node operation goes through
+``plumbing(ng)`` while interface sockets and custom properties stay on the outer group. The legacy proxy stays flat.
 """
 from __future__ import annotations
 
@@ -29,6 +33,14 @@ USE_NODE_PREFIX = "MH_use_"
 INST_PREFIX = "MH_inst_"
 INST_KEY = "minihou_instances"
 CACHE_INFO_NODE = "MH_cache_info"
+OBJECT_USAGE_PREFIX = "__MiniHou_object_usage_"
+# Nested layout: a modifier/placement group holds only Group Input -> one private group node -> Group Output.
+# The generated plumbing (cache Object Info, object compares, "use" stores, instancing) lives in that inner tree.
+# The outer group keeps the interface, the modifier values and every identity/custom property.
+PLUMBING_NODE = "MH_plumbing"
+PLUMBING_KEY = "minihou_plumbing"     # on the inner tree: JSON {outer input identifier: inner input identifier}
+PLUMBING_LABEL = "MiniHou Plumbing"
+_GENERATED = (USE_NODE_PREFIX, INST_PREFIX, OBJECT_USAGE_PREFIX, CACHE_INFO_NODE)
 
 
 def ensure_objects():
@@ -99,10 +111,12 @@ def cache_info(ng):
     """Return the private cooked-mesh reader, never a source-object instancing node.
 
     Legacy groups predate its stable name; adopt only a non-instancing Object Info.
+    Nested groups keep it inside their plumbing tree.
     """
-    info = ng.nodes.get(CACHE_INFO_NODE)
+    tree = plumbing(ng)
+    info = tree.nodes.get(CACHE_INFO_NODE)
     if info is None:
-        info = next((n for n in ng.nodes if n.bl_idname == "GeometryNodeObjectInfo"
+        info = next((n for n in tree.nodes if n.bl_idname == "GeometryNodeObjectInfo"
                      and not n.name.startswith(INST_PREFIX)), None)
         if info is not None:
             info.name = CACHE_INFO_NODE
@@ -113,6 +127,196 @@ def _sockets(ng, in_out: str):
     return [i for i in ng.interface.items_tree if i.item_type == "SOCKET" and i.in_out == in_out]
 
 
+# -- nested layout ---------------------------------------------------------------------------------------------------
+
+def plumbing_node(ng):
+    """The outer group's node holding the private plumbing tree, or None for a flat (legacy) group."""
+    node = ng.nodes.get(PLUMBING_NODE)
+    if node is not None and node.bl_idname == "GeometryNodeGroup" and node.node_tree is not None \
+            and PLUMBING_KEY in node.node_tree:
+        return node
+    return None
+
+
+def is_nested(ng) -> bool:
+    return plumbing_node(ng) is not None
+
+
+def plumbing(ng):
+    """The tree containing the generated nodes: the inner plumbing tree, or ``ng`` itself when flat. Read-only."""
+    node = plumbing_node(ng)
+    return node.node_tree if node is not None else ng
+
+
+def plumbing_name(ng) -> str:
+    return (ng.name.strip() or "MiniHou") + " Plumbing"
+
+
+def _io_node(tree, idname, location):
+    node = next((n for n in tree.nodes if n.bl_idname == idname), None)
+    if node is None:
+        node = tree.nodes.new(idname)
+        node.location = location
+    return node
+
+
+def _mirror_interface(ng, inner) -> dict:
+    """Make the inner inputs mirror the outer inputs (same order, names and types) plus one Geometry output.
+
+    Writes only what differs. Returns {outer identifier: inner identifier}.
+    """
+    try:
+        saved = json.loads(inner.get(PLUMBING_KEY, "{}"))
+    except ValueError:
+        saved = {}
+    have = {i.identifier: i for i in _sockets(inner, "INPUT")}
+    mapping, order = {}, []
+    for src in _sockets(ng, "INPUT"):
+        item = have.pop(saved.get(src.identifier, ""), None)
+        if item is not None and item.socket_type != src.socket_type:
+            inner.interface.remove(item)
+            item = None
+        if item is None:
+            item = inner.interface.new_socket(src.name, in_out="INPUT", socket_type=src.socket_type)
+        if item.name != src.name:
+            item.name = src.name
+        for attr in ("structure_type", "force_non_field"):    # plain values, like the modifier's own inputs
+            if hasattr(src, attr) and hasattr(item, attr) and getattr(item, attr) != getattr(src, attr):
+                try:
+                    setattr(item, attr, getattr(src, attr))
+                except (TypeError, AttributeError):
+                    pass
+        mapping[src.identifier] = item.identifier
+        order.append(item)
+    for stale in have.values():
+        inner.interface.remove(stale)
+    for k, item in enumerate(order):
+        target = order[k - 1].position + 1 if k else min(i.position for i in order)
+        if item.position != target:
+            inner.interface.move(item, target)
+    if not any(i.socket_type == "NodeSocketGeometry" for i in _sockets(inner, "OUTPUT")):
+        inner.interface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+    encoded = json.dumps(mapping, sort_keys=True)
+    if inner.get(PLUMBING_KEY) != encoded:
+        inner[PLUMBING_KEY] = encoded
+    return mapping
+
+
+def _link(tree, src, dst) -> None:
+    if not (dst.is_linked and dst.links[0].from_socket == src):
+        tree.links.new(src, dst)
+
+
+def ensure_plumbing(ng):
+    """Keep a nested group consistent: private inner tree, mirrored interface, outer wiring. Returns the plumbing tree.
+
+    A copied outer group (duplicate modifier/object) still references the original inner tree; it gets its own copy
+    here, so plumbing is never shared between groups. Flat groups are returned unchanged. Idempotent and write-free
+    when nothing changed (every bpy write tags the depsgraph).
+    """
+    node = plumbing_node(ng)
+    if node is None:
+        return ng
+    inner = node.node_tree
+    if inner.users - int(inner.use_fake_user) > 1:
+        inner = inner.copy()
+        inner.use_fake_user = False
+        inner.name = plumbing_name(ng)
+        node.node_tree = inner
+    mapping = _mirror_interface(ng, inner)
+    _io_node(inner, "NodeGroupInput", (-450, 0))
+    _io_node(inner, "NodeGroupOutput", (400, 0))
+    gin = _io_node(ng, "NodeGroupInput", (-350, 0))
+    gout = _io_node(ng, "NodeGroupOutput", (350, 0))
+    for src in gin.outputs:
+        ident = mapping.get(src.identifier)
+        dst = next((s for s in node.inputs if s.identifier == ident), None) if ident else None
+        if dst is not None:
+            _link(ng, src, dst)
+    out = next((s for s in node.outputs if s.type == "GEOMETRY"), None)
+    target = next((s for s in gout.inputs if s.type == "GEOMETRY"), None)
+    if out is not None and target is not None:
+        _link(ng, out, target)
+    return inner
+
+
+def ensure_nested(ng):
+    """Give ``ng`` the nested layout, migrating a flat group in place. Returns the plumbing tree.
+
+    Migration keeps the outer interface untouched (so modifier values, object pickers, keyframes and drivers stay),
+    keeps every custom property on the outer group, re-points the cache Object Info at the same cache object, rebuilds
+    source instancing with the same objects and preserves an uncooked pass-through. The caller re-syncs the parameter
+    usage chain (``sync_interface`` / ``_sync_usage_chain``) afterwards.
+    """
+    assert_main_thread()
+    if is_nested(ng):
+        return ensure_plumbing(ng)
+    iface = ng.interface
+    if not any(i.socket_type == "NodeSocketGeometry" for i in _sockets(ng, "INPUT")):
+        iface.new_socket("Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
+    if not any(i.socket_type == "NodeSocketGeometry" for i in _sockets(ng, "OUTPUT")):
+        iface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
+    info = cache_info(ng)
+    cache = info.inputs["Object"].default_value if info is not None else None
+    space = info.transform_space if info is not None else None
+    names = json.loads(ng.get(INST_KEY, "[]"))
+    objects = []
+    for k in range(len(names)):
+        oi = ng.nodes.get(INST_PREFIX + f"obj{k}")
+        objects.append(oi.inputs["Object"].default_value if oi is not None else None)
+    through = info is None or passthrough(ng)
+    for node in list(ng.nodes):
+        if node.name.startswith(_GENERATED):
+            ng.nodes.remove(node)
+    stale = ng.nodes.get(PLUMBING_NODE)            # e.g. a group node whose tree was deleted
+    if stale is not None:
+        ng.nodes.remove(stale)
+    inner = bpy.data.node_groups.new(plumbing_name(ng), "GeometryNodeTree")
+    inner[PLUMBING_KEY] = "{}"
+    if hasattr(inner, "is_modifier"):
+        inner.is_modifier = False                  # not offered in the modifier's group picker
+    node = ng.nodes.new("GeometryNodeGroup")
+    node.name = PLUMBING_NODE
+    node.label = PLUMBING_LABEL
+    node.node_tree = inner
+    node.width = 200
+    node.location = (0, 0)
+    ensure_plumbing(ng)
+    if cache is not None:
+        _build_nodes(ng, cache)
+        if space is not None:
+            cache_info(ng).transform_space = space
+        if names:
+            ng[INST_KEY] = "[]"                    # force a rebuild inside the plumbing tree
+            sync_instances(ng, names, objects=objects)
+    if through:
+        link_passthrough(ng)
+    return inner
+
+
+def passthrough(ng) -> bool:
+    """True while upstream geometry is routed straight to the output (before the first successful cook)."""
+    tree = plumbing(ng)
+    gout = next((n for n in tree.nodes if n.bl_idname == "NodeGroupOutput"), None)
+    if gout is None:
+        return False
+    targets = [gout.inputs["Geometry"], _chain_target(ng)]
+    return any(link.from_node.bl_idname == "NodeGroupInput" for target in targets for link in target.links)
+
+
+def link_passthrough(ng) -> None:
+    tree = plumbing(ng)
+    gin = next(n for n in tree.nodes if n.bl_idname == "NodeGroupInput")
+    _link(tree, gin.outputs["Geometry"], _chain_target(ng))
+
+
+def cleanup_plumbing() -> None:
+    """Remove plumbing trees whose outer group is gone (removed or orphaned)."""
+    for tree in list(bpy.data.node_groups):
+        if PLUMBING_KEY in tree and tree.users == 0:
+            bpy.data.node_groups.remove(tree)
+
+
 def _build_nodes(ng, output_obj) -> None:
     """Geometry in/out sockets plus the Object Info -> Group Output wiring. Only creates what is missing."""
     iface = ng.interface
@@ -120,12 +324,13 @@ def _build_nodes(ng, output_obj) -> None:
         iface.new_socket("Geometry", in_out="INPUT", socket_type="NodeSocketGeometry")
     if not any(i.socket_type == "NodeSocketGeometry" for i in _sockets(ng, "OUTPUT")):
         iface.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
-    nodes = {n.bl_idname: n for n in ng.nodes}
-    gin = nodes.get("NodeGroupInput") or ng.nodes.new("NodeGroupInput")
-    gout = nodes.get("NodeGroupOutput") or ng.nodes.new("NodeGroupOutput")
+    tree = ensure_plumbing(ng)
+    nodes = {n.bl_idname: n for n in tree.nodes}
+    gin = nodes.get("NodeGroupInput") or tree.nodes.new("NodeGroupInput")
+    gout = nodes.get("NodeGroupOutput") or tree.nodes.new("NodeGroupOutput")
     info = cache_info(ng)
     if info is None:
-        info = ng.nodes.new("GeometryNodeObjectInfo")
+        info = tree.nodes.new("GeometryNodeObjectInfo")
         info.name = CACHE_INFO_NODE
         gin.location, info.location, gout.location = (-400, 0), (-150, -150), (150, 0)
         info.transform_space = "RELATIVE"          # engine output follows the proxy's transform, not its own
@@ -134,7 +339,7 @@ def _build_nodes(ng, output_obj) -> None:
     if cur is None or cur.name != output_obj.name:
         info.inputs["Object"].default_value = output_obj
     if not gout.inputs["Geometry"].is_linked:
-        ng.links.new(info.outputs["Geometry"], gout.inputs["Geometry"])
+        tree.links.new(info.outputs["Geometry"], gout.inputs["Geometry"])
 
 
 def _active_inputs(ng):
@@ -144,9 +349,10 @@ def _active_inputs(ng):
 def _remove_input(ng, item) -> None:
     # Dependency order: the store node (and its link *from* this socket) first, then the socket, so there is never a
     # link to a socket that no longer exists.
-    use = ng.nodes.get(USE_NODE_PREFIX + item.identifier)
+    tree = plumbing(ng)
+    use = tree.nodes.get(USE_NODE_PREFIX + item.identifier)
     if use is not None:
-        ng.nodes.remove(use)
+        tree.nodes.remove(use)
     ng.interface.remove(item)
 
 
@@ -217,8 +423,13 @@ def _sync_usage_chain(ng, params: List[dict], ids: Dict[str, str]) -> None:
     in the modifier panel and look disabled (seen in the GUI smoke test). Each input feeds a Store Named Attribute on
     the Instance domain, chained between Object Info and Group Output. The engine output is a plain mesh with no
     instances, so the stores write nothing (measured: ~0.08 ms per evaluation, output unchanged).
+
+    Nested groups build the chain inside their plumbing tree; node names keep the *outer* socket identifiers and the
+    inner Group Input socket carrying each outer input is found through the mirrored-interface map.
     """
-    nodes = {n.bl_idname: n for n in ng.nodes}
+    tree = ensure_plumbing(ng)
+    inner_ids = json.loads(tree.get(PLUMBING_KEY, "{}")) if tree is not ng else None
+    nodes = {n.bl_idname: n for n in tree.nodes}
     gin, gout = nodes["NodeGroupInput"], nodes["NodeGroupOutput"]
     params = list(params)
     ids = dict(ids)
@@ -226,25 +437,25 @@ def _sync_usage_chain(ng, params: List[dict], ids: Dict[str, str]) -> None:
     # must not evaluate object geometry merely to mark a socket as used.
     object_ids = ({item.identifier for item in _sockets(ng, "INPUT") if item.socket_type == "NodeSocketObject"}
                   if bpy.app.version >= (5, 2, 0) else set())
-    compare_prefix = "__MiniHou_object_usage_"
-    for node in list(ng.nodes):
+    compare_prefix = OBJECT_USAGE_PREFIX
+    for node in list(tree.nodes):
         if node.name.startswith(compare_prefix) and node.name[len(compare_prefix):] not in object_ids:
-            ng.nodes.remove(node)
+            tree.nodes.remove(node)
     for identifier in sorted(object_ids):
         params.append({"name": identifier, "kind": "bool"})
         ids[identifier] = identifier
     wanted = [USE_NODE_PREFIX + ids[p["name"]] for p in params]
-    for n in [n for n in ng.nodes if n.name.startswith(USE_NODE_PREFIX)]:
+    for n in [n for n in tree.nodes if n.name.startswith(USE_NODE_PREFIX)]:
         if n.name not in wanted:
-            ng.nodes.remove(n)
+            tree.nodes.remove(n)
     chain = []
     for k, (p, name) in enumerate(zip(params, wanted)):
-        node = ng.nodes.get(name)
+        node = tree.nodes.get(name)
         if node is not None and node.data_type != _STORE_TYPES[p["kind"]]:
-            ng.nodes.remove(node)
+            tree.nodes.remove(node)
             node = None
         if node is None:
-            node = ng.nodes.new("GeometryNodeStoreNamedAttribute")
+            node = tree.nodes.new("GeometryNodeStoreNamedAttribute")
             node.name = name
             node.data_type = _STORE_TYPES[p["kind"]]
             node.domain = "INSTANCE"
@@ -255,33 +466,35 @@ def _sync_usage_chain(ng, params: List[dict], ids: Dict[str, str]) -> None:
         loc = (0.0 + 180.0 * k, -320.0)
         if tuple(node.location) != loc:
             node.location = loc
-        src = next(o for o in gin.outputs if o.identifier == ids[p["name"]])
-        if src.identifier in object_ids:
-            compare = ng.nodes.get(compare_prefix + src.identifier)
+        outer_ident = ids[p["name"]]
+        inner_ident = inner_ids.get(outer_ident) if inner_ids is not None else outer_ident
+        src = next(o for o in gin.outputs if o.identifier == inner_ident)
+        if outer_ident in object_ids:
+            compare = tree.nodes.get(compare_prefix + outer_ident)
             if compare is None:
-                compare = ng.nodes.new("FunctionNodeCompare")
-                compare.name = compare_prefix + src.identifier
+                compare = tree.nodes.new("FunctionNodeCompare")
+                compare.name = compare_prefix + outer_ident
                 compare.data_type = "OBJECT"
                 compare.operation = "EQUAL"
-            if not compare.inputs["A"].is_linked:
-                ng.links.new(src, compare.inputs["A"])
+            if not (compare.inputs["A"].is_linked and compare.inputs["A"].links[0].from_socket == src):
+                tree.links.new(src, compare.inputs["A"])
             src = compare.outputs["Result"]
         value_in = node.inputs["Value"]
         if not (value_in.is_linked and value_in.links[0].from_socket == src):
-            ng.links.new(src, value_in)
+            tree.links.new(src, value_in)
         chain.append(node)
     sockets = [_chain_source(ng)] + [n.outputs["Geometry"] for n in chain]
     targets = [n.inputs["Geometry"] for n in chain] + [gout.inputs["Geometry"]]
     for src, dst in zip(sockets, targets):
         if not (dst.is_linked and dst.links[0].from_socket == src):
-            ng.links.new(src, dst)
+            tree.links.new(src, dst)
     if gout.location.x < 200.0 + 180.0 * len(chain):
         gout.location = (200.0 + 180.0 * len(chain), 0.0)
 
 
 def _chain_source(ng):
     """Where the parameter chain starts: the instancing join if there is one, else the Object Info output."""
-    join = ng.nodes.get(INST_PREFIX + "join")
+    join = plumbing(ng).nodes.get(INST_PREFIX + "join")
     if join is not None:
         return join.outputs["Geometry"]
     return cache_info(ng).outputs["Geometry"]
@@ -289,10 +502,11 @@ def _chain_source(ng):
 
 def _chain_target(ng):
     """The socket that takes the engine geometry first (the first parameter store, or the group output)."""
-    stores = sorted((n for n in ng.nodes if n.name.startswith(USE_NODE_PREFIX)), key=lambda n: n.location.x)
+    tree = plumbing(ng)
+    stores = sorted((n for n in tree.nodes if n.name.startswith(USE_NODE_PREFIX)), key=lambda n: n.location.x)
     if stores:
         return stores[0].inputs["Geometry"]
-    return next(n for n in ng.nodes if n.bl_idname == "NodeGroupOutput").inputs["Geometry"]
+    return next(n for n in tree.nodes if n.bl_idname == "NodeGroupOutput").inputs["Geometry"]
 
 
 def sync_instances(ng, names: List[str], *, objects=None) -> List[str]:
@@ -317,16 +531,18 @@ def sync_instances(ng, names: List[str], *, objects=None) -> List[str]:
     resolved = list(objects) if objects is not None else [bpy.data.objects.get(n) for n in names]
     key = json.dumps(list(names))
     missing = [n for n, obj in zip(names, resolved) if obj is None]
-    if ng.get(INST_KEY, "[]") == key and (not names or ng.nodes.get(INST_PREFIX + "join") is not None):
+    tree = plumbing(ng)                      # nodes live in the plumbing tree; INST_KEY stays on the outer group
+    if ng.get(INST_KEY, "[]") == key and (not names or tree.nodes.get(INST_PREFIX + "join") is not None):
         _refresh_instance_objects(ng, names, objects=resolved)
         return missing
-    for n in [n for n in ng.nodes if n.name.startswith(INST_PREFIX)]:
-        ng.nodes.remove(n)
+    tree = ensure_plumbing(ng)
+    for n in [n for n in tree.nodes if n.name.startswith(INST_PREFIX)]:
+        tree.nodes.remove(n)
     info = cache_info(ng)
     target = _chain_target(ng)
     if names:
         def new(idname, name, loc):
-            nd = ng.nodes.new(idname)
+            nd = tree.nodes.new(idname)
             nd.name = nd.label = INST_PREFIX + name
             nd.location = loc
             return nd
@@ -343,30 +559,30 @@ def sync_instances(ng, names: List[str], *, objects=None) -> List[str]:
             oi.transform_space = "ORIGINAL"
             oi.inputs["As Instance"].default_value = True
             oi.inputs["Object"].default_value = resolved[k]
-            ng.links.new(oi.outputs["Geometry"], to_inst.inputs["Geometry"])
+            tree.links.new(oi.outputs["Geometry"], to_inst.inputs["Geometry"])
         index = new("FunctionNodeIntegerMath", "index", (-150, -380))
         index.operation = "SUBTRACT"
         inst_attr = attr("instance", "INT", (-400, -300))
-        ng.links.new(inst_attr, index.inputs[0])
+        tree.links.new(inst_attr, index.inputs[0])
         index.inputs[1].default_value = 1
         iop = new("GeometryNodeInstanceOnPoints", "on_points", (50, -300))
-        ng.links.new(info.outputs["Geometry"], iop.inputs["Points"])
-        ng.links.new(inst_attr, iop.inputs["Selection"])                 # int -> bool: instance > 0
-        ng.links.new(to_inst.outputs["Instances"], iop.inputs["Instance"])
+        tree.links.new(info.outputs["Geometry"], iop.inputs["Points"])
+        tree.links.new(inst_attr, iop.inputs["Selection"])                 # int -> bool: instance > 0
+        tree.links.new(to_inst.outputs["Instances"], iop.inputs["Instance"])
         iop.inputs["Pick Instance"].default_value = True
-        ng.links.new(index.outputs[0], iop.inputs["Instance Index"])
-        ng.links.new(attr("rot", "FLOAT_VECTOR", (-150, -250)), iop.inputs["Rotation"])   # Euler XYZ -> rotation
-        ng.links.new(attr("scale", "FLOAT_VECTOR", (-150, -200)), iop.inputs["Scale"])
+        tree.links.new(index.outputs[0], iop.inputs["Instance Index"])
+        tree.links.new(attr("rot", "FLOAT_VECTOR", (-150, -250)), iop.inputs["Rotation"])   # Euler XYZ -> rotation
+        tree.links.new(attr("scale", "FLOAT_VECTOR", (-150, -200)), iop.inputs["Scale"])
         drop = new("GeometryNodeDeleteGeometry", "drop_points", (50, -120))
         drop.domain = "POINT"
-        ng.links.new(info.outputs["Geometry"], drop.inputs["Geometry"])
-        ng.links.new(inst_attr, drop.inputs["Selection"])
+        tree.links.new(info.outputs["Geometry"], drop.inputs["Geometry"])
+        tree.links.new(inst_attr, drop.inputs["Selection"])
         join = new("GeometryNodeJoinGeometry", "join", (250, -150))
-        ng.links.new(drop.outputs["Geometry"], join.inputs["Geometry"])
-        ng.links.new(iop.outputs["Instances"], join.inputs["Geometry"])
-        ng.links.new(join.outputs["Geometry"], target)
+        tree.links.new(drop.outputs["Geometry"], join.inputs["Geometry"])
+        tree.links.new(iop.outputs["Instances"], join.inputs["Geometry"])
+        tree.links.new(join.outputs["Geometry"], target)
     else:
-        ng.links.new(info.outputs["Geometry"], target)
+        tree.links.new(info.outputs["Geometry"], target)
     ng[INST_KEY] = key
     return missing
 
@@ -374,7 +590,7 @@ def sync_instances(ng, names: List[str], *, objects=None) -> List[str]:
 def _refresh_instance_objects(ng, names: List[str], *, objects=None) -> None:
     """Re-point Object Info nodes whose object was missing (or renamed back) -- only when it differs."""
     for k, name in enumerate(names):
-        oi = ng.nodes.get(INST_PREFIX + f"obj{k}")
+        oi = plumbing(ng).nodes.get(INST_PREFIX + f"obj{k}")
         if oi is None:
             continue
         want = objects[k] if objects is not None else bpy.data.objects.get(name)

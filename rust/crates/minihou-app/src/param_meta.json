@@ -1,9 +1,669 @@
 {
- "lod_bake": {
-  "cluster_size": {"default": 128, "doc": "Maximum triangles per cluster (16 to 128)", "kind": "int", "min": 16, "max": 128},
-  "error_px": {"default": 1.0, "doc": "Screen-space error budget in pixels", "kind": "float", "min": 0.01, "soft_max": 16.0},
-  "enabled": {"default": true, "doc": "Build and use the clustered LOD payload", "kind": "bool"},
-  "min_triangles": {"default": 50000, "doc": "Skip the build for smaller meshes", "kind": "int", "min": 0, "soft_max": 1000000}
+ "assemble": {
+  "groups": {
+   "default": "*",
+   "doc": "groups: group names or wildcards (each group is a piece; faces in none become a last piece)",
+   "kind": "str"
+  },
+  "name_prefix": {
+   "default": "piece",
+   "doc": "Pieces are named prefix0, prefix1...: the list is the detail attribute 'piece_names'",
+   "kind": "str"
+  },
+  "outgrp_shared": {
+   "default": false,
+   "doc": "The points that two or more pieces used before they were split",
+   "kind": "bool"
+  },
+  "outgrp_shared_name": {
+   "default": "sharedpoints",
+   "doc": "Name of the shared points group",
+   "kind": "str"
+  },
+  "outgrp_unshared": {
+   "default": false,
+   "doc": "The points that were copied so that each piece has its own (every copy after the first)",
+   "kind": "bool"
+  },
+  "outgrp_unshared_name": {
+   "default": "splitpoints",
+   "doc": "Name of the split points group",
+   "kind": "str"
+  },
+  "output_attrib": {
+   "default": "piece",
+   "doc": "Primitive int attribute to write",
+   "kind": "str"
+  },
+  "piece_attrib": {
+   "default": "piece",
+   "doc": "attribute: the primitive int attribute to read",
+   "kind": "str"
+  },
+  "piece_groups": {
+   "default": false,
+   "doc": "Also make a primitive group per piece, named like the piece",
+   "kind": "bool"
+  },
+  "pivot": {
+   "default": "centroid",
+   "doc": "Where each piece's pivot is: written as the primitive vector 'pivot'",
+   "kind": "enum",
+   "options": [
+    "centroid",
+    "origin",
+    "bounds_bottom"
+   ]
+  },
+  "remove_source_groups": {
+   "default": false,
+   "doc": "groups: delete the groups the pieces came from",
+   "kind": "bool"
+  },
+  "renumber": {
+   "default": true,
+   "doc": "Number the pieces 0, 1, 2... in order of first appearance",
+   "kind": "bool"
+  },
+  "source": {
+   "default": "attribute",
+   "doc": "How pieces are told apart: an integer primitive attribute, the connected parts, or each primitive group matching 'groups'",
+   "kind": "enum",
+   "options": [
+    "attribute",
+    "connectivity",
+    "groups"
+   ]
+  },
+  "unshare_points": {
+   "default": true,
+   "doc": "Give every piece its own points (copy the ones pieces share); simulation needs this",
+   "kind": "bool"
+  }
+ },
+ "attribute_blur": {
+  "group": {
+   "default": "",
+   "doc": "Only these points",
+   "kind": "str"
+  },
+  "iterations": {
+   "default": 5,
+   "doc": "",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 100
+  },
+  "names": {
+   "default": "P",
+   "doc": "Point attributes to smooth along edges (P smooths the shape), space separated",
+   "kind": "str"
+  },
+  "pin_boundary": {
+   "default": true,
+   "doc": "Keep points on open edges, and the ends of curves, in place",
+   "kind": "bool"
+  },
+  "strength": {
+   "default": 0.5,
+   "doc": "How far each step moves towards the neighbours' average",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
+ "attribute_create": {
+  "domain": {
+   "default": "points",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "points",
+    "primitives",
+    "vertices",
+    "detail"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Only set it on these elements (others get 0); points or primitives",
+   "kind": "str"
+  },
+  "name": {
+   "default": "attrib1",
+   "doc": "",
+   "kind": "str"
+  },
+  "type": {
+   "default": "float",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "float",
+    "int",
+    "vector",
+    "vector2",
+    "color",
+    "vector4"
+   ]
+  },
+  "value": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Value (float/int use the first component; vector4 adds w = 1)",
+   "kind": "vec3"
+  }
+ },
+ "attribute_delete": {
+  "names": {
+   "default": "",
+   "doc": "Attributes to delete, space separated; wildcards work (e.g. 'N uv tmp_*'). P is never deleted",
+   "kind": "str"
+  }
+ },
+ "attribute_promote": {
+  "keep_original": {
+   "default": false,
+   "doc": "",
+   "kind": "bool"
+  },
+  "method": {
+   "default": "average",
+   "doc": "How several values combine into one",
+   "kind": "enum",
+   "options": [
+    "average",
+    "min",
+    "max",
+    "sum",
+    "first"
+   ]
+  },
+  "name": {
+   "default": "Cd",
+   "doc": "Attribute to move (wildcards promote several)",
+   "kind": "str"
+  },
+  "to": {
+   "default": "points",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "points",
+    "primitives",
+    "vertices",
+    "detail"
+   ]
+  }
+ },
+ "attribute_randomize": {
+  "by": {
+   "default": "",
+   "doc": "Optional int attribute (e.g. 'class' from connectivity): equal values get equal random values",
+   "kind": "str"
+  },
+  "distribution": {
+   "default": "uniform",
+   "doc": "normal: mean (min+max)/2, 99.7% within min..max",
+   "kind": "enum",
+   "options": [
+    "uniform",
+    "normal"
+   ]
+  },
+  "domain": {
+   "default": "points",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "points",
+    "primitives",
+    "vertices"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these elements (points or primitives)",
+   "kind": "str"
+  },
+  "max": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "min": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "name": {
+   "default": "Cd",
+   "doc": "",
+   "kind": "str"
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  },
+  "type": {
+   "default": "color",
+   "doc": "int: whole numbers from min to max inclusive",
+   "kind": "enum",
+   "options": [
+    "color",
+    "float",
+    "vector",
+    "int"
+   ]
+  }
+ },
+ "attribute_rename": {
+  "from_name": {
+   "default": "",
+   "doc": "Existing attribute (any domain)",
+   "kind": "str"
+  },
+  "to_name": {
+   "default": "",
+   "doc": "New name; replaces an attribute of that name on any domain",
+   "kind": "str"
+  }
+ },
+ "attribute_transfer": {
+  "blend_width": {
+   "default": 0.0,
+   "doc": "Soft edge: the source's influence fades to zero over the last blend_width before max_distance",
+   "kind": "float",
+   "min": 0.0
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these points of the first input",
+   "kind": "str"
+  },
+  "max_distance": {
+   "default": 1000000000.0,
+   "doc": "Points farther than this from the source keep their own values",
+   "kind": "float",
+   "min": 0.0
+  },
+  "names": {
+   "default": "Cd",
+   "doc": "Point attributes to copy from the nearest source point, space separated (wildcards work)",
+   "kind": "str"
+  }
+ },
+ "bend": {
+  "bend": {
+   "default": 90.0,
+   "doc": "Degrees over the capture length",
+   "kind": "float",
+   "soft_max": 360.0,
+   "soft_min": -360.0
+  },
+  "direction": {
+   "default": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "doc": "Axis of the capture region",
+   "kind": "vec3"
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these points",
+   "kind": "str"
+  },
+  "length": {
+   "default": 1.0,
+   "doc": "Length of the capture region along the axis",
+   "kind": "float",
+   "min": 1e-06,
+   "soft_max": 10.0
+  },
+  "origin": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Start of the capture region",
+   "kind": "vec3"
+  },
+  "taper": {
+   "default": 1.0,
+   "doc": "Scale across the axis at the end of the region",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 3.0
+  },
+  "twist": {
+   "default": 0.0,
+   "doc": "Degrees of twist about the axis over the length",
+   "kind": "float",
+   "soft_max": 720.0,
+   "soft_min": -720.0
+  },
+  "up": {
+   "default": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "doc": "The bend turns about this direction (made perpendicular to the axis)",
+   "kind": "vec3"
+  }
+ },
+ "bezier": {
+  "closed": {
+   "default": false,
+   "doc": "",
+   "kind": "bool"
+  },
+  "controls": {
+   "default": "[{\"p\": [-1, 0, 0], \"left\": [-1.5, 0, 0], \"right\": [-0.5, 0, 0], \"mode\": \"AUTO\"}, {\"p\": [0, 0, 1], \"left\": [-0.5, 0, 1], \"right\": [0.5, 0, 1], \"mode\": \"AUTO\"}, {\"p\": [1, 0, 0], \"left\": [0.5, 0, 0], \"right\": [1.5, 0, 0], \"mode\": \"AUTO\"}]",
+   "doc": "Control points edited with the viewport curve tool",
+   "kind": "str"
+  },
+  "resolution": {
+   "default": 24,
+   "doc": "Samples per Bezier segment",
+   "kind": "int",
+   "max": 1024,
+   "min": 1
+  }
+ },
+ "blast": {
+  "delete_non_selected": {
+   "default": false,
+   "doc": "Keep the selection and delete everything else",
+   "kind": "bool"
+  },
+  "domain": {
+   "default": "primitives",
+   "doc": "Delete faces, points, or faces touching selected edges",
+   "kind": "enum",
+   "options": [
+    "primitives",
+    "points",
+    "edges"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "What to delete: group names, ^exclusions, numbers/ranges, or an expression like '@P.z < 0'",
+   "kind": "str"
+  },
+  "keep_unused_points": {
+   "default": false,
+   "doc": "primitives: keep points no remaining primitive uses",
+   "kind": "bool"
+  }
+ },
+ "blend": {
+  "amount": {
+   "default": 1.0,
+   "doc": "Overall strength: 0 leaves the base shape, 1 reaches the target (more or less than that overshoots or inverts)",
+   "kind": "float",
+   "soft_max": 1.0,
+   "soft_min": 0.0
+  },
+  "attributes": {
+   "default": "P",
+   "doc": "Point attributes to blend, space separated; '*' for every float attribute the targets share with the base",
+   "kind": "str"
+  },
+  "group": {
+   "default": "",
+   "doc": "Only blend these points (empty: all)",
+   "kind": "str"
+  },
+  "mask": {
+   "default": "",
+   "doc": "A point attribute (0..1) that scales the blend per point, e.g. painted or noise-driven (empty: none)",
+   "kind": "str"
+  },
+  "weights": {
+   "default": "1",
+   "doc": "Weight of each target: one for all, or one per target separated by ';'. Numbers or expressions, e.g. 'sin(@Time * 3) * 0.5 + 0.5' (@Frame, @Time, @TimeInc; functions sin cos abs min max sqrt clamp smoothstep fit)",
+   "kind": "str"
+  }
+ },
+ "blender_image": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "colorspace": {
+   "default": "auto",
+   "doc": "auto: 8-bit sRGB images become linear colour like everything else in MiniHou; stored: the numbers exactly as the image holds them (masks, heights, normal maps)",
+   "kind": "enum",
+   "options": [
+    "auto",
+    "stored"
+   ]
+  },
+  "height": {
+   "default": "none",
+   "doc": "Lift the points by this channel (a height map): z = value * height_scale; also stored as `height`",
+   "kind": "enum",
+   "options": [
+    "none",
+    "luminance",
+    "red",
+    "green",
+    "blue",
+    "alpha"
+   ]
+  },
+  "height_scale": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "soft_max": 10.0,
+   "soft_min": -10.0
+  },
+  "image": {
+   "default": "",
+   "doc": "Name of the Blender image (Image Editor; a texture, a painted mask, a height map). It is watched: paint on it and the graph recooks",
+   "kind": "str"
+  },
+  "max_size": {
+   "default": 1024,
+   "doc": "The longest side in pixels (bigger images are averaged down in blocks)",
+   "kind": "int",
+   "max": 8192,
+   "min": 2
+  },
+  "size": {
+   "default": 10.0,
+   "doc": "Width of the grid in world units (the height follows the image's aspect)",
+   "kind": "float",
+   "min": 0.0001,
+   "soft_max": 100.0
+  }
+ },
+ "blender_object": {
+  "join_edges": {
+   "default": true,
+   "doc": "Join the loose edges of a mesh into long curves (real curves and point clouds already come whole)",
+   "kind": "bool"
+  },
+  "object": {
+   "default": "",
+   "doc": "Name of the Blender object to read: a mesh, a curve (Bezier, NURBS, poly, hair curves), a point cloud, text, or the output of Geometry Nodes, which can hold all of those at once",
+   "kind": "str"
+  },
+  "space": {
+   "default": "world",
+   "doc": "world: where the object is in the scene; object: its own local coordinates",
+   "kind": "enum",
+   "options": [
+    "world",
+    "object"
+   ]
+  }
+ },
+ "boolean": {
+  "operation": {
+   "default": "union",
+   "doc": "subtract: A minus B",
+   "kind": "enum",
+   "options": [
+    "union",
+    "subtract",
+    "intersect"
+   ]
+  },
+  "outgrp_from_a": {
+   "default": true,
+   "doc": "The result's faces that came from input A",
+   "kind": "bool"
+  },
+  "outgrp_from_a_name": {
+   "default": "from_a",
+   "doc": "Name of the faces from a group",
+   "kind": "str"
+  },
+  "outgrp_from_b": {
+   "default": true,
+   "doc": "The result's faces that came from input B",
+   "kind": "bool"
+  },
+  "outgrp_from_b_name": {
+   "default": "from_b",
+   "doc": "Name of the faces from b group",
+   "kind": "str"
+  },
+  "outgrp_seam": {
+   "default": false,
+   "doc": "The edges where the two inputs meet: where a face from A touches a face from B",
+   "kind": "bool"
+  },
+  "outgrp_seam_name": {
+   "default": "intersection",
+   "doc": "Name of the intersection edges group",
+   "kind": "str"
+  },
+  "outgrp_seampoints": {
+   "default": false,
+   "doc": "The points on those intersection edges",
+   "kind": "bool"
+  },
+  "outgrp_seampoints_name": {
+   "default": "intersectionpoints",
+   "doc": "Name of the intersection points group",
+   "kind": "str"
+  }
+ },
+ "boolean_fracture": {
+  "cutter_attrib": {
+   "default": "cutter",
+   "doc": "Primitive int attribute: which cutter made the piece (-1: the remainder; empty: none)",
+   "kind": "str"
+  },
+  "keep": {
+   "default": "both",
+   "doc": "inside: only the pieces cut out by the cutters; outside: only what is left",
+   "kind": "enum",
+   "options": [
+    "both",
+    "inside",
+    "outside"
+   ]
+  },
+  "mode": {
+   "default": "each_cutter",
+   "doc": "each_cutter: one piece per cutter (earlier cutters win where they overlap); union: one inside piece for all of them",
+   "kind": "enum",
+   "options": [
+    "each_cutter",
+    "union"
+   ]
+  },
+  "outgrp_cutedges": {
+   "default": false,
+   "doc": "The edges where the inside meets the outside",
+   "kind": "bool"
+  },
+  "outgrp_cutedges_name": {
+   "default": "cutedges",
+   "doc": "Name of the cut edges group",
+   "kind": "str"
+  },
+  "outgrp_cutpoints": {
+   "default": false,
+   "doc": "The points where the inside meets the outside",
+   "kind": "bool"
+  },
+  "outgrp_cutpoints_name": {
+   "default": "cutpoints",
+   "doc": "Name of the cut points group",
+   "kind": "str"
+  },
+  "outgrp_cutter": {
+   "default": false,
+   "doc": "All faces of the pieces that were inside a cutter",
+   "kind": "bool"
+  },
+  "outgrp_cutter_name": {
+   "default": "cutterpieces",
+   "doc": "Name of the cutter pieces group",
+   "kind": "str"
+  },
+  "outgrp_inside": {
+   "default": true,
+   "doc": "The faces the cutters created: the new inside surface of every piece",
+   "kind": "bool"
+  },
+  "outgrp_inside_name": {
+   "default": "inside",
+   "doc": "Name of the inside faces group",
+   "kind": "str"
+  },
+  "outgrp_outside": {
+   "default": false,
+   "doc": "The faces that came from the input's own surface",
+   "kind": "bool"
+  },
+  "outgrp_outside_name": {
+   "default": "outside",
+   "doc": "Name of the outside faces group",
+   "kind": "str"
+  },
+  "outgrp_remainder": {
+   "default": false,
+   "doc": "All faces of what was left outside every cutter",
+   "kind": "bool"
+  },
+  "outgrp_remainder_name": {
+   "default": "remainder",
+   "doc": "Name of the remainder piece group",
+   "kind": "str"
+  },
+  "piece_attrib": {
+   "default": "piece",
+   "doc": "Primitive int attribute numbering the connected pieces (empty: none)",
+   "kind": "str"
+  }
  },
  "bound": {
   "oriented": {
@@ -105,6 +765,133 @@
    "min": 0.0
   }
  },
+ "bridge": {
+  "align": {
+   "default": true,
+   "doc": "Rotate the second loop to the position that keeps the rungs shortest (equal-length loops)",
+   "kind": "bool"
+  },
+  "outgrp_bridge": {
+   "default": false,
+   "doc": "The faces that join the paired loops",
+   "kind": "bool"
+  },
+  "outgrp_bridge_name": {
+   "default": "bridgepolys",
+   "doc": "Name of the bridge polygons group",
+   "kind": "str"
+  },
+  "pairing": {
+   "default": "mutual_nearest",
+   "doc": "mutual_nearest: join two open loops of different pieces when each is the other's nearest (centres); in_order: the first two, the next two... (a lone loop in a single piece pairs with the next nearest)",
+   "kind": "enum",
+   "options": [
+    "mutual_nearest",
+    "in_order"
+   ]
+  },
+  "twist": {
+   "default": 0,
+   "doc": "Extra steps to turn the second loop",
+   "kind": "int",
+   "soft_max": 8,
+   "soft_min": -8
+  }
+ },
+ "building_rules": {
+  "balcony_depth": {
+   "default": 0.7,
+   "doc": "",
+   "kind": "float",
+   "max": 10,
+   "min": 0.0
+  },
+  "balcony_probability": {
+   "default": 0.25,
+   "doc": "",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "bay_width": {
+   "default": 2.5,
+   "doc": "",
+   "kind": "float",
+   "max": 1000,
+   "min": 0.1
+  },
+  "roof": {
+   "default": "flat",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "flat",
+    "pyramid",
+    "gable"
+   ]
+  },
+  "roof_height": {
+   "default": 1.5,
+   "doc": "",
+   "kind": "float",
+   "max": 100,
+   "min": 0.0
+  },
+  "rules": {
+   "default": "[]",
+   "doc": "Ordered JSON overrides, e.g. [{\"floor\":\"ground\",\"window_height\":0.8,\"balcony_probability\":0}]. floor: all, ground, top, or zero-based integer. Last matching value wins.",
+   "kind": "str"
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  },
+  "storey_height": {
+   "default": 3.0,
+   "doc": "",
+   "kind": "float",
+   "max": 100,
+   "min": 0.1
+  },
+  "storeys": {
+   "default": 3,
+   "doc": "",
+   "kind": "int",
+   "max": 100,
+   "min": 1
+  },
+  "window_height": {
+   "default": 0.55,
+   "doc": "Fraction of storey height",
+   "kind": "float",
+   "max": 0.95,
+   "min": 0.0
+  },
+  "window_width": {
+   "default": 0.55,
+   "doc": "Fraction of each facade bay; zero omits windows",
+   "kind": "float",
+   "max": 0.95,
+   "min": 0.0
+  }
+ },
+ "carve": {
+  "end": {
+   "default": 1.0,
+   "doc": "...to this one (animate it to grow a curve)",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "start": {
+   "default": 0.0,
+   "doc": "Keep from this fraction of each curve's length...",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
  "circle": {
   "center": {
    "default": [
@@ -138,6 +925,377 @@
    "kind": "vec3"
   }
  },
+ "clean": {
+  "fuse_distance": {
+   "default": 0.0,
+   "doc": "Weld points closer than this first (0 = off)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 0.1
+  },
+  "remove_degenerate": {
+   "default": true,
+   "doc": "Drop repeated corners, then faces with < 3 corners and curves with < 2",
+   "kind": "bool"
+  },
+  "remove_unused_points": {
+   "default": true,
+   "doc": "",
+   "kind": "bool"
+  }
+ },
+ "clip": {
+  "keep": {
+   "default": "above",
+   "doc": "both: cut along the plane and keep both halves (sharing the seam)",
+   "kind": "enum",
+   "options": [
+    "above",
+    "below",
+    "both"
+   ]
+  },
+  "normal": {
+   "default": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "doc": "Plane normal; 'above' is the side it points to",
+   "kind": "vec3"
+  },
+  "origin": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "outgrp_above": {
+   "default": true,
+   "doc": "Faces on the side the normal points to",
+   "kind": "bool"
+  },
+  "outgrp_above_name": {
+   "default": "above",
+   "doc": "Name of the above group",
+   "kind": "str"
+  },
+  "outgrp_below": {
+   "default": false,
+   "doc": "Faces on the other side",
+   "kind": "bool"
+  },
+  "outgrp_below_name": {
+   "default": "below",
+   "doc": "Name of the below group",
+   "kind": "str"
+  },
+  "outgrp_cutedges": {
+   "default": false,
+   "doc": "The edges that lie in the plane: the opening a cap would fill",
+   "kind": "bool"
+  },
+  "outgrp_cutedges_name": {
+   "default": "cutedges",
+   "doc": "Name of the cut edges group",
+   "kind": "str"
+  },
+  "outgrp_cutpoints": {
+   "default": false,
+   "doc": "The new points on the plane, and original points that lie on it",
+   "kind": "bool"
+  },
+  "outgrp_cutpoints_name": {
+   "default": "cutpoints",
+   "doc": "Name of the cut points group",
+   "kind": "str"
+  },
+  "outgrp_cutpolys": {
+   "default": false,
+   "doc": "Faces the plane went through (trimmed pieces of them)",
+   "kind": "bool"
+  },
+  "outgrp_cutpolys_name": {
+   "default": "cutpolys",
+   "doc": "Name of the cut polygons group",
+   "kind": "str"
+  }
+ },
+ "color": {
+  "color": {
+   "default": [
+    1.0,
+    0.5,
+    0.2
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "color2": {
+   "default": [
+    0.1,
+    0.3,
+    1.0
+   ],
+   "doc": "ramp end color",
+   "kind": "vec3"
+  },
+  "domain": {
+   "default": "points",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "points",
+    "primitives",
+    "vertices"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these points or primitives",
+   "kind": "str"
+  },
+  "mode": {
+   "default": "constant",
+   "doc": "ramp: from color to color2 along an attribute's range",
+   "kind": "enum",
+   "options": [
+    "constant",
+    "random",
+    "random_by_piece",
+    "ramp"
+   ]
+  },
+  "ramp_attrib": {
+   "default": "P.z",
+   "doc": "ramp: attribute (with .x/.y/.z for a component), mapped from its min to its max",
+   "kind": "str"
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  }
+ },
+ "connectivity": {
+  "domain": {
+   "default": "primitives",
+   "doc": "Where to write the piece number",
+   "kind": "enum",
+   "options": [
+    "primitives",
+    "points"
+   ]
+  },
+  "name": {
+   "default": "class",
+   "doc": "",
+   "kind": "str"
+  }
+ },
+ "contour": {
+  "attribute": {
+   "default": "P.z",
+   "doc": "The point attribute to contour (a float, or P.x / P.y / P.z; the length of a vector attribute)",
+   "kind": "str"
+  },
+  "cells": {
+   "default": "polygons",
+   "doc": "polygons: quads are contoured as quads (marching squares, saddles by the centre value); triangles: every polygon is triangulated first",
+   "kind": "enum",
+   "options": [
+    "polygons",
+    "triangles"
+   ]
+  },
+  "fill": {
+   "default": false,
+   "doc": "lines mode: closed loops stay polygons (off: open polylines, so only the outline shows)",
+   "kind": "bool"
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these primitives",
+   "kind": "str"
+  },
+  "keep_above": {
+   "default": true,
+   "doc": "surface mode: keep where the value is above the level (off: below)",
+   "kind": "bool"
+  },
+  "level": {
+   "default": 0.0,
+   "doc": "Value at which to cut",
+   "kind": "float",
+   "soft_max": 10.0,
+   "soft_min": -10.0
+  },
+  "levels": {
+   "default": 1,
+   "doc": "lines mode: how many lines (the first at level, then every spacing)",
+   "kind": "int",
+   "min": 1,
+   "soft_max": 100
+  },
+  "mode": {
+   "default": "lines",
+   "doc": "lines: curves along the level; surface: cut the mesh on the level and keep one side",
+   "kind": "enum",
+   "options": [
+    "lines",
+    "surface"
+   ]
+  },
+  "outgrp_cutpoints": {
+   "default": false,
+   "doc": "surface mode: the points on the cut",
+   "kind": "bool"
+  },
+  "outgrp_cutpoints_name": {
+   "default": "contourpoints",
+   "doc": "Name of the cut points group",
+   "kind": "str"
+  },
+  "spacing": {
+   "default": 1.0,
+   "doc": "lines mode: distance in value between lines",
+   "kind": "float",
+   "min": 1e-09,
+   "soft_max": 10.0
+  }
+ },
+ "convert_line": {
+  "join": {
+   "default": true,
+   "doc": "Join the edges into long polylines (else one 2-point curve per edge)",
+   "kind": "bool"
+  }
+ },
+ "convex_hull": {
+  "group": {
+   "default": "",
+   "doc": "Points or primitives to compute the hull from (empty: all)",
+   "kind": "str"
+  },
+  "positions_2d": {
+   "default": "fit_plane",
+   "doc": "Projection plane for 2D hull (best-fit plane or world axis plane)",
+   "kind": "enum",
+   "options": [
+    "fit_plane",
+    "xy",
+    "yz",
+    "zx"
+   ]
+  },
+  "preserve_attributes": {
+   "default": true,
+   "doc": "Copy point attributes and groups from the source points to the hull",
+   "kind": "bool"
+  },
+  "remove_inline_points": {
+   "default": true,
+   "doc": "Merge coplanar triangles into polygon faces and drop inline edge/interior points",
+   "kind": "bool"
+  },
+  "shrink_amount": {
+   "default": 0.0,
+   "doc": "Pull hull surface toward interior points (0: pure convex hull, 1: full shrinkwrap)",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0,
+   "soft_max": 1.0
+  },
+  "type": {
+   "default": "3d",
+   "doc": "3D convex hull mesh or 2D convex hull polygon",
+   "kind": "enum",
+   "options": [
+    "3d",
+    "2d"
+   ]
+  }
+ },
+ "copy_to_points": {
+  "orient": {
+   "default": true,
+   "doc": "Rotate each copy by the target point's orient (quaternion), rot (Euler, from the instance node), or N (+Z) and up (+Y)",
+   "kind": "bool"
+  },
+  "use_pscale": {
+   "default": true,
+   "doc": "Scale each copy by the target point's pscale (if present); 'scale' (a vector) always applies",
+   "kind": "bool"
+  }
+ },
+ "copy_transform": {
+  "copies": {
+   "default": 2,
+   "doc": "Total number of copies, the original included",
+   "kind": "int",
+   "max": 100000,
+   "min": 1,
+   "soft_max": 100
+  },
+  "pivot": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "rotate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Euler XYZ degrees per copy",
+   "kind": "vec3"
+  },
+  "scale": {
+   "default": 1.0,
+   "doc": "Uniform scale per copy",
+   "kind": "float"
+  },
+  "translate": {
+   "default": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Applied once more to each copy than to the one before",
+   "kind": "vec3"
+  }
+ },
+ "crease": {
+  "domain": {
+   "default": "edges",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "edges",
+    "points"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Edge selection or point group; empty selects all",
+   "kind": "str"
+  },
+  "sharpness": {
+   "default": 2.0,
+   "doc": "Semi-sharp subdivision levels; zero clears selected creases",
+   "kind": "float",
+   "max": 10,
+   "min": 0
+  }
+ },
  "curve": {
   "closed": {
    "default": false,
@@ -150,6 +1308,62 @@
    "kind": "str"
   }
  },
+ "curve_simplify": {
+  "angle": {
+   "default": 10.0,
+   "doc": "angle method: degrees of turning between kept points",
+   "kind": "float",
+   "max": 180.0,
+   "min": 0.0
+  },
+  "keep": {
+   "default": "",
+   "doc": "A point group that always stays",
+   "kind": "str"
+  },
+  "method": {
+   "default": "distance",
+   "doc": "distance: Ramer-Douglas-Peucker, keep points that stray more than the tolerance from the simplified line; angle: keep a point once the curve has turned by the angle since the last kept one",
+   "kind": "enum",
+   "options": [
+    "distance",
+    "angle"
+   ]
+  },
+  "smooth": {
+   "default": 0,
+   "doc": "Relax the kept points towards their neighbours this many times (ends stay put)",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 20
+  },
+  "tolerance": {
+   "default": 0.01,
+   "doc": "distance method: the largest distance the original may be from the simplified curve",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 1.0
+  }
+ },
+ "delaunay": {
+  "axis": {
+   "default": "z",
+   "doc": "Triangulate the points as seen along this axis (the output faces +axis)",
+   "kind": "enum",
+   "options": [
+    "z",
+    "y",
+    "x"
+   ]
+  },
+  "max_edge": {
+   "default": 0.0,
+   "doc": "Drop triangles with an edge longer than this (0: keep all), to follow a concave outline or leave holes",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 10.0
+  }
+ },
  "delete": {
   "expr": {
    "default": "@P.z < 0",
@@ -160,6 +1374,507 @@
    "default": false,
    "doc": "Delete the points that do NOT match instead",
    "kind": "bool"
+  }
+ },
+ "dissolve": {
+  "angle": {
+   "default": 1.0,
+   "doc": "Largest angle in degrees between neighbouring faces that still count as one flat region",
+   "kind": "float",
+   "max": 89.0,
+   "min": 0.0,
+   "soft_max": 30.0
+  },
+  "group": {
+   "default": "",
+   "doc": "Primitives to merge (pattern; empty: all)",
+   "kind": "str"
+  }
+ },
+ "dissolve_edges": {
+  "angle": {
+   "default": 0.1,
+   "doc": "Maximum angle between faces, degrees",
+   "kind": "float",
+   "max": 180,
+   "min": 0
+  },
+  "group": {
+   "default": "",
+   "doc": "Interior edges to remove; empty selection is a no-op",
+   "kind": "str"
+  },
+  "preserve_seams": {
+   "default": true,
+   "doc": "Reject merges across differing corner data or primitive attributes/materials",
+   "kind": "bool"
+  }
+ },
+ "divide": {
+  "group": {
+   "default": "",
+   "doc": "Primitives to triangulate (pattern; empty: all)",
+   "kind": "str"
+  }
+ },
+ "edge_collapse": {
+  "group": {
+   "default": "",
+   "doc": "Edges to collapse: ids/ranges, p0-1 pairs, edge group names; empty does nothing",
+   "kind": "str"
+  },
+  "outgrp_collapsed": {
+   "default": false,
+   "doc": "The points the selected edges were merged into",
+   "kind": "bool"
+  },
+  "outgrp_collapsed_name": {
+   "default": "collapsedpoints",
+   "doc": "Name of the collapsed points group",
+   "kind": "str"
+  }
+ },
+ "edge_cusp": {
+  "cusp_angle": {
+   "default": 180.0,
+   "doc": "Edges between faces that meet at more than this many degrees are hard as well (180: only the selected edges)",
+   "kind": "float",
+   "max": 180.0,
+   "min": 0.0
+  },
+  "group": {
+   "default": "",
+   "doc": "Edges to make hard: ids/ranges, p0-1 pairs, edge group names",
+   "kind": "str"
+  }
+ },
+ "edge_flip": {
+  "group": {
+   "default": "",
+   "doc": "Edges to flip: ids/ranges, p0-1 pairs, edge group names; empty does nothing",
+   "kind": "str"
+  },
+  "outgrp_flipped": {
+   "default": false,
+   "doc": "The new diagonals",
+   "kind": "bool"
+  },
+  "outgrp_flipped_name": {
+   "default": "flippededges",
+   "doc": "Name of the flipped edges group",
+   "kind": "str"
+  }
+ },
+ "edge_group": {
+  "combine": {
+   "default": "replace",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "replace",
+    "union",
+    "intersect",
+    "subtract"
+   ]
+  },
+  "method": {
+   "default": "pattern",
+   "doc": "bounding_object: edges with both ends inside the bounding box of the second input",
+   "kind": "enum",
+   "options": [
+    "pattern",
+    "boundary",
+    "points",
+    "primitives",
+    "bounding_object"
+   ]
+  },
+  "name": {
+   "default": "edges",
+   "doc": "",
+   "kind": "str"
+  },
+  "pattern": {
+   "default": "*",
+   "doc": "Edges: ids/ranges, p0-1 pairs, names, wildcards, ^exclusions. Other methods: point/primitive group pattern.",
+   "kind": "str"
+  }
+ },
+ "edge_group_promote": {
+  "name": {
+   "default": "edge_points",
+   "doc": "",
+   "kind": "str"
+  },
+  "pattern": {
+   "default": "*",
+   "doc": "Derived edge selection",
+   "kind": "str"
+  },
+  "to": {
+   "default": "points",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "points",
+    "primitives"
+   ]
+  }
+ },
+ "exploded_view": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Pieces move away from this point",
+   "kind": "vec3"
+  },
+  "piece_attrib": {
+   "default": "piece",
+   "doc": "Primitive attribute naming each face's piece",
+   "kind": "str"
+  },
+  "scale": {
+   "default": 0.5,
+   "doc": "Move pieces this fraction of their centre's offset outwards",
+   "kind": "float",
+   "soft_max": 3.0,
+   "soft_min": 0.0
+  }
+ },
+ "facet": {
+  "compute_normals": {
+   "default": false,
+   "doc": "Write N per point from its face (flat); otherwise N is left as it is",
+   "kind": "bool"
+  },
+  "unique_points": {
+   "default": true,
+   "doc": "Give every vertex its own point (faces no longer share points)",
+   "kind": "bool"
+  }
+ },
+ "falloff": {
+  "blend": {
+   "default": 1.0,
+   "doc": "sphere and mesh: the share of the size over which the weight fades (0: hard edge, 1: from the middle)",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Sphere centre; start of the ramp for directional; the axis point for radial and wave",
+   "kind": "vec3"
+  },
+  "direction": {
+   "default": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "doc": "Ramp / axis / travel direction (directional, radial, wave)",
+   "kind": "vec3"
+  },
+  "domain": {
+   "default": "points",
+   "doc": "primitives use the face centre and the primitive number",
+   "kind": "enum",
+   "options": [
+    "points",
+    "primitives"
+   ]
+  },
+  "every": {
+   "default": 0,
+   "doc": "index: repeat the ramp every N elements (0: once)",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 100
+  },
+  "flip": {
+   "default": false,
+   "doc": "1 - weight",
+   "kind": "bool"
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these elements (the rest get min)",
+   "kind": "str"
+  },
+  "inside": {
+   "default": false,
+   "doc": "mesh: points inside a closed mesh get 1",
+   "kind": "bool"
+  },
+  "max": {
+   "default": 1.0,
+   "doc": "The weight where the falloff is 1",
+   "kind": "float",
+   "soft_max": 2.0,
+   "soft_min": -1.0
+  },
+  "min": {
+   "default": 0.0,
+   "doc": "The weight where the falloff is 0 (the output range is min..max)",
+   "kind": "float",
+   "soft_max": 1.0,
+   "soft_min": -1.0
+  },
+  "mirror": {
+   "default": false,
+   "doc": "directional, radial and index: a ramp that rises and falls again (symmetric about its middle)",
+   "kind": "bool"
+  },
+  "name": {
+   "default": "mask",
+   "doc": "The float attribute to write",
+   "kind": "str"
+  },
+  "narrowness": {
+   "default": 1.0,
+   "doc": "wave: sharpness of the pulse (higher is narrower)",
+   "kind": "float",
+   "min": 0.01,
+   "soft_max": 8.0
+  },
+  "offset": {
+   "default": 0.0,
+   "doc": "directional: slide the ramp along the direction; radial: start angle in degrees; wave: position of the front; index: first index",
+   "kind": "float",
+   "soft_max": 10.0,
+   "soft_min": -10.0
+  },
+  "range": {
+   "default": 10.0,
+   "doc": "index: how many elements the ramp takes",
+   "kind": "float",
+   "min": 1e-09,
+   "soft_max": 1000.0
+  },
+  "shape": {
+   "default": "sphere",
+   "doc": "sphere: 1 at the centre, 0 at the radius; directional: 0 to 1 along a direction; radial: 0 to 1 once round an axis; wave: a pulse travelling along a direction; index: by point (or primitive) number; mesh: by distance to the mesh on input 2",
+   "kind": "enum",
+   "options": [
+    "sphere",
+    "directional",
+    "radial",
+    "wave",
+    "index",
+    "mesh"
+   ]
+  },
+  "size": {
+   "default": 1.0,
+   "doc": "sphere: radius; directional: length of the ramp; wave: width of the pulse; mesh: distance over which the weight fades",
+   "kind": "float",
+   "min": 1e-09,
+   "soft_max": 10.0
+  },
+  "smooth": {
+   "default": true,
+   "doc": "Ease the ramp (smoothstep)",
+   "kind": "bool"
+  }
+ },
+ "fillet": {
+  "divisions": {
+   "default": 6,
+   "doc": "Segments per rounded corner",
+   "kind": "int",
+   "max": 256,
+   "min": 1,
+   "soft_max": 32
+  },
+  "group": {
+   "default": "",
+   "doc": "Points to round (empty: every corner)",
+   "kind": "str"
+  },
+  "min_angle": {
+   "default": 1.0,
+   "doc": "Leave corners that turn by less than this many degrees alone",
+   "kind": "float",
+   "max": 179.0,
+   "min": 0.0
+  },
+  "radius": {
+   "default": 0.2,
+   "doc": "Radius of the arc that replaces each corner (reduced where the neighbouring segments are too short to hold it)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 2.0
+  }
+ },
+ "for_each": {
+  "attribute": {
+   "default": "class",
+   "doc": "piece = attribute: a primitive attribute (e.g. from connectivity or a wrangle)",
+   "kind": "str"
+  },
+  "body": {
+   "default": "",
+   "doc": "Node type to run on each piece: a system (a graph in nodes/) or any node with a geometry input",
+   "kind": "str"
+  },
+  "max_pieces": {
+   "default": 1000,
+   "doc": "Safety limit",
+   "kind": "int",
+   "max": 10000,
+   "min": 1
+  },
+  "params": {
+   "default": "{}",
+   "doc": "Parameters for the body as JSON, e.g. {\"distance\": 0.3}; omitted ones use defaults",
+   "kind": "str"
+  },
+  "piece": {
+   "default": "connectivity",
+   "doc": "connectivity: each connected piece; attribute: primitives sharing a value of 'attribute'; primitive: every primitive alone",
+   "kind": "enum",
+   "options": [
+    "connectivity",
+    "attribute",
+    "primitive"
+   ]
+  }
+ },
+ "fuse": {
+  "distance": {
+   "default": 0.001,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 1.0
+  },
+  "outgrp_fused": {
+   "default": false,
+   "doc": "Points that stand for two or more welded points",
+   "kind": "bool"
+  },
+  "outgrp_fused_name": {
+   "default": "fusedpoints",
+   "doc": "Name of the fused points group",
+   "kind": "str"
+  },
+  "outgrp_unique": {
+   "default": false,
+   "doc": "Points that were not welded to anything",
+   "kind": "bool"
+  },
+  "outgrp_unique_name": {
+   "default": "uniquepoints",
+   "doc": "Name of the unique points group",
+   "kind": "str"
+  }
+ },
+ "goal_collision": {
+  "radius": {
+   "default": 0.25,
+   "doc": "Equal-radius spheres centred at every point",
+   "kind": "float",
+   "max": 1000,
+   "min": 0.0001
+  },
+  "strength": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
+ "goal_gravity": {
+  "acceleration": {
+   "default": [
+    0.0,
+    0.0,
+    -9.81
+   ],
+   "doc": "",
+   "kind": "vec3"
+  }
+ },
+ "goal_length": {
+  "scale": {
+   "default": 1.0,
+   "doc": "Rest lengths relative to incoming geometry",
+   "kind": "float",
+   "max": 100,
+   "min": 0.001
+  },
+  "strength": {
+   "default": 1.0,
+   "doc": "Projection fraction per iteration; not physical stiffness",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
+ "goal_pin": {
+  "group": {
+   "default": "0",
+   "doc": "Point group/pattern to fix; empty fixes all points",
+   "kind": "str"
+  }
+ },
+ "goal_solve": {
+  "damping": {
+   "default": 0.9,
+   "doc": "Fraction of velocity removed each step; 1 is pure relaxation",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "iterations": {
+   "default": 12,
+   "doc": "",
+   "kind": "int",
+   "max": 100,
+   "min": 1
+  },
+  "steps": {
+   "default": 60,
+   "doc": "",
+   "kind": "int",
+   "max": 1000,
+   "min": 0
+  },
+  "timestep": {
+   "default": 0.02,
+   "doc": "",
+   "kind": "float",
+   "max": 0.2,
+   "min": 0.0001
+  },
+  "tolerance": {
+   "default": 0.0001,
+   "doc": "Convergence needs both displacement and constraint residual below this",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
+ "goal_surface": {
+  "group": {
+   "default": "",
+   "doc": "Point selection; empty selects all",
+   "kind": "str"
+  },
+  "strength": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
   }
  },
  "grid": {
@@ -227,6 +1942,676 @@
    "min": 0
   }
  },
+ "group_create": {
+  "angle": {
+   "default": 45.0,
+   "doc": "normal method, in degrees",
+   "kind": "float",
+   "max": 180.0,
+   "min": 0.0
+  },
+  "backface_from": {
+   "default": "",
+   "doc": "filters: a position 'x y z'; drops what faces away from it",
+   "kind": "str"
+  },
+  "base_enable": {
+   "default": true,
+   "doc": "filters: start from the base group in 'pattern' (empty: everything)",
+   "kind": "bool"
+  },
+  "boundary_groups": {
+   "default": false,
+   "doc": "filters: also make '<name>_boundary', the edge group around what was selected",
+   "kind": "bool"
+  },
+  "bounds_enable": {
+   "default": false,
+   "doc": "filters: Keep in Bounding Regions",
+   "kind": "bool"
+  },
+  "bounds_partial": {
+   "default": false,
+   "doc": "filters: include entities that are only partly inside (otherwise all of their points must be)",
+   "kind": "bool"
+  },
+  "bounds_type": {
+   "default": "box",
+   "doc": "filters: the region's shape; box_size is its full size (a sphere is the ellipsoid inside it)",
+   "kind": "enum",
+   "options": [
+    "box",
+    "sphere"
+   ]
+  },
+  "box_center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "bounding_box method",
+   "kind": "vec3"
+  },
+  "box_size": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "bounding_box method",
+   "kind": "vec3"
+  },
+  "combine": {
+   "default": "replace",
+   "doc": "How to merge with an existing group of the name (Initial Merge)",
+   "kind": "enum",
+   "options": [
+    "replace",
+    "union",
+    "intersect",
+    "subtract"
+   ]
+  },
+  "direction": {
+   "default": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "doc": "normal method: elements whose normal is within 'angle' of this",
+   "kind": "vec3"
+  },
+  "domain": {
+   "default": "points",
+   "doc": "What the group holds (an edge group is stored like the edge_group node's)",
+   "kind": "enum",
+   "options": [
+    "points",
+    "primitives",
+    "edges"
+   ]
+  },
+  "edges_enable": {
+   "default": false,
+   "doc": "filters: Include by Edges (angle and length apply to edge groups; unshared edges to all)",
+   "kind": "bool"
+  },
+  "max_edge_angle": {
+   "default": 20.0,
+   "doc": "",
+   "kind": "float",
+   "max": 180.0,
+   "min": 0.0
+  },
+  "max_edge_angle_on": {
+   "default": false,
+   "doc": "filters: only edges at most this many degrees off flat",
+   "kind": "bool"
+  },
+  "max_edge_length": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 10.0
+  },
+  "max_edge_length_on": {
+   "default": false,
+   "doc": "",
+   "kind": "bool"
+  },
+  "method": {
+   "default": "pattern",
+   "doc": "pattern: groups, ranges or an expression like '@P.z > 1'; bounding_box: inside a box; normal: facing a direction; random: a percentage; boundary: on open edges; filters: Houdini's combinable sections (base group, bounding region, normals, edges, random chance: an element must pass every enabled one)",
+   "kind": "enum",
+   "options": [
+    "pattern",
+    "bounding_box",
+    "normal",
+    "random",
+    "boundary",
+    "filters"
+   ]
+  },
+  "min_edge_angle": {
+   "default": 20.0,
+   "doc": "",
+   "kind": "float",
+   "max": 180.0,
+   "min": 0.0
+  },
+  "min_edge_angle_on": {
+   "default": false,
+   "doc": "filters: only edges at least this many degrees off flat",
+   "kind": "bool"
+  },
+  "min_edge_length": {
+   "default": 0.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 10.0
+  },
+  "min_edge_length_on": {
+   "default": false,
+   "doc": "",
+   "kind": "bool"
+  },
+  "name": {
+   "default": "group1",
+   "doc": "Group name; wrangles read it as @group_<name>",
+   "kind": "str"
+  },
+  "normals_enable": {
+   "default": false,
+   "doc": "filters: Keep by Normals (direction and angle above)",
+   "kind": "bool"
+  },
+  "normals_opposite": {
+   "default": false,
+   "doc": "filters: also keep normals matching the opposite direction",
+   "kind": "bool"
+  },
+  "pattern": {
+   "default": "*",
+   "doc": "pattern method: group names, ^exclusions, numbers/ranges ('0-9'), or '@P.z > 1'",
+   "kind": "str"
+  },
+  "percent": {
+   "default": 50.0,
+   "doc": "random method",
+   "kind": "float",
+   "max": 100.0,
+   "min": 0.0
+  },
+  "random_enable": {
+   "default": false,
+   "doc": "filters: Keep by Random Chance (percent and seed above)",
+   "kind": "bool"
+  },
+  "seed": {
+   "default": 0,
+   "doc": "random method",
+   "kind": "int"
+  },
+  "seed_attrib": {
+   "default": "",
+   "doc": "filters: a point or primitive attribute that seeds each element separately (empty: by element number)",
+   "kind": "str"
+  },
+  "unshared_edges": {
+   "default": false,
+   "doc": "filters: only edges used by one face (open borders); for points and primitives, those on a border",
+   "kind": "bool"
+  }
+ },
+ "group_expand": {
+  "connectivity": {
+   "default": "points",
+   "doc": "primitives: neighbours share a point, or an edge",
+   "kind": "enum",
+   "options": [
+    "points",
+    "edges"
+   ]
+  },
+  "domain": {
+   "default": "primitives",
+   "doc": "What the group holds",
+   "kind": "enum",
+   "options": [
+    "primitives",
+    "points"
+   ]
+  },
+  "group": {
+   "default": "group1",
+   "doc": "Group (or pattern) to grow or shrink",
+   "kind": "str"
+  },
+  "mode": {
+   "default": "expand",
+   "doc": "expand: add the neighbours of members; contract: drop members that touch a non-member",
+   "kind": "enum",
+   "options": [
+    "expand",
+    "contract"
+   ]
+  },
+  "name": {
+   "default": "",
+   "doc": "Name for the result (empty: replace the group, if it is a plain group name)",
+   "kind": "str"
+  },
+  "steps": {
+   "default": 1,
+   "doc": "How many neighbour rings",
+   "kind": "int",
+   "max": 1000,
+   "min": 1,
+   "soft_max": 10
+  }
+ },
+ "group_promote": {
+  "name": {
+   "default": "group1",
+   "doc": "Group to convert (wildcards convert several)",
+   "kind": "str"
+  },
+  "to": {
+   "default": "points",
+   "doc": "Points of a primitive group: the points its primitives use. Primitives of a point group: those whose points are all in it",
+   "kind": "enum",
+   "options": [
+    "points",
+    "primitives"
+   ]
+  }
+ },
+ "group_range": {
+  "combine": {
+   "default": "replace",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "replace",
+    "union",
+    "intersect",
+    "subtract"
+   ]
+  },
+  "domain": {
+   "default": "primitives",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "primitives",
+    "points"
+   ]
+  },
+  "end": {
+   "default": -1,
+   "doc": "Last element (-1: the last one in the geometry)",
+   "kind": "int",
+   "min": -1
+  },
+  "every": {
+   "default": 1,
+   "doc": "... out of every this many (1 of 2 is every other element)",
+   "kind": "int",
+   "min": 1
+  },
+  "invert": {
+   "default": false,
+   "doc": "",
+   "kind": "bool"
+  },
+  "name": {
+   "default": "group1",
+   "doc": "",
+   "kind": "str"
+  },
+  "offset": {
+   "default": 0,
+   "doc": "Shift the pattern along",
+   "kind": "int"
+  },
+  "select": {
+   "default": 1,
+   "doc": "Select this many ...",
+   "kind": "int",
+   "min": 1
+  },
+  "start": {
+   "default": 0,
+   "doc": "First element",
+   "kind": "int",
+   "min": 0
+  }
+ },
+ "heightfield_erode": {
+  "capacity": {
+   "default": 4.0,
+   "doc": "How much sediment water can carry, per slope and speed",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 20.0
+  },
+  "deposit_rate": {
+   "default": 0.3,
+   "doc": "",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "droplets": {
+   "default": 4096,
+   "doc": "",
+   "kind": "int",
+   "min": 1,
+   "soft_max": 100000
+  },
+  "erode_rate": {
+   "default": 0.3,
+   "doc": "",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "evaporation": {
+   "default": 0.02,
+   "doc": "",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "inertia": {
+   "default": 0.1,
+   "doc": "How much droplets keep their direction (smoother channels)",
+   "kind": "float",
+   "max": 0.95,
+   "min": 0.0
+  },
+  "iterations": {
+   "default": 30,
+   "doc": "Rounds of rain (each drops 'droplets' droplets)",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 300
+  },
+  "rain": {
+   "default": 0.01,
+   "doc": "Water per droplet (scales how much each one can carry)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 0.1
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  },
+  "talus_angle": {
+   "default": 35.0,
+   "doc": "Slopes steeper than this slump",
+   "kind": "float",
+   "max": 89.0,
+   "min": 0.0
+  },
+  "thermal_iterations": {
+   "default": 20,
+   "doc": "Talus slumping steps (after the water)",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 200
+  },
+  "thermal_rate": {
+   "default": 0.5,
+   "doc": "",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
+ "helix": {
+  "height": {
+   "default": 2.0,
+   "doc": "",
+   "kind": "float",
+   "soft_max": 10.0,
+   "soft_min": 0.0
+  },
+  "points": {
+   "default": 120,
+   "doc": "",
+   "kind": "int",
+   "min": 2,
+   "soft_max": 5000
+  },
+  "radius": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 10.0
+  },
+  "radius_end": {
+   "default": -1.0,
+   "doc": "Radius at the top (negative: same as radius) - a cone spiral",
+   "kind": "float"
+  },
+  "turns": {
+   "default": 3.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 20.0
+  }
+ },
+ "image_out": {
+  "encoding": {
+   "default": "linear",
+   "doc": "linear: scene-linear colour in a float image; srgb: encode for an 8-bit sRGB image; data: a float Non-Color image (heights, masks, vectors)",
+   "kind": "enum",
+   "options": [
+    "linear",
+    "srgb",
+    "data"
+   ]
+  },
+  "file": {
+   "default": "",
+   "doc": "Also write a PNG here (8-bit sRGB for 'srgb', else 16-bit linear numbers): the way to hand an image to Houdini",
+   "kind": "str"
+  },
+  "height": {
+   "default": 512,
+   "doc": "bake: image height in pixels",
+   "kind": "int",
+   "max": 8192,
+   "min": 1
+  },
+  "image": {
+   "default": "MiniHou",
+   "doc": "Name of the Blender image to make or update (it keeps its place in the file; its size follows the data)",
+   "kind": "str"
+  },
+  "mode": {
+   "default": "lattice",
+   "doc": "lattice: the points are a pixel grid (an image, a grid, a heightfield) and give one pixel each; bake: any points are binned into the image by their X / Y position (mean per pixel, empty pixels transparent)",
+   "kind": "enum",
+   "options": [
+    "lattice",
+    "bake"
+   ]
+  },
+  "normalize": {
+   "default": false,
+   "doc": "Stretch the values to 0..1 (a height map before it becomes an image)",
+   "kind": "bool"
+  },
+  "source": {
+   "default": "Cd",
+   "doc": "Point attribute written to the pixels: a scalar is grey, a vector is red green blue, 4 values include alpha. `P` works too (positions as colours)",
+   "kind": "str"
+  },
+  "width": {
+   "default": 512,
+   "doc": "bake: image width in pixels",
+   "kind": "int",
+   "max": 8192,
+   "min": 1
+  }
+ },
+ "input": {
+  "index": {
+   "default": 0,
+   "doc": "Which input of the system this is (0 = first)",
+   "kind": "int",
+   "max": 15,
+   "min": 0
+  },
+  "name": {
+   "default": "geo",
+   "doc": "Name of the system's input port",
+   "kind": "str"
+  }
+ },
+ "inset": {
+  "amount": {
+   "default": 0.1,
+   "doc": "",
+   "kind": "float",
+   "min": 0,
+   "soft_max": 1
+  },
+  "group": {
+   "default": "",
+   "doc": "",
+   "kind": "str"
+  },
+  "mode": {
+   "default": "connected",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "connected",
+    "individual"
+   ]
+  }
+ },
+ "instance": {
+  "align": {
+   "default": "normal",
+   "doc": "normal: the object's +Z follows the point's N; up: objects stay upright",
+   "kind": "enum",
+   "options": [
+    "normal",
+    "up"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these points get instances",
+   "kind": "str"
+  },
+  "objects": {
+   "default": "",
+   "doc": "Blender objects to place, space separated (e.g. 'Tree Bush Rock'); they stay in your scene",
+   "kind": "str"
+  },
+  "pick": {
+   "default": "random",
+   "doc": "Which object each point gets; attribute: from 'pick_attrib'",
+   "kind": "enum",
+   "options": [
+    "random",
+    "cycle",
+    "attribute"
+   ]
+  },
+  "pick_attrib": {
+   "default": "variant",
+   "doc": "pick = attribute: an int point attribute, 0 = first object (wraps around)",
+   "kind": "str"
+  },
+  "random_spin": {
+   "default": 360.0,
+   "doc": "Random rotation about the object's own +Z, in degrees",
+   "kind": "float",
+   "max": 360.0,
+   "min": 0.0
+  },
+  "scale_max": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 4.0
+  },
+  "scale_min": {
+   "default": 1.0,
+   "doc": "Random uniform scale range, times the point's pscale if any",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 4.0
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  }
+ },
+ "knife": {
+  "cuts": {
+   "default": "[]",
+   "doc": "Interactive view-space cut segments, captured by the viewport Knife.",
+   "kind": "str"
+  }
+ },
+ "lattice": {
+  "group": {
+   "default": "",
+   "doc": "",
+   "kind": "str"
+  },
+  "outside": {
+   "default": "clamp",
+   "doc": "Outside rest bounds: clamp displacement lookup or leave points unchanged",
+   "kind": "enum",
+   "options": [
+    "clamp",
+    "unchanged"
+   ]
+  }
+ },
+ "lattice_grid": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "columns": {
+   "default": 2,
+   "doc": "",
+   "kind": "int",
+   "max": 64,
+   "min": 2
+  },
+  "layers": {
+   "default": 2,
+   "doc": "",
+   "kind": "int",
+   "max": 64,
+   "min": 2
+  },
+  "offsets": {
+   "default": "[]",
+   "doc": "Per-control XYZ displacement values edited by viewport handles. Changing resolution resets incompatible offsets.",
+   "kind": "str"
+  },
+  "rows": {
+   "default": 2,
+   "doc": "",
+   "kind": "int",
+   "max": 64,
+   "min": 2
+  },
+  "size": {
+   "default": [
+    2.0,
+    2.0,
+    2.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  }
+ },
  "line": {
   "direction": {
    "default": [
@@ -259,6 +2644,165 @@
    "kind": "int",
    "min": 2,
    "soft_max": 1000
+  }
+ },
+ "linear_taper": {
+  "direction": {
+   "default": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "doc": "Taper axis",
+   "kind": "vec3"
+  },
+  "dropoff": {
+   "default": 1.0,
+   "doc": "1 is linear; larger holds the shape longer then tapers faster",
+   "kind": "float",
+   "min": 0.01,
+   "soft_max": 4.0
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these points",
+   "kind": "str"
+  },
+  "length": {
+   "default": 1.0,
+   "doc": "Distance along the axis over which the taper is reached",
+   "kind": "float",
+   "min": 1e-08
+  },
+  "origin": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "No scaling at this point",
+   "kind": "vec3"
+  },
+  "symmetric": {
+   "default": false,
+   "doc": "Taper the same way on the other side of the origin",
+   "kind": "bool"
+  },
+  "taper_x": {
+   "default": 0.5,
+   "doc": "Scale across the first perpendicular axis at the end of the length",
+   "kind": "float",
+   "soft_max": 2.0,
+   "soft_min": 0.0
+  },
+  "taper_y": {
+   "default": 0.5,
+   "doc": "Scale across the second perpendicular axis at the end",
+   "kind": "float",
+   "soft_max": 2.0,
+   "soft_min": 0.0
+  },
+  "up": {
+   "default": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "doc": "Orients the two perpendicular axes",
+   "kind": "vec3"
+  }
+ },
+ "lod_bake": {
+  "cluster_size": {
+   "default": 128,
+   "doc": "Maximum triangles per cluster (16 to 128)",
+   "kind": "int",
+   "max": 128,
+   "min": 16
+  },
+  "enabled": {
+   "default": true,
+   "doc": "Build and use the clustered LOD payload",
+   "kind": "bool"
+  },
+  "error_px": {
+   "default": 1.0,
+   "doc": "Screen-space error budget in pixels",
+   "kind": "float",
+   "min": 0.01,
+   "soft_max": 16.0
+  },
+  "min_triangles": {
+   "default": 50000,
+   "doc": "Skip the build for smaller meshes",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 1000000
+  }
+ },
+ "loop_begin": {},
+ "loop_cut": {
+  "loops": {
+   "default": 1,
+   "doc": "How many loops to insert, evenly spaced",
+   "kind": "int",
+   "max": 64,
+   "min": 1
+  },
+  "mode": {
+   "default": "edge_loop",
+   "doc": "edge_loop: insert loops through the quad strip around each edge; points: cut faces between two of their points",
+   "kind": "enum",
+   "options": [
+    "edge_loop",
+    "points"
+   ]
+  },
+  "outgrp_edges": {
+   "default": false,
+   "doc": "The edges across the faces that were split",
+   "kind": "bool"
+  },
+  "outgrp_edges_name": {
+   "default": "splitedges",
+   "doc": "Name of the new edges group",
+   "kind": "str"
+  },
+  "outgrp_points": {
+   "default": false,
+   "doc": "The points inserted on the split edges",
+   "kind": "bool"
+  },
+  "outgrp_points_name": {
+   "default": "splitpoints",
+   "doc": "Name of the new points group",
+   "kind": "str"
+  },
+  "position": {
+   "default": 0.5,
+   "doc": "Where a single loop crosses the edge, from the first point",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "split_edges": {
+   "default": "",
+   "doc": "edge_loop: the edges to cut across: ids/ranges, p0-1 pairs (direction p0 -> p1 decides where 'position' counts from), edge groups",
+   "kind": "str"
+  },
+  "split_points": {
+   "default": "",
+   "doc": "points mode: pairs like '0-2 5-7'; each cuts the face that holds both points",
+   "kind": "str"
+  }
+ },
+ "loop_end": {
+  "iterations": {
+   "default": 3,
+   "doc": "Repeat the body N times; zero returns initial geometry",
+   "kind": "int",
+   "max": 1000,
+   "min": 0
   }
  },
  "match_size": {
@@ -307,7 +2851,94 @@
    "kind": "bool"
   }
  },
+ "measure": {
+  "measure": {
+   "default": "area",
+   "doc": "area / perimeter per primitive (an open curve's perimeter is its length); curvature per point (mean curvature, 1/radius: + convex, - concave); piece_area / piece_volume per primitive, summed over its connected piece",
+   "kind": "enum",
+   "options": [
+    "area",
+    "perimeter",
+    "curvature",
+    "piece_area",
+    "piece_volume"
+   ]
+  },
+  "name": {
+   "default": "",
+   "doc": "Attribute name (default: the measure's name)",
+   "kind": "str"
+  }
+ },
  "merge": {},
+ "mirror": {
+  "consolidate_seam": {
+   "default": true,
+   "doc": "Weld mirrored points that lie on the plane to the originals",
+   "kind": "bool"
+  },
+  "distance": {
+   "default": 0.001,
+   "doc": "How close to the plane a point must be to weld",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 0.1
+  },
+  "keep_original": {
+   "default": true,
+   "doc": "",
+   "kind": "bool"
+  },
+  "normal": {
+   "default": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Normal of the mirror plane (default: mirror across X = 0)",
+   "kind": "vec3"
+  },
+  "origin": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "outgrp_mirrored": {
+   "default": false,
+   "doc": "The reflected copies of the primitives",
+   "kind": "bool"
+  },
+  "outgrp_mirrored_name": {
+   "default": "mirrored",
+   "doc": "Name of the mirrored primitives group",
+   "kind": "str"
+  },
+  "outgrp_mirroredpoints": {
+   "default": false,
+   "doc": "The reflected copies of the points",
+   "kind": "bool"
+  },
+  "outgrp_mirroredpoints_name": {
+   "default": "mirroredpoints",
+   "doc": "Name of the mirrored points group",
+   "kind": "str"
+  },
+  "outgrp_seam": {
+   "default": false,
+   "doc": "Points on the mirror plane that were welded to their reflections",
+   "kind": "bool"
+  },
+  "outgrp_seam_name": {
+   "default": "seampoints",
+   "doc": "Name of the seam points group",
+   "kind": "str"
+  }
+ },
+ "modifier_input": {},
  "noise": {
   "amplitude": {
    "default": [
@@ -406,10 +3037,541 @@
    "kind": "str"
   }
  },
+ "object_input": {
+  "binding": {
+   "default": "",
+   "doc": "Modifier object input name; blank uses this node's name",
+   "kind": "str"
+  }
+ },
  "output": {
   "object": {
    "default": "",
    "doc": "Blender object that shows this output (created and updated live). Empty: the main output, shown through the MiniHou proxy; only the display node is the main output",
+   "kind": "str"
+  }
+ },
+ "outset": {
+  "amount": {
+   "default": 0.1,
+   "doc": "",
+   "kind": "float",
+   "min": 0,
+   "soft_max": 1
+  },
+  "group": {
+   "default": "",
+   "doc": "",
+   "kind": "str"
+  },
+  "mode": {
+   "default": "connected",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "connected",
+    "individual"
+   ]
+  }
+ },
+ "path_deform": {
+  "axis": {
+   "default": "x",
+   "doc": "The geometry's length axis; it is laid along the curve from its first point",
+   "kind": "enum",
+   "options": [
+    "x",
+    "y",
+    "z"
+   ]
+  },
+  "frame": {
+   "default": "minimal_rotation",
+   "doc": "minimal_rotation: cross-sections turn as little as possible (up is matched at the start); up_vector: they keep `up` everywhere (roads, slides, banners)",
+   "kind": "enum",
+   "options": [
+    "minimal_rotation",
+    "up_vector"
+   ]
+  },
+  "offset": {
+   "default": 0.0,
+   "doc": "Slide along the curve (distance)",
+   "kind": "float",
+   "soft_max": 10.0,
+   "soft_min": -10.0
+  },
+  "stretch": {
+   "default": false,
+   "doc": "Scale the length to fit the whole curve",
+   "kind": "bool"
+  },
+  "twist": {
+   "default": 0.0,
+   "doc": "Degrees of twist over the curve's length",
+   "kind": "float",
+   "soft_max": 720.0,
+   "soft_min": -720.0
+  },
+  "up": {
+   "default": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "doc": "Where the geometry's up (Z, or Y for axis z) points",
+   "kind": "vec3"
+  }
+ },
+ "pcg_bounds": {
+  "bounds_max": {
+   "default": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "bounds_min": {
+   "default": [
+    -0.5,
+    -0.5,
+    -0.5
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "factor": {
+   "default": 1.0,
+   "doc": "scale: multiply the bounds",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 4.0
+  },
+  "mode": {
+   "default": "set",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "set",
+    "scale"
+   ]
+  }
+ },
+ "pcg_copy_points": {
+  "inherit_rotation": {
+   "default": true,
+   "doc": "",
+   "kind": "bool"
+  },
+  "inherit_scale": {
+   "default": true,
+   "doc": "",
+   "kind": "bool"
+  }
+ },
+ "pcg_debug": {
+  "color_by_density": {
+   "default": true,
+   "doc": "Cd from density: dark red (0) to white (1)",
+   "kind": "bool"
+  }
+ },
+ "pcg_density_filter": {
+  "invert": {
+   "default": false,
+   "doc": "Keep the points outside the range instead",
+   "kind": "bool"
+  },
+  "lower": {
+   "default": 0.5,
+   "doc": "",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "probabilistic": {
+   "default": false,
+   "doc": "Keep each point with probability = its density (ignores the range)",
+   "kind": "bool"
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  },
+  "upper": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
+ "pcg_density_noise": {
+  "frequency": {
+   "default": 0.2,
+   "doc": "perlin: patches per metre",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 5.0
+  },
+  "high": {
+   "default": 1.0,
+   "doc": "Range of the noise values",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "invert": {
+   "default": false,
+   "doc": "",
+   "kind": "bool"
+  },
+  "low": {
+   "default": 0.0,
+   "doc": "",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "mode": {
+   "default": "set",
+   "doc": "How the noise combines with the density",
+   "kind": "enum",
+   "options": [
+    "set",
+    "multiply",
+    "add",
+    "minimum",
+    "maximum"
+   ]
+  },
+  "noise": {
+   "default": "random",
+   "doc": "random: per point (from its seed); perlin: smooth patches in space",
+   "kind": "enum",
+   "options": [
+    "random",
+    "perlin"
+   ]
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  }
+ },
+ "pcg_difference": {
+  "density_function": {
+   "default": "binary",
+   "doc": "binary: drop points that touch; subtract: lower their density by how much of their box is covered (dropping those left at 0)",
+   "kind": "enum",
+   "options": [
+    "binary",
+    "subtract"
+   ]
+  }
+ },
+ "pcg_distance": {
+  "invert": {
+   "default": false,
+   "doc": "1 at the target, 0 far away",
+   "kind": "bool"
+  },
+  "max_distance": {
+   "default": 5.0,
+   "doc": "Density goes from 0 at the target to 1 at this distance",
+   "kind": "float",
+   "min": 1e-06,
+   "soft_max": 100.0
+  },
+  "mode": {
+   "default": "set",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "set",
+    "multiply"
+   ]
+  }
+ },
+ "pcg_intersection": {
+  "density_function": {
+   "default": "binary",
+   "doc": "binary: keep points that touch; multiply: scale their density by how much of their box is covered",
+   "kind": "enum",
+   "options": [
+    "binary",
+    "multiply"
+   ]
+  }
+ },
+ "pcg_points": {
+  "density": {
+   "default": 1.0,
+   "doc": "Density where the points have none yet",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "extents": {
+   "default": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "doc": "Half size of each point's box where it has no bounds yet",
+   "kind": "vec3",
+   "min": 0.0
+  }
+ },
+ "pcg_projection": {
+  "align": {
+   "default": true,
+   "doc": "Turn each point's +Z to the surface normal",
+   "kind": "bool"
+  },
+  "direction": {
+   "default": [
+    0.0,
+    0.0,
+    -1.0
+   ],
+   "doc": "Cast along this direction (and back) to find the surface",
+   "kind": "vec3"
+  },
+  "keep_misses": {
+   "default": false,
+   "doc": "Keep points that miss the surface (unchanged)",
+   "kind": "bool"
+  }
+ },
+ "pcg_self_prune": {
+  "priority": {
+   "default": "large_first",
+   "doc": "Which of two overlapping points survives: the larger box, the smaller, the denser, or by chance",
+   "kind": "enum",
+   "options": [
+    "large_first",
+    "small_first",
+    "density",
+    "random"
+   ]
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  }
+ },
+ "pcg_spawner": {
+  "objects": {
+   "default": "",
+   "doc": "Weighted Blender objects, e.g. 'Tree:3 Bush:2 Rock:1' (weight 1 if omitted)",
+   "kind": "str"
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  }
+ },
+ "pcg_spline_sampler": {
+  "extents": {
+   "default": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "doc": "",
+   "kind": "vec3",
+   "min": 0.0
+  },
+  "jitter": {
+   "default": 0.0,
+   "doc": "interior: random offset, as a fraction of the spacing",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "mode": {
+   "default": "on_curve",
+   "doc": "on_curve: along the curves; interior: filling closed curves (in their plane, e.g. a lot outline drawn in XY)",
+   "kind": "enum",
+   "options": [
+    "on_curve",
+    "interior"
+   ]
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  },
+  "spacing": {
+   "default": 1.0,
+   "doc": "Distance between points",
+   "kind": "float",
+   "min": 0.001,
+   "soft_max": 20.0
+  }
+ },
+ "pcg_surface_sampler": {
+  "align": {
+   "default": false,
+   "doc": "Rotate points so their +Z follows the surface normal (else upright)",
+   "kind": "bool"
+  },
+  "extents": {
+   "default": [
+    0.5,
+    0.5,
+    0.5
+   ],
+   "doc": "Half size of each point's box",
+   "kind": "vec3",
+   "min": 0.0
+  },
+  "looseness": {
+   "default": 0.3,
+   "doc": "0: evenly spaced (blue noise); 1: plain random",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "points_per_m2": {
+   "default": 1.0,
+   "doc": "How many points per square metre of surface",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 100.0
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  }
+ },
+ "pcg_transform": {
+  "absolute_rotation": {
+   "default": false,
+   "doc": "Replace the rotation instead of adding to it",
+   "kind": "bool"
+  },
+  "offset_max": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "offset_min": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "rotation_max": {
+   "default": [
+    0.0,
+    0.0,
+    360.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "rotation_min": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Degrees, Euler XYZ",
+   "kind": "vec3"
+  },
+  "scale_max": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "scale_min": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  },
+  "uniform_scale": {
+   "default": true,
+   "doc": "One random factor for all axes (from the X range)",
+   "kind": "bool"
+  }
+ },
+ "pcg_union": {
+  "density_function": {
+   "default": "keep",
+   "doc": "maximum / add: where boxes from different inputs overlap, raise each point's density to the highest one, or add them (clamped to 1)",
+   "kind": "enum",
+   "options": [
+    "keep",
+    "maximum",
+    "add"
+   ]
+  }
+ },
+ "pcg_volume_sampler": {
+  "jitter": {
+   "default": 0.0,
+   "doc": "Random offset, as a fraction of the voxel",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  },
+  "voxel_size": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "Spacing of the grid of points",
+   "kind": "vec3",
+   "min": 0.001
+  }
+ },
+ "peak": {
+  "distance": {
+   "default": 0.1,
+   "doc": "",
+   "kind": "float",
+   "soft_max": 1.0,
+   "soft_min": -1.0
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these points",
    "kind": "str"
   }
  },
@@ -422,6 +3584,1887 @@
    ],
    "doc": "Position of the single point in model coordinates",
    "kind": "vec3"
+  }
+ },
+ "point_deform": {
+  "group": {
+   "default": "",
+   "doc": "",
+   "kind": "str"
+  },
+  "max_points": {
+   "default": 16,
+   "doc": "Nearest control samples per point; at least four noncoplanar samples for full affine reproduction",
+   "kind": "int",
+   "max": 128,
+   "min": 1
+  },
+  "radius": {
+   "default": 0.0,
+   "doc": "0: nearest controls without a radius cutoff; otherwise uncaptured points stay unchanged",
+   "kind": "float",
+   "min": 0
+  }
+ },
+ "point_jitter": {
+  "group": {
+   "default": "",
+   "doc": "",
+   "kind": "str"
+  },
+  "scale": {
+   "default": [
+    0.1,
+    0.1,
+    0.1
+   ],
+   "doc": "Maximum offset along each axis",
+   "kind": "vec3"
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  }
+ },
+ "point_relax": {
+  "iterations": {
+   "default": 10,
+   "doc": "",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 100
+  },
+  "radius": {
+   "default": 0.0,
+   "doc": "Desired spacing; 0 = from the surface area and point count (or the points' bounding box without a surface)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 2.0
+  },
+  "update_normals": {
+   "default": true,
+   "doc": "Take N from the surface where each point lands",
+   "kind": "bool"
+  }
+ },
+ "points_to_surface": {
+  "blend": {
+   "default": 1.0,
+   "doc": "How much neighbouring points melt together (metaballs)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 4.0
+  },
+  "radius": {
+   "default": 0.2,
+   "doc": "Sphere radius per point (times pscale if present)",
+   "kind": "float",
+   "min": 0.0001,
+   "soft_max": 2.0
+  },
+  "smooth": {
+   "default": 0,
+   "doc": "",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 20
+  },
+  "transfer": {
+   "default": "Cd",
+   "doc": "Point attributes to carry from the nearest point onto the surface",
+   "kind": "str"
+  },
+  "voxel_size": {
+   "default": 0.05,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0001,
+   "soft_max": 1.0
+  }
+ },
+ "polybevel": {
+  "convexity": {
+   "default": 1.0,
+   "doc": "Blend from a flat profile (0) to the round profile (1).",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "distance": {
+   "default": 0.1,
+   "doc": "How far the bevel cuts into the faces on each side",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 1.0
+  },
+  "divisions": {
+   "default": 1,
+   "doc": "Segments across each bevel strip. One preserves the original chamfer.",
+   "kind": "int",
+   "max": 64,
+   "min": 1
+  },
+  "edges": {
+   "default": "",
+   "doc": "Edges to bevel as point pairs, e.g. '12-13 40-41' (the 3-D view's edge selection writes this). When set, exactly these interior edges are bevelled and min_angle is ignored",
+   "kind": "str"
+  },
+  "exclude_edges": {
+   "default": "",
+   "doc": "Edges to exclude: edge ids, named groups, or pA-B point pairs.",
+   "kind": "str"
+  },
+  "group": {
+   "default": "",
+   "doc": "What to bevel, read as 'group_type' (empty: every sharp edge, see min_angle)",
+   "kind": "str"
+  },
+  "group_type": {
+   "default": "points",
+   "doc": "points: edges with both ends in the point group; edges: an edge group, edge numbers or pA-B pairs (e.g. the offsetedges of an earlier bevel); primitives: every interior edge of those primitives. A group selects exactly those edges",
+   "kind": "enum",
+   "options": [
+    "points",
+    "edges",
+    "primitives"
+   ]
+  },
+  "limit_overlap": {
+   "default": true,
+   "doc": "Reduce offsets that would fold an original face. This is not a global self-intersection solver.",
+   "kind": "bool"
+  },
+  "min_angle": {
+   "default": 30.0,
+   "doc": "Only bevel edges whose faces meet at least this many degrees off flat (0: every interior edge)",
+   "kind": "float",
+   "max": 180.0,
+   "min": 0.0
+  },
+  "outgrp_edgefilletpolys": {
+   "default": false,
+   "doc": "The strips (quads) that replace each bevelled edge",
+   "kind": "bool"
+  },
+  "outgrp_edgefilletpolys_name": {
+   "default": "edgefilletpolys",
+   "doc": "Name of the edge fillet polygons group",
+   "kind": "str"
+  },
+  "outgrp_mergedpoints": {
+   "default": false,
+   "doc": "Points merged where offsets collide. This bevel limits an offset instead of merging, so the group is always empty",
+   "kind": "bool"
+  },
+  "outgrp_mergedpoints_name": {
+   "default": "mergedpoints",
+   "doc": "Name of the merged points group",
+   "kind": "str"
+  },
+  "outgrp_offsetedges": {
+   "default": false,
+   "doc": "The new edges where each strip meets the original faces: the offset copies of the bevelled edges",
+   "kind": "bool"
+  },
+  "outgrp_offsetedges_name": {
+   "default": "offsetedges",
+   "doc": "Name of the offset edges group",
+   "kind": "str"
+  },
+  "outgrp_offsetpoints": {
+   "default": false,
+   "doc": "The new points created by offsetting the bevelled edges",
+   "kind": "bool"
+  },
+  "outgrp_offsetpoints_name": {
+   "default": "offsetpoints",
+   "doc": "Name of the offset points group",
+   "kind": "str"
+  },
+  "outgrp_pointfilletedges": {
+   "default": false,
+   "doc": "The edges of those corner polygons",
+   "kind": "bool"
+  },
+  "outgrp_pointfilletedges_name": {
+   "default": "pointfilletedges",
+   "doc": "Name of the point fillet edges group",
+   "kind": "str"
+  },
+  "outgrp_pointfilletpolys": {
+   "default": false,
+   "doc": "The corner polygons made where three or more bevelled edges meet at a point",
+   "kind": "bool"
+  },
+  "outgrp_pointfilletpolys_name": {
+   "default": "pointfilletpolys",
+   "doc": "Name of the point fillet polygons group",
+   "kind": "str"
+  },
+  "output_group": {
+   "default": "bevel",
+   "doc": "Primitive group for all the new bevel faces (empty: none)",
+   "kind": "str"
+  },
+  "shape": {
+   "default": "round",
+   "doc": "Round uses a tangent circular profile; flat subdivides the chamfer.",
+   "kind": "enum",
+   "options": [
+    "round",
+    "flat"
+   ]
+  }
+ },
+ "polybridge": {
+  "destination": {
+   "default": "",
+   "doc": "Disjoint chain/loop with the same number of points",
+   "kind": "str"
+  },
+  "outgrp_bridge": {
+   "default": false,
+   "doc": "The faces that join the two profiles",
+   "kind": "bool"
+  },
+  "outgrp_bridge_name": {
+   "default": "bridgepolys",
+   "doc": "Name of the bridge polygons group",
+   "kind": "str"
+  },
+  "reverse": {
+   "default": false,
+   "doc": "Reverse destination correspondence (standalone profiles only)",
+   "kind": "bool"
+  },
+  "segments": {
+   "default": 1,
+   "doc": "",
+   "kind": "int",
+   "max": 256,
+   "min": 1
+  },
+  "source": {
+   "default": "",
+   "doc": "One boundary chain/loop: edge group, ids or pA-B pairs",
+   "kind": "str"
+  },
+  "twist": {
+   "default": 0,
+   "doc": "Destination loop cyclic point shift",
+   "kind": "int"
+  }
+ },
+ "polyexpand2d": {
+  "distance": {
+   "default": 0.1,
+   "doc": "Positive expands, negative insets; winding-independent. With mode inside_outside it is the offset amount (its absolute value)",
+   "kind": "float"
+  },
+  "group": {
+   "default": "",
+   "doc": "Closed convex planar profile primitives",
+   "kind": "str"
+  },
+  "keep_input": {
+   "default": false,
+   "doc": "Keep the input loops as well as the offset ones",
+   "kind": "bool"
+  },
+  "miter_limit": {
+   "default": 10.0,
+   "doc": "Maximum corner displacement / absolute offset",
+   "kind": "float",
+   "min": 1
+  },
+  "mode": {
+   "default": "single",
+   "doc": "single: one offset loop, outwards for a positive distance and inwards for a negative one. inside_outside: the outside loop and the inside loop, as Houdini outputs them",
+   "kind": "enum",
+   "options": [
+    "single",
+    "inside_outside"
+   ]
+  },
+  "outattr_edgedist": {
+   "default": false,
+   "doc": "Write the point attribute 'edgedist' on the offset points",
+   "kind": "bool"
+  },
+  "outattr_edgedist_name": {
+   "default": "edgedist",
+   "doc": "",
+   "kind": "str"
+  },
+  "outattr_edgespeed": {
+   "default": false,
+   "doc": "Write the point attribute 'edgespeed' on the offset points",
+   "kind": "bool"
+  },
+  "outattr_edgespeed_name": {
+   "default": "edgespeed",
+   "doc": "",
+   "kind": "str"
+  },
+  "outgrp_inside": {
+   "default": false,
+   "doc": "The offset loops that lie inside the input loop",
+   "kind": "bool"
+  },
+  "outgrp_inside_name": {
+   "default": "inside",
+   "doc": "Name of the inside group group",
+   "kind": "str"
+  },
+  "outgrp_outside": {
+   "default": false,
+   "doc": "The offset loops that lie outside the input loop",
+   "kind": "bool"
+  },
+  "outgrp_outside_name": {
+   "default": "outside",
+   "doc": "Name of the outside group group",
+   "kind": "str"
+  },
+  "output_inside": {
+   "default": true,
+   "doc": "inside_outside: make the inside loop",
+   "kind": "bool"
+  },
+  "output_outside": {
+   "default": true,
+   "doc": "inside_outside: make the outside loop",
+   "kind": "bool"
+  },
+  "tolerance": {
+   "default": 1e-06,
+   "doc": "Planarity tolerance relative to profile extent",
+   "kind": "float",
+   "max": 0.01,
+   "min": 1e-10
+  }
+ },
+ "polyextrude": {
+  "distance": {
+   "default": 0.5,
+   "doc": "Along the face normals (negative: inwards)",
+   "kind": "float",
+   "soft_max": 2.0,
+   "soft_min": -2.0
+  },
+  "group": {
+   "default": "",
+   "doc": "Primitives to extrude (pattern; empty: all)",
+   "kind": "str"
+  },
+  "inset": {
+   "default": 0.0,
+   "doc": "Constant perpendicular boundary offset; inset regions must be planar",
+   "kind": "float",
+   "soft_max": 1.0,
+   "soft_min": 0.0
+  },
+  "mode": {
+   "default": "connected",
+   "doc": "connected: neighbouring faces extrude as one region (Houdini's 'keep shared edges together'); individual: every face on its own",
+   "kind": "enum",
+   "options": [
+    "connected",
+    "individual"
+   ]
+  },
+  "outgrp_back": {
+   "default": false,
+   "doc": "The original faces left behind (needs 'output_back')",
+   "kind": "bool"
+  },
+  "outgrp_back_name": {
+   "default": "extrudeBack",
+   "doc": "Name of the back group",
+   "kind": "str"
+  },
+  "outgrp_front": {
+   "default": true,
+   "doc": "The extruded faces (the selected faces, moved)",
+   "kind": "bool"
+  },
+  "outgrp_front_name": {
+   "default": "extrudeFront",
+   "doc": "Name of the front group",
+   "kind": "str"
+  },
+  "outgrp_side": {
+   "default": true,
+   "doc": "The walls between the original outline and the front faces",
+   "kind": "bool"
+  },
+  "outgrp_side_name": {
+   "default": "extrudeSide",
+   "doc": "Name of the side group",
+   "kind": "str"
+  },
+  "output_back": {
+   "default": false,
+   "doc": "Keep the original faces as well (a closed shell)",
+   "kind": "bool"
+  }
+ },
+ "polyfill": {
+  "fill_group": {
+   "default": "",
+   "doc": "Optional name of a primitive group for the new faces",
+   "kind": "str"
+  }
+ },
+ "polypath": {},
+ "polyreduce": {
+  "keep_borders": {
+   "default": true,
+   "doc": "Hold open borders in place (stiff quadrics along them)",
+   "kind": "bool"
+  },
+  "percentage": {
+   "default": 25.0,
+   "doc": "Keep this percentage of the triangles",
+   "kind": "float",
+   "max": 100.0,
+   "min": 0.0
+  },
+  "target": {
+   "default": 0,
+   "doc": "Or this many triangles (overrides the percentage when > 0)",
+   "kind": "int",
+   "min": 0
+  }
+ },
+ "polysplit": {
+  "loops": {
+   "default": 1,
+   "doc": "How many loops to insert, evenly spaced",
+   "kind": "int",
+   "max": 64,
+   "min": 1
+  },
+  "mode": {
+   "default": "edge_loop",
+   "doc": "edge_loop: insert loops through the quad strip around each edge; points: cut faces between two of their points",
+   "kind": "enum",
+   "options": [
+    "edge_loop",
+    "points"
+   ]
+  },
+  "outgrp_edges": {
+   "default": false,
+   "doc": "The edges across the faces that were split",
+   "kind": "bool"
+  },
+  "outgrp_edges_name": {
+   "default": "splitedges",
+   "doc": "Name of the new edges group",
+   "kind": "str"
+  },
+  "outgrp_points": {
+   "default": false,
+   "doc": "The points inserted on the split edges",
+   "kind": "bool"
+  },
+  "outgrp_points_name": {
+   "default": "splitpoints",
+   "doc": "Name of the new points group",
+   "kind": "str"
+  },
+  "position": {
+   "default": 0.5,
+   "doc": "Where a single loop crosses the edge, from the first point",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "split_edges": {
+   "default": "",
+   "doc": "edge_loop: the edges to cut across: ids/ranges, p0-1 pairs (direction p0 -> p1 decides where 'position' counts from), edge groups",
+   "kind": "str"
+  },
+  "split_points": {
+   "default": "",
+   "doc": "points mode: pairs like '0-2 5-7'; each cuts the face that holds both points",
+   "kind": "str"
+  }
+ },
+ "pushpull": {
+  "distance": {
+   "default": 0.25,
+   "doc": "Positive adds solid; negative removes solid, including through the opposite wall",
+   "kind": "float",
+   "soft_max": 2,
+   "soft_min": -2
+  },
+  "group": {
+   "default": "",
+   "doc": "Exactly one convex planar face; inset a face first to create a smaller opening",
+   "kind": "str"
+  }
+ },
+ "ray": {
+  "bias": {
+   "default": 0.0,
+   "doc": "Offset transformed points along the hit surface normal.",
+   "kind": "float",
+   "soft_max": 1.0,
+   "soft_min": -1.0
+  },
+  "both_ways": {
+   "default": false,
+   "doc": "Also cast backwards and take the nearer hit",
+   "kind": "bool"
+  },
+  "collision_group": {
+   "default": "",
+   "doc": "Primitive group on the second input (empty: all). Hit primitive numbers remain original input numbers.",
+   "kind": "str"
+  },
+  "create_point_group": {
+   "default": true,
+   "doc": "Enabled by default for compatibility with rayHit.",
+   "kind": "bool"
+  },
+  "delete_misses": {
+   "default": false,
+   "doc": "Delete points whose ray hits nothing",
+   "kind": "bool"
+  },
+  "detail_attributes": {
+   "default": "",
+   "doc": "Numeric details broadcast to hit points; structured/string values are copied as detail data when any ray hits.",
+   "enabled_if": {
+    "import_attributes_from_hits": true
+   },
+   "kind": "str"
+  },
+  "direction": {
+   "default": [
+    0.0,
+    0.0,
+    -1.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "direction_attribute": {
+   "default": "N",
+   "doc": "Point vector attribute used as the ray direction when Direction From is Attribute.",
+   "enabled_if": {
+    "direction_from": "attribute",
+    "method": "project_rays"
+   },
+   "kind": "str"
+  },
+  "direction_from": {
+   "default": "normal",
+   "doc": "Normal computes missing point normals; Specified Vector uses Direction; Attribute reads a point vector.",
+   "enabled_if": {
+    "method": "project_rays"
+   },
+   "kind": "enum",
+   "options": [
+    "normal",
+    "specified_vector",
+    "attribute"
+   ]
+  },
+  "entity": {
+   "default": "points",
+   "doc": "Interpret Group as points or primitives; selected primitives project their shared points once.",
+   "kind": "enum",
+   "options": [
+    "points",
+    "primitives"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these points",
+   "kind": "str"
+  },
+  "import_attribs": {
+   "default": "",
+   "doc": "Target attributes to copy from the hit (point attributes are interpolated); e.g. 'Cd uv'",
+   "kind": "str"
+  },
+  "import_attributes_from_hits": {
+   "default": false,
+   "doc": "Copy attributes from the hit primitive of the second input onto the projected points.",
+   "kind": "bool"
+  },
+  "intersect_farthest_surface": {
+   "default": false,
+   "doc": "Choose the farthest surface along each ray, within Max Distance.",
+   "kind": "bool"
+  },
+  "jitter_scale": {
+   "default": 0.0,
+   "doc": "Radius of uniform-disk direction perturbations in the ray tangent plane.",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 1.0
+  },
+  "lift": {
+   "default": 0.0,
+   "doc": "Project Rays: offset along the ray after scaling. Legacy methods: offset along the hit normal.",
+   "kind": "float",
+   "soft_max": 1.0,
+   "soft_min": -1.0
+  },
+  "max_distance": {
+   "default": 1000000.0,
+   "doc": "",
+   "enabled_if": {
+    "max_distance_enabled": true
+   },
+   "kind": "float",
+   "min": 0.0
+  },
+  "max_distance_enabled": {
+   "default": true,
+   "doc": "Disable for unlimited reach. Enabled by default to preserve Python's 1e6 limit.",
+   "kind": "bool"
+  },
+  "method": {
+   "default": "direction",
+   "doc": "Project Rays uses Direction From; direction and normal retain Python-compatible behavior; minimum_distance finds the closest surface.",
+   "kind": "enum",
+   "options": [
+    "direction",
+    "normal",
+    "minimum_distance",
+    "project_rays"
+   ]
+  },
+  "point_attributes": {
+   "default": "*",
+   "doc": "Target point patterns; floats are barycentrically interpolated. P is excluded. Commas/spaces and ^ exclusions are accepted.",
+   "enabled_if": {
+    "import_attributes_from_hits": true
+   },
+   "kind": "str"
+  },
+  "point_intersection_distance": {
+   "default": false,
+   "doc": "Write intersection distance to dist; hitdist is always available (-1 on misses).",
+   "kind": "bool"
+  },
+  "point_intersection_normal": {
+   "default": false,
+   "doc": "Write hit surface normals to N. Importing target N overrides this. hitN is always available.",
+   "kind": "bool"
+  },
+  "prim_num_attribute": {
+   "default": "hitprim",
+   "doc": "Name of the integer attribute that receives the hit primitive number.",
+   "enabled_if": {
+    "prim_num_attribute_enabled": true
+   },
+   "kind": "str"
+  },
+  "prim_num_attribute_enabled": {
+   "default": true,
+   "doc": "Enabled by default for compatibility with hitprim.",
+   "kind": "bool"
+  },
+  "prim_uvw_attribute": {
+   "default": "hitprimuv",
+   "doc": "Triangle-local (u,v,0). N-gons use the intersected triangulation triangle, not Houdini's polygon parameterization.",
+   "enabled_if": {
+    "prim_uvw_attribute_enabled": true
+   },
+   "kind": "str"
+  },
+  "prim_uvw_attribute_enabled": {
+   "default": false,
+   "doc": "Write the hit primitive's parametric UVW coordinates to an attribute.",
+   "kind": "bool"
+  },
+  "primitive_attributes": {
+   "default": "",
+   "doc": "Target primitive patterns; copy hit primitive values to source points.",
+   "enabled_if": {
+    "import_attributes_from_hits": true
+   },
+   "kind": "str"
+  },
+  "ray_combiner": {
+   "default": "average",
+   "doc": "Combine successful ray lengths along the base direction; average also averages normals and imported float attributes. Prim/UVW use the actual hit nearest the average length.",
+   "kind": "enum",
+   "options": [
+    "average",
+    "median",
+    "shortest",
+    "longest"
+   ]
+  },
+  "ray_hit_group": {
+   "default": "rayHit",
+   "doc": "Name of the point group created for points whose ray hit the surface.",
+   "enabled_if": {
+    "create_point_group": true
+   },
+   "kind": "str"
+  },
+  "ray_tolerance": {
+   "default": 0.01,
+   "doc": "World-space edge tolerance for Project Rays; near misses within this distance count as hits.",
+   "enabled_if": {
+    "method": "project_rays"
+   },
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 0.1
+  },
+  "reverse_rays": {
+   "default": false,
+   "doc": "Cast rays in the opposite direction.",
+   "kind": "bool"
+  },
+  "sample": {
+   "default": 1,
+   "doc": "Ray count per point, including the unperturbed first ray; Minimum Distance uses one closest-point query.",
+   "kind": "int",
+   "max": 65536,
+   "min": 1,
+   "soft_max": 32
+  },
+  "scale": {
+   "default": 1.0,
+   "doc": "Fraction of the intersection path (0: unchanged, 1: surface; values above 1 overshoot).",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 1.0
+  },
+  "seed": {
+   "default": 1,
+   "doc": "Deterministic jitter seed, combined with the source point number.",
+   "kind": "int"
+  },
+  "show_guide_geometry": {
+   "default": false,
+   "doc": "Show collision wireframe while this node is selected and displayed. Off by default to preserve legacy output metadata. Very large guides are thinned to 20000 edges.",
+   "kind": "bool"
+  },
+  "transform_points": {
+   "default": true,
+   "doc": "Move the points (off: only write the hit attributes)",
+   "kind": "bool"
+  },
+  "vertex_attributes": {
+   "default": "",
+   "doc": "Target vertex patterns; interpolate at the actual triangle corners, preserving seams.",
+   "enabled_if": {
+    "import_attributes_from_hits": true
+   },
+   "kind": "str"
+  }
+ },
+ "rbd_configure": {
+  "active": {
+   "default": true,
+   "doc": "",
+   "kind": "bool"
+  },
+  "angular_damping": {
+   "default": 0.1,
+   "doc": "",
+   "kind": "float",
+   "max": 100,
+   "min": 0
+  },
+  "angular_velocity": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Initial angular velocity in simulation space, radians/sec.",
+   "kind": "vec3"
+  },
+  "compound": {
+   "default": false,
+   "doc": "Several separate convex pieces with the same ID (a glue cluster) become one rigid body.",
+   "kind": "bool"
+  },
+  "friction": {
+   "default": 0.6,
+   "doc": "",
+   "kind": "float",
+   "max": 10,
+   "min": 0
+  },
+  "id_offset": {
+   "default": 0,
+   "doc": "Offset IDs before merging separately configured bodies.",
+   "kind": "int"
+  },
+  "linear_damping": {
+   "default": 0.05,
+   "doc": "Exponential velocity decay rate, per second.",
+   "kind": "float",
+   "max": 100,
+   "min": 0
+  },
+  "mass": {
+   "default": 1.0,
+   "doc": "Mass per body in kg; uniform density within its convex hull.",
+   "kind": "float",
+   "min": 1e-06
+  },
+  "piece_attrib": {
+   "default": "",
+   "doc": "Primitive integer piece ID; empty uses connectivity. Fracture: piece.",
+   "kind": "str"
+  },
+  "restitution": {
+   "default": 0.0,
+   "doc": "Approximate bounce, mapped to MuJoCo contact damping ratio.",
+   "kind": "float",
+   "max": 1,
+   "min": 0
+  },
+  "velocity": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Initial linear velocity in simulation space, units/sec.",
+   "kind": "vec3"
+  }
+ },
+ "rbd_constraint": {
+  "anchor": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Pin/hinge pivot, or spring attachment on A, in initial simulation coordinates (metres). Glue preserves the initial relative pose.",
+   "kind": "vec3"
+  },
+  "anchor_b": {
+   "default": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "doc": "Spring attachment on B or the world, in initial simulation coordinates. Ignored by other kinds.",
+   "kind": "vec3"
+  },
+  "axis": {
+   "default": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "doc": "Hinge rotation axis in initial simulation coordinates; normalized by the solver.",
+   "kind": "vec3"
+  },
+  "body_a": {
+   "default": 0,
+   "doc": "Moving piece's rbd_id from RBD Configure.",
+   "kind": "int"
+  },
+  "body_b": {
+   "default": 1,
+   "doc": "Other piece's rbd_id; ignored when World is enabled. IDs must be unique across bodies and colliders.",
+   "kind": "int"
+  },
+  "break_torque": {
+   "default": 0.0,
+   "doc": "Glue/hinge only: break torque in N m; zero disables torque breaking. Pin and spring transmit no direct torque.",
+   "kind": "float",
+   "min": 0,
+   "soft_max": 1000
+  },
+  "collide_connected": {
+   "default": false,
+   "doc": "Allow collisions between linked pieces before breaking. They collide after all non-colliding links between them break.",
+   "kind": "bool"
+  },
+  "damping": {
+   "default": 1.0,
+   "doc": "Spring: axial damping in N s/m. Hinge: angular damping in N m s/rad.",
+   "kind": "float",
+   "min": 0
+  },
+  "kind": {
+   "default": "glue",
+   "doc": "Glue welds; pin fixes a point with free rotation; hinge rotates about an axis; spring connects two anchors.",
+   "kind": "enum",
+   "options": [
+    "glue",
+    "pin",
+    "hinge",
+    "spring"
+   ]
+  },
+  "limited": {
+   "default": false,
+   "doc": "Hinge: angular stops. Spring: minimum/maximum anchor distance. Not used by pin/glue.",
+   "kind": "bool"
+  },
+  "lower": {
+   "default": 0.0,
+   "doc": "Hinge lower angle in degrees from the initial pose; spring minimum length in metres.",
+   "kind": "float"
+  },
+  "rest_length": {
+   "default": -1.0,
+   "doc": "Spring only: -1 uses initial anchor distance; otherwise metres (zero allowed).",
+   "kind": "float",
+   "min": -1
+  },
+  "stiffness": {
+   "default": 100.0,
+   "doc": "Spring only: axial Hooke stiffness in N/m.",
+   "kind": "float",
+   "min": 0
+  },
+  "strength": {
+   "default": 0.0,
+   "doc": "Break force in newtons; zero disables force breaking. Glue also includes torque/lever length for compatibility. Grace period: first 0.1 seconds.",
+   "kind": "float",
+   "min": 0,
+   "soft_max": 1000
+  },
+  "upper": {
+   "default": 90.0,
+   "doc": "Hinge upper angle in degrees; spring maximum length in metres. Must exceed Lower.",
+   "kind": "float"
+  },
+  "world": {
+   "default": false,
+   "doc": "Attach to fixed simulation space instead of Body B.",
+   "kind": "bool"
+  }
+ },
+ "rbd_constraint_properties": {
+  "group": {
+   "default": "",
+   "doc": "Links to edit: group names, ranges or '@area > 0.1' (empty: all). 'internal' / 'external' from glue_cluster work here",
+   "kind": "str"
+  },
+  "mode": {
+   "default": "set",
+   "doc": "set: replace the strength; scale: multiply what is there",
+   "kind": "enum",
+   "options": [
+    "set",
+    "scale"
+   ]
+  },
+  "outgrp_changed": {
+   "default": false,
+   "doc": "The links this node set or scaled",
+   "kind": "bool"
+  },
+  "outgrp_changed_name": {
+   "default": "editedlinks",
+   "doc": "Name of the edited links group",
+   "kind": "str"
+  },
+  "per_area": {
+   "default": true,
+   "doc": "set: newtons per square metre of the link's contact area (off: newtons for the whole link)",
+   "kind": "bool"
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  },
+  "strength": {
+   "default": 1000000.0,
+   "doc": "The new strength (set) or the factor (scale)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 100000000.0
+  },
+  "unbreakable": {
+   "default": false,
+   "doc": "Strength 0 on these links: the solver never breaks them",
+   "kind": "bool"
+  },
+  "variation": {
+   "default": 0.0,
+   "doc": "Random spread of each link's result (0.2: within 20%)",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
+ "rbd_solver": {
+  "cache_mb": {
+   "default": 32,
+   "doc": "Bound on cached body poses; geometry uses evaluator cache.",
+   "kind": "int",
+   "max": 1024,
+   "min": 1
+  },
+  "gravity": {
+   "default": [
+    0.0,
+    0.0,
+    -9.81
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "include_colliders": {
+   "default": true,
+   "doc": "",
+   "kind": "bool"
+  },
+  "iterations": {
+   "default": 50,
+   "doc": "",
+   "kind": "int",
+   "max": 500,
+   "min": 1
+  },
+  "margin": {
+   "default": 0.001,
+   "doc": "",
+   "kind": "float",
+   "max": 1,
+   "min": 0
+  },
+  "reset": {
+   "default": 0,
+   "doc": "Change to discard this simulation and replay its initial state.",
+   "kind": "int"
+  },
+  "start_frame": {
+   "default": 1,
+   "doc": "",
+   "kind": "int"
+  },
+  "substeps": {
+   "default": 10,
+   "doc": "",
+   "kind": "int",
+   "max": 128,
+   "min": 1
+  }
+ },
+ "region_identify": {
+  "attribute": {
+   "default": "class",
+   "doc": "Existing scalar integer primitive label when mode is attribute",
+   "kind": "str"
+  },
+  "mode": {
+   "default": "connectivity",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "connectivity",
+    "primitive",
+    "attribute"
+   ]
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  }
+ },
+ "region_transform": {
+  "extrude": {
+   "default": 0.0,
+   "doc": "",
+   "kind": "float",
+   "soft_max": 1,
+   "soft_min": -1
+  },
+  "random_extrude": {
+   "default": 0.0,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 1
+  },
+  "random_rotate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Per-axis uniform +/- degrees",
+   "kind": "vec3",
+   "min": 0.0
+  },
+  "random_scale": {
+   "default": 0.0,
+   "doc": "Uniform multiplicative scale variation, +/- fraction",
+   "kind": "float",
+   "max": 0.99,
+   "min": 0.0
+  },
+  "random_translate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Per-axis uniform +/- translation",
+   "kind": "vec3",
+   "min": 0.0
+  },
+  "rotate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Euler XYZ degrees about each region centroid",
+   "kind": "vec3"
+  },
+  "scale": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "",
+   "kind": "vec3",
+   "min": 0.001
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  },
+  "translate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  }
+ },
+ "remesh": {
+  "offset": {
+   "default": 0.0,
+   "doc": "Grow (+) or shrink (-) the surface by this distance",
+   "kind": "float",
+   "soft_max": 1.0,
+   "soft_min": -1.0
+  },
+  "smooth": {
+   "default": 0,
+   "doc": "Smoothing passes on the distance field (rounds sharp detail)",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 20
+  },
+  "transfer": {
+   "default": "",
+   "doc": "Point attributes to carry over from the nearest original point, e.g. 'Cd uv'",
+   "kind": "str"
+  },
+  "voxel_size": {
+   "default": 0.05,
+   "doc": "Detail of the new mesh; cost grows with 1/size^3",
+   "kind": "float",
+   "min": 0.0001,
+   "soft_max": 1.0
+  }
+ },
+ "resample": {
+  "by": {
+   "default": "length",
+   "doc": "length: segments of about 'length'; count: exactly 'segments' per curve",
+   "kind": "enum",
+   "options": [
+    "length",
+    "count"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Primitives to resample (others are dropped); empty: all",
+   "kind": "str"
+  },
+  "length": {
+   "default": 0.1,
+   "doc": "",
+   "kind": "float",
+   "min": 1e-06,
+   "soft_max": 2.0
+  },
+  "segments": {
+   "default": 20,
+   "doc": "",
+   "kind": "int",
+   "min": 1,
+   "soft_max": 1000
+  }
+ },
+ "reverse": {
+  "group": {
+   "default": "",
+   "doc": "Primitives to reverse (pattern; empty: all)",
+   "kind": "str"
+  },
+  "reverse_normals": {
+   "default": true,
+   "doc": "Also negate N on the reversed primitives (and their points and vertices)",
+   "kind": "bool"
+  }
+ },
+ "revolve": {
+  "angle": {
+   "default": 360.0,
+   "doc": "Degrees to sweep (360: a closed surface; negative turns the other way)",
+   "kind": "float",
+   "max": 360.0,
+   "min": -360.0,
+   "soft_max": 360.0,
+   "soft_min": -360.0
+  },
+  "axis": {
+   "default": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "doc": "Direction of the axis of revolution",
+   "kind": "vec3"
+  },
+  "divisions": {
+   "default": 32,
+   "doc": "Steps around the axis",
+   "kind": "int",
+   "max": 4096,
+   "min": 1,
+   "soft_max": 128
+  },
+  "end_caps": {
+   "default": false,
+   "doc": "Close both ends of a partial revolve with a face per profile (nothing to close at 360 degrees)",
+   "kind": "bool"
+  },
+  "origin": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "A point on the axis",
+   "kind": "vec3"
+  },
+  "outgrp_endcaps": {
+   "default": false,
+   "doc": "The faces that close the two ends of a partial revolve",
+   "kind": "bool"
+  },
+  "outgrp_endcaps_name": {
+   "default": "endcaps",
+   "doc": "Name of the end caps group group",
+   "kind": "str"
+  },
+  "start_angle": {
+   "default": 0.0,
+   "doc": "Where the sweep starts, in degrees (the end is start + angle)",
+   "kind": "float",
+   "soft_max": 360.0,
+   "soft_min": -360.0
+  }
+ },
+ "scatter": {
+  "count": {
+   "default": 1000,
+   "doc": "",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 1000000
+  },
+  "mode": {
+   "default": "surface",
+   "doc": "surface: on the faces (area weighted); volume: inside a closed mesh",
+   "kind": "enum",
+   "options": [
+    "surface",
+    "volume"
+   ]
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  }
+ },
+ "scene_objects": {
+  "attributes": {
+   "default": "uv Cd N material_index",
+   "doc": "pieces, curves, points: attributes to carry onto the objects (space separated; the ones that exist are sent; * is all of them): for pieces uv, Cd and N become Blender's UV map, colour attribute and custom normals and material_index the face material; Cd on curves and points becomes a colour attribute; anything else a generic attribute. radius and tilt always go",
+   "kind": "str"
+  },
+  "collection": {
+   "default": "",
+   "doc": "Blender collection the objects go in (created if missing; empty: the prefix)",
+   "kind": "str"
+  },
+  "id_attrib": {
+   "default": "id",
+   "doc": "instances: integer point attribute that gives each object a stable identity; without it the point number is used (so changing how many points there are can hand objects to other points)",
+   "kind": "str"
+  },
+  "max_objects": {
+   "default": 2000,
+   "doc": "Safety limit: more points than this is refused, not truncated",
+   "kind": "int",
+   "max": 10000,
+   "min": 1
+  },
+  "mode": {
+   "default": "instances",
+   "doc": "instances: one Blender object per point (a linked duplicate of the object the point names), placed with the point's position, rot and scale; pieces: one mesh object per piece of the geometry (fracture pieces, say), origin at its centre; curves: a Blender curves object with every curve (poly curves, with radius and tilt); points: a Blender point cloud with every point (and its radius)",
+   "kind": "enum",
+   "options": [
+    "instances",
+    "pieces",
+    "curves",
+    "points"
+   ]
+  },
+  "piece_attrib": {
+   "default": "piece",
+   "doc": "pieces: integer primitive attribute that numbers the pieces (it is the objects' identity); when the geometry has none, connected pieces are used, numbered in order",
+   "kind": "str"
+  },
+  "prefix": {
+   "default": "MiniHou",
+   "doc": "Object names start with this (Prefix_0001, ...)",
+   "kind": "str"
+  },
+  "source": {
+   "default": "",
+   "doc": "Blender object to duplicate for points that do not say which (no 'instance' attribute); points from the instance node name their objects themselves",
+   "kind": "str"
+  }
+ },
+ "sdf_boolean": {
+  "operation": {
+   "default": "union",
+   "doc": "subtract: a minus b",
+   "kind": "enum",
+   "options": [
+    "union",
+    "subtract",
+    "intersect"
+   ]
+  },
+  "smooth": {
+   "default": 0.0,
+   "doc": "Fillet radius where the shapes meet (0 = sharp)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 1.0
+  },
+  "transfer_attribs": {
+   "default": true,
+   "doc": "Carry point attributes from the nearest input point (Cd, uv...)",
+   "kind": "bool"
+  },
+  "voxel_size": {
+   "default": 0.05,
+   "doc": "",
+   "kind": "float",
+   "min": 0.0001,
+   "soft_max": 1.0
+  }
+ },
+ "sdf_shape": {
+  "bevel": {
+   "default": 0.0,
+   "doc": "box, cylinder, prism: round the edges with this radius",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 1.0
+  },
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "depth": {
+   "default": 1.0,
+   "doc": "cylinder, prism: height; capsule: length of the straight part; round_cone: distance between the two spheres' centres",
+   "kind": "float",
+   "min": 0.0001,
+   "soft_max": 10.0
+  },
+  "minor_radius": {
+   "default": 0.15,
+   "doc": "torus: tube radius",
+   "kind": "float",
+   "min": 0.0001,
+   "soft_max": 2.0
+  },
+  "radius": {
+   "default": 0.5,
+   "doc": "sphere, cylinder, capsule, prism (corner radius), torus (ring radius), round_cone (bottom radius)",
+   "kind": "float",
+   "min": 0.0001,
+   "soft_max": 5.0
+  },
+  "radius2": {
+   "default": 0.2,
+   "doc": "round_cone: top radius",
+   "kind": "float",
+   "min": 0.0001,
+   "soft_max": 5.0
+  },
+  "rotate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Euler XYZ degrees",
+   "kind": "vec3"
+  },
+  "shape": {
+   "default": "sphere",
+   "doc": "A shape from its exact distance field, meshed with surface nets: all-quad, watertight, with rounding (bevel) for free",
+   "kind": "enum",
+   "options": [
+    "sphere",
+    "box",
+    "cylinder",
+    "capsule",
+    "ellipsoid",
+    "torus",
+    "round_cone",
+    "prism"
+   ]
+  },
+  "sides": {
+   "default": 6,
+   "doc": "prism: number of sides",
+   "kind": "int",
+   "max": 64,
+   "min": 3
+  },
+  "size": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "box (full size) and ellipsoid (full diameters)",
+   "kind": "vec3",
+   "min": 0.0001
+  },
+  "smooth": {
+   "default": 0,
+   "doc": "Smoothing passes on the field (rounds sharp detail)",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 20
+  },
+  "voxel_size": {
+   "default": 0.04,
+   "doc": "Detail of the mesh; cost grows with 1/size^3",
+   "kind": "float",
+   "min": 0.0001,
+   "soft_max": 1.0
+  }
+ },
+ "set_material": {
+  "domain": {
+   "default": "primitives",
+   "doc": "primitives: faces get the material (Blender's material slots, USD's bindings); points: the points do, which Scene Objects reads to give each instance its own material",
+   "kind": "enum",
+   "options": [
+    "primitives",
+    "points"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Which ones: group names, ranges or '@area > 0.1' (empty: all of them)",
+   "kind": "str"
+  },
+  "index_attrib": {
+   "default": "",
+   "doc": "An integer attribute on the same domain (a piece or id number, or one made by attribute_randomize) that picks from 'names'. Empty: every element gets 'material'",
+   "kind": "str"
+  },
+  "material": {
+   "default": "",
+   "doc": "Material name. In Blender the object's slot is filled with the material of that name (made if missing); in USD it becomes a material binding. Empty: back to whatever the target has",
+   "kind": "str"
+  },
+  "names": {
+   "default": "",
+   "doc": "Several names, separated by commas: with 'index_attrib', element number n gets the name at position n (counting from 0, wrapping around). Used instead of 'material'",
+   "kind": "str"
+  }
+ },
+ "skin": {
+  "cap": {
+   "default": false,
+   "doc": "Fill the first and last curve with a face when the curves are closed (ignored with loop)",
+   "kind": "bool"
+  },
+  "loop": {
+   "default": false,
+   "doc": "Join the last curve back to the first (a tube from rings)",
+   "kind": "bool"
+  },
+  "outgrp_cap": {
+   "default": false,
+   "doc": "The faces closing the first and last curve",
+   "kind": "bool"
+  },
+  "outgrp_cap_name": {
+   "default": "skincap",
+   "doc": "Name of the cap polygons group",
+   "kind": "str"
+  },
+  "outgrp_surface": {
+   "default": false,
+   "doc": "The lofted quads between the curves",
+   "kind": "bool"
+  },
+  "outgrp_surface_name": {
+   "default": "skinsurface",
+   "doc": "Name of the surface group",
+   "kind": "str"
+  },
+  "samples": {
+   "default": 0,
+   "doc": "Points per curve after resampling by length (0: the most any curve has)",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 200
+  }
+ },
+ "skin_profiles": {
+  "close_loft": {
+   "default": false,
+   "doc": "Connect the last profile back to the first (at least three profiles)",
+   "kind": "bool"
+  },
+  "group": {
+   "default": "",
+   "doc": "Profiles in primitive-number order; equal point counts and matching closure required",
+   "kind": "str"
+  },
+  "keep_profiles": {
+   "default": false,
+   "doc": "",
+   "kind": "bool"
+  }
+ },
+ "slice": {
+  "count": {
+   "default": 1,
+   "doc": "How many planes (from the origin along the normal)",
+   "kind": "int",
+   "min": 1,
+   "soft_max": 200
+  },
+  "cover": {
+   "default": false,
+   "doc": "Ignore count: planes at every spacing through the whole height of the mesh (contour lines of a terrain, layers for printing)",
+   "kind": "bool"
+  },
+  "fill": {
+   "default": false,
+   "doc": "Closed slices stay polygons (off: outlines only)",
+   "kind": "bool"
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these primitives",
+   "kind": "str"
+  },
+  "normal": {
+   "default": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "doc": "The planes' normal; they stack along it",
+   "kind": "vec3"
+  },
+  "origin": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "A point on the first plane",
+   "kind": "vec3"
+  },
+  "spacing": {
+   "default": 0.25,
+   "doc": "Distance between planes",
+   "kind": "float",
+   "min": 1e-09,
+   "soft_max": 5.0
+  }
+ },
+ "smooth": {
+  "group": {
+   "default": "",
+   "doc": "Only these points",
+   "kind": "str"
+  },
+  "iterations": {
+   "default": 10,
+   "doc": "",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 200
+  },
+  "method": {
+   "default": "taubin",
+   "doc": "taubin: alternating shrink/inflate steps that keep the volume; laplacian: plain averaging (shrinks)",
+   "kind": "enum",
+   "options": [
+    "taubin",
+    "laplacian"
+   ]
+  },
+  "pin_boundary": {
+   "default": true,
+   "doc": "Keep points on open edges, and the ends of curves, in place",
+   "kind": "bool"
+  },
+  "strength": {
+   "default": 0.5,
+   "doc": "",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
+ "soft_peak": {
+  "distance": {
+   "default": 0.3,
+   "doc": "How far the selection moves along its normals",
+   "kind": "float",
+   "soft_max": 2.0,
+   "soft_min": -2.0
+  },
+  "falloff": {
+   "default": "smooth",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "smooth",
+    "linear",
+    "constant"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "The points (or faces' points) that move fully; their neighbours follow within the radius",
+   "kind": "str"
+  },
+  "radius": {
+   "default": 1.0,
+   "doc": "Falloff distance from the group (empty group: everything moves fully)",
+   "kind": "float",
+   "min": 1e-08
+  }
+ },
+ "soft_transform": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Falloff center and transform pivot",
+   "kind": "vec3"
+  },
+  "falloff": {
+   "default": "smooth",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "smooth",
+    "linear"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these points can move; distance is Euclidean from center",
+   "kind": "str"
+  },
+  "radius": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "min": 1e-08
+  },
+  "rotate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Euler XYZ degrees",
+   "kind": "vec3"
+  },
+  "scale": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "translate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  }
+ },
+ "solidify": {
+  "even": {
+   "default": true,
+   "doc": "Keep the thickness the same at corners and creases (move points further out where faces meet at an angle)",
+   "kind": "bool"
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these primitives (the rest stay single sheets and follow the points they share)",
+   "kind": "str"
+  },
+  "offset": {
+   "default": -1.0,
+   "doc": "Where the original surface sits: -1: it stays the outer surface and the shell grows against the normals; 0: the shell is centred on it; 1: it is the inner surface",
+   "kind": "float",
+   "max": 1.0,
+   "min": -1.0
+  },
+  "outgrp_bottom": {
+   "default": false,
+   "doc": "The inner surface (the copy facing the other way)",
+   "kind": "bool"
+  },
+  "outgrp_bottom_name": {
+   "default": "solidifybottom",
+   "doc": "Name of the bottom polygons group",
+   "kind": "str"
+  },
+  "outgrp_side": {
+   "default": false,
+   "doc": "The rim joining the two along open edges",
+   "kind": "bool"
+  },
+  "outgrp_side_name": {
+   "default": "solidifyside",
+   "doc": "Name of the side polygons group",
+   "kind": "str"
+  },
+  "outgrp_top": {
+   "default": false,
+   "doc": "The outer surface (the original faces)",
+   "kind": "bool"
+  },
+  "outgrp_top_name": {
+   "default": "solidifytop",
+   "doc": "Name of the top polygons group",
+   "kind": "str"
+  },
+  "rim": {
+   "default": true,
+   "doc": "Close the open edges with a band of faces (off: two separate sheets, e.g. for a double-sided plane)",
+   "kind": "bool"
+  },
+  "thickness": {
+   "default": 0.1,
+   "doc": "How thick the shell is (negative: the shell grows the other way, as if the offset were mirrored)",
+   "kind": "float",
+   "soft_max": 1.0,
+   "soft_min": -1.0
+  }
+ },
+ "solver": {
+  "body": {
+   "default": "",
+   "doc": "Node type applied once per step to the previous result: a system or e.g. 'wrangle'",
+   "kind": "str"
+  },
+  "params": {
+   "default": "{}",
+   "doc": "Parameters for the body as JSON, e.g. {\"snippet\": \"@P.z += @TimeInc\"}",
+   "kind": "str"
+  },
+  "start_frame": {
+   "default": 1,
+   "doc": "At and before this frame the solver outputs its input unchanged",
+   "kind": "int"
+  },
+  "substeps": {
+   "default": 1,
+   "doc": "Steps per frame (@TimeInc shrinks accordingly)",
+   "kind": "int",
+   "max": 100,
+   "min": 1
+  }
+ },
+ "sort": {
+  "attribute": {
+   "default": "",
+   "doc": "key = attribute: sort by this attribute (first component)",
+   "kind": "str"
+  },
+  "domain": {
+   "default": "points",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "points",
+    "primitives"
+   ]
+  },
+  "key": {
+   "default": "random",
+   "doc": "",
+   "kind": "enum",
+   "options": [
+    "random",
+    "x",
+    "y",
+    "z",
+    "attribute",
+    "reverse"
+   ]
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
   }
  },
  "sphere": {
@@ -479,6 +5522,167 @@
    "doc": "",
    "kind": "float",
    "min": 0
+  }
+ },
+ "squash_stretch": {
+  "amount": {
+   "default": 1.5,
+   "doc": "Scale along the axis; 1 is unchanged, above 1 stretches, below 1 squashes",
+   "kind": "float",
+   "min": 0.01,
+   "soft_max": 4.0
+  },
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "direction": {
+   "default": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "doc": "Squash axis",
+   "kind": "vec3"
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these points",
+   "kind": "str"
+  },
+  "preserve_volume": {
+   "default": true,
+   "doc": "Scale the other two axes by 1/sqrt(amount) so the volume stays the same",
+   "kind": "bool"
+  }
+ },
+ "subdivide": {
+  "algorithm": {
+   "default": "catmull_clark",
+   "doc": "catmull_clark smooths; linear only splits faces",
+   "kind": "enum",
+   "options": [
+    "catmull_clark",
+    "linear"
+   ]
+  },
+  "crease_weight": {
+   "default": 1.0,
+   "doc": "Sharpness for the 'creases' edges when overriding",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 10.0
+  },
+  "creases": {
+   "default": "",
+   "doc": "Edges to crease: an edge group, edge numbers or pA-B pairs. They get their creaseweight (1 where it has none), or 'crease_weight' when 'override_crease_weight' is on",
+   "kind": "str"
+  },
+  "depth": {
+   "default": 1,
+   "doc": "Levels; each multiplies the face count by about 4",
+   "kind": "int",
+   "max": 6,
+   "min": 0
+  },
+  "outgrp_creases": {
+   "default": false,
+   "doc": "The edges that are still creased after subdividing (sharpness decays by one per level)",
+   "kind": "bool"
+  },
+  "outgrp_creases_name": {
+   "default": "creases",
+   "doc": "Name of the generate resulting creases group",
+   "kind": "str"
+  },
+  "override_crease_weight": {
+   "default": false,
+   "doc": "Give the 'creases' edges crease_weight instead of their own creaseweight",
+   "kind": "bool"
+  },
+  "use_creases": {
+   "default": true,
+   "doc": "Use outgoing-corner creaseweight and point cornerweight; sharpness decays each level",
+   "kind": "bool"
+  }
+ },
+ "sweep": {
+  "caps": {
+   "default": true,
+   "doc": "Close the ends of open curves",
+   "kind": "bool"
+  },
+  "divisions": {
+   "default": 8,
+   "doc": "Sides around the tube",
+   "kind": "int",
+   "min": 3,
+   "soft_max": 64
+  },
+  "outgrp_endcap": {
+   "default": false,
+   "doc": "The cap closing the end of each open curve",
+   "kind": "bool"
+  },
+  "outgrp_endcap_name": {
+   "default": "endcap",
+   "doc": "Name of the end cap group",
+   "kind": "str"
+  },
+  "outgrp_sides": {
+   "default": false,
+   "doc": "The tube walls (everything except the end caps)",
+   "kind": "bool"
+  },
+  "outgrp_sides_name": {
+   "default": "sweepsides",
+   "doc": "Name of the sides group",
+   "kind": "str"
+  },
+  "outgrp_startcap": {
+   "default": false,
+   "doc": "The cap closing the start of each open curve",
+   "kind": "bool"
+  },
+  "outgrp_startcap_name": {
+   "default": "startcap",
+   "doc": "Name of the start cap group",
+   "kind": "str"
+  },
+  "radius": {
+   "default": 0.05,
+   "doc": "Tube radius; multiplied by point 'width' or 'pscale' if present",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 1.0
+  },
+  "section_scale": {
+   "default": 1.0,
+   "doc": "Scale of the connected cross-section (radius is not used then)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 10.0
+  },
+  "twist": {
+   "default": 0.0,
+   "doc": "Degrees of twist from start to end",
+   "kind": "float",
+   "soft_max": 720.0,
+   "soft_min": -720.0
+  }
+ },
+ "switch": {
+  "index": {
+   "default": 0,
+   "doc": "Which input to pass on (0 = the first; clamped to the last)",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 10
   }
  },
  "torus": {
@@ -722,6 +5926,562 @@
    "doc": "",
    "kind": "float",
    "min": 0
+  }
+ },
+ "twist": {
+  "direction": {
+   "default": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "doc": "Twist axis",
+   "kind": "vec3"
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these points",
+   "kind": "str"
+  },
+  "origin": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "The twist is zero here",
+   "kind": "vec3"
+  },
+  "strength": {
+   "default": 90.0,
+   "doc": "Degrees of rotation per unit along the axis",
+   "kind": "float",
+   "soft_max": 360.0,
+   "soft_min": -360.0
+  }
+ },
+ "usd_export": {
+  "embed_graph": {
+   "default": true,
+   "doc": "Keep the graph inside the file, so MiniHou can open the recipe back from the result",
+   "kind": "bool"
+  },
+  "end": {
+   "default": 24,
+   "doc": "range: last frame",
+   "kind": "int",
+   "soft_max": 240,
+   "soft_min": 0
+  },
+  "file": {
+   "default": "exports/scene.usdc",
+   "doc": "The USD file to write (.usd, .usda text, .usdc binary); a relative path starts in the workspace folder",
+   "kind": "str"
+  },
+  "format": {
+   "default": "auto",
+   "doc": "auto: by the file's extension (.usd is binary); usdc: binary; usda: readable text. A format that disagrees with the extension changes the extension",
+   "kind": "enum",
+   "options": [
+    "auto",
+    "usdc",
+    "usda"
+   ]
+  },
+  "frames": {
+   "default": "current",
+   "doc": "current: the frame the timeline is on; range: an animation, cooked at every frame from start to end (what changes between frames becomes time samples)",
+   "kind": "enum",
+   "options": [
+    "current",
+    "range"
+   ]
+  },
+  "materials": {
+   "default": true,
+   "doc": "Write the materials the faces use (Material prims bound to the mesh); off writes geometry only",
+   "kind": "bool"
+  },
+  "name": {
+   "default": "",
+   "doc": "Name of this geometry's prim under the root (empty: the node's name)",
+   "kind": "str"
+  },
+  "overwrite": {
+   "default": true,
+   "doc": "Replace the file when it exists (off: Save to Disk refuses)",
+   "kind": "bool"
+  },
+  "root": {
+   "default": "MiniHou",
+   "doc": "Name of the root prim of the file (its default prim)",
+   "kind": "str"
+  },
+  "start": {
+   "default": 1,
+   "doc": "range: first frame",
+   "kind": "int",
+   "soft_max": 240,
+   "soft_min": 0
+  },
+  "step": {
+   "default": 1,
+   "doc": "range: every this many frames",
+   "kind": "int",
+   "min": 1,
+   "soft_max": 10
+  },
+  "units": {
+   "default": "meters",
+   "doc": "The unit the file declares. The geometry is scaled to match, so a metre stays a metre (centimeters multiplies the coordinates by 100)",
+   "kind": "enum",
+   "options": [
+    "meters",
+    "centimeters",
+    "millimeters",
+    "inches",
+    "feet"
+   ]
+  },
+  "up_axis": {
+   "default": "z",
+   "doc": "z: as MiniHou and Blender have it; y: the file says Y up and its root turns the geometry, so the numbers stay",
+   "kind": "enum",
+   "options": [
+    "z",
+    "y"
+   ]
+  }
+ },
+ "usd_import": {
+  "apply_units": {
+   "default": true,
+   "doc": "Scale by the file's metersPerUnit (a centimetre file becomes metres); off keeps the file's numbers",
+   "kind": "bool"
+  },
+  "file": {
+   "default": "",
+   "doc": "USD file (.usd, .usda, .usdc, .usdz); a relative path starts in the workspace folder",
+   "kind": "str"
+  },
+  "missing_file": {
+   "default": "error",
+   "doc": "error: a missing or unset file fails the node; empty: it gives empty geometry (a graph that opens before its files are in place)",
+   "kind": "enum",
+   "options": [
+    "error",
+    "empty"
+   ]
+  },
+  "path_attrib": {
+   "default": "",
+   "doc": "Name of an integer primitive attribute telling which USD prim each primitive came from (an index into the detail attribute `usd_paths`); empty: none",
+   "kind": "str"
+  },
+  "prim_path": {
+   "default": "",
+   "doc": "Only read these prims and what is below them: a prim path, or several patterns separated by spaces, with * and ? wildcards and a leading ^ to exclude, e.g. `/World/Props /World/Set/chair* ^/World/Props/lights` (empty: the whole file)",
+   "kind": "str"
+  },
+  "purpose": {
+   "default": "default render",
+   "doc": "Which purposes to read: default, render, proxy, guide (several, separated by spaces) or all",
+   "kind": "str"
+  },
+  "reload": {
+   "default": 0,
+   "doc": "Counts the Reload button, so a reload is a different cook",
+   "kind": "int"
+  },
+  "time": {
+   "default": "default",
+   "doc": "frame: read the file's animation at the current frame (default: the un-animated values)",
+   "kind": "enum",
+   "options": [
+    "default",
+    "frame"
+   ]
+  },
+  "time_offset": {
+   "default": 0.0,
+   "doc": "Frames the file's animation is delayed by (file time = (frame - offset) / scale)",
+   "kind": "float",
+   "soft_max": 100.0,
+   "soft_min": -100.0
+  },
+  "time_scale": {
+   "default": 1.0,
+   "doc": "Speed of the file's animation: 2 plays it half as fast",
+   "kind": "float",
+   "min": 0.0001,
+   "soft_max": 10.0
+  },
+  "up_axis": {
+   "default": "z",
+   "doc": "z: turn a Y-up file to Z-up like MiniHou and Blender; keep: leave the coordinates as they are",
+   "kind": "enum",
+   "options": [
+    "z",
+    "keep"
+   ]
+  }
+ },
+ "uv_project": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these primitives (others keep their uv)",
+   "kind": "str"
+  },
+  "method": {
+   "default": "box",
+   "doc": "box: each face projected along its dominant axis (triplanar); planar: along the frame's Z; cylindrical / spherical: around the frame's Z axis",
+   "kind": "enum",
+   "options": [
+    "box",
+    "planar",
+    "cylindrical",
+    "spherical"
+   ]
+  },
+  "rotate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Orientation of the projection frame, Euler XYZ degrees",
+   "kind": "vec3"
+  },
+  "rotate_uv": {
+   "default": 0.0,
+   "doc": "Rotate the UVs about (0.5, 0.5), degrees",
+   "kind": "float",
+   "soft_max": 180.0,
+   "soft_min": -180.0
+  },
+  "scale": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "Size of one UV tile in the frame (box/planar); height (cylindrical)",
+   "kind": "vec3"
+  }
+ },
+ "uv_transform": {
+  "align": {
+   "default": false,
+   "doc": "First turn each island so the uv image of `direction` (a 3-D direction) points along the axis below",
+   "kind": "bool"
+  },
+  "align_axis": {
+   "default": "v",
+   "doc": "Which uv axis the direction lines up with",
+   "kind": "enum",
+   "options": [
+    "v",
+    "u"
+   ]
+  },
+  "direction": {
+   "default": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "doc": "The 3-D direction to line up (e.g. up, or a wood grain direction)",
+   "kind": "vec3"
+  },
+  "flip_u": {
+   "default": false,
+   "doc": "Mirror in u about the pivot",
+   "kind": "bool"
+  },
+  "flip_v": {
+   "default": false,
+   "doc": "Mirror in v about the pivot",
+   "kind": "bool"
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these primitives",
+   "kind": "str"
+  },
+  "pivot": {
+   "default": "center",
+   "doc": "center: the middle of the uv bounds of each island/face/everything; custom: pivot_uv",
+   "kind": "enum",
+   "options": [
+    "center",
+    "custom"
+   ]
+  },
+  "pivot_uv": {
+   "default": [
+    0.5,
+    0.5,
+    0.0
+   ],
+   "doc": "custom pivot (u, v)",
+   "kind": "vec3"
+  },
+  "random_rotate": {
+   "default": 0.0,
+   "doc": "Random turn per island/face, up to this many degrees each way",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 180.0
+  },
+  "random_scale": {
+   "default": 0.0,
+   "doc": "Random scale per island/face, up to this fraction each way",
+   "kind": "float",
+   "max": 0.99,
+   "min": 0.0
+  },
+  "random_translate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Random shift per island/face, up to this much each way (u, v)",
+   "kind": "vec3"
+  },
+  "rotate": {
+   "default": 0.0,
+   "doc": "Turn about the pivot, degrees (counter-clockwise)",
+   "kind": "float",
+   "soft_max": 360.0,
+   "soft_min": -360.0
+  },
+  "scale": {
+   "default": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "doc": "Scale in u and v (x and y) about the pivot",
+   "kind": "vec3"
+  },
+  "scope": {
+   "default": "whole",
+   "doc": "whole: all selected faces as one; island: every uv island on its own (own centre as pivot); face: every face on its own",
+   "kind": "enum",
+   "options": [
+    "whole",
+    "island",
+    "face"
+   ]
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  },
+  "translate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Move in u and v (x and y)",
+   "kind": "vec3"
+  },
+  "uv": {
+   "default": "uv",
+   "doc": "The uv attribute to change (face-corner uv, or a point uv)",
+   "kind": "str"
+  }
+ },
+ "voronoi_adjacency": {
+  "max_gap": {
+   "default": 0.0,
+   "doc": "Pieces whose faces are up to this far apart still count as touching (use the fracture's gap here)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 0.1
+  },
+  "min_area": {
+   "default": 0.0,
+   "doc": "Ignore contacts smaller than this",
+   "kind": "float",
+   "min": 0.0
+  },
+  "outgrp_connected": {
+   "default": false,
+   "doc": "Piece centres that touch at least one other piece",
+   "kind": "bool"
+  },
+  "outgrp_connected_name": {
+   "default": "connected",
+   "doc": "Name of the connected pieces group",
+   "kind": "str"
+  },
+  "outgrp_isolated": {
+   "default": false,
+   "doc": "Piece centres that touch no other piece",
+   "kind": "bool"
+  },
+  "outgrp_isolated_name": {
+   "default": "isolated",
+   "doc": "Name of the isolated pieces group",
+   "kind": "str"
+  },
+  "outgrp_strong": {
+   "default": false,
+   "doc": "Links whose contact area is at least the 'strong area' fraction of the biggest one",
+   "kind": "bool"
+  },
+  "outgrp_strong_name": {
+   "default": "stronglinks",
+   "doc": "Name of the strong links group",
+   "kind": "str"
+  },
+  "piece_attrib": {
+   "default": "piece",
+   "doc": "Primitive int attribute with each face's piece (empty: connected pieces)",
+   "kind": "str"
+  },
+  "strong_area": {
+   "default": 0.5,
+   "doc": "Share of the largest contact above which a link is strong",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
+ "voronoi_fracture": {
+  "cluster_attrib": {
+   "default": "cluster",
+   "doc": "The point int attribute that numbers the clusters (negative: not clustered)",
+   "kind": "str"
+  },
+  "cluster_pieces": {
+   "default": false,
+   "doc": "Points with the same 'cluster' number (see voronoi_fracture_points) make one piece",
+   "kind": "bool"
+  },
+  "create_inside": {
+   "default": true,
+   "doc": "Cap each cut so pieces are closed solids; off leaves them open (like voronoi_split)",
+   "kind": "bool"
+  },
+  "gap": {
+   "default": 0.0,
+   "doc": "Shrink each cut plane towards its point: a gap between pieces",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 0.1
+  },
+  "inside_group": {
+   "default": "inside",
+   "doc": "Name of the inside faces group; empty switches it off (the Output Groups entry does the same)",
+   "kind": "str"
+  },
+  "outgrp_cutedges": {
+   "default": false,
+   "doc": "The edges that lie on a cut plane: the outline of every cut face",
+   "kind": "bool"
+  },
+  "outgrp_cutedges_name": {
+   "default": "cutedges",
+   "doc": "Name of the cut edges group",
+   "kind": "str"
+  },
+  "outgrp_cutpoints": {
+   "default": false,
+   "doc": "The points that lie on a cut plane",
+   "kind": "bool"
+  },
+  "outgrp_cutpoints_name": {
+   "default": "cutpoints",
+   "doc": "Name of the cut points group",
+   "kind": "str"
+  },
+  "outgrp_inside": {
+   "default": true,
+   "doc": "The faces the cuts created (the caps): the inside surface of each piece",
+   "kind": "bool"
+  },
+  "outgrp_inside_name": {
+   "default": "inside",
+   "doc": "Name of the inside faces group",
+   "kind": "str"
+  },
+  "outgrp_outside": {
+   "default": false,
+   "doc": "The faces that came from the input's own surface",
+   "kind": "bool"
+  },
+  "outgrp_outside_name": {
+   "default": "outside",
+   "doc": "Name of the outside faces group",
+   "kind": "str"
+  },
+  "piece_attrib": {
+   "default": "piece",
+   "doc": "Primitive int attribute with each face's cell (the index of its point)",
+   "kind": "str"
+  }
+ },
+ "voronoi_split": {
+  "outgrp_cutedges": {
+   "default": false,
+   "doc": "The edges that lie on a cut plane (the open border each cut left)",
+   "kind": "bool"
+  },
+  "outgrp_cutedges_name": {
+   "default": "cutedges",
+   "doc": "Name of the cut edges group",
+   "kind": "str"
+  },
+  "outgrp_cutpoints": {
+   "default": false,
+   "doc": "The points that lie on a cut plane",
+   "kind": "bool"
+  },
+  "outgrp_cutpoints_name": {
+   "default": "cutpoints",
+   "doc": "Name of the cut points group",
+   "kind": "str"
+  },
+  "piece_attrib": {
+   "default": "piece",
+   "doc": "Primitive int attribute with each face's cell (the index of its point)",
+   "kind": "str"
+  }
+ },
+ "wrangle": {
+  "group": {
+   "default": "",
+   "doc": "Only change these elements: group names, ^exclusions, numbers/ranges, or an expression like '@P.z > 0' (empty: all). Over vertices, a primitive group selects its corners",
+   "kind": "str"
+  },
+  "run_over": {
+   "default": "points",
+   "doc": "Domain the snippet runs over: points, primitives (faces) or vertices (face corners)",
+   "kind": "enum",
+   "options": [
+    "points",
+    "primitives",
+    "vertices"
+   ]
+  },
+  "snippet": {
+   "default": "@P.z += sin(@P.x)",
+   "doc": "VEX-like expression run over every element, e.g. '@P.z += sin(@P.x * 2) * 0.5'. See the wrangle reference.",
+   "kind": "str"
   }
  }
 }

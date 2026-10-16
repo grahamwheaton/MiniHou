@@ -1,7 +1,7 @@
 bl_info = {
     "name": "MiniHou Link",
     "author": "MiniHou",
-    "version": (0, 1, 4),
+    "version": (0, 1, 6),
     "blender": (4, 2, 0),
     "location": "Properties > Modifiers > MiniHou",
     "description": "Live link to the MiniHou procedural geometry engine",
@@ -39,8 +39,23 @@ def _restore_endpoint_timer():
     return None
 
 
+def _auto_connect_timer():
+    try:
+        addon = bpy.context.preferences.addons.get(__package__)
+        wm = bpy.context.window_manager
+        if addon and wm:
+            runtime.get_runtime().poll_auto_connect(addon.preferences.auto_connect_minihou, wm.minihou_port)
+    except Exception as exc:
+        # Keep polling through file loads and temporarily restricted Blender contexts.
+        print(f"[minihou] auto-connect: {exc}")
+    return 2.0
+
+
 class MINIHOU_Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
+
+    auto_connect_minihou: BoolProperty(name="Auto-connect to MiniHou", default=True,
+        description="Connect to the local engine automatically; Disconnect pauses this until Connect is pressed")
 
     auto_connect: BoolProperty(name="Find MiniHou automatically", default=True,
         update=lambda self, context: modifiers.disconnect())
@@ -56,6 +71,7 @@ class MINIHOU_Preferences(bpy.types.AddonPreferences):
         description="Folder containing minihou/__main__.py and the node library")
 
     def draw(self, context):
+        self.layout.prop(self, "auto_connect_minihou")
         self.layout.prop(self, "auto_connect")
         if not self.auto_connect:
             self.layout.prop(self, "manual_host")
@@ -233,7 +249,7 @@ class MINIHOU_OT_select_proxy(bpy.types.Operator):
 
 
 class MINIHOU_PT_main(bpy.types.Panel):
-    bl_label = "MiniHou"
+    bl_label = f"MiniHou V{'.'.join(str(n) for n in bl_info['version'])}"
     bl_idname = "MINIHOU_PT_main"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -371,8 +387,11 @@ class MINIHOU_OT_bake_rbd(bpy.types.Operator):
             return {'CANCELLED'}
 
 
+ADDON_VERSION = ".".join(str(n) for n in bl_info["version"])
+
+
 class MINIHOU_PT_modifier_sources(bpy.types.Panel):
-    bl_label = "MiniHou"
+    bl_label = f"MiniHou V{ADDON_VERSION}"
     bl_idname = "MINIHOU_PT_modifier_sources"
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
@@ -421,13 +440,17 @@ def register():
     modifiers.register()
     geonodes_ui.register()
     network_ui.register()
+    if not bpy.app.timers.is_registered(_auto_connect_timer):
+        bpy.app.timers.register(_auto_connect_timer, first_interval=2.0, persistent=True)
 
 
 def unregister():
+    if bpy.app.timers.is_registered(_auto_connect_timer):
+        bpy.app.timers.unregister(_auto_connect_timer)
     network_ui.unregister()
     geonodes_ui.unregister()
     modifiers.unregister()
-    _server.stop(wait=True)
+    _server.stop(wait=False)  # Owned-process cleanup stays on its worker during unregister.
     if bpy.app.timers.is_registered(_server_redraw):
         bpy.app.timers.unregister(_server_redraw)
     runtime.shutdown()

@@ -1,0 +1,526 @@
+//! Fracture tools: assemble and face-contact adjacency (minihou/nodes/fracture_tools.py).
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
+
+use super::{InputSpec, Inputs, NodeSpec, GEO};
+use crate::error::{Error, Result};
+use crate::geometry::{Attr, AttrData, Geometry};
+use crate::params::Params;
+use super::model::{add, sub, mul, dot, len, positions, range, polygons, outgroup};
+
+pub(super) fn extent(g: &Geometry) -> f64 {
+    if g.npoints == 0 { return 1.0; }
+    let p = positions(g);
+    (0..3).map(|k| {
+        let lo = p.iter().map(|p| p[k]).fold(f64::INFINITY, f64::min);
+        let hi = p.iter().map(|p| p[k]).fold(f64::NEG_INFINITY, f64::max);
+        hi - lo
+    }).fold(0.0, f64::max)
+}
+
+/// Radius pairs, ordered by original indices. Sweep X to avoid scanning all distant points.
+pub(super) fn pairs(p: &[[f64; 3]], radius: f64) -> Vec<(usize, usize)> {
+    let mut order: Vec<_> = (0..p.len()).collect();
+    order.sort_by(|&a, &b| p[a][0].total_cmp(&p[b][0]).then(a.cmp(&b)));
+    let mut out = Vec::new();
+    for (at, &a) in order.iter().enumerate() {
+        for &b in &order[at + 1..] {
+            if p[b][0] - p[a][0] > radius { break; }
+            let d = sub(p[b], p[a]);
+            if dot(d, d) <= radius * radius { out.push((a.min(b), a.max(b))); }
+        }
+    }
+    out.sort_unstable();
+    out
+}
+
+/// Opposed cut faces belonging to different pieces, with their shared contact area.
+pub(super) fn contacts(g: &Geometry, pieces: &[i32], max_gap: f64) -> Vec<(usize, usize, f64)> {
+    let p = positions(g);
+    let normals = crate::normals::prim_normals(g.p(), &g.topology);
+    let area: Vec<_> = normals.iter().map(|&n| len(n) * 0.5).collect();
+    let unit: Vec<_> = normals.iter().map(|&n| mul(n, 1.0 / len(n).max(1e-30))).collect();
+    let centres: Vec<_> = (0..g.nprims()).map(|i| {
+        let r = range(g, i);
+        let n = r.len().max(1) as f64;
+        mul(r.fold([0.0; 3], |sum, v| add(sum, p[g.topology.vertex_point[v] as usize])), 1.0 / n)
+    }).collect();
+    let tol = 1e-5 * extent(g).max(1e-9);
+    let rad: Vec<_> = area.iter().map(|a| (a / std::f64::consts::PI).sqrt()).collect();
+    let radius = if max_gap <= 0.0 { tol * 5.0 } else {
+        max_gap + 2.0 * rad.iter().copied().fold(0.0, f64::max) + tol
+    };
+    pairs(&centres, radius).into_iter().filter_map(|(a, b)| {
+        if pieces[a] == pieces[b] || dot(unit[a], unit[b]) >= -0.999 { return None; }
+        let d = sub(centres[b], centres[a]);
+        let along = dot(d, unit[a]);
+        let side = len(sub(d, mul(unit[a], along)));
+        let ok = if max_gap <= 0.0 {
+            along.abs() <= tol && side <= tol * 4.0
+                && area[a].min(area[b]) / area[a].max(area[b]).max(1e-300) >= 1.0 - 1e-3
+        } else { along.abs() <= max_gap + tol && side <= rad[a] + rad[b] };
+        ok.then(|| if pieces[a] < pieces[b] { (a, b, area[a].min(area[b])) }
+            else { (b, a, area[a].min(area[b])) })
+    }).collect()
+}
+
+pub const VORONOI_ADJACENCY: NodeSpec = NodeSpec {
+    name: "voronoi_adjacency",
+    inputs: &[
+        InputSpec { name: "geo", multi: false, optional: false },
+        InputSpec { name: "points", multi: false, optional: true },
+    ],
+    params: crate::params!("piece_attrib": "piece"; "max_gap": 0.0; "min_area": 0.0; "strong_area": 0.5;
+        "outgrp_connected": false; "outgrp_connected_name": "connected";
+        "outgrp_isolated": false; "outgrp_isolated_name": "isolated";
+        "outgrp_strong": false; "outgrp_strong_name": "stronglinks"),
+    cook: voronoi_adjacency,
+};
+
+fn voronoi_adjacency(inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    let g = VORONOI_ADJACENCY.one(inputs, 0)?;
+    polygons(&g, "voronoi_adjacency")?;
+    let name = p.s("piece_attrib")?;
+    let pieces = if name.is_empty() { super::attrib_tools::piece_labels(&g).1 } else {
+        let attr = g.prim.get(&name).ok_or_else(|| Error::new(format!("no primitive attribute {name:?}: fracture first, or leave piece attribute empty to use connectivity")))?;
+        match &attr.data {
+            AttrData::I32(v) if attr.width == 1 => v.clone(),
+            _ => return Err(Error::new(format!("{name:?} must be a scalar integer primitive attribute"))),
+        }
+    };
+    let ids: Vec<_> = pieces.iter().copied().collect::<BTreeSet<_>>().into_iter().collect();
+    let slot: BTreeMap<_, _> = ids.iter().enumerate().map(|(i, &id)| (id, i)).collect();
+    let mut centres = vec![[0.0; 3]; ids.len()];
+    if let Some(points) = inputs.get(1).and_then(|i| i.first()).filter(|g| g.npoints > 0) {
+        let pos = positions(points);
+        for (i, &id) in ids.iter().enumerate() {
+            if id < 0 || id as usize >= points.npoints {
+                return Err(Error::new("the points input has fewer points than there are pieces"));
+            }
+            centres[i] = pos[id as usize];
+        }
+    } else {
+        let pos = positions(&g);
+        let mut counts = vec![0usize; ids.len()];
+        for (i, &piece) in pieces.iter().enumerate() {
+            let k = slot[&piece];
+            for v in range(&g, i) {
+                centres[k] = add(centres[k], pos[g.topology.vertex_point[v] as usize]);
+                counts[k] += 1;
+            }
+        }
+        for (c, n) in centres.iter_mut().zip(counts) { *c = mul(*c, 1.0 / n.max(1) as f64); }
+    }
+    let max_gap = p.f("max_gap")?;
+    let min_area = p.f("min_area")?;
+    let strong = p.f("strong_area")?;
+    if !max_gap.is_finite() || max_gap < 0.0 || !min_area.is_finite() || min_area < 0.0 || !(0.0..=1.0).contains(&strong) {
+        return Err(Error::new("max_gap/min_area must be nonnegative and strong_area must be 0..1"));
+    }
+    let mut summed = BTreeMap::<(i32, i32), f64>::new();
+    for (a, b, area) in contacts(&g, &pieces, max_gap) {
+        *summed.entry((pieces[a], pieces[b])).or_default() += area;
+    }
+    let mut vp = Vec::new();
+    let mut piece_a = Vec::new();
+    let mut piece_b = Vec::new();
+    let mut areas = Vec::new();
+    let mut degree = vec![0i32; ids.len()];
+    for ((a, b), area) in summed {
+        if area < min_area.max(1e-300) { continue; }
+        let (a_slot, b_slot) = (slot[&a], slot[&b]);
+        vp.extend([a_slot as i32, b_slot as i32]);
+        degree[a_slot] += 1;
+        degree[b_slot] += 1;
+        piece_a.push(a);
+        piece_b.push(b);
+        areas.push(area);
+    }
+    let n = areas.len();
+    let mut out = Geometry::from_arrays(centres.into_iter().flatten().map(|v| v as f32).collect(), vp,
+        (0..=n).map(|i| (i * 2) as i32).collect(), Some(vec![false; n]))?;
+    out.point.insert("piece".into(), Arc::new(Attr::i32(1, ids)));
+    out.point.insert("neighbors".into(), Arc::new(Attr::i32(1, degree.clone())));
+    out.prim.insert("piece_a".into(), Arc::new(Attr::i32(1, piece_a)));
+    out.prim.insert("piece_b".into(), Arc::new(Attr::i32(1, piece_b)));
+    out.prim.insert("area".into(), Arc::new(Attr::f32(1, areas.iter().map(|&a| a as f32).collect())));
+    outgroup(&mut out, p, "connected", "point", &degree.iter().map(|&d| d > 0).collect::<Vec<_>>())?;
+    outgroup(&mut out, p, "isolated", "point", &degree.iter().map(|&d| d == 0).collect::<Vec<_>>())?;
+    let biggest = areas.iter().copied().fold(0.0, f64::max);
+    outgroup(&mut out, p, "strong", "prim", &areas.iter().map(|&a| a >= strong * biggest).collect::<Vec<_>>())?;
+    Ok(out)
+}
+
+pub const ASSEMBLE: NodeSpec = NodeSpec {
+    name: "assemble",
+    inputs: GEO,
+    params: crate::params!(
+        "source": "attribute";
+        "piece_attrib": "piece";
+        "groups": "*";
+        "output_attrib": "piece";
+        "renumber": true;
+        "unshare_points": true;
+        "pivot": "centroid";
+        "name_prefix": "piece";
+        "piece_groups": false;
+        "remove_source_groups": false;
+        "outgrp_unshared": false;
+        "outgrp_unshared_name": "splitpoints";
+        "outgrp_shared": false;
+        "outgrp_shared_name": "sharedpoints"
+    ),
+    cook: assemble,
+};
+
+fn assemble(inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    let geo = ASSEMBLE.one(inputs, 0)?;
+
+    if geo.topology.has_open() {
+        let n = geo.topology.closed_mask().iter().filter(|&&c| !c).count();
+        return Err(Error::new(format!(
+            "assemble works on polygons, but the input has {n} open curve(s); remove them first, e.g. blast with group '@closed == 0'"
+        )));
+    }
+    if geo.nprims() == 0 {
+        return Ok((*geo).clone());
+    }
+
+    let source = p.e("source", &["attribute", "connectivity", "groups"])?;
+    let piece_attrib = p.s("piece_attrib")?;
+    let groups_pat = p.s("groups")?;
+    let output_attrib = p.s("output_attrib")?;
+    let renumber = p.b("renumber")?;
+    let unshare_points = p.b("unshare_points")?;
+    let pivot_mode = p.e("pivot", &["centroid", "origin", "bounds_bottom"])?;
+    let name_prefix = p.s("name_prefix")?;
+    let piece_groups = p.b("piece_groups")?;
+    let remove_source_groups = p.b("remove_source_groups")?;
+
+    let mut used_groups = Vec::new();
+    let mut ids: Vec<i64> = match source.as_str() {
+        "attribute" => {
+            if piece_attrib.is_empty() {
+                return Err(Error::new(
+                    "no primitive attribute \"\": fracture first, or leave piece attribute empty to use connectivity",
+                ));
+            }
+            let attr = geo.prim.get(&piece_attrib).ok_or_else(|| {
+                Error::new(format!(
+                    "no primitive attribute {piece_attrib:?}: fracture first, or leave piece attribute empty to use connectivity"
+                ))
+            })?;
+            if attr.width != 1 {
+                return Err(Error::new(format!(
+                    "{piece_attrib:?} must be a scalar integer primitive attribute"
+                )));
+            }
+            match &attr.data {
+                AttrData::I32(v) => v.iter().map(|&x| x as i64).collect(),
+                _ => {
+                    return Err(Error::new(format!(
+                        "{piece_attrib:?} must be a scalar integer primitive attribute"
+                    )));
+                }
+            }
+        }
+        "connectivity" => {
+            let (_, prim_labels) = super::attrib_tools::piece_labels(&geo);
+            prim_labels.into_iter().map(|x| x as i64).collect()
+        }
+        "groups" => {
+            let pat_str = if groups_pat.is_empty() {
+                "*"
+            } else {
+                groups_pat.as_str()
+            };
+            let mut available_groups = Vec::new();
+            for k in geo.prim.keys() {
+                if let Some(stripped) = k.strip_prefix("group_") {
+                    available_groups.push(stripped.to_string());
+                }
+            }
+            available_groups.sort();
+
+            let mut matched_names = Vec::new();
+            for pat in pat_str.split_whitespace() {
+                for gname in &available_groups {
+                    if super::groups::point_mask(
+                        &Geometry::points_only(vec![0.0, 0.0, 0.0]).unwrap(),
+                        pat,
+                    )
+                    .is_ok()
+                    {
+                        // Match wildcard pattern against group name
+                        let is_match = match_pattern(pat.as_bytes(), gname.as_bytes());
+                        if is_match && !matched_names.contains(gname) {
+                            matched_names.push(gname.clone());
+                        }
+                    }
+                }
+            }
+
+            if matched_names.is_empty() {
+                return Err(Error::new(format!(
+                    "no primitive group matches {groups_pat:?}; have {available_groups:?}"
+                )));
+            }
+
+            let mut group_ids = vec![-1i64; geo.nprims()];
+            for (k, name) in matched_names.iter().enumerate() {
+                if let Some(attr) = geo.prim.get(&format!("group_{name}")) {
+                    let m = super::group::flags(attr);
+                    for i in 0..geo.nprims() {
+                        if m[i] && group_ids[i] < 0 {
+                            group_ids[i] = k as i64;
+                        }
+                    }
+                }
+            }
+            for i in 0..geo.nprims() {
+                if group_ids[i] < 0 {
+                    group_ids[i] = matched_names.len() as i64;
+                }
+            }
+            used_groups = matched_names;
+            group_ids
+        }
+        _ => unreachable!(),
+    };
+
+    if renumber {
+        let mut map = HashMap::new();
+        let mut next_id = 0i64;
+        let mut new_ids = Vec::with_capacity(ids.len());
+        for &id in &ids {
+            let assigned = *map.entry(id).or_insert_with(|| {
+                let nid = next_id;
+                next_id += 1;
+                nid
+            });
+            new_ids.push(assigned);
+        }
+        ids = new_ids;
+    }
+
+    let count = if ids.is_empty() {
+        0
+    } else {
+        (*ids.iter().max().unwrap() + 1) as usize
+    };
+
+    let mut out = (*geo).clone();
+    let mut shared_mask_opt = None;
+    let mut copied_mask_opt = None;
+
+    if unshare_points {
+        let nvert = geo.nvertices();
+        let mut pv = Vec::with_capacity(nvert);
+        for i in 0..geo.nprims() {
+            let start = geo.topology.prim_offsets[i] as usize;
+            let end = geo.topology.prim_offsets[i + 1] as usize;
+            pv.extend(std::iter::repeat(i).take(end - start));
+        }
+
+        let stride = (count + 1) as i64;
+        let mut keys = Vec::with_capacity(nvert + geo.npoints);
+        let mut used_points = vec![false; geo.npoints];
+
+        for v in 0..nvert {
+            let pt = geo.topology.vertex_point[v] as usize;
+            used_points[pt] = true;
+            let piece = ids[pv[v]];
+            keys.push(pt as i64 * stride + piece);
+        }
+
+        for pt in 0..geo.npoints {
+            if !used_points[pt] {
+                keys.push(pt as i64 * stride + count as i64);
+            }
+        }
+
+        let mut uniq = keys.clone();
+        uniq.sort_unstable();
+        uniq.dedup();
+
+        let inv: Vec<i32> = keys
+            .iter()
+            .map(|k| uniq.binary_search(k).unwrap() as i32)
+            .collect();
+        let src: Vec<usize> = uniq.iter().map(|&k| (k / stride) as usize).collect();
+
+        let mut copies = vec![0usize; geo.npoints];
+        for &s in &src {
+            copies[s] += 1;
+        }
+
+        let mut shared_mask = vec![false; src.len()];
+        let mut copied_mask = vec![false; src.len()];
+        for i in 0..src.len() {
+            shared_mask[i] = copies[src[i]] > 1;
+            copied_mask[i] = i > 0 && src[i] == src[i - 1];
+        }
+
+        let p_src = geo.p();
+        let mut p_out = Vec::with_capacity(src.len() * 3);
+        for &s in &src {
+            p_out.extend_from_slice(&p_src[s * 3..s * 3 + 3]);
+        }
+
+        let mut new_point = HashMap::new();
+        for (name, attr) in &geo.point {
+            if name != "P" {
+                new_point.insert(name.clone(), Arc::new(super::group::gather(attr, &src)));
+            }
+        }
+
+        out = Geometry::from_arrays(
+            p_out,
+            inv[..nvert].to_vec(),
+            geo.topology.prim_offsets.clone(),
+            geo.topology.closed.clone(),
+        )?;
+        out.point.extend(new_point);
+        out.vertex = geo.vertex.clone();
+        out.prim = geo.prim.clone();
+        out.detail = geo.detail.clone();
+
+        shared_mask_opt = Some(shared_mask);
+        copied_mask_opt = Some(copied_mask);
+    }
+
+    if !output_attrib.is_empty() {
+        let ids32: Vec<i32> = ids.iter().map(|&x| x as i32).collect();
+        out.prim
+            .insert(output_attrib, Arc::new(Attr::i32(1, ids32)));
+    }
+
+    let mut pv2 = Vec::with_capacity(out.nvertices());
+    for i in 0..out.nprims() {
+        let start = out.topology.prim_offsets[i] as usize;
+        let end = out.topology.prim_offsets[i + 1] as usize;
+        pv2.extend(std::iter::repeat(i).take(end - start));
+    }
+
+    let p_out = out.p();
+    let vp2 = &out.topology.vertex_point;
+
+    let mut vert_counts = vec![0usize; count];
+    let mut sum_p = vec![[0.0f64; 3]; count];
+    let mut min_z = vec![f64::INFINITY; count];
+
+    for v in 0..out.nvertices() {
+        let piece = ids[pv2[v]] as usize;
+        let pt = vp2[v] as usize;
+        vert_counts[piece] += 1;
+        sum_p[piece][0] += p_out[pt * 3] as f64;
+        sum_p[piece][1] += p_out[pt * 3 + 1] as f64;
+        sum_p[piece][2] += p_out[pt * 3 + 2] as f64;
+        min_z[piece] = min_z[piece].min(p_out[pt * 3 + 2] as f64);
+    }
+
+    let mut pivot_arr = vec![[0.0f32; 3]; count];
+    if pivot_mode != "origin" {
+        for k in 0..count {
+            let cnt = vert_counts[k].max(1) as f64;
+            pivot_arr[k][0] = (sum_p[k][0] / cnt) as f32;
+            pivot_arr[k][1] = (sum_p[k][1] / cnt) as f32;
+            pivot_arr[k][2] = if pivot_mode == "bounds_bottom" {
+                if min_z[k].is_finite() {
+                    min_z[k] as f32
+                } else {
+                    0.0
+                }
+            } else {
+                (sum_p[k][2] / cnt) as f32
+            };
+        }
+    }
+
+    let mut prim_pivots = Vec::with_capacity(out.nprims() * 3);
+    for i in 0..out.nprims() {
+        let piece = ids[i] as usize;
+        prim_pivots.extend_from_slice(&pivot_arr[piece]);
+    }
+    out.prim
+        .insert("pivot".into(), Arc::new(Attr::f32(3, prim_pivots)));
+
+    let piece_names: Vec<serde_json::Value> = (0..count)
+        .map(|k| serde_json::json!(format!("{name_prefix}{k}")))
+        .collect();
+    out.detail
+        .insert("piece_names".into(), serde_json::Value::Array(piece_names));
+
+    if piece_groups {
+        if count > 1000 {
+            return Err(Error::new("piece_groups is limited to 1000 pieces"));
+        }
+        for k in 0..count {
+            let mask: Vec<bool> = ids.iter().map(|&id| id == k as i64).collect();
+            super::model::write_group(&mut out, "prim", &format!("{name_prefix}{k}"), &mask)?;
+        }
+    }
+
+    if remove_source_groups {
+        for name in used_groups {
+            out.prim.remove(&format!("group_{name}"));
+        }
+    }
+
+    if let (Some(shared), Some(copied)) = (shared_mask_opt, copied_mask_opt) {
+        super::model::outgroup(&mut out, p, "unshared", "point", &copied)?;
+        super::model::outgroup(&mut out, p, "shared", "point", &shared)?;
+    }
+
+    Ok(out)
+}
+
+fn match_pattern(pattern: &[u8], name: &[u8]) -> bool {
+    match pattern {
+        [] => name.is_empty(),
+        [b'*', rest @ ..] => (0..=name.len()).any(|n| match_pattern(rest, &name[n..])),
+        [b'?', rest @ ..] => !name.is_empty() && match_pattern(rest, &name[1..]),
+        [c, rest @ ..] => name.first() == Some(c) && match_pattern(rest, &name[1..]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_geo() -> Geometry {
+        // Two disjoint triangles sharing no points
+        let p = vec![
+            0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0,
+            2.0, 0.0, 0.0, 3.0, 0.0, 0.0, 2.0, 1.0, 0.0,
+        ];
+        let vp = vec![0, 1, 2, 3, 4, 5];
+        let offs = vec![0, 3, 6];
+        Geometry::from_arrays(p, vp, offs, None).unwrap()
+    }
+
+    #[test]
+    fn test_assemble_connectivity() {
+        let g = test_geo();
+        let p = Params::resolve(
+            ASSEMBLE.params,
+            serde_json::json!({"source": "connectivity", "piece_attrib": ""}).as_object(),
+        )
+        .unwrap();
+        let out = assemble(&[vec![Arc::new(g)]], &p).unwrap();
+        assert_eq!(out.prim["piece"].data, AttrData::I32(vec![0, 1]));
+        assert_eq!(out.detail["piece_names"].as_array().unwrap().len(), 2);
+        assert!(out.prim.contains_key("pivot"));
+    }
+
+    #[test]
+    fn test_assemble_missing_attrib_error() {
+        let g = test_geo();
+        let p = Params::resolve(
+            ASSEMBLE.params,
+            serde_json::json!({"source": "attribute", "piece_attrib": "nope"}).as_object(),
+        )
+        .unwrap();
+        assert!(assemble(&[vec![Arc::new(g)]], &p).is_err());
+    }
+}

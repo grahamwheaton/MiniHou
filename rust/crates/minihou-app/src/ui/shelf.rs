@@ -8,8 +8,8 @@ use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stro
 use shelf_data::{TABS, Tool};
 
 fn drag_payload(tool: &Tool) -> super::ToolDrag { super::ToolDrag(tool.node_type.to_owned()) }
-pub fn dropped_tool(tool: &super::ToolDrag, selected: &str) -> UiAction {
-    UiAction::AddNode { node_type: tool.0.clone(), after: Some(selected.to_owned()) }
+pub fn dropped_tool(tool: &super::ToolDrag, pos: Pos2) -> UiAction {
+    UiAction::AddNetworkNode { node_type: tool.0.clone(), pos: [pos.x, pos.y] }
 }
 
 fn line(p: &egui::Painter, o: Pos2, points: &[(f32, f32)], color: Color32) {
@@ -133,7 +133,7 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
                     for (i, text) in label.lines().enumerate() {
                         ui.painter().with_clip_rect(r).text(r.center_top() + Vec2::new(0., 27. + i as f32 * 11.), Align2::CENTER_TOP, text, FontId::proportional(9.5), v.theme.text);
                     }
-                    if v.runs_on_rust(tool.node_type) { dot(ui.painter(), r.min, r.width() - 7., 5., 2.5, v.theme.ok); }
+                    if !v.runs_on_rust(tool.node_type) { dot(ui.painter(), r.min, r.width() - 7., 5., 2.5, v.theme.err); }
                     if response.on_hover_text(format!("{} ({})", tool.label, tool.node_type)).clicked() {
                         if active == 0 && matches!(tool.node_type, "line" | "circle" | "curve") {
                             let mode = match tool.node_type { "line" => super::sketch::SketchMode::Line, "circle" => super::sketch::SketchMode::Circle, _ => super::sketch::SketchMode::Pen };
@@ -144,8 +144,8 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
             });
         });
     });
-    dot(ui.painter(), row.right_center(), -101., 0., 2.5, v.theme.ok);
-    ui.painter().text(row.right_center() - Vec2::new(92., 0.), Align2::LEFT_CENTER, "runs on Rust", FontId::proportional(11.), v.theme.dim);
+    dot(ui.painter(), row.right_center(), -121., 0., 2.5, v.theme.err);
+    ui.painter().text(row.right_center() - Vec2::new(112., 0.), Align2::LEFT_CENTER, "no Rust version yet", FontId::proportional(11.), v.theme.dim);
 }
 
 fn wrap_label(label: &str) -> String {
@@ -162,8 +162,8 @@ mod tests {
     #[test] fn draws_a_frame() { assert!(Fixture::new().run(show).is_empty()); }
     #[test] fn drag_payload_requests_the_same_tool_on_drop() {
         let payload = drag_payload(&TABS[0].tools[0]);
-        assert!(matches!(dropped_tool(&payload, "grid1"), UiAction::AddNode { node_type, after }
-            if node_type == "box" && after.as_deref() == Some("grid1")));
+        assert!(matches!(dropped_tool(&payload, Pos2::new(320., -64.)), UiAction::AddNetworkNode { node_type, pos }
+            if node_type == "box" && pos == [320., -64.]));
     }
     #[test] fn web_icon_table_is_covered_and_unknown_tools_keep_initials() {
         let ctx = egui::Context::default();

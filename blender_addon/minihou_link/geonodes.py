@@ -15,8 +15,8 @@ from types import SimpleNamespace
 import bpy
 from bpy.app.handlers import persistent
 
-from . import modifiers, proxy, mesh_reader, mesh_writer
-from .protocol import GeoUpdate, Mirror
+from . import modifiers, proxy, mesh_reader, mesh_writer, scene_objects
+from .protocol import GeoUpdate, Mirror, instance_payload
 
 KEY = "minihou_gn_id"
 CACHE = "minihou_gn_cache"
@@ -74,6 +74,7 @@ def add_group(tree, graph_path, *, host=None, port=None):
     ng[modifiers.GRAPH] = json.dumps(header["graph"])
     ng[modifiers.PARAMS] = json.dumps(header["interface"])
     ng[modifiers.STATUS] = "Waiting for first cook (empty output)"
+    proxy.ensure_nested(ng)  # plumbing in one private nested group, like stack modifiers
     cache = _cache(ng)
     proxy.sync_interface(ng, cache, header["interface"], json.dumps(header["interface"]))
     node = tree.nodes.new("GeometryNodeGroup")
@@ -208,7 +209,8 @@ def edit_live(obj, node):
                               fps=scene.render.fps / scene.render.fps_base)
     _live.add(tree[KEY])
     _apply_live(node, header)
-    return {"state": "ready", "editor_url": client.welcome.get("editor_url", "")}, header["path"]
+    return {"state": "ready", "editor_url": client.welcome.get("editor_url", ""),
+            "native_live": header.get("live") and header.get("editor") == "native"}, header["path"]
 
 
 def _private(tree, seen_ids):
@@ -225,6 +227,7 @@ def _private(tree, seen_ids):
         if tree[KEY] in seen_ids:
             tree[KEY] = uuid.uuid4().hex
         seen_ids.add(tree[KEY])
+        proxy.ensure_plumbing(tree)  # a copied nested group gets its own plumbing tree
         _cache(tree)
         _object_interface(tree)
     else:
@@ -515,6 +518,7 @@ def _cook_tree(obj, mod, host, port, force):
                 frame=scene.frame_current + scene.frame_subframe,
                 fps=scene.render.fps / scene.render.fps_base, graph=graph,
                 materials=[m.name if m is not None else "" for m in materials])
+            output, manifests = instance_payload(header, output)
             update = GeoUpdate.from_message(header, output)
             names = update.detail.get("instance_objects", [])
             if any(not name.startswith("@") for name in names):
@@ -537,6 +541,12 @@ def _cook_tree(obj, mod, host, port, force):
             if old.users == 0:
                 bpy.data.meshes.remove(old)
             proxy.sync_instances(tree, names, objects=objects)
+            for manifest in manifests:
+                scene_objects.queue(tree[KEY], manifest, parent=obj.name)
+            for error in header.get("scene_errors", []):
+                scene_objects._log(f"scene_objects {error.get('node')!r} on {obj.name}: {error.get('message')}")
+            scene_objects.queue_nodes(tree[KEY], [m["node"] for m in manifests]
+                                      + [e["node"] for e in header.get("scene_errors", [])])
             _digests[tree[KEY]] = signature
             _known.add(tree[KEY])
             tree[modifiers.STATUS] = ready
@@ -556,6 +566,7 @@ def _cleanup():
     for tree in list(bpy.data.node_groups):
         if KEY in tree and tree.users == 0:
             bpy.data.node_groups.remove(tree)
+    proxy.cleanup_plumbing()
     used = {tree[KEY] for tree in bpy.data.node_groups if KEY in tree}
     for ident in (_known | set(_digests) | set(_source_sent) | _live) - used:
         if modifiers._client is not None:
@@ -563,6 +574,7 @@ def _cleanup():
                 modifiers._client.remove(ident)
             except Exception:
                 pass  # client.close/next cook handles transport failure
+        scene_objects.queue_nodes(ident, [])
         _known.discard(ident)
         _live.discard(ident)
         _source_sent.pop(ident, None)
@@ -606,8 +618,11 @@ def pump(host=None, port=None, *, force=False):
                         mod.node_group = tree
         _cleanup()
         for obj in list(bpy.context.scene.objects):
-            if obj.library or obj.type != "MESH" or CACHE in obj:
-                continue
+            try:
+                if obj.library or obj.type != "MESH" or CACHE in obj:
+                    continue
+            except ReferenceError:
+                continue  # a stale cache object freed by an earlier modifiers.pump cleanup in this loop
             for mod in obj.modifiers:
                 if not mod.show_viewport:
                     continue

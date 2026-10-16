@@ -2,6 +2,98 @@
 //! plenty for a click), and the highlight geometry for the current selection.
 use crate::ui::SelectionMode;
 
+#[derive(Clone, Copy, Debug)]
+pub struct SnapFeature { pub point: [f32; 3], pub triangle: [[f32; 3]; 3], pub kind: crate::ui::SnapTo }
+
+/// Compare every enabled feature in pixels, including vertices outside the ray-hit triangle.
+pub fn snap_feature(positions: &[f32], indices: &[u32], camera: crate::ui::CameraInfo,
+    rect: eframe::egui::Rect, pointer: eframe::egui::Pos2, targets: crate::ui::SnapTargets,
+    backface_culling: bool) -> Option<SnapFeature> {
+    use crate::ui::{SnapTo, transform_gizmo::{project, ray}};
+    let (origin, direction) = ray(camera, rect, pointer);
+    let mut best: Option<(f32, f32, SnapFeature)> = None;
+    for ids in indices.chunks_exact(3) {
+        if ids.iter().any(|&id| id as usize >= positions.len() / 3) { continue; }
+        let tri = [at(positions, ids[0]), at(positions, ids[1]), at(positions, ids[2])];
+        if backface_culling && dot(cross(sub(tri[1], tri[0]), sub(tri[2], tri[0])), direction) >= 0. { continue; }
+        let screens = tri.map(|p| project(camera, rect, p));
+        let mut consider = |point: [f32; 3], kind| {
+            let Some(screen) = project(camera, rect, point) else { return; };
+            let distance = screen.distance(pointer);
+            let depth = dot(sub(point, origin), direction);
+            if distance <= 14. && depth > 0. && best.as_ref().is_none_or(|(d,z,_)|
+                distance < *d - 0.001 || ((distance - *d).abs() <= 0.001 && depth < *z)) {
+                best = Some((distance, depth, SnapFeature { point, triangle: tri, kind }));
+            }
+        };
+        if targets.contains(SnapTo::Vertex) { for p in tri { consider(p, SnapTo::Vertex); } }
+        for (a,b) in [(0,1),(1,2),(2,0)] {
+            if targets.contains(SnapTo::EdgeCenter) { consider([0,1,2].map(|k| (tri[a][k]+tri[b][k])*0.5), SnapTo::EdgeCenter); }
+            if targets.contains(SnapTo::Edge) {
+                if let (Some(sa), Some(sb)) = (screens[a], screens[b]) {
+                    let ab = sb-sa;
+                    let t = ((pointer-sa).dot(ab)/ab.length_sq().max(1e-8)).clamp(0.,1.);
+                    // Perspective-correct interpolation along the projected segment.
+                    let w = |p: [f32;3]| camera.projection[0][3]*p[0]+camera.projection[1][3]*p[1]+camera.projection[2][3]*p[2]+camera.projection[3][3];
+                    let (wa,wb) = (w(tri[a]),w(tri[b]));
+                    let t = t*wa / ((1.-t)*wb+t*wa).max(1e-8);
+                    consider([0,1,2].map(|k| tri[a][k]+(tri[b][k]-tri[a][k])*t), SnapTo::Edge);
+                }
+            }
+        }
+        if targets.contains(SnapTo::Face) || targets.contains(SnapTo::Volume) {
+            if let Some(hit) = pick_triangle(tri.as_flattened(), &[0,1,2], origin, direction) {
+                let point = [0,1,2].map(|k| origin[k]+direction[k]*hit.t);
+                if targets.contains(SnapTo::Face) { consider(point, SnapTo::Face); }
+                if targets.contains(SnapTo::Volume) {
+                    // Enter the surface and find the next exit along the same ray.
+                    let inside = [0,1,2].map(|k| point[k]+direction[k]*1e-4);
+                    if let Some(exit) = pick_triangle(positions, indices, inside, direction) {
+                        consider([0,1,2].map(|k| point[k]+direction[k]*(exit.t+1e-4)*0.5), SnapTo::Volume);
+                    }
+                }
+            }
+        }
+    }
+    best.map(|(_,_,feature)| feature)
+}
+
+/// A region in viewport screen coordinates. Boundaries count as inside.
+#[derive(Clone, Debug, PartialEq)]
+pub enum RegionShape {
+    Rect(eframe::egui::Rect),
+    Circle { center: eframe::egui::Pos2, radius: f32 },
+    Lasso(Vec<eframe::egui::Pos2>),
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SelectOp { #[default] Replace, Add, Subtract }
+impl RegionShape {
+    pub fn contains(&self, p: eframe::egui::Pos2) -> bool {
+        match self {
+            Self::Rect(r) => r.contains(p),
+            Self::Circle { center, radius } => *radius >= 0. && center.distance(p) <= *radius,
+            Self::Lasso(points) => {
+                if points.len() < 3 { return false; }
+                let mut inside = false;
+                for (a, b) in points.iter().zip(points.iter().cycle().skip(1)).take(points.len()) {
+                    // Use f64 to retain the reference's boundary tolerance in screen coordinates.
+                    let (dx, dy) = ((b.x - a.x) as f64, (b.y - a.y) as f64);
+                    let (px, py) = ((p.x - a.x) as f64, (p.y - a.y) as f64);
+                    let length = dx * dx + dy * dy;
+                    let t = if length == 0. { 0. } else { ((px * dx + py * dy) / length).clamp(0., 1.) };
+                    if (px - t * dx).hypot(py - t * dy) < 1e-7 { return true; }
+                    if (a.y > p.y) != (b.y > p.y) && px < dx * py / dy { inside = !inside; }
+                }
+                inside
+            }
+        }
+    }
+    /// Edges count only when both projected endpoints are inside (browser editor parity).
+    pub fn contains_edge(&self, a: eframe::egui::Pos2, b: eframe::egui::Pos2) -> bool {
+        self.contains(a) && self.contains(b)
+    }
+}
+
 /// What a click hit: the triangle (index into the triangle list), the distance along the ray and the barycentric weights.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit { pub tri: usize, pub t: f32, pub bary: [f32; 3] }
@@ -22,8 +114,13 @@ pub fn at(p: &[f32], i: u32) -> [f32; 3] { let k = i as usize * 3; [p[k], p[k + 
 
 /// Nearest front-most triangle along the ray (Moller-Trumbore, both sides).
 pub fn pick_triangle(p: &[f32], tri: &[u32], origin: [f32; 3], dir: [f32; 3]) -> Option<Hit> {
+    pick_triangle_filtered(p,tri,origin,dir,|_| true)
+}
+/// Filter before ray testing so an unpickable foreground ghost cannot block a selected object.
+pub fn pick_triangle_filtered(p:&[f32],tri:&[u32],origin:[f32;3],dir:[f32;3],mut visible:impl FnMut(&[u32])->bool)->Option<Hit> {
     let mut best: Option<Hit> = None;
     for (n, t) in tri.as_chunks::<3>().0.iter().enumerate() {
+        if !visible(t) { continue; }
         let (a, b, c) = (at(p, t[0]), at(p, t[1]), at(p, t[2]));
         let (e1, e2) = (sub(b, a), sub(c, a));
         let h = cross(dir, e2);
@@ -294,6 +391,74 @@ mod tests {
     use super::*;
     use minihou_app::{Camera, StandardView};
 
+    #[test]
+    fn snap_candidates_use_screen_distance_and_edges_are_not_midpoints() {
+        use crate::ui::{CameraInfo,SnapTargets,SnapTo};
+        use eframe::egui::{pos2,vec2,Rect};
+        let camera=CameraInfo { projection:[[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]],
+            ortho:true,ray_origin:[0.,0.,5.],ray_right:[1.,0.,0.],ray_up:[0.,1.,0.],ray_forward:[0.,0.,-1.],..Default::default() };
+        let rect=Rect::from_min_size(pos2(0.,0.),vec2(200.,200.));
+        let p=[0.,0.,0., 1.,0.,0., 0.,1.,0.];
+        let mut targets=SnapTargets::default(); targets.toggle(SnapTo::Edge); targets.toggle(SnapTo::EdgeCenter);
+        let edge=snap_feature(&p,&[0,1,2],camera,rect,pos2(125.,102.),targets,false).unwrap();
+        assert_eq!(edge.kind,SnapTo::Edge);
+        assert!((edge.point[0]-0.25).abs()<1e-5 && edge.point[1].abs()<1e-5);
+        let vertex=snap_feature(&p,&[0,1,2],camera,rect,pos2(96.,104.),SnapTo::Vertex.into(),false).unwrap();
+        assert_eq!(vertex.point,[0.;3]); // Pointer need not hit a face.
+        assert!(snap_feature(&p,&[0,1,2],camera,rect,pos2(150.,150.),SnapTo::Vertex.into(),false).is_none());
+        targets.toggle(SnapTo::Face);
+        let face=snap_feature(&p,&[0,1,2],camera,rect,pos2(120.,90.),targets,false).unwrap();
+        assert_eq!(face.kind,SnapTo::Face);
+        assert!((face.point[0]-0.2).abs()<1e-5 && (face.point[1]-0.1).abs()<1e-5);
+        assert!(snap_feature(&p,&[0,2,1],camera,rect,pos2(120.,90.),SnapTo::Face.into(),true).is_none());
+    }
+
+    #[test]
+    fn volume_snap_uses_midpoint_between_entry_and_exit() {
+        use crate::ui::{CameraInfo,SnapTo};
+        use eframe::egui::{pos2,vec2,Rect};
+        let camera=CameraInfo { projection:[[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]],
+            ortho:true,ray_origin:[0.,0.,5.],ray_right:[1.,0.,0.],ray_up:[0.,1.,0.],ray_forward:[0.,0.,-1.],..Default::default() };
+        let p=[0.,0.,1., 1.,0.,1., 0.,1.,1., 0.,0.,-1., 0.,1.,-1., 1.,0.,-1.];
+        let feature=snap_feature(&p,&[0,1,2,3,4,5],camera,Rect::from_min_size(pos2(0.,0.),vec2(200.,200.)),pos2(120.,90.),SnapTo::Volume.into(),false).unwrap();
+        assert!(feature.point[2].abs()<1e-4);
+    }
+
+    #[test]
+    fn region_contains_boundaries_and_concave_lassos() {
+        use eframe::egui::{pos2, Rect};
+        let rect = RegionShape::Rect(Rect::from_min_max(pos2(0., 0.), pos2(10., 10.)));
+        assert!(rect.contains(pos2(0., 10.)));
+        assert!(!rect.contains(pos2(11., 5.)));
+        let circle = RegionShape::Circle { center: pos2(0., 0.), radius: 5. };
+        assert!(circle.contains(pos2(3., 4.)));
+        assert!(!circle.contains(pos2(4., 4.)));
+        let points = vec![pos2(0., 0.), pos2(10., 0.), pos2(10., 4.), pos2(4., 4.), pos2(4., 10.), pos2(0., 10.)];
+        for polygon in [points.clone(), points.into_iter().rev().collect()] {
+            let lasso = RegionShape::Lasso(polygon);
+            assert!(lasso.contains(pos2(2., 8.)));
+            assert!(lasso.contains(pos2(4., 7.)));
+            assert!(lasso.contains(pos2(10., 0.)));
+            assert!(!lasso.contains(pos2(7., 7.)));
+            assert!(!lasso.contains(pos2(-1., 0.)));
+        }
+        assert!(!RegionShape::Lasso(vec![]).contains(pos2(0., 0.)));
+        assert!(!RegionShape::Lasso(vec![pos2(0., 0.); 2]).contains(pos2(0., 0.)));
+    }
+
+    #[test]
+    fn region_edges_require_both_endpoints_even_when_midpoint_is_inside() {
+        use eframe::egui::{pos2, Rect};
+        for shape in [RegionShape::Rect(Rect::from_min_max(pos2(-5., -5.), pos2(5., 5.))),
+            RegionShape::Circle { center: pos2(0., 0.), radius: 5. },
+            RegionShape::Lasso(vec![pos2(-5., -5.), pos2(5., -5.), pos2(5., 5.), pos2(-5., 5.)])] {
+            assert!(shape.contains(pos2(0., 0.)));
+            assert!(!shape.contains_edge(pos2(-10., 0.), pos2(10., 0.)));
+            assert!(!shape.contains_edge(pos2(0., 0.), pos2(6., 0.)));
+            assert!(shape.contains_edge(pos2(-2., 0.), pos2(5., 0.)));
+        }
+    }
+
     // two triangles forming a unit square in the z = 0 plane
     const P: [f32; 12] = [0., 0., 0., 1., 0., 0., 1., 1., 0., 0., 1., 0.];
     const T: [u32; 6] = [0, 1, 2, 0, 2, 3];
@@ -351,7 +516,7 @@ mod tests {
 
     #[test]
     fn camera_center_ray_hits_mesh_in_perspective_and_orthographic_views() {
-        let vertices = [-1., -1., 0., 1., -1., 0., 0., 1., 0.];
+        let vertices = [-1., 0., -1., 1., 0., -1., 0., 0., 1.];
         let triangles = [0, 1, 2];
         let mut camera = Camera::frame([0., 0., 0.], 1.);
         for view in [StandardView::Perspective, StandardView::Front] {
@@ -475,4 +640,13 @@ mod tests {
         assert!(very_large.stride >= 20);
         assert!(very_large.status.unwrap().contains(">200k"));
     }
+}
+
+#[test]
+fn filtered_pick_ignores_foreground_ghost_and_preserves_triangle_id() {
+    let p=[0.,0.,1., 1.,0.,1., 0.,1.,1., 0.,0.,0., 1.,0.,0., 0.,1.,0.];
+    let tri=[0,1,2,3,4,5];
+    let hit=pick_triangle_filtered(&p,&tri,[0.2,0.2,3.],[0.,0.,-1.],|t| t.iter().all(|id| (3..6).contains(id))).unwrap();
+    assert_eq!(hit.tri,1); assert_eq!(hit.t,3.);
+    assert!(pick_triangle_filtered(&p,&tri,[0.2,0.2,3.],[0.,0.,-1.],|_|false).is_none());
 }

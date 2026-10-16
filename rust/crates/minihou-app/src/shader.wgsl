@@ -1,5 +1,4 @@
-// Workbench-style shading: no PBR, no textures. Textures later: add a `uv` vertex buffer (location 2) and a
-// `@group(1)` texture_2d + sampler pair, and multiply `base` by the sample in fs_surf.
+// Workbench studio lighting and view-normal sphere-capture shading.
 struct U {
     view_proj: mat4x4<f32>,
     view: mat4x4<f32>,
@@ -12,9 +11,15 @@ struct U {
     // 1 when the target is a plain (non-sRGB) texture that is shown as it is, as in the editor: the shader then encodes
     // its linear result to sRGB itself so it matches a window whose surface is an sRGB format.
     encode_srgb: u32,
-    _pad1: u32,
+    matcap: u32,
+    floor: vec4<f32>,
+    element_size: vec4<f32>,
+    element_flags: vec4<u32>,
+    element_color: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> u: U;
+@group(0) @binding(1) var matcap: texture_2d<f32>;
+@group(0) @binding(2) var matcap_sampler: sampler;
 
 struct VOut {
     @builtin(position) pos: vec4<f32>,
@@ -71,6 +76,9 @@ fn shade_surf(i: VOut, front: bool) -> vec3<f32> {
             n = normalize(n - v * d * 1.25);
         }
     }
+    if (u.matcap != 0u) {
+        return textureSample(matcap, matcap_sampler, vec2<f32>(n.x * 0.5 + 0.5, 0.5 - n.y * 0.5)).rgb;
+    }
     return u.base.rgb * light(n);
 }
 
@@ -96,13 +104,14 @@ fn vs_wire(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>) -> WOut {
 
 @fragment
 fn fs_wire(i: WOut) -> @location(0) vec4<f32> {
-    var n = normalize(i.vnorm);
+    var n = vec3<f32>(0.0,0.0,1.0);
+    if (dot(i.vnorm,i.vnorm)>1e-20) { n = normalize(i.vnorm); }
     if (dot(n, normalize(-i.vpos)) < 0.0) { n = -n; }
     // lit like the surface so the shape reads even when the edges fill the screen; over a surface (Shaded+Wire) the line is a
     // darker version of the surface colour, fading to the surface itself as the mesh gets denser
     let lit = u.base.rgb * light(n);
     if (u.wire.a > 0.5) {
-        return out_color(lit * mix(1.0, 0.45, u.wire_fade));
+        return vec4<f32>(out_color(lit * 0.45).rgb, u.wire_fade);
     }
     return out_color(lit);
 }
@@ -130,3 +139,57 @@ fn fs_mask(i: VOut) -> @location(0) vec4<f32> {
     return vec4<f32>(1.0, 0.0, 0.0, 1.0);
 }
 
+
+// Faint surfaces/edges for Wireframe Ghost, Hidden Line Ghost and other objects.
+@fragment
+fn fs_ghost(i: VOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    return vec4<f32>(out_color(shade_surf(i,front)).rgb,0.09);
+}
+@fragment
+fn fs_ghost_wire(i: WOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(0.65,0.69,0.74,0.17 * select(1.0,u.wire_fade,u.wire.a>0.5));
+}
+
+// Constant-pixel squares and segment quads. Clip segments before perspective division.
+struct ElementOut {
+    @builtin(position) pos:vec4<f32>,
+    @location(0) @interpolate(flat) selected:u32,
+    @location(1) @interpolate(flat) kind:u32,
+};
+@vertex
+fn vs_element(@builtin(vertex_index) vertex:u32, @location(0) a:vec3<f32>, @location(1) b:vec3<f32>,
+              @location(2) kind:u32, @location(3) selected:u32) -> ElementOut {
+    let corners=array<vec2<f32>,6>(vec2(-1.,-1.),vec2(1.,-1.),vec2(1.,1.),vec2(-1.,-1.),vec2(1.,1.),vec2(-1.,1.));
+    let corner=corners[vertex];
+    let scale=select(1.,u.floor.x,kind>=3u);
+    var start=u.view_proj*vec4(a*scale,1.); var end=u.view_proj*vec4(b*scale,1.);
+    var o:ElementOut; o.selected=selected*u.element_flags.w; o.kind=kind;
+    o.pos=vec4(2.,2.,2.,1.);
+    if (kind==0u || kind>=3u) {
+        if ((kind==0u && u.element_flags.y==0u) || (start.z<0. && end.z<0.)) { return o; }
+        if ((kind==3u && u.floor.y==0.) || (kind>=4u && u.floor.z==0.)) { return o; }
+        if (start.z<0.) { start=mix(start,end,-start.z/(end.z-start.z)); }
+        if (end.z<0.) { end=mix(end,start,-end.z/(start.z-end.z)); }
+        if (start.w<=0. || end.w<=0.) { return o; }
+        let delta=(end.xy/end.w-start.xy/start.w)*u.element_size.xy;
+        let direction=delta/max(length(delta),0.00001);
+        let perpendicular=vec2(-direction.y,direction.x);
+        var clip=select(start,end,corner.x>0.);
+        clip=vec4(clip.xy+perpendicular*corner.y*select(u.element_size.w,1.,kind>=3u)/u.element_size.xy*clip.w,clip.zw);
+        o.pos=clip;
+    } else {
+        if (u.element_flags.x==0u || (kind==2u && u.element_flags.z==0u) || start.z<0. || start.w<=0.) { return o; }
+        o.pos=vec4(start.xy+corner*u.element_size.z/u.element_size.xy*start.w,start.zw);
+    }
+    return o;
+}
+@fragment
+fn fs_element(i:ElementOut) -> @location(0) vec4<f32> {
+    if (i.kind==3u) {return vec4(u.element_color.rgb,0.16);}
+    if (i.kind==4u) {return vec4(0.7,0.16,0.12,0.8);}
+    if (i.kind==5u) {return vec4(0.22,0.65,0.18,0.8);}
+    if (i.kind==6u) {return vec4(0.18,0.38,0.8,0.8);}
+    return select(u.element_color,vec4(1.,0.627,0.157,1.),i.selected!=0u);
+}
+@fragment
+fn fs_element_ghost(i:ElementOut) -> @location(0) vec4<f32> { return vec4(u.element_color.rgb,0.20); }

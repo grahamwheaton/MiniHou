@@ -129,37 +129,61 @@ def encode_message(header: dict, arrays: Optional[Dict[str, np.ndarray]] = None)
     return [_PREFIX.pack(MAGIC, len(hb), offset), hb] + chunks
 
 
-def send_message(sock: socket.socket, header: dict, arrays: Optional[Dict[str, np.ndarray]] = None) -> int:
+def send_message(sock: socket.socket, header: dict, arrays: Optional[Dict[str, np.ndarray]] = None,
+                 *, deadline: Optional[float] = None) -> int:
     """Send one frame. Returns the number of bytes written."""
     bufs = encode_message(header, arrays)
     total = 0
     for b in bufs:
-        sock.sendall(b)
+        if deadline is None:
+            sock.sendall(b)
+        else:
+            view = memoryview(b).cast("B")
+            while view:
+                _check_deadline(deadline)
+                try:
+                    sent = sock.send(view)
+                except socket.timeout:
+                    continue
+                if sent == 0:
+                    raise ConnectionError("connection closed while sending")
+                view = view[sent:]
         total += len(b)
     return total
 
 
-def _recv_exact_into(sock: socket.socket, view: memoryview) -> None:
+def _check_deadline(deadline: Optional[float]) -> None:
+    if deadline is not None and time.monotonic() >= deadline:
+        raise TimeoutError("link frame deadline exceeded")
+
+
+def _recv_exact_into(sock: socket.socket, view: memoryview, deadline=None) -> None:
     got = 0
     n = len(view)
     while got < n:
-        r = sock.recv_into(view[got:], n - got)
+        _check_deadline(deadline)
+        try:
+            r = sock.recv_into(view[got:], n - got)
+        except socket.timeout:
+            if deadline is None:
+                raise
+            continue
         if r == 0:
             raise ConnectionError("connection closed by peer")
         got += r
 
 
-def recv_message(sock: socket.socket) -> Tuple[dict, Dict[str, np.ndarray]]:
+def recv_message(sock: socket.socket, *, deadline: Optional[float] = None) -> Tuple[dict, Dict[str, np.ndarray]]:
     """Read one frame. Returns ``(header, arrays)``; arrays are views into a fresh bytearray."""
     prefix = bytearray(_PREFIX.size)
-    _recv_exact_into(sock, memoryview(prefix))
+    _recv_exact_into(sock, memoryview(prefix), deadline)
     magic, hlen, blen = _PREFIX.unpack(prefix)
     if magic != MAGIC:
         raise ProtocolError(f"bad magic {bytes(magic)!r}")
     if hlen > MAX_HEADER or blen > MAX_BLOB or hlen % 8:
         raise ProtocolError(f"unreasonable frame sizes hlen={hlen} blen={blen}")
     buf = bytearray(hlen + blen)
-    _recv_exact_into(sock, memoryview(buf))
+    _recv_exact_into(sock, memoryview(buf), deadline)
     return decode_payload(buf, hlen)
 
 
@@ -192,6 +216,17 @@ def decode_payload(buf, hlen: int) -> Tuple[dict, Dict[str, np.ndarray]]:
 # ---------------------------------------------------------------------------
 # Geometry updates
 # ---------------------------------------------------------------------------
+def instance_payload(header: dict, arrays: dict):
+    """Separate the mesh from namespaced scene sink arrays in an instance reply."""
+    mesh = {k: v for k, v in arrays.items() if not k.startswith("scene:")}
+    manifests = []
+    for manifest in header.get("scene", []):
+        prefix = f"scene:{manifest['node']}:"
+        manifests.append(dict(manifest, _arrays={k[len(prefix):]: v for k, v in arrays.items()
+                                                if k.startswith(prefix)}))
+    return mesh, manifests
+
+
 class GeoUpdate:
     """A decoded ``geo`` message."""
 

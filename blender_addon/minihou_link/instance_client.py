@@ -1,7 +1,13 @@
-"""Synchronous instance RPC client shared verbatim with Blender; no engine imports."""
+"""Worker-only RPC I/O with a 200 ms main-thread budget; shared with Blender.
+
+On timeout raise OSError so modifiers retain their last good mesh and use their
+existing retry/backoff path. A timeout never returns a stale reply as a new cook.
+"""
 from __future__ import annotations
 import socket
 import threading
+import time
+from typing import Optional
 from .protocol import PROTOCOL_VERSION, ProtocolError, recv_message, send_message
 from .shm import ShmReader, unpack_shm_payload
 
@@ -14,18 +20,74 @@ class InstanceClient:
         self.sequence = 0
         self.welcome = {}
         self.shm_reader = ShmReader()
+        self._local = threading.local()
+        self._thread = None
+        self._epoch = 0
+
+    def _invoke(self, operation):
+        # Even callers that set timeout/sock timeout to 30 s (older modifiers.py)
+        # cannot extend Blender's UI budget. All actual I/O runs on a daemon.
+        budget = max(0.001, min(float(self.timeout), 0.2))
+        deadline = time.monotonic() + budget
+        epoch = self._epoch
+        done, cancelled = threading.Event(), threading.Event()
+        result = []
+        def run():
+            if not self.lock.acquire(timeout=max(0.001, deadline - time.monotonic())):
+                result.append((False, TimeoutError("modifier client busy")))
+                done.set()
+                return
+            self._local.deadline = deadline
+            self._local.cancelled = cancelled
+            self._local.epoch = epoch
+            try:
+                if cancelled.is_set() or time.monotonic() >= deadline:
+                    raise TimeoutError("modifier RPC deadline exceeded")
+                if epoch != self._epoch:
+                    raise ConnectionError("modifier operation cancelled")
+                value = operation()
+                if epoch != self._epoch:
+                    raise ConnectionError("modifier operation cancelled")
+                result.append((True, value))
+            except Exception as exc:
+                result.append((False, exc))
+            finally:
+                self.lock.release()
+                done.set()
+        self._thread = threading.Thread(target=run, name="minihou-instance-rpc", daemon=True)
+        self._thread.start()
+        if not done.wait(max(0.0, deadline - time.monotonic())):
+            cancelled.set()
+            self.close()
+            raise TimeoutError("MiniHou did not reply within 200 ms; last cache retained")
+        ok, value = result[0]
+        if not ok:
+            raise value
+        return value
 
     def connect(self):
+        return self._invoke(self._connect)
+
+    def _connect(self):
         with self.lock:
-            if self.sock is not None:
-                return
-            sock = socket.create_connection((self.host, self.port), self.timeout)
+            existing = self.sock
+            if existing is not None:
+                existing.settimeout(0.025)
+                return self.welcome
+            remaining = self._local.deadline - time.monotonic()
+            if remaining <= 0 or self._local.cancelled.is_set():
+                raise TimeoutError("modifier connect cancelled")
+            sock = socket.create_connection((self.host, self.port), remaining)
+            sock.settimeout(0.025)
             self.sock = sock
+            if self._local.cancelled.is_set() or self._local.epoch != self._epoch:
+                self.close()
+                raise ConnectionError("modifier connect cancelled")
             try:
                 send_message(sock, {"type": "hello", "protocol": PROTOCOL_VERSION,
                                     "mode": "instances", "client": "Blender modifiers",
-                                    "capabilities": ["shm_v1"]})
-                header, _ = recv_message(sock)
+                                    "capabilities": ["shm_v1"]}, deadline=self._local.deadline)
+                header, _ = recv_message(sock, deadline=self._local.deadline)
                 if (header.get("type") != "welcome" or header.get("server") != "minihou"
                         or header.get("protocol") != PROTOCOL_VERSION
                         or "instances_v1" not in header.get("capabilities", [])):
@@ -37,22 +99,33 @@ class InstanceClient:
                 raise
 
     def close(self):
-        with self.lock:
-            if self.sock is not None:
-                try:
-                    self.sock.close()
-                finally:
-                    self.sock = None
-            self.shm_reader.close()
+        # Do not acquire the RPC lock: shutdown must interrupt a pending read/write.
+        self._epoch += 1
+        sock, self.sock = self.sock, None
+        if sock is not None:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            sock.close()
+        # An SHM read can own its lock. Never wait for it on Blender's main thread.
+        reader, self.shm_reader = self.shm_reader, ShmReader()
+        threading.Thread(target=reader.close, name="minihou-instance-close", daemon=True).start()
 
     def _request(self, header, arrays=None):
+        return self._invoke(lambda: self._request_io(header, arrays))
+
+    def _request_io(self, header, arrays=None):
         with self.lock:
-            self.connect()
+            self._connect()
             self.sequence += 1
             header["request_id"] = self.sequence
             try:
-                send_message(self.sock, header, arrays)
-                reply, output = recv_message(self.sock)
+                sock = self.sock
+                if sock is None:
+                    raise ConnectionError("modifier connection closed")
+                send_message(sock, header, arrays, deadline=self._local.deadline)
+                reply, output = recv_message(sock, deadline=self._local.deadline)
                 if reply and reply.get("transport") == "shm":
                     output = unpack_shm_payload(reply, self.shm_reader)
                 if reply.get("request_id") != self.sequence:
@@ -105,10 +178,13 @@ class InstanceClient:
         return self._request({"type": "instance_sync", "instance_id": instance_id, "params": params})[0]
 
     def ack(self, seq: int, slot: Optional[int] = None) -> None:
-        with self.lock:
+        # ACKs share the same bounded worker path; no raw sendall in a timer.
+        def send_ack():
             if self.sock is not None:
-                try:
-                    send_message(self.sock, {"type": "geo_ack", "seq": seq, "slot": slot})
-                except Exception:
-                    pass
-
+                self.sock.settimeout(0.025)
+                send_message(self.sock, {"type": "geo_ack", "seq": seq, "slot": slot},
+                             deadline=self._local.deadline)
+        try:
+            self._invoke(send_ack)
+        except (OSError, ProtocolError):
+            self.close()

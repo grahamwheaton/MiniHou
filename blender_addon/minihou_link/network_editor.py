@@ -24,6 +24,11 @@ class NetworkEditor:
             self._state = {"state": state, "path": path, "detail": detail}
 
     def start(self, server, graph_path, *, live=False):
+        if live and server.get("state") == "ready" and server.get("native_live"):
+            if not graph_path or not Path(graph_path).is_absolute():
+                raise ValueError("Native live editor did not return an absolute document path")
+            self._set("ready", str(Path(graph_path).resolve()), "Live editing in MiniHou: changes update this modifier.")
+            return
         if server.get("state") != "ready" or not server.get("editor_url"):
             raise ValueError("Start or reuse a ready MiniHou server first")
         url = urlsplit(server["editor_url"])

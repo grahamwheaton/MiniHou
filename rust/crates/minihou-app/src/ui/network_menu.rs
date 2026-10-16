@@ -7,13 +7,29 @@ use eframe::egui::{self, pos2, Color32, FontId, Id, Key, Order, Pos2, RichText, 
 use shelf_data::TABS;
 
 #[derive(Clone)]
-pub(super) struct MenuState { at: Pos2, target: Option<String>, add: bool, pie: bool, category: Option<usize>, query: String, active: usize, focus: bool }
+pub(super) struct MenuState { at: Pos2, target: Option<String>, add: bool, pie: bool, category: Option<usize>, query: String, active: usize, focus: bool,
+    pub(super) connect_to: Option<(crate::graph_edit::AddConnection, Pos2)> }
 impl MenuState {
     pub(super) fn new(at: Pos2, target: Option<String>, add: bool) -> Self {
-        Self { at, target, add, pie: false, category: None, query: String::new(), active: 0, focus: true }
+        Self { at, target, add, pie: false, category: None, query: String::new(), active: 0, focus: true, connect_to: None }
     }
     pub(super) fn pie(at: Pos2) -> Self { let mut menu = Self::new(at, None, true); menu.pie = true; menu }
     pub(super) fn query(&self) -> &str { &self.query }
+    pub(super) fn at(&self) -> Pos2 { self.at }
+    pub(super) fn connected(at: Pos2, connection: crate::graph_edit::AddConnection, world: Pos2) -> Self {
+        let mut menu = Self::new(at, None, true);
+        menu.connect_to = Some((connection, world));
+        menu
+    }
+}
+
+fn accepts(menu: &MenuState, ty: &str) -> bool {
+    use crate::graph_edit::AddConnection;
+    match &menu.connect_to {
+        Some((AddConnection::Output(_), _)) => minihou_core::nodes::get(ty).is_some_and(|s| !s.inputs.is_empty()),
+        Some((AddConnection::Input { .. }, _)) => ty != "output" && minihou_core::nodes::get(ty).is_some(),
+        None => true,
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,14 +46,14 @@ fn entries(menu: &MenuState) -> Vec<(String, Entry)> {
     if !menu.query.trim().is_empty() {
         let query = menu.query.to_lowercase();
         let mut matches: Vec<_> = TABS.iter().flat_map(|tab| tab.tools.iter().map(move |tool| (tab.name, tool)))
-            .filter(|(category, tool)| tool.label.to_lowercase().contains(&query) || tool.node_type.contains(&query) || category.to_lowercase().contains(&query))
+            .filter(|(category, tool)| accepts(menu, tool.node_type) && (tool.label.to_lowercase().contains(&query) || tool.node_type.contains(&query) || category.to_lowercase().contains(&query)))
             .map(|(category, tool)| (format!("{} · {}", tool.label, category), Entry::Tool(tool.node_type))).collect();
         matches.truncate(80);
         return matches;
     }
     if let Some(index) = menu.category {
         if let Some(tab) = TABS.get(index) {
-            return tab.tools.iter().map(|tool| (tool.label.to_owned(), Entry::Tool(tool.node_type))).collect();
+            return tab.tools.iter().filter(|tool| accepts(menu, tool.node_type)).map(|tool| (tool.label.to_owned(), Entry::Tool(tool.node_type))).collect();
         }
     }
     if menu.pie {
@@ -64,6 +80,10 @@ fn activate(entry: Entry, menu: &mut MenuState, v: &View, out: &mut Actions) -> 
     match entry {
         Entry::Category(index) => { menu.category = Some(index); menu.active = 0; None }
         Entry::Tool(node_type) => {
+            if let Some((connection, at)) = &menu.connect_to {
+                out.push(UiAction::AddConnectedNode { node_type: node_type.to_owned(), connection: connection.clone(), pos: [at.x, at.y] });
+                return Some(Choice::Close);
+            }
             let after = (!v.selected.is_empty() && v.graph.nodes.iter().any(|(id, _)| id == v.selected)).then(|| v.selected.to_owned());
             out.push(UiAction::AddNode { node_type: node_type.to_owned(), after });
             Some(Choice::Close)
@@ -131,7 +151,8 @@ pub(super) fn show(ctx: &egui::Context, id: Id, menu: &mut MenuState, v: &View, 
                     let disabled = matches!(entry, Entry::Item(Item::Rename));
                     let color = if disabled { v.theme.faint } else if index == menu.active { v.theme.accent } else { v.theme.text };
                     let response = ui.add_enabled(!disabled, egui::Button::new(RichText::new(label).color(color)).selected(index == menu.active)
-                        .fill(if index == menu.active { v.theme.accent_bg } else { Color32::TRANSPARENT }).frame(false));
+                        .fill(if index == menu.active { v.theme.accent_bg } else { Color32::TRANSPARENT }).frame(false).sense(egui::Sense::click_and_drag()));
+                    if let Entry::Tool(ty) = entry { response.dnd_set_drag_payload(crate::ui::ToolDrag((*ty).into())); }
                     if response.hovered() { menu.active = index; }
                     if response.clicked() { chosen = Some(*entry); }
                 }
@@ -150,6 +171,23 @@ pub(super) fn show(ctx: &egui::Context, id: Id, menu: &mut MenuState, v: &View, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn noodle_search_filters_and_keeps_connection_through_categories() {
+        use crate::graph_edit::AddConnection;
+        let mut menu = MenuState::connected(pos2(100., 200.), AddConnection::Output("source".into()), pos2(96., 192.));
+        assert!(!accepts(&menu, "point"));
+        assert!(accepts(&menu, "transform"));
+        let f = crate::ui::testing::Fixture::new();
+        let mut out = Actions::default();
+        assert!(activate(Entry::Category(0), &mut menu, &f.view(), &mut out).is_none());
+        assert!(out.0.is_empty());
+        menu.query = "transform".into();
+        assert!(entries(&menu).iter().any(|(_, e)| matches!(e, Entry::Tool("transform"))));
+        assert!(matches!(activate(Entry::Tool("transform"), &mut menu, &f.view(), &mut out), Some(Choice::Close)));
+        assert!(matches!(out.0.as_slice(), [UiAction::AddConnectedNode { connection: AddConnection::Output(source), pos, .. }] if source == "source" && *pos == [96., 192.]));
+        let menu = MenuState::connected(Pos2::ZERO, AddConnection::Input { node: "target".into(), port: "geo".into() }, Pos2::ZERO);
+        assert!(accepts(&menu, "box"));
+        assert!(!accepts(&menu, "output"));
+    }
     #[test]
     fn menu_target_model() {
         assert_eq!(items_for(None), vec![Item::Add, Item::Paste, Item::Tidy, Item::FrameAll]);

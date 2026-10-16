@@ -32,15 +32,16 @@ pub enum Command {
     Front, Back, Right, Left, Top, Bottom, ToggleProjection,
     OrbitDown, OrbitLeft, OrbitRight, OrbitUp,
     PanLeft, PanRight, PanUp, PanDown, ZoomIn, ZoomOut,
-    Xray, Snap, Proportional, ShadeNext, ShadePrevious,
+    Xray, Snap, Proportional, ShadeNext, ShadePrevious, ShadePie,
     Undo, Redo, Save, SaveAs, Open, Copy, Paste, DeleteNode, DissolveNode, DuplicateNode,
-    TidyNetwork, Preferences, BoxSelect, CircleSelect, Paint, Extrude, Inset, Bevel, PushPull, LoopCut, FlipFaces, OppositeView, NetworkBox, PieMenu, DisplayFlag, MuteFlag, TemplateFlag, SelectableTemplateFlag, FindNode,
+    TidyNetwork, Preferences, BoxSelect, CircleSelect, LassoSelect, Paint, Extrude, Inset, Bevel, PushPull, LoopCut, Knife, FlipFaces, OppositeView, NetworkBox, PieMenu, DisplayFlag, MuteFlag, TemplateFlag, SelectableTemplateFlag, FindNode,
     TimelineToggle, TimelinePrevious, TimelineNext, TimelineStart, TimelineEnd,
     ResetCursor,
     RepeatLast,
+    SketchLine, SketchPolyline, SketchPolygon, SketchRectangle, SketchCircle,
 }
 impl Command {
-    pub const ALL: [Self; 76] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
+    pub const ALL: [Self; 84] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
         Self::ToolSelect, Self::ToolMove, Self::ToolRotate, Self::ToolScale, Self::ToolTransform,
         Self::FrameAll, Self::FrameSelected, Self::Front, Self::Back, Self::Right, Self::Left,
         Self::Top, Self::Bottom, Self::ToggleProjection, Self::OrbitDown, Self::OrbitLeft,
@@ -48,9 +49,10 @@ impl Command {
         Self::PanDown, Self::ZoomIn, Self::ZoomOut, Self::Xray, Self::Snap,
         Self::Proportional, Self::ShadeNext, Self::ShadePrevious, Self::Undo, Self::Redo,
         Self::Save, Self::SaveAs, Self::Open, Self::Copy, Self::Paste, Self::DeleteNode, Self::DissolveNode, Self::DuplicateNode,
-        Self::TidyNetwork, Self::Preferences, Self::BoxSelect, Self::CircleSelect, Self::Paint, Self::Extrude, Self::Inset, Self::Bevel, Self::PushPull, Self::LoopCut, Self::FlipFaces, Self::OppositeView, Self::NetworkBox, Self::PieMenu, Self::DisplayFlag, Self::MuteFlag, Self::TemplateFlag, Self::SelectableTemplateFlag, Self::FindNode,
+        Self::TidyNetwork, Self::Preferences, Self::BoxSelect, Self::CircleSelect, Self::LassoSelect, Self::Paint, Self::Extrude, Self::Inset, Self::Bevel, Self::PushPull, Self::LoopCut, Self::Knife, Self::FlipFaces, Self::OppositeView, Self::NetworkBox, Self::PieMenu, Self::DisplayFlag, Self::MuteFlag, Self::TemplateFlag, Self::SelectableTemplateFlag, Self::FindNode,
         Self::TimelineToggle, Self::TimelinePrevious, Self::TimelineNext, Self::TimelineStart, Self::TimelineEnd,
-        Self::ResetCursor, Self::RepeatLast];
+        Self::ResetCursor, Self::RepeatLast,
+        Self::SketchLine, Self::SketchPolyline, Self::SketchPolygon, Self::SketchRectangle, Self::SketchCircle, Self::ShadePie];
     pub fn label(self) -> &'static str { match self {
         Self::Points => "Points", Self::Edges => "Edges", Self::Faces => "Faces", Self::Object => "Object", Self::ToggleEdit => "Toggle Object / edit mode",
         Self::SelectAll => "Select all", Self::SelectNone => "Select none", Self::Hide => "Hide selected", Self::Reveal => "Reveal hidden", Self::AddMenu => "Add node menu", Self::ToggleParams => "Toggle parameters",
@@ -67,15 +69,18 @@ impl Command {
         Self::Copy => "Copy nodes", Self::Paste => "Paste nodes",
         Self::DeleteNode => "Delete nodes", Self::DissolveNode => "Dissolve nodes", Self::DuplicateNode => "Duplicate nodes", Self::TidyNetwork => "Tidy network",
         Self::Preferences => "Preferences",
-        Self::BoxSelect => "Box select", Self::CircleSelect => "Circle select", Self::Paint => "Paint",
+        Self::BoxSelect => "Box select", Self::CircleSelect => "Circle select", Self::LassoSelect => "Lasso select", Self::Paint => "Paint",
         Self::Extrude => "Extrude", Self::Inset => "Inset", Self::Bevel => "Bevel", Self::PushPull => "Push / pull",
-        Self::LoopCut => "Loop cut", Self::FlipFaces => "Flip faces", Self::OppositeView => "Opposite view",
+        Self::Knife => "Knife", Self::LoopCut => "Loop cut", Self::FlipFaces => "Flip faces", Self::OppositeView => "Opposite view",
         Self::NetworkBox => "Network box", Self::PieMenu => "Modeling pie menu", Self::DisplayFlag => "Display flag",
         Self::MuteFlag => "Mute flag", Self::TemplateFlag => "Template flag", Self::SelectableTemplateFlag => "Selectable template flag",
         Self::FindNode => "Find node", Self::TimelineToggle => "Play / pause", Self::TimelinePrevious => "Previous frame",
         Self::TimelineNext => "Next frame", Self::TimelineStart => "First frame", Self::TimelineEnd => "Last frame",
         Self::ResetCursor => "Reset 3D cursor and frame all",
+        Self::ShadePie => "Shading pie",
         Self::RepeatLast => "Repeat last",
+        Self::SketchLine => "Sketch line", Self::SketchPolyline => "Sketch polyline", Self::SketchPolygon => "Sketch polygon",
+        Self::SketchRectangle => "Sketch rectangle", Self::SketchCircle => "Sketch circle",
     } }
     fn id(self) -> &'static str { match self {
         Self::Points => "points", Self::Edges => "edges", Self::Faces => "faces", Self::Object => "object", Self::ToggleEdit => "toggle_edit",
@@ -91,15 +96,18 @@ impl Command {
         Self::ShadePrevious => "shade_previous", Self::Undo => "undo", Self::Redo => "redo", Self::Save => "save",
         Self::SaveAs => "save_as", Self::Open => "open", Self::Copy => "copy", Self::Paste => "paste", Self::DeleteNode => "delete_node", Self::DissolveNode => "dissolve_node", Self::DuplicateNode => "duplicate_node",
         Self::TidyNetwork => "tidy_network", Self::Preferences => "preferences",
-        Self::BoxSelect => "box_select", Self::CircleSelect => "circle_select", Self::Paint => "paint",
+        Self::BoxSelect => "box_select", Self::CircleSelect => "circle_select", Self::LassoSelect => "lasso_select", Self::Paint => "paint",
         Self::Extrude => "extrude", Self::Inset => "inset", Self::Bevel => "bevel", Self::PushPull => "pushpull",
-        Self::LoopCut => "loop_cut", Self::FlipFaces => "flip_faces", Self::OppositeView => "opposite_view",
+        Self::Knife => "knife", Self::LoopCut => "loop_cut", Self::FlipFaces => "flip_faces", Self::OppositeView => "opposite_view",
         Self::NetworkBox => "network_box", Self::PieMenu => "pie_menu", Self::DisplayFlag => "display_flag",
         Self::MuteFlag => "mute_flag", Self::TemplateFlag => "template_flag", Self::SelectableTemplateFlag => "selectable_template_flag",
         Self::FindNode => "find_node", Self::TimelineToggle => "timeline_toggle", Self::TimelinePrevious => "timeline_previous",
         Self::TimelineNext => "timeline_next", Self::TimelineStart => "timeline_start", Self::TimelineEnd => "timeline_end",
         Self::ResetCursor => "reset_cursor",
+        Self::ShadePie => "shade_pie",
         Self::RepeatLast => "repeat_last",
+        Self::SketchLine => "sketch_line", Self::SketchPolyline => "sketch_polyline", Self::SketchPolygon => "sketch_polygon",
+        Self::SketchRectangle => "sketch_rectangle", Self::SketchCircle => "sketch_circle",
     } }
     pub fn to_action(self, kctx: &KeyContext<'_>) -> Option<UiAction> { Some(match self {
         Self::Points => UiAction::Editor(EditorChange::Selection(SelectionMode::Points)),
@@ -150,7 +158,7 @@ impl Keymap {
         for (key, cmd) in [(K::Num1,C::Points),(K::Num2,C::Edges),(K::Num3,C::Faces),(K::Num4,C::Object),
             (K::G,C::ToolMove),(K::R,C::ToolRotate),(K::S,C::ToolScale),(K::B,C::BoxSelect),(K::C,C::CircleSelect),
             (K::A,C::SelectAll),(K::F,C::FrameSelected),(K::O,C::Proportional),(K::Num5,C::Paint),
-            (K::E,C::Extrude),(K::I,C::Inset),(K::Escape,C::SelectNone)] {
+            (K::E,C::Extrude),(K::I,C::Inset),(K::K,C::Knife),(K::Escape,C::SelectNone)] {
             add(key,false,false,false,cmd,X::Viewport);
         }
         for (key,ctrl,alt,cmd) in [(K::B,true,false,C::Bevel),(K::E,false,true,C::PushPull),
@@ -172,8 +180,11 @@ impl Keymap {
             (K::Num3,false,C::Right),(K::Num3,true,C::Left),(K::Num7,false,C::Top),(K::Num7,true,C::Bottom),
             (K::Num5,false,C::ToggleProjection),(K::Num9,false,C::OppositeView),
             (K::Period,false,C::FrameSelected)] { add(key,ctrl,false,true,cmd,X::Viewport); }
+        for (key,ctrl,cmd) in [(K::Num2,false,C::OrbitDown),(K::Num4,false,C::OrbitLeft),(K::Num6,false,C::OrbitRight),(K::Num8,false,C::OrbitUp),
+            (K::Num4,true,C::PanLeft),(K::Num6,true,C::PanRight),(K::Num8,true,C::PanUp),(K::Num2,true,C::PanDown),
+            (K::Plus,false,C::ZoomIn),(K::Minus,false,C::ZoomOut)] { add(key,ctrl,false,true,cmd,X::Viewport); }
         for (key,cmd) in [(K::F,C::FrameAll),(K::L,C::TidyNetwork),(K::O,C::NetworkBox),
-            (K::C,C::PieMenu),(K::R,C::DisplayFlag),(K::M,C::MuteFlag),(K::E,C::TemplateFlag),
+            (K::C,C::PieMenu),(K::D,C::DisplayFlag),(K::M,C::MuteFlag),(K::E,C::TemplateFlag),
             (K::W,C::SelectableTemplateFlag)] { add(key,false,false,false,cmd,X::Network); }
         for (key,ctrl,shift,cmd) in [(K::Z,true,false,C::Undo),(K::Y,true,false,C::Redo),
             (K::Z,true,true,C::Redo),(K::S,true,false,C::Save),(K::S,true,true,C::SaveAs),
@@ -187,6 +198,15 @@ impl Keymap {
         for key in [K::Delete,K::Backspace] { add(key,false,false,false,C::DeleteNode,X::Network); }
         add(K::X,false,false,false,C::DeleteNode,X::Network);
         for key in [K::X, K::Delete] { add(key,false,false,false,C::DeleteNode,X::Viewport); }
+        add(K::L,true,false,true,C::LassoSelect,X::Viewport);
+        // Append aliases so persisted keymap override slots keep their meaning.
+        add(K::T,false,false,false,C::TidyNetwork,X::Network);
+        add(K::A,false,false,true,C::SelectNone,X::Viewport);
+        add(K::Q,false,false,false,C::ToolSelect,X::Viewport);
+        add(K::Z,false,false,false,C::ShadePie,X::Viewport);
+        add(K::Z,false,true,false,C::ShadeNext,X::Viewport);
+        add(K::Z,false,true,true,C::ShadePrevious,X::Viewport);
+        add(K::Z,false,false,true,C::Xray,X::Viewport);
         Self { bindings: b, emulate_numpad: false }
     }
     pub fn reset(&mut self) { *self = Self::blender(); }
@@ -219,15 +239,30 @@ impl Keymap {
         b
     }
     pub fn poll(&self, ctx: &egui::Context, kctx: &KeyContext<'_>) -> Vec<UiAction> {
+        self.poll_allowed(ctx, kctx, false)
+    }
+    /// Selection can interrupt transforms. Escape remains owned by the running operator.
+    pub fn poll_selection(&self, ctx: &egui::Context, kctx: &KeyContext<'_>) -> Vec<UiAction> {
+        self.poll_allowed(ctx, kctx, true)
+    }
+    fn poll_allowed(&self, ctx: &egui::Context, kctx: &KeyContext<'_>, selection_only: bool) -> Vec<UiAction> {
         if ctx.wants_keyboard_input() { return Vec::new(); }
         let mut bindings = self.effective();
         bindings.sort_by_key(|b| std::cmp::Reverse(u8::from(b.chord.ctrl) + u8::from(b.chord.shift) + u8::from(b.chord.alt)));
         let mut out = Vec::new();
         ctx.input_mut(|input| for b in bindings {
+            if selection_only && (b.context != Context::Viewport || b.chord.key == Key::Escape ||
+                !matches!(b.command, Command::SelectAll | Command::SelectNone | Command::BoxSelect | Command::CircleSelect | Command::LassoSelect | Command::ToolSelect)) { continue; }
             if !(match b.context { Context::Everywhere => true, Context::Viewport => kctx.viewport_hovered, Context::Network => kctx.network_hovered }) { continue; }
-            let exact = input.events.iter().any(|e| matches!(e, egui::Event::Key { key, pressed: true, modifiers, .. }
-                if *key == b.chord.key && modifiers.ctrl == b.chord.ctrl && modifiers.shift == b.chord.shift && modifiers.alt == b.chord.alt));
-            if exact && input.consume_key(b.chord.modifiers(), b.chord.key) {
+            // egui reports number-row and numpad keys alike, so a held numpad key counts as Alt+key (the numpad binding form)
+            let hit = input.events.iter().position(|e| matches!(e, egui::Event::Key { key, pressed: true, modifiers, .. }
+                if *key == b.chord.key && modifiers.ctrl == b.chord.ctrl && modifiers.shift == b.chord.shift
+                    && (modifiers.alt || numpad_down(*key)) == b.chord.alt)
+                // egui-winit replaces Ctrl+X key presses with Cut before they reach us.
+                || (matches!(e, egui::Event::Cut) && b.chord == Chord::new(Key::X,true,false,false)
+                    && !input.modifiers.shift && !input.modifiers.alt));
+            if let Some(i) = hit {
+                input.events.remove(i);
                 if let Some(action) = b.command.to_action(kctx) { out.push(action); }
             }
         });
@@ -259,6 +294,21 @@ impl Keymap {
         map
     }
 }
+/// Whether the numpad key matching `key` is physically held (Windows; other platforms rely on the Alt fallback).
+fn numpad_down(key: Key) -> bool {
+    #[cfg(windows)]
+    {
+        #[link(name = "user32")] extern "system" { fn GetAsyncKeyState(vk: i32) -> i16; }
+        let vk = match key {
+            Key::Num0 => 0x60, Key::Num1 => 0x61, Key::Num2 => 0x62, Key::Num3 => 0x63, Key::Num4 => 0x64,
+            Key::Num5 => 0x65, Key::Num6 => 0x66, Key::Num7 => 0x67, Key::Num8 => 0x68, Key::Num9 => 0x69,
+            Key::Plus => 0x6B, Key::Minus => 0x6D, Key::Period => 0x6E, _ => return false,
+        };
+        unsafe { GetAsyncKeyState(vk) < 0 }
+    }
+    #[cfg(not(windows))]
+    { let _ = key; false }
+}
 fn parse_key(name: &str) -> Option<Key> { Key::ALL.iter().copied().find(|k| format!("{k:?}") == name) }
 
 #[cfg(test)]
@@ -288,20 +338,85 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
     ("Tab", "Next move numeric field"), ("Ctrl", "Invert snapping"),
     ("Shift", "Precision movement"), ("O", "Toggle proportional editing"),
     ("Wheel / PageUp / PageDown", "Change proportional radius"),
-    ("B while moving", "Cycle Increment / Vertex / Edge / Face snap target"),
+    ("B / C / Ctrl+Alt+L", "Confirm transform and begin box / circle / lasso selection"),
+    ("A / Alt+A", "Confirm transform and select all / none"),
     ("Ctrl+Shift+LMB while moving", "Pick snap reference point"),
     ("R while rotating", "Toggle trackball"),
-    ("B while rotating", "Pick two-point pivot, reference, then angle"),
-    ("C while scaling", "Toggle scale cage; click a handle, move, click to confirm"),
     ("Alt while scaling", "Individual origins is not yet supported for multiple displayed objects"),
 ];
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn selection_interrupts_without_consuming_transform_keys_or_escape() {
+        for (key, modifiers, expected) in [(Key::A, Modifiers::NONE, "select_all"),
+            (Key::A, Modifiers::ALT, "select_none"), (Key::B, Modifiers::NONE, "box_select"),
+            (Key::C, Modifiers::NONE, "circle_select")] {
+            let ctx = egui::Context::default();
+            let _ = ctx.run(egui::RawInput { modifiers, events: vec![egui::Event::Key {
+                key, physical_key: None, pressed: true, repeat: false, modifiers }], ..Default::default() }, |ctx| {
+                let actions = Keymap::blender().poll_selection(ctx, &KeyContext { viewport_hovered: true, ..Default::default() });
+                assert!(matches!(actions.as_slice(), [UiAction::Command(name)] if name == expected));
+                assert!(!ctx.input(|i| i.key_pressed(key)));
+            });
+        }
+        for key in [Key::Escape, Key::X, Key::R, Key::S] {
+            let ctx = egui::Context::default();
+            let _ = ctx.run(egui::RawInput { events: vec![egui::Event::Key { key, physical_key: None,
+                pressed: true, repeat: false, modifiers: Modifiers::NONE }], ..Default::default() }, |ctx| {
+                assert!(Keymap::blender().poll_selection(ctx, &KeyContext { viewport_hovered: true, ..Default::default() }).is_empty());
+                assert!(ctx.input(|i| i.key_pressed(key)));
+            });
+        }
+    }
+    #[test] fn network_tidy_delete_and_native_cut_dispatch_without_conflicts() {
+        for (event, modifiers, expected) in [
+            (egui::Event::Cut, Modifiers::CTRL, "dissolve_selection"),
+            (egui::Event::Key { key: Key::X, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::CTRL }, Modifiers::CTRL, "dissolve_selection"),
+            (egui::Event::Key { key: Key::X, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }, Modifiers::NONE, "delete_selection"),
+        ] {
+            let ctx = egui::Context::default();
+            let mut actions = Vec::new();
+            let _ = ctx.run(egui::RawInput { events: vec![event], modifiers, ..Default::default() }, |ctx| {
+                actions = Keymap::blender().poll(ctx, &KeyContext { network_hovered: true, selected: Some("b"), ..Default::default() });
+                assert!(Keymap::blender().poll(ctx, &KeyContext { network_hovered: true, ..Default::default() }).is_empty());
+            });
+            assert!(matches!(actions.as_slice(), [UiAction::Command(name)] if name == expected));
+        }
+        for key in [Key::T, Key::L] {
+            let ctx = egui::Context::default();
+            let _ = ctx.run(egui::RawInput { events: vec![egui::Event::Key { key, physical_key: None,
+                pressed: true, repeat: false, modifiers: Modifiers::NONE }], ..Default::default() }, |ctx| {
+                assert!(matches!(Keymap::blender().poll(ctx, &KeyContext { network_hovered: true, ..Default::default() }).as_slice(), [UiAction::TidyNetwork]));
+            });
+        }
+    }
+
     #[test] fn guide_keymap_matches_defaults() {
         let guide = include_str!("../../docs/NATIVE_EDITOR.md").replace("\r\n", "\n");
         let table = guide.split_once("<!-- keymap:start -->\n").unwrap().1.split_once("<!-- keymap:end -->").unwrap().0;
         assert_eq!(table, default_keymap_table());
+    }
+    #[test] fn display_d_and_duplicate_ctrl_d_respect_editor_context() {
+        for (modifiers, network, expected) in [
+            (Modifiers::NONE, true, Some("display_flag")),
+            (Modifiers::CTRL, true, Some("duplicate_selection")),
+            (Modifiers::NONE, false, None),
+            (Modifiers::CTRL, false, None),
+        ] {
+            let ctx = egui::Context::default();
+            let input = egui::RawInput { modifiers, events: vec![egui::Event::Key {
+                key: Key::D, physical_key: None, pressed: true, repeat: false, modifiers,
+            }], ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                let actions = Keymap::blender().poll(ctx, &KeyContext {
+                    network_hovered: network, viewport_hovered: !network, selected: Some("a"), ..Default::default()
+                });
+                match expected {
+                    Some(expected) => assert!(matches!(actions.as_slice(), [UiAction::Command(name)] if name == expected)),
+                    None => assert!(actions.is_empty()),
+                }
+            });
+        }
     }
     #[test] fn guide_modal_table_matches_keys() {
         let guide=include_str!("../../docs/NATIVE_EDITOR.md").replace("\r\n","\n");
@@ -329,6 +444,13 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
         for (i,a) in map.bindings.iter().enumerate() { for b in &map.bindings[i+1..] {
             assert!(a.chord != b.chord || (a.context != b.context && a.context != Context::Everywhere && b.context != Context::Everywhere), "{a:?} / {b:?}");
         } }
+    }
+    #[test] fn lasso_command_is_registered_and_bindable() {
+        assert!(Command::ALL.contains(&Command::LassoSelect));
+        let map = Keymap::blender();
+        assert!(map.bindings.iter().any(|b| b.command == Command::LassoSelect
+            && b.context == Context::Viewport && b.chord == Chord::new(Key::L, true, false, true)));
+        assert!(matches!(Command::LassoSelect.to_action(&KeyContext::default()), Some(UiAction::Command(name)) if name == "lasso_select"));
     }
     #[test] fn views_and_overrides() {
         let mut map = Keymap::blender();
@@ -362,7 +484,7 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
                 && b.command == command && b.context == Context::Viewport));
         }
         for (key, command) in [(Key::Tab, Command::AddMenu), (Key::C, Command::PieMenu),
-            (Key::R, Command::DisplayFlag), (Key::E, Command::TemplateFlag)] {
+            (Key::D, Command::DisplayFlag), (Key::E, Command::TemplateFlag)] {
             assert!(map.bindings.iter().any(|b| b.chord == Chord::new(key, false, false, false)
                 && b.command == command && b.context == Context::Network));
         }

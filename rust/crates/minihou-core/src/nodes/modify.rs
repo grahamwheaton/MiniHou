@@ -470,7 +470,7 @@ fn delete_mask(geo: &Geometry, expr: &str) -> Result<Vec<bool>> {
     Err(Error::new("delete expression is not supported by the Rust backend"))
 }
 
-fn keep_points(geo: &Geometry, keep: &[bool]) -> Result<Geometry> {
+pub(super) fn keep_points(geo: &Geometry, keep: &[bool]) -> Result<Geometry> {
     let npoints = geo.npoints;
     let topo = &geo.topology;
     let nverts = topo.nvertices();

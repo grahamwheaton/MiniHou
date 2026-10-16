@@ -1,6 +1,6 @@
 //! Projected transform handles over the cooked viewport image.
-use super::{Actions, CameraInfo, Orientation, Pivot, Tool, TransformOp, UiAction, View};
-use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Vec2};
+use super::{Actions, CameraInfo, Orientation, Pivot, SelectionMode, Tool, TransformOp, UiAction, View};
+use eframe::egui::{self, pos2, vec2, Align2, Color32, FontId, Pos2, Rect, Stroke, Vec2};
 
 pub fn project(camera: CameraInfo, rect: Rect, point: [f32; 3]) -> Option<Pos2> {
     let m = camera.projection;
@@ -34,17 +34,26 @@ fn swept_degrees(previous: Pos2, current: Pos2, center: Pos2) -> f32 {
     let b = current - center;
     (a.x * b.y - a.y * b.x).atan2(a.dot(b)).to_degrees()
 }
-fn ring_points(camera: CameraInfo, rect: Rect, origin: [f32; 3], frame: [[f32; 3]; 3], axis: usize, span: f32) -> Vec<(Pos2, bool)> {
+/// Differential projection at the pivot keeps the widget's size independent of zoom and bounds.
+fn projected_basis(camera: CameraInfo, rect: Rect, origin: [f32; 3], axis: [f32; 3]) -> Vec2 {
+    let m = camera.projection;
+    let clip = |row: usize| m[3][row] + (0..3).map(|k| m[k][row]*origin[k]).sum::<f32>();
+    let d = |row: usize| (0..3).map(|k| m[k][row]*axis[k]).sum::<f32>();
+    let w = clip(3).max(1e-5);
+    vec2((d(0)*w-clip(0)*d(3))/w.powi(2), -(d(1)*w-clip(1)*d(3))/w.powi(2)) * rect.height()*0.5
+}
+fn gizmo_span(camera: CameraInfo, rect: Rect, origin: [f32;3], frame: [[f32;3];3]) -> f32 {
+    82. / frame.into_iter().map(|a| projected_basis(camera,rect,origin,a).length()).fold(1e-6, f32::max)
+}
+fn ring_points(camera: CameraInfo, rect: Rect, origin: [f32; 3], frame: [[f32; 3]; 3], axis: usize, _span: f32) -> Vec<(Pos2, bool)> {
     let a = frame[(axis + 1) % 3];
     let b = frame[(axis + 2) % 3];
     let center = project(camera, rect, origin).unwrap_or(rect.center());
-    let projected = [a, b].into_iter().filter_map(|basis| project(camera, rect, add(origin, mul(basis, span)))
-        .map(|p| (p - center).length())).fold(0., f32::max);
-    let radius = span * (50. / projected.max(1.)).clamp(0.25, 4.);
-    (0..=96).filter_map(|i| {
+    let radius = gizmo_span(camera,rect,origin,frame) * 62./82.;
+    (0..=96).map(|i| {
         let theta = i as f32 * std::f32::consts::TAU / 96.;
         let offset = add(mul(a, radius * theta.cos()), mul(b, radius * theta.sin()));
-        project(camera, rect, add(origin, offset)).map(|pos| (pos, dot(offset, camera.ray_forward) <= 0.))
+        (center + projected_basis(camera,rect,origin,offset), dot(offset, camera.ray_forward) <= 0.)
     }).collect()
 }
 fn ring_hit(rings: &[Vec<(Pos2, bool)>; 3], pointer: Pos2) -> Option<usize> {
@@ -53,6 +62,14 @@ fn ring_hit(rings: &[Vec<(Pos2, bool)>; 3], pointer: Pos2) -> Option<usize> {
         (distance < 7.).then_some((axis, distance))
     }).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(axis, _)| axis)
 }
+fn axis_sweep(camera: CameraInfo, rect: Rect, origin: [f32;3], frame: [[f32;3];3], axis: usize, previous: Pos2, current: Pos2) -> f32 {
+    let center=project(camera,rect,origin).unwrap_or(rect.center());
+    let a=projected_basis(camera,rect,origin,frame[(axis+1)%3]);
+    let b=projected_basis(camera,rect,origin,frame[(axis+2)%3]);
+    if (a.x*b.y-a.y*b.x).abs()<1e-3 { return swept_degrees(previous,current,center)*dot(frame[axis],camera.ray_forward).signum(); }
+    let point=|p| { let (x,y)=plane_delta(p-center,a,b,1.); pos2(x,y) };
+    swept_degrees(point(previous),point(current),Pos2::ZERO)
+}
 
 #[derive(Clone)]
 struct Drag { axis: usize, kind: Tool, start: Pos2, last_pointer: Pos2, swept: f32, last: f32, typed: String,
@@ -60,8 +77,35 @@ struct Drag { axis: usize, kind: Tool, start: Pos2, last_pointer: Pos2, swept: f
 #[derive(Clone)]
 struct PlaneDrag { a: usize, b: usize, start: Pos2, last: [f32; 3],
     origin: [f32; 3], frame: [[f32; 3]; 3], span: f32 }
+#[derive(Clone)]
+struct FreeDrag { kind: Tool, trackball: bool, start: Pos2, pointer: Pos2, swept: f32,
+    origin: [f32;3], frame: [[f32;3];3], last: [f32;3], changed: bool }
+
+fn screen_rotation(axis: [f32;3], degrees: f32, frame: [[f32;3];3]) -> [f32;3] {
+    let a = normal(frame.map(|basis|dot(axis,basis))).map(f64::from);
+    let (s,c) = (degrees as f64).to_radians().sin_cos();
+    let mut m = [[0.;3];3];
+    for i in 0..3 { for j in 0..3 { m[i][j] = a[i]*a[j]*(1.-c) + if i==j {c} else {0.}; } }
+    m[0][1]-=a[2]*s; m[1][0]+=a[2]*s; m[0][2]+=a[1]*s;
+    m[2][0]-=a[1]*s; m[1][2]-=a[0]*s; m[2][1]+=a[0]*s;
+    crate::transform_math::matrix_to_euler_xyz(&m,[0.;3]).map(|x|x as f32)
+}
+
+fn snap_point(mesh: Option<(&[f32], &[u32])>, v: &View, rect: Rect, pointer: Pos2) -> Option<[f32;3]> {
+    let (positions,indices) = mesh?;
+    crate::picking::snap_feature(positions,indices,v.camera,rect,pointer,v.editor.snap.to,v.editor.snap.backface_culling).map(|f|f.point)
+}
 pub fn active(ctx: &egui::Context) -> bool { ctx.data(|d| d.get_temp::<Drag>(egui::Id::new("transform_gizmo_drag")).is_some()
-    || d.get_temp::<PlaneDrag>(egui::Id::new("transform_plane_drag")).is_some()) }
+    || d.get_temp::<PlaneDrag>(egui::Id::new("transform_plane_drag")).is_some()
+    || d.get_temp::<FreeDrag>(egui::Id::new("transform_free_drag")).is_some()) }
+/// Release input ownership while retaining the last applied transform.
+pub fn finish_input(ctx: &egui::Context) {
+    ctx.data_mut(|d| {
+        d.remove::<Drag>(egui::Id::new("transform_gizmo_drag"));
+        d.remove::<PlaneDrag>(egui::Id::new("transform_plane_drag"));
+        d.remove::<FreeDrag>(egui::Id::new("transform_free_drag"));
+    });
+}
 fn projected_distance(pixels: f32, world_span: f32, screen_span: f32) -> f32 {
     pixels * world_span / screen_span.max(1.)
 }
@@ -82,43 +126,45 @@ fn axis_frame(v: &View) -> [[f32; 3]; 3] {
         }
         Orientation::Normal => v.normal_frame,
         Orientation::Local | Orientation::Gimbal => {
-            let trs = crate::transform_math::TrsParams::from_params(&v.doc["nodes"][v.display]["params"]);
+            let trs = crate::transform_math::TrsParams::from_params(&v.doc["nodes"][if v.editor.selection == SelectionMode::Object { v.selected } else { v.display }]["params"]);
             crate::transform_math::Frame::from_rotation(&trs.world_rotation()).axes.map(|v| v.map(|x| x as f32))
         }
         _ => [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]],
     }
 }
 pub fn hit(rect: Rect, v: &View, pointer: Pos2) -> bool {
-    if !matches!(v.editor.tool, Tool::Move | Tool::Rotate | Tool::Scale | Tool::Transform) || v.display.is_empty() { return false; }
+    if !matches!(v.editor.tool, Tool::Move | Tool::Rotate | Tool::Scale | Tool::Transform) || v.display.is_empty()
+        || v.selection_center.is_none() { return false; }
     let origin = pivot(v);
     let Some(center) = project(v.camera, rect, origin) else { return false; };
     let frame = axis_frame(v);
     if v.editor.tool == Tool::Rotate {
         let rings = [0, 1, 2].map(|axis| ring_points(v.camera, rect, origin, frame, axis, v.bounds.1.max(0.1) * 0.4));
-        return ring_hit(&rings, pointer).is_some();
+        return ring_hit(&rings, pointer).is_some() || (pointer-center).length() <= 80.;
     }
     for axis in 0..3 {
         {
-            let world = add(origin, mul(frame[axis], v.bounds.1.max(0.1) * 0.4));
-            let mut dir = project(v.camera, rect, world).map(|q| q - center).unwrap_or(Vec2::ZERO);
-            if dir.length() < 3. { dir = [vec2(1., 0.), vec2(0., -1.), vec2(-0.7, 0.7)][axis]; }
-            if (pointer - (center + dir.normalized() * 58.)).length() <= 12. { return true; }
+            let dir = screen_axis(rect,v,center,frame,axis);
+            if dir.length() > 10. && screen_segment_distance(pointer,center+dir.normalized()*16.,center+dir) <= 9. { return true; }
         }
     }
     if matches!(v.editor.tool, Tool::Move | Tool::Transform) {
-        for (a,b) in [(0,1),(0,2),(1,2)] { if plane_square(rect, v, center, frame, a, b).contains(pointer) { return true; } }
+        for (a,b) in [(0,1),(0,2),(1,2)] { if plate_hit(plane_plate(rect, v, center, frame, a, b),pointer) { return true; } }
     }
-    false
+    (pointer-center).length() <= 12.
 }
-fn screen_axis(rect: Rect, v: &View, center: Pos2, frame: [[f32; 3]; 3], axis: usize) -> Vec2 {
+fn screen_axis(rect: Rect, v: &View, _center: Pos2, frame: [[f32; 3]; 3], axis: usize) -> Vec2 {
     let origin = pivot(v);
-    let world = add(origin, mul(frame[axis], v.bounds.1.max(0.1) * 0.4));
-    let mut dir = project(v.camera, rect, world).map(|q| q - center).unwrap_or(Vec2::ZERO);
-    if dir.length() < 3. { dir = [vec2(1., 0.), vec2(0., -1.), vec2(-0.7, 0.7)][axis]; }
-    dir.normalized()
+    projected_basis(v.camera,rect,origin,frame[axis])*gizmo_span(v.camera,rect,origin,frame)
 }
-fn plane_square(rect: Rect, v: &View, center: Pos2, frame: [[f32; 3]; 3], a: usize, b: usize) -> Rect {
-    Rect::from_center_size(center + (screen_axis(rect,v,center,frame,a) + screen_axis(rect,v,center,frame,b)) * 23., vec2(12.,12.))
+fn plane_plate(rect: Rect, v: &View, center: Pos2, frame: [[f32; 3]; 3], a: usize, b: usize) -> [Pos2;4] {
+    let (a,b) = (screen_axis(rect,v,center,frame,a),screen_axis(rect,v,center,frame,b));
+    [(0.26,0.26),(0.42,0.26),(0.42,0.42),(0.26,0.42)].map(|(x,y)|center+a*x+b*y)
+}
+fn plate_hit(plate: [Pos2;4], pointer: Pos2) -> bool {
+    let a = plate[1]-plate[0]; let b = plate[3]-plate[0];
+    let (x,y) = plane_delta(pointer-plate[0],a,b,1.);
+    (a.x*b.y-a.y*b.x).abs() > 2. && (0. ..=1.).contains(&x) && (0. ..=1.).contains(&y)
 }
 fn plane_delta(delta: Vec2, a: Vec2, b: Vec2, unit: f32) -> (f32, f32) {
     let det = a.x*b.y - a.y*b.x;
@@ -172,8 +218,12 @@ pub fn cursor(ui: &egui::Ui, rect: Rect, v: &View) {
 }
 
 pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool {
+    show_with_snap(ui,rect,v,out,None)
+}
+pub fn show_with_snap(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions, mesh: Option<(&[f32], &[u32])>) -> bool {
     let tool = v.editor.tool;
-    if !matches!(tool, Tool::Move | Tool::Rotate | Tool::Scale | Tool::Transform) || v.display.is_empty() { return false; }
+    if !matches!(tool, Tool::Move | Tool::Rotate | Tool::Scale | Tool::Transform) || v.display.is_empty()
+        || v.selection_center.is_none() { return false; }
     let origin = pivot(v);
     let Some(center) = project(v.camera, rect, origin) else { return false; };
     let p = ui.painter_at(rect);
@@ -181,48 +231,79 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
     let mut drag: Option<Drag> = ui.ctx().data_mut(|d| d.get_temp(id));
     let plane_id = egui::Id::new("transform_plane_drag");
     let mut plane_drag: Option<PlaneDrag> = ui.ctx().data_mut(|d| d.get_temp(plane_id));
-    let colors = [v.theme.x_axis, v.theme.y_axis, v.theme.z_axis];
+    let colors = [Color32::from_rgb(242,75,91), Color32::from_rgb(132,204,30), Color32::from_rgb(73,144,255)];
     let frame = axis_frame(v);
     let rings = [0, 1, 2].map(|axis| ring_points(v.camera, rect, origin, frame, axis, v.bounds.1.max(0.1) * 0.4));
     let pointer = ui.input(|i| i.pointer.hover_pos());
+    let free_id = egui::Id::new("transform_free_drag");
+    let mut free_drag: Option<FreeDrag> = ui.ctx().data_mut(|d|d.get_temp(free_id));
+    let span = gizmo_span(v.camera,rect,origin,frame);
     let hovered_ring = if tool == Tool::Rotate { pointer.and_then(|q| ring_hit(&rings, q)) } else { None };
-    let mut consumed = drag.is_some() || plane_drag.is_some();
+    let hovered_axis=pointer.and_then(|q|(0..3).filter_map(|axis| {
+        let dir=screen_axis(rect,v,center,frame,axis);
+        let distance=screen_segment_distance(q,center+dir.normalized()*16.,center+dir);
+        (dir.length()>10. && distance<=9.).then_some((axis,distance))
+    }).min_by(|a,b|a.1.total_cmp(&b.1)).map(|(axis,_)|axis));
+    let mut consumed = drag.is_some() || plane_drag.is_some() || free_drag.is_some();
     if matches!(tool, Tool::Move | Tool::Transform) {
         for (a,b) in [(0,1),(0,2),(1,2)] {
-            let r = plane_square(rect, v, center, frame, a, b);
-            let over = ui.input(|i| i.pointer.hover_pos()).is_some_and(|q| r.contains(q));
-            p.rect(r, 0., if over { v.theme.accent_bg } else { v.theme.panel2 }, Stroke::new(1_f32, if over { v.theme.sel } else { v.theme.stroke2 }), egui::StrokeKind::Inside);
-            if over && ui.input(|i| i.pointer.primary_pressed()) && plane_drag.is_none() {
-                plane_drag = Some(PlaneDrag { a, b, start: ui.input(|i| i.pointer.hover_pos()).unwrap_or(r.center()),
-                    last: [0.;3], origin, frame, span: v.bounds.1.max(0.1) * 0.4 }); consumed = true;
+            let plate = plane_plate(rect, v, center, frame, a, b);
+            let over = pointer.is_some_and(|q| plate_hit(plate,q));
+            let hover = over || plane_drag.as_ref().is_some_and(|d|d.a==a && d.b==b);
+            let color = colors[3-a-b];
+            p.add(egui::Shape::convex_polygon(plate.to_vec(), Color32::from_rgba_unmultiplied(color.r(),color.g(),color.b(),if hover {150} else {65}), Stroke::new(if hover {1.5_f32} else {1_f32},color)));
+            if over && ui.input(|i| i.pointer.primary_pressed()) && !consumed {
+                plane_drag = Some(PlaneDrag { a, b, start: pointer.unwrap_or(center),
+                    last: [0.;3], origin, frame, span }); consumed = true;
             }
         }
     }
     for axis in 0..3 {
-        let world = add(origin, mul(frame[axis], v.bounds.1.max(0.1) * 0.4));
-        let mut dir = project(v.camera, rect, world).map(|q| q - center).unwrap_or(Vec2::ZERO);
-        if dir.length() < 3. { dir = [vec2(1., 0.), vec2(0., -1.), vec2(-0.7, 0.7)][axis]; }
-        dir = dir.normalized() * 58.;
+        let dir = screen_axis(rect,v,center,frame,axis);
         let tip = center + dir;
-        let hit = Rect::from_center_size(tip, vec2(18., 18.));
-        let response = ui.interact(hit, egui::Id::new(("gizmo", axis)), Sense::click_and_drag());
-        let over = if tool == Tool::Rotate { hovered_ring == Some(axis) } else { pointer.is_some_and(|q| (q - tip).length() <= 12.) };
-        let hover = over || (tool != Tool::Rotate && response.hovered()) || drag.as_ref().is_some_and(|d| d.axis == axis);
-        let color = if hover { v.theme.sel } else { colors[axis] };
+        let over = if tool == Tool::Rotate { hovered_ring == Some(axis) } else { hovered_axis == Some(axis) };
+        let hover = over || drag.as_ref().is_some_and(|d| d.axis == axis);
+        let color = if hover { colors[axis].lerp_to_gamma(Color32::WHITE,0.45) } else { colors[axis] };
+        if hover { p.text(tip+vec2(8.,-8.),Align2::LEFT_BOTTOM,["X","Y","Z"][axis],FontId::proportional(13.),color); }
         if tool == Tool::Rotate {
             for pair in rings[axis].windows(2) {
                 let col = if pair[0].1 && pair[1].1 { color } else { color.gamma_multiply(0.32) };
                 p.line_segment([pair[0].0, pair[1].0], Stroke::new(if hover { 2.5_f32 } else { 1.5_f32 }, col));
             }
         } else {
-            p.line_segment([center, tip], Stroke::new(if hover { 3_f32 } else { 2_f32 }, color));
-            if tool == Tool::Scale { p.rect_filled(hit.shrink(4.), 1., color); }
-            else { p.add(egui::Shape::convex_polygon(vec![tip, tip - dir.normalized() * 10. + dir.rot90().normalized() * 5., tip - dir.normalized() * 10. - dir.rot90().normalized() * 5.], color, Stroke::NONE)); }
+            if dir.length() < 10. { continue; }
+            p.line_segment([center+dir.normalized()*14., tip], Stroke::new(if hover { 3_f32 } else { 2.3_f32 }, color));
+            if tool == Tool::Scale {
+                let offsets=frame.map(|a|projected_basis(v.camera,rect,origin,a)*span*0.055);
+                for (a,b,c) in [(0,1,2),(1,2,0),(2,0,1)] {
+                    let side=offsets[c]*if dot(frame[c],v.camera.ray_forward)>0. {-1.} else {1.};
+                    p.add(egui::Shape::convex_polygon(vec![tip+side-offsets[a]-offsets[b],tip+side+offsets[a]-offsets[b],tip+side+offsets[a]+offsets[b],tip+side-offsets[a]+offsets[b]],color.gamma_multiply(0.65+a as f32*0.15),Stroke::new(0.6_f32,color)));
+                }
+            } else {
+                let base=tip-dir.normalized()*14.; let side=dir.rot90().normalized()*5.;
+                p.add(egui::Shape::convex_polygon(vec![tip,base+side,base-side],color,Stroke::NONE));
+                p.add(egui::Shape::convex_polygon(vec![tip,base,base-side],color.gamma_multiply(0.72),Stroke::NONE));
+                p.line_segment([base-side,base+side],Stroke::new(1_f32,color));
+            }
         }
-        if ((tool != Tool::Rotate && response.drag_started()) || (over && ui.input(|i| i.pointer.primary_pressed()))) && drag.is_none() { let start = pointer.unwrap_or(tip); drag = Some(Drag { axis, kind: if tool == Tool::Transform { Tool::Move } else { tool }, start, last_pointer: start, swept: 0., last: 0., typed: String::new(),
-            origin, frame, span: v.bounds.1.max(0.1) * 0.4 }); consumed = true; }
+        if over && ui.input(|i| i.pointer.primary_pressed()) && !consumed { let start = pointer.unwrap_or(tip); drag = Some(Drag { axis, kind: if tool == Tool::Transform { Tool::Move } else { tool }, start, last_pointer: start, swept: 0., last: 0., typed: String::new(),
+            origin, frame, span }); consumed = true; }
     }
-    p.circle_filled(center, 4., v.theme.accent);
+    let free_over = pointer.is_some_and(|q| if tool==Tool::Rotate {
+        hovered_ring.is_none() && (q-center).length() <= 80.
+    } else { (q-center).length() <= 12. });
+    let white = if free_over || free_drag.is_some() { Color32::WHITE } else { Color32::from_white_alpha(190) };
+    if tool==Tool::Rotate {
+        p.circle_stroke(center,76.,Stroke::new(1.8_f32,white));
+        p.circle_stroke(center,60.,Stroke::new(1_f32,Color32::from_white_alpha(35)));
+        if free_over && pointer.is_some_and(|q|(q-center).length()<68.) { p.circle_filled(center,60.,Color32::from_white_alpha(12)); }
+    } else if tool==Tool::Scale { p.rect_stroke(Rect::from_center_size(center,vec2(12.,12.)),0.,Stroke::new(2_f32,white),egui::StrokeKind::Inside); }
+    else { p.circle_stroke(center,12.,Stroke::new(1.8_f32,white)); }
+    if free_over && ui.input(|i|i.pointer.primary_pressed()) && !consumed {
+        let start=pointer.unwrap_or(center);
+        free_drag=Some(FreeDrag { kind:tool, trackball:tool==Tool::Rotate && (start-center).length()<68., start,pointer:start,swept:0.,origin,frame,last:[0.;3],changed:false });
+        consumed=true;
+    }
     if let Some(mut d) = drag {
         let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
         let down = ui.input(|i| i.pointer.primary_down());
@@ -239,12 +320,11 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
                 _ => {}
             } }
             let pointer = ui.input(|i| i.pointer.latest_pos()).unwrap_or(d.start);
-            let drag_center = project(v.camera, rect, d.origin).unwrap_or(center);
-            if d.kind == Tool::Rotate { d.swept += swept_degrees(d.last_pointer, pointer, drag_center); d.last_pointer = pointer; }
+            let precision=if ui.input(|i|i.modifiers.shift) {0.1} else {1.};
+            if d.kind == Tool::Rotate { d.swept += axis_sweep(v.camera,rect,d.origin,d.frame,d.axis,d.last_pointer,pointer)*precision; d.last_pointer = pointer; }
             let span = d.span;
-            let projected = project(v.camera, rect, add(d.origin, mul(d.frame[d.axis], span)))
-                .map(|p| p - drag_center).filter(|delta| delta.length() > 1.).unwrap_or(vec2(1., 0.));
-            let pixels = (pointer - d.start).dot(projected.normalized());
+            let projected = projected_basis(v.camera,rect,d.origin,d.frame[d.axis])*span;
+            let pixels = (pointer - d.start).dot(projected.normalized())*precision;
             let typed = if d.kind == Tool::Move {
                 crate::units::parse(&d.typed, v.units).map(|x| x as f32)
             } else {
@@ -254,8 +334,16 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
                 else if d.kind == Tool::Move { projected_distance(pixels, span, projected.length()) }
             else { value(d.kind, pixels) });
             let ctrl = ui.input(|i| i.modifiers.ctrl);
-            let step = if d.kind == Tool::Rotate { 15. } else if d.kind == Tool::Scale { 0.1 } else { v.editor.snap.increment };
-            let current = snapped(raw, step, v.editor.snap.enabled != ctrl);
+            let step = if d.kind == Tool::Rotate { 5. } else if d.kind == Tool::Scale { 0.1 } else { v.editor.snap.increment };
+            let snap = v.editor.snap.enabled != ctrl;
+            let mut current = snapped(raw, step, snap && (d.kind!=Tool::Move || v.editor.snap.to.contains(super::SnapTo::Increment)));
+            if d.kind==Tool::Move && snap && typed.is_none() {
+                if let Some(target) = snap_point(mesh,v,rect,pointer) {
+                    let amount=dot(add(target,mul(d.origin,-1.)),d.frame[d.axis]);
+                    if !v.editor.snap.to.contains(super::SnapTo::Increment) || project(v.camera,rect,add(d.origin,mul(d.frame[d.axis],amount))).is_some_and(|p|
+                        p.distance(pointer) < project(v.camera,rect,add(d.origin,mul(d.frame[d.axis],current))).map(|p|p.distance(pointer)).unwrap_or(f32::INFINITY)) { current=amount; }
+                }
+            }
             if (current - d.last).abs() > 1e-6 {
                 let operation = if d.kind == Tool::Move { TransformOp::Move(mul(d.frame[d.axis], current)) }
                     else if d.kind == Tool::Scale { op(d.kind, d.axis, current + 1.) }
@@ -287,15 +375,62 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
         else {
             let pointer = ui.input(|i| i.pointer.hover_pos()).unwrap_or(d.start);
             let span = d.span;
-            let drag_center = project(v.camera, rect, d.origin).unwrap_or(center);
-            let projected_axis = |axis| project(v.camera, rect, add(d.origin, mul(d.frame[axis], span)))
-                .map(|p| p - drag_center).filter(|delta| delta.length() > 1.)
-                .unwrap_or_else(|| screen_axis(rect, v, drag_center, d.frame, axis) * 58.);
-            let (x,y) = plane_delta(pointer - d.start, projected_axis(d.a), projected_axis(d.b), span);
+            let projected_axis = |axis| projected_basis(v.camera,rect,d.origin,d.frame[axis])*span;
+            let precision=if ui.input(|i|i.modifiers.shift) {0.1} else {1.};
+            let (x,y) = plane_delta((pointer - d.start)*precision, projected_axis(d.a), projected_axis(d.b), span);
             let snap = v.editor.snap.enabled != ui.input(|i| i.modifiers.ctrl);
-            let world = add(mul(d.frame[d.a], snapped(x,v.editor.snap.increment,snap)), mul(d.frame[d.b], snapped(y,v.editor.snap.increment,snap)));
+            let grid = snap && v.editor.snap.to.contains(super::SnapTo::Increment);
+            let mut world = add(mul(d.frame[d.a], snapped(x,v.editor.snap.increment,grid)), mul(d.frame[d.b], snapped(y,v.editor.snap.increment,grid)));
+            if snap { if let Some(target)=snap_point(mesh,v,rect,pointer) {
+                let delta=add(target,mul(d.origin,-1.));
+                let candidate=add(mul(d.frame[d.a],dot(delta,d.frame[d.a])),mul(d.frame[d.b],dot(delta,d.frame[d.b])));
+                if !grid || project(v.camera,rect,add(d.origin,candidate)).is_some_and(|p|p.distance(pointer)<project(v.camera,rect,add(d.origin,world)).map(|p|p.distance(pointer)).unwrap_or(f32::INFINITY)) { world=candidate; }
+            } }
             if (0..3).any(|k| (world[k] - d.last[k]).abs() > 1e-6) { out.push(UiAction::TransformNode { op: TransformOp::Move(world) }); d.last = world; }
             ui.ctx().data_mut(|data| data.insert_temp(plane_id, d));
+        }
+    }
+    if let Some(mut d)=free_drag {
+        let escape=ui.input(|i|i.key_pressed(egui::Key::Escape));
+        if escape || !ui.input(|i|i.pointer.primary_down()) {
+            ui.ctx().data_mut(|data|data.remove::<FreeDrag>(free_id));
+            if escape { out.push(UiAction::CancelTransform); }
+            else if d.changed { out.push(UiAction::FinishTransform); }
+        } else {
+            let pointer=ui.input(|i|i.pointer.latest_pos()).unwrap_or(d.start);
+            let center=project(v.camera,rect,d.origin).unwrap_or(center);
+            let delta=(pointer-d.start)*if ui.input(|i|i.modifiers.shift) {0.1} else {1.};
+            let snap=v.editor.snap.enabled ^ ui.input(|i|i.modifiers.ctrl);
+            let step=v.editor.snap.increment;
+            let values=match d.kind {
+                Tool::Rotate => {
+                    if d.trackball {
+                        let axis=add(mul(normal(v.camera.ray_up),delta.x),mul(normal(v.camera.ray_right),delta.y));
+                        screen_rotation(axis,snapped(delta.length()*0.6,5.,snap),d.frame)
+                    } else {
+                        d.swept+=swept_degrees(d.pointer,pointer,center)*if ui.input(|i|i.modifiers.shift) {0.1} else {1.};
+                        screen_rotation(normal(v.camera.ray_forward),snapped(d.swept,5.,snap),d.frame)
+                    }
+                }
+                Tool::Scale => { let factor=snapped(1.+(delta.x-delta.y)/120.,0.1,snap); [factor;3] }
+                _ => {
+                    let right=normal(v.camera.ray_right); let up=normal(v.camera.ray_up);
+                    let (x,y)=plane_delta(delta,projected_basis(v.camera,rect,d.origin,right),projected_basis(v.camera,rect,d.origin,up),1.);
+                    let grid=snap && v.editor.snap.to.contains(super::SnapTo::Increment);
+                    let mut world=add(mul(right,x),mul(up,y)).map(|x|snapped(x,step,grid));
+                    if snap { if let Some(target)=snap_point(mesh,v,rect,pointer) {
+                        if !grid || project(v.camera,rect,add(d.origin,world)).is_none_or(|p|p.distance(pointer)>project(v.camera,rect,target).map(|p|p.distance(pointer)).unwrap_or(f32::INFINITY)) { world=add(target,mul(d.origin,-1.)); }
+                    } }
+                    world
+                }
+            };
+            d.pointer=pointer;
+            let identity=if d.kind==Tool::Scale {[1.;3]} else {[0.;3]};
+            if values!=d.last && (d.changed || values!=identity) {
+                let op=match d.kind { Tool::Rotate=>TransformOp::Rotate(values),Tool::Scale=>TransformOp::Scale(values),_=>TransformOp::Move(values) };
+                out.push(UiAction::TransformNode {op}); d.last=values; d.changed=true;
+            }
+            ui.ctx().data_mut(|data|data.insert_temp(free_id,d));
         }
     }
     consumed
@@ -303,8 +438,69 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn free_handles_drag_and_escape_cancels() {
+        use egui::{Event,PointerButton,RawInput};
+        for (tool,trackball) in [(Tool::Move,false),(Tool::Scale,false),(Tool::Rotate,false),(Tool::Rotate,true)] {
+            let mut f=crate::ui::testing::Fixture::new();
+            f.editor.tool=tool;
+            f.camera=CameraInfo {projection:[[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]],
+                ortho:true,ray_right:[1.,0.,0.],ray_up:[0.,1.,0.],ray_forward:[0.,0.,-1.],..Default::default()};
+            let mut v=f.view(); v.selection_center=Some([0.;3]);
+            let ctx=egui::Context::default();
+            let run=|events| {
+                let mut out=Actions::default(); let mut rect=Rect::NOTHING;
+                let _=ctx.run(RawInput {screen_rect:Some(Rect::from_min_size(Pos2::ZERO,vec2(500.,500.))),events,..Default::default()},|ctx| {
+                    egui::CentralPanel::default().show(ctx,|ui| { rect=ui.max_rect(); show(ui,rect,&v,&mut out); });
+                });
+                (out.0,rect)
+            };
+            let (_,rect)=run(Vec::new());
+            let center=rect.center();
+            let start=center+if tool==Tool::Rotate {if trackball {vec2(20.,20.)} else {vec2(76.,0.)}} else {Vec2::ZERO};
+            assert!(hit(rect,&v,start));
+            let (out,_)=run(vec![Event::PointerMoved(start),Event::PointerButton {pos:start,button:PointerButton::Primary,pressed:true,modifiers:Default::default()}]);
+            assert!(out.is_empty()); assert!(active(&ctx));
+            let end=if tool==Tool::Rotate && !trackball {center+vec2(0.,76.)} else {start+vec2(15.,-10.)};
+            let (out,_)=run(vec![Event::PointerMoved(end)]);
+            assert!(out.iter().any(|action|matches!(action,UiAction::TransformNode {..})),"{tool:?} trackball={trackball}");
+            let (out,_)=run(vec![Event::Key {key:egui::Key::Escape,physical_key:None,pressed:true,repeat:false,modifiers:Default::default()}]);
+            assert!(out.iter().any(|action|matches!(action,UiAction::CancelTransform)));
+            assert!(!active(&ctx));
+        }
+    }
     #[test] fn snap_and_op() { assert_eq!(snapped(0.62, 0.25, true), 0.5); assert_eq!(op(Tool::Move, 1, 2.), TransformOp::Move([0., 2., 0.])); assert_eq!(op(Tool::Scale, 1, 2.), TransformOp::Scale([1., 2., 1.])); }
+    #[test] fn object_pivot_uses_active_origin_and_no_selection_has_no_handles() {
+        let mut f = crate::ui::testing::Fixture::new();
+        f.editor.tool = Tool::Move;
+        f.editor.selection = SelectionMode::Object;
+        let mut v = f.view();
+        v.bounds = ([50.; 3], 100.);
+        v.selection_center = Some([2., 3., 4.]);
+        assert_eq!(pivot(&v), [2., 3., 4.]);
+        v.selection_center = None;
+        assert!(!hit(Rect::from_min_size(Pos2::ZERO, vec2(400., 400.)), &v, Pos2::ZERO));
+    }
     #[test] fn plane_projection() { assert_eq!(plane_delta(vec2(20., -10.), vec2(1.,0.), vec2(0.,-1.), 0.1), (2., 1.)); }
+    #[test] fn plates_follow_the_projected_axes_and_reject_bounding_box_corners() {
+        let plate=[pos2(0.,0.),pos2(12.,4.),pos2(16.,16.),pos2(4.,12.)];
+        assert!(plate_hit(plate,pos2(8.,8.)));
+        assert!(!plate_hit(plate,pos2(0.,16.)));
+        assert!(!plate_hit([Pos2::ZERO;4],Pos2::ZERO));
+    }
+    #[test] fn gizmo_size_is_constant_across_zoom_and_perspective_depth() {
+        let rect=Rect::from_min_size(Pos2::ZERO,vec2(400.,400.));
+        let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
+        for zoom in [0.01,1.,100.] {
+            let camera=CameraInfo {projection:[[zoom,0.,0.,0.],[0.,zoom,0.,0.],[0.,0.,1.,1.],[0.,0.,0.,0.]],..Default::default()};
+            for depth in [0.1,1.,1000.] {
+                let origin=[0.,0.,depth];
+                let size=projected_basis(camera,rect,origin,frame[0]).length()*gizmo_span(camera,rect,origin,frame);
+                assert!((size-82.).abs()<1e-4);
+            }
+        }
+        let rotated=screen_rotation([0.,0.,1.],90.,frame);
+        assert!((rotated[2]-90.).abs()<1e-4);
+    }
     #[test] fn axis_drag_uses_projected_world_span() { assert_eq!(projected_distance(40., 2., 80.), 1.); }
     #[test] fn rotation_sweep_continues_past_a_half_turn() {
         let c = Pos2::ZERO;
@@ -330,6 +526,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
         let editor = crate::ui::EditorState { tool: Tool::Move, ..Default::default() };
         let mut view = f.view();
         view.editor = &editor;
+        view.selection_center = Some([0.; 3]);
         let mut actions = Actions::default();
         let id = egui::Id::new("transform_gizmo_drag");
         let d = Drag {

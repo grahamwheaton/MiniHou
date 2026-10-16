@@ -74,7 +74,7 @@ Source: `minihou/web/static/` at this worktree revision. “Done” means the na
 | X | Viewport point/edge/face mode | Insert a blast node for selected components | `editor.js:1497-1518,1913` | missing: Rust graph delete node cannot address component IDs |
 | G / R / S | Viewport | Modal move / rotate / scale | `editor.js`, `index.html:333` | missing: concurrent modal-transform work owns these handlers; current branch selects tools |
 | E / I / Ctrl+B / Alt+E | Viewport | Extrude / inset / bevel / push-pull | `editor.js:1885-1886` | done: commands; missing: web-style modal drag interaction |
-| Ctrl+R | Viewport | Loop cut | `editor.js:1888`, `loop-tool.js:13-20` | missing: native modal loop-cut UI absent |
+| Ctrl+R | Viewport | Loop cut | `editor.js:1888`, `loop-tool.js:13-20` | done: persistent Loop Cut tool (`ui/mesh_cut.rs`, docs/RUST_LOOP_CUT.md) |
 | Alt+N | Viewport | Flip selected faces | `editor.js:1889` | missing: native command has no handler |
 | K / Shift+K | Viewport | Start knife / knife from selection | `editor.js:1268` | not applicable: native knife tool absent |
 | 5 | Viewport | Paint mode | `editor.js:1898-1913` | missing: native paint command has no handler |
@@ -103,8 +103,8 @@ Source: `minihou/web/static/` at this worktree revision. “Done” means the na
 | LMB / MMB / RMB / double-click | Knife tool | Add/drag cut, new path, close path | `knife-tool.js:30-33` | not applicable: native knife tool absent |
 | Enter / Space / Escape / Ctrl+Z / Backspace | Knife tool | Commit, cancel, undo last segment | `knife-tool.js:34-35` | not applicable: native knife tool absent |
 | C / V / S / A / R / E / X/Y/Z / digits | Knife tool | Through, x-ray, measure, angle, reference, new path, axis, angle increment | `knife-tool.js:34-35` | not applicable: native knife tool absent |
-| LMB / RMB / wheel / Ctrl drag | Loop cut tool | Start/confirm, center, count, snap slide | `loop-tool.js:13-20` | not applicable: native modal loop-cut tool absent |
-| Enter / Escape | Loop cut tool | Accept / cancel | `loop-tool.js:19` | not applicable: native modal loop-cut tool absent |
+| LMB / RMB / wheel / Ctrl drag | Loop cut tool | Start/confirm, center, count, snap slide | `loop-tool.js:13-20` | done: same gestures (+PageUp/PageDown count, Shift fine slide, drag-release confirm); slide follows the hovered edge instead of screen X |
+| Enter / Escape | Loop cut tool | Accept / cancel | `loop-tool.js:19` | done: Esc during the slide drops the pending cut, Esc while hovering returns to Select |
 | Drag / Shift / Ctrl | Modal modeling tool | Adjust amount finely / snap | `modal-model-tool.js:28` | not applicable: native web modal modeling tool absent |
 | Digits / . / - / Backspace / Enter / Escape | Modal modeling tool | Type amount, edit, accept/cancel | `modal-model-tool.js:33-35` | not applicable: native web modal modeling tool absent |
 | Wheel | Modal bevel | Adjust divisions | `modal-model-tool.js:37` | not applicable: native web modal modeling tool absent |

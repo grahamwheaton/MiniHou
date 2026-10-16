@@ -29,7 +29,46 @@ pub fn set_display(value: &Value, id: &str, additive: bool) -> Option<Value> {
     Some(next)
 }
 
+/// The fixed end of a noodle used to add a connected node.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AddConnection {
+    Output(String),
+    Input { node: String, port: String },
+}
+
+/// One atomic add/connect/position edit. Failed connections never leave a loose node.
+pub fn add_connected(value: &Value, ty: &str, connection: &AddConnection, pos: [f32; 2]) -> Option<(Value, String)> {
+    let spec = nodes::get(ty)?;
+    if !pos.iter().all(|v| v.is_finite()) { return None; }
+    let (mut next, id) = match connection {
+        AddConnection::Output(source) => {
+            nodes(value)?.get(source)?;
+            spec.inputs.first()?;
+            // Delegate terminal output insertion to add; never wire an output downstream.
+            let (next, id) = add_impl(value, ty, Some(source), false)?;
+            let terminal = value["nodes"][source]["type"] == "output";
+            let next = if terminal { next } else { connect(&next, source, &id, None)? };
+            (next, id)
+        }
+        AddConnection::Input { node, port } => {
+            if ty == "output" { return None; }
+            let (next, id) = add(value, ty, None)?;
+            let mut next = connect(&next, &id, node, Some(port))?;
+            // Inserting upstream should keep the existing stream displayed.
+            if let Some(display) = value.get("display") { next["display"] = display.clone(); }
+            else { next.as_object_mut()?.remove("display"); }
+            (next, id)
+        }
+    };
+    next["nodes"][&id]["pos"] = json!(pos);
+    Some((next, id))
+}
+
 pub fn add(value: &Value, ty: &str, after: Option<&str>) -> Option<(Value, String)> {
+    add_impl(value, ty, after, true)
+}
+
+fn add_impl(value: &Value, ty: &str, after: Option<&str>, splice: bool) -> Option<(Value, String)> {
     let spec = nodes::get(ty)?;
     let mut value = value.clone();
     let displayed = minihou_app::display_nodes(&value);
@@ -37,8 +76,43 @@ pub fn add(value: &Value, ty: &str, after: Option<&str>) -> Option<(Value, Strin
     let id = fresh_id(all, ty);
     let mut node = json!({"type": ty});
     let source = after.filter(|id| all.contains_key(*id));
+    let mut spliced = false;
+    // 'Add after' an output node inserts just before it: output stays the end of the stream
+    if let (Some(out_id), Some(port)) = (source, spec.inputs.first()) {
+        let is_output = all.get(out_id).and_then(|n| n.get("type")).and_then(Value::as_str) == Some("output");
+        let out_port = nodes::get("output").and_then(|o| o.inputs.first());
+        if let (true, Some(out_port)) = (is_output, out_port) {
+            let upstream = match all[out_id].get("inputs").and_then(|i| i.get(out_port.name)) {
+                Some(Value::String(s)) => Some(s.clone()),
+                Some(Value::Array(a)) => a.first().and_then(Value::as_str).map(str::to_owned),
+                _ => None,
+            };
+            if let Some(up) = upstream {
+                node["inputs"] = if port.multi { json!({port.name: [up]}) } else { json!({port.name: up}) };
+            }
+            all.insert(id.clone(), node);
+            all[out_id]["inputs"] = if out_port.multi { json!({out_port.name: [id.clone()]}) } else { json!({out_port.name: id.clone()}) };
+            return Some((value, id));
+        }
+    }
     if let (Some(after), Some(port)) = (source, spec.inputs.first().filter(|p| !p.optional)) {
         node["inputs"] = if port.multi { json!({port.name: [after]}) } else { json!({port.name: after}) };
+        if splice && ty != "output" {
+            // Replace every occurrence, including references in multi-input ports.
+            // Explicit noodle adds use add_impl without splicing existing wires.
+            for consumer in all.values_mut() {
+                if let Some(inputs) = consumer.get_mut("inputs").and_then(Value::as_object_mut) {
+                    for input in inputs.values_mut() {
+                        if input.as_str() == Some(after) { *input = json!(id); spliced = true; }
+                        else if let Some(refs) = input.as_array_mut() {
+                            for source in refs {
+                                if source.as_str() == Some(after) { *source = json!(id); spliced = true; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
     all.insert(id.clone(), node);
     let mut next = displayed;
@@ -46,7 +120,7 @@ pub fn add(value: &Value, ty: &str, after: Option<&str>) -> Option<(Value, Strin
         next.push(id.clone());
     } else if let Some(source) = source {
         if let Some(index) = next.iter().position(|item| item == source) { next[index] = id.clone(); }
-        else { next = vec![id.clone()]; }
+        else if !spliced { next = vec![id.clone()]; }
     } else { next = vec![id.clone()]; }
     value["display"] = if next.len() == 1 { json!(next[0]) } else { json!(next) };
     Some((value, id))
@@ -97,6 +171,17 @@ pub fn add_sketch(value: &Value, name: &str, points: &[[f32; 3]], closed: bool, 
     Some((value, id))
 }
 
+/// Viewport topology edits use the displayed stream, never an unrelated selected node.
+pub fn add_viewport_cut(value: &Value, source: &str, ty: &str, params: Value) -> Option<(Value, String)> {
+    if !matches!(ty, "knife" | "loop_cut") || !params.is_object() { return None; }
+    if minihou_app::display_nodes(value) != vec![source.to_owned()] { return None; }
+    nodes(value)?.get(source)?;
+    let (mut next, id) = add(value, ty, Some(source))?;
+    next["nodes"][&id]["params"] = params;
+    validated(next.clone()).ok()?;
+    Some((next, id))
+}
+
 pub fn delete(value: &Value, id: &str) -> Option<Value> {
     let mut value = value.clone();
     let all = nodes_mut(&mut value)?;
@@ -141,6 +226,15 @@ pub fn disconnect_all(value: &Value, id: &str) -> Option<Value> {
             });
         }
     }
+    Some(next)
+}
+
+/// Bypass the node using dissolve's rewiring, then restore its detached card and parameters.
+pub fn detach(value: &Value, id: &str) -> Option<Value> {
+    let mut node = nodes(value)?.get(id)?.clone();
+    node.as_object_mut()?.remove("inputs");
+    let mut next = dissolve_set(value, &[id.to_owned()])?;
+    nodes_mut(&mut next)?.insert(id.to_owned(), node);
     Some(next)
 }
 
@@ -230,6 +324,102 @@ pub fn connect(value: &Value, from: &str, to: &str, port: Option<&str>) -> Optio
     Some(value)
 }
 
+/// Identity of one noodle, including its source within a multi-input port.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct WireRef { pub from: String, pub to: String, pub port: String }
+
+/// Splice one exact edge, preserving multi-input order and terminal Output nodes.
+/// Native ports all carry Geometry; the registry declares required/optional ports.
+pub fn insert_existing(value: &Value, id: &str, wire: &WireRef) -> Option<Value> {
+    let all = nodes(value)?;
+    let node = all.get(id)?;
+    if id == wire.from || id == wire.to || node["type"] == "output" || all.get(&wire.from)?["type"] == "output" { return None; }
+    if node.get("inputs").and_then(Value::as_object).is_some_and(|inputs|
+        inputs.values().any(|v| v.as_str().is_some() || v.as_array().is_some_and(|a| !a.is_empty()))) { return None; }
+    nodes::get(all.get(&wire.from)?["type"].as_str()?)?;
+    let spec = nodes::get(node["type"].as_str()?)?;
+    let input = spec.inputs.iter().find(|p| !p.optional).or_else(|| spec.inputs.first())?;
+    if spec.inputs.iter().any(|p| p.name != input.name && !p.optional) { return None; }
+    let dest = nodes::get(all.get(&wire.to)?["type"].as_str()?)?;
+    dest.inputs.iter().find(|p| p.name == wire.port)?;
+    // Downstream wiring must not introduce a cycle through an existing consumer.
+    let mut pending = vec![id];
+    let mut seen = HashSet::new();
+    while let Some(source) = pending.pop() {
+        if source == wire.from { return None; }
+        if !seen.insert(source) { continue; }
+        for (target, def) in all {
+            if def.get("inputs").and_then(Value::as_object).is_some_and(|i| i.values().any(|v|
+                v.as_str() == Some(source) || v.as_array().is_some_and(|a| a.iter().any(|r| r.as_str() == Some(source))))) {
+                pending.push(target.as_str());
+            }
+        }
+    }
+    let mut next = connect(value, &wire.from, id, Some(input.name))?;
+    let edge = next.get_mut("nodes")?.get_mut(&wire.to)?.get_mut("inputs")?.get_mut(&wire.port)?;
+    if let Some(refs) = edge.as_array_mut() {
+        if refs.iter().any(|r| r.as_str() == Some(id)) { return None; }
+        let index = refs.iter().position(|r| r.as_str() == Some(&wire.from))?;
+        refs[index] = json!(id);
+    } else if edge.as_str() == Some(&wire.from) { *edge = json!(id); }
+    else { return None; }
+    Some(next)
+}
+
+/// A pickup remains a UI preview until release, so cancellation needs no graph edit.
+#[derive(Clone, Debug)]
+pub struct WirePickup { pub original: WireRef }
+impl WirePickup {
+    pub fn begin(value: &Value, node: &str, port: &str) -> Option<Self> {
+        let refs = value.get("nodes")?.get(node)?.get("inputs")?.get(port)?;
+        let from = refs.as_str().or_else(|| refs.as_array()?.last()?.as_str())?;
+        Some(Self { original: WireRef { from: from.into(), to: node.into(), port: port.into() } })
+    }
+    pub fn release(&self, value: &Value, target: Option<(&str, &str)>) -> Option<Value> {
+        if target == Some((self.original.to.as_str(), self.original.port.as_str())) { return None; }
+        let next = disconnect_wires(value, &std::collections::BTreeSet::from([self.original.clone()]))?;
+        if let Some((node, port)) = target {
+            if value["nodes"][&self.original.from]["type"] == "output" { return None; }
+            let next = connect(&next, &self.original.from, node, Some(port))?;
+            // Reject cycles, including those outside the displayed branch.
+            let mut pending = vec![self.original.from.as_str()];
+            let mut seen = HashSet::new();
+            while let Some(id) = pending.pop() {
+                if id == node { return None; }
+                if !seen.insert(id) { continue; }
+                if let Some(inputs) = next["nodes"][id]["inputs"].as_object() {
+                    for refs in inputs.values() {
+                        if let Some(source) = refs.as_str() { pending.push(source); }
+                        else if let Some(refs) = refs.as_array() { pending.extend(refs.iter().filter_map(Value::as_str)); }
+                    }
+                }
+            }
+            Some(next)
+        } else { Some(next) }
+    }
+}
+
+/// Disconnect exact edges in one snapshot. Never dissolve or remove nodes.
+pub fn disconnect_wires(value: &Value, wires: &std::collections::BTreeSet<WireRef>) -> Option<Value> {
+    let mut next = value.clone();
+    let mut changed = false;
+    for wire in wires {
+        let Some(inputs) = next.get_mut("nodes").and_then(|n| n.get_mut(&wire.to))
+            .and_then(|n| n.get_mut("inputs")).and_then(Value::as_object_mut) else { continue };
+        let Some(input) = inputs.get_mut(&wire.port) else { continue };
+        if let Some(refs) = input.as_array_mut() {
+            let before = refs.len();
+            refs.retain(|r| r.as_str() != Some(wire.from.as_str()));
+            changed |= before != refs.len();
+            if refs.is_empty() { inputs.remove(&wire.port); }
+        } else if input.as_str() == Some(wire.from.as_str()) {
+            inputs.remove(&wire.port);
+            changed = true;
+        }
+    }
+    changed.then_some(next)
+}
+
 pub fn disconnect(value: &Value, node: &str, port: &str) -> Option<Value> {
     let mut value = value.clone();
     nodes_mut(&mut value)?.get_mut(node)?.get_mut("inputs")?.as_object_mut()?.remove(port)?;
@@ -291,16 +481,108 @@ pub fn paste(value: &Value, clipboard: &Value) -> Option<(Value, Vec<String>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn noodle_add_connects_in_both_directions_and_records_position() {
+        let base = graph();
+        let (next, id) = add_connected(&base, "transform", &AddConnection::Output("box1".into()), [320., 192.]).unwrap();
+        assert_eq!(next["nodes"][&id]["inputs"]["geo"], "box1");
+        assert_eq!(next["nodes"][&id]["pos"], json!([320., 192.]));
+        let mut doc = validated(base.clone()).unwrap();
+        let mut history = minihou_app::History::default();
+        history.replace(&mut doc, validated(next.clone()).unwrap());
+        history.undo(&mut doc).unwrap();
+        assert_eq!(doc.value(), &base);
+        history.redo(&mut doc).unwrap();
+        assert_eq!(doc.value(), &next);
+        let (next, id) = add_connected(&base, "box", &AddConnection::Input { node: "merge1".into(), port: "geos".into() }, [-32., 64.]).unwrap();
+        assert_eq!(next["nodes"]["merge1"]["inputs"]["geos"], json!(["box1", "box2", id]));
+        assert_eq!(next["display"], base["display"]);
+        validated(next).unwrap();
+    }
+    #[test] fn noodle_add_handles_optional_inputs_and_terminal_output() {
+        let base = json!({"version":1,"display":"output1","nodes":{"box1":{"type":"box"},"output1":{"type":"output","inputs":{"geo":"box1"}}}});
+        for ty in ["transform", "curve"] {
+            let (next, id) = add_connected(&base, ty, &AddConnection::Output("output1".into()), [32., 64.]).unwrap();
+            assert_eq!(next["nodes"][&id]["inputs"]["geo"], "box1");
+            assert_eq!(next["nodes"]["output1"]["inputs"]["geo"], id.as_str());
+            assert_eq!(next["display"], "output1");
+            validated(next).unwrap();
+        }
+        let (next, id) = add_connected(&base, "curve", &AddConnection::Output("box1".into()), [0., 0.]).unwrap();
+        assert_eq!(next["nodes"][&id]["inputs"]["geo"], "box1");
+    }
+    #[test] fn noodle_add_replaces_exact_input_and_rejects_invalid_contexts() {
+        let base = json!({"version":1,"nodes":{"a":{"type":"box"},"b":{"type":"transform","inputs":{"geo":"a"}}}});
+        let input = AddConnection::Input { node: "b".into(), port: "geo".into() };
+        let (next, id) = add_connected(&base, "box", &input, [0., 0.]).unwrap();
+        assert_eq!(next["nodes"]["b"]["inputs"]["geo"], id.as_str());
+        assert!(next.get("display").is_none());
+        assert!(add_connected(&base, "output", &input, [0., 0.]).is_none());
+        assert!(add_connected(&base, "point", &AddConnection::Output("a".into()), [0., 0.]).is_none());
+        assert!(add_connected(&base, "transform", &AddConnection::Output("missing".into()), [0., 0.]).is_none());
+        assert!(add_connected(&base, "box", &AddConnection::Input { node: "b".into(), port: "missing".into() }, [0., 0.]).is_none());
+        assert!(add_connected(&base, "box", &input, [f32::NAN, 0.]).is_none());
+        assert_eq!(base["nodes"].as_object().unwrap().len(), 2);
+    }
+    #[test] fn reverse_noodle_preserves_other_named_inputs() {
+        let base = json!({"nodes":{"a":{"type":"box"},"b":{"type":"ray","inputs":{"geo":"a","target":"a"}}}});
+        let (next, id) = add_connected(&base, "sphere", &AddConnection::Input { node: "b".into(), port: "target".into() }, [32., 64.]).unwrap();
+        assert_eq!(next["nodes"]["b"]["inputs"]["geo"], "a");
+        assert_eq!(next["nodes"]["b"]["inputs"]["target"], id.as_str());
+        validated(next).unwrap();
+    }
+    #[test] fn detach_keeps_card_and_bypasses_all_consumers() {
+        let v = json!({"version":1,"display":"b","nodes":{
+            "a":{"type":"box"}, "other":{"type":"box"},
+            "b":{"type":"transform","inputs":{"geo":"a"},"params":{"translate":[1,2,3]},"pos":[123,456]},
+            "c":{"type":"normal","inputs":{"geo":"b"}},
+            "d":{"type":"merge","inputs":{"geos":["other","b","a"]}}
+        }});
+        let next = detach(&v, "b").unwrap();
+        let mut card = v["nodes"]["b"].clone();
+        card.as_object_mut().unwrap().remove("inputs");
+        assert_eq!(next["nodes"]["b"], card);
+        assert_eq!(next["nodes"]["c"]["inputs"]["geo"], "a");
+        assert_eq!(next["nodes"]["d"]["inputs"]["geos"], json!(["other","a"]));
+        assert_eq!(next["display"], "a");
+        validated(next).unwrap();
+    }
+
     fn graph() -> Value { json!({"version": 1, "display": "merge1", "nodes": {
         "box1": {"type": "box"}, "box2": {"type": "box"},
         "merge1": {"type": "merge", "inputs": {"geos": ["box1", "box2"]}}
     }}) }
+    #[test] fn adding_after_middle_splices_scalar_and_multi_consumers() {
+        let base = json!({"version":1,"display":"out","nodes":{
+            "a":{"type":"box"}, "b":{"type":"normal","inputs":{"geo":"a"}},
+            "c":{"type":"normal","inputs":{"geo":"b"}},
+            "merge":{"type":"merge","inputs":{"geos":["a","b"]}},
+            "out":{"type":"output","inputs":{"geo":"c"}}
+        }});
+        let (next, id) = add(&base, "normal", Some("b")).unwrap();
+        assert_eq!(next["nodes"][&id]["inputs"]["geo"], "b");
+        assert_eq!(next["nodes"]["c"]["inputs"]["geo"], id.as_str());
+        assert_eq!(next["nodes"]["merge"]["inputs"]["geos"], json!(["a",id]));
+        assert_eq!(next["nodes"]["out"], base["nodes"]["out"]);
+        assert_eq!(next["display"], base["display"]);
+        validated(next).unwrap();
+        let (next, _) = add_connected(&base, "normal", &AddConnection::Output("b".into()), [0.,0.]).unwrap();
+        assert_eq!(next["nodes"]["c"], base["nodes"]["c"]);
+        assert_eq!(next["nodes"]["merge"], base["nodes"]["merge"]);
+    }
     #[test] fn add_and_duplicate_find_unused_ids() {
         let (v, id) = add(&graph(), "box", Some("box1")).unwrap();
         assert_eq!(id, "box3"); assert_eq!(minihou_app::display_nodes(&v), vec!["merge1", "box3"]);
         assert!(v["nodes"][&id].get("inputs").is_none()); validated(v.clone()).unwrap();
         let (v, next) = duplicate(&v, "box1").unwrap();
         assert_eq!(next, "box4"); assert_eq!(v["nodes"]["box4"], v["nodes"]["box1"]); validated(v).unwrap();
+    }
+    #[test] fn adding_after_an_output_inserts_before_it() {
+        let base = json!({"version":1,"nodes":{"box1":{"type":"box"},"output1":{"type":"output","inputs":{"geo":"box1"}}},"display":"output1"});
+        let (v, id) = add(&base, "transform", Some("output1")).unwrap();
+        assert_eq!(v["nodes"][&id]["inputs"]["geo"], "box1");
+        assert_eq!(v["nodes"]["output1"]["inputs"]["geo"], id.as_str());
+        assert_eq!(minihou_app::display_nodes(&v), vec!["output1"]);
+        validated(v).unwrap();
     }
     #[test] fn displayed_set_adds_generators_and_replaces_modifier_input() {
         let base = json!({"version":1,"nodes":{"box1":{"type":"box"}},"display":"box1"});
@@ -322,6 +604,27 @@ mod tests {
         let (v, id) = add(&v, "box", Some("transform1")).unwrap();
         assert!(v["nodes"][&id].get("inputs").is_none());
         validated(v).unwrap();
+    }
+    #[test] fn viewport_cuts_cook_and_undo_as_one_edit() {
+        let base = json!({"version":1,"display":"out","nodes":{"box1":{"type":"box"},"out":{"type":"output","inputs":{"geo":"box1"}}}});
+        let original = minihou_core::Graph::from_value(&base).unwrap().cook(None).unwrap();
+        for (ty,params) in [
+            ("knife",json!({"cuts":json!([{"a":[0.,-2.],"b":[0.,2.],"matrix":[1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.],"through":false}]).to_string()})),
+            ("loop_cut",json!({"split_edges":"0","mode":"edge_loop","loops":1,"position":0.5})),
+        ] {
+            let (next,id) = add_viewport_cut(&base,"out",ty,params).unwrap();
+            assert_eq!(next["nodes"][&id]["inputs"]["geo"],"box1");
+            assert_eq!(next["nodes"]["out"]["inputs"]["geo"],id.as_str());
+            assert_eq!(next["display"],"out");
+            let cut = minihou_core::Graph::from_value(&next).unwrap().cook(None).unwrap();
+            assert!(cut.npoints > original.npoints);
+            let mut doc = validated(base.clone()).unwrap(); let mut history = minihou_app::History::default();
+            history.replace(&mut doc,validated(next.clone()).unwrap());
+            history.undo(&mut doc).unwrap(); assert_eq!(doc.value(),&base);
+            history.redo(&mut doc).unwrap(); assert_eq!(doc.value(),&next);
+        }
+        assert!(add_viewport_cut(&base,"box1","loop_cut",json!({})).is_none());
+        assert!(add_viewport_cut(&base,"out","transform",json!({})).is_none());
     }
     #[test] fn sketch_wires_after_a_cooked_node_and_can_stand_alone() {
         let points = [[0.,0.,0.], [1.,0.,0.], [1.,1.,0.]];
@@ -409,6 +712,10 @@ mod tests {
         assert_eq!(next["nodes"]["transform3"]["inputs"]["geo"], "box1");
         assert_eq!(next["display"], "box1");
         validated(next).unwrap();
+        let reversed = dissolve_set(&v, &["transform2".into(), "transform1".into()]).unwrap();
+        assert_eq!(reversed["nodes"]["transform3"]["inputs"]["geo"], "box1");
+        assert_eq!(reversed["display"], "box1");
+        validated(reversed).unwrap();
         let deleted = delete_set(&v, &ids).unwrap();
         assert!(deleted["nodes"]["transform3"]["inputs"].as_object().unwrap().is_empty());
         validated(deleted).unwrap();
@@ -441,5 +748,104 @@ mod tests {
         assert_eq!(v["nodes"]["merge1"]["inputs"]["geos"], json!(["box1", "box2"]));
         assert_eq!(v["display"], "box1");
         validated(v).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod noodle_tests {
+    use super::*;
+    use std::collections::BTreeSet;
+    fn wire(from: &str, to: &str, port: &str) -> WireRef {
+        WireRef { from: from.into(), to: to.into(), port: port.into() }
+    }
+    #[test]
+    fn noodle_insert_exact_edge_and_position_are_one_history_edit() {
+        let base = json!({"nodes": {
+            "a":{"type":"box"}, "b":{"type":"box"},
+            "loose":{"type":"transform","pos":[0,0]},
+            "m":{"type":"merge","inputs":{"geos":["a","b"]}},
+            "out":{"type":"output","inputs":{"geo":"m"}}
+        },"display":"out"});
+        let mut moved = base.clone(); moved["nodes"]["loose"]["pos"] = json!([50,80]);
+        let next = insert_existing(&moved,"loose",&wire("a","m","geos")).unwrap();
+        assert_eq!(next["nodes"]["m"]["inputs"]["geos"],json!(["loose","b"]));
+        assert_eq!(next["nodes"]["loose"]["inputs"]["geo"],"a");
+        assert_eq!(next["display"],"out");
+        let mut doc = validated(base.clone()).unwrap();
+        let mut history = minihou_app::History::default();
+        history.replace(&mut doc,validated(next.clone()).unwrap());
+        history.undo(&mut doc).unwrap(); assert_eq!(doc.value(),&base);
+        assert!(history.undo(&mut doc).is_none());
+        history.redo(&mut doc).unwrap(); assert_eq!(doc.value(),&next);
+        let terminal = insert_existing(&moved,"loose",&wire("m","out","geo")).unwrap();
+        assert_eq!(terminal["nodes"]["out"]["inputs"]["geo"],"loose");
+        for edge in [wire("loose","m","geos"),wire("a","loose","geo"),wire("b","out","geo"),wire("gone","m","geos")] {
+            assert!(insert_existing(&moved,"loose",&edge).is_none());
+        }
+        assert!(insert_existing(&next,"loose",&wire("b","m","geos")).is_none());
+        assert!(insert_existing(&moved,"out",&wire("a","m","geos")).is_none());
+        let mut generator = moved.clone(); generator["nodes"]["point"] = json!({"type":"point"});
+        assert!(insert_existing(&generator,"point",&wire("a","m","geos")).is_none());
+        let mut cyclic = moved.clone(); cyclic["nodes"]["a"]["inputs"]["geo"] = json!("loose");
+        assert!(insert_existing(&cyclic,"loose",&wire("a","m","geos")).is_none());
+    }
+    #[test]
+    fn noodle_pickup_preview_cancel_release_and_undo() {
+        let base = json!({"nodes": {"a":{"type":"box"},"b":{"type":"box"},
+            "m":{"type":"merge","inputs":{"geos":["a","b"]}},
+            "t":{"type":"transform"},"out":{"type":"output","inputs":{"geo":"m"}}}});
+        assert!(WirePickup::begin(&base,"t","geo").is_none());
+        let pickup = WirePickup::begin(&base,"m","geos").unwrap();
+        assert_eq!(pickup.original,wire("b","m","geos"));
+        // Cancelling simply drops the preview: the original document never changed.
+        drop(pickup.clone()); assert_eq!(base["nodes"]["m"]["inputs"]["geos"],json!(["a","b"]));
+        assert!(pickup.release(&base,Some(("m","geos"))).is_none());
+        assert!(pickup.release(&base,Some(("b","geo"))).is_none());
+        assert!(pickup.release(&base,Some(("t","missing"))).is_none());
+        let next = pickup.release(&base,Some(("t","geo"))).unwrap();
+        assert_eq!(next["nodes"]["t"]["inputs"]["geo"],"b");
+        assert_eq!(next["nodes"]["m"]["inputs"]["geos"],json!(["a"]));
+        let disconnected = pickup.release(&base,None).unwrap();
+        assert_eq!(disconnected["nodes"]["m"]["inputs"]["geos"],json!(["a"]));
+        let mut doc = validated(base.clone()).unwrap(); let mut history = minihou_app::History::default();
+        history.replace(&mut doc,validated(next.clone()).unwrap());
+        history.undo(&mut doc).unwrap(); assert_eq!(doc.value(),&base);
+        assert!(history.undo(&mut doc).is_none());
+        history.redo(&mut doc).unwrap(); assert_eq!(doc.value(),&next);
+        let cycle = WirePickup::begin(&base,"out","geo").unwrap();
+        assert!(cycle.release(&base,Some(("m","geos"))).is_none());
+    }
+    #[test]
+    fn noodle_cut_is_one_undoable_edit_and_never_dissolves() {
+        let before = json!({"nodes": {
+            "a":{"type":"box"}, "b":{"type":"box"},
+            "merge":{"type":"merge", "inputs":{"geos":["a","b"]}},
+            "out":{"type":"output", "inputs":{"geo":"merge"}}
+        }, "output":"out"});
+        let cuts=BTreeSet::from([wire("a","merge","geos"),wire("merge","out","geo")]);
+        let next=disconnect_wires(&before,&cuts).unwrap();
+        assert_eq!(next["nodes"]["merge"]["inputs"]["geos"],json!(["b"]));
+        assert!(next["nodes"]["out"]["inputs"].get("geo").is_none());
+        assert_eq!(next["nodes"].as_object().unwrap().len(),4);
+        assert_eq!(next["output"],before["output"]);
+        let mut doc=validated(before.clone()).unwrap();
+        let mut history=minihou_app::History::default();
+        history.replace(&mut doc,validated(next.clone()).unwrap());
+        history.undo(&mut doc).unwrap();
+        assert_eq!(doc.value(),&before);
+        assert!(history.undo(&mut doc).is_none());
+        history.redo(&mut doc).unwrap();
+        assert_eq!(doc.value(),&next);
+    }
+    #[test]
+    fn noodle_cut_preserves_order_other_ports_and_ignores_stale_edges() {
+        let doc=json!({"nodes":{"m":{"inputs":{"geos":["a","b","c"],"other":"a"}}}});
+        let cuts=BTreeSet::from([wire("b","m","geos"),wire("missing","m","geos"),wire("a","gone","geo")]);
+        let next=disconnect_wires(&doc,&cuts).unwrap();
+        assert_eq!(next["nodes"]["m"]["inputs"]["geos"],json!(["a","c"]));
+        assert_eq!(next["nodes"]["m"]["inputs"]["other"],json!("a"));
+        assert!(disconnect_wires(&next,&cuts).is_none());
+        let next=disconnect_wires(&next,&BTreeSet::from([wire("a","m","geos"),wire("c","m","geos")])).unwrap();
+        assert!(next["nodes"]["m"]["inputs"].get("geos").is_none());
     }
 }

@@ -87,3 +87,46 @@ fn concat_tables(parts: Vec<(&AttrTable, usize)>, domain: &str) -> Result<AttrTa
     }
     Ok(out)
 }
+
+pub const SWITCH: NodeSpec = NodeSpec {
+    name: "switch",
+    inputs: &[InputSpec { name: "geos", multi: true, optional: false }],
+    params: crate::params!(
+        "index": 0;
+    ),
+    cook: switch,
+};
+
+fn switch(inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    let geos = &inputs[0];
+    if geos.is_empty() {
+        return Err(Error::new("connect at least one input"));
+    }
+    let idx = p.i("index")?;
+    let clamped = idx.clamp(0, (geos.len() - 1) as i64) as usize;
+    Ok((*geos[clamped]).clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_switch_selects_and_clamps() {
+        let g0 = Geometry::points_only(vec![0.0, 0.0, 0.0]).unwrap();
+        let g1 = Geometry::points_only(vec![1.0, 0.0, 0.0, 2.0, 0.0, 0.0]).unwrap();
+        let inputs = vec![vec![Arc::new(g0), Arc::new(g1)]];
+
+        let p0 = Params::resolve(SWITCH.params, serde_json::json!({"index": 0}).as_object()).unwrap();
+        let out0 = switch(&inputs, &p0).unwrap();
+        assert_eq!(out0.npoints, 1);
+
+        let p1 = Params::resolve(SWITCH.params, serde_json::json!({"index": 1}).as_object()).unwrap();
+        let out1 = switch(&inputs, &p1).unwrap();
+        assert_eq!(out1.npoints, 2);
+
+        let p_clamp = Params::resolve(SWITCH.params, serde_json::json!({"index": 99}).as_object()).unwrap();
+        let out_clamp = switch(&inputs, &p_clamp).unwrap();
+        assert_eq!(out_clamp.npoints, 2);
+    }
+}

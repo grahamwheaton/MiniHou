@@ -47,23 +47,35 @@ struct Entry {
 
 pub struct Session {
     graph: Graph,
+    external: nodes::blender_input::ExternalInputs,
+    external_versions: HashMap<String,u64>,
+    external_revision: u64,
     cache: HashMap<u64, Entry>,
     bytes: usize,
     budget: Option<usize>,
     keep_versions: usize,
     clock: u64,
     last: CookStats,
+    /// (frame, fps) cooks run at.
+    time: (f64, f64),
 }
 
 impl Session {
     pub fn new(graph: Graph) -> Session {
-        Session { graph, cache: HashMap::new(), bytes: 0, budget: None, keep_versions: 2, clock: 0, last: CookStats::default() }
+        Session { graph, external: Default::default(), external_versions: Default::default(), external_revision:0, cache: HashMap::new(), bytes: 0, budget: None, keep_versions: 2, clock: 0, last: CookStats::default(), time: (1.0, crate::timectx::DEFAULT_FPS) }
     }
 
     pub fn from_json(text: &str) -> Result<Session> {
         Ok(Session::new(Graph::from_json(text)?))
     }
 
+    /// Keep live inputs across graph edits, undo and timeline recooks.
+    pub fn replace_graph(&mut self, graph: Graph) { self.graph=graph; self.clear(); }
+    pub fn set_external(&mut self, name: String, input: nodes::blender_input::ExternalInput) {
+        self.external_revision+=1;
+        self.external_versions.insert(name.clone(),self.external_revision);
+        self.external.insert(name,input);
+    }
     pub fn graph(&self) -> &Graph {
         &self.graph
     }
@@ -90,19 +102,40 @@ impl Session {
         Ok(())
     }
 
+    /// The frame and fps cooks run at (see [`crate::timectx`]; default frame 1 at 24 fps). Only time-dependent nodes (and
+    /// what reads them) recook when it changes.
+    pub fn set_time(&mut self, frame: f64, fps: f64) -> Result<()> {
+        if !frame.is_finite() || !fps.is_finite() || fps <= 0.0 {
+            return Err(Error::new("frame must be finite and fps positive"));
+        }
+        self.time = (frame, fps);
+        Ok(())
+    }
+
+    pub fn time(&self) -> (f64, f64) {
+        self.time
+    }
+
     /// Cook `target` (default: the graph's main output), running only the nodes the cache does not already hold.
     pub fn cook(&mut self, target: Option<&str>) -> Result<Arc<Geometry>> {
+        let (frame, fps) = self.time;
+        crate::timectx::at(Some(frame), Some(fps), || self.cook_now(target))
+    }
+
+    fn cook_now(&mut self, target: Option<&str>) -> Result<Arc<Geometry>> {
         let target = match target {
             Some(t) => t.to_string(),
             None => self.graph.main_output()?,
         };
         let mut keys: HashMap<String, u64> = HashMap::new();
         self.last = CookStats::default();
-        key_of(&self.graph, &target, &mut keys, &mut HashSet::new())?;
+        let plan = nodes::r#loop::Plan::analyze(&self.graph, &target)?;
+        nodes::rbd_engine::check_static_inputs(&self.graph, &target)?;
+        key_of(&self.graph, &self.external_versions, &target, &mut keys, &mut HashSet::new())?;
         self.clock += 1;
         let mut stats = CookStats::default();
-        let mut run = Run { graph: &self.graph, cache: &mut self.cache, bytes: &mut self.bytes, clock: self.clock, keys: &keys, stats: &mut stats };
-        let result = run.get(&target);
+        let mut run = Run { graph: &self.graph, plan: &plan, budget: nodes::r#loop::budget(), external: &self.external, cache: &mut self.cache, bytes: &mut self.bytes, clock: self.clock, keys: &keys, stats: &mut stats };
+        let result = nodes::usd_nodes::with_context(&self.graph, &self.external, || run.get(&target));
         self.last = stats;
         self.evict();
         result
@@ -122,11 +155,11 @@ impl Session {
 
     /// Typed side result for a node's current content key. It is evicted with its geometry.
     pub fn side_payload<T: Any + Send + Sync>(&self, node: &str) -> Option<Arc<T>> {
-        let key = key_of(&self.graph, node, &mut HashMap::new(), &mut HashSet::new()).ok()?;
+        let key = crate::timectx::at(Some(self.time.0), Some(self.time.1), || key_of(&self.graph, &self.external_versions, node, &mut HashMap::new(), &mut HashSet::new())).ok()?;
         self.cache.get(&key)?.side.as_ref()?.clone().downcast::<T>().ok()
     }
     pub fn cached_geometry(&self, node: &str) -> Option<Arc<Geometry>> {
-        let key = key_of(&self.graph, node, &mut HashMap::new(), &mut HashSet::new()).ok()?;
+        let key = crate::timectx::at(Some(self.time.0), Some(self.time.1), || key_of(&self.graph, &self.external_versions, node, &mut HashMap::new(), &mut HashSet::new())).ok()?;
         Some(self.cache.get(&key)?.geo.clone())
     }
 
@@ -184,7 +217,7 @@ impl Session {
 
 /// The content key of `id`: validates what the cook would (unknown node or type, bad ports, cycles) with the same wording as
 /// [`Graph::cook`].
-fn key_of(graph: &Graph, id: &str, keys: &mut HashMap<String, u64>, active: &mut HashSet<String>) -> Result<u64> {
+fn key_of(graph: &Graph, external_versions: &HashMap<String,u64>, id: &str, keys: &mut HashMap<String, u64>, active: &mut HashSet<String>) -> Result<u64> {
     if let Some(k) = keys.get(id) {
         return Ok(*k);
     }
@@ -202,7 +235,34 @@ fn key_of(graph: &Graph, id: &str, keys: &mut HashMap<String, u64>, active: &mut
     }
     let mut h = DefaultHasher::new();
     def.node_type.hash(&mut h);
+    if def.node_type == "usd_export" {
+        nodes::usd_nodes::exports_suppressed().hash(&mut h);
+        let p = Params::resolve(spec.params, def.params.as_ref())?;
+        if let Ok(path) = nodes::usd_nodes::export_target(&p) {
+            if let Ok(meta) = std::fs::metadata(path) { meta.len().hash(&mut h); meta.modified().ok().hash(&mut h); }
+        }
+    }
+    if def.node_type == "usd_import" {
+        let p = Params::resolve(spec.params, def.params.as_ref())?;
+        let path = crate::usd_io::resolve_path(&p.s("file")?);
+        path.hash(&mut h);
+        if let Ok(meta) = std::fs::metadata(path) { meta.len().hash(&mut h); meta.modified().ok().hash(&mut h); }
+    }
+    if def.node_type == "copy_to_points" {
+        nodes::copy_limit_bytes().hash(&mut h);
+    }
+    let binding=match def.node_type.as_str() {
+        "blender_object" => Some(format!("object:{}",def.params.as_ref().and_then(|p|p.get("object")).and_then(Value::as_str).unwrap_or(""))),
+        "blender_image" => Some(format!("image:{}",def.params.as_ref().and_then(|p|p.get("image")).and_then(Value::as_str).unwrap_or(""))),
+        "object_input" => Some(nodes::blender_input::binding_key(id, &Params::resolve(spec.params,def.params.as_ref())?)?),
+        "modifier_input" => Some("modifier_input".into()), _ => None,
+    };
+    if let Some(binding)=binding { external_versions.get(&binding).hash(&mut h); }
     def.bypass.hash(&mut h);
+    // time-dependent nodes (Python's key_extra = timectx.key()) recook when the frame changes
+    if nodes::is_time_dependent(&def.node_type, def.params.as_ref()) {
+        crate::timectx::key().hash(&mut h);
+    }
     match &def.params {
         Some(p) => {
             1u8.hash(&mut h);
@@ -220,7 +280,7 @@ fn key_of(graph: &Graph, id: &str, keys: &mut HashMap<String, u64>, active: &mut
         port.name.hash(&mut h);
         refs.len().hash(&mut h);
         for r in refs {
-            key_of(graph, r, keys, active)?.hash(&mut h);
+            key_of(graph, external_versions, r, keys, active)?.hash(&mut h);
         }
     }
     active.remove(id);
@@ -258,6 +318,9 @@ fn canonical(v: &Value, out: &mut String) {
 
 struct Run<'a> {
     graph: &'a Graph,
+    plan: &'a nodes::r#loop::Plan,
+    budget: nodes::r#loop::Budget,
+    external: &'a nodes::blender_input::ExternalInputs,
     cache: &'a mut HashMap<u64, Entry>,
     bytes: &'a mut usize,
     clock: u64,
@@ -268,13 +331,26 @@ struct Run<'a> {
 impl Run<'_> {
     fn get(&mut self, id: &str) -> Result<Arc<Geometry>> {
         let key = self.keys[id];
-        if let Some(e) = self.cache.get_mut(&key) {
+        if let Some(e) = self.cache.get_mut(&key).filter(|_| self.graph.node(id).is_none_or(|n| n.node_type != "usd_export")) {
             e.used = self.clock;
             self.stats.cached.push(id.to_string());
             return Ok(e.geo.clone());
         }
         let def = self.graph.node(id).expect("validated by key_of");
         let spec = nodes::get(&def.node_type).expect("validated by key_of");
+        if def.node_type == "loop_end" {
+            let t0 = Instant::now();
+            let (plan, graph, budget) = (self.plan, self.graph, self.budget.clone());
+            let (geo,times) = plan.cook_end(graph, id, budget, &mut |src| self.get(src))?;
+            let geo = Arc::new(geo);
+            for (node,ms) in times { self.stats.cooked.push(node.clone()); self.stats.node_ms.push((node,ms)); }
+            let bytes = geometry_bytes(&geo);
+            if let Some(old) = self.cache.insert(key, Entry { node: id.into(), geo: geo.clone(), side: None, bytes, used: self.clock }) { *self.bytes -= old.bytes; }
+            *self.bytes += bytes;
+            self.stats.cooked.push(id.into());
+            self.stats.node_ms.push((id.into(), t0.elapsed().as_secs_f64()*1000.0));
+            return Ok(geo);
+        }
         let mut inputs: Vec<Vec<Arc<Geometry>>> = Vec::with_capacity(spec.inputs.len());
         for port in spec.inputs {
             let refs = def.inputs.iter().find(|(p, _)| p == port.name).map(|(_, r)| r.as_slice()).unwrap_or(&[]);
@@ -285,7 +361,15 @@ impl Run<'_> {
             inputs.push(got);
         }
         let t0 = Instant::now();
-        let geo = Arc::new(run_node(id, def, spec, &inputs)?);
+        let external = if def.bypass { None } else {
+            let p=Params::resolve(spec.params,def.params.as_ref()).map_err(|e|e.in_node(id,&def.node_type))?;
+            if def.node_type == "object_input" { Some(nodes::blender_input::cook_binding(id,&p,self.external)) }
+            else { nodes::blender_input::cook_external(&def.node_type,&p,self.external) }
+        };
+        let geo = Arc::new(match external {
+            Some(result)=>result.and_then(|g|g.validate().map(|_|g)).map_err(|e|e.in_node(id,&def.node_type))?,
+            None=>run_node(id, def, spec, &inputs)?,
+        });
         let mut side: Option<Arc<dyn Any + Send + Sync>> = None;
         let mut side_bytes = 0;
         if def.node_type == "lod_bake" && !def.bypass {

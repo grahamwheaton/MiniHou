@@ -6,13 +6,14 @@ use eframe::egui::{self, Pos2, Rect, Sense, Stroke, Vec2};
 struct Ball { preset: ViewPreset, xy: Vec2, depth: f32, positive: bool, axis: usize }
 
 fn axes(yaw: f32, pitch: f32) -> [Ball; 6] {
-    let eye = [pitch.cos() * yaw.sin(), pitch.sin(), pitch.cos() * yaw.cos()];
-    let right = [yaw.cos(), 0., -yaw.sin()];
-    let up = [-pitch.sin() * yaw.sin(), pitch.cos(), -pitch.sin() * yaw.cos()];
+    // Z up: the eye orbits at -Y for yaw 0 (Front)
+    let eye = [pitch.cos() * yaw.sin(), -pitch.cos() * yaw.cos(), pitch.sin()];
+    let right = [yaw.cos(), yaw.sin(), 0.];
+    let up = [-pitch.sin() * yaw.sin(), pitch.sin() * yaw.cos(), pitch.cos()];
     let specs = [
         (ViewPreset::Right, [1., 0., 0.], true, 0), (ViewPreset::Left, [-1., 0., 0.], false, 0),
-        (ViewPreset::Top, [0., 1., 0.], true, 1), (ViewPreset::Bottom, [0., -1., 0.], false, 1),
-        (ViewPreset::Front, [0., 0., 1.], true, 2), (ViewPreset::Back, [0., 0., -1.], false, 2),
+        (ViewPreset::Back, [0., 1., 0.], true, 1), (ViewPreset::Front, [0., -1., 0.], false, 1),
+        (ViewPreset::Top, [0., 0., 1.], true, 2), (ViewPreset::Bottom, [0., 0., -1.], false, 2),
     ];
     specs.map(|(preset, axis, positive, i)| Ball {
         preset,
@@ -75,11 +76,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn zero_angles_put_x_right_and_z_toward_the_viewer() {
+    fn zero_angles_put_x_right_and_minus_y_toward_the_viewer() {
         let a = axes(0., 0.);
         assert!(a[0].xy.x > 0. && a[0].xy.y.abs() < 1e-5);
-        assert!((a[4].depth - 1.).abs() < 1e-5);
-        assert!(a[4].xy.length() < 1e-5);
+        assert!((a[3].depth - 1.).abs() < 1e-5);
+        assert!(a[3].xy.length() < 1e-5);
     }
 
     #[test]

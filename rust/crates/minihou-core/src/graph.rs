@@ -25,6 +25,8 @@ pub struct Graph {
     /// In file order (the first `output` node is the main output, as in Python).
     pub nodes: Vec<(String, NodeDef)>,
     pub display: Option<String>,
+    /// Original UI/extension fields survive graph embedding in interchange files.
+    source: Value,
 }
 
 impl Graph {
@@ -53,6 +55,9 @@ impl Graph {
             let mut inputs = Vec::new();
             if let Some(ins) = nd.get("inputs").and_then(Value::as_object) {
                 for (port, r) in ins {
+                    if matches!(node_type.as_str(), "loop_begin" | "loop_end") && r.is_array() {
+                        return Err(Error::new(format!("node '{id}': {port} input must be a single node")));
+                    }
                     let refs = match r {
                         Value::String(s) => vec![s.clone()],
                         Value::Array(a) => a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect(),
@@ -67,7 +72,35 @@ impl Graph {
             nodes.push((id.clone(), NodeDef { node_type, inputs, params, bypass }));
         }
         let display = obj.get("display").and_then(|v| v.as_str().or_else(|| v.as_array()?.iter().find_map(Value::as_str))).map(str::to_string);
-        Ok(Graph { nodes, display })
+        Ok(Graph { nodes, display, source: v.clone() })
+    }
+
+    /// Current engine edits over the original document, preserving layout and metadata.
+    pub fn to_value(&self) -> Value {
+        let mut value = self.source.clone();
+        let nodes = value["nodes"].as_object_mut().expect("validated graph");
+        nodes.retain(|id, _| self.nodes.iter().any(|(n, _)| n == id));
+        for (id, def) in &self.nodes {
+            let nd = nodes.entry(id.clone()).or_insert_with(|| serde_json::json!({}));
+            nd["type"] = Value::String(def.node_type.clone());
+            if nd.get("params").and_then(Value::as_object) != def.params.as_ref() {
+                if let Some(p) = &def.params { nd["params"] = Value::Object(p.clone()); }
+                else { nd.as_object_mut().unwrap().remove("params"); }
+            }
+            if nd["bypass"].as_bool().unwrap_or(false) != def.bypass { nd["bypass"] = Value::Bool(def.bypass); }
+            let old_inputs = nd.get("inputs").and_then(Value::as_object);
+            let same = old_inputs.map_or(def.inputs.is_empty(), |m| m.len() == def.inputs.len() && def.inputs.iter().all(|(port, refs)| {
+                let Some(old) = m.get(port) else { return false; };
+                if let Some(s) = old.as_str() { refs.len() == 1 && refs[0] == s }
+                else { old.as_array().is_some_and(|a| a.len() == refs.len() && a.iter().zip(refs).all(|(v,r)| v.as_str() == Some(r.as_str()))) }
+            }));
+            if !same { nd["inputs"] = Value::Object(def.inputs.iter().map(|(port,refs)|(port.clone(),if refs.len()==1 { Value::String(refs[0].clone()) } else { serde_json::json!(refs) })).collect()); }
+        }
+        if value["display"].as_str() != self.display.as_deref() {
+            if let Some(display) = &self.display { value["display"] = Value::String(display.clone()); }
+            else { value.as_object_mut().unwrap().remove("display"); }
+        }
+        value
     }
 
     pub(crate) fn node(&self, id: &str) -> Option<&NodeDef> {
@@ -86,14 +119,27 @@ impl Graph {
             .ok_or_else(|| Error::new("graph has no display node and no 'output' node"))
     }
 
+    /// Python Graph.extra_outputs: first unique trimmed name, excluding the main output.
+    pub fn extra_outputs(&self) -> Vec<(String,String)> {
+        let main=self.main_output().ok();
+        let mut seen=HashSet::new();
+        self.nodes.iter().filter(|(id,d)|d.node_type=="output" && Some(id)!=main.as_ref())
+            .filter_map(|(id,d)| {
+                let name=d.params.as_ref()?.get("object")?.as_str()?.trim().chars().take(63).collect::<String>();
+                if name.is_empty() || !seen.insert(name.clone()) {None} else {Some((name,id.clone()))}
+            }).collect()
+    }
+
     /// Cook `target` (default: the main output).
     pub fn cook(&self, target: Option<&str>) -> Result<Arc<Geometry>> {
         let target = match target {
             Some(t) => t.to_string(),
             None => self.main_output()?,
         };
-        let mut ev = Cook { graph: self, done: HashMap::new(), active: HashSet::new() };
-        ev.node(&target)
+        let plan = nodes::r#loop::Plan::analyze(self, &target)?;
+        nodes::rbd_engine::check_static_inputs(self, &target)?;
+        let mut ev = Cook { graph: self, plan: &plan, budget: nodes::r#loop::budget(), done: HashMap::new(), active: HashSet::new() };
+        nodes::usd_nodes::with_context(self, &Default::default(), || ev.node(&target))
     }
 }
 
@@ -105,7 +151,7 @@ pub(crate) fn run_node(id: &str, def: &NodeDef, spec: &nodes::NodeSpec, inputs: 
         Ok(inputs.first().and_then(|i| i.first()).map(|g| (**g).clone()).unwrap_or_else(|| Geometry::points_only(Vec::new()).expect("empty geometry")))
     } else {
         Params::resolve(spec.params, def.params.as_ref())
-            .and_then(|p| (spec.cook)(inputs, &p))
+            .and_then(|p| if def.node_type == "usd_export" { nodes::usd_nodes::cook_named(inputs, &p, id) } else { (spec.cook)(inputs, &p) })
             .and_then(|g| g.validate().map(|_| g))
     };
     result.map_err(|e| e.in_node(id, &def.node_type))
@@ -113,6 +159,8 @@ pub(crate) fn run_node(id: &str, def: &NodeDef, spec: &nodes::NodeSpec, inputs: 
 
 struct Cook<'a> {
     graph: &'a Graph,
+    plan: &'a nodes::r#loop::Plan,
+    budget: nodes::r#loop::Budget,
     done: HashMap<String, Arc<Geometry>>,
     active: HashSet<String>,
 }
@@ -133,6 +181,13 @@ impl Cook<'_> {
             if !spec.inputs.iter().any(|i| i.name == port) {
                 return Err(Error::new(format!("node '{id}': '{}' has no input '{port}'", def.node_type)));
             }
+        }
+        if def.node_type == "loop_end" {
+            let (plan, graph, budget) = (self.plan, self.graph, self.budget.clone());
+            let geo = Arc::new(plan.cook_end(graph, id, budget, &mut |src| self.node(src))?.0);
+            self.active.remove(id);
+            self.done.insert(id.into(), geo.clone());
+            return Ok(geo);
         }
         // cook what this node reads (their errors pass through unchanged: they name their own node)
         let mut inputs: Vec<Vec<Arc<Geometry>>> = Vec::with_capacity(spec.inputs.len());

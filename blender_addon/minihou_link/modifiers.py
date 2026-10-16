@@ -18,7 +18,7 @@ import bpy
 from bpy.app.handlers import persistent
 
 from . import mesh_reader, mesh_writer, proxy, scene_objects
-from .protocol import GeoUpdate, Mirror
+from .protocol import GeoUpdate, Mirror, instance_payload
 
 KEY = "minihou_modifier_id"
 GRAPH = "minihou_graph"
@@ -29,6 +29,7 @@ CACHE = "minihou_cache_id"
 COLLECTION = "MiniHou Modifier Caches"
 SOURCE = "Source Object"
 SOURCE_TOKEN = "@source"
+USAGE_VERSION = 3  # 2: object-usage compares; 3: plumbing nested in a private group (proxy.ensure_nested)
 _client = None
 _live_ids = set()
 _source_digests = {}
@@ -111,7 +112,8 @@ def _validate_source(owner, source):
     forbidden_ids = {owner.data.as_pointer()}
     forbidden_ids.update(obj.data.as_pointer() for obj in bpy.data.objects
                          if obj.data is not None and (CACHE in obj or geonodes.CACHE in obj or obj.name == proxy.OUTPUT_OBJECT))
-    forbidden_ids.update(group.as_pointer() for group in bpy.data.node_groups if KEY in group or geonodes.KEY in group)
+    forbidden_ids.update(group.as_pointer() for group in bpy.data.node_groups
+                         if KEY in group or geonodes.KEY in group or proxy.PLUMBING_KEY in group)
 
     def drivers(value):
         if value is None or not isinstance(value, bpy.types.ID):
@@ -290,7 +292,7 @@ def _disconnect_unsafe_sources(obj, mod):
     A bad pending picker selection must not disconnect a still-valid previous source.
     Only previously connected sources which are now themselves unsafe are detached.
     """
-    for node in mod.node_group.nodes:
+    for node in proxy.plumbing(mod.node_group).nodes:
         if not node.name.startswith(proxy.INST_PREFIX + "obj") or node.bl_idname != "GeometryNodeObjectInfo":
             continue
         source = node.inputs["Object"].default_value
@@ -373,6 +375,12 @@ def _cache(mod):
     obj = info.inputs["Object"].default_value if info else None
     if obj is not None and obj.get(CACHE) == ident:
         return obj
+    # A lost reader node (e.g. rebuilt plumbing) must not orphan this instance's existing cache.
+    obj = next((o for o in bpy.data.objects if o.get(CACHE) == ident and o.type == "MESH"), None)
+    if obj is not None:
+        proxy._build_nodes(ng, obj)
+        proxy.cache_info(ng).transform_space = "ORIGINAL"
+        return obj
     mesh = bpy.data.meshes.new("MiniHou Cache " + ident[:8])
     obj = bpy.data.objects.new(mesh.name, mesh)
     obj[CACHE] = ident
@@ -387,9 +395,9 @@ def _cache(mod):
 
 def _interface(mod, header, initial=False, activate=False):
     ng = mod.node_group
-    gout = next((n for n in ng.nodes if n.bl_idname == "NodeGroupOutput"), None)
-    passthrough = initial or (gout is not None and any(
-        link.from_node.bl_idname == "NodeGroupInput" for target in (gout.inputs["Geometry"], proxy._chain_target(ng)) for link in target.links))
+    passthrough = initial or proxy.passthrough(ng)
+    # Plumbing lives in one private nested group; flat groups from older add-ons migrate here.
+    proxy.ensure_nested(ng)
     old = proxy.read_values(mod, ng, parameters(mod)) if not initial else {}
     params = header["interface"]
     cache = _cache(mod)
@@ -407,16 +415,15 @@ def _interface(mod, header, initial=False, activate=False):
     for key in keys:
         _object_socket(mod, key)
     proxy._sync_usage_chain(ng, params, json.loads(ng.get(proxy.MAP_KEY, "{}")))
-    ng["minihou_object_usage_version"] = 2
+    if ng.get("minihou_object_usage_version") != USAGE_VERSION:
+        ng["minihou_object_usage_version"] = USAGE_VERSION
     ng[PARAMS] = json.dumps(params)
     values = {p["name"]: old.get(p["name"], p["value"]) for p in params}
     proxy.write_values(mod, ng, params, values)
     # sync_interface uses the proxy's relative cache convention; stack caches always stay local.
     proxy.cache_info(ng).transform_space = "ORIGINAL"
     if passthrough and not activate:
-        gin = next(n for n in ng.nodes if n.bl_idname == "NodeGroupInput")
-        gout = next(n for n in ng.nodes if n.bl_idname == "NodeGroupOutput")
-        ng.links.new(gin.outputs["Geometry"], proxy._chain_target(ng))
+        proxy.link_passthrough(ng)
 
 
 def _apply_live(mod, header):
@@ -451,7 +458,8 @@ def edit_live(obj, mod):
                               fps=scene.render.fps / scene.render.fps_base)
     _live_ids.add(instance_id(mod))
     _apply_live(mod, header)
-    return {"state": "ready", "editor_url": client.welcome.get("editor_url", "")}, header["path"]
+    return {"state": "ready", "editor_url": client.welcome.get("editor_url", ""),
+            "native_live": header.get("live") and header.get("editor") == "native"}, header["path"]
 
 
 def add_modifier(obj, graph_path, *, host=None, port=None):
@@ -476,11 +484,10 @@ def add_modifier(obj, graph_path, *, host=None, port=None):
     ng[GRAPH] = json.dumps(header["graph"])
     ng[PARAMS] = "[]"
     mod.node_group = ng
+    proxy.ensure_nested(ng)
     _interface(mod, header, initial=True)
     # Until the first successful cook, pass upstream geometry through unchanged.
-    gin = next(n for n in ng.nodes if n.bl_idname == "NodeGroupInput")
-    gout = next(n for n in ng.nodes if n.bl_idname == "NodeGroupOutput")
-    ng.links.new(gin.outputs["Geometry"], proxy._chain_target(ng))
+    proxy.link_passthrough(ng)
     ng[STATUS] = "Waiting for first cook"
     _owners[instance_id(mod)] = (obj.as_pointer(), mod.as_pointer())
     return mod
@@ -509,6 +516,7 @@ def _unique(entries):
             old_values = proxy.read_values(mod, mod.node_group, parameters(mod))
             ng = mod.node_group.copy()
             mod.node_group = ng
+            proxy.ensure_plumbing(ng)  # the copy still references the original's plumbing tree
             ident = uuid.uuid4().hex
             ng[KEY] = ident
             set_source(mod, old_source)
@@ -641,7 +649,10 @@ def _cleanup(live):
     for ng in list(bpy.data.node_groups):
         if KEY in ng and ng.users == 0:
             bpy.data.node_groups.remove(ng)
-    scene_objects.retain_owners(live)            # objects of removed modifiers are parked (hidden), never deleted
+    proxy.cleanup_plumbing()  # after the outer groups, whose removal releases them
+    # Wired GN placements own scene sinks just like stack modifiers.
+    gn_owners = {ng.get("minihou_gn_id") for ng in bpy.data.node_groups if ng.get("minihou_gn_id")}
+    scene_objects.retain_owners(set(live) | gn_owners)  # removed owners are parked, never deleted
 
 
 def pump(host=None, port=None, *, force=False, _only=None, render=False):
@@ -674,7 +685,9 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
         all_entries = [(o, m) for o in bpy.data.objects if o.type == "MESH" and CACHE not in o
                        and o.library is None for m in o.modifiers if is_modifier(m)]
         for _, modifier in all_entries:
-            if modifier.node_group.get("minihou_object_usage_version", 0) < 2:
+            # Older layouts (flat plumbing, pre-object-usage) migrate in place; values and pickers are kept.
+            if (modifier.node_group.get("minihou_object_usage_version", 0) < USAGE_VERSION
+                    or not proxy.is_nested(modifier.node_group)):
                 _interface(modifier, {"interface": parameters(modifier)})
         live = _unique(all_entries)  # copied objects in another scene also need fresh identities
         _cleanup(live)
@@ -750,8 +763,7 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                                                   fps=scene.render.fps / scene.render.fps_base,
                                                   graph=json.loads(ng[GRAPH]),
                                                   materials=[m.name if m is not None else "" for m in materials], render=render)
-                    scene_arrays = {k: v for k, v in output.items() if k.startswith("scene:")}     # pieces' meshes, by node
-                    output = {k: v for k, v in output.items() if not k.startswith("scene:")}
+                    output, manifests = instance_payload(header, output)
                     update = GeoUpdate.from_message(header, output)
                     names = update.detail.get("instance_objects", [])
                     objects = _instance_objects(obj, mod, names)
@@ -774,10 +786,8 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                     proxy.sync_instances(ng, names, objects=objects)
                     # scene_objects nodes: real objects, parented to this object. Only queued here (pump can run from a
                     # frame-change handler); the timer makes them.
-                    for m in header.get("scene", []):
-                        prefix = f"scene:{m['node']}:"
-                        scene_objects.queue(ident, dict(m, _arrays={k[len(prefix):]: v for k, v in scene_arrays.items()
-                                                                   if k.startswith(prefix)}), parent=obj.name)
+                    for manifest in manifests:
+                        scene_objects.queue(ident, manifest, parent=obj.name)
                     for e in header.get("scene_errors", []):
                         scene_objects._log(f"scene_objects {e.get('node')!r} on {obj.name}: {e.get('message')}")
                     scene_objects.queue_nodes(ident, [m["node"] for m in header.get("scene", [])]

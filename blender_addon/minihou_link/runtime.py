@@ -70,6 +70,8 @@ class Runtime:
         self.log: deque = deque(maxlen=200)
         self._in_tick = False
         self._timer_on = False
+        self.auto_connect_paused = False
+        self._auto_client = False
         self._last_forward = 0.0
         self._ui_dirty = True
         scene_objects.set_logger(self._log)
@@ -95,11 +97,18 @@ class Runtime:
         self._refused_extras: set = set()
 
     # -- lifecycle ---------------------------------------------------------
-    def connect(self, host: str = "127.0.0.1", port: int = 8765) -> None:
+    def connect(self, host: str = "127.0.0.1", port: int = 8765, *, automatic=False) -> None:
         mesh_writer.assert_main_thread()
-        self.disconnect()
-        self.client = LinkClient(host, port, on_message=self.inbox.push, on_state=self._on_state,
-                                 client_name=f"blender {bpy.app.version_string}")
+        self.disconnect(manual=False)
+        if not automatic:
+            self.auto_connect_paused = False
+        self._auto_client = automatic
+        # Retired workers may finish after a new Connect; ignore their callbacks.
+        client = LinkClient(host, port,
+                            on_message=lambda h, a: self.inbox.push(h, a) if self.client is client else None,
+                            on_state=lambda s, d: self._on_state(s, d) if self.client is client else None,
+                            client_name=f"blender {bpy.app.version_string}", retry_seconds=2.0)
+        self.client = client
         self.last_error = ""
         self.client.start()
         if not self._timer_on:
@@ -112,10 +121,12 @@ class Runtime:
         self.frame_dirty, self._sent_frame = True, None
         self._log(f"connecting to {host}:{port}")
 
-    def disconnect(self) -> None:
+    def disconnect(self, *, manual=True) -> None:
+        if manual:
+            self.auto_connect_paused = True
         if self.client is not None:
-            self.client.stop()
-            self.client = None
+            client, self.client = self.client, None
+            client.stop()
         self.inbox.clear()
         self.state, self.detail = "disconnected", ""
         self._ui_dirty = True
@@ -123,6 +134,15 @@ class Runtime:
             bpy.app.handlers.depsgraph_update_post.remove(_depsgraph_post)
         if _frame_change in bpy.app.handlers.frame_change_post:
             bpy.app.handlers.frame_change_post.remove(_frame_change)
+
+    def poll_auto_connect(self, enabled: bool, port: int) -> None:
+        # LinkClient retries on its worker thread; never probe a socket on Blender's UI thread.
+        if not enabled:
+            if self._auto_client and self.client is not None:
+                self.disconnect(manual=False)
+            return
+        if not self.auto_connect_paused and self.client is None and self.state == "disconnected":
+            self.connect("127.0.0.1", port, automatic=True)
 
     def _log(self, msg: str) -> None:
         line = f"[minihou] {msg}"
@@ -504,6 +524,8 @@ def _tag_redraw() -> None:
 
 def shutdown() -> None:
     global _runtime
+    if bpy.app.timers.is_registered(timer_entry):
+        bpy.app.timers.unregister(timer_entry)
     if _runtime is not None:
         _runtime.disconnect()
     if _depsgraph_post in bpy.app.handlers.depsgraph_update_post:

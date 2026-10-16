@@ -4,7 +4,22 @@ use eframe::egui::{self, pos2, vec2, Align2, FontId, Pos2, Rect, Stroke};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SketchMode { Line, Pen, Polygon, Rectangle, Circle, Tape }
-impl SketchMode { fn name(self) -> &'static str { match self { Self::Line => "Line", Self::Pen => "Polyline", Self::Polygon => "Polygon", Self::Rectangle => "Rectangle", Self::Circle => "Circle", Self::Tape => "Measure" } } }
+impl SketchMode {
+    /// The drawing modes of the old sketch panel, in its button order (Tape is the Measure tool).
+    pub const DRAW: [Self; 5] = [Self::Line, Self::Pen, Self::Polygon, Self::Rectangle, Self::Circle];
+    /// Command id that starts this mode (registered in `keymap.rs`, unbound by default like the old build).
+    pub fn command_id(self) -> &'static str { match self { Self::Line => "sketch_line", Self::Pen => "sketch_polyline", Self::Polygon => "sketch_polygon", Self::Rectangle => "sketch_rectangle", Self::Circle => "sketch_circle", Self::Tape => "sketch_measure" } }
+    pub fn name(self) -> &'static str { match self { Self::Line => "Line", Self::Pen => "Polyline", Self::Polygon => "Polygon", Self::Rectangle => "Rectangle", Self::Circle => "Circle", Self::Tape => "Measure" } }
+    pub fn tool(self) -> super::Tool { match self {
+        Self::Line => super::Tool::Line, Self::Pen => super::Tool::Polyline,
+        Self::Polygon => super::Tool::Polygon, Self::Rectangle => super::Tool::Rectangle,
+        Self::Circle => super::Tool::Circle, Self::Tape => super::Tool::Measure,
+    } }
+    pub fn from_tool(tool: super::Tool) -> Option<Self> {
+        Self::DRAW.into_iter().chain([Self::Tape]).find(|m| m.tool() == tool)
+    }
+    fn short(self) -> &'static str { match self { Self::Line => "Line", Self::Pen => "Poly", Self::Polygon => "Polygon", Self::Rectangle => "Rect", Self::Circle => "Circle", Self::Tape => "Tape" } }
+}
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Plane { #[default] XY, XZ, YZ }
 impl Plane {
@@ -83,16 +98,23 @@ fn id() -> egui::Id { egui::Id::new("sketch_state") }
 pub fn start(ctx: &egui::Context, mode: SketchMode) {
     ctx.data_mut(|d| { let mut s: State = d.get_temp(id()).unwrap_or_default(); s.mode = Some(mode); s.points.clear(); s.hover = None; s.numeric.clear(); s.axis = None; d.insert_temp(id(), s); });
 }
-pub fn active(ctx: &egui::Context) -> bool { ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| s.mode.is_some())) }
+pub fn cancel(ctx: &egui::Context) { ctx.data_mut(|d| d.remove::<State>(id())); }
+pub fn active(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| s.mode.is_some() && (s.mode != Some(SketchMode::Tape) || !s.points.is_empty())))
+}
+/// The persistent ruler tool must allow orbit/pan, including between its two endpoints.
+pub fn blocks_navigation(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| s.mode.is_some() && s.mode != Some(SketchMode::Tape)))
+}
 fn finish(s: &mut State, out: &mut Actions) {
     let Some(mode) = s.mode else { return; };
     if mode == SketchMode::Tape {
-        if s.points.len() == 2 { out.push(UiAction::AddMeasurement { a: s.points[0], b: s.points[1] }); s.mode = None; }
+        if s.points.len() == 2 { out.push(UiAction::AddMeasurement { a: s.points[0], b: s.points[1] }); s.mode = None; s.points.clear(); s.hover = None; s.numeric.clear(); s.axis = None; }
         return;
     }
     let Some((points, closed)) = specification(mode, &s.points, s.plane) else { return; };
     out.push(UiAction::SketchCommit { name: mode.name().into(), points, closed });
-    s.mode = None; s.points.clear(); s.hover = None;
+    s.points.clear(); s.hover = None; s.numeric.clear(); s.axis = None;
 }
 fn measurements(ui: &egui::Ui, rect: Rect, v: &View) {
     let Some(rows) = v.doc.get("measurements").and_then(|x| x.as_array()) else { return; };
@@ -108,8 +130,8 @@ fn measurements(ui: &egui::Ui, rect: Rect, v: &View) {
 pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     measurements(ui, rect, v);
     let ctx = ui.ctx().clone(); let mut s: State = ctx.data_mut(|d| d.get_temp(id())).unwrap_or_default();
-    if v.editor.tool == super::Tool::Measure && s.mode.is_none() { s.mode = Some(SketchMode::Tape); }
-    if v.editor.tool != super::Tool::Measure && s.mode == Some(SketchMode::Tape) { s.mode = None; s.points.clear(); }
+    let tool_mode = SketchMode::from_tool(v.editor.tool);
+    if s.mode != tool_mode { s = State { mode: tool_mode, plane: s.plane, ..Default::default() }; }
     let Some(mode) = s.mode else { return; };
     let pointer = ctx.input(|i| i.pointer.hover_pos());
     let safe = Rect::from_min_max(pos2(rect.left() + 55., rect.top() + 83.), pos2(rect.right() - 55., rect.bottom() - 50.));
@@ -126,12 +148,15 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     } else { s.hover = None; }
     let events = ctx.input(|i| i.events.clone());
     for event in events { match event {
-        egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } => { s.mode = None; s.points.clear(); },
+        egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } |
+        egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: true, .. } => {
+            s = State { plane: s.plane, ..Default::default() }; out.push(UiAction::Editor(super::EditorChange::Tool(super::Tool::Select))); break;
+        },
         egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } => { if !s.numeric.is_empty() { if let Some(p) = s.hover { s.points.push(p); } s.numeric.clear(); } finish(&mut s, out); },
         egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => { if s.numeric.is_empty() { s.points.pop(); } else { s.numeric.pop(); } },
         egui::Event::Key { key, pressed: true, .. } if matches!(key, egui::Key::X | egui::Key::Y | egui::Key::Z) => { let axis = match key { egui::Key::X => 0, egui::Key::Y => 1, _ => 2 }; s.axis = if s.axis == Some(axis) { None } else { Some(axis) }; },
         egui::Event::Text(t) if t.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-' || matches!(c, 'm'|'c'|'k'|'i'|'n'|'f'|'t'|'M'|'C'|'K'|'I'|'N'|'F'|'T'|' ')) => s.numeric.push_str(&t),
-        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, .. } if safe.contains(pos) => {
+        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers } if safe.contains(pos) && !modifiers.alt => {
             if let Some(p) = s.hover { if s.points.last().is_none_or(|a| length(sub(*a, p)) > 1e-7) {
                 if mode == SketchMode::Polygon && s.points.len() >= 3 && length(sub(s.points[0], p)) < v.bounds.1 * 0.015 { finish(&mut s, out); }
                 else { if s.points.is_empty() { s.origin = p; } s.points.push(p); s.numeric.clear(); if matches!(mode, SketchMode::Line | SketchMode::Rectangle | SketchMode::Circle | SketchMode::Tape) && s.points.len() == 2 { finish(&mut s, out); } }
@@ -152,7 +177,8 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     }
     let chip = Rect::from_min_size(pos2(rect.left() + 56., rect.top() + 48.), vec2(265., 28.));
     p.rect_filled(chip, 2., v.theme.panel); p.rect_stroke(chip, 2., Stroke::new(1_f32, v.theme.stroke), egui::StrokeKind::Inside);
-    p.text(chip.left_center() + vec2(8., 0.), Align2::LEFT_CENTER, format!("{} · {}  {}  Enter finish · Esc cancel", mode.name(), s.plane.label(), s.numeric), FontId::monospace(10.), v.theme.text);
+    p.text(chip.left_center() + vec2(8., 0.), Align2::LEFT_CENTER, format!("{} | {} | {}", mode.name(), s.axis.map(|a| ["X","Y","Z"][a]).unwrap_or("free"), if s.numeric.is_empty() { "type length" } else { &s.numeric }), FontId::monospace(10.), v.theme.text);
+    ui.interact(chip, egui::Id::new("sketch_help"), egui::Sense::hover()).on_hover_text("Click points; Enter finishes Polyline/Polygon. Type a length (units supported), X/Y/Z locks an axis, Ctrl toggles grid snapping. Esc or RMB returns to Select.");
     for (i, plane) in [Plane::XY, Plane::XZ, Plane::YZ].into_iter().enumerate() {
         let r = Rect::from_min_size(pos2(chip.right() + 4. + i as f32 * 31., chip.top()), vec2(29., 28.));
         let resp = ui.interact(r, egui::Id::new(("sketch_plane", i)), egui::Sense::click());
@@ -160,11 +186,49 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         p.text(r.center(), Align2::CENTER_CENTER, plane.label(), FontId::monospace(10.), if s.plane == plane { v.theme.accent } else { v.theme.dim });
         if resp.clicked() { s.plane = plane; s.points.clear(); s.origin = [0.; 3]; }
     }
+    let x0 = chip.right() + 4. + 3. * 31. + 6.;
+    let (_,_,normal) = s.plane.basis();
+    for (axis, label) in ["X", "Y", "Z"].into_iter().enumerate() {
+        let r = Rect::from_min_size(pos2(x0 + axis as f32 * 29., chip.top()), vec2(27.,28.));
+        let resp = ui.interact(r, egui::Id::new(("sketch_axis",axis)), egui::Sense::click()).on_hover_text("Lock drawing to this axis (X/Y/Z)");
+        p.rect_filled(r,2.,if s.axis == Some(axis) { v.theme.accent_bg } else { v.theme.panel });
+        p.text(r.center(),Align2::CENTER_CENTER,label,FontId::monospace(10.),if s.axis == Some(axis) { v.theme.accent } else { v.theme.dim });
+        if resp.clicked() && normal[axis] == 0. { s.axis = if s.axis == Some(axis) { None } else { Some(axis) }; }
+    }
     ctx.data_mut(|d| d.insert_temp(id(), s));
 }
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn ruler_finish_cancel_and_tool_switch_release_navigation() {
+        let ctx = egui::Context::default();
+        let mut f = crate::ui::testing::Fixture::new();
+        f.editor.tool = super::super::Tool::Measure;
+        let mut tape = State { mode: Some(SketchMode::Tape), points: vec![[0.; 3], [1., 0., 0.]], ..Default::default() };
+        finish(&mut tape, &mut Actions::default());
+        assert!(tape.mode.is_none() && tape.points.is_empty());
+        ctx.data_mut(|d| d.insert_temp(id(), State { mode: Some(SketchMode::Tape), points: vec![[0.; 3]], ..Default::default() }));
+        assert!(active(&ctx));
+        assert!(!blocks_navigation(&ctx));
+        ctx.data_mut(|d| d.insert_temp(id(), tape));
+        assert!(!active(&ctx) && !blocks_navigation(&ctx));
+        for event in [
+            egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() },
+            egui::Event::PointerButton { pos: pos2(200., 200.), button: egui::PointerButton::Secondary, pressed: true, modifiers: Default::default() },
+        ] {
+            start(&ctx, SketchMode::Tape);
+            let _ = ctx.run(egui::RawInput { events: vec![event], ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, ui.max_rect(), &f.view(), &mut Actions::default()));
+            });
+            assert!(!active(&ctx) && !blocks_navigation(&ctx));
+        }
+        start(&ctx, SketchMode::Tape);
+        f.editor.tool = super::super::Tool::Select;
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, ui.max_rect(), &f.view(), &mut Actions::default()));
+        });
+        assert!(!active(&ctx) && !blocks_navigation(&ctx));
+    }
     #[test] fn geometry_and_constraints() {
         assert_eq!(grid_snap([0.26,0.74,3.], Plane::XY, 0.25), [0.25,0.75,3.]);
         assert_eq!(axis_lock([2.,3.,0.], [1.,1.,0.], 0, Plane::XY), [2.,1.,0.]);
@@ -201,6 +265,48 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
             assert!(matches!(&out.0[..], [UiAction::SketchCommit { points, closed: c, .. }]
                 if points.len() == expected_len && *c == closed), "{mode:?}");
         }
+    }
+    #[test] fn quick_shapes_remain_active_across_commits() {
+        for mode in SketchMode::DRAW {
+            assert_eq!(SketchMode::from_tool(mode.tool()),Some(mode));
+            let mut state = State { mode: Some(mode), plane: Plane::XZ, ..Default::default() };
+            let mut out = Actions::default();
+            for _ in 0..2 {
+                state.points = vec![[0.;3],[2.,0.,0.],[2.,0.,2.]];
+                state.numeric = "2m".into(); state.axis = Some(0);
+                finish(&mut state,&mut out);
+                assert_eq!(state.mode,Some(mode)); assert!(state.points.is_empty());
+                assert!(state.numeric.is_empty()); assert_eq!(state.axis,None); assert_eq!(state.plane,Plane::XZ);
+            }
+            assert_eq!(out.0.len(),2);
+        }
+    }
+    #[test] fn drawing_escape_and_rmb_request_select() {
+        for mode in SketchMode::DRAW {
+            for event in [
+                egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() },
+                egui::Event::PointerButton { pos: pos2(200.,200.), button: egui::PointerButton::Secondary, pressed: true, modifiers: Default::default() },
+            ] {
+                let mut f = crate::ui::testing::Fixture::new(); f.editor.tool = mode.tool();
+                let ctx = egui::Context::default(); let mut out = Actions::default();
+                let _ = ctx.run(egui::RawInput { events:vec![event], ..Default::default() }, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| show(ui,ui.max_rect(),&f.view(),&mut out));
+                });
+                assert!(out.0.iter().any(|a| matches!(a,UiAction::Editor(super::super::EditorChange::Tool(super::super::Tool::Select)))));
+                assert!(!active(&ctx));
+            }
+        }
+    }
+    #[test] fn every_draw_mode_has_a_distinct_command() {
+        let ids: std::collections::BTreeSet<_> = SketchMode::DRAW.iter().map(|m| m.command_id()).collect();
+        assert_eq!(ids.len(), SketchMode::DRAW.len());
+    }
+    #[test] fn starting_a_mode_replaces_the_previous_one() {
+        let ctx = egui::Context::default();
+        start(&ctx, SketchMode::Rectangle); assert!(active(&ctx));
+        start(&ctx, SketchMode::Polygon);
+        let s: State = ctx.data(|d| d.get_temp(id())).unwrap();
+        assert_eq!(s.mode, Some(SketchMode::Polygon)); assert!(s.points.is_empty());
     }
     #[test] fn measurements_render_with_units() {
         let mut f = crate::ui::testing::Fixture::new();

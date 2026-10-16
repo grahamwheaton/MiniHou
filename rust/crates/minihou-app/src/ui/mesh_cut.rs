@@ -1,0 +1,396 @@
+//! Persistent viewport cut tools. Hover/preview is UI-only; confirmation is one document action.
+//! Loop Cut ports the pre-rust `loop-tool.js` (see docs/RUST_LOOP_CUT.md): hover previews the quad ring with the node's
+//! own walk (`LoopTopology`), wheel/PageUp/PageDown sets the count, click starts the slide, a second click / Enter /
+//! drag-release commits one `loop_cut` node, RMB during the slide commits centred, Esc cancels the pending cut.
+use super::{transform_gizmo, Actions, CameraInfo, EditorChange, Tool, UiAction, View};
+use crate::picking;
+use eframe::egui::{self, pos2, vec2, FontId, Pos2, Rect, Stroke, Vec2};
+use minihou_core::{nodes::{loop_cut_fractions, LoopTopology, LOOP_CUT_MAX}, Geometry};
+use serde_json::{json, Value};
+use std::sync::Arc;
+
+type Edge = (usize, usize);
+/// Hover radius in pixels (preview.js `edgeAt` used 14).
+const HOVER_RADIUS: f32 = 14.;
+/// Nearest candidates tested for occlusion, front-most visible wins (preview.js `pickEdge` tested 8).
+const HOVER_CANDIDATES: usize = 8;
+/// Pointer travel that turns a held slide click into a drag that commits on release.
+const DRAG_THRESHOLD: f32 = 4.;
+
+fn dot(a: [f32; 3], b: [f32; 3]) -> f32 { (0..3).map(|k| a[k] * b[k]).sum() }
+fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] { [0, 1, 2].map(|k| a[k] + (b[k] - a[k]) * t) }
+
+#[derive(Clone, Default)]
+struct Mesh {
+    positions: Vec<f32>,
+    /// Fan triangulation of closed faces, used only to test whether a hovered edge is hidden.
+    tris: Vec<u32>,
+    loops: LoopTopology,
+    edges: Vec<Edge>,
+    scale: f32,
+}
+impl Mesh {
+    fn new(g: &Geometry) -> Self {
+        let positions = g.p().to_vec();
+        let mut tris = Vec::new();
+        for (face, r) in g.topology.prim_offsets.windows(2).enumerate() {
+            if !g.topology.is_closed(face) || r[1] - r[0] < 3 { continue; }
+            let vp = &g.topology.vertex_point[r[0] as usize..r[1] as usize];
+            for i in 1..vp.len() - 1 { tris.extend([vp[0] as u32, vp[i] as u32, vp[i + 1] as u32]); }
+        }
+        let loops = LoopTopology::new(g);
+        let edges = loops.edges().collect();
+        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for q in positions.chunks_exact(3) { for k in 0..3 { lo[k] = lo[k].min(q[k]); hi[k] = hi[k].max(q[k]); } }
+        let scale = if positions.is_empty() { 1. } else { (0..3).map(|k| (hi[k] - lo[k]).powi(2)).sum::<f32>().sqrt().max(1e-6) };
+        Self { positions, tris, loops, edges, scale }
+    }
+    fn point(&self, i: usize) -> [f32; 3] { [self.positions[3 * i], self.positions[3 * i + 1], self.positions[3 * i + 2]] }
+    /// Nothing displayed lies in front of `world` along the view ray through it (perspective and ortho alike).
+    fn visible(&self, camera: CameraInfo, rect: Rect, world: [f32; 3]) -> bool {
+        let Some(screen) = transform_gizmo::project(camera, rect, world) else { return false; };
+        let (o, d) = transform_gizmo::ray(camera, rect, screen);
+        let dd = dot(d, d).max(1e-12);
+        let depth = dot([0, 1, 2].map(|k| world[k] - o[k]), d) / dd;
+        let eps = self.scale * 1e-3 / dd.sqrt();
+        picking::pick_triangle(&self.positions, &self.tris, o, d).is_none_or(|h| h.t >= depth - eps)
+    }
+    /// The edge under the pointer as preview.js `pickEdge` chose it: the nearest within the radius whose closest point
+    /// is not hidden (unless X-ray), among the eight nearest. Only edges that have a quad strip to cut qualify.
+    fn hover(&self, camera: CameraInfo, rect: Rect, pointer: Pos2, xray: bool) -> Option<Edge> {
+        let mut cand = Vec::new();
+        for &(a, b) in &self.edges {
+            let (Some(pa), Some(pb)) = (transform_gizmo::project(camera, rect, self.point(a)), transform_gizmo::project(camera, rect, self.point(b))) else { continue; };
+            let ab = pb - pa;
+            let t = ((pointer - pa).dot(ab) / ab.length_sq().max(1e-8)).clamp(0., 1.);
+            let d = pointer.distance(pa + ab * t);
+            if d <= HOVER_RADIUS { cand.push((d, (a, b), t)); }
+        }
+        cand.sort_by(|x, y| x.0.total_cmp(&y.0));
+        cand.into_iter().take(HOVER_CANDIDATES).find(|&(_, (a, b), t)| {
+            (xray || self.visible(camera, rect, lerp3(self.point(a), self.point(b), t))) && !self.loops.ring([(a, b)]).quads.is_empty()
+        }).map(|c| c.1)
+    }
+    /// World segments of the new edges, computed by the node's own ring walk and fractions.
+    fn preview(&self, seed: Edge, count: usize, factor: f64) -> Vec<([f32; 3], [f32; 3])> {
+        self.loops.ring([seed]).cut_lines(&self.positions, &loop_cut_fractions(count, factor))
+    }
+}
+
+/// Count after `steps` wheel notches or PageUp/PageDown presses, clamped to polysplit's 1..64.
+fn step_count(count: usize, steps: i32) -> usize { (count as i64 + steps as i64).clamp(1, LOOP_CUT_MAX as i64) as usize }
+/// Wheel notches in one event: lines count as notches, points as 50 per notch, pages as 3.
+fn wheel_notches(unit: egui::MouseWheelUnit, delta: f32) -> f32 {
+    match unit { egui::MouseWheelUnit::Line => delta, egui::MouseWheelUnit::Point => delta / 50., egui::MouseWheelUnit::Page => delta * 3. }
+}
+/// Advance the raw slide (0..1, from the seed's lower point id towards the higher) by a pointer delta measured along the
+/// seed edge's projection, so the loop follows the cursor. Shift is 10x finer. A seed edge seen end-on (shorter than
+/// 4 px) falls back to loop-tool.js's horizontal mapping (100 px per unit).
+fn slide_step(raw: f64, delta: Vec2, a: Pos2, b: Pos2, fine: bool) -> f64 {
+    let ab = b - a;
+    let len = ab.length();
+    let (along, span) = if len >= 4. { (delta.dot(ab) / len, len.max(20.)) } else { (delta.x, 100.) };
+    (raw + along as f64 / span as f64 * if fine { 0.1 } else { 1. }).clamp(0., 1.)
+}
+/// The `position` written to the node: loop-tool.js clamped to 0.001..0.999 and Ctrl snapped to tenths.
+fn slide_factor(raw: f64, snap: bool) -> f64 {
+    let x = if snap { (raw * 10.).round() / 10. } else { raw };
+    (x.clamp(0.001, 0.999) * 1e4).round() / 1e4
+}
+fn loop_params(edge: Edge, count: usize, factor: f64) -> Value {
+    json!({"mode":"edge_loop","split_edges":format!("p{}-{}",edge.0,edge.1),"loops":count,"position":factor})
+}
+
+/// Egui's camera projection omits the viewport aspect ratio. Store the exact NDC projection the kernel expects.
+fn knife_params(camera: CameraInfo, rect: Rect, points: &[[f32; 2]]) -> Value {
+    let aspect = rect.width()/rect.height().max(1.);
+    let matrix: Vec<f32> = camera.projection.iter().flat_map(|col| [col[0]/aspect,col[1],col[2],col[3]]).collect();
+    let cuts: Vec<_> = points.windows(2).map(|p| json!({"a":p[0],"b":p[1],"matrix":matrix,"through":false})).collect();
+    json!({"cuts":Value::Array(cuts).to_string()})
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Slide { edge: Edge, raw: f64, press: Pos2, held: bool, dragged: bool }
+#[derive(Clone, Default)]
+struct State {
+    tool: Option<Tool>, revision: u64, source: String, mesh: Arc<Mesh>, points: Vec<[f32; 2]>, projection: [[f32; 4]; 4], aspect: f32,
+    count: usize, hover: Option<Edge>, hover_key: Option<(Pos2, [[f32; 4]; 4], f32, bool, u64)>, slide: Option<Slide>, wheel: f32,
+}
+fn id() -> egui::Id { egui::Id::new("viewport_mesh_cut") }
+pub fn cancel(ctx: &egui::Context) { ctx.data_mut(|d| d.remove::<State>(id())); }
+pub fn blocks_navigation(ctx: &egui::Context) -> bool { ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| !s.points.is_empty() || s.slide.is_some())) }
+/// Loop Cut owns the wheel (cut count) while it previews an edge or slides; otherwise the wheel still zooms.
+pub fn captures_wheel(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| s.tool == Some(Tool::LoopCut) && (s.hover.is_some() || s.slide.is_some())))
+}
+pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
+    let tool = v.editor.tool;
+    if !matches!(tool, Tool::Knife | Tool::LoopCut) { cancel(ui.ctx()); return; }
+    let ctx = ui.ctx().clone();
+    let mut s: State = ctx.data_mut(|d| d.get_temp(id())).unwrap_or_default();
+    let displayed = minihou_app::display_nodes(v.doc);
+    let ready = displayed.len() == 1 && !v.cooking.cooking() && v.cooking.error.is_none() && v.cooking.geometry.is_some();
+    let source = displayed.first().cloned().unwrap_or_default();
+    let aspect = rect.width()/rect.height().max(1.);
+    if s.tool != Some(tool) || s.source != source {
+        s = State { tool: Some(tool), count: 1, ..Default::default() };
+    }
+    if s.revision != v.cooking.completed || s.source != source || s.mesh.positions.is_empty() && v.cooking.geometry.is_some() {
+        // The cut count is a tool setting and survives re-cooks; a pending slide refers to the old topology.
+        s.revision = v.cooking.completed; s.source = source;
+        s.mesh = Arc::new(v.cooking.geometry.as_deref().map(Mesh::new).unwrap_or_default());
+        s.slide = None; s.hover = None; s.hover_key = None;
+    }
+    s.count = s.count.clamp(1, LOOP_CUT_MAX);
+    if s.projection != v.camera.projection || s.aspect != aspect || !ready { s.points.clear(); }
+    if !ready { s.slide = None; }
+    s.projection = v.camera.projection; s.aspect = aspect;
+    let canvas = |p: Pos2| super::viewport_ui::selection_canvas_contains(rect,p) && p.x > rect.left()+55. && p.y > rect.top()+83.;
+    let (pointer, delta, modifiers) = ctx.input(|i| (i.pointer.hover_pos(), i.pointer.delta(), i.modifiers));
+    let pointer = pointer.filter(|p| canvas(*p));
+    let loop_cut = ready && tool == Tool::LoopCut;
+    if loop_cut && s.slide.is_none() {
+        let key = pointer.map(|p| (p, v.camera.projection, aspect, v.editor.xray, s.revision));
+        if key != s.hover_key { s.hover = pointer.and_then(|p| s.mesh.hover(v.camera, rect, p, v.editor.xray)); s.hover_key = key; }
+    } else { s.hover = None; s.hover_key = None; }
+    // Slide follows pointer motion along the seed edge's projection.
+    if let (true, Some(sl)) = (loop_cut, s.slide.as_mut()) {
+        let (pa, pb) = (transform_gizmo::project(v.camera, rect, s.mesh.point(sl.edge.0)), transform_gizmo::project(v.camera, rect, s.mesh.point(sl.edge.1)));
+        if let (Some(pa), Some(pb)) = (pa, pb) { sl.raw = slide_step(sl.raw, delta, pa, pb, modifiers.shift); }
+        if sl.held && pointer.is_some_and(|p| p.distance(sl.press) > DRAG_THRESHOLD) { sl.dragged = true; }
+    }
+    let ndc = |p: Pos2| [(p.x-rect.center().x)*2./rect.width(),(rect.center().y-p.y)*2./rect.height()];
+    let commit = |s: &State, edge: Edge, factor: f64, out: &mut Actions| out.push(UiAction::MeshCutCommit {
+        source: s.source.clone(), node_type: "loop_cut".into(), params: loop_params(edge, s.count, factor) });
+    for event in ctx.input(|i| i.events.clone()) {
+        match event {
+            egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } if s.slide.is_some() => { s.slide = None; }
+            egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: true, modifiers, .. }
+                if s.slide.is_some() && !modifiers.alt && !modifiers.ctrl => {
+                // loop-tool.js: right-click during the slide commits the cut centred.
+                let sl = s.slide.take().unwrap(); commit(&s, sl.edge, 0.5, out);
+            }
+            egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } => {
+                cancel(&ctx); out.push(UiAction::Editor(EditorChange::Tool(Tool::Select))); return;
+            }
+            egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: true, modifiers, .. } if !modifiers.alt && !modifiers.ctrl => {
+                cancel(&ctx); out.push(UiAction::Editor(EditorChange::Tool(Tool::Select))); return;
+            }
+            egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => { s.points.pop(); }
+            egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } if ready && tool == Tool::Knife && s.points.len() >= 2 => {
+                out.push(UiAction::MeshCutCommit { source: s.source.clone(), node_type: "knife".into(), params: knife_params(v.camera,rect,&s.points) }); s.points.clear();
+            }
+            egui::Event::Key { key: egui::Key::Enter, pressed: true, modifiers, .. } if loop_cut => {
+                if let Some(sl) = s.slide.take() { commit(&s, sl.edge, slide_factor(sl.raw, modifiers.ctrl), out); }
+                else if let Some(edge) = s.hover { commit(&s, edge, 0.5, out); }
+            }
+            egui::Event::Key { key: key @ (egui::Key::PageUp | egui::Key::PageDown), pressed: true, .. } if loop_cut => {
+                s.count = step_count(s.count, if key == egui::Key::PageUp { 1 } else { -1 });
+            }
+            egui::Event::MouseWheel { unit, delta, .. } if loop_cut && (s.hover.is_some() || s.slide.is_some()) => {
+                s.wheel += wheel_notches(unit, delta.y);
+                let steps = s.wheel.trunc();
+                if steps != 0. { s.count = step_count(s.count, steps as i32); s.wheel -= steps; }
+            }
+            egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers } if ready && canvas(pos) && !modifiers.alt => {
+                if tool == Tool::Knife {
+                    let p = ndc(pos);
+                    if s.points.len() < 513 && s.points.last().is_none_or(|a| (a[0]-p[0]).abs()+(a[1]-p[1]).abs() > 1e-6) { s.points.push(p); }
+                } else if let Some(sl) = s.slide {
+                    s.slide = None; commit(&s, sl.edge, slide_factor(sl.raw, modifiers.ctrl), out);
+                } else if let Some(edge) = s.hover {
+                    s.slide = Some(Slide { edge, raw: 0.5, press: pos, held: true, dragged: false });
+                }
+            }
+            egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: false, modifiers, .. } if loop_cut => {
+                if let Some(sl) = s.slide.as_mut() {
+                    // Press-drag-release (Blender) commits on release; a plain click keeps sliding (loop-tool.js).
+                    if sl.held && sl.dragged { let sl = s.slide.take().unwrap(); commit(&s, sl.edge, slide_factor(sl.raw, modifiers.ctrl), out); }
+                    else { sl.held = false; }
+                }
+            }
+            _ => {}
+        }
+    }
+    let painter = ui.painter_at(rect); let stroke = Stroke::new(2.5_f32,v.theme.warn);
+    let snap = modifiers.ctrl;
+    let active = s.slide.map(|sl| (sl.edge, slide_factor(sl.raw, snap))).or(s.hover.map(|e| (e, 0.5)));
+    if let (true, Some((seed, factor))) = (loop_cut, active) {
+        for (a,b) in s.mesh.preview(seed, s.count, factor) {
+            if let (Some(a),Some(b)) = (transform_gizmo::project(v.camera,rect,a),transform_gizmo::project(v.camera,rect,b)) { painter.line_segment([a,b],stroke); }
+        }
+        if let (Some(a), Some(b)) = (transform_gizmo::project(v.camera,rect,s.mesh.point(seed.0)), transform_gizmo::project(v.camera,rect,s.mesh.point(seed.1))) {
+            painter.line_segment([a,b],Stroke::new(1_f32,v.theme.text));
+        }
+        if let Some(p) = pointer {
+            let label = match s.slide { Some(_) if s.count == 1 => format!("{} cut  {factor:.3}", s.count), _ => format!("{} cut{}", s.count, if s.count == 1 { "" } else { "s" }) };
+            let at = p + vec2(16., -18.);
+            let galley = painter.layout_no_wrap(label, FontId::monospace(12.), v.theme.text);
+            painter.rect_filled(Rect::from_min_size(at - vec2(3., 2.), galley.size() + vec2(6., 4.)), 2., v.theme.panel);
+            painter.galley(at, galley, v.theme.text);
+        }
+    }
+    if tool == Tool::Knife {
+        let screen = |p: [f32;2]| pos2(rect.center().x+p[0]*rect.width()*0.5,rect.center().y-p[1]*rect.height()*0.5);
+        let mut path: Vec<_> = s.points.iter().map(|&p| screen(p)).collect();
+        if let Some(p) = pointer { if !path.is_empty() { path.push(p); } }
+        for pair in path.windows(2) { painter.line_segment([pair[0],pair[1]],stroke); }
+        for &p in &s.points { painter.circle_filled(screen(p),3.,v.theme.warn); }
+    }
+    let hint = if !ready { "Cut tools: display one cooked mesh stream".to_owned() }
+        else if tool == Tool::Knife { "Knife: click points | Enter apply | Backspace undo point | Esc/RMB exit".to_owned() }
+        else { loop_hint(s.count, s.slide.map(|sl| slide_factor(sl.raw, snap)), s.hover.is_some()) };
+    let galley = painter.layout_no_wrap(hint, FontId::monospace(11.), v.theme.text);
+    let chip = Rect::from_min_size(rect.min+vec2(56.,48.),vec2(galley.size().x + 16., 28.));
+    painter.rect_filled(chip,2.,v.theme.panel);
+    painter.galley(chip.left_center()+vec2(8.,-galley.size().y*0.5),galley,v.theme.text);
+    if s.slide.is_some() || s.hover.is_some() { ctx.request_repaint(); }
+    ctx.data_mut(|d| d.insert_temp(id(),s));
+}
+/// Status text with the cut count and, while sliding a single cut, the factor (loop-tool.js `showFeedback`).
+fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
+    let cuts = format!("{count} cut{}", if count == 1 { "" } else { "s" });
+    match slide {
+        Some(f) if count == 1 => format!("Loop Cut | {cuts} | factor {f:.3} | move to slide, Shift fine, Ctrl snap 0.1 | click/Enter confirm | RMB centred | Esc cancel"),
+        Some(_) => format!("Loop Cut | {cuts}, evenly spaced | wheel/PgUp/PgDn count | click/Enter confirm | RMB centred | Esc cancel"),
+        None if hovering => format!("Loop Cut | {cuts} | wheel/PgUp/PgDn count | click to slide | Enter centred cut | Esc/RMB exit"),
+        None => format!("Loop Cut | {cuts} | hover a quad edge | Esc/RMB exit"),
+    }
+}
+
+#[cfg(test)] mod tests {
+    use super::*;
+    fn ortho() -> CameraInfo {
+        CameraInfo { ortho: true, projection: [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]],
+            ray_origin: [0.,0.,10.], ray_forward: [0.,0.,-1.], ray_right: [1.,0.,0.], ray_up: [0.,1.,0.], ..Default::default() }
+    }
+    fn geo(p: Vec<f32>, verts: Vec<i32>, offsets: Vec<i32>) -> Geometry { Geometry::from_arrays(p, verts, offsets, None).unwrap() }
+    /// Two quads side by side in z = 0: 0(0,0) 1(1,0) 2(2,0) 3(0,1) 4(1,1) 5(2,1).
+    fn strip() -> Geometry { geo(vec![0.,0.,0., 1.,0.,0., 2.,0.,0., 0.,1.,0., 1.,1.,0., 2.,1.,0.], vec![0,1,4,3, 1,2,5,4], vec![0,4,8]) }
+    #[test] fn count_clamps_to_polysplit_range() {
+        assert_eq!(step_count(1, -1), 1);
+        assert_eq!(step_count(1, 3), 4);
+        assert_eq!(step_count(63, 5), 64);
+        assert_eq!(wheel_notches(egui::MouseWheelUnit::Point, 100.), 2.);
+    }
+    #[test] fn slide_follows_the_projected_seed_edge() {
+        let (a, b) = (pos2(0., 0.), pos2(200., 0.));
+        assert!((slide_step(0.5, vec2(50., 0.), a, b, false) - 0.75).abs() < 1e-9);
+        assert!((slide_step(0.5, vec2(-50., 0.), a, b, false) - 0.25).abs() < 1e-9);
+        assert!((slide_step(0.5, vec2(50., 0.), a, b, true) - 0.525).abs() < 1e-9, "shift is 10x finer");
+        assert!((slide_step(0.5, vec2(0., 80.), a, b, false) - 0.5).abs() < 1e-9, "motion across the edge does nothing");
+        assert_eq!(slide_step(0.9, vec2(500., 0.), a, b, false), 1.);
+        assert!((slide_step(0.5, vec2(50., 0.), a, a, false) - 1.0).abs() < 1e-9, "end-on edge uses 100px horizontal mapping");
+        assert_eq!(slide_factor(1., false), 0.999);
+        assert_eq!(slide_factor(0., false), 0.001);
+        assert_eq!(slide_factor(0.437, true), 0.4);
+        assert_eq!(slide_factor(0.43712, false), 0.4371);
+    }
+    #[test] fn hover_preview_is_the_node_ring_and_ignores_hidden_edges() {
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(200., 200.));
+        let cam = ortho();
+        let m = Mesh::new(&strip());
+        let over = |x: f32, y: f32| transform_gizmo::project(cam, rect, [x, y, 0.]).unwrap();
+        assert_eq!(m.hover(cam, rect, over(1., 0.5), false), Some((1, 4)));
+        assert_eq!(m.preview((1, 4), 2, 0.5).len(), 4, "two quads x two cuts");
+        assert_eq!(m.hover(cam, rect, over(1., 0.5) + vec2(30., 0.), false), None, "outside the radius");
+        // a larger quad in front (z = 1) hides the strip unless X-ray is on
+        let mut g = strip();
+        g = geo([g.p(), &[-1.,-1.,1., 3.,-1.,1., 3.,2.,1., -1.,2.,1.][..]].concat(), vec![0,1,4,3, 1,2,5,4, 6,7,8,9], vec![0,4,8,12]);
+        let m = Mesh::new(&g);
+        assert_eq!(m.hover(cam, rect, over(1., 0.5), false), None);
+        assert_eq!(m.hover(cam, rect, over(1., 0.5), true), Some((1, 4)));
+    }
+    #[test] fn perspective_hover_picks_the_front_edge() {
+        // camera at z = 10 looking down -z with a simple perspective projection (w = 10 - z)
+        let cam = CameraInfo { ortho: false, projection: [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,-1.],[0.,0.,0.,10.]],
+            ray_origin: [0.,0.,10.], ray_forward: [0.,0.,-1.], ray_right: [1.,0.,0.], ray_up: [0.,1.,0.], ..Default::default() };
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(200., 200.));
+        let m = Mesh::new(&strip());
+        let p = transform_gizmo::project(cam, rect, [1., 0.5, 0.]).unwrap();
+        assert_eq!(m.hover(cam, rect, p, false), Some((1, 4)));
+        let (o, d) = transform_gizmo::ray(cam, rect, p);
+        assert!((o[0] + d[0] * 10. / -d[2] - 1.).abs() < 1e-3, "ray goes through the projected point");
+    }
+    struct Harness { fixture: super::super::testing::Fixture, ctx: egui::Context, rect: Rect }
+    impl Harness {
+        fn new() -> Self {
+            let mut fixture = super::super::testing::Fixture::new();
+            fixture.editor.tool = Tool::LoopCut;
+            fixture.camera = ortho();
+            fixture.cooking.geometry = Some(Arc::new(strip()));
+            Self { fixture, ctx: egui::Context::default(), rect: Rect::from_min_size(Pos2::ZERO, vec2(1280., 800.)) }
+        }
+        fn at(&self, x: f32, y: f32) -> Pos2 { transform_gizmo::project(self.fixture.camera, self.rect, [x, y, 0.]).unwrap() }
+        fn frame(&self, events: Vec<egui::Event>) -> Vec<UiAction> {
+            let mut out = Actions::default();
+            let (rect, view) = (self.rect, self.fixture.view());
+            let _ = self.ctx.run(egui::RawInput { screen_rect: Some(rect), events, ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, rect, &view, &mut out));
+            });
+            out.0
+        }
+    }
+    fn button(pos: Pos2, button: egui::PointerButton, pressed: bool) -> egui::Event {
+        egui::Event::PointerButton { pos, button, pressed, modifiers: egui::Modifiers::NONE }
+    }
+    fn key(key: egui::Key) -> egui::Event { egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE } }
+    fn committed(actions: &[UiAction]) -> Option<Value> {
+        actions.iter().find_map(|a| match a { UiAction::MeshCutCommit { node_type, params, .. } if node_type == "loop_cut" => Some(params.clone()), _ => None })
+    }
+    #[test] fn wheel_count_click_slide_and_confirm_make_one_node_edit() {
+        let h = Harness::new();
+        let p = h.at(1., 0.5);
+        assert!(h.frame(vec![egui::Event::PointerMoved(p)]).is_empty());
+        assert!(captures_wheel(&h.ctx));
+        let wheel = egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: vec2(0., 1.), modifiers: egui::Modifiers::NONE };
+        assert!(h.frame(vec![wheel.clone(), wheel.clone(), key(egui::Key::PageDown), key(egui::Key::PageUp)]).is_empty());
+        assert!(h.frame(vec![button(p, egui::PointerButton::Primary, true)]).is_empty());
+        assert!(h.frame(vec![button(p, egui::PointerButton::Primary, false)]).is_empty(), "plain click keeps sliding");
+        assert!(blocks_navigation(&h.ctx));
+        let params = committed(&h.frame(vec![key(egui::Key::Enter)])).unwrap();
+        assert_eq!(params, json!({"mode":"edge_loop","split_edges":"p1-4","loops":3,"position":0.5}));
+        assert!(!blocks_navigation(&h.ctx));
+    }
+    #[test] fn drag_release_commits_the_slid_factor_and_rmb_commits_centred() {
+        let h = Harness::new();
+        let p = h.at(1., 0.5);
+        h.frame(vec![egui::Event::PointerMoved(p)]);
+        h.frame(vec![button(p, egui::PointerButton::Primary, true)]);
+        // drag a quarter of the edge towards point 4 (screen up), then release
+        let q = h.at(1., 0.75);
+        h.frame(vec![egui::Event::PointerMoved(q)]);
+        let params = committed(&h.frame(vec![button(q, egui::PointerButton::Primary, false)])).unwrap();
+        assert!((params["position"].as_f64().unwrap() - 0.75).abs() < 1e-3, "{params}");
+        assert_eq!(params["loops"], 1);
+        // RMB during a slide commits centred (loop-tool.js)
+        h.frame(vec![egui::Event::PointerMoved(p)]);
+        h.frame(vec![button(p, egui::PointerButton::Primary, true), button(p, egui::PointerButton::Primary, false)]);
+        h.frame(vec![egui::Event::PointerMoved(q)]);
+        let params = committed(&h.frame(vec![button(q, egui::PointerButton::Secondary, true)])).unwrap();
+        assert_eq!(params["position"], 0.5);
+    }
+    #[test] fn escape_cancels_without_a_node_and_select_tool_is_untouched() {
+        let mut h = Harness::new();
+        let p = h.at(1., 0.5);
+        h.frame(vec![egui::Event::PointerMoved(p)]);
+        h.frame(vec![button(p, egui::PointerButton::Primary, true)]);
+        assert!(h.frame(vec![key(egui::Key::Escape)]).is_empty(), "first Esc drops the pending cut only");
+        assert!(!blocks_navigation(&h.ctx));
+        let out = h.frame(vec![key(egui::Key::Escape)]);
+        assert!(committed(&out).is_none());
+        assert!(matches!(out.as_slice(), [UiAction::Editor(EditorChange::Tool(Tool::Select))]));
+        h.fixture.editor.tool = Tool::Select;
+        let wheel = egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: vec2(0., 1.), modifiers: egui::Modifiers::NONE };
+        assert!(h.frame(vec![egui::Event::PointerMoved(p), wheel, button(p, egui::PointerButton::Primary, true)]).is_empty());
+        assert!(!captures_wheel(&h.ctx) && !blocks_navigation(&h.ctx));
+    }
+    #[test] fn knife_projection_matches_viewport_with_non_square_aspect() {
+        let camera = CameraInfo { projection: [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]], ..Default::default() };
+        let rect = Rect::from_min_size(pos2(30.,20.),vec2(800.,400.));
+        let params = knife_params(camera,rect,&[[-0.5,0.],[0.5,0.]]);
+        let cuts: Value = serde_json::from_str(params["cuts"].as_str().unwrap()).unwrap();
+        assert_eq!(cuts[0]["matrix"][0],0.5); assert_eq!(cuts[0]["a"],json!([-0.5,0.]));
+        let screen = transform_gizmo::project(camera,rect,[1.,0.,0.]).unwrap();
+        assert_eq!((screen.x-rect.center().x)*2./rect.width(),0.5);
+    }
+}

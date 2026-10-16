@@ -19,6 +19,7 @@ suite = unittest.defaultTestLoader.loadTestsFromNames([
     "tests.test_addon_state", "tests.test_blender_addon", "tests.test_blender_modifiers",
     "tests.test_blender_server_control",
     "tests.test_blender_source_objects",
+    "tests.test_blender_nested_layout",
     "tests.test_blender_geonodes",
     "tests.test_blender_modeling",
     "tests.test_blender_scene_objects",

@@ -407,7 +407,7 @@ class SourceObjectTests(unittest.TestCase):
         self.assertEqual(self.m.get_source(mod), source)
         self.assertEqual(self.m._cache(mod), cache)
         self.assertEqual([tuple(v.co) for v in cache.data.vertices], positions)
-        active = [n for n in mod.node_group.nodes
+        active = [n for n in self.proxy.plumbing(mod.node_group).nodes
                   if n.name.startswith(self.proxy.INST_PREFIX + 'obj')
                   and n.bl_idname == 'GeometryNodeObjectInfo']
         self.assertTrue(active)

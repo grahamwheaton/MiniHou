@@ -443,6 +443,24 @@ and point/prim counts), `inspect_node` (counts, bounds and attribute ranges at a
 see below). The screenshots above are from exactly that loop.
 The same edit operations are available to scripts over HTTP (`POST /api/edit`, see `minihou/edit.py` and `minihou/web/server.py`).
 
+### MCP with the Rust app
+
+Start the native Rust MiniHou editor first: it serves the compatible local HTTP
+API on `127.0.0.1:8766`. Run `py tools\setup_mcp.py` once for Claude Code's
+`.mcp.json` and the printed Claude Desktop configuration. The existing Python
+MCP server works unchanged; `engine_status` shows `(rust)` in the version.
+Edits use native document history, appear in the editor/live Blender link, and
+can be undone as batches. Keep the Rust app running: if no engine answers,
+MCP's unchanged `open_graph` fallback starts the Python engine.
+
+Verify an already-running app with `python tools/mcp_smoke_rust.py` (read-only),
+or `python tools/mcp_smoke_rust.py --edit` for a disposable graph edit/undo test
+(save your current document first; opening another file resets its history).
+Python-only nodes/libraries report unavailable errors. Proxy reduces native
+viewport triangles; Rust geometry cooks stay full resolution. USD export uses
+the optional Python/OpenUSD writer (`numpy`, `usd-core`; set `MINIHOU_PYTHON`
+before starting the app if needed). See [the HTTP contract and limits](docs/RUST_MCP_API.md).
+
 ## Examples
 
 | file | what it shows |

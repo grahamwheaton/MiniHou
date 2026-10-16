@@ -51,6 +51,9 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
             let (name, _) = ui.allocate_exact_size(Vec2::new(55., 20.), Sense::hover());
             ui.painter().text(name.left_center(), Align2::LEFT_CENTER, "MiniHou", FontId::proportional(13.), v.theme.text);
             separator(ui, v);
+            ui.menu_button("File", |ui| {
+                if ui.button("Export USD…").clicked() { out.push(UiAction::Command("export_usd".into())); ui.close(); }
+            });
             if button(ui, "Open", "open", true, true, v, None) { out.push(UiAction::Open); }
             if button(ui, "Save As", "save", true, true, v, None) { out.push(UiAction::SaveAs); }
             separator(ui, v);

@@ -36,6 +36,8 @@ pub fn show(ctx: &egui::Context, open: &mut bool, prefs: &mut Preferences, keyma
                             changed |= ui.add(egui::Slider::new(&mut prefs.ui_scale,0.5..=3.).text("UI scale").step_by(0.05)).changed();
                             changed |= ui.add(egui::DragValue::new(&mut prefs.snap_increment).range(0.0001..=1000.).speed(0.01).prefix("Snap increment  ")).changed();
                             changed |= ui.checkbox(&mut prefs.show_stats,"Show statistics").changed();
+                            changed |= ui.add(egui::Slider::new(&mut prefs.node_physics_snappiness,0.0..=1.0).text("Node physics snappiness"))
+                                .on_hover_text("Higher values make connected nodes follow Shift-drag faster and settle sooner").changed();
                         }
                         Tab::Units => {
                             heading(ui,"Units",theme);
@@ -59,15 +61,25 @@ pub fn show(ctx: &egui::Context, open: &mut bool, prefs: &mut Preferences, keyma
                             }); });
                             ui.horizontal(|ui| { ui.label("Default shading");
                                 egui::ComboBox::from_id_salt("default_shading").selected_text(&prefs.viewport.default_shading).show_ui(ui, |ui| {
-                                    for mode in ["Shaded","Wireframe","Solid"] {
+                                    for mode in crate::viewport::Mode::ALL.map(|m| m.label()) {
                                         changed |= ui.selectable_value(&mut prefs.viewport.default_shading,mode.to_owned(),mode).changed();
                                     }
                                 });
                             });
+                            ui.horizontal(|ui| { ui.label("Other objects");
+                                egui::ComboBox::from_id_salt("object_visibility_pref").selected_text(prefs.viewport.object_visibility.label()).show_ui(ui,|ui| {
+                                    for visibility in crate::viewport::ObjectVisibility::ALL {
+                                        changed |= ui.selectable_value(&mut prefs.viewport.object_visibility,visibility,visibility.label()).changed();
+                                    }
+                                });
+                            });
+                            changed |= ui.checkbox(&mut prefs.viewport.fly_navigation,"Fly navigation (RMB + WASD)").changed();
                             changed |= ui.checkbox(&mut prefs.viewport.show_grid,"Show grid").changed();
                             changed |= ui.checkbox(&mut prefs.viewport.show_axes,"Show axes").changed();
                             changed |= ui.add(egui::DragValue::new(&mut prefs.viewport.auto_budget).range(1..=u32::MAX).speed(1_000.).prefix("Auto proxy triangle budget  ")).changed();
-                            changed |= ui.add(egui::DragValue::new(&mut prefs.viewport.view_distance).range(3.0..=1000.0).speed(1.0).prefix("View distance  ").suffix(" x")).changed();
+                            changed |= ui.add(egui::DragValue::new(&mut prefs.viewport.clip_start).range(1e-6..=1e8).speed(0.01).prefix("Clip Start  ")).changed();
+                            changed |= ui.add(egui::DragValue::new(&mut prefs.viewport.clip_end).range(1e-6..=1e9).speed(1.0).prefix("Clip End  ")).changed();
+                            (prefs.viewport.clip_start, prefs.viewport.clip_end) = minihou_app::sanitize_clip_planes(prefs.viewport.clip_start, prefs.viewport.clip_end);
                         }
                         Tab::Keymap => {
                             heading(ui,"Keymap",theme);

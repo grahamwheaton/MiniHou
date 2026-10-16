@@ -8,12 +8,75 @@ use crate::error::{Error, Result};
 use crate::geometry::Geometry;
 use crate::params::{ParamSpec, Params};
 
+pub mod blender_input;
+pub mod image_nodes;
+pub mod scene_objects;
 mod generate;
 mod groups;
+mod group;
+mod curves;
+mod copy_to_points;
+mod instance;
+mod foreach;
+mod attribs;
+mod attrib_tools;
+mod falloff;
+mod deform;
+mod uv;
 mod merge;
 mod modify;
+mod output;
+mod model;
+mod planar_offset;
+mod pushpull;
+mod boolean;
+mod boolean_fracture;
+mod reduce;
+#[cfg(test)]
+mod boolean_parity;
+mod solidify;
+mod edge_tools;
+mod subdivide;
+mod modeling_tools;
+mod profiles;
+mod bevel;
+mod knife;
+mod volume;
+mod fracture_voronoi;
+mod fracture_tools;
+mod ray;
+pub(crate) mod r#loop;
+mod scalar_expr;
+mod wrangle;
+mod blend;
+mod exploded_view;
+pub mod usd_nodes;
+mod np_random;
+mod pcg;
+mod procedural_systems;
+// time / physics family (docs/RUST_SOLVER_DESIGN.md)
+mod sim_common;
+mod goals;
+pub mod solver;
+mod rbd;
+pub mod rbd_engine;
+mod rbd_fracture_tools;
+#[cfg(test)]
+mod solver_parity;
+mod delaunay;
+mod surface;
+mod capture_deform;
+mod contour;
+mod heightfield;
+mod scatter;
+mod primitives;
+mod transform;
+mod materials_node;
+mod dissolve;
 
 pub use modify::{match_size_points, MatchSizeOut};
+pub use modeling_tools::{loop_cut_fractions, LoopRing, LoopTopology, LOOP_CUT_MAX};
+pub(crate) use copy_to_points::copy_limit_bytes;
 
 /// One input port.
 pub struct InputSpec {
@@ -46,6 +109,19 @@ const GEO: &[InputSpec] = &[InputSpec { name: "geo", multi: false, optional: fal
 /// Every node type, by name.
 pub fn registry() -> &'static [NodeSpec] {
     static NODES: &[NodeSpec] = &[
+        blender_input::BLENDER_OBJECT,
+        blender_input::MODIFIER_INPUT,
+        blender_input::OBJECT_INPUT,
+        wrangle::WRANGLE,
+        blend::BLEND,
+        exploded_view::EXPLODED_VIEW,
+        usd_nodes::USD_EXPORT,
+        usd_nodes::USD_IMPORT,
+        r#loop::LOOP_BEGIN,
+        r#loop::LOOP_END,
+        image_nodes::BLENDER_IMAGE,
+        image_nodes::IMAGE_OUT,
+        scene_objects::SCENE_OBJECTS,
         generate::GRID,
         generate::BOX,
         generate::POINT,
@@ -56,21 +132,162 @@ pub fn registry() -> &'static [NodeSpec] {
         generate::TUBE,
         generate::TORUS,
         generate::BOUND,
+        volume::SDF_SHAPE,
+        volume::SDF_BOOLEAN,
+        fracture_voronoi::VORONOI_FRACTURE,
+        fracture_voronoi::VORONOI_SPLIT,
+        fracture_tools::VORONOI_ADJACENCY,
+        ray::RAY,
         modify::TRANSFORM,
         modify::NORMAL,
         modify::NOISE,
         modify::MATCH_SIZE,
         modify::DELETE,
         merge::MERGE,
+        curves::BEZIER,
+        curves::HELIX,
+        curves::CONVERT_LINE,
+        curves::POLYPATH,
+        curves::RESAMPLE,
+        curves::CARVE,
+        curves::FILLET,
+        curves::CURVE_SIMPLIFY,
+        copy_to_points::COPY_TO_POINTS,
+        instance::INSTANCE,
+        foreach::FOR_EACH,
+        group::GROUP_PROMOTE,
+        group::GROUP_CREATE,
+        group::GROUP_EXPAND,
+        group::BLAST,
+        attribs::ATTRIBUTE_DELETE,
+        attribs::ATTRIBUTE_RENAME,
+        attrib_tools::ATTRIBUTE_CREATE,
+        attrib_tools::ATTRIBUTE_PROMOTE,
+        attrib_tools::ATTRIBUTE_BLUR,
+        attrib_tools::CONNECTIVITY,
+        attrib_tools::SMOOTH,
+        attrib_tools::MEASURE,
+        falloff::FALLOFF,
+        deform::BEND,
+        uv::UV_PROJECT,
+        uv::UV_TRANSFORM,
+        model::REVERSE,
+        model::FACET,
+        model::DIVIDE,
+        model::MIRROR,
+        model::CLIP,
+        model::POLYFILL,
+        model::POLYEXTRUDE,
+        pushpull::INSET,
+        pushpull::OUTSET,
+        boolean::BOOLEAN,
+        boolean_fracture::BOOLEAN_FRACTURE,
+        reduce::POLYREDUCE,
+        pushpull::PUSHPULL,
+        solidify::SOLIDIFY,
+        edge_tools::CREASE,
+        edge_tools::EDGE_GROUP,
+        edge_tools::EDGE_GROUP_PROMOTE,
+        edge_tools::POLYBRIDGE,
+        edge_tools::DISSOLVE,
+        subdivide::SUBDIVIDE,
+        modeling_tools::TWIST,
+        modeling_tools::LINEAR_TAPER,
+        modeling_tools::SQUASH_STRETCH,
+        modeling_tools::SOFT_PEAK,
+        modeling_tools::GROUP_RANGE,
+        modeling_tools::EDGE_COLLAPSE,
+        modeling_tools::EDGE_FLIP,
+        modeling_tools::EDGE_CUSP,
+        modeling_tools::POLYSPLIT,
+        modeling_tools::LOOP_CUT,
+        profiles::SKIN_PROFILES,
+        profiles::POLYEXPAND2D,
+        bevel::POLYBEVEL,
+        knife::KNIFE,
+        pcg::PCG_POINTS,
+        pcg::PCG_TRANSFORM,
+        pcg::PCG_BOUNDS,
+        pcg::PCG_UNION,
+        pcg::PCG_DIFFERENCE,
+        pcg::PCG_INTERSECTION,
+        pcg::PCG_DENSITY_FILTER,
+        pcg::PCG_DENSITY_NOISE,
+        pcg::PCG_DISTANCE,
+        pcg::PCG_COPY_POINTS,
+        pcg::PCG_SELF_PRUNE,
+        pcg::PCG_PROJECTION,
+        pcg::PCG_SPLINE_SAMPLER,
+        pcg::PCG_SPAWNER,
+        pcg::PCG_VOLUME_SAMPLER,
+        pcg::PCG_SURFACE_SAMPLER,
+        pcg::PCG_DEBUG,
+        procedural_systems::BUILDING_RULES,
+        procedural_systems::REGION_IDENTIFY,
+        procedural_systems::REGION_TRANSFORM,
+        fracture_tools::ASSEMBLE,
+        goals::GOAL_LENGTH,
+        goals::GOAL_COLLISION,
+        goals::GOAL_SURFACE,
+        goals::GOAL_GRAVITY,
+        goals::GOAL_PIN,
+        goals::GOAL_SOLVE,
+        solver::SOLVER,
+        rbd::RBD_CONFIGURE,
+        rbd::RBD_CONSTRAINT,
+        rbd::RBD_SOLVER,
+        rbd_fracture_tools::RBD_CONSTRAINT_PROPERTIES,
         NodeSpec { name: "lod_bake", inputs: GEO, params: crate::params!("cluster_size": 128; "error_px": 1.0; "enabled": true; "min_triangles": 50000), cook: lod_bake },
         NodeSpec { name: "null", inputs: GEO, params: crate::params!("label": ""), cook: pass_through },
-        NodeSpec { name: "output", inputs: GEO, params: crate::params!("object": ""), cook: pass_through },
+        delaunay::DELAUNAY,
+        surface::BRIDGE,
+        surface::REVOLVE,
+        curves::SWEEP,
+        surface::SKIN,
+        capture_deform::LATTICE,
+        capture_deform::LATTICE_GRID,
+        curves::PATH_DEFORM,
+        capture_deform::POINT_DEFORM,
+        volume::POINTS_TO_SURFACE,
+        contour::CONTOUR,
+        volume::REMESH,
+        heightfield::HEIGHTFIELD_ERODE,
+        scatter::SCATTER,
+        deform::POINT_JITTER,
+        deform::POINT_RELAX,
+        attrib_tools::SORT,
+        merge::SWITCH,
+        deform::CLEAN,
+        primitives::FUSE,
+        transform::PEAK,
+        capture_deform::SOFT_TRANSFORM,
+        transform::COPY_TRANSFORM,
+        attrib_tools::ATTRIBUTE_RANDOMIZE,
+        attrib_tools::ATTRIBUTE_TRANSFER,
+        attrib_tools::COLOR,
+        materials_node::SET_MATERIAL,
+        surface::CONVEX_HULL,
+        contour::SLICE,
+        dissolve::DISSOLVE,
+        output::OUTPUT,
+        output::INPUT,
     ];
     NODES
 }
 
 pub fn get(name: &str) -> Option<&'static NodeSpec> {
     registry().iter().find(|n| n.name == name)
+}
+
+/// Node types whose result depends on the current frame whatever their parameters (Python: `key_extra` uses `timectx.key()`).
+pub const TIME_DEPENDENT: &[&str] = &["solver", "rbd_solver"];
+
+/// The node's cache key must include the frame: its type always depends on time, or a string parameter uses
+/// `@Frame`/`@Time`/`@TimeInc` (or `animated` is on). See [`crate::timectx`].
+pub fn is_time_dependent(node_type: &str, params: Option<&serde_json::Map<String, serde_json::Value>>) -> bool {
+    TIME_DEPENDENT.contains(&node_type) || node_type == "usd_export"
+        || (node_type == "usd_import" && params.is_some_and(|p| p.get("time").and_then(serde_json::Value::as_str) == Some("frame")))
+        || params.is_some_and(crate::timectx::params_use_time)
 }
 
 fn pass_through(inputs: &Inputs, _p: &Params) -> Result<Geometry> {

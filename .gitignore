@@ -15,4 +15,11 @@ graphs/
 
 # Rust build output
 rust/target/
+rust/target_mcp/
+rust/target_usd/
 rust-wheels/
+
+# Local helper scratch and per-helper cargo target dirs
+rust/target_*/
+.claude/tmp/
+integration-*.log

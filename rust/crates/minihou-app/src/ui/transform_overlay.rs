@@ -29,16 +29,18 @@ pub fn show(ui: &egui::Ui, rect: Rect, v: &View<'_>, modal: &Modal) {
     if let Some(target) = modal.target.and_then(|p|project(v.camera,rect,p)) {
         if let Some(shape)=modal.target_shape {
             let points=shape.map(|p|project(v.camera,rect,p));
-            match modal.snap_to {
-                SnapTo::Edge | SnapTo::EdgeCenter => {
+            match modal.target_kind {
+                Some(SnapTo::Edge | SnapTo::EdgeCenter) => {
                     let pairs=[(0,1),(1,2),(2,0)];
+                    let distance=|a: Pos2,b: Pos2| { let ab=b-a;
+                        let t=((target-a).dot(ab)/ab.length_sq().max(1e-8)).clamp(0.,1.);
+                        (target-(a+ab*t)).length_sq() };
                     if let Some((a,b))=pairs.into_iter().filter_map(|(a,b)|Some((points[a]?,points[b]?)))
-                        .min_by(|(a,b),(c,d)| (((*a+(*b-*a)*0.5)-target).length())
-                            .total_cmp(&(((*c+(*d-*c)*0.5)-target).length()))) {
+                        .min_by(|(a,b),(c,d)| distance(*a,*b).total_cmp(&distance(*c,*d))) {
                         line(ui,rect,a,b,v.theme.accent,3.);
                     }
                 }
-                SnapTo::Face => if let [Some(a),Some(b),Some(c)]=points {
+                Some(SnapTo::Face) => if let [Some(a),Some(b),Some(c)]=points {
                     painter.add(egui::Shape::convex_polygon(vec![a,b,c],v.theme.accent.gamma_multiply(0.25),
                         Stroke::new(2_f32,v.theme.accent)));
                 },

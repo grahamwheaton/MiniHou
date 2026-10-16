@@ -4,7 +4,6 @@ use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, Str
 use minihou_app::{clamp_parameter, metadata_kind, param_kind, param_meta, slider_range, Edit, ParamKind};
 use minihou_core::{nodes, params::ParamSpec};
 use serde_json::{json, Value};
-use std::collections::HashSet;
 
 const DISABLED: &str = "The Rust backend does not support it yet";
 
@@ -176,21 +175,6 @@ fn icon(ui: &mut egui::Ui, rect: Rect, id: egui::Id, reset: bool, on: bool, them
     response
 }
 
-fn exposed(ui: &egui::Ui, id: &str, name: &str) -> bool {
-    ui.ctx().data_mut(|d| d.get_persisted::<HashSet<(String, String)>>(egui::Id::new("params_exposed")))
-        .is_some_and(|set| set.contains(&(id.to_owned(), name.to_owned())))
-}
-
-fn toggle_exposed(ui: &egui::Ui, id: &str, name: &str) {
-    ui.ctx().data_mut(|d| {
-        let key = egui::Id::new("params_exposed");
-        let pair = (id.to_owned(), name.to_owned());
-        let mut set = d.get_persisted::<HashSet<(String, String)>>(key).unwrap_or_default();
-        if !set.insert(pair.clone()) { set.remove(&pair); }
-        d.insert_persisted(key, set);
-    });
-}
-
 #[allow(clippy::too_many_arguments)]
 fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, param: &ParamSpec, locked: bool, errors: &mut Vec<String>) {
     let default = (param.default)();
@@ -198,7 +182,24 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     let mut value = old.clone();
     let modified = old != default;
     let meta = param_meta(typ, param.name);
+    let synthetic_meta;
+    let meta = if param.name == "uniform_scale" {
+        let mut m = meta.cloned().unwrap_or_else(|| json!({"kind": "float", "default": 1.0}));
+        if m.get("min").is_none() { m["min"] = json!(0.0); }
+        if m.get("soft_max").is_none() && m.get("max").is_none() { m["soft_max"] = json!(10.0); }
+        synthetic_meta = m;
+        Some(&synthetic_meta)
+    } else {
+        meta
+    };
     let kind = meta.map_or_else(|| param_kind(&default), |m| metadata_kind(m, &default));
+    // Metadata-driven optional controls (for example Ray's distance and hit-output toggles).
+    let condition_enabled = meta.and_then(|m| m["enabled_if"].as_object()).is_none_or(|conditions| {
+        conditions.iter().all(|(name, expected)| {
+            let fallback = nodes::get(typ).and_then(|s| s.params.iter().find(|p| p.name == name)).map(|p| (p.default)()).unwrap_or(Value::Null);
+            value_of(v, id, name, &fallback) == *expected
+        })
+    });
     let reason = invalid_reason(meta, &old).or_else(|| node_error(v, id).and_then(|error| {
         error.to_lowercase().contains(&param.name.replace('_', " ")).then(|| error.to_owned())
     }));
@@ -210,36 +211,66 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     let control = Rect::from_min_max(Pos2::new(label.right() + 6., r.top() + 3.), Pos2::new(reset_rect.left() - 6., r.bottom() - 3.));
     if modified { ui.painter().circle_filled(Pos2::new(r.left() + 9., r.center().y), 3., v.theme.accent); }
     let is_length = crate::units::is_length_param(typ, param.name);
-    let ink = if !param.supported { v.theme.faint } else if modified { v.theme.text } else { v.theme.dim };
+    let units_opt = if is_length { Some(v.units) } else { None };
+    let ink = if !param.supported || !condition_enabled { v.theme.faint } else if modified { v.theme.text } else { v.theme.dim };
     let label_text = if is_length { format!("{} ({})", title(param.name), v.units.display.symbol()) } else { title(param.name) };
     paint_text(ui, Pos2::new(label.left(), label.center().y), &label_text, 12., false, ink, Align2::LEFT_CENTER);
-    let label_response = ui.interact(label, ui.id().with((id, param.name, "label")), Sense::hover());
+
+    let is_vec3 = kind == ParamKind::Vec3;
+    let label_sense = if is_vec3 && param.supported && !locked && condition_enabled { Sense::click_and_drag() } else { Sense::hover() };
+    let label_response = ui.interact(label, ui.id().with((id, param.name, "label")), label_sense);
     let doc = meta.and_then(|m| m["doc"].as_str()).unwrap_or("");
-    if !param.supported { label_response.on_hover_text(DISABLED); }
-    else if !doc.is_empty() { label_response.on_hover_text(doc); }
+    if !param.supported { label_response.clone().on_hover_text(DISABLED); }
+    else if !doc.is_empty() { label_response.clone().on_hover_text(doc); }
+
+    if is_vec3 && param.supported && !locked && condition_enabled {
+        if label_response.hovered() || label_response.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+        if label_response.dragged_by(egui::PointerButton::Middle) {
+            let mut delta = ui.ctx().input(|i| i.pointer.delta());
+            let screen = ui.ctx().screen_rect();
+            if screen.width() > 10.0 && screen.height() > 10.0 {
+                crate::wrap_drag(ui.ctx(), screen, &mut delta);
+            }
+            let speed = meta.and_then(slider_range).map_or(0.01, |r| ((r.end() - r.start()) / 400.).clamp(0.001, 1.));
+            let step = if let Some(u) = units_opt {
+                delta.x as f64 * speed * u.display.metres() / u.unit_scale
+            } else {
+                delta.x as f64 * speed
+            };
+            if step != 0. {
+                let range = meta.and_then(|m| m["min"].as_f64()).unwrap_or(f64::NEG_INFINITY)..=meta.and_then(|m| m["max"].as_f64()).unwrap_or(f64::INFINITY);
+                let mut v = [0, 1, 2].map(|i| value.get(i).and_then(Value::as_f64).unwrap_or(0.));
+                for x in &mut v {
+                    *x = (*x + step).clamp(*range.start(), *range.end());
+                }
+                value = json!(v);
+            }
+        }
+    }
 
     if control.width() > 4. {
         if reason.is_some() { ui.painter().rect_stroke(control, 4., Stroke::new(1.0_f32, v.theme.err), StrokeKind::Outside); }
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(control).id_salt((id, param.name, "widget")).layout(egui::Layout::left_to_right(egui::Align::Center)));
         child.set_width(control.width());
         child.spacing_mut().item_spacing.x = 4.;
-        let enabled = param.supported && !locked;
-        let units_opt = if is_length { Some(v.units) } else { None };
+        let enabled = param.supported && !locked && condition_enabled;
         let response = child.add_enabled_ui(enabled, |ui| widget_styled(ui, kind, meta, &mut value, Some(v.theme), control.width(), units_opt)).response;
-        if !enabled { response.on_disabled_hover_text(if locked { "Locked" } else { DISABLED }); }
+        if !enabled { response.on_disabled_hover_text(if locked { "Locked" } else if !condition_enabled { "Enable the controlling parameter first" } else { DISABLED }); }
     }
     if param.supported && !locked && value != old {
-        let dragging = ui.ctx().input(|input| input.pointer.primary_down());
+        let dragging = ui.ctx().input(|input| input.pointer.primary_down() || input.pointer.middle_down());
         out.push(UiAction::Edit { edit: Edit::Param { node: id.to_owned(), name: param.name.to_owned(), value }, continuous: dragging });
     }
     if modified && !locked && icon(ui, reset_rect, ui.id().with((id, param.name, "reset")), true, false, v.theme)
         .on_hover_text(format!("Reset {} to {}", label_text, default)).clicked() {
         out.push(UiAction::Edit { edit: Edit::Param { node: id.to_owned(), name: param.name.to_owned(), value: default }, continuous: false });
     }
-    let on = exposed(ui, id, param.name);
+    let on = minihou_app::is_exposed(v.doc, id, param.name);
     if icon(ui, expose_rect, ui.id().with((id, param.name, "expose")), false, on, v.theme)
         .on_hover_text(if on { "Exposed: click to remove" } else { "Expose parameter" }).clicked() {
-        toggle_exposed(ui, id, param.name);
+        out.push(UiAction::Edit { edit: minihou_app::toggle_exposed(v.doc, id, param.name), continuous: false });
     }
 }
 
@@ -399,10 +430,17 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
             let mut v = value.as_f64().unwrap_or(0.);
             let integer = kind == ParamKind::Integer;
             let mut changed = false;
+            let s_range = slider_range(meta).or_else(|| {
+                if meta.get("doc").and_then(Value::as_str) == Some("Multiplies scale") {
+                    Some(0.0..=10.0)
+                } else {
+                    None
+                }
+            });
             if !integer {
-                if let Some(range) = slider_range(meta) {
+                if let Some(range) = s_range.clone() {
                     let (min, max) = (*range.start(), *range.end());
-                    let box_w = if units.is_some() { 68. } else { 52. };
+                    let box_w = if units.is_some() { 84. } else { 68. };
                     ui.spacing_mut().slider_width = (width - box_w - 6.).max(8.);
                     let response = ui.scope(|ui| {
                         let w = &mut ui.visuals_mut().widgets;
@@ -433,13 +471,13 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
                     }
                 }
             }
-            let box_w = if units.is_some() { 68. } else { 52. };
+            let box_w = if units.is_some() { 84. } else { 68. };
             let drag_width = if integer { width - if theme.is_some() { 32. } else { 0. } }
-                else if slider_range(meta).is_some() { box_w } else { width };
-            let range = meta["min"].as_f64().unwrap_or(f64::NEG_INFINITY)..=meta["max"].as_f64().unwrap_or(f64::INFINITY);
+                else if s_range.is_some() { box_w } else { width };
+            let range = meta["min"].as_f64().or_else(|| if s_range.is_some() { Some(0.0) } else { None }).unwrap_or(f64::NEG_INFINITY)..=meta["max"].as_f64().unwrap_or(f64::INFINITY);
             if let (Some(t), false) = (theme, integer) {
                 let (outer, inner) = boxed(ui, drag_width.max(24.), t);
-                let drag_speed = slider_range(meta).map_or(0.01, |r| ((r.end() - r.start()) / 400.).clamp(0.001, 1.));
+                let drag_speed = s_range.map_or(0.01, |r| ((r.end() - r.start()) / 400.).clamp(0.001, 1.));
                 changed |= drag_number(ui, inner, ui.id().with(("num", meta["default"].to_string(), outer.min.x as i32, outer.min.y as i32)), &mut v, drag_speed, &range, false, Align2::RIGHT_CENTER, t, units);
             } else if let Some(u) = units {
                 changed |= ui.add_sized([drag_width.max(24.), 22.], egui::DragValue::new(&mut v).speed(0.01).range(range).suffix(format!(" {}", u.display.symbol()))).changed();
@@ -531,6 +569,35 @@ mod tests {
     use crate::ui::testing::Fixture;
 
     #[test]
+    fn clicking_expose_emits_saved_document_edit_for_the_link_interface() {
+        let mut f=Fixture::new();
+        f.doc=minihou_app::Document::parse(json!({"display":"box1","nodes":{"box1":{"type":"box"}}}).to_string()).unwrap();
+        f.graph=minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected="box1".into();f.display="box1".into();
+        let ctx=egui::Context::default();f.theme.apply(&ctx);
+        let mut click=None;let mut actions=Actions::default();
+        for phase in 0..3 {
+            let events=match (phase,click) {
+                (1,Some(pos))=>vec![egui::Event::PointerMoved(pos),egui::Event::PointerButton{pos,button:egui::PointerButton::Primary,pressed:true,modifiers:egui::Modifiers::NONE}],
+                (2,Some(pos))=>vec![egui::Event::PointerButton{pos,button:egui::PointerButton::Primary,pressed:false,modifiers:egui::Modifiers::NONE}],
+                _=>vec![],
+            };
+            let input=egui::RawInput{screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(800.,600.))),events,..Default::default()};
+            let v=f.view();
+            let _=ctx.run(input,|ctx|{egui::CentralPanel::default().show(ctx,|ui|{
+                let param=minihou_core::nodes::get("box").unwrap().params.iter().find(|p|p.name=="size").unwrap();
+                row(ui,&v,&mut actions,"box1","box",param,false,&mut vec![]);
+                click=ui.ctx().read_response(ui.id().with(("box1","size","expose"))).map(|r|r.rect.center());
+            });});
+        }
+        let edit=actions.0.into_iter().find_map(|a|match a {UiAction::Edit{edit:edit @ Edit::Exposed(_),..}=>Some(edit),_=>None}).expect("Expose click must emit a document edit");
+        let mut history=minihou_app::History::default();history.edit(&mut f.doc,&edit).unwrap();history.finish(&f.doc);
+        assert_eq!(f.doc.value()["exposed"][0]["param"],"size");
+        assert_eq!(minihou_app::link_interface(f.doc.value())["params"][0]["name"],"box1_size");
+        history.undo(&mut f.doc);assert!(!minihou_app::is_exposed(f.doc.value(),"box1","size"));
+    }
+
+    #[test]
     fn titles_and_invalid_ranges() {
         assert_eq!(title("attribute_create"), "Attribute Create");
         assert_eq!(invalid_reason(Some(&json!({"min": 1, "max": 4})), &json!(0)), Some("Value must be at least 1.".into()));
@@ -603,5 +670,28 @@ mod tests {
         let mut texts = Vec::new();
         extract_texts(&full_output.shapes, &mut texts);
         assert!(texts.iter().any(|t| t == "1000 mm"), "expected '1000 mm' in painted texts, got: {texts:?}");
+    }
+
+    #[test]
+    fn uniform_scale_slider_and_vector_scrub() {
+        let mut f = Fixture::new();
+        f.doc = minihou_app::Document::parse(json!({
+            "version": 1,
+            "display": "transform1",
+            "nodes": {
+                "transform1": {
+                    "type": "transform",
+                    "params": {
+                        "translate": [1.0, 2.0, 3.0],
+                        "scale": [1.0, 1.0, 1.0],
+                        "uniform_scale": 1.0
+                    }
+                }
+            }
+        }).to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected = "transform1".into();
+        f.display = "transform1".into();
+        assert!(f.run(show).is_empty());
     }
 }

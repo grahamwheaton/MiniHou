@@ -2,23 +2,35 @@
 //! snapping, proportional editing, overlays, X-ray, shading, Frame), left tool strip, bottom timeline, stats chip, view gizmo,
 //! error and dense-mesh notes. `rect` is the viewport's area; the 3-D image is already painted into it.
 use super::{theme::Theme, Actions, EditorChange, Falloff, Orientation, Pivot, SelectionMode, SnapTo, Tool, UiAction, View};
-use crate::viewport::Mode;
+use crate::viewport::{Mode, ObjectVisibility};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
 #[path = "view_gizmo.rs"] mod view_gizmo;
+#[path = "ray_guide.rs"] mod ray_guide;
 
 /// Render primitive handles over the viewport when a primitive generator is selected.
 pub fn handles(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool {
+    ray_guide::show(ui, rect, v);
     super::prim_handles::show(ui, rect, v, out)
 }
 
 const HEADER_H: f32 = 36.;
 const TIMELINE_H: f32 = 44.;
-const TOOLS: [(&str, Icon); 7] = [
+const TOOLS: [(&str, Icon); 14] = [
     ("Select (Q)", Icon::Select), ("3D cursor", Icon::Cursor), ("Move (G)", Icon::Move), ("Rotate (R)", Icon::Rotate),
     ("Scale (S)", Icon::Scale), ("Transform", Icon::Transform), ("Measure", Icon::Measure),
+    ("Draw Line", Icon::Line), ("Draw Polyline (Enter finish)", Icon::Polyline),
+    ("Draw Polygon (Enter finish)", Icon::Polygon), ("Draw Rectangle", Icon::Rectangle), ("Draw Circle", Icon::Circle),
+    ("Knife (K): click points, Enter confirm", Icon::Knife), ("Loop Cut (Ctrl+R): hover a quad edge, wheel count, click then slide, click confirm", Icon::LoopCut),
 ];
+/// Keep region presses off viewport chrome (header, timeline, tool strip and view gizmo).
+pub fn selection_canvas_contains(rect: Rect, p: Pos2) -> bool {
+    p.y > rect.top() + HEADER_H
+        && !(p.x >= rect.left() + 56. && p.x <= rect.left() + 252. && p.y < rect.top() + HEADER_H + 34.) && p.y < rect.bottom() - TIMELINE_H
+        && !(p.x < rect.left() + 52. && p.y < rect.top() + HEADER_H + 12. + TOOLS.len() as f32 * 28. + 28.)
+        && !(p.x > rect.right() - 110. && p.y < rect.top() + HEADER_H + 115.)
+}
 const DENSE_PRIMS: usize = 40_000;
-const FRAME_START: u32 = 1;
+const FRAME_START: u32 = 0;
 const FRAME_END: u32 = 240;
 
 /// UI-only viewport state (nothing here reaches the engine yet).
@@ -42,21 +54,21 @@ pub fn timeline_command(ctx: &egui::Context, command: &str) {
 }
 impl Default for VpState {
     fn default() -> Self {
-        Self { popover: None, frame: 48, playing: false, clock: 0. }
+        Self { popover: None, frame: FRAME_START, playing: false, clock: 0. }
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Popover { Orientation, Pivot, Snap, Proportional, Overlays }
+enum Popover { Orientation, Pivot, Snap, Proportional, Overlays, Shading, Visibility }
 fn toggle_popover(open: Option<Popover>, next: Popover) -> Option<Popover> { if open == Some(next) { None } else { Some(next) } }
 const OVERLAYS: [(&str, &str); 6] = [("Grid floor", ""), ("Axis gizmo", ""), ("Edges in solid", ""), ("Stats", ""), ("Normals", ""), ("Bounding box", "")];
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Icon { Object, Points, Edges, Faces, Orient, Pivot, Magnet, Prop, Overlays, Xray, Solid, Shaded, Wire, ShadedWire, Frame,
-    Select, Cursor, Move, Rotate, Scale, Transform, Measure, ToStart, Prev, Play, Pause, Next, ToEnd }
+enum Icon { Display(Mode), Visibility(ObjectVisibility), Object, Points, Edges, Faces, Orient, Pivot, Magnet, Prop, Overlays, Xray, Solid, Shaded, Wire, ShadedWire, Frame,
+    Select, BoxSelect, CircleSelect, LassoSelect, Cursor, Move, Rotate, Scale, Transform, Measure, Line, Polyline, Polygon, Rectangle, Circle, Knife, LoopCut, ToStart, Prev, Play, Pause, Next, ToEnd }
 
 /// Where every header control sits, from the viewport's left/top/width. Pure so it can be tested at any width.
 #[derive(Debug)]
-struct HeaderLayout { modes: [Rect; 4], orient: Rect, pivot: Rect, snap: Rect, prop: Rect, proxy: Rect, overlays: Rect, xray: Rect, shading: [Rect; 4], frame: Rect, seps: Vec<f32>, groups: Vec<Rect> }
+struct HeaderLayout { modes: [Rect; 4], orient: Rect, pivot: Rect, snap: Rect, prop: Rect, proxy: Rect, overlays: Rect, shading: Rect, visibility: Rect, frame: Rect, seps: Vec<f32>, groups: Vec<Rect> }
 fn header_layout(left: f32, top: f32, width: f32, snap_on: bool) -> HeaderLayout {
     let cy = top + HEADER_H / 2.;
     let mk = |x: f32, w: f32, h: f32| Rect::from_min_size(Pos2::new(x, cy - h / 2.), Vec2::new(w, h));
@@ -78,17 +90,13 @@ fn header_layout(left: f32, top: f32, width: f32, snap_on: bool) -> HeaderLayout
     let mut r = left + width - 6.;
     let frame = mk(r - 26., 26., 26.); r -= 26. + 3.;
     seps.push(r - 4.); r -= 9.;
-    let gright = r;
-    let gleft = gright - (4. * 25. - 1. + 4.);
-    let shading = [0, 1, 2, 3].map(|i| mk(gleft + 2. + i as f32 * 25., 24., 22.));
-    groups.push(Rect::from_min_max(Pos2::new(gleft, cy - 13.), Pos2::new(gright, cy + 13.)));
-    r = gleft;
+    let visibility = mk(r - 42., 42., 26.); r -= 45.;
+    let shading = mk(r - 42., 42., 26.); r -= 45.;
     seps.push(r - 4.); r -= 9.;
-    let xray = mk(r - 26., 26., 26.); r -= 26. + 3.;
     let overlays = mk(r - 44., 44., 26.);
     let proxy_width = (overlays.left() - prop.right() - 16.).clamp(0., 100.);
     let proxy = mk(overlays.left() - 8. - proxy_width, proxy_width, 26.);
-    HeaderLayout { modes, orient, pivot, snap, prop, proxy, overlays, xray, shading, frame, seps, groups }
+    HeaderLayout { modes, orient, pivot, snap, prop, proxy, overlays, shading, visibility, frame, seps, groups }
 }
 
 /// "node 'noise1' (noise): ValueError: ..." -> (Some("noise1"), "ValueError: ...")
@@ -108,6 +116,7 @@ fn frame_at(x: f32, left: f32, right: f32) -> u32 {
 }
 
 pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
+    show_shading_pie(ui.ctx(), rect, v, out);
     let ctx = ui.ctx().clone();
     let id = egui::Id::new("viewport_ui_state");
     let mut st: VpState = ctx.data_mut(|d| d.get_temp(id)).unwrap_or_default();
@@ -119,7 +128,7 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     painter.rect_filled(Rect::from_min_size(rect.min, Vec2::new(rect.width(), HEADER_H)), 0., th.panel);
     painter.line_segment([Pos2::new(rect.left(), rect.top() + HEADER_H), Pos2::new(rect.right(), rect.top() + HEADER_H)], stroke);
     let ed = v.editor;
-    let show = [ed.overlays.grid, ed.overlays.axes, ed.overlays.wireframe, ed.overlays.stats, ed.overlays.normals, ed.overlays.bounds];
+    let show = [ed.overlays.grid, ed.overlays.axes, ed.overlays.wireframe, ed.overlays.stats, ed.overlays.normals, ed.overlays.bounds].map(|b| b && ed.overlays.enabled);
     let h = header_layout(rect.left(), rect.top(), rect.width(), ed.snap.enabled);
     for g in &h.groups { painter.rect(*g, 5., th.panel2, stroke, StrokeKind::Inside); }
     for x in &h.seps { painter.line_segment([Pos2::new(*x, rect.top() + 9.), Pos2::new(*x, rect.top() + HEADER_H - 9.)], stroke); }
@@ -129,7 +138,11 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     }
     if button_text(ui, th, h.orient, "vp_orient", st.popover == Some(Popover::Orientation), "Transform orientation", Icon::Orient, (Some(ed.orientation.label()), true)) { st.popover = toggle_popover(st.popover, Popover::Orientation); }
     if button_text(ui, th, h.pivot, "vp_pivot", st.popover == Some(Popover::Pivot), "Pivot point", Icon::Pivot, (None, true)) { st.popover = toggle_popover(st.popover, Popover::Pivot); }
-    let snap_label = crate::units::format(ed.snap.increment as f64, v.units);
+    let snap_label = if ed.snap.to == SnapTo::Increment.into() { crate::units::format(ed.snap.increment as f64, v.units) }
+        else if ed.snap.to.iter().count()>1 { "Multi".into() }
+        else { match ed.snap.to.iter().next().unwrap_or_default() {
+            SnapTo::Vertex=>"Vtx",SnapTo::Edge=>"Edge",SnapTo::Face=>"Face",SnapTo::Volume=>"Vol",SnapTo::EdgeCenter=>"Mid",SnapTo::Increment=>"Grid"
+        }.into() };
     let snap_main = Rect::from_min_max(h.snap.min, Pos2::new(h.snap.right() - 16., h.snap.bottom()));
     if button_text(ui, th, snap_main, "vp_snap_toggle", ed.snap.enabled, "Toggle snapping (Shift+Tab)", Icon::Magnet, (if ed.snap.enabled && h.snap.width() > 44. { Some(snap_label.as_str()) } else { None }, false)) { out.push(UiAction::Editor(EditorChange::SnapEnabled(!ed.snap.enabled))); }
     if caret_button(ui, th, h.snap, "vp_snap_menu", st.popover == Some(Popover::Snap)) { st.popover = toggle_popover(st.popover, Popover::Snap); }
@@ -140,26 +153,59 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         ui.set_clip_rect(h.proxy);
         super::proxy_ui::menu(ui, v, out, h.proxy.width() < 80.);
     });
-    if button_text(ui, th, h.overlays, "vp_overlays", st.popover == Some(Popover::Overlays), "Overlays", Icon::Overlays, (None, true)) { st.popover = toggle_popover(st.popover, Popover::Overlays); }
-    if button(ui, th, h.xray, ("vp_xray", 0), ed.xray, "X-ray (Alt+Z)", Icon::Xray) { out.push(UiAction::Editor(EditorChange::Xray(!ed.xray))); }
-    for (i, (mode, name, icon)) in [(Mode::Solid, "Solid", Icon::Solid), (Mode::Shaded, "Shaded", Icon::Shaded), (Mode::Wire, "Wire", Icon::Wire), (Mode::ShadedWire, "Shaded + Wire", Icon::ShadedWire)].into_iter().enumerate() {
-        if button(ui, th, h.shading[i], ("vp_shading", i), v.mode == mode, name, icon) { out.push(UiAction::SetMode(mode)); }
+    let overlay_main=Rect::from_min_max(h.overlays.min,Pos2::new(h.overlays.right()-16.,h.overlays.bottom()));
+    if button_text(ui,th,overlay_main,"vp_overlays_toggle",ed.overlays.enabled,"Toggle all overlays",Icon::Overlays,(None,false)) {
+        let mut o=ed.overlays; o.enabled=!o.enabled; out.push(UiAction::Editor(EditorChange::Overlays(o)));
     }
+    if caret_button(ui,th,h.overlays,"vp_overlays_menu",st.popover==Some(Popover::Overlays)) { st.popover=toggle_popover(st.popover,Popover::Overlays); }
+    if button_text(ui, th, h.shading, "vp_shading", st.popover == Some(Popover::Shading), v.mode.label(), Icon::Display(v.mode), (None,true)) { st.popover=toggle_popover(st.popover,Popover::Shading); }
+    if button_text(ui, th, h.visibility, "vp_visibility", st.popover == Some(Popover::Visibility), ed.object_visibility.label(), Icon::Visibility(ed.object_visibility), (None,true)) { st.popover=toggle_popover(st.popover,Popover::Visibility); }
     if button(ui, th, h.frame, ("vp_frame", 0), false, "Frame the mesh (Home)", Icon::Frame) { out.push(UiAction::Frame); }
 
     // ---- tool strip
-    let strip_h = TOOLS.len() as f32 * 28. + 2. * 5. + 8.;
+    let strip_h = TOOLS.len() as f32 * 28. + 4. * 5. + 8.;
     let strip = Rect::from_min_size(Pos2::new(rect.left() + 12., rect.top() + HEADER_H + 12.), Vec2::new(36., strip_h));
     painter.rect(strip, 6., th.panel, stroke, StrokeKind::Inside);
     let mut y = strip.top() + 4.;
     for (i, (name, icon)) in TOOLS.iter().enumerate() {
-        if i == 2 || i == 6 {
+        if i == 2 || i == 6 || i == 7 || i == 12 {
             painter.line_segment([Pos2::new(strip.left() + 6., y + 2.), Pos2::new(strip.right() - 6., y + 2.)], stroke);
             y += 5.;
         }
         let r = Rect::from_min_size(Pos2::new(strip.left() + 4., y), Vec2::splat(28.));
         if button(ui, th, r, ("vp_tool", i), ed.tool == Tool::ALL[i], name, *icon) { out.push(UiAction::Editor(EditorChange::Tool(Tool::ALL[i]))); }
         y += 28.;
+    }
+
+    // Active Select tool options, separate from the tool strip and one-shot hotkeys.
+    if ed.tool == Tool::Select && !super::sketch::active(&ctx) {
+        use super::selection_region::{self, Kind};
+        use crate::picking::SelectOp;
+        let mut options = selection_region::options(&ctx);
+        let bar = Rect::from_min_size(Pos2::new(rect.left() + 56., rect.top() + HEADER_H + 4.), Vec2::new(196., 28.));
+        painter.rect(bar, 4., th.panel, stroke, StrokeKind::Inside);
+        for (i, (kind, ic, tip)) in [
+            (Kind::Box, Icon::BoxSelect, "Select Box (B for one-shot box)"),
+            (Kind::Circle, Icon::CircleSelect, "Select Circle (C for modal circle)"),
+            (Kind::Lasso, Icon::LassoSelect, "Select Lasso (Ctrl+RMB drag)"),
+        ].into_iter().enumerate() {
+            let r = Rect::from_min_size(bar.min + Vec2::new(2. + i as f32 * 28., 2.), Vec2::splat(24.));
+            if button(ui, th, r, ("vp_select_kind", i), options.kind == kind, tip, ic) {
+                options.kind = kind;
+                selection_region::set_options(&ctx, options);
+            }
+        }
+        for (i, (op, label, tip)) in [
+            (SelectOp::Replace, "=", "Set: replace selection"),
+            (SelectOp::Add, "+", "Extend selection (Shift)"),
+            (SelectOp::Subtract, "-", "Subtract selection (Ctrl)"),
+        ].into_iter().enumerate() {
+            let r = Rect::from_min_size(bar.min + Vec2::new(102. + i as f32 * 30., 2.), Vec2::new(28., 24.));
+            if ui.put(r, egui::Button::new(label).selected(options.op == op)).on_hover_text(tip).clicked() {
+                options.op = op;
+                selection_region::set_options(&ctx, options);
+            }
+        }
     }
 
     // ---- timeline
@@ -237,8 +283,10 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     }
 
     if let Some(which) = st.popover {
-        let anchor = match which { Popover::Orientation => h.orient, Popover::Pivot => h.pivot, Popover::Snap => h.snap, Popover::Proportional => h.prop, Popover::Overlays => h.overlays };
+        let anchor = match which { Popover::Orientation => h.orient, Popover::Pivot => h.pivot, Popover::Snap => h.snap, Popover::Proportional => h.prop, Popover::Overlays => h.overlays, Popover::Shading => h.shading, Popover::Visibility => h.visibility };
+        let before=out.0.len();
         let pop = show_popover(ui, rect, anchor, which, v, out);
+        if out.0.len()>before && matches!(which,Popover::Shading | Popover::Visibility) { st.popover=None; }
         let dismiss = ctx.input(|i| i.key_pressed(egui::Key::Escape) || (i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !pop.contains(p) && !anchor.contains(p))));
         if dismiss { st.popover = None; }
     }
@@ -337,16 +385,22 @@ fn falloff_samples(f: Falloff) -> [f32; 13] { std::array::from_fn(|i| falloff_va
 fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover, v: &View, out: &mut Actions) -> Rect {
     let th = v.theme;
     let ed = v.editor;
-    let rows = match which { Popover::Orientation => 6, Popover::Pivot => 5, Popover::Snap => 11, Popover::Proportional => 12, Popover::Overlays => 7 };
-    let height = 30. + rows as f32 * 24. + 10. + if which == Popover::Overlays { 38. } else { 0. };
+    let rows = match which { Popover::Orientation => 6, Popover::Pivot => 5, Popover::Snap => 11, Popover::Proportional => 12, Popover::Overlays => 14, Popover::Shading => 12, Popover::Visibility => 3 };
+    let height = 30. + rows as f32 * 24. + 10.;
     let x = (anchor.right() - 232.).clamp(viewport.left() + 6., (viewport.right() - 238.).max(viewport.left() + 6.));
     let pop = Rect::from_min_size(Pos2::new(x, anchor.bottom() + 4.), Vec2::new(232., height));
     let p = ui.painter();
     p.rect(pop, 6., th.panel, Stroke::new(1.0_f32, th.stroke), StrokeKind::Inside);
-    let title = match which { Popover::Orientation => "ORIENTATION", Popover::Pivot => "PIVOT POINT", Popover::Snap => "SNAPPING", Popover::Proportional => "PROPORTIONAL EDITING", Popover::Overlays => "OVERLAYS" };
+    let title = match which { Popover::Orientation => "ORIENTATION", Popover::Pivot => "PIVOT POINT", Popover::Snap => "SNAPPING", Popover::Proportional => "PROPORTIONAL EDITING", Popover::Overlays => "OVERLAYS", Popover::Shading => "DISPLAY MODE", Popover::Visibility => "OBJECT VISIBILITY" };
     p.text(pop.min + Vec2::new(12., 17.), egui::Align2::LEFT_CENTER, title, egui::FontId::proportional(11.), th.dim);
     let row = |i: usize| Rect::from_min_size(pop.min + Vec2::new(6., 28. + i as f32 * 24.), Vec2::new(220., 24.));
     match which {
+        Popover::Shading => for (i,mode) in Mode::ALL.into_iter().enumerate() {
+            if display_row(ui,row(i),("display",i),mode.label(),v.mode==mode,Icon::Display(mode),th) { out.push(UiAction::SetMode(mode)); }
+        },
+        Popover::Visibility => for (i,visibility) in ObjectVisibility::ALL.into_iter().enumerate() {
+            if display_row(ui,row(i),("visibility",i),visibility.label(),ed.object_visibility==visibility,Icon::Visibility(visibility),th) { out.push(UiAction::Editor(EditorChange::ObjectVisibility(visibility))); }
+        },
         Popover::Orientation => for (i, o) in Orientation::ALL.iter().enumerate() {
             if pop_row(ui, row(i), ("orientation", i), o.label(), *o == ed.orientation, false, "", th) { out.push(UiAction::Editor(EditorChange::Orientation(*o))); }
         },
@@ -357,7 +411,7 @@ fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover,
             if pop_row(ui, row(0), ("snap_enabled", 0), "Enable snapping", ed.snap.enabled, true, "", th) { out.push(UiAction::Editor(EditorChange::SnapEnabled(!ed.snap.enabled))); }
             section(ui, row(1), "SNAP TO", th);
             for (i, to) in SnapTo::ALL.iter().enumerate() {
-                if pop_row(ui, row(2 + i), ("snap_to", i), to.label(), *to == ed.snap.to, false, "", th) { out.push(UiAction::Editor(EditorChange::SnapTo(*to))); }
+                if pop_row(ui, row(2 + i), ("snap_to", i), to.label(), ed.snap.to.contains(*to), true, "", th) { out.push(UiAction::Editor(EditorChange::SnapTo(*to))); }
             }
             if let Some(x) = numeric_row(ui, row(8), "snap_increment", "Increment", ed.snap.increment, th, Some(v.units)) { out.push(UiAction::Editor(EditorChange::SnapIncrement(x))); }
             // The final two rows extend the standard spacing so both toggles remain readable.
@@ -378,17 +432,24 @@ fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover,
             if pop_row(ui, row(11), ("prop_connected", 0), "Connected only", ed.proportional.connected_only, true, "", th) { out.push(UiAction::Editor(EditorChange::ProportionalConnected(!ed.proportional.connected_only))); }
         }
         Popover::Overlays => {
-            let values = [ed.overlays.grid, ed.overlays.axes, ed.overlays.wireframe, ed.overlays.stats, ed.overlays.normals, ed.overlays.bounds];
-            for i in 0..4 {
-                if pop_row(ui, row(i), ("overlay", i), OVERLAYS[i].0, values[i], true, OVERLAYS[i].1, th) { toggle_overlay(i, ed.overlays, out); }
+            section(ui,row(0),"GENERAL",th);
+            let mut o=ed.overlays;
+            let values=[o.grid,o.axes,o.stats,o.bounds,o.normals,o.wireframe];
+            for (i,label) in ["Grid","Axes / Floor","Statistics","Bounds","Normals","Wireframe overlay"].iter().enumerate() {
+                if pop_row(ui,row(i+1),("general_overlay",i),label,values[i],true,"",th) {
+                    match i {0=>o.grid=!o.grid,1=>o.axes=!o.axes,2=>o.stats=!o.stats,3=>o.bounds=!o.bounds,4=>o.normals=!o.normals,_=>o.wireframe=!o.wireframe}
+                }
             }
-            section(ui, row(4), "MESH", th);
-            for i in 4..6 {
-                if pop_row(ui, row(i + 1), ("overlay", i), OVERLAYS[i].0, values[i], true, OVERLAYS[i].1, th) { toggle_overlay(i, ed.overlays, out); }
+            if pop_row(ui,row(7),"overlay_xray","X-ray",ed.xray,true,"Alt+Z",th) { out.push(UiAction::Editor(EditorChange::Xray(!ed.xray))); }
+            section(ui,row(8),"GEOMETRY",th);
+            for (i,(label,value)) in [("Points",o.points),("Lines (curves / edges)",o.lines),("Faces",o.faces)].into_iter().enumerate() {
+                if pop_row(ui,row(i+9),("geometry_overlay",i),label,value,true,"",th) {
+                    match i {0=>o.points=!o.points,1=>o.lines=!o.lines,_=>o.faces=!o.faces}
+                }
             }
-            let foot_y = row(7).top() + 8.;
-            ui.painter().line_segment([Pos2::new(pop.left() + 12., foot_y), Pos2::new(pop.right() - 12., foot_y)], Stroke::new(1.0_f32, th.stroke));
-            ui.painter().text(Pos2::new(pop.left() + 12., foot_y + 9.), egui::Align2::LEFT_TOP, "Edges fade out above 40,000 prims\nto keep the view readable.", egui::FontId::proportional(11.), th.dim);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(row(12)),|ui| {ui.add(egui::Slider::new(&mut o.point_size,1.0..=16.0).text("Point size"));});
+            ui.scope_builder(egui::UiBuilder::new().max_rect(row(13)),|ui| {ui.add(egui::Slider::new(&mut o.line_width,1.0..=10.0).text("Line width"));});
+            if o!=ed.overlays { out.push(UiAction::Editor(EditorChange::Overlays(o))); }
         }
     }
     pop
@@ -397,11 +458,6 @@ fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover,
 fn section(ui: &egui::Ui, r: Rect, label: &str, th: &Theme) {
     ui.painter().line_segment([r.left_top() + Vec2::new(7., 1.), r.right_top() + Vec2::new(-7., 1.)], Stroke::new(1.0_f32, th.stroke));
     ui.painter().text(r.min + Vec2::new(8., 13.), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(11.), th.dim);
-}
-
-fn toggle_overlay(i: usize, mut o: super::Overlays, out: &mut Actions) {
-    match i { 0 => o.grid = !o.grid, 1 => o.axes = !o.axes, 2 => o.wireframe = !o.wireframe, 3 => o.stats = !o.stats, 4 => o.normals = !o.normals, _ => o.bounds = !o.bounds }
-    out.push(UiAction::Editor(EditorChange::Overlays(o)));
 }
 
 /// Icon-only button with a tooltip; true when clicked.
@@ -438,13 +494,37 @@ fn icon(p: &egui::Painter, ic: Icon, r: Rect, col: Color32, tick: bool) {
     let dot = |x: f32, y: f32, rad: f32| p.circle_filled(at(x, y), rad * s, col);
     if tick { line(&[(1.8, 8.2), (6., 12.2), (14.2, 3.4)]); return; }
     match ic {
+        Icon::Display(mode) => {
+            let faces=[vec![at(2.,4.),at(8.,1.5),at(14.,4.),at(8.,7.)],vec![at(2.,4.),at(8.,7.),at(8.,14.5),at(3.,11.5)],vec![at(8.,7.),at(14.,4.),at(13.,11.5),at(8.,14.5)]];
+            let tint=if mode.bounds() { Color32::from_rgb(153,209,68) } else if mode.matcap() { Color32::from_rgb(172,186,214) } else { col };
+            let filled=mode.shaded() || mode==Mode::WireframeGhost || mode==Mode::HiddenLineGhost;
+            for (i,face) in faces.into_iter().enumerate() {
+                let alpha=if matches!(mode,Mode::WireframeGhost | Mode::HiddenLineGhost) { 0.2 } else { [0.85,0.4,0.6][i] };
+                p.add(egui::Shape::convex_polygon(face,if filled { tint.gamma_multiply(alpha) } else { Color32::TRANSPARENT },Stroke::new(0.9*s,tint)));
+            }
+            if mode.wire_shaded() || mode==Mode::Wireframe { line(&[(2.,4.),(13.,11.5)]); }
+            if mode==Mode::HiddenLineGhost { line(&[(3.,11.5),(8.,9.),(13.,11.5)]); }
+        }
+        Icon::Visibility(visibility) => {
+            let other=if visibility==ObjectVisibility::ShowAll { col } else if visibility==ObjectVisibility::GhostOthers { col.gamma_multiply(0.4) } else { Color32::TRANSPARENT };
+            p.circle(at(5.,6.),4.*s,other,Stroke::new(s,if visibility==ObjectVisibility::HideOthers { Color32::TRANSPARENT } else { col.gamma_multiply(0.65) }));
+            p.circle(at(10.5,10.),4.5*s,Color32::from_rgb(79,132,186),Stroke::new(s,col));
+            p.circle_filled(at(9.,8.),1.3*s,col.gamma_multiply(0.7));
+        }
+
         Icon::Object => { poly(&[(8., 1.5), (13.5, 4.3), (13.5, 11.7), (8., 14.5), (2.5, 11.7), (2.5, 4.3)]); line(&[(2.5, 4.3), (8., 7.2), (13.5, 4.3)]); line(&[(8., 7.2), (8., 14.5)]); }
         Icon::Points => { for (x, y) in [(4., 4.), (12., 4.), (4., 12.), (12., 12.)] { dot(x, y, 1.7); } }
         Icon::Edges => { poly(&[(3., 3.), (13., 3.), (13., 13.), (3., 13.)]); line(&[(3., 13.), (3., 3.), (13., 3.)]); }
         Icon::Faces => { fill_poly(&[(3., 3.), (13., 3.), (13., 13.), (3., 13.)]); }
         Icon::Orient => { line(&[(4., 12.), (4., 3.)]); line(&[(4., 12.), (13., 12.)]); line(&[(4., 12.), (1.8, 14.2)]); }
         Icon::Pivot => { line(&[(8., 2.), (8., 14.)]); line(&[(2., 8.), (14., 8.)]); circle(8., 8., 2.4); }
-        Icon::Magnet => { line(&[(4., 2.), (4., 8.)]); line(&[(12., 2.), (12., 8.)]); line(&[(4., 8.), (4.5, 10.), (6., 11.8), (8., 12.4), (10., 11.8), (11.5, 10.), (12., 8.)]); line(&[(6.5, 2.), (6.5, 8.)]); line(&[(9.5, 2.), (9.5, 8.)]); }
+        Icon::Magnet => {
+            // Closed horseshoe outline with separated pole caps, like Blender's magnet.
+            poly(&[(2.5, 2.), (5.5, 2.), (5.5, 8.5), (6., 10.), (8., 10.8),
+                (10., 10.), (10.5, 8.5), (10.5, 2.), (13.5, 2.), (13.5, 8.5),
+                (13., 11.), (11., 13.), (8., 13.8), (5., 13.), (3., 11.), (2.5, 8.5)]);
+            line(&[(2.5, 5.), (5.5, 5.)]); line(&[(10.5, 5.), (13.5, 5.)]);
+        }
         Icon::Prop => { dot(8., 8., 2.); circle(8., 8., 6.); }
         Icon::Overlays => { circle(6., 8., 3.6); circle(10., 8., 3.6); }
         Icon::Xray => { poly(&[(3., 3.), (11., 3.), (11., 11.), (3., 11.)]); poly(&[(6., 6.), (13., 6.), (13., 13.), (6., 13.)]); }
@@ -453,12 +533,22 @@ fn icon(p: &egui::Painter, ic: Icon, r: Rect, col: Color32, tick: bool) {
         Icon::Wire => { circle(8., 8., 5.5); line(&[(2.5, 8.), (5., 9.7), (8., 10.2), (11., 9.7), (13.5, 8.)]); line(&[(2.5, 8.), (5., 6.3), (8., 5.8), (11., 6.3), (13.5, 8.)]); line(&[(8., 2.5), (8., 13.5)]); }
         Icon::ShadedWire => { p.circle_filled(at(8., 8.), 5.5 * s, col.gamma_multiply(0.45)); circle(8., 8., 5.5); line(&[(2.5, 8.), (8., 10.2), (13.5, 8.)]); line(&[(2.5, 8.), (8., 5.8), (13.5, 8.)]); line(&[(8., 2.5), (8., 13.5)]); }
         Icon::Frame => { line(&[(1.5, 4.5), (1.5, 1.5), (4.5, 1.5)]); line(&[(11.5, 1.5), (14.5, 1.5), (14.5, 4.5)]); line(&[(14.5, 11.5), (14.5, 14.5), (11.5, 14.5)]); line(&[(4.5, 14.5), (1.5, 14.5), (1.5, 11.5)]); poly(&[(5.5, 5.5), (10.5, 5.5), (10.5, 10.5), (5.5, 10.5)]); }
+        Icon::BoxSelect => { poly(&[(2., 2.), (14., 2.), (14., 14.), (2., 14.)]); }
+        Icon::CircleSelect => { circle(8., 8., 6.); dot(8., 8., 1.); }
+        Icon::LassoSelect => { line(&[(4., 12.), (1.5, 8.), (3., 3.), (9., 2.), (14., 6.), (12., 12.), (6., 14.), (4., 12.), (6., 9.), (8., 11.), (5., 15.)]); }
         Icon::Select => { poly(&[(4., 2.), (12., 7.6), (8.3, 8.5), (10.5, 12.2), (8.9, 13.1), (6.7, 9.4), (4., 12.6)]); }
         Icon::Cursor => { circle(8., 8., 3.); line(&[(8., 1.5), (8., 4.5)]); line(&[(8., 11.5), (8., 14.5)]); line(&[(1.5, 8.), (4.5, 8.)]); line(&[(11.5, 8.), (14.5, 8.)]); }
         Icon::Move => { line(&[(8., 1.5), (8., 14.5)]); line(&[(1.5, 8.), (14.5, 8.)]); line(&[(6., 3.5), (8., 1.5), (10., 3.5)]); line(&[(6., 12.5), (8., 14.5), (10., 12.5)]); line(&[(3.5, 6.), (1.5, 8.), (3.5, 10.)]); line(&[(12.5, 6.), (14.5, 8.), (12.5, 10.)]); }
         Icon::Rotate => { line(&[(13., 8.), (12.6, 10.), (11.2, 12.2), (9., 13.2), (6.5, 13.), (4.4, 11.6), (3.2, 9.4), (3., 7.), (4., 5.), (5.8, 3.6), (8., 3.)]); line(&[(13., 2.5), (13., 5.5), (10., 5.5)]); }
         Icon::Scale => { poly(&[(2., 7.), (9., 7.), (9., 14.), (2., 14.)]); line(&[(7., 9.), (14., 2.)]); line(&[(9.5, 2.), (14., 2.), (14., 6.5)]); }
         Icon::Transform => { poly(&[(3.5, 3.5), (12.5, 3.5), (12.5, 12.5), (3.5, 12.5)]); for (x, y) in [(3., 3.), (13., 3.), (3., 13.), (13., 13.)] { fill_poly(&[(x - 1.5, y - 1.5), (x + 1.5, y - 1.5), (x + 1.5, y + 1.5), (x - 1.5, y + 1.5)]); } }
+        Icon::Line => { line(&[(2., 13.), (14., 3.)]); for q in [(2.,13.),(14.,3.)] { p.circle_filled(at(q.0,q.1), 1.8, col); } }
+        Icon::Polyline => { line(&[(2., 13.), (5., 3.), (10., 10.), (14., 4.)]); }
+        Icon::Polygon => { poly(&[(2., 6.), (7., 2.), (14., 6.), (12., 14.), (4., 13.)]); }
+        Icon::Rectangle => { poly(&[(2., 3.), (14., 3.), (14., 13.), (2., 13.)]); }
+        Icon::Circle => { p.circle_stroke(at(8.,8.), 6. * s, st); }
+        Icon::Knife => { poly(&[(3., 14.), (7., 8.), (13., 2.), (14., 6.), (9., 11.)]); line(&[(5.,7.),(10.,12.)]); }
+        Icon::LoopCut => { poly(&[(1.,4.),(11.,1.),(15.,11.),(5.,15.)]); line(&[(3.,9.),(13.,6.)]); line(&[(6.,2.5),(10.,13.)]); }
         Icon::Measure => { poly(&[(1.5, 11.5), (11.5, 1.5), (14.5, 4.5), (4.5, 14.5)]); line(&[(4., 9.), (5.5, 10.5)]); line(&[(6.5, 6.5), (8., 8.)]); line(&[(9., 4.), (10.5, 5.5)]); }
         Icon::ToStart => { line(&[(3.5, 3.), (3.5, 13.)]); poly(&[(13., 3.5), (13., 12.5), (6., 8.)]); }
         Icon::Prev => { poly(&[(12., 3.5), (12., 12.5), (5., 8.)]); }
@@ -500,8 +590,8 @@ mod tests {
             for snap in [false, true] {
                 let h = header_layout(0., 0., width, snap);
                 let mut rects: Vec<Rect> = h.modes.to_vec();
-                rects.extend([h.orient, h.pivot, h.snap, h.prop, h.proxy, h.overlays, h.xray, h.frame]);
-                rects.extend(h.shading);
+                rects.extend([h.orient, h.pivot, h.snap, h.prop, h.proxy, h.overlays, h.frame]);
+                rects.extend([h.shading,h.visibility]);
                 for (i, a) in rects.iter().enumerate() {
                     assert!(a.left() >= 0. && a.right() <= width, "width {width}: {a:?} outside");
                     for b in &rects[i + 1..] { assert!(!overlap(a, b), "width {width} snap {snap}: {a:?} overlaps {b:?}"); }
@@ -515,9 +605,10 @@ mod tests {
     }
 
     #[test]
-    fn shading_buttons_run_solid_to_shaded_wire_left_to_right() {
+    fn shading_and_visibility_dropdowns_are_adjacent() {
         let h = header_layout(0., 0., 800., false);
-        assert!(h.shading.windows(2).all(|w| w[0].left() < w[1].left()));
+        assert!(h.shading.right() < h.visibility.left());
+        assert_eq!(Mode::ALL.len(),12);
     }
 
     #[test]
@@ -550,6 +641,33 @@ mod tests {
         open = toggle_popover(open, Popover::Pivot);
         assert_eq!(open, Some(Popover::Pivot));
         assert_eq!(toggle_popover(open, Popover::Pivot), None);
+    }
+
+    #[test]
+    fn overlay_header_toggle_menu_and_geometry_checkbox_are_independent() {
+        use egui::{Event,PointerButton,RawInput};
+        let f=super::super::testing::Fixture::new(); let ctx=egui::Context::default(); f.theme.apply(&ctx);
+        let viewport=Rect::from_min_size(Pos2::ZERO,Vec2::new(900.,600.));
+        let h=header_layout(0.,0.,900.,false);
+        let frame=|events:Vec<Event>| {
+            let mut out=Actions::default();
+            let _=ctx.run(RawInput {screen_rect:Some(viewport),events,..Default::default()},|ctx| {
+                egui::CentralPanel::default().show(ctx,|ui|overlay(ui,viewport,&f.view(),&mut out));
+            }); out
+        };
+        frame(vec![]);
+        let click=|p:Pos2| {
+            frame(vec![Event::PointerMoved(p),Event::PointerButton{pos:p,button:PointerButton::Primary,pressed:true,modifiers:Default::default()}]);
+            frame(vec![Event::PointerButton{pos:p,button:PointerButton::Primary,pressed:false,modifiers:Default::default()}])
+        };
+        let toggle=click(h.overlays.left_center()+Vec2::new(12.,0.));
+        assert!(toggle.0.iter().any(|a|matches!(a,UiAction::Editor(EditorChange::Overlays(o)) if !o.enabled && o.points && o.lines && o.faces)));
+        let menu=click(h.overlays.right_center()-Vec2::new(8.,0.));
+        assert!(!menu.0.iter().any(|a|matches!(a,UiAction::Editor(EditorChange::Overlays(_)))));
+        assert_eq!(ctx.data(|d|d.get_temp::<VpState>(egui::Id::new("viewport_ui_state"))).unwrap().popover,Some(Popover::Overlays));
+        let x=(h.overlays.right()-232.).clamp(6.,662.);
+        let points=click(Pos2::new(x+60.,h.overlays.bottom()+4.+28.+9.*24.+12.));
+        assert!(points.0.iter().any(|a|matches!(a,UiAction::Editor(EditorChange::Overlays(o)) if !o.points && o.enabled && o.lines && o.faces)));
     }
 
     #[test]
@@ -598,6 +716,7 @@ mod tests {
         let mut f = super::super::testing::Fixture::new();
         let mut editor = crate::ui::EditorState::default();
         editor.snap.enabled = true;
+        editor.snap.to = SnapTo::Increment.into();
         editor.snap.increment = 0.25;
         f.editor = editor;
         let viewport = Rect::from_min_size(Pos2::ZERO, Vec2::new(900., 600.));
@@ -623,5 +742,95 @@ mod tests {
         let mut texts = Vec::new();
         extract_texts(&full.shapes, &mut texts);
         assert!(texts.iter().any(|t| t.contains("250 mm")), "expected 250 mm in {texts:?}");
+    }
+}
+
+fn display_row(ui:&mut egui::Ui,r:Rect,id:(&str,usize),label:&str,selected:bool,ic:Icon,th:&Theme)->bool {
+    let response=ui.interact(r,egui::Id::new(("display_row",id)),Sense::click());
+    if selected || response.hovered() { ui.painter().rect_filled(r,2.,if selected { th.accent_bg } else { th.panel2 }); }
+    icon(ui.painter(),ic,Rect::from_center_size(Pos2::new(r.left()+12.,r.center().y),Vec2::splat(18.)),th.text,false);
+    ui.painter().text(Pos2::new(r.left()+28.,r.center().y),egui::Align2::LEFT_CENTER,label,egui::FontId::proportional(12.),th.text);
+    response.clicked()
+}
+pub fn popup_open(ctx:&egui::Context)->bool {
+    ctx.data(|d| d.get_temp::<VpState>(egui::Id::new("viewport_ui_state")).is_some_and(|s| s.popover.is_some())
+        || d.get_temp::<Pos2>(egui::Id::new("shading_pie")).is_some())
+}
+
+pub fn open_shading_pie(ctx:&egui::Context) {
+    let at=ctx.input(|i| i.pointer.hover_pos()).unwrap_or(Pos2::new(300.,200.));
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new("shading_pie"),at));
+}
+fn show_shading_pie(ctx:&egui::Context, viewport:Rect,v:&View,out:&mut Actions) {
+    let id=egui::Id::new("shading_pie");
+    let Some(at)=ctx.data(|d| d.get_temp::<Pos2>(id)) else { return; };
+    let origin=Pos2::new((at.x-220.).clamp(viewport.left(),(viewport.right()-440.).max(viewport.left())),
+        (at.y-110.).clamp(viewport.top()+HEADER_H,(viewport.bottom()-220.).max(viewport.top()+HEADER_H)));
+    let mut close=ctx.input(|i| i.key_pressed(egui::Key::Escape));
+    egui::Area::new(id).order(egui::Order::Foreground).fixed_pos(origin).show(ctx,|ui| {
+        ui.set_min_size(Vec2::new(440.,220.));
+        let c=ui.min_rect().min+Vec2::new(220.,110.);
+        ui.painter().circle_filled(c,70.,v.theme.panel);
+        ui.painter().text(c-Vec2::new(0.,16.),egui::Align2::CENTER_CENTER,"SHADING · Z",egui::FontId::proportional(12.),v.theme.dim);
+        if display_row(ui,Rect::from_center_size(c+Vec2::new(0.,16.),Vec2::new(112.,26.)),("pie_all",0),"All modes…",false,Icon::Display(v.mode),v.theme) {
+            let state_id=egui::Id::new("viewport_ui_state");
+            ctx.data_mut(|d| { let mut state=d.get_temp::<VpState>(state_id).unwrap_or_default(); state.popover=Some(Popover::Shading); d.insert_temp(state_id,state); });
+            close=true;
+        }
+        for (i,(mode,offset,key)) in [
+            (Mode::Wireframe,Vec2::new(-140.,0.),egui::Key::Num4),
+            (Mode::FlatShaded,Vec2::new(140.,0.),egui::Key::Num6),
+            (Mode::SmoothShaded,Vec2::new(0.,-76.),egui::Key::Num8),
+            (Mode::SmoothWireShaded,Vec2::new(0.,76.),egui::Key::Num2),
+        ].into_iter().enumerate() {
+            let row=Rect::from_center_size(c+offset,Vec2::new(158.,30.));
+            ui.painter().rect_filled(row,4.,v.theme.panel);
+            if display_row(ui,row,("pie",i),mode.label(),mode==v.mode,Icon::Display(mode),v.theme)
+                || ctx.input(|i| i.key_pressed(key)) { out.push(UiAction::SetMode(mode)); close=true; }
+        }
+        if ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !ui.min_rect().contains(p))) { close=true; }
+    });
+    if close { ctx.data_mut(|d| d.remove::<Pos2>(id)); }
+}
+
+#[cfg(test)] mod display_menu_tests {
+    use super::*;
+    use egui::{Event,PointerButton,RawInput};
+    fn frame(ctx:&egui::Context,f:&super::super::testing::Fixture,events:Vec<Event>)->Vec<UiAction> {
+        let mut out=Actions::default();
+        let _=ctx.run(RawInput { screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(900.,600.))),events,..Default::default() },|ctx| {
+            egui::CentralPanel::default().show(ctx,|ui| overlay(ui,Rect::from_min_size(Pos2::ZERO,Vec2::new(900.,600.)),&f.view(),&mut out));
+        }); out.0
+    }
+    fn click(ctx:&egui::Context,f:&super::super::testing::Fixture,p:Pos2)->Vec<UiAction> {
+        frame(ctx,f,vec![Event::PointerMoved(p),Event::PointerButton { pos:p,button:PointerButton::Primary,pressed:true,modifiers:Default::default() }]);
+        frame(ctx,f,vec![Event::PointerButton { pos:p,button:PointerButton::Primary,pressed:false,modifiers:Default::default() }])
+    }
+    #[test] fn dropdowns_emit_every_display_and_visibility_choice() {
+        let f=super::super::testing::Fixture::new(); let ctx=egui::Context::default(); f.theme.apply(&ctx);
+        let h=header_layout(0.,0.,900.,false);
+        frame(&ctx,&f,vec![]);
+        for (i,mode) in Mode::ALL.into_iter().enumerate() {
+            click(&ctx,&f,h.shading.center());
+            assert!(popup_open(&ctx));
+            let at=Pos2::new(h.shading.right()-100.,h.shading.bottom()+4.+28.+i as f32*24.+12.);
+            let actions=click(&ctx,&f,at);
+            assert!(actions.iter().any(|a| matches!(a,UiAction::SetMode(m) if *m==mode)),"{} row failed",mode.label());
+            assert!(!popup_open(&ctx));
+        }
+        for (i,visibility) in ObjectVisibility::ALL.into_iter().enumerate() {
+            click(&ctx,&f,h.visibility.center());
+            let at=Pos2::new(h.visibility.right()-100.,h.visibility.bottom()+4.+28.+i as f32*24.+12.);
+            let actions=click(&ctx,&f,at);
+            assert!(actions.iter().any(|a| matches!(a,UiAction::Editor(EditorChange::ObjectVisibility(v)) if *v==visibility)));
+            assert!(!popup_open(&ctx));
+        }
+    }
+    #[test] fn z_pie_number_selects_mapped_mode_and_closes() {
+        let f=super::super::testing::Fixture::new(); let ctx=egui::Context::default();
+        frame(&ctx,&f,vec![]); open_shading_pie(&ctx);
+        let actions=frame(&ctx,&f,vec![Event::Key { key:egui::Key::Num8,physical_key:None,pressed:true,repeat:false,modifiers:Default::default() }]);
+        assert!(actions.iter().any(|a| matches!(a,UiAction::SetMode(Mode::SmoothShaded))));
+        assert!(!popup_open(&ctx));
     }
 }

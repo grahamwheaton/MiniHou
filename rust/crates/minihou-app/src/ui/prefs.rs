@@ -14,20 +14,24 @@ impl ThemePref {
     pub fn label(self) -> &'static str { match self { Self::Dark => "Dark", Self::Light => "Light", Self::System => "System" } }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct ViewportPreferences { pub default_shading: String, pub navigation: Navigation, pub show_grid: bool, pub show_axes: bool, pub auto_budget: u32, pub view_distance: f32 }
-impl Default for ViewportPreferences { fn default() -> Self { Self { default_shading: "Shaded".into(), navigation: Navigation::Blender, show_grid: true, show_axes: true, auto_budget: 400_000, view_distance: 20.0 } } }
+pub struct ViewportPreferences { pub overlays: crate::ui::Overlays, pub xray: bool, pub default_shading: String, pub object_visibility: crate::viewport::ObjectVisibility, pub navigation: Navigation, pub fly_navigation: bool, pub show_grid: bool, pub show_axes: bool, pub auto_budget: u32, pub clip_start: f32, pub clip_end: f32 }
+impl Default for ViewportPreferences { fn default() -> Self { Self { overlays: Default::default(), xray: false, default_shading: "Smooth Shaded".into(), object_visibility: crate::viewport::ObjectVisibility::ShowAll, navigation: Navigation::Blender, fly_navigation: true, show_grid: true, show_axes: true, auto_budget: 400_000, clip_start: 0.01, clip_end: 1000.0 } } }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub theme: ThemePref, pub ui_scale: f32, pub emulate_numpad: bool, pub snap_increment: f32,
+    pub snap_targets: crate::ui::SnapTargets,
     pub show_stats: bool, pub autosave_minutes: Option<u32>, pub keymap_overrides: Value,
     pub recent_files: Vec<PathBuf>, pub viewport: ViewportPreferences,
     pub units: UnitSettings,
+    pub node_physics_snappiness: f32,
 }
 impl Default for Preferences { fn default() -> Self { Self {
     theme: ThemePref::System, ui_scale: 1., emulate_numpad: false, snap_increment: 0.25,
+    snap_targets: crate::ui::SnapTargets::default(),
     show_stats: true, autosave_minutes: Some(5), keymap_overrides: json!({"bindings": []}),
     recent_files: Vec::new(), viewport: ViewportPreferences::default(),
     units: UnitSettings::default(),
+    node_physics_snappiness: 0.7,
 } } }
 impl Preferences {
     pub fn path() -> PathBuf {
@@ -53,13 +57,17 @@ impl Preferences {
     fn to_json(&self) -> Value { json!({
         "schema": SCHEMA, "theme": self.theme.label(), "ui_scale": self.ui_scale,
         "emulate_numpad": self.emulate_numpad, "snap_increment": self.snap_increment,
+        "snap_targets": self.snap_targets.bits(),
+        "node_physics_snappiness": self.node_physics_snappiness,
         "show_stats": self.show_stats, "autosave_minutes": self.autosave_minutes,
         "keymap_overrides": self.keymap_overrides,
         "recent_files": self.recent_files.iter().take(10).collect::<Vec<_>>(),
-        "viewport": { "default_shading": self.viewport.default_shading,
+        "viewport": { "overlays": self.viewport.overlays, "xray": self.viewport.xray, "default_shading": self.viewport.default_shading,
+            "object_visibility": self.viewport.object_visibility.label(),
+            "fly_navigation": self.viewport.fly_navigation,
             "navigation": match self.viewport.navigation { Navigation::Blender => "blender", Navigation::Houdini => "houdini" },
             "show_grid": self.viewport.show_grid, "show_axes": self.viewport.show_axes, "auto_budget": self.viewport.auto_budget,
-            "view_distance": self.viewport.view_distance },
+            "clip_start": self.viewport.clip_start, "clip_end": self.viewport.clip_end },
         "length_unit": self.units.display.symbol(),
         "unit_scale": self.units.unit_scale,
         "units": { "length_unit": self.units.display.symbol(), "unit_scale": self.units.unit_scale },
@@ -70,6 +78,8 @@ impl Preferences {
         if let Some(x) = v.get("ui_scale").and_then(Value::as_f64) { p.ui_scale = (x as f32).clamp(0.5, 3.); }
         if let Some(x) = v.get("emulate_numpad").and_then(Value::as_bool) { p.emulate_numpad = x; }
         if let Some(x) = v.get("snap_increment").and_then(Value::as_f64) { p.snap_increment = (x as f32).max(0.0001); }
+        if let Some(x) = v.get("snap_targets").and_then(Value::as_u64) { p.snap_targets = crate::ui::SnapTargets::from_bits((x & 63) as u8); }
+        if let Some(x) = v.get("node_physics_snappiness").and_then(Value::as_f64) { p.node_physics_snappiness = (x as f32).clamp(0.0, 1.0); }
         if let Some(x) = v.get("show_stats").and_then(Value::as_bool) { p.show_stats = x; }
         if let Some(x) = v.get("autosave_minutes") { p.autosave_minutes = x.as_u64().and_then(|n| u32::try_from(n).ok()).filter(|n| *n > 0); }
         if let Some(x) = v.get("keymap_overrides").filter(|x| x.is_object()) { p.keymap_overrides = x.clone(); }
@@ -77,12 +87,30 @@ impl Preferences {
             p.recent_files = xs.iter().filter_map(Value::as_str).take(10).map(PathBuf::from).collect();
         }
         if let Some(view) = v.get("viewport") {
+            if let Some(value)=view.get("overlays") { if let Ok(mut o)=serde_json::from_value::<crate::ui::Overlays>(value.clone()) {
+                o.point_size=o.point_size.clamp(1.,16.); o.line_width=o.line_width.clamp(1.,10.); p.viewport.show_grid=o.grid; p.viewport.show_axes=o.axes; p.show_stats=o.stats; p.viewport.overlays=o;
+            } }
+            if let Some(x)=view.get("xray").and_then(Value::as_bool) { p.viewport.xray=x; }
+            if let Some(x)=view.get("object_visibility").and_then(Value::as_str) { p.viewport.object_visibility=crate::viewport::ObjectVisibility::parse(x); }
+            if let Some(x) = view.get("fly_navigation").and_then(Value::as_bool) { p.viewport.fly_navigation = x; }
             if let Some(x) = view.get("navigation").and_then(Value::as_str) { p.viewport.navigation = if x == "houdini" { Navigation::Houdini } else { Navigation::Blender }; }
-            if let Some(x) = view.get("default_shading").and_then(Value::as_str) { p.viewport.default_shading = x.to_owned(); }
+            if let Some(x) = view.get("default_shading").and_then(Value::as_str) { p.viewport.default_shading = crate::viewport::Mode::parse(x).label().to_owned(); }
             if let Some(x) = view.get("show_grid").and_then(Value::as_bool) { p.viewport.show_grid = x; }
             if let Some(x) = view.get("show_axes").and_then(Value::as_bool) { p.viewport.show_axes = x; }
             if let Some(x) = view.get("auto_budget").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()) { p.viewport.auto_budget = x.max(1); }
-            if let Some(x) = view.get("view_distance").and_then(Value::as_f64) { p.viewport.view_distance = (x as f32).clamp(3.0, 1000.0); }
+            // Legacy view_distance was a scene-radius multiplier and cannot be converted without a scene.
+            let near = view.get("clip_start").and_then(Value::as_f64).map_or(p.viewport.clip_start, |x| x as f32);
+            let far = view.get("clip_end").and_then(Value::as_f64).map_or(p.viewport.clip_end, |x| x as f32);
+            (p.viewport.clip_start, p.viewport.clip_end) = minihou_app::sanitize_clip_planes(near, far);
+        }
+        // Older preference files only stored these three switches.
+        if v.get("viewport").and_then(|view|view.get("overlays")).is_none() {
+            p.viewport.overlays.grid=p.viewport.show_grid; p.viewport.overlays.axes=p.viewport.show_axes;
+            p.viewport.overlays.stats=p.show_stats;
+        }
+        else {
+            p.viewport.show_grid=p.viewport.overlays.grid; p.viewport.show_axes=p.viewport.overlays.axes;
+            p.show_stats=p.viewport.overlays.stats;
         }
         let unit_sym = v.get("length_unit").or_else(|| v.get("units").and_then(|u| u.get("length_unit"))).and_then(Value::as_str);
         if let Some(u) = unit_sym.and_then(LengthUnit::parse_symbol) { p.units.display = u; }
@@ -97,12 +125,51 @@ impl Preferences {
 }
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn display_preferences_round_trip_and_load_legacy_names() {
+        use crate::viewport::{Mode,ObjectVisibility};
+        for mode in Mode::ALL { for visibility in ObjectVisibility::ALL {
+            let p=Preferences::from_json(&json!({"viewport":{"default_shading":mode.label(),"object_visibility":visibility.label()}}));
+            assert_eq!(p.viewport.default_shading,mode.label()); assert_eq!(p.viewport.object_visibility,visibility);
+            assert_eq!(Preferences::from_json(&p.to_json()),p);
+        } }
+        for (old,mode) in [("Solid",Mode::FlatShaded),("Shaded",Mode::SmoothShaded),("Wire",Mode::Wireframe),("ShadedWire",Mode::SmoothWireShaded)] {
+            let p=Preferences::from_json(&json!({"viewport":{"default_shading":old}}));
+            assert_eq!(p.viewport.default_shading,mode.label()); assert_eq!(p.viewport.object_visibility,ObjectVisibility::ShowAll);
+        }
+        assert_eq!(Preferences::from_json(&json!({"viewport":{"object_visibility":"future mode"}})).viewport.object_visibility,ObjectVisibility::ShowAll);
+    }
+    #[test] fn geometry_overlays_round_trip() {
+        let mut p=Preferences::default();
+        p.viewport.overlays=crate::ui::Overlays {enabled:false,points:false,lines:false,faces:false,point_size:9.,line_width:5.,normals:true,bounds:true,..Default::default()};
+        p.viewport.xray=true;
+        assert_eq!(Preferences::from_json(&p.to_json()),p);
+        let partial=Preferences::from_json(&json!({"viewport":{"overlays":{"points":false,"point_size":999.,"line_width":-5.}}}));
+        assert!(!partial.viewport.overlays.points && partial.viewport.overlays.lines && partial.viewport.overlays.faces);
+        assert_eq!((partial.viewport.overlays.point_size,partial.viewport.overlays.line_width),(16.,1.));
+    }
+    #[test] fn fly_defaults_on_and_round_trips_disabled() {
+        assert!(Preferences::from_json(&json!({})).viewport.fly_navigation);
+        let p = Preferences::from_json(&json!({"viewport":{"fly_navigation":false}}));
+        assert!(!p.viewport.fly_navigation);
+        assert_eq!(Preferences::from_json(&p.to_json()), p);
+    }
+    #[test] fn node_physics_snappiness_defaults_clamps_and_round_trips() {
+        assert_eq!(Preferences::from_json(&json!({})).node_physics_snappiness, 0.7);
+        for (input, expected) in [(-1.0, 0.0), (0.3, 0.3), (2.0, 1.0)] {
+            let p = Preferences::from_json(&json!({"node_physics_snappiness": input}));
+            assert_eq!(p.node_physics_snappiness, expected);
+            assert_eq!(Preferences::from_json(&p.to_json()).node_physics_snappiness, expected);
+        }
+    }
     fn test_path(name: &str) -> PathBuf { std::env::temp_dir().join(format!("minihou-{name}-{}",std::process::id())).join("preferences.json") }
     #[test] fn round_trip() {
         let path = test_path("prefs-roundtrip");
         let mut p = Preferences { theme: ThemePref::Light, ui_scale: 1.25, recent_files: vec![PathBuf::from("a.hou")], ..Default::default() };
         p.viewport.auto_budget = 250_000;
-        p.viewport.view_distance = 100.0;
+        p.snap_targets.toggle(crate::ui::SnapTo::Edge);
+        p.snap_targets.toggle(crate::ui::SnapTo::Face);
+        p.viewport.clip_start = 0.2;
+        p.viewport.clip_end = 5000.0;
         p.units = UnitSettings { display: LengthUnit::Cm, unit_scale: 0.1 };
         p.save_to(&path).unwrap(); p.save_to(&path).unwrap(); assert_eq!(Preferences::load_from(&path),p);
         let _ = fs::remove_file(path);
@@ -114,9 +181,11 @@ impl Preferences {
         let _ = fs::remove_file(path.with_extension("json.bak"));
     }
     #[test] fn missing_fields_default_and_unknown_fields_ignored() {
+        assert_eq!(Preferences::from_json(&json!({})).snap_targets,crate::ui::SnapTargets::default());
+        assert_eq!(Preferences::from_json(&json!({"snap_targets":0})).snap_targets,crate::ui::SnapTargets::default());
         let p = Preferences::from_json(&json!({"schema":0,"theme":"Dark","unknown":42}));
         assert_eq!(p.theme,ThemePref::Dark); assert_eq!(p.ui_scale,1.); assert!(p.viewport.show_grid);
-        assert_eq!(p.viewport.view_distance, 20.0);
+        assert_eq!((p.viewport.clip_start, p.viewport.clip_end), (0.01, 1000.0));
         assert_eq!(p.units.display, LengthUnit::Mm);
         assert_eq!(p.units.unit_scale, 1.0);
     }
@@ -125,14 +194,16 @@ impl Preferences {
         let mut p = Preferences::default(); p.viewport.navigation = Navigation::Houdini;
         assert_eq!(Preferences::from_json(&p.to_json()).viewport.navigation, Navigation::Houdini);
     }
-    #[test] fn view_distance_defaults_and_round_trips() {
-        assert_eq!(Preferences::default().viewport.view_distance, 20.0);
-        let p = Preferences::from_json(&json!({"viewport": {"view_distance": 50.0}}));
-        assert_eq!(p.viewport.view_distance, 50.0);
-        let p_clamp = Preferences::from_json(&json!({"viewport": {"view_distance": 1.0}}));
-        assert_eq!(p_clamp.viewport.view_distance, 3.0);
-        let p_max = Preferences::from_json(&json!({"viewport": {"view_distance": 2000.0}}));
-        assert_eq!(p_max.viewport.view_distance, 1000.0);
+    #[test] fn clip_planes_defaults_round_trip_and_validation() {
+        let legacy = Preferences::from_json(&json!({"viewport": {"view_distance": 50.0}}));
+        assert_eq!((legacy.viewport.clip_start, legacy.viewport.clip_end), (0.01, 1000.0));
+        let p = Preferences::from_json(&json!({"viewport": {"clip_start": 0.25, "clip_end": 2500.0}}));
+        assert_eq!((p.viewport.clip_start, p.viewport.clip_end), (0.25, 2500.0));
+        assert_eq!(Preferences::from_json(&p.to_json()), p);
+        for (near, far) in [(-1.0, -2.0), (10.0, 1.0), (0.0, 0.0), (1e30, 1e30)] {
+            let p = Preferences::from_json(&json!({"viewport": {"clip_start": near, "clip_end": far}}));
+            assert!(p.viewport.clip_start > 0.0 && p.viewport.clip_end > p.viewport.clip_start);
+        }
     }
     #[test] fn units_preferences_deserialize() {
         let p = Preferences::from_json(&json!({"length_unit": "in", "unit_scale": 0.0254}));

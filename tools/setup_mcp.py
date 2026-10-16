@@ -70,8 +70,14 @@ def main():
     print(f"\nClaude Desktop: add this to {desktop_config_path()} and restart the app:")
     print(json.dumps({"mcpServers": {"minihou": {"command": sys.executable, "args": [SERVER]}}}, indent=2))
     print("\nThen ask for a system, e.g. \"Build a terrain with scattered rocks and expose the rock size to Blender\".")
-    print("Keep the engine running (py tools\\launch_blender.py --engine graphs\\x.json), or let the AI start it with"
-          " open_graph. Watch it happen in the editor at http://127.0.0.1:8766/")
+    print("\nMCP with the Rust app: start the native MiniHou editor first. It serves the same HTTP API on"
+          " 127.0.0.1:8766; this registration works unchanged with Claude Code and Desktop."
+          " Check engine_status: its version should say '(rust)'. Edits appear in the native editor and Blender."
+          " Do not run a Python engine on the same port. If no app is running, open_graph still starts the Python engine.")
+    print("Verify a running Rust app with: python tools/mcp_smoke_rust.py (read-only). See docs/RUST_MCP_API.md.")
+    print("For the Python browser editor: keep the engine running"
+          " (py tools\\launch_blender.py --engine graphs\\x.json), or let open_graph start it."
+          " Its editor is at http://127.0.0.1:8766/.")
     return 0
 
 

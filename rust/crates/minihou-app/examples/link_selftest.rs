@@ -1,0 +1,148 @@
+//! Throwaway TCP host for add-on interoperability tests. Never creates a window or GPU.
+#[path = "../src/blender_link.rs"]
+#[allow(dead_code)]
+mod blender_link;
+use minihou_app::{cook_batch, CookRequest, Document, Edit, EditorDocument};
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
+fn main() -> minihou_app::Result<()> {
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    if !(3..=4).contains(&args.len()) {
+        return Err("usage: link_selftest GRAPH.json ADDRESS SECONDS [CONTROL.json]".into());
+    }
+    let path = PathBuf::from(&args[0]).canonicalize()?;
+    let mut editor = EditorDocument::new(Document::open(&path)?, path);
+    let mut session = editor.doc.session()?;
+    let mut target = session.graph().main_output()?;
+    let mut server = blender_link::LinkServer::bind(&args[1], &editor.doc, &editor.path)?;
+    let mut revision = 1;
+    let response = cook_batch(
+        &mut session,
+        &mut target,
+        vec![CookRequest {
+            revision,
+            edit: Edit::Replace(editor.doc.value().clone()),
+        }],
+        |_| (),
+    );
+    server.cooked(&response);
+    println!("LINK_READY {}", server.address());
+    let mut command_id = 0;
+    let deadline = Instant::now() + Duration::from_secs(args[2].parse()?);
+    while Instant::now() < deadline {
+        let mut edits = Vec::new();
+        if let Some(control) = args.get(3) {
+            if let Ok(text) = std::fs::read_to_string(control) {
+                if let Ok(command) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if command["id"].as_u64().is_some_and(|id| id > command_id) {
+                        command_id = command["id"].as_u64().unwrap();
+                        match command["op"].as_str().unwrap_or("") {
+                            "stop" => break,
+                            "expose" => {
+                                let edit = minihou_app::toggle_exposed(
+                                    editor.doc.value(),
+                                    command["node"].as_str().unwrap(),
+                                    command["param"].as_str().unwrap(),
+                                );
+                                editor.history.edit(&mut editor.doc, &edit)?;
+                                editor.history.finish(&editor.doc);
+                                edits.push(edit);
+                            }
+                            "param" => {
+                                let edit =
+                                    minihou_app::link_param_edit(editor.doc.value(), &command)?;
+                                editor.history.edit(&mut editor.doc, &edit)?;
+                                editor.history.finish(&editor.doc);
+                                edits.push(edit);
+                            }
+                            "undo" => {
+                                if let Some(edit) = editor.history.undo(&mut editor.doc) {
+                                    edits.push(edit);
+                                }
+                            }
+                            "redo" => {
+                                if let Some(edit) = editor.history.redo(&mut editor.doc) {
+                                    edits.push(edit);
+                                }
+                            }
+                            "replace" => {
+                                let doc = Document::parse(command["graph"].to_string())?;
+                                editor.history.replace(&mut editor.doc, doc);
+                                edits.push(Edit::Replace(editor.doc.value().clone()));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        for request in server.poll() {
+            let result: minihou_app::Result<()> = (|| {
+                match request.message["type"].as_str().unwrap_or("") {
+                    "live_activate" | "live_update" | "live_remove" => {
+                        edits.extend(server.handle_live(&request, &mut editor)?)
+                    }
+                    "set_param" => {
+                        let edit =
+                            minihou_app::link_param_edit(editor.doc.value(), &request.message)?;
+                        editor.history.finish(&editor.doc);
+                        editor.history.edit(&mut editor.doc, &edit)?;
+                        editor.history.finish(&editor.doc);
+                        edits.push(edit);
+                    }
+                    "set_frame" => {
+                        if server.set_frame(&request.message)? {
+                            edits.push(Edit::Time {
+                                frame: server.frame,
+                                fps: server.fps,
+                            });
+                        }
+                    }
+                    "object_geo" | "object_missing" | "image_data" | "image_missing" => {
+                        match minihou_app::link_protocol::external_edit(
+                            &request.message,
+                            &request.arrays,
+                        ) {
+                            Ok(edit) => edits.push(edit),
+                            Err(e) => {
+                                let image = request.message["type"]
+                                    .as_str()
+                                    .unwrap_or("")
+                                    .starts_with("image_");
+                                if let Some(name) =
+                                    request.message[if image { "image" } else { "object" }].as_str()
+                                {
+                                    edits.push(Edit::External{name:format!("{}:{name}",if image{"image"}else{"object"}),input:minihou_core::nodes::blender_input::ExternalInput::Missing(format!("could not read input: {e}"))});
+                                }
+                                return Err(e.into());
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                Ok(())
+            })();
+            if let Err(e) = result {
+                server.reply_error(
+                    request.peer,
+                    request.message["type"].as_str().unwrap_or(""),
+                    &e.to_string(),
+                );
+            }
+        }
+        server.document_changed(&editor.doc, &editor.path);
+        if !edits.is_empty() {
+            revision += 1;
+            let requests = edits
+                .into_iter()
+                .map(|edit| CookRequest { revision, edit })
+                .collect();
+            let response = cook_batch(&mut session, &mut target, requests, |_| ());
+            server.cooked(&response);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    Ok(())
+}

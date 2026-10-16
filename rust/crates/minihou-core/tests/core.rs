@@ -85,7 +85,7 @@ fn supported_group_and_unsupported_node() {
     let g = cook(json!({"nodes": {"a": {"type": "line", "params": {"points": 3}},
         "t": {"type": "transform", "inputs": {"geo": "a"}, "params": {"group": "1", "translate": [1,0,0]}}}, "display": "t"})).unwrap();
     assert_eq!(g.p(), &[0.0,0.0,0.0,1.0,0.0,0.5,0.0,0.0,1.0]);
-    let err = cook(json!({"nodes": {"w": {"type": "wrangle"}}, "display": "w"})).unwrap_err();
+    let err = cook(json!({"nodes": {"w": {"type": "unregistered_test_node"}}, "display": "w"})).unwrap_err();
     assert!(err.0.contains("not in the Rust backend"), "{err}");
 }
 
@@ -155,12 +155,14 @@ fn noise_is_deterministic_and_seeded() {
 
 #[test]
 fn every_node_declares_defaults() {
+    let mut names = std::collections::HashSet::new();
     for n in nodes::registry() {
+        assert!(names.insert(n.name), "duplicate node registration: {}", n.name);
         for p in n.params {
             let _ = (p.default)();
         }
     }
-    assert!(nodes::get("grid").is_some() && nodes::get("delete").is_some() && nodes::get("wrangle").is_none());
+    assert!(nodes::get("grid").is_some() && nodes::get("delete").is_some() && nodes::get("wrangle").is_some());
 }
 
 #[test]

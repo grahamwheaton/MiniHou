@@ -9,6 +9,7 @@
 //! The Python engine stays the reference: `tests/test_rust_parity.py` cooks the same graphs in both and compares.
 
 pub mod error;
+mod boolean_kernel;
 pub mod geometry;
 pub mod graph;
 pub mod heightfield;
@@ -23,8 +24,10 @@ pub mod session;
 pub mod sdf_mesh;
 pub mod sdf_nets;
 pub mod sdf_field;
+pub mod timectx;
 pub mod topo;
 pub mod xform;
+pub mod usd_io;
 
 pub use error::{Error, Result};
 pub use geometry::{Attr, AttrData, Geometry, Topology};

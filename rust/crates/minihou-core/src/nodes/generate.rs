@@ -42,7 +42,8 @@ fn curve(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     if n < 2 {
         return Err(Error::new("give at least two points, each as x,y,z"));
     }
-    let new = Geometry::from_arrays(positions, (0..n as i32).collect(), vec![0, n as i32], Some(vec![p.b("closed")?]))?;
+    let mut new = Geometry::from_arrays(positions, (0..n as i32).collect(), vec![0, n as i32], Some(vec![p.b("closed")?]))?;
+    new.prim.insert("__viewport_curve".into(), Arc::new(Attr::i32(1,vec![1])));
     if let Some(input) = inputs[0].first() {
         let params = Params::resolve(&[], None)?;
         super::merge::merge(&[vec![input.clone(), Arc::new(new)]], &params)
@@ -93,7 +94,9 @@ fn circle(_inputs: &Inputs, p: &Params) -> Result<Geometry> {
         let q = math::apply(&m, [r * angle.cos(), r * angle.sin(), 0.0]);
         pos.extend((0..3).map(|k| (q[k] + center[k]) as f32));
     }
-    Geometry::from_arrays(pos, (0..n as i32).collect(), vec![0, n as i32], None)
+    let mut g=Geometry::from_arrays(pos, (0..n as i32).collect(), vec![0, n as i32], None)?;
+    g.prim.insert("__viewport_curve".into(),Arc::new(Attr::i32(1,vec![1])));
+    Ok(g)
 }
 
 pub const GRID: NodeSpec = NodeSpec {

@@ -121,43 +121,33 @@ fn camera_frame_orbit_pan_zoom_are_finite() {
 }
 
 #[test]
-fn clip_planes_several_pairs_and_ratio_clamp() {
-    let test_cases = [
-        (10.0, 5.0, 20.0),
-        (0.01, 10.0, 20.0),
-        (1000.0, 0.1, 20.0),
-        (100.0, 10000.0, 20.0),
-        (0.0001, 1000.0, 20.0),
-        (50.0, 25.0, 5.0),
-        (50.0, 25.0, 100.0),
-        (50.0, 25.0, 1000.0),
-    ];
-    for (dist, radius, vd) in test_cases {
-        let mut camera = Camera::frame([0., 0., 0.], radius);
-        camera.set_dist(dist);
-        camera.set_view_distance(vd);
-        let (near, far) = camera.clip_planes();
-        assert!(near > 0.0, "near must be positive, got {near} for dist={dist}, radius={radius}");
-        assert!(near < far, "near {near} must be < far {far} for dist={dist}, radius={radius}");
-        let ratio = far / near;
-        assert!(ratio <= 1_000_000.0 + 1e-1, "ratio {ratio} must not exceed 1e6 for dist={dist}, radius={radius}");
+fn explicit_clip_planes_survive_zoom_and_scene_scale() {
+    for radius in [0.001, 1.0, 10000.0] {
+        let mut camera = Camera::frame([0.; 3], radius);
+        camera.set_clip_planes(0.02, 25000.0);
+        camera.set_dist(0.001);
+        assert_eq!(camera.clip_planes(), (0.02, 25000.0));
+        camera.zoom(-100.0);
+        assert_eq!(camera.clip_planes(), (0.02, 25000.0));
+        assert!(camera.matrices(1.0).0.iter().flatten().all(|x| x.is_finite()));
     }
 }
 
 #[test]
-fn clip_planes_ratio_clamp_triggers() {
-    let mut camera = Camera::frame([0., 0., 0.], 10000.0);
-    camera.set_dist(0.001);
-    camera.set_view_distance(20.0);
-    let (near, far) = camera.clip_planes();
-    assert!((far / near - 1_000_000.0).abs() < 1.0, "far/near ratio should be clamped to 1e6, got {}", far / near);
+fn invalid_clip_planes_are_sanitized() {
+    let mut camera = Camera::frame([0.; 3], 1.0);
+    for (near, far) in [(-1., -2.), (10., 1.), (f32::NAN, f32::INFINITY), (f32::MAX, 0.)] {
+        camera.set_clip_planes(near, far);
+        let (near, far) = camera.clip_planes();
+        assert!(near.is_finite() && far.is_finite() && near > 0. && far > near);
+    }
 }
 
 #[test]
 fn point_at_15_radii_in_front_of_camera_inside_frustum() {
     let radius = 10.0;
     let camera = Camera::frame([0., 0., 0.], radius);
-    assert_eq!(camera.view_distance(), 20.0);
+    assert_eq!(camera.clip_planes(), (0.01, 1000.0));
 
     let (near, far) = camera.clip_planes();
     let pt_dist = 15.0 * radius;
@@ -205,10 +195,10 @@ fn bom_open_save_strips_bom_and_preserves_crlf() {
 }
 #[test]
 fn metadata_covers_all_node_types_and_parameters() {
-    assert_eq!(nodes::registry().len(), 19);
+    assert!(nodes::registry().len() >= 19);
     for spec in nodes::registry() {
         for param in spec.params {
-            let meta = param_meta(spec.name, param.name).expect("missing registry parameter");
+            let meta = param_meta(spec.name, param.name).unwrap_or_else(|| panic!("missing metadata for {}.{}", spec.name, param.name));
             assert!(meta["kind"].is_string());
             assert!(meta["doc"].is_string());
             assert_ne!(metadata_kind(meta, &(param.default)()), ParamKind::Unsupported);

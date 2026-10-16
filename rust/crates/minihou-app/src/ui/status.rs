@@ -62,11 +62,19 @@ pub fn show(ui: &mut egui::Ui, v: &View, _out: &mut Actions) {
     }
     let right = bar.right() - 10.;
     let file_width = if v.file_status.is_empty() { 0. } else { p.layout_no_wrap(v.file_status.to_owned(), FontId::proportional(12.), v.theme.dim).size().x + 14. };
-    let chip = Rect::from_center_size(Pos2::new(right - file_width - 42., y), Vec2::new(84., 18.));
+    let label = build_label();
+    let text_width = p.layout_no_wrap(label.clone(), FontId::proportional(11.), v.theme.dim).size().x;
+    let chip_width = text_width + 32.;
+    let chip = Rect::from_center_size(Pos2::new(right - file_width - chip_width / 2., y), Vec2::new(chip_width, 18.));
     p.rect_stroke(chip, 9., Stroke::new(1.0_f32, v.theme.stroke), StrokeKind::Inside);
     p.circle_filled(Pos2::new(chip.left() + 11., y), 3.5, v.theme.ok);
-    p.text(Pos2::new(chip.left() + 21., y), Align2::LEFT_CENTER, "Rust core", FontId::proportional(11.), v.theme.dim);
+    p.text(Pos2::new(chip.left() + 21., y), Align2::LEFT_CENTER, label, FontId::proportional(11.), v.theme.dim);
     if !v.file_status.is_empty() { p.text(Pos2::new(right, y), Align2::RIGHT_CENTER, v.file_status, FontId::proportional(12.), v.theme.dim); }
+}
+
+/// "Rust core v0.1.0 · f80387d* · 2026-10-16 15:12 UTC": package version, git commit (* = uncommitted changes), build time.
+pub fn build_label() -> String {
+    format!("Rust core v{} \u{b7} {} \u{b7} {}", env!("CARGO_PKG_VERSION"), env!("MINIHOU_BUILD_COMMIT"), env!("MINIHOU_BUILD_TIME"))
 }
 
 #[cfg(test)]

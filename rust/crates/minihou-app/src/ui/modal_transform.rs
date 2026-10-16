@@ -1,6 +1,6 @@
 //! Input and maths for viewport modal transforms. No document or renderer state lives here.
 use eframe::egui::{Key, Pos2, Vec2};
-use super::{CameraInfo, Orientation, SnapTo, TransformOp};
+use super::{CameraInfo, Orientation, SnapTo, SnapTargets, TransformOp};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind { Move, Rotate, Scale }
@@ -27,7 +27,7 @@ pub struct Modal {
     pub kind: Kind, pub start: Pos2, pub pointer: Pos2, pub pivot: [f32; 3],
     pub rotation: [f32; 3],
     pub constraint: Constraint, pub numeric: [String; 3], pub field: usize,
-    pub snap_to: SnapTo, pub proportional: bool, pub radius: f32,
+    pub snap_to: SnapTargets, pub target_kind: Option<SnapTo>, pub proportional: bool, pub radius: f32,
     pub initial_proportional: bool, pub initial_radius: f32,
     pub trackball: bool, pub sketch: SketchStage, pub sketch_pivot: Option<[f32; 3]>,
     pub sketch_reference: Option<Pos2>, pub cage: bool, pub cage_handle: Option<CageHandle>,
@@ -37,9 +37,9 @@ pub struct Modal {
     pub last: [f32; 3], pub mmb_start: Option<Pos2>,
 }
 impl Modal {
-    pub fn new(kind: Kind, start: Pos2, pivot: [f32; 3], bounds: ([f32; 3], [f32; 3]), snap_to: SnapTo, proportional: bool, radius: f32) -> Self {
+    pub fn new(kind: Kind, start: Pos2, pivot: [f32; 3], bounds: ([f32; 3], [f32; 3]), snap_to: impl Into<SnapTargets>, proportional: bool, radius: f32) -> Self {
         Self { kind, start, pointer: start, pivot, rotation:[0.;3], constraint: Constraint::Free,
-            numeric: Default::default(), field: 0, snap_to, proportional, radius,
+            numeric: Default::default(), field: 0, snap_to: snap_to.into(), target_kind: None, proportional, radius,
             initial_proportional:proportional, initial_radius:radius, trackball: false,
             sketch: SketchStage::Off, sketch_pivot: None, sketch_reference: None,
             cage: false, cage_handle: None, cage_start: start, bounds, reference: None, target: None, target_shape:None,
@@ -64,15 +64,15 @@ impl Modal {
         self.numeric[index].parse().ok()
     }
     pub fn toggle_axis(&mut self, axis: usize, plane: bool) { self.constraint = self.constraint.key(axis, plane); }
-    pub fn cycle_snap(&mut self) { self.snap_to = match self.snap_to { SnapTo::Increment => SnapTo::Vertex,
-        SnapTo::Vertex => SnapTo::Edge, SnapTo::Edge => SnapTo::Face, _ => SnapTo::Increment }; }
+    pub fn cycle_snap(&mut self) { self.snap_to = match self.snap_to.iter().next().unwrap_or_default() { SnapTo::Increment => SnapTo::Vertex,
+        SnapTo::Vertex => SnapTo::Edge, SnapTo::Edge => SnapTo::Face, _ => SnapTo::Increment }.into(); }
     pub fn wheel(&mut self, delta: f32) { self.radius = (self.radius * (delta * 0.12).exp()).clamp(0.001, 1e6); }
     pub fn status(&self, snap: bool) -> String {
         let title = match self.kind { Kind::Move => "Move", Kind::Rotate => "Rotate", Kind::Scale => "Scale" };
         let numbers = if self.kind == Kind::Move { format!("X: {:.3}  Y: {:.3}  Z: {:.3}", self.last[0], self.last[1], self.last[2]) }
             else { format!("{:.3}{}", self.last.iter().copied().find(|v| *v != 0. && *v != 1.).unwrap_or(self.last[0]), if self.kind == Kind::Rotate { "°" } else { "×" }) };
         format!("{title}  {}  {numbers}  (Snap: {}){}{}", self.constraint.label(),
-            if snap { self.snap_to.label() } else { "Off" }, if self.proportional { "  Proportional" } else { "" },
+            if snap { self.snap_to.label() } else { "Off".into() }, if self.proportional { "  Proportional" } else { "" },
             if self.cage { "  Cage" } else if self.sketch != SketchStage::Off { "  Two-point" }
             else if self.trackball { "  Trackball" } else { "" })
     }
@@ -82,7 +82,7 @@ impl Modal {
         let speed = if precision { 0.1 } else { 1. };
         let delta = (self.pointer - self.start) * speed;
         let step = match self.kind { Kind::Move => increment, Kind::Rotate => 5., Kind::Scale => 0.1 };
-        let q = |v: f32| if snap { snap_value(v, step) } else { v };
+        let q = |v: f32| if snap && (self.kind != Kind::Move || (self.snap_to.contains(SnapTo::Increment) && self.target.is_none())) { snap_value(v, step) } else { v };
         let mut pivot = self.pivot;
         let mut values = match self.kind {
             Kind::Move => {
@@ -97,8 +97,14 @@ impl Modal {
                     Constraint::Plane(axis, _) => { v[axis] = 0.; }
                     Constraint::Free => {}
                 }
-                if let (Some(reference), Some(target)) = (self.reference, self.target) {
+                if let Some(target) = self.target.filter(|_| snap) {
+                    let reference = self.reference.unwrap_or(self.pivot);
                     v = [0, 1, 2].map(|i| target[i] - reference[i]);
+                    match self.constraint {
+                        Constraint::Axis(axis, _) => { let amount = dot(v, basis[axis]); v = basis[axis].map(|c| c * amount); }
+                        Constraint::Plane(axis, _) => { let amount = dot(v, basis[axis]); v = [0,1,2].map(|i| v[i] - basis[axis][i] * amount); }
+                        _ => {}
+                    }
                 }
                 if let Constraint::Axis(axis, _) = self.constraint {
                     if let Some(amount)=self.typed(0) { v=frame[axis].map(|c|c*amount); }
@@ -223,6 +229,17 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         assert!(m.type_key(Key::Num5,false)); assert_eq!(m.typed(0),Some(-2.5));
         m.type_key(Key::Backspace,false); assert_eq!(m.typed(0),Some(-2.)); m.type_key(Key::Tab,false); assert_eq!(m.field,1);
         assert_eq!(snap_value(1.24,0.25),1.25);
+    }
+    #[test] fn geometry_snap_is_exact_and_respects_toggle_and_constraint() {
+        let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
+        let camera=CameraInfo::default();
+        let mut m=Modal::new(Kind::Move,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Vertex,false,1.);
+        m.snap_to.toggle(SnapTo::Increment);
+        m.target=Some([0.13,0.27,0.41]);
+        assert_eq!(m.desired(pos2(0.,0.),100.,frame,camera,true,0.25,false).0,[0.13,0.27,0.41]);
+        assert_eq!(m.desired(pos2(0.,0.),100.,frame,camera,false,0.25,false).0,[0.;3]);
+        m.constraint=Constraint::Axis(1,false);
+        assert_eq!(m.desired(pos2(0.,0.),100.,frame,camera,true,0.25,false).0,[0.,0.27,0.]);
     }
     #[test] fn motion_angle_and_cage() {
         let camera = CameraInfo { ray_right:[1.,0.,0.], ray_up:[0.,1.,0.], ..Default::default() };

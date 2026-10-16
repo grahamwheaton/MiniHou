@@ -14,6 +14,7 @@ pub mod selection_region;
 pub mod shelf;
 pub mod status;
 pub mod sketch;
+pub mod mesh_cut;
 pub mod theme;
 pub mod topbar;
 pub mod transform_gizmo;
@@ -22,7 +23,7 @@ pub mod transform_overlay;
 pub mod viewport_ui;
 
 #[allow(unused_imports)]
-pub use editor_state::{EditorChange, EditorState, Falloff, Orientation, Overlays, Pivot, Proxy, SelectionMode, Snap, SnapTo, Tool, ViewPreset, Proportional};
+pub use editor_state::{EditorChange, EditorState, Falloff, Orientation, Overlays, Pivot, Proxy, SelectionMode, Snap, SnapTo, SnapTargets, Tool, ViewPreset, Proportional};
 use crate::viewport::Mode;
 use minihou_app::{CookState, Edit};
 use minihou_core::Graph;
@@ -38,9 +39,11 @@ pub enum UiAction {
     StartModal(modal_transform::Kind),
     FinishTransform,
     CancelTransform,
+    MeshCutCommit { source: String, node_type: String, params: serde_json::Value },
     SketchCommit { name: String, points: Vec<[f32; 3]>, closed: bool },
     AddMeasurement { a: [f32; 3], b: [f32; 3] },
-    RegionSelect { rect: eframe::egui::Rect, extend: bool, subtract: bool },
+    RegionSelect { shape: crate::picking::RegionShape, op: crate::picking::SelectOp },
+    RestoreRegionSelection(selection_region::Snapshot),
     Open,
     Save,
     SaveAs,
@@ -60,6 +63,9 @@ pub enum UiAction {
     Edit { edit: Edit, continuous: bool },
     /// A shelf tool: add a node of this type (after `after`, wired to it, when given).
     AddNode { node_type: String, after: Option<String> },
+    /// A shelf drop in network coordinates, independent of viewport/world placement.
+    AddNetworkNode { node_type: String, pos: [f32; 2] },
+    AddConnectedNode { node_type: String, connection: crate::graph_edit::AddConnection, pos: [f32; 2] },
     /// A shelf tool dropped with a specific world position.
     AddNodeAt { node_type: String, after: Option<String>, pos: [f32; 3] },
     SetMode(Mode),
@@ -81,10 +87,14 @@ pub enum UiAction {
     DeleteNode(String),
     DuplicateNode(String),
     DisconnectAll(String),
+    DetachNode(String),
     DissolveNode(String),
     /// Wire `from`'s output to `to`'s input `port`; `None` port = its first input.
     ConnectNodes { from: String, to: String, port: Option<String> },
+    /// Atomic canvas gesture; expected guards against stale previews.
+    NetworkGesture { expected: serde_json::Value, before: serde_json::Value, next: serde_json::Value },
     DisconnectInput { node: String, port: String },
+    DisconnectWires(std::collections::BTreeSet<crate::graph_edit::WireRef>),
     /// Re-run the automatic layout for the whole network (card positions are UI state).
     TidyNetwork,
     /// Repeat the last confirmed operator with the same settings (Shift+R).
@@ -95,6 +105,8 @@ pub enum UiAction {
     BlenderInstall(usize),
     BlenderOpen,
     BlenderDownloadAddon,
+    BlenderDetect,
+    BlenderRestartLink,
     /// Show or hide the Blender bar.
     BlenderBar(bool),
     /// A named command from the keymap that has no dedicated action yet (kept for forward compatibility).
@@ -136,6 +148,8 @@ pub struct BlenderStatus {
     pub installs: Vec<(String, String)>,
     pub addon_installed: bool,
     pub message: String,
+    pub link_message: String,
+    pub busy: bool,
 }
 impl BlenderStatus { pub fn connected(&self) -> bool { self.clients.iter().any(|c| c.to_lowercase().starts_with("blender")) } }
 

@@ -29,6 +29,7 @@ fn send(worker: &CookWorker<Scene>, state: &mut CookState, edit: Edit) {
 fn gizmo_axis_drag_emits_move_steps_and_finishes() {
     use egui::{pos2, Event, PointerButton, RawInput, Rect};
     let mut demo: Value = serde_json::from_str(include_str!("default_graph.json")).unwrap();
+    demo["nodes"]["grid1"]["params"]["center"] = json!([0.25, 0.2, 0.]);
     demo["nodes"]["hidden_transform"] = json!({"type": "transform", "inputs": {"geo": "grid1"}});
     let doc = Document::parse(demo.to_string()).unwrap();
     let graph = Graph::from_value(doc.value()).unwrap();
@@ -37,12 +38,14 @@ fn gizmo_axis_drag_emits_move_steps_and_finishes() {
     let theme = Theme::dark();
     let blender = BlenderStatus::default();
     let flags = HashMap::new();
-    let selected_set = std::collections::BTreeSet::from(["hidden_transform".to_owned()]);
+    let selected_set = std::collections::BTreeSet::from(["output1".to_owned(), "hidden_transform".to_owned()]);
+    let origin = object_origin(doc.value(), "output1");
+    assert_eq!(origin, [0.25, 0.2, 0.]);
     let camera = CameraInfo { projection: [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]], ..Default::default() };
     let view = View { graph: &graph, doc: doc.value(), path: std::path::Path::new("demo.json"), dirty: false,
-        can_undo: false, can_redo: false, selected: "hidden_transform", selected_set: &selected_set, display: "output1", cooking: &cooking,
+        can_undo: false, can_redo: false, selected: "output1", selected_set: &selected_set, display: "output1", cooking: &cooking,
         file_status: "", mode: Mode::Shaded, theme: &theme, editor: &editor, camera,
-        bounds: ([0.;3], 1.), selection_center: None, normal_frame: [[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]], geo: None, blender: &blender, flags: &flags,
+        bounds: ([0.;3], 1.), selection_center: Some(origin), normal_frame: [[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]], geo: None, blender: &blender, flags: &flags,
         units: crate::units::UnitSettings::default(), repeat_label: None };
     let ctx = egui::Context::default();
     let frame = |events| {
@@ -58,18 +61,19 @@ fn gizmo_axis_drag_emits_move_steps_and_finishes() {
         (actions.0, rect)
     };
     let (_, rect) = frame(Vec::new());
-    let tip = pos2(rect.center().x + 58., rect.center().y);
+    // Handles follow the active origin, even when the scene bounds differ and
+    // other nodes are selected.
+    let center = ui::transform_gizmo::project(camera, rect, origin).unwrap();
+    assert!(center.distance(rect.center()) > 12.);
+    let tip = pos2(center.x + 58., center.y);
+    assert!(ui::transform_gizmo::hit(rect, &view, tip));
     let (pressed, _) = frame(vec![Event::PointerMoved(tip), Event::PointerButton { pos: tip, button: PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
     assert!(pressed.is_empty());
     let dragged_at = tip + egui::vec2(40., 0.);
     let (dragged, _) = frame(vec![Event::PointerMoved(dragged_at)]);
     assert!(dragged.iter().any(|a| matches!(a, UiAction::TransformNode { op: TransformOp::Move(v) } if v[0] > 0.)));
-    // A selected transform can be unrelated to the viewport output. The old
-    // action path would edit that hidden node and leave output1 unchanged.
-    let mut wrong_target = doc.value().clone();
-    assert_eq!(ensure_transform_target(&mut wrong_target, view.selected, true, None).as_deref(), Some("hidden_transform"));
-    assert_eq!(wrong_target["display"], "output1");
-    // The emitted action must move the displayed mesh through its new transform.
+    // The emitted action transforms the active object, leaving the unrelated
+    // hidden selection alone.
     let op = dragged.iter().find_map(|a| match a { UiAction::TransformNode { op } => Some(*op), _ => None }).unwrap();
     let mut transformed = doc.clone();
     let worker = CookWorker::start(&doc, Scene::new).unwrap();
@@ -77,7 +81,7 @@ fn gizmo_axis_drag_emits_move_steps_and_finishes() {
     send(&worker, &mut state, Edit::Replace(doc.value().clone()));
     let (_, original_hi, _) = cooked(&worker, &mut state);
     let mut value = transformed.value().clone();
-    let target = ensure_transform_target(&mut value, view.display, true, None).unwrap();
+    let target = ensure_transform_target(&mut value, view.selected, true, None).unwrap();
     assert_eq!(value["nodes"][&target]["inputs"]["geo"], "output1");
     let (name, param) = transform_parameter(&value, &doc, &target, op);
     value["nodes"][&target]["params"] = json!({"group": "", "pivot": [0.,0.,0.]});
@@ -87,6 +91,7 @@ fn gizmo_axis_drag_emits_move_steps_and_finishes() {
     }
     let (_, moved_hi, _) = cooked(&worker, &mut state);
     assert!((moved_hi[0] - original_hi[0] - param[0].as_f64().unwrap() as f32).abs() < 1e-3);
+    assert_eq!(transformed.value()["nodes"]["hidden_transform"], doc.value()["nodes"]["hidden_transform"]);
     let (released, _) = frame(vec![Event::PointerButton { pos: dragged_at, button: PointerButton::Primary, pressed: false, modifiers: Default::default() }]);
     assert!(released.iter().any(|a| matches!(a, UiAction::FinishTransform)));
 }

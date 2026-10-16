@@ -546,6 +546,9 @@ pub fn active(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<PrimDrag>(Id::new("prim_handle_drag")).is_some())
 }
 
+pub fn finish_input(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.remove::<PrimDrag>(Id::new("prim_handle_drag")));
+}
 fn is_displayed(v: &View) -> bool {
     if v.selected.is_empty() { return false; }
     if v.display == v.selected { return true; }
