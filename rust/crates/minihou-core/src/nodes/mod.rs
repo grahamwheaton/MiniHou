@@ -20,6 +20,7 @@ mod instance;
 mod foreach;
 mod attribs;
 mod attrib_tools;
+pub mod attrib_paint;
 mod falloff;
 mod deform;
 mod uv;
@@ -162,6 +163,7 @@ pub fn registry() -> &'static [NodeSpec] {
         attribs::ATTRIBUTE_DELETE,
         attribs::ATTRIBUTE_RENAME,
         attrib_tools::ATTRIBUTE_CREATE,
+        attrib_paint::ATTRIB_PAINT,
         attrib_tools::ATTRIBUTE_PROMOTE,
         attrib_tools::ATTRIBUTE_BLUR,
         attrib_tools::CONNECTIVITY,

@@ -148,7 +148,7 @@ Blender link then publishes the document, exposed interface and cook result.
 | `box_add` | `around:[ids]` or `pos`+`size`, `id?`, `title?`, `color?` | `{id}`; network box |
 | `box_set` | `id`, `title?`, `color?`, `pos?`, `size?`, `collapsed?`, `locked?`, `note?`, `text?` | `{}` |
 | `box_remove` | `id:str|[str]` | `{}` |
-| `paint_assign` | `id`, `indices?`, `value?`/`values?`/`erase?`, `clear?`, `default?` | Python returns `{edited:true,bytes:int}`; Rust explicitly rejects because attrib_paint is not in its registry |
+| `paint_assign` | `id`, `indices?`, `value?`/`values?`/`erase?`, `clear?`, `default?` | Rust edits the Python-compatible `mhp1:` payload and returns `{edited:true,bytes:int}`. |
 
 The MCP edit schema lists 18 op names; its prose also documents `paint_assign`,
 which its Python HTTP client can send. Other editor-only operations in Python's

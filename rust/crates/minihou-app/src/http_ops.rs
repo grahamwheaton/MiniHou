@@ -879,7 +879,49 @@ fn apply_one(g: &mut Value, op: &Value, kind: &str) -> Result<Value> {
                 json!({})
             })
         }
-        "paint_assign" => Err("attrib_paint is not in the Rust backend yet".into()),
+        "paint_assign" => {
+            let id = string(op, "id")?;
+            if string(node(g, id)?, "type")? != "attrib_paint" { return Err("paint_assign needs an attrib_paint node".into()); }
+            let s = nodes::get("attrib_paint").unwrap();
+            let current = node(g, id)?["params"].as_object();
+            let p = Params::resolve(s.params, current)?;
+            let kind = p.e("kind", &["float", "int", "vec3"])?;
+            let width = if kind == "vec3" { 3 } else { 1 };
+            let mut data = if op["clear"].as_bool() == Some(true) { String::new() } else { p.s("data")? };
+            if let Some(indices) = op.get("indices") {
+                let indices = indices.as_array().ok_or("indices must be a list of whole numbers")?
+                    .iter().map(|v| v.as_i64().filter(|&n| n >= 0 && n <= i32::MAX as i64)
+                        .map(|n| n as i32).ok_or_else(|| "indices must be nonnegative whole numbers".into()))
+                    .collect::<Result<Vec<i32>>>()?;
+                if op["erase"].as_bool() == Some(true) {
+                    data = nodes::attrib_paint::merge(&data, width, &indices, None).map_err(|e| e.to_string())?;
+                } else if !indices.is_empty() {
+                    let value_rows = if let Some(v) = op.get("values") {
+                        let a = v.as_array().ok_or("values must be a list")?;
+                        if width == 1 { a.iter().map(|v| vec![v.as_f64().or_else(|| v.as_array().filter(|a| a.len() == 1).and_then(|a| a[0].as_f64())).unwrap_or(f64::NAN) as f32]).collect::<Vec<_>>() }
+                        else if a.iter().all(Value::is_number) {
+                            a.chunks(width).map(|row| row.iter().map(|x| x.as_f64().unwrap_or(f64::NAN) as f32).collect()).collect()
+                        } else { a.iter().map(|v| v.as_array().map(|v| v.iter().map(|x| x.as_f64().unwrap_or(f64::NAN) as f32).collect()).unwrap_or_default()).collect() }
+                    } else {
+                        let v = op.get("value").ok_or("give value or values (or erase)")?;
+                        let row = if width == 1 { vec![v.as_f64().unwrap_or(f64::NAN) as f32] }
+                                  else { v.as_array().ok_or("value must hold 3 numbers")?.iter().map(|x| x.as_f64().unwrap_or(f64::NAN) as f32).collect() };
+                        vec![row; indices.len()]
+                    };
+                    let value_rows: Vec<Vec<f32>> = if kind == "int" { value_rows.into_iter().map(|r| r.into_iter().map(f32::round_ties_even).collect()).collect() } else { value_rows };
+                    data = nodes::attrib_paint::merge(&data, width, &indices, Some(&value_rows)).map_err(|e| e.to_string())?;
+                }
+            }
+            let default = if let Some(v) = op.get("default") {
+                let name = if width == 3 { "default_vec" } else { "default" };
+                validate_param("attrib_paint", name, v)?;
+                Some((name, v.clone()))
+            } else { None };
+            let params = ensure_object(&mut g["nodes"][id]["params"]);
+            params.insert("data".into(), json!(data));
+            if let Some((name, v)) = default { params.insert(name.into(), v); }
+            Ok(json!({"edited":true,"bytes":data.len()}))
+        },
         _ => Err(format!("unknown op '{kind}'").into()),
     }
 }
