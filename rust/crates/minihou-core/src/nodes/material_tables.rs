@@ -40,6 +40,8 @@ pub(super) fn reconcile(geos: &[Geometry]) -> Result<Vec<Geometry>> {
                 combined.iter().position(|(_, other, _)| other.as_ref() == Some(id))
             } else if !name.is_empty() {
                 combined.iter().position(|(n, other, source)| other.is_none() && *n == name && *source == usd)
+            } else if ids.is_some() {
+                combined.iter().position(|(n, other, _)| n.is_empty() && other.is_none())
             } else { None };
             let slot = found.unwrap_or_else(|| { combined.push((name, id, usd)); combined.len() - 1 });
             lut.push(slot as i32);
@@ -59,11 +61,31 @@ pub(super) fn reconcile(geos: &[Geometry]) -> Result<Vec<Geometry>> {
             table.insert(key.into(), Arc::new(Attr::i32(1, mapped)));
         }
     }
+    // The legacy USD dictionary is keyed by display name. Give conflicting
+    // sources distinct slot names so both references remain addressable.
+    for i in 0..combined.len() {
+        let (name, _, source) = &combined[i];
+        if name.is_empty() || source.is_none() { continue; }
+        if combined[..i].iter().any(|(n, _, s)| n == name && s != source) {
+            let base = name.clone();
+            let mut suffix = 2;
+            loop {
+                let candidate = format!("{base} ({suffix})");
+                if combined.iter().all(|(n, _, _)| *n != candidate) {
+                    combined[i].0 = candidate;
+                    break;
+                }
+                suffix += 1;
+            }
+        }
+    }
     let merged_names: Vec<_> = combined.iter().map(|(name, _, _)| name.clone()).collect();
     let merged_ids: Vec<_> = combined.iter().map(|(_, id, _)| id.clone()).collect();
+    let usd_sources: serde_json::Map<String, Value> = combined.iter().filter_map(|(name, _, source)| source.as_ref().map(|v| (name.clone(), v.clone()))).collect();
     for g in &mut result {
         g.detail.insert("materials".into(), json!(merged_names));
         if has_bindings { g.detail.insert("material_bindings".into(), json!({"version":1,"slots":merged_ids})); }
+        if !usd_sources.is_empty() { g.detail.insert("usd_materials".into(), Value::Object(usd_sources.clone())); }
     }
     Ok(result)
 }
@@ -89,7 +111,7 @@ pub(super) fn neutral_new_faces(g: &mut Geometry, first_prim: usize, first_corne
     if first_prim >= g.nprims() { return; }
     let mut names = names(g);
     let mut ids = bindings(g).unwrap_or_else(|| vec![None; names.len()]);
-    let neutral = ids.iter().position(Option::is_none).unwrap_or_else(|| {
+    let neutral = ids.iter().enumerate().position(|(i, id)| id.is_none() && names.get(i).is_none_or(String::is_empty)).unwrap_or_else(|| {
         names.push(String::new());
         ids.push(None);
         ids.len() - 1

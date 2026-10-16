@@ -81,7 +81,11 @@ fn concat_tables(parts: Vec<(&AttrTable, usize)>, domain: &str) -> Result<AttrTa
                 "{domain} attribute {name:?} is float on one input and integer on another: not supported by the Rust backend yet"
             )));
         }
-        let pieces: Vec<Attr> = parts.iter().map(|(t, n)| t.get(name).map(|a| (**a).clone()).unwrap_or_else(|| r.zeros_like(*n))).collect();
+        let pieces: Vec<Attr> = parts.iter().map(|(t, n)| t.get(name).map(|a| (**a).clone()).unwrap_or_else(|| {
+            if domain == "vertex" && matches!(r.width, 2 | 3) && !matches!(name.as_str(), "N" | "Cd" | "P") && r.as_f32().is_some() {
+                Attr::f32(r.width, vec![f32::NAN; n * r.width])
+            } else { r.zeros_like(*n) }
+        })).collect();
         let data = match &r.data {
             AttrData::F32(_) => AttrData::F32(pieces.into_iter().flat_map(|a| match a.data { AttrData::F32(v) => v, _ => unreachable!() }).collect()),
             AttrData::I32(_) => AttrData::I32(pieces.into_iter().flat_map(|a| match a.data { AttrData::I32(v) => v, _ => unreachable!() }).collect()),
@@ -133,6 +137,19 @@ mod tests {
         assert_eq!(out.vertex["uv"].as_f32().unwrap()[6], 0.5);
         assert_eq!(out.vertex["Lightmap"].rows(), 6);
         out.validate().unwrap();
+    }
+
+    #[test]
+    fn same_legacy_name_with_different_usd_sources_keeps_both() {
+        let mut a = Geometry::from_arrays(vec![0.,0.,0., 1.,0.,0., 0.,1.,0.], vec![0,1,2], vec![0,3], None).unwrap();
+        a.detail.insert("materials".into(), serde_json::json!(["Mat"]));
+        a.detail.insert("usd_materials".into(), serde_json::json!({"Mat":"/A"}));
+        let mut b = a.clone();
+        b.detail.insert("usd_materials".into(), serde_json::json!({"Mat":"/B"}));
+        let out = merge(&[vec![Arc::new(a), Arc::new(b)]], &Params::resolve(&[],None).unwrap()).unwrap();
+        assert_eq!(out.prim["material_index"].as_i32().unwrap(), &[0,1]);
+        assert_eq!(out.detail["usd_materials"]["Mat"], "/A");
+        assert_eq!(out.detail["usd_materials"]["Mat (2)"], "/B");
     }
 
     #[test]
