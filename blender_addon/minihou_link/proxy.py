@@ -34,18 +34,52 @@ _SOCKET_TYPES = {"float": "NodeSocketFloat", "int": "NodeSocketInt", "bool": "No
                  "material": "NodeSocketMaterial", "image": "NodeSocketImage", "texture": "NodeSocketTexture",
                  "geometry": "NodeSocketGeometry", "bundle": "NodeSocketBundle", "closure": "NodeSocketClosure"}
 _STORE_TYPES = {"float": "FLOAT", "int": "INT", "bool": "BOOLEAN", "vec3": "FLOAT_VECTOR",
-                "vector": "FLOAT_VECTOR", "color": "FLOAT_COLOR", "string": "STRING"}
+                "vector": "FLOAT_VECTOR", "color": "FLOAT_COLOR", "rotation": "QUATERNION",
+                "matrix": "FLOAT4X4", "string": "STRING", "menu": "INT"}
+_REFERENCE_COMPARE_TYPES = {"NodeSocketObject": "OBJECT", "NodeSocketCollection": "COLLECTION",
+                            "NodeSocketMaterial": "MATERIAL", "NodeSocketImage": "IMAGE",
+                            "NodeSocketTexture": "TEXTURE"}
+MENU_NODE_PREFIX = "MH_menu_"
 _VECTOR_SUBTYPES = {"translation": "NodeSocketVectorTranslation", "xyz": "NodeSocketVectorXYZ",
-                    "euler": "NodeSocketVectorEuler", "direction": "NodeSocketVectorDirection"}
+                    "euler": "NodeSocketVectorEuler", "direction": "NodeSocketVectorDirection",
+                    "velocity": "NodeSocketVectorVelocity", "acceleration": "NodeSocketVectorAcceleration"}
+_FLOAT_SUBTYPES = {"angle": "NodeSocketFloatAngle", "distance": "NodeSocketFloatDistance",
+                   "factor": "NodeSocketFloatFactor", "percentage": "NodeSocketFloatPercentage",
+                   "time": "NodeSocketFloatTime"}
+_INT_SUBTYPES = {"factor": "NodeSocketIntFactor", "percentage": "NodeSocketIntPercentage"}
+_STRING_SUBTYPES = {"filepath": "NodeSocketStringFilePath"}
 
 
 def _socket_type(p):
-    if p["kind"] == "vector":
+    kind = p["kind"]
+    subtypes = {"vector": _VECTOR_SUBTYPES, "float": _FLOAT_SUBTYPES,
+                "int": _INT_SUBTYPES, "string": _STRING_SUBTYPES}.get(kind)
+    if subtypes is not None:
         subtype = str(p.get("subtype", "")).lower()
-        if subtype and subtype not in _VECTOR_SUBTYPES:
-            raise ValueError(f"Unsupported vector subtype {subtype!r} for {p['name']}")
-        return _VECTOR_SUBTYPES.get(subtype, "NodeSocketVector")
+        if subtype and subtype not in subtypes:
+            raise ValueError(f"Unsupported {kind} subtype {subtype!r} for {p['name']}")
+        return subtypes.get(subtype, _SOCKET_TYPES[kind])
+    if p.get("subtype"):
+        raise ValueError(f"{kind} input {p['name']!r} has no subtype")
     return _SOCKET_TYPES[p["kind"]]
+
+
+def _menu_source(tree, src, identifier, options):
+    """Create the Menu Switch that gives a Blender menu socket its editable choices."""
+    menu = tree.nodes.get(MENU_NODE_PREFIX + identifier)
+    if menu is None:
+        menu = tree.nodes.new("GeometryNodeMenuSwitch")
+        menu.name = MENU_NODE_PREFIX + identifier
+        menu.data_type = "INT"
+    options = list(options)
+    if [item.name for item in menu.enum_items] != options:
+        menu.enum_items.clear()
+        for option in options:
+            menu.enum_items.new(option)
+    for index, option in enumerate(options):
+        menu.inputs[option].default_value = index
+    _link(tree, src, menu.inputs["Menu"])
+    return menu.outputs[0]
 USE_NODE_PREFIX = "MH_use_"
 INST_PREFIX = "MH_inst_"
 INST_KEY = "minihou_instances"
@@ -395,7 +429,7 @@ def _configure_socket(s, p: dict) -> None:
         elif kind in {"object", "collection", "material", "image", "texture"} and isinstance(value, str):
             collection = getattr(bpy.data, {"object":"objects", "collection":"collections", "material":"materials", "image":"images", "texture":"textures"}[kind])
             value = collection.get(value)
-        if kind != "menu" or value:
+        if kind != "menu":
             want["default_value"] = value
     if kind != "bool":
         # Blender sockets only have hard limits; the engine's hard limits map straight onto them.
@@ -463,6 +497,16 @@ def sync_interface(ng, output_obj, params: List[dict], structure: str) -> None:
         if item.position != target:
             iface.move(item, target)
     _sync_usage_chain(ng, params, ids)
+    # Menu choices are defined by the linked Menu Switch inside the plumbing tree.
+    # Only after that link exists can Blender accept a nonempty menu default.
+    for p in params:
+        if p["kind"] == "menu" and p["value"]:
+            item = next(i for i in _sockets(ng, "INPUT") if i.identifier == ids[p["name"]])
+            if item.default_value != p["value"]:
+                try:
+                    item.default_value = p["value"]
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"Blender cannot set menu input {p['name']!r}: {exc}") from exc
     new_map = json.dumps(ids)
     if ng.get(MAP_KEY) != new_map:
         ng[MAP_KEY] = new_map
@@ -490,15 +534,20 @@ def _sync_usage_chain(ng, params: List[dict], ids: Dict[str, str]) -> None:
     gin, gout = nodes["NodeGroupInput"], nodes["NodeGroupOutput"]
     params = [p for p in params if p["kind"] in _STORE_TYPES]
     ids = dict(ids)
-    # Reference-only comparison is available from Blender 5.2. Older versions
-    # must not evaluate object geometry merely to mark a socket as used.
-    object_ids = ({item.identifier for item in _sockets(ng, "INPUT") if item.socket_type == "NodeSocketObject"}
-                  if bpy.app.version >= (5, 2, 0) else set())
+    menu_ids = {ids[p["name"]] for p in params if p["kind"] == "menu"}
+    for old in [n for n in tree.nodes if n.name.startswith(MENU_NODE_PREFIX)
+                and n.name[len(MENU_NODE_PREFIX):] not in menu_ids]:
+        tree.nodes.remove(old)
+    # Reference-only comparisons keep ID controls active without evaluating
+    # Object Info geometry (which could feed this modifier back into itself).
+    reference_ids = ({item.identifier: _REFERENCE_COMPARE_TYPES[item.socket_type]
+                      for item in _sockets(ng, "INPUT") if item.socket_type in _REFERENCE_COMPARE_TYPES}
+                     if bpy.app.version >= (5, 2, 0) else {})
     compare_prefix = OBJECT_USAGE_PREFIX
     for node in list(tree.nodes):
-        if node.name.startswith(compare_prefix) and node.name[len(compare_prefix):] not in object_ids:
+        if node.name.startswith(compare_prefix) and node.name[len(compare_prefix):] not in reference_ids:
             tree.nodes.remove(node)
-    for identifier in sorted(object_ids):
+    for identifier in sorted(reference_ids):
         params.append({"name": identifier, "kind": "bool"})
         ids[identifier] = identifier
     wanted = [USE_NODE_PREFIX + ids[p["name"]] for p in params]
@@ -526,12 +575,17 @@ def _sync_usage_chain(ng, params: List[dict], ids: Dict[str, str]) -> None:
         outer_ident = ids[p["name"]]
         inner_ident = inner_ids.get(outer_ident) if inner_ids is not None else outer_ident
         src = next(o for o in gin.outputs if o.identifier == inner_ident)
-        if outer_ident in object_ids:
+        if p["kind"] == "menu":
+            src = _menu_source(tree, src, outer_ident, p.get("options", []))
+        if outer_ident in reference_ids:
             compare = tree.nodes.get(compare_prefix + outer_ident)
+            if compare is not None and compare.data_type != reference_ids[outer_ident]:
+                tree.nodes.remove(compare)
+                compare = None
             if compare is None:
                 compare = tree.nodes.new("FunctionNodeCompare")
                 compare.name = compare_prefix + outer_ident
-                compare.data_type = "OBJECT"
+                compare.data_type = reference_ids[outer_ident]
                 compare.operation = "EQUAL"
             if not (compare.inputs["A"].is_linked and compare.inputs["A"].links[0].from_socket == src):
                 tree.links.new(src, compare.inputs["A"])
