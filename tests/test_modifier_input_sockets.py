@@ -126,6 +126,12 @@ class ModifierInputSocketTests(unittest.TestCase):
                 proxy.sync_interface(self.group, self.output, [param("bundle", "Pack", "bundle", "")], "bundle")
         finally:
             bpy.app.version = (5, 2, 0)
+        bpy.types = types.SimpleNamespace(NodeSocketFloat=object)
+        try:
+            with self.assertRaisesRegex(ValueError, "does not support NodeSocketMatrix"):
+                proxy.sync_interface(self.group, self.output, [param("matrix", "Transform", "matrix", "")], "matrix")
+        finally:
+            del bpy.types
 
     def test_reference_metadata_carries_names_and_transforms(self):
         matrix = ((1, 0, 0, 3), (0, 1, 0, 4), (0, 0, 1, 5), (0, 0, 0, 1))
@@ -153,6 +159,69 @@ class ModifierInputSocketTests(unittest.TestCase):
         sockets = {s.name: s.socket_type for s in proxy._active_inputs(self.group)}
         for p in params:
             self.assertEqual(sockets[p["name"]], proxy._socket_type(p))
+
+    def test_numeric_vector_and_path_subtypes(self):
+        variants = [("float", "angle", "NodeSocketFloatAngle"),
+                    ("float", "distance", "NodeSocketFloatDistance"),
+                    ("float", "factor", "NodeSocketFloatFactor"),
+                    ("float", "percentage", "NodeSocketFloatPercentage"),
+                    ("float", "time", "NodeSocketFloatTime"),
+                    ("int", "factor", "NodeSocketIntFactor"),
+                    ("int", "percentage", "NodeSocketIntPercentage"),
+                    ("vector", "velocity", "NodeSocketVectorVelocity"),
+                    ("vector", "acceleration", "NodeSocketVectorAcceleration"),
+                    ("string", "filepath", "NodeSocketStringFilePath")]
+        for kind, subtype, expected in variants:
+            with self.subTest(kind=kind, subtype=subtype):
+                self.assertEqual(proxy._socket_type(dict(param("x", "Test", kind, ""),
+                                                         subtype=subtype)), expected)
+        with self.assertRaisesRegex(ValueError, "Unsupported float subtype"):
+            proxy._socket_type(dict(param("x", "Test", "float", 0), subtype="wrong"))
+
+    def test_menu_switch_populates_and_updates_choices(self):
+        class Items(list):
+            def __init__(self, node):
+                super().__init__()
+                self.node = node
+
+            def new(self, name):
+                item = types.SimpleNamespace(name=name)
+                self.append(item)
+                self.node.inputs[name] = types.SimpleNamespace(default_value=None)
+                return item
+
+            def clear(self):
+                super().clear()
+                self.node.inputs = {"Menu": types.SimpleNamespace(default_value=None)}
+
+        class Nodes(dict):
+            def new(self, kind):
+                self.created += 1
+                node = types.SimpleNamespace(name="", data_type=None,
+                                             inputs={"Menu": types.SimpleNamespace(default_value=None)},
+                                             outputs=[object()])
+                node.enum_items = Items(node)
+                self[proxy.MENU_NODE_PREFIX + "choice"] = node
+                return node
+
+        nodes = Nodes()
+        nodes.created = 0
+        tree = types.SimpleNamespace(nodes=nodes)
+        old_link = proxy._link
+        links = []
+        proxy._link = lambda tree, src, dst: links.append((src, dst))
+        try:
+            source = object()
+            first = proxy._menu_source(tree, source, "choice", ["One", "Two"])
+            self.assertEqual([nodes[proxy.MENU_NODE_PREFIX + "choice"].inputs[n].default_value
+                              for n in ("One", "Two")], [0, 1])
+            self.assertIs(proxy._menu_source(tree, source, "choice", ["One", "Two"]), first)
+            self.assertEqual(nodes.created, 1)
+            proxy._menu_source(tree, source, "choice", ["Three"])
+            self.assertEqual([i.name for i in nodes[proxy.MENU_NODE_PREFIX + "choice"].enum_items], ["Three"])
+            self.assertEqual(len(links), 3)
+        finally:
+            proxy._link = old_link
 
 
 if __name__ == "__main__":

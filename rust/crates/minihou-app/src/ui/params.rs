@@ -559,13 +559,16 @@ fn modifier_inputs_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, nod
     }
     if ui.button("Add input").clicked() {
         let id = (1..).map(|i| format!("input_{i}")).find(|id| !entries.iter().any(|e| e["id"] == *id)).unwrap();
-        let parsed = if default.trim().is_empty() { Ok(default_for(&kind)) } else { serde_json::from_str::<Value>(&default) };
+        let options: Vec<_> = subtype.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+        let parsed = if default.trim().is_empty() {
+            Ok(if kind == "menu" { options.first().map_or(Value::Null, |s| json!(s)) } else { default_for(&kind) })
+        } else { serde_json::from_str::<Value>(&default) };
         match parsed {
             Ok(value) => {
                 let mut entry = json!({"id":id,"name":draft.trim(),"kind":kind,"default":value});
-                if !min.trim().is_empty() { if let Ok(v) = min.parse::<f64>() { entry["min"] = json!(v); } }
-                if !max.trim().is_empty() { if let Ok(v) = max.parse::<f64>() { entry["max"] = json!(v); } }
-                if kind == "menu" { entry["options"] = json!(subtype.split(',').map(str::trim).filter(|s| !s.is_empty()).collect::<Vec<_>>()); }
+                if !min.trim().is_empty() { entry["min"] = json!(min.parse::<f64>().ok()); }
+                if !max.trim().is_empty() { entry["max"] = json!(max.parse::<f64>().ok()); }
+                if kind == "menu" { entry["options"] = json!(options); }
                 else if !subtype.trim().is_empty() { entry["subtype"] = json!(subtype.trim()); }
                 let mut next = entries.clone(); next.push(entry);
                 match validate(&next) {
