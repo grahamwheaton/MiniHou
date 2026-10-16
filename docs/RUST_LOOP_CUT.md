@@ -50,26 +50,26 @@ fine, even or flip options.
 
 ## Rust (`rust/crates/minihou-app/src/ui/mesh_cut.rs`)
 
-Persistent toolbar tool (`Tool::LoopCut`, Ctrl+R). It works on one displayed, successfully cooked stream.
+Modal toolbar tool (`Tool::LoopCut`, Ctrl+R). It works on one displayed, successfully cooked stream.
 
 * **Ring/preview**: uses `minihou_core::nodes::LoopTopology` / `LoopRing::cut_lines`, the same walk and fractions
   `polysplit` cooks with. The preview is therefore exactly the cooked edges (unit-tested).
 * **Hover**: as `pickEdge`, 14 px radius, the 8 nearest candidates, the first visible one. Visibility ray-casts the
   displayed faces (`picking::pick_triangle`) along the camera ray through the edge point, so it works in perspective and
   ortho. X-ray skips the test. Only edges with a quad strip qualify; the old tool also accepted others and drew nothing.
-* **Count**: wheel (or PageUp/PageDown) while an edge is previewed or sliding, 1..64. The count shows beside the cursor
-  and in the status chip. The wheel only zooms when no edge is previewed. The count persists while the tool stays active.
+* **Count**: wheel (or PageUp/PageDown or +/-) while Loop Cut is active, 1..64. The count shows beside the cursor
+  and in the status chip. The wheel changes the count throughout the Loop Cut session.
 * **Slide**: LMB on a previewed edge starts it at 0.5. The pointer motion is projected on the hovered edge's screen
   direction (lower id -> higher id) and divided by its projected length, so the loop follows the cursor. Shift is 10x
   finer and Ctrl snaps to 0.1. The factor is clamped to 0.001..0.999 and rounded to 1e-4. A seed seen end-on falls back to the old
   100 px horizontal mapping. The factor shows beside the cursor and in the chip. With several cuts, spacing stays even (node semantics).
-* **Confirm**: LMB click, Enter, or releasing a press-drag (Blender style). RMB while sliding commits centred.
+* **Confirm**: LMB click, Enter, or releasing a press-drag (Blender style). RMB while sliding cancels.
   Enter while hovering commits centred.
-* **Cancel**: Esc while sliding drops the pending cut and stays in the tool. Esc or RMB while hovering returns to Select. No node is made.
+* **Cancel**: Esc or RMB exits without inserting a node from either stage.
 * **Edit path**: `UiAction::MeshCutCommit` -> `graph_edit::add_viewport_cut` -> `commit_document`. That's one undoable document
-  edit inserting `loop_cut` with `{mode, split_edges: "pA-B", loops, position}`. Editing those params later in the params
+  edit inserting `polysplit` with `{mode, split_edges: "pA-B", loops, position}`. Editing those params later in the params
   panel re-cooks the same result.
 
 Differences from pre-rust: the slide follows the edge rather than raw screen X, and Shift fine, PageUp/PageDown and drag-release
-confirm are new. The node type is `loop_cut` (a Rust alias of `polysplit`; a Python build would need `polysplit`).
+confirm are new. The node type is `polysplit` (Rust also retains the `loop_cut` cook alias).
 Multi-display editing is not supported. Even/flip edge-slide modes don't exist in either build.
