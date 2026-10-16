@@ -654,6 +654,7 @@ fn polyfill(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         g.detail.clone(),
         None,
     )?;
+    super::material_tables::neutral_new_faces(&mut out, g.nprims(), g.nvertices());
     let name = p.s("fill_group")?;
     if !name.is_empty() {
         write_group(
