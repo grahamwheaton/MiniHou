@@ -226,6 +226,7 @@ pub fn registry() -> &'static [NodeSpec] {
         procedural_systems::REGION_IDENTIFY,
         procedural_systems::REGION_TRANSFORM,
         fracture_tools::ASSEMBLE,
+        fracture_tools::GLUE_CLUSTER,
         goals::GOAL_LENGTH,
         goals::GOAL_COLLISION,
         goals::GOAL_SURFACE,

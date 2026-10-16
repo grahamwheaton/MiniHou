@@ -59,7 +59,7 @@ TYPES += ["scatter", "point_jitter", "point_relax", "sort", "switch", "clean",
 
 # Time / physics ports (docs/RUST_SOLVER_DESIGN.md).
 TYPES += ["goal_length", "goal_collision", "goal_surface", "goal_gravity", "goal_pin", "goal_solve",
-          "solver", "rbd_configure", "rbd_constraint", "rbd_solver", "rbd_constraint_properties"]
+          "solver", "rbd_configure", "rbd_constraint", "rbd_solver", "rbd_constraint_properties", "glue_cluster"]
 
 
 def meta() -> dict:

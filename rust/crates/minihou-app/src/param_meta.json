@@ -1776,6 +1776,135 @@
    "kind": "str"
   }
  },
+ "glue_cluster": {
+  "clusters": {
+   "default": 0,
+   "doc": "Merge the most strongly stuck pieces into this many rigid clusters (0: no clustering)",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 100
+  },
+  "max_gap": {
+   "default": 0.0,
+   "doc": "Pieces whose faces are up to this far apart still count as touching",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 0.1
+  },
+  "min_area": {
+   "default": 0.0,
+   "doc": "No glue where the contact is smaller than this",
+   "kind": "float",
+   "min": 0.0
+  },
+  "min_share": {
+   "default": 0.0,
+   "doc": "No glue where the contact is smaller than this share of the largest one: slivers would otherwise snap at once",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "outgrp_external": {
+   "default": false,
+   "doc": "constraints output: links between clusters (these can break)",
+   "kind": "bool"
+  },
+  "outgrp_external_name": {
+   "default": "external",
+   "doc": "Name of the external links group",
+   "kind": "str"
+  },
+  "outgrp_glued": {
+   "default": false,
+   "doc": "pieces output: faces of pieces that are glued to at least one other",
+   "kind": "bool"
+  },
+  "outgrp_glued_name": {
+   "default": "glued",
+   "doc": "Name of the glued pieces group",
+   "kind": "str"
+  },
+  "outgrp_interface": {
+   "default": false,
+   "doc": "pieces output: the faces that lie against another piece",
+   "kind": "bool"
+  },
+  "outgrp_interface_name": {
+   "default": "interface",
+   "doc": "Name of the interface faces group",
+   "kind": "str"
+  },
+  "outgrp_internal": {
+   "default": false,
+   "doc": "constraints output: links inside one cluster (rigid, never break)",
+   "kind": "bool"
+  },
+  "outgrp_internal_name": {
+   "default": "internal",
+   "doc": "Name of the internal links group",
+   "kind": "str"
+  },
+  "outgrp_loose": {
+   "default": false,
+   "doc": "pieces output: faces of pieces that touch nothing",
+   "kind": "bool"
+  },
+  "outgrp_loose_name": {
+   "default": "loose",
+   "doc": "Name of the loose pieces group",
+   "kind": "str"
+  },
+  "outgrp_weak": {
+   "default": false,
+   "doc": "constraints output: links weaker than the 'weak' share of the average strength",
+   "kind": "bool"
+  },
+  "outgrp_weak_name": {
+   "default": "weaklinks",
+   "doc": "Name of the weak links group",
+   "kind": "str"
+  },
+  "output": {
+   "default": "pieces",
+   "doc": "pieces: the input with a 'cluster' attribute; constraints: the glue links, for the solver's third input",
+   "kind": "enum",
+   "options": [
+    "pieces",
+    "constraints"
+   ]
+  },
+  "piece_attrib": {
+   "default": "piece",
+   "doc": "Primitive int attribute with each face's piece (empty: connected pieces)",
+   "kind": "str"
+  },
+  "seed": {
+   "default": 0,
+   "doc": "",
+   "kind": "int"
+  },
+  "strength": {
+   "default": 4000000.0,
+   "doc": "Newtons per square metre of contact: a link breaks when the force on it passes strength x contact area (0: never breaks)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 100000000.0
+  },
+  "strength_variation": {
+   "default": 0.2,
+   "doc": "Random spread of each link's strength (0.2: within 20%)",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "weak": {
+   "default": 0.5,
+   "doc": "A link is weak when it is below this share of the average strength",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
  "goal_collision": {
   "radius": {
    "default": 0.25,
