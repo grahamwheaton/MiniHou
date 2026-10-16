@@ -1,4 +1,4 @@
-"""Staged, wired-input Geometry Nodes bridge. No Python geometry execution callback.
+"""Staged Geometry Nodes bridge with optional placement inputs. No Python geometry callback.
 
 Native input subgraphs are evaluated by Blender on disposable copies, then cooked by
 the external engine in dependency order. Persistent private meshes publish results.
@@ -13,6 +13,7 @@ import uuid
 from types import SimpleNamespace
 
 import bpy
+import numpy as np
 from bpy.app.handlers import persistent
 
 from . import modifiers, proxy, mesh_reader, mesh_writer, scene_objects
@@ -283,7 +284,8 @@ def _promote_wired_modifier(mod):
             inner = inner.copy()
             inner.use_fake_user = False
             node.node_tree = inner
-        inner[KEY] = uuid.uuid4().hex
+        # The first placement inherits the legacy modifier's connection identity.
+        inner[KEY] = root[modifiers.KEY] if node is source else uuid.uuid4().hex
         node[KEY] = inner[KEY]
         for key in (modifiers.PATH, modifiers.GRAPH, modifiers.PARAMS):
             inner[key] = root[key]
@@ -318,7 +320,7 @@ def _placements(tree, path=()):
 
 
 def _order(root):
-    """Trace actual socket links across group boundaries, not editor node order."""
+    """Order every placement by its actual socket dependencies, including unused branches."""
     done, active, ordered, added = set(), set(), [], set()
 
     def input_socket(path, socket):
@@ -355,11 +357,10 @@ def _order(root):
         active.remove(key)
         done.add(key)
 
-    gout = _output(root)
-    if gout:
-        for socket in gout.inputs:
+    for path, node in _placements(root):
+        for socket in node.outputs:
             if socket.type == "GEOMETRY":
-                input_socket((), socket)
+                output_socket(path[:-1], node, socket)
     return ordered
 
 
@@ -427,10 +428,17 @@ def _probe_value(obj, mod, path, socket):
         placement = tree.nodes[socket.node.name]
         value = _socket(placement.inputs, socket.identifier)
         geometry = placement.inputs["Geometry"]
-        if len(value.links) != 1 or len(geometry.links) != 1:
-            raise ValueError("Linked MiniHou parameter requires one value and one Geometry input")
+        if len(value.links) != 1 or len(geometry.links) > 1:
+            raise ValueError("Linked MiniHou parameter requires one value input")
         realize = tree.nodes.new("GeometryNodeRealizeInstances")
-        tree.links.new(geometry.links[0].from_socket, realize.inputs["Geometry"])
+        if geometry.links:
+            source_geometry = geometry.links[0].from_socket
+        else:
+            # A single point gives a uniform field a domain even for generators.
+            point = tree.nodes.new("GeometryNodeMeshLine")
+            point.inputs["Count"].default_value = 1
+            source_geometry = point.outputs["Mesh"]
+        tree.links.new(source_geometry, realize.inputs["Geometry"])
         store = tree.nodes.new("GeometryNodeStoreNamedAttribute")
         store.data_type = kinds[socket.type][0]
         store.domain = "POINT"
@@ -505,6 +513,12 @@ def _validate(obj, tree, mod):
 
 def _probe(obj, mod, path):
     """Lift the placement's wired input through temporary ancestor output sockets."""
+    placement = _tree(mod.node_group, path[:-1]).nodes[path[-1]]
+    if not placement.inputs["Geometry"].links:
+        return ({"point/P": np.empty((0, 3), np.float32),
+                 "topo/vertex_point": np.empty(0, np.int32),
+                 "topo/prim_offsets": np.array([0], np.int32)},
+                (), {"skipped": []})
     copies = []
     temp = obj.copy()
     temp.name = "__MiniHou_GN_probe__"
@@ -535,7 +549,7 @@ def _probe(obj, mod, path):
         placement = tree.nodes[path[-1]]
         geometry = placement.inputs["Geometry"]
         if len(geometry.links) != 1:
-            raise ValueError("MiniHou Geometry input must have one wired mesh input")
+            raise ValueError("MiniHou Geometry input must have at most one mesh link")
         source = geometry.links[0].from_socket
         for parent, node in reversed(ancestors):
             item = tree.interface.new_socket("__MiniHou_probe__", in_out="OUTPUT", socket_type="NodeSocketGeometry")
@@ -596,19 +610,10 @@ def _cook_tree(obj, mod, host, port, force):
         modifiers._disconnect_unsafe_sources(obj, SimpleNamespace(node_group=placement.node_tree))
     _validate(obj, root, mod)
     paths = _order(root)
-    active = set(paths)
-    for path, node in _placements(root):
-        if path not in active:
-            node.node_tree[modifiers.STATUS] = "Disconnected from Geometry output; not cooked"
     cooked = 0
     for path in paths:
         node = _tree(root, path[:-1]).nodes[path[-1]]
         tree = node.node_tree
-        if len(node.inputs["Geometry"].links) != 1:
-            tree[modifiers.STATUS] = "Waiting for a wired Geometry input"
-            for later in paths[paths.index(path) + 1:]:
-                _tree(root, later[:-1]).nodes[later[-1]].node_tree[modifiers.STATUS] = "Waiting: preceding placement needs Geometry input"
-            break
         try:
             graph = json.loads(tree[modifiers.GRAPH])
             if any(n.get("type") == "rbd_solver" for n in graph.get("nodes", {}).values()):
@@ -640,7 +645,7 @@ def _cook_tree(obj, mod, host, port, force):
             objects = [bindings.get(name[1:]) for name in names]
             if names:
                 proxy.sync_instances(tree, names, objects=objects)
-            ready = "Ready (staged wired input)" + (
+            ready = "Ready (staged placement)" + (
                 "; skipped attributes: " + ", ".join(info["skipped"]) if info["skipped"] else "")
             if not force and _digests.get(tree[KEY]) == signature:
                 if tree.get(modifiers.STATUS) != ready:

@@ -321,14 +321,14 @@ class GeometryNodesPlacementTests(unittest.TestCase):
         self.cook()
         self.assert_x(obj, [-6] * 4 + [6] * 4)
 
-    def test_disconnected_group_never_cooks_or_blocks_native_output(self):
+    def test_unused_group_cooks_without_blocking_native_output(self):
         obj = self.mesh()
         tree, gin, gout = self.tree()
         unused = self.mini(tree, scale=10)
         self.chain(tree, gin, self.native(tree, 4), gout)
         self.attach(obj, tree)
-        self.assertEqual(self.cook(), 0)
-        self.assertIn("Disconnected", self.g.status(unused))
+        self.assertEqual(self.cook(), 1)
+        self.assertIn("Ready", self.g.status(unused))
         self.assert_x(obj, [5])
 
     def test_duplicate_placement_node_in_same_tree_is_independent(self):

@@ -8,7 +8,7 @@ The engine is the debug ``link_selftest`` Cargo example (production ``blender_li
 window/GPU), started per test class on an ephemeral port. It never touches a running
 minihou-app.exe. Build it first:
 
-    $env:CARGO_TARGET_DIR="rust/target_chain2"; cargo build --manifest-path rust/Cargo.toml -p minihou-app --example link_selftest
+    $env:CARGO_TARGET_DIR="rust/target_chain3"; cargo build --manifest-path rust/Cargo.toml -p minihou-app --example link_selftest
 
 Override the executable with MINIHOU_LINK_SELFTEST. Set MINIHOU_RUST_FULL_GN=1 to also run
 the whole tests/test_blender_geonodes.py placement suite against the Rust server.
@@ -51,12 +51,14 @@ SOURCES = {"version": 1, "nodes": {
     "output": {"type": "output", "inputs": {"geo": "merge"}}},
     "display": "output",
     "exposed": [{"name": "Offset", "node": "move", "param": "translate"}]}
+GENERATOR = {"version": 1, "nodes": {"box": {"type": "box", "params": {"size": [2, 2, 2]}}},
+             "display": "box", "exposed": [{"name": "Size", "node": "box", "param": "size"}]}
 
 
 def selftest_executable():
     explicit = os.environ.get("MINIHOU_LINK_SELFTEST")
     candidates = [Path(explicit)] if explicit else []
-    for target in ("target_chain2", "target_place", "target_inst"):
+    for target in ("target_chain3", "target_chain2", "target_place", "target_inst"):
         candidates.append(ROOT / "rust" / target / "debug" / "examples" / "link_selftest.exe")
         candidates.append(ROOT / "rust" / target / "debug" / "examples" / "link_selftest")
     for path in candidates:
@@ -119,6 +121,8 @@ class RustChainedPlacementTests(unittest.TestCase):
         cls.extrude.write_text(json.dumps(EXTRUDE), encoding="utf-8")
         cls.sources = Path(cls.tmp.name) / "two_sources.json"
         cls.sources.write_text(json.dumps(SOURCES), encoding="utf-8")
+        cls.generator = Path(cls.tmp.name) / "box_generator.json"
+        cls.generator.write_text(json.dumps(GENERATOR), encoding="utf-8")
         cls.engine = RustEngine(TRANSFORM)
 
     @classmethod
@@ -225,6 +229,39 @@ class RustChainedPlacementTests(unittest.TestCase):
         return area, region, space
 
     # -- tests ----------------------------------------------------------------------------------
+    def test_generator_without_input_and_unused_placement_cook_independently(self):
+        obj = self.plane()
+        tree, gin, gout = self.tree()
+        a = self.add(tree, self.generator, name="Generator A", Size=(2, 2, 2))
+        b = self.add(tree, self.generator, name="Generator B", Size=(4, 2, 2))
+        self.chain(tree, b, gout)  # A feeds nothing; neither placement reads Group Input.
+        self.attach(obj, tree)
+        self.assertEqual(self.cook(), 2)
+        self.assertEqual(self.order(), [self.ident(a), self.ident(b)])
+        self.assertEqual([len(c["input"]) for c in self.cooks], [0, 0])
+        self.assertEqual([len(c["output"]) for c in self.cooks], [8, 8])
+        np.testing.assert_allclose(self.evaluated(obj)[:, 0].max(), 2, atol=1e-6)
+        self.assertEqual(tuple(b.inputs["Size"].default_value), (4, 2, 2))
+
+    def test_group_input_geometry_unlink_relink_keeps_placement_identity_and_controls(self):
+        obj = self.plane()
+        tree, gin, gout = self.tree()
+        a = self.add(tree, self.generator, name="Generator", Size=(3, 2, 2))
+        self.chain(tree, gin, a, gout)
+        self.attach(obj, tree)
+        self.assertEqual(self.cook(), 1)
+        ident = self.ident(a)
+        original = self.evaluated(obj).copy()
+        tree.links.remove(a.inputs["Geometry"].links[0])
+        self.assertEqual(self.cook(), 1)
+        self.assertEqual(self.order(), [ident])
+        np.testing.assert_allclose(sorted_rows(self.evaluated(obj)), sorted_rows(original))
+        self.assertEqual(tuple(a.inputs["Size"].default_value), (3, 2, 2))
+        tree.links.new(gin.outputs["Geometry"], a.inputs["Geometry"])
+        self.assertEqual(self.cook(), 1)
+        self.assertEqual(self.ident(a), ident)
+        self.assertEqual(self.cooks[0]["params"]["Size"], [3, 2, 2])
+
     def test_plane_export_and_wired_cook_keep_one_quad(self):
         obj = self.plane()
         self.assertEqual([face.loop_total for face in obj.data.polygons], [4])

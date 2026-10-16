@@ -477,32 +477,7 @@ fn validate_graph(v: &Value) -> Result<()> {
     if forbidden(v) {
         return Err("modifier graphs cannot read blender_object; use modifier_input to prevent feedback loops".into());
     }
-    let graph = Graph::from_value(v)?;
-    validate_target(v, &graph.main_output()?)
-}
-fn validate_target(v: &Value, target: &str) -> Result<()> {
-    let graph = Graph::from_value(v)?;
-    let mut queue = vec![target.to_string()];
-    let mut seen = std::collections::HashSet::new();
-    let mut input = false;
-    while let Some(id) = queue.pop() {
-        if !seen.insert(id.clone()) {
-            continue;
-        }
-        let n = graph
-            .nodes
-            .iter()
-            .find(|(n, _)| *n == id)
-            .map(|(_, n)| n)
-            .ok_or("no such output node")?;
-        input |= n.node_type == "modifier_input";
-        for (_, ids) in &n.inputs {
-            queue.extend(ids.iter().cloned());
-        }
-    }
-    if !input {
-        return Err("modifier graphs require a top-level modifier_input node; replacement-only generators are not stack modifiers".into());
-    }
+    Graph::from_value(v)?.main_output()?;
     Ok(())
 }
 fn same_param(a: &Value, b: &Value) -> bool {
@@ -514,5 +489,48 @@ fn same_param(a: &Value, b: &Value) -> bool {
             a.len() == b.len() && a.iter().zip(b).all(|(a, b)| same_param(a, b))
         }
         _ => a == b,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn independent_generator_instances_cook_with_empty_inputs_and_survive_relink() {
+        let graph = json!({"nodes":{"box":{"type":"box"}},"display":"box",
+            "exposed":[{"name":"Size","node":"box","param":"size"}]});
+        let doc = Document::parse(graph.to_string()).unwrap();
+        let server = LinkServer::bind("127.0.0.1:0", &doc, Path::new("generator.json")).unwrap();
+        let (sender, _requests) = mpsc::sync_channel(4);
+        let mut manager = InstanceManager::new(1, server.shared.clone(), sender);
+        let empty = Geometry::from_arrays(vec![], vec![], vec![0], None).unwrap();
+        let empty_arrays = link_protocol::geometry_arrays(&empty);
+        let source = Geometry::from_arrays(vec![1., 2., 3.], vec![], vec![0], None).unwrap();
+        let source_arrays = link_protocol::geometry_arrays(&source);
+
+        let describe = manager.handle(&json!({"type":"instance_describe","graph":graph}), &Arrays::new());
+        assert_eq!(describe.0["type"], "instance_description");
+        for (request_id, id, input, size) in [(1, "A", &empty_arrays, 2.),
+                                               (2, "B", &empty_arrays, 4.),
+                                               (3, "A", &source_arrays, 2.),
+                                               (4, "A", &empty_arrays, 2.)] {
+            let (header, arrays) = manager.handle(&json!({"type":"instance_cook","request_id":request_id,
+                "instance_id":id,"graph":graph,"params":{"Size":[size,2.,2.]}}), input);
+            assert_eq!(header["type"], "instance_result", "{header}");
+            assert_eq!(header["instance_id"], id);
+            let geometry = link_protocol::decode_object(&header, &arrays).unwrap();
+            assert!(geometry.npoints > 0, "generator must return geometry for {id}");
+            let max_x = geometry.p().chunks_exact(3).map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max);
+            assert_eq!(max_x, size as f32 / 2.);
+        }
+        assert!(manager.entries.contains_key("A"));
+        assert!(manager.entries.contains_key("B"));
+
+        let empty_input_graph = json!({"nodes":{"input":{"type":"modifier_input"}},"display":"input"});
+        let (header, arrays) = manager.handle(&json!({"type":"instance_cook","request_id":5,
+            "instance_id":"empty-input","graph":empty_input_graph,"params":{}}), &empty_arrays);
+        assert_eq!(header["type"], "instance_result", "{header}");
+        assert_eq!(link_protocol::decode_object(&header, &arrays).unwrap().npoints, 0);
     }
 }
