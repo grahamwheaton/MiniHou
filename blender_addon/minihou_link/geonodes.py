@@ -79,6 +79,7 @@ def add_group(tree, graph_path, *, host=None, port=None):
     proxy.sync_interface(ng, cache, header["interface"], json.dumps(header["interface"]))
     node = tree.nodes.new("GeometryNodeGroup")
     node.node_tree = ng
+    node[KEY] = ng[KEY]
     node.label = "MiniHou: " + os.path.basename(path)
     node.width = 240
     _object_interface(ng)
@@ -237,7 +238,55 @@ def _private(tree, seen_ids):
                 private = _private(child, seen_ids)
                 if private != child:
                     node.node_tree = private
+                if KEY in private:
+                    node[KEY] = private[KEY]
     return tree
+
+
+def _promote_wired_modifier(mod):
+    """Adopt edited plumbing nodes as independent placements on first staged cook.
+
+    Old one-node modifiers keep their existing stack bridge. A second plumbing
+    occurrence means the user is editing the Geometry Nodes tree as a network.
+    """
+    root = mod.node_group
+    if root is None or modifiers.KEY not in root:
+        return
+    nodes = [n for n in root.nodes if n.bl_idname == "GeometryNodeGroup"
+             and n.node_tree is not None and proxy.PLUMBING_KEY in n.node_tree]
+    if not nodes:
+        return
+    if len(nodes) == 1:
+        geometry = nodes[0].inputs.get("Geometry")
+        if geometry is not None and len(geometry.links) == 1 \
+                and geometry.links[0].from_node.bl_idname == "NodeGroupInput":
+            return
+    for node in nodes:
+        # The modifier's interface previously drove every copy through Group
+        # Input. Preserve its current values on each occurrence, then expose
+        # independent node sockets for subsequent edits.
+        for socket in node.inputs:
+            if socket.type == "GEOMETRY" or len(socket.links) != 1:
+                continue
+            link = socket.links[0]
+            if link.from_node.bl_idname == "NodeGroupInput":
+                value = _value(root, mod, (), socket)
+                root.links.remove(link)
+                socket.default_value = value
+        inner = node.node_tree
+        if inner.users - int(inner.use_fake_user) > 1:
+            inner = inner.copy()
+            inner.use_fake_user = False
+            node.node_tree = inner
+        inner[KEY] = uuid.uuid4().hex
+        node[KEY] = inner[KEY]
+        for key in (modifiers.PATH, modifiers.GRAPH, modifiers.PARAMS):
+            inner[key] = root[key]
+        inner[modifiers.STATUS] = "Waiting for first wired cook"
+    # The outer group becomes an ordinary GN container. Its old modifier cache
+    # is retained until the new placements have published their own results.
+    del root[modifiers.KEY]
+    root[modifiers.STATUS] = "Converted to wired MiniHou placements"
 
 
 def _tree(root, path):
@@ -475,6 +524,11 @@ def _cook_tree(obj, mod, host, port, force):
     for path in paths:
         node = _tree(root, path[:-1]).nodes[path[-1]]
         tree = node.node_tree
+        if len(node.inputs["Geometry"].links) != 1:
+            tree[modifiers.STATUS] = "Waiting for a wired Geometry input"
+            for later in paths[paths.index(path) + 1:]:
+                _tree(root, later[:-1]).nodes[later[-1]].node_tree[modifiers.STATUS] = "Waiting: preceding placement needs Geometry input"
+            break
         try:
             graph = json.loads(tree[modifiers.GRAPH])
             if any(n.get("type") == "rbd_solver" for n in graph.get("nodes", {}).values()):
@@ -612,6 +666,8 @@ def pump(host=None, port=None, *, force=False):
             if obj.library or obj.type != "MESH" or CACHE in obj:
                 continue
             for mod in obj.modifiers:
+                if mod.type == "NODES":
+                    _promote_wired_modifier(mod)
                 if mod.type == "NODES" and not modifiers.is_modifier(mod) and contains(mod.node_group):
                     tree = _private(mod.node_group, seen)
                     if tree != mod.node_group:

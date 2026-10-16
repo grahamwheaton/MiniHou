@@ -666,6 +666,11 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
         return 0
     if _only is None:
         from . import geonodes
+        for obj in bpy.data.objects:
+            if obj.type == "MESH" and obj.library is None and geonodes.CACHE not in obj:
+                for mod in obj.modifiers:
+                    if mod.type == "NODES":
+                        geonodes._promote_wired_modifier(mod)
         geonodes._cleanup()
         if any(geonodes.contains(getattr(m, "node_group", None))
                for o in bpy.context.scene.objects for m in o.modifiers):
