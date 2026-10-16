@@ -29,9 +29,18 @@ pub fn validate(inputs: &[Value]) -> Result<()> {
         if !KINDS.contains(&kind) { return Err(format!("unsupported Blender input type {kind:?}").into()); }
         if !ids.insert(id) || !names.insert(name) { return Err("duplicate input id or name".into()); }
         let value = entry.get("default").ok_or("input needs a default")?;
-        if kind == "vector" && !entry["subtype"].as_str().unwrap_or("").is_empty()
-            && !["translation", "xyz", "euler", "direction"].contains(&entry["subtype"].as_str().unwrap()) {
-            return Err(format!("{name}: unsupported vector subtype").into());
+        let subtypes: &[&str] = match kind {
+            "vector" => &["translation", "xyz", "euler", "direction", "velocity", "acceleration"],
+            "float" => &["angle", "distance", "factor", "percentage", "time"],
+            "int" => &["factor", "percentage"],
+            "string" => &["filepath"],
+            _ => &[],
+        };
+        if let Some(subtype) = entry.get("subtype") {
+            let subtype = subtype.as_str().ok_or("input subtype must be a string")?;
+            if !subtype.is_empty() && !subtypes.contains(&subtype) {
+                return Err(format!("{name}: unsupported {kind} subtype {subtype:?}").into());
+            }
         }
         let valid = match kind {
             "float" => value.is_number(), "int" => value.as_i64().is_some(), "bool" => value.is_boolean(),
@@ -42,8 +51,15 @@ pub fn validate(inputs: &[Value]) -> Result<()> {
         if !valid { return Err(format!("invalid default for {name} ({kind})").into()); }
         if kind == "menu" {
             let options = entry["options"].as_array().filter(|a| !a.is_empty()).ok_or("menu input needs options")?;
-            if !options.iter().all(Value::is_string) || (value != "" && !options.contains(value)) {
+            let mut unique = HashSet::new();
+            if !options.iter().all(|o| o.as_str().is_some_and(|s| !s.is_empty() && unique.insert(s)))
+                || !options.contains(value) {
                 return Err(format!("{name}: menu default must be one of its options").into());
+            }
+        }
+        for bound in ["min", "max"] {
+            if entry.get(bound).is_some() && !entry[bound].is_number() {
+                return Err(format!("{name}: {bound} must be numeric").into());
             }
         }
         if let (Some(min), Some(max)) = (entry["min"].as_f64(), entry["max"].as_f64()) {
@@ -160,5 +176,26 @@ mod tests {
         assert_eq!(doc.value()["nodes"]["move"]["params"]["translate"], json!([0.,0.,0.]));
         assert_eq!(doc.value()["nodes"]["input"]["input_values"], json!({}));
         assert!(minihou_core::Graph::from_value(doc.value()).is_ok());
+    }
+
+    #[test]
+    fn menu_and_subtype_definitions_reject_unusable_blender_values() {
+        let menu = json!({"id":"choice","name":"Choice","kind":"menu",
+                          "options":["One","Two"],"default":"One"});
+        assert!(validate(&[menu.clone()]).is_ok());
+        let mut bad = menu;
+        bad["default"] = json!("");
+        assert!(validate(&[bad.clone()]).is_err());
+        bad["default"] = json!("One");
+        bad["options"] = json!(["One", "One"]);
+        assert!(validate(&[bad]).is_err());
+        let mut scalar = json!({"id":"angle","name":"Angle","kind":"float",
+                                "subtype":"angle","default":0.5,"min":0.0});
+        assert!(validate(&[scalar.clone()]).is_ok());
+        scalar["subtype"] = json!("not_a_socket");
+        assert!(validate(&[scalar.clone()]).is_err());
+        scalar["subtype"] = json!("angle");
+        scalar["min"] = json!("bad");
+        assert!(validate(&[scalar]).is_err());
     }
 }
