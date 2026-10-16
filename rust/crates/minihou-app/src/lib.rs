@@ -730,6 +730,13 @@ fn append_cook_stats(out:&mut CookStats, more:&CookStats) {
 mod channel_document_tests {
     use super::*;
     #[test]
+    fn existing_python_compatible_graph_needs_no_channel_fields() {
+        let doc=Document::parse(include_str!("default_graph.json").into()).unwrap();
+        let graph=Graph::from_value(doc.value()).unwrap();
+        assert_eq!(graph.to_value(),*doc.value());
+        assert!(graph.nodes.iter().all(|(_,node)|node.channels.is_none()&&node.locked_params.is_none()));
+    }
+    #[test]
     fn channels_and_locks_roundtrip_through_lossless_document_history() {
         let original="{\n  \"nodes\": {\"driver\": {\"type\": \"box\"}, \"out\": {\"type\": \"box\", \"params\": {\"size\": [1,2,3]}, \"custom\": 42}},\n  \"display\": \"out\", \"unknown\": \"stay\"\n}";
         let mut doc=Document::parse(original.into()).unwrap();

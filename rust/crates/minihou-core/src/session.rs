@@ -366,6 +366,9 @@ mod channel_cache_tests {
         },"display":"out"})).unwrap());
         s.cook(None).unwrap();
         assert!(!s.last_stats().cooked.contains(&"driver".into()));
+        s.set_param("driver","size",json!([2,3,2])).unwrap();
+        s.cook(None).unwrap();
+        assert!(s.last_stats().cooked.is_empty(),"{:?}",s.last_stats());
         s.set_param("driver","size",json!([3,2,2])).unwrap();
         s.cook(None).unwrap();
         assert!(s.last_stats().cooked.contains(&"dependent".into()));

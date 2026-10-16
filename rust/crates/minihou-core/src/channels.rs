@@ -201,9 +201,12 @@ mod tests {
             "a":{"type":"box","params":{"size":[3,4,5]},"channels":{"size.x":"ch('../b/size.x')","size.y":"ch('../gone/size.y')"}},
             "b":{"type":"box","params":{"size":[6,7,8]},"channels":{"size.x":"ch('../a/size.x')"}}
         }}));
+        assert_eq!(r.params["a"]["size"][0],json!(3));
         assert_eq!(r.params["a"]["size"][1],json!(4));
+        assert_eq!(r.params["b"]["size"][0],json!(6));
         assert!(r.diagnostics.iter().any(|d|d.kind==ParamDiagKind::BadReference&&d.node=="a"&&d.param=="size.y"));
-        assert!(r.diagnostics.iter().any(|d|d.kind==ParamDiagKind::CycleDetected));
+        assert!(r.diagnostics.iter().any(|d|d.kind==ParamDiagKind::CycleDetected&&d.node=="a"&&d.param=="size.x"));
+        assert!(r.diagnostics.iter().any(|d|d.kind==ParamDiagKind::CycleDetected&&d.node=="b"&&d.param=="size.x"));
     }
     #[test]
     fn previously_resolved_broken_link_does_not_drive_a_dependent() {
