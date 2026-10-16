@@ -265,12 +265,41 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     }
     if modified && !locked && icon(ui, reset_rect, ui.id().with((id, param.name, "reset")), true, false, v.theme)
         .on_hover_text(format!("Reset {} to {}", label_text, default)).clicked() {
-        out.push(UiAction::Edit { edit: Edit::Param { node: id.to_owned(), name: param.name.to_owned(), value: default }, continuous: false });
+        out.push(UiAction::Edit { edit: Edit::Param { node: id.to_owned(), name: param.name.to_owned(), value: default.clone() }, continuous: false });
     }
     let on = minihou_app::is_exposed(v.doc, id, param.name);
     if icon(ui, expose_rect, ui.id().with((id, param.name, "expose")), false, on, v.theme)
         .on_hover_text(if on { "Exposed: click to remove" } else { "Expose parameter" }).clicked() {
         out.push(UiAction::Edit { edit: minihou_app::toggle_exposed(v.doc, id, param.name), continuous: false });
+    }
+    let matching: Vec<_> = minihou_app::modifier_inputs::entries(v.doc).into_iter().filter(|entry| {
+        match kind {
+            ParamKind::Float => entry["kind"] == "float",
+            ParamKind::Integer => entry["kind"] == "int",
+            ParamKind::Bool => entry["kind"] == "bool",
+            ParamKind::Vec3 => entry["kind"] == "vector" || entry["kind"] == "rotation",
+            ParamKind::String => ["string", "menu", "object", "collection", "material", "image", "texture"].iter().any(|k| entry["kind"] == *k),
+            ParamKind::Unsupported => false,
+        }
+    }).collect();
+    if !matching.is_empty() || old.get("modifier_input").is_some() {
+        ui.horizontal(|ui| {
+            if let Some(link) = old.get("modifier_input") { ui.label(format!("Blender input: {link}")); }
+            ui.menu_button("Link to Blender input", |ui| {
+                for entry in &matching {
+                    let name = entry["name"].as_str().unwrap_or("");
+                    if ui.button(name).clicked() {
+                        out.push(UiAction::Edit { edit: Edit::Param { node: id.into(), name: param.name.into(),
+                            value: json!({"modifier_input":{"node":entry["node"],"id":entry["id"]}}) }, continuous: false });
+                        ui.close();
+                    }
+                }
+                if old.get("modifier_input").is_some() && ui.button("Unlink").clicked() {
+                    out.push(UiAction::Edit { edit: Edit::Param { node: id.into(), name: param.name.into(), value: default.clone() }, continuous: false });
+                    ui.close();
+                }
+            });
+        });
     }
 }
 
@@ -295,6 +324,97 @@ fn unsupported(ui: &mut egui::Ui, v: &View<'_>, id: &str, typ: &str) {
             paint_text(ui, row.min + Vec2::new(8., 11.), &format!("{name}: {value}"), 11., true, v.theme.dim, Align2::LEFT_CENTER);
         }
     }
+}
+
+fn modifier_inputs_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, node: &str) {
+    use minihou_app::modifier_inputs::{default_for, validate, KINDS};
+    let entries = v.doc["nodes"][node]["modifier_inputs"].as_array().cloned().unwrap_or_default();
+    ui.separator();
+    ui.label("Blender inputs");
+    for (index, entry) in entries.iter().enumerate() {
+        let ident = entry["id"].as_str().unwrap_or("");
+        let key = egui::Id::new(("modifier_input_name", node, ident));
+        let mut name = ui.ctx().data_mut(|d| d.get_persisted::<String>(key)).unwrap_or_else(|| entry["name"].as_str().unwrap_or("").to_owned());
+        ui.horizontal(|ui| {
+            let response = ui.add(egui::TextEdit::singleline(&mut name).desired_width(110.));
+            if response.changed() { ui.ctx().data_mut(|d| d.insert_persisted(key, name.clone())); }
+            if response.lost_focus() && name != entry["name"] {
+                let mut next = entries.clone(); next[index]["name"] = json!(name.trim());
+                if validate(&next).is_ok() {
+                    out.push(UiAction::Edit { edit: Edit::ModifierInputs { node: node.into(), inputs: next }, continuous: false });
+                }
+            }
+            ui.label(entry["kind"].as_str().unwrap_or("?"));
+            for (label, dest) in [("↑", index.checked_sub(1)), ("↓", (index + 1 < entries.len()).then_some(index + 1))] {
+                if ui.add_enabled(dest.is_some(), egui::Button::new(label)).clicked() {
+                    let mut next = entries.clone(); next.swap(index, dest.unwrap());
+                    out.push(UiAction::Edit { edit: Edit::ModifierInputs { node: node.into(), inputs: next }, continuous: false });
+                }
+            }
+            if ui.button("×").on_hover_text("Remove input").clicked() {
+                let mut next = entries.clone(); next.remove(index);
+                out.push(UiAction::Edit { edit: Edit::ModifierInputs { node: node.into(), inputs: next }, continuous: false });
+            }
+        });
+        ui.small(format!("id: {ident} · default: {}", entry["default"]));
+    }
+    let key = egui::Id::new(("modifier_input_draft", node));
+    let mut draft = ui.ctx().data_mut(|d| d.get_persisted::<String>(key)).unwrap_or_default();
+    let kind_key = egui::Id::new(("modifier_input_kind", node));
+    let mut kind = ui.ctx().data_mut(|d| d.get_persisted::<String>(kind_key)).unwrap_or_else(|| "float".into());
+    let default_key = egui::Id::new(("modifier_input_default", node));
+    let mut default = ui.ctx().data_mut(|d| d.get_persisted::<String>(default_key)).unwrap_or_default();
+    let min_key = egui::Id::new(("modifier_input_min", node));
+    let mut min = ui.ctx().data_mut(|d| d.get_persisted::<String>(min_key)).unwrap_or_default();
+    let max_key = egui::Id::new(("modifier_input_max", node));
+    let mut max = ui.ctx().data_mut(|d| d.get_persisted::<String>(max_key)).unwrap_or_default();
+    let subtype_key = egui::Id::new(("modifier_input_subtype", node));
+    let mut subtype = ui.ctx().data_mut(|d| d.get_persisted::<String>(subtype_key)).unwrap_or_default();
+    let error_key = egui::Id::new(("modifier_input_error", node));
+    let mut error = ui.ctx().data_mut(|d| d.get_persisted::<String>(error_key)).unwrap_or_default();
+    ui.horizontal(|ui| { ui.label("Name"); ui.text_edit_singleline(&mut draft); });
+    ui.horizontal(|ui| {
+        ui.label("Type");
+        egui::ComboBox::from_id_salt((node, "input_type")).selected_text(&kind).show_ui(ui, |ui| {
+            for option in KINDS { ui.selectable_value(&mut kind, (*option).to_owned(), *option); }
+        });
+    });
+    ui.horizontal(|ui| { ui.label("Default JSON"); ui.text_edit_singleline(&mut default); });
+    if matches!(kind.as_str(), "float" | "int" | "vector" | "rotation") {
+        ui.horizontal(|ui| { ui.label("Min"); ui.text_edit_singleline(&mut min); ui.label("Max"); ui.text_edit_singleline(&mut max); });
+    }
+    if matches!(kind.as_str(), "vector" | "float" | "int" | "string" | "menu") {
+        ui.horizontal(|ui| { ui.label(if kind == "menu" { "Options (comma separated)" } else { "Subtype" }); ui.text_edit_singleline(&mut subtype); });
+    }
+    for (key, value) in [(key, &draft), (kind_key, &kind), (default_key, &default), (min_key, &min), (max_key, &max), (subtype_key, &subtype)] {
+        ui.ctx().data_mut(|d| d.insert_persisted(key, value.clone()));
+    }
+    if ui.button("Add input").clicked() {
+        let id = (1..).map(|i| format!("input_{i}")).find(|id| !entries.iter().any(|e| e["id"] == *id)).unwrap();
+        let parsed = if default.trim().is_empty() { Ok(default_for(&kind)) } else { serde_json::from_str::<Value>(&default) };
+        match parsed {
+            Ok(value) => {
+                let mut entry = json!({"id":id,"name":draft.trim(),"kind":kind,"default":value});
+                if !min.trim().is_empty() { if let Ok(v) = min.parse::<f64>() { entry["min"] = json!(v); } }
+                if !max.trim().is_empty() { if let Ok(v) = max.parse::<f64>() { entry["max"] = json!(v); } }
+                if kind == "menu" { entry["options"] = json!(subtype.split(',').map(str::trim).filter(|s| !s.is_empty()).collect::<Vec<_>>()); }
+                else if !subtype.trim().is_empty() { entry["subtype"] = json!(subtype.trim()); }
+                let mut next = entries.clone(); next.push(entry);
+                match validate(&next) {
+                    Ok(()) => {
+                        out.push(UiAction::Edit { edit: Edit::ModifierInputs { node: node.into(), inputs: next }, continuous: false });
+                        draft.clear(); default.clear(); error.clear();
+                        ui.ctx().data_mut(|d| { d.insert_persisted(key, draft); d.insert_persisted(default_key, default); });
+                    }
+                    Err(e) => error = e.to_string(),
+                }
+            }
+            Err(_) => error = "Default must be valid JSON".into(),
+        }
+        ui.ctx().data_mut(|d| d.insert_persisted(error_key, error.clone()));
+    }
+    if !error.is_empty() { ui.colored_label(v.theme.err, error); }
+    ui.small("Link a parameter with this input's stable id in the node parameter menu.");
 }
 
 pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
@@ -334,6 +454,7 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
             if let Some(spec) = nodes::get(typ) {
                 for param in spec.params { ui.push_id(param.name, |ui| row(ui, v, out, id, typ, param, flags.locked, &mut errors)); }
             }
+            if typ == "modifier_input" { modifier_inputs_panel(ui, v, out, id); }
             ui.add_space(6.);
             for error in errors {
                 let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.), Sense::hover());
