@@ -2069,6 +2069,16 @@ mod tests {
         assert!(pos.x >= row_layout.label_rect.right(), "Checkbox text pos ({}) must sit at/after field column start ({})", pos.x, row_layout.label_rect.right());
     }
 
+    /// f32 round-trips: compare numbers with a tolerance, everything else exactly.
+fn json_close(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+    use serde_json::Value::*;
+    match (a, b) {
+        (Number(x), Number(y)) => (x.as_f64().unwrap_or(f64::NAN) - y.as_f64().unwrap_or(f64::NAN)).abs() < 1e-5,
+        (Array(x), Array(y)) => x.len() == y.len() && x.iter().zip(y).all(|(p, q)| json_close(p, q)),
+        (Object(x), Object(y)) => x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| json_close(v, w))),
+        _ => a == b,
+    }
+}
     #[test]
     fn color_deserialization_and_serialization() {
         // 3-component RGB array
@@ -2081,7 +2091,7 @@ mod tests {
         assert!((rgba[2] - 0.6).abs() < 1e-4);
         assert_eq!(rgba[3], 1.0);
         let ser_rgb = serialize_color_value(rgba, comps, is_hex);
-        assert_eq!(ser_rgb, rgb_val);
+        assert!(json_close(&ser_rgb, &rgb_val), "{ser_rgb:?} vs {rgb_val:?}");
 
         // 4-component RGBA array
         let rgba_val = json!([0.1, 0.2, 0.3, 0.8]);
@@ -2091,7 +2101,7 @@ mod tests {
         assert!((rgba[0] - 0.1).abs() < 1e-4);
         assert!((rgba[3] - 0.8).abs() < 1e-4);
         let ser_rgba = serialize_color_value(rgba, comps, is_hex);
-        assert_eq!(ser_rgba, rgba_val);
+        assert!(json_close(&ser_rgba, &rgba_val), "{ser_rgba:?} vs {rgba_val:?}");
 
         // 6-digit hex string
         let hex_val = json!("#336699");
@@ -2174,7 +2184,7 @@ mod tests {
         assert_eq!(ramp3.format, RampFormat::ArrayOfPairs);
         assert_eq!(ramp3.stops.len(), 2);
         let ser3 = ramp3.to_value();
-        assert_eq!(ser3, pairs);
+        assert!(json_close(&ser3, &pairs), "{ser3:?} vs {pairs:?}");
 
         // Format 4: ArrayOfStops [{"pos": 0.0, "color": [...]}, ...]
         let stops_arr = json!([
