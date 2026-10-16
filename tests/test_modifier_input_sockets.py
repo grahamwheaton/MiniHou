@@ -5,21 +5,20 @@ from pathlib import Path
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "_modifier_input_addon"
 package = types.ModuleType(PACKAGE)
 package.__path__ = [str(ROOT / "blender_addon/minihou_link")]
-sys.modules[PACKAGE] = package
 mesh_writer = types.ModuleType(PACKAGE + ".mesh_writer")
 mesh_writer.assert_main_thread = lambda: None
-sys.modules[PACKAGE + ".mesh_writer"] = mesh_writer
 bpy = types.ModuleType("bpy")
 bpy.app = types.SimpleNamespace(version=(5, 2, 0), version_string="5.2")
 bpy.data = types.SimpleNamespace(**{name: {} for name in ("objects", "collections", "materials", "images", "textures")})
-sys.modules["bpy"] = bpy
-proxy = importlib.import_module(PACKAGE + ".proxy")
+with patch.dict(sys.modules, {PACKAGE: package, PACKAGE + ".mesh_writer": mesh_writer, "bpy": bpy}):
+    proxy = importlib.import_module(PACKAGE + ".proxy")
 
 
 class Socket:
