@@ -1,6 +1,7 @@
 mod picking;
 mod element_select;
 mod graph_edit;
+mod noodle_hit;
 mod http_ui;
 mod ui;
 mod viewport;
@@ -1487,11 +1488,11 @@ impl App {
                     if let Some(mode) = ui::sketch::SketchMode::DRAW.into_iter().find(|m| m.command_id() == node_type) { self.start_sketch(ctx, mode); }
                 }
                 UiAction::AddNode { node_type, after } => self.add_node(ctx, &node_type, after.as_deref()),
-                UiAction::AddNetworkNode { node_type, pos } => {
+                UiAction::AddNetworkNode { node_type, pos, wire } => {
                     if let Some((mut value, id)) = graph_edit::add(self.editor.doc.value(), &node_type, None) {
                         let before = ui::network::position_add(ctx, &self.editor.path, self.editor.doc.value(), &mut value, None);
                         value["nodes"][&id]["pos"] = json!(pos);
-                        let inserted = ui::network::insert_added(ctx, &self.editor.path, self.editor.doc.value(), &mut value, &id, pos);
+                        let inserted = ui::network::insert_added(ctx, &self.editor.path, self.editor.doc.value(), &mut value, &id, pos, wire.as_ref());
                         self.editor.history.finish(&self.editor.doc);
                         let original = self.editor.doc.clone();
                         if let Some(before) = before { self.editor.doc = before; }

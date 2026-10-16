@@ -316,7 +316,13 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
     if over && ctx.input(|i| i.pointer.any_released()) {
         if let Some(tool) = egui::DragAndDrop::take_payload::<super::ToolDrag>(ctx) {
             let at = shelf_drop_position(pointer.unwrap(), r, state.pan, state.zoom, &positions);
-            out.push(super::shelf::dropped_tool(&tool, at));
+            let mut action = super::shelf::dropped_tool(&tool, at);
+            if let Some((added, node)) = crate::graph_edit::add(v.doc, &tool.0, None) {
+                if let UiAction::AddNetworkNode { wire, .. } = &mut action {
+                    *wire = insertion_candidate_at_point(&added, &node, pointer.unwrap(), &wire_curves(r, state, v, &positions));
+                }
+            }
+            out.push(action);
             state.menu = None;
             tool_dropped = true;
         }
@@ -534,7 +540,8 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
         !ctx.input(|i| i.modifiers.shift || i.modifiers.alt) && (!v.selected_set.contains(node) || v.selected_set.len() <= 1))
         .and_then(|(node, _)| {
             let at = current_positions.iter().find(|(id, _)| id == node)?.1;
-            insertion_candidate(v.doc, node, Rect::from_min_size(screen(r, state, at), CARD * state.zoom), &current_wires)
+            pointer.and_then(|at| insertion_candidate_at_point(v.doc, node, at, &current_wires))
+                .or_else(|| insertion_candidate(v.doc, node, Rect::from_min_size(screen(r, state, at), CARD * state.zoom), &current_wires))
         });
     if let Some(wire) = &candidate {
         if let Some((_, points)) = current_wires.iter().find(|(w, _)| w == wire) {
@@ -558,7 +565,7 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
         let rect = Rect::from_min_size(screen(r, state, world), CARD * state.zoom);
         p.rect_stroke(rect, 6.0, Stroke::new(1.5_f32, v.theme.accent), StrokeKind::Inside);
         if let Some((value, node)) = crate::graph_edit::add(v.doc, &tool.0, None) {
-            if let Some(wire) = insertion_candidate(&value, &node, rect, &drawn_wires) {
+            if let Some(wire) = insertion_candidate_at_point(&value, &node, at, &drawn_wires) {
                 if let Some((_, points)) = drawn_wires.iter().find(|(w, _)| w == &wire) {
                     p.add(egui::Shape::line(points.clone(), Stroke::new(3.5_f32, v.theme.accent)));
                 }
@@ -626,12 +633,17 @@ fn insertion_candidate(doc: &serde_json::Value, node: &str, rect: Rect, wires: &
     }).min_by(|(a, da), (b, db)| da.total_cmp(db).then_with(|| a.cmp(b))).map(|(wire, _)| wire.clone())
 }
 
-pub fn insert_added(ctx: &egui::Context, path: &Path, old: &serde_json::Value, next: &mut serde_json::Value, node: &str, pos: [f32; 2]) -> bool {
+fn insertion_candidate_at_point(doc: &serde_json::Value, node: &str, at: Pos2, wires: &[(WireRef, Vec<Pos2>)]) -> Option<WireRef> {
+    crate::noodle_hit::closest_at_point(wires, at, 8.0, |wire| crate::graph_edit::insert_existing(doc, node, wire).is_some())
+}
+
+pub fn insert_added(ctx: &egui::Context, path: &Path, old: &serde_json::Value, next: &mut serde_json::Value, node: &str, pos: [f32; 2], drop_wire: Option<&WireRef>) -> bool {
     let state = ctx.data_mut(|d| d.get_persisted::<State>(state_id(path)).unwrap_or_default());
     let Ok(graph) = minihou_core::Graph::from_value(old) else { return false };
     let positions = positions_for(&state, &graph, old);
     let wires = curves_for(Rect::ZERO, &State::default(), &graph, &positions);
-    if let Some(wire) = insertion_candidate(next, node, Rect::from_min_size(pos2(pos[0], pos[1]), CARD), &wires) {
+    let candidate = drop_wire.cloned().or_else(|| insertion_candidate(next, node, Rect::from_min_size(pos2(pos[0], pos[1]), CARD), &wires));
+    if let Some(wire) = candidate {
         if let Some(mut inserted) = crate::graph_edit::insert_existing(next, node, &wire) {
             // A stream insertion keeps the existing display/output flags.
             if let Some(display) = old.get("display") { inserted["display"] = display.clone(); }
@@ -1035,7 +1047,7 @@ mod tests {
                 });
             });
         }
-        assert!(matches!(out.0.as_slice(), [UiAction::AddNetworkNode { node_type, pos }]
+        assert!(matches!(out.0.as_slice(), [UiAction::AddNetworkNode { node_type, pos, .. }]
             if node_type == "transform" && *pos == [640., 320.]));
         assert!(!egui::DragAndDrop::has_payload_of_type::<super::super::ToolDrag>(&ctx));
     }
@@ -1673,9 +1685,26 @@ mod noodle_selection_tests {
         egui::DragAndDrop::set_payload(&ctx,super::super::ToolDrag("transform".into()));
         frame(&ctx,&f,&mut state,at,None,egui::Modifiers::NONE);
         let actions = frame(&ctx,&f,&mut state,at,Some((PointerButton::Primary,false)),egui::Modifiers::NONE);
-        assert!(matches!(actions.as_slice(),[UiAction::AddNetworkNode { node_type,pos }]
+        assert!(matches!(actions.as_slice(),[UiAction::AddNetworkNode { node_type,pos, .. }]
             if node_type == "transform" && *pos == [96.,256.]), "actions: {actions:?}");
         assert!(state.menu.is_none());
+    }
+    #[test]
+    fn noodle_shelf_drop_splices_even_when_collision_moves_card_past_wire() {
+        let (f, mut state, expected_wire) = fixture();
+        let ctx = egui::Context::default();
+        let at = pos2(210., 360.);
+        frame(&ctx, &f, &mut state, at, None, egui::Modifiers::NONE);
+        frame(&ctx, &f, &mut state, at, Some((PointerButton::Primary, true)), egui::Modifiers::NONE);
+        egui::DragAndDrop::set_payload(&ctx, super::super::ToolDrag("transform".into()));
+        let actions = frame(&ctx, &f, &mut state, at, Some((PointerButton::Primary, false)), egui::Modifiers::NONE);
+        let [UiAction::AddNetworkNode { pos, wire, .. }] = actions.as_slice() else { panic!("actions: {actions:?}"); };
+        assert_eq!(wire.as_ref(), Some(&expected_wire));
+        let (mut next, id) = crate::graph_edit::add(f.doc.value(), "transform", None).unwrap();
+        next["nodes"][&id]["pos"] = serde_json::json!(pos);
+        assert!(insert_added(&ctx, Path::new("drop.mhou"), f.doc.value(), &mut next, &id, *pos, wire.as_ref()));
+        assert_eq!(next["nodes"]["out"]["inputs"]["geo"], id);
+        assert_eq!(next["nodes"][&id]["inputs"]["geo"], "a");
     }
     #[test]
     fn noodle_insertion_picks_closest_centre_and_shelf_add_splices() {
@@ -1687,7 +1716,7 @@ mod noodle_selection_tests {
         let wires = vec![(far,vec![pos2(110.,200.),pos2(110.,350.)]),(near.clone(),vec![pos2(210.,200.),pos2(210.,350.)])];
         assert_eq!(insertion_candidate(&value,&id,rect,&wires),Some(near));
         let ctx = egui::Context::default();
-        insert_added(&ctx,Path::new("drop.mhou"),f.doc.value(),&mut value,&id,[100.,240.]);
+        insert_added(&ctx,Path::new("drop.mhou"),f.doc.value(),&mut value,&id,[100.,240.],None);
         assert_eq!(value["nodes"]["out"]["inputs"]["geo"],id.as_str());
         assert_eq!(value["display"],f.doc.value()["display"]);
     }

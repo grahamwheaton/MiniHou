@@ -6,6 +6,7 @@ pub mod http_ops;
 pub mod http_geometry;
 #[cfg(test)] mod http_tests;
 pub mod transform_math;
+pub mod noodle_hit;
 use minihou_core::{session::Session, lod::ClusterLod, Graph};
 use serde_json::{json, Value};
 use std::{collections::HashMap, ops::Range, path::Path, time::Instant};

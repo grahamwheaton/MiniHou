@@ -64,7 +64,7 @@ pub enum UiAction {
     /// A shelf tool: add a node of this type (after `after`, wired to it, when given).
     AddNode { node_type: String, after: Option<String> },
     /// A shelf drop in network coordinates, independent of viewport/world placement.
-    AddNetworkNode { node_type: String, pos: [f32; 2] },
+    AddNetworkNode { node_type: String, pos: [f32; 2], wire: Option<crate::graph_edit::WireRef> },
     AddConnectedNode { node_type: String, connection: crate::graph_edit::AddConnection, pos: [f32; 2] },
     /// A shelf tool dropped with a specific world position.
     AddNodeAt { node_type: String, after: Option<String>, pos: [f32; 3] },

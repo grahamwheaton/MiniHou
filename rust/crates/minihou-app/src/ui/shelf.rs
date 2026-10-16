@@ -9,7 +9,7 @@ use shelf_data::{TABS, Tool};
 
 fn drag_payload(tool: &Tool) -> super::ToolDrag { super::ToolDrag(tool.node_type.to_owned()) }
 pub fn dropped_tool(tool: &super::ToolDrag, pos: Pos2) -> UiAction {
-    UiAction::AddNetworkNode { node_type: tool.0.clone(), pos: [pos.x, pos.y] }
+    UiAction::AddNetworkNode { node_type: tool.0.clone(), pos: [pos.x, pos.y], wire: None }
 }
 
 fn line(p: &egui::Painter, o: Pos2, points: &[(f32, f32)], color: Color32) {
@@ -162,7 +162,7 @@ mod tests {
     #[test] fn draws_a_frame() { assert!(Fixture::new().run(show).is_empty()); }
     #[test] fn drag_payload_requests_the_same_tool_on_drop() {
         let payload = drag_payload(&TABS[0].tools[0]);
-        assert!(matches!(dropped_tool(&payload, Pos2::new(320., -64.)), UiAction::AddNetworkNode { node_type, pos }
+        assert!(matches!(dropped_tool(&payload, Pos2::new(320., -64.)), UiAction::AddNetworkNode { node_type, pos, .. }
             if node_type == "box" && pos == [320., -64.]));
     }
     #[test] fn web_icon_table_is_covered_and_unknown_tools_keep_initials() {
