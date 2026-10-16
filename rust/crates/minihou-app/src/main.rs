@@ -90,6 +90,14 @@ fn selected_point_ids(selection: &picking::Selection, mode: ui::SelectionMode, t
     ids.sort_unstable(); ids.dedup(); ids
 }
 
+/// Sets `params` on node `id` of a graph value, keeping its other parameters.
+fn merge_params(value: &mut Value, id: &str, params: Value) {
+    let Some(node) = value["nodes"].get_mut(id).and_then(Value::as_object_mut) else { return; };
+    let target = node.entry("params").or_insert_with(|| json!({}));
+    if let (Some(target), Some(params)) = (target.as_object_mut(), params.as_object()) {
+        for (k, v) in params { target.insert(k.clone(), v.clone()); }
+    }
+}
 fn group_text(ids: &[u32]) -> String { ids.iter().map(u32::to_string).collect::<Vec<_>>().join(",") }
 
 fn proportional_params(params: &mut Value, state: &EditorState) {
@@ -533,6 +541,8 @@ impl App {
             self.file_status = format!("The Rust core has no {node_type} node yet");
             return;
         };
+        // grow / select_path / select_loop / select_ring start from the viewport's element selection
+        if let Some(params) = self.selection_node_params(node_type) { merge_params(&mut value, &id, params); }
         let before = ui::network::position_add(ctx, &self.editor.path, self.editor.doc.value(), &mut value, after);
         self.editor.history.finish(&self.editor.doc);
         let original = self.editor.doc.clone();
@@ -549,6 +559,10 @@ impl App {
         } else {
             self.editor.doc = original;
         }
+    }
+    fn selection_node_params(&self, node_type: &str) -> Option<Value> {
+        if self.editor_state.selection == ui::SelectionMode::Object || self.selection.mode != self.editor_state.selection { return None; }
+        element_select::cached(&self.elem_topo, self.scene.as_ref()?).node_params(node_type, &self.selection)
     }
     fn selected_points(&self) -> Vec<u32> {
         selected_point_ids(&self.selection, self.editor_state.selection,
@@ -1454,6 +1468,12 @@ impl App {
                     }
                 }
             }
+            "select_more" | "select_less" => {
+                // Ctrl+Numpad +/-: viewport selection only; the grow node is added from the Tab menu
+                if let Some(scene) = &self.scene {
+                    if element_select::cached(&self.elem_topo, scene).grow_selection(&mut self.selection, name == "select_less") { self.selection_dirty = true; }
+                }
+            }
             "toggle_edit" => {
                 let mode = toggle_edit_mode(e.selection, &mut self.last_edit_selection);
                 self.editor_state.apply(C::Selection(mode));
@@ -2220,8 +2240,9 @@ impl eframe::App for App {
                 }
 
                 self.viewport_hover = response.hovered();
-                if !fly_frame && !region_frame && (self.modal.is_none() && self.model_modal.is_none()) && response.hovered() && !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
-                    out.push(UiAction::Command(if self.editor_state.selection != ui::SelectionMode::Object { "toggle_edit".into() } else { "add_menu".into() }));
+                if !fly_frame && !region_frame && (self.modal.is_none() && self.model_modal.is_none()) && response.hovered() && !ctx.wants_keyboard_input() && ctx.input(|i| i.modifiers.is_none() && i.key_pressed(egui::Key::Tab)) {
+                    // Tab is the node menu in every mode; Ctrl+Tab (keymap ToggleEdit) switches object / edit mode
+                    out.push(UiAction::Command("add_menu".into()));
                 }
                 if !fly_frame && !region_frame && !model_modal_frame && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::transform_gizmo::hit(rect, &v, p)) && (self.editor_state.tool == ui::Tool::Select || (self.editor_state.selection == ui::SelectionMode::Object && !matches!(self.editor_state.tool, ui::Tool::Cursor | ui::Tool::Measure | ui::Tool::Line | ui::Tool::Polyline | ui::Tool::Polygon | ui::Tool::Rectangle | ui::Tool::Circle | ui::Tool::Knife | ui::Tool::LoopCut))) {
                     if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {
@@ -2405,6 +2426,66 @@ fn main() {
 #[cfg(test)]
 mod tools_tests {
     use super::*;
+
+    #[test]
+    fn alt_and_ctrl_selection_gestures_never_create_nodes() {
+        // Alt (loop), Ctrl+Alt (ring), Ctrl (path) clicks and Ctrl+Numpad +/- (select more / less) change the viewport
+        // selection only. The grow / select_* nodes exist only when chosen from the Tab menu (docs/RUST_SELECT_NODES.md).
+        let doc = json!({"version":1,"display":"output1","nodes":{
+            "grid1":{"type":"grid"},"output1":{"type":"output","inputs":{"geo":"grid1"}}}});
+        let before = doc.clone();
+        // a 3 x 3 grid of quads split by diagonals, as the preview layout gives it
+        let w = 4u32;
+        let p: Vec<f32> = (0..4).flat_map(|j| (0..4).flat_map(move |i| [i as f32, j as f32, 0.])).collect();
+        let (mut tris, mut edges) = (Vec::new(), Vec::new());
+        for j in 0..3 { for i in 0..3 {
+            let (a, b, c, d) = (j * w + i, j * w + i + 1, (j + 1) * w + i + 1, (j + 1) * w + i);
+            tris.extend([a, b, c, a, c, d]); edges.extend([a, b, b, c, c, d, d, a]);
+        } }
+        let topo = element_select::Topology::new(&p, &tris, &edges);
+        let tri = 2 * (3 + 1); // quad (1, 1)
+        for (shift, ctrl, alt) in [(false, false, true), (false, true, true), (true, false, true), (false, true, false)] {
+            let kind = element_select::classify(shift, ctrl, alt, true).unwrap();
+            for mode in [ui::SelectionMode::Points, ui::SelectionMode::Edges, ui::SelectionMode::Faces] {
+                let mut selection = picking::Selection { mode, ..Default::default() };
+                let hit = picking::Hit { tri: tri as usize, t: 1., bary: [0.4, 0.3, 0.3] };
+                let point = [1.5, 1.05, 0.];
+                topo.apply_click(&p, kind, Some((topo.pick(&p, &tris, hit, point, mode), tri, point)), mode, &mut selection);
+                let picked = selection.clone();
+                topo.apply_click(&p, kind, Some((topo.pick(&p, &tris, hit, [2.5, 2.05, 0.], mode), tri + 6, [2.5, 2.05, 0.])), mode, &mut selection);
+                assert!(!selection.is_empty() && !picked.is_empty(), "{kind:?} {mode:?}");
+                topo.grow_selection(&mut selection, false);
+                topo.grow_selection(&mut selection, true);
+            }
+        }
+        assert_eq!(doc, before);
+        // the keymap routes those keys to selection commands, never to node creation
+        for (key, cmd) in [(egui::Key::Plus, "select_more"), (egui::Key::Minus, "select_less")] {
+            let modifiers = egui::Modifiers { ctrl: true, alt: true, ..Default::default() };
+            let ctx = egui::Context::default();
+            let mut actions = Vec::new();
+            let _ = ctx.run(egui::RawInput { modifiers, events: vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }], ..Default::default() }, |ctx| {
+                actions = Keymap::blender().poll(ctx, &KeyContext { viewport_hovered: true, in_edit_mode: true, ..Default::default() });
+            });
+            assert!(matches!(actions.as_slice(), [UiAction::Command(name)] if name == cmd), "{actions:?}");
+        }
+    }
+
+    #[test]
+    fn selection_node_params_merge_into_the_added_node() {
+        let mut value = json!({"nodes":{"grow1":{"type":"grow","inputs":{"geo":"box1"}}}});
+        merge_params(&mut value, "grow1", json!({"group":"1 2","domain":"points"}));
+        assert_eq!(value["nodes"]["grow1"]["params"], json!({"group":"1 2","domain":"points"}));
+        merge_params(&mut value, "grow1", json!({"steps":2}));
+        assert_eq!(value["nodes"]["grow1"]["params"]["domain"], "points");
+        assert_eq!(value["nodes"]["grow1"]["params"]["steps"], 2);
+        merge_params(&mut value, "missing", json!({"steps":2}));
+        // the menu insertion wires the node after the source and before the output, like other viewport-added nodes
+        let doc = json!({"version":1,"display":"output1","nodes":{"box1":{"type":"box"},"output1":{"type":"output","inputs":{"geo":"box1"}}}});
+        let (value, id) = graph_edit::add_at(&doc, "grow", Some("box1"), [0.; 3]).unwrap();
+        assert_eq!(value["nodes"][&id]["inputs"]["geo"], "box1");
+        assert_eq!(value["nodes"]["output1"]["inputs"]["geo"], id.as_str());
+    }
 
     #[test]
     fn viewport_move_inserts_transform_before_output_not_after() {

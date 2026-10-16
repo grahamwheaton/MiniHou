@@ -249,6 +249,71 @@ impl Topology {
     }
 }
 
+/// Selection nodes that take their seeds from the viewport selection when added from the Tab menu (docs/RUST_SELECT_NODES.md).
+pub const SELECTION_NODES: [&str; 4] = ["grow", "select_path", "select_loop", "select_ring"];
+
+impl Topology {
+    /// The ids of `sel` in its mode's id space (points, edge ids, polygons), in selection order.
+    fn ids(&self, sel: &Selection) -> Vec<u32> {
+        match sel.mode {
+            SelectionMode::Points => sel.points.clone(),
+            SelectionMode::Edges => sel.edges.iter().filter_map(|&(a, b)| self.edge_of(a, b)).collect(),
+            SelectionMode::Faces => self.polys_of(&sel.tris),
+            SelectionMode::Object => Vec::new(),
+        }
+    }
+    /// Element tokens of the selection-node patterns: point / primitive numbers, `p<a>-<b>` edges.
+    fn tokens(&self, mode: SelectionMode, ids: &[u32]) -> Vec<String> {
+        ids.iter().map(|&i| match mode {
+            SelectionMode::Edges => { let (a, b) = self.edges[i as usize]; format!("p{a}-{b}") }
+            _ => i.to_string(),
+        }).collect()
+    }
+
+    /// Select More / Less (Blender Ctrl+Numpad +/-, Face Step on) on the viewport selection. Selection state only: the
+    /// `grow` node is never created by this. Kept elements keep their order; added ones follow in id order. Returns
+    /// whether the selection changed.
+    pub fn grow_selection(&self, sel: &mut Selection, shrink: bool) -> bool {
+        let Some(d) = domain(sel.mode) else { return false; };
+        let ids = self.ids(sel);
+        if ids.is_empty() { return false; }
+        let mut mask = vec![false; self.count(d)];
+        for &i in &ids { if let Some(m) = mask.get_mut(i as usize) { *m = true; } }
+        self.core.grow(d, &mut mask, 1, true, shrink);
+        let mut next: Vec<u32> = ids.iter().copied().filter(|&i| mask.get(i as usize) == Some(&true)).collect();
+        let kept: HashSet<u32> = next.iter().copied().collect();
+        next.extend(mask.iter().enumerate().filter(|(i, m)| **m && !kept.contains(&(*i as u32))).map(|(i, _)| i as u32));
+        let before = sel.count();
+        match sel.mode {
+            SelectionMode::Points => sel.points = next,
+            SelectionMode::Edges => sel.edges = next.into_iter().map(|e| self.edges[e as usize]).collect(),
+            SelectionMode::Faces => sel.tris = self.tris_of(&next),
+            SelectionMode::Object => {}
+        }
+        sel.count() != before
+    }
+
+    /// Parameters for a selection node added from the Tab menu while elements are selected: `grow` gets the selection
+    /// as its group, `select_loop` / `select_ring` the selected edges as seeds (other modes converted to edges),
+    /// `select_path` the first two selected elements as waypoints. `None` for other nodes or an empty selection.
+    pub fn node_params(&self, node_type: &str, sel: &Selection) -> Option<serde_json::Value> {
+        if !SELECTION_NODES.contains(&node_type) || sel.is_empty() { return None; }
+        let name = match sel.mode { SelectionMode::Points => "points", SelectionMode::Edges => "edges", SelectionMode::Faces => "primitives", SelectionMode::Object => return None };
+        let ids = self.ids(sel);
+        if ids.is_empty() { return None; }
+        let join = |mode: SelectionMode, ids: &[u32]| self.tokens(mode, ids).join(" ");
+        Some(match node_type {
+            "grow" => serde_json::json!({"group": join(sel.mode, &ids), "domain": name}),
+            "select_path" => serde_json::json!({"waypoints": join(sel.mode, &ids[..ids.len().min(2)]), "domain": name}),
+            _ => {
+                let edges = if sel.mode == SelectionMode::Edges { ids } else { self.ids(&self.convert(sel, SelectionMode::Edges)) };
+                if edges.is_empty() { return None; }
+                serde_json::json!({"seeds": join(SelectionMode::Edges, &edges), "domain": name})
+            }
+        })
+    }
+}
+
 /// The topology of `scene`, built on first use and kept in `cell` until the scene changes (the caller resets it).
 pub fn cached<'a>(cell: &'a std::cell::OnceCell<Topology>, scene: &crate::viewport::Scene) -> &'a Topology {
     cell.get_or_init(|| Topology::new(scene.positions(), scene.triangle_indices(), scene.edge_indices()))
@@ -594,6 +659,49 @@ mod tests {
         assert_eq!(cur.tris, vec![0, 1]);
         t.apply_click(&m.0, ClickKind::Toggle, face, Faces, &mut cur);
         assert!(cur.tris.is_empty());
+    }
+
+    #[test]
+    fn select_more_and_less_change_only_the_selection() {
+        let m = grid(4, 4); // w = 5
+        let t = topo(&m);
+        let mut s = Selection { points: vec![12], ..sel(Points) };
+        assert!(t.grow_selection(&mut s, false));
+        assert_eq!(s.points[0], 12, "kept elements keep their order");
+        assert_eq!(s.points.len(), 9, "face step: the four quads round the point");
+        assert!(t.grow_selection(&mut s, true));
+        assert_eq!(s.points, vec![12]);
+        // faces: whole polygons, one ring by shared points
+        let centre = t.poly_of_tri(2 * (4 + 1)).unwrap();
+        let mut s = Selection { tris: t.poly_tris(centre).to_vec(), ..sel(Faces) };
+        t.grow_selection(&mut s, false);
+        assert_eq!(t.polys_of(&s.tris).len(), 9);
+        assert_eq!(s.tris.len(), 18);
+        let mut s = Selection { edges: vec![(6, 7)], ..sel(Edges) };
+        t.grow_selection(&mut s, false);
+        assert!(s.edges.contains(&(6, 7)) && s.edges.len() > 4);
+        // empty and object selections are left alone
+        let mut empty = sel(Points);
+        assert!(!t.grow_selection(&mut empty, false));
+        assert!(!t.grow_selection(&mut sel(SelectionMode::Object), false));
+    }
+
+    #[test]
+    fn selection_nodes_take_their_seeds_from_the_selection() {
+        let m = grid(4, 3);
+        let t = topo(&m);
+        let points = Selection { points: vec![7, 3, 9], ..sel(Points) };
+        assert_eq!(t.node_params("grow", &points).unwrap(), serde_json::json!({"group": "7 3 9", "domain": "points"}));
+        assert_eq!(t.node_params("select_path", &points).unwrap(), serde_json::json!({"waypoints": "7 3", "domain": "points"}));
+        let edges = Selection { edges: vec![(6, 7), (7, 8)], ..sel(Edges) };
+        assert_eq!(t.node_params("select_loop", &edges).unwrap(), serde_json::json!({"seeds": "p6-7 p7-8", "domain": "edges"}));
+        assert_eq!(t.node_params("select_ring", &edges).unwrap()["seeds"], "p6-7 p7-8");
+        let face = Selection { tris: vec![0, 1], ..sel(Faces) };
+        assert_eq!(t.node_params("grow", &face).unwrap(), serde_json::json!({"group": "0", "domain": "primitives"}));
+        // faces convert to their edges as loop seeds
+        assert_eq!(t.node_params("select_ring", &face).unwrap()["seeds"].as_str().unwrap().split(' ').count(), 4);
+        assert!(t.node_params("blast", &points).is_none());
+        assert!(t.node_params("grow", &sel(Points)).is_none());
     }
 
     #[test]

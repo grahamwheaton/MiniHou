@@ -3,6 +3,9 @@
 Behaviour spec for the native (egui/wgpu) editor, ported from the pre-rust browser
 viewport. Implementation: `rust/crates/minihou-app/src/element_select.rs` (pure logic,
 unit tested) wired into `main.rs` (click, hover, mode switch, region select).
+The adjacency, loop/ring walks and paths live in `minihou-core/src/select_topo.rs`, shared with the
+selection nodes (docs/RUST_SELECT_NODES.md). Ctrl+Numpad +/- grow / shrink the selection (Select More / Less,
+face step on); none of these gestures add nodes.
 
 ## Sources in the pre-rust build
 

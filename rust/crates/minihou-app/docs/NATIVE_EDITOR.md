@@ -2,7 +2,7 @@
 
 Open a graph JSON file by passing its path to `minihou-app.exe`, or start the app without arguments for the demo graph. The top bar opens and saves files, changes shading, and opens Preferences. The shelf adds tools to the selected node; drag a tool into the network or viewport to add it there. The network editor selects, connects, duplicates, deletes, copies, and pastes nodes. The right panel edits parameters and shows geometry information. The centre viewport supports orbit, pan, zoom, mesh picking, view presets, and display proxy levels. The bottom strip shows cook state, file messages, and the Blender triangle cap when set.
 
-Click a shelf tool to add it; tools with a required input connect after the selected node, while generators remain unwired and join the displayed set. Click a blue Visible flag to show one node, or Shift-click to add or remove it from the displayed set. The graph stores one displayed node as a string and several as a list. Tab over the network or viewport opens the add menu at the pointer; type to filter, use arrows and Enter to add, or Esc to close it. In the network editor, `Ctrl+C` copies the selected nodes and `Ctrl+V` pastes them with fresh IDs. Wires between copied nodes are preserved. Click a noodle to select it; Shift-click adds it and Ctrl-click removes it from the wire selection. Copy and paste continue to include only nodes.
+Click a shelf tool to add it; tools with a required input connect after the selected node, while generators remain unwired and join the displayed set. Click a blue Visible flag to show one node, or Shift-click to add or remove it from the displayed set. The graph stores one displayed node as a string and several as a list. Tab over the network or viewport opens the add menu at the pointer; type to filter, use arrows and Enter to add, or Esc to close it. In the viewport Tab opens the menu in the Points/Edges/Faces modes too; Ctrl+Tab toggles object / edit mode (rebindable in Preferences, and the selection-mode buttons and 1-4 keys still switch modes). Ctrl+Numpad +/- (Ctrl+Alt+Plus/Minus) grow and shrink the viewport element selection. The selection nodes `grow`, `select_path`, `select_loop` and `select_ring` are only added from the menu; added while elements are selected they start from that selection (docs/RUST_SELECT_NODES.md). In the network editor, `Ctrl+C` copies the selected nodes and `Ctrl+V` pastes them with fresh IDs. Wires between copied nodes are preserved. Click a noodle to select it; Shift-click adds it and Ctrl-click removes it from the wire selection. Copy and paste continue to include only nodes.
 
 Preferences are available from the top bar. The Viewport tab contains the Blender and Houdini / MiniHou navigation styles and the Auto proxy triangle budget. Blender navigation (the default) uses middle mouse to orbit, Shift+middle to pan, Ctrl+middle to zoom, and the wheel to zoom. Houdini / MiniHou uses Alt+left to orbit, Alt+middle to pan, and Alt+right to zoom. The viewport proxy menu has the Blender triangle cap; zero means unlimited. Preferences are stored in `%APPDATA%\MiniHou\preferences.json` on Windows.
 
@@ -113,6 +113,9 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Shift+Z | Next shading | Viewport |
 | Shift+Alt+Z | Previous shading | Viewport |
 | Alt+Z | X-ray | Viewport |
+| Ctrl+Tab | Toggle Object / edit mode | Viewport |
+| Ctrl+Alt+Plus | Select more (grow selection) | Viewport |
+| Ctrl+Alt+Minus | Select less (shrink selection) | Viewport |
 <!-- keymap:end -->
 
 ## Viewport display
