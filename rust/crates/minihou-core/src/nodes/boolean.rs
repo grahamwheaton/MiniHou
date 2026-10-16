@@ -156,6 +156,23 @@ pub(super) fn combine(parts: &[(AttrTable, usize)]) -> Result<AttrTable> {
     }
     Ok(out)
 }
+pub(super) fn combine_vertices(parts: &[(AttrTable, usize)]) -> Result<AttrTable> {
+    let mut out = combine(parts)?;
+    for (name, attr) in &mut out {
+        if matches!(name.as_str(), "N" | "Cd" | "P") || !matches!(attr.width, 2 | 3) { continue; }
+        let Some(values) = attr.as_f32() else { continue; };
+        let mut values = values.to_vec();
+        let mut start = 0;
+        for (table, count) in parts {
+            if !table.contains_key(name) {
+                values[start..start + count * attr.width].fill(f32::NAN);
+            }
+            start += count * attr.width;
+        }
+        *attr = Arc::new(Attr::f32(attr.width, values));
+    }
+    Ok(out)
+}
 fn blend(table: &AttrTable, idx: &[[usize; 3]], weights: &[[f64; 3]]) -> AttrTable {
     table
         .iter()
@@ -316,81 +333,10 @@ fn outline(loops: Vec<Vec<usize>>, v: &[usize], p: &[[f64; 3]]) -> Option<Vec<Ve
     k::holes_into(loops[outer].clone(), holes, &xy).ok()
 }
 pub(super) fn unify(a: &Geometry, b: &Geometry) -> Result<(Geometry, Geometry)> {
-    let mut gs = [a.clone(), b.clone()];
-    let lists: Vec<Vec<String>> = gs
-        .iter()
-        .map(|g| {
-            g.detail
-                .get("materials")
-                .and_then(|v| v.as_array())
-                .map(|l| {
-                    l.iter()
-                        .map(|v| v.as_str().unwrap_or("").trim().chars().take(63).collect())
-                        .collect()
-                })
-                .unwrap_or_default()
-        })
-        .collect();
-    if lists.iter().all(Vec::is_empty) || lists[0] == lists[1] {
-        return Ok((gs[0].clone(), gs[1].clone()));
-    }
-    let mut combined = vec![];
-    for (g, list) in gs.iter_mut().zip(lists) {
-        let mut top = list.len().max(1);
-        for (t, name) in [(&g.prim, "material_index"), (&g.point, "material_id")] {
-            if let Some(a) = t.get(name) {
-                if let AttrData::I32(v) = &a.data {
-                    top =
-                        top.max((v.iter().copied().max().unwrap_or(-1) as i64 + 1).max(0) as usize);
-                }
-            }
-        }
-        let mut lut = vec![];
-        for i in 0..top {
-            let n = list.get(i).cloned().unwrap_or_default();
-            let slot = if let Some(j) = combined.iter().position(|x| *x == n) {
-                j
-            } else {
-                combined.push(n);
-                combined.len() - 1
-            };
-            lut.push(slot as i32);
-        }
-        for (t, name, count, always) in [
-            (&mut g.prim, "material_index", g.topology.nprims(), true),
-            (&mut g.point, "material_id", g.npoints, false),
-        ] {
-            if always || t.contains_key(name) {
-                let indices = if let Some(a) = t.get(name) {
-                    match &a.data {
-                        AttrData::I32(v) => v.clone(),
-                        _ => vec![0; count],
-                    }
-                } else {
-                    vec![0; count]
-                };
-                let mut out = vec![];
-                for i in indices {
-                    let j = if i < 0 {
-                        lut.len() as isize + i as isize
-                    } else {
-                        i as isize
-                    };
-                    out.push(
-                        *lut.get(j as usize)
-                            .ok_or_else(|| Error::new("material index out of range"))?,
-                    );
-                }
-                t.insert(name.into(), Arc::new(Attr::i32(1, out)));
-            }
-        }
-    }
-    for g in &mut gs {
-        g.detail
-            .insert("materials".into(), serde_json::json!(combined));
-    }
-    let [a, b] = gs;
-    Ok((a, b))
+    let mut gs = super::material_tables::reconcile(&[a.clone(), b.clone()])?;
+    super::model::promote_corner_uv_sets(&mut gs);
+    let b = gs.pop().unwrap();
+    Ok((gs.pop().unwrap(), b))
 }
 pub(super) fn boolean(
     a: &Geometry,
@@ -594,22 +540,12 @@ pub(super) fn boolean(
         point,
         vout.iter().map(|&i| i as i32).collect(),
         &sizes_out,
-        combine(&vertex_parts)?,
+        combine_vertices(&vertex_parts)?,
         combine(&prim_parts)?,
         a.detail.clone(),
         None,
     )?;
-    let mut sources = serde_json::Map::new();
-    for g in [&a, &b] {
-        if let Some(src) = g.detail.get("usd_materials").and_then(|v| v.as_object()) {
-            for (n, v) in src {
-                sources.entry(n.clone()).or_insert_with(|| v.clone());
-            }
-        }
-    }
-    if !sources.is_empty() {
-        out.detail.insert("usd_materials".into(), sources.into());
-    }
+    super::material_tables::merge_usd_sources(&[a, b], &mut out)?;
     let defaults = Params::resolve(BOOLEAN.params, None)?;
     let p = params.unwrap_or(&defaults);
     outgroup(

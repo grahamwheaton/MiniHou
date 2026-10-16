@@ -77,6 +77,9 @@ mod scatter;
 mod primitives;
 mod transform;
 mod materials_node;
+mod material_tables;
+#[cfg(test)]
+mod stage1_provenance_tests;
 mod dissolve;
 
 pub use modify::{match_size_points, MatchSizeOut};

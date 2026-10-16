@@ -201,6 +201,26 @@ impl Geometry {
     /// Every attribute has the right number of rows for its domain.
     pub fn validate(&self) -> Result<()> {
         self.topology.validate(self.npoints)?;
+        if let Some(bindings) = self.detail.get("material_bindings") {
+            if bindings.get("version").and_then(Value::as_u64) != Some(1) {
+                return Err(Error::new("material_bindings version must be 1"));
+            }
+            let slots = bindings.get("slots").and_then(Value::as_array)
+                .ok_or_else(|| Error::new("material_bindings slots must be an array"))?;
+            if slots.iter().any(|v| !v.is_null() && !v.is_string()) {
+                return Err(Error::new("material_bindings slots must be IDs or null"));
+            }
+            let names = self.detail.get("materials").and_then(Value::as_array)
+                .ok_or_else(|| Error::new("material_bindings requires materials"))?;
+            if slots.len() != names.len() {
+                return Err(Error::new("material_bindings slots must parallel materials"));
+            }
+        }
+        if let Some(a) = self.prim.get("material_index") {
+            if a.width != 1 || a.as_i32().is_none() {
+                return Err(Error::new("prim material_index must be scalar int32"));
+            }
+        }
         for (domain, table, n) in [("point", &self.point, self.npoints), ("vertex", &self.vertex, self.nvertices()),
                                    ("prim", &self.prim, self.nprims())] {
             for (name, a) in table {

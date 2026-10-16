@@ -95,6 +95,24 @@ pub(super) fn gather(t: &AttrTable, ix: &[usize]) -> AttrTable {
         })
         .collect()
 }
+
+/// A merged mesh has a corner UV set if any input does. Materialize point UV
+/// fallback on the other inputs before concatenating their vertex tables.
+pub(super) fn promote_corner_uv_sets(geos: &mut [Geometry]) {
+    let names: BTreeSet<_> = geos.iter().flat_map(|g| g.vertex.iter())
+        .filter(|(name, a)| !matches!(name.as_str(), "N" | "Cd" | "P") && matches!(a.width, 2 | 3) && a.as_f32().is_some())
+        .map(|(name, _)| name.clone()).collect();
+    for g in geos {
+        for name in &names {
+            if g.vertex.contains_key(name) { continue; }
+            if let Some((width, values)) = g.point.get(name).filter(|a| matches!(a.width, 2 | 3))
+                .and_then(|a| a.as_f32().map(|v| (a.width, v))) {
+                let data = g.topology.vertex_point.iter().flat_map(|&p| values[p as usize * width..(p as usize + 1) * width].iter().copied()).collect();
+                g.vertex.insert(name.clone(), Arc::new(Attr::f32(width, data)));
+            }
+        }
+    }
+}
 pub(super) fn concat(a: &AttrTable, b: &AttrTable) -> AttrTable {
     a.iter()
         .filter_map(|(n, x)| {
@@ -654,6 +672,7 @@ fn polyfill(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         g.detail.clone(),
         None,
     )?;
+    super::material_tables::neutral_new_faces(&mut out, g.nprims(), g.nvertices());
     let name = p.s("fill_group")?;
     if !name.is_empty() {
         write_group(

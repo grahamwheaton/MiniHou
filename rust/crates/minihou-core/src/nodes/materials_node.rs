@@ -96,6 +96,8 @@ fn assign_picks(
 ) -> Geometry {
     let mut out = (*geo).clone();
     let mut lst = get_names(geo);
+    let mut bindings = geo.detail.get("material_bindings").and_then(|v| v.get("slots"))
+        .and_then(serde_json::Value::as_array).cloned();
     let mut idx = get_indices(geo, dom);
 
     let top_limit = (top(geo) as usize).max(1);
@@ -118,6 +120,11 @@ fn assign_picks(
     );
 
     let compacted = compact(lst, top(&out) as usize);
+    if let Some(ids) = &mut bindings {
+        ids.resize(compacted.len(), serde_json::Value::Null);
+        ids.truncate(compacted.len());
+        out.detail.insert("material_bindings".into(), serde_json::json!({"version":1,"slots":ids}));
+    }
     let detail_val = serde_json::Value::Array(
         compacted.into_iter().map(serde_json::Value::String).collect(),
     );
