@@ -4,52 +4,33 @@
 //! Behaviour spec: docs/RUST_ELEMENT_SELECT.md.
 use crate::picking::{self, Hit, Selection};
 use crate::ui::SelectionMode;
-use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
-
-/// Compressed adjacency lists: the items of key `k` are `items[offs[k]..offs[k + 1]]`.
-#[derive(Debug, Default)]
-struct Csr { offs: Vec<u32>, items: Vec<u32> }
-impl Csr {
-    /// Groups `(key, item)` pairs by key, keeping their order within a key.
-    fn build(n: usize, pairs: &[(u32, u32)]) -> Self {
-        let mut offs = vec![0u32; n + 1];
-        for &(k, _) in pairs { offs[k as usize + 1] += 1; }
-        for i in 0..n { offs[i + 1] += offs[i]; }
-        let mut fill = offs.clone();
-        let mut items = vec![0; pairs.len()];
-        for &(k, v) in pairs { items[fill[k as usize] as usize] = v; fill[k as usize] += 1; }
-        Self { offs, items }
-    }
-    fn get(&self, k: u32) -> &[u32] {
-        let k = k as usize;
-        if k + 1 >= self.offs.len() { return &[]; }
-        &self.items[self.offs[k] as usize..self.offs[k + 1] as usize]
-    }
-}
+use minihou_core::select_topo::{key, Csr, Domain, PathMethod, SelectTopology};
+use std::collections::{HashMap, HashSet};
 
 const NONE: u32 = u32::MAX;
 
-/// Polygon/edge adjacency of one displayed mesh; build once per cooked scene.
+/// Polygon/edge adjacency of one displayed mesh; build once per cooked scene. The loop, ring, path and grow logic is the
+/// shared `minihou_core::select_topo::SelectTopology` (also used by the selection nodes), reached through `Deref`.
 #[derive(Debug, Default)]
 pub struct Topology {
-    /// Real (polygon) edges as sorted point pairs; ids index this list.
-    pub edges: Vec<(u32, u32)>,
-    edge_id: HashMap<(u32, u32), u32>,
-    point_edges: Csr,
-    edge_polys: Csr,
+    core: SelectTopology,
     /// Polygon of each triangle (`NONE` for invalid triangles).
     tri_poly: Vec<u32>,
     poly_tris: Csr,
-    /// Sorted, unique points of each polygon.
-    poly_verts: Csr,
-    poly_edges: Csr,
-    npolys: u32,
+}
+impl std::ops::Deref for Topology {
+    type Target = SelectTopology;
+    fn deref(&self) -> &SelectTopology { &self.core }
 }
 
-fn key(a: u32, b: u32) -> (u32, u32) { (a.min(b), a.max(b)) }
 fn sub(a: [f32; 3], b: [f32; 3]) -> [f64; 3] { [0, 1, 2].map(|k| a[k] as f64 - b[k] as f64) }
 fn dot(a: [f64; 3], b: [f64; 3]) -> f64 { a[0] * b[0] + a[1] * b[1] + a[2] * b[2] }
 fn len(a: [f64; 3]) -> f64 { dot(a, a).sqrt() }
+
+/// The shared topology's domain for an element selection mode (`None` in object mode).
+pub fn domain(mode: SelectionMode) -> Option<Domain> {
+    match mode { SelectionMode::Points => Some(Domain::Points), SelectionMode::Edges => Some(Domain::Edges), SelectionMode::Faces => Some(Domain::Faces), SelectionMode::Object => None }
+}
 
 impl Topology {
     /// `positions` xyz per point, `tris` fan triangles, `edge_list` polygon edges as point pairs (the preview layout).
@@ -99,20 +80,12 @@ impl Topology {
             for (a, b) in [(t[0], t[1]), (t[1], t[2]), (t[2], t[0])] { if let Some(&e) = edge_id.get(&key(a, b)) { edge_pairs.push((poly, e)); } }
         }
         let npolys = root_poly.len() as u32;
-        vert_pairs.sort_unstable(); vert_pairs.dedup();
-        edge_pairs.sort_unstable(); edge_pairs.dedup();
-        let edge_poly_pairs: Vec<(u32, u32)> = edge_pairs.iter().map(|&(p, e)| (e, p)).collect();
-        let point_pairs: Vec<(u32, u32)> = edges.iter().enumerate().flat_map(|(i, &(a, b))| [(a, i as u32), (b, i as u32)]).collect();
         Self {
-            point_edges: Csr::build(npoints, &point_pairs),
-            edge_polys: Csr::build(edges.len(), &edge_poly_pairs),
+            core: SelectTopology::from_parts(npoints, edges, vert_pairs, edge_pairs, npolys),
             poly_tris: Csr::build(npolys as usize, &poly_tri_pairs),
-            poly_verts: Csr::build(npolys as usize, &vert_pairs),
-            poly_edges: Csr::build(npolys as usize, &edge_pairs),
-            edges, edge_id, tri_poly, npolys,
+            tri_poly,
         }
     }
-    pub fn edge_of(&self, a: u32, b: u32) -> Option<u32> { self.edge_id.get(&key(a, b)).copied() }
     pub fn poly_of_tri(&self, tri: u32) -> Option<u32> { self.tri_poly.get(tri as usize).copied().filter(|&p| p != NONE) }
     pub fn poly_tris(&self, poly: u32) -> &[u32] { self.poly_tris.get(poly) }
     pub fn polygons(&self) -> std::ops::Range<u32> { 0..self.npolys }
@@ -120,9 +93,6 @@ impl Topology {
     pub fn polygon_edges(&self, poly: u32) -> impl Iterator<Item = (u32, u32)> + '_ {
         self.poly_edges.get(poly).iter().map(|&id| self.edges[id as usize])
     }
-    fn poly_has(&self, poly: u32, v: u32) -> bool { self.poly_verts.get(poly).binary_search(&v).is_ok() }
-    fn poly_has_edge_points(&self, poly: u32, e: u32) -> bool { let (a, b) = self.edges[e as usize]; self.poly_has(poly, a) && self.poly_has(poly, b) }
-    fn other(&self, e: u32, v: u32) -> u32 { let (a, b) = self.edges[e as usize]; if a == v { b } else { a } }
 
     /// The polygon edge nearest `point` (world space) among the edges of the clicked triangle's polygon.
     pub fn nearest_edge(&self, p: &[f32], tri: u32, point: [f32; 3]) -> Option<u32> {
@@ -137,69 +107,14 @@ impl Topology {
         self.poly_edges.get(poly).iter().copied().min_by(|&x, &y| distance(x).total_cmp(&distance(y)))
     }
 
-    /// Edge loop (`ring == false`) or ring through `start`, as edge ids in walk order (pre-rust `quadStrip`).
-    pub fn walk(&self, p: &[f32], start: u32, ring: bool) -> Vec<u32> {
-        if start as usize >= self.edges.len() { return Vec::new(); }
-        let mut found = vec![start];
-        let mut seen = HashSet::from([start]);
-        let mut queue = VecDeque::from([start]);
-        while let Some(e) = queue.pop_front() {
-            let faces = self.edge_polys.get(e);
-            if faces.len() > 2 { continue; }
-            let mut next = Vec::new();
-            if ring {
-                for &f in faces {
-                    if self.poly_verts.get(f).len() != 4 { continue; }
-                    let (a, b) = self.edges[e as usize];
-                    if let Some(&o) = self.poly_edges.get(f).iter().find(|&&o| { let (c, d) = self.edges[o as usize]; c != a && c != b && d != a && d != b }) { next.push(o); }
-                }
-            } else {
-                let (a, b) = self.edges[e as usize];
-                for v in [a, b] {
-                    let at = self.point_edges.get(v);
-                    let candidates: Vec<u32> = at.iter().copied().filter(|&o| o != e && self.edge_polys.get(o).len() <= 2).collect();
-                    // Preserve the unambiguous topological continuation through regular quads.
-                    if at.len() == 4 {
-                        let opposite: Vec<u32> = candidates.iter().copied().filter(|&o| !faces.iter().any(|&f| self.poly_has_edge_points(f, o))).collect();
-                        if opposite.len() == 1 { next.push(opposite[0]); continue; }
-                    }
-                    // A cap perimeter is a coherent flow even when each vertex has valence 3.
-                    let perimeter: Vec<u32> = candidates.iter().copied().filter(|&o| faces.iter().any(|&f| self.poly_verts.get(f).len() > 4 && self.poly_has_edge_points(f, o))).collect();
-                    if perimeter.len() == 1 { next.push(perimeter[0]); continue; }
-                    // Irregular wire/boundary flow: one clearly forward direction, never fan out.
-                    let incoming = sub(picking::at(p, v), picking::at(p, self.other(e, v)));
-                    let il = len(incoming);
-                    let mut ranked: Vec<(f64, u32)> = candidates.iter().map(|&o| {
-                        let d = sub(picking::at(p, self.other(o, v)), picking::at(p, v));
-                        let dl = len(d);
-                        (if il > 0. && dl > 0. { dot(incoming, d) / (il * dl) } else { -1. }, o)
-                    }).collect();
-                    ranked.sort_by(|x, y| y.0.total_cmp(&x.0));
-                    if let Some(&(best, o)) = ranked.first() {
-                        if best > 0.5 && ranked.get(1).is_none_or(|second| best - second.0 > 0.15) { next.push(o); }
-                    }
-                }
-            }
-            for n in next { if seen.insert(n) { found.push(n); queue.push_back(n); } }
-        }
-        found
-    }
-
     /// The loop or ring selection in `mode` through edge `edge`. Faces mode gives the face loop (polygons of the ring).
     pub fn loop_selection(&self, p: &[f32], edge: u32, ring: bool, mode: SelectionMode) -> Selection {
         let mut s = Selection { mode, ..Default::default() };
         match mode {
             SelectionMode::Object => {}
             SelectionMode::Edges => s.edges = self.walk(p, edge, ring).into_iter().map(|e| self.edges[e as usize]).collect(),
-            SelectionMode::Points => {
-                let mut seen = HashSet::new();
-                for e in self.walk(p, edge, ring) { let (a, b) = self.edges[e as usize]; for v in [a, b] { if seen.insert(v) { s.points.push(v); } } }
-            }
-            SelectionMode::Faces => {
-                let mut polys = Vec::new();
-                for e in self.walk(p, edge, true) { for &f in self.edge_polys.get(e) { if !polys.contains(&f) { polys.push(f); } } }
-                s.tris = self.tris_of(&polys);
-            }
+            SelectionMode::Points => s.points = self.points_of_edges(&self.walk(p, edge, ring)),
+            SelectionMode::Faces => s.tris = self.tris_of(&self.faces_of_edges(&self.walk(p, edge, true))),
         }
         s
     }
@@ -248,107 +163,10 @@ impl Topology {
         }
     }
 
-    fn neighbours(&self, mode: SelectionMode, x: u32, out: &mut Vec<u32>) {
-        out.clear();
-        match mode {
-            SelectionMode::Points => out.extend(self.point_edges.get(x).iter().map(|&e| self.other(e, x))),
-            SelectionMode::Edges => {
-                let (a, b) = self.edges[x as usize];
-                for v in [a, b] { out.extend(self.point_edges.get(v).iter().copied().filter(|&e| e != x)); }
-            }
-            SelectionMode::Faces => for &e in self.poly_edges.get(x) { out.extend(self.edge_polys.get(e).iter().copied().filter(|&f| f != x)); },
-            SelectionMode::Object => {}
-        }
-    }
-    fn position(&self, p: &[f32], mode: SelectionMode, x: u32) -> [f32; 3] {
-        let mean = |ids: &[u32]| { let n = ids.len().max(1) as f32; [0, 1, 2].map(|k| ids.iter().map(|&i| picking::at(p, i)[k]).sum::<f32>() / n) };
-        match mode {
-            SelectionMode::Points => picking::at(p, x),
-            SelectionMode::Edges => { let (a, b) = self.edges[x as usize]; mean(&[a, b]) }
-            SelectionMode::Faces => mean(self.poly_verts.get(x)),
-            SelectionMode::Object => [0.; 3],
-        }
-    }
-    fn count(&self, mode: SelectionMode) -> usize {
-        match mode { SelectionMode::Points => self.point_edges.offs.len().saturating_sub(1), SelectionMode::Edges => self.edges.len(), SelectionMode::Faces => self.npolys as usize, SelectionMode::Object => 0 }
-    }
-
     /// Route from `start` to `target` (ids in `mode`'s space), both included; empty when disconnected.
     pub fn path(&self, p: &[f32], mode: SelectionMode, start: u32, target: u32, method: Method) -> Vec<u32> {
-        let n = self.count(mode);
-        if start as usize >= n || target as usize >= n { return Vec::new(); }
-        if start == target { return vec![start]; }
-        match method { Method::Shortest => self.fewest_hops(mode, start, target), Method::Direct => self.most_direct(p, mode, start, target) }
-    }
-    fn fewest_hops(&self, mode: SelectionMode, start: u32, target: u32) -> Vec<u32> {
-        let mut previous = HashMap::from([(start, NONE)]);
-        let mut queue = VecDeque::from([start]);
-        let mut nb = Vec::new();
-        while let Some(x) = queue.pop_front() {
-            if x == target { break; }
-            self.neighbours(mode, x, &mut nb);
-            for &y in &nb { if let std::collections::hash_map::Entry::Vacant(v) = previous.entry(y) { v.insert(x); queue.push_back(y); } }
-        }
-        if !previous.contains_key(&target) { return Vec::new(); }
-        let mut route = vec![target];
-        let mut x = target;
-        while let Some(&prev) = previous.get(&x) { if prev == NONE { break; } route.push(prev); x = prev; }
-        route.reverse();
-        route
-    }
-    /// Pre-rust `directPath`: Dijkstra over (previous, current) so bends can be costed. Penalises length,
-    /// distance from the start-target chord and turning.
-    fn most_direct(&self, p: &[f32], mode: SelectionMode, start: u32, target: u32) -> Vec<u32> {
-        #[derive(PartialEq)]
-        struct State { cost: f64, prev: u32, cur: u32 }
-        impl Eq for State {}
-        impl Ord for State { fn cmp(&self, o: &Self) -> std::cmp::Ordering { o.cost.total_cmp(&self.cost) } }
-        impl PartialOrd for State { fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(o)) } }
-        let pos = |x: u32| self.position(p, mode, x);
-        let (a, b) = (pos(start), pos(target));
-        let chord = sub(b, a);
-        let scale = { let l = len(chord); if l > 0. { l } else { 1. } };
-        let distance = |q: [f32; 3]| {
-            let v = sub(q, a);
-            let t = (dot(v, chord) / (scale * scale)).clamp(0., 1.);
-            len([0, 1, 2].map(|k| v[k] - chord[k] * t)) / scale
-        };
-        let mut best: HashMap<(u32, u32), f64> = HashMap::from([((NONE, start), 0.)]);
-        let mut parent: HashMap<(u32, u32), (u32, u32)> = HashMap::new();
-        let mut open = BinaryHeap::from([State { cost: 0., prev: NONE, cur: start }]);
-        let mut nb = Vec::new();
-        let mut pops = 0usize;
-        while let Some(s) = open.pop() {
-            pops += 1;
-            if pops > 4_000_000 { return self.fewest_hops(mode, start, target); }
-            if s.cost > best.get(&(s.prev, s.cur)).copied().unwrap_or(f64::INFINITY) { continue; }
-            if s.cur == target {
-                let mut route = vec![s.cur];
-                let mut k = (s.prev, s.cur);
-                while let Some(&up) = parent.get(&k) { route.push(up.1); k = up; }
-                route.reverse();
-                return route;
-            }
-            let pc = pos(s.cur);
-            let incoming = if s.prev == NONE { chord } else { sub(pc, pos(s.prev)) };
-            let il = len(incoming);
-            self.neighbours(mode, s.cur, &mut nb);
-            for &v in &nb {
-                if v == s.prev { continue; }
-                let q = pos(v);
-                let d = sub(q, pc);
-                let l = len(d);
-                let turn = if il > 0. && l > 0. { 1. - (dot(incoming, d) / (il * l)).clamp(-1., 1.) } else { 0. };
-                let cost = s.cost + (l / scale).max(1e-9) * (1. + 8. * (distance(pc) + distance(q)) / 2.) + 0.75 * turn;
-                let k = (s.cur, v);
-                if cost < best.get(&k).copied().unwrap_or(f64::INFINITY) - 1e-12 {
-                    best.insert(k, cost);
-                    parent.insert(k, (s.prev, s.cur));
-                    open.push(State { cost, prev: s.cur, cur: v });
-                }
-            }
-        }
-        Vec::new()
+        let Some(domain) = domain(mode) else { return Vec::new(); };
+        self.core.path(p, domain, start, target, match method { Method::Direct => PathMethod::MostDirect, Method::Shortest => PathMethod::FewestSteps })
     }
 
     /// Converts `sel` to `to` (pre-rust `setMode`): down to constituents, up only to fully contained elements.
