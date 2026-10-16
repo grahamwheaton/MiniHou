@@ -3044,6 +3044,82 @@
    "kind": "str"
   }
  },
+ "occlusion": {
+  "bias": {
+   "default": 0.0001,
+   "doc": "Start the rays this far off the surface, as a fraction of the object's size, so a surface does not occlude itself",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 0.1
+  },
+  "blur": {
+   "default": 0,
+   "doc": "Smoothing passes over the mesh edges afterwards",
+   "kind": "int",
+   "min": 0,
+   "soft_max": 20
+  },
+  "group": {
+   "default": "",
+   "doc": "Only these points (the rest get 1 for occlusion, 0 for thickness)",
+   "kind": "str"
+  },
+  "invert": {
+   "default": false,
+   "doc": "Ambient occlusion: 1 where it is closed in instead of open",
+   "kind": "bool"
+  },
+  "max_distance": {
+   "default": 0.0,
+   "doc": "Ambient occlusion: things further than this do not block (0: any distance). Thickness: ignore walls further than this (0: any)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 10.0
+  },
+  "mode": {
+   "default": "ambient_occlusion",
+   "doc": "ambient_occlusion: how open the surface is to the outside (1 open, 0 closed in); thickness: how far the inside of the surface is to the other side",
+   "kind": "enum",
+   "options": [
+    "ambient_occlusion",
+    "thickness"
+   ]
+  },
+  "name": {
+   "default": "",
+   "doc": "The point attribute to write (empty: 'ao' or 'thickness')",
+   "kind": "str"
+  },
+  "normalize": {
+   "default": false,
+   "doc": "Thickness: divide by the largest value (0..1)",
+   "kind": "bool"
+  },
+  "rays": {
+   "default": 32,
+   "doc": "Rays per point (more is smoother and slower)",
+   "kind": "int",
+   "min": 1,
+   "soft_max": 256
+  },
+  "seed": {
+   "default": 0,
+   "doc": "Rotates the ray pattern differently at each point (removes banding)",
+   "kind": "int"
+  },
+  "self_occlusion": {
+   "default": true,
+   "doc": "The geometry itself blocks the rays (off: only the occluders do)",
+   "kind": "bool"
+  },
+  "spread": {
+   "default": 90.0,
+   "doc": "Half-angle of the cone of rays around the normal, in degrees (90: the whole hemisphere)",
+   "kind": "float",
+   "max": 90.0,
+   "min": 1.0
+  }
+ },
  "output": {
   "object": {
    "default": "",

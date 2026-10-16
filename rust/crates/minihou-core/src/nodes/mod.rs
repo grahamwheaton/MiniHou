@@ -45,6 +45,7 @@ mod volume;
 mod fracture_voronoi;
 mod fracture_tools;
 mod ray;
+mod occlusion;
 pub(crate) mod r#loop;
 mod scalar_expr;
 mod wrangle;
@@ -138,6 +139,7 @@ pub fn registry() -> &'static [NodeSpec] {
         fracture_voronoi::VORONOI_SPLIT,
         fracture_tools::VORONOI_ADJACENCY,
         ray::RAY,
+        occlusion::OCCLUSION,
         modify::TRANSFORM,
         modify::NORMAL,
         modify::NOISE,
