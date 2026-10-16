@@ -10,6 +10,7 @@ pub mod transform_math;
 pub mod noodle_hit;
 pub mod graph_edit;
 pub mod modifier_inputs;
+pub mod params;
 use minihou_core::{session::Session, lod::ClusterLod, Graph};
 use serde_json::{json, Value};
 use std::{collections::HashMap, ops::Range, path::Path, time::Instant};
