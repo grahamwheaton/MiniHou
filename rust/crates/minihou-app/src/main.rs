@@ -20,6 +20,7 @@ use std::{collections::HashMap, path::PathBuf, time::{Duration, Instant}};
 use ui::keymap::{KeyContext, Keymap, Preferences, ThemePref};
 use ui::{theme::Theme, Actions, BlenderStatus, CameraInfo, EditorState, GeoSummary, NodeFlags, TransformOp, UiAction, View};
 use ui::modal_transform::{Modal, Kind as ModalKind, SketchStage, Constraint};
+use ui::modal_model::{State as ModelState, Kind as ModelKind, Outcome as ModelOutcome};
 use viewport::{Gpu, Mode, Overlay, Scene, Target};
 
 fn point_pickable(visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,id:u32)->bool {
@@ -309,6 +310,7 @@ struct App {
     transform_pivot: Option<[f32; 3]>,
     transform_orientation: Option<ui::Orientation>,
     modal: Option<Modal>,
+    model_modal: Option<(ModelState, Document, String, String)>,
     pub last_operator: Option<LastOperator>,
     last_edit_selection: ui::SelectionMode, params_open: bool, object_hidden: bool,
 }
@@ -316,6 +318,7 @@ impl App {
     /// Finish the current edit before transferring pointer/keyboard ownership to selection.
     fn finish_for_selection(&mut self, ctx: &egui::Context) {
         if let Some(modal) = self.modal.take() { self.finish_modal(modal); }
+        self.finish_model_modal();
         ui::transform_gizmo::finish_input(ctx);
         ui::prim_handles::finish_input(ctx);
         ui::sketch::cancel(ctx);
@@ -389,7 +392,7 @@ impl App {
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),link:None,blender_job:None,
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
             display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
-            clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,last_operator:None,last_viewport:egui::Rect::NOTHING,
+            clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,model_modal:None,last_operator:None,last_viewport:egui::Rect::NOTHING,
             last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false };
         app.prefs = Preferences::load();
         app.mode=Mode::parse(&app.prefs.viewport.default_shading);
@@ -753,6 +756,85 @@ impl App {
         self.transform_delta = None;
         self.transform_pivot = None;
         self.transform_orientation = None;
+    }
+    fn start_model_modal(&mut self, ctx: &egui::Context, kind: ModelKind) {
+        if self.modal.is_some() || self.model_modal.is_some() || self.scene.is_none() { return; }
+        let Some(scene)=self.scene.as_ref() else { return; };
+        let mut selection=self.selection.clone();
+        selection.mode=match self.editor_state.selection { ui::SelectionMode::Points => ui::SelectionMode::Points,
+            ui::SelectionMode::Edges => ui::SelectionMode::Edges,
+            ui::SelectionMode::Faces => ui::SelectionMode::Faces,
+            ui::SelectionMode::Object => { self.file_status="Select mesh elements for this tool".into(); return; } };
+        let params=if kind==ModelKind::Bevel {
+            if selection.mode!=ui::SelectionMode::Edges {
+                selection=element_select::cached(&self.elem_topo,scene).convert(&selection,ui::SelectionMode::Edges);
+            }
+            if selection.edges.is_empty() { self.file_status="Select edges to bevel".into(); return; }
+            json!({"edges":selection.edges.iter().map(|(a,b)|format!("{a}-{b}")).collect::<Vec<_>>().join(" "),"distance":0.,"divisions":1})
+        } else {
+            if selection.mode!=ui::SelectionMode::Faces || selection.tris.is_empty() {
+                self.file_status="Select faces for this tool".into(); return;
+            }
+            let faces=element_select::cached(&self.elem_topo,scene).polys_of(&selection.tris);
+            let mut params=json!({"group":group_text(&faces)});
+            params[kind.parameter()]=json!(0.);
+            params
+        };
+        let source=self.selected.clone();
+        let Some((doc,id))=ui::modal_model::insert_graph(&self.editor.doc,&source,kind,params) else {
+            self.file_status=format!("Could not add {}",kind.node()); return;
+        };
+        self.editor.history.finish(&self.editor.doc);
+        let before=self.editor.doc.clone();
+        self.editor.doc=doc;
+        self.send(Edit::Replace(self.editor.doc.value().clone()));
+        let previous=self.selected.clone();
+        self.selected=id.clone(); self.selected_set=std::collections::BTreeSet::from([id.clone()]);
+        self.display=Graph::from_value(self.editor.doc.value()).ok().and_then(|g|g.main_output().ok()).unwrap_or(id.clone());
+        let pointer=ctx.input(|i|i.pointer.hover_pos()).unwrap_or(self.last_viewport.center());
+        let radius=self.bounds.1.max(0.001);
+        self.model_modal=Some((ModelState::new(kind,pointer,(radius/200.).max(0.00001)),before,id,previous));
+    }
+    fn finish_model_modal(&mut self) {
+        if let Some((_,before,_,_))=self.model_modal.take() { self.editor.history.record(before,&self.editor.doc); }
+    }
+    fn cancel_model_modal(&mut self) {
+        if let Some((_,before,_,previous))=self.model_modal.take() {
+            self.editor.doc=before;
+            self.selected=previous.clone(); self.selected_set=std::collections::BTreeSet::from([previous]);
+            self.display=Graph::from_value(self.editor.doc.value()).ok().and_then(|g|g.main_output().ok()).unwrap_or_default();
+            self.send(Edit::Replace(self.editor.doc.value().clone()));
+        }
+    }
+    fn update_model_modal(&mut self, ctx: &egui::Context) {
+        let Some((mut state,before,id,previous))=self.model_modal.take() else { return; };
+        let (events,pointer,modifiers,scroll)=ctx.input(|i|(i.events.clone(),i.pointer.hover_pos(),i.modifiers,i.raw_scroll_delta.y));
+        let mut confirm=false; let mut cancel=false;
+        for event in events {
+            match event {
+                egui::Event::Key { key,pressed:true,.. } => match state.key_event(key,modifiers.ctrl) {
+                    ModelOutcome::Cancel=>cancel=true, ModelOutcome::Confirm=>confirm=true, ModelOutcome::Continue=>{}
+                },
+                egui::Event::PointerButton { button:egui::PointerButton::Primary,pressed:true,.. } => confirm=true,
+                egui::Event::PointerButton { button:egui::PointerButton::Secondary,pressed:true,.. } => cancel=true,
+                _=>{}
+            }
+        }
+        if cancel { self.model_modal=Some((state,before,id,previous)); self.cancel_model_modal(); return; }
+        if let Some(pointer)=pointer { state.move_to(pointer,modifiers.shift,modifiers.ctrl); }
+        if state.kind==ModelKind::Bevel && scroll!=0. { state.divisions_step(if scroll>0. {1} else {-1}); }
+        let param=state.kind.parameter();
+        let value=json!(state.value);
+        if self.editor.doc.value()["nodes"][&id]["params"][param]!=value {
+            let edit=Edit::Param { node:id.clone(),name:param.into(),value };
+            if self.editor.doc.edit(&edit).is_ok() { self.send(edit); }
+        }
+        if state.kind==ModelKind::Bevel && self.editor.doc.value()["nodes"][&id]["params"]["divisions"]!=json!(state.divisions) {
+            let edit=Edit::Param { node:id.clone(),name:"divisions".into(),value:json!(state.divisions) };
+            if self.editor.doc.edit(&edit).is_ok() { self.send(edit); }
+        }
+        self.model_modal=Some((state,before,id,previous));
+        if confirm { self.finish_model_modal(); } else { ctx.request_repaint(); }
     }
     fn start_modal(&mut self, ctx: &egui::Context, kind: ModalKind) {
         if self.modal.is_some() || self.display.is_empty() || self.scene.is_none() { return; }
@@ -1400,8 +1482,13 @@ impl App {
                 self.editor_state.apply(C::Tool(if name == "knife" { ui::Tool::Knife } else { ui::Tool::LoopCut }));
             }
             "extrude" | "inset" | "bevel" | "pushpull" => {
-                let ty = match name { "extrude" => "polyextrude", "inset" => "inset", "bevel" => "polybevel", "pushpull" => "pushpull", _ => "loop_cut" };
-                let after = self.selected.clone(); self.add_node(ctx, ty, Some(&after));
+                let kind=match name { "extrude"=>ModelKind::Extrude,"inset"=>ModelKind::Inset,
+                    "bevel"=>ModelKind::Bevel,_=>ModelKind::PushPull };
+                let has_selection=if kind==ModelKind::Bevel { !self.selection.is_empty() }
+                    else { self.editor_state.selection==ui::SelectionMode::Faces && !self.selection.tris.is_empty() };
+                if self.editor_state.selection==ui::SelectionMode::Object || !has_selection {
+                    let after=self.selected.clone(); self.add_node(ctx,kind.node(),Some(&after));
+                } else { self.start_model_modal(ctx,kind); }
             }
             "opposite_view" => {
                 let next = match self.editor_state.view {
@@ -1785,7 +1872,7 @@ impl eframe::App for App {
                 self.geo_rev = self.cooking.completed;
             }
         }
-        let busy = self.modal.is_some() || (ui::sketch::active(ctx) || self.editor_state.tool.drawing()) || ui::transform_gizmo::active(ctx) || ui::prim_handles::active(ctx);
+        let busy = self.modal.is_some() || self.model_modal.is_some() || (ui::sketch::active(ctx) || self.editor_state.tool.drawing()) || ui::transform_gizmo::active(ctx) || ui::prim_handles::active(ctx);
         let fly_frame = viewport_input::fly(ctx, self.last_viewport, &mut self.camera,
             self.prefs.viewport.fly_navigation && !busy && !ui::selection_region::active(ctx) && !ctx.wants_keyboard_input());
         if busy && !fly_frame && !ui::sketch::active(ctx) && !self.editor_state.tool.drawing() {
@@ -1798,7 +1885,7 @@ impl eframe::App for App {
             let lasso_press = ctx.input(|i| i.pointer.secondary_pressed() && i.modifiers.ctrl
                 && i.pointer.latest_pos().is_some_and(|p| self.last_viewport.contains(p)
                     && ui::viewport_ui::selection_canvas_contains(self.last_viewport, p)));
-            if !selection_actions.is_empty() || lasso_press || (select_press && self.modal.is_none() && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing())) {
+            if !selection_actions.is_empty() || lasso_press || (select_press && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing())) {
                 self.finish_for_selection(ctx);
                 self.apply(ctx, selection_actions);
             }
@@ -1806,7 +1893,9 @@ impl eframe::App for App {
         // Process confirmation before constructing View so the same click can reach selection.
         let modal_frame = self.modal.is_some();
         if modal_frame { self.update_modal(ctx); }
-        if modal_frame && self.modal.is_none() && ctx.input(|i| i.pointer.primary_pressed()) {
+        let model_modal_frame=self.model_modal.is_some();
+        if model_modal_frame { self.update_model_modal(ctx); }
+        if (modal_frame || model_modal_frame) && self.modal.is_none() && self.model_modal.is_none() && ctx.input(|i| i.pointer.primary_pressed()) {
             ctx.data_mut(|d| d.insert_temp(egui::Id::new("modal_confirm_click"), true));
         }
         if (ui::transform_gizmo::active(ctx) || ui::prim_handles::active(ctx))
@@ -1823,7 +1912,7 @@ impl eframe::App for App {
         let mut out = Actions::default();
         let kctx = KeyContext { viewport_hovered: self.viewport_hover, network_hovered: self.network_hover,
             in_edit_mode: self.editor_state.selection != ui::SelectionMode::Object, selected: Some(&self.selected) };
-        if !fly_frame && !busy && !ui::viewport_ui::popup_open(ctx) && self.modal.is_none() && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) { for action in self.keymap.poll(ctx, &kctx) { out.push(action); } }
+        if !fly_frame && !busy && !ui::viewport_ui::popup_open(ctx) && self.modal.is_none() && self.model_modal.is_none() && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) { for action in self.keymap.poll(ctx, &kctx) { out.push(action); } }
         {
             let repeat_desc = self.last_operator.as_ref().map(LastOperator::description);
             let transform_node = if self.editor_state.selection == ui::SelectionMode::Object { &self.selected } else { &self.display };
@@ -1858,11 +1947,11 @@ impl eframe::App for App {
                 let size = ui.available_size().max(egui::vec2(1., 1.));
                 let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
                 self.last_viewport = rect;
-                let region_frame = if !fly_frame && self.modal.is_none() && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) {
+                let region_frame = if !fly_frame && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) {
                     ui::selection_region::handle(ctx, rect, &v, &mut out)
                 } else { false };
                 let mut delta = ctx.input(|i| i.pointer.delta());
-                if !fly_frame && !region_frame && response.dragged() && self.modal.is_none() && !ui::sketch::blocks_navigation(ctx) && !ui::mesh_cut::blocks_navigation(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx)
+                if !fly_frame && !region_frame && response.dragged() && (self.modal.is_none() && self.model_modal.is_none()) && !ui::sketch::blocks_navigation(ctx) && !ui::mesh_cut::blocks_navigation(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx)
                     && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::transform_gizmo::hit(rect, &v, p) || ui::prim_handles::hit(rect, &v, p)) {
                     let modifiers = ctx.input(|i| i.modifiers);
                     wrap_drag(ctx, rect, &mut delta);
@@ -1880,7 +1969,7 @@ impl eframe::App for App {
                         _ => {}
                     }
                 }
-                if !fly_frame && !region_frame && response.hovered() && self.modal.is_none()
+                if !fly_frame && !region_frame && response.hovered() && (self.modal.is_none() && self.model_modal.is_none())
                     && self.editor_state.tool != ui::Tool::LoopCut && !ui::mesh_cut::captures_wheel(ctx) {
                     self.camera.zoom(ctx.input(|i| i.smooth_scroll_delta.y));
                 }
@@ -2055,10 +2144,10 @@ impl eframe::App for App {
                 }
 
                 self.viewport_hover = response.hovered();
-                if !fly_frame && !region_frame && self.modal.is_none() && response.hovered() && !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
+                if !fly_frame && !region_frame && (self.modal.is_none() && self.model_modal.is_none()) && response.hovered() && !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
                     out.push(UiAction::Command(if self.editor_state.selection != ui::SelectionMode::Object { "toggle_edit".into() } else { "add_menu".into() }));
                 }
-                if !fly_frame && !region_frame && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && self.modal.is_none() && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::transform_gizmo::hit(rect, &v, p)) && (self.editor_state.tool == ui::Tool::Select || (self.editor_state.selection == ui::SelectionMode::Object && !matches!(self.editor_state.tool, ui::Tool::Cursor | ui::Tool::Measure | ui::Tool::Line | ui::Tool::Polyline | ui::Tool::Polygon | ui::Tool::Rectangle | ui::Tool::Circle | ui::Tool::Knife | ui::Tool::LoopCut))) {
+                if !fly_frame && !region_frame && !model_modal_frame && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::transform_gizmo::hit(rect, &v, p)) && (self.editor_state.tool == ui::Tool::Select || (self.editor_state.selection == ui::SelectionMode::Object && !matches!(self.editor_state.tool, ui::Tool::Cursor | ui::Tool::Measure | ui::Tool::Line | ui::Tool::Polyline | ui::Tool::Polygon | ui::Tool::Rectangle | ui::Tool::Circle | ui::Tool::Knife | ui::Tool::LoopCut))) {
                     if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {
                         let (nx, ny) = (((at.x - rect.left()) / rect.width()) * 2. - 1., 1. - ((at.y - rect.top()) / rect.height()) * 2.);
                         let (o, d) = self.camera.ray(nx, ny, rect.width() / rect.height());
@@ -2094,7 +2183,7 @@ impl eframe::App for App {
                 }
                 let shift_rmb = response.clicked_by(egui::PointerButton::Secondary) && ctx.input(|i| i.modifiers.shift);
                 let cursor_tool_click = response.clicked_by(egui::PointerButton::Primary) && self.editor_state.tool == ui::Tool::Cursor;
-                if !fly_frame && !region_frame && (shift_rmb || cursor_tool_click) && self.modal.is_none() {
+                if !fly_frame && !region_frame && !model_modal_frame && (shift_rmb || cursor_tool_click) && (self.modal.is_none() && self.model_modal.is_none()) {
                     if let Some(at) = response.interact_pointer_pos() {
                         let (o, d) = ui::transform_gizmo::ray(v.camera, rect, at);
                         let (mesh_p, mesh_tri) = self.scene.as_ref().map(|s| (s.positions(), s.triangle_indices())).unzip();
@@ -2160,7 +2249,9 @@ impl eframe::App for App {
                     }
                 }
                 ui::transform_gizmo::cursor(ui, rect, &v);
-                if let Some(modal)=&self.modal {
+                if let Some((state,_,_,_))=&self.model_modal {
+                    ui::viewport_ui::modal_status(ui,rect,&state.status());
+                } else if let Some(modal)=&self.modal {
                     ui::transform_overlay::show(ui,rect,&v,modal);
                     let snap=self.editor_state.snap.enabled ^ ctx.input(|i|i.modifiers.ctrl);
                     ui::viewport_ui::modal_status(ui,rect,&modal.status(snap));
@@ -2194,9 +2285,9 @@ impl eframe::App for App {
         if ctx.input(|i| i.pointer.primary_released()) {
             ctx.data_mut(|d| d.remove::<bool>(egui::Id::new("modal_confirm_click")));
         }
-        if self.modal.is_none() && !ctx.input(|i| i.pointer.primary_down()) { self.editor.history.finish(&self.editor.doc); }
+        if self.modal.is_none() && self.model_modal.is_none() && !ctx.input(|i| i.pointer.primary_down()) { self.editor.history.finish(&self.editor.doc); }
         self.apply(ctx, out.0);
-        if self.modal.is_none() && !ctx.input(|i| i.pointer.primary_down()) { self.finish_transform(); }
+        if (self.modal.is_none() && self.model_modal.is_none()) && !ctx.input(|i| i.pointer.primary_down()) { self.finish_transform(); }
         if self.cooking.cooking() { ctx.request_repaint_after(Duration::from_millis(16)); }
     }
 }

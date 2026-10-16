@@ -19,6 +19,7 @@ pub mod theme;
 pub mod topbar;
 pub mod transform_gizmo;
 pub mod modal_transform;
+pub mod modal_model;
 pub mod transform_overlay;
 pub mod viewport_ui;
 

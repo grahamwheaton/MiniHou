@@ -200,7 +200,7 @@ impl Topology {
     }
 
     fn tris_of(&self, polys: &[u32]) -> Vec<u32> { polys.iter().flat_map(|&f| self.poly_tris(f).iter().copied()).collect() }
-    fn polys_of(&self, tris: &[u32]) -> Vec<u32> {
+    pub(crate) fn polys_of(&self, tris: &[u32]) -> Vec<u32> {
         let mut seen = HashSet::new();
         tris.iter().filter_map(|&t| self.poly_of_tri(t)).filter(|f| seen.insert(*f)).collect()
     }
