@@ -242,7 +242,7 @@ fn key_of(graph: &Graph, external_versions: &HashMap<String,u64>, id: &str, keys
             if let Ok(meta) = std::fs::metadata(path) { meta.len().hash(&mut h); meta.modified().ok().hash(&mut h); }
         }
     }
-    if def.node_type == "usd_import" {
+    if def.node_type == "usd_import" || def.node_type == "image_file" {
         let p = Params::resolve(spec.params, def.params.as_ref())?;
         let path = crate::usd_io::resolve_path(&p.s("file")?);
         path.hash(&mut h);

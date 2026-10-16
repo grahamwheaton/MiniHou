@@ -2389,6 +2389,65 @@
    "soft_max": 20.0
   }
  },
+ "image_file": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "",
+   "kind": "vec3"
+  },
+  "colorspace": {
+   "default": "auto",
+   "doc": "auto: colour images are sRGB, so they become linear colour; stored: the numbers as they are (masks, heights)",
+   "kind": "enum",
+   "options": [
+    "auto",
+    "stored"
+   ]
+  },
+  "file": {
+   "default": "",
+   "doc": "A PNG file (any format Pillow reads, when it is installed). A relative path starts in the workspace folder",
+   "kind": "str"
+  },
+  "height": {
+   "default": "none",
+   "doc": "Lift the points by this channel (a height map): z = value * height_scale; also stored as `height`",
+   "kind": "enum",
+   "options": [
+    "none",
+    "luminance",
+    "red",
+    "green",
+    "blue",
+    "alpha"
+   ]
+  },
+  "height_scale": {
+   "default": 1.0,
+   "doc": "",
+   "kind": "float",
+   "soft_max": 10.0,
+   "soft_min": -10.0
+  },
+  "max_size": {
+   "default": 1024,
+   "doc": "The longest side in pixels (bigger images are averaged down in blocks)",
+   "kind": "int",
+   "max": 8192,
+   "min": 2
+  },
+  "size": {
+   "default": 10.0,
+   "doc": "Width of the grid in world units (the height follows the image's aspect)",
+   "kind": "float",
+   "min": 0.0001,
+   "soft_max": 100.0
+  }
+ },
  "image_out": {
   "encoding": {
    "default": "linear",

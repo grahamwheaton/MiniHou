@@ -4,10 +4,110 @@ use serde_json::{json,Value};
 use crate::{Geometry, Attr, Error, Result, params::Params};
 use super::{Inputs,NodeSpec,blender_input::{ExternalInput,ExternalInputs,numbers}};
 pub const BLENDER_IMAGE: NodeSpec=NodeSpec{name:"blender_image",inputs:&[],params:crate::params!("image":"";"max_size":1024;"colorspace":"auto";"size":10.;"center":[0.,0.,0.];"height":"none";"height_scale":1.),cook:waiting};
+pub const IMAGE_FILE: NodeSpec=NodeSpec{name:"image_file",inputs:&[],params:crate::params!("file":"";"max_size":1024;"colorspace":"auto";"size":10.;"center":[0.,0.,0.];"height":"none";"height_scale":1.),cook:image_file};
 pub const IMAGE_OUT: NodeSpec=NodeSpec{name:"image_out",inputs:super::GEO,params:crate::params!("image":"MiniHou";"mode":"lattice";"source":"Cd";"width":512;"height":512;"normalize":false;"encoding":"linear";"file":"",unsupported),cook:image_out};
 fn waiting(_: &Inputs,p: &Params)->Result<Geometry>{blender_image(p,&ExternalInputs::new())}
 pub fn srgb_to_linear(x:f32)->f32{if x<=0.04045{x/12.92}else{((x+0.055)/1.055).powf(2.4)}}
 pub fn linear_to_srgb(x:f32)->f32{let x=x.max(0.);if x<=0.0031308{x*12.92}else{1.055*x.powf(1./2.4)-0.055}}
+pub fn image_file(_: &Inputs, p: &Params) -> Result<Geometry> {
+    let file = p.s("file")?;
+    if file.trim().is_empty() {
+        return Err(Error::new("set 'file' to a PNG file"));
+    }
+    let path = crate::usd_io::resolve_path(&file);
+    if !path.is_file() {
+        return Err(Error::new(format!("no such file: {}", path.display())));
+    }
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    let data = std::fs::read(&path)
+        .map_err(|e| Error::new(format!("cannot read {file_name}: {e}")))?;
+    let img = image::load_from_memory(&data)
+        .map_err(|e| Error::new(format!("cannot read {file_name}: {e}")))?;
+    let width = img.width() as usize;
+    let height = img.height() as usize;
+    let (is_16bit, is_32f) = match &img {
+        image::DynamicImage::ImageLuma16(_)
+        | image::DynamicImage::ImageLumaA16(_)
+        | image::DynamicImage::ImageRgb16(_)
+        | image::DynamicImage::ImageRgba16(_) => (true, false),
+        image::DynamicImage::ImageRgb32F(_) | image::DynamicImage::ImageRgba32F(_) => (false, true),
+        _ => (false, false),
+    };
+    let mut pix = Vec::with_capacity(width * height * 4);
+    if is_16bit {
+        let rgba = img.into_rgba16();
+        let raw = rgba.as_raw();
+        for y in (0..height).rev() {
+            let row = &raw[y * width * 4..(y + 1) * width * 4];
+            for &val in row {
+                pix.push(val as f32 / 65535.0);
+            }
+        }
+    } else if is_32f {
+        let rgba = img.into_rgba32f();
+        let raw = rgba.as_raw();
+        for y in (0..height).rev() {
+            let row = &raw[y * width * 4..(y + 1) * width * 4];
+            pix.extend_from_slice(row);
+        }
+    } else {
+        let rgba = img.into_rgba8();
+        let raw = rgba.as_raw();
+        for y in (0..height).rev() {
+            let row = &raw[y * width * 4..(y + 1) * width * 4];
+            for &val in row {
+                pix.push(val as f32 / 255.0);
+            }
+        }
+    }
+    let linear = p.e("colorspace", &["auto", "stored"])? == "auto";
+    if linear {
+        for chunk in pix.chunks_exact_mut(4) {
+            chunk[0] = srgb_to_linear(chunk[0]);
+            chunk[1] = srgb_to_linear(chunk[1]);
+            chunk[2] = srgb_to_linear(chunk[2]);
+        }
+    }
+    let max_size = p.i("max_size")?.max(1) as usize;
+    let factor = width.max(height).div_ceil(max_size).max(1);
+    let (w, h, pix) = if factor > 1 {
+        let w2 = width / factor;
+        let h2 = height / factor;
+        let mut down = vec![0.0f32; w2 * h2 * 4];
+        let divisor = (factor * factor) as f32;
+        for y in 0..h2 {
+            for x in 0..w2 {
+                let mut sums = [0.0f32; 4];
+                for dy in 0..factor {
+                    for dx in 0..factor {
+                        let src = ((y * factor + dy) * width + (x * factor + dx)) * 4;
+                        for c in 0..4 {
+                            sums[c] += pix[src + c];
+                        }
+                    }
+                }
+                let dst = (y * w2 + x) * 4;
+                for c in 0..4 {
+                    down[dst + c] = sums[c] / divisor;
+                }
+            }
+        }
+        (w2, h2, down)
+    } else {
+        (width, height, pix)
+    };
+    if w < 2 || h < 2 {
+        return Err(Error::new("an image needs at least 2 x 2 pixels to make a grid"));
+    }
+    if w.checked_mul(h).is_none_or(|n| n > 16_000_000) {
+        return Err(Error::new("image exceeds 16,000,000 pixels; lower max_size"));
+    }
+    grid_from_pixels(&pix, w, h, p, &file_name)
+}
 pub fn blender_image(p:&Params,store:&ExternalInputs)->Result<Geometry>{
     let name=p.s("image")?;
     if name.is_empty(){return Err(Error::new("set 'image' to the name of a Blender image"));}
@@ -64,4 +164,81 @@ pub fn pixels(g:&Geometry,p:&Params)->Result<(usize,usize,Vec<f32>)>{
     use super::*;
     #[test]fn bake_means_and_transparency(){let mut g=Geometry::points_only(vec![0.,0.,0.,0.,0.,0.,1.,1.,0.]).unwrap();g.point.insert("Cd".into(),Arc::new(Attr::f32(1,vec![0.,1.,1.])));let p=Params::resolve(IMAGE_OUT.params,json!({"mode":"bake","width":2,"height":2}).as_object()).unwrap();let(_,_,pix)=pixels(&g,&p).unwrap();assert_eq!(&pix[..4],&[0.5,0.5,0.5,1.]);assert_eq!(&pix[4..8],&[0.;4]);assert_eq!(&pix[12..],&[1.;4]);}
     #[test]fn image_grid_height_and_alpha(){let mut store=ExternalInputs::new();store.insert("image:A".into(),ExternalInput::Image{pixels:Arc::new(vec![0.5;16]),width:2,height:2,meta:json!({"is_float":true})});let p=Params::resolve(BLENDER_IMAGE.params,json!({"image":"A","height":"red","height_scale":2.}).as_object()).unwrap();let g=blender_image(&p,&store).unwrap();assert_eq!(g.p(),&[-5.,-5.,1.,5.,-5.,1.,-5.,5.,1.,5.,5.,1.]);assert_eq!(g.topology.vertex_point,vec![0,1,3,2]);assert_eq!(g.point["Alpha"].rows(),4);}
+    #[test]fn test_image_file_validations(){
+        let p_empty=Params::resolve(IMAGE_FILE.params,json!({"file":""}).as_object()).unwrap();
+        assert_eq!(image_file(&[],&p_empty).unwrap_err().0,"set 'file' to a PNG file");
+        let p_missing=Params::resolve(IMAGE_FILE.params,json!({"file":"does_not_exist_xyz.png"}).as_object()).unwrap();
+        assert!(image_file(&[],&p_missing).unwrap_err().0.contains("no such file:"));
+    }
+    #[test]fn test_image_file_golden_comparison(){
+        let manifest_dir=env!("CARGO_MANIFEST_DIR");
+        let golden_path=std::path::Path::new(manifest_dir).join("tests/fixtures/image_file_golden.json");
+        let golden_text=std::fs::read_to_string(&golden_path).expect("read golden json");
+        let golden:Value=serde_json::from_str(&golden_text).expect("parse golden json");
+
+        let file8=std::path::Path::new(manifest_dir).join("tests/fixtures/image_file_test.png");
+        let p8=Params::resolve(IMAGE_FILE.params,json!({
+            "file":file8.to_str().unwrap(),
+            "max_size":1024,
+            "colorspace":"auto",
+            "size":10.0,
+            "center":[1.0,2.0,3.0],
+            "height":"red",
+            "height_scale":2.0
+        }).as_object()).unwrap();
+        let g8=image_file(&[],&p8).expect("cook image_file 8bit");
+        let want8=&golden["geo8"];
+        assert_eq!(g8.npoints,want8["npoints"].as_u64().unwrap() as usize);
+        assert_eq!(g8.nprims(),want8["nprims"].as_u64().unwrap() as usize);
+        let want_vp:Vec<i32>=want8["vertex_point"].as_array().unwrap().iter().map(|v|v.as_i64().unwrap() as i32).collect();
+        assert_eq!(g8.topology.vertex_point,want_vp);
+        let want_po:Vec<i32>=want8["prim_offsets"].as_array().unwrap().iter().map(|v|v.as_i64().unwrap() as i32).collect();
+        assert_eq!(g8.topology.prim_offsets,want_po);
+        let want_p:Vec<Vec<f32>>=serde_json::from_value(want8["P"].clone()).unwrap();
+        let got_p=g8.p();
+        for (i,pt) in want_p.iter().enumerate(){
+            assert!((got_p[i*3]-pt[0]).abs()<1e-4,"P[{}][0]: {} vs {}",i,got_p[i*3],pt[0]);
+            assert!((got_p[i*3+1]-pt[1]).abs()<1e-4,"P[{}][1]: {} vs {}",i,got_p[i*3+1],pt[1]);
+            assert!((got_p[i*3+2]-pt[2]).abs()<1e-4,"P[{}][2]: {} vs {}",i,got_p[i*3+2],pt[2]);
+        }
+        let want_cd:Vec<Vec<f32>>=serde_json::from_value(want8["Cd"].clone()).unwrap();
+        let got_cd=numbers(&g8.point["Cd"]);
+        for (i,cd) in want_cd.iter().enumerate(){
+            assert!((got_cd[i*3] as f32-cd[0]).abs()<1e-4);
+            assert!((got_cd[i*3+1] as f32-cd[1]).abs()<1e-4);
+            assert!((got_cd[i*3+2] as f32-cd[2]).abs()<1e-4);
+        }
+        assert!(g8.point.contains_key("Alpha"));
+        let want_alpha:Vec<f32>=serde_json::from_value(want8["Alpha"].clone()).unwrap();
+        let got_alpha=numbers(&g8.point["Alpha"]);
+        for (i,&a) in want_alpha.iter().enumerate(){
+            assert!((got_alpha[i] as f32-a).abs()<1e-4);
+        }
+        assert_eq!(g8.detail["grid_columns"],json!(4));
+        assert_eq!(g8.detail["grid_rows"],json!(3));
+        assert_eq!(g8.detail["image"],json!("image_file_test.png"));
+
+        let file16=std::path::Path::new(manifest_dir).join("tests/fixtures/image_file_16bit.png");
+        let p16=Params::resolve(IMAGE_FILE.params,json!({
+            "file":file16.to_str().unwrap(),
+            "max_size":1024,
+            "colorspace":"stored",
+            "size":5.0,
+            "center":[0.0,0.0,0.0],
+            "height":"luminance",
+            "height_scale":1.5
+        }).as_object()).unwrap();
+        let g16=image_file(&[],&p16).expect("cook image_file 16bit");
+        let want16=&golden["geo16"];
+        assert_eq!(g16.npoints,want16["npoints"].as_u64().unwrap() as usize);
+        assert_eq!(g16.nprims(),want16["nprims"].as_u64().unwrap() as usize);
+        let want_p16:Vec<Vec<f32>>=serde_json::from_value(want16["P"].clone()).unwrap();
+        let got_p16=g16.p();
+        for (i,pt) in want_p16.iter().enumerate(){
+            assert!((got_p16[i*3]-pt[0]).abs()<1e-4);
+            assert!((got_p16[i*3+1]-pt[1]).abs()<1e-4);
+            assert!((got_p16[i*3+2]-pt[2]).abs()<1e-4);
+        }
+        assert!(!g16.point.contains_key("Alpha"));
+    }
 }
