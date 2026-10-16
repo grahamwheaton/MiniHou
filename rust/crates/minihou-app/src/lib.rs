@@ -421,6 +421,10 @@ pub enum Edit {
     /// Timeline: the frame and fps cooks run at (`@Frame`/`@Time`, solvers). Not a document edit.
     Time { frame: f64, fps: f64 },
 }
+/// Emit a cook request only when the visible timeline actually advances.
+pub fn timeline_time_edit(before: u32, after: u32, fps: f64) -> Option<Edit> {
+    (before != after).then_some(Edit::Time { frame: after as f64, fps })
+}
 impl Document {
     /// Validate edits without creating or cooking a Session on the UI thread.
     pub fn edit(&mut self, edit: &Edit) -> Result<()> {
@@ -677,6 +681,19 @@ pub struct CookWorker<T> {
     queries: mpsc::Sender<http_geometry::Query>,
     latest: Arc<Mutex<Option<CookResponse<T>>>>,
 }
+/// A short quiet period folds a drag's frame events into one cook. Playback's
+/// 24 fps ticks are farther apart, so each displayed frame still gets a cook.
+fn collect_cook_batch(receiver: &mpsc::Receiver<CookRequest>, first: CookRequest) -> Vec<CookRequest> {
+    let mut batch = vec![first];
+    batch.extend(receiver.try_iter());
+    while matches!(batch.last().map(|r| &r.edit), Some(Edit::Time { .. })) {
+        match receiver.recv_timeout(std::time::Duration::from_millis(16)) {
+            Ok(next) => { batch.push(next); batch.extend(receiver.try_iter()); }
+            Err(_) => break,
+        }
+    }
+    batch
+}
 impl<T: Send + 'static> CookWorker<T> {
     pub fn start(doc: &Document, prepare: impl Fn(&Geometry) -> T + Send + 'static) -> Result<Self> {
         let mut session = doc.session()?;
@@ -689,8 +706,7 @@ impl<T: Send + 'static> CookWorker<T> {
             loop {
                 match receiver.recv_timeout(std::time::Duration::from_millis(10)) {
                     Ok(first) => {
-                        let mut batch = vec![first];
-                        batch.extend(receiver.try_iter());
+                        let batch = collect_cook_batch(&receiver, first);
                         let response = cook_batch(&mut session, &mut target, batch, &prepare);
                         *output.lock().unwrap() = Some(response);
                     }

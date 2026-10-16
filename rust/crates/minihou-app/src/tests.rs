@@ -361,6 +361,67 @@ fn actual_worker_delivers_final_revision() {
 }
 
 #[test]
+fn timeline_frame_change_emits_one_time_edit() {
+    let edits: Vec<_> = [12, 12].into_iter()
+        .scan(1, |frame, next| {
+            let edit = crate::timeline_time_edit(*frame, next, 24.);
+            *frame = next;
+            Some(edit)
+        })
+        .flatten().collect();
+    assert_eq!(edits.len(), 1);
+    assert!(matches!(edits[0], Edit::Time { frame: 12., fps: 24. }));
+}
+
+#[test]
+fn timeline_time_dependent_blend_changes_output() {
+    let doc = Document::parse(json!({"display":"blend","nodes":{
+        "base":{"type":"point"},
+        "target":{"type":"point","params":{"center":[2,0,0]}},
+        "blend":{"type":"blend","inputs":{"geo":"base","targets":["target"]},"params":{"weights":"@Time"}}
+    }}).to_string()).unwrap();
+    let mut session = doc.session().unwrap();
+    let mut target = "blend".to_owned();
+    let mut at = |session: &mut _, revision, frame| cook_batch(session, &mut target,
+        vec![request(revision, Edit::Time { frame, fps: 24. })], |_| ());
+    let first = at(&mut session, 1, 1.);
+    let second = at(&mut session, 2, 25.);
+    assert!(first.error.is_none() && second.error.is_none());
+    assert_ne!(first.geometry.unwrap().p()[0], second.geometry.unwrap().p()[0]);
+}
+
+#[test]
+fn timeline_rapid_scrub_cooks_only_latest_frame() {
+    let doc = Document::parse(json!({"display":"blend","nodes":{
+        "base":{"type":"point"},
+        "target":{"type":"point","params":{"center":[2,0,0]}},
+        "blend":{"type":"blend","inputs":{"geo":"base","targets":["target"]},"params":{"weights":"@Frame"}}
+    }}).to_string()).unwrap();
+    let cooks = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = cooks.clone();
+    let worker = CookWorker::start(&doc, move |g| {
+        count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        g.p()[0]
+    }).unwrap();
+    for frame in 1..=80 {
+        worker.send(request(frame, Edit::Time { frame: frame as f64, fps: 24. })).unwrap();
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if let Some(response) = worker.poll() {
+            if response.revision == 80 {
+                assert!(response.error.is_none());
+                assert_eq!(response.prepared, Some(160.));
+                assert_eq!(cooks.load(std::sync::atomic::Ordering::SeqCst), 1);
+                break;
+            }
+        }
+        assert!(std::time::Instant::now() < deadline, "worker timed out");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+#[test]
 fn file_save_as_dirty_title_and_open_reset() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let path = dir.join(format!("save-as-{}.json", std::process::id()));

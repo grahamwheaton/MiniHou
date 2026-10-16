@@ -61,6 +61,8 @@ pub enum UiAction {
     ToggleDisplay(String),
     /// A document edit (parameter, mute/bypass, display, whole-graph replace). `continuous` is true while a drag is in progress.
     Edit { edit: Edit, continuous: bool },
+    /// A timeline cook without changing the document or undo history.
+    Time(Edit),
     /// A shelf tool: add a node of this type (after `after`, wired to it, when given).
     AddNode { node_type: String, after: Option<String> },
     /// A shelf drop in network coordinates, independent of viewport/world placement.

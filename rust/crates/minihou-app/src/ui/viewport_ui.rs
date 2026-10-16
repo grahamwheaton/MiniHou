@@ -33,28 +33,32 @@ const DENSE_PRIMS: usize = 40_000;
 const FRAME_START: u32 = 0;
 const FRAME_END: u32 = 240;
 
-/// UI-only viewport state (nothing here reaches the engine yet).
+/// Viewport chrome state; frame changes are emitted as time edits.
 #[derive(Clone)]
 struct VpState { popover: Option<Popover>, frame: u32, playing: bool, clock: f32 }
-pub fn timeline_command(ctx: &egui::Context, command: &str) {
+pub fn timeline_command(ctx: &egui::Context, command: &str) -> Option<minihou_app::Edit> {
     let id = egui::Id::new("viewport_ui_state");
-    ctx.data_mut(|d| {
+    let changed = ctx.data_mut(|d| {
         let mut st: VpState = d.get_temp(id).unwrap_or_default();
+        let before = st.frame;
         match command {
             "timeline_toggle" => st.playing = !st.playing,
             "timeline_previous" => st.frame = st.frame.saturating_sub(1).max(FRAME_START),
             "timeline_next" => st.frame = (st.frame + 1).min(FRAME_END),
             "timeline_start" => { st.playing = false; st.frame = FRAME_START; }
             "timeline_end" => { st.playing = false; st.frame = FRAME_END; }
-            _ => return,
+            _ => return None,
         }
+        let edit = minihou_app::timeline_time_edit(before, st.frame, 24.);
         d.insert_temp(id, st);
+        edit
     });
     ctx.request_repaint();
+    changed
 }
 impl Default for VpState {
     fn default() -> Self {
-        Self { popover: None, frame: FRAME_START, playing: false, clock: 0. }
+        Self { popover: None, frame: 1, playing: false, clock: 0. }
     }
 }
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -120,6 +124,7 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     let ctx = ui.ctx().clone();
     let id = egui::Id::new("viewport_ui_state");
     let mut st: VpState = ctx.data_mut(|d| d.get_temp(id)).unwrap_or_default();
+    let previous_frame = st.frame;
     let th = v.theme;
     let painter = ui.painter_at(rect);
     let stroke = Stroke::new(1.0_f32, th.stroke);
@@ -290,6 +295,7 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         let dismiss = ctx.input(|i| i.key_pressed(egui::Key::Escape) || (i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !pop.contains(p) && !anchor.contains(p))));
         if dismiss { st.popover = None; }
     }
+    if let Some(edit) = minihou_app::timeline_time_edit(previous_frame, st.frame, 24.) { out.push(UiAction::Time(edit)); }
     ctx.data_mut(|d| d.insert_temp(id, st));
 }
 

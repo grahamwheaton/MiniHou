@@ -413,6 +413,13 @@ impl App {
             self.cooking.error = Some(e.to_string());
         }
     }
+    fn send_timeline_time(&mut self, edit: Edit) {
+        if let Edit::Time { frame, fps } = edit {
+            self.http_time = (frame, fps);
+            if let Some(link) = &mut self.link { link.frame = frame; link.fps = fps; }
+            self.send(Edit::Time { frame, fps });
+        }
+    }
     fn edit(&mut self, edit: Edit, continuous: bool) {
         match self.editor.history.edit(&mut self.editor.doc, &edit) {
             Ok(()) => { self.send(edit); if !continuous { self.editor.history.finish(&self.editor.doc); } }
@@ -1335,7 +1342,9 @@ impl App {
             "circle_select" => ui::selection_region::arm_circle(ctx, ui::selection_region::Snapshot {
                 selection: self.selection.clone(), selected: self.selected.clone(), selected_set: self.selected_set.clone(),
             }),
-            "timeline_toggle" | "timeline_previous" | "timeline_next" | "timeline_start" | "timeline_end" => ui::viewport_ui::timeline_command(ctx, name),
+            "timeline_toggle" | "timeline_previous" | "timeline_next" | "timeline_start" | "timeline_end" => {
+                if let Some(edit) = ui::viewport_ui::timeline_command(ctx, name) { self.send_timeline_time(edit); }
+            }
             "shade_pie" => ui::viewport_ui::open_shading_pie(ctx),
             "pie_menu" => ui::network::open_pie_menu(ctx, &self.editor.path),
             "reset_cursor" => {
@@ -1484,6 +1493,7 @@ impl App {
                     if !continuous { self.editor.history.finish(&self.editor.doc); }
                     self.edit(edit, continuous);
                 }
+                UiAction::Time(edit) => self.send_timeline_time(edit),
                 UiAction::AddNode { node_type, .. } if node_type.starts_with("sketch_") => {
                     if let Some(mode) = ui::sketch::SketchMode::DRAW.into_iter().find(|m| m.command_id() == node_type) { self.start_sketch(ctx, mode); }
                 }
