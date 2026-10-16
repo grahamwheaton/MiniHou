@@ -373,6 +373,7 @@ pub fn decimate_dots(npoints: usize) -> DecimatedDots {
 mod tests {
     use super::*;
     use minihou_app::{Camera, StandardView};
+    use minihou_app::graph_edit::{is_primitive_node, node_has_center_param};
 
     #[test]
     fn snap_candidates_use_screen_distance_and_edges_are_not_midpoints() {

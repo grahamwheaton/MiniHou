@@ -129,10 +129,10 @@ fn add_impl(value: &Value, ty: &str, after: Option<&str>, splice: bool) -> Optio
 /// Adds a node placed at world position `pos`. If `ty` is a primitive with a `center` parameter,
 /// sets `center` to `pos`. If `ty` is a primitive without `center`, adds the node and then adds a
 /// `transform` node after it with `translate` set to `pos`. For non-primitives, behaves like `add`.
-fn node_has_center_param(ty: &str) -> bool {
+pub fn node_has_center_param(ty: &str) -> bool {
     matches!(ty, "box" | "sphere" | "tube" | "torus" | "grid" | "circle" | "point")
 }
-fn is_primitive_node(ty: &str) -> bool {
+pub fn is_primitive_node(ty: &str) -> bool {
     node_has_center_param(ty) || matches!(ty, "line" | "curve" | "bezier" | "helix" | "lsystem" | "null" | "lattice_grid")
 }
 pub fn add_at(value: &Value, ty: &str, after: Option<&str>, pos: [f32; 3]) -> Option<(Value, String)> {

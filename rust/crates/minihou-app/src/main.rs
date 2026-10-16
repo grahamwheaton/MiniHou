@@ -132,6 +132,14 @@ fn ensure_transform_target(value: &mut Value, source: &str, object_mode: bool, a
     if object_mode {
         if let Some(id) = nodes.iter().find(|(id, n)| displayed.iter().any(|shown| shown == *id) && n["type"] == "transform" && n["inputs"]["geo"] == source).map(|(id, _)| id.clone()) { return Some(id); }
     }
+    if nodes.get(source).and_then(|n| n["type"].as_str()) == Some("output") {
+        let up = nodes[source]["inputs"]["geo"].as_str().map(str::to_owned);
+        if let Some(up) = up.filter(|up| object_mode && nodes.get(up).is_some_and(|n| n["type"] == "transform")) { return Some(up); }
+        // Never hang a node off the end of the stream: insert it just before the output.
+        let (next, id) = graph_edit::add(value, "transform", Some(source))?;
+        *value = next;
+        return Some(id);
+    }
     let id = (1..).map(|n| format!("transform{n}")).find(|id| !nodes.contains_key(id))?;
     nodes.insert(id.clone(), json!({"type":"transform", "inputs":{"geo":source}}));
     if let Some(index) = displayed.iter().position(|shown| shown == source) { displayed[index] = id.clone(); }
@@ -2230,6 +2238,17 @@ fn main() {
 #[cfg(test)]
 mod tools_tests {
     use super::*;
+
+    #[test]
+    fn viewport_move_inserts_transform_before_output_not_after() {
+        let mut value = json!({"version":1,"display":"output1","nodes":{
+            "box1":{"type":"box"},
+            "output1":{"type":"output","inputs":{"geo":"box1"}}}});
+        let id = ensure_transform_target(&mut value, "output1", true, None).unwrap();
+        assert_eq!(value["nodes"][&id]["inputs"]["geo"], "box1");
+        assert_eq!(value["nodes"]["output1"]["inputs"]["geo"], id.as_str());
+        assert_eq!(value["display"], "output1");
+    }
 
     #[test]
     fn sixty_transform_updates_use_param_edits_and_one_undo_step() {

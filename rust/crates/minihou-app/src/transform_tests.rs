@@ -82,7 +82,7 @@ fn gizmo_axis_drag_emits_move_steps_and_finishes() {
     let (_, original_hi, _) = cooked(&worker, &mut state);
     let mut value = transformed.value().clone();
     let target = ensure_transform_target(&mut value, view.selected, true, None).unwrap();
-    assert_eq!(value["nodes"][&target]["inputs"]["geo"], "output1");
+    assert_eq!(value["nodes"][&target]["inputs"]["geo"], "normal1");
     let (name, param) = transform_parameter(&value, &doc, &target, op);
     value["nodes"][&target]["params"] = json!({"group": "", "pivot": [0.,0.,0.]});
     value["nodes"][&target]["params"][name] = param.clone();
@@ -137,7 +137,7 @@ fn viewport_drag_cooks_move_rotate_scale_for_object_and_point_groups() {
                 let (lo, hi, points) = cooked(&worker, &mut state);
                 assert!(points != original_points, "{name} step {index} point_mode={point_mode} did not move");
                 if index > 0 {
-                    assert!(state.stats.cached.contains(&source), "{name} step {index} had no upstream cache hit: {:?}", state.stats);
+                    assert!(state.stats.cached.contains(&"normal1".to_string()), "{name} step {index} had no upstream cache hit: {:?}", state.stats);
                     assert!(state.stats.cooked.contains(&target), "{name} step {index} did not recook target: {:?}", state.stats);
                 }
                 if name == "translate" {
@@ -170,7 +170,7 @@ fn viewport_transform_replaces_only_its_entry_in_a_display_set() {
     send(&worker, &mut state, Edit::Replace(doc.value().clone()));
     let (_, original_hi, _) = cooked(&worker, &mut state);
     let target = ensure_transform_target(&mut value, "output1", true, None).unwrap();
-    assert_eq!(value["display"], json!([target.clone(), "grid1"]));
+    assert_eq!(value["display"], json!(["output1", "grid1"]));
     value["nodes"][&target]["params"] = json!({"translate": [2., 0., 0.]});
     send(&worker, &mut state, Edit::Replace(value));
     send(&worker, &mut state, Edit::Param { node: target, name: "translate".into(), value: json!([2., 0., 0.]) });
@@ -292,7 +292,7 @@ fn repeat_move_three_times_cooks_incrementally_with_single_transform_node() {
         let (_, hi, _) = cooked(&worker, &mut state);
         let expected_delta = 1.0 + (i as f32); // 2.0, 3.0, 4.0
         assert!((hi[0] - original_hi[0] - expected_delta).abs() < 1e-3, "step {i}: hi[0]={} vs expected={}", hi[0], original_hi[0] + expected_delta);
-        assert!(state.stats.cached.contains(&source), "repeat step {i} had no upstream cache hit: {:?}", state.stats);
+        assert!(state.stats.cached.contains(&"normal1".to_string()), "repeat step {i} had no upstream cache hit: {:?}", state.stats);
         assert!(state.stats.cooked.contains(&target), "repeat step {i} did not cook target: {:?}", state.stats);
     }
 
