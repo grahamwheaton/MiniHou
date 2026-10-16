@@ -35,6 +35,7 @@ pub struct CookStats {
     pub cooked: Vec<String>,
     pub cached: Vec<String>,
     pub node_ms: Vec<(String, f64)>,
+    pub param_diags: Vec<crate::channels::ParamDiag>,
 }
 
 struct Entry {
@@ -80,6 +81,11 @@ impl Session {
         &self.graph
     }
 
+    /// Current evaluated values and warnings, without cooking any geometry.
+    pub fn resolved_channels(&self) -> crate::channels::ResolvedChannels {
+        crate::timectx::at(Some(self.time.0),Some(self.time.1),||crate::channels::resolve_graph(&self.graph))
+    }
+
     /// Set (or add) one parameter of a node. Unknown nodes and parameter names are errors here; a value the node refuses is
     /// an error at cook time, as in a graph file.
     pub fn set_param(&mut self, node: &str, name: &str, value: Value) -> Result<()> {
@@ -92,6 +98,34 @@ impl Session {
             return Err(Error::new(format!("node '{node}' ({}): unknown parameter {name:?}", def.node_type)));
         }
         def.params.get_or_insert_with(Default::default).insert(name.to_string(), value);
+        Ok(())
+    }
+
+    pub fn set_channel(&mut self, node: &str, path: &str, expression: Option<String>) -> Result<()> {
+        let def = self.graph.nodes.iter_mut().find(|(n, _)| n == node).map(|(_, d)| d)
+            .ok_or_else(|| Error::new(format!("no such node '{node}'")))?;
+        let spec = nodes::get(&def.node_type).ok_or_else(|| Error::new("unsupported node"))?;
+        let (base, component) = crate::channels::split_component(path);
+        let target = spec.params.iter().find(|p| p.name == base).ok_or_else(|| Error::new(format!("unknown parameter {path:?}")))?;
+        if component.is_some() && !(target.default)().as_array().is_some_and(|a| a.len()==3) {
+            return Err(Error::new(format!("parameter {path:?} has no vector component")));
+        }
+        let channels = def.channels.get_or_insert_with(Default::default);
+        if let Some(expression)=expression {channels.insert(path.into(),Value::String(expression));}
+        else {channels.remove(path);}
+        Ok(())
+    }
+
+    pub fn set_locked_param(&mut self, node: &str, path: &str, locked: bool) -> Result<()> {
+        let def = self.graph.nodes.iter_mut().find(|(n, _)| n == node).map(|(_, d)| d)
+            .ok_or_else(|| Error::new(format!("no such node '{node}'")))?;
+        let spec = nodes::get(&def.node_type).ok_or_else(|| Error::new("unsupported node"))?;
+        let (base, component) = crate::channels::split_component(path);
+        let target = spec.params.iter().find(|p| p.name == base).ok_or_else(|| Error::new(format!("unknown parameter {path:?}")))?;
+        if component.is_some() && !(target.default)().as_array().is_some_and(|a| a.len()==3) {return Err(Error::new("parameter has no vector component"));}
+        let list=def.locked_params.get_or_insert_with(Vec::new);
+        list.retain(|p|p!=path);
+        if locked {list.push(path.into());}
         Ok(())
     }
 
@@ -129,12 +163,13 @@ impl Session {
         };
         let mut keys: HashMap<String, u64> = HashMap::new();
         self.last = CookStats::default();
+        let resolved = crate::channels::resolve_graph(&self.graph);
         let plan = nodes::r#loop::Plan::analyze(&self.graph, &target)?;
         nodes::rbd_engine::check_static_inputs(&self.graph, &target)?;
-        key_of(&self.graph, &self.external_versions, &target, &mut keys, &mut HashSet::new())?;
+        key_of(&self.graph, &resolved, &self.external_versions, &target, &mut keys, &mut HashSet::new())?;
         self.clock += 1;
-        let mut stats = CookStats::default();
-        let mut run = Run { graph: &self.graph, plan: &plan, budget: nodes::r#loop::budget(), external: &self.external, cache: &mut self.cache, bytes: &mut self.bytes, clock: self.clock, keys: &keys, stats: &mut stats };
+        let mut stats = CookStats { param_diags: resolved.diagnostics.clone(), ..Default::default() };
+        let mut run = Run { graph: &self.graph, resolved: &resolved, plan: &plan, budget: nodes::r#loop::budget(), external: &self.external, cache: &mut self.cache, bytes: &mut self.bytes, clock: self.clock, keys: &keys, stats: &mut stats };
         let result = nodes::usd_nodes::with_context(&self.graph, &self.external, || run.get(&target));
         self.last = stats;
         self.evict();
@@ -155,11 +190,11 @@ impl Session {
 
     /// Typed side result for a node's current content key. It is evicted with its geometry.
     pub fn side_payload<T: Any + Send + Sync>(&self, node: &str) -> Option<Arc<T>> {
-        let key = crate::timectx::at(Some(self.time.0), Some(self.time.1), || key_of(&self.graph, &self.external_versions, node, &mut HashMap::new(), &mut HashSet::new())).ok()?;
+        let key = crate::timectx::at(Some(self.time.0), Some(self.time.1), || key_of(&self.graph, &crate::channels::resolve_graph(&self.graph), &self.external_versions, node, &mut HashMap::new(), &mut HashSet::new())).ok()?;
         self.cache.get(&key)?.side.as_ref()?.clone().downcast::<T>().ok()
     }
     pub fn cached_geometry(&self, node: &str) -> Option<Arc<Geometry>> {
-        let key = crate::timectx::at(Some(self.time.0), Some(self.time.1), || key_of(&self.graph, &self.external_versions, node, &mut HashMap::new(), &mut HashSet::new())).ok()?;
+        let key = crate::timectx::at(Some(self.time.0), Some(self.time.1), || key_of(&self.graph, &crate::channels::resolve_graph(&self.graph), &self.external_versions, node, &mut HashMap::new(), &mut HashSet::new())).ok()?;
         Some(self.cache.get(&key)?.geo.clone())
     }
 
@@ -217,7 +252,7 @@ impl Session {
 
 /// The content key of `id`: validates what the cook would (unknown node or type, bad ports, cycles) with the same wording as
 /// [`Graph::cook`].
-fn key_of(graph: &Graph, external_versions: &HashMap<String,u64>, id: &str, keys: &mut HashMap<String, u64>, active: &mut HashSet<String>) -> Result<u64> {
+fn key_of(graph: &Graph, resolved: &crate::channels::ResolvedChannels, external_versions: &HashMap<String,u64>, id: &str, keys: &mut HashMap<String, u64>, active: &mut HashSet<String>) -> Result<u64> {
     if let Some(k) = keys.get(id) {
         return Ok(*k);
     }
@@ -228,6 +263,7 @@ fn key_of(graph: &Graph, external_versions: &HashMap<String,u64>, id: &str, keys
     let spec = nodes::get(&def.node_type).ok_or_else(|| {
         Error::new(format!("node '{id}': node type '{}' is not in the Rust backend yet", def.node_type))
     })?;
+    let values = resolved.params.get(id).or(def.params.as_ref());
     for (port, _) in &def.inputs {
         if !spec.inputs.iter().any(|i| i.name == port) {
             return Err(Error::new(format!("node '{id}': '{}' has no input '{port}'", def.node_type)));
@@ -237,13 +273,13 @@ fn key_of(graph: &Graph, external_versions: &HashMap<String,u64>, id: &str, keys
     def.node_type.hash(&mut h);
     if def.node_type == "usd_export" {
         nodes::usd_nodes::exports_suppressed().hash(&mut h);
-        let p = Params::resolve(spec.params, def.params.as_ref())?;
+        let p = Params::resolve(spec.params, values)?;
         if let Ok(path) = nodes::usd_nodes::export_target(&p) {
             if let Ok(meta) = std::fs::metadata(path) { meta.len().hash(&mut h); meta.modified().ok().hash(&mut h); }
         }
     }
     if def.node_type == "usd_import" || def.node_type == "image_file" {
-        let p = Params::resolve(spec.params, def.params.as_ref())?;
+        let p = Params::resolve(spec.params, values)?;
         let path = crate::usd_io::resolve_path(&p.s("file")?);
         path.hash(&mut h);
         if let Ok(meta) = std::fs::metadata(path) { meta.len().hash(&mut h); meta.modified().ok().hash(&mut h); }
@@ -252,18 +288,18 @@ fn key_of(graph: &Graph, external_versions: &HashMap<String,u64>, id: &str, keys
         nodes::copy_limit_bytes().hash(&mut h);
     }
     let binding=match def.node_type.as_str() {
-        "blender_object" => Some(format!("object:{}",def.params.as_ref().and_then(|p|p.get("object")).and_then(Value::as_str).unwrap_or(""))),
-        "blender_image" => Some(format!("image:{}",def.params.as_ref().and_then(|p|p.get("image")).and_then(Value::as_str).unwrap_or(""))),
-        "object_input" => Some(nodes::blender_input::binding_key(id, &Params::resolve(spec.params,def.params.as_ref())?)?),
+        "blender_object" => Some(format!("object:{}",values.and_then(|p|p.get("object")).and_then(Value::as_str).unwrap_or(""))),
+        "blender_image" => Some(format!("image:{}",values.and_then(|p|p.get("image")).and_then(Value::as_str).unwrap_or(""))),
+        "object_input" => Some(nodes::blender_input::binding_key(id, &Params::resolve(spec.params,values)?)?),
         "modifier_input" => Some("modifier_input".into()), _ => None,
     };
     if let Some(binding)=binding { external_versions.get(&binding).hash(&mut h); }
     def.bypass.hash(&mut h);
     // time-dependent nodes (Python's key_extra = timectx.key()) recook when the frame changes
-    if nodes::is_time_dependent(&def.node_type, def.params.as_ref()) {
+    if nodes::is_time_dependent(&def.node_type, def.params.as_ref()) || resolved.time_dependent.contains(id) {
         crate::timectx::key().hash(&mut h);
     }
-    match &def.params {
+    match values {
         Some(p) => {
             1u8.hash(&mut h);
             let mut text = String::new();
@@ -280,7 +316,7 @@ fn key_of(graph: &Graph, external_versions: &HashMap<String,u64>, id: &str, keys
         port.name.hash(&mut h);
         refs.len().hash(&mut h);
         for r in refs {
-            key_of(graph, external_versions, r, keys, active)?.hash(&mut h);
+            key_of(graph, resolved, external_versions, r, keys, active)?.hash(&mut h);
         }
     }
     active.remove(id);
@@ -316,8 +352,47 @@ fn canonical(v: &Value, out: &mut String) {
     }
 }
 
+#[cfg(test)]
+mod channel_cache_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn driver_change_recooks_only_channel_dependents_without_cooking_driver_geometry() {
+        let mut s=Session::new(Graph::from_value(&json!({"nodes":{
+            "driver":{"type":"box","params":{"size":[2,2,2]}},
+            "dependent":{"type":"box","params":{"size":[1,1,1]},"channels":{"size.x":"ch('../driver/size.x') * 2"}},
+            "unrelated":{"type":"box","params":{"size":[1,1,1]}},
+            "out":{"type":"merge","inputs":{"geos":["dependent","unrelated"]}}
+        },"display":"out"})).unwrap());
+        s.cook(None).unwrap();
+        assert!(!s.last_stats().cooked.contains(&"driver".into()));
+        s.set_param("driver","size",json!([3,2,2])).unwrap();
+        s.cook(None).unwrap();
+        assert!(s.last_stats().cooked.contains(&"dependent".into()));
+        assert!(s.last_stats().cooked.contains(&"out".into()));
+        assert!(!s.last_stats().cooked.contains(&"unrelated".into()));
+        assert!(!s.last_stats().cooked.contains(&"driver".into()));
+    }
+    #[test]
+    fn time_link_invalidates_only_dependent_nodes() {
+        let mut s=Session::new(Graph::from_value(&json!({"nodes":{
+            "dependent":{"type":"box","params":{"size":[1,1,1]},"channels":{"size.x":"@Frame"}},
+            "unrelated":{"type":"box"}
+        }})).unwrap());
+        s.cook(Some("dependent")).unwrap();
+        s.cook(Some("unrelated")).unwrap();
+        s.set_time(2.,24.).unwrap();
+        assert_eq!(s.resolved_channels().params["dependent"]["size"][0].as_f64(),Some(2.));
+        s.cook(Some("dependent")).unwrap();
+        assert_eq!(s.last_stats().cooked,vec!["dependent"]);
+        s.cook(Some("unrelated")).unwrap();
+        assert_eq!(s.last_stats().cached,vec!["unrelated"]);
+    }
+}
+
 struct Run<'a> {
     graph: &'a Graph,
+    resolved: &'a crate::channels::ResolvedChannels,
     plan: &'a nodes::r#loop::Plan,
     budget: nodes::r#loop::Budget,
     external: &'a nodes::blender_input::ExternalInputs,
@@ -340,8 +415,8 @@ impl Run<'_> {
         let spec = nodes::get(&def.node_type).expect("validated by key_of");
         if def.node_type == "loop_end" {
             let t0 = Instant::now();
-            let (plan, graph, budget) = (self.plan, self.graph, self.budget.clone());
-            let (geo,times) = plan.cook_end(graph, id, budget, &mut |src| self.get(src))?;
+            let (plan, graph, budget, resolved) = (self.plan, self.graph, self.budget.clone(), self.resolved);
+            let (geo,times) = plan.cook_end(graph, resolved, id, budget, &mut |src| self.get(src))?;
             let geo = Arc::new(geo);
             for (node,ms) in times { self.stats.cooked.push(node.clone()); self.stats.node_ms.push((node,ms)); }
             let bytes = geometry_bytes(&geo);
@@ -362,18 +437,18 @@ impl Run<'_> {
         }
         let t0 = Instant::now();
         let external = if def.bypass { None } else {
-            let p=Params::resolve(spec.params,def.params.as_ref()).map_err(|e|e.in_node(id,&def.node_type))?;
+            let p=Params::resolve(spec.params,self.resolved.params.get(id).or(def.params.as_ref())).map_err(|e|e.in_node(id,&def.node_type))?;
             if def.node_type == "object_input" { Some(nodes::blender_input::cook_binding(id,&p,self.external)) }
             else { nodes::blender_input::cook_external(&def.node_type,&p,self.external) }
         };
         let geo = Arc::new(match external {
             Some(result)=>result.and_then(|g|g.validate().map(|_|g)).map_err(|e|e.in_node(id,&def.node_type))?,
-            None=>run_node(id, def, spec, &inputs)?,
+            None=>run_node(id, def, spec, &inputs, self.resolved.params.get(id))?,
         });
         let mut side: Option<Arc<dyn Any + Send + Sync>> = None;
         let mut side_bytes = 0;
         if def.node_type == "lod_bake" && !def.bypass {
-            let params = Params::resolve(spec.params, def.params.as_ref()).map_err(|e| e.in_node(id, &def.node_type))?;
+            let params = Params::resolve(spec.params, self.resolved.params.get(id).or(def.params.as_ref())).map_err(|e| e.in_node(id, &def.node_type))?;
             let cluster_size = params.i("cluster_size").map_err(|e| e.in_node(id, &def.node_type))?;
             let min_triangles = params.i("min_triangles").map_err(|e| e.in_node(id, &def.node_type))?;
             let error_px = params.f("error_px").map_err(|e| e.in_node(id, &def.node_type))?;

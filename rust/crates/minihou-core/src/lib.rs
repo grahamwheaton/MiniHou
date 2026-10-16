@@ -12,6 +12,7 @@ pub mod error;
 mod boolean_kernel;
 pub mod geometry;
 pub mod graph;
+pub mod channels;
 pub mod heightfield;
 pub mod lod;
 pub mod math;

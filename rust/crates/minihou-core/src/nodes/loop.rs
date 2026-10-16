@@ -79,16 +79,16 @@ impl Plan {
         Ok(plan)
     }
 
-    pub(crate) fn cook_end(&self, graph: &Graph, id: &str, budget: Budget,
+    pub(crate) fn cook_end(&self, graph: &Graph, resolved: &crate::channels::ResolvedChannels, id: &str, budget: Budget,
         fetch: &mut dyn FnMut(&str) -> Result<Arc<Geometry>>) -> Result<(Geometry,Vec<(String,f64)>)> {
-        let mut cook = Region { graph, plan: self, budget, fetch, frames: Vec::new(), times:Vec::new() };
+        let mut cook = Region { graph, resolved, plan: self, budget, fetch, frames: Vec::new(), times:Vec::new() };
         let geometry=(*cook.end(id)?).clone();Ok((geometry,cook.times))
     }
 }
 
 struct Frame { scope: Vec<String>, done: HashMap<String, Arc<Geometry>> }
 struct Region<'a> {
-    graph: &'a Graph, plan: &'a Plan, budget: Budget,
+    graph: &'a Graph, resolved: &'a crate::channels::ResolvedChannels, plan: &'a Plan, budget: Budget,
     fetch: &'a mut dyn FnMut(&str) -> Result<Arc<Geometry>>, frames: Vec<Frame>, times:Vec<(String,f64)>,
 }
 impl Region<'_> {
@@ -107,7 +107,7 @@ impl Region<'_> {
                 if !port.multi && refs.len() > 1 { return Err(Error::new(format!("node '{id}': input '{}' takes one connection", port.name))); }
                 let mut got = Vec::new(); for src in refs { got.push(self.node(src)?); } inputs.push(got);
             }
-            Arc::new(run_node(id, def, spec, &inputs)?)
+            Arc::new(run_node(id, def, spec, &inputs, self.resolved.params.get(id))?)
         };
         self.times.push((id.into(),start.elapsed().as_secs_f64()*1000.));
         self.frames[slot].done.insert(id.into(), out.clone()); Ok(out)
@@ -118,11 +118,11 @@ impl Region<'_> {
         let source = one(self.graph, &b, "geo")?.to_owned();
         let body = one(self.graph, id, "geo")?.to_owned();
         let initial = self.node(&source)?;
-        let p = Params::resolve(LOOP_END.params, def.params.as_ref()).map_err(|e| e.in_node(id, "loop_end"))?;
+        let p = Params::resolve(LOOP_END.params, self.resolved.params.get(id).or(def.params.as_ref())).map_err(|e| e.in_node(id, "loop_end"))?;
         // Int bounds are enforced here because Params deliberately has no UI range coercion.
         let n = p.f("iterations")?;
         if !n.is_finite() || n.fract() != 0.0 || !(0.0..=1000.0).contains(&n)
-            || def.params.as_ref().and_then(|p| p.get("iterations")).is_some_and(|v| v.is_boolean()) {
+            || self.resolved.params.get(id).or(def.params.as_ref()).and_then(|p| p.get("iterations")).is_some_and(|v| v.is_boolean()) {
             return Err(Error::new("iterations must be an integer from 0 to 1000").in_node(id, "loop_end"));
         }
         let count = n as usize;
@@ -155,6 +155,19 @@ impl Region<'_> {
         "step":{"type":"transform","inputs":{"geo":"begin"},"params":{"translate":[0.5,0,0]}},
         "end":{"type":"loop_end","inputs":{"geo":"step","begin":"begin"},"params":{"iterations":n}}
     }})).unwrap() }
+    #[test] fn channel_link_inside_loop_uses_parameter_dag() {
+        let g=Graph::from_value(&json!({"display":"end","nodes":{
+            "driver":{"type":"box","params":{"size":[2,1,1]}},
+            "p":{"type":"point"},
+            "begin":{"type":"loop_begin","inputs":{"geo":"p"}},
+            "step":{"type":"transform","inputs":{"geo":"begin"},"params":{"translate":[0,0,0]},"channels":{"translate.x":"ch('../driver/size.x')"}},
+            "end":{"type":"loop_end","inputs":{"geo":"step","begin":"begin"},"params":{"iterations":2}}
+        }})).unwrap();
+        assert_eq!(g.cook(None).unwrap().p(),&[4.,0.,0.]);
+        let mut s=crate::session::Session::new(g);
+        assert_eq!(s.cook(None).unwrap().p(),&[4.,0.,0.]);
+        assert!(!s.last_stats().cooked.contains(&"driver".into()));
+    }
     #[test] fn feedback_graph_and_session() {
         for n in [0,1,7] { let g=graph(n); let out=g.cook(None).unwrap(); assert_eq!(out.p(), &[n as f32*0.5,0.,0.]); assert!(!out.detail.contains_key("iteration"));
             let mut s=crate::session::Session::new(g); assert_eq!(s.cook(None).unwrap().p(), out.p());
@@ -175,7 +188,7 @@ impl Region<'_> {
         let out=session.cook(None).unwrap();assert_eq!(out.detail,initial.detail);assert_eq!(out.p()[0],1.);
         assert_eq!(session.last_stats().cooked.iter().filter(|id|id.as_str()=="step").count(),2);
         let g=graph(2);let plan=Plan::analyze(&g,"end").unwrap();let b=budget();b.set(1);
-        assert!(plan.cook_end(&g,"end",b,&mut |src|g.cook(Some(src))).unwrap_err().to_string().contains("budget exceeded"));
+        assert!(plan.cook_end(&g,&crate::channels::resolve_graph(&g),"end",b,&mut |src|g.cook(Some(src))).unwrap_err().to_string().contains("budget exceeded"));
         assert!(g.cook(None).is_ok());
     }
     #[test] fn nested_feedback() {
