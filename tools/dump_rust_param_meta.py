@@ -94,6 +94,16 @@ def meta() -> dict:
         "points": {"kind": "str", "default": "", "doc": "Optional point selection for point extrusion."},
         "direction": {"kind": "vec3", "default": [0.0, 0.0, 0.0], "doc": "Explicit extrusion direction; zero follows face normals."},
     })
+    # Rust Mirror SOP extensions (Houdini parity); the defaults reproduce the Python node.
+    out["mirror"]["distance"]["doc"] = "Consolidate tolerance: how close to the plane a point must be to weld (Houdini's seam tolerance)."
+    out["mirror"].update({
+        "group": {"kind": "str", "default": "", "doc": "Primitives to mirror when Operation is Mirror Selected."},
+        "operation": {"kind": "enum", "default": "mirror_all", "options": ["mirror_all", "mirror_selected"], "doc": "Mirror every primitive, or only the Group."},
+        "offset": {"kind": "float", "default": 0.0, "soft_min": -10.0, "soft_max": 10.0, "doc": "Houdini's Distance: moves the plane along the direction."},
+        "reverse": {"kind": "bool", "default": False, "doc": "Flip the plane direction: keep (with Cut) and mirror the other side."},
+        "cut": {"kind": "bool", "default": False, "doc": "Bisect first: remove geometry behind the plane so only the kept side is mirrored (Blender-style)."},
+        "unshared_only": {"kind": "bool", "default": False, "enabled_if": {"consolidate_seam": True}, "doc": "Only consolidate points on unshared (boundary) edges lying in the plane."},
+    })
     # Rust-only nodes (no Python counterpart to introspect)
     out["lod_bake"] = {
         "cluster_size": {"default": 128, "doc": "Maximum triangles per cluster (16 to 128)", "kind": "int", "min": 16, "max": 128},

@@ -138,6 +138,9 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
                         if active == 0 && matches!(tool.node_type, "line" | "circle" | "curve") {
                             let mode = match tool.node_type { "line" => super::sketch::SketchMode::Line, "circle" => super::sketch::SketchMode::Circle, _ => super::sketch::SketchMode::Pen };
                             out.push(UiAction::StartSketch(mode));
+                        } else if tool.node_type == "mirror" {
+                            // The Mirror button starts the interactive tool (axis cubes + plane), like Alt+M.
+                            out.push(UiAction::Command("mirror_tool".into()));
                         } else { out.push(UiAction::AddNode { node_type: tool.node_type.to_owned(), after: Some(v.selected.to_owned()) }); }
                     }
                 }

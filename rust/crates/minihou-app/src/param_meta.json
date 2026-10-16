@@ -3431,12 +3431,22 @@
    "doc": "Weld mirrored points that lie on the plane to the originals",
    "kind": "bool"
   },
+  "cut": {
+   "default": false,
+   "doc": "Bisect first: remove geometry behind the plane so only the kept side is mirrored (Blender-style).",
+   "kind": "bool"
+  },
   "distance": {
    "default": 0.001,
-   "doc": "How close to the plane a point must be to weld",
+   "doc": "Consolidate tolerance: how close to the plane a point must be to weld (Houdini's seam tolerance).",
    "kind": "float",
    "min": 0.0,
    "soft_max": 0.1
+  },
+  "group": {
+   "default": "",
+   "doc": "Primitives to mirror when Operation is Mirror Selected.",
+   "kind": "str"
   },
   "keep_original": {
    "default": true,
@@ -3451,6 +3461,22 @@
    ],
    "doc": "Normal of the mirror plane (default: mirror across X = 0)",
    "kind": "vec3"
+  },
+  "offset": {
+   "default": 0.0,
+   "doc": "Houdini's Distance: moves the plane along the direction.",
+   "kind": "float",
+   "soft_max": 10.0,
+   "soft_min": -10.0
+  },
+  "operation": {
+   "default": "mirror_all",
+   "doc": "Mirror every primitive, or only the Group.",
+   "kind": "enum",
+   "options": [
+    "mirror_all",
+    "mirror_selected"
+   ]
   },
   "origin": {
    "default": [
@@ -3490,6 +3516,19 @@
    "default": "seampoints",
    "doc": "Name of the seam points group",
    "kind": "str"
+  },
+  "reverse": {
+   "default": false,
+   "doc": "Flip the plane direction: keep (with Cut) and mirror the other side.",
+   "kind": "bool"
+  },
+  "unshared_only": {
+   "default": false,
+   "doc": "Only consolidate points on unshared (boundary) edges lying in the plane.",
+   "enabled_if": {
+    "consolidate_seam": true
+   },
+   "kind": "bool"
   }
  },
  "modifier_input": {

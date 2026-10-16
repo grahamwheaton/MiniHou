@@ -311,6 +311,7 @@ struct App {
     transform_orientation: Option<ui::Orientation>,
     modal: Option<Modal>,
     model_modal: Option<(ModelState, Document, String, String)>,
+    mirror: Option<ui::mirror_tool::Session>,
     pushpull_pick: bool,
     pub last_operator: Option<LastOperator>,
     last_edit_selection: ui::SelectionMode, params_open: bool, object_hidden: bool,
@@ -320,6 +321,7 @@ impl App {
     fn finish_for_selection(&mut self, ctx: &egui::Context) {
         if let Some(modal) = self.modal.take() { self.finish_modal(modal); }
         self.finish_model_modal();
+        self.finish_mirror();
         ui::transform_gizmo::finish_input(ctx);
         ui::prim_handles::finish_input(ctx);
         ui::sketch::cancel(ctx);
@@ -393,7 +395,7 @@ impl App {
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),link:None,blender_job:None,
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
             display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
-            clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,model_modal:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
+            clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
             last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false };
         app.prefs = Preferences::load();
         app.mode=Mode::parse(&app.prefs.viewport.default_shading);
@@ -767,6 +769,148 @@ impl App {
         self.transform_delta = None;
         self.transform_pivot = None;
         self.transform_orientation = None;
+    }
+    /// Alt+M: start the Mirror tool on the selected node (or adopt a selected mirror node). See ui/mirror_tool.rs.
+    fn start_mirror(&mut self, ctx: &egui::Context) {
+        use ui::mirror_tool as mt;
+        if self.modal.is_some() || self.model_modal.is_some() || self.mirror.is_some() { return; }
+        if self.scene.is_none() { self.file_status = "Wait for the mesh to cook".into(); return; }
+        self.finish_for_selection(ctx);
+        let Some(scene) = self.scene.as_ref() else { return; };
+        let positions = scene.positions();
+        // The active object's points when one is selected among several displayed objects, else every pickable point.
+        let owner = self.active_object().map(str::to_owned);
+        let ranges: Vec<_> = self.display_ranges.iter().filter(|(o, _)| owner.as_deref().is_none_or(|w| w == o)).map(|r| r.1.clone()).collect();
+        let point = |i: usize| [positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]];
+        let in_object = |i: u32| ranges.is_empty() || ranges.iter().any(|r| r.contains(&i));
+        let ids: Vec<usize> = (0..positions.len() / 3).filter(|&i| in_object(i as u32)
+            && point_pickable(self.editor_state.object_visibility, &self.display_ranges, &self.selected_set, i as u32)).collect();
+        let Some(bounds) = mt::Bounds::of(ids.iter().map(|&i| point(i))).or_else(|| mt::Bounds::of((0..positions.len() / 3).map(point))) else {
+            self.file_status = "Nothing to mirror".into(); return;
+        };
+        // Edit mode with selected faces: Mirror Selected on those primitives.
+        let extra = if self.editor_state.selection != ui::SelectionMode::Object && !self.selection.tris.is_empty() {
+            let faces = element_select::cached(&self.elem_topo, scene).polys_of(&self.selection.tris);
+            json!({"operation": "mirror_selected", "group": group_text(&faces)})
+        } else { json!({}) };
+        let wire: Vec<_> = scene.edge_indices().chunks_exact(2).filter(|e| in_object(e[0])).take(mt::WIRE_LIMIT)
+            .map(|e| (point(e[0] as usize), point(e[1] as usize))).collect();
+        let source = if self.selected.is_empty() { self.display.clone() } else { self.selected.clone() };
+        self.editor.history.finish(&self.editor.doc);
+        let mut session = mt::Session::new(self.editor.doc.clone(), self.selected.clone(), source.clone(), bounds, extra);
+        session.wire = wire;
+        if self.editor.doc.value()["nodes"][&source]["type"] == "mirror" {
+            let plane = mt::Plane::read(&self.editor.doc.value()["nodes"][&source]["params"]);
+            session.nodes.push((mt::dominant_axis(plane.normal), source.clone()));
+            session.active = Some(source);
+        }
+        self.mirror = Some(session);
+    }
+    fn mirror_select(&mut self, id: Option<String>) {
+        let Some(s) = self.mirror.as_mut() else { return; };
+        s.active = id.clone();
+        let id = id.unwrap_or_else(|| s.previous.clone());
+        self.selected = id.clone(); self.selected_set = std::collections::BTreeSet::from([id]);
+        self.display = Graph::from_value(self.editor.doc.value()).ok().and_then(|g| g.main_output().ok()).unwrap_or_else(|| self.display.clone());
+    }
+    fn mirror_replace(&mut self, doc: Document) {
+        self.editor.doc = doc;
+        self.send(Edit::Replace(self.editor.doc.value().clone()));
+    }
+    fn mirror_axis(&mut self, cube: ui::mirror_tool::Cube, world_origin: bool) {
+        use ui::mirror_tool as mt;
+        let Some(s) = self.mirror.as_mut() else { return; };
+        let origin = if world_origin { [0.; 3] } else { s.bounds.center() };
+        let (source, extra) = (s.source.clone(), s.extra.clone());
+        let Some((doc, click)) = mt::click_axis(&self.editor.doc, &mut s.nodes, &source, cube, origin, &extra) else {
+            self.file_status = "Could not add a mirror node".into(); return;
+        };
+        let last = s.nodes.last().map(|n| n.1.clone());
+        self.mirror_replace(doc);
+        let active = match click { mt::Click::Added(id) | mt::Click::Flipped(id) => Some(id), mt::Click::Removed(_) => last };
+        self.mirror_select(active);
+    }
+    fn mirror_set_plane(&mut self, plane: ui::mirror_tool::Plane) {
+        use ui::mirror_tool as mt;
+        let Some(s) = self.mirror.as_mut() else { return; };
+        let id = match s.active.clone() {
+            Some(id) => id,
+            None => {
+                // A drawn plane before any cube click creates the first node.
+                let after = s.source.clone();
+                let Some((mut graph, id)) = graph_edit::add(self.editor.doc.value(), "mirror", Some(&after)) else { return; };
+                let mut params = json!({"cut": true});
+                for (k, v) in s.extra.as_object().cloned().unwrap_or_default() { params[k] = v; }
+                graph["nodes"][&id]["params"] = params;
+                let Ok(doc) = graph_edit::validated(graph) else { return; };
+                s.nodes.push((mt::dominant_axis(plane.effective().1), id.clone()));
+                self.mirror_replace(doc);
+                self.mirror_select(Some(id.clone()));
+                id
+            }
+        };
+        // Coalesced: only changed values are sent to the cook worker.
+        for (name, value) in plane.params() {
+            if self.editor.doc.value()["nodes"][&id]["params"][name] != value {
+                let edit = Edit::Param { node: id.clone(), name: name.into(), value };
+                if self.editor.doc.edit(&edit).is_ok() { self.send(edit); }
+            }
+        }
+    }
+    fn finish_mirror(&mut self) {
+        if let Some(s) = self.mirror.take() {
+            self.editor.history.drop_pending();
+            self.editor.history.record(s.before, &self.editor.doc);
+        }
+    }
+    fn cancel_mirror(&mut self) {
+        if let Some(s) = self.mirror.take() {
+            self.editor.history.drop_pending();
+            self.editor.doc = s.before;
+            self.selected = s.previous.clone(); self.selected_set = std::collections::BTreeSet::from([s.previous]);
+            self.display = Graph::from_value(self.editor.doc.value()).ok().and_then(|g| g.main_output().ok()).unwrap_or_default();
+            self.send(Edit::Replace(self.editor.doc.value().clone()));
+        }
+    }
+    fn update_mirror(&mut self, ctx: &egui::Context) {
+        use ui::mirror_tool as mt;
+        if self.mirror.is_none() { return; }
+        let rect = self.last_viewport;
+        let typing = ctx.wants_keyboard_input();
+        let popup = ui::viewport_ui::popup_open(ctx);
+        let input = ctx.input(|i| mt::Input {
+            pointer: i.pointer.hover_pos(), pressed: i.pointer.primary_pressed(), down: i.pointer.primary_down(),
+            released: i.pointer.primary_released(),
+            secondary: i.pointer.secondary_pressed() && i.pointer.hover_pos().is_some_and(|p| rect.contains(p)),
+            keys: if typing { Vec::new() } else { i.events.iter().filter_map(|e| match e { egui::Event::Key { key, pressed: true, repeat: false, .. } => Some(*key), _ => None }).collect() },
+            shift: i.modifiers.shift, alt: i.modifiers.alt,
+            in_viewport: i.pointer.hover_pos().is_some_and(|p| rect.contains(p)) && !popup,
+        });
+        let camera = self.camera_info();
+        let plane = self.mirror.as_ref().and_then(|s| s.active.as_ref()).map(|id| mt::Plane::read(&self.editor.doc.value()["nodes"][id]["params"]));
+        let outs = {
+            let (scene, visibility, ranges, selected) = (self.scene.as_ref(), self.editor_state.object_visibility, &self.display_ranges, &self.selected_set);
+            let pick = |p: egui::Pos2| -> Option<([f32; 3], [f32; 3])> {
+                let scene = scene?;
+                let (o, d) = ui::transform_gizmo::ray(camera, rect, p);
+                let hit = pick_displayed(scene, o, d, visibility, ranges, selected)?;
+                let tri = scene.triangle_indices().get(hit.tri as usize * 3..hit.tri as usize * 3 + 3)?;
+                let (a, b, c) = (picking::at(scene.positions(), tri[0]), picking::at(scene.positions(), tri[1]), picking::at(scene.positions(), tri[2]));
+                let u = [0, 1, 2].map(|k| b[k] - a[k]); let v = [0, 1, 2].map(|k| c[k] - a[k]);
+                let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+                Some(([0, 1, 2].map(|k| o[k] + d[k] * hit.t), n))
+            };
+            self.mirror.as_mut().unwrap().step(&input, plane, camera, rect, &pick)
+        };
+        for o in outs {
+            match o {
+                mt::Out::Confirm => { self.finish_mirror(); ctx.data_mut(|d| d.insert_temp(egui::Id::new("modal_confirm_click"), true)); return; }
+                mt::Out::Cancel => { self.cancel_mirror(); return; }
+                mt::Out::Axis { cube, world_origin } => self.mirror_axis(cube, world_origin),
+                mt::Out::Plane(p) => self.mirror_set_plane(p),
+            }
+        }
+        ctx.request_repaint();
     }
     fn start_model_modal(&mut self, ctx: &egui::Context, kind: ModelKind) {
         if self.modal.is_some() || self.model_modal.is_some() || self.scene.is_none() { return; }
@@ -1536,6 +1680,7 @@ impl App {
                     self.dissolve_node(&sel);
                 }
             }
+            "mirror_tool" => self.start_mirror(ctx),
             "knife" | "loop_cut" => {
                 self.finish_for_selection(ctx);
                 self.editor_state.apply(C::Tool(if name == "knife" { ui::Tool::Knife } else { ui::Tool::LoopCut }));
@@ -1937,7 +2082,7 @@ impl eframe::App for App {
                 self.geo_rev = self.cooking.completed;
             }
         }
-        let busy = self.modal.is_some() || self.model_modal.is_some() || self.pushpull_pick || (ui::sketch::active(ctx) || self.editor_state.tool.drawing()) || ui::transform_gizmo::active(ctx) || ui::prim_handles::active(ctx);
+        let busy = self.modal.is_some() || self.model_modal.is_some() || self.mirror.is_some() || self.pushpull_pick || (ui::sketch::active(ctx) || self.editor_state.tool.drawing()) || ui::transform_gizmo::active(ctx) || ui::prim_handles::active(ctx);
         let fly_frame = viewport_input::fly(ctx, self.last_viewport, &mut self.camera,
             self.prefs.viewport.fly_navigation && !busy && !ui::selection_region::active(ctx) && !ctx.wants_keyboard_input());
         if busy && !fly_frame && !ui::sketch::active(ctx) && !self.editor_state.tool.drawing() {
@@ -1950,7 +2095,7 @@ impl eframe::App for App {
             let lasso_press = ctx.input(|i| i.pointer.secondary_pressed() && i.modifiers.ctrl
                 && i.pointer.latest_pos().is_some_and(|p| self.last_viewport.contains(p)
                     && ui::viewport_ui::selection_canvas_contains(self.last_viewport, p)));
-            if !selection_actions.is_empty() || lasso_press || (select_press && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing())) {
+            if !selection_actions.is_empty() || lasso_press || (select_press && (self.modal.is_none() && self.model_modal.is_none() && self.mirror.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing())) {
                 self.finish_for_selection(ctx);
                 self.apply(ctx, selection_actions);
             }
@@ -1979,6 +2124,8 @@ impl eframe::App for App {
         if modal_frame { self.update_modal(ctx); }
         let model_modal_frame=self.model_modal.is_some();
         if model_modal_frame && !started_pushpull { self.update_model_modal(ctx); }
+        let mirror_frame = self.mirror.is_some();
+        if mirror_frame { self.update_mirror(ctx); }
         if (modal_frame || model_modal_frame) && self.modal.is_none() && self.model_modal.is_none() && ctx.input(|i| i.pointer.primary_pressed()) {
             ctx.data_mut(|d| d.insert_temp(egui::Id::new("modal_confirm_click"), true));
         }
@@ -2031,7 +2178,7 @@ impl eframe::App for App {
                 let size = ui.available_size().max(egui::vec2(1., 1.));
                 let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
                 self.last_viewport = rect;
-                let region_frame = if !fly_frame && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) {
+                let region_frame = if !fly_frame && (self.modal.is_none() && self.model_modal.is_none() && self.mirror.is_none()) && !mirror_frame && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) {
                     ui::selection_region::handle(ctx, rect, &v, &mut out)
                 } else { false };
                 let mut delta = ctx.input(|i| i.pointer.delta());
@@ -2220,10 +2367,10 @@ impl eframe::App for App {
                 }
 
                 self.viewport_hover = response.hovered();
-                if !fly_frame && !region_frame && (self.modal.is_none() && self.model_modal.is_none()) && response.hovered() && !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
+                if !fly_frame && !region_frame && (self.modal.is_none() && self.model_modal.is_none() && self.mirror.is_none()) && response.hovered() && !ctx.wants_keyboard_input() && ctx.input(|i| i.key_pressed(egui::Key::Tab)) {
                     out.push(UiAction::Command(if self.editor_state.selection != ui::SelectionMode::Object { "toggle_edit".into() } else { "add_menu".into() }));
                 }
-                if !fly_frame && !region_frame && !model_modal_frame && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::transform_gizmo::hit(rect, &v, p)) && (self.editor_state.tool == ui::Tool::Select || (self.editor_state.selection == ui::SelectionMode::Object && !matches!(self.editor_state.tool, ui::Tool::Cursor | ui::Tool::Measure | ui::Tool::Line | ui::Tool::Polyline | ui::Tool::Polygon | ui::Tool::Rectangle | ui::Tool::Circle | ui::Tool::Knife | ui::Tool::LoopCut))) {
+                if !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::transform_gizmo::hit(rect, &v, p)) && (self.editor_state.tool == ui::Tool::Select || (self.editor_state.selection == ui::SelectionMode::Object && !matches!(self.editor_state.tool, ui::Tool::Cursor | ui::Tool::Measure | ui::Tool::Line | ui::Tool::Polyline | ui::Tool::Polygon | ui::Tool::Rectangle | ui::Tool::Circle | ui::Tool::Knife | ui::Tool::LoopCut))) {
                     if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {
                         let (nx, ny) = (((at.x - rect.left()) / rect.width()) * 2. - 1., 1. - ((at.y - rect.top()) / rect.height()) * 2.);
                         let (o, d) = self.camera.ray(nx, ny, rect.width() / rect.height());
@@ -2259,7 +2406,7 @@ impl eframe::App for App {
                 }
                 let shift_rmb = response.clicked_by(egui::PointerButton::Secondary) && ctx.input(|i| i.modifiers.shift);
                 let cursor_tool_click = response.clicked_by(egui::PointerButton::Primary) && self.editor_state.tool == ui::Tool::Cursor;
-                if !fly_frame && !region_frame && !model_modal_frame && (shift_rmb || cursor_tool_click) && (self.modal.is_none() && self.model_modal.is_none()) {
+                if !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && (shift_rmb || cursor_tool_click) && (self.modal.is_none() && self.model_modal.is_none()) {
                     if let Some(at) = response.interact_pointer_pos() {
                         let (o, d) = ui::transform_gizmo::ray(v.camera, rect, at);
                         let (mesh_p, mesh_tri) = self.scene.as_ref().map(|s| (s.positions(), s.triangle_indices())).unzip();
@@ -2325,7 +2472,11 @@ impl eframe::App for App {
                     }
                 }
                 ui::transform_gizmo::cursor(ui, rect, &v);
-                if let Some((state,_,_,_))=&self.model_modal {
+                if let Some(s)=&self.mirror {
+                    let plane=s.active.as_ref().map(|id| ui::mirror_tool::Plane::read(&self.editor.doc.value()["nodes"][id]["params"]));
+                    ui::mirror_tool::paint(ui,rect,v.camera,s,plane);
+                    ui::viewport_ui::modal_status(ui,rect,&s.status());
+                } else if let Some((state,_,_,_))=&self.model_modal {
                     ui::viewport_ui::modal_status(ui,rect,&state.status());
                 } else if let Some(modal)=&self.modal {
                     ui::transform_overlay::show(ui,rect,&v,modal);
@@ -2361,7 +2512,7 @@ impl eframe::App for App {
         if ctx.input(|i| i.pointer.primary_released()) {
             ctx.data_mut(|d| d.remove::<bool>(egui::Id::new("modal_confirm_click")));
         }
-        if self.modal.is_none() && self.model_modal.is_none() && !ctx.input(|i| i.pointer.primary_down()) { self.editor.history.finish(&self.editor.doc); }
+        if self.modal.is_none() && self.model_modal.is_none() && self.mirror.is_none() && !ctx.input(|i| i.pointer.primary_down()) { self.editor.history.finish(&self.editor.doc); }
         self.apply(ctx, out.0);
         if (self.modal.is_none() && self.model_modal.is_none()) && !ctx.input(|i| i.pointer.primary_down()) { self.finish_transform(); }
         if self.cooking.cooking() { ctx.request_repaint_after(Duration::from_millis(16)); }

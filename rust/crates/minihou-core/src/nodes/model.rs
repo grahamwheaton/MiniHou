@@ -354,8 +354,8 @@ pub const POLYFILL: NodeSpec = NodeSpec {
 pub const MIRROR: NodeSpec = NodeSpec {
     name: "mirror",
     inputs: GEO,
-    params: crate::params!("origin":[0.,0.,0.];"normal":[1.,0.,0.];"keep_original":true;"consolidate_seam":true;"distance":0.001;"outgrp_mirrored":false;"outgrp_mirrored_name":"mirrored";"outgrp_mirroredpoints":false;"outgrp_mirroredpoints_name":"mirroredpoints";"outgrp_seam":false;"outgrp_seam_name":"seampoints"),
-    cook: mirror,
+    params: crate::params!("origin":[0.,0.,0.];"normal":[1.,0.,0.];"keep_original":true;"consolidate_seam":true;"distance":0.001;"outgrp_mirrored":false;"outgrp_mirrored_name":"mirrored";"outgrp_mirroredpoints":false;"outgrp_mirroredpoints_name":"mirroredpoints";"outgrp_seam":false;"outgrp_seam_name":"seampoints";"group":"";"operation":"mirror_all";"offset":0.0;"reverse":false;"cut":false;"unshared_only":false),
+    cook: super::mirror::mirror,
 };
 pub const CLIP: NodeSpec = NodeSpec {
     name: "clip",
@@ -666,112 +666,6 @@ fn polyfill(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         )?;
     }
     Ok(out)
-}
-fn reflect(t: &AttrTable, n: [f64; 3]) -> AttrTable {
-    let mut out = t.clone();
-    if let Some(a) = t.get("N") {
-        if a.width == 3 {
-            if let AttrData::F32(v) = &a.data {
-                let b = v
-                    .chunks_exact(3)
-                    .flat_map(|q| {
-                        let q = [q[0] as f64, q[1] as f64, q[2] as f64];
-                        sub(q, mul(n, 2. * dot(q, n))).map(|x| x as f32)
-                    })
-                    .collect();
-                out.insert("N".into(), Arc::new(Attr::f32(3, b)));
-            }
-        }
-    }
-    out
-}
-fn mirror(inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    let g = MIRROR.one(inputs, 0)?;
-    let raw = p.v3("normal")?;
-    let n = mul(raw, 1. / len(raw).max(1e-12));
-    let o = p.v3("origin")?;
-    let pos = positions(&g);
-    let d: Vec<_> = pos.iter().map(|&q| dot(sub(q, o), n)).collect();
-    let mut mp = reflect(&g.point, n);
-    mp.insert(
-        "P".into(),
-        Arc::new(Attr::f32(
-            3,
-            pos.iter()
-                .zip(&d)
-                .flat_map(|(&q, &d)| sub(q, mul(n, 2. * d)).map(|x| x as f32))
-                .collect(),
-        )),
-    );
-    let rev: Vec<_> = (0..g.nprims()).flat_map(|i| range(&g, i).rev()).collect();
-    let mv = gather(&reflect(&g.vertex, n), &rev);
-    let mpr = reflect(&g.prim, n);
-    let keep = p.b("keep_original")?;
-    let consolidate = p.b("consolidate_seam")?;
-    let distance = p.f("distance")?;
-    let seam: Vec<_> = d
-        .iter()
-        .map(|d| keep && consolidate && d.abs() <= distance)
-        .collect();
-    let mut sizes: Vec<_> = (0..g.nprims()).map(|i| range(&g, i).len()).collect();
-    let mut vp = Vec::new();
-    if keep {
-        vp.extend(&g.topology.vertex_point);
-        sizes.extend(sizes.clone());
-    }
-    vp.extend(rev.iter().map(|&v| {
-        let q = g.topology.vertex_point[v] as usize;
-        if !keep || seam[q] {
-            q as i32
-        } else {
-            (q + g.npoints) as i32
-        }
-    }));
-    let closed = g.topology.closed.as_ref().map(|c| {
-        if keep {
-            c.iter().chain(c).copied().collect()
-        } else {
-            c.clone()
-        }
-    });
-    let mut out = make(
-        if keep { concat(&g.point, &mp) } else { mp },
-        vp,
-        &sizes,
-        if keep { concat(&g.vertex, &mv) } else { mv },
-        if keep { concat(&g.prim, &mpr) } else { mpr },
-        g.detail.clone(),
-        closed,
-    )?;
-    outgroup(
-        &mut out,
-        p,
-        "mirrored",
-        "prim",
-        &(0..sizes.len())
-            .map(|i| !keep || i >= g.nprims())
-            .collect::<Vec<_>>(),
-    )?;
-    let np = out.npoints;
-    outgroup(
-        &mut out,
-        p,
-        "mirroredpoints",
-        "point",
-        &(0..np)
-            .map(|i| !keep || i >= g.npoints || seam[i])
-            .collect::<Vec<_>>(),
-    )?;
-    outgroup(
-        &mut out,
-        p,
-        "seam",
-        "point",
-        &(0..np)
-            .map(|i| keep && i < g.npoints && seam[i])
-            .collect::<Vec<_>>(),
-    )?;
-    if keep { compact(out) } else { Ok(out) }
 }
 fn clip(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let g = CLIP.one(inputs, 0)?;

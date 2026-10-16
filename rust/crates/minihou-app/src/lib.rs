@@ -533,6 +533,8 @@ impl History {
             if before.text != doc.text { self.undo.push((before, doc.clone())); }
         }
     }
+    /// Forget an in-progress edit without recording it (a modal tool records its own single step).
+    pub fn drop_pending(&mut self) { self.pending = None; }
     pub fn can_undo(&self) -> bool { !self.undo.is_empty() || self.pending.is_some() }
     pub fn can_redo(&self) -> bool { !self.redo.is_empty() }
     pub fn undo(&mut self, doc: &mut Document) -> Option<Edit> {
