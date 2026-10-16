@@ -772,14 +772,22 @@ impl App {
             }
             if selection.edges.is_empty() { self.file_status="Select edges to bevel".into(); return; }
             json!({"edges":selection.edges.iter().map(|(a,b)|format!("{a}-{b}")).collect::<Vec<_>>().join(" "),"distance":0.,"divisions":1})
-        } else {
-            if kind==ModelKind::Extrude && selection.mode!=ui::SelectionMode::Faces {
+        } else if kind==ModelKind::Extrude && selection.mode!=ui::SelectionMode::Faces {
+            let mut params=match selection.mode {
+                ui::SelectionMode::Edges => json!({"edges":selection.edges.iter().map(|(a,b)|format!("{a}-{b}")).collect::<Vec<_>>().join(" "),"distance":0.}),
+                ui::SelectionMode::Points => json!({"points":group_text(&selection.points),"distance":0.}),
+                _ => unreachable!(),
+            };
+            if selection.is_empty() { self.file_status="Select mesh elements for this tool".into(); return; }
+            {
                 let points=selected_point_ids(&selection,selection.mode,scene.triangle_indices());
                 selection.tris=scene.triangle_indices().chunks_exact(3).enumerate()
                     .filter(|(_,tri)| tri.iter().any(|p| points.contains(p)))
                     .map(|(tri,_)|tri as u32).collect();
-                selection.mode=ui::SelectionMode::Faces;
             }
+            params["group"]=json!("");
+            params
+        } else {
             if selection.tris.is_empty() {
                 self.file_status="Select mesh elements for this tool".into(); return;
             }

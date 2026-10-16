@@ -366,7 +366,7 @@ pub const CLIP: NodeSpec = NodeSpec {
 pub const POLYEXTRUDE: NodeSpec = NodeSpec {
     name: "polyextrude",
     inputs: GEO,
-    params: crate::params!("group":"";"distance":0.5;"direction":[0.,0.,0.];"inset":0.;"mode":"connected";"output_back":false;"outgrp_front":true;"outgrp_front_name":"extrudeFront";"outgrp_back":false;"outgrp_back_name":"extrudeBack";"outgrp_side":true;"outgrp_side_name":"extrudeSide"),
+    params: crate::params!("group":"";"edges":"";"points":"";"distance":0.5;"direction":[0.,0.,0.];"inset":0.;"mode":"connected";"output_back":false;"outgrp_front":true;"outgrp_front_name":"extrudeFront";"outgrp_back":false;"outgrp_back_name":"extrudeBack";"outgrp_side":true;"outgrp_side_name":"extrudeSide"),
     cook: polyextrude,
 };
 fn negate(t: &mut AttrTable, mask: &[bool]) {
@@ -899,6 +899,9 @@ fn clip(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 fn polyextrude(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let g = POLYEXTRUDE.one(inputs, 0)?;
     let direction = p.v3("direction")?;
+    if !p.s("edges")?.is_empty() || !p.s("points")?.is_empty() {
+        return component_extrude(&g, &p.s("edges")?, &p.s("points")?, p.f("distance")?, direction);
+    }
     extrude_with_direction(
         &g,
         &p.s("group")?,
@@ -909,6 +912,73 @@ fn polyextrude(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         Some(p),
         direction,
     )
+}
+fn component_extrude(g: &Geometry, edges: &str, points: &str, distance: f64, direction: [f64; 3]) -> Result<Geometry> {
+    polygons(g, "polyextrude")?;
+    if distance == 0. { return Ok(g.clone()); }
+    let edge_pairs: Vec<(usize,usize)> = edges.split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.is_empty()).map(|s| {
+            let (a,b)=s.split_once('-').ok_or_else(||Error::new("invalid extrusion edge"))?;
+            let a=a.parse::<usize>().map_err(|_|Error::new("invalid extrusion edge"))?;
+            let b=b.parse::<usize>().map_err(|_|Error::new("invalid extrusion edge"))?;
+            Ok((a,b))
+        }).collect::<Result<_>>()?;
+    let point_ids: Vec<usize> = points.split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.is_empty()).map(|s|s.parse::<usize>().map_err(|_|Error::new("invalid extrusion point")))
+        .collect::<Result<_>>()?;
+    if edge_pairs.is_empty() && point_ids.is_empty() { return Ok(g.clone()); }
+    let mut owner=vec![None;g.npoints];
+    let mut normals=vec![[0.;3];g.npoints];
+    let face_normals=normals::prim_normals(g.p(),&g.topology);
+    let mut valid_edges=std::collections::BTreeMap::new();
+    for prim in 0..g.nprims() {
+        let verts: Vec<_>=range(g,prim).collect();
+        for (i,&v) in verts.iter().enumerate() {
+            let a=g.topology.vertex_point[v] as usize;
+            let b=g.topology.vertex_point[verts[(i+1)%verts.len()]] as usize;
+            owner[a]=Some((v,prim));
+            normals[a]=add(normals[a],face_normals[prim]);
+            valid_edges.entry((a.min(b),a.max(b))).or_insert((v,prim));
+        }
+    }
+    let mut selected=std::collections::BTreeSet::new();
+    for &(a,b) in &edge_pairs {
+        if !valid_edges.contains_key(&(a.min(b),a.max(b))) { return Err(Error::new("extrusion edge is not in the source mesh")); }
+        selected.extend([a,b]);
+    }
+    for &p in &point_ids {
+        if owner.get(p).copied().flatten().is_none() { return Err(Error::new("extrusion point is not in the source mesh")); }
+        selected.insert(p);
+    }
+    let selected: Vec<_>=selected.into_iter().collect();
+    let mut map=vec![0usize;g.npoints];
+    for (i,&p) in selected.iter().enumerate() { map[p]=g.npoints+i; }
+    let pos=positions(g);
+    let mut outp=g.p().to_vec();
+    for &p in &selected {
+        let normal=if len(direction)>0. { direction } else { unit32(normals[p]) };
+        outp.extend(add(pos[p],mul(normal,distance)).map(|x|x as f32));
+    }
+    let mut point=concat(&g.point,&gather(&g.point,&selected));
+    point.insert("P".into(),Arc::new(Attr::f32(3,outp)));
+    let mut vp=g.topology.vertex_point.clone();
+    let mut sizes: Vec<_>=(0..g.nprims()).map(|i|range(g,i).len()).collect();
+    let mut vs: Vec<_>=(0..g.nvertices()).collect();
+    let mut ps: Vec<_>=(0..g.nprims()).collect();
+    let mut closed=g.topology.closed.clone().unwrap_or_else(||vec![true;g.nprims()]);
+    for &(a,b) in &edge_pairs {
+        let (v,prim)=valid_edges[&(a.min(b),a.max(b))];
+        vp.extend([a as i32,b as i32,map[b] as i32,map[a] as i32]);
+        vs.extend([v,v,v,v]); ps.push(prim); sizes.push(4); closed.push(true);
+    }
+    for &p in &point_ids {
+        let (v,prim)=owner[p].unwrap();
+        vp.extend([p as i32,map[p] as i32]);
+        vs.extend([v,v]); ps.push(prim); sizes.push(2); closed.push(false);
+    }
+    let mut out=make(point,vp,&sizes,gather(&g.vertex,&vs),gather(&g.prim,&ps),g.detail.clone(),Some(closed))?;
+    out.point.remove("N");
+    Ok(out)
 }
 pub(super) fn extrude(
     g: &Geometry,
@@ -1140,6 +1210,20 @@ mod tests {
         assert_eq!(normal.nprims(),axis.nprims());
         assert!(axis.p().chunks_exact(3).any(|p|p[0]>2.9));
         assert_ne!(normal.p(),axis.p());
+    }
+    #[test]
+    fn polyextrude_edge_and_point_previews_keep_original_geometry() {
+        let g=quad();
+        let edge=cook(&POLYEXTRUDE,g.clone(),json!({"edges":"0-1","distance":1.}));
+        assert_eq!(edge.nprims(),g.nprims()+1);
+        assert_eq!(edge.npoints,g.npoints+2);
+        assert_eq!(edge.topology.vertex_point[0..4],g.topology.vertex_point[0..4]);
+        assert!(edge.p().chunks_exact(3).any(|p|p[2]>0.9));
+        let point=cook(&POLYEXTRUDE,g.clone(),json!({"points":"0","distance":1.}));
+        assert_eq!(point.nprims(),g.nprims()+1);
+        assert_eq!(point.npoints,g.npoints+1);
+        assert_eq!(point.topology.closed.as_ref().unwrap(),&vec![true,false]);
+        point.validate().unwrap();
     }
     #[test]
     fn clip_shared_intersections_and_int_sources() {
