@@ -41,6 +41,7 @@ fn cap_plane(g:Geometry,o:[f64;3],n:[f64;3],eps:f64)->Result<Geometry>{
     let mut vp=g.topology.vertex_point.clone();vp.extend(loops.iter().flatten().map(|&v|v as i32));
     let count:usize=loops.iter().map(Vec::len).sum();
     let mut out=make(g.point.clone(),vp,&sizes,pad(&g.vertex,count),pad(&g.prim,loops.len()),g.detail.clone(),None)?;
+    super::material_tables::neutral_new_faces(&mut out,g.nprims(),g.nvertices());
     let mut mask=member(&g,INSIDE);mask.extend(std::iter::repeat_n(true,loops.len()));write_group(&mut out,"prim",INSIDE,&mask)?;Ok(out)
 }
 fn cells(g:&Geometry,s:&[[f64;3]],gap:f64,cap:bool,eps:f64,prior:&[bool])->Result<Vec<Cell>>{
