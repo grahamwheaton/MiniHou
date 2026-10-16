@@ -9,6 +9,7 @@ pub mod http_geometry;
 pub mod transform_math;
 pub mod noodle_hit;
 pub mod graph_edit;
+pub mod modifier_inputs;
 use minihou_core::{session::Session, lod::ClusterLod, Graph};
 use serde_json::{json, Value};
 use std::{collections::HashMap, ops::Range, path::Path, time::Instant};
@@ -18,7 +19,7 @@ pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + S
 pub mod units;
 pub use units::{LengthUnit, UnitSettings};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParamKind { Bool, Integer, Float, String, Vec3, Unsupported }
 pub fn param_kind(default: &Value) -> ParamKind {
     match default {
@@ -40,6 +41,7 @@ impl Document {
         let text = text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned();
         let value = serde_json::from_str(&text)?;
         Graph::from_value(&value)?;
+        modifier_inputs::validate_document(&value)?;
         Ok(Self { value, text })
     }
     pub fn open(path: &Path) -> Result<Self> { Self::parse(std::fs::read_to_string(path)?) }
@@ -417,6 +419,8 @@ pub enum Edit {
     Display(String),
     Replace(Value),
     Exposed(Vec<Value>),
+    ModifierInputs { node: String, inputs: Vec<Value> },
+    ModifierInputValue { node: String, id: String, value: Value },
     External { name: String, input: minihou_core::nodes::blender_input::ExternalInput },
     /// Timeline: the frame and fps cooks run at (`@Frame`/`@Time`, solvers). Not a document edit.
     Time { frame: f64, fps: f64 },
@@ -441,6 +445,46 @@ impl Document {
             }
             Edit::Display(node) => self.set_display(node)?,
             Edit::Exposed(entries) => self.set(&["exposed"], json!(entries)),
+            Edit::ModifierInputs { node, inputs } => {
+                if self.value["nodes"][node]["type"] != "modifier_input" { return Err("expected modifier_input node".into()); }
+                modifier_inputs::validate(inputs)?;
+                let mut check = self.value.clone();
+                check["nodes"][node]["modifier_inputs"] = json!(inputs);
+                modifier_inputs::validate_document(&check)?;
+                let retained: std::collections::HashSet<_> = inputs.iter().filter_map(|p| p["id"].as_str()).collect();
+                let removed: std::collections::HashSet<_> = self.value["nodes"][node]["modifier_inputs"].as_array()
+                    .into_iter().flatten().filter_map(|p| p["id"].as_str())
+                    .filter(|id| !retained.contains(id)).map(str::to_owned).collect();
+                let mut resets = Vec::new();
+                if let Some(nodes) = self.value["nodes"].as_object() {
+                    for (nid, data) in nodes {
+                        if let Some(params) = data["params"].as_object() {
+                            for (name, value) in params {
+                                let link = &value["modifier_input"];
+                                let referenced = link["node"] == *node && link["id"].as_str().is_some_and(|id| removed.contains(id))
+                                    || link.as_str().is_some_and(|id| removed.contains(id));
+                                if referenced {
+                                    let default = data["type"].as_str().and_then(minihou_core::nodes::get)
+                                        .and_then(|s| s.params.iter().find(|p| p.name == name)).map(|p| (p.default)()).unwrap_or(Value::Null);
+                                    resets.push((nid.clone(), name.clone(), default));
+                                }
+                            }
+                        }
+                    }
+                }
+                self.set(&["nodes", node, "modifier_inputs"], json!(inputs));
+                if !removed.is_empty() {
+                    let mut values = self.value["nodes"][node]["input_values"].as_object().cloned().unwrap_or_default();
+                    values.retain(|id, _| retained.contains(id.as_str()));
+                    self.set(&["nodes", node, "input_values"], Value::Object(values));
+                    for (nid, name, value) in resets { self.set(&["nodes", &nid, "params", &name], value); }
+                }
+            }
+            Edit::ModifierInputValue { node, id, value } => {
+                let mut check = self.value.clone();
+                modifier_inputs::set_value(&mut check, node, id, value.clone())?;
+                self.set(&["nodes", node, "input_values", id], value.clone());
+            }
             Edit::External { .. } => return Err("live inputs are not document edits".into()),
             Edit::Time { .. } => return Err("the timeline is not a document edit".into()),
             Edit::Replace(_) => return Err("replace uses document snapshots".into()),
@@ -537,6 +581,16 @@ pub fn cook_batch<T>(session: &mut Session, target: &mut String, requests: Vec<C
                 Edit::External { name, input } => session.set_external(name,input),
                 Edit::Time { frame, fps } => session.set_time(frame, fps)?,
                 Edit::Exposed(_) => {}, // Interface metadata does not change the core graph.
+                Edit::ModifierInputs { node, inputs } => {
+                    let mut value = session.graph().to_value();
+                    value["nodes"][&node]["modifier_inputs"] = json!(inputs);
+                    session.replace_graph(Graph::from_value(&value)?);
+                }
+                Edit::ModifierInputValue { node, id, value } => {
+                    let mut graph = session.graph().to_value();
+                    modifier_inputs::set_value(&mut graph, &node, &id, value)?;
+                    session.replace_graph(Graph::from_value(&graph)?);
+                }
                 Edit::Replace(value) => {
                     let mut graph = Graph::from_value(&value)?;
                     let displayed = display_nodes(&value);
@@ -797,6 +851,12 @@ pub fn link_interface(doc: &Value) -> Value {
         p["value"] = doc["nodes"][node]["params"].get(param).unwrap_or(&default).clone();
         params.push(p);
     }
+    for mut p in modifier_inputs::entries(doc) {
+        let Some(name) = p["name"].as_str().map(str::to_owned) else { continue };
+        if !names.insert(name) { continue; }
+        p["label"] = p["name"].clone();
+        params.push(p);
+    }
     // This is an opaque change token in the addon, not a mandated hashing algorithm.
     let structure: Vec<_> = params.iter().cloned().map(|mut p| { p.as_object_mut().unwrap().remove("value"); p }).collect();
     use std::hash::{Hash, Hasher};
@@ -820,6 +880,16 @@ pub fn snap_float32(value: &Value) -> Value {
 }
 
 pub fn link_param_edit(doc: &Value, message: &Value) -> Result<Edit> {
+    if let Some(name) = message["name"].as_str() {
+        if let Some(entry) = modifier_inputs::entries(doc).into_iter().find(|e| e["name"] == name) {
+            let node = entry["node"].as_str().unwrap().to_owned();
+            let id = entry["id"].as_str().unwrap().to_owned();
+            let value = message.get("value").ok_or("missing value")?.clone();
+            let mut check = doc.clone();
+            modifier_inputs::set_value(&mut check, &node, &id, value.clone())?;
+            return Ok(Edit::ModifierInputValue { node, id, value });
+        }
+    }
     let (node, param) = if let Some(name) = message.get("name") {
         let e = doc["exposed"].as_array().into_iter().flatten()
             .find(|e| &e["name"] == name).ok_or("unknown exposed parameter")?;

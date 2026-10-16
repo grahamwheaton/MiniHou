@@ -68,7 +68,24 @@ impl Graph {
                 }
             }
             let bypass = nd.get("flags").and_then(|f| f.get("bypass")).and_then(Value::as_bool).unwrap_or(false);
-            let params = nd.get("params").and_then(Value::as_object).cloned();
+            let mut params = nd.get("params").and_then(Value::as_object).cloned();
+            if let Some(params) = &mut params {
+                for (param, value) in params {
+                    if let Some(link) = value.as_object().and_then(|o| o.get("modifier_input")) {
+                        let (source, input) = if let Some(s) = link.as_str() {
+                            (None, s)
+                        } else {
+                            (link["node"].as_str(), link["id"].as_str().ok_or_else(|| Error::new(format!("node '{id}' parameter '{param}': modifier input link needs an id")))?)
+                        };
+                        let found = nodes_v.iter().filter(|(name, n)| n["type"] == "modifier_input" && source.is_none_or(|s| s == name.as_str()))
+                            .flat_map(|(_, n)| n["modifier_inputs"].as_array().into_iter().flatten().map(move |entry| (n, entry)))
+                            .find(|(_, entry)| entry["id"] == input || entry["name"] == input)
+                            .ok_or_else(|| Error::new(format!("node '{id}' parameter '{param}': modifier input {input:?} is missing")))?;
+                        let key = found.1["id"].as_str().unwrap_or(input);
+                        *value = found.0["input_values"].get(key).unwrap_or(&found.1["default"]).clone();
+                    }
+                }
+            }
             nodes.push((id.clone(), NodeDef { node_type, inputs, params, bypass }));
         }
         let display = obj.get("display").and_then(|v| v.as_str().or_else(|| v.as_array()?.iter().find_map(Value::as_str))).map(str::to_string);

@@ -82,6 +82,18 @@ def meta() -> dict:
             params[p.name] = d
         out[t] = params
     out["loop_cut"] = out["polysplit"]
+    # modifier_input owns an ordered interface schema rather than fixed node parameters.
+    # Keep this description with the generated native parameter metadata for the editor.
+    out["modifier_input"]["__dynamic_inputs__"] = {
+        "kind": "interface", "doc": "Ordered Blender inputs with stable ids, names, defaults and optional ranges/subtypes.",
+        "types": ["float", "int", "bool", "vector", "color", "rotation", "matrix", "string", "menu",
+                  "object", "collection", "material", "image", "texture", "geometry", "bundle", "closure"],
+    }
+    out["polyextrude"].update({
+        "edges": {"kind": "str", "default": "", "doc": "Optional edge selection for edge extrusion."},
+        "points": {"kind": "str", "default": "", "doc": "Optional point selection for point extrusion."},
+        "direction": {"kind": "vec3", "default": [0.0, 0.0, 0.0], "doc": "Explicit extrusion direction; zero follows face normals."},
+    })
     # Rust-only nodes (no Python counterpart to introspect)
     out["lod_bake"] = {
         "cluster_size": {"default": 128, "doc": "Maximum triangles per cluster (16 to 128)", "kind": "int", "min": 16, "max": 128},

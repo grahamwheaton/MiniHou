@@ -2938,7 +2938,31 @@
    "kind": "str"
   }
  },
- "modifier_input": {},
+ "modifier_input": {
+  "__dynamic_inputs__": {
+   "doc": "Ordered Blender inputs with stable ids, names, defaults and optional ranges/subtypes.",
+   "kind": "interface",
+   "types": [
+    "float",
+    "int",
+    "bool",
+    "vector",
+    "color",
+    "rotation",
+    "matrix",
+    "string",
+    "menu",
+    "object",
+    "collection",
+    "material",
+    "image",
+    "texture",
+    "geometry",
+    "bundle",
+    "closure"
+   ]
+  }
+ },
  "noise": {
   "amplitude": {
    "default": [
@@ -3946,12 +3970,26 @@
   }
  },
  "polyextrude": {
+  "direction": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Explicit extrusion direction; zero follows face normals.",
+   "kind": "vec3"
+  },
   "distance": {
    "default": 0.5,
    "doc": "Along the face normals (negative: inwards)",
    "kind": "float",
    "soft_max": 2.0,
    "soft_min": -2.0
+  },
+  "edges": {
+   "default": "",
+   "doc": "Optional edge selection for edge extrusion.",
+   "kind": "str"
   },
   "group": {
    "default": "",
@@ -4008,6 +4046,11 @@
    "default": false,
    "doc": "Keep the original faces as well (a closed shell)",
    "kind": "bool"
+  },
+  "points": {
+   "default": "",
+   "doc": "Optional point selection for point extrusion.",
+   "kind": "str"
   }
  },
  "polyfill": {

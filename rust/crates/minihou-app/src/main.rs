@@ -433,8 +433,18 @@ impl App {
         }
     }
     fn edit(&mut self, edit: Edit, continuous: bool) {
+        let was_linked = match &edit {
+            Edit::Param { node, name, .. } => self.editor.doc.value()["nodes"][node]["params"][name].get("modifier_input").is_some(),
+            _ => false,
+        };
         match self.editor.history.edit(&mut self.editor.doc, &edit) {
-            Ok(()) => { self.send(edit); if !continuous { self.editor.history.finish(&self.editor.doc); } }
+            Ok(()) => {
+                if matches!(edit, Edit::ModifierInputs { .. } | Edit::ModifierInputValue { .. }) || was_linked
+                    || matches!(&edit, Edit::Param { value, .. } if value.get("modifier_input").is_some()) {
+                    self.send(Edit::Replace(self.editor.doc.value().clone()));
+                } else { self.send(edit); }
+                if !continuous { self.editor.history.finish(&self.editor.doc); }
+            }
             Err(e) => self.file_status = e.to_string(),
         }
     }

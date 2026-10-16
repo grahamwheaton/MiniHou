@@ -10,6 +10,7 @@ struct Entry {
     input: Arrays,
     materials: Value,
     sources: BTreeMap<String, Arc<Geometry>>,
+    source_meta: BTreeMap<String, Value>,
 }
 struct Live {
     graph: Value,
@@ -203,6 +204,7 @@ impl InstanceManager {
                     input: Arrays::new(),
                     materials: Value::Null,
                     sources: BTreeMap::new(),
+                    source_meta: BTreeMap::new(),
                 },
             );
         }
@@ -242,14 +244,20 @@ impl InstanceManager {
             .collect();
         for key in bindings {
             let incoming = feeds.and_then(|s| s.get(&key));
+            let info = h["references"].get(&key).cloned().unwrap_or(Value::Null);
             let unchanged = entry
                 .sources
                 .get(&key)
                 .zip(incoming)
-                .is_some_and(|(a, b)| Arc::ptr_eq(a, b));
+                .is_some_and(|(a, b)| Arc::ptr_eq(a, b)) && entry.source_meta.get(&key) == Some(&info);
             if !unchanged {
-                entry.session.set_external(format!("object_input:{key}"),incoming.map_or_else(||ExternalInput::Missing("Choose an object in this modifier's Object input picker in Blender".into()),|g|ExternalInput::Object{geo:g.clone(),matrix:None,info:Value::Null}));
+                let matrix = info["matrix"].as_array().and_then(|a| (a.len() == 16).then(|| {
+                    let values: Vec<_> = a.iter().filter_map(Value::as_f64).collect();
+                    (values.len() == 16).then(|| std::array::from_fn(|i| values[i]))
+                }).flatten());
+                entry.session.set_external(format!("object_input:{key}"),incoming.map_or_else(||ExternalInput::Missing("Choose an object in this modifier's Object input picker in Blender".into()),|g|ExternalInput::Object{geo:g.clone(),matrix,info:info.clone()}));
             }
+            entry.source_meta.insert(key, info);
         }
         entry.sources = feeds.cloned().unwrap_or_default();
         entry.session.set_time(frame, fps)?;
@@ -269,6 +277,7 @@ impl InstanceManager {
             DiffState::default().build(&link_protocol::geometry_arrays(&result), &result, 1, &cook);
         header["type"] = json!("instance_result");
         header["interface"] = link_interface(&graph)["params"].clone();
+        if h["references"].is_object() { header["input_references"] = h["references"].clone(); }
         let sinks: Vec<_> = entry
             .session
             .graph()
