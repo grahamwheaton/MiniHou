@@ -2,6 +2,14 @@
 
 Updated 2026-10-16. This describes the current checkout, including the add-on changes here. The Desktop backup was not changed.
 
+## Dynamic modifier inputs (add-on 0.2.0)
+
+The Rust `modifier_input` node stores ordered `modifier_inputs` definitions (`id`, `name`, `kind`, `default`, optional `min`, `max`, `subtype`, or menu `options`). The native params panel adds them. `link_interface` advertises every definition; `instance_cook` applies per-placement values to `input_values` before graph evaluation. A node parameter can bind to `{"modifier_input":{"node":"input","id":"input_1"}}`; the Rust graph resolves that value during cook, so existing numeric/string node parameters consume it without a new scalar-port evaluator. The add-on maps stable IDs to Blender socket identifiers, preserving modifier values and GN wires through rename/reorder. Removed inputs are removed cleanly. Independent instances keep separate values.
+
+The 0.2.0 bridge lists float, int, bool, vector (translation/xyz/euler/direction), color, rotation, matrix, string, menu, object, collection, material, image, texture, geometry, bundle and closure socket types. `bpy.app.version` and available `bpy.types` guard newer sockets. Object and collection references cross as names; evaluated object meshes travel through `instance_sources`, with names/transforms in `references`. Wired geometry inputs also travel as mesh sources. Existing `object_input` nodes can read an `input:<modifier node>:<stable id>` binding. Material/image/texture references are available as names to string-accepting Rust nodes. Linked bundle/closure values report an unsupported-data error. Computed links for ID/matrix/rotation/menu sockets have not been sampled; unsupported computed links report an error instead of being guessed.
+
+Mocked bpy interface tests and the headless Rust link test cover float, int, bool, vector, color, string and object round trips, independent placement values, and stable socket identifiers on rename/reorder. Actual Blender socket construction, modifier panel behavior, evaluated object/geometry sampling, reference metadata and UI interaction remain unverified without Blender.
+
 ## Implemented contracts
 
 | Add-on path | Rust behavior | Evidence |
@@ -55,6 +63,15 @@ Validation caveat: an initial broad Cargo test run also ran the pre-existing CLI
 - **Side-output diagnostics:** the current `CookResponse` exposes a single aggregate error string for proxy-side extra/sink failures, so the last such error is what the TCP proxy error reports. Valid main/other successful outputs still flow. Instance replies have separate per-node `scene_errors`.
 
 ## Live Blender smoke test to perform later
+
+For the 0.2.0 input feature:
+
+1. Install add-on 0.2.0 in Blender 5.x, connect to the Rust link, select `modifier_input`, and add float, int, bool, vector, color, string, object, plus a second geometry input in the native params panel. Confirm each appears on the Plumbing node and applicable controls on the modifier.
+2. Link float/vector inputs to a Box/Transform parameter in MiniHou; set different values on two placements and cook. Confirm different mesh results and the correct values in the native editor. Pick an object, bind `object_input.binding` to `input:<modifier node>:<stable id>`, and confirm its evaluated mesh arrives.
+3. Rename and reorder inputs, then remove one. Confirm retained sockets keep their Blender identifiers, links, modifier values and animation, while the removed socket/wires disappear cleanly; save/reopen the `.blend` and repeat.
+4. Try color, string, rotation, matrix, menu, material, image, texture, geometry, bundle and closure on Blender 5.x. Check supported literal/reference values round-trip, wired geometry cooks, and unsupported linked/computed combinations display an error while the last cache remains visible.
+
+Previous broader link smoke plan:
 
 1. Install the current checkout add-on, connect to the Rust app, select a Box size parameter and click Expose. Confirm the document's `exposed` list, the proxy modifier's new vector socket, and socket removal when toggled off.
 2. Change that Blender socket and confirm native geometry/value updates; undo/redo in the app and check Blender follows without repeated feedback cooks.

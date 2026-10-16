@@ -62,6 +62,8 @@ There is no engine edge domain: edge attributes are skipped. String/matrix attri
 
 Parameters support unlinked literal values, Value constants, reroutes, Group Input bindings in value mode, and computed Blender node outputs. A computed output is sampled on the placement's wired mesh and must have the same value on every point. Modifier attribute mode is unsupported. Native nodes can still evaluate fields while building the mesh before/between/after MiniHou groups.
 
+The native `modifier_input` node's **Add input** control defines ordered Blender inputs. Each has a stable ID, display name, type and default, with ranges or a subtype where applicable. Rename and reorder retain the underlying Blender socket identifier, links and per-placement values. Use **Link to Blender input** on a compatible MiniHou parameter to bind that parameter to the new input; the saved parameter reference uses the stable ID. Object and collection pickers send names and evaluated object meshes under `input:<node>:<id>` bindings; an `object_input` node can consume that binding. A wired Geometry input sends its mesh under the same binding. IDs for materials, images and textures cross as names, with image size and object transforms in reference metadata. Linked bundle and closure data have no mesh representation and report a clear error.
+
 ## Staging limits
 
 This is not a synchronous Python geometry-node evaluator. Interactive changes propagate through a main-thread timer. Cook explicitly before a still render or save when the latest result matters; animation/background render automation must cook each frame before rendering. The bridge pauses updates during rendering and in edit mode. It does not mutate geometry from a depsgraph callback.
