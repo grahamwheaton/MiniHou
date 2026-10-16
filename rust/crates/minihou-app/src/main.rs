@@ -1872,7 +1872,10 @@ impl eframe::App for App {
                         _ => {}
                     }
                 }
-                if !fly_frame && !region_frame && response.hovered() && self.modal.is_none() && !ui::mesh_cut::captures_wheel(ctx) { self.camera.zoom(ctx.input(|i| i.smooth_scroll_delta.y)); }
+                if !fly_frame && !region_frame && response.hovered() && self.modal.is_none()
+                    && self.editor_state.tool != ui::Tool::LoopCut && !ui::mesh_cut::captures_wheel(ctx) {
+                    self.camera.zoom(ctx.input(|i| i.smooth_scroll_delta.y));
+                }
                 let limit = self.state.device.limits().max_texture_dimension_2d;
                 let pixels = [(size.x * ctx.pixels_per_point()).round() as u32, (size.y * ctx.pixels_per_point()).round() as u32].map(|x| x.clamp(1, limit));
                 if self.target.as_ref().is_none_or(|t| t.size != pixels) {

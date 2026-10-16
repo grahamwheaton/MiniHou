@@ -16,9 +16,24 @@ pub fn ray(camera: CameraInfo, rect: Rect, pos: Pos2) -> ([f32; 3], [f32; 3]) {
     let x = (pos.x - rect.center().x) * 2. / rect.width().max(1.);
     let y = (rect.center().y - pos.y) * 2. / rect.height().max(1.);
     let aspect = rect.width() / rect.height().max(1.);
-    let combine = |base: [f32; 3]| [0, 1, 2].map(|k| base[k] + x * aspect * camera.ray_right[k] + y * camera.ray_up[k]);
-    if camera.ortho { (combine(camera.ray_origin), camera.ray_forward) }
-    else { (camera.ray_origin, normal(combine(camera.ray_forward))) }
+    if camera.ortho {
+        let origin = [0, 1, 2].map(|k| camera.ray_origin[k] + x * aspect * camera.ray_right[k] + y * camera.ray_up[k]);
+        (origin, camera.ray_forward)
+    } else {
+        // CameraInfo stores the difference between the *normalised* corner ray and
+        // the centre ray. Recover its unnormalised camera-plane basis before
+        // interpolation; linear interpolation of unit rays misses off-centre
+        // points, causing edge visibility tests to reject the visible surface.
+        let basis = |delta: [f32; 3]| {
+            let corner = [0, 1, 2].map(|k| camera.ray_forward[k] + delta[k]);
+            let along = dot(corner, camera.ray_forward).max(1e-6);
+            [0, 1, 2].map(|k| (corner[k] - along * camera.ray_forward[k]) / along)
+        };
+        let right = basis(camera.ray_right);
+        let up = basis(camera.ray_up);
+        let dir = [0, 1, 2].map(|k| camera.ray_forward[k] + x * aspect * right[k] + y * up[k]);
+        (camera.ray_origin, normal(dir))
+    }
 }
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 { (0..3).map(|k| a[k] * b[k]).sum() }
 fn normal(a: [f32; 3]) -> [f32; 3] { let n = dot(a, a).sqrt().max(1e-8); a.map(|x| x / n) }

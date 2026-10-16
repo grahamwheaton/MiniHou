@@ -1,7 +1,7 @@
-//! Persistent viewport cut tools. Hover/preview is UI-only; confirmation is one document action.
+//! Viewport cut tools. Hover/preview is UI-only; confirmation is one document action.
 //! Loop Cut ports the pre-rust `loop-tool.js` (see docs/RUST_LOOP_CUT.md): hover previews the quad ring with the node's
-//! own walk (`LoopTopology`), wheel/PageUp/PageDown sets the count, click starts the slide, a second click / Enter /
-//! drag-release commits one `loop_cut` node, RMB during the slide commits centred, Esc cancels the pending cut.
+//! own walk (`LoopTopology`), wheel/PageUp/PageDown/+/- sets the count, click starts the slide, a second click / Enter /
+//! drag-release commits one `polysplit` node, and RMB/Esc cancels the pending cut.
 use super::{transform_gizmo, Actions, CameraInfo, EditorChange, Tool, UiAction, View};
 use crate::picking;
 use eframe::egui::{self, pos2, vec2, FontId, Pos2, Rect, Stroke, Vec2};
@@ -19,6 +19,14 @@ const DRAG_THRESHOLD: f32 = 4.;
 
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 { (0..3).map(|k| a[k] * b[k]).sum() }
 fn lerp3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] { [0, 1, 2].map(|k| a[k] + (b[k] - a[k]) * t) }
+fn edge_world_fraction(camera: CameraInfo, a: [f32; 3], b: [f32; 3], screen_fraction: f32) -> f32 {
+    if camera.ortho { return screen_fraction; }
+    let w = |p: [f32; 3]| camera.projection[3][3] + (0..3).map(|k| camera.projection[k][3] * p[k]).sum::<f32>();
+    let (wa, wb) = (w(a), w(b));
+    let a_weight = (1. - screen_fraction) / wa.max(1e-6);
+    let b_weight = screen_fraction / wb.max(1e-6);
+    b_weight / (a_weight + b_weight).max(1e-6)
+}
 
 #[derive(Clone, Default)]
 struct Mesh {
@@ -68,7 +76,9 @@ impl Mesh {
         }
         cand.sort_by(|x, y| x.0.total_cmp(&y.0));
         cand.into_iter().take(HOVER_CANDIDATES).find(|&(_, (a, b), t)| {
-            (xray || self.visible(camera, rect, lerp3(self.point(a), self.point(b), t))) && !self.loops.ring([(a, b)]).quads.is_empty()
+            let (pa, pb) = (self.point(a), self.point(b));
+            let world_t = edge_world_fraction(camera, pa, pb, t);
+            (xray || self.visible(camera, rect, lerp3(pa, pb, world_t))) && !self.loops.ring([(a, b)]).quads.is_empty()
         }).map(|c| c.1)
     }
     /// World segments of the new edges, computed by the node's own ring walk and fractions.
@@ -118,9 +128,9 @@ struct State {
 fn id() -> egui::Id { egui::Id::new("viewport_mesh_cut") }
 pub fn cancel(ctx: &egui::Context) { ctx.data_mut(|d| d.remove::<State>(id())); }
 pub fn blocks_navigation(ctx: &egui::Context) -> bool { ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| !s.points.is_empty() || s.slide.is_some())) }
-/// Loop Cut owns the wheel (cut count) while it previews an edge or slides; otherwise the wheel still zooms.
+/// Loop Cut owns the wheel throughout its modal session, including between edges.
 pub fn captures_wheel(ctx: &egui::Context) -> bool {
-    ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| s.tool == Some(Tool::LoopCut) && (s.hover.is_some() || s.slide.is_some())))
+    ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| s.tool == Some(Tool::LoopCut)))
 }
 pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     let tool = v.editor.tool;
@@ -159,16 +169,13 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         if sl.held && pointer.is_some_and(|p| p.distance(sl.press) > DRAG_THRESHOLD) { sl.dragged = true; }
     }
     let ndc = |p: Pos2| [(p.x-rect.center().x)*2./rect.width(),(rect.center().y-p.y)*2./rect.height()];
-    let commit = |s: &State, edge: Edge, factor: f64, out: &mut Actions| out.push(UiAction::MeshCutCommit {
-        source: s.source.clone(), node_type: "loop_cut".into(), params: loop_params(edge, s.count, factor) });
+    let commit = |s: &State, edge: Edge, factor: f64, out: &mut Actions| {
+        out.push(UiAction::MeshCutCommit {
+            source: s.source.clone(), node_type: "polysplit".into(), params: loop_params(edge, s.count, factor) });
+        out.push(UiAction::Editor(EditorChange::Tool(Tool::Select)));
+    };
     for event in ctx.input(|i| i.events.clone()) {
         match event {
-            egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } if s.slide.is_some() => { s.slide = None; }
-            egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: true, modifiers, .. }
-                if s.slide.is_some() && !modifiers.alt && !modifiers.ctrl => {
-                // loop-tool.js: right-click during the slide commits the cut centred.
-                let sl = s.slide.take().unwrap(); commit(&s, sl.edge, 0.5, out);
-            }
             egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } => {
                 cancel(&ctx); out.push(UiAction::Editor(EditorChange::Tool(Tool::Select))); return;
             }
@@ -183,10 +190,10 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
                 if let Some(sl) = s.slide.take() { commit(&s, sl.edge, slide_factor(sl.raw, modifiers.ctrl), out); }
                 else if let Some(edge) = s.hover { commit(&s, edge, 0.5, out); }
             }
-            egui::Event::Key { key: key @ (egui::Key::PageUp | egui::Key::PageDown), pressed: true, .. } if loop_cut => {
-                s.count = step_count(s.count, if key == egui::Key::PageUp { 1 } else { -1 });
+            egui::Event::Key { key: key @ (egui::Key::PageUp | egui::Key::PageDown | egui::Key::Plus | egui::Key::Minus), pressed: true, .. } if loop_cut => {
+                s.count = step_count(s.count, if matches!(key, egui::Key::PageUp | egui::Key::Plus) { 1 } else { -1 });
             }
-            egui::Event::MouseWheel { unit, delta, .. } if loop_cut && (s.hover.is_some() || s.slide.is_some()) => {
+            egui::Event::MouseWheel { unit, delta, .. } if loop_cut && pointer.is_some() => {
                 s.wheel += wheel_notches(unit, delta.y);
                 let steps = s.wheel.trunc();
                 if steps != 0. { s.count = step_count(s.count, steps as i32); s.wheel -= steps; }
@@ -250,9 +257,9 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
 fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
     let cuts = format!("{count} cut{}", if count == 1 { "" } else { "s" });
     match slide {
-        Some(f) if count == 1 => format!("Loop Cut | {cuts} | factor {f:.3} | move to slide, Shift fine, Ctrl snap 0.1 | click/Enter confirm | RMB centred | Esc cancel"),
-        Some(_) => format!("Loop Cut | {cuts}, evenly spaced | wheel/PgUp/PgDn count | click/Enter confirm | RMB centred | Esc cancel"),
-        None if hovering => format!("Loop Cut | {cuts} | wheel/PgUp/PgDn count | click to slide | Enter centred cut | Esc/RMB exit"),
+        Some(f) if count == 1 => format!("Loop Cut | {cuts} | factor {f:.3} | move to slide, Shift fine, Ctrl snap 0.1 | click/Enter confirm | Esc/RMB cancel"),
+        Some(_) => format!("Loop Cut | {cuts}, evenly spaced | wheel/PgUp/PgDn/+/- count | click/Enter confirm | Esc/RMB cancel"),
+        None if hovering => format!("Loop Cut | {cuts} | wheel/PgUp/PgDn/+/- count | click to slide | Enter centred cut | Esc/RMB cancel"),
         None => format!("Loop Cut | {cuts} | hover a quad edge | Esc/RMB exit"),
     }
 }
@@ -292,6 +299,11 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
         let over = |x: f32, y: f32| transform_gizmo::project(cam, rect, [x, y, 0.]).unwrap();
         assert_eq!(m.hover(cam, rect, over(1., 0.5), false), Some((1, 4)));
         assert_eq!(m.preview((1, 4), 2, 0.5).len(), 4, "two quads x two cuts");
+        let lines = m.preview((1, 4), 2, 0.9);
+        let mut ys: Vec<_> = lines.iter().map(|(a, b)| { assert!((a[1] - b[1]).abs() < 1e-6); a[1] }).collect();
+        ys.sort_by(f32::total_cmp);
+        assert!((ys[0] - 1. / 3.).abs() < 1e-6 && (ys[3] - 2. / 3.).abs() < 1e-6,
+            "all preview cuts are evenly spaced, independent of the slide factor");
         assert_eq!(m.hover(cam, rect, over(1., 0.5) + vec2(30., 0.), false), None, "outside the radius");
         // a larger quad in front (z = 1) hides the strip unless X-ray is on
         let mut g = strip();
@@ -310,6 +322,30 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
         assert_eq!(m.hover(cam, rect, p, false), Some((1, 4)));
         let (o, d) = transform_gizmo::ray(cam, rect, p);
         assert!((o[0] + d[0] * 10. / -d[2] - 1.).abs() < 1e-3, "ray goes through the projected point");
+    }
+    #[test] fn real_camera_off_centre_ray_hits_projected_edge() {
+        let camera = minihou_app::Camera::frame([1., 0.5, 0.], 2.);
+        let (projection, _) = camera.matrices(1.);
+        let (ray_origin, ray_forward) = camera.ray(0., 0., 1.);
+        let (_, dx) = camera.ray(1., 0., 1.);
+        let (_, dy) = camera.ray(0., 1., 1.);
+        let info = CameraInfo { projection, ray_origin, ray_forward,
+            ray_right: [0, 1, 2].map(|k| dx[k] - ray_forward[k]),
+            ray_up: [0, 1, 2].map(|k| dy[k] - ray_forward[k]), ..Default::default() };
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(1280., 800.));
+        let point = [0., 0.5, 0.];
+        let screen = transform_gizmo::project(info, rect, point).unwrap();
+        let (origin, direction) = transform_gizmo::ray(info, rect, screen);
+        let depth = dot([0, 1, 2].map(|k| point[k] - origin[k]), direction);
+        let miss = [0, 1, 2].map(|k| origin[k] + depth * direction[k] - point[k]);
+        assert!(dot(miss, miss).sqrt() < 1e-4, "off-centre ray must pass through its projected point: {miss:?}");
+        let a = [0., 0., 0.]; let b = [0., 1., 0.];
+        let t = edge_world_fraction(info, a, b, 0.5);
+        let projected = transform_gizmo::project(info, rect, lerp3(a, b, t)).unwrap();
+        let midpoint = transform_gizmo::project(info, rect, a).unwrap()
+            + (transform_gizmo::project(info, rect, b).unwrap() - transform_gizmo::project(info, rect, a).unwrap()) * 0.5;
+        assert!(projected.distance(midpoint) < 1e-3, "occlusion must test the point actually under the cursor");
+        assert_eq!(Mesh::new(&strip()).hover(info, rect, screen, false), Some((0, 3)));
     }
     struct Harness { fixture: super::super::testing::Fixture, ctx: egui::Context, rect: Rect }
     impl Harness {
@@ -335,7 +371,7 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
     }
     fn key(key: egui::Key) -> egui::Event { egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE } }
     fn committed(actions: &[UiAction]) -> Option<Value> {
-        actions.iter().find_map(|a| match a { UiAction::MeshCutCommit { node_type, params, .. } if node_type == "loop_cut" => Some(params.clone()), _ => None })
+        actions.iter().find_map(|a| match a { UiAction::MeshCutCommit { node_type, params, .. } if node_type == "polysplit" => Some(params.clone()), _ => None })
     }
     #[test] fn wheel_count_click_slide_and_confirm_make_one_node_edit() {
         let h = Harness::new();
@@ -344,6 +380,7 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
         assert!(captures_wheel(&h.ctx));
         let wheel = egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: vec2(0., 1.), modifiers: egui::Modifiers::NONE };
         assert!(h.frame(vec![wheel.clone(), wheel.clone(), key(egui::Key::PageDown), key(egui::Key::PageUp)]).is_empty());
+        assert!(h.frame(vec![key(egui::Key::Plus), key(egui::Key::Minus)]).is_empty());
         assert!(h.frame(vec![button(p, egui::PointerButton::Primary, true)]).is_empty());
         assert!(h.frame(vec![button(p, egui::PointerButton::Primary, false)]).is_empty(), "plain click keeps sliding");
         assert!(blocks_navigation(&h.ctx));
@@ -351,7 +388,21 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
         assert_eq!(params, json!({"mode":"edge_loop","split_edges":"p1-4","loops":3,"position":0.5}));
         assert!(!blocks_navigation(&h.ctx));
     }
-    #[test] fn drag_release_commits_the_slid_factor_and_rmb_commits_centred() {
+    #[test] fn wheel_count_survives_moving_between_edges() {
+        let h = Harness::new();
+        let p = h.at(1., 0.5);
+        h.frame(vec![egui::Event::PointerMoved(p)]);
+        let away = p + vec2(160., 120.);
+        h.frame(vec![egui::Event::PointerMoved(away)]);
+        assert!(captures_wheel(&h.ctx));
+        let wheel = egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line,
+            delta: vec2(0., 2.), modifiers: egui::Modifiers::NONE };
+        h.frame(vec![wheel]);
+        h.frame(vec![egui::Event::PointerMoved(p)]);
+        let params = committed(&h.frame(vec![key(egui::Key::Enter)])).unwrap();
+        assert_eq!(params["loops"], 3);
+    }
+    #[test] fn drag_release_commits_the_slid_factor_and_rmb_cancels() {
         let h = Harness::new();
         let p = h.at(1., 0.5);
         h.frame(vec![egui::Event::PointerMoved(p)]);
@@ -362,20 +413,19 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
         let params = committed(&h.frame(vec![button(q, egui::PointerButton::Primary, false)])).unwrap();
         assert!((params["position"].as_f64().unwrap() - 0.75).abs() < 1e-3, "{params}");
         assert_eq!(params["loops"], 1);
-        // RMB during a slide commits centred (loop-tool.js)
+        // RMB during a slide cancels without inserting a node.
         h.frame(vec![egui::Event::PointerMoved(p)]);
         h.frame(vec![button(p, egui::PointerButton::Primary, true), button(p, egui::PointerButton::Primary, false)]);
         h.frame(vec![egui::Event::PointerMoved(q)]);
-        let params = committed(&h.frame(vec![button(q, egui::PointerButton::Secondary, true)])).unwrap();
-        assert_eq!(params["position"], 0.5);
+        let actions = h.frame(vec![button(q, egui::PointerButton::Secondary, true)]);
+        assert!(committed(&actions).is_none());
+        assert!(matches!(actions.as_slice(), [UiAction::Editor(EditorChange::Tool(Tool::Select))]));
     }
     #[test] fn escape_cancels_without_a_node_and_select_tool_is_untouched() {
         let mut h = Harness::new();
         let p = h.at(1., 0.5);
         h.frame(vec![egui::Event::PointerMoved(p)]);
         h.frame(vec![button(p, egui::PointerButton::Primary, true)]);
-        assert!(h.frame(vec![key(egui::Key::Escape)]).is_empty(), "first Esc drops the pending cut only");
-        assert!(!blocks_navigation(&h.ctx));
         let out = h.frame(vec![key(egui::Key::Escape)]);
         assert!(committed(&out).is_none());
         assert!(matches!(out.as_slice(), [UiAction::Editor(EditorChange::Tool(Tool::Select))]));
