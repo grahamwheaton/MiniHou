@@ -260,7 +260,7 @@ class RustChainedPlacementTests(unittest.TestCase):
         tree.links.new(gin.outputs["Geometry"], a.inputs["Geometry"])
         self.assertEqual(self.cook(), 1)
         self.assertEqual(self.ident(a), ident)
-        self.assertEqual(self.cooks[0]["params"]["Size"], [3, 2, 2])
+        self.assertEqual(list(self.cooks[0]["params"]["Size"]), [3, 2, 2])
 
     def test_plane_export_and_wired_cook_keep_one_quad(self):
         obj = self.plane()
@@ -296,7 +296,7 @@ class RustChainedPlacementTests(unittest.TestCase):
         first, second = self.cooks
         self.assertEqual(first["params"]["Scale"], 2.0)
         self.assertEqual(second["params"]["Scale"], 1.0)
-        self.assertEqual(second["params"]["Translate"], [0, 0, 3])
+        self.assertEqual(list(second["params"]["Translate"]), [0, 0, 3])
         # B received A's cooked output (through Blender) as its wired input mesh.
         np.testing.assert_allclose(sorted_rows(second["input"]), sorted_rows(first["output"]), atol=1e-6)
         expected = np.array([[-2, -2, 3], [2, -2, 3], [2, 2, 3], [-2, 2, 3]], np.float64)

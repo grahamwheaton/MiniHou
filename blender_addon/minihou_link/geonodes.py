@@ -118,8 +118,24 @@ def _object_interface(tree):
         tree["minihou_object_sockets"] = encoded
     for key in keys:
         modifiers._object_socket(adapter, key)
-    proxy._sync_usage_chain(tree, json.loads(tree[modifiers.PARAMS]),
-                            json.loads(tree.get(proxy.MAP_KEY, "{}")))
+    proxy._sync_usage_chain(tree, json.loads(tree[modifiers.PARAMS]), _own_map(tree))
+
+
+def _own_map(tree):
+    """{parameter name: this tree's input identifier}, repaired when it names another tree's sockets.
+
+    A placement promoted from a modifier's plumbing tree inherits the outer group's parameters, but the outer map
+    names the *outer* identifiers; using it raised KeyError on every cook (placements never cooked, 0.2.0).
+    """
+    have = {i.name: i.identifier for i in proxy._sockets(tree, "INPUT")}
+    idents = set(have.values())
+    params = [p for p in json.loads(tree.get(modifiers.PARAMS, "[]")) if p["name"] in have]
+    saved = json.loads(tree.get(proxy.MAP_KEY, "{}"))
+    if all(saved.get(p["name"]) in idents for p in params):
+        return saved
+    fixed = {p["name"]: have[p["name"]] for p in params}
+    tree[proxy.MAP_KEY] = json.dumps(fixed)
+    return fixed
 
 
 def _bindings(obj, mod, path, node):
@@ -260,12 +276,12 @@ def edit_live(obj, node):
 
 
 def _private(tree, seen_ids):
-    """Copy only ancestors containing placements, preserving unrelated native groups."""
+    """Give placements (and ancestors containing them) private copies; the caller has already made ``tree`` private.
+
+    Unrelated native groups stay shared.
+    """
     if tree.library is not None:
         raise ValueError("MiniHou placements require local node groups")
-    if tree.users - int(tree.use_fake_user) > 1:
-        tree = tree.copy()
-        tree.use_fake_user = False
     if modifiers.KEY in tree:
         tree[KEY] = uuid.uuid4().hex
         del tree[modifiers.KEY]
@@ -280,9 +296,13 @@ def _private(tree, seen_ids):
         for node in tree.nodes:
             child = getattr(node, "node_tree", None)
             if contains(child):
+                # Copy and assign *before* recursing: an unassigned copy is not live, so the nested plumbing check
+                # (proxy.shared) would not see it and two placements could keep sharing one plumbing tree.
+                if child.library is None and proxy.shared(child):
+                    child = child.copy()
+                    child.use_fake_user = False
+                    node.node_tree = child
                 private = _private(child, seen_ids)
-                if private != child:
-                    node.node_tree = private
                 if KEY in private:
                     node[KEY] = private[KEY]
     return tree
@@ -324,7 +344,7 @@ def _promote_wired_modifier(mod):
                 if not socket.is_linked:
                     socket.default_value = values[socket.identifier]
         inner = node.node_tree
-        if inner.users - int(inner.use_fake_user) > 1:
+        if proxy.shared(inner):
             inner = inner.copy()
             inner.use_fake_user = False
             node.node_tree = inner
@@ -361,6 +381,49 @@ def _placements(tree, path=()):
             yield path + (node.name,), node
         elif contains(getattr(node, "node_tree", None)):
             yield from _placements(node.node_tree, path + (node.name,))
+
+
+def placement_title(node, index):
+    """'MiniHou <n>' unless the user renamed the node (its Label), which then wins."""
+    label = (node.label or "").strip()
+    if not label or label == proxy.PLUMBING_LABEL or label.startswith("MiniHou: "):
+        return f"MiniHou {index}"
+    return label
+
+
+def placement_controls(mod):
+    """Per-placement controls of a Geometry Nodes modifier, for the modifier panel.
+
+    Returns [{"key", "title", "node", "rows"}] in a stable order (tree order, nested groups depth first). Each row is
+    (label, data, property) for an editable value -- the placement's own node socket, or, when that socket is wired to
+    the modifier's Group Input, the modifier input driving it -- or (label, None, note) for a value set by a link.
+    Editing a row changes only that placement's cook. Stack (single-placement) modifiers return [] (their values are
+    the modifier's native inputs).
+    """
+    root = getattr(mod, "node_group", None)
+    if root is None or modifiers.KEY in root or not contains(root):
+        return []
+    result = []
+    for index, (path, node) in enumerate(_placements(root), 1):
+        rows = []
+        for p in json.loads(node.node_tree.get(modifiers.PARAMS, "[]")):
+            socket = node.inputs.get(p["name"])
+            label = p.get("label", p["name"])
+            if socket is None or p.get("kind") in {"geometry", "bundle", "closure"}:
+                continue
+            if not socket.is_linked:
+                if hasattr(socket, "default_value"):
+                    rows.append((label, socket, "default_value"))
+                continue
+            link = socket.links[0]
+            if len(path) == 1 and link.from_node.bl_idname == "NodeGroupInput":
+                owner = proxy.input_owner(mod, link.from_socket.identifier)
+                if owner is not None:
+                    rows.append((label + " (modifier input)", owner[0], owner[1]))
+                    continue
+            rows.append((label, None, "linked from " + (link.from_node.label or link.from_node.name)))
+        result.append({"key": "/".join(path), "title": placement_title(node, index), "node": node, "rows": rows})
+    return result
 
 
 def _order(root):
@@ -800,9 +863,11 @@ def pump(host=None, port=None, *, force=False):
                 if mod.type == "NODES":
                     _promote_wired_modifier(mod)
                 if mod.type == "NODES" and not modifiers.is_modifier(mod) and contains(mod.node_group):
-                    tree = _private(mod.node_group, seen)
-                    if tree != mod.node_group:
-                        mod.node_group = tree
+                    if mod.node_group.library is None and proxy.shared(mod.node_group):
+                        copy = mod.node_group.copy()
+                        copy.use_fake_user = False
+                        mod.node_group = copy
+                    _private(mod.node_group, seen)
         _cleanup()
         for obj in list(bpy.context.scene.objects):
             try:

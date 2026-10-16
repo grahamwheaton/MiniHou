@@ -88,6 +88,7 @@ def load_module():
     package.proxy.PLUMBING_KEY = "plumbing"
     package.proxy.PLUMBING_NODE = "MH_plumbing"
     package.proxy.INST_KEY = "instances"
+    package.proxy.shared = lambda tree: tree.users - int(tree.use_fake_user) > 1  # no orphans here
     protocol = types.ModuleType(pkg + ".protocol")
     protocol.GeoUpdate = protocol.Mirror = protocol.instance_payload = object()
     sys.modules[protocol.__name__] = protocol
