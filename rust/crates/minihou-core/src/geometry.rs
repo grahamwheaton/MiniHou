@@ -56,6 +56,13 @@ impl Attr {
         }
     }
 
+    pub fn as_i32(&self) -> Option<&[i32]> {
+        match &self.data {
+            AttrData::I32(v) => Some(v),
+            _ => None,
+        }
+    }
+
     pub fn dtype(&self) -> &'static str {
         match &self.data {
             AttrData::F32(_) => "float32",
