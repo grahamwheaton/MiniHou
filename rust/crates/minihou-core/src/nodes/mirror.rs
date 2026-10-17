@@ -137,7 +137,7 @@ pub(super) fn mirror(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         "point",
         &(0..np).map(|i| keep && i < g.npoints && seam[i]).collect::<Vec<_>>(),
     )?;
-    if keep || !all { compact(out) } else { Ok(out) }
+    if g.nprims() > 0 && (keep || !all) { compact(out) } else { Ok(out) }
 }
 
 /// Points of in-plane edges used by exactly one (selected) primitive: Houdini's "Only Consolidate Unshared Edges".
@@ -312,7 +312,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "BUG: mirror with keep_original=true drops points-only geometry because compact discards unreferenced points"]
     fn test_mirror_points_only_preserves_points() {
         let pt = Geometry::points_only(vec![1., 2., 3.]).unwrap();
         let out_pt = cook(pt, json!({"origin": [0., 0., 0.], "normal": [1., 0., 0.], "keep_original": true}));
