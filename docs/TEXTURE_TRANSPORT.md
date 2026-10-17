@@ -1,4 +1,10 @@
-# Blender viewport texture transport (add-on 0.4.1)
+﻿# Blender viewport texture transport (add-on 0.4.2)
+
+## Binding
+
+The link namespaces each manifest descriptor and slot binding with `peerN:`. For an instance manifest, the slot table is attached to the modifier input request and carried into the app's `live_activate` or `live_update` request. The document cook then receives `detail.materials` and parallel `detail.material_bindings.slots`; transform, output and merge preserve the table and corner UV attributes. Object geometry and instance sources are decoded with the same revision-checked binding header. A stale geometry revision is rejected. A newer manifest rebinds the live app feed using its cached arrays, without asking Blender to upload its mesh again. Registry entries for an older revision of that scope are removed before the new descriptors are published.
+
+When geometry has only a Blender slot name, the registry may resolve it by the descriptor's `name` if exactly one peer-scoped descriptor has that name. Ambiguous names stay neutral rather than selecting an unrelated peer. Texture inspector reports the resolved descriptor ID, manifest scope, image hash and state for each drawn slot. The headless modifier regression checks the app's cooked geometry and the slot list used for textured triangles; a live window and GPU pixels still require visual verification.
 
 ## Design as built
 
@@ -12,7 +18,7 @@ Unsupported shader paths, missing images, UDIM, sequences, movies, non-opaque Pr
 
 ## Diagnostics
 
-For the reported `imagepaste-261017-142014` plane, CLIP made the object export discard its image descriptor, leaving a valid constant white material and the inspector's `no image · 1x1 · neutral` line. The `Textured surfaces use full detail` line is normal viewport LOD behavior. Headless Blender 5.2 reproduces the modifier prefix with the plane's original single material and Principled Alpha 1.000; its PNG alpha channel does not trigger the alpha diagnostic. The historical instance diagnostic therefore cannot be attributed to the reported shader alone. It means the live instance manifest contained a different material/socket state when sent; the revised diagnostic names that material and its linked/value state. The instance uses its own `peer:instance` manifest and slot IDs; geometry material names resolve through the parallel `material_bindings.slots` table. The receiver now registers each descriptor independently, so one unsupported slot cannot prevent another valid slot in the same manifest from acquiring its image.
+The 0.4.1 live result for `imagepaste-261017-142014` proved the image reached the CPU cache but the native app's cooked modifier geometry carried only the plain material name. `InstanceManager::update_live` rebuilt the UI request without `material_bindings`, and `edit_live` did not send material names or the manifest revision. The viewport therefore selected a white neutral slot even though the instance cook result had a valid descriptor ID. Add-on 0.4.2 sends those fields on live activation, and the Rust handoff preserves them through the app document cook. The `Textured surfaces use full detail` line is normal viewport LOD behavior. CLIP still uses clamp-to-edge approximation, and the prior alpha diagnostics remain available for unsupported live shader states.
 
 ## Limits and validation
 
@@ -27,4 +33,4 @@ The 8-bit PNG snapshot path needs a precision-preserving float/16-bit format, wi
 
 ## Try it
 
-Build the native app and install add-on 0.4.1 from this checkout. In Blender, give an evaluated mesh a UV layer and an opaque Principled material whose Base Color is linked directly to an Image Texture. Start the native link, then use that mesh as a watched `blender_object`, stack modifier input, or Geometry Nodes placement. Select Flat or Smooth shaded texture mode in MiniHou and open Texture inspector to see image and diagnostic status. Painting a generated image or changing an external PNG/JPEG should update watched objects on the next poll; modifier and GN instances update on their next evaluation. Older peers continue to show the untextured mesh.
+Build the native app and install add-on 0.4.2 from this checkout. In Blender, give an evaluated mesh a UV layer and an opaque Principled material whose Base Color is linked directly to an Image Texture. Start the native link, then use that mesh as a watched `blender_object`, stack modifier input, or Geometry Nodes placement. Select Flat or Smooth shaded texture mode in MiniHou and open Texture inspector to see image and diagnostic status. Painting a generated image or changing an external PNG/JPEG should update watched objects on the next poll; modifier and GN instances update on their next evaluation. Older peers continue to show the untextured mesh.
