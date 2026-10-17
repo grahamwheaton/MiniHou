@@ -27,3 +27,15 @@ Report in 6 lines: what each node does, params, tests, the demo graph path, what
 # Queued node-editor fix (not the image work)
 
 - **Tab with nothing selected places the new node at the mouse position** in the node editor (not at the default spot). Attach to the next node-editor fix; check the existing Tab-menu insertion path (ui/network.rs, network_menu.rs) so a node created with a selection still follows its current rule.
+
+---
+
+# Queued feature: Controller node
+
+A "Controller" node that acts as a control panel for top-level driver parameters.
+
+- **Add parameters of any type** (float, int, bool, vector, colour, string, menu, and so on) from the node's own panel.
+- **Drag to rearrange** parameters, and **group them into sections** that can be named and reordered.
+- **Purpose:** one place to hold the top-level drivers that other nodes reference, so a whole network can be tuned from one panel.
+- **Link to existing work:** it should reuse the Add Input machinery (dynamic typed inputs) and the value-linking references (`ch(...)`), so other nodes can link to its parameters.
+- **Open questions for the spec:** whether sections are saved in the graph file, and whether the Controller's parameters appear in the Blender modifier panel as well.
