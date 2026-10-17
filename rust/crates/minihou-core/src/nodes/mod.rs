@@ -69,6 +69,7 @@ mod rbd;
 pub mod rbd_engine;
 mod rbd_fracture_tools;
 mod rbd_material_fracture;
+mod rbd_interior_detail;
 mod convex_decomposition;
 mod python_node;
 #[cfg(test)]
