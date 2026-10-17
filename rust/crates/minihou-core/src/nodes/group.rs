@@ -81,7 +81,7 @@ pub(super) fn keep_prims(g: &Geometry, keep: &[bool], compact: bool) -> Result<G
 }
 
 pub const GROUP_CREATE:NodeSpec=NodeSpec{name:"group_create",inputs:&[InputSpec{name:"geo",multi:false,optional:false},InputSpec{name:"bounds",multi:false,optional:true}],params:crate::params!(
-    "name":"group1";"domain":"points";"method":"pattern";"pattern":"*";"box_center":[0.,0.,0.];"box_size":[1.,1.,1.];"direction":[0.,0.,1.];"angle":45.;"percent":50.;"seed":0;"combine":"replace";
+    "name":"group1";"domain":"points";"method":"pattern";"pattern":"*";"box_center":[0.,0.,0.];"box_size":[1.,1.,1.];"direction":[0.,0.,1.];"angle":45.;"planes":"";"plane_offset":0.;"plane_tolerance":0.0001;"percent":50.;"seed":0;"combine":"replace";
     "base_enable":true,unsupported;"bounds_enable":false,unsupported;"bounds_type":"box",unsupported;"bounds_partial":false,unsupported;
     "normals_enable":false,unsupported;"backface_from":"",unsupported;"normals_opposite":false,unsupported;"edges_enable":false,unsupported;
     "min_edge_angle_on":false,unsupported;"min_edge_angle":20.,unsupported;"max_edge_angle_on":false,unsupported;"max_edge_angle":20.,unsupported;
@@ -90,7 +90,7 @@ pub const GROUP_CREATE:NodeSpec=NodeSpec{name:"group_create",inputs:&[InputSpec{
 fn create(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let g=GROUP_CREATE.one(inputs,0)?;let name=p.s("name")?;valid_name(&name)?;let dom=p.e("domain",&["points","primitives","edges"])?;
     if dom=="edges"{return Err(Error::new("group_create edge groups require the edge-group subsystem, not supported by the Rust backend yet"));}
-    let dom=if dom=="points"{"point"}else{"prim"};let n=if dom=="point"{g.npoints}else{g.nprims()};let method=p.e("method",&["pattern","bounding_box","normal","random","boundary","filters"])?;
+    let dom=if dom=="points"{"point"}else{"prim"};let n=if dom=="point"{g.npoints}else{g.nprims()};let method=p.e("method",&["pattern","bounding_box","normal","coplanar","random","boundary","filters"])?;
     let mut m=match method.as_str(){
         "pattern"=>mask(&g,dom,&p.s("pattern")?)?,
         "bounding_box"=>{
@@ -98,6 +98,16 @@ fn create(inputs:&Inputs,p:&Params)->Result<Geometry>{
             if let Some(bounds)=inputs[1].first(){if bounds.npoints>0{for k in 0..3{let lo=bounds.p().chunks_exact(3).map(|p|p[k] as f64).fold(f64::INFINITY,f64::min);let hi=bounds.p().chunks_exact(3).map(|p|p[k] as f64).fold(f64::NEG_INFINITY,f64::max);c[k]=(lo+hi)/2.;size[k]=hi-lo;}}}
             let pos=if dom=="point"{g.p().iter().map(|&v|v as f64).collect()}else{centroids64(&g)};
             pos.chunks_exact(3).map(|q|(0..3).all(|k|q[k]>=c[k]-size[k].abs()/2. && q[k]<=c[k]+size[k].abs()/2.)).collect()
+        },
+        "coplanar"=>{
+            if dom!="prim" {return Err(Error::new("coplanar groups require the primitives domain"));}
+            let text=p.s("planes")?;
+            let planes=if text.trim().is_empty() {
+                let direction=p.v3("direction")?;let length=direction.iter().map(|v|v*v).sum::<f64>().sqrt();
+                if !length.is_finite()||length<1e-15 {return Err(Error::new("coplanar direction must be nonzero"));}
+                vec![crate::coplanar::Plane {normal:direction.map(|v|v/length),offset:p.f("plane_offset")?}]
+            }else{crate::coplanar::parse(&text)?};
+            crate::coplanar::mask(&g,&planes,p.f("angle")?,p.f("plane_tolerance")?)?
         },
         "normal"=>{
             let d=p.v3("direction")?;let ln=d.iter().map(|v|v*v).sum::<f64>().sqrt().max(1e-12);let d=d.map(|v|v/ln);

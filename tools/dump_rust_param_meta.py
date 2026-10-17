@@ -225,6 +225,11 @@ def meta() -> dict:
         "reverse_rays": "Cast rays in the opposite direction.",
     }.items():
         out["ray"][_name].setdefault("doc", _doc)
+    out["group_create"]["method"]["options"].append("coplanar")
+    out["group_create"]["plane_offset"] = {"kind": "float", "default": 0.0, "doc": "Coplanar plane distance along the normalized Direction. Used when Planes is empty."}
+    out["group_create"]["direction"]["doc"] = "Reference normal for Normal/Coplanar. Explicit Planes overrides Direction and Plane Offset when populated."
+    out["group_create"]["planes"] = {"kind": "string", "default": "", "doc": "Reference plane normals and offsets: nx ny nz offset; one plane per semicolon."}
+    out["group_create"]["plane_tolerance"] = {"kind": "float", "default": 0.0001, "min": 0.0, "doc": "Maximum distance from each reference plane in internal length units."}
     return out
 
 

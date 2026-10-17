@@ -2276,7 +2276,7 @@
     0.0,
     1.0
    ],
-   "doc": "normal method: elements whose normal is within 'angle' of this",
+   "doc": "Reference normal for Normal/Coplanar. Explicit Planes overrides Direction and Plane Offset when populated.",
    "kind": "vec3"
   },
   "domain": {
@@ -2328,7 +2328,8 @@
     "normal",
     "random",
     "boundary",
-    "filters"
+    "filters",
+    "coplanar"
    ]
   },
   "min_edge_angle": {
@@ -2381,6 +2382,22 @@
    "kind": "float",
    "max": 100.0,
    "min": 0.0
+  },
+  "plane_offset": {
+   "default": 0.0,
+   "doc": "Coplanar plane distance along the normalized Direction. Used when Planes is empty.",
+   "kind": "float"
+  },
+  "plane_tolerance": {
+   "default": 0.0001,
+   "doc": "Maximum distance from each reference plane in internal length units.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "planes": {
+   "default": "",
+   "doc": "Reference plane normals and offsets: nx ny nz offset; one plane per semicolon.",
+   "kind": "string"
   },
   "random_enable": {
    "default": false,
