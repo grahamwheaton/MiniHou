@@ -92,6 +92,7 @@ mod mesh_common;
 mod grid_fill;
 mod recalc_normals;
 mod tris_to_quads;
+mod inset_ext;
 
 pub use modify::{match_size_points, MatchSizeOut};
 pub use modeling_tools::{edge_slide_preview, loop_cut_fractions, loop_cut_preview, loop_slide_fractions, LoopRing, LoopTopology, LOOP_CUT_MAX};

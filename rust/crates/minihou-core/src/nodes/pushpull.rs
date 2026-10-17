@@ -780,7 +780,10 @@ fn merge_coplanar(g: &Geometry, tol: f64) -> Result<Geometry> {
 pub const INSET: NodeSpec = NodeSpec {
     name: "inset",
     inputs: GEO,
-    params: crate::params!("group":"";"amount":0.1;"mode":"connected"),
+    params: crate::params!("group":"";"amount":0.1;"mode":"connected";
+        "depth":0.0;"use_boundary":true;"use_even_offset":true;"use_relative_offset":false;"use_edge_rail":false;
+        "use_outset":false;"use_individual":false;"use_interpolate":true;
+        "output_group":false;"output_group_name":"inset_ring";"output_inner_group":false;"output_inner_group_name":"inset_inner"),
     cook: inset,
 };
 pub const OUTSET: NodeSpec = NodeSpec {
@@ -791,15 +794,28 @@ pub const OUTSET: NodeSpec = NodeSpec {
 };
 fn inset(i: &Inputs, p: &Params) -> Result<Geometry> {
     let g = INSET.one(i, 0)?;
-    model::extrude(
-        &g,
-        &p.s("group")?,
-        0.,
-        p.f("amount")?,
-        &p.e("mode", &["connected", "individual"])?,
-        false,
-        None,
-    )
+    let individual = p.e("mode", &["connected", "individual"])? == "individual" || p.b("use_individual")?;
+    let mode = if individual { "individual" } else { "connected" };
+    let amount = if p.b("use_outset")? { -p.f("amount")? } else { p.f("amount")? };
+    let depth = p.f("depth")?;
+    let extended = !p.b("use_boundary")? || !p.b("use_even_offset")? || p.b("use_relative_offset")? || p.b("use_edge_rail")? || !p.b("use_interpolate")?;
+    let mut out = if extended {
+        let sel = model::prim_mask(&g, &p.s("group")?)?;
+        let o = super::inset_ext::Opts { thickness: amount, depth, boundary: p.b("use_boundary")?, even: p.b("use_even_offset")?,
+            relative: p.b("use_relative_offset")?, rail: p.b("use_edge_rail")?, individual, interpolate: p.b("use_interpolate")? };
+        super::inset_ext::inset_ext(&g, &sel, &o)?
+    } else {
+        model::extrude(&g, &p.s("group")?, depth, amount, mode, false, None)?
+    };
+    for (flag, name, src) in [("output_group", "output_group_name", "group_extrudeSide"), ("output_inner_group", "output_inner_group_name", "group_extrudeFront")] {
+        if p.b(flag)? {
+            let n = p.s(name)?;
+            model::group_name(n.trim()).map_err(|_| Error::new(format!("invalid {name} {n:?}")))?;
+            let mask: Vec<bool> = out.prim.get(src).map_or(vec![false; out.nprims()], |a| super::group::flags(a));
+            model::write_group(&mut out, "prim", n.trim(), &mask)?;
+        }
+    }
+    Ok(out)
 }
 fn outset(i: &Inputs, p: &Params) -> Result<Geometry> {
     let g = OUTSET.one(i, 0)?;
