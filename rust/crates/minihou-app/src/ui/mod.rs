@@ -26,6 +26,7 @@ pub mod modal_model;
 pub mod mirror_tool;
 pub mod transform_overlay;
 pub mod viewport_ui;
+pub mod waiting;
 
 #[allow(unused_imports)]
 pub use editor_state::{EditorChange, EditorState, Falloff, Orientation, Overlays, Pivot, Proxy, SelectionMode, Snap, SnapTo, SnapTargets, Tool, ViewPreset, Proportional};

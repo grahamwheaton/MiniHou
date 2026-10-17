@@ -981,8 +981,9 @@ fn card_ui(p: &egui::Painter, r: Rect, id: &str, node: &NodeDef, v: &View, zoom:
     let unsupported = !v.runs_on_rust(&node.node_type);
     let error = v.cooking.error.as_deref().filter(|e| e.contains(&format!("node '{id}'")));
     let visible = minihou_app::display_nodes(v.doc).iter().any(|node| node == id);
+    let waiting = if error.is_none() && !node.bypass { super::waiting::waiting_of(&v.cooking.stats, id) } else { None };
     let fill = if node.bypass { t.panel } else if error.is_some() { t.err_bg } else if visible { t.accent_bg } else { t.card };
-    let border = if node.bypass { t.stroke } else if error.is_some() { t.err } else if unsupported { t.warn } else if flags.template { t.tpl } else if visible || v.cooking.cooking() { t.accent } else { t.stroke2 };
+    let border = if node.bypass { t.stroke } else if error.is_some() { t.err } else if waiting.is_some() { super::waiting::outline(t.warn) } else if unsupported { t.warn } else if flags.template { t.tpl } else if visible || v.cooking.cooking() { t.accent } else { t.stroke2 };
     p.rect_filled(r, 6.0 * zoom, fill);
     if node.bypass || unsupported || flags.template { dashed_rect(p, r, border); }
     else { p.rect_stroke(r, 6.0 * zoom, Stroke::new(1.0_f32, border), StrokeKind::Inside); }
@@ -1046,6 +1047,13 @@ fn card_ui(p: &egui::Painter, r: Rect, id: &str, node: &NodeDef, v: &View, zoom:
         p.rect_filled(msg, 4.0, t.err_bg);
         p.rect_stroke(msg, 4.0, Stroke::new(1.0_f32, t.err), StrokeKind::Inside);
         p.galley(msg.left_top() + vec2(8.0, 3.0), galley, t.text);
+    } else if let Some(message) = waiting {
+        // Waiting for external data: a quiet note, never the red error box.
+        let galley = p.layout(super::waiting::card_note(message), FontId::proportional(11.0 * zoom), t.dim, r.width() - 22.0);
+        let msg = Rect::from_min_size(pos2(r.left(), r.bottom() + 6.0 * zoom), vec2(r.width(), galley.size().y + 6.0));
+        p.rect_filled(msg, 4.0, t.panel);
+        p.circle_filled(pos2(msg.left() + 8.0, msg.top() + 3.0 + galley.size().y / 2.0), 3.0, t.warn);
+        p.galley(msg.left_top() + vec2(15.0, 3.0), galley, t.dim);
     }
 }
 
@@ -1054,6 +1062,7 @@ fn node_status(v: &View, id: &str, bypass: bool, unsupported: bool, error: bool)
     if bypass { return ("muted".into(), t.faint); }
     if unsupported { return ("unsupported".into(), t.warn); }
     if error { return ("failed".into(), t.err); }
+    if super::waiting::waiting_of(&v.cooking.stats, id).is_some() { return (super::waiting::NODE_STATUS.into(), t.warn); }
     if v.cooking.cooking() { return ("cooking".into(), t.accent); }
     if v.cooking.stats.cached.iter().any(|n| n == id) { return ("cached".into(), t.dim); }
     if let Some((_, ms)) = v.cooking.stats.node_ms.iter().find(|(n, _)| n == id) {

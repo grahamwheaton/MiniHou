@@ -742,6 +742,7 @@ fn append_cook_stats(out:&mut CookStats, more:&CookStats) {
     for id in &more.cached {if !out.cached.contains(id)&&!out.cooked.contains(id){out.cached.push(id.clone());}}
     out.node_ms.extend(more.node_ms.iter().cloned());
     for diag in &more.param_diags {if !out.param_diags.contains(diag){out.param_diags.push(diag.clone());}}
+    for w in &more.waiting {if !out.waiting.contains(w){out.waiting.push(w.clone());}}
 }
 
 #[cfg(test)]

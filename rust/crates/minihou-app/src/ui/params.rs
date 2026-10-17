@@ -1297,6 +1297,7 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
                 if typ == "bezier" { bezier_controls_panel(ui,v,out,id,flags.locked); }
             }
             if typ == "modifier_input" { modifier_inputs_panel(ui, v, out, id); }
+            if let Some(message) = super::waiting::waiting_of(&v.cooking.stats, id) { ui.add_space(4.); super::waiting::panel_note(ui, v.theme, message); }
             ui.add_space(6.);
             for error in errors {
                 let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 34.), Sense::hover());

@@ -29,6 +29,7 @@ pub fn show(ui: &mut egui::Ui, v: &View, _out: &mut Actions) {
     let y = bar.center().y;
     let (dot_color, state) = if v.cooking.cooking() { (v.theme.accent, 1) }
         else if v.cooking.error.is_some() { (v.theme.err, 2) }
+        else if !v.cooking.stats.waiting.is_empty() { (v.theme.warn, 3) }
         else { (v.theme.ok, 0) };
     p.circle_filled(Pos2::new(bar.left() + 13.5, y), 3.5, dot_color);
     let mut x = bar.left() + 28.;
@@ -46,6 +47,7 @@ pub fn show(ui: &mut egui::Ui, v: &View, _out: &mut Actions) {
             x += 14.;
             span(p, &mut x, y, "Showing last good mesh.", false, v.theme.dim);
         }
+        3 => span(p, &mut x, y, &super::waiting::status_line(&v.cooking.stats).unwrap_or_default(), false, v.theme.dim),
         _ => {
             span(p, &mut x, y, "Cooked: ", false, v.theme.dim);
             span(p, &mut x, y, &v.cooking.stats.cooked.join(", "), true, v.theme.text);
