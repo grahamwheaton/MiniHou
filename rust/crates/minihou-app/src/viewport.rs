@@ -680,7 +680,7 @@ impl Gpu {
             let mut warning=match &binding.state {State::Ok=>"ok".into(),State::Missing=>"neutral".into(),State::Unsupported(e)|State::CheckerFallback(e)=>format!("checker fallback: {e}")};
             if triangles.iter().any(|t|t.vertices.iter().any(|v|v.valid==0.)) {warning.push_str("; missing UV checker");}
             if downsampled {warning.push_str("; downsampled for GPU budget");}
-            self.texture_status.push(format!("{}: {} · {}x{} · {} · UV {} · {} / {} · {} bytes · {}",if slot.is_empty(){"(default)"}else{&slot},tex.and_then(|t|t.path.as_ref().map(|p|p.display().to_string()).or_else(||t.image_id.clone())).unwrap_or_else(||"no image".into()),dimensions.0,dimensions.1,tex.map_or("linear",|t|&t.color_space),tex.map_or("uv",|t|&t.uv_set),tex.map_or("linear",|t|&t.sampler.min),tex.map_or("repeat",|t|&t.sampler.wrap_u),resident,warning));
+            self.texture_status.push(format!("{}: descriptor {} · scope {} · image hash {} · state {:?} · {}x{} · UV {} · {} / {} · {} bytes · {}",if slot.is_empty(){"(default)"}else{&slot},binding.descriptor_id.as_deref().unwrap_or("none"),binding.scope.as_deref().unwrap_or("none"),tex.and_then(|t|t.image_id.as_deref()).unwrap_or("none"),binding.state,dimensions.0,dimensions.1,tex.map_or("uv",|t|&t.uv_set),tex.map_or("linear",|t|&t.sampler.min),tex.map_or("repeat",|t|&t.sampler.wrap_u),resident,warning));
             let mut batch=TextureBatch {vertex:device.create_buffer(&wgpu::BufferDescriptor {label:Some("empty material vertices"),size:48,usage:wgpu::BufferUsages::VERTEX,mapped_at_creation:false}),bind,selected:0,total:0,triangles};
             batch.repartition(device,&self.object_mask_points.clone().unwrap_or_default());
             self.tex_batches.push(batch);

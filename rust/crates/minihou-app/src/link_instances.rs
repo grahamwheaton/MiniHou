@@ -9,6 +9,7 @@ struct Entry {
     session: Session,
     input: Arrays,
     materials: Value,
+    bindings: Value,
     sources: BTreeMap<String, Arc<Geometry>>,
     source_meta: BTreeMap<String, Value>,
 }
@@ -191,6 +192,7 @@ impl InstanceManager {
             let live = self.live.get_mut(&id).unwrap();
             if live.input != *arrays
                 || live.header["materials"] != h["materials"]
+                || live.header["material_bindings"] != h["material_bindings"]
                 || time(&live.header)? != (frame, fps)
             {
                 live.input = arrays.clone();
@@ -212,6 +214,7 @@ impl InstanceManager {
                     session,
                     input: Arrays::new(),
                     materials: Value::Null,
+                    bindings: Value::Null,
                     sources: BTreeMap::new(),
                     source_meta: BTreeMap::new(),
                 },
@@ -222,7 +225,7 @@ impl InstanceManager {
             entry.session.replace_graph(Graph::from_value(&graph)?);
             entry.graph = graph.clone();
         }
-        if entry.input != *arrays || entry.materials != h["materials"] {
+        if entry.input != *arrays || entry.materials != h["materials"] || entry.bindings != h["material_bindings"] {
             entry.session.set_external(
                 "modifier_input".into(),
                 ExternalInput::Object {
@@ -233,6 +236,7 @@ impl InstanceManager {
             );
             entry.input = arrays.clone();
             entry.materials = h["materials"].clone();
+            entry.bindings = h["material_bindings"].clone();
         }
         let feeds = self.sources.get(&id);
         let bindings: Vec<_> = entry
@@ -326,6 +330,13 @@ impl InstanceManager {
                 live.graph = graph.clone();
             }
         }
+    }
+    pub(super) fn rebind_manifest(&mut self, id: &str, bindings: &Value) -> Result<()> {
+        if let Some(live) = self.live.get_mut(id) {
+            live.header["material_bindings"] = json!({"version":1,"slots":bindings});
+            self.update_live(id, "live_update", None)?;
+        }
+        Ok(())
     }
     fn sync(&mut self, id: &str, h: &Value) -> Result<Value> {
         self.refresh(id);
@@ -452,7 +463,7 @@ impl InstanceManager {
             );
         }
         let (frame, fps) = time(&live.header)?;
-        let h = json!({"type":typ,"path":live.path,"label":live.header["label"],"graph":live.graph,"sources":sources.keys().collect::<Vec<_>>(),"materials":live.header["materials"],"frame":frame,"fps":fps,"overrides":overrides});
+        let h = json!({"type":typ,"path":live.path,"label":live.header["label"],"graph":live.graph,"sources":sources.keys().collect::<Vec<_>>(),"materials":live.header["materials"],"material_bindings":live.header["material_bindings"],"frame":frame,"fps":fps,"overrides":overrides});
         self.shared
             .live_documents
             .lock()

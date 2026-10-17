@@ -944,7 +944,7 @@ impl LinkServer {
                     edits.push(Edit::External {
                         name: format!("object_input:{}", name.as_str().ok_or("bad source name")?),
                         input: ExternalInput::Object {
-                            geo: Arc::new(link_protocol::decode_object(&Value::Null, &arrays)?),
+                            geo: Arc::new(link_protocol::decode_object(h, &arrays)?),
                             matrix: None,
                             info: Value::Null,
                         },
@@ -1145,6 +1145,13 @@ fn serve_client(
                                 drop(service);
                                 state.asset_updates.lock().unwrap().push(scoped);
                                 send_frame(&mut socket,&json!({"type":"image_request","scope":scope,"revision":revision,"hashes":missing}),&Arrays::new())?;
+                                if let Some(instance)=scope.strip_prefix("instance:") {
+                                    let bindings={state.image_assets.lock().unwrap().manifests
+                                        .get(&format!("peer{id}:{scope}")).and_then(|m|m.get("bindings")).cloned()};
+                                    if let Some(bindings)=bindings {
+                                        let _=instances.rebind_manifest(instance,&bindings);
+                                    }
+                                }
                             }
                         }
                     }
@@ -1419,6 +1426,27 @@ mod tests {
             usize::MAX, usize::MAX, 100_000, 8192);
         assert_eq!(display.tri.len() / 3, 2, "rendering may use two fan triangles");
         assert_eq!(display.edge.len() / 2, 4, "display edges must exclude the fan diagonal");
+    }
+    #[test]
+    fn live_modifier_bindings_reach_cooked_document_and_rebind() {
+        let graph=json!({"nodes":{"input":{"type":"modifier_input"},"move":{"type":"transform","inputs":{"geo":"input"}},"out":{"type":"output","inputs":{"geo":"move"}}},"display":"out"});
+        let doc=Document::parse(graph.to_string()).unwrap();
+        let mut editor=minihou_app::EditorDocument::new(doc.clone(),PathBuf::from("plane.json"));
+        let mut server=LinkServer::bind("127.0.0.1:0",&doc,Path::new("plane.json")).unwrap();
+        let mut plane=Geometry::from_arrays(vec![0.,0.,0.,1.,0.,0.,1.,1.,0.,0.,1.,0.],vec![0,1,2,3],vec![0,4],Some(vec![true])).unwrap();
+        plane.prim.insert("material_index".into(),Arc::new(minihou_core::Attr::i32(1,vec![0])));
+        plane.vertex.insert("uv".into(),Arc::new(minihou_core::Attr::f32(2,vec![0.,0.,1.,0.,1.,1.,0.,1.])));
+        let arrays=link_protocol::geometry_arrays(&plane);
+        let mut session=doc.session().unwrap(); let mut target="out".to_owned();
+        for (revision,id) in [(1,"peer1:blender:plane:0"),(2,"peer1:blender:plane:new:0")] {
+            let edits=server.handle_live(&LinkRequest {peer:1,message:json!({"type":"live_activate","path":"plane.json","graph":graph,"materials":["imagepaste-261017-142014"],"material_bindings":{"version":1,"slots":[id]}}),arrays:arrays.clone(),completion:None},&mut editor).unwrap();
+            let response=minihou_app::cook_batch(&mut session,&mut target,edits.into_iter().map(|edit|minihou_app::CookRequest {revision,edit}).collect(),|_|());
+            assert!(response.error.is_none(),"{:?}",response.error);
+            let cooked=response.geometry.unwrap();
+            assert_eq!(cooked.detail["materials"],json!(["imagepaste-261017-142014"]));
+            assert_eq!(cooked.detail["material_bindings"]["slots"],json!([id]));
+            assert!(cooked.vertex.contains_key("uv"));
+        }
     }
 
     fn receive(socket: &mut TcpStream, kind: &str) -> (Value, Arrays) {
