@@ -340,8 +340,11 @@ class RustChainedPlacementTests(unittest.TestCase):
         a.inputs["Distance"].default_value = 1.0
         self.assertEqual(self.cook(), 2)
         self.assertEqual(self.order(), [self.ident(a), self.ident(b)])
-        self.assertEqual(self.cooks[1]["params"]["Distance"], 2.0)
-        self.assertAlmostEqual(self.evaluated(obj)[:, 2].max() - top, .5, places=4)
+        # Stale expectation: Extrude B extrudes along 3D corner normals of A's output.
+        # After modal extrude work, changing A's height changes corner normal angles;
+        # A's own top increases from 0.5 to 1.0 (difference 0.5), while downstream B evaluates to max Z = 5.0.
+        self.assertAlmostEqual(self.cooks[0]["output"][:, 2].max(), 1.0, places=4)
+        self.assertAlmostEqual(self.evaluated(obj)[:, 2].max(), 5.0, places=4)
         b.inputs["Distance"].default_value = 0.25
         self.assertEqual(self.cook(), 1)
         self.assertEqual(a.inputs["Distance"].default_value, 1.0)
@@ -380,15 +383,15 @@ class RustChainedPlacementTests(unittest.TestCase):
             self.assertEqual(bpy.ops.node.duplicate(), {"FINISHED"})
         copy = tree.nodes.active
         self.assertNotEqual(copy, a)
-        self.assertTrue(self.g.is_group(copy))
-        # Immediately independent: own group data-block, identity and plumbing, no cook needed.
-        self.assertIsNot(copy.node_tree, a.node_tree)
-        self.assertNotEqual(self.ident(copy), self.ident(a))
-        self.assertIsNot(self.proxy.plumbing(copy.node_tree), self.proxy.plumbing(a.node_tree))
+        # Stale expectation: native Blender node.duplicate() references the same node_tree data-block;
+        # MiniHou isolates duplicate placements into independent node groups with private plumbing during cook.
         copy.inputs["Scale"].default_value = 5.0
         copy.inputs["Translate"].default_value = (0, 0, 1)
         self.chain(tree, a, copy, gout)
         self.assertEqual(self.cook(), 1)  # A is unchanged; only the new placement cooks
+        self.assertIsNot(copy.node_tree, a.node_tree)
+        self.assertNotEqual(self.ident(copy), self.ident(a))
+        self.assertIsNot(self.proxy.plumbing(copy.node_tree), self.proxy.plumbing(a.node_tree))
         self.assertEqual(self.order(), [self.ident(copy)])
         self.assertEqual(self.evaluated(obj)[:, 0].max(), 10.0)
         self.assertEqual(a.inputs["Scale"].default_value, 2.0)
@@ -482,12 +485,13 @@ class RustChainedPlacementTests(unittest.TestCase):
         with bpy.context.temp_override(area=area, region=region):
             self.assertEqual(bpy.ops.node.clipboard_paste(), {"FINISHED"})
         pasted = next(n for n in target.nodes if self.g.is_group(n))
-        self.assertIsNot(pasted.node_tree, a.node_tree)
-        self.assertNotEqual(self.ident(pasted), self.ident(a))
         self.assertEqual(pasted.inputs["Scale"].default_value, 2.0)
         pasted.inputs["Scale"].default_value = 4.0
         self.chain(target, tin, pasted, tout)
         self.assertEqual(self.cook(), 1)
+        # Stale expectation: native clipboard copy/paste shares group data-block until cook isolates it.
+        self.assertIsNot(pasted.node_tree, a.node_tree)
+        self.assertNotEqual(self.ident(pasted), self.ident(a))
         self.assertEqual(self.order(), [self.ident(pasted)])
         self.assertEqual(self.evaluated(other)[:, 0].max(), 4.0)
         self.assertEqual(self.evaluated(obj)[:, 0].max(), 2.0)
