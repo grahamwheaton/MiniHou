@@ -136,7 +136,7 @@ pub fn open_add_menu(ctx: &egui::Context, path: &Path) {
     let at = ctx.input(|i| i.pointer.hover_pos()).unwrap_or(pos2(160., 190.));
     ctx.data_mut(|d| {
         let mut state = d.get_persisted::<State>(id).unwrap_or_default();
-        state.menu = if state.menu.is_some() { None } else { Some(network_menu::MenuState::new(at, None, true)) };
+        if state.menu.is_none() { state.menu = Some(network_menu::MenuState::new(at, None, true)); }
         d.insert_persisted(id, state);
     });
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::default(), egui::Key::Tab));
@@ -727,6 +727,7 @@ pub fn position_add(ctx: &egui::Context, path: &Path, old: &serde_json::Value,
     let (Ok(graph), Ok(next_graph)) = (minihou_core::Graph::from_value(old), minihou_core::Graph::from_value(next)) else { return None };
     let state = ctx.data_mut(|d| d.get_persisted::<State>(state_id(path)).unwrap_or_default());
     let mut positions = positions_for(&state, &graph, old);
+    let live_override = after.is_some_and(|anchor| state.moved.get(anchor).is_some_and(|at| json_pos(old, anchor) != Some(*at)));
     // History must remember the pre-add canvas too, including unsaved drags.
     let mut before = old.clone();
     for (id, at) in &positions { before["nodes"][id]["pos"] = serde_json::json!([at.x, at.y]); }
@@ -736,11 +737,16 @@ pub fn position_add(ctx: &egui::Context, path: &Path, old: &serde_json::Value,
             if before { next_graph.nodes.iter().any(|(target, def)| target == anchor &&
                 def.inputs.iter().any(|(_, refs)| refs.contains(id))) }
             else { node.inputs.iter().any(|(_, refs)| refs.iter().any(|source| source == anchor)) });
-        if let Some((id, _)) = inserted {
+        if let Some((id, _)) = inserted.filter(|(id, _)| live_override || json_pos(next, id).is_none()) {
             positions = network_layout::insert_position(&graph, &positions, anchor, id, before);
         }
     }
-    let lookup: HashMap<_, _> = positions.into_iter().collect();
+    let mut lookup: HashMap<_, _> = positions.into_iter().collect();
+    for (id, _) in &next_graph.nodes {
+        if !live_override && (old["nodes"].get(id).is_none() || json_pos(old, id) != json_pos(next, id)) && json_pos(next, id).is_some() {
+            lookup.insert(id.clone(), json_pos(next, id).unwrap());
+        }
+    }
     for (id, at) in network_layout::layout(&next_graph, |id| lookup.get(id).copied()) {
         next["nodes"][&id]["pos"] = serde_json::json!([at.x, at.y]);
     }
@@ -1584,7 +1590,7 @@ mod tests {
         assert!(rx.recv_timeout(std::time::Duration::from_millis(500)).is_ok(), "open_add_menu deadlocked on nested ctx lock");
     }
     #[test]
-    fn menu_can_open_and_close_fifty_times() {
+    fn repeated_tab_does_not_close_menu() {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let ctx = egui::Context::default();
@@ -1596,7 +1602,7 @@ mod tests {
                 assert!(is_open, "Failed to open menu on iteration {i}");
                 open_add_menu(&ctx, path);
                 let is_open = ctx.data_mut(|d| d.get_persisted::<State>(id).and_then(|s| s.menu).is_some());
-                assert!(!is_open, "Failed to close menu on iteration {i}");
+                assert!(is_open, "Repeated Tab closed menu on iteration {i}");
             }
             tx.send(()).unwrap();
         });
@@ -1726,7 +1732,7 @@ mod tests {
                     if cmd == "add_menu" { open_add_menu(&ctx, path); }
                 }
             }
-            assert!(ctx.data_mut(|d| d.get_persisted::<State>(id).and_then(|s| s.menu).is_none()), "Tab should close open menu");
+            assert!(ctx.data_mut(|d| d.get_persisted::<State>(id).and_then(|s| s.menu).is_some()), "Tab should leave open menu focused");
 
             // Frame 5: Open menu again, then close with Escape
             open_add_menu(&ctx, path);

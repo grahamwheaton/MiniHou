@@ -199,6 +199,7 @@ fn apply_transform_step(doc: &mut Document, first: bool, value: Value, target: &
     }
 }
 fn ensure_transform_target(value: &mut Value, source: &str, object_mode: bool, active: Option<&str>) -> Option<String> {
+    graph_edit::repair_output_hangs(value);
     if let Some(id) = active {
         if value["nodes"].get(id).is_some()
             && !(value["nodes"][source]["type"] == "output"

@@ -44,7 +44,7 @@ pub fn add_connected(value: &Value, ty: &str, connection: &AddConnection, pos: [
         AddConnection::Output(source) => {
             nodes(value)?.get(source)?;
             spec.inputs.first()?;
-            // Delegate terminal output insertion to add; never wire an output downstream.
+            // An explicit noodle branches from its endpoint; terminal outputs insert upstream.
             let (next, id) = add_impl(value, ty, Some(source), false)?;
             let terminal = value["nodes"][source]["type"] == "output";
             let next = if terminal { next } else { connect(&next, source, &id, None)? };
@@ -65,11 +65,36 @@ pub fn add_connected(value: &Value, ty: &str, connection: &AddConnection, pos: [
 }
 
 pub fn add(value: &Value, ty: &str, after: Option<&str>) -> Option<(Value, String)> {
-    add_impl(value, ty, after, true)
+    let mut repaired = value.clone();
+    repair_output_hangs(&mut repaired);
+    add_impl(&repaired, ty, after, true)
+}
+
+/// Repair the older viewport shape `source -> output -> operator` in place.
+/// Each hanging operator becomes the last operation before its output.
+pub fn repair_output_hangs(value: &mut Value) -> usize {
+    let Some(all) = nodes(value) else { return 0 };
+    let repairs: Vec<_> = all.iter().filter(|(_, n)| n["type"] == "output").flat_map(|(out, _)| {
+        all.iter().filter_map(move |(id, child)| {
+            (child["inputs"]["geo"].as_str() == Some(out.as_str()) && child["type"] != "output")
+                .then(|| (out.clone(), id.clone()))
+        })
+    }).collect();
+    let mut count = 0;
+    for (out, id) in repairs {
+        let Some(upstream) = value["nodes"][&out]["inputs"]["geo"].as_str().map(str::to_owned) else { continue };
+        let old = value.clone();
+        value["nodes"][&id]["inputs"]["geo"] = json!(upstream);
+        value["nodes"][&out]["inputs"]["geo"] = json!(id);
+        position_in_stream(&old, value, &out, &id, true);
+        count += 1;
+    }
+    count
 }
 
 fn add_impl(value: &Value, ty: &str, after: Option<&str>, splice: bool) -> Option<(Value, String)> {
     let spec = nodes::get(ty)?;
+    let original = value;
     let mut value = value.clone();
     let displayed = minihou_app::display_nodes(&value);
     let all = nodes_mut(&mut value)?;
@@ -92,6 +117,7 @@ fn add_impl(value: &Value, ty: &str, after: Option<&str>, splice: bool) -> Optio
             }
             all.insert(id.clone(), node);
             all[out_id]["inputs"] = if out_port.multi { json!({out_port.name: [id.clone()]}) } else { json!({out_port.name: id.clone()}) };
+            position_in_stream(original, &mut value, out_id, &id, true);
             return Some((value, id));
         }
     }
@@ -123,7 +149,64 @@ fn add_impl(value: &Value, ty: &str, after: Option<&str>, splice: bool) -> Optio
         else if !spliced { next = vec![id.clone()]; }
     } else { next = vec![id.clone()]; }
     value["display"] = if next.len() == 1 { json!(next[0]) } else { json!(next) };
+    if splice && ty != "output" {
+        if let Some(source) = source { position_in_stream(original, &mut value, source, &id, false); }
+    }
     Some((value, id))
+}
+
+/// Persist stream spacing in the same document edit as the new node and its wires.
+/// The canvas may refine this using its live positions when an add originates there.
+fn position_in_stream(old: &Value, next: &mut Value, anchor: &str, inserted: &str, before: bool) {
+    let Some(all) = nodes(old) else { return };
+    fn automatic(all: &Map<String, Value>, id: &str, seen: &mut HashSet<String>) -> [f32; 2] {
+        if !seen.insert(id.to_owned()) { return [96.0, 32.0] }
+        let Some(node) = all.get(id) else { return [96.0, 32.0] };
+        let parents: Vec<_> = node.get("inputs").and_then(Value::as_object).into_iter().flat_map(|m| m.values())
+            .flat_map(|v| if let Some(s) = v.as_str() { vec![s] } else { v.as_array().map_or_else(Vec::new, |a| a.iter().filter_map(Value::as_str).collect()) })
+            .filter(|source| all.contains_key(*source)).collect();
+        if parents.is_empty() {
+            let roots: Vec<_> = all.iter().filter(|(_, n)| n.get("inputs").and_then(Value::as_object).is_none_or(|m| m.is_empty())).map(|(id, _)| id).collect();
+            return [96.0 + roots.iter().position(|root| root.as_str() == id).unwrap_or(0) as f32 * 704.0, 32.0];
+        }
+        let positions: Vec<_> = parents.iter().map(|p| automatic(all, p, &mut seen.clone())).collect();
+        let x = positions.iter().map(|p| p[0]).sum::<f32>() / positions.len() as f32;
+        [x, positions.iter().map(|p| p[1]).fold(32.0_f32, f32::max) + 128.0]
+    }
+    let position = |id: &str| -> Option<[f32; 2]> {
+        let node = all.get(id)?;
+        if let Some(at) = node.get("pos").and_then(Value::as_array) {
+            return Some([at.first()?.as_f64()? as f32, at.get(1)?.as_f64()? as f32]);
+        }
+        Some(automatic(all, id, &mut HashSet::new()))
+    };
+    let Some(origin) = position(anchor) else { return };
+    let consumes = |node: &Value, source: &str| -> bool {
+        node.get("inputs").and_then(Value::as_object).is_some_and(|inputs| inputs.values().any(|v|
+            v.as_str() == Some(source) || v.as_array().is_some_and(|a| a.iter().any(|v| v.as_str() == Some(source)))))
+    };
+    let mut pitch = all.iter().filter_map(|(id, node)| {
+        let at = position(id)?;
+        let adjacent = if before { consumes(&all[anchor], id) } else { consumes(node, anchor) };
+        let dy = if before { origin[1] - at[1] } else { at[1] - origin[1] };
+        (adjacent && (at[0] - origin[0]).abs() < 16.0 && dy >= 96.0).then_some(dy)
+    }).min_by(f32::total_cmp).unwrap_or(128.0);
+    pitch = (pitch / 32.0).round() * 32.0;
+    let slot = [origin[0], origin[1] + if before { 0.0 } else { pitch }];
+    let mut downstream = HashSet::from([anchor.to_owned()]);
+    loop {
+        let mut changed = false;
+        for (id, node) in all {
+            if downstream.iter().any(|source| consumes(node, source)) { changed |= downstream.insert(id.clone()); }
+        }
+        if !changed { break; }
+    }
+    for id in downstream {
+        if (!before && id == anchor) || position(&id).is_none_or(|at| at[1] < slot[1]) { continue; }
+        let at = position(&id).unwrap();
+        next["nodes"][&id]["pos"] = json!([at[0], at[1] + pitch]);
+    }
+    next["nodes"][inserted]["pos"] = json!(slot);
 }
 
 /// Adds a node placed at world position `pos`. If `ty` is a primitive with a `center` parameter,
@@ -583,6 +666,55 @@ pub fn rename(value: &Value, old: &str, new: &str) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn viewport_insertion_splices_branches_pushes_stream_and_undoes_once() {
+        let base = json!({"nodes": {
+            "source":{"type":"box","pos":[96,32]},
+            "middle":{"type":"transform","inputs":{"geo":"source"},"pos":[96,160]},
+            "out":{"type":"output","inputs":{"geo":"middle"},"pos":[96,288]},
+            "branch":{"type":"normal","inputs":{"geo":"middle"},"pos":[416,288]}
+        },"display":["out","branch"]});
+        for source in ["out", "middle", "source"] {
+            for ty in ["transform", "polyextrude", "inset", "polybevel", "pushpull", "mirror", "grow", "loop_cut"] {
+                let (next, id) = add(&base, ty, Some(source)).unwrap();
+                let anchor = if source == "out" { "middle" } else { source };
+                assert_eq!(next["nodes"][&id]["inputs"]["geo"], anchor, "{source} {ty}");
+                assert_eq!(next["nodes"][&id]["pos"][0].as_f64(), base["nodes"][if source == "out" { "out" } else { source }]["pos"][0].as_f64());
+                if source == "out" { assert_eq!(next["nodes"]["out"]["inputs"]["geo"], id); }
+                else {
+                    for consumer in ["middle", "out", "branch"] {
+                        if base["nodes"][consumer]["inputs"]["geo"] == source { assert_eq!(next["nodes"][consumer]["inputs"]["geo"], id); }
+                    }
+                }
+                assert_eq!(next["display"], base["display"]);
+                let origin_y = base["nodes"][if source == "out" { "out" } else { source }]["pos"][1].as_f64().unwrap();
+                assert_eq!(next["nodes"][&id]["pos"][1].as_f64().unwrap(), origin_y + if source == "out" { 0.0 } else { 128.0 });
+                if source == "out" { assert_eq!(next["nodes"]["out"]["pos"], json!([96.,416.])); }
+                if source == "middle" { assert_eq!(next["nodes"]["out"]["pos"], json!([96.,416.])); }
+                let mut doc = validated(base.clone()).unwrap();
+                let mut history = minihou_app::History::default();
+                history.replace(&mut doc, validated(next).unwrap());
+                history.undo(&mut doc).unwrap();
+                assert_eq!(doc.value(), &base);
+            }
+        }
+    }
+    #[test] fn output_insertion_materializes_unpositioned_stream() {
+        let base = json!({"nodes":{"box1":{"type":"box"},"out":{"type":"output","inputs":{"geo":"box1"}}},"display":"out"});
+        let (next,id) = add(&base,"transform",Some("out")).unwrap();
+        assert_eq!(next["nodes"][&id]["pos"], json!([96.,160.]));
+        assert_eq!(next["nodes"]["out"]["pos"], json!([96.,288.]));
+        assert_eq!(next["nodes"]["out"]["inputs"]["geo"], id);
+    }
+    #[test] fn repairs_operator_hanging_after_output() {
+        let mut bad = json!({"nodes":{"source":{"type":"box","pos":[96,32]},
+            "out":{"type":"output","inputs":{"geo":"source"},"pos":[96,160]},
+            "transform1":{"type":"transform","inputs":{"geo":"out"},"pos":[96,288]}},"display":"out"});
+        assert_eq!(repair_output_hangs(&mut bad), 1);
+        assert_eq!(bad["nodes"]["transform1"]["inputs"]["geo"], "source");
+        assert_eq!(bad["nodes"]["out"]["inputs"]["geo"], "transform1");
+        assert_eq!(bad["nodes"]["transform1"]["pos"], json!([96.,160.]));
+        assert_eq!(bad["nodes"]["out"]["pos"], json!([96.,288.]));
+    }
     #[test] fn measurement_deletion_and_clear_are_undoable_document_edits() {
         let mut base=graph(); base["nodes"]["box1"]["measurement_identity"]=json!("stable");
         base["measurements"]=json!([{"id":"one","points":[[0,0,0],[1,0,0]],"refs":[{"node":"box1","identity":"stable","point":0,"point_count":8},null],"a":[0,0,0],"b":[1,0,0]},{"a":[0,0,0],"b":[2,0,0]}]);
@@ -701,7 +833,8 @@ mod tests {
         assert_eq!(next["nodes"][&id]["inputs"]["geo"], "b");
         assert_eq!(next["nodes"]["c"]["inputs"]["geo"], id.as_str());
         assert_eq!(next["nodes"]["merge"]["inputs"]["geos"], json!(["a",id]));
-        assert_eq!(next["nodes"]["out"], base["nodes"]["out"]);
+        assert_eq!(next["nodes"]["out"]["inputs"], base["nodes"]["out"]["inputs"]);
+        assert_eq!(next["nodes"]["out"]["pos"], json!([96., 544.]));
         assert_eq!(next["display"], base["display"]);
         validated(next).unwrap();
         let (next, _) = add_connected(&base, "normal", &AddConnection::Output("b".into()), [0.,0.]).unwrap();
