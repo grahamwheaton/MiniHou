@@ -71,7 +71,7 @@ impl FaceMarkers {
         assert!(super::super::display_render_tests::changed(&image,&hover)>0);
         assert!(gpu.face_markers.update(&device,&scene,&topo,&[],&[],ObjectVisibility::HideOthers,&[]));
         assert_eq!(gpu.face_markers.count,0);
-        gpu.face_markers.invalidate();
+        gpu.upload_lod(&device,&scene);
         assert!(gpu.face_markers.update(&device,&scene,&topo,&selected,&[],ObjectVisibility::ShowAll,&[]));
     }
 }

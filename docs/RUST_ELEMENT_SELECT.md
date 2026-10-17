@@ -112,7 +112,7 @@ Going up requires complete containment, so a single point or edge never selects 
 Switching to Object mode stashes the element selection and hides it; entering an element
 mode again converts the stash from the mode it was made in (pre-rust `lastMode`).
 
-Face-centre markers use cached GPU instances. Camera movement projects the cached centres on the GPU; pointer hover updates only the hovered markers. Selection or scene changes rebuild the base marker instances. This avoids projecting and tessellating a UI circle for every face each frame.
+Face-centre markers use cached GPU instances. Camera movement projects the cached centres on the GPU; pointer hover updates only the hovered markers. Selection or scene changes rebuild the base marker instances. This avoids projecting and tessellating a UI circle for every face each frame. The gizmo centre and averaged normal are also cached by selection, cooked geometry revision and visibility; camera redraws do not sort all selected triangle vertices again.
 
 ## Approximations
 

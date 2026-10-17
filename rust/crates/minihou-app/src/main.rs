@@ -1,5 +1,7 @@
 mod picking;
 mod element_select;
+mod selection_metrics;
+#[cfg(test)] mod face_mode_profile;
 use minihou_app::graph_edit;
 mod noodle_hit;
 mod http_ui;
@@ -425,6 +427,7 @@ struct App {
     lod_uploaded: bool, last_lod_view: Option<([[f32;4];4], [u32;2], bool)>, last_lod_select: Instant,
     blender_paths: Vec<PathBuf>, blender_bar: bool,
     selection: picking::Selection, selection_dirty: bool,
+    selection_metrics: selection_metrics::Cache,
     /// Polygon/edge adjacency of `scene` for loops, rings, paths and mode conversion (built on first use).
     elem_topo: std::cell::OnceCell<element_select::Topology>,
     /// The element selection hidden while in Object mode; converted back when an element mode is entered.
@@ -529,7 +532,7 @@ impl App {
             http:http_ui::HttpUi::default(),http_time:(1.,24.),
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),link:None,blender_job:None,
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
-            display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
+            display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,selection_metrics:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
             clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,embed_conflict:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
             last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default() };
         app.prefs = Preferences::load();
@@ -779,23 +782,16 @@ impl App {
         if self.editor_state.selection == ui::SelectionMode::Object {
             return self.active_object().map(|id| object_origin(self.editor.doc.value(), id));
         }
-        let scene = self.scene.as_ref()?; let points = scene.positions(); let ids = self.selected_points();
-        if ids.is_empty() { return None; }
-        let mut sum = [0.; 3]; let mut count = 0.;
-        for id in ids { let k = id as usize * 3; if let Some(p) = points.get(k..k + 3) { for a in 0..3 { sum[a] += p[a]; } count += 1.; } }
-        (count > 0.).then(|| sum.map(|x| x / count))
+        self.element_metrics().center
+    }
+    fn element_metrics(&self) -> selection_metrics::Metrics {
+        let Some(scene)=self.scene.as_ref() else { return Default::default(); };
+        self.selection_metrics.get(self.cooking.completed,&self.selection,self.editor_state.selection,scene,
+            self.editor_state.object_visibility,&self.display_ranges,&self.selected_set)
     }
     fn selection_normal_frame(&self, trs: &transform_math::TrsParams) -> transform_math::Frame {
         let local = transform_math::Frame::from_rotation(&trs.world_rotation());
-        let Some(scene) = &self.scene else { return local; };
-        let ids = self.selected_points();
-        if ids.is_empty() { return local; }
-        let mut normal = [0.0_f64; 3];
-        for id in ids {
-            if let Some(n) = scene.normals().get(id as usize * 3..id as usize * 3 + 3) {
-                for i in 0..3 { normal[i] += n[i] as f64; }
-            }
-        }
+        let normal = self.element_metrics().normal;
         if transform_math::length3(normal) < 1e-9 { return local; }
         transform_math::Frame::from_normal(normal, local.axis(0))
     }
@@ -3197,6 +3193,3 @@ mod tools_tests {
         assert_eq!(params["proportional_falloff"], "random");
     }
 }
-
-
-

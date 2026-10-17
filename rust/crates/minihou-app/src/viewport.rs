@@ -718,6 +718,7 @@ impl Gpu {
     }
     /// Retain the source vertex attributes but start with no triangles; selection uploads a cut.
     pub fn upload_lod(&mut self, device: &wgpu::Device, sc: &Scene) {
+        self.face_markers.invalidate();
         self.upload(device,&sc.proxied(0.0));
     }
     pub fn select_lod(&mut self, device: &wgpu::Device, lod: &ClusterLod, ids: &[ClusterId], wire: bool) {
