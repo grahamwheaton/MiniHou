@@ -166,7 +166,8 @@
   "group": {
    "default": "",
    "doc": "Only these points",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "iterations": {
    "default": 5,
@@ -208,7 +209,9 @@
   "group": {
    "default": "",
    "doc": "Only set it on these elements (others get 0); points or primitives",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain_default": "points",
+   "pick_domain_param": "domain"
   },
   "name": {
    "default": "attrib1",
@@ -308,7 +311,9 @@
   "group": {
    "default": "",
    "doc": "Only these elements (points or primitives)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain_default": "points",
+   "pick_domain_param": "domain"
   },
   "max": {
    "default": [
@@ -372,7 +377,8 @@
   "group": {
    "default": "",
    "doc": "Only these points of the first input",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "max_distance": {
    "default": 1000000000.0,
@@ -406,7 +412,8 @@
   "group": {
    "default": "",
    "doc": "Only these points",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "length": {
    "default": 1.0,
@@ -491,7 +498,9 @@
   "group": {
    "default": "",
    "doc": "What to delete: group names, ^exclusions, numbers/ranges, or an expression like '@P.z < 0'",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain_default": "points",
+   "pick_domain_param": "group_type"
   },
   "keep_unused_points": {
    "default": false,
@@ -515,7 +524,8 @@
   "group": {
    "default": "",
    "doc": "Only blend these points (empty: all)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "mask": {
    "default": "",
@@ -1142,7 +1152,9 @@
   "group": {
    "default": "",
    "doc": "Only these points or primitives",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain_default": "points",
+   "pick_domain_param": "domain"
   },
   "mode": {
    "default": "constant",
@@ -1205,7 +1217,8 @@
   "group": {
    "default": "",
    "doc": "Only these primitives",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "keep_above": {
    "default": true,
@@ -1339,7 +1352,8 @@
   "group": {
    "default": "",
    "doc": "Points or primitives to compute the hull from (empty: all)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "positions_2d": {
    "default": "fit_plane",
@@ -1447,7 +1461,10 @@
   "group": {
    "default": "",
    "doc": "Edge selection or point group; empty selects all",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points",
+   "pick_domain_default": "edges",
+   "pick_domain_param": "domain"
   },
   "sharpness": {
    "default": 2.0,
@@ -1559,7 +1576,8 @@
   "group": {
    "default": "",
    "doc": "Primitives to merge (pattern; empty: all)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   }
  },
  "dissolve_edges": {
@@ -1573,7 +1591,8 @@
   "group": {
    "default": "",
    "doc": "Interior edges to remove; empty selection is a no-op",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges"
   },
   "preserve_seams": {
    "default": true,
@@ -1585,14 +1604,16 @@
   "group": {
    "default": "",
    "doc": "Primitives to triangulate (pattern; empty: all)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   }
  },
  "edge_collapse": {
   "group": {
    "default": "",
    "doc": "Edges to collapse: ids/ranges, p0-1 pairs, edge group names; empty does nothing",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges"
   },
   "outgrp_collapsed": {
    "default": false,
@@ -1616,14 +1637,16 @@
   "group": {
    "default": "",
    "doc": "Edges to make hard: ids/ranges, p0-1 pairs, edge group names",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges"
   }
  },
  "edge_flip": {
   "group": {
    "default": "",
    "doc": "Edges to flip: ids/ranges, p0-1 pairs, edge group names; empty does nothing",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges"
   },
   "outgrp_flipped": {
    "default": false,
@@ -1668,7 +1691,8 @@
   "pattern": {
    "default": "*",
    "doc": "Edges: ids/ranges, p0-1 pairs, names, wildcards, ^exclusions. Other methods: point/primitive group pattern.",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges"
   }
  },
  "edge_group_promote": {
@@ -1680,7 +1704,8 @@
   "pattern": {
    "default": "*",
    "doc": "Derived edge selection",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges"
   },
   "to": {
    "default": "points",
@@ -1723,7 +1748,8 @@
   "group": {
    "default": "",
    "doc": "Selected edge group or pA-B pairs; empty leaves the mesh unchanged.",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges"
   },
   "mirror_editing": {
    "default": true,
@@ -1826,7 +1852,9 @@
   "group": {
    "default": "",
    "doc": "Only these elements (the rest get min)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain_default": "points",
+   "pick_domain_param": "domain"
   },
   "inside": {
    "default": false,
@@ -1916,7 +1944,8 @@
   "group": {
    "default": "",
    "doc": "Points to round (empty: every corner)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "min_angle": {
    "default": 1.0,
@@ -2172,7 +2201,8 @@
   "group": {
    "default": "0",
    "doc": "Point group/pattern to fix; empty fixes all points",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   }
  },
  "goal_solve": {
@@ -2216,7 +2246,8 @@
   "group": {
    "default": "",
    "doc": "Point selection; empty selects all",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "strength": {
    "default": 1.0,
@@ -2300,7 +2331,8 @@
   "group": {
    "default": "",
    "doc": "Boundary edges to fill: edge ids, pA-B point pairs or edge group names (empty: every boundary loop).",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges"
   },
   "offset": {
    "default": 0,
@@ -2513,7 +2545,9 @@
   "pattern": {
    "default": "*",
    "doc": "pattern method: group names, ^exclusions, numbers/ranges ('0-9'), or '@P.z > 1'",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain_default": "points",
+   "pick_domain_param": "domain"
   },
   "percent": {
    "default": 50.0,
@@ -2581,7 +2615,9 @@
   "group": {
    "default": "group1",
    "doc": "Group (or pattern) to grow or shrink",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain_default": "primitives",
+   "pick_domain_param": "domain"
   },
   "mode": {
    "default": "expand",
@@ -2702,7 +2738,9 @@
   "group": {
    "default": "",
    "doc": "Selection to grow or shrink: group name or pattern in the chosen domain (empty: everything)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain_default": "primitives",
+   "pick_domain_param": "domain"
   },
   "keep_selection": {
    "default": true,
@@ -3013,7 +3051,8 @@
   "group": {
    "default": "",
    "doc": "",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "mode": {
    "default": "connected",
@@ -3099,7 +3138,8 @@
   "group": {
    "default": "",
    "doc": "Only these points get instances",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "objects": {
    "default": "",
@@ -3169,7 +3209,8 @@
   "group": {
    "default": "",
    "doc": "",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "outside": {
    "default": "clamp",
@@ -3281,7 +3322,8 @@
   "group": {
    "default": "",
    "doc": "Only these points",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "length": {
    "default": 1.0,
@@ -3869,7 +3911,8 @@
   "group": {
    "default": "",
    "doc": "Primitives to mirror when Operation is Mirror Selected.",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "keep_original": {
    "default": true,
@@ -4011,7 +4054,8 @@
   "group": {
    "default": "",
    "doc": "Only change these points: group names, ^exclusions, numbers/ranges or '@P.z > 0'. Empty: all",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "lacunarity": {
    "default": 2.0,
@@ -4102,7 +4146,8 @@
   "group": {
    "default": "",
    "doc": "Only these points (the rest get 1 for occlusion, 0 for thickness)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "invert": {
    "default": false,
@@ -4178,7 +4223,8 @@
   "group": {
    "default": "",
    "doc": "",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "mode": {
    "default": "connected",
@@ -4688,7 +4734,8 @@
   "group": {
    "default": "",
    "doc": "Only these points",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   }
  },
  "point": {
@@ -4706,7 +4753,8 @@
   "group": {
    "default": "",
    "doc": "",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "max_points": {
    "default": 16,
@@ -4726,7 +4774,8 @@
   "group": {
    "default": "",
    "doc": "",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "scale": {
    "default": [
@@ -4824,17 +4873,22 @@
   "edges": {
    "default": "",
    "doc": "Edges to bevel as point pairs, e.g. '12-13 40-41' (the 3-D view's edge selection writes this). When set, exactly these interior edges are bevelled and min_angle is ignored",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges",
+   "pick_format": "pairs"
   },
   "exclude_edges": {
    "default": "",
    "doc": "Edges to exclude: edge ids, named groups, or pA-B point pairs.",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges"
   },
   "group": {
    "default": "",
    "doc": "What to bevel, read as 'group_type' (empty: every sharp edge, see min_angle)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain_default": "points",
+   "pick_domain_param": "group_type"
   },
   "group_type": {
    "default": "points",
@@ -4981,7 +5035,8 @@
   "group": {
    "default": "",
    "doc": "Closed convex planar profile primitives",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "keep_input": {
    "default": false,
@@ -5081,12 +5136,15 @@
   "edges": {
    "default": "",
    "doc": "Optional edge selection for edge extrusion.",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges",
+   "pick_format": "pairs"
   },
   "group": {
    "default": "",
    "doc": "Primitives to extrude (pattern; empty: all)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "inset": {
    "default": 0.0,
@@ -5142,7 +5200,8 @@
   "points": {
    "default": "",
    "doc": "Optional point selection for point extrusion.",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   }
  },
  "polyfill": {
@@ -5283,7 +5342,8 @@
   "group": {
    "default": "",
    "doc": "Exactly one convex planar face; inset a face first to create a smaller opening",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "through": {
    "default": "auto",
@@ -5453,7 +5513,8 @@
   "group": {
    "default": "",
    "doc": "Only these points",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "import_attribs": {
    "default": "",
@@ -5819,7 +5880,8 @@
   "group": {
    "default": "",
    "doc": "Links to edit: group names, ranges or '@area > 0.1' (empty: all). 'internal' / 'external' from glue_cluster work here",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "mode": {
    "default": "set",
@@ -6135,7 +6197,8 @@
   "group": {
    "default": "",
    "doc": "Faces to orient (empty: all).",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "inside": {
    "default": false,
@@ -6295,7 +6358,8 @@
   "group": {
    "default": "",
    "doc": "Primitives to resample (others are dropped); empty: all",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "length": {
    "default": 0.1,
@@ -6316,7 +6380,8 @@
   "group": {
    "default": "",
    "doc": "Primitives to reverse (pattern; empty: all)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "reverse_normals": {
    "default": true,
@@ -6635,7 +6700,8 @@
   "seeds": {
    "default": "",
    "doc": "Seed edges: edge ids, p<a>-<b> point pairs, edge group names or wildcards (empty: nothing selected)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges"
   }
  },
  "select_path": {
@@ -6694,7 +6760,9 @@
   "waypoints": {
    "default": "",
    "doc": "Ordered elements to route through: ids (edges also p<a>-<b>) keep their order; group names add members in element order",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain_default": "points",
+   "pick_domain_param": "domain"
   }
  },
  "select_ring": {
@@ -6735,7 +6803,8 @@
   "seeds": {
    "default": "",
    "doc": "Seed edges: edge ids, p<a>-<b> point pairs, edge group names or wildcards (empty: nothing selected)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges"
   }
  },
  "set_material": {
@@ -6751,7 +6820,8 @@
   "group": {
    "default": "",
    "doc": "Which ones: group names, ranges or '@area > 0.1' (empty: all of them)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "index_attrib": {
    "default": "",
@@ -6817,7 +6887,8 @@
   "group": {
    "default": "",
    "doc": "Profiles in primitive-number order; equal point counts and matching closure required",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "keep_profiles": {
    "default": false,
@@ -6846,7 +6917,8 @@
   "group": {
    "default": "",
    "doc": "Only these primitives",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "normal": {
    "default": [
@@ -6878,7 +6950,8 @@
   "group": {
    "default": "",
    "doc": "Only these points",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "iterations": {
    "default": 10,
@@ -6930,7 +7003,8 @@
   "group": {
    "default": "",
    "doc": "The points (or faces' points) that move fully; their neighbours follow within the radius",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "radius": {
    "default": 1.0,
@@ -6961,7 +7035,8 @@
   "group": {
    "default": "",
    "doc": "Only these points can move; distance is Euclidean from center",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "radius": {
    "default": 1.0,
@@ -7006,7 +7081,8 @@
   "group": {
    "default": "",
    "doc": "Only these primitives (the rest stay single sheets and follow the points they share)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "offset": {
    "default": -1.0,
@@ -7202,7 +7278,8 @@
   "group": {
    "default": "",
    "doc": "Only these points",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "preserve_volume": {
    "default": true,
@@ -7230,7 +7307,8 @@
   "creases": {
    "default": "",
    "doc": "Edges to crease: an edge group, edge numbers or pA-B pairs. They get their creaseweight (1 where it has none), or 'crease_weight' when 'override_crease_weight' is on",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "edges"
   },
   "depth": {
    "default": 1,
@@ -7412,7 +7490,8 @@
   "group": {
    "default": "",
    "doc": "Only move these points: group names, ^exclusions, numbers/ranges or '@P.z > 0' (a primitive group moves its points). Empty: all",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "pivot": {
    "default": [
@@ -7511,7 +7590,8 @@
   "group": {
    "default": "",
    "doc": "Faces to merge (empty: all triangles).",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "materials": {
    "default": false,
@@ -7649,7 +7729,8 @@
   "group": {
    "default": "",
    "doc": "Only these points",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "points"
   },
   "origin": {
    "default": [
@@ -7873,7 +7954,8 @@
   "group": {
    "default": "",
    "doc": "Only these primitives (others keep their uv)",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "method": {
    "default": "box",
@@ -7949,7 +8031,8 @@
   "group": {
    "default": "",
    "doc": "Only these primitives",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain": "primitives"
   },
   "pivot": {
    "default": "center",
@@ -8341,7 +8424,9 @@
   "group": {
    "default": "",
    "doc": "Only change these elements: group names, ^exclusions, numbers/ranges, or an expression like '@P.z > 0' (empty: all). Over vertices, a primitive group selects its corners",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain_default": "points",
+   "pick_domain_param": "domain"
   },
   "run_over": {
    "default": "points",
