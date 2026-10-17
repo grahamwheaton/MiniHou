@@ -284,6 +284,12 @@ def meta() -> dict:
         "output_group": {"kind": "bool", "default": False, "doc": "Write the faces that were flipped to a primitive group."},
         "output_group_name": {"kind": "str", "default": "flipped", "enabled_if": {"output_group": True}, "doc": "Name of the flipped faces' group."},
     }
+    out["array"] = {
+        "count": {"kind": "int", "default": 2, "min": 1, "max": 10000, "doc": "Number of copies, including the original (1 leaves the input unchanged)."},
+        "relative_offset": {"kind": "vec3", "default": [1.0, 0.0, 0.0], "doc": "Offset between copies as a fraction of the input bounds size per axis (Blender Relative Offset)."},
+        "constant_offset": {"kind": "vec3", "default": [0.0, 0.0, 0.0], "doc": "Offset between copies in scene units, added to the relative offset (Blender Constant Offset)."},
+        "merge_distance": {"kind": "float", "default": 0.0, "min": 0.0, "doc": "Weld points of each copy onto the previous copy within this distance (0: no merge). Object offset is not supported."},
+    }
     out["tris_to_quads"] = {
         "group": {"kind": "str", "default": "", "doc": "Faces to merge (empty: all triangles)."},
         "face_threshold": {"kind": "float", "default": 40.0, "min": 0.0, "max": 180.0, "doc": "Maximum angle between the two triangle normals, in degrees (Blender Max Face Angle)."},

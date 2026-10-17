@@ -30,6 +30,7 @@ mod modify;
 mod output;
 mod model;
 mod mirror;
+mod array;
 mod planar_offset;
 mod pushpull;
 mod boolean;
@@ -208,6 +209,7 @@ pub fn registry() -> &'static [NodeSpec] {
         model::FACET,
         model::DIVIDE,
         model::MIRROR,
+        array::ARRAY,
         model::CLIP,
         model::POLYFILL,
         model::POLYEXTRUDE,

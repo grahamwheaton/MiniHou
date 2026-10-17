@@ -1,4 +1,37 @@
 {
+ "array": {
+  "constant_offset": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Offset between copies in scene units, added to the relative offset (Blender Constant Offset).",
+   "kind": "vec3"
+  },
+  "count": {
+   "default": 2,
+   "doc": "Number of copies, including the original (1 leaves the input unchanged).",
+   "kind": "int",
+   "max": 10000,
+   "min": 1
+  },
+  "merge_distance": {
+   "default": 0.0,
+   "doc": "Weld points of each copy onto the previous copy within this distance (0: no merge). Object offset is not supported.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "relative_offset": {
+   "default": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Offset between copies as a fraction of the input bounds size per axis (Blender Relative Offset).",
+   "kind": "vec3"
+  }
+ },
  "assemble": {
   "groups": {
    "default": "*",
