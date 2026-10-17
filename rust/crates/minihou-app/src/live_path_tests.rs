@@ -4,6 +4,50 @@ use super::*;
 fn cook(doc: &Value, node: &str) -> std::sync::Arc<minihou_core::Geometry> {
     Graph::from_value(doc).unwrap().cook(Some(node)).unwrap()
 }
+#[test]
+fn loop_cut_confirm_selects_the_cooked_loop() {
+    let base=stepped_doc();
+    let (value,_) = graph_edit::add_viewport_cut(base.value(),"out","polysplit",json!({
+        "mode":"edge_loop","split_edges":"p0-1","loops":2,"position":0.5,"factor":0.4,
+        "outgrp_edges":true,"outgrp_edges_name":"viewport_loop_cut"
+    })).unwrap();
+    let g=cook(&value,"out");
+    let selection=loop_cut_selection(&g,&(0..g.npoints as u32));
+    assert_eq!(selection.mode,ui::SelectionMode::Edges);
+    assert_eq!(selection.edges.len(),8);
+    let scene=Scene::new(&g);
+    assert!(selection.edges.iter().all(|edge|scene.edge_indices().chunks_exact(2)
+        .any(|pair|(pair[0],pair[1])==*edge)));
+}
+
+#[test]
+fn undo_restores_face_selection_for_another_extrude() {
+    let mut doc=stepped_doc();
+    let original=cook(doc.value(),"out");
+    let scene=Scene::new(&original);
+    let topo=element_select::Topology::new(scene.positions(),scene.triangle_indices(),scene.edge_indices());
+    let face=topo.polygons().next().unwrap();
+    let selection=picking::Selection {mode:ui::SelectionMode::Faces,tris:topo.poly_tris(face).to_vec(),..Default::default()};
+    let mut memory=element_select::SelectionMemory::default();
+    let key=element_select::topology_key(scene.positions().len()/3,scene.triangle_indices(),scene.edge_indices());
+    assert_eq!(memory.retarget(key,(selection.clone(),picking::Selection::default())).0,selection);
+    let mut history=minihou_app::History::default();
+    let (next,_)=ui::modal_model::insert_graph(&doc,"out",ModelKind::Extrude,json!({"group":face.to_string(),"distance":0.2})).unwrap();
+    history.record(doc.clone(),&next); doc=next;
+    let mut records=vec![(doc.value().to_string(),selection.clone(),picking::Selection::default())];
+    let changed=Scene::new(&cook(doc.value(),"out"));
+    let changed_key=element_select::topology_key(changed.positions().len()/3,changed.triangle_indices(),changed.edge_indices());
+    memory.retarget(changed_key,(selection.clone(),picking::Selection::default()));
+    let saved=undo_selection_for(&mut records,&doc.value().to_string(),&picking::Selection::default()).unwrap();
+    history.undo(&mut doc).unwrap();
+    let _=memory.retarget(key,(picking::Selection::default(),picking::Selection::default()));
+    let restored=saved.0;
+    assert_eq!(restored,selection);
+    let faces=topo.polys_of(&restored.tris);
+    let group=faces.iter().map(u32::to_string).collect::<Vec<_>>().join(" ");
+    let (repeated,_)=ui::modal_model::insert_graph(&doc,"out",ModelKind::Extrude,json!({"group":group,"distance":0.3})).unwrap();
+    cook(repeated.value(),"out");
+}
 /// The polygon whose centroid sits at the centre of a bounding face (the inset's inner face on that side).
 fn centre_face(scene: &Scene, topo: &element_select::Topology) -> u32 {
     let p = scene.positions(); let tris = scene.triangle_indices();
