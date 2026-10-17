@@ -135,7 +135,8 @@ class InstanceClient:
                 expected = {"instance_cook": "instance_result", "instance_describe": "instance_description",
                             "instance_remove": "instance_removed", "instance_edit": "instance_synced",
                             "instance_sync": "instance_synced", "instance_sources": "instance_sources_set",
-                            "graph_push": "graph_ack", "graph_pull": "graph_state"}[header["type"]]
+                            "graph_push": "graph_ack", "graph_pull": "graph_state",
+                            "input_define": "input_define_ack"}[header["type"]]
                 if reply.get("type") not in (expected, "instance_error"):
                     raise ProtocolError("unexpected modifier response type")
             except Exception:
@@ -195,6 +196,13 @@ class InstanceClient:
         if not self.has_capability("graph_embed_v1"):
             return {"type": "graph_state", "status": "unsupported"}
         return self._request({"type": "graph_pull", "instance_id": instance_id})[0]
+
+    def define_input(self, message):
+        """input_define_v1: {"status": "ok", "input", "graph", "interface"} or {"status": "error", "code", "message"}."""
+        if not self.has_capability("input_define_v1"):
+            return {"type": "input_define_ack", "status": "error", "code": "unsupported",
+                    "message": "the connected MiniHou app cannot define inputs (update it)"}
+        return self._request(dict(message))[0]
 
     def sync_live(self, instance_id, params):
         return self._request({"type": "instance_sync", "instance_id": instance_id, "params": params})[0]

@@ -650,6 +650,10 @@ def _sync_usage_chain(ng, params: List[dict], ids: Dict[str, str]) -> None:
     reference_ids = ({item.identifier: _REFERENCE_COMPARE_TYPES[item.socket_type]
                       for item in _sockets(ng, "INPUT") if item.socket_type in _REFERENCE_COMPARE_TYPES}
                      if bpy.app.version >= (5, 2, 0) else {})
+    # Store Named Attribute has no STRING type (Blender 5.2 rejects it): a string input feeds a string Compare.
+    for p in [p for p in params if p["kind"] == "string"]:
+        reference_ids[ids[p["name"]]] = "STRING"
+        params.remove(p)
     compare_prefix = OBJECT_USAGE_PREFIX
     for node in list(tree.nodes):
         if node.name.startswith(compare_prefix) and node.name[len(compare_prefix):] not in reference_ids:
@@ -915,7 +919,10 @@ def write_values(mod, ng, params: List[dict], values: Dict[str, object]) -> None
         v = values[p["name"]]
         if p["kind"] in {"geometry", "bundle", "closure"}:
             continue
-        if not same_value(canonical(p["kind"], get_input(mod, ident)), v):
+        current = get_input(mod, ident)
+        if p["kind"] == "menu" and isinstance(current, int):
+            continue   # Blender < 5.2 stores menus as internal int ids the Python API cannot map; keep Blender's
+        if not same_value(canonical(p["kind"], current), v):
             if p["kind"] in {"object", "collection", "material", "image", "texture"} and isinstance(v, str):
                 v = getattr(bpy.data, {"object":"objects", "collection":"collections", "material":"materials", "image":"images", "texture":"textures"}[p["kind"]]).get(v)
             if p["kind"] == "matrix":
@@ -936,7 +943,12 @@ def read_values(mod, ng, params: List[dict]) -> Dict[str, object]:
             continue
         if p["kind"] in {"geometry", "bundle", "closure"}:
             continue
-        out[p["name"]] = canonical(p["kind"], get_input(mod, ident))
+        value = get_input(mod, ident)
+        if p["kind"] == "menu" and isinstance(value, int):
+            # Blender < 5.2 int menu id: report the menu socket's default (the int cannot be mapped to a name).
+            item = next((i for i in _sockets(ng, "INPUT") if i.identifier == ident), None)
+            value = getattr(item, "default_value", "") or p.get("value", "")
+        out[p["name"]] = canonical(p["kind"], value)
     return out
 
 
