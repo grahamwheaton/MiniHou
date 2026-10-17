@@ -143,6 +143,25 @@ fn addon_source_in(roots: &[PathBuf]) -> Option<PathBuf> {
         .find(|path| path.join("__init__.py").is_file())
 }
 
+/// `bl_info` version ("0.4.0") declared in an add-on `__init__.py`.
+fn version_in_source(text: &str) -> Option<String> {
+    text.lines().find(|l| l.trim_start().starts_with("\"version\"")).and_then(|l| {
+        let inner = l.split('(').nth(1)?.split(')').next()?;
+        Some(inner.split(',').map(|n| n.trim()).filter(|n| !n.is_empty()).collect::<Vec<_>>().join("."))
+    })
+}
+
+/// The add-on source tree whose version equals `wanted`. Search roots can include an unrelated
+/// older checkout (an exe copied into another repo folder), which must never be installed.
+fn addon_source_matching(roots: &[PathBuf], wanted: &str) -> Option<PathBuf> {
+    roots
+        .iter()
+        .map(|root| root.join("blender_addon/minihou_link"))
+        .find(|path| {
+            fs::read_to_string(path.join("__init__.py")).ok().and_then(|t| version_in_source(&t)).as_deref() == Some(wanted)
+        })
+}
+
 /// Keep generated archives in the OS temp directory for Blender startup and manual installation.
 pub fn prepare_addon_zip() -> io::Result<PathBuf> {
     let mut roots = Vec::new();
@@ -159,9 +178,15 @@ pub fn prepare_addon_zip() -> io::Result<PathBuf> {
         roots.extend(start.ancestors().map(Path::to_path_buf));
     }
     // A checkout must package its current source, even if an older release ZIP is nearby.
-    let Some(source) = addon_source_in(&roots) else {
-        return addon_zip().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound,
-            "No MiniHou_Link*.zip or blender_addon/minihou_link/__init__.py found beside the app or in its source tree"));
+    let wanted = addon_version();
+    let Some(source) = addon_source_matching(&roots, &wanted) else {
+        let other = addon_source_in(&roots)
+            .and_then(|p| fs::read_to_string(p.join("__init__.py")).ok())
+            .and_then(|t| version_in_source(&t));
+        return addon_zip().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, match other {
+            Some(found) => format!("Add-on sources found beside the app are V{found}, but this app bundles V{wanted}. Not installing a mismatched add-on: build or run the app from the matching checkout, or place a MiniHou_Link*.zip of V{wanted} beside it."),
+            None => format!("No MiniHou_Link*.zip or blender_addon/minihou_link/__init__.py (V{wanted}) found beside the app or in its source tree"),
+        }));
     };
     let temp = TempDir::new()?;
     let zip = temp.0.join("MiniHou_Link.zip");
@@ -259,10 +284,7 @@ minihou_guard(minihou_bootstrap)
 /// Version of the bundled Blender add-on (bl_info in blender_addon/minihou_link/__init__.py), e.g. "0.1.5".
 pub fn addon_version() -> String {
     const SOURCE: &str = include_str!("../../../../blender_addon/minihou_link/__init__.py");
-    SOURCE.lines().find(|l| l.trim_start().starts_with("\"version\"")).and_then(|l| {
-        let inner = l.split('(').nth(1)?.split(')').next()?;
-        Some(inner.split(',').map(|n| n.trim()).filter(|n| !n.is_empty()).collect::<Vec<_>>().join("."))
-    }).unwrap_or_else(|| "unknown".into())
+    version_in_source(SOURCE).unwrap_or_else(|| "unknown".into())
 }
 
 pub fn open_blender(exe: &Path, graph: &Path) -> io::Result<Child> {
@@ -1908,5 +1930,32 @@ mod addon_version_tests {
     #[test] fn bundled_addon_version_is_parsed() {
         let v = super::addon_version();
         assert!(v.split('.').count() >= 2 && v.split('.').all(|n| n.parse::<u32>().is_ok()), "got {v}");
+    }
+}
+
+#[cfg(test)]
+mod addon_source_version_tests {
+    use super::*;
+    fn tree(root: &Path, version: &str) {
+        let dir = root.join("blender_addon/minihou_link");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("__init__.py"), format!("bl_info = {{
+    \"version\": ({version}),
+}}
+")).unwrap();
+    }
+    #[test]
+    fn install_never_packages_a_mismatched_checkout() {
+        let temp = TempDir::new().unwrap();
+        let (old, new) = (temp.0.join("old"), temp.0.join("new"));
+        tree(&old, "0, 1, 7");
+        tree(&new, "0, 4, 0");
+        // The older checkout comes first in the search order, as when the exe sits inside it.
+        let roots = vec![old.clone(), new.clone()];
+        assert_eq!(addon_source_matching(&roots, "0.4.0"), Some(new.join("blender_addon/minihou_link")));
+        assert_eq!(addon_source_matching(&roots, "0.1.7"), Some(old.join("blender_addon/minihou_link")));
+        assert_eq!(addon_source_matching(&roots, "9.9.9"), None);
+        assert_eq!(version_in_source("    \"version\": (0, 4, 0),
+").as_deref(), Some("0.4.0"));
     }
 }
