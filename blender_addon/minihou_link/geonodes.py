@@ -223,7 +223,8 @@ def _sources(client, ident, bindings, materials, extra=None):
             h.update(array.tobytes())
     token = h.hexdigest()
     if _source_sent.get(ident) != (client, token):
-        client.set_sources(ident, sources)
+        revision = client.sync_materials(ident, materials)
+        client.set_sources(ident, sources, materials=materials, manifest_revision=revision)
         _source_sent[ident] = (client, token)
     return token
 
@@ -765,11 +766,15 @@ def _cook_tree(obj, mod, host, port, force):
                     tree[modifiers.STATUS] = ready
                 continue
             scene = bpy.context.scene
+            client = modifiers._connection(host, port)
+            render_uv = next((layer.name for layer in obj.data.uv_layers if layer.active_render), None)
+            manifest_revision = client.sync_materials(tree[KEY], materials, render_uv)
             header, output = modifiers._connection(host, port).cook(
                 tree[KEY], tree[modifiers.PATH], values, arrays,
                 frame=scene.frame_current + scene.frame_subframe,
                 fps=scene.render.fps / scene.render.fps_base, graph=graph,
                 materials=[m.name if m is not None else "" for m in materials],
+                manifest_revision=manifest_revision,
                 references=_placement_references(root, mod, path[:-1], node, obj))
             output, manifests = instance_payload(header, output)
             update = GeoUpdate.from_message(header, output)

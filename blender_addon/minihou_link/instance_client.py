@@ -86,7 +86,7 @@ class InstanceClient:
             try:
                 send_message(sock, {"type": "hello", "protocol": PROTOCOL_VERSION,
                                     "mode": "instances", "client": "Blender modifiers",
-                                    "capabilities": ["shm_v1"]}, deadline=self._local.deadline)
+                                    "capabilities": ["shm_v1", "viewport_materials_v1", "image_assets_v1"]}, deadline=self._local.deadline)
                 header, _ = recv_message(sock, deadline=self._local.deadline)
                 if (header.get("type") != "welcome" or header.get("server") != "minihou"
                         or header.get("protocol") != PROTOCOL_VERSION
@@ -100,6 +100,7 @@ class InstanceClient:
 
     def close(self):
         # Do not acquire the RPC lock: shutdown must interrupt a pending read/write.
+        self._material_revisions = {}
         self._epoch += 1
         sock, self.sock = self.sock, None
         if sock is not None:
@@ -151,7 +152,7 @@ class InstanceClient:
     def describe(self, graph_path, graph=None):
         return self._request({"type": "instance_describe", "graph_path": graph_path, "graph": graph})[0]
 
-    def cook(self, instance_id, graph_path, params, arrays, *, frame=1, fps=24, graph=None, materials=None, render=False, references=None):
+    def cook(self, instance_id, graph_path, params, arrays, *, frame=1, fps=24, graph=None, materials=None, render=False, references=None, manifest_revision=None):
         header = {"type": "instance_cook", "instance_id": instance_id,
                   "graph_path": graph_path, "graph": graph, "params": params,
                   "frame": frame, "fps": fps, "render": bool(render)}
@@ -159,7 +160,51 @@ class InstanceClient:
             header["references"] = references
         if materials and any(materials):
             header["materials"] = list(materials)              # slot names of the geometry going in (see minihou.materials)
+        if manifest_revision is not None:
+            header["manifest_revision"] = manifest_revision
         return self._request(header, arrays)
+
+    def sync_materials(self, instance_id, materials, render_uv=None):
+        """Synchronous instance channel: manifest, missing-byte requests, and verified ACKs."""
+        if not self.has_capability("viewport_materials_v1") or not self.has_capability("image_assets_v1"):
+            return None
+        from .material_export import export_materials
+        import hashlib
+        import numpy as np
+        manifest, images = export_materials(materials, instance_id, render_uv)
+        digest = hashlib.sha256(repr(manifest).encode()).hexdigest()
+        if not hasattr(self, "_material_revisions"):
+            self._material_revisions = {}
+        previous = self._material_revisions.get(instance_id)
+        if previous and previous[0] == digest:
+            return previous[1]
+        revision = (previous[1] if previous else 0) + 1
+        def send():
+            with self.lock:
+                self._connect()
+                sock = self.sock
+                deadline = self._local.deadline
+                send_message(sock, {"type": "material_manifest", "scope": "instance:" + instance_id,
+                                    "revision": revision, **manifest}, deadline=deadline)
+                reply, _ = recv_message(sock, deadline=deadline)
+                if reply.get("type") != "image_request":
+                    raise ProtocolError("expected image_request")
+                for hash_id in reply.get("hashes", []):
+                    payload = images[hash_id]
+                    send_message(sock, {"type": "image_begin", "transfer_id": hash_id, "hash": hash_id,
+                                        "total": len(payload)}, deadline=deadline)
+                    for offset in range(0, len(payload), 1024 * 1024):
+                        chunk = payload[offset:offset + 1024 * 1024]
+                        send_message(sock, {"type": "image_chunk", "transfer_id": hash_id, "hash": hash_id,
+                                            "offset": offset, "total": len(payload)},
+                                     {"data": np.frombuffer(chunk, np.uint8)}, deadline=deadline)
+                    send_message(sock, {"type": "image_end", "transfer_id": hash_id}, deadline=deadline)
+                    ack, _ = recv_message(sock, deadline=deadline)
+                    if ack.get("type") != "image_ack" or ack.get("hash") != hash_id:
+                        raise ProtocolError("image transfer was not acknowledged")
+            self._material_revisions[instance_id] = (digest, revision)
+            return revision
+        return self._invoke(send)
 
     def remove(self, instance_id):
         return self._request({"type": "instance_remove", "instance_id": instance_id})[0]
@@ -172,12 +217,16 @@ class InstanceClient:
                               "graph": graph, "params": params, "label": label, "frame": frame, "fps": fps,
                               "references": references or {}}, arrays)[0]
 
-    def set_sources(self, instance_id, sources):
+    def set_sources(self, instance_id, sources, *, materials=None, manifest_revision=None):
         self.connect()
         if "object_inputs_v1" not in self.welcome.get("capabilities", []):
             raise RuntimeError("Restart the updated MiniHou app to load object inputs")
         arrays = {str(i) + "/" + key: value for i, values in enumerate(sources.values()) for key, value in values.items()}
-        return self._request({"type": "instance_sources", "instance_id": instance_id, "sources": list(sources)}, arrays)[0]
+        header = {"type": "instance_sources", "instance_id": instance_id, "sources": list(sources)}
+        if manifest_revision is not None:
+            header["manifest_revision"] = manifest_revision
+            header["materials"] = [m.name if m else "" for m in materials]
+        return self._request(header, arrays)[0]
 
     def has_capability(self, name):
         self.connect()
