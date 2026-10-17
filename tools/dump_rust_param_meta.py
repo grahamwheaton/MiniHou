@@ -96,14 +96,14 @@ def meta() -> dict:
     out["loop_cut"] = out["polysplit"]
     out["edge_slide"] = {
         "group": {"kind":"str","default":"","doc":"Selected edge group or pA-B pairs; empty leaves the mesh unchanged."},
-        "factor": {"kind":"float","default":0.0,"min":-1.0,"max":1.0},
-        "even": {"kind":"bool","default":False},
-        "flipped": {"kind":"bool","default":False},
-        "clamp": {"kind":"bool","default":True},
+        "factor": {"kind":"float","default":0.0,"min":-1.0,"max":1.0,"doc":"Signed distance to slide the selected edges along their adjacent rails."},
+        "even": {"kind":"bool","default":False,"doc":"Use equal travel distance along rails of different lengths."},
+        "flipped": {"kind":"bool","default":False,"doc":"Reverse the side chosen by the Factor sign."},
+        "clamp": {"kind":"bool","default":True,"doc":"Stop sliding at the neighbouring edge."},
         "mirror_editing": {"kind":"bool","default":True,"doc":"Mirror setting; active when a symmetry context is available."},
-        "correct_uvs": {"kind":"bool","default":True},
-        "output_group": {"kind":"bool","default":False},
-        "output_group_name": {"kind":"str","default":"slid_edges"},
+        "correct_uvs": {"kind":"bool","default":True,"doc":"Adjust corner UVs on each face while sliding."},
+        "output_group": {"kind":"bool","default":False,"doc":"Write a group containing the slid edges."},
+        "output_group_name": {"kind":"str","default":"slid_edges","doc":"Name of the generated slid edge group."},
     }
     # modifier_input owns an ordered interface schema rather than fixed node parameters.
     # Keep this description with the generated native parameter metadata for the editor.

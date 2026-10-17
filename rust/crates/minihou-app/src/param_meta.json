@@ -1652,24 +1652,29 @@
  "edge_slide": {
   "clamp": {
    "default": true,
+   "doc": "Stop sliding at the neighbouring edge.",
    "kind": "bool"
   },
   "correct_uvs": {
    "default": true,
+   "doc": "Adjust corner UVs on each face while sliding.",
    "kind": "bool"
   },
   "even": {
    "default": false,
+   "doc": "Use equal travel distance along rails of different lengths.",
    "kind": "bool"
   },
   "factor": {
    "default": 0.0,
+   "doc": "Signed distance to slide the selected edges along their adjacent rails.",
    "kind": "float",
    "max": 1.0,
    "min": -1.0
   },
   "flipped": {
    "default": false,
+   "doc": "Reverse the side chosen by the Factor sign.",
    "kind": "bool"
   },
   "group": {
@@ -1684,10 +1689,12 @@
   },
   "output_group": {
    "default": false,
+   "doc": "Write a group containing the slid edges.",
    "kind": "bool"
   },
   "output_group_name": {
    "default": "slid_edges",
+   "doc": "Name of the generated slid edge group.",
    "kind": "str"
   }
  },
