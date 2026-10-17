@@ -1188,5 +1188,12 @@
     "menu": "Attributes",
     "label": "Wrangle",
     "keywords": "vex expression code snippet attribwrangle"
+  },
+  "scatteralign": {
+    "category": "generate",
+    "doc": "Scatter points over a surface with normal alignment, random rotation, scale, and copied point attributes. Volume mode uses the legacy scatter sampler.",
+    "menu": "Points",
+    "label": "Scatter and Align",
+    "keywords": "scatter align orient surface points"
   }
 }

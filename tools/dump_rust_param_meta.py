@@ -302,6 +302,35 @@ def meta() -> dict:
         "output_group": {"kind": "bool", "default": True, "doc": "Write the new quads to a primitive group."},
         "output_group_name": {"kind": "str", "default": "quads", "enabled_if": {"output_group": True}, "doc": "Name of the new quads' group."},
     }
+    # Native-only Houdini Scatter and Align node (no Python registry entry).
+    sa = {}
+    def add(name, kind, default, doc, **extra):
+        sa[name] = {"kind": kind, "default": default, "doc": doc, **extra}
+    add("mode", "enum", "surface", "Scatter on the surface or inside a closed volume.", options=["surface", "volume"])
+    add("group", "str", "", "Primitive group to scatter over; empty selects all faces.")
+    add("tag_name", "str", "$OS", "Integer tag attribute name; $OS resolves to scatteralign.")
+    add("global_seed", "int", 0, "Seed for deterministic point placement, rotation and scale.")
+    add("coverage", "float", 1.0, "Multiplier for the generated point count.", min=0.0)
+    add("point_count_method", "enum", "by_size", "Derive count from radius and surface area, or specify a fixed count.", options=["by_size", "fixed"])
+    add("point_count", "int", 100, "Count when Point Count Method is Fixed; base count in volume mode.", min=0)
+    add("scaling_mode", "enum", "uniform", "Use the mean radius or random radii between Min and Max.", options=["uniform", "random"])
+    add("min_radius", "float", 0.1, "Smallest radius in random scaling; contributes to By Size count.", min=0.0)
+    add("max_radius", "float", 0.1, "Largest radius in random scaling; contributes to By Size count.", min=0.0)
+    add("uniform_scale", "float", 1.0, "Multiplier for the output pscale.", min=0.0)
+    add("alignment", "enum", "normal", "Align local Z to the surface normal or keep local Z world up.", options=["normal", "world_up"])
+    add("rotation", "bool", True, "Enable random cone rotation of the local Z axis.")
+    add("max_random_cone_angle", "float", 0.0, "Maximum cone angle in degrees.", min=0.0, max=180.0)
+    add("rotation_around_normal", "bool", True, "Enable spin around the aligned local Z axis.")
+    add("min_angle", "float", 0.0, "Minimum spin angle in degrees.")
+    add("max_angle", "float", 360.0, "Maximum spin angle in degrees.")
+    add("round_to_multiple", "float", 0.0, "Round spin to this many degrees; zero disables rounding.", min=0.0)
+    add("offset_angle", "float", 0.0, "Angle added after spin rounding, in degrees.")
+    add("remap_using_distribution_ramp", "bool", False, "Remap spin randomness with a linear two-point ramp.")
+    add("distribution_ramp_start", "float", 0.0, "Ramp value at zero; linear two-point ramps only.", min=0.0, max=1.0)
+    add("distribution_ramp_end", "float", 1.0, "Ramp value at one; linear two-point ramps only.", min=0.0, max=1.0)
+    add("copy_point_attributes", "bool", True, "Copy source point attributes to generated points.")
+    add("point_attributes", "str", "*", "Space-separated source point attributes to copy; * copies all. Float attributes interpolate, integers use the dominant vertex.")
+    out["scatteralign"] = sa
     return out
 
 
