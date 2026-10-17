@@ -40,6 +40,7 @@ use std::collections::BTreeSet;
 /// What a panel asks the app to do.
 #[derive(Clone, Debug)]
 pub enum UiAction {
+    PickParameter { node: String, name: String, mode: SelectionMode, pairs: bool },
     StartSketch(sketch::SketchMode),
     TransformNode { op: TransformOp },
     StartModal(modal_transform::Kind),
