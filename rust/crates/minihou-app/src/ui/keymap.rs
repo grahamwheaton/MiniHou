@@ -116,6 +116,8 @@ impl Command {
         Self::Points => UiAction::Editor(EditorChange::Selection(SelectionMode::Points)),
         Self::Edges => UiAction::Editor(EditorChange::Selection(SelectionMode::Edges)),
         Self::Faces => UiAction::Editor(EditorChange::Selection(SelectionMode::Faces)),
+        // 4 fell through to Command("object"), which main never handled ("not wired up yet").
+        Self::Object => UiAction::Editor(EditorChange::Selection(SelectionMode::Object)),
         Self::ToggleEdit | Self::SelectAll | Self::SelectNone | Self::Hide | Self::Reveal | Self::ToggleParams => UiAction::Command(self.id().to_owned()),
         // Tab opens the add menu in the viewport too, in every selection mode; Ctrl+Tab toggles object / edit mode.
         Self::AddMenu => UiAction::Command("add_menu".to_owned()),
@@ -546,5 +548,17 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
             pressed: true, repeat: false, modifiers: Modifiers::default() }], ..Default::default() };
         let _ = ctx.run(input, |ctx| { found = Keymap::blender().poll(ctx,&KeyContext { viewport_hovered: true, in_edit_mode: true, ..Default::default() }); });
         assert!(matches!(found.as_slice(),[UiAction::Editor(EditorChange::Selection(SelectionMode::Points))]));
+    }
+    /// Live report: 4 did nothing. Every mode key (1-4) must reach the editor as a mode change in edit and object mode
+    /// with the viewport hovered (they fell through to an unhandled Command before).
+    #[test] fn mode_keys_one_to_four_switch_modes() {
+        let ctx = egui::Context::default();
+        let want = [(Key::Num1, SelectionMode::Points), (Key::Num2, SelectionMode::Edges), (Key::Num3, SelectionMode::Faces), (Key::Num4, SelectionMode::Object)];
+        for edit in [false, true] { for (key, mode) in want {
+            let input = egui::RawInput { events: vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::default() }], ..Default::default() };
+            let mut found = Vec::new();
+            let _ = ctx.run(input, |ctx| { found = Keymap::blender().poll(ctx, &KeyContext { viewport_hovered: true, in_edit_mode: edit, ..Default::default() }); });
+            assert!(matches!(found.as_slice(), [UiAction::Editor(EditorChange::Selection(m))] if *m == mode), "{key:?} {found:?}");
+        } }
     }
 }
