@@ -2,6 +2,10 @@
 
 Updated 2026-10-17 (embedded networks); previously 2026-10-16. This describes the current checkout, including the add-on changes here. The Desktop backup was not changed.
 
+## Viewport materials and image assets (add-on 0.4.0)
+
+The native welcome advertises `viewport_materials_v1` and `image_assets_v1`. Watched objects, stack modifiers, Geometry Nodes placements and their `instance_sources` can send revisioned material manifests. The app requests missing SHA-256 image payloads and verifies bounded MHL1 `|u1` chunks before rebinding the existing material registry. Descriptor changes refresh GPU texture bindings without a geometry recook. Older peers retain untextured geometry. Missing images show the viewport checker; unsupported material node paths show a diagnostic and retain their constant factor. See [TEXTURE_TRANSPORT.md](TEXTURE_TRANSPORT.md) for exact messages, limits, tests, and open gaps. The native interactive viewport has not been smoke-tested with a live Blender window in this run.
+
 ## Dynamic modifier inputs (add-on 0.2.0)
 
 The Rust `modifier_input` node stores ordered `modifier_inputs` definitions (`id`, `name`, `kind`, `default`, optional `min`, `max`, `subtype`, or menu `options`). The native params panel adds them. `link_interface` advertises every definition; `instance_cook` applies per-placement values to `input_values` before graph evaluation. A node parameter can bind to `{"modifier_input":{"node":"input","id":"input_1"}}`; the Rust graph resolves that value during cook, so existing numeric/string node parameters consume it without a new scalar-port evaluator. The add-on maps stable IDs to Blender socket identifiers, preserving modifier values and GN wires through rename/reorder. Removed inputs are removed cleanly. Independent instances keep separate values.

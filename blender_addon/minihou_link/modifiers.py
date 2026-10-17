@@ -289,7 +289,9 @@ def _send_sources(client, obj, mod, materials=None):
     token = digest.hexdigest()
     ident = instance_id(mod)
     if _source_digests.get(ident) != token:
-        client.set_sources(ident, sources)
+        render_uv = next((layer.name for layer in obj.data.uv_layers if layer.active_render), None)
+        revision = client.sync_materials(ident, materials, render_uv) if materials is not None else None
+        client.set_sources(ident, sources, materials=materials, manifest_revision=revision)
         _source_digests[ident] = token
     return token
 
@@ -805,6 +807,8 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                     ident = instance_id(mod)
                     failed = _failures.get(ident)
                     selected_source = get_source(mod)
+                    render_uv = next((layer.name for layer in obj.data.uv_layers if layer.active_render), None)
+                    manifest_revision = client.sync_materials(ident, materials, render_uv)
                     source_pointer = selected_source.as_pointer() if selected_source else 0
                     if not force and failed and failed[0] == signature and failed[2] == source_pointer:
                         upstream_error = failed[1]
@@ -826,6 +830,7 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                                                   fps=scene.render.fps / scene.render.fps_base,
                                                   graph=json.loads(ng[GRAPH]),
                                                   materials=[m.name if m is not None else "" for m in materials], render=render,
+                                                  manifest_revision=manifest_revision,
                                                   references=_input_references(mod))
                     output, manifests = instance_payload(header, output)
                     update = GeoUpdate.from_message(header, output)

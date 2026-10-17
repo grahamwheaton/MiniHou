@@ -56,7 +56,13 @@ pub fn read_message(reader: &mut impl Read, limit: usize) -> io::Result<(Value, 
     if hlen == 0 || hlen > MAX_HEADER || hlen % 8 != 0 || blen > MAX_BLOB { return Err(invalid("unreasonable frame sizes")); }
     let total = u64::try_from(hlen).unwrap().checked_add(blen).ok_or_else(|| invalid("frame overflow"))?;
     if total > limit as u64 { return Err(invalid("frame exceeds receive limit")); }
-    let mut payload = vec![0; total as usize]; reader.read_exact(&mut payload)?;
+    let mut payload = vec![0; hlen]; reader.read_exact(&mut payload)?;
+    let header:Value=serde_json::from_slice(&payload)?;
+    let kind=header["type"].as_str().unwrap_or("");
+    if kind=="image_chunk" && blen>1024*1024+7 {return Err(invalid("image chunk exceeds 1 MiB"));}
+    if matches!(kind,"image_begin"|"image_end"|"image_ack"|"image_request"|"image_error"|"material_manifest") && blen!=0 {return Err(invalid("image control frame has a blob"));}
+    payload.resize(total as usize,0);
+    reader.read_exact(&mut payload[hlen..])?;
     decode_payload(&payload, hlen)
 }
 
@@ -149,6 +155,7 @@ pub fn decode_object(h:&Value,arrays:&Arrays)->io::Result<Geometry>{
     if let Some(mats)=h["materials"].as_array().filter(|a|!a.is_empty()){
         geo.detail.insert("materials".into(),json!(mats.iter().take(4096).map(|m|m.as_str().unwrap_or("").chars().take(63).collect::<String>()).collect::<Vec<_>>()));
     }
+    if let Some(bindings)=h.get("material_bindings") {geo.detail.insert("material_bindings".into(),bindings.clone());}
     geo.validate().map_err(io::Error::other)?;Ok(geo)
 }
 /// Decode on the UI thread into a transient worker edit, without touching document history.

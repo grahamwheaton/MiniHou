@@ -130,7 +130,7 @@ impl InstanceManager {
                     .collect();
                 sources.insert(
                     name.into(),
-                    Arc::new(decode_geometry(&Value::Null, &arrays)?),
+                    Arc::new(decode_geometry(h, &arrays)?),
                 );
             }
             self.sources.insert(id.clone(), sources);

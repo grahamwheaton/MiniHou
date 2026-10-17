@@ -14,6 +14,7 @@ pub mod modifier_inputs;
 pub mod input_define;
 pub mod geo_info;
 pub mod materials;
+pub mod image_assets;
 pub mod params;
 pub mod value_link_ui;
 use minihou_core::{session::Session, lod::ClusterLod, Graph};

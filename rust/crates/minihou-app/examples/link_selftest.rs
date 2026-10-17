@@ -17,6 +17,7 @@ fn main() -> minihou_app::Result<()> {
     let mut session = editor.doc.session()?;
     let mut target = session.graph().main_output()?;
     let mut server = blender_link::LinkServer::bind(&args[1], &editor.doc, &editor.path)?;
+    let mut materials=minihou_app::materials::Registry::new(".");
     let mut revision = 1;
     let response = cook_batch(
         &mut session,
@@ -35,6 +36,7 @@ fn main() -> minihou_app::Result<()> {
     let mut answer: Option<serde_json::Value> = None;
     let deadline = Instant::now() + Duration::from_secs(args[2].parse()?);
     while Instant::now() < deadline {
+        if server.apply_asset_updates(&mut materials) { eprintln!("IMAGE_ASSETS {}",materials.cpu_resident_bytes()); }
         let mut edits = Vec::new();
         if let Some(control) = args.get(3) {
             if let Ok(text) = std::fs::read_to_string(control) {

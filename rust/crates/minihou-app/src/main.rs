@@ -2299,6 +2299,7 @@ impl eframe::App for App {
             egui::Window::new("Texture inspector").open(&mut open).default_width(330.).show(ctx,|ui| {
                 if self.scene.as_ref().is_some_and(Scene::has_textured_slots) {ui.label("Textured surfaces use full detail; clustered LOD is suspended.");}
                 if let Some(gpu)=&self.gpu {for slot in gpu.texture_status() {ui.label(slot);} } else {ui.label("No cooked scene");}
+                if let Some(link)=&self.link {for status in link.texture_status(){ui.label(status);} }
                 ui.label(format!("CPU image cache: {} MiB / {} MiB; GPU budget: {} MiB",self.materials.cpu_resident_bytes()/1048576,minihou_app::materials::CPU_BUDGET/1048576,self.materials.gpu_budget/1048576));
             });
             if !open {self.editor_state.texture_inspector=false;}
@@ -2321,6 +2322,12 @@ impl eframe::App for App {
         if !self.themed { self.theme.apply(ctx); self.themed = true; }
         self.camera.set_clip_planes(self.editor_state.proxy.clip_start, self.editor_state.proxy.clip_end);
         let requests = self.link.as_ref().map(|link| link.poll()).unwrap_or_default();
+        if self.link.as_ref().is_some_and(|link|link.apply_asset_updates(&mut self.materials)) {
+            if let (Some(gpu),Some(scene))=(&mut self.gpu,&self.scene) {
+                gpu.upload_textures(&self.state.device,&self.state.queue,scene,&mut self.materials);
+            }
+            ctx.request_repaint();
+        }
         for request in requests {
             let result: Result<()> = match request.message["type"].as_str() {
                 Some("live_activate" | "live_update" | "live_remove" | "live_replace") => {

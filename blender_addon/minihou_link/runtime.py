@@ -33,9 +33,10 @@ from collections import deque
 from typing import Dict, List, Optional
 
 import bpy
+import numpy as np
 from bpy.app.handlers import persistent
 
-from . import image_exchange, mesh_reader, mesh_writer, proxy, scene_objects
+from . import image_exchange, mesh_reader, mesh_writer, proxy, scene_objects, material_export
 from .client import LinkClient
 from .protocol import GeoUpdate, Mirror, ProtocolError
 from .state import Inbox, ParamForwarder
@@ -85,6 +86,14 @@ class Runtime:
         self.watched_images: List[str] = []
         self.dirty_images: set = set()
         self.images_sent = 0
+        self._texture_capabilities = set()
+        self._texture_payloads = {}
+        self._texture_scope_images = {}
+        self._texture_pending = []
+        self._texture_attempts = {}
+        self._texture_revision = {}
+        self._texture_digest = {}
+        self._texture_last_poll = 0.0
         self._image_digest: Dict[str, str] = {}
         self._image_last: Dict[str, float] = {}
         self._image_present: Dict[str, bool] = {}
@@ -188,8 +197,11 @@ class Runtime:
                 busy = self._forward_params() or busy
             if self.watched:
                 busy = self._send_objects() or busy
+                busy = self._send_material_updates() or busy
             if self.watched_images:
                 busy = self._send_images() or busy
+            if self._texture_pending:
+                busy = self._send_texture_chunk() or busy
             if self.frame_dirty:
                 busy = self._send_frame() or busy
             if self._ui_dirty:
@@ -212,6 +224,13 @@ class Runtime:
             self._log(self.last_error)
             self._ui_dirty = True
         elif t == "welcome":
+            self._texture_capabilities = set(e.get("capabilities", []))
+            self._texture_revision.clear()
+            self._texture_digest.clear()
+            self._texture_pending.clear()
+            self._texture_attempts.clear()
+            self._texture_scope_images.clear()
+            self._texture_payloads.clear()
             self.last_error = ""
             self._log(f"connected to engine (protocol {e.get('protocol')})")
             self.frame_dirty, self._sent_frame = True, None       # a (re)started engine needs the time
@@ -241,6 +260,22 @@ class Runtime:
             if self.watched:
                 self._log(f"engine reads Blender objects: {', '.join(self.watched)}")
             self._ui_dirty = True
+        elif t == "image_request":
+            for hash_id in e.get("hashes", []):
+                payload = self._texture_payloads.get(hash_id)
+                if payload is not None and not any(item[0] == hash_id for item in self._texture_pending):
+                    self._texture_pending.append((hash_id, payload, 0, False))
+        elif t == "image_error":
+            self.last_error = "texture transfer: " + str(e.get("message", "unknown error"))
+            hash_id = e.get("transfer_id", "")
+            count = self._texture_attempts.get(hash_id, 0) + 1
+            self._texture_attempts[hash_id] = count
+            self._texture_pending = [item for item in self._texture_pending if item[0] != hash_id]
+            if count < 3 and hash_id in self._texture_payloads:
+                self._texture_pending.append((hash_id, self._texture_payloads[hash_id], 0, False))
+            self._ui_dirty = True
+        elif t == "image_ack":
+            self._texture_attempts.pop(e.get("transfer_id", ""), None)
 
     def _apply_interface(self, iface: dict) -> None:
         params = iface["params"]
@@ -442,6 +477,19 @@ class Runtime:
                 try:
                     fields, arrays = mesh_reader.read_object(obj, depsgraph)
                     header = {"type": "object_geo", "object": name, **fields}
+                    if {"viewport_materials_v1", "image_assets_v1"} <= self._texture_capabilities:
+                        manifest, images = material_export.export_object(obj.evaluated_get(depsgraph))
+                        scope = "object:" + name
+                        manifest_digest = hashlib.sha256(repr(manifest).encode()).hexdigest()
+                        if self._texture_digest.get(scope) != manifest_digest:
+                            revision = self._texture_revision.get(scope, 0) + 1
+                            if self.client.send({"type": "material_manifest", "scope": scope, "revision": revision, **manifest}):
+                                self._texture_revision[scope] = revision
+                                self._texture_digest[scope] = manifest_digest
+                                self._texture_payloads.update(images)
+                                self._texture_scope_images[scope] = set(images)
+                        if scope in self._texture_revision:
+                            header["manifest_revision"] = self._texture_revision[scope]
                 except ValueError as e:
                     header, arrays = {"type": "object_missing", "object": name, "reason": str(e)}, None
             digest = _digest(header, arrays)
@@ -456,6 +504,59 @@ class Runtime:
                                           f"{info.get('read_ms', 0)} ms" if header["type"] == "object_geo"
                                           else header["reason"])
                 self._ui_dirty = True
+        return sent
+
+    def _send_texture_chunk(self):
+        """One image frame per tick, after control and geometry traffic."""
+        if not self.client or not self._texture_pending:
+            return False
+        hash_id, payload, offset, begun = self._texture_pending[0]
+        transfer_id = hash_id
+        if not begun:
+            if not self.client.send({"type": "image_begin", "transfer_id": transfer_id, "hash": hash_id, "total": len(payload)}):
+                return False
+            begun = True
+            self._texture_pending[0] = (hash_id, payload, offset, begun)
+        if offset == len(payload):
+            if self.client.send({"type": "image_end", "transfer_id": transfer_id, "hash": hash_id}):
+                self._texture_pending.pop(0)
+                return True
+            return False
+        chunk = payload[offset:offset + 1024 * 1024]
+        if not self.client.send({"type": "image_chunk", "transfer_id": transfer_id, "hash": hash_id,
+                                 "offset": offset, "total": len(payload)}, {"data": np.frombuffer(chunk, dtype=np.uint8)}):
+            return False
+        offset += len(chunk)
+        self._texture_pending[0] = (hash_id, payload, offset, begun)
+        return True
+
+    def _send_material_updates(self):
+        if not {"viewport_materials_v1", "image_assets_v1"} <= self._texture_capabilities:
+            return False
+        now = time.monotonic()
+        if now - self._texture_last_poll < 1.0:
+            return False
+        self._texture_last_poll = now
+        sent = False
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        for name in self.watched:
+            obj = bpy.data.objects.get(name)
+            if obj is None:
+                continue
+            manifest, images = material_export.export_object(obj.evaluated_get(depsgraph))
+            scope = "object:" + name
+            digest = hashlib.sha256(repr(manifest).encode()).hexdigest()
+            if digest == self._texture_digest.get(scope):
+                continue
+            revision = self._texture_revision.get(scope, 0) + 1
+            if self.client.send({"type": "material_manifest", "scope": scope, "revision": revision, **manifest}):
+                self._texture_revision[scope] = revision
+                self._texture_digest[scope] = digest
+                self._texture_payloads.update(images)
+                self._texture_scope_images[scope] = set(images)
+                keep = set().union(*self._texture_scope_images.values()) if self._texture_scope_images else set()
+                self._texture_payloads = {key: value for key, value in self._texture_payloads.items() if key in keep}
+                sent = True
         return sent
 
 
