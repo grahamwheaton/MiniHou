@@ -76,6 +76,7 @@ pub fn show(ctx: &egui::Context, open: &mut bool, prefs: &mut Preferences, keyma
                             });
                             changed |= ui.checkbox(&mut prefs.viewport.fly_navigation,"Fly navigation (RMB + WASD)").changed();
                             changed |= ui.checkbox(&mut prefs.viewport.zoom_to_mouse,"Zoom to mouse position").changed();
+                            changed |= ui.checkbox(&mut prefs.viewport.orbit_to_mouse,"Orbit around mouse position").changed();
                             changed |= ui.checkbox(&mut prefs.viewport.show_grid,"Show grid").changed();
                             changed |= ui.checkbox(&mut prefs.viewport.show_axes,"Show axes").changed();
                             changed |= ui.add(egui::DragValue::new(&mut prefs.viewport.auto_budget).range(1..=u32::MAX).speed(1_000.).prefix("Auto proxy triangle budget  ")).changed();
