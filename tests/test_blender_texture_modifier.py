@@ -95,8 +95,9 @@ def run_in_blender():
             assert cooked["detail"]["materials"] == [name], cooked.get("detail")
             assert cooked["detail"]["material_bindings"]["slots"][0].endswith(
                 "blender:" + modifiers.instance_id(mod) + ":0"), cooked.get("detail")
+            modifiers.edit_live(obj, mod, push=False)
             result = temp / (kind + "-result.json")
-            control.write_text(json.dumps({"id": 1 if kind == "external" else 2, "op": "texture_probe",
+            control.write_text(json.dumps({"id": 1 if kind == "external" else 3, "op": "texture_probe",
                               "slot_suffix": "blender:" + modifiers.instance_id(mod) + ":0", "output": str(result)}))
             for _ in range(100):
                 if result.exists():
@@ -106,6 +107,30 @@ def run_in_blender():
             report = json.loads(result.read_text())
             assert report["state"] == "Ok" and report["image"] == [2, 2], report
             assert report["image_id"] and report["slot"].endswith("blender:" + modifiers.instance_id(mod) + ":0"), report
+            assert report["cooked"]["materials"] == [name], report
+            assert report["cooked"]["bindings"]["slots"] == [report["slot"]], report
+            assert report["cooked"]["draw_slots"] == [report["slot"]] * 2, report
+            assert report["cooked"]["uv_triangles"] == 2, report
+            image.pixels[0] = 0.25
+            assert client.sync_materials(modifiers.instance_id(mod), list(materials), "UVMap") > revision
+            rebound = temp / (kind + "-rebound.json")
+            control.write_text(json.dumps({"id": 2 if kind == "external" else 4, "op": "texture_probe",
+                              "slot_suffix": "blender:" + modifiers.instance_id(mod) + ":0", "output": str(rebound)}))
+            for _ in range(100):
+                if rebound.exists():
+                    break
+                time.sleep(.05)
+            assert rebound.exists(), "rebound app texture probe did not respond"
+            changed = json.loads(rebound.read_text())
+            assert changed["state"] == "Ok" and changed["image_id"] != report["image_id"], changed
+            assert changed["cooked"]["draw_slots"] == [changed["slot"]] * 2, changed
+            try:
+                stale, _ = client.cook(modifiers.instance_id(mod), str(graph), {}, arrays,
+                                       graph=json.loads(mod.node_group[modifiers.GRAPH]),
+                                       materials=[mat.name], manifest_revision=revision)
+                assert stale["type"] == "instance_error", stale
+            except Exception as exc:
+                assert "revision" in str(exc), exc
             shader.inputs["Alpha"].default_value = .5
             rejected, _ = material_export.export_materials([mat], modifiers.instance_id(mod), "UVMap")
             reason = rejected["diagnostics"][rejected["bindings"][0]]

@@ -31,6 +31,7 @@ fn main() -> minihou_app::Result<()> {
     server.cooked(&response);
     println!("LINK_READY {}", server.address());
     let mut command_id = 0;
+    let mut last_geometry = response.geometry.clone();
     // graph_embed_v1: the last conflict the app would show in its modal; answered by a "resolve" command.
     let mut conflict: Option<serde_json::Value> = None;
     let mut answer: Option<serde_json::Value> = None;
@@ -50,11 +51,22 @@ fn main() -> minihou_app::Result<()> {
                                 let slot = server.texture_binding_ids().into_iter()
                                     .find(|id| id.ends_with(suffix)).unwrap_or_default();
                                 let binding = materials.resolve(&slot);
+                                let cooked = last_geometry.as_ref().map(|geo| {
+                                    let triangles=minihou_core::preview::triangulate_geometry(geo);
+                                    let names=geo.detail.get("materials").and_then(|v|v.as_array());
+                                    let ids=geo.detail.get("material_bindings").and_then(|v|v.get("slots")).and_then(|v|v.as_array());
+                                    let slots:Vec<_>=triangles.material_slot.iter().map(|&index| {
+                                        let i=index as usize;
+                                        ids.and_then(|a|a.get(i)).and_then(|v|v.as_str()).or_else(||names.and_then(|a|a.get(i)).and_then(|v|v.as_str())).unwrap_or("")
+                                    }).collect();
+                                    serde_json::json!({"materials":geo.detail.get("materials"),"bindings":geo.detail.get("material_bindings"),
+                                        "draw_slots":slots,"uv_triangles":triangles.uv_sets.get("uv").map_or(0,|uv|uv.len()/6)})
+                                });
                                 let report = serde_json::json!({"slot":slot,
                                     "image_id":binding.descriptor.as_ref().and_then(|d|d.textures.base_color.as_ref()).and_then(|t|t.image_id.as_ref()),
                                     "image":binding.image.as_ref().map(|i|[i.width,i.height]),
                                     "state":format!("{:?}",binding.state),
-                                    "diagnostics":server.texture_status()});
+                                    "diagnostics":server.texture_status(),"cooked":cooked});
                                 std::fs::write(command["output"].as_str().ok_or("texture probe needs output")?,report.to_string())?;
                             }
                             "expose" => {
@@ -179,6 +191,7 @@ fn main() -> minihou_app::Result<()> {
                 .map(|edit| CookRequest { revision, edit })
                 .collect();
             let response = cook_batch(&mut session, &mut target, requests, |_| ());
+            last_geometry=response.geometry.clone();
             server.cooked(&response);
         }
         std::thread::sleep(Duration::from_millis(5));

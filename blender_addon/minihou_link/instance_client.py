@@ -209,13 +209,17 @@ class InstanceClient:
     def remove(self, instance_id):
         return self._request({"type": "instance_remove", "instance_id": instance_id})[0]
 
-    def edit_live(self, instance_id, graph, params, arrays, *, label="Blender modifier", frame=1, fps=24, references=None):
+    def edit_live(self, instance_id, graph, params, arrays, *, label="Blender modifier", frame=1, fps=24, references=None, materials=None, manifest_revision=None):
         self.connect()
         if "live_modifier_v1" not in self.welcome.get("capabilities", []):
             raise RuntimeError("Restart MiniHou with the updated app to enable live modifier editing")
-        return self._request({"type": "instance_edit", "instance_id": instance_id,
-                              "graph": graph, "params": params, "label": label, "frame": frame, "fps": fps,
-                              "references": references or {}}, arrays)[0]
+        header = {"type": "instance_edit", "instance_id": instance_id,
+                  "graph": graph, "params": params, "label": label, "frame": frame, "fps": fps,
+                  "references": references or {}}
+        if manifest_revision is not None:
+            header["materials"] = [m.name if m else "" for m in materials]
+            header["manifest_revision"] = manifest_revision
+        return self._request(header, arrays)[0]
 
     def set_sources(self, instance_id, sources, *, materials=None, manifest_revision=None):
         self.connect()

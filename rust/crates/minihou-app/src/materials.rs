@@ -64,18 +64,30 @@ impl ImageAsset { pub fn resident_bytes(&self) -> usize { self.rgba.len() } }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum State { Ok, Missing, Unsupported(String), CheckerFallback(String) }
 #[derive(Clone, Debug)]
-pub struct MaterialBinding { pub slot:String, pub descriptor:Option<Descriptor>, pub image:Option<ImageAsset>, pub state:State }
+pub struct MaterialBinding { pub slot:String, pub descriptor_id:Option<String>, pub scope:Option<String>, pub descriptor:Option<Descriptor>, pub image:Option<ImageAsset>, pub state:State }
 
 pub struct Registry {
     descriptors:HashMap<String,Descriptor>, images:HashMap<String,(ImageAsset,u64)>,
     errors:HashMap<String,String>,
+    scopes:HashMap<String,String>,
     tick:u64, cpu_budget:usize, pub gpu_budget:usize, base_path:PathBuf,
 }
 impl Registry {
-    pub fn new(base_path:impl Into<PathBuf>) -> Self { Self { descriptors:HashMap::new(), images:HashMap::new(), errors:HashMap::new(), tick:0, cpu_budget:CPU_BUDGET, gpu_budget:GPU_BUDGET, base_path:base_path.into() } }
+    pub fn new(base_path:impl Into<PathBuf>) -> Self { Self { descriptors:HashMap::new(), images:HashMap::new(), errors:HashMap::new(), scopes:HashMap::new(), tick:0, cpu_budget:CPU_BUDGET, gpu_budget:GPU_BUDGET, base_path:base_path.into() } }
     pub fn set_budgets(&mut self, cpu:usize, gpu:usize) { self.cpu_budget=cpu; self.gpu_budget=gpu; self.evict(&HashSet::new()); }
     pub fn register_descriptor(&mut self, id:impl Into<String>, descriptor:Descriptor) { let id=id.into(); self.errors.remove(&id); self.descriptors.insert(id,descriptor); }
+    pub fn register_scoped_descriptor(&mut self, scope:&str, id:impl Into<String>, descriptor:Descriptor) {
+        let id=id.into(); self.scopes.insert(id.clone(),scope.into()); self.register_descriptor(id,descriptor);
+    }
+    pub fn clear_scope(&mut self, scope:&str) {
+        self.scopes.retain(|id,owned| {
+            if owned==scope {self.descriptors.remove(id);self.errors.remove(id);false} else {true}
+        });
+    }
     pub fn register_error(&mut self, id:impl Into<String>, reason:String) { let id=id.into(); self.descriptors.remove(&id); self.errors.insert(id,reason); }
+    pub fn register_scoped_error(&mut self, scope:&str, id:impl Into<String>, reason:String) {
+        let id=id.into(); self.scopes.insert(id.clone(),scope.into()); self.register_error(id,reason);
+    }
     /// Register encoded PNG/JPEG bytes. The returned ID includes pixels, dimensions, encoding and top-row origin.
     pub fn register_image(&mut self, bytes:&[u8]) -> Result<String,String> {
         let format=image::guess_format(bytes).map_err(|e| e.to_string())?;
@@ -121,21 +133,27 @@ impl Registry {
         Ok(self.register_graph(&serde_json::json!({"materials":value})))
     }
     pub fn resolve(&mut self,slot:&str)->MaterialBinding {
-        let Some(descriptor)=self.descriptors.get(slot).cloned() else { return MaterialBinding {slot:slot.into(),descriptor:None,image:None,state:self.errors.get(slot).map_or(State::Missing,|e|State::Unsupported(e.clone()))}; };
-        let Some(tex)=descriptor.textures.base_color.as_ref() else { return MaterialBinding {slot:slot.into(),descriptor:Some(descriptor),image:None,state:State::Ok}; };
+        let id = if self.descriptors.contains_key(slot) {Some(slot.to_owned())} else {
+            let mut matches=self.descriptors.iter().filter(|(id,d)|self.scopes.contains_key(*id) && d.name==slot).map(|(id,_)|id.clone());
+            matches.next().filter(|_|matches.next().is_none())
+        };
+        let scope=id.as_ref().and_then(|id|self.scopes.get(id)).cloned();
+        let Some(descriptor)=id.as_ref().and_then(|id|self.descriptors.get(id)).cloned() else { return MaterialBinding {slot:slot.into(),descriptor_id:self.errors.contains_key(slot).then(||slot.into()),scope:self.scopes.get(slot).cloned(),descriptor:None,image:None,state:self.errors.get(slot).map_or(State::Missing,|e|State::Unsupported(e.clone()))}; };
+        let result=|image,state| MaterialBinding {slot:slot.into(),descriptor_id:id.clone(),scope:scope.clone(),descriptor:Some(descriptor.clone()),image,state};
+        let Some(tex)=descriptor.textures.base_color.as_ref() else { return result(None,State::Ok); };
         let mut id=tex.image_id.clone();
         if id.as_ref().is_none_or(|id| !self.images.contains_key(id)) {
             if let Some(path)=&tex.path {
                 let path=if path.is_absolute() {path.clone()} else {self.base_path.join(path)};
                 match std::fs::read(&path).map_err(|e| e.to_string()).and_then(|b|self.register_image(&b)) {
-                    Ok(hash)=>{ if id.as_ref().is_some_and(|expected| expected!=&hash) { return MaterialBinding {slot:slot.into(),descriptor:Some(descriptor),image:None,state:State::CheckerFallback("image hash mismatch".into())}; } id=Some(hash); },
-                    Err(e)=>return MaterialBinding {slot:slot.into(),descriptor:Some(descriptor),image:None,state:State::CheckerFallback(e)},
+                    Ok(hash)=>{ if id.as_ref().is_some_and(|expected| expected!=&hash) { return result(None,State::CheckerFallback("image hash mismatch".into())); } id=Some(hash); },
+                    Err(e)=>return result(None,State::CheckerFallback(e)),
                 }
             }
         }
         let image=id.and_then(|id| { self.tick+=1; self.images.get_mut(&id).map(|(asset,last)| {*last=self.tick;asset.clone()}) });
         let state=if image.is_some() {State::Ok} else {State::CheckerFallback("image asset missing".into())};
-        MaterialBinding {slot:slot.into(),descriptor:Some(descriptor),image,state}
+        result(image,state)
     }
     pub fn cpu_resident_bytes(&self)->usize { self.images.values().map(|(i,_)|i.resident_bytes()).sum() }
     pub fn evict(&mut self,pinned:&HashSet<String>) {
@@ -171,5 +189,16 @@ pub fn linear_to_srgb(v:f32)->f32 { if v<=0.0031308 {v*12.92} else {1.055*v.powf
             "sampler":{"min":"linear","mag":"linear","wrap_u":"clamp","wrap_v":"clamp"}}}})).unwrap();
         let sampler=&d.textures.base_color.unwrap().sampler;
         assert_eq!(sampler.wrap_u,"clamp"); assert_eq!(sampler.wrap_v,"clamp");
+    }
+    #[test] fn unique_peer_material_name_fallback_is_unambiguous() {
+        let mut r=Registry::new(".");
+        let d=Descriptor::parse(&serde_json::json!({"version":1,"name":"imagepaste-261017-142014"})).unwrap();
+        r.register_scoped_descriptor("peer1:instance:a","peer1:blender:a:0",d.clone());
+        let found=r.resolve("imagepaste-261017-142014");
+        assert_eq!(found.descriptor_id.as_deref(),Some("peer1:blender:a:0"));
+        assert_eq!(found.scope.as_deref(),Some("peer1:instance:a"));
+        r.register_scoped_descriptor("peer2:instance:b","peer2:blender:b:0",d);
+        assert!(matches!(r.resolve("imagepaste-261017-142014").state,State::Missing));
+        assert_eq!(r.resolve("peer1:blender:a:0").descriptor_id.as_deref(),Some("peer1:blender:a:0"));
     }
 }

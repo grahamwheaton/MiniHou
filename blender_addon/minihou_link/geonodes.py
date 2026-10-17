@@ -268,13 +268,16 @@ def edit_live(obj, node):
     materials = list(materials)
     _sources(client, tree[KEY], _bindings(obj, mod, path, node), materials,
              _geometry_sources(obj, mod, path, node))
+    render_uv = next((layer.name for layer in obj.data.uv_layers if layer.active_render), None)
+    manifest_revision = client.sync_materials(tree[KEY], materials, render_uv)
     values = _placement_values(mod.node_group, mod, path[:-1], node, obj)
     scene = bpy.context.scene
     header = client.edit_live(tree[KEY], json.loads(tree[modifiers.GRAPH]), values, arrays,
                               label=obj.name + " / " + " / ".join(path),
                               frame=scene.frame_current + scene.frame_subframe,
                               fps=scene.render.fps / scene.render.fps_base,
-                              references=_placement_references(mod.node_group, mod, path[:-1], node, obj))
+                              references=_placement_references(mod.node_group, mod, path[:-1], node, obj),
+                              materials=materials, manifest_revision=manifest_revision)
     _live.add(tree[KEY])
     _apply_live(node, header)
     return {"state": "ready", "editor_url": client.welcome.get("editor_url", ""),

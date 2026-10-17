@@ -72,10 +72,11 @@ impl Service {
     pub fn bind(&self,scope:&str,registry:&mut Registry)->Result<(),String> {
         let manifest=self.manifests.get(scope).ok_or("missing manifest")?;
         let descriptors=manifest["descriptors"].as_object().ok_or("missing descriptors")?;
+        registry.clear_scope(scope);
         for (id,value) in descriptors {
-            let mut d=match Descriptor::parse(value) { Ok(d)=>d, Err(reason)=>{registry.register_error(id.clone(),reason);continue;} };
+            let mut d=match Descriptor::parse(value) { Ok(d)=>d, Err(reason)=>{registry.register_scoped_error(scope,id.clone(),reason);continue;} };
             if let Some(t)=d.textures.base_color.as_mut() { if let Some(hash)=t.image_id.as_ref() {if self.has(hash) {t.image_id=Some(self.publish(hash,registry)?);} } }
-            registry.register_descriptor(id.clone(),d);
+            registry.register_scoped_descriptor(scope,id.clone(),d);
         }
         Ok(())
     }
