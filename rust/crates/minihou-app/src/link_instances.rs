@@ -1,6 +1,6 @@
 //! Connection-owned stack evaluators. No access to the proxy session's external inputs.
 use super::*;
-use minihou_app::{link_interface, link_param_edit};
+use minihou_app::{graph_embed, link_interface, link_param_edit};
 use minihou_core::{nodes::blender_input::ExternalInput, session::Session, Graph};
 
 type Result<T> = minihou_app::Result<T>;
@@ -26,6 +26,10 @@ pub(super) struct InstanceManager {
     entries: BTreeMap<String, Entry>,
     sources: BTreeMap<String, BTreeMap<String, Arc<Geometry>>>,
     live: BTreeMap<String, Live>,
+    /// graph_embed_v1: last graph both sides agreed on, per Blender network id.
+    embed_base: BTreeMap<String, Value>,
+    /// Pushed graphs waiting for the user's answer in the app's conflict modal.
+    embed_pending: BTreeMap<String, Value>,
 }
 impl InstanceManager {
     pub fn new(
@@ -40,6 +44,8 @@ impl InstanceManager {
             entries: BTreeMap::new(),
             sources: BTreeMap::new(),
             live: BTreeMap::new(),
+            embed_base: BTreeMap::new(),
+            embed_pending: BTreeMap::new(),
         }
     }
     pub fn handle(&mut self, h: &Value, arrays: &Arrays) -> (Value, Arrays) {
@@ -67,9 +73,9 @@ impl InstanceManager {
             );
             if path
                 .extension()
-                .is_none_or(|s| !s.eq_ignore_ascii_case("json"))
+                .is_none_or(|s| !s.eq_ignore_ascii_case("json") && !s.eq_ignore_ascii_case("minihou"))
             {
-                return Err("modifier graph must be a .json file".into());
+                return Err("modifier graph must be a .json or .minihou file".into());
             }
             let snapshot = self.shared.snapshot.lock().unwrap();
             let same = path
@@ -136,6 +142,12 @@ impl InstanceManager {
                 self.update_live(&id, "live_update", None)?;
             }
             return Ok((json!({"type":"instance_sources_set"}), Arrays::new()));
+        }
+        if typ == "graph_push" {
+            return Ok((self.embed_push(&id, h)?, Arrays::new()));
+        }
+        if typ == "graph_pull" {
+            return Ok((self.embed_pull(&id)?, Arrays::new()));
         }
         if typ == "instance_sync" {
             return Ok((self.sync(&id, h)?, Arrays::new()));
@@ -356,9 +368,80 @@ impl InstanceManager {
                 .filter_map(|p| Some((p["name"].as_str()?.to_owned(), p["value"].clone())))
                 .collect(),
         );
+        let pending = self.embed_pending.contains_key(id);
+        let graph = live.graph.clone();
+        if !pending {
+            self.embed_base.insert(id.to_string(), graph.clone());
+        }
+        let live = &self.live[id];
         Ok(
-            json!({"type":"instance_synced","live":true,"editor":"native","graph":live.graph,"interface":interface,"path":live.path}),
+            json!({"type":"instance_synced","live":true,"editor":"native","graph":live.graph,"interface":interface,"path":live.path,
+                   "hash":graph_embed::graph_hash(&graph),"embed_pending":pending}),
         )
+    }
+    /// `graph_push`: Blender's embedded graph for network `id`. Replies `graph_ack` with a status:
+    /// unchanged | accepted | app_newer (+ the app's graph) | conflict (the app asks the user).
+    fn embed_push(&mut self, id: &str, h: &Value) -> Result<Value> {
+        use graph_embed::Decision;
+        let push = graph_embed::parse_push(h)?;
+        validate_graph(&push.graph)?;
+        self.refresh(id);
+        let app = self.live.get(id).map(|l| l.graph.clone());
+        let open_dirty = self.shared.open_dirty.load(Ordering::Relaxed);
+        let decision = graph_embed::decide(&push.graph, app.as_ref(), self.embed_base.get(id), open_dirty);
+        self.shared.embed_resolutions.lock().unwrap().remove(id);
+        self.embed_pending.remove(id);
+        let mut ack = match decision {
+            Decision::Unchanged => graph_embed::state("graph_ack", "unchanged", None),
+            Decision::AdoptEmbedded => {
+                if let Some(live) = self.live.get_mut(id) {
+                    live.graph = push.graph.clone();
+                    let path = live.path.clone();
+                    self.dispatch(json!({"type":"live_replace","path":path,"graph":push.graph}), Arrays::new(), true)?;
+                }
+                graph_embed::state("graph_ack", "accepted", None)
+            }
+            Decision::KeepApp => graph_embed::state("graph_ack", "app_newer", app.as_ref()),
+            Decision::Conflict | Decision::OpenDocumentDirty => {
+                let kind = if decision == Decision::Conflict { "live" } else { "open_document" };
+                let path = self.live.get(id).map(|l| l.path.clone()).unwrap_or_default();
+                self.embed_pending.insert(id.to_string(), push.graph.clone());
+                self.dispatch(json!({"type":"embed_conflict","kind":kind,"path":path,"instance_id":id,
+                    "label":push.label,"name":push.name,"graph":push.graph}), Arrays::new(), false)?;
+                return Ok(graph_embed::state("graph_ack", "conflict", None));
+            }
+        };
+        self.embed_base.insert(id.to_string(), match decision { Decision::KeepApp => app.unwrap(), _ => push.graph });
+        ack["received"] = json!(push.size);
+        Ok(ack)
+    }
+    /// `graph_pull`: the app's current graph for network `id` (`graph_state`), or the outcome of
+    /// a pending conflict. Status: pending | resolved (+ resolution) | ok | none.
+    fn embed_pull(&mut self, id: &str) -> Result<Value> {
+        self.refresh(id);
+        let app = self.live.get(id).map(|l| l.graph.clone());
+        if self.embed_pending.contains_key(id) {
+            let Some(resolution) = self.shared.embed_resolutions.lock().unwrap().remove(id) else {
+                return Ok(graph_embed::state("graph_state", "pending", None));
+            };
+            let pushed = self.embed_pending.remove(id).unwrap();
+            let adopt = graph_embed::Resolution::parse(&resolution).is_some_and(|r| r.adopts_embedded());
+            match &app {
+                Some(graph) => { self.embed_base.insert(id.to_string(), graph.clone()); }
+                None if adopt => { self.embed_base.insert(id.to_string(), pushed); }
+                None => {}
+            }
+            let mut out = graph_embed::state("graph_state", "resolved", app.as_ref());
+            out["resolution"] = json!(resolution);
+            return Ok(out);
+        }
+        Ok(match app {
+            Some(graph) => {
+                self.embed_base.insert(id.to_string(), graph.clone());
+                graph_embed::state("graph_state", "ok", Some(&graph))
+            }
+            None => graph_embed::state("graph_state", "none", None),
+        })
     }
     fn update_live(&mut self, id: &str, typ: &str, overrides: Option<Value>) -> Result<()> {
         let live = &self.live[id];
@@ -372,7 +455,7 @@ impl InstanceManager {
             );
         }
         let (frame, fps) = time(&live.header)?;
-        let h = json!({"type":typ,"path":live.path,"graph":live.graph,"sources":sources.keys().collect::<Vec<_>>(),"materials":live.header["materials"],"frame":frame,"fps":fps,"overrides":overrides});
+        let h = json!({"type":typ,"path":live.path,"label":live.header["label"],"graph":live.graph,"sources":sources.keys().collect::<Vec<_>>(),"materials":live.header["materials"],"frame":frame,"fps":fps,"overrides":overrides});
         self.shared
             .live_documents
             .lock()
@@ -424,6 +507,8 @@ impl InstanceManager {
         }
         self.entries.remove(id);
         self.sources.remove(id);
+        self.embed_base.remove(id);
+        self.embed_pending.remove(id);
         Ok(())
     }
     pub fn clear(&mut self) {
@@ -504,6 +589,48 @@ fn same_param(a: &Value, b: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn push(id: &str, graph: &Value) -> Value {
+        let text = graph_embed::canonical_text(graph);
+        json!({"type":"graph_push","request_id":1,"instance_id":id,"schema":1,"name":"N","label":"Cube / MiniHou",
+               "json":text,"hash":graph_embed::sha256_hex(text.as_bytes()),"size":text.len()})
+    }
+
+    #[test]
+    fn graph_push_acks_validates_and_asks_before_replacing_a_modified_document() {
+        let graph = json!({"nodes":{"input":{"type":"modifier_input"},"o":{"type":"output","inputs":{"geo":"input"}}},"display":"o"});
+        let doc = Document::parse(graph.to_string()).unwrap();
+        let server = LinkServer::bind("127.0.0.1:0", &doc, Path::new("g.json")).unwrap();
+        let (sender, requests) = mpsc::sync_channel(4);
+        let mut manager = InstanceManager::new(1, server.shared.clone(), sender);
+        let (ack, _) = manager.handle(&push("A", &graph), &Arrays::new());
+        assert_eq!((ack["type"].as_str(), ack["status"].as_str()), (Some("graph_ack"), Some("accepted")), "{ack}");
+        assert_eq!(ack["instance_id"], "A");
+        assert_eq!(manager.embed_base["A"]["version"], 1, "migrated to the current schema");
+        let (state, _) = manager.handle(&json!({"type":"graph_pull","request_id":2,"instance_id":"A"}), &Arrays::new());
+        assert_eq!((state["type"].as_str(), state["status"].as_str()), (Some("graph_state"), Some("none")));
+        let mut bad = push("A", &graph);
+        bad["hash"] = json!("deadbeef");
+        let (err, _) = manager.handle(&bad, &Arrays::new());
+        assert_eq!(err["type"], "instance_error");
+        assert!(err["message"].as_str().unwrap().contains("hash"));
+        let (err, _) = manager.handle(&push("A", &json!({"nodes":{"b":{"type":"blender_object"}}})), &Arrays::new());
+        assert_eq!(err["type"], "instance_error", "feedback-prone graphs are refused like instance graphs");
+
+        server.shared.open_dirty.store(true, Ordering::Relaxed);
+        let (ack, _) = manager.handle(&push("B", &graph), &Arrays::new());
+        assert_eq!(ack["status"], "conflict");
+        let conflict = requests.try_recv().unwrap().message;
+        assert_eq!((conflict["type"].as_str(), conflict["kind"].as_str()), (Some("embed_conflict"), Some("open_document")));
+        assert_eq!(conflict["label"], "Cube / MiniHou");
+        let pull = json!({"type":"graph_pull","request_id":3,"instance_id":"B"});
+        assert_eq!(manager.handle(&pull, &Arrays::new()).0["status"], "pending");
+        server.shared.embed_resolutions.lock().unwrap().insert("B".into(), "keep_mine".into());
+        let (state, _) = manager.handle(&pull, &Arrays::new());
+        assert_eq!((state["status"].as_str(), state["resolution"].as_str()), (Some("resolved"), Some("keep_mine")));
+        assert!(!manager.embed_base.contains_key("B"), "a declined push is not an agreement");
+        assert_eq!(manager.handle(&pull, &Arrays::new()).0["status"], "none");
+    }
 
     #[test]
     fn independent_generator_instances_cook_with_empty_inputs_and_survive_relink() {
