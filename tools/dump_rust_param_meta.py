@@ -93,6 +93,16 @@ def meta() -> dict:
         "clamp": {"kind":"bool","default":True,"doc":"Stop at the neighbouring edge."},
         "correct_uvs": {"kind":"bool","default":True,"doc":"Slide corner UVs independently on each face."},
     })
+    # Select arrow (viewport pick) element domain for fields that take edges.
+    out["subdivide"]["creases"]["pick_domain"] = "edges"
+    # Select arrow domains for group fields, declared once here so every group field follows one rule.
+    for node, field, domain in [("polyextrude","group","faces"), ("transform","group","points"),
+                                ("polybevel","group","edges")]:
+        if field in out.get(node, {}):
+            out[node][field]["pick_domain"] = domain
+    # polybevel group follows its group_type parameter (edges or primitives) when set.
+    out["polybevel"]["group"]["pick_domain_param"] = "group_type"
+    out["polybevel"]["group"]["pick_domain_default"] = "edges"
     out["loop_cut"] = out["polysplit"]
     out["edge_slide"] = {
         "group": {"kind":"str","default":"","doc":"Selected edge group or pA-B pairs; empty leaves the mesh unchanged."},
