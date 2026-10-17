@@ -189,3 +189,24 @@ Full handoff: docs/TODO_PERSISTENT_OVERRIDES.md (from the user's HANDOFF.md, 202
 - **Polyfill full parity:** Houdini Polyfill parameters from the user's screenshot: Boundary Group, Fill Mode (Quadrilaterals and others), Auto-Complete Boundaries, Reverse Patches, Unique Points, Update Point Normals, Edge Loop, Smooth, Patch Construction (Corner Offset, Custom Corners, Deform Patch, Surface Offset, Tangent Strength), Output Groups (Patch Group, Edge Loop Group, Append to Groups).
 - **Statistics nodes:** measure volume, distance between points, bounding box size, curve length, and similar measurements, as nodes with output attributes or detail values.
 - **Houdini shelf gap audit:** the user's screenshots list the Model, Polygon, Deform and Texture shelves. Check each Houdini node against MiniHou and port the missing ones (Model: Revolve, Loft, Skin, Rails, Sweep, Creep, Ray, Shatter, Carve, Convert, Refine, Reverse, Sculpt, Cluster Points, Edit, Visibility; Polygon: PolyDraw, Curve Polygon, PolyBridge, Edge Loop, PolyReduce, PolyExpand2D, Edge Collapse, Edge Cusp, Edge Flip, Edge Divide, Clip, Facet, Point Weld, Fuse, Snap, Smooth, Curve from Edges, PolyHinge; Deform: Bulge, Fractal, Mountain, Waves, Ripple, Morph; Texture: UV Project, UV Edit, UV Brush, UV Fuse, UV Flatten, UV Pelt, UV Texture, UV Transform, UV Unwrap, UV Quick Shade, UV Smooth, UV Layout).
+# PRIORITY (set by user 2026-10-17, full-auto while away)
+
+Standing rules:
+- Bob: use up to 20% of weekly allowance (stop when 80% remains).
+- Local Codex: use freely (5-hour window is the only limit).
+- Claude (Opus/Sonnet): keep session usage under 90%; Sonnet or Opus allowed, pace yourself.
+- Argon: advisor only. Flash agents: use as much as possible.
+- Merge and push to native-ui automatically when the full test run is green; build the test exe and run the add-on updater after each push. Stop and leave for the user if anything is red.
+
+Order:
+1. Finish in-flight: fence + MCP test (Bob), deformer parity (Flash), Python parity suites (Bob).
+2. Stage 1 self-registering node architecture.
+3. Ctrl+G grouping (moved up above Attribute Wrangle, per user).
+4. Attribute Wrangle parity.
+5. Polyfill full parity, then Houdini shelf gap nodes (Flash batches).
+6. Statistics nodes (volume, distance, bounding box, curve length).
+7. Loop Cut extras, Controller node.
+8. Image nodes, Flood Fill, Array parity, rest of list.
+9. When the MCP works and the queue has no runnable jobs: archviz asset generators (wall, fence, road, tree scatter, roof), each with a demo; check pre-Rust examples for reference.
+
+Parked by user: inset on non-planar regions. Tri to Quad: user will test.
