@@ -3001,10 +3001,20 @@
   }
  },
  "knife": {
+  "cut_through": {
+   "default": false,
+   "doc": "Cut hidden faces along the view projection.",
+   "kind": "bool"
+  },
   "cuts": {
    "default": "[]",
-   "doc": "Interactive view-space cut segments, captured by the viewport Knife.",
+   "doc": "View-projected cut chains with point positions and snap references.",
    "kind": "str"
+  },
+  "snap_tolerance": {
+   "default": 10.0,
+   "doc": "Viewport snapping radius in pixels.",
+   "kind": "float"
   }
  },
  "lattice": {

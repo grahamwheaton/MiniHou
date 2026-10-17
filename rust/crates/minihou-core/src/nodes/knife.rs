@@ -17,7 +17,7 @@ type Weights = Vec<(usize, f64)>;
 pub const KNIFE: NodeSpec = NodeSpec {
     name: "knife",
     inputs: GEO,
-    params: crate::params!("cuts":"[]"),
+    params: crate::params!("cuts":"[]"; "cut_through":false; "snap_tolerance":10.0),
     cook: knife,
 };
 fn sub2(a: V2, b: V2) -> V2 {
@@ -237,7 +237,21 @@ impl Segment {
         })
     }
 }
-fn parse(text: &str) -> Result<Vec<Segment>> {
+fn attached_screen(point:&serde_json::Value, matrix:&serde_json::Value, positions:&[[f64;3]]) -> serde_json::Value {
+    let Some(snap)=point.get("snap") else { return point["screen"].clone(); };
+    if snap["point_count"].as_u64()!=Some(positions.len() as u64) { return point["screen"].clone(); }
+    let Some(ids)=snap["element"].as_array() else { return point["screen"].clone(); };
+    let Some(weights)=snap["params"].as_array() else { return point["screen"].clone(); };
+    if ids.len()!=weights.len() || ids.is_empty() { return point["screen"].clone(); }
+    let mut q=[0.;3];
+    for (id,w) in ids.iter().zip(weights) { let (Some(id),Some(w))=(id.as_u64(),w.as_f64()) else {return point["screen"].clone()};
+        let Some(p)=positions.get(id as usize) else {return point["screen"].clone()}; for k in 0..3 {q[k]+=p[k]*w;} }
+    let Some(m)=matrix.as_array().filter(|m|m.len()==16) else {return point["screen"].clone()};
+    let clip=|row:usize| (0..3).map(|k|m[k*4+row].as_f64().unwrap_or(0.)*q[k]).sum::<f64>()+m[12+row].as_f64().unwrap_or(0.);
+    let w=clip(3); if w.abs()<EPS {return point["screen"].clone();}
+    serde_json::json!([clip(0)/w,clip(1)/w])
+}
+fn parse(text: &str, positions: Option<&[[f64;3]]>) -> Result<Vec<Segment>> {
     let v: serde_json::Value =
         serde_json::from_str(text).map_err(|e| Error::new(format!("Invalid Knife cuts: {e}")))?;
     let array = v
@@ -249,7 +263,12 @@ fn parse(text: &str) -> Result<Vec<Segment>> {
         ));
     }
     let mut out = Vec::new();
-    for v in array {
+    for chain in array {
+      let segments: Vec<serde_json::Value> = if let Some(points)=chain.get("points").and_then(|v|v.as_array()) {
+          points.windows(2).map(|ab| serde_json::json!({"a":positions.map_or_else(||ab[0]["screen"].clone(),|p|attached_screen(&ab[0],&chain["matrix"],p)),"b":positions.map_or_else(||ab[1]["screen"].clone(),|p|attached_screen(&ab[1],&chain["matrix"],p)),"matrix":chain["matrix"],"through":chain.get("through").and_then(|v|v.as_bool()).unwrap_or(false)})).collect()
+      } else { vec![chain.clone()] };
+      for v in &segments {
+        if out.len() >= 512 { return Err(Error::new("Knife supports up to 512 segments per operation.")); }
         let nums = |name: &str, count: usize| -> Result<Vec<f64>> {
             let a = v
                 .get(name)
@@ -288,17 +307,19 @@ fn parse(text: &str) -> Result<Vec<Segment>> {
             faces,
             through: v.get("through").and_then(|v| v.as_bool()).unwrap_or(false),
         });
+      }
     }
     Ok(out)
 }
 fn knife(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let g = KNIFE.one(inputs, 0)?;
     polygons(&g, "Knife")?;
-    let segments = parse(&p.s("cuts")?)?;
+    let pos = positions(&g);
+    let mut segments = parse(&p.s("cuts")?,Some(&pos))?;
+    if p.b("cut_through")? { for segment in &mut segments { segment.through=true; } }
     if segments.is_empty() {
         return Ok((*g).clone());
     }
-    let pos = positions(&g);
     let vp = &g.topology.vertex_point;
     let mut original = Vec::new();
     for f in 0..g.nprims() {
@@ -715,6 +736,8 @@ fn knife(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         }
     }
     let mut point = interpolate(&g.point, &pointweights);
+    point.insert("point_group_knife".into(), Arc::new(Attr::i32(1,
+        (0..pointweights.len()).map(|i| i32::from(i>=g.npoints)).collect())));
     // _build.make takes P from its explicit positions argument, not the attribute table.
     point.insert(
         "P".into(),
@@ -879,6 +902,15 @@ mod sketch_split_tests {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test] fn attached_vertex_and_edge_follow_positions_with_topology_fallback() {
+        let matrix=json!([1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.]);
+        let pos=[[2.,3.,0.],[4.,3.,0.]];
+        let vertex=json!({"screen":[0.,0.],"snap":{"point_count":2,"element":[0],"params":[1.]}});
+        let edge=json!({"screen":[0.,0.],"snap":{"point_count":2,"element":[0,1],"params":[0.5,0.5]}});
+        assert_eq!(attached_screen(&vertex,&matrix,&pos),json!([2.,3.]));
+        assert_eq!(attached_screen(&edge,&matrix,&pos),json!([3.,3.]));
+        assert_eq!(attached_screen(&edge,&matrix,&pos[..1]),json!([0.,0.]));
+    }
     #[test]
     fn cut_quad_through_and_stitch_shared_edge() {
         let g = Geometry::from_arrays(
@@ -901,11 +933,46 @@ mod tests {
                 .any(|&v| v > 0.)
         );
     }
+    #[test] fn two_chains_create_point_and_edge_groups() {
+        let g=Geometry::from_arrays(vec![-1.,-1.,0.,1.,-1.,0.,1.,1.,0.,-1.,1.,0.],vec![0,1,2,3],vec![0,4],None).unwrap();
+        let matrix=[1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.];
+        let cuts=json!([
+            {"matrix":matrix,"points":[{"screen":[-2.,0.],"position":[-2.,0.,0.]},{"screen":[2.,0.],"position":[2.,0.,0.]}]},
+            {"matrix":matrix,"points":[{"screen":[0.,-2.],"position":[0.,-2.,0.]},{"screen":[0.,2.],"position":[0.,2.,0.]}]}
+        ]).to_string();
+        let p=Params::resolve(KNIFE.params,json!({"cuts":cuts}).as_object()).unwrap();
+        let out=knife(&[vec![Arc::new(g)]],&p).unwrap();
+        out.validate().unwrap();
+        assert!(out.nprims()>=4);
+        assert!(out.point.get("point_group_knife").is_some());
+        assert!(edges::values(&out,"edge_group_knife").unwrap().iter().any(|v|*v>0.));
+    }
+    #[test] fn projected_path_splits_non_coplanar_neighbours() {
+        let g=Geometry::from_arrays(vec![-1.,-1.,0.,0.,-1.,0.,0.,1.,0.,-1.,1.,0.,1.,-1.,1.,1.,1.,1.],
+            vec![0,1,2,3,1,4,5,2],vec![0,4,8],None).unwrap();
+        let matrix=[1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.];
+        let cuts=json!([{"matrix":matrix,"a":[-2.,0.],"b":[2.,0.]}]).to_string();
+        let p=Params::resolve(KNIFE.params,json!({"cuts":cuts}).as_object()).unwrap();
+        let out=knife(&[vec![Arc::new(g)]],&p).unwrap(); out.validate().unwrap();
+        assert_eq!(out.nprims(),4);
+        let edges=topo::edges(&out.topology,out.npoints);
+        assert_eq!(out.npoints as i64-(edges.points.len()/2) as i64+out.nprims() as i64,1);
+    }
+    #[test] fn cut_through_reaches_occluded_face() {
+        let g=Geometry::from_arrays(vec![-1.,-1.,0.,1.,-1.,0.,1.,1.,0.,-1.,1.,0.,-1.,-1.,-1.,1.,-1.,-1.,1.,1.,-1.,-1.,1.,-1.],
+            vec![0,1,2,3,4,5,6,7],vec![0,4,8],None).unwrap();
+        let matrix=[1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.];
+        let cuts=json!([{"matrix":matrix,"a":[-2.,0.],"b":[2.,0.]}]).to_string();
+        let cook=|through| {let p=Params::resolve(KNIFE.params,json!({"cuts":cuts,"cut_through":through}).as_object()).unwrap();
+            knife(&[vec![Arc::new(g.clone())]],&p).unwrap()};
+        let visible=cook(false);let through=cook(true);
+        assert!(through.nprims()>visible.nprims());
+    }
     #[test]
     fn empty_and_invalid_projection() {
         let g = Geometry::points_only(vec![0., 0., 0.]).unwrap();
         let p = Params::resolve(KNIFE.params, None).unwrap();
         assert_eq!(knife(&[vec![Arc::new(g)]], &p).unwrap().npoints, 1);
-        assert!(parse("[{\"matrix\":[],\"a\":[0,0],\"b\":[1,1]}]").is_err());
+        assert!(parse("[{\"matrix\":[],\"a\":[0,0],\"b\":[1,1]}]",None).is_err());
     }
 }
