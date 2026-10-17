@@ -142,8 +142,14 @@ fn apply_transform_step(doc: &mut Document, first: bool, value: Value, target: &
     }
 }
 fn ensure_transform_target(value: &mut Value, source: &str, object_mode: bool, active: Option<&str>) -> Option<String> {
-    if let Some(id) = active { return Some(id.to_owned()); }
-    let mut displayed = minihou_app::display_nodes(value);
+    if let Some(id) = active {
+        if value["nodes"].get(id).is_some()
+            && !(value["nodes"][source]["type"] == "output"
+                && value["nodes"][id]["inputs"]["geo"] == source) {
+            return Some(id.to_owned());
+        }
+    }
+    let displayed = minihou_app::display_nodes(value);
     let nodes = value["nodes"].as_object_mut()?;
     if object_mode && nodes.get(source).and_then(|n| n["type"].as_str()) == Some("transform") { return Some(source.to_owned()); }
     if object_mode {
@@ -151,18 +157,41 @@ fn ensure_transform_target(value: &mut Value, source: &str, object_mode: bool, a
     }
     if nodes.get(source).and_then(|n| n["type"].as_str()) == Some("output") {
         let up = nodes[source]["inputs"]["geo"].as_str().map(str::to_owned);
+        if object_mode {
+            if let Some(id) = nodes.iter().find(|(_, n)| n["type"] == "transform" && n["inputs"]["geo"] == source).map(|(id, _)| id.clone()) {
+                let upstream = up?;
+                nodes[&id]["inputs"]["geo"] = json!(upstream);
+                nodes[source]["inputs"]["geo"] = json!(id);
+                return Some(id);
+            }
+        }
         if let Some(up) = up.filter(|up| object_mode && nodes.get(up).is_some_and(|n| n["type"] == "transform")) { return Some(up); }
         // Never hang a node off the end of the stream: insert it just before the output.
         let (next, id) = graph_edit::add(value, "transform", Some(source))?;
         *value = next;
         return Some(id);
     }
-    let id = (1..).map(|n| format!("transform{n}")).find(|id| !nodes.contains_key(id))?;
-    nodes.insert(id.clone(), json!({"type":"transform", "inputs":{"geo":source}}));
-    if let Some(index) = displayed.iter().position(|shown| shown == source) { displayed[index] = id.clone(); }
-    else { displayed = vec![id.clone()]; }
-    value["display"] = if displayed.len() == 1 { json!(displayed[0]) } else { json!(displayed) };
+    // Splice every consumer of the selected node, including a displayed output.
+    let (next, id) = graph_edit::add(value, "transform", Some(source))?;
+    *value = next;
     Some(id)
+}
+fn feeds_displayed_node(value: &Value, selected: &str) -> bool {
+    let mut pending = minihou_app::display_nodes(value);
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id.clone()) { continue; }
+        if id == selected { return true; }
+        if let Some(inputs) = value["nodes"][&id]["inputs"].as_object() {
+            for input in inputs.values() {
+                if let Some(source) = input.as_str() { pending.push(source.to_owned()); }
+                else if let Some(sources) = input.as_array() {
+                    pending.extend(sources.iter().filter_map(Value::as_str).map(str::to_owned));
+                }
+            }
+        }
+    }
+    false
 }
 fn toggle_edit_mode(current: ui::SelectionMode, last: &mut ui::SelectionMode) -> ui::SelectionMode {
     if current == ui::SelectionMode::Object { *last } else { *last = current; ui::SelectionMode::Object }
@@ -610,7 +639,7 @@ impl App {
     }
     fn active_object(&self) -> Option<&str> {
         (!self.object_hidden && self.selected_set.contains(&self.selected)
-            && self.editor.doc.display_nodes().contains(&self.selected)).then_some(self.selected.as_str())
+            && feeds_displayed_node(self.editor.doc.value(), &self.selected)).then_some(self.selected.as_str())
     }
     fn selection_center(&self) -> Option<[f32; 3]> {
         if self.editor_state.selection == ui::SelectionMode::Object {
