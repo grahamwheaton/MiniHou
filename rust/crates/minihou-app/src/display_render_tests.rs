@@ -23,7 +23,7 @@ fn scene() -> Scene {
         nlp.extend_from_slice(p); nlp.extend((0..3).map(|k| p[k]+n[k]*0.2));
         nln.extend_from_slice(n); nln.extend_from_slice(n);
     }
-    Scene { p,n,tri,edge,point:Vec::new(),line:Vec::new(),nlp,nln,normal_points:(0..8).collect(),bbp:[0.;24],center:[0.;3],radius:2.5 }
+    Scene { p,n,tri,edge,point:Vec::new(),line:Vec::new(),nlp,nln,normal_points:(0..8).collect(),bbp:[0.;24],center:[0.;3],radius:2.5,textured:Vec::new() }
 }
 pub(super) fn render(device:&wgpu::Device,queue:&wgpu::Queue,gpu:&Gpu,mode:Mode,overlay:Overlay,outline:bool)->Vec<[u8;4]> {
     render_selection(device,queue,gpu,mode,overlay,outline,crate::ui::SelectionMode::Object)
@@ -149,7 +149,7 @@ fn random_objects_and_normal_matcap_headless() {
     for half in [0..64,64..128] {
         assert!((0..128).flat_map(|y|half.clone().map(move |x|y*128+x)).filter(|&i|single[i]!=random[i]).count()>50);
     }
-    let mut plane=Scene {p:Vec::new(),n:Vec::new(),tri:vec![0,1,2,0,2,3],edge:vec![0,1,1,2,2,3,3,0],point:Vec::new(),line:Vec::new(),nlp:Vec::new(),nln:Vec::new(),normal_points:Vec::new(),bbp:[0.;24],center:[0.;3],radius:2.5};
+    let mut plane=Scene {p:Vec::new(),n:Vec::new(),tri:vec![0,1,2,0,2,3],edge:vec![0,1,1,2,2,3,3,0],point:Vec::new(),line:Vec::new(),nlp:Vec::new(),nln:Vec::new(),normal_points:Vec::new(),bbp:[0.;24],center:[0.;3],radius:2.5,textured:Vec::new()};
     let cam=Camera::frame([0.;3],2.5); let (_,view)=cam.matrices(1.);
     let right=[view[0][0],view[1][0],view[2][0]];
     let up=[view[0][1],view[1][1],view[2][1]];
@@ -167,4 +167,83 @@ fn random_objects_and_normal_matcap_headless() {
     let flat=render(&device,&queue,&gpu,Mode::MatCapShaded,Overlay {matcap:MatCap::Normal,matcap_flat:true,..options},false);
     assert!(changed(&smooth,&flat)>100,"flat MatCap ignored face normal");
     assert!(flat[64*128+64][2]>235,"flat normal centre {:?}",flat[64*128+64]);
+}
+
+#[test]
+fn textured_two_slots_factor_checker_and_diagnostic_modes_headless() {
+    let Some((device,queue))=adapter() else {eprintln!("No adapter: skipping texture render test");return;};
+    use std::sync::Arc;
+    use minihou_core::geometry::Attr;
+    use minihou_app::materials::{Descriptor,Registry};
+    let cam=Camera::frame([0.;3],2.5); let (_,view)=cam.matrices(1.);
+    let right=[view[0][0],view[1][0],view[2][0]]; let up=[view[0][1],view[1][1],view[2][1]];
+    let mut p=Vec::new();
+    for (x,y) in [(-1.,-1.),(0.,-1.),(0.,1.),(-1.,1.),(0.,-1.),(1.,-1.),(1.,1.),(0.,1.)] {
+        p.extend((0..3).map(|i|right[i]*x+up[i]*y));
+    }
+    let mut g=minihou_core::Geometry::from_arrays(p,vec![0,1,2,3,4,5,6,7],vec![0,4,8],None).unwrap();
+    g.vertex.insert("uv".into(),Arc::new(Attr::f32(2,vec![0.,0.,1.,0.,1.,1.,0.,1., 0.,0.,1.,0.,1.,1.,0.,1.])));
+    g.prim.insert("material_index".into(),Arc::new(Attr::i32(1,vec![0,1])));
+    g.detail.insert("materials".into(),serde_json::json!(["Red","Green"]));
+    let scene=Scene::new(&g);
+    assert_eq!(scene.textured.len(),4); assert_eq!(scene.textured[0].vertices[0].uv,[0.,0.]);
+    let mut registry=Registry::new(".");
+    let red=registry.register_pixels(2,2,vec![255,0,0,255].repeat(4),false).unwrap();
+    let green=registry.register_pixels(2,2,vec![0,255,0,255].repeat(4),false).unwrap();
+    for (name,id,factor) in [("Red",red.clone(),[0.5,1.,1.,1.]),("Green",green.clone(),[1.;4])] {
+        registry.register_descriptor(name,Descriptor::parse(&serde_json::json!({"version":1,"base_color_factor":factor,"textures":{"base_color":{"image_id":id}}})).unwrap());
+    }
+    let mut gpu=Gpu::new(&device,&scene); gpu.upload_textures(&device,&queue,&scene,&mut registry);
+    let options=Overlay {textures:true,geometry:crate::ui::Overlays {points:false,lines:false,wireframe:false,..Default::default()},..Default::default()};
+    let image=render(&device,&queue,&gpu,Mode::SmoothShaded,options,false);
+    let left=image[64*128+46]; let right=image[64*128+82];
+    assert!(left[0]>left[1]+25 && left[0]>left[2]+25,"left {left:?}");
+    assert!(right[1]>right[0]+25 && right[1]>right[2]+25,"right {right:?}");
+    gpu.select_objects(&device,&scene,vec![0..4]);
+    let hidden=render(&device,&queue,&gpu,Mode::SmoothShaded,Overlay {visibility:ObjectVisibility::HideOthers,..options},true);
+    assert!(hidden[64*128+46][0]>hidden[64*128+46][1]+25);
+    assert!(hidden[64*128+82][1]<right[1]/2,"unselected textured object should be hidden");
+    registry.register_descriptor("Red",Descriptor::parse(&serde_json::json!({"version":1,"textures":{"base_color":{"image_id":red}}})).unwrap());
+    gpu.upload_textures(&device,&queue,&scene,&mut registry);
+    let full=render(&device,&queue,&gpu,Mode::SmoothShaded,options,false);
+    assert!(full[64*128+46][0]>left[0]+20,"factor should darken red: {:?} vs {left:?}",full[64*128+46]);
+    let matcap=render(&device,&queue,&gpu,Mode::MatCapShaded,Overlay {matcap:MatCap::Normal,..options},false);
+    let matcap_off=render(&device,&queue,&gpu,Mode::MatCapShaded,Overlay {textures:false,matcap:MatCap::Normal,..options},false);
+    assert_eq!(matcap,matcap_off);
+    let random=render(&device,&queue,&gpu,Mode::SmoothShaded,Overlay {object_color:ObjectColor::Random,..options},false);
+    let random_off=render(&device,&queue,&gpu,Mode::SmoothShaded,Overlay {textures:false,object_color:ObjectColor::Random,..options},false);
+    assert_eq!(random,random_off);
+    registry.register_descriptor("Green",Descriptor::parse(&serde_json::json!({"version":1,"textures":{"base_color":{"image_id":"sha256:missing"}}})).unwrap());
+    gpu.upload_textures(&device,&queue,&scene,&mut registry);
+    let missing=render(&device,&queue,&gpu,Mode::SmoothShaded,options,false);
+    assert!(changed(&image,&missing)>100); assert!(gpu.texture_status().iter().any(|s|s.contains("checker fallback")));
+    let mut broken=g.clone();
+    broken.vertex.insert("uv".into(),Arc::new(Attr::f32(2,vec![f32::NAN;16])));
+    let broken=Scene::new(&broken);gpu.upload(&device,&broken);gpu.upload_textures(&device,&queue,&broken,&mut registry);
+    assert!(gpu.texture_status().iter().any(|s|s.contains("missing UV checker")));
+    let invalid=render(&device,&queue,&gpu,Mode::SmoothShaded,options,false);
+    assert!(changed(&missing,&invalid)>50);
+}
+
+#[test]
+fn asymmetric_texture_rows_render_top_to_bottom_headless() {
+    let Some((device,queue))=adapter() else {eprintln!("No adapter: skipping UV orientation render test");return;};
+    use std::sync::Arc;
+    use minihou_core::geometry::Attr;
+    use minihou_app::materials::{Descriptor,Registry};
+    let cam=Camera::frame([0.;3],2.5); let (_,view)=cam.matrices(1.);
+    let right=[view[0][0],view[1][0],view[2][0]];let up=[view[0][1],view[1][1],view[2][1]];
+    let mut p=Vec::new();for (x,y) in [(-1.,-1.),(1.,-1.),(1.,1.),(-1.,1.)] {p.extend((0..3).map(|i|right[i]*x+up[i]*y));}
+    let mut g=minihou_core::Geometry::from_arrays(p,vec![0,1,2,3],vec![0,4],None).unwrap();
+    g.vertex.insert("uv".into(),Arc::new(Attr::f32(2,vec![0.,1.,1.,1.,1.,0.,0.,0.])));
+    g.prim.insert("material_index".into(),Arc::new(Attr::i32(1,vec![0])));
+    g.detail.insert("materials".into(),serde_json::json!(["Corners"]));
+    let scene=Scene::new(&g); let mut registry=Registry::new(".");
+    let hash=registry.register_pixels(2,2,vec![255,0,0,255,0,255,0,255,0,0,255,255,255,255,0,255],false).unwrap();
+    registry.register_descriptor("Corners",Descriptor::parse(&serde_json::json!({"version":1,"textures":{"base_color":{"image_id":hash,"color_space":"linear","sampler":{"min":"nearest","mag":"nearest","wrap_u":"clamp","wrap_v":"clamp"}}}})).unwrap());
+    let mut gpu=Gpu::new(&device,&scene);gpu.upload_textures(&device,&queue,&scene,&mut registry);
+    let pixels=render(&device,&queue,&gpu,Mode::SmoothShaded,Overlay {textures:true,geometry:crate::ui::Overlays {points:false,lines:false,wireframe:false,..Default::default()},..Default::default()},false);
+    for (x,y,channel) in [(48,48,0),(80,48,1),(48,80,2)] {
+        let p=pixels[y*128+x];assert!(p[channel]>p[(channel+1)%3]+40 && p[channel]>p[(channel+2)%3]+40,"{x},{y}: {p:?}");
+    }
 }

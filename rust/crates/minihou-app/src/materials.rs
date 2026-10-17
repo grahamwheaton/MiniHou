@@ -68,21 +68,29 @@ pub struct MaterialBinding { pub slot:String, pub descriptor:Option<Descriptor>,
 
 pub struct Registry {
     descriptors:HashMap<String,Descriptor>, images:HashMap<String,(ImageAsset,u64)>,
+    errors:HashMap<String,String>,
     tick:u64, cpu_budget:usize, pub gpu_budget:usize, base_path:PathBuf,
 }
 impl Registry {
-    pub fn new(base_path:impl Into<PathBuf>) -> Self { Self { descriptors:HashMap::new(), images:HashMap::new(), tick:0, cpu_budget:CPU_BUDGET, gpu_budget:GPU_BUDGET, base_path:base_path.into() } }
+    pub fn new(base_path:impl Into<PathBuf>) -> Self { Self { descriptors:HashMap::new(), images:HashMap::new(), errors:HashMap::new(), tick:0, cpu_budget:CPU_BUDGET, gpu_budget:GPU_BUDGET, base_path:base_path.into() } }
     pub fn set_budgets(&mut self, cpu:usize, gpu:usize) { self.cpu_budget=cpu; self.gpu_budget=gpu; self.evict(&HashSet::new()); }
-    pub fn register_descriptor(&mut self, id:impl Into<String>, descriptor:Descriptor) { self.descriptors.insert(id.into(),descriptor); }
+    pub fn register_descriptor(&mut self, id:impl Into<String>, descriptor:Descriptor) { let id=id.into(); self.errors.remove(&id); self.descriptors.insert(id,descriptor); }
     /// Register encoded PNG/JPEG bytes. The returned ID includes pixels, dimensions, encoding and top-row origin.
     pub fn register_image(&mut self, bytes:&[u8]) -> Result<String,String> {
         let format=image::guess_format(bytes).map_err(|e| e.to_string())?;
         if !matches!(format,image::ImageFormat::Png|image::ImageFormat::Jpeg) { return Err("only PNG/JPEG image bytes are supported".into()); }
+        let (width,height)=image::ImageReader::with_format(std::io::Cursor::new(bytes),format).into_dimensions().map_err(|e|e.to_string())?;
+        if u64::from(width)*u64::from(height)>MAX_PIXELS {return Err("image exceeds 16 Mpx".into());}
         let source=image::load_from_memory_with_format(bytes,format).map_err(|e| e.to_string())?;
-        let (width,height)=(source.width(),source.height());
-        if u64::from(width)*u64::from(height)>MAX_PIXELS { return Err("image exceeds 16 Mpx".into()); }
+        if matches!(source,image::DynamicImage::ImageLuma16(_)|image::DynamicImage::ImageLumaA16(_)|image::DynamicImage::ImageRgb16(_)|image::DynamicImage::ImageRgba16(_)|image::DynamicImage::ImageRgb32F(_)|image::DynamicImage::ImageRgba32F(_)) {return Err("high precision image needs a float asset path (not yet supported)".into());}
         let rgba=source.to_rgba8().into_raw();
         self.register_pixels(width,height,rgba,false)
+    }
+    /// Future transport entry point: verify the immutable ID before publication.
+    pub fn register_image_with_id(&mut self,expected:&str,bytes:&[u8])->Result<String,String>{
+        let actual=self.register_image(bytes)?;
+        if actual!=expected {self.images.remove(&actual);return Err(format!("image hash mismatch: expected {expected}, got {actual}"));}
+        Ok(actual)
     }
     /// RGBA8 pixels. Set bottom_up for Blender-style rows; internally rows always start at the top.
     pub fn register_pixels(&mut self,width:u32,height:u32,mut rgba:Vec<u8>,bottom_up:bool)->Result<String,String>{
@@ -98,7 +106,7 @@ impl Registry {
     pub fn register_graph(&mut self, graph:&Value) -> Vec<String> {
         let mut errors=Vec::new();
         if let Some(table)=graph.get("materials").and_then(Value::as_object) {
-            for (name,value) in table { match Descriptor::parse(value) { Ok(d)=>self.register_descriptor(name.clone(),d),Err(e)=>errors.push(format!("{name}: {e}")) } }
+            for (name,value) in table { match Descriptor::parse(value) { Ok(d)=>self.register_descriptor(name.clone(),d),Err(e)=>{self.descriptors.remove(name);self.errors.insert(name.clone(),e.clone());errors.push(format!("{name}: {e}"));} } }
         }
         errors
     }
@@ -112,7 +120,7 @@ impl Registry {
         Ok(self.register_graph(&serde_json::json!({"materials":value})))
     }
     pub fn resolve(&mut self,slot:&str)->MaterialBinding {
-        let Some(descriptor)=self.descriptors.get(slot).cloned() else { return MaterialBinding {slot:slot.into(),descriptor:None,image:None,state:State::Missing}; };
+        let Some(descriptor)=self.descriptors.get(slot).cloned() else { return MaterialBinding {slot:slot.into(),descriptor:None,image:None,state:self.errors.get(slot).map_or(State::Missing,|e|State::Unsupported(e.clone()))}; };
         let Some(tex)=descriptor.textures.base_color.as_ref() else { return MaterialBinding {slot:slot.into(),descriptor:Some(descriptor),image:None,state:State::Ok}; };
         let mut id=tex.image_id.clone();
         if id.as_ref().is_none_or(|id| !self.images.contains_key(id)) {
@@ -130,7 +138,7 @@ impl Registry {
     }
     pub fn cpu_resident_bytes(&self)->usize { self.images.values().map(|(i,_)|i.resident_bytes()).sum() }
     pub fn evict(&mut self,pinned:&HashSet<String>) {
-        while self.cpu_resident_bytes()>self.cpu_budget { let Some(id)=self.images.iter().filter(|(id,_)| !pinned.contains(*id)).min_by_key(|(_,(_,last))|last).map(|(id,_)|id.clone()) else {break}; self.images.remove(&id); }
+        while self.cpu_resident_bytes()>self.cpu_budget { let Some(id)=self.images.iter().filter(|(id,_)| !pinned.contains(*id) && !self.descriptors.values().any(|d|d.textures.base_color.as_ref().and_then(|t|t.image_id.as_ref())==Some(*id))).min_by_key(|(_,(_,last))|last).map(|(id,_)|id.clone()) else {break}; self.images.remove(&id); }
     }
 }
 
@@ -143,10 +151,18 @@ pub fn linear_to_srgb(v:f32)->f32 { if v<=0.0031308 {v*12.92} else {1.055*v.powf
         let d=Descriptor::parse(&serde_json::json!({"version":1,"textures":{"base_color":{"image_id":"sha256:missing"}}})).unwrap();
         assert_eq!(d.base_color_factor,[1.;4]); assert!(Descriptor::parse(&serde_json::json!({"version":1,"alpha_mode":"BLEND"})).is_err());
         let mut r=Registry::new("."); r.register_descriptor("a",d); assert!(matches!(r.resolve("a").state,State::CheckerFallback(_)));
+        assert_eq!(r.register_graph(&serde_json::json!({"materials":{"bad":{"version":1,"alpha_mode":"BLEND"}}})).len(),1);
+        assert!(matches!(r.resolve("bad").state,State::Unsupported(_)));
         let hash=r.register_pixels(1,2,vec![255,0,0,255,0,0,255,255],true).unwrap();
         assert_eq!(&r.images[&hash].0.rgba[..4],&[0,0,255,255]);
         assert_eq!(hash,r.register_pixels(1,2,vec![0,0,255,255,255,0,0,255],false).unwrap());
         r.set_budgets(0,0); assert_eq!(r.cpu_resident_bytes(),0);
     }
     #[test] fn color_transfer_round_trip() { for v in [0.,0.02,0.18,0.5,1.] { assert!((srgb_to_linear(linear_to_srgb(v))-v).abs()<1e-5); } }
+    #[test] fn encoded_png_and_verified_id() {
+        let bytes=include_bytes!("test_data/textured_cube.png"); let mut r=Registry::new(".");
+        let hash=r.register_image(bytes).unwrap();assert_eq!((r.images[&hash].0.width,r.images[&hash].0.height),(64,64));
+        assert_eq!(r.register_image_with_id(&hash,bytes).unwrap(),hash);
+        assert!(r.register_image_with_id("sha256:wrong",bytes).is_err());
+    }
 }
