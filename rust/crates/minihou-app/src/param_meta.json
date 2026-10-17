@@ -1429,6 +1429,11 @@
    "default": "0,0,0  1,0,0  1,1,0  2,1,1",
    "doc": "Point positions 'x,y,z' separated by spaces",
    "kind": "str"
+  },
+  "split": {
+   "default": false,
+   "doc": "With an input: split coplanar faces of the input along the drawn open polyline (SketchUp-style line tool)",
+   "kind": "bool"
   }
  },
  "curve_simplify": {

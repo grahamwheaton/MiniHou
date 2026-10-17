@@ -173,6 +173,8 @@ def meta() -> dict:
         "preserve_attributes": {"default": True, "doc": "Copy point attributes and groups from the source points to the hull", "kind": "bool"},
         "remove_inline_points": {"default": True, "doc": "Merge coplanar triangles into polygon faces and drop inline edge/interior points", "kind": "bool"},
     }
+    # Sketch-tool extension of the Curve SOP: a drawn open line also splits coplanar faces of the input geometry.
+    out["curve"]["split"] = {"default": False, "kind": "bool", "doc": "With an input: split coplanar faces of the input along the drawn open polyline (SketchUp-style line tool)"}
     # Rust Ray SOP extensions. Keep the Python defaults and legacy methods intact.
     ray = out["ray"]
     ray["method"]["options"] += ["project_rays"]
