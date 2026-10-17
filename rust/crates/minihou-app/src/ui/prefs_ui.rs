@@ -5,7 +5,7 @@ use super::super::theme::Theme;
 use crate::units::LengthUnit;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum Tab { #[default] Interface, Units, Viewport, Keymap, Files }
+enum Tab { #[default] Interface, Units, Viewport, Keymap, Files, Security }
 #[derive(Clone, Default)]
 struct State { tab: Tab, search: String, capture: Option<usize>, conflict: String }
 
@@ -20,7 +20,7 @@ pub fn show(ctx: &egui::Context, open: &mut bool, prefs: &mut Preferences, keyma
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
                     ui.set_min_width(130.);
-                    for (tab,label) in [(Tab::Interface,"Interface"),(Tab::Units,"Units"),(Tab::Viewport,"Viewport"),(Tab::Keymap,"Keymap"),(Tab::Files,"Files")] {
+                    for (tab,label) in [(Tab::Interface,"Interface"),(Tab::Units,"Units"),(Tab::Viewport,"Viewport"),(Tab::Keymap,"Keymap"),(Tab::Files,"Files"),(Tab::Security,"Security")] {
                         if ui.selectable_label(state.tab == tab, label).clicked() { state.tab = tab; state.capture = None; state.conflict.clear(); }
                     }
                 });
@@ -119,6 +119,15 @@ pub fn show(ctx: &egui::Context, open: &mut bool, prefs: &mut Preferences, keyma
                                     } }
                                 }
                             }
+                        }
+                        Tab::Security => {
+                            heading(ui,"Security",theme);
+                            changed |= ui.checkbox(&mut prefs.allow_python_nodes,"Allow Python nodes").changed();
+                            ui.add_enabled_ui(prefs.allow_python_nodes, |ui| {
+                                changed |= ui.add(egui::DragValue::new(&mut prefs.python_timeout_s).range(1..=3600).prefix("Python node timeout  ").suffix(" s")).changed();
+                            });
+                            ui.add_space(4.);
+                            ui.label(RichText::new("A python node runs the code stored in the graph with your user account's privileges. This is not a sandbox: enable it only for graphs you trust. Each distinct snippet still asks Run / Skip once per session. Remote control (MCP/HTTP) and the Blender link cannot change this setting.").color(theme.dim));
                         }
                         Tab::Files => {
                             heading(ui,"Files",theme);

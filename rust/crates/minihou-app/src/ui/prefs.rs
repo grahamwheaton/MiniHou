@@ -24,6 +24,10 @@ pub struct Preferences {
     pub recent_files: Vec<PathBuf>, pub viewport: ViewportPreferences,
     pub units: UnitSettings,
     pub node_physics_snappiness: f32,
+    /// Security: run `python` nodes (trusted code, user privileges). Off by default; only this window changes it.
+    pub allow_python_nodes: bool,
+    /// Wall-clock limit for one python node cook, in seconds.
+    pub python_timeout_s: u32,
 }
 impl Default for Preferences { fn default() -> Self { Self {
     theme: ThemePref::System, ui_scale: 1., emulate_numpad: false, snap_increment: 0.25,
@@ -32,6 +36,7 @@ impl Default for Preferences { fn default() -> Self { Self {
     recent_files: Vec::new(), viewport: ViewportPreferences::default(),
     units: UnitSettings::default(),
     node_physics_snappiness: 0.7,
+    allow_python_nodes: false, python_timeout_s: 30,
 } } }
 impl Preferences {
     pub fn path() -> PathBuf {
@@ -68,6 +73,7 @@ impl Preferences {
             "navigation": match self.viewport.navigation { Navigation::Blender => "blender", Navigation::Houdini => "houdini" },
             "show_grid": self.viewport.show_grid, "show_axes": self.viewport.show_axes, "auto_budget": self.viewport.auto_budget,
             "clip_start": self.viewport.clip_start, "clip_end": self.viewport.clip_end },
+        "security": { "allow_python_nodes": self.allow_python_nodes, "python_timeout_s": self.python_timeout_s },
         "length_unit": self.units.display.symbol(),
         "unit_scale": self.units.unit_scale,
         "units": { "length_unit": self.units.display.symbol(), "unit_scale": self.units.unit_scale },
@@ -81,6 +87,11 @@ impl Preferences {
         if let Some(x) = v.get("snap_targets").and_then(Value::as_u64) { p.snap_targets = crate::ui::SnapTargets::from_bits((x & 63) as u8); }
         if let Some(x) = v.get("node_physics_snappiness").and_then(Value::as_f64) { p.node_physics_snappiness = (x as f32).clamp(0.0, 1.0); }
         if let Some(x) = v.get("show_stats").and_then(Value::as_bool) { p.show_stats = x; }
+        if let Some(sec) = v.get("security") {
+            // Only a literal `true` enables Python; anything else keeps it off.
+            p.allow_python_nodes = sec.get("allow_python_nodes") == Some(&Value::Bool(true));
+            if let Some(t) = sec.get("python_timeout_s").and_then(Value::as_u64) { p.python_timeout_s = t.clamp(1, 3600) as u32; }
+        }
         if let Some(x) = v.get("autosave_minutes") { p.autosave_minutes = x.as_u64().and_then(|n| u32::try_from(n).ok()).filter(|n| *n > 0); }
         if let Some(x) = v.get("keymap_overrides").filter(|x| x.is_object()) { p.keymap_overrides = x.clone(); }
         if let Some(xs) = v.get("recent_files").and_then(Value::as_array) {
@@ -117,6 +128,11 @@ impl Preferences {
         let scale_val = v.get("unit_scale").or_else(|| v.get("units").and_then(|u| u.get("unit_scale"))).and_then(Value::as_f64);
         if let Some(scale) = scale_val { if (1e-9..=1e9).contains(&scale) { p.units.unit_scale = scale; } }
         p
+    }
+    /// Push the Security settings into the cook's Python gate (the only place the app flips it).
+    pub fn apply_python(&self, gate: &minihou_core::python_bridge::PythonGate) {
+        gate.set_allowed(self.allow_python_nodes);
+        gate.set_timeout(std::time::Duration::from_secs(u64::from(self.python_timeout_s.clamp(1, 3600))));
     }
     pub fn add_recent(&mut self, path: PathBuf) {
         self.recent_files.retain(|p| p != &path);
@@ -188,6 +204,25 @@ impl Preferences {
         assert_eq!((p.viewport.clip_start, p.viewport.clip_end), (0.01, 1000.0));
         assert_eq!(p.units.display, LengthUnit::Mm);
         assert_eq!(p.units.unit_scale, 1.0);
+    }
+    #[test] fn python_permission_defaults_off_round_trips_and_feeds_the_gate() {
+        use minihou_core::python_bridge::{Decision, PythonGate};
+        let d = Preferences::default();
+        assert!(!d.allow_python_nodes); assert_eq!(d.python_timeout_s, 30);
+        for junk in [json!({}), json!({"security":{}}), json!({"security":{"allow_python_nodes":"yes"}}), json!({"security":{"allow_python_nodes":1}}), json!({"allow_python_nodes":true})] {
+            assert!(!Preferences::from_json(&junk).allow_python_nodes, "{junk}");
+        }
+        let p = Preferences::from_json(&json!({"security":{"allow_python_nodes":true,"python_timeout_s":0}}));
+        assert!(p.allow_python_nodes); assert_eq!(p.python_timeout_s, 1);
+        assert_eq!(Preferences::from_json(&p.to_json()), p);
+        let gate = PythonGate::denied();
+        d.apply_python(&gate);
+        assert_eq!(gate.check("x"), Decision::Disabled);
+        p.apply_python(&gate);
+        assert_eq!(gate.check("x"), Decision::NeedsConfirmation);
+        assert_eq!(gate.timeout(), std::time::Duration::from_secs(1));
+        d.apply_python(&gate);
+        assert_eq!(gate.check("x"), Decision::Disabled);
     }
     #[test] fn navigation_defaults_and_round_trips() {
         assert_eq!(Preferences::default().viewport.navigation, Navigation::Blender);

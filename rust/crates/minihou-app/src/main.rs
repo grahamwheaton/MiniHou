@@ -22,6 +22,14 @@ use ui::{theme::Theme, Actions, BlenderStatus, CameraInfo, EditorState, GeoSumma
 use ui::modal_transform::{Modal, Kind as ModalKind, SketchStage, Constraint};
 use ui::modal_model::{State as ModelState, Kind as ModelKind, Outcome as ModelOutcome};
 use viewport::{Gpu, Mode, Overlay, Scene, Target};
+use minihou_core::python_bridge::PythonGate;
+
+/// The desktop session's Python permission. Only the Preferences window and the Run / Skip banner change it; the HTTP API
+/// and the Blender link never see it (their sessions have no gate, see docs/RUST_PYTHON_NODE.md).
+fn python_gate() -> std::sync::Arc<PythonGate> {
+    static GATE: std::sync::OnceLock<std::sync::Arc<PythonGate>> = std::sync::OnceLock::new();
+    GATE.get_or_init(|| std::sync::Arc::new(PythonGate::denied())).clone()
+}
 
 fn point_pickable(visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,id:u32)->bool {
     visibility==viewport::ObjectVisibility::ShowAll || ranges.iter().any(|(owner,range)| selected.contains(owner) && range.contains(&id))
@@ -395,7 +403,7 @@ impl App {
     }
     fn new_document(doc: Document, path: PathBuf, state: egui_wgpu::RenderState, start_link: bool) -> Result<Self> {
         let display = Graph::from_value(doc.value())?.main_output()?;
-        let worker = CookWorker::start(&doc, Scene::new)?;
+        let worker = CookWorker::start_with_python(&doc, Some(python_gate()), Scene::new)?;
         let mut app = Self { selected:display.clone(), selected_set: std::collections::BTreeSet::from([display.clone()]), display, editor:EditorDocument::new(doc, path), worker,
             cooking:CookState::default(), state,gpu:None,target:None,
             camera:Camera::frame([0.;3],1.),bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new(),
@@ -406,6 +414,7 @@ impl App {
             clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
             last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false };
         app.prefs = Preferences::load();
+        app.prefs.apply_python(&python_gate());
         app.mode=Mode::parse(&app.prefs.viewport.default_shading);
         app.editor_state.object_visibility=app.prefs.viewport.object_visibility;
         app.keymap = Keymap::from_overrides_json(&app.prefs.keymap_overrides);
@@ -433,6 +442,30 @@ impl App {
         if let Err(e) = self.worker.send(CookRequest { revision:self.cooking.requested, edit }) {
             self.cooking.completed = self.cooking.requested;
             self.cooking.error = Some(e.to_string());
+        }
+    }
+    /// Recook after a Python permission change: same graph and time, only keys that read the gate change.
+    fn recook_python(&mut self) {
+        let (frame, fps) = self.link.as_ref().map_or(self.http_time, |l| (l.frame, l.fps));
+        self.send(Edit::Time { frame, fps });
+    }
+    /// Run / Skip for the first python snippet waiting for confirmation (once per snippet per session).
+    fn python_confirm(&mut self, ctx: &egui::Context) {
+        let gate = python_gate();
+        if !gate.allowed() { return; }
+        let Some(code) = gate.pending().into_iter().next() else { return };
+        let mut choice = None;
+        egui::Window::new("Run Python snippet?").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_TOP, [0., 40.]).show(ctx, |ui| {
+            ui.label(format!("A python node wants to run this code (snippet {}) with your user privileges. It is not sandboxed.", minihou_core::python_bridge::code_hash(&code)));
+            egui::ScrollArea::vertical().max_height(220.).show(ui, |ui| { ui.add(egui::Label::new(egui::RichText::new(&code).monospace())); });
+            ui.horizontal(|ui| {
+                if ui.button("Run").clicked() { choice = Some(true); }
+                if ui.button("Skip").clicked() { choice = Some(false); }
+            });
+        });
+        if let Some(run) = choice {
+            if run { gate.approve(&code); } else { gate.skip(&code); }
+            self.recook_python();
         }
     }
     fn send_timeline_time(&mut self, edit: Edit) {
@@ -2516,7 +2549,12 @@ impl eframe::App for App {
             });
         }
         usd_export::show(self, ctx);
+        self.python_confirm(ctx);
         if self.prefs_open && ui::keymap::show_preferences(ctx, &mut self.prefs_open, &mut self.prefs, &mut self.keymap, &self.theme) {
+            let gate = python_gate();
+            let before = (gate.allowed(), gate.timeout());
+            self.prefs.apply_python(&gate);
+            if before != (gate.allowed(), gate.timeout()) { self.recook_python(); }
             self.mode=Mode::parse(&self.prefs.viewport.default_shading);
             self.editor_state.object_visibility=self.prefs.viewport.object_visibility;
             self.editor_state.overlays.grid=self.prefs.viewport.show_grid;

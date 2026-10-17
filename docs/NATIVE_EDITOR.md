@@ -41,6 +41,10 @@ The **Preferences** window (`Ctrl+,` or from the top menu) includes a **Units** 
 - **Unit scale**: Drag value specifying the scale multiplier (metres per internal unit). Must be positive and finite; defaults to `1.0`.
 - **Persistence**: Stored in `Preferences` under `units`, serialised to `~/.minihou/preferences.json` (also backwards-compatible with `length_unit` and `unit_scale` fields).
 
+The **Security** tab has **Allow Python nodes** (default off, stored as `security.allow_python_nodes`) and **Python node
+timeout** (`security.python_timeout_s`, default 30 s). With it on, each distinct python snippet asks Run / Skip once per
+session. Python nodes run trusted code with your privileges; this is not a sandbox. See [RUST_PYTHON_NODE.md](RUST_PYTHON_NODE.md).
+
 ### Length Parameter Identification
 
 MiniHou maintains explicit semantic length metadata ported from `minihou/web/static/length-params.js`. Generic floats and vector attributes (e.g., counts, segments, weights, normals, UVs, scales) are never converted.

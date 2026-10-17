@@ -358,3 +358,46 @@ fn http_rejects_cross_origin_and_oversized_requests() {
     }
     assert!(server.poll().is_empty());
 }
+
+/// The MCP HTTP API and the Blender link must not be able to reach the desktop's Python permission or confirmations.
+#[test]
+fn remote_surfaces_cannot_touch_the_python_permission() {
+    for (name, src) in [
+        ("http_api.rs", include_str!("http_api.rs")), ("http_ops.rs", include_str!("http_ops.rs")),
+        ("http_geometry.rs", include_str!("http_geometry.rs")), ("http_ui.rs", include_str!("http_ui.rs")),
+        ("blender_link.rs", include_str!("blender_link.rs")), ("link_instances.rs", include_str!("link_instances.rs")),
+        ("link_protocol.rs", include_str!("link_protocol.rs")),
+    ] {
+        for needle in ["PythonGate", "python_gate", "python_bridge", "allow_python", "apply_python", "set_python_gate"] {
+            assert!(!src.contains(needle), "{name} mentions {needle}");
+        }
+    }
+}
+#[test]
+fn remote_edits_and_graph_fields_cannot_enable_python() {
+    use minihou_core::python_bridge::{PythonGate, DISABLED_MESSAGE};
+    let graph = json!({"version":1,"allow_python_nodes":true,"security":{"allow_python_nodes":true},
+        "nodes":{"py":{"type":"python","params":{"code":"out = None"}},"output1":{"type":"output","inputs":{"geo":"py"}}},"display":"output1"});
+    // every op an HTTP client can send, aimed at the python node, still leaves it denied
+    let (graph, _) = http_ops::apply_ops(&graph, &json!([
+        {"op":"set","id":"py","params":{"code":"out = geo","flag":true}},
+        {"op":"add","id":"py2","type":"python","params":{"code":"import os"}},
+    ])).unwrap();
+    assert!(http_ops::apply_ops(&graph, &json!([{"op":"set","id":"py","params":{"allow_python_nodes":true}}])).is_err());
+    let doc = Document::parse(graph.to_string()).unwrap();
+    let e = doc.session().unwrap().cook(None).unwrap_err().to_string();
+    assert!(e.contains(DISABLED_MESSAGE), "{e}");
+    // the desktop worker with a denied gate: edits arrive as `Edit`s, which carry no permission
+    let gate = Arc::new(PythonGate::denied());
+    let worker = CookWorker::start_with_python(&doc, Some(gate.clone()), |_g: &Geometry| ()).unwrap();
+    worker.send(CookRequest { revision: 1, edit: Edit::Param { node: "py".into(), name: "code".into(), value: json!("x = 1") } }).unwrap();
+    worker.send(CookRequest { revision: 2, edit: Edit::Replace(graph.clone()) }).unwrap();
+    let start = std::time::Instant::now();
+    let response = loop {
+        if let Some(r) = worker.poll().filter(|r| r.revision == 2) { break r; }
+        assert!(start.elapsed() < Duration::from_secs(30), "worker did not answer");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert!(response.error.unwrap_or_default().contains(DISABLED_MESSAGE));
+    assert!(!gate.allowed() && gate.pending().is_empty());
+}

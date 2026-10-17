@@ -812,7 +812,12 @@ fn collect_cook_batch(receiver: &mpsc::Receiver<CookRequest>, first: CookRequest
 }
 impl<T: Send + 'static> CookWorker<T> {
     pub fn start(doc: &Document, prepare: impl Fn(&Geometry) -> T + Send + 'static) -> Result<Self> {
+        Self::start_with_python(doc, None, prepare)
+    }
+    /// `python`: the desktop UI's permission gate. None (as for every remote or headless cook) denies python nodes.
+    pub fn start_with_python(doc: &Document, python: Option<Arc<minihou_core::python_bridge::PythonGate>>, prepare: impl Fn(&Geometry) -> T + Send + 'static) -> Result<Self> {
         let mut session = doc.session()?;
+        session.set_python_gate(python);
         let mut target = session.graph().main_output()?;
         let (sender, receiver) = mpsc::channel();
         let (queries, query_rx) = mpsc::channel();
