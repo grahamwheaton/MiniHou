@@ -18,6 +18,8 @@ pub struct NodeDef {
     /// Port name -> the node ids connected to it (one, or several for a multi input).
     pub inputs: Vec<(String, Vec<String>)>,
     pub params: Option<Map<String, Value>>,
+    pub channels: Option<Map<String, Value>>,
+    pub locked_params: Option<Vec<String>>,
     pub bypass: bool,
 }
 
@@ -86,7 +88,10 @@ impl Graph {
                     }
                 }
             }
-            nodes.push((id.clone(), NodeDef { node_type, inputs, params, bypass }));
+            let channels = nd.get("channels").map(|v| v.as_object().cloned().ok_or_else(|| Error::new(format!("node '{id}': channels must be an object")))).transpose()?;
+            if channels.as_ref().is_some_and(|m| m.values().any(|v| !v.is_string())) {return Err(Error::new(format!("node '{id}': channels must contain expression strings")));}
+            let locked_params = nd.get("locked_params").map(|v| v.as_array().and_then(|a| a.iter().map(|x| x.as_str().map(str::to_owned)).collect()).ok_or_else(|| Error::new(format!("node '{id}': locked_params must be an array of strings")))).transpose()?;
+            nodes.push((id.clone(), NodeDef { node_type, inputs, params, channels, locked_params, bypass }));
         }
         let display = obj.get("display").and_then(|v| v.as_str().or_else(|| v.as_array()?.iter().find_map(Value::as_str))).map(str::to_string);
         Ok(Graph { nodes, display, source: v.clone() })
@@ -114,6 +119,12 @@ impl Graph {
                 if let Some(p) = &params { nd["params"] = Value::Object(p.clone()); }
                 else { nd.as_object_mut().unwrap().remove("params"); }
             }
+            if nd.get("channels").and_then(Value::as_object) != def.channels.as_ref() {
+                if let Some(c)=&def.channels {nd["channels"]=Value::Object(c.clone());}else{nd.as_object_mut().unwrap().remove("channels");}
+            }
+            if nd.get("locked_params").and_then(Value::as_array).map(|a|a.iter().filter_map(Value::as_str).collect::<Vec<_>>()) != def.locked_params.as_ref().map(|a|a.iter().map(String::as_str).collect::<Vec<_>>()) {
+                if let Some(l)=&def.locked_params {nd["locked_params"]=serde_json::json!(l);}else{nd.as_object_mut().unwrap().remove("locked_params");}
+            }
             if nd["bypass"].as_bool().unwrap_or(false) != def.bypass { nd["bypass"] = Value::Bool(def.bypass); }
             let old_inputs = nd.get("inputs").and_then(Value::as_object);
             let same = old_inputs.map_or(def.inputs.is_empty(), |m| m.len() == def.inputs.len() && def.inputs.iter().all(|(port, refs)| {
@@ -133,6 +144,8 @@ impl Graph {
     pub(crate) fn node(&self, id: &str) -> Option<&NodeDef> {
         self.nodes.iter().find(|(n, _)| n == id).map(|(_, d)| d)
     }
+    pub fn node_channels(&self,id:&str)->Option<&Map<String,Value>> {self.node(id)?.channels.as_ref()}
+    pub fn node_locks(&self,id:&str)->Option<&Vec<String>> {self.node(id)?.locked_params.as_ref()}
 
     /// The display node, else the first `output` node without its own Blender object, else the first `output`.
     pub fn main_output(&self) -> Result<String> {
@@ -165,7 +178,7 @@ impl Graph {
         };
         let plan = nodes::r#loop::Plan::analyze(self, &target)?;
         nodes::rbd_engine::check_static_inputs(self, &target)?;
-        let mut ev = Cook { graph: self, plan: &plan, budget: nodes::r#loop::budget(), done: HashMap::new(), active: HashSet::new() };
+        let mut ev = Cook { graph: self, plan: &plan, budget: nodes::r#loop::budget(), done: HashMap::new(), active: HashSet::new(), resolved: Arc::new(crate::channels::resolve_graph(self)) };
         nodes::usd_nodes::with_context(self, &Default::default(), || ev.node(&target))
     }
 }
@@ -173,11 +186,11 @@ impl Graph {
 /// Run one node on inputs that are already cooked: a bypassed node passes its first input through (nothing connected: empty
 /// geometry), any other resolves its parameters, cooks and validates. Errors name the node. Shared by [`Graph::cook`] and
 /// [`crate::session::Session`] so the two can not drift apart.
-pub(crate) fn run_node(id: &str, def: &NodeDef, spec: &nodes::NodeSpec, inputs: &nodes::Inputs) -> Result<Geometry> {
+pub(crate) fn run_node(id: &str, def: &NodeDef, spec: &nodes::NodeSpec, inputs: &nodes::Inputs, resolved: Option<&Map<String,Value>>) -> Result<Geometry> {
     let result = if def.bypass {
         Ok(inputs.first().and_then(|i| i.first()).map(|g| (**g).clone()).unwrap_or_else(|| Geometry::points_only(Vec::new()).expect("empty geometry")))
     } else {
-        Params::resolve(spec.params, def.params.as_ref())
+        Params::resolve(spec.params, resolved.or(def.params.as_ref()))
             .and_then(|p| if def.node_type == "usd_export" { nodes::usd_nodes::cook_named(inputs, &p, id) } else { (spec.cook)(inputs, &p) })
             .and_then(|g| g.validate().map(|_| g))
     };
@@ -190,6 +203,7 @@ struct Cook<'a> {
     budget: nodes::r#loop::Budget,
     done: HashMap<String, Arc<Geometry>>,
     active: HashSet<String>,
+    resolved: Arc<crate::channels::ResolvedChannels>,
 }
 
 impl Cook<'_> {
@@ -210,8 +224,8 @@ impl Cook<'_> {
             }
         }
         if def.node_type == "loop_end" {
-            let (plan, graph, budget) = (self.plan, self.graph, self.budget.clone());
-            let geo = Arc::new(plan.cook_end(graph, id, budget, &mut |src| self.node(src))?.0);
+            let (plan, graph, budget, resolved) = (self.plan, self.graph, self.budget.clone(), self.resolved.clone());
+            let geo = Arc::new(plan.cook_end(graph, &resolved, id, budget, &mut |src| self.node(src))?.0);
             self.active.remove(id);
             self.done.insert(id.into(), geo.clone());
             return Ok(geo);
@@ -229,7 +243,7 @@ impl Cook<'_> {
             }
             inputs.push(got);
         }
-        let geo = Arc::new(run_node(id, def, spec, &inputs)?);
+        let geo = Arc::new(run_node(id, def, spec, &inputs, self.resolved.params.get(id))?);
         self.active.remove(id);
         self.done.insert(id.to_string(), geo.clone());
         Ok(geo)

@@ -53,7 +53,7 @@ mod fracture_tools;
 mod ray;
 mod occlusion;
 pub(crate) mod r#loop;
-mod scalar_expr;
+pub(crate) mod scalar_expr;
 mod wrangle;
 mod blend;
 mod exploded_view;
