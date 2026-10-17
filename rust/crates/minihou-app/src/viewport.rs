@@ -117,6 +117,12 @@ fn cube_seams_expand_to_triangle_corners() {
     assert_eq!(scene.textured.len()*3,36);
     assert_eq!(scene.textured.iter().map(|t|t.prim).collect::<std::collections::BTreeSet<_>>().len(),6);
     assert!(scene.textured.iter().all(|t|t.vertices.iter().all(|v|v.valid==1.)));
+    let mut registry=Registry::new(concat!(env!("CARGO_MANIFEST_DIR"),"/src/test_data"));
+    let document:serde_json::Value=serde_json::from_str(include_str!("test_data/textured_cube.minihou")).unwrap();
+    assert!(registry.register_graph(&document).is_empty());
+    let binding=registry.resolve("SampleChecker");
+    assert!(matches!(binding.state,materials::State::Ok));
+    assert_eq!((binding.image.unwrap().width,binding.descriptor.unwrap().textures.base_color.unwrap().uv_set),(64,"uv".to_owned()));
 }
 #[test]
 fn instance_slot_name_resolves_to_manifest_binding() {
