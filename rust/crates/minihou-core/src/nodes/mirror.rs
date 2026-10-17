@@ -290,4 +290,104 @@ mod tests {
         assert_eq!(o, [1., 2., 3.5]);
         assert_eq!(n, [0., 0., -1.]);
     }
+
+    #[test]
+    fn test_mirror_empty_and_single_element() {
+        let empty = Geometry::points_only(vec![]).unwrap();
+        let out = cook(empty, json!({}));
+        assert_eq!(out.npoints, 0);
+        assert_eq!(out.nprims(), 0);
+
+        // single triangle
+        let tri = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 0., 1., 0.],
+            vec![0, 1, 2],
+            vec![0, 3],
+            None,
+        ).unwrap();
+        let out_tri = cook(tri.clone(), json!({"origin": [0., 0., 0.], "normal": [1., 0., 0.], "keep_original": true, "consolidate_seam": true}));
+        assert_eq!(out_tri.nprims(), 2);
+        // Points on x = 0 (point 0 at (0,0,0) and point 2 at (0,1,0)) are welded: 3 originals + 1 new = 4 points total
+        assert_eq!(out_tri.npoints, 4);
+    }
+
+    #[test]
+    #[ignore = "BUG: mirror with keep_original=true drops points-only geometry because compact discards unreferenced points"]
+    fn test_mirror_points_only_preserves_points() {
+        let pt = Geometry::points_only(vec![1., 2., 3.]).unwrap();
+        let out_pt = cook(pt, json!({"origin": [0., 0., 0.], "normal": [1., 0., 0.], "keep_original": true}));
+        assert_eq!(out_pt.npoints, 2);
+        assert_eq!(out_pt.p(), &[1., 2., 3., -1., 2., 3.]);
+    }
+
+    #[test]
+    fn test_mirror_degenerate_and_nan_inf() {
+        // Degenerate triangle (zero area)
+        let degen = Geometry::from_arrays(
+            vec![0., 0., 0., 0., 0., 0., 0., 0., 0.],
+            vec![0, 1, 2],
+            vec![0, 3],
+            None,
+        ).unwrap();
+        let out_degen = cook(degen, json!({}));
+        assert_eq!(out_degen.nprims(), 2);
+
+        // Degenerate plane normal [0, 0, 0] falls back safely to [1, 0, 0]
+        let (_o, n) = plane([0., 0., 0.], [0., 0., 0.], 0., false);
+        assert_eq!(n, [1., 0., 0.]);
+
+        // Huge offset
+        let out_huge = cook(strip(), json!({"offset": 1e9, "keep_original": false}));
+        assert_eq!(out_huge.nprims(), 2);
+    }
+
+    #[test]
+    fn test_mirror_missing_groups_and_invalid_enums() {
+        // Nonexistent group in mirror_selected gives an error
+        let p_bad_grp = Params::resolve(
+            MIRROR.params,
+            json!({"operation": "mirror_selected", "group": "nonexistent"}).as_object(),
+        ).unwrap();
+        assert!((MIRROR.cook)(&[vec![Arc::new(strip())]], &p_bad_grp).is_err());
+
+        // Invalid enum for operation
+        let p_bad_op = Params::resolve(
+            MIRROR.params,
+            json!({"operation": "mirror_everything"}).as_object(),
+        ).unwrap();
+        assert!((MIRROR.cook)(&[vec![Arc::new(strip())]], &p_bad_op).is_err());
+    }
+
+    #[test]
+    fn test_mirror_determinism_and_attribute_preservation() {
+        let s = strip();
+        let out1 = cook(s.clone(), json!({"origin": [1., 0., 0.]}));
+        let out2 = cook(s.clone(), json!({"origin": [1., 0., 0.]}));
+        assert_eq!(out1.p(), out2.p());
+        assert_eq!(out1.point["N"].data, out2.point["N"].data);
+        assert_eq!(out1.point["Cd"].data, out2.point["Cd"].data);
+        assert_eq!(out1.prim["material_index"].data, out2.prim["material_index"].data);
+    }
+
+    #[test]
+    fn test_mirror_topology_euler_manifold() {
+        let cube = |offset_x: f32| {
+            let p = (0..8).flat_map(|c| [(c & 1) as f32 + offset_x, ((c >> 1) & 1) as f32, ((c >> 2) & 1) as f32]).collect();
+            let vp = vec![0, 2, 3, 1, 4, 5, 7, 6, 0, 1, 5, 4, 2, 6, 7, 3, 0, 4, 6, 2, 1, 3, 7, 5];
+            Geometry::from_arrays(p, vp, (0..=6).map(|k| k * 4).collect(), None).unwrap()
+        };
+        let c = cube(1.0); // x in [1, 2]
+        // Mirrored across x = 0 with keep_original: two separate cubes
+        let out_two = cook(c.clone(), json!({"origin": [0., 0., 0.], "normal": [1., 0., 0.], "keep_original": true}));
+        assert_eq!(out_two.nprims(), 12);
+        assert_eq!(out_two.npoints, 16);
+        let e = crate::topo::edges(&out_two.topology, out_two.npoints);
+        assert!(e.count.iter().all(|&cnt| cnt == 2));
+        let chi = out_two.npoints as i32 - e.len() as i32 + out_two.nprims() as i32;
+        assert_eq!(chi, 4);
+
+        // Mirrored across x = 1 (touching face at x=1): welded single closed solid
+        let out_welded = cook(c, json!({"origin": [1., 0., 0.], "normal": [1., 0., 0.], "keep_original": true, "consolidate_seam": true, "distance": 1e-3}));
+        assert_eq!(out_welded.npoints, 12);
+    }
 }

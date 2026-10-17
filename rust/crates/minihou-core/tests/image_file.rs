@@ -159,3 +159,74 @@ fn test_image_file_downsample_and_errors() {
     let err = Graph::from_value(&doc_missing).unwrap().cook(None).unwrap_err();
     assert!(err.0.contains("no such file:"));
 }
+
+#[test]
+fn test_image_file_edge_cases_and_determinism() {
+    let p = fixture_path("image_file_test.png");
+    // Invalid colorspace enum
+    let doc_bad_cs = json!({
+        "nodes": {
+            "img": {
+                "type": "image_file",
+                "params": {
+                    "file": p.to_str().unwrap(),
+                    "colorspace": "invalid_cs"
+                }
+            }
+        },
+        "display": "img"
+    });
+    assert!(Graph::from_value(&doc_bad_cs).unwrap().cook(None).is_err());
+
+    // Invalid height enum
+    let doc_bad_h = json!({
+        "nodes": {
+            "img": {
+                "type": "image_file",
+                "params": {
+                    "file": p.to_str().unwrap(),
+                    "height": "infrared"
+                }
+            }
+        },
+        "display": "img"
+    });
+    assert!(Graph::from_value(&doc_bad_h).unwrap().cook(None).is_err());
+
+    // Huge max_size doesn't break, clamps factor to 1
+    let doc_huge = json!({
+        "nodes": {
+            "img": {
+                "type": "image_file",
+                "params": {
+                    "file": p.to_str().unwrap(),
+                    "max_size": 1_000_000
+                }
+            }
+        },
+        "display": "img"
+    });
+    let g_huge = Graph::from_value(&doc_huge).unwrap().cook(None).unwrap();
+    assert_eq!(g_huge.npoints, 12);
+
+    // Determinism: cooking twice produces identical geometry and attributes
+    let doc_det = json!({
+        "nodes": {
+            "img": {
+                "type": "image_file",
+                "params": {
+                    "file": p.to_str().unwrap(),
+                    "height": "luminance"
+                }
+            }
+        },
+        "display": "img"
+    });
+    let g1 = Graph::from_value(&doc_det).unwrap().cook(None).unwrap();
+    let g2 = Graph::from_value(&doc_det).unwrap().cook(None).unwrap();
+    assert_eq!(g1.p(), g2.p());
+    assert_eq!(g1.point["Cd"].data, g2.point["Cd"].data);
+    assert_eq!(g1.point["uv"].data, g2.point["uv"].data);
+    assert_eq!(g1.point["height"].data, g2.point["height"].data);
+}
+

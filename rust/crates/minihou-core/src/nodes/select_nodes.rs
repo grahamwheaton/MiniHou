@@ -391,4 +391,182 @@ mod tests {
         let out = run(&SELECT_RING, strip, json!({"seeds": "p0-4", "combine": "union"})).unwrap();
         assert_eq!(edges(&out, "ring"), vec![(0, 4), (1, 5), (2, 6)]);
     }
+
+    #[test]
+    fn test_selection_nodes_empty_and_single_element() {
+        let empty = Geometry::points_only(vec![]).unwrap();
+        // grow on empty geometry does not panic across domains
+        for domain in ["points", "edges", "primitives"] {
+            let out = run(&GROW, empty.clone(), json!({"domain": domain})).unwrap();
+            assert_eq!(out.npoints, 0);
+            assert_eq!(out.nprims(), 0);
+        }
+        // select_path on empty geometry gives a clear out-of-range error
+        let err = run(&SELECT_PATH, empty.clone(), json!({"start": 0, "end": 0})).unwrap_err().to_string();
+        assert!(err.contains("there is no point 0"), "{err}");
+
+        // select_loop and select_ring on empty geometry write empty groups safely
+        let out_l = run(&SELECT_LOOP, empty.clone(), json!({})).unwrap();
+        let out_r = run(&SELECT_RING, empty, json!({})).unwrap();
+        assert_eq!(out_l.npoints, 0);
+        assert_eq!(out_r.npoints, 0);
+
+        // single point geometry
+        let single_pt = Geometry::points_only(vec![1.0, 2.0, 3.0]).unwrap();
+        let out_pt = run(&GROW, single_pt.clone(), json!({"domain": "points"})).unwrap();
+        assert_eq!(points(&out_pt, "selection"), vec![0]);
+        // single point path to self succeeds
+        let out_path = run(&SELECT_PATH, single_pt.clone(), json!({"start": 0, "end": 0})).unwrap();
+        assert_eq!(points(&out_path, "path"), vec![0]);
+
+        // single triangle geometry
+        let tri = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 0., 1., 0.],
+            vec![0, 1, 2],
+            vec![0, 3],
+            None,
+        ).unwrap();
+        let out_tri = run(&GROW, tri.clone(), json!({"domain": "primitives"})).unwrap();
+        assert_eq!(prims(&out_tri, "selection"), vec![0]);
+        let out_tri_path = run(&SELECT_PATH, tri.clone(), json!({"start": 0, "end": 2})).unwrap();
+        assert_eq!(points(&out_tri_path, "path"), vec![0, 2]);
+    }
+
+    #[test]
+    fn test_selection_nodes_degenerate_and_nonmanifold() {
+        // Collinear zero-area triangle and duplicate points
+        let degen = Geometry::from_arrays(
+            vec![0., 0., 0., 0., 0., 0., 0., 0., 0.],
+            vec![0, 1, 2],
+            vec![0, 3],
+            None,
+        ).unwrap();
+        let out_grow = run(&GROW, degen.clone(), json!({"domain": "primitives"})).unwrap();
+        assert_eq!(prims(&out_grow, "selection"), vec![0]);
+
+        // Duplicate points forming two separate edges
+        let dup = Geometry::from_arrays(
+            vec![0., 0., 0., 0., 0., 0., 1., 1., 1., 1., 1., 1.],
+            vec![0, 1, 2, 3],
+            vec![0, 2, 4],
+            Some(vec![false, false]),
+        ).unwrap();
+        let out_dup = run(&GROW, dup, json!({"domain": "points"})).unwrap();
+        assert_eq!(points(&out_dup, "selection"), vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn test_selection_nodes_nan_inf_and_huge_params() {
+        let g = grid(2, 2);
+        // huge steps > 100_000 is rejected
+        assert!(run(&GROW, g.clone(), json!({"steps": 100_001})).is_err());
+        // negative steps is rejected
+        assert!(run(&GROW, g.clone(), json!({"steps": -10})).is_err());
+        // negative start/end in select_path is rejected
+        assert!(run(&SELECT_PATH, g.clone(), json!({"start": -1, "end": 2})).is_err());
+        assert!(run(&SELECT_PATH, g.clone(), json!({"start": 0, "end": -2})).is_err());
+
+        // Geometry with NaN / Inf in positions
+        let nan_geo = Geometry::from_arrays(
+            vec![f32::NAN, 0., 0., f32::INFINITY, 1., 0., 0., 2., 0.],
+            vec![0, 1, 2],
+            vec![0, 3],
+            None,
+        ).unwrap();
+        // grow does not panic on NaN coords (it operates on graph topology)
+        let out_nan = run(&GROW, nan_geo.clone(), json!({"domain": "points"})).unwrap();
+        assert_eq!(points(&out_nan, "selection"), vec![0, 1, 2]);
+
+        // select_path methods handle NaN gracefully (either returning route or clear disconnected error, no panic or hang)
+        let _res1 = run(&SELECT_PATH, nan_geo.clone(), json!({"start": 0, "end": 2, "method": "fewest_steps"}));
+        let _res2 = run(&SELECT_PATH, nan_geo.clone(), json!({"start": 0, "end": 2, "method": "shortest_distance"}));
+        let _res3 = run(&SELECT_PATH, nan_geo, json!({"start": 0, "end": 2, "method": "most_direct"}));
+    }
+
+    #[test]
+    fn test_selection_nodes_missing_groups_and_invalid_enums() {
+        let g = grid(2, 2);
+        // nonexistent group pattern in grow gives a clear error
+        let err = run(&GROW, g.clone(), json!({"group": "group_does_not_exist"})).unwrap_err().to_string();
+        assert!(err.contains("no group"), "{err}");
+
+        // invalid enums give clean errors
+        assert!(run(&GROW, g.clone(), json!({"domain": "vertices"})).is_err());
+        assert!(run(&GROW, g.clone(), json!({"mode": "invert"})).is_err());
+        assert!(run(&SELECT_PATH, g.clone(), json!({"domain": "faces"})).is_err());
+        assert!(run(&SELECT_PATH, g.clone(), json!({"method": "dijkstra"})).is_err());
+        assert!(run(&SELECT_PATH, g.clone(), json!({"combine": "intersect"})).is_err());
+        assert!(run(&SELECT_LOOP, g.clone(), json!({"mode": "ring"})).is_err());
+        assert!(run(&SELECT_RING, g.clone(), json!({"direction": "diagonal"})).is_err());
+    }
+
+    #[test]
+    fn test_selection_nodes_determinism_and_attribute_preservation() {
+        let mut g = grid(3, 3);
+        g.point.insert("Cd".into(), Arc::new(Attr::f32(3, vec![1.0; g.npoints * 3])));
+        g.point.insert("N".into(), Arc::new(Attr::f32(3, vec![0.0, 0.0, 1.0].repeat(g.npoints))));
+        g.vertex.insert("uv".into(), Arc::new(Attr::f32(2, vec![0.5; g.nvertices() * 2])));
+        g.prim.insert("material_index".into(), Arc::new(Attr::i32(1, vec![42; g.nprims()])));
+        g.prim.insert("group_custom".into(), Arc::new(Attr::i32(1, vec![1; g.nprims()])));
+
+        // Run grow twice and verify deterministic identical output and preserved attributes
+        let out1 = run(&GROW, g.clone(), json!({"group": "0", "steps": 2})).unwrap();
+        let out2 = run(&GROW, g.clone(), json!({"group": "0", "steps": 2})).unwrap();
+        assert_eq!(out1.p(), out2.p());
+        assert_eq!(out1.point["Cd"].data, g.point["Cd"].data);
+        assert_eq!(out1.point["N"].data, g.point["N"].data);
+        assert_eq!(out1.vertex["uv"].data, g.vertex["uv"].data);
+        assert_eq!(out1.prim["material_index"].data, g.prim["material_index"].data);
+        assert_eq!(out1.prim["group_custom"].data, g.prim["group_custom"].data);
+        assert_eq!(prims(&out1, "selection"), prims(&out2, "selection"));
+
+        // Run select_path determinism
+        let p1 = run(&SELECT_PATH, g.clone(), json!({"start": 0, "end": 15})).unwrap();
+        let p2 = run(&SELECT_PATH, g.clone(), json!({"start": 0, "end": 15})).unwrap();
+        assert_eq!(points(&p1, "path"), points(&p2, "path"));
+        assert_eq!(p1.point["Cd"].data, g.point["Cd"].data);
+
+        // Run select_loop and select_ring determinism
+        let l1 = run(&SELECT_LOOP, g.clone(), json!({"seeds": "p0-1"})).unwrap();
+        let l2 = run(&SELECT_LOOP, g.clone(), json!({"seeds": "p0-1"})).unwrap();
+        assert_eq!(edges(&l1, "loop"), edges(&l2, "loop"));
+        assert_eq!(l1.vertex["uv"].data, g.vertex["uv"].data);
+
+        let r1 = run(&SELECT_RING, g.clone(), json!({"seeds": "p0-1"})).unwrap();
+        let r2 = run(&SELECT_RING, g, json!({"seeds": "p0-1"})).unwrap();
+        assert_eq!(edges(&r1, "ring"), edges(&r2, "ring"));
+    }
+
+    #[test]
+    fn test_selection_nodes_topology_euler_unchanged() {
+        // Selection nodes only write groups; topology and Euler characteristic are invariant
+        let c = cube();
+        let euler_char = |geo: &Geometry| {
+            let v = geo.npoints as i32;
+            let e = crate::topo::edges(&geo.topology, geo.npoints).len() as i32;
+            let f = geo.nprims() as i32;
+            v - e + f
+        };
+        assert_eq!(euler_char(&c), 2); // closed genus 0 surface V - E + F = 8 - 12 + 6 = 2
+
+        let out_grow = run(&GROW, c.clone(), json!({"group": "0", "steps": 3})).unwrap();
+        assert_eq!(euler_char(&out_grow), 2);
+        assert_eq!(out_grow.topology.vertex_point, c.topology.vertex_point);
+        assert_eq!(out_grow.topology.prim_offsets, c.topology.prim_offsets);
+
+        let out_path = run(&SELECT_PATH, c.clone(), json!({"start": 0, "end": 7})).unwrap();
+        assert_eq!(euler_char(&out_path), 2);
+
+        let out_loop = run(&SELECT_LOOP, c.clone(), json!({"seeds": "p0-1"})).unwrap();
+        assert_eq!(euler_char(&out_loop), 2);
+
+        let out_ring = run(&SELECT_RING, c, json!({"seeds": "p0-1"})).unwrap();
+        assert_eq!(euler_char(&out_ring), 2);
+
+        // Grid Euler characteristic V - E + F = 16 - 24 + 9 = 1
+        let g = grid(3, 3);
+        assert_eq!(euler_char(&g), 1);
+        let out_g = run(&GROW, g.clone(), json!({"steps": 2})).unwrap();
+        assert_eq!(euler_char(&out_g), 1);
+    }
 }

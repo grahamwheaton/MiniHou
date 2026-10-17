@@ -80,4 +80,75 @@ mod tests {
         let p=Params::resolve(OCCLUSION.params,serde_json::json!({"mode":"thickness","rays":8,"spread":5.,"seed":3,"self_occlusion":false}).as_object()).unwrap();
         assert_eq!(occlusion(&[vec![a],vec![plate(2.,1.)]],&p).unwrap().point["thickness"].as_f32().unwrap(), &[0.;4]);
     }
+
+    #[test]
+    fn test_occlusion_empty_and_single_element() {
+        let empty = Geometry::points_only(vec![]).unwrap();
+        let p = Params::resolve(OCCLUSION.params, None).unwrap();
+        // Empty geometry without prims returns error
+        assert!(occlusion(&[vec![Arc::new(empty)], vec![]], &p).is_err());
+
+        // Single triangle
+        let tri = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 0., 1., 0.],
+            vec![0, 1, 2],
+            vec![0, 3],
+            None,
+        ).unwrap();
+        let p_tri = Params::resolve(OCCLUSION.params, serde_json::json!({"rays": 8, "self_occlusion": true}).as_object()).unwrap();
+        let out_tri = occlusion(&[vec![Arc::new(tri)], vec![]], &p_tri).unwrap();
+        assert_eq!(out_tri.npoints, 3);
+        assert_eq!(out_tri.point["ao"].as_f32().unwrap(), &[1.0, 1.0, 1.0]);
+    }
+
+    #[test]
+    fn test_occlusion_degenerate_and_params() {
+        // Degenerate triangle (collinear)
+        let degen = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 2., 0., 0.],
+            vec![0, 1, 2],
+            vec![0, 3],
+            None,
+        ).unwrap();
+        let p = Params::resolve(OCCLUSION.params, serde_json::json!({"rays": 8, "self_occlusion": true}).as_object()).unwrap();
+        let _ = occlusion(&[vec![Arc::new(degen)], vec![]], &p);
+
+        // Rays <= 0 is rejected
+        let p_zero_rays = Params::resolve(OCCLUSION.params, serde_json::json!({"rays": 0}).as_object()).unwrap();
+        let a = plate(1., 0.);
+        assert!(occlusion(&[vec![a.clone()], vec![]], &p_zero_rays).is_err());
+
+        // Invalid mode enum
+        let p_bad_mode = Params::resolve(OCCLUSION.params, serde_json::json!({"mode": "invalid"}).as_object()).unwrap();
+        assert!(occlusion(&[vec![a.clone()], vec![]], &p_bad_mode).is_err());
+
+        // Invalid output attribute name
+        let p_bad_name = Params::resolve(OCCLUSION.params, serde_json::json!({"name": "123invalid"}).as_object()).unwrap();
+        assert!(occlusion(&[vec![a.clone()], vec![]], &p_bad_name).is_err());
+
+        // Self occlusion false without occluders
+        let p_no_target = Params::resolve(OCCLUSION.params, serde_json::json!({"self_occlusion": false}).as_object()).unwrap();
+        assert!(occlusion(&[vec![a], vec![]], &p_no_target).is_err());
+    }
+
+    #[test]
+    fn test_occlusion_determinism_and_attribute_preservation() {
+        let mut a = Geometry::from_arrays(vec![-1., -1., 0., 1., -1., 0., 1., 1., 0., -1., 1., 0.], vec![0, 1, 2, 3], vec![0, 4], None).unwrap();
+        a.point.insert("N".into(), Arc::new(Attr::f32(3, [0., 0., 1.].repeat(4))));
+        a.point.insert("Cd".into(), Arc::new(Attr::f32(3, [0.5, 0.5, 0.5].repeat(4))));
+        a.vertex.insert("uv".into(), Arc::new(Attr::f32(2, vec![0.1; 8])));
+        a.prim.insert("material_index".into(), Arc::new(Attr::i32(1, vec![10])));
+
+        let p = Params::resolve(OCCLUSION.params, serde_json::json!({"rays": 16, "seed": 42, "self_occlusion": true}).as_object()).unwrap();
+        let out1 = occlusion(&[vec![Arc::new(a.clone())], vec![]], &p).unwrap();
+        let out2 = occlusion(&[vec![Arc::new(a.clone())], vec![]], &p).unwrap();
+
+        // Determinism
+        assert_eq!(out1.point["ao"].data, out2.point["ao"].data);
+
+        // Attribute preservation
+        assert_eq!(out1.point["Cd"].data, a.point["Cd"].data);
+        assert_eq!(out1.vertex["uv"].data, a.vertex["uv"].data);
+        assert_eq!(out1.prim["material_index"].data, a.prim["material_index"].data);
+    }
 }

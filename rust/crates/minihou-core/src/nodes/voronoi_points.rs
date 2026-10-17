@@ -101,4 +101,77 @@ mod tests {
         let golden=[-0.43997028,-0.43286419,-0.5,-0.5,0.41119614,0.07433863,0.47747296,0.21036334,0.5];
         for (got,want) in out.p().iter().zip(golden){assert!((got-want).abs()<1e-6,"{:?}",out.p());}
     }
+
+    #[test]
+    fn test_voronoi_points_empty_and_single_element() {
+        // Empty geometry (0 prims) gives clear error
+        let empty = Geometry::points_only(vec![]).unwrap();
+        let p = Params::resolve(VORONOI_FRACTURE_POINTS.params, None).unwrap();
+        assert!(voronoi_points(&[vec![Arc::new(empty)], vec![]], &p).is_err());
+
+        // Box with count: 0 returns empty geometry
+        let box_p = Params::resolve(super::super::generate::BOX.params, None).unwrap();
+        let cube = (super::super::generate::BOX.cook)(&[vec![]], &box_p).unwrap();
+        let p_zero = Params::resolve(VORONOI_FRACTURE_POINTS.params, serde_json::json!({"count": 0}).as_object()).unwrap();
+        let out_zero = voronoi_points(&[vec![Arc::new(cube.clone())], vec![]], &p_zero).unwrap();
+        assert_eq!(out_zero.npoints, 0);
+
+        // Open mesh with surface_fraction=1.0 works (surface scatter doesn't need closed mesh)
+        let tri = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 0., 1., 0.],
+            vec![0, 1, 2],
+            vec![0, 3],
+            None,
+        ).unwrap();
+        let p_surf = Params::resolve(VORONOI_FRACTURE_POINTS.params, serde_json::json!({"count": 5, "surface_fraction": 1.0}).as_object()).unwrap();
+        let out_surf = voronoi_points(&[vec![Arc::new(tri)], vec![]], &p_surf).unwrap();
+        assert_eq!(out_surf.npoints, 5);
+        assert_eq!(out_surf.point["piece"].rows(), 5);
+    }
+
+    #[test]
+    fn test_voronoi_points_errors_and_limits() {
+        let box_p = Params::resolve(super::super::generate::BOX.params, None).unwrap();
+        let cube = (super::super::generate::BOX.cook)(&[vec![]], &box_p).unwrap();
+
+        // Invalid source enum
+        let p_bad_source = Params::resolve(VORONOI_FRACTURE_POINTS.params, serde_json::json!({"source": "invalid_src"}).as_object()).unwrap();
+        assert!(voronoi_points(&[vec![Arc::new(cube.clone())], vec![]], &p_bad_source).is_err());
+
+        // source = impacts without second input points
+        let p_impacts = Params::resolve(VORONOI_FRACTURE_POINTS.params, serde_json::json!({"source": "impacts"}).as_object()).unwrap();
+        assert!(voronoi_points(&[vec![Arc::new(cube.clone())], vec![]], &p_impacts).is_err());
+
+        // Open mesh with interior scatter (surface_fraction < 1) gives clear error
+        let open_grid = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 1., 1., 0., 0., 1., 0.],
+            vec![0, 1, 2, 3],
+            vec![0, 4],
+            None,
+        ).unwrap();
+        let p_int = Params::resolve(VORONOI_FRACTURE_POINTS.params, serde_json::json!({"count": 5, "surface_fraction": 0.0}).as_object()).unwrap();
+        let err = voronoi_points(&[vec![Arc::new(open_grid)], vec![]], &p_int).unwrap_err().to_string();
+        assert!(err.contains("needs a closed mesh"), "{err}");
+    }
+
+    #[test]
+    fn test_voronoi_points_determinism_and_clusters() {
+        let box_p = Params::resolve(super::super::generate::BOX.params, None).unwrap();
+        let cube = (super::super::generate::BOX.cook)(&[vec![]], &box_p).unwrap();
+        let p = Params::resolve(VORONOI_FRACTURE_POINTS.params, serde_json::json!({
+            "count": 10,
+            "seed": 777,
+            "surface_fraction": 0.5,
+            "merge_clusters": 3,
+            "piece_attrib": "piece"
+        }).as_object()).unwrap();
+
+        let out1 = voronoi_points(&[vec![Arc::new(cube.clone())], vec![]], &p).unwrap();
+        let out2 = voronoi_points(&[vec![Arc::new(cube)], vec![]], &p).unwrap();
+
+        // Deterministic points
+        assert_eq!(out1.p(), out2.p());
+        assert_eq!(out1.point["piece"].data, out2.point["piece"].data);
+        assert_eq!(out1.point["cluster"].data, out2.point["cluster"].data);
+    }
 }

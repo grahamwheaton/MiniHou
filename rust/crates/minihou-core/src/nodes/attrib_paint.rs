@@ -318,4 +318,97 @@ mod tests {
             1.
         );
     }
+
+    #[test]
+    fn test_attrib_paint_empty_and_single_element() {
+        let empty = Geometry::points_only(vec![]).unwrap();
+        // Point domain on empty geometry
+        let out_pt = paint(empty.clone(), json!({"attribute": "foo", "domain": "point", "default": 1.0})).unwrap();
+        assert_eq!(out_pt.npoints, 0);
+        assert_eq!(out_pt.point["foo"].rows(), 0);
+
+        // Prim domain on empty geometry
+        let out_prim = paint(empty.clone(), json!({"attribute": "bar", "domain": "prim", "default": 2.0})).unwrap();
+        assert_eq!(out_prim.nprims(), 0);
+        assert_eq!(out_prim.prim["bar"].rows(), 0);
+
+        // Edge domain on empty geometry
+        let out_edge = paint(empty, json!({"attribute": "edge_foo", "domain": "edge", "default": 3.0})).unwrap();
+        assert_eq!(out_edge.vertex.get("edge_group_edge_foo").map(|a| a.rows()).unwrap_or(0), 0);
+
+        // Single point geometry
+        let pt = Geometry::points_only(vec![1., 2., 3.]).unwrap();
+        let painted_pt = encode(&[(0, vec![42.0])], 1).unwrap();
+        let out_single = paint(pt, json!({"attribute": "val", "data": painted_pt})).unwrap();
+        assert_eq!(out_single.point["val"].as_f32().unwrap(), &[42.0]);
+
+        // Single triangle geometry
+        let tri = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 0., 1., 0.],
+            vec![0, 1, 2],
+            vec![0, 3],
+            None,
+        ).unwrap();
+        let painted_tri = encode(&[(0, vec![7.0])], 1).unwrap();
+        let out_tri = paint(tri, json!({"attribute": "density", "domain": "prim", "data": painted_tri})).unwrap();
+        assert_eq!(out_tri.prim["density"].as_f32().unwrap(), &[7.0]);
+    }
+
+    #[test]
+    fn test_attrib_paint_degenerate_and_nan_inf() {
+        // Degenerate zero-area triangle
+        let degen = Geometry::from_arrays(
+            vec![0., 0., 0., 0., 0., 0., 0., 0., 0.],
+            vec![0, 1, 2],
+            vec![0, 3],
+            None,
+        ).unwrap();
+        let out = paint(degen, json!({"attribute": "mask", "default": 1.0})).unwrap();
+        assert_eq!(out.point["mask"].as_f32().unwrap(), &[1.0, 1.0, 1.0]);
+
+        // Attempting to encode NaN or Inf fails cleanly
+        assert!(encode(&[(0, vec![f32::NAN])], 1).is_err());
+        assert!(encode(&[(0, vec![f32::INFINITY])], 1).is_err());
+
+        // Merging invalid NaN/Inf values fails
+        assert!(merge("", 1, &[0], Some(&[vec![f32::NAN]])).is_err());
+    }
+
+    #[test]
+    fn test_attrib_paint_missing_and_invalid_enums_and_names() {
+        let s = sample();
+        // Attribute name "P" is rejected
+        assert!(paint(s.clone(), json!({"attribute": "P"})).is_err());
+        // Leading digits or invalid characters rejected
+        assert!(paint(s.clone(), json!({"attribute": "123invalid"})).is_err());
+        assert!(paint(s.clone(), json!({"attribute": "has spaces"})).is_err());
+        // edge_group_ prefix in edge domain is rejected
+        assert!(paint(s.clone(), json!({"attribute": "edge_group_test", "domain": "edge"})).is_err());
+        // edge domain with vec3 is rejected
+        assert!(paint(s.clone(), json!({"attribute": "col", "domain": "edge", "kind": "vec3"})).is_err());
+        // invalid enums
+        assert!(paint(s.clone(), json!({"domain": "vertex"})).is_err());
+        assert!(paint(s.clone(), json!({"kind": "matrix"})).is_err());
+    }
+
+    #[test]
+    fn test_attrib_paint_determinism_and_attribute_preservation() {
+        let mut s = sample();
+        s.point.insert("Cd".into(), Arc::new(Attr::f32(3, vec![1.0; 12])));
+        s.vertex.insert("uv".into(), Arc::new(Attr::f32(2, vec![0.5; 8])));
+        s.prim.insert("material_index".into(), Arc::new(Attr::i32(1, vec![99])));
+
+        let encoded = encode(&[(1, vec![0.8])], 1).unwrap();
+        let out1 = paint(s.clone(), json!({"attribute": "heat", "data": encoded, "default": 0.1})).unwrap();
+        let out2 = paint(s.clone(), json!({"attribute": "heat", "data": encoded, "default": 0.1})).unwrap();
+
+        // Deterministic output
+        assert_eq!(out1.p(), out2.p());
+        assert_eq!(out1.point["heat"].data, out2.point["heat"].data);
+
+        // Attribute preservation
+        assert_eq!(out1.point["Cd"].data, s.point["Cd"].data);
+        assert_eq!(out1.vertex["uv"].data, s.vertex["uv"].data);
+        assert_eq!(out1.prim["material_index"].data, s.prim["material_index"].data);
+    }
 }

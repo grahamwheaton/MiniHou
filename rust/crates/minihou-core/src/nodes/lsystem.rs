@@ -120,4 +120,72 @@ mod tests {
         let out=lsystem(&[vec![],vec![],vec![],vec![]],&p).unwrap();
         assert_eq!((out.npoints,out.nprims(),out.nvertices(),out.detail["lsystem_symbols"].as_u64().unwrap()),(4097,1536,5632,11116));
     }
+
+    #[test]
+    fn test_lsystem_empty_and_single_element() {
+        // Empty premise produces safe empty geometry
+        let p_empty = Params::resolve(LSYSTEM.params, serde_json::json!({"premise": "", "rules": ""}).as_object()).unwrap();
+        let out_empty = lsystem(&[vec![], vec![], vec![], vec![]], &p_empty).unwrap();
+        assert_eq!(out_empty.npoints, 0);
+        assert_eq!(out_empty.nprims(), 0);
+
+        // Single step 'F': 2 points, 1 curve
+        let p_single = Params::resolve(LSYSTEM.params, serde_json::json!({"premise": "F", "rules": "", "generations": 0.}).as_object()).unwrap();
+        let out_single = lsystem(&[vec![], vec![], vec![], vec![]], &p_single).unwrap();
+        assert_eq!(out_single.npoints, 2);
+        assert_eq!(out_single.nprims(), 1);
+        assert_eq!(out_single.topology.vertex_point, &[0, 1]);
+    }
+
+    #[test]
+    fn test_lsystem_errors_and_unsupported() {
+        // generations out of 0..12 range
+        let p_neg_gen = Params::resolve(LSYSTEM.params, serde_json::json!({"generations": -1.}).as_object()).unwrap();
+        assert!(lsystem(&[vec![], vec![], vec![], vec![]], &p_neg_gen).is_err());
+        let p_huge_gen = Params::resolve(LSYSTEM.params, serde_json::json!({"generations": 13.}).as_object()).unwrap();
+        assert!(lsystem(&[vec![], vec![], vec![], vec![]], &p_huge_gen).is_err());
+
+        // tube geometry unsupported
+        let p_tube = Params::resolve(LSYSTEM.params, serde_json::json!({"type": "tube"}).as_object()).unwrap();
+        assert!(lsystem(&[vec![], vec![], vec![], vec![]], &p_tube).is_err());
+
+        // leaf geometry input unsupported
+        let dummy = Arc::new(Geometry::points_only(vec![0., 0., 0.]).unwrap());
+        let p_def = Params::resolve(LSYSTEM.params, None).unwrap();
+        assert!(lsystem(&[vec![dummy], vec![], vec![], vec![]], &p_def).is_err());
+
+        // unmatched brackets
+        let p_open = Params::resolve(LSYSTEM.params, serde_json::json!({"premise": "F[F", "rules": "", "generations": 0.}).as_object()).unwrap();
+        assert!(lsystem(&[vec![], vec![], vec![], vec![]], &p_open).is_err());
+        let p_close = Params::resolve(LSYSTEM.params, serde_json::json!({"premise": "F]F", "rules": "", "generations": 0.}).as_object()).unwrap();
+        assert!(lsystem(&[vec![], vec![], vec![], vec![]], &p_close).is_err());
+
+        // invalid rule syntax
+        let p_bad_rule = Params::resolve(LSYSTEM.params, serde_json::json!({"rules": "invalid_rule"}).as_object()).unwrap();
+        assert!(lsystem(&[vec![], vec![], vec![], vec![]], &p_bad_rule).is_err());
+    }
+
+    #[test]
+    fn test_lsystem_determinism_and_attributes() {
+        let p = Params::resolve(LSYSTEM.params, serde_json::json!({
+            "premise": "F+F",
+            "rules": "",
+            "generations": 0.,
+            "random_scale": 0.5,
+            "seed": 12345,
+            "point_attributes": true
+        }).as_object()).unwrap();
+
+        let out1 = lsystem(&[vec![], vec![], vec![], vec![]], &p).unwrap();
+        let out2 = lsystem(&[vec![], vec![], vec![], vec![]], &p).unwrap();
+
+        // Determinism with seeded random
+        assert_eq!(out1.p(), out2.p());
+        assert_eq!(out1.point["width"].data, out2.point["width"].data);
+        assert_eq!(out1.point["arc"].data, out2.point["arc"].data);
+        assert_eq!(out1.point["up"].data, out2.point["up"].data);
+        assert!(out1.point.contains_key("segs"));
+        assert!(out1.point.contains_key("div"));
+        assert!(out1.point.contains_key("gen"));
+    }
 }

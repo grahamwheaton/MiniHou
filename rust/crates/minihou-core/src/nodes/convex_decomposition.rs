@@ -126,4 +126,54 @@ fn cook(inputs:&Inputs,p:&Params)->Result<Geometry>{
         assert!(ids.iter().copied().max().unwrap_or(0)>0);
         assert!((signed_volume(&out)-3.).abs()<0.01,"volume {}",signed_volume(&out));
     }
+
+    #[test]
+    fn test_convex_decomposition_empty_and_errors() {
+        // Empty geometry (0 prims) returns cloned geometry
+        let empty = Geometry::points_only(vec![]).unwrap();
+        let p = Params::resolve(CONVEX_DECOMPOSITION.params, None).unwrap();
+        let out_empty = cook(&[vec![Arc::new(empty)]], &p).unwrap();
+        assert_eq!(out_empty.npoints, 0);
+        assert_eq!(out_empty.nprims(), 0);
+
+        // Open mesh (e.g. single triangle) fails with clear error
+        let tri = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 0., 1., 0.],
+            vec![0, 1, 2],
+            vec![0, 3],
+            None,
+        ).unwrap();
+        let err_open = cook(&[vec![Arc::new(tri)]], &p).unwrap_err().to_string();
+        assert!(err_open.contains("needs a closed mesh"), "{err_open}");
+
+        // Invalid parameters
+        let bp = Params::resolve(super::super::generate::BOX.params, None).unwrap();
+        let cube = (super::super::generate::BOX.cook)(&[vec![]], &bp).unwrap();
+
+        let p_bad_pieces = Params::resolve(CONVEX_DECOMPOSITION.params, serde_json::json!({"max_pieces": 0}).as_object()).unwrap();
+        assert!(cook(&[vec![Arc::new(cube.clone())]], &p_bad_pieces).is_err());
+
+        let p_bad_concavity = Params::resolve(CONVEX_DECOMPOSITION.params, serde_json::json!({"max_concavity": -0.1}).as_object()).unwrap();
+        assert!(cook(&[vec![Arc::new(cube.clone())]], &p_bad_concavity).is_err());
+    }
+
+    #[test]
+    fn test_convex_decomposition_determinism_and_attribute_preservation() {
+        let bp = Params::resolve(super::super::generate::BOX.params, None).unwrap();
+        let mut cube = (super::super::generate::BOX.cook)(&[vec![]], &bp).unwrap();
+        cube.point.insert("Cd".into(), Arc::new(Attr::f32(3, vec![0.5; cube.npoints * 3])));
+        cube.prim.insert("material_index".into(), Arc::new(Attr::i32(1, vec![10; cube.nprims()])));
+
+        let p = Params::resolve(CONVEX_DECOMPOSITION.params, None).unwrap();
+        let out1 = cook(&[vec![Arc::new(cube.clone())]], &p).unwrap();
+        let out2 = cook(&[vec![Arc::new(cube.clone())]], &p).unwrap();
+
+        // Deterministic output
+        assert_eq!(out1.p(), out2.p());
+        assert_eq!(out1.prim["piece"].data, out2.prim["piece"].data);
+
+        // Attribute preservation
+        assert_eq!(out1.point["Cd"].data, cube.point["Cd"].data);
+        assert_eq!(out1.prim["material_index"].data, cube.prim["material_index"].data);
+    }
 }
