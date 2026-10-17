@@ -392,6 +392,8 @@ struct App {
     pub last_operator: Option<LastOperator>,
     last_edit_selection: ui::SelectionMode, params_open: bool, object_hidden: bool,
     held_keys: Vec<egui::Event>,
+    /// Element selection (and the Object-mode stash) per cooked topology, see element_select::SelectionMemory.
+    selection_memory: element_select::SelectionMemory<(picking::Selection, picking::Selection)>,
 }
 impl App {
     /// Finish the current edit before transferring pointer/keyboard ownership to selection.
@@ -475,7 +477,7 @@ impl App {
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
             display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
             clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
-            last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new() };
+            last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default() };
         app.prefs = Preferences::load();
         app.prefs.apply_python(&python_gate());
         app.mode=Mode::parse(&app.prefs.viewport.default_shading);
@@ -2178,6 +2180,12 @@ impl eframe::App for App {
                 self.lod_uploaded = use_lod;
                 self.last_lod_view = None;
                 self.shown_level = level;
+                // element ids only mean something on the topology they were picked on (stale bevel edges drew as orange diagonals)
+                let key = element_select::topology_key(scene.positions().len() / 3, scene.triangle_indices(), scene.edge_indices());
+                let mode = self.selection.mode;
+                let (selection, stash) = self.selection_memory.retarget(key, (std::mem::take(&mut self.selection), std::mem::take(&mut self.stashed_selection)));
+                self.selection = if selection.is_empty() { picking::Selection { mode, ..Default::default() } } else { selection };
+                self.stashed_selection = stash;
                 self.scene = Some(scene);
                 self.elem_topo = Default::default();
                 if first { self.frame_mesh(); }
