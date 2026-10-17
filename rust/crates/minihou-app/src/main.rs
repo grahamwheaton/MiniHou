@@ -1074,6 +1074,10 @@ impl App {
                     count+=1.;
                 }
             }
+            if count>0. && kind==ModelKind::PushPull {
+                // SketchUp-style inference: far face (Through) and parallel faces (On Face).
+                state.targets=ui::modal_model::pushpull_targets(positions,tris,&selection.tris,normal);
+            }
             if count>0. {
                 center=center.map(|x|x/count);
                 let length=normal.iter().map(|x|x*x).sum::<f32>().sqrt();
@@ -2632,6 +2636,7 @@ impl eframe::App for App {
                     ui::viewport_ui::modal_status(ui,rect,&s.status());
                 } else if let Some((state,_,_,_))=&self.model_modal {
                     ui::viewport_ui::modal_status(ui,rect,&state.status());
+                    if let Some(snap)=state.snapped { ui.painter().text(state.pointer+egui::vec2(14.,-14.),egui::Align2::LEFT_BOTTOM,snap.label(),egui::FontId::proportional(13.),egui::Color32::from_rgb(255,200,60)); }
                 } else if let Some(modal)=&self.modal {
                     ui::transform_overlay::show(ui,rect,&v,modal);
                     let snap=self.editor_state.snap.enabled ^ ctx.input(|i|i.modifiers.ctrl);
