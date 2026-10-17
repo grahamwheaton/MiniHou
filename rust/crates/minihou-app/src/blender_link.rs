@@ -725,6 +725,15 @@ impl LinkServer {
                 .as_ref()
                 .is_some_and(|listener| !listener.is_finished())
     }
+    pub fn reply(&self, peer: u64, message: Value) {
+        if let Some(p) = self.shared.peers.lock().unwrap().get(&peer) {
+            let _ = p.replies.send(message);
+        }
+    }
+    /// The Blender graph path bound to the editor document: the live modifier's path while one is live.
+    pub fn bound_path(&self) -> Option<&str> {
+        self.active_live.as_deref()
+    }
     pub fn reply_error(&self, peer: u64, where_: &str, message: &str) {
         if let Some(p) = self.shared.peers.lock().unwrap().get(&peer) {
             let _ = p
@@ -1004,7 +1013,7 @@ fn serve_client(
     send_frame(
         &mut socket,
         &json!({"type":"welcome","protocol":link_protocol::PROTOCOL_VERSION,"server":"minihou",
-        "capabilities":["instances_v1","live_modifier_v1","object_inputs_v1","scene_objects_v1","image_exchange_v1",minihou_app::graph_embed::CAPABILITY],"editor_url":null,"editor":"native","graph_path":snapshot.graph_path}),
+        "capabilities":["instances_v1","live_modifier_v1","object_inputs_v1","scene_objects_v1","image_exchange_v1",minihou_app::graph_embed::CAPABILITY,minihou_app::input_define::CAPABILITY],"editor_url":null,"editor":"native","graph_path":snapshot.graph_path}),
         &Arrays::new(),
     )?;
     let instance_mode = hello["mode"] == "instances";
@@ -1111,6 +1120,13 @@ fn serve_client(
                                 &json!({"type":"error","message":"editor request queue is full"}),
                                 &Arrays::new(),
                             )?;
+                        }
+                    }
+                    // input_define_v1: applied on the UI thread as an undoable edit; it always answers
+                    // with input_define_ack (status ok|error) carrying this request_id/instance_id.
+                    "input_define" => {
+                        if requests.try_send(LinkRequest { peer: id, message: h.clone(), arrays, completion: None }).is_err() {
+                            send_frame(&mut socket, &minihou_app::input_define::error(&h, "busy", "editor request queue is full"), &Arrays::new())?;
                         }
                     }
                     "geo_ack" => {} // TCP needs no acknowledgement; some addon versions send one anyway.
@@ -1278,10 +1294,33 @@ mod tests {
                 "object_inputs_v1",
                 "scene_objects_v1",
                 "image_exchange_v1",
-                "graph_embed_v1"
+                "graph_embed_v1",
+                "input_define_v1"
             ])
         );
         socket
+    }
+    #[test]
+    fn input_define_is_forwarded_to_the_ui_and_answered_with_its_request_id() {
+        let doc = Document::parse(r#"{"nodes":{"input":{"type":"modifier_input"}},"display":"input"}"#.into()).unwrap();
+        let server = LinkServer::bind("127.0.0.1:0", &doc, Path::new("graph.json")).unwrap();
+        let mut a = connect(&server);
+        let msg = json!({"type":"input_define","request_id":7,"instance_id":"m","path":"graph.json","op":"add",
+                         "input":{"name":"Target","kind":"object"}});
+        send_frame(&mut a, &msg, &Arrays::new()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let request = loop {
+            if let Some(r) = server.poll().into_iter().next() { break r; }
+            assert!(Instant::now() < deadline, "input_define was not forwarded");
+            thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(request.message["type"], "input_define");
+        let (edit, entry) = minihou_app::input_define::plan(doc.value(), &request.message).unwrap();
+        assert!(matches!(edit, minihou_app::Edit::ModifierInputs { .. }));
+        server.reply(request.peer, minihou_app::input_define::ack(&request.message, &entry, doc.value()));
+        let ack = receive(&mut a, "input_define_ack").0;
+        assert_eq!((ack["request_id"].as_i64(), ack["instance_id"].as_str(), ack["input"]["kind"].as_str()), (Some(7), Some("m"), Some("object")));
+        assert_eq!(server.bound_path(), None);
     }
     #[test]
     fn proxy_handshake_requests_resync_errors_and_disconnect() {

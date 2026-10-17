@@ -1031,7 +1031,7 @@ fn unsupported(ui: &mut egui::Ui, v: &View<'_>, id: &str, typ: &str) {
 }
 
 fn modifier_inputs_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, node: &str) {
-    use minihou_app::modifier_inputs::{default_for, validate, KINDS};
+    use minihou_app::modifier_inputs::{validate, KINDS};
     let entries = v.doc["nodes"][node]["modifier_inputs"].as_array().cloned().unwrap_or_default();
     ui.separator();
     ui.label("Blender inputs");
@@ -1094,24 +1094,19 @@ fn modifier_inputs_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, nod
         ui.ctx().data_mut(|d| d.insert_persisted(key, value.clone()));
     }
     if ui.button("Add input").clicked() {
-        let id = (1..).map(|i| format!("input_{i}")).find(|id| !entries.iter().any(|e| e["id"] == *id)).unwrap();
-        let options: Vec<_> = subtype.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
-        let parsed = if default.trim().is_empty() {
-            Ok(if kind == "menu" { options.first().map_or(Value::Null, |s| json!(s)) } else { default_for(&kind) })
-        } else { serde_json::from_str::<Value>(&default) };
+        // Same path as Blender's input_define_v1 (ids, collision suffixes, validation).
+        let options: Vec<String> = subtype.split(',').map(str::trim).filter(|s| !s.is_empty()).map(str::to_owned).collect();
+        let parsed = if default.trim().is_empty() { Ok(None) } else { serde_json::from_str::<Value>(&default).map(Some) };
         match parsed {
             Ok(value) => {
-                let mut entry = json!({"id":id,"name":draft.trim(),"kind":kind,"default":value});
-                if !min.trim().is_empty() { entry["min"] = json!(min.parse::<f64>().ok()); }
-                if !max.trim().is_empty() { entry["max"] = json!(max.parse::<f64>().ok()); }
-                if kind == "menu" { entry["options"] = json!(options); }
-                else if !subtype.trim().is_empty() { entry["subtype"] = json!(subtype.trim()); }
-                let mut next = entries.clone(); next.push(entry);
-                match validate(&next) {
-                    Ok(()) => {
+                let draft = minihou_app::input_define::Draft { name: draft.trim().to_owned(), kind: kind.clone(), default: value,
+                    min: min.trim().parse().ok(), max: max.trim().parse().ok(),
+                    subtype: if kind == "menu" { String::new() } else { subtype.trim().to_owned() }, options, doc: String::new() };
+                match minihou_app::input_define::add_entry(v.doc, node, &draft) {
+                    Ok((next, _)) => {
                         out.push(UiAction::Edit { edit: Edit::ModifierInputs { node: node.into(), inputs: next }, continuous: false });
-                        draft.clear(); default.clear(); error.clear();
-                        ui.ctx().data_mut(|d| { d.insert_persisted(key, draft); d.insert_persisted(default_key, default); });
+                        error.clear();
+                        ui.ctx().data_mut(|d| { d.insert_persisted(key, String::new()); d.insert_persisted(default_key, String::new()); });
                     }
                     Err(e) => error = e.to_string(),
                 }
