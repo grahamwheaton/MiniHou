@@ -1685,7 +1685,7 @@ impl App {
                 self.connect_nodes(&from, &to, port.as_deref());
             }
             LastOperator::Tidy => {
-                ui::network::tidy(ctx, &self.editor.path);
+                ui::network::tidy(ctx, &self.editor.path, self.editor.doc.value(), &self.flags);
                 self.last_operator = Some(LastOperator::Tidy);
             }
         }
@@ -2220,7 +2220,7 @@ impl App {
                     }
                 },
                 UiAction::TidyNetwork => {
-                    ui::network::tidy(ctx, &self.editor.path);
+                    ui::network::tidy(ctx, &self.editor.path, self.editor.doc.value(), &self.flags);
                     self.last_operator = Some(LastOperator::Tidy);
                 }
                 UiAction::RepeatLast => self.repeat_last(ctx),
