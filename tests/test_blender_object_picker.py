@@ -168,6 +168,8 @@ class BlenderObjectPickerTests(unittest.TestCase):
         self.addon.draw_placement(layout, gn, section)
         props = [(a[0], a[1]) for name, a, kw in layout.calls if name == "prop"]
         self.assertIn((node.inputs["blender_object1"], "default_value"), props)
+        if bpy.app.version < (5, 1, 0):
+            return                     # placement cooks need Object.evaluated_geometry (5.1+)
         holder.update_tag(); bpy.context.view_layer.update()
         self.pump()
         self.assertEqual(self.verts(holder), 8, "placement cooks its own pick")

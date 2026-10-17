@@ -4,6 +4,14 @@ MiniHou wired groups process the mesh connected to their Geometry input through 
 
 With add-on 0.4.0, evaluated input material slots and image bytes also cross the native live link for opaque base-colour textures. The placement sends a revisioned material manifest and only image hashes the app requests; changes rebind viewport textures without a geometry recook. `instance_sources` use the same binding table. See [TEXTURE_TRANSPORT.md](TEXTURE_TRANSPORT.md) for supported Blender nodes and limits.
 
+## Blender Object node pickers (add-on 0.5.0)
+
+A `blender_object` node in the MiniHou graph shows up on the MiniHou group as an Object picker named after the
+node (modifier panel, Plumbing group node, each "MiniHou N" placement section); eyedrop an object and the node
+reads its evaluated mesh. Until something is picked the node is *waiting* (empty geometry, no error). The
+node's name field in MiniHou searches Blender object names as you type. See
+[BLENDER_OBJECT_NODE.md](BLENDER_OBJECT_NODE.md).
+
 ## Embedded networks (add-on 0.3.0)
 
 New placements and stack modifiers store their network inside the .blend (a `MiniHou: <name>.minihou` Text datablock) instead of depending on the graph file; the file is remembered for comparison and *Extract to .minihou File*. Live edits from MiniHou are written back to the embedded copy (debounced and on save). Placements made before 0.3.0 stay in Linked File mode until embedded. Design, UI, link messages and limits: [EMBEDDED_GRAPHS.md](EMBEDDED_GRAPHS.md).
