@@ -358,6 +358,9 @@ def _geometry(r):
     g = Geometry(int(r["npoints"]), Topology(r["vertex_point"], r["prim_offsets"], r["closed"]))
     for domain in ("point", "vertex", "prim"):
         for name, a in r[domain].items():
+            # Native Rust viewport hint; Python geometry has no equivalent attribute.
+            if domain == "prim" and name == "__viewport_curve":
+                continue
             g.table(domain)[name] = a
     g.detail.update(json.loads(r["detail_json"]))
     return g
