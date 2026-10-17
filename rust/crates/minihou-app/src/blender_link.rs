@@ -547,6 +547,8 @@ struct LinkShared {
     live_active: AtomicBool,
     /// graph_embed_v1: the user's conflict-modal answers, keyed by Blender network id.
     embed_resolutions: Mutex<BTreeMap<String, String>>,
+    /// Pushed graphs waiting for that answer (shared: a reconnecting add-on still learns the outcome).
+    embed_pending: Mutex<BTreeMap<String, Value>>,
     /// The UI's unrelated open document has unsaved edits (ask before a pushed graph takes over).
     open_dirty: AtomicBool,
 }
@@ -597,6 +599,7 @@ impl LinkServer {
             live_documents: Mutex::new(BTreeMap::new()),
             live_active: AtomicBool::new(false),
             embed_resolutions: Mutex::new(BTreeMap::new()),
+            embed_pending: Mutex::new(BTreeMap::new()),
             open_dirty: AtomicBool::new(false),
         });
         let (sender, requests) = mpsc::sync_channel(256);

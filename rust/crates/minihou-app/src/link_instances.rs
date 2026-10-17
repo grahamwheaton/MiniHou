@@ -28,8 +28,6 @@ pub(super) struct InstanceManager {
     live: BTreeMap<String, Live>,
     /// graph_embed_v1: last graph both sides agreed on, per Blender network id.
     embed_base: BTreeMap<String, Value>,
-    /// Pushed graphs waiting for the user's answer in the app's conflict modal.
-    embed_pending: BTreeMap<String, Value>,
 }
 impl InstanceManager {
     pub fn new(
@@ -45,7 +43,6 @@ impl InstanceManager {
             sources: BTreeMap::new(),
             live: BTreeMap::new(),
             embed_base: BTreeMap::new(),
-            embed_pending: BTreeMap::new(),
         }
     }
     pub fn handle(&mut self, h: &Value, arrays: &Arrays) -> (Value, Arrays) {
@@ -368,7 +365,7 @@ impl InstanceManager {
                 .filter_map(|p| Some((p["name"].as_str()?.to_owned(), p["value"].clone())))
                 .collect(),
         );
-        let pending = self.embed_pending.contains_key(id);
+        let pending = self.shared.embed_pending.lock().unwrap().contains_key(id);
         let graph = live.graph.clone();
         if !pending {
             self.embed_base.insert(id.to_string(), graph.clone());
@@ -390,7 +387,7 @@ impl InstanceManager {
         let open_dirty = self.shared.open_dirty.load(Ordering::Relaxed);
         let decision = graph_embed::decide(&push.graph, app.as_ref(), self.embed_base.get(id), open_dirty);
         self.shared.embed_resolutions.lock().unwrap().remove(id);
-        self.embed_pending.remove(id);
+        self.shared.embed_pending.lock().unwrap().remove(id);
         let mut ack = match decision {
             Decision::Unchanged => graph_embed::state("graph_ack", "unchanged", None),
             Decision::AdoptEmbedded => {
@@ -405,7 +402,7 @@ impl InstanceManager {
             Decision::Conflict | Decision::OpenDocumentDirty => {
                 let kind = if decision == Decision::Conflict { "live" } else { "open_document" };
                 let path = self.live.get(id).map(|l| l.path.clone()).unwrap_or_default();
-                self.embed_pending.insert(id.to_string(), push.graph.clone());
+                self.shared.embed_pending.lock().unwrap().insert(id.to_string(), push.graph.clone());
                 self.dispatch(json!({"type":"embed_conflict","kind":kind,"path":path,"instance_id":id,
                     "label":push.label,"name":push.name,"graph":push.graph}), Arrays::new(), false)?;
                 return Ok(graph_embed::state("graph_ack", "conflict", None));
@@ -420,11 +417,11 @@ impl InstanceManager {
     fn embed_pull(&mut self, id: &str) -> Result<Value> {
         self.refresh(id);
         let app = self.live.get(id).map(|l| l.graph.clone());
-        if self.embed_pending.contains_key(id) {
+        if self.shared.embed_pending.lock().unwrap().contains_key(id) {
             let Some(resolution) = self.shared.embed_resolutions.lock().unwrap().remove(id) else {
                 return Ok(graph_embed::state("graph_state", "pending", None));
             };
-            let pushed = self.embed_pending.remove(id).unwrap();
+            let Some(pushed) = self.shared.embed_pending.lock().unwrap().remove(id) else { return Ok(graph_embed::state("graph_state", "none", None)) };
             let adopt = graph_embed::Resolution::parse(&resolution).is_some_and(|r| r.adopts_embedded());
             match &app {
                 Some(graph) => { self.embed_base.insert(id.to_string(), graph.clone()); }
@@ -508,7 +505,7 @@ impl InstanceManager {
         self.entries.remove(id);
         self.sources.remove(id);
         self.embed_base.remove(id);
-        self.embed_pending.remove(id);
+        self.shared.embed_pending.lock().unwrap().remove(id);
         Ok(())
     }
     pub fn clear(&mut self) {

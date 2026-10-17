@@ -134,7 +134,8 @@ class InstanceClient:
                     raise ProtocolError("modifier response instance ID mismatch")
                 expected = {"instance_cook": "instance_result", "instance_describe": "instance_description",
                             "instance_remove": "instance_removed", "instance_edit": "instance_synced",
-                            "instance_sync": "instance_synced", "instance_sources": "instance_sources_set"}[header["type"]]
+                            "instance_sync": "instance_synced", "instance_sources": "instance_sources_set",
+                            "graph_push": "graph_ack", "graph_pull": "graph_state"}[header["type"]]
                 if reply.get("type") not in (expected, "instance_error"):
                     raise ProtocolError("unexpected modifier response type")
             except Exception:
@@ -176,6 +177,24 @@ class InstanceClient:
             raise RuntimeError("Restart the updated MiniHou app to load object inputs")
         arrays = {str(i) + "/" + key: value for i, values in enumerate(sources.values()) for key, value in values.items()}
         return self._request({"type": "instance_sources", "instance_id": instance_id, "sources": list(sources)}, arrays)[0]
+
+    def has_capability(self, name):
+        self.connect()
+        return name in self.welcome.get("capabilities", [])
+
+    def push_graph(self, instance_id, *, name, label, text, sha256, schema=1):
+        """graph_embed_v1: send an embedded network (text is the exact JSON; sha256 covers its UTF-8 bytes)."""
+        if not self.has_capability("graph_embed_v1"):
+            raise RuntimeError("This MiniHou app predates embedded networks (graph_embed_v1)")
+        return self._request({"type": "graph_push", "instance_id": instance_id, "schema": schema,
+                              "name": name, "label": label, "json": text, "hash": sha256,
+                              "size": len(text.encode("utf-8"))})[0]
+
+    def pull_graph(self, instance_id):
+        """graph_embed_v1: the app's current copy of a network, or a pending conflict's outcome."""
+        if not self.has_capability("graph_embed_v1"):
+            return {"type": "graph_state", "status": "unsupported"}
+        return self._request({"type": "graph_pull", "instance_id": instance_id})[0]
 
     def sync_live(self, instance_id, params):
         return self._request({"type": "instance_sync", "instance_id": instance_id, "params": params})[0]

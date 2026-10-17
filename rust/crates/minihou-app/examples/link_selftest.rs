@@ -32,6 +32,7 @@ fn main() -> minihou_app::Result<()> {
     let mut command_id = 0;
     // graph_embed_v1: the last conflict the app would show in its modal; answered by a "resolve" command.
     let mut conflict: Option<serde_json::Value> = None;
+    let mut answer: Option<serde_json::Value> = None;
     let deadline = Instant::now() + Duration::from_secs(args[2].parse()?);
     while Instant::now() < deadline {
         let mut edits = Vec::new();
@@ -70,18 +71,8 @@ fn main() -> minihou_app::Result<()> {
                                 }
                             }
                             "open_dirty" => server.set_open_dirty(command["value"] == true),
-                            "resolve" => {
-                                let choice = minihou_app::graph_embed::Resolution::parse(
-                                    command["choice"].as_str().unwrap_or(""),
-                                )
-                                .ok_or("resolve needs use_embedded, keep_mine or open_as_new")?;
-                                if let Some(c) = conflict.take() {
-                                    if let Some(path) = command["export"].as_str() {
-                                        editor.export_to(std::path::Path::new(path))?;
-                                    }
-                                    edits.extend(server.resolve_embed(&c, choice, &mut editor)?);
-                                }
-                            }
+                            // Answered once the conflict request has arrived (it may still be queued).
+                            "resolve" => answer = Some(command.clone()),
                             "replace" => {
                                 let doc = Document::parse(command["graph"].to_string())?;
                                 editor.history.replace(&mut editor.doc, doc);
@@ -100,7 +91,7 @@ fn main() -> minihou_app::Result<()> {
                         edits.extend(server.handle_live(&request, &mut editor)?)
                     }
                     "embed_conflict" => {
-                        println!("EMBED_CONFLICT {}", request.message["kind"].as_str().unwrap_or(""));
+                        eprintln!("EMBED_CONFLICT {}", request.message["kind"].as_str().unwrap_or(""));
                         conflict = Some(request.message.clone());
                     }
                     "set_param" => {
@@ -150,6 +141,15 @@ fn main() -> minihou_app::Result<()> {
                     &e.to_string(),
                 );
             }
+        }
+        if conflict.is_some() && answer.is_some() {
+            let (c, command) = (conflict.take().unwrap(), answer.take().unwrap());
+            let choice = minihou_app::graph_embed::Resolution::parse(command["choice"].as_str().unwrap_or(""))
+                .ok_or("resolve needs use_embedded, keep_mine or open_as_new")?;
+            if let Some(path) = command["export"].as_str() {
+                editor.export_to(std::path::Path::new(path))?;
+            }
+            edits.extend(server.resolve_embed(&c, choice, &mut editor)?);
         }
         server.document_changed(&editor.doc, &editor.path);
         if !edits.is_empty() {

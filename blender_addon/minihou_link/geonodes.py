@@ -16,7 +16,7 @@ import bpy
 import numpy as np
 from bpy.app.handlers import persistent
 
-from . import modifiers, proxy, mesh_reader, mesh_writer, scene_objects
+from . import embed, modifiers, proxy, mesh_reader, mesh_writer, scene_objects
 from .protocol import GeoUpdate, Mirror, instance_payload
 
 KEY = "minihou_gn_id"
@@ -84,6 +84,10 @@ def add_group(tree, graph_path, *, host=None, port=None):
     node.label = "MiniHou: " + os.path.basename(path)
     node.width = 240
     _object_interface(ng)
+    try:
+        embed.embed(ng, label=os.path.basename(path), file=path)  # 0.3.0: new placements are embedded
+    except embed.EmbedError as exc:
+        ng[embed.ERROR] = f"Kept in Linked File mode: {exc}"
     return node
 
 
@@ -241,6 +245,7 @@ def _apply_live(node, header):
             if socket is not None and not socket.is_linked and hasattr(socket, "default_value"):
                 socket.default_value = old.get(socket.identifier, p["value"])
         _digests.pop(tree[KEY], None)
+        embed.note_graph(tree, pending=bool(header.get("embed_pending")))  # MiniHou edit -> embedded copy
     tree[modifiers.PATH] = header["path"]
 
 
