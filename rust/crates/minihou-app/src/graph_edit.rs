@@ -188,6 +188,51 @@ pub fn add_viewport_cut(value: &Value, source: &str, ty: &str, params: Value) ->
     Some((next, id))
 }
 
+/// Insert a point deletion into the displayed curve stream. The output node remains terminal.
+pub fn add_curve_blast(value: &Value, display: &str, points: &[u32]) -> Option<(Value, String)> {
+    if points.is_empty() || !curve_stream(value, display) { return None; }
+    let mut ids = points.to_vec();
+    ids.sort_unstable();
+    ids.dedup();
+    let (mut next, id) = add(value, "blast", Some(display))?;
+    next["nodes"][&id]["params"] = json!({"domain": "points", "group": ids.iter().map(u32::to_string).collect::<Vec<_>>().join(",")});
+    validated(next.clone()).ok()?;
+    Some((next, id))
+}
+
+fn curve_stream(value: &Value, display: &str) -> bool {
+    let mut node = display;
+    let mut seen = HashSet::new();
+    while seen.insert(node.to_owned()) {
+        let current = &value["nodes"][node];
+        if matches!(current["type"].as_str(), Some("curve" | "bezier" | "helix" | "polypath" | "line" | "circle" | "convert_line")) {
+            return true;
+        }
+        let input = match current.get("inputs").and_then(|i| i.get("geo")) {
+            Some(Value::String(s)) => Some(s.as_str()),
+            Some(Value::Array(a)) => a.first().and_then(Value::as_str),
+            _ => None,
+        };
+        let Some(input) = input else { break; };
+        node = input;
+    }
+    false
+}
+
+/// Add a bezier sketch to an existing cooked node, or as a standalone bezier curve when there is no usable source.
+pub fn add_bezier_sketch(value: &Value, name: &str, points: &[[f32; 3]], closed: bool, selected: &str) -> Option<(Value, String)> {
+    if points.len() < 2 || points.iter().flatten().any(|x| !x.is_finite()) { return None; }
+    let after = nodes(value)?.get(selected).and_then(|node| node.get("type")?.as_str())
+        .filter(|ty| nodes::get(ty).is_some()).map(|_| selected);
+    let (mut value, id) = add(value, "bezier", after)?;
+    if let Some(after) = after { value = connect(&value, after, &id, Some("geo"))?; }
+    let controls = points.iter().map(|p| json!({"p": p, "left": p, "right": p, "mode": "AUTO"})).collect::<Vec<_>>();
+    let node = nodes_mut(&mut value)?.get_mut(&id)?;
+    node["params"] = json!({"controls": serde_json::to_string(&controls).unwrap_or_default(), "closed": closed});
+    node["name"] = json!(name);
+    Some((value, id))
+}
+
 pub fn delete(value: &Value, id: &str) -> Option<Value> {
     let mut value = value.clone();
     let all = nodes_mut(&mut value)?;
@@ -646,6 +691,45 @@ mod tests {
         assert!(v["nodes"][&id].get("inputs").is_none());
         validated(v).unwrap();
         assert!(add_sketch(&graph(), "Bad", &[[f32::NAN,0.,0.]; 2], false, "box1").is_none());
+    }
+    #[test] fn curve_blast_inserts_before_output_and_cleans_points() {
+        let base = json!({
+            "version": 1,
+            "display": "out",
+            "nodes": {
+                "c": {"type": "curve", "params": {"points": "0,0,0 1,0,0 2,0,0 3,0,0", "closed": false}},
+                "out": {"type": "output", "inputs": {"geo": "c"}}
+            }
+        });
+        let original = minihou_core::Graph::from_value(&base).unwrap().cook(None).unwrap();
+        assert_eq!(original.npoints, 4);
+
+        let (next, blast_id) = add_curve_blast(&base, "out", &[1, 2]).unwrap();
+        assert_eq!(next["nodes"]["out"]["inputs"]["geo"], blast_id.as_str());
+        assert_eq!(next["nodes"][&blast_id]["inputs"]["geo"], "c");
+        assert_eq!(next["nodes"][&blast_id]["params"]["domain"], "points");
+        assert_eq!(next["nodes"][&blast_id]["params"]["group"], "1,2");
+        assert_eq!(next["display"], "out");
+
+        let cooked = minihou_core::Graph::from_value(&next).unwrap().cook(None).unwrap();
+        assert_eq!(cooked.npoints, 2);
+
+        assert!(add_curve_blast(&base, "out", &[]).is_none());
+        let mesh_base = json!({"version": 1, "display": "out", "nodes": {"b": {"type": "box"}, "out": {"type": "output", "inputs": {"geo": "b"}}}});
+        assert!(add_curve_blast(&mesh_base, "out", &[0]).is_none());
+    }
+    #[test] fn bezier_sketch_creates_bezier_node_with_controls() {
+        let points = [[0., 0., 0.], [1., 1., 0.], [2., 0., 0.]];
+        let (v, id) = add_bezier_sketch(&graph(), "Bezier", &points, false, "box1").unwrap();
+        assert_eq!(v["nodes"][&id]["type"], "bezier");
+        assert_eq!(v["nodes"][&id]["inputs"]["geo"], "box1");
+        assert_eq!(v["nodes"][&id]["params"]["closed"], false);
+        let controls: Value = serde_json::from_str(v["nodes"][&id]["params"]["controls"].as_str().unwrap()).unwrap();
+        assert_eq!(controls.as_array().unwrap().len(), 3);
+        validated(v.clone()).unwrap();
+
+        let cooked = minihou_core::Graph::from_value(&v).unwrap().cook(None).unwrap();
+        assert!(cooked.npoints >= 3);
     }
     #[test] fn delete_cleans_wires_and_display() {
         let v = delete(&graph(), "box1").unwrap();

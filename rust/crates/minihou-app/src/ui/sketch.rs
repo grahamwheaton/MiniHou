@@ -3,22 +3,23 @@ use super::{transform_gizmo, Actions, UiAction, View};
 use eframe::egui::{self, pos2, vec2, Align2, FontId, Pos2, Rect, Stroke};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SketchMode { Line, Pen, Polygon, Rectangle, Circle, Tape }
+pub enum SketchMode { Line, Pen, Polygon, Rectangle, Circle, Tape, Bezier, Arc }
 impl SketchMode {
     /// The drawing modes of the old sketch panel, in its button order (Tape is the Measure tool).
     pub const DRAW: [Self; 5] = [Self::Line, Self::Pen, Self::Polygon, Self::Rectangle, Self::Circle];
     /// Command id that starts this mode (registered in `keymap.rs`, unbound by default like the old build).
-    pub fn command_id(self) -> &'static str { match self { Self::Line => "sketch_line", Self::Pen => "sketch_polyline", Self::Polygon => "sketch_polygon", Self::Rectangle => "sketch_rectangle", Self::Circle => "sketch_circle", Self::Tape => "sketch_measure" } }
-    pub fn name(self) -> &'static str { match self { Self::Line => "Line", Self::Pen => "Polyline", Self::Polygon => "Polygon", Self::Rectangle => "Rectangle", Self::Circle => "Circle", Self::Tape => "Measure" } }
+    pub fn command_id(self) -> &'static str { match self { Self::Line => "sketch_line", Self::Pen => "sketch_polyline", Self::Polygon => "sketch_polygon", Self::Rectangle => "sketch_rectangle", Self::Circle => "sketch_circle", Self::Tape => "sketch_measure", Self::Bezier => "sketch_bezier", Self::Arc => "sketch_arc" } }
+    pub fn name(self) -> &'static str { match self { Self::Line => "Line", Self::Pen => "Polyline", Self::Polygon => "Polygon", Self::Rectangle => "Rectangle", Self::Circle => "Circle", Self::Tape => "Measure", Self::Bezier => "Bezier", Self::Arc => "Arc" } }
     pub fn tool(self) -> super::Tool { match self {
         Self::Line => super::Tool::Line, Self::Pen => super::Tool::Polyline,
         Self::Polygon => super::Tool::Polygon, Self::Rectangle => super::Tool::Rectangle,
         Self::Circle => super::Tool::Circle, Self::Tape => super::Tool::Measure,
+        Self::Bezier | Self::Arc => super::Tool::Polyline,
     } }
     pub fn from_tool(tool: super::Tool) -> Option<Self> {
         Self::DRAW.into_iter().chain([Self::Tape]).find(|m| m.tool() == tool)
     }
-    fn short(self) -> &'static str { match self { Self::Line => "Line", Self::Pen => "Poly", Self::Polygon => "Polygon", Self::Rectangle => "Rect", Self::Circle => "Circle", Self::Tape => "Tape" } }
+    fn short(self) -> &'static str { match self { Self::Line => "Line", Self::Pen => "Poly", Self::Polygon => "Polygon", Self::Rectangle => "Rect", Self::Circle => "Circle", Self::Tape => "Tape", Self::Bezier => "Bezier", Self::Arc => "Arc" } }
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Plane { #[default] XY, XZ, YZ }
@@ -55,6 +56,24 @@ pub fn shape(mode: SketchMode, points: &[[f32; 3]], plane: Plane, segments: usiz
     match mode {
         SketchMode::Rectangle => { let x = mul(u, dot(d, u)); let y = mul(v, dot(d, v)); vec![a, add(a, x), add(add(a, x), y), add(a, y)] }
         SketchMode::Circle => { let r = length(d); (0..segments.clamp(3, 256)).map(|i| { let t = i as f32 * std::f32::consts::TAU / segments.clamp(3, 256) as f32; add(a, add(mul(u, r * t.cos()), mul(v, r * t.sin()))) }).collect() }
+        SketchMode::Arc => {
+            let mid = mul(add(a, *points.last().unwrap()), 0.5);
+            let chord = sub(*points.last().unwrap(), a);
+            let r = length(chord) * 0.5;
+            if r < 1e-7 { return points.to_vec(); }
+            let chord_dir = mul(chord, 1.0 / (r * 2.0));
+            let (_, _, n) = plane.basis();
+            let perp = [
+                n[1] * chord_dir[2] - n[2] * chord_dir[1],
+                n[2] * chord_dir[0] - n[0] * chord_dir[2],
+                n[0] * chord_dir[1] - n[1] * chord_dir[0],
+            ];
+            let n_segs = segments.clamp(4, 64);
+            (0..=n_segs).map(|i| {
+                let angle = std::f32::consts::PI * (1.0 - i as f32 / n_segs as f32);
+                add(mid, add(mul(chord_dir, -r * angle.cos()), mul(perp, r * angle.sin())))
+            }).collect()
+        }
         _ => points.to_vec(),
     }
 }
@@ -159,7 +178,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers } if safe.contains(pos) && !modifiers.alt => {
             if let Some(p) = s.hover { if s.points.last().is_none_or(|a| length(sub(*a, p)) > 1e-7) {
                 if mode == SketchMode::Polygon && s.points.len() >= 3 && length(sub(s.points[0], p)) < v.bounds.1 * 0.015 { finish(&mut s, out); }
-                else { if s.points.is_empty() { s.origin = p; } s.points.push(p); s.numeric.clear(); if matches!(mode, SketchMode::Line | SketchMode::Rectangle | SketchMode::Circle | SketchMode::Tape) && s.points.len() == 2 { finish(&mut s, out); } }
+                else { if s.points.is_empty() { s.origin = p; } s.points.push(p); s.numeric.clear(); if matches!(mode, SketchMode::Line | SketchMode::Rectangle | SketchMode::Circle | SketchMode::Tape | SketchMode::Arc) && s.points.len() == 2 { finish(&mut s, out); } }
             } } },
         _ => {}
     } }
@@ -258,6 +277,8 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
             (SketchMode::Polygon, vec![[0.;3], [2.,0.,0.], [2.,2.,0.]], 3, true),
             (SketchMode::Rectangle, vec![[0.;3], [2.,2.,0.]], 4, true),
             (SketchMode::Circle, vec![[0.;3], [2.,0.,0.]], 32, true),
+            (SketchMode::Arc, vec![[0.;3], [2.,0.,0.]], 33, false),
+            (SketchMode::Bezier, vec![[0.;3], [1.,1.,0.], [2.,0.,0.]], 3, false),
         ] {
             let mut state = State { mode: Some(mode), points: source, ..Default::default() };
             let mut out = Actions::default();

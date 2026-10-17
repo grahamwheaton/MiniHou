@@ -1272,7 +1272,12 @@ impl App {
         if confirm { self.finish_modal(modal); } else { self.modal=Some(modal); ctx.request_repaint(); }
     }
     fn sketch_commit(&mut self, name: &str, points: &[[f32; 3]], closed: bool) {
-        let Some((value, id)) = graph_edit::add_sketch(self.editor.doc.value(), name, points, closed, &self.selected) else {
+        let res = if name == "Bezier" {
+            graph_edit::add_bezier_sketch(self.editor.doc.value(), name, points, closed, &self.selected)
+        } else {
+            graph_edit::add_sketch(self.editor.doc.value(), name, points, closed, &self.selected)
+        };
+        let Some((value, id)) = res else {
             self.file_status = "Could not add sketch".into(); return;
         };
         if self.commit_document(value, "add sketch") { self.selected = id.clone(); self.selected_set = std::collections::BTreeSet::from([id.clone()]); self.display = id; }
@@ -1711,7 +1716,18 @@ impl App {
             "delete_selection" => {
                 if self.remove_selected_wires(ctx, false) { return; }
                 if self.viewport_hover && self.editor_state.selection != ui::SelectionMode::Object {
-                    self.file_status = "Component deletion is not supported by the Rust graph yet".into();
+                    if self.editor_state.selection == ui::SelectionMode::Points {
+                        let points = self.selected_points();
+                        if let Some((next, id)) = graph_edit::add_curve_blast(self.editor.doc.value(), &self.display, &points) {
+                            if self.commit_document(next, "delete curve points") {
+                                self.selected = id.clone();
+                                self.selected_set = std::collections::BTreeSet::from([id.clone()]);
+                                self.display = minihou_app::display_nodes(self.editor.doc.value()).first().cloned().unwrap_or(id);
+                                self.selection.clear();
+                                self.selection_dirty = true;
+                            }
+                        } else { self.file_status = "Select points on a displayed curve to delete".into(); }
+                    } else { self.file_status = "Curve component deletion supports points only".into(); }
                 } else if let Some(id) = self.selected_set.iter().next().cloned() { self.delete_node(&id); }
             }
             "duplicate_selection" => { if let Some(id) = self.selected_set.iter().next().cloned() { self.duplicate_node(&id); } }
