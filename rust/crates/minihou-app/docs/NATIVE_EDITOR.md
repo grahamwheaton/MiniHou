@@ -173,6 +173,10 @@ Alt+M (or the shelf's Mirror button) starts the Mirror tool (Houdini's Mirror to
 
 ## Known limitations
 
+Sketch & Measure uses displayed vertices, edge midpoints, edges and faces as pointer targets within 12 pixels, with endpoint priority. A coloured marker and label identify the target. Red, green and blue axis guides appear near the previous point; hovered edges also provide parallel and perpendicular directions. X/Y/Z and the right/left/up arrows lock an axis, down releases it, and Shift locks the current axis inference. Line stays active for successive points; clicking its first point closes a coplanar face, while an open coplanar stroke through an existing polygon splits that polygon. Enter commits the open chain.
+
+Measure stores annotations in the graph document. Vertex picks store the node identity and point index, so a label follows a moved point while its topology remains valid. An unavailable anchor turns the label grey and keeps its last session position. Click a label to select it, then press Delete; right-click a label for Delete Measurement or Clear all, or choose Clear all under the Edit menu or use Clear Measurements near the bottom left of the viewport. These document edits use normal Undo. Edge and face measurement picks currently remain fixed points.
+
 Hold RMB over the viewport canvas to fly: drag to look, W/A/S/D to move along the view, E/Q or Space/Ctrl to move along world Z, Shift to move faster, and wheel to change speed. Flight starts only after a drag or movement key, leaving plain RMB clicks available to cancel operators. Ctrl+RMB remains lasso selection. Disable **Fly navigation (RMB + WASD)** in Viewport preferences if desired.
 
 Selection shortcuts finish a running transform before selecting. A confirming LMB click also selects a different object under the pointer; clicking the current selection or empty space only confirms. Select-tool region drags and Ctrl+RMB lasso can take ownership from handle drags. Choosing Select releases sketch and handle input state.

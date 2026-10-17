@@ -137,22 +137,68 @@ fn measurement_endpoint(row: &Value, slot: usize, doc: &Value, display: &str, po
     }
     Some((fallback,true))
 }
-fn measurements(ui: &egui::Ui, rect: Rect, v: &View) {
-    let Some(rows) = v.doc.get("measurements").and_then(|x| x.as_array()) else { return; };
+fn selected_id() -> egui::Id { egui::Id::new("sketch_selected_measurement") }
+pub fn selected_measurement(ctx:&egui::Context) -> Option<usize> { ctx.data(|d|d.get_temp(selected_id())) }
+pub fn clear_measurement_selection(ctx:&egui::Context) {ctx.data_mut(|d|d.remove::<usize>(selected_id()));}
+fn measurements(ui: &mut egui::Ui, rect: Rect, v: &View, out:&mut Actions) -> bool {
+    let Some(rows) = v.doc.get("measurements").and_then(|x| x.as_array()) else { return false; };
+    if let Some(index) = selected_measurement(ui.ctx()) {
+        if index >= rows.len() { clear_measurement_selection(ui.ctx()); }
+    }
     let p = ui.painter_at(rect);
-    for row in rows {
+    let mut consumed=false;
+    if !rows.is_empty() {
+        let button=Rect::from_min_size(pos2(rect.left()+57.,rect.bottom()-88.),vec2(112.,24.));
+        let response=ui.interact(button,egui::Id::new("sketch_clear_measurements"),egui::Sense::click());
+        p.rect_filled(button,3.,v.theme.panel);
+        p.text(button.center(),Align2::CENTER_CENTER,"Clear Measurements",FontId::monospace(10.),v.theme.text);
+        if response.clicked() {out.push(UiAction::ClearMeasurements);consumed=true;}
+        response.context_menu(|ui| {
+            if ui.button("Clear all").clicked() {
+                out.push(UiAction::ClearMeasurements);
+                ui.close();
+            }
+        });
+    }
+    for (index,row) in rows.iter().enumerate() {
         let positions=v.cooking.geometry.as_ref().map(|g|g.p());
-        let (Some((a,stale_a)), Some((b,stale_b))) = (measurement_endpoint(row,0,v.doc,v.display,positions),measurement_endpoint(row,1,v.doc,v.display,positions)) else { continue; };
+        let (Some((mut a,stale_a)), Some((mut b,stale_b))) = (measurement_endpoint(row,0,v.doc,v.display,positions),measurement_endpoint(row,1,v.doc,v.display,positions)) else { continue; };
+        let cache_id=egui::Id::new(("measurement_last",row.get("id").and_then(Value::as_str).unwrap_or("legacy"),index));
+        let mut last=ui.ctx().data(|d|d.get_temp::<[[f32;3];2]>(cache_id)).unwrap_or([a,b]);
+        if stale_a {a=last[0];} else {last[0]=a;}
+        if stale_b {b=last[1];} else {last[1]=b;}
+        ui.ctx().data_mut(|d|d.insert_temp(cache_id,last));
         let (Some(pa), Some(pb)) = (transform_gizmo::project(v.camera, rect, a), transform_gizmo::project(v.camera, rect, b)) else { continue; };
         let color=if stale_a||stale_b {v.theme.dim} else {v.theme.tpl};
         p.line_segment([pa, pb], Stroke::new(1.5_f32, color));
-        p.text(pa.lerp(pb, 0.5) + vec2(8., -8.), Align2::LEFT_BOTTOM, format!("{}{}",crate::units::format(length(sub(b, a)) as f64, v.units),if stale_a||stale_b {" [detached]"} else {""}), FontId::monospace(12.), color);
+        let label=pa.lerp(pb,0.5)+vec2(8.,-8.);
+        p.text(label, Align2::LEFT_BOTTOM, format!("{}{}",crate::units::format(length(sub(b, a)) as f64, v.units),if stale_a||stale_b {" [detached]"} else {""}), FontId::monospace(12.), color);
+        let target=Rect::from_min_size(label+vec2(-4.,-20.),vec2(160.,24.));
+        let response=ui.interact(target,egui::Id::new(("measurement",index)),egui::Sense::click());
+        if response.clicked() {ui.ctx().data_mut(|d|d.insert_temp(selected_id(),index));consumed=true;}
+        response.context_menu(|ui| {
+            if ui.button("Delete Measurement").clicked() {
+                out.push(UiAction::DeleteMeasurement(index));ui.close();
+            }
+            if ui.button("Clear all").clicked() {
+                out.push(UiAction::ClearMeasurements);ui.close();
+            }
+        });
+        if selected_measurement(ui.ctx())==Some(index) {p.rect_stroke(target,2.,Stroke::new(1_f32,v.theme.accent),egui::StrokeKind::Inside);}
     }
+    consumed
 }
 pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
     mesh: Option<(&[f32], &[u32])>) {
-    measurements(ui, rect, v);
-    let ctx = ui.ctx().clone(); let mut s: State = ctx.data_mut(|d| d.get_temp(id())).unwrap_or_default();
+    let measurement_click=measurements(ui, rect, v, out);
+    let ctx = ui.ctx().clone();
+    if let Some(index) = selected_measurement(&ctx) {
+        if ctx.input(|i| i.key_pressed(egui::Key::Delete)) {
+            out.push(UiAction::DeleteMeasurement(index));
+            clear_measurement_selection(&ctx);
+        }
+    }
+    let mut s: State = ctx.data_mut(|d| d.get_temp(id())).unwrap_or_default();
     let tool_mode = SketchMode::from_tool(v.editor.tool);
     if s.mode != tool_mode { s = State { mode: tool_mode, plane: s.plane, ..Default::default() }; }
     let Some(mode) = s.mode else { return; };
@@ -193,9 +239,13 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
     } else { s.hover = None; s.inference = None; }
     let events = ctx.input(|i| i.events.clone());
     for event in events { match event {
+        egui::Event::Key {key:egui::Key::Delete,pressed:true,..} if selected_measurement(&ctx).is_some() => {
+            out.push(UiAction::DeleteMeasurement(selected_measurement(&ctx).unwrap()));
+            clear_measurement_selection(&ctx);
+        },
         egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } |
         egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: true, .. } => {
-            s = State { plane: s.plane, ..Default::default() }; out.push(UiAction::Editor(super::EditorChange::Tool(super::Tool::Select))); break;
+            clear_measurement_selection(&ctx); s = State { plane: s.plane, ..Default::default() }; out.push(UiAction::Editor(super::EditorChange::Tool(super::Tool::Select))); break;
         },
         egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } => { if !s.numeric.is_empty() { if let Some(p) = s.hover { s.points.push(p); s.refs.push(None); } s.numeric.clear(); } finish(&mut s, out); },
         egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => { if s.numeric.is_empty() { s.points.pop(); s.refs.pop(); } else { s.numeric.pop(); } },
@@ -205,7 +255,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
         egui::Event::Key { key: egui::Key::ArrowDown, pressed: true, .. } => { s.axis = None; },
         egui::Event::Key { key, pressed: true, .. } if matches!(key, egui::Key::X | egui::Key::Y | egui::Key::Z) => { let axis = match key { egui::Key::X => 0, egui::Key::Y => 1, _ => 2 }; s.axis = if s.axis == Some(axis) { None } else { Some(axis) }; },
         egui::Event::Text(t) if t.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-' || matches!(c, 'm'|'c'|'k'|'i'|'n'|'f'|'t'|'M'|'C'|'K'|'I'|'N'|'F'|'T'|' ')) => s.numeric.push_str(&t),
-        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers } if safe.contains(pos) && !modifiers.alt => {
+        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers } if safe.contains(pos) && !modifiers.alt && !measurement_click => {
             if let Some(p) = s.hover { if s.points.last().is_none_or(|a| length(sub(*a, p)) > 1e-7) {
                 if matches!(mode,SketchMode::Line|SketchMode::Pen|SketchMode::Polygon) && s.points.len() >= 3 && length(sub(s.points[0], p)) < v.bounds.1 * 0.015 {
                     s.closed = true; finish(&mut s, out);
@@ -232,7 +282,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
             p.circle_filled(screen, 5., color);
             p.text(screen+vec2(10.,-12.),Align2::LEFT_BOTTOM,hit.kind.label(),FontId::monospace(12.),color);
             if let Some(anchor) = s.points.last().and_then(|q|transform_gizmo::project(v.camera,rect,*q)) {
-                if matches!(hit.kind,Kind::Axis(_)) { p.line_segment([anchor,screen],Stroke::new(1.,color)); }
+                if matches!(hit.kind,Kind::Axis(_)) { p.line_segment([anchor,screen],Stroke::new(1_f32,color)); }
             }
         }
     }
@@ -420,5 +470,105 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
         let row=json!({"points":[[1.,2.,3.],[0.,0.,0.]],"refs":[{"node":"box1","identity":"stable","point":1,"point_count":2},null]});
         assert_eq!(measurement_endpoint(&row,0,&doc,"box1",Some(&[0.,0.,0.,4.,5.,6.])),Some(([4.,5.,6.],false)));
         assert_eq!(measurement_endpoint(&row,0,&doc,"box1",Some(&[0.,0.,0.])),Some(([1.,2.,3.],true)));
+    }
+    #[test] fn measurement_selection_and_delete_key_remove_measurement() {
+        let mut f = crate::ui::testing::Fixture::new();
+        f.camera.projection = [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]];
+        let mut doc = f.doc.value().clone();
+        doc["measurements"] = serde_json::json!([
+            { "a": [0.0, 0.0, 0.0], "b": [1.0, 0.0, 0.0] }
+        ]);
+        f.doc = minihou_app::Document::parse(doc.to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        let ctx = egui::Context::default();
+        f.theme.apply(&ctx);
+        let viewport = Rect::from_min_size(Pos2::ZERO, vec2(1280., 800.));
+        let v = f.view();
+        let frame = |events: Vec<egui::Event>| {
+            let mut out = Actions::default();
+            let _ = ctx.run(egui::RawInput { screen_rect: Some(viewport), events, ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    show(ui, viewport, &v, &mut out, None);
+                });
+            });
+            out
+        };
+        let click = |p: Pos2| {
+            frame(vec![egui::Event::PointerMoved(p), egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+            frame(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }])
+        };
+
+        frame(vec![]);
+        assert_eq!(selected_measurement(&ctx), None);
+
+        // Click the measurement label target: (a+b)/2 = (840, 400), label is at (848, 392), target is (844..1004, 372..396).
+        click(pos2(924., 384.));
+        assert_eq!(selected_measurement(&ctx), Some(0));
+
+        // Pressing Delete key removes the selected measurement
+        let out = frame(vec![egui::Event::Key {
+            key: egui::Key::Delete,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }]);
+        assert!(matches!(out.0.as_slice(), [UiAction::DeleteMeasurement(0)]));
+        assert_eq!(selected_measurement(&ctx), None);
+    }
+    #[test] fn measurement_clear_button_emits_clear_action() {
+        let mut f = crate::ui::testing::Fixture::new();
+        f.camera.projection = [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]];
+        let mut doc = f.doc.value().clone();
+        doc["measurements"] = serde_json::json!([
+            { "a": [0.0, 0.0, 0.0], "b": [1.0, 0.0, 0.0] }
+        ]);
+        f.doc = minihou_app::Document::parse(doc.to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        let ctx = egui::Context::default();
+        f.theme.apply(&ctx);
+        let viewport = Rect::from_min_size(Pos2::ZERO, vec2(1280., 800.));
+        let v = f.view();
+        let frame = |events: Vec<egui::Event>| {
+            let mut out = Actions::default();
+            let _ = ctx.run(egui::RawInput { screen_rect: Some(viewport), events, ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    show(ui, viewport, &v, &mut out, None);
+                });
+            });
+            out
+        };
+        let click = |p: Pos2| {
+            frame(vec![egui::Event::PointerMoved(p), egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+            frame(vec![egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }])
+        };
+
+        frame(vec![]);
+        // Clear button center is (113, 724)
+        let out = click(pos2(113., 724.));
+        assert!(matches!(out.0.as_slice(), [UiAction::ClearMeasurements]));
+    }
+    #[test] fn measurement_stale_selection_is_cleared() {
+        let mut f = crate::ui::testing::Fixture::new();
+        let mut doc = f.doc.value().clone();
+        doc["measurements"] = serde_json::json!([
+            { "a": [0.0, 0.0, 0.0], "b": [1.0, 0.0, 0.0] }
+        ]);
+        f.doc = minihou_app::Document::parse(doc.to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        let ctx = egui::Context::default();
+        f.theme.apply(&ctx);
+        // Simulate selection pointing to out-of-bounds index 5
+        ctx.data_mut(|d| d.insert_temp(selected_id(), 5usize));
+        assert_eq!(selected_measurement(&ctx), Some(5));
+
+        let mut out = Actions::default();
+        let v = f.view();
+        let _ = ctx.run(egui::RawInput { screen_rect: Some(Rect::from_min_size(pos2(0., 0.), vec2(1280., 800.))), ..Default::default() }, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                show(ui, ui.max_rect(), &v, &mut out, None);
+            });
+        });
+        assert_eq!(selected_measurement(&ctx), None);
     }
 }

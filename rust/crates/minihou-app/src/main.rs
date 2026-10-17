@@ -1466,6 +1466,16 @@ impl App {
         }
         self.commit_document(value, "add measurement");
     }
+    fn delete_measurement(&mut self,index:usize) {
+        if let Some(value)=graph_edit::delete_measurement(self.editor.doc.value(),index) {
+            self.commit_document(value,"delete measurement");
+        }
+    }
+    fn clear_measurements(&mut self) {
+        if let Some(value)=graph_edit::clear_measurements(self.editor.doc.value()) {
+            self.commit_document(value,"clear measurements");
+        }
+    }
     /// Make `value` the document as one undo step and send it to the cook worker; false (with a status message) when it is invalid.
     fn commit_document(&mut self, value: serde_json::Value, what: &str) -> bool {
         match graph_edit::validated(value) {
@@ -1892,6 +1902,11 @@ impl App {
             "template_flag" => { for id in &self.selected_set { let f = self.flags.entry(id.clone()).or_default(); f.template = !f.template; } }
             "selectable_template_flag" => self.file_status = "Selectable template flags are not supported yet".into(),
             "delete_selection" => {
+                if let Some(index)=ui::sketch::selected_measurement(ctx) {
+                    self.delete_measurement(index);
+                    ui::sketch::clear_measurement_selection(ctx);
+                    return;
+                }
                 if self.remove_selected_wires(ctx, false) { return; }
                 if self.viewport_hover && self.editor_state.selection != ui::SelectionMode::Object {
                     self.file_status = "Component deletion is not supported by the Rust graph yet".into();
@@ -1989,6 +2004,8 @@ impl App {
                 }
                 UiAction::SketchCommit { name, points, closed } => self.sketch_commit(&name, &points, closed),
                 UiAction::AddMeasurement { a, b, refs } => self.add_measurement(a, b, refs),
+                UiAction::DeleteMeasurement(index) => {self.delete_measurement(index);ui::sketch::clear_measurement_selection(ctx);},
+                UiAction::ClearMeasurements => {self.clear_measurements();ui::sketch::clear_measurement_selection(ctx);},
                 UiAction::RegionSelect { shape, op } => self.region_select(shape, op),
                 UiAction::RestoreRegionSelection(snapshot) => {
                     self.selection = snapshot.selection; self.selected = snapshot.selected;
