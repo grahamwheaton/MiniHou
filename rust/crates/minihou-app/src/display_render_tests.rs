@@ -247,3 +247,44 @@ fn asymmetric_texture_rows_render_top_to_bottom_headless() {
         let p=pixels[y*128+x];assert!(p[channel]>p[(channel+1)%3]+40 && p[channel]>p[(channel+2)%3]+40,"{x},{y}: {p:?}");
     }
 }
+
+#[test]
+fn mhl1_image_asset_and_seam_geometry_render_together_headless() {
+    let Some((device,queue))=adapter() else {eprintln!("No adapter: skipping linked texture render test");return;};
+    use minihou_app::{image_assets::Service,link_protocol::{self,Array,Arrays},materials::Registry};
+    use sha2::{Digest,Sha256};
+    use std::sync::Arc;
+    let cam=Camera::frame([0.;3],2.5);let (_,view)=cam.matrices(1.);
+    let right=[view[0][0],view[1][0],view[2][0]];let up=[view[0][1],view[1][1],view[2][1]];
+    let mut p=Vec::new();for (x,y) in [(-1.,-1.),(1.,-1.),(1.,1.),(-1.,1.)] {p.extend((0..3).map(|i|right[i]*x+up[i]*y));}
+    let f32bytes=|v:Vec<f32>|v.iter().flat_map(|x|x.to_le_bytes()).collect::<Vec<_>>();
+    let i32bytes=|v:Vec<i32>|v.iter().flat_map(|x|x.to_le_bytes()).collect::<Vec<_>>();
+    let mut arrays=Arrays::new();
+    for (key,dtype,shape,bytes) in [
+        ("point/P","<f4",vec![4,3],f32bytes(p)),
+        ("topo/vertex_point","<i4",vec![4],i32bytes(vec![0,1,2,3])),
+        ("topo/prim_offsets","<i4",vec![2],i32bytes(vec![0,4])),
+        ("vertex/uv","<f4",vec![4,2],f32bytes(vec![0.,1.,1.,1.,1.,0.,0.,0.])),
+        ("prim/material_index","<i4",vec![1],i32bytes(vec![0])),
+    ] {arrays.insert(key.into(),Array {dtype:dtype.into(),shape,bytes:Arc::new(bytes)});}
+    let header=serde_json::json!({"type":"object_geo","object":"Seam","materials":["Paint"],
+        "manifest_revision":1,"material_bindings":{"version":1,"slots":["peer1:Paint"]}});
+    let frame=link_protocol::encode_message(&header,&arrays).unwrap();
+    let (header,arrays)=link_protocol::read_message(&mut std::io::Cursor::new(frame),2*1024*1024).unwrap();
+    let geometry=link_protocol::decode_object(&header,&arrays).unwrap();
+    let scene=Scene::new(&geometry);
+    let mut png=Vec::new();
+    let image=image::RgbaImage::from_raw(2,2,vec![255,0,0,255,0,255,0,255,0,0,255,255,255,255,0,255]).unwrap();
+    image::DynamicImage::ImageRgba8(image).write_to(&mut std::io::Cursor::new(&mut png),image::ImageFormat::Png).unwrap();
+    let hash=format!("sha256:{:x}",Sha256::digest(&png));
+    let mut service=Service::default();service.manifest("peer1:object:Seam",1,serde_json::json!({
+        "descriptors":{"peer1:Paint":{"version":1,"textures":{"base_color":{"image_id":hash,"color_space":"linear",
+        "sampler":{"min":"nearest","mag":"nearest","wrap_u":"clamp","wrap_v":"clamp"}}}}}}));
+    service.begin("x",&hash,png.len()).unwrap();service.chunk("x",0,&png).unwrap();service.end("x").unwrap();
+    let mut registry=Registry::new(".");service.bind("peer1:object:Seam",&mut registry).unwrap();
+    let mut gpu=Gpu::new(&device,&scene);gpu.upload_textures(&device,&queue,&scene,&mut registry);
+    let pixels=render(&device,&queue,&gpu,Mode::SmoothShaded,Overlay {textures:true,geometry:crate::ui::Overlays {points:false,lines:false,wireframe:false,..Default::default()},..Default::default()},false);
+    for (x,y,channel) in [(48,48,0),(80,48,1),(48,80,2)] {
+        let p=pixels[y*128+x];assert!(p[channel]>p[(channel+1)%3]+40 && p[channel]>p[(channel+2)%3]+40,"{x},{y}: {p:?}");
+    }
+}

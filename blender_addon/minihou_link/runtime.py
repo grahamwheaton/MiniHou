@@ -90,6 +90,7 @@ class Runtime:
         self._texture_payloads = {}
         self._texture_scope_images = {}
         self._texture_pending = []
+        self._texture_attempts = {}
         self._texture_revision = {}
         self._texture_digest = {}
         self._texture_last_poll = 0.0
@@ -227,6 +228,7 @@ class Runtime:
             self._texture_revision.clear()
             self._texture_digest.clear()
             self._texture_pending.clear()
+            self._texture_attempts.clear()
             self._texture_scope_images.clear()
             self._texture_payloads.clear()
             self.last_error = ""
@@ -265,7 +267,15 @@ class Runtime:
                     self._texture_pending.append((hash_id, payload, 0, False))
         elif t == "image_error":
             self.last_error = "texture transfer: " + str(e.get("message", "unknown error"))
+            hash_id = e.get("transfer_id", "")
+            count = self._texture_attempts.get(hash_id, 0) + 1
+            self._texture_attempts[hash_id] = count
+            self._texture_pending = [item for item in self._texture_pending if item[0] != hash_id]
+            if count < 3 and hash_id in self._texture_payloads:
+                self._texture_pending.append((hash_id, self._texture_payloads[hash_id], 0, False))
             self._ui_dirty = True
+        elif t == "image_ack":
+            self._texture_attempts.pop(e.get("transfer_id", ""), None)
 
     def _apply_interface(self, iface: dict) -> None:
         params = iface["params"]

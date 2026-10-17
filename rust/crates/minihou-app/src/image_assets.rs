@@ -94,5 +94,10 @@ impl Service {
         assert!(!s.manifest("object:C",1,serde_json::json!({"descriptors":{}})));
         s.begin("b",&hash,6).unwrap();s.chunk("b",0,b"xxxxxx").unwrap();assert!(s.end("b").is_err());
         s.begin("c",&hash,6).unwrap();s.chunk("c",0,b"ab").unwrap();assert!(s.end("c").is_err());
+        assert!(s.begin("too-big",&hash,MAX_DECODED+1).is_err());
+        s.begin("range",&hash,6).unwrap();
+        assert!(s.chunk("range",usize::MAX,b"x").is_err());
+        assert!(s.chunk("range",5,b"xx").is_err());
+        assert!(s.chunk("range",0,&vec![0;CHUNK+1]).is_err());
     }
 }

@@ -1100,6 +1100,12 @@ fn serve_client(
                         let revision=h["revision"].as_u64().unwrap_or(0);
                         let hashes:Vec<String>=h["images"].as_array().into_iter().flatten().filter_map(|v|v.as_str().map(str::to_owned)).collect();
                         if !scope.is_empty() && revision>0 {
+                            if h.to_string().len()>1024*1024 || h["descriptors"].as_object().is_none_or(|v|v.len()>4096)
+                                || h["bindings"].as_array().is_none_or(|v|v.len()>4096)
+                                || hashes.len()>4096 {
+                                send_frame(&mut socket,&json!({"type":"error","where":"material_manifest","message":"invalid or oversized material manifest"}),&Arrays::new())?;
+                                continue;
+                            }
                             let mut service=state.image_assets.lock().unwrap();
                             let mut manifest=h.clone();
                             if let Some(desc)=manifest["descriptors"].as_object_mut() {
@@ -1109,6 +1115,7 @@ fn serve_client(
                             if let Some(bindings)=manifest["bindings"].as_array_mut() {for binding in bindings {if let Some(key)=binding.as_str(){*binding=json!(format!("peer{id}:{key}"));}}}
                             if service.manifest(&scoped,revision,manifest) {
                                 let missing=service.missing(&hashes);
+                                drop(service);
                                 state.asset_updates.lock().unwrap().push(scoped);
                                 send_frame(&mut socket,&json!({"type":"image_request","scope":scope,"revision":revision,"hashes":missing}),&Arrays::new())?;
                             }
@@ -1124,9 +1131,11 @@ fn serve_client(
                             "image_end"=>service.end(&scoped_id).map(Some),
                             _=>{service.cancel(&scoped_id);Ok(None)},
                         };
+                        let affected=if result.as_ref().is_ok_and(Option::is_some) {service.manifests.keys().cloned().collect::<Vec<_>>()} else {Vec::new()};
+                        drop(service);
                         match result {
                             Ok(Some(hash))=>{
-                                for scope in service.manifests.keys() {state.asset_updates.lock().unwrap().push(scope.clone());}
+                                state.asset_updates.lock().unwrap().extend(affected);
                                 send_frame(&mut socket,&json!({"type":"image_ack","transfer_id":id,"hash":hash}),&Arrays::new())?;
                             },
                             Ok(None)=>{},
@@ -1155,10 +1164,11 @@ fn serve_client(
                             let scope=format!("peer{id}:instance:{}",h["instance_id"].as_str().unwrap_or(""));
                             let service=state.image_assets.lock().unwrap();
                             if service.revisions.get(&scope).copied()!=h["manifest_revision"].as_u64() {
+                                drop(service);
                                 send_frame(&mut socket,&json!({"type":"instance_error","request_id":h["request_id"],"instance_id":h["instance_id"],"message":"geometry manifest revision is unavailable"}),&Arrays::new())?;
                                 continue;
                             }
-                            if let Some(bindings)=service.manifests.get(&scope).and_then(|v|v.get("bindings")) {
+                            if let Some(bindings)=service.manifests.get(&scope).and_then(|v|v.get("bindings")).filter(|b|b.as_array().is_some_and(|a|!a.is_empty())) {
                                 h["material_bindings"]=json!({"version":1,"slots":bindings});
                             }
                         }
@@ -1179,10 +1189,11 @@ fn serve_client(
                             let scope=format!("peer{id}:object:{}",h["object"].as_str().unwrap_or(""));
                             let service=state.image_assets.lock().unwrap();
                             if service.revisions.get(&scope).copied()!=h["manifest_revision"].as_u64() {
+                                drop(service);
                                 send_frame(&mut socket,&json!({"type":"error","where":"material_manifest","message":"geometry manifest revision is unavailable"}),&Arrays::new())?;
                                 continue;
                             }
-                            if let Some(bindings)=service.manifests.get(&scope).and_then(|v|v.get("bindings")) {
+                            if let Some(bindings)=service.manifests.get(&scope).and_then(|v|v.get("bindings")).filter(|b|b.as_array().is_some_and(|a|!a.is_empty())) {
                                 h["material_bindings"]=json!({"version":1,"slots":bindings});
                             }
                         }
