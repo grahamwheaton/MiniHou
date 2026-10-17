@@ -9,8 +9,8 @@ pub const RBD_MATERIAL_FRACTURE: NodeSpec = NodeSpec {
         "material":"concrete"; "density":1000.; "friction":0.6; "restitution":0.1; "glue_strength":1.0e7;
         "pieces":24; "fracture_level":1; "sub_pieces":4; "seed":0; "surface_fraction":0.15; "relax":2;
         "gap":0.; "convex_parts":false; "max_concavity":0.05;
-        "interior_detail":false,unsupported; "detail_divisions":4,unsupported;
-        "detail_amplitude":0.02,unsupported; "detail_frequency":4.,unsupported;
+        "interior_detail":false; "detail_divisions":4;
+        "detail_amplitude":0.02; "detail_frequency":4.;
         "glue":true; "clusters":0; "strength_scale":1.; "mass_scale":1.; "output":"pieces";
         "outgrp_inside":true; "outgrp_inside_name":"inside"; "outgrp_outside":false; "outgrp_outside_name":"outside";
         "outgrp_cutpoints":false; "outgrp_cutpoints_name":"cutpoints";
@@ -131,6 +131,9 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         }
         if !parts.is_empty() {out=invoke(&super::merge::MERGE,&[parts],serde_json::json!({}))?;}
     }
+    if p.b("interior_detail")? {
+        out=super::rbd_interior_detail::apply(out,p)?;
+    }
     let ids=piece_ids(&out)?;
     let body=out.prim.get("cluster").and_then(|a|a.as_i32()).map(|v|v.to_vec()).unwrap_or_else(||ids.clone());
     let body_mass:Vec<f64>=ids.iter().map(|&id| {
@@ -177,6 +180,117 @@ mod tests {
         assert!((masses[0]-expected["mass"][0].as_f64().unwrap() as f32).abs()<0.1,"{masses:?}");
         assert!((masses[6]-expected["mass"][1].as_f64().unwrap() as f32).abs()<0.1,"{masses:?}");
         assert!(out.prim.contains_key("group_inside"));
+    }
+    #[test]
+    fn interior_box_and_material_oracle() {
+        let bp=Params::resolve(super::super::generate::BOX.params,None).unwrap();
+        let mut g=(super::super::generate::BOX.cook)(&[vec![]],&bp).unwrap();
+        g.detail.insert("materials".into(),serde_json::json!(["a","b"]));
+        g.detail.insert("material_bindings".into(),serde_json::json!({"version":1,"slots":["a","b"]}));
+        g.prim.insert("material_index".into(),Arc::new(Attr::i32(1,vec![0,1,0,1,0,1])));
+        g.vertex.insert("uv".into(),Arc::new(Attr::f32(2,(0..g.nvertices()).flat_map(|v|[(v%4) as f32/3.,(v%4) as f32/3.]).collect())));
+        let p=Params::resolve(RBD_MATERIAL_FRACTURE.params,serde_json::json!({
+            "pieces":2,"seed":2,"surface_fraction":0,"relax":0,"glue":false,
+            "interior_detail":true,"detail_divisions":2,"detail_amplitude":0,
+            "outgrp_cutpoints":true,"outgrp_cutedges":true}).as_object()).unwrap();
+        let out=cook(&[vec![Arc::new(g)]],&p).unwrap();
+        let oracle:serde_json::Value=serde_json::from_str(include_str!("test_data/last_nodes_parity.json")).unwrap();
+        let expected=&oracle["material_interior"]["two_materials"];
+        assert_eq!(out.npoints,expected["points"].as_u64().unwrap() as usize);
+        assert_eq!(out.nprims(),expected["prims"].as_u64().unwrap() as usize);
+        assert_eq!(out.prim["group_inside"].as_i32().unwrap().iter().sum::<i32>(),expected["inside"].as_i64().unwrap() as i32);
+        assert_eq!(out.point["group_cutpoints"].as_i32().unwrap().iter().sum::<i32>(),expected["cutpoints"].as_i64().unwrap() as i32);
+        let uv=out.vertex["uv"].as_f32().unwrap();
+        let finite=uv.chunks_exact(2).filter(|v|v.iter().all(|x|x.is_finite())).count();
+        assert_eq!(finite,expected["uv_finite_corners"].as_u64().unwrap() as usize);
+        out.validate().unwrap();
+    }
+    #[test]
+    fn sphere_interior_oracle() {
+        let sp=Params::resolve(super::super::generate::SPHERE.params,
+            serde_json::json!({"rows":8,"columns":12}).as_object()).unwrap();
+        let g=(super::super::generate::SPHERE.cook)(&[vec![]],&sp).unwrap();
+        let p=Params::resolve(RBD_MATERIAL_FRACTURE.params,serde_json::json!({
+            "pieces":2,"seed":2,"surface_fraction":0,"relax":0,"glue":false,
+            "interior_detail":true,"detail_divisions":2,"detail_amplitude":0,
+            "outgrp_cutpoints":true,"outgrp_cutedges":true}).as_object()).unwrap();
+        let out=cook(&[vec![Arc::new(g)]],&p).unwrap();
+        let oracle:serde_json::Value=serde_json::from_str(include_str!("test_data/last_nodes_parity.json")).unwrap();
+        let expected=&oracle["material_interior"]["sphere"];
+        assert_eq!(out.npoints,expected["points"].as_u64().unwrap() as usize);
+        assert_eq!(out.nprims(),expected["prims"].as_u64().unwrap() as usize);
+        assert_eq!(out.prim["group_inside"].as_i32().unwrap().iter().sum::<i32>(),expected["inside"].as_i64().unwrap() as i32);
+        assert_eq!(out.point["group_cutpoints"].as_i32().unwrap().iter().sum::<i32>(),expected["cutpoints"].as_i64().unwrap() as i32);
+    }
+    #[test]
+    fn concave_interior_and_compound_are_valid() {
+        let xy=[[0.,0.],[2.,0.],[2.,1.],[1.,1.],[1.,2.],[0.,2.]];
+        let pts:Vec<f32>=[0.,1.].into_iter().flat_map(|z|xy.into_iter().flat_map(move |q|[q[0],q[1],z])).collect();
+        let mut faces=vec![(0..6).rev().collect::<Vec<i32>>(),(6..12).collect()];
+        for i in 0..6 {faces.push(vec![i,(i+1)%6,(i+1)%6+6,i+6]);}
+        let mut vp=Vec::new();let mut offsets=vec![0];for face in faces {vp.extend(face);offsets.push(vp.len() as i32);}
+        let g=Geometry::from_arrays(pts,vp,offsets,None).unwrap();
+        for compound in [false,true] {
+            let p=Params::resolve(RBD_MATERIAL_FRACTURE.params,serde_json::json!({
+                "pieces":2,"seed":2,"surface_fraction":0,"relax":0,"glue":false,
+                "convex_parts":compound,"max_concavity":0.,"interior_detail":true,
+                "detail_divisions":2,"detail_amplitude":0.,"outgrp_cutpoints":true,
+                "outgrp_cutedges":true}).as_object()).unwrap();
+            let out=cook(&[vec![Arc::new(g.clone())]],&p).unwrap();
+            out.validate().unwrap();
+            assert!(out.npoints>g.npoints && out.nprims()>g.nprims());
+            if !compound {
+                let oracle:serde_json::Value=serde_json::from_str(include_str!("test_data/last_nodes_parity.json")).unwrap();
+                let expected=&oracle["material_interior"]["l_prism"];
+                assert_eq!((out.npoints,out.nprims()),(expected["points"].as_u64().unwrap() as usize,expected["prims"].as_u64().unwrap() as usize));
+            }
+            if compound {
+                assert!(out.prim.contains_key("rbd_hull"));
+                println!("L prism compound: {} points, {} faces",out.npoints,out.nprims());
+            }
+        }
+    }
+    #[test]
+    #[ignore = "production-sized performance sample; run explicitly"]
+    fn stress_sphere_24_pieces() {
+        let sp=Params::resolve(super::super::generate::SPHERE.params,
+            serde_json::json!({"rows":36,"columns":72}).as_object()).unwrap();
+        let g=(super::super::generate::SPHERE.cook)(&[vec![]],&sp).unwrap();
+        assert!(g.nprims()>2000);
+        let p=Params::resolve(RBD_MATERIAL_FRACTURE.params,serde_json::json!({
+            "pieces":24,"seed":2,"surface_fraction":0.15,"relax":2,"glue":false,
+            "interior_detail":true,"detail_divisions":2,"detail_amplitude":0.02,
+            "outgrp_cutpoints":true,"outgrp_cutedges":true}).as_object()).unwrap();
+        let start=std::time::Instant::now();
+        let out=cook(&[vec![Arc::new(g)]],&p).unwrap();
+        println!("rbd stress: {:.3}s, {} points, {} faces, {} pieces",start.elapsed().as_secs_f64(),out.npoints,out.nprims(),
+            piece_ids(&out).unwrap().into_iter().collect::<std::collections::BTreeSet<_>>().len());
+        out.validate().unwrap();
+        assert!(out.prim["piece"].as_i32().unwrap().iter().copied().collect::<std::collections::BTreeSet<_>>().len()>=20);
+    }
+    #[test]
+    fn detail_controls_and_missing_group() {
+        let bp=Params::resolve(super::super::generate::BOX.params,None).unwrap();
+        let g=(super::super::generate::BOX.cook)(&[vec![]],&bp).unwrap();
+        let base=serde_json::json!({"pieces":2,"seed":2,"surface_fraction":0,"relax":0,"glue":false,
+            "interior_detail":true,"detail_divisions":3,"detail_amplitude":0.,"detail_frequency":7.,
+            "outgrp_inside_name":"caps","outgrp_cutpoints":true,"outgrp_cutpoints_name":"seampts",
+            "outgrp_cutedges":true,"outgrp_cutedges_name":"seamedges"});
+        let p=Params::resolve(RBD_MATERIAL_FRACTURE.params,base.as_object()).unwrap();
+        let flat=cook(&[vec![Arc::new(g.clone())]],&p).unwrap();
+        assert!(flat.prim.contains_key("group_caps") && flat.point.contains_key("group_seampts"));
+        assert!(flat.vertex.contains_key("edge_group_seamedges"));
+        let mut rough=base.clone();rough["detail_amplitude"]=serde_json::json!(0.1);
+        let p=Params::resolve(RBD_MATERIAL_FRACTURE.params,rough.as_object()).unwrap();
+        let noisy=cook(&[vec![Arc::new(g.clone())]],&p).unwrap();
+        assert_eq!(flat.npoints,noisy.npoints);
+        let fixed=flat.point["group_seampts"].as_i32().unwrap();
+        assert!(flat.p().chunks_exact(3).zip(noisy.p().chunks_exact(3)).zip(fixed)
+            .all(|((a,b),&f)|f==0 || a==b));
+        assert!(flat.p().iter().zip(noisy.p()).any(|(a,b)|a!=b));
+        rough["outgrp_inside"]=serde_json::json!(false);
+        let p=Params::resolve(RBD_MATERIAL_FRACTURE.params,rough.as_object()).unwrap();
+        assert!(cook(&[vec![Arc::new(g)]],&p).unwrap_err().0.contains("inside faces group"));
     }
 }
 

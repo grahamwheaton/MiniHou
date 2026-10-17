@@ -38,5 +38,101 @@
       "rbd_w"
     ],
     "prims": 12
+  },
+  "material_interior": {
+    "box": {
+      "cutpoints": 16,
+      "inside": 16,
+      "materials": [],
+      "pieces": [
+        13,
+        13
+      ],
+      "points": 26,
+      "prims": 26,
+      "time_s": 0.008,
+      "uv_finite_corners": null
+    },
+    "box_convex": {
+      "cutpoints": 8,
+      "inside": 2,
+      "materials": [],
+      "pieces": [
+        6,
+        6
+      ],
+      "points": 16,
+      "prims": 12,
+      "time_s": 0.0061,
+      "uv_finite_corners": null
+    },
+    "l_prism": {
+      "cutpoints": 20,
+      "inside": 24,
+      "materials": [],
+      "pieces": [
+        19,
+        18
+      ],
+      "points": 36,
+      "prims": 37,
+      "time_s": 0.0117,
+      "uv_finite_corners": null
+    },
+    "l_prism_convex": {
+      "cutpoints": 296,
+      "inside": 116,
+      "materials": [],
+      "pieces": [
+        127,
+        98
+      ],
+      "points": 326,
+      "prims": 225,
+      "time_s": 0.3285,
+      "uv_finite_corners": null
+    },
+    "l_prism_convex_detail": {
+      "cutpoints": 592,
+      "inside": 1224,
+      "materials": [],
+      "pieces": [
+        783,
+        550
+      ],
+      "points": 933,
+      "prims": 1333,
+      "time_s": 0.3359,
+      "uv_finite_corners": null
+    },
+    "sphere": {
+      "cutpoints": 96,
+      "inside": 176,
+      "materials": [],
+      "pieces": [
+        145,
+        151
+      ],
+      "points": 224,
+      "prims": 296,
+      "time_s": 0.017,
+      "uv_finite_corners": null
+    },
+    "two_materials": {
+      "cutpoints": 16,
+      "inside": 16,
+      "materials": [
+        21,
+        5
+      ],
+      "pieces": [
+        13,
+        13
+      ],
+      "points": 26,
+      "prims": 26,
+      "time_s": 0.0074,
+      "uv_finite_corners": 96
+    }
   }
 }
