@@ -182,6 +182,7 @@ impl Elements {
 struct Uniforms {
     view_proj: [[f32; 4]; 4],
     view: [[f32; 4]; 4],
+    inv_view_proj: [[f32; 4]; 4],
     base: [f32; 4],
     wire: [f32; 4],
     flat_shading: u32,
@@ -190,6 +191,19 @@ struct Uniforms {
     object_color: u32,
     _pad_color: [u32; 3],
     floor:[f32;4], element_size:[f32;4], element_flags:[u32;4], element_color:[f32;4],
+}
+
+fn inverse_projection(m:[[f32;4];4])->[[f32;4];4] {
+    let mut rows=[[0f32;8];4];
+    for r in 0..4 {for c in 0..4 {rows[r][c]=m[c][r];}rows[r][r+4]=1.;}
+    for c in 0..4 {
+        let pivot=(c..4).max_by(|&a,&b|rows[a][c].abs().total_cmp(&rows[b][c].abs())).unwrap();
+        rows.swap(c,pivot);
+        let scale=rows[c][c];
+        for j in 0..8 {rows[c][j]/=scale;}
+        for r in 0..4 {if r!=c {let f=rows[r][c];for j in 0..8 {rows[r][j]-=f*rows[c][j];}}}
+    }
+    std::array::from_fn(|c|std::array::from_fn(|r|rows[r][c+4]))
 }
 
 
@@ -217,8 +231,8 @@ pub struct Gpu {
     gpu_images:HashMap<String,(wgpu::TextureView,usize,u64)>, gpu_tick:u64,
     pipe_surf: wgpu::RenderPipeline, pipe_surf_bias: wgpu::RenderPipeline, pipe_wire: wgpu::RenderPipeline,
     pipe_xray: wgpu::RenderPipeline, pipe_normals: wgpu::RenderPipeline, pipe_bounds: wgpu::RenderPipeline, pipe_select: wgpu::RenderPipeline,
-    floor:wgpu::Buffer, floor_count:u32, pipe_floor:wgpu::RenderPipeline,
-    face_markers:face_markers::FaceMarkers, pipe_face_markers:wgpu::RenderPipeline,
+    pipe_floor:wgpu::RenderPipeline, z_axis:wgpu::Buffer, pipe_z_axis:wgpu::RenderPipeline,
+    face_markers:face_markers::FaceMarkers, pipe_face_markers:wgpu::RenderPipeline, pipe_face_markers_xray:wgpu::RenderPipeline,
     elements:Elements, element_points:Vec<u32>, pipe_elements:wgpu::RenderPipeline, pipe_elements_ghost:wgpu::RenderPipeline,
     pipe_depth: wgpu::RenderPipeline, pipe_wire_all: wgpu::RenderPipeline,
     pipe_wire_hidden: wgpu::RenderPipeline, pipe_ghost: wgpu::RenderPipeline, pipe_ghost_wire: wgpu::RenderPipeline,
@@ -435,18 +449,11 @@ impl Gpu {
         use wgpu::{CompareFunction as C, ColorWrites as W, PrimitiveTopology as T};
         const ELEMENT_ATTRS:[wgpu::VertexAttribute;4]=wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Uint32,3=>Uint32];
         let element_bufs=[wgpu::VertexBufferLayout {array_stride:32,step_mode:wgpu::VertexStepMode::Instance,attributes:&ELEMENT_ATTRS}];
-        let pipe_floor=mk("floor and axes","vs_element","fs_element",&element_bufs,T::TriangleList,0,true,C::LessEqual,false,W::ALL);
-        let mut floor=Vec::new();
-        for i in -10..=10 { if i!=0 {
-            floor.push(Element {a:[i as f32,-10.,0.],b:[i as f32,10.,0.],kind:3,selected:0});
-            floor.push(Element {a:[-10.,i as f32,0.],b:[10.,i as f32,0.],kind:3,selected:0});
-        } }
-        for (kind,b) in [(4,[10.,0.,0.]),(5,[0.,10.,0.]),(6,[0.,0.,10.])] {
-            floor.push(Element {a:b.map(|x|-x),b,kind,selected:0});
-        }
-        let floor_count=floor.len() as u32;
-        let floor=buf("floor lines",bytemuck::cast_slice(&floor),wgpu::BufferUsages::VERTEX);
-        let pipe_face_markers=mk("face centres","vs_face_marker","fs_face_marker",&element_bufs,T::TriangleList,0,true,C::Always,false,W::ALL);
+        let pipe_floor=mk("infinite floor","vs_infinite_floor","fs_infinite_floor",&[],T::TriangleList,0,true,C::LessEqual,false,W::ALL);
+        let pipe_z_axis=mk("z axis","vs_element","fs_element",&element_bufs,T::TriangleList,0,true,C::LessEqual,false,W::ALL);
+        let z_axis=buf("z axis",bytemuck::cast_slice(&[Element {a:[0.,0.,-1e6],b:[0.,0.,1e6],kind:6,selected:0}]),wgpu::BufferUsages::VERTEX);
+        let pipe_face_markers=mk("face centres","vs_face_marker","fs_face_marker",&element_bufs,T::TriangleList,-2,true,C::LessEqual,false,W::ALL);
+        let pipe_face_markers_xray=mk("face centres xray","vs_face_marker","fs_face_marker",&element_bufs,T::TriangleList,-2,true,C::Always,false,W::ALL);
         let pipe_elements=mk("points and curves","vs_element","fs_element",&element_bufs,T::TriangleList,-1,true,C::LessEqual,true,W::ALL);
         let pipe_elements_ghost=mk("ghost points and curves","vs_element","fs_element_ghost",&element_bufs,T::TriangleList,-1,true,C::LessEqual,false,W::ALL);
         let pipe_surf = mk("surf", "vs_surf", "fs_surf", &surf_bufs, T::TriangleList, 0, false, C::LessEqual, true, W::ALL);
@@ -571,8 +578,8 @@ impl Gpu {
 
         Self {
             tex_bgl,default_tex_bind,pipe_tex,pipe_tex_bias,pipe_tex_xray,tex_batches:Vec::new(),texture_status:Vec::new(),gpu_images:HashMap::new(),gpu_tick:0,
-            floor,floor_count,pipe_floor,
-            face_markers:face_markers::FaceMarkers::new(device),pipe_face_markers,
+            pipe_floor,z_axis,pipe_z_axis,
+            face_markers:face_markers::FaceMarkers::new(device),pipe_face_markers,pipe_face_markers_xray,
             elements:Elements::new(device,sc,&[],&[]),element_points:Vec::new(),pipe_elements,pipe_elements_ghost,
             pipe_depth, pipe_wire_all, pipe_wire_hidden, pipe_ghost, pipe_ghost_wire,
             partition_tri: Partition::new(device, &sc.tri, 3, &[]), partition_edge: Partition::new(device, &sc.edge, 2, &[]),
@@ -833,13 +840,15 @@ impl Gpu {
         let px_per_unit = target.size[1] as f32 / (2.0 * (0.8f32 / 2.0).tan() * cam.distance().max(1e-6));
         let t = ((self.edge_world * px_per_unit - 1.5) / 8.5).clamp(0.0, 1.0);
         let fade = t * t * (3.0 - 2.0 * t);
-        let is_shaded_wire = mode.wire_shaded() || (overlay.wireframe && mode.shaded() && !mode.bounds())
-            || (selection_mode == crate::ui::SelectionMode::Edges && !mode.bounds());
-        let show_wire = mode.wire() || is_shaded_wire || overlay.xray;
-        let u = Uniforms { view_proj,view,base:[0.72,0.74,0.78,1.],wire:[0.,0.,0.,if is_shaded_wire {1.} else {0.}],
+        let editing = selection_mode != crate::ui::SelectionMode::Object;
+        let is_shaded_wire = (mode.wire_shaded() && (editing || overlay.wireframe))
+            || (overlay.wireframe && mode.shaded() && !mode.bounds())
+            || (editing && !mode.bounds());
+        let show_wire = mode.wire() || is_shaded_wire || (overlay.xray && editing);
+        let u = Uniforms { view_proj,view,inv_view_proj:inverse_projection(view_proj),base:[0.72,0.74,0.78,1.],wire:[0.,0.,0.,if is_shaded_wire {1.} else {0.}],
             flat_shading:(mode.flat() || (mode.matcap() && overlay.matcap_flat)) as u32,wire_fade:fade,_pad:[1,mode.matcap() as u32],
             object_color:(overlay.object_color==ObjectColor::Random) as u32,_pad_color:[0;3],
-            floor:[10f32.powf((cam.distance().max(0.01)*0.1).log10().floor()),overlay.grid as u32 as f32,overlay.axes as u32 as f32,0.],
+            floor:[10f32.powf((cam.distance().max(0.01)*0.1).log10().floor()),overlay.grid as u32 as f32,overlay.axes as u32 as f32,cam.distance().max(0.01)],
             element_size:[target.size[0] as f32,target.size[1] as f32,overlay.geometry.point_size,overlay.geometry.line_width],
             element_flags:[overlay.geometry.points as u32,overlay.geometry.lines as u32,overlay.geometry.enabled as u32,(selection_mode==crate::ui::SelectionMode::Points) as u32],
             element_color:if overlay.light_background {[0.025,0.03,0.04,1.]} else {[0.72,0.75,0.8,1.]} };
@@ -911,11 +920,15 @@ impl Gpu {
                 pass.set_index_buffer(tri.buffer.slice(..),wgpu::IndexFormat::Uint32);
                 if overlay.geometry.faces { pass.set_pipeline(&self.pipe_ghost); pass.draw_indexed(tri.selected..tri.total,0,0..1); }
                 pass.set_index_buffer(edge.buffer.slice(..),wgpu::IndexFormat::Uint32);
-                if overlay.geometry.lines { pass.set_pipeline(&self.pipe_ghost_wire); pass.draw_indexed(edge.selected..edge.total,0,0..1); }
+                if overlay.geometry.lines && show_wire { pass.set_pipeline(&self.pipe_ghost_wire); pass.draw_indexed(edge.selected..edge.total,0,0..1); }
             }
             if overlay.grid || overlay.axes {
-                pass.set_pipeline(&self.pipe_floor); pass.set_vertex_buffer(0,self.floor.slice(..));
-                pass.draw(0..6,0..self.floor_count);
+                pass.set_pipeline(&self.pipe_floor);
+                pass.draw(0..3,0..1);
+            }
+            if overlay.axes {
+                pass.set_pipeline(&self.pipe_z_axis);pass.set_vertex_buffer(0,self.z_axis.slice(..));
+                pass.draw(0..6,0..1);
             }
             if !mode.bounds() {
                 pass.set_pipeline(&self.pipe_elements);
@@ -930,7 +943,7 @@ impl Gpu {
                 pass.set_vertex_buffer(0,self.sel_face.slice(..)); pass.set_vertex_buffer(1,self.zeros.slice(..)); pass.set_vertex_buffer(2,self.neutral_color.slice(..));
                 pass.draw(0..self.sel_face_n,0..1);
             }
-            if self.sel_line_n > 0 && overlay.geometry.lines && !mode.bounds() {
+            if editing && self.sel_line_n > 0 && overlay.geometry.lines && !mode.bounds() {
                 pass.set_pipeline(&self.pipe_bounds);
                 pass.set_vertex_buffer(0,self.sel_line.slice(..)); pass.set_vertex_buffer(1,self.zeros.slice(..)); pass.set_vertex_buffer(2,self.neutral_color.slice(..));
                 pass.draw(0..self.sel_line_n,0..1);
@@ -940,7 +953,7 @@ impl Gpu {
                 if self.group_line_n>0 {pass.set_pipeline(&self.pipe_group_line);pass.set_vertex_buffer(0,self.group_line.slice(..));pass.draw(0..self.group_line_n,0..1);}
             }
             if selection_mode == crate::ui::SelectionMode::Faces && !mode.bounds() && self.face_markers.count > 0 {
-                pass.set_pipeline(&self.pipe_face_markers);
+                pass.set_pipeline(if overlay.xray {&self.pipe_face_markers_xray}else{&self.pipe_face_markers});
                 pass.set_vertex_buffer(0,self.face_markers.buffer.slice(..));
                 pass.draw(0..6,0..self.face_markers.count);
                 if self.face_markers.hover_count > 0 {
@@ -1093,6 +1106,64 @@ mod tests {
     use minihou_core::lod::{Cluster, Sphere};
 
     #[test]
+    fn floor_ray_inverse_handles_perspective_and_ortho() {
+        let mut camera=Camera::frame([1.,2.,3.],2.);
+        for ortho in [false,true] {
+            if ortho {camera.set_view(minihou_app::StandardView::Top);}
+            let m=camera.matrices(1.7).0;
+            let inv=inverse_projection(m);
+            for c in 0..4 {for r in 0..4 {
+                let actual=(0..4).map(|k|m[k][r]*inv[c][k]).sum::<f32>();
+                assert!((actual-if c==r {1.}else{0.}).abs()<1e-3,"{ortho} {c} {r}: {actual}");
+            }}
+        }
+    }
+
+    #[test]
+    fn asymmetric_f_texture_uses_blender_uv_origin() {
+        let instance=wgpu::Instance::default();
+        let Ok(adapter)=pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())) else {return};
+        let Ok((device,queue))=pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())) else {return};
+        let p=vec![-1.,-1.,0., 1.,-1.,0., 1.,1.,0., -1.,1.,0.];
+        let uv=[[0.,0.],[1.,0.],[1.,1.],[0.,1.]];
+        let tex_vertex=|i:usize|TexVertex {p:[p[3*i],p[3*i+1],p[3*i+2]],n:[0.,0.,1.],color:[1.;3],uv:uv[i],valid:1.};
+        let textured=[[0,1,2],[0,2,3]].into_iter().enumerate().map(|(prim,ids)|SurfaceTri {
+            vertices:ids.map(tex_vertex),points:ids.map(|i|i as u32),prim:prim as u32,slot:"F".into(),
+            uv_sets:BTreeMap::from([("uv".into(),ids.map(|i|uv[i]))]),
+        }).collect();
+        let scene=Scene {p,n:vec![0.,0.,1.].repeat(4),tri:vec![0,1,2,0,2,3],edge:vec![0,1,1,2,2,3,3,0],
+            point:Vec::new(),line:Vec::new(),pick_bvh:std::sync::Arc::new(crate::picking::Bvh::new(&[],&[])),
+            nlp:Vec::new(),nln:Vec::new(),normal_points:Vec::new(),bbp:[0.;24],center:[0.;3],radius:1.5,textured};
+        let mut gpu=Gpu::new(&device,&scene);
+        let mut registry=Registry::new(".");
+        // The red F has a top bar and left stem. A V mirror puts its bar at the bottom.
+        let mut pixels=vec![0u8;4*4*4];
+        for y in 0..4 {for x in 0..4 {let i=(y*4+x)*4; pixels[i]=if y==0 || x==0 || (y==2 && x<3) {255}else{0};pixels[i+3]=255;}}
+        for bottom_up in [false,true] {
+            let mut rows=pixels.clone();
+            if bottom_up {for y in 0..2 {for x in 0..16 {rows.swap(y*16+x,(3-y)*16+x);}}}
+            let hash=registry.register_pixels(4,4,rows,bottom_up).unwrap();
+            registry.register_descriptor("F",materials::Descriptor::parse(&serde_json::json!({"version":1,
+                "textures":{"base_color":{"image_id":hash,"sampler":{"min":"nearest","mag":"nearest","wrap_u":"clamp","wrap_v":"clamp"}}}})).unwrap());
+            gpu.upload_textures(&device,&queue,&scene,&mut registry);
+            let (target,color)=Target::new_headless(&device,[64,64]);
+            let mut camera=Camera::frame([0.;3],1.5);camera.set_view(minihou_app::StandardView::Top);
+            gpu.draw_raw(&device,&queue,&target,&camera,Mode::FlatShaded,Overlay {textures:true,..Default::default()},crate::ui::SelectionMode::Object,false);
+            let buffer=device.create_buffer(&wgpu::BufferDescriptor {label:Some("F readback"),size:256*64,usage:wgpu::BufferUsages::MAP_READ|wgpu::BufferUsages::COPY_DST,mapped_at_creation:false});
+            let mut encoder=device.create_command_encoder(&Default::default());
+            encoder.copy_texture_to_buffer(wgpu::TexelCopyTextureInfo {texture:&color,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},
+                wgpu::TexelCopyBufferInfo {buffer:&buffer,layout:wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(256),rows_per_image:Some(64)}},
+                wgpu::Extent3d {width:64,height:64,depth_or_array_layers:1});
+            queue.submit([encoder.finish()]);
+            let (tx,rx)=std::sync::mpsc::channel();buffer.slice(..).map_async(wgpu::MapMode::Read,move |r|{tx.send(r).unwrap();});
+            let _=device.poll(wgpu::PollType::wait_indefinitely());rx.recv().unwrap().unwrap();
+            let bytes=buffer.slice(..).get_mapped_range();
+            let red=|x:usize,y:usize|bytes[y*256+x*4];
+            assert!((red(37,18) as u16)>(red(37,46) as u16)+40,"F top bar should be above its empty lower-right, bottom_up={bottom_up}");
+        }
+    }
+
+    #[test]
     fn gpu_cut_contains_only_selected_clusters_and_contiguous_ranges() {
         let cluster = |triangles| Cluster { triangles, bounds:Sphere::default(), error:0., level:0 };
         let lod = ClusterLod { clusters:vec![cluster(vec![[0,1,2]]),cluster(vec![[3,4,5],[5,6,7]])], ..Default::default() };
@@ -1123,13 +1194,14 @@ mod tests {
         assert_eq!(faces.len(), scene.triangle_indices().len() * 3);
         let mut gpu = Gpu::new(&device, &scene);
         let (target, _texture) = Target::new_headless(&device, [64, 64]);
-        let camera = Camera::frame(scene.center, scene.radius);
+        let mut camera = Camera::frame(scene.center, scene.radius);
         // Both initial upload and scene replacement must support the expanded highlight.
         for replace_scene in [false, true] {
-            if replace_scene { gpu.upload(&device, &scene); }
+            if replace_scene { gpu.upload(&device, &scene);camera.set_view(minihou_app::StandardView::Top); }
             gpu.set_selection(&device, &faces, &lines);
             device.push_error_scope(wgpu::ErrorFilter::Validation);
-            gpu.draw_raw(&device, &queue, &target, &camera, Mode::Solid, Overlay::default(), crate::ui::SelectionMode::Faces, false);
+            gpu.draw_raw(&device, &queue, &target, &camera, Mode::Solid,
+                Overlay {grid:true,axes:true,..Default::default()}, crate::ui::SelectionMode::Faces, false);
             let error = pollster::block_on(device.pop_error_scope());
             assert!(error.is_none(), "whole-mesh face selection must render: {error:?}");
         }

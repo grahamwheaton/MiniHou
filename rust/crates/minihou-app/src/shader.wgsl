@@ -2,6 +2,7 @@
 struct U {
     view_proj: mat4x4<f32>,
     view: mat4x4<f32>,
+    inv_view_proj: mat4x4<f32>,
     base: vec4<f32>,
     wire: vec4<f32>,
     flat_shading: u32,
@@ -84,7 +85,8 @@ fn textured(i:VOut,front:bool)->vec3<f32> {
         let tile=floor(i.vpos.xy * 8.0);
         let alternate=(i32(tile.x)+i32(tile.y)) & 1;
         rgb=select(vec3<f32>(0.35,0.12,0.42),vec3<f32>(0.9,0.9,0.9),alternate==0);
-    } else { rgb=textureSample(base_image,base_sampler,i.uv).rgb; }
+    // UVs use Blender's bottom-left origin; uploaded PNG/JPEG and normalized Blender pixels start at the top.
+    } else { rgb=textureSample(base_image,base_sampler,vec2<f32>(i.uv.x,1.0-i.uv.y)).rgb; }
     return rgb * material.factor.rgb * (shade_surf(i,front) / u.base.rgb);
 }
 @fragment fn fs_tex(i:VOut,@builtin(front_facing) front:bool)->@location(0) vec4<f32> { return out_color(textured(i,front)); }
@@ -262,6 +264,51 @@ fn fs_face_marker(i:FaceMarkerOut) -> @location(0) vec4<f32> {
     if (selected) { color=orange; }
     if (hovered) { color=select(vec3(1.),orange,d>3.); }
     return vec4(color,1.-smoothstep(radius-0.5,radius+0.5,d));
+}
+
+// One triangle covers the viewport. Reconstruct the floor from each pixel's view ray so
+// perspective and orthographic views have no finite mesh boundary.
+@vertex
+fn vs_infinite_floor(@builtin(vertex_index) vertex:u32) -> @builtin(position) vec4<f32> {
+    let xy=array<vec2<f32>,3>(vec2(-1.,-1.),vec2(3.,-1.),vec2(-1.,3.));
+    return vec4(xy[vertex],0.,1.);
+}
+struct FloorPixel { @location(0) color:vec4<f32>, @builtin(frag_depth) depth:f32 };
+fn grid_line(value:f32, spacing:f32) -> f32 {
+    let units=value/spacing;
+    let edge=abs(fract(units+0.5)-0.5);
+    let width=max(fwidth(units),0.0001);
+    return 1.-smoothstep(0.,width*1.2,edge);
+}
+@fragment
+fn fs_infinite_floor(@builtin(position) pixel:vec4<f32>) -> FloorPixel {
+    let ndc=vec2(pixel.x/u.element_size.x*2.-1.,1.-pixel.y/u.element_size.y*2.);
+    let near_clip=u.inv_view_proj*vec4(ndc,0.,1.);
+    let far_clip=u.inv_view_proj*vec4(ndc,1.,1.);
+    let near=near_clip.xyz/near_clip.w;
+    let far=far_clip.xyz/far_clip.w;
+    let delta=far-near;
+    if (abs(delta.z)<1e-7) { discard; }
+    let t=-near.z/delta.z;
+    if (t<=0.) { discard; }
+    let world=near+t*delta;
+    let clip=u.view_proj*vec4(world,1.);
+    let spacing=u.floor.x;
+    let major=spacing*10.;
+    let minor_line=max(grid_line(world.x,spacing),grid_line(world.y,spacing));
+    let major_line=max(grid_line(world.x,major),grid_line(world.y,major));
+    let x_axis=1.-smoothstep(0.,max(fwidth(world.y),spacing*0.025),abs(world.y));
+    let y_axis=1.-smoothstep(0.,max(fwidth(world.x),spacing*0.025),abs(world.x));
+    let dist=length((u.view*vec4(world,1.)).xyz);
+    let fade=exp(-pow(dist/max(u.floor.w*5.,major*5.),2.));
+    let grid_alpha=select(0.,(minor_line*0.10+major_line*0.18)*fade,u.floor.y>0.);
+    let axes_alpha=select(0.,max(x_axis,y_axis)*0.75*fade,u.floor.z>0.);
+    if (grid_alpha+axes_alpha<0.002) { discard; }
+    let axis_color=select(vec3(0.7,0.16,0.12),vec3(0.22,0.65,0.18),y_axis>x_axis);
+    var out:FloorPixel;
+    out.color=vec4(mix(u.element_color.rgb,axis_color,axes_alpha/max(grid_alpha+axes_alpha,1e-5)),min(grid_alpha+axes_alpha,0.85));
+    out.depth=clip.z/clip.w;
+    return out;
 }
 
 @vertex

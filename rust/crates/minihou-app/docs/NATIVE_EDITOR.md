@@ -213,3 +213,7 @@ Element transforms write a `group` of point numbers. Edge selection includes bot
 Modal rotation uses the nearest Cartesian axis to the view direction for its default axis. Face-normal sketch rotation, cursor orientation rotation, and scale individual origins across multiple displayed objects are not available yet. The scale cage creates `match_size` for one displayed object when it can represent the result with nonnegative scales; otherwise it keeps the transform node.
 
 The Rust core currently cooks only the nodes marked with a green dot on the shelf. Copy and paste operate on the selected network set. egui does not distinguish numpad digits from the number row, so Alt+digit represents numpad keys; Preferences can emulate the numpad with plain digits. Lock and template flags are session state. Auto proxy reduces the displayed mesh; the Blender cap is a separate setting for the link.
+
+### Viewport behavior
+
+Image UVs use Blender's bottom-left origin for both linked Blender pixels and local PNG/JPEG files. Object mode hides shaded edge lines until Wireframe is enabled in Overlays; edit modes keep them. Face centre dots respect surface depth unless X-ray is enabled. The floor grid is drawn from view rays, with zoom-adaptive spacing and a horizon fade in perspective and orthographic views. Removing every displayed node clears the viewport immediately; a cook error retains the last good result. During Loop Cut and Edge Slide, pointer movement follows the visible slide side even when the ring orientation or Flip/Even setting changes.
