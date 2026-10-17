@@ -1815,6 +1815,17 @@ impl App {
         use ui::EditorChange as C;
         let e = self.editor_state;
         match name {
+            "toggle_dep_links" => { self.prefs.show_parameter_links=!self.prefs.show_parameter_links; ui::network::toggle_links(ctx,&self.editor.path); let _=self.prefs.save(); },
+            "go_to_link_source" | "go_to_link_target" => {
+                let destination = if name == "go_to_link_source" {
+                    minihou_app::value_link_ui::go_to_source(self.editor.doc.value(),&self.selected,None)
+                } else { minihou_app::value_link_ui::go_to_target(self.editor.doc.value(),&self.selected,None) };
+                if let Some((node,param)) = destination {
+                    select_active_nodes(&mut self.selected,&mut self.selected_set,vec![node.clone()],false,false);
+                    ui::network::focus(ctx,&self.editor.path,&node);
+                    ctx.data_mut(|d| d.insert_temp(egui::Id::new("link_flash"),(node,param,ctx.input(|i|i.time))));
+                }
+            }
             "export_usd" => usd_export::open(ctx, &self.editor.path),
             "blender_install" => self.blender_action(UiAction::BlenderInstall(ui::blender_ui::selected_index(ctx, self.blender_paths.len())), ctx),
             "blender_open" | "blender_connect" => self.blender_action(UiAction::BlenderOpen, ctx),
@@ -2063,6 +2074,17 @@ impl App {
                 UiAction::FrameSelected => self.frame_selected(),
                 UiAction::FrameNetwork => ui::network::frame(ctx, &self.editor.path),
                 UiAction::Select(id) => select_active_nodes(&mut self.selected, &mut self.selected_set, vec![id], false, false),
+                UiAction::NavigateLink { node, param } => {
+                    select_active_nodes(&mut self.selected, &mut self.selected_set, vec![node.clone()], false, false);
+                    ui::network::focus(ctx, &self.editor.path, &node);
+                    ctx.data_mut(|d| d.insert_temp(egui::Id::new("link_flash"), (node,param,ctx.input(|i|i.time))));
+                }
+                UiAction::LinkVisibility(show) => { self.prefs.show_parameter_links=show; let _=self.prefs.save(); },
+                UiAction::RenameNode { old, new } => {
+                    if let Some(value)=graph_edit::rename(self.editor.doc.value(),&old,&new) {
+                        if self.commit_document(value,"rename node") { self.selected=new.clone(); self.selected_set=std::collections::BTreeSet::from([new]); }
+                    } else {self.file_status="Could not rename node: name is invalid or already in use".into();}
+                }
                 UiAction::ToggleSelect(id) => select_active_nodes(&mut self.selected, &mut self.selected_set, vec![id], true, true),
                 UiAction::SelectSet { ids, extend } => select_active_nodes(&mut self.selected, &mut self.selected_set, ids, extend, false),
                 UiAction::SetDisplay(id) => {
@@ -2079,7 +2101,8 @@ impl App {
                 }
                 UiAction::Edit { edit, continuous } => {
                     if !continuous { self.editor.history.finish(&self.editor.doc); }
-                    self.edit(edit, continuous);
+                    if let Edit::Replace(value) = edit { self.commit_document(value, "edit linked parameter"); }
+                    else { self.edit(edit, continuous); }
                 }
                 UiAction::Time(edit) => self.send_timeline_time(edit),
                 UiAction::AddNode { node_type, .. } if node_type.starts_with("sketch_") => {
@@ -2489,6 +2512,7 @@ impl eframe::App for App {
             egui::TopBottomPanel::top("shelf").show(ctx, |ui| ui::shelf::show(ui, &v, &mut out));
             egui::TopBottomPanel::bottom("stats").show(ctx, |ui| ui::status::show(ui, &v, &mut out));
             ui::network::set_physics_snappiness(ctx, self.prefs.node_physics_snappiness);
+            ui::network::set_links(ctx, &self.editor.path, self.prefs.show_parameter_links);
             let net = egui::SidePanel::left("network").default_width(400.).show(ctx, |ui| ui::network::show(ui, &v, &mut out));
             self.network_hover = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| net.response.rect.contains(p));
             if self.params_open { egui::SidePanel::right("parameters").default_width(460.).show(ctx, |ui| {

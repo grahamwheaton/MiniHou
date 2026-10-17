@@ -36,6 +36,7 @@ pub fn show(ctx: &egui::Context, open: &mut bool, prefs: &mut Preferences, keyma
                             changed |= ui.add(egui::Slider::new(&mut prefs.ui_scale,0.5..=3.).text("UI scale").step_by(0.05)).changed();
                             changed |= ui.add(egui::DragValue::new(&mut prefs.snap_increment).range(0.0001..=1000.).speed(0.01).prefix("Snap increment  ")).changed();
                             changed |= ui.checkbox(&mut prefs.show_stats,"Show statistics").changed();
+                            changed |= ui.checkbox(&mut prefs.show_parameter_links,"Show parameter links in network").changed();
                             changed |= ui.add(egui::Slider::new(&mut prefs.node_physics_snappiness,0.0..=1.0).text("Node physics snappiness"))
                                 .on_hover_text("Higher values make connected nodes follow Shift-drag faster and settle sooner").changed();
                         }

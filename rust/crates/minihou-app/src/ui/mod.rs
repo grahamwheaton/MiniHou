@@ -61,6 +61,9 @@ pub enum UiAction {
     FrameSelected,
     FrameNetwork,
     Select(String),
+    NavigateLink { node: String, param: String },
+    LinkVisibility(bool),
+    RenameNode { old: String, new: String },
     ToggleSelect(String),
     SelectSet { ids: Vec<String>, extend: bool },
     /// "Visible" flag: make this node the displayed one.
