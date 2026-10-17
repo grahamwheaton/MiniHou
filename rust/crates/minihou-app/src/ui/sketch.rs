@@ -1,7 +1,8 @@
 //! Plane sketch and tape tool. UI state stays in egui memory; commits are document actions.
 use super::{transform_gizmo, Actions, UiAction, View};
 use eframe::egui::{self, pos2, vec2, Align2, FontId, Pos2, Rect, Stroke};
-use super::sketch_inference::{self, Hit, Kind};
+use minihou_app::inference::{self as inf, InferenceEngine, InferenceInput, InferenceResult, InferenceSettings, Kind, Primitive, Projector, ToolContext, ToolSpec};
+use std::sync::{Arc, Mutex};
 use serde_json::{json, Value};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -114,10 +115,61 @@ fn plane_hit(ray: ([f32; 3], [f32; 3]), plane: Plane, origin: [f32; 3]) -> Optio
     (t >= 0.).then(|| add(ray.0, mul(ray.1, t)))
 }
 #[derive(Clone, Default)]
-struct State { mode: Option<SketchMode>, plane: Plane, points: Vec<[f32; 3]>, refs: Vec<Option<Value>>, hover: Option<[f32; 3]>, inference: Option<Hit>, reference_edge: Option<([f32;3],[f32;3])>, reference_point: Option<[f32;3]>, closed: bool, axis: Option<usize>, numeric: String, origin: [f32; 3] }
+struct State { mode: Option<SketchMode>, plane: Plane, points: Vec<[f32; 3]>, refs: Vec<Option<Value>>,
+    /// Face plane under each committed point (the next segment's working plane).
+    faces: Vec<Option<([f32;3],[f32;3])>>, hover: Option<[f32; 3]>, result: Option<InferenceResult>,
+    closed: bool, axis: Option<usize>, numeric: String, origin: [f32; 3], alt_down: bool, alt_clean: bool, committed: usize }
 fn id() -> egui::Id { egui::Id::new("sketch_state") }
+/// The shared inference engine (one per viewport context; caches the scene accelerator).
+pub fn engine(ctx: &egui::Context) -> Arc<Mutex<InferenceEngine>> {
+    ctx.data_mut(|d| d.get_temp_mut_or_insert_with(egui::Id::new("inference_engine"), || Arc::new(Mutex::new(InferenceEngine::new()))).clone())
+}
+/// The app stores `Preferences::inference` here every frame.
+pub fn settings_id() -> egui::Id { egui::Id::new("inference_settings") }
+fn settings(ctx: &egui::Context) -> InferenceSettings { ctx.data(|d| d.get_temp(settings_id())).unwrap_or_default() }
+fn spec(mode: SketchMode) -> ToolSpec { match mode {
+    SketchMode::Line => ToolSpec::LINE, SketchMode::Pen | SketchMode::Bezier => ToolSpec::POLYLINE, SketchMode::Polygon => ToolSpec::POLYGON,
+    SketchMode::Rectangle => ToolSpec::RECTANGLE, SketchMode::Circle | SketchMode::Arc => ToolSpec::CIRCLE, SketchMode::Tape => ToolSpec::MEASURE,
+} }
+fn color(c: [u8; 4]) -> egui::Color32 { egui::Color32::from_rgba_unmultiplied(c[0], c[1], c[2], c[3]) }
+fn key_named(name: &str) -> Option<egui::Key> { egui::Key::from_name(name) }
+/// Preferences > Viewport > Inference. Returns true when something changed.
+pub fn inference_preferences(ui: &mut egui::Ui, s: &mut InferenceSettings) -> bool {
+    let mut changed = false;
+    ui.collapsing("Inference (Line / sketch tools)", |ui| {
+        changed |= ui.add(egui::Slider::new(&mut s.tolerance_px, 2.0..=40.0).text("Snap tolerance (px)")).changed();
+        changed |= ui.add(egui::Slider::new(&mut s.marker_size, 2.0..=24.0).text("Marker size")).changed();
+        changed |= ui.add(egui::Slider::new(&mut s.dwell_s, 0.05..=3.0).text("Hover to reference (s)")).changed();
+        changed |= ui.checkbox(&mut s.show_tooltips, "Show inference tooltips").changed();
+        changed |= ui.add(egui::Slider::new(&mut s.tooltip_delay_s, 0.0..=3.0).text("Tooltip delay (s)")).changed();
+        changed |= ui.checkbox(&mut s.include_hidden, "Snap to hidden / occluded geometry").changed();
+        ui.horizontal(|ui| { ui.label("Linear inferences");
+            egui::ComboBox::from_id_salt("inference_linear_mode").selected_text(s.linear_mode.label()).show_ui(ui, |ui| {
+                for m in inf::LinearMode::ALL { changed |= ui.selectable_value(&mut s.linear_mode, m, m.label()).changed(); }
+            });
+        });
+        ui.horizontal_wrapped(|ui| { for (bit, name) in inf::cat::NAMES {
+            let mut on = s.enabled & bit != 0;
+            if ui.checkbox(&mut on, name).changed() { s.enabled ^= bit; changed = true; }
+        } });
+        ui.horizontal_wrapped(|ui| { for f in inf::settings::InferenceColors::FIELDS {
+            let slot = s.colors.field_mut(f).unwrap();
+            let mut c = color(*slot);
+            ui.label(f);
+            if ui.color_edit_button_srgba(&mut c).changed() { *slot = c.to_srgba_unmultiplied(); changed = true; }
+        } });
+        ui.label("Tool keys (egui key names; the viewport keymap is suspended while a sketch tool is active):");
+        for (label, slot) in [("Lock X", &mut s.keys.lock_x), ("Lock Y", &mut s.keys.lock_y), ("Lock Z", &mut s.keys.lock_z), ("Lock inferred", &mut s.keys.lock_inferred), ("Cycle candidates", &mut s.keys.cycle_candidate)] {
+            ui.horizontal(|ui| { ui.label(label); let r = ui.text_edit_singleline(slot); if key_named(slot).is_none() { ui.label("unknown key"); } changed |= r.changed(); });
+        }
+        let conflicts = s.keys.conflicts();
+        if !conflicts.is_empty() { ui.label(format!("Conflicting tool keys (first action wins): {}", conflicts.join(", "))); }
+        if ui.button("Reset inference settings").clicked() { *s = InferenceSettings::default(); changed = true; }
+    });
+    changed
+}
 pub fn start(ctx: &egui::Context, mode: SketchMode) {
-    ctx.data_mut(|d| { let mut s: State = d.get_temp(id()).unwrap_or_default(); s.mode = Some(mode); s.points.clear(); s.refs.clear(); s.hover = None; s.numeric.clear(); s.axis = None; d.insert_temp(id(), s); });
+    ctx.data_mut(|d| { let mut s: State = d.get_temp(id()).unwrap_or_default(); s.mode = Some(mode); s.points.clear(); s.refs.clear(); s.faces.clear(); s.hover = None; s.numeric.clear(); s.axis = None; d.insert_temp(id(), s); });
 }
 pub fn cancel(ctx: &egui::Context) { ctx.data_mut(|d| d.remove::<State>(id())); }
 pub fn active(ctx: &egui::Context) -> bool {
@@ -130,13 +182,13 @@ pub fn blocks_navigation(ctx: &egui::Context) -> bool {
 fn finish(s: &mut State, out: &mut Actions) {
     let Some(mode) = s.mode else { return; };
     if mode == SketchMode::Tape {
-        if s.points.len() == 2 { out.push(UiAction::AddMeasurement { a: s.points[0], b: s.points[1], refs: [s.refs.first().cloned().flatten(),s.refs.get(1).cloned().flatten()] }); s.mode = None; s.points.clear(); s.refs.clear(); s.hover = None; s.numeric.clear(); s.axis = None; }
+        if s.points.len() == 2 { out.push(UiAction::AddMeasurement { a: s.points[0], b: s.points[1], refs: [s.refs.first().cloned().flatten(),s.refs.get(1).cloned().flatten()] }); s.mode = None; s.points.clear(); s.refs.clear(); s.faces.clear(); s.hover = None; s.numeric.clear(); s.axis = None; }
         return;
     }
     let spec_mode = if s.closed && matches!(mode,SketchMode::Line|SketchMode::Pen) { SketchMode::Polygon } else { mode };
     let Some((points, closed)) = specification(spec_mode, &s.points, s.plane) else { return; };
-    out.push(UiAction::SketchCommit { name: mode.name().into(), points, closed });
-    s.points.clear(); s.refs.clear(); s.hover = None; s.numeric.clear(); s.axis = None; s.closed = false;
+    out.push(UiAction::SketchCommit { name: mode.name().into(), points, closed, refs: s.refs.clone() });
+    s.points.clear(); s.refs.clear(); s.faces.clear(); s.hover = None; s.numeric.clear(); s.axis = None; s.closed = false;
 }
 fn vec3(value: &Value) -> Option<[f32;3]> {
     let a=value.as_array()?; Some([a.first()?.as_f64()? as f32,a.get(1)?.as_f64()? as f32,a.get(2)?.as_f64()? as f32])
@@ -207,6 +259,34 @@ fn measurements(ui: &mut egui::Ui, rect: Rect, v: &View, out:&mut Actions) -> bo
     }
     consumed
 }
+/// Paint engine primitives: markers by shape, solid/dashed guide lines, tooltips with a backdrop.
+fn paint_primitives(p: &egui::Painter, prims: &[Primitive], project: impl Fn([f32; 3]) -> Option<Pos2>, backdrop: egui::Color32) {
+    use inf::Marker as M;
+    for prim in prims { match prim {
+        Primitive::Line { a, b, color: c, width, dashed } => if let (Some(a), Some(b)) = (project(*a), project(*b)) {
+            let stroke = Stroke::new(*width, color(*c));
+            if *dashed { p.extend(egui::Shape::dashed_line(&[a, b], stroke, 6., 4.)); } else { p.line_segment([a, b], stroke); }
+        },
+        Primitive::Marker { at, shape, color: c, size } => if let Some(q) = project(*at) {
+            let (c, r) = (color(*c), *size);
+            let outline = Stroke::new(1.5_f32, egui::Color32::BLACK);
+            match shape {
+                M::Circle => { p.circle_filled(q, r, c); p.circle_stroke(q, r, outline); }
+                M::Ring => { p.circle_stroke(q, r, Stroke::new(2_f32, c)); }
+                M::Dot => { p.circle_filled(q, r * 0.6, c); }
+                M::Square => { p.rect_filled(Rect::from_center_size(q, vec2(r * 2., r * 2.)), 0., c); }
+                M::Diamond => { let pts = vec![q + vec2(0., -r), q + vec2(r, 0.), q + vec2(0., r), q + vec2(-r, 0.)]; p.add(egui::Shape::convex_polygon(pts, c, outline)); }
+                M::Cross => { let s = Stroke::new(2.5_f32, c); p.line_segment([q + vec2(-r, -r), q + vec2(r, r)], s); p.line_segment([q + vec2(-r, r), q + vec2(r, -r)], s); }
+            }
+        },
+        Primitive::Tooltip { at, text, color: c } => if let Some(q) = project(*at) {
+            let galley = p.layout_no_wrap(text.clone(), FontId::proportional(12.), color(*c));
+            let at = q + vec2(12., -12. - galley.size().y);
+            p.rect_filled(Rect::from_min_size(at - vec2(3., 2.), galley.size() + vec2(6., 4.)), 3., backdrop);
+            p.galley(at, galley, color(*c));
+        },
+    } }
+}
 pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
     mesh: Option<(&[f32], &[u32])>) {
     let measurement_click=measurements(ui, rect, v, out);
@@ -222,71 +302,90 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
     if s.mode != tool_mode { s = State { mode: tool_mode, plane: s.plane, ..Default::default() }; }
     let Some(mode) = s.mode else { return; };
     let pointer = ctx.input(|i| i.pointer.hover_pos());
+    let settings = settings(&ctx);
+    let engine_cell = engine(&ctx);
+    let mut engine = engine_cell.lock().unwrap_or_else(|e| e.into_inner());
+    if s.committed != s.points.len() { if s.points.len() > s.committed { engine.segment_committed(); } s.committed = s.points.len(); }
     let safe = Rect::from_min_max(pos2(rect.left() + 55., rect.top() + 83.), pos2(rect.right() - 55., rect.bottom() - 50.));
+    let projector = Projector { matrix: v.camera.projection, rect_min: [rect.min.x, rect.min.y], rect_size: [rect.width(), rect.height()] };
+    let typed = inf::constraints::parse_typed(&s.numeric, v.units);
     if let Some(at) = pointer.filter(|p| safe.contains(*p)) {
-        let ray = transform_gizmo::ray(v.camera, rect, at);
-        let anchor = s.points.last().copied();
-        let project = |p| transform_gizmo::project(v.camera, rect, p).map(|screen| (screen, dot(sub(p,ray.0),ray.1)));
-        let mesh_hit = mesh.and_then(|(positions,tris)| sketch_inference::infer_mesh(positions,tris,at,project));
-        if let (Some((positions,_)),Some(hit))=(mesh,mesh_hit.as_ref()) {
-            if hit.indices.len()==2 {
-                let at_index=|i:usize|[positions[i*3],positions[i*3+1],positions[i*3+2]];
-                s.reference_edge=Some((at_index(hit.indices[0]),at_index(hit.indices[1])));
-            } else if hit.kind==Kind::Endpoint { s.reference_point=Some(hit.point); }
-        }
-        let point_hit = s.points.iter().enumerate().filter_map(|(i,&p)| project(p).map(|(screen,depth)| Hit {
-            point:p, kind:Kind::Endpoint, indices:vec![i], weights:vec![1.], distance:screen.distance(at), depth
-        })).filter(|h| h.distance<=12.).min_by(|a,b| a.distance.total_cmp(&b.distance));
-        let raw = plane_hit(ray, s.plane, s.origin);
-        let axis_hit = s.points.last().copied().zip(raw).and_then(|(anchor,p)| sketch_inference::infer_axis(at,anchor,p,project));
-        let direction_hit = s.points.last().copied().zip(raw).zip(s.reference_edge)
-            .and_then(|((anchor,p),edge)|sketch_inference::infer_direction(at,anchor,p,edge,project));
-        let from_hit = s.reference_point.zip(raw).and_then(|(reference,p)| {
-            sketch_inference::infer_axis(at,reference,p,project).map(|mut h|{h.kind=Kind::FromPoint;h})
-        });
-        s.inference = point_hit.or(mesh_hit).or(direction_hit).or(from_hit).or(axis_hit);
-        if ctx.input(|i| i.modifiers.shift) {
-            if let Some(Kind::Axis(axis)) = s.inference.as_ref().map(|h| h.kind) { s.axis = Some(axis); }
-        }
-        s.hover = raw.map(|p| {
-            let ctrl = ctx.input(|i| i.modifiers.ctrl);
-            let mut p = s.inference.as_ref().map_or_else(|| grid_snap(p, s.plane, if v.editor.snap.enabled != ctrl { v.editor.snap.increment } else { 0. }), |h| h.point);
-            if let (Some(a), Some(axis)) = (anchor, s.axis) { p = axis_lock(p, a, axis, s.plane); }
-            if let (Some(a), Some(amount)) = (anchor, crate::units::parse(&s.numeric, v.units).map(|x| x as f32)) { p = numeric_length(p, a, amount); }
-            p
-        });
-    } else { s.hover = None; s.inference = None; }
+        // Ray from the same matrix the overlay projects with (exact inverse of `project`).
+        let ray = projector.ray([at.x, at.y]).map(|(o, d)| {
+            if inf::math::dot(d, v.camera.ray_forward) < 0. { (o, inf::math::mul(d, -1.)) } else { (o, d) }
+        }).unwrap_or_else(|| transform_gizmo::ray(v.camera, rect, at));
+        let (_, _, normal) = s.plane.basis();
+        let line_like = matches!(mode, SketchMode::Line | SketchMode::Pen | SketchMode::Polygon | SketchMode::Tape);
+        let tool = ToolContext { spec: spec(mode), start: s.points.last().copied(),
+            start_face: if line_like { s.faces.last().copied().flatten() } else { None },
+            ground: (s.origin, normal), tool_points: s.points.clone() };
+        let input = InferenceInput { ray, cursor: [at.x, at.y], projector, time: ctx.input(|i| i.time),
+            geometry: mesh.map(|(positions, triangles)| inf::GeometryRef { positions, triangles, revision: 0 }),
+            tool, settings: &settings, shift_held: ctx.input(|i| i.modifiers.shift), typed };
+        let res = engine.update(&input);
+        let ctrl = ctx.input(|i| i.modifiers.ctrl);
+        s.hover = res.point.map(|p| if res.winner.kind == Kind::Free && typed.is_none() {
+            grid_snap(p, s.plane, if v.editor.snap.enabled != ctrl { v.editor.snap.increment } else { 0. })
+        } else { p });
+        s.result = Some(res);
+    } else { s.hover = None; s.result = None; }
+    // Alt tap (press and release with nothing else) cycles the linear inference mode.
+    let alt = ctx.input(|i| i.modifiers.alt);
+    if alt && !s.alt_down { s.alt_down = true; s.alt_clean = true; }
+    let keys = settings.keys.clone();
     let events = ctx.input(|i| i.events.clone());
+    if s.alt_down && events.iter().any(|e| matches!(e, egui::Event::Key { .. } | egui::Event::PointerButton { .. })) { s.alt_clean = false; }
+    if !alt && s.alt_down { s.alt_down = false; if s.alt_clean { engine.cycle_linear_mode(&settings); } }
+    let bound = |key: egui::Key, name: &str| key_named(name) == Some(key);
     for event in events { match event {
         egui::Event::Key {key:egui::Key::Delete,pressed:true,..} if selected_measurement(&ctx).is_some() => {
             out.push(UiAction::DeleteMeasurement(selected_measurement(&ctx).unwrap()));
             clear_measurement_selection(&ctx);
         },
-        egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } |
+        // Esc state machine: typed value, then temporary locks/references, then the stroke, then the tool.
+        egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } => {
+            if !s.numeric.is_empty() { s.numeric.clear(); }
+            else if engine.escape() {}
+            else if !s.points.is_empty() && mode != SketchMode::Tape { s.points.clear(); s.refs.clear(); s.faces.clear(); s.closed = false; }
+            else { clear_measurement_selection(&ctx); s = State { plane: s.plane, ..Default::default() }; out.push(UiAction::Editor(super::EditorChange::Tool(super::Tool::Select))); break; }
+        },
         egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: true, .. } => {
+            engine.escape();
             clear_measurement_selection(&ctx); s = State { plane: s.plane, ..Default::default() }; out.push(UiAction::Editor(super::EditorChange::Tool(super::Tool::Select))); break;
         },
-        egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } => { if !s.numeric.is_empty() { if let Some(p) = s.hover { s.points.push(p); s.refs.push(None); } s.numeric.clear(); } finish(&mut s, out); },
-        egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => { if s.numeric.is_empty() { s.points.pop(); s.refs.pop(); } else { s.numeric.pop(); } },
-        egui::Event::Key { key: egui::Key::ArrowRight, pressed: true, .. } => { s.axis = Some(0); },
-        egui::Event::Key { key: egui::Key::ArrowLeft, pressed: true, .. } => { s.axis = Some(1); },
-        egui::Event::Key { key: egui::Key::ArrowUp, pressed: true, .. } => { s.axis = Some(2); },
-        egui::Event::Key { key: egui::Key::ArrowDown, pressed: true, .. } => { s.axis = None; },
-        egui::Event::Key { key, pressed: true, .. } if matches!(key, egui::Key::X | egui::Key::Y | egui::Key::Z) => { let axis = match key { egui::Key::X => 0, egui::Key::Y => 1, _ => 2 }; s.axis = if s.axis == Some(axis) { None } else { Some(axis) }; },
-        egui::Event::Text(t) if t.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-' || matches!(c, 'm'|'c'|'k'|'i'|'n'|'f'|'t'|'M'|'C'|'K'|'I'|'N'|'F'|'T'|' ')) => s.numeric.push_str(&t),
+        egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } => { if !s.numeric.is_empty() { if let Some(p) = s.hover { s.points.push(p); s.refs.push(None); s.faces.push(s.result.as_ref().and_then(|r| r.face)); } s.numeric.clear(); } finish(&mut s, out); },
+        egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => { if s.numeric.is_empty() { s.points.pop(); s.refs.pop(); s.faces.pop(); } else { s.numeric.pop(); } },
+        egui::Event::Key { key, pressed: true, .. } if bound(key, &keys.lock_x) => engine.toggle_axis_lock(0),
+        egui::Event::Key { key, pressed: true, .. } if bound(key, &keys.lock_y) => engine.toggle_axis_lock(1),
+        egui::Event::Key { key, pressed: true, .. } if bound(key, &keys.lock_z) => engine.toggle_axis_lock(2),
+        egui::Event::Key { key, pressed: true, .. } if bound(key, &keys.lock_inferred) => engine.lock_inferred(),
+        egui::Event::Key { key, pressed: true, .. } if bound(key, &keys.cycle_candidate) => engine.cycle_candidates(),
+        egui::Event::Key { key, pressed: true, .. } if matches!(key, egui::Key::X | egui::Key::Y | egui::Key::Z) => { engine.toggle_axis_lock(match key { egui::Key::X => 0, egui::Key::Y => 1, _ => 2 }); },
+        egui::Event::Text(t) if t.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | ',' | '@' | '<' | 'm'|'c'|'k'|'i'|'n'|'f'|'t'|'M'|'C'|'K'|'I'|'N'|'F'|'T'|' ')) => s.numeric.push_str(&t),
         egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers } if safe.contains(pos) && !modifiers.alt && !measurement_click => {
             if let Some(p) = s.hover { if s.points.last().is_none_or(|a| length(sub(*a, p)) > 1e-7) {
                 if matches!(mode,SketchMode::Line|SketchMode::Pen|SketchMode::Polygon) && s.points.len() >= 3 && length(sub(s.points[0], p)) < v.bounds.1 * 0.015 {
                     s.closed = true; finish(&mut s, out);
                 } else { if s.points.is_empty() { s.origin = p; } s.points.push(p);
-                    let reference = if mode==SketchMode::Tape { s.inference.as_ref().filter(|h|h.kind==Kind::Endpoint && h.indices.len()==1)
-                        .and_then(|h|mesh.map(|(positions,_)|(h,positions))).filter(|(h,positions)|h.indices[0]<positions.len()/3
-                            && length(sub(h.point,[positions[h.indices[0]*3],positions[h.indices[0]*3+1],positions[h.indices[0]*3+2]]))<1e-5)
-                        .map(|(h,positions)|json!({"node":v.display,"point":h.indices[0],"point_count":positions.len()/3})) } else {None};
+                    let res = s.result.as_ref();
+                    let count = mesh.map_or(0, |(positions, _)| positions.len() / 3);
+                    // Static snap: the numeric point is stored; the descriptor is optional live-reference metadata.
+                    let reference = res.and_then(|r| r.descriptor.as_ref().filter(|_| mesh.is_some()).map(|d| (r, d))).and_then(|(r, d)| match (mode, d) {
+                        (SketchMode::Tape, inf::RefDescriptor::Vertex { point }) if r.winner.kind == Kind::Endpoint && (*point as usize) < count =>
+                            Some(json!({"node":v.display,"point":point,"point_count":count})),
+                        (SketchMode::Tape, _) => None,
+                        (_, d) => Some(d.to_json(v.display, count)),
+                    });
+                    s.faces.push(res.and_then(|r| r.face));
                     s.refs.push(reference); s.numeric.clear(); if matches!(mode, SketchMode::Rectangle | SketchMode::Circle | SketchMode::Tape | SketchMode::Arc) && s.points.len() == 2 { finish(&mut s, out); } }
             } } },
         _ => {}
     } }
+    if s.committed != s.points.len() { if s.points.len() > s.committed { engine.segment_committed(); } s.committed = s.points.len(); }
+    s.axis = match engine.active_lock() { Some(inf::Lock::Axis(a)) => Some(a), _ => None };
+    let linear_mode = engine.linear_mode(&settings);
+    let lock_label = engine.active_lock().map(|l| l.label());
+    drop(engine);
     let p = ui.painter_at(rect);
     let mut preview = s.points.clone(); if let Some(h) = s.hover { preview.push(h); }
     let preview = shape(mode, &preview, s.plane, 32);
@@ -294,17 +393,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
     for pair in screen.windows(2) { p.line_segment([pair[0], pair[1]], Stroke::new(2_f32, v.theme.warn)); }
     if matches!(mode, SketchMode::Polygon | SketchMode::Rectangle | SketchMode::Circle) && screen.len() >= 3 { p.line_segment([*screen.last().unwrap(), screen[0]], Stroke::new(2_f32, v.theme.warn)); }
     for q in &screen { p.circle_filled(*q, 3., v.theme.warn); }
-    if let Some(hit) = &s.inference {
-        if let Some(screen) = transform_gizmo::project(v.camera, rect, hit.point) {
-            let color = match hit.kind { Kind::Axis(0) => egui::Color32::RED, Kind::Axis(1) => egui::Color32::GREEN,
-                Kind::Axis(2) => egui::Color32::BLUE, _ => v.theme.accent };
-            p.circle_filled(screen, 5., color);
-            p.text(screen+vec2(10.,-12.),Align2::LEFT_BOTTOM,hit.kind.label(),FontId::monospace(12.),color);
-            if let Some(anchor) = s.points.last().and_then(|q|transform_gizmo::project(v.camera,rect,*q)) {
-                if matches!(hit.kind,Kind::Axis(_)) { p.line_segment([anchor,screen],Stroke::new(1_f32,color)); }
-            }
-        }
-    }
+    if let Some(res) = &s.result { paint_primitives(&p, &res.primitives, |q| transform_gizmo::project(v.camera, rect, q), v.theme.panel); }
     if mode == SketchMode::Tape && screen.len() == 2 {
         if let (Some(&a), Some(h)) = (s.points.first(), s.hover) {
             p.text(screen[0].lerp(screen[1], 0.5) + vec2(8., -8.), Align2::LEFT_BOTTOM, crate::units::format(length(sub(h, a)) as f64, v.units), FontId::monospace(12.), v.theme.warn);
@@ -312,29 +401,160 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
     }
     let chip = Rect::from_min_size(pos2(rect.left() + 56., rect.top() + 48.), vec2(265., 28.));
     p.rect_filled(chip, 2., v.theme.panel); p.rect_stroke(chip, 2., Stroke::new(1_f32, v.theme.stroke), egui::StrokeKind::Inside);
-    p.text(chip.left_center() + vec2(8., 0.), Align2::LEFT_CENTER, format!("{} | {} | {}", mode.name(), s.axis.map(|a| ["X","Y","Z"][a]).unwrap_or("free"), if s.numeric.is_empty() { "type length" } else { &s.numeric }), FontId::monospace(10.), v.theme.text);
-    ui.interact(chip, egui::Id::new("sketch_help"), egui::Sense::hover()).on_hover_text("Click points; Enter finishes Polyline/Polygon. Type a length (units supported), X/Y/Z locks an axis, Ctrl toggles grid snapping. Esc or RMB returns to Select.");
+    p.text(chip.left_center() + vec2(8., 0.), Align2::LEFT_CENTER, format!("{} | {} | {}", mode.name(), lock_label.as_deref().unwrap_or("free"), if s.numeric.is_empty() { "type length" } else { &s.numeric }), FontId::monospace(10.), v.theme.text);
+    ui.interact(chip, egui::Id::new("sketch_help"), egui::Sense::hover()).on_hover_text("Click points; Enter finishes Polyline/Polygon. Type a length, x,y,z, @dx,dy,dz or len<deg (units supported). Right/Left/Up arrows (or X/Y/Z) lock an axis, Down locks parallel/perpendicular, hold Shift to lock the current inference, Tab cycles candidates, tap Alt for linear modes. Hover a point ~0.4 s to track it. Ctrl toggles grid snapping. Esc clears locks/references, then the stroke, then returns to Select.");
+    // Status line: what a click will do, typed-value conflicts, working plane.
+    if let Some(res) = &s.result {
+        let mut status = res.reason.clone();
+        if let Some(t) = &res.typed_status { status = format!("{status} | {t}"); }
+        if res.winner.kind == Kind::Free || res.plane.source == inf::PlaneSource::Face { status = format!("{status} | {}", res.plane.source.label()); }
+        let at = chip.left_bottom() + vec2(0., 4.);
+        let text_color = if res.typed_status.is_some() { v.theme.warn } else { v.theme.text };
+        let galley = p.layout_no_wrap(status, FontId::monospace(10.), text_color);
+        p.rect_filled(Rect::from_min_size(at, galley.size() + vec2(12., 6.)), 2., v.theme.panel);
+        p.galley(at + vec2(6., 3.), galley, text_color);
+    }
     for (i, plane) in [Plane::XY, Plane::XZ, Plane::YZ].into_iter().enumerate() {
         let r = Rect::from_min_size(pos2(chip.right() + 4. + i as f32 * 31., chip.top()), vec2(29., 28.));
         let resp = ui.interact(r, egui::Id::new(("sketch_plane", i)), egui::Sense::click());
         p.rect_filled(r, 2., if s.plane == plane { v.theme.accent_bg } else { v.theme.panel });
         p.text(r.center(), Align2::CENTER_CENTER, plane.label(), FontId::monospace(10.), if s.plane == plane { v.theme.accent } else { v.theme.dim });
-        if resp.clicked() { s.plane = plane; s.points.clear(); s.origin = [0.; 3]; }
+        if resp.clicked() { s.plane = plane; s.points.clear(); s.faces.clear(); s.origin = [0.; 3]; }
     }
     let x0 = chip.right() + 4. + 3. * 31. + 6.;
-    let (_,_,normal) = s.plane.basis();
     for (axis, label) in ["X", "Y", "Z"].into_iter().enumerate() {
         let r = Rect::from_min_size(pos2(x0 + axis as f32 * 29., chip.top()), vec2(27.,28.));
-        let resp = ui.interact(r, egui::Id::new(("sketch_axis",axis)), egui::Sense::click()).on_hover_text("Lock drawing to this axis (X/Y/Z)");
+        let resp = ui.interact(r, egui::Id::new(("sketch_axis",axis)), egui::Sense::click()).on_hover_text("Lock drawing to this axis (X/Y/Z or Right/Left/Up arrow)");
         p.rect_filled(r,2.,if s.axis == Some(axis) { v.theme.accent_bg } else { v.theme.panel });
         p.text(r.center(),Align2::CENTER_CENTER,label,FontId::monospace(10.),if s.axis == Some(axis) { v.theme.accent } else { v.theme.dim });
-        if resp.clicked() && normal[axis] == 0. { s.axis = if s.axis == Some(axis) { None } else { Some(axis) }; }
+        if resp.clicked() { engine_cell.lock().unwrap_or_else(|x| x.into_inner()).toggle_axis_lock(axis); }
     }
+    let r = Rect::from_min_size(pos2(x0 + 3. * 29. + 6., chip.top()), vec2(46., 28.));
+    let resp = ui.interact(r, egui::Id::new("sketch_linear_mode"), egui::Sense::click()).on_hover_text(format!("Linear inferences: {} (click or tap Alt to cycle)", linear_mode.label()));
+    p.rect_filled(r, 2., if linear_mode == inf::LinearMode::All { v.theme.panel } else { v.theme.accent_bg });
+    p.text(r.center(), Align2::CENTER_CENTER, match linear_mode { inf::LinearMode::All => "All", inf::LinearMode::PointsOnly => "Pts", inf::LinearMode::ParallelPerpendicularOnly => "//|_" }, FontId::monospace(10.), v.theme.dim);
+    if resp.clicked() { engine_cell.lock().unwrap_or_else(|x| x.into_inner()).cycle_linear_mode(&settings); }
     ctx.data_mut(|d| d.insert_temp(id(), s));
 }
 
 #[cfg(test)] mod tests {
     use super::*;
+    // ---- inference routing through the real sketch input path (shared engine in ctx memory)
+    const VP: Rect = Rect { min: Pos2::ZERO, max: Pos2 { x: 1280., y: 800. } };
+    fn rig(mode: SketchMode) -> (egui::Context, crate::ui::testing::Fixture) {
+        let mut f = crate::ui::testing::Fixture::new();
+        f.editor.tool = mode.tool();
+        f.camera.projection = inf::math::view_projection([4., -9., 7.], [1.5, 1., 0.], [0., 0., 1.], 0.8, None);
+        (egui::Context::default(), f)
+    }
+    fn key(k: egui::Key) -> egui::Event { egui::Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() } }
+    fn frame(ctx: &egui::Context, f: &crate::ui::testing::Fixture, events: Vec<egui::Event>, mesh: Option<(&[f32], &[u32])>, modifiers: egui::Modifiers) -> Actions {
+        let mut out = Actions::default();
+        let v = f.view();
+        let _ = ctx.run(egui::RawInput { screen_rect: Some(VP), events, modifiers, ..Default::default() }, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, VP, &v, &mut out, mesh));
+        });
+        out
+    }
+    fn scr(f: &crate::ui::testing::Fixture, p: [f32; 3]) -> Pos2 { transform_gizmo::project(f.camera, VP, p).unwrap() }
+    fn click(ctx: &egui::Context, f: &crate::ui::testing::Fixture, at: Pos2, mesh: Option<(&[f32], &[u32])>) -> Actions {
+        let mut out = frame(ctx, f, vec![egui::Event::PointerMoved(at), egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }], mesh, Default::default());
+        out.0.extend(frame(ctx, f, vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }], mesh, Default::default()).0);
+        out
+    }
+    fn state(ctx: &egui::Context) -> State { ctx.data(|d| d.get_temp(id())).unwrap() }
+
+    #[test] fn arrow_lock_and_typed_length_commit_exact_line() {
+        let (ctx, f) = rig(SketchMode::Line);
+        click(&ctx, &f, scr(&f, [1., 1., 0.]), None);
+        let a = state(&ctx).points[0];
+        frame(&ctx, &f, vec![key(egui::Key::ArrowRight)], None, Default::default());
+        let m = frame(&ctx, &f, vec![egui::Event::PointerMoved(scr(&f, [3., 2.2, 0.])), egui::Event::Text("2.5m".into())], None, Default::default());
+        assert!(m.0.is_empty(), "hovering/typing must not emit document actions");
+        frame(&ctx, &f, vec![], None, Default::default());
+        let s = state(&ctx);
+        assert_eq!(s.axis, Some(0));
+        let h = s.hover.unwrap();
+        assert!(length(sub(h, add(a, [2.5, 0., 0.]))) < 1e-5, "{h:?} vs {a:?}");
+        let out = frame(&ctx, &f, vec![key(egui::Key::Enter)], None, Default::default());
+        assert!(matches!(&out.0[..], [UiAction::SketchCommit { points, .. }] if points.len() == 2 && points[1][1] == a[1] && points[1][2] == a[2]), "{:?}", out.0.len());
+        // Up arrow locks Z (3D, not limited to the sketch plane).
+        let (ctx, f) = rig(SketchMode::Line);
+        click(&ctx, &f, scr(&f, [1., 1., 0.]), None);
+        let a = state(&ctx).points[0];
+        frame(&ctx, &f, vec![key(egui::Key::ArrowUp), egui::Event::PointerMoved(scr(&f, [1.3, 1.2, 1.5]))], None, Default::default());
+        frame(&ctx, &f, vec![], None, Default::default());
+        let h = state(&ctx).hover.unwrap();
+        assert!(h[0] == a[0] && h[1] == a[1] && h[2] > 0.5, "{h:?}");
+    }
+
+    #[test] fn escape_clears_locks_then_stroke_then_tool() {
+        let (ctx, f) = rig(SketchMode::Pen);
+        click(&ctx, &f, scr(&f, [1., 1., 0.]), None);
+        frame(&ctx, &f, vec![key(egui::Key::ArrowRight)], None, Default::default());
+        let select = |o: &Actions| o.0.iter().any(|a| matches!(a, UiAction::Editor(super::super::EditorChange::Tool(super::super::Tool::Select))));
+        let o = frame(&ctx, &f, vec![key(egui::Key::Escape)], None, Default::default());
+        assert!(!select(&o) && state(&ctx).axis.is_none() && state(&ctx).points.len() == 1);
+        let o = frame(&ctx, &f, vec![key(egui::Key::Escape)], None, Default::default());
+        assert!(!select(&o) && state(&ctx).points.is_empty());
+        assert!(select(&frame(&ctx, &f, vec![key(egui::Key::Escape)], None, Default::default())));
+    }
+
+    #[test] fn alt_tap_cycles_linear_mode_and_tab_cycles() {
+        let (ctx, f) = rig(SketchMode::Line);
+        frame(&ctx, &f, vec![], None, egui::Modifiers::ALT);
+        frame(&ctx, &f, vec![], None, Default::default());
+        let mode = engine(&ctx).lock().unwrap().linear_mode(&InferenceSettings::default());
+        assert_eq!(mode, inf::LinearMode::PointsOnly);
+        // Alt used with a click (Alt+LMB selection) does not cycle.
+        frame(&ctx, &f, vec![], None, egui::Modifiers::ALT);
+        frame(&ctx, &f, vec![egui::Event::PointerButton { pos: pos2(600., 400.), button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::ALT }], None, egui::Modifiers::ALT);
+        frame(&ctx, &f, vec![], None, Default::default());
+        assert_eq!(engine(&ctx).lock().unwrap().linear_mode(&InferenceSettings::default()), inf::LinearMode::PointsOnly);
+    }
+
+    #[test] fn mesh_snaps_record_reference_descriptors() {
+        // Migrated from sketch_inference: endpoint priority within the radius, nothing far away.
+        let positions = [0., 0., 0., 2., 0., 0., 0., 2., 0.5];
+        let tris = [0u32, 1, 2];
+        let mesh = Some((&positions[..], &tris[..]));
+        let (ctx, f) = rig(SketchMode::Line);
+        let at = scr(&f, [2., 0., 0.]) + vec2(3., -2.);
+        frame(&ctx, &f, vec![egui::Event::PointerMoved(at)], mesh, Default::default());
+        let r = state(&ctx).result.unwrap();
+        assert_eq!(r.winner.kind, Kind::Endpoint);
+        assert_eq!(state(&ctx).hover, Some([2., 0., 0.]));
+        frame(&ctx, &f, vec![egui::Event::PointerMoved(scr(&f, [6., 5., 0.]))], mesh, Default::default());
+        assert!(!matches!(state(&ctx).result.unwrap().winner.kind, Kind::Endpoint | Kind::Midpoint | Kind::OnEdge));
+        click(&ctx, &f, at, mesh);
+        let mid = scr(&f, [1., 1., 0.25]) + vec2(2., 2.);
+        click(&ctx, &f, mid, mesh);
+        let out = frame(&ctx, &f, vec![key(egui::Key::Enter)], mesh, Default::default());
+        let Some(UiAction::SketchCommit { refs, points, .. }) = out.0.first() else { panic!("no commit") };
+        assert_eq!(points[1], [1., 1., 0.25]);
+        assert_eq!(refs[0].as_ref().unwrap()["kind"], "vertex");
+        assert_eq!(refs[0].as_ref().unwrap()["element"], json!([1]));
+        assert_eq!(refs[1].as_ref().unwrap()["kind"], "edge");
+        // Measure keeps its anchor format (node / point / point_count).
+        let (ctx, mut f) = rig(SketchMode::Tape);
+        f.editor.tool = super::super::Tool::Measure;
+        click(&ctx, &f, at, mesh);
+        assert_eq!(state(&ctx).refs[0], Some(json!({"node": f.display, "point": 1, "point_count": 3})));
+    }
+    #[test] fn guide_inference_table_matches_default_tool_keys() {
+        let guide = include_str!("../../docs/NATIVE_EDITOR.md").replace("
+", "
+");
+        let table = guide.split_once("<!-- inference:start -->
+").unwrap().1.split_once("<!-- inference:end -->").unwrap().0;
+        let mut rows = String::from("| Input | While a sketch tool (Line, Polyline, Polygon, Rectangle, Circle, Measure) is active |
+| --- | --- |
+");
+        for (k, a) in inf::settings::InferenceKeys::default().table_rows() { rows.push_str(&format!("| {k} | {a} |
+")); }
+        assert_eq!(table, rows);
+        for name in [&InferenceSettings::default().keys.lock_x, &InferenceSettings::default().keys.cycle_candidate] { assert!(key_named(name).is_some()); }
+    }
     #[test] fn ruler_finish_cancel_and_tool_switch_release_navigation() {
         let ctx = egui::Context::default();
         let mut f = crate::ui::testing::Fixture::new();

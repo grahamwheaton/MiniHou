@@ -14,7 +14,7 @@ Viewport region selection works in object, point, edge, and face modes. Press B 
 
 ## Viewport drawing and cuts
 
-The left strip groups Measure, the five drawing shapes, and Knife/Loop Cut with separators. Each shape has its own line icon and tooltip. Click Line, Polyline, Polygon, Rectangle or Circle to activate it; it stays highlighted for repeated drawings. Each completed drawing adds a curve node through the regular undo path. Two clicks complete Line/Rectangle/Circle; Enter completes Polyline/Polygon, and clicking near the first polygon point closes it. Esc or RMB returns to Select. The sketch chip offers XY/XZ/YZ planes, X/Y/Z axis locks, and keyboard length entry with document units; Ctrl toggles grid snapping.
+The left strip groups Measure, the five drawing shapes, and Knife/Loop Cut with separators. Each shape has its own line icon and tooltip. Click Line, Polyline, Polygon, Rectangle or Circle to activate it; it stays highlighted for repeated drawings. Each completed drawing adds a curve node through the regular undo path. Two clicks complete Line/Rectangle/Circle; Enter completes Polyline/Polygon, and clicking near the first polygon point closes it. RMB returns to Select. The sketch chip offers XY/XZ/YZ planes, X/Y/Z axis locks, the linear inference mode (All / Pts / parallel-perpendicular), and keyboard entry of lengths, coordinates and angles with document units; a status line under it explains the current inference. Ctrl toggles grid snapping. Esc clears a typed value, then locks and references, then the current stroke, then returns to Select.
 
 K activates Knife: click a path across the mesh, Backspace removes its last point, and Enter applies all segments as one knife node and undo step. Ctrl+R activates Loop Cut: hover a visible quad edge to preview the new loop(s); the mouse wheel, PageUp/PageDown, or +/- sets the cut count (1-64, shown beside the cursor). Click to start sliding (the loop follows the pointer along the hovered edge; Shift fine, Ctrl snaps to 0.1), then click, Enter or release a drag to insert one polysplit node (split_edges pA-B, loops, position) as one undo step; Enter while hovering commits a centred cut, RMB or Esc cancels the pending cut and returns to Select. A confirmed cut also returns to Select. They require one successfully cooked displayed stream. The chosen node in the network does not redirect the cut. Pending Knife points are cleared if the camera or target changes. Loop previews stop at boundaries, non-quad faces and non-manifold edges.
 
@@ -181,7 +181,25 @@ Alt+M (or the shelf's Mirror button) starts the Mirror tool (Houdini's Mirror to
 
 ## Known limitations
 
-Sketch & Measure uses displayed vertices, edge midpoints, edges and faces as pointer targets within 12 pixels, with endpoint priority. A coloured marker and label identify the target. Red, green and blue axis guides appear near the previous point; hovered edges also provide parallel and perpendicular directions. X/Y/Z and the right/left/up arrows lock an axis, down releases it, and Shift locks the current axis inference. Line stays active for successive points; clicking its first point closes a coplanar face, while an open coplanar stroke through an existing polygon splits that polygon. Enter commits the open chain.
+Sketch & Measure use the shared inference engine (`src/inference/`, docs/RUST_INFERENCE.md): endpoints, midpoints, true 3D edge intersections, the world origin, on-edge and on-face points, X/Y/Z axes from the start point, parallel/perpendicular to the last hovered edge (perpendicular in the working plane), edge extensions and from-point tracking of hovered references. Within the snap tolerance (default 10 px) exact points beat intersections/tracking, then edges, then directions, then faces; a lock beats everything, and the previous winner is kept unless another is clearly closer. Markers: endpoint green circle, midpoint cyan circle, intersection cross, on edge/face diamond, origin square, acquired reference small dot; axis guides red/green/blue, parallel/perpendicular magenta with the causing edge highlighted, temporary tracking lines dashed, locked lines solid and thicker; a tooltip names the inference after 0.25 s and the status line under the chip says what a click will do (and any typed-value conflict). Occluded and coplanar-diagonal (soft) edges are ignored unless enabled. A stroke started on a face keeps drawing in that face plane. X/Y/Z also lock an axis. Line stays active for successive points; clicking its first point closes a coplanar face, while an open coplanar stroke through an existing polygon splits that polygon. Enter commits the open chain. Committed points are stored as values (static snap); vertex/edge/face snaps also store an `inference_refs` descriptor on the new sketch node for a future live-reference feature.
+
+Preferences > Viewport > Inference sets the tolerance, marker size, tooltip delay, hover-to-reference time, colours, enabled categories, linear mode, hidden-geometry snapping and the tool keys below. The viewport keymap is suspended while a sketch tool is active, so these keys never trigger timeline or other viewport commands; tool keys bound twice are reported there (first action wins). Alt is a tap (press and release alone), so Alt+click and Alt+digit numpad emulation are unaffected.
+
+<!-- inference:start -->
+| Input | While a sketch tool (Line, Polyline, Polygon, Rectangle, Circle, Measure) is active |
+| --- | --- |
+| ArrowRight | Lock X (red); again unlocks |
+| ArrowLeft | Lock Y (green); again unlocks |
+| ArrowUp | Lock Z (blue); again unlocks |
+| ArrowDown | Lock the current parallel/perpendicular (else the inferred direction); again unlocks |
+| Shift (hold) | Lock the current inferred direction or face plane until released |
+| Tab | Cycle overlapping candidates under the cursor |
+| Alt (tap) | Cycle linear inference mode: all / linear off / parallel-perpendicular only |
+| Hover ~0.4 s | Acquire a point or edge as a tracking reference (max 4, oldest replaced) |
+| Digits, units, `x,y,z`, `@dx,dy,dz`, `len<deg` | Exact length along the current direction or lock, absolute / relative point, length at angle in the working plane |
+| Enter | Apply typed value; finish Polyline/Polygon |
+| Escape | Clear typed value, locks and references; else cancel the stroke; else return to Select |
+<!-- inference:end -->
 
 Measure stores annotations in the graph document. Vertex picks store the node identity and point index, so a label follows a moved point while its topology remains valid. An unavailable anchor turns the label grey and keeps its last session position. Click a label to select it, then press Delete; right-click a label for Delete Measurement or Clear all, or choose Clear all under the Edit menu or use Clear Measurements near the bottom left of the viewport. These document edits use normal Undo. Edge and face measurement picks currently remain fixed points.
 

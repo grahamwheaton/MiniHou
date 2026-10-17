@@ -8,7 +8,7 @@ Open **Sketch & Measure** above the viewport. Choose a drawing plane (XY, XZ or 
 
 X/Y/Z locks the next segment to an axis in the selected drawing plane. An axis perpendicular to that plane is rejected. Type a positive length and press Enter to use an exact segment length/radius along the current pointer direction. For a rectangle this length is its diagonal, not separate width and height. Inputs elsewhere in the UI retain normal typing.
 
-Endpoint and edge-midpoint inferencing uses displayed geometry within 12 screen pixels and within the drawing plane. Current sketch endpoints also attract the cursor. Without a nearby endpoint/midpoint, grid and in-plane axis inference apply; the feedback line identifies the current inference. Ctrl temporarily inverts snapping. Grid spacing is in scene units; zero disables grid rounding. The drawing plane origin defaults to world zero (the API can provide another origin).
+Native editor: inferencing now goes through the shared engine described in docs/RUST_INFERENCE.md (10 px default tolerance, 3D axes/parallel/perpendicular/extension, true 3D intersections, reference tracking, face-plane drawing for Line/Polyline). The paragraph below describes the original web sketch tool. Endpoint and edge-midpoint inferencing uses displayed geometry within 12 screen pixels and within the drawing plane. Current sketch endpoints also attract the cursor. Without a nearby endpoint/midpoint, grid and in-plane axis inference apply; the feedback line identifies the current inference. Ctrl temporarily inverts snapping. Grid spacing is in scene units; zero disables grid rounding. The drawing plane origin defaults to world zero (the API can provide another origin).
 
 ## Tape and dimensions
 
@@ -16,7 +16,7 @@ Tape picks two points and leaves a world-space line and distance label, updated 
 
 ## Limits and validation
 
-Drawing is on principal planes, not arbitrary picked faces. No automatic face intersection/healing, arc tool, offset inference, parallel inference, locked inference references, hidden-geometry filtering or model topology editing is claimed. Closed outlines reject duplicate points, zero area, nonplanarity and ordinary crossing segments; complex self-touching outlines are outside this basic tool. Circle polygons have bounded 3–256 segments through the API. No enormous realised-copy fixtures are used.
+(Web tool limits; the native editor's line tools draw on a picked face plane and support parallel inference, locks and hidden-geometry filtering, see docs/RUST_INFERENCE.md.) Drawing is on principal planes, not arbitrary picked faces. No automatic face intersection/healing, arc tool, offset inference, parallel inference, locked inference references, hidden-geometry filtering or model topology editing is claimed. Closed outlines reject duplicate points, zero area, nonplanarity and ordinary crossing segments; complex self-touching outlines are outside this basic tool. Circle polygons have bounded 3–256 segments through the API. No enormous realised-copy fixtures are used.
 
 The numerical tests execute the shipped JavaScript and cook its output with the existing Python curve node. The browser test exercises actual pointer/keyboard handlers, exact numeric length, rectangle creation, tape labels, cancellation and text-input preservation using a deterministic projection fixture. Host Blender UI validation is separate.
 

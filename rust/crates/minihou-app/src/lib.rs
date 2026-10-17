@@ -25,6 +25,7 @@ use std::{collections::HashMap, ops::Range, path::Path, time::Instant};
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 pub mod units;
+pub mod inference;
 pub use units::{LengthUnit, UnitSettings};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

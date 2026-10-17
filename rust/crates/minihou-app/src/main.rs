@@ -32,6 +32,19 @@ use minihou_core::python_bridge::PythonGate;
 
 /// The desktop session's Python permission. Only the Preferences window and the Run / Skip banner change it; the HTTP API
 /// and the Blender link never see it (their sessions have no gate, see docs/RUST_PYTHON_NODE.md).
+/// Static-snap metadata: each clicked sketch point's inference reference descriptor
+/// (docs/RUST_INFERENCE.md), stamped with the source node's stable identity like measurement anchors.
+fn attach_inference_refs(value: &mut Value, id: &str, mut refs: Vec<Option<Value>>) {
+    if refs.iter().all(Option::is_none) { return; }
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+    for reference in refs.iter_mut().flatten() {
+        let Some(node) = reference["node"].as_str().map(str::to_owned) else { continue; };
+        if !value["nodes"][&node].is_object() { *reference = Value::Null; continue; }
+        if !value["nodes"][&node]["measurement_identity"].is_string() { value["nodes"][&node]["measurement_identity"] = json!(format!("measure-{stamp}-{node}")); }
+        reference["identity"] = value["nodes"][&node]["measurement_identity"].clone();
+    }
+    if value["nodes"][id].is_object() { value["nodes"][id]["inference_refs"] = json!(refs); }
+}
 fn python_gate() -> std::sync::Arc<PythonGate> {
     static GATE: std::sync::OnceLock<std::sync::Arc<PythonGate>> = std::sync::OnceLock::new();
     GATE.get_or_init(|| std::sync::Arc::new(PythonGate::denied())).clone()
@@ -1466,15 +1479,16 @@ impl App {
         }
         if confirm { self.finish_modal(modal); } else { self.modal=Some(modal); ctx.request_repaint(); }
     }
-    fn sketch_commit(&mut self, name: &str, points: &[[f32; 3]], closed: bool) {
+    fn sketch_commit(&mut self, name: &str, points: &[[f32; 3]], closed: bool, refs: Vec<Option<Value>>) {
         let res = if name == "Bezier" {
             graph_edit::add_bezier_sketch(self.editor.doc.value(), name, points, closed, &self.selected)
         } else {
             graph_edit::add_sketch(self.editor.doc.value(), name, points, closed, &self.selected)
         };
-        let Some((value, id)) = res else {
+        let Some((mut value, id)) = res else {
             self.file_status = "Could not add sketch".into(); return;
         };
+        attach_inference_refs(&mut value, &id, refs);
         if self.commit_document(value, "add sketch") { self.selected = id.clone(); self.selected_set = std::collections::BTreeSet::from([id.clone()]); self.display = id; }
     }
     fn add_measurement(&mut self, a: [f32; 3], b: [f32; 3], mut refs: [Option<Value>;2]) {
@@ -2094,7 +2108,7 @@ impl App {
                         }
                     } else { self.file_status = "Cut target changed; try the cut again".into(); }
                 }
-                UiAction::SketchCommit { name, points, closed } => self.sketch_commit(&name, &points, closed),
+                UiAction::SketchCommit { name, points, closed, refs } => self.sketch_commit(&name, &points, closed, refs),
                 UiAction::AddMeasurement { a, b, refs } => self.add_measurement(a, b, refs),
                 UiAction::DeleteMeasurement(index) => {self.delete_measurement(index);ui::sketch::clear_measurement_selection(ctx);},
                 UiAction::ClearMeasurements => {self.clear_measurements();ui::sketch::clear_measurement_selection(ctx);},
@@ -2577,6 +2591,7 @@ impl eframe::App for App {
         let kctx = KeyContext { viewport_hovered: self.viewport_hover, network_hovered: self.network_hover,
             in_edit_mode: self.editor_state.selection != ui::SelectionMode::Object, selected: Some(&self.selected) };
         if !fly_frame && !busy && !ui::viewport_ui::popup_open(ctx) && self.modal.is_none() && self.model_modal.is_none() && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) { for action in self.keymap.poll(ctx, &kctx) { out.push(action); } }
+        ctx.data_mut(|d| d.insert_temp(ui::sketch::settings_id(), self.prefs.inference.clone()));
         {
             let repeat_desc = self.last_operator.as_ref().map(LastOperator::description);
             let transform_node = if self.editor_state.selection == ui::SelectionMode::Object { &self.selected } else { &self.display };
