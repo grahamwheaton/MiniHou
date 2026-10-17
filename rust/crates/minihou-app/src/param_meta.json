@@ -4962,6 +4962,16 @@
    "default": "",
    "doc": "Exactly one convex planar face; inset a face first to create a smaller opening",
    "kind": "str"
+  },
+  "through": {
+   "default": "auto",
+   "doc": "Punch through: auto opens a hole when the push reaches or passes the opposite surface (excess ignored) and merges a pull that lands on a parallel face; force always punches; off is the original single-convex-face behaviour.",
+   "kind": "enum",
+   "options": [
+    "off",
+    "auto",
+    "force"
+   ]
   }
  },
  "python": {

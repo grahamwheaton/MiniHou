@@ -260,6 +260,9 @@ fn canonical_compare(name: &str, a: &Geometry, b: &Geometry, tol: f64) {
         }
     }
 }
+const RUST_ONLY: &[(&str, &str)] = &[("pushpull", "through")];
+/// The Python oracle is compared against the legacy value of each Rust-only parameter.
+const RUST_ONLY_LEGACY: &[(&str, &str, &str)] = &[("pushpull", "through", "off")];
 fn check(c: &Value) {
     let name = c["name"].as_str().unwrap();
     let spec = super::get(c["type"].as_str().unwrap()).unwrap();
@@ -267,9 +270,17 @@ fn check(c: &Value) {
         .params
         .iter()
         .map(|p| (p.name.to_string(), (p.default)()))
+        // Rust-only parameters (e.g. pushpull `through`) have no Python oracle.
+        .filter(|(k, _)| !RUST_ONLY.contains(&(spec.name, k.as_str())))
         .collect();
     assert_eq!(Value::Object(defaults), c["defaults"], "{name} defaults");
-    let p = Params::resolve(spec.params, c["params"].as_object()).unwrap();
+    let mut params = c["params"].as_object().cloned().unwrap_or_default();
+    for (ty, key, legacy) in RUST_ONLY_LEGACY {
+        if spec.name == *ty && !params.contains_key(*key) {
+            params.insert(key.to_string(), Value::from(*legacy));
+        }
+    }
+    let p = Params::resolve(spec.params, Some(&params)).unwrap();
     let inputs: Vec<_> = c["inputs"]
         .as_array()
         .unwrap()
@@ -367,6 +378,33 @@ fn polyreduce_python_parity() {
 #[test]
 fn pushpull_python_parity() {
     cases("pushpull");
+}
+#[test]
+fn pushpull_auto_through_keeps_python_shapes() {
+    // The default `through: auto` must give the same solid as Python whenever Python
+    // succeeds (it may additionally drop collinear split points).
+    let cases: Value = serde_json::from_str(include_str!("test_data/boolean_parity.json")).unwrap();
+    let mut count = 0;
+    for c in cases.as_array().unwrap() {
+        if c["type"] != "pushpull" || c.get("error").is_some() {
+            continue;
+        }
+        let name = c["name"].as_str().unwrap();
+        let spec = super::get("pushpull").unwrap();
+        let p = Params::resolve(spec.params, c["params"].as_object()).unwrap();
+        let inputs: Vec<_> = c["inputs"].as_array().unwrap().iter().map(|v| vec![Arc::new(geometry(v))]).collect();
+        let g = (spec.cook)(&inputs, &p).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let expected = geometry(&c["expected"]);
+        assert!(twins(&g).iter().all(Option::is_some), "{name}: closed");
+        let edges = crate::topo::edges(&g.topology, g.npoints);
+        // Same genus; Python's rotated_5 oracle keeps a degenerate sliver (Euler 4) that
+        // auto's collinear clean-up removes, so the count may only go down.
+        let chi = g.npoints as i64 - edges.len() as i64 + g.nprims() as i64;
+        assert!(chi <= c["stats"]["euler"].as_i64().unwrap() && chi % 2 == 0, "{name}: Euler {chi}");
+        assert!((volume(&g) - volume(&expected)).abs() <= 2e-5 * (1. + volume(&expected).abs()), "{name}: volume");
+        count += 1;
+    }
+    assert!(count >= 10);
 }
 #[test]
 fn boolean_fracture_python_parity() {
