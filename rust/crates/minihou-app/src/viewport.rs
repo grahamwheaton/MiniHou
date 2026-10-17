@@ -20,7 +20,7 @@ pub struct Overlay { pub grid: bool, pub axes: bool, pub geometry: crate::ui::Ov
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct TexVertex { p:[f32;3], n:[f32;3], color:[f32;3], uv:[f32;2], valid:f32 }
 #[derive(Clone)]
-struct SurfaceTri { vertices:[TexVertex;3], points:[u32;3], slot:String, uv_sets:BTreeMap<String,[[f32;2];3]> }
+struct SurfaceTri { vertices:[TexVertex;3], points:[u32;3], prim:u32, slot:String, uv_sets:BTreeMap<String,[[f32;2];3]> }
 
 pub struct Scene {
     p: Vec<f32>, n: Vec<f32>, point: Vec<u32>, line: Vec<u32>, tri: Vec<u32>, edge: Vec<u32>,
@@ -98,7 +98,7 @@ impl Scene {
                 TexVertex {p:[p[point*3],p[point*3+1],p[point*3+2]],n:[normal[0],normal[1],normal[2]],color:[0.72;3],uv:if valid>0. {uv} else {[0.;2]},valid}
             });
             let uv_sets=provenance.uv_sets.iter().map(|(name,values)| (name.clone(),std::array::from_fn(|k|[values[(ti*3+k)*2],values[(ti*3+k)*2+1]]))).collect();
-            textured.push(SurfaceTri { vertices,points:[provenance.point[ti*3],provenance.point[ti*3+1],provenance.point[ti*3+2]],slot:name,uv_sets });
+            textured.push(SurfaceTri { vertices,points:[provenance.point[ti*3],provenance.point[ti*3+1],provenance.point[ti*3+2]],prim:provenance.prim[ti],slot:name,uv_sets });
         }
         Self { p:p.to_vec(),n,point,line,tri:l.tri,edge:l.edge,nlp,nln,normal_points,bbp,center,radius,textured }
     }
@@ -111,6 +111,7 @@ fn cube_seams_expand_to_triangle_corners() {
     assert_eq!(scene.positions().len()/3,8);
     assert_eq!(scene.textured.len(),12);
     assert_eq!(scene.textured.len()*3,36);
+    assert_eq!(scene.textured.iter().map(|t|t.prim).collect::<std::collections::BTreeSet<_>>().len(),6);
     assert!(scene.textured.iter().all(|t|t.vertices.iter().all(|v|v.valid==1.)));
 }
 /// Standalone points and non-surface primitive segments survive every proxy cut.
