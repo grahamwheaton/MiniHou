@@ -1,6 +1,7 @@
 //! Parameters panel: Main.dc.html `.par` and Params.dc.html.
 use super::{theme::Theme, Actions, UiAction, View};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
+use super::number_step;
 use minihou_app::{clamp_parameter, metadata_kind, param_kind, param_meta, slider_range, Edit, ParamKind};
 use minihou_core::{nodes, params::ParamSpec};
 use serde_json::{json, Value};
@@ -1267,8 +1268,15 @@ fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: 
             } else {
                 response.drag_delta().x as f64 * speed
             };
-            if step != 0. { let next = clamp(*v + step); if next != *v { *v = next; changed = true; } }
-        }
+            if integer {
+                // accumulate sub-unit drags so slow integer drags still move
+                let acc_id = id.with("drag_acc");
+                let acc = ui.ctx().data(|d| d.get_temp::<f64>(acc_id)).unwrap_or(0.) + step;
+                let whole = acc.trunc();
+                ui.ctx().data_mut(|d| d.insert_temp(acc_id, acc - whole));
+                if whole != 0. { let next = clamp(*v + whole); if next != *v { *v = next; changed = true; } }
+            } else if step != 0. { let next = clamp(*v + step); if next != *v { *v = next; changed = true; } }
+        } else if integer { ui.ctx().data_mut(|d| d.remove::<f64>(id.with("drag_acc"))); }
         if response.double_clicked() {
             let text = if let Some(u) = units {
                 u.format(*v)
@@ -1289,6 +1297,39 @@ fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: 
         ui.painter().text(anchor, align, text, egui::FontId::monospace(12.), if ui.is_enabled() { t.text } else { t.faint });
     }
     changed
+}
+
+/// A boxed number field: drag/double-click text (drag_number) plus up/down arrows at the right
+/// end and gated wheel stepping (see ui::number_step for step sizes and the wheel rule).
+#[allow(clippy::too_many_arguments)]
+fn number_field(ui: &mut egui::Ui, width: f32, id: egui::Id, v: &mut f64, speed: f64, range: &std::ops::RangeInclusive<f64>, integer: bool, soft: Option<(f64, f64)>, align: Align2, t: &Theme, units: Option<crate::units::UnitSettings>) -> (bool, Rect) {
+    let (outer, inner) = boxed(ui, width, t);
+    let arrows = Rect::from_min_max(Pos2::new(outer.right() - number_step::STEPPER_W, outer.top() + 1.), Pos2::new(outer.right() - 1., outer.bottom() - 1.));
+    let text = Rect::from_min_max(inner.min, Pos2::new(arrows.left() - 1., inner.bottom()));
+    let mut changed = drag_number(ui, text, id, v, speed, range, integer, align, t, units);
+    let steps = number_step::stepper(ui, arrows, id, t) + step_by_wheel(ui, outer, id);
+    changed |= apply_field_steps(ui, id, v, steps, range, integer, soft, units);
+    (changed, outer)
+}
+fn step_by_wheel(ui: &egui::Ui, rect: Rect, id: egui::Id) -> i32 {
+    let editing = ui.ctx().data(|d| d.get_temp::<String>(id.with("edit")).is_some());
+    number_step::wheel(ui, rect, id, editing)
+}
+#[allow(clippy::too_many_arguments)]
+fn apply_field_steps(ui: &egui::Ui, id: egui::Id, v: &mut f64, steps: i32, range: &std::ops::RangeInclusive<f64>, integer: bool, soft: Option<(f64, f64)>, units: Option<crate::units::UnitSettings>) -> bool {
+    if steps == 0 { return false; }
+    let mods = ui.input(|i| i.modifiers);
+    let step = number_step::step_size(integer, soft, *v) * number_step::modifier_scale(mods, integer);
+    let next = number_step::apply_step(*v, step, steps as f64, range, integer);
+    if next == *v { return false; }
+    *v = next;
+    let edit_id = id.with("edit");
+    if ui.ctx().data(|d| d.get_temp::<String>(edit_id).is_some()) {
+        // keep the text being typed in step with the wheel
+        let text = if let Some(u) = units { u.format(next) } else if integer { format!("{}", next as i64) } else { format!("{next}") };
+        ui.ctx().data_mut(|d| d.insert_temp(edit_id, text));
+    }
+    true
 }
 
 fn color_widget(
@@ -1697,6 +1738,7 @@ fn render_vector_fields(
     let total_spacing = spacing * (n as f32 - 1.0);
     let axis_width = ((width - total_spacing) / n as f32).max(22.0);
     let range = meta.and_then(|m| m["min"].as_f64()).unwrap_or(f64::NEG_INFINITY)..=meta.and_then(|m| m["max"].as_f64()).unwrap_or(f64::INFINITY);
+    let soft = meta.and_then(slider_range).map(|r| (*r.start(), *r.end()));
 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = spacing;
@@ -1717,10 +1759,11 @@ fn render_vector_fields(
                     egui::FontId::monospace(11.),
                     axis_color,
                 );
+                let id = ui.id().with(("v", i, outer.min.x as i32, outer.min.y as i32));
                 changed |= drag_number(
                     ui,
                     Rect::from_min_max(Pos2::new(inner.left() + 12., inner.top()), inner.max),
-                    ui.id().with(("v", i, outer.min.x as i32, outer.min.y as i32)),
+                    id,
                     x,
                     0.01,
                     &range,
@@ -1729,6 +1772,8 @@ fn render_vector_fields(
                     t,
                     units,
                 );
+                let steps = step_by_wheel(ui, outer, id);
+                changed |= apply_field_steps(ui, id, x, steps, &range, false, soft, units);
             } else if let Some(u) = units {
                 changed |= ui.add_sized([axis_width, 22.], egui::DragValue::new(x).speed(0.01).range(range.clone()).suffix(format!(" {}", u.display.symbol()))).changed();
             } else {
@@ -1778,7 +1823,7 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
                     None
                 }
             });
-            let box_w: f32 = if units.is_some() { 84. } else { 68. };
+            let box_w: f32 = number_step::STEPPER_W + if units.is_some() { 84. } else { 68. };
             let drag_width = if integer {
                 if theme.is_some() { width - 32. } else { width }
             } else if s_range.is_some() {
@@ -1787,10 +1832,12 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
                 width
             };
             let range = meta["min"].as_f64().or_else(|| if s_range.is_some() { Some(0.0) } else { None }).unwrap_or(f64::NEG_INFINITY)..=meta["max"].as_f64().unwrap_or(f64::INFINITY);
-            if let (Some(t), false) = (theme, integer) {
-                let (outer, inner) = boxed(ui, drag_width.max(24.), t);
-                let drag_speed = s_range.as_ref().map_or(0.01, |r| ((r.end() - r.start()) / 400.).clamp(0.001, 1.));
-                changed |= drag_number(ui, inner, ui.id().with(("num", meta["default"].to_string(), outer.min.x as i32, outer.min.y as i32)), &mut v, drag_speed, &range, false, Align2::RIGHT_CENTER, t, units);
+            let soft = s_range.as_ref().map(|r| (*r.start(), *r.end()));
+            if let Some(t) = theme {
+                let drag_speed = if integer { 0.1 } else { s_range.as_ref().map_or(0.01, |r| ((r.end() - r.start()) / 400.).clamp(0.001, 1.)) };
+                let at = ui.next_widget_position();
+                let id = ui.id().with(("num", meta["default"].to_string(), at.x as i32, at.y as i32));
+                changed |= number_field(ui, drag_width.max(36.), id, &mut v, drag_speed, &range, integer, soft, Align2::RIGHT_CENTER, t, units).0;
             } else if let Some(u) = units {
                 changed |= ui.add_sized([drag_width.max(24.), 22.], egui::DragValue::new(&mut v).speed(0.01).range(range.clone()).suffix(format!(" {}", u.display.symbol()))).changed();
             } else {
@@ -1845,18 +1892,10 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
         ParamKind::Integer => {
             let mut v = value.as_i64().or_else(|| value.as_f64().map(|f| f as i64)).unwrap_or(0);
             let changed = if let Some(t) = theme {
-                let (outer, inner) = boxed(ui, width.max(40.), t);
-                let p = ui.painter();
-                let c = outer.center().y;
-                p.add(egui::Shape::line(vec![Pos2::new(outer.left() + 9., c - 3.), Pos2::new(outer.left() + 6., c), Pos2::new(outer.left() + 9., c + 3.)], Stroke::new(1.3_f32, t.dim)));
-                p.add(egui::Shape::line(vec![Pos2::new(outer.right() - 9., c - 3.), Pos2::new(outer.right() - 6., c), Pos2::new(outer.right() - 9., c + 3.)], Stroke::new(1.3_f32, t.dim)));
                 let range = meta.and_then(|m| m["min"].as_f64()).unwrap_or(f64::NEG_INFINITY)..=meta.and_then(|m| m["max"].as_f64()).unwrap_or(f64::INFINITY);
                 let mut x = v as f64;
-                let mut hit = ui.interact(Rect::from_min_size(outer.min, Vec2::new(16., 22.)), ui.id().with(("dec", outer.min.x as i32, outer.min.y as i32)), Sense::click()).clicked().then_some(x - 1.);
-                if hit.is_none() { hit = ui.interact(Rect::from_min_size(Pos2::new(outer.right() - 16., outer.top()), Vec2::new(16., 22.)), ui.id().with(("inc", outer.min.x as i32, outer.min.y as i32)), Sense::click()).clicked().then_some(x + 1.); }
-                let mut moved = false;
-                if let Some(n) = hit { x = n.clamp(*range.start(), *range.end()); moved = true; }
-                moved |= drag_number(ui, inner.shrink2(Vec2::new(16., 0.)), ui.id().with(("int", outer.min.x as i32, outer.min.y as i32)), &mut x, 0.1, &range, true, Align2::CENTER_CENTER, t, None);
+                let at = ui.next_widget_position();
+                let moved = number_field(ui, width.max(40.), ui.id().with(("int", at.x as i32, at.y as i32)), &mut x, 0.1, &range, true, None, Align2::RIGHT_CENTER, t, None).0;
                 if moved { v = x as i64; }
                 moved
             } else {
@@ -1868,8 +1907,8 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
         ParamKind::Float => {
             let mut v = value.as_f64().unwrap_or(0.);
             let changed = if let Some(t) = theme {
-                let (outer, inner) = boxed(ui, width.max(24.), t);
-                drag_number(ui, inner, ui.id().with(("f_num", outer.min.x as i32, outer.min.y as i32)), &mut v, 0.01, &(f64::NEG_INFINITY..=f64::INFINITY), false, Align2::RIGHT_CENTER, t, units)
+                let at = ui.next_widget_position();
+                number_field(ui, width.max(36.), ui.id().with(("f_num", at.x as i32, at.y as i32)), &mut v, 0.01, &(f64::NEG_INFINITY..=f64::INFINITY), false, None, Align2::RIGHT_CENTER, t, units).0
             } else if let Some(u) = units {
                 ui.add_sized([width, 22.], egui::DragValue::new(&mut v).speed(0.01).suffix(format!(" {}", u.display.symbol()))).changed()
             } else {
@@ -2387,5 +2426,59 @@ fn json_close(a: &serde_json::Value, b: &serde_json::Value) -> bool {
                 assert!(!changed_ramp);
             });
         });
+    }
+
+    /// Drives number_field through real egui frames: arrow press, hold-repeat with clamping,
+    /// Alt+wheel stepping and plain wheel left to the panel's scrolling.
+    #[test]
+    fn number_field_arrows_and_gated_wheel() {
+        let ctx = egui::Context::default();
+        let theme = Theme::dark();
+        let screen = Rect::from_min_size(Pos2::ZERO, Vec2::new(400., 200.));
+        let field = std::cell::Cell::new(Rect::NOTHING);
+        let frame = |ctx: &egui::Context, v: &mut f64, range: std::ops::RangeInclusive<f64>, integer: bool, time: f64, modifiers: egui::Modifiers, events: Vec<egui::Event>| -> (bool, egui::Vec2) {
+            let mut changed = false;
+            let input = egui::RawInput { screen_rect: Some(screen), time: Some(time), modifiers, events, ..Default::default() };
+            let mut leftover = egui::Vec2::ZERO;
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let (c, r) = number_field(ui, 120., egui::Id::new("nf"), v, 0.1, &range, integer, Some((0., 10.)), Align2::RIGHT_CENTER, &theme, None);
+                    changed = c; field.set(r);
+                });
+                leftover = ctx.input(|i| i.smooth_scroll_delta + i.raw_scroll_delta);
+            });
+            (changed, leftover)
+        };
+        let none = egui::Modifiers::NONE;
+        let mut v = 2.;
+        frame(&ctx, &mut v, 0.0..=3.0, true, 0., none, vec![]);
+        let fr = field.get();
+        let up = Pos2::new(fr.right() - 6., fr.top() + 5.);
+        let down = Pos2::new(fr.right() - 6., fr.bottom() - 5.);
+        let press = |pos: Pos2, pressed: bool| vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }];
+        // press the up arrow: one step on press, then held repeats stop at max 3
+        assert!(frame(&ctx, &mut v, 0.0..=3.0, true, 0.1, none, press(up, true)).0);
+        assert_eq!(v, 3.);
+        frame(&ctx, &mut v, 0.0..=3.0, true, 2.0, none, vec![]);
+        assert_eq!(v, 3.);
+        frame(&ctx, &mut v, 0.0..=3.0, true, 2.1, none, press(up, false));
+        // a held down arrow repeats after the delay: press (1) + due at 0.5 s held
+        let mut w = 10.;
+        frame(&ctx, &mut w, f64::NEG_INFINITY..=f64::INFINITY, true, 3.0, none, press(down, true));
+        assert_eq!(w, 9.);
+        frame(&ctx, &mut w, f64::NEG_INFINITY..=f64::INFINITY, true, 3.5, none, vec![]);
+        assert_eq!(w, 10. - number_step::repeat_steps_due(0.5) as f64);
+        frame(&ctx, &mut w, f64::NEG_INFINITY..=f64::INFINITY, true, 3.6, none, press(down, false));
+        // plain wheel over the field scrolls the panel, Alt+wheel steps (float: soft range 0..10 -> 0.1)
+        let mut f = 1.;
+        let wheel = |m: egui::Modifiers| vec![egui::Event::PointerMoved(fr.center()), egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: Vec2::new(0., 1.), modifiers: m }];
+        let (changed, leftover) = frame(&ctx, &mut f, 0.0..=10.0, false, 4.0, none, wheel(none));
+        assert!(!changed && f == 1. && leftover != Vec2::ZERO, "{leftover:?}");
+        let alt = egui::Modifiers { alt: true, ..Default::default() };
+        let (changed, leftover) = frame(&ctx, &mut f, 0.0..=10.0, false, 4.1, alt, wheel(alt));
+        assert!(changed && (f - 1.1).abs() < 1e-9 && leftover == Vec2::ZERO, "{f} {leftover:?}");
+        let fine = egui::Modifiers { alt: true, shift: true, ..Default::default() };
+        frame(&ctx, &mut f, 0.0..=10.0, false, 4.2, fine, wheel(fine));
+        assert!((f - 1.11).abs() < 1e-9, "{f}");
     }
 }
