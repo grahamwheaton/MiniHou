@@ -273,10 +273,10 @@ pub fn clear_measurements(value:&Value)->Option<Value> {
     rows.clear();Some(next)
 }
 
-/// Viewport topology edits use the displayed stream, never an unrelated selected node.
+/// Viewport topology edits use one displayed object stream.
 pub fn add_viewport_cut(value: &Value, source: &str, ty: &str, params: Value) -> Option<(Value, String)> {
     if !matches!(ty, "knife" | "loop_cut" | "polysplit" | "edge_slide") || !params.is_object() { return None; }
-    if minihou_app::display_nodes(value) != vec![source.to_owned()] { return None; }
+    if !minihou_app::display_nodes(value).iter().any(|id|id==source) { return None; }
     nodes(value)?.get(source)?;
     let (mut next, id) = add(value, ty, Some(source))?;
     next["nodes"][&id]["params"] = params;
@@ -905,6 +905,18 @@ mod tests {
         }
         assert!(add_viewport_cut(&base,"box1","loop_cut",json!({})).is_none());
         assert!(add_viewport_cut(&base,"out","transform",json!({})).is_none());
+    }
+    #[test] fn viewport_cut_splices_only_active_output_with_three_displays() {
+        let base=json!({"version":1,"display":["a","b","c"],"nodes":{
+            "box_a":{"type":"box"},"box_b":{"type":"box"},"box_c":{"type":"box"},
+            "a":{"type":"output","inputs":{"geo":"box_a"}},
+            "b":{"type":"output","inputs":{"geo":"box_b"}},
+            "c":{"type":"output","inputs":{"geo":"box_c"}}}});
+        let (next,id)=add_viewport_cut(&base,"b","edge_slide",json!({"group":"p0-1","factor":0.25})).unwrap();
+        assert_eq!(next["nodes"]["b"]["inputs"]["geo"],id);
+        assert_eq!(next["nodes"]["a"],base["nodes"]["a"]);
+        assert_eq!(next["nodes"]["c"],base["nodes"]["c"]);
+        assert_eq!(next["display"],base["display"]);
     }
     #[test] fn sketch_wires_after_a_cooked_node_and_can_stand_alone() {
         let points = [[0.,0.,0.], [1.,0.,0.], [1.,1.,0.]];

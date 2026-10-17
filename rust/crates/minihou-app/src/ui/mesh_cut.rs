@@ -29,6 +29,7 @@ fn edge_world_fraction(camera: CameraInfo, a: [f32; 3], b: [f32; 3], screen_frac
 
 #[derive(Clone, Default)]
 struct Mesh {
+    geometry: Geometry,
     positions: Vec<f32>,
     /// Fan triangulation of closed faces, used only to test whether a hovered edge is hidden.
     tris: Vec<u32>,
@@ -50,7 +51,7 @@ impl Mesh {
         let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
         for q in positions.chunks_exact(3) { for k in 0..3 { lo[k] = lo[k].min(q[k]); hi[k] = hi[k].max(q[k]); } }
         let scale = if positions.is_empty() { 1. } else { (0..3).map(|k| (hi[k] - lo[k]).powi(2)).sum::<f32>().sqrt().max(1e-6) };
-        Self { positions, tris, loops, edges, scale }
+        Self { geometry:g.clone(), positions, tris, loops, edges, scale }
     }
     fn point(&self, i: usize) -> [f32; 3] { [self.positions[3 * i], self.positions[3 * i + 1], self.positions[3 * i + 2]] }
     /// Nothing displayed lies in front of `world` along the view ray through it (perspective and ortho alike).
@@ -84,6 +85,18 @@ impl Mesh {
     fn preview(&self, seed: Edge, count: usize, factor: f64) -> Vec<([f32; 3], [f32; 3])> {
         self.loops.ring([seed]).cut_lines(&self.positions, &loop_slide_fractions(count, 0.5, factor, true))
     }
+}
+pub(crate) fn object_geometry(g:&Geometry,range:&std::ops::Range<u32>)->Option<Geometry> {
+    if range.end as usize>g.npoints || range.start>=range.end {return None;}
+    let mut vertices=Vec::new();let mut offsets=vec![0];let mut closed=Vec::new();
+    for (face,bounds) in g.topology.prim_offsets.windows(2).enumerate() {
+        let ids=&g.topology.vertex_point[bounds[0] as usize..bounds[1] as usize];
+        if ids.iter().all(|&id|id>=range.start as i32&&id<range.end as i32) {
+            vertices.extend(ids.iter().map(|id|*id-range.start as i32));
+            offsets.push(vertices.len() as i32);closed.push(g.topology.is_closed(face));
+        }
+    }
+    Geometry::from_arrays(g.p()[range.start as usize*3..range.end as usize*3].to_vec(),vertices,offsets,Some(closed)).ok()
 }
 
 /// Count after `steps` wheel notches or PageUp/PageDown presses, clamped to polysplit's 1..64.
@@ -158,14 +171,13 @@ pub fn blocks_navigation(ctx: &egui::Context) -> bool { ctx.data(|d| d.get_temp:
 pub fn captures_wheel(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| s.tool == Some(Tool::LoopCut)))
 }
-pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
+pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::ops::Range<u32>)>, out: &mut Actions) {
     let tool = v.editor.tool;
     if !matches!(tool, Tool::Knife | Tool::LoopCut | Tool::EdgeSlide) { cancel(ui.ctx()); return; }
     let ctx = ui.ctx().clone();
     let mut s: State = ctx.data_mut(|d| d.get_temp(id())).unwrap_or_default();
-    let displayed = minihou_app::display_nodes(v.doc);
-    let ready = displayed.len() == 1 && !v.cooking.cooking() && v.cooking.error.is_none() && v.cooking.geometry.is_some();
-    let source = displayed.first().cloned().unwrap_or_default();
+    let ready = active.is_some() && !v.cooking.cooking() && v.cooking.error.is_none() && v.cooking.geometry.is_some();
+    let source = active.map(|(id,_)|id.to_owned()).unwrap_or_default();
     let aspect = rect.width()/rect.height().max(1.);
     if s.tool != Some(tool) || s.source != source {
         s = State { tool: Some(tool), count: 1, clamp: true, ..Default::default() };
@@ -173,7 +185,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     if s.revision != v.cooking.completed || s.source != source || s.mesh.positions.is_empty() && v.cooking.geometry.is_some() {
         // The cut count is a tool setting and survives re-cooks; a pending slide refers to the old topology.
         s.revision = v.cooking.completed; s.source = source;
-        s.mesh = Arc::new(v.cooking.geometry.as_deref().map(Mesh::new).unwrap_or_default());
+        s.mesh = Arc::new(active.and_then(|(_,range)|v.cooking.geometry.as_deref().and_then(|g|object_geometry(g,range))).as_ref().map(Mesh::new).unwrap_or_default());
         s.slide = None; s.hover = None; s.hover_key = None;
     }
     s.count = s.count.clamp(1, LOOP_CUT_MAX);
@@ -277,7 +289,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     let snap = modifiers.ctrl;
     let active = s.slide.map(|sl| (sl.edge, slide_factor(sl.raw, snap))).or(s.hover.map(|e| (e, 0.)));
     if let (true, Some((seed, factor))) = (loop_cut, active) {
-        let lines=if s.slide.is_some() { v.cooking.geometry.as_deref().and_then(|g|loop_cut_preview(g,seed,s.count,factor,s.even,s.flipped,s.clamp).ok()).unwrap_or_default() }
+        let lines=if s.slide.is_some() { loop_cut_preview(&s.mesh.geometry,seed,s.count,factor,s.even,s.flipped,s.clamp).unwrap_or_default() }
             else { s.mesh.preview(seed,s.count,0.) };
         for (a,b) in lines {
             if let (Some(a),Some(b)) = (transform_gizmo::project(v.camera,rect,a),transform_gizmo::project(v.camera,rect,b)) { painter.line_segment([a,b],stroke); }
@@ -294,7 +306,8 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         }
     }
     if edge_slide {
-        if let (Some(g),Some(sl))=(v.cooking.geometry.as_deref(),s.slide) {
+        if let Some(sl)=s.slide {
+            let g=&s.mesh.geometry;
             let preview=edge_slide_preview(g,&s.edge_selection,slide_factor(sl.raw,snap),s.even,s.flipped,s.clamp,true);
             for &(a,b) in &s.edge_selection {
                 if a>=preview.npoints || b>=preview.npoints { continue; }
@@ -312,7 +325,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         for pair in path.windows(2) { painter.line_segment([pair[0],pair[1]],stroke); }
         for &p in &s.points { painter.circle_filled(screen(p),3.,v.theme.warn); }
     }
-    let hint = if !ready { "Cut tools: display one cooked mesh stream".to_owned() }
+    let hint = if !ready { "Cut tools: select a cooked active mesh stream".to_owned() }
         else if tool == Tool::Knife { "Knife: click points | Enter apply | Backspace undo point | Esc/RMB exit".to_owned() }
         else if tool==Tool::EdgeSlide { format!("Edge Slide | Factor {:.3} | Shift precision, Ctrl snap, E Even, F Flip, C Clamp, type factor | LMB/Enter confirm | RMB/Esc cancel",s.slide.map(|sl|slide_factor(sl.raw,snap)).unwrap_or(0.)) }
         else { loop_hint(s.count, s.slide.map(|sl| slide_factor(sl.raw, snap)), s.hover.is_some()) };
@@ -382,6 +395,21 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
         let m = Mesh::new(&g);
         assert_eq!(m.hover(cam, rect, over(1., 0.5), false), None);
         assert_eq!(m.hover(cam, rect, over(1., 0.5), true), Some((1, 4)));
+    }
+    #[test] fn active_stream_preview_ignores_two_other_displayed_meshes() {
+        let base=strip();
+        let mut points=base.p().to_vec();
+        points.extend([-1.,-1.,1.,3.,-1.,1.,3.,2.,1.,-1.,2.,1.]);
+        points.extend([-1.,-1.,2.,3.,-1.,2.,3.,2.,2.,-1.,2.,2.]);
+        let merged=geo(points,vec![0,1,4,3,1,2,5,4,6,7,8,9,10,11,12,13],vec![0,4,8,12,16]);
+        let active=object_geometry(&merged,&(0..6)).unwrap();
+        let mesh=Mesh::new(&active);
+        let rect=Rect::from_min_size(Pos2::ZERO,vec2(200.,200.));
+        let cam=ortho();
+        let pointer=transform_gizmo::project(cam,rect,[1.,0.5,0.]).unwrap();
+        assert_eq!(mesh.hover(cam,rect,pointer,false),Some((1,4)));
+        assert_eq!(mesh.preview((1,4),2,0.).len(),4);
+        assert_eq!(active.npoints,6);
     }
     #[test] fn perspective_hover_picks_the_front_edge() {
         // camera at z = 10 looking down -z with a simple perspective projection (w = 10 - z)

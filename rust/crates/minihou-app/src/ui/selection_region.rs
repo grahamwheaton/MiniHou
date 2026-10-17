@@ -68,7 +68,8 @@ pub fn handle(ctx: &egui::Context, viewport: Rect, v: &View, out: &mut Actions) 
                     if *button == PointerButton::Secondary && modifiers.ctrl {
                         s = State { armed: true, kind: Kind::Lasso, ..Default::default() };
                     } else if *button == PointerButton::Primary && matches!(v.editor.tool, super::Tool::Select | super::Tool::Move | super::Tool::Rotate | super::Tool::Scale | super::Tool::Transform)
-                        && !super::transform_gizmo::hit(viewport, v, *pos) && !super::prim_handles::hit(viewport, v, *pos) {
+                        && !super::transform_gizmo::hit(viewport, v, *pos) && !super::prim_handles::hit(viewport, v, *pos)
+                        && !super::curve_tool::hit(viewport, v, *pos, ctx) && !super::curve_tool::active(ctx) {
                         s = State { armed: true, implicit: true, kind: options.kind, ..Default::default() };
                     }
                 }
@@ -117,10 +118,14 @@ pub fn handle(ctx: &egui::Context, viewport: Rect, v: &View, out: &mut Actions) 
                     match s.kind {
                         Kind::Box => {
                             let rect = Rect::from_two_pos(start, pos);
-                            if rect.width().max(rect.height()) > 3. { out.push(UiAction::RegionSelect { shape: RegionShape::Rect(rect), op: s.op }); }
+                            if rect.width().max(rect.height()) > 3. { let shape=RegionShape::Rect(rect);
+                                if !super::curve_tool::region_select(ctx,viewport,v,&shape,s.op){out.push(UiAction::RegionSelect { shape, op: s.op });}
+                            }
                             else if s.implicit { consumed = false; } // Let ordinary clicks reach click picking.
                         }
-                        Kind::Lasso => { s.points.push(pos); if s.points.len() >= 3 { out.push(UiAction::RegionSelect { shape: RegionShape::Lasso(s.points.clone()), op: s.op }); } }
+                        Kind::Lasso => { s.points.push(pos); if s.points.len() >= 3 { let shape=RegionShape::Lasso(s.points.clone());
+                            if !super::curve_tool::region_select(ctx,viewport,v,&shape,s.op){out.push(UiAction::RegionSelect { shape, op: s.op });}
+                        } }
                         Kind::Circle => { if s.last != Some(pos) { paint_stroke(out, s.last.unwrap_or(pos), pos, radius, s.op); } },
                     }
                 }

@@ -53,6 +53,16 @@ fn python_gate() -> std::sync::Arc<PythonGate> {
 fn point_pickable(visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,id:u32)->bool {
     visibility==viewport::ObjectVisibility::ShowAll || ranges.iter().any(|(owner,range)| selected.contains(owner) && range.contains(&id))
 }
+fn active_range<'a>(active:&str,ranges:&'a [(String,std::ops::Range<u32>)])->Option<&'a std::ops::Range<u32>> {
+    ranges.iter().find(|(id,_)|id==active).map(|(_,range)|range)
+}
+fn selection_in_range(selection:&picking::Selection,scene:&Scene,range:&std::ops::Range<u32>)->picking::Selection {
+    let mut result=selection.clone();
+    result.points.retain(|id|range.contains(id));
+    result.edges.retain(|(a,b)|range.contains(a)&&range.contains(b));
+    result.tris.retain(|id|scene.triangle_indices().get(*id as usize*3).is_some_and(|p|range.contains(p)));
+    result
+}
 fn pick_displayed(scene:&Scene,o:[f32;3],d:[f32;3],visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>)->Option<picking::Hit> {
     picking::pick_triangle_filtered(scene.positions(),scene.triangle_indices(),o,d,|tri| tri.iter().all(|id| point_pickable(visibility,ranges,selected,*id)))
 }
@@ -256,17 +266,6 @@ fn transform_keeps_measurement_point_identity() {
     forward_measurement_refs(&mut doc,"a","b");
     assert_eq!(doc["measurements"][0]["refs"][0]["node"],"b");
     assert_eq!(doc["nodes"]["b"]["measurement_identity"],"stable");
-}
-/// Where a viewport modelling node (extrude, push/pull, bevel...) is inserted. Element ids come from the displayed
-/// scene, so the node must take the displayed geometry: the selected node only when it exists and is what the
-/// display shows (itself, or the node feeding a displayed output); otherwise the display (e.g. after an undo removed
-/// the selected node, or an upstream node is selected whose ids differ from the scene).
-fn modeling_source(value: &Value, selected: &str, display: &str) -> String {
-    let nodes = &value["nodes"];
-    let shows = |id: &str| id == display || (nodes[display]["type"] == "output" && nodes[display]["inputs"]["geo"] == id);
-    if !selected.is_empty() && nodes.get(selected).is_some() && shows(selected) { return selected.to_owned(); }
-    if !display.is_empty() && nodes.get(display).is_some() { return display.to_owned(); }
-    minihou_app::display_nodes(value).into_iter().next().unwrap_or_else(|| selected.to_owned())
 }
 /// Alt+E with faces selected starts Push/Pull on them immediately; without, it waits for a face pick.
 fn pushpull_starts_now(mode: ui::SelectionMode, selection: &picking::Selection) -> bool {
@@ -529,7 +528,11 @@ impl App {
         if self.object_hidden { return; }
         let Some(scene) = &self.scene else { return; };
         let camera = self.camera_info(); let points = scene.positions(); let tris = scene.triangle_indices();
-        let position = |i: u32| -> Option<[f32; 3]> { if !point_pickable(self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,i) { return None; } let k = i as usize * 3; let a = points.get(k..k + 3)?; Some([a[0], a[1], a[2]]) };
+        let active=self.active_object().and_then(|id|active_range(id,&self.display_ranges));
+        let position = |i: u32| -> Option<[f32; 3]> { if self.editor_state.selection==ui::SelectionMode::Object {
+                if !point_pickable(self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,i){return None;}
+            } else if !active.is_some_and(|range|range.contains(&i)){return None;}
+            let k = i as usize * 3; let a = points.get(k..k + 3)?; Some([a[0], a[1], a[2]]) };
         let project = |p| ui::transform_gizmo::project(camera, self.last_viewport, p);
         let inside = |p| project(p).is_some_and(|q| shape.contains(q));
         let mode = self.editor_state.selection;
@@ -824,11 +827,23 @@ impl App {
     }
     fn selection_node_params(&self, node_type: &str) -> Option<Value> {
         if self.editor_state.selection == ui::SelectionMode::Object || self.selection.mode != self.editor_state.selection { return None; }
-        element_select::cached(&self.elem_topo, self.scene.as_ref()?).node_params(node_type, &self.selection)
+        let range=active_range(self.active_object()?,&self.display_ranges)?;
+        let global=self.scene.as_ref()?;
+        let positions=global.positions().get(range.start as usize*3..range.end as usize*3)?;
+        let triangles=global.triangle_indices().chunks_exact(3).filter(|tri|tri.iter().all(|p|range.contains(p)))
+            .flat_map(|tri|tri.iter().map(|p|*p-range.start)).collect::<Vec<_>>();
+        let edges=global.edge_indices().chunks_exact(2).filter(|edge|edge.iter().all(|p|range.contains(p)))
+            .flat_map(|edge|edge.iter().map(|p|*p-range.start)).collect::<Vec<_>>();
+        let mut selection=self.active_selection()?;
+        let tri_offset=global.triangle_indices().chunks_exact(3).take_while(|tri|tri[0]<range.start).count() as u32;
+        for p in &mut selection.points {*p-=range.start;}
+        for (a,b) in &mut selection.edges {*a-=range.start;*b-=range.start;}
+        for tri in &mut selection.tris {*tri-=tri_offset;}
+        element_select::Topology::new(positions,&triangles,&edges).node_params(node_type,&selection)
     }
     fn selected_points(&self) -> Vec<u32> {
         selected_point_ids(&self.selection, self.editor_state.selection,
-            self.scene.as_ref().map_or(&[], Scene::triangle_indices)).into_iter().filter(|id| point_pickable(self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,*id)).collect()
+            self.scene.as_ref().map_or(&[], Scene::triangle_indices)).into_iter().filter(|id| self.active_object().and_then(|active|active_range(active,&self.display_ranges)).is_some_and(|range|range.contains(id))).collect()
     }
     fn set_display_mode(&mut self,mode:Mode) {
         self.mode=mode;
@@ -837,7 +852,14 @@ impl App {
     }
     fn active_object(&self) -> Option<&str> {
         (!self.object_hidden && self.selected_set.contains(&self.selected)
+            && active_range(&self.selected,&self.display_ranges).is_some()
             && feeds_displayed_node(self.editor.doc.value(), &self.selected)).then_some(self.selected.as_str())
+    }
+    fn active_selection(&self) -> Option<picking::Selection> {
+        Some(selection_in_range(&self.selection,self.scene.as_ref()?,active_range(self.active_object()?,&self.display_ranges)?))
+    }
+    fn active_pick_set(&self) -> std::collections::BTreeSet<String> {
+        self.active_object().map(|id|std::collections::BTreeSet::from([id.to_owned()])).unwrap_or_default()
     }
     fn selection_center(&self) -> Option<[f32; 3]> {
         if self.editor_state.selection == ui::SelectionMode::Object {
@@ -847,8 +869,8 @@ impl App {
     }
     fn element_metrics(&self) -> selection_metrics::Metrics {
         let Some(scene)=self.scene.as_ref() else { return Default::default(); };
-        self.selection_metrics.get(self.cooking.completed,&self.selection,self.editor_state.selection,scene,
-            self.editor_state.object_visibility,&self.display_ranges,&self.selected_set)
+        self.selection_metrics.get(self.cooking.completed,&self.active_selection().unwrap_or_default(),self.editor_state.selection,scene,
+            viewport::ObjectVisibility::HideOthers,&self.display_ranges,&self.active_pick_set())
     }
     fn selection_normal_frame(&self, trs: &transform_math::TrsParams) -> transform_math::Frame {
         let local = transform_math::Frame::from_rotation(&trs.world_rotation());
@@ -880,7 +902,9 @@ impl App {
     }
     fn transform_node_at(&mut self, op: TransformOp, pivot: Option<[f32; 3]>, orientation_override: Option<ui::Orientation>) {
         if self.editor_state.selection == ui::SelectionMode::Object && self.active_object().is_none() { return; }
-        let group = group_text(&self.selected_points());
+        let Some(active)=self.active_object().map(str::to_owned) else {return;};
+        let offset=active_range(&active,&self.display_ranges).map(|r|r.start).unwrap_or(0);
+        let group = group_text(&self.selected_points().iter().map(|p|p-offset).collect::<Vec<_>>());
         if self.editor_state.selection != ui::SelectionMode::Object && group.is_empty() {
             self.file_status = "Select points, edges, or faces to transform".into();
             return;
@@ -891,7 +915,7 @@ impl App {
         let mut value = self.editor.doc.value().clone();
         // The displayed node changes to the new node during a drag. Keep reading
         // the original matrix from the document saved at drag start.
-        let displayed = if self.editor_state.selection == ui::SelectionMode::Object { &self.selected } else { &self.display };
+        let displayed = &active;
         let source = if before_doc.value()["nodes"].get(displayed).is_some() {
             displayed.clone()
         } else {
@@ -1045,24 +1069,28 @@ impl App {
         self.finish_for_selection(ctx);
         let Some(scene) = self.scene.as_ref() else { return; };
         let positions = scene.positions();
-        // The active object's points when one is selected among several displayed objects, else every pickable point.
-        let owner = self.active_object().map(str::to_owned);
-        let ranges: Vec<_> = self.display_ranges.iter().filter(|(o, _)| owner.as_deref().is_none_or(|w| w == o)).map(|r| r.1.clone()).collect();
+        let Some(owner) = self.active_object().map(str::to_owned) else { self.file_status="Select a displayed object to mirror".into(); return; };
+        let ranges: Vec<_> = self.display_ranges.iter().filter(|(o, _)| &owner == o).map(|r| r.1.clone()).collect();
         let point = |i: usize| [positions[3 * i], positions[3 * i + 1], positions[3 * i + 2]];
         let in_object = |i: u32| ranges.is_empty() || ranges.iter().any(|r| r.contains(&i));
         let ids: Vec<usize> = (0..positions.len() / 3).filter(|&i| in_object(i as u32)
             && point_pickable(self.editor_state.object_visibility, &self.display_ranges, &self.selected_set, i as u32)).collect();
-        let Some(bounds) = mt::Bounds::of(ids.iter().map(|&i| point(i))).or_else(|| mt::Bounds::of((0..positions.len() / 3).map(point))) else {
+        let Some(bounds) = mt::Bounds::of(ids.iter().map(|&i| point(i))) else {
             self.file_status = "Nothing to mirror".into(); return;
         };
         // Edit mode with selected faces: Mirror Selected on those primitives.
         let extra = if self.editor_state.selection != ui::SelectionMode::Object && !self.selection.tris.is_empty() {
-            let faces = element_select::cached(&self.elem_topo, scene).polys_of(&self.selection.tris);
+            let selection=self.active_selection().unwrap_or_default();
+            let range=active_range(&owner,&self.display_ranges).unwrap();
+            let first=scene.triangle_indices().chunks_exact(3).take_while(|tri|tri[0]<range.start).count() as u32;
+            let topo=element_select::cached(&self.elem_topo, scene);
+            let offset=topo.poly_of_tri(first).unwrap_or(0);
+            let faces = topo.polys_of(&selection.tris).into_iter().map(|p|p-offset).collect::<Vec<_>>();
             json!({"operation": "mirror_selected", "group": group_text(&faces)})
         } else { json!({}) };
         let wire: Vec<_> = scene.edge_indices().chunks_exact(2).filter(|e| in_object(e[0])).take(mt::WIRE_LIMIT)
             .map(|e| (point(e[0] as usize), point(e[1] as usize))).collect();
-        let source = if self.selected.is_empty() { self.display.clone() } else { self.selected.clone() };
+        let source = owner;
         self.editor.history.finish(&self.editor.doc);
         let mut session = mt::Session::new(self.editor.doc.clone(), self.selected.clone(), source.clone(), bounds, extra);
         session.wire = wire;
@@ -1156,7 +1184,8 @@ impl App {
         let camera = self.camera_info();
         let plane = self.mirror.as_ref().and_then(|s| s.active.as_ref()).map(|id| mt::Plane::read(&self.editor.doc.value()["nodes"][id]["params"]));
         let outs = {
-            let (scene, visibility, ranges, selected) = (self.scene.as_ref(), self.editor_state.object_visibility, &self.display_ranges, &self.selected_set);
+            let active_set=self.active_pick_set();
+            let (scene, visibility, ranges, selected) = (self.scene.as_ref(), viewport::ObjectVisibility::HideOthers, &self.display_ranges, &active_set);
             let pick = |p: egui::Pos2| -> Option<([f32; 3], [f32; 3])> {
                 let scene = scene?;
                 let (o, d) = ui::transform_gizmo::ray(camera, rect, p);
@@ -1182,8 +1211,11 @@ impl App {
     fn start_model_modal(&mut self, ctx: &egui::Context, kind: ModelKind) {
         if self.modal.is_some() || self.model_modal.is_some() || self.scene.is_none() { return; }
         let Some(scene)=self.scene.as_ref() else { return; };
-        let source_points=scene.positions().len()/3;
-        let mut selection=self.selection.clone();
+        let Some(range)=self.active_object().and_then(|id|active_range(id,&self.display_ranges)) else { self.file_status="Select a displayed object".into(); return; };
+        let source_points=(range.end-range.start) as usize;
+        let tri_offset=scene.triangle_indices().chunks_exact(3).take_while(|tri|tri[0]<range.start).count() as u32;
+        let poly_offset=element_select::cached(&self.elem_topo,scene).poly_of_tri(tri_offset).unwrap_or(0);
+        let Some(mut selection)=self.active_selection() else { self.file_status="Select a displayed object".into(); return; };
         selection.mode=match self.editor_state.selection { ui::SelectionMode::Points => ui::SelectionMode::Points,
             ui::SelectionMode::Edges => ui::SelectionMode::Edges,
             ui::SelectionMode::Faces => ui::SelectionMode::Faces,
@@ -1193,11 +1225,11 @@ impl App {
                 selection=element_select::cached(&self.elem_topo,scene).convert(&selection,ui::SelectionMode::Edges);
             }
             if selection.edges.is_empty() { self.file_status="Select edges to bevel".into(); return; }
-            json!({"edges":selection.edges.iter().map(|(a,b)|format!("{a}-{b}")).collect::<Vec<_>>().join(" "),"distance":0.,"divisions":1})
+            json!({"edges":selection.edges.iter().map(|(a,b)|format!("{}-{}",a-range.start,b-range.start)).collect::<Vec<_>>().join(" "),"distance":0.,"divisions":1})
         } else if kind==ModelKind::Extrude && selection.mode!=ui::SelectionMode::Faces {
             let mut params=match selection.mode {
-                ui::SelectionMode::Edges => json!({"edges":selection.edges.iter().map(|(a,b)|format!("{a}-{b}")).collect::<Vec<_>>().join(" "),"distance":0.}),
-                ui::SelectionMode::Points => json!({"points":group_text(&selection.points),"distance":0.}),
+                ui::SelectionMode::Edges => json!({"edges":selection.edges.iter().map(|(a,b)|format!("{}-{}",a-range.start,b-range.start)).collect::<Vec<_>>().join(" "),"distance":0.}),
+                ui::SelectionMode::Points => json!({"points":group_text(&selection.points.iter().map(|p|*p-range.start).collect::<Vec<_>>()),"distance":0.}),
                 _ => unreachable!(),
             };
             if selection.is_empty() { self.file_status="Select mesh elements for this tool".into(); return; }
@@ -1214,11 +1246,11 @@ impl App {
                 self.file_status="Select mesh elements for this tool".into(); return;
             }
             let faces=element_select::cached(&self.elem_topo,scene).polys_of(&selection.tris);
-            let mut params=json!({"group":group_text(&faces)});
+            let mut params=json!({"group":group_text(&faces.iter().map(|p|*p-poly_offset).collect::<Vec<_>>())});
             params[kind.parameter()]=json!(0.);
             params
         };
-        let source=modeling_source(self.editor.doc.value(),&self.selected,&self.display);
+        let source=self.active_object().unwrap().to_owned();
         let Some((doc,id))=ui::modal_model::insert_graph(&self.editor.doc,&source,kind,params) else {
             self.file_status=format!("Could not add {}",kind.node()); return;
         };
@@ -1248,7 +1280,11 @@ impl App {
             }
             if count>0. && kind==ModelKind::PushPull {
                 // SketchUp-style inference: far face (Through) and parallel faces (On Face).
-                state.targets=ui::modal_model::pushpull_targets(positions,tris,&selection.tris,normal);
+                if let Some(local_geo)=self.cooking.geometry.as_deref().and_then(|g|ui::mesh_cut::object_geometry(g,range)) {
+                    let local_scene=Scene::new(&local_geo);
+                    let local_tris=selection.tris.iter().map(|tri|*tri-tri_offset).collect::<Vec<_>>();
+                    state.targets=ui::modal_model::pushpull_targets(local_scene.positions(),local_scene.triangle_indices(),&local_tris,normal);
+                }
             }
             if count>0. {
                 center=center.map(|x|x/count);
@@ -1622,16 +1658,18 @@ impl App {
             LastOperator::Extrude {mut params} => {
                 if self.cooking.cooking() {self.file_status="Wait for the extrusion to cook before repeating".into();return;}
                 let Some(scene)=self.scene.as_ref() else {return;};
-                let source_points=scene.positions().len()/3;
-                if self.editor_state.selection!=ui::SelectionMode::Object && !self.selection.is_empty() {
+                let Some(source)=self.active_object().map(str::to_owned) else {self.file_status="Select a displayed object".into();return;};
+                let range=active_range(&source,&self.display_ranges).unwrap();
+                let source_points=(range.end-range.start) as usize;
+                let selection=self.active_selection().unwrap_or_default();
+                if self.editor_state.selection!=ui::SelectionMode::Object && !selection.is_empty() {
                     params["group"]=json!("");params["edges"]=json!("");params["points"]=json!("");
                     match self.editor_state.selection {
-                        ui::SelectionMode::Faces=>params["group"]=json!(group_text(&element_select::cached(&self.elem_topo,scene).polys_of(&self.selection.tris))),
-                        ui::SelectionMode::Edges=>params["edges"]=json!(self.selection.edges.iter().map(|(a,b)|format!("{a}-{b}")).collect::<Vec<_>>().join(" ")),
-                        ui::SelectionMode::Points=>params["points"]=json!(group_text(&self.selection.points)),_=>{},
+                        ui::SelectionMode::Faces=>{let first=scene.triangle_indices().chunks_exact(3).take_while(|tri|tri[0]<range.start).count() as u32;let topo=element_select::cached(&self.elem_topo,scene);let offset=topo.poly_of_tri(first).unwrap_or(0);params["group"]=json!(group_text(&topo.polys_of(&selection.tris).iter().map(|p|*p-offset).collect::<Vec<_>>()));},
+                        ui::SelectionMode::Edges=>params["edges"]=json!(selection.edges.iter().map(|(a,b)|format!("{}-{}",a-range.start,b-range.start)).collect::<Vec<_>>().join(" ")),
+                        ui::SelectionMode::Points=>params["points"]=json!(group_text(&selection.points.iter().map(|p|*p-range.start).collect::<Vec<_>>())),_=>{},
                     }
                 }
-                let source=modeling_source(self.editor.doc.value(),&self.selected,&self.display);
                 let next=repeat::extrude_next_params(&params,source_points);
                 if let Some((doc,id))=ui::modal_model::insert_graph(&self.editor.doc,&source,ModelKind::Extrude,params) {
                     if self.commit_document(doc.value().clone(),"repeat extrusion") {
@@ -1953,7 +1991,8 @@ impl App {
                     if !self.selected_set.contains(&self.selected) {self.selected=self.selected_set.iter().next().cloned().unwrap_or_default();}
                     self.selection_dirty=true;
                 }else if let Some(scene)=&self.scene {
-                    let visible=|id|point_pickable(e.object_visibility,&self.display_ranges,&self.selected_set,id);
+                    let active=self.active_object().and_then(|id|active_range(id,&self.display_ranges));
+                    let visible=|id|active.is_some_and(|range|range.contains(&id));
                     if element_select::cached(&self.elem_topo,scene).linked_or_inverse(&mut self.selection,e.selection,inverse,visible) {self.selection_dirty=true;}
                 }
             }
@@ -1973,7 +2012,8 @@ impl App {
                     self.selected.clear();
                     return;
                 }
-                self.selection.clear(); self.selection_dirty = true; self.selected_set.clear(); self.selected.clear();
+                self.selection.clear(); self.selection_dirty = true;
+                if e.selection==ui::SelectionMode::Object { self.selected_set.clear(); self.selected.clear(); }
             }
             "select_all" => {
                 if self.network_hover {
@@ -1982,13 +2022,15 @@ impl App {
                     return;
                 }
                 if let Some(scene) = &self.scene {
+                    let active=self.active_object().and_then(|id|active_range(id,&self.display_ranges));
+                    let visible=|id:&u32|active.is_some_and(|range|range.contains(id));
                     match e.selection {
-                        ui::SelectionMode::Points => self.selection.points = (0..scene.positions().len() / 3).map(|i| i as u32).filter(|id| point_pickable(e.object_visibility,&self.display_ranges,&self.selected_set,*id)).collect(),
-                        ui::SelectionMode::Faces => self.selection.tris = scene.triangle_indices().chunks_exact(3).enumerate().filter(|(_,tri)| tri.iter().all(|id| point_pickable(e.object_visibility,&self.display_ranges,&self.selected_set,*id))).map(|(i,_)| i as u32).collect(),
+                        ui::SelectionMode::Points => self.selection.points = (0..scene.positions().len() / 3).map(|i| i as u32).filter(&visible).collect(),
+                        ui::SelectionMode::Faces => self.selection.tris = scene.triangle_indices().chunks_exact(3).enumerate().filter(|(_,tri)| tri.iter().all(&visible)).map(|(i,_)| i as u32).collect(),
                         ui::SelectionMode::Edges => {
                             // polygon (and wire) edges, without fan diagonals
                             let edges = element_select::cached(&self.elem_topo, scene).edges.clone();
-                            self.selection.edges = edges.into_iter().filter(|(a,b)| point_pickable(e.object_visibility,&self.display_ranges,&self.selected_set,*a) && point_pickable(e.object_visibility,&self.display_ranges,&self.selected_set,*b)).collect();
+                            self.selection.edges = edges.into_iter().filter(|(a,b)| visible(a) && visible(b)).collect();
                         }
                         ui::SelectionMode::Object => {
                             self.object_hidden = false;
@@ -2042,11 +2084,21 @@ impl App {
                     ui::sketch::clear_measurement_selection(ctx);
                     return;
                 }
+                if self.viewport_hover && self.editor.doc.value()["nodes"][&self.selected]["type"]=="bezier" {
+                    if let Some(cs)=ui::curve_tool::parse(&ui::curve_tool::node_controls(self.editor.doc.value(),&self.selected)) {
+                        let index=ui::curve_tool::selected(ctx,&self.selected).index;
+                        let next=ui::curve_tool::delete(&cs,index);
+                        if next.len()!=cs.len() {self.edit(Edit::Param{node:self.selected.clone(),name:"controls".into(),value:ui::curve_tool::write(&next)},false);}
+                        return;
+                    }
+                }
                 if self.remove_selected_wires(ctx, false) { return; }
                 if self.viewport_hover && self.editor_state.selection != ui::SelectionMode::Object {
                     if self.editor_state.selection == ui::SelectionMode::Points {
-                        let points = self.selected_points();
-                        if let Some((next, id)) = graph_edit::add_curve_blast(self.editor.doc.value(), &self.display, &points) {
+                        let Some(source)=self.active_object().map(str::to_owned) else {self.file_status="Select a displayed curve".into();return;};
+                        let offset=active_range(&source,&self.display_ranges).unwrap().start;
+                        let points = self.selected_points().into_iter().map(|p|p-offset).collect::<Vec<_>>();
+                        if let Some((next, id)) = graph_edit::add_curve_blast(self.editor.doc.value(), &source, &points) {
                             if self.commit_document(next, "delete curve points") {
                                 self.selected = id.clone();
                                 self.selected_set = std::collections::BTreeSet::from([id.clone()]);
@@ -2078,7 +2130,10 @@ impl App {
                     self.file_status="Select edges in edge mode to slide".into();
                 } else {
                     self.finish_for_selection(ctx);
-                    ui::mesh_cut::start_edge_slide(ctx,self.display.clone(),self.selection.edges.iter().map(|&(a,b)|(a as usize,b as usize)).collect());
+                    let Some(source)=self.active_object().map(str::to_owned) else { self.file_status="Select a displayed object to slide".into(); return; };
+                    let range=active_range(&source,&self.display_ranges).unwrap();
+                    let edges=self.selection.edges.iter().filter(|(a,b)|range.contains(a)&&range.contains(b)).map(|&(a,b)|((a-range.start) as usize,(b-range.start) as usize)).collect();
+                    ui::mesh_cut::start_edge_slide(ctx,source,edges);
                     self.editor_state.apply(C::Tool(ui::Tool::EdgeSlide));
                 }
             }
@@ -2609,7 +2664,7 @@ impl eframe::App for App {
                 if self.last_viewport.contains(at) {
                     if let Some(scene)=self.scene.as_ref() {
                         let (o,d)=ui::transform_gizmo::ray(self.camera_info(),self.last_viewport,at);
-                        if let Some(hit)=pick_displayed(scene,o,d,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set) {
+                        if let Some(hit)=pick_displayed(scene,o,d,viewport::ObjectVisibility::HideOthers,&self.display_ranges,&self.active_pick_set()) {
                             let picked=element_select::cached(&self.elem_topo,scene).pick(scene.positions(),scene.triangle_indices(),hit,[0,1,2].map(|k|o[k]+d[k]*hit.t),ui::SelectionMode::Faces);
                             self.selection=picked; self.editor_state.selection=ui::SelectionMode::Faces;
                             self.selection_dirty=true; self.pushpull_pick=false; self.file_status.clear();
@@ -2686,7 +2741,7 @@ impl eframe::App for App {
                 } else { false };
                 let mut delta = ctx.input(|i| i.pointer.delta());
                 if !response.dragged() { self.orbit_drag=None; }
-                if !fly_frame && !region_frame && response.dragged() && (self.modal.is_none() && self.model_modal.is_none()) && !ui::sketch::blocks_navigation(ctx) && !ui::mesh_cut::blocks_navigation(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx)
+                if !fly_frame && !region_frame && response.dragged() && (self.modal.is_none() && self.model_modal.is_none()) && !ui::sketch::blocks_navigation(ctx) && !ui::mesh_cut::blocks_navigation(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::curve_tool::active(ctx)
                     && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| (!ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) || ui::prim_handles::hit(rect, &v, p) || ui::curve_tool::hit(rect, &v, p, ctx)) {
                     let modifiers = ctx.input(|i| i.modifiers);
                     let orbiting = match self.prefs.viewport.navigation {
@@ -2774,13 +2829,16 @@ impl eframe::App for App {
                 let hover_in_viewport = !coplanar_hover && hover_pos.is_some_and(|p| rect.contains(p))
                     && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing())
                     && !ui::selection_region::active(ctx);
+                let modal_pick=self.pushpull_pick || self.editor_state.selection!=ui::SelectionMode::Object;
+                let pick_set=if modal_pick {self.active_pick_set()} else {self.selected_set.clone()};
+                let pick_visibility=if modal_pick {viewport::ObjectVisibility::HideOthers} else {self.editor_state.object_visibility};
 
                 let hover_elem = if hover_in_viewport {
                     if let (Some(pos), Some(scene)) = (hover_pos, &self.scene) {
                         let (o, d) = ui::transform_gizmo::ray(v.camera, rect, pos);
                         let mode = if self.pushpull_pick { ui::SelectionMode::Faces } else { self.editor_state.selection };
                         let mods = ctx.input(|i| i.modifiers);
-                        let surface = pick_displayed(scene,o,d,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set);
+                        let surface = pick_displayed(scene,o,d,pick_visibility,&self.display_ranges,&pick_set);
                         surface
                             .map(|hit| {
                                 if mode == ui::SelectionMode::Object { return picking::element_of(hit, scene.triangle_indices(), mode); }
@@ -2793,7 +2851,7 @@ impl eframe::App for App {
                                     _ => topo.pick(scene.positions(), scene.triangle_indices(), hit, point, mode),
                                 }
                             }).or_else(|| {
-                                let wire=pick_displayed_wire(scene,v.camera,rect,pos,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,mode)?;
+                                let wire=pick_displayed_wire(scene,v.camera,rect,pos,pick_visibility,&self.display_ranges,&pick_set,mode)?;
                                 let topo=element_select::cached(&self.elem_topo,scene);
                                 let mut selected=wire_selection(wire,mode);
                                 if mode==ui::SelectionMode::Edges && mods.alt && self.prefs.viewport.navigation==ui::keymap::Navigation::Blender {
@@ -2911,8 +2969,8 @@ impl eframe::App for App {
                         let (o, d) = self.camera.ray(nx, ny, rect.width() / rect.height());
                         let mode = self.editor_state.selection;
                         let extend = ctx.input(|i| i.modifiers.shift);
-                        let hit = if self.object_hidden { None } else { pick_displayed(scene,o,d,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set) };
-                        let wire = if self.object_hidden || hit.is_some() { None } else { pick_displayed_wire(scene,v.camera,rect,at,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,mode) };
+                        let hit = if self.object_hidden { None } else { pick_displayed(scene,o,d,pick_visibility,&self.display_ranges,&pick_set) };
+                        let wire = if self.object_hidden || hit.is_some() { None } else { pick_displayed_wire(scene,v.camera,rect,at,pick_visibility,&self.display_ranges,&pick_set,mode) };
                         if mode == ui::SelectionMode::Object {
                             let ids = hit.and_then(|hit| picked_object(&self.display_ranges, scene.triangle_indices(), hit))
                                 .or_else(|| wire.and_then(|w| { let id=match w { picking::WireHit::Point(i)|picking::WireHit::Edge(i,_)=>i }; self.display_ranges.iter().find(|(_,r)|r.contains(&id)).map(|(name,_)|name.as_str()) }))
@@ -3032,7 +3090,7 @@ impl eframe::App for App {
                         ui::curve_tool::show(ui, rect, &v, &mut out, response.double_clicked());
                         ui::sketch::show(ui, rect, &v, &mut out,
                             self.scene.as_ref().map(|scene|(scene.positions(),scene.triangle_indices())));
-                        ui::mesh_cut::show(ui, rect, &v, &mut out);
+                        ui::mesh_cut::show(ui, rect, &v, self.active_object().and_then(|id|active_range(id,&self.display_ranges).map(|range|(id,range))), &mut out);
                     }
                     ui::selection_region::paint(ui, rect, &v);
                     coplanar_tool::show(ui,rect,&mut self.coplanar,v.units,&mut out);
@@ -3321,6 +3379,55 @@ mod tools_tests {
         assert_eq!(set, std::collections::BTreeSet::from(["grid".into()]));
         select_active_nodes(&mut active, &mut set, vec![], false, false);
         assert!(active.is_empty() && set.is_empty());
+    }
+    #[test]
+    fn modal_tools_route_two_and_three_displayed_objects_to_last_selected_stream() {
+        for count in [2,3] {
+            let mut nodes=serde_json::Map::new();
+            let mut outputs=Vec::new();
+            for i in 0..count {
+                let source=format!("box{i}");let output=format!("out{i}");
+                nodes.insert(source.clone(),json!({"type":"box"}));
+                nodes.insert(output.clone(),json!({"type":"output","inputs":{"geo":source}}));
+                outputs.push(output);
+            }
+            let doc=json!({"version":1,"nodes":nodes,"display":outputs});
+            let mut active=String::new();let mut selected=std::collections::BTreeSet::new();
+            select_active_nodes(&mut active,&mut selected,vec!["out0".into()],false,false);
+            select_active_nodes(&mut active,&mut selected,vec!["out1".into()],true,false);
+            assert_eq!(active,"out1");
+            for tool in ["polysplit","edge_slide","knife","polyextrude","inset","polybevel","pushpull","mirror","grow","select_path","select_loop","select_ring"] {
+                let (next,id)=graph_edit::add(&doc,tool,Some(&active)).unwrap_or_else(||panic!("{tool} should insert on active output"));
+                assert_eq!(next["nodes"]["out1"]["inputs"]["geo"],id);
+                for other in [&"out0",&"out2"] {
+                    if doc["nodes"].get(*other).is_some() {assert_eq!(next["nodes"][*other],doc["nodes"][*other],"{tool} changed {other}");}
+                }
+            }
+            select_active_nodes(&mut active,&mut selected,vec!["out0".into()],true,false);
+            assert_eq!(active,"out0");
+        }
+    }
+    #[test]
+    fn modal_picking_and_elements_ignore_other_displayed_objects() {
+        for count in [2,3] {
+            let mut points=Vec::new();let mut vertices=Vec::new();let mut offsets=vec![0];
+            for i in 0..count {
+                let z=i as f32;
+                points.extend([0.,0.,z,1.,0.,z,0.,1.,z]);
+                vertices.extend([i*3,i*3+1,i*3+2]);offsets.push(vertices.len() as i32);
+            }
+            let geo=minihou_core::Geometry::from_arrays(points,vertices,offsets,None).unwrap();
+            let scene=Scene::new(&geo);
+            let ranges=(0..count).map(|i|(format!("out{i}"),(i*3) as u32..(i*3+3) as u32)).collect::<Vec<_>>();
+            let selected=std::collections::BTreeSet::from(["out0".into(),format!("out{}",count-1)]);
+            let active=std::collections::BTreeSet::from(["out0".into()]);
+            let hit=pick_displayed(&scene,[0.2,0.2,10.],[0.,0.,-1.],viewport::ObjectVisibility::HideOthers,&ranges,&active).unwrap();
+            assert_eq!(picked_object(&ranges,scene.triangle_indices(),hit),Some("out0"));
+            let all=picking::Selection{mode:ui::SelectionMode::Points,points:(0..count*3).map(|i|i as u32).collect(),edges:vec![(0,1),(3,4)],tris:(0..count).map(|i|i as u32).collect()};
+            let only=selection_in_range(&all,&scene,&ranges[0].1);
+            assert_eq!(only.points,vec![0,1,2]);assert_eq!(only.edges,vec![(0,1)]);assert_eq!(only.tris,vec![0]);
+            assert_eq!(selected.len(),2);
+        }
     }
     #[test]
     fn viewport_picks_the_nearest_display_output() {
