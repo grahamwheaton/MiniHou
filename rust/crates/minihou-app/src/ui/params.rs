@@ -8,6 +8,49 @@ use serde_json::{json, Value};
 use minihou_app::value_link_ui::{self, CopiedParam, PasteMode};
 
 const DISABLED: &str = "The Rust backend does not support it yet";
+pub const PICK_PURPLE: Color32 = Color32::from_rgb(184, 82, 245);
+
+/// The registry describes the element domain; dynamic nodes read their domain parameter.
+pub fn pick_domain(meta: Option<&Value>, params: &Value) -> Option<super::SelectionMode> {
+    let meta = meta?;
+    let domain = meta["pick_domain_param"].as_str()
+        .and_then(|name| params[name].as_str().or_else(|| meta["pick_domain_default"].as_str()))
+        .or_else(|| meta["pick_domain"].as_str())?;
+    match domain {
+        "points" | "point" => Some(super::SelectionMode::Points),
+        "edges" | "edge" => Some(super::SelectionMode::Edges),
+        "primitives" | "primitive" | "faces" | "prim" => Some(super::SelectionMode::Faces),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod pick_tests {
+    use super::*;
+    use super::super::SelectionMode;
+    #[test]
+    fn registry_maps_group_and_crease_fields() {
+        assert_eq!(pick_domain(param_meta("subdivide", "creases"), &json!({})), Some(SelectionMode::Edges));
+        assert_eq!(pick_domain(param_meta("polyextrude", "group"), &json!({})), Some(SelectionMode::Faces));
+        assert_eq!(pick_domain(param_meta("transform", "group"), &json!({})), Some(SelectionMode::Points));
+        assert_eq!(pick_domain(param_meta("polybevel", "group"), &json!({"group_type":"edges"})), Some(SelectionMode::Edges));
+        assert_eq!(pick_domain(param_meta("polybevel", "group"), &json!({"group_type":"primitives"})), Some(SelectionMode::Faces));
+    }
+    #[test]
+    fn arrow_ink_is_purple() {
+        assert_eq!(PICK_PURPLE, Color32::from_rgb(184, 82, 245));
+    }
+}
+
+fn pick_field(ui: &mut egui::Ui, value: &mut Value, width: f32, active: bool, enabled: bool) -> bool {
+    let mut text = value.as_str().unwrap_or_default().to_owned();
+    let edit = ui.add_sized([(width - 28.).max(8.), 22.], egui::TextEdit::singleline(&mut text));
+    if edit.changed() { *value = json!(text); }
+    let arrow = ui.add_enabled(enabled, egui::Button::new(egui::RichText::new("↖").color(PICK_PURPLE))
+        .fill(if active { PICK_PURPLE.gamma_multiply(0.27) } else { ui.visuals().widgets.inactive.bg_fill })
+        .stroke(Stroke::new(1.0_f32, PICK_PURPLE))).on_hover_text("Pick elements in viewport (Enter to finish, Esc to cancel)");
+    arrow.clicked()
+}
 fn clipboard_id() -> egui::Id { egui::Id::new("value_link_parameter_clipboard") }
 
 fn parameter_menu(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, node: &str, name: &str, default: &Value) {
@@ -907,6 +950,7 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     } else {
         meta
     };
+    let pick_mode = pick_domain(meta, &v.doc["nodes"][id]["params"]);
     let kind = meta.map_or_else(|| param_kind(&default), |m| metadata_kind(m, &default));
     // Metadata-driven optional controls (for example Ray's distance and hit-output toggles).
     let condition_enabled = meta.and_then(|m| m["enabled_if"].as_object()).is_none_or(|conditions| {
@@ -1060,6 +1104,15 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
                 file_widget(ui, &mut value, meta, typ, param.name, layout.control_rect.width())
             } else if typ == "blender_object" && param.name == "object" {
                 super::object_search::field(ui, &mut value, layout.control_rect.width(), v.theme)
+            } else if pick_mode.is_some() && kind == ParamKind::String {
+                let active = ui.ctx().data(|d| d.get_temp::<(String,String)>(egui::Id::new("param_pick_active")))
+                    .is_some_and(|(node,name)| node == id && name == param.name);
+                let clicked = pick_field(ui, &mut value, layout.control_rect.width(), active, enabled);
+                if clicked {
+                    out.push(UiAction::PickParameter { node:id.to_owned(), name:param.name.to_owned(), mode:pick_mode.unwrap(),
+                        pairs:meta.is_some_and(|m| m["pick_format"] == "pairs") });
+                }
+                clicked
             } else {
                 widget_styled(
                     ui,
@@ -2157,6 +2210,40 @@ mod tests {
         assert_eq!(f.doc.value()["exposed"][0]["param"],"size");
         assert_eq!(minihou_app::link_interface(f.doc.value())["params"][0]["name"],"box1_size");
         history.undo(&mut f.doc);assert!(!minihou_app::is_exposed(f.doc.value(),"box1","size"));
+    }
+
+    #[test]
+    fn clicking_group_arrow_emits_viewport_pick_action() {
+        let mut f = Fixture::new();
+        f.doc = minihou_app::Document::parse(json!({"display":"subdivide1","nodes":{
+            "box1":{"type":"box"},"subdivide1":{"type":"subdivide","inputs":{"geo":"box1"}}
+        }}).to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected = "subdivide1".into(); f.display = "subdivide1".into();
+        let ctx = egui::Context::default(); f.theme.apply(&ctx);
+        let mut click = None;
+        let mut actions = Actions::default();
+        for phase in 0..3 {
+            let events = match (phase, click) {
+                (1,Some(pos)) => vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button:egui::PointerButton::Primary, pressed:true, modifiers:egui::Modifiers::NONE }],
+                (2,Some(pos)) => vec![egui::Event::PointerButton { pos, button:egui::PointerButton::Primary, pressed:false, modifiers:egui::Modifiers::NONE }],
+                _ => vec![],
+            };
+            let input = egui::RawInput { screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(800.,600.))), events, ..Default::default() };
+            let v = f.view();
+            let output = ctx.run(input, |ctx| { egui::CentralPanel::default().show(ctx, |ui| {
+                let param = minihou_core::nodes::get("subdivide").unwrap().params.iter().find(|p|p.name=="creases").unwrap();
+                row(ui,&v,&mut actions,"subdivide1","subdivide",param,false,&mut vec![]);
+            }); });
+            if phase == 0 {
+                for shape in output.shapes { if let egui::Shape::Text(t) = shape.shape {
+                    if t.galley.text() == "↖" { click = Some(t.pos + t.galley.size() * 0.5); }
+                }}
+            }
+        }
+        assert!(click.is_some(), "purple arrow must be drawn");
+        assert!(actions.0.iter().any(|a| matches!(a, UiAction::PickParameter {node,name,mode,..}
+            if node=="subdivide1" && name=="creases" && *mode==super::super::SelectionMode::Edges)));
     }
 
     #[test]

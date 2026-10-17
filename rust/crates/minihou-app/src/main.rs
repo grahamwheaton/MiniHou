@@ -3,6 +3,8 @@ mod element_select;
 mod node_selection;
 mod coplanar_tool;
 mod group_preview;
+mod param_pick;
+use param_pick::{ParamPick, PickedField, param_pick_end, input_source, source_ready};
 mod selection_metrics;
 #[cfg(test)] mod face_mode_profile;
 use minihou_app::graph_edit;
@@ -517,6 +519,7 @@ struct App {
     lod_uploaded: bool, last_lod_view: Option<([[f32;4];4], [u32;2], bool)>, last_lod_select: Instant,
     blender_paths: Vec<PathBuf>, blender_bar: bool,
     selection: picking::Selection, selection_dirty: bool,
+    param_pick: Option<ParamPick>, picked_field: Option<PickedField>,
     selection_metrics: selection_metrics::Cache,
     coplanar: Option<coplanar_tool::State>, group_preview:group_preview::State,
     /// Polygon/edge adjacency of `scene` for loops, rings, paths and mode conversion (built on first use).
@@ -546,6 +549,31 @@ struct App {
     model_before_selection: Option<(picking::Selection, picking::Selection)>,
 }
 impl App {
+    fn finish_param_pick(&mut self, ctx: &egui::Context, cancel: bool) {
+        let Some(pick) = self.param_pick.take() else { return; };
+        if ctx.input(|i| i.key_pressed(if cancel { egui::Key::Escape } else { egui::Key::Enter })) {
+            let mods = ctx.input(|i| i.modifiers);
+            ctx.input_mut(|i| { i.consume_key(mods, if cancel { egui::Key::Escape } else { egui::Key::Enter }); });
+        }
+        ctx.data_mut(|d| d.remove::<(String,String)>(egui::Id::new("param_pick_active")));
+        if cancel {
+            if pick.changed {
+                self.edit(pick.cancel_edit(), true);
+            }
+            self.picked_field = None;
+            if let Some(gpu) = &mut self.gpu { gpu.set_group_overlay(&self.state.device, &[], &[]); }
+            self.group_preview = Default::default();
+        }
+        self.selection = pick.previous_selection;
+        self.editor_state.selection = pick.previous_mode;
+        self.selected_set = pick.previous_selected_set;
+        self.selection_dirty = true;
+        if self.display != pick.previous_display {
+            self.display = pick.previous_display.clone();
+            self.send(Edit::Display(pick.previous_display));
+        }
+        self.editor.history.finish(&self.editor.doc);
+    }
     /// Finish the current edit before transferring pointer/keyboard ownership to selection.
     fn finish_for_selection(&mut self, ctx: &egui::Context) {
         if let Some(modal) = self.modal.take() { self.finish_modal(modal); }
@@ -626,7 +654,7 @@ impl App {
             http:http_ui::HttpUi::default(),http_time:(1.,24.),
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),link:None,blender_job:None,
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
-            display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,selection_metrics:Default::default(),coplanar:None,group_preview:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
+            display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,param_pick:None,picked_field:None,selection_metrics:Default::default(),coplanar:None,group_preview:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
             clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,embed_conflict:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
             last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default(),pending_loop_selection:None,undo_element_selection:Vec::new(),pending_restore_selection:None,model_before_selection:None };
         app.prefs = Preferences::load();
@@ -2263,6 +2291,23 @@ impl App {
         for action in actions {
             if matches!(&action,UiAction::Select(_) | UiAction::ToggleSelect(_) | UiAction::SelectSet { .. }) { self.selection_dirty=true; }
             match action {
+                UiAction::PickParameter { node, name, mode, pairs } => {
+                    let original = self.editor.doc.value()["nodes"][&node]["params"][&name].as_str().unwrap_or("").to_owned();
+                    let source = input_source(self.editor.doc.value(), &node, &self.display);
+                    let ready = source_ready(&self.display_ranges, &source);
+                    self.param_pick = Some(ParamPick { node:node.clone(), name:name.clone(), original, changed:false,
+                        previous_selection:self.selection.clone(), previous_mode:self.editor_state.selection, pairs,
+                        source:source.clone(), previous_display:self.display.clone(), previous_selected_set:self.selected_set.clone(), ready });
+                    self.picked_field = None;
+                    if let Some(gpu) = &mut self.gpu { gpu.set_group_overlay(&self.state.device, &[], &[]); }
+                    self.group_preview = Default::default();
+                    if source != self.display || !ready { self.display = source.clone(); self.send(Edit::Display(source.clone())); }
+                    self.selected_set.insert(source);
+                    self.editor_state.selection = mode;
+                    self.selection = picking::Selection { mode, ..Default::default() };
+                    self.selection_dirty = true;
+                    ctx.data_mut(|d| d.insert_temp(egui::Id::new("param_pick_active"), (node, name)));
+                }
                 UiAction::StartSketch(mode) => self.start_sketch(ctx, mode),
                 UiAction::TransformNode { op } => self.transform_node(op),
                 UiAction::StartModal(kind) => {
@@ -2656,6 +2701,12 @@ impl eframe::App for App {
                 let (selection, stash) = self.selection_memory.retarget(key, (std::mem::take(&mut self.selection), std::mem::take(&mut self.stashed_selection)));
                 self.selection = if selection.is_empty() { picking::Selection { mode, ..Default::default() } } else { selection };
                 self.stashed_selection = stash;
+                if let Some(pick) = &mut self.param_pick {
+                    if !pick.ready && source_ready(&self.display_ranges, &pick.source) {
+                        pick.ready = true;
+                        self.selection = picking::Selection { mode:self.editor_state.selection, ..Default::default() };
+                    }
+                }
                 if let Some((selection,stash,user_selection))=self.pending_restore_selection.take() {
                     self.selection=user_selection.filter(|candidate|selection_exists_on_scene(candidate,&scene)).unwrap_or(selection);
                     self.stashed_selection=stash;
@@ -2724,6 +2775,9 @@ impl eframe::App for App {
                 self.geo = Some(ui::geo_info::geo_summary::summarize(&self.display, g));
                 self.geo_rev = self.cooking.completed;
             }
+        }
+        if self.param_pick.is_some() {
+            if let Some(cancel) = param_pick_end(ctx, self.last_viewport) { self.finish_param_pick(ctx, cancel); }
         }
         let busy = self.modal.is_some() || self.model_modal.is_some() || self.mirror.is_some() || self.pushpull_pick || (ui::sketch::active(ctx) || self.editor_state.tool.drawing()) || ui::transform_gizmo::active(ctx) || ui::prim_handles::active(ctx) || ui::curve_tool::active(ctx);
         let fly_frame = viewport_input::fly(ctx, self.last_viewport, &mut self.camera,
@@ -2910,6 +2964,11 @@ impl eframe::App for App {
                     let ranges = self.display_ranges.iter().filter(|(id, _)| !self.object_hidden && self.selected_set.contains(id))
                         .map(|(_, range)| range.clone()).collect();
                     self.group_preview.update(gpu,&self.state.device,if self.cooking.error.is_none(){self.cooking.geometry.as_deref()}else{None},self.editor.doc.value(),&self.selected,self.cooking.completed);
+                    if let Some(field) = &self.picked_field {
+                        if field.node == self.selected {
+                            gpu.set_group_overlay(&self.state.device, &field.faces, &field.lines);
+                        }
+                    }
                     gpu.select_points(&self.state.device,scene,&self.selection.points);
                     gpu.select_objects(&self.state.device, scene, ranges);
                     gpu.set_named_object_ranges(&self.state.device,scene,self.display_ranges.clone());
@@ -3053,7 +3112,8 @@ impl eframe::App for App {
                     // Tab is the node menu in every mode; Ctrl+Tab (keymap ToggleEdit) switches object / edit mode
                     out.push(UiAction::Command("add_menu".into()));
                 }
-                if !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && !(response.double_clicked() && ctx.input(|i|i.modifiers.shift) && matches!(v.doc["nodes"][v.selected]["type"].as_str(),Some("curve"|"bezier"))) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::curve_tool::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::curve_tool::hit(rect, &v, p, ctx)) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| !ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) && matches!(self.editor_state.tool, ui::Tool::Select | ui::Tool::Move | ui::Tool::Rotate | ui::Tool::Scale | ui::Tool::Transform) {
+                if !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && !(response.double_clicked() && ctx.input(|i|i.modifiers.shift) && matches!(v.doc["nodes"][v.selected]["type"].as_str(),Some("curve"|"bezier"))) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::curve_tool::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::curve_tool::hit(rect, &v, p, ctx)) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| !ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) && matches!(self.editor_state.tool, ui::Tool::Select | ui::Tool::Move | ui::Tool::Rotate | ui::Tool::Scale | ui::Tool::Transform)
+                    && self.param_pick.as_ref().is_none_or(|pick| pick.ready && source_ready(&self.display_ranges, &pick.source)) {
                     if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {
                         let (nx, ny) = (((at.x - rect.left()) / rect.width()) * 2. - 1., 1. - ((at.y - rect.top()) / rect.height()) * 2.);
                         let (o, d) = self.camera.ray(nx, ny, rect.width() / rect.height());
@@ -3088,7 +3148,16 @@ impl eframe::App for App {
                                 let changed = if let Some(w) = wire {
                                     topo.apply_wire_click(scene.positions(),kind,Some(wire_selection(w,mode)),mode,&mut self.selection)
                                 } else { topo.apply_click(scene.positions(), kind, picked, mode, &mut self.selection) };
-                                if changed { self.selection_dirty = true; }
+                                if changed {
+                                    self.selection_dirty = true;
+                                    if let Some(pick) = &mut self.param_pick {
+                                        let value = pick.text(topo, &self.selection);
+                                        if value != self.editor.doc.value()["nodes"][&pick.node]["params"][&pick.name].as_str().unwrap_or("") {
+                                            out.push(UiAction::Edit { edit:pick.clicked(topo, &self.selection), continuous:true });
+                                        }
+                                        self.picked_field = Some(pick.highlight(&self.selection, scene.positions(), scene.triangle_indices(), scene.radius * 0.012));
+                                    }
+                                }
                             }
                         }
                     }

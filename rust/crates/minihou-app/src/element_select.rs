@@ -33,6 +33,10 @@ pub fn domain(mode: SelectionMode) -> Option<Domain> {
 }
 
 impl Topology {
+    /// Encode the same point, edge-pair, or primitive tokens used by group-consuming nodes.
+    pub fn group_string(&self, sel: &Selection) -> String {
+        self.tokens(sel.mode, &self.ids(sel)).join(" ")
+    }
     /// `positions` xyz per point, `tris` fan triangles, `edge_list` polygon edges as point pairs (the preview layout).
     /// Triangles sharing an edge that is not a polygon edge (a fan diagonal) belong to the same polygon.
     pub fn new(positions: &[f32], tris: &[u32], edge_list: &[u32]) -> Self {
@@ -939,6 +943,20 @@ mod tests {
         assert_eq!(t.node_params("edge_slide", &edges).unwrap(), serde_json::json!({"group": "p6-7 p7-8"}));
         assert!(t.node_params("edge_slide", &sel(Edges)).is_none());
         assert!(t.node_params("grow", &sel(Points)).is_none());
+    }
+
+    #[test]
+    fn subdivide_crease_group_tokens_round_trip() {
+        let mesh = grid(4, 3);
+        let topo = topo(&mesh);
+        let edges = Selection { edges: vec![(6, 7), (7, 8)], ..sel(Edges) };
+        let text = topo.group_string(&edges);
+        assert_eq!(text, "p6-7 p7-8");
+        let decoded: Vec<(u32,u32)> = text.split_whitespace().map(|token| {
+            let (a,b) = token.strip_prefix('p').unwrap().split_once('-').unwrap();
+            (a.parse().unwrap(), b.parse().unwrap())
+        }).collect();
+        assert_eq!(decoded, edges.edges);
     }
 
     #[test]
