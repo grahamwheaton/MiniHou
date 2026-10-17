@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "nodes": {
+    "box1": {"type": "box", "params": {"size": [2, 2, 2]}},
+    "uv1": {"type": "uv_project", "inputs": {"geo": "box1"}, "params": {"method": "box"}},
+    "mat1": {"type": "set_material", "inputs": {"geo": "uv1"}, "params": {"material": "SampleChecker"}},
+    "output1": {"type": "output", "inputs": {"geo": "mat1"}}
+  },
+  "display": "output1",
+  "materials": {
+    "SampleChecker": {
+      "version": 1,
+      "name": "SampleChecker",
+      "base_color_factor": [1, 1, 1, 1],
+      "textures": {"base_color": {"path": "textured_cube.png", "uv_set": "uv", "sampler": {"min": "linear_mipmap_linear", "mag": "linear", "wrap_u": "repeat", "wrap_v": "repeat"}, "color_space": "srgb"}},
+      "alpha_mode": "OPAQUE"
+    }
+  }
+}
