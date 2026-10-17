@@ -180,6 +180,8 @@ impl Modal {
         self.constraint = Constraint::Axis(axis, false);
     }
 }
+/// Blender GG: pressing G again during an edge-mode move switches to Edge Slide on the selected edges.
+pub fn double_g_slides(kind: Kind, mode: super::SelectionMode) -> bool { kind == Kind::Move && mode == super::SelectionMode::Edges }
 pub fn snap_value(value: f32, step: f32) -> f32 { if step <= 0. { value } else { (value / step).round() * step } }
 pub fn projected_axis(axis: [f32; 3], camera: CameraInfo) -> Vec2 {
     let x = dot(axis, camera.ray_right); let y = -dot(axis, camera.ray_up);
@@ -285,6 +287,11 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         assert_eq!(m.constraint,Constraint::Axis(1,false));
         m.constraint=Constraint::Free;m.mmb_start=Some(pos2(10.,10.));m.middle_release(pos2(60.,10.),frame,camera);
         assert_eq!(m.constraint,Constraint::Axis(0,false), "a drag still picks the dragged axis");
+    }
+    #[test] fn double_g_in_edge_mode_starts_edge_slide() {
+        use crate::ui::SelectionMode as M;
+        assert!(double_g_slides(Kind::Move,M::Edges));
+        assert!(!double_g_slides(Kind::Move,M::Faces) && !double_g_slides(Kind::Move,M::Object) && !double_g_slides(Kind::Rotate,M::Edges));
     }
     #[test] fn constraint_cycles_and_plane() {
         let a = Constraint::Free.key(0, false); assert_eq!(a, Constraint::Axis(0,false));
