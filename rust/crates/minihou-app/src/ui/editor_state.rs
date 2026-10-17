@@ -6,11 +6,11 @@
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum SelectionMode { #[default] Object, Points, Edges, Faces }
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum Tool { #[default] Select, Cursor, Move, Rotate, Scale, Transform, Measure, Line, Polyline, Polygon, Rectangle, Circle, Knife, LoopCut }
-impl Tool { pub const ALL: [Self; 14] = [Self::Select, Self::Cursor, Self::Move, Self::Rotate, Self::Scale, Self::Transform, Self::Measure, Self::Line, Self::Polyline, Self::Polygon, Self::Rectangle, Self::Circle, Self::Knife, Self::LoopCut]; }
+pub enum Tool { #[default] Select, Cursor, Move, Rotate, Scale, Transform, Measure, Line, Polyline, Polygon, Rectangle, Circle, Knife, LoopCut, EdgeSlide }
+impl Tool { pub const ALL: [Self; 15] = [Self::Select, Self::Cursor, Self::Move, Self::Rotate, Self::Scale, Self::Transform, Self::Measure, Self::Line, Self::Polyline, Self::Polygon, Self::Rectangle, Self::Circle, Self::Knife, Self::LoopCut, Self::EdgeSlide]; }
 impl Tool {
     /// Own viewport clicks and modal keys as soon as the strip activates the tool.
-    pub fn drawing(self) -> bool { matches!(self, Self::Line | Self::Polyline | Self::Polygon | Self::Rectangle | Self::Circle | Self::Knife | Self::LoopCut) }
+    pub fn drawing(self) -> bool { matches!(self, Self::Line | Self::Polyline | Self::Polygon | Self::Rectangle | Self::Circle | Self::Knife | Self::LoopCut | Self::EdgeSlide) }
 }
 impl SelectionMode {
     pub const ALL: [SelectionMode; 4] = [Self::Points, Self::Edges, Self::Faces, Self::Object];

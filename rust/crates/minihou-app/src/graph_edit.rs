@@ -192,7 +192,7 @@ pub fn clear_measurements(value:&Value)->Option<Value> {
 
 /// Viewport topology edits use the displayed stream, never an unrelated selected node.
 pub fn add_viewport_cut(value: &Value, source: &str, ty: &str, params: Value) -> Option<(Value, String)> {
-    if !matches!(ty, "knife" | "loop_cut" | "polysplit") || !params.is_object() { return None; }
+    if !matches!(ty, "knife" | "loop_cut" | "polysplit" | "edge_slide") || !params.is_object() { return None; }
     if minihou_app::display_nodes(value) != vec![source.to_owned()] { return None; }
     nodes(value)?.get(source)?;
     let (mut next, id) = add(value, ty, Some(source))?;
@@ -740,6 +740,7 @@ mod tests {
             ("knife",json!({"cuts":json!([{"a":[0.,-2.],"b":[0.,2.],"matrix":[1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.],"through":false}]).to_string()})),
             ("loop_cut",json!({"split_edges":"0","mode":"edge_loop","loops":1,"position":0.5})),
             ("polysplit",json!({"split_edges":"0","mode":"edge_loop","loops":1,"position":0.5})),
+            ("edge_slide",json!({"group":"p0-1","factor":0.25})),
         ] {
             let (next,id) = add_viewport_cut(&base,"out",ty,params).unwrap();
             assert_eq!(next["nodes"][&id]["inputs"]["geo"],"box1");

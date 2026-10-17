@@ -1,11 +1,10 @@
 //! Viewport cut tools. Hover/preview is UI-only; confirmation is one document action.
-//! Loop Cut ports the pre-rust `loop-tool.js` (see docs/RUST_LOOP_CUT.md): hover previews the quad ring with the node's
-//! own walk (`LoopTopology`), wheel/PageUp/PageDown/+/- sets the count, click starts the slide, a second click / Enter /
-//! drag-release commits one `polysplit` node, and RMB/Esc cancels the pending cut.
+//! Loop Cut uses the core ring walk for hover and a cook-backed preview for slide.
+//! RMB/Esc during slide keeps centred cuts; during hover they cancel the operation.
 use super::{transform_gizmo, Actions, CameraInfo, EditorChange, Tool, UiAction, View};
 use crate::picking;
 use eframe::egui::{self, pos2, vec2, FontId, Pos2, Rect, Stroke, Vec2};
-use minihou_core::{nodes::{loop_cut_fractions, LoopTopology, LOOP_CUT_MAX}, Geometry};
+use minihou_core::{nodes::{edge_slide_preview, loop_cut_preview, loop_slide_fractions, LoopTopology, LOOP_CUT_MAX}, Geometry};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -83,7 +82,7 @@ impl Mesh {
     }
     /// World segments of the new edges, computed by the node's own ring walk and fractions.
     fn preview(&self, seed: Edge, count: usize, factor: f64) -> Vec<([f32; 3], [f32; 3])> {
-        self.loops.ring([seed]).cut_lines(&self.positions, &loop_cut_fractions(count, factor))
+        self.loops.ring([seed]).cut_lines(&self.positions, &loop_slide_fractions(count, 0.5, factor, true))
     }
 }
 
@@ -93,22 +92,23 @@ fn step_count(count: usize, steps: i32) -> usize { (count as i64 + steps as i64)
 fn wheel_notches(unit: egui::MouseWheelUnit, delta: f32) -> f32 {
     match unit { egui::MouseWheelUnit::Line => delta, egui::MouseWheelUnit::Point => delta / 50., egui::MouseWheelUnit::Page => delta * 3. }
 }
-/// Advance the raw slide (0..1, from the seed's lower point id towards the higher) by a pointer delta measured along the
+/// Advance the raw slide (-1..1, from the centre toward either rail) by a pointer delta measured along the
 /// seed edge's projection, so the loop follows the cursor. Shift is 10x finer. A seed edge seen end-on (shorter than
 /// 4 px) falls back to loop-tool.js's horizontal mapping (100 px per unit).
 fn slide_step(raw: f64, delta: Vec2, a: Pos2, b: Pos2, fine: bool) -> f64 {
     let ab = b - a;
     let len = ab.length();
     let (along, span) = if len >= 4. { (delta.dot(ab) / len, len.max(20.)) } else { (delta.x, 100.) };
-    (raw + along as f64 / span as f64 * if fine { 0.1 } else { 1. }).clamp(0., 1.)
+    (raw + 2. * along as f64 / span as f64 * if fine { 0.1 } else { 1. }).clamp(-1., 1.)
 }
-/// The `position` written to the node: loop-tool.js clamped to 0.001..0.999 and Ctrl snapped to tenths.
+/// The Blender-style signed slide factor. Ctrl snaps to tenths.
 fn slide_factor(raw: f64, snap: bool) -> f64 {
     let x = if snap { (raw * 10.).round() / 10. } else { raw };
-    (x.clamp(0.001, 0.999) * 1e4).round() / 1e4
+    (x.clamp(-1., 1.) * 1e4).round() / 1e4
 }
-fn loop_params(edge: Edge, count: usize, factor: f64) -> Value {
-    json!({"mode":"edge_loop","split_edges":format!("p{}-{}",edge.0,edge.1),"loops":count,"position":factor})
+fn loop_params(edge: Edge, count: usize, factor: f64, even: bool, flipped: bool, clamp: bool) -> Value {
+    json!({"mode":"edge_loop","split_edges":format!("p{}-{}",edge.0,edge.1),"loops":count,
+        "position":0.5,"factor":factor,"even":even,"flipped":flipped,"clamp":clamp,"correct_uvs":true})
 }
 
 /// Egui's camera projection omits the viewport aspect ratio. Store the exact NDC projection the kernel expects.
@@ -124,9 +124,17 @@ struct Slide { edge: Edge, raw: f64, press: Pos2, held: bool, dragged: bool }
 struct State {
     tool: Option<Tool>, revision: u64, source: String, mesh: Arc<Mesh>, points: Vec<[f32; 2]>, projection: [[f32; 4]; 4], aspect: f32,
     count: usize, hover: Option<Edge>, hover_key: Option<(Pos2, [[f32; 4]; 4], f32, bool, u64)>, slide: Option<Slide>, wheel: f32,
+    even: bool, flipped: bool, clamp: bool, numeric: String,
+    edge_selection: Vec<Edge>,
 }
 fn id() -> egui::Id { egui::Id::new("viewport_mesh_cut") }
 pub fn cancel(ctx: &egui::Context) { ctx.data_mut(|d| d.remove::<State>(id())); }
+pub fn start_edge_slide(ctx: &egui::Context, source: String, edges: Vec<Edge>) {
+    if edges.is_empty() { return; }
+    let mut state=State { tool:Some(Tool::EdgeSlide), source, count:1, clamp:true, edge_selection:edges, ..Default::default() };
+    state.slide=Some(Slide { edge:state.edge_selection[0], raw:0., press:ctx.input(|i|i.pointer.hover_pos()).unwrap_or(Pos2::ZERO), held:false, dragged:false });
+    ctx.data_mut(|d|d.insert_temp(id(),state));
+}
 pub fn blocks_navigation(ctx: &egui::Context) -> bool { ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| !s.points.is_empty() || s.slide.is_some())) }
 /// Loop Cut owns the wheel throughout its modal session, including between edges.
 pub fn captures_wheel(ctx: &egui::Context) -> bool {
@@ -134,7 +142,7 @@ pub fn captures_wheel(ctx: &egui::Context) -> bool {
 }
 pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     let tool = v.editor.tool;
-    if !matches!(tool, Tool::Knife | Tool::LoopCut) { cancel(ui.ctx()); return; }
+    if !matches!(tool, Tool::Knife | Tool::LoopCut | Tool::EdgeSlide) { cancel(ui.ctx()); return; }
     let ctx = ui.ctx().clone();
     let mut s: State = ctx.data_mut(|d| d.get_temp(id())).unwrap_or_default();
     let displayed = minihou_app::display_nodes(v.doc);
@@ -142,7 +150,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     let source = displayed.first().cloned().unwrap_or_default();
     let aspect = rect.width()/rect.height().max(1.);
     if s.tool != Some(tool) || s.source != source {
-        s = State { tool: Some(tool), count: 1, ..Default::default() };
+        s = State { tool: Some(tool), count: 1, clamp: true, ..Default::default() };
     }
     if s.revision != v.cooking.completed || s.source != source || s.mesh.positions.is_empty() && v.cooking.geometry.is_some() {
         // The cut count is a tool setting and survives re-cooks; a pending slide refers to the old topology.
@@ -153,47 +161,65 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     s.count = s.count.clamp(1, LOOP_CUT_MAX);
     if s.projection != v.camera.projection || s.aspect != aspect || !ready { s.points.clear(); }
     if !ready { s.slide = None; }
+    if ready && tool==Tool::EdgeSlide && s.slide.is_none() && !s.edge_selection.is_empty() {
+        s.slide=Some(Slide { edge:s.edge_selection[0], raw:0., press:ctx.input(|i|i.pointer.hover_pos()).unwrap_or(Pos2::ZERO), held:false, dragged:false });
+    }
     s.projection = v.camera.projection; s.aspect = aspect;
     let canvas = |p: Pos2| super::viewport_ui::selection_canvas_contains(rect,p) && p.x > rect.left()+55. && p.y > rect.top()+83.;
     let (pointer, delta, modifiers) = ctx.input(|i| (i.pointer.hover_pos(), i.pointer.delta(), i.modifiers));
     let pointer = pointer.filter(|p| canvas(*p));
     let loop_cut = ready && tool == Tool::LoopCut;
+    let edge_slide = ready && tool == Tool::EdgeSlide;
     if loop_cut && s.slide.is_none() {
         let key = pointer.map(|p| (p, v.camera.projection, aspect, v.editor.xray, s.revision));
         if key != s.hover_key { s.hover = pointer.and_then(|p| s.mesh.hover(v.camera, rect, p, v.editor.xray)); s.hover_key = key; }
     } else { s.hover = None; s.hover_key = None; }
     // Slide follows pointer motion along the seed edge's projection.
-    if let (true, Some(sl)) = (loop_cut, s.slide.as_mut()) {
+    if let (true, Some(sl)) = (loop_cut || edge_slide, s.slide.as_mut()) {
         let (pa, pb) = (transform_gizmo::project(v.camera, rect, s.mesh.point(sl.edge.0)), transform_gizmo::project(v.camera, rect, s.mesh.point(sl.edge.1)));
-        if let (Some(pa), Some(pb)) = (pa, pb) { sl.raw = slide_step(sl.raw, delta, pa, pb, modifiers.shift); }
+        if s.numeric.is_empty() { if let (Some(pa), Some(pb)) = (pa, pb) { sl.raw = slide_step(sl.raw, delta, pa, pb, modifiers.shift); } }
         if sl.held && pointer.is_some_and(|p| p.distance(sl.press) > DRAG_THRESHOLD) { sl.dragged = true; }
     }
     let ndc = |p: Pos2| [(p.x-rect.center().x)*2./rect.width(),(rect.center().y-p.y)*2./rect.height()];
     let commit = |s: &State, edge: Edge, factor: f64, out: &mut Actions| {
-        out.push(UiAction::MeshCutCommit {
-            source: s.source.clone(), node_type: "polysplit".into(), params: loop_params(edge, s.count, factor) });
+        let (node_type,params)=if s.tool==Some(Tool::EdgeSlide) {
+            ("edge_slide",json!({"group":s.edge_selection.iter().map(|(a,b)|format!("p{a}-{b}")).collect::<Vec<_>>().join(" "),
+                "factor":factor,"even":s.even,"flipped":s.flipped,"clamp":s.clamp,"mirror_editing":true,"correct_uvs":true,"output_group":true}))
+        } else { ("polysplit",loop_params(edge,s.count,factor,s.even,s.flipped,s.clamp)) };
+        out.push(UiAction::MeshCutCommit { source:s.source.clone(), node_type:node_type.into(), params });
         out.push(UiAction::Editor(EditorChange::Tool(Tool::Select)));
     };
     for event in ctx.input(|i| i.events.clone()) {
         match event {
             egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } => {
+                if loop_cut { if let Some(sl)=s.slide.take() { commit(&s,sl.edge,0.,out); cancel(&ctx); return; } }
                 cancel(&ctx); out.push(UiAction::Editor(EditorChange::Tool(Tool::Select))); return;
             }
             egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: true, modifiers, .. } if !modifiers.alt && !modifiers.ctrl => {
+                if loop_cut { if let Some(sl)=s.slide.take() { commit(&s,sl.edge,0.,out); cancel(&ctx); return; } }
                 cancel(&ctx); out.push(UiAction::Editor(EditorChange::Tool(Tool::Select))); return;
+            }
+            egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } if (loop_cut || edge_slide) && s.slide.is_some() => {
+                s.numeric.pop(); if let Ok(f)=s.numeric.parse::<f64>() { if let Some(sl)=s.slide.as_mut() { sl.raw=f.clamp(-1.,1.); } }
             }
             egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => { s.points.pop(); }
             egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } if ready && tool == Tool::Knife && s.points.len() >= 2 => {
                 out.push(UiAction::MeshCutCommit { source: s.source.clone(), node_type: "knife".into(), params: knife_params(v.camera,rect,&s.points) }); s.points.clear();
             }
-            egui::Event::Key { key: egui::Key::Enter, pressed: true, modifiers, .. } if loop_cut => {
+            egui::Event::Key { key: egui::Key::Enter, pressed: true, modifiers, .. } if loop_cut || edge_slide => {
                 if let Some(sl) = s.slide.take() { commit(&s, sl.edge, slide_factor(sl.raw, modifiers.ctrl), out); }
-                else if let Some(edge) = s.hover { commit(&s, edge, 0.5, out); }
+                else if let Some(edge) = s.hover { commit(&s, edge, 0., out); }
             }
-            egui::Event::Key { key: key @ (egui::Key::PageUp | egui::Key::PageDown | egui::Key::Plus | egui::Key::Minus), pressed: true, .. } if loop_cut => {
+            egui::Event::Key { key: egui::Key::E, pressed: true, .. } if (loop_cut || edge_slide) && s.slide.is_some() => s.even=!s.even,
+            egui::Event::Key { key: egui::Key::F, pressed: true, .. } if (loop_cut || edge_slide) && s.slide.is_some() => s.flipped=!s.flipped,
+            egui::Event::Key { key: egui::Key::C, pressed: true, .. } if (loop_cut || edge_slide) && s.slide.is_some() => s.clamp=!s.clamp,
+            egui::Event::Text(ref value) if (loop_cut || edge_slide) && s.slide.is_some() && value.chars().all(|c| c.is_ascii_digit() || c=='.' || c=='-') => {
+                s.numeric.push_str(value); if let Ok(f)=s.numeric.parse::<f64>() { if let Some(sl)=s.slide.as_mut() { sl.raw=f.clamp(-1.,1.); } }
+            }
+            egui::Event::Key { key: key @ (egui::Key::PageUp | egui::Key::PageDown | egui::Key::Plus | egui::Key::Minus), pressed: true, .. } if loop_cut && s.slide.is_none() => {
                 s.count = step_count(s.count, if matches!(key, egui::Key::PageUp | egui::Key::Plus) { 1 } else { -1 });
             }
-            egui::Event::MouseWheel { unit, delta, .. } if loop_cut && pointer.is_some() => {
+            egui::Event::MouseWheel { unit, delta, .. } if loop_cut && s.slide.is_none() && pointer.is_some() => {
                 s.wheel += wheel_notches(unit, delta.y);
                 let steps = s.wheel.trunc();
                 if steps != 0. { s.count = step_count(s.count, steps as i32); s.wheel -= steps; }
@@ -205,10 +231,10 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
                 } else if let Some(sl) = s.slide {
                     s.slide = None; commit(&s, sl.edge, slide_factor(sl.raw, modifiers.ctrl), out);
                 } else if let Some(edge) = s.hover {
-                    s.slide = Some(Slide { edge, raw: 0.5, press: pos, held: true, dragged: false });
+                    s.slide = Some(Slide { edge, raw: 0., press: pos, held: true, dragged: false });
                 }
             }
-            egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: false, modifiers, .. } if loop_cut => {
+            egui::Event::PointerButton { button: egui::PointerButton::Primary, pressed: false, modifiers, .. } if loop_cut || edge_slide => {
                 if let Some(sl) = s.slide.as_mut() {
                     // Press-drag-release (Blender) commits on release; a plain click keeps sliding (loop-tool.js).
                     if sl.held && sl.dragged { let sl = s.slide.take().unwrap(); commit(&s, sl.edge, slide_factor(sl.raw, modifiers.ctrl), out); }
@@ -220,20 +246,34 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     }
     let painter = ui.painter_at(rect); let stroke = Stroke::new(2.5_f32,v.theme.warn);
     let snap = modifiers.ctrl;
-    let active = s.slide.map(|sl| (sl.edge, slide_factor(sl.raw, snap))).or(s.hover.map(|e| (e, 0.5)));
+    let active = s.slide.map(|sl| (sl.edge, slide_factor(sl.raw, snap))).or(s.hover.map(|e| (e, 0.)));
     if let (true, Some((seed, factor))) = (loop_cut, active) {
-        for (a,b) in s.mesh.preview(seed, s.count, factor) {
+        let lines=if s.slide.is_some() { v.cooking.geometry.as_deref().and_then(|g|loop_cut_preview(g,seed,s.count,factor,s.even,s.flipped,s.clamp).ok()).unwrap_or_default() }
+            else { s.mesh.preview(seed,s.count,0.) };
+        for (a,b) in lines {
             if let (Some(a),Some(b)) = (transform_gizmo::project(v.camera,rect,a),transform_gizmo::project(v.camera,rect,b)) { painter.line_segment([a,b],stroke); }
         }
         if let (Some(a), Some(b)) = (transform_gizmo::project(v.camera,rect,s.mesh.point(seed.0)), transform_gizmo::project(v.camera,rect,s.mesh.point(seed.1))) {
             painter.line_segment([a,b],Stroke::new(1_f32,v.theme.text));
         }
         if let Some(p) = pointer {
-            let label = match s.slide { Some(_) if s.count == 1 => format!("{} cut  {factor:.3}", s.count), _ => format!("{} cut{}", s.count, if s.count == 1 { "" } else { "s" }) };
+            let label = match s.slide { Some(_) => format!("{} cut{}  Factor {factor:.3}{}", s.count, if s.count == 1 { "" } else { "s" }, if s.numeric.is_empty() { "" } else { " (numeric)" }), _ => format!("{} cut{}", s.count, if s.count == 1 { "" } else { "s" }) };
             let at = p + vec2(16., -18.);
             let galley = painter.layout_no_wrap(label, FontId::monospace(12.), v.theme.text);
             painter.rect_filled(Rect::from_min_size(at - vec2(3., 2.), galley.size() + vec2(6., 4.)), 2., v.theme.panel);
             painter.galley(at, galley, v.theme.text);
+        }
+    }
+    if edge_slide {
+        if let (Some(g),Some(sl))=(v.cooking.geometry.as_deref(),s.slide) {
+            let preview=edge_slide_preview(g,&s.edge_selection,slide_factor(sl.raw,snap),s.even,s.flipped,s.clamp,true);
+            for &(a,b) in &s.edge_selection {
+                if a>=preview.npoints || b>=preview.npoints { continue; }
+                let point=|i:usize| [preview.p()[3*i],preview.p()[3*i+1],preview.p()[3*i+2]];
+                if let (Some(a),Some(b))=(transform_gizmo::project(v.camera,rect,point(a)),transform_gizmo::project(v.camera,rect,point(b))) {
+                    painter.line_segment([a,b],stroke);
+                }
+            }
         }
     }
     if tool == Tool::Knife {
@@ -245,6 +285,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     }
     let hint = if !ready { "Cut tools: display one cooked mesh stream".to_owned() }
         else if tool == Tool::Knife { "Knife: click points | Enter apply | Backspace undo point | Esc/RMB exit".to_owned() }
+        else if tool==Tool::EdgeSlide { format!("Edge Slide | Factor {:.3} | Shift precision, Ctrl snap, E Even, F Flip, C Clamp, type factor | LMB/Enter confirm | RMB/Esc cancel",s.slide.map(|sl|slide_factor(sl.raw,snap)).unwrap_or(0.)) }
         else { loop_hint(s.count, s.slide.map(|sl| slide_factor(sl.raw, snap)), s.hover.is_some()) };
     let galley = painter.layout_no_wrap(hint, FontId::monospace(11.), v.theme.text);
     let chip = Rect::from_min_size(rect.min+vec2(56.,48.),vec2(galley.size().x + 16., 28.));
@@ -253,13 +294,12 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     if s.slide.is_some() || s.hover.is_some() { ctx.request_repaint(); }
     ctx.data_mut(|d| d.insert_temp(id(),s));
 }
-/// Status text with the cut count and, while sliding a single cut, the factor (loop-tool.js `showFeedback`).
+/// Status text reflects the two Blender modal phases.
 fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
     let cuts = format!("{count} cut{}", if count == 1 { "" } else { "s" });
     match slide {
-        Some(f) if count == 1 => format!("Loop Cut | {cuts} | factor {f:.3} | move to slide, Shift fine, Ctrl snap 0.1 | click/Enter confirm | Esc/RMB cancel"),
-        Some(_) => format!("Loop Cut | {cuts}, evenly spaced | wheel/PgUp/PgDn/+/- count | click/Enter confirm | Esc/RMB cancel"),
-        None if hovering => format!("Loop Cut | {cuts} | wheel/PgUp/PgDn/+/- count | click to slide | Enter centred cut | Esc/RMB cancel"),
+        Some(f) => format!("Loop Cut | {cuts} | Factor {f:.3} | Shift precision, Ctrl snap, E Even, F Flip, C Clamp, type factor | LMB/Enter confirm | RMB: keep centred | Esc: keep centred"),
+        None if hovering => format!("Loop Cut | {cuts} | wheel/PgUp/PgDn/+/- count | LMB to slide | Esc/RMB cancel"),
         None => format!("Loop Cut | {cuts} | hover a quad edge | Esc/RMB exit"),
     }
 }
@@ -281,14 +321,14 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
     }
     #[test] fn slide_follows_the_projected_seed_edge() {
         let (a, b) = (pos2(0., 0.), pos2(200., 0.));
-        assert!((slide_step(0.5, vec2(50., 0.), a, b, false) - 0.75).abs() < 1e-9);
-        assert!((slide_step(0.5, vec2(-50., 0.), a, b, false) - 0.25).abs() < 1e-9);
-        assert!((slide_step(0.5, vec2(50., 0.), a, b, true) - 0.525).abs() < 1e-9, "shift is 10x finer");
-        assert!((slide_step(0.5, vec2(0., 80.), a, b, false) - 0.5).abs() < 1e-9, "motion across the edge does nothing");
+        assert!((slide_step(0., vec2(50., 0.), a, b, false) - 0.5).abs() < 1e-9);
+        assert!((slide_step(0., vec2(-50., 0.), a, b, false) + 0.5).abs() < 1e-9);
+        assert!((slide_step(0., vec2(50., 0.), a, b, true) - 0.05).abs() < 1e-9, "shift is 10x finer");
+        assert_eq!(slide_step(0., vec2(0., 80.), a, b, false), 0.);
         assert_eq!(slide_step(0.9, vec2(500., 0.), a, b, false), 1.);
-        assert!((slide_step(0.5, vec2(50., 0.), a, a, false) - 1.0).abs() < 1e-9, "end-on edge uses 100px horizontal mapping");
-        assert_eq!(slide_factor(1., false), 0.999);
-        assert_eq!(slide_factor(0., false), 0.001);
+        assert_eq!(slide_step(0., vec2(50., 0.), a, a, false), 1., "end-on edge uses 100px horizontal mapping");
+        assert_eq!(slide_factor(1., false), 1.);
+        assert_eq!(slide_factor(0., false), 0.);
         assert_eq!(slide_factor(0.437, true), 0.4);
         assert_eq!(slide_factor(0.43712, false), 0.4371);
     }
@@ -299,11 +339,13 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
         let over = |x: f32, y: f32| transform_gizmo::project(cam, rect, [x, y, 0.]).unwrap();
         assert_eq!(m.hover(cam, rect, over(1., 0.5), false), Some((1, 4)));
         assert_eq!(m.preview((1, 4), 2, 0.5).len(), 4, "two quads x two cuts");
-        let lines = m.preview((1, 4), 2, 0.9);
+        let lines = m.preview((1, 4), 2, 0.);
         let mut ys: Vec<_> = lines.iter().map(|(a, b)| { assert!((a[1] - b[1]).abs() < 1e-6); a[1] }).collect();
         ys.sort_by(f32::total_cmp);
         assert!((ys[0] - 1. / 3.).abs() < 1e-6 && (ys[3] - 2. / 3.).abs() < 1e-6,
-            "all preview cuts are evenly spaced, independent of the slide factor");
+            "all preview cuts start evenly spaced");
+        let moved=m.preview((1,4),2,0.5);
+        assert!(moved[0].0[1] > lines[0].0[1], "all cuts slide together");
         assert_eq!(m.hover(cam, rect, over(1., 0.5) + vec2(30., 0.), false), None, "outside the radius");
         // a larger quad in front (z = 1) hides the strip unless X-ray is on
         let mut g = strip();
@@ -385,7 +427,7 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
         assert!(h.frame(vec![button(p, egui::PointerButton::Primary, false)]).is_empty(), "plain click keeps sliding");
         assert!(blocks_navigation(&h.ctx));
         let params = committed(&h.frame(vec![key(egui::Key::Enter)])).unwrap();
-        assert_eq!(params, json!({"mode":"edge_loop","split_edges":"p1-4","loops":3,"position":0.5}));
+        assert_eq!(params, loop_params((1,4),3,0.,false,false,true));
         assert!(!blocks_navigation(&h.ctx));
     }
     #[test] fn wheel_count_survives_moving_between_edges() {
@@ -402,7 +444,7 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
         let params = committed(&h.frame(vec![key(egui::Key::Enter)])).unwrap();
         assert_eq!(params["loops"], 3);
     }
-    #[test] fn drag_release_commits_the_slid_factor_and_rmb_cancels() {
+    #[test] fn drag_release_commits_the_slid_factor_and_rmb_keeps_centre() {
         let h = Harness::new();
         let p = h.at(1., 0.5);
         h.frame(vec![egui::Event::PointerMoved(p)]);
@@ -411,28 +453,48 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
         let q = h.at(1., 0.75);
         h.frame(vec![egui::Event::PointerMoved(q)]);
         let params = committed(&h.frame(vec![button(q, egui::PointerButton::Primary, false)])).unwrap();
-        assert!((params["position"].as_f64().unwrap() - 0.75).abs() < 1e-3, "{params}");
+        assert!((params["factor"].as_f64().unwrap() - 0.5).abs() < 1e-3, "{params}");
         assert_eq!(params["loops"], 1);
-        // RMB during a slide cancels without inserting a node.
+        // RMB during a slide inserts the centred cut as one edit.
         h.frame(vec![egui::Event::PointerMoved(p)]);
         h.frame(vec![button(p, egui::PointerButton::Primary, true), button(p, egui::PointerButton::Primary, false)]);
         h.frame(vec![egui::Event::PointerMoved(q)]);
         let actions = h.frame(vec![button(q, egui::PointerButton::Secondary, true)]);
-        assert!(committed(&actions).is_none());
-        assert!(matches!(actions.as_slice(), [UiAction::Editor(EditorChange::Tool(Tool::Select))]));
+        assert_eq!(committed(&actions).unwrap()["factor"],0.);
     }
-    #[test] fn escape_cancels_without_a_node_and_select_tool_is_untouched() {
+    #[test] fn escape_during_slide_keeps_centre_and_hover_escape_cancels() {
         let mut h = Harness::new();
         let p = h.at(1., 0.5);
         h.frame(vec![egui::Event::PointerMoved(p)]);
         h.frame(vec![button(p, egui::PointerButton::Primary, true)]);
         let out = h.frame(vec![key(egui::Key::Escape)]);
+        assert_eq!(committed(&out).unwrap()["factor"],0.);
+        h.frame(vec![egui::Event::PointerMoved(p)]);
+        let out=h.frame(vec![key(egui::Key::Escape)]);
         assert!(committed(&out).is_none());
-        assert!(matches!(out.as_slice(), [UiAction::Editor(EditorChange::Tool(Tool::Select))]));
         h.fixture.editor.tool = Tool::Select;
         let wheel = egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: vec2(0., 1.), modifiers: egui::Modifiers::NONE };
         assert!(h.frame(vec![egui::Event::PointerMoved(p), wheel, button(p, egui::PointerButton::Primary, true)]).is_empty());
         assert!(!captures_wheel(&h.ctx) && !blocks_navigation(&h.ctx));
+    }
+    #[test] fn slide_toggles_and_numeric_factor_commit_once() {
+        let h=Harness::new(); let p=h.at(1.,0.5);
+        h.frame(vec![egui::Event::PointerMoved(p)]);
+        h.frame(vec![button(p,egui::PointerButton::Primary,true),button(p,egui::PointerButton::Primary,false)]);
+        let params=committed(&h.frame(vec![key(egui::Key::E),key(egui::Key::F),key(egui::Key::C),
+            egui::Event::Text("-0.4".into()),key(egui::Key::Enter)])).unwrap();
+        assert_eq!(params["factor"],-0.4);
+        assert_eq!((params["even"].as_bool(),params["flipped"].as_bool(),params["clamp"].as_bool()),(Some(true),Some(true),Some(false)));
+    }
+    #[test] fn edge_slide_selected_edges_confirm_and_cancel() {
+        let mut h=Harness::new(); h.fixture.editor.tool=Tool::EdgeSlide;
+        let source=minihou_app::display_nodes(h.fixture.view().doc)[0].clone();
+        start_edge_slide(&h.ctx,source,vec![(1,4)]);
+        let params=h.frame(vec![egui::Event::Text("0.5".into()),key(egui::Key::Enter)]);
+        assert!(params.iter().any(|a|matches!(a,UiAction::MeshCutCommit {node_type,params,..} if node_type=="edge_slide" && params["factor"]==0.5 && params["group"]=="p1-4")));
+        let source=minihou_app::display_nodes(h.fixture.view().doc)[0].clone();
+        start_edge_slide(&h.ctx,source,vec![(1,4)]);
+        assert!(h.frame(vec![key(egui::Key::Escape)]).iter().all(|a|!matches!(a,UiAction::MeshCutCommit {..})));
     }
     #[test] fn knife_projection_matches_viewport_with_non_square_aspect() {
         let camera = CameraInfo { projection: [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]], ..Default::default() };

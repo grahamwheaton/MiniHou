@@ -69,6 +69,7 @@ pub(super) const TABS: &[Category] = &[
         Tool { label: "Solidify", node_type: "solidify" },
         Tool { label: "PolySplit", node_type: "polysplit" },
         Tool { label: "Loop Cut", node_type: "loop_cut" },
+        Tool { label: "Edge Slide", node_type: "edge_slide" },
         Tool { label: "Knife", node_type: "knife" },
         Tool { label: "PolyFill", node_type: "polyfill" },
         Tool { label: "PolyBridge", node_type: "polybridge" },
