@@ -9,6 +9,7 @@ pub mod keymap;
 pub mod network;
 pub mod params;
 pub mod prim_handles;
+pub mod curve_tool;
 pub mod proxy_ui;
 pub mod selection_region;
 pub mod shelf;

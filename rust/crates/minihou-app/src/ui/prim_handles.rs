@@ -88,6 +88,8 @@ pub enum GripAction {
     GridSize { axis: usize },
     CircleRadius,
     LineLength,
+    CurvePoint(usize),
+    HelixValue { param: &'static str, min: f64 },
 }
 
 #[derive(Clone, Debug)]
@@ -130,6 +132,18 @@ fn get_v3(params: &Value, key: &str, default: [f64; 3]) -> [f64; 3] {
     } else {
         default
     }
+}
+
+pub fn parse_curve_points(text:&str)->Option<Vec<[f64;3]>> {
+    let points:Option<Vec<_>>=text.split_whitespace().map(|token| {
+        let parts:Vec<_>=token.split(',').collect();if parts.len()!=3 {return None;}
+        let xyz:Option<Vec<f64>>=parts.iter().map(|s|s.parse::<f64>().ok().filter(|x|x.is_finite())).collect();
+        let xyz=xyz?;Some([xyz[0],xyz[1],xyz[2]])
+    }).collect();
+    points.filter(|p|p.len()>=2)
+}
+pub fn write_curve_points(points:&[[f64;3]])->String {
+    points.iter().map(|p|format!("{},{},{}",p[0],p[1],p[2])).collect::<Vec<_>>().join(" ")
 }
 
 pub fn handles_for_node(node_id: &str, node_type: &str, params: &Value) -> (Vec<Grip>, Option<SpinnerRing>) {
@@ -525,6 +539,30 @@ pub fn handles_for_node(node_id: &str, node_type: &str, params: &Value) -> (Vec<
                 label: Some(format!("{points} pts")),
             });
         }
+        "curve" => {
+            let default="0,0,0  1,0,0  1,1,0  2,1,1";
+            if let Some(points)=parse_curve_points(params["points"].as_str().unwrap_or(default)) {
+                for (index,p) in points.into_iter().enumerate() {
+                    grips.push(Grip{id:format!("{node_id}_curve_point_{index}"),world_pos:p.map(|x|x as f32),world_dir:[1.,0.,0.],
+                        shape:GripShape::Circle,action:GripAction::CurvePoint(index),label:Some(format!("Point {}",index+1))});
+                }
+            }
+        }
+        "helix" => {
+            let radius=get_f64(params,"radius",1.);
+            let top=get_f64(params,"radius_end",-1.);let top=if top<0.{radius}else{top};
+            let height=get_f64(params,"height",2.);let turns=get_f64(params,"turns",3.);
+            let angle=turns*std::f64::consts::TAU;
+            for (name,param,p,dir,min) in [
+                ("Radius","radius",[radius,0.,0.],[1.,0.,0.],0.),
+                ("Radius top","radius_end",[top*angle.cos(),top*angle.sin(),height],[angle.cos(),angle.sin(),0.],0.),
+                ("Height","height",[0.,0.,height],[0.,0.,1.],0.),
+                ("Turns","turns",[top*angle.cos(),top*angle.sin(),height+0.3],[-angle.sin(),angle.cos(),0.],0.01),
+            ] {
+                grips.push(Grip{id:format!("{node_id}_helix_{param}"),world_pos:p.map(|x|x as f32),world_dir:dir.map(|x|x as f32),
+                    shape:GripShape::Square,action:GripAction::HelixValue{param,min},label:Some(format!("{name}: {:.2}",if param=="radius_end" {top}else{get_f64(params,param,if param=="turns" {3.}else if param=="height" {2.}else{1.})}))});
+            }
+        }
         _ => {}
     }
 
@@ -540,6 +578,8 @@ pub struct PrimDrag {
     start_params: Value,
     action: GripAction,
     world_dir: [f32; 3],
+    camera: CameraInfo,
+    rect: Rect,
 }
 
 pub fn active(ctx: &egui::Context) -> bool {
@@ -694,6 +734,32 @@ pub fn compute_edits_for_drag(
             let new_l = (start_l + world_delta).max(0.0);
             out.push(("length", json!(new_l)));
         }
+        GripAction::CurvePoint(index) => {
+            let default="0,0,0  1,0,0  1,1,0  2,1,1";
+            if let Some(mut points)=parse_curve_points(drag.start_params["points"].as_str().unwrap_or(default)) {
+                if let Some(base)=points.get(index).copied() {
+                    let plane=|pointer| {
+                        let (origin,dir)=ray(drag.camera,drag.rect,pointer);
+                        let n=drag.camera.ray_forward;
+                        let denom=(0..3).map(|k|dir[k]*n[k]).sum::<f32>() as f64;
+                        if denom.abs()<1e-8 {return None;}
+                        let t=(0..3).map(|k|(base[k]-origin[k] as f64)*n[k] as f64).sum::<f64>()/denom;
+                        Some([0,1,2].map(|k|origin[k] as f64+dir[k] as f64*t))
+                    };
+                    if let (Some(start),Some(end))=(plane(drag.start_pointer),plane(cur_pointer)) {
+                        let precision=if shift {0.1}else{1.};
+                        points[index]=[0,1,2].map(|k|base[k]+(end[k]-start[k])*precision);
+                        out.push(("points",json!(write_curve_points(&points))));
+                    }
+                }
+            }
+        }
+        GripAction::HelixValue{param,min} => {
+            let default=match param {"radius"=>1.,"radius_end"=>get_f64(&drag.start_params,"radius",1.),"height"=>2.,"turns"=>3.,_=>0.};
+            let start=get_f64(&drag.start_params,param,default);
+            let start=if param=="radius_end"&&start<0. {default}else{start};
+            out.push((param,json!((start+world_delta).max(min))));
+        }
     }
     out
 }
@@ -711,8 +777,21 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
 
     let pointer = ui.input(|i| i.pointer.hover_pos());
     let primary_down = ui.input(|i| i.pointer.primary_down());
-    let primary_clicked = ui.input(|i| i.pointer.button_clicked(PointerButton::Primary));
+    let primary_clicked = ui.input(|i| i.pointer.primary_pressed());
     let shift = ui.input(|i| i.modifiers.shift);
+    if ty=="curve" && shift && ui.input(|i|i.pointer.button_double_clicked(PointerButton::Primary)) && current_drag.is_none() {
+        if let Some(pointer)=pointer.filter(|p|rect.contains(*p)) {
+            let default="0,0,0  1,0,0  1,1,0  2,1,1";
+            if let Some(mut points)=parse_curve_points(params["points"].as_str().unwrap_or(default)) {
+                let base=*points.last().unwrap();let (origin,dir)=ray(v.camera,rect,pointer);let n=v.camera.ray_forward;
+                let denom=(0..3).map(|k|dir[k]*n[k]).sum::<f32>() as f64;
+                if denom.abs()>1e-8 {let t=(0..3).map(|k|(base[k]-origin[k] as f64)*n[k] as f64).sum::<f64>()/denom;
+                    points.push([0,1,2].map(|k|origin[k] as f64+dir[k] as f64*t));
+                    out.push(UiAction::Edit{edit:Edit::Param{node:node_id.into(),name:"points".into(),value:json!(write_curve_points(&points))},continuous:false});
+                }
+            }
+        }
+    }
 
     // Render spinner ring if present
     if let Some(r) = ring {
@@ -846,6 +925,8 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
                 start_params: params.clone(),
                 action: grip.action.clone(),
                 world_dir: grip.world_dir,
+                camera: v.camera,
+                rect,
             };
             ui.ctx().data_mut(|d| d.insert_temp(drag_id, drag));
             current_drag = ui.ctx().data(|d| d.get_temp(drag_id));
@@ -858,6 +939,28 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bool 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn curve_points_round_trip_and_helix_grips() {
+        let text="0,0,0 1.25,2,-3";
+        let points=parse_curve_points(text).unwrap();
+        assert_eq!(parse_curve_points(&write_curve_points(&points)),Some(points));
+        let (grips,_)=handles_for_node("curve1","curve",&json!({"points":text}));
+        assert_eq!(grips.len(),2);
+        assert_eq!(grips[1].action,GripAction::CurvePoint(1));
+        let (grips,_)=handles_for_node("helix1","helix",&json!({"radius":2.,"radius_end":1.,"height":4.,"turns":3.}));
+        assert_eq!(grips.len(),4);
+        assert!(grips.iter().any(|g|g.action==GripAction::HelixValue{param:"radius_end",min:0.}));
+    }
+    #[test] fn curve_point_drag_writes_xyz_text() {
+        let drag=PrimDrag{node:"curve1".into(),start_pointer:pos2(100.,100.),screen_dir:Vec2::X,span:100.,
+            start_params:json!({"points":"0,0,0 1,0,0"}),action:GripAction::CurvePoint(1),world_dir:[1.,0.,0.],
+            camera:CameraInfo{ortho:true,ray_origin:[0.,0.,1.],ray_forward:[0.,0.,-1.],ray_right:[1.,0.,0.],ray_up:[0.,1.,0.],..Default::default()},
+            rect:Rect::from_min_size(Pos2::ZERO,Vec2::splat(200.))};
+        let edits=compute_edits_for_drag(&drag,pos2(150.,100.),false);
+        assert_eq!(edits.len(),1);
+        let points=parse_curve_points(edits[0].1.as_str().unwrap()).unwrap();
+        assert_eq!(points[1],[1.5,0.,0.]);
+    }
 
     #[test]
     fn test_box_face_drag_symmetric() {
@@ -874,6 +977,8 @@ mod tests {
             start_params,
             action: GripAction::BoxFace { axis: 0, sign: 1.0 },
             world_dir: [1.0, 0.0, 0.0],
+            camera: CameraInfo::default(),
+            rect: Rect::NOTHING,
         };
         // Move pointer 50 pixels to the right along screen_dir: world_delta = 1.0
         // Symmetric mode (shift = false): size expands by 2 * delta = 2.0 -> size_x = 4.0
@@ -900,6 +1005,8 @@ mod tests {
             start_params,
             action: GripAction::BoxFace { axis: 0, sign: 1.0 },
             world_dir: [1.0, 0.0, 0.0],
+            camera: CameraInfo::default(),
+            rect: Rect::NOTHING,
         };
         // Move pointer 50 pixels to the right with shift = true
         // size_x = start + 1.0 = 3.0, center moves by delta/2 = +0.5
@@ -927,6 +1034,8 @@ mod tests {
             start_params,
             action: GripAction::BoxCorner,
             world_dir: [1.0, 1.0, 1.0],
+            camera: CameraInfo::default(),
+            rect: Rect::NOTHING,
         };
         // Move pointer 50px along span: factor = (50 + 50) / 50 = 2.0
         let edits = compute_edits_for_drag(&drag, Pos2::new(100.0 + 35.355, 100.0 + 35.355), false);
@@ -953,6 +1062,8 @@ mod tests {
             start_params: start_params.clone(),
             action: GripAction::SphereRadius,
             world_dir: [1.0, 0.0, 0.0],
+            camera: CameraInfo::default(),
+            rect: Rect::NOTHING,
         };
         // Drag radius by +40px: delta = 1.0 -> radius = 2.5
         let edits = compute_edits_for_drag(&rad_drag, Pos2::new(140.0, 100.0), false);
@@ -969,6 +1080,8 @@ mod tests {
             start_params,
             action: GripAction::IntStep { param: "columns", min: 3, max: 4096, step_scale: 1.0 },
             world_dir: [0.0, 1.0, 0.0],
+            camera: CameraInfo::default(),
+            rect: Rect::NOTHING,
         };
         // Drag columns by 20px -> +2 steps -> columns = 34
         let edits = compute_edits_for_drag(&col_drag, Pos2::new(100.0, 120.0), false);
@@ -994,6 +1107,8 @@ mod tests {
             start_params,
             action: GripAction::TubeHeight,
             world_dir: [0.0, 0.0, 1.0],
+            camera: CameraInfo::default(),
+            rect: Rect::NOTHING,
         };
         // Drag height upward by 50px -> delta = 1.0 -> new height = 3.0 + 2*1.0 = 5.0
         let edits = compute_edits_for_drag(&h_drag, Pos2::new(100.0, 50.0), false);
@@ -1018,6 +1133,8 @@ mod tests {
             start_params,
             action: GripAction::TorusThickness,
             world_dir: [0.0, 0.0, 1.0],
+            camera: CameraInfo::default(),
+            rect: Rect::NOTHING,
         };
         let edits = compute_edits_for_drag(&t_drag, Pos2::new(100.0, 50.0), false);
         assert_eq!(edits.len(), 1);
@@ -1043,6 +1160,8 @@ mod tests {
             start_params,
             action: GripAction::GridSize { axis: 0 },
             world_dir: [1.0, 0.0, 0.0],
+            camera: CameraInfo::default(),
+            rect: Rect::NOTHING,
         };
         let edits = compute_edits_for_drag(&sx_drag, Pos2::new(150.0, 100.0), false);
         assert_eq!(edits.len(), 1);
@@ -1064,6 +1183,8 @@ mod tests {
             start_params,
             action: GripAction::CircleRadius,
             world_dir: [1.0, 0.0, 0.0],
+            camera: CameraInfo::default(),
+            rect: Rect::NOTHING,
         };
         let edits = compute_edits_for_drag(&rad_drag, Pos2::new(150.0, 100.0), false);
         assert_eq!(edits.len(), 1);
@@ -1085,6 +1206,8 @@ mod tests {
             start_params,
             action: GripAction::LineLength,
             world_dir: [0.0, 0.0, 1.0],
+            camera: CameraInfo::default(),
+            rect: Rect::NOTHING,
         };
         let edits = compute_edits_for_drag(&len_drag, Pos2::new(100.0, 150.0), false);
         assert_eq!(edits.len(), 1);

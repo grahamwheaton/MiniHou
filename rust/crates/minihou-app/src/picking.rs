@@ -98,6 +98,55 @@ impl RegionShape {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit { pub tri: usize, pub t: f32, pub bary: [f32; 3] }
 
+/// A point or open-wire segment picked in viewport pixels. The indices remain geometry point ids.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum WireHit { Point(u32), Edge(u32, u32) }
+
+pub fn pick_wire(p: &[f32], lines: &[u32], pointer: eframe::egui::Pos2,
+    mut project: impl FnMut([f32; 3]) -> Option<(eframe::egui::Pos2, f32)>,
+    mut visible: impl FnMut(u32) -> bool, points: bool, edges: bool) -> Option<WireHit> {
+    let mut best: Option<(f32, f32, WireHit)> = None;
+    let mut consider = |distance: f32, depth: f32, hit| {
+        if depth <= 0. || !depth.is_finite() { return; }
+        if best.as_ref().is_none_or(|(d,z,_)| distance < *d - 0.001 ||
+            ((distance-*d).abs() <= 0.001 && depth < *z)) { best = Some((distance,depth,hit)); }
+    };
+    if points {
+        for id in 0..(p.len()/3) as u32 {
+            if !visible(id) { continue; }
+            if let Some((screen,depth)) = project(at(p,id)) {
+                let distance = screen.distance(pointer);
+                if distance <= 12. { consider(distance,depth,WireHit::Point(id)); }
+            }
+        }
+    }
+    if edges {
+        for pair in lines.chunks_exact(2) {
+            let (a,b) = (pair[0],pair[1]);
+            if a == b || a as usize >= p.len()/3 || b as usize >= p.len()/3 || !visible(a) || !visible(b) { continue; }
+            let (Some((sa,za)),Some((sb,zb))) = (project(at(p,a)),project(at(p,b))) else { continue; };
+            let ab = sb-sa;
+            let t = ((pointer-sa).dot(ab)/ab.length_sq().max(1e-8)).clamp(0.,1.);
+            let distance = (pointer-(sa+ab*t)).length();
+            if distance <= 8. { consider(distance,za+(zb-za)*t,WireHit::Edge(a.min(b),a.max(b))); }
+        }
+    }
+    best.map(|(_,_,hit)| hit)
+}
+
+#[cfg(test)] mod wire_tests {
+    use super::*;
+    use eframe::egui::pos2;
+    #[test] fn wire_pixels_and_visibility() {
+        let p=[0.,0.,1., 100.,0.,1.];
+        let project=|p:[f32;3]|Some((pos2(p[0],p[1]),p[2]));
+        assert_eq!(pick_wire(&p,&[0,1],pos2(3.,11.),project,|_|true,true,false),Some(WireHit::Point(0)));
+        assert_eq!(pick_wire(&p,&[0,1],pos2(50.,7.),project,|_|true,false,true),Some(WireHit::Edge(0,1)));
+        assert_eq!(pick_wire(&p,&[0,1],pos2(50.,9.),project,|_|true,false,true),None);
+        assert_eq!(pick_wire(&p,&[0,1],pos2(0.,0.),project,|_|false,true,true),None);
+    }
+}
+
 /// Selected elements of one kind; ids are point numbers (Points), vertex-pair ids (Edges) or triangle numbers (Faces).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Selection { pub mode: SelectionMode, pub points: Vec<u32>, pub edges: Vec<(u32, u32)>, pub tris: Vec<u32> }

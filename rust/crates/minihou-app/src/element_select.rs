@@ -247,6 +247,32 @@ impl Topology {
             }
         }
     }
+
+    /// Apply a point or wire-edge click without requiring a surface triangle.
+    pub fn apply_wire_click(&self, p: &[f32], kind: ClickKind, picked: Option<Selection>, mode: SelectionMode, current: &mut Selection) -> bool {
+        if let ClickKind::Loop { ring, add } = kind {
+            let Some(edge) = picked.as_ref().and_then(|s| s.edges.first()).and_then(|&(a,b)| self.edge_of(a,b)) else { return false; };
+            let found = self.loop_selection(p,edge,ring,mode);
+            if add { union(current,&found); } else { *current=found; }
+            return true;
+        }
+        // Pick, toggle, subtract and path use only the element; the triangle payload is unused.
+        self.apply_click(p,kind,picked.map(|s|(s,0,[0.;3])),mode,current)
+    }
+}
+
+#[cfg(test)] mod wire_tests {
+    use super::*;
+    #[test] fn wire_path_and_loop_are_selection_only() {
+        let p=[0.,0.,0.,1.,0.,0.,2.,0.,0.,3.,0.,0.];
+        let topo=Topology::new(&p,&[],&[0,1,1,2,2,3]);
+        let mut current=Selection {mode:SelectionMode::Points,points:vec![0],..Default::default()};
+        assert!(topo.apply_wire_click(&p,ClickKind::Path(Method::Shortest),Some(Selection {mode:SelectionMode::Points,points:vec![3],..Default::default()}),SelectionMode::Points,&mut current));
+        assert_eq!(current.points,[0,1,2,3]);
+        let mut edges=Selection {mode:SelectionMode::Edges,..Default::default()};
+        assert!(topo.apply_wire_click(&p,ClickKind::Loop {ring:false,add:false},Some(Selection {mode:SelectionMode::Edges,edges:vec![(1,2)],..Default::default()}),SelectionMode::Edges,&mut edges));
+        assert!(!edges.edges.is_empty());
+    }
 }
 
 /// Selection nodes that take their seeds from the viewport selection when added from the Tab menu (docs/RUST_SELECT_NODES.md).

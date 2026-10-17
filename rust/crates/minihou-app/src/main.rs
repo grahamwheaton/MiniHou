@@ -38,6 +38,28 @@ fn pick_displayed(scene:&Scene,o:[f32;3],d:[f32;3],visibility:viewport::ObjectVi
     picking::pick_triangle_filtered(scene.positions(),scene.triangle_indices(),o,d,|tri| tri.iter().all(|id| point_pickable(visibility,ranges,selected,*id)))
 }
 
+fn pick_displayed_wire(scene:&Scene, camera:CameraInfo, rect:egui::Rect, pointer:egui::Pos2,
+    visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,mode:ui::SelectionMode)->Option<picking::WireHit> {
+    picking::pick_wire(scene.positions(),scene.line_primitive_indices(),pointer,
+        |p| ui::transform_gizmo::project(camera,rect,p).map(|screen| {
+            let depth=(0..3).map(|k|(p[k]-camera.ray_origin[k])*camera.ray_forward[k]).sum::<f32>();
+            (screen, if camera.ortho { depth.max(0.001) } else { depth })
+        }),
+        |id| point_pickable(visibility,ranges,selected,id),
+        matches!(mode,ui::SelectionMode::Object|ui::SelectionMode::Points),
+        matches!(mode,ui::SelectionMode::Object|ui::SelectionMode::Edges))
+}
+
+fn wire_selection(hit:picking::WireHit,mode:ui::SelectionMode)->picking::Selection {
+    let mut out=picking::Selection {mode,..Default::default()};
+    match (mode,hit) {
+        (ui::SelectionMode::Points,picking::WireHit::Point(id)) => out.points.push(id),
+        (ui::SelectionMode::Edges,picking::WireHit::Edge(a,b)) => out.edges.push((a,b)),
+        _ => {}
+    }
+    out
+}
+
 #[allow(dead_code)]
 fn scaled_from_initial(initial: &serde_json::Value, factor: [f32; 3]) -> [f32; 3] {
     [0,1,2].map(|i| initial.get(i).and_then(|x| x.as_f64()).unwrap_or(1.) as f32 * factor[i])
@@ -340,6 +362,7 @@ impl App {
         self.finish_mirror();
         ui::transform_gizmo::finish_input(ctx);
         ui::prim_handles::finish_input(ctx);
+        ui::curve_tool::cancel(ctx);
         ui::sketch::cancel(ctx);
         self.finish_transform();
     }
@@ -366,6 +389,7 @@ impl App {
             ui::SelectionMode::Edges => {
                 let mut edges = std::collections::BTreeSet::new();
                 for t in tris.as_chunks::<3>().0 { for (a,b) in [(t[0],t[1]),(t[1],t[2]),(t[2],t[0])] { edges.insert((a.min(b), a.max(b))); } }
+                for pair in scene.line_primitive_indices().chunks_exact(2) { edges.insert((pair[0].min(pair[1]),pair[0].max(pair[1]))); }
                 for (a,b) in edges {
                     if let (Some(pa), Some(pb)) = (position(a).and_then(project), position(b).and_then(project)) {
                         if shape.contains_edge(pa, pb) { found.edges.push((a,b)); }
@@ -1796,7 +1820,14 @@ impl App {
             match action {
                 UiAction::StartSketch(mode) => self.start_sketch(ctx, mode),
                 UiAction::TransformNode { op } => self.transform_node(op),
-                UiAction::StartModal(kind) => self.start_modal(ctx, kind),
+                UiAction::StartModal(kind) => {
+                    let node=&self.editor.doc.value()["nodes"][&self.selected];
+                    let controls=ui::curve_tool::node_controls(self.editor.doc.value(),&self.selected);
+                    let pointer=ctx.input(|i|i.pointer.hover_pos()).unwrap_or(self.last_viewport.center());
+                    if node["type"]=="bezier" && minihou_app::display_nodes(self.editor.doc.value()).iter().any(|id|id==&self.selected)
+                        && ui::curve_tool::start_modal(ctx,&self.selected,&controls,kind,pointer) { ctx.request_repaint(); }
+                    else { self.start_modal(ctx,kind); }
+                },
                 UiAction::FinishTransform => self.finish_transform(),
                 UiAction::CancelTransform => self.cancel_transform(),
                 UiAction::MeshCutCommit { source, node_type, params } => {
@@ -2150,7 +2181,7 @@ impl eframe::App for App {
                 self.geo_rev = self.cooking.completed;
             }
         }
-        let busy = self.modal.is_some() || self.model_modal.is_some() || self.mirror.is_some() || self.pushpull_pick || (ui::sketch::active(ctx) || self.editor_state.tool.drawing()) || ui::transform_gizmo::active(ctx) || ui::prim_handles::active(ctx);
+        let busy = self.modal.is_some() || self.model_modal.is_some() || self.mirror.is_some() || self.pushpull_pick || (ui::sketch::active(ctx) || self.editor_state.tool.drawing()) || ui::transform_gizmo::active(ctx) || ui::prim_handles::active(ctx) || ui::curve_tool::active(ctx);
         let fly_frame = viewport_input::fly(ctx, self.last_viewport, &mut self.camera,
             self.prefs.viewport.fly_navigation && !busy && !ui::selection_region::active(ctx) && !ctx.wants_keyboard_input());
         if busy && !fly_frame && !ui::sketch::active(ctx) && !self.editor_state.tool.drawing() {
@@ -2251,7 +2282,7 @@ impl eframe::App for App {
                 } else { false };
                 let mut delta = ctx.input(|i| i.pointer.delta());
                 if !fly_frame && !region_frame && response.dragged() && (self.modal.is_none() && self.model_modal.is_none()) && !ui::sketch::blocks_navigation(ctx) && !ui::mesh_cut::blocks_navigation(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx)
-                    && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::transform_gizmo::hit(rect, &v, p) || ui::prim_handles::hit(rect, &v, p)) {
+                    && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| (!ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) || ui::prim_handles::hit(rect, &v, p) || ui::curve_tool::hit(rect, &v, p, ctx)) {
                     let modifiers = ctx.input(|i| i.modifiers);
                     wrap_drag(ctx, rect, &mut delta);
                     match self.prefs.viewport.navigation {
@@ -2342,7 +2373,8 @@ impl eframe::App for App {
                         let (o, d) = ui::transform_gizmo::ray(v.camera, rect, pos);
                         let mode = if self.pushpull_pick { ui::SelectionMode::Faces } else { self.editor_state.selection };
                         let mods = ctx.input(|i| i.modifiers);
-                        pick_displayed(scene,o,d,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set)
+                        let surface = pick_displayed(scene,o,d,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set);
+                        surface
                             .map(|hit| {
                                 if mode == ui::SelectionMode::Object { return picking::element_of(hit, scene.triangle_indices(), mode); }
                                 // Polygon-aware hover; Alt (Blender navigation) previews the loop, Ctrl+Alt the ring.
@@ -2353,6 +2385,16 @@ impl eframe::App for App {
                                     Some(edge) if loop_preview => topo.loop_selection(scene.positions(), edge, mods.ctrl, mode),
                                     _ => topo.pick(scene.positions(), scene.triangle_indices(), hit, point, mode),
                                 }
+                            }).or_else(|| {
+                                let wire=pick_displayed_wire(scene,v.camera,rect,pos,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,mode)?;
+                                let topo=element_select::cached(&self.elem_topo,scene);
+                                let mut selected=wire_selection(wire,mode);
+                                if mode==ui::SelectionMode::Edges && mods.alt && self.prefs.viewport.navigation==ui::keymap::Navigation::Blender {
+                                    if let picking::WireHit::Edge(a,b)=wire {
+                                        if let Some(edge)=topo.edge_of(a,b) { selected=topo.loop_selection(scene.positions(),edge,mods.ctrl,mode); }
+                                    }
+                                }
+                                Some(selected)
                             })
                     } else {
                         None
@@ -2442,15 +2484,18 @@ impl eframe::App for App {
                     // Tab is the node menu in every mode; Ctrl+Tab (keymap ToggleEdit) switches object / edit mode
                     out.push(UiAction::Command("add_menu".into()));
                 }
-                if !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::transform_gizmo::hit(rect, &v, p)) && (self.editor_state.tool == ui::Tool::Select || (self.editor_state.selection == ui::SelectionMode::Object && !matches!(self.editor_state.tool, ui::Tool::Cursor | ui::Tool::Measure | ui::Tool::Line | ui::Tool::Polyline | ui::Tool::Polygon | ui::Tool::Rectangle | ui::Tool::Circle | ui::Tool::Knife | ui::Tool::LoopCut))) {
+                if !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && !(response.double_clicked() && ctx.input(|i|i.modifiers.shift) && matches!(v.doc["nodes"][v.selected]["type"].as_str(),Some("curve"|"bezier"))) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::curve_tool::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::curve_tool::hit(rect, &v, p, ctx)) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| !ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) && (self.editor_state.tool == ui::Tool::Select || (self.editor_state.selection == ui::SelectionMode::Object && !matches!(self.editor_state.tool, ui::Tool::Cursor | ui::Tool::Measure | ui::Tool::Line | ui::Tool::Polyline | ui::Tool::Polygon | ui::Tool::Rectangle | ui::Tool::Circle | ui::Tool::Knife | ui::Tool::LoopCut))) {
                     if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {
                         let (nx, ny) = (((at.x - rect.left()) / rect.width()) * 2. - 1., 1. - ((at.y - rect.top()) / rect.height()) * 2.);
                         let (o, d) = self.camera.ray(nx, ny, rect.width() / rect.height());
                         let mode = self.editor_state.selection;
                         let extend = ctx.input(|i| i.modifiers.shift);
                         let hit = if self.object_hidden { None } else { pick_displayed(scene,o,d,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set) };
+                        let wire = if self.object_hidden || hit.is_some() { None } else { pick_displayed_wire(scene,v.camera,rect,at,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,mode) };
                         if mode == ui::SelectionMode::Object {
-                            let ids = hit.and_then(|hit| picked_object(&self.display_ranges, scene.triangle_indices(), hit)).map(|id| vec![id.to_owned()]).unwrap_or_default();
+                            let ids = hit.and_then(|hit| picked_object(&self.display_ranges, scene.triangle_indices(), hit))
+                                .or_else(|| wire.and_then(|w| { let id=match w { picking::WireHit::Point(i)|picking::WireHit::Edge(i,_)=>i }; self.display_ranges.iter().find(|(_,r)|r.contains(&id)).map(|(name,_)|name.as_str()) }))
+                                .map(|id| vec![id.to_owned()]).unwrap_or_default();
                             // Empty space clears the shared network/object selection, including with Shift.
                             let extend = extend && !ids.is_empty();
                             let confirming = ctx.data(|d| d.get_temp::<bool>(egui::Id::new("modal_confirm_click")).unwrap_or(false));
@@ -2471,7 +2516,10 @@ impl eframe::App for App {
                                     let point = [0,1,2].map(|k| o[k] + d[k] * hit.t);
                                     (topo.pick(scene.positions(), scene.triangle_indices(), hit, point, mode), hit.tri as u32, point)
                                 });
-                                if topo.apply_click(scene.positions(), kind, picked, mode, &mut self.selection) { self.selection_dirty = true; }
+                                let changed = if let Some(w) = wire {
+                                    topo.apply_wire_click(scene.positions(),kind,Some(wire_selection(w,mode)),mode,&mut self.selection)
+                                } else { topo.apply_click(scene.positions(), kind, picked, mode, &mut self.selection) };
+                                if changed { self.selection_dirty = true; }
                             }
                         }
                     }
@@ -2556,9 +2604,10 @@ impl eframe::App for App {
                     ui::viewport_ui::modal_status(ui,rect,&modal.status(snap));
                 } else {
                     if !fly_frame && !modal_frame && !region_frame {
-                        ui::transform_gizmo::show_with_snap(ui, rect, &v, &mut out,
-                            self.scene.as_ref().map(|scene|(scene.positions(),scene.triangle_indices())));
+                        if !ui::curve_tool::is_active_node(&v) { ui::transform_gizmo::show_with_snap(ui, rect, &v, &mut out,
+                            self.scene.as_ref().map(|scene|(scene.positions(),scene.triangle_indices()))); }
                         ui::prim_handles::show(ui, rect, &v, &mut out);
+                        ui::curve_tool::show(ui, rect, &v, &mut out, response.double_clicked());
                         ui::sketch::show(ui, rect, &v, &mut out);
                         ui::mesh_cut::show(ui, rect, &v, &mut out);
                     }
