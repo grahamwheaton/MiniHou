@@ -21,6 +21,7 @@ pub mod nodes;
 pub mod normals;
 pub mod params;
 pub mod preview;
+pub mod python_bridge;
 pub mod session;
 pub mod sdf_mesh;
 pub mod sdf_nets;

@@ -59,11 +59,13 @@ pub struct Session {
     last: CookStats,
     /// (frame, fps) cooks run at.
     time: (f64, f64),
+    /// Permission for `python` nodes; None (the default) denies them.
+    python: Option<Arc<crate::python_bridge::PythonGate>>,
 }
 
 impl Session {
     pub fn new(graph: Graph) -> Session {
-        Session { graph, external: Default::default(), external_versions: Default::default(), external_revision:0, cache: HashMap::new(), bytes: 0, budget: None, keep_versions: 2, clock: 0, last: CookStats::default(), time: (1.0, crate::timectx::DEFAULT_FPS) }
+        Session { graph, external: Default::default(), external_versions: Default::default(), external_revision:0, cache: HashMap::new(), bytes: 0, budget: None, keep_versions: 2, clock: 0, last: CookStats::default(), time: (1.0, crate::timectx::DEFAULT_FPS), python: None }
     }
 
     pub fn from_json(text: &str) -> Result<Session> {
@@ -150,10 +152,16 @@ impl Session {
         self.time
     }
 
+    /// Let `python` nodes ask `gate` for permission (None: denied, the default). Only the app's own UI sets this.
+    pub fn set_python_gate(&mut self, gate: Option<Arc<crate::python_bridge::PythonGate>>) {
+        self.python = gate;
+    }
+
     /// Cook `target` (default: the graph's main output), running only the nodes the cache does not already hold.
     pub fn cook(&mut self, target: Option<&str>) -> Result<Arc<Geometry>> {
         let (frame, fps) = self.time;
-        crate::timectx::at(Some(frame), Some(fps), || self.cook_now(target))
+        let gate = self.python.clone();
+        crate::python_bridge::with_gate(gate, || crate::timectx::at(Some(frame), Some(fps), || self.cook_now(target)))
     }
 
     fn cook_now(&mut self, target: Option<&str>) -> Result<Arc<Geometry>> {
@@ -190,11 +198,11 @@ impl Session {
 
     /// Typed side result for a node's current content key. It is evicted with its geometry.
     pub fn side_payload<T: Any + Send + Sync>(&self, node: &str) -> Option<Arc<T>> {
-        let key = crate::timectx::at(Some(self.time.0), Some(self.time.1), || key_of(&self.graph, &crate::channels::resolve_graph(&self.graph), &self.external_versions, node, &mut HashMap::new(), &mut HashSet::new())).ok()?;
+        let key = crate::python_bridge::with_gate(self.python.clone(), || crate::timectx::at(Some(self.time.0), Some(self.time.1), || key_of(&self.graph, &crate::channels::resolve_graph(&self.graph), &self.external_versions, node, &mut HashMap::new(), &mut HashSet::new()))).ok()?;
         self.cache.get(&key)?.side.as_ref()?.clone().downcast::<T>().ok()
     }
     pub fn cached_geometry(&self, node: &str) -> Option<Arc<Geometry>> {
-        let key = crate::timectx::at(Some(self.time.0), Some(self.time.1), || key_of(&self.graph, &crate::channels::resolve_graph(&self.graph), &self.external_versions, node, &mut HashMap::new(), &mut HashSet::new())).ok()?;
+        let key = crate::python_bridge::with_gate(self.python.clone(), || crate::timectx::at(Some(self.time.0), Some(self.time.1), || key_of(&self.graph, &crate::channels::resolve_graph(&self.graph), &self.external_versions, node, &mut HashMap::new(), &mut HashSet::new()))).ok()?;
         Some(self.cache.get(&key)?.geo.clone())
     }
 
@@ -283,6 +291,10 @@ fn key_of(graph: &Graph, resolved: &crate::channels::ResolvedChannels, external_
         let path = crate::usd_io::resolve_path(&p.s("file")?);
         path.hash(&mut h);
         if let Ok(meta) = std::fs::metadata(path) { meta.len().hash(&mut h); meta.modified().ok().hash(&mut h); }
+    }
+    if def.node_type == "python" {
+        let p = Params::resolve(spec.params, values)?;
+        crate::python_bridge::key_material(&p.s("code")?).hash(&mut h);
     }
     if def.node_type == "copy_to_points" {
         nodes::copy_limit_bytes().hash(&mut h);

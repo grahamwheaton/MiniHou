@@ -1,5 +1,5 @@
-//! Explicit Python-runtime boundary. This core does not embed or launch Python.
-//! `minihou-py` is an extension exposing Rust to Python, not an embedded interpreter.
+//! The `python` node: runs the snippet in an external Python through [`crate::python_bridge`], only when the cook carries a
+//! [`crate::python_bridge::PythonGate`] that is switched on and this exact snippet was confirmed (see docs/RUST_PYTHON_NODE.md).
 use super::{InputSpec,Inputs,NodeSpec};
 use crate::{error::{Error,Result},geometry::Geometry,params::Params};
 
@@ -19,15 +19,26 @@ pub const PYTHON:NodeSpec=NodeSpec{name:"python",inputs:&[
     params:crate::params!("code":DEFAULT_CODE;"a":0.;"b":1.;"c":0.;"d":0.;"i":0;"j":0;
         "v":[0.,0.,0.];"s":"";"flag":false;"variables":"";"animated":false),cook:cook};
 
-fn cook(_inputs:&Inputs,_p:&Params)->Result<Geometry>{
-    Err(Error::new("python node is unsupported without a Python runtime bridge in the Rust engine; open this graph in the Python engine with Python nodes explicitly enabled to run trusted code"))
+fn cook(inputs:&Inputs,p:&Params)->Result<Geometry>{
+    use crate::python_bridge::{self as bridge,Decision};
+    let code=p.s("code")?;
+    let Some(gate)=bridge::current_gate() else {return Err(Error::new(bridge::DISABLED_MESSAGE))};
+    match gate.check(&code) {
+        Decision::Disabled=>Err(Error::new(bridge::DISABLED_MESSAGE)),
+        Decision::NeedsConfirmation=>Err(Error::new(format!("{} (snippet {})",bridge::CONFIRM_MESSAGE,bridge::code_hash(&code)))),
+        Decision::Skipped=>Err(Error::new(bridge::SKIPPED_MESSAGE)),
+        Decision::Run=>{
+            let slot=|k:usize|inputs.get(k).and_then(|v|v.first()).map(|g|&**g);
+            bridge::run(&gate,[slot(0),slot(1),slot(2),slot(3)],p)
+        }
+    }
 }
 
 #[cfg(test)] mod tests {use super::*;
-    #[test] fn stub_preserves_python_contract_and_fails_clearly(){
+    #[test] fn denied_by_default_preserves_python_contract(){
         let params=Params::resolve(PYTHON.params,None).unwrap();
         assert_eq!(params.s("code").unwrap(),DEFAULT_CODE);
         assert_eq!(PYTHON.inputs.iter().map(|v|v.name).collect::<Vec<_>>(),["geo","input1","input2","input3"]);
-        assert!(cook(&[vec![],vec![],vec![],vec![]],&params).unwrap_err().to_string().contains("unsupported without a Python runtime"));
+        assert_eq!(cook(&[vec![],vec![],vec![],vec![]],&params).unwrap_err().to_string(),crate::python_bridge::DISABLED_MESSAGE);
     }
 }
