@@ -542,16 +542,11 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
         assert_eq!(state(&ctx).refs[0], Some(json!({"node": f.display, "point": 1, "point_count": 3})));
     }
     #[test] fn guide_inference_table_matches_default_tool_keys() {
-        let guide = include_str!("../../docs/NATIVE_EDITOR.md").replace("
-", "
-");
-        let table = guide.split_once("<!-- inference:start -->
-").unwrap().1.split_once("<!-- inference:end -->").unwrap().0;
-        let mut rows = String::from("| Input | While a sketch tool (Line, Polyline, Polygon, Rectangle, Circle, Measure) is active |
-| --- | --- |
-");
-        for (k, a) in inf::settings::InferenceKeys::default().table_rows() { rows.push_str(&format!("| {k} | {a} |
-")); }
+        // Line endings differ between checkouts (CRLF on Windows): normalise before comparing.
+        let guide = include_str!("../../docs/NATIVE_EDITOR.md").replace("\r\n", "\n");
+        let table = guide.split_once("<!-- inference:start -->\n").unwrap().1.split_once("<!-- inference:end -->").unwrap().0;
+        let mut rows = String::from("| Input | While a sketch tool (Line, Polyline, Polygon, Rectangle, Circle, Measure) is active |\n| --- | --- |\n");
+        for (k, a) in inf::settings::InferenceKeys::default().table_rows() { rows.push_str(&format!("| {k} | {a} |\n")); }
         assert_eq!(table, rows);
         for name in [&InferenceSettings::default().keys.lock_x, &InferenceSettings::default().keys.cycle_candidate] { assert!(key_named(name).is_some()); }
     }
