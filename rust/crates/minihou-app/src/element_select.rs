@@ -345,6 +345,40 @@ pub fn cached<'a>(cell: &'a std::cell::OnceCell<Topology>, scene: &crate::viewpo
     cell.get_or_init(|| Topology::new(scene.positions(), scene.triangle_indices(), scene.edge_indices()))
 }
 
+/// Fingerprint of the element numbering a selection refers to: point count, fan triangles and polygon edges.
+pub fn topology_key(npoints: usize, tris: &[u32], edges: &[u32]) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325_u64 ^ npoints as u64;
+    let mut mix = |x: u64| { h = (h ^ x).wrapping_mul(0x0000_0100_0000_01b3).rotate_left(5); };
+    mix(tris.len() as u64);
+    for &x in tris { mix(x as u64); }
+    mix(edges.len() as u64);
+    for &x in edges { mix(x as u64); }
+    h
+}
+
+/// Element selections (point ids, edge point pairs, triangle ids) only mean something on the topology they were made
+/// on. A cook that changes the topology (Ctrl+B bevel, divisions, a new node) would otherwise keep the old numbers and
+/// the highlight would draw old point pairs as orange lines across the new faces and half-quad triangles. Each
+/// topology keeps its own selection: a new topology starts empty, returning to a known one (cancel, undo) restores it.
+#[derive(Debug, Default)]
+pub struct SelectionMemory<T> { key: Option<u64>, saved: Vec<(u64, T)> }
+const SELECTION_MEMORY: usize = 8;
+impl<T: Default> SelectionMemory<T> {
+    /// Called for each newly cooked scene with the current selection state; returns the state to use from now on.
+    pub fn retarget(&mut self, key: u64, current: T) -> T {
+        match self.key.replace(key) {
+            None => current,
+            Some(old) if old == key => current,
+            Some(old) => {
+                self.saved.retain(|(k, _)| *k != old);
+                self.saved.push((old, current));
+                if self.saved.len() > SELECTION_MEMORY { self.saved.remove(0); }
+                self.saved.iter().position(|(k, _)| *k == key).map(|i| self.saved.remove(i).1).unwrap_or_default()
+            }
+        }
+    }
+}
+
 /// Path search variants: pre-rust "Most direct" (default) and "Shortest" (fewest steps).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Method { #[default] Direct, #[allow(dead_code)] /* no UI switch yet (pre-rust Select menu) */ Shortest }
@@ -737,5 +771,66 @@ mod tests {
         let s = t.complete(Selection { tris: vec![1], edges: vec![(0, 4), (0, 1)], ..sel(Faces) });
         assert_eq!(s.tris, vec![0, 1]);
         assert_eq!(s.edges, vec![(0, 1)]);
+    }
+
+    /// Polygon edges of ngons and a beveled box corner never include fan/triangulation diagonals, and the
+    /// rebuilt polygons own exactly their sides.
+    #[test]
+    fn ngon_and_bevel_corner_edges_have_no_interior_diagonals() {
+        use minihou_core::Geometry;
+        let check = |g: &Geometry, what: &str| {
+            let scene = crate::viewport::Scene::new(g);
+            let t = &g.topology;
+            let mut sides = HashSet::new();
+            for f in 0..g.nprims() {
+                let vs: Vec<u32> = (t.prim_offsets[f] as usize..t.prim_offsets[f + 1] as usize).map(|v| t.vertex_point[v] as u32).collect();
+                for i in 0..vs.len() { sides.insert(key(vs[i], vs[(i + 1) % vs.len()])); }
+            }
+            let edges: HashSet<(u32, u32)> = scene.edge_indices().chunks_exact(2).map(|e| key(e[0], e[1])).collect();
+            assert_eq!(edges, sides, "{what}: edge list must be exactly the polygon sides");
+            let topo = Topology::new(scene.positions(), scene.triangle_indices(), scene.edge_indices());
+            assert_eq!(topo.polygons().len(), g.nprims(), "{what}: one polygon per primitive");
+            for poly in topo.polygons() {
+                let n = topo.polygon_vertices(poly).len();
+                assert_eq!(topo.polygon_edges(poly).count(), n, "{what}: polygon {poly} outline must be its {n} sides");
+                assert!(topo.polygon_edges(poly).all(|(a, b)| sides.contains(&key(a, b))));
+            }
+        };
+        // pentagon, hexagon and a concave (arrow) hexagon side by side
+        let mut p = Vec::new(); let mut vp = Vec::new(); let mut offs = vec![0];
+        for (k, n) in [5usize, 6].into_iter().enumerate() {
+            let base = p.len() as i32 / 3;
+            for i in 0..n { let a = i as f32 / n as f32 * std::f32::consts::TAU; p.extend([a.cos() + k as f32 * 3., a.sin(), 0.]); vp.push(base + i as i32); }
+            offs.push(vp.len() as i32);
+        }
+        let base = p.len() as i32 / 3;
+        for q in [[0., 0.], [2., 0.], [2., 2.], [1., 0.8], [0., 2.], [-0.5, 1.]] { p.extend([q[0] + 9., q[1], 0.]); }
+        vp.extend((0..6).map(|i| base + i)); offs.push(vp.len() as i32);
+        check(&Geometry::from_arrays(p, vp, offs, None).unwrap(), "ngons");
+        // the beveled box corner (three beveled edges meeting, divisions 2-4: hexagon to octagon caps and corner patches)
+        for div in [2, 3, 4] {
+            let doc = minihou_app::Document::parse(serde_json::json!({"nodes":{"box":{"type":"box"},
+                "bev":{"type":"polybevel","inputs":{"geo":"box"},"params":{"distance":0.1,"divisions":div,"edges":"0-1 0-2 0-4 0-3 0-5 0-6 0-7"}}},
+                "display":"bev"}).to_string()).unwrap();
+            let g = doc.session().unwrap().cook(Some("bev")).unwrap();
+            check(&g, &format!("bevel divisions {div}"));
+        }
+    }
+
+    #[test]
+    fn selections_follow_their_topology() {
+        let sel = |a: u32, b: u32| Selection { mode: SelectionMode::Edges, edges: vec![(a, b)], ..Default::default() };
+        let mut memory = SelectionMemory::default();
+        let boxed = topology_key(8, &[0, 1, 2], &[0, 1, 1, 2]);
+        let beveled = topology_key(12, &[0, 1, 2, 2, 3, 0], &[0, 1, 1, 2, 2, 3]);
+        assert_ne!(boxed, beveled);
+        assert_eq!(memory.retarget(boxed, sel(0, 1)), sel(0, 1));
+        // the same topology (a param drag) keeps the selection
+        assert_eq!(memory.retarget(boxed, sel(0, 1)), sel(0, 1));
+        // bevel changes the numbering: the old point pairs must not be highlighted on the new mesh
+        assert!(memory.retarget(beveled, sel(0, 1)).is_empty());
+        // cancel / undo back to the box restores its selection; the beveled one is kept too
+        assert_eq!(memory.retarget(boxed, sel(5, 6)), sel(0, 1));
+        assert_eq!(memory.retarget(beveled, Selection::default()), sel(5, 6));
     }
 }

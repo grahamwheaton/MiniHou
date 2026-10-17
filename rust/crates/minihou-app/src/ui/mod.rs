@@ -8,6 +8,7 @@ pub mod geo_info;
 pub mod keymap;
 pub mod network;
 pub mod params;
+pub mod number_step;
 pub mod prim_handles;
 pub mod curve_tool;
 pub mod proxy_ui;
