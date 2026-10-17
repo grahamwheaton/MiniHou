@@ -75,12 +75,18 @@ class RustParityTests(unittest.TestCase):
 
     # -- the contract ----------------------------------------------------------------------------------------------------
     def test_every_node_declares_the_python_parameters_and_defaults(self):
-        self.assertEqual(sorted(rust.node_types()), sorted(NODE_TYPES))
+        self.assertTrue(set(NODE_TYPES) <= set(rust.node_types()))
         for t in NODE_TYPES:
             with self.subTest(node=t):
                 py = json.loads(json.dumps(REGISTRY.get(t).coerce_params({})))
                 rs = {k: v[0] for k, v in rust.node_params(t).items()}
-                self.assertEqual(rs, py)
+                # The native curve editor has two additional controls. Keep their
+                # presence explicit while checking every Python parameter exactly.
+                extra = {"as_mesh", "split"} if t == "curve" else set()
+                self.assertEqual(set(rs) - set(py), extra)
+                self.assertEqual({k: rs[k] for k in py}, py)
+                if t == "curve":
+                    self.assertEqual({k: rs[k] for k in extra}, {"as_mesh": False, "split": False})
 
     def test_unsupported_settings_are_refused(self):
         for graph in (chain(("transform", {"proportional_enabled": True, "proportional_falloff": "random"})),
@@ -90,10 +96,15 @@ class RustParityTests(unittest.TestCase):
                       chain(("delete", {"expr": "rand(@ptnum, 1) < 0.5"})),
                       chain(("delete", {"expr": "@nope > 0"})),
                       {"version": 1, "nodes": {"b": {"type": "box", "params": {"add_vertex_normals": True}}}, "display": "b"},
-                      {"version": 1, "nodes": {"w": {"type": "wrangle"}}, "display": "w"}):
+                      {"version": 1, "nodes": {"w": {"type": "node_that_does_not_exist"}}, "display": "w"}):
             with self.subTest(graph=json.dumps(graph)[:90]), self.assertRaises(RuntimeError) as cm:
                 rust.cook(graph)
             self.assertRegex(str(cm.exception), "not (supported by|in) the Rust backend")
+
+    def test_wrangle_subset_rejects_multiple_assignments(self):
+        graph = chain(("wrangle", {"snippet": "@P.x = 1; @P.y = 2"}))
+        with self.assertRaisesRegex(RuntimeError, "wrangle subset supports one assignment"):
+            rust.cook(graph)
 
     # -- nodes -----------------------------------------------------------------------------------------------------------
     def test_grid(self):
