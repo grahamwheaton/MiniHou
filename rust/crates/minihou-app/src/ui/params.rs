@@ -5,8 +5,102 @@ use super::number_step;
 use minihou_app::{clamp_parameter, metadata_kind, param_kind, param_meta, slider_range, Edit, ParamKind};
 use minihou_core::{nodes, params::ParamSpec};
 use serde_json::{json, Value};
+use minihou_app::value_link_ui::{self, CopiedParam, PasteMode};
 
 const DISABLED: &str = "The Rust backend does not support it yet";
+fn clipboard_id() -> egui::Id { egui::Id::new("value_link_parameter_clipboard") }
+
+fn parameter_menu(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, node: &str, name: &str, default: &Value) {
+    let copied = ui.ctx().data(|d| d.get_temp::<CopiedParam>(clipboard_id()));
+    if ui.button("Copy Parameter").clicked() {
+        if let Some(copy) = value_link_ui::copied(v.doc, node, name) { ui.ctx().data_mut(|d| d.insert_temp(clipboard_id(), copy)); }
+        ui.close();
+    }
+    for (label, mode) in [("Paste Relative Reference", PasteMode::Reference), ("Paste Value", PasteMode::Value), ("Paste Expression", PasteMode::Expression)] {
+        let valid = copied.as_ref().is_some_and(|c| value_link_ui::compatible(&c.value, default));
+        if ui.add_enabled(valid, egui::Button::new(label)).clicked() {
+            if let Some(c) = &copied {
+                match value_link_ui::paste(v.doc, node, name, c, mode) {
+                    Ok(edit) => out.push(UiAction::Edit { edit, continuous: false }),
+                    Err(message) => ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("link_message"), message)),
+                }
+            }
+            ui.close();
+        }
+    }
+    ui.menu_button("Link to Parameter...", |ui| {
+        let search_id = egui::Id::new("link_picker_search");
+        let mut search = ui.ctx().data(|d| d.get_temp::<String>(search_id)).unwrap_or_default();
+        ui.add(egui::TextEdit::singleline(&mut search).hint_text("Search nodes and parameters"));
+        ui.ctx().data_mut(|d| d.insert_temp(search_id, search.clone()));
+        egui::ScrollArea::vertical().max_height(260.).show(ui, |ui| {
+            if let Some(all) = v.doc["nodes"].as_object() {
+                for (source, def) in all {
+                    let Some(typ) = def["type"].as_str() else { continue; };
+                    let Some(spec) = nodes::get(typ) else { continue; };
+                    for param in spec.params {
+                        if source == node && param.name == name { continue; }
+                        let label = format!("{source} / {}",param.name);
+                        if !label.to_lowercase().contains(&search.to_lowercase()) { continue; }
+                        let source_value = def["params"].get(param.name).cloned().unwrap_or_else(|| (param.default)());
+                        let valid = value_link_ui::compatible(&source_value, default);
+                        if ui.add_enabled(valid,egui::Button::new(&label)).on_disabled_hover_text("Incompatible parameter type").clicked() {
+                            if let Some(copy) = value_link_ui::copied(v.doc,source,param.name) {
+                                match value_link_ui::paste(v.doc,node,name,&copy,PasteMode::Reference) {
+                                    Ok(edit) => out.push(UiAction::Edit { edit, continuous:false }),
+                                    Err(message) => ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("link_message"),message)),
+                                }
+                            }
+                            ui.close();
+                        }
+                    }
+                }
+            }
+        });
+    });
+    let linked = v.doc["nodes"][node]["channels"].as_object().is_some_and(|c| c.keys().any(|k| k == name || k.starts_with(&format!("{name}."))));
+    if ui.add_enabled(linked, egui::Button::new("Delete Channel")).clicked() {
+        if let Some(edit) = value_link_ui::clear(v.doc,node,name,false) { out.push(UiAction::Edit { edit, continuous: false }); }
+        ui.close();
+    }
+    if ui.button("Revert to Default").clicked() {
+        if linked { if let Some(edit) = value_link_ui::clear(v.doc,node,name,true) { out.push(UiAction::Edit { edit, continuous: false }); } }
+        else { out.push(UiAction::Edit { edit: Edit::Param { node: node.into(), name: name.into(), value: default.clone() }, continuous: false }); }
+        ui.close();
+    }
+    let locked = v.doc["nodes"][node]["locked_params"].as_array().is_some_and(|a| a.iter().any(|x| x == name));
+    if ui.button(if locked { "Unlock Parameter" } else { "Lock Parameter" }).clicked() {
+        out.push(UiAction::Edit { edit: Edit::LockParam { node:node.into(), path:name.into(), locked:!locked }, continuous:false }); ui.close();
+    }
+    if ui.button("Edit Expression...").clicked() {
+        let expr = v.doc["nodes"][node]["channels"][name].as_str().unwrap_or("").to_owned();
+        ui.ctx().data_mut(|d| { d.insert_temp(egui::Id::new("link_expression_open"), (node.to_owned(), name.to_owned())); d.insert_temp(egui::Id::new("link_expression_text"), expr); });
+        ui.close();
+    }
+    if let Some(message) = ui.ctx().data(|d| d.get_temp::<String>(egui::Id::new("link_message"))) { ui.colored_label(v.theme.err, message); }
+}
+
+fn expression_dialog(ctx: &egui::Context, v: &View<'_>, out: &mut Actions) {
+    let id = egui::Id::new("link_expression_open");
+    let Some((node, name)) = ctx.data(|d| d.get_temp::<(String,String)>(id)) else { return; };
+    let mut open = true;
+    egui::Window::new(format!("Expression: {node}.{name}")).open(&mut open).collapsible(false).show(ctx, |ui| {
+        let text_id = egui::Id::new("link_expression_text");
+        let mut expression = ctx.data(|d| d.get_temp::<String>(text_id)).unwrap_or_default();
+        ui.text_edit_singleline(&mut expression);
+        ctx.data_mut(|d| d.insert_temp(text_id, expression.clone()));
+        if let Ok(graph) = minihou_core::Graph::from_value(v.doc) {
+            for diag in minihou_core::channels::resolve_graph(&graph).diagnostics.iter().filter(|d| d.node == node && (d.param == name || d.param.starts_with(&format!("{name}.")))) {
+                ui.colored_label(v.theme.err, &diag.message);
+            }
+        }
+        if ui.button("Apply").clicked() {
+            out.push(UiAction::Edit { edit: Edit::Channel { node:node.clone(), path:name.clone(), expression:(!expression.trim().is_empty()).then_some(expression) }, continuous:false });
+            ctx.data_mut(|d| d.remove::<(String,String)>(id));
+        }
+    });
+    if !open { ctx.data_mut(|d| d.remove::<(String,String)>(id)); }
+}
 
 fn title(name: &str) -> String {
     name.split('_').map(|part| {
@@ -786,6 +880,11 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     let default = (param.default)();
     let old = value_of(v, id, param.name, &default);
     let mut value = old.clone();
+    if let Ok(graph) = minihou_core::Graph::from_value(v.doc) {
+        if let Some(resolved) = minihou_core::channels::resolve_graph(&graph).params.get(id).and_then(|p| p.get(param.name)) {
+            value = resolved.clone();
+        }
+    }
     let modified = old != default;
     let meta = param_meta(typ, param.name);
     let synthetic_meta;
@@ -815,10 +914,19 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     let is_file = !is_ramp && !is_color && is_file_param(param.name, meta);
 
     let row_height = if is_ramp { 76.0 } else { 28.0 };
-    let (r, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), Sense::hover());
+    let (r, row_response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), Sense::click());
     let layout = ParamRowLayout::compute(r);
 
-    let enabled = param.supported && !locked && condition_enabled;
+    let param_locked = v.doc["nodes"][id]["locked_params"].as_array().is_some_and(|a| a.iter().any(|x| x == param.name));
+    let channels = v.doc["nodes"][id]["channels"].as_object();
+    let linked = channels.is_some_and(|c| c.keys().any(|key| key == param.name || key.starts_with(&format!("{}.",param.name))));
+    let enabled = param.supported && !locked && !param_locked && !linked && condition_enabled;
+    if linked {
+        ui.painter().rect_filled(layout.control_rect, 4., Color32::from_rgba_unmultiplied(48, 164, 102, 42));
+        ui.painter().rect_stroke(layout.control_rect, 4., Stroke::new(1., Color32::from_rgb(62, 190, 110)), StrokeKind::Inside);
+        paint_text(ui, Pos2::new(layout.label_rect.left()+4., r.center().y), "↗", 12., false, Color32::from_rgb(62, 190, 110), Align2::LEFT_CENTER);
+    }
+    if param_locked { flag_icon(ui, Pos2::new(layout.label_rect.left()+4.,r.center().y), "Locked", v.theme.warn); }
     if modified {
         ui.painter().circle_filled(
             Pos2::new(r.left() + 9., if is_ramp { r.top() + 14. } else { r.center().y }),
@@ -855,7 +963,7 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
             Align2::RIGHT_CENTER,
         );
 
-        let label_sense = if is_vector && enabled { Sense::click_and_drag() } else { Sense::hover() };
+        let label_sense = if is_vector && enabled { Sense::click_and_drag() } else { Sense::click() };
         let label_response = ui.interact(layout.label_rect, ui.id().with((id, param.name, "label")), label_sense);
         let doc = meta.and_then(|m| m["doc"].as_str()).unwrap_or("");
         if !param.supported {
@@ -865,6 +973,7 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
         } else if displayed_label != label_text {
             label_response.clone().on_hover_text(&label_text);
         }
+        label_response.context_menu(|ui| parameter_menu(ui,v,out,id,param.name,&default));
 
         if is_vector && enabled {
             if label_response.hovered() || label_response.dragged() {
@@ -945,8 +1054,13 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
                 )
             }
         }).response;
-        if !enabled {
-            response.on_disabled_hover_text(if locked {
+        response.clone().context_menu(|ui| parameter_menu(ui,v,out,id,param.name,&default));
+        if linked {
+            let expressions = channels.into_iter().flat_map(|c| c.iter()).filter(|(key,_)| *key == param.name || key.starts_with(&format!("{}.",param.name)))
+                .map(|(key,value)| format!("{key} = {}", value.as_str().unwrap_or(""))).collect::<Vec<_>>().join("\n");
+            response.clone().on_hover_text(format!("{expressions}\nValue: {value}"));
+        } else if !enabled {
+            response.on_disabled_hover_text(if locked || param_locked {
                 "Locked"
             } else if !condition_enabled {
                 "Enable the controlling parameter first"
@@ -962,12 +1076,13 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
             }
         }
     }
+    row_response.context_menu(|ui| parameter_menu(ui,v,out,id,param.name,&default));
 
     if param.supported && !locked && value != old {
         let dragging = ui.ctx().input(|input| input.pointer.primary_down() || input.pointer.middle_down());
         out.push(UiAction::Edit { edit: Edit::Param { node: id.to_owned(), name: param.name.to_owned(), value }, continuous: dragging });
     }
-    if modified && !locked && icon(ui, layout.reset_rect, ui.id().with((id, param.name, "reset")), true, false, v.theme)
+    if modified && !locked && !param_locked && !linked && icon(ui, layout.reset_rect, ui.id().with((id, param.name, "reset")), true, false, v.theme)
         .on_hover_text(format!("Reset {} to {}", label_text, default)).clicked() {
         out.push(UiAction::Edit { edit: Edit::Param { node: id.to_owned(), name: param.name.to_owned(), value: default.clone() }, continuous: false });
     }
@@ -1125,6 +1240,7 @@ fn modifier_inputs_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, nod
 }
 
 pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
+    expression_dialog(ui.ctx(), v, out);
     let (bar, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.), Sense::hover());
     ui.painter().rect_filled(bar, 0., v.theme.panel2);
     ui.painter().line_segment([bar.left_bottom(), bar.right_bottom()], Stroke::new(1.0_f32, v.theme.stroke));

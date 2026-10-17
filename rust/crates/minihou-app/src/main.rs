@@ -2046,7 +2046,8 @@ impl App {
                 }
                 UiAction::Edit { edit, continuous } => {
                     if !continuous { self.editor.history.finish(&self.editor.doc); }
-                    self.edit(edit, continuous);
+                    if let Edit::Replace(value) = edit { self.commit_document(value, "edit linked parameter"); }
+                    else { self.edit(edit, continuous); }
                 }
                 UiAction::Time(edit) => self.send_timeline_time(edit),
                 UiAction::AddNode { node_type, .. } if node_type.starts_with("sketch_") => {

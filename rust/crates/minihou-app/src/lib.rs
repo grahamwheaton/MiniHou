@@ -13,6 +13,7 @@ pub mod graph_edit;
 pub mod modifier_inputs;
 pub mod geo_info;
 pub mod params;
+pub mod value_link_ui;
 use minihou_core::{session::Session, lod::ClusterLod, Graph};
 use serde_json::{json, Value};
 use std::{collections::HashMap, ops::Range, path::Path, time::Instant};
