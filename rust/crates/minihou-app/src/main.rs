@@ -30,6 +30,28 @@ fn pick_displayed(scene:&Scene,o:[f32;3],d:[f32;3],visibility:viewport::ObjectVi
     picking::pick_triangle_filtered(scene.positions(),scene.triangle_indices(),o,d,|tri| tri.iter().all(|id| point_pickable(visibility,ranges,selected,*id)))
 }
 
+fn pick_displayed_wire(scene:&Scene, camera:CameraInfo, rect:egui::Rect, pointer:egui::Pos2,
+    visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,mode:ui::SelectionMode)->Option<picking::WireHit> {
+    picking::pick_wire(scene.positions(),scene.line_primitive_indices(),pointer,
+        |p| ui::transform_gizmo::project(camera,rect,p).map(|screen| {
+            let depth=(0..3).map(|k|(p[k]-camera.ray_origin[k])*camera.ray_forward[k]).sum::<f32>();
+            (screen, if camera.ortho { depth.max(0.001) } else { depth })
+        }),
+        |id| point_pickable(visibility,ranges,selected,id),
+        matches!(mode,ui::SelectionMode::Object|ui::SelectionMode::Points),
+        matches!(mode,ui::SelectionMode::Object|ui::SelectionMode::Edges))
+}
+
+fn wire_selection(hit:picking::WireHit,mode:ui::SelectionMode)->picking::Selection {
+    let mut out=picking::Selection {mode,..Default::default()};
+    match (mode,hit) {
+        (ui::SelectionMode::Points,picking::WireHit::Point(id)) => out.points.push(id),
+        (ui::SelectionMode::Edges,picking::WireHit::Edge(a,b)) => out.edges.push((a,b)),
+        _ => {}
+    }
+    out
+}
+
 #[allow(dead_code)]
 fn scaled_from_initial(initial: &serde_json::Value, factor: [f32; 3]) -> [f32; 3] {
     [0,1,2].map(|i| initial.get(i).and_then(|x| x.as_f64()).unwrap_or(1.) as f32 * factor[i])
@@ -358,6 +380,7 @@ impl App {
             ui::SelectionMode::Edges => {
                 let mut edges = std::collections::BTreeSet::new();
                 for t in tris.as_chunks::<3>().0 { for (a,b) in [(t[0],t[1]),(t[1],t[2]),(t[2],t[0])] { edges.insert((a.min(b), a.max(b))); } }
+                for pair in scene.line_primitive_indices().chunks_exact(2) { edges.insert((pair[0].min(pair[1]),pair[0].max(pair[1]))); }
                 for (a,b) in edges {
                     if let (Some(pa), Some(pb)) = (position(a).and_then(project), position(b).and_then(project)) {
                         if shape.contains_edge(pa, pb) { found.edges.push((a,b)); }
@@ -2291,7 +2314,8 @@ impl eframe::App for App {
                         let (o, d) = ui::transform_gizmo::ray(v.camera, rect, pos);
                         let mode = if self.pushpull_pick { ui::SelectionMode::Faces } else { self.editor_state.selection };
                         let mods = ctx.input(|i| i.modifiers);
-                        pick_displayed(scene,o,d,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set)
+                        let surface = pick_displayed(scene,o,d,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set);
+                        surface
                             .map(|hit| {
                                 if mode == ui::SelectionMode::Object { return picking::element_of(hit, scene.triangle_indices(), mode); }
                                 // Polygon-aware hover; Alt (Blender navigation) previews the loop, Ctrl+Alt the ring.
@@ -2302,6 +2326,16 @@ impl eframe::App for App {
                                     Some(edge) if loop_preview => topo.loop_selection(scene.positions(), edge, mods.ctrl, mode),
                                     _ => topo.pick(scene.positions(), scene.triangle_indices(), hit, point, mode),
                                 }
+                            }).or_else(|| {
+                                let wire=pick_displayed_wire(scene,v.camera,rect,pos,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,mode)?;
+                                let topo=element_select::cached(&self.elem_topo,scene);
+                                let mut selected=wire_selection(wire,mode);
+                                if mode==ui::SelectionMode::Edges && mods.alt && self.prefs.viewport.navigation==ui::keymap::Navigation::Blender {
+                                    if let picking::WireHit::Edge(a,b)=wire {
+                                        if let Some(edge)=topo.edge_of(a,b) { selected=topo.loop_selection(scene.positions(),edge,mods.ctrl,mode); }
+                                    }
+                                }
+                                Some(selected)
                             })
                     } else {
                         None
@@ -2398,8 +2432,11 @@ impl eframe::App for App {
                         let mode = self.editor_state.selection;
                         let extend = ctx.input(|i| i.modifiers.shift);
                         let hit = if self.object_hidden { None } else { pick_displayed(scene,o,d,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set) };
+                        let wire = if self.object_hidden || hit.is_some() { None } else { pick_displayed_wire(scene,v.camera,rect,at,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,mode) };
                         if mode == ui::SelectionMode::Object {
-                            let ids = hit.and_then(|hit| picked_object(&self.display_ranges, scene.triangle_indices(), hit)).map(|id| vec![id.to_owned()]).unwrap_or_default();
+                            let ids = hit.and_then(|hit| picked_object(&self.display_ranges, scene.triangle_indices(), hit))
+                                .or_else(|| wire.and_then(|w| { let id=match w { picking::WireHit::Point(i)|picking::WireHit::Edge(i,_)=>i }; self.display_ranges.iter().find(|(_,r)|r.contains(&id)).map(|(name,_)|name.as_str()) }))
+                                .map(|id| vec![id.to_owned()]).unwrap_or_default();
                             // Empty space clears the shared network/object selection, including with Shift.
                             let extend = extend && !ids.is_empty();
                             let confirming = ctx.data(|d| d.get_temp::<bool>(egui::Id::new("modal_confirm_click")).unwrap_or(false));
@@ -2420,7 +2457,10 @@ impl eframe::App for App {
                                     let point = [0,1,2].map(|k| o[k] + d[k] * hit.t);
                                     (topo.pick(scene.positions(), scene.triangle_indices(), hit, point, mode), hit.tri as u32, point)
                                 });
-                                if topo.apply_click(scene.positions(), kind, picked, mode, &mut self.selection) { self.selection_dirty = true; }
+                                let changed = if let Some(w) = wire {
+                                    topo.apply_wire_click(scene.positions(),kind,Some(wire_selection(w,mode)),mode,&mut self.selection)
+                                } else { topo.apply_click(scene.positions(), kind, picked, mode, &mut self.selection) };
+                                if changed { self.selection_dirty = true; }
                             }
                         }
                     }
