@@ -1317,13 +1317,16 @@ mod python_oracles {
         for domain in ["point", "vertex", "prim"] {
             let (a, b) = (a.table(domain), b.table(domain));
             let neutral_index = domain == "prim" && super::super::oracle_material_detail::neutral_index_added(original_a, original_b);
+            // `point_group_knife` is a Rust-only group written by the knife node; Python has no such attribute.
+            let rust_only = |key: &str| key == "point_group_knife";
             assert_eq!(
-                a.keys().filter(|key| !neutral_index || key.as_str() != "material_index").collect::<Vec<_>>(),
+                a.keys().filter(|key| (!neutral_index || key.as_str() != "material_index") && !rust_only(key)).collect::<Vec<_>>(),
                 b.keys().collect::<Vec<_>>(),
                 "{name}: {domain} attribute names"
             );
             for (key, a) in a {
                 if neutral_index && key == "material_index" { continue; }
+                if rust_only(key) { continue; }
                 let b = &b[key];
                 let invalid_uv = if domain == "vertex" {
                     super::super::oracle_material_detail::invalid_uv_rows(
