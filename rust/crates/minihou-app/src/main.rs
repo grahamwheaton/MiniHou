@@ -43,6 +43,22 @@ fn point_pickable(visibility:viewport::ObjectVisibility,ranges:&[(String,std::op
 fn pick_displayed(scene:&Scene,o:[f32;3],d:[f32;3],visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>)->Option<picking::Hit> {
     picking::pick_triangle_filtered(scene.positions(),scene.triangle_indices(),o,d,|tri| tri.iter().all(|id| point_pickable(visibility,ranges,selected,*id)))
 }
+fn navigation_point(camera:&Camera,scene:Option<&Scene>,hidden:bool,visibility:viewport::ObjectVisibility,
+    ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,rect:egui::Rect,pos:egui::Pos2)->Option<[f32;3]> {
+    let nx=(pos.x-rect.left())/rect.width()*2.-1.; let ny=1.-(pos.y-rect.top())/rect.height()*2.;
+    let (origin,dir)=camera.ray(nx,ny,rect.width()/rect.height());
+    if hidden {return None;}
+    let scene=scene?;
+    let hit=scene.pick_bvh.pick(scene.positions(),scene.triangle_indices(),origin,dir,|ids| ids.iter().all(|id| point_pickable(visibility,ranges,selected,*id)))?;
+    Some([0,1,2].map(|k|origin[k]+dir[k]*hit.t))
+}
+fn zoom_under_cursor(camera:&mut Camera,delta:f32,enabled:bool,rect:egui::Rect,pos:Option<egui::Pos2>,point:Option<[f32;3]>) {
+    if delta==0. {return;}
+    let Some(pos)=pos.filter(|_|enabled) else {camera.zoom(delta);return;};
+    let nx=(pos.x-rect.left())/rect.width()*2.-1.; let ny=1.-(pos.y-rect.top())/rect.height()*2.;
+    let point=point.unwrap_or_else(||camera.view_plane_point(nx,ny,rect.width()/rect.height()));
+    camera.zoom_at(delta,point,nx,ny,rect.width()/rect.height());
+}
 
 fn pick_displayed_wire(scene:&Scene, camera:CameraInfo, rect:egui::Rect, pointer:egui::Pos2,
     visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,mode:ui::SelectionMode)->Option<picking::WireHit> {
@@ -2607,21 +2623,34 @@ impl eframe::App for App {
                     wrap_drag(ctx, rect, &mut delta);
                     match self.prefs.viewport.navigation {
                         ui::keymap::Navigation::Blender if response.dragged_by(egui::PointerButton::Middle) => {
-                            if modifiers.ctrl { self.camera.zoom(delta.y); }
+                            if modifiers.ctrl {
+                                let pos=ctx.input(|i|i.pointer.hover_pos());
+                                let point=pos.and_then(|p|navigation_point(&self.camera,self.scene.as_ref(),self.object_hidden,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,rect,p));
+                                zoom_under_cursor(&mut self.camera,delta.y,self.prefs.viewport.zoom_to_mouse,rect,pos,point);
+                            }
                             else if modifiers.shift { self.camera.pan(delta.x, delta.y); }
                             else { self.camera.orbit(delta.x, delta.y); }
                         }
                         ui::keymap::Navigation::Houdini if modifiers.alt => {
-                            if response.dragged_by(egui::PointerButton::Primary) { self.camera.orbit(delta.x, delta.y); }
+                            if response.dragged_by(egui::PointerButton::Primary) {self.camera.orbit(delta.x,delta.y);}
                             else if response.dragged_by(egui::PointerButton::Middle) { self.camera.pan(delta.x, delta.y); }
-                            else if response.dragged_by(egui::PointerButton::Secondary) { self.camera.zoom(delta.y); }
+                            else if response.dragged_by(egui::PointerButton::Secondary) {
+                                let pos=ctx.input(|i|i.pointer.hover_pos());
+                                let point=pos.and_then(|p|navigation_point(&self.camera,self.scene.as_ref(),self.object_hidden,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,rect,p));
+                                zoom_under_cursor(&mut self.camera,delta.y,self.prefs.viewport.zoom_to_mouse,rect,pos,point);
+                            }
                         }
                         _ => {}
                     }
                 }
                 if !fly_frame && !region_frame && response.hovered() && (self.modal.is_none() && self.model_modal.is_none())
                     && self.editor_state.tool != ui::Tool::LoopCut && !ui::mesh_cut::captures_wheel(ctx) {
-                    self.camera.zoom(ctx.input(|i| i.smooth_scroll_delta.y));
+                    let delta=ctx.input(|i| i.smooth_scroll_delta.y);
+                    if delta!=0. {
+                        let pos=ctx.input(|i|i.pointer.hover_pos());
+                        let point=if self.prefs.viewport.zoom_to_mouse {pos.and_then(|p|navigation_point(&self.camera,self.scene.as_ref(),self.object_hidden,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,rect,p))} else {None};
+                        zoom_under_cursor(&mut self.camera,delta,self.prefs.viewport.zoom_to_mouse,rect,pos,point);
+                    }
                 }
                 let limit = self.state.device.limits().max_texture_dimension_2d;
                 let pixels = [(size.x * ctx.pixels_per_point()).round() as u32, (size.y * ctx.pixels_per_point()).round() as u32].map(|x| x.clamp(1, limit));

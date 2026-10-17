@@ -26,6 +26,7 @@ struct SurfaceTri { vertices:[TexVertex;3], points:[u32;3], prim:u32, slot:Strin
 
 pub struct Scene {
     p: Vec<f32>, n: Vec<f32>, point: Vec<u32>, line: Vec<u32>, tri: Vec<u32>, edge: Vec<u32>,
+    pub pick_bvh: std::sync::Arc<crate::picking::Bvh>,
     /// Normal overlay: segment end points (positions) and the matching normals; two points per segment.
     nlp: Vec<f32>, nln: Vec<f32>, normal_points: Vec<u32>,
     /// The eight corners of the bounding box.
@@ -41,7 +42,7 @@ impl Scene {
     /// The same scene showing only `level` (0..1) of its triangles and edges (the viewport proxy); points, normals and bounds stay.
     pub fn proxied(&self, level: f32) -> Scene {
         Scene {
-            p: self.p.clone(), n: self.n.clone(), point:self.point.clone(), line:self.line.clone(),
+            p: self.p.clone(), n: self.n.clone(), point:self.point.clone(), line:self.line.clone(), pick_bvh:self.pick_bvh.clone(),
             tri: crate::ui::proxy_ui::proxy::reduced_triangles(&self.tri, level),
             edge: crate::ui::proxy_ui::proxy::reduced_edges(&self.edge, level),
             nlp: self.nlp.clone(), nln: self.nln.clone(), normal_points:self.normal_points.clone(), bbp: self.bbp, center: self.center, radius: self.radius, textured:self.textured.clone(),
@@ -102,7 +103,8 @@ impl Scene {
             let uv_sets=provenance.uv_sets.iter().map(|(name,values)| (name.clone(),std::array::from_fn(|k|[values[(ti*3+k)*2],values[(ti*3+k)*2+1]]))).collect();
             textured.push(SurfaceTri { vertices,points:[provenance.point[ti*3],provenance.point[ti*3+1],provenance.point[ti*3+2]],prim:provenance.prim[ti],slot:name,uv_sets });
         }
-        Self { p:p.to_vec(),n,point,line,tri:l.tri,edge:l.edge,nlp,nln,normal_points,bbp,center,radius,textured }
+        let pick_bvh=std::sync::Arc::new(crate::picking::Bvh::new(p,&l.tri));
+        Self { p:p.to_vec(),n,point,line,tri:l.tri,edge:l.edge,pick_bvh,nlp,nln,normal_points,bbp,center,radius,textured }
     }
 }
 
@@ -1170,6 +1172,7 @@ mod tests {
         let edge = vec![0, 1, 1, 2, 2, 3, 3, 0];
         let scene = Scene {
             p, n, tri, edge, point:Vec::new(), line:Vec::new(),
+            pick_bvh:std::sync::Arc::new(crate::picking::Bvh::new(&[],&[])),
             nlp: Vec::new(), nln: Vec::new(), normal_points:Vec::new(), bbp: [0.0; 24],
             center: [0.0, 0.0, 0.0], radius: 1.5,
             textured:Vec::new(),

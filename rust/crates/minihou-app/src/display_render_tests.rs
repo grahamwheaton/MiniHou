@@ -23,7 +23,7 @@ fn scene() -> Scene {
         nlp.extend_from_slice(p); nlp.extend((0..3).map(|k| p[k]+n[k]*0.2));
         nln.extend_from_slice(n); nln.extend_from_slice(n);
     }
-    Scene { p,n,tri,edge,point:Vec::new(),line:Vec::new(),nlp,nln,normal_points:(0..8).collect(),bbp:[0.;24],center:[0.;3],radius:2.5,textured:Vec::new() }
+    Scene { p,n,tri,edge,point:Vec::new(),line:Vec::new(),pick_bvh:std::sync::Arc::new(crate::picking::Bvh::new(&[],&[])),nlp,nln,normal_points:(0..8).collect(),bbp:[0.;24],center:[0.;3],radius:2.5,textured:Vec::new() }
 }
 pub(super) fn render(device:&wgpu::Device,queue:&wgpu::Queue,gpu:&Gpu,mode:Mode,overlay:Overlay,outline:bool)->Vec<[u8;4]> {
     render_selection(device,queue,gpu,mode,overlay,outline,crate::ui::SelectionMode::Object)
@@ -149,7 +149,7 @@ fn random_objects_and_normal_matcap_headless() {
     for half in [0..64,64..128] {
         assert!((0..128).flat_map(|y|half.clone().map(move |x|y*128+x)).filter(|&i|single[i]!=random[i]).count()>50);
     }
-    let mut plane=Scene {p:Vec::new(),n:Vec::new(),tri:vec![0,1,2,0,2,3],edge:vec![0,1,1,2,2,3,3,0],point:Vec::new(),line:Vec::new(),nlp:Vec::new(),nln:Vec::new(),normal_points:Vec::new(),bbp:[0.;24],center:[0.;3],radius:2.5,textured:Vec::new()};
+    let mut plane=Scene {p:Vec::new(),n:Vec::new(),tri:vec![0,1,2,0,2,3],edge:vec![0,1,1,2,2,3,3,0],point:Vec::new(),line:Vec::new(),pick_bvh:std::sync::Arc::new(crate::picking::Bvh::new(&[],&[])),nlp:Vec::new(),nln:Vec::new(),normal_points:Vec::new(),bbp:[0.;24],center:[0.;3],radius:2.5,textured:Vec::new()};
     let cam=Camera::frame([0.;3],2.5); let (_,view)=cam.matrices(1.);
     let right=[view[0][0],view[1][0],view[2][0]];
     let up=[view[0][1],view[1][1],view[2][1]];

@@ -389,6 +389,56 @@ impl Camera {
         for i in 0..3 { self.target[i] += (-s[i]*dx+u[i]*dy)*self.dist*0.0011; }
     }
     pub fn zoom(&mut self, delta: f32) { self.dist = (self.dist * (-delta * 0.0025).exp()).clamp(self.radius*0.002,self.radius*10000.); }
+
+    /// Zoom about a surface (or view-plane) point, keeping its projection fixed.
+    pub fn zoom_at(&mut self, delta: f32, point: [f32; 3], nx: f32, ny: f32, aspect: f32) {
+        if !delta.is_finite() || delta == 0. { return; }
+        let old_dist = self.dist;
+        let old_origin = self.ray(nx, ny, aspect).0;
+        self.zoom(delta);
+        if self.ortho {
+            let new_origin = self.ray(nx, ny, aspect).0;
+            self.target = [0, 1, 2].map(|k| self.target[k] + old_origin[k] - new_origin[k]);
+        } else {
+            let fraction = self.dist / old_dist;
+            self.target = [0, 1, 2].map(|k| point[k] + (self.target[k] - point[k]) * fraction);
+        }
+    }
+
+    /// The point at the current view-target depth when the cursor misses geometry.
+    pub fn view_plane_point(&self, nx: f32, ny: f32, aspect: f32) -> [f32; 3] {
+        let (origin, direction) = self.ray(nx, ny, aspect);
+        let depth = dot(sub(self.target, origin), self.forward()) / dot(direction, self.forward()).max(1e-6);
+        [0, 1, 2].map(|k| origin[k] + direction[k] * depth)
+    }
+
+}
+
+#[cfg(test)] mod navigation_tests {
+    use super::*;
+    fn screen(c:&Camera,p:[f32;3])->[f32;2] {
+        let m=c.matrices(1.5).0;
+        let q=[p[0],p[1],p[2],1.];
+        let clip=[0,1,3].map(|row|(0..4).map(|col|m[col][row]*q[col]).sum::<f32>());
+        [clip[0]/clip[2],clip[1]/clip[2]]
+    }
+    fn close(a:[f32;2],b:[f32;2]) {assert!((a[0]-b[0]).abs()<2e-4 && (a[1]-b[1]).abs()<2e-4,"{a:?} {b:?}");}
+    #[test] fn zoom_to_point_keeps_cursor_fixed_in_both_projections_and_clamps() {
+        for ortho in [false,true] {
+            let mut c=Camera::frame([0.;3],2.);
+            if ortho {c.toggle_ortho();}
+            let p=c.view_plane_point(0.4,-0.3,1.5);
+            let before=screen(&c,p);
+            c.zoom_at(130.,p,0.4,-0.3,1.5); close(before,screen(&c,p));
+            c.zoom_at(-1e6,p,0.4,-0.3,1.5); close(before,screen(&c,p));
+            assert!(c.distance().is_finite() && c.distance()<=c.radius*10000.);
+        }
+    }
+    #[test] fn old_zoom_stays_centred_when_mouse_preference_is_off() {
+        let mut c=Camera::frame([0.;3],2.); let target=c.target;
+        c.zoom(100.);
+        assert_eq!(c.target,target);
+    }
 }
 
 #[cfg(test)]
