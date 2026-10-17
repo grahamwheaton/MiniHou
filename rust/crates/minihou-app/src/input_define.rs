@@ -37,7 +37,10 @@ fn reserved(name: &str) -> bool {
 /// `wanted`, or `wanted 2`, `wanted 3`, ... when the name is taken anywhere in the document (or reserved).
 pub fn unique_name(taken: &[String], wanted: &str) -> String {
     let base = wanted.trim();
-    let base = if base.is_empty() { "Input" } else { base };
+    let base = if base.is_empty() { "Input".to_owned() } else { base.to_owned() };
+    // "Object: " is reserved for object bindings and no suffix frees it.
+    let base = match base.strip_prefix("Object: ") { Some(rest) => format!("Object {rest}"), None => base };
+    let base = base.as_str();
     let free = |n: &str| !reserved(n) && !taken.iter().any(|t| t == n);
     if free(base) { return base.to_owned(); }
     (2..).map(|i| format!("{base} {i}")).find(|n| free(n)).unwrap()
@@ -189,7 +192,7 @@ mod tests {
         assert_eq!((a["status"].as_str(), a["request_id"].as_i64()), (Some("ok"), Some(4)));
         assert!(a["interface"].as_array().unwrap().iter().any(|p| p["name"] == "Amount 2" && p["kind"] == "object"));
         // Exposed names and reserved Blender names collide too.
-        for (wanted, got) in [("Scale", "Scale 2"), ("Geometry", "Geometry 2"), ("", "Input")] {
+        for (wanted, got) in [("Scale", "Scale 2"), ("Geometry", "Geometry 2"), ("Object: x", "Object x"), ("", "Input")] {
             let m = json!({"input":{"name":wanted,"kind":"bool"}});
             assert_eq!(plan(d.value(), &m).unwrap().1["name"], json!(got));
         }

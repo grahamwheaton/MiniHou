@@ -164,6 +164,8 @@ class MINIHOU_PT_geonodes(bpy.types.Panel):
             box.operator("minihou.duplicate_placement")
             box.operator("minihou.edit_group_network", icon="URL")
             box.operator("minihou.reload_group")
+            from . import input_define_ui
+            input_define_ui.draw(box, node.node_tree, tree=node.node_tree.name)
             box.label(text="Edit Network updates this placement live.")
             from . import network_ui
             state = network_ui.router.snapshot()

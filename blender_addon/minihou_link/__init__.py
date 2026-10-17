@@ -1,7 +1,7 @@
 bl_info = {
     "name": "MiniHou Link",
     "author": "MiniHou",
-    "version": (0, 3, 0),
+    "version": (0, 3, 1),
     "blender": (4, 2, 0),
     "location": "Properties > Modifiers > MiniHou",
     "description": "Live link to the MiniHou procedural geometry engine",
@@ -14,7 +14,7 @@ import bpy
 from bpy.app.handlers import persistent
 from bpy.props import BoolProperty, IntProperty, StringProperty
 
-from . import runtime, modifiers, geonodes_ui, network_ui, scene_objects
+from . import runtime, modifiers, geonodes_ui, network_ui, scene_objects, input_define_ui
 from .server_control import ServerController
 from .protocol import DEFAULT_PORT
 
@@ -415,6 +415,7 @@ class MINIHOU_PT_modifier_sources(bpy.types.Panel):
             box = self.layout.box()
             box.label(text=mod.name, icon="MODIFIER")
             network_ui.draw(box, mod)
+            input_define_ui.draw(box, mod.node_group, modifier=mod.name)
             box.label(text=modifiers.status(mod)[:160])
         # Every placement of a Geometry Nodes modifier gets its own collapsible section with its own values (its node
         # sockets; a socket wired to the modifier's Group Input shows that modifier input). Rename a section by
@@ -446,6 +447,7 @@ def draw_placement(layout, mod, section):
     body.prop(node, "label", text="Label")
     from . import geonodes
     body.label(text=geonodes.status(node)[:160])
+    input_define_ui.draw(body, node.node_tree, tree=node.node_tree.name)
     for label, data, prop in section["rows"]:
         if data is None:
             body.label(text=f"{label}: {prop}")
@@ -477,6 +479,7 @@ def register():
     modifiers.register()
     geonodes_ui.register()
     network_ui.register()
+    input_define_ui.register()
     if not bpy.app.timers.is_registered(_auto_connect_timer):
         bpy.app.timers.register(_auto_connect_timer, first_interval=2.0, persistent=True)
 
@@ -484,6 +487,7 @@ def register():
 def unregister():
     if bpy.app.timers.is_registered(_auto_connect_timer):
         bpy.app.timers.unregister(_auto_connect_timer)
+    input_define_ui.unregister()
     network_ui.unregister()
     geonodes_ui.unregister()
     modifiers.unregister()
