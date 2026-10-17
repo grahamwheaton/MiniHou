@@ -75,6 +75,7 @@ impl Registry {
     pub fn new(base_path:impl Into<PathBuf>) -> Self { Self { descriptors:HashMap::new(), images:HashMap::new(), errors:HashMap::new(), tick:0, cpu_budget:CPU_BUDGET, gpu_budget:GPU_BUDGET, base_path:base_path.into() } }
     pub fn set_budgets(&mut self, cpu:usize, gpu:usize) { self.cpu_budget=cpu; self.gpu_budget=gpu; self.evict(&HashSet::new()); }
     pub fn register_descriptor(&mut self, id:impl Into<String>, descriptor:Descriptor) { let id=id.into(); self.errors.remove(&id); self.descriptors.insert(id,descriptor); }
+    pub fn register_error(&mut self, id:impl Into<String>, reason:String) { let id=id.into(); self.descriptors.remove(&id); self.errors.insert(id,reason); }
     /// Register encoded PNG/JPEG bytes. The returned ID includes pixels, dimensions, encoding and top-row origin.
     pub fn register_image(&mut self, bytes:&[u8]) -> Result<String,String> {
         let format=image::guess_format(bytes).map_err(|e| e.to_string())?;
@@ -164,5 +165,11 @@ pub fn linear_to_srgb(v:f32)->f32 { if v<=0.0031308 {v*12.92} else {1.055*v.powf
         let hash=r.register_image(bytes).unwrap();assert_eq!((r.images[&hash].0.width,r.images[&hash].0.height),(64,64));
         assert_eq!(r.register_image_with_id(&hash,bytes).unwrap(),hash);
         assert!(r.register_image_with_id("sha256:wrong",bytes).is_err());
+    }
+    #[test] fn clip_approximation_parses_as_clamp() {
+        let d=Descriptor::parse(&serde_json::json!({"version":1,"textures":{"base_color":{"image_id":"sha256:test",
+            "sampler":{"min":"linear","mag":"linear","wrap_u":"clamp","wrap_v":"clamp"}}}})).unwrap();
+        let sampler=&d.textures.base_color.unwrap().sampler;
+        assert_eq!(sampler.wrap_u,"clamp"); assert_eq!(sampler.wrap_v,"clamp");
     }
 }

@@ -116,6 +116,20 @@ fn cube_seams_expand_to_triangle_corners() {
     assert_eq!(scene.textured.iter().map(|t|t.prim).collect::<std::collections::BTreeSet<_>>().len(),6);
     assert!(scene.textured.iter().all(|t|t.vertices.iter().all(|v|v.valid==1.)));
 }
+#[test]
+fn instance_slot_name_resolves_to_manifest_binding() {
+    let mut geo=minihou_core::geometry::Geometry::from_arrays(
+        vec![0.,0.,0.,1.,0.,0.,0.,1.,0.],vec![0,1,2],vec![0,3],Some(vec![true])).unwrap();
+    geo.detail.insert("materials".into(),serde_json::json!(["imagepaste-261017-142014"]));
+    geo.detail.insert("material_bindings".into(),serde_json::json!({"version":1,"slots":["peer3:blender:instance:0"]}));
+    let scene=Scene::new(&geo);
+    assert_eq!(scene.textured.len(),1);
+    assert_eq!(scene.textured[0].slot,"peer3:blender:instance:0");
+    let mut registry=Registry::new(".");
+    registry.register_descriptor("peer3:blender:instance:0",materials::Descriptor::parse(
+        &serde_json::json!({"version":1,"name":"imagepaste-261017-142014"})).unwrap());
+    assert!(matches!(registry.resolve(&scene.textured[0].slot).state,State::Ok));
+}
 /// Standalone points and non-surface primitive segments survive every proxy cut.
 fn element_indices(g:&Geometry, triangles:&[u32]) -> (Vec<u32>,Vec<u32>) {
     let mut faced=vec![false;g.npoints];

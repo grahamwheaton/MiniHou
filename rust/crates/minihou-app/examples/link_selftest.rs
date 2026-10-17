@@ -45,6 +45,18 @@ fn main() -> minihou_app::Result<()> {
                         command_id = command["id"].as_u64().unwrap();
                         match command["op"].as_str().unwrap_or("") {
                             "stop" => break,
+                            "texture_probe" => {
+                                let suffix = command["slot_suffix"].as_str().unwrap_or("");
+                                let slot = server.texture_binding_ids().into_iter()
+                                    .find(|id| id.ends_with(suffix)).unwrap_or_default();
+                                let binding = materials.resolve(&slot);
+                                let report = serde_json::json!({"slot":slot,
+                                    "image_id":binding.descriptor.as_ref().and_then(|d|d.textures.base_color.as_ref()).and_then(|t|t.image_id.as_ref()),
+                                    "image":binding.image.as_ref().map(|i|[i.width,i.height]),
+                                    "state":format!("{:?}",binding.state),
+                                    "diagnostics":server.texture_status()});
+                                std::fs::write(command["output"].as_str().ok_or("texture probe needs output")?,report.to_string())?;
+                            }
                             "expose" => {
                                 let edit = minihou_app::toggle_exposed(
                                     editor.doc.value(),

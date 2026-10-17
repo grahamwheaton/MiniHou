@@ -73,7 +73,7 @@ impl Service {
         let manifest=self.manifests.get(scope).ok_or("missing manifest")?;
         let descriptors=manifest["descriptors"].as_object().ok_or("missing descriptors")?;
         for (id,value) in descriptors {
-            let mut d=Descriptor::parse(value)?;
+            let mut d=match Descriptor::parse(value) { Ok(d)=>d, Err(reason)=>{registry.register_error(id.clone(),reason);continue;} };
             if let Some(t)=d.textures.base_color.as_mut() { if let Some(hash)=t.image_id.as_ref() {if self.has(hash) {t.image_id=Some(self.publish(hash,registry)?);} } }
             registry.register_descriptor(id.clone(),d);
         }
@@ -99,5 +99,16 @@ impl Service {
         assert!(s.chunk("range",usize::MAX,b"x").is_err());
         assert!(s.chunk("range",5,b"xx").is_err());
         assert!(s.chunk("range",0,&vec![0;CHUNK+1]).is_err());
+    }
+    #[test] fn bad_slot_does_not_poison_supported_binding() {
+        let mut service=Service::default();
+        service.manifest("peer1:instance:test",1,serde_json::json!({"descriptors":{
+            "peer1:blender:test:0":{"version":1,"alpha_mode":"BLEND"},
+            "peer1:blender:test:1":{"version":1,"textures":{"base_color":{"image_id":"sha256:missing"}}}
+        },"bindings":["peer1:blender:test:0","peer1:blender:test:1"]}));
+        let mut registry=Registry::new(".");
+        service.bind("peer1:instance:test",&mut registry).unwrap();
+        assert!(matches!(registry.resolve("peer1:blender:test:0").state,crate::materials::State::Unsupported(_)));
+        assert!(registry.resolve("peer1:blender:test:1").descriptor.unwrap().textures.base_color.is_some());
     }
 }

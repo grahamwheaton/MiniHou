@@ -595,6 +595,11 @@ pub struct LinkServer {
     address: std::net::SocketAddr,
 }
 impl LinkServer {
+    pub fn texture_binding_ids(&self)->Vec<String> {
+        self.shared.image_assets.lock().unwrap().manifests.values().flat_map(|m|
+            m["bindings"].as_array().into_iter().flatten().filter_map(|v|v.as_str().map(str::to_owned))
+        ).collect()
+    }
     pub fn texture_status(&self)->Vec<String> {
         let service=self.shared.image_assets.lock().unwrap();
         let mut result=Vec::new();
