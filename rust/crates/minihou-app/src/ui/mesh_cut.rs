@@ -140,7 +140,8 @@ fn slide_factor(raw: f64, snap: bool) -> f64 {
 }
 fn loop_params(edge: Edge, count: usize, factor: f64, even: bool, flipped: bool, clamp: bool) -> Value {
     json!({"mode":"edge_loop","split_edges":format!("p{}-{}",edge.0,edge.1),"loops":count,
-        "position":0.5,"factor":factor,"even":even,"flipped":flipped,"clamp":clamp,"correct_uvs":true})
+        "position":0.5,"factor":factor,"even":even,"flipped":flipped,"clamp":clamp,"correct_uvs":true,
+        "outgrp_edges":true,"outgrp_edges_name":"viewport_loop_cut"})
 }
 
 /// Egui's camera projection omits the viewport aspect ratio. Store the exact NDC projection the kernel expects.

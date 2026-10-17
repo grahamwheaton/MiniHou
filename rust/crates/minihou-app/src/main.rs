@@ -56,6 +56,33 @@ fn point_pickable(visibility:viewport::ObjectVisibility,ranges:&[(String,std::op
 fn active_range<'a>(active:&str,ranges:&'a [(String,std::ops::Range<u32>)])->Option<&'a std::ops::Range<u32>> {
     ranges.iter().find(|(id,_)|id==active).map(|(_,range)|range)
 }
+fn loop_cut_selection(g:&minihou_core::Geometry,range:&std::ops::Range<u32>)->picking::Selection {
+    let topo_edges=minihou_core::topo::edges(&g.topology,g.npoints);
+    let marks=g.vertex.get("edge_group_viewport_loop_cut").and_then(|attr|attr.as_i32());
+    let mut selected=vec![false;topo_edges.len()];
+    if let Some(marks)=marks { for (vertex,&edge) in topo_edges.of_vertex.iter().enumerate() {
+        if edge>=0 && marks.get(vertex).is_some_and(|&mark|mark!=0) { selected[edge as usize]=true; }
+    } }
+    let edges=topo_edges.points.chunks_exact(2).enumerate()
+        .filter(|(i,pair)|selected[*i] && range.contains(&(pair[0] as u32)) && range.contains(&(pair[1] as u32)))
+        .map(|(_,pair)|(pair[0] as u32,pair[1] as u32)).collect();
+    picking::Selection { mode:ui::SelectionMode::Edges,edges,..Default::default() }
+}
+fn selection_exists_on_scene(selection:&picking::Selection,scene:&Scene)->bool {
+    selection.points.iter().all(|&p|(p as usize)<scene.positions().len()/3)
+        && selection.tris.iter().all(|&t|(t as usize)<scene.triangle_indices().len()/3)
+        && selection.edges.iter().all(|&(a,b)|scene.edge_indices().chunks_exact(2)
+            .any(|edge|(edge[0]==a && edge[1]==b)||(edge[0]==b && edge[1]==a)))
+}
+fn undo_selection_for(records:&mut Vec<(String,picking::Selection,picking::Selection)>,
+    previous:&str,current:&picking::Selection)
+    ->Option<(picking::Selection,picking::Selection,Option<picking::Selection>)> {
+    let matches=records.last().is_some_and(|(text,_,_)|text==previous);
+    if !matches { return None; }
+    let (_,selection,stash)=records.pop().unwrap();
+    let user=(!current.is_empty() && *current!=selection).then(||current.clone());
+    Some((selection,stash,user))
+}
 fn selection_in_range(selection:&picking::Selection,scene:&Scene,range:&std::ops::Range<u32>)->picking::Selection {
     let mut result=selection.clone();
     result.points.retain(|id|range.contains(id));
@@ -513,6 +540,10 @@ struct App {
     held_keys: Vec<egui::Event>,
     /// Element selection (and the Object-mode stash) per cooked topology, see element_select::SelectionMemory.
     selection_memory: element_select::SelectionMemory<(picking::Selection, picking::Selection)>,
+    pending_loop_selection: Option<String>,
+    undo_element_selection: Vec<(String, picking::Selection, picking::Selection)>,
+    pending_restore_selection: Option<(picking::Selection, picking::Selection, Option<picking::Selection>)>,
+    model_before_selection: Option<(picking::Selection, picking::Selection)>,
 }
 impl App {
     /// Finish the current edit before transferring pointer/keyboard ownership to selection.
@@ -597,7 +628,7 @@ impl App {
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
             display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,selection_metrics:Default::default(),coplanar:None,group_preview:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
             clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,embed_conflict:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
-            last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default() };
+            last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default(),pending_loop_selection:None,undo_element_selection:Vec::new(),pending_restore_selection:None,model_before_selection:None };
         app.prefs = Preferences::load();
         app.prefs.apply_python(&python_gate());
         app.mode=Mode::parse(&app.prefs.viewport.default_shading);
@@ -1265,6 +1296,7 @@ impl App {
         let Some((doc,id))=ui::modal_model::insert_graph(&self.editor.doc,&source,kind,params) else {
             self.file_status=format!("Could not add {}",kind.node()); return;
         };
+        self.model_before_selection=Some((self.selection.clone(),self.stashed_selection.clone()));
         self.editor.history.finish(&self.editor.doc);
         let before=self.editor.doc.clone();
         self.editor.doc=doc;
@@ -1317,10 +1349,14 @@ impl App {
                 self.last_operator=Some(LastOperator::Extrude {params:repeat::extrude_next_params(&self.editor.doc.value()["nodes"][&id]["params"],state.source_points)});
             }
             self.editor.history.record(before,&self.editor.doc);
+            if let Some((selection,stash))=self.model_before_selection.take() {
+                self.undo_element_selection.push((self.editor.doc.value().to_string(),selection,stash));
+            }
         }
     }
     fn cancel_model_modal(&mut self) {
         if let Some((_,before,_,previous))=self.model_modal.take() {
+            self.model_before_selection=None;
             self.editor.doc=before;
             self.selected=previous.clone(); self.selected_set=std::collections::BTreeSet::from([previous]);
             self.display=Graph::from_value(self.editor.doc.value()).ok().and_then(|g|g.main_output().ok()).unwrap_or_default();
@@ -1615,7 +1651,11 @@ impl App {
     fn commit_document(&mut self, value: serde_json::Value, what: &str) -> bool {
         match graph_edit::validated(value) {
             Ok(new) => {
+                let selection=self.selection.clone();
+                let stash=self.stashed_selection.clone();
+                let changed=self.editor.doc.value()!=new.value();
                 self.editor.history.replace(&mut self.editor.doc, new);
+                if changed { self.undo_element_selection.push((self.editor.doc.value().to_string(),selection,stash)); }
                 self.send(Edit::Replace(self.editor.doc.value().clone()));
                 true
             }
@@ -2231,6 +2271,7 @@ impl App {
                 UiAction::MeshCutCommit { source, node_type, params } => {
                     if let Some((value, id)) = graph_edit::add_viewport_cut(self.editor.doc.value(), &source, &node_type, params) {
                         if self.commit_document(value, "viewport cut") {
+                            self.pending_loop_selection=(node_type=="polysplit").then(||id.clone());
                             self.selected = id.clone(); self.selected_set = std::collections::BTreeSet::from([id.clone()]);
                             self.display = Graph::from_value(self.editor.doc.value()).ok().and_then(|g| g.main_output().ok()).unwrap_or(id);
                         }
@@ -2262,8 +2303,14 @@ impl App {
                 UiAction::Undo | UiAction::Redo => {
                     let undo = matches!(action, UiAction::Undo);
                     let previous = self.editor.doc.value().clone();
+                    let previous_text = previous.to_string();
                     let command = if undo { self.editor.history.undo(&mut self.editor.doc) } else { self.editor.history.redo(&mut self.editor.doc) };
                     if let Some(command) = command {
+                        self.pending_loop_selection=None;
+                        if undo {
+                            self.pending_restore_selection=undo_selection_for(&mut self.undo_element_selection,
+                                &previous_text,&self.selection);
+                        } else { self.pending_restore_selection=None; }
                         if ui::network::layout_changed(&previous, self.editor.doc.value()) {
                             ui::network::restore_positions(ctx, &self.editor.path, self.editor.doc.value());
                         }
@@ -2603,6 +2650,16 @@ impl eframe::App for App {
                 let (selection, stash) = self.selection_memory.retarget(key, (std::mem::take(&mut self.selection), std::mem::take(&mut self.stashed_selection)));
                 self.selection = if selection.is_empty() { picking::Selection { mode, ..Default::default() } } else { selection };
                 self.stashed_selection = stash;
+                if let Some((selection,stash,user_selection))=self.pending_restore_selection.take() {
+                    self.selection=user_selection.filter(|candidate|selection_exists_on_scene(candidate,&scene)).unwrap_or(selection);
+                    self.stashed_selection=stash;
+                }
+                if self.pending_loop_selection.take().is_some() {
+                    if let (Some(range),Some(g))=(active_range(&self.display,&self.display_ranges),self.cooking.geometry.as_deref()) {
+                        self.selection=loop_cut_selection(g,range);
+                        self.editor_state.apply(ui::EditorChange::Selection(ui::SelectionMode::Edges));
+                    }
+                }
                 self.scene = Some(scene);
                 self.elem_topo = Default::default();
                 if first { self.frame_mesh(); }
