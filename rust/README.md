@@ -24,6 +24,27 @@ tests/test_rust_parity.py       the same graphs cooked by both engines, compared
 bench/bench_rust.py             numpy vs numba vs Rust, 1M and 4M quads
 ```
 
+## Local Python parity build (debug)
+
+The `minihou_rs` extension is built by PyO3 in `crates/minihou-py` through
+maturin. Build it for the interpreter that runs the tests; an older installed
+extension may import successfully while lacking current nodes or functions.
+From the repository root in PowerShell:
+
+```powershell
+python -m venv --system-site-packages .venv
+.\.venv\Scripts\python.exe -m pip install --no-deps maturin
+$env:CARGO_BUILD_JOBS = '2'
+$env:CARGO_TARGET_DIR = Join-Path (Get-Location) 'rust\target_pyparity'
+$env:CARGO_PROFILE_DEV_DEBUG = '0'
+$env:CARGO_INCREMENTAL = '0'
+.\.venv\Scripts\python.exe -m maturin develop --manifest-path rust\crates\minihou-py\Cargo.toml
+.\.venv\Scripts\python.exe -m unittest tests.test_rust_parity tests.test_parity_inputs
+```
+
+The target stays under `rust/`, and `maturin develop` installs into the local
+venv. Check `minihou_rs.__file__` when diagnosing a suspected stale import.
+
 ## Build
 
 Needs `rustup` (it fetches the pinned toolchain itself) and `pip install maturin`.
