@@ -9,22 +9,26 @@ use serde_json::Value;
 pub struct Control { pub p:[f64;3], pub left:[f64;3], pub right:[f64;3], pub mode:String }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part { Anchor, Left, Right }
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Selected { pub index:usize, pub part:Part }
 #[derive(Clone, Debug)]
 struct Drag { node:String, before:Vec<Control>, current:Vec<Control>, selected:Selected, start:Pos2, base:[f64;3],
-    kind:Tool, axis:Option<usize>, plane:bool, modal:bool, changed:bool }
+    parts:Vec<Selected>,kind:Tool, axis:Option<usize>, plane:bool, modal:bool, changed:bool }
 fn selection_id(node:&str)->Id { Id::new(("curve_selection",node)) }
+fn selection_set_id(node:&str)->Id { Id::new(("curve_selection_set",node)) }
 fn drag_id()->Id { Id::new("curve_tool_drag") }
 pub fn selected(ctx:&egui::Context,node:&str)->Selected { ctx.data(|d|d.get_temp(selection_id(node)).unwrap_or(Selected{index:0,part:Part::Anchor})) }
-pub fn set_selected(ctx:&egui::Context,node:&str,selection:Selected) { ctx.data_mut(|d|d.insert_temp(selection_id(node),selection)); }
+fn selected_parts(ctx:&egui::Context,node:&str)->Vec<Selected> {ctx.data(|d|d.get_temp(selection_set_id(node))).unwrap_or_else(||vec![selected(ctx,node)])}
+pub fn set_selected(ctx:&egui::Context,node:&str,selection:Selected) { ctx.data_mut(|d|{d.insert_temp(selection_id(node),selection);d.insert_temp(selection_set_id(node),vec![selection]);}); }
+fn extend_selected(ctx:&egui::Context,node:&str,selection:Selected) {let mut parts=selected_parts(ctx,node);if !parts.contains(&selection){parts.push(selection);}ctx.data_mut(|d|{d.insert_temp(selection_id(node),selection);d.insert_temp(selection_set_id(node),parts);});}
 pub fn active(ctx:&egui::Context)->bool { ctx.data(|d|d.get_temp::<Drag>(drag_id()).is_some()) }
 pub fn cancel(ctx:&egui::Context) { ctx.data_mut(|d|d.remove::<Drag>(drag_id())); }
 pub fn start_modal(ctx:&egui::Context,node:&str,controls:&Value,kind:super::modal_transform::Kind,pointer:Pos2)->bool {
     let Some(cs)=parse(controls) else {return false;};
     let selected=selected(ctx,node);let selected=Selected{index:selected.index.min(cs.len()-1),..selected};
     let c=&cs[selected.index];let base=part_position(c,selected.part);
-    ctx.data_mut(|data|data.insert_temp(drag_id(),Drag{node:node.into(),before:cs.clone(),current:cs,selected,start:pointer,base,
+    let parts=selected_parts(ctx,node);
+    ctx.data_mut(|data|data.insert_temp(drag_id(),Drag{node:node.into(),before:cs.clone(),current:cs,selected,start:pointer,base,parts,
         kind:match kind {super::modal_transform::Kind::Move=>Tool::Move,super::modal_transform::Kind::Rotate=>Tool::Rotate,super::modal_transform::Kind::Scale=>Tool::Scale},
         axis:None,plane:false,modal:true,changed:false}));true
 }
@@ -192,6 +196,27 @@ pub fn hit(rect:Rect,v:&View,pointer:Pos2,ctx:&egui::Context)->bool {
         hit_control(v,rect,&cs,selected,pointer).is_some() || gizmo(v,rect,&cs,selected,Some(pointer),None).is_some()
     })
 }
+pub fn region_select(ctx:&egui::Context,rect:Rect,v:&View,shape:&crate::picking::RegionShape,op:crate::picking::SelectOp)->bool {
+    if !is_active_node(v){return false;}
+    let Some(cs)=parse(&node_controls(v.doc,v.selected)) else{return false;};
+    let cs=resolved(&cs,v.doc["nodes"][v.selected]["params"]["closed"].as_bool().unwrap_or(false));
+    let active=selected(ctx,v.selected).index.min(cs.len()-1);
+    let mut found=Vec::new();
+    for (index,c) in cs.iter().enumerate() {
+        if index==active {for part in [Part::Left,Part::Right] {
+            if screen(v,rect,part_position(c,part)).is_some_and(|p|shape.contains(p)){found.push(Selected{index,part});}
+        }}
+        if screen(v,rect,c.p).is_some_and(|p|shape.contains(p)){found.push(Selected{index,part:Part::Anchor});}
+    }
+    let mut parts=if op==crate::picking::SelectOp::Replace {Vec::new()} else {selected_parts(ctx,v.selected)};
+    for part in found {
+        if op==crate::picking::SelectOp::Subtract {parts.retain(|p|*p!=part);}
+        else if !parts.contains(&part){parts.push(part);}
+    }
+    let last=parts.last().copied().unwrap_or(Selected{index:0,part:Part::Anchor});
+    ctx.data_mut(|d|{d.insert_temp(selection_id(v.selected),last);d.insert_temp(selection_set_id(v.selected),parts);});
+    true
+}
 pub fn show(ui:&mut egui::Ui,rect:Rect,v:&View,out:&mut Actions,double_click:bool) {
     if !is_active_node(v){cancel(ui.ctx());return;}
     let Some(doc_cs)=parse(&node_controls(v.doc,v.selected)) else{return;};
@@ -219,14 +244,18 @@ pub fn show(ui:&mut egui::Ui,rect:Rect,v:&View,out:&mut Actions,double_click:boo
                         let mut delta=mul(sub(now,start),precision);
                         if let Some(axis)=d.axis {let along=mul(frame[axis],dot(delta,frame[axis]));delta=if d.plane {sub(delta,along)} else {along};}
                         if snap {let step=v.editor.snap.increment as f64;if step>0. {delta=delta.map(|x|(x/step).round()*step);}}
-                        d.current=move_part(&d.before,d.selected.index,d.selected.part,add(d.base,delta));
+                        d.current=d.before.clone();
+                        for part in &d.parts {if let Some(control)=d.before.get(part.index) {
+                            d.current=move_part(&d.current,part.index,part.part,add(part_position(control,part.part),delta));
+                        }}
                     }
                 } else {
                     let raw=((pointer.x-d.start.x)-(pointer.y-d.start.y)) as f64*precision;
                     let mut amount=if d.kind==Tool::Rotate {raw*0.6} else {(raw/120.).exp()};
                     if snap {let step=if d.kind==Tool::Rotate {5.} else {0.1};
                         amount=if d.kind==Tool::Rotate {(amount/step).round()*step} else {1.+((amount-1.)/step).round()*step};}
-                    d.current=transform_part(&d.before,d.selected.index,d.selected.part,d.kind,d.axis,d.plane,amount,frame);
+                    d.current=d.before.clone();
+                    for part in &d.parts {d.current=transform_part(&d.current,part.index,part.part,d.kind,d.axis,d.plane,amount,frame);}
                 }
                 d.changed=d.current!=d.before;cs=d.current.clone();
             }
@@ -239,17 +268,19 @@ pub fn show(ui:&mut egui::Ui,rect:Rect,v:&View,out:&mut Actions,double_click:boo
                 out.push(UiAction::Edit{edit:Edit::Param{node:v.selected.into(),name:"controls".into(),value:write(&cs)},continuous:false});
             }
         } else if ui.input(|i|i.pointer.primary_pressed()) {
-            if let Some((axis,plane))=gizmo(v,rect,&cs,selected,Some(pointer),None) {
+            if let Some(hit)=hit_control(v,rect,&cs,selected,pointer) {
+                selected=hit;if ui.input(|i|i.modifiers.shift){extend_selected(ui.ctx(),v.selected,hit);}else{set_selected(ui.ctx(),v.selected,hit);}
+                let resolved=resolved(&cs,v.doc["nodes"][v.selected]["params"]["closed"].as_bool().unwrap_or(false));
+                let c=&resolved[hit.index];let base=part_position(c,hit.part);
+                let parts=selected_parts(ui.ctx(),v.selected);
+                ui.ctx().data_mut(|data|data.insert_temp(drag_id(),Drag{node:v.selected.into(),before:resolved.clone(),current:resolved,selected:hit,start:pointer,base,parts,
+                    kind:Tool::Move,axis:None,plane:false,modal:false,changed:false}));
+            } else if let Some((axis,plane))=gizmo(v,rect,&cs,selected,Some(pointer),None) {
                 let resolved=resolved(&cs,v.doc["nodes"][v.selected]["params"]["closed"].as_bool().unwrap_or(false));
                 let base=part_position(&resolved[selected.index],selected.part);
-                ui.ctx().data_mut(|data|data.insert_temp(drag_id(),Drag{node:v.selected.into(),before:resolved.clone(),current:resolved,selected,start:pointer,base,
+                let parts=selected_parts(ui.ctx(),v.selected);
+                ui.ctx().data_mut(|data|data.insert_temp(drag_id(),Drag{node:v.selected.into(),before:resolved.clone(),current:resolved,selected,start:pointer,base,parts,
                     kind:if v.editor.tool==Tool::Transform {Tool::Move} else {v.editor.tool},axis,plane,modal:false,changed:false}));
-            } else if let Some(hit)=hit_control(v,rect,&cs,selected,pointer) {
-                selected=hit;set_selected(ui.ctx(),v.selected,hit);
-                let resolved=resolved(&cs,v.doc["nodes"][v.selected]["params"]["closed"].as_bool().unwrap_or(false));
-                let c=&resolved[hit.index];let base=match hit.part {Part::Anchor=>c.p,Part::Left=>c.left,Part::Right=>c.right};
-                ui.ctx().data_mut(|data|data.insert_temp(drag_id(),Drag{node:v.selected.into(),before:resolved.clone(),current:resolved,selected:hit,start:pointer,base,
-                    kind:if matches!(v.editor.tool,Tool::Rotate|Tool::Scale){v.editor.tool}else{Tool::Move},axis:None,plane:false,modal:false,changed:false}));
             }
         }
     }
@@ -299,5 +330,40 @@ pub fn show(ui:&mut egui::Ui,rect:Rect,v:&View,out:&mut Actions,double_click:boo
         assert!((rotated[0].right[1]-1.).abs()<1e-9);
         let scaled=transform_part(&controls(),0,Part::Anchor,Tool::Scale,None,false,2.,frame);
         assert_eq!(scaled[0].left,[-2.,0.,0.]);assert_eq!(scaled[0].right,[2.,0.,0.]);
+    }
+    #[test] fn raw_pointer_routes_handle_press_drag_and_single_edit() {
+        use crate::ui::testing::Fixture;
+        use eframe::egui::{vec2,Event,Modifiers,PointerButton,RawInput};
+        let mut f=Fixture::new();
+        let mut cs=controls();cs[1].p=[-0.5,0.5,0.];cs[1].left=[-0.8,0.5,0.];cs[1].right=[-0.2,0.5,0.];
+        f.doc=minihou_app::Document::parse(serde_json::json!({"version":1,"nodes":{"curve1":{"type":"bezier","params":{"controls":write(&cs)}}},"display":"curve1"}).to_string()).unwrap();
+        f.graph=minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected="curve1".into();f.selected_set=std::collections::BTreeSet::from([f.selected.clone()]);f.display=f.selected.clone();
+        f.editor.tool=Tool::Move;
+        f.camera=crate::ui::CameraInfo{ortho:true,projection:[[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]],ray_origin:[0.,0.,10.],ray_forward:[0.,0.,-1.],ray_right:[1.,0.,0.],ray_up:[0.,1.,0.],..Default::default()};
+        let ctx=egui::Context::default();let rect=Rect::from_min_size(Pos2::ZERO,vec2(800.,600.));
+        let handle=screen(&f.view(),rect,cs[0].right).unwrap();
+        let mut frame=|events:Vec<Event>| {
+            let raw=RawInput{screen_rect:Some(rect),events,..Default::default()};
+            let mut actions=Actions::default();let view=f.view();
+            let _=ctx.run(raw,|ctx| {egui::CentralPanel::default().show(ctx,|ui| {
+                assert!(!crate::ui::selection_region::handle(ctx,rect,&view,&mut actions));
+                show(ui,rect,&view,&mut actions,false);
+            });});
+            actions.0
+        };
+        let button=|pos,pressed|Event::PointerButton{pos,button:PointerButton::Primary,pressed,modifiers:Modifiers::NONE};
+        frame(vec![Event::PointerMoved(handle),button(handle,true)]);
+        assert_eq!(selected(&ctx,"curve1").part,Part::Right);
+        assert!(active(&ctx));
+        frame(vec![Event::PointerMoved(handle+vec2(30.,20.))]);
+        let edits=frame(vec![button(handle+vec2(30.,20.),false)]);
+        assert_eq!(edits.iter().filter(|a|matches!(a,UiAction::Edit{..})).count(),1);
+        assert!(!active(&ctx));
+        let anchor=screen(&f.view(),rect,cs[1].p).unwrap();
+        let shape=crate::picking::RegionShape::Rect(Rect::from_center_size(anchor,vec2(20.,20.)));
+        assert!(region_select(&ctx,rect,&f.view(),&shape,crate::picking::SelectOp::Add));
+        assert!(selected_parts(&ctx,"curve1").contains(&Selected{index:0,part:Part::Right}));
+        assert!(selected_parts(&ctx,"curve1").contains(&Selected{index:1,part:Part::Anchor}));
     }
 }
