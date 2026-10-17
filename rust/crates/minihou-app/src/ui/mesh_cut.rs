@@ -101,6 +101,24 @@ fn slide_step(raw: f64, delta: Vec2, a: Pos2, b: Pos2, fine: bool) -> f64 {
     let (along, span) = if len >= 4. { (delta.dot(ab) / len, len.max(20.)) } else { (delta.x, 100.) };
     (raw + 2. * along as f64 / span as f64 * if fine { 0.1 } else { 1. }).clamp(-1., 1.)
 }
+/// Project a small positive cooked slide to find the side chosen by topology winding.
+fn slide_screen_motion(v: &super::View, rect: Rect, s: &State, edge: Edge) -> Option<Vec2> {
+    let g = v.cooking.geometry.as_deref()?;
+    if s.tool == Some(Tool::EdgeSlide) {
+        let moved=edge_slide_preview(g,&s.edge_selection,0.1,s.even,s.flipped,s.clamp,true);
+        let p=|geo:&Geometry, id:usize| [0,1,2].map(|k|geo.p()[id*3+k]);
+        transform_gizmo::project(v.camera,rect,p(&moved,edge.0))
+            .zip(transform_gizmo::project(v.camera,rect,p(g,edge.0)))
+            .map(|(after,before)|after-before)
+    } else {
+        let before=loop_cut_preview(g,edge,s.count,0.,s.even,s.flipped,s.clamp).ok();
+        let after=loop_cut_preview(g,edge,s.count,0.1,s.even,s.flipped,s.clamp).ok();
+        before.as_ref().and_then(|lines|lines.first()).zip(after.as_ref().and_then(|lines|lines.first()))
+            .and_then(|(a,b)|transform_gizmo::project(v.camera,rect,a.0)
+                .zip(transform_gizmo::project(v.camera,rect,b.0)))
+            .map(|(before,after)|after-before)
+    }
+}
 /// The Blender-style signed slide factor. Ctrl snaps to tenths.
 fn slide_factor(raw: f64, snap: bool) -> f64 {
     let x = if snap { (raw * 10.).round() / 10. } else { raw };
@@ -174,10 +192,21 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         let key = pointer.map(|p| (p, v.camera.projection, aspect, v.editor.xray, s.revision));
         if key != s.hover_key { s.hover = pointer.and_then(|p| s.mesh.hover(v.camera, rect, p, v.editor.xray)); s.hover_key = key; }
     } else { s.hover = None; s.hover_key = None; }
-    // Slide follows pointer motion along the seed edge's projection.
-    if let (true, Some(sl)) = (loop_cut || edge_slide, s.slide.as_mut()) {
-        let (pa, pb) = (transform_gizmo::project(v.camera, rect, s.mesh.point(sl.edge.0)), transform_gizmo::project(v.camera, rect, s.mesh.point(sl.edge.1)));
-        if s.numeric.is_empty() { if let (Some(pa), Some(pb)) = (pa, pb) { sl.raw = slide_step(sl.raw, delta, pa, pb, modifiers.shift); } }
+    // Loop Cut follows the seed edge; Edge Slide follows the cooked rail projection.
+    if let (true, Some(edge)) = (loop_cut || edge_slide, s.slide.map(|sl|sl.edge)) {
+        let (pa, pb) = (transform_gizmo::project(v.camera, rect, s.mesh.point(edge.0)), transform_gizmo::project(v.camera, rect, s.mesh.point(edge.1)));
+        let motion=if delta==Vec2::ZERO {None}else{slide_screen_motion(v,rect,&s,edge)};
+        let sl=s.slide.as_mut().unwrap();
+        if s.numeric.is_empty() { if let (Some(pa), Some(pb)) = (pa, pb) {
+            let (from,to)=if edge_slide {
+                // Edge Slide moves across the selected edge, along a rail; a seed-edge projection is perpendicular.
+                motion.filter(|d|d.length()>0.01).map(|d|(pa,pa+d*20.)).unwrap_or((pa,pb))
+            }else{
+                let sign=if motion.is_some_and(|d|d.dot(pb-pa)<0.) {-1.}else{1.};
+                (pa,pa+(pb-pa)*sign)
+            };
+            sl.raw = slide_step(sl.raw, delta, from, to, modifiers.shift);
+        } }
         if sl.held && pointer.is_some_and(|p| p.distance(sl.press) > DRAG_THRESHOLD) { sl.dragged = true; }
     }
     let ndc = |p: Pos2| [(p.x-rect.center().x)*2./rect.width(),(rect.center().y-p.y)*2./rect.height()];
@@ -462,6 +491,18 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
         let actions = h.frame(vec![button(q, egui::PointerButton::Secondary, true)]);
         assert_eq!(committed(&actions).unwrap()["factor"],0.);
     }
+    #[test] fn flipped_drag_tracks_the_same_screen_side() {
+        let h=Harness::new();
+        let p=h.at(1.,0.5);
+        h.frame(vec![egui::Event::PointerMoved(p)]);
+        h.frame(vec![button(p,egui::PointerButton::Primary,true)]);
+        h.frame(vec![key(egui::Key::F)]);
+        let q=h.at(1.,0.75);
+        h.frame(vec![egui::Event::PointerMoved(q)]);
+        let params=committed(&h.frame(vec![button(q,egui::PointerButton::Primary,false)])).unwrap();
+        assert_eq!(params["flipped"],true);
+        assert!(params["factor"].as_f64().unwrap()<0.,"flipped rail must still follow screen-up drag: {params}");
+    }
     #[test] fn escape_during_slide_keeps_centre_and_hover_escape_cancels() {
         let mut h = Harness::new();
         let p = h.at(1., 0.5);
@@ -495,6 +536,22 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
         let source=minihou_app::display_nodes(h.fixture.view().doc)[0].clone();
         start_edge_slide(&h.ctx,source,vec![(1,4)]);
         assert!(h.frame(vec![key(egui::Key::Escape)]).iter().all(|a|!matches!(a,UiAction::MeshCutCommit {..})));
+    }
+    #[test] fn edge_slide_drag_uses_rail_direction() {
+        let mut h=Harness::new();h.fixture.editor.tool=Tool::EdgeSlide;
+        let p=h.at(1.,0.5);
+        h.frame(vec![egui::Event::PointerMoved(p)]);
+        let moved=edge_slide_preview(h.fixture.cooking.geometry.as_deref().unwrap(),&[(1,4)],0.1,false,false,true,true);
+        let q=transform_gizmo::project(h.fixture.camera,h.rect,[moved.p()[3],moved.p()[4],moved.p()[5]]).unwrap();
+        let origin=h.at(1.,0.);
+        let toward=(q-origin).normalized()*30.;
+        let source=minihou_app::display_nodes(h.fixture.view().doc)[0].clone();
+        start_edge_slide(&h.ctx,source,vec![(1,4)]);
+        h.frame(vec![egui::Event::PointerMoved(p+toward)]);
+        let params=h.frame(vec![key(egui::Key::Enter)]).into_iter().find_map(|a|match a {
+            UiAction::MeshCutCommit {node_type,params,..} if node_type=="edge_slide" => Some(params), _=>None,
+        }).unwrap();
+        assert!(params["factor"].as_f64().unwrap()>0.,"dragging along the visible rail must choose that rail: {params}");
     }
     #[test] fn knife_projection_matches_viewport_with_non_square_aspect() {
         let camera = CameraInfo { projection: [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]], ..Default::default() };
