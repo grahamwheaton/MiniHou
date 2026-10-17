@@ -888,7 +888,8 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     let default = (param.default)();
     let old = value_of(v, id, param.name, &default);
     let mut value = old.clone();
-    let resolved_channels = minihou_core::Graph::from_value(v.doc).ok().map(|graph| minihou_core::channels::resolve_graph(&graph));
+    let resolved_channels = ui.ctx().data(|d| d.get_temp::<std::sync::Arc<minihou_core::channels::ResolvedChannels>>(egui::Id::new("param_panel_resolved")))
+        .or_else(|| minihou_core::Graph::from_value(v.doc).ok().map(|graph| std::sync::Arc::new(minihou_core::channels::resolve_graph(&graph))));
     if let Some(resolved_all) = &resolved_channels {
         if let Some(resolved) = resolved_all.params.get(id).and_then(|p| p.get(param.name)) {
             value = resolved.clone();
@@ -1256,6 +1257,9 @@ fn modifier_inputs_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, nod
 }
 
 pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
+    if let Ok(graph)=minihou_core::Graph::from_value(v.doc) {
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("param_panel_resolved"),std::sync::Arc::new(minihou_core::channels::resolve_graph(&graph))));
+    }
     expression_dialog(ui.ctx(), v, out);
     let (bar, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 32.), Sense::hover());
     ui.painter().rect_filled(bar, 0., v.theme.panel2);
@@ -2073,6 +2077,33 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
 mod tests {
     use super::*;
     use crate::ui::testing::Fixture;
+
+    #[test] fn linked_row_context_menu_opens_in_egui() {
+        let mut f=Fixture::new();
+        f.doc=minihou_app::Document::parse(json!({"display":"b","nodes":{"a":{"type":"box"},"b":{"type":"box","channels":{"size.x":"ch('../a/size.x')"}}}}).to_string()).unwrap();
+        f.graph=minihou_core::Graph::from_value(f.doc.value()).unwrap(); f.selected="b".into(); f.display="b".into();
+        let ctx=egui::Context::default(); f.theme.apply(&ctx);
+        let mut label=Pos2::ZERO; let mut found=false; let mut tinted=false;
+        for phase in 0..4 {
+            let events=match phase {
+                1=>vec![egui::Event::PointerMoved(label),egui::Event::PointerButton{pos:label,button:egui::PointerButton::Secondary,pressed:true,modifiers:egui::Modifiers::NONE}],
+                2=>vec![egui::Event::PointerButton{pos:label,button:egui::PointerButton::Secondary,pressed:false,modifiers:egui::Modifiers::NONE}],
+                _=>vec![],
+            };
+            let input=egui::RawInput{screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(800.,600.))),events,..Default::default()};
+            let v=f.view(); let mut out=Actions::default();
+            let output=ctx.run(input,|ctx|{egui::CentralPanel::default().show(ctx,|ui|{
+                let param=minihou_core::nodes::get("box").unwrap().params.iter().find(|p|p.name=="size").unwrap();
+                row(ui,&v,&mut out,"b","box",param,false,&mut vec![]);
+                if let Some(r)=ui.ctx().read_response(ui.id().with(("b","size","label"))) {label=r.rect.center();}
+            });});
+            found|=output.shapes.iter().any(|shape|matches!(&shape.shape,egui::Shape::Text(t) if t.galley.text().contains("Copy Parameter")));
+            tinted|=output.shapes.iter().any(|shape|matches!(&shape.shape,egui::Shape::Rect(rect) if rect.fill == Color32::from_rgba_unmultiplied(48,164,102,42)));
+            assert!(out.0.is_empty());
+        }
+        assert!(found,"right click should reveal parameter actions");
+        assert!(tinted,"linked field should carry the green tint");
+    }
 
     #[test]
     fn bezier_inspector_uses_control_model_with_default_param() {

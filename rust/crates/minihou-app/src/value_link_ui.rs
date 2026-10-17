@@ -142,7 +142,9 @@ pub fn paste(doc: &Value, node: &str, name: &str, copied: &CopiedParam, mode: Pa
                 }
             } else {
                 let fun = if matches!(param_kind(&target), ParamKind::String) { "chs" } else { "ch" };
-                next["nodes"][node]["channels"][name] = json!(format!("{fun}(\"{path}\")"));
+                let expr=format!("{fun}(\"{path}\")");
+                let expr=if matches!(param_kind(&target),ParamKind::Integer) && matches!(param_kind(&copied.value),ParamKind::Float) {format!("round({expr})")} else {expr};
+                next["nodes"][node]["channels"][name] = json!(expr);
             }
         }
     }
@@ -188,5 +190,31 @@ pub fn clear(doc: &Value, node: &str, name: &str, default: bool) -> Option<Edit>
         let expr="ch('../old/size.x') + ch(\"/other/size.y\")";
         assert_eq!(rewrite_expression(expr,"target","target",|node| if node=="old" {"new".into()} else {node.into()}),
             "ch('../new/size.x') + ch(\"/other/size.y\")");
+    }
+    #[test] fn floating_driver_of_integer_uses_round() {
+        let doc=json!({"nodes":{"scale":{"type":"transform","params":{"uniform_scale":2.6}},"grid":{"type":"grid"}}});
+        let copy=copied(&doc,"scale","uniform_scale").unwrap();
+        let Edit::Replace(next)=paste(&doc,"grid","rows",&copy,PasteMode::Reference).unwrap() else {panic!()};
+        assert_eq!(next["nodes"]["grid"]["channels"]["rows"],json!("round(ch(\"../scale/uniform_scale\"))"));
+        let resolved=channels::resolve_graph(&Graph::from_value(&next).unwrap());
+        assert_eq!(resolved.params["grid"]["rows"],json!(3.0),"{:?}",resolved.diagnostics);
+    }
+    #[test] fn clearing_vector_link_bakes_value_in_one_undo_step() {
+        let value=json!({"display":"b","nodes":{"a":{"type":"box","params":{"size":[2,3,4]}},"b":{"type":"box","params":{"size":[1,1,1]},"channels":{"size.x":"ch('../a/size.x')","size.y":"ch('../a/size.y')"}}}});
+        let mut doc=crate::Document::parse(value.to_string()).unwrap();
+        let Edit::Replace(next)=clear(doc.value(),"b","size",false).unwrap() else {panic!()};
+        assert_eq!(next["nodes"]["b"]["params"]["size"],json!([2,3,1]));
+        assert!(next["nodes"]["b"]["channels"].as_object().unwrap().is_empty());
+        let mut history=crate::History::default();
+        history.replace(&mut doc,crate::Document::parse(next.to_string()).unwrap());
+        history.undo(&mut doc).unwrap(); assert_eq!(doc.value(),&value);
+        history.redo(&mut doc).unwrap(); assert_eq!(doc.value(),&next);
+    }
+    #[test] fn missing_source_reports_diagnostic_text() {
+        let value=json!({"nodes":{"b":{"type":"box","channels":{"size.x":"ch('../gone/size.x')"}}}});
+        let graph=Graph::from_value(&value).unwrap();
+        let diagnostics=channels::resolve_graph(&graph).diagnostics;
+        assert!(diagnostics.iter().any(|d|d.node=="b" && d.param=="size.x" && d.message.contains("missing channel path")));
+        assert!(links(&value)[0].broken);
     }
 }
