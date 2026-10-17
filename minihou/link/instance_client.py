@@ -1,4 +1,4 @@
-"""Worker-only RPC I/O with a 200 ms main-thread budget; shared with Blender.
+"""Worker-only RPC I/O with adaptive main-thread budget; shared with Blender.
 
 On timeout raise OSError so modifiers retain their last good mesh and use their
 existing retry/backoff path. A timeout never returns a stale reply as a new cook.
@@ -25,9 +25,9 @@ class InstanceClient:
         self._epoch = 0
 
     def _invoke(self, operation):
-        # Even callers that set timeout/sock timeout to 30 s (older modifiers.py)
-        # cannot extend Blender's UI budget. All actual I/O runs on a daemon.
-        budget = max(0.001, min(float(self.timeout), 0.2))
+        # Adaptive budget: honour explicit timeout (e.g. generous 30s deadlines for cooks
+        # or debug servers), while preserving short budgets for polling/auto-connect.
+        budget = max(0.001, float(self.timeout))
         deadline = time.monotonic() + budget
         epoch = self._epoch
         done, cancelled = threading.Event(), threading.Event()
@@ -59,7 +59,7 @@ class InstanceClient:
         if not done.wait(max(0.0, deadline - time.monotonic())):
             cancelled.set()
             self.close()
-            raise TimeoutError("MiniHou did not reply within 200 ms; last cache retained")
+            raise TimeoutError(f"MiniHou did not reply within {budget:.1f}s; last cache retained")
         ok, value = result[0]
         if not ok:
             raise value
@@ -134,7 +134,8 @@ class InstanceClient:
                     raise ProtocolError("modifier response instance ID mismatch")
                 expected = {"instance_cook": "instance_result", "instance_describe": "instance_description",
                             "instance_remove": "instance_removed", "instance_edit": "instance_synced",
-                            "instance_sync": "instance_synced", "instance_sources": "instance_sources_set"}[header["type"]]
+                            "instance_sync": "instance_synced", "instance_sources": "instance_sources_set",
+                            "graph_push": "graph_ack", "graph_pull": "graph_state"}[header["type"]]
                 if reply.get("type") not in (expected, "instance_error"):
                     raise ProtocolError("unexpected modifier response type")
             except Exception:
@@ -149,10 +150,12 @@ class InstanceClient:
     def describe(self, graph_path, graph=None):
         return self._request({"type": "instance_describe", "graph_path": graph_path, "graph": graph})[0]
 
-    def cook(self, instance_id, graph_path, params, arrays, *, frame=1, fps=24, graph=None, materials=None, render=False):
+    def cook(self, instance_id, graph_path, params, arrays, *, frame=1, fps=24, graph=None, materials=None, render=False, references=None):
         header = {"type": "instance_cook", "instance_id": instance_id,
                   "graph_path": graph_path, "graph": graph, "params": params,
                   "frame": frame, "fps": fps, "render": bool(render)}
+        if references:
+            header["references"] = references
         if materials and any(materials):
             header["materials"] = list(materials)              # slot names of the geometry going in (see minihou.materials)
         return self._request(header, arrays)
@@ -160,12 +163,13 @@ class InstanceClient:
     def remove(self, instance_id):
         return self._request({"type": "instance_remove", "instance_id": instance_id})[0]
 
-    def edit_live(self, instance_id, graph, params, arrays, *, label="Blender modifier", frame=1, fps=24):
+    def edit_live(self, instance_id, graph, params, arrays, *, label="Blender modifier", frame=1, fps=24, references=None):
         self.connect()
         if "live_modifier_v1" not in self.welcome.get("capabilities", []):
             raise RuntimeError("Restart MiniHou with the updated app to enable live modifier editing")
         return self._request({"type": "instance_edit", "instance_id": instance_id,
-                              "graph": graph, "params": params, "label": label, "frame": frame, "fps": fps}, arrays)[0]
+                              "graph": graph, "params": params, "label": label, "frame": frame, "fps": fps,
+                              "references": references or {}}, arrays)[0]
 
     def set_sources(self, instance_id, sources):
         self.connect()
@@ -173,6 +177,24 @@ class InstanceClient:
             raise RuntimeError("Restart the updated MiniHou app to load object inputs")
         arrays = {str(i) + "/" + key: value for i, values in enumerate(sources.values()) for key, value in values.items()}
         return self._request({"type": "instance_sources", "instance_id": instance_id, "sources": list(sources)}, arrays)[0]
+
+    def has_capability(self, name):
+        self.connect()
+        return name in self.welcome.get("capabilities", [])
+
+    def push_graph(self, instance_id, *, name, label, text, sha256, schema=1):
+        """graph_embed_v1: send an embedded network (text is the exact JSON; sha256 covers its UTF-8 bytes)."""
+        if not self.has_capability("graph_embed_v1"):
+            raise RuntimeError("This MiniHou app predates embedded networks (graph_embed_v1)")
+        return self._request({"type": "graph_push", "instance_id": instance_id, "schema": schema,
+                              "name": name, "label": label, "json": text, "hash": sha256,
+                              "size": len(text.encode("utf-8"))})[0]
+
+    def pull_graph(self, instance_id):
+        """graph_embed_v1: the app's current copy of a network, or a pending conflict's outcome."""
+        if not self.has_capability("graph_embed_v1"):
+            return {"type": "graph_state", "status": "unsupported"}
+        return self._request({"type": "graph_pull", "instance_id": instance_id})[0]
 
     def sync_live(self, instance_id, params):
         return self._request({"type": "instance_sync", "instance_id": instance_id, "params": params})[0]
