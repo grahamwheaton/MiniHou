@@ -233,3 +233,33 @@ fn fs_element(i:ElementOut) -> @location(0) vec4<f32> {
 }
 @fragment
 fn fs_element_ghost(i:ElementOut) -> @location(0) vec4<f32> { return vec4(u.element_color.rgb,0.20); }
+
+// Face centre discs share one instanced draw, with camera projection on the GPU.
+struct FaceMarkerOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(flat) state: u32,
+};
+@vertex
+fn vs_face_marker(@builtin(vertex_index) vertex:u32, @location(0) center:vec3<f32>, @location(3) state:u32) -> FaceMarkerOut {
+    let corners=array<vec2<f32>,6>(vec2(-1.,-1.),vec2(1.,-1.),vec2(1.,1.),vec2(-1.,-1.),vec2(1.,1.),vec2(-1.,1.));
+    let corner=corners[vertex];
+    let clip=u.view_proj*vec4(center,1.);
+    let radius=select(select(2.5,3.5,(state&1u)!=0u),4.,(state&2u)!=0u);
+    var o:FaceMarkerOut;
+    o.pos=vec4(2.,2.,2.,1.);
+    if (clip.z>=0. && clip.w>0.) { o.pos=vec4(clip.xy+corner*(radius+0.5)*2./u.element_size.xy*clip.w,clip.zw); }
+    o.uv=corner*(radius+0.5); o.state=state;
+    return o;
+}
+@fragment
+fn fs_face_marker(i:FaceMarkerOut) -> @location(0) vec4<f32> {
+    let hovered=(i.state&2u)!=0u; let selected=(i.state&1u)!=0u;
+    let radius=select(select(2.5,3.5,selected),4.,hovered);
+    let d=length(i.uv);
+    let orange=vec3(1.,0.627,0.157);
+    var color=select(vec3(0.188,0.220,0.282),vec3(0.502,0.565,0.659),d>1.5);
+    if (selected) { color=orange; }
+    if (hovered) { color=select(vec3(1.),orange,d>3.); }
+    return vec4(color,1.-smoothstep(radius-0.5,radius+0.5,d));
+}

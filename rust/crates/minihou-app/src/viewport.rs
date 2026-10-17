@@ -9,6 +9,8 @@ use std::collections::{BTreeMap,HashMap,HashSet};
 
 #[path = "display_modes.rs"]
 pub mod display_modes;
+#[path = "face_markers.rs"]
+mod face_markers;
 pub use display_modes::{Mode, ObjectVisibility, MatCap, ObjectColor};
 use display_modes::split_indices;
 
@@ -200,6 +202,7 @@ pub struct Gpu {
     pipe_surf: wgpu::RenderPipeline, pipe_surf_bias: wgpu::RenderPipeline, pipe_wire: wgpu::RenderPipeline,
     pipe_xray: wgpu::RenderPipeline, pipe_normals: wgpu::RenderPipeline, pipe_bounds: wgpu::RenderPipeline, pipe_select: wgpu::RenderPipeline,
     floor:wgpu::Buffer, floor_count:u32, pipe_floor:wgpu::RenderPipeline,
+    face_markers:face_markers::FaceMarkers, pipe_face_markers:wgpu::RenderPipeline,
     elements:Elements, element_points:Vec<u32>, pipe_elements:wgpu::RenderPipeline, pipe_elements_ghost:wgpu::RenderPipeline,
     pipe_depth: wgpu::RenderPipeline, pipe_wire_all: wgpu::RenderPipeline,
     pipe_wire_hidden: wgpu::RenderPipeline, pipe_ghost: wgpu::RenderPipeline, pipe_ghost_wire: wgpu::RenderPipeline,
@@ -425,6 +428,7 @@ impl Gpu {
         }
         let floor_count=floor.len() as u32;
         let floor=buf("floor lines",bytemuck::cast_slice(&floor),wgpu::BufferUsages::VERTEX);
+        let pipe_face_markers=mk("face centres","vs_face_marker","fs_face_marker",&element_bufs,T::TriangleList,0,true,C::Always,false,W::ALL);
         let pipe_elements=mk("points and curves","vs_element","fs_element",&element_bufs,T::TriangleList,-1,true,C::LessEqual,true,W::ALL);
         let pipe_elements_ghost=mk("ghost points and curves","vs_element","fs_element_ghost",&element_bufs,T::TriangleList,-1,true,C::LessEqual,false,W::ALL);
         let pipe_surf = mk("surf", "vs_surf", "fs_surf", &surf_bufs, T::TriangleList, 0, false, C::LessEqual, true, W::ALL);
@@ -545,6 +549,7 @@ impl Gpu {
         Self {
             tex_bgl,default_tex_bind,pipe_tex,pipe_tex_bias,pipe_tex_xray,tex_batches:Vec::new(),texture_status:Vec::new(),gpu_images:HashMap::new(),gpu_tick:0,
             floor,floor_count,pipe_floor,
+            face_markers:face_markers::FaceMarkers::new(device),pipe_face_markers,
             elements:Elements::new(device,sc,&[],&[]),element_points:Vec::new(),pipe_elements,pipe_elements_ghost,
             pipe_depth, pipe_wire_all, pipe_wire_hidden, pipe_ghost, pipe_ghost_wire,
             partition_tri: Partition::new(device, &sc.tri, 3, &[]), partition_edge: Partition::new(device, &sc.edge, 2, &[]),
@@ -584,6 +589,7 @@ impl Gpu {
         }
     }
     pub fn upload(&mut self, device: &wgpu::Device, sc: &Scene) {
+        self.face_markers.invalidate();
         self.tex_batches.clear(); self.texture_status.clear();
         self.elements=Elements::new(device,sc,&[],&self.element_points);
         self.current_tri=sc.tri.clone(); self.current_edge=sc.edge.clone();
@@ -666,6 +672,7 @@ impl Gpu {
     /// Use full-detail selected-object triangles for a stable silhouette at every proxy/LOD level.
     pub fn select_objects(&mut self, device: &wgpu::Device, scene: &Scene, ranges: Vec<std::ops::Range<u32>>) {
         if self.object_mask_points.as_ref() == Some(&ranges) { return; }
+        self.face_markers.invalidate();
         self.elements=Elements::new(device,scene,&ranges,&self.element_points);
         let indices = object_mask_indices(scene.triangle_indices(), &ranges);
         self.object_mask_n = indices.len() as u32;
@@ -728,6 +735,10 @@ impl Gpu {
             self.current_edge=indices;
         } else { self.current_edge.clear(); }
         self.partition_edge=Partition::new(device,&self.current_edge,2,self.object_mask_points.as_deref().unwrap_or(&[]));
+    }
+    pub fn set_face_markers(&mut self, device:&wgpu::Device, scene:&Scene, topo:&crate::element_select::Topology,
+        selected:&[u32], hovered:&[u32], visibility:ObjectVisibility) {
+        self.face_markers.update(device,scene,topo,selected,hovered,visibility,self.object_mask_points.as_deref().unwrap_or(&[]));
     }
     pub fn select_points(&mut self, device:&wgpu::Device, scene:&Scene, points:&[u32]) {
         if self.element_points==points { return; }
@@ -891,6 +902,15 @@ impl Gpu {
                 pass.set_pipeline(&self.pipe_bounds);
                 pass.set_vertex_buffer(0,self.sel_line.slice(..)); pass.set_vertex_buffer(1,self.zeros.slice(..)); pass.set_vertex_buffer(2,self.neutral_color.slice(..));
                 pass.draw(0..self.sel_line_n,0..1);
+            }
+            if selection_mode == crate::ui::SelectionMode::Faces && !mode.bounds() && self.face_markers.count > 0 {
+                pass.set_pipeline(&self.pipe_face_markers);
+                pass.set_vertex_buffer(0,self.face_markers.buffer.slice(..));
+                pass.draw(0..6,0..self.face_markers.count);
+                if self.face_markers.hover_count > 0 {
+                    pass.set_vertex_buffer(0,self.face_markers.hover_buffer.slice(..));
+                    pass.draw(0..6,0..self.face_markers.hover_count);
+                }
             }
             if overlay.normals && self.nl_count > 0 && !mode.bounds() {
                 pass.set_pipeline(&self.pipe_normals);

@@ -2600,36 +2600,6 @@ impl eframe::App for App {
                     gpu.select_objects(&self.state.device, scene, ranges);
                     gpu.set_named_object_ranges(&self.state.device,scene,self.display_ranges.clone());
                 }
-                if let (Some(gpu), Some(target)) = (&self.gpu, &self.target) {
-                    let selected_object = !self.object_hidden && self.display_ranges.iter().any(|(id, _)| self.selected_set.contains(id));
-                    gpu.draw(
-                        &self.state,
-                        target,
-                        &self.camera,
-                        self.mode,
-                        Overlay {
-                            grid:self.editor_state.overlays.enabled && self.editor_state.overlays.grid,
-                            axes:self.editor_state.overlays.enabled && self.editor_state.overlays.axes,
-                            geometry:self.editor_state.overlays, light_background:!self.theme.dark,
-                            normals: self.editor_state.overlays.enabled && self.editor_state.overlays.normals,
-                            bounds: self.editor_state.overlays.enabled && self.editor_state.overlays.bounds,
-                            xray: self.editor_state.overlays.enabled && self.editor_state.xray,
-                            wireframe: self.editor_state.overlays.enabled && self.editor_state.overlays.wireframe,
-                            visibility: self.editor_state.object_visibility,
-                            matcap: self.editor_state.matcap,
-                            matcap_flat: self.editor_state.matcap_flat,
-                            object_color: self.editor_state.object_color,
-                            textures: self.editor_state.textures,
-                        },
-                        self.editor_state.selection,
-                        selected_object,
-                    );
-                    if !self.object_hidden {
-                        ui.painter().image(target.id, rect, egui::Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.)), egui::Color32::WHITE);
-                    }
-                }
-
-
                 // Hover pre-selection highlight (Item 4)
                 let hover_pos = ctx.input(|i| i.pointer.latest_pos());
                 let hover_in_viewport = hover_pos.is_some_and(|p| rect.contains(p))
@@ -2671,6 +2641,42 @@ impl eframe::App for App {
                     None
                 };
 
+                if self.pushpull_pick || self.editor_state.selection == ui::SelectionMode::Faces {
+                    if let (Some(gpu),Some(scene)) = (&mut self.gpu,&self.scene) {
+                        gpu.set_face_markers(&self.state.device,scene,element_select::cached(&self.elem_topo,scene),&self.selection.tris,
+                            hover_elem.as_ref().map_or(&[],|e| e.tris.as_slice()),self.editor_state.object_visibility);
+                    }
+                }
+                if let (Some(gpu), Some(target)) = (&self.gpu, &self.target) {
+                    let selected_object = !self.object_hidden && self.display_ranges.iter().any(|(id, _)| self.selected_set.contains(id));
+                    gpu.draw(
+                        &self.state,
+                        target,
+                        &self.camera,
+                        self.mode,
+                        Overlay {
+                            grid:self.editor_state.overlays.enabled && self.editor_state.overlays.grid,
+                            axes:self.editor_state.overlays.enabled && self.editor_state.overlays.axes,
+                            geometry:self.editor_state.overlays, light_background:!self.theme.dark,
+                            normals: self.editor_state.overlays.enabled && self.editor_state.overlays.normals,
+                            bounds: self.editor_state.overlays.enabled && self.editor_state.overlays.bounds,
+                            xray: self.editor_state.overlays.enabled && self.editor_state.xray,
+                            wireframe: self.editor_state.overlays.enabled && self.editor_state.overlays.wireframe,
+                            visibility: self.editor_state.object_visibility,
+                            matcap: self.editor_state.matcap,
+                            matcap_flat: self.editor_state.matcap_flat,
+                            object_color: self.editor_state.object_color,
+                            textures: self.editor_state.textures,
+                        },
+                        if self.pushpull_pick { ui::SelectionMode::Faces } else { self.editor_state.selection },
+                        selected_object,
+                    );
+                    if !self.object_hidden {
+                        ui.painter().image(target.id, rect, egui::Rect::from_min_max(egui::pos2(0., 0.), egui::pos2(1., 1.)), egui::Color32::WHITE);
+                    }
+                }
+
+
                 // Elements in edit modes 1/2/3 (Item 4)
                 if !self.object_hidden && !self.mode.bounds() {
                     if let Some(scene) = &self.scene {
@@ -2708,30 +2714,6 @@ impl eframe::App for App {
                             }
                             ui::SelectionMode::Faces => {
                                 let topo = element_select::cached(&self.elem_topo, scene);
-                                let center_fill = egui::Color32::from_rgb(0x30, 0x38, 0x48);
-                                let center_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x80, 0x90, 0xa8));
-                                let selected_polys = topo.polygon_selection_mask(&self.selection.tris);
-                                let hovered_polys = topo.polygon_selection_mask(hover_elem.as_ref().map_or(&[], |e| e.tris.as_slice()));
-                                let npoly = topo.polygons().len();
-                                let stride = if npoly > 50_000 { (npoly / 20_000).max(2) } else { 1 };
-                                for poly in topo.polygons().step_by(stride) {
-                                    let vertices = topo.polygon_vertices(poly);
-                                    if vertices.is_empty() || !vertices.iter().all(|id| point_pickable(self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,*id)) { continue; }
-                                    let center = [0, 1, 2].map(|k| vertices.iter().map(|&id| picking::at(pos, id)[k]).sum::<f32>() / vertices.len() as f32);
-                                    if let Some(sp) = ui::transform_gizmo::project(v.camera, rect, center) {
-                                        let is_sel = selected_polys[poly as usize];
-                                        let is_hov = hovered_polys[poly as usize];
-                                        if is_hov {
-                                            ui.painter().circle_filled(sp, 4.0_f32, white);
-                                            ui.painter().circle_stroke(sp, 4.0_f32, egui::Stroke::new(1.0_f32, orange));
-                                        } else if is_sel {
-                                            ui.painter().circle_filled(sp, 3.5_f32, orange);
-                                        } else {
-                                            ui.painter().circle_filled(sp, 2.0_f32, center_fill);
-                                            ui.painter().circle_stroke(sp, 2.0_f32, center_stroke);
-                                        }
-                                    }
-                                }
                                 if let Some(hov) = &hover_elem {
                                     for poly in topo.polys_of(&hov.tris) {
                                         for (a, b) in topo.polygon_edges(poly) {
