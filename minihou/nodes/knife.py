@@ -1,7 +1,7 @@
 """View-projected interactive Knife with perspective-correct attribute interpolation."""
 import json
 import numpy as np
-from ..sdk import node, Str
+from ..sdk import node, Str, Bool, Float
 from .. import edges, topo
 from ..boolean import earclip
 from . import _build as B
@@ -65,12 +65,20 @@ def cut_triangle(tri,a,b):
                 result.append(out)
     return result
 
-@node('knife',inputs=['geo'],category='model',params=[Str('cuts','[]',doc='Interactive view-space cut segments, captured by the viewport Knife.')])
-def knife(geo,cuts):
+@node('knife',inputs=['geo'],category='model',params=[Str('cuts','[]',doc='View-projected cut chains with point positions and snap references.'),Bool('cut_through',False,doc='Cut hidden faces along the view projection.'),Float('snap_tolerance',10.,doc='Viewport snapping radius in pixels.')])
+def knife(geo,cuts,cut_through=False,snap_tolerance=10.):
     B.require_polygons(geo,'Knife')
     segments=json.loads(cuts)
     if not segments:return geo
     if not isinstance(segments,list) or len(segments)>512:raise ValueError('Knife supports up to 512 segments per operation.')
+    def screen(point,matrix):
+        snap=point.get('snap') or {};ids=snap.get('element',[]);weights=snap.get('params',[])
+        if snap.get('point_count')!=geo.npoints or not ids or len(ids)!=len(weights) or any(not isinstance(i,int) or i<0 or i>=geo.npoints for i in ids):return point['screen']
+        q=sum((geo.P[i].astype(float)*w for i,w in zip(ids,weights)),np.zeros(3))
+        m=np.asarray(matrix,float).reshape(4,4,order='F');clip=m@np.r_[q,1.]
+        return (clip[:2]/clip[3]).tolist() if abs(clip[3])>EPS else point['screen']
+    segments=[{'a':screen(a,chain['matrix']),'b':screen(b,chain['matrix']),'matrix':chain['matrix'],'through':chain.get('through',False)} for chain in segments for a,b in zip(chain['points'],chain['points'][1:])] if segments and 'points' in segments[0] else segments
+    if cut_through:segments=[dict(s,through=True) for s in segments]
     P=geo.P.astype(float);vp=geo.topology.vertex_point;off=geo.topology.prim_offsets
     # Triangulate each polygon in its own stable plane, preserving original winding.
     original=[]
@@ -255,7 +263,9 @@ def knife(geo,cuts):
         for name,array in table.items():
             result[name]=np.asarray([sum(array[i]*v for i,v in row.items()) if array.dtype.kind=='f' else array[max(row,key=row.get)] for row in weights],dtype=array.dtype)
         return result
-    out=B.make(np.asarray(positions),np.array([i for f in faces for i in f]),B.offsets_from_sizes([len(f) for f in faces]),interpolate(geo.point,pointweights),interpolate(geo.vertex,[r for f in vertexweights for r in f]),B.gather(geo.prim,np.array(sources)),geo.detail)
+    pointattrs=interpolate(geo.point,pointweights)
+    pointattrs['point_group_knife']=np.array([int(i>=len(P)) for i in range(len(pointweights))],np.int32)
+    out=B.make(np.asarray(positions),np.array([i for f in faces for i in f]),B.offsets_from_sizes([len(f) for f in faces]),pointattrs,interpolate(geo.vertex,[r for f in vertexweights for r in f]),B.gather(geo.prim,np.array(sources)),geo.detail)
     # Preserve edge data on subdivided source edges, not only unchanged endpoint pairs.
     old=topo.edges(geo);new=topo.edges(out);lookup={tuple(pair):i for i,pair in enumerate(old.points)}
     origin=[]
