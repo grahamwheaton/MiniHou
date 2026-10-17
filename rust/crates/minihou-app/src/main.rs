@@ -444,7 +444,7 @@ struct App {
     selected: String, selected_set: std::collections::BTreeSet<String>, display: String,
     state: egui_wgpu::RenderState, gpu: Option<Gpu>, target: Option<Target>,
     materials:minihou_app::materials::Registry,
-    camera: Camera, bounds: ([f32;3], f32), mode: Mode,
+    camera: Camera, orbit_drag: Option<([f32;3], f32, f32, f32)>, bounds: ([f32;3], f32), mode: Mode,
     file_status: String,
     http: http_ui::HttpUi,
     http_time: (f64, f64),
@@ -557,7 +557,7 @@ impl App {
         let worker = CookWorker::start_with_python(&doc, Some(python_gate()), Scene::new)?;
         let mut app = Self { selected:display.clone(), selected_set: std::collections::BTreeSet::from([display.clone()]), display, editor:EditorDocument::new(doc, path), worker,
             cooking:CookState::default(), state,gpu:None,target:None,materials,
-            camera:Camera::frame([0.;3],1.),bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new(),
+            camera:Camera::frame([0.;3],1.),orbit_drag:None,bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new(),
             http:http_ui::HttpUi::default(),http_time:(1.,24.),
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),link:None,blender_job:None,
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
@@ -2642,9 +2642,23 @@ impl eframe::App for App {
                     ui::selection_region::handle(ctx, rect, &v, &mut out)
                 } else { false };
                 let mut delta = ctx.input(|i| i.pointer.delta());
+                if !response.dragged() { self.orbit_drag=None; }
                 if !fly_frame && !region_frame && response.dragged() && (self.modal.is_none() && self.model_modal.is_none()) && !ui::sketch::blocks_navigation(ctx) && !ui::mesh_cut::blocks_navigation(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx)
                     && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| (!ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) || ui::prim_handles::hit(rect, &v, p) || ui::curve_tool::hit(rect, &v, p, ctx)) {
                     let modifiers = ctx.input(|i| i.modifiers);
+                    let orbiting = match self.prefs.viewport.navigation {
+                        ui::keymap::Navigation::Blender => response.dragged_by(egui::PointerButton::Middle) && !modifiers.ctrl && !modifiers.shift,
+                        ui::keymap::Navigation::Houdini => modifiers.alt && response.dragged_by(egui::PointerButton::Primary),
+                    };
+                    if !orbiting || !self.prefs.viewport.orbit_to_mouse { self.orbit_drag=None; }
+                    if orbiting && self.prefs.viewport.orbit_to_mouse && self.orbit_drag.is_none() {
+                        if let Some(pos)=ctx.input(|i|i.pointer.press_origin()) {
+                            let nx=(pos.x-rect.left())/rect.width()*2.-1.; let ny=1.-(pos.y-rect.top())/rect.height()*2.;
+                            let aspect=rect.width()/rect.height();
+                            let point=navigation_point(&self.camera,self.scene.as_ref(),self.object_hidden,self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,rect,pos);
+                            self.orbit_drag=Some(point.map_or((self.camera.view_plane_point(0.,0.,aspect),0.,0.,aspect),|p|(p,nx,ny,aspect)));
+                        }
+                    }
                     wrap_drag(ctx, rect, &mut delta);
                     match self.prefs.viewport.navigation {
                         ui::keymap::Navigation::Blender if response.dragged_by(egui::PointerButton::Middle) => {
@@ -2654,10 +2668,14 @@ impl eframe::App for App {
                                 zoom_under_cursor(&mut self.camera,delta.y,self.prefs.viewport.zoom_to_mouse,rect,pos,point);
                             }
                             else if modifiers.shift { self.camera.pan(delta.x, delta.y); }
+                            else if let Some((point,nx,ny,aspect))=self.orbit_drag { self.camera.orbit_at(delta.x,delta.y,point,nx,ny,aspect); }
                             else { self.camera.orbit(delta.x, delta.y); }
                         }
                         ui::keymap::Navigation::Houdini if modifiers.alt => {
-                            if response.dragged_by(egui::PointerButton::Primary) {self.camera.orbit(delta.x,delta.y);}
+                            if response.dragged_by(egui::PointerButton::Primary) {
+                                if let Some((point,nx,ny,aspect))=self.orbit_drag {self.camera.orbit_at(delta.x,delta.y,point,nx,ny,aspect);}
+                                else {self.camera.orbit(delta.x,delta.y);}
+                            }
                             else if response.dragged_by(egui::PointerButton::Middle) { self.camera.pan(delta.x, delta.y); }
                             else if response.dragged_by(egui::PointerButton::Secondary) {
                                 let pos=ctx.input(|i|i.pointer.hover_pos());

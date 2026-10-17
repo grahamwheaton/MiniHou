@@ -386,6 +386,14 @@ impl Camera {
     }
     pub fn zoom_factor(&mut self, factor: f32) { if factor.is_finite() && factor > 0.0 { self.dist = (self.dist / factor).clamp(self.radius * 0.05, self.radius * 60.0); } }
     pub fn orbit(&mut self, dx: f32, dy: f32) { self.ortho = false; self.add_orbit(-dx * 0.008, dy * 0.008); }
+    /// Orbit while keeping a world point at its original screen coordinates.
+    pub fn orbit_at(&mut self, dx: f32, dy: f32, point: [f32; 3], nx: f32, ny: f32, aspect: f32) {
+        self.orbit(dx, dy);
+        let (origin, direction) = self.ray(nx, ny, aspect);
+        let forward = self.forward();
+        let depth = dot(sub(point, origin), forward) / dot(direction, forward).max(1e-6);
+        self.target = [0, 1, 2].map(|k| self.target[k] + point[k] - origin[k] - direction[k] * depth);
+    }
     pub fn pan(&mut self, dx: f32, dy: f32) {
         let f = norm(sub(self.target,self.eye())); let s = norm(cross(f,self.up())); let u = cross(s,f);
         for i in 0..3 { self.target[i] += (-s[i]*dx+u[i]*dy)*self.dist*0.0011; }
@@ -440,6 +448,22 @@ impl Camera {
         let mut c=Camera::frame([0.;3],2.); let target=c.target;
         c.zoom(100.);
         assert_eq!(c.target,target);
+    }
+    #[test] fn orbit_point_stays_on_screen_through_yaw_pitch_and_zenith() {
+        let mut c=Camera::frame([0.;3],2.);
+        let p=c.view_plane_point(0.42,-0.31,1.5);
+        let before=screen(&c,p);
+        for (dx,dy) in [(80.,20.),(-35.,150.),(14.,90.),(-110.,-30.)] {
+            c.orbit_at(dx,dy,p,0.42,-0.31,1.5);
+            close(before,screen(&c,p));
+        }
+        assert!(c.angles().1.cos()<0.);
+    }
+    #[test] fn orbit_fallback_target_stays_centred() {
+        let mut c=Camera::frame([1.,2.,3.],2.);
+        let target=c.target;
+        c.orbit_at(80.,220.,target,0.,0.,1.5);
+        close([0.,0.],screen(&c,target));
     }
 }
 

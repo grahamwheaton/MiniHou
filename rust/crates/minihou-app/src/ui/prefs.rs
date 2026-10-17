@@ -14,8 +14,8 @@ impl ThemePref {
     pub fn label(self) -> &'static str { match self { Self::Dark => "Dark", Self::Light => "Light", Self::System => "System" } }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct ViewportPreferences { pub overlays: crate::ui::Overlays, pub xray: bool, pub default_shading: String, pub object_visibility: crate::viewport::ObjectVisibility, pub matcap:crate::viewport::MatCap, pub matcap_flat:bool, pub object_color:crate::viewport::ObjectColor, pub textures:bool, pub navigation: Navigation, pub fly_navigation: bool, pub zoom_to_mouse: bool, pub show_grid: bool, pub show_axes: bool, pub auto_budget: u32, pub clip_start: f32, pub clip_end: f32 }
-impl Default for ViewportPreferences { fn default() -> Self { Self { overlays: Default::default(), xray: false, default_shading: "Smooth Shaded".into(), object_visibility: crate::viewport::ObjectVisibility::ShowAll, matcap:Default::default(), matcap_flat:false, object_color:Default::default(), textures:true, navigation: Navigation::Blender, fly_navigation: true, zoom_to_mouse:true, show_grid: true, show_axes: true, auto_budget: 400_000, clip_start: 0.01, clip_end: 1000.0 } } }
+pub struct ViewportPreferences { pub overlays: crate::ui::Overlays, pub xray: bool, pub default_shading: String, pub object_visibility: crate::viewport::ObjectVisibility, pub matcap:crate::viewport::MatCap, pub matcap_flat:bool, pub object_color:crate::viewport::ObjectColor, pub textures:bool, pub navigation: Navigation, pub fly_navigation: bool, pub zoom_to_mouse: bool, pub orbit_to_mouse: bool, pub show_grid: bool, pub show_axes: bool, pub auto_budget: u32, pub clip_start: f32, pub clip_end: f32 }
+impl Default for ViewportPreferences { fn default() -> Self { Self { overlays: Default::default(), xray: false, default_shading: "Smooth Shaded".into(), object_visibility: crate::viewport::ObjectVisibility::ShowAll, matcap:Default::default(), matcap_flat:false, object_color:Default::default(), textures:true, navigation: Navigation::Blender, fly_navigation: true, zoom_to_mouse:true, orbit_to_mouse:true, show_grid: true, show_axes: true, auto_budget: 400_000, clip_start: 0.01, clip_end: 1000.0 } } }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub theme: ThemePref, pub ui_scale: f32, pub emulate_numpad: bool, pub snap_increment: f32,
@@ -76,6 +76,7 @@ impl Preferences {
             "matcap": self.viewport.matcap.label(), "matcap_flat":self.viewport.matcap_flat, "object_color": self.viewport.object_color.label(), "textures":self.viewport.textures,
             "fly_navigation": self.viewport.fly_navigation,
             "zoom_to_mouse": self.viewport.zoom_to_mouse,
+            "orbit_to_mouse": self.viewport.orbit_to_mouse,
             "navigation": match self.viewport.navigation { Navigation::Blender => "blender", Navigation::Houdini => "houdini" },
             "show_grid": self.viewport.show_grid, "show_axes": self.viewport.show_axes, "auto_budget": self.viewport.auto_budget,
             "clip_start": self.viewport.clip_start, "clip_end": self.viewport.clip_end },
@@ -118,6 +119,7 @@ impl Preferences {
             if let Some(x)=view.get("textures").and_then(Value::as_bool) {p.viewport.textures=x;}
             if let Some(x) = view.get("fly_navigation").and_then(Value::as_bool) { p.viewport.fly_navigation = x; }
             if let Some(x) = view.get("zoom_to_mouse").and_then(Value::as_bool) { p.viewport.zoom_to_mouse = x; }
+            if let Some(x) = view.get("orbit_to_mouse").and_then(Value::as_bool) { p.viewport.orbit_to_mouse = x; }
             if let Some(x) = view.get("navigation").and_then(Value::as_str) { p.viewport.navigation = if x == "houdini" { Navigation::Houdini } else { Navigation::Blender }; }
             if let Some(x) = view.get("default_shading").and_then(Value::as_str) { p.viewport.default_shading = crate::viewport::Mode::parse(x).label().to_owned(); }
             if let Some(x) = view.get("show_grid").and_then(Value::as_bool) { p.viewport.show_grid = x; }
@@ -196,6 +198,12 @@ impl Preferences {
         assert!(p.viewport.zoom_to_mouse);
         p.viewport.zoom_to_mouse = false;
         assert_eq!(Preferences::from_json(&p.to_json()), p);
+    }
+    #[test] fn orbit_to_mouse_defaults_on_and_round_trips() {
+        let mut p=Preferences::default();
+        assert!(p.viewport.orbit_to_mouse);
+        p.viewport.orbit_to_mouse=false;
+        assert_eq!(Preferences::from_json(&p.to_json()),p);
     }
     #[test] fn node_physics_snappiness_defaults_clamps_and_round_trips() {
         assert_eq!(Preferences::from_json(&json!({})).node_physics_snappiness, 0.7);
