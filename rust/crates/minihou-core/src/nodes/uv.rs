@@ -1884,5 +1884,56 @@ mod tests{
         let err = flatten_uv(&[vec![Arc::new(curve)]], &p_default).unwrap_err();
         assert!(err.to_string().contains("open curve"));
     }
+
+    #[test]
+    fn test_uv_flatten_edge_cases() {
+        // 1. Empty geometry (0 points, 0 prims)
+        let empty = Geometry::points_only(vec![]).unwrap();
+        let p = Params::resolve(UV_FLATTEN.params, serde_json::json!({}).as_object()).unwrap();
+        let out_empty = flatten_uv(&[vec![Arc::new(empty)]], &p).unwrap();
+        assert_eq!(out_empty.npoints, 0);
+        assert_eq!(out_empty.nprims(), 0);
+
+        // 2. Single triangle
+        let tri = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 0., 1., 0.],
+            vec![0, 1, 2],
+            vec![0, 3],
+            None,
+        ).unwrap();
+        let out_tri = flatten_uv(&[vec![Arc::new(tri)]], &p).unwrap();
+        assert_eq!(out_tri.nprims(), 1);
+        let uv_tri = out_tri.vertex["uv"].as_f32().unwrap();
+        assert_eq!(uv_tri.len(), 6); // 3 vertices * 2 coords
+        for &coord in uv_tri {
+            assert!(coord >= 0.0 && coord <= 1.0, "UV in unit square: {coord}");
+        }
+
+        // 3. Degenerate zero-area triangle: collinear vertices
+        let degen = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 2., 0., 0.],
+            vec![0, 1, 2],
+            vec![0, 3],
+            None,
+        ).unwrap();
+        // Degenerate triangle must either succeed safely with clamped UVs or return an error, never panic or hang
+        let _ = flatten_uv(&[vec![Arc::new(degen)]], &p);
+
+        // 4. Determinism
+        let grid = make_test_grid();
+        let out1 = flatten_uv(&[vec![Arc::new(grid.clone())]], &p).unwrap();
+        let out2 = flatten_uv(&[vec![Arc::new(grid.clone())]], &p).unwrap();
+        assert_eq!(out1.vertex["uv"].data, out2.vertex["uv"].data);
+        assert_eq!(out1.prim["island"].data, out2.prim["island"].data);
+
+        // 5. Attribute preservation
+        let mut grid_attr = grid;
+        grid_attr.point.insert("Cd".into(), Arc::new(Attr::f32(3, vec![1.0; grid_attr.npoints * 3])));
+        grid_attr.prim.insert("material_index".into(), Arc::new(Attr::i32(1, vec![5; grid_attr.nprims()])));
+        let out_attr = flatten_uv(&[vec![Arc::new(grid_attr.clone())]], &p).unwrap();
+        assert_eq!(out_attr.point["Cd"].data, grid_attr.point["Cd"].data);
+        assert_eq!(out_attr.prim["material_index"].data, grid_attr.prim["material_index"].data);
+        assert_eq!(out_attr.topology.vertex_point, grid_attr.topology.vertex_point);
+    }
 }
 
