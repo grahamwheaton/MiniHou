@@ -1117,6 +1117,9 @@ fn serve_client(
         },
     );
     let mut instances = link_instances::InstanceManager::new(id, state.clone(), requests.clone());
+    // object_names_v1: the session connection of a capable add-on answers object-name searches.
+    let names_capable = !instance_mode && hello["capabilities"].as_array().is_some_and(|a| a.iter().any(|v| v == minihou_app::object_names::CAPABILITY));
+    if names_capable { if let Ok(mut hub) = minihou_app::object_names::HUB.lock() { hub.capable_peers += 1; } }
     let result = (|| -> io::Result<()> {
         let mut diff = DiffState::default();
         let mut version = 0;
@@ -1132,6 +1135,9 @@ fn serve_client(
             }
             match received.recv_timeout(Duration::from_millis(16)) {
                 Ok(Ok((h, arrays))) => match h["type"].as_str().unwrap_or("") {
+                    "object_names" if names_capable => {
+                        if let Ok(mut hub) = minihou_app::object_names::HUB.lock() { if hub.incoming.len() < 64 { hub.incoming.push(h); } }
+                    }
                     "material_manifest" if hello["capabilities"].as_array().is_some_and(|a|a.iter().any(|v|v=="viewport_materials_v1")) => {
                         let scope=h["scope"].as_str().unwrap_or("");
                         let scoped=format!("peer{id}:{scope}");
@@ -1280,6 +1286,10 @@ fn serve_client(
             for reply in reply_rx.try_iter() {
                 send_frame(&mut socket, &reply, &Arrays::new())?;
             }
+            if names_capable {
+                let queries = minihou_app::object_names::HUB.lock().map(|mut hub| std::mem::take(&mut hub.outgoing)).unwrap_or_default();
+                for query in queries { send_frame(&mut socket, &query, &Arrays::new())?; }
+            }
             if instance_mode || state.live_active.load(Ordering::Relaxed) {
                 continue;
             }
@@ -1362,6 +1372,7 @@ fn serve_client(
     instances.clear();
     state.image_assets.lock().unwrap().remove_peer(&format!("peer{id}:"));
     state.peers.lock().unwrap().remove(&id);
+    if names_capable { if let Ok(mut hub) = minihou_app::object_names::HUB.lock() { hub.capable_peers = hub.capable_peers.saturating_sub(1); } }
     result
 }
 

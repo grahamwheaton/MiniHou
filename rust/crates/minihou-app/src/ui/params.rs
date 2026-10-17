@@ -1058,6 +1058,8 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
                 color_widget(ui, &mut value, meta, Some(v.theme), layout.control_rect.width(), id, param.name)
             } else if is_file {
                 file_widget(ui, &mut value, meta, typ, param.name, layout.control_rect.width())
+            } else if typ == "blender_object" && param.name == "object" {
+                super::object_search::field(ui, &mut value, layout.control_rect.width(), v.theme)
             } else {
                 widget_styled(
                     ui,
