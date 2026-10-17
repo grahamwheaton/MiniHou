@@ -460,7 +460,7 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
             let mut out = Actions::default();
             let (rect, view) = (self.rect, self.fixture.view());
             let _ = self.ctx.run(egui::RawInput { screen_rect: Some(rect), events, ..Default::default() }, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| show(ui, rect, &view, &mut out));
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, rect, &view, None, &mut out));
             });
             out.0
         }

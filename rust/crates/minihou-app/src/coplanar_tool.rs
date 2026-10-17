@@ -47,7 +47,7 @@ impl App {
         let Some(g)=self.cooking.geometry.as_ref() else {return;};
         let planes=coplanar::seeds(g,&self.selection.tris);
         if planes.is_empty(){self.file_status="Selected faces have no valid planes".into();return;}
-        self.coplanar=Some(State {planes,angle:0.1,tolerance:self.prefs.units.parse("0.1").unwrap_or(0.0001),name:"coplanar".into(),source:modeling_source(self.editor.doc.value(),&self.selected,&self.display)});
+        self.coplanar=Some(State {planes,angle:0.1,tolerance:self.prefs.units.parse("0.1").unwrap_or(0.0001),name:"coplanar".into(),source:self.active_object().map(str::to_owned).unwrap_or_else(||self.display.clone())});
         self.update_coplanar();
     }
     pub fn update_coplanar(&mut self) {

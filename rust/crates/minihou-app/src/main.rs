@@ -292,6 +292,17 @@ fn feeds_displayed_node(value: &Value, selected: &str) -> bool {
     }
     false
 }
+/// Where a viewport modelling node (extrude, push/pull, bevel...) is inserted. Element ids come from the displayed
+/// scene, so the node must take the displayed geometry: the selected node only when it exists and is what the
+/// display shows (itself, or the node feeding a displayed output); otherwise the display (e.g. after an undo removed
+/// the selected node, or an upstream node is selected whose ids differ from the scene).
+fn modeling_source(value: &Value, selected: &str, display: &str) -> String {
+    let nodes = &value["nodes"];
+    let shows = |id: &str| id == display || (nodes[display]["type"] == "output" && nodes[display]["inputs"]["geo"] == id);
+    if !selected.is_empty() && nodes.get(selected).is_some() && shows(selected) { return selected.to_owned(); }
+    if !display.is_empty() && nodes.get(display).is_some() { return display.to_owned(); }
+    minihou_app::display_nodes(value).into_iter().next().unwrap_or_else(|| selected.to_owned())
+}
 fn toggle_edit_mode(current: ui::SelectionMode, last: &mut ui::SelectionMode) -> ui::SelectionMode {
     if current == ui::SelectionMode::Object { *last } else { *last = current; ui::SelectionMode::Object }
 }
@@ -1211,7 +1222,7 @@ impl App {
     fn start_model_modal(&mut self, ctx: &egui::Context, kind: ModelKind) {
         if self.modal.is_some() || self.model_modal.is_some() || self.scene.is_none() { return; }
         let Some(scene)=self.scene.as_ref() else { return; };
-        let Some(range)=self.active_object().and_then(|id|active_range(id,&self.display_ranges)) else { self.file_status="Select a displayed object".into(); return; };
+        let Some(range)=self.active_object().and_then(|id|active_range(id,&self.display_ranges)).cloned() else { self.file_status="Select a displayed object".into(); return; };
         let source_points=(range.end-range.start) as usize;
         let tri_offset=scene.triangle_indices().chunks_exact(3).take_while(|tri|tri[0]<range.start).count() as u32;
         let poly_offset=element_select::cached(&self.elem_topo,scene).poly_of_tri(tri_offset).unwrap_or(0);
@@ -1280,7 +1291,7 @@ impl App {
             }
             if count>0. && kind==ModelKind::PushPull {
                 // SketchUp-style inference: far face (Through) and parallel faces (On Face).
-                if let Some(local_geo)=self.cooking.geometry.as_deref().and_then(|g|ui::mesh_cut::object_geometry(g,range)) {
+                if let Some(local_geo)=self.cooking.geometry.as_deref().and_then(|g|ui::mesh_cut::object_geometry(g,&range)) {
                     let local_scene=Scene::new(&local_geo);
                     let local_tris=selection.tris.iter().map(|tri|*tri-tri_offset).collect::<Vec<_>>();
                     state.targets=ui::modal_model::pushpull_targets(local_scene.positions(),local_scene.triangle_indices(),&local_tris,normal);
@@ -2719,6 +2730,8 @@ impl eframe::App for App {
             let transform_node = if self.editor_state.selection == ui::SelectionMode::Object { &self.selected } else { &self.display };
             let display_trs = transform_math::TrsParams::from_params(&self.editor.doc.value()["nodes"][transform_node]["params"]);
             let normal_frame = self.selection_normal_frame(&display_trs).axes.map(|axis| axis.map(|x| x as f32));
+            let active_pick_set=self.active_pick_set();
+            let active_cut_range=self.active_object().and_then(|id|active_range(id,&self.display_ranges).map(|range|(id.to_owned(),range.clone())));
             let v = View { graph: &graph, doc: self.editor.doc.value(), path: &self.editor.path, dirty: self.editor.dirty(),
                 can_undo: self.editor.history.can_undo(), can_redo: self.editor.history.can_redo(),
                 selected: &self.selected, selected_set: &self.selected_set, display: &self.display, cooking: &self.cooking, file_status: &self.file_status,
@@ -2844,7 +2857,7 @@ impl eframe::App for App {
                     && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing())
                     && !ui::selection_region::active(ctx);
                 let modal_pick=self.pushpull_pick || self.editor_state.selection!=ui::SelectionMode::Object;
-                let pick_set=if modal_pick {self.active_pick_set()} else {self.selected_set.clone()};
+                let pick_set=if modal_pick {active_pick_set.clone()} else {self.selected_set.clone()};
                 let pick_visibility=if modal_pick {viewport::ObjectVisibility::HideOthers} else {self.editor_state.object_visibility};
 
                 let hover_elem = if hover_in_viewport {
@@ -3104,7 +3117,7 @@ impl eframe::App for App {
                         ui::curve_tool::show(ui, rect, &v, &mut out, response.double_clicked());
                         ui::sketch::show(ui, rect, &v, &mut out,
                             self.scene.as_ref().map(|scene|(scene.positions(),scene.triangle_indices())));
-                        ui::mesh_cut::show(ui, rect, &v, self.active_object().and_then(|id|active_range(id,&self.display_ranges).map(|range|(id,range))), &mut out);
+                        ui::mesh_cut::show(ui, rect, &v, active_cut_range.as_ref().map(|(id,range)|(id.as_str(),range)), &mut out);
                     }
                     ui::selection_region::paint(ui, rect, &v);
                     coplanar_tool::show(ui,rect,&mut self.coplanar,v.units,&mut out);
