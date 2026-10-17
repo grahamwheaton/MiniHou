@@ -6471,6 +6471,156 @@
    "kind": "int"
   }
  },
+ "scatteralign": {
+  "alignment": {
+   "default": "normal",
+   "doc": "Align local Z to the surface normal or keep local Z world up.",
+   "kind": "enum",
+   "options": [
+    "normal",
+    "world_up"
+   ]
+  },
+  "copy_point_attributes": {
+   "default": true,
+   "doc": "Copy source point attributes to generated points.",
+   "kind": "bool"
+  },
+  "coverage": {
+   "default": 1.0,
+   "doc": "Multiplier for the generated point count.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "distribution_ramp_end": {
+   "default": 1.0,
+   "doc": "Ramp value at one; linear two-point ramps only.",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "distribution_ramp_start": {
+   "default": 0.0,
+   "doc": "Ramp value at zero; linear two-point ramps only.",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "global_seed": {
+   "default": 0,
+   "doc": "Seed for deterministic point placement, rotation and scale.",
+   "kind": "int"
+  },
+  "group": {
+   "default": "",
+   "doc": "Primitive group to scatter over; empty selects all faces.",
+   "kind": "str"
+  },
+  "max_angle": {
+   "default": 360.0,
+   "doc": "Maximum spin angle in degrees.",
+   "kind": "float"
+  },
+  "max_radius": {
+   "default": 0.1,
+   "doc": "Largest radius in random scaling; contributes to By Size count.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "max_random_cone_angle": {
+   "default": 0.0,
+   "doc": "Maximum cone angle in degrees.",
+   "kind": "float",
+   "max": 180.0,
+   "min": 0.0
+  },
+  "min_angle": {
+   "default": 0.0,
+   "doc": "Minimum spin angle in degrees.",
+   "kind": "float"
+  },
+  "min_radius": {
+   "default": 0.1,
+   "doc": "Smallest radius in random scaling; contributes to By Size count.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "mode": {
+   "default": "surface",
+   "doc": "Scatter on the surface or inside a closed volume.",
+   "kind": "enum",
+   "options": [
+    "surface",
+    "volume"
+   ]
+  },
+  "offset_angle": {
+   "default": 0.0,
+   "doc": "Angle added after spin rounding, in degrees.",
+   "kind": "float"
+  },
+  "point_attributes": {
+   "default": "*",
+   "doc": "Space-separated source point attributes to copy; * copies all. Float attributes interpolate, integers use the dominant vertex.",
+   "kind": "str"
+  },
+  "point_count": {
+   "default": 100,
+   "doc": "Count when Point Count Method is Fixed; base count in volume mode.",
+   "kind": "int",
+   "min": 0
+  },
+  "point_count_method": {
+   "default": "by_size",
+   "doc": "Derive count from radius and surface area, or specify a fixed count.",
+   "kind": "enum",
+   "options": [
+    "by_size",
+    "fixed"
+   ]
+  },
+  "remap_using_distribution_ramp": {
+   "default": false,
+   "doc": "Remap spin randomness with a linear two-point ramp.",
+   "kind": "bool"
+  },
+  "rotation": {
+   "default": true,
+   "doc": "Enable random cone rotation of the local Z axis.",
+   "kind": "bool"
+  },
+  "rotation_around_normal": {
+   "default": true,
+   "doc": "Enable spin around the aligned local Z axis.",
+   "kind": "bool"
+  },
+  "round_to_multiple": {
+   "default": 0.0,
+   "doc": "Round spin to this many degrees; zero disables rounding.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "scaling_mode": {
+   "default": "uniform",
+   "doc": "Use the mean radius or random radii between Min and Max.",
+   "kind": "enum",
+   "options": [
+    "uniform",
+    "random"
+   ]
+  },
+  "tag_name": {
+   "default": "$OS",
+   "doc": "Integer tag attribute name; $OS resolves to scatteralign.",
+   "kind": "str"
+  },
+  "uniform_scale": {
+   "default": 1.0,
+   "doc": "Multiplier for the output pscale.",
+   "kind": "float",
+   "min": 0.0
+  }
+ },
  "scene_objects": {
   "attributes": {
    "default": "uv Cd N material_index",

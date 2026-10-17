@@ -165,6 +165,7 @@ pub(super) const TABS: &[Category] = &[
     ] },
     Category { name: "Points", tools: &[
         Tool { label: "Scatter", node_type: "scatter" },
+        Tool { label: "Scatter and Align", node_type: "scatteralign" },
         Tool { label: "Fuse", node_type: "fuse" },
         Tool { label: "Delaunay", node_type: "delaunay" },
         Tool { label: "Point Jitter", node_type: "point_jitter" },
