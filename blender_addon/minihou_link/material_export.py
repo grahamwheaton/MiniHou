@@ -20,10 +20,20 @@ def _png(width, height, rgba):
             + block(b"IDAT", zlib.compress(rows, 3)) + block(b"IEND", b""))
 
 
-def _pixels(image, color_space):
+class ImageUnavailable(ValueError):
+    """The image has no pixel data (missing file, unsupported format, or an unrendered viewer)."""
+
+
+def _size(image):
     w, h = map(int, image.size)
-    if w <= 0 or h <= 0 or w * h > MAX_PIXELS:
-        raise ValueError("image exceeds 16 Mpx or is empty")
+    if w <= 0 or h <= 0:
+        path = image.filepath or image.name
+        raise ImageUnavailable(f"image '{image.name}' is empty or could not be loaded ({path})")
+    return w, h
+
+
+def _pixels(image, color_space):
+    w, h = _size(image)
     channels = int(image.channels)
     data = np.empty(w * h * channels, dtype=np.float32)
     image.pixels.foreach_get(data)
@@ -32,6 +42,16 @@ def _pixels(image, color_space):
     rgba[:, :, :min(channels, 4)] = data[:, :, :min(channels, 4)]
     if channels == 1:
         rgba[:, :, 1:3] = rgba[:, :, :1]
+    if w * h > MAX_PIXELS:
+        # Over the limit: box-average k x k blocks (k smallest integer that fits) rather than dropping the texture.
+        k = 2
+        while (w // k) * (h // k) > MAX_PIXELS:
+            k += 1
+        nw, nh = w // k, h // k
+        if nw < 1 or nh < 1:
+            raise ImageUnavailable(f"image '{image.name}' has unsupported dimensions {w}x{h}")
+        rgba = rgba[:nh * k, :nw * k].reshape(nh, k, nw, k, 4).mean(axis=(1, 3), dtype=np.float32)
+        w, h = nw, nh
     if color_space == "srgb":
         rgb = np.clip(rgba[:, :, :3], 0, 1)
         rgba[:, :, :3] = np.where(rgb <= 0.0031308, rgb * 12.92, 1.055 * np.power(rgb, 1 / 2.4) - 0.055)
@@ -42,9 +62,9 @@ def _pixels(image, color_space):
 def image_bytes(image, color_space):
     if image.source in {"TILED", "MOVIE", "SEQUENCE"}:
         raise ValueError(f"{image.source} images are unsupported")
-    w, h = map(int, image.size)
-    if w <= 0 or h <= 0 or w * h > MAX_PIXELS:
-        raise ValueError("image exceeds 16 Mpx or is empty")
+    w, h = _size(image)
+    if w * h > MAX_PIXELS:
+        return _pixels(image, color_space)          # too large to forward as-is: downscale to fit
     if image.packed_file and not image.is_dirty:
         data = bytes(image.packed_file.data)
         if data.startswith((b"\x89PNG", b"\xff\xd8")):
@@ -141,7 +161,7 @@ def export_object(obj, render_uv=None):
                         "sampler": {"min": filt, "mag": filt, "wrap_u": extension, "wrap_v": extension}, "color_space": color_space}
         except (ValueError, RuntimeError, KeyError, OSError) as exc:
             diagnostics[key] = str(exc)
-            if str(exc) in {"Image Texture has no image", "image exceeds 16 Mpx or is empty"} or isinstance(exc, OSError):
+            if str(exc) == "Image Texture has no image" or isinstance(exc, (ImageUnavailable, OSError)):
                 missing = "sha256:" + hashlib.sha256(("missing:" + key).encode()).hexdigest()
                 descriptor["textures"] = {"base_color": {"image_id": missing, "uv_set": "uv", "color_space": "srgb"}}
             else:
