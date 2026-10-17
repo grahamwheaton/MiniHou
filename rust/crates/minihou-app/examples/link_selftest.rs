@@ -102,6 +102,12 @@ fn main() -> minihou_app::Result<()> {
                         editor.history.finish(&editor.doc);
                         edits.push(edit);
                     }
+                    "input_define" => {
+                        let live = server.bound_path().map(str::to_owned);
+                        let (reply, changed) = minihou_app::input_define::handle(&mut editor, live.as_deref(), &request.message);
+                        if changed { edits.push(Edit::Replace(editor.doc.value().clone())); }
+                        server.reply(request.peer, reply);
+                    }
                     "set_frame" => {
                         if server.set_frame(&request.message)? {
                             edits.push(Edit::Time {

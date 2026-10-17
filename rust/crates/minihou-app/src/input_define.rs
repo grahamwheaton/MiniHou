@@ -130,6 +130,30 @@ pub fn plan(doc: &Value, msg: &Value) -> Result<(Edit, Value)> {
     Ok((Edit::ModifierInputs { node, inputs }, entry))
 }
 
+/// UI-thread handler shared by the app and the link_selftest host. `live` is the bound live modifier path
+/// (LinkServer::bound_path); without one, the open document's own path must match. Applies the edit
+/// through undo history and returns (reply, changed); the caller recooks with `Edit::Replace` when changed.
+pub fn handle(editor: &mut crate::EditorDocument, live: Option<&str>, msg: &Value) -> (Value, bool) {
+    let path = msg["path"].as_str().unwrap_or("");
+    let bound = match live {
+        Some(live) => live == path,
+        None => !path.is_empty() && std::path::Path::new(path) == editor.path.as_path(),
+    };
+    if !bound {
+        return (error(msg, "not_bound", "this network is not the document open in MiniHou; edit it there first, or the input is stored offline"), false);
+    }
+    let applied = plan(editor.doc.value(), msg).and_then(|(edit, entry)| {
+        editor.history.finish(&editor.doc);
+        editor.history.edit(&mut editor.doc, &edit)?;
+        editor.history.finish(&editor.doc);
+        Ok(entry)
+    });
+    match applied {
+        Ok(entry) => (ack(msg, &entry, editor.doc.value()), true),
+        Err(e) => (error(msg, "invalid", &e.to_string()), false),
+    }
+}
+
 pub fn ack(msg: &Value, entry: &Value, graph: &Value) -> Value {
     json!({"type":"input_define_ack","status":"ok","request_id":msg["request_id"],"instance_id":msg["instance_id"],
            "op":msg["op"].as_str().unwrap_or("add"),"input":entry,"graph":graph,
@@ -191,6 +215,21 @@ mod tests {
         let e = error(&json!({"request_id":2,"instance_id":"m"}), "not_bound", "nope");
         assert_eq!((e["type"].as_str(), e["status"].as_str(), e["request_id"].as_i64()), (Some("input_define_ack"), Some("error"), Some(2)));
         assert!(plan(&json!({"nodes":{"b":{"type":"box"}}}), &json!({"input":{"kind":"float"}})).is_err());
+    }
+
+    #[test]
+    fn handle_requires_the_bound_document_and_edits_through_undo() {
+        let mut editor = crate::EditorDocument::new(doc(), "net.json".into());
+        let msg = json!({"type":"input_define","request_id":1,"instance_id":"m","path":"other.json","input":{"name":"T","kind":"object"}});
+        let (reply, changed) = handle(&mut editor, None, &msg);
+        assert_eq!((reply["code"].as_str(), changed), (Some("not_bound"), false));
+        let (reply, changed) = handle(&mut editor, Some("other.json"), &msg);
+        assert_eq!((reply["status"].as_str(), changed), (Some("ok"), true));
+        let mut ok = msg.clone(); ok["path"] = json!("net.json");
+        assert_eq!(handle(&mut editor, None, &ok).0["input"]["name"], "T 2");
+        assert_eq!(handle(&mut editor, None, &json!({"path":"net.json","input":{"kind":"float","default":"x"}})).0["code"], "invalid");
+        editor.history.undo(&mut editor.doc); editor.history.undo(&mut editor.doc);
+        assert_eq!(editor.doc.value()["nodes"]["input"]["modifier_inputs"].as_array().unwrap().len(), 1);
     }
 
     #[test]

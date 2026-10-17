@@ -2228,25 +2228,9 @@ impl eframe::App for App {
                     Ok(())
                 },
                 Some("input_define") => {
-                    let link = self.link.as_ref().unwrap();
-                    let msg = &request.message;
-                    let path = msg["path"].as_str().unwrap_or("");
-                    let bound = match link.bound_path() {
-                        Some(live) => live == path,
-                        None => !path.is_empty() && std::path::Path::new(path) == self.editor.path.as_path(),
-                    };
-                    let reply = if !bound {
-                        minihou_app::input_define::error(msg, "not_bound", "this network is not the document open in MiniHou; open it there (Edit Network) or define the input offline")
-                    } else {
-                        match minihou_app::input_define::plan(self.editor.doc.value(), msg) {
-                            Ok((edit, entry)) => {
-                                self.editor.history.finish(&self.editor.doc);
-                                self.edit(edit, false);
-                                minihou_app::input_define::ack(msg, &entry, self.editor.doc.value())
-                            }
-                            Err(e) => minihou_app::input_define::error(msg, "invalid", &e.to_string()),
-                        }
-                    };
+                    let live = self.link.as_ref().and_then(|l| l.bound_path().map(str::to_owned));
+                    let (reply, changed) = minihou_app::input_define::handle(&mut self.editor, live.as_deref(), &request.message);
+                    if changed { self.send(Edit::Replace(self.editor.doc.value().clone())); }
                     if let Some(link) = &self.link { link.reply(request.peer, reply); }
                     Ok(())
                 },
