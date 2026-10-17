@@ -149,6 +149,7 @@ pub fn decode_object(h:&Value,arrays:&Arrays)->io::Result<Geometry>{
     if let Some(mats)=h["materials"].as_array().filter(|a|!a.is_empty()){
         geo.detail.insert("materials".into(),json!(mats.iter().take(4096).map(|m|m.as_str().unwrap_or("").chars().take(63).collect::<String>()).collect::<Vec<_>>()));
     }
+    if let Some(bindings)=h.get("material_bindings") {geo.detail.insert("material_bindings".into(),bindings.clone());}
     geo.validate().map_err(io::Error::other)?;Ok(geo)
 }
 /// Decode on the UI thread into a transient worker edit, without touching document history.
