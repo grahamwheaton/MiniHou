@@ -498,8 +498,11 @@ def _build_nodes(ng, output_obj) -> None:
 
 
 def _active_inputs(ng):
+    obj_ids = set(json.loads(ng.get("minihou_object_sockets", "{}")).values())
     return [i for i in _sockets(ng, "INPUT") if i.name != "Geometry" and i.name != "Source Object"
-            and not i.name.startswith("Object: ")]
+            and not i.name.startswith("Object: ")
+            and not getattr(i, "description", "").startswith("MiniHou object input: ")
+            and i.identifier not in obj_ids]
 
 
 def _remove_input(ng, item) -> None:
