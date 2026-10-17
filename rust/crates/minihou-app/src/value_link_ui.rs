@@ -124,35 +124,33 @@ pub fn paste(doc: &Value, node: &str, name: &str, copied: &CopiedParam, mode: Pa
     let target = target_value(doc, node, name).ok_or("Unknown target parameter")?;
     if !compatible(&copied.value, &target) { return Err("Parameter types are incompatible".into()); }
     if node == copied.node && name == copied.name && matches!(mode, PasteMode::Reference) { return Err("A parameter cannot reference itself".into()); }
-    let mut next = doc.clone();
-    let channels = next["nodes"][node].as_object_mut().ok_or("Unknown target node")?
-        .entry("channels").or_insert_with(|| json!({})).as_object_mut().ok_or("Invalid channels")?;
-    channels.retain(|key, _| key != name && !key.starts_with(&format!("{name}.")));
+    let mut changes: Vec<(String,Option<String>)> = doc["nodes"][node]["channels"].as_object().into_iter().flatten()
+        .filter(|(key,_)| *key == name || key.starts_with(&format!("{name}."))).map(|(key,_)|(key.clone(),None)).collect();
+    let mut value=None;
     match mode {
-        PasteMode::Value => { next["nodes"][node]["params"][name] = literal_for(&copied.value, &target).ok_or("Incompatible value")?; }
+        PasteMode::Value => { value=Some(literal_for(&copied.value, &target).ok_or("Incompatible value")?); }
         PasteMode::Expression => {
             if copied.expressions.is_empty() { return Err("Copied parameter has no expression".into()); }
-            for (suffix, expr) in &copied.expressions { next["nodes"][node]["channels"][format!("{name}{suffix}")] = json!(expr); }
+            for (suffix, expr) in &copied.expressions { changes.push((format!("{name}{suffix}"),Some(expr.clone()))); }
         }
         PasteMode::Reference => {
             let path = relative_path(node, &copied.node, &copied.name);
             if matches!(param_kind(&target), ParamKind::Vec3) {
                 for component in ["x", "y", "z"] {
-                    next["nodes"][node]["channels"][format!("{name}.{component}")] = json!(format!("ch(\"{path}.{component}\")"));
+                    changes.push((format!("{name}.{component}"),Some(format!("ch(\"{path}.{component}\")"))));
                 }
             } else {
                 let fun = if matches!(param_kind(&target), ParamKind::String) { "chs" } else { "ch" };
                 let expr=format!("{fun}(\"{path}\")");
                 let expr=if matches!(param_kind(&target),ParamKind::Integer) && matches!(param_kind(&copied.value),ParamKind::Float) {format!("round({expr})")} else {expr};
-                next["nodes"][node]["channels"][name] = json!(expr);
+                changes.push((name.into(),Some(expr)));
             }
         }
     }
-    Ok(Edit::Replace(next))
+    Ok(Edit::ChannelGroup { node:node.into(), name:name.into(), value, channels:changes })
 }
 
 pub fn clear(doc: &Value, node: &str, name: &str, default: bool) -> Option<Edit> {
-    let mut next = doc.clone();
     let value = if default { target_value(doc,node,name).and_then(|_| {
         let typ=doc["nodes"][node]["type"].as_str()?;
         Some((nodes::get(typ)?.params.iter().find(|p|p.name==name)?.default)())
@@ -160,13 +158,14 @@ pub fn clear(doc: &Value, node: &str, name: &str, default: bool) -> Option<Edit>
         let graph=Graph::from_value(doc).ok()?;
         channels::resolve_graph(&graph).params.get(node)?.get(name)?.clone()
     };
-    next["nodes"][node]["params"][name] = value;
-    next["nodes"][node]["channels"].as_object_mut()?.retain(|key,_| key != name && !key.starts_with(&format!("{name}.")));
-    Some(Edit::Replace(next))
+    let changes=doc["nodes"][node]["channels"].as_object()?.keys()
+        .filter(|key| *key == name || key.starts_with(&format!("{name}."))).map(|key|(key.clone(),None)).collect();
+    Some(Edit::ChannelGroup {node:node.into(),name:name.into(),value:Some(value),channels:changes})
 }
 
 #[cfg(test)] mod tests {
     use super::*;
+    fn applied(value:&Value, edit:&Edit)->Value {let mut doc=crate::Document::parse(value.to_string()).unwrap();doc.edit(edit).unwrap();doc.value().clone()}
     #[test] fn paths_and_types() {
         assert_eq!(relative_path("a", "b", "size.x"), "../b/size.x");
         assert_eq!(relative_path("sub/a", "sub/b", "p"), "../b/p");
@@ -177,7 +176,8 @@ pub fn clear(doc: &Value, node: &str, name: &str, default: bool) -> Option<Edit>
     #[test] fn vector_reference_is_one_edit() {
         let doc=json!({"nodes":{"a":{"type":"box","params":{"size":[2,3,4]}},"b":{"type":"box"}}});
         let copy=copied(&doc,"a","size").unwrap();
-        let Edit::Replace(next)=paste(&doc,"b","size",&copy,PasteMode::Reference).unwrap() else {panic!()};
+        let edit=paste(&doc,"b","size",&copy,PasteMode::Reference).unwrap();
+        let next=applied(&doc,&edit);
         assert_eq!(next["nodes"]["b"]["channels"]["size.y"],json!("ch(\"../a/size.y\")"));
     }
     #[test] fn link_paths_and_navigation() {
@@ -194,7 +194,8 @@ pub fn clear(doc: &Value, node: &str, name: &str, default: bool) -> Option<Edit>
     #[test] fn floating_driver_of_integer_uses_round() {
         let doc=json!({"nodes":{"scale":{"type":"transform","params":{"uniform_scale":2.6}},"grid":{"type":"grid"}}});
         let copy=copied(&doc,"scale","uniform_scale").unwrap();
-        let Edit::Replace(next)=paste(&doc,"grid","rows",&copy,PasteMode::Reference).unwrap() else {panic!()};
+        let edit=paste(&doc,"grid","rows",&copy,PasteMode::Reference).unwrap();
+        let next=applied(&doc,&edit);
         assert_eq!(next["nodes"]["grid"]["channels"]["rows"],json!("round(ch(\"../scale/uniform_scale\"))"));
         let resolved=channels::resolve_graph(&Graph::from_value(&next).unwrap());
         assert_eq!(resolved.params["grid"]["rows"],json!(3.0),"{:?}",resolved.diagnostics);
@@ -202,11 +203,12 @@ pub fn clear(doc: &Value, node: &str, name: &str, default: bool) -> Option<Edit>
     #[test] fn clearing_vector_link_bakes_value_in_one_undo_step() {
         let value=json!({"display":"b","nodes":{"a":{"type":"box","params":{"size":[2,3,4]}},"b":{"type":"box","params":{"size":[1,1,1]},"channels":{"size.x":"ch('../a/size.x')","size.y":"ch('../a/size.y')"}}}});
         let mut doc=crate::Document::parse(value.to_string()).unwrap();
-        let Edit::Replace(next)=clear(doc.value(),"b","size",false).unwrap() else {panic!()};
+        let edit=clear(doc.value(),"b","size",false).unwrap();
+        let next=applied(doc.value(),&edit);
         assert_eq!(next["nodes"]["b"]["params"]["size"],json!([2,3,1]));
         assert!(next["nodes"]["b"]["channels"].as_object().unwrap().is_empty());
         let mut history=crate::History::default();
-        history.replace(&mut doc,crate::Document::parse(next.to_string()).unwrap());
+        history.edit(&mut doc,&edit).unwrap();history.finish(&doc);
         history.undo(&mut doc).unwrap(); assert_eq!(doc.value(),&value);
         history.redo(&mut doc).unwrap(); assert_eq!(doc.value(),&next);
     }

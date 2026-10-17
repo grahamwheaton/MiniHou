@@ -2,7 +2,7 @@
 
 ## Built
 
-The Parameters panel now has a right-click menu on parameter labels and fields: Copy Parameter, Paste Relative Reference, Paste Value, Paste Expression, Link to Parameter, Delete Channel, Revert to Default, Lock/Unlock Parameter, Edit Expression, Go to Source, and Go to Target. The picker searches nodes and parameters and disables incompatible types. Floating sources linked to integer targets use `round(ch(...))`; vector references create three component expressions in one undoable document edit. Delete Channel stores the evaluated result as the literal fallback. Linked fields show the evaluated value with a green tint and a reference mark, block direct editing, and show their expression and value on hover. Locks show a lock icon. The expression dialog shows current diagnostics; broken references appear in the error list and can be retargeted with the picker.
+The Parameters panel now has a right-click menu on parameter labels and fields: Copy Parameter, Paste Relative Reference, Paste Value, Paste Expression, Link to Parameter, Delete Channel, Revert to Default, Lock/Unlock Parameter, Edit Expression, Go to Source, and Go to Target. The picker searches nodes and parameters and disables incompatible types. Floating sources linked to integer targets use `round(ch(...))`; vector references create three component expressions in one undoable `ChannelGroup` edit, retaining unrelated cook cache entries. Delete Channel stores the evaluated result as the literal fallback. Linked fields show the evaluated value with a green tint and a reference mark, block direct editing, and show their expression and value on hover. Locks show a lock icon. The expression dialog shows current diagnostics; broken references appear in the error list and can be retargeted with the picker.
 
 The Network editor draws dashed cyan dependency curves behind node cards and red curves for missing sources. Selection and hovering highlight curves and reveal parameter names. Cards show reference counts or a warning badge. The Links header control and Interface preference show or hide the curves. Node and parameter menus list source and target navigation. Navigation selects and centres the destination card and flashes its parameter row.
 
@@ -26,6 +26,7 @@ Focused tests cover relative paths and type compatibility, vector and scalar cop
 - A source/target shortcut chooses the first matching link when several exist; the menus list each destination.
 - Red curves end near the affected node when the source card is missing. Invalid expressions without a readable `ch()` path are listed in the panel but have no source curve.
 - Ctrl+G grouping is pending the inline subnet cooking, port extraction, and nested editing described in `DESIGN_VALUE_LINKING.md`.
+- Structural node edits (rename, paste, delete) still use graph replacement and clear the cook cache; parameter menu edits use incremental session setters.
 - The editor behavior has egui harness coverage but has not had a manual desktop smoke test in this worktree.
 
 Shared files changed in small scopes: `main.rs` dispatches link navigation, rename, visibility persistence, and atomic snapshot edits; `keymap.rs` adds three network commands; `prefs.rs` persists one visibility boolean. The Blender add-on, viewport renderer, and `link_*.rs` were not changed.

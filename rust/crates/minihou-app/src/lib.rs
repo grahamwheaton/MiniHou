@@ -420,6 +420,7 @@ pub fn clamp_parameter(meta: &Value, value: f64) -> f64 {
 pub enum Edit {
     Param { node: String, name: String, value: Value },
     Channel { node: String, path: String, expression: Option<String> },
+    ChannelGroup { node: String, name: String, value: Option<Value>, channels: Vec<(String, Option<String>)> },
     LockParam { node: String, path: String, locked: bool },
     Bypass { node: String, flag: bool },
     Display(String),
@@ -450,6 +451,13 @@ impl Document {
                 check.set_channel(node,path,expression.clone())?;
                 let channels=check.graph().node_channels(node).ok_or("no such node")?;
                 self.set(&["nodes",node,"channels"],json!(channels));
+            }
+            Edit::ChannelGroup { node, name, value, channels } => {
+                let mut check=self.session()?;
+                if let Some(value)=value {check.set_param(node,name,value.clone())?;}
+                for (path,expression) in channels {check.set_channel(node,path,expression.clone())?;}
+                if let Some(value)=value {self.set(&["nodes",node,"params",name],value.clone());}
+                self.set(&["nodes",node,"channels"],json!(check.graph().node_channels(node).ok_or("no such node")?));
             }
             Edit::LockParam { node, path, locked } => {
                 let mut check=self.session()?;
@@ -597,6 +605,10 @@ pub fn cook_batch<T>(session: &mut Session, target: &mut String, requests: Vec<C
             match request.edit {
                 Edit::Param { node, name, value } => session.set_param(&node, &name, value)?,
                 Edit::Channel { node, path, expression } => session.set_channel(&node,&path,expression)?,
+                Edit::ChannelGroup { node, name, value, channels } => {
+                    if let Some(value)=value {session.set_param(&node,&name,value)?;}
+                    for (path,expression) in channels {session.set_channel(&node,&path,expression)?;}
+                }
                 Edit::LockParam { node, path, locked } => session.set_locked_param(&node,&path,locked)?,
                 Edit::Bypass { node, flag } => session.set_bypass(&node, flag)?,
                 Edit::Display(node) => *target = node,
@@ -732,6 +744,18 @@ fn append_cook_stats(out:&mut CookStats, more:&CookStats) {
 #[cfg(test)]
 mod channel_document_tests {
     use super::*;
+    #[test]
+    fn channel_group_keeps_unrelated_cook_cache() {
+        let doc=Document::parse(json!({"display":"b","nodes":{"a":{"type":"box"},"b":{"type":"box"}}}).to_string()).unwrap();
+        let mut session=doc.session().unwrap();
+        session.cook(Some("a")).unwrap();
+        let mut target="b".to_string();
+        let edit=Edit::ChannelGroup{node:"b".into(),name:"size".into(),value:None,channels:vec![("size.x".into(),Some("ch('../a/size.x')".into()))]};
+        let response=cook_batch(&mut session,&mut target,vec![CookRequest{revision:1,edit}],|_|());
+        assert!(response.error.is_none(),"{:?}",response.error);
+        session.cook(Some("a")).unwrap();
+        assert!(session.last_stats().cached.contains(&"a".to_string()));
+    }
     #[test]
     fn existing_python_compatible_graph_needs_no_channel_fields() {
         let doc=Document::parse(include_str!("default_graph.json").into()).unwrap();
