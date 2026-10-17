@@ -68,3 +68,22 @@ Full brief supplied by the user (2026-10-17). Not started. Category: Groups / Se
 - **Problem:** the Rust `lsystem` node produces 2D output, but the pre-Rust (Python) version already fixed this. Make the Rust node match the Python behaviour (3D output, same turtle semantics as the fixed Python node).
 - **Priority:** low. Not started.
 - **How to start later:** compare the Python fix in `minihou/nodes` (grep `lsystem`) with the Rust node in `rust/crates/minihou-core/src/nodes/`, then add a golden test against the Python output.
+
+---
+
+# Queued: Array node full Blender parity (incl. gizmos)
+
+The current `array` node (count, relative and constant offset, merge distance) is only a first step. Blender's Array modifier, per the user's screenshots (2026-10-17), needs:
+
+- **Shape:** Line, Circle, Curve, Transform (4 modes).
+- **Count method:** Count or Distance (fit copies to a distance).
+- **Line:** count; offset method (Relative, Offset, End Point); relative X/Y/Z; constant offset X/Y/Z; per-copy rotation X/Y/Z and scale X/Y/Z.
+- **Circle:** count or distance; central axis X/Y/Z; segment Full or Arc; radius; align rotation toggle.
+- **Curve:** count or distance; per curve toggle; curve object (picked, with eyedropper, or a curve from the graph); relative space toggle; align rotation.
+- **Transform:** transform reference Inputs or Object; translation, rotation and scale per copy.
+- **Common:** Realize Instances; Randomize panel (seed, randomisation of offset/rotation/scale); Merge panel (merge distance, first/last copy merge).
+- **Errors:** report "No Curve Selected" and similar in the panel, as Blender does.
+- **Gizmos:** Blender-style viewport gizmos for the line offset (arrow per axis), circle radius and axis, and curve/transform handles, so the array can be adjusted in the viewport without typing numbers.
+- **Parity target:** match Blender's Array output for each shape on the same inputs, with golden tests.
+
+Priority: queued after the image nodes and Flood Fill. Not started.
