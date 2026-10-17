@@ -97,6 +97,9 @@ def meta() -> dict:
         "points": {"kind": "str", "default": "", "doc": "Optional point selection for point extrusion."},
         "direction": {"kind": "vec3", "default": [0.0, 0.0, 0.0], "doc": "Explicit extrusion direction; zero follows face normals."},
     })
+    # Rust Push/Pull extension (SketchUp-style punch through / coplanar merge); "off" is the Python behaviour.
+    out["pushpull"]["through"] = {"kind": "enum", "default": "auto", "options": ["off", "auto", "force"],
+                                  "doc": "Punch through: auto opens a hole when the push reaches or passes the opposite surface (excess ignored) and merges a pull that lands on a parallel face; force always punches; off is the original single-convex-face behaviour."}
     # Rust Mirror SOP extensions (Houdini parity); the defaults reproduce the Python node.
     out["mirror"]["distance"]["doc"] = "Consolidate tolerance: how close to the plane a point must be to weld (Houdini's seam tolerance)."
     out["mirror"].update({
