@@ -12,6 +12,10 @@ struct U {
     // its linear result to sRGB itself so it matches a window whose surface is an sRGB format.
     encode_srgb: u32,
     matcap: u32,
+    object_color: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
     floor: vec4<f32>,
     element_size: vec4<f32>,
     element_flags: vec4<u32>,
@@ -25,6 +29,7 @@ struct VOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) vpos: vec3<f32>,
     @location(1) vnorm: vec3<f32>,
+    @location(2) vcolor: vec3<f32>,
 };
 
 // the three-term rig; `n` is a unit view-space normal that faces the viewer
@@ -43,12 +48,13 @@ fn out_color(c: vec3<f32>) -> vec4<f32> {
 }
 
 @vertex
-fn vs_surf(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>) -> VOut {
+fn vs_surf(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) color: vec3<f32>) -> VOut {
     var o: VOut;
     o.pos = u.view_proj * vec4<f32>(p, 1.0);
     let vp = u.view * vec4<f32>(p, 1.0);
     o.vpos = vp.xyz;
     o.vnorm = (u.view * vec4<f32>(n, 0.0)).xyz;
+    o.vcolor = color;
     return o;
 }
 
@@ -79,7 +85,7 @@ fn shade_surf(i: VOut, front: bool) -> vec3<f32> {
     if (u.matcap != 0u) {
         return textureSample(matcap, matcap_sampler, vec2<f32>(n.x * 0.5 + 0.5, 0.5 - n.y * 0.5)).rgb;
     }
-    return u.base.rgb * light(n);
+    return select(u.base.rgb, i.vcolor, u.object_color != 0u) * light(n);
 }
 
 @fragment
@@ -91,14 +97,16 @@ struct WOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) vpos: vec3<f32>,
     @location(1) vnorm: vec3<f32>,
+    @location(2) vcolor: vec3<f32>,
 };
 
 @vertex
-fn vs_wire(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>) -> WOut {
+fn vs_wire(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) color: vec3<f32>) -> WOut {
     var o: WOut;
     o.pos = u.view_proj * vec4<f32>(p, 1.0);
     o.vpos = (u.view * vec4<f32>(p, 1.0)).xyz;
     o.vnorm = (u.view * vec4<f32>(n, 0.0)).xyz;
+    o.vcolor = color;
     return o;
 }
 
@@ -109,7 +117,7 @@ fn fs_wire(i: WOut) -> @location(0) vec4<f32> {
     if (dot(n, normalize(-i.vpos)) < 0.0) { n = -n; }
     // lit like the surface so the shape reads even when the edges fill the screen; over a surface (Shaded+Wire) the line is a
     // darker version of the surface colour, fading to the surface itself as the mesh gets denser
-    let lit = u.base.rgb * light(n);
+    let lit = select(u.base.rgb, i.vcolor, u.object_color != 0u && u.matcap == 0u) * light(n);
     if (u.wire.a > 0.5) {
         return vec4<f32>(out_color(lit * 0.45).rgb, u.wire_fade);
     }
