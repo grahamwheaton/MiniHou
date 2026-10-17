@@ -81,6 +81,10 @@ networks may need a retry on a slow machine.
   always did). Unsaved work is never overwritten silently. The add-on polls the answer with
   `graph_pull`; while it is pending the embedded text is never overwritten by the app's copy.
 
+## Inputs defined in Blender (add-on 0.3.1)
+
+**Add Input** / rename / remove on an Embedded network that is not bound in a connected MiniHou (or with no app, or an app without `input_define_v1`) edits the input node's `modifier_inputs` in the runtime copy and writes the embedded text immediately (same ids, suffixes and validation as the app). Because the text is authoritative, MiniHou receives the definition with the graph the next time the network is pushed (Edit Network). When the network is bound, the app makes the edit (undoable there) and the embedded text follows like any app edit. Linked File networks are only changed through the app.
+
 ## External files
 
 On write, file parameters (`file` and `*_file` string params: image_file, image_out, usd_import,
