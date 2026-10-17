@@ -45,6 +45,8 @@ pub enum UiAction {
     MeshCutCommit { source: String, node_type: String, params: serde_json::Value },
     SketchCommit { name: String, points: Vec<[f32; 3]>, closed: bool },
     AddMeasurement { a: [f32; 3], b: [f32; 3], refs: [Option<serde_json::Value>; 2] },
+    DeleteMeasurement(usize),
+    ClearMeasurements,
     RegionSelect { shape: crate::picking::RegionShape, op: crate::picking::SelectOp },
     RestoreRegionSelection(selection_region::Snapshot),
     Open,

@@ -177,6 +177,19 @@ pub fn add_sketch(value: &Value, name: &str, points: &[[f32; 3]], closed: bool, 
     Some((value, id))
 }
 
+pub fn delete_measurement(value:&Value,index:usize)->Option<Value> {
+    let mut next=value.clone();
+    let rows=next.get_mut("measurements")?.as_array_mut()?;
+    if index>=rows.len() {return None;}
+    rows.remove(index);Some(next)
+}
+pub fn clear_measurements(value:&Value)->Option<Value> {
+    let mut next=value.clone();
+    let rows=next.get_mut("measurements")?.as_array_mut()?;
+    if rows.is_empty() {return None;}
+    rows.clear();Some(next)
+}
+
 /// Viewport topology edits use the displayed stream, never an unrelated selected node.
 pub fn add_viewport_cut(value: &Value, source: &str, ty: &str, params: Value) -> Option<(Value, String)> {
     if !matches!(ty, "knife" | "loop_cut" | "polysplit") || !params.is_object() { return None; }
@@ -488,6 +501,22 @@ pub fn paste(value: &Value, clipboard: &Value) -> Option<(Value, Vec<String>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn measurement_deletion_and_clear_are_undoable_document_edits() {
+        let mut base=graph(); base["nodes"]["box1"]["measurement_identity"]=json!("stable");
+        base["measurements"]=json!([{"id":"one","points":[[0,0,0],[1,0,0]],"refs":[{"node":"box1","identity":"stable","point":0,"point_count":8},null],"a":[0,0,0],"b":[1,0,0]},{"a":[0,0,0],"b":[2,0,0]}]);
+        let mut doc=validated(base.clone()).unwrap();
+        let mut history=minihou_app::History::default();
+        let one=delete_measurement(doc.value(),0).unwrap();
+        assert_eq!(one["measurements"].as_array().unwrap().len(),1);
+        history.replace(&mut doc,validated(one).unwrap());
+        let empty=validated(clear_measurements(doc.value()).unwrap()).unwrap();
+        history.replace(&mut doc,empty);
+        assert!(doc.value()["measurements"].as_array().unwrap().is_empty());
+        history.undo(&mut doc).unwrap();
+        assert_eq!(doc.value()["measurements"].as_array().unwrap().len(),1);
+        history.undo(&mut doc).unwrap();
+        assert_eq!(doc.value()["measurements"].as_array().unwrap().len(),2);
+    }
     #[test] fn noodle_add_connects_in_both_directions_and_records_position() {
         let base = graph();
         let (next, id) = add_connected(&base, "transform", &AddConnection::Output("box1".into()), [320., 192.]).unwrap();

@@ -54,6 +54,9 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
             ui.menu_button("File", |ui| {
                 if ui.button("Export USD…").clicked() { out.push(UiAction::Command("export_usd".into())); ui.close(); }
             });
+            ui.menu_button("Edit", |ui| {
+                if ui.button("Clear all").clicked() { out.push(UiAction::ClearMeasurements); ui.close(); }
+            });
             if button(ui, "Open", "open", true, true, v, None) { out.push(UiAction::Open); }
             if button(ui, "Save As", "save", true, true, v, None) { out.push(UiAction::SaveAs); }
             separator(ui, v);
@@ -74,3 +77,37 @@ fn separator(ui: &mut egui::Ui, v: &View) {
     let (r, _) = ui.allocate_exact_size(Vec2::new(1., 20.), Sense::hover());
     ui.painter().rect_filled(r, 0., v.theme.stroke);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::testing::Fixture;
+
+    #[test]
+    fn edit_menu_contains_clear_all_action() {
+        let f = Fixture::new();
+        let ctx = egui::Context::default();
+        let viewport = Rect::from_min_size(Pos2::ZERO, Vec2::new(1280., 800.));
+        let v = f.view();
+        let frame = |events: Vec<egui::Event>| {
+            let mut out = Actions::default();
+            let _ = ctx.run(egui::RawInput { screen_rect: Some(viewport), events, ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    show(ui, &v, &mut out);
+                });
+            });
+            out
+        };
+        let click = |p: Pos2| {
+            frame(vec![egui::Event::PointerMoved(p), egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: true, modifiers: Default::default() }]);
+            frame(vec![egui::Event::PointerMoved(p), egui::Event::PointerButton { pos: p, button: egui::PointerButton::Primary, pressed: false, modifiers: Default::default() }])
+        };
+        frame(vec![]);
+        click(Pos2::new(170., 27.));
+        // Next frame to let popup layout
+        frame(vec![egui::Event::PointerMoved(Pos2::new(185., 53.))]);
+        let out = click(Pos2::new(185., 53.));
+        assert!(out.0.iter().any(|a| matches!(a, UiAction::ClearMeasurements)));
+    }
+}
+
