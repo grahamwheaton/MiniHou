@@ -326,6 +326,26 @@ fn select_active_nodes(active: &mut String, set: &mut std::collections::BTreeSet
     else if !set.contains(active) { *active = set.iter().next().cloned().unwrap_or_default(); }
 }
 
+fn display_is_empty(value: &Value) -> bool {
+    let Some(nodes)=value["nodes"].as_object() else {return false};
+    if nodes.is_empty() {return true;}
+    if value["display"].is_array() || value["display"].is_string() {
+        minihou_app::display_nodes(value).iter().all(|id|!nodes.contains_key(id))
+    } else {
+        !nodes.values().any(|node|node["type"]=="output")
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn empty_display_is_distinct_from_a_valid_graph() {
+    assert!(display_is_empty(&json!({"nodes":{}})));
+    assert!(display_is_empty(&json!({"nodes":{"a":{"type":"box"}},"display":[]})));
+    assert!(display_is_empty(&json!({"nodes":{"a":{"type":"box"}},"display":"deleted"})));
+    assert!(display_is_empty(&json!({"nodes":{"a":{"type":"box"}}})));
+    assert!(!display_is_empty(&json!({"nodes":{"a":{"type":"box"}},"display":["a"]})));
+}
+
 fn picked_object<'a>(ranges: &'a [(String, std::ops::Range<u32>)], triangles: &[u32], hit: picking::Hit) -> Option<&'a str> {
     let point = *triangles.get(hit.tri * 3)?;
     ranges.iter().find(|(_, range)| range.contains(&point)).map(|(id, _)| id.as_str())
@@ -593,6 +613,18 @@ impl App {
         Ok(app)
     }
     fn send(&mut self, edit: Edit) {
+        // An explicitly empty display has no last-good result. Cook failures still keep it.
+        if let Edit::Replace(value) = &edit {
+            if display_is_empty(value) {
+                self.scene = None;
+                self.gpu = None;
+                self.cooking.geometry = None;
+                self.cooking.lod = None;
+                self.geo = None;
+                self.display_ranges.clear();
+                self.selection_dirty = true;
+            }
+        }
         self.cooking.requested += 1;
         if let Err(e) = self.worker.send(CookRequest { revision:self.cooking.requested, edit }) {
             self.cooking.completed = self.cooking.requested;
@@ -2453,7 +2485,11 @@ impl eframe::App for App {
             if response.revision == self.cooking.requested {
                 if let Some(link) = &self.link { link.cooked(&response); }
             }
-            if let Some(scene) = self.cooking.accept(response) {
+            let accepted=self.cooking.accept(response);
+            if display_is_empty(self.editor.doc.value()) {
+                self.cooking.geometry=None;self.cooking.lod=None;self.geo=None;
+            }
+            if let Some(scene) = accepted.filter(|_| !display_is_empty(self.editor.doc.value())) {
                 self.display_ranges = display_ranges;
                 self.selection_dirty = true;
                 let first = self.gpu.is_none();
