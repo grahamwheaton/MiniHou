@@ -14,6 +14,7 @@ pub mod selection_region;
 pub mod shelf;
 pub mod status;
 pub mod sketch;
+pub mod sketch_inference;
 pub mod mesh_cut;
 pub mod theme;
 pub mod topbar;

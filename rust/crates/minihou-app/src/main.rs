@@ -2508,7 +2508,8 @@ impl eframe::App for App {
                         ui::transform_gizmo::show_with_snap(ui, rect, &v, &mut out,
                             self.scene.as_ref().map(|scene|(scene.positions(),scene.triangle_indices())));
                         ui::prim_handles::show(ui, rect, &v, &mut out);
-                        ui::sketch::show(ui, rect, &v, &mut out);
+                        ui::sketch::show(ui, rect, &v, &mut out,
+                            self.scene.as_ref().map(|scene|(scene.positions(),scene.triangle_indices())));
                         ui::mesh_cut::show(ui, rect, &v, &mut out);
                     }
                     ui::selection_region::paint(ui, rect, &v);

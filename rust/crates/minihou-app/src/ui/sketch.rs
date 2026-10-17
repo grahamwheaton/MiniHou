@@ -1,6 +1,7 @@
 //! Plane sketch and tape tool. UI state stays in egui memory; commits are document actions.
 use super::{transform_gizmo, Actions, UiAction, View};
 use eframe::egui::{self, pos2, vec2, Align2, FontId, Pos2, Rect, Stroke};
+use super::sketch_inference::{self, Hit, Kind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SketchMode { Line, Pen, Polygon, Rectangle, Circle, Tape }
@@ -93,7 +94,7 @@ fn plane_hit(ray: ([f32; 3], [f32; 3]), plane: Plane, origin: [f32; 3]) -> Optio
     (t >= 0.).then(|| add(ray.0, mul(ray.1, t)))
 }
 #[derive(Clone, Default)]
-struct State { mode: Option<SketchMode>, plane: Plane, points: Vec<[f32; 3]>, hover: Option<[f32; 3]>, axis: Option<usize>, numeric: String, origin: [f32; 3] }
+struct State { mode: Option<SketchMode>, plane: Plane, points: Vec<[f32; 3]>, hover: Option<[f32; 3]>, inference: Option<Hit>, reference_edge: Option<([f32;3],[f32;3])>, reference_point: Option<[f32;3]>, axis: Option<usize>, numeric: String, origin: [f32; 3] }
 fn id() -> egui::Id { egui::Id::new("sketch_state") }
 pub fn start(ctx: &egui::Context, mode: SketchMode) {
     ctx.data_mut(|d| { let mut s: State = d.get_temp(id()).unwrap_or_default(); s.mode = Some(mode); s.points.clear(); s.hover = None; s.numeric.clear(); s.axis = None; d.insert_temp(id(), s); });
@@ -127,7 +128,8 @@ fn measurements(ui: &egui::Ui, rect: Rect, v: &View) {
         p.text(pa.lerp(pb, 0.5) + vec2(8., -8.), Align2::LEFT_BOTTOM, crate::units::format(length(sub(b, a)) as f64, v.units), FontId::monospace(12.), v.theme.tpl);
     }
 }
-pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
+pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
+    mesh: Option<(&[f32], &[u32])>) {
     measurements(ui, rect, v);
     let ctx = ui.ctx().clone(); let mut s: State = ctx.data_mut(|d| d.get_temp(id())).unwrap_or_default();
     let tool_mode = SketchMode::from_tool(v.editor.tool);
@@ -138,14 +140,36 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     if let Some(at) = pointer.filter(|p| safe.contains(*p)) {
         let ray = transform_gizmo::ray(v.camera, rect, at);
         let anchor = s.points.last().copied();
-        s.hover = plane_hit(ray, s.plane, s.origin).map(|p| {
+        let project = |p| transform_gizmo::project(v.camera, rect, p).map(|screen| (screen, dot(sub(p,ray.0),ray.1)));
+        let mesh_hit = mesh.and_then(|(positions,tris)| sketch_inference::infer_mesh(positions,tris,at,project));
+        if let (Some((positions,_)),Some(hit))=(mesh,mesh_hit.as_ref()) {
+            if hit.indices.len()==2 {
+                let at_index=|i:usize|[positions[i*3],positions[i*3+1],positions[i*3+2]];
+                s.reference_edge=Some((at_index(hit.indices[0]),at_index(hit.indices[1])));
+            } else if hit.kind==Kind::Endpoint { s.reference_point=Some(hit.point); }
+        }
+        let point_hit = s.points.iter().enumerate().filter_map(|(i,&p)| project(p).map(|(screen,depth)| Hit {
+            point:p, kind:Kind::Endpoint, indices:vec![i], weights:vec![1.], distance:screen.distance(at), depth
+        })).filter(|h| h.distance<=12.).min_by(|a,b| a.distance.total_cmp(&b.distance));
+        let raw = plane_hit(ray, s.plane, s.origin);
+        let axis_hit = s.points.last().copied().zip(raw).and_then(|(anchor,p)| sketch_inference::infer_axis(at,anchor,p,project));
+        let direction_hit = s.points.last().copied().zip(raw).zip(s.reference_edge)
+            .and_then(|((anchor,p),edge)|sketch_inference::infer_direction(at,anchor,p,edge,project));
+        let from_hit = s.reference_point.zip(raw).and_then(|(reference,p)| {
+            sketch_inference::infer_axis(at,reference,p,project).map(|mut h|{h.kind=Kind::FromPoint;h})
+        });
+        s.inference = point_hit.or(mesh_hit).or(direction_hit).or(from_hit).or(axis_hit);
+        if ctx.input(|i| i.modifiers.shift) {
+            if let Some(Kind::Axis(axis)) = s.inference.as_ref().map(|h| h.kind) { s.axis = Some(axis); }
+        }
+        s.hover = raw.map(|p| {
             let ctrl = ctx.input(|i| i.modifiers.ctrl);
-            let mut p = grid_snap(p, s.plane, if v.editor.snap.enabled != ctrl { v.editor.snap.increment } else { 0. });
+            let mut p = s.inference.as_ref().map_or_else(|| grid_snap(p, s.plane, if v.editor.snap.enabled != ctrl { v.editor.snap.increment } else { 0. }), |h| h.point);
             if let (Some(a), Some(axis)) = (anchor, s.axis) { p = axis_lock(p, a, axis, s.plane); }
             if let (Some(a), Some(amount)) = (anchor, crate::units::parse(&s.numeric, v.units).map(|x| x as f32)) { p = numeric_length(p, a, amount); }
             p
         });
-    } else { s.hover = None; }
+    } else { s.hover = None; s.inference = None; }
     let events = ctx.input(|i| i.events.clone());
     for event in events { match event {
         egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } |
@@ -154,6 +178,10 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         },
         egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } => { if !s.numeric.is_empty() { if let Some(p) = s.hover { s.points.push(p); } s.numeric.clear(); } finish(&mut s, out); },
         egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => { if s.numeric.is_empty() { s.points.pop(); } else { s.numeric.pop(); } },
+        egui::Event::Key { key: egui::Key::ArrowRight, pressed: true, .. } => { s.axis = Some(0); },
+        egui::Event::Key { key: egui::Key::ArrowLeft, pressed: true, .. } => { s.axis = Some(1); },
+        egui::Event::Key { key: egui::Key::ArrowUp, pressed: true, .. } => { s.axis = Some(2); },
+        egui::Event::Key { key: egui::Key::ArrowDown, pressed: true, .. } => { s.axis = None; },
         egui::Event::Key { key, pressed: true, .. } if matches!(key, egui::Key::X | egui::Key::Y | egui::Key::Z) => { let axis = match key { egui::Key::X => 0, egui::Key::Y => 1, _ => 2 }; s.axis = if s.axis == Some(axis) { None } else { Some(axis) }; },
         egui::Event::Text(t) if t.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-' || matches!(c, 'm'|'c'|'k'|'i'|'n'|'f'|'t'|'M'|'C'|'K'|'I'|'N'|'F'|'T'|' ')) => s.numeric.push_str(&t),
         egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers } if safe.contains(pos) && !modifiers.alt => {
@@ -170,6 +198,17 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     for pair in screen.windows(2) { p.line_segment([pair[0], pair[1]], Stroke::new(2_f32, v.theme.warn)); }
     if matches!(mode, SketchMode::Polygon | SketchMode::Rectangle | SketchMode::Circle) && screen.len() >= 3 { p.line_segment([*screen.last().unwrap(), screen[0]], Stroke::new(2_f32, v.theme.warn)); }
     for q in &screen { p.circle_filled(*q, 3., v.theme.warn); }
+    if let Some(hit) = &s.inference {
+        if let Some(screen) = transform_gizmo::project(v.camera, rect, hit.point) {
+            let color = match hit.kind { Kind::Axis(0) => egui::Color32::RED, Kind::Axis(1) => egui::Color32::GREEN,
+                Kind::Axis(2) => egui::Color32::BLUE, _ => v.theme.accent };
+            p.circle_filled(screen, 5., color);
+            p.text(screen+vec2(10.,-12.),Align2::LEFT_BOTTOM,hit.kind.label(),FontId::monospace(12.),color);
+            if let Some(anchor) = s.points.last().and_then(|q|transform_gizmo::project(v.camera,rect,*q)) {
+                if matches!(hit.kind,Kind::Axis(_)) { p.line_segment([anchor,screen],Stroke::new(1.,color)); }
+            }
+        }
+    }
     if mode == SketchMode::Tape && screen.len() == 2 {
         if let (Some(&a), Some(h)) = (s.points.first(), s.hover) {
             p.text(screen[0].lerp(screen[1], 0.5) + vec2(8., -8.), Align2::LEFT_BOTTOM, crate::units::format(length(sub(h, a)) as f64, v.units), FontId::monospace(12.), v.theme.warn);
@@ -218,14 +257,14 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         ] {
             start(&ctx, SketchMode::Tape);
             let _ = ctx.run(egui::RawInput { events: vec![event], ..Default::default() }, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| show(ui, ui.max_rect(), &f.view(), &mut Actions::default()));
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, ui.max_rect(), &f.view(), &mut Actions::default(), None));
             });
             assert!(!active(&ctx) && !blocks_navigation(&ctx));
         }
         start(&ctx, SketchMode::Tape);
         f.editor.tool = super::super::Tool::Select;
         let _ = ctx.run(Default::default(), |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, ui.max_rect(), &f.view(), &mut Actions::default()));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, ui.max_rect(), &f.view(), &mut Actions::default(), None));
         });
         assert!(!active(&ctx) && !blocks_navigation(&ctx));
     }
@@ -240,7 +279,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         assert!(specification(SketchMode::Polygon, &[[0.;3],[1.,0.,0.],[0.,1.,0.]], Plane::XY).is_some());
         assert!(specification(SketchMode::Polygon, &[[0.,0.,0.],[3.,2.,0.],[0.,2.,0.],[2.,0.,0.]], Plane::XY).is_none());
     }
-    #[test] fn headless_frame() { let f = crate::ui::testing::Fixture::new(); assert!(f.run(|ui,v,out| show(ui, ui.max_rect(), v, out)).is_empty()); }
+    #[test] fn headless_frame() { let f = crate::ui::testing::Fixture::new(); assert!(f.run(|ui,v,out| show(ui, ui.max_rect(), v, out, None)).is_empty()); }
     #[test] fn finishing_a_line_and_tape_emits_document_actions() {
         let mut line = State { mode: Some(SketchMode::Line), points: vec![[0.; 3], [2., 0., 0.]], ..Default::default() };
         let mut out = Actions::default();
@@ -290,7 +329,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
                 let mut f = crate::ui::testing::Fixture::new(); f.editor.tool = mode.tool();
                 let ctx = egui::Context::default(); let mut out = Actions::default();
                 let _ = ctx.run(egui::RawInput { events:vec![event], ..Default::default() }, |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| show(ui,ui.max_rect(),&f.view(),&mut out));
+                    egui::CentralPanel::default().show(ctx, |ui| show(ui,ui.max_rect(),&f.view(),&mut out,None));
                 });
                 assert!(out.0.iter().any(|a| matches!(a,UiAction::Editor(super::super::EditorChange::Tool(super::super::Tool::Select)))));
                 assert!(!active(&ctx));
@@ -324,7 +363,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
         let v = f.view();
         let full = ctx.run(input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                show(ui, ui.max_rect(), &v, &mut out);
+                show(ui, ui.max_rect(), &v, &mut out, None);
             });
         });
         fn extract_texts(shapes: &[egui::epaint::ClippedShape], out: &mut Vec<String>) {
