@@ -36,7 +36,7 @@ import bpy
 import numpy as np
 from bpy.app.handlers import persistent
 
-from . import image_exchange, mesh_reader, mesh_writer, proxy, scene_objects, material_export
+from . import image_exchange, mesh_reader, mesh_writer, object_names, proxy, scene_objects, material_export
 from .client import LinkClient
 from .protocol import GeoUpdate, Mirror, ProtocolError
 from .state import Inbox, ParamForwarder
@@ -202,6 +202,8 @@ class Runtime:
                 busy = self._send_images() or busy
             if self._texture_pending:
                 busy = self._send_texture_chunk() or busy
+            if object_names.SEARCHER.active:                   # time-sliced object-name search (object_names_v1)
+                busy = object_names.SEARCHER.step(self.client.send) or busy
             if self.frame_dirty:
                 busy = self._send_frame() or busy
             if self._ui_dirty:
@@ -274,6 +276,8 @@ class Runtime:
             if count < 3 and hash_id in self._texture_payloads:
                 self._texture_pending.append((hash_id, self._texture_payloads[hash_id], 0, False))
             self._ui_dirty = True
+        elif t == "object_names_query":
+            object_names.handle_query(e)
         elif t == "image_ack":
             self._texture_attempts.pop(e.get("transfer_id", ""), None)
 

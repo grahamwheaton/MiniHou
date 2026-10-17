@@ -356,8 +356,8 @@ class RustLinkTests(unittest.TestCase):
         self.assertFalse(any(k.startswith("scene:") for k in mirror.arrays))
         np.testing.assert_array_equal(manifests[0]["_arrays"]["P"], mirror.P)
         c.set_sources("A", {})
-        with self.assertRaisesRegex(RuntimeError, "Object input picker"):
-            c.cook("A", "", {}, mesh(), graph=graph)
+        h, arrays = c.cook("A", "", {}, mesh(), graph=graph)       # nothing picked: waiting, not an error
+        self.assertIn("Object input picker", h["cook"]["waiting"]["source"])
         c.set_sources("A", {"tree": mesh(9)})
         _, arrays = c.cook("A", "", {}, mesh(), graph=graph)
         self.assertEqual(arrays["point/P"][3, 0], 9)

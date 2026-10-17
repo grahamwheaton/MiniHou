@@ -797,7 +797,7 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                     values = proxy.read_values(mod, ng, parameters(mod))
                     source_token = ""
                     graph_data = json.loads(ng[GRAPH])
-                    has_imports = any(n.get("type") == "object_input" or
+                    has_imports = any(n.get("type") in {"object_input", "blender_object"} or
                                       (n.get("type") == "modifier_input" and any(
                                           p.get("kind") in {"object", "collection"} for p in n.get("modifier_inputs", [])))
                                       for n in graph_data.get("nodes", {}).values())

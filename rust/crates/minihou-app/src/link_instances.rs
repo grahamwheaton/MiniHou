@@ -256,15 +256,17 @@ impl InstanceManager {
         bindings.extend(minihou_app::modifier_inputs::pickers(&graph).into_iter().map(|(node, uid)|
             (minihou_core::nodes::blender_input::picker_external(&node), minihou_app::modifier_inputs::picker_key(&uid), String::new())));
         for (external, key, empty) in bindings {
+            // Keyed by store name too: a renamed node needs its feed set even when Blender's source is unchanged.
+            let tag = format!("{external}|{key}");
             let incoming = feeds.and_then(|s| s.get(&key));
             let info = h["references"].get(&key).cloned().unwrap_or(Value::Null);
             let unchanged = entry
                 .sources
                 .get(&key)
                 .zip(incoming)
-                .is_some_and(|(a, b)| Arc::ptr_eq(a, b)) && entry.source_meta.get(&key) == Some(&info)
+                .is_some_and(|(a, b)| Arc::ptr_eq(a, b)) && entry.source_meta.get(&tag) == Some(&info)
                 // Still empty: keep the cached waiting state instead of recooking every frame.
-                || (incoming.is_none() && !entry.sources.contains_key(&key) && entry.source_meta.get(&key) == Some(&info));
+                || (incoming.is_none() && !entry.sources.contains_key(&key) && entry.source_meta.get(&tag) == Some(&info));
             if !unchanged {
                 let matrix = info["matrix"].as_array().and_then(|a| (a.len() == 16).then(|| {
                     let values: Vec<_> = a.iter().filter_map(Value::as_f64).collect();
@@ -272,7 +274,7 @@ impl InstanceManager {
                 }).flatten());
                 entry.session.set_external(external,incoming.map_or_else(||ExternalInput::Missing(empty),|g|ExternalInput::Object{geo:g.clone(),matrix,info:info.clone()}));
             }
-            entry.source_meta.insert(key, info);
+            entry.source_meta.insert(tag, info);
         }
         entry.sources = feeds.cloned().unwrap_or_default();
         entry.session.set_time(frame, fps)?;
@@ -534,7 +536,11 @@ fn apply_params(graph: &mut Value, params: &Value) -> Result<()> {
         .as_object()
         .ok_or("params must be an object of exposed parameter values")?;
     let mut doc = Document::parse(graph.to_string())?;
+    let known: Vec<Value> = link_interface(graph)["params"].as_array().into_iter().flatten().map(|p| p["name"].clone()).collect();
     for (name, value) in params {
+        // A value for a parameter the (renamed/changed) graph no longer has is stale, not an error:
+        // the add-on resyncs its sockets from this cook's interface.
+        if !known.iter().any(|k| k == name) { continue; }
         let edit = link_param_edit(doc.value(), &json!({"name":name,"value":value}))?;
         doc.edit(&edit)?;
     }

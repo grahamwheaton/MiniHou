@@ -71,8 +71,37 @@ def entries(graph):
     return out
 
 
+PICKER_NODE = "@picker"
+PICKER_ID = "picker_id"
+
+
+def pickers(graph):
+    """Rust modifier_inputs::pickers: (node id, stable picker id) per Blender Object node (sorted by node id)."""
+    used, out = set(), []
+    for node in sorted(k for k, n in (graph.get("nodes") or {}).items() if n.get("type") == "blender_object"):
+        pinned = graph["nodes"][node].get(PICKER_ID)
+        uid = pinned if isinstance(pinned, str) and pinned and len(pinned) <= 128 and pinned not in used else node
+        if uid in used:
+            uid = node + "~"
+        used.add(uid)
+        out.append((node, uid))
+    return out
+
+
+def picker_entries(graph):
+    """Implicit Object pickers: each Blender Object node, named after the node, keyed input:@picker:<id>."""
+    return [{"id": uid, "name": node, "kind": "object", "default": "", "node": PICKER_NODE, "graph_node": node,
+             "implicit": True, "doc": "MiniHou Blender Object node: pick the object it reads",
+             "value": str(((graph["nodes"][node].get("params") or {}).get("object")) or "")}
+            for node, uid in pickers(graph)]
+
+
+def interface_entries(graph):
+    return entries(graph) + picker_entries(graph)
+
+
 def taken_names(graph):
-    return [e["name"] for e in graph.get("exposed") or [] if "name" in e] + [e["name"] for e in entries(graph)]
+    return [e["name"] for e in graph.get("exposed") or [] if "name" in e] + [e["name"] for e in interface_entries(graph)]
 
 
 def _numbers(v, n):
@@ -221,10 +250,10 @@ def apply_offline(graph, msg):
 
 def merged_interface(old_params, graph):
     """Exposed parameters keep their engine-described entries; modifier inputs follow the graph."""
-    nodes = set(input_nodes(graph))
+    nodes = set(input_nodes(graph)) | {PICKER_NODE}
     keep = [p for p in old_params if not (p.get("id") and p.get("node") in nodes)]
     names = {p["name"] for p in keep}
-    return keep + [dict(e, label=e["name"]) for e in entries(graph) if e["name"] not in names]
+    return keep + [dict(e, label=e["name"]) for e in interface_entries(graph) if e["name"] not in names]
 
 
 def build_draft(kind, name, *, float_value=0.0, int_value=0, bool_value=False, vector=(0.0, 0.0, 0.0),

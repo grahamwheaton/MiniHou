@@ -134,7 +134,7 @@ class LinkClient:
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 self._sock = sock
                 send_message(sock, {"type": "hello", "protocol": PROTOCOL_VERSION, "client": self.client_name,
-                                    "capabilities": ["shm_v1", "viewport_materials_v1", "image_assets_v1"]}, deadline=time.monotonic() + 2.0)
+                                    "capabilities": ["shm_v1", "viewport_materials_v1", "image_assets_v1", "object_names_v1"]}, deadline=time.monotonic() + 2.0)
                 outgoing = queue.Queue(maxsize=64)
                 self._outgoing = outgoing
                 writer = threading.Thread(target=self._write, args=(sock, outgoing, ended),
