@@ -60,3 +60,11 @@ Full brief supplied by the user (2026-10-17). Not started. Category: Groups / Se
 - **Stages:** A essential (domains, multiple seeds, avoid/allowed/barrier, step limits, output group); B constraints (distance, sharp/face angle, UV/material, attributes, directional); C modes (flood to target, regions, outputs); D interaction (viewport seed pick, live preview, barrier and frontier display). Complete and test each stage before the next.
 - **Validation:** tests for each domain, islands, groups, barriers, non-manifold, limits, constraints, directional, target, regions, empty and invalid input, attribute preservation. Demo graphs: barrier-restricted face flood, distance-limited flood, attribute-tolerance flood.
 - **Must not break** existing Grow and Group Expand.
+
+---
+
+# Low-importance todo: L-system is 2D
+
+- **Problem:** the Rust `lsystem` node produces 2D output, but the pre-Rust (Python) version already fixed this. Make the Rust node match the Python behaviour (3D output, same turtle semantics as the fixed Python node).
+- **Priority:** low. Not started.
+- **How to start later:** compare the Python fix in `minihou/nodes` (grep `lsystem`) with the Rust node in `rust/crates/minihou-core/src/nodes/`, then add a golden test against the Python output.
