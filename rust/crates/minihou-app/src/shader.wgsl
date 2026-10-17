@@ -24,12 +24,18 @@ struct U {
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var matcap: texture_2d<f32>;
 @group(0) @binding(2) var matcap_sampler: sampler;
+struct Material { factor: vec4<f32> };
+@group(1) @binding(0) var<uniform> material: Material;
+@group(1) @binding(1) var base_image: texture_2d<f32>;
+@group(1) @binding(2) var base_sampler: sampler;
 
 struct VOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) vpos: vec3<f32>,
     @location(1) vnorm: vec3<f32>,
     @location(2) vcolor: vec3<f32>,
+    @location(3) uv: vec2<f32>,
+    @location(4) uv_valid: f32,
 };
 
 // the three-term rig; `n` is a unit view-space normal that faces the viewer
@@ -42,7 +48,9 @@ fn light(n: vec3<f32>) -> f32 {
 
 fn out_color(c: vec3<f32>) -> vec4<f32> {
     if (u.encode_srgb != 0u) {
-        return vec4<f32>(pow(c, vec3<f32>(1.0 / 2.2)), 1.0);
+        let low = c * 12.92;
+        let high = 1.055 * pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.4)) - 0.055;
+        return vec4<f32>(select(high, low, c <= vec3<f32>(0.0031308)), 1.0);
     }
     return vec4<f32>(c, 1.0);
 }
@@ -55,8 +63,32 @@ fn vs_surf(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) co
     o.vpos = vp.xyz;
     o.vnorm = (u.view * vec4<f32>(n, 0.0)).xyz;
     o.vcolor = color;
+    o.uv = vec2<f32>(0.0); o.uv_valid = 0.0;
     return o;
 }
+
+@vertex
+fn vs_tex(@location(0) p:vec3<f32>, @location(1) n:vec3<f32>, @location(2) color:vec3<f32>,
+          @location(3) uv:vec2<f32>, @location(4) valid:f32) -> VOut {
+    var o:VOut;
+    o.pos=u.view_proj*vec4<f32>(p,1.0);
+    o.vpos=(u.view*vec4<f32>(p,1.0)).xyz;
+    o.vnorm=(u.view*vec4<f32>(n,0.0)).xyz;
+    o.vcolor=color; o.uv=uv; o.uv_valid=valid;
+    return o;
+}
+
+fn textured(i:VOut,front:bool)->vec3<f32> {
+    var rgb:vec3<f32>;
+    if (i.uv_valid < 0.5) {
+        let tile=floor(i.vpos.xy * 8.0);
+        let alternate=(i32(tile.x)+i32(tile.y)) & 1;
+        rgb=select(vec3<f32>(0.35,0.12,0.42),vec3<f32>(0.9,0.9,0.9),alternate==0);
+    } else { rgb=textureSample(base_image,base_sampler,i.uv).rgb; }
+    return rgb * material.factor.rgb * (shade_surf(i,front) / u.base.rgb);
+}
+@fragment fn fs_tex(i:VOut,@builtin(front_facing) front:bool)->@location(0) vec4<f32> { return out_color(textured(i,front)); }
+@fragment fn fs_tex_xray(i:VOut,@builtin(front_facing) front:bool)->@location(0) vec4<f32> { return vec4<f32>(out_color(textured(i,front)).rgb,0.32); }
 
 fn shade_surf(i: VOut, front: bool) -> vec3<f32> {
     // The unit vector from this point to the eye (view space: the eye is at the origin). In a perspective view it is NOT

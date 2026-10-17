@@ -4,6 +4,8 @@ use bytemuck::{Pod, Zeroable};
 use minihou_core::{Geometry, normals, preview};
 use minihou_core::lod::{ClusterLod, ClusterId};
 use minihou_app::Camera;
+use minihou_app::materials::{self, Registry, State};
+use std::collections::{BTreeMap,HashMap,HashSet};
 
 #[path = "display_modes.rs"]
 pub mod display_modes;
@@ -12,7 +14,13 @@ use display_modes::split_indices;
 
 /// Renderer switches; stats and the orientation widget are painted by the UI.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
-pub struct Overlay { pub grid: bool, pub axes: bool, pub geometry: crate::ui::Overlays, pub light_background: bool, pub normals: bool, pub bounds: bool, pub xray: bool, pub wireframe: bool, pub visibility: ObjectVisibility, pub matcap: MatCap, pub matcap_flat: bool, pub object_color: ObjectColor }
+pub struct Overlay { pub grid: bool, pub axes: bool, pub geometry: crate::ui::Overlays, pub light_background: bool, pub normals: bool, pub bounds: bool, pub xray: bool, pub wireframe: bool, pub visibility: ObjectVisibility, pub matcap: MatCap, pub matcap_flat: bool, pub object_color: ObjectColor, pub textures: bool }
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct TexVertex { p:[f32;3], n:[f32;3], color:[f32;3], uv:[f32;2], valid:f32 }
+#[derive(Clone)]
+struct SurfaceTri { vertices:[TexVertex;3], points:[u32;3], prim:u32, slot:String, uv_sets:BTreeMap<String,[[f32;2];3]> }
 
 pub struct Scene {
     p: Vec<f32>, n: Vec<f32>, point: Vec<u32>, line: Vec<u32>, tri: Vec<u32>, edge: Vec<u32>,
@@ -21,6 +29,7 @@ pub struct Scene {
     /// The eight corners of the bounding box.
     bbp: [f32; 24],
     pub center: [f32;3], pub radius: f32,
+    textured:Vec<SurfaceTri>,
 }
 /// Longest overlay normal list kept: more points than this are thinned evenly.
 const NORMAL_LINES: usize = 60_000;
@@ -33,10 +42,11 @@ impl Scene {
             p: self.p.clone(), n: self.n.clone(), point:self.point.clone(), line:self.line.clone(),
             tri: crate::ui::proxy_ui::proxy::reduced_triangles(&self.tri, level),
             edge: crate::ui::proxy_ui::proxy::reduced_edges(&self.edge, level),
-            nlp: self.nlp.clone(), nln: self.nln.clone(), normal_points:self.normal_points.clone(), bbp: self.bbp, center: self.center, radius: self.radius,
+            nlp: self.nlp.clone(), nln: self.nln.clone(), normal_points:self.normal_points.clone(), bbp: self.bbp, center: self.center, radius: self.radius, textured:self.textured.clone(),
         }
     }
     pub fn triangles(&self) -> usize { self.tri.len() / 3 }
+    pub fn has_textured_slots(&self) -> bool { self.textured.iter().any(|t|!t.slot.is_empty()) }
     pub fn positions(&self) -> &[f32] { &self.p }
     pub fn normals(&self) -> &[f32] { &self.n }
     pub fn point_indices(&self) -> &[u32] { &self.point }
@@ -72,8 +82,37 @@ impl Scene {
             for c in 0..8 { for k in 0..3 { bbp[c*3+k] = if (c >> k) & 1 == 1 { hi[k] } else { lo[k] }; } }
         }
         let (point,line)=element_indices(g,&l.tri);
-        Self { p:p.to_vec(),n,point,line,tri:l.tri,edge:l.edge,nlp,nln,normal_points,bbp,center,radius }
+        let provenance=preview::triangulate_geometry(g);
+        let names=g.detail.get("materials").and_then(|v|v.as_array());
+        let bindings=g.detail.get("material_bindings").and_then(|v|v.get("slots")).and_then(|v|v.as_array());
+        let corner_n=g.vertex.get("N").and_then(|a|a.as_f32());
+        let mut textured=Vec::with_capacity(provenance.prim.len());
+        for (ti,&slot) in provenance.material_slot.iter().enumerate() {
+            let slot_index=usize::try_from(slot).ok();
+            let name=slot_index.and_then(|i|bindings.and_then(|b|b.get(i)).and_then(|v|v.as_str())
+                .or_else(||names.and_then(|n|n.get(i)).and_then(|v|v.as_str()))).unwrap_or("").to_owned();
+            let vertices=std::array::from_fn(|k| { let i=ti*3+k; let point=provenance.point[i] as usize; let corner=provenance.corner[i] as usize;
+                let uv=provenance.uv_sets.get("uv").and_then(|v|v.get(i*2..i*2+2)).map(|v|[v[0],v[1]]).unwrap_or([f32::NAN;2]);
+                let valid=(uv[0].is_finite() && uv[1].is_finite()) as u8 as f32;
+                let normal=corner_n.and_then(|v|v.get(corner*3..corner*3+3)).unwrap_or(&n[point*3..point*3+3]);
+                TexVertex {p:[p[point*3],p[point*3+1],p[point*3+2]],n:[normal[0],normal[1],normal[2]],color:[0.72;3],uv:if valid>0. {uv} else {[0.;2]},valid}
+            });
+            let uv_sets=provenance.uv_sets.iter().map(|(name,values)| (name.clone(),std::array::from_fn(|k|[values[(ti*3+k)*2],values[(ti*3+k)*2+1]]))).collect();
+            textured.push(SurfaceTri { vertices,points:[provenance.point[ti*3],provenance.point[ti*3+1],provenance.point[ti*3+2]],prim:provenance.prim[ti],slot:name,uv_sets });
+        }
+        Self { p:p.to_vec(),n,point,line,tri:l.tri,edge:l.edge,nlp,nln,normal_points,bbp,center,radius,textured }
     }
+}
+
+#[test]
+fn cube_seams_expand_to_triangle_corners() {
+    let graph=minihou_core::Graph::from_json(include_str!("test_data/textured_cube.minihou")).unwrap();
+    let geo=graph.cook(Some("output1")).unwrap(); let scene=Scene::new(&geo);
+    assert_eq!(scene.positions().len()/3,8);
+    assert_eq!(scene.textured.len(),12);
+    assert_eq!(scene.textured.len()*3,36);
+    assert_eq!(scene.textured.iter().map(|t|t.prim).collect::<std::collections::BTreeSet<_>>().len(),6);
+    assert!(scene.textured.iter().all(|t|t.vertices.iter().all(|v|v.valid==1.)));
 }
 /// Standalone points and non-surface primitive segments survive every proxy cut.
 fn element_indices(g:&Geometry, triangles:&[u32]) -> (Vec<u32>,Vec<u32>) {
@@ -155,6 +194,9 @@ fn make_depth(device: &wgpu::Device, w: u32, h: u32) -> wgpu::TextureView {
 
 
 pub struct Gpu {
+    tex_bgl:wgpu::BindGroupLayout, default_tex_bind:wgpu::BindGroup, pipe_tex:wgpu::RenderPipeline, pipe_tex_bias:wgpu::RenderPipeline, pipe_tex_xray:wgpu::RenderPipeline,
+    tex_batches:Vec<TextureBatch>, texture_status:Vec<String>,
+    gpu_images:HashMap<String,(wgpu::TextureView,usize,u64)>, gpu_tick:u64,
     pipe_surf: wgpu::RenderPipeline, pipe_surf_bias: wgpu::RenderPipeline, pipe_wire: wgpu::RenderPipeline,
     pipe_xray: wgpu::RenderPipeline, pipe_normals: wgpu::RenderPipeline, pipe_bounds: wgpu::RenderPipeline, pipe_select: wgpu::RenderPipeline,
     floor:wgpu::Buffer, floor_count:u32, pipe_floor:wgpu::RenderPipeline,
@@ -175,6 +217,39 @@ pub struct Gpu {
     object_mask_points: Option<Vec<std::ops::Range<u32>>>,
     /// Average edge length in world units: sizes the edge fade.
     edge_world: f32,
+}
+
+struct TextureBatch { vertex:wgpu::Buffer, bind:wgpu::BindGroup, selected:u32, total:u32, triangles:Vec<SurfaceTri> }
+impl TextureBatch {
+    fn repartition(&mut self,device:&wgpu::Device,ranges:&[std::ops::Range<u32>]) {
+        let mut vertices=Vec::with_capacity(self.triangles.len()*3);
+        for selected in [true,false] { for tri in &self.triangles {
+            if ranges.iter().any(|r|tri.points.iter().all(|p|r.contains(p)))==selected {vertices.extend_from_slice(&tri.vertices);}
+        } if selected {self.selected=vertices.len() as u32;} }
+        self.total=vertices.len() as u32;
+        self.vertex=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("material vertices"),contents:if vertices.is_empty(){&[0u8;48]}else{bytemuck::cast_slice(&vertices)},usage:wgpu::BufferUsages::VERTEX});
+    }
+}
+
+fn texture_address(s:&str)->wgpu::AddressMode { match s {"clamp"=>wgpu::AddressMode::ClampToEdge,"mirror"=>wgpu::AddressMode::MirrorRepeat,_=>wgpu::AddressMode::Repeat} }
+fn texture_filter(s:&str)->wgpu::FilterMode {if s.starts_with("nearest") {wgpu::FilterMode::Nearest} else {wgpu::FilterMode::Linear} }
+
+/// Downsample in linear light, then encode into the selected GPU byte format.
+fn mip_chain(asset:&materials::ImageAsset,srgb:bool)->Vec<(u32,u32,Vec<u8>)> {
+    let mut levels=vec![(asset.width,asset.height,asset.rgba.clone())];
+    while levels.last().is_some_and(|(w,h,_)| *w>1 || *h>1) {
+        let (w,h,src)=levels.last().unwrap(); let (nw,nh)=((*w/2).max(1),(*h/2).max(1));
+        let mut dst=vec![0u8;nw as usize*nh as usize*4];
+        for y in 0..nh {for x in 0..nw {for c in 0..4 {
+            let mut sum=0.; let mut count=0.;
+            for yy in 0..2 {for xx in 0..2 {let sx=(x*2+xx).min(*w-1); let sy=(y*2+yy).min(*h-1);
+                let v=src[((sy*w+sx)*4+c) as usize] as f32/255.; sum+=if srgb && c<3 {materials::srgb_to_linear(v)} else {v}; count+=1.; }}
+            let v=sum/count; let v=if srgb && c<3 {materials::linear_to_srgb(v)} else {v};
+            dst[((y*nw+x)*4+c) as usize]=(v.clamp(0.,1.)*255.).round() as u8;
+        }}}
+        levels.push((nw,nh,dst));
+    }
+    levels
 }
 
 fn object_mask_indices(triangles: &[u32], ranges: &[std::ops::Range<u32>]) -> Vec<u32> {
@@ -284,9 +359,20 @@ impl Gpu {
                 wgpu::BindGroupEntry { binding:1, resource:wgpu::BindingResource::TextureView(&matcap_view) },
                 wgpu::BindGroupEntry { binding:2, resource:wgpu::BindingResource::Sampler(&sampler) }],
         });
+        let tex_bgl=device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {label:Some("material group"),entries:&[
+            wgpu::BindGroupLayoutEntry {binding:0,visibility:wgpu::ShaderStages::FRAGMENT,ty:wgpu::BindingType::Buffer {ty:wgpu::BufferBindingType::Uniform,has_dynamic_offset:false,min_binding_size:None},count:None},
+            wgpu::BindGroupLayoutEntry {binding:1,visibility:wgpu::ShaderStages::FRAGMENT,ty:wgpu::BindingType::Texture {sample_type:wgpu::TextureSampleType::Float {filterable:true},view_dimension:wgpu::TextureViewDimension::D2,multisampled:false},count:None},
+            wgpu::BindGroupLayoutEntry {binding:2,visibility:wgpu::ShaderStages::FRAGMENT,ty:wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),count:None},
+        ]});
+        let default_texture=device.create_texture(&wgpu::TextureDescriptor {label:Some("default material placeholder"),size:wgpu::Extent3d {width:1,height:1,depth_or_array_layers:1},mip_level_count:1,sample_count:1,dimension:wgpu::TextureDimension::D2,format:wgpu::TextureFormat::Rgba8Unorm,usage:wgpu::TextureUsages::TEXTURE_BINDING,view_formats:&[]});
+        let default_view=default_texture.create_view(&Default::default());
+        let default_sampler=device.create_sampler(&Default::default());
+        let default_factor=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("default factor"),contents:bytemuck::cast_slice(&[1f32;4]),usage:wgpu::BufferUsages::UNIFORM});
+        let default_tex_bind=device.create_bind_group(&wgpu::BindGroupDescriptor {label:Some("default material"),layout:&tex_bgl,entries:&[
+            wgpu::BindGroupEntry {binding:0,resource:default_factor.as_entire_binding()},wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::TextureView(&default_view)},wgpu::BindGroupEntry {binding:2,resource:wgpu::BindingResource::Sampler(&default_sampler)}]});
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[&bgl],
+            bind_group_layouts: &[&bgl,&tex_bgl],
             push_constant_ranges: &[],
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -303,6 +389,8 @@ impl Gpu {
         };
         let surf_bufs = [vb(&POS), vb(&NRM), vb(&COL)];
         let wire_bufs = [vb(&POS), vb(&NRM), vb(&COL)];
+        const TEX_ATTRS:[wgpu::VertexAttribute;5]=wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Float32x3,3=>Float32x2,4=>Float32];
+        let tex_bufs=[wgpu::VertexBufferLayout {array_stride:std::mem::size_of::<TexVertex>() as u64,step_mode:wgpu::VertexStepMode::Vertex,attributes:&TEX_ATTRS}];
 
         let mk = |label, vs, fs, bufs: &[wgpu::VertexBufferLayout], topo, bias: i32, blend: bool, compare, depth_write: bool, color_write| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -340,6 +428,9 @@ impl Gpu {
         let pipe_elements=mk("points and curves","vs_element","fs_element",&element_bufs,T::TriangleList,-1,true,C::LessEqual,true,W::ALL);
         let pipe_elements_ghost=mk("ghost points and curves","vs_element","fs_element_ghost",&element_bufs,T::TriangleList,-1,true,C::LessEqual,false,W::ALL);
         let pipe_surf = mk("surf", "vs_surf", "fs_surf", &surf_bufs, T::TriangleList, 0, false, C::LessEqual, true, W::ALL);
+        let pipe_tex=mk("textured surface","vs_tex","fs_tex",&tex_bufs,T::TriangleList,0,false,C::LessEqual,true,W::ALL);
+        let pipe_tex_bias=mk("textured surface+bias","vs_tex","fs_tex",&tex_bufs,T::TriangleList,2,false,C::LessEqual,true,W::ALL);
+        let pipe_tex_xray=mk("textured xray","vs_tex","fs_tex_xray",&tex_bufs,T::TriangleList,0,true,C::Always,false,W::ALL);
         let pipe_surf_bias = mk("surf+bias", "vs_surf", "fs_surf", &surf_bufs, T::TriangleList, 2, false, C::LessEqual, true, W::ALL);
         let pipe_wire = mk("wire", "vs_wire", "fs_wire", &wire_bufs, T::LineList, -1, true, C::LessEqual, false, W::ALL);
         let pipe_wire_all = mk("all edges", "vs_wire", "fs_wire", &wire_bufs, T::LineList, 0, true, C::Always, false, W::ALL);
@@ -452,6 +543,7 @@ impl Gpu {
         let bb_i = buf("bb_i", bytemuck::cast_slice(&BOX_EDGES), wgpu::BufferUsages::INDEX);
 
         Self {
+            tex_bgl,default_tex_bind,pipe_tex,pipe_tex_bias,pipe_tex_xray,tex_batches:Vec::new(),texture_status:Vec::new(),gpu_images:HashMap::new(),gpu_tick:0,
             floor,floor_count,pipe_floor,
             elements:Elements::new(device,sc,&[],&[]),element_points:Vec::new(),pipe_elements,pipe_elements_ghost,
             pipe_depth, pipe_wire_all, pipe_wire_hidden, pipe_ghost, pipe_ghost_wire,
@@ -492,6 +584,7 @@ impl Gpu {
         }
     }
     pub fn upload(&mut self, device: &wgpu::Device, sc: &Scene) {
+        self.tex_batches.clear(); self.texture_status.clear();
         self.elements=Elements::new(device,sc,&[],&self.element_points);
         self.current_tri=sc.tri.clone(); self.current_edge=sc.edge.clone();
         self.partition_tri=Partition::new(device,&sc.tri,3,&[]);
@@ -512,6 +605,64 @@ impl Gpu {
         self.nl_count=(sc.nlp.len()/3) as u32; self.nl_selected=0;
         self.bb_p=buf("bb_p",bytemuck::cast_slice(&sc.bbp),wgpu::BufferUsages::VERTEX);
     }
+    pub fn upload_textures(&mut self,device:&wgpu::Device,queue:&wgpu::Queue,sc:&Scene,registry:&mut Registry) {
+        self.tex_batches.clear(); self.texture_status.clear();
+        let mut grouped:BTreeMap<String,Vec<SurfaceTri>>=BTreeMap::new();
+        for tri in &sc.textured { grouped.entry(tri.slot.clone()).or_default().push(tri.clone()); }
+        let mut pinned=HashSet::new(); let mut gpu_used=0usize;
+        for (slot,mut triangles) in grouped {
+            let binding=registry.resolve(&slot);
+            let tex=binding.descriptor.as_ref().and_then(|d|d.textures.base_color.as_ref());
+            if let Some(tex)=tex {for tri in &mut triangles {for k in 0..3 {
+                let uv=tri.uv_sets.get(&tex.uv_set).map(|uv|uv[k]).unwrap_or([f32::NAN;2]);
+                tri.vertices[k].valid=(uv[0].is_finite()&&uv[1].is_finite()) as u8 as f32;
+                tri.vertices[k].uv=if tri.vertices[k].valid>0. {uv}else{[0.;2]};
+            }}}
+            else {for tri in &mut triangles {for v in &mut tri.vertices {v.valid=1.;v.uv=[0.;2];}}}
+            let srgb=tex.is_some_and(|t|t.color_space=="srgb");
+            let image=binding.image.clone().unwrap_or_else(|| {
+                let checker=matches!(binding.state,State::CheckerFallback(_)|State::Unsupported(_));
+                let rgba=if checker {[220,220,220,255,90,30,110,255,90,30,110,255,220,220,220,255].to_vec()} else {[255,255,255,255].to_vec()};
+                materials::ImageAsset {width:if checker {2}else{1},height:if checker {2}else{1},rgba,hash:if checker {"checker".into()}else{"white".into()}}
+            });
+            let key=format!("{}:{}",image.hash,if srgb {"srgb"}else{"linear"}); pinned.insert(key.clone());
+            let (view,resident,dimensions,downsampled)=if let Some((view,bytes,last))=self.gpu_images.get_mut(&key) {
+                self.gpu_tick+=1; *last=self.gpu_tick; gpu_used+=*bytes; (view.clone(),*bytes,(image.width,image.height),false)
+            } else {
+                let mut levels=mip_chain(&image,srgb);
+                let mut skipped=0;
+                while levels.len()>1 && gpu_used+levels.iter().map(|(_,_,b)|b.len()).sum::<usize>()>registry.gpu_budget {levels.remove(0);skipped+=1;}
+                let bytes=levels.iter().map(|(_,_,b)|b.len()).sum::<usize>(); gpu_used+=bytes;
+                let dimensions=(levels[0].0,levels[0].1);
+                let format=if srgb {wgpu::TextureFormat::Rgba8UnormSrgb}else{wgpu::TextureFormat::Rgba8Unorm};
+                let texture=device.create_texture(&wgpu::TextureDescriptor {label:Some("base colour"),size:wgpu::Extent3d {width:dimensions.0,height:dimensions.1,depth_or_array_layers:1},mip_level_count:levels.len() as u32,sample_count:1,dimension:wgpu::TextureDimension::D2,format,usage:wgpu::TextureUsages::TEXTURE_BINDING|wgpu::TextureUsages::COPY_DST,view_formats:&[]});
+                for (mip,(w,h,bytes)) in levels.iter().enumerate() {
+                    queue.write_texture(wgpu::TexelCopyTextureInfo {texture:&texture,mip_level:mip as u32,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All},bytes,wgpu::TexelCopyBufferLayout {offset:0,bytes_per_row:Some(w*4),rows_per_image:Some(*h)},wgpu::Extent3d {width:*w,height:*h,depth_or_array_layers:1});
+                }
+                let view=texture.create_view(&Default::default());
+                self.gpu_tick+=1; self.gpu_images.insert(key.clone(),(view.clone(),bytes,self.gpu_tick));
+                (view,bytes,dimensions,skipped>0)
+            };
+            let sampler_desc=tex.map(|t|&t.sampler);
+            let sampler=device.create_sampler(&wgpu::SamplerDescriptor {address_mode_u:sampler_desc.map_or(wgpu::AddressMode::Repeat,|s|texture_address(&s.wrap_u)),address_mode_v:sampler_desc.map_or(wgpu::AddressMode::Repeat,|s|texture_address(&s.wrap_v)),mag_filter:sampler_desc.map_or(wgpu::FilterMode::Linear,|s|texture_filter(&s.mag)),min_filter:sampler_desc.map_or(wgpu::FilterMode::Linear,|s|texture_filter(&s.min)),mipmap_filter:if sampler_desc.is_some_and(|s|s.min.ends_with("nearest")){wgpu::FilterMode::Nearest}else{wgpu::FilterMode::Linear},..Default::default()});
+            let factor=binding.descriptor.as_ref().map_or([1.;4],|d|d.base_color_factor);
+            let uniform=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("base colour factor"),contents:bytemuck::cast_slice(&factor),usage:wgpu::BufferUsages::UNIFORM});
+            let bind=device.create_bind_group(&wgpu::BindGroupDescriptor {label:Some("material"),layout:&self.tex_bgl,entries:&[
+                wgpu::BindGroupEntry {binding:0,resource:uniform.as_entire_binding()},wgpu::BindGroupEntry {binding:1,resource:wgpu::BindingResource::TextureView(&view)},wgpu::BindGroupEntry {binding:2,resource:wgpu::BindingResource::Sampler(&sampler)}]});
+            let mut warning=match &binding.state {State::Ok=>"ok".into(),State::Missing=>"neutral".into(),State::Unsupported(e)|State::CheckerFallback(e)=>format!("checker fallback: {e}")};
+            if triangles.iter().any(|t|t.vertices.iter().any(|v|v.valid==0.)) {warning.push_str("; missing UV checker");}
+            if downsampled {warning.push_str("; downsampled for GPU budget");}
+            self.texture_status.push(format!("{}: {} · {}x{} · {} · UV {} · {} / {} · {} bytes · {}",if slot.is_empty(){"(default)"}else{&slot},tex.and_then(|t|t.path.as_ref().map(|p|p.display().to_string()).or_else(||t.image_id.clone())).unwrap_or_else(||"no image".into()),dimensions.0,dimensions.1,tex.map_or("linear",|t|&t.color_space),tex.map_or("uv",|t|&t.uv_set),tex.map_or("linear",|t|&t.sampler.min),tex.map_or("repeat",|t|&t.sampler.wrap_u),resident,warning));
+            let mut batch=TextureBatch {vertex:device.create_buffer(&wgpu::BufferDescriptor {label:Some("empty material vertices"),size:48,usage:wgpu::BufferUsages::VERTEX,mapped_at_creation:false}),bind,selected:0,total:0,triangles};
+            batch.repartition(device,&self.object_mask_points.clone().unwrap_or_default());
+            self.tex_batches.push(batch);
+        }
+        while self.gpu_images.values().map(|(_,bytes,_)|*bytes).sum::<usize>()>registry.gpu_budget {
+            let Some(id)=self.gpu_images.iter().filter(|(id,_)|!pinned.contains(*id)).min_by_key(|(_,(_,_,last))|last).map(|(id,_)|id.clone()) else {break};
+            self.gpu_images.remove(&id);
+        }
+    }
+    pub fn texture_status(&self)->&[String] {&self.texture_status}
     /// Use full-detail selected-object triangles for a stable silhouette at every proxy/LOD level.
     pub fn select_objects(&mut self, device: &wgpu::Device, scene: &Scene, ranges: Vec<std::ops::Range<u32>>) {
         if self.object_mask_points.as_ref() == Some(&ranges) { return; }
@@ -524,6 +675,7 @@ impl Gpu {
             usage: wgpu::BufferUsages::INDEX,
         }));
         self.partition_tri=Partition::new(device,&self.current_tri,3,&ranges);
+        for batch in &mut self.tex_batches {batch.repartition(device,&ranges);}
         self.partition_edge=Partition::new(device,&self.current_edge,2,&ranges);
         self.boxes=None;
         let (mut p,mut n)=(Vec::with_capacity(scene.nlp.len()),Vec::with_capacity(scene.nln.len()));
@@ -673,6 +825,7 @@ impl Gpu {
                 timestamp_writes:None,occlusion_query_set:None,
             });
             pass.set_bind_group(0,&self.bind,&[]);
+            pass.set_bind_group(1,&self.default_tex_bind,&[]);
             pass.set_vertex_buffer(0,vp.slice(..)); pass.set_vertex_buffer(1,vn.slice(..)); pass.set_vertex_buffer(2,vc.slice(..));
             pass.set_index_buffer(tri.buffer.slice(..),wgpu::IndexFormat::Uint32);
             let visible=tri.visible(visibility);
@@ -681,10 +834,20 @@ impl Gpu {
                     pass.set_pipeline(&self.pipe_depth); pass.draw_indexed(visible.clone(),0,0..1);
                 }
                 if mode.shaded() || mode == Mode::WireframeGhost {
-                    pass.set_pipeline(if overlay.xray { &self.pipe_xray }
-                        else if mode == Mode::WireframeGhost { &self.pipe_ghost }
-                        else if is_shaded_wire { &self.pipe_surf_bias } else { &self.pipe_surf });
-                    pass.draw_indexed(visible,0,0..1);
+                    let textured=overlay.textures && matches!(mode,Mode::FlatShaded|Mode::FlatWireShaded|Mode::SmoothShaded|Mode::SmoothWireShaded)
+                        && overlay.object_color==ObjectColor::Single && !self.tex_batches.is_empty();
+                    if textured {
+                        pass.set_pipeline(if overlay.xray {&self.pipe_tex_xray}else if is_shaded_wire {&self.pipe_tex_bias}else{&self.pipe_tex});
+                        for batch in &self.tex_batches {pass.set_bind_group(1,&batch.bind,&[]); pass.set_vertex_buffer(0,batch.vertex.slice(..));
+                            pass.draw(0..if visibility==ObjectVisibility::ShowAll {batch.total}else{batch.selected},0..1);
+                        }
+                        pass.set_vertex_buffer(0,vp.slice(..));
+                    } else {
+                        pass.set_pipeline(if overlay.xray { &self.pipe_xray }
+                            else if mode == Mode::WireframeGhost { &self.pipe_ghost }
+                            else if is_shaded_wire { &self.pipe_surf_bias } else { &self.pipe_surf });
+                        pass.draw_indexed(visible,0,0..1);
+                    }
                 }
             }
             if show_wire && overlay.geometry.lines {
@@ -767,6 +930,7 @@ impl Gpu {
                     occlusion_query_set: None,
                 });
                 mask_pass.set_bind_group(0, &self.bind, &[]);
+                mask_pass.set_bind_group(1, &self.default_tex_bind, &[]);
                 mask_pass.set_pipeline(&self.pipe_mask);
                 mask_pass.set_vertex_buffer(0, vp.slice(..));
                 mask_pass.set_vertex_buffer(1, vn.slice(..));
@@ -919,6 +1083,7 @@ mod tests {
             p, n, tri, edge, point:Vec::new(), line:Vec::new(),
             nlp: Vec::new(), nln: Vec::new(), normal_points:Vec::new(), bbp: [0.0; 24],
             center: [0.0, 0.0, 0.0], radius: 1.5,
+            textured:Vec::new(),
         };
 
         let gpu = Gpu::new(&device, &scene);
