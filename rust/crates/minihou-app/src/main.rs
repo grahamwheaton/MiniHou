@@ -212,6 +212,21 @@ fn transform_keeps_measurement_point_identity() {
 fn toggle_edit_mode(current: ui::SelectionMode, last: &mut ui::SelectionMode) -> ui::SelectionMode {
     if current == ui::SelectionMode::Object { *last } else { *last = current; ui::SelectionMode::Object }
 }
+/// Element modes picked by 1-4 or the mode buttons become the mode Ctrl+Tab returns to.
+fn remember_element_mode(mode: ui::SelectionMode, last: &mut ui::SelectionMode) {
+    if mode != ui::SelectionMode::Object { *last = mode; }
+}
+/// egui's focus pass treats every Tab press (Ctrl included) as "focus next widget" when nothing is
+/// focused, so the first Ctrl+Tab parked keyboard focus in the first text field and the keymap
+/// (which ignores keys while egui wants keyboard input) never saw the second press. Ctrl+Tab is
+/// held back from egui while nothing is focused and replayed into the frame input for the keymap.
+fn hold_back_ctrl_tab(raw: &mut egui::RawInput, widget_focused: bool) -> Vec<egui::Event> {
+    if widget_focused { return Vec::new(); }
+    let (held, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut raw.events).into_iter()
+        .partition(|e| matches!(e, egui::Event::Key { key: egui::Key::Tab, modifiers, .. } if modifiers.ctrl || modifiers.command));
+    raw.events = kept;
+    held
+}
 fn select_nodes(set: &mut std::collections::BTreeSet<String>, ids: impl IntoIterator<Item = String>, extend: bool, toggle: bool) {
     if !extend && !toggle { set.clear(); }
     for id in ids {
@@ -376,6 +391,7 @@ struct App {
     pushpull_pick: bool,
     pub last_operator: Option<LastOperator>,
     last_edit_selection: ui::SelectionMode, params_open: bool, object_hidden: bool,
+    held_keys: Vec<egui::Event>,
 }
 impl App {
     /// Finish the current edit before transferring pointer/keyboard ownership to selection.
@@ -459,7 +475,7 @@ impl App {
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
             display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
             clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
-            last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false };
+            last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new() };
         app.prefs = Preferences::load();
         app.prefs.apply_python(&python_gate());
         app.mode=Mode::parse(&app.prefs.viewport.default_shading);
@@ -1956,7 +1972,7 @@ impl App {
                 UiAction::SetMode(mode) => self.set_display_mode(mode),
                 UiAction::Editor(change) => {
                     if matches!(change, ui::EditorChange::Tool(_)) { self.finish_for_selection(ctx); }
-                    if let ui::EditorChange::Selection(mode) = change { if mode != ui::SelectionMode::Object { self.last_edit_selection = mode; } }
+                    if let ui::EditorChange::Selection(mode) = change { remember_element_mode(mode, &mut self.last_edit_selection); }
                     self.editor_state.apply(change);
                     if matches!(change,ui::EditorChange::Overlays(_) | ui::EditorChange::Xray(_)) {
                         self.prefs.viewport.overlays=self.editor_state.overlays;
@@ -2051,7 +2067,12 @@ impl App {
     }
 }
 impl eframe::App for App {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        let focused = ctx.memory(|m| m.focused().is_some());
+        self.held_keys.extend(hold_back_ctrl_tab(raw_input, focused));
+    }
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        if !self.held_keys.is_empty() { let held = std::mem::take(&mut self.held_keys); ctx.input_mut(|i| i.events.extend(held)); }
         self.poll_http(ctx);
         if self.blender_job.as_ref().is_some_and(|job| job.is_finished()) {
             let result = self.blender_job.take().unwrap().join();
@@ -2854,6 +2875,61 @@ mod tools_tests {
         assert_eq!(toggle_edit_mode(ui::SelectionMode::Object, &mut last), ui::SelectionMode::Points);
         assert_eq!(toggle_edit_mode(ui::SelectionMode::Faces, &mut last), ui::SelectionMode::Object);
         assert_eq!(toggle_edit_mode(ui::SelectionMode::Object, &mut last), ui::SelectionMode::Faces);
+    }
+    /// Real routing: raw Ctrl+Tab -> raw_input_hook filter -> egui frame (with a focusable text
+    /// field, as the params panel has) -> keymap poll -> toggle. Before the fix the first press
+    /// moved egui focus into the text field and every later press was swallowed.
+    #[test]
+    fn ctrl_tab_toggles_object_and_element_modes_through_the_keymap() {
+        use ui::SelectionMode as M;
+        let ctx = egui::Context::default();
+        let keymap = Keymap::blender();
+        let (mut mode, mut last) = (M::Object, M::Points);
+        let mut text = String::from("1.0");
+        let mut press = |key: egui::Key, modifiers: egui::Modifiers, mode: &mut M, last: &mut M| {
+            let mut raw = egui::RawInput { modifiers, events: vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }], ..Default::default() };
+            let held = hold_back_ctrl_tab(&mut raw, ctx.memory(|m| m.focused().is_some()));
+            let mut actions = Vec::new();
+            let _ = ctx.run(raw, |ctx| {
+                ctx.input_mut(|i| i.events.extend(held.clone()));
+                actions = keymap.poll(ctx, &KeyContext { viewport_hovered: true, in_edit_mode: *mode != M::Object, ..Default::default() });
+                egui::CentralPanel::default().show(ctx, |ui| { ui.text_edit_singleline(&mut text); let _ = ui.button("mode"); });
+            });
+            for action in actions {
+                match action {
+                    UiAction::Command(name) if name == "toggle_edit" => *mode = toggle_edit_mode(*mode, last),
+                    UiAction::Editor(ui::EditorChange::Selection(m)) => { remember_element_mode(m, last); *mode = m; }
+                    other => panic!("unexpected {other:?}"),
+                }
+            }
+            assert!(ctx.memory(|m| m.focused().is_none()), "Ctrl+Tab must not move egui focus");
+        };
+        let ctrl = egui::Modifiers::CTRL;
+        let mut seq = Vec::new();
+        for _ in 0..4 { press(egui::Key::Tab, ctrl, &mut mode, &mut last); seq.push(mode); }
+        assert_eq!(seq, [M::Points, M::Object, M::Points, M::Object]);
+        // 3 (faces) in object mode enters faces and becomes the remembered element mode
+        press(egui::Key::Num3, egui::Modifiers::NONE, &mut mode, &mut last); assert_eq!(mode, M::Faces);
+        press(egui::Key::Tab, ctrl, &mut mode, &mut last); assert_eq!(mode, M::Object);
+        press(egui::Key::Tab, ctrl, &mut mode, &mut last); assert_eq!(mode, M::Faces);
+        press(egui::Key::Num2, egui::Modifiers::NONE, &mut mode, &mut last); assert_eq!(mode, M::Edges);
+        press(egui::Key::Tab, ctrl, &mut mode, &mut last); assert_eq!(mode, M::Object);
+        press(egui::Key::Tab, ctrl, &mut mode, &mut last); assert_eq!(mode, M::Edges);
+        // a mode button (UiAction::Editor) also updates the remembered mode; Object button keeps it
+        remember_element_mode(M::Points, &mut last);
+        remember_element_mode(M::Object, &mut last); mode = M::Object;
+        press(egui::Key::Tab, ctrl, &mut mode, &mut last); assert_eq!(mode, M::Points);
+    }
+    #[test]
+    fn ctrl_tab_is_left_to_a_focused_text_field() {
+        let mods = egui::Modifiers::CTRL;
+        let mut raw = egui::RawInput { events: vec![egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers: mods }], ..Default::default() };
+        assert!(hold_back_ctrl_tab(&mut raw, true).is_empty());
+        assert_eq!(raw.events.len(), 1);
+        let plain = egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+        raw.events = vec![plain.clone(), raw.events[0].clone()];
+        assert_eq!(hold_back_ctrl_tab(&mut raw, false).len(), 1);
+        assert_eq!(raw.events, vec![plain]);
     }
     #[test]
     fn viewport_and_network_selection_keep_the_last_added_object_active() {
