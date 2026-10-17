@@ -184,3 +184,20 @@ fn alt_e_with_face_selection_starts_immediately() {
     assert!(!pushpull_starts_now(M::Object, &faces));
     assert!(!pushpull_starts_now(M::Edges, &picking::Selection { mode: M::Edges, edges: vec![(0, 1)], ..Default::default() }));
 }
+
+/// One displayed object, Loop Cut confirmed with Enter: the cooked loop must be the selection
+/// afterwards, computed from the same range the app uses for the active object.
+#[test]
+fn loop_cut_confirm_keeps_loop_selected_for_single_object() {
+    let base=stepped_doc();
+    let (value,id)=graph_edit::add_viewport_cut(base.value(),"out","polysplit",json!({
+        "mode":"edge_loop","split_edges":"p0-1","loops":2,"position":0.5,"factor":0.4,
+        "outgrp_edges":true,"outgrp_edges_name":"viewport_loop_cut"
+    })).unwrap();
+    let g=cook(&value,&id);
+    // The app derives the active object's range from the displayed geometry (single object: all points).
+    let range=0..g.npoints as u32;
+    let selection=loop_cut_selection(&g,&range);
+    assert!(!selection.edges.is_empty(),"confirm must leave the cooked loop selected");
+    assert_eq!(selection.mode,ui::SelectionMode::Edges);
+}

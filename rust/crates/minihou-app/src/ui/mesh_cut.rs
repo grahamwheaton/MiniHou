@@ -281,7 +281,8 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
                 // Edge Slide moves across the selected edge, along a rail; a seed-edge projection is perpendicular.
                 motion.filter(|d|d.length()>0.01).map(|d|(pa,pa+d*20.)).unwrap_or((pa,pb))
             }else{
-                let sign=if motion.is_some_and(|d|d.dot(pb-pa)<0.) {-1.}else{1.};
+                // Slide along the seed edge's own direction, signed by where the pointer moves across it, so the loop follows the mouse on every orientation.
+                let sign=motion.map(|d|if d.dot(pb-pa)<0. {-1.} else {1.}).unwrap_or(1.);
                 (pa,pa+(pb-pa)*sign)
             };
             sl.raw = slide_step(sl.raw, delta, from, to, modifiers.shift);
