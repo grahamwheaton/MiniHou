@@ -125,6 +125,15 @@ impl Topology {
         tris.iter().filter_map(|&t| self.poly_of_tri(t)).filter(|f| seen.insert(*f)).collect()
     }
 
+    /// Constant-time face-marker lookup after one pass over selected triangles.
+    pub(crate) fn polygon_selection_mask(&self, tris: &[u32]) -> Vec<bool> {
+        let mut selected = vec![false; self.npolys as usize];
+        for &tri in tris {
+            if let Some(poly) = self.poly_of_tri(tri) { selected[poly as usize] = true; }
+        }
+        selected
+    }
+
     /// What a plain click on `hit` selects: the nearest corner, the nearest polygon edge, or the whole polygon.
     pub fn pick(&self, p: &[f32], tris: &[u32], hit: Hit, point: [f32; 3], mode: SelectionMode) -> Selection {
         let mut s = picking::element_of(hit, tris, mode);
@@ -421,6 +430,24 @@ fn toggle(current: &mut Selection, new: &Selection) {
 mod tests {
     use super::*;
     use SelectionMode::{Edges, Faces, Points};
+
+    #[test]
+    fn face_marker_mask_matches_polygon_selection_on_startup_mesh() {
+        let graph = minihou_core::Graph::from_json(include_str!("default_graph.json")).unwrap();
+        let geo = graph.cook(Some("output1")).unwrap();
+        let scene = crate::viewport::Scene::new(&geo);
+        let topo = Topology::new(scene.positions(), scene.triangle_indices(), scene.edge_indices());
+        let all: Vec<_> = (0..scene.triangles() as u32).collect();
+        for selected in [vec![], vec![0, 0, 3, u32::MAX], all] {
+            let expected: HashSet<_> = topo.polys_of(&selected).into_iter().collect();
+            let start = std::time::Instant::now();
+            let mask = topo.polygon_selection_mask(&selected);
+            let count = topo.polygons().filter(|&poly| mask[poly as usize]).count();
+            eprintln!("Face markers: {} selected triangles, {count} selected polygons, {:?}", selected.len(), start.elapsed());
+            assert_eq!(mask.len(), topo.polygons().len());
+            for poly in topo.polygons() { assert_eq!(mask[poly as usize], expected.contains(&poly)); }
+        }
+    }
 
     /// An `nx` by `ny` grid of quads in z = 0, each quad split by a diagonal; point (i, j) is j * (nx + 1) + i.
     fn grid(nx: u32, ny: u32) -> (Vec<f32>, Vec<u32>, Vec<u32>) {

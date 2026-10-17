@@ -2710,6 +2710,8 @@ impl eframe::App for App {
                                 let topo = element_select::cached(&self.elem_topo, scene);
                                 let center_fill = egui::Color32::from_rgb(0x30, 0x38, 0x48);
                                 let center_stroke = egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(0x80, 0x90, 0xa8));
+                                let selected_polys = topo.polygon_selection_mask(&self.selection.tris);
+                                let hovered_polys = topo.polygon_selection_mask(hover_elem.as_ref().map_or(&[], |e| e.tris.as_slice()));
                                 let npoly = topo.polygons().len();
                                 let stride = if npoly > 50_000 { (npoly / 20_000).max(2) } else { 1 };
                                 for poly in topo.polygons().step_by(stride) {
@@ -2717,8 +2719,8 @@ impl eframe::App for App {
                                     if vertices.is_empty() || !vertices.iter().all(|id| point_pickable(self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,*id)) { continue; }
                                     let center = [0, 1, 2].map(|k| vertices.iter().map(|&id| picking::at(pos, id)[k]).sum::<f32>() / vertices.len() as f32);
                                     if let Some(sp) = ui::transform_gizmo::project(v.camera, rect, center) {
-                                        let is_sel = topo.poly_tris(poly).iter().any(|id| self.selection.tris.contains(id));
-                                        let is_hov = hover_elem.as_ref().is_some_and(|e| topo.poly_tris(poly).iter().any(|id| e.tris.contains(id)));
+                                        let is_sel = selected_polys[poly as usize];
+                                        let is_hov = hovered_polys[poly as usize];
                                         if is_hov {
                                             ui.painter().circle_filled(sp, 4.0_f32, white);
                                             ui.painter().circle_stroke(sp, 4.0_f32, egui::Stroke::new(1.0_f32, orange));
