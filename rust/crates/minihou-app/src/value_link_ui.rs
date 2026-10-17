@@ -48,6 +48,78 @@ fn literal_for(source: &Value, target: &Value) -> Option<Value> {
 }
 
 pub enum PasteMode { Value, Expression, Reference }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Link { pub source: String, pub source_param: String, pub target: String, pub target_param: String, pub broken: bool }
+
+fn references(expression: &str) -> Vec<&str> {
+    let mut found = Vec::new();
+    for function in ["ch(\"", "chs(\"", "chv(\"", "ch('", "chs('", "chv('"] {
+        let mut rest = expression;
+        while let Some(start) = rest.find(function) {
+            rest = &rest[start + function.len()..];
+            let quote = if function.ends_with('"') { '"' } else { '\'' };
+            if let Some(end) = rest.find(quote) { found.push(&rest[..end]); rest = &rest[end + 1..]; } else { break; }
+        }
+    }
+    found
+}
+fn resolve_path(owner: &str, path: &str) -> Option<(String,String)> {
+    let mut parts: Vec<&str> = if path.starts_with('/') { Vec::new() } else { owner.split('/').collect() };
+    let segments: Vec<&str> = path.split('/').collect();
+    for part in &segments[..segments.len().checked_sub(1)?] {
+        match *part { "" | "." => {}, ".." => { parts.pop()?; }, other => parts.push(other) }
+    }
+    Some((parts.join("/"), segments.last()?.to_string()))
+}
+pub fn rewrite_expression(expression: &str, old_owner: &str, new_owner: &str, map_node: impl Fn(&str) -> String) -> String {
+    let mut out=String::new(); let mut rest=expression;
+    while !rest.is_empty() {
+        let hit=["ch(\"","chs(\"","chv(\"","ch('","chs('","chv('"]
+            .iter().filter_map(|prefix| rest.find(prefix).map(|at|(at,*prefix))).min_by_key(|(at,_)|*at);
+        let Some((at,prefix))=hit else {out.push_str(rest);break};
+        let start=at+prefix.len(); out.push_str(&rest[..start]);
+        let quote=if prefix.ends_with('"') {'"'} else {'\''};
+        let Some(end)=rest[start..].find(quote) else {out.push_str(&rest[start..]);break};
+        let path=&rest[start..start+end];
+        if let Some((source,param))=resolve_path(old_owner,path) {
+            let source=map_node(&source);
+            if path.starts_with('/') { out.push_str(&format!("/{source}/{param}")); }
+            else { out.push_str(&relative_path(new_owner,&source,&param)); }
+        } else {out.push_str(path);}
+        rest=&rest[start+end..];
+    }
+    out
+}
+pub fn links(doc: &Value) -> Vec<Link> {
+    let Some(nodes) = doc["nodes"].as_object() else { return Vec::new(); };
+    let mut result = Vec::new();
+    for (target, def) in nodes {
+        if let Some(channels) = def["channels"].as_object() {
+            for (target_param, expression) in channels {
+                for path in expression.as_str().into_iter().flat_map(references) {
+                    if let Some((source, source_param)) = resolve_path(target, path) {
+                        let base = source_param.trim_end_matches(".x").trim_end_matches(".y").trim_end_matches(".z");
+                        let broken = nodes.get(&source).and_then(|n| n["type"].as_str()).and_then(nodes::get)
+                            .is_none_or(|spec| !spec.params.iter().any(|p|p.name==base));
+                        result.push(Link { source, source_param, target:target.clone(), target_param:target_param.clone(), broken });
+                    } else {
+                        result.push(Link {source:String::new(),source_param:path.into(),target:target.clone(),target_param:target_param.clone(),broken:true});
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
+pub fn go_to_source(doc: &Value, target: &str, param: Option<&str>) -> Option<(String,String)> {
+    links(doc).into_iter().find(|link| link.target == target && param.is_none_or(|p| link.target_param == p || link.target_param.starts_with(&format!("{p}."))) && !link.broken)
+        .map(|link|(link.source,link.source_param))
+}
+pub fn go_to_target(doc: &Value, source: &str, param: Option<&str>) -> Option<(String,String)> {
+    links(doc).into_iter().find(|link| link.source == source && param.is_none_or(|p| link.source_param == p || link.source_param.starts_with(&format!("{p}."))))
+        .map(|link|(link.target,link.target_param))
+}
 pub fn paste(doc: &Value, node: &str, name: &str, copied: &CopiedParam, mode: PasteMode) -> Result<Edit, String> {
     let target = target_value(doc, node, name).ok_or("Unknown target parameter")?;
     if !compatible(&copied.value, &target) { return Err("Parameter types are incompatible".into()); }
@@ -105,5 +177,16 @@ pub fn clear(doc: &Value, node: &str, name: &str, default: bool) -> Option<Edit>
         let copy=copied(&doc,"a","size").unwrap();
         let Edit::Replace(next)=paste(&doc,"b","size",&copy,PasteMode::Reference).unwrap() else {panic!()};
         assert_eq!(next["nodes"]["b"]["channels"]["size.y"],json!("ch(\"../a/size.y\")"));
+    }
+    #[test] fn link_paths_and_navigation() {
+        let doc=json!({"nodes":{"a":{"type":"box"},"b":{"type":"box","channels":{"size.x":"ch('../a/size.y') + 1"}}}});
+        assert_eq!(go_to_source(&doc,"b",Some("size")),Some(("a".into(),"size.y".into())));
+        assert_eq!(go_to_target(&doc,"a",None),Some(("b".into(),"size.x".into())));
+        assert!(!links(&doc)[0].broken);
+    }
+    #[test] fn rewrite_only_channel_paths() {
+        let expr="ch('../old/size.x') + ch(\"/other/size.y\")";
+        assert_eq!(rewrite_expression(expr,"target","target",|node| if node=="old" {"new".into()} else {node.into()}),
+            "ch('../new/size.x') + ch(\"/other/size.y\")");
     }
 }

@@ -28,7 +28,7 @@ fn parameter_menu(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, node: &str
             ui.close();
         }
     }
-    ui.menu_button("Link to Parameter...", |ui| {
+    ui.menu_button(if v.doc["nodes"][node]["channels"].as_object().is_some_and(|c| c.contains_key(name)) { "Link to Parameter... / Fix Reference" } else { "Link to Parameter..." }, |ui| {
         let search_id = egui::Id::new("link_picker_search");
         let mut search = ui.ctx().data(|d| d.get_temp::<String>(search_id)).unwrap_or_default();
         ui.add(egui::TextEdit::singleline(&mut search).hint_text("Search nodes and parameters"));
@@ -59,6 +59,14 @@ fn parameter_menu(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, node: &str
         });
     });
     let linked = v.doc["nodes"][node]["channels"].as_object().is_some_and(|c| c.keys().any(|k| k == name || k.starts_with(&format!("{name}."))));
+    if let Some((source, param)) = value_link_ui::go_to_source(v.doc,node,Some(name)) {
+        if ui.button(format!("Go to Source: {source}.{param}")).clicked() { out.push(UiAction::NavigateLink {node:source,param}); ui.close(); }
+    }
+    for link in value_link_ui::links(v.doc).into_iter().filter(|l| l.source == node && (l.source_param == name || l.source_param.starts_with(&format!("{name}.")))) {
+        if ui.button(format!("Go to Target: {}.{}",link.target,link.target_param)).clicked() {
+            out.push(UiAction::NavigateLink {node:link.target,param:link.target_param}); ui.close();
+        }
+    }
     if ui.add_enabled(linked, egui::Button::new("Delete Channel")).clicked() {
         if let Some(edit) = value_link_ui::clear(v.doc,node,name,false) { out.push(UiAction::Edit { edit, continuous: false }); }
         ui.close();
@@ -880,8 +888,9 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     let default = (param.default)();
     let old = value_of(v, id, param.name, &default);
     let mut value = old.clone();
-    if let Ok(graph) = minihou_core::Graph::from_value(v.doc) {
-        if let Some(resolved) = minihou_core::channels::resolve_graph(&graph).params.get(id).and_then(|p| p.get(param.name)) {
+    let resolved_channels = minihou_core::Graph::from_value(v.doc).ok().map(|graph| minihou_core::channels::resolve_graph(&graph));
+    if let Some(resolved_all) = &resolved_channels {
+        if let Some(resolved) = resolved_all.params.get(id).and_then(|p| p.get(param.name)) {
             value = resolved.clone();
         }
     }
@@ -905,7 +914,9 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
             value_of(v, id, name, &fallback) == *expected
         })
     });
-    let reason = invalid_reason(meta, &old).or_else(|| node_error(v, id).and_then(|error| {
+    let channel_reason = resolved_channels.as_ref().and_then(|resolved| resolved.diagnostics.iter()
+        .find(|d| d.node == id && (d.param == param.name || d.param.starts_with(&format!("{}.",param.name)))).map(|d| d.message.clone()));
+    let reason = channel_reason.or_else(|| invalid_reason(meta, &old)).or_else(|| node_error(v, id).and_then(|error| {
         error.to_lowercase().contains(&param.name.replace('_', " ")).then(|| error.to_owned())
     }));
     if let Some(reason) = &reason { errors.push(format!("{}: {reason}", title(param.name))); }
@@ -916,6 +927,11 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     let row_height = if is_ramp { 76.0 } else { 28.0 };
     let (r, row_response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), Sense::click());
     let layout = ParamRowLayout::compute(r);
+    if ui.ctx().data(|d| d.get_temp::<(String,String,f64)>(egui::Id::new("link_flash")))
+        .is_some_and(|(node,name,time)| node == id && (name == param.name || name.starts_with(&format!("{}.",param.name))) && ui.ctx().input(|i|i.time) - time < 1.5) {
+        ui.painter().rect_filled(r,3.,v.theme.accent.gamma_multiply(0.22));
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    }
 
     let param_locked = v.doc["nodes"][id]["locked_params"].as_array().is_some_and(|a| a.iter().any(|x| x == param.name));
     let channels = v.doc["nodes"][id]["channels"].as_object();

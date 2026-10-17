@@ -470,6 +470,13 @@ pub fn paste(value: &Value, clipboard: &Value) -> Option<(Value, Vec<String>)> {
     }
     for (old, src) in copied {
         let mut node = src.clone();
+        if let Some(channels) = node.get_mut("channels").and_then(Value::as_object_mut) {
+            for expr in channels.values_mut() {
+                if let Some(source) = expr.as_str() {
+                    *expr = json!(crate::value_link_ui::rewrite_expression(source, old, &ids[old.as_str()], |referenced| ids.get(referenced).cloned().unwrap_or_else(||referenced.into())));
+                }
+            }
+        }
         if let Some(inputs) = node.get_mut("inputs").and_then(Value::as_object_mut) {
             for source in inputs.values_mut() {
                 match source {
@@ -485,9 +492,49 @@ pub fn paste(value: &Value, clipboard: &Value) -> Option<(Value, Vec<String>)> {
     Some((value, new_ids))
 }
 
+/// Rename a node and preserve every channel's resolved target in one graph edit.
+pub fn rename(value: &Value, old: &str, new: &str) -> Option<Value> {
+    if new.is_empty() || new.contains('"') || new.contains('\'') || new.contains(' ') { return None; }
+    let mut value=value.clone();
+    let all=nodes_mut(&mut value)?;
+    if all.contains_key(new) { return None; }
+    let renamed=all.remove(old)?;
+    all.insert(new.into(),renamed);
+    for (owner,node) in all.iter_mut() {
+        if let Some(inputs)=node.get_mut("inputs").and_then(Value::as_object_mut) {
+            for source in inputs.values_mut() {
+                match source { Value::String(s) if s==old => *s=new.into(), Value::Array(xs) => for x in xs {if x==old {*x=json!(new)}}, _=>{} }
+            }
+        }
+        if let Some(channels)=node.get_mut("channels").and_then(Value::as_object_mut) {
+            for expr in channels.values_mut() {
+                if let Some(source)=expr.as_str() {
+                    let before=if owner==new {old} else {owner};
+                    *expr=json!(crate::value_link_ui::rewrite_expression(source,before,owner,|node|if node==old {new.into()} else {node.into()}));
+                }
+            }
+        }
+    }
+    if value["display"]==old {value["display"]=json!(new);}
+    if let Some(xs)=value["display"].as_array_mut() {for x in xs {if x==old {*x=json!(new)}}}
+    Some(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn rename_and_paste_keep_reference_targets() {
+        let doc=json!({"nodes":{"driver":{"type":"box","params":{"size":[2,3,4]}},"target":{"type":"box","channels":{"size.x":"ch('../driver/size.y')"}},"external":{"type":"box","channels":{"size.x":"ch('../target/size.x')"}}},"display":"target"});
+        let renamed=rename(&doc,"driver","source").unwrap();
+        assert_eq!(renamed["nodes"]["target"]["channels"]["size.x"],json!("ch('../source/size.y')"));
+        let clip=copy(&renamed,&["source".into(),"target".into()]).unwrap();
+        let (pasted,ids)=paste(&renamed,&clip).unwrap();
+        let new_target=ids.iter().find(|id|pasted["nodes"][*id]["channels"].is_object()).unwrap();
+        assert!(crate::value_link_ui::links(&pasted).iter().any(|l|l.target==*new_target && l.source!= "source" && !l.broken));
+        assert_eq!(pasted["nodes"]["external"]["channels"]["size.x"],renamed["nodes"]["external"]["channels"]["size.x"]);
+        let deleted=delete(&renamed,"source").unwrap();
+        assert_eq!(deleted["nodes"]["target"]["channels"]["size.x"],json!("ch('../source/size.y')"));
+    }
     #[test] fn noodle_add_connects_in_both_directions_and_records_position() {
         let base = graph();
         let (next, id) = add_connected(&base, "transform", &AddConnection::Output("box1".into()), [320., 192.]).unwrap();

@@ -89,6 +89,9 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | M | Mute flag | Network |
 | E | Template flag | Network |
 | W | Selectable template flag | Network |
+| Shift+J | Go to link source | Network |
+| Shift+K | Go to link target | Network |
+| Shift+D | Toggle parameter links | Network |
 | Ctrl+Z | Undo | Everywhere |
 | Ctrl+Y | Redo | Everywhere |
 | Ctrl+Shift+Z | Redo | Everywhere |

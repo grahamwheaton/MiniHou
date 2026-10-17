@@ -50,7 +50,7 @@ impl Wiggle {
 }
 
 #[derive(Clone)]
-struct State { list: bool, zoom: f32, pan: Vec2, moved: HashMap<String, Pos2>, snap: bool, physics: bool, springs: Option<network_physics::Springs>, tidied: bool,
+struct State { list: bool, show_links: bool, focus: Option<String>, zoom: f32, pan: Vec2, moved: HashMap<String, Pos2>, snap: bool, physics: bool, springs: Option<network_physics::Springs>, tidied: bool,
     tidy_order: HashMap<String, Pos2>,
     selected_wires: BTreeSet<WireRef>, graph_snapshot: Option<serde_json::Value>,
     cut: Option<Cut>, box_op: SelectionOp,
@@ -59,7 +59,7 @@ struct State { list: bool, zoom: f32, pan: Vec2, moved: HashMap<String, Pos2>, s
     drag_before: Option<serde_json::Value>, drag_physics: bool,
     drag: Option<(String, Pos2)>, box_start: Option<Pos2>, alt_pan: bool, menu: Option<network_menu::MenuState> }
 impl Default for State {
-    fn default() -> Self { Self { list: false, zoom: 1.0, pan: Vec2::ZERO, moved: HashMap::new(), snap: true, physics: true, springs: None,
+    fn default() -> Self { Self { list: false, show_links: true, focus: None, zoom: 1.0, pan: Vec2::ZERO, moved: HashMap::new(), snap: true, physics: true, springs: None,
         selected_wires: BTreeSet::new(), graph_snapshot: None, cut: None, box_op: SelectionOp::Replace,
         tidied: false, tidy_order: HashMap::new(), wiggle: Wiggle::default(), wire: None, pickup: None, drag_before: None, drag_physics: false, drag: None, box_start: None, alt_pan: false, menu: None } }
 }
@@ -107,6 +107,20 @@ pub fn frame(ctx: &egui::Context, path: &Path) {
     });
     ctx.request_repaint();
 }
+pub fn focus(ctx: &egui::Context, path: &Path, node: &str) {
+    let id = state_id(path);
+    ctx.data_mut(|d| { let mut state=d.get_persisted::<State>(id).unwrap_or_default(); state.focus=Some(node.into()); d.insert_persisted(id,state); });
+    ctx.request_repaint();
+}
+pub fn toggle_links(ctx: &egui::Context, path: &Path) {
+    let id=state_id(path);
+    ctx.data_mut(|d| { let mut state=d.get_persisted::<State>(id).unwrap_or_default(); state.show_links=!state.show_links; d.insert_persisted(id,state); });
+    ctx.request_repaint();
+}
+pub fn set_links(ctx: &egui::Context, path: &Path, show: bool) {
+    let id=state_id(path);
+    ctx.data_mut(|d| { let mut state=d.get_persisted::<State>(id).unwrap_or_default(); state.show_links=show; d.insert_persisted(id,state); });
+}
 /// Honor an explicit noodle placement even when Tidy ignores authored positions.
 pub fn place_connected(ctx: &egui::Context, path: &Path, node: &str, pos: [f32; 2]) {
     ctx.data_mut(|d| {
@@ -148,6 +162,7 @@ fn tidy_state(state: &mut State) {
 }
 
 pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
+    rename_dialog(ui.ctx(),out);
     let old_spacing = ui.spacing().item_spacing;
     ui.spacing_mut().item_spacing.y = 0.0;
     let id = state_id(v.path);
@@ -164,6 +179,17 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
     ui.ctx().data_mut(|d| d.insert_persisted(id, state));
     ui.spacing_mut().item_spacing = old_spacing;
 }
+fn rename_dialog(ctx: &egui::Context, out: &mut Actions) {
+    let id=egui::Id::new("rename_link_node");
+    let Some((old,mut new))=ctx.data(|d|d.get_temp::<(String,String)>(id)) else {return};
+    let mut open=true;
+    egui::Window::new("Rename node").open(&mut open).show(ctx,|ui| {
+        ui.text_edit_singleline(&mut new);
+        if ui.button("Rename").clicked() {out.push(UiAction::RenameNode {old:old.clone(),new:new.clone()});ctx.data_mut(|d|d.remove::<(String,String)>(id));}
+    });
+    if open && ctx.data(|d|d.get_temp::<(String,String)>(id)).is_some() {ctx.data_mut(|d|d.insert_temp(id,(old,new)));}
+    if !open {ctx.data_mut(|d|d.remove::<(String,String)>(id));}
+}
 
 fn header_ui(ui: &mut egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut State) {
     let p = ui.painter();
@@ -177,6 +203,9 @@ fn header_ui(ui: &mut egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mu
         if state.list == *list { p.line_segment([pos2(tab.left(), tab.bottom() - 1.0), pos2(tab.right(), tab.bottom() - 1.0)], Stroke::new(2.0_f32, v.theme.accent)); }
     }
     let snap_rect = Rect::from_min_size(pos2(r.right() - 214.0, r.top() + 5.0), vec2(52.0, 22.0));
+    let links_rect = Rect::from_min_size(pos2(r.right() - 285.0, r.top() + 5.0), vec2(66.0, 22.0));
+    if ui.interact(links_rect, ui.id().with("links"), Sense::click()).on_hover_text("Show parameter references").clicked() { state.show_links = !state.show_links; out.push(UiAction::LinkVisibility(state.show_links)); }
+    p.text(links_rect.left_center(), Align2::LEFT_CENTER, if state.show_links { "☑ Links" } else { "☐ Links" }, FontId::proportional(11.), if state.show_links { v.theme.accent } else { v.theme.dim });
     if ui.interact(snap_rect, ui.id().with("snap"), Sense::click()).on_hover_text("Snap cards (Ctrl to invert)").clicked() { state.snap = !state.snap; }
     let sc = if state.snap { v.theme.accent } else { v.theme.dim };
     magnet_icon(p, pos2(snap_rect.left() + 9.0, snap_rect.center().y), sc);
@@ -280,6 +309,11 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
     let pointer = ctx.input(|i| i.pointer.hover_pos());
     let over = pointer.is_some_and(|at| r.contains(at));
     let mut positions = node_positions(state, v);
+    if let Some(focus) = state.focus.take() {
+        if let Some((_,at)) = positions.iter().find(|(node,_)| *node == focus) {
+            state.pan = r.center().to_vec2() - r.min.to_vec2() - (*at + CARD * 0.5).to_vec2() * state.zoom;
+        }
+    }
     // Cache automatic positions too: adding a root must not shuffle the existing layer.
     state.moved.retain(|node, _| v.graph.nodes.iter().any(|(id, _)| id == node));
     for (node, at) in &positions { state.moved.insert(node.clone(), *at); }
@@ -438,8 +472,10 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
         let hint = p.layout("Open a graph file, press Tab, or pick a tool from the shelf above.".into(), FontId::proportional(12.0), v.theme.dim, (r.width() - 80.0).max(80.0));
         p.galley(pos2(r.center().x - hint.size().x * 0.5, r.center().y + 5.0), hint, v.theme.dim);
     } else {
+        if state.show_links { dependency_links(&p,r,state,v,&positions); }
         wires(&p, r, state, v, &positions);
         let mut guide = None;
+        let ref_links = minihou_app::value_link_ui::links(v.doc);
         for (node_id, at) in &positions {
             let Some((_, node)) = v.graph.nodes.iter().find(|(n, _)| n == node_id) else { continue };
             let card = Rect::from_min_size(screen(r, state, *at), CARD * state.zoom);
@@ -447,6 +483,23 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
             let face = Rect::from_min_max(pos2(card.left() + 20.0 * state.zoom, card.top()), pos2(card.right() - 20.0 * state.zoom, card.bottom()));
             let response = ui.interact(face, id.with(("node", node_id)), sense)
                 .on_hover_text(format!("{} · {} · {} params", node_id, node.node_type, node.params.as_ref().map_or(0, |p| p.len())));
+            response.clone().context_menu(|ui| {
+                if ui.button("Rename node...").clicked() {
+                    ui.ctx().data_mut(|d|d.insert_temp(egui::Id::new("rename_link_node"),(node_id.clone(),node_id.clone())));
+                    ui.close();
+                }
+                let links = minihou_app::value_link_ui::links(v.doc);
+                for link in links.iter().filter(|l| &l.target == node_id && !l.broken) {
+                    if ui.button(format!("Go to source: {}.{}",link.source,link.source_param)).clicked() {
+                        out.push(UiAction::NavigateLink {node:link.source.clone(),param:link.source_param.clone()}); ui.close();
+                    }
+                }
+                for link in links.iter().filter(|l| &l.source == node_id) {
+                    if ui.button(format!("Go to target: {}.{}",link.target,link.target_param)).clicked() {
+                        out.push(UiAction::NavigateLink {node:link.target.clone(),param:link.target_param.clone()}); ui.close();
+                    }
+                }
+            });
             if response.double_clicked() { out.push(UiAction::SetDisplay(node_id.clone())); }
             else if response.clicked() {
                 state.selected_wires.clear();
@@ -518,6 +571,13 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
                 }
             }
             card_ui(&p, card, node_id, node, v, state.zoom);
+            let count = ref_links.iter().filter(|l| &l.source == node_id || &l.target == node_id).count();
+            if count > 0 {
+                let broken = ref_links.iter().any(|l| l.broken && &l.target == node_id);
+                p.text(card.right_top() + vec2(-25., 4.) * state.zoom, Align2::RIGHT_TOP,
+                    if broken { format!("⚠ {count}") } else { format!("↗ {count}") }, FontId::proportional(10. * state.zoom),
+                    if broken { Color32::from_rgb(235,80,80) } else { Color32::from_rgb(62,190,110) });
+            }
         }
         if let Some(lines) = guide {
             if let Some(x) = lines.x { let x = screen(r, state, pos2(x, 0.0)).x; p.line_segment([pos2(x, r.top()), pos2(x, r.bottom())], Stroke::new(1.0_f32, v.theme.accent)); }
@@ -808,6 +868,51 @@ fn wire_connection(a: &AddConnection, b: &AddConnection) -> Option<UiAction> {
 
 fn noodle(p: &egui::Painter, a: Pos2, b: Pos2, color: Color32) {
     p.add(egui::Shape::line(network_wires::curve(a,b), Stroke::new(1.5_f32, color)));
+}
+
+fn link_curve(a: Pos2, b: Pos2) -> Vec<Pos2> {
+    let bend = ((b.x - a.x).abs() * 0.45).max(40.);
+    let c = a + vec2(bend, 0.);
+    let d = b - vec2(bend, 0.);
+    (0..=32).map(|i| {
+        let t = i as f32 / 32.; let u = 1. - t;
+        pos2(u*u*u*a.x + 3.*u*u*t*c.x + 3.*u*t*t*d.x + t*t*t*b.x,
+             u*u*u*a.y + 3.*u*u*t*c.y + 3.*u*t*t*d.y + t*t*t*b.y)
+    }).collect()
+}
+fn link_hit(points: &[Pos2], at: Pos2) -> bool {
+    points.windows(2).any(|w| network_wires::distance(at,w[0],w[1]) <= 6.)
+}
+fn dependency_links(p: &egui::Painter, canvas: Rect, state: &State, v: &View, positions: &[(String, Pos2)]) {
+    let lookup: HashMap<&str,Pos2> = positions.iter().map(|(id,at)|(id.as_str(),*at)).collect();
+    let pointer = p.ctx().input(|i| i.pointer.hover_pos());
+    for link in minihou_app::value_link_ui::links(v.doc) {
+        let Some(&target) = lookup.get(link.target.as_str()) else { continue; };
+        let b = screen(canvas,state,target + vec2(0.,CARD.y*0.5));
+        let a = lookup.get(link.source.as_str()).map(|at|screen(canvas,state,*at + vec2(CARD.x,CARD.y*0.5)))
+            .unwrap_or(b - vec2(80. * state.zoom, 35. * state.zoom));
+        let points = link_curve(a,b);
+        let hot = v.selected == link.source || v.selected == link.target || pointer.is_some_and(|at| link_hit(&points,at));
+        let color = if link.broken { Color32::from_rgb(239,68,68) } else { Color32::from_rgb(56,189,248) }.gamma_multiply(if hot { 0.95 } else { 0.25 });
+        for (i,segment) in points.windows(2).enumerate() {
+            if i % 4 < 2 { p.line_segment([segment[0],segment[1]],Stroke::new(if hot {2.} else {1.2},color)); }
+        }
+        if hot {
+            let mid=points[16];
+            p.text(mid,Align2::CENTER_BOTTOM,format!("{} → {}",link.source_param,link.target_param),FontId::proportional(10.),color);
+        }
+    }
+}
+
+#[cfg(test)] mod link_geometry_tests {
+    use super::*;
+    #[test] fn curved_link_hit_is_separate_from_card_and_noodle_geometry() {
+        let points=link_curve(pos2(10.,20.),pos2(210.,70.));
+        assert_eq!(points.first().copied(),Some(pos2(10.,20.)));
+        assert_eq!(points.last().copied(),Some(pos2(210.,70.)));
+        assert!(link_hit(&points,points[16]));
+        assert!(!link_hit(&points,pos2(100.,300.)));
+    }
 }
 
 fn wire_curves(canvas: Rect, state: &State, v: &View, positions: &[(String, Pos2)]) -> Vec<(WireRef, Vec<Pos2>)> {

@@ -39,10 +39,10 @@ pub enum Command {
     ResetCursor,
     RepeatLast,
     SketchLine, SketchPolyline, SketchPolygon, SketchRectangle, SketchCircle,
-    SelectMore, SelectLess,
+    SelectMore, SelectLess, GoToLinkSource, GoToLinkTarget, ToggleDepLinks,
 }
 impl Command {
-    pub const ALL: [Self; 87] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
+    pub const ALL: [Self; 90] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
         Self::ToolSelect, Self::ToolMove, Self::ToolRotate, Self::ToolScale, Self::ToolTransform,
         Self::FrameAll, Self::FrameSelected, Self::Front, Self::Back, Self::Right, Self::Left,
         Self::Top, Self::Bottom, Self::ToggleProjection, Self::OrbitDown, Self::OrbitLeft,
@@ -53,7 +53,7 @@ impl Command {
         Self::TidyNetwork, Self::Preferences, Self::BoxSelect, Self::CircleSelect, Self::LassoSelect, Self::Paint, Self::Extrude, Self::Inset, Self::Bevel, Self::PushPull, Self::LoopCut, Self::Knife, Self::FlipFaces, Self::Mirror, Self::OppositeView, Self::NetworkBox, Self::PieMenu, Self::DisplayFlag, Self::MuteFlag, Self::TemplateFlag, Self::SelectableTemplateFlag, Self::FindNode,
         Self::TimelineToggle, Self::TimelinePrevious, Self::TimelineNext, Self::TimelineStart, Self::TimelineEnd,
         Self::ResetCursor, Self::RepeatLast,
-        Self::SketchLine, Self::SketchPolyline, Self::SketchPolygon, Self::SketchRectangle, Self::SketchCircle, Self::ShadePie, Self::SelectMore, Self::SelectLess];
+        Self::SketchLine, Self::SketchPolyline, Self::SketchPolygon, Self::SketchRectangle, Self::SketchCircle, Self::ShadePie, Self::SelectMore, Self::SelectLess, Self::GoToLinkSource, Self::GoToLinkTarget, Self::ToggleDepLinks];
     pub fn label(self) -> &'static str { match self {
         Self::Points => "Points", Self::Edges => "Edges", Self::Faces => "Faces", Self::Object => "Object", Self::ToggleEdit => "Toggle Object / edit mode",
         Self::SelectAll => "Select all", Self::SelectNone => "Select none", Self::Hide => "Hide selected", Self::Reveal => "Reveal hidden", Self::AddMenu => "Add node menu", Self::ToggleParams => "Toggle parameters",
@@ -83,6 +83,7 @@ impl Command {
         Self::SketchLine => "Sketch line", Self::SketchPolyline => "Sketch polyline", Self::SketchPolygon => "Sketch polygon",
         Self::SketchRectangle => "Sketch rectangle", Self::SketchCircle => "Sketch circle",
         Self::SelectMore => "Select more (grow selection)", Self::SelectLess => "Select less (shrink selection)",
+        Self::GoToLinkSource => "Go to link source", Self::GoToLinkTarget => "Go to link target", Self::ToggleDepLinks => "Toggle parameter links",
     } }
     fn id(self) -> &'static str { match self {
         Self::Points => "points", Self::Edges => "edges", Self::Faces => "faces", Self::Object => "object", Self::ToggleEdit => "toggle_edit",
@@ -111,6 +112,7 @@ impl Command {
         Self::SketchLine => "sketch_line", Self::SketchPolyline => "sketch_polyline", Self::SketchPolygon => "sketch_polygon",
         Self::SketchRectangle => "sketch_rectangle", Self::SketchCircle => "sketch_circle",
         Self::SelectMore => "select_more", Self::SelectLess => "select_less",
+        Self::GoToLinkSource => "go_to_link_source", Self::GoToLinkTarget => "go_to_link_target", Self::ToggleDepLinks => "toggle_dep_links",
     } }
     pub fn to_action(self, kctx: &KeyContext<'_>) -> Option<UiAction> { Some(match self {
         Self::Points => UiAction::Editor(EditorChange::Selection(SelectionMode::Points)),
@@ -192,6 +194,7 @@ impl Keymap {
         for (key,cmd) in [(K::F,C::FrameAll),(K::L,C::TidyNetwork),(K::O,C::NetworkBox),
             (K::C,C::PieMenu),(K::D,C::DisplayFlag),(K::M,C::MuteFlag),(K::E,C::TemplateFlag),
             (K::W,C::SelectableTemplateFlag)] { add(key,false,false,false,cmd,X::Network); }
+        for (key,cmd) in [(K::J,C::GoToLinkSource),(K::K,C::GoToLinkTarget),(K::D,C::ToggleDepLinks)] { add(key,false,true,false,cmd,X::Network); }
         for (key,ctrl,shift,cmd) in [(K::Z,true,false,C::Undo),(K::Y,true,false,C::Redo),
             (K::Z,true,true,C::Redo),(K::S,true,false,C::Save),(K::S,true,true,C::SaveAs),
             (K::O,true,false,C::Open)] {

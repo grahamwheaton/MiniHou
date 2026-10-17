@@ -21,6 +21,7 @@ pub struct Preferences {
     pub theme: ThemePref, pub ui_scale: f32, pub emulate_numpad: bool, pub snap_increment: f32,
     pub snap_targets: crate::ui::SnapTargets,
     pub show_stats: bool, pub autosave_minutes: Option<u32>, pub keymap_overrides: Value,
+    pub show_parameter_links: bool,
     pub recent_files: Vec<PathBuf>, pub viewport: ViewportPreferences,
     pub units: UnitSettings,
     pub node_physics_snappiness: f32,
@@ -32,7 +33,7 @@ pub struct Preferences {
 impl Default for Preferences { fn default() -> Self { Self {
     theme: ThemePref::System, ui_scale: 1., emulate_numpad: false, snap_increment: 0.25,
     snap_targets: crate::ui::SnapTargets::default(),
-    show_stats: true, autosave_minutes: Some(5), keymap_overrides: json!({"bindings": []}),
+    show_stats: true, show_parameter_links: true, autosave_minutes: Some(5), keymap_overrides: json!({"bindings": []}),
     recent_files: Vec::new(), viewport: ViewportPreferences::default(),
     units: UnitSettings::default(),
     node_physics_snappiness: 0.7,
@@ -61,7 +62,7 @@ impl Preferences {
     }
     fn to_json(&self) -> Value { json!({
         "schema": SCHEMA, "theme": self.theme.label(), "ui_scale": self.ui_scale,
-        "emulate_numpad": self.emulate_numpad, "snap_increment": self.snap_increment,
+        "emulate_numpad": self.emulate_numpad, "snap_increment": self.snap_increment, "show_parameter_links": self.show_parameter_links,
         "snap_targets": self.snap_targets.bits(),
         "node_physics_snappiness": self.node_physics_snappiness,
         "show_stats": self.show_stats, "autosave_minutes": self.autosave_minutes,
@@ -84,6 +85,7 @@ impl Preferences {
             Some("Dark") => ThemePref::Dark, Some("Light") => ThemePref::Light, _ => ThemePref::System }, ..Self::default() };
         if let Some(x) = v.get("ui_scale").and_then(Value::as_f64) { p.ui_scale = (x as f32).clamp(0.5, 3.); }
         if let Some(x) = v.get("emulate_numpad").and_then(Value::as_bool) { p.emulate_numpad = x; }
+        if let Some(x) = v.get("show_parameter_links").and_then(Value::as_bool) { p.show_parameter_links = x; }
         if let Some(x) = v.get("snap_increment").and_then(Value::as_f64) { p.snap_increment = (x as f32).max(0.0001); }
         if let Some(x) = v.get("snap_targets").and_then(Value::as_u64) { p.snap_targets = crate::ui::SnapTargets::from_bits((x & 63) as u8); }
         if let Some(x) = v.get("node_physics_snappiness").and_then(Value::as_f64) { p.node_physics_snappiness = (x as f32).clamp(0.0, 1.0); }
