@@ -98,8 +98,11 @@ def export_object(obj, render_uv=None):
                 if shader is None or shader.type != "BSDF_PRINCIPLED":
                     raise ValueError("active output is not a Principled BSDF")
                 alpha = shader.inputs.get("Alpha")
-                if alpha and (alpha.is_linked or float(alpha.default_value) < .999):
-                    raise ValueError("non-opaque alpha is unsupported")
+                mode = getattr(material, "surface_render_method", getattr(material, "blend_method", "OPAQUE"))
+                if alpha and alpha.is_linked:
+                    raise ValueError(f"non-opaque alpha is unsupported: material {material.name}, Principled Alpha socket is linked, render mode={mode}")
+                if alpha and float(alpha.default_value) < .999:
+                    raise ValueError(f"non-opaque alpha is unsupported: material {material.name}, Principled Alpha={float(alpha.default_value):.3f}, render mode={mode}")
                 color = shader.inputs["Base Color"]
                 factor = list(color.default_value)
                 descriptor["base_color_factor"] = factor
@@ -125,7 +128,7 @@ def export_object(obj, render_uv=None):
                     payload = image_bytes(image, color_space)
                     hash_id = "sha256:" + hashlib.sha256(payload).hexdigest()
                     images[hash_id] = payload
-                    extension = {"REPEAT": "repeat", "EXTEND": "clamp", "MIRROR": "mirror"}.get(node.extension)
+                    extension = {"REPEAT": "repeat", "EXTEND": "clamp", "MIRROR": "mirror", "CLIP": "clamp"}.get(node.extension)
                     if not extension:
                         raise ValueError(f"{node.extension} extension is unsupported")
                     if node.interpolation not in {"Linear", "Closest"}:
