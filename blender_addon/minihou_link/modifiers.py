@@ -486,12 +486,15 @@ def edit_live(obj, mod, *, push=True):
     materials = list(materials)
     scene = bpy.context.scene
     _send_sources(client, obj, mod, materials)
+    render_uv = next((layer.name for layer in obj.data.uv_layers if layer.active_render), None)
+    manifest_revision = client.sync_materials(instance_id(mod), materials, render_uv)
     header = client.edit_live(instance_id(mod), json.loads(mod.node_group[GRAPH]),
                               proxy.read_values(mod, mod.node_group, parameters(mod)), arrays,
                               label=obj.name + " / " + mod.name,
                               frame=scene.frame_current + scene.frame_subframe,
                               fps=scene.render.fps / scene.render.fps_base,
-                              references=_input_references(mod))
+                              references=_input_references(mod), materials=materials,
+                              manifest_revision=manifest_revision)
     _live_ids.add(instance_id(mod))
     _apply_live(mod, header)
     return {"state": "ready", "editor_url": client.welcome.get("editor_url", ""),
