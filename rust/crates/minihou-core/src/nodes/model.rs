@@ -827,7 +827,6 @@ fn polyextrude(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     )
 }
 fn component_extrude(g: &Geometry, edges: &str, points: &str, distance: f64, direction: [f64; 3]) -> Result<Geometry> {
-    polygons(g, "polyextrude")?;
     if distance == 0. { return Ok(g.clone()); }
     let edge_pairs: Vec<(usize,usize)> = edges.split(|c: char| c == ',' || c.is_whitespace())
         .filter(|s| !s.is_empty()).map(|s| {
@@ -842,16 +841,25 @@ fn component_extrude(g: &Geometry, edges: &str, points: &str, distance: f64, dir
     if edge_pairs.is_empty() && point_ids.is_empty() { return Ok(g.clone()); }
     let mut owner=vec![None;g.npoints];
     let mut normals=vec![[0.;3];g.npoints];
+    let mut curve_directions=vec![[0.;3];g.npoints];
+    let pos=positions(g);
     let face_normals=normals::prim_normals(g.p(),&g.topology);
     let mut valid_edges=std::collections::BTreeMap::new();
     for prim in 0..g.nprims() {
         let verts: Vec<_>=range(g,prim).collect();
         for (i,&v) in verts.iter().enumerate() {
             let a=g.topology.vertex_point[v] as usize;
-            let b=g.topology.vertex_point[verts[(i+1)%verts.len()]] as usize;
             owner[a]=Some((v,prim));
             normals[a]=add(normals[a],face_normals[prim]);
-            valid_edges.entry((a.min(b),a.max(b))).or_insert((v,prim));
+            let closed=g.topology.closed.as_ref().is_none_or(|closed|closed[prim]);
+            if i+1<verts.len() || closed {
+                let b=g.topology.vertex_point[verts[(i+1)%verts.len()]] as usize;
+                valid_edges.entry((a.min(b),a.max(b))).or_insert((v,prim));
+                if !closed {
+                    curve_directions[a]=add(curve_directions[a],sub(pos[a],pos[b]));
+                    curve_directions[b]=add(curve_directions[b],sub(pos[b],pos[a]));
+                }
+            }
         }
     }
     let mut selected=std::collections::BTreeSet::new();
@@ -866,10 +874,11 @@ fn component_extrude(g: &Geometry, edges: &str, points: &str, distance: f64, dir
     let selected: Vec<_>=selected.into_iter().collect();
     let mut map=vec![0usize;g.npoints];
     for (i,&p) in selected.iter().enumerate() { map[p]=g.npoints+i; }
-    let pos=positions(g);
     let mut outp=g.p().to_vec();
     for &p in &selected {
-        let normal=if len(direction)>0. { direction } else { unit32(normals[p]) };
+        let normal=if len(direction)>0. { direction }
+            else if len(normals[p])>1e-12 {unit32(normals[p])}
+            else {unit32(curve_directions[p])};
         outp.extend(add(pos[p],mul(normal,distance)).map(|x|x as f32));
     }
     let mut point=concat(&g.point,&gather(&g.point,&selected));
@@ -1123,6 +1132,16 @@ mod tests {
         assert_eq!(normal.nprims(),axis.nprims());
         assert!(axis.p().chunks_exact(3).any(|p|p[0]>2.9));
         assert_ne!(normal.p(),axis.p());
+    }
+    #[test]
+    fn polyextrude_point_can_continue_along_its_new_open_segment() {
+        let first=cook(&POLYEXTRUDE,quad(),json!({"points":"0","distance":0.05}));
+        let second=cook(&POLYEXTRUDE,first.clone(),json!({"points":"4","distance":0.05}));
+        assert_eq!(second.npoints,6);assert_eq!(second.nprims(),3);
+        let a=&first.p()[12..15];let b=&second.p()[15..18];
+        assert!((b[2]-a[2]-0.05).abs()<1e-6);
+        assert_eq!(&second.topology.closed.as_ref().unwrap()[..],&[true,false,false]);
+        second.validate().unwrap();
     }
     #[test]
     fn polyextrude_edge_and_point_previews_keep_original_geometry() {

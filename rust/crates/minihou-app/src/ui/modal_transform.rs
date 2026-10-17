@@ -26,6 +26,7 @@ pub enum CageHandle { Face(usize, bool), Corner([bool; 3]) }
 pub struct Modal {
     pub kind: Kind, pub start: Pos2, pub pointer: Pos2, pub pivot: [f32; 3],
     pub rotation: [f32; 3],
+    pub units: Option<crate::units::UnitSettings>,
     pub constraint: Constraint, pub numeric: [String; 3], pub field: usize,
     pub snap_to: SnapTargets, pub target_kind: Option<SnapTo>, pub proportional: bool, pub radius: f32,
     pub initial_proportional: bool, pub initial_radius: f32,
@@ -38,7 +39,7 @@ pub struct Modal {
 }
 impl Modal {
     pub fn new(kind: Kind, start: Pos2, pivot: [f32; 3], bounds: ([f32; 3], [f32; 3]), snap_to: impl Into<SnapTargets>, proportional: bool, radius: f32) -> Self {
-        Self { kind, start, pointer: start, pivot, rotation:[0.;3], constraint: Constraint::Free,
+        Self { kind, start, pointer: start, pivot, units:None, rotation:[0.;3], constraint: Constraint::Free,
             numeric: Default::default(), field: 0, snap_to: snap_to.into(), target_kind: None, proportional, radius,
             initial_proportional:proportional, initial_radius:radius, trackball: false,
             sketch: SketchStage::Off, sketch_pivot: None, sketch_reference: None,
@@ -61,6 +62,9 @@ impl Modal {
     }
     pub fn typed(&self, axis: usize) -> Option<f32> {
         let index = if self.constraint == Constraint::Free && self.kind == Kind::Move { axis } else { 0 };
+        if self.kind==Kind::Move {
+            if let Some(units)=self.units {return units.parse(&self.numeric[index]).map(|value|value as f32);}
+        }
         self.numeric[index].parse().ok()
     }
     pub fn toggle_axis(&mut self, axis: usize, plane: bool) { self.constraint = self.constraint.key(axis, plane); }
@@ -69,7 +73,10 @@ impl Modal {
     pub fn wheel(&mut self, delta: f32) { self.radius = (self.radius * (delta * 0.12).exp()).clamp(0.001, 1e6); }
     pub fn status(&self, snap: bool) -> String {
         let title = match self.kind { Kind::Move => "Move", Kind::Rotate => "Rotate", Kind::Scale => "Scale" };
-        let numbers = if self.kind == Kind::Move { format!("X: {:.3}  Y: {:.3}  Z: {:.3}", self.last[0], self.last[1], self.last[2]) }
+        let numbers = if self.kind == Kind::Move {
+            if let Some(units)=self.units {format!("X: {}  Y: {}  Z: {}",units.format(self.last[0] as f64),units.format(self.last[1] as f64),units.format(self.last[2] as f64))}
+            else {format!("X: {:.3}  Y: {:.3}  Z: {:.3}", self.last[0], self.last[1], self.last[2])}
+        }
             else { format!("{:.3}{}", self.last.iter().copied().find(|v| *v != 0. && *v != 1.).unwrap_or(self.last[0]), if self.kind == Kind::Rotate { "°" } else { "×" }) };
         format!("{title}  {}  {numbers}  (Snap: {}){}{}", self.constraint.label(),
             if snap { self.snap_to.label() } else { "Off".into() }, if self.proportional { "  Proportional" } else { "" },
@@ -218,6 +225,23 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
 #[cfg(test)] mod tests {
     use super::*;
     use eframe::egui::pos2;
+    #[test] fn typed_move_uses_display_units_but_angles_and_scale_do_not() {
+        use crate::units::{UnitSettings,LengthUnit};
+        let mut m=Modal::new(Kind::Move,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
+        m.units=Some(UnitSettings::new(LengthUnit::Mm,1.));
+        m.toggle_axis(2,false);m.numeric[0]="50".into();
+        assert!((m.typed(0).unwrap()-0.05).abs()<1e-6);
+        let f=crate::ui::testing::Fixture::new();
+        let camera=f.view().camera;
+        let (values,_)=m.desired(pos2(0.,0.),100.,[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]],camera,false,1.,false);
+        assert_eq!(values[0],0.);assert_eq!(values[1],0.);assert!((values[2]-0.05).abs()<1e-6);
+        m.last=values;assert!(m.status(false).contains("50 mm"));
+        m.units=Some(UnitSettings::new(LengthUnit::Mm,0.01));assert_eq!(m.typed(0),Some(5.));
+        m.kind=Kind::Rotate;assert_eq!(m.typed(0),Some(50.));
+        m.kind=Kind::Scale;assert_eq!(m.typed(0),Some(50.));
+        m.kind=Kind::Move;m.constraint=Constraint::Free;m.numeric=["10".into(),"20".into(),"30".into()];
+        assert_eq!([m.typed(0),m.typed(1),m.typed(2)],[Some(1.),Some(2.),Some(3.)]);
+    }
     #[test] fn constraint_cycles_and_plane() {
         let a = Constraint::Free.key(0, false); assert_eq!(a, Constraint::Axis(0,false));
         assert_eq!(a.key(0,false), Constraint::Axis(0,true)); assert_eq!(a.key(0,false).key(0,false), Constraint::Free);

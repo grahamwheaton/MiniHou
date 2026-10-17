@@ -1117,6 +1117,7 @@ impl App {
     fn start_model_modal(&mut self, ctx: &egui::Context, kind: ModelKind) {
         if self.modal.is_some() || self.model_modal.is_some() || self.scene.is_none() { return; }
         let Some(scene)=self.scene.as_ref() else { return; };
+        let source_points=scene.positions().len()/3;
         let mut selection=self.selection.clone();
         selection.mode=match self.editor_state.selection { ui::SelectionMode::Points => ui::SelectionMode::Points,
             ui::SelectionMode::Edges => ui::SelectionMode::Edges,
@@ -1166,6 +1167,7 @@ impl App {
         let pointer=ctx.input(|i|i.pointer.hover_pos()).unwrap_or(self.last_viewport.center());
         let radius=self.bounds.1.max(0.001);
         let mut state=ModelState::new(kind,pointer,(radius/200.).max(0.00001));
+        state.units=Some(self.prefs.units); state.source_points=source_points;
         if matches!(kind,ModelKind::Extrude | ModelKind::PushPull) {
             let scene=self.scene.as_ref().unwrap();
             let tris=scene.triangle_indices(); let positions=scene.positions();
@@ -1198,7 +1200,12 @@ impl App {
         self.model_modal=Some((state,before,id,previous));
     }
     fn finish_model_modal(&mut self) {
-        if let Some((_,before,_,_))=self.model_modal.take() { self.editor.history.record(before,&self.editor.doc); }
+        if let Some((state,before,id,_))=self.model_modal.take() {
+            if state.kind==ModelKind::Extrude {
+                self.last_operator=Some(LastOperator::Extrude {params:repeat::extrude_next_params(&self.editor.doc.value()["nodes"][&id]["params"],state.source_points)});
+            }
+            self.editor.history.record(before,&self.editor.doc);
+        }
     }
     fn cancel_model_modal(&mut self) {
         if let Some((_,before,_,previous))=self.model_modal.take() {
@@ -1267,6 +1274,7 @@ impl App {
             else { self.selection_center().unwrap_or([0,1,2].map(|i|(lo[i]+hi[i])*0.5)) };
         let mut modal=Modal::new(kind,pointer,pivot,(lo,hi),self.editor_state.snap.to,
             self.editor_state.proportional.enabled,self.editor_state.proportional.radius);
+        modal.units=Some(self.prefs.units);
         let transform_node = if self.editor_state.selection == ui::SelectionMode::Object { &self.selected } else { &self.display };
         let trs = transform_math::TrsParams::from_params(&self.editor.doc.value()["nodes"][transform_node]["params"]);
         modal.rotation = transform_math::matrix_to_euler_xyz(&trs.world_rotation(), [0.; 3]).map(|x| x as f32);
@@ -1545,6 +1553,28 @@ impl App {
             return;
         };
         match op {
+            LastOperator::Extrude {mut params} => {
+                if self.cooking.cooking() {self.file_status="Wait for the extrusion to cook before repeating".into();return;}
+                let Some(scene)=self.scene.as_ref() else {return;};
+                let source_points=scene.positions().len()/3;
+                if self.editor_state.selection!=ui::SelectionMode::Object && !self.selection.is_empty() {
+                    params["group"]=json!("");params["edges"]=json!("");params["points"]=json!("");
+                    match self.editor_state.selection {
+                        ui::SelectionMode::Faces=>params["group"]=json!(group_text(&element_select::cached(&self.elem_topo,scene).polys_of(&self.selection.tris))),
+                        ui::SelectionMode::Edges=>params["edges"]=json!(self.selection.edges.iter().map(|(a,b)|format!("{a}-{b}")).collect::<Vec<_>>().join(" ")),
+                        ui::SelectionMode::Points=>params["points"]=json!(group_text(&self.selection.points)),_=>{},
+                    }
+                }
+                let source=modeling_source(self.editor.doc.value(),&self.selected,&self.display);
+                let next=repeat::extrude_next_params(&params,source_points);
+                if let Some((doc,id))=ui::modal_model::insert_graph(&self.editor.doc,&source,ModelKind::Extrude,params) {
+                    if self.commit_document(doc.value().clone(),"repeat extrusion") {
+                        self.display=Graph::from_value(self.editor.doc.value()).ok().and_then(|g|g.main_output().ok()).unwrap_or(id.clone());
+                        self.selected=id.clone();self.selected_set=std::collections::BTreeSet::from([id]);
+                        self.last_operator=Some(LastOperator::Extrude {params:next});
+                    }
+                }
+            }
             LastOperator::MatrixDelta { delta, frame, .. } => {
                 let group = group_text(&self.selected_points());
                 let object_mode = self.editor_state.selection == ui::SelectionMode::Object;

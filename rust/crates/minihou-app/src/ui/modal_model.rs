@@ -15,6 +15,7 @@ impl Kind {
 
 #[derive(Clone, Debug)]
 pub struct State {
+    pub units: Option<crate::units::UnitSettings>, pub source_points: usize,
     pub kind: Kind, pub start: Pos2, pub pointer: Pos2, pub raw: f32,
     pub value: f32, pub divisions: i32, pub numeric: String, pub scale: f32,
     pub screen_axis: Vec2, pub axis: Option<usize>,
@@ -111,7 +112,7 @@ pub fn pushpull_targets(positions: &[f32], tris: &[u32], selected: &[u32], norma
 }
 impl State {
     pub fn new(kind: Kind, pointer: Pos2, scale: f32) -> Self {
-        Self { kind, start:pointer, pointer, raw:0., value:0., divisions:1, numeric:String::new(), scale,
+        Self { kind, units:None, source_points:0, start:pointer, pointer, raw:0., value:0., divisions:1, numeric:String::new(), scale,
             screen_axis:Vec2::new(1.,-1.).normalized(), axis:None, targets:vec![], snapped:None, snap_pixels:8. }
     }
     pub fn move_to(&mut self, pointer: Pos2, shift: bool, ctrl: bool) {
@@ -124,7 +125,8 @@ impl State {
         self.recalculate(ctrl);
     }
     pub fn recalculate(&mut self, ctrl: bool) {
-        let value=self.numeric.parse::<f32>().ok().unwrap_or_else(|| if ctrl { (self.raw*10.).round()/10. } else { self.raw });
+        let typed=if let Some(units)=self.units {units.parse(&self.numeric).map(|value|value as f32)}else{self.numeric.parse::<f32>().ok()};
+        let value=typed.unwrap_or_else(|| if ctrl { (self.raw*10.).round()/10. } else { self.raw });
         self.value=if matches!(self.kind, Kind::Bevel | Kind::Inset) { value.max(0.) } else { value };
         self.snapped=None;
         if self.kind==Kind::PushPull && !self.targets.is_empty() {
@@ -156,7 +158,8 @@ impl State {
     }
     pub fn status(&self) -> String {
         let measure=if matches!(self.kind,Kind::Extrude | Kind::PushPull) { "Distance" } else { "Offset" };
-        let mut status=format!("{}  {}: {:.3}",self.kind.label(),measure,self.value);
+        let value=if let Some(units)=self.units {units.format(self.value as f64)}else{format!("{:.3}",self.value)};
+        let mut status=format!("{}  {}: {}",self.kind.label(),measure,value);
         if self.kind==Kind::Bevel { status.push_str(&format!("  Divisions: {}",self.divisions)); }
         if let Some(axis)=self.axis { status.push_str(&format!("  {}",["X","Y","Z"][axis])); }
         if let Some(snap)=self.snapped { status.push_str(&format!("  [{}]",snap.label())); }
@@ -173,6 +176,14 @@ pub fn insert_graph(before: &Document, source: &str, kind: Kind, params: Value) 
 #[cfg(test)] mod tests {
     use super::*;
     use eframe::egui::pos2;
+    #[test] fn modelling_distances_use_display_units() {
+        for kind in [Kind::Extrude,Kind::Inset,Kind::Bevel,Kind::PushPull] {
+            let mut state=State::new(kind,pos2(0.,0.),0.01);
+            state.units=Some(crate::units::UnitSettings::default());
+            state.numeric="50".into();state.recalculate(false);
+            assert!((state.value-0.05).abs()<1e-6);assert!(state.status().contains("50 mm"));
+        }
+    }
     #[test] fn precision_snap_numeric_and_division_bounds() {
         let mut s=State::new(Kind::Bevel,pos2(0.,0.),0.01);
         s.move_to(pos2(100.,0.),true,false); assert!((s.value-0.1).abs()<1e-5);

@@ -29,6 +29,7 @@ pub enum LastOperator {
         factor: [f32; 3],
         pivot: [f32; 3],
     },
+    Extrude { params: Value },
     AddNode {
         node_type: String,
         after_selection: bool,
@@ -51,6 +52,7 @@ impl LastOperator {
             Self::Move { .. } => "Repeat Move (Shift+R)".to_string(),
             Self::Rotate { .. } => "Repeat Rotate (Shift+R)".to_string(),
             Self::Scale { .. } => "Repeat Scale (Shift+R)".to_string(),
+            Self::Extrude { .. } => "Repeat Extrude (Shift+R)".into(),
             Self::AddNode { node_type, .. } => format!("Repeat Add {node_type} (Shift+R)"),
             Self::Duplicate => "Repeat Duplicate (Shift+R)".to_string(),
             Self::Dissolve => "Repeat Dissolve (Shift+R)".to_string(),
@@ -59,6 +61,24 @@ impl LastOperator {
             Self::Tidy => "Repeat Tidy (Shift+R)".to_string(),
         }
     }
+}
+
+/// Face primitive IDs remain the front caps; edge/point extrusions append their
+/// new endpoints in sorted source-point order. Replay on those new endpoints.
+pub fn extrude_next_params(params:&Value, source_points:usize)->Value {
+    use std::collections::{BTreeSet,BTreeMap};
+    let mut next=params.clone();
+    let edges=params["edges"].as_str().unwrap_or("");
+    let points=params["points"].as_str().unwrap_or("");
+    let pairs:Vec<(usize,usize)>=edges.split(|c:char|c==','||c.is_whitespace()).filter_map(|item| {
+        let (a,b)=item.split_once('-')?;Some((a.parse().ok()?,b.parse().ok()?))
+    }).collect();
+    let ids:BTreeSet<usize>=if !pairs.is_empty() {pairs.iter().flat_map(|&(a,b)|[a,b]).collect()}
+        else {points.split(|c:char|c==','||c.is_whitespace()).filter_map(|item|item.parse().ok()).collect()};
+    let map:BTreeMap<_,_>=ids.iter().enumerate().map(|(i,&id)|(id,source_points+i)).collect();
+    if !pairs.is_empty() {next["edges"]=json!(pairs.iter().map(|(a,b)|format!("{}-{}",map[a],map[b])).collect::<Vec<_>>().join(" "));}
+    else if !ids.is_empty() {next["points"]=json!(map.values().map(usize::to_string).collect::<Vec<_>>().join(","));}
+    next
 }
 
 /// Applies a transform repeat to an existing transform node in the document.
@@ -99,6 +119,29 @@ pub fn apply_repeat_transform(
 mod tests {
     use super::*;
 
+    #[test] fn extrude_repeat_extends_caps_and_is_one_undo_step() {
+        let base=Document::parse(json!({"nodes":{"grid":{"type":"grid","params":{"rows":2,"columns":2}},"out":{"type":"output","inputs":{"geo":"grid"}}},"display":"out"}).to_string()).unwrap();
+        for component in ["group","edges","points"] {
+            let mut doc=base.clone();let mut params=json!({"distance":0.05,"direction":[0.,0.,1.]});
+            params[component]=json!(if component=="edges" {"0-1"}else{"0"});
+            let mut history=minihou_app::History::default();
+            for step in 0..3 {
+                let before=doc.clone();
+                let geo=doc.session().unwrap().cook(Some("out")).unwrap();
+                let old_max=geo.p().chunks_exact(3).map(|p|p[2]).fold(f32::NEG_INFINITY,f32::max);
+                let next_params=extrude_next_params(&params,geo.npoints);
+                let (next,_)=crate::ui::modal_model::insert_graph(&doc,"out",crate::ui::modal_model::Kind::Extrude,params).unwrap();
+                doc=next;history.record(before.clone(),&doc);
+                let cooked=doc.session().unwrap().cook(Some("out")).unwrap();
+                assert!(cooked.npoints>geo.npoints);
+                if component=="group" {let max=cooked.p().chunks_exact(3).map(|p|p[2]).fold(f32::NEG_INFINITY,f32::max);assert!((max-old_max-0.05).abs()<1e-5);}
+                history.undo(&mut doc).unwrap();assert_eq!(doc.value(),before.value());history.redo(&mut doc).unwrap();
+                params=next_params;
+                assert_eq!(doc.value()["nodes"].as_object().unwrap().len(),3+step);
+            }
+        }
+        assert_eq!(LastOperator::Extrude {params:json!({})}.description(),"Repeat Extrude (Shift+R)");
+    }
     #[test]
     fn test_four_x_90_degree_rotate_repeats() {
         let initial = json!({
