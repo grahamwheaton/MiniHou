@@ -24,22 +24,22 @@ checks restrict the service to local clients. No authentication is added.
 In the table, `snapshot`, `status` and `node-type` have the shapes below. Optional
 fields are marked `?`. GET query parameters are separate from JSON bodies.
 
-| MCP tool | Method and path | Exact payload/query from mcp.py | Response consumed by mcp.py |
-|---|---|---|---|
-| `engine_status` | GET `/api/state` | none | snapshot plus `status`, `link:{clients:[str],port}`, `engine:{pid,version,python_nodes}`, `library?:{dirs:[str],files:[{file,nodes:[str],error:null\|str}]}` |
-| `list_node_types` | GET `/api/nodes` | none; filtering `names` is done in the MCP process | `[node-type,...]` |
-| `get_graph` | GET `/api/graph`, then GET `/api/status` | none; `include_layout=false` strips node `pos` in the MCP process | snapshot and status |
-| `edit_graph` | POST `/api/edit` | `{"ops":[...],"wait":true,"timeout":60,"origin":"mcp"}` | `{"changed":bool,"rev":int,"results":[object,...],"status":status,"graph":snapshot}` |
-| `inspect_node` | POST `/api/inspect` | `{"node":str,"detail":bool}` (tool default true) | inspection below; `ok=false` becomes a tool error |
-| `undo` | POST `/api/undo` or `/api/redo`, then GET `/api/status?wait=1&timeout=30` | `{"origin":"mcp"}` once per step, clamped to 1..50 | `{"ok":bool,"graph":snapshot}` and status |
-| `export_usd` | POST `/api/export_usd` | `{"path":str,"overwrite":bool,"graph":bool,"node"?:str}`; overwrite default false, graph default true | `{"path":str,"outputs":{name:{"prim":str,"faces":int,"curves":int,"points":int,"instances"?:int,"dropped":{"faces":int,"curves":int}}}}` |
-| `press_button` | POST `/api/node_action` | `{"node":str,"action":str}` | object with optional `message` string |
-| `set_proxy` | GET `/api/proxy` if no args, otherwise POST `/api/proxy`, GET `/api/status?wait=1`, GET `/api/proxy` | POST contains only supplied fields: `level?:number`, `auto?:bool`, `link_tris?:int` | `{"level":number,"auto":bool,"cooked":number,"link_tris":int,...}` |
-| `set_frame` | POST `/api/frame`, GET `/api/status?wait=1` | `{"frame":number,"fps"?:number}` | `{"frame":number,"fps":number}` and status |
-| `list_graphs` | GET `/api/files` | none | `{"root":str,"current":str\|null,"files":[relative-path,...]}` |
-| `open_graph` | GET `/api/status` alive probe, POST `/api/open`, GET `/api/status?wait=1&timeout=30`, then `engine_status` | `{"path":absolute-path,"create":bool}` | open reply is ignored; subsequent status/state are consumed |
-| `node_library` | GET `/api/state` | none | optional `library` as above; authoring guide comes from the local Python package |
-| `wrangle_reference` | **no HTTP** | none | reference text comes from the local Python package |
+| MCP tool | Method and path | Exact payload/query from mcp.py | Response consumed by mcp.py | Live status 2026-10-17 |
+|---|---|---|---|---|
+| `engine_status` | GET `/api/state` | none | snapshot plus `status`, `link:{clients:[str],port}`, `engine:{pid,version,python_nodes}`, `library?:{dirs:[str],files:[{file,nodes:[str],error:null\|str}]}` | Pass |
+| `list_node_types` | GET `/api/nodes` | none; filtering `names` is done in the MCP process | `[node-type,...]` | Pass, `names` filter |
+| `get_graph` | GET `/api/graph`, then GET `/api/status` | none; `include_layout=false` strips node `pos` in the MCP process | snapshot and status | Pass |
+| `edit_graph` | POST `/api/edit` | `{"ops":[...],"wait":true,"timeout":60,"origin":"mcp"}` | `{"changed":bool,"rev":int,"results":[object,...],"status":status,"graph":snapshot}` | Pass, replace/add/connect/set/display |
+| `inspect_node` | POST `/api/inspect` | `{"node":str,"detail":bool}` (tool default true) | inspection below; `ok=false` becomes a tool error | Pass |
+| `undo` | POST `/api/undo` or `/api/redo`, then GET `/api/status?wait=1&timeout=30` | `{"origin":"mcp"}` once per step, clamped to 1..50 | `{"ok":bool,"graph":snapshot}` and status | Pass, undo and redo |
+| `export_usd` | POST `/api/export_usd` | `{"path":str,"overwrite":bool,"graph":bool,"node"?:str}`; overwrite default false, graph default true | `{"path":str,"outputs":{name:{"prim":str,"faces":int,"curves":int,"points":int,"instances"?:int,"dropped":{"faces":int,"curves":int}}}}` | Pass, `.usda` file written |
+| `press_button` | POST `/api/node_action` | `{"node":str,"action":str}` | object with optional `message` string | Not exercised live |
+| `set_proxy` | GET `/api/proxy` if no args, otherwise POST `/api/proxy`, GET `/api/status?wait=1`, GET `/api/proxy` | POST contains only supplied fields: `level?:number`, `auto?:bool`, `link_tris?:int` | `{"level":number,"auto":bool,"cooked":number,"link_tris":int,...}` | Not exercised live |
+| `set_frame` | POST `/api/frame`, GET `/api/status?wait=1` | `{"frame":number,"fps"?:number}` | `{"frame":number,"fps":number}` and status | Not exercised live |
+| `list_graphs` | GET `/api/files` | none | `{"root":str,"current":str\|null,"files":[relative-path,...]}` | Not exercised live |
+| `open_graph` | GET `/api/status` alive probe, POST `/api/open`, GET `/api/status?wait=1&timeout=30`, then `engine_status` | `{"path":absolute-path,"create":bool}` | open reply is ignored; subsequent status/state are consumed | Not exercised live |
+| `node_library` | GET `/api/state` | none | optional `library` as above; authoring guide comes from the local Python package | Not exercised live |
+| `wrangle_reference` | **no HTTP** | none | reference text comes from the local Python package | Not exercised live |
 
 There are **15 method/path combinations** (GET+POST proxy count separately).
 There are no screenshot, viewport-image, file-upload, save, library-write,
@@ -248,3 +248,34 @@ Files changed for this work: `src/http_api.rs`, `src/http_ops.rs`,
 `tests/test_rust_mcp_support.py`, `tools/setup_mcp.py`, `README.md`, `.gitignore`,
 and this contract. No core node files or `blender_link.rs` were edited for this
 work; concurrent helpers' changes are retained.
+
+## Live check and fence sample (2026-10-17)
+
+The debug native app was launched from this worktree and answered GET `/api/state`
+with `engine.engine="rust"`, and GET `/api/nodes` with 183 types. The
+`tests/test_mcp_live.py` live test passed through the Python `McpServer` tool
+layer: `engine_status`, filtered `list_node_types`, `get_graph`, `edit_graph`,
+`inspect_node`, `undo`/redo, and `export_usd`. The export created a real temporary
+`.usda` file, which the test removed. An `edit_graph` batch added a box, connected
+it to output, and set its size before inspection and undo. No requested tool
+failed at runtime. The other seven tools in the table were not exercised live.
+
+`tools/create_fence_mcp.py` created `rust/crates/minihou-app/src/test_data/fence.minihou`
+with MCP `replace`, `add`, `connect`, and `display` operations. It cooked in the
+live app with 488 points, 366 primitives, and no cook error. `garden_fence` uses
+the new Rust `fence` node, whose input is an open curve and whose parameters are
+bay width, height, rail height, slat width/gap, batten thickness, and post size.
+The sample uses `sample_path` so it cooks headlessly. To use a Blender curve,
+pick it for `blender_path` and connect `blender_path` to `garden_fence.path`.
+The node outputs posts at bay boundaries, three rails per bay, lower slats and
+crossed upper battens; its geometry detail includes `fence_bays`, `fence_posts`,
+and `fence_slats` for validation.
+
+The first debug build failed with OS error 112 (disk full). Cleaning only
+`rust/target_fence` and building with debug symbols and incremental artifacts
+disabled succeeded. The first targeted Rust test link then failed with LNK1180
+(insufficient disk space). A second clean of only `rust/target_fence` allowed
+the focused tests to pass: `minihou-core --lib fence` (1), `minihou-app --lib
+fence` (1), and `minihou-app --lib mcp` (1). Blender's object picker, curve
+feed, live modifier, and viewport appearance still require a Blender/native UI
+session.
