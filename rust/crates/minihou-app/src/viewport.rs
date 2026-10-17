@@ -738,9 +738,13 @@ impl Gpu {
     pub fn set_selection(&mut self, device: &wgpu::Device, faces: &[f32], lines: &[f32]) {
         let buf = |label, data: &[f32]| device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(label), contents: if data.is_empty() { &[0u8; 12] } else { bytemuck::cast_slice(data) }, usage: wgpu::BufferUsages::VERTEX });
-        // the normal buffer must cover every vertex: grow the zero buffer when a selection is larger than it
+        // Highlights expand indexed faces/edges into individual vertices. Every bound
+        // vertex buffer must cover that expanded count, including the constant colour.
         let need = faces.len().max(lines.len()) * 4;
         if need as u64 > self.zeros.size() { self.zeros = buf("zeros", &vec![0f32; faces.len().max(lines.len()).next_power_of_two()]); }
+        if need as u64 > self.neutral_color.size() {
+            self.neutral_color = buf("neutral color", &vec![0.72f32; faces.len().max(lines.len()).next_power_of_two()]);
+        }
         self.sel_face = buf("sel_face", faces);
         self.sel_face_n = (faces.len() / 3) as u32;
         self.sel_line = buf("sel_line", lines);
@@ -1042,6 +1046,37 @@ mod tests {
         let (indices,ranges)=packed_cut(&lod,&[0,1]);
         assert_eq!(indices,vec![0,1,2,3,4,5,5,6,7]);
         assert_eq!(ranges,vec![0..3,3..9]);
+    }
+
+    #[test]
+    fn whole_mesh_face_selection_headless() {
+        let instance = wgpu::Instance::default();
+        let Ok(adapter) = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            compatible_surface: None, force_fallback_adapter: false,
+        })) else { eprintln!("No wgpu adapter available, skipping selection render test"); return; };
+        eprintln!("Selection render adapter: {:?}", adapter.get_info());
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).unwrap();
+        let graph = minihou_core::Graph::from_json(include_str!("default_graph.json")).unwrap();
+        let scene = Scene::new(&graph.cook(Some("output1")).unwrap());
+        let selection = crate::picking::Selection {
+            mode: crate::ui::SelectionMode::Faces,
+            tris: (0..scene.triangles() as u32).collect(), ..Default::default()
+        };
+        let (faces, lines) = crate::picking::highlight(scene.positions(), scene.triangle_indices(), &selection, 0.01);
+        assert_eq!(faces.len(), scene.triangle_indices().len() * 3);
+        let mut gpu = Gpu::new(&device, &scene);
+        let (target, _texture) = Target::new_headless(&device, [64, 64]);
+        let camera = Camera::frame(scene.center, scene.radius);
+        // Both initial upload and scene replacement must support the expanded highlight.
+        for replace_scene in [false, true] {
+            if replace_scene { gpu.upload(&device, &scene); }
+            gpu.set_selection(&device, &faces, &lines);
+            device.push_error_scope(wgpu::ErrorFilter::Validation);
+            gpu.draw_raw(&device, &queue, &target, &camera, Mode::Solid, Overlay::default(), crate::ui::SelectionMode::Faces, false);
+            let error = pollster::block_on(device.pop_error_scope());
+            assert!(error.is_none(), "whole-mesh face selection must render: {error:?}");
+        }
     }
 
     #[test]
