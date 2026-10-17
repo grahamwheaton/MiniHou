@@ -412,7 +412,14 @@ class EmbeddedLinkTests(unittest.TestCase):
         command["id"] = self.command
         tmp = self.engine.control.with_suffix(".tmp")
         tmp.write_text(json.dumps(command), encoding="utf-8")
-        tmp.replace(self.engine.control)
+        for _ in range(25):
+            try:
+                tmp.replace(self.engine.control)
+                break
+            except PermissionError:
+                time.sleep(0.05)
+        else:
+            tmp.replace(self.engine.control)
         time.sleep(0.3)
 
     def retry(self, fn):

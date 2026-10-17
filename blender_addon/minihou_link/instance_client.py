@@ -1,4 +1,4 @@
-"""Worker-only RPC I/O with a 200 ms main-thread budget; shared with Blender.
+"""Worker-only RPC I/O with adaptive main-thread budget; shared with Blender.
 
 On timeout raise OSError so modifiers retain their last good mesh and use their
 existing retry/backoff path. A timeout never returns a stale reply as a new cook.
@@ -25,9 +25,9 @@ class InstanceClient:
         self._epoch = 0
 
     def _invoke(self, operation):
-        # Even callers that set timeout/sock timeout to 30 s (older modifiers.py)
-        # cannot extend Blender's UI budget. All actual I/O runs on a daemon.
-        budget = max(0.001, min(float(self.timeout), 0.2))
+        # Adaptive budget: honour explicit timeout (e.g. generous 30s deadlines for cooks
+        # or debug servers), while preserving short budgets for polling/auto-connect.
+        budget = max(0.001, float(self.timeout))
         deadline = time.monotonic() + budget
         epoch = self._epoch
         done, cancelled = threading.Event(), threading.Event()
@@ -59,7 +59,7 @@ class InstanceClient:
         if not done.wait(max(0.0, deadline - time.monotonic())):
             cancelled.set()
             self.close()
-            raise TimeoutError("MiniHou did not reply within 200 ms; last cache retained")
+            raise TimeoutError(f"MiniHou did not reply within {budget:.1f}s; last cache retained")
         ok, value = result[0]
         if not ok:
             raise value

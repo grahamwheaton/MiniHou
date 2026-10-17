@@ -1,4 +1,4 @@
-"""Geometry Nodes editor controls for staged MiniHou placements."""
+import uuid
 import bpy
 from . import geonodes, modifiers
 
@@ -38,6 +38,52 @@ class MINIHOU_OT_add_group(bpy.types.Operator):
             node.location = context.space_data.cursor_location
             node.select = True
             tree.nodes.active = node
+        except Exception as exc:
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class MINIHOU_OT_duplicate_placement(bpy.types.Operator):
+    bl_idname = "minihou.duplicate_placement"
+    bl_label = "Duplicate Placement"
+    bl_description = "Create an independent duplicate of the active MiniHou placement"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return _active(context) is not None
+
+    def execute(self, context):
+        try:
+            node = _active(context)
+            tree = getattr(context.space_data, "edit_tree", None)
+            if tree is None:
+                for ng in bpy.data.node_groups:
+                    if node in list(ng.nodes):
+                        tree = ng
+                        break
+            if tree is None:
+                raise ValueError("Active tree not found")
+            new_node = tree.nodes.new("GeometryNodeGroup")
+            new_node.node_tree = node.node_tree.copy()
+            new_node.node_tree.use_fake_user = False
+            new_node.node_tree[geonodes.KEY] = uuid.uuid4().hex
+            geonodes.proxy.ensure_plumbing(new_node.node_tree)
+            geonodes._cache(new_node.node_tree)
+            geonodes._object_interface(new_node.node_tree)
+            for inp in new_node.inputs:
+                old_inp = node.inputs.get(inp.name)
+                if old_inp is not None and hasattr(inp, "default_value") and hasattr(old_inp, "default_value") and not old_inp.is_linked:
+                    try:
+                        inp.default_value = old_inp.default_value
+                    except Exception:
+                        pass
+            new_node.location = (node.location.x + 40, node.location.y - 40)
+            for other in tree.nodes:
+                other.select = False
+            new_node.select = True
+            tree.nodes.active = new_node
         except Exception as exc:
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
@@ -115,6 +161,7 @@ class MINIHOU_PT_geonodes(bpy.types.Panel):
             box.alert = text.startswith("Error")
             for offset in range(0, min(len(text), 400), 55):
                 box.label(text=text[offset:offset + 55])
+            box.operator("minihou.duplicate_placement")
             box.operator("minihou.edit_group_network", icon="URL")
             box.operator("minihou.reload_group")
             box.label(text="Edit Network updates this placement live.")
@@ -126,12 +173,13 @@ class MINIHOU_PT_geonodes(bpy.types.Panel):
                     box.label(text=line)
 
 
-_classes = (MINIHOU_OT_add_group, MINIHOU_OT_reload_group, MINIHOU_OT_edit_group_network, MINIHOU_PT_geonodes)
+_classes = (MINIHOU_OT_add_group, MINIHOU_OT_duplicate_placement, MINIHOU_OT_reload_group, MINIHOU_OT_edit_group_network, MINIHOU_PT_geonodes)
 
 
 def _context_menu(self, context):
     if _active(context):
         self.layout.separator()
+        self.layout.operator("minihou.duplicate_placement")
         self.layout.operator("minihou.edit_group_network", icon="NODETREE")
 
 
