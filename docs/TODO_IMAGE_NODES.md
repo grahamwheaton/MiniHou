@@ -21,3 +21,9 @@ BUILD ORDER: (a) Image Density, plus a Scatter density option; (b) Image Sample;
 ACCEPTANCE: load a black-and-white PNG, generate points concentrated in its dark areas with image_density -> scatter, and changing density interactively cooks without errors (test the cook path with two different density settings).
 
 Report in 6 lines: what each node does, params, tests, the demo graph path, what was not built and why, and how to try the acceptance flow.
+
+---
+
+# Queued node-editor fix (not the image work)
+
+- **Tab with nothing selected places the new node at the mouse position** in the node editor (not at the default spot). Attach to the next node-editor fix; check the existing Tab-menu insertion path (ui/network.rs, network_menu.rs) so a node created with a selection still follows its current rule.
