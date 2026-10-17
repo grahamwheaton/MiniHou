@@ -127,3 +127,11 @@ Target: match Houdini's SOPs for these three nodes (screenshots supplied by the 
 - Mode (Scatter Points on Geometry Surface), Group, Tag Name (`$OS`), Global Seed, Coverage, Point Count Method (By Size), Scaling mode, Min/Max Radius, Uniform Scale, Orientation tab (Alignment; Rotation with Max Random Cone Angle; Rotation Around Normal with Min/Max Angle, Round to Multiple, Offset Angle, Remap Using Distribution Ramp), Point Generation tab, Attributes tab.
 
 Priority: queued after the select-arrow work. Not started. Note: Copy to Curves and Orientation along Curve depend on a correct curve frame (tangent, up vector), so build the shared frame code once and reuse it in both.
+
+---
+
+# Queued (small): shelf red dots on Rectangle, Polygon and Repeat
+
+- **Rectangle and Polygon** show a red "no Rust version" dot, but they are viewport drawing tools (`sketch_rectangle`, `sketch_polygon`), not graph nodes. The Python app never had them as nodes, so there is nothing to port. Fix: give tools their own marker (no red dot), or hide the dot for tool entries.
+- **Repeat** points at `loop_block`. The Python app's repeat region is `loop_begin` and `loop_end`, which Rust already runs. Fix: map the shelf entry to the existing loop region and show the normal marker.
+- Priority: low (cosmetic, but it misleads about what is missing).
