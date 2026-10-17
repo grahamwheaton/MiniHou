@@ -11,6 +11,7 @@ mod repeat;
 mod usd_export;
 pub use repeat::LastOperator;
 #[cfg(test)] mod transform_tests;
+#[cfg(test)] mod live_path_tests;
 use eframe::{egui, egui_wgpu};
 pub use minihou_app::units;
 use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, CookRequest, CookState, StandardView};
@@ -220,6 +221,25 @@ fn transform_keeps_measurement_point_identity() {
     forward_measurement_refs(&mut doc,"a","b");
     assert_eq!(doc["measurements"][0]["refs"][0]["node"],"b");
     assert_eq!(doc["nodes"]["b"]["measurement_identity"],"stable");
+}
+/// Where a viewport modelling node (extrude, push/pull, bevel...) is inserted. Element ids come from the displayed
+/// scene, so the node must take the displayed geometry: the selected node only when it exists and is what the
+/// display shows (itself, or the node feeding a displayed output); otherwise the display (e.g. after an undo removed
+/// the selected node, or an upstream node is selected whose ids differ from the scene).
+fn modeling_source(value: &Value, selected: &str, display: &str) -> String {
+    let nodes = &value["nodes"];
+    let shows = |id: &str| id == display || (nodes[display]["type"] == "output" && nodes[display]["inputs"]["geo"] == id);
+    if !selected.is_empty() && nodes.get(selected).is_some() && shows(selected) { return selected.to_owned(); }
+    if !display.is_empty() && nodes.get(display).is_some() { return display.to_owned(); }
+    minihou_app::display_nodes(value).into_iter().next().unwrap_or_else(|| selected.to_owned())
+}
+/// Alt+E with faces selected starts Push/Pull on them immediately; without, it waits for a face pick.
+fn pushpull_starts_now(mode: ui::SelectionMode, selection: &picking::Selection) -> bool {
+    mode == ui::SelectionMode::Faces && selection.mode == ui::SelectionMode::Faces && !selection.tris.is_empty()
+}
+/// The active node after undo/redo: kept when it still exists, else the displayed node.
+fn surviving_selection(value: &Value, selected: &str, display: &str) -> String {
+    if value["nodes"].get(selected).is_some() { selected.to_owned() } else { display.to_owned() }
 }
 fn feeds_displayed_node(value: &Value, selected: &str) -> bool {
     let mut pending = minihou_app::display_nodes(value);
@@ -1136,7 +1156,7 @@ impl App {
             params[kind.parameter()]=json!(0.);
             params
         };
-        let source=if self.selected.is_empty() { self.display.clone() } else { self.selected.clone() };
+        let source=modeling_source(self.editor.doc.value(),&self.selected,&self.display);
         let Some((doc,id))=ui::modal_model::insert_graph(&self.editor.doc,&source,kind,params) else {
             self.file_status=format!("Could not add {}",kind.node()); return;
         };
@@ -1897,6 +1917,8 @@ impl App {
                     "bevel"=>ModelKind::Bevel,_=>ModelKind::PushPull };
                 if kind==ModelKind::PushPull {
                     if self.scene.is_none() { self.file_status="Wait for the mesh to cook".into(); return; }
+                    // Like E: a face selection starts the gesture at once; otherwise hover and click a face.
+                    if pushpull_starts_now(self.editor_state.selection,&self.selection) { self.start_model_modal(ctx,kind); return; }
                     self.pushpull_pick=true;
                     self.file_status="Push / Pull: hover a face and click to pick it".into();
                     return;
@@ -1995,6 +2017,12 @@ impl App {
                         }
                         self.display = Graph::from_value(self.editor.doc.value()).ok().and_then(|g| g.main_output().ok()).unwrap_or_default();
                         self.selected_set.retain(|id| self.editor.doc.value()["nodes"].get(id).is_some());
+                        // Undo can remove the node the last action created and selected: per-action state must not
+                        // point at it, or the next action hangs its node off a missing source (live report 8).
+                        self.selected = surviving_selection(self.editor.doc.value(), &self.selected, &self.display);
+                        if self.selected_set.is_empty() && !self.selected.is_empty() { self.selected_set.insert(self.selected.clone()); }
+                        self.transform_target = None; self.transform_before = None; self.transform_delta = None;
+                        self.pushpull_pick = false;
                         self.send(command);
                     }
                 }

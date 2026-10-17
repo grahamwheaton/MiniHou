@@ -102,7 +102,7 @@ pub fn pushpull_targets(positions: &[f32], tris: &[u32], selected: &[u32], norma
         if chosen.contains(&(t as u32)) { continue; }
         let [a, b, c] = corners(t);
         let m = cross(sub(b, a), sub(c, a)); let ml = dot(m, m).sqrt();
-        if ml < 1e-12 || dot(m, n) / ml < 1. - 1e-6 { continue; }
+        if ml < 1e-12 || dot(m, n) / ml < 1. - 1e-5 { continue; }
         let d = dot(sub(a, anchor), n);
         if d > extent * 1e-5 && !planes.iter().any(|&p| (p - d).abs() <= extent * 1e-5) { planes.push(d); }
     }
