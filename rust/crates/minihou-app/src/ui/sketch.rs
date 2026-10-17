@@ -361,7 +361,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
         let line_like = matches!(mode, SketchMode::Line | SketchMode::Pen | SketchMode::Polygon | SketchMode::Tape | SketchMode::Bezier | SketchMode::Arc);
         let tool = ToolContext { spec: spec(mode), start: s.points.last().copied(),
             start_face: if line_like { s.faces.last().copied().flatten() } else { None },
-            ground: (s.origin, normal), tool_points: s.points.clone() };
+            ground: (s.origin, normal), tool_points: s.points.clone(), tool_segments: vec![] };
         let input = InferenceInput { ray, cursor: [at.x, at.y], projector, time: ctx.input(|i| i.time),
             geometry: mesh.map(|(positions, triangles)| inf::GeometryRef { positions, triangles, curve_lines: &curve_lines, curve_centers: &curve_centers, revision: 0 }),
             tool, settings: &settings, alt_held: ctx.input(|i| i.modifiers.alt), typed };
@@ -400,7 +400,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
         egui::Event::Key { key, pressed: true, .. } if bound(key, &keys.cycle_linear_mode) => { engine.cycle_linear_mode(&settings); },
         egui::Event::Key { key, pressed: true, .. } if matches!(key, egui::Key::X | egui::Key::Y | egui::Key::Z) => { engine.toggle_axis_lock(match key { egui::Key::X => 0, egui::Key::Y => 1, _ => 2 }); },
         egui::Event::Text(t) if t.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | ',' | '@' | '<' | 'm'|'c'|'k'|'i'|'n'|'f'|'t'|'M'|'C'|'K'|'I'|'N'|'F'|'T'|' ')) => s.numeric.push_str(&t),
-        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers } if safe.contains(pos) && !modifiers.alt && !measurement_click => {
+        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, .. } if safe.contains(pos) && !measurement_click => {
             if let Some(p) = s.hover { if s.points.last().is_none_or(|a| length(sub(*a, p)) > 1e-7) {
                 if matches!(mode,SketchMode::Line|SketchMode::Pen|SketchMode::Polygon) && s.points.len() >= 3 && length(sub(s.points[0], p)) < v.bounds.1 * 0.015 {
                     s.closed = true; stage(&mut s);
@@ -507,6 +507,22 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
     }
     fn state(ctx: &egui::Context) -> State { ctx.data(|d| d.get_temp(id())).unwrap() }
 
+    #[test] fn alt_lock_primary_click_commits_locked_point_in_line_and_polyline() {
+        for mode in [SketchMode::Line, SketchMode::Pen] {
+            let (ctx, f) = rig(mode);
+            click(&ctx, &f, scr(&f, [1., 1., 0.]), None);
+            let along = scr(&f, [2., 1., 0.]);
+            frame(&ctx, &f, vec![egui::Event::PointerMoved(along)], None, Default::default());
+            let off = scr(&f, [2., 1.3, 0.]);
+            frame(&ctx, &f, vec![egui::Event::PointerMoved(off)], None, egui::Modifiers::ALT);
+            let locked = state(&ctx).hover.expect("locked hover");
+            assert!(engine(&ctx).lock().unwrap().active_lock().is_some());
+            frame(&ctx, &f, vec![egui::Event::PointerButton {pos: off, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::ALT}], None, egui::Modifiers::ALT);
+            assert_eq!(state(&ctx).points.len(), 2, "{mode:?}");
+            assert_eq!(state(&ctx).points[1], locked);
+        }
+    }
+
     #[test] fn line_right_click_stages_chains_and_enter_releases_mmb_orbit() {
         let (ctx, f) = rig(SketchMode::Line);
         for (a,b) in [([0.,0.,0.],[1.,0.,0.]), ([0.,1.,0.],[1.,1.,0.])] {
@@ -564,7 +580,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
         frame(&ctx, &f, vec![key(egui::Key::F)], None, Default::default());
         let mode = engine(&ctx).lock().unwrap().linear_mode(&InferenceSettings::default());
         assert_eq!(mode, inf::LinearMode::PointsOnly);
-        // Alt used with a click (Alt+LMB selection) does not cycle.
+        // Alt used with a click does not cycle the linear mode.
         frame(&ctx, &f, vec![], None, egui::Modifiers::ALT);
         frame(&ctx, &f, vec![egui::Event::PointerButton { pos: pos2(600., 400.), button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::ALT }], None, egui::Modifiers::ALT);
         frame(&ctx, &f, vec![], None, Default::default());

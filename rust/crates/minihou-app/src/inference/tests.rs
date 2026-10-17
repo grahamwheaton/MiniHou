@@ -41,6 +41,17 @@ impl Rig {
 }
 fn close(a: V3, b: V3, eps: f32) -> bool { math::dist(a, b) <= eps }
 
+#[test] fn knife_previous_path_offers_on_edge_and_extension() {
+    let mut r = Rig::new(top());
+    r.tool.spec = ToolSpec::KNIFE;
+    r.tool.tool_points = vec![[0., 0., 0.], [1., 0., 0.]];
+    r.tool.tool_segments = vec![([0., 0., 0.], [1., 0., 0.])];
+    let on = r.near([0.5, 0., 0.], [0., 0.], None);
+    assert_eq!(on.winner.kind, Kind::OnEdge, "{}", on.reason);
+    let beyond = r.near([1.3, 0., 0.], [0., 0.], None);
+    assert_eq!(beyond.winner.kind, Kind::Extension, "{}", beyond.reason);
+}
+
 #[test] fn evaluated_curve_segments_and_centres_share_mesh_snap_ranking() {
     let p = [0.,0.,0., 2.,0.,0., 3.,1.,0.];
     let lines = [0,1,1,2];
