@@ -11,7 +11,7 @@ pub fn point_key(tag: u64, p: V3) -> u64 {
     h
 }
 pub fn key(c: &Candidate) -> u64 {
-    let tag = match c.kind { Kind::Endpoint | Kind::Midpoint | Kind::Origin | Kind::Reference | Kind::Intersection => 1, Kind::Axis(a) | Kind::FromPoint(a) | Kind::Locked(a) => 0x100 + a as u64 + ((c.kind.tier() as u64) << 4), k => k.tier() as u64 * 31 + k.label().len() as u64 };
+    let tag = match c.kind { Kind::Endpoint | Kind::Midpoint | Kind::Centre | Kind::Origin | Kind::Reference | Kind::Intersection => 1, Kind::Axis(a) | Kind::FromPoint(a) | Kind::Locked(a) => 0x100 + a as u64 + ((c.kind.tier() as u64) << 4), k => k.tier() as u64 * 31 + k.label().len() as u64 };
     // Linear candidates move with the cursor: identify them by their guide line instead.
     match (c.kind.is_linear() || matches!(c.kind, Kind::OnEdge | Kind::OnFace), c.guides.first(), c.edge) {
         (true, Some(g), _) => point_key(tag, [g.origin[0] + g.dir[0] * 1e3, g.origin[1] + g.dir[1] * 1e3, g.origin[2] + g.dir[2] * 1e3]),

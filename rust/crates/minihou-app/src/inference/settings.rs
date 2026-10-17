@@ -1,7 +1,7 @@
 //! Persisted inference preferences (Preferences > Viewport > Inference) and tool key bindings.
 use serde_json::{json, Value};
 
-/// SketchUp's three linear inference modes, cycled with an Alt tap or chosen in the chip/preferences.
+/// Three linear inference modes, cycled with F or chosen in the chip/preferences.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum LinearMode { #[default] All, PointsOnly, ParallelPerpendicularOnly }
 impl LinearMode {
@@ -17,11 +17,11 @@ pub mod cat {
     pub const VERTEX: u32 = 1; pub const MIDPOINT: u32 = 2; pub const EDGE: u32 = 4; pub const FACE: u32 = 8;
     pub const INTERSECTION: u32 = 16; pub const ORIGIN: u32 = 32; pub const AXIS: u32 = 64;
     pub const PARALLEL: u32 = 128; pub const PERPENDICULAR: u32 = 256; pub const EXTENSION: u32 = 512;
-    pub const TRACKING: u32 = 1024;
-    pub const POINTS: u32 = VERTEX | MIDPOINT | EDGE | FACE | INTERSECTION | ORIGIN;
+    pub const TRACKING: u32 = 1024; pub const CENTRE: u32 = 2048;
+    pub const POINTS: u32 = VERTEX | MIDPOINT | CENTRE | EDGE | FACE | INTERSECTION | ORIGIN;
     pub const LINEAR: u32 = AXIS | PARALLEL | PERPENDICULAR | EXTENSION | TRACKING;
     pub const ALL: u32 = POINTS | LINEAR;
-    pub const NAMES: [(u32, &str); 11] = [(VERTEX, "Endpoints"), (MIDPOINT, "Midpoints"), (EDGE, "On edge"), (FACE, "On face"), (INTERSECTION, "Intersections"), (ORIGIN, "Origin"), (AXIS, "Axes"), (PARALLEL, "Parallel"), (PERPENDICULAR, "Perpendicular"), (EXTENSION, "Extension"), (TRACKING, "Reference tracking")];
+    pub const NAMES: [(u32, &str); 12] = [(VERTEX, "Endpoints"), (MIDPOINT, "Midpoints"), (CENTRE, "Curve centres"), (EDGE, "On edge"), (FACE, "On face"), (INTERSECTION, "Intersections"), (ORIGIN, "Origin"), (AXIS, "Axes"), (PARALLEL, "Parallel"), (PERPENDICULAR, "Perpendicular"), (EXTENSION, "Extension"), (TRACKING, "Reference tracking")];
 }
 
 pub type Rgba = [u8; 4];
@@ -43,9 +43,9 @@ impl InferenceColors {
 /// Tool keys while a sketch/line tool is active. Values are egui key names; the global keymap is
 /// suspended while a sketch tool is active, so these never collide with viewport commands.
 #[derive(Clone, Debug, PartialEq)]
-pub struct InferenceKeys { pub lock_x: String, pub lock_y: String, pub lock_z: String, pub lock_inferred: String, pub cycle_candidate: String }
+pub struct InferenceKeys { pub lock_x: String, pub lock_y: String, pub lock_z: String, pub lock_inferred: String, pub cycle_candidate: String, pub cycle_linear_mode: String }
 impl Default for InferenceKeys { fn default() -> Self { Self {
-    lock_x: "ArrowRight".into(), lock_y: "ArrowLeft".into(), lock_z: "ArrowUp".into(), lock_inferred: "ArrowDown".into(), cycle_candidate: "Tab".into(),
+    lock_x: "ArrowRight".into(), lock_y: "ArrowLeft".into(), lock_z: "ArrowUp".into(), lock_inferred: "ArrowDown".into(), cycle_candidate: "Tab".into(), cycle_linear_mode: "F".into(),
 } } }
 impl InferenceKeys {
     /// `(input, action)` rows of the NATIVE_EDITOR.md inference table (fixed modifiers included).
@@ -54,25 +54,25 @@ impl InferenceKeys {
         (self.lock_y.clone(), "Lock Y (green); again unlocks"),
         (self.lock_z.clone(), "Lock Z (blue); again unlocks"),
         (self.lock_inferred.clone(), "Lock the current parallel/perpendicular (else the inferred direction); again unlocks"),
-        ("Shift (hold)".into(), "Lock the current inferred direction or face plane until released"),
+        ("Alt (hold)".into(), "Lock the current inferred direction or face plane until released"),
         (self.cycle_candidate.clone(), "Cycle overlapping candidates under the cursor"),
-        ("Alt (tap)".into(), "Cycle linear inference mode: all / linear off / parallel-perpendicular only"),
+        (self.cycle_linear_mode.clone(), "Cycle linear inference mode: all / linear off / parallel-perpendicular only"),
         ("Hover ~0.4 s".into(), "Acquire a point or edge as a tracking reference (max 4, oldest replaced)"),
         ("Digits, units, `x,y,z`, `@dx,dy,dz`, `len<deg`".into(), "Exact length along the current direction or lock, absolute / relative point, length at angle in the working plane"),
-        ("Enter".into(), "Apply typed value; finish Polyline/Polygon"),
-        ("Escape".into(), "Clear typed value, locks and references; else cancel the stroke; else return to Select"),
+        ("Enter".into(), "Apply typed value; confirm all pending chains"),
+        ("Escape".into(), "Cancel all pending chains and return to Select"),
     ] }
-    pub fn to_json(&self) -> Value { json!({"lock_x": self.lock_x, "lock_y": self.lock_y, "lock_z": self.lock_z, "lock_inferred": self.lock_inferred, "cycle_candidate": self.cycle_candidate}) }
+    pub fn to_json(&self) -> Value { json!({"lock_x": self.lock_x, "lock_y": self.lock_y, "lock_z": self.lock_z, "lock_inferred": self.lock_inferred, "cycle_candidate": self.cycle_candidate, "cycle_linear_mode": self.cycle_linear_mode}) }
     pub fn from_json(v: &Value) -> Self {
         let mut k = Self::default();
-        for (name, slot) in [("lock_x", &mut k.lock_x), ("lock_y", &mut k.lock_y), ("lock_z", &mut k.lock_z), ("lock_inferred", &mut k.lock_inferred), ("cycle_candidate", &mut k.cycle_candidate)] {
+        for (name, slot) in [("lock_x", &mut k.lock_x), ("lock_y", &mut k.lock_y), ("lock_z", &mut k.lock_z), ("lock_inferred", &mut k.lock_inferred), ("cycle_candidate", &mut k.cycle_candidate), ("cycle_linear_mode", &mut k.cycle_linear_mode)] {
             if let Some(s) = v.get(name).and_then(Value::as_str).filter(|s| !s.is_empty()) { *slot = s.to_owned(); }
         }
         k
     }
     /// Keys bound to more than one action (reported in Preferences, first binding wins).
     pub fn conflicts(&self) -> Vec<String> {
-        let all = [&self.lock_x, &self.lock_y, &self.lock_z, &self.lock_inferred, &self.cycle_candidate];
+        let all = [&self.lock_x, &self.lock_y, &self.lock_z, &self.lock_inferred, &self.cycle_candidate, &self.cycle_linear_mode];
         let mut out: Vec<String> = all.iter().enumerate().filter(|(i, k)| all[..*i].contains(k)).map(|(_, k)| (*k).clone()).collect();
         out.dedup(); out
     }

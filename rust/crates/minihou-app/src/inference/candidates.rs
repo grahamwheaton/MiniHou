@@ -6,7 +6,7 @@ use super::settings::cat;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Kind {
-    Endpoint, Midpoint, Intersection, Origin, Reference,
+    Endpoint, Midpoint, Centre, Intersection, Origin, Reference,
     OnEdge, OnFace, Extension,
     Axis(u8), Parallel, Perpendicular, FromPoint(u8), AlignIntersection,
     /// Resolved on an explicit lock (axis index 0-2, 3 = inferred direction, 4 = plane).
@@ -15,7 +15,7 @@ pub enum Kind {
 }
 impl Kind {
     pub fn label(self) -> &'static str { match self {
-        Self::Endpoint => "Endpoint", Self::Midpoint => "Midpoint", Self::Intersection => "Intersection", Self::Origin => "Origin",
+        Self::Endpoint => "Endpoint", Self::Midpoint => "Midpoint", Self::Centre => "Curve Centre", Self::Intersection => "Intersection", Self::Origin => "Origin",
         Self::Reference => "Reference Point", Self::OnEdge => "On Edge", Self::OnFace => "On Face", Self::Extension => "Extension",
         Self::Axis(0) => "Along X", Self::Axis(1) => "Along Y", Self::Axis(_) => "Along Z",
         Self::Parallel => "Parallel", Self::Perpendicular => "Perpendicular",
@@ -30,7 +30,7 @@ impl Kind {
     /// the point on the face (see constraints::working_plane).
     pub fn tier(self) -> u8 { match self {
         Self::Locked(_) => 0,
-        Self::Endpoint | Self::Midpoint | Self::Origin | Self::Reference => 1,
+        Self::Endpoint | Self::Midpoint | Self::Centre | Self::Origin | Self::Reference => 1,
         Self::Intersection | Self::AlignIntersection | Self::FromPoint(_) => 2,
         Self::OnEdge | Self::Extension => 3,
         Self::Axis(_) | Self::Parallel | Self::Perpendicular => 4,
@@ -92,6 +92,7 @@ pub fn world_eps(scale: f32) -> f32 { 1e-5 * scale.max(1.) }
 
 /// Vertex / midpoint / on-edge / true 3D edge intersection candidates near the cursor.
 pub fn point_candidates(frame: &Frame, accel: &Accel, out: &mut Vec<Candidate>) {
+    if frame.enabled & cat::CENTRE != 0 { for &p in &accel.centers { frame.push(out, Kind::Centre, p, |_| {}); } }
     let mut near: Vec<(f32, u32)> = Vec::new();
     let (a, b) = frame.wpp;
     let pad = frame.tolerance * 1.5;

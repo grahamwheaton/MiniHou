@@ -68,15 +68,17 @@ pub fn ray_box(ray: Ray, min: V3, max: V3) -> Option<f32> {
 /// Identifies one evaluated geometry. Pointer/length catch reallocation, the sampled hash catches
 /// in-place edits, the explicit revision (when the host has one) catches everything else.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct GeometryKey { pub revision: u64, ptr: usize, len: usize, tri_ptr: usize, tri_len: usize, sample: u64 }
+pub struct GeometryKey { pub revision: u64, ptr: usize, len: usize, tri_ptr: usize, tri_len: usize, line_len: usize, center_len: usize, sample: u64 }
 impl GeometryKey {
-    pub fn of(revision: u64, positions: &[f32], triangles: &[u32]) -> Self {
+    pub fn of(revision: u64, positions: &[f32], triangles: &[u32], lines: &[u32], centers: &[V3]) -> Self {
         let mut h = 0xcbf29ce484222325u64;
         let step = (positions.len() / 61).max(1);
         for x in positions.iter().step_by(step).chain(positions.last()) { h = (h ^ x.to_bits() as u64).wrapping_mul(0x100000001b3); }
         let step = (triangles.len() / 31).max(1);
         for x in triangles.iter().step_by(step) { h = (h ^ *x as u64).wrapping_mul(0x100000001b3); }
-        Self { revision, ptr: positions.as_ptr() as usize, len: positions.len(), tri_ptr: triangles.as_ptr() as usize, tri_len: triangles.len(), sample: h }
+        for x in lines { h = (h ^ *x as u64).wrapping_mul(0x100000001b3); }
+        for p in centers { for x in p { h = (h ^ x.to_bits() as u64).wrapping_mul(0x100000001b3); } }
+        Self { revision, ptr: positions.as_ptr() as usize, len: positions.len(), tri_ptr: triangles.as_ptr() as usize, tri_len: triangles.len(), line_len: lines.len(), center_len: centers.len(), sample: h }
     }
 }
 
@@ -88,6 +90,7 @@ pub struct Accel {
     pub edges: Vec<Edge>,
     /// Cached derived candidates.
     pub midpoints: Vec<V3>,
+    pub centers: Vec<V3>,
     pub bounds: (V3, V3),
     pub scale: f32,
     tri_bvh: Bvh,
@@ -96,7 +99,7 @@ pub struct Accel {
 }
 
 impl Accel {
-    pub fn build(key: GeometryKey, positions: &[f32], triangles: &[u32]) -> Self {
+    pub fn build(key: GeometryKey, positions: &[f32], triangles: &[u32], lines: &[u32], centers: &[V3]) -> Self {
         let points: Vec<V3> = positions.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect();
         let n = points.len() as u32;
         let tris: Vec<[u32; 3]> = triangles.chunks_exact(3).filter(|t| t.iter().all(|&i| i < n)).map(|t| [t[0], t[1], t[2]]).collect();
@@ -117,13 +120,18 @@ impl Accel {
             edges.push(Edge { a, b, tri: t, hidden, degenerate });
             i = j;
         }
+        for pair in lines.chunks_exact(2) {
+            let (a, b) = (pair[0], pair[1]);
+            if a >= n || b >= n { continue; }
+            edges.push(Edge { a, b, tri: u32::MAX, hidden: false, degenerate: a == b || dist(points[a as usize], points[b as usize]) < 1e-9 });
+        }
         let midpoints = edges.iter().map(|e| lerp(points[e.a as usize], points[e.b as usize], 0.5)).collect();
         let bbox = |ps: &[u32]| { let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]); for &p in ps { let q = points[p as usize]; for k in 0..3 { lo[k] = lo[k].min(q[k]); hi[k] = hi[k].max(q[k]); } } (lo, hi) };
         let tri_boxes: Vec<_> = tris.iter().map(|t| bbox(t)).collect();
         let edge_boxes: Vec<_> = edges.iter().map(|e| bbox(&[e.a, e.b])).collect();
         let bounds = if points.is_empty() { ([0.; 3], [0.; 3]) } else { bbox(&(0..n).collect::<Vec<_>>()) };
         let scale = len(sub(bounds.1, bounds.0)).max(1e-3);
-        Self { key, tri_bvh: Bvh::build(&tri_boxes), edge_bvh: Bvh::build(&edge_boxes), points, tris, edges, midpoints, bounds, scale, build_count: 1 }
+        Self { key, tri_bvh: Bvh::build(&tri_boxes), edge_bvh: Bvh::build(&edge_boxes), points, tris, edges, midpoints, centers: centers.to_vec(), bounds, scale, build_count: 1 }
     }
     pub fn p(&self, i: u32) -> V3 { self.points[i as usize] }
     /// Nearest triangle hit: `(triangle, t, barycentrics)`.

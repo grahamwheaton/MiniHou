@@ -1492,6 +1492,19 @@ impl App {
         attach_inference_refs(&mut value, &id, refs);
         if self.commit_document(value, "add sketch") { self.selected = id.clone(); self.selected_set = std::collections::BTreeSet::from([id.clone()]); self.display = id; }
     }
+    fn sketch_batch(&mut self, strokes: &[ui::sketch::SketchStroke], selected: &str, target: graph_edit::SketchTarget) {
+        let rows: Vec<_> = strokes.iter().map(|s| (s.name.as_str(), s.points.as_slice(), s.closed)).collect();
+        let Some((mut value, id, stroke_ids)) = graph_edit::add_sketch_batch(self.editor.doc.value(), &rows, selected, target) else {
+            self.file_status = "Could not add sketch".into(); return;
+        };
+        // References belong to their stroke's source node; the batch itself is
+        // still committed as one undo step.
+        for (stroke, stroke_id) in strokes.iter().zip(&stroke_ids) { attach_inference_refs(&mut value, stroke_id, stroke.refs.clone()); }
+        if self.commit_document(value, "add sketches") {
+            self.selected = id.clone(); self.selected_set = std::collections::BTreeSet::from([id.clone()]);
+            self.display = minihou_app::display_nodes(self.editor.doc.value()).into_iter().next().unwrap_or(id);
+        }
+    }
     fn add_measurement(&mut self, a: [f32; 3], b: [f32; 3], mut refs: [Option<Value>;2]) {
         let mut value = self.editor.doc.value().clone();
         if !value["measurements"].is_array() { value["measurements"] = json!([]); }
@@ -2119,6 +2132,7 @@ impl App {
                     } else { self.file_status = "Cut target changed; try the cut again".into(); }
                 }
                 UiAction::SketchCommit { name, points, closed, refs } => self.sketch_commit(&name, &points, closed, refs),
+                UiAction::SketchBatch { strokes, selected, target } => self.sketch_batch(&strokes, &selected, target),
                 UiAction::AddMeasurement { a, b, refs } => self.add_measurement(a, b, refs),
                 UiAction::DeleteMeasurement(index) => {self.delete_measurement(index);ui::sketch::clear_measurement_selection(ctx);},
                 UiAction::ClearMeasurements => {self.clear_measurements();ui::sketch::clear_measurement_selection(ctx);},

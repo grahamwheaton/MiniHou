@@ -15,7 +15,7 @@ use crate::params::Params;
 pub const CURVE: NodeSpec = NodeSpec {
     name: "curve",
     inputs: &[InputSpec { name: "geo", multi: false, optional: true }],
-    params: crate::params!("points": "0,0,0  1,0,0  1,1,0  2,1,1"; "closed": false; "split": false;),
+    params: crate::params!("points": "0,0,0  1,0,0  1,1,0  2,1,1"; "closed": false; "split": false; "as_mesh": false;),
     cook: curve,
 };
 
@@ -43,7 +43,7 @@ fn curve(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         return Err(Error::new("give at least two points, each as x,y,z"));
     }
     let mut new = Geometry::from_arrays(positions, (0..n as i32).collect(), vec![0, n as i32], Some(vec![p.b("closed")?]))?;
-    new.prim.insert("__viewport_curve".into(), Arc::new(Attr::i32(1,vec![1])));
+    if !p.b("as_mesh")? { new.prim.insert("__viewport_curve".into(), Arc::new(Attr::i32(1,vec![1]))); }
     if let Some(input) = inputs[0].first() {
         let mut input=(**input).clone();
         if p.b("split")? && !p.b("closed")? {
@@ -105,6 +105,18 @@ fn circle(_inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let mut g=Geometry::from_arrays(pos, (0..n as i32).collect(), vec![0, n as i32], None)?;
     g.prim.insert("__viewport_curve".into(),Arc::new(Attr::i32(1,vec![1])));
     Ok(g)
+}
+
+#[cfg(test)]
+mod sketch_mesh_tests {
+    #[test]
+    fn as_mesh_marks_closed_sketch_as_surface() {
+        let base=serde_json::json!({"version":1,"display":"c","nodes":{"c":{"type":"curve","params":{"points":"0,0,0 1,0,0 0,1,0","closed":true,"as_mesh":true}}}});
+        let g=crate::Graph::from_value(&base).unwrap().cook(None).unwrap();
+        assert_eq!(g.nprims(),1);
+        assert!(g.topology.is_closed(0));
+        assert!(!g.prim.contains_key("__viewport_curve"));
+    }
 }
 
 pub const GRID: NodeSpec = NodeSpec {

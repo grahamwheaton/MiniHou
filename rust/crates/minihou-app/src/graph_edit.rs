@@ -260,6 +260,77 @@ pub fn add_sketch(value: &Value, name: &str, points: &[[f32; 3]], closed: bool, 
     Some((value, id))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SketchTarget { New, Curve, Mesh }
+impl Default for SketchTarget { fn default() -> Self { Self::New } }
+
+/// A displayed stream may contain both polygons and curves. Surface primitives win;
+/// otherwise the viewport curve attribute or open primitives identify a curve stream.
+pub fn sketch_target(g: Option<&minihou_core::Geometry>) -> SketchTarget {
+    let Some(g) = g else { return SketchTarget::New };
+    let t = &g.topology;
+    let mut curve = false;
+    for i in 0..t.nprims() {
+        let marked = g.prim.get("__viewport_curve").and_then(|a| a.as_i32())
+            .is_some_and(|v| v.get(i) == Some(&1));
+        if t.is_closed(i) && !marked && t.prim_offsets[i + 1] - t.prim_offsets[i] >= 3 { return SketchTarget::Mesh; }
+        curve |= marked || !t.is_closed(i);
+    }
+    if curve { SketchTarget::Curve } else { SketchTarget::New }
+}
+
+fn splice_sketch_consumers(value: &mut Value, source: &str, inserted: &str) -> Option<()> {
+    for (id, node) in nodes_mut(value)?.iter_mut() {
+        if id == inserted { continue; }
+        if let Some(inputs) = node.get_mut("inputs").and_then(Value::as_object_mut) {
+            for input in inputs.values_mut() {
+                if input.as_str() == Some(source) { *input = json!(inserted); }
+                else if let Some(items) = input.as_array_mut() {
+                    for item in items { if item.as_str() == Some(source) { *item = json!(inserted); } }
+                }
+            }
+        }
+    }
+    Some(())
+}
+
+/// Insert all strokes into one displayed object stream. The caller commits the
+/// resulting document once, so undo removes the entire drawing session.
+pub fn add_sketch_batch(value: &Value, strokes: &[(&str, &[[f32; 3]], bool)], selected: &str, target: SketchTarget) -> Option<(Value, String, Vec<String>)> {
+    if strokes.is_empty() { return None; }
+    let mut next = value.clone();
+    let mut source = if target == SketchTarget::New { None } else {
+        let node = nodes(&next)?.get(selected)?;
+        if node["type"] == "output" { node["inputs"]["geo"].as_str().map(str::to_owned) }
+        else { Some(selected.to_owned()) }
+    };
+    let mut last = String::new();
+    let mut stroke_ids = Vec::new();
+    for &(name, points, closed) in strokes {
+        if target == SketchTarget::Mesh {
+            let (mut with_curve, curve) = if name == "Bezier" { add_bezier_sketch(&next, name, points, closed, "")? }
+                else { add_sketch(&next, name, points, closed, "")? };
+            with_curve["nodes"][&curve]["params"]["as_mesh"] = json!(true);
+            let anchor = source.as_deref()?;
+            let (mut merged, id) = add(&with_curve, "merge", Some(anchor))?;
+            merged["nodes"][&id]["inputs"]["geos"] = json!([anchor, curve]);
+            stroke_ids.push(curve);
+            next = merged; source = Some(id.clone()); last = id;
+        } else {
+            let after = source.as_deref().unwrap_or("");
+            let (mut updated, id) = if name == "Bezier" { add_bezier_sketch(&next, name, points, closed, after)? }
+                else { add_sketch(&next, name, points, closed, after)? };
+            if let Some(source_id) = source.as_deref() { splice_sketch_consumers(&mut updated, source_id, &id)?; }
+            next = updated; source = Some(id.clone()); last = id.clone(); stroke_ids.push(id);
+        }
+    }
+    let display: Vec<String> = if target == SketchTarget::New { vec![last.clone()] }
+        else { minihou_app::display_nodes(value).into_iter().map(|id| if id == selected && value["nodes"][&id]["type"] != "output" { last.clone() } else { id }).collect() };
+    next["display"] = if display.len() == 1 { json!(display[0]) } else { json!(display) };
+    validated(next.clone()).ok()?;
+    Some((next, last, stroke_ids))
+}
+
 pub fn delete_measurement(value:&Value,index:usize)->Option<Value> {
     let mut next=value.clone();
     let rows=next.get_mut("measurements")?.as_array_mut()?;
@@ -918,6 +989,43 @@ mod tests {
         assert!(v["nodes"][&id].get("inputs").is_none());
         validated(v).unwrap();
         assert!(add_sketch(&graph(), "Bad", &[[f32::NAN,0.,0.]; 2], false, "box1").is_none());
+    }
+    #[test] fn sketch_batch_follows_stream_primitive_type_and_undoes_once() {
+        let strokes: Vec<(&str, &[[f32;3]], bool)> = vec![
+            ("Line", &[[0.,0.,0.],[1.,0.,0.]], false),
+            ("Polygon", &[[0.,0.,1.],[1.,0.,1.],[0.,1.,1.]], true),
+        ];
+        for (base, selected, target) in [
+            (json!({"version":1,"display":"out","nodes":{"box1":{"type":"box"},"out":{"type":"output","inputs":{"geo":"box1"}}}}), "out", SketchTarget::Mesh),
+            (json!({"version":1,"display":"out","nodes":{"curve1":{"type":"curve","params":{"points":"0,0,0 1,0,0"}},"out":{"type":"output","inputs":{"geo":"curve1"}}}}), "out", SketchTarget::Curve),
+            (json!({"version":1,"nodes":{}}), "", SketchTarget::New),
+        ] {
+            let actual = if selected.is_empty() { SketchTarget::New } else {
+                let g = minihou_core::Graph::from_value(&base).unwrap().cook(Some(selected)).unwrap();
+                sketch_target(Some(&g))
+            };
+            assert_eq!(actual, target);
+            let (next, id, ids) = add_sketch_batch(&base, &strokes, selected, actual).unwrap();
+            assert_eq!(ids.len(), 2);
+            if target == SketchTarget::Mesh {
+                assert_eq!(next["nodes"][&id]["type"], "merge");
+                assert_eq!(next["nodes"]["out"]["inputs"]["geo"], id);
+                assert_eq!(next["display"], "out");
+                assert_eq!(next["nodes"][&ids[0]]["params"]["as_mesh"], true);
+            } else if target == SketchTarget::Curve {
+                assert_eq!(next["nodes"][&ids[0]]["inputs"]["geo"], "curve1");
+                assert_eq!(next["nodes"][&ids[1]]["inputs"]["geo"], ids[0]);
+                assert_eq!(next["display"], "out");
+            } else { assert_eq!(next["display"], id); }
+            let cooked = minihou_core::Graph::from_value(&next).unwrap().cook(None).unwrap();
+            assert!(cooked.nprims() >= 2, "{target:?}: {} primitives", cooked.nprims());
+            let mut doc = validated(base.clone()).unwrap();
+            let mut history = minihou_app::History::default();
+            history.replace(&mut doc, validated(next).unwrap());
+            history.undo(&mut doc).unwrap();
+            assert_eq!(doc.value(), &base);
+            assert!(history.undo(&mut doc).is_none());
+        }
     }
     #[test] fn curve_blast_inserts_before_output_and_cleans_points() {
         let base = json!({

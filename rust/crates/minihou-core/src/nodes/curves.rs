@@ -28,7 +28,7 @@ fn helix(_: &Inputs,p: &Params) -> Result<Geometry> {
 }
 const CONTROLS: &str = r#"[{"p": [-1, 0, 0], "left": [-1.5, 0, 0], "right": [-0.5, 0, 0], "mode": "AUTO"}, {"p": [0, 0, 1], "left": [-0.5, 0, 1], "right": [0.5, 0, 1], "mode": "AUTO"}, {"p": [1, 0, 0], "left": [0.5, 0, 0], "right": [1.5, 0, 0], "mode": "AUTO"}]"#;
 pub const BEZIER: NodeSpec = NodeSpec { name: "bezier", inputs: &[InputSpec{name:"geo",multi:false,optional:true}],
-    params: crate::params!("controls": CONTROLS; "closed": false; "resolution": 24), cook: bezier };
+    params: crate::params!("controls": CONTROLS; "closed": false; "resolution": 24; "as_mesh": false), cook: bezier };
 fn norm(v: [f64;3]) -> f64 { v.iter().map(|x| x*x).sum::<f64>().sqrt() }
 fn sub(a:[f64;3],b:[f64;3])->[f64;3] { std::array::from_fn(|i| a[i]-b[i]) }
 fn bezier(inputs:&Inputs,p:&Params)->Result<Geometry> {
@@ -72,7 +72,8 @@ fn bezier(inputs:&Inputs,p:&Params)->Result<Geometry> {
         for k in 0..3 { out.push((u.powi(3)*a[0][k]+3.*u*u*t*a[2][k]+3.*u*t*t*b[1][k]+t.powi(3)*b[0][k]) as f32); }
     } }
     if !closed { out.extend(xyz[n-1][0].map(|x| x as f32)); }
-    let out=curve(out,closed)?;
+    let mut out=curve(out,closed)?;
+    if p.b("as_mesh")? { out.prim.remove("__viewport_curve"); }
     if let Some(g)=inputs[0].first() { super::merge::merge(&[vec![g.clone(),Arc::new(out)]],&Params::resolve(&[],None)?) } else {Ok(out)}
 }
 

@@ -15,7 +15,7 @@ impl Mesh {
         for q in [a, b, c, d] { m.p.extend(q); }
         m.t.extend([n, n + 1, n + 2, n, n + 2, n + 3]); m
     }
-    fn geo(&self) -> GeometryRef<'_> { GeometryRef { positions: &self.p, triangles: &self.t, revision: 0 } }
+    fn geo(&self) -> GeometryRef<'_> { GeometryRef { positions: &self.p, triangles: &self.t, curve_lines: &[], curve_centers: &[], revision: 0 } }
 }
 fn cube() -> Mesh {
     let v = |x: f32, y: f32, z: f32| [x, y, z];
@@ -31,7 +31,7 @@ impl Rig {
     fn at_screen(&mut self, screen: [f32; 2], geo: Option<GeometryRef>) -> InferenceResult {
         let ray = self.pr.ray(screen).unwrap();
         self.time += 0.016;
-        self.e.update(&InferenceInput { ray, cursor: screen, projector: self.pr, time: self.time, geometry: geo, tool: self.tool.clone(), settings: &self.s, shift_held: self.shift, typed: self.typed })
+        self.e.update(&InferenceInput { ray, cursor: screen, projector: self.pr, time: self.time, geometry: geo, tool: self.tool.clone(), settings: &self.s, alt_held: self.shift, typed: self.typed })
     }
     fn near(&mut self, p: V3, offset: [f32; 2], geo: Option<GeometryRef>) -> InferenceResult {
         let s = self.pr.project(p).unwrap();
@@ -40,6 +40,18 @@ impl Rig {
     fn dwell(&mut self, p: V3, geo: Option<GeometryRef>) { self.near(p, [0., 0.], geo); self.time += 0.5; self.near(p, [0., 0.], geo); }
 }
 fn close(a: V3, b: V3, eps: f32) -> bool { math::dist(a, b) <= eps }
+
+#[test] fn evaluated_curve_segments_and_centres_share_mesh_snap_ranking() {
+    let p = [0.,0.,0., 2.,0.,0., 3.,1.,0.];
+    let lines = [0,1,1,2];
+    let centers = [[5.,2.,0.]];
+    let g = GeometryRef { positions: &p, triangles: &[], curve_lines: &lines, curve_centers: &centers, revision: 1 };
+    let mut r = Rig::new(top());
+    assert_eq!(r.near([0.,0.,0.],[1.,1.],Some(g)).winner.kind, Kind::Endpoint);
+    assert_eq!(r.near([1.,0.,0.],[1.,1.],Some(g)).winner.kind, Kind::Midpoint);
+    assert_eq!(r.near([1.35,0.,0.],[0.,0.],Some(g)).winner.kind, Kind::OnEdge);
+    assert_eq!(r.near(centers[0],[0.,0.],Some(g)).winner.kind, Kind::Centre);
+}
 
 #[test] fn t01_axis_snap_roughly_along_x() {
     let mut r = Rig::new(persp());
@@ -237,10 +249,10 @@ fn diag() -> Mesh { Mesh::new().tri([0., 0., 0.], [1., 1., 0.], [1., 0., 0.]) }
     assert_ne!(res.point.unwrap(), [1., 1., 0.], "old vertex must be gone");
     // Same buffer edited in place with an explicit revision bump.
     let mut c = diag();
-    let g = GeometryRef { positions: &c.p, triangles: &c.t, revision: 7 };
+    let g = GeometryRef { positions: &c.p, triangles: &c.t, curve_lines: &[], curve_centers: &[], revision: 7 };
     r.near([0., 0., 0.], [0., 0.], Some(g));
     c.p[0] = -0.5;
-    let g = GeometryRef { positions: &c.p, triangles: &c.t, revision: 8 };
+    let g = GeometryRef { positions: &c.p, triangles: &c.t, curve_lines: &[], curve_centers: &[], revision: 8 };
     let res = r.near([-0.5, 0., 0.], [0., 0.], Some(g));
     assert!(close(res.point.unwrap(), [-0.5, 0., 0.], 1e-6));
 }
@@ -253,7 +265,7 @@ fn diag() -> Mesh { Mesh::new().tri([0., 0., 0.], [1., 1., 0.], [1., 0., 0.]) }
     let mut t = Vec::with_capacity(n * n * 6);
     for j in 0..n { for i in 0..n { let a = (j * (n + 1) + i) as u32; let b = a + 1; let c = a + n as u32 + 2; let d = a + n as u32 + 1; t.extend([a, b, c, a, c, d]); } }
     assert!(t.len() / 3 >= 1_000_000);
-    let g = GeometryRef { positions: &p, triangles: &t, revision: 1 };
+    let g = GeometryRef { positions: &p, triangles: &t, curve_lines: &[], curve_centers: &[], revision: 1 };
     let mut r = Rig::new(cam([5., -6., 8.], [5., 5., 0.], [0., 0., 1.]));
     r.tool.start = Some([5., 5., 0.]);
     let build = std::time::Instant::now();
