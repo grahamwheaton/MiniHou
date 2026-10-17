@@ -891,7 +891,13 @@ mod tests {
             assert_eq!(next["nodes"]["out"]["inputs"]["geo"],id.as_str());
             assert_eq!(next["display"],"out");
             let cut = minihou_core::Graph::from_value(&next).unwrap().cook(None).unwrap();
-            assert!(cut.npoints > original.npoints);
+            if ty == "edge_slide" {
+                // Sliding an existing edge changes positions, unlike the three cutting nodes which add points.
+                assert_eq!(cut.npoints, original.npoints);
+                assert_ne!(cut.p(), original.p());
+            } else {
+                assert!(cut.npoints > original.npoints, "{ty}: {} -> {} points", original.npoints, cut.npoints);
+            }
             let mut doc = validated(base.clone()).unwrap(); let mut history = minihou_app::History::default();
             history.replace(&mut doc,validated(next.clone()).unwrap());
             history.undo(&mut doc).unwrap(); assert_eq!(doc.value(),&base);
