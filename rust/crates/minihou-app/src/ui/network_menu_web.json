@@ -1,0 +1,1192 @@
+{
+  "assemble": {
+    "category": "model",
+    "doc": "Turn pieces into a clean set of separate bodies (Houdini's Assemble): number them, name them, give each its own\npoints and a pivot, ready for ``rbd_configure``. MiniHou has no packed primitives or string attributes, so instead\nof packing, each piece's faces carry the int ``piece`` and its vector ``pivot``, and the names are the detail\nattribute ``piece_names``.",
+    "menu": "Fracture & RBD",
+    "label": "Assemble",
+    "keywords": "pieces names pivot pack"
+  },
+  "attrib_paint": {
+    "category": "attribute",
+    "doc": "Hold painted values of one attribute on points, primitives (faces) or edges. Elements nobody painted keep the input's value of that\nattribute, or the default. The painted elements are remembered by number, so they follow the geometry only while the elements upstream\nkeep their numbers; ones that no longer exist are ignored and counted in the detail attribute `paint_stale_<name>`. Paint it in\nthe 3D view (Paint mode), assign to a selection with Quick Assign, or edit cells in the spreadsheet.",
+    "menu": "Attributes",
+    "label": "Attribute Paint",
+    "keywords": "paint attribute weight mask vertex colour color assign brush edit values spreadsheet"
+  },
+  "attribute_blur": {
+    "category": "attribute",
+    "doc": "Laplacian smoothing of point attributes over the mesh edges (Houdini's Attribute Blur).",
+    "menu": "Attributes",
+    "label": "Attribute Blur",
+    "keywords": "smooth average"
+  },
+  "attribute_create": {
+    "category": "attribute",
+    "doc": "Add an attribute with a constant value (Houdini's Attribute Create).",
+    "menu": "Attributes",
+    "label": "Attribute Create",
+    "keywords": "add attribute"
+  },
+  "attribute_delete": {
+    "category": "attribute",
+    "doc": "Delete attributes by name or wildcard on every domain (also detail). Useful to stop an attribute reaching Blender,\ne.g. delete N to let Blender compute its own normals.",
+    "menu": "Attributes",
+    "label": "Attribute Delete",
+    "keywords": "remove"
+  },
+  "attribute_promote": {
+    "category": "attribute",
+    "doc": "Move an attribute to another domain (Houdini's Attribute Promote): points <-> primitives <-> vertices -> detail.",
+    "menu": "Attributes",
+    "label": "Attribute Promote",
+    "keywords": "convert move domain"
+  },
+  "attribute_randomize": {
+    "category": "attribute",
+    "doc": "Random values per element, or per piece with 'by' (Houdini's Attribute Randomize). Deterministic per seed.",
+    "menu": "Attributes",
+    "label": "Attribute Randomize",
+    "keywords": "random"
+  },
+  "attribute_rename": {
+    "category": "attribute",
+    "doc": "Rename an attribute, e.g. a Blender color attribute 'Col' to 'Cd', or 'weight' to 'pscale'.",
+    "menu": "Attributes",
+    "label": "Attribute Rename",
+    "keywords": "name"
+  },
+  "attribute_transfer": {
+    "category": "attribute",
+    "doc": "Copy point attributes from the nearest point of a second geometry (Houdini's Attribute Transfer, nearest-point\nmode). Within max_distance the source value is taken; blend_width softens the edge. Exact nearest neighbours\n(SciPy's KD-tree when installed, otherwise a numpy grid).",
+    "menu": "Attributes",
+    "label": "Attribute Transfer",
+    "keywords": "copy nearest project"
+  },
+  "bend": {
+    "category": "deform",
+    "doc": "Bend, twist and taper geometry along an axis (Houdini's Bend SOP). Inside the capture region the shape\ncurls into an arc; beyond it, it continues straight along the bent end. N follows the deformation. With rest\ngeometry on the second input the capture region is measured on the rest positions, and only the displacement\nthey undergo is added to the first input (so animated or already-deformed points bend as they were modelled).",
+    "menu": "Deform",
+    "label": "Bend",
+    "keywords": "curve warp"
+  },
+  "bezier": {
+    "category": "source",
+    "doc": "Editable cubic Bezier curve (see ``bezier``); with an input, the curve is added to that geometry.",
+    "menu": "Create",
+    "label": "Bezier",
+    "keywords": "curve spline tangent handles control points path"
+  },
+  "blast": {
+    "category": "group",
+    "doc": "Delete a selection of primitives or points (Houdini's Blast). Attributes and groups are compacted to match.",
+    "menu": "Groups & Selection",
+    "label": "Blast",
+    "keywords": "delete extract keep"
+  },
+  "blend": {
+    "category": "deform",
+    "doc": "Morph the base shape towards one or more targets that have the same number of points (Houdini's Blend Shapes /\nBlender's shape keys). Every blended attribute becomes ``base + amount * sum(weight_i * (target_i - base))``, so with\na single target and weight 1 the amount runs from the base (0) to the target (1), and several targets add their offsets.\nNormals follow when ``N`` is listed; topology and everything else comes from the base.",
+    "menu": "Deform",
+    "label": "Blend",
+    "keywords": "morph shape keys blendshape"
+  },
+  "blender_image": {
+    "category": "source",
+    "doc": "A Blender image as a pixel grid: a point per pixel (row by row from the bottom left, like Blender), `Cd` and `Alpha` point\nattributes for the colour, `uv`, and the grid detail attributes the heightfield nodes use. Wrangles read and write pixels, heightfield\nnodes erode a height map, `image_out` sends the result back.",
+    "menu": "Create",
+    "label": "Blender Image",
+    "keywords": "texture picture bitmap pixels height map mask read import"
+  },
+  "blender_object": {
+    "category": "source",
+    "doc": "A Blender object's evaluated mesh (modifiers applied), live: edit it in Blender and the graph recooks.\nNative data arrives as attributes: the render UV map as `uv` and other UV maps by name (vertices), the render color\nattribute as `Cd` (+ `Alpha` if not opaque), `material_index` and `sharp_face` (primitives), vertex groups as point\nfloats named after the group, custom normals as vertex `N`, and every other attribute under its own name. Loose\nedges (an edge-only mesh) become curves.\n\nCurves and point clouds come in as what they are: each curve is an open primitive (cyclic ones closed), sampled exactly as Blender\ndraws it (Bezier handles, NURBS, Catmull-Rom, poly), with `radius` and `tilt` as point attributes and curve attributes as primitive\nattributes; a point cloud is points with `radius` and its attributes. An object whose evaluated geometry holds several kinds (a\nmesh, curves and points from one Geometry Nodes tree) arrives as one geometry with the parts side by side.",
+    "menu": "Create",
+    "label": "Blender Object",
+    "keywords": "read import mesh curve curves hair point cloud"
+  },
+  "boolean": {
+    "category": "model",
+    "doc": "Exact boolean of two closed polygon meshes (Houdini's Boolean). The result is watertight; faces keep their\nattributes (vertex attributes such as uv are interpolated across cuts), cut points blend point attributes, and\nfaces from each input are in groups ``from_a`` / ``from_b``. Inputs must be closed and consistently wound.",
+    "menu": "Polygon Modelling",
+    "label": "Boolean",
+    "keywords": "union subtract intersect cut csg"
+  },
+  "boolean_fracture": {
+    "category": "model",
+    "doc": "Break a closed mesh with other closed meshes (Houdini's Boolean Fracture): every connected body of the cutters\ncarves out a piece (the input intersected with it) and what no cutter touched is the remainder. The new surface of\neach piece (the cutter's) is the ``inside`` group; the input's own surface is ``outside``. Pieces are closed solids, ready for\n``rbd_configure``.",
+    "menu": "Fracture & RBD",
+    "label": "Boolean Fracture",
+    "keywords": "cutters break"
+  },
+  "bound": {
+    "category": "generate",
+    "doc": "A closed box around the input (Houdini's Bound); detail attributes ``bound_min``/``bound_max``/``bound_size``\n(in the box's own axes when oriented).",
+    "menu": "Transform & Combine",
+    "label": "Bound",
+    "keywords": "bounding box"
+  },
+  "box": {
+    "category": "source",
+    "doc": "Polygon box or surface points; optional input fits an axis-aligned bounding box before rotation.",
+    "menu": "Create",
+    "label": "Box",
+    "keywords": "cube"
+  },
+  "bridge": {
+    "category": "modify",
+    "doc": "Join pairs of open boundary loops with a band of faces (Houdini's Bridge): two pipe ends become one pipe, a hole\nin a wall and a hole in a floor a corridor. Equal loops get quads; loops of different sizes get triangles. Loops are\npaired when each is the other's nearest loop among those of other pieces (or in order); a loop with no partner is\nleft open.",
+    "menu": "Polygon Modelling",
+    "label": "Bridge",
+    "keywords": ""
+  },
+  "building_rules": {
+    "category": "generate",
+    "doc": "Generate a building per strictly convex, closed XY footprint polygon.\n\nStoreys are divided into evenly spaced bays. Windows are shallow facade panels;\nbalconies are slabs with three parapets. They are not Boolean openings or interiors.\nFlat and pyramid roofs accept convex polygons; gable roofs require rectangles.\nPrimitive component: 0 wall, 1 window, 2 balcony, 3 roof, 4 foundation.",
+    "menu": "Procedural Systems",
+    "label": "Building Rules",
+    "keywords": "building footprint facade grammar storeys windows balconies roof architecture"
+  },
+  "carve": {
+    "category": "curve",
+    "doc": "Keep a portion of each open curve by length (Houdini's Carve). Original points inside are kept exactly; the\nends are cut with interpolated attributes. Polygons pass through.",
+    "menu": "Curves",
+    "label": "Carve",
+    "keywords": "trim curve"
+  },
+  "circle": {
+    "category": "source",
+    "doc": "A single filled n-gon.",
+    "menu": "Create",
+    "label": "Circle",
+    "keywords": "disc"
+  },
+  "clean": {
+    "category": "modify",
+    "doc": "Tidy geometry (Houdini's Clean): weld, remove degenerate primitives and unused points.",
+    "menu": "Polygon Modelling",
+    "label": "Clean",
+    "keywords": "cleanup remove degenerate"
+  },
+  "clip": {
+    "category": "modify",
+    "doc": "Cut polygons with a plane (Houdini's Clip). Cut edges get new points with interpolated attributes; faces\nstraddling the plane are trimmed, not deleted. Use polyfill to cap the opening.",
+    "menu": "Polygon Modelling",
+    "label": "Clip",
+    "keywords": "cut plane slice"
+  },
+  "color": {
+    "category": "attribute",
+    "doc": "Set Cd (Houdini's Color SOP). Blender shows it as the color attribute 'Color'.",
+    "menu": "Attributes",
+    "label": "Color",
+    "keywords": "colour"
+  },
+  "connectivity": {
+    "category": "attribute",
+    "doc": "Number the connected pieces 0, 1, 2... (Houdini's Connectivity): faces sharing points are one piece. Use it\nwith attribute_randomize 'by', blast, or for_each.",
+    "menu": "Attributes",
+    "label": "Connectivity",
+    "keywords": "pieces islands"
+  },
+  "contour": {
+    "category": "curve",
+    "doc": "Iso-lines or a cut surface of a point attribute over a mesh (marching squares and marching triangles in one node).\nLines carry the point attributes interpolated, a point attribute and a primitive attribute 'level'. Surface mode keeps the\npolygons whole where it can and cuts them exactly on the level elsewhere.",
+    "menu": "Curves",
+    "label": "Contour",
+    "keywords": "isolines iso lines marching squares triangles topographic threshold cut surface level set"
+  },
+  "convert_line": {
+    "category": "curve",
+    "doc": "Turn every edge into curves (Houdini's Convert Line), e.g. for wireframes with sweep. Point attributes are kept.",
+    "menu": "Curves",
+    "label": "Convert Line",
+    "keywords": "polyline"
+  },
+  "convex_decomposition": {
+    "category": "model",
+    "doc": "Cut a closed concave mesh into nearly convex pieces (Houdini's Convex Decomposition, for simulation collision shapes).\nThe piece with the most volume missing from its convex hull is cut next, along the plane of a face beside one of its\nreflex edges (the cut that removes the most concavity wins), until every piece is within ``max_concavity`` or there are\n``max_pieces``. Each cut is capped, so the pieces are closed solids; the caps are the ``inside`` group.",
+    "menu": "Fracture & RBD",
+    "label": "Convex Decomposition",
+    "keywords": "collision proxy hulls"
+  },
+  "convex_hull": {
+    "category": "modify",
+    "doc": "The smallest convex shape holding all the input points: a closed triangle mesh facing outwards, on those of\nthe points that are corners of the hull (they keep their attributes). Primitives are ignored. With fewer than four\npoints, or points that are all in one plane, there is no volume and the points come back unchanged.",
+    "menu": "Polygon Modelling",
+    "label": "Convex Hull",
+    "keywords": "hull wrap"
+  },
+  "copy_to_points": {
+    "category": "generate",
+    "doc": "Stamp a copy of ``source`` on every point of ``points`` (Houdini's Copy to Points, same attributes).\n\nOrientation, first match wins: ``orient`` (quaternion x,y,z,w), ``rot`` (Euler XYZ radians), ``N`` with ``up``\n(+Z along N, +Y towards up), ``N`` alone (minimal rotation of +Z). Size: ``scale`` (per axis) times ``pscale``.\nTarget point attributes other than these are inherited by the copied points (overriding source attributes of\nthe same name); the source's N turns with each copy. Vertex, primitive and detail attributes come from\n``source``.",
+    "menu": "Transform & Combine",
+    "label": "Copy to Points",
+    "keywords": "instance scatter copy stamp"
+  },
+  "copy_transform": {
+    "category": "combine",
+    "doc": "Copies with an accumulating transform (Houdini's Copy and Transform): stairs, spirals, arrays. Each copy's\npoints get the int ``copynum``.",
+    "menu": "Transform & Combine",
+    "label": "Copy Transform",
+    "keywords": "duplicate array repeat stairs"
+  },
+  "crease": {
+    "category": "model",
+    "doc": "Set edge creaseweight or point cornerweight for Subdivide; sharpness decays by one per level.",
+    "menu": "Edges",
+    "label": "Crease",
+    "keywords": "sharp subdivision weight"
+  },
+  "curve": {
+    "category": "source",
+    "doc": "A curve through typed-in points (Houdini's Curve SOP, as text); with an input, the curve is added to that geometry.",
+    "menu": "Create",
+    "label": "Curve",
+    "keywords": "polyline path"
+  },
+  "curve_simplify": {
+    "category": "curve",
+    "doc": "Fewer points on a curve with the same shape (the opposite of resample): the points that matter stay, with their attributes. Open\ncurves keep their ends; closed loops keep at least three points. Run it on curves (convert_line, resample, ...), not on a mesh.",
+    "menu": "Curves",
+    "label": "Curve Simplify",
+    "keywords": "decimate reduce points rdp douglas peucker fewer optimise"
+  },
+  "delaunay": {
+    "category": "modify",
+    "doc": "Joins the points of the input into triangles so that no point lies inside any triangle's circumcircle. Only\nthe points are used (primitives are dropped); every point is kept with its attributes, and points that end up in\nno triangle (duplicates, collinear sets) stay as loose points. Pair with ``scatter`` on a grid, or ``max_edge``\nto cut a ragged outline.",
+    "menu": "Points",
+    "label": "Delaunay",
+    "keywords": "triangulate points"
+  },
+  "delete": {
+    "category": "modify",
+    "doc": "Delete points matching an expression (Houdini's Blast/Delete). Primitives that use a deleted point are deleted\ntoo; point, vertex and primitive attributes are compacted to match.",
+    "menu": "Groups & Selection",
+    "label": "Delete",
+    "keywords": "remove"
+  },
+  "dissolve": {
+    "category": "modify",
+    "doc": "Merge neighbouring faces that lie in one plane (within the angle) into single n-gons, e.g. the triangles that\na boolean, a triangulate or a convex hull leave on flat sides. Points stay where they are; the merged face takes\nthe attributes of the lowest-numbered face of its region. Regions whose outline would pinch or enclose a hole are\nleft as they are.",
+    "menu": "Polygon Modelling",
+    "label": "Dissolve",
+    "keywords": "merge faces planar"
+  },
+  "dissolve_edges": {
+    "category": "model",
+    "doc": "Merge selected manifold face regions into simple n-gons. Reject holes, branches, boundary edges and seams.",
+    "menu": "Edges",
+    "label": "Dissolve Edges",
+    "keywords": "remove edges"
+  },
+  "divide": {
+    "category": "modify",
+    "doc": "Triangulate polygons (Houdini's Divide 'Triangulate'): convex ones as fans, concave ones by ear clipping.\nVertex and primitive attributes follow; primitive order is kept.",
+    "menu": "Polygon Modelling",
+    "label": "Divide",
+    "keywords": "triangulate quads"
+  },
+  "edge_collapse": {
+    "category": "model",
+    "doc": "Merge the two ends of every selected edge into one point at their average (Houdini's Edge Collapse). Chains of\nselected edges collapse to a single point; faces left with fewer than three corners disappear.",
+    "menu": "Edges",
+    "label": "Edge Collapse",
+    "keywords": "merge edge"
+  },
+  "edge_cusp": {
+    "category": "model",
+    "doc": "Make the selected edges look hard and everything else smooth (Houdini's Edge Cusp): writes per-corner normals\n``N`` that average across every edge except the cusped ones.",
+    "menu": "Edges",
+    "label": "Edge Cusp",
+    "keywords": "hard edge sharp normals"
+  },
+  "edge_flip": {
+    "category": "model",
+    "doc": "Swap the diagonal of the two triangles on each selected edge (Houdini's Edge Flip). Edges that are not shared by\nexactly two triangles are left alone, and a triangle takes part in at most one flip.",
+    "menu": "Edges",
+    "label": "Edge Flip",
+    "keywords": "swap diagonal"
+  },
+  "edge_group": {
+    "category": "group",
+    "doc": "Create a derived edge group; stored as edge_group_<name> on outgoing corners for protocol compatibility.",
+    "menu": "Edges",
+    "label": "Edge Group",
+    "keywords": ""
+  },
+  "edge_group_promote": {
+    "category": "group",
+    "doc": "Copy an edge selection to incident points or primitives (any selected edge). Source edge groups remain.",
+    "menu": "Edges",
+    "label": "Edge Group Promote",
+    "keywords": ""
+  },
+  "exploded_view": {
+    "category": "deform",
+    "doc": "Push pieces apart (Houdini's Exploded View): each moves along the line from ``center`` through its centroid.\nPoints shared by several pieces follow the first.",
+    "menu": "Deform",
+    "label": "Exploded View",
+    "keywords": "separate pieces"
+  },
+  "facet": {
+    "category": "modify",
+    "doc": "Split shared points so each face stands alone (Houdini's Facet 'Unique Points'). Useful before moving faces\napart; for flat shading in Blender, sharp_face (a primitive int) is cheaper.",
+    "menu": "Polygon Modelling",
+    "label": "Facet",
+    "keywords": "flat shading unique points"
+  },
+  "falloff": {
+    "category": "attribute",
+    "doc": "Write a 0..1 weight (remapped to min..max) from a shape: for masks, soft selections, deformer strengths and colours. The\nresult is a normal float attribute that wrangles, soft_transform-like nodes, attribute_transfer and Blender all read.",
+    "menu": "Attributes",
+    "label": "Falloff",
+    "keywords": "weight mask gradient soft selection sphere directional radial wave index distance field"
+  },
+  "fillet": {
+    "category": "curve",
+    "doc": "Round the corners of curves with circular arcs (Houdini's Fillet). Open curves keep their end points; closed\ncurves and polygon outlines are rounded all the way round. Each corner becomes ``divisions + 1`` points on the arc\ntangent to both segments; where two corners compete for a short segment each gets at most half of it, so arcs\nnever overlap. Point attributes are blended along the curve, ``curveu`` is not added. Every primitive becomes its\nown curve (points are not shared afterwards).",
+    "menu": "Curves",
+    "label": "Fillet",
+    "keywords": "round corners curve"
+  },
+  "for_each": {
+    "category": "combine",
+    "doc": "Split the geometry into pieces, run 'body' on each, merge the results. Each piece carries the detail\nattributes iteration (0, 1, ...), numiterations and value (the piece's attribute value), which a wrangle inside a\nsystem reads as @iteration etc. -- e.g. to vary a seed per piece.",
+    "menu": "Flow & Time",
+    "label": "For Each",
+    "keywords": "per piece iterate"
+  },
+  "fuse": {
+    "category": "modify",
+    "doc": "Weld points that lie within ``distance`` of each other (snapped to a grid of that size). With a second input\nthe first input's points are only snapped onto the nearest point of the second (within ``distance``): the\nsecond input is not modified, and the first input's points are not welded to each other.",
+    "menu": "Points",
+    "label": "Fuse",
+    "keywords": "weld merge points snap"
+  },
+  "glue_cluster": {
+    "category": "model",
+    "doc": "Glue touching pieces together (Houdini's Glue Cluster). Pieces that share a cut face are linked; ``clusters`` can\nmerge the most firmly stuck ones into rigid groups (the int ``cluster``: configure it with ``rbd_configure`` ``compound``\non). ``output = constraints`` gives the remaining links as lines between piece centres with the attributes the solver\nreads: ``rbd_a`` / ``rbd_b`` (body ids: clusters when clustering, else pieces), ``strength`` (newtons) and ``length``.",
+    "menu": "Fracture & RBD",
+    "label": "Glue Cluster",
+    "keywords": "constraints bond weld"
+  },
+  "goal_collision": {
+    "category": "physics",
+    "doc": "Separate point spheres; packing goal, not polygon/edge self-collision.\n\nEvery pair participates, including topology neighbours. Limit: 1000 points.",
+    "menu": "Procedural Systems",
+    "label": "Goal Collision",
+    "keywords": "geometric constraint collision separation packing radius"
+  },
+  "goal_gravity": {
+    "category": "physics",
+    "doc": "Apply a downward (or custom) acceleration at each relaxation step.\n\nThis is damped form-finding. Results depend on the solver timestep and iteration\ncount; these nodes do not replace the timeline MuJoCo RBD solver.",
+    "menu": "Procedural Systems",
+    "label": "Goal Gravity",
+    "keywords": "geometric constraint gravity load relaxation"
+  },
+  "goal_length": {
+    "category": "physics",
+    "doc": "Maintain all topology edge lengths; captures rest lengths here, before relaxation.\n\nAdd diagonals to cloth if shear resistance is desired. This goal has no bending term.",
+    "menu": "Procedural Systems",
+    "label": "Goal Length",
+    "keywords": "geometric constraint edge length cable fabric"
+  },
+  "goal_pin": {
+    "category": "physics",
+    "doc": "Fix selected points at their incoming positions. Pins take precedence over other goals.",
+    "menu": "Procedural Systems",
+    "label": "Goal Pin",
+    "keywords": "geometric constraint anchor fixed points"
+  },
+  "goal_solve": {
+    "category": "physics",
+    "doc": "Replay deterministic position-based geometric goals from the incoming geometry.\n\nChain goal nodes into this input. Topology and attributes survive except normals N,\nwhich are removed after deformation; append a Normal node to recompute them.\nDetail goal_report records residuals, displacement, steps and convergence. Incompatible\ngoals need not converge. No material stiffness, structural certification or cloth collision.",
+    "menu": "Procedural Systems",
+    "label": "Goal Solve",
+    "keywords": "geometric constraints relaxation solver goals fabric cable packing"
+  },
+  "goal_surface": {
+    "category": "physics",
+    "doc": "Pull selected points to the closest point on a fixed triangle/polygon surface.\n\nTarget polygons use the engine's fan triangulation; use convex faces or triangulate\nfirst. This is a two-sided attachment, not a one-sided collision obstacle.",
+    "menu": "Procedural Systems",
+    "label": "Goal Surface",
+    "keywords": "geometric constraint project closest surface"
+  },
+  "grid": {
+    "category": "source",
+    "doc": "Rectangular grid of quads in the XY plane. ``columns``/``rows`` count points per side.\n\nWrites point attributes ``P`` and ``uv`` (u along X, v along Y).",
+    "menu": "Create",
+    "label": "Grid",
+    "keywords": "plane floor"
+  },
+  "group_create": {
+    "category": "group",
+    "doc": "Make a named group of points, primitives or edges (stored as the int attribute group_<name>, 1 = member; edge\ngroups as edge_group_<name>). Most nodes take a group field, and Blender gets each group as a boolean attribute.",
+    "menu": "Groups & Selection",
+    "label": "Group Create",
+    "keywords": "select group make"
+  },
+  "group_expand": {
+    "category": "group",
+    "doc": "Grow or shrink a group by rings of neighbours (Houdini's Group Expand): select a face, expand once to get its\nborder ring (then subtract the original), contract to pull a selection away from open edges and holes in it.",
+    "menu": "Groups & Selection",
+    "label": "Group Expand",
+    "keywords": "grow shrink selection"
+  },
+  "group_promote": {
+    "category": "group",
+    "doc": "Convert the opposite domain to the target, replacing any same-name target group and removing the source.",
+    "menu": "Groups & Selection",
+    "label": "Group Promote",
+    "keywords": "convert group points primitives"
+  },
+  "group_range": {
+    "category": "group",
+    "doc": "Group a numeric range of points or primitives, optionally every Nth (Houdini's Group by Range).",
+    "menu": "Groups & Selection",
+    "label": "Group Range",
+    "keywords": "every other nth"
+  },
+  "heightfield_erode": {
+    "category": "terrain",
+    "doc": "Erode a terrain grid: rivers cut valleys and lay down fans of sediment, then over-steep slopes slump. Writes\nflow (river mask 0..1), erosion and deposit point attributes for shading. A second input with a 'mask' point\nattribute restricts the change: the result is blended with the original terrain by the mask.",
+    "menu": "Volumes & Terrain",
+    "label": "Heightfield Erode",
+    "keywords": "terrain erosion"
+  },
+  "helix": {
+    "category": "source",
+    "doc": "A spiral curve around +Z (springs, vines, stair rails).",
+    "menu": "Create",
+    "label": "Helix",
+    "keywords": "spiral coil"
+  },
+  "image_file": {
+    "category": "source",
+    "doc": "A PNG file as a pixel grid, like `blender_image` but from disk: the way to bring in height maps and masks that came from Houdini or\nany paint program.",
+    "menu": "Create",
+    "label": "Image File",
+    "keywords": "png texture picture bitmap pixels height map mask load file"
+  },
+  "image_out": {
+    "category": "output",
+    "doc": "Send an image to Blender: the geometry passes through unchanged, and the link makes (or updates) the Blender image `image` from\nthe attribute `source`, optionally writing a PNG as well. Float images keep every value; `srgb` makes an 8-bit sRGB image.",
+    "menu": "Utility & I/O",
+    "label": "Image Out",
+    "keywords": "texture picture bitmap pixels bake export write png"
+  },
+  "input": {
+    "category": "system",
+    "doc": "An input of a system (a graph saved in the node folder and used as a node). Inside the system it receives what is\nwired into the system node; when the system graph is opened on its own it passes ``preview`` through, so you can\nbuild the system on stand-in geometry.",
+    "menu": "Utility & I/O",
+    "label": "Input",
+    "keywords": "system port"
+  },
+  "inset": {
+    "category": "model",
+    "doc": "Inset selected faces without height; amount is the perpendicular distance from the original boundary.",
+    "menu": "Polygon Modelling",
+    "label": "Inset",
+    "keywords": ""
+  },
+  "instance": {
+    "category": "generate",
+    "doc": "Turn points into instances of Blender objects: Blender's Geometry Nodes proxy places the real objects on them\n(Instance on Points), so huge counts stay cheap and the objects stay editable in Blender.",
+    "menu": "Transform & Combine",
+    "label": "Instance",
+    "keywords": "blender objects forest"
+  },
+  "knife": {
+    "category": "model",
+    "doc": "",
+    "menu": "Polygon Modelling",
+    "label": "Knife",
+    "keywords": ""
+  },
+  "lattice": {
+    "category": "deform",
+    "doc": "Trilinear displacement from a complete axis-aligned rectilinear rest grid. Deformed controls retain point order.",
+    "menu": "Deform",
+    "label": "Lattice",
+    "keywords": "ffd free form"
+  },
+  "lattice_grid": {
+    "category": "source",
+    "doc": "Complete 3D control-point grid for Lattice: columns X, rows Y, layers Z; X varies fastest.",
+    "menu": "Create",
+    "label": "Lattice Grid",
+    "keywords": ""
+  },
+  "line": {
+    "category": "source",
+    "doc": "A straight open curve (Houdini's Line).",
+    "menu": "Create",
+    "label": "Line",
+    "keywords": "segment"
+  },
+  "linear_taper": {
+    "category": "deform",
+    "doc": "Scale points across an axis by an amount that blends from 1 at the origin to ``taper`` at ``length`` (Houdini's\nLinear Taper); past the length the scale keeps going.",
+    "menu": "Deform",
+    "label": "Linear Taper",
+    "keywords": "taper scale along"
+  },
+  "loop_begin": {
+    "category": "flow",
+    "doc": "Loop Begin: initial geometry on entry, previous result on subsequent iterations.\n\nPair with Loop End's begin input. In the body, @iteration is zero-based and\n@numiterations is the End's repeat count. Display the End to evaluate the block.",
+    "menu": "Flow & Time",
+    "label": "Loop Begin",
+    "keywords": "repeat iterate"
+  },
+  "loop_end": {
+    "category": "flow",
+    "doc": "Loop End: repeat the paired Begin/body region, feeding each result back internally.\n\nConnect Begin directly to the begin pairing port, and the body's last node to geo.\nNested blocks are supported; external inputs remain unchanged during the repeat.",
+    "menu": "Flow & Time",
+    "label": "Loop End",
+    "keywords": "repeat iterate"
+  },
+  "lsystem": {
+    "category": "source",
+    "doc": "Grow plants and fractals from rewriting rules (Houdini's L-System). Output: curves along the turtle's path (+Z is up)\nwith a width attribute, or polygon tubes; leaf points (group 'leaves') where J appears with no Leaf J input, and copies of the\nLeaf J/K/M inputs at J/K/M. + / - yaw, & / ^ pitch, backslash / slash roll in the moving turtle frame. Enable Separate Angles\nto control each axis independently. Branches restore the entire frame.\n\nDiffers from Houdini in these ways: + turns left and - right (the node's original convention), Rules is one multi-line box\ninstead of numbered fields, the meta test is the bounding box of its input rather than a metaball field, and tubes are\nstraight per F (Tension and Branch Blend are accepted but not used yet).",
+    "menu": "Create",
+    "label": "L-System",
+    "keywords": "plant tree fractal"
+  },
+  "match_size": {
+    "category": "modify",
+    "doc": "Fit geometry to a target position and size (Houdini's Match Size). A second input replaces the target\nposition and size with its own bounding box.",
+    "menu": "Transform & Combine",
+    "label": "Match Size",
+    "keywords": "fit center align"
+  },
+  "measure": {
+    "category": "attribute",
+    "doc": "Measure geometry (Houdini's Measure SOP).",
+    "menu": "Attributes",
+    "label": "Measure",
+    "keywords": "area volume perimeter curvature"
+  },
+  "merge": {
+    "category": "combine",
+    "doc": "Concatenate any number of geometries. Attributes missing on an input are zero-filled.",
+    "menu": "Transform & Combine",
+    "label": "Merge",
+    "keywords": "combine append join"
+  },
+  "mirror": {
+    "category": "modify",
+    "doc": "Reflect geometry across a plane (Houdini's Mirror). The copy's winding is reversed so it faces outwards, and N\nis reflected.",
+    "menu": "Polygon Modelling",
+    "label": "Mirror",
+    "keywords": "symmetry reflect flip"
+  },
+  "modifier_input": {
+    "category": "source",
+    "doc": "Mesh entering this MiniHou modifier at its stack position, in object coordinates.\n\nThe Rust editor may store an ordered ``modifier_inputs`` interface on this node.\nEach entry has a stable id, Blender socket name and type, and a default; a\nnode parameter can refer to it with ``{\"modifier_input\":{\"node\":\"input\",\"id\":\"...\"}}``.\n\nSupplied by an independent modifier instance. This node cannot cook in the legacy proxy session.",
+    "menu": "Create",
+    "label": "Modifier Input",
+    "keywords": "host geometry"
+  },
+  "noise": {
+    "category": "modify",
+    "doc": "Fractal Perlin noise sampled at P * frequency + offset.\n\nOutput range is roughly [-1, 1] before 'amplitude'. For ``attrib == \"P\"`` the result is\nadded to P. For other attributes it is written as a float attribute in scalar mode\n(value * amplitude.x) or a vec3 in vector mode.",
+    "menu": "Deform",
+    "label": "Noise",
+    "keywords": "mountain perlin displace random"
+  },
+  "normal": {
+    "category": "modify",
+    "doc": "Compute ``N`` (unit length). Faces are counter-clockwise when seen from the side N points to.\nPoints not used by any face get N = (0, 0, 0). Vertex normals reach Blender as custom normals.",
+    "menu": "Attributes",
+    "label": "Normal",
+    "keywords": "normals compute"
+  },
+  "null": {
+    "category": "utility",
+    "doc": "Pass the input through unchanged (Houdini's Null): a named place to read or output from.",
+    "menu": "Utility & I/O",
+    "label": "Null",
+    "keywords": "named output pass through"
+  },
+  "object_input": {
+    "category": "source",
+    "doc": "Import an evaluated Blender mesh from this modifier's own object picker, in source-local coordinates.",
+    "menu": "Create",
+    "label": "Object Input",
+    "keywords": ""
+  },
+  "occlusion": {
+    "category": "attribute",
+    "doc": "Per-point ambient occlusion or wall thickness by ray casting: a mask for dirt, edge wear, subsurface strength, cavities,\nor a 3-D-print wall check. Needs a polygon mesh; the point normals are computed (smooth) if the points have no N.",
+    "menu": "Attributes",
+    "label": "Occlusion",
+    "keywords": "ambient occlusion ao thickness cavity dirt wear rays sss mask"
+  },
+  "output": {
+    "category": "output",
+    "doc": "Marks the geometry the live link publishes. The evaluator validates it (P present, indices in range). Give an\noutput an ``object`` name to publish more than one result: each named output (that is not the display node) becomes\nits own mesh object in Blender.",
+    "menu": "Utility & I/O",
+    "label": "Output",
+    "keywords": "result display"
+  },
+  "outset": {
+    "category": "model",
+    "doc": "Offset selected planar boundaries outward, without height. Does not resolve collisions with neighbours.",
+    "menu": "Polygon Modelling",
+    "label": "Outset",
+    "keywords": ""
+  },
+  "path_deform": {
+    "category": "deform",
+    "doc": "Bend geometry along a curve (Houdini's Path Deform, Blender's Curve modifier). Cross-sections follow\nrotation-minimising frames, so nothing twists unless asked; beyond the ends the geometry continues straight.\nUses the first primitive of the curve input; rotates N.",
+    "menu": "Deform",
+    "label": "Path Deform",
+    "keywords": "curve warp bend along"
+  },
+  "pcg_bounds": {
+    "category": "pcg",
+    "doc": "Set or scale the points' boxes (PCG's Bounds Modifier): what the booleans and self-pruning test.",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Bounds",
+    "keywords": ""
+  },
+  "pcg_copy_points": {
+    "category": "pcg",
+    "doc": "Copy a set of points onto every target point, composing their transforms (PCG's Copy Points): clusters,\nrings of rocks around each tree... Seeds mix both, densities multiply.",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Copy Points",
+    "keywords": ""
+  },
+  "pcg_debug": {
+    "category": "pcg",
+    "doc": "Show each point as its box (PCG's Debug view), to see what the booleans and pruning see.",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Debug",
+    "keywords": ""
+  },
+  "pcg_density_filter": {
+    "category": "pcg",
+    "doc": "Keep points by density (PCG's Density Filter).",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Density Filter",
+    "keywords": ""
+  },
+  "pcg_density_noise": {
+    "category": "pcg",
+    "doc": "Vary density with noise (PCG's Density Noise / Spatial Noise): feed a density filter to thin points in\npatches.",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Density Noise",
+    "keywords": ""
+  },
+  "pcg_difference": {
+    "category": "pcg",
+    "doc": "Remove points whose boxes overlap the other input (PCG's Difference): its points' boxes, or the inside of a\nclosed mesh (a house footprint, a road made with sweep...).",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Difference",
+    "keywords": ""
+  },
+  "pcg_distance": {
+    "category": "pcg",
+    "doc": "Density from the distance to another input: a mesh's surface, a curve, or its points (PCG's Distance).",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Distance",
+    "keywords": ""
+  },
+  "pcg_intersection": {
+    "category": "pcg",
+    "doc": "Keep points whose boxes overlap the other input (PCG's Intersection): its points' boxes, or the inside of\na closed mesh.",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Intersection",
+    "keywords": ""
+  },
+  "pcg_points": {
+    "category": "pcg",
+    "doc": "Turn any points (a mesh's, a scatter's...) into PCG points: fills rot, scale, bounds, density and seed where\nmissing and drops the primitives.",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Points",
+    "keywords": ""
+  },
+  "pcg_projection": {
+    "category": "pcg",
+    "doc": "Drop points onto a surface (PCG's Projection): terrain, a roof, a wall...",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Projection",
+    "keywords": ""
+  },
+  "pcg_self_prune": {
+    "category": "pcg",
+    "doc": "Remove points whose boxes overlap others (PCG's Self Pruning): no two remaining boxes overlap.",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Self Prune",
+    "keywords": ""
+  },
+  "pcg_spawner": {
+    "category": "pcg",
+    "doc": "Choose a Blender object for every point by weight (PCG's Static Mesh Spawner); Blender instances them with\neach point's rot and scale. Also writes ``variant`` (0-based choice) for copy_to_points or wrangles.",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Spawner",
+    "keywords": ""
+  },
+  "pcg_spline_sampler": {
+    "category": "pcg",
+    "doc": "Points along curves, their X axis following the curve (PCG's Spline Sampler), or on a grid inside closed\ncurves.",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Spline Sampler",
+    "keywords": ""
+  },
+  "pcg_surface_sampler": {
+    "category": "pcg",
+    "doc": "Points on a surface (PCG's Surface Sampler): random positions thinned to an even spacing, with N, bounds,\ndensity 1 and a per-point seed.",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Surface Sampler",
+    "keywords": ""
+  },
+  "pcg_transform": {
+    "category": "pcg",
+    "doc": "Random offsets, rotations and scales per point (PCG's Transform Points), driven by each point's seed.",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Transform",
+    "keywords": ""
+  },
+  "pcg_union": {
+    "category": "pcg",
+    "doc": "Merge point sets (PCG's Union), optionally combining the density where they overlap.",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Union",
+    "keywords": ""
+  },
+  "pcg_volume_sampler": {
+    "category": "pcg",
+    "doc": "Points on a grid inside a closed mesh (PCG's Volume Sampler); each point's box is its voxel.",
+    "menu": "Procedural (PCG)",
+    "label": "PCG Volume Sampler",
+    "keywords": ""
+  },
+  "peak": {
+    "category": "deform",
+    "doc": "Move points along their normals (Houdini's Peak): inflate, shrink or offset a surface. Uses N if present,\nelse area-weighted point normals.",
+    "menu": "Deform",
+    "label": "Peak",
+    "keywords": "inflate push normals offset"
+  },
+  "point": {
+    "category": "source",
+    "doc": "Create one editable point, with no edges or faces. Useful as a copy target or graph seed.",
+    "menu": "Create",
+    "label": "Point",
+    "keywords": ""
+  },
+  "point_deform": {
+    "category": "deform",
+    "doc": "Weighted local affine displacement fit to corresponding control clouds. NumPy-only; no stored capture or piece matching.",
+    "menu": "Deform",
+    "label": "Point Deform",
+    "keywords": "capture cage"
+  },
+  "point_jitter": {
+    "category": "deform",
+    "doc": "Move points by a random offset (Houdini's Point Jitter).",
+    "menu": "Deform",
+    "label": "Point Jitter",
+    "keywords": "random move"
+  },
+  "point_relax": {
+    "category": "deform",
+    "doc": "Push points apart to an even spacing and keep them on the surface (Houdini's Point Relax / Scatter's relax\niterations): turns clumpy random scatter into blue-noise-like distributions.",
+    "menu": "Deform",
+    "label": "Point Relax",
+    "keywords": "spread even"
+  },
+  "points_to_surface": {
+    "category": "volume",
+    "doc": "A smooth surface around points (VDB from Particles / metaballs): blobs, liquids, organic shapes.",
+    "menu": "Points",
+    "label": "Points to Surface",
+    "keywords": "meta balls blobby"
+  },
+  "polybevel": {
+    "category": "model",
+    "doc": "Bevel polygon edges with segmented round or flat profiles. Keep ``distance`` below half\nthe shortest bevelled face edge, or the cuts overlap. N is removed (recompute it with a normal node).",
+    "menu": "Polygon Modelling",
+    "label": "PolyBevel",
+    "keywords": "bevel chamfer round edges"
+  },
+  "polybridge": {
+    "category": "model",
+    "doc": "Linear quad bridge between equal-size boundary chains/loops. No unequal resampling or intersection repair.",
+    "menu": "Polygon Modelling",
+    "label": "PolyBridge",
+    "keywords": "bridge connect loops"
+  },
+  "polyexpand2d": {
+    "category": "model",
+    "doc": "Offset independent convex closed planar loops in their own planes. Reject concavity, holes/union requests and collapse.",
+    "menu": "Polygon Modelling",
+    "label": "PolyExpand2D",
+    "keywords": "offset outline inset curve expand"
+  },
+  "polyextrude": {
+    "category": "modify",
+    "doc": "Extrude faces along their normals with optional inset (Houdini's PolyExtrude). Side walls are added on the\nregion's boundary; groups extrudeFront and extrudeSide hold the new faces.",
+    "menu": "Polygon Modelling",
+    "label": "PolyExtrude",
+    "keywords": "extrude inset shell thicken"
+  },
+  "polyfill": {
+    "category": "modify",
+    "doc": "Close every hole with one n-gon facing the same way as its surroundings (Houdini's PolyFill, single polygon).\nNew faces get zero for primitive and vertex attributes.",
+    "menu": "Polygon Modelling",
+    "label": "PolyFill",
+    "keywords": "fill hole cap"
+  },
+  "polypath": {
+    "category": "curve",
+    "doc": "Join curves that share end points into single polylines (Houdini's PolyPath). Polygons pass through.",
+    "menu": "Curves",
+    "label": "PolyPath",
+    "keywords": "path curve"
+  },
+  "polyreduce": {
+    "category": "model",
+    "doc": "Reduce the polygon count while keeping the shape (Houdini's PolyReduce, quadric error metrics). Point\nattributes blend along each collapsed edge (others follow the kept point); vertex attributes follow their\ncorners. Output: triangles.",
+    "menu": "Polygon Modelling",
+    "label": "PolyReduce",
+    "keywords": "decimate simplify reduce"
+  },
+  "polysplit": {
+    "category": "model",
+    "doc": "Insert edge loops or cut faces (Houdini's PolySplit). A loop runs through connected quads on both sides of the\nchosen edge until it meets a boundary or a face that is not a quad; that face gets the new point too, so there are\nno cracks.",
+    "menu": "Polygon Modelling",
+    "label": "PolySplit",
+    "keywords": "edge loop insert cut"
+  },
+  "pushpull": {
+    "category": "model",
+    "doc": "Push/pull a single planar convex face with solid union/subtraction. Closed meshes only.\nUnlike ordinary extrusion, an inward pull removes intersected solid and can punch through.\nUnsupported or non-manifold results fail clearly rather than returning broken geometry.",
+    "menu": "Polygon Modelling",
+    "label": "Push / Pull",
+    "keywords": ""
+  },
+  "python": {
+    "category": "modify",
+    "doc": "Run Python on the geometry you wire in (numpy as np, Geometry, groups). Variables a b c d i j v s flag, any named\nvalues from Variables, Frame/Time/TimeInc and the inputs geo, input1..3 are in scope; set `out` to the result (a\nGeometry, or an (n, 3) array of points), or leave it out to pass `geo` through. Inputs are read-only: copy before\nediting. Disabled unless the engine runs with --allow-python (or MINIHOU_PYTHON_NODES=1), because a graph file can then\nrun code; treat the node as a pure function of its inputs and parameters (results are cached).",
+    "menu": "Attributes",
+    "label": "Python",
+    "keywords": "script code custom"
+  },
+  "ray": {
+    "category": "modify",
+    "doc": "Project points onto the target: along a direction, along their normals, or to the closest point. Writes\nhitdist (-1 on a miss), hitprim (-1), hitN (the target's face normal) and the group rayHit.",
+    "menu": "Attributes",
+    "label": "Ray",
+    "keywords": "project raycast hit"
+  },
+  "rbd_configure": {
+    "category": "physics",
+    "doc": "Configure closed convex polygon pieces; keep all render geometry and attributes intact.\n\nPrimitive rbd_* attributes can subsequently be edited per piece with a wrangle.\nGeometry positions define the initial pose; use Transform before configuring.",
+    "menu": "Fracture & RBD",
+    "label": "RBD Configure",
+    "keywords": "bodies mass friction physics"
+  },
+  "rbd_constraint": {
+    "category": "physics",
+    "doc": "Create one physical link. Merge several links into RBD Solver's constraints input.\n\nThis is constraint geometry, not simulated render geometry. Pin is a ball joint (three\nfree rotations); hinge has one free rotation. All anchors use the initial scene pose.",
+    "menu": "Fracture & RBD",
+    "label": "RBD Constraint",
+    "keywords": "hinge spring pin glue joint anchor tendon limits break physics"
+  },
+  "rbd_constraint_properties": {
+    "category": "physics",
+    "doc": "Edit the glue links of ``glue_cluster`` (Houdini's RBD Constraint Properties): set or scale the break strength of a\ngroup of links, with random variation, or make them unbreakable. Chain several to give different parts of a structure\ndifferent strengths.",
+    "menu": "Fracture & RBD",
+    "label": "RBD Constraint Properties",
+    "keywords": "constraint glue strength break"
+  },
+  "rbd_material_fracture": {
+    "category": "physics",
+    "doc": "A one-node fracture for simulation (Houdini's RBD Material Fracture): scatter fracture points, cut the closed\nmesh with ``voronoi_fracture`` (again for each further ``fracture_level``), give each piece its own points, glue the\npieces and set mass (density x volume), friction and bounce from the material. Feed ``output = pieces`` to\n``rbd_solver`` and ``output = constraints`` to its third input. Pieces are convex when the input is; for a concave\ninput switch on ``convex_parts`` (each concave piece becomes a compound body of convex parts).",
+    "menu": "Fracture & RBD",
+    "label": "RBD Material Fracture",
+    "keywords": "shatter destruction concrete glass wood"
+  },
+  "rbd_solver": {
+    "category": "physics",
+    "doc": "Simulate convex rigid pieces with body-body contacts using optional MuJoCo 3.15.0.\n\nStatic geometry only. Integer frames are solved with fixed substeps; fractional frames\nhold the preceding integer frame. One unit = one metre. All inputs share one space.\n\n``constraints``: merge links from RBD Constraint or Glue Cluster. Glue welds, ball pins,\nlimited hinges and axial springs are supported. Body IDs come from RBD Configure.\nSee docs/RBD-CONSTRAINTS.md for mechanisms, units, limits and break semantics.",
+    "menu": "Fracture & RBD",
+    "label": "RBD Solver",
+    "keywords": "simulate physics dynamics bullet"
+  },
+  "region_identify": {
+    "category": "attribute",
+    "doc": "Label connected polygon regions; sharing any point joins a region.\n\nPrimitive mode separates each face (useful for paving). Attribute mode uses existing\ninteger labels. Writes region_id, region_random, region_center and region Cd.",
+    "menu": "Procedural Systems",
+    "label": "Region Identify",
+    "keywords": "connected islands regions flood fill connectivity"
+  },
+  "region_transform": {
+    "category": "modify",
+    "doc": "Independently transform/extrude labelled regions, splitting shared boundaries.\n\nReuses connected PolyExtrude, so a connected multi-face patch has walls only along\nits outer boundary. Without region_id, connected components are identified first.\nExtrusion is performed before the centroid transform, with the original backs kept.",
+    "menu": "Procedural Systems",
+    "label": "Region Transform",
+    "keywords": "regions islands random rotate scale extrude paving tiles stones damage"
+  },
+  "remesh": {
+    "category": "volume",
+    "doc": "Voxel remesh a closed mesh into an even, watertight quad mesh (VDB from Polygons -> smooth -> convert):\nmerges overlapping parts, closes small gaps, optional offset and smoothing. Needs closed meshes.",
+    "menu": "Volumes & Terrain",
+    "label": "Remesh",
+    "keywords": "retopo voxel rebuild"
+  },
+  "resample": {
+    "category": "curve",
+    "doc": "Even spacing along curves (Houdini's Resample). Closed polygons are resampled along their outline. Adds\ncurveu (0 at the start, 1 at the end) for ramps, carve and sweep.",
+    "menu": "Curves",
+    "label": "Resample",
+    "keywords": "points along curve spacing"
+  },
+  "reverse": {
+    "category": "modify",
+    "doc": "Reverse the winding of primitives, which flips the side they face (Houdini's Reverse).",
+    "menu": "Polygon Modelling",
+    "label": "Reverse",
+    "keywords": "flip normals winding"
+  },
+  "revolve": {
+    "category": "generate",
+    "doc": "Spin curves (or polygon outlines) around an axis into a surface (Houdini's Revolve): a profile of a vase, a wheel\nor a goblet becomes the solid. Each segment of a profile makes a ring of quads; points on the axis are shared, so a\nprofile that runs from the axis to the axis gives a closed shell with triangles at the poles. Writes corner `uv`\n(u around the axis, v along the profile by length); point attributes follow their points, primitive attributes\ntheir profile.",
+    "menu": "Polygon Modelling",
+    "label": "Revolve",
+    "keywords": "lathe spin"
+  },
+  "scatter": {
+    "category": "generate",
+    "doc": "Scatter points uniformly over the surface (area weighted), or inside a closed mesh.\n\nOutput is a point cloud with ``P``, ``N`` (face normal; zero in volume mode) and ``primnum`` (source primitive;\n-1 in volume mode). Primitives are fan-triangulated for sampling. An input with no area yields an empty cloud.\nUses a Numba kernel when available; the numpy path draws the same random numbers in the same order.",
+    "menu": "Points",
+    "label": "Scatter",
+    "keywords": "random points distribute"
+  },
+  "scene_objects": {
+    "category": "output",
+    "doc": "Make Blender objects out of points. The geometry passes through unchanged; what happens in Blender is described by the\nmanifest the link sends (see the manual). Objects are never deleted by a cook: ones that are no longer needed are hidden, and\na Clean up button in the MiniHou panel removes them for good.",
+    "menu": "Utility & I/O",
+    "label": "Scene Objects",
+    "keywords": "realize real objects scene export blender instances scatter"
+  },
+  "sdf_boolean": {
+    "category": "volume",
+    "doc": "Boolean of two closed meshes through distance fields: robust (no fragile intersection math), watertight, with\noptional smooth fillets; edges are as sharp as the voxel size allows.",
+    "menu": "Volumes & Terrain",
+    "label": "SDF Boolean",
+    "keywords": "volume union"
+  },
+  "sdf_shape": {
+    "category": "volume",
+    "doc": "An analytic shape as a watertight quad mesh (Higgsas' SDF nodes): sphere, box, cylinder, capsule, ellipsoid, torus,\nround cone and n-sided prism, with rounded edges, a position and a rotation. Feed several through sdf_boolean for smooth\nunions and subtractions.",
+    "menu": "Volumes & Terrain",
+    "label": "SDF Shape",
+    "keywords": "signed distance primitive sphere box capsule torus cylinder cone prism metaball implicit"
+  },
+  "set_material": {
+    "category": "attribute",
+    "doc": "Assign materials by name (Houdini's Material SOP). Faces keep their `material_index`; the name list that gives the numbers\ntheir meaning travels with the geometry, through merges and booleans, into Blender's material slots and USD's material\nbindings. To give every piece of a fracture its own material, set `index_attrib` to the piece attribute and list names; to give\nScene Objects instances their own, use the points domain.",
+    "menu": "Attributes",
+    "label": "Set Material",
+    "keywords": "material assign shader slot"
+  },
+  "skin": {
+    "category": "modify",
+    "doc": "Stretch a surface across a row of curves (Houdini's Skin / loft): every curve is resampled to the same number\nof points by arclength and consecutive curves are joined with quads, in primitive order. Closed curves give\ntubes (closed in the other direction too with `loop`). Writes `uv` (u along the curves, v across them).",
+    "menu": "Polygon Modelling",
+    "label": "Skin",
+    "keywords": "loft"
+  },
+  "skin_profiles": {
+    "category": "model",
+    "doc": "Loft quads through multiple ordered polygon/polyline profiles. Correspondence is by corner index, without resampling.",
+    "menu": "Polygon Modelling",
+    "label": "Skin Profiles",
+    "keywords": ""
+  },
+  "slice": {
+    "category": "curve",
+    "doc": "Cut a mesh with parallel planes into curves (topographic lines, layer outlines, cross-sections). Writes the point\nattribute and primitive attribute 'level' (height above the origin plane along the normal).",
+    "menu": "Curves",
+    "label": "Slice",
+    "keywords": "cross section planes layers topographic outline 3d print contour"
+  },
+  "smooth": {
+    "category": "deform",
+    "doc": "Smooth the shape (Houdini's Smooth). Taubin's lambda|mu filter removes noise without shrinking; N is\nrecomputed if present.",
+    "menu": "Deform",
+    "label": "Smooth",
+    "keywords": "relax laplacian blur"
+  },
+  "soft_peak": {
+    "category": "deform",
+    "doc": "Peak with a soft edge (Houdini's Soft Peak): the group moves along its normals by ``distance``, points within\n``radius`` of it follow by a falling-off share. Falloff is straight-line distance.",
+    "menu": "Deform",
+    "label": "Soft Peak",
+    "keywords": "inflate falloff"
+  },
+  "soft_transform": {
+    "category": "deform",
+    "doc": "Transform with radial smoothstep/linear falloff. No geodesic distance or selection-centred multi-source capture.",
+    "menu": "Deform",
+    "label": "Soft Transform",
+    "keywords": "proportional falloff"
+  },
+  "solidify": {
+    "category": "model",
+    "doc": "Make a polygon surface into a solid shell of constant thickness: the original faces, a copy offset along the normals with\nthe opposite winding, and a rim of quads along every open edge. Closed meshes become a hollow shell (two nested surfaces).\nAttributes ride along (points and corners copied to the inner surface; the rim takes those of the face it closes);\nN is removed. Curves in the input pass through untouched.",
+    "menu": "Polygon Modelling",
+    "label": "Solidify",
+    "keywords": "thickness shell thicken wall modifier hollow"
+  },
+  "solver": {
+    "category": "time",
+    "doc": "Run 'body' on the previous frame's result, frame after frame, from start_frame to the current frame (Houdini's\nSolver). Deterministic: any frame gives the same result however you got there; playback is incremental (recent\nframes are remembered), jumping ahead steps from the nearest remembered frame, and going back before it restarts\nfrom the input. Inside the body, @Frame is the frame being solved and @TimeInc the step in seconds.",
+    "menu": "Flow & Time",
+    "label": "Solver",
+    "keywords": "feedback simulation previous frame"
+  },
+  "sort": {
+    "category": "attribute",
+    "doc": "Reorder points or primitives (Houdini's Sort): changes @ptnum / @primnum order, which matters for copies,\nids and anything indexed by number. Topology and attributes are kept consistent.",
+    "menu": "Attributes",
+    "label": "Sort",
+    "keywords": "reorder"
+  },
+  "sphere": {
+    "category": "source",
+    "doc": "UV sphere: triangle fans at the poles, quads between; outward-facing, closed.",
+    "menu": "Create",
+    "label": "Sphere",
+    "keywords": "ball"
+  },
+  "squash_stretch": {
+    "category": "deform",
+    "doc": "Scale along an axis and (optionally) compensate across it (Houdini's Squash and Stretch).",
+    "menu": "Deform",
+    "label": "Squash Stretch",
+    "keywords": "scale volume"
+  },
+  "subdivide": {
+    "category": "modify",
+    "doc": "Subdivide polygons into quads (Houdini's Subdivide). Catmull-Clark smooths towards a limit surface and keeps open\nboundaries as smooth curves; linear splits without moving anything. Faces with fewer than 3 points are dropped.",
+    "menu": "Polygon Modelling",
+    "label": "Subdivide",
+    "keywords": "catmull clark smooth subsurf subdivision"
+  },
+  "sweep": {
+    "category": "curve",
+    "doc": "Tubes along curves (Houdini's Sweep / PolyWire): rotation-minimising frames (no flips), radius scaled by\npoint width or pscale, uv along (u) and around (v) the tube, curve point attributes kept on the rings.\nClosed primitives (closed curves, polygon outlines) make closed rings. A second input replaces the circle with\nits own cross-section (open sections make open sheets, closed ones tubes with caps).",
+    "menu": "Curves",
+    "label": "Sweep",
+    "keywords": "polywire tube pipe along curve"
+  },
+  "switch": {
+    "category": "combine",
+    "doc": "Pass on one of several inputs (Houdini's Switch): try variants, or expose the choice as a parameter.",
+    "menu": "Transform & Combine",
+    "label": "Switch",
+    "keywords": "select input choose"
+  },
+  "torus": {
+    "category": "source",
+    "doc": "Torus in the XY plane (Houdini's Torus), outward-facing quads with vertex uvs; closed.",
+    "menu": "Create",
+    "label": "Torus",
+    "keywords": "donut ring"
+  },
+  "transform": {
+    "category": "modify",
+    "doc": "Scale, then rotate, then translate about ``pivot``. Also rotates ``N`` if present.",
+    "menu": "Transform & Combine",
+    "label": "Transform",
+    "keywords": "move rotate scale translate pivot"
+  },
+  "tube": {
+    "category": "source",
+    "doc": "Cylinder or cone along +Z (Houdini's Tube), outward-facing, with vertex uvs; closed when ``caps`` is on.",
+    "menu": "Create",
+    "label": "Tube",
+    "keywords": "cylinder cone"
+  },
+  "twist": {
+    "category": "deform",
+    "doc": "Rotate points about an axis by an angle that grows with the distance along it (Houdini's Twist).",
+    "menu": "Deform",
+    "label": "Twist",
+    "keywords": "spiral rotate along axis"
+  },
+  "usd_export": {
+    "category": "output",
+    "doc": "Passes its input on unchanged; its **Save to Disk** button writes the cooked geometry to a USD file (always at full size, whatever the\nproxy level). Settings: format (binary or text), the root prim, the current frame or a frame range (an animation), up axis, units,\nwhether materials and the graph are written. Houdini,\nBlender, Maya and usdview open the result; a file written here reads back through `usd_import` with its points, groups and details.",
+    "menu": "Utility & I/O",
+    "label": "USD Export",
+    "keywords": "usd usda usdc save write export file scene pixar omniverse houdini rop"
+  },
+  "usd_import": {
+    "category": "source",
+    "doc": "Meshes, curves and points of a USD file, in world space, merged into one geometry: the file's own transforms are applied,\nprimvars become attributes (`st` as `uv`, `displayColor` as `Cd`, normals as `N`, others by name), GeomSubsets become groups, and a\nfile exported by MiniHou comes back with its point order, groups and detail attributes. Other prim types (cubes, spheres, ...) are\nskipped and listed in the detail attribute `usd_skipped`. Needs the usd-core package (pip install usd-core).\n\nSettings follow Houdini's USD Import where MiniHou has the same idea: file (with a picker), Reload, time offset and scale, what to do\nwith a missing file, a Primitives pattern, purposes and a path attribute. Variants, traversal, display as, pivot and unpack have no\ncounterpart: MiniHou reads the geometry, not the stage.",
+    "menu": "Create",
+    "label": "USD Import",
+    "keywords": "usd usda usdc usdz open load file scene pixar omniverse houdini"
+  },
+  "uv_flatten": {
+    "category": "attribute",
+    "doc": "Unwrap UVs with least-squares conformal maps (Houdini's UV Flatten): low-distortion islands cut at sharp edges\n(closed shapes are cut automatically), scaled to keep their relative size and packed into 0-1. Writes vertex\n``uv`` (Blender's 'UVMap').",
+    "menu": "UV",
+    "label": "UV Flatten",
+    "keywords": "unwrap lscm texture"
+  },
+  "uv_project": {
+    "category": "attribute",
+    "doc": "Project texture coordinates onto the geometry (written as vertex uv, Blender's UV map).",
+    "menu": "UV",
+    "label": "UV Project",
+    "keywords": "texture coordinates map"
+  },
+  "uv_transform": {
+    "category": "attribute",
+    "doc": "Move, rotate, scale, flip and randomise texture coordinates, all together or per island or face, optionally lining a 3-D direction\nup with a uv axis first. Writes the result as face-corner uv (the attribute named in `uv`).",
+    "menu": "UV",
+    "label": "UV Transform",
+    "keywords": "texture coordinates move rotate scale flip mirror island randomise offset align"
+  },
+  "voronoi_adjacency": {
+    "category": "model",
+    "doc": "Which pieces touch (Houdini's Voronoi Adjacency): a point at each piece's centre (or at the matching point of the\nsecond input, numbered by the piece) and a two-point curve between pieces that share a cut face. Prim attributes: ``piece_a``,\n``piece_b`` and ``area`` (the contact area); points carry ``piece`` and the number of ``neighbors``.",
+    "menu": "Fracture & RBD",
+    "label": "Voronoi Adjacency",
+    "keywords": "neighbours touching"
+  },
+  "voronoi_fracture": {
+    "category": "model",
+    "doc": "Break a closed polygon mesh into the Voronoi cells of the ``points`` input (e.g. scattered inside it). Pieces\nare closed meshes sharing their cut faces; give each a different transform or hand them to a simulation.",
+    "menu": "Fracture & RBD",
+    "label": "Voronoi Fracture",
+    "keywords": "shatter break cells pieces"
+  },
+  "voronoi_fracture_points": {
+    "category": "model",
+    "doc": "Fracture points for ``voronoi_fracture`` (Houdini's Voronoi Fracture Points): scattered inside a closed mesh, with\noptional surface points, thinning, relaxation, clustering and points from a second input. Connect the result to\nthe fracture's second input.",
+    "menu": "Fracture & RBD",
+    "label": "Voronoi Fracture Points",
+    "keywords": "scatter seeds shatter"
+  },
+  "voronoi_split": {
+    "category": "model",
+    "doc": "Split any polygon geometry (open sheets, soup, solids) by the Voronoi cells of the ``points`` input (Houdini's\nVoronoi Split): faces are cut where they cross a bisector plane and nothing is capped, so each piece keeps only\nthe surface that was already there. Use it on thin or open geometry, ``voronoi_fracture`` on solids.",
+    "menu": "Fracture & RBD",
+    "label": "Voronoi Split",
+    "keywords": "cut cells"
+  },
+  "wrangle": {
+    "category": "modify",
+    "doc": "Attribute wrangle: run a snippet over points, primitives or vertices (compiled once per snippet, numpy speed).\nReads attributes of other domains (promoted), writes to the domain it runs over; uv, Cd, N, material_index and\nsharp_face arrive in Blender as UV map, color attribute, normals, material index and flat shading. Groups are\n@group_<name> ints: writing i@group_top = @P.z > 1 makes a group. The extra inputs are read with @opinput1_<name>\n(same element number) and @near1_<name> (nearest point).",
+    "menu": "Attributes",
+    "label": "Wrangle",
+    "keywords": "vex expression code snippet attribwrangle"
+  }
+}
