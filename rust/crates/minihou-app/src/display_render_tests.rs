@@ -235,17 +235,26 @@ fn asymmetric_texture_rows_render_top_to_bottom_headless() {
     let right=[view[0][0],view[1][0],view[2][0]];let up=[view[0][1],view[1][1],view[2][1]];
     let mut p=Vec::new();for (x,y) in [(-1.,-1.),(1.,-1.),(1.,1.),(-1.,1.)] {p.extend((0..3).map(|i|right[i]*x+up[i]*y));}
     let mut g=minihou_core::Geometry::from_arrays(p,vec![0,1,2,3],vec![0,4],None).unwrap();
-    g.vertex.insert("uv".into(),Arc::new(Attr::f32(2,vec![0.,1.,1.,1.,1.,0.,0.,0.])));
+    // Blender 5.2's default plane: lower-left (0,0), upper-right (1,1).
+    g.vertex.insert("uv".into(),Arc::new(Attr::f32(2,vec![0.,0.,1.,0.,1.,1.,0.,1.])));
     g.prim.insert("material_index".into(),Arc::new(Attr::i32(1,vec![0])));
     g.detail.insert("materials".into(),serde_json::json!(["Corners"]));
     let scene=Scene::new(&g); let mut registry=Registry::new(".");
-    let hash=registry.register_pixels(2,2,vec![255,0,0,255,0,255,0,255,0,0,255,255,255,255,0,255],false).unwrap();
+    let png=include_bytes!("test_data/blender_orientation_source.png");
+    let hash=registry.register_image(png).unwrap();
     registry.register_descriptor("Corners",Descriptor::parse(&serde_json::json!({"version":1,"textures":{"base_color":{"image_id":hash,"color_space":"linear","sampler":{"min":"nearest","mag":"nearest","wrap_u":"clamp","wrap_v":"clamp"}}}})).unwrap());
     let mut gpu=Gpu::new(&device,&scene);gpu.upload_textures(&device,&queue,&scene,&mut registry);
     let pixels=render(&device,&queue,&gpu,Mode::SmoothShaded,Overlay {textures:true,geometry:crate::ui::Overlays {points:false,lines:false,wireframe:false,..Default::default()},..Default::default()},false);
-    for (x,y,channel) in [(48,48,0),(80,48,1),(48,80,2)] {
-        let p=pixels[y*128+x];assert!(p[channel]>p[(channel+1)%3]+40 && p[channel]>p[(channel+2)%3]+40,"{x},{y}: {p:?}");
+    for (x,y,channel) in [(56,56,0),(80,48,1),(48,80,2)] {
+        let p=pixels[y*128+x];assert!(u16::from(p[channel])>u16::from(p[(channel+1)%3])+40 && u16::from(p[channel])>u16::from(p[(channel+2)%3])+40,"{x},{y}: {p:?}");
     }
+    let yellow=pixels[80*128+80];assert!(u16::from(yellow[0])>u16::from(yellow[2])+40 && u16::from(yellow[1])>u16::from(yellow[2])+40,"80,80: {yellow:?}");
+    let dot=pixels[48*128+48];assert!(dot[..3].iter().all(|c|*c>230),"white dot: {dot:?}");
+    // A descriptor path and transferred PNG bytes must decode to identical rows.
+    registry.register_descriptor("Corners",Descriptor::parse(&serde_json::json!({"version":1,"textures":{"base_color":{"path":concat!(env!("CARGO_MANIFEST_DIR"),"/src/test_data/blender_orientation_source.png"),"color_space":"linear","sampler":{"min":"nearest","mag":"nearest","wrap_u":"clamp","wrap_v":"clamp"}}}})).unwrap());
+    gpu.upload_textures(&device,&queue,&scene,&mut registry);
+    let local=render(&device,&queue,&gpu,Mode::SmoothShaded,Overlay {textures:true,geometry:crate::ui::Overlays {points:false,lines:false,wireframe:false,..Default::default()},..Default::default()},false);
+    assert_eq!(pixels,local,"local-file texture differs from image asset");
 }
 
 #[test]
@@ -264,7 +273,7 @@ fn mhl1_image_asset_and_seam_geometry_render_together_headless() {
         ("point/P","<f4",vec![4,3],f32bytes(p)),
         ("topo/vertex_point","<i4",vec![4],i32bytes(vec![0,1,2,3])),
         ("topo/prim_offsets","<i4",vec![2],i32bytes(vec![0,4])),
-        ("vertex/uv","<f4",vec![4,2],f32bytes(vec![0.,1.,1.,1.,1.,0.,0.,0.])),
+        ("vertex/uv","<f4",vec![4,2],f32bytes(vec![0.,0.,1.,0.,1.,1.,0.,1.])),
         ("prim/material_index","<i4",vec![1],i32bytes(vec![0])),
     ] {arrays.insert(key.into(),Array {dtype:dtype.into(),shape,bytes:Arc::new(bytes)});}
     let header=serde_json::json!({"type":"object_geo","object":"Seam","materials":["Paint"],
@@ -273,18 +282,18 @@ fn mhl1_image_asset_and_seam_geometry_render_together_headless() {
     let (header,arrays)=link_protocol::read_message(&mut std::io::Cursor::new(frame),2*1024*1024).unwrap();
     let geometry=link_protocol::decode_object(&header,&arrays).unwrap();
     let scene=Scene::new(&geometry);
-    let mut png=Vec::new();
-    let image=image::RgbaImage::from_raw(2,2,vec![255,0,0,255,0,255,0,255,0,0,255,255,255,255,0,255]).unwrap();
-    image::DynamicImage::ImageRgba8(image).write_to(&mut std::io::Cursor::new(&mut png),image::ImageFormat::Png).unwrap();
+    let png=include_bytes!("test_data/blender_orientation_source.png");
     let hash=format!("sha256:{:x}",Sha256::digest(&png));
     let mut service=Service::default();service.manifest("peer1:object:Seam",1,serde_json::json!({
         "descriptors":{"peer1:Paint":{"version":1,"textures":{"base_color":{"image_id":hash,"color_space":"linear",
         "sampler":{"min":"nearest","mag":"nearest","wrap_u":"clamp","wrap_v":"clamp"}}}}}}));
-    service.begin("x",&hash,png.len()).unwrap();service.chunk("x",0,&png).unwrap();service.end("x").unwrap();
+    service.begin("x",&hash,png.len()).unwrap();service.chunk("x",0,png).unwrap();service.end("x").unwrap();
     let mut registry=Registry::new(".");service.bind("peer1:object:Seam",&mut registry).unwrap();
     let mut gpu=Gpu::new(&device,&scene);gpu.upload_textures(&device,&queue,&scene,&mut registry);
     let pixels=render(&device,&queue,&gpu,Mode::SmoothShaded,Overlay {textures:true,geometry:crate::ui::Overlays {points:false,lines:false,wireframe:false,..Default::default()},..Default::default()},false);
-    for (x,y,channel) in [(48,48,0),(80,48,1),(48,80,2)] {
-        let p=pixels[y*128+x];assert!(p[channel]>p[(channel+1)%3]+40 && p[channel]>p[(channel+2)%3]+40,"{x},{y}: {p:?}");
+    for (x,y,channel) in [(56,56,0),(80,48,1),(48,80,2)] {
+        let p=pixels[y*128+x];assert!(u16::from(p[channel])>u16::from(p[(channel+1)%3])+40 && u16::from(p[channel])>u16::from(p[(channel+2)%3])+40,"{x},{y}: {p:?}");
     }
+    let yellow=pixels[80*128+80];assert!(u16::from(yellow[0])>u16::from(yellow[2])+40 && u16::from(yellow[1])>u16::from(yellow[2])+40,"80,80: {yellow:?}");
+    let dot=pixels[48*128+48];assert!(dot[..3].iter().all(|c|*c>230),"white dot: {dot:?}");
 }
