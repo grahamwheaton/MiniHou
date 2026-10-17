@@ -138,7 +138,11 @@ def export_object(obj, render_uv=None):
                         "sampler": {"min": filt, "mag": filt, "wrap_u": extension, "wrap_v": extension}, "color_space": color_space}
         except (ValueError, RuntimeError, KeyError, OSError) as exc:
             diagnostics[key] = str(exc)
-            descriptor["textures"] = {}
+            if str(exc) in {"Image Texture has no image", "image exceeds 16 Mpx or is empty"} or isinstance(exc, OSError):
+                missing = "sha256:" + hashlib.sha256(("missing:" + key).encode()).hexdigest()
+                descriptor["textures"] = {"base_color": {"image_id": missing, "uv_set": "uv", "color_space": "srgb"}}
+            else:
+                descriptor["textures"] = {}
         descriptors[key] = descriptor
     return {"descriptors": descriptors, "bindings": bindings, "images": list(images), "diagnostics": diagnostics}, images
 
