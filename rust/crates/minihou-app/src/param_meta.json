@@ -416,6 +416,11 @@
   }
  },
  "bezier": {
+  "as_mesh": {
+   "default": false,
+   "doc": "Sketch insertion: create mesh lines or a face instead of a viewport curve",
+   "kind": "bool"
+  },
   "closed": {
    "default": false,
    "doc": "",
@@ -1420,6 +1425,11 @@
   }
  },
  "curve": {
+  "as_mesh": {
+   "default": false,
+   "doc": "Sketch insertion: create mesh lines or a face instead of a viewport curve",
+   "kind": "bool"
+  },
   "closed": {
    "default": false,
    "doc": "",

@@ -16,12 +16,12 @@ pub enum Primitive {
 }
 
 pub fn marker_for(kind: Kind) -> Marker { match kind {
-    Kind::Endpoint => Marker::Circle, Kind::Midpoint => Marker::Circle, Kind::Intersection | Kind::AlignIntersection => Marker::Cross,
+    Kind::Endpoint => Marker::Circle, Kind::Midpoint | Kind::Centre => Marker::Circle, Kind::Intersection | Kind::AlignIntersection => Marker::Cross,
     Kind::Origin => Marker::Square, Kind::Reference => Marker::Ring, Kind::OnEdge | Kind::OnFace | Kind::Extension => Marker::Diamond,
     _ => Marker::Dot,
 } }
 pub fn color_for(kind: Kind, s: &InferenceSettings) -> Rgba { let c = &s.colors; match kind {
-    Kind::Endpoint => c.endpoint, Kind::Midpoint => c.midpoint, Kind::Intersection | Kind::AlignIntersection => c.intersection,
+    Kind::Endpoint => c.endpoint, Kind::Midpoint | Kind::Centre => c.midpoint, Kind::Intersection | Kind::AlignIntersection => c.intersection,
     Kind::Origin => c.endpoint, Kind::Reference => c.reference, Kind::OnEdge | Kind::OnFace => c.on, Kind::Extension => c.parallel,
     Kind::Axis(0) | Kind::FromPoint(0) | Kind::Locked(0) => c.x, Kind::Axis(1) | Kind::FromPoint(1) | Kind::Locked(1) => c.y,
     Kind::Axis(_) | Kind::FromPoint(_) | Kind::Locked(2) => c.z, Kind::Parallel | Kind::Perpendicular | Kind::Locked(3) => c.parallel,

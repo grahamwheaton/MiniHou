@@ -198,6 +198,8 @@ def meta() -> dict:
     }
     # Sketch-tool extension of the Curve SOP: a drawn open line also splits coplanar faces of the input geometry.
     out["curve"]["split"] = {"default": False, "kind": "bool", "doc": "With an input: split coplanar faces of the input along the drawn open polyline (SketchUp-style line tool)"}
+    out["curve"]["as_mesh"] = {"default": False, "kind": "bool", "doc": "Sketch insertion: create mesh lines or a face instead of a viewport curve"}
+    out["bezier"]["as_mesh"] = {"default": False, "kind": "bool", "doc": "Sketch insertion: create mesh lines or a face instead of a viewport curve"}
     # Rust Ray SOP extensions. Keep the Python defaults and legacy methods intact.
     ray = out["ray"]
     ray["method"]["options"] += ["project_rays"]

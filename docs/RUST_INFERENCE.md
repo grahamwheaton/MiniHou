@@ -24,7 +24,7 @@ let res = engine.update(&InferenceInput {
     ray, cursor: [x, y], projector, time,                // seconds; drives dwell and tooltip delay
     geometry: Some(GeometryRef { positions, triangles, revision }),
     tool: ToolContext { spec: ToolSpec::LINE, start, start_face, ground, tool_points },
-    settings: &settings, shift_held, typed,              // typed = parse_typed(text, units)
+    settings: &settings, alt_held, typed,                // typed = parse_typed(text, units)
 });
 res.point; res.winner; res.alternatives; res.primitives; res.reason; res.typed_status;
 res.plane; res.lock; res.face; res.descriptor;
@@ -48,11 +48,11 @@ Tolerances: acquisition is in pixels (default 10). Geometric truth uses world to
 
 ## Reference tracking
 
-Hovering an endpoint/midpoint/intersection/origin or an edge for `dwell_s` (0.4 s) acquires it (max 4, FIFO). Acquired points add dashed from-point X/Y/Z lines; acquired edges add extension lines; intersections of those lines with each other and with the start point's axes/parallel/perpendicular are point candidates ("From Points"). The last hovered edge (no dwell) is the transient reference for parallel/perpendicular/extension. Esc clears typed text, then locks and references, then the stroke, then returns to Select. RMB returns to Select.
+Hovering an endpoint/midpoint/intersection/origin or an edge for `dwell_s` (0.4 s) acquires it (max 4, FIFO). Acquired points add dashed from-point X/Y/Z lines; acquired edges add extension lines; intersections of those lines with each other and with the start point's axes/parallel/perpendicular are point candidates ("From Points"). The last hovered edge (no dwell) is the transient reference for parallel/perpendicular/extension. In native sketch drawing, RMB stages the current chain; Enter confirms every staged chain; Escape cancels the session.
 
 ## Keys and settings
 
-Defaults (configurable in Preferences > Viewport > Inference, documented in NATIVE_EDITOR.md's inference table, checked by a test): Right/Left/Up lock X/Y/Z, Down locks parallel/perpendicular, hold Shift locks the current inference (direction or face plane), Tab cycles overlapping candidates, an Alt tap cycles the three linear modes (also the chip button), X/Y/Z still lock axes. Conflicts: the global keymap is not polled while a sketch tool is active, so arrows never reach the timeline; Alt is a tap only, so Alt+LMB and Alt+digit numpad emulation keep working; Tab (Add menu) is suspended with the keymap. Typing: `2.5m` (length along the lock or cursor direction), `x,y,z`, `@dx,dy,dz`, `len<deg` / `<deg` (angle from the plane's first in-plane world axis). A typed value that contradicts the lock is applied and the conflict is shown in the status line.
+Defaults (configurable in Preferences > Viewport > Inference, documented in NATIVE_EDITOR.md's inference table, checked by a test): Right/Left/Up lock X/Y/Z, Down locks parallel/perpendicular, hold Alt locks the highlighted inference (direction or face plane) until released, Tab cycles overlapping candidates, F cycles the three linear modes (also the chip button), X/Y/Z still lock axes. The global keymap is suspended while a sketch tool is active. Alt+click selection outside sketch remains available. Typing: `2.5m` (length along the lock or cursor direction), `x,y,z`, `@dx,dy,dz`, `len<deg` / `<deg` (angle from the plane's first in-plane world axis).
 
 ## Static snap and live-reference design
 
@@ -64,4 +64,4 @@ Commits store numeric points. Each clicked point's `RefDescriptor` is passed thr
 
 ## Limits / Phase 2
 
-Unwelded meshes (one vertex per triangle corner) do not get soft-edge detection; `revision` is 0 from the app (pointer/length/sample hash detect re-cooks; in-place edits of the same buffer without a revision bump could be missed between samples). Accelerator build is synchronous on the first hover of a new geometry. Not yet: Move/Rotate/Scale clients (acceptance test 15), through-point and persistent reference lock UI, object origin and bounding-box points (bounds are cached), guides/construction geometry, face-normal and custom axes, angle increments, arc/circle centres, shape inferences, clipping/isolation filters, curve-only (non-triangle) geometry.
+Unwelded meshes (one vertex per triangle corner) do not get soft-edge detection; `revision` is 0 from the app (pointer/length/sample hash detect re-cooks; in-place edits of the same buffer without a revision bump could be missed between samples). Accelerator build is synchronous on the first hover of a new geometry. Evaluated curve segments participate in endpoint, midpoint and nearest-on-edge ranking; circular sampled curves also offer a centre. Not yet: Move/Rotate/Scale clients (acceptance test 15), through-point and persistent reference lock UI, object origin and bounding-box points (bounds are cached), guides/construction geometry, face-normal and custom axes, angle increments, shape inferences, clipping/isolation filters.

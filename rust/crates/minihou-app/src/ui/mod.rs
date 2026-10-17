@@ -48,6 +48,7 @@ pub enum UiAction {
     MeshCutCommit { source: String, node_type: String, params: serde_json::Value },
     /// `refs`: per clicked point, optional inference reference descriptor (static snap metadata).
     SketchCommit { name: String, points: Vec<[f32; 3]>, closed: bool, refs: Vec<Option<Value>> },
+    SketchBatch { strokes: Vec<sketch::SketchStroke>, selected: String, target: crate::graph_edit::SketchTarget },
     AddMeasurement { a: [f32; 3], b: [f32; 3], refs: [Option<serde_json::Value>; 2] },
     DeleteMeasurement(usize),
     ClearMeasurements,

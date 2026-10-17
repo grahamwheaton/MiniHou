@@ -27,7 +27,7 @@ use math::*;
 /// Borrowed evaluated geometry of the displayed node. `revision` is the host's geometry revision
 /// (0 if it has none; pointer/length/sample checks still catch re-cooks).
 #[derive(Clone, Copy, Debug)]
-pub struct GeometryRef<'a> { pub positions: &'a [f32], pub triangles: &'a [u32], pub revision: u64 }
+pub struct GeometryRef<'a> { pub positions: &'a [f32], pub triangles: &'a [u32], pub curve_lines: &'a [u32], pub curve_centers: &'a [V3], pub revision: u64 }
 
 /// Degrees of freedom of a tool's next point.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,8 +74,8 @@ pub struct InferenceInput<'a> {
     pub geometry: Option<GeometryRef<'a>>,
     pub tool: ToolContext,
     pub settings: &'a InferenceSettings,
-    /// Shift held: lock the current inference while held.
-    pub shift_held: bool,
+    /// Alt held: lock the highlighted inference until released.
+    pub alt_held: bool,
     pub typed: Option<Typed>,
 }
 
@@ -104,7 +104,7 @@ pub struct InferenceEngine {
     /// Persistent lock (arrow keys / Down).
     pub lock: Option<Lock>,
     held: Option<Lock>,
-    prev_shift: bool,
+    prev_alt: bool,
     prev_key: Option<u64>,
     winner_since: f64,
     cycle: usize,
@@ -124,6 +124,7 @@ impl InferenceEngine {
     pub fn set_linear_mode(&mut self, m: LinearMode) { self.linear_mode = Some(m); }
     pub fn last(&self) -> Option<&InferenceResult> { self.last.as_ref() }
     pub fn active_lock(&self) -> Option<Lock> { self.held.or(self.lock) }
+    pub fn release_held(&mut self) { self.held = None; self.prev_alt = false; }
     pub fn references(&self) -> &[Reference] { &self.tracker.acquired }
 
     pub fn toggle_axis_lock(&mut self, axis: usize) {
@@ -160,9 +161,9 @@ impl InferenceEngine {
     pub fn accel_builds(&self) -> u32 { self.builds }
 
     fn ensure_accel(&mut self, g: GeometryRef) {
-        let key = GeometryKey::of(g.revision, g.positions, g.triangles);
+        let key = GeometryKey::of(g.revision, g.positions, g.triangles, g.curve_lines, g.curve_centers);
         if self.accel.as_ref().is_none_or(|a| a.key != key) {
-            self.accel = Some(Accel::build(key, g.positions, g.triangles));
+            self.accel = Some(Accel::build(key, g.positions, g.triangles, g.curve_lines, g.curve_centers));
             self.builds += 1;
         }
     }
@@ -185,10 +186,10 @@ impl InferenceEngine {
         let start = input.tool.start;
         if self.last_start != start { self.last_start = start; self.last_pp = None; }
         let enabled = s.enabled & input.tool.spec.categories;
-        // Shift: rising edge captures the current inference, release unlocks.
-        if input.shift_held && !self.prev_shift { self.held = self.last.as_ref().and_then(|r| Self::capture(r, start)); }
-        if !input.shift_held { self.held = None; }
-        self.prev_shift = input.shift_held;
+        // Alt: rising edge captures the highlighted inference, release unlocks.
+        if input.alt_held && !self.prev_alt { self.held = self.last.as_ref().and_then(|r| Self::capture(r, start)); }
+        if !input.alt_held { self.held = None; }
+        self.prev_alt = input.alt_held;
         let lock = self.held.or(self.lock);
         let geometry = input.geometry;
         if let Some(g) = geometry { self.ensure_accel(g); }
@@ -302,7 +303,7 @@ impl InferenceEngine {
 
         // ---- hover-to-reference (dwell) and transient edge
         let acquirable = match winner.kind {
-            Kind::Endpoint | Kind::Midpoint | Kind::Intersection | Kind::Origin => Some(Reference::Point { point: winner.point, label: winner.kind.label(), descriptor: winner.descriptor.clone() }),
+            Kind::Endpoint | Kind::Midpoint | Kind::Centre | Kind::Intersection | Kind::Origin => Some(Reference::Point { point: winner.point, label: winner.kind.label(), descriptor: winner.descriptor.clone() }),
             Kind::OnEdge => winner.edge.map(|(a, b)| Reference::Edge { a, b, descriptor: None }),
             _ => None,
         };
@@ -358,14 +359,14 @@ impl InferenceEngine {
         result
     }
 
-    /// Shift-lock capture from the last result.
+    /// Alt-lock capture from the last result.
     fn capture(r: &InferenceResult, start: Option<V3>) -> Option<Lock> {
         match r.winner.kind {
             Kind::Axis(a) => Some(Lock::Axis(a as usize)),
             Kind::Parallel | Kind::Perpendicular | Kind::Extension | Kind::FromPoint(_) => r.winner.guides.first().map(|g| Lock::Direction {
                 origin: if matches!(r.winner.kind, Kind::Parallel | Kind::Perpendicular) { None } else { Some(g.origin) }, dir: g.dir, label: r.winner.kind.label() }),
             Kind::OnFace => r.face.map(|(point, normal)| Lock::Plane { point, normal }),
-            Kind::Endpoint | Kind::Midpoint | Kind::Intersection | Kind::Origin | Kind::OnEdge => start.and_then(|a| norm(sub(r.winner.point, a)))
+            Kind::Endpoint | Kind::Midpoint | Kind::Centre | Kind::Intersection | Kind::Origin | Kind::OnEdge => start.and_then(|a| norm(sub(r.winner.point, a)))
                 .map(|dir| Lock::Direction { origin: None, dir, label: "Direction" }),
             _ => r.lock,
         }

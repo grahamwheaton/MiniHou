@@ -1,8 +1,14 @@
 # Sketch tools
 
-A practical plane-based drawing toolset, not a complete SketchUp implementation. All committed drawing uses the existing editable **curve** node. Closed rectangle, polygon and circle outlines are single polygon faces; line and pen are open polylines. They can feed existing extrusion, sweep and other modelling nodes. Drawing does not automatically split or weld an existing solid.
+## Native editor rework (2026-10-17)
 
-## Drawing
+Line, Polyline, Polygon, Rectangle, Circle, Arc and Bezier keep completed chains visible as pending previews. Right-click finishes the current chain and leaves the tool ready for a new left-click chain. Enter confirms every pending chain in one document edit and one undo step; Escape discards the session. Middle mouse orbit works while drawing and after confirmation. Measure remains a two-point annotation tool.
+
+The target is chosen from the **selected stream's evaluated primitive types when drawing starts**: a stream with surface polygons receives mesh lines or faces merged after the selected stream, before its output; a curve/open-primitive stream receives additional curves in the same displayed object; with nothing selected a new curve object is created. Mixed streams with surface polygons use the mesh rule. Selected curves may gain another curve node in their graph chain while retaining one displayed object. Holding Alt locks the highlighted inference until release; F cycles linear inference modes. Displayed evaluated curves, including sampled Bezier and polylines, offer endpoint, midpoint and nearest-on-curve snaps. Circular sampled curves also offer a centre snap.
+
+The native editor and browser sketch tool share the plane-based drawing concept. The native editor behaviour is described first; the older browser tool behaviour follows below.
+
+## Browser drawing
 
 Open **Sketch & Measure** above the viewport. Choose a drawing plane (XY, XZ or YZ), then Line, Pen, Polygon, Rectangle or Circle. Left-click points. Line uses two endpoints; rectangle uses opposite corners; circle uses centre and radius with 32 segments by default. Pen and polygon accept multiple points; Enter finishes, or click the starting point to close a polygon. Escape or right-click cancels without adding a node. Middle mouse remains available for navigation. Backspace removes the last point or typed digit.
 
