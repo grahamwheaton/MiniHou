@@ -177,3 +177,15 @@ Full handoff: docs/TODO_PERSISTENT_OVERRIDES.md (from the user's HANDOFF.md, 202
 - **Blender Object picker and waiting state:** live check in the real Blender window still to do.
 - **Knife limits:** no live cooked preview, and no edge-axis constraints.
 - **Grid Fill limits:** loops with holes are not detected.
+
+---
+
+# Decisions 2026-10-17 and new work
+
+- **Python parity suites:** APPROVED. Rebuild the stale minihou_rs extension from current Rust so test_rust_parity and test_parity_inputs run. In progress (Bob).
+- **Inset on non-planar regions:** PAUSED by the user.
+- **Tri to Quads:** user will test before it is called done.
+- **Attribute Wrangle parity:** not Houdini-equivalent yet. Bring the wrangle to Houdini parity (VEX-style expressions for points, primitives and vertices, bindings to attributes, and the groups/attributes it reads and writes).
+- **Polyfill full parity:** Houdini Polyfill parameters from the user's screenshot: Boundary Group, Fill Mode (Quadrilaterals and others), Auto-Complete Boundaries, Reverse Patches, Unique Points, Update Point Normals, Edge Loop, Smooth, Patch Construction (Corner Offset, Custom Corners, Deform Patch, Surface Offset, Tangent Strength), Output Groups (Patch Group, Edge Loop Group, Append to Groups).
+- **Statistics nodes:** measure volume, distance between points, bounding box size, curve length, and similar measurements, as nodes with output attributes or detail values.
+- **Houdini shelf gap audit:** the user's screenshots list the Model, Polygon, Deform and Texture shelves. Check each Houdini node against MiniHou and port the missing ones (Model: Revolve, Loft, Skin, Rails, Sweep, Creep, Ray, Shatter, Carve, Convert, Refine, Reverse, Sculpt, Cluster Points, Edit, Visibility; Polygon: PolyDraw, Curve Polygon, PolyBridge, Edge Loop, PolyReduce, PolyExpand2D, Edge Collapse, Edge Cusp, Edge Flip, Edge Divide, Clip, Facet, Point Weld, Fuse, Snap, Smooth, Curve from Edges, PolyHinge; Deform: Bulge, Fractal, Mountain, Waves, Ripple, Morph; Texture: UV Project, UV Edit, UV Brush, UV Fuse, UV Flatten, UV Pelt, UV Texture, UV Transform, UV Unwrap, UV Quick Shade, UV Smooth, UV Layout).
