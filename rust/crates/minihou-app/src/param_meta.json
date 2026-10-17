@@ -1649,6 +1649,48 @@
    ]
   }
  },
+ "edge_slide": {
+  "clamp": {
+   "default": true,
+   "kind": "bool"
+  },
+  "correct_uvs": {
+   "default": true,
+   "kind": "bool"
+  },
+  "even": {
+   "default": false,
+   "kind": "bool"
+  },
+  "factor": {
+   "default": 0.0,
+   "kind": "float",
+   "max": 1.0,
+   "min": -1.0
+  },
+  "flipped": {
+   "default": false,
+   "kind": "bool"
+  },
+  "group": {
+   "default": "",
+   "doc": "Selected edge group or pA-B pairs; empty leaves the mesh unchanged.",
+   "kind": "str"
+  },
+  "mirror_editing": {
+   "default": true,
+   "doc": "Mirror setting; active when a symmetry context is available.",
+   "kind": "bool"
+  },
+  "output_group": {
+   "default": false,
+   "kind": "bool"
+  },
+  "output_group_name": {
+   "default": "slid_edges",
+   "kind": "str"
+  }
+ },
  "exploded_view": {
   "center": {
    "default": [
@@ -3140,6 +3182,43 @@
  },
  "loop_begin": {},
  "loop_cut": {
+  "clamp": {
+   "default": true,
+   "doc": "Stop at the neighbouring edge.",
+   "kind": "bool"
+  },
+  "correct_uvs": {
+   "default": true,
+   "doc": "Slide corner UVs independently on each face.",
+   "kind": "bool"
+  },
+  "even": {
+   "default": false,
+   "doc": "Keep a constant travel distance along uneven rails.",
+   "kind": "bool"
+  },
+  "factor": {
+   "default": 0.0,
+   "doc": "Signed slide of the new cuts along their rails.",
+   "kind": "float",
+   "max": 1.0,
+   "min": -1.0
+  },
+  "falloff": {
+   "default": "inverse_square",
+   "doc": "Smoothness falloff (reserved).",
+   "kind": "enum",
+   "options": [
+    "inverse_square",
+    "linear",
+    "smooth"
+   ]
+  },
+  "flipped": {
+   "default": false,
+   "doc": "Swap the side selected by the Factor sign.",
+   "kind": "bool"
+  },
   "loops": {
    "default": 1,
    "doc": "How many loops to insert, evenly spaced",
@@ -3182,6 +3261,13 @@
    "kind": "float",
    "max": 1.0,
    "min": 0.0
+  },
+  "smoothness": {
+   "default": 0.0,
+   "doc": "Loop Cut smoothing amount (reserved for future surface interpolation).",
+   "kind": "float",
+   "max": 1.0,
+   "min": -1.0
   },
   "split_edges": {
    "default": "",
@@ -4913,6 +4999,43 @@
   }
  },
  "polysplit": {
+  "clamp": {
+   "default": true,
+   "doc": "Stop at the neighbouring edge.",
+   "kind": "bool"
+  },
+  "correct_uvs": {
+   "default": true,
+   "doc": "Slide corner UVs independently on each face.",
+   "kind": "bool"
+  },
+  "even": {
+   "default": false,
+   "doc": "Keep a constant travel distance along uneven rails.",
+   "kind": "bool"
+  },
+  "factor": {
+   "default": 0.0,
+   "doc": "Signed slide of the new cuts along their rails.",
+   "kind": "float",
+   "max": 1.0,
+   "min": -1.0
+  },
+  "falloff": {
+   "default": "inverse_square",
+   "doc": "Smoothness falloff (reserved).",
+   "kind": "enum",
+   "options": [
+    "inverse_square",
+    "linear",
+    "smooth"
+   ]
+  },
+  "flipped": {
+   "default": false,
+   "doc": "Swap the side selected by the Factor sign.",
+   "kind": "bool"
+  },
   "loops": {
    "default": 1,
    "doc": "How many loops to insert, evenly spaced",
@@ -4955,6 +5078,13 @@
    "kind": "float",
    "max": 1.0,
    "min": 0.0
+  },
+  "smoothness": {
+   "default": 0.0,
+   "doc": "Loop Cut smoothing amount (reserved for future surface interpolation).",
+   "kind": "float",
+   "max": 1.0,
+   "min": -1.0
   },
   "split_edges": {
    "default": "",

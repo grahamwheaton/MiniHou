@@ -44,7 +44,7 @@ pub const EDGE_CUSP: NodeSpec = NodeSpec {
 pub const POLYSPLIT: NodeSpec = NodeSpec {
     name: "polysplit",
     inputs: GEO,
-    params: crate::params!("mode":"edge_loop";"split_edges":"";"loops":1;"position":0.5;"split_points":"";"outgrp_points":false;"outgrp_points_name":"splitpoints";"outgrp_edges":false;"outgrp_edges_name":"splitedges"),
+    params: crate::params!("mode":"edge_loop";"split_edges":"";"loops":1;"position":0.5;"factor":0.;"smoothness":0.;"falloff":"inverse_square";"even":false;"flipped":false;"clamp":true;"correct_uvs":true;"split_points":"";"outgrp_points":false;"outgrp_points_name":"splitpoints";"outgrp_edges":false;"outgrp_edges_name":"splitedges"),
     cook: polysplit,
 };
 // Native keymap calls this tool loop_cut; Python's node type is polysplit.
@@ -53,6 +53,12 @@ pub const LOOP_CUT: NodeSpec = NodeSpec {
     inputs: GEO,
     params: POLYSPLIT.params,
     cook: polysplit,
+};
+pub const EDGE_SLIDE: NodeSpec = NodeSpec {
+    name: "edge_slide",
+    inputs: GEO,
+    params: crate::params!("group":"";"factor":0.;"even":false;"flipped":false;"clamp":true;"mirror_editing":true;"correct_uvs":true;"output_group":false;"output_group_name":"slid_edges"),
+    cook: edge_slide,
 };
 pub(super) fn twins(g: &Geometry) -> Vec<Option<usize>> {
     let (_, nx, _) = corners(g);
@@ -657,6 +663,13 @@ pub fn loop_cut_fractions(loops: usize, position: f64) -> Vec<f64> {
         (0..loops).map(|j| (j + 1) as f64 / (loops + 1) as f64).collect()
     }
 }
+/// Signed displacement of all cuts by one interval. Zero preserves polysplit's Python semantics.
+pub fn loop_slide_fractions(loops: usize, position: f64, factor: f64, clamp: bool) -> Vec<f64> {
+    if factor == 0. { return loop_cut_fractions(loops, position); }
+    let f = if clamp { factor.clamp(-1., 1.) } else { factor };
+    let base = if loops == 1 { 0.5 } else { 0. };
+    (0..loops).map(|j| if loops == 1 { base + 0.5 * f } else { (j + 1) as f64 / (loops + 1) as f64 + f / (loops + 1) as f64 }).collect()
+}
 /// Edge/quad adjacency polysplit walks. Shared with the viewport Loop Cut preview so hover and cook agree exactly.
 #[derive(Clone, Debug, Default)]
 pub struct LoopTopology {
@@ -756,6 +769,127 @@ impl LoopRing {
         out
     }
 }
+/// Slide selected edge chains along the unselected face rails. Each face supplies a rail
+/// on its side of an oriented chain, so open borders have one available direction.
+fn slide_selected_edges(g: &Geometry, selected: &BTreeSet<Pair>, factor: f64, even: bool,
+    flipped: bool, clamp: bool, correct_uvs: bool) -> Geometry {
+    let mut out = g.clone();
+    if selected.is_empty() || factor == 0. { return out; }
+    let mut adjacency = BTreeMap::<usize, Vec<usize>>::new();
+    for &(a,b) in selected { adjacency.entry(a).or_default().push(b); adjacency.entry(b).or_default().push(a); }
+    for n in adjacency.values_mut() { n.sort_unstable(); }
+    let mut oriented = Vec::new();
+    let mut visited = BTreeSet::new();
+    while visited.len() < selected.len() {
+        let start = adjacency.iter().find(|(v, n)| n.len() == 1 && n.iter().any(|&u| !visited.contains(&key(**v,u))))
+            .map(|(v,_)| *v).or_else(|| adjacency.iter().find(|(v,n)| n.iter().any(|&u| !visited.contains(&key(**v,u)))).map(|(v,_)| *v));
+        let Some(mut current) = start else { break; };
+        loop {
+            let Some(next) = adjacency[&current].iter().copied().find(|&u| !visited.contains(&key(current,u))) else { break; };
+            visited.insert(key(current,next)); oriented.push((current,next)); current = next;
+        }
+    }
+    let vp = &g.topology.vertex_point;
+    let mut rails = BTreeMap::<usize,[Option<usize>;2]>::new();
+    for &(a,b) in &oriented {
+        for face in 0..g.nprims() {
+            if !g.topology.is_closed(face) { continue; }
+            let r = range(g,face);
+            if r.len() < 3 { continue; }
+            let corners: Vec<_> = r.collect();
+            for i in 0..corners.len() {
+                let x = vp[corners[i]] as usize;
+                let y = vp[corners[(i+1)%corners.len()]] as usize;
+                let (side, u, v, before, after) = if (x,y)==(a,b) {
+                    (0,a,b,vp[corners[(i+corners.len()-1)%corners.len()]] as usize,vp[corners[(i+2)%corners.len()]] as usize)
+                } else if (x,y)==(b,a) {
+                    (1,a,b,vp[corners[(i+2)%corners.len()]] as usize,vp[corners[(i+corners.len()-1)%corners.len()]] as usize)
+                } else { continue; };
+                if !selected.contains(&key(u,before)) { rails.entry(u).or_default()[side].get_or_insert(before); }
+                if !selected.contains(&key(v,after)) { rails.entry(v).or_default()[side].get_or_insert(after); }
+            }
+        }
+    }
+    let side = (factor.is_sign_negative() as usize) ^ (flipped as usize);
+    let reference = rails.iter().find_map(|(&v,r)| r[side].map(|n| (v,n)))
+        .map(|(v,n)| (0..3).map(|k| (g.p()[3*v+k]-g.p()[3*n+k]).powi(2)).sum::<f32>().sqrt() as f64).unwrap_or(0.);
+    let mut targets = BTreeMap::<usize,(usize,f64)>::new();
+    for (&v,r) in &rails {
+        let Some(n) = r[side] else { continue; };
+        let distance=(0..3).map(|k| (g.p()[3*v+k]-g.p()[3*n+k]).powi(2)).sum::<f32>().sqrt() as f64;
+        if distance <= 1e-12 { continue; }
+        let amount=factor.abs() * if even && reference > 0. { reference/distance } else { 1. };
+        targets.insert(v,(n,if clamp { amount.clamp(0.,1.) } else { amount }));
+    }
+    let mut positions=g.p().to_vec();
+    for (&v,&(n,t)) in &targets { for k in 0..3 { positions[3*v+k]=(g.p()[3*v+k] as f64*(1.-t)+g.p()[3*n+k] as f64*t) as f32; } }
+    out.set_p(positions);
+    for (name,attr) in &g.point {
+        if name=="P" || name.starts_with("group_") { continue; }
+        if let AttrData::F32(data)=&attr.data {
+            let mut data=data.clone();
+            for (&v,&(n,t)) in &targets { for k in 0..attr.width { data[v*attr.width+k]=(attr.as_f32().unwrap()[v*attr.width+k] as f64*(1.-t)+attr.as_f32().unwrap()[n*attr.width+k] as f64*t) as f32; } }
+            out.point.insert(name.clone(),Arc::new(Attr::f32(attr.width,data)));
+        }
+    }
+    if correct_uvs {
+        let (_,next,prev)=corners(g);
+        for (name,attr) in &g.vertex {
+            if name.starts_with("edge_group_") { continue; }
+            if let AttrData::F32(data)=&attr.data {
+                let mut changed=data.clone();
+                for c in 0..g.nvertices() {
+                    let v=vp[c] as usize;
+                    let Some(&(n,t))=targets.get(&v) else { continue; };
+                    let rail=if vp[next[c]] as usize==n { Some(next[c]) } else if vp[prev[c]] as usize==n { Some(prev[c]) } else { None };
+                    if let Some(q)=rail { for k in 0..attr.width { changed[c*attr.width+k]=(data[c*attr.width+k] as f64*(1.-t)+data[q*attr.width+k] as f64*t) as f32; } }
+                }
+                out.vertex.insert(name.clone(),Arc::new(Attr::f32(attr.width,changed)));
+            }
+        }
+    }
+    out
+}
+/// Geometry used by the viewport preview. The node calls the same kernel after parsing its group.
+pub fn edge_slide_preview(g: &Geometry, selected: &[(usize,usize)], factor: f64, even: bool,
+    flipped: bool, clamp: bool, correct_uvs: bool) -> Geometry {
+    slide_selected_edges(g,&selected.iter().map(|&(a,b)|key(a,b)).collect(),factor,even,flipped,clamp,correct_uvs)
+}
+/// Cook-backed preview for the modal, including Even and Flip on irregular rings.
+pub fn loop_cut_preview(g: &Geometry, seed: Pair, count: usize, factor: f64, even: bool,
+    flipped: bool, clamp: bool) -> Result<Vec<([f32;3],[f32;3])>> {
+    let value=serde_json::json!({"split_edges":format!("p{}-{}",seed.0,seed.1),"loops":count,
+        "factor":factor,"even":even,"flipped":flipped,"clamp":clamp,"outgrp_edges":true});
+    let params=Params::resolve(POLYSPLIT.params,value.as_object())?;
+    let result=polysplit(&[vec![Arc::new(g.clone())]],&params)?;
+    let edges=topo::edges(&result.topology,result.npoints);
+    let mask=edges::edge_mask(&result,"splitedges")?;
+    let positions=result.p();
+    Ok(edges.points.chunks_exact(2).enumerate().filter(|(i,_)|mask[*i]).map(|(_,pair)| {
+        let point=|id:i64| [0,1,2].map(|k|positions[3*id as usize+k]);
+        (point(pair[0]),point(pair[1]))
+    }).collect())
+}
+fn edge_slide(inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    let g=EDGE_SLIDE.one(inputs,0)?;
+    polygons(&g,"edge_slide")?;
+    let group=p.s("group")?;
+    if group.trim().is_empty() { return Ok((*g).clone()); }
+    let edges=topo::edges(&g.topology,g.npoints);
+    let mask=edges::edge_mask(&g,&group)?;
+    let selected: BTreeSet<_>=edges.points.chunks_exact(2).enumerate().filter(|(i,_)|mask[*i])
+        .map(|(_,v)|key(v[0] as usize,v[1] as usize)).collect();
+    let factor=p.f("factor")?;
+    if !(-1. ..=1.).contains(&factor) { return Err(Error::new("factor must be -1..1")); }
+    let mut out=slide_selected_edges(&g,&selected,factor,p.b("even")?,p.b("flipped")?,p.b("clamp")?,p.b("correct_uvs")?);
+    // Mirror editing is reserved for the editor's symmetry context; without one, geometry is unchanged.
+    let _=p.b("mirror_editing")?;
+    if p.b("output_group")? { let name=p.s("output_group_name")?; group_name(&name)?;
+        let mask=pair_mask(&out,&selected.iter().copied().collect::<Vec<_>>());
+        write_group(&mut out,"edge",&name,&mask)?;
+    }
+    Ok(out)
+}
 fn polysplit(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let g = POLYSPLIT.one(inputs, 0)?;
     polygons(&g, "polysplit")?;
@@ -789,7 +923,12 @@ fn polysplit(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     if !(0.0..=1.0).contains(&position) {
         return Err(Error::new("position must be 0..1"));
     }
-    let fractions = loop_cut_fractions(n, position);
+    let factor=p.f("factor")?;
+    if !(-1. ..=1.).contains(&factor) { return Err(Error::new("factor must be -1..1")); }
+    let smoothness=p.f("smoothness")?;
+    if !(-1. ..=1.).contains(&smoothness) { return Err(Error::new("smoothness must be -1..1")); }
+    let falloff=p.e("falloff", &["inverse_square","linear","smooth"])?;
+    let fractions = loop_cut_fractions(n,if factor==0. { position } else { 0.5 });
     let keys: Vec<_> = ring.keys().copied().collect();
     let mut ia = Vec::new();
     let mut ib = Vec::new();
@@ -893,6 +1032,21 @@ fn polysplit(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     )?;
     let mask = pair_mask(&out, &cut_pairs);
     outgroup(&mut out, p, "edges", "edge", &mask)?;
+    if smoothness != 0. {
+        let mut neighbours=BTreeMap::<usize,Vec<usize>>::new();
+        for &(a,b) in &cut_pairs { neighbours.entry(a).or_default().push(b); neighbours.entry(b).or_default().push(a); }
+        let old=out.p().to_vec(); let mut new=old.clone();
+        let weight=match falloff.as_str() { "linear"=>smoothness, "smooth"=>smoothness.abs().powi(2)*(3.-2.*smoothness.abs())*smoothness.signum(), _=>smoothness.abs().powi(2)*smoothness.signum() };
+        for (&v,n) in &neighbours { if n.len()!=2 { continue; }
+            for k in 0..3 { let mid=(old[3*n[0]+k] as f64+old[3*n[1]+k] as f64)*0.5;
+                new[3*v+k]=(old[3*v+k] as f64+(mid-old[3*v+k] as f64)*weight) as f32; }
+        }
+        out.set_p(new);
+    }
+    if factor != 0. {
+        out=slide_selected_edges(&out,&cut_pairs.iter().map(|&(a,b)|key(a,b)).collect(),factor,
+            p.b("even")?,p.b("flipped")?,p.b("clamp")?,p.b("correct_uvs")?);
+    }
     Ok(out)
 }
 fn split_points(g: &Geometry, p: &Params) -> Result<Geometry> {
@@ -1048,6 +1202,65 @@ mod tests {
     fn loop_fractions_match_python() {
         assert_eq!(loop_cut_fractions(1, 0.3), vec![0.3]);
         assert_eq!(loop_cut_fractions(3, 0.3), vec![0.25, 0.5, 0.75]);
+    }
+    fn slide(g: Geometry, params: serde_json::Value) -> Geometry {
+        let p=Params::resolve(EDGE_SLIDE.params,params.as_object()).unwrap();
+        edge_slide(&[vec![Arc::new(g)]],&p).unwrap()
+    }
+    #[test] fn edge_slide_boundary_flip_and_empty_group() {
+        let g=quad();
+        assert_eq!(slide(g.clone(),json!({})).p(),g.p());
+        let positive=slide(g.clone(),json!({"group":"p0-1","factor":0.5}));
+        assert_eq!(&positive.p()[..6],&[0.,1.,0.,2.,1.,0.]);
+        assert_eq!(slide(g.clone(),json!({"group":"p0-1","factor":-0.5})).p(),g.p());
+        assert_eq!(slide(g,json!({"group":"p0-1","factor":-0.5,"flipped":true})).p(),positive.p());
+        assert_eq!(positive.topology.vertex_point,quad().topology.vertex_point);
+    }
+    #[test] fn edge_slide_on_cube_and_polysplit_are_same() {
+        let centre=cut(cube(),json!({"split_edges":"p0-1","outgrp_edges":true}));
+        let via_slide=slide(centre.clone(),json!({"group":"splitedges","factor":0.4}));
+        let direct=cut(cube(),json!({"split_edges":"p0-1","factor":0.4}));
+        assert_eq!(via_slide.p(),direct.p());
+        assert_eq!(via_slide.topology.vertex_point,direct.topology.vertex_point);
+        assert_eq!(slide(centre.clone(),json!({"group":"splitedges","factor":0.4})).p(),via_slide.p());
+        let negative=slide(centre,json!({"group":"splitedges","factor":-0.4}));
+        assert_ne!(negative.p(),via_slide.p());
+    }
+    #[test] fn edge_slide_interpolates_point_attributes_and_keeps_uv_seams() {
+        let mut g=Geometry::from_arrays(vec![0.,0.,0., 1.,0.,0., 2.,0.,0., 0.,1.,0., 1.,1.,0., 2.,1.,0.],
+            vec![0,1,4,3, 1,2,5,4],vec![0,4,8],None).unwrap();
+        g.point.insert("weight".into(),Arc::new(Attr::f32(1,vec![0.,1.,2.,0.,1.,2.])));
+        g.vertex.insert("uv".into(),Arc::new(Attr::f32(2,vec![0.,0., 1.,0., 1.,1., 0.,1.,
+            10.,0., 11.,0., 11.,1., 10.,1.])));
+        let o=slide(g.clone(),json!({"group":"p1-4","factor":0.5}));
+        assert_eq!(o.topology.vertex_point,g.topology.vertex_point);
+        assert_eq!(o.point["weight"].as_f32().unwrap()[1],0.5);
+        let uv=o.vertex["uv"].as_f32().unwrap();
+        assert_eq!(uv[2],0.5);
+        assert_eq!(uv[8],10.);
+        let off=slide(g,json!({"group":"p1-4","factor":0.5,"correct_uvs":false}));
+        assert_eq!(off.vertex["uv"].as_f32().unwrap()[2],1.);
+    }
+    #[test] fn edge_slide_even_and_clamp_on_unequal_rails() {
+        let g=Geometry::from_arrays(vec![0.,0.,0., 2.,0.,0., 2.,2.,0., 0.,4.,0.],vec![0,1,2,3],vec![0,4],None).unwrap();
+        let plain=slide(g.clone(),json!({"group":"p0-1","factor":0.5}));
+        let even=slide(g.clone(),json!({"group":"p0-1","factor":0.5,"even":true}));
+        assert_eq!(plain.p()[4],1.);
+        assert_eq!(even.p()[4],2.);
+        let capped=slide(g.clone(),json!({"group":"p0-1","factor":1.,"even":true}));
+        let free=slide(g,json!({"group":"p0-1","factor":1.,"even":true,"clamp":false}));
+        assert_eq!(capped.p()[4],2.);
+        assert_eq!(free.p()[4],4.);
+    }
+    #[test] fn multiple_loop_cuts_slide_together_and_preview_matches_cook() {
+        let g=cube();
+        for count in [1,3] { for factor in [-0.5,0.,0.5] {
+            let o=cut(g.clone(),json!({"split_edges":"p0-1","loops":count,"factor":factor,"outgrp_edges":true}));
+            let lines=loop_cut_preview(&g,(0,1),count,factor,false,false,true).unwrap();
+            assert_eq!(lines.len(),4*count);
+            let coords: BTreeSet<_>=o.p().chunks_exact(3).map(|q|format!("{:.4},{:.4},{:.4}",q[0],q[1],q[2])).collect();
+            for (a,b) in lines { for p in [a,b] { assert!(coords.contains(&format!("{:.4},{:.4},{:.4}",p[0],p[1],p[2]))); } }
+        } }
     }
     #[test]
     fn twist_and_singular_taper_normals() {
