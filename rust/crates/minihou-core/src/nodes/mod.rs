@@ -91,6 +91,7 @@ mod select_nodes;
 mod mesh_common;
 mod grid_fill;
 mod recalc_normals;
+mod tris_to_quads;
 
 pub use modify::{match_size_points, MatchSizeOut};
 pub use modeling_tools::{edge_slide_preview, loop_cut_fractions, loop_cut_preview, loop_slide_fractions, LoopRing, LoopTopology, LOOP_CUT_MAX};
@@ -186,6 +187,7 @@ pub fn registry() -> &'static [NodeSpec] {
         select_nodes::SELECT_RING,
         grid_fill::GRID_FILL,
         recalc_normals::RECALC_NORMALS,
+        tris_to_quads::TRIS_TO_QUADS,
         group::BLAST,
         attribs::ATTRIBUTE_DELETE,
         attribs::ATTRIBUTE_RENAME,

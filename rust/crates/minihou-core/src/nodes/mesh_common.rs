@@ -106,10 +106,16 @@ pub(super) fn out_group(g: &mut Geometry, p: &crate::params::Params, mask: &[boo
 
 /// Recomputes corner normals `N` (if present) as the flat normal of every face from `first_prim` on.
 pub(super) fn refresh_corner_normals(g: &mut Geometry, first_prim: usize) {
+    let mask: Vec<bool> = (0..g.nprims()).map(|p| p >= first_prim).collect();
+    refresh_corner_normals_for(g, &mask);
+}
+
+/// Recomputes corner normals `N` (if present) as the flat normal of the faces in `mask`.
+pub(super) fn refresh_corner_normals_for(g: &mut Geometry, mask: &[bool]) {
     let Some(old) = g.vertex.get("N").filter(|a| a.width == 3).and_then(|a| a.as_f32()).map(<[f32]>::to_vec) else { return };
     let fnorm = crate::normals::prim_normals(g.p(), &g.topology);
     let mut data = old;
-    for p in first_prim..g.nprims() {
+    for p in (0..g.nprims()).filter(|&p| mask[p]) {
         let n = model::unit32(fnorm[p]).map(|x| x as f32);
         for v in model::range(g, p) { data[v * 3..v * 3 + 3].copy_from_slice(&n); }
     }
