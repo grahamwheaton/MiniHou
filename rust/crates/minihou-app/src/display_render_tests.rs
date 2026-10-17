@@ -137,3 +137,34 @@ fn bounds_of_edge_only_objects_keep_selection_outline_headless() {
         assert!(image.iter().filter(outline).count()>0,"edge-only object lost bounds silhouette");
     }
 }
+
+#[test]
+fn random_objects_and_normal_matcap_headless() {
+    let Some((device,queue))=adapter() else { eprintln!("No adapter: skipping MatCap render test"); return; };
+    let scene=scene(); let mut gpu=Gpu::new(&device,&scene);
+    gpu.set_named_object_ranges(&device,&scene,vec![("left".into(),0..4),("right".into(),4..8)]);
+    let options=Overlay {geometry:crate::ui::Overlays {points:false,..Default::default()},..Default::default()};
+    let single=render(&device,&queue,&gpu,Mode::SmoothShaded,options,false);
+    let random=render(&device,&queue,&gpu,Mode::SmoothShaded,Overlay {object_color:ObjectColor::Random,..options},false);
+    for half in [0..64,64..128] {
+        assert!((0..128).flat_map(|y|half.clone().map(move |x|y*128+x)).filter(|&i|single[i]!=random[i]).count()>50);
+    }
+    let mut plane=Scene {p:Vec::new(),n:Vec::new(),tri:vec![0,1,2,0,2,3],edge:vec![0,1,1,2,2,3,3,0],point:Vec::new(),line:Vec::new(),nlp:Vec::new(),nln:Vec::new(),normal_points:Vec::new(),bbp:[0.;24],center:[0.;3],radius:2.5};
+    let cam=Camera::frame([0.;3],2.5); let (_,view)=cam.matrices(1.);
+    let right=[view[0][0],view[1][0],view[2][0]];
+    let up=[view[0][1],view[1][1],view[2][1]];
+    let toward=cam.forward().map(|v|-v);
+    for (x,y) in [(-1.,-1.),(1.,-1.),(1.,1.),(-1.,1.)] {
+        plane.p.extend((0..3).map(|i|right[i]*x+up[i]*y)); plane.n.extend(toward);
+    }
+    gpu.upload(&device,&plane);
+    let capture=render(&device,&queue,&gpu,Mode::MatCapShaded,Overlay {matcap:MatCap::Normal,..options},false);
+    let centre=capture[64*128+64];
+    assert!(centre[0].abs_diff(186)<65 && centre[1].abs_diff(186)<65 && centre[2]>235,"normal centre {centre:?}");
+    for normal in plane.n.chunks_exact_mut(3) { normal.copy_from_slice(&right); }
+    gpu.upload(&device,&plane);
+    let smooth=render(&device,&queue,&gpu,Mode::MatCapShaded,Overlay {matcap:MatCap::Normal,..options},false);
+    let flat=render(&device,&queue,&gpu,Mode::MatCapShaded,Overlay {matcap:MatCap::Normal,matcap_flat:true,..options},false);
+    assert!(changed(&smooth,&flat)>100,"flat MatCap ignored face normal");
+    assert!(flat[64*128+64][2]>235,"flat normal centre {:?}",flat[64*128+64]);
+}

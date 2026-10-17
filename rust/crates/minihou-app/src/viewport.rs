@@ -7,12 +7,12 @@ use minihou_app::Camera;
 
 #[path = "display_modes.rs"]
 pub mod display_modes;
-pub use display_modes::{Mode, ObjectVisibility};
+pub use display_modes::{Mode, ObjectVisibility, MatCap, ObjectColor};
 use display_modes::split_indices;
 
 /// Renderer switches; stats and the orientation widget are painted by the UI.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
-pub struct Overlay { pub grid: bool, pub axes: bool, pub geometry: crate::ui::Overlays, pub light_background: bool, pub normals: bool, pub bounds: bool, pub xray: bool, pub wireframe: bool, pub visibility: ObjectVisibility }
+pub struct Overlay { pub grid: bool, pub axes: bool, pub geometry: crate::ui::Overlays, pub light_background: bool, pub normals: bool, pub bounds: bool, pub xray: bool, pub wireframe: bool, pub visibility: ObjectVisibility, pub matcap: MatCap, pub matcap_flat: bool, pub object_color: ObjectColor }
 
 pub struct Scene {
     p: Vec<f32>, n: Vec<f32>, point: Vec<u32>, line: Vec<u32>, tri: Vec<u32>, edge: Vec<u32>,
@@ -130,6 +130,8 @@ struct Uniforms {
     flat_shading: u32,
     wire_fade: f32,
     _pad: [u32; 2],
+    object_color: u32,
+    _pad_color: [u32; 3],
     floor:[f32;4], element_size:[f32;4], element_flags:[u32;4], element_color:[f32;4],
 }
 
@@ -160,14 +162,14 @@ pub struct Gpu {
     pipe_depth: wgpu::RenderPipeline, pipe_wire_all: wgpu::RenderPipeline,
     pipe_wire_hidden: wgpu::RenderPipeline, pipe_ghost: wgpu::RenderPipeline, pipe_ghost_wire: wgpu::RenderPipeline,
     partition_tri: Partition, partition_edge: Partition, current_tri: Vec<u32>, current_edge: Vec<u32>,
-    boxes: Option<Boxes>, object_ranges: Vec<std::ops::Range<u32>>,
-    matcap: wgpu::Texture, matcap_ready: std::sync::atomic::AtomicBool,
+    boxes: Option<Boxes>, object_ranges: Vec<std::ops::Range<u32>>, object_ids: Vec<String>,
+    matcap: wgpu::Texture, matcap_loaded: std::sync::atomic::AtomicU8,
     pipe_mask: wgpu::RenderPipeline, pipe_outline: wgpu::RenderPipeline, bgl_outline: wgpu::BindGroupLayout,
     /// Selection highlight: face triangles and line segments (positions, with a zero normal buffer of the same length).
     sel_face: wgpu::Buffer, sel_face_n: u32, sel_line: wgpu::Buffer, sel_line_n: u32, zeros: wgpu::Buffer,
     nl_p: wgpu::Buffer, nl_n: wgpu::Buffer, nl_count: u32, nl_selected: u32, bb_p: wgpu::Buffer, bb_n: wgpu::Buffer, bb_i: wgpu::Buffer,
     bind: wgpu::BindGroup, ubuf: wgpu::Buffer,
-    vp: wgpu::Buffer, vn: wgpu::Buffer,
+    vp: wgpu::Buffer, vn: wgpu::Buffer, vc: wgpu::Buffer, neutral_color: wgpu::Buffer,
     ntri_idx: u32,
     object_mask: Option<wgpu::Buffer>, object_mask_n: u32,
     object_mask_points: Option<Vec<std::ops::Range<u32>>>,
@@ -212,17 +214,19 @@ fn index_buffer(device: &wgpu::Device, label: &str, indices: &[u32]) -> wgpu::Bu
     })
 }
 const BOX_TRIANGLES: [u32;36]=[0,2,3,0,3,1, 4,5,7,4,7,6, 0,1,5,0,5,4, 2,6,7,2,7,3, 0,4,6,0,6,2, 1,3,7,1,7,5];
-struct Boxes { p:wgpu::Buffer, n:wgpu::Buffer, tri:Partition, edge:Partition }
+struct Boxes { p:wgpu::Buffer, n:wgpu::Buffer, c:wgpu::Buffer, tri:Partition, edge:Partition }
 impl Boxes {
-    fn new(device:&wgpu::Device, scene:&Scene, objects:&[std::ops::Range<u32>], selected:&[std::ops::Range<u32>]) -> Self {
-        let (mut points,mut triangles,mut edges,mut selected_boxes)=(Vec::new(),Vec::new(),Vec::new(),Vec::new());
+    fn new(device:&wgpu::Device, scene:&Scene, objects:&[std::ops::Range<u32>], ids:&[String], selected:&[std::ops::Range<u32>]) -> Self {
+        let (mut points,mut colors,mut triangles,mut edges,mut selected_boxes)=(Vec::new(),Vec::new(),Vec::new(),Vec::new(),Vec::new());
         let fallback=[0..(scene.p.len()/3) as u32];
         let objects=if objects.is_empty() { &fallback[..] } else { objects };
-        for range in objects {
+        for (i,range) in objects.iter().enumerate() {
             let Some(p)=scene.p.get(range.start as usize*3..range.end as usize*3).filter(|p| !p.is_empty()) else { continue; };
             let (lo,hi)=preview::bounds(p);
             let start=(points.len()/3) as u32;
             for c in 0..8 { for k in 0..3 { points.push(if c>>k&1==1 { hi[k] } else { lo[k] }); } }
+            let color=display_modes::random_object_color(ids.get(i).map(String::as_str).unwrap_or("object"));
+            for _ in 0..8 { colors.extend(color); }
             triangles.extend(BOX_TRIANGLES.iter().map(|i| start+i));
             edges.extend(BOX_EDGES.iter().map(|i| start+i));
             if selected.iter().any(|s| s.start<=range.start && s.end>=range.end) { selected_boxes.push(start..start+8); }
@@ -230,7 +234,7 @@ impl Boxes {
         let vertex=|label,data:&[f32]| device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label:Some(label),contents:if data.is_empty() { &[0u8;12] } else { bytemuck::cast_slice(data) },usage:wgpu::BufferUsages::VERTEX,
         });
-        Self { p:vertex("object bounds",&points),n:vertex("bounds normals",&vec![0.;points.len()]),
+        Self { p:vertex("object bounds",&points),n:vertex("bounds normals",&vec![0.;points.len()]),c:vertex("bounds colors",&colors),
             tri:Partition::new(device,&triangles,3,&selected_boxes),edge:Partition::new(device,&edges,2,&selected_boxes) }
     }
 }
@@ -291,13 +295,14 @@ impl Gpu {
         });
         const POS: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![0 => Float32x3];
         const NRM: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![1 => Float32x3];
+        const COL: [wgpu::VertexAttribute; 1] = wgpu::vertex_attr_array![2 => Float32x3];
         let vb = |a: &'static [wgpu::VertexAttribute]| wgpu::VertexBufferLayout {
             array_stride: 12,
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: a,
         };
-        let surf_bufs = [vb(&POS), vb(&NRM)];
-        let wire_bufs = [vb(&POS), vb(&NRM)];
+        let surf_bufs = [vb(&POS), vb(&NRM), vb(&COL)];
+        let wire_bufs = [vb(&POS), vb(&NRM), vb(&COL)];
 
         let mk = |label, vs, fs, bufs: &[wgpu::VertexBufferLayout], topo, bias: i32, blend: bool, compare, depth_write: bool, color_write| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -452,8 +457,8 @@ impl Gpu {
             pipe_depth, pipe_wire_all, pipe_wire_hidden, pipe_ghost, pipe_ghost_wire,
             partition_tri: Partition::new(device, &sc.tri, 3, &[]), partition_edge: Partition::new(device, &sc.edge, 2, &[]),
             current_tri:sc.tri.clone(), current_edge:sc.edge.clone(),
-            boxes:Some(Boxes::new(device,sc,&[],&[0..(sc.p.len()/3) as u32])), object_ranges:Vec::new(),
-            matcap, matcap_ready:std::sync::atomic::AtomicBool::new(false),
+            boxes:Some(Boxes::new(device,sc,&[],&[],&[0..(sc.p.len()/3) as u32])), object_ranges:Vec::new(), object_ids:Vec::new(),
+            matcap, matcap_loaded:std::sync::atomic::AtomicU8::new(0),
             pipe_surf,
             pipe_surf_bias,
             pipe_wire,
@@ -479,6 +484,8 @@ impl Gpu {
             ubuf,
             vp,
             vn,
+            vc:buf("object colors",bytemuck::cast_slice(&vec![0.72f32;(sc.p.len()).max(3)]),wgpu::BufferUsages::VERTEX),
+            neutral_color:buf("neutral color",bytemuck::cast_slice(&vec![0.72f32;(sc.p.len()*4).max(sc.tri.len()).max(24)]),wgpu::BufferUsages::VERTEX),
             object_mask: None, object_mask_n: 0, object_mask_points: None,
             ntri_idx: sc.tri.len() as u32,
             edge_world: edge_world_of(sc),
@@ -489,13 +496,15 @@ impl Gpu {
         self.current_tri=sc.tri.clone(); self.current_edge=sc.edge.clone();
         self.partition_tri=Partition::new(device,&sc.tri,3,&[]);
         self.partition_edge=Partition::new(device,&sc.edge,2,&[]);
-        self.boxes=Some(Boxes::new(device,sc,&[],&[0..(sc.p.len()/3) as u32])); self.object_ranges.clear();
+        self.boxes=Some(Boxes::new(device,sc,&[],&[],&[0..(sc.p.len()/3) as u32])); self.object_ranges.clear(); self.object_ids.clear();
         self.object_mask = None; self.object_mask_n = 0; self.object_mask_points = None;
         let buf = |label, data: &[u8], usage| device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label:Some(label), contents:if data.is_empty() { &[0;4] } else { data }, usage
         });
         self.vp=buf("P",bytemuck::cast_slice(&sc.p),wgpu::BufferUsages::VERTEX);
         self.vn=buf("N",bytemuck::cast_slice(&sc.n),wgpu::BufferUsages::VERTEX);
+        self.vc=buf("object colors",bytemuck::cast_slice(&vec![0.72f32;sc.p.len().max(3)]),wgpu::BufferUsages::VERTEX);
+        self.neutral_color=buf("neutral color",bytemuck::cast_slice(&vec![0.72f32;(sc.p.len()*4).max(sc.tri.len()).max(24)]),wgpu::BufferUsages::VERTEX);
         self.ntri_idx=sc.tri.len() as u32;
         self.edge_world=edge_world_of(sc);
         self.nl_p=buf("nl_p",bytemuck::cast_slice(&sc.nlp),wgpu::BufferUsages::VERTEX);
@@ -533,9 +542,20 @@ impl Gpu {
     }
     /// Bounds use full-resolution object ownership, independently of the current proxy/LOD cut.
     pub fn set_object_ranges(&mut self, device: &wgpu::Device, scene: &Scene, ranges: Vec<std::ops::Range<u32>>) {
-        if self.boxes.is_some() && self.object_ranges == ranges { return; }
-        self.boxes=Some(Boxes::new(device,scene,&ranges,self.object_mask_points.as_deref().unwrap_or(&[])));
-        self.object_ranges=ranges;
+        let named=ranges.into_iter().enumerate().map(|(i,r)| (i.to_string(),r)).collect();
+        self.set_named_object_ranges(device,scene,named);
+    }
+    pub fn set_named_object_ranges(&mut self, device:&wgpu::Device, scene:&Scene, objects:Vec<(String,std::ops::Range<u32>)>) {
+        let (ids,ranges):(Vec<_>,Vec<_>)=objects.into_iter().unzip();
+        if self.boxes.is_some() && self.object_ranges==ranges && self.object_ids==ids { return; }
+        let mut colors=vec![0.72f32;scene.p.len().max(3)];
+        for (id,range) in ids.iter().zip(&ranges) {
+            let color=display_modes::random_object_color(id);
+            for i in range.clone() { if let Some(dst)=colors.get_mut(i as usize*3..i as usize*3+3) { dst.copy_from_slice(&color); } }
+        }
+        self.vc=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {label:Some("object colors"),contents:bytemuck::cast_slice(&colors),usage:wgpu::BufferUsages::VERTEX});
+        self.boxes=Some(Boxes::new(device,scene,&ranges,&ids,self.object_mask_points.as_deref().unwrap_or(&[])));
+        self.object_ranges=ranges; self.object_ids=ids;
     }
     /// Retain the source vertex attributes but start with no triangles; selection uploads a cut.
     pub fn upload_lod(&mut self, device: &wgpu::Device, sc: &Scene) {
@@ -618,21 +638,23 @@ impl Gpu {
             || (selection_mode == crate::ui::SelectionMode::Edges && !mode.bounds());
         let show_wire = mode.wire() || is_shaded_wire || overlay.xray;
         let u = Uniforms { view_proj,view,base:[0.72,0.74,0.78,1.],wire:[0.,0.,0.,if is_shaded_wire {1.} else {0.}],
-            flat_shading:mode.flat() as u32,wire_fade:fade,_pad:[1,mode.matcap() as u32],
+            flat_shading:(mode.flat() || (mode.matcap() && overlay.matcap_flat)) as u32,wire_fade:fade,_pad:[1,mode.matcap() as u32],
+            object_color:(overlay.object_color==ObjectColor::Random) as u32,_pad_color:[0;3],
             floor:[10f32.powf((cam.distance().max(0.01)*0.1).log10().floor()),overlay.grid as u32 as f32,overlay.axes as u32 as f32,0.],
             element_size:[target.size[0] as f32,target.size[1] as f32,overlay.geometry.point_size,overlay.geometry.line_width],
             element_flags:[overlay.geometry.points as u32,overlay.geometry.lines as u32,overlay.geometry.enabled as u32,(selection_mode==crate::ui::SelectionMode::Points) as u32],
             element_color:if overlay.light_background {[0.025,0.03,0.04,1.]} else {[0.72,0.75,0.8,1.]} };
         queue.write_buffer(&self.ubuf,0,bytemuck::bytes_of(&u));
-        if !self.matcap_ready.swap(true,std::sync::atomic::Ordering::Relaxed) {
+        let matcap_id=if overlay.matcap==MatCap::Clay {1} else {2};
+        if self.matcap_loaded.swap(matcap_id,std::sync::atomic::Ordering::Relaxed)!=matcap_id {
             queue.write_texture(wgpu::TexelCopyTextureInfo { texture:&self.matcap,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All },
-                &display_modes::clay_matcap(128),wgpu::TexelCopyBufferLayout { offset:0,bytes_per_row:Some(128*4),rows_per_image:Some(128) },
+                &if overlay.matcap==MatCap::Clay {display_modes::clay_matcap(128)} else {display_modes::normal_matcap(128)},wgpu::TexelCopyBufferLayout { offset:0,bytes_per_row:Some(128*4),rows_per_image:Some(128) },
                 wgpu::Extent3d { width:128,height:128,depth_or_array_layers:1 });
         }
         // Boxes are full object bounds, never the bounds of a decimated cluster.
         let boxes=if mode.bounds() { self.boxes.as_ref() } else { None };
-        let (vp,vn,tri,edge)=if let Some(b)=boxes { (&b.p,&b.n,&b.tri,&b.edge) }
-            else { (&self.vp,&self.vn,&self.partition_tri,&self.partition_edge) };
+        let (vp,vn,vc,tri,edge)=if let Some(b)=boxes { (&b.p,&b.n,&b.c,&b.tri,&b.edge) }
+            else { (&self.vp,&self.vn,&self.vc,&self.partition_tri,&self.partition_edge) };
         let visibility=overlay.visibility;
         let mut enc = device.create_command_encoder(&Default::default());
         {
@@ -651,7 +673,7 @@ impl Gpu {
                 timestamp_writes:None,occlusion_query_set:None,
             });
             pass.set_bind_group(0,&self.bind,&[]);
-            pass.set_vertex_buffer(0,vp.slice(..)); pass.set_vertex_buffer(1,vn.slice(..));
+            pass.set_vertex_buffer(0,vp.slice(..)); pass.set_vertex_buffer(1,vn.slice(..)); pass.set_vertex_buffer(2,vc.slice(..));
             pass.set_index_buffer(tri.buffer.slice(..),wgpu::IndexFormat::Uint32);
             let visible=tri.visible(visibility);
             if overlay.geometry.faces && !visible.is_empty() {
@@ -695,27 +717,27 @@ impl Gpu {
             }
             if self.sel_face_n > 0 && !mode.bounds() {
                 pass.set_pipeline(&self.pipe_select);
-                pass.set_vertex_buffer(0,self.sel_face.slice(..)); pass.set_vertex_buffer(1,self.zeros.slice(..));
+                pass.set_vertex_buffer(0,self.sel_face.slice(..)); pass.set_vertex_buffer(1,self.zeros.slice(..)); pass.set_vertex_buffer(2,self.neutral_color.slice(..));
                 pass.draw(0..self.sel_face_n,0..1);
             }
             if self.sel_line_n > 0 && overlay.geometry.lines && !mode.bounds() {
                 pass.set_pipeline(&self.pipe_bounds);
-                pass.set_vertex_buffer(0,self.sel_line.slice(..)); pass.set_vertex_buffer(1,self.zeros.slice(..));
+                pass.set_vertex_buffer(0,self.sel_line.slice(..)); pass.set_vertex_buffer(1,self.zeros.slice(..)); pass.set_vertex_buffer(2,self.neutral_color.slice(..));
                 pass.draw(0..self.sel_line_n,0..1);
             }
             if overlay.normals && self.nl_count > 0 && !mode.bounds() {
                 pass.set_pipeline(&self.pipe_normals);
-                pass.set_vertex_buffer(0,self.nl_p.slice(..)); pass.set_vertex_buffer(1,self.nl_n.slice(..));
+                pass.set_vertex_buffer(0,self.nl_p.slice(..)); pass.set_vertex_buffer(1,self.nl_n.slice(..)); pass.set_vertex_buffer(2,self.neutral_color.slice(..));
                 pass.draw(0..if visibility==ObjectVisibility::ShowAll { self.nl_count } else { self.nl_selected },0..1);
             }
             if overlay.bounds && !mode.bounds() {
                 pass.set_pipeline(&self.pipe_bounds);
                 if let Some(b)=&self.boxes {
-                    pass.set_vertex_buffer(0,b.p.slice(..)); pass.set_vertex_buffer(1,b.n.slice(..));
+                    pass.set_vertex_buffer(0,b.p.slice(..)); pass.set_vertex_buffer(1,b.n.slice(..)); pass.set_vertex_buffer(2,b.c.slice(..));
                     pass.set_index_buffer(b.edge.buffer.slice(..),wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(b.edge.visible(visibility),0,0..1);
                 } else {
-                    pass.set_vertex_buffer(0,self.bb_p.slice(..)); pass.set_vertex_buffer(1,self.bb_n.slice(..));
+                    pass.set_vertex_buffer(0,self.bb_p.slice(..)); pass.set_vertex_buffer(1,self.bb_n.slice(..)); pass.set_vertex_buffer(2,self.neutral_color.slice(..));
                     pass.set_index_buffer(self.bb_i.slice(..),wgpu::IndexFormat::Uint32); pass.draw_indexed(0..24,0,0..1);
                 }
             }
@@ -748,6 +770,7 @@ impl Gpu {
                 mask_pass.set_pipeline(&self.pipe_mask);
                 mask_pass.set_vertex_buffer(0, vp.slice(..));
                 mask_pass.set_vertex_buffer(1, vn.slice(..));
+                mask_pass.set_vertex_buffer(2, vc.slice(..));
                 let mask_buffer=if boxes.is_some() { &tri.buffer } else { self.object_mask.as_ref().unwrap_or(&self.partition_tri.buffer) };
                 mask_pass.set_index_buffer(mask_buffer.slice(..), wgpu::IndexFormat::Uint32);
                 let end = if boxes.is_some() { tri.selected } else if self.object_mask.is_some() { self.object_mask_n } else { self.ntri_idx };

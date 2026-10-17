@@ -53,6 +53,47 @@ impl ObjectVisibility {
     pub fn parse(s: &str) -> Self { Self::ALL.into_iter().find(|m| m.label() == s).unwrap_or_default() }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MatCap { #[default] Clay, Normal }
+impl MatCap {
+    pub const ALL: [Self; 2] = [Self::Clay, Self::Normal];
+    pub fn label(self) -> &'static str { match self { Self::Clay => "Clay", Self::Normal => "Normal" } }
+    pub fn parse(s: &str) -> Self { Self::ALL.into_iter().find(|v| v.label()==s).unwrap_or_default() }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ObjectColor { #[default] Single, Random }
+impl ObjectColor {
+    pub const ALL: [Self; 2] = [Self::Single, Self::Random];
+    pub fn label(self) -> &'static str { match self { Self::Single => "Single", Self::Random => "Random" } }
+    pub fn parse(s: &str) -> Self { Self::ALL.into_iter().find(|v| v.label()==s).unwrap_or_default() }
+}
+
+/// FNV-1a uses fixed constants, so object colours do not depend on process hash seeds.
+pub fn random_object_color(identity: &str) -> [f32; 3] {
+    let hash = identity.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3));
+    let hue = (hash as u32 as f64 / 4294967296.0) as f32;
+    let x = hue * 6.; let f = x.fract();
+    let (r,g,b) = match x as u32 { 0 => (1.,f,0.), 1 => (1.-f,1.,0.), 2 => (0.,1.,f),
+        3 => (0.,1.-f,1.), 4 => (f,0.,1.), _ => (1.,0.,1.-f) };
+    // Linear RGB with fixed saturation/value: bright enough under the studio rig.
+    [r,g,b].map(|c| 0.48 + 0.32*c)
+}
+
+pub fn normal_color(n: [f32; 3]) -> [f32; 3] { n.map(|c| c*0.5+0.5) }
+
+pub fn normal_matcap(size: u32) -> Vec<u8> {
+    let mut pixels = Vec::with_capacity((size*size*4) as usize);
+    for y in 0..size { for x in 0..size {
+        let nx = 2.*(x as f32+0.5)/size as f32-1.;
+        let ny = 1.-2.*(y as f32+0.5)/size as f32;
+        let nz = (1.-nx*nx-ny*ny).max(0.).sqrt();
+        pixels.extend(normal_color([nx,ny,nz]).map(|v| (v.clamp(0.,1.)*255.).round() as u8));
+        pixels.push(if nx*nx+ny*ny<=1. {255} else {0});
+    } }
+    pixels
+}
+
 /// Partition whole primitives; retain original vertex IDs, including in packed LOD cuts.
 pub fn split_indices(indices: &[u32], width: usize, selected: &[Range<u32>]) -> (Vec<u32>, Vec<u32>) {
     let (mut a, mut b) = (Vec::new(), Vec::new());
@@ -101,5 +142,19 @@ pub fn clay_matcap(size: u32) -> Vec<u8> {
         let p=clay_matcap(128); assert_eq!(p.len(),128*128*4);
         assert!(p.chunks_exact(4).all(|c| c[3]==255));
         assert!(p.chunks_exact(4).map(|c| c[0]).max().unwrap() > 200);
+    }
+    #[test] fn normal_capture_directions_and_object_hash() {
+        assert_eq!(normal_color([0.,0.,1.]),[0.5,0.5,1.]);
+        assert_eq!(normal_color([1.,0.,0.]),[1.,0.5,0.5]);
+        assert_eq!(normal_color([0.,1.,0.]),[0.5,1.,0.5]);
+        let p=normal_matcap(129); let c=&p[((64*129+64)*4)..][..4];
+        assert_eq!(c,[128,128,255,255]);
+        assert_eq!(random_object_color("box_A"),random_object_color("box_A"));
+        assert_ne!(random_object_color("box_A"),random_object_color("box_B"));
+        for name in ["", "box_A", "box_B", "unicode ✓"] {
+            let c=random_object_color(name);
+            assert!(c.iter().all(|v| (0.48..=0.8).contains(v)));
+            assert!(c.iter().any(|v| *v>=0.79));
+        }
     }
 }

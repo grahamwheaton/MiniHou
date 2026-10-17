@@ -417,6 +417,9 @@ impl App {
         app.prefs.apply_python(&python_gate());
         app.mode=Mode::parse(&app.prefs.viewport.default_shading);
         app.editor_state.object_visibility=app.prefs.viewport.object_visibility;
+        app.editor_state.matcap=app.prefs.viewport.matcap;
+        app.editor_state.matcap_flat=app.prefs.viewport.matcap_flat;
+        app.editor_state.object_color=app.prefs.viewport.object_color;
         app.keymap = Keymap::from_overrides_json(&app.prefs.keymap_overrides);
         app.keymap.emulate_numpad = app.prefs.emulate_numpad;
         if app.prefs.theme == ThemePref::Light { app.theme = Theme::light(); }
@@ -1903,6 +1906,18 @@ impl App {
                         self.selection_dirty=true;
                         if let Err(e)=self.prefs.save() { self.file_status=format!("Could not save preferences: {e}"); }
                     }
+                    if let ui::EditorChange::MatCap(matcap)=change {
+                        self.prefs.viewport.matcap=matcap;
+                        if let Err(e)=self.prefs.save() { self.file_status=format!("Could not save preferences: {e}"); }
+                    }
+                    if let ui::EditorChange::MatCapFlat(flat)=change {
+                        self.prefs.viewport.matcap_flat=flat;
+                        if let Err(e)=self.prefs.save() { self.file_status=format!("Could not save preferences: {e}"); }
+                    }
+                    if let ui::EditorChange::ObjectColor(color)=change {
+                        self.prefs.viewport.object_color=color;
+                        if let Err(e)=self.prefs.save() { self.file_status=format!("Could not save preferences: {e}"); }
+                    }
                     if matches!(change, ui::EditorChange::SnapTo(_) | ui::EditorChange::SnapIncrement(_)) {
                         self.prefs.snap_targets = self.editor_state.snap.to;
                         self.prefs.snap_increment = self.editor_state.snap.increment;
@@ -2285,7 +2300,7 @@ impl eframe::App for App {
                         .map(|(_, range)| range.clone()).collect();
                     gpu.select_points(&self.state.device,scene,&self.selection.points);
                     gpu.select_objects(&self.state.device, scene, ranges);
-                    gpu.set_object_ranges(&self.state.device,scene,self.display_ranges.iter().map(|(_,r)| r.clone()).collect());
+                    gpu.set_named_object_ranges(&self.state.device,scene,self.display_ranges.clone());
                 }
                 if let (Some(gpu), Some(target)) = (&self.gpu, &self.target) {
                     let selected_object = !self.object_hidden && self.display_ranges.iter().any(|(id, _)| self.selected_set.contains(id));
@@ -2303,6 +2318,9 @@ impl eframe::App for App {
                             xray: self.editor_state.overlays.enabled && self.editor_state.xray,
                             wireframe: self.editor_state.overlays.enabled && self.editor_state.overlays.wireframe,
                             visibility: self.editor_state.object_visibility,
+                            matcap: self.editor_state.matcap,
+                            matcap_flat: self.editor_state.matcap_flat,
+                            object_color: self.editor_state.object_color,
                         },
                         self.editor_state.selection,
                         selected_object,
@@ -2557,6 +2575,9 @@ impl eframe::App for App {
             if before != (gate.allowed(), gate.timeout()) { self.recook_python(); }
             self.mode=Mode::parse(&self.prefs.viewport.default_shading);
             self.editor_state.object_visibility=self.prefs.viewport.object_visibility;
+            self.editor_state.matcap=self.prefs.viewport.matcap;
+            self.editor_state.matcap_flat=self.prefs.viewport.matcap_flat;
+            self.editor_state.object_color=self.prefs.viewport.object_color;
             self.editor_state.overlays.grid=self.prefs.viewport.show_grid;
             self.editor_state.overlays.axes=self.prefs.viewport.show_axes;
             self.editor_state.overlays.stats=self.prefs.show_stats;
