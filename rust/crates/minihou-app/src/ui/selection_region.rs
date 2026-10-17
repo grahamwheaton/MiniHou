@@ -36,10 +36,21 @@ fn arm_kind(ctx: &egui::Context, kind: Kind, snapshot: Option<Snapshot>) {
     ctx.request_repaint();
 }
 fn paint_stroke(out: &mut Actions, from: Pos2, to: Pos2, radius: f32, op: SelectOp) {
-    let n = (from.distance(to) / (radius / 2.).max(1.)).ceil().max(1.) as usize;
-    for i in 1..=n {
-        out.push(UiAction::RegionSelect { shape: RegionShape::Circle { center: from + (to - from) * (i as f32 / n as f32), radius }, op });
+    if let Some(UiAction::RegionSelect {shape, op: previous}) = out.0.last_mut() {
+        if *previous == op {
+            match shape {
+                RegionShape::Circle {center, radius: r} if *r == radius && *center == from => {
+                    *shape=RegionShape::CircleStroke {points:vec![from,to],radius}; return;
+                }
+                RegionShape::CircleStroke {points, radius: r} if *r == radius && points.last() == Some(&from) => {
+                    if from != to { points.push(to); } return;
+                }
+                _ => {},
+            }
+        }
     }
+    let shape=if from==to {RegionShape::Circle {center:to,radius}} else {RegionShape::CircleStroke {points:vec![from,to],radius}};
+    out.push(UiAction::RegionSelect {shape,op});
 }
 /// Tool-mode drags may start over geometry; handle hits still take precedence.
 /// Return true for the entire consumed frame, including release/cancel, to suppress other viewport gestures.
@@ -66,6 +77,9 @@ pub fn handle(ctx: &egui::Context, viewport: Rect, v: &View, out: &mut Actions) 
         if !s.armed { continue; }
         consumed = true;
         match event {
+            egui::Event::PointerButton { button: PointerButton::Secondary, pressed: true, .. } if s.kind == Kind::Circle => {
+                s=State::default(); used.push(index);
+            }
             egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } |
             egui::Event::PointerButton { button: PointerButton::Secondary, pressed: true, .. }
                 if !(s.kind == Kind::Lasso && s.start.is_none() && matches!(&event, egui::Event::PointerButton { modifiers, .. } if modifiers.ctrl)) => {
@@ -93,7 +107,7 @@ pub fn handle(ctx: &egui::Context, viewport: Rect, v: &View, out: &mut Actions) 
                     used.push(index);
                 }
             egui::Event::PointerMoved(pos) if s.start.is_some() => {
-                if s.kind == Kind::Circle { paint_stroke(out, s.last.unwrap_or(pos), pos, radius, s.op); }
+                if s.kind == Kind::Circle && s.last != Some(pos) { paint_stroke(out, s.last.unwrap_or(pos), pos, radius, s.op); }
                 if s.kind == Kind::Lasso { s.points.push(pos); }
                 s.last = Some(pos); used.push(index);
             }
@@ -106,7 +120,7 @@ pub fn handle(ctx: &egui::Context, viewport: Rect, v: &View, out: &mut Actions) 
                             else if s.implicit { consumed = false; } // Let ordinary clicks reach click picking.
                         }
                         Kind::Lasso => { s.points.push(pos); if s.points.len() >= 3 { out.push(UiAction::RegionSelect { shape: RegionShape::Lasso(s.points.clone()), op: s.op }); } }
-                        Kind::Circle => paint_stroke(out, s.last.unwrap_or(pos), pos, radius, s.op),
+                        Kind::Circle => { if s.last != Some(pos) { paint_stroke(out, s.last.unwrap_or(pos), pos, radius, s.op); } },
                     }
                 }
                 if s.kind == Kind::Circle && !s.implicit { s.start = None; s.last = None; s.button = None; } else { s = State::default(); }
@@ -139,7 +153,7 @@ pub fn paint(ui: &egui::Ui, viewport: Rect, v: &View) {
     }
     let text = match s.kind {
         Kind::Box => "Box: LMB select / MMB subtract / RMB or Esc cancel",
-        Kind::Circle => "Circle: LMB add / MMB or Ctrl+LMB subtract / wheel size / Enter finish / RMB or Esc restore",
+        Kind::Circle => "Circle: LMB add / MMB or Ctrl+LMB subtract / wheel size / RMB or Enter finish / Esc restore",
         Kind::Lasso => "Lasso: drag / Shift add / MMB subtract / RMB or Esc cancel",
     };
     p.text(pos2(viewport.left() + 56., viewport.top() + 80.), egui::Align2::LEFT_TOP, text, egui::FontId::monospace(11.), v.theme.text);
@@ -205,7 +219,7 @@ mod tests {
                 assert!(matches!(actions.first(), Some(UiAction::RegionSelect { op: actual, .. }) if *actual == op));
                 assert!(matches!((&kind, &actions[0]),
                     (Kind::Box, UiAction::RegionSelect { shape: RegionShape::Rect(_), .. }) |
-                    (Kind::Circle, UiAction::RegionSelect { shape: RegionShape::Circle { .. }, .. }) |
+                    (Kind::Circle, UiAction::RegionSelect { shape: RegionShape::Circle { .. } | RegionShape::CircleStroke { .. }, .. }) |
                     (Kind::Lasso, UiAction::RegionSelect { shape: RegionShape::Lasso(_), .. })));
                 if kind == Kind::Circle && op == SelectOp::Replace {
                     assert!(actions[1..].iter().all(|a| matches!(a, UiAction::RegionSelect { op: SelectOp::Add, .. })));
@@ -224,19 +238,33 @@ mod tests {
         assert!(!active(&ctx));
     }
     #[test]
-    fn circle_interpolates_and_cancel_restores_snapshot() {
+    fn circle_sweeps_and_escape_restores_snapshot() {
         let ctx = egui::Context::default();
         let snapshot = Snapshot { selection: Selection { points: vec![7], ..Default::default() }, selected: "box1".into(), selected_set: ["box1".into()].into() };
         arm_circle(&ctx, snapshot.clone());
         let a = pos2(100., 100.); let b = pos2(190., 100.);
         let actions = frame(&ctx, vec![button(a, PointerButton::Primary, true, false, false), Event::PointerMoved(b)]);
-        assert_eq!(actions.len(), 7); // Initial dab plus six samples spaced at radius / 2.
-        assert!(actions.iter().all(|a| matches!(a, UiAction::RegionSelect { shape: RegionShape::Circle { radius: 30., .. }, op: SelectOp::Add })));
+        assert_eq!(actions.len(), 1); // One swept region rather than repeated mesh scans.
+        assert!(matches!(&actions[0], UiAction::RegionSelect {shape:RegionShape::CircleStroke {points,radius:30.},op:SelectOp::Add} if points == &vec![a,b]));
         frame(&ctx, vec![button(b, PointerButton::Primary, false, false, false)]);
         assert!(active(&ctx));
-        let actions = frame(&ctx, vec![button(b, PointerButton::Secondary, true, false, false)]);
+        let actions = frame(&ctx, vec![Event::Key {key:Key::Escape,physical_key:None,pressed:true,repeat:false,modifiers:Default::default()}]);
         assert!(matches!(&actions[..], [UiAction::RestoreRegionSelection(s)] if s.selection == snapshot.selection && s.selected == snapshot.selected && s.selected_set == snapshot.selected_set));
         assert!(!active(&ctx));
+    }
+    #[test]
+    fn right_click_confirms_circle_including_during_a_stroke() {
+        for held in [false,true] {
+            let ctx=egui::Context::default();
+            arm_circle(&ctx,Snapshot {selection:Selection {points:vec![7],..Default::default()},selected:"box".into(),selected_set:Default::default()});
+            let p=pos2(200.,200.);
+            frame(&ctx,vec![button(p,PointerButton::Primary,true,false,false)]);
+            if !held {frame(&ctx,vec![button(p,PointerButton::Primary,false,false,false)]);}
+            let actions=frame(&ctx,vec![button(p,PointerButton::Secondary,true,false,false)]);
+            assert!(actions.is_empty(),"confirm must not restore the old selection");
+            assert!(!active(&ctx));
+            assert!(frame(&ctx,vec![button(p,PointerButton::Secondary,false,false,false)]).is_empty());
+        }
     }
     #[test]
     fn circle_subtracts_wheel_clamps_and_enter_keeps_selection() {

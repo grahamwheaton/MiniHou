@@ -121,3 +121,5 @@ Face-centre markers use cached GPU instances. Camera movement projects the cache
   are reachable only from a polygon edge.
 * Plain Edge-mode clicks and box/lasso/circle edge selection now use real edges only (no
   fan diagonals); face region selection expands hits to whole polygons.
+
+Circle selection batches each frame's brush path into a swept screen-space region and merges dense point/triangle IDs with masks. Repainting an already selected region does not rebuild selection highlights. RMB or Enter confirms circle selection; Esc restores its starting snapshot.

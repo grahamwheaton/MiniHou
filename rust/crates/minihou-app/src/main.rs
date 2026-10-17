@@ -510,14 +510,9 @@ impl App {
         }
         // whole polygons, polygon edges only (no fan diagonals)
         let found = element_select::cached(&self.elem_topo, scene).complete(found);
-        if self.selection.mode != mode { self.selection = picking::Selection { mode, ..Default::default() }; }
-        match op {
-            SelectOp::Subtract => { self.selection.points.retain(|x| !found.points.contains(x)); self.selection.edges.retain(|x| !found.edges.contains(x)); self.selection.tris.retain(|x| !found.tris.contains(x)); }
-            SelectOp::Add => { for x in found.points { if !self.selection.points.contains(&x) { self.selection.points.push(x); } } for x in found.edges { if !self.selection.edges.contains(&x) { self.selection.edges.push(x); } } for x in found.tris { if !self.selection.tris.contains(&x) { self.selection.tris.push(x); } } }
-            SelectOp::Replace => self.selection = found,
-        }
-        self.selection_dirty = true;
+        self.selection_dirty |= element_select::apply_region(&mut self.selection, found, op);
     }
+
     fn new(doc: Document, path: PathBuf, state: egui_wgpu::RenderState) -> Result<Self> {
         Self::new_document(doc, path, state, true)
     }

@@ -63,6 +63,8 @@ pub fn snap_feature(positions: &[f32], indices: &[u32], camera: crate::ui::Camer
 pub enum RegionShape {
     Rect(eframe::egui::Rect),
     Circle { center: eframe::egui::Pos2, radius: f32 },
+    /// One continuous brush path, evaluated in one mesh pass.
+    CircleStroke { points: Vec<eframe::egui::Pos2>, radius: f32 },
     Lasso(Vec<eframe::egui::Pos2>),
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -71,7 +73,12 @@ impl RegionShape {
     pub fn contains(&self, p: eframe::egui::Pos2) -> bool {
         match self {
             Self::Rect(r) => r.contains(p),
-            Self::Circle { center, radius } => *radius >= 0. && center.distance(p) <= *radius,
+            Self::Circle { center, radius } => *radius >= 0. && center.distance_sq(p) <= radius * radius,
+            Self::CircleStroke { points, radius } => *radius >= 0. && points.windows(2).any(|pair| {
+                let delta=pair[1]-pair[0];
+                let t=((p-pair[0]).dot(delta)/delta.length_sq().max(f32::MIN_POSITIVE)).clamp(0.,1.);
+                p.distance_sq(pair[0]+delta*t) <= radius*radius
+            }),
             Self::Lasso(points) => {
                 if points.len() < 3 { return false; }
                 let mut inside = false;
@@ -137,6 +144,16 @@ pub fn pick_wire(p: &[f32], lines: &[u32], pointer: eframe::egui::Pos2,
 #[cfg(test)] mod wire_tests {
     use super::*;
     use eframe::egui::pos2;
+    #[test]
+    fn swept_circle_covers_fast_and_bent_strokes_without_gaps() {
+        use eframe::egui::pos2;
+        let stroke=RegionShape::CircleStroke {points:vec![pos2(0.,0.),pos2(100.,0.),pos2(100.,100.)],radius:5.};
+        for p in [pos2(-5.,0.),pos2(50.,5.),pos2(100.,50.),pos2(100.,105.)] {assert!(stroke.contains(p));}
+        assert!(!stroke.contains(pos2(50.,50.)),"do not cut across a bent stroke");
+        assert!(!stroke.contains(pos2(50.,5.1)));
+        assert!(RegionShape::CircleStroke {points:vec![pos2(0.,0.);2],radius:5.}.contains(pos2(3.,4.)));
+        assert!(!RegionShape::CircleStroke {points:vec![],radius:5.}.contains(pos2(0.,0.)));
+    }
     #[test] fn wire_pixels_and_visibility() {
         let p=[0.,0.,1., 100.,0.,1.];
         let project=|p:[f32;3]|Some((pos2(p[0],p[1]),p[2]));

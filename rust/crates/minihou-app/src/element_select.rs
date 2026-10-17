@@ -409,15 +409,54 @@ pub fn classify(shift: bool, ctrl: bool, alt: bool, alt_selects: bool) -> Option
     })
 }
 
+fn add_unique<T: Copy + Eq + std::hash::Hash>(current: &mut Vec<T>, new: &[T]) {
+    if new.is_empty() { return; }
+    let mut seen: HashSet<T> = current.iter().copied().collect();
+    current.extend(new.iter().copied().filter(|x| seen.insert(*x)));
+}
+fn remove_items<T: Copy + Eq + std::hash::Hash>(current: &mut Vec<T>, new: &[T]) {
+    if new.is_empty() { return; }
+    let removed: HashSet<T> = new.iter().copied().collect();
+    current.retain(|x| !removed.contains(x));
+}
+// Point/triangle IDs are dense on cooked meshes; avoid hashing the full growing
+// selection for every brush frame. Sparse or malformed IDs keep the bounded fallback.
+fn merge_ids(current: &mut Vec<u32>, new: &[u32], subtract: bool) {
+    if new.is_empty() { return; }
+    let size=current.iter().chain(new).copied().max().unwrap_or(0) as usize+1;
+    if size>(current.len()+new.len()).saturating_mul(16).saturating_add(1024) {
+        if subtract {remove_items(current,new);} else {add_unique(current,new);}
+        return;
+    }
+    let mut mask=vec![false;size];
+    if subtract {
+        for &id in new {mask[id as usize]=true;}
+        current.retain(|&id|!mask[id as usize]);
+    } else {
+        for &id in current.iter() {mask[id as usize]=true;}
+        current.extend(new.iter().copied().filter(|&id| {let seen=&mut mask[id as usize];let fresh=!*seen;*seen=true;fresh}));
+    }
+}
 fn union(current: &mut Selection, new: &Selection) {
-    for &x in &new.points { if !current.points.contains(&x) { current.points.push(x); } }
-    for &x in &new.edges { if !current.edges.contains(&x) { current.edges.push(x); } }
-    for &x in &new.tris { if !current.tris.contains(&x) { current.tris.push(x); } }
+    merge_ids(&mut current.points,&new.points,false);
+    add_unique(&mut current.edges,&new.edges);
+    merge_ids(&mut current.tris,&new.tris,false);
 }
 fn subtract(current: &mut Selection, new: &Selection) {
-    current.points.retain(|x| !new.points.contains(x));
-    current.edges.retain(|x| !new.edges.contains(x));
-    current.tris.retain(|x| !new.tris.contains(x));
+    merge_ids(&mut current.points,&new.points,true);
+    remove_items(&mut current.edges,&new.edges);
+    merge_ids(&mut current.tris,&new.tris,true);
+}
+/// Merge a region once, preserving active-element order and avoiding no-op redraw work.
+pub fn apply_region(current: &mut Selection, found: Selection, op: picking::SelectOp) -> bool {
+    let mode_changed=current.mode != found.mode;
+    if mode_changed { *current=Selection {mode:found.mode,..Default::default()}; }
+    if op == picking::SelectOp::Replace {
+        let changed=*current!=found; *current=found; return mode_changed || changed;
+    }
+    let before=current.count();
+    match op {picking::SelectOp::Add=>union(current,&found),picking::SelectOp::Subtract=>subtract(current,&found),_=>unreachable!()}
+    mode_changed || current.count()!=before
 }
 /// Shift-click: remove the element when it is entirely selected, otherwise add it (whole polygons in face mode).
 fn toggle(current: &mut Selection, new: &Selection) {
@@ -431,6 +470,27 @@ mod tests {
     use super::*;
     use SelectionMode::{Edges, Faces, Points};
 
+    #[test]
+    fn brush_merges_preserve_order_detect_noops_and_subtract() {
+        let mut selection=Selection {mode:Faces,tris:(0..50_562).collect(),..Default::default()};
+        let dab=Selection {mode:Faces,tris:vec![7,2,7,50_562,50_563],..Default::default()};
+        let start=std::time::Instant::now();
+        assert!(apply_region(&mut selection,dab.clone(),picking::SelectOp::Add));
+        assert_eq!(&selection.tris[50_562..],&[50_562,50_563]);
+        assert!(!apply_region(&mut selection,dab.clone(),picking::SelectOp::Add));
+        assert!(apply_region(&mut selection,dab.clone(),picking::SelectOp::Subtract));
+        assert!(!apply_region(&mut selection,dab,picking::SelectOp::Subtract));
+        assert!(!selection.tris.contains(&7));
+        assert_eq!(&selection.tris[..3],&[0,1,3]);
+        eprintln!("Four large brush merges: {:?}",start.elapsed());
+        let sparse=Selection {mode:Faces,tris:vec![u32::MAX],..Default::default()};
+        assert!(apply_region(&mut selection,sparse.clone(),picking::SelectOp::Add));
+        assert!(!apply_region(&mut selection,sparse.clone(),picking::SelectOp::Add));
+        assert!(apply_region(&mut selection,sparse,picking::SelectOp::Subtract));
+        let subtract=Selection {mode:Points,points:vec![3],..Default::default()};
+        assert!(apply_region(&mut selection,subtract,picking::SelectOp::Subtract));
+        assert!(selection.is_empty()); assert_eq!(selection.mode,Points);
+    }
     #[test]
     fn face_marker_mask_matches_polygon_selection_on_startup_mesh() {
         let graph = minihou_core::Graph::from_json(include_str!("default_graph.json")).unwrap();

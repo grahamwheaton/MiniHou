@@ -18,7 +18,19 @@ impl Cache {
             if entry.revision==revision && entry.mode==mode && entry.selection==*selection && entry.visibility==visibility
                 && entry.ranges==ranges && entry.owners==*owners { return entry.metrics; }
         }
-        let ids=selected_point_ids(selection,mode,scene.triangle_indices());
+        // A brush changes selection every frame: mark dense point IDs instead of
+        // sorting all triangle corners again whenever the cache is refreshed.
+        let mut points=vec![false;scene.positions().len()/3];
+        let mut mark=|id:u32| { if let Some(selected)=points.get_mut(id as usize) { *selected=true; } };
+        match mode {
+            ui::SelectionMode::Points=>{for &id in &selection.points {mark(id);}},
+            ui::SelectionMode::Edges=>{for &(a,b) in &selection.edges {mark(a);mark(b);}},
+            ui::SelectionMode::Faces=>{for &tri in &selection.tris {
+                for &id in scene.triangle_indices().get(tri as usize*3..tri as usize*3+3).unwrap_or(&[]) {mark(id);}
+            }},
+            ui::SelectionMode::Object=>{},
+        }
+        let ids=points.iter().enumerate().filter(|(_,selected)|**selected).map(|(id,_)|id as u32);
         let mut metrics=Metrics::default(); let mut center=[0.;3]; let mut count=0;
         for id in ids {
             if !point_pickable(visibility,ranges,owners,id) { continue; }
@@ -35,6 +47,19 @@ impl Cache {
 }
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn brush_refresh_matches_unique_face_vertex_metrics() {
+        let graph=Graph::from_json(include_str!("default_graph.json")).unwrap();
+        let scene=Scene::new(&graph.cook(Some("output1")).unwrap());
+        let sel=picking::Selection {mode:ui::SelectionMode::Faces,tris:(0..scene.triangles() as u32).collect(),..Default::default()};
+        let ids=selected_point_ids(&sel,sel.mode,scene.triangle_indices());
+        let mut center=[0f32;3]; let mut normal=[0f64;3];
+        for &id in &ids { for k in 0..3 {center[k]+=scene.positions()[id as usize*3+k];normal[k]+=scene.normals()[id as usize*3+k] as f64;} }
+        let start=Instant::now();
+        let actual=Cache::default().get(0,&sel,sel.mode,&scene,viewport::ObjectVisibility::ShowAll,&[],&Default::default());
+        eprintln!("Full-face brush metric refresh: {:?}",start.elapsed());
+        assert_eq!(actual.center,Some(center.map(|v|v/ids.len() as f32)));
+        assert_eq!(actual.normal,normal);
+    }
     #[test] fn metrics_refresh_on_selection_geometry_mode_and_visibility() {
         let graph=Graph::from_json(r#"{"nodes":{"box":{"type":"box"}},"display":"box"}"#).unwrap();
         let geo=graph.cook(Some("box")).unwrap();
