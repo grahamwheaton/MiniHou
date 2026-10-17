@@ -848,8 +848,13 @@ impl App {
             self.file_status = format!("The Rust core has no {node_type} node yet");
             return;
         };
-        // grow / select_path / select_loop / select_ring start from the viewport's element selection
-        if let Some(params) = self.selection_node_params(node_type) { merge_params(&mut value, &id, params); }
+        // grow / select_path / select_loop / select_ring / edge_slide / group_create start from the viewport's element selection
+        let params = self.selection_node_params(node_type);
+        if node_type == "group_create" && self.editor_state.selection != ui::SelectionMode::Object {
+            let Some(mut params) = params else { self.file_status = "Select points, edges or faces to create a group".into(); return; };
+            params["name"] = json!(element_select::free_group_name(self.editor.doc.value()));
+            merge_params(&mut value, &id, params);
+        } else if let Some(params) = params { merge_params(&mut value, &id, params); }
         let before = ui::network::position_add(ctx, &self.editor.path, self.editor.doc.value(), &mut value, after);
         self.editor.history.finish(&self.editor.doc);
         let original = self.editor.doc.clone();
@@ -1492,7 +1497,7 @@ impl App {
         let input=ctx.input(|i|(i.events.clone(),i.pointer.hover_pos(),i.modifiers,i.raw_scroll_delta.y));
         let (events,pointer,modifiers,scroll)=input;
         if let Some(pointer)=pointer { modal.pointer=pointer; }
-        let mut confirm=false; let mut cancel=false;
+        let mut confirm=false; let mut cancel=false; let mut gg=false;
         let camera=self.camera_info();
         let orientation=if matches!(modal.constraint,Constraint::Axis(_,true)|Constraint::Plane(_,true))
             { ui::Orientation::Local } else { self.editor_state.orientation };
@@ -1510,6 +1515,7 @@ impl App {
                     match key {
                         egui::Key::Escape => cancel=true,
                         egui::Key::Enter | egui::Key::Space => confirm=true,
+                        egui::Key::G if ui::modal_transform::double_g_slides(modal.kind,self.editor_state.selection) => gg=true,
                         egui::Key::X | egui::Key::Y | egui::Key::Z => modal.toggle_axis(match key { egui::Key::X=>0,egui::Key::Y=>1,_=>2 },m.shift),
                         egui::Key::O => modal.proportional = !modal.proportional,
                         egui::Key::PageUp => modal.wheel(1.), egui::Key::PageDown => modal.wheel(-1.),
@@ -1539,7 +1545,7 @@ impl App {
                     if modal.constraint!=Constraint::Free { modal.constraint=Constraint::Free; } else { modal.mmb_start=Some(pos); }
                 }
                 egui::Event::PointerButton { pos, button:egui::PointerButton::Middle, pressed:false, .. } => {
-                    if let Some(start)=modal.mmb_start.take() { modal.constraint=Constraint::Axis(ui::modal_transform::closest_axis(pos-start,frame,camera),false); }
+                    modal.middle_release(pos,frame,camera);
                 }
                 _=>{}
             }
@@ -1550,6 +1556,7 @@ impl App {
             }
         }
         if modal.proportional && scroll!=0. { modal.wheel(scroll.signum()); }
+        if gg { self.cancel_transform(); self.command("edge_slide",ctx); return; }
         if cancel {
             self.editor_state.proportional.enabled=modal.initial_proportional;
             self.editor_state.proportional.radius=modal.initial_radius;
@@ -2262,8 +2269,7 @@ impl App {
                     let node=&self.editor.doc.value()["nodes"][&self.selected];
                     let controls=ui::curve_tool::node_controls(self.editor.doc.value(),&self.selected);
                     let pointer=ctx.input(|i|i.pointer.hover_pos()).unwrap_or(self.last_viewport.center());
-                    if node["type"]=="bezier" && minihou_app::display_nodes(self.editor.doc.value()).iter().any(|id|id==&self.selected)
-                        && ui::curve_tool::start_modal(ctx,&self.selected,&controls,kind,pointer) { ctx.request_repaint(); }
+                    if node["type"]=="bezier" && ui::curve_tool::start_modal(ctx,&self.selected,&controls,kind,pointer) { ctx.request_repaint(); }
                     else { self.start_modal(ctx,kind); }
                 },
                 UiAction::FinishTransform => self.finish_transform(),

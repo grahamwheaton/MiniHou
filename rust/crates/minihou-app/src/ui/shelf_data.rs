@@ -53,6 +53,7 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "Boolean", node_type: "boolean", icon: "boolean" },
         Tool { label: "Clip", node_type: "clip", icon: "clip" },
         Tool { label: "Mirror", node_type: "mirror", icon: "mirror" },
+        Tool { label: "Array", node_type: "array", icon: "copy_to_points" },
         Tool { label: "Subdivide", node_type: "subdivide", icon: "subdivide" },
         Tool { label: "Skin", node_type: "skin", icon: "skin" },
         Tool { label: "Skin Profiles", node_type: "skin_profiles", icon: "skin" },

@@ -32,7 +32,8 @@ pub fn start_modal(ctx:&egui::Context,node:&str,controls:&Value,kind:super::moda
         kind:match kind {super::modal_transform::Kind::Move=>Tool::Move,super::modal_transform::Kind::Rotate=>Tool::Rotate,super::modal_transform::Kind::Scale=>Tool::Scale},
         axis:None,plane:false,modal:true,changed:false}));true
 }
-pub fn is_active_node(v:&View)->bool { v.doc["nodes"][v.selected]["type"]=="bezier" && minihou_app::display_nodes(v.doc).iter().any(|id|id==v.selected) }
+/// The selected node (network editor selection / active object) is a Bezier: its handles show and edit whether or not it is displayed.
+pub fn is_active_node(v:&View)->bool { v.doc["nodes"][v.selected]["type"]=="bezier" }
 pub fn node_controls(doc:&Value,node:&str)->Value {
     doc["nodes"][node]["params"]["controls"].as_str().map(|s|Value::String(s.into()))
         .unwrap_or_else(||(minihou_core::nodes::get("bezier").unwrap().params.iter().find(|p|p.name=="controls").unwrap().default)())
@@ -330,6 +331,20 @@ pub fn show(ui:&mut egui::Ui,rect:Rect,v:&View,out:&mut Actions,double_click:boo
         assert!((rotated[0].right[1]-1.).abs()<1e-9);
         let scaled=transform_part(&controls(),0,Part::Anchor,Tool::Scale,None,false,2.,frame);
         assert_eq!(scaled[0].left,[-2.,0.,0.]);assert_eq!(scaled[0].right,[2.,0.,0.]);
+    }
+    #[test] fn selected_bezier_shows_handles_when_not_displayed() {
+        use crate::ui::testing::Fixture;
+        let mut f=Fixture::new();
+        let cs=controls();
+        f.doc=minihou_app::Document::parse(serde_json::json!({"version":1,"nodes":{"curve1":{"type":"bezier","params":{"controls":write(&cs)}},"xform1":{"type":"transform","inputs":{"geo":"curve1"}}},"display":"xform1"}).to_string()).unwrap();
+        f.graph=minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected="curve1".into();f.selected_set=std::collections::BTreeSet::from([f.selected.clone()]);f.display="xform1".into();
+        f.camera=crate::ui::CameraInfo{ortho:true,projection:[[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]],ray_origin:[0.,0.,10.],ray_forward:[0.,0.,-1.],ray_right:[1.,0.,0.],ray_up:[0.,1.,0.],..Default::default()};
+        let ctx=egui::Context::default();let rect=Rect::from_min_size(Pos2::ZERO,egui::vec2(800.,600.));
+        let v=f.view();assert!(is_active_node(&v));
+        let handle=screen(&v,rect,cs[0].right).unwrap();
+        assert!(hit(rect,&v,handle,&ctx),"the selected, non-displayed bezier's handle is hit-testable");
+        f.selected="xform1".into();assert!(!is_active_node(&f.view()));
     }
     #[test] fn raw_pointer_routes_handle_press_drag_and_single_edit() {
         use crate::ui::testing::Fixture;

@@ -50,6 +50,7 @@ pub(super) const TABS: &[Category] = &[
         Tool { label: "Boolean", node_type: "boolean" },
         Tool { label: "Clip", node_type: "clip" },
         Tool { label: "Mirror", node_type: "mirror" },
+        Tool { label: "Array", node_type: "array" },
         Tool { label: "Subdivide", node_type: "subdivide" },
         Tool { label: "Skin", node_type: "skin" },
         Tool { label: "Skin Profiles", node_type: "skin_profiles" },

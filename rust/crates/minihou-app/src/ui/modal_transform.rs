@@ -94,7 +94,7 @@ impl Modal {
         let mut values = match self.kind {
             Kind::Move => {
                 let basis = [frame[0], frame[1], frame[2]];
-                let mut v = [delta.x / pixels_per_unit, -delta.y / pixels_per_unit, 0.];
+                let mut v = view_plane_motion(delta / pixels_per_unit, camera);
                 match self.constraint {
                     Constraint::Axis(axis, _) => {
                         let direction = projected_axis(basis[axis], camera);
@@ -162,6 +162,26 @@ impl Modal {
         }
     }
 }
+/// Free move (Blender G): screen motion in units mapped onto the camera's right and up vectors, so the object slides in the view
+/// plane in perspective and orthographic views alike. A camera without a basis (tests' default) falls back to world XY.
+pub fn view_plane_motion(motion: Vec2, camera: CameraInfo) -> [f32; 3] {
+    if dot(camera.ray_right, camera.ray_right) < 1e-8 || dot(camera.ray_up, camera.ray_up) < 1e-8 { return [motion.x, -motion.y, 0.]; }
+    [0, 1, 2].map(|i| camera.ray_right[i] * motion.x - camera.ray_up[i] * motion.y)
+}
+/// The frame axis most aligned with the view direction (Blender: middle-click during G locks to it).
+pub fn view_axis(frame: [[f32; 3]; 3], camera: CameraInfo) -> usize {
+    (0..3).max_by(|&a, &b| dot(frame[a], camera.ray_forward).abs().total_cmp(&dot(frame[b], camera.ray_forward).abs())).unwrap_or(2)
+}
+impl Modal {
+    /// Middle button released: a drag picks the axis closest to the drag on screen; a click locks the axis closest to the view.
+    pub fn middle_release(&mut self, pos: Pos2, frame: [[f32; 3]; 3], camera: CameraInfo) {
+        let Some(start) = self.mmb_start.take() else { return };
+        let axis = if (pos - start).length() > 4. { closest_axis(pos - start, frame, camera) } else { view_axis(frame, camera) };
+        self.constraint = Constraint::Axis(axis, false);
+    }
+}
+/// Blender GG: pressing G again during an edge-mode move switches to Edge Slide on the selected edges.
+pub fn double_g_slides(kind: Kind, mode: super::SelectionMode) -> bool { kind == Kind::Move && mode == super::SelectionMode::Edges }
 pub fn snap_value(value: f32, step: f32) -> f32 { if step <= 0. { value } else { (value / step).round() * step } }
 pub fn projected_axis(axis: [f32; 3], camera: CameraInfo) -> Vec2 {
     let x = dot(axis, camera.ray_right); let y = -dot(axis, camera.ray_up);
@@ -241,6 +261,37 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         m.kind=Kind::Scale;assert_eq!(m.typed(0),Some(50.));
         m.kind=Kind::Move;m.constraint=Constraint::Free;m.numeric=["10".into(),"20".into(),"30".into()];
         assert_eq!([m.typed(0),m.typed(1),m.typed(2)],[Some(1.),Some(2.),Some(3.)]);
+    }
+    fn perspective() -> CameraInfo {
+        // Looking down -Y and tilted: right is +X, up mixes +Z and +Y, forward mostly -Y.
+        let (c, s) = (0.8f32, 0.6f32);
+        CameraInfo { ray_right:[1.,0.,0.], ray_up:[0.,s,c], ray_forward:[0.,-c,s], ..Default::default() }
+    }
+    #[test] fn g_in_perspective_moves_in_the_view_plane() {
+        let camera=perspective();
+        let mut m=Modal::new(Kind::Move,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
+        m.pointer=pos2(0.,-100.);
+        let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
+        let v=m.desired(pos2(0.,0.),100.,frame,camera,false,1.,false).0;
+        assert!((v[0]).abs()<1e-6 && (v[1]-0.6).abs()<1e-6 && (v[2]-0.8).abs()<1e-6, "{v:?}");
+        assert!(dot(v,camera.ray_forward).abs()<1e-6);
+        m.pointer=pos2(50.,0.);
+        assert_eq!(m.desired(pos2(0.,0.),100.,frame,camera,false,1.,false).0,[0.5,0.,0.]);
+        m.toggle_axis(0,false);m.pointer=pos2(50.,-100.);
+        assert_eq!(m.desired(pos2(0.,0.),100.,frame,camera,false,1.,false).0,[0.5,0.,0.], "X still locks");
+    }
+    #[test] fn middle_click_locks_the_axis_closest_to_the_view() {
+        let camera=perspective();let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];
+        let mut m=Modal::new(Kind::Move,pos2(0.,0.),[0.;3],([0.;3],[1.;3]),SnapTo::Increment,false,1.);
+        m.mmb_start=Some(pos2(10.,10.));m.middle_release(pos2(11.,10.),frame,camera);
+        assert_eq!(m.constraint,Constraint::Axis(1,false));
+        m.constraint=Constraint::Free;m.mmb_start=Some(pos2(10.,10.));m.middle_release(pos2(60.,10.),frame,camera);
+        assert_eq!(m.constraint,Constraint::Axis(0,false), "a drag still picks the dragged axis");
+    }
+    #[test] fn double_g_in_edge_mode_starts_edge_slide() {
+        use crate::ui::SelectionMode as M;
+        assert!(double_g_slides(Kind::Move,M::Edges));
+        assert!(!double_g_slides(Kind::Move,M::Faces) && !double_g_slides(Kind::Move,M::Object) && !double_g_slides(Kind::Rotate,M::Edges));
     }
     #[test] fn constraint_cycles_and_plane() {
         let a = Constraint::Free.key(0, false); assert_eq!(a, Constraint::Axis(0,false));
