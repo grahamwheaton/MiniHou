@@ -148,3 +148,15 @@ Priority: queued after the select-arrow work. Not started. Note: Copy to Curves 
 Native `scatteralign` implementation: area-weighted surface sampling of polygon faces, primitive Group filtering, By Size (surface area / mean-radius disk area) or Fixed count, Coverage multiplier, seeded random or uniform `pscale`, integer tag point attribute (`$OS` resolves to `scatteralign`), and `N`, `orient`, `primnum` output. The orientation uses local +Z for the surface normal or world up; cone deviation and spin are independent. Spin remapping currently accepts only a linear two-point ramp (start and end values), not Houdini's editable multi-knot ramp. Point Generation supports these count and scale controls; Attributes copies selected source point attributes (`*` for all), interpolating floats by barycentric weights and choosing the dominant vertex for integers. It does not yet copy vertex/primitive/detail attributes or generate Houdini's additional density/relaxation options. Volume mode reuses the existing scatter volume sampler and does not yet emit alignment, scale, tag, or copied attributes. The tag is an integer marker because the core geometry has no string attribute columns. Surface points are independent random samples, not a radius-constrained packing.
 
 Priority: Copy to Curves and Orientation along Curve remain queued. Scatter and Align has the native subset documented above. The curve nodes depend on a correct curve frame (tangent, up vector), so build shared frame code once and reuse it in both.
+
+---
+
+# Future: Persistent instance overrides (Scene Objects)
+
+Full handoff: docs/TODO_PERSISTENT_OVERRIDES.md (from the user's HANDOFF.md, 2026-10-17). Not started.
+
+- **Goal:** Blender edits to location, rotation and scale on instanced objects survive procedural recooks, with identities kept.
+- **Modes:** procedural (default, current behaviour), preserve (a hand-edited channel stays fixed), offset (edits are kept as a delta from the generated placement).
+- **Needs:** a Reset to Procedural action in the add-on, persisted per-object state, and tests for reopening the file, retargeting and multiple objects.
+- **Limits to document:** point-index fallback when point order changes; migration of older files; keyframes and drivers on transform channels.
+- Priority: future. Lower than the queued items above.
