@@ -201,12 +201,15 @@ def text_of(ng):
 
 
 def linked_file(ng) -> str:
-    path = str(ng.get(FILE, ""))
-    if not path:
-        legacy = str(ng.get(PATH, ""))
-        if legacy and "minihou-live-" not in os.path.basename(legacy):
-            path = legacy
-    return path
+    """The network's file: the graph path unless the live editor replaced it with its temp file."""
+    legacy = str(ng.get(PATH, ""))
+    if legacy.strip() and "minihou-live-" not in os.path.basename(legacy):
+        return legacy
+    return str(ng.get(FILE, ""))
+
+
+def _set_file(ng, path):
+    ng[FILE] = ng[PATH] = os.path.abspath(path)
 
 
 def frozen(ng) -> bool:
@@ -295,7 +298,7 @@ def read(ng):
 def embed(ng, graph=None, *, label=None, file=None):
     """Switch to EMBEDDED keeping (or replacing) the network. Existing linked file is remembered."""
     if file:
-        ng[FILE] = os.path.abspath(file)
+        _set_file(ng, file)
     elif not ng.get(FILE) and linked_file(ng):
         ng[FILE] = linked_file(ng)
     if graph is not None:
@@ -331,7 +334,7 @@ def extract(ng, path):
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
         f.write(content)
     os.replace(tmp, path)
-    ng[FILE] = os.path.abspath(path)
+    _set_file(ng, path)
     return len(content.encode("utf-8"))
 
 
