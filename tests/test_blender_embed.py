@@ -381,6 +381,16 @@ class EmbeddedLinkTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         from tests.test_blender_rust_placements import RustEngine, TRANSFORM
+        # An older link_selftest build (e.g. rust/target_chain2) lacks graph_embed_v1: the add-on then
+        # correctly falls back to a plain live edit and no conflict can be reported. Use a current build.
+        exe = next((p for p in [os.environ.get("MINIHOU_LINK_SELFTEST", "")] +
+                    [str(ROOT / "rust" / t / "debug" / "examples" / "link_selftest.exe")
+                     for t in ("target_embed", "target_chain3", "target_chain2", "target_place", "target_inst")]
+                    if p and os.path.isfile(p) and b"graph_embed_v1" in Path(p).read_bytes()), None)
+        if exe is None:
+            raise unittest.SkipTest("no link_selftest build with graph_embed_v1; run cargo build -p minihou-app "
+                                    "--example link_selftest and set MINIHOU_LINK_SELFTEST")
+        os.environ["MINIHOU_LINK_SELFTEST"] = exe
         cls.engine = RustEngine(TRANSFORM)
         cls.command = 100
 
