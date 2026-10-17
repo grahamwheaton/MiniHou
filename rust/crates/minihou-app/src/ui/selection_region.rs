@@ -67,7 +67,7 @@ pub fn handle(ctx: &egui::Context, viewport: Rect, v: &View, out: &mut Actions) 
                 if canvas(*pos) && !modifiers.alt {
                     if *button == PointerButton::Secondary && modifiers.ctrl {
                         s = State { armed: true, kind: Kind::Lasso, ..Default::default() };
-                    } else if *button == PointerButton::Primary && v.editor.tool == super::Tool::Select
+                    } else if *button == PointerButton::Primary && matches!(v.editor.tool, super::Tool::Select | super::Tool::Move | super::Tool::Rotate | super::Tool::Scale | super::Tool::Transform)
                         && !super::transform_gizmo::hit(viewport, v, *pos) && !super::prim_handles::hit(viewport, v, *pos) {
                         s = State { armed: true, implicit: true, kind: options.kind, ..Default::default() };
                     }
@@ -93,7 +93,8 @@ pub fn handle(ctx: &egui::Context, viewport: Rect, v: &View, out: &mut Actions) 
                 used.push(index);
             }
             egui::Event::PointerButton { pos, button, pressed: true, modifiers }
-                if canvas(pos) && s.button.is_none() && (button == PointerButton::Primary || button == PointerButton::Middle || (s.kind == Kind::Lasso && button == PointerButton::Secondary && modifiers.ctrl)) => {
+                if canvas(pos) && s.button.is_none() && (button != PointerButton::Primary || !super::transform_gizmo::hit(viewport,v,pos))
+                    && (button == PointerButton::Primary || button == PointerButton::Middle || (s.kind == Kind::Lasso && button == PointerButton::Secondary && modifiers.ctrl)) => {
                     s.start = Some(pos); s.last = Some(pos); s.points = vec![pos]; s.button = Some(button);
                     // Ctrl initiates the Blender RMB lasso; Shift modifies that gesture to add.
                     s.op = if button == PointerButton::Middle || (modifiers.ctrl && button != PointerButton::Secondary) { SelectOp::Subtract }
@@ -163,6 +164,51 @@ pub fn paint(ui: &egui::Ui, viewport: Rect, v: &View) {
 mod tests {
     use super::*;
     use egui::{Event, Key, PointerButton, Pos2, RawInput};
+
+    #[test]
+    fn selection_works_with_every_transform_tool() {
+        for tool in [super::super::Tool::Move, super::super::Tool::Rotate,
+            super::super::Tool::Scale, super::super::Tool::Transform] {
+            for kind in [Kind::Box, Kind::Circle, Kind::Lasso] {
+              for (ctrl,shift,expected) in [(false,false,SelectOp::Replace),(false,true,SelectOp::Add),(true,false,SelectOp::Subtract)] {
+                let mut fixture = crate::ui::testing::Fixture::new();
+                fixture.editor.tool = tool;
+                let ctx = egui::Context::default();
+                set_options(&ctx, Options { kind, op: SelectOp::Replace });
+                let viewport = Rect::from_min_max(pos2(0., 0.), pos2(800., 600.));
+                let a = pos2(330., 230.); let b = pos2(420., 270.); let c = pos2(440., 340.);
+                let mut out = Actions::default();
+                let _ = ctx.run(RawInput { screen_rect: Some(viewport), events: vec![
+                    button(a, PointerButton::Primary, true, ctrl, shift),
+                    Event::PointerMoved(b), Event::PointerMoved(c),
+                    button(c, PointerButton::Primary, false, ctrl, shift)], ..Default::default() }, |ctx| {
+                    handle(ctx, viewport, &fixture.view(), &mut out);
+                });
+                assert!(out.0.iter().any(|action| matches!(action, UiAction::RegionSelect {op,..} if *op==expected)), "{tool:?} {kind:?} {expected:?}");
+              }
+            }
+        }
+    }
+    #[test]
+    fn gizmo_press_keeps_priority_over_armed_selection() {
+        for tool in [super::super::Tool::Move,super::super::Tool::Rotate,super::super::Tool::Scale,super::super::Tool::Transform] {
+            let mut f=crate::ui::testing::Fixture::new(); f.editor.tool=tool;
+            f.camera=super::super::CameraInfo {projection:[[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]],
+                ortho:true,ray_right:[1.,0.,0.],ray_up:[0.,1.,0.],ray_forward:[0.,0.,-1.],..Default::default()};
+            let mut v=f.view(); v.selection_center=Some([0.;3]);
+            let ctx=egui::Context::default(); arm(&ctx);
+            let rect=Rect::from_min_max(pos2(0.,0.),pos2(500.,500.)); let center=rect.center();
+            let mut out=Actions::default();
+            let _=ctx.run(RawInput {screen_rect:Some(rect),events:vec![button(center,PointerButton::Primary,true,false,false)],..Default::default()},|ctx|{
+                egui::CentralPanel::default().show(ctx,|ui|{
+                    handle(ctx,rect,&v,&mut out);
+                    super::super::transform_gizmo::show(ui,rect,&v,&mut out);
+                });
+            });
+            assert!(super::super::transform_gizmo::active(&ctx),"{tool:?}");
+            assert!(!out.0.iter().any(|a|matches!(a,UiAction::RegionSelect {..})),"{tool:?}");
+        }
+    }
 
     #[test]
     fn box_gesture_requests_region_selection() {

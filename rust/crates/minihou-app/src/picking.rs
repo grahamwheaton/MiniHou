@@ -1,5 +1,4 @@
-//! Picking mesh elements in the viewport: a ray from the camera against the displayed triangles (CPU, brute force, which is
-//! plenty for a click), and the highlight geometry for the current selection.
+//! Picking mesh elements in the viewport and highlight geometry for the current selection.
 use crate::ui::SelectionMode;
 
 #[derive(Clone, Copy, Debug)]
@@ -104,6 +103,88 @@ impl RegionShape {
 /// What a click hit: the triangle (index into the triangle list), the distance along the ray and the barycentric weights.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Hit { pub tri: usize, pub t: f32, pub bary: [f32; 3] }
+
+/// Cook-time triangle accelerator. Navigation depth picks never scan the whole mesh.
+pub struct Bvh { order: Vec<usize>, nodes: Vec<BvhNode> }
+struct BvhNode { lo: [f32; 3], hi: [f32; 3], left: usize, right: usize, start: usize, end: usize }
+impl Bvh {
+    pub fn new(p: &[f32], indices: &[u32]) -> Self {
+        let mut b = Self { order: (0..indices.len()/3).collect(), nodes: Vec::new() };
+        if !b.order.is_empty() { b.build(p, indices, 0, b.order.len()); }
+        b
+    }
+    fn build(&mut self, p: &[f32], indices: &[u32], start: usize, end: usize) -> usize {
+        let mut lo = [f32::INFINITY; 3]; let mut hi = [f32::NEG_INFINITY; 3];
+        for &id in &self.order[start..end] { for &v in &indices[id*3..id*3+3] {
+            if let Some(pt) = p.get(v as usize*3..v as usize*3+3) { for k in 0..3 { lo[k]=lo[k].min(pt[k]); hi[k]=hi[k].max(pt[k]); } }
+        } }
+        let node = self.nodes.len();
+        self.nodes.push(BvhNode { lo, hi, left:0, right:0, start, end });
+        if end-start > 8 {
+            let axis = (0..3).max_by(|&a,&b| (hi[a]-lo[a]).total_cmp(&(hi[b]-lo[b]))).unwrap();
+            self.order[start..end].sort_unstable_by(|&a,&b| {
+                let centroid = |id: usize| indices[id*3..id*3+3].iter().map(|&v| p.get(v as usize*3+axis).copied().unwrap_or(0.)).sum::<f32>();
+                centroid(a).total_cmp(&centroid(b))
+            });
+            let mid=(start+end)/2;
+            let left=self.build(p,indices,start,mid); let right=self.build(p,indices,mid,end);
+            self.nodes[node].left=left; self.nodes[node].right=right;
+        }
+        node
+    }
+    pub fn pick(&self, p:&[f32], indices:&[u32], origin:[f32;3], dir:[f32;3], mut visible:impl FnMut(&[u32])->bool) -> Option<Hit> {
+        let mut best:Option<Hit>=None;
+        if self.nodes.is_empty() { return None; }
+        let mut stack=vec![0];
+        while let Some(id)=stack.pop() {
+            let n=&self.nodes[id];
+            let mut near=0_f32; let mut far=best.map_or(f32::INFINITY,|h|h.t);
+            let mut missed=false;
+            for k in 0..3 {
+                if dir[k].abs()<1e-12 { if origin[k]<n.lo[k] || origin[k]>n.hi[k] { missed=true; break; } }
+                else { let a=(n.lo[k]-origin[k])/dir[k]; let b=(n.hi[k]-origin[k])/dir[k]; near=near.max(a.min(b)); far=far.min(a.max(b)); }
+            }
+            if missed || near>far { continue; }
+            if n.left!=0 { stack.push(n.left); stack.push(n.right); continue; }
+            for &tri_id in &self.order[n.start..n.end] {
+                let ids=&indices[tri_id*3..tri_id*3+3];
+                if !visible(ids) { continue; }
+                if let Some(mut hit)=pick_triangle(p,ids,origin,dir) {
+                    if best.is_none_or(|h|hit.t<h.t) { hit.tri=tri_id; best=Some(hit); }
+                }
+            }
+        }
+        best
+    }
+}
+
+#[cfg(test)] mod bvh_navigation_tests {
+    use super::*;
+    #[test] fn navigation_depth_pick_uses_cooked_bvh_and_empty_fallback() {
+        let p=[-1.,-1.,0., 1.,-1.,0., 0.,1.,0.]; let tri=[0,1,2];
+        let bvh=Bvh::new(&p,&tri);
+        assert_eq!(bvh.pick(&p,&tri,[0.,0.,2.],[0.,0.,-1.],|_|true).unwrap().tri,0);
+        assert!(bvh.pick(&p,&tri,[5.,0.,2.],[0.,0.,-1.],|_|true).is_none());
+        assert!(bvh.pick(&p,&tri,[0.,0.,2.],[0.,0.,-1.],|_|false).is_none());
+    }
+    #[test] fn million_triangle_navigation_pick_is_under_five_ms() {
+        let (w,h)=(1000_u32,500_u32);
+        let mut p=Vec::with_capacity(((w+1)*(h+1)*3) as usize);
+        for y in 0..=h {for x in 0..=w {p.extend([x as f32,y as f32,0.]);}}
+        let mut tri=Vec::with_capacity((w*h*6) as usize);
+        for y in 0..h {for x in 0..w {let a=y*(w+1)+x;tri.extend([a,a+1,a+w+2,a,a+w+2,a+w+1]);}}
+        let bvh=Bvh::new(&p,&tri);
+        let mut times=Vec::new();
+        for _ in 0..7 {
+            let now=std::time::Instant::now();
+            assert!(bvh.pick(&p,&tri,[511.25,241.5,10.],[0.,0.,-1.],|_|true).is_some());
+            times.push(now.elapsed());
+        }
+        times.sort();
+        eprintln!("million-triangle BVH median pick: {:?}",times[3]);
+        assert!(times[3]<std::time::Duration::from_millis(5),"median pick: {:?}",times[3]);
+    }
+}
 
 /// A point or open-wire segment picked in viewport pixels. The indices remain geometry point ids.
 #[derive(Clone, Copy, Debug, PartialEq)]

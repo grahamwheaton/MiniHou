@@ -191,7 +191,7 @@ pub fn overlay(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) {
     }
 
     // Active Select tool options, separate from the tool strip and one-shot hotkeys.
-    if ed.tool == Tool::Select && !super::sketch::active(&ctx) {
+    if matches!(ed.tool, Tool::Select | Tool::Move | Tool::Rotate | Tool::Scale | Tool::Transform) && !super::sketch::active(&ctx) {
         use super::selection_region::{self, Kind};
         use crate::picking::SelectOp;
         let mut options = selection_region::options(&ctx);
