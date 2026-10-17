@@ -15,7 +15,7 @@ use crate::params::Params;
 pub const CURVE: NodeSpec = NodeSpec {
     name: "curve",
     inputs: &[InputSpec { name: "geo", multi: false, optional: true }],
-    params: crate::params!("points": "0,0,0  1,0,0  1,1,0  2,1,1"; "closed": false;),
+    params: crate::params!("points": "0,0,0  1,0,0  1,1,0  2,1,1"; "closed": false; "split": false;),
     cook: curve,
 };
 
@@ -45,8 +45,16 @@ fn curve(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let mut new = Geometry::from_arrays(positions, (0..n as i32).collect(), vec![0, n as i32], Some(vec![p.b("closed")?]))?;
     new.prim.insert("__viewport_curve".into(), Arc::new(Attr::i32(1,vec![1])));
     if let Some(input) = inputs[0].first() {
+        let mut input=(**input).clone();
+        if p.b("split")? && !p.b("closed")? {
+            for segment in new.p().chunks_exact(3).collect::<Vec<_>>().windows(2) {
+                let a=[segment[0][0],segment[0][1],segment[0][2]];
+                let b=[segment[1][0],segment[1][1],segment[1][2]];
+                input=super::knife::split_coplanar_segment(&input,a,b)?;
+            }
+        }
         let params = Params::resolve(&[], None)?;
-        super::merge::merge(&[vec![input.clone(), Arc::new(new)]], &params)
+        super::merge::merge(&[vec![Arc::new(input), Arc::new(new)]], &params)
     } else {
         Ok(new)
     }

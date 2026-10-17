@@ -177,6 +177,7 @@ fn ensure_transform_target(value: &mut Value, source: &str, object_mode: bool, a
         // Never hang a node off the end of the stream: insert it just before the output.
         let (next, id) = graph_edit::add(value, "transform", Some(source))?;
         *value = next;
+        forward_measurement_refs(value,source,&id);
         return Some(id);
     }
     let id = (1..).map(|n| format!("transform{n}")).find(|id| !nodes.contains_key(id))?;
@@ -184,7 +185,29 @@ fn ensure_transform_target(value: &mut Value, source: &str, object_mode: bool, a
     if let Some(index) = displayed.iter().position(|shown| shown == source) { displayed[index] = id.clone(); }
     else { displayed = vec![id.clone()]; }
     value["display"] = if displayed.len() == 1 { json!(displayed[0]) } else { json!(displayed) };
+    forward_measurement_refs(value,source,&id);
     Some(id)
+}
+fn forward_measurement_refs(value:&mut Value,source:&str,target:&str) {
+    let identity=value["nodes"][source]["measurement_identity"].clone();
+    if !identity.is_string() {return;}
+    value["nodes"][target]["measurement_identity"]=identity.clone();
+    if let Some(rows)=value["measurements"].as_array_mut() {
+        for row in rows {if let Some(refs)=row["refs"].as_array_mut() {
+            for reference in refs {if reference["node"]==source && reference["identity"]==identity {
+                reference["node"]=json!(target);
+            }}
+        }}
+    }
+}
+#[cfg(test)]
+#[test]
+fn transform_keeps_measurement_point_identity() {
+    let mut doc=json!({"nodes":{"a":{"measurement_identity":"stable"},"b":{}},
+        "measurements":[{"refs":[{"node":"a","identity":"stable","point":2},null]}]});
+    forward_measurement_refs(&mut doc,"a","b");
+    assert_eq!(doc["measurements"][0]["refs"][0]["node"],"b");
+    assert_eq!(doc["nodes"]["b"]["measurement_identity"],"stable");
 }
 fn toggle_edit_mode(current: ui::SelectionMode, last: &mut ui::SelectionMode) -> ui::SelectionMode {
     if current == ui::SelectionMode::Object { *last } else { *last = current; ui::SelectionMode::Object }
@@ -1313,10 +1336,21 @@ impl App {
         };
         if self.commit_document(value, "add sketch") { self.selected = id.clone(); self.selected_set = std::collections::BTreeSet::from([id.clone()]); self.display = id; }
     }
-    fn add_measurement(&mut self, a: [f32; 3], b: [f32; 3]) {
+    fn add_measurement(&mut self, a: [f32; 3], b: [f32; 3], mut refs: [Option<Value>;2]) {
         let mut value = self.editor.doc.value().clone();
         if !value["measurements"].is_array() { value["measurements"] = json!([]); }
-        if let Some(rows) = value["measurements"].as_array_mut() { rows.push(json!({"a":a,"b":b})); }
+        let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos();
+        for reference in refs.iter_mut().flatten() {
+            let Some(node)=reference["node"].as_str().map(str::to_owned) else { continue; };
+            if !value["nodes"][&node].is_object() { *reference=Value::Null; continue; }
+            if !value["nodes"][&node]["measurement_identity"].is_string() {
+                value["nodes"][&node]["measurement_identity"]=json!(format!("measure-{stamp}-{node}"));
+            }
+            reference["identity"]=value["nodes"][&node]["measurement_identity"].clone();
+        }
+        if let Some(rows) = value["measurements"].as_array_mut() {
+            rows.push(json!({"id":format!("m-{stamp}"),"points":[a,b],"refs":refs,"a":a,"b":b}));
+        }
         self.commit_document(value, "add measurement");
     }
     /// Make `value` the document as one undo step and send it to the cook worker; false (with a status message) when it is invalid.
@@ -1839,7 +1873,7 @@ impl App {
                     } else { self.file_status = "Cut target changed; try the cut again".into(); }
                 }
                 UiAction::SketchCommit { name, points, closed } => self.sketch_commit(&name, &points, closed),
-                UiAction::AddMeasurement { a, b } => self.add_measurement(a, b),
+                UiAction::AddMeasurement { a, b, refs } => self.add_measurement(a, b, refs),
                 UiAction::RegionSelect { shape, op } => self.region_select(shape, op),
                 UiAction::RestoreRegionSelection(snapshot) => {
                     self.selection = snapshot.selection; self.selected = snapshot.selected;
@@ -2608,7 +2642,8 @@ impl eframe::App for App {
                             self.scene.as_ref().map(|scene|(scene.positions(),scene.triangle_indices()))); }
                         ui::prim_handles::show(ui, rect, &v, &mut out);
                         ui::curve_tool::show(ui, rect, &v, &mut out, response.double_clicked());
-                        ui::sketch::show(ui, rect, &v, &mut out);
+                        ui::sketch::show(ui, rect, &v, &mut out,
+                            self.scene.as_ref().map(|scene|(scene.positions(),scene.triangle_indices())));
                         ui::mesh_cut::show(ui, rect, &v, &mut out);
                     }
                     ui::selection_region::paint(ui, rect, &v);

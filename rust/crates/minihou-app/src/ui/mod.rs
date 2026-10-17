@@ -15,6 +15,7 @@ pub mod selection_region;
 pub mod shelf;
 pub mod status;
 pub mod sketch;
+pub mod sketch_inference;
 pub mod mesh_cut;
 pub mod theme;
 pub mod topbar;
@@ -44,7 +45,7 @@ pub enum UiAction {
     CancelTransform,
     MeshCutCommit { source: String, node_type: String, params: serde_json::Value },
     SketchCommit { name: String, points: Vec<[f32; 3]>, closed: bool },
-    AddMeasurement { a: [f32; 3], b: [f32; 3] },
+    AddMeasurement { a: [f32; 3], b: [f32; 3], refs: [Option<serde_json::Value>; 2] },
     RegionSelect { shape: crate::picking::RegionShape, op: crate::picking::SelectOp },
     RestoreRegionSelection(selection_region::Snapshot),
     Open,

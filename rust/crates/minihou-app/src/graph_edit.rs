@@ -172,7 +172,7 @@ pub fn add_sketch(value: &Value, name: &str, points: &[[f32; 3]], closed: bool, 
     if let Some(after) = after { value = connect(&value, after, &id, Some("geo"))?; }
     let text = points.iter().map(|p| format!("{},{},{}", p[0], p[1], p[2])).collect::<Vec<_>>().join(" ");
     let node = nodes_mut(&mut value)?.get_mut(&id)?;
-    node["params"] = json!({"points": text, "closed": closed});
+    node["params"] = json!({"points": text, "closed": closed, "split": !closed});
     node["name"] = json!(name);
     Some((value, id))
 }
