@@ -57,11 +57,13 @@ struct State { show_links: bool, focus: Option<String>, zoom: f32, pan: Vec2, mo
     wiggle: Wiggle,
     wire: Option<AddConnection>, pickup: Option<crate::graph_edit::WirePickup>,
     drag_before: Option<serde_json::Value>, drag_physics: bool,
-    drag: Option<(String, Pos2)>, box_start: Option<Pos2>, alt_pan: bool, menu: Option<network_menu::MenuState> }
+    drag: Option<(String, Pos2)>, box_start: Option<Pos2>, alt_pan: bool, menu: Option<network_menu::MenuState>,
+    canvas: Option<Rect>, add_pos: Option<Pos2> }
 impl Default for State {
     fn default() -> Self { Self { show_links: true, focus: None, zoom: 1.0, pan: Vec2::ZERO, moved: HashMap::new(), snap: true, physics: true, springs: None,
         selected_wires: BTreeSet::new(), graph_snapshot: None, cut: None, box_op: SelectionOp::Replace,
-        tidied: false, tidy_order: HashMap::new(), wiggle: Wiggle::default(), wire: None, pickup: None, drag_before: None, drag_physics: false, drag: None, box_start: None, alt_pan: false, menu: None } }
+        tidied: false, tidy_order: HashMap::new(), wiggle: Wiggle::default(), wire: None, pickup: None, drag_before: None, drag_physics: false, drag: None, box_start: None, alt_pan: false, menu: None,
+        canvas: None, add_pos: None } }
 }
 
 // Wire selection belongs only to the canvas. A changed graph invalidates it,
@@ -136,7 +138,13 @@ pub fn open_add_menu(ctx: &egui::Context, path: &Path) {
     let at = ctx.input(|i| i.pointer.hover_pos()).unwrap_or(pos2(160., 190.));
     ctx.data_mut(|d| {
         let mut state = d.get_persisted::<State>(id).unwrap_or_default();
-        if state.menu.is_none() { state.menu = Some(network_menu::MenuState::new(at, None, true)); }
+        let r = state.canvas.unwrap_or_else(|| Rect::from_min_size(Pos2::ZERO, vec2(1000., 800.)));
+        let zoom = if state.zoom <= 0.0 { 1.0 } else { state.zoom };
+        let graph_pos = ((at - r.min - state.pan) / zoom).to_pos2();
+        if state.menu.is_none() {
+            state.add_pos = Some(graph_pos);
+            state.menu = Some(network_menu::MenuState::new(at, None, true).with_canvas_pos(graph_pos));
+        }
         d.insert_persisted(id, state);
     });
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::default(), egui::Key::Tab));
@@ -299,6 +307,7 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
     if v.cooking.cooking() { ctx.request_repaint_after(std::time::Duration::from_millis(16)); }
     let pointer = ctx.input(|i| i.pointer.hover_pos());
     let over = pointer.is_some_and(|at| r.contains(at));
+    state.canvas = Some(r);
     let mut positions = node_positions(state, v);
     if let Some(focus) = state.focus.take() {
         if let Some((_,at)) = positions.iter().find(|(node,_)| *node == focus) {
@@ -385,7 +394,10 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
         let at = shifted_click.or(pointer).unwrap_or(r.center());
         let target = if right_click { positions.iter().rev().find(|(_, pos)| Rect::from_min_size(screen(r, state, *pos), CARD * state.zoom).contains(at))
             .map(|(id, _)| id.clone()) } else { None };
-        state.menu = Some(network_menu::MenuState::new(at, target, tab));
+        let zoom = if state.zoom <= 0.0 { 1.0 } else { state.zoom };
+        let graph_pos = ((at - r.min - state.pan) / zoom).to_pos2();
+        if tab || target.is_none() { state.add_pos = Some(graph_pos); }
+        state.menu = Some(network_menu::MenuState::new(at, target, tab).with_canvas_pos(graph_pos));
         if tab { ctx.input_mut(|i| i.consume_key(egui::Modifiers::default(), egui::Key::Tab)); }
     }
     let p = ui.painter().with_clip_rect(r);
@@ -445,7 +457,11 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
     let background = ui.interact(r, id.with("box_selection"), sense);
     let background_hit_card = pointer.is_some_and(|at| positions.iter().any(|(_, pos)| Rect::from_min_size(screen(r, state, *pos), CARD * state.zoom).contains(at)));
     if background.double_clicked() && !background_hit_card {
-        state.menu = Some(network_menu::MenuState::new(pointer.unwrap_or(r.center()), None, true));
+        let at = pointer.unwrap_or(r.center());
+        let zoom = if state.zoom <= 0.0 { 1.0 } else { state.zoom };
+        let graph_pos = ((at - r.min - state.pan) / zoom).to_pos2();
+        state.add_pos = Some(graph_pos);
+        state.menu = Some(network_menu::MenuState::new(at, None, true).with_canvas_pos(graph_pos));
     }
     if background.drag_started_by(PointerButton::Primary) && !state.alt_pan && !background_hit_card {
         state.box_start = ctx.input(|i| i.pointer.press_origin());
@@ -658,11 +674,19 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
         }
     }
     if let Some(menu) = &mut state.menu {
+        let canvas_pos = menu.canvas_pos();
         if let Some(choice) = network_menu::show(ctx, id.with("menu"), menu, v, out) {
             match choice {
-                network_menu::Choice::Close => state.menu = None,
-                network_menu::Choice::FrameAll => { frame_all(state, r, content_bounds(&positions)); state.menu = None; },
-                network_menu::Choice::Tidy => { tidy_state(state); out.push(UiAction::TidyNetwork); state.menu = None; },
+                network_menu::Choice::Close => {
+                    if matches!(out.0.last(), Some(UiAction::AddNode { after: None, .. })) {
+                        state.add_pos = canvas_pos;
+                    } else if !matches!(out.0.last(), Some(UiAction::AddNode { .. })) {
+                        state.add_pos = None;
+                    }
+                    state.menu = None;
+                }
+                network_menu::Choice::FrameAll => { frame_all(state, r, content_bounds(&positions)); state.menu = None; state.add_pos = None; },
+                network_menu::Choice::Tidy => { tidy_state(state); out.push(UiAction::TidyNetwork); state.menu = None; state.add_pos = None; },
             }
         }
     }
@@ -725,7 +749,12 @@ fn ghost_card(p: &egui::Painter, rect: Rect, node_type: &str, v: &View, zoom: f3
 pub fn position_add(ctx: &egui::Context, path: &Path, old: &serde_json::Value,
     next: &mut serde_json::Value, after: Option<&str>) -> Option<minihou_app::Document> {
     let (Ok(graph), Ok(next_graph)) = (minihou_core::Graph::from_value(old), minihou_core::Graph::from_value(next)) else { return None };
-    let state = ctx.data_mut(|d| d.get_persisted::<State>(state_id(path)).unwrap_or_default());
+    let (state, add_pos) = ctx.data_mut(|d| {
+        let mut s = d.get_persisted::<State>(state_id(path)).unwrap_or_default();
+        let pos = s.add_pos.take();
+        d.insert_persisted(state_id(path), s.clone());
+        (s, pos)
+    });
     let mut positions = positions_for(&state, &graph, old);
     let live_override = after.is_some_and(|anchor| state.moved.get(anchor).is_some_and(|at| json_pos(old, anchor) != Some(*at)));
     // History must remember the pre-add canvas too, including unsaved drags.
@@ -742,6 +771,13 @@ pub fn position_add(ctx: &egui::Context, path: &Path, old: &serde_json::Value,
         }
     }
     let mut lookup: HashMap<_, _> = positions.into_iter().collect();
+    if after.is_none() {
+        if let Some(pos) = add_pos {
+            if let Some((id, _)) = next_graph.nodes.iter().find(|(id, _)| old["nodes"].get(id).is_none()) {
+                lookup.insert(id.clone(), pos);
+            }
+        }
+    }
     for (id, _) in &next_graph.nodes {
         if !live_override && (old["nodes"].get(id).is_none() || json_pos(old, id) != json_pos(next, id)) && json_pos(next, id).is_some() {
             lookup.insert(id.clone(), json_pos(next, id).unwrap());
@@ -1757,6 +1793,56 @@ mod tests {
             tx.send(()).unwrap();
         });
         assert!(rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok(), "Test timed out!");
+    }
+
+    #[test]
+    fn tab_menu_node_placed_at_mouse_position_when_no_selection_and_unchanged_with_selection() {
+        let ctx = egui::Context::default();
+        let path = Path::new("tab_placement_test.json");
+        let canvas = Rect::from_min_size(pos2(100., 100.), vec2(800., 600.));
+        let old = serde_json::json!({
+            "version": 1,
+            "nodes": {
+                "a": { "type": "box", "pos": [320., 96.] }
+            }
+        });
+
+        // 1. Without selection: mouse at (390., 510.) on screen with pan (50., 50.) and zoom 2.0.
+        // In graph coordinates: ((390 - 100 - 50) / 2.0, (510 - 100 - 50) / 2.0) = (120., 180.)
+        let mut state = State::default();
+        state.canvas = Some(canvas);
+        state.pan = vec2(50., 50.);
+        state.zoom = 2.0;
+        ctx.data_mut(|d| d.insert_persisted(state_id(path), state));
+
+        let mouse_screen = pos2(390., 510.);
+        let _ = ctx.run(egui::RawInput {
+            events: vec![egui::Event::PointerMoved(mouse_screen)],
+            ..Default::default()
+        }, |_| {});
+        open_add_menu(&ctx, path);
+
+        let stored_graph_pos = ctx.data_mut(|d| d.get_persisted::<State>(state_id(path)).unwrap().add_pos);
+        assert_eq!(stored_graph_pos, Some(pos2(120., 180.)));
+
+        // With no selection (after = None), node added from menu lands at the stored mouse position
+        let (mut next_no_sel, id_no_sel) = crate::graph_edit::add(&old, "sphere", None).unwrap();
+        let _ = position_add(&ctx, path, &old, &mut next_no_sel, None).unwrap();
+        assert_eq!(next_no_sel["nodes"][&id_no_sel]["pos"], serde_json::json!([120., 180.]));
+
+        // 2. With selection: same pointer position captured when menu opens
+        let mut state2 = State::default();
+        state2.canvas = Some(canvas);
+        state2.pan = vec2(50., 50.);
+        state2.zoom = 2.0;
+        ctx.data_mut(|d| d.insert_persisted(state_id(path), state2));
+        open_add_menu(&ctx, path);
+
+        // With a selection (after = Some("a")), placement is unchanged by mouse position
+        let (mut next_sel, id_sel) = crate::graph_edit::add(&old, "sphere", Some("a")).unwrap();
+        let _ = position_add(&ctx, path, &old, &mut next_sel, Some("a")).unwrap();
+        assert_ne!(next_sel["nodes"][&id_sel]["pos"], serde_json::json!([120., 180.]));
+        assert_eq!(next_sel["nodes"][&id_sel]["pos"], serde_json::json!([320., 224.]));
     }
 }
 

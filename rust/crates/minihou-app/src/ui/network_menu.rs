@@ -50,14 +50,17 @@ fn search_score(ty: &str, query: &str) -> Option<u32> {
 
 #[derive(Clone)]
 pub(super) struct MenuState { at: Pos2, target: Option<String>, add: bool, pie: bool, category: Option<usize>, open: HashSet<usize>, query: String, active: usize, focus: bool,
-    pub(super) connect_to: Option<(crate::graph_edit::AddConnection, Pos2)> }
+    pub(super) connect_to: Option<(crate::graph_edit::AddConnection, Pos2)>,
+    pub(super) canvas_pos: Option<Pos2> }
 impl MenuState {
     pub(super) fn new(at: Pos2, target: Option<String>, add: bool) -> Self {
-        Self { at, target, add, pie: false, category: None, open: HashSet::from([0, 3]), query: String::new(), active: 1, focus: true, connect_to: None }
+        Self { at, target, add, pie: false, category: None, open: HashSet::from([0, 3]), query: String::new(), active: 1, focus: true, connect_to: None, canvas_pos: None }
     }
     pub(super) fn pie(at: Pos2) -> Self { let mut menu = Self::new(at, None, true); menu.pie = true; menu }
     pub(super) fn query(&self) -> &str { &self.query }
     pub(super) fn at(&self) -> Pos2 { self.at }
+    pub(super) fn canvas_pos(&self) -> Option<Pos2> { self.canvas_pos }
+    pub(super) fn with_canvas_pos(mut self, pos: Pos2) -> Self { self.canvas_pos = Some(pos); self }
     pub(super) fn connected(at: Pos2, connection: crate::graph_edit::AddConnection, world: Pos2) -> Self {
         let mut menu = Self::new(at, None, true);
         menu.connect_to = Some((connection, world));
