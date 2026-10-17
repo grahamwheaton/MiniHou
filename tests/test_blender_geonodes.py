@@ -3,7 +3,10 @@
 Set MINIHOU_ENGINE_PYTHON, then run Blender --background --factory-startup
 --python tests/test_blender_geonodes.py. No engine dependencies are installed in Blender.
 """
+import functools
 import json
+import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -20,6 +23,17 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path[:0] = [str(ROOT), str(ROOT / "blender_addon")]
 from tests.test_blender_addon import Engine, evaluated_positions, free_port
 from tests.test_blender_modifiers import GRAPH
+
+
+@functools.lru_cache(maxsize=None)
+def _engine_has_mujoco():
+    engine_py = os.environ.get("MINIHOU_ENGINE_PYTHON", sys.executable)
+    try:
+        res = subprocess.run([engine_py, "-c", "import mujoco"],
+                             capture_output=True, timeout=5)
+        return res.returncode == 0
+    except Exception:
+        return False
 
 
 @unittest.skipIf(bpy is None, "requires actual Blender")
@@ -45,9 +59,9 @@ class GeometryNodesPlacementTests(unittest.TestCase):
     def tearDown(self):
         self.g.unregister()
 
-    def mesh(self, name="Source", x=1):
+    def mesh(self, name="Source", x=1, points=None):
         mesh = bpy.data.meshes.new(name)
-        mesh.from_pydata([(x, 0, 0)], [], [])
+        mesh.from_pydata(points or [(x, 0, 0)], [], [])
         obj = bpy.data.objects.new(name, mesh)
         bpy.context.scene.collection.objects.link(obj)
         return obj
@@ -88,8 +102,8 @@ class GeometryNodesPlacementTests(unittest.TestCase):
     def assert_x(self, obj, expected):
         np.testing.assert_allclose(np.sort(evaluated_positions(obj)[:, 0]), np.sort(expected), atol=1e-5)
 
-    def mixed(self):
-        obj = self.mesh()
+    def mixed(self, points=None):
+        obj = self.mesh(points=points)
         tree, gin, gout = self.tree()
         prefix, middle, suffix = (self.native(tree, x) for x in (2, 1, 5))
         first, second = self.mini(tree, scale=2), self.mini(tree, translate=4)
@@ -442,17 +456,20 @@ class GeometryNodesPlacementTests(unittest.TestCase):
         self.assert_x(obj, [1])
 
     def test_repaired_parameter_link_restores_ready_status_without_recook(self):
-        obj, tree, _, first, _ = self.mixed()
+        # Stale expectation: ShaderNodeMath was previously treated as an unsupported link,
+        # but is now evaluated uniformly via _probe_value. Use a varying field (Index on a 2-point mesh)
+        # to test parameter failure and recovery when the link is removed.
+        obj, tree, _, first, _ = self.mixed(points=[(1, 0, 0), (2, 0, 0)])
         self.cook()
-        math = tree.nodes.new("ShaderNodeMath")
-        link = tree.links.new(math.outputs[0], first.inputs["Scale"])
+        idx = tree.nodes.new("GeometryNodeInputIndex")
+        link = tree.links.new(idx.outputs[0], first.inputs["Scale"])
         self.g.pump(port=self.engine.port)
         self.assertTrue(self.g.last_error())
         self.assertIn("Error", self.g.status(first))
         tree.links.remove(link)
         self.assertEqual(self.cook(), 0)
         self.assertTrue(self.g.status(first).startswith("Ready"))
-        self.assert_x(obj, [16])
+        self.assert_x(obj, [16, 18])
 
     def test_transitive_native_object_reference_back_to_owner_is_rejected(self):
         consumer = self.mesh("Owner")
@@ -672,6 +689,7 @@ class GeometryNodesPlacementTests(unittest.TestCase):
         path.write_text(json.dumps(graph), encoding="utf-8")
         return path
 
+    @unittest.skipUnless(_engine_has_mujoco(), "RBD requires the optional physics extra (MuJoCo) in the engine Python environment")
     def test_rbd_wired_native_mesh_two_independent_placements(self):
         bpy.ops.mesh.primitive_cube_add()
         obj = bpy.context.object
@@ -723,6 +741,7 @@ class GeometryNodesPlacementTests(unittest.TestCase):
         original_node = obj.modifiers[0].node_group.nodes[second.name]
         self.assertEqual(tuple(original_node.inputs["Velocity"].default_value), (2, 0, 0))
 
+    @unittest.skipUnless(_engine_has_mujoco(), "RBD requires the optional physics extra (MuJoCo) in the engine Python environment")
     def test_rbd_rejects_animated_native_input_and_retains_valid_mesh(self):
         bpy.ops.mesh.primitive_cube_add()
         obj = bpy.context.object
@@ -746,19 +765,22 @@ class GeometryNodesPlacementTests(unittest.TestCase):
         np.testing.assert_allclose(evaluated_positions(obj), initial)
 
     def test_later_modifier_waits_after_earlier_wired_placement_failure(self):
-        obj, first_tree, _, first, _ = self.mixed()
+        # Stale expectation: ShaderNodeMath was previously treated as an unsupported link,
+        # but is now evaluated uniformly via _probe_value. Use a varying field (Index on a 2-point mesh)
+        # to test that an upstream parameter failure puts downstream placements into Waiting state.
+        obj, first_tree, _, first, _ = self.mixed(points=[(1, 0, 0), (2, 0, 0)])
         tree, gin, gout = self.tree("Later GN modifier")
         later = self.mini(tree, scale=2)
         self.chain(tree, gin, later, gout)
         self.attach(obj, tree)
         self.cook()
-        self.assert_x(obj, [32])
-        math = first_tree.nodes.new("ShaderNodeMath")
-        first_tree.links.new(math.outputs[0], first.inputs["Scale"])
+        self.assert_x(obj, [32, 36])
+        idx = first_tree.nodes.new("GeometryNodeInputIndex")
+        first_tree.links.new(idx.outputs[0], first.inputs["Scale"])
         self.g.pump(port=self.engine.port, force=True)
         self.assertTrue(self.g.last_error())
         self.assertTrue(self.g.status(later).startswith("Waiting"), self.g.status(later))
-        self.assert_x(obj, [32])
+        self.assert_x(obj, [32, 36])
 
     def test_fake_user_group_does_not_duplicate_on_every_refresh(self):
         obj = self.mesh()
