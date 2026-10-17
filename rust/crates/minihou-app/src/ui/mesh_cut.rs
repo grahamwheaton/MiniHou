@@ -232,7 +232,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
             let settings = ctx.data(|d| d.get_temp::<inf::InferenceSettings>(super::sketch::settings_id())).unwrap_or_default();
             let mut settings = settings;
             s.snap_tolerance=settings.tolerance_px;
-            settings.enabled &= inf::cat::VERTEX | inf::cat::MIDPOINT | inf::cat::EDGE | inf::cat::FACE;
+            settings.enabled &= inf::cat::VERTEX | inf::cat::MIDPOINT | inf::cat::EDGE | inf::cat::FACE | inf::cat::EXTENSION;
             if !modifiers.ctrl { settings.enabled &= !inf::cat::MIDPOINT; }
             settings.include_hidden = s.cut_through;
             let projector = Projector { matrix:v.camera.projection, rect_min:[rect.min.x,rect.min.y], rect_size:[rect.width(),rect.height()] };
@@ -240,7 +240,11 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
             {
                 let engine_cell = super::sketch::engine(&ctx);
                 let mut engine = engine_cell.lock().unwrap_or_else(|e|e.into_inner());
-                let tool = ToolContext { spec:ToolSpec::KNIFE, start:s.points.last().map(|p|p.world), start_face:None, ground:([0.;3],[0.,0.,1.]), tool_points:s.points.iter().map(|p|p.world).collect() };
+                let previous = s.pending.last();
+                let tool = ToolContext { spec:ToolSpec::KNIFE, start:s.points.last().map(|p|p.world), start_face:None, ground:([0.;3],[0.,0.,1.]),
+                    tool_points:s.points.iter().chain(previous.into_iter().flatten()).map(|p|p.world).collect(),
+                    tool_segments:s.points.windows(2).chain(previous.into_iter().flat_map(|chain|chain.windows(2)))
+                        .map(|pair|(pair[0].world,pair[1].world)).collect() };
                 let input = InferenceInput { ray, cursor:[at.x,at.y], projector, time:ctx.input(|i|i.time),
                     geometry:Some(inf::GeometryRef { positions:&s.mesh.positions, triangles:&s.mesh.tris, curve_lines:&[], curve_centers:&[], revision:s.revision }),
                     tool, settings:&settings, alt_held:false, typed:None };
@@ -253,7 +257,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
                         if !modifiers.shift { if let Some(projected)=transform_gizmo::project(v.camera,rect,world) { screen=ndc(projected); } }
                         s.knife_hover=Some(KnifePoint {screen,world,reference});
                         if !modifiers.shift { knife_primitives=result.primitives; for primitive in &mut knife_primitives {
-                            if let inf::Primitive::Tooltip {text,..}=primitive { *text=match text.as_str() {"Endpoint"=>"Vertex","On Edge"=>"Edge","On Face"=>"Face",other=>other}.into(); }
+                            if let inf::Primitive::Tooltip {text,..}=primitive { *text=match text.as_str() {"Endpoint" if result.descriptor.is_some()=>"Vertex", "On Edge" if result.descriptor.is_some()=>"Edge", "On Face"=>"Face",other=>other}.into(); }
                         } }
                     }
                 }
@@ -552,6 +556,26 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
     fn key(key: egui::Key) -> egui::Event { egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE } }
     fn committed(actions: &[UiAction]) -> Option<Value> {
         actions.iter().find_map(|a| match a { UiAction::MeshCutCommit { node_type, params, .. } if node_type == "polysplit" => Some(params.clone()), _ => None })
+    }
+    #[test] fn knife_next_chain_snaps_to_previous_endpoint() {
+        let mut h=Harness::new(); h.fixture.editor.tool=Tool::Knife;
+        let mut settings=inf::InferenceSettings::default(); settings.tooltip_delay_s=0.;
+        h.ctx.data_mut(|d|d.insert_temp(super::super::sketch::settings_id(),settings));
+        for x in [0.2,0.4] {
+            let p=h.at(x,0.2);
+            h.frame(vec![egui::Event::PointerMoved(p),button(p,egui::PointerButton::Primary,true)]);
+            h.frame(vec![button(p,egui::PointerButton::Primary,false)]);
+        }
+        let endpoint=h.ctx.data(|d|d.get_temp::<State>(id()).unwrap().points[1].world);
+        h.frame(vec![button(h.at(0.4,0.2),egui::PointerButton::Secondary,true)]);
+        let near=h.at(0.4,0.2)+vec2(3.,2.);
+        h.frame(vec![egui::Event::PointerMoved(near)]);
+        let result=super::super::sketch::engine(&h.ctx).lock().unwrap().last().cloned().unwrap();
+        assert_eq!(result.winner.kind,inf::Kind::Endpoint);
+        assert_eq!(result.point,Some(endpoint));
+        assert!(result.primitives.iter().any(|p|matches!(p,inf::Primitive::Tooltip {text,..} if text=="Endpoint")));
+        h.frame(vec![button(near,egui::PointerButton::Primary,true)]);
+        assert_eq!(h.ctx.data(|d|d.get_temp::<State>(id()).unwrap().points[0].world),endpoint);
     }
     #[test] fn knife_rmb_and_e_stage_two_chains_then_enter_commits_one_node() {
         let mut h=Harness::new(); h.fixture.editor.tool=Tool::Knife;

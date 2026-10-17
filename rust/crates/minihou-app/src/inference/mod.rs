@@ -40,7 +40,7 @@ pub enum Dof { /// Free 3D point (first click, Move base point).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ToolSpec { pub name: &'static str, pub categories: u32, pub dof: Dof }
 impl ToolSpec {
-    pub const KNIFE: Self = Self { name: "Knife", categories: cat::VERTEX | cat::MIDPOINT | cat::EDGE | cat::FACE, dof: Dof::Line };
+    pub const KNIFE: Self = Self { name: "Knife", categories: cat::VERTEX | cat::MIDPOINT | cat::EDGE | cat::FACE | cat::EXTENSION, dof: Dof::Line };
     pub const LINE: Self = Self { name: "Line", categories: cat::ALL, dof: Dof::Line };
     pub const POLYLINE: Self = Self { name: "Polyline", categories: cat::ALL, dof: Dof::Line };
     pub const POLYGON: Self = Self { name: "Polygon", categories: cat::ALL, dof: Dof::Line };
@@ -59,11 +59,13 @@ pub struct ToolContext {
     pub start_face: Option<(V3, V3)>,
     /// Ground plane `(point, normal)` (the sketch chip plane).
     pub ground: (V3, V3),
-    /// The tool's own points (current stroke) as endpoint candidates.
+    /// The tool's own path points as endpoint candidates.
     pub tool_points: Vec<V3>,
+    /// Tool path segments, available for on-edge and extension snaps.
+    pub tool_segments: Vec<(V3, V3)>,
 }
 impl ToolContext {
-    pub fn new(spec: ToolSpec) -> Self { Self { spec, start: None, start_face: None, ground: ([0.; 3], [0., 0., 1.]), tool_points: vec![] } }
+    pub fn new(spec: ToolSpec) -> Self { Self { spec, start: None, start_face: None, ground: ([0.; 3], [0., 0., 1.]), tool_points: vec![], tool_segments: vec![] } }
 }
 
 pub struct InferenceInput<'a> {
@@ -215,6 +217,17 @@ impl InferenceEngine {
         for &p in &input.tool.tool_points {
             if let Some((d, depth)) = frame.screen(p) { if d <= frame.tolerance { cands.push(Candidate::new(Kind::Endpoint, p, d, depth)); } }
         }
+        for &(a, b) in &input.tool.tool_segments {
+            if dist(a, b) < 1e-7 { continue; }
+            if enabled & cat::EDGE != 0 {
+                let (t, _) = segment_ray(a, b, input.ray);
+                let p = lerp(a, b, t);
+                if let Some((d, depth)) = frame.screen(p) { if d <= frame.tolerance {
+                    let mut c = Candidate::new(Kind::OnEdge, p, d, depth);
+                    c.edge = Some((a, b)); cands.push(c);
+                } }
+            }
+        }
         if enabled & cat::ORIGIN != 0 { if let Some((d, depth)) = frame.screen([0.; 3]) { if d <= frame.tolerance { let mut c = Candidate::new(Kind::Origin, [0.; 3], d, depth); c.descriptor = Some(RefDescriptor::Origin); cands.push(c); } } }
         if let (Some((p, n, tr, bary)), true) = (hit_face, enabled & cat::FACE != 0) {
             let mut c = Candidate::new(Kind::OnFace, p, 0., dot(sub(p, input.ray.0), input.ray.1));
@@ -254,6 +267,7 @@ impl InferenceEngine {
         if linear_ok(cat::EXTENSION) {
             let mut edges: Vec<(V3, V3)> = self.tracker.acquired.iter().filter_map(|r| match r { Reference::Edge { a, b, .. } => Some((*a, *b)), _ => None }).collect();
             if let Some(e) = self.tracker.transient_edge { if !edges.iter().any(|x| *x == e) { edges.push(e); } }
+            edges.extend(input.tool.tool_segments.iter().copied());
             for (ea, eb) in edges { ref_lines.push((Guide { origin: ea, dir: sub(eb, ea), kind: Kind::Extension }, Some((ea, eb)))); }
         }
         for g in &start_lines {
