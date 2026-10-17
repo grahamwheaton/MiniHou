@@ -40,7 +40,7 @@ fn items_for(target: Option<&str>) -> Vec<Item> {
 }
 
 #[derive(Clone, Copy)]
-enum Entry { Item(Item), Category(usize), Tool(&'static str) }
+enum Entry { Item(Item), Category(usize), Tool(&'static str), Operator(&'static str) }
 fn entries(menu: &MenuState) -> Vec<(String, Entry)> {
     if !menu.add { return items_for(menu.target.as_deref()).into_iter().map(|item| (item_label(item).to_owned(), Entry::Item(item))).collect(); }
     if !menu.query.trim().is_empty() {
@@ -48,6 +48,7 @@ fn entries(menu: &MenuState) -> Vec<(String, Entry)> {
         let mut matches: Vec<_> = TABS.iter().flat_map(|tab| tab.tools.iter().map(move |tool| (tab.name, tool)))
             .filter(|(category, tool)| accepts(menu, tool.node_type) && (tool.label.to_lowercase().contains(&query) || tool.node_type.contains(&query) || category.to_lowercase().contains(&query)))
             .map(|(category, tool)| (format!("{} · {}", tool.label, category), Entry::Tool(tool.node_type))).collect();
+        if menu.connect_to.is_none() && "select coplanar".contains(&query) {matches.insert(0,("Select Coplanar · Selection".into(),Entry::Operator("select_coplanar")));}
         matches.truncate(80);
         return matches;
     }
@@ -78,6 +79,7 @@ fn item_label(item: Item) -> &'static str {
 pub(super) enum Choice { Close, FrameAll, Tidy }
 fn activate(entry: Entry, menu: &mut MenuState, v: &View, out: &mut Actions) -> Option<Choice> {
     match entry {
+        Entry::Operator(name)=>{out.push(UiAction::Command(name.into()));Some(Choice::Close)}
         Entry::Category(index) => { menu.category = Some(index); menu.active = 0; None }
         Entry::Tool(node_type) => {
             if let Some((connection, at)) = &menu.connect_to {
@@ -171,6 +173,13 @@ pub(super) fn show(ctx: &egui::Context, id: Id, menu: &mut MenuState, v: &View, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn coplanar_search_runs_a_viewport_operator_not_an_add_node() {
+        let f=crate::ui::testing::Fixture::new();let mut menu=MenuState::new(pos2(0.,0.),None,true);
+        menu.query="select coplanar".into();let shown=entries(&menu);
+        let entry=shown.iter().find(|(_,entry)|matches!(entry,Entry::Operator("select_coplanar"))).unwrap().1;
+        let mut actions=Actions::default();assert!(matches!(activate(entry,&mut menu,&f.view(),&mut actions),Some(Choice::Close)));
+        assert!(matches!(actions.0.as_slice(),[UiAction::Command(name)] if name=="select_coplanar"));
+    }
     #[test] fn noodle_search_filters_and_keeps_connection_through_categories() {
         use crate::graph_edit::AddConnection;
         let mut menu = MenuState::connected(pos2(100., 200.), AddConnection::Output("source".into()), pos2(96., 192.));

@@ -263,3 +263,10 @@ fn fs_face_marker(i:FaceMarkerOut) -> @location(0) vec4<f32> {
     if (hovered) { color=select(vec3(1.),orange,d>3.); }
     return vec4(color,1.-smoothstep(radius-0.5,radius+0.5,d));
 }
+
+@vertex
+fn vs_group(@location(0) p:vec3<f32>)->@builtin(position) vec4<f32> {return u.view_proj*vec4(p,1.);}
+@fragment
+fn fs_group_fill()->@location(0) vec4<f32> {return vec4(out_color(vec3(0.64,0.22,0.95)).rgb,0.24);}
+@fragment
+fn fs_group_line()->@location(0) vec4<f32> {return vec4(out_color(vec3(0.72,0.32,1.)).rgb,1.);}

@@ -123,3 +123,13 @@ Face-centre markers use cached GPU instances. Camera movement projects the cache
   fan diagonals); face region selection expands hits to whole polygons.
 
 Circle selection batches each frame's brush path into a swept screen-space region and merges dense point/triangle IDs with masks. Repainting an already selected region does not rebuild selection highlights. RMB or Enter confirms circle selection; Esc restores its starting snapshot.
+
+## Select Coplanar and procedural group preview
+
+In Faces mode, select reference faces, press Tab and search **Select Coplanar**. This is a viewport operator: it extends selection to faces on the reference planes, including disconnected pieces, without adding a node. A bottom-left panel adjusts the normal-angle tolerance (degrees) and plane-distance tolerance (current display length unit). Multiple reference planes are supported. Parallel faces at a different height are excluded. Faces are compared by their estimated normal and plane offset, so a reference face remains selected even if its vertices are slightly nonplanar.
+
+**Make group** in that panel inserts **Group Create** into the displayed stream (before Output) as one undo step. It sets `domain=primitives`, `method=coplanar`, `direction`, `plane_offset`, `angle` and `plane_tolerance`. When several reference planes are selected, `planes` stores semicolon-separated normal/offset rows and overrides the single Direction/Plane Offset controls. These are procedural geometric conditions, not saved primitive numbers. Reference planes stay fixed in geometry coordinates; upstream topology changes are re-evaluated against them.
+
+Selecting a Group Create node previews its cooked output group with a purple face tint and purple polygon edges, or purple crosses for point groups. The preview updates after cooks and disappears when another node is selected. The master Overlays switch hides it. Preview buffers are cached between cooks and do not rebuild when orbiting.
+
+The normal and plane-distance checks follow Blender's Select Similar > Coplanar concept, with separate angle/distance controls here rather than Blender's combined threshold. `tests/blender_coplanar_selftest.py` is a factory-startup headless parity fixture; it never connects to an interactive Blender session.

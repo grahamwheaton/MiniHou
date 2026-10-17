@@ -220,6 +220,7 @@ pub fn is_length_param(node_type: &str, param_name: &str) -> bool {
             | ("fillet", "radius")
             | ("sweep", "radius")
             | ("curve_simplify", "tolerance")
+            | ("group_create", "plane_tolerance" | "plane_offset")
     )
 }
 

@@ -1,6 +1,8 @@
 mod picking;
 mod element_select;
 mod node_selection;
+mod coplanar_tool;
+mod group_preview;
 mod selection_metrics;
 #[cfg(test)] mod face_mode_profile;
 use minihou_app::graph_edit;
@@ -429,6 +431,7 @@ struct App {
     blender_paths: Vec<PathBuf>, blender_bar: bool,
     selection: picking::Selection, selection_dirty: bool,
     selection_metrics: selection_metrics::Cache,
+    coplanar: Option<coplanar_tool::State>, group_preview:group_preview::State,
     /// Polygon/edge adjacency of `scene` for loops, rings, paths and mode conversion (built on first use).
     elem_topo: std::cell::OnceCell<element_select::Topology>,
     /// The element selection hidden while in Object mode; converted back when an element mode is entered.
@@ -528,7 +531,7 @@ impl App {
             http:http_ui::HttpUi::default(),http_time:(1.,24.),
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),link:None,blender_job:None,
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
-            display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,selection_metrics:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
+            display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,selection_metrics:Default::default(),coplanar:None,group_preview:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
             clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,embed_conflict:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
             last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default() };
         app.prefs = Preferences::load();
@@ -1871,6 +1874,9 @@ impl App {
                     }
                 }
             }
+            "select_coplanar"=>self.select_coplanar(),
+            "update_coplanar"=>self.update_coplanar(),
+            "make_coplanar_group"=>self.make_coplanar_group(),
             "select_linked" | "invert_selection" | "select_linked_nodes" | "invert_selection_nodes" => {
                 let inverse=name.starts_with("invert");
                 let network=name.ends_with("_nodes");
@@ -2583,7 +2589,8 @@ impl eframe::App for App {
                 let size = ui.available_size().max(egui::vec2(1., 1.));
                 let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
                 self.last_viewport = rect;
-                let region_frame = if !fly_frame && (self.modal.is_none() && self.model_modal.is_none() && self.mirror.is_none()) && !mirror_frame && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) {
+                let coplanar_hover=self.coplanar.is_some() && ctx.input(|i|i.pointer.hover_pos()).is_some_and(|p|coplanar_tool::contains(ctx,rect,p));
+                let region_frame = if coplanar_hover {true} else if !fly_frame && (self.modal.is_none() && self.model_modal.is_none() && self.mirror.is_none()) && !mirror_frame && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) {
                     ui::selection_region::handle(ctx, rect, &v, &mut out)
                 } else { false };
                 let mut delta = ctx.input(|i| i.pointer.delta());
@@ -2635,13 +2642,14 @@ impl eframe::App for App {
                 if let (Some(gpu), Some(scene)) = (&mut self.gpu, &self.scene) {
                     let ranges = self.display_ranges.iter().filter(|(id, _)| !self.object_hidden && self.selected_set.contains(id))
                         .map(|(_, range)| range.clone()).collect();
+                    self.group_preview.update(gpu,&self.state.device,if self.cooking.error.is_none(){self.cooking.geometry.as_deref()}else{None},self.editor.doc.value(),&self.selected,self.cooking.completed);
                     gpu.select_points(&self.state.device,scene,&self.selection.points);
                     gpu.select_objects(&self.state.device, scene, ranges);
                     gpu.set_named_object_ranges(&self.state.device,scene,self.display_ranges.clone());
                 }
                 // Hover pre-selection highlight (Item 4)
                 let hover_pos = ctx.input(|i| i.pointer.latest_pos());
-                let hover_in_viewport = hover_pos.is_some_and(|p| rect.contains(p))
+                let hover_in_viewport = !coplanar_hover && hover_pos.is_some_and(|p| rect.contains(p))
                     && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing())
                     && !ui::selection_region::active(ctx);
 
@@ -2905,6 +2913,7 @@ impl eframe::App for App {
                         ui::mesh_cut::show(ui, rect, &v, &mut out);
                     }
                     ui::selection_region::paint(ui, rect, &v);
+                    coplanar_tool::show(ui,rect,&mut self.coplanar,v.units,&mut out);
                 }
             });
         }
