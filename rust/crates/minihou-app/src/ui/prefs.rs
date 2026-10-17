@@ -14,8 +14,8 @@ impl ThemePref {
     pub fn label(self) -> &'static str { match self { Self::Dark => "Dark", Self::Light => "Light", Self::System => "System" } }
 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct ViewportPreferences { pub overlays: crate::ui::Overlays, pub xray: bool, pub default_shading: String, pub object_visibility: crate::viewport::ObjectVisibility, pub navigation: Navigation, pub fly_navigation: bool, pub show_grid: bool, pub show_axes: bool, pub auto_budget: u32, pub clip_start: f32, pub clip_end: f32 }
-impl Default for ViewportPreferences { fn default() -> Self { Self { overlays: Default::default(), xray: false, default_shading: "Smooth Shaded".into(), object_visibility: crate::viewport::ObjectVisibility::ShowAll, navigation: Navigation::Blender, fly_navigation: true, show_grid: true, show_axes: true, auto_budget: 400_000, clip_start: 0.01, clip_end: 1000.0 } } }
+pub struct ViewportPreferences { pub overlays: crate::ui::Overlays, pub xray: bool, pub default_shading: String, pub object_visibility: crate::viewport::ObjectVisibility, pub matcap:crate::viewport::MatCap, pub matcap_flat:bool, pub object_color:crate::viewport::ObjectColor, pub navigation: Navigation, pub fly_navigation: bool, pub show_grid: bool, pub show_axes: bool, pub auto_budget: u32, pub clip_start: f32, pub clip_end: f32 }
+impl Default for ViewportPreferences { fn default() -> Self { Self { overlays: Default::default(), xray: false, default_shading: "Smooth Shaded".into(), object_visibility: crate::viewport::ObjectVisibility::ShowAll, matcap:Default::default(), matcap_flat:false, object_color:Default::default(), navigation: Navigation::Blender, fly_navigation: true, show_grid: true, show_axes: true, auto_budget: 400_000, clip_start: 0.01, clip_end: 1000.0 } } }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Preferences {
     pub theme: ThemePref, pub ui_scale: f32, pub emulate_numpad: bool, pub snap_increment: f32,
@@ -64,6 +64,7 @@ impl Preferences {
         "recent_files": self.recent_files.iter().take(10).collect::<Vec<_>>(),
         "viewport": { "overlays": self.viewport.overlays, "xray": self.viewport.xray, "default_shading": self.viewport.default_shading,
             "object_visibility": self.viewport.object_visibility.label(),
+            "matcap": self.viewport.matcap.label(), "matcap_flat":self.viewport.matcap_flat, "object_color": self.viewport.object_color.label(),
             "fly_navigation": self.viewport.fly_navigation,
             "navigation": match self.viewport.navigation { Navigation::Blender => "blender", Navigation::Houdini => "houdini" },
             "show_grid": self.viewport.show_grid, "show_axes": self.viewport.show_axes, "auto_budget": self.viewport.auto_budget,
@@ -92,6 +93,9 @@ impl Preferences {
             } }
             if let Some(x)=view.get("xray").and_then(Value::as_bool) { p.viewport.xray=x; }
             if let Some(x)=view.get("object_visibility").and_then(Value::as_str) { p.viewport.object_visibility=crate::viewport::ObjectVisibility::parse(x); }
+            if let Some(x)=view.get("matcap").and_then(Value::as_str) { p.viewport.matcap=crate::viewport::MatCap::parse(x); }
+            if let Some(x)=view.get("matcap_flat").and_then(Value::as_bool) { p.viewport.matcap_flat=x; }
+            if let Some(x)=view.get("object_color").and_then(Value::as_str) { p.viewport.object_color=crate::viewport::ObjectColor::parse(x); }
             if let Some(x) = view.get("fly_navigation").and_then(Value::as_bool) { p.viewport.fly_navigation = x; }
             if let Some(x) = view.get("navigation").and_then(Value::as_str) { p.viewport.navigation = if x == "houdini" { Navigation::Houdini } else { Navigation::Blender }; }
             if let Some(x) = view.get("default_shading").and_then(Value::as_str) { p.viewport.default_shading = crate::viewport::Mode::parse(x).label().to_owned(); }
@@ -146,6 +150,14 @@ impl Preferences {
         let partial=Preferences::from_json(&json!({"viewport":{"overlays":{"points":false,"point_size":999.,"line_width":-5.}}}));
         assert!(!partial.viewport.overlays.points && partial.viewport.overlays.lines && partial.viewport.overlays.faces);
         assert_eq!((partial.viewport.overlays.point_size,partial.viewport.overlays.line_width),(16.,1.));
+    }
+    #[test] fn matcap_and_object_color_round_trip() {
+        let mut p=Preferences::default();
+        p.viewport.matcap=crate::viewport::MatCap::Normal;
+        p.viewport.matcap_flat=true;
+        p.viewport.object_color=crate::viewport::ObjectColor::Random;
+        assert_eq!(Preferences::from_json(&p.to_json()),p);
+        assert_eq!(Preferences::from_json(&json!({})).viewport.object_color,crate::viewport::ObjectColor::Single);
     }
     #[test] fn fly_defaults_on_and_round_trips_disabled() {
         assert!(Preferences::from_json(&json!({})).viewport.fly_navigation);

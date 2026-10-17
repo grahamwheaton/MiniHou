@@ -391,7 +391,7 @@ fn falloff_samples(f: Falloff) -> [f32; 13] { std::array::from_fn(|i| falloff_va
 fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover, v: &View, out: &mut Actions) -> Rect {
     let th = v.theme;
     let ed = v.editor;
-    let rows = match which { Popover::Orientation => 6, Popover::Pivot => 5, Popover::Snap => 11, Popover::Proportional => 12, Popover::Overlays => 14, Popover::Shading => 12, Popover::Visibility => 3 };
+    let rows = match which { Popover::Orientation => 6, Popover::Pivot => 5, Popover::Snap => 11, Popover::Proportional => 12, Popover::Overlays => 17, Popover::Shading => 16, Popover::Visibility => 3 };
     let height = 30. + rows as f32 * 24. + 10.;
     let x = (anchor.right() - 232.).clamp(viewport.left() + 6., (viewport.right() - 238.).max(viewport.left() + 6.));
     let pop = Rect::from_min_size(Pos2::new(x, anchor.bottom() + 4.), Vec2::new(232., height));
@@ -401,8 +401,21 @@ fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover,
     p.text(pop.min + Vec2::new(12., 17.), egui::Align2::LEFT_CENTER, title, egui::FontId::proportional(11.), th.dim);
     let row = |i: usize| Rect::from_min_size(pop.min + Vec2::new(6., 28. + i as f32 * 24.), Vec2::new(220., 24.));
     match which {
-        Popover::Shading => for (i,mode) in Mode::ALL.into_iter().enumerate() {
-            if display_row(ui,row(i),("display",i),mode.label(),v.mode==mode,Icon::Display(mode),th) { out.push(UiAction::SetMode(mode)); }
+        Popover::Shading => {
+            for (i,mode) in Mode::ALL.into_iter().enumerate() {
+                if display_row(ui,row(i),("display",i),mode.label(),v.mode==mode,Icon::Display(mode),th) { out.push(UiAction::SetMode(mode)); }
+            }
+            section(ui,row(12),"MATCAP",th);
+            for (i,matcap) in crate::viewport::MatCap::ALL.into_iter().enumerate() {
+                let r=row(13+i);
+                if pop_row(ui,r,("matcap",i),matcap.label(),ed.matcap==matcap,false,"",th) {
+                    out.push(UiAction::Editor(EditorChange::MatCap(matcap)));
+                }
+                matcap_swatch(ui,r,matcap);
+            }
+            if pop_row(ui,row(15),"matcap_flat","Flat normals",ed.matcap_flat,true,"",th) {
+                out.push(UiAction::Editor(EditorChange::MatCapFlat(!ed.matcap_flat)));
+            }
         },
         Popover::Visibility => for (i,visibility) in ObjectVisibility::ALL.into_iter().enumerate() {
             if display_row(ui,row(i),("visibility",i),visibility.label(),ed.object_visibility==visibility,Icon::Visibility(visibility),th) { out.push(UiAction::Editor(EditorChange::ObjectVisibility(visibility))); }
@@ -456,9 +469,38 @@ fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover,
             ui.scope_builder(egui::UiBuilder::new().max_rect(row(12)),|ui| {ui.add(egui::Slider::new(&mut o.point_size,1.0..=16.0).text("Point size"));});
             ui.scope_builder(egui::UiBuilder::new().max_rect(row(13)),|ui| {ui.add(egui::Slider::new(&mut o.line_width,1.0..=10.0).text("Line width"));});
             if o!=ed.overlays { out.push(UiAction::Editor(EditorChange::Overlays(o))); }
+            section(ui,row(14),"COLOR",th);
+            for (i,color) in crate::viewport::ObjectColor::ALL.into_iter().enumerate() {
+                if pop_row(ui,row(15+i),("object_color",i),color.label(),ed.object_color==color,false,"",th) {
+                    out.push(UiAction::Editor(EditorChange::ObjectColor(color)));
+                }
+            }
         }
     }
     pop
+}
+
+fn matcap_swatch(ui:&egui::Ui, row:Rect, matcap:crate::viewport::MatCap) {
+    let centre=Pos2::new(row.left()+17.,row.center().y);
+    let mut mesh=egui::Mesh::default();
+    let rings=4; let sectors=20; let radius=9.;
+    for ring in 0..=rings { for sector in 0..sectors {
+        let r=ring as f32/rings as f32;
+        let angle=std::f32::consts::TAU*sector as f32/sectors as f32;
+        let (x,y)=(r*angle.cos(),r*angle.sin());
+        let rgb=if matcap==crate::viewport::MatCap::Normal {
+            crate::viewport::display_modes::normal_color([x,-y,(1.-r*r).sqrt()])
+        } else { let v=0.68+0.23*(1.-r*r).sqrt()-0.14*y; [v*0.99,v*0.95,v*0.9] };
+        mesh.vertices.push(egui::epaint::Vertex {pos:centre+Vec2::new(x*radius,y*radius),uv:egui::epaint::WHITE_UV,color:Color32::from_rgb((rgb[0]*255.) as u8,(rgb[1]*255.) as u8,(rgb[2]*255.) as u8)});
+    } }
+    for ring in 0..rings { for sector in 0..sectors {
+        let a=(ring*sectors+sector) as u32;
+        let b=(ring*sectors+(sector+1)%sectors) as u32;
+        let c=((ring+1)*sectors+sector) as u32;
+        let d=((ring+1)*sectors+(sector+1)%sectors) as u32;
+        mesh.indices.extend([a,c,b,b,c,d]);
+    } }
+    ui.painter().add(egui::Shape::mesh(mesh));
 }
 
 fn section(ui: &egui::Ui, r: Rect, label: &str, th: &Theme) {
