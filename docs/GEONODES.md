@@ -2,6 +2,8 @@
 
 MiniHou wired groups process the mesh connected to their Geometry input through the external engine. Their output can feed native nodes and further independent MiniHou groups. This is a staged bridge: Blender evaluates the actual upstream socket on disposable object/group copies, the engine computes the result, and a private persistent mesh publishes that result to downstream Geometry Nodes. The saved result is a cache of that computation; it is not a substitute for reading the input.
 
+With add-on 0.4.0, evaluated input material slots and image bytes also cross the native live link for opaque base-colour textures. The placement sends a revisioned material manifest and only image hashes the app requests; changes rebind viewport textures without a geometry recook. `instance_sources` use the same binding table. See [TEXTURE_TRANSPORT.md](TEXTURE_TRANSPORT.md) for supported Blender nodes and limits.
+
 ## Embedded networks (add-on 0.3.0)
 
 New placements and stack modifiers store their network inside the .blend (a `MiniHou: <name>.minihou` Text datablock) instead of depending on the graph file; the file is remembered for comparison and *Extract to .minihou File*. Live edits from MiniHou are written back to the embedded copy (debounced and on save). Placements made before 0.3.0 stay in Linked File mode until embedded. Design, UI, link messages and limits: [EMBEDDED_GRAPHS.md](EMBEDDED_GRAPHS.md).

@@ -1,6 +1,6 @@
 # Native opaque texture rendering: stage 4 and stage 5 controls
 
-Implemented on `bob/tex-render` on 2026-10-17. This is the local document/image path. Blender material extraction and link asset transport remain separate stages.
+Implemented on `bob/tex-render` on 2026-10-17. The Blender link transport now uses this registry; see [TEXTURE_TRANSPORT.md](TEXTURE_TRANSPORT.md) for the wire format, extraction limits, and remaining verification.
 
 ## What the editor does
 
@@ -13,7 +13,7 @@ Implemented on `bob/tex-render` on 2026-10-17. This is the local document/image 
 
 ## Registry API for the transport stage
 
-`minihou_app::materials::Registry` is device independent. Construct it with a document directory; call `register_descriptor(id, Descriptor)` for an immutable source-scoped binding ID, `register_image_with_id(expected_hash, encoded_png_or_jpeg)` for verified transport bytes, or `register_pixels(width, height, rgba8, bottom_up)` for a decoded snapshot. `register_image(bytes)` returns a canonical `sha256:` ID; `resolve(slot)` returns `MaterialBinding { descriptor, image, state }`. `register_graph(value)` and `register_sidecar(path)` are local adapters. The future link receiver should verify hashes before calling this API and bind IDs from `detail.material_bindings` without recooking geometry for an image revision. Material descriptor changes currently trigger texture upload on recook; a link receiver will need an explicit rebind notification.
+`minihou_app::materials::Registry` is device independent. Construct it with a document directory; call `register_descriptor(id, Descriptor)` for a source-scoped binding ID, `register_image_with_id(expected_hash, encoded_png_or_jpeg)` for verified transport bytes, or `register_pixels(width, height, rgba8, bottom_up)` for a decoded snapshot. `register_image(bytes)` returns a canonical `sha256:` ID; `resolve(slot)` returns `MaterialBinding { descriptor, image, state }`. `register_graph(value)` and `register_sidecar(path)` are local adapters. The link receiver validates its wire hash, publishes decoded bytes through `register_image`, then rebinds `detail.material_bindings` IDs and explicitly refreshes GPU textures without recooking geometry.
 
 The CPU decoded cache starts at 1 GiB and LRU-evicts unreferenced images. The GPU cache starts at 512 MiB, reuses image views by hash and colour interpretation, evicts unreferenced views by LRU when over budget, and downsamples newly visible images when their full mip chain exceeds the remaining budget. These are configurable registry values (`set_budgets` and `gpu_budget`). A visible pinned set can exceed a configured budget; the inspector reports downsampling on newly loaded images. Upload is synchronous on the UI thread and has no per-frame throttle yet.
 
