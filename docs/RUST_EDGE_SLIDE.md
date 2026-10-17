@@ -15,3 +15,5 @@ This implementation handles simple edge chains, closed loops and boundaries. At 
 ## Validation
 
 Targeted Rust core tests cover edge rail sign, boundary, Flip, cube loop equivalence with `polysplit`, attributes, UV seams, deterministic cooking and multi-cut preview. The app's modal and keymap tests exercise the binding and phase transitions. `python tools/dump_rust_param_meta.py` and `python -m unittest tests.test_rust_param_meta` keep Parameters metadata in sync.
+
+Verification this morning: the targeted core modeling group passed (12 tests before the final Even/Clamp assertion was added); app modal tests passed (12), keymap tests passed (30), Python modeling/metadata tests passed (19), and `cargo check -p minihou-app --tests` passed. The final `cargo test --workspace --no-fail-fast` attempt reached zero disk space while compiling `ndarray`/`pyo3` and ran no workspace tests. The worktree target was cleaned afterwards. The final Even/Clamp core assertion and a full host-app smoke test remain unverified.
