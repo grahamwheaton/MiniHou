@@ -155,7 +155,10 @@ pub fn decode_object(h:&Value,arrays:&Arrays)->io::Result<Geometry>{
     if let Some(mats)=h["materials"].as_array().filter(|a|!a.is_empty()){
         geo.detail.insert("materials".into(),json!(mats.iter().take(4096).map(|m|m.as_str().unwrap_or("").chars().take(63).collect::<String>()).collect::<Vec<_>>()));
     }
-    if let Some(bindings)=h.get("material_bindings") {geo.detail.insert("material_bindings".into(),bindings.clone());}
+    // Older and manifest-free peers may send null or empty bindings. Treat those as absent.
+    if let Some(bindings)=h.get("material_bindings").filter(|v| !v.is_null() && !v.as_array().is_some_and(Vec::is_empty)) {
+        geo.detail.insert("material_bindings".into(),bindings.clone());
+    }
     geo.validate().map_err(io::Error::other)?;Ok(geo)
 }
 /// Decode on the UI thread into a transient worker edit, without touching document history.
@@ -251,6 +254,20 @@ mod tests {
         let mut bad=arrays.clone();bad.insert("point/radius".into(),attr_array(&minihou_core::Attr::f32(1,vec![1.])));assert!(decode_object(&h,&bad).is_err());
         let mut bad=h.clone();bad["matrix"]=json!([1,2,3]);
         assert!(external_edit(&bad,&arrays).is_err());
+    }
+    #[test]
+    fn absent_or_empty_material_bindings_do_not_poison_modifier_geometry() {
+        let g=Geometry::points_only(vec![0.,0.,0.]).unwrap();
+        let arrays=geometry_arrays(&g);
+        for bindings in [Value::Null, json!([])] {
+            let h=json!({"materials":[],"material_bindings":bindings});
+            let decoded=decode_object(&h,&arrays).unwrap();
+            assert!(!decoded.detail.contains_key("material_bindings"));
+        }
+        let h=json!({"materials":["Paint"],"material_bindings":{"version":1,"slots":["peer:Paint"]}});
+        assert_eq!(decode_object(&h,&arrays).unwrap().detail["material_bindings"],h["material_bindings"]);
+        let invalid=json!({"materials":["Paint"],"material_bindings":["peer:Paint"]});
+        assert!(decode_object(&invalid,&arrays).is_err());
     }
     #[test]
     fn images_keep_bottom_row_order_and_encode_rgb_only() {

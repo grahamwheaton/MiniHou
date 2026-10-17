@@ -341,7 +341,11 @@ impl InstanceManager {
     }
     pub(super) fn rebind_manifest(&mut self, id: &str, bindings: &Value) -> Result<()> {
         if let Some(live) = self.live.get_mut(id) {
-            live.header["material_bindings"] = json!({"version":1,"slots":bindings});
+            if bindings.as_array().is_some_and(|slots| !slots.is_empty()) {
+                live.header["material_bindings"] = json!({"version":1,"slots":bindings});
+            } else {
+                live.header.as_object_mut().unwrap().remove("material_bindings");
+            }
             self.update_live(id, "live_update", None)?;
         }
         Ok(())
@@ -471,7 +475,10 @@ impl InstanceManager {
             );
         }
         let (frame, fps) = time(&live.header)?;
-        let h = json!({"type":typ,"path":live.path,"label":live.header["label"],"graph":live.graph,"sources":sources.keys().collect::<Vec<_>>(),"materials":live.header["materials"],"material_bindings":live.header["material_bindings"],"frame":frame,"fps":fps,"overrides":overrides});
+        let mut h = json!({"type":typ,"path":live.path,"label":live.header["label"],"graph":live.graph,"sources":sources.keys().collect::<Vec<_>>(),"materials":live.header["materials"],"frame":frame,"fps":fps,"overrides":overrides});
+        if let Some(bindings) = live.header.get("material_bindings").filter(|v| !v.is_null()) {
+            h["material_bindings"] = bindings.clone();
+        }
         self.shared
             .live_documents
             .lock()
