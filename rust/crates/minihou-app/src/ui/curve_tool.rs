@@ -33,6 +33,10 @@ pub fn node_controls(doc:&Value,node:&str)->Value {
     doc["nodes"][node]["params"]["controls"].as_str().map(|s|Value::String(s.into()))
         .unwrap_or_else(||(minihou_core::nodes::get("bezier").unwrap().params.iter().find(|p|p.name=="controls").unwrap().default)())
 }
+pub fn visible_controls(ctx:&egui::Context,doc:&Value,node:&str)->Option<Vec<Control>> {
+    ctx.data(|d|d.get_temp::<Drag>(drag_id())).filter(|d|d.node==node).map(|d|d.current)
+        .or_else(||parse(&node_controls(doc,node)))
+}
 pub fn parse(value:&Value)->Option<Vec<Control>> {
     let text=value.as_str()?;
     let cs:Vec<Control>=serde_json::from_str(text).ok()?;

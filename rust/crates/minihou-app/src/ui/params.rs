@@ -1158,7 +1158,11 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
             ui.add_space(6.);
             let mut errors = Vec::new();
             if let Some(spec) = nodes::get(typ) {
-                for param in spec.params { ui.push_id(param.name, |ui| row(ui, v, out, id, typ, param, flags.locked, &mut errors)); }
+                for param in spec.params {
+                    if typ == "bezier" && param.name == "controls" { continue; }
+                    ui.push_id(param.name, |ui| row(ui, v, out, id, typ, param, flags.locked, &mut errors));
+                }
+                if typ == "bezier" { bezier_controls_panel(ui,v,out,id,flags.locked); }
             }
             if typ == "modifier_input" { modifier_inputs_panel(ui, v, out, id); }
             ui.add_space(6.);
@@ -1169,6 +1173,58 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
                 paint_text(ui, Pos2::new(r.left() + 10., r.center().y), &error, 11., true, v.theme.err, Align2::LEFT_CENTER);
             }
         }
+    });
+}
+
+fn bezier_controls_panel(ui:&mut egui::Ui,v:&View<'_>,out:&mut Actions,id:&str,locked:bool) {
+    use super::curve_tool::{self,Part,Selected};
+    let Some(cs)=curve_tool::visible_controls(ui.ctx(),v.doc,id) else {
+        ui.colored_label(v.theme.err,"Invalid Bezier control data");return;
+    };
+    let selected=curve_tool::selected(ui.ctx(),id);
+    let index=selected.index.min(cs.len()-1);
+    ui.add_space(5.);
+    ui.horizontal(|ui| {ui.add_space(12.);ui.strong(format!("Control point {} of {}",index+1,cs.len()));});
+    let mut mode=cs[index].mode.clone();
+    ui.add_enabled_ui(!locked,|ui| {
+        ui.horizontal(|ui| {
+            ui.add_space(12.);ui.label("Handle mode");
+            egui::ComboBox::from_id_salt((id,"bezier_mode")).selected_text(&mode).show_ui(ui,|ui| {
+                for choice in ["AUTO","VECTOR","ALIGNED","MIRRORED","FREE"] {ui.selectable_value(&mut mode,choice.into(),choice);}
+            });
+        });
+        if mode!=cs[index].mode {
+            let closed=v.doc["nodes"][id]["params"]["closed"].as_bool().unwrap_or(false);
+            let mut next=curve_tool::resolved(&cs,closed);next[index].mode=mode;
+            next=curve_tool::resolved(&next,closed);
+            out.push(UiAction::Edit{edit:Edit::Param{node:id.into(),name:"controls".into(),value:curve_tool::write(&next)},continuous:false});
+        }
+        ui.horizontal(|ui| {
+            ui.add_space(12.);
+            let append=ui.button("Append point").clicked();
+            let closed=v.doc["nodes"][id]["params"]["closed"].as_bool().unwrap_or(false);
+            let split=ui.add_enabled(closed||index+1<cs.len(),egui::Button::new("Split segment")).clicked();
+            let delete=ui.add_enabled(cs.len()>2,egui::Button::new("Delete point")).clicked();
+            if append||split||delete {
+                let next=if append {curve_tool::append(&cs,[cs.last().unwrap().p[0]+1.,cs.last().unwrap().p[1],cs.last().unwrap().p[2]])}
+                    else if split {curve_tool::split(&cs,index,closed)} else {curve_tool::delete(&cs,index)};
+                let selected_index=if append {next.len()-1} else if split {index+1} else {index.min(next.len()-1)};
+                curve_tool::set_selected(ui.ctx(),id,Selected{index:selected_index,part:Part::Anchor});
+                out.push(UiAction::Edit{edit:Edit::Param{node:id.into(),name:"controls".into(),value:curve_tool::write(&next)},continuous:false});
+            }
+        });
+        let mut p=cs[index].p;
+        ui.horizontal(|ui| {
+            ui.add_space(12.);
+            for (axis,label) in ["X","Y","Z"].into_iter().enumerate() {
+                ui.label(label);
+                let response=ui.add(egui::DragValue::new(&mut p[axis]).speed(0.1).max_decimals(5));
+                if response.changed() && p[axis].is_finite() {
+                    let next=curve_tool::move_part(&cs,index,Part::Anchor,p);
+                    out.push(UiAction::Edit{edit:Edit::Param{node:id.into(),name:"controls".into(),value:curve_tool::write(&next)},continuous:response.dragged()});
+                }
+            }
+        });
     });
 }
 
@@ -1844,6 +1900,18 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
 mod tests {
     use super::*;
     use crate::ui::testing::Fixture;
+
+    #[test]
+    fn bezier_inspector_uses_control_model_with_default_param() {
+        let mut f=Fixture::new();
+        f.doc=minihou_app::Document::parse(json!({"display":"bezier1","nodes":{"bezier1":{"type":"bezier"}}}).to_string()).unwrap();
+        f.graph=minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected="bezier1".into();f.display="bezier1".into();
+        let actions=f.run(|ui,v,out| bezier_controls_panel(ui,v,out,"bezier1",false));
+        assert!(actions.is_empty());
+        let controls=super::super::curve_tool::node_controls(f.doc.value(),"bezier1");
+        assert_eq!(super::super::curve_tool::parse(&controls).unwrap().len(),3);
+    }
 
     #[test]
     fn clicking_expose_emits_saved_document_edit_for_the_link_interface() {
