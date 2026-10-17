@@ -2,6 +2,7 @@
 use super::{transform_gizmo, Actions, UiAction, View};
 use eframe::egui::{self, pos2, vec2, Align2, FontId, Pos2, Rect, Stroke};
 use super::sketch_inference::{self, Hit, Kind};
+use serde_json::{json, Value};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SketchMode { Line, Pen, Polygon, Rectangle, Circle, Tape }
@@ -94,10 +95,10 @@ fn plane_hit(ray: ([f32; 3], [f32; 3]), plane: Plane, origin: [f32; 3]) -> Optio
     (t >= 0.).then(|| add(ray.0, mul(ray.1, t)))
 }
 #[derive(Clone, Default)]
-struct State { mode: Option<SketchMode>, plane: Plane, points: Vec<[f32; 3]>, hover: Option<[f32; 3]>, inference: Option<Hit>, reference_edge: Option<([f32;3],[f32;3])>, reference_point: Option<[f32;3]>, closed: bool, axis: Option<usize>, numeric: String, origin: [f32; 3] }
+struct State { mode: Option<SketchMode>, plane: Plane, points: Vec<[f32; 3]>, refs: Vec<Option<Value>>, hover: Option<[f32; 3]>, inference: Option<Hit>, reference_edge: Option<([f32;3],[f32;3])>, reference_point: Option<[f32;3]>, closed: bool, axis: Option<usize>, numeric: String, origin: [f32; 3] }
 fn id() -> egui::Id { egui::Id::new("sketch_state") }
 pub fn start(ctx: &egui::Context, mode: SketchMode) {
-    ctx.data_mut(|d| { let mut s: State = d.get_temp(id()).unwrap_or_default(); s.mode = Some(mode); s.points.clear(); s.hover = None; s.numeric.clear(); s.axis = None; d.insert_temp(id(), s); });
+    ctx.data_mut(|d| { let mut s: State = d.get_temp(id()).unwrap_or_default(); s.mode = Some(mode); s.points.clear(); s.refs.clear(); s.hover = None; s.numeric.clear(); s.axis = None; d.insert_temp(id(), s); });
 }
 pub fn cancel(ctx: &egui::Context) { ctx.data_mut(|d| d.remove::<State>(id())); }
 pub fn active(ctx: &egui::Context) -> bool {
@@ -110,23 +111,42 @@ pub fn blocks_navigation(ctx: &egui::Context) -> bool {
 fn finish(s: &mut State, out: &mut Actions) {
     let Some(mode) = s.mode else { return; };
     if mode == SketchMode::Tape {
-        if s.points.len() == 2 { out.push(UiAction::AddMeasurement { a: s.points[0], b: s.points[1] }); s.mode = None; s.points.clear(); s.hover = None; s.numeric.clear(); s.axis = None; }
+        if s.points.len() == 2 { out.push(UiAction::AddMeasurement { a: s.points[0], b: s.points[1], refs: [s.refs.first().cloned().flatten(),s.refs.get(1).cloned().flatten()] }); s.mode = None; s.points.clear(); s.refs.clear(); s.hover = None; s.numeric.clear(); s.axis = None; }
         return;
     }
     let spec_mode = if s.closed && matches!(mode,SketchMode::Line|SketchMode::Pen) { SketchMode::Polygon } else { mode };
     let Some((points, closed)) = specification(spec_mode, &s.points, s.plane) else { return; };
     out.push(UiAction::SketchCommit { name: mode.name().into(), points, closed });
-    s.points.clear(); s.hover = None; s.numeric.clear(); s.axis = None; s.closed = false;
+    s.points.clear(); s.refs.clear(); s.hover = None; s.numeric.clear(); s.axis = None; s.closed = false;
+}
+fn vec3(value: &Value) -> Option<[f32;3]> {
+    let a=value.as_array()?; Some([a.first()?.as_f64()? as f32,a.get(1)?.as_f64()? as f32,a.get(2)?.as_f64()? as f32])
+}
+fn measurement_endpoint(row: &Value, slot: usize, doc: &Value, display: &str, positions: Option<&[f32]>) -> Option<([f32;3],bool)> {
+    let fallback=vec3(row.get("points").and_then(|v|v.get(slot)).or_else(||row.get(if slot==0 {"a"} else {"b"}))?)?;
+    let Some(reference)=row.get("refs").and_then(|v|v.get(slot)).filter(|v|v.is_object()) else {return Some((fallback,false));};
+    let Some(node)=reference.get("node").and_then(Value::as_str) else {return Some((fallback,true));};
+    let identity=reference.get("identity").and_then(Value::as_str);
+    let valid=identity.is_some_and(|id|doc["nodes"][node]["measurement_identity"].as_str()==Some(id));
+    let index=reference.get("point").and_then(Value::as_u64).unwrap_or(u64::MAX) as usize;
+    let count=reference.get("point_count").and_then(Value::as_u64).unwrap_or(u64::MAX) as usize;
+    if valid && node==display {
+        if let Some(p)=positions.filter(|p|p.len()/3==count && index<count) {
+            return Some(([p[index*3],p[index*3+1],p[index*3+2]],false));
+        }
+    }
+    Some((fallback,true))
 }
 fn measurements(ui: &egui::Ui, rect: Rect, v: &View) {
     let Some(rows) = v.doc.get("measurements").and_then(|x| x.as_array()) else { return; };
     let p = ui.painter_at(rect);
     for row in rows {
-        let coords = |key: &str| -> Option<[f32; 3]> { let a = row.get(key)?.as_array()?; Some([a.first()?.as_f64()? as f32, a.get(1)?.as_f64()? as f32, a.get(2)?.as_f64()? as f32]) };
-        let (Some(a), Some(b)) = (coords("a"), coords("b")) else { continue; };
+        let positions=v.cooking.geometry.as_ref().map(|g|g.p());
+        let (Some((a,stale_a)), Some((b,stale_b))) = (measurement_endpoint(row,0,v.doc,v.display,positions),measurement_endpoint(row,1,v.doc,v.display,positions)) else { continue; };
         let (Some(pa), Some(pb)) = (transform_gizmo::project(v.camera, rect, a), transform_gizmo::project(v.camera, rect, b)) else { continue; };
-        p.line_segment([pa, pb], Stroke::new(1.5_f32, v.theme.tpl));
-        p.text(pa.lerp(pb, 0.5) + vec2(8., -8.), Align2::LEFT_BOTTOM, crate::units::format(length(sub(b, a)) as f64, v.units), FontId::monospace(12.), v.theme.tpl);
+        let color=if stale_a||stale_b {v.theme.dim} else {v.theme.tpl};
+        p.line_segment([pa, pb], Stroke::new(1.5_f32, color));
+        p.text(pa.lerp(pb, 0.5) + vec2(8., -8.), Align2::LEFT_BOTTOM, format!("{}{}",crate::units::format(length(sub(b, a)) as f64, v.units),if stale_a||stale_b {" [detached]"} else {""}), FontId::monospace(12.), color);
     }
 }
 pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
@@ -177,8 +197,8 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
         egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: true, .. } => {
             s = State { plane: s.plane, ..Default::default() }; out.push(UiAction::Editor(super::EditorChange::Tool(super::Tool::Select))); break;
         },
-        egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } => { if !s.numeric.is_empty() { if let Some(p) = s.hover { s.points.push(p); } s.numeric.clear(); } finish(&mut s, out); },
-        egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => { if s.numeric.is_empty() { s.points.pop(); } else { s.numeric.pop(); } },
+        egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } => { if !s.numeric.is_empty() { if let Some(p) = s.hover { s.points.push(p); s.refs.push(None); } s.numeric.clear(); } finish(&mut s, out); },
+        egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => { if s.numeric.is_empty() { s.points.pop(); s.refs.pop(); } else { s.numeric.pop(); } },
         egui::Event::Key { key: egui::Key::ArrowRight, pressed: true, .. } => { s.axis = Some(0); },
         egui::Event::Key { key: egui::Key::ArrowLeft, pressed: true, .. } => { s.axis = Some(1); },
         egui::Event::Key { key: egui::Key::ArrowUp, pressed: true, .. } => { s.axis = Some(2); },
@@ -189,7 +209,12 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
             if let Some(p) = s.hover { if s.points.last().is_none_or(|a| length(sub(*a, p)) > 1e-7) {
                 if matches!(mode,SketchMode::Line|SketchMode::Pen|SketchMode::Polygon) && s.points.len() >= 3 && length(sub(s.points[0], p)) < v.bounds.1 * 0.015 {
                     s.closed = true; finish(&mut s, out);
-                } else { if s.points.is_empty() { s.origin = p; } s.points.push(p); s.numeric.clear(); if matches!(mode, SketchMode::Rectangle | SketchMode::Circle | SketchMode::Tape) && s.points.len() == 2 { finish(&mut s, out); } }
+                } else { if s.points.is_empty() { s.origin = p; } s.points.push(p);
+                    let reference = if mode==SketchMode::Tape { s.inference.as_ref().filter(|h|h.kind==Kind::Endpoint && h.indices.len()==1)
+                        .and_then(|h|mesh.map(|(positions,_)|(h,positions))).filter(|(h,positions)|h.indices[0]<positions.len()/3
+                            && length(sub(h.point,[positions[h.indices[0]*3],positions[h.indices[0]*3+1],positions[h.indices[0]*3+2]]))<1e-5)
+                        .map(|(h,positions)|json!({"node":v.display,"point":h.indices[0],"point_count":positions.len()/3})) } else {None};
+                    s.refs.push(reference); s.numeric.clear(); if matches!(mode, SketchMode::Rectangle | SketchMode::Circle | SketchMode::Tape) && s.points.len() == 2 { finish(&mut s, out); } }
             } } },
         _ => {}
     } }
@@ -290,7 +315,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
         let mut tape = State { mode: Some(SketchMode::Tape), points: vec![[0.; 3], [0., 3., 0.]], ..Default::default() };
         let mut out = Actions::default();
         finish(&mut tape, &mut out);
-        assert!(matches!(&out.0[..], [UiAction::AddMeasurement { a, b }] if *a == [0.; 3] && *b == [0., 3., 0.]));
+        assert!(matches!(&out.0[..], [UiAction::AddMeasurement { a, b, .. }] if *a == [0.; 3] && *b == [0., 3., 0.]));
     }
     #[test] fn closing_a_line_emits_a_face() {
         let mut line=State {mode:Some(SketchMode::Line),closed:true,
@@ -389,5 +414,11 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
         let mut texts = Vec::new();
         extract_texts(&full.shapes, &mut texts);
         assert!(texts.iter().any(|t| t.contains("1000 mm")), "expected 1000 mm in {texts:?}");
+    }
+    #[test] fn measurement_anchor_tracks_point_and_detaches_on_topology_change() {
+        let doc=json!({"nodes":{"box1":{"measurement_identity":"stable"}}});
+        let row=json!({"points":[[1.,2.,3.],[0.,0.,0.]],"refs":[{"node":"box1","identity":"stable","point":1,"point_count":2},null]});
+        assert_eq!(measurement_endpoint(&row,0,&doc,"box1",Some(&[0.,0.,0.,4.,5.,6.])),Some(([4.,5.,6.],false)));
+        assert_eq!(measurement_endpoint(&row,0,&doc,"box1",Some(&[0.,0.,0.])),Some(([1.,2.,3.],true)));
     }
 }
