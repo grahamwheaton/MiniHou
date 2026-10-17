@@ -177,7 +177,7 @@ pub(super) fn scatter_surface(geo: &Geometry, count: usize, seed: i64) -> Result
     Ok(res)
 }
 
-fn scatter_volume(geo: &Geometry, count: usize, seed: i64) -> Result<Geometry> {
+pub(super) fn scatter_volume(geo: &Geometry, count: usize, seed: i64) -> Result<Geometry> {
     if geo.topology.has_open() {
         return Err(Error::new("scatter in volume mode works on polygons, but the input has open curves"));
     }

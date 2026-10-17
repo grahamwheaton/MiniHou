@@ -81,6 +81,7 @@ mod capture_deform;
 mod contour;
 mod heightfield;
 mod scatter;
+mod scatteralign;
 mod primitives;
 mod transform;
 mod materials_node;
@@ -293,6 +294,7 @@ pub fn registry() -> &'static [NodeSpec] {
         volume::REMESH,
         heightfield::HEIGHTFIELD_ERODE,
         scatter::SCATTER,
+        scatteralign::SCATTERALIGN,
         deform::POINT_JITTER,
         deform::POINT_RELAX,
         attrib_tools::SORT,
