@@ -391,7 +391,7 @@ fn falloff_samples(f: Falloff) -> [f32; 13] { std::array::from_fn(|i| falloff_va
 fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover, v: &View, out: &mut Actions) -> Rect {
     let th = v.theme;
     let ed = v.editor;
-    let rows = match which { Popover::Orientation => 6, Popover::Pivot => 5, Popover::Snap => 11, Popover::Proportional => 12, Popover::Overlays => 17, Popover::Shading => 16, Popover::Visibility => 3 };
+    let rows = match which { Popover::Orientation => 6, Popover::Pivot => 5, Popover::Snap => 11, Popover::Proportional => 12, Popover::Overlays => 19, Popover::Shading => 18, Popover::Visibility => 3 };
     let height = 30. + rows as f32 * 24. + 10.;
     let x = (anchor.right() - 232.).clamp(viewport.left() + 6., (viewport.right() - 238.).max(viewport.left() + 6.));
     let pop = Rect::from_min_size(Pos2::new(x, anchor.bottom() + 4.), Vec2::new(232., height));
@@ -415,6 +415,13 @@ fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover,
             }
             if pop_row(ui,row(15),"matcap_flat","Flat normals",ed.matcap_flat,true,"",th) {
                 out.push(UiAction::Editor(EditorChange::MatCapFlat(!ed.matcap_flat)));
+            }
+            let active=matches!(v.mode,Mode::FlatShaded|Mode::FlatWireShaded|Mode::SmoothShaded|Mode::SmoothWireShaded);
+            if pop_row(ui,row(16),"materials_textures","Materials / Textures",ed.textures,true,if active {""}else{"Shaded modes only"},th) {
+                out.push(UiAction::Editor(EditorChange::Textures(!ed.textures)));
+            }
+            if pop_row(ui,row(17),"texture_inspector","Texture inspector",ed.texture_inspector,true,"",th) {
+                out.push(UiAction::Editor(EditorChange::TextureInspector(!ed.texture_inspector)));
             }
         },
         Popover::Visibility => for (i,visibility) in ObjectVisibility::ALL.into_iter().enumerate() {
@@ -474,6 +481,12 @@ fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover,
                 if pop_row(ui,row(15+i),("object_color",i),color.label(),ed.object_color==color,false,"",th) {
                     out.push(UiAction::Editor(EditorChange::ObjectColor(color)));
                 }
+            }
+            if pop_row(ui,row(17),"overlay_materials","Materials / Textures",ed.textures,true,"",th) {
+                out.push(UiAction::Editor(EditorChange::Textures(!ed.textures)));
+            }
+            if pop_row(ui,row(18),"overlay_texture_inspector","Texture inspector",ed.texture_inspector,true,"",th) {
+                out.push(UiAction::Editor(EditorChange::TextureInspector(!ed.texture_inspector)));
             }
         }
     }

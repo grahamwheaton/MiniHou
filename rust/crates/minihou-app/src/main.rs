@@ -408,6 +408,7 @@ struct App {
     editor: EditorDocument, worker: CookWorker<Scene>, cooking: CookState,
     selected: String, selected_set: std::collections::BTreeSet<String>, display: String,
     state: egui_wgpu::RenderState, gpu: Option<Gpu>, target: Option<Target>,
+    materials:minihou_app::materials::Registry,
     camera: Camera, bounds: ([f32;3], f32), mode: Mode,
     file_status: String,
     http: http_ui::HttpUi,
@@ -519,9 +520,11 @@ impl App {
     }
     fn new_document(doc: Document, path: PathBuf, state: egui_wgpu::RenderState, start_link: bool) -> Result<Self> {
         let display = Graph::from_value(doc.value())?.main_output()?;
+        let mut materials=minihou_app::materials::Registry::new(path.parent().unwrap_or(std::path::Path::new(".")));
+        materials.register_graph(doc.value()); let _=materials.register_sidecar(&path);
         let worker = CookWorker::start_with_python(&doc, Some(python_gate()), Scene::new)?;
         let mut app = Self { selected:display.clone(), selected_set: std::collections::BTreeSet::from([display.clone()]), display, editor:EditorDocument::new(doc, path), worker,
-            cooking:CookState::default(), state,gpu:None,target:None,
+            cooking:CookState::default(), state,gpu:None,target:None,materials,
             camera:Camera::frame([0.;3],1.),bounds:([0.;3],1.),mode:Mode::Shaded,file_status:String::new(),
             http:http_ui::HttpUi::default(),http_time:(1.,24.),
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),link:None,blender_job:None,
@@ -536,6 +539,7 @@ impl App {
         app.editor_state.matcap=app.prefs.viewport.matcap;
         app.editor_state.matcap_flat=app.prefs.viewport.matcap_flat;
         app.editor_state.object_color=app.prefs.viewport.object_color;
+        app.editor_state.textures=app.prefs.viewport.textures;
         app.keymap = Keymap::from_overrides_json(&app.prefs.keymap_overrides);
         app.keymap.emulate_numpad = app.prefs.emulate_numpad;
         if app.prefs.theme == ThemePref::Light { app.theme = Theme::light(); }
@@ -2112,6 +2116,10 @@ impl App {
                         self.prefs.viewport.object_color=color;
                         if let Err(e)=self.prefs.save() { self.file_status=format!("Could not save preferences: {e}"); }
                     }
+                    if let ui::EditorChange::Textures(enabled)=change {
+                        self.prefs.viewport.textures=enabled;
+                        if let Err(e)=self.prefs.save() {self.file_status=format!("Could not save preferences: {e}");}
+                    }
                     if matches!(change, ui::EditorChange::SnapTo(_) | ui::EditorChange::SnapIncrement(_)) {
                         self.prefs.snap_targets = self.editor_state.snap.to;
                         self.prefs.snap_increment = self.editor_state.snap.increment;
@@ -2185,6 +2193,15 @@ impl eframe::App for App {
         self.held_keys.extend(hold_back_ctrl_tab(raw_input, focused));
     }
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        if self.editor_state.texture_inspector {
+            let mut open=true;
+            egui::Window::new("Texture inspector").open(&mut open).default_width(330.).show(ctx,|ui| {
+                if self.scene.as_ref().is_some_and(Scene::has_textured_slots) {ui.label("Textured surfaces use full detail; clustered LOD is suspended.");}
+                if let Some(gpu)=&self.gpu {for slot in gpu.texture_status() {ui.label(slot);} } else {ui.label("No cooked scene");}
+                ui.label(format!("CPU image cache: {} MiB / {} MiB; GPU budget: {} MiB",self.materials.cpu_resident_bytes()/1048576,minihou_app::materials::CPU_BUDGET/1048576,self.materials.gpu_budget/1048576));
+            });
+            if !open {self.editor_state.texture_inspector=false;}
+        }
         if !self.held_keys.is_empty() { let held = std::mem::take(&mut self.held_keys); ctx.input_mut(|i| i.events.extend(held)); }
         self.poll_http(ctx);
         if self.blender_job.as_ref().is_some_and(|job| job.is_finished()) {
@@ -2286,8 +2303,10 @@ impl eframe::App for App {
                 self.selection_dirty = true;
                 let first = self.gpu.is_none();
                 self.bounds = (scene.center, scene.radius);
-                let level = self.proxy_level(scene.triangles());
-                let use_lod = self.editor_state.proxy.clustered && self.cooking.lod.is_some();
+                self.materials.register_graph(self.editor.doc.value()); let _=self.materials.register_sidecar(&self.editor.path);
+                let textured=scene.has_textured_slots();
+                let level = if textured {1.0}else{self.proxy_level(scene.triangles())};
+                let use_lod = !textured && self.editor_state.proxy.clustered && self.cooking.lod.is_some();
                 if use_lod {
                     if let Some(gpu) = &mut self.gpu { gpu.upload_lod(&self.state.device, &scene); }
                     else { self.gpu = Some(Gpu::new_lod(&self.state.device, &scene)); }
@@ -2295,6 +2314,7 @@ impl eframe::App for App {
                     let shown = scene.proxied(level);
                     if let Some(gpu) = &mut self.gpu { gpu.upload(&self.state.device, &shown); }
                     else { self.gpu = Some(Gpu::new(&self.state.device, &shown)); }
+                    if let Some(gpu)=&mut self.gpu {gpu.upload_textures(&self.state.device,&self.state.queue,&shown,&mut self.materials);}
                 }
                 self.lod_uploaded = use_lod;
                 self.last_lod_view = None;
@@ -2313,18 +2333,19 @@ impl eframe::App for App {
         if self.cooking.cooking() { ctx.request_repaint_after(Duration::from_millis(16)); }
         // the proxy level changed (menu, auto budget): re-upload the reduced scene
         if let Some(scene) = &self.scene {
-            let level = self.proxy_level(scene.triangles());
-            let use_lod = self.editor_state.proxy.clustered && self.cooking.lod.is_some();
+            let textured=scene.has_textured_slots();
+            let level = if textured {1.0}else{self.proxy_level(scene.triangles())};
+            let use_lod = !textured && self.editor_state.proxy.clustered && self.cooking.lod.is_some();
             if use_lod != self.lod_uploaded {
                 if let Some(gpu) = &mut self.gpu {
                     if use_lod { gpu.upload_lod(&self.state.device, scene); }
-                    else { gpu.upload(&self.state.device, &scene.proxied(level)); }
+                    else { let shown=scene.proxied(level); gpu.upload(&self.state.device, &shown); gpu.upload_textures(&self.state.device,&self.state.queue,&shown,&mut self.materials); }
                 }
                 self.lod_uploaded = use_lod;
                 self.last_lod_view = None;
                 self.shown_level = level;
             } else if !use_lod && (level - self.shown_level).abs() > 1e-6 {
-                if let Some(gpu) = &mut self.gpu { gpu.upload(&self.state.device, &scene.proxied(level)); }
+                if let Some(gpu) = &mut self.gpu { let shown=scene.proxied(level); gpu.upload(&self.state.device, &shown); gpu.upload_textures(&self.state.device,&self.state.queue,&shown,&mut self.materials); }
                 self.shown_level = level;
             }
         }
@@ -2534,6 +2555,7 @@ impl eframe::App for App {
                             matcap: self.editor_state.matcap,
                             matcap_flat: self.editor_state.matcap_flat,
                             object_color: self.editor_state.object_color,
+                            textures: self.editor_state.textures,
                         },
                         self.editor_state.selection,
                         selected_object,
