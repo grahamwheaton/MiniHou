@@ -38,4 +38,5 @@ A "Controller" node that acts as a control panel for top-level driver parameters
 - **Drag to rearrange** parameters, and **group them into sections** that can be named and reordered.
 - **Purpose:** one place to hold the top-level drivers that other nodes reference, so a whole network can be tuned from one panel.
 - **Link to existing work:** it should reuse the Add Input machinery (dynamic typed inputs) and the value-linking references (`ch(...)`), so other nodes can link to its parameters.
-- **Open questions for the spec:** whether sections are saved in the graph file, and whether the Controller's parameters appear in the Blender modifier panel as well.
+- **Sections are saved in the graph file** (decided by the user).
+- **Parameters can optionally be exposed to Blender** (decided by the user): each Controller parameter has an 'Expose to Blender' flag. Exposed parameters appear in the Blender modifier panel, inside a section that matches the Controller's section, and reuse the Add Input socket machinery. Unexposed parameters stay inside MiniHou.
