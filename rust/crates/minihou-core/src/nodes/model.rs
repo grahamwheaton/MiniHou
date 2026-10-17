@@ -366,8 +366,8 @@ pub const DIVIDE: NodeSpec = NodeSpec {
 pub const POLYFILL: NodeSpec = NodeSpec {
     name: "polyfill",
     inputs: GEO,
-    params: crate::params!("fill_group":""),
-    cook: polyfill,
+    params: super::polyfill::PARAMS,
+    cook: super::polyfill::polyfill,
 };
 pub const MIRROR: NodeSpec = NodeSpec {
     name: "mirror",
@@ -610,82 +610,7 @@ fn divide(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         },
     )
 }
-fn polyfill(inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    let g = POLYFILL.one(inputs, 0)?;
-    polygons(&g, "polyfill")?;
-    let e = topo::edges(&g.topology, g.npoints);
-    let (_, nx, _) = corners(&g);
-    let vp = &g.topology.vertex_point;
-    let mut succ = BTreeMap::new();
-    let mut starts = Vec::new();
-    for v in 0..g.nvertices() {
-        if e.count[e.of_vertex[v] as usize] == 1 {
-            let b = vp[nx[v]];
-            if succ.insert(b, vp[v]).is_some() {
-                return Err(Error::new("the boundary touches itself; cannot fill it"));
-            }
-            starts.push(b);
-        }
-    }
-    let mut seen = BTreeSet::new();
-    let mut loops = Vec::new();
-    for start in starts {
-        if seen.contains(&start) {
-            continue;
-        }
-        let mut at = start;
-        let mut f = Vec::new();
-        while seen.insert(at) {
-            f.push(at);
-            let Some(&next) = succ.get(&at) else {
-                break;
-            };
-            at = next;
-        }
-        if at == start && f.len() >= 3 {
-            loops.push(f);
-        }
-    }
-    if loops.is_empty() {
-        return Ok((*g).clone());
-    }
-    let mut vp = vp.clone();
-    let mut sizes: Vec<_> = (0..g.nprims()).map(|i| range(&g, i).len()).collect();
-    for f in &loops {
-        vp.extend(f);
-        sizes.push(f.len());
-    }
-    let pad = |t: &AttrTable, n: usize| {
-        let zero = t
-            .iter()
-            .map(|(k, a)| (k.clone(), Arc::new(a.zeros_like(n))))
-            .collect();
-        concat(t, &zero)
-    };
-    let nv = loops.iter().map(Vec::len).sum();
-    let mut out = make(
-        g.point.clone(),
-        vp,
-        &sizes,
-        pad(&g.vertex, nv),
-        pad(&g.prim, loops.len()),
-        g.detail.clone(),
-        None,
-    )?;
-    super::material_tables::neutral_new_faces(&mut out, g.nprims(), g.nvertices());
-    let name = p.s("fill_group")?;
-    if !name.is_empty() {
-        write_group(
-            &mut out,
-            "prim",
-            &name,
-            &(0..sizes.len())
-                .map(|i| i >= g.nprims())
-                .collect::<Vec<_>>(),
-        )?;
-    }
-    Ok(out)
-}
+
 fn clip(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let g = CLIP.one(inputs, 0)?;
     polygons(&g, "clip")?;

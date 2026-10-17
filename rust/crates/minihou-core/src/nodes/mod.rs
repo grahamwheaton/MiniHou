@@ -29,6 +29,7 @@ mod merge;
 mod modify;
 mod output;
 mod model;
+pub(crate) mod polyfill;
 mod mirror;
 mod array;
 mod planar_offset;
