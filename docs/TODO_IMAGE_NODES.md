@@ -87,3 +87,13 @@ The current `array` node (count, relative and constant offset, merge distance) i
 - **Parity target:** match Blender's Array output for each shape on the same inputs, with golden tests.
 
 Priority: queued after the image nodes and Flood Fill. Not started.
+
+---
+
+# Queued: Viewport select arrow on group and element fields (Houdini parity)
+
+- **What:** any node parameter that takes a group or element selection (e.g. Subdivide's Group and Creases, and every group field across the node set) gets a Houdini-style **select arrow** button beside it. Clicking it enters a viewport pick mode that writes the picked elements into that field.
+- **Highlight:** the picked elements are shown in **purple** in the viewport while the pick is active and once stored, so the user can see what the field refers to.
+- **Scope:** a shared parameter-panel feature, not one node. It affects quite a few nodes (anything with a group or element list: Subdivide Creases, Group, Delete, Blast, Extrude, Bevel, Edge Slide and others). Build it once as a shared widget and wire it through the existing group and selection infrastructure, rather than per node.
+- **Reuse:** the viewport picking and selection code already in place; no new picking engine.
+- **Priority:** queued. Not started.
