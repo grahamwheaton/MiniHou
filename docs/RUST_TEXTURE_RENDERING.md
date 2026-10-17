@@ -22,7 +22,7 @@ The CPU decoded cache starts at 1 GiB and LRU-evicts unreferenced images. The GP
 - Targeted pure tests: descriptor rejection, content hash verification, decoded cache and eviction, sRGB round-trip, bottom-up row flip, cube seam expansion (8 source points, 6 faces, 36 rendered corners), preserved NaN marker.
 - Targeted headless tests: asymmetric image top/bottom orientation; two material slots on one mesh; factor multiplication; selected-object visibility; missing image and UV checker; unchanged Normal MatCap and Random object colour. Existing display and geometry render suites passed: 6 and 4 tests respectively. Tests skip with a clear message if no GPU adapter is available; this machine had one.
 - Sample graph `--selftest` cooked 4 nodes, 8 points and 6 primitives: first cook 6.16 ms, second 0.64 ms in this run. The 64×64 RGBA8 sample uses 16 KiB decoded CPU pixels and about 21.3 KiB across its mip chain before driver allocation. Headless texture tests took about 0.6–0.8 s each including adapter/device setup and readback. These are test timings, not interactive frame benchmarks.
-- Final workspace result: pending the one required end-of-work `cargo test --workspace --no-fail-fast` run.
+- Final workspace result: the one end-of-work `cargo test --workspace --no-fail-fast` run completed with exit code 0: 860 passed, 0 failed, 3 ignored across 14 test groups. The existing Windows cache-path tests created a `%SystemDrive%` directory inside the worktree; that generated directory and the test log were removed after recording totals.
 
 ## Limits and open questions
 
