@@ -319,10 +319,11 @@ class RustLinkTests(unittest.TestCase):
         np.testing.assert_array_equal(defaults["point/P"], mesh()["point/P"])
         _, isolated = other.cook("A", "", {}, mesh(7), graph=graph)
         self.assertEqual(isolated["point/P"][0, 0], 7)
-        bad = copy.deepcopy(graph)
-        bad["nodes"]["input"] = {"type": "blender_object", "params": {"object": "Cube"}}
-        with self.assertRaisesRegex(RuntimeError, "feedback"):
-            c.describe("", bad)
+        # Add-on 0.5.0: modifier graphs may hold blender_object nodes; they read only their own group
+        # picker (input:@picker:<id>), never an object by name, so they are exposed instead of refused.
+        picked = copy.deepcopy(graph)
+        picked["nodes"]["source"] = {"type": "blender_object", "params": {"object": "Cube"}}
+        self.assertIn("source", [p["name"] for p in c.describe("", picked)["interface"]])
         with self.assertRaisesRegex(RuntimeError, "exposed"):
             c.cook("bad", "", {"missing": 1}, mesh(), graph=graph)
         with self.assertRaisesRegex(RuntimeError, "fps"):
@@ -443,7 +444,8 @@ class RustLinkTests(unittest.TestCase):
         c = host.client()
         c.wait("watch_objects")
         c.wait("interface")
-        c.wait("error")
+        # Nothing received yet: the node is waiting (empty geometry), not a cook error (add-on 0.5.0).
+        self.assertEqual(c.geo()[0]["counts"]["point"], 0)
         curve = mesh()
         curve["topo/prim_closed"] = np.array([0], np.uint8)
         c.link.send({"type": "object_geo", "object": "Curve", "materials": ["Paint"], "info": {"components": ["curves"]}}, curve)
@@ -502,8 +504,8 @@ class RustLinkTests(unittest.TestCase):
         c.geo()  # failed side outputs do not hide the valid main mesh
         c.link.send({"type": "object_geo", "object": "Cube", "materials": ["Paint"]}, mesh())
         c.wait("outputs", lambda h: h["names"] == ["Separate"])
-        h, arrays = c.geo("Separate")
-        self.assertTrue(h["full"])
+        # Before the object arrived "Separate" cooked empty (waiting); take the geometry that carries it.
+        h, arrays = c.wait("geo", lambda h: h.get("output") == "Separate" and h["counts"]["point"] > 0)
         self.assertEqual(h["detail"]["materials"], ["Paint"])
         np.testing.assert_array_equal(arrays["point/P"], mesh()["point/P"])
         pixels = np.array([[[.2, .4, .6, .8], [1, 0, 0, .5]], [[0, 1, 0, 1], [0, 0, 1, .25]]], np.float32)

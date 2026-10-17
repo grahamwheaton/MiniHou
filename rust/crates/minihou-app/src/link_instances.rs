@@ -538,9 +538,10 @@ fn apply_params(graph: &mut Value, params: &Value) -> Result<()> {
     let mut doc = Document::parse(graph.to_string())?;
     let known: Vec<Value> = link_interface(graph)["params"].as_array().into_iter().flatten().map(|p| p["name"].clone()).collect();
     for (name, value) in params {
-        // A value for a parameter the (renamed/changed) graph no longer has is stale, not an error:
-        // the add-on resyncs its sockets from this cook's interface.
-        if !known.iter().any(|k| k == name) { continue; }
+        // Unknown names stay an error, except a stale Blender Object picker value (an object name sent
+        // under the node's old name right after a rename); the add-on resyncs from this cook's interface.
+        let stale_picker = value.is_string(); // also after the node was removed
+        if !known.iter().any(|k| k == name) && stale_picker { continue; }
         let edit = link_param_edit(doc.value(), &json!({"name":name,"value":value}))?;
         doc.edit(&edit)?;
     }
