@@ -103,8 +103,9 @@ Source: `minihou/web/static/` at this worktree revision. “Done” means the na
 | LMB / MMB / RMB / double-click | Knife tool | Add/drag cut, new path, close path | `knife-tool.js:30-33` | not applicable: native knife tool absent |
 | Enter / Space / Escape / Ctrl+Z / Backspace | Knife tool | Commit, cancel, undo last segment | `knife-tool.js:34-35` | not applicable: native knife tool absent |
 | C / V / S / A / R / E / X/Y/Z / digits | Knife tool | Through, x-ray, measure, angle, reference, new path, axis, angle increment | `knife-tool.js:34-35` | not applicable: native knife tool absent |
-| LMB / RMB / wheel / Ctrl drag | Loop cut tool | Start/confirm, center, count, snap slide | `loop-tool.js:13-20` | done: same gestures (+PageUp/PageDown count, Shift fine slide, drag-release confirm); slide follows the hovered edge instead of screen X |
-| Enter / Escape | Loop cut tool | Accept / cancel | `loop-tool.js:19` | done: Esc during the slide drops the pending cut, Esc while hovering returns to Select |
+| LMB / RMB / wheel / Ctrl drag | Loop cut tool | Start/confirm, center, count, snap slide | `loop-tool.js:13-20` | done: wheel count in hover; signed Factor slide after LMB; RMB during slide keeps centred cuts |
+| Enter / Escape | Loop cut tool | Accept / cancel | `loop-tool.js:19` | done: Esc during slide keeps centred cuts; Esc during hover returns to Select |
+| Shift+V | Viewport | Edge slide selected edges | `docs/RUST_EDGE_SLIDE.md` | added now: dedicated edge slide modal; G remains Move |
 | Drag / Shift / Ctrl | Modal modeling tool | Adjust amount finely / snap | `modal-model-tool.js:28` | not applicable: native web modal modeling tool absent |
 | Digits / . / - / Backspace / Enter / Escape | Modal modeling tool | Type amount, edit, accept/cancel | `modal-model-tool.js:33-35` | not applicable: native web modal modeling tool absent |
 | Wheel | Modal bevel | Adjust divisions | `modal-model-tool.js:37` | not applicable: native web modal modeling tool absent |

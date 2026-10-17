@@ -90,7 +90,7 @@ mod dissolve;
 mod select_nodes;
 
 pub use modify::{match_size_points, MatchSizeOut};
-pub use modeling_tools::{loop_cut_fractions, LoopRing, LoopTopology, LOOP_CUT_MAX};
+pub use modeling_tools::{edge_slide_preview, loop_cut_fractions, loop_cut_preview, loop_slide_fractions, LoopRing, LoopTopology, LOOP_CUT_MAX};
 pub(crate) use copy_to_points::copy_limit_bytes;
 
 /// One input port.
@@ -224,6 +224,7 @@ pub fn registry() -> &'static [NodeSpec] {
         modeling_tools::EDGE_COLLAPSE,
         modeling_tools::EDGE_FLIP,
         modeling_tools::EDGE_CUSP,
+        modeling_tools::EDGE_SLIDE,
         modeling_tools::POLYSPLIT,
         modeling_tools::LOOP_CUT,
         profiles::SKIN_PROFILES,

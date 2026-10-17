@@ -84,7 +84,27 @@ def meta() -> dict:
                 d["options"] = [o if isinstance(o, str) else getattr(o, "name", str(o)) for o in opts]
             params[p.name] = d
         out[t] = params
+    out["polysplit"].update({
+        "factor": {"kind":"float","default":0.0,"min":-1.0,"max":1.0,"doc":"Signed slide of the new cuts along their rails."},
+        "smoothness": {"kind":"float","default":0.0,"min":-1.0,"max":1.0,"doc":"Loop Cut smoothing amount (reserved for future surface interpolation)."},
+        "falloff": {"kind":"enum","default":"inverse_square","options":["inverse_square","linear","smooth"],"doc":"Smoothness falloff (reserved)."},
+        "even": {"kind":"bool","default":False,"doc":"Keep a constant travel distance along uneven rails."},
+        "flipped": {"kind":"bool","default":False,"doc":"Swap the side selected by the Factor sign."},
+        "clamp": {"kind":"bool","default":True,"doc":"Stop at the neighbouring edge."},
+        "correct_uvs": {"kind":"bool","default":True,"doc":"Slide corner UVs independently on each face."},
+    })
     out["loop_cut"] = out["polysplit"]
+    out["edge_slide"] = {
+        "group": {"kind":"str","default":"","doc":"Selected edge group or pA-B pairs; empty leaves the mesh unchanged."},
+        "factor": {"kind":"float","default":0.0,"min":-1.0,"max":1.0},
+        "even": {"kind":"bool","default":False},
+        "flipped": {"kind":"bool","default":False},
+        "clamp": {"kind":"bool","default":True},
+        "mirror_editing": {"kind":"bool","default":True,"doc":"Mirror setting; active when a symmetry context is available."},
+        "correct_uvs": {"kind":"bool","default":True},
+        "output_group": {"kind":"bool","default":False},
+        "output_group_name": {"kind":"str","default":"slid_edges"},
+    }
     # modifier_input owns an ordered interface schema rather than fixed node parameters.
     # Keep this description with the generated native parameter metadata for the editor.
     out["modifier_input"]["__dynamic_inputs__"] = {

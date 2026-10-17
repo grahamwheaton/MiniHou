@@ -2033,6 +2033,15 @@ impl App {
                 self.finish_for_selection(ctx);
                 self.editor_state.apply(C::Tool(if name == "knife" { ui::Tool::Knife } else { ui::Tool::LoopCut }));
             }
+            "edge_slide" => {
+                if self.editor_state.selection!=ui::SelectionMode::Edges || self.selection.edges.is_empty() {
+                    self.file_status="Select edges in edge mode to slide".into();
+                } else {
+                    self.finish_for_selection(ctx);
+                    ui::mesh_cut::start_edge_slide(ctx,self.display.clone(),self.selection.edges.iter().map(|&(a,b)|(a as usize,b as usize)).collect());
+                    self.editor_state.apply(C::Tool(ui::Tool::EdgeSlide));
+                }
+            }
             "extrude" | "inset" | "bevel" | "pushpull" => {
                 let kind=match name { "extrude"=>ModelKind::Extrude,"inset"=>ModelKind::Inset,
                     "bevel"=>ModelKind::Bevel,_=>ModelKind::PushPull };
@@ -2659,7 +2668,7 @@ impl eframe::App for App {
                     }
                 }
                 if !fly_frame && !region_frame && response.hovered() && (self.modal.is_none() && self.model_modal.is_none())
-                    && self.editor_state.tool != ui::Tool::LoopCut && !ui::mesh_cut::captures_wheel(ctx) {
+                    && !matches!(self.editor_state.tool, ui::Tool::LoopCut | ui::Tool::EdgeSlide) && !ui::mesh_cut::captures_wheel(ctx) {
                     let delta=ctx.input(|i| i.smooth_scroll_delta.y);
                     if delta!=0. {
                         let pos=ctx.input(|i|i.pointer.hover_pos());
