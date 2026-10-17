@@ -40,3 +40,23 @@ A "Controller" node that acts as a control panel for top-level driver parameters
 - **Link to existing work:** it should reuse the Add Input machinery (dynamic typed inputs) and the value-linking references (`ch(...)`), so other nodes can link to its parameters.
 - **Sections are saved in the graph file** (decided by the user).
 - **Parameters can optionally be exposed to Blender** (decided by the user): each Controller parameter has an 'Expose to Blender' flag. Exposed parameters appear in the Blender modifier panel, inside a section that matches the Controller's section, and reuse the Add Input socket machinery. Unexposed parameters stay inside MiniHou.
+
+---
+
+# Queued node: Advanced Flood Fill (`flood_fill`)
+
+Full brief supplied by the user (2026-10-17). Not started. Category: Groups / Selection.
+
+- **Purpose:** select connected points, edges or faces from one or more seeds, spreading under constraints (barriers, attribute differences, limits), unlike Grow Selection.
+- **Seeds and groups:** seed group, seed elements, Avoid group, Allowed group, Barrier edge group, Target group. Optional viewport **Pick Seed** (reuse existing picking, no new engine).
+- **Connectivity:** domain (points, edges, faces); connectivity rules (shared edges default for faces, shared vertex optional). Must handle islands, open curves, isolated points, non-manifold geometry.
+- **Limits:** max steps, max geodesic distance (follows connectivity), max elements (deterministic order), stop at boundary, sharp edges, max face angle, UV seams, material changes.
+- **Attribute constraints:** scalar and vector attributes; comparison modes (equal, greater, less, range, tolerance); reference modes (seed, neighbour, user value); colour uses a documented distance rule. Must block traversal, not just filter results.
+- **Directional flood:** direction vector, mode (any, positive, negative, along vector), max deviation, min alignment.
+- **Flood to Target:** stop at first target or find all; include or exclude targets; deterministic with several paths.
+- **Connected Regions mode:** no seed; outputs region_id, region count, optional largest/smallest region groups. Structure the region detection so a separate Connected Regions node can reuse it.
+- **Outputs:** flood group, step distance, surface distance, frontier group, region id, reached-target flag, reached-element count. Output group combine: replace, union, intersect, subtract.
+- **Performance:** BFS for steps, Dijkstra for distance, cached adjacency, no recursion, deterministic results, zero-copy where unchanged.
+- **Stages:** A essential (domains, multiple seeds, avoid/allowed/barrier, step limits, output group); B constraints (distance, sharp/face angle, UV/material, attributes, directional); C modes (flood to target, regions, outputs); D interaction (viewport seed pick, live preview, barrier and frontier display). Complete and test each stage before the next.
+- **Validation:** tests for each domain, islands, groups, barriers, non-manifold, limits, constraints, directional, target, regions, empty and invalid input, attribute preservation. Demo graphs: barrier-restricted face flood, distance-limited flood, attribute-tolerance flood.
+- **Must not break** existing Grow and Group Expand.
