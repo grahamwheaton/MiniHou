@@ -835,6 +835,46 @@ fn interpolate(table: &AttrTable, weights: &[Weights]) -> AttrTable {
         })
         .collect()
 }
+/// Cut only polygons whose plane contains the drawn segment. The Knife kernel handles
+/// interpolated boundary points and attribute forwarding; unrelated planes stay intact.
+pub(super) fn split_coplanar_segment(g: &Geometry, a: [f32;3], b: [f32;3]) -> Result<Geometry> {
+    let pos=positions(g);
+    let mut cuts=Vec::new();
+    for face in 0..g.nprims() {
+        if !g.topology.is_closed(face) { continue; }
+        let ids:Vec<usize>=range(g,face).map(|v|g.topology.vertex_point[v] as usize).collect();
+        if ids.len()<3 { continue; }
+        let origin=pos[ids[0]];
+        let normal=cross(sub(pos[ids[1]],origin),sub(pos[ids[2]],origin));
+        let scale=normal.iter().map(|x|x*x).sum::<f64>().sqrt();
+        if scale<1e-10 { continue; }
+        let on_plane=|p:[f64;3]| (0..3).map(|k|(p[k]-origin[k])*normal[k]).sum::<f64>().abs()/scale < 1e-5;
+        if !ids.iter().all(|&i|on_plane(pos[i])) || !on_plane(a.map(f64::from)) || !on_plane(b.map(f64::from)) { continue; }
+        let drop=(0..3).max_by(|&i,&j|normal[i].abs().total_cmp(&normal[j].abs())).unwrap();
+        let axes:Vec<usize>=(0..3).filter(|&k|k!=drop).collect();
+        let mut matrix=[0.;16]; matrix[axes[0]*4]=1.; matrix[axes[1]*4+1]=1.; matrix[drop*4+2]=1.; matrix[15]=1.;
+        cuts.push(serde_json::json!({"matrix":matrix,"a":[a[axes[0]],a[axes[1]]],
+            "b":[b[axes[0]],b[axes[1]]],"faces":[face],"through":true}));
+    }
+    if cuts.is_empty() { return Ok(g.clone()); }
+    let params=Params::resolve(KNIFE.params,serde_json::json!({"cuts":serde_json::Value::Array(cuts).to_string()}).as_object())?;
+    knife(&[vec![Arc::new(g.clone())]],&params)
+}
+
+#[cfg(test)]
+mod sketch_split_tests {
+    use super::*;
+    #[test]
+    fn coplanar_stroke_divides_a_quad() {
+        let g=Geometry::from_arrays(vec![-1.,-1.,0.,1.,-1.,0.,1.,1.,0.,-1.,1.,0.],vec![0,1,2,3],vec![0,4],None).unwrap();
+        let cut=split_coplanar_segment(&g,[0.,-1.,0.],[0.,1.,0.]).unwrap();
+        assert!(cut.nprims()>g.nprims());
+        let untouched=split_coplanar_segment(&g,[0.,-1.,1.],[0.,1.,1.]).unwrap();
+        assert_eq!(untouched.p(),g.p());
+        assert_eq!(untouched.topology.vertex_point,g.topology.vertex_point);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

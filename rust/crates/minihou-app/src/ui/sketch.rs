@@ -94,7 +94,7 @@ fn plane_hit(ray: ([f32; 3], [f32; 3]), plane: Plane, origin: [f32; 3]) -> Optio
     (t >= 0.).then(|| add(ray.0, mul(ray.1, t)))
 }
 #[derive(Clone, Default)]
-struct State { mode: Option<SketchMode>, plane: Plane, points: Vec<[f32; 3]>, hover: Option<[f32; 3]>, inference: Option<Hit>, reference_edge: Option<([f32;3],[f32;3])>, reference_point: Option<[f32;3]>, axis: Option<usize>, numeric: String, origin: [f32; 3] }
+struct State { mode: Option<SketchMode>, plane: Plane, points: Vec<[f32; 3]>, hover: Option<[f32; 3]>, inference: Option<Hit>, reference_edge: Option<([f32;3],[f32;3])>, reference_point: Option<[f32;3]>, closed: bool, axis: Option<usize>, numeric: String, origin: [f32; 3] }
 fn id() -> egui::Id { egui::Id::new("sketch_state") }
 pub fn start(ctx: &egui::Context, mode: SketchMode) {
     ctx.data_mut(|d| { let mut s: State = d.get_temp(id()).unwrap_or_default(); s.mode = Some(mode); s.points.clear(); s.hover = None; s.numeric.clear(); s.axis = None; d.insert_temp(id(), s); });
@@ -113,9 +113,10 @@ fn finish(s: &mut State, out: &mut Actions) {
         if s.points.len() == 2 { out.push(UiAction::AddMeasurement { a: s.points[0], b: s.points[1] }); s.mode = None; s.points.clear(); s.hover = None; s.numeric.clear(); s.axis = None; }
         return;
     }
-    let Some((points, closed)) = specification(mode, &s.points, s.plane) else { return; };
+    let spec_mode = if s.closed && matches!(mode,SketchMode::Line|SketchMode::Pen) { SketchMode::Polygon } else { mode };
+    let Some((points, closed)) = specification(spec_mode, &s.points, s.plane) else { return; };
     out.push(UiAction::SketchCommit { name: mode.name().into(), points, closed });
-    s.points.clear(); s.hover = None; s.numeric.clear(); s.axis = None;
+    s.points.clear(); s.hover = None; s.numeric.clear(); s.axis = None; s.closed = false;
 }
 fn measurements(ui: &egui::Ui, rect: Rect, v: &View) {
     let Some(rows) = v.doc.get("measurements").and_then(|x| x.as_array()) else { return; };
@@ -186,8 +187,9 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
         egui::Event::Text(t) if t.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-' || matches!(c, 'm'|'c'|'k'|'i'|'n'|'f'|'t'|'M'|'C'|'K'|'I'|'N'|'F'|'T'|' ')) => s.numeric.push_str(&t),
         egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers } if safe.contains(pos) && !modifiers.alt => {
             if let Some(p) = s.hover { if s.points.last().is_none_or(|a| length(sub(*a, p)) > 1e-7) {
-                if mode == SketchMode::Polygon && s.points.len() >= 3 && length(sub(s.points[0], p)) < v.bounds.1 * 0.015 { finish(&mut s, out); }
-                else { if s.points.is_empty() { s.origin = p; } s.points.push(p); s.numeric.clear(); if matches!(mode, SketchMode::Line | SketchMode::Rectangle | SketchMode::Circle | SketchMode::Tape) && s.points.len() == 2 { finish(&mut s, out); } }
+                if matches!(mode,SketchMode::Line|SketchMode::Pen|SketchMode::Polygon) && s.points.len() >= 3 && length(sub(s.points[0], p)) < v.bounds.1 * 0.015 {
+                    s.closed = true; finish(&mut s, out);
+                } else { if s.points.is_empty() { s.origin = p; } s.points.push(p); s.numeric.clear(); if matches!(mode, SketchMode::Rectangle | SketchMode::Circle | SketchMode::Tape) && s.points.len() == 2 { finish(&mut s, out); } }
             } } },
         _ => {}
     } }
@@ -289,6 +291,12 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions,
         let mut out = Actions::default();
         finish(&mut tape, &mut out);
         assert!(matches!(&out.0[..], [UiAction::AddMeasurement { a, b }] if *a == [0.; 3] && *b == [0., 3., 0.]));
+    }
+    #[test] fn closing_a_line_emits_a_face() {
+        let mut line=State {mode:Some(SketchMode::Line),closed:true,
+            points:vec![[0.,0.,0.],[2.,0.,0.],[0.,2.,0.]],..Default::default()};
+        let mut out=Actions::default(); finish(&mut line,&mut out);
+        assert!(matches!(&out.0[..],[UiAction::SketchCommit {closed:true,points,..}] if points.len()==3));
     }
     #[test] fn every_sketch_mode_emits_the_curve_it_draws() {
         for (mode, source, expected_len, closed) in [
