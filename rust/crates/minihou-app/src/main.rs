@@ -1784,7 +1784,14 @@ impl App {
             match action {
                 UiAction::StartSketch(mode) => self.start_sketch(ctx, mode),
                 UiAction::TransformNode { op } => self.transform_node(op),
-                UiAction::StartModal(kind) => self.start_modal(ctx, kind),
+                UiAction::StartModal(kind) => {
+                    let node=&self.editor.doc.value()["nodes"][&self.selected];
+                    let controls=ui::curve_tool::node_controls(self.editor.doc.value(),&self.selected);
+                    let pointer=ctx.input(|i|i.pointer.hover_pos()).unwrap_or(self.last_viewport.center());
+                    if node["type"]=="bezier" && minihou_app::display_nodes(self.editor.doc.value()).iter().any(|id|id==&self.selected)
+                        && ui::curve_tool::start_modal(ctx,&self.selected,&controls,kind,pointer) { ctx.request_repaint(); }
+                    else { self.start_modal(ctx,kind); }
+                },
                 UiAction::FinishTransform => self.finish_transform(),
                 UiAction::CancelTransform => self.cancel_transform(),
                 UiAction::MeshCutCommit { source, node_type, params } => {
@@ -2227,7 +2234,7 @@ impl eframe::App for App {
                 } else { false };
                 let mut delta = ctx.input(|i| i.pointer.delta());
                 if !fly_frame && !region_frame && response.dragged() && (self.modal.is_none() && self.model_modal.is_none()) && !ui::sketch::blocks_navigation(ctx) && !ui::mesh_cut::blocks_navigation(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx)
-                    && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::transform_gizmo::hit(rect, &v, p) || ui::prim_handles::hit(rect, &v, p) || ui::curve_tool::hit(rect, &v, p, ctx)) {
+                    && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| (!ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) || ui::prim_handles::hit(rect, &v, p) || ui::curve_tool::hit(rect, &v, p, ctx)) {
                     let modifiers = ctx.input(|i| i.modifiers);
                     wrap_drag(ctx, rect, &mut delta);
                     match self.prefs.viewport.navigation {
@@ -2426,7 +2433,7 @@ impl eframe::App for App {
                     // Tab is the node menu in every mode; Ctrl+Tab (keymap ToggleEdit) switches object / edit mode
                     out.push(UiAction::Command("add_menu".into()));
                 }
-                if !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::curve_tool::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::curve_tool::hit(rect, &v, p, ctx)) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::transform_gizmo::hit(rect, &v, p)) && (self.editor_state.tool == ui::Tool::Select || (self.editor_state.selection == ui::SelectionMode::Object && !matches!(self.editor_state.tool, ui::Tool::Cursor | ui::Tool::Measure | ui::Tool::Line | ui::Tool::Polyline | ui::Tool::Polygon | ui::Tool::Rectangle | ui::Tool::Circle | ui::Tool::Knife | ui::Tool::LoopCut))) {
+                if !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::curve_tool::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::curve_tool::hit(rect, &v, p, ctx)) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| !ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) && (self.editor_state.tool == ui::Tool::Select || (self.editor_state.selection == ui::SelectionMode::Object && !matches!(self.editor_state.tool, ui::Tool::Cursor | ui::Tool::Measure | ui::Tool::Line | ui::Tool::Polyline | ui::Tool::Polygon | ui::Tool::Rectangle | ui::Tool::Circle | ui::Tool::Knife | ui::Tool::LoopCut))) {
                     if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {
                         let (nx, ny) = (((at.x - rect.left()) / rect.width()) * 2. - 1., 1. - ((at.y - rect.top()) / rect.height()) * 2.);
                         let (o, d) = self.camera.ray(nx, ny, rect.width() / rect.height());
