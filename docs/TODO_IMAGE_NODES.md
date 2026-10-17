@@ -110,3 +110,20 @@ Priority: queued after the image nodes and Flood Fill. Not started.
 - **Scope:** a shared parameter-panel feature, not one node. It affects quite a few nodes (anything with a group or element list: Subdivide Creases, Group, Delete, Blast, Extrude, Bevel, Edge Slide and others). Build it once as a shared widget and wire it through the existing group and selection infrastructure, rather than per node.
 - **Reuse:** the viewport picking and selection code already in place; no new picking engine.
 - **Priority:** queued. Not started.
+
+---
+
+# Queued: Houdini parity - Copy to Curves, Orientation along Curve, Scatter and Align
+
+Target: match Houdini's SOPs for these three nodes (screenshots supplied by the user, 2026-10-17).
+
+## Copy to Curves (Houdini `copytocurves`)
+- Inputs: source geometry, curve geometry. Params seen: Source Group, Source Group Type (Guess from Group), Curve Group, Piece Attribute (variant) with Pack and Instance, Tangent Type (Average of Edge Directions), Make Closed Curve Orientations Continuous, Extrapolate End Tangents, Transform Using Curve Point Attributes, Target Up Vector (Curve Normal), Target Up Vector at Start (else Average), Use Target End Up Vector, Rotate Order (Pitch, Yaw, Roll), Apply Roll or Twist / Yaw / Pitch, Normalize Scales, Uniform Scale, Stretch Around Turns, Max Stretch, Attributes (Reset Attributes from Target).
+
+## Orientation along Curve (Houdini `orientalongcurve`)
+- Params seen: Curve Group, Tangent Type, Make Closed Curve Orientations Continuous, Extrapolate End Tangents, Transform Using Point Attributes, Target Up Vector, Target Up Vector at Start, Use Target End Up Vector, Adjust Up Vectors by Curvature, Additional Rotations, Scales and Shears, Output Attributes (Class Point, X Axis `out`, Y Axis `up`, Tangent (Z Axis) `N`, Translation `P`, Quaternion `orient`, 3x3 and 4x4 transform).
+
+## Scatter and Align (Houdini `scatteralign`)
+- Mode (Scatter Points on Geometry Surface), Group, Tag Name (`$OS`), Global Seed, Coverage, Point Count Method (By Size), Scaling mode, Min/Max Radius, Uniform Scale, Orientation tab (Alignment; Rotation with Max Random Cone Angle; Rotation Around Normal with Min/Max Angle, Round to Multiple, Offset Angle, Remap Using Distribution Ramp), Point Generation tab, Attributes tab.
+
+Priority: queued after the select-arrow work. Not started. Note: Copy to Curves and Orientation along Curve depend on a correct curve frame (tangent, up vector), so build the shared frame code once and reuse it in both.
