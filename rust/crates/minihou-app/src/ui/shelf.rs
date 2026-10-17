@@ -133,7 +133,7 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
                     for (i, text) in label.lines().enumerate() {
                         ui.painter().with_clip_rect(r).text(r.center_top() + Vec2::new(0., 27. + i as f32 * 11.), Align2::CENTER_TOP, text, FontId::proportional(9.5), v.theme.text);
                     }
-                    if !v.runs_on_rust(tool.node_type) { dot(ui.painter(), r.min, r.width() - 7., 5., 2.5, v.theme.err); }
+
                     if response.on_hover_text(format!("{} ({})", tool.label, tool.node_type)).clicked() {
                         if active == 0 && matches!(tool.node_type, "line" | "circle" | "curve") {
                             let mode = match tool.node_type { "line" => super::sketch::SketchMode::Line, "circle" => super::sketch::SketchMode::Circle, _ => super::sketch::SketchMode::Pen };
@@ -147,8 +147,8 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
             });
         });
     });
-    dot(ui.painter(), row.right_center(), -121., 0., 2.5, v.theme.err);
-    ui.painter().text(row.right_center() - Vec2::new(112., 0.), Align2::LEFT_CENTER, "no Rust version yet", FontId::proportional(11.), v.theme.dim);
+
+
 }
 
 fn wrap_label(label: &str) -> String {

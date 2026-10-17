@@ -130,7 +130,7 @@ Priority: queued after the select-arrow work. Not started. Note: Copy to Curves 
 
 ---
 
-# Queued (small): shelf red dots on Rectangle, Polygon and Repeat
+# DONE (removed): shelf red dots on Rectangle, Polygon and Repeat
 
 - **Rectangle and Polygon** show a red "no Rust version" dot, but they are viewport drawing tools (`sketch_rectangle`, `sketch_polygon`), not graph nodes. The Python app never had them as nodes, so there is nothing to port. Fix: give tools their own marker (no red dot), or hide the dot for tool entries.
 - **Repeat** points at `loop_block`. The Python app's repeat region is `loop_begin` and `loop_end`, which Rust already runs. Fix: map the shelf entry to the existing loop region and show the normal marker.
