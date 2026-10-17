@@ -243,7 +243,7 @@ def _apply_live(node, header):
         for p in header["interface"]:
             socket = node.inputs.get(p["name"])
             if socket is not None and not socket.is_linked and hasattr(socket, "default_value"):
-                socket.default_value = old.get(socket.identifier, p["value"])
+                socket.default_value = p["value"]
         _digests.pop(tree[KEY], None)
         embed.note_graph(tree, pending=bool(header.get("embed_pending")))  # MiniHou edit -> embedded copy
     tree[modifiers.PATH] = header["path"]
