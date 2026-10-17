@@ -2258,6 +2258,53 @@
    "min": 0
   }
  },
+ "grid_fill": {
+  "auto_span": {
+   "default": true,
+   "doc": "Pick span and start from the loop's corners, as Blender does when Span is untouched.",
+   "kind": "bool"
+  },
+  "group": {
+   "default": "",
+   "doc": "Boundary edges to fill: edge ids, pA-B point pairs or edge group names (empty: every boundary loop).",
+   "kind": "str"
+  },
+  "offset": {
+   "default": 0,
+   "doc": "Rotate the loop start vertex (Blender Offset).",
+   "kind": "int",
+   "soft_max": 32,
+   "soft_min": -32
+  },
+  "output_group": {
+   "default": true,
+   "doc": "Write the new faces to a primitive group.",
+   "kind": "bool"
+  },
+  "output_group_name": {
+   "default": "grid_fill",
+   "doc": "Name of the new faces' group.",
+   "enabled_if": {
+    "output_group": true
+   },
+   "kind": "str"
+  },
+  "span": {
+   "default": 1,
+   "doc": "Number of grid columns, the length of the first side in edges (Blender Span).",
+   "enabled_if": {
+    "auto_span": false
+   },
+   "kind": "int",
+   "min": 1,
+   "soft_max": 32
+  },
+  "use_interp_simple": {
+   "default": false,
+   "doc": "Simple blending: interpolate by edge count instead of edge length (Blender Simple Blending).",
+   "kind": "bool"
+  }
+ },
  "group_create": {
   "angle": {
    "default": 45.0,
@@ -2918,10 +2965,17 @@
  "inset": {
   "amount": {
    "default": 0.1,
-   "doc": "",
+   "doc": "Inset thickness (Blender Thickness); negative values outset.",
    "kind": "float",
    "min": 0,
    "soft_max": 1
+  },
+  "depth": {
+   "default": 0.0,
+   "doc": "Move the inner faces along the face normal (Blender Depth).",
+   "kind": "float",
+   "soft_max": 2.0,
+   "soft_min": -2.0
   },
   "group": {
    "default": "",
@@ -2930,12 +2984,73 @@
   },
   "mode": {
    "default": "connected",
-   "doc": "",
+   "doc": "connected: inset the selected region as one; individual: inset every face on its own (same as Use Individual).",
    "kind": "enum",
    "options": [
     "connected",
     "individual"
    ]
+  },
+  "output_group": {
+   "default": false,
+   "doc": "Write the ring faces to a group.",
+   "kind": "bool"
+  },
+  "output_group_name": {
+   "default": "inset_ring",
+   "doc": "Name of the ring face group.",
+   "enabled_if": {
+    "output_group": true
+   },
+   "kind": "str"
+  },
+  "output_inner_group": {
+   "default": false,
+   "doc": "Write the inner (inset) faces to a group.",
+   "kind": "bool"
+  },
+  "output_inner_group_name": {
+   "default": "inset_inner",
+   "doc": "Name of the inner face group.",
+   "enabled_if": {
+    "output_inner_group": true
+   },
+   "kind": "str"
+  },
+  "use_boundary": {
+   "default": true,
+   "doc": "Also inset the mesh border; off keeps border edges and their points in place (Blender Boundary).",
+   "kind": "bool"
+  },
+  "use_edge_rail": {
+   "default": false,
+   "doc": "Slide boundary points along the existing edges that run into the region (Blender Edge Rail); ignored in individual mode.",
+   "kind": "bool"
+  },
+  "use_even_offset": {
+   "default": true,
+   "doc": "Scale the offset at corners so the ring keeps an even thickness (Blender Offset Even).",
+   "kind": "bool"
+  },
+  "use_individual": {
+   "default": false,
+   "doc": "Inset each face separately instead of the region (same as Mode individual).",
+   "kind": "bool"
+  },
+  "use_interpolate": {
+   "default": true,
+   "doc": "Copy point attributes to the new inner points; off zeroes them.",
+   "kind": "bool"
+  },
+  "use_outset": {
+   "default": false,
+   "doc": "Outset instead of inset.",
+   "kind": "bool"
+  },
+  "use_relative_offset": {
+   "default": false,
+   "doc": "Scale the thickness by the local boundary edge length (Blender Offset Relative).",
+   "kind": "bool"
   }
  },
  "instance": {
@@ -5973,6 +6088,31 @@
    "min": 1
   }
  },
+ "recalc_normals": {
+  "group": {
+   "default": "",
+   "doc": "Faces to orient (empty: all).",
+   "kind": "str"
+  },
+  "inside": {
+   "default": false,
+   "doc": "Point normals inward instead of outward (Blender Inside).",
+   "kind": "bool"
+  },
+  "output_group": {
+   "default": false,
+   "doc": "Write the faces that were flipped to a primitive group.",
+   "kind": "bool"
+  },
+  "output_group_name": {
+   "default": "flipped",
+   "doc": "Name of the flipped faces' group.",
+   "enabled_if": {
+    "output_group": true
+   },
+   "kind": "str"
+  }
+ },
  "region_identify": {
   "attribute": {
    "default": "class",
@@ -7315,6 +7455,65 @@
    "default": 1.0,
    "doc": "Multiplies scale",
    "kind": "float"
+  }
+ },
+ "tris_to_quads": {
+  "face_threshold": {
+   "default": 40.0,
+   "doc": "Maximum angle between the two triangle normals, in degrees (Blender Max Face Angle).",
+   "kind": "float",
+   "max": 180.0,
+   "min": 0.0
+  },
+  "group": {
+   "default": "",
+   "doc": "Faces to merge (empty: all triangles).",
+   "kind": "str"
+  },
+  "materials": {
+   "default": false,
+   "doc": "Do not merge faces with different material_index (Compare Materials).",
+   "kind": "bool"
+  },
+  "output_group": {
+   "default": true,
+   "doc": "Write the new quads to a primitive group.",
+   "kind": "bool"
+  },
+  "output_group_name": {
+   "default": "quads",
+   "doc": "Name of the new quads' group.",
+   "enabled_if": {
+    "output_group": true
+   },
+   "kind": "str"
+  },
+  "seam": {
+   "default": false,
+   "doc": "Do not merge across edges in the edge group seam.",
+   "kind": "bool"
+  },
+  "shape_threshold": {
+   "default": 40.0,
+   "doc": "Maximum deviation of any quad corner from 90 degrees (Blender Max Shape Angle).",
+   "kind": "float",
+   "max": 180.0,
+   "min": 0.0
+  },
+  "sharp": {
+   "default": false,
+   "doc": "Do not merge across edges in the edge group sharp.",
+   "kind": "bool"
+  },
+  "uvs": {
+   "default": false,
+   "doc": "Do not merge across a UV boundary (Compare UVs).",
+   "kind": "bool"
+  },
+  "vcols": {
+   "default": false,
+   "doc": "Do not merge across a Cd colour difference (Compare Color Attributes).",
+   "kind": "bool"
   }
  },
  "tube": {

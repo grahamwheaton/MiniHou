@@ -252,6 +252,50 @@ def meta() -> dict:
     out["group_create"]["direction"]["doc"] = "Reference normal for Normal/Coplanar. Explicit Planes overrides Direction and Plane Offset when populated."
     out["group_create"]["planes"] = {"kind": "string", "default": "", "doc": "Reference plane normals and offsets: nx ny nz offset; one plane per semicolon."}
     out["group_create"]["plane_tolerance"] = {"kind": "float", "default": 0.0001, "min": 0.0, "doc": "Maximum distance from each reference plane in internal length units."}
+    # Blender-audit mesh nodes (docs/RUST_MESH_NODES.md): Inset options and three Rust-only nodes.
+    out["inset"]["amount"]["doc"] = "Inset thickness (Blender Thickness); negative values outset."
+    out["inset"]["mode"]["doc"] = "connected: inset the selected region as one; individual: inset every face on its own (same as Use Individual)."
+    out["inset"].update({
+        "depth": {"kind": "float", "default": 0.0, "soft_min": -2.0, "soft_max": 2.0, "doc": "Move the inner faces along the face normal (Blender Depth)."},
+        "use_boundary": {"kind": "bool", "default": True, "doc": "Also inset the mesh border; off keeps border edges and their points in place (Blender Boundary)."},
+        "use_even_offset": {"kind": "bool", "default": True, "doc": "Scale the offset at corners so the ring keeps an even thickness (Blender Offset Even)."},
+        "use_relative_offset": {"kind": "bool", "default": False, "doc": "Scale the thickness by the local boundary edge length (Blender Offset Relative)."},
+        "use_edge_rail": {"kind": "bool", "default": False, "doc": "Slide boundary points along the existing edges that run into the region (Blender Edge Rail); ignored in individual mode."},
+        "use_outset": {"kind": "bool", "default": False, "doc": "Outset instead of inset."},
+        "use_individual": {"kind": "bool", "default": False, "doc": "Inset each face separately instead of the region (same as Mode individual)."},
+        "use_interpolate": {"kind": "bool", "default": True, "doc": "Copy point attributes to the new inner points; off zeroes them."},
+        "output_group": {"kind": "bool", "default": False, "doc": "Write the ring faces to a group."},
+        "output_group_name": {"kind": "str", "default": "inset_ring", "enabled_if": {"output_group": True}, "doc": "Name of the ring face group."},
+        "output_inner_group": {"kind": "bool", "default": False, "doc": "Write the inner (inset) faces to a group."},
+        "output_inner_group_name": {"kind": "str", "default": "inset_inner", "enabled_if": {"output_inner_group": True}, "doc": "Name of the inner face group."},
+    })
+    out["grid_fill"] = {
+        "group": {"kind": "str", "default": "", "doc": "Boundary edges to fill: edge ids, pA-B point pairs or edge group names (empty: every boundary loop)."},
+        "span": {"kind": "int", "default": 1, "min": 1, "soft_max": 32, "enabled_if": {"auto_span": False}, "doc": "Number of grid columns, the length of the first side in edges (Blender Span)."},
+        "auto_span": {"kind": "bool", "default": True, "doc": "Pick span and start from the loop's corners, as Blender does when Span is untouched."},
+        "offset": {"kind": "int", "default": 0, "soft_min": -32, "soft_max": 32, "doc": "Rotate the loop start vertex (Blender Offset)."},
+        "use_interp_simple": {"kind": "bool", "default": False, "doc": "Simple blending: interpolate by edge count instead of edge length (Blender Simple Blending)."},
+        "output_group": {"kind": "bool", "default": True, "doc": "Write the new faces to a primitive group."},
+        "output_group_name": {"kind": "str", "default": "grid_fill", "enabled_if": {"output_group": True}, "doc": "Name of the new faces' group."},
+    }
+    out["recalc_normals"] = {
+        "group": {"kind": "str", "default": "", "doc": "Faces to orient (empty: all)."},
+        "inside": {"kind": "bool", "default": False, "doc": "Point normals inward instead of outward (Blender Inside)."},
+        "output_group": {"kind": "bool", "default": False, "doc": "Write the faces that were flipped to a primitive group."},
+        "output_group_name": {"kind": "str", "default": "flipped", "enabled_if": {"output_group": True}, "doc": "Name of the flipped faces' group."},
+    }
+    out["tris_to_quads"] = {
+        "group": {"kind": "str", "default": "", "doc": "Faces to merge (empty: all triangles)."},
+        "face_threshold": {"kind": "float", "default": 40.0, "min": 0.0, "max": 180.0, "doc": "Maximum angle between the two triangle normals, in degrees (Blender Max Face Angle)."},
+        "shape_threshold": {"kind": "float", "default": 40.0, "min": 0.0, "max": 180.0, "doc": "Maximum deviation of any quad corner from 90 degrees (Blender Max Shape Angle)."},
+        "uvs": {"kind": "bool", "default": False, "doc": "Do not merge across a UV boundary (Compare UVs)."},
+        "vcols": {"kind": "bool", "default": False, "doc": "Do not merge across a Cd colour difference (Compare Color Attributes)."},
+        "seam": {"kind": "bool", "default": False, "doc": "Do not merge across edges in the edge group seam."},
+        "sharp": {"kind": "bool", "default": False, "doc": "Do not merge across edges in the edge group sharp."},
+        "materials": {"kind": "bool", "default": False, "doc": "Do not merge faces with different material_index (Compare Materials)."},
+        "output_group": {"kind": "bool", "default": True, "doc": "Write the new quads to a primitive group."},
+        "output_group_name": {"kind": "str", "default": "quads", "enabled_if": {"output_group": True}, "doc": "Name of the new quads' group."},
+    }
     return out
 
 
