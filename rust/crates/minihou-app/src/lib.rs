@@ -2,6 +2,7 @@
 extern crate self as minihou_app;
 pub mod cluster_lod;
 pub mod link_protocol;
+pub mod graph_embed;
 pub mod http_api;
 pub mod http_ops;
 pub mod http_geometry;
@@ -850,14 +851,26 @@ pub struct EditorDocument {
     pub history: History,
     pub path: std::path::PathBuf,
     saved: String,
+    /// Set when this document is bound to a Blender network (`<object> / <modifier>`).
+    /// Its edits sync back to Blender; Save As only exports a copy.
+    pub blender_label: Option<String>,
 }
 impl EditorDocument {
     pub fn new(doc: Document, path: std::path::PathBuf) -> Self {
-        Self { saved:doc.text().into(), doc, path, history:History::default() }
+        Self { saved:doc.text().into(), doc, path, history:History::default(), blender_label: None }
     }
     pub fn dirty(&self) -> bool { self.doc.text() != self.saved }
     pub fn title(&self) -> String {
+        if let Some(label) = &self.blender_label {
+            return format!("MiniHou - {}", graph_embed::binding_title(label));
+        }
         format!("MiniHou - {}{}", self.path.file_name().unwrap_or_default().to_string_lossy(), if self.dirty() { " *" } else { "" })
+    }
+    /// Write a separate copy (e.g. a `.minihou` file for sharing) without changing this
+    /// document's identity, save point or Blender binding.
+    pub fn export_to(&mut self, path: &Path) -> Result<()> {
+        self.history.finish(&self.doc);
+        self.doc.save(path)
     }
     pub fn save_to(&mut self, path: std::path::PathBuf) -> Result<()> {
         self.history.finish(&self.doc);

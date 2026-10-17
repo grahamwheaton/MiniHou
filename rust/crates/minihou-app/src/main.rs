@@ -371,6 +371,8 @@ struct App {
     transform_pivot: Option<[f32; 3]>,
     transform_orientation: Option<ui::Orientation>,
     modal: Option<Modal>,
+    /// graph_embed_v1: a pushed Blender graph waiting for the user's answer (modal).
+    embed_conflict: Option<Value>,
     model_modal: Option<(ModelState, Document, String, String)>,
     mirror: Option<ui::mirror_tool::Session>,
     pushpull_pick: bool,
@@ -458,7 +460,7 @@ impl App {
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),link:None,blender_job:None,
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
             display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
-            clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
+            clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,embed_conflict:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
             last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false };
         app.prefs = Preferences::load();
         app.prefs.apply_python(&python_gate());
@@ -557,6 +559,46 @@ impl App {
             self.camera = Camera::frame(center, radius);
             self.camera.set_clip_planes(self.editor_state.proxy.clip_start, self.editor_state.proxy.clip_end);
         } else { self.frame_mesh(); }
+    }
+    /// graph_embed_v1 conflict modal: a Blender push never overwrites unsaved work silently.
+    fn embed_conflict_modal(&mut self, ctx: &egui::Context) {
+        use minihou_app::graph_embed::{conflict_prompt, Resolution};
+        let Some(conflict) = self.embed_conflict.clone() else { return };
+        if self.link.is_none() { self.embed_conflict = None; return; }
+        let kind = conflict["kind"].as_str().unwrap_or("live");
+        let (text, choices) = conflict_prompt(kind, conflict["label"].as_str().unwrap_or(""));
+        let mut chosen = None;
+        egui::Modal::new(egui::Id::new("minihou_embed_conflict")).show(ctx, |ui| {
+            ui.set_max_width(460.);
+            ui.heading("Embedded Blender network");
+            ui.label(text);
+            ui.add_space(8.);
+            ui.horizontal(|ui| for (resolution, label) in choices {
+                if ui.button(label).clicked() { chosen = Some(resolution); }
+            });
+        });
+        let Some(resolution) = chosen else { return };
+        if resolution == Resolution::OpenAsNew && kind == "live" {
+            let name = format!("{} (my edits).minihou", conflict["name"].as_str().filter(|s| !s.is_empty()).unwrap_or("network"));
+            let Some(path) = rfd::FileDialog::new().add_filter("MiniHou graph", &["minihou", "json"]).set_file_name(name).save_file() else { return };
+            if let Err(e) = self.editor.export_to(&path) { self.file_status = format!("Export failed: {e}"); return; }
+            self.file_status = format!("Your version was saved to {}", path.display());
+        }
+        self.embed_conflict = None;
+        let mut link = self.link.take().unwrap();
+        let edits = link.resolve_embed(&conflict, resolution, &mut self.editor);
+        self.link = Some(link);
+        match edits {
+            Ok(edits) => {
+                if !edits.is_empty() {
+                    self.display = Graph::from_value(self.editor.doc.value()).ok().and_then(|g| g.main_output().ok()).unwrap_or_default();
+                    self.selected = self.display.clone();
+                    self.selected_set = std::collections::BTreeSet::from([self.display.clone()]);
+                }
+                for edit in edits { self.send(edit); }
+            }
+            Err(e) => self.file_status = format!("Could not apply the embedded graph: {e}"),
+        }
     }
     fn save_to(&mut self, path: PathBuf) {
         self.editor.history.finish(&self.editor.doc);
@@ -1879,10 +1921,18 @@ impl App {
                     self.selection = snapshot.selection; self.selected = snapshot.selected;
                     self.selected_set = snapshot.selected_set; self.selection_dirty = true;
                 }
-                UiAction::Open => if let Some(path) = rfd::FileDialog::new().add_filter("MiniHou graph", &["json"]).pick_file() { self.open(path); },
+                UiAction::Open => if let Some(path) = rfd::FileDialog::new().add_filter("MiniHou graph", &["json", "minihou"]).pick_file() { self.open(path); },
                 UiAction::Save => self.save_to(self.editor.path.clone()),
+                UiAction::SaveAs if self.editor.blender_label.is_some() => {
+                    // A Blender-bound document saves into the .blend implicitly; Save As exports a
+                    // separate .minihou copy and keeps the binding (graph_embed_v1).
+                    let name = format!("{}.minihou", self.editor.blender_label.as_deref().unwrap_or("network").replace(['/', '\\', ':'], "_").replace(" _ ", "_"));
+                    if let Some(path) = rfd::FileDialog::new().add_filter("MiniHou graph", &["minihou", "json"]).set_file_name(name).save_file() {
+                        self.file_status = match self.editor.export_to(&path) { Ok(()) => format!("Exported {}", path.display()), Err(e) => format!("Export failed: {e}") };
+                    }
+                }
                 UiAction::SaveAs => {
-                    if let Some(path) = rfd::FileDialog::new().add_filter("MiniHou graph", &["json"]).set_file_name(self.editor.path.file_name().unwrap_or_default().to_string_lossy()).save_file() { self.save_to(path); }
+                    if let Some(path) = rfd::FileDialog::new().add_filter("MiniHou graph", &["json", "minihou"]).set_file_name(self.editor.path.file_name().unwrap_or_default().to_string_lossy()).save_file() { self.save_to(path); }
                 }
                 UiAction::Undo | UiAction::Redo => {
                     let undo = matches!(action, UiAction::Undo);
@@ -2071,7 +2121,7 @@ impl eframe::App for App {
         let requests = self.link.as_ref().map(|link| link.poll()).unwrap_or_default();
         for request in requests {
             let result: Result<()> = match request.message["type"].as_str() {
-                Some("live_activate" | "live_update" | "live_remove") => {
+                Some("live_activate" | "live_update" | "live_remove" | "live_replace") => {
                     let mut link=self.link.take().unwrap();
                     let edits=link.handle_live(&request,&mut self.editor);
                     self.link=Some(link);
@@ -2086,6 +2136,12 @@ impl eframe::App for App {
                         },
                         Err(e)=>Err(e.into()),
                     }
+                },
+                Some("embed_conflict") => {
+                    // Never decided silently: the modal below asks (graph_embed_v1).
+                    self.embed_conflict = Some(request.message.clone());
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                    Ok(())
                 },
                 Some("set_param") => minihou_app::link_param_edit(self.editor.doc.value(), &request.message)
                     .map(|edit| {
@@ -2125,7 +2181,9 @@ impl eframe::App for App {
                 }
             }
         }
+        self.embed_conflict_modal(ctx);
         if let Some(link) = &self.link {
+            link.set_open_dirty(!link.live_active() && self.editor.dirty());
             link.document_changed(&self.editor.doc, &self.editor.path);
             let clients = link.clients();
             let disconnected = !self.blender.clients.is_empty() && clients.is_empty();

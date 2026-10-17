@@ -4,7 +4,7 @@ import textwrap
 import bpy
 from bpy.props import StringProperty
 
-from . import modifiers, runtime
+from . import embed, embed_ui, modifiers, runtime
 from .network_editor import NetworkEditor
 
 router = NetworkEditor()
@@ -29,6 +29,9 @@ class MINIHOU_OT_edit_network(bpy.types.Operator):
         try:
             server, path = modifiers.edit_live(context.object, mod)
             router.start(server, path, live=True)
+        except embed.ConflictPending as exc:
+            self.report({"WARNING"}, str(exc))
+            return {"FINISHED"}
         except Exception as exc:
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
@@ -96,7 +99,7 @@ def draw_objects(layout, mod):
 def draw(layout, mod):
     draw_objects(layout, mod)
     row = layout.column(align=True)
-    row.operator("minihou.edit_network", icon="URL").modifier_name = mod.name
+    row.operator("minihou.edit_network", text="Open in MiniHou", icon="URL").modifier_name = mod.name
     row.operator("minihou.reload_modifier", text="Reload Graph", icon="FILE_REFRESH").modifier_name = mod.name
     layout.label(text="Live editor: this modifier")
     state = router.snapshot()
@@ -107,14 +110,17 @@ def draw(layout, mod):
         width = max(18, min(72, (region.width - 50) // 7)) if region else 45
         for line in textwrap.wrap(state["detail"], width):
             status.label(text=line)
+    embed_ui.draw(layout, mod)
 
 
 def register():
     bpy.utils.register_class(MINIHOU_OT_edit_network)
     bpy.utils.register_class(MINIHOU_OT_choose_object)
+    embed_ui.register()
 
 
 def unregister():
+    embed_ui.unregister()
     if bpy.app.timers.is_registered(_redraw):
         bpy.app.timers.unregister(_redraw)
     bpy.utils.unregister_class(MINIHOU_OT_choose_object)

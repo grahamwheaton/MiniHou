@@ -1,6 +1,6 @@
 # Rust / Blender link status
 
-Updated 2026-10-16. This describes the current checkout, including the add-on changes here. The Desktop backup was not changed.
+Updated 2026-10-17 (embedded networks); previously 2026-10-16. This describes the current checkout, including the add-on changes here. The Desktop backup was not changed.
 
 ## Dynamic modifier inputs (add-on 0.2.0)
 
@@ -9,6 +9,10 @@ The Rust `modifier_input` node stores ordered `modifier_inputs` definitions (`id
 The 0.2.0 bridge lists float, int, bool, vector, color, rotation, matrix, string, menu, object, collection, material, image, texture, geometry, bundle and closure socket types. Float, int, vector and string subtypes map to their matching Blender socket classes; vector includes translation/xyz/euler/direction/velocity/acceleration. `bpy.app.version` and available `bpy.types` guard newer sockets. Menu inputs connect to generated Menu Switch nodes so Blender can populate their options; a new menu defaults to its first option. Rotation and matrix use the modifier's attribute-use chain, while object, collection, material, image and texture use reference comparisons on Blender 5.2+. Object and collection references cross as names; evaluated object meshes travel through `instance_sources`, with names/transforms in `references`. Wired geometry inputs also travel as mesh sources. Existing `object_input` nodes can read an `input:<modifier node>:<stable id>` binding. Material/image/texture references are available as names to string-accepting Rust nodes. Linked bundle/closure values report an unsupported-data error. Computed links beyond float/int/bool/vector sampling have not been implemented; unsupported computed links report an error instead of being guessed.
 
 Mocked bpy interface tests and the headless Rust link test cover float, int, bool, vector, color, string and object round trips, independent placement values, and stable socket identifiers on rename/reorder. Actual Blender socket construction, modifier panel behavior, evaluated object/geometry sampling, reference metadata and UI interaction remain unverified without Blender.
+
+## Embedded networks (add-on 0.3.0, `graph_embed_v1`)
+
+The welcome now also advertises `graph_embed_v1`. `graph_push` -> `graph_ack` (unchanged / accepted / app_newer / conflict) and `graph_pull` -> `graph_state` (ok / none / pending / resolved) carry an embedded network as exact JSON text with a sha256 over its bytes, a byte size (max 32 MiB) and envelope schema 1; `instance_synced` adds `hash` and `embed_pending`. The app binds a document titled `Blender: <object>/<modifier>`, asks in an egui modal when Blender's copy and app edits (or an unsaved open document) conflict, and its Save As on a bound document exports a `.minihou` copy without unbinding. Instance graphs may be `.minihou` files. Pending conflicts and answers are shared across connections so a reconnecting add-on still learns the outcome. Older add-ons/apps keep working: the add-on only pushes when the capability is present. Pure logic: `src/graph_embed.rs`; handling: `link_instances.rs` (`embed_push`/`embed_pull`), `blender_link.rs` (`live_replace`, `resolve_embed`), `main.rs` (modal). Evidence: Rust unit tests, and `tests/test_blender_embed.py` against `link_selftest` in headless Blender 4.3, 5.0, 5.1 and 5.2 (the selftest accepts `open_dirty` and `resolve` control commands). The app's modal and title have not been exercised in the live window. See [EMBEDDED_GRAPHS.md](EMBEDDED_GRAPHS.md).
 
 ## Implemented contracts
 

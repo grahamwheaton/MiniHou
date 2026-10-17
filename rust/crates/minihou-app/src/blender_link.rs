@@ -545,6 +545,12 @@ struct LinkShared {
     next_peer: AtomicU64,
     live_documents: Mutex<BTreeMap<String, Value>>,
     live_active: AtomicBool,
+    /// graph_embed_v1: the user's conflict-modal answers, keyed by Blender network id.
+    embed_resolutions: Mutex<BTreeMap<String, String>>,
+    /// Pushed graphs waiting for that answer (shared: a reconnecting add-on still learns the outcome).
+    embed_pending: Mutex<BTreeMap<String, Value>>,
+    /// The UI's unrelated open document has unsaved edits (ask before a pushed graph takes over).
+    open_dirty: AtomicBool,
 }
 pub struct LinkRequest {
     pub peer: u64,
@@ -592,6 +598,9 @@ impl LinkServer {
             next_peer: AtomicU64::new(1),
             live_documents: Mutex::new(BTreeMap::new()),
             live_active: AtomicBool::new(false),
+            embed_resolutions: Mutex::new(BTreeMap::new()),
+            embed_pending: Mutex::new(BTreeMap::new()),
+            open_dirty: AtomicBool::new(false),
         });
         let (sender, requests) = mpsc::sync_channel(256);
         let state = shared.clone();
@@ -668,6 +677,34 @@ impl LinkServer {
             completion: None,
         };
         self.handle_live(&request, editor).unwrap_or_default()
+    }
+    /// The UI reports whether its own (non-Blender) document has unsaved edits.
+    pub fn set_open_dirty(&self, dirty: bool) {
+        self.shared.open_dirty.store(dirty, Ordering::Relaxed);
+    }
+    /// Apply the user's answer to an `embed_conflict` request (graph_embed_v1). The add-on
+    /// learns the outcome through `graph_pull`. Unsaved work is never overwritten here:
+    /// `KeepMine` changes nothing, the others replace the bound document through its
+    /// undo history (the caller exports the user's version first for `OpenAsNew`).
+    pub fn resolve_embed(
+        &mut self,
+        conflict: &Value,
+        resolution: minihou_app::graph_embed::Resolution,
+        editor: &mut minihou_app::EditorDocument,
+    ) -> io::Result<Vec<minihou_app::Edit>> {
+        let id = conflict["instance_id"].as_str().unwrap_or("").to_string();
+        let mut edits = Vec::new();
+        if resolution.adopts_embedded() && conflict["kind"] == "live" {
+            let request = LinkRequest {
+                peer: 0,
+                message: json!({"type":"live_replace","path":conflict["path"],"graph":conflict["graph"]}),
+                arrays: Arrays::new(),
+                completion: None,
+            };
+            edits = self.handle_live(&request, editor)?;
+        }
+        self.shared.embed_resolutions.lock().unwrap().insert(id, resolution.as_str().into());
+        Ok(edits)
     }
     pub fn poll(&self) -> Vec<LinkRequest> {
         self.requests.try_iter().collect()
@@ -773,6 +810,20 @@ impl LinkServer {
                 }
                 return Ok(vec![]);
             }
+            if h["type"] == "live_replace" {
+                // graph_embed_v1: Blender's embedded graph replaces the bound document (undoable).
+                let doc = Document::parse(h["graph"].to_string())?;
+                self.shared.live_documents.lock().unwrap().insert(key.clone(), doc.value().clone());
+                if current {
+                    editor.history.replace(&mut editor.doc, doc);
+                    self.document_changed(&editor.doc, &editor.path);
+                    return Ok(vec![Edit::Replace(editor.doc.value().clone())]);
+                }
+                if let Some(cached) = self.live_editors.get_mut(&key) {
+                    cached.history.replace(&mut cached.doc, doc);
+                }
+                return Ok(vec![]);
+            }
             if h["type"] != "live_activate" && !current {
                 if let Some(overrides)=h["overrides"].as_object() {
                     let graph=self.shared.live_documents.lock().unwrap().get(&key).cloned().unwrap_or(h["graph"].clone());
@@ -846,6 +897,9 @@ impl LinkServer {
                     minihou_app::EditorDocument::new(doc.clone(), PathBuf::from(&key))
                 });
                 new.history.replace(&mut new.doc, doc);
+                if let Some(label) = h["label"].as_str().filter(|s| !s.is_empty()) {
+                    new.blender_label = Some(label.chars().take(200).collect());
+                }
                 let old = std::mem::replace(editor, new);
                 if let Some(old_key) = self.active_live.take() {
                     self.live_editors.insert(old_key, old);
@@ -950,7 +1004,7 @@ fn serve_client(
     send_frame(
         &mut socket,
         &json!({"type":"welcome","protocol":link_protocol::PROTOCOL_VERSION,"server":"minihou",
-        "capabilities":["instances_v1","live_modifier_v1","object_inputs_v1","scene_objects_v1","image_exchange_v1"],"editor_url":null,"editor":"native","graph_path":snapshot.graph_path}),
+        "capabilities":["instances_v1","live_modifier_v1","object_inputs_v1","scene_objects_v1","image_exchange_v1",minihou_app::graph_embed::CAPABILITY],"editor_url":null,"editor":"native","graph_path":snapshot.graph_path}),
         &Arrays::new(),
     )?;
     let instance_mode = hello["mode"] == "instances";
@@ -1022,7 +1076,7 @@ fn serve_client(
                         interface = Value::Null;
                         watch = Value::Null;
                     }
-                    typ if typ.starts_with("instance_") => {
+                    typ if typ.starts_with("instance_") || typ.starts_with("graph_") => {
                         let (header, output) = if instance_mode {
                             instances.handle(&h, &arrays)
                         } else {
@@ -1223,7 +1277,8 @@ mod tests {
                 "live_modifier_v1",
                 "object_inputs_v1",
                 "scene_objects_v1",
-                "image_exchange_v1"
+                "image_exchange_v1",
+                "graph_embed_v1"
             ])
         );
         socket

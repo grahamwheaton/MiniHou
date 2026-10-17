@@ -17,7 +17,7 @@ import uuid
 import bpy
 from bpy.app.handlers import persistent
 
-from . import mesh_reader, mesh_writer, proxy, scene_objects
+from . import embed, mesh_reader, mesh_writer, proxy, scene_objects
 from .protocol import GeoUpdate, Mirror, instance_payload
 
 KEY = "minihou_modifier_id"
@@ -458,18 +458,28 @@ def _apply_live(mod, header):
     values = {p["name"]: p["value"] for p in header["interface"]}
     current = proxy.read_values(mod, ng, parameters(mod))
     if ng[GRAPH] != data or any(not proxy.same_value(current.get(k), v) for k, v in values.items()):
+        graph_changed = ng[GRAPH] != data
         ng[GRAPH] = data
         _interface(mod, header)
         proxy.write_values(mod, ng, parameters(mod), values)
         _digests.pop(instance_id(mod), None)
         _failures.pop(instance_id(mod), None)
+        if graph_changed:   # an edit made in MiniHou: the embedded copy follows (debounced)
+            embed.note_graph(ng, pending=bool(header.get("embed_pending")))
     if ng.get(PATH) != header["path"]:
         ng[PATH] = header["path"]
 
 
-def edit_live(obj, mod):
+def edit_live(obj, mod, *, push=True):
     """Bind actual pre-modifier geometry to the editor without using a legacy proxy."""
     client = _connection()
+    ng = mod.node_group
+    if push and embed.mode(ng) == embed.EMBEDDED:
+        # graph_embed_v1: the app binds a document to this network; a conflicting open
+        # document or concurrent edit is answered in MiniHou's dialog (polled by pump()).
+        if embed.push(client, ng, obj.name + " / " + mod.name) == "conflict":
+            raise embed.ConflictPending("MiniHou is asking how to combine your open work with this "
+                                        "embedded network; answer in the MiniHou window")
     arrays, materials = read_prefix(obj, mod, with_materials=True)
     materials = list(materials)
     scene = bpy.context.scene
@@ -492,8 +502,8 @@ def add_modifier(obj, graph_path, *, host=None, port=None):
     if obj.type != "MESH" or obj.library is not None:
         raise ValueError("Select a local editable mesh object")
     path = os.path.abspath(bpy.path.abspath(graph_path)) if graph_path.strip() else ""
-    if path and not path.lower().endswith(".json"):
-        raise ValueError("Graph must name a .json file; leave Graph empty to start a new modifier")
+    if path and not path.lower().endswith((".json", ".minihou")):
+        raise ValueError("Graph must name a .minihou or .json file; leave Graph empty to start a new modifier")
     starter = {"nodes": {"input": {"type": "modifier_input"},
                            "transform": {"type": "transform", "inputs": {"geo": "input"}},
                            "output": {"type": "output", "inputs": {"geo": "transform"}}},
@@ -514,13 +524,26 @@ def add_modifier(obj, graph_path, *, host=None, port=None):
     proxy.link_passthrough(ng)
     ng[STATUS] = "Waiting for first cook"
     _owners[instance_id(mod)] = (obj.as_pointer(), mod.as_pointer())
+    # 0.3.0: new networks live inside the .blend; a source file is remembered for comparison/extract.
+    try:
+        embed.embed(ng, label=obj.name + " " + mod.name, file=path or None)
+    except embed.EmbedError as exc:
+        ng[embed.ERROR] = f"Kept in Linked File mode: {exc}"
     return mod
 
 
 def reload_graph(mod, *, host=None, port=None):
-    """Explicitly adopt the external editor's saved graph, preserving matching parameter values."""
-    header = _connection(host, port).describe(graph_path(mod))
+    """Explicitly adopt the saved graph (embedded text or linked file), preserving matching parameter values."""
+    ng = mod.node_group
+    embedded = embed.mode(ng) == embed.EMBEDDED
+    path = embed.linked_file(ng) if embedded else (embed.linked_file(ng) or graph_path(mod))
+    if embedded and not (path and os.path.exists(path)):
+        header = _connection(host, port).describe("", embed.read(ng)[0])   # no file: re-read the .blend copy
+    else:
+        header = _connection(host, port).describe(path)
     mod.node_group[GRAPH] = json.dumps(header["graph"])
+    if embedded:
+        embed.write(ng)   # the reloaded file becomes the embedded copy
     _interface(mod, header)
     _digests.pop(instance_id(mod), None)
     _failures.pop(instance_id(mod), None)
@@ -672,8 +695,10 @@ def _cleanup(live):
                 bpy.data.meshes.remove(mesh)
     for ng in list(bpy.data.node_groups):
         if KEY in ng and ng.users == 0:
+            embed.release(ng)  # a deleted modifier's embedded network goes with it
             bpy.data.node_groups.remove(ng)
     proxy.cleanup_plumbing()  # after the outer groups, whose removal releases them
+    embed.repair()  # duplicated networks get their own text; orphaned texts are removed
     # Wired GN placements own scene sinks just like stack modifiers.
     gn_owners = {ng.get("minihou_gn_id") for ng in bpy.data.node_groups if ng.get("minihou_gn_id")}
     scene_objects.retain_owners(set(live) | gn_owners)  # removed owners are parked, never deleted
@@ -696,6 +721,7 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                     if mod.type == "NODES":
                         geonodes._promote_wired_modifier(mod)
         geonodes._cleanup()
+        embed.repair()
         if any(geonodes.contains(getattr(m, "node_group", None))
                for o in bpy.context.scene.objects for m in o.modifiers):
             count = geonodes.pump(host, port, force=force)
@@ -742,6 +768,11 @@ def pump(host=None, port=None, *, force=False, _only=None, render=False):
                     continue
                 signature = None
                 try:
+                    if ng.get(embed.STATE) == "conflict":
+                        # graph_embed_v1: the user answers in MiniHou; then open (or stay closed).
+                        resolution = embed.poll(client, ng)
+                        if resolution and resolution != "keep_mine" and instance_id(mod) not in _live_ids:
+                            edit_live(obj, mod, push=False)  # already answered; do not ask again
                     if instance_id(mod) in _live_ids:
                         _apply_live(mod, client.sync_live(instance_id(mod), proxy.read_values(mod, ng, parameters(mod))))
                     if has_rbd(mod):
@@ -948,9 +979,11 @@ def register():
         bpy.app.handlers.frame_change_post.append(_frame_post)
     if not bpy.app.timers.is_registered(_timer):
         bpy.app.timers.register(_timer, first_interval=0.2, persistent=True)
+    embed.register()
 
 
 def unregister():
+    embed.unregister()
     global _registered
     _registered = False
     _render_done(None)
