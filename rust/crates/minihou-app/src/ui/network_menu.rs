@@ -75,14 +75,14 @@ fn accepts(menu: &MenuState, ty: &str) -> bool {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Item { Add, Paste, Tidy, FrameAll, Display, Mute, Lock, Template, Duplicate, Delete, Rename }
+pub(super) enum Item { Add, Paste, Tidy, FrameAll, Display, Mute, Lock, Template, Duplicate, Delete, Rename }
 fn items_for(target: Option<&str>) -> Vec<Item> {
     if target.is_some() { vec![Item::Display, Item::Mute, Item::Lock, Item::Template, Item::Duplicate, Item::Delete, Item::Rename] }
     else { vec![Item::Add, Item::Paste, Item::Tidy, Item::FrameAll] }
 }
 
 #[derive(Clone, Copy)]
-enum Entry { Item(Item), Category(usize), Tool(&'static str), Operator(&'static str) }
+pub(super) enum Entry { Item(Item), Category(usize), Tool(&'static str), Operator(&'static str) }
 fn entries(menu: &MenuState) -> Vec<(String, Entry)> {
     if !menu.add { return items_for(menu.target.as_deref()).into_iter().map(|item| (item_label(item).to_owned(), Entry::Item(item))).collect(); }
     if !menu.query.trim().is_empty() {
@@ -93,8 +93,8 @@ fn entries(menu: &MenuState) -> Vec<(String, Entry)> {
             .filter_map(|tool| search_score(tool.node_type, query).map(|score| (score, tool))).collect();
         ranked.sort_by(|a,b| a.0.cmp(&b.0).then_with(|| meta(a.1.node_type, "label").cmp(meta(b.1.node_type, "label"))));
         let mut matches: Vec<_> = ranked.into_iter().map(|(_, tool)|
-            (format!("{} · {}", tool.label, meta(tool.node_type, "menu")), Entry::Tool(tool.node_type))).collect();
-        if menu.connect_to.is_none() && "select coplanar".contains(&query) {matches.insert(0,("Select Coplanar · Selection".into(),Entry::Operator("select_coplanar")));}
+            (tool.label.to_owned(), Entry::Tool(tool.node_type))).collect();
+        if menu.connect_to.is_none() && "select coplanar".contains(&query) {matches.insert(0,("Select Coplanar".into(),Entry::Operator("select_coplanar")));}
         matches.truncate(80);
         return matches;
     }
@@ -182,6 +182,18 @@ fn activate(entry: Entry, menu: &mut MenuState, v: &View, out: &mut Actions) -> 
     }
 }
 
+pub(super) fn footer_text(entry: Option<&Entry>) -> &'static str {
+    const DEFAULT_BLURB: &str = "↑ ↓ choose   Enter add   Esc close   • missing Rust node";
+    match entry {
+        Some(Entry::Tool(ty)) => {
+            let doc = meta(ty, "doc").lines().next().unwrap_or("").trim();
+            if !doc.is_empty() { doc } else { DEFAULT_BLURB }
+        }
+        Some(Entry::Operator("select_coplanar")) => "Select coplanar faces",
+        _ => DEFAULT_BLURB,
+    }
+}
+
 pub(super) fn show(ctx: &egui::Context, id: Id, menu: &mut MenuState, v: &View, out: &mut Actions) -> Option<Choice> {
     if ctx.input(|i| i.key_pressed(Key::Escape)) {
         ctx.input_mut(|i| {
@@ -240,13 +252,13 @@ pub(super) fn show(ctx: &egui::Context, id: Id, menu: &mut MenuState, v: &View, 
                     } }
                     if response.hovered() { menu.active = index; }
                     if response.clicked() { chosen = Some(*entry); }
-                    if let Entry::Tool(ty) = entry {
-                        let description = meta(ty, "doc").lines().next().unwrap_or("");
-                        if !description.is_empty() { ui.label(RichText::new(description).small().color(v.theme.faint)); }
-                    }
                 }
             });
-            if menu.add { ui.separator(); ui.label(RichText::new("↑ ↓ choose   Enter add   Esc close   • missing Rust node").small().color(v.theme.faint)); }
+            if menu.add {
+                ui.separator();
+                let text = footer_text(shown.get(menu.active).map(|(_, entry)| entry));
+                ui.label(RichText::new(text).small().color(v.theme.faint));
+            }
         });
     });
     if let Some(entry) = chosen { return activate(entry, menu, v, out); }
@@ -332,5 +344,32 @@ mod tests {
         let menu = MenuState::pie(Pos2::ZERO);
         let labels: Vec<_> = entries(&menu).into_iter().map(|(label, _)| label).collect();
         assert_eq!(labels, ["1  Adjust", "2  Deform", "3  Polygons", "4  Group", "5  Create", "6  Build", "7  Edges", "8  Modify"]);
+    }
+    #[test] fn search_popup_result_rows_show_only_node_names() {
+        for (query, expected_name) in [("box", "Box"), ("bevel", "PolyBevel"), ("extrude", "PolyExtrude"), ("select coplanar", "Select Coplanar")] {
+            let mut menu = MenuState::new(Pos2::ZERO, None, true);
+            menu.query = query.into();
+            let rows = entries(&menu);
+            assert!(!rows.is_empty(), "expected matches for query {query}");
+            assert_eq!(rows[0].0, expected_name);
+            for (label, _) in &rows {
+                assert!(!label.contains('·'), "row label '{label}' should not contain category separator");
+            }
+        }
+    }
+    #[test] fn search_popup_footer_shows_item_description_and_category_blurb() {
+        assert_eq!(footer_text(Some(&Entry::Tool("box"))), "Polygon box or surface points; optional input fits an axis-aligned bounding box before rotation.");
+        assert_eq!(footer_text(Some(&Entry::Tool("polybevel"))), "Bevel polygon edges with segmented round or flat profiles. Keep ``distance`` below half");
+        assert_eq!(footer_text(Some(&Entry::Category(0))), "↑ ↓ choose   Enter add   Esc close   • missing Rust node");
+        assert_eq!(footer_text(None), "↑ ↓ choose   Enter add   Esc close   • missing Rust node");
+
+        let f = crate::ui::testing::Fixture::new();
+        let ctx = egui::Context::default();
+        let mut menu = MenuState::new(pos2(30., 30.), None, true);
+        menu.query = "box".into(); menu.active = 0; menu.focus = false;
+        let mut actions = Actions::default();
+        let _ = ctx.run(egui::RawInput::default(), |ctx| { show(ctx, Id::new("search_harness"), &mut menu, &f.view(), &mut actions); });
+        let shown = entries(&menu);
+        assert_eq!(footer_text(shown.get(menu.active).map(|(_, e)| e)), "Polygon box or surface points; optional input fits an axis-aligned bounding box before rotation.");
     }
 }

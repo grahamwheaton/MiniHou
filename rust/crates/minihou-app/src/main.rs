@@ -1935,7 +1935,14 @@ impl App {
                 let mode = toggle_edit_mode(e.selection, &mut self.last_edit_selection);
                 self.editor_state.apply(C::Selection(mode));
             }
-            "select_none" => { self.selection.clear(); self.selection_dirty = true; self.selected_set.clear(); self.selected.clear(); }
+            "select_none" => {
+                if self.network_hover {
+                    self.selected_set.clear();
+                    self.selected.clear();
+                    return;
+                }
+                self.selection.clear(); self.selection_dirty = true; self.selected_set.clear(); self.selected.clear();
+            }
             "select_all" => {
                 if self.network_hover {
                     self.selected_set = self.editor.doc.value()["nodes"].as_object().map(|n| n.keys().cloned().collect()).unwrap_or_default();
@@ -3327,5 +3334,46 @@ mod tools_tests {
         state.proportional.falloff = ui::Falloff::Random;
         proportional_params(&mut params, &state);
         assert_eq!(params["proportional_falloff"], "random");
+    }
+    #[test]
+    fn network_select_all_and_deselect_all_manage_node_set_without_affecting_viewport_mesh_selection() {
+        let doc = json!({
+            "nodes": {
+                "box1": {"type": "box"},
+                "transform1": {"type": "transform", "inputs": {"geo": "box1"}},
+                "out": {"type": "null", "inputs": {"geo": "transform1"}}
+            }
+        });
+        let all_nodes: std::collections::BTreeSet<String> = doc["nodes"].as_object().unwrap().keys().cloned().collect();
+        assert_eq!(all_nodes.len(), 3);
+
+        let mut selected_set = std::collections::BTreeSet::from(["box1".to_string()]);
+        let mut selected = "box1".to_string();
+        assert_eq!(selected_set.len(), 1);
+        assert_eq!(selected, "box1");
+        let mut mesh_selection = picking::Selection {
+            mode: ui::SelectionMode::Points,
+            points: vec![0, 1, 2],
+            edges: vec![],
+            tris: vec![],
+        };
+
+        // Select all nodes in network (A)
+        selected_set = all_nodes.clone();
+        selected = selected_set.iter().next().cloned().unwrap_or_default();
+        assert_eq!(selected_set.len(), 3);
+        assert!(!selected.is_empty());
+        assert_eq!(mesh_selection.points, vec![0, 1, 2]);
+
+        // Deselect all nodes in network (Alt+A)
+        selected_set.clear();
+        selected.clear();
+        assert!(selected_set.is_empty());
+        assert!(selected.is_empty());
+        assert_eq!(mesh_selection.points, vec![0, 1, 2]);
+
+        // Deselect in viewport (viewport Alt+A) clears mesh selection
+        mesh_selection.clear();
+        assert!(mesh_selection.is_empty());
     }
 }

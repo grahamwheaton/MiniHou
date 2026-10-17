@@ -228,6 +228,8 @@ impl Keymap {
         add(K::L,false,false,false,C::SelectLinked,X::Viewport);
         add(K::I,true,false,false,C::InvertSelection,X::Viewport);
         add(K::I,true,false,false,C::InvertSelection,X::Network);
+        add(K::A,false,false,false,C::SelectAll,X::Network);
+        add(K::A,false,false,true,C::SelectNone,X::Network);
         Self { bindings: b, emulate_numpad: false }
     }
     pub fn reset(&mut self) { *self = Self::blender(); }
@@ -587,5 +589,64 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
             let _ = ctx.run(input, |ctx| { found = Keymap::blender().poll(ctx, &KeyContext { viewport_hovered: true, in_edit_mode: edit, ..Default::default() }); });
             assert!(matches!(found.as_slice(), [UiAction::Editor(EditorChange::Selection(m))] if *m == mode), "{key:?} {found:?}");
         } }
+    }
+    #[test] fn network_a_and_alt_a_select_and_deselect_all_nodes_hover_scoped() {
+        for (modifiers, expected) in [(Modifiers::NONE, "select_all"), (Modifiers::ALT, "select_none")] {
+            // Hovered over network editor
+            let ctx = egui::Context::default();
+            let input = egui::RawInput { modifiers, events: vec![egui::Event::Key {
+                key: Key::A, physical_key: None, pressed: true, repeat: false, modifiers
+            }], ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                let actions = Keymap::blender().poll(ctx, &KeyContext {
+                    network_hovered: true, viewport_hovered: false, ..Default::default()
+                });
+                assert!(matches!(actions.as_slice(), [UiAction::Command(name)] if name == expected));
+            });
+
+            // Hovered over viewport: viewport A / Alt+A keep their own meaning and are unaffected by network
+            let ctx = egui::Context::default();
+            let input = egui::RawInput { modifiers, events: vec![egui::Event::Key {
+                key: Key::A, physical_key: None, pressed: true, repeat: false, modifiers
+            }], ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                let actions = Keymap::blender().poll(ctx, &KeyContext {
+                    network_hovered: false, viewport_hovered: true, ..Default::default()
+                });
+                assert!(matches!(actions.as_slice(), [UiAction::Command(name)] if name == expected));
+            });
+
+            // Neither hovered
+            let ctx = egui::Context::default();
+            let input = egui::RawInput { modifiers, events: vec![egui::Event::Key {
+                key: Key::A, physical_key: None, pressed: true, repeat: false, modifiers
+            }], ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                let actions = Keymap::blender().poll(ctx, &KeyContext {
+                    network_hovered: false, viewport_hovered: false, ..Default::default()
+                });
+                assert!(actions.is_empty());
+            });
+        }
+    }
+    #[test] fn a_and_alt_a_ignored_while_typing_in_text_field() {
+        for modifiers in [Modifiers::NONE, Modifiers::ALT] {
+            let ctx = egui::Context::default();
+            ctx.memory_mut(|m| m.request_focus(egui::Id::new("text_field")));
+            let input = egui::RawInput { modifiers, events: vec![egui::Event::Key {
+                key: Key::A, physical_key: None, pressed: true, repeat: false, modifiers
+            }], ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                assert!(ctx.wants_keyboard_input());
+                let actions = Keymap::blender().poll(ctx, &KeyContext { network_hovered: true, ..Default::default() });
+                assert!(actions.is_empty(), "keystrokes in text field must not trigger network selection");
+            });
+        }
+    }
+    #[test] fn every_binding_command_is_in_command_all() {
+        let map = Keymap::blender();
+        for b in &map.bindings {
+            assert!(Command::ALL.contains(&b.command), "{:?} not in Command::ALL", b.command);
+        }
     }
 }
