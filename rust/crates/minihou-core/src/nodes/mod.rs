@@ -15,6 +15,7 @@ mod generate;
 mod groups;
 mod group;
 mod curves;
+mod fence;
 mod lsystem;
 mod copy_to_points;
 mod instance;
@@ -149,6 +150,7 @@ pub fn registry() -> &'static [NodeSpec] {
         generate::BOX,
         generate::POINT,
         generate::CURVE,
+        fence::FENCE,
         generate::LINE,
         generate::CIRCLE,
         generate::SPHERE,

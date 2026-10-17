@@ -41,6 +41,26 @@ pub fn param_kind(default: &Value) -> ParamKind {
     }
 }
 
+#[cfg(test)]
+mod fence_asset_tests {
+    use super::*;
+
+    #[test]
+    fn fence_asset_cooks_headlessly_with_expected_counts_and_bounds() {
+        let doc = Document::parse(include_str!("test_data/fence.minihou").to_owned()).unwrap();
+        let geo = doc.session().unwrap().cook(None).unwrap();
+        assert_eq!(geo.detail["fence_bays"], 4);
+        assert_eq!(geo.detail["fence_posts"], 5);
+        assert_eq!(geo.detail["fence_slats"], 36);
+        assert_eq!(geo.npoints / 8, 5 + 36 + 4 * 3 + 4 * 2);
+        assert!(geo.p().iter().all(|p| p.is_finite()));
+        let max_x = geo.p().chunks_exact(3).map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max);
+        let max_y = geo.p().chunks_exact(3).map(|p| p[1]).fold(f32::NEG_INFINITY, f32::max);
+        assert!(max_x > 5.9 && max_x < 6.2);
+        assert!(max_y > 0.35 && max_y < 0.55);
+    }
+}
+
 /// Keeps original spelling, whitespace and unknown fields. Edits replace only
 /// the corresponding JSON token (or insert an omitted member).
 #[derive(Clone)]
