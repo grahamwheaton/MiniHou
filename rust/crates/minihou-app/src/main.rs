@@ -2974,6 +2974,11 @@ fn run() -> Result<()> {
     if headless { println!("{}",minihou_app::selftest(&doc)?); return Ok(()); }
     let options=eframe::NativeOptions { renderer:eframe::Renderer::Wgpu,viewport:egui::ViewportBuilder::default().with_inner_size([1280.,800.]).with_maximized(true),..Default::default() };
     eframe::run_native("MiniHou",options,Box::new(move |cc| {
+        // The builder's maximized flag alone can leave a Windows window at its restored size while
+        // the OS believes it is maximized (the first Maximize click then does nothing visible), so
+        // apply the real state explicitly on the first frame.
+        cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(false));
+        cc.egui_ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
         let state=cc.wgpu_render_state.clone().ok_or("wgpu renderer unavailable")?;
         Ok(Box::new(App::new(doc,path,state)?))
     })).map_err(|e|e.to_string())?;
