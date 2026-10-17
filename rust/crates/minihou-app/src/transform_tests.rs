@@ -26,6 +26,78 @@ fn send(worker: &CookWorker<Scene>, state: &mut CookState, edit: Edit) {
 }
 
 #[test]
+fn selected_node_transform_drags_reach_display_and_undo() {
+    for selected in ["output1", "normal1", "transform1"] {
+        for (name, first, second) in [
+            ("translate", json!([1., 0., 0.]), json!([2., 0., 0.])),
+            ("rotate", json!([0., 0., 15.]), json!([0., 0., 30.])),
+            ("scale", json!([1.2, 1., 1.]), json!([1.5, 1., 1.])),
+        ] {
+            let mut value: Value = serde_json::from_str(include_str!("default_graph.json")).unwrap();
+            if selected == "normal1" { value["display"] = json!(["output1", "grid1"]); }
+            let mut doc = Document::parse(value.to_string()).unwrap();
+            let before = doc.clone();
+            let display = minihou_app::display_nodes(before.value());
+            assert!(feeds_displayed_node(before.value(), selected));
+            let original = doc.session().unwrap().cook(Some(&display[0])).unwrap().p().to_vec();
+            let original_bounds = preview::bounds(&original);
+            let mut target = String::new();
+            for (step, param) in [first, second].into_iter().enumerate() {
+                let mut value = doc.value().clone();
+                let found = ensure_transform_target(&mut value, selected, true, (step > 0).then_some(target.as_str())).unwrap();
+                if step == 0 { target = found; } else { assert_eq!(found, target); }
+                value["nodes"][&target]["params"][name] = param.clone();
+                apply_transform_step(&mut doc, step == 0, value, &target, name, param).unwrap();
+                let moved = doc.session().unwrap().cook(Some(&display[0])).unwrap().p().to_vec();
+                assert!(moved != original, "{selected} {name} step {step} did not move displayed points");
+                assert_ne!(preview::bounds(&moved), original_bounds, "{selected} {name} step {step} did not move displayed bounds");
+                if selected != "transform1" {
+                    let mut upstream = doc.value()["nodes"]["output1"]["inputs"]["geo"].as_str().unwrap();
+                    while upstream != target && upstream != "grid1" {
+                        upstream = doc.value()["nodes"][upstream]["inputs"]["geo"].as_str().unwrap();
+                    }
+                    assert_eq!(upstream, target, "{selected} {name} is outside displayed chain");
+                }
+            }
+            let mut next_drag = doc.value().clone();
+            assert_eq!(ensure_transform_target(&mut next_drag, &target, true, None), Some(target.clone()));
+            assert_eq!(next_drag, *doc.value());
+            let mut history = minihou_app::History::default();
+            history.record(before.clone(), &doc);
+            assert!(history.undo(&mut doc).is_some());
+            assert_eq!(doc.value(), before.value());
+        }
+    }
+}
+
+#[test]
+fn viewport_drag_repairs_transform_hanging_after_output() {
+    let mut value: Value = serde_json::from_str(include_str!("default_graph.json")).unwrap();
+    value["nodes"]["transform2"] = json!({"type":"transform", "inputs":{"geo":"output1"}});
+    let mut doc = Document::parse(value.to_string()).unwrap();
+    let before = doc.clone();
+    let original = doc.session().unwrap().cook(Some("output1")).unwrap().p().to_vec();
+    let original_bounds = preview::bounds(&original);
+    for (step, distance) in [1., 2.].into_iter().enumerate() {
+        let mut value = doc.value().clone();
+        let target = ensure_transform_target(&mut value, "output1", true, Some("transform2")).unwrap();
+        assert_eq!(target, "transform2");
+        value["nodes"][&target]["params"]["translate"] = json!([distance, 0., 0.]);
+        apply_transform_step(&mut doc, step == 0, value, &target, "translate", json!([distance, 0., 0.])).unwrap();
+        assert_eq!(doc.value()["nodes"]["output1"]["inputs"]["geo"], "transform2");
+        assert_eq!(doc.value()["nodes"]["transform2"]["inputs"]["geo"], "normal1");
+        let moved = doc.session().unwrap().cook(Some("output1")).unwrap().p().to_vec();
+        assert!(moved != original);
+        assert_ne!(preview::bounds(&moved), original_bounds);
+        assert_eq!(doc.value()["nodes"].as_object().unwrap().len(), before.value()["nodes"].as_object().unwrap().len());
+    }
+    let mut history = minihou_app::History::default();
+    history.record(before.clone(), &doc);
+    assert!(history.undo(&mut doc).is_some());
+    assert_eq!(doc.value(), before.value());
+}
+
+#[test]
 fn gizmo_axis_drag_emits_move_steps_and_finishes() {
     use egui::{pos2, Event, PointerButton, RawInput, Rect};
     let mut demo: Value = serde_json::from_str(include_str!("default_graph.json")).unwrap();
