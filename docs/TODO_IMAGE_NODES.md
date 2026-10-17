@@ -160,3 +160,20 @@ Full handoff: docs/TODO_PERSISTENT_OVERRIDES.md (from the user's HANDOFF.md, 202
 - **Needs:** a Reset to Procedural action in the add-on, persisted per-object state, and tests for reopening the file, retargeting and multiple objects.
 - **Limits to document:** point-index fallback when point order changes; migration of older files; keyframes and drivers on transform channels.
 - Priority: future. Lower than the queued items above.
+
+---
+
+# Added 2026-10-17: items raised in conversation, not yet on the list
+
+- **Stage 1: self-registering node architecture.** Brief supplied by the user. Node packages with build-time registration, a shared catalogue for Tab menu and shelf, and a node development guide (docs/NODE_DEVELOPMENT.md). Not started. High value: it stops every new node touching shared registry files.
+- **Ctrl+G grouping** (node grouping into subnets). Not started.
+- **Loop Cut extras:** numeric entry, E (even) and F (flip) keys, and the redo strip. Not started.
+- **Inference Phase 2 and Move-tool integration:** multi-reference, through-point locks, guides, bounding-box and object-origin snapping; Move gizmo using the shared engine. Not started.
+- **Multi-output sockets:** separate constraint and proxy outputs for fracture and RBD nodes, from the user's node review. Deferred by the user until later.
+- **Python parity suites on this machine:** the stale prebuilt extension blocks test_rust_parity and test_parity_inputs. Rebuilding it needs the user's go-ahead.
+- **Inset on non-planar regions (sphere):** decide between per-face fallback, an actionable error, or an Individual toggle that turns on automatically. Argon's recommendation is still to be reviewed.
+- **Tri to Quads:** needs the user's own testing before we call it done.
+- **Texture transport limits:** 16-bit and float image precision, non-identity Mapping transforms, and a live-window smoke test. Clip is approximated by edge clamping.
+- **Blender Object picker and waiting state:** live check in the real Blender window still to do.
+- **Knife limits:** no live cooked preview, and no edge-axis constraints.
+- **Grid Fill limits:** loops with holes are not detected.
