@@ -148,7 +148,9 @@ impl InferenceEngine {
     /// Esc: clears typed-independent temporary state first. Returns true if something was cleared
     /// (the tool then keeps its operation); false means the tool should cancel.
     pub fn escape(&mut self) -> bool {
-        let had = self.lock.take().is_some() | self.held.take().is_some() | self.tracker.clear() | self.tracker.transient_edge.take().is_some();
+        // The transient (last hovered) edge is not user-visible state: clearing it alone does not count.
+        self.tracker.transient_edge = None;
+        let had = self.lock.take().is_some() | self.held.take().is_some() | self.tracker.clear();
         self.cycle = 0; self.last_pp = None;
         had
     }

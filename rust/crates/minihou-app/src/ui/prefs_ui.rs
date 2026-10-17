@@ -81,6 +81,7 @@ pub fn show(ctx: &egui::Context, open: &mut bool, prefs: &mut Preferences, keyma
                             changed |= ui.add(egui::DragValue::new(&mut prefs.viewport.clip_start).range(1e-6..=1e8).speed(0.01).prefix("Clip Start  ")).changed();
                             changed |= ui.add(egui::DragValue::new(&mut prefs.viewport.clip_end).range(1e-6..=1e9).speed(1.0).prefix("Clip End  ")).changed();
                             (prefs.viewport.clip_start, prefs.viewport.clip_end) = minihou_app::sanitize_clip_planes(prefs.viewport.clip_start, prefs.viewport.clip_end);
+                            changed |= crate::ui::sketch::inference_preferences(ui, &mut prefs.inference);
                         }
                         Tab::Keymap => {
                             heading(ui,"Keymap",theme);

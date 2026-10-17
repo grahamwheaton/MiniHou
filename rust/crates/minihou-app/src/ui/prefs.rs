@@ -29,6 +29,8 @@ pub struct Preferences {
     pub allow_python_nodes: bool,
     /// Wall-clock limit for one python node cook, in seconds.
     pub python_timeout_s: u32,
+    /// Viewport inferencing (snap tolerance, markers, colours, tool keys); see docs/RUST_INFERENCE.md.
+    pub inference: minihou_app::inference::InferenceSettings,
 }
 impl Default for Preferences { fn default() -> Self { Self {
     theme: ThemePref::System, ui_scale: 1., emulate_numpad: false, snap_increment: 0.25,
@@ -38,6 +40,7 @@ impl Default for Preferences { fn default() -> Self { Self {
     units: UnitSettings::default(),
     node_physics_snappiness: 0.7,
     allow_python_nodes: false, python_timeout_s: 30,
+    inference: Default::default(),
 } } }
 impl Preferences {
     pub fn path() -> PathBuf {
@@ -75,6 +78,7 @@ impl Preferences {
             "navigation": match self.viewport.navigation { Navigation::Blender => "blender", Navigation::Houdini => "houdini" },
             "show_grid": self.viewport.show_grid, "show_axes": self.viewport.show_axes, "auto_budget": self.viewport.auto_budget,
             "clip_start": self.viewport.clip_start, "clip_end": self.viewport.clip_end },
+        "inference": self.inference.to_json(),
         "security": { "allow_python_nodes": self.allow_python_nodes, "python_timeout_s": self.python_timeout_s },
         "length_unit": self.units.display.symbol(),
         "unit_scale": self.units.unit_scale,
@@ -90,6 +94,7 @@ impl Preferences {
         if let Some(x) = v.get("snap_targets").and_then(Value::as_u64) { p.snap_targets = crate::ui::SnapTargets::from_bits((x & 63) as u8); }
         if let Some(x) = v.get("node_physics_snappiness").and_then(Value::as_f64) { p.node_physics_snappiness = (x as f32).clamp(0.0, 1.0); }
         if let Some(x) = v.get("show_stats").and_then(Value::as_bool) { p.show_stats = x; }
+        if let Some(x) = v.get("inference") { p.inference = minihou_app::inference::InferenceSettings::from_json(x); }
         if let Some(sec) = v.get("security") {
             // Only a literal `true` enables Python; anything else keeps it off.
             p.allow_python_nodes = sec.get("allow_python_nodes") == Some(&Value::Bool(true));
