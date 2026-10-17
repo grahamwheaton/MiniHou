@@ -178,5 +178,66 @@ mod tests {
         assert!((masses[6]-expected["mass"][1].as_f64().unwrap() as f32).abs()<0.1,"{masses:?}");
         assert!(out.prim.contains_key("group_inside"));
     }
+
+    #[test]
+    fn test_rbd_material_fracture_limits_and_errors() {
+        let box_params = Params::resolve(super::super::generate::BOX.params, None).unwrap();
+        let box_geo = (super::super::generate::BOX.cook)(&[vec![]], &box_params).unwrap();
+
+        // Empty geometry fails
+        let empty = Geometry::points_only(vec![]).unwrap();
+        let p_def = Params::resolve(RBD_MATERIAL_FRACTURE.params, None).unwrap();
+        assert!(cook(&[vec![Arc::new(empty)]], &p_def).is_err());
+
+        // pieces < 2
+        let p_bad_pcs = Params::resolve(RBD_MATERIAL_FRACTURE.params, serde_json::json!({"pieces": 1}).as_object()).unwrap();
+        assert!(cook(&[vec![Arc::new(box_geo.clone())]], &p_bad_pcs).is_err());
+
+        // sub_pieces < 2
+        let p_bad_sub = Params::resolve(RBD_MATERIAL_FRACTURE.params, serde_json::json!({"sub_pieces": 1}).as_object()).unwrap();
+        assert!(cook(&[vec![Arc::new(box_geo.clone())]], &p_bad_sub).is_err());
+
+        // fracture_level out of 1..=4
+        let p_bad_lvl = Params::resolve(RBD_MATERIAL_FRACTURE.params, serde_json::json!({"fracture_level": 5}).as_object()).unwrap();
+        assert!(cook(&[vec![Arc::new(box_geo.clone())]], &p_bad_lvl).is_err());
+
+        // Total pieces > 2000
+        let p_huge = Params::resolve(RBD_MATERIAL_FRACTURE.params, serde_json::json!({"pieces": 100, "fracture_level": 3, "sub_pieces": 10}).as_object()).unwrap();
+        assert!(cook(&[vec![Arc::new(box_geo.clone())]], &p_huge).is_err());
+
+        // Invalid material enum
+        let p_bad_mat = Params::resolve(RBD_MATERIAL_FRACTURE.params, serde_json::json!({"material": "plastic"}).as_object()).unwrap();
+        assert!(cook(&[vec![Arc::new(box_geo.clone())]], &p_bad_mat).is_err());
+
+        // output = constraints without glue
+        let p_no_glue = Params::resolve(RBD_MATERIAL_FRACTURE.params, serde_json::json!({"output": "constraints", "glue": false}).as_object()).unwrap();
+        assert!(cook(&[vec![Arc::new(box_geo)]], &p_no_glue).is_err());
+    }
+
+    #[test]
+    fn test_rbd_material_fracture_constraints_mode_and_determinism() {
+        let box_params = Params::resolve(super::super::generate::BOX.params, None).unwrap();
+        let box_geo = (super::super::generate::BOX.cook)(&[vec![]], &box_params).unwrap();
+
+        // Constraints output
+        let p_cons = Params::resolve(RBD_MATERIAL_FRACTURE.params, serde_json::json!({
+            "pieces": 2, "seed": 5, "glue": true, "output": "constraints"
+        }).as_object()).unwrap();
+        let out_cons = cook(&[vec![Arc::new(box_geo.clone())]], &p_cons).unwrap();
+        assert!(out_cons.prim.contains_key("strength"));
+
+        // Determinism
+        let p1 = Params::resolve(RBD_MATERIAL_FRACTURE.params, serde_json::json!({
+            "pieces": 2, "seed": 42, "glue": false
+        }).as_object()).unwrap();
+        let p2 = Params::resolve(RBD_MATERIAL_FRACTURE.params, serde_json::json!({
+            "pieces": 2, "seed": 42, "glue": false
+        }).as_object()).unwrap();
+        let out1 = cook(&[vec![Arc::new(box_geo.clone())]], &p1).unwrap();
+        let out2 = cook(&[vec![Arc::new(box_geo)]], &p2).unwrap();
+        assert_eq!(out1.p(), out2.p());
+        assert_eq!(out1.prim["piece"].data, out2.prim["piece"].data);
+        assert_eq!(out1.prim["rbd_mass"].data, out2.prim["rbd_mass"].data);
+    }
 }
 

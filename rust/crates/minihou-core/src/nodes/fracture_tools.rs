@@ -958,4 +958,63 @@ mod tests {
         let err = (s.cook)(&[vec![Arc::new(g)]], &p).unwrap_err();
         assert!(err.0.contains("no primitive attribute \"nonexistent\""));
     }
+
+    #[test]
+    fn test_glue_cluster_empty_and_single_element() {
+        let s = &GLUE_CLUSTER;
+        let empty = Geometry::points_only(vec![]).unwrap();
+
+        // Empty geometry in pieces mode
+        let p_pcs = Params::resolve(s.params, serde_json::json!({"output": "pieces", "piece_attrib": ""}).as_object()).unwrap();
+        let out_pcs = (s.cook)(&[vec![Arc::new(empty.clone())]], &p_pcs).unwrap();
+        assert_eq!(out_pcs.npoints, 0);
+        assert_eq!(out_pcs.nprims(), 0);
+
+        // Empty geometry in constraints mode
+        let p_cons = Params::resolve(s.params, serde_json::json!({"output": "constraints", "piece_attrib": ""}).as_object()).unwrap();
+        let out_cons = (s.cook)(&[vec![Arc::new(empty)]], &p_cons).unwrap();
+        assert_eq!(out_cons.nprims(), 0);
+
+        // Open curve fails
+        let curve = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0.],
+            vec![0, 1],
+            vec![0, 2],
+            Some(vec![false]),
+        ).unwrap();
+        let err_curve = (s.cook)(&[vec![Arc::new(curve)]], &p_pcs).unwrap_err();
+        assert!(err_curve.0.contains("open curve"));
+
+        // Single triangle (single piece)
+        let tri = Geometry::from_arrays(
+            vec![0., 0., 0., 1., 0., 0., 0., 1., 0.],
+            vec![0, 1, 2],
+            vec![0, 3],
+            None,
+        ).unwrap();
+        let out_tri = (s.cook)(&[vec![Arc::new(tri)]], &p_pcs).unwrap();
+        assert_eq!(out_tri.nprims(), 1);
+        assert_eq!(out_tri.prim["cluster"].as_i32().unwrap(), &[0]);
+    }
+
+    #[test]
+    fn test_glue_cluster_invalid_params_and_determinism() {
+        let s = &GLUE_CLUSTER;
+        let g = test_geo();
+
+        // Invalid output enum
+        let p_bad_out = Params::resolve(s.params, serde_json::json!({"output": "everything", "piece_attrib": ""}).as_object()).unwrap();
+        assert!((s.cook)(&[vec![Arc::new(g.clone())]], &p_bad_out).is_err());
+
+        // Negative strength or clusters
+        let p_neg_str = Params::resolve(s.params, serde_json::json!({"strength": -1.0, "piece_attrib": ""}).as_object()).unwrap();
+        assert!((s.cook)(&[vec![Arc::new(g.clone())]], &p_neg_str).is_err());
+
+        // Determinism: seeded random gives identical clusters and strength
+        let p1 = Params::resolve(s.params, serde_json::json!({"seed": 42, "clusters": 2, "output": "pieces", "piece_attrib": ""}).as_object()).unwrap();
+        let p2 = Params::resolve(s.params, serde_json::json!({"seed": 42, "clusters": 2, "output": "pieces", "piece_attrib": ""}).as_object()).unwrap();
+        let out1 = (s.cook)(&[vec![Arc::new(g.clone())]], &p1).unwrap();
+        let out2 = (s.cook)(&[vec![Arc::new(g)]], &p2).unwrap();
+        assert_eq!(out1.prim["cluster"].data, out2.prim["cluster"].data);
+    }
 }
