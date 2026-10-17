@@ -1,3 +1,14 @@
+# QUEUE (ordered, highest priority first)
+
+1. **Viewport select arrow on group and element fields** (purple highlight). Shared widget, see below.
+2. **Advanced Flood Fill** (`flood_fill`).
+3. **Full Array parity** (shapes, count methods, gizmos).
+4. **Image-based nodes** (Image Density + Scatter option first).
+5. **Controller node** (section-grouped driver panel, optional Blender exposure).
+6. **Low priority:** L-system is 2D (match the Python fix).
+
+---
+
 # TODO: Image-based procedural nodes (parked)
 
 Status: parked by the user (2026-10-17). Not started. Build order when resumed: Image Density + Scatter density option, Image Sample, Image Mask, Image Displace, Image to Curves.
@@ -87,6 +98,8 @@ The current `array` node (count, relative and constant offset, merge distance) i
 - **Parity target:** match Blender's Array output for each shape on the same inputs, with golden tests.
 
 Priority: queued after the image nodes and Flood Fill. Not started.
+
+---
 
 ---
 
