@@ -119,6 +119,53 @@ pub fn entries(doc: &Value) -> Vec<Value> {
     out
 }
 
+/// Pseudo node of implicit object inputs: every `blender_object` node in a Blender-bound graph gets an
+/// Object picker on the MiniHou group, keyed `input:@picker:<stable id>` like an object Add Input.
+pub const PICKER_NODE: &str = "@picker";
+/// Node field pinning the picker id across node renames (absent: the node id; pinned on first rename).
+pub const PICKER_ID: &str = "picker_id";
+
+/// (node id, stable picker id) for each `blender_object` node; duplicate pinned ids (copy/paste) fall back to the node id.
+pub fn pickers(doc: &Value) -> Vec<(String, String)> {
+    let mut used = HashSet::new();
+    let mut out = Vec::new();
+    let mut nodes: Vec<_> = doc["nodes"].as_object().into_iter().flatten()
+        .filter(|(_, n)| n["type"] == "blender_object").collect();
+    nodes.sort_by(|a, b| a.0.cmp(b.0));
+    for (node, data) in nodes {
+        let pinned = data[PICKER_ID].as_str().filter(|s| !s.is_empty() && s.len() <= 128);
+        let uid = match pinned { Some(p) if !used.contains(p) => p.to_owned(), _ => node.clone() };
+        let uid = if used.contains(&uid) { format!("{node}~") } else { uid };
+        used.insert(uid.clone());
+        out.push((node.clone(), uid));
+    }
+    out
+}
+
+/// World matrix from an `input_references` entry (row-major 16 numbers), if present.
+pub fn reference_matrix(info: &Value) -> Option<[f64; 16]> {
+    let values: Vec<f64> = info["matrix"].as_array()?.iter().filter_map(Value::as_f64).collect();
+    (values.len() == 16).then(|| std::array::from_fn(|i| values[i]))
+}
+
+pub fn picker_key(uid: &str) -> String { format!("input:{PICKER_NODE}:{uid}") }
+
+/// Implicit object entries for `blender_object` nodes: named after the node, value = its object param.
+pub fn picker_entries(doc: &Value) -> Vec<Value> {
+    pickers(doc).into_iter().map(|(node, uid)| json!({
+        "id": uid, "name": node, "kind": "object", "default": "", "node": PICKER_NODE, "graph_node": node,
+        "implicit": true, "doc": "MiniHou Blender Object node: pick the object it reads",
+        "value": doc["nodes"][&node]["params"]["object"].as_str().unwrap_or(""),
+    })).collect()
+}
+
+/// Everything the Blender group shows besides exposed parameters: dynamic inputs, then implicit pickers.
+pub fn interface_entries(doc: &Value) -> Vec<Value> {
+    let mut out = entries(doc);
+    out.extend(picker_entries(doc));
+    out
+}
+
 pub fn set_value(doc: &mut Value, node: &str, id: &str, value: Value) -> Result<()> {
     let defs = doc["nodes"][node]["modifier_inputs"].as_array().ok_or("unknown modifier input node")?;
     let def = defs.iter().find(|e| e["id"] == id).ok_or("unknown modifier input")?;
@@ -176,6 +223,29 @@ mod tests {
         assert_eq!(doc.value()["nodes"]["move"]["params"]["translate"], json!([0.,0.,0.]));
         assert_eq!(doc.value()["nodes"]["input"]["input_values"], json!({}));
         assert!(minihou_core::Graph::from_value(doc.value()).is_ok());
+    }
+
+    #[test]
+    fn blender_object_nodes_expose_stable_object_pickers() {
+        let doc = json!({"display":"b","exposed":[],"nodes":{
+            "b":{"type":"blender_object","params":{"object":"Cube"}},
+            "c":{"type":"blender_object","picker_id":"b"},
+            "input":{"type":"modifier_input","modifier_inputs":[{"id":"input_1","name":"Amount","kind":"float","default":0.0}]}}});
+        assert_eq!(pickers(&doc), vec![("b".into(), "b".into()), ("c".into(), "c".into())], "pasted duplicate id falls back");
+        let params = link_interface(&doc)["params"].as_array().unwrap().clone();
+        let picker = params.iter().find(|p| p["name"] == "b").unwrap();
+        assert_eq!((picker["kind"].as_str(), picker["node"].as_str(), picker["id"].as_str(), picker["value"].as_str()),
+                   (Some("object"), Some(PICKER_NODE), Some("b"), Some("Cube")));
+        assert_eq!(picker_key("b"), "input:@picker:b");
+        // A pick (or clear) from Blender sets the node's object name; it is not a modifier_input value.
+        let edit = link_param_edit(&doc, &json!({"name":"b","value":"Suzanne"})).unwrap();
+        assert!(matches!(edit, Edit::Param { ref node, ref name, ref value } if node == "b" && name == "object" && value == "Suzanne"));
+        assert!(link_param_edit(&doc, &json!({"name":"b","value":3})).is_err());
+        // Plain entries (parameter-link targets) never include pickers.
+        assert_eq!(entries(&doc).len(), 1);
+        // Add Input avoids picker names.
+        let (_, entry) = crate::input_define::plan(&doc, &json!({"input":{"name":"b","kind":"float"}})).unwrap();
+        assert_eq!(entry["name"], "b 2");
     }
 
     #[test]

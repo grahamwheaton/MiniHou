@@ -108,11 +108,22 @@ pub fn image_file(_: &Inputs, p: &Params) -> Result<Geometry> {
     }
     grid_from_pixels(&pix, w, h, p, &file_name)
 }
-pub fn blender_image(p:&Params,store:&ExternalInputs)->Result<Geometry>{
+/// The image a `blender_image` node reads; waiting conditions are `Error::waiting`.
+pub fn resolve_image<'a>(p:&Params,store:&'a ExternalInputs)->Result<&'a ExternalInput>{
     let name=p.s("image")?;
-    if name.is_empty(){return Err(Error::new("set 'image' to the name of a Blender image"));}
-    let data=store.get(&format!("image:{name}")).ok_or_else(||Error::new(format!("waiting for Blender image {name:?} (is Blender connected to this engine?)")))?;
-    let ExternalInput::Image{pixels,width,height,meta}=data else{return Err(Error::new(format!("Blender image {name:?}: {}",match data{ExternalInput::Missing(e)=>e.as_str(),_=>"invalid input"})));};
+    if name.is_empty(){return Err(Error::waiting("no image set: type the name of a Blender image"));}
+    let data=store.get(&format!("image:{name}")).ok_or_else(||Error::waiting(format!("waiting for Blender image {name:?}: connect Blender")))?;
+    match data{
+        ExternalInput::Image{..}=>Ok(data),
+        ExternalInput::Missing(e) if e.starts_with("no image named") => Err(Error::waiting(format!("Blender image {name:?} not found: check the name or connect Blender"))),
+        ExternalInput::Missing(e)=>Err(Error::new(format!("Blender image {name:?}: {e}"))),
+        _=>Err(Error::new(format!("Blender image {name:?}: invalid input"))),
+    }
+}
+pub fn blender_image(p:&Params,store:&ExternalInputs)->Result<Geometry>{
+    let data=resolve_image(p,store)?;
+    let ExternalInput::Image{pixels,width,height,meta}=data else{return Err(Error::new("invalid input"));};
+    let name=p.s("image")?;
     let max_size=p.i("max_size")?.max(1) as usize;
     let factor=(*width).max(*height).div_ceil(max_size).max(1);
     let w=width/factor;let h=height/factor;

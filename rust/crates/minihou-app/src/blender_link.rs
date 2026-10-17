@@ -931,6 +931,11 @@ impl LinkServer {
                     });
                 }
             }
+            // Blender Object nodes follow their group picker while the modifier is live (empty: waiting).
+            let pickers = minihou_app::modifier_inputs::pickers(doc.value());
+            for (node, _) in &pickers {
+                edits.push(Edit::External { name: minihou_core::nodes::blender_input::picker_external(node), input: ExternalInput::Missing(String::new()) });
+            }
             if let Some(sources) = h["sources"].as_array() {
                 for (i, name) in sources.iter().enumerate() {
                     let prefix = format!("source:{i}/");
@@ -941,6 +946,12 @@ impl LinkServer {
                             k.strip_prefix(&prefix).map(|k| (k.to_string(), a.clone()))
                         })
                         .collect();
+                    if let Some((node, _)) = pickers.iter().find(|(_, uid)| minihou_app::modifier_inputs::picker_key(uid) == name.as_str().unwrap_or("")) {
+                        edits.push(Edit::External {
+                            name: minihou_core::nodes::blender_input::picker_external(node),
+                            input: ExternalInput::Object { geo: Arc::new(link_protocol::decode_object(&Value::Null, &arrays)?), matrix: minihou_app::modifier_inputs::reference_matrix(&h["references"][name.as_str().unwrap_or("")]), info: h["references"][name.as_str().unwrap_or("")].clone() },
+                        });
+                    }
                     edits.push(Edit::External {
                         name: format!("object_input:{}", name.as_str().ok_or("bad source name")?),
                         input: ExternalInput::Object {

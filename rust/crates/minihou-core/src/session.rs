@@ -36,6 +36,9 @@ pub struct CookStats {
     pub cached: Vec<String>,
     pub node_ms: Vec<(String, f64)>,
     pub param_diags: Vec<crate::channels::ParamDiag>,
+    /// Nodes waiting for external data (no Blender object picked, Blender not connected): (node, message).
+    /// They cook empty geometry; this is a neutral state, not an error.
+    pub waiting: Vec<(String, String)>,
 }
 
 struct Entry {
@@ -179,9 +182,22 @@ impl Session {
         let mut stats = CookStats { param_diags: resolved.diagnostics.clone(), ..Default::default() };
         let mut run = Run { graph: &self.graph, resolved: &resolved, plan: &plan, budget: nodes::r#loop::budget(), external: &self.external, cache: &mut self.cache, bytes: &mut self.bytes, clock: self.clock, keys: &keys, stats: &mut stats };
         let result = nodes::usd_nodes::with_context(&self.graph, &self.external, || run.get(&target));
+        stats.waiting = self.waiting(&resolved);
         self.last = stats;
         self.evict();
         result
+    }
+
+    /// Every external-data node currently waiting (whether or not the last cook ran it).
+    fn waiting(&self, resolved: &crate::channels::ResolvedChannels) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        for (id, def) in &self.graph.nodes {
+            if def.bypass || !matches!(def.node_type.as_str(), "blender_object" | "blender_image" | "object_input") { continue; }
+            let Some(spec) = nodes::get(&def.node_type) else { continue };
+            let Ok(p) = Params::resolve(spec.params, resolved.params.get(id).or(def.params.as_ref())) else { continue };
+            if let Some(msg) = nodes::blender_input::waiting_reason(id, &def.node_type, &p, &self.external) { out.push((id.clone(), msg)); }
+        }
+        out
     }
 
     pub fn last_stats(&self) -> &CookStats {
@@ -306,6 +322,7 @@ fn key_of(graph: &Graph, resolved: &crate::channels::ResolvedChannels, external_
         "modifier_input" => Some("modifier_input".into()), _ => None,
     };
     if let Some(binding)=binding { external_versions.get(&binding).hash(&mut h); }
+    if def.node_type == "blender_object" { external_versions.get(&nodes::blender_input::picker_external(id)).hash(&mut h); }
     def.bypass.hash(&mut h);
     // time-dependent nodes (Python's key_extra = timectx.key()) recook when the frame changes
     if nodes::is_time_dependent(&def.node_type, def.params.as_ref()) || resolved.time_dependent.contains(id) {
@@ -454,10 +471,15 @@ impl Run<'_> {
         let external = if def.bypass { None } else {
             let p=Params::resolve(spec.params,self.resolved.params.get(id).or(def.params.as_ref())).map_err(|e|e.in_node(id,&def.node_type))?;
             if def.node_type == "object_input" { Some(nodes::blender_input::cook_binding(id,&p,self.external)) }
+            else if def.node_type == "blender_object" { Some(nodes::blender_input::cook_object(id,&p,self.external)) }
             else { nodes::blender_input::cook_external(&def.node_type,&p,self.external) }
         };
         let geo = Arc::new(match external {
-            Some(result)=>result.and_then(|g|g.validate().map(|_|g)).map_err(|e|e.in_node(id,&def.node_type))?,
+            // Waiting for external data: empty geometry, so downstream nodes still cook (see CookStats::waiting).
+            Some(result)=>match result.and_then(|g|g.validate().map(|_|g)) {
+                Err(e) if e.waiting_text().is_some() => Geometry::default(),
+                other => other.map_err(|e|e.in_node(id,&def.node_type))?,
+            },
             None=>run_node(id, def, spec, &inputs, self.resolved.params.get(id))?,
         });
         let mut side: Option<Arc<dyn Any + Send + Sync>> = None;

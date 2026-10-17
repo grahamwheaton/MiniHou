@@ -26,7 +26,7 @@ pub struct Draft {
 fn taken_names(doc: &Value) -> Vec<String> {
     let mut names: Vec<String> = doc["exposed"].as_array().into_iter().flatten()
         .filter_map(|e| e["name"].as_str().map(str::to_owned)).collect();
-    names.extend(modifier_inputs::entries(doc).into_iter().filter_map(|e| e["name"].as_str().map(str::to_owned)));
+    names.extend(modifier_inputs::interface_entries(doc).into_iter().filter_map(|e| e["name"].as_str().map(str::to_owned)));
     names
 }
 

@@ -556,7 +556,9 @@ pub fn rename(value: &Value, old: &str, new: &str) -> Option<Value> {
     let mut value=value.clone();
     let all=nodes_mut(&mut value)?;
     if all.contains_key(new) { return None; }
-    let renamed=all.remove(old)?;
+    let mut renamed=all.remove(old)?;
+    // A Blender Object node's group picker keeps its socket (value, links) across renames.
+    if renamed["type"]=="blender_object" && renamed.get(minihou_app::modifier_inputs::PICKER_ID).is_none() { renamed[minihou_app::modifier_inputs::PICKER_ID]=json!(old); }
     all.insert(new.into(),renamed);
     for (owner,node) in all.iter_mut() {
         if let Some(inputs)=node.get_mut("inputs").and_then(Value::as_object_mut) {
@@ -596,6 +598,15 @@ mod tests {
         assert_eq!(doc.value()["measurements"].as_array().unwrap().len(),1);
         history.undo(&mut doc).unwrap();
         assert_eq!(doc.value()["measurements"].as_array().unwrap().len(),2);
+    }
+    #[test] fn renaming_a_blender_object_pins_its_picker_id() {
+        let g=json!({"display":"a","nodes":{"a":{"type":"blender_object"}}});
+        let once=rename(&g,"a","b").unwrap();
+        assert_eq!(once["nodes"]["b"]["picker_id"],"a");
+        let twice=rename(&once,"b","c").unwrap();
+        assert_eq!(twice["nodes"]["c"]["picker_id"],"a");
+        assert_eq!(minihou_app::modifier_inputs::pickers(&twice),vec![("c".to_string(),"a".to_string())]);
+        assert!(rename(&json!({"nodes":{"x":{"type":"box"}}}),"x","y").unwrap()["nodes"]["y"].get("picker_id").is_none());
     }
     #[test] fn rename_and_paste_keep_reference_targets() {
         let doc=json!({"nodes":{"driver":{"type":"box","params":{"size":[2,3,4]}},"target":{"type":"box","channels":{"size.x":"ch('../driver/size.y')"}},"external":{"type":"box","channels":{"size.x":"ch('../target/size.x')"}}},"display":"target"});

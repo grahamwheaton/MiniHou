@@ -20,7 +20,11 @@ pub const MODIFIER_INPUT_KINDS: &[&str] = &[
 ];
 pub const MODIFIER_INPUT: NodeSpec = NodeSpec { name:"modifier_input", inputs:&[], params:&[], cook:modifier_input };
 pub const OBJECT_INPUT: NodeSpec = NodeSpec { name:"object_input", inputs:&[], params:crate::params!("binding":""), cook:object_input };
-fn object_input(_: &Inputs, _: &Params) -> Result<Geometry> { Err(Error::new("Choose an object in this modifier's Object input picker in Blender")) }
+fn object_input(_: &Inputs, _: &Params) -> Result<Geometry> { Err(Error::waiting("Choose an object in this modifier's Object input picker in Blender")) }
+/// What a Blender Object node tells the user while nothing is picked.
+pub const PICK_HINT: &str = "Pick an object in the MiniHou group in Blender, or connect Blender";
+/// External store key of a `blender_object` node's group picker feed (set only in Blender-bound cooks).
+pub fn picker_external(id: &str) -> String { format!("picker:{id}") }
 
 /// Modifier-local feeds use a distinct namespace from named world-space Blender objects.
 pub(crate) fn binding_key(id: &str, p: &Params) -> Result<String> {
@@ -30,7 +34,7 @@ pub(crate) fn binding_key(id: &str, p: &Params) -> Result<String> {
 pub(crate) fn cook_binding(id: &str, p: &Params, store: &ExternalInputs) -> Result<Geometry> {
     match store.get(&binding_key(id,p)?) {
         Some(ExternalInput::Object{geo,..})=>Ok((**geo).clone()),
-        Some(ExternalInput::Missing(message))=>Err(Error::new(message)),
+        Some(ExternalInput::Missing(message))=>Err(Error::waiting(message)),
         _=>object_input(&[],p),
     }
 }
@@ -45,12 +49,54 @@ pub fn cook_external(typ: &str, p: &Params, store: &ExternalInputs) -> Option<Re
         _ => None,
     }
 }
-fn object(p: &Params, store: &ExternalInputs) -> Result<Geometry> {
+/// Missing-object reasons the add-on sends that mean "nothing to read yet", not a broken object.
+fn absent(reason: &str) -> bool { reason.starts_with("no object named") || reason == "not found" }
+
+/// The external data a `blender_object` node reads: its group picker feed when the cook is Blender-bound
+/// (`picker:<id>` present), else the object named by its `object` param. Waiting conditions are
+/// [`Error::waiting`]; a picked object that cannot be read stays a real error.
+pub fn resolve_object<'a>(id: &str, p: &Params, store: &'a ExternalInputs) -> Result<&'a ExternalInput> {
+    if let Some(feed)=store.get(&picker_external(id)) {
+        return match feed {
+            ExternalInput::Object{..}=>Ok(feed),
+            ExternalInput::Missing(m) if m.is_empty() => Err(Error::waiting(format!("no object picked. {PICK_HINT}"))),
+            ExternalInput::Missing(m)=>Err(Error::new(m.clone())),
+            _=>Err(Error::new("invalid picker input")),
+        };
+    }
     let name=p.s("object")?;
-    if name.is_empty() { return Err(Error::new("set 'object' to the name of a Blender object")); }
+    if name.is_empty() { return Err(Error::waiting(format!("no object set. {PICK_HINT} (or type an object name)"))); }
     if ["MiniHou_Output","MiniHou_Proxy"].contains(&name.as_str()) { return Err(Error::new(format!("{name:?} is MiniHou's own output; reading it would feed the result back into itself"))); }
-    let data=store.get(&format!("object:{name}")).ok_or_else(|| Error::new(format!("waiting for Blender object {name:?} (is Blender connected to this engine?)")))?;
-    let ExternalInput::Object { geo, matrix, info }=data else { return Err(Error::new(format!("Blender object {name:?}: {}", match data { ExternalInput::Missing(e)=>e.as_str(), _=>"invalid input" }))); };
+    let data=store.get(&format!("object:{name}")).ok_or_else(|| Error::waiting(format!("waiting for Blender object {name:?}. {PICK_HINT}")))?;
+    match data {
+        ExternalInput::Object{..}=>Ok(data),
+        ExternalInput::Missing(e) if absent(e) => Err(Error::waiting(format!("Blender object {name:?} not found. {PICK_HINT}"))),
+        ExternalInput::Missing(e)=>Err(Error::new(format!("Blender object {name:?}: {e}"))),
+        _=>Err(Error::new(format!("Blender object {name:?}: invalid input"))),
+    }
+}
+/// Waiting text for an external-data node, without cooking it (so cache hits still report the state).
+/// Nodes using the waiting state: blender_object, blender_image, object_input.
+pub fn waiting_reason(id: &str, typ: &str, p: &Params, store: &ExternalInputs) -> Option<String> {
+    let err=match typ {
+        "blender_object"=>resolve_object(id,p,store).err(),
+        "blender_image"=>super::image_nodes::resolve_image(p,store).err(),
+        "object_input"=>match binding_key(id,p) {
+            Ok(k)=>match store.get(&k) {
+                Some(ExternalInput::Object{..})=>None,
+                Some(ExternalInput::Missing(m))=>Some(Error::waiting(m.clone())),
+                _=>Some(Error::waiting("Choose an object in this modifier's Object input picker in Blender")),
+            },
+            Err(e)=>Some(e),
+        },
+        _=>None,
+    }?;
+    err.waiting_text().map(str::to_owned)
+}
+pub fn cook_object(id: &str, p: &Params, store: &ExternalInputs) -> Result<Geometry> { build_object(p, resolve_object(id,p,store)?) }
+fn object(p: &Params, store: &ExternalInputs) -> Result<Geometry> { cook_object("", p, store) }
+fn build_object(p: &Params, data: &ExternalInput) -> Result<Geometry> {
+    let ExternalInput::Object { geo, matrix, info }=data else { return Err(Error::new("invalid input")); };
     let mut out=(**geo).clone();
     if p.b("join_edges")? && geo.topology.has_open() && !info["components"].as_array().is_some_and(|a| a.iter().any(|v| v=="curves")) {
         out=join_edges(geo)?;
@@ -120,13 +166,15 @@ fn join_edges(g: &Geometry) -> Result<Geometry> {
         use serde_json::json;
         let doc=json!({"display":"src","nodes":{"src":{"type":"object_input"}}});
         let mut session=crate::session::Session::new(crate::Graph::from_value(&doc).unwrap());
-        assert!(session.cook(None).unwrap_err().to_string().contains("Object input picker"));
+        assert_eq!(session.cook(None).unwrap().npoints,0);
+        assert!(session.last_stats().waiting[0].1.contains("Object input picker"));
         for x in [1.,2.] {
             session.set_external("object_input:src".into(),ExternalInput::Object{geo:Arc::new(Geometry::points_only(vec![x,0.,0.]).unwrap()),matrix:Some([2.;16]),info:Value::Null});
             assert_eq!(session.cook(None).unwrap().p(),&[x,0.,0.]);
             assert!(session.last_stats().cooked.contains(&"src".into()));
         }
-        session.set_param("src","binding",json!("tree")).unwrap();assert!(session.cook(None).is_err());
+        assert!(session.last_stats().waiting.is_empty());
+        session.set_param("src","binding",json!("tree")).unwrap();assert_eq!(session.cook(None).unwrap().npoints,0);
         session.set_external("object_input:tree".into(),ExternalInput::Object{geo:Arc::new(Geometry::points_only(vec![9.,0.,0.]).unwrap()),matrix:None,info:Value::Null});
         assert_eq!(session.cook(None).unwrap().p()[0],9.);
     }
@@ -148,13 +196,40 @@ fn join_edges(g: &Geometry) -> Result<Geometry> {
             "out":{"type":"merge","inputs":{"geos":["src","static"]}}
         }});
         let mut session=Session::new(Graph::from_value(&doc).unwrap());
-        assert!(session.cook(None).is_err());
+        assert_eq!(session.cook(None).unwrap().npoints,1);
+        assert_eq!(session.last_stats().waiting.len(),1);
         for x in [1.,2.] {
             session.set_external("object:Cube".into(),ExternalInput::Object{geo:Arc::new(Geometry::points_only(vec![x,0.,0.]).unwrap()),matrix:None,info:Value::Null});
             assert_eq!(session.cook(None).unwrap().p()[0],x);
             if x==2. {assert!(session.last_stats().cached.contains(&"static".into()));assert!(session.last_stats().cooked.contains(&"src".into()));}
         }
         session.replace_graph(Graph::from_value(&doc).unwrap());assert_eq!(session.cook(None).unwrap().p()[0],2.);
-        session.set_external("object:Cube".into(),ExternalInput::Missing("not found".into()));assert!(session.cook(None).unwrap_err().to_string().contains("not found"));
+        session.set_external("object:Cube".into(),ExternalInput::Missing("no object named 'Cube' in the Blender file".into()));
+        assert_eq!(session.cook(None).unwrap().npoints,1);
+        assert!(session.last_stats().waiting[0].1.contains("not found"));
+        session.set_external("object:Cube".into(),ExternalInput::Missing("unsupported object type CAMERA".into()));
+        assert!(session.cook(None).unwrap_err().to_string().contains("CAMERA"));
+    }
+    #[test] fn picker_feed_wins_over_the_name_and_clearing_waits() {
+        use crate::{Graph,session::Session};use serde_json::json;
+        let doc=json!({"display":"src","nodes":{"src":{"type":"blender_object","params":{"object":"Cube"}}}});
+        let mut session=Session::new(Graph::from_value(&doc).unwrap());
+        session.set_external("object:Cube".into(),ExternalInput::Object{geo:Arc::new(Geometry::points_only(vec![1.,0.,0.]).unwrap()),matrix:None,info:Value::Null});
+        assert_eq!(session.cook(None).unwrap().p()[0],1.);
+        session.set_external(picker_external("src"),ExternalInput::Object{geo:Arc::new(Geometry::points_only(vec![5.,0.,0.]).unwrap()),matrix:None,info:Value::Null});
+        assert_eq!(session.cook(None).unwrap().p()[0],5.);
+        session.set_external(picker_external("src"),ExternalInput::Missing(String::new()));
+        assert_eq!(session.cook(None).unwrap().npoints,0);
+        assert_eq!(session.last_stats().waiting,vec![("src".into(),format!("no object picked. {PICK_HINT}"))]);
+        // Still reported when served from cache.
+        assert_eq!(session.cook(None).unwrap().npoints,0);
+        assert_eq!(session.last_stats().waiting.len(),1);
+        session.set_external(picker_external("src"),ExternalInput::Missing("Blender object \"Cam\" is a CAMERA".into()));
+        assert!(session.cook(None).unwrap_err().to_string().contains("CAMERA"));
+    }
+    #[test] fn waiting_marker_round_trips() {
+        assert_eq!(Error::waiting("x").waiting_text(),Some("x"));
+        assert_eq!(Error::new("x").waiting_text(),None);
+        assert_eq!(Error::waiting("x").in_node("a","b").waiting_text(),None);
     }
 }

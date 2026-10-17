@@ -959,7 +959,7 @@ pub fn link_interface(doc: &Value) -> Value {
         p["value"] = doc["nodes"][node]["params"].get(param).unwrap_or(&default).clone();
         params.push(p);
     }
-    for mut p in modifier_inputs::entries(doc) {
+    for mut p in modifier_inputs::interface_entries(doc) {
         let Some(name) = p["name"].as_str().map(str::to_owned) else { continue };
         if !names.insert(name) { continue; }
         p["label"] = p["name"].clone();
@@ -989,7 +989,13 @@ pub fn snap_float32(value: &Value) -> Value {
 
 pub fn link_param_edit(doc: &Value, message: &Value) -> Result<Edit> {
     if let Some(name) = message["name"].as_str() {
-        if let Some(entry) = modifier_inputs::entries(doc).into_iter().find(|e| e["name"] == name) {
+        if let Some(entry) = modifier_inputs::interface_entries(doc).into_iter().find(|e| e["name"] == name) {
+            if entry["implicit"] == true {
+                // A picked Blender object names the node's object param (standalone use); the live feed wins.
+                let value = message.get("value").ok_or("missing value")?;
+                let value = value.as_str().ok_or("object picker value must be a name")?;
+                return Ok(Edit::Param { node: entry["graph_node"].as_str().unwrap().to_owned(), name: "object".into(), value: json!(value) });
+            }
             let node = entry["node"].as_str().unwrap().to_owned();
             let id = entry["id"].as_str().unwrap().to_owned();
             let value = message.get("value").ok_or("missing value")?.clone();

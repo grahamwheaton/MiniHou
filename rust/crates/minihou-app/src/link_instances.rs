@@ -235,36 +235,42 @@ impl InstanceManager {
             entry.materials = h["materials"].clone();
         }
         let feeds = self.sources.get(&id);
-        let bindings: Vec<_> = entry
+        let mut bindings: Vec<(String, String, String)> = entry
             .session
             .graph()
             .nodes
             .iter()
             .filter(|(_, n)| n.node_type == "object_input")
             .map(|(nid, n)| {
-                n.params
+                let key = n.params
                     .as_ref()
                     .and_then(|p| p.get("binding"))
                     .and_then(Value::as_str)
                     .filter(|s| !s.is_empty())
                     .unwrap_or(nid)
-                    .to_string()
+                    .to_string();
+                (format!("object_input:{key}"), key, "Choose an object in this modifier's Object input picker in Blender".to_string())
             })
             .collect();
-        for key in bindings {
+        // Blender Object nodes read their implicit group picker (input:@picker:<id>); empty = waiting, never by name.
+        bindings.extend(minihou_app::modifier_inputs::pickers(&graph).into_iter().map(|(node, uid)|
+            (minihou_core::nodes::blender_input::picker_external(&node), minihou_app::modifier_inputs::picker_key(&uid), String::new())));
+        for (external, key, empty) in bindings {
             let incoming = feeds.and_then(|s| s.get(&key));
             let info = h["references"].get(&key).cloned().unwrap_or(Value::Null);
             let unchanged = entry
                 .sources
                 .get(&key)
                 .zip(incoming)
-                .is_some_and(|(a, b)| Arc::ptr_eq(a, b)) && entry.source_meta.get(&key) == Some(&info);
+                .is_some_and(|(a, b)| Arc::ptr_eq(a, b)) && entry.source_meta.get(&key) == Some(&info)
+                // Still empty: keep the cached waiting state instead of recooking every frame.
+                || (incoming.is_none() && !entry.sources.contains_key(&key) && entry.source_meta.get(&key) == Some(&info));
             if !unchanged {
                 let matrix = info["matrix"].as_array().and_then(|a| (a.len() == 16).then(|| {
                     let values: Vec<_> = a.iter().filter_map(Value::as_f64).collect();
                     (values.len() == 16).then(|| std::array::from_fn(|i| values[i]))
                 }).flatten());
-                entry.session.set_external(format!("object_input:{key}"),incoming.map_or_else(||ExternalInput::Missing("Choose an object in this modifier's Object input picker in Blender".into()),|g|ExternalInput::Object{geo:g.clone(),matrix,info:info.clone()}));
+                entry.session.set_external(external,incoming.map_or_else(||ExternalInput::Missing(empty),|g|ExternalInput::Object{geo:g.clone(),matrix,info:info.clone()}));
             }
             entry.source_meta.insert(key, info);
         }
@@ -281,7 +287,7 @@ impl InstanceManager {
             return Err("cooked point positions must be finite".into());
         }
         let stats = entry.session.last_stats().clone();
-        let cook = json!({"ms":start.elapsed().as_secs_f64()*1000.,"cooked":stats.cooked,"cached":stats.cached,"node_ms":stats.node_ms.into_iter().collect::<BTreeMap<_,_>>(),"frame":frame,"fps":fps});
+        let cook = json!({"ms":start.elapsed().as_secs_f64()*1000.,"cooked":stats.cooked,"cached":stats.cached,"node_ms":stats.node_ms.into_iter().collect::<BTreeMap<_,_>>(),"waiting":stats.waiting.into_iter().collect::<BTreeMap<_,_>>(),"frame":frame,"fps":fps});
         let (mut header, mut output) =
             DiffState::default().build(&link_protocol::geometry_arrays(&result), &result, 1, &cook);
         header["type"] = json!("instance_result");
@@ -555,19 +561,9 @@ fn decode_geometry(h: &Value, a: &Arrays) -> Result<Geometry> {
     }
     Ok(geo)
 }
+/// `blender_object` nodes are allowed: instance cooks feed them only from their own group picker
+/// (`picker:<node>`), never by object name, and the add-on refuses self/cache picks (feedback loops).
 fn validate_graph(v: &Value) -> Result<()> {
-    fn forbidden(v: &Value) -> bool {
-        match v {
-            Value::Object(o) => {
-                o.get("type").is_some_and(|s| s == "blender_object") || o.values().any(forbidden)
-            }
-            Value::Array(a) => a.iter().any(forbidden),
-            _ => false,
-        }
-    }
-    if forbidden(v) {
-        return Err("modifier graphs cannot read blender_object; use modifier_input to prevent feedback loops".into());
-    }
     Graph::from_value(v)?.main_output()?;
     Ok(())
 }
@@ -611,8 +607,7 @@ mod tests {
         let (err, _) = manager.handle(&bad, &Arrays::new());
         assert_eq!(err["type"], "instance_error");
         assert!(err["message"].as_str().unwrap().contains("hash"));
-        let (err, _) = manager.handle(&push("A", &json!({"nodes":{"b":{"type":"blender_object"}}})), &Arrays::new());
-        assert_eq!(err["type"], "instance_error", "feedback-prone graphs are refused like instance graphs");
+        assert!(validate_graph(&json!({"display":"b","nodes":{"b":{"type":"blender_object"}}})).is_ok(), "fed by its group picker");
 
         server.shared.open_dirty.store(true, Ordering::Relaxed);
         let (ack, _) = manager.handle(&push("B", &graph), &Arrays::new());
