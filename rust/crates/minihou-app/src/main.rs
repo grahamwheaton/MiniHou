@@ -1539,7 +1539,7 @@ impl App {
                     if modal.constraint!=Constraint::Free { modal.constraint=Constraint::Free; } else { modal.mmb_start=Some(pos); }
                 }
                 egui::Event::PointerButton { pos, button:egui::PointerButton::Middle, pressed:false, .. } => {
-                    if let Some(start)=modal.mmb_start.take() { modal.constraint=Constraint::Axis(ui::modal_transform::closest_axis(pos-start,frame,camera),false); }
+                    modal.middle_release(pos,frame,camera);
                 }
                 _=>{}
             }
