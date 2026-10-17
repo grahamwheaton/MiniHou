@@ -135,3 +135,12 @@ Priority: queued after the select-arrow work. Not started. Note: Copy to Curves 
 - **Rectangle and Polygon** show a red "no Rust version" dot, but they are viewport drawing tools (`sketch_rectangle`, `sketch_polygon`), not graph nodes. The Python app never had them as nodes, so there is nothing to port. Fix: give tools their own marker (no red dot), or hide the dot for tool entries.
 - **Repeat** points at `loop_block`. The Python app's repeat region is `loop_begin` and `loop_end`, which Rust already runs. Fix: map the shelf entry to the existing loop region and show the normal marker.
 - Priority: low (cosmetic, but it misleads about what is missing).
+
+---
+
+# Queued: node input port tooltips and wide multi-input ports
+
+- **Port tooltips:** hovering a node input port should name what to connect there (e.g. "points", "geo", "cutters"), as the pre-Rust editor did. The editor already shows hover tooltips on header buttons (ui/network.rs uses on_hover_text), so the same mechanism applies to ports. Source of each name: the node's input spec labels.
+- **Wide port for multi-input nodes:** nodes that take many inputs (e.g. Merge) should draw a wider, pill-shaped port so several wires can attach clearly, as the pre-Rust editor did. Ports stay single-width for ordinary one-input nodes.
+- **Where:** ui/network.rs (port drawing, canvas_ports) plus the input spec labels. Reuse the existing port hit-testing; do not change connection behaviour.
+- Priority: queued after the current deformer and Scatter and Align work. Not started.
