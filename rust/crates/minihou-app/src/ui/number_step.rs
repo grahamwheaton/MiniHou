@@ -1,4 +1,4 @@
-//! Stepping for the parameter panel's number fields: the up/down arrow stepper and Alt+wheel.
+//! Stepping for the parameter panel's number fields: the -/+ buttons at the field's two ends and Alt+wheel.
 //!
 //! Step size: integers step by 1; floats by a power of ten derived from the soft slider range
 //! (range / 100, so 0..10 steps 0.1) or, without a range, from 10% of the value's magnitude
@@ -11,15 +11,17 @@ use eframe::egui::{self, Pos2, Rect, Sense, Stroke, Vec2};
 
 use super::theme::Theme;
 
-/// Width of the arrow column at the right end of a number field.
-pub const STEPPER_W: f32 = 13.;
+/// Width of each stepper button: decrement at the left end, increment at the right end of a number field.
+pub const STEPPER_W: f32 = 20.;
+/// Narrowest text area kept between the two buttons; narrower fields get no buttons (wheel and drag only).
+pub const MIN_TEXT_W: f32 = 28.;
 /// Held arrow: first repeat after this delay, then one step per interval (seconds).
 pub const REPEAT_DELAY: f64 = 0.4;
 pub const REPEAT_INTERVAL: f64 = 0.06;
 /// Point-unit (touchpad) wheel distance that counts as one notch.
 const POINTS_PER_NOTCH: f32 = 40.;
 
-pub const WHEEL_HINT: &str = "Arrows step the value (hold to repeat). Alt+wheel over the field, or the wheel while typing, steps it too. Shift: fine, Ctrl: coarse.";
+pub const WHEEL_HINT: &str = "The - / + buttons step the value (hold to repeat). Alt+wheel over the field, or the wheel while typing, steps it too. Shift: fine, Ctrl: coarse.";
 
 fn pow10_floor(x: f64) -> f64 { 10f64.powf(x.log10().floor()) }
 
@@ -56,21 +58,30 @@ pub fn repeat_steps_due(held: f64) -> u32 {
 /// Whether the wheel may change a field's value (see the module docs).
 pub fn wheel_steps_value(hovered: bool, alt: bool, editing: bool) -> bool { hovered && (alt || editing) }
 
-/// Draw the up/down arrows in `rect` and return the number of steps (+/-) to apply this frame.
-pub fn stepper(ui: &mut egui::Ui, rect: Rect, id: egui::Id, t: &Theme) -> i32 {
+/// The decrement (left end) and increment (right end) button rects and the text rect between them, or `None` when
+/// the field is too narrow for buttons plus `MIN_TEXT_W` of text.
+pub fn layout(outer: Rect) -> Option<(Rect, Rect, Rect)> {
+    if outer.width() < 2. * STEPPER_W + MIN_TEXT_W { return None; }
+    let (top, bottom) = (outer.top() + 1., outer.bottom() - 1.);
+    let dec = Rect::from_min_max(Pos2::new(outer.left() + 1., top), Pos2::new(outer.left() + STEPPER_W, bottom));
+    let inc = Rect::from_min_max(Pos2::new(outer.right() - STEPPER_W, top), Pos2::new(outer.right() - 1., bottom));
+    Some((dec, inc, Rect::from_min_max(Pos2::new(dec.right(), outer.top()), Pos2::new(inc.left(), outer.bottom()))))
+}
+
+/// Draw both stepper buttons and return the number of steps (+/-) to apply this frame (press = 1, held = repeats).
+pub fn stepper(ui: &mut egui::Ui, dec: Rect, inc: Rect, id: egui::Id, t: &Theme) -> i32 {
     let mut steps = 0;
-    let half = rect.height() / 2.;
-    for (dir, r) in [(1, Rect::from_min_size(rect.min, Vec2::new(rect.width(), half))),
-                     (-1, Rect::from_min_size(Pos2::new(rect.left(), rect.top() + half), Vec2::new(rect.width(), half)))] {
+    for (dir, r) in [(-1, dec), (1, inc)] {
         let bid = id.with(("step", dir));
         let response = ui.interact(r, bid, Sense::click_and_drag()).on_hover_text(WHEEL_HINT);
         let enabled = ui.is_enabled();
-        let color = if !enabled { t.faint } else if response.hovered() || response.is_pointer_button_down_on() { t.text } else { t.dim };
-        if response.hovered() && enabled { ui.painter().rect_filled(r.shrink(1.), 2., t.stroke.gamma_multiply(0.6)); }
+        let active = response.hovered() || response.is_pointer_button_down_on();
+        let color = if !enabled { t.faint } else if active { t.text } else { t.dim };
+        if active && enabled { ui.painter().rect_filled(r.shrink(1.), 2., t.stroke.gamma_multiply(if response.is_pointer_button_down_on() { 1. } else { 0.6 })); }
         let c = r.center();
-        let (w, h) = (3.5, 2.2 * dir as f32);
+        let (w, h) = (3.0 * dir as f32, 4.0);
         ui.painter().add(egui::Shape::convex_polygon(
-            vec![Pos2::new(c.x - w, c.y + h), Pos2::new(c.x + w, c.y + h), Pos2::new(c.x, c.y - h)],
+            vec![Pos2::new(c.x - w, c.y - h), Pos2::new(c.x + w, c.y), Pos2::new(c.x - w, c.y + h)],
             color, Stroke::NONE));
         let state = bid.with("held");
         if response.is_pointer_button_down_on() && enabled {
@@ -83,9 +94,6 @@ pub fn stepper(ui: &mut egui::Ui, rect: Rect, id: egui::Id, t: &Theme) -> i32 {
         } else {
             ui.ctx().data_mut(|d| d.remove::<(f64, u32)>(state));
         }
-    }
-    if steps != 0 {
-        ui.painter().line_segment([Pos2::new(rect.left(), rect.top() + 2.), Pos2::new(rect.left(), rect.bottom() - 2.)], Stroke::new(1.0_f32, t.stroke));
     }
     steps
 }
@@ -156,6 +164,15 @@ mod tests {
         assert_eq!(repeat_steps_due(REPEAT_DELAY - 0.01), 1);
         assert_eq!(repeat_steps_due(REPEAT_DELAY), 2);
         assert_eq!(repeat_steps_due(REPEAT_DELAY + REPEAT_INTERVAL * 3.5), 5);
+    }
+    #[test]
+    fn buttons_sit_at_both_ends_and_need_room() {
+        let outer = Rect::from_min_size(Pos2::new(10., 0.), Vec2::new(120., 22.));
+        let (dec, inc, text) = layout(outer).unwrap();
+        assert_eq!(dec.left(), 11.); assert_eq!(inc.right(), 129.);
+        assert!(dec.width() >= STEPPER_W - 1. && inc.width() >= STEPPER_W - 1. && dec.height() >= 20.);
+        assert!(text.left() >= dec.right() && text.right() <= inc.left() && text.width() >= MIN_TEXT_W);
+        assert!(layout(Rect::from_min_size(Pos2::ZERO, Vec2::new(60., 22.))).is_none());
     }
     #[test]
     fn wheel_never_hijacks_plain_panel_scrolling() {

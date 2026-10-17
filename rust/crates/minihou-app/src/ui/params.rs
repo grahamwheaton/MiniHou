@@ -1299,15 +1299,17 @@ fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: 
     changed
 }
 
-/// A boxed number field: drag/double-click text (drag_number) plus up/down arrows at the right
-/// end and gated wheel stepping (see ui::number_step for step sizes and the wheel rule).
+/// A boxed number field: drag/double-click text between a decrement button (left end) and an increment button
+/// (right end), plus gated wheel stepping (see ui::number_step). Fields too narrow for the buttons keep drag + wheel.
 #[allow(clippy::too_many_arguments)]
 fn number_field(ui: &mut egui::Ui, width: f32, id: egui::Id, v: &mut f64, speed: f64, range: &std::ops::RangeInclusive<f64>, integer: bool, soft: Option<(f64, f64)>, align: Align2, t: &Theme, units: Option<crate::units::UnitSettings>) -> (bool, Rect) {
     let (outer, inner) = boxed(ui, width, t);
-    let arrows = Rect::from_min_max(Pos2::new(outer.right() - number_step::STEPPER_W, outer.top() + 1.), Pos2::new(outer.right() - 1., outer.bottom() - 1.));
-    let text = Rect::from_min_max(inner.min, Pos2::new(arrows.left() - 1., inner.bottom()));
+    let buttons = number_step::layout(outer);
+    // the value reads centred between the - and + buttons
+    let align = if buttons.is_some() { Align2::CENTER_CENTER } else { align };
+    let text = buttons.map_or(inner, |(_, _, text)| Rect::from_min_max(Pos2::new(text.left() + 2., inner.top()), Pos2::new(text.right() - 2., inner.bottom())));
     let mut changed = drag_number(ui, text, id, v, speed, range, integer, align, t, units);
-    let steps = number_step::stepper(ui, arrows, id, t) + step_by_wheel(ui, outer, id);
+    let steps = buttons.map_or(0, |(dec, inc, _)| number_step::stepper(ui, dec, inc, id, t)) + step_by_wheel(ui, outer, id);
     changed |= apply_field_steps(ui, id, v, steps, range, integer, soft, units);
     (changed, outer)
 }
@@ -1823,7 +1825,7 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
                     None
                 }
             });
-            let box_w: f32 = number_step::STEPPER_W + if units.is_some() { 84. } else { 68. };
+            let box_w: f32 = 2. * number_step::STEPPER_W + if units.is_some() { 84. } else { 68. };
             let drag_width = if integer {
                 if theme.is_some() { width - 32. } else { width }
             } else if s_range.is_some() {
@@ -2453,8 +2455,9 @@ fn json_close(a: &serde_json::Value, b: &serde_json::Value) -> bool {
         let mut v = 2.;
         frame(&ctx, &mut v, 0.0..=3.0, true, 0., none, vec![]);
         let fr = field.get();
-        let up = Pos2::new(fr.right() - 6., fr.top() + 5.);
-        let down = Pos2::new(fr.right() - 6., fr.bottom() - 5.);
+        // increment button at the right end, decrement at the left end, each the full field height
+        let up = Pos2::new(fr.right() - 10., fr.bottom() - 4.);
+        let down = Pos2::new(fr.left() + 10., fr.top() + 4.);
         let press = |pos: Pos2, pressed: bool| vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }];
         // press the up arrow: one step on press, then held repeats stop at max 3
         assert!(frame(&ctx, &mut v, 0.0..=3.0, true, 0.1, none, press(up, true)).0);
