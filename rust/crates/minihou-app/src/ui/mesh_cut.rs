@@ -6,6 +6,7 @@ use crate::picking;
 use eframe::egui::{self, pos2, vec2, FontId, Pos2, Rect, Stroke, Vec2};
 use minihou_core::{nodes::{edge_slide_preview, loop_cut_preview, loop_slide_fractions, LoopTopology, LOOP_CUT_MAX}, Geometry};
 use serde_json::{json, Value};
+use minihou_app::inference::{self as inf, InferenceInput, Projector, ToolContext, ToolSpec};
 use std::sync::Arc;
 
 type Edge = (usize, usize);
@@ -143,22 +144,35 @@ fn loop_params(edge: Edge, count: usize, factor: f64, even: bool, flipped: bool,
 }
 
 /// Egui's camera projection omits the viewport aspect ratio. Store the exact NDC projection the kernel expects.
-fn knife_params(camera: CameraInfo, rect: Rect, points: &[[f32; 2]]) -> Value {
+fn knife_params(camera: CameraInfo, rect: Rect, chains: &[Vec<KnifePoint>], through: bool, tolerance:f32) -> Value {
     let aspect = rect.width()/rect.height().max(1.);
     let matrix: Vec<f32> = camera.projection.iter().flat_map(|col| [col[0]/aspect,col[1],col[2],col[3]]).collect();
-    let cuts: Vec<_> = points.windows(2).map(|p| json!({"a":p[0],"b":p[1],"matrix":matrix,"through":false})).collect();
-    json!({"cuts":Value::Array(cuts).to_string()})
+    let cuts: Vec<_> = chains.iter().filter(|c|c.len()>=2).map(|chain| {
+        json!({"points":chain.iter().map(|p|json!({"position":p.world,"screen":p.screen,"snap":p.reference})).collect::<Vec<_>>(),"matrix":matrix})
+    }).collect();
+    json!({"cuts":Value::Array(cuts).to_string(),"cut_through":through,"snap_tolerance":tolerance})
 }
+#[derive(Clone, Debug)]
+struct KnifePoint { screen: [f32;2], world: [f32;3], reference: Option<Value> }
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Slide { edge: Edge, raw: f64, press: Pos2, held: bool, dragged: bool }
 #[derive(Clone, Default)]
 struct State {
-    tool: Option<Tool>, revision: u64, source: String, mesh: Arc<Mesh>, points: Vec<[f32; 2]>, projection: [[f32; 4]; 4], aspect: f32,
+    tool: Option<Tool>, revision: u64, source: String, mesh: Arc<Mesh>, points: Vec<KnifePoint>, pending: Vec<Vec<KnifePoint>>, knife_hover: Option<KnifePoint>, cut_through: bool, angle: bool, snap_tolerance:f32, projection: [[f32; 4]; 4], aspect: f32,
     count: usize, hover: Option<Edge>, hover_key: Option<(Pos2, [[f32; 4]; 4], f32, bool, u64)>, slide: Option<Slide>, wheel: f32,
     even: bool, flipped: bool, clamp: bool, numeric: String,
     edge_selection: Vec<Edge>,
 }
 fn id() -> egui::Id { egui::Id::new("viewport_mesh_cut") }
+fn stage_knife(s: &mut State) { if s.points.len() >= 2 { s.pending.push(std::mem::take(&mut s.points)); } else { s.points.clear(); } }
+fn confirm_knife(s: &mut State, camera: CameraInfo, rect: Rect, out: &mut Actions) {
+    stage_knife(s);
+    if !s.pending.is_empty() {
+        out.push(UiAction::MeshCutCommit { source:s.source.clone(), node_type:"knife".into(), params:knife_params(camera,rect,&s.pending,s.cut_through,s.snap_tolerance) });
+        s.pending.clear();
+    }
+    out.push(UiAction::Editor(EditorChange::Tool(Tool::Select)));
+}
 pub fn cancel(ctx: &egui::Context) { ctx.data_mut(|d| d.remove::<State>(id())); }
 pub fn start_edge_slide(ctx: &egui::Context, source: String, edges: Vec<Edge>) {
     if edges.is_empty() { return; }
@@ -166,7 +180,7 @@ pub fn start_edge_slide(ctx: &egui::Context, source: String, edges: Vec<Edge>) {
     state.slide=Some(Slide { edge:state.edge_selection[0], raw:0., press:ctx.input(|i|i.pointer.hover_pos()).unwrap_or(Pos2::ZERO), held:false, dragged:false });
     ctx.data_mut(|d|d.insert_temp(id(),state));
 }
-pub fn blocks_navigation(ctx: &egui::Context) -> bool { ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| !s.points.is_empty() || s.slide.is_some())) }
+pub fn blocks_navigation(ctx: &egui::Context) -> bool { ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| s.slide.is_some())) }
 /// Loop Cut owns the wheel throughout its modal session, including between edges.
 pub fn captures_wheel(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<State>(id()).is_some_and(|s| s.tool == Some(Tool::LoopCut)))
@@ -189,7 +203,14 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
         s.slide = None; s.hover = None; s.hover_key = None;
     }
     s.count = s.count.clamp(1, LOOP_CUT_MAX);
-    if s.projection != v.camera.projection || s.aspect != aspect || !ready { s.points.clear(); }
+    if tool==Tool::Knife && (s.projection!=v.camera.projection || s.aspect!=aspect) {
+        let update=|p:&mut KnifePoint| { if let Some(q)=transform_gizmo::project(v.camera,rect,p.world) {
+            p.screen=[(q.x-rect.center().x)*2./rect.width(),(rect.center().y-q.y)*2./rect.height()];
+        } };
+        for p in &mut s.points { update(p); }
+        for chain in &mut s.pending { for p in chain { update(p); } }
+    }
+    if !ready { s.points.clear(); s.pending.clear(); }
     if !ready { s.slide = None; }
     if ready && tool==Tool::EdgeSlide && s.slide.is_none() && !s.edge_selection.is_empty() {
         s.slide=Some(Slide { edge:s.edge_selection[0], raw:0., press:ctx.input(|i|i.pointer.hover_pos()).unwrap_or(Pos2::ZERO), held:false, dragged:false });
@@ -197,7 +218,48 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
     s.projection = v.camera.projection; s.aspect = aspect;
     let canvas = |p: Pos2| super::viewport_ui::selection_canvas_contains(rect,p) && p.x > rect.left()+55. && p.y > rect.top()+83.;
     let (pointer, delta, modifiers) = ctx.input(|i| (i.pointer.hover_pos(), i.pointer.delta(), i.modifiers));
-    let pointer = pointer.filter(|p| canvas(*p));
+    let mut pointer = pointer.filter(|p| canvas(*p));
+    if tool==Tool::Knife && s.angle { if let (Some(p),Some(last))=(pointer,s.points.last()) {
+        let a=pos2(rect.center().x+last.screen[0]*rect.width()*0.5,rect.center().y-last.screen[1]*rect.height()*0.5);
+        let d=p-a; let radius=d.length(); if radius>1. { let theta=(d.y.atan2(d.x)/std::f32::consts::FRAC_PI_4).round()*std::f32::consts::FRAC_PI_4;
+            pointer=Some(a+vec2(theta.cos(),theta.sin())*radius); }
+    } }
+    let ndc = |p: Pos2| [(p.x-rect.center().x)*2./rect.width(),(rect.center().y-p.y)*2./rect.height()];
+    let mut knife_primitives = Vec::new();
+    if ready && tool == Tool::Knife {
+        s.knife_hover = None;
+        if let Some(at) = pointer {
+            let settings = ctx.data(|d| d.get_temp::<inf::InferenceSettings>(super::sketch::settings_id())).unwrap_or_default();
+            let mut settings = settings;
+            s.snap_tolerance=settings.tolerance_px;
+            settings.enabled &= inf::cat::VERTEX | inf::cat::MIDPOINT | inf::cat::EDGE | inf::cat::FACE;
+            if !modifiers.ctrl { settings.enabled &= !inf::cat::MIDPOINT; }
+            settings.include_hidden = s.cut_through;
+            let projector = Projector { matrix:v.camera.projection, rect_min:[rect.min.x,rect.min.y], rect_size:[rect.width(),rect.height()] };
+            let ray = transform_gizmo::ray(v.camera,rect,at);
+            {
+                let engine_cell = super::sketch::engine(&ctx);
+                let mut engine = engine_cell.lock().unwrap_or_else(|e|e.into_inner());
+                let tool = ToolContext { spec:ToolSpec::KNIFE, start:s.points.last().map(|p|p.world), start_face:None, ground:([0.;3],[0.,0.,1.]), tool_points:s.points.iter().map(|p|p.world).collect() };
+                let input = InferenceInput { ray, cursor:[at.x,at.y], projector, time:ctx.input(|i|i.time),
+                    geometry:Some(inf::GeometryRef { positions:&s.mesh.positions, triangles:&s.mesh.tris, curve_lines:&[], curve_centers:&[], revision:s.revision }),
+                    tool, settings:&settings, alt_held:false, typed:None };
+                let result = engine.update(&input);
+                let hit = if modifiers.shift { picking::pick_triangle(&s.mesh.positions,&s.mesh.tris,ray.0,ray.1).map(|h| (inf::math::add(ray.0,inf::math::mul(ray.1,h.t)),None)) }
+                    else { result.point.filter(|_|result.winner.kind != inf::Kind::Free).map(|p|(p,result.descriptor.as_ref().map(|d|d.to_json(&s.source,s.mesh.geometry.npoints)))) };
+                if let Some((world,reference)) = hit {
+                    if s.cut_through || s.mesh.visible(v.camera,rect,world) {
+                        let mut screen = ndc(at);
+                        if !modifiers.shift { if let Some(projected)=transform_gizmo::project(v.camera,rect,world) { screen=ndc(projected); } }
+                        s.knife_hover=Some(KnifePoint {screen,world,reference});
+                        if !modifiers.shift { knife_primitives=result.primitives; for primitive in &mut knife_primitives {
+                            if let inf::Primitive::Tooltip {text,..}=primitive { *text=match text.as_str() {"Endpoint"=>"Vertex","On Edge"=>"Edge","On Face"=>"Face",other=>other}.into(); }
+                        } }
+                    }
+                }
+            }
+        }
+    }
     let loop_cut = ready && tool == Tool::LoopCut;
     let edge_slide = ready && tool == Tool::EdgeSlide;
     if loop_cut && s.slide.is_none() {
@@ -221,7 +283,6 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
         } }
         if sl.held && pointer.is_some_and(|p| p.distance(sl.press) > DRAG_THRESHOLD) { sl.dragged = true; }
     }
-    let ndc = |p: Pos2| [(p.x-rect.center().x)*2./rect.width(),(rect.center().y-p.y)*2./rect.height()];
     let commit = |s: &State, edge: Edge, factor: f64, out: &mut Actions| {
         let (node_type,params)=if s.tool==Some(Tool::EdgeSlide) {
             ("edge_slide",json!({"group":s.edge_selection.iter().map(|(a,b)|format!("p{a}-{b}")).collect::<Vec<_>>().join(" "),
@@ -236,6 +297,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
                 if loop_cut { if let Some(sl)=s.slide.take() { commit(&s,sl.edge,0.,out); cancel(&ctx); return; } }
                 cancel(&ctx); out.push(UiAction::Editor(EditorChange::Tool(Tool::Select))); return;
             }
+            egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: true, modifiers, .. } if tool==Tool::Knife && !modifiers.alt => { stage_knife(&mut s); }
             egui::Event::PointerButton { button: egui::PointerButton::Secondary, pressed: true, modifiers, .. } if !modifiers.alt && !modifiers.ctrl => {
                 if loop_cut { if let Some(sl)=s.slide.take() { commit(&s,sl.edge,0.,out); cancel(&ctx); return; } }
                 cancel(&ctx); out.push(UiAction::Editor(EditorChange::Tool(Tool::Select))); return;
@@ -244,9 +306,10 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
                 s.numeric.pop(); if let Ok(f)=s.numeric.parse::<f64>() { if let Some(sl)=s.slide.as_mut() { sl.raw=f.clamp(-1.,1.); } }
             }
             egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => { s.points.pop(); }
-            egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } if ready && tool == Tool::Knife && s.points.len() >= 2 => {
-                out.push(UiAction::MeshCutCommit { source: s.source.clone(), node_type: "knife".into(), params: knife_params(v.camera,rect,&s.points) }); s.points.clear();
-            }
+            egui::Event::Key { key: egui::Key::Enter | egui::Key::Space, pressed: true, .. } if ready && tool == Tool::Knife => confirm_knife(&mut s,v.camera,rect,out),
+            egui::Event::Key { key: egui::Key::E, pressed: true, .. } if tool==Tool::Knife => stage_knife(&mut s),
+            egui::Event::Key { key: egui::Key::Z, pressed: true, .. } if tool==Tool::Knife => s.cut_through=!s.cut_through,
+            egui::Event::Key { key: egui::Key::C, pressed: true, .. } if tool==Tool::Knife => s.angle=!s.angle,
             egui::Event::Key { key: egui::Key::Enter, pressed: true, modifiers, .. } if loop_cut || edge_slide => {
                 if let Some(sl) = s.slide.take() { commit(&s, sl.edge, slide_factor(sl.raw, modifiers.ctrl), out); }
                 else if let Some(edge) = s.hover { commit(&s, edge, 0., out); }
@@ -267,8 +330,9 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
             }
             egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers } if ready && canvas(pos) && !modifiers.alt => {
                 if tool == Tool::Knife {
-                    let p = ndc(pos);
-                    if s.points.len() < 513 && s.points.last().is_none_or(|a| (a[0]-p[0]).abs()+(a[1]-p[1]).abs() > 1e-6) { s.points.push(p); }
+                    if let Some(p)=s.knife_hover.clone() {
+                        if s.points.len()<513 && s.points.last().is_none_or(|a|a.screen!=p.screen) { s.points.push(p); }
+                    }
                 } else if let Some(sl) = s.slide {
                     s.slide = None; commit(&s, sl.edge, slide_factor(sl.raw, modifiers.ctrl), out);
                 } else if let Some(edge) = s.hover {
@@ -320,13 +384,18 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
     }
     if tool == Tool::Knife {
         let screen = |p: [f32;2]| pos2(rect.center().x+p[0]*rect.width()*0.5,rect.center().y-p[1]*rect.height()*0.5);
-        let mut path: Vec<_> = s.points.iter().map(|&p| screen(p)).collect();
-        if let Some(p) = pointer { if !path.is_empty() { path.push(p); } }
+        for chain in &s.pending { let path:Vec<_>=chain.iter().map(|p|screen(p.screen)).collect();
+            for pair in path.windows(2) { painter.line_segment([pair[0],pair[1]],stroke); }
+            for p in path { painter.circle_filled(p,3.,v.theme.warn); }
+        }
+        let mut path: Vec<_> = s.points.iter().map(|p| screen(p.screen)).collect();
+        if let Some(p) = s.knife_hover.as_ref() { if !path.is_empty() { path.push(screen(p.screen)); } }
         for pair in path.windows(2) { painter.line_segment([pair[0],pair[1]],stroke); }
-        for &p in &s.points { painter.circle_filled(screen(p),3.,v.theme.warn); }
+        for p in &s.points { painter.circle_filled(screen(p.screen),3.,v.theme.warn); }
+        super::sketch::paint_primitives(&painter,&knife_primitives,|q|transform_gizmo::project(v.camera,rect,q),v.theme.panel);
     }
     let hint = if !ready { "Cut tools: select a cooked active mesh stream".to_owned() }
-        else if tool == Tool::Knife { "Knife: click points | Enter apply | Backspace undo point | Esc/RMB exit".to_owned() }
+        else if tool == Tool::Knife { format!("Knife: click | RMB/E next chain | Enter/Space apply | Backspace undo | Esc cancel | Ctrl midpoint, Shift free, Z through {} | C angle {}",s.cut_through,s.angle) }
         else if tool==Tool::EdgeSlide { format!("Edge Slide | Factor {:.3} | Shift precision, Ctrl snap, E Even, F Flip, C Clamp, type factor | LMB/Enter confirm | RMB/Esc cancel",s.slide.map(|sl|slide_factor(sl.raw,snap)).unwrap_or(0.)) }
         else { loop_hint(s.count, s.slide.map(|sl| slide_factor(sl.raw, snap)), s.hover.is_some()) };
     let galley = painter.layout_no_wrap(hint, FontId::monospace(11.), v.theme.text);
@@ -353,6 +422,18 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
             ray_origin: [0.,0.,10.], ray_forward: [0.,0.,-1.], ray_right: [1.,0.,0.], ray_up: [0.,1.,0.], ..Default::default() }
     }
     fn geo(p: Vec<f32>, verts: Vec<i32>, offsets: Vec<i32>) -> Geometry { Geometry::from_arrays(p, verts, offsets, None).unwrap() }
+    #[test] fn knife_chains_stage_and_confirm_once() {
+        let point=|x|KnifePoint {screen:[x,0.],world:[x,0.,0.],reference:None};
+        let mut state=State {source:"active".into(),points:vec![point(0.),point(1.)],..Default::default()};
+        stage_knife(&mut state); assert_eq!(state.pending.len(),1); assert!(state.points.is_empty());
+        state.points=vec![point(2.),point(3.)];
+        let mut out=Actions::default();
+        confirm_knife(&mut state,ortho(),Rect::from_min_size(Pos2::ZERO,vec2(200.,200.)),&mut out);
+        assert_eq!(out.0.len(),2);
+        let UiAction::MeshCutCommit {params,..}=&out.0[0] else {panic!("expected knife commit")};
+        let chains:Value=serde_json::from_str(params["cuts"].as_str().unwrap()).unwrap();
+        assert_eq!(chains.as_array().unwrap().len(),2);
+    }
     /// Two quads side by side in z = 0: 0(0,0) 1(1,0) 2(2,0) 3(0,1) 4(1,1) 5(2,1).
     fn strip() -> Geometry { geo(vec![0.,0.,0., 1.,0.,0., 2.,0.,0., 0.,1.,0., 1.,1.,0., 2.,1.,0.], vec![0,1,4,3, 1,2,5,4], vec![0,4,8]) }
     #[test] fn count_clamps_to_polysplit_range() {
@@ -472,6 +553,34 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
     fn committed(actions: &[UiAction]) -> Option<Value> {
         actions.iter().find_map(|a| match a { UiAction::MeshCutCommit { node_type, params, .. } if node_type == "polysplit" => Some(params.clone()), _ => None })
     }
+    #[test] fn knife_rmb_and_e_stage_two_chains_then_enter_commits_one_node() {
+        let mut h=Harness::new(); h.fixture.editor.tool=Tool::Knife;
+        let click=|h:&Harness,x,y| {let p=h.at(x,y);h.frame(vec![egui::Event::PointerMoved(p)]);
+            let out=h.frame(vec![button(p,egui::PointerButton::Primary,true)]);h.frame(vec![button(p,egui::PointerButton::Primary,false)]);out};
+        assert!(click(&h,0.2,0.2).is_empty());assert!(click(&h,0.8,0.2).is_empty());
+        assert!(h.frame(vec![button(h.at(0.8,0.2),egui::PointerButton::Secondary,true)]).is_empty());
+        h.frame(vec![button(h.at(0.8,0.2),egui::PointerButton::Secondary,false)]);
+        assert_eq!(h.ctx.data(|d|d.get_temp::<State>(id()).unwrap().pending.len()),1);
+        assert!(click(&h,0.2,0.7).is_empty());assert!(click(&h,0.8,0.7).is_empty());
+        assert_eq!(h.ctx.data(|d|d.get_temp::<State>(id()).unwrap().points.len()),2);
+        assert!(h.frame(vec![key(egui::Key::E)]).is_empty());
+        assert_eq!(h.ctx.data(|d|d.get_temp::<State>(id()).unwrap().pending.len()),2);
+        let out=h.frame(vec![key(egui::Key::Enter)]);
+        let commits:Vec<_>=out.iter().filter_map(|a|if let UiAction::MeshCutCommit {params,..}=a {Some(params)} else {None}).collect();
+        assert_eq!(commits.len(),1);
+        let chains:Value=serde_json::from_str(commits[0]["cuts"].as_str().unwrap()).unwrap();
+        assert_eq!(chains.as_array().unwrap().len(),2);
+    }
+    #[test] fn knife_backspace_and_escape_discard_pending_chains() {
+        let mut h=Harness::new();h.fixture.editor.tool=Tool::Knife;
+        for x in [0.2,0.8] {let p=h.at(x,0.2);h.frame(vec![egui::Event::PointerMoved(p),button(p,egui::PointerButton::Primary,true)]);
+            h.frame(vec![button(p,egui::PointerButton::Primary,false)]);}
+        h.frame(vec![key(egui::Key::Backspace)]);
+        assert_eq!(h.ctx.data(|d|d.get_temp::<State>(id()).unwrap().points.len()),1);
+        let out=h.frame(vec![key(egui::Key::Escape)]);
+        assert!(!out.iter().any(|a|matches!(a,UiAction::MeshCutCommit {..})));
+        assert!(h.ctx.data(|d|d.get_temp::<State>(id()).is_none()));
+    }
     #[test] fn wheel_count_click_slide_and_confirm_make_one_node_edit() {
         let h = Harness::new();
         let p = h.at(1., 0.5);
@@ -584,9 +693,10 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
     #[test] fn knife_projection_matches_viewport_with_non_square_aspect() {
         let camera = CameraInfo { projection: [[1.,0.,0.,0.],[0.,1.,0.,0.],[0.,0.,1.,0.],[0.,0.,0.,1.]], ..Default::default() };
         let rect = Rect::from_min_size(pos2(30.,20.),vec2(800.,400.));
-        let params = knife_params(camera,rect,&[[-0.5,0.],[0.5,0.]]);
+        let points=vec![KnifePoint {screen:[-0.5,0.],world:[0.;3],reference:None},KnifePoint {screen:[0.5,0.],world:[0.;3],reference:None}];
+        let params = knife_params(camera,rect,&[points],false,10.);
         let cuts: Value = serde_json::from_str(params["cuts"].as_str().unwrap()).unwrap();
-        assert_eq!(cuts[0]["matrix"][0],0.5); assert_eq!(cuts[0]["a"],json!([-0.5,0.]));
+        assert_eq!(cuts[0]["matrix"][0],0.5); assert_eq!(cuts[0]["points"][0]["screen"],json!([-0.5,0.]));
         let screen = transform_gizmo::project(camera,rect,[1.,0.,0.]).unwrap();
         assert_eq!((screen.x-rect.center().x)*2./rect.width(),0.5);
     }

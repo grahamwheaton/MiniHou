@@ -294,7 +294,7 @@ fn measurements(ui: &mut egui::Ui, rect: Rect, v: &View, out:&mut Actions) -> bo
     consumed
 }
 /// Paint engine primitives: markers by shape, solid/dashed guide lines, tooltips with a backdrop.
-fn paint_primitives(p: &egui::Painter, prims: &[Primitive], project: impl Fn([f32; 3]) -> Option<Pos2>, backdrop: egui::Color32) {
+pub(super) fn paint_primitives(p: &egui::Painter, prims: &[Primitive], project: impl Fn([f32; 3]) -> Option<Pos2>, backdrop: egui::Color32) {
     use inf::Marker as M;
     for prim in prims { match prim {
         Primitive::Line { a, b, color: c, width, dashed } => if let (Some(a), Some(b)) = (project(*a), project(*b)) {

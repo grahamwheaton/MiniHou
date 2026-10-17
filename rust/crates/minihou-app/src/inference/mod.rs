@@ -40,6 +40,7 @@ pub enum Dof { /// Free 3D point (first click, Move base point).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ToolSpec { pub name: &'static str, pub categories: u32, pub dof: Dof }
 impl ToolSpec {
+    pub const KNIFE: Self = Self { name: "Knife", categories: cat::VERTEX | cat::MIDPOINT | cat::EDGE | cat::FACE, dof: Dof::Line };
     pub const LINE: Self = Self { name: "Line", categories: cat::ALL, dof: Dof::Line };
     pub const POLYLINE: Self = Self { name: "Polyline", categories: cat::ALL, dof: Dof::Line };
     pub const POLYGON: Self = Self { name: "Polygon", categories: cat::ALL, dof: Dof::Line };

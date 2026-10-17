@@ -28,7 +28,7 @@ const TOOLS: [(&str, Icon); 14] = [
     ("Scale (S)", Icon::Scale), ("Transform", Icon::Transform), ("Measure", Icon::Measure),
     ("Draw Line", Icon::Line), ("Draw Polyline (Enter finish)", Icon::Polyline),
     ("Draw Polygon (Enter finish)", Icon::Polygon), ("Draw Rectangle", Icon::Rectangle), ("Draw Circle", Icon::Circle),
-    ("Knife (K): click points, Enter confirm", Icon::Knife), ("Loop Cut (Ctrl+R): hover a quad edge, wheel count, click then slide, click confirm", Icon::LoopCut),
+    ("Knife (K): click mesh points, RMB/E next chain, Enter confirm all", Icon::Knife), ("Loop Cut (Ctrl+R): hover a quad edge, wheel count, click then slide, click confirm", Icon::LoopCut),
 ];
 /// Keep region presses off viewport chrome (header, timeline, tool strip and view gizmo).
 pub fn selection_canvas_contains(rect: Rect, p: Pos2) -> bool {

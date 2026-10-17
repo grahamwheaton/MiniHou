@@ -1294,9 +1294,11 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
             if let Some(spec) = nodes::get(typ) {
                 for param in spec.params {
                     if typ == "bezier" && param.name == "controls" { continue; }
+                    if typ == "knife" && param.name == "cuts" { continue; }
                     ui.push_id(param.name, |ui| row(ui, v, out, id, typ, param, flags.locked, &mut errors));
                 }
                 if typ == "bezier" { bezier_controls_panel(ui,v,out,id,flags.locked); }
+                if typ == "knife" { knife_chains_panel(ui,v,out,id,flags.locked); }
             }
             if typ == "modifier_input" { modifier_inputs_panel(ui, v, out, id); }
             if let Some(message) = super::waiting::waiting_of(&v.cooking.stats, id) { ui.add_space(4.); super::waiting::panel_note(ui, v.theme, message); }
@@ -1309,6 +1311,19 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
             }
         }
     });
+}
+
+fn knife_chains_panel(ui:&mut egui::Ui,v:&View<'_>,out:&mut Actions,id:&str,locked:bool) {
+    let raw=v.doc["nodes"][id]["params"]["cuts"].as_str().unwrap_or("[]");
+    let Ok(mut chains)=serde_json::from_str::<Vec<Value>>(raw) else { ui.colored_label(v.theme.err,"Invalid Knife chains"); return; };
+    ui.add_space(5.); ui.horizontal(|ui| {ui.add_space(12.);ui.strong(format!("Cut chains ({})",chains.len()));});
+    let mut clear=None;
+    for (i,chain) in chains.iter().enumerate() {
+        let count=chain.get("points").and_then(Value::as_array).map_or(2,Vec::len);
+        ui.horizontal(|ui| {ui.add_space(12.);ui.label(format!("Chain {} · {} points",i+1,count));
+            if ui.add_enabled(!locked,egui::Button::new("Clear")).clicked() {clear=Some(i);} });
+    }
+    if let Some(i)=clear {chains.remove(i);out.push(UiAction::Edit{edit:Edit::Param{node:id.into(),name:"cuts".into(),value:json!(Value::Array(chains).to_string())},continuous:false});}
 }
 
 fn bezier_controls_panel(ui:&mut egui::Ui,v:&View<'_>,out:&mut Actions,id:&str,locked:bool) {
