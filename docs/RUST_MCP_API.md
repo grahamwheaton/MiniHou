@@ -279,3 +279,12 @@ the focused tests to pass: `minihou-core --lib fence` (1), `minihou-app --lib
 fence` (1), and `minihou-app --lib mcp` (1). Blender's object picker, curve
 feed, live modifier, and viewport appearance still require a Blender/native UI
 session.
+
+Rechecked on 2026-10-18 in this worktree: `tests.test_mcp_live` passed (1),
+including MCP `edit_graph` add/connect/set and the documented state/node-type
+fields. Targeted `minihou-core --lib fence`, `minihou-app --lib mcp`, and
+`minihou-app --lib fence` each passed (1). The first rebuild attempts hit OS
+error 112 twice as disk space fluctuated; `cargo clean` was confined to
+`rust/target_fence`, and the subsequent debug build passed. These were build
+environment failures, not MCP/API failures. No additional tool failure was
+observed; the table's seven unexercised tools remain unverified live.

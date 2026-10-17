@@ -74,9 +74,13 @@ class LiveMcp(unittest.TestCase):
     def test_live_contract(self):
         state = self.engine.get("/api/state")
         types = self.engine.get("/api/nodes")
-        self.assertIn("graph", state)
+        self.assertTrue({"rev", "graph", "status", "link", "engine"} <= state.keys())
+        self.assertTrue({"nodes", "display"} <= state["graph"].keys())
+        self.assertTrue({"pid", "version", "python_nodes"} <= state["engine"].keys())
         self.assertIsInstance(types, list)
         self.assertTrue(all({"name", "inputs", "params"} <= t.keys() for t in types))
+        self.assertTrue(all({"name", "kind", "default"} <= p.keys()
+                            for t in types for p in t["params"]))
         self.assertIn("Engine running", self.tool("engine_status"))
         self.assertIn("fence", self.tool("list_node_types", names=["box", "curve", "fence", "output"]))
         self.assertIn("nodes", self.tool("get_graph"))
@@ -90,9 +94,11 @@ class LiveMcp(unittest.TestCase):
         self.assertIn("Applied", self.tool("edit_graph", ops=ops))
         snap = self.engine.get("/api/graph")
         self.assertEqual(snap["graph"]["nodes"]["fence1"]["type"], "fence")
-        self.assertEqual(len(self.engine.post("/api/edit", {"ops": [{"op": "add", "type": "box", "id": "test_box"},
+        self.assertIn("Applied 3 op(s)", self.tool("edit_graph", ops=[
+            {"op": "add", "type": "box", "id": "test_box"},
             {"op": "connect", "from": "test_box", "to": "output1"},
-            {"op": "set", "id": "test_box", "params": {"size": [1, 2, 3]}}], "wait": True})["results"]), 3)
+            {"op": "set", "id": "test_box", "params": {"size": [1, 2, 3]}}]))
+        self.assertEqual(self.engine.get("/api/graph")["graph"]["nodes"]["test_box"]["params"]["size"], [1, 2, 3])
         inspected = json.loads(self.tool("inspect_node", node="output1"))
         self.assertTrue({"node", "points", "prims", "vertices", "bounds"} <= inspected.keys())
         self.assertIn("Undid 1", self.tool("undo"))
