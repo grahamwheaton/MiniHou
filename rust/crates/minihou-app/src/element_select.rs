@@ -305,6 +305,38 @@ impl Topology {
         }).collect()
     }
 
+    /// Expand connected components or invert, within the currently pickable domain.
+    pub fn linked_or_inverse(&self, sel:&mut Selection, mode:SelectionMode, inverse:bool, visible:impl Fn(u32)->bool) -> bool {
+        let Some(domain)=domain(mode) else {return false;};
+        let eligible=|id:u32| match mode {
+            SelectionMode::Points=>visible(id),
+            SelectionMode::Edges=>{let (a,b)=self.edges[id as usize];visible(a)&&visible(b)},
+            SelectionMode::Faces=>self.polygon_vertices(id).iter().all(|&v|visible(v)),
+            _=>false,
+        };
+        let ids=if sel.mode==mode {self.ids(sel)}else{Vec::new()};
+        let mut mask=vec![false;self.count(domain)];
+        for &id in &ids {if let Some(value)=mask.get_mut(id as usize) {if eligible(id) {*value=true;}}}
+        if inverse {for (id,value) in mask.iter_mut().enumerate() {*value=!*value&&eligible(id as u32);}}
+        else {
+            let mut pending:Vec<_>=ids.iter().copied().filter(|&id|mask.get(id as usize)==Some(&true)).collect();
+            let mut neighbours=Vec::new();
+            while let Some(id)=pending.pop() {
+                self.neighbours(domain,id,&mut neighbours);
+                for &next in &neighbours {if !mask[next as usize]&&eligible(next) {mask[next as usize]=true;pending.push(next);}}
+            }
+        }
+        let mut next=Selection {mode,..Default::default()};
+        let selected:Vec<_>=mask.iter().enumerate().filter(|(_,value)|**value).map(|(id,_)|id as u32).collect();
+        match mode {
+            SelectionMode::Points=>next.points=selected,
+            SelectionMode::Edges=>next.edges=selected.into_iter().map(|id|self.edges[id as usize]).collect(),
+            SelectionMode::Faces=>next.tris=self.tris_of(&selected),
+            _=>{},
+        }
+        let changed=*sel!=next;*sel=next;changed
+    }
+
     /// Select More / Less (Blender Ctrl+Numpad +/-, Face Step on) on the viewport selection. Selection state only: the
     /// `grow` node is never created by this. Kept elements keep their order; added ones follow in id order. Returns
     /// whether the selection changed.
@@ -470,6 +502,21 @@ mod tests {
     use super::*;
     use SelectionMode::{Edges, Faces, Points};
 
+    #[test] fn linked_and_inverse_respect_components_and_visibility_in_all_modes() {
+        let m=mesh(vec![0.;24],&[&[0,1,2,3],&[4,5,6,7]]);
+        let t=topo(&m);
+        for mode in [Points,Edges,Faces] {
+            let mut sel=Selection {mode,..Default::default()};
+            match mode {Points=>sel.points=vec![0],Edges=>sel.edges=vec![(0,1)],Faces=>sel.tris=vec![0],_=>{}}
+            assert!(t.linked_or_inverse(&mut sel,mode,false,|_|true));
+            match mode {Points=>assert_eq!(sel.points,vec![0,1,2,3]),Edges=>assert_eq!(sel.edges.len(),4),Faces=>assert_eq!(sel.tris,vec![0,1]),_=>{}}
+            assert!(t.linked_or_inverse(&mut sel,mode,true,|_|true));
+            match mode {Points=>assert_eq!(sel.points,vec![4,5,6,7]),Edges=>assert!(sel.edges.iter().all(|(a,b)|*a>=4&&*b>=4)),Faces=>assert_eq!(sel.tris,vec![2,3]),_=>{}}
+            assert!(t.linked_or_inverse(&mut sel,mode,true,|id|id>=4));
+            assert!(sel.is_empty(),"inverse cannot select hidden components");
+            assert!(!t.linked_or_inverse(&mut sel,mode,false,|_|true));
+        }
+    }
     #[test]
     fn brush_merges_preserve_order_detect_noops_and_subtract() {
         let mut selection=Selection {mode:Faces,tris:(0..50_562).collect(),..Default::default()};

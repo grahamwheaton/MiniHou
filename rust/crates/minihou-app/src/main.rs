@@ -1,5 +1,6 @@
 mod picking;
 mod element_select;
+mod node_selection;
 mod selection_metrics;
 #[cfg(test)] mod face_mode_profile;
 use minihou_app::graph_edit;
@@ -1838,6 +1839,23 @@ impl App {
                         self.selected = ids[0].clone(); self.selected_set = ids.iter().cloned().collect();
                         self.file_status = format!("Pasted {} node(s)", ids.len());
                     }
+                }
+            }
+            "select_linked" | "invert_selection" | "select_linked_nodes" | "invert_selection_nodes" => {
+                let inverse=name.starts_with("invert");
+                let network=name.ends_with("_nodes");
+                if network || e.selection==ui::SelectionMode::Object {
+                    let graph=Graph::from_value(self.editor.doc.value()).expect("validated document");
+                    let ids=if inverse {
+                        let universe=if network {graph.nodes.iter().map(|(id,_)|id.clone()).collect()}else{self.editor.doc.display_nodes()};
+                        node_selection::inverse(universe,&self.selected_set)
+                    }else{node_selection::linked(&graph,&self.selected_set)};
+                    self.selected_set=ids;
+                    if !self.selected_set.contains(&self.selected) {self.selected=self.selected_set.iter().next().cloned().unwrap_or_default();}
+                    self.selection_dirty=true;
+                }else if let Some(scene)=&self.scene {
+                    let visible=|id|point_pickable(e.object_visibility,&self.display_ranges,&self.selected_set,id);
+                    if element_select::cached(&self.elem_topo,scene).linked_or_inverse(&mut self.selection,e.selection,inverse,visible) {self.selection_dirty=true;}
                 }
             }
             "select_more" | "select_less" => {

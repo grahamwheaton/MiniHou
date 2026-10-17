@@ -27,7 +27,7 @@ impl Chord {
 pub enum Context { Everywhere, Viewport, Network }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Command {
-    Points, Edges, Faces, Object, ToggleEdit, SelectAll, SelectNone, Hide, Reveal, AddMenu, ToggleParams, FrameAll, FrameSelected,
+    Points, Edges, Faces, Object, ToggleEdit, SelectAll, SelectNone, SelectLinked, InvertSelection, Hide, Reveal, AddMenu, ToggleParams, FrameAll, FrameSelected,
     ToolSelect, ToolMove, ToolRotate, ToolScale, ToolTransform,
     Front, Back, Right, Left, Top, Bottom, ToggleProjection,
     OrbitDown, OrbitLeft, OrbitRight, OrbitUp,
@@ -42,7 +42,7 @@ pub enum Command {
     SelectMore, SelectLess, GoToLinkSource, GoToLinkTarget, ToggleDepLinks,
 }
 impl Command {
-    pub const ALL: [Self; 90] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
+    pub const ALL: [Self; 92] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::SelectLinked, Self::InvertSelection, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
         Self::ToolSelect, Self::ToolMove, Self::ToolRotate, Self::ToolScale, Self::ToolTransform,
         Self::FrameAll, Self::FrameSelected, Self::Front, Self::Back, Self::Right, Self::Left,
         Self::Top, Self::Bottom, Self::ToggleProjection, Self::OrbitDown, Self::OrbitLeft,
@@ -56,6 +56,7 @@ impl Command {
         Self::SketchLine, Self::SketchPolyline, Self::SketchPolygon, Self::SketchRectangle, Self::SketchCircle, Self::ShadePie, Self::SelectMore, Self::SelectLess, Self::GoToLinkSource, Self::GoToLinkTarget, Self::ToggleDepLinks];
     pub fn label(self) -> &'static str { match self {
         Self::Points => "Points", Self::Edges => "Edges", Self::Faces => "Faces", Self::Object => "Object", Self::ToggleEdit => "Toggle Object / edit mode",
+        Self::SelectLinked => "Select linked", Self::InvertSelection => "Invert selection",
         Self::SelectAll => "Select all", Self::SelectNone => "Select none", Self::Hide => "Hide selected", Self::Reveal => "Reveal hidden", Self::AddMenu => "Add node menu", Self::ToggleParams => "Toggle parameters",
         Self::ToolSelect => "Select tool", Self::ToolMove => "Move (modal)", Self::ToolRotate => "Rotate (modal)",
         Self::ToolScale => "Scale (modal)", Self::ToolTransform => "Transform tool",
@@ -87,6 +88,7 @@ impl Command {
     } }
     fn id(self) -> &'static str { match self {
         Self::Points => "points", Self::Edges => "edges", Self::Faces => "faces", Self::Object => "object", Self::ToggleEdit => "toggle_edit",
+        Self::SelectLinked => "select_linked", Self::InvertSelection => "invert_selection",
         Self::SelectAll => "select_all", Self::SelectNone => "select_none", Self::Hide => "hide", Self::Reveal => "reveal", Self::AddMenu => "add_menu", Self::ToggleParams => "toggle_params",
         Self::ToolSelect => "tool_select", Self::ToolMove => "tool_move", Self::ToolRotate => "tool_rotate",
         Self::ToolScale => "tool_scale", Self::ToolTransform => "tool_transform",
@@ -120,6 +122,7 @@ impl Command {
         Self::Faces => UiAction::Editor(EditorChange::Selection(SelectionMode::Faces)),
         // 4 fell through to Command("object"), which main never handled ("not wired up yet").
         Self::Object => UiAction::Editor(EditorChange::Selection(SelectionMode::Object)),
+        Self::SelectLinked | Self::InvertSelection => UiAction::Command(format!("{}{}",self.id(),if kctx.network_hovered {"_nodes"}else{""})),
         Self::ToggleEdit | Self::SelectAll | Self::SelectNone | Self::Hide | Self::Reveal | Self::ToggleParams => UiAction::Command(self.id().to_owned()),
         // Tab opens the add menu in the viewport too, in every selection mode; Ctrl+Tab toggles object / edit mode.
         Self::AddMenu => UiAction::Command("add_menu".to_owned()),
@@ -191,7 +194,7 @@ impl Keymap {
         for (key,ctrl,cmd) in [(K::Num2,false,C::OrbitDown),(K::Num4,false,C::OrbitLeft),(K::Num6,false,C::OrbitRight),(K::Num8,false,C::OrbitUp),
             (K::Num4,true,C::PanLeft),(K::Num6,true,C::PanRight),(K::Num8,true,C::PanUp),(K::Num2,true,C::PanDown),
             (K::Plus,false,C::ZoomIn),(K::Minus,false,C::ZoomOut)] { add(key,ctrl,false,true,cmd,X::Viewport); }
-        for (key,cmd) in [(K::F,C::FrameAll),(K::L,C::TidyNetwork),(K::O,C::NetworkBox),
+        for (key,cmd) in [(K::F,C::FrameAll),(K::L,C::SelectLinked),(K::O,C::NetworkBox),
             (K::C,C::PieMenu),(K::D,C::DisplayFlag),(K::M,C::MuteFlag),(K::E,C::TemplateFlag),
             (K::W,C::SelectableTemplateFlag)] { add(key,false,false,false,cmd,X::Network); }
         for (key,cmd) in [(K::J,C::GoToLinkSource),(K::K,C::GoToLinkTarget),(K::D,C::ToggleDepLinks)] { add(key,false,true,false,cmd,X::Network); }
@@ -221,6 +224,9 @@ impl Keymap {
         add(K::Tab,true,false,false,C::ToggleEdit,X::Viewport);
         add(K::Plus,true,false,true,C::SelectMore,X::Viewport);
         add(K::Minus,true,false,true,C::SelectLess,X::Viewport);
+        add(K::L,false,false,false,C::SelectLinked,X::Viewport);
+        add(K::I,true,false,false,C::InvertSelection,X::Viewport);
+        add(K::I,true,false,false,C::InvertSelection,X::Network);
         Self { bindings: b, emulate_numpad: false }
     }
     pub fn reset(&mut self) { *self = Self::blender(); }
@@ -266,7 +272,7 @@ impl Keymap {
         let mut out = Vec::new();
         ctx.input_mut(|input| for b in bindings {
             if selection_only && (b.context != Context::Viewport || b.chord.key == Key::Escape ||
-                !matches!(b.command, Command::SelectAll | Command::SelectNone | Command::BoxSelect | Command::CircleSelect | Command::LassoSelect | Command::ToolSelect)) { continue; }
+                !matches!(b.command, Command::SelectAll | Command::SelectNone | Command::SelectLinked | Command::InvertSelection | Command::BoxSelect | Command::CircleSelect | Command::LassoSelect | Command::ToolSelect)) { continue; }
             if !(match b.context { Context::Everywhere => true, Context::Viewport => kctx.viewport_hovered, Context::Network => kctx.network_hovered }) { continue; }
             // egui reports number-row and numpad keys alike, so a held numpad key counts as Alt+key (the numpad binding form)
             let hit = input.events.iter().position(|e| matches!(e, egui::Event::Key { key, pressed: true, modifiers, .. }
@@ -396,7 +402,7 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
             });
             assert!(matches!(actions.as_slice(), [UiAction::Command(name)] if name == expected));
         }
-        for key in [Key::T, Key::L] {
+        for key in [Key::T] {
             let ctx = egui::Context::default();
             let _ = ctx.run(egui::RawInput { events: vec![egui::Event::Key { key, physical_key: None,
                 pressed: true, repeat: false, modifiers: Modifiers::NONE }], ..Default::default() }, |ctx| {
@@ -405,6 +411,16 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
         }
     }
 
+    #[test] fn linked_and_inverse_are_routed_to_the_hovered_editor() {
+        for network in [false,true] { for (key,modifiers,name) in [(Key::L,Modifiers::NONE,"select_linked"),(Key::I,Modifiers::CTRL,"invert_selection")] {
+            let ctx=egui::Context::default();
+            let _=ctx.run(egui::RawInput {modifiers,events:vec![egui::Event::Key {key,physical_key:None,pressed:true,repeat:false,modifiers}],..Default::default()},|ctx| {
+                let actions=Keymap::blender().poll(ctx,&KeyContext {network_hovered:network,viewport_hovered:!network,..Default::default()});
+                let expected=format!("{name}{}",if network {"_nodes"}else{""});
+                assert!(matches!(actions.as_slice(),[UiAction::Command(actual)] if actual==&expected));
+            });
+        } }
+    }
     #[test] fn guide_keymap_matches_defaults() {
         let guide = include_str!("../../docs/NATIVE_EDITOR.md").replace("\r\n", "\n");
         let table = guide.split_once("<!-- keymap:start -->\n").unwrap().1.split_once("<!-- keymap:end -->").unwrap().0;
