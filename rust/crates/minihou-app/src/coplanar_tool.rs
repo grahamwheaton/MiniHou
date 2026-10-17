@@ -16,12 +16,16 @@ impl State {
 }
 fn panel_id()->egui::Id {egui::Id::new("coplanar_redo_bounds")}
 pub fn contains(ctx:&egui::Context,viewport:egui::Rect,p:egui::Pos2)->bool {
-    ctx.data(|d|d.get_temp::<egui::Rect>(panel_id())).unwrap_or_else(||egui::Rect::from_min_size(egui::pos2(viewport.left()+56.,(viewport.bottom()-174.).max(viewport.top()+48.)),egui::vec2(278.,174.))).contains(p)
+    ctx.data(|d|d.get_temp::<egui::Rect>(panel_id())).unwrap_or_else(|| {
+        let available=ui::viewport_ui::operator_panel_rect(viewport);
+        egui::Rect::from_min_size(available.left_bottom()-egui::vec2(0.,174.),egui::vec2(278.,174.))
+    }).contains(p)
 }
 pub fn show(ui:&egui::Ui,rect:egui::Rect,state:&mut Option<State>,units:units::UnitSettings,out:&mut Actions) {
     let Some(operator)=state.as_mut() else {return;}; let mut close=false;
+    let available=ui::viewport_ui::operator_panel_rect(rect);
     let area=egui::Area::new(egui::Id::new("coplanar_redo")).order(egui::Order::Foreground)
-        .fixed_pos(egui::pos2(rect.left()+56.,(rect.bottom()-174.).max(rect.top()+48.))).show(ui.ctx(),|ui| {
+        .pivot(egui::Align2::LEFT_BOTTOM).fixed_pos(available.left_bottom()).constrain_to(available).show(ui.ctx(),|ui| {
         egui::Frame::popup(ui.style()).show(ui,|ui| {
             ui.set_width(246.);ui.horizontal(|ui|{ui.strong("Select Coplanar");if ui.small_button("×").clicked(){close=true;}});
             let mut changed=false;
@@ -101,6 +105,10 @@ fn valid_group_name(name:&str)->bool { !name.is_empty()&&!name.as_bytes()[0].is_
         for phase in 0..5 {
             let events=match phase {2|3=>vec![egui::Event::PointerMoved(button),egui::Event::PointerButton {pos:button,button:egui::PointerButton::Primary,pressed:phase==2,modifiers:Default::default()}],_=>vec![]};
             let output=ctx.run(egui::RawInput {screen_rect:Some(rect),events,..Default::default()},|ctx| {egui::CentralPanel::default().show(ctx,|ui|show(ui,rect,&mut state,units::UnitSettings::default(),&mut actions));});
+            if phase>0 {
+                let bounds=ctx.data(|d|d.get_temp::<egui::Rect>(panel_id())).unwrap();
+                assert!(ui::viewport_ui::operator_panel_rect(rect).contains_rect(bounds), "panel overlaps viewport chrome: {bounds:?}");
+            }
             if phase==1 {for shape in output.shapes {if let egui::Shape::Text(text)=shape.shape {if text.galley.text()=="Make group" {button=text.pos+text.galley.size()*0.5;}}}}
         }
         assert!(contains(&ctx,rect,button));assert!(actions.0.iter().any(|a|matches!(a,UiAction::Command(name) if name=="make_coplanar_group")));

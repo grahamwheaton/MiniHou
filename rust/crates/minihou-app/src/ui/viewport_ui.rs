@@ -15,6 +15,14 @@ pub fn handles(ui: &mut egui::Ui, rect: Rect, v: &View, out: &mut Actions) -> bo
 
 const HEADER_H: f32 = 36.;
 const TIMELINE_H: f32 = 44.;
+/// Space for operator panels above the stats chip and timeline, beside the tools.
+pub fn operator_panel_rect(rect: Rect) -> Rect {
+    Rect::from_min_max(
+        Pos2::new(rect.left() + 56., rect.top() + HEADER_H + 46.),
+        Pos2::new(rect.right() - 12., rect.bottom() - TIMELINE_H - 50.),
+    )
+}
+
 const TOOLS: [(&str, Icon); 14] = [
     ("Select (Q)", Icon::Select), ("3D cursor", Icon::Cursor), ("Move (G)", Icon::Move), ("Rotate (R)", Icon::Rotate),
     ("Scale (S)", Icon::Scale), ("Transform", Icon::Transform), ("Measure", Icon::Measure),
