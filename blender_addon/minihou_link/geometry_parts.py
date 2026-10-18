@@ -2,7 +2,7 @@
 
 Everything is keyed like ``geo`` messages: ``point/P``, ``topo/vertex_point`` (corner -> point), ``topo/prim_offsets``,
 ``topo/prim_closed`` (1 polygon, 0 open curve; absent: all polygons) and ``<domain>/<name>`` attributes, with the domains
-``point``, ``vertex`` (corners) and ``prim``.
+``point``, ``vertex`` (corners), ``edge`` and ``prim``. Edge rows use ``topo/edge_pairs``.
 """
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from . import curve_eval
-from .protocol import TOPO_KEYS, TOPO_PRIM_CLOSED, TOPO_PRIM_OFFSETS, TOPO_VERTEX_POINT, attr_key, split_key
+from .protocol import TOPO_EDGE_PAIRS, TOPO_KEYS, TOPO_PRIM_CLOSED, TOPO_PRIM_OFFSETS, TOPO_VERTEX_POINT, attr_key, split_key
 
 Arrays = Dict[str, np.ndarray]
 
@@ -93,6 +93,9 @@ def combine(parts: Sequence[Arrays]) -> Arrays:
     if any(TOPO_PRIM_CLOSED in p for p in parts):
         out[TOPO_PRIM_CLOSED] = np.concatenate([
             p[TOPO_PRIM_CLOSED] if TOPO_PRIM_CLOSED in p else np.ones(s[2], np.uint8) for p, s in zip(parts, sizes)]).astype(np.uint8)
+    if any(TOPO_EDGE_PAIRS in p for p in parts):
+        out[TOPO_EDGE_PAIRS] = np.concatenate([
+            p.get(TOPO_EDGE_PAIRS, np.zeros((0, 2), np.int32)) + pbase[i] for i, p in enumerate(parts)]).astype(np.int32)
     names: Dict[str, None] = {}
     for p in parts:
         for key in p:
@@ -100,14 +103,15 @@ def combine(parts: Sequence[Arrays]) -> Arrays:
                 names[key] = None
     for key in names:
         dom, _ = split_key(key)
-        n_of = {"point": 0, "vertex": 1, "prim": 2}[dom]
+        n_of = {"point": 0, "vertex": 1, "prim": 2}.get(dom)
         ref = next(p[key] for p in parts if key in p)
         chunks = []
         for p, s in zip(parts, sizes):
             if key in p:
                 chunks.append(p[key])
             else:
-                chunks.append(np.zeros((s[n_of],) + ref.shape[1:], ref.dtype))
+                count = len(p.get(TOPO_EDGE_PAIRS, ())) if dom == "edge" else s[n_of]
+                chunks.append(np.zeros((count,) + ref.shape[1:], ref.dtype))
         out[key] = np.concatenate(chunks)
     return out
 
@@ -124,6 +128,6 @@ def check(arrays: Arrays) -> None:
         if key in TOPO_KEYS:
             continue
         dom, _ = split_key(key)
-        want = {"point": npts, "vertex": nv, "prim": nprim}[dom]
+        want = len(arrays.get(TOPO_EDGE_PAIRS, ())) if dom == "edge" else {"point": npts, "vertex": nv, "prim": nprim}[dom]
         if len(a) != want:
             raise ValueError(f"{key} has {len(a)} rows, expected {want}")

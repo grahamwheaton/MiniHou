@@ -9,9 +9,9 @@ import bpy
 import numpy as np
 
 from . import material_slots
-from .protocol import GeoUpdate, Mirror, TOPO_KEYS, attr_key, split_key
+from .protocol import GeoUpdate, Mirror, TOPO_EDGE_PAIRS, TOPO_KEYS, attr_key, split_key
 
-_DOMAIN = {"point": "POINT", "vertex": "CORNER", "prim": "FACE"}
+_DOMAIN = {"point": "POINT", "vertex": "CORNER", "edge": "EDGE", "prim": "FACE"}
 CUSTOM_ATTRS_KEY = "minihou_attrs"          # names of attributes we created, so we can remove stale ones
 
 # Engine attribute names that become Blender-native data (Houdini name -> Blender meaning). Anything else is written as a
@@ -49,6 +49,8 @@ def attribute_spec(arr: np.ndarray) -> Optional[Tuple[str, str, np.dtype]]:
             return "FLOAT_COLOR", "color", np.dtype(np.float32)
     elif kind in "iu" and width == 1:
         return "INT", "value", np.dtype(np.int32)
+    elif kind in "iu" and width == 2:
+        return "INT32_2D", "value", np.dtype(np.int32)
     elif kind == "b" and width == 1:
         return "BOOLEAN", "value", np.dtype(np.bool_)
     return None
@@ -210,7 +212,9 @@ def remove_extra_objects(keep) -> List[str]:
     return gone
 
 
-def _blender_name(engine_name: str) -> str:
+def _blender_name(engine_name: str, domain: str = "") -> str:
+    if domain == "edge" and engine_name == "seam":
+        return "uv_seam"
     return {"uv": UV_NAME, "Cd": COLOR_NAME, "N": NORMAL_NAME}.get(engine_name, engine_name)
 
 
@@ -235,6 +239,22 @@ def write_attribute(mesh, domain: str, name: str, arr: np.ndarray) -> bool:
     return True
 
 
+def edge_values(mesh, pairs: np.ndarray, values: np.ndarray) -> np.ndarray:
+    """Reorder edge rows by their sorted point pair; missing mesh edges retain zero."""
+    if pairs.shape != (len(values), 2):
+        raise ValueError("edge values need one point pair per row")
+    source = {tuple(sorted(map(int, pair))): i for i, pair in enumerate(pairs)}
+    raw = np.empty(len(mesh.edges) * 2, np.int32)
+    if len(mesh.edges):
+        mesh.edges.foreach_get("vertices", raw)
+    out = np.zeros((len(mesh.edges),) + values.shape[1:], values.dtype)
+    for i, pair in enumerate(raw.reshape(-1, 2)):
+        found = source.get(tuple(sorted(map(int, pair))))
+        if found is not None:
+            out[i] = values[found]
+    return out
+
+
 def _to_corners(domain: str, arr: np.ndarray, mirror: Mirror) -> Optional[np.ndarray]:
     """Values of any domain expressed per face corner (UV maps must be on corners; colors on points or corners)."""
     if domain == "vertex":
@@ -251,6 +271,12 @@ def write_native(mesh, mirror: Mirror, domain: str, name: str, arr: np.ndarray) 
     """Write one engine attribute the way Blender understands it natively. Returns the Blender attribute name written,
     or None if ``name`` has no native meaning (or cannot be represented: then a warning is the caller's)."""
     width = 1 if arr.ndim == 1 else arr.shape[1]
+    if domain == "edge":
+        if name not in ("sharp_edge", "seam") or width != 1:
+            return None
+        blender_name = _blender_name(name, domain)
+        write_attribute(mesh, "edge", blender_name, np.asarray(arr) != 0)
+        return blender_name
     if name == "uv":
         if width < 2:
             return None
@@ -331,6 +357,8 @@ class PolygonView:
         self.prim_offsets = np.concatenate([[0], np.cumsum(sizes[closed])]).astype(np.int32)
         self.counts = {"point": mirror.counts["point"], "vertex": int(vmask.sum()), "prim": int(closed.sum())}
         self.arrays = {}
+        if TOPO_EDGE_PAIRS in mirror.arrays:
+            self.arrays[TOPO_EDGE_PAIRS] = mirror.arrays[TOPO_EDGE_PAIRS]
         for k, a in mirror.arrays.items():
             if k in TOPO_KEYS:
                 continue
@@ -383,6 +411,8 @@ def apply_update(mesh, mirror: Mirror, u: GeoUpdate) -> Dict[str, object]:
         if len(loose):
             mesh.edges.add(len(loose))
             set_edge_verts(mesh, loose)
+        if any(k.startswith("edge/") for k in mirror.arrays):
+            mesh.update(calc_edges=True)             # populate polygon edges before matching pairs
         out["loose_edges"] = int(len(loose))
         written = set(mirror.arrays) - set(TOPO_KEYS)
     else:
@@ -401,16 +431,23 @@ def apply_update(mesh, mirror: Mirror, u: GeoUpdate) -> Dict[str, object]:
     live_names = set()
     for key in sorted(k for k in mirror.arrays if k not in TOPO_KEYS and k != P_key):
         domain, name = split_key(key)
-        live_names.add(_blender_name(name))
+        live_names.add(_blender_name(name, domain))
         if key not in written:
             continue
         arr = mirror.arrays[key]
-        if name in NATIVE:
+        if domain == "edge":
+            pairs = mirror.arrays.get(TOPO_EDGE_PAIRS)
+            if pairs is None:
+                out["warnings"].append(f"attribute {key!r} has no topo/edge_pairs; skipped")
+                continue
+            arr = edge_values(mesh, pairs, arr)
+        if name in NATIVE or (domain == "edge" and name in ("sharp_edge", "seam")):
             done = write_native(mesh, mirror, domain, name, arr)
             if done:
                 wanted.add(done)
             else:
-                out["warnings"].append(f"attribute {key!r} {arr.shape} cannot be Blender's {NATIVE[name]}; skipped")
+                meaning = NATIVE.get(name, "edge flag")
+                out["warnings"].append(f"attribute {key!r} {arr.shape} cannot be Blender's {meaning}; skipped")
         elif name in reserved:
             out["warnings"].append(f"attribute {key!r}: the name {name!r} is used for a native Blender attribute "
                                    f"(see uv / Cd / N); rename it")

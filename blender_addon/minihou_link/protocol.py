@@ -74,9 +74,10 @@ DEFAULT_PORT = 8765
 TOPO_VERTEX_POINT = "topo/vertex_point"
 TOPO_PRIM_OFFSETS = "topo/prim_offsets"
 TOPO_PRIM_CLOSED = "topo/prim_closed"      # uint8 per primitive: 1 polygon, 0 open curve (absent: all polygons)
+TOPO_EDGE_PAIRS = "topo/edge_pairs"          # int32 (n, 2), sorted point-index pair per edge-domain row
 TOPO_REQUIRED = (TOPO_VERTEX_POINT, TOPO_PRIM_OFFSETS)            # always sent when topology changes
-TOPO_KEYS = TOPO_REQUIRED + (TOPO_PRIM_CLOSED,)
-DOMAINS = ("point", "vertex", "prim")
+TOPO_KEYS = TOPO_REQUIRED + (TOPO_PRIM_CLOSED, TOPO_EDGE_PAIRS)
+DOMAINS = ("point", "vertex", "edge", "prim")
 
 _SUPPORTED_DTYPES = {"<f4", "<f8", "<i4", "<i8", "|u1", "|b1"}
 
