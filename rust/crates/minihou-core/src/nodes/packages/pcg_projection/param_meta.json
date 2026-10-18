@@ -1,0 +1,21 @@
+{
+  "align": {
+    "default": true,
+    "doc": "Turn each point's +Z to the surface normal",
+    "kind": "bool"
+  },
+  "direction": {
+    "default": [
+      0.0,
+      0.0,
+      -1.0
+    ],
+    "doc": "Cast along this direction (and back) to find the surface",
+    "kind": "vec3"
+  },
+  "keep_misses": {
+    "default": false,
+    "doc": "Keep points that miss the surface (unchanged)",
+    "kind": "bool"
+  }
+}

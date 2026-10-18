@@ -246,18 +246,6 @@ pub fn registry() -> &'static [NodeSpec] {
         profiles::POLYEXPAND2D,
         bevel::POLYBEVEL,
         knife::KNIFE,
-        pcg::PCG_UNION,
-        pcg::PCG_DIFFERENCE,
-        pcg::PCG_INTERSECTION,
-        pcg::PCG_DISTANCE,
-        pcg::PCG_COPY_POINTS,
-        pcg::PCG_SELF_PRUNE,
-        pcg::PCG_PROJECTION,
-        pcg::PCG_SPLINE_SAMPLER,
-        pcg::PCG_SPAWNER,
-        pcg::PCG_VOLUME_SAMPLER,
-        pcg::PCG_SURFACE_SAMPLER,
-        pcg::PCG_DEBUG,
         procedural_systems::BUILDING_RULES,
         procedural_systems::REGION_IDENTIFY,
         procedural_systems::REGION_TRANSFORM,
@@ -332,7 +320,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["attribute_delete", "attribute_rename", "bend", "bezier", "bound", "boundary_select", "bulge", "cache", "clean", "example_offset", "facet", "fillet", "flood_fill", "fractal", "group_expand", "group_promote", "helix", "line", "loop_flatten", "loop_space", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "pcg_bounds", "pcg_density_filter", "pcg_points", "pcg_transform", "peak", "point", "point_jitter", "point_relax", "resample", "reverse", "ripple", "select_sharp_edges", "set_material", "subnet", "unpack", "waves"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["attribute_delete", "attribute_rename", "bend", "bezier", "bound", "boundary_select", "bulge", "cache", "clean", "example_offset", "facet", "fillet", "flood_fill", "fractal", "group_expand", "group_promote", "helix", "line", "loop_flatten", "loop_space", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "pcg_bounds", "pcg_copy_points", "pcg_debug", "pcg_density_filter", "pcg_density_noise", "pcg_difference", "pcg_distance", "pcg_intersection", "pcg_points", "pcg_projection", "pcg_self_prune", "pcg_spawner", "pcg_spline_sampler", "pcg_surface_sampler", "pcg_transform", "pcg_union", "pcg_volume_sampler", "peak", "point", "point_jitter", "point_relax", "resample", "reverse", "ripple", "select_sharp_edges", "set_material", "subnet", "unpack", "waves"]);
     }
 }
 

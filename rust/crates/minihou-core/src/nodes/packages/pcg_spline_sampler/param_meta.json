@@ -1,0 +1,40 @@
+{
+  "extents": {
+    "default": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "doc": "Half-size of the box given to each sampled point",
+    "kind": "vec3",
+    "min": 0.0
+  },
+  "jitter": {
+    "default": 0.0,
+    "doc": "interior: random offset, as a fraction of the spacing",
+    "kind": "float",
+    "max": 1.0,
+    "min": 0.0
+  },
+  "mode": {
+    "default": "on_curve",
+    "doc": "on_curve: along the curves; interior: filling closed curves (in their plane, e.g. a lot outline drawn in XY)",
+    "kind": "enum",
+    "options": [
+      "on_curve",
+      "interior"
+    ]
+  },
+  "seed": {
+    "default": 0,
+    "doc": "Seed for the sampling",
+    "kind": "int"
+  },
+  "spacing": {
+    "default": 1.0,
+    "doc": "Distance between points",
+    "kind": "float",
+    "min": 0.001,
+    "soft_max": 20.0
+  }
+}

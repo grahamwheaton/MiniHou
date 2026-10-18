@@ -1,0 +1,5 @@
+id = "pcg_distance"
+name = "PCG Distance"
+category = "PCG"
+description = "Write the distance to a target onto points."
+keywords = "pcg distance"

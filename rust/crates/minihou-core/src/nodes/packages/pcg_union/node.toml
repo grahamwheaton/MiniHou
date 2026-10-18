@@ -1,0 +1,5 @@
+id = "pcg_union"
+name = "PCG Union"
+category = "PCG"
+description = "Union of two point sets."
+keywords = "pcg union"

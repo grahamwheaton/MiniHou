@@ -1,0 +1,5 @@
+id = "pcg_difference"
+name = "PCG Difference"
+category = "PCG"
+description = "Difference of two point sets."
+keywords = "pcg difference"

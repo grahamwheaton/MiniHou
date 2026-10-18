@@ -4752,12 +4752,12 @@
  "pcg_copy_points": {
   "inherit_rotation": {
    "default": true,
-   "doc": "",
+   "doc": "Rotate each copy by the target point's rotation",
    "kind": "bool"
   },
   "inherit_scale": {
    "default": true,
-   "doc": "",
+   "doc": "Scale each copy by the target point's scale",
    "kind": "bool"
   }
  },
@@ -4816,12 +4816,12 @@
   },
   "invert": {
    "default": false,
-   "doc": "",
+   "doc": "Flip the noise values before they are applied",
    "kind": "bool"
   },
   "low": {
    "default": 0.0,
-   "doc": "",
+   "doc": "Lowest value of the noise range",
    "kind": "float",
    "max": 1.0,
    "min": 0.0
@@ -4849,7 +4849,7 @@
   },
   "seed": {
    "default": 0,
-   "doc": "",
+   "doc": "Seed for the noise",
    "kind": "int"
   }
  },
@@ -4879,7 +4879,7 @@
   },
   "mode": {
    "default": "set",
-   "doc": "",
+   "doc": "Replace the density with the distance-based value, or multiply the existing density by it",
    "kind": "enum",
    "options": [
     "set",
@@ -4952,7 +4952,7 @@
   },
   "seed": {
    "default": 0,
-   "doc": "",
+   "doc": "Seed for the random priority",
    "kind": "int"
   }
  },
@@ -4964,7 +4964,7 @@
   },
   "seed": {
    "default": 0,
-   "doc": "",
+   "doc": "Seed for choosing which object each point gets",
    "kind": "int"
   }
  },
@@ -4975,7 +4975,7 @@
     0.5,
     0.5
    ],
-   "doc": "",
+   "doc": "Half-size of the box given to each sampled point",
    "kind": "vec3",
    "min": 0.0
   },
@@ -4997,7 +4997,7 @@
   },
   "seed": {
    "default": 0,
-   "doc": "",
+   "doc": "Seed for the sampling",
    "kind": "int"
   },
   "spacing": {
@@ -5040,7 +5040,7 @@
   },
   "seed": {
    "default": 0,
-   "doc": "",
+   "doc": "Seed for the sampling",
    "kind": "int"
   }
  },
@@ -5137,7 +5137,7 @@
   },
   "seed": {
    "default": 0,
-   "doc": "",
+   "doc": "Seed for the sampling",
    "kind": "int"
   },
   "voxel_size": {

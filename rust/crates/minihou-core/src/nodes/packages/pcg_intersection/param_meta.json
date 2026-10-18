@@ -1,0 +1,11 @@
+{
+  "density_function": {
+    "default": "binary",
+    "doc": "binary: keep points that touch; multiply: scale their density by how much of their box is covered",
+    "kind": "enum",
+    "options": [
+      "binary",
+      "multiply"
+    ]
+  }
+}

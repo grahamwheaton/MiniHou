@@ -1,0 +1,12 @@
+{
+  "density_function": {
+    "default": "keep",
+    "doc": "maximum / add: where boxes from different inputs overlap, raise each point's density to the highest one, or add them (clamped to 1)",
+    "kind": "enum",
+    "options": [
+      "keep",
+      "maximum",
+      "add"
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "density_function": {
+    "default": "binary",
+    "doc": "binary: drop points that touch; subtract: lower their density by how much of their box is covered (dropping those left at 0)",
+    "kind": "enum",
+    "options": [
+      "binary",
+      "subtract"
+    ]
+  }
+}

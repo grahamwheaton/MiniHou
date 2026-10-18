@@ -1,0 +1,5 @@
+id = "pcg_volume_sampler"
+name = "PCG Volume Sampler"
+category = "PCG"
+description = "Sample points inside a volume."
+keywords = "pcg volume sampler"

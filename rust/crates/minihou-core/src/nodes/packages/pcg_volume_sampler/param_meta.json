@@ -1,0 +1,24 @@
+{
+  "jitter": {
+    "default": 0.0,
+    "doc": "Random offset, as a fraction of the voxel",
+    "kind": "float",
+    "max": 1.0,
+    "min": 0.0
+  },
+  "seed": {
+    "default": 0,
+    "doc": "Seed for the sampling",
+    "kind": "int"
+  },
+  "voxel_size": {
+    "default": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "doc": "Spacing of the grid of points",
+    "kind": "vec3",
+    "min": 0.001
+  }
+}

@@ -1,0 +1,5 @@
+id = "pcg_intersection"
+name = "PCG Intersection"
+category = "PCG"
+description = "Intersection of two point sets."
+keywords = "pcg intersection"

@@ -1,0 +1,5 @@
+id = "pcg_self_prune"
+name = "PCG Self Prune"
+category = "PCG"
+description = "Remove overlapping points."
+keywords = "pcg self prune"

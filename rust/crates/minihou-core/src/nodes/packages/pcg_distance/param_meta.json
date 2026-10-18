@@ -1,0 +1,23 @@
+{
+  "invert": {
+    "default": false,
+    "doc": "1 at the target, 0 far away",
+    "kind": "bool"
+  },
+  "max_distance": {
+    "default": 5.0,
+    "doc": "Density goes from 0 at the target to 1 at this distance",
+    "kind": "float",
+    "min": 1e-06,
+    "soft_max": 100.0
+  },
+  "mode": {
+    "default": "set",
+    "doc": "Replace the density with the distance-based value, or multiply the existing density by it",
+    "kind": "enum",
+    "options": [
+      "set",
+      "multiply"
+    ]
+  }
+}

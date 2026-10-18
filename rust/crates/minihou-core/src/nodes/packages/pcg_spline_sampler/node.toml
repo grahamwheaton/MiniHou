@@ -1,0 +1,5 @@
+id = "pcg_spline_sampler"
+name = "PCG Spline Sampler"
+category = "PCG"
+description = "Sample points along curves."
+keywords = "pcg spline sampler"

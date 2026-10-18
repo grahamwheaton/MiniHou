@@ -1,0 +1,18 @@
+{
+  "priority": {
+    "default": "large_first",
+    "doc": "Which of two overlapping points survives: the larger box, the smaller, the denser, or by chance",
+    "kind": "enum",
+    "options": [
+      "large_first",
+      "small_first",
+      "density",
+      "random"
+    ]
+  },
+  "seed": {
+    "default": 0,
+    "doc": "Seed for the random priority",
+    "kind": "int"
+  }
+}

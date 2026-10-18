@@ -1,0 +1,7 @@
+{
+  "color_by_density": {
+    "default": true,
+    "doc": "Cd from density: dark red (0) to white (1)",
+    "kind": "bool"
+  }
+}

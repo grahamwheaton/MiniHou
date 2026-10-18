@@ -1,0 +1,5 @@
+id = "pcg_copy_points"
+name = "PCG Copy Points"
+category = "PCG"
+description = "Copy points onto target points."
+keywords = "pcg copy points"

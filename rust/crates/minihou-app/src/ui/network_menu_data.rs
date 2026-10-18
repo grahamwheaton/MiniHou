@@ -193,18 +193,6 @@ pub(super) const TABS: &[Category] = &[
         Tool { label: "Points to Surface", node_type: "points_to_surface" },
     ] },
     Category { name: "PCG", tools: &[
-        Tool { label: "PCG Union", node_type: "pcg_union" },
-        Tool { label: "PCG Difference", node_type: "pcg_difference" },
-        Tool { label: "PCG Intersection", node_type: "pcg_intersection" },
-        Tool { label: "PCG Distance", node_type: "pcg_distance" },
-        Tool { label: "PCG Copy Points", node_type: "pcg_copy_points" },
-        Tool { label: "PCG Self Prune", node_type: "pcg_self_prune" },
-        Tool { label: "PCG Projection", node_type: "pcg_projection" },
-        Tool { label: "PCG Spline Sampler", node_type: "pcg_spline_sampler" },
-        Tool { label: "PCG Spawner", node_type: "pcg_spawner" },
-        Tool { label: "PCG Volume Sampler", node_type: "pcg_volume_sampler" },
-        Tool { label: "PCG Surface Sampler", node_type: "pcg_surface_sampler" },
-        Tool { label: "PCG Debug", node_type: "pcg_debug" },
     ] },
     Category { name: "Procedural", tools: &[
         Tool { label: "Building Rules", node_type: "building_rules" },

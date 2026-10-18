@@ -1,0 +1,5 @@
+id = "pcg_surface_sampler"
+name = "PCG Surface Sampler"
+category = "PCG"
+description = "Sample points on a surface."
+keywords = "pcg surface sampler"

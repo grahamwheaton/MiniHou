@@ -1,0 +1,5 @@
+id = "pcg_debug"
+name = "PCG Debug"
+category = "PCG"
+description = "Show PCG point boxes as geometry."
+keywords = "pcg debug"

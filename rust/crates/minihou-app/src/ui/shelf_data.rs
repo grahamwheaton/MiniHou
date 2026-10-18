@@ -195,18 +195,6 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "Points to Surface", node_type: "points_to_surface", icon: "points_to_surface" },
     ] },
     Tab { name: "PCG", tools: &[
-        Tool { label: "PCG Union", node_type: "pcg_union", icon: "boolean" },
-        Tool { label: "PCG Difference", node_type: "pcg_difference", icon: "boolean" },
-        Tool { label: "PCG Intersection", node_type: "pcg_intersection", icon: "boolean" },
-        Tool { label: "PCG Distance", node_type: "pcg_distance", icon: "measure" },
-        Tool { label: "PCG Copy Points", node_type: "pcg_copy_points", icon: "copy_to_points" },
-        Tool { label: "PCG Self Prune", node_type: "pcg_self_prune", icon: "clean" },
-        Tool { label: "PCG Projection", node_type: "pcg_projection", icon: "ray" },
-        Tool { label: "PCG Spline Sampler", node_type: "pcg_spline_sampler", icon: "curve" },
-        Tool { label: "PCG Spawner", node_type: "pcg_spawner", icon: "instance" },
-        Tool { label: "PCG Volume Sampler", node_type: "pcg_volume_sampler", icon: "box" },
-        Tool { label: "PCG Surface Sampler", node_type: "pcg_surface_sampler", icon: "scatter" },
-        Tool { label: "PCG Debug", node_type: "pcg_debug", icon: "box" },
     ] },
     Tab { name: "Procedural", tools: &[
         Tool { label: "Building Rules", node_type: "building_rules", icon: "box" },

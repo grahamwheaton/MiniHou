@@ -1,0 +1,5 @@
+id = "pcg_spawner"
+name = "PCG Spawner"
+category = "PCG"
+description = "Assign instance objects to points."
+keywords = "pcg spawner"

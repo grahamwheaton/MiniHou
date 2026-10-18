@@ -15,12 +15,12 @@
   },
   "invert": {
     "default": false,
-    "doc": "",
+    "doc": "Flip the noise values before they are applied",
     "kind": "bool"
   },
   "low": {
     "default": 0.0,
-    "doc": "",
+    "doc": "Lowest value of the noise range",
     "kind": "float",
     "max": 1.0,
     "min": 0.0
@@ -48,7 +48,7 @@
   },
   "seed": {
     "default": 0,
-    "doc": "",
+    "doc": "Seed for the noise",
     "kind": "int"
   }
 }

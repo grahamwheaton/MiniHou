@@ -1,0 +1,12 @@
+{
+  "objects": {
+    "default": "",
+    "doc": "Weighted Blender objects, e.g. 'Tree:3 Bush:2 Rock:1' (weight 1 if omitted)",
+    "kind": "str"
+  },
+  "seed": {
+    "default": 0,
+    "doc": "Seed for choosing which object each point gets",
+    "kind": "int"
+  }
+}

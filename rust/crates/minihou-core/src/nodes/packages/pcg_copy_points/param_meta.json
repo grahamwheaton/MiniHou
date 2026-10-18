@@ -1,0 +1,12 @@
+{
+  "inherit_rotation": {
+    "default": true,
+    "doc": "Rotate each copy by the target point's rotation",
+    "kind": "bool"
+  },
+  "inherit_scale": {
+    "default": true,
+    "doc": "Scale each copy by the target point's scale",
+    "kind": "bool"
+  }
+}

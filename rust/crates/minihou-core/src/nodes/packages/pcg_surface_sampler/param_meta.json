@@ -1,0 +1,36 @@
+{
+  "align": {
+    "default": false,
+    "doc": "Rotate points so their +Z follows the surface normal (else upright)",
+    "kind": "bool"
+  },
+  "extents": {
+    "default": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "doc": "Half size of each point's box",
+    "kind": "vec3",
+    "min": 0.0
+  },
+  "looseness": {
+    "default": 0.3,
+    "doc": "0: evenly spaced (blue noise); 1: plain random",
+    "kind": "float",
+    "max": 1.0,
+    "min": 0.0
+  },
+  "points_per_m2": {
+    "default": 1.0,
+    "doc": "How many points per square metre of surface",
+    "kind": "float",
+    "min": 0.0,
+    "soft_max": 100.0
+  },
+  "seed": {
+    "default": 0,
+    "doc": "Seed for the sampling",
+    "kind": "int"
+  }
+}
