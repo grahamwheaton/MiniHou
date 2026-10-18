@@ -58,7 +58,6 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "Skin Profiles", node_type: "skin_profiles", icon: "skin" },
         Tool { label: "Revolve", node_type: "revolve", icon: "revolve" },
         Tool { label: "Sweep", node_type: "sweep", icon: "sweep" },
-        Tool { label: "Fillet", node_type: "fillet", icon: "fillet" },
         Tool { label: "PolyReduce", node_type: "polyreduce", icon: "polyreduce" },
         Tool { label: "Convex Hull", node_type: "convex_hull", icon: "convex_hull" },
         Tool { label: "Remesh", node_type: "remesh", icon: "remesh" },
@@ -159,7 +158,6 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "Convert Line", node_type: "convert_line", icon: "line" },
         Tool { label: "PolyPath", node_type: "polypath", icon: "curve" },
         Tool { label: "Sweep", node_type: "sweep", icon: "sweep" },
-        Tool { label: "Fillet", node_type: "fillet", icon: "fillet" },
     ] },
     Tab { name: "Points", tools: &[
         Tool { label: "Scatter", node_type: "scatter", icon: "scatter" },

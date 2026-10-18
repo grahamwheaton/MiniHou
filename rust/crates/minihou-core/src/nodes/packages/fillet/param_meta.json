@@ -1,0 +1,30 @@
+{
+  "divisions": {
+    "default": 6,
+    "doc": "Segments per rounded corner",
+    "kind": "int",
+    "max": 256,
+    "min": 1,
+    "soft_max": 32
+  },
+  "group": {
+    "default": "",
+    "doc": "Points to round (empty: every corner)",
+    "kind": "str",
+    "pick_domain": "edges"
+  },
+  "min_angle": {
+    "default": 1.0,
+    "doc": "Leave corners that turn by less than this many degrees alone",
+    "kind": "float",
+    "max": 179.0,
+    "min": 0.0
+  },
+  "radius": {
+    "default": 0.2,
+    "doc": "Radius of the arc that replaces each corner (reduced where the neighbouring segments are too short to hold it)",
+    "kind": "float",
+    "min": 0.0,
+    "soft_max": 2.0
+  }
+}

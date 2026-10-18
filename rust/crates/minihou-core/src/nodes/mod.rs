@@ -192,7 +192,6 @@ pub fn registry() -> &'static [NodeSpec] {
         curves::CONVERT_LINE,
         curves::POLYPATH,
         curves::CARVE,
-        curves::FILLET,
         curves::CURVE_SIMPLIFY,
         copy_to_points::COPY_TO_POINTS,
         instance::INSTANCE,
@@ -352,7 +351,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["bound", "boundary_select", "cache", "example_offset", "facet", "flood_fill", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "point", "resample", "reverse", "select_sharp_edges", "subnet", "unpack"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["bound", "boundary_select", "cache", "example_offset", "facet", "fillet", "flood_fill", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "point", "resample", "reverse", "select_sharp_edges", "subnet", "unpack"]);
     }
 }
 
