@@ -164,7 +164,7 @@ Full handoff: docs/TODO_PERSISTENT_OVERRIDES.md (from the user's HANDOFF.md, 202
 # Added 2026-10-17: items raised in conversation, not yet on the list
 
 - **Stage 1: self-registering node architecture.** Largely done (2026-10-18): standard nodes live in nodes/packages/<name>/ and are discovered at build time; shared Tab menu and shelf catalogue; guide in docs/NODE_DEVELOPMENT.md; packages example_offset, pack, unpack. Remaining: older nodes still have hand-written registry and param metadata in tools/dump_rust_param_meta.py, so adding one still touches shared files. Migrating them to packages is the open part (plan first).
-- **Ctrl+G grouping** (node grouping into subnets). Not started.
+- **Ctrl+G grouping** (node grouping into subnets). DONE: commit 201879e7f (subnet_edit.rs, keymap Ctrl+G). Live check pending.
 - **Loop Cut extras:** numeric entry, E (even) and F (flip) keys, and the redo strip. Not started.
 - **Inference Phase 2 and Move-tool integration:** multi-reference, through-point locks, guides, bounding-box and object-origin snapping; Move gizmo using the shared engine. Not started.
 - **Multi-output sockets:** separate constraint and proxy outputs for fracture and RBD nodes, from the user's node review. Deferred by the user until later.
@@ -199,7 +199,7 @@ Standing rules:
 Order:
 1. Finish in-flight: fence + MCP test (Bob), deformer parity (Flash), Python parity suites (Bob).
 2. Stage 1 self-registering node architecture.
-3. Ctrl+G grouping (moved up above Attribute Wrangle, per user).
+3. Ctrl+G grouping: DONE (201879e7f). Live check pending.
 4. Attribute Wrangle parity.
 5. Polyfill full parity, then Houdini shelf gap nodes (Flash batches).
 6. Statistics nodes (volume, distance, bounding box, curve length).
