@@ -1,0 +1,7 @@
+{
+  "group": {
+    "default": "",
+    "doc": "Optional point or primitive group to measure bounds of; empty measures all points.",
+    "kind": "str"
+  }
+}

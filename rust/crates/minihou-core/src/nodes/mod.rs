@@ -99,7 +99,6 @@ mod recalc_normals;
 mod tris_to_quads;
 mod inset_ext;
 mod measure_distance;
-mod measure_bounds;
 mod measure_length;
 mod measure_area;
 
@@ -338,7 +337,6 @@ pub fn registry() -> &'static [NodeSpec] {
         output::OUTPUT,
         output::INPUT,
         measure_distance::MEASURE_DISTANCE,
-        measure_bounds::MEASURE_BOUNDS,
         measure_length::MEASURE_LENGTH,
         measure_area::MEASURE_AREA,
     ];
@@ -366,7 +364,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["example_offset", "measure_volume", "pack", "unpack"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["example_offset", "measure_bounds", "measure_volume", "pack", "unpack"]);
     }
 }
 

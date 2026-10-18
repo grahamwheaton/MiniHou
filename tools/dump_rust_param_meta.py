@@ -413,9 +413,6 @@ def meta() -> dict:
         "point1": {"kind": "int", "default": 0, "doc": "First point seed index (default: first point 0; negative indices count from the end)."},
         "point2": {"kind": "int", "default": -1, "doc": "Second point seed index (default: last point -1; negative indices count from the end)."},
     }
-    out["measure_bounds"] = {
-        "group": {"kind": "str", "default": "", "doc": "Optional point or primitive group to measure bounds of; empty measures all points."},
-    }
     out["measure_length"] = {
         "group": {"kind": "str", "default": "", "doc": "Optional primitive group to measure length of; empty measures all primitives."},
     }
