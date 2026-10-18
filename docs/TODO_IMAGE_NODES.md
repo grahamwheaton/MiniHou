@@ -293,3 +293,11 @@ The UI now shows "faces" (display label only, in ui/params.rs). The stored value
 ## Queued: deformer parity and gizmos (requested 2026-10-18)
 
 Plan from Argon (argon-deform-45cb8b): (1) add missing lattice, path and point deform params to capture_deform.rs and curves.rs; (2) a shared capture gizmo in a new deform_gizmo.rs (capture box wireframe, origin, direction and up handles, pure drag tests); (3) per-deformer handles: Bend arc, Twist ring, Taper squares and centre, Squish pivot, lattice/path/point handles; (4) keys F/G/H/B/N/M only when a capture deformer is selected and no modal or gizmo is active, plus the HUD legend and parameter grouping. Acceptance: numerical parity test against a Houdini reference within 1e-4.
+
+## Queued: LoopTools nodes (requested 2026-10-18)
+
+Source: https://extensions.blender.org/add-ons/looptools/ (Blender's LoopTools add-on: circle, loft, relax, space, flatten, gstretch, bridge and similar loop operations). Plan the node set first (Argon), then Flash builds the nodes as packages, one per tool, with tests.
+
+## Queued: migrate older nodes to packages (requested 2026-10-18)
+
+Migrate the legacy nodes to the self-registering package system, following docs/NODE_MIGRATION_PLAN.md (Bob's plan) and the pilot (measure_volume, measure_bounds, measure_area, measure_distance, measure_length, flood_fill). Argon to plan the order and batches; Flash to move each batch with unchanged ids, parameters and output, plus the registry list update.
