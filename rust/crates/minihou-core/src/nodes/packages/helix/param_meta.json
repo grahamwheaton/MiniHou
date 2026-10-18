@@ -1,0 +1,35 @@
+{
+  "height": {
+    "default": 2.0,
+    "doc": "Vertical distance from the first point to the last.",
+    "kind": "float",
+    "soft_max": 10.0,
+    "soft_min": 0.0
+  },
+  "points": {
+    "default": 120,
+    "doc": "Number of sampled points along the spiral.",
+    "kind": "int",
+    "min": 2,
+    "soft_max": 5000
+  },
+  "radius": {
+    "default": 1.0,
+    "doc": "Radius at the base of the spiral.",
+    "kind": "float",
+    "min": 0.0,
+    "soft_max": 10.0
+  },
+  "radius_end": {
+    "default": -1.0,
+    "doc": "Radius at the top (negative: same as radius) - a cone spiral",
+    "kind": "float"
+  },
+  "turns": {
+    "default": 3.0,
+    "doc": "Number of revolutions around the Z axis.",
+    "kind": "float",
+    "min": 0.0,
+    "soft_max": 20.0
+  }
+}

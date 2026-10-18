@@ -462,7 +462,7 @@
   },
   "closed": {
    "default": false,
-   "doc": "",
+   "doc": "Connect the last control point to the first.",
    "kind": "bool"
   },
   "controls": {
@@ -3178,21 +3178,21 @@
  "helix": {
   "height": {
    "default": 2.0,
-   "doc": "",
+   "doc": "Vertical distance from the first point to the last.",
    "kind": "float",
    "soft_max": 10.0,
    "soft_min": 0.0
   },
   "points": {
    "default": 120,
-   "doc": "",
+   "doc": "Number of sampled points along the spiral.",
    "kind": "int",
    "min": 2,
    "soft_max": 5000
   },
   "radius": {
    "default": 1.0,
-   "doc": "",
+   "doc": "Radius at the base of the spiral.",
    "kind": "float",
    "min": 0.0,
    "soft_max": 10.0
@@ -3204,7 +3204,7 @@
   },
   "turns": {
    "default": 3.0,
-   "doc": "",
+   "doc": "Number of revolutions around the Z axis.",
    "kind": "float",
    "min": 0.0,
    "soft_max": 20.0

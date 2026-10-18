@@ -43,8 +43,7 @@ def package_meta() -> dict:
 TYPES += ["loop_begin", "loop_end", "input", "object_input", "wrangle", "blend", "exploded_view", "usd_export", "usd_import"]
 
 # Procedural / instancing ports; retain the other workers' type lists above.
-TYPES += ["bezier", "helix", "lsystem", "convert_line", "polypath", "carve",
-          "copy_to_points", "instance", "for_each",
+TYPES += ["lsystem", "convert_line", "polypath", "carve", "copy_to_points", "instance", "for_each"]
           "attribute_create", "attribute_promote", "attribute_blur",
           "connectivity", "smooth", "falloff", "bend", "uv_project", "uv_flatten", "uv_transform",
           "curve_simplify", "group_create", "blast", "measure"]
@@ -291,7 +290,6 @@ def meta() -> dict:
     out["blender_object"]["reset_transform"] = {"kind": "bool", "default": False, "doc": "Ignore the object's location: keep its rotation and scale but move it to the origin. Off matches Blender's own placement."}
     out["curve"]["split"] = {"default": False, "kind": "bool", "doc": "With an input: split coplanar faces of the input along the drawn open polyline (SketchUp-style line tool)"}
     out["curve"]["as_mesh"] = {"default": False, "kind": "bool", "doc": "Sketch insertion: create mesh lines or a face instead of a viewport curve"}
-    out["bezier"]["as_mesh"] = {"default": False, "kind": "bool", "doc": "Sketch insertion: create mesh lines or a face instead of a viewport curve"}
     # Rust Ray SOP extensions. Keep the Python defaults and legacy methods intact.
     ray = out["ray"]
     ray["method"]["options"] += ["project_rays"]

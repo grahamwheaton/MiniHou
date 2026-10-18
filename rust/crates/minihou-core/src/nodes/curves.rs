@@ -1,6 +1,6 @@
 //! Arc-length curves and Bezier sources, matching nodes/curves.py.
 use std::sync::Arc;
-use super::{InputSpec, Inputs, NodeSpec, GEO, linspace};
+use super::{InputSpec, Inputs, NodeSpec, GEO};
 use super::group::{gather_table, keep_prims};
 use crate::{error::{Error, Result}, geometry::{Attr, AttrData, Geometry, Topology, MAX_ELEMENTS}, params::Params};
 
@@ -13,70 +13,8 @@ pub(crate) fn curve(p: Vec<f32>, closed: bool) -> Result<Geometry> {
     g.prim.insert("__viewport_curve".into(),Arc::new(Attr::i32(1,vec![1])));
     Ok(g)
 }
-pub const HELIX: NodeSpec = NodeSpec { name: "helix", inputs: &[], params: crate::params!(
-    "radius": 1.0; "radius_end": -1.0; "height": 2.0; "turns": 3.0; "points": 120), cook: helix };
-fn helix(_: &Inputs,p: &Params) -> Result<Geometry> {
-    let n=p.i("points")?; if n<2 { return Err(Error::new("points must be at least 2")); } count(n as usize)?;
-    let (r,h,turns)=(p.f("radius")?,p.f("height")?,p.f("turns")?);
-    let end=p.f("radius_end")?; let end=if end<0.0 {r} else {end};
-    let mut out=Vec::new();
-    for t in linspace(0.0,1.0,n as usize) {
-        let rad=r+(end-r)*t; let a=t*turns*2.0*std::f64::consts::PI;
-        out.extend([(rad*a.cos()) as f32,(rad*a.sin()) as f32,(t*h) as f32]);
-    }
-    curve(out,false)
-}
-const CONTROLS: &str = r#"[{"p": [-1, 0, 0], "left": [-1.5, 0, 0], "right": [-0.5, 0, 0], "mode": "AUTO"}, {"p": [0, 0, 1], "left": [-0.5, 0, 1], "right": [0.5, 0, 1], "mode": "AUTO"}, {"p": [1, 0, 0], "left": [0.5, 0, 0], "right": [1.5, 0, 0], "mode": "AUTO"}]"#;
-pub const BEZIER: NodeSpec = NodeSpec { name: "bezier", inputs: &[InputSpec{name:"geo",multi:false,optional:true}],
-    params: crate::params!("controls": CONTROLS; "closed": false; "resolution": 24; "as_mesh": false), cook: bezier };
-fn norm(v: [f64;3]) -> f64 { v.iter().map(|x| x*x).sum::<f64>().sqrt() }
-fn sub(a:[f64;3],b:[f64;3])->[f64;3] { std::array::from_fn(|i| a[i]-b[i]) }
-fn bezier(inputs:&Inputs,p:&Params)->Result<Geometry> {
-    let value:serde_json::Value=serde_json::from_str(&p.s("controls")?).map_err(|e| Error::new(e.to_string()))?;
-    let cs=value.as_array().ok_or_else(|| Error::new("Bezier curves need 2 to 10000 control points"))?;
-    if !(2..=10000).contains(&cs.len()) { return Err(Error::new("Bezier curves need 2 to 10000 control points")); }
-    let mut xyz=Vec::<[[f64;3];3]>::new(); let mut modes=Vec::new();
-    for c in cs {
-        let mode=c.get("mode").and_then(|v| v.as_str()).unwrap_or("FREE");
-        if !["AUTO","VECTOR","ALIGNED","MIRRORED","FREE"].contains(&mode) { return Err(Error::new("Unknown Bezier handle mode")); }
-        let mut row=[[0.;3];3];
-        for (j,name) in ["p","left","right"].iter().enumerate() {
-            let a=c.get(*name).and_then(|v| v.as_array()).filter(|v| v.len()==3).ok_or_else(|| Error::new("Bezier handles must be finite XYZ vectors"))?;
-            for i in 0..3 { row[j][i]=a[i].as_f64().filter(|x| x.is_finite()).ok_or_else(|| Error::new("Bezier handles must be finite XYZ vectors"))?; }
-        }
-        xyz.push(row); modes.push(mode);
-    }
-    let closed=p.b("closed")?; let n=xyz.len();
-    for i in 0..n {
-        let pt=xyz[i][0];
-        let prev=if closed || i>0 {xyz[(i+n-1)%n][0]} else {pt};
-        let next=if closed || i+1<n {xyz[(i+1)%n][0]} else {pt};
-        if modes[i]=="VECTOR" {
-            xyz[i][1]=std::array::from_fn(|k| pt[k]+(prev[k]-pt[k])/3.);
-            xyz[i][2]=std::array::from_fn(|k| pt[k]+(next[k]-pt[k])/3.);
-        } else if modes[i]=="AUTO" {
-            let d=sub(next,prev); let ln=norm(d).max(1e-12);
-            xyz[i][1]=std::array::from_fn(|k| pt[k]-d[k]/ln*norm(sub(pt,prev))/3.);
-            xyz[i][2]=std::array::from_fn(|k| pt[k]+d[k]/ln*norm(sub(next,pt))/3.);
-        } else if modes[i]=="ALIGNED" || modes[i]=="MIRRORED" {
-            let d=sub(xyz[i][2],pt); let ln=norm(d);
-            if ln>1e-12 { let size=if modes[i]=="MIRRORED" {ln} else {norm(sub(xyz[i][1],pt))};
-                xyz[i][1]=std::array::from_fn(|k| pt[k]-d[k]*size/ln); }
-        }
-    }
-    let res=p.i("resolution")?; if !(1..=1024).contains(&res) {return Err(Error::new("resolution must be 1..1024"));}
-    let seg=if closed {n} else {n-1}; count(seg*res as usize+usize::from(!closed))?;
-    let mut out=Vec::new();
-    for i in 0..seg { for j in 0..res {
-        let t=j as f64/res as f64; let u=1.-t; let a=xyz[i]; let b=xyz[(i+1)%n];
-        for k in 0..3 { out.push((u.powi(3)*a[0][k]+3.*u*u*t*a[2][k]+3.*u*t*t*b[1][k]+t.powi(3)*b[0][k]) as f32); }
-    } }
-    if !closed { out.extend(xyz[n-1][0].map(|x| x as f32)); }
-    let mut out=curve(out,closed)?;
-    if p.b("as_mesh")? { out.prim.remove("__viewport_curve"); }
-    if let Some(g)=inputs[0].first() { super::merge::merge(&[vec![g.clone(),Arc::new(out)]],&Params::resolve(&[],None)?) } else {Ok(out)}
-}
-
+pub(crate) fn norm(v: [f64;3]) -> f64 { v.iter().map(|x| x*x).sum::<f64>().sqrt() }
+pub(crate) fn sub(a:[f64;3],b:[f64;3])->[f64;3] { std::array::from_fn(|i| a[i]-b[i]) }
 /// Exactly the edge order and branch/loop traversal of Python chain_segments.
 pub(super) fn chains(n:usize,edges:&[[i32;2]]) -> (Vec<Vec<i32>>,Vec<bool>) {
     let mut adj=vec![Vec::<(i32,usize)>::new();n];
@@ -896,12 +834,6 @@ mod tests {
     fn simplify_preserves_attributes(){
         let mut g=curve(vec![0.,0.,0.,1.,0.,0.,2.,0.,0.],false).unwrap();g.point.insert("id".into(),Arc::new(Attr::i32(1,vec![5,6,7])));
         let out=cook(&CURVE_SIMPLIFY,g,serde_json::json!({}));assert_eq!(out.npoints,2);assert_eq!(out.point["id"].data,AttrData::I32(vec![5,7]));out.validate().unwrap();
-    }
-    #[test]
-    fn bezier_vector_handles_and_optional_input(){
-        let p=Params::resolve(BEZIER.params,serde_json::json!({"controls":"[{\"p\":[0,0,0],\"left\":[0,0,0],\"right\":[0,0,0],\"mode\":\"VECTOR\"},{\"p\":[3,0,0],\"left\":[0,0,0],\"right\":[0,0,0],\"mode\":\"VECTOR\"}]","resolution":3}).as_object()).unwrap();
-        let g=bezier(&[vec![]],&p).unwrap();assert_eq!(g.p(),[0.,0.,0.,1.,0.,0.,2.,0.,0.,3.,0.,0.]);
-        let g=bezier(&[vec![Arc::new(Geometry::points_only(vec![9.,9.,9.]).unwrap())]],&p).unwrap();assert_eq!(g.npoints,5);
     }
     #[test]
     fn sweep_line_circle() {

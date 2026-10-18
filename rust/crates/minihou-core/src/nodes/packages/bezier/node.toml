@@ -1,0 +1,5 @@
+id = "bezier"
+name = "Bezier"
+category = "Curves"
+description = "Create an editable cubic Bezier curve."
+keywords = "curve cubic controls handles"

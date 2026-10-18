@@ -1,0 +1,5 @@
+id = "helix"
+name = "Helix"
+category = "Curves"
+description = "Create a spiral curve around the Z axis."
+keywords = "spiral spring curve"
