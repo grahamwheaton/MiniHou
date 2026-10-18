@@ -98,6 +98,7 @@ mod tris_to_quads;
 mod inset_ext;
 mod measure_volume;
 mod measure_distance;
+mod measure_bounds;
 
 pub use modify::{match_size_points, MatchSizeOut};
 pub use modeling_tools::{edge_slide_preview, loop_cut_fractions, loop_cut_preview, loop_slide_fractions, LoopRing, LoopTopology, LOOP_CUT_MAX};
@@ -318,6 +319,7 @@ pub fn registry() -> &'static [NodeSpec] {
         output::INPUT,
         measure_volume::MEASURE_VOLUME,
         measure_distance::MEASURE_DISTANCE,
+        measure_bounds::MEASURE_BOUNDS,
     ];
     NODES
 }
