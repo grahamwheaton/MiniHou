@@ -338,3 +338,7 @@ Bug seen: Ctrl+G groups a box and a subdivide, but both inner nodes show in the 
 ## Feature (non-urgent): node frames (requested 2026-10-18)
 
 Add frames (comment boxes) to the node editor, created with the O key. A frame has a name label and one of five colours to choose from. Frames move with the nodes inside them. Add the O key to the keymap table in rust/crates/minihou-app/docs/NATIVE_EDITOR.md (the keymap test compares it with Command::ALL).
+
+## Feature (low urgency): fuzzy search in the node search (Tab) (requested 2026-10-18)
+
+The Tab node search should match fuzzily: letters in order rather than an exact substring, ranked by match quality (exact name first, then word starts, then scattered letters). For example "sbd" finds "subdivide". Keep the current search on node names and keywords, and keep the existing keyword list in the node catalogue.
