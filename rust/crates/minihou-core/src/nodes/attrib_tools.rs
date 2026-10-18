@@ -209,7 +209,7 @@ fn sort(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             prim_offsets: g.topology.prim_offsets.clone(),
             closed: g.topology.closed.clone(),
         };
-        let mut out = Geometry { packed: Default::default(),
+        let mut out = Geometry { packed: Default::default(), edge: Default::default(),
             npoints: n,
             topology: Arc::new(topo),
             point: super::group::gather_table(&g.point, &order),
@@ -241,7 +241,7 @@ fn sort(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             prim_offsets: new_offsets,
             closed,
         };
-        let out = Geometry { packed: Default::default(),
+        let out = Geometry { packed: Default::default(), edge: Default::default(),
             npoints: g.npoints,
             topology: Arc::new(topo),
             point: g.point.clone(),

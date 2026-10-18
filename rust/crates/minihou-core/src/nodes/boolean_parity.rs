@@ -28,7 +28,7 @@ fn table(v: &Value) -> AttrTable {
 }
 fn geometry(v: &Value) -> Geometry {
     let point = table(&v["point"]);
-    let g = Geometry { packed: Default::default(),
+    let g = Geometry { packed: Default::default(), edge: Default::default(),
         npoints: point["P"].rows(),
         point,
         vertex: table(&v["vertex"]),

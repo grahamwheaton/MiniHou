@@ -77,7 +77,8 @@ pub(super) fn keep_prims(g: &Geometry, keep: &[bool], compact: bool) -> Result<G
     }
     let closed = g.topology.has_open().then(|| prims.iter().map(|&i| g.topology.is_closed(i)).collect());
     Ok(Geometry { packed: g.packed.clone(), npoints: rows.len(), topology: Arc::new(Topology { vertex_point: vp, prim_offsets: offs, closed }),
-        point: gather_table(&g.point, &rows), vertex: gather_table(&g.vertex, &verts), prim: gather_table(&g.prim, &prims), detail: g.detail.clone() })
+        point: gather_table(&g.point, &rows), vertex: gather_table(&g.vertex, &verts), edge: Default::default(),
+        prim: gather_table(&g.prim, &prims), detail: g.detail.clone() })
 }
 
 pub const GROUP_CREATE:NodeSpec=NodeSpec{name:"group_create",inputs:&[InputSpec{name:"geo",multi:false,optional:false},InputSpec{name:"bounds",multi:false,optional:true}],params:crate::params!(

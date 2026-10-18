@@ -1791,7 +1791,7 @@ mod tests{
                 .collect(),
             closed: Some(closed),
         };
-        let g = Geometry { packed: Default::default(),
+        let g = Geometry { packed: Default::default(), edge: Default::default(),
             npoints: point["P"].rows(),
             topology: Arc::new(topo),
             point,

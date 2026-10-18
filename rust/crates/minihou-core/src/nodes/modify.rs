@@ -595,7 +595,7 @@ pub(super) fn keep_points(geo: &Geometry, keep: &[bool]) -> Result<Geometry> {
         Some(src_prim.iter().map(|&p| closed[p]).collect())
     };
 
-    Ok(Geometry { packed: Default::default(),
+    Ok(Geometry { packed: Default::default(), edge: Default::default(),
         npoints: new_point_count,
         topology: Arc::new(Topology {
             vertex_point: new_vp,
