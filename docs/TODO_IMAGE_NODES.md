@@ -223,3 +223,8 @@ Parked by user: inset on non-planar regions. Tri to Quad: user will test.
 ## Future: Houdini-style output groups UI (requested 2026-10-18)
 
 For nodes with output groups, show an "Output Groups" section like Houdini: one row per output group, with a checkbox (enable that group), a label (for example "Point Fillet Polygons") and a group-name field (for example `pointfilletpolys`). The name field is greyed when the checkbox is off. Applies to every node with output groups, for example polyfillet and similar nodes.
+
+## Future nodes (requested 2026-10-18)
+
+- **Boundary of selection node:** select the boundary of the current selection, with the same behaviour as Blender's boundary select.
+- **Select sharp edges node:** select edges above a sharp angle threshold, with the same behaviour as Blender's select sharp edges.
