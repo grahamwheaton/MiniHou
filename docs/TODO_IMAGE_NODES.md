@@ -236,3 +236,9 @@ The slide direction sometimes flips and the user can't tell what triggers it. Li
 ## Future bug: full ring not selected after Loop Cut slide (reported 2026-10-18)
 
 After a Loop Cut slide, the whole loop is not selected; only part of the ring stays selected. Related to the Loop Cut selection work (mesh_cut.rs, the loop_cut viewport selection restore). Needs a repro from the user: which mesh, which edge, and whether it happens after slide only or also after confirming without sliding.
+
+## Bug: purple group arrow clears selection, then crashes on second press (reported 2026-10-18)
+
+Repro (user): make a box, add Loop Cut, make a group of edges, click the purple arrow on the group field. Expected: the group's edges highlight in purple. Actual: the selection is cleared. Pressing the arrow again crashes the app.
+
+Likely cause (first press): main.rs `UiAction::PickParameter` clears `self.selection` and `group_preview` and does not load the field's current value into the highlight, so the existing group is not shown. Second press: `self.param_pick` is overwritten and `previous_display` is saved while `display` already points at the pick source, so the restore on exit is wrong; a panic in the pick path is the probable crash. Needs the panic text (run the exe from a terminal) to confirm.
