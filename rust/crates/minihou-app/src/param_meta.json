@@ -598,6 +598,11 @@
    "doc": "Name of the Blender object to read: a mesh, a curve (Bezier, NURBS, poly, hair curves), a point cloud, text, or the output of Geometry Nodes, which can hold all of those at once",
    "kind": "str"
   },
+  "reset_transform": {
+   "default": false,
+   "doc": "Ignore the object's location: keep its rotation and scale but move it to the origin. Off matches Blender's own placement.",
+   "kind": "bool"
+  },
   "space": {
    "default": "world",
    "doc": "world: where the object is in the scene; object: its own local coordinates",

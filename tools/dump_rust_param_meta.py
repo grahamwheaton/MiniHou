@@ -261,6 +261,7 @@ def meta() -> dict:
         "remove_inline_points": {"default": True, "doc": "Merge coplanar triangles into polygon faces and drop inline edge/interior points", "kind": "bool"},
     }
     # Sketch-tool extension of the Curve SOP: a drawn open line also splits coplanar faces of the input geometry.
+    out["blender_object"]["reset_transform"] = {"kind": "bool", "default": False, "doc": "Ignore the object's location: keep its rotation and scale but move it to the origin. Off matches Blender's own placement."}
     out["curve"]["split"] = {"default": False, "kind": "bool", "doc": "With an input: split coplanar faces of the input along the drawn open polyline (SketchUp-style line tool)"}
     out["curve"]["as_mesh"] = {"default": False, "kind": "bool", "doc": "Sketch insertion: create mesh lines or a face instead of a viewport curve"}
     out["bezier"]["as_mesh"] = {"default": False, "kind": "bool", "doc": "Sketch insertion: create mesh lines or a face instead of a viewport curve"}

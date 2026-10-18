@@ -11,7 +11,7 @@ pub enum ExternalInput {
     Missing(String),
 }
 pub type ExternalInputs = HashMap<String, ExternalInput>;
-pub const BLENDER_OBJECT: NodeSpec = NodeSpec { name:"blender_object", inputs:&[], params:crate::params!("object":""; "space":"world"; "join_edges":true), cook:waiting_object };
+pub const BLENDER_OBJECT: NodeSpec = NodeSpec { name:"blender_object", inputs:&[], params:crate::params!("object":""; "space":"world"; "join_edges":true; "reset_transform":false), cook:waiting_object };
 /// Dynamic Blender interface schema stored on modifier_input graph nodes.
 /// Geometry is the node's regular output; scalar values resolve through parameter links.
 pub const MODIFIER_INPUT_KINDS: &[&str] = &[
@@ -102,7 +102,10 @@ fn build_object(p: &Params, data: &ExternalInput) -> Result<Geometry> {
         out=join_edges(geo)?;
     }
     if p.e("space", &["world","object"])?=="object" { return Ok(out); }
-    let Some(m)=matrix else { return Ok(out); };
+    let Some(&m0)=matrix.as_ref() else { return Ok(out); };
+    // Reset transform: keep rotation and scale, drop the location so the object sits at the origin.
+    let mut m=m0;
+    if p.b("reset_transform")? { m[3]=0.; m[7]=0.; m[11]=0.; }
     if m.iter().enumerate().all(|(i,x)| (*x-if i/4==i%4 {1.} else {0.}).abs() <= 1e-8+1e-5*if i/4==i%4 {1.} else {0.}) { return Ok(out); }
     let a=[[m[0],m[1],m[2]],[m[4],m[5],m[6]],[m[8],m[9],m[10]]];
     let det=a[0][0]*(a[1][1]*a[2][2]-a[1][2]*a[2][1])-a[0][1]*(a[1][0]*a[2][2]-a[1][2]*a[2][0])+a[0][2]*(a[1][0]*a[2][1]-a[1][1]*a[2][0]);
@@ -183,6 +186,14 @@ fn join_edges(g: &Geometry) -> Result<Geometry> {
         let mut store=ExternalInputs::new();store.insert("object:Cube".into(),ExternalInput::Object{geo:Arc::new(g),matrix:Some([2.,0.,0.,4.,0.,1.,0.,0.,0.,0.,1.,0.,0.,0.,0.,1.]),info:Value::Null});
         let p=Params::resolve(BLENDER_OBJECT.params,serde_json::json!({"object":"Cube"}).as_object()).unwrap();
         let out=object(&p,&store).unwrap();assert_eq!(out.p(),&[6.,2.,3.]);assert!((out.point["N"].as_f32().unwrap()[0]-0.4472136).abs()<1e-7);
+    }
+    #[test] fn reset_transform_drops_location_but_keeps_rotation_and_scale() {
+        let mut store=ExternalInputs::new();
+        store.insert("object:Cube".into(),ExternalInput::Object{geo:Arc::new(Geometry::points_only(vec![1.,2.,3.]).unwrap()),matrix:Some([2.,0.,0.,4.,0.,1.,0.,5.,0.,0.,1.,6.,0.,0.,0.,1.]),info:Value::Null});
+        let kept=Params::resolve(BLENDER_OBJECT.params,serde_json::json!({"object":"Cube"}).as_object()).unwrap();
+        assert_eq!(object(&kept,&store).unwrap().p(),&[6.,7.,9.]);
+        let reset=Params::resolve(BLENDER_OBJECT.params,serde_json::json!({"object":"Cube","reset_transform":true}).as_object()).unwrap();
+        assert_eq!(object(&reset,&store).unwrap().p(),&[2.,2.,3.]);
     }
     #[test] fn joins_segments_and_keeps_point_attributes() {
         let g=Geometry::from_arrays(vec![0.;9],vec![0,1,1,2],vec![0,2,4],Some(vec![false,false])).unwrap();
