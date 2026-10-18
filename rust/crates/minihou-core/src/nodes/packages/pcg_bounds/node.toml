@@ -1,0 +1,5 @@
+id = "pcg_bounds"
+name = "PCG Bounds"
+category = "PCG"
+description = "Set or scale the per-point PCG bounds."
+keywords = "pcg bounds"

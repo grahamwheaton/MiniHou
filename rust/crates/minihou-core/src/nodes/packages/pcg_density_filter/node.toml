@@ -1,0 +1,5 @@
+id = "pcg_density_filter"
+name = "PCG Density Filter"
+category = "PCG"
+description = "Keep or drop points by their density."
+keywords = "pcg density filter"

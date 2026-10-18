@@ -4673,7 +4673,7 @@
     0.5,
     0.5
    ],
-   "doc": "",
+   "doc": "set: the upper corner of every point box",
    "kind": "vec3"
   },
   "bounds_min": {
@@ -4682,7 +4682,7 @@
     -0.5,
     -0.5
    ],
-   "doc": "",
+   "doc": "set: the lower corner of every point box",
    "kind": "vec3"
   },
   "factor": {
@@ -4694,7 +4694,7 @@
   },
   "mode": {
    "default": "set",
-   "doc": "",
+   "doc": "set writes the bounds; scale multiplies the existing bounds about their centre",
    "kind": "enum",
    "options": [
     "set",
@@ -4729,7 +4729,7 @@
   },
   "lower": {
    "default": 0.5,
-   "doc": "",
+   "doc": "Lowest density that is kept",
    "kind": "float",
    "max": 1.0,
    "min": 0.0
@@ -4741,12 +4741,12 @@
   },
   "seed": {
    "default": 0,
-   "doc": "",
+   "doc": "Seed for the probabilistic draw",
    "kind": "int"
   },
   "upper": {
    "default": 1.0,
-   "doc": "",
+   "doc": "Highest density that is kept",
    "kind": "float",
    "max": 1.0,
    "min": 0.0
@@ -5009,7 +5009,7 @@
     0.0,
     0.0
    ],
-   "doc": "",
+   "doc": "Largest random offset added to each point position",
    "kind": "vec3"
   },
   "offset_min": {
@@ -5018,7 +5018,7 @@
     0.0,
     0.0
    ],
-   "doc": "",
+   "doc": "Smallest random offset added to each point position",
    "kind": "vec3"
   },
   "rotation_max": {
@@ -5027,7 +5027,7 @@
     0.0,
     360.0
    ],
-   "doc": "",
+   "doc": "Largest random rotation in degrees, Euler XYZ",
    "kind": "vec3"
   },
   "rotation_min": {
@@ -5045,7 +5045,7 @@
     1.0,
     1.0
    ],
-   "doc": "",
+   "doc": "Largest random scale multiplier per axis",
    "kind": "vec3"
   },
   "scale_min": {
@@ -5054,12 +5054,12 @@
     1.0,
     1.0
    ],
-   "doc": "",
+   "doc": "Smallest random scale multiplier per axis",
    "kind": "vec3"
   },
   "seed": {
    "default": 0,
-   "doc": "",
+   "doc": "Seed mixed with each point seed for the random draws",
    "kind": "int"
   },
   "uniform_scale": {

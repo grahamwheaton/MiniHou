@@ -195,13 +195,9 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "Points to Surface", node_type: "points_to_surface", icon: "points_to_surface" },
     ] },
     Tab { name: "PCG", tools: &[
-        Tool { label: "PCG Points", node_type: "pcg_points", icon: "point" },
-        Tool { label: "PCG Transform", node_type: "pcg_transform", icon: "transform" },
-        Tool { label: "PCG Bounds", node_type: "pcg_bounds", icon: "box" },
         Tool { label: "PCG Union", node_type: "pcg_union", icon: "boolean" },
         Tool { label: "PCG Difference", node_type: "pcg_difference", icon: "boolean" },
         Tool { label: "PCG Intersection", node_type: "pcg_intersection", icon: "boolean" },
-        Tool { label: "PCG Density Filter", node_type: "pcg_density_filter", icon: "delete" },
         Tool { label: "PCG Density Noise", node_type: "pcg_density_noise", icon: "noise" },
         Tool { label: "PCG Distance", node_type: "pcg_distance", icon: "measure" },
         Tool { label: "PCG Copy Points", node_type: "pcg_copy_points", icon: "copy_to_points" },

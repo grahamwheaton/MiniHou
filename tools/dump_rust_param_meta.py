@@ -64,8 +64,8 @@ TYPES += ["sdf_shape", "sdf_boolean", "voronoi_fracture", "voronoi_split",
           "voronoi_adjacency", "voronoi_fracture_points", "ray", "occlusion"]
 
 # PCG, procedural systems, and assemble ports.
-TYPES += ["pcg_points", "pcg_transform", "pcg_bounds", "pcg_union", "pcg_difference",
-          "pcg_intersection", "pcg_density_filter", "pcg_density_noise", "pcg_distance",
+TYPES += ["pcg_union", "pcg_difference",
+          "pcg_intersection", "pcg_density_noise", "pcg_distance",
           "pcg_copy_points", "pcg_self_prune", "pcg_projection", "pcg_spline_sampler",
           "pcg_spawner", "pcg_volume_sampler", "pcg_surface_sampler", "pcg_debug",
           "building_rules", "region_identify", "region_transform", "assemble"]

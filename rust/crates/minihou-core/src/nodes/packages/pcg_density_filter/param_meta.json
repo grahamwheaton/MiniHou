@@ -1,0 +1,31 @@
+{
+  "invert": {
+    "default": false,
+    "doc": "Keep the points outside the range instead",
+    "kind": "bool"
+  },
+  "lower": {
+    "default": 0.5,
+    "doc": "Lowest density that is kept",
+    "kind": "float",
+    "max": 1.0,
+    "min": 0.0
+  },
+  "probabilistic": {
+    "default": false,
+    "doc": "Keep each point with probability = its density (ignores the range)",
+    "kind": "bool"
+  },
+  "seed": {
+    "default": 0,
+    "doc": "Seed for the probabilistic draw",
+    "kind": "int"
+  },
+  "upper": {
+    "default": 1.0,
+    "doc": "Highest density that is kept",
+    "kind": "float",
+    "max": 1.0,
+    "min": 0.0
+  }
+}

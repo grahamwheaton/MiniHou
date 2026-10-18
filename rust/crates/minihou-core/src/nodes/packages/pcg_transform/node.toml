@@ -1,0 +1,5 @@
+id = "pcg_transform"
+name = "PCG Transform"
+category = "PCG"
+description = "Randomly offset, rotate and scale PCG points."
+keywords = "pcg transform jitter"

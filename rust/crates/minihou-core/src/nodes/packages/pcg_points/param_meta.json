@@ -1,0 +1,19 @@
+{
+  "density": {
+    "default": 1.0,
+    "doc": "Density where the points have none yet",
+    "kind": "float",
+    "max": 1.0,
+    "min": 0.0
+  },
+  "extents": {
+    "default": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "doc": "Half size of each point's box where it has no bounds yet",
+    "kind": "vec3",
+    "min": 0.0
+  }
+}

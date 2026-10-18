@@ -1,0 +1,36 @@
+{
+  "bounds_max": {
+    "default": [
+      0.5,
+      0.5,
+      0.5
+    ],
+    "doc": "set: the upper corner of every point box",
+    "kind": "vec3"
+  },
+  "bounds_min": {
+    "default": [
+      -0.5,
+      -0.5,
+      -0.5
+    ],
+    "doc": "set: the lower corner of every point box",
+    "kind": "vec3"
+  },
+  "factor": {
+    "default": 1.0,
+    "doc": "scale: multiply the bounds",
+    "kind": "float",
+    "min": 0.0,
+    "soft_max": 4.0
+  },
+  "mode": {
+    "default": "set",
+    "doc": "set writes the bounds; scale multiplies the existing bounds about their centre",
+    "kind": "enum",
+    "options": [
+      "set",
+      "scale"
+    ]
+  }
+}

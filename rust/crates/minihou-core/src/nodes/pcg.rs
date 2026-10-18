@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::{InputSpec, Inputs, NodeSpec, GEO};
+use super::{InputSpec, Inputs, NodeSpec};
 use crate::error::{Error, Result};
 use crate::geometry::{Attr, AttrData, Geometry};
 use crate::params::Params;
@@ -107,7 +107,7 @@ pub fn matrix_to_euler_xyz(r: &[[f64; 3]; 3]) -> [f64; 3] {
     }
 }
 
-fn mat_mul(a: &[[f64; 3]; 3], b: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
+pub(crate) fn mat_mul(a: &[[f64; 3]; 3], b: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
     let mut out = [[0.0; 3]; 3];
     for i in 0..3 {
         for j in 0..3 {
@@ -132,17 +132,17 @@ fn rotation_from_z_to(n: [f64; 3]) -> [[f64; 3]; 3] {
 
 // -- PCG point attributes -------------------------------------------------------------------------------------
 
-struct PcgData {
-    p: Vec<[f64; 3]>,
-    rot: Vec<[f64; 3]>,
-    scale: Vec<[f64; 3]>,
-    bounds_min: Vec<[f64; 3]>,
-    bounds_max: Vec<[f64; 3]>,
-    density: Vec<f64>,
-    seed: Vec<i32>,
+pub(crate) struct PcgData {
+    pub(crate) p: Vec<[f64; 3]>,
+    pub(crate) rot: Vec<[f64; 3]>,
+    pub(crate) scale: Vec<[f64; 3]>,
+    pub(crate) bounds_min: Vec<[f64; 3]>,
+    pub(crate) bounds_max: Vec<[f64; 3]>,
+    pub(crate) density: Vec<f64>,
+    pub(crate) seed: Vec<i32>,
 }
 
-fn read_pcg(geo: &Geometry) -> PcgData {
+pub(crate) fn read_pcg(geo: &Geometry) -> PcgData {
     let n = geo.npoints;
     let pos: Vec<[f64; 3]> = geo
         .p()
@@ -220,12 +220,12 @@ fn gather_attr(attr: &Attr, indices: &[usize]) -> Attr {
     Attr { width: w, data }
 }
 
-enum NewAttrVal {
+pub(crate) enum NewAttrVal {
     F32(usize, Vec<f32>),
     I32(usize, Vec<i32>),
 }
 
-fn cloud(
+pub(crate) fn cloud(
     geo: &Geometry,
     keep: Option<&[bool]>,
     new_attrs: Option<HashMap<String, NewAttrVal>>,
@@ -813,230 +813,8 @@ fn coverage(a: &PcgData, other: &Geometry) -> (Vec<f64>, Vec<bool>) {
 // NODE IMPLEMENTATIONS
 // =============================================================================================================
 
-// 1. pcg_points
-pub const PCG_POINTS: NodeSpec = NodeSpec {
-    name: "pcg_points",
-    inputs: GEO,
-    params: crate::params!("extents": [0.5, 0.5, 0.5]; "density": 1.0),
-    cook: pcg_points,
-};
 
-fn pcg_points(inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    let geo = PCG_POINTS.one(inputs, 0)?;
-    let extents = p.v3("extents")?;
-    let density = p.f("density")?;
-    let d = read_pcg(&geo);
-    let n = geo.npoints;
 
-    let mut new_attrs = HashMap::new();
-    if !geo.point.contains_key("rot") {
-        new_attrs.insert(
-            "rot".into(),
-            NewAttrVal::F32(
-                3,
-                d.rot
-                    .iter()
-                    .flat_map(|r| [r[0] as f32, r[1] as f32, r[2] as f32])
-                    .collect(),
-            ),
-        );
-    }
-    if !geo.point.contains_key("scale") {
-        new_attrs.insert(
-            "scale".into(),
-            NewAttrVal::F32(
-                3,
-                d.scale
-                    .iter()
-                    .flat_map(|s| [s[0] as f32, s[1] as f32, s[2] as f32])
-                    .collect(),
-            ),
-        );
-    }
-    if !geo.point.contains_key("bounds_min") {
-        let bmin = extents
-            .iter()
-            .map(|&e| -e as f32)
-            .cycle()
-            .take(n * 3)
-            .collect();
-        new_attrs.insert("bounds_min".into(), NewAttrVal::F32(3, bmin));
-    }
-    if !geo.point.contains_key("bounds_max") {
-        let bmax = extents
-            .iter()
-            .map(|&e| e as f32)
-            .cycle()
-            .take(n * 3)
-            .collect();
-        new_attrs.insert("bounds_max".into(), NewAttrVal::F32(3, bmax));
-    }
-    if !geo.point.contains_key("density") {
-        new_attrs.insert(
-            "density".into(),
-            NewAttrVal::F32(1, vec![density as f32; n]),
-        );
-    }
-    if !geo.point.contains_key("seed") {
-        new_attrs.insert("seed".into(), NewAttrVal::I32(1, d.seed));
-    }
-    cloud(&geo, None, Some(new_attrs))
-}
-
-// 2. pcg_transform
-pub const PCG_TRANSFORM: NodeSpec = NodeSpec {
-    name: "pcg_transform",
-    inputs: &[InputSpec {
-        name: "points",
-        multi: false,
-        optional: false,
-    }],
-    params: crate::params!(
-        "offset_min": [0.0, 0.0, 0.0];
-        "offset_max": [0.0, 0.0, 0.0];
-        "rotation_min": [0.0, 0.0, 0.0];
-        "rotation_max": [0.0, 0.0, 360.0];
-        "scale_min": [1.0, 1.0, 1.0];
-        "scale_max": [1.0, 1.0, 1.0];
-        "uniform_scale": true;
-        "absolute_rotation": false;
-        "seed": 0
-    ),
-    cook: pcg_transform,
-};
-
-fn pcg_transform(inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    let points = PCG_TRANSFORM.one(inputs, 0)?;
-    let off_min = p.v3("offset_min")?;
-    let off_max = p.v3("offset_max")?;
-    let rot_min = p.v3("rotation_min")?;
-    let rot_max = p.v3("rotation_max")?;
-    let sc_min = p.v3("scale_min")?;
-    let sc_max = p.v3("scale_max")?;
-    let uniform_scale = p.b("uniform_scale")?;
-    let absolute_rotation = p.b("absolute_rotation")?;
-    let seed = p.i("seed")?;
-
-    let a = read_pcg(&points);
-    let n = points.npoints;
-
-    let mut new_p = Vec::with_capacity(n * 3);
-    let mut new_rot = Vec::with_capacity(n * 3);
-    let mut new_scale = Vec::with_capacity(n * 3);
-
-    for i in 0..n {
-        let pt_seed = a.seed[i];
-        let r: [f64; 9] = std::array::from_fn(|k| random01(pt_seed, seed, k));
-        let off = [
-            off_min[0] + (off_max[0] - off_min[0]) * r[0],
-            off_min[1] + (off_max[1] - off_min[1]) * r[1],
-            off_min[2] + (off_max[2] - off_min[2]) * r[2],
-        ];
-        let rot_deg = [
-            rot_min[0] + (rot_max[0] - rot_min[0]) * r[3],
-            rot_min[1] + (rot_max[1] - rot_min[1]) * r[4],
-            rot_min[2] + (rot_max[2] - rot_min[2]) * r[5],
-        ];
-        let rot_rad = [
-            rot_deg[0].to_radians(),
-            rot_deg[1].to_radians(),
-            rot_deg[2].to_radians(),
-        ];
-        let sc_val = [
-            sc_min[0] + (sc_max[0] - sc_min[0]) * r[6],
-            sc_min[1] + (sc_max[1] - sc_min[1]) * r[7],
-            sc_min[2] + (sc_max[2] - sc_min[2]) * r[8],
-        ];
-        let sc = if uniform_scale {
-            [sc_val[0], sc_val[0], sc_val[0]]
-        } else {
-            sc_val
-        };
-
-        new_p.extend_from_slice(&[
-            (a.p[i][0] + off[0]) as f32,
-            (a.p[i][1] + off[1]) as f32,
-            (a.p[i][2] + off[2]) as f32,
-        ]);
-
-        let final_rot = if absolute_rotation {
-            rot_rad
-        } else {
-            let r_base = euler_xyz_to_matrix(a.rot[i]);
-            let r_add = euler_xyz_to_matrix(rot_rad);
-            matrix_to_euler_xyz(&mat_mul(&r_base, &r_add))
-        };
-        new_rot.extend_from_slice(&[
-            final_rot[0] as f32,
-            final_rot[1] as f32,
-            final_rot[2] as f32,
-        ]);
-
-        new_scale.extend_from_slice(&[
-            (a.scale[i][0] * sc[0]) as f32,
-            (a.scale[i][1] * sc[1]) as f32,
-            (a.scale[i][2] * sc[2]) as f32,
-        ]);
-    }
-
-    let mut attrs = HashMap::new();
-    attrs.insert("P".into(), NewAttrVal::F32(3, new_p));
-    attrs.insert("rot".into(), NewAttrVal::F32(3, new_rot));
-    attrs.insert("scale".into(), NewAttrVal::F32(3, new_scale));
-    cloud(&points, None, Some(attrs))
-}
-
-// 3. pcg_bounds
-pub const PCG_BOUNDS: NodeSpec = NodeSpec {
-    name: "pcg_bounds",
-    inputs: &[InputSpec {
-        name: "points",
-        multi: false,
-        optional: false,
-    }],
-    params: crate::params!(
-        "mode": "set";
-        "bounds_min": [-0.5, -0.5, -0.5];
-        "bounds_max": [0.5, 0.5, 0.5];
-        "factor": 1.0
-    ),
-    cook: pcg_bounds,
-};
-
-fn pcg_bounds(inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    let points = PCG_BOUNDS.one(inputs, 0)?;
-    let mode = p.e("mode", &["set", "scale"])?;
-    let bmin = p.v3("bounds_min")?;
-    let bmax = p.v3("bounds_max")?;
-    let factor = p.f("factor")?;
-
-    let a = read_pcg(&points);
-    let n = points.npoints;
-    let mut lo = Vec::with_capacity(n * 3);
-    let mut hi = Vec::with_capacity(n * 3);
-
-    if mode == "set" {
-        for _ in 0..n {
-            lo.extend_from_slice(&[bmin[0] as f32, bmin[1] as f32, bmin[2] as f32]);
-            hi.extend_from_slice(&[bmax[0] as f32, bmax[1] as f32, bmax[2] as f32]);
-        }
-    } else {
-        for i in 0..n {
-            for c in 0..3 {
-                let mid = (a.bounds_min[i][c] + a.bounds_max[i][c]) / 2.0;
-                let l = mid + (a.bounds_min[i][c] - mid) * factor;
-                let h = mid + (a.bounds_max[i][c] - mid) * factor;
-                lo.push(l as f32);
-                hi.push(h as f32);
-            }
-        }
-    }
-
-    let mut attrs = HashMap::new();
-    attrs.insert("bounds_min".into(), NewAttrVal::F32(3, lo));
-    attrs.insert("bounds_max".into(), NewAttrVal::F32(3, hi));
-    cloud(&points, None, Some(attrs))
-}
 
 // 4. pcg_union
 pub const PCG_UNION: NodeSpec = NodeSpec {
@@ -1231,45 +1009,6 @@ fn pcg_intersection(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     }
 }
 
-// 7. pcg_density_filter
-pub const PCG_DENSITY_FILTER: NodeSpec = NodeSpec {
-    name: "pcg_density_filter",
-    inputs: &[InputSpec {
-        name: "points",
-        multi: false,
-        optional: false,
-    }],
-    params: crate::params!(
-        "lower": 0.5;
-        "upper": 1.0;
-        "invert": false;
-        "probabilistic": false;
-        "seed": 0
-    ),
-    cook: pcg_density_filter,
-};
-
-fn pcg_density_filter(inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    let points = PCG_DENSITY_FILTER.one(inputs, 0)?;
-    let lower = p.f("lower")?;
-    let upper = p.f("upper")?;
-    let invert = p.b("invert")?;
-    let probabilistic = p.b("probabilistic")?;
-    let seed = p.i("seed")?;
-
-    let a = read_pcg(&points);
-    let mut keep = Vec::with_capacity(points.npoints);
-    for i in 0..points.npoints {
-        let d = a.density[i];
-        let k = if probabilistic {
-            random01(a.seed[i], seed, 0) < d
-        } else {
-            d >= lower && d <= upper
-        };
-        keep.push(if invert { !k } else { k });
-    }
-    cloud(&points, Some(&keep), None)
-}
 
 // 8. pcg_density_noise
 pub const PCG_DENSITY_NOISE: NodeSpec = NodeSpec {
@@ -2633,42 +2372,6 @@ mod tests {
     fn sample_points() -> Geometry {
         let p = vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0];
         Geometry::points_only(p).unwrap()
-    }
-
-    #[test]
-    fn test_pcg_points_and_bounds() {
-        let pts = sample_points();
-        let p = Params::resolve(PCG_POINTS.params, None).unwrap();
-        let out = pcg_points(&[vec![Arc::new(pts)]], &p).unwrap();
-        assert_eq!(out.npoints, 3);
-        assert!(out.point.contains_key("rot"));
-        assert!(out.point.contains_key("scale"));
-        assert!(out.point.contains_key("bounds_min"));
-        assert!(out.point.contains_key("bounds_max"));
-        assert!(out.point.contains_key("density"));
-        assert!(out.point.contains_key("seed"));
-
-        let pb = Params::resolve(
-            PCG_BOUNDS.params,
-            serde_json::json!({"mode": "scale", "factor": 2.0}).as_object(),
-        )
-        .unwrap();
-        let scaled = pcg_bounds(&[vec![Arc::new(out)]], &pb).unwrap();
-        let bmin = scaled.point["bounds_min"].as_f32().unwrap();
-        assert_eq!(bmin[0], -1.0);
-    }
-
-    #[test]
-    fn test_pcg_transform_deterministic() {
-        let pts = sample_points();
-        let p1 = Params::resolve(
-            PCG_TRANSFORM.params,
-            serde_json::json!({"seed": 42, "scale_min": [2.0, 2.0, 2.0]}).as_object(),
-        )
-        .unwrap();
-        let out1 = pcg_transform(&[vec![Arc::new(pts.clone())]], &p1).unwrap();
-        let out2 = pcg_transform(&[vec![Arc::new(pts)]], &p1).unwrap();
-        assert_eq!(out1.p(), out2.p());
     }
 
     #[test]

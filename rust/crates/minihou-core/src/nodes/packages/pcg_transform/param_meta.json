@@ -1,0 +1,71 @@
+{
+  "absolute_rotation": {
+    "default": false,
+    "doc": "Replace the rotation instead of adding to it",
+    "kind": "bool"
+  },
+  "offset_max": {
+    "default": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "doc": "Largest random offset added to each point position",
+    "kind": "vec3"
+  },
+  "offset_min": {
+    "default": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "doc": "Smallest random offset added to each point position",
+    "kind": "vec3"
+  },
+  "rotation_max": {
+    "default": [
+      0.0,
+      0.0,
+      360.0
+    ],
+    "doc": "Largest random rotation in degrees, Euler XYZ",
+    "kind": "vec3"
+  },
+  "rotation_min": {
+    "default": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "doc": "Degrees, Euler XYZ",
+    "kind": "vec3"
+  },
+  "scale_max": {
+    "default": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "doc": "Largest random scale multiplier per axis",
+    "kind": "vec3"
+  },
+  "scale_min": {
+    "default": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "doc": "Smallest random scale multiplier per axis",
+    "kind": "vec3"
+  },
+  "seed": {
+    "default": 0,
+    "doc": "Seed mixed with each point seed for the random draws",
+    "kind": "int"
+  },
+  "uniform_scale": {
+    "default": true,
+    "doc": "One random factor for all axes (from the X range)",
+    "kind": "bool"
+  }
+}

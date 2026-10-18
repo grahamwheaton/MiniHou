@@ -1,0 +1,5 @@
+id = "pcg_points"
+name = "PCG Points"
+category = "PCG"
+description = "Fill in missing PCG point attributes (rot, scale, bounds, density, seed)."
+keywords = "pcg points"
