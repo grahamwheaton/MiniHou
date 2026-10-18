@@ -366,3 +366,7 @@ Houdini's PolyExtrude (screenshots 84 to 87): Group (purple arrow), Divide Into 
 - The viewport ignores the point/vertex colour attribute `Cd` (only Single and Random colour exist, in Overlays -> Color).
 - Add a **Cd** option to that menu: interpolate Cd across each face when the geometry has it; default to Cd when present, else Single.
 - Affects Image File, Image Density and any node that writes Cd. Small, self-contained viewport change. Not started.
+
+## Urgent: show Cd colours in the viewport (requested 2026-10-18)
+
+Geometry with a Cd colour attribute (point, vertex or face, as the Color node and Image File write) should show those colours in the solid viewport, not grey. Check the display path (viewport.rs, the shader, the Scene build for the colour buffer) and whether the Color node output reaches it.
