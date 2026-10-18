@@ -1,0 +1,5 @@
+id = "attribute_transfer"
+name = "Attribute Transfer"
+category = "Attributes"
+description = "Transfer point attributes from nearby source points."
+keywords = "attribute attribute transfer"

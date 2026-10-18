@@ -1,0 +1,25 @@
+{
+  "blend_width": {
+    "default": 0.0,
+    "doc": "Soft edge: the source's influence fades to zero over the last blend_width before max_distance",
+    "kind": "float",
+    "min": 0.0
+  },
+  "group": {
+    "default": "",
+    "doc": "Only these points of the first input",
+    "kind": "str",
+    "pick_domain": "points"
+  },
+  "max_distance": {
+    "default": 1000000000.0,
+    "doc": "Points farther than this from the source keep their own values",
+    "kind": "float",
+    "min": 0.0
+  },
+  "names": {
+    "default": "Cd",
+    "doc": "Point attributes to copy from the nearest source point, space separated (wildcards work)",
+    "kind": "str"
+  }
+}
