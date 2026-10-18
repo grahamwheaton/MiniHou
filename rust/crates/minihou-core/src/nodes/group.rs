@@ -76,7 +76,7 @@ pub(super) fn keep_prims(g: &Geometry, keep: &[bool], compact: bool) -> Result<G
         for i in &mut vp { *i = remap[*i as usize]; }
     }
     let closed = g.topology.has_open().then(|| prims.iter().map(|&i| g.topology.is_closed(i)).collect());
-    Ok(Geometry { npoints: rows.len(), topology: Arc::new(Topology { vertex_point: vp, prim_offsets: offs, closed }),
+    Ok(Geometry { packed: g.packed.clone(), npoints: rows.len(), topology: Arc::new(Topology { vertex_point: vp, prim_offsets: offs, closed }),
         point: gather_table(&g.point, &rows), vertex: gather_table(&g.vertex, &verts), prim: gather_table(&g.prim, &prims), detail: g.detail.clone() })
 }
 

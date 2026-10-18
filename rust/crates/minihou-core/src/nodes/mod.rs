@@ -27,6 +27,7 @@ mod falloff;
 mod deform;
 mod uv;
 mod merge;
+pub mod packed;
 mod modify;
 mod output;
 mod model;
@@ -367,7 +368,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["example_offset"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["example_offset", "pack", "unpack"]);
     }
 }
 

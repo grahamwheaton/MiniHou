@@ -52,6 +52,7 @@ pub(super) fn merge(inputs: &Inputs, _p: &Params) -> Result<Geometry> {
     out.point = concat_tables(geos.iter().map(|g| (&g.point, g.npoints)).collect(), "point")?;
     out.vertex = concat_tables(geos.iter().map(|g| (&g.vertex, g.nvertices())).collect(), "vertex")?;
     out.prim = concat_tables(geos.iter().map(|g| (&g.prim, g.nprims())).collect(), "prim")?;
+    super::packed::merge_packed(&geos, &mut out);
     for g in &geos {
         for (k, v) in &g.detail {
             out.detail.entry(k.clone()).or_insert_with(|| v.clone());
