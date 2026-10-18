@@ -387,10 +387,6 @@ In Houdini, a middle-mouse click on a number field opens a vertical scale bar wi
 
 Hover over a parameter value and press Ctrl+C to copy it. Hover over another parameter and press Ctrl+V to paste it. Works for number, vector (all channels), text and enum values, and for group fields. Keep the copied value in the app (not the system clipboard only), so it works between nodes.
 
-## Bug: points always show, even in object mode with overlays off (screenshot 86, 2026-10-18)
-
-Points are drawn on the surface in object selection mode with overlays off. Points should only show in point selection mode or when the points overlay is on. Check the point draw path in viewport.rs and the overlay flags.
-
 ## Feature: silhouette outline for a selected object (requested 2026-10-18)
 
 When an object is selected, show only its silhouette outline (the outer edge seen from the camera) in orange, not the internal faces and edges. Screenshot 86 shows the current internal edges on a selected object.
