@@ -1,0 +1,22 @@
+{
+  "group": {
+    "default": "",
+    "doc": "Points to move (empty: all)",
+    "kind": "str",
+    "pick_domain": "points"
+  },
+  "scale": {
+    "default": [
+      0.1,
+      0.1,
+      0.1
+    ],
+    "doc": "Maximum offset along each axis",
+    "kind": "vec3"
+  },
+  "seed": {
+    "default": 0,
+    "doc": "Seed for the random offsets",
+    "kind": "int"
+  }
+}

@@ -1,0 +1,5 @@
+id = "point_jitter"
+name = "Point Jitter"
+category = "Deform"
+description = "Move points by a random offset."
+keywords = "random move"

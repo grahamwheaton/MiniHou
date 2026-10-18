@@ -4,40 +4,6 @@ use super::{InputSpec,Inputs,NodeSpec};
 use crate::{error::{Error,Result},geometry::{Attr,Geometry},params::Params};
 fn dot(a:[f64;3],b:[f64;3])->f64{(0..3).map(|i|a[i]*b[i]).sum()}
 fn cross(a:[f64;3],b:[f64;3])->[f64;3]{[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]}
-pub const POINT_JITTER: NodeSpec = NodeSpec {
-    name: "point_jitter",
-    inputs: super::GEO,
-    params: crate::params!(
-        "scale": [0.1, 0.1, 0.1];
-        "seed": 0;
-        "group": "";
-    ),
-    cook: point_jitter,
-};
-
-fn point_jitter(inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    let g = POINT_JITTER.one(inputs, 0)?;
-    let scale = p.v3("scale")?;
-    let seed = p.i("seed")?;
-    let group = p.s("group")?;
-    let sel = super::group::mask(&g, "point", &group)?;
-    let mut rng = super::np_random::Rng::new(&[(seed as u64) & 0xFFFFFFFF]);
-    let mut positions = g.p().to_vec();
-    for i in 0..g.npoints {
-        let rx = rng.random();
-        let ry = rng.random();
-        let rz = rng.random();
-        if sel[i] {
-            positions[i * 3] += ((rx * 2.0 - 1.0) * scale[0]) as f32;
-            positions[i * 3 + 1] += ((ry * 2.0 - 1.0) * scale[1]) as f32;
-            positions[i * 3 + 2] += ((rz * 2.0 - 1.0) * scale[2]) as f32;
-        }
-    }
-    let mut out = (*g).clone();
-    out.set_p(positions);
-    Ok(out)
-}
-
 pub const POINT_RELAX: NodeSpec = NodeSpec {
     name: "point_relax",
     inputs: &[
@@ -370,15 +336,6 @@ fn clean(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 #[cfg(test)]
 mod tests{
     use super::*;
-    #[test]
-    fn point_jitter_applies_offset() {
-        let g = Arc::new(Geometry::points_only(vec![0.0, 0.0, 0.0]).unwrap());
-        let p = Params::resolve(POINT_JITTER.params, serde_json::json!({"scale": [0.1, 0.0, 0.0]}).as_object()).unwrap();
-        let out = point_jitter(&[vec![g]], &p).unwrap();
-        assert!(out.p()[0].abs() <= 0.1 && out.p()[0] != 0.0);
-        assert_eq!(out.p()[1], 0.0);
-        assert_eq!(out.p()[2], 0.0);
-    }
     #[test]
     fn clean_removes_degenerates_and_unused() {
         let p = vec![
