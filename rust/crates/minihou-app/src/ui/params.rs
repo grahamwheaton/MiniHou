@@ -24,6 +24,18 @@ pub fn pick_domain(meta: Option<&Value>, params: &Value) -> Option<super::Select
     }
 }
 
+/// Fallback for group fields without registry metadata: follow a sibling domain or group_type parameter.
+pub fn pick_domain_for(typ: &str, name: &str, meta: Option<&Value>, params: &Value) -> Option<super::SelectionMode> {
+    if let Some(mode) = pick_domain(meta, params) { return Some(mode); }
+    if !matches!(name, "group" | "group_name" | "pattern") { return None; }
+    for sibling in ["domain", "group_type"] {
+        let Some(m) = param_meta(typ, sibling) else { continue };
+        let value = params[sibling].as_str().or_else(|| m["default"].as_str());
+        if let Some(mode) = value.and_then(|d| pick_domain(Some(&json!({"pick_domain": d})), params)) { return Some(mode); }
+    }
+    None
+}
+
 #[cfg(test)]
 mod pick_tests {
     use super::*;
@@ -38,6 +50,16 @@ mod pick_tests {
         assert_eq!(pick_domain(param_meta("attribute_create", "group"), &json!({})), Some(SelectionMode::Points));
         assert_eq!(pick_domain(param_meta("attribute_create", "group"), &json!({"domain":"points"})), Some(SelectionMode::Points));
         assert_eq!(pick_domain(param_meta("attribute_create", "group"), &json!({"domain":"primitives"})), Some(SelectionMode::Faces));
+    }
+    #[test]
+    fn group_fields_of_many_nodes_get_picker() {
+        assert_eq!(pick_domain(param_meta("blast", "group"), &json!({})), Some(SelectionMode::Faces));
+        assert_eq!(pick_domain(param_meta("blast", "group"), &json!({"domain":"points"})), Some(SelectionMode::Points));
+        assert_eq!(pick_domain(param_meta("blast", "group"), &json!({"domain":"edges"})), Some(SelectionMode::Edges));
+        assert_eq!(pick_domain(param_meta("group_create", "pattern"), &json!({"domain":"primitives"})), Some(SelectionMode::Faces));
+        assert_eq!(pick_domain(param_meta("edge_slide", "group"), &json!({})), Some(SelectionMode::Edges));
+        assert_eq!(pick_domain(param_meta("bend", "group"), &json!({})), Some(SelectionMode::Points));
+        assert_eq!(pick_domain_for("blast", "group", None, &json!({"domain":"edges"})), Some(SelectionMode::Edges));
     }
     #[test]
     fn attribute_create_group_field_gets_picker() {
@@ -959,7 +981,7 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     } else {
         meta
     };
-    let pick_mode = pick_domain(meta, &v.doc["nodes"][id]["params"]);
+    let pick_mode = pick_domain_for(typ, param.name, meta, &v.doc["nodes"][id]["params"]);
     let kind = meta.map_or_else(|| param_kind(&default), |m| metadata_kind(m, &default));
     // Metadata-driven optional controls (for example Ray's distance and hit-output toggles).
     let condition_enabled = meta.and_then(|m| m["enabled_if"].as_object()).is_none_or(|conditions| {
@@ -2330,6 +2352,47 @@ mod tests {
         assert!(click.is_some(), "purple arrow must be drawn");
         assert!(actions.0.iter().any(|a| matches!(a, UiAction::PickParameter {node,name,mode,..}
             if node=="subdivide1" && name=="creases" && *mode==super::super::SelectionMode::Edges)));
+    }
+
+    fn arrow_click_mode(typ: &str, field: &str) -> Option<super::super::SelectionMode> {
+        let mut f = Fixture::new();
+        f.doc = minihou_app::Document::parse(json!({"display":"n1","nodes":{
+            "box1":{"type":"box"},"n1":{"type":typ,"inputs":{"geo":"box1"}}
+        }}).to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected = "n1".into(); f.display = "n1".into();
+        let ctx = egui::Context::default(); f.theme.apply(&ctx);
+        let mut click = None;
+        let mut actions = Actions::default();
+        for phase in 0..3 {
+            let events = match (phase, click) {
+                (1,Some(pos)) => vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button:egui::PointerButton::Primary, pressed:true, modifiers:egui::Modifiers::NONE }],
+                (2,Some(pos)) => vec![egui::Event::PointerButton { pos, button:egui::PointerButton::Primary, pressed:false, modifiers:egui::Modifiers::NONE }],
+                _ => vec![],
+            };
+            let input = egui::RawInput { screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(800.,600.))), events, ..Default::default() };
+            let v = f.view();
+            let output = ctx.run(input, |ctx| { egui::CentralPanel::default().show(ctx, |ui| {
+                let param = minihou_core::nodes::get(typ).unwrap().params.iter().find(|p|p.name==field).unwrap();
+                row(ui,&v,&mut actions,"n1",typ,param,false,&mut vec![]);
+            }); });
+            if phase == 0 {
+                for shape in output.shapes { if let egui::Shape::Text(t) = shape.shape {
+                    if t.galley.text() == "↖" { click = Some(t.pos + t.galley.size() * 0.5); }
+                }}
+            }
+        }
+        actions.0.iter().find_map(|a| match a {
+            UiAction::PickParameter {node,name,mode,..} if node=="n1" && name==field => Some(*mode),
+            _ => None })
+    }
+    #[test]
+    fn clicking_arrow_works_on_many_nodes() {
+        use super::super::SelectionMode::*;
+        assert_eq!(arrow_click_mode("blast", "group"), Some(Faces));
+        assert_eq!(arrow_click_mode("group_create", "pattern"), Some(Points));
+        assert_eq!(arrow_click_mode("edge_slide", "group"), Some(Edges));
+        assert_eq!(arrow_click_mode("bend", "group"), Some(Points));
     }
 
     #[test]
