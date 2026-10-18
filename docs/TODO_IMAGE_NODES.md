@@ -358,3 +358,11 @@ Houdini's Split (screenshot 83): splits the input into separate pieces by a grou
 ## Feature: PolyExtrude, Houdini parity (requested 2026-10-18)
 
 Houdini's PolyExtrude (screenshots 84 to 87): Group (purple arrow), Divide Into (Connected Components and others), Split Group, Extrusion Mode (Primitive/Edge Normal and others), Distance, Inset, Twist, Divisions, Spine Shape (Straight and others). Extrusion tab: Transform Extruded Front, Output Front, Output Back, Output Side, Front, Back and Side groups, Front and Back Boundary Groups, Preserve Groups, Limit Insetting, Use Common Limit, Add Vertex Normals, Cusp Angle, Generate Unwrapped Texture Coordinates for Sides (Style Proportional, Scaling Match Incident UV Scale). Spine Control tab: Front and Back Magnitude and Stiffness, Interpolation (Rotating Frame and others), Division Spacing, External Spine (Reverse Direction, Axial Rotation, Front and Back Blend), Thickness Scale and Thickness Ramp, Twist and Local Twist Ramp with Range Half-Width. Local Control tab: attribute overrides for distance (zscale), inset (insetscale), twist (twistscale), divisions (divsscale), and local frames (localx, localz, localctr).
+
+---
+
+# Added 2026-10-18: viewport should display Cd
+
+- The viewport ignores the point/vertex colour attribute `Cd` (only Single and Random colour exist, in Overlays -> Color).
+- Add a **Cd** option to that menu: interpolate Cd across each face when the geometry has it; default to Cd when present, else Single.
+- Affects Image File, Image Density and any node that writes Cd. Small, self-contained viewport change. Not started.
