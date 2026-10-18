@@ -1,0 +1,5 @@
+id = "fillet"
+name = "Fillet"
+category = "Curves"
+description = "Round the corners of curves with circular arcs."
+keywords = "round corners curve"

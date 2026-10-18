@@ -1,0 +1,31 @@
+{
+  "by": {
+    "default": "length",
+    "doc": "length: segments of about 'length'; count: exactly 'segments' per curve",
+    "kind": "enum",
+    "options": [
+      "length",
+      "count"
+    ]
+  },
+  "group": {
+    "default": "",
+    "doc": "Primitives to resample (others are dropped); empty: all",
+    "kind": "str",
+    "pick_domain": "points"
+  },
+  "length": {
+    "default": 0.1,
+    "doc": "Approximate segment length when resampling by length",
+    "kind": "float",
+    "min": 1e-06,
+    "soft_max": 2.0
+  },
+  "segments": {
+    "default": 20,
+    "doc": "Number of segments per curve when resampling by count",
+    "kind": "int",
+    "min": 1,
+    "soft_max": 1000
+  }
+}

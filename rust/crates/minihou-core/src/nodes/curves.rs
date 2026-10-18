@@ -4,10 +4,10 @@ use super::{InputSpec, Inputs, NodeSpec, GEO, linspace};
 use super::group::{gather_table, keep_prims};
 use crate::{error::{Error, Result}, geometry::{Attr, AttrData, Geometry, Topology, MAX_ELEMENTS}, params::Params};
 
-fn count(n: usize) -> Result<()> {
+pub(crate) fn count(n: usize) -> Result<()> {
     if n > MAX_ELEMENTS.min(20_000_000) { Err(Error::new("curve output exceeds the 20,000,000 generated-element safety limit")) } else { Ok(()) }
 }
-fn curve(p: Vec<f32>, closed: bool) -> Result<Geometry> {
+pub(crate) fn curve(p: Vec<f32>, closed: bool) -> Result<Geometry> {
     let n=p.len()/3; count(n)?;
     let mut g=Geometry::from_arrays(p,(0..n as i32).collect(),vec![0,n as i32],Some(vec![closed]))?;
     g.prim.insert("__viewport_curve".into(),Arc::new(Attr::i32(1,vec![1])));
@@ -121,7 +121,7 @@ fn polypath(inputs:&Inputs,_:&Params)->Result<Geometry> {
     topo.closed=Some(closed);out.topology=Arc::new(topo);Ok(out)
 }
 
-fn lengths(g:&Geometry,i:usize)->(Vec<usize>,Vec<f64>,f64) {
+pub(crate) fn lengths(g:&Geometry,i:usize)->(Vec<usize>,Vec<f64>,f64) {
     let ids:Vec<_>=g.topology.vertex_point[g.topology.prim_offsets[i] as usize..g.topology.prim_offsets[i+1] as usize].iter().map(|&i|i as usize).collect();
     let mut cum=vec![0.];let mut total=0.;
     for j in 0..ids.len(){let next=if j+1<ids.len(){j+1}else{0};
@@ -129,7 +129,7 @@ fn lengths(g:&Geometry,i:usize)->(Vec<usize>,Vec<f64>,f64) {
         total+=d;cum.push(total);
     } (ids,cum,total)
 }
-fn sample(g:&Geometry,prims:&[usize],lists:&[Vec<f64>])->Result<Geometry> {
+pub(crate) fn sample(g:&Geometry,prims:&[usize],lists:&[Vec<f64>])->Result<Geometry> {
     let n:usize=lists.iter().map(Vec::len).sum();count(n)?;
     let mut pa=Vec::new();let mut pb=Vec::new();let mut ts=Vec::new();let mut positions=Vec::new();let mut u=Vec::new();let mut offs=vec![0];
     for (&i,list) in prims.iter().zip(lists){let(ids,cum,total)=lengths(g,i);
@@ -147,18 +147,6 @@ fn sample(g:&Geometry,prims:&[usize],lists:&[Vec<f64>])->Result<Geometry> {
     }
     out.point.insert("curveu".into(),Arc::new(Attr::f32(1,u)));out.prim=gather_table(&g.prim,prims);out.detail=g.detail.clone();Ok(out)
 }
-pub const RESAMPLE:NodeSpec=NodeSpec{name:"resample",inputs:GEO,params:crate::params!("by":"length";"length":0.1;"segments":20;"group":""),cook:resample};
-fn resample(inputs:&Inputs,p:&Params)->Result<Geometry>{
-    let g=RESAMPLE.one(inputs,0)?;let sel=super::group::mask(&g,"prim",&p.s("group")?)?;
-    let by=p.e("by",&["length","count"])?;let length=p.f("length")?;let segments=p.i("segments")?;
-    if length<=0. || segments<1{return Err(Error::new("length must be positive and segments at least 1"));}
-    let mut prims=Vec::new();let mut lists=Vec::new();let mut count_out=0usize;
-    for (i,&selected) in sel.iter().enumerate(){if !selected || g.topology.prim_offsets[i+1]-g.topology.prim_offsets[i]<2{continue;}
-        let (_,_,total)=lengths(&g,i);let n=if by=="count"{segments as usize}else{(total/length-1e-9).ceil().max(1.) as usize};
-        count_out=count_out.checked_add(n).and_then(|v|v.checked_add(1)).ok_or_else(||Error::new("resample count overflow"))?;count(count_out)?;
-        let mut s=linspace(0.,total,n+1);if g.topology.is_closed(i){s.pop();}prims.push(i);lists.push(s);
-    }sample(&g,&prims,&lists)
-}
 pub const CARVE:NodeSpec=NodeSpec{name:"carve",inputs:GEO,params:crate::params!("start":0.0;"end":1.0),cook:carve};
 fn carve(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let g=CARVE.one(inputs,0)?;let a=p.f("start")?;let b=p.f("end")?;let(lo,hi)=(a.min(b),a.max(b));let mut prims=Vec::new();let mut lists=Vec::new();
@@ -173,39 +161,7 @@ fn carve(inputs:&Inputs,p:&Params)->Result<Geometry>{
     super::merge::merge(&[vec![Arc::new(rest),Arc::new(out)]],&Params::resolve(&[],None)?)
 }
 
-pub const FILLET:NodeSpec=NodeSpec{name:"fillet",inputs:GEO,params:crate::params!(
-    "radius":0.2;"divisions":6;"min_angle":1.;"group":""),cook:fillet};
-fn fillet(inputs:&Inputs,p:&Params)->Result<Geometry>{
-    let g=FILLET.one(inputs,0)?;if g.nprims()==0{return Ok((*g).clone());}
-    let radius=p.f("radius")?;let divisions=p.i("divisions")?;if !(1..=256).contains(&divisions){return Err(Error::new("divisions must be 1..256"));}
-    let min_angle=p.f("min_angle")?.max(1e-3).to_radians();let sel=super::group::mask(&g,"point",&p.s("group")?)?;
-    let mut positions=Vec::new();let mut weights=Vec::<(usize,usize,usize,f64,f64,f64)>::new();let mut offs=vec![0];let mut rounded=false;
-    for i in 0..g.nprims(){let start=g.topology.prim_offsets[i] as usize;let end=g.topology.prim_offsets[i+1] as usize;let n=end-start;let cl=g.topology.is_closed(i);
-        let ids:Vec<_>=g.topology.vertex_point[start..end].iter().map(|&v|v as usize).collect();
-        let q:Vec<[f64;3]>=ids.iter().map(|&pt|std::array::from_fn(|k|g.p()[pt*3+k] as f64)).collect();
-        for j in 0..n{let prev=if j==0{if cl{n-1}else{0}}else{j-1};let next=if j+1==n{if cl{0}else{j}}else{j+1};
-            let a=sub(q[prev],q[j]);let b=sub(q[next],q[j]);let(la,lb)=(norm(a),norm(b));let interior=n>=3 && (cl || (j>0 && j+1<n));let ok=interior && la>1e-12 && lb>1e-12;
-            let a=a.map(|v|v/if ok{la}else{1.});let b=b.map(|v|v/if ok{lb}else{1.});let theta=dot(a,b).clamp(-1.,1.).acos();let turn=std::f64::consts::PI-theta;
-            let corner=ok && sel[ids[j]] && radius>0. && turn>=min_angle && theta>1e-3;
-            if !corner{positions.extend(q[j].map(|v|v as f32));weights.push((ids[j],ids[prev],ids[next],0.,0.,0.));continue;}
-            rounded=true;let half=theta/2.;let end_prev=!cl && (prev==0 || prev+1==n);let end_next=!cl && (next==0 || next+1==n);
-            let room=(if end_prev{la}else{la/2.}).min(if end_next{lb}else{lb/2.});let tang=(radius/half.tan()).min(room);let r=tang*half.tan();
-            let bis=std::array::from_fn(|k|a[k]+b[k]);let bn=norm(bis);let bis=bis.map(|v|v/if bn>1e-12{bn}else{1.});
-            let centre=std::array::from_fn::<_,3,_>(|k|q[j][k]+bis[k]*(r/half.sin().max(1e-12)));
-            let u1=std::array::from_fn::<_,3,_>(|k|(q[j][k]+a[k]*tang-centre[k])/r.max(1e-12));let u2=std::array::from_fn::<_,3,_>(|k|(q[j][k]+b[k]*tang-centre[k])/r.max(1e-12));let om=turn.max(1e-6);
-            count(weights.len()+divisions as usize+1)?;
-            for k in 0..=divisions{let s=k as f64/divisions as f64;let w1=((1.-s)*om).sin()/om.sin();let w2=(s*om).sin()/om.sin();
-                positions.extend((0..3).map(|c|(centre[c]+r*(u1[c]*w1+u2[c]*w2)) as f32));weights.push((ids[j],ids[prev],ids[next],tang/la,tang/lb,s));}
-        }offs.push(weights.len() as i32);
-    }
-    if !rounded{return Ok((*g).clone());}count(weights.len())?;
-    let mut out=Geometry::from_arrays(positions,(0..weights.len() as i32).collect(),offs,Some(g.topology.closed_mask()))?;
-    for(name,attr)in &g.point{if name=="P"{continue;}let mut a=attr.zeros_like(weights.len());match(&attr.data,&mut a.data){
-        (AttrData::F32(src),AttrData::F32(dst))=>for(i,&(ic,ip,inx,fa,fb,s))in weights.iter().enumerate(){let(fa,fb,s)=(fa as f32,fb as f32,s as f32);for k in 0..a.width{let v1=src[ic*a.width+k]*(1.-fa)+src[ip*a.width+k]*fa;let v2=src[ic*a.width+k]*(1.-fb)+src[inx*a.width+k]*fb;dst[i*a.width+k]=v1*(1.-s)+v2*s;}},
-        (AttrData::I32(src),AttrData::I32(dst))=>for(i,&(ic,_,_,_,_,_))in weights.iter().enumerate(){dst[i*a.width..(i+1)*a.width].copy_from_slice(&src[ic*a.width..(ic+1)*a.width]);},_=>unreachable!(),
-    }out.point.insert(name.clone(),Arc::new(a));}
-    out.prim=g.prim.clone();out.detail=g.detail.clone();Ok(out)
-}
+
 
 pub const CURVE_SIMPLIFY:NodeSpec=NodeSpec{name:"curve_simplify",inputs:GEO,params:crate::params!(
     "method":"distance";"tolerance":0.01;"angle":10.;"smooth":0;"keep":""),cook:simplify};
@@ -927,26 +883,19 @@ mod tests {
     use super::*;
     fn cook(spec:&NodeSpec,g:Geometry,v:serde_json::Value)->Geometry{(spec.cook)(&[vec![Arc::new(g)]],&Params::resolve(spec.params,v.as_object()).unwrap()).unwrap()}
     #[test]
-    fn resample_interpolation_and_carve_keep_original_knots(){
+    fn carve_keeps_original_knots(){
         let mut g=curve(vec![0.,0.,0.,0.,0.,1.,0.,0.,2.,0.,0.,3.,0.,0.,4.],false).unwrap();
         g.point.insert("id".into(),Arc::new(Attr::i32(1,vec![10,11,12,13,14])));
-        let r=cook(&RESAMPLE,g.clone(),serde_json::json!({"length":0.5}));assert_eq!(r.npoints,9);
-        assert_eq!(r.point["curveu"].as_f32().unwrap(),[0.,0.125,0.25,0.375,0.5,0.625,0.75,0.875,1.]);
-        assert_eq!(r.point["id"].data,AttrData::I32(vec![10,10,11,11,12,12,13,13,14]));
         let c=cook(&CARVE,g,serde_json::json!({"start":0.25,"end":0.6}));assert_eq!(c.p(),[0.,0.,1.,0.,0.,2.,0.,0.,2.4]);c.validate().unwrap();
     }
     #[test]
-    fn closed_resample_and_branch_chains(){
-        let g=curve(vec![0.,0.,0.,1.,0.,0.,1.,1.,0.,0.,1.,0.],true).unwrap();
-        let r=cook(&RESAMPLE,g,serde_json::json!({"length":0.25}));assert_eq!(r.npoints,16);assert!(r.topology.is_closed(0));
+    fn branch_chains(){
         let (paths,cl)=chains(4,&[[0,1],[1,2],[1,3]]);assert_eq!(paths,vec![vec![0,1],vec![1,2],vec![1,3]]);assert_eq!(cl,[false;3]);
     }
     #[test]
-    fn simplify_preserves_attributes_and_fillet_keeps_ends(){
+    fn simplify_preserves_attributes(){
         let mut g=curve(vec![0.,0.,0.,1.,0.,0.,2.,0.,0.],false).unwrap();g.point.insert("id".into(),Arc::new(Attr::i32(1,vec![5,6,7])));
         let out=cook(&CURVE_SIMPLIFY,g,serde_json::json!({}));assert_eq!(out.npoints,2);assert_eq!(out.point["id"].data,AttrData::I32(vec![5,7]));out.validate().unwrap();
-        let g=curve(vec![0.,0.,0.,1.,0.,0.,1.,1.,0.],false).unwrap();let out=cook(&FILLET,g,serde_json::json!({"radius":0.2,"divisions":2}));
-        assert_eq!(out.npoints,5);assert_eq!(&out.p()[..3],&[0.,0.,0.]);assert_eq!(&out.p()[12..],&[1.,1.,0.]);assert!((out.p()[3]-0.8).abs()<1e-6);assert!((out.p()[10]-0.2).abs()<1e-6);out.validate().unwrap();
     }
     #[test]
     fn bezier_vector_handles_and_optional_input(){

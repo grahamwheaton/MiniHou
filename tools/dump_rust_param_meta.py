@@ -43,11 +43,11 @@ def package_meta() -> dict:
 TYPES += ["loop_begin", "loop_end", "input", "object_input", "wrangle", "blend", "exploded_view", "usd_export", "usd_import"]
 
 # Procedural / instancing ports; retain the other workers' type lists above.
-TYPES += ["bezier", "helix", "lsystem", "convert_line", "polypath", "resample", "carve",
+TYPES += ["bezier", "helix", "lsystem", "convert_line", "polypath", "carve",
           "copy_to_points", "instance", "for_each", "group_promote",
           "attribute_create", "attribute_promote", "attribute_blur",
           "connectivity", "smooth", "falloff", "bend", "uv_project", "uv_flatten", "uv_transform",
-          "fillet", "curve_simplify", "group_create", "group_expand", "blast", "measure"]
+          "curve_simplify", "group_create", "group_expand", "blast", "measure"]
 
 
 # Modeling ports. loop_cut is the native keymap alias for Python's polysplit.

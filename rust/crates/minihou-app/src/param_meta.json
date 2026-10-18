@@ -6845,14 +6845,14 @@
   },
   "length": {
    "default": 0.1,
-   "doc": "",
+   "doc": "Approximate segment length when resampling by length",
    "kind": "float",
    "min": 1e-06,
    "soft_max": 2.0
   },
   "segments": {
    "default": 20,
-   "doc": "",
+   "doc": "Number of segments per curve when resampling by count",
    "kind": "int",
    "min": 1,
    "soft_max": 1000
