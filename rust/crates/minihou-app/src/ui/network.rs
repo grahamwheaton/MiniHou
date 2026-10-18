@@ -580,7 +580,7 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
             let count = ref_links.iter().filter(|l| &l.source == node_id || &l.target == node_id).count();
             let external_count = v.doc["exposed"].as_array().into_iter().flatten().filter(|entry| entry["node"] == node_id.as_str()).count();
             let broken = ref_links.iter().any(|l| l.broken && &l.target == node_id);
-            card_ui(&p, card, node_id, node, v, state.zoom, count + external_count, external_count > 0, broken);
+            card_ui(&p, card, node_id, node, v, state.zoom, count + external_count, exposed_to_blender(v.doc, node_id), broken);
         }
         if let Some(lines) = guide {
             if let Some(x) = lines.x { let x = screen(r, state, pos2(x, 0.0)).x; p.line_segment([pos2(x, r.top()), pos2(x, r.bottom())], Stroke::new(1.0_f32, v.theme.accent)); }
@@ -995,6 +995,10 @@ fn flag_action(flag: usize, id: &str, bypass: bool) -> UiAction {
         2 => UiAction::ToggleTemplate(id.into()),
         _ => UiAction::SetDisplay(id.into()),
     }
+}
+
+fn exposed_to_blender(doc: &serde_json::Value, id: &str) -> bool {
+    minihou_app::exposed_nodes(doc).contains(id)
 }
 
 fn card_ui(p: &egui::Painter, r: Rect, id: &str, node: &NodeDef, v: &View, zoom: f32, link_count: usize, external: bool, broken_link: bool) {

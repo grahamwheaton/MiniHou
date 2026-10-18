@@ -166,6 +166,58 @@ fn target_field(ui: &mut egui::Ui, value: &mut Value, width: f32, enabled: bool)
 }
 fn clipboard_id() -> egui::Id { egui::Id::new("value_link_parameter_clipboard") }
 
+fn open_expression(ctx: &egui::Context, doc: &Value, node: &str, path: &str) {
+    let expr = doc["nodes"][node]["channels"][path].as_str().unwrap_or("").to_owned();
+    ctx.data_mut(|d| { d.insert_temp(egui::Id::new("link_expression_open"), (node.to_owned(), path.to_owned())); d.insert_temp(egui::Id::new("link_expression_text"), expr); });
+}
+
+fn channel_reference_edit(node: &str, path: &str, source: &str, source_path: &str) -> Edit {
+    let reference = value_link_ui::relative_path(node, source, source_path);
+    Edit::Channel { node: node.into(), path: path.into(), expression: Some(format!("ch(\"{reference}\")")) }
+}
+
+fn vector_channel_menu(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, node: &str, name: &str, axis: usize) {
+    let suffix = ["x", "y", "z", "w"][axis];
+    let path = format!("{name}.{suffix}");
+    ui.menu_button("Link to Parameter...", |ui| {
+        let search_id = egui::Id::new("link_picker_search");
+        let mut search = ui.ctx().data(|d| d.get_temp::<String>(search_id)).unwrap_or_default();
+        ui.add(egui::TextEdit::singleline(&mut search).hint_text("Search nodes and parameters"));
+        ui.ctx().data_mut(|d| d.insert_temp(search_id, search.clone()));
+        egui::ScrollArea::vertical().max_height(260.).show(ui, |ui| {
+            if let Some(all) = v.doc["nodes"].as_object() {
+                for (source, def) in all {
+                    let Some(spec) = def["type"].as_str().and_then(nodes::get) else { continue; };
+                    for param in spec.params {
+                        let value = def["params"].get(param.name).cloned().unwrap_or_else(|| (param.default)());
+                        let source_path = if value.as_array().is_some_and(|a| axis < a.len() && a[axis].is_number()) {
+                            format!("{}.{suffix}", param.name)
+                        } else if value.is_number() || value.is_boolean() { param.name.to_owned() } else { continue; };
+                        if source == node && source_path == path { continue; }
+                        let label = format!("{source} / {source_path}");
+                        if !label.to_lowercase().contains(&search.to_lowercase()) { continue; }
+                        if ui.button(label).clicked() {
+                            out.push(UiAction::Edit { edit: channel_reference_edit(node, &path, source, &source_path), continuous: false });
+                            ui.close();
+                        }
+                    }
+                }
+            }
+        });
+    });
+    if let Some((source, param)) = value_link_ui::go_to_source(v.doc, node, Some(&path)) {
+        if ui.button(format!("Go to Source: {source}.{param}")).clicked() { out.push(UiAction::NavigateLink { node: source, param }); ui.close(); }
+    }
+    if v.doc["nodes"][node]["channels"].get(&path).is_some() && ui.button("Delete Channel").clicked() {
+        out.push(UiAction::Edit { edit: Edit::Channel { node: node.into(), path: path.clone(), expression: None }, continuous: false });
+        ui.close();
+    }
+    if ui.button("Edit Expression...").clicked() {
+        open_expression(ui.ctx(), v.doc, node, &path);
+        ui.close();
+    }
+}
+
 fn parameter_menu(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, node: &str, name: &str, default: &Value) {
     let copied = ui.ctx().data(|d| d.get_temp::<CopiedParam>(clipboard_id()));
     if ui.button("Copy Parameter").clicked() {
@@ -236,9 +288,16 @@ fn parameter_menu(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, node: &str
     if ui.button(if locked { "Unlock Parameter" } else { "Lock Parameter" }).clicked() {
         out.push(UiAction::Edit { edit: Edit::LockParam { node:node.into(), path:name.into(), locked:!locked }, continuous:false }); ui.close();
     }
-    if ui.button("Edit Expression...").clicked() {
-        let expr = v.doc["nodes"][node]["channels"][name].as_str().unwrap_or("").to_owned();
-        ui.ctx().data_mut(|d| { d.insert_temp(egui::Id::new("link_expression_open"), (node.to_owned(), name.to_owned())); d.insert_temp(egui::Id::new("link_expression_text"), expr); });
+    let component_paths: Vec<_> = v.doc["nodes"][node]["channels"].as_object().into_iter().flatten()
+        .filter(|(path, _)| path.starts_with(&format!("{name}."))).map(|(path, _)| path.clone()).collect();
+    if v.doc["nodes"][node]["channels"].get(name).is_none() && !component_paths.is_empty() {
+        ui.menu_button("Edit Expression...", |ui| {
+            for path in &component_paths {
+                if ui.button(path).clicked() { open_expression(ui.ctx(), v.doc, node, path); ui.close(); }
+            }
+        });
+    } else if ui.button("Edit Expression...").clicked() {
+        open_expression(ui.ctx(), v.doc, node, name);
         ui.close();
     }
     if let Some(message) = ui.ctx().data(|d| d.get_temp::<String>(egui::Id::new("link_message"))) { ui.colored_label(v.theme.err, message); }
@@ -1245,6 +1304,7 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
                 }
                 clicked
             } else {
+                let mut channel_menu = |ui: &mut egui::Ui, axis| vector_channel_menu(ui, v, out, id, param.name, axis);
                 widget_styled(
                     ui,
                     kind,
@@ -1254,6 +1314,7 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
                     layout.control_rect.width(),
                     units_opt,
                     bool_label.as_deref(),
+                    Some(&mut channel_menu),
                 )
             }
         }).response;
@@ -2159,12 +2220,12 @@ fn ramp_widget(
 /// One editing widget for a parameter value; returns true when the value changed.
 pub fn widget(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value: &mut Value) -> bool {
     let width = ui.available_width();
-    widget_styled(ui, kind, meta, value, None, width, None, None)
+    widget_styled(ui, kind, meta, value, None, width, None, None, None)
 }
 
 pub fn widget_with_units(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value: &mut Value, units: Option<crate::units::UnitSettings>) -> bool {
     let width = ui.available_width();
-    widget_styled(ui, kind, meta, value, None, width, units, None)
+    widget_styled(ui, kind, meta, value, None, width, units, None, None)
 }
 
 fn render_vector_fields(
@@ -2175,6 +2236,7 @@ fn render_vector_fields(
     theme: Option<&Theme>,
     width: f32,
     units: Option<crate::units::UnitSettings>,
+    mut channel_menu: Option<&mut dyn FnMut(&mut egui::Ui, usize)>,
 ) -> bool {
     let axis_labels = ["X", "Y", "Z", "W"];
     let mut v: Vec<f64> = (0..n).map(|i| value.get(i).and_then(Value::as_f64).unwrap_or(0.)).collect();
@@ -2204,6 +2266,11 @@ fn render_vector_fields(
                     egui::FontId::monospace(11.),
                     axis_color,
                 );
+                if let Some(menu) = channel_menu.as_deref_mut() {
+                    ui.interact(Rect::from_min_max(outer.min, Pos2::new(inner.left() + 12., outer.bottom())),
+                        ui.id().with(("v_label", i, outer.min.x as i32, outer.min.y as i32)), Sense::click())
+                        .context_menu(|ui| menu(ui, i));
+                }
                 let id = ui.id().with(("v", i, outer.min.x as i32, outer.min.y as i32));
                 changed |= drag_number(
                     ui,
@@ -2217,6 +2284,11 @@ fn render_vector_fields(
                     t,
                     units,
                 );
+                if let Some(menu) = channel_menu.as_deref_mut() {
+                    if let Some(response) = ui.ctx().read_response(id).or_else(|| ui.ctx().read_response(id.with("text"))) {
+                        response.context_menu(|ui| menu(ui, i));
+                    }
+                }
                 let steps = step_by_wheel(ui, outer, id);
                 changed |= apply_field_steps(ui, id, x, steps, &range, false, soft, units);
             } else if let Some(u) = units {
@@ -2232,7 +2304,7 @@ fn render_vector_fields(
     changed
 }
 
-fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value: &mut Value, theme: Option<&Theme>, width: f32, units: Option<crate::units::UnitSettings>, bool_label: Option<&str>) -> bool {
+fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value: &mut Value, theme: Option<&Theme>, width: f32, units: Option<crate::units::UnitSettings>, bool_label: Option<&str>, channel_menu: Option<&mut dyn FnMut(&mut egui::Ui, usize)>) -> bool {
     let param_name = meta.and_then(|m| m["name"].as_str()).unwrap_or("");
     if is_ramp_param(param_name, meta, value) {
         let default_theme = Theme::dark();
@@ -2370,11 +2442,11 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
         }
         ParamKind::Vec3 => {
             let n = value.as_array().map_or(3, |a| a.len().clamp(2, 4));
-            render_vector_fields(ui, value, n, meta, theme, width, units)
+            render_vector_fields(ui, value, n, meta, theme, width, units, channel_menu)
         }
         ParamKind::Unsupported => {
             if let Some(arr) = value.as_array().filter(|a| (2..=4).contains(&a.len()) && a.iter().all(Value::is_number)) {
-                render_vector_fields(ui, value, arr.len(), meta, theme, width, units)
+                render_vector_fields(ui, value, arr.len(), meta, theme, width, units, channel_menu)
             } else {
                 ui.label(value.to_string());
                 false
@@ -2387,6 +2459,22 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
 mod tests {
     use super::*;
     use crate::ui::testing::Fixture;
+
+    #[test] fn channel_link_changes_only_the_selected_axis() {
+        let mut doc = minihou_app::Document::parse(json!({"nodes":{"a":{"type":"box"},"b":{"type":"box","channels":{"size.y":"ch('../a/size.y')"}}}}).to_string()).unwrap();
+        doc.edit(&channel_reference_edit("b", "size.x", "a", "size.x")).unwrap();
+        assert_eq!(doc.value()["nodes"]["b"]["channels"]["size.x"], "ch(\"../a/size.x\")");
+        assert_eq!(doc.value()["nodes"]["b"]["channels"]["size.y"], "ch('../a/size.y')");
+        assert!(doc.value()["nodes"]["b"]["channels"].get("size.z").is_none());
+    }
+
+    #[test] fn edit_expression_prefills_the_existing_channel_relationship() {
+        let ctx = egui::Context::default();
+        let doc = json!({"nodes":{"b":{"channels":{"size.x":"ch('../a/size.x')"}}}});
+        open_expression(&ctx, &doc, "b", "size.x");
+        assert_eq!(ctx.data(|d| d.get_temp::<String>(egui::Id::new("link_expression_text"))).as_deref(), Some("ch('../a/size.x')"));
+        assert_eq!(ctx.data(|d| d.get_temp::<(String,String)>(egui::Id::new("link_expression_open"))), Some(("b".into(), "size.x".into())));
+    }
 
     #[test] fn params_tab_moves_editing_to_the_next_and_previous_number_field() {
         let order=[egui::Id::new("a"),egui::Id::new("b"),egui::Id::new("c")];
@@ -2439,6 +2527,37 @@ mod tests {
         }
         assert!(found,"right click should reveal parameter actions");
         assert!(tinted,"linked field should carry the green tint");
+    }
+
+    #[test] fn vector_channel_right_click_opens_channel_link_menu() {
+        let mut f = Fixture::new();
+        f.doc = minihou_app::Document::parse(json!({"display":"b","nodes":{"a":{"type":"box"},"b":{"type":"box"}}}).to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap(); f.selected = "b".into(); f.display = "b".into();
+        let ctx = egui::Context::default(); f.theme.apply(&ctx);
+        let mut at = Pos2::ZERO;
+        let mut found = false;
+        for phase in 0..4 {
+            let events = match phase {
+                1 => vec![egui::Event::PointerMoved(at), egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed: true, modifiers: egui::Modifiers::NONE }],
+                2 => vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed: false, modifiers: egui::Modifiers::NONE }],
+                _ => vec![],
+            };
+            let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(800.,600.))), events, ..Default::default() };
+            let v = f.view(); let mut out = Actions::default();
+            let output = ctx.run(input, |ctx| { egui::CentralPanel::default().show(ctx, |ui| {
+                let param = minihou_core::nodes::get("box").unwrap().params.iter().find(|p| p.name == "size").unwrap();
+                row(ui, &v, &mut out, "b", "box", param, false, &mut vec![]);
+            }); });
+            if phase == 0 {
+                at = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(t) if t.galley.text() == "X" => Some(t.pos + Vec2::new(4., 5.)),
+                    _ => None,
+                }).expect("X channel label");
+            }
+            found |= output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(t) if t.galley.text().contains("Edit Expression")));
+            assert!(out.0.is_empty());
+        }
+        assert!(found, "right-clicking X should open its channel menu");
     }
 
     #[test]
