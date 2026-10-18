@@ -8,7 +8,10 @@ parameter of one of these nodes::
 import json
 import os
 import sys
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10 used by the local test environment.
+    tomllib = None
 from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -25,8 +28,16 @@ def package_meta() -> dict:
     if not PACKAGES.exists():
         return result
     for package in sorted(path for path in PACKAGES.iterdir() if path.is_dir()):
-        with (package / "node.toml").open("rb") as f:
-            node_id = tomllib.load(f)["id"]
+        if tomllib is not None:
+            with (package / "node.toml").open("rb") as f:
+                node_id = tomllib.load(f)["id"]
+        else:
+            import re
+            manifest = (package / "node.toml").read_text(encoding="utf-8")
+            match = re.search(r'^id\s*=\s*"([^"]+)"\s*$', manifest, re.MULTILINE)
+            if match is None:
+                raise ValueError(f"{package}: missing node id")
+            node_id = match.group(1)
         if not (package / "node.rs").is_file():
             raise ValueError(f"{package}: missing node.rs")
         with (package / "param_meta.json").open(encoding="utf-8") as f:
@@ -424,6 +435,7 @@ def meta() -> dict:
     add("copy_point_attributes", "bool", True, "Copy source point attributes to generated points.")
     add("point_attributes", "str", "*", "Space-separated source point attributes to copy; * copies all. Float attributes interpolate, integers use the dominant vertex.")
     out["scatteralign"] = sa
+    out["scatter"]["density_attribute"] = {"kind": "str", "default": "", "doc": "Optional point float attribute controlling each surface sample's acceptance probability; empty disables density."}
     # Rust-only native instances for Copy to Points (nodes/packed.rs); off keeps the Python-identical copy.
     out["copy_to_points"]["pack_instances"] = {"kind": "bool", "default": True, "doc": "Output native instances (one point per copy referencing the shared source, with its transform) instead of copying the source geometry; Unpack converts them to real geometry."}
     for node_id, params in package_meta().items():

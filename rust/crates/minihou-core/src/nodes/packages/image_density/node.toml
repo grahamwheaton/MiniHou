@@ -1,0 +1,5 @@
+id = "image_density"
+name = "Image Density"
+category = "Texture"
+description = "Convert point colour into a density attribute for scattering."
+keywords = "image colour density scatter mask"
