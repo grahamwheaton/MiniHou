@@ -1,0 +1,5 @@
+id = "measure_area"
+name = "Measure Area"
+category = "Measure"
+description = "Measure geometry and write result attributes."
+keywords = "measure geometry area"

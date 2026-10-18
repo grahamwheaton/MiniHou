@@ -1,0 +1,5 @@
+id = "measure_volume"
+name = "Measure Volume"
+category = "Measure"
+description = "Measure geometry and write result attributes."
+keywords = "measure geometry volume"
