@@ -223,7 +223,6 @@ pub fn registry() -> &'static [NodeSpec] {
         uv::UV_PROJECT,
         uv::UV_FLATTEN,
         uv::UV_TRANSFORM,
-        model::REVERSE,
         model::FACET,
         model::DIVIDE,
         model::MIRROR,
@@ -355,7 +354,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["bound", "cache", "example_offset", "flood_fill", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "point", "subnet", "unpack"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["bound", "cache", "example_offset", "flood_fill", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "point", "reverse", "subnet", "unpack"]);
     }
 }
 

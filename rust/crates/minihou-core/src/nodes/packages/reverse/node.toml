@@ -1,0 +1,5 @@
+id = "reverse"
+name = "Flip Faces"
+category = "Modify"
+description = "Reverse primitive winding and optionally normals."
+keywords = "reverse geometry"

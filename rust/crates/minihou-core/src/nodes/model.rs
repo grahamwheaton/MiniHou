@@ -345,12 +345,6 @@ pub(super) fn outgroup(
     Ok(())
 }
 
-pub const REVERSE: NodeSpec = NodeSpec {
-    name: "reverse",
-    inputs: GEO,
-    params: crate::params!("group":"";"reverse_normals":true),
-    cook: reverse,
-};
 pub const FACET: NodeSpec = NodeSpec {
     name: "facet",
     inputs: GEO,
@@ -387,68 +381,6 @@ pub const POLYEXTRUDE: NodeSpec = NodeSpec {
     params: crate::params!("group":"";"edges":"";"points":"";"distance":0.5;"direction":[0.,0.,0.];"inset":0.;"mode":"connected";"output_back":false;"outgrp_front":true;"outgrp_front_name":"extrudeFront";"outgrp_back":false;"outgrp_back_name":"extrudeBack";"outgrp_side":true;"outgrp_side_name":"extrudeSide"),
     cook: polyextrude,
 };
-fn negate(t: &mut AttrTable, mask: &[bool]) {
-    if let Some(a) = t.get("N") {
-        let mut a = (**a).clone();
-        match &mut a.data {
-            AttrData::F32(v) => {
-                for (i, row) in v.chunks_mut(a.width).enumerate() {
-                    if mask[i] {
-                        for x in row {
-                            *x = -*x;
-                        }
-                    }
-                }
-            }
-            AttrData::I32(v) => {
-                for (i, row) in v.chunks_mut(a.width).enumerate() {
-                    if mask[i] {
-                        for x in row {
-                            *x = -*x;
-                        }
-                    }
-                }
-            }
-        }
-        t.insert("N".into(), Arc::new(a));
-    }
-}
-fn reverse(inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    let g = REVERSE.one(inputs, 0)?;
-    let sel = prim_mask(&g, &p.s("group")?)?;
-    let mut faces = Vec::new();
-    for i in 0..g.nprims() {
-        let mut f: Vec<_> = range(&g, i).collect();
-        if sel[i] {
-            f.reverse();
-        }
-        faces.push(f);
-    }
-    let mut out = rebuild(
-        &g,
-        &faces,
-        &(0..g.nprims()).collect::<Vec<_>>(),
-        g.topology.closed.clone(),
-    )?;
-    if p.b("reverse_normals")? {
-        let (pv, _, _) = corners(&out);
-        negate(
-            &mut out.vertex,
-            &pv.iter().map(|&i| sel[i]).collect::<Vec<_>>(),
-        );
-        negate(&mut out.prim, &sel);
-        let mut ps = vec![false; g.npoints];
-        for i in 0..g.nprims() {
-            if sel[i] {
-                for v in range(&g, i) {
-                    ps[g.topology.vertex_point[v] as usize] = true;
-                }
-            }
-        }
-        negate(&mut out.point, &ps);
-    }
-    Ok(out)
-}
 fn facet(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let g = FACET.one(inputs, 0)?;
     let mut out = (*g).clone();
@@ -1019,7 +951,7 @@ mod tests {
         let mut g = quad();
         g.vertex
             .insert("id".into(), Arc::new(Attr::i32(1, vec![10, 11, 12, 13])));
-        let r = cook(&REVERSE, g.clone(), json!({}));
+        let r = cook(crate::nodes::registry().iter().find(|spec| spec.name == "reverse").unwrap(), g.clone(), json!({}));
         assert_eq!(r.topology.vertex_point, vec![3, 2, 1, 0]);
         assert_eq!(r.vertex["id"].data, AttrData::I32(vec![13, 12, 11, 10]));
         let d = cook(&DIVIDE, g, json!({}));

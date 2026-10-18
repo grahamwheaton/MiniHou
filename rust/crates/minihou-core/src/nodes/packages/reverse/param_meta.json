@@ -1,0 +1,13 @@
+{
+  "group": {
+    "default": "",
+    "doc": "Primitives to reverse (pattern; empty: all)",
+    "kind": "str",
+    "pick_domain": "faces"
+  },
+  "reverse_normals": {
+    "default": true,
+    "doc": "Also negate N on the reversed primitives (and their points and vertices)",
+    "kind": "bool"
+  }
+}

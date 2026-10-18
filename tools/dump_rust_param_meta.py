@@ -51,7 +51,7 @@ TYPES += ["bezier", "helix", "lsystem", "convert_line", "polypath", "resample", 
 
 
 # Modeling ports. loop_cut is the native keymap alias for Python's polysplit.
-TYPES += ["reverse", "facet", "divide", "mirror", "clip", "polyfill", "polyextrude",
+TYPES += ["facet", "divide", "mirror", "clip", "polyfill", "polyextrude",
           "inset", "outset", "solidify", "crease", "edge_group", "edge_group_promote",
           "polybridge", "dissolve_edges", "subdivide", "twist", "linear_taper",
           "squash_stretch", "soft_peak", "group_range", "edge_collapse", "edge_flip",
