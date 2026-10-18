@@ -9129,6 +9129,33 @@
    "kind": "str"
   }
  },
+ "waves": {
+  "axis": {
+   "default": "x",
+   "doc": "Axis along which the waves propagate.",
+   "kind": "enum",
+   "options": [
+    "x",
+    "y",
+    "z"
+   ]
+  },
+  "frequency": {
+   "default": 1.0,
+   "doc": "Spatial frequency of the sinusoidal waves.",
+   "kind": "float"
+  },
+  "offset": {
+   "default": 0.0,
+   "doc": "Phase offset of the waves in radians.",
+   "kind": "float"
+  },
+  "strength": {
+   "default": 1.0,
+   "doc": "Displacement amplitude along the surface normal.",
+   "kind": "float"
+  }
+ },
  "wrangle": {
   "group": {
    "default": "",

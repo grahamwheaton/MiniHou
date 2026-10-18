@@ -1,0 +1,5 @@
+id = "waves"
+name = "Waves"
+category = "Deform"
+description = "Displace points with sinusoidal waves from an axis."
+keywords = "waves deform sine sinusoid axis ocean water"
