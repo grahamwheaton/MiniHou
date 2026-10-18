@@ -1,4 +1,5 @@
 mod picking;
+mod subnet_edit;
 mod element_select;
 mod node_selection;
 mod coplanar_tool;
@@ -2231,6 +2232,17 @@ impl App {
                         } else { self.file_status = "Select points on a displayed curve to delete".into(); }
                     } else { self.file_status = "Curve component deletion supports points only".into(); }
                 } else if let Some(id) = self.selected_set.iter().next().cloned() { self.delete_node(&id); }
+            }
+            "group_selection" => {
+                let ids: Vec<String> = if self.selected_set.is_empty() { vec![self.selected.clone()] } else { self.selected_set.iter().cloned().collect() };
+                match subnet_edit::toggle(self.editor.doc.value(), &ids) {
+                    Some((value, sel)) => if self.commit_document(value, "group nodes") {
+                        self.selected = sel[0].clone();
+                        self.selected_set = sel.into_iter().collect();
+                        if let Ok(g) = Graph::from_value(self.editor.doc.value()) { self.display = g.main_output().unwrap_or_else(|_| self.selected.clone()); }
+                    },
+                    None => self.file_status = "Select nodes to group (only one may feed the rest of the network)".into(),
+                }
             }
             "duplicate_selection" => { if let Some(id) = self.selected_set.iter().next().cloned() { self.duplicate_node(&id); } }
             "dissolve_selection" => {

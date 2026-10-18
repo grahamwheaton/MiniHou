@@ -100,6 +100,7 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Ctrl+Shift+S | Save as | Everywhere |
 | Ctrl+O | Open | Everywhere |
 | Ctrl+D | Duplicate nodes | Network |
+| Ctrl+G | Group / ungroup nodes | Network |
 | Ctrl+X | Dissolve nodes | Network |
 | Ctrl+C | Copy nodes | Network |
 | Ctrl+V | Paste nodes | Network |
