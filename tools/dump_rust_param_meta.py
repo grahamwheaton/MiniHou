@@ -46,7 +46,7 @@ TYPES += ["loop_begin", "loop_end", "input", "object_input", "wrangle", "blend",
 TYPES += ["bezier", "helix", "lsystem", "convert_line", "polypath", "carve",
           "copy_to_points", "instance", "for_each", "group_promote",
           "attribute_create", "attribute_promote", "attribute_blur",
-          "connectivity", "smooth", "falloff", "bend", "uv_project", "uv_flatten", "uv_transform",
+          "connectivity", "smooth", "falloff", "uv_project", "uv_flatten", "uv_transform",
           "curve_simplify", "group_create", "group_expand", "blast", "measure"]
 
 
@@ -76,7 +76,7 @@ TYPES += ["delaunay", "bridge", "revolve", "sweep", "skin", "lattice",
           "contour", "remesh", "heightfield_erode"]
 
 # Ported nodes: scatter, deform, primitives, transform, attributes, materials, surface, contour.
-TYPES += ["scatter", "point_jitter", "point_relax", "sort", "switch", "clean",
+TYPES += ["scatter", "sort", "switch",
           "fuse", "soft_transform", "copy_transform", "attribute_randomize",
           "attribute_transfer", "convex_hull", "slice", "dissolve", "color", "attrib_paint"]
 

@@ -1,10 +1,8 @@
-//! Bend, twist, taper and rest-position capture from nodes/deform.py.
-use std::sync::Arc;
-use super::{InputSpec,Inputs,NodeSpec};
-use crate::{error::{Error,Result},geometry::{Attr,Geometry},params::Params};
-pub const CLEAN: NodeSpec = NodeSpec {
+use crate::nodes::{Inputs, NodeSpec, GEO};
+use crate::{error::Result, geometry::Geometry, params::Params};
+pub(super) const NODE: NodeSpec = NodeSpec {
     name: "clean",
-    inputs: super::GEO,
+    inputs: GEO,
     params: crate::params!(
         "fuse_distance": 0.0;
         "remove_degenerate": true;
@@ -69,25 +67,25 @@ fn drop_degenerate(g: &Geometry) -> Result<Geometry> {
         None
     };
 
-    super::model::make(
+    crate::nodes::model::make(
         g.point.clone(),
         kept_vp,
         &kept_sizes,
-        super::model::gather(&g.vertex, &kept_vert_indices),
-        super::model::gather(&g.prim, &kept_prims),
+        crate::nodes::model::gather(&g.vertex, &kept_vert_indices),
+        crate::nodes::model::gather(&g.prim, &kept_prims),
         g.detail.clone(),
         closed_opt,
     )
 }
 
 fn clean(inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    let geo = CLEAN.one(inputs, 0)?;
+    let geo = NODE.one(inputs, 0)?;
     let fuse_distance = p.f("fuse_distance")?;
     let remove_degenerate = p.b("remove_degenerate")?;
     let remove_unused_points = p.b("remove_unused_points")?;
 
     let mut out = if fuse_distance > 0.0 {
-        super::primitives::fuse_points(&geo, fuse_distance, None)?
+        crate::nodes::primitives::fuse_points(&geo, fuse_distance, None)?
     } else {
         (*geo).clone()
     };
@@ -96,28 +94,11 @@ fn clean(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         out = drop_degenerate(&out)?;
     }
     if remove_unused_points {
-        out = super::model::compact(out)?;
+        out = crate::nodes::model::compact(out)?;
     }
     Ok(out)
 }
 
 #[cfg(test)]
-mod tests{
-    use super::*;
-    #[test]
-    fn clean_removes_degenerates_and_unused() {
-        let p = vec![
-            0.0, 0.0, 0.0,
-            1.0, 0.0, 0.0,
-            1.0, 1.0, 0.0,
-            0.0, 1.0, 0.0,
-            5.0, 5.0, 5.0,
-        ];
-        let g = Arc::new(Geometry::from_arrays(p, vec![0, 1, 1, 2, 3, 0, 1, 2, 2, 2], vec![0, 6, 8, 9, 10], None).unwrap());
-        let params = Params::resolve(CLEAN.params, serde_json::json!({"fuse_distance": 0.0, "remove_degenerate": true, "remove_unused_points": true}).as_object()).unwrap();
-        let out = clean(&[vec![g]], &params).unwrap();
-        assert_eq!(out.npoints, 4);
-        assert_eq!(out.nprims(), 1);
-        assert_eq!(out.topology.vertex_point, vec![0, 1, 2, 3]);
-    }
-}
+#[path = "tests.rs"]
+mod tests;

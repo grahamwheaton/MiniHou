@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Arc;
     #[test]
     fn point_jitter_applies_offset() {
         let g = Arc::new(Geometry::points_only(vec![0.0, 0.0, 0.0]).unwrap());

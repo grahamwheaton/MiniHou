@@ -1096,7 +1096,7 @@
   },
   "remove_unused_points": {
    "default": true,
-   "doc": "",
+   "doc": "Discard points unused by any remaining primitive",
    "kind": "bool"
   }
  },
@@ -5154,7 +5154,7 @@
  "point_jitter": {
   "group": {
    "default": "",
-   "doc": "",
+   "doc": "Points to move (empty: all)",
    "kind": "str",
    "pick_domain": "points"
   },
@@ -5169,14 +5169,14 @@
   },
   "seed": {
    "default": 0,
-   "doc": "",
+   "doc": "Seed for the random offsets",
    "kind": "int"
   }
  },
  "point_relax": {
   "iterations": {
    "default": 10,
-   "doc": "",
+   "doc": "Number of relaxation passes",
    "kind": "int",
    "min": 0,
    "soft_max": 100

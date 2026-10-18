@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use crate::nodes::{InputSpec, Inputs, NodeSpec, GEO};
+use crate::nodes::{InputSpec, Inputs, NodeSpec};
 use crate::{error::{Error, Result}, geometry::{Attr, Geometry}, params::Params};
 pub(super) const NODE:NodeSpec=NodeSpec{name:"bend",inputs:&[InputSpec{name:"geo",multi:false,optional:false},InputSpec{name:"rest",multi:false,optional:true}],params:crate::params!(
     "origin":[0.,0.,0.];"direction":[0.,0.,1.];"length":1.;"up":[0.,1.,0.];"bend":90.;"twist":0.;"taper":1.;"group":""),cook:bend};
