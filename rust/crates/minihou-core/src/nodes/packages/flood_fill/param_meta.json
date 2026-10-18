@@ -1,24 +1,147 @@
 {
-  "domain": {"kind":"enum","default":"points","options":["points","edges","faces"],"doc":"Element domain to traverse."},
-  "seed_group": {"kind":"str","default":"","doc":"Starting elements; empty selects no seeds except in Regions mode."},
-  "avoid_group": {"kind":"str","default":"","doc":"Elements excluded from selection and traversal."},
-  "allowed_group": {"kind":"str","default":"","doc":"Elements traversal may visit; empty allows all."},
-  "barrier_group": {"kind":"str","default":"","doc":"Elements that block traversal and are excluded."},
-  "target_group": {"kind":"str","default":"","doc":"Elements at which Flood to Target stops."},
-  "max_steps": {"kind":"int","default":-1,"doc":"Maximum topological hops from a seed; -1 disables the limit."},
-  "max_distance": {"kind":"float","default":-1.0,"doc":"Maximum geodesic distance; -1 disables Dijkstra distance traversal."},
-  "max_elements": {"kind":"int","default":-1,"doc":"Maximum selected elements; -1 is unlimited."},
-  "stop_at_boundary": {"kind":"bool","default":false,"doc":"Stop expansion at mesh boundary elements."},
-  "max_angle": {"kind":"float","default":180.0,"doc":"Maximum degrees between neighboring face normals or consecutive point and edge traversal steps."},
-  "attr_name": {"kind":"str","default":"","doc":"Optional scalar or vector attribute on the chosen domain used to gate traversal."},
-  "attr_mode": {"kind":"enum","default":"neighbor_diff","options":["seed_diff","neighbor_diff","threshold"],"doc":"Compare candidate attribute to seed, current neighbor, or zero threshold."},
-  "attr_tolerance": {"kind":"float","default":0.0,"doc":"Maximum Euclidean attribute difference or threshold magnitude."},
-  "direction": {"kind":"vec3","default":[0.0,0.0,0.0],"doc":"Optional preferred traversal direction; zero disables the filter."},
-  "max_deviation": {"kind":"float","default":180.0,"doc":"Maximum degrees that a traversal step may deviate from Direction."},
-  "mode": {"kind":"enum","default":"flood","options":["flood","flood_to_target","regions"],"doc":"Flood from seeds, stop at first target, or label connected regions."},
-  "output_group": {"kind":"str","default":"flood","doc":"Name of the output group."},
-  "combine": {"kind":"enum","default":"replace","options":["replace","union","intersect","subtract"],"doc":"How to combine selection with an existing output group."},
-  "frontier_group": {"kind":"str","default":"","doc":"Optional group marking the selection frontier."},
-  "store_step_distance": {"kind":"bool","default":false,"doc":"Write int32 step_distance, with -1 for unvisited elements."},
-  "store_surface_distance": {"kind":"bool","default":false,"doc":"Write float32 surface_distance, with -1 for unvisited elements."}
+  "domain": {
+    "kind": "enum",
+    "default": "points",
+    "options": [
+      "points",
+      "edges",
+      "faces"
+    ],
+    "doc": "Element domain to traverse."
+  },
+  "seed_group": {
+    "kind": "str",
+    "default": "",
+    "doc": "Starting elements; empty selects no seeds except in Regions mode.",
+    "pick_domain_param": "domain",
+    "pick_domain_default": "points"
+  },
+  "avoid_group": {
+    "kind": "str",
+    "default": "",
+    "doc": "Elements excluded from selection and traversal.",
+    "pick_domain_param": "domain",
+    "pick_domain_default": "points"
+  },
+  "allowed_group": {
+    "kind": "str",
+    "default": "",
+    "doc": "Elements traversal may visit; empty allows all.",
+    "pick_domain_param": "domain",
+    "pick_domain_default": "points"
+  },
+  "barrier_group": {
+    "kind": "str",
+    "default": "",
+    "doc": "Elements that block traversal and are excluded.",
+    "pick_domain_param": "domain",
+    "pick_domain_default": "points"
+  },
+  "target_group": {
+    "kind": "str",
+    "default": "",
+    "doc": "Elements at which Flood to Target stops.",
+    "pick_domain_param": "domain",
+    "pick_domain_default": "points"
+  },
+  "max_steps": {
+    "kind": "int",
+    "default": -1,
+    "doc": "Maximum topological hops from a seed; -1 disables the limit."
+  },
+  "max_distance": {
+    "kind": "float",
+    "default": -1.0,
+    "doc": "Maximum geodesic distance; -1 disables Dijkstra distance traversal."
+  },
+  "max_elements": {
+    "kind": "int",
+    "default": -1,
+    "doc": "Maximum selected elements; -1 is unlimited."
+  },
+  "stop_at_boundary": {
+    "kind": "bool",
+    "default": false,
+    "doc": "Stop expansion at mesh boundary elements."
+  },
+  "max_angle": {
+    "kind": "float",
+    "default": 180.0,
+    "doc": "Maximum degrees between neighboring face normals or consecutive point and edge traversal steps."
+  },
+  "attr_name": {
+    "kind": "str",
+    "default": "",
+    "doc": "Optional scalar or vector attribute on the chosen domain used to gate traversal."
+  },
+  "attr_mode": {
+    "kind": "enum",
+    "default": "neighbor_diff",
+    "options": [
+      "seed_diff",
+      "neighbor_diff",
+      "threshold"
+    ],
+    "doc": "Compare candidate attribute to seed, current neighbor, or zero threshold."
+  },
+  "attr_tolerance": {
+    "kind": "float",
+    "default": 0.0,
+    "doc": "Maximum Euclidean attribute difference or threshold magnitude."
+  },
+  "direction": {
+    "kind": "vec3",
+    "default": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "doc": "Optional preferred traversal direction; zero disables the filter."
+  },
+  "max_deviation": {
+    "kind": "float",
+    "default": 180.0,
+    "doc": "Maximum degrees that a traversal step may deviate from Direction."
+  },
+  "mode": {
+    "kind": "enum",
+    "default": "flood",
+    "options": [
+      "flood",
+      "flood_to_target",
+      "regions"
+    ],
+    "doc": "Flood from seeds, stop at first target, or label connected regions."
+  },
+  "output_group": {
+    "kind": "str",
+    "default": "flood",
+    "doc": "Name of the output group."
+  },
+  "combine": {
+    "kind": "enum",
+    "default": "replace",
+    "options": [
+      "replace",
+      "union",
+      "intersect",
+      "subtract"
+    ],
+    "doc": "How to combine selection with an existing output group."
+  },
+  "frontier_group": {
+    "kind": "str",
+    "default": "",
+    "doc": "Optional group marking the selection frontier."
+  },
+  "store_step_distance": {
+    "kind": "bool",
+    "default": false,
+    "doc": "Write int32 step_distance, with -1 for unvisited elements."
+  },
+  "store_surface_distance": {
+    "kind": "bool",
+    "default": false,
+    "doc": "Write float32 surface_distance, with -1 for unvisited elements."
+  }
 }

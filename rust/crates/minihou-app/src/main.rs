@@ -549,7 +549,7 @@ struct App {
     lod_uploaded: bool, last_lod_view: Option<([[f32;4];4], [u32;2], bool)>, last_lod_select: Instant,
     blender_paths: Vec<PathBuf>, blender_bar: bool,
     selection: picking::Selection, selection_dirty: bool,
-    param_pick: Option<ParamPick>, picked_field: Option<PickedField>,
+    param_pick: Option<ParamPick>, barrier_key: Option<(String,ui::SelectionMode,String,u64)>, picked_field: Option<PickedField>,
     selection_metrics: selection_metrics::Cache,
     coplanar: Option<coplanar_tool::State>, group_preview:group_preview::State,
     /// Polygon/edge adjacency of `scene` for loops, rings, paths and mode conversion (built on first use).
@@ -708,7 +708,7 @@ impl App {
             http:http_ui::HttpUi::default(),http_time:(1.,24.),
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),link:None,blender_job:None,
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
-            display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,param_pick:None,picked_field:None,selection_metrics:Default::default(),coplanar:None,group_preview:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
+            display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,param_pick:None,barrier_key:None,picked_field:None,selection_metrics:Default::default(),coplanar:None,group_preview:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
             clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,embed_conflict:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
             last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default(),pending_loop_selection:None,undo_element_selection:Vec::new(),pending_restore_selection:None,model_before_selection:None,extrude_keep:None };
         app.prefs = Preferences::load();
@@ -3069,6 +3069,18 @@ impl eframe::App for App {
                             },
                         }
                     }
+                    // Flood Fill's barrier group is drawn in orange beside the purple picked field.
+                    let flood=&self.editor.doc.value()["nodes"][&self.selected];
+                    if flood["type"]=="flood_fill" && source_ready(&self.display_ranges,&input_source(self.editor.doc.value(),&self.selected,&self.display)) {
+                        let mode=param_pick::flood_domain(&flood["params"]);
+                        let text=flood["params"]["barrier_group"].as_str().unwrap_or("");
+                        let key=(self.selected.clone(),mode,text.to_owned(),self.cooking.completed);
+                        if self.barrier_key.as_ref()!=Some(&key) {
+                            let topo=element_select::cached(&self.elem_topo,scene);
+                            let (f,l)=param_pick::barrier_overlay(topo,text,mode,scene.positions(),scene.triangle_indices(),scene.radius*0.012);
+                            gpu.set_barrier_overlay(&self.state.device,&f,&l);self.barrier_key=Some(key);
+                        }
+                    } else if self.barrier_key.take().is_some() { gpu.set_barrier_overlay(&self.state.device,&[],&[]); }
                     if let Some(field) = &self.picked_field {
                         if field.node == self.selected {
                             gpu.set_group_overlay(&self.state.device, &field.faces, &field.lines);

@@ -320,3 +320,7 @@ fn vs_group(@location(0) p:vec3<f32>)->@builtin(position) vec4<f32> {return u.vi
 fn fs_group_fill()->@location(0) vec4<f32> {return vec4(out_color(vec3(0.64,0.22,0.95)).rgb,0.24);}
 @fragment
 fn fs_group_line()->@location(0) vec4<f32> {return vec4(out_color(vec3(0.72,0.32,1.)).rgb,1.);}
+@fragment
+fn fs_barrier_fill()->@location(0) vec4<f32> {return vec4(out_color(vec3(0.95,0.45,0.08)).rgb,0.24);}
+@fragment
+fn fs_barrier_line()->@location(0) vec4<f32> {return vec4(out_color(vec3(1.,0.55,0.12)).rgb,1.);}

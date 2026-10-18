@@ -253,6 +253,8 @@ pub struct Gpu {
     /// Selection highlight: face triangles and line segments (positions, with a zero normal buffer of the same length).
     group_face:wgpu::Buffer,group_face_n:u32,group_line:wgpu::Buffer,group_line_n:u32,
     pipe_group_face:wgpu::RenderPipeline,pipe_group_line:wgpu::RenderPipeline,
+    barrier_face:wgpu::Buffer,barrier_face_n:u32,barrier_line:wgpu::Buffer,barrier_line_n:u32,
+    pipe_barrier_face:wgpu::RenderPipeline,pipe_barrier_line:wgpu::RenderPipeline,
     sel_face: wgpu::Buffer, sel_face_n: u32, sel_line: wgpu::Buffer, sel_line_n: u32, zeros: wgpu::Buffer,
     nl_p: wgpu::Buffer, nl_n: wgpu::Buffer, nl_count: u32, nl_selected: u32, bb_p: wgpu::Buffer, bb_n: wgpu::Buffer, bb_i: wgpu::Buffer,
     bind: wgpu::BindGroup, ubuf: wgpu::Buffer,
@@ -483,6 +485,8 @@ impl Gpu {
         let group_bufs=[vb(&POS)];
         let pipe_group_face=mk("group fill","vs_group","fs_group_fill",&group_bufs,T::TriangleList,-3,true,C::LessEqual,false,W::ALL);
         let pipe_group_line=mk("group outline","vs_group","fs_group_line",&group_bufs,T::LineList,-4,true,C::LessEqual,false,W::ALL);
+        let pipe_barrier_face=mk("barrier fill","vs_group","fs_barrier_fill",&group_bufs,T::TriangleList,-3,true,C::LessEqual,false,W::ALL);
+        let pipe_barrier_line=mk("barrier outline","vs_group","fs_barrier_line",&group_bufs,T::LineList,-4,true,C::LessEqual,false,W::ALL);
         let pipe_select = mk("select", "vs_surf", "fs_select", &surf_bufs, T::TriangleList, -2, true, C::LessEqual, false, W::ALL);
 
         let pipe_mask = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -577,6 +581,8 @@ impl Gpu {
 
         let group_face=buf("group faces",bytemuck::cast_slice(&[0f32;3]),wgpu::BufferUsages::VERTEX);
         let group_line=buf("group outline",bytemuck::cast_slice(&[0f32;3]),wgpu::BufferUsages::VERTEX);
+        let barrier_face=buf("barrier faces",bytemuck::cast_slice(&[0f32;3]),wgpu::BufferUsages::VERTEX);
+        let barrier_line=buf("barrier outline",bytemuck::cast_slice(&[0f32;3]),wgpu::BufferUsages::VERTEX);
         let sel_face = buf("sel_face", bytemuck::cast_slice(&[0f32; 3]), wgpu::BufferUsages::VERTEX);
         let sel_line = buf("sel_line", bytemuck::cast_slice(&[0f32; 3]), wgpu::BufferUsages::VERTEX);
         let zeros = buf("zeros", bytemuck::cast_slice(&vec![0f32; 3 * 6 * 4096]), wgpu::BufferUsages::VERTEX);
@@ -606,7 +612,7 @@ impl Gpu {
             pipe_mask,
             pipe_outline,
             bgl_outline,
-            group_face,group_face_n:0,group_line,group_line_n:0,pipe_group_face,pipe_group_line,
+            group_face,group_face_n:0,group_line,group_line_n:0,pipe_group_face,pipe_group_line,barrier_face,barrier_face_n:0,barrier_line,barrier_line_n:0,pipe_barrier_face,pipe_barrier_line,
             sel_face,
             sel_face_n: 0,
             sel_line,
@@ -795,6 +801,14 @@ impl Gpu {
         self.group_face=buffer("group faces",faces);self.group_face_n=(faces.len()/3) as u32;
         self.group_line=buffer("group outline",lines);self.group_line_n=(lines.len()/3) as u32;
     }
+    /// Barrier-group overlay (orange), drawn beside the purple group overlay.
+    pub fn set_barrier_overlay(&mut self,device:&wgpu::Device,faces:&[f32],lines:&[f32]) {
+        let buffer=|label,data:&[f32]|device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label:Some(label),contents:if data.is_empty(){&[0u8;12]}else{bytemuck::cast_slice(data)},usage:wgpu::BufferUsages::VERTEX,
+        });
+        self.barrier_face=buffer("barrier faces",faces);self.barrier_face_n=(faces.len()/3) as u32;
+        self.barrier_line=buffer("barrier outline",lines);self.barrier_line_n=(lines.len()/3) as u32;
+    }
     pub fn set_selection(&mut self, device: &wgpu::Device, faces: &[f32], lines: &[f32]) {
         let buf = |label, data: &[f32]| device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(label), contents: if data.is_empty() { &[0u8; 12] } else { bytemuck::cast_slice(data) }, usage: wgpu::BufferUsages::VERTEX });
@@ -962,6 +976,8 @@ impl Gpu {
             if !mode.bounds() && overlay.geometry.enabled {
                 if self.group_face_n>0 {pass.set_pipeline(&self.pipe_group_face);pass.set_vertex_buffer(0,self.group_face.slice(..));pass.draw(0..self.group_face_n,0..1);}
                 if self.group_line_n>0 {pass.set_pipeline(&self.pipe_group_line);pass.set_vertex_buffer(0,self.group_line.slice(..));pass.draw(0..self.group_line_n,0..1);}
+                if self.barrier_face_n>0 {pass.set_pipeline(&self.pipe_barrier_face);pass.set_vertex_buffer(0,self.barrier_face.slice(..));pass.draw(0..self.barrier_face_n,0..1);}
+                if self.barrier_line_n>0 {pass.set_pipeline(&self.pipe_barrier_line);pass.set_vertex_buffer(0,self.barrier_line.slice(..));pass.draw(0..self.barrier_line_n,0..1);}
             }
             if selection_mode == crate::ui::SelectionMode::Faces && !mode.bounds() && self.face_markers.count > 0 {
                 pass.set_pipeline(if overlay.xray {&self.pipe_face_markers_xray}else{&self.pipe_face_markers});

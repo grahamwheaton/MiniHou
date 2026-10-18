@@ -41,6 +41,14 @@ mod pick_tests {
     use super::*;
     use super::super::SelectionMode;
     #[test]
+    fn flood_fill_group_fields_have_pick_arrow_following_domain() {
+        for f in ["seed_group","avoid_group","allowed_group","barrier_group","target_group"] {
+            assert_eq!(pick_domain(param_meta("flood_fill", f), &json!({})), Some(SelectionMode::Points), "{f}");
+            assert_eq!(pick_domain(param_meta("flood_fill", f), &json!({"domain":"edges"})), Some(SelectionMode::Edges), "{f}");
+            assert_eq!(pick_domain(param_meta("flood_fill", f), &json!({"domain":"faces"})), Some(SelectionMode::Faces), "{f}");
+        }
+    }
+    #[test]
     fn group_create_edges_domain_picks_edges() {
         assert_eq!(pick_domain_for("group_create", "pattern", param_meta("group_create", "pattern"), &json!({"domain":"edges"})), Some(SelectionMode::Edges));
     }

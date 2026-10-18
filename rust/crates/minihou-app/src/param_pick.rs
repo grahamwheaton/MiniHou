@@ -47,6 +47,16 @@ impl ParamPick {
         PickedField { node:self.node.clone(), selection:selection.clone(), faces, lines }
     }
 }
+/// Flood Fill's `domain` menu as a selection mode.
+pub(super) fn flood_domain(params: &serde_json::Value) -> ui::SelectionMode {
+    ui::params::pick_domain(Some(&json!({"pick_domain":params["domain"].as_str().unwrap_or("points")})), params).unwrap_or(ui::SelectionMode::Points)
+}
+/// Orange overlay geometry (faces, lines) for the barrier group text on the node's input topology.
+pub(super) fn barrier_overlay(topo: &element_select::Topology, text: &str, mode: ui::SelectionMode,
+        positions: &[f32], triangles: &[u32], size: f32) -> (Vec<f32>, Vec<f32>) {
+    if text.trim().is_empty() { return Default::default(); }
+    picking::highlight(positions, triangles, &topo.parse_group(text, mode), size)
+}
 /// The element type of a field's text: edge pairs (`0-1`, `p0-1`) mean edges whatever the node's default domain says
 /// (faces keep their default, where `a-b` may be a range).
 pub(super) fn infer_mode(text: &str, default: ui::SelectionMode) -> ui::SelectionMode {
@@ -71,6 +81,20 @@ pub(super) fn param_pick_end(ctx: &egui::Context, viewport: egui::Rect) -> Optio
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn barrier_overlay_colour_differs_from_seed_overlay() {
+        let shader = include_str!("shader.wgsl");
+        let colour = |name: &str| { let l = shader.lines().find(|l| l.contains(name)).unwrap(); l.split("vec3(").nth(1).unwrap().split(')').next().unwrap().to_owned() };
+        assert_ne!(colour("fn fs_barrier_line"), colour("fn fs_group_line"));
+        assert_ne!(colour("fn fs_barrier_fill"), colour("fn fs_group_fill"));
+    }
+    #[test]
+    fn flood_domain_follows_menu() {
+        assert_eq!(flood_domain(&json!({})), ui::SelectionMode::Points);
+        assert_eq!(flood_domain(&json!({"domain":"edges"})), ui::SelectionMode::Edges);
+        assert_eq!(flood_domain(&json!({"domain":"faces"})), ui::SelectionMode::Faces);
+    }
+
     use super::*;
     fn quad() -> (Vec<f32>, Vec<u32>, Vec<u32>) {
         (vec![0.,0.,0., 1.,0.,0., 1.,1.,0., 0.,1.,0.], vec![0,1,2,0,2,3], vec![0,1,1,2,2,3,3,0])
