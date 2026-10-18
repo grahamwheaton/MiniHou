@@ -90,7 +90,7 @@ pub const GROUP_CREATE:NodeSpec=NodeSpec{name:"group_create",inputs:&[InputSpec{
     "unshared_edges":false,unsupported;"boundary_groups":false,unsupported;"random_enable":false,unsupported;"seed_attrib":"",unsupported),cook:create};
 fn create(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let g=GROUP_CREATE.one(inputs,0)?;let name=p.s("name")?;valid_name(&name)?;let dom=p.e("domain",&["points","primitives","edges"])?;
-    if dom=="edges"{return Err(Error::new("group_create edge groups require the edge-group subsystem, not supported by the Rust backend yet"));}
+    if dom=="edges"{return create_edges(&g,inputs,p,&name);}
     let dom=if dom=="points"{"point"}else{"prim"};let n=if dom=="point"{g.npoints}else{g.nprims()};let method=p.e("method",&["pattern","bounding_box","normal","coplanar","random","boundary","filters"])?;
     let mut m=match method.as_str(){
         "pattern"=>mask(&g,dom,&p.s("pattern")?)?,
@@ -134,6 +134,48 @@ fn create(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let mut out=(*g).clone();let a=Arc::new(Attr::i32(1,m.into_iter().map(i32::from).collect()));if dom=="point"{out.prim.remove(&key);out.point.insert(key,a);}else{out.point.remove(&key);out.prim.insert(key,a);}Ok(out)
 }
 
+/// Edge selection text: edge ids, `a-b` point pairs (either order), `*`, `^` exclusion, and edge group names.
+fn edge_mask(g:&Geometry,e:&crate::topo::Edges,pattern:&str)->Result<Vec<bool>>{
+    let n=e.len();let tokens:Vec<_>=pattern.split(|c:char|c==','||c.is_whitespace()).filter(|s|!s.is_empty()).collect();
+    if tokens.is_empty(){return Ok(vec![true;n]);}
+    let mut sel=vec![tokens[0].starts_with('^');n];
+    for t in tokens{
+        let ex=t.starts_with('^');let t=t.strip_prefix('^').unwrap_or(t);if t.is_empty(){continue;}
+        let mut hit=vec![false;n];
+        if t=="*"{hit.fill(true);}
+        else if let Some((a,b))=t.split_once('-').filter(|(a,b)|a.parse::<i64>().is_ok()&&b.parse::<i64>().is_ok()){
+            let (a,b)=(a.parse::<i64>().unwrap(),b.parse::<i64>().unwrap());let (a,b)=(a.min(b),a.max(b));
+            for i in 0..n{if e.points[i*2]==a&&e.points[i*2+1]==b{hit[i]=true;}}
+        }else if let Ok(i)=t.parse::<usize>(){if i<n{hit[i]=true;}}
+        else{for(k,a)in g.edge.iter(){if let Some(nm)=k.strip_prefix("group_"){if super::attribs::matches(t,nm){for(h,f)in hit.iter_mut().zip(flags(a)){*h|=f;}}}}}
+        for(s,h)in sel.iter_mut().zip(hit){if h{*s=!ex;}}
+    }
+    Ok(sel)
+}
+fn create_edges(g:&Geometry,inputs:&Inputs,p:&Params,name:&str)->Result<Geometry>{
+    let e=crate::topo::edges(&g.topology,g.npoints);let n=e.len();
+    let method=p.e("method",&["pattern","bounding_box","normal","coplanar","random","boundary","filters"])?;
+    let mut m=match method.as_str(){
+        "pattern"=>edge_mask(g,&e,&p.s("pattern")?)?,
+        "bounding_box"=>{
+            let mut c=p.v3("box_center")?;let mut size=p.v3("box_size")?;
+            if let Some(bounds)=inputs[1].first(){if bounds.npoints>0{for k in 0..3{let lo=bounds.p().chunks_exact(3).map(|p|p[k] as f64).fold(f64::INFINITY,f64::min);let hi=bounds.p().chunks_exact(3).map(|p|p[k] as f64).fold(f64::NEG_INFINITY,f64::max);c[k]=(lo+hi)/2.;size[k]=hi-lo;}}}
+            let pt=g.p();
+            (0..n).map(|i|{let (a,b)=(e.points[i*2] as usize,e.points[i*2+1] as usize);(0..3).all(|k|{let q=(pt[a*3+k] as f64+pt[b*3+k] as f64)/2.;q>=c[k]-size[k].abs()/2.&&q<=c[k]+size[k].abs()/2.})}).collect()
+        },
+        "boundary"=>{
+            let mut cnt=vec![0usize;n];
+            for i in 0..g.nprims(){if g.topology.is_closed(i){for v in g.topology.prim_offsets[i] as usize..g.topology.prim_offsets[i+1] as usize{let ed=e.of_vertex[v];if ed>=0{cnt[ed as usize]+=1;}}}}
+            cnt.into_iter().map(|c|c==1).collect()
+        },
+        _=>return Err(Error::new(format!("group_create method {method:?} is not supported for edge groups"))),
+    };
+    let key=format!("group_{name}");let combine=p.e("combine",&["replace","union","intersect","subtract"])?;
+    if let Some(a)=g.edge.get(&key){for(dst,old)in m.iter_mut().zip(flags(a)){*dst=match combine.as_str(){"union"=>*dst||old,"intersect"=>*dst&&old,"subtract"=>old&&!*dst,_=>*dst};}}
+    else if combine=="intersect"||combine=="subtract"{m.fill(false);}
+    let mut out=g.clone();out.edge.insert(key,Arc::new(Attr::i32(1,m.into_iter().map(i32::from).collect())));Ok(out)
+}
+
 pub const GROUP_PROMOTE: NodeSpec = NodeSpec { name: "group_promote", inputs: GEO,
     params: crate::params!("name": "group1"; "to": "points"), cook: promote };
 fn promote(inputs: &Inputs, p: &Params) -> Result<Geometry> {
@@ -171,7 +213,16 @@ pub const BLAST: NodeSpec = NodeSpec { name: "blast", inputs: GEO, params: crate
     "group":"";"domain":"primitives";"delete_non_selected":false;"keep_unused_points":false), cook: blast };
 fn blast(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let g=BLAST.one(inputs,0)?;let dom=p.e("domain",&["primitives","points","edges"])?;
-    if dom=="edges" {return Err(Error::new("blast edge selections require the edge-group parser, not supported by the Rust backend yet"));}
+    if dom=="edges" {
+        // Edges are implied by topology, so blasting them cannot delete anything: the selected (or, with delete_non_selected, the
+        // unselected) edges are only cleared from every edge group. Topology and points are left unchanged.
+        let pattern=p.s("group")?;let e=crate::topo::edges(&g.topology,g.npoints);
+        let mut m=if pattern.split(|c:char|c==',' || c.is_whitespace()).all(|s|s.is_empty()){vec![false;e.len()]}else{edge_mask(&g,&e,&pattern)?};
+        if p.b("delete_non_selected")?{for v in &mut m{*v=!*v;}}
+        let mut out=(*g).clone();
+        for (k,a) in g.edge.iter(){if k.starts_with("group_"){let f:Vec<i32>=flags(a).iter().zip(&m).map(|(&o,&d)|(o && !d) as i32).collect();out.edge.insert(k.clone(),Arc::new(Attr::i32(1,f)));}}
+        return Ok(out);
+    }
     let dom=if dom=="points"{"point"}else{"prim"};let pattern=p.s("group")?;let n=if dom=="point"{g.npoints}else{g.nprims()};
     let mut m=if pattern.split(|c:char|c==',' || c.is_whitespace()).all(|s|s.is_empty()){vec![false;n]}else{mask(&g,dom,&pattern)?};
     if !p.b("delete_non_selected")?{for v in &mut m{*v=!*v;}}
@@ -228,5 +279,38 @@ mod tests {
         let p=Params::resolve(GROUP_CREATE.params,serde_json::json!({"name":"region","method":"bounding_box","combine":"union"}).as_object()).unwrap();
         let out=create(&[vec![Arc::new(g)],vec![Arc::new(bounds)]],&p).unwrap();assert_eq!(out.point["group_region"].data,AttrData::I32(vec![1,1]));out.validate().unwrap();
         assert!(Params::resolve(GROUP_CREATE.params,serde_json::json!({"bounds_enable":true}).as_object()).is_err());
+    }
+    fn cube_open(drop_top:bool)->Geometry{
+        let pts=vec![0.,0.,0., 1.,0.,0., 1.,1.,0., 0.,1.,0., 0.,0.,1., 1.,0.,1., 1.,1.,1., 0.,1.,1.];
+        let mut g=Geometry::points_only(pts).unwrap();
+        let mut faces=vec![[0,3,2,1],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]];if !drop_top{faces.push([4,5,6,7]);}
+        let vp:Vec<i32>=faces.iter().flatten().copied().collect();let offs:Vec<i32>=(0..=faces.len() as i32).map(|i|i*4).collect();
+        g.topology=Arc::new(Topology{vertex_point:vp,prim_offsets:offs,closed:None});g
+    }
+    fn edge_group(g:Geometry,j:serde_json::Value)->Geometry{
+        let mut j=j;j["domain"]="edges".into();let p=Params::resolve(GROUP_CREATE.params,j.as_object()).unwrap();
+        let out=create(&[vec![Arc::new(g)],vec![]],&p).unwrap();out.validate().unwrap();out
+    }
+    fn count(g:&Geometry)->usize{flags(&g.edge["group_e"]).iter().filter(|&&b|b).count()}
+    #[test]
+    fn edge_group_pattern_pair_box_and_boundary(){
+        let g=cube_open(false);assert_eq!(g.nedges(),12);
+        let out=edge_group(g.clone(),serde_json::json!({"name":"e","pattern":"0-1"}));
+        let f=flags(&out.edge["group_e"]);let e=crate::topo::edges(&out.topology,out.npoints);
+        assert_eq!(count(&out),1);let i=f.iter().position(|&b|b).unwrap();assert_eq!((e.points[i*2],e.points[i*2+1]),(0,1));
+        assert_eq!(count(&edge_group(g.clone(),serde_json::json!({"name":"e","pattern":"3"}))),1);
+        let b=edge_group(g.clone(),serde_json::json!({"name":"e","method":"bounding_box","box_center":[0.5,0.5,0.0],"box_size":[2.,2.,0.1]}));
+        assert_eq!(count(&b),4);
+        assert_eq!(count(&edge_group(g,serde_json::json!({"name":"e","method":"boundary"}))),0);
+        assert_eq!(count(&edge_group(cube_open(true),serde_json::json!({"name":"e","method":"boundary"}))),4);
+        let pt=create(&[vec![Arc::new(cube_open(false))],vec![]],&Params::resolve(GROUP_CREATE.params,serde_json::json!({"name":"p","pattern":"0-2"}).as_object()).unwrap()).unwrap();
+        assert_eq!(flags(&pt.point["group_p"]).iter().filter(|&&x|x).count(),3);assert!(pt.edge.is_empty());
+    }
+    #[test]
+    fn blast_edges_clears_group_members_keeps_topology(){
+        let g=edge_group(cube_open(false),serde_json::json!({"name":"e","pattern":"*"}));
+        let p=Params::resolve(BLAST.params,serde_json::json!({"domain":"edges","group":"0-1"}).as_object()).unwrap();
+        let out=blast(&[vec![Arc::new(g)]],&p).unwrap();out.validate().unwrap();
+        assert_eq!(out.nedges(),12);assert_eq!(count(&out),11);
     }
 }
