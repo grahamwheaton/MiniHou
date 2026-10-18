@@ -1,0 +1,15 @@
+{
+  "group": {
+    "default": "",
+    "doc": "Open loop edges or points to straighten; empty uses all edges.",
+    "kind": "str",
+    "pick_domain": "edges"
+  },
+  "influence": {
+    "default": 1.0,
+    "doc": "Blend between original (0.0) and straightened (1.0) positions.",
+    "kind": "float",
+    "max": 1.0,
+    "min": 0.0
+  }
+}

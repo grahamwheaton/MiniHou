@@ -1,0 +1,21 @@
+{
+  "group": {
+    "default": "",
+    "doc": "Loop edges or points to relax; empty uses all edges.",
+    "kind": "str",
+    "pick_domain": "edges"
+  },
+  "influence": {
+    "default": 1.0,
+    "doc": "Blend between original (0.0) and relaxed (1.0) positions.",
+    "kind": "float",
+    "max": 1.0,
+    "min": 0.0
+  },
+  "iterations": {
+    "default": 3,
+    "doc": "Number of 1D Laplacian smoothing iterations along the loop.",
+    "kind": "int",
+    "min": 0
+  }
+}

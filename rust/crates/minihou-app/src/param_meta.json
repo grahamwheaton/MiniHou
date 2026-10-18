@@ -3742,6 +3742,41 @@
   }
  },
  "loop_begin": {},
+ "loop_circle": {
+  "fit_inside": {
+   "default": false,
+   "doc": "Fit circle inside loop using minimum radius instead of average radius.",
+   "kind": "bool"
+  },
+  "group": {
+   "default": "",
+   "doc": "Loop edges or points to circularize; empty uses all edges.",
+   "kind": "str",
+   "pick_domain": "edges"
+  },
+  "influence": {
+   "default": 1.0,
+   "doc": "Blend between original (0.0) and circular (1.0) positions.",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
+ "loop_curve": {
+  "group": {
+   "default": "",
+   "doc": "Open loop edges or points to straighten; empty uses all edges.",
+   "kind": "str",
+   "pick_domain": "edges"
+  },
+  "influence": {
+   "default": 1.0,
+   "doc": "Blend between original (0.0) and straightened (1.0) positions.",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  }
+ },
  "loop_cut": {
   "clamp": {
    "default": true,
@@ -3873,6 +3908,27 @@
     "best_fit",
     "normal"
    ]
+  }
+ },
+ "loop_relax": {
+  "group": {
+   "default": "",
+   "doc": "Loop edges or points to relax; empty uses all edges.",
+   "kind": "str",
+   "pick_domain": "edges"
+  },
+  "influence": {
+   "default": 1.0,
+   "doc": "Blend between original (0.0) and relaxed (1.0) positions.",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "iterations": {
+   "default": 3,
+   "doc": "Number of 1D Laplacian smoothing iterations along the loop.",
+   "kind": "int",
+   "min": 0
   }
  },
  "loop_space": {
