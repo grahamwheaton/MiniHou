@@ -289,3 +289,7 @@ Any node with a group field should show its group members in purple when that no
 ## Bug: edge group highlight disappears after Enter, hover does nothing (reported 2026-10-18)
 
 With group_create set to edges and a pattern like `p12-18 p12-43`: after Enter the purple highlight goes away, and hovering the purple arrow shows no preview. Wanted: the group's edges stay purple whenever the node is selected in the editor (see the "group highlight on any selected node" item above), with no hover needed. Check the overlay clear on Enter (finish_param_pick) and the hover gate (`param_pick_hover` and `source_ready` in main.rs).
+
+## Future: call the "primitives" domain "faces" (requested 2026-10-18)
+
+The domain option shown as "primitives" (group_create, blast, and other nodes with a domain param) should read "faces" in the UI. Saved graphs store "primitives", so the parser must keep accepting it as an alias (map it to faces), and the metadata options and param meta regenerated. Check every `p.e("domain", ...)` list in rust/crates/minihou-core/src/nodes for the "primitives" value, and the Python parity tests that use the name.
