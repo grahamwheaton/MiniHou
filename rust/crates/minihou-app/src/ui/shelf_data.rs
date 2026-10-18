@@ -79,7 +79,6 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "PolyExpand2D", node_type: "polyexpand2d", icon: "polyexpand2d" },
         Tool { label: "Dissolve", node_type: "dissolve", icon: "dissolve" },
         Tool { label: "Divide", node_type: "divide", icon: "divide" },
-        Tool { label: "Facet", node_type: "facet", icon: "facet" },
         Tool { label: "Grid Fill", node_type: "grid_fill", icon: "polyfill" },
         Tool { label: "Recalculate Normals", node_type: "recalc_normals", icon: "reverse" },
         Tool { label: "Tris to Quads", node_type: "tris_to_quads", icon: "dissolve" },

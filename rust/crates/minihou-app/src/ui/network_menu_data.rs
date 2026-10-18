@@ -76,7 +76,6 @@ pub(super) const TABS: &[Category] = &[
         Tool { label: "PolyExpand2D", node_type: "polyexpand2d" },
         Tool { label: "Dissolve", node_type: "dissolve" },
         Tool { label: "Divide", node_type: "divide" },
-        Tool { label: "Facet", node_type: "facet" },
         Tool { label: "Grid Fill", node_type: "grid_fill" },
         Tool { label: "Recalculate Normals", node_type: "recalc_normals" },
         Tool { label: "Tris to Quads", node_type: "tris_to_quads" },

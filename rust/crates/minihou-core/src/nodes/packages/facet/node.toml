@@ -1,0 +1,5 @@
+id = "facet"
+name = "Facet"
+category = "Modify"
+description = "Give each face unique points and optionally flat normals."
+keywords = "facet geometry"

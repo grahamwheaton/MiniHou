@@ -345,12 +345,6 @@ pub(super) fn outgroup(
     Ok(())
 }
 
-pub const FACET: NodeSpec = NodeSpec {
-    name: "facet",
-    inputs: GEO,
-    params: crate::params!("unique_points":true;"compute_normals":false),
-    cook: facet,
-};
 pub const DIVIDE: NodeSpec = NodeSpec {
     name: "divide",
     inputs: GEO,
@@ -381,42 +375,6 @@ pub const POLYEXTRUDE: NodeSpec = NodeSpec {
     params: crate::params!("group":"";"edges":"";"points":"";"distance":0.5;"direction":[0.,0.,0.];"inset":0.;"mode":"connected";"output_back":false;"outgrp_front":true;"outgrp_front_name":"extrudeFront";"outgrp_back":false;"outgrp_back_name":"extrudeBack";"outgrp_side":true;"outgrp_side_name":"extrudeSide"),
     cook: polyextrude,
 };
-fn facet(inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    let g = FACET.one(inputs, 0)?;
-    let mut out = (*g).clone();
-    let unique = p.b("unique_points")?;
-    if unique {
-        let ix: Vec<_> = g
-            .topology
-            .vertex_point
-            .iter()
-            .map(|&v| v as usize)
-            .collect();
-        out.point = gather(&g.point, &ix);
-        out.npoints = ix.len();
-        let mut t = (*g.topology).clone();
-        t.vertex_point = (0..ix.len() as i32).collect();
-        out.topology = Arc::new(t);
-    }
-    if p.b("compute_normals")? {
-        let fn_ = normals::normalize_to_f32(&normals::prim_normals(out.p(), &out.topology));
-        if unique {
-            let (pv, _, _) = corners(&out);
-            out.point.insert(
-                "N".into(),
-                Arc::new(Attr::f32(
-                    3,
-                    pv.iter()
-                        .flat_map(|&p| fn_[3 * p..3 * p + 3].iter().copied())
-                        .collect(),
-                )),
-            );
-        } else {
-            out.prim.insert("N".into(), Arc::new(Attr::f32(3, fn_)));
-        }
-    }
-    Ok(out)
-}
 pub(super) fn ear_clip(xy: &[[f64; 2]]) -> Vec<[usize; 3]> {
     let n = xy.len();
     if n < 3 {
