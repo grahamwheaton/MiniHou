@@ -1,12 +1,12 @@
 //! MHL1 TCP framing and per-subscriber geometry diffs (Python link protocol v1).
-use std::{collections::BTreeMap, io::{self, Read}, sync::Arc};
+use std::{collections::{BTreeMap, BTreeSet}, io::{self, Read}, sync::Arc};
 use minihou_core::{Geometry, geometry::AttrData};
 use serde_json::{json, Value};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_HEADER: usize = 64 * 1024 * 1024;
 pub const MAX_BLOB: u64 = 8 * 1024 * 1024 * 1024;
-const TOPO: [&str; 3] = ["topo/vertex_point", "topo/prim_offsets", "topo/prim_closed"];
+const TOPO: [&str; 4] = ["topo/vertex_point", "topo/prim_offsets", "topo/prim_closed", "topo/edge_pairs"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Array {
@@ -91,7 +91,7 @@ fn i32_array(v: &[i32]) -> Array {
 }
 pub fn geometry_arrays(geo: &Geometry) -> Arrays {
     let mut arrays = Arrays::new();
-    for (domain, table) in [("point", &geo.point), ("vertex", &geo.vertex), ("prim", &geo.prim)] {
+    for (domain, table) in [("point", &geo.point), ("vertex", &geo.vertex), ("edge", &geo.edge), ("prim", &geo.prim)] {
         for (name, attr) in table {
             let (dtype, bytes) = match &attr.data {
                 AttrData::F32(v) if domain == "vertex" && matches!(attr.width, 2 | 3)
@@ -108,6 +108,13 @@ pub fn geometry_arrays(geo: &Geometry) -> Arrays {
     arrays.entry("point/P".into()).or_insert_with(|| Array { dtype:"<f4".into(), shape:vec![0,3], bytes:Arc::new(Vec::new()) });
     arrays.insert(TOPO[0].into(), i32_array(&geo.topology.vertex_point));
     arrays.insert(TOPO[1].into(), i32_array(&geo.topology.prim_offsets));
+    if !geo.edge.is_empty() {
+        let pairs = geo.topology.edge_pairs();
+        let flat: Vec<i32> = pairs.iter().flat_map(|&(a, b)| [a, b]).collect();
+        let mut wire = i32_array(&flat);
+        wire.shape = vec![pairs.len(), 2];
+        arrays.insert(TOPO[3].into(), wire);
+    }
     if geo.topology.has_open() {
         arrays.insert(TOPO[2].into(), Array { dtype:"|u1".into(), shape:vec![geo.nprims()], bytes:Arc::new(geo.topology.closed_mask().iter().map(|&b| u8::from(b)).collect()) });
     }
@@ -145,12 +152,51 @@ pub fn decode_object(h:&Value,arrays:&Arrays)->io::Result<Geometry>{
         None=>None,Some(a)=>{if a.shape.len()!=1||!["|u1","|b1"].contains(&a.dtype.as_str()){return Err(invalid("closed must be a byte column"));}Some(a.bytes.iter().map(|&x|x!=0).collect())}
     };
     let mut geo=Geometry::from_arrays(p,indices(TOPO[0],vec![])?,indices(TOPO[1],vec![0])?,closed).map_err(io::Error::other)?;
+    let edge_pairs = match arrays.get(TOPO[3]) {
+        None => None,
+        Some(a) => {
+            if a.dtype != "<i4" || a.shape.len() != 2 || a.shape[1] != 2 || array_len(&a.dtype, &a.shape)? != a.bytes.len() {
+                return Err(invalid("topo/edge_pairs must be an int32 (n, 2) array"));
+            }
+            Some(a.bytes.chunks_exact(8).map(|row| {
+                let a = i32::from_le_bytes(row[..4].try_into().unwrap());
+                let b = i32::from_le_bytes(row[4..].try_into().unwrap());
+                (a.min(b), a.max(b))
+            }).collect::<Vec<_>>())
+        }
+    };
+    let topology_pairs = geo.topology.edge_pairs();
+    let edge_index: BTreeMap<_, _> = topology_pairs.iter().copied().enumerate().map(|(i, pair)| (pair, i)).collect();
+    let mut dropped_edges = BTreeSet::new();
     for (key,a) in arrays {
         if key=="point/P"||TOPO.contains(&key.as_str()){continue;}
         let (dom,name)=key.split_once('/').ok_or_else(||invalid("bad attribute key"))?;
         if name.is_empty(){return Err(invalid("empty attribute name"));}
-        let table=match dom{"point"=>&mut geo.point,"vertex"=>&mut geo.vertex,"prim"=>&mut geo.prim,_=>return Err(invalid("bad attribute domain"))};
-        table.insert(name.into(),Arc::new(decode_attr(a)?));
+        if dom == "edge" {
+            let pairs = edge_pairs.as_ref().ok_or_else(|| invalid("edge attributes require topo/edge_pairs"))?;
+            let attr = decode_attr(a)?;
+            if attr.rows() != pairs.len() { return Err(invalid("edge attribute row count differs from topo/edge_pairs")); }
+            let mut mapped = attr.zeros_like(topology_pairs.len());
+            for (source, pair) in pairs.iter().enumerate() {
+                if let Some(&target) = edge_index.get(pair) {
+                    let from = source * attr.width;
+                    let to = target * attr.width;
+                    match (&attr.data, &mut mapped.data) {
+                        (AttrData::F32(src), AttrData::F32(dst)) => dst[to..to + attr.width].copy_from_slice(&src[from..from + attr.width]),
+                        (AttrData::I32(src), AttrData::I32(dst)) => dst[to..to + attr.width].copy_from_slice(&src[from..from + attr.width]),
+                        _ => unreachable!(),
+                    }
+                } else { dropped_edges.insert(*pair); }
+            }
+            geo.edge.insert(name.into(), Arc::new(mapped));
+        } else {
+            let table=match dom{"point"=>&mut geo.point,"vertex"=>&mut geo.vertex,"prim"=>&mut geo.prim,_=>return Err(invalid("bad attribute domain"))};
+            table.insert(name.into(),Arc::new(decode_attr(a)?));
+        }
+    }
+    if !dropped_edges.is_empty() {
+        eprintln!("MiniHou link: dropped {} unmatched edges", dropped_edges.len());
+        geo.detail.insert("link_unmatched_edges".into(), json!(dropped_edges.len()));
     }
     if let Some(mats)=h["materials"].as_array().filter(|a|!a.is_empty()){
         geo.detail.insert("materials".into(),json!(mats.iter().take(4096).map(|m|m.as_str().unwrap_or("").chars().take(63).collect::<String>()).collect::<Vec<_>>()));
@@ -235,6 +281,9 @@ impl DiffState {
         if topology_changed && !current.contains_key(TOPO[2]) && self.sent.as_ref().is_some_and(|s| s.contains_key(TOPO[2])) {
             send.insert(TOPO[2].into(), Array { dtype:"|u1".into(), shape:vec![0], bytes:Arc::new(Vec::new()) });
         }
+        if topology_changed && !current.contains_key(TOPO[3]) && self.sent.as_ref().is_some_and(|s| s.contains_key(TOPO[3])) {
+            send.insert(TOPO[3].into(), Array { dtype:"<i4".into(), shape:vec![0, 2], bytes:Arc::new(Vec::new()) });
+        }
         self.sent = Some(current.clone());
         let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs_f64();
         (json!({"type":"geo","seq":seq,"full":full,"counts":{"point":geo.npoints,"vertex":geo.nvertices(),"prim":geo.nprims()},"topology_changed":topology_changed,"manifest":manifest,"detail":geo.detail,"cook":cook,"t_sent":t}), send)
@@ -244,6 +293,31 @@ impl DiffState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn edge_pairs_match_shuffled_rows_and_drop_unknown_pairs() {
+        let g = Geometry::from_arrays(vec![0.; 12], vec![0, 1, 2, 3], vec![0, 4], None).unwrap();
+        let h = json!({});
+        let mut arrays = geometry_arrays(&g);
+        let pairs = [(3, 2), (3, 0), (1, 0), (2, 1), (0, 2)];
+        let flat: Vec<i32> = pairs.iter().flat_map(|&(a,b)| [a,b]).collect();
+        let mut wire = i32_array(&flat);
+        wire.shape = vec![pairs.len(), 2];
+        arrays.insert(TOPO[3].into(), wire);
+        arrays.insert("edge/crease_edge".into(), attr_array(&minihou_core::Attr::f32(1, vec![30.,40.,10.,20.,99.])));
+        let decoded = decode_object(&h, &arrays).unwrap();
+        assert_eq!(decoded.edge["crease_edge"].as_f32().unwrap(), &[10.,40.,20.,30.]);
+        assert_eq!(decoded.detail["link_unmatched_edges"], json!(1));
+
+        let ordered = [(0,1),(0,3),(1,2),(2,3)];
+        let flat: Vec<i32> = ordered.iter().flat_map(|&(a,b)| [a,b]).collect();
+        let mut wire = i32_array(&flat); wire.shape = vec![4,2];
+        arrays.insert(TOPO[3].into(), wire);
+        arrays.insert("edge/crease_edge".into(), attr_array(&minihou_core::Attr::f32(1, vec![10.,40.,20.,30.])));
+        let ordered_geo = decode_object(&h, &arrays).unwrap();
+        assert_eq!(ordered_geo.edge["crease_edge"], decoded.edge["crease_edge"]);
+        let outbound = geometry_arrays(&ordered_geo);
+        assert_eq!(outbound[TOPO[3]].shape, vec![4,2]);
+    }
     #[test]
     fn object_input_roundtrip_and_validation() {
         let mut g=Geometry::from_arrays(vec![0.,0.,0.,1.,0.,0.],vec![0,1],vec![0,2],Some(vec![false])).unwrap();

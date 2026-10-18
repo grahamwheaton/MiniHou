@@ -106,6 +106,11 @@ impl Topology {
     /// Unique undirected pairs from primitive loops, ordered by (lower point, higher point).
     /// Open curves omit their closing segment, matching [`crate::topo::edges`].
     pub fn nedges(&self) -> usize {
+        self.edge_pairs().len()
+    }
+
+    /// The stable edge-domain row order, independent of a source mesh's edge order.
+    pub fn edge_pairs(&self) -> Vec<(i32, i32)> {
         let mut pairs = Vec::new();
         for prim in 0..self.nprims() {
             let start = self.prim_offsets[prim] as usize;
@@ -124,7 +129,7 @@ impl Topology {
         }
         pairs.sort_unstable();
         pairs.dedup();
-        pairs.len()
+        pairs
     }
 
     pub fn is_closed(&self, prim: usize) -> bool {
