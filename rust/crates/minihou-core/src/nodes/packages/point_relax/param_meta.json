@@ -1,0 +1,21 @@
+{
+  "iterations": {
+    "default": 10,
+    "doc": "Number of relaxation passes",
+    "kind": "int",
+    "min": 0,
+    "soft_max": 100
+  },
+  "radius": {
+    "default": 0.0,
+    "doc": "Desired spacing; 0 = from the surface area and point count (or the points' bounding box without a surface)",
+    "kind": "float",
+    "min": 0.0,
+    "soft_max": 2.0
+  },
+  "update_normals": {
+    "default": true,
+    "doc": "Take N from the surface where each point lands",
+    "kind": "bool"
+  }
+}
