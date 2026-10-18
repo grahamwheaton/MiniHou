@@ -203,7 +203,7 @@ def chunks(count=6, seed=4, **so):
         "pts": {"type": "voronoi_fracture_points", "inputs": {"geo": "b"}, "params": {"count": count, "seed": seed}},
         "f": {"type": "voronoi_fracture", "inputs": {"geo": "b", "points": "pts"}, "params": {}},
         "a": {"type": "assemble", "inputs": {"geo": "f"}, "params": {}},
-        "so": {"type": "scene_objects", "inputs": {"geo": "a"}, "params": dict({"mode": "pieces", "prefix": "Chunk"}, **so)},
+        "so": {"type": "scene_objects", "inputs": {"geo": "a"}, "params": dict({"mode": "objects", "prefix": "Chunk"}, **so)},
         "g": {"type": "grid", "params": {"columns": 3, "rows": 3}},
         "main": {"type": "output", "inputs": {"geo": "g"}}}}
 
@@ -237,6 +237,27 @@ class ScenePiecesTests(LiveHarness, unittest.TestCase):
             local = np.array([tuple(v.co) for v in o.data.vertices])
             np.testing.assert_allclose(local.mean(0), 0, atol=1e-4)                    # origin at the centre of the piece
         self.assertIn("Chunk", bpy.data.collections)
+
+    def test_each_object_has_a_placement_empty_as_parent(self):
+        self.pump(lambda: len(scene_objs()) == self.piece_count() and all(len(o.data.polygons) for o in scene_objs()))
+        for obj in scene_objs():
+            self.assertEqual(obj.parent.type, "EMPTY")
+            self.assertEqual(obj.parent.get("minihou_scene_control"), obj["minihou_scene"])
+            self.assertEqual(obj.parent["minihou_id"], obj["minihou_id"])
+            self.assertEqual(tuple(obj.location), (0.0, 0.0, 0.0))
+        obj = scene_objs()[0]
+        control = obj.parent
+        control_name = control.name
+        bpy.context.view_layer.update()
+        before = obj.matrix_world.translation.copy()
+        control.location.x += 1.0
+        bpy.context.view_layer.update()
+        self.assertAlmostEqual(obj.matrix_world.translation.x - before.x, 1.0)
+        self.so.last_summary.clear()
+        self.write(chunks(max_objects=300))
+        self.pump(lambda: "session:so" in self.so.last_summary)
+        self.assertIs(obj.parent, control)
+        self.assertEqual(control.name, control_name)
 
     def test_the_users_work_on_pieces_survives_and_unchanged_pieces_are_not_rewritten(self):
         n = self.piece_count()
@@ -368,7 +389,7 @@ class SceneObjectsModifierTests(unittest.TestCase):
             "pts": {"type": "voronoi_fracture_points", "inputs": {"geo": "m"}, "params": {"count": 5, "seed": 2}},
             "f": {"type": "voronoi_fracture", "inputs": {"geo": "m", "points": "pts"}, "params": {}},
             "a": {"type": "assemble", "inputs": {"geo": "f"}, "params": {}},
-            "so": {"type": "scene_objects", "inputs": {"geo": "a"}, "params": {"mode": "pieces", "prefix": "Shard"}},
+            "so": {"type": "scene_objects", "inputs": {"geo": "a"}, "params": {"mode": "objects", "prefix": "Shard"}},
             "out": {"type": "output", "inputs": {"geo": "m"}}},
             "exposed": [{"name": "Count", "node": "pts", "param": "count"}]}
         shards = Path(self.tmp.name) / "shards.json"                      # not the engine's own session file: read from disk as written
@@ -387,7 +408,8 @@ class SceneObjectsModifierTests(unittest.TestCase):
         self.assertGreaterEqual(len(objs), 4)
         self.assertEqual([o.name for o in objs], [f"Shard_{o['minihou_id']:04d}" for o in objs])
         for o in objs:
-            self.assertIs(o.parent, slab)
+            self.assertEqual(o.parent.type, "EMPTY")
+            self.assertIs(o.parent.parent, slab)
             self.assertGreater(len(o.data.polygons), 3)
             self.assertNotEqual(o.data.name, slab.data.name)
         self.assertEqual(len({o.data.name for o in objs}), len(objs))

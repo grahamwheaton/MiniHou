@@ -154,11 +154,49 @@ def _make(name: str, src_name: str, tag: str, ident: int, col, placeholder_log: 
     return obj
 
 
-DIGEST = "minihou_digest"        # on a piece's mesh: hash of the shape last written, so an unchanged piece is not rewritten
+DIGEST = "minihou_digest"        # on an object's mesh: hash of the shape last written, so an unchanged piece is not rewritten
+CONTROL = "minihou_scene_control"  # on the empty that places an objects-mode mesh
+
+
+def _control(obj, tag: str, col):
+    """Find or make the stable placement empty for this mesh object."""
+    if obj.parent is not None and obj.parent.get(CONTROL) == tag and obj.parent.get(sp.MARK_ID) == obj.get(sp.MARK_ID):
+        return obj.parent
+    control = next((o for o in bpy.data.objects if o.get(CONTROL) == tag and o.get(sp.MARK_ID) == obj.get(sp.MARK_ID)), None)
+    if control is None:
+        control = bpy.data.objects.new(obj.name + "_Control", None)
+        control[CONTROL] = tag
+        control[sp.MARK_ID] = obj[sp.MARK_ID]
+        control.empty_display_type = "PLAIN_AXES"
+        control.empty_display_size = 0.5
+        col.objects.link(control)
+        control.location = obj.location
+        control.rotation_euler = obj.rotation_euler
+        control.scale = obj.scale
+        control.parent = obj.parent
+        control.matrix_parent_inverse = mathutils.Matrix.Identity(4)
+    obj.parent = control
+    obj.matrix_parent_inverse = mathutils.Matrix.Identity(4)
+    obj.location = (0, 0, 0)
+    obj.rotation_euler = (0, 0, 0)
+    obj.scale = (1, 1, 1)
+    return control
+
+
+def _paired_control(obj):
+    parent = obj.parent
+    return parent if parent is not None and parent.get(CONTROL) == obj.get(sp.MARK) and parent.get(sp.MARK_ID) == obj.get(sp.MARK_ID) else None
+
+
+def _existing_placement(obj):
+    control = _paired_control(obj)
+    info = _info(control or obj)
+    info.hidden = bool(obj.get(sp.MARK_HIDDEN))
+    return info
 
 
 def _make_shaped(mode: str, name: str, ident: int, col):
-    """The object for a shaped mode: a mesh object (pieces), a curves object or a point-cloud object, with data of its own."""
+    """The object for a shaped mode: a mesh object (objects), a curves object or a point-cloud object, with data of its own."""
     if mode == "curves":
         data = bpy.data.hair_curves.new(name)
     elif mode == "points":
@@ -173,7 +211,7 @@ def _make_shaped(mode: str, name: str, ident: int, col):
     return obj
 
 
-_OBJECT_TYPE = {"pieces": "MESH", "curves": "CURVES", "points": "POINTCLOUD"}
+_OBJECT_TYPE = {"objects": "MESH", "pieces": "MESH", "curves": "CURVES", "points": "POINTCLOUD"}
 COLOR_NAME = "Color"                                 # what the engine's Cd becomes on curves and point clouds
 
 
@@ -276,8 +314,8 @@ def _apply_shaped(mode: str, manifest: dict, arrays: dict, objs: Dict[int, "bpy.
     return 1
 
 
-def _write_piece(mesh, P: np.ndarray, vp: np.ndarray, sizes: np.ndarray, attrs: Optional[Dict[str, np.ndarray]] = None) -> List[str]:
-    """Fill ``mesh`` with one piece. ``attrs``: ``"domain:name"`` -> values. Returns warnings."""
+def _write_object_mesh(mesh, P: np.ndarray, vp: np.ndarray, sizes: np.ndarray, attrs: Optional[Dict[str, np.ndarray]] = None) -> List[str]:
+    """Fill ``mesh`` with one object. ``attrs``: ``"domain:name"`` -> values. Returns warnings."""
     import types
     warnings: List[str] = []
     mesh.clear_geometry()
@@ -300,19 +338,19 @@ def _write_piece(mesh, P: np.ndarray, vp: np.ndarray, sizes: np.ndarray, attrs: 
         except (RuntimeError, TypeError, ValueError) as e:
             ok, name = False, f"{name} ({e})"
         if not ok:
-            warnings.append(f"attribute {key!r} could not be written to the piece meshes")
+            warnings.append(f"attribute {key!r} could not be written to the object meshes")
     mesh.update()
     return warnings
 
 
-def _piece_slices(manifest: dict, arrays: dict):
+def _object_slices(manifest: dict, arrays: dict):
     """Per manifest entry: (id, P, vp, sizes, attrs) views into the arrays."""
     pb = np.concatenate([[0], np.cumsum(manifest["npts"])]).astype(np.int64)
     cb = np.concatenate([[0], np.cumsum(manifest["ncorner"])]).astype(np.int64)
     fb = np.concatenate([[0], np.cumsum(manifest["nprim"])]).astype(np.int64)
     P, vp, sizes = arrays["P"].reshape(-1, 3), arrays["vp"], arrays["sizes"]
     if pb[-1] != len(P) or cb[-1] != len(vp) or fb[-1] != len(sizes):
-        raise ValueError("the piece arrays do not match the counts in the manifest")
+        raise ValueError("the object arrays do not match the counts in the manifest")
     bounds = {"point": pb, "vertex": cb, "prim": fb}
     wanted = [k for k in manifest.get("attributes", []) if k in arrays and k.split(":", 1)[0] in bounds]
     for k, ident in enumerate(manifest["id"]):
@@ -379,13 +417,13 @@ def _retarget(obj, item: sp.Item, tag: str, col, placeholder_log: List[str]):
 
 
 def apply(manifest: dict, owner: str = SESSION, parent: str = "", arrays: Optional[dict] = None) -> dict:
-    """Make the objects the manifest describes. ``arrays``: the binary part (pieces mode; session manifests carry it as
+    """Make the objects the manifest describes. ``arrays``: the binary part (objects mode; session manifests carry it as
     ``_arrays``). Returns counts."""
     assert_main_thread()
     mode = str(manifest.get("mode") or "instances")
     if mode == "image":                                   # not objects: one Blender image (see image_exchange)
         return image_exchange.apply_image(manifest, arrays if arrays is not None else manifest.get("_arrays"), sp.owner_tag(owner, str(manifest["node"])))
-    pieces = mode == "pieces"
+    object_mode = mode in ("pieces", "objects")
     shaped = mode in sp.SHAPED
     arrays = arrays if arrays is not None else manifest.get("_arrays")
     if shaped and not arrays:
@@ -393,9 +431,19 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "", arrays: Option
     node = str(manifest["node"])
     tag = sp.owner_tag(owner, node)
     by_id, extras = _existing(tag)
+    if not object_mode:
+        for obj in by_id.values():
+            control = _paired_control(obj)
+            if control is not None:
+                obj.parent = control.parent
+                obj.matrix_parent_inverse = mathutils.Matrix.Identity(4)
+                obj.location = control.location
+                obj.rotation_euler = control.rotation_euler
+                obj.scale = control.scale
+                bpy.data.objects.remove(control, do_unlink=True)
     parent_obj = bpy.data.objects.get(parent) if parent else None
     present = [o.name for o in bpy.data.objects if not o.get(sp.MARK)]
-    plan = sp.plan(manifest, {i: _info(o) for i, o in by_id.items()}, present, parent=parent_obj.name if parent_obj else "",
+    plan = sp.plan(manifest, {i: _existing_placement(o) if object_mode else _info(o) for i, o in by_id.items()}, present, parent=parent_obj.name if parent_obj else "",
                    extras=[_info(o) for o in extras])
     col = _collection(str(manifest.get("collection") or manifest.get("prefix") or "MiniHou"))
     missing_log: List[str] = []
@@ -407,32 +455,44 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "", arrays: Option
     rebuilt = set()
     for item in plan.retarget:
         old = objs[item.ident]
-        objs[item.ident] = _retarget(old, item, tag, col, missing_log)
+        if object_mode:
+            name = old.name
+            bpy.data.objects.remove(old, do_unlink=True)
+            objs[item.ident] = _make_shaped(mode, name, item.ident, col)
+            objs[item.ident][sp.MARK] = tag
+        else:
+            objs[item.ident] = _retarget(old, item, tag, col, missing_log)
         if objs[item.ident] is not old and item.ident not in {i.ident for i in plan.create}:
             rebuilt.add(item.ident)                          # a new object: it needs its transform and parent written
     for ident in plan.unhide:
         _show(objs[ident])
+        if object_mode and _paired_control(objs[ident]) is not None:
+            _show(objs[ident].parent)
     created = {i.ident for i in plan.create} | rebuilt
+    wanted_ids = {int(i) for i in manifest.get("id", [])}
+    controls = {ident: _control(obj, tag, col) for ident, obj in objs.items() if object_mode and ident in wanted_ids}
     for item in plan.create + plan.update + [i for i in plan.retarget if i.ident in rebuilt]:
-        obj = objs[item.ident]
+        obj = controls[item.ident] if object_mode else objs[item.ident]
         if item.ident in created or sp.changed(item, _info(obj)):
             obj.location = item.loc
             obj.rotation_euler = item.rot
             obj.scale = item.scale
     if parent_obj is not None:                            # a modifier's objects live in its owner's space: moving the owner moves them
         for ident in created | set(plan.reparent):
-            obj = objs[ident]
+            obj = controls[ident] if object_mode else objs[ident]
             obj.parent = parent_obj
             obj.matrix_parent_inverse = mathutils.Matrix.Identity(4)
     rewritten = 0
     if mode in ("curves", "points"):
         rewritten = _apply_shaped(mode, manifest, arrays, objs, col, tag, node)
-    if pieces:                                            # shapes: only the pieces whose shape really changed are rewritten
+    if object_mode:                                            # shapes: only the objects whose shape really changed are rewritten
         warned = set()
-        for ident, P, vp, sizes, attrs in _piece_slices(manifest, arrays):
+        for ident, P, vp, sizes, attrs in _object_slices(manifest, arrays):
             obj = objs.get(ident)
             if obj is None or obj.type != "MESH":
                 continue
+            if obj.data.users > 1:
+                obj.data = obj.data.copy()
             h = hashlib.blake2b(digest_size=12)
             for a in (P, vp, sizes):
                 h.update(np.ascontiguousarray(a).tobytes())
@@ -441,7 +501,7 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "", arrays: Option
                 h.update(np.ascontiguousarray(attrs[key]).tobytes())
             digest = h.hexdigest()
             if obj.data.get(DIGEST) != digest:
-                for w in _write_piece(obj.data, P, vp, sizes, attrs):
+                for w in _write_object_mesh(obj.data, P, vp, sizes, attrs):
                     if w not in warned:
                         warned.add(w)
                         _log(f"scene_objects {node!r}: {w}")
@@ -455,6 +515,9 @@ def apply(manifest: dict, owner: str = SESSION, parent: str = "", arrays: Option
         _apply_object_materials(manifest, objs, node, _noted)
     for ident in plan.hide:
         _hide(objs[ident])
+        control = _paired_control(objs[ident]) if object_mode else None
+        if control is not None:
+            _hide(control)
     for name in plan.duplicates:
         extra = bpy.data.objects.get(name)
         if extra is not None:
@@ -474,6 +537,9 @@ def hide_removed_nodes(owner: str, nodes: List[str]) -> int:
     for obj in list(marked(owner=owner)):
         if obj.get(sp.MARK) not in keep and not obj.get(sp.MARK_HIDDEN):
             _hide(obj)
+            control = _paired_control(obj)
+            if control is not None:
+                _hide(control)
             n += 1
     return n
 
@@ -486,6 +552,9 @@ def retain_owners(owners) -> int:
         owner = str(obj.get(sp.MARK)).split(":", 1)[0]
         if owner not in owners and not obj.get(sp.MARK_HIDDEN):
             _hide(obj)
+            control = _paired_control(obj)
+            if control is not None:
+                _hide(control)
             n += 1
     return n
 
@@ -505,8 +574,11 @@ def cleanup(everything: bool = False) -> int:
     gone = 0
     for obj in list(marked()):
         if everything or obj.get(sp.MARK_HIDDEN):
-            mesh = obj.data if obj.type == "MESH" and obj.data is not None and obj.data.get(DIGEST) else None   # a piece's own mesh
+            mesh = obj.data if obj.type == "MESH" and obj.data is not None and obj.data.get(DIGEST) else None   # an object's own mesh
+            control = _paired_control(obj)
             bpy.data.objects.remove(obj, do_unlink=True)
+            if control is not None:
+                bpy.data.objects.remove(control, do_unlink=True)
             if mesh is not None and mesh.users == 0:
                 bpy.data.meshes.remove(mesh)
             gone += 1

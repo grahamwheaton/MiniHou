@@ -135,6 +135,9 @@ class Param:
                     raise ParamError(f"expected 3 numbers, got {value!r}")
                 return tuple(self._check_range(self._num(c)) for c in value)
             if k == "enum":
+                # Scene Objects kept this value in saved graphs before the visible mode was renamed.
+                if self.name == "mode" and self.choices == ("instances", "objects", "curves", "points") and value == "pieces":
+                    return value
                 if value not in self.choices:
                     raise ParamError(f"expected one of {list(self.choices)}, got {value!r}")
                 return value
