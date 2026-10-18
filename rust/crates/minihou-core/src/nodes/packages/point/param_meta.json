@@ -1,0 +1,11 @@
+{
+  "center": {
+    "default": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "doc": "Position of the single point in model coordinates",
+    "kind": "vec3"
+  }
+}

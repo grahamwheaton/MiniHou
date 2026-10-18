@@ -25,7 +25,6 @@ pub(super) const TABS: &[Category] = &[
         Tool { label: "USD Import", node_type: "usd_import" },
         Tool { label: "Host Mesh", node_type: "modifier_input" },
         Tool { label: "Object Input", node_type: "object_input" },
-        Tool { label: "Point", node_type: "point" },
     ] },
     Category { name: "Modify", tools: &[
         Tool { label: "Transform", node_type: "transform" },

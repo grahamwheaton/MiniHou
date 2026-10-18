@@ -19,14 +19,6 @@ pub const CURVE: NodeSpec = NodeSpec {
     cook: curve,
 };
 
-pub const POINT: NodeSpec = NodeSpec {
-    name: "point", inputs: &[], params: crate::params!("center": [0.0, 0.0, 0.0];), cook: point,
-};
-
-fn point(_inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    Geometry::points_only(p.v3("center")?.map(|v| v as f32).to_vec())
-}
-
 fn curve(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let mut positions = Vec::new();
     for token in p.s("points")?.split_whitespace() {

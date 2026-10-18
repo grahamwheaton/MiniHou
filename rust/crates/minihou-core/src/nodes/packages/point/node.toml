@@ -1,0 +1,5 @@
+id = "point"
+name = "Point"
+category = "Create"
+description = "Create one point at a position."
+keywords = "point geometry"
