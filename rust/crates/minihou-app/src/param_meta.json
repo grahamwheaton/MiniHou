@@ -3812,6 +3812,53 @@
    "min": 0
   }
  },
+ "loop_flatten": {
+  "group": {
+   "default": "",
+   "doc": "Points or loop edges to flatten onto a plane; empty uses all points.",
+   "kind": "str",
+   "pick_domain": "points"
+  },
+  "influence": {
+   "default": 1.0,
+   "doc": "Blend between original (0.0) and flattened (1.0) positions.",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "plane": {
+   "default": "best_fit",
+   "doc": "Plane calculation method ('best_fit' from PCA or 'normal' from average normal).",
+   "kind": "enum",
+   "options": [
+    "best_fit",
+    "normal"
+   ]
+  }
+ },
+ "loop_space": {
+  "group": {
+   "default": "",
+   "doc": "Loop edges or points to space; empty uses all edges.",
+   "kind": "str",
+   "pick_domain": "edges"
+  },
+  "influence": {
+   "default": 1.0,
+   "doc": "Blend between original (0.0) and spaced (1.0) positions.",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "interpolation": {
+   "default": "linear",
+   "doc": "Interpolation mode along the loop ('linear').",
+   "kind": "enum",
+   "options": [
+    "linear"
+   ]
+  }
+ },
  "lsystem": {
   "angle": {
    "default": 22.5,

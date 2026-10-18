@@ -1,0 +1,5 @@
+id = "loop_space"
+name = "Loop Space"
+category = "Modify"
+description = "Space vertices evenly along selected loops or edge paths."
+keywords = "loop space evenly uniform vertices"

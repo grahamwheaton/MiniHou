@@ -20,6 +20,7 @@ rust/target_usd/
 rust-wheels/
 
 # Local helper scratch and per-helper cargo target dirs
+target_*/
 rust/target_*/
 .claude/tmp/
 integration-*.log

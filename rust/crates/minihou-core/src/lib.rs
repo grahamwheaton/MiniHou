@@ -16,6 +16,7 @@ pub mod channels;
 pub mod coplanar;
 pub mod heightfield;
 pub mod lod;
+pub mod loop_topology;
 pub mod math;
 pub mod noise;
 pub mod nodes;
