@@ -8,6 +8,16 @@ fn cook(graph: serde_json::Value) -> minihou_core::Result<std::sync::Arc<minihou
 }
 
 #[test]
+fn wrangle_existing_graph_cooks() {
+    let g = cook(json!({"nodes": {
+        "p": {"type": "point", "params": {}},
+        "w": {"type": "wrangle", "inputs": {"geo": "p"},
+              "params": {"snippet": "@P.x = @Frame;"}}
+    }, "display": "w"})).unwrap();
+    assert_eq!(g.p()[0], 1.0);
+}
+
+#[test]
 fn grid_has_the_python_layout() {
     let g = cook(json!({"nodes": {"g": {"type": "grid", "params": {"columns": 3, "rows": 2, "size_x": 2.0, "size_y": 1.0}}}, "display": "g"})).unwrap();
     assert_eq!((g.npoints, g.nprims(), g.nvertices()), (6, 2, 8));

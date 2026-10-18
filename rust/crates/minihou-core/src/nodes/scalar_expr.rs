@@ -60,6 +60,8 @@ impl Expr {
                     ("min",xs) if xs.len()>=2=>xs.iter().copied().reduce(|x,y|if y<x{y}else{x}).unwrap(),
                     ("max",xs) if xs.len()>=2=>xs.iter().copied().reduce(|x,y|if y>x{y}else{x}).unwrap(),
                     ("clamp",[x,lo,hi])=>lo.max(hi.min(*x)),
+                    ("rand",[x])=>{let mut h=(*x as f32).to_bits().wrapping_add(0x9e3779b9);h^=h>>16;h=h.wrapping_mul(0x7feb352d);h^=h>>15;h=h.wrapping_mul(0x846ca68b);h^=h>>16;(h as f64)/(u32::MAX as f64)},
+                    ("noise",[x])=>crate::noise::fbm3_one([*x as f32,0.,0.],0,4,2.,0.5) as f64,
                     ("smoothstep",[lo,hi,x])=>{let t=if hi==lo{0.}else{((x-lo)/(hi-lo)).clamp(0.,1.)};t*t*(3.-2.*t)},
                     ("fit",[x,a,b,c,d])=>c+(d-c)*if b==a{0.}else{(x-a)/(b-a)},
                     _=>return Err(Error::new(format!("unsupported function or argument count: {name}")))
@@ -111,7 +113,7 @@ impl Parser<'_>{
         if attr&&self.text.get(self.pos)==Some(&b'.'){self.pos+=1;while self.text.get(self.pos).is_some_and(u8::is_ascii_alphabetic){self.pos+=1;}}
         let name=std::str::from_utf8(&self.text[start..self.pos]).unwrap().to_owned();
         if !attr&&self.take(b"("){
-            if !["sin","cos","abs","round","sqrt","min","max","clamp","smoothstep","fit","ch","chs","chv"].contains(&name.as_str()){return Err(Error::new(format!("unsupported function {name}")));}
+            if !["sin","cos","abs","round","sqrt","min","max","clamp","smoothstep","fit","rand","noise","ch","chs","chv"].contains(&name.as_str()){return Err(Error::new(format!("unsupported function {name}")));}
             let mut args=Vec::new();if !self.take(b")"){loop{args.push(self.sum()?);if self.take(b")"){break;}if !self.take(b","){return Err(Error::new("expected ',' or ')'"));}}}
             Ok(Expr::Call(name,args))
         }else{Ok(Expr::Name(if attr{format!("@{name}")}else if dollar{format!("${name}")}else{name}))}
