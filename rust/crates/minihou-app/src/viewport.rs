@@ -33,6 +33,8 @@ pub struct Scene {
     bbp: [f32; 24],
     pub center: [f32;3], pub radius: f32,
     textured:Vec<SurfaceTri>,
+    /// Per-point display colour from the `Cd` attribute (point, vertex or primitive domain, averaged onto points); None without Cd.
+    cd:Option<Vec<f32>>,
 }
 /// Longest overlay normal list kept: more points than this are thinned evenly.
 const NORMAL_LINES: usize = 60_000;
@@ -45,7 +47,7 @@ impl Scene {
             p: self.p.clone(), n: self.n.clone(), point:self.point.clone(), line:self.line.clone(), pick_bvh:self.pick_bvh.clone(),
             tri: crate::ui::proxy_ui::proxy::reduced_triangles(&self.tri, level),
             edge: crate::ui::proxy_ui::proxy::reduced_edges(&self.edge, level),
-            nlp: self.nlp.clone(), nln: self.nln.clone(), normal_points:self.normal_points.clone(), bbp: self.bbp, center: self.center, radius: self.radius, textured:self.textured.clone(),
+            nlp: self.nlp.clone(), nln: self.nln.clone(), normal_points:self.normal_points.clone(), bbp: self.bbp, center: self.center, radius: self.radius, textured:self.textured.clone(), cd:self.cd.clone(),
         }
     }
     pub fn triangles(&self) -> usize { self.tri.len() / 3 }
@@ -108,7 +110,7 @@ impl Scene {
             textured.push(SurfaceTri { vertices,points:[provenance.point[ti*3],provenance.point[ti*3+1],provenance.point[ti*3+2]],prim:provenance.prim[ti],slot:name,uv_sets });
         }
         let pick_bvh=std::sync::Arc::new(crate::picking::Bvh::new(p,&l.tri));
-        Self { p:p.to_vec(),n,point,line,tri:l.tri,edge:l.edge,pick_bvh,nlp,nln,normal_points,bbp,center,radius,textured }
+        Self { p:p.to_vec(),n,point,line,tri:l.tri,edge:l.edge,pick_bvh,nlp,nln,normal_points,bbp,center,radius,textured,cd:point_colors(g) }
     }
 }
 
@@ -141,6 +143,25 @@ fn instance_slot_name_resolves_to_manifest_binding() {
     registry.register_descriptor("peer3:blender:instance:0",materials::Descriptor::parse(
         &serde_json::json!({"version":1,"name":"imagepaste-261017-142014"})).unwrap());
     assert!(matches!(registry.resolve(&scene.textured[0].slot).state,State::Ok));
+}
+/// `Cd` as one RGB per point: point Cd as is; vertex and primitive Cd averaged onto the points they touch.
+fn point_colors(g:&Geometry) -> Option<Vec<f32>> {
+    let t=&g.topology; let n=g.npoints;
+    let rgb=|a:&minihou_core::geometry::Attr,i:usize| -> Option<[f32;3]> {
+        let v=a.as_f32()?; let w=a.width; if w<3 { return None; }
+        let s=v.get(i*w..i*w+3)?; Some([s[0],s[1],s[2]])
+    };
+    if let Some(a)=g.point.get("Cd") { if a.as_f32().is_some() && a.width>=3 && a.rows()>=n {
+        return Some((0..n).flat_map(|i|rgb(a,i).unwrap_or([0.72;3])).collect());
+    } }
+    let (mut sum,mut cnt)=(vec![0f32;n*3],vec![0u32;n]);
+    let mut add=|pt:i32,c:[f32;3]| { let k=pt as usize; if k<n { for j in 0..3 { sum[k*3+j]+=c[j]; } cnt[k]+=1; } };
+    if let Some(a)=g.vertex.get("Cd") { for (i,&pt) in t.vertex_point.iter().enumerate() { if let Some(c)=rgb(a,i) { add(pt,c); } } }
+    else if let Some(a)=g.prim.get("Cd") { for prim in 0..t.nprims() {
+        if let Some(c)=rgb(a,prim) { for &pt in &t.vertex_point[t.prim_offsets[prim] as usize..t.prim_offsets[prim+1] as usize] { add(pt,c); } }
+    } }
+    else { return None; }
+    Some((0..n).flat_map(|i|{ let c=cnt[i].max(1) as f32; if cnt[i]==0 {[0.72;3]} else {[sum[i*3]/c,sum[i*3+1]/c,sum[i*3+2]/c]} }).collect())
 }
 /// Standalone points and non-surface primitive segments survive every proxy cut.
 fn element_indices(g:&Geometry, triangles:&[u32]) -> (Vec<u32>,Vec<u32>) {
@@ -260,7 +281,7 @@ pub struct Gpu {
     sel_face: wgpu::Buffer, sel_face_n: u32, sel_line: wgpu::Buffer, sel_line_n: u32, zeros: wgpu::Buffer,
     nl_p: wgpu::Buffer, nl_n: wgpu::Buffer, nl_count: u32, nl_selected: u32, bb_p: wgpu::Buffer, bb_n: wgpu::Buffer, bb_i: wgpu::Buffer,
     bind: wgpu::BindGroup, ubuf: wgpu::Buffer,
-    vp: wgpu::Buffer, vn: wgpu::Buffer, vc: wgpu::Buffer, neutral_color: wgpu::Buffer,
+    vp: wgpu::Buffer, vn: wgpu::Buffer, vc: wgpu::Buffer, vcd: Option<wgpu::Buffer>, neutral_color: wgpu::Buffer,
     ntri_idx: u32,
     object_mask: Option<wgpu::Buffer>, object_mask_n: u32,
     object_mask_points: Option<Vec<std::ops::Range<u32>>>,
@@ -635,6 +656,7 @@ impl Gpu {
             vp,
             vn,
             vc:buf("object colors",bytemuck::cast_slice(&vec![0.72f32;(sc.p.len()).max(3)]),wgpu::BufferUsages::VERTEX),
+            vcd:sc.cd.as_ref().map(|c|buf("Cd colors",bytemuck::cast_slice(c),wgpu::BufferUsages::VERTEX)),
             neutral_color:buf("neutral color",bytemuck::cast_slice(&vec![0.72f32;(sc.p.len()*4).max(sc.tri.len()).max(24)]),wgpu::BufferUsages::VERTEX),
             object_mask: None, object_mask_n: 0, object_mask_points: None,
             ntri_idx: sc.tri.len() as u32,
@@ -656,6 +678,7 @@ impl Gpu {
         self.vp=buf("P",bytemuck::cast_slice(&sc.p),wgpu::BufferUsages::VERTEX);
         self.vn=buf("N",bytemuck::cast_slice(&sc.n),wgpu::BufferUsages::VERTEX);
         self.vc=buf("object colors",bytemuck::cast_slice(&vec![0.72f32;sc.p.len().max(3)]),wgpu::BufferUsages::VERTEX);
+        self.vcd=sc.cd.as_ref().map(|c|buf("Cd colors",bytemuck::cast_slice(c),wgpu::BufferUsages::VERTEX));
         self.neutral_color=buf("neutral color",bytemuck::cast_slice(&vec![0.72f32;(sc.p.len()*4).max(sc.tri.len()).max(24)]),wgpu::BufferUsages::VERTEX);
         self.ntri_idx=sc.tri.len() as u32;
         self.edge_world=edge_world_of(sc);
@@ -884,9 +907,10 @@ impl Gpu {
             || (overlay.wireframe && mode.shaded() && !mode.bounds())
             || (editing && !mode.bounds());
         let show_wire = mode.wire() || is_shaded_wire || (overlay.xray && editing);
+        let use_cd=overlay.object_color==ObjectColor::Single && self.vcd.is_some() && !mode.matcap();
         let u = Uniforms { view_proj,view,inv_view_proj:inverse_projection(view_proj),base:[0.72,0.74,0.78,1.],wire:[0.,0.,0.,if is_shaded_wire {1.} else {0.}],
             flat_shading:(mode.flat() || (mode.matcap() && overlay.matcap_flat)) as u32,wire_fade:fade,_pad:[1,if sketchup_clean {2} else {mode.matcap() as u32}],
-            object_color:(overlay.object_color==ObjectColor::Random) as u32,_pad_color:[0;3],
+            object_color:(overlay.object_color==ObjectColor::Random || use_cd) as u32,_pad_color:[0;3],
             floor:[10f32.powf((cam.distance().max(0.01)*0.1).log10().floor()),overlay.grid as u32 as f32,overlay.axes as u32 as f32,cam.distance().max(0.01)],
             element_size:[target.size[0] as f32,target.size[1] as f32,overlay.geometry.point_size,overlay.geometry.line_width],
             element_flags:[overlay.geometry.points as u32,overlay.geometry.lines as u32,overlay.geometry.enabled as u32,(selection_mode==crate::ui::SelectionMode::Points) as u32],
@@ -901,7 +925,7 @@ impl Gpu {
         // Boxes are full object bounds, never the bounds of a decimated cluster.
         let boxes=if mode.bounds() { self.boxes.as_ref() } else { None };
         let (vp,vn,vc,tri,edge)=if let Some(b)=boxes { (&b.p,&b.n,&b.c,&b.tri,&b.edge) }
-            else { (&self.vp,&self.vn,&self.vc,&self.partition_tri,&self.partition_edge) };
+            else { (&self.vp,&self.vn,if use_cd { self.vcd.as_ref().unwrap() } else { &self.vc },&self.partition_tri,&self.partition_edge) };
         let visibility=overlay.visibility;
         let mut enc = device.create_command_encoder(&Default::default());
         {
@@ -1176,7 +1200,7 @@ mod tests {
         }).collect();
         let scene=Scene {p,n:vec![0.,0.,1.].repeat(4),tri:vec![0,1,2,0,2,3],edge:vec![0,1,1,2,2,3,3,0],
             point:Vec::new(),line:Vec::new(),pick_bvh:std::sync::Arc::new(crate::picking::Bvh::new(&[],&[])),
-            nlp:Vec::new(),nln:Vec::new(),normal_points:Vec::new(),bbp:[0.;24],center:[0.;3],radius:1.5,textured};
+            nlp:Vec::new(),nln:Vec::new(),normal_points:Vec::new(),bbp:[0.;24],center:[0.;3],radius:1.5,textured,cd:None};
         let mut gpu=Gpu::new(&device,&scene);
         let mut registry=Registry::new(".");
         // The red F has a top bar and left stem. A V mirror puts its bar at the bottom.
@@ -1290,7 +1314,7 @@ mod tests {
             pick_bvh:std::sync::Arc::new(crate::picking::Bvh::new(&[],&[])),
             nlp: Vec::new(), nln: Vec::new(), normal_points:Vec::new(), bbp: [0.0; 24],
             center: [0.0, 0.0, 0.0], radius: 1.5,
-            textured:Vec::new(),
+            textured:Vec::new(), cd:None,
         };
 
         let gpu = Gpu::new(&device, &scene);
@@ -1393,3 +1417,22 @@ mod tests {
 
 #[cfg(test)]
 #[path="group_render_tests.rs"] mod group_render_tests;
+#[cfg(test)]
+mod cd_scene_tests {
+    use super::*;
+    use minihou_core::geometry::Attr;
+    use std::sync::Arc;
+    fn tri() -> Geometry { Geometry::from_arrays(vec![0.,0.,0.,1.,0.,0.,0.,1.,0.],vec![0,1,2],vec![0,3],Some(vec![true])).unwrap() }
+    #[test] fn scene_without_cd_keeps_default_colour() { assert!(Scene::new(&tri()).cd.is_none()); }
+    #[test] fn point_cd_is_the_scene_colour() {
+        let mut g=tri(); let c=vec![1.,0.,0., 0.,1.,0., 0.,0.,1.];
+        g.point.insert("Cd".into(),Arc::new(Attr::f32(3,c.clone())));
+        assert_eq!(Scene::new(&g).cd.unwrap(),c);
+    }
+    #[test] fn vertex_and_face_cd_reach_the_points() {
+        let mut g=tri(); g.vertex.insert("Cd".into(),Arc::new(Attr::f32(3,vec![1.,0.,0., 0.,1.,0., 0.,0.,1.])));
+        assert_eq!(Scene::new(&g).cd.unwrap(),vec![1.,0.,0., 0.,1.,0., 0.,0.,1.]);
+        let mut g=tri(); g.prim.insert("Cd".into(),Arc::new(Attr::f32(3,vec![0.2,0.4,0.6])));
+        assert_eq!(Scene::new(&g).cd.unwrap(),vec![0.2,0.4,0.6].repeat(3));
+    }
+}
