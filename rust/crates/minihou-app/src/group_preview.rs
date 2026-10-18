@@ -36,6 +36,26 @@ pub fn geometry(g:&minihou_core::Geometry,name:&str)->(Vec<f32>,Vec<f32>) {
     (faces,lines)
 }
 
+/// Membership of the named output group as a selection (primitive, edge, then point groups), for the target button click.
+pub fn selection(g:&minihou_core::Geometry,name:&str)->Option<picking::Selection> {
+    let key=format!("group_{name}");
+    let on=|a:&minihou_core::geometry::Attr|->Vec<u32> {match &a.data {
+        minihou_core::geometry::AttrData::F32(v)=>v.chunks(a.width).enumerate().filter(|(_,r)|r[0]!=0.).map(|(i,_)|i as u32).collect(),
+        minihou_core::geometry::AttrData::I32(v)=>v.chunks(a.width).enumerate().filter(|(_,r)|r[0]!=0).map(|(i,_)|i as u32).collect(),
+    }};
+    if let Some(a)=g.prim.get(&key) {
+        let members:std::collections::BTreeSet<u32>=on(a).into_iter().collect();let layout=minihou_core::coplanar::preview_layout(g);
+        let tris=layout.tri_prim.iter().enumerate().filter(|(_,p)|members.contains(p)).map(|(t,_)|t as u32).collect();
+        return Some(picking::Selection {mode:ui::SelectionMode::Faces,tris,..Default::default()});
+    }
+    if let Some(a)=g.edge.get(&key) {
+        let e=minihou_core::topo::edges(&g.topology,g.npoints);
+        let edges=on(a).into_iter().filter(|&i|(i as usize)*2+1<e.points.len()).map(|i|(e.points[i as usize*2] as u32,e.points[i as usize*2+1] as u32)).collect();
+        return Some(picking::Selection {mode:ui::SelectionMode::Edges,edges,..Default::default()});
+    }
+    g.point.get(&key).map(|a|picking::Selection {mode:ui::SelectionMode::Points,points:on(a),..Default::default()})
+}
+
 #[cfg(test)] mod tests {
     use super::*;
     #[test] fn point_groups_preview_only_their_members() {

@@ -41,6 +41,8 @@ use std::collections::BTreeSet;
 #[derive(Clone, Debug)]
 pub enum UiAction {
     PickParameter { node: String, name: String, mode: SelectionMode, pairs: bool },
+    /// Output group target button clicked: select that group's elements on the node's own output.
+    SelectOutputGroup { node: String, name: String },
     StartSketch(sketch::SketchMode),
     TransformNode { op: TransformOp },
     StartModal(modal_transform::Kind),

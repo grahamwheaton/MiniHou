@@ -313,6 +313,7 @@ Features:
 - **Image file default:** a flat image plane by default, renamed "Tessellation", with a height map as an option (no "too dense" error by default).
 - **Output target button:** a target button next to each output parameter. Hover shows the output on the mesh (a float output can show as a strength level); click selects the group. Suggest a colour (not purple, which is the input selection colour).
 - **Dissolve flat edges and Clean parity** (Flash, in progress); if the Clean/dissolve nodes cannot be found in the Tab menu, add them to the shelf.
+<<<<<<< HEAD
 
 ## Global rule: purple input arrows and output target buttons (requested 2026-10-18)
 
@@ -326,3 +327,9 @@ Features:
 - **External link icon:** replace the Blender icon on externally linked parameters with the same style as the linked-parameter icon (screenshot 80: a green arrow with the link count), in orange. If a parameter is both externally linked and linked in MiniHou, keep it orange.
 - **Edit expression:** when a parameter already has a link, "Edit expression" should open with the existing relationship filled in, not empty.
 - **Per-channel link menus:** right-clicking a single channel of a vector (X, Y or Z) should link just that channel. Clicking the label still links all channels (X, Y and Z together).
+=======
+>>>>>>> sonnet/global-arrows
+
+## Feature: Match Size node, Houdini parity (requested 2026-10-18)
+
+Match Size (https://www.sidefx.com/docs/houdini/nodes/sop/matchsize.html): translate and scale the input so its bounding box matches a target. Parameters: Group (with the purple arrow), Group Type, Justify With (Input If Wired, Target, and so on), Use Groups to Determine Justification Bounds, Target Position (x, y, z), Target Size (x, y, z), Translate, Justify X/Y/Z (Center, Min, Max, and so on) to Same/Target with Offset By, Scale to Fit, Uniform Scale, Restore Transform, and Stash Transform (with Replace Existing).

@@ -9,6 +9,40 @@ use minihou_app::value_link_ui::{self, CopiedParam, PasteMode};
 
 const DISABLED: &str = "The Rust backend does not support it yet";
 pub const PICK_PURPLE: Color32 = Color32::from_rgb(184, 82, 245);
+/// Output group target button and its viewport highlight: teal, distinct from purple (input) and orange (object selection).
+pub const TARGET_TEAL: Color32 = Color32::from_rgb(38, 205, 200);
+/// Orange used for object selection and the barrier group.
+pub const SELECT_ORANGE: Color32 = Color32::from_rgb(0xff, 0xa0, 0x28);
+
+fn is_string_meta(meta: Option<&Value>) -> bool {
+    meta.is_some_and(|m| matches!(m["kind"].as_str(), Some("str" | "string")))
+}
+fn explicit_pick(meta: Option<&Value>) -> bool {
+    meta.is_some_and(|m| m.get("pick_domain").is_some() || m.get("pick_domain_param").is_some())
+}
+/// One rule for output group fields: string fields that name a group the node writes (outgrp_*_name, output_group, ...).
+pub fn is_output_group_field(name: &str, meta: Option<&Value>) -> bool {
+    if !is_string_meta(meta) || explicit_pick(meta) { return false; }
+    let named = (name.starts_with("outgrp_") && name.ends_with("_name"))
+        || matches!(name, "output_group" | "output_group_name" | "output_inner_group_name" | "result_group_name" | "patch_group" | "patchgroup"
+            | "edge_loop_group" | "edgeloopgroup" | "fill_group" | "ray_hit_group" | "inside_group");
+    named || meta.is_some_and(|m| m["doc"].as_str().is_some_and(|d| d.contains("receives")))
+}
+/// One rule for input group fields: string fields that select elements by group, pattern, or an element list.
+pub fn is_input_group_field(name: &str, meta: Option<&Value>) -> bool {
+    if explicit_pick(meta) { return true; }
+    if (meta.is_some() && !is_string_meta(meta)) || is_output_group_field(name, meta) { return false; }
+    let by_name = matches!(name, "group" | "group2" | "groups" | "group_name" | "pattern") || name.ends_with("_group") || name.ends_with("_groups");
+    let selection_list = matches!(name, "points" | "edges" | "faces" | "exclude_edges")
+        && meta.is_some_and(|m| m["doc"].as_str().is_some_and(|d| d.to_lowercase().contains("selection")));
+    by_name || selection_list
+}
+fn name_domain(name: &str, meta: Option<&Value>) -> super::SelectionMode {
+    let doc = meta.and_then(|m| m["doc"].as_str()).unwrap_or("").to_lowercase();
+    if name.contains("edge") || doc.contains("edge") { super::SelectionMode::Edges }
+    else if name.contains("face") || doc.contains("primitive") { super::SelectionMode::Faces }
+    else { super::SelectionMode::Points }
+}
 
 /// The registry describes the element domain; dynamic nodes read their domain parameter.
 pub fn pick_domain(meta: Option<&Value>, params: &Value) -> Option<super::SelectionMode> {
@@ -27,13 +61,14 @@ pub fn pick_domain(meta: Option<&Value>, params: &Value) -> Option<super::Select
 /// Fallback for group fields without registry metadata: follow a sibling domain or group_type parameter.
 pub fn pick_domain_for(typ: &str, name: &str, meta: Option<&Value>, params: &Value) -> Option<super::SelectionMode> {
     if let Some(mode) = pick_domain(meta, params) { return Some(mode); }
-    if !matches!(name, "group" | "group_name" | "pattern") { return None; }
+    if !is_input_group_field(name, meta) { return None; }
+    if !matches!(name, "group" | "group_name" | "pattern") { return Some(name_domain(name, meta)); }
     for sibling in ["domain", "group_type"] {
         let Some(m) = param_meta(typ, sibling) else { continue };
         let value = params[sibling].as_str().or_else(|| m["default"].as_str());
         if let Some(mode) = value.and_then(|d| pick_domain(Some(&json!({"pick_domain": d})), params)) { return Some(mode); }
     }
-    None
+    Some(name_domain(name, meta))
 }
 
 #[cfg(test)]
@@ -80,6 +115,32 @@ mod pick_tests {
         assert_eq!(pick_domain(param_meta("attribute_create", "group"), &json!({"domain":"primitives"})), Some(SelectionMode::Faces));
     }
     #[test]
+    fn input_rule_adds_arrow_to_group_fields_only() {
+        for (n, f) in [("blast","group"),("transform","group"),("group_create","pattern"),("ray","collision_group"),("polyfill","boundary_group"),
+                       ("measure_distance","group2"),("assemble","groups"),("polyextrude","edges"),("polyextrude","points")] {
+            let m = param_meta(n, f);
+            assert!(pick_domain_for(n, f, m, &json!({})).is_some(), "{n}.{f} needs the arrow");
+        }
+        for (n, f) in [("blast","negate"),("curve","points"),("polyfill","patch_group"),("flood_fill","output_group"),("assemble","output_attrib"),("polybevel","group_type")] {
+            assert!(pick_domain_for(n, f, param_meta(n, f), &json!({})).is_none(), "{n}.{f} must not get an arrow");
+        }
+    }
+    #[test]
+    fn output_rule_adds_target_to_output_group_names() {
+        for (n, f) in [("flood_fill","output_group"),("polyfill","patch_group"),("polyfill","fill_group"),("ray","ray_hit_group"),("grow","result_group_name"),("voronoi_fracture","inside_group")] {
+            assert!(is_output_group_field(f, param_meta(n, f)), "{n}.{f} needs the target");
+        }
+        assert!(is_output_group_field("outgrp_shared_name", Some(&json!({"kind":"str"}))));
+        assert!(!is_output_group_field("group", param_meta("blast", "group")));
+        assert!(!is_output_group_field("outgrp_cap", Some(&json!({"kind":"bool"}))));
+    }
+    #[test]
+    fn target_colour_differs_from_purple_and_orange() {
+        assert_ne!(TARGET_TEAL, PICK_PURPLE);
+        assert_ne!(TARGET_TEAL, SELECT_ORANGE);
+        assert!(TARGET_TEAL.g() > TARGET_TEAL.r() && TARGET_TEAL.b() > TARGET_TEAL.r());
+    }
+    #[test]
     fn arrow_ink_is_purple() {
         assert_eq!(PICK_PURPLE, Color32::from_rgb(184, 82, 245));
     }
@@ -93,6 +154,15 @@ fn pick_field(ui: &mut egui::Ui, value: &mut Value, width: f32, active: bool, en
         .fill(if active { PICK_PURPLE.gamma_multiply(0.27) } else { ui.visuals().widgets.inactive.bg_fill })
         .stroke(Stroke::new(1.0_f32, PICK_PURPLE))).on_hover_text("Pick elements in viewport (Enter to finish, Esc to cancel)");
     (arrow.clicked(), arrow.hovered())
+}
+fn target_field(ui: &mut egui::Ui, value: &mut Value, width: f32, enabled: bool) -> (bool, bool) {
+    let mut text = value.as_str().unwrap_or_default().to_owned();
+    let edit = ui.add_sized([(width - 28.).max(8.), 22.], egui::TextEdit::singleline(&mut text));
+    if edit.changed() { *value = json!(text); }
+    let button = ui.add_enabled(enabled, egui::Button::new(egui::RichText::new("◎").color(TARGET_TEAL))
+        .fill(ui.visuals().widgets.inactive.bg_fill).stroke(Stroke::new(1.0_f32, TARGET_TEAL)))
+        .on_hover_text("Show this output group in the viewport; click to select it");
+    (button.clicked(), button.hovered())
 }
 fn clipboard_id() -> egui::Id { egui::Id::new("value_link_parameter_clipboard") }
 
@@ -1148,6 +1218,17 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
                 file_widget(ui, &mut value, meta, typ, param.name, layout.control_rect.width())
             } else if typ == "blender_object" && param.name == "object" {
                 super::object_search::field(ui, &mut value, layout.control_rect.width(), v.theme)
+            } else if pick_mode.is_none() && kind == ParamKind::String && is_output_group_field(param.name, meta) {
+                let (clicked, hovered) = target_field(ui, &mut value, layout.control_rect.width(), enabled);
+                if hovered {
+                    let pass = ui.ctx().cumulative_pass_nr();
+                    let name = value.as_str().unwrap_or("").to_owned();
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("param_target_hover"), (id.to_owned(), name, pass)));
+                }
+                if clicked {
+                    out.push(UiAction::SelectOutputGroup { node: id.to_owned(), name: value.as_str().unwrap_or("").to_owned() });
+                }
+                false
             } else if pick_mode.is_some() && kind == ParamKind::String {
                 let active = ui.ctx().data(|d| d.get_temp::<(String,String)>(egui::Id::new("param_pick_active")))
                     .is_some_and(|(node,name)| node == id && name == param.name);
