@@ -1030,7 +1030,8 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     let is_length = crate::units::is_length_param(typ, param.name);
     let units_opt = if is_length { Some(v.units) } else { None };
     let ink = if !enabled { v.theme.faint } else if modified { v.theme.text } else { v.theme.dim };
-    let label_text = if is_length { format!("{} ({})", title(param.name), v.units.display.symbol()) } else { title(param.name) };
+    let label_text = if typ == "scene_objects" && param.name == "piece_attrib" { "Object ID Attribute".to_owned() }
+        else if is_length { format!("{} ({})", title(param.name), v.units.display.symbol()) } else { title(param.name) };
 
     let is_bool = kind == ParamKind::Bool;
     let is_vector = kind == ParamKind::Vec3 || value.as_array().is_some_and(|a| (2..=4).contains(&a.len()) && a.iter().all(Value::is_number));

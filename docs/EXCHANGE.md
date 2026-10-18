@@ -2,7 +2,7 @@
 
 | | Blender -> MiniHou | MiniHou -> Blender | Files (to or from Houdini and others) |
 |---|---|---|---|
-| **Mesh** | `blender_object` (live; modifiers applied) | the output object (live), `scene_objects` *pieces* | USD (`usd_import`, File > Export USD) |
+| **Mesh** | `blender_object` (live; modifiers applied) | the output object (live), `scene_objects` *objects* | USD (`usd_import`, File > Export USD) |
 | **Curves** | `blender_object` on a curve, hair-curves or Geometry Nodes object | `scene_objects` mode **curves** (a real curves object); loose edges of the output mesh | USD `BasisCurves` |
 | **Points / point clouds** | `blender_object` on a point-cloud object (or loose vertices of a mesh) | `scene_objects` mode **points** (a real point cloud); vertices of the output mesh | USD `Points` |
 | **Instances** | (instances are points that name objects) | `scene_objects` mode **instances** (linked duplicates) | USD `PointInstancer` |
