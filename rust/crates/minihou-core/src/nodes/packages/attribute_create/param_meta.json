@@ -1,0 +1,47 @@
+{
+  "domain": {
+    "default": "points",
+    "doc": "Geometry domain receiving the new attribute.",
+    "kind": "enum",
+    "options": [
+      "points",
+      "primitives",
+      "vertices",
+      "detail"
+    ]
+  },
+  "group": {
+    "default": "",
+    "doc": "Only set it on these elements (others get 0); points or primitives",
+    "kind": "str",
+    "pick_domain_default": "points",
+    "pick_domain_param": "domain"
+  },
+  "name": {
+    "default": "attrib1",
+    "doc": "Name of the attribute to create.",
+    "kind": "str"
+  },
+  "type": {
+    "default": "float",
+    "doc": "Data type and component count of the new attribute.",
+    "kind": "enum",
+    "options": [
+      "float",
+      "int",
+      "vector",
+      "vector2",
+      "color",
+      "vector4"
+    ]
+  },
+  "value": {
+    "default": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "doc": "Value (float/int use the first component; vector4 adds w = 1)",
+    "kind": "vec3"
+  }
+}

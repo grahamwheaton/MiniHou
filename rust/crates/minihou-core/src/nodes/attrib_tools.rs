@@ -1,15 +1,14 @@
 //! Deterministic attribute tools from nodes/attrib_tools.py.
 use std::{collections::BTreeMap,sync::Arc};
-use super::{InputSpec, Inputs, NodeSpec, GEO};
-use crate::{error::{Error,Result},geometry::{Attr,AttrData,AttrTable,Geometry,Topology},params::Params};
-fn table_mut<'a>(g:&'a mut Geometry,dom:&str)-> &'a mut AttrTable{match dom{"point"=>&mut g.point,"vertex"=>&mut g.vertex,_=>&mut g.prim}}
-fn domain(s:&str)->&str{match s{"points"=>"point","vertices"=>"vertex","detail"=>"detail",_=>"prim"}}
-fn size(g:&Geometry,d:&str)->usize{match d{"point"=>g.npoints,"vertex"=>g.nvertices(),_=>g.nprims()}}
-fn set(g:&Geometry,dom:&str,name:String,arr:Attr)->Geometry{
+use crate::{error::{Error,Result},geometry::{Attr,AttrData,AttrTable,Geometry},params::Params};
+pub(super) fn table_mut<'a>(g:&'a mut Geometry,dom:&str)-> &'a mut AttrTable{match dom{"point"=>&mut g.point,"vertex"=>&mut g.vertex,_=>&mut g.prim}}
+pub(super) fn domain(s:&str)->&str{match s{"points"=>"point","vertices"=>"vertex","detail"=>"detail",_=>"prim"}}
+pub(super) fn size(g:&Geometry,d:&str)->usize{match d{"point"=>g.npoints,"vertex"=>g.nvertices(),_=>g.nprims()}}
+pub(super) fn set(g:&Geometry,dom:&str,name:String,arr:Attr)->Geometry{
     let mut out=g.clone();for d in ["point","vertex","prim"]{if d!=dom{table_mut(&mut out,d).remove(&name);}}
     table_mut(&mut out,dom).insert(name,Arc::new(arr));out
 }
-fn set_with_group(g:&Geometry,dom:&str,name:&str,arr:Attr,group:&str)->Result<Geometry>{
+pub(super) fn set_with_group(g:&Geometry,dom:&str,name:&str,arr:Attr,group:&str)->Result<Geometry>{
     super::group::valid_name(name)?;
     let mut out=g.clone();for d in ["point","vertex","prim"]{if d!=dom{table_mut(&mut out,d).remove(name);}}
     let arr=if !group.is_empty() && (dom=="point" || dom=="prim"){
@@ -30,19 +29,6 @@ fn set_with_group(g:&Geometry,dom:&str,name:&str,arr:Attr,group:&str)->Result<Ge
         }
     }else{arr};
     table_mut(&mut out,dom).insert(name.to_string(),Arc::new(arr));Ok(out)
-}
-pub const ATTRIBUTE_CREATE:NodeSpec=NodeSpec{name:"attribute_create",inputs:GEO,params:crate::params!("name":"attrib1";"domain":"points";"type":"float";"value":[0.,0.,0.];"group":""),cook:create};
-fn create(inputs:&Inputs,p:&Params)->Result<Geometry>{
-    let g=ATTRIBUTE_CREATE.one(inputs,0)?;let name=p.s("name")?;super::group::valid_name(&name)?;
-    let dom=p.e("domain",&["points","primitives","vertices","detail"])?;let dom=domain(&dom);
-    let kind=p.e("type",&["float","int","vector","vector2","color","vector4"])?;let w=match kind.as_str(){"float"|"int"=>1,"vector2"=>2,"vector4"=>4,_=>3};
-    let v=p.v3("value")?;let v=[v[0],v[1],v[2],1.];
-    if dom=="detail"{let mut out=(*g).clone();out.detail.insert(name,if w==1{serde_json::json!(v[0])}else{serde_json::json!(&v[..w])});return Ok(out);}
-    if name=="P" && (dom!="point" || w!=3){return Err(Error::new("P must be a point vector attribute"));}
-    let n=size(&g,dom);let sel=if dom=="point" || dom=="prim"{super::group::mask(&g,dom,&p.s("group")?)?}else{vec![true;n]};
-    let arr=if kind=="int"{Attr::i32(w,(0..n).flat_map(|i|(0..w).map({let sel=&sel;move|k|if sel[i]{v[k] as i32}else{0}})).collect())}
-        else{Attr::f32(w,(0..n).flat_map(|i|(0..w).map({let sel=&sel;move|k|if sel[i]{v[k] as f32}else{0.}})).collect())};
-    Ok(set(&g,dom,name,arr))
 }
 pub(super) fn piece_labels(g:&Geometry)->(Vec<i32>,Vec<i32>){
     fn root(parent:&mut[usize],mut i:usize)->usize{while parent[i]!=i{parent[i]=parent[parent[i]];i=parent[i];}i}
@@ -111,7 +97,7 @@ fn measure(inputs:&Inputs,p:&Params)->Result<Geometry>{
 
 pub const ATTRIBUTE_BLUR:NodeSpec=NodeSpec{name:"attribute_blur",inputs:GEO,params:crate::params!("names":"P";"iterations":5;"strength":0.5;"pin_boundary":true;"group":""),cook:blur};
 pub const SMOOTH:NodeSpec=NodeSpec{name:"smooth",inputs:GEO,params:crate::params!("iterations":10;"strength":0.5;"method":"taubin";"pin_boundary":true;"group":""),cook:smooth};
-fn laplacian(g:&Geometry,names:&str,p:&Params,factors:&[f64])->Result<Geometry>{
+pub(super) fn laplacian(g:&Geometry,names:&str,p:&Params,factors:&[f64])->Result<Geometry>{
     let e=crate::topo::edges(&g.topology,g.npoints);let mut neighbours=vec![Vec::new();g.npoints];let mut boundary=vec![false;g.npoints];
     // Only polygon edges mark polygon boundary; curve ends are pinned by degree.
     let mut polygon_counts=BTreeMap::<(i32,i32),usize>::new();
@@ -836,7 +822,7 @@ mod tests{
     }
     #[test]
     fn create_vector4_and_group_zero_fill(){
-        let g=geo();let out=create(&[vec![Arc::new(g)]],&Params::resolve(ATTRIBUTE_CREATE.params,serde_json::json!({"type":"vector4","value":[1,2,3],"group":"1"}).as_object()).unwrap()).unwrap();
+        let g=geo();let out=(crate::nodes::get("attribute_create").unwrap().cook)(&[vec![Arc::new(g)]],&Params::resolve(crate::nodes::get("attribute_create").unwrap().params,serde_json::json!({"type":"vector4","value":[1,2,3],"group":"1"}).as_object()).unwrap()).unwrap();
         assert_eq!(&out.point["attrib1"].as_f32().unwrap()[4..8],&[1.,2.,3.,1.]);assert_eq!(out.point["attrib1"].as_f32().unwrap()[0],0.);out.validate().unwrap();
     }
     #[test]
