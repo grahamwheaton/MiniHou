@@ -3042,7 +3042,8 @@ impl eframe::App for App {
                         .filter(|h| h.4 + 1 >= ctx.cumulative_pass_nr());
                     if self.param_pick.is_none() {
                         match hover {
-                            Some((node,name,default_mode,_,_)) if source_ready(&self.display_ranges, &input_source(self.editor.doc.value(), &node, &self.display)) => {
+                            Some((node,name,default_mode,_,_)) if source_ready(&self.display_ranges, &input_source(self.editor.doc.value(), &node, &self.display))
+                                || (self.editor.doc.value()["nodes"][&node]["type"] == "group_create" && source_ready(&self.display_ranges, &node)) => {
                                 let text = self.editor.doc.value()["nodes"][&node]["params"][&name].as_str().unwrap_or("").to_owned();
                                 let mode = infer_mode(&text, default_mode);
                                 let topo = element_select::cached(&self.elem_topo, scene);

@@ -41,6 +41,10 @@ mod pick_tests {
     use super::*;
     use super::super::SelectionMode;
     #[test]
+    fn group_create_edges_domain_picks_edges() {
+        assert_eq!(pick_domain_for("group_create", "pattern", param_meta("group_create", "pattern"), &json!({"domain":"edges"})), Some(SelectionMode::Edges));
+    }
+    #[test]
     fn registry_maps_group_and_crease_fields() {
         assert_eq!(pick_domain(param_meta("subdivide", "creases"), &json!({})), Some(SelectionMode::Edges));
         assert_eq!(pick_domain(param_meta("polyextrude", "group"), &json!({})), Some(SelectionMode::Faces));
