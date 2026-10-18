@@ -172,7 +172,6 @@ pub fn registry() -> &'static [NodeSpec] {
         generate::SPHERE,
         generate::TUBE,
         generate::TORUS,
-        generate::BOUND,
         volume::SDF_SHAPE,
         volume::SDF_BOOLEAN,
         fracture_voronoi::VORONOI_FRACTURE,
@@ -356,7 +355,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["cache", "example_offset", "flood_fill", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "point", "subnet", "unpack"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["bound", "cache", "example_offset", "flood_fill", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "point", "subnet", "unpack"]);
     }
 }
 

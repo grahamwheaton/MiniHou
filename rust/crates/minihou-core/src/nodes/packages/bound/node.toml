@@ -1,0 +1,5 @@
+id = "bound"
+name = "Bound"
+category = "Modify"
+description = "Create a box around the input geometry."
+keywords = "bound geometry"

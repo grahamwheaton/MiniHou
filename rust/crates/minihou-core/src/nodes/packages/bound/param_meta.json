@@ -1,0 +1,17 @@
+{
+  "oriented": {
+    "default": false,
+    "doc": "Fit the box to the points' principal axes instead of the world axes",
+    "kind": "bool"
+  },
+  "padding": {
+    "default": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "doc": "Grow the box by this much on each side",
+    "kind": "vec3",
+    "min": 0.0
+  }
+}

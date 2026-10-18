@@ -33,7 +33,6 @@ pub(super) const TABS: &[Category] = &[
         Tool { label: "Instance", node_type: "instance" },
         Tool { label: "Switch", node_type: "switch" },
         Tool { label: "Match Size", node_type: "match_size" },
-        Tool { label: "Bound", node_type: "bound" },
         Tool { label: "Blast", node_type: "blast" },
         Tool { label: "Delete", node_type: "delete" },
         Tool { label: "Fuse", node_type: "fuse" },
