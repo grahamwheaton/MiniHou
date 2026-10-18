@@ -96,6 +96,7 @@ mod grid_fill;
 mod recalc_normals;
 mod tris_to_quads;
 mod inset_ext;
+mod measure_volume;
 
 pub use modify::{match_size_points, MatchSizeOut};
 pub use modeling_tools::{edge_slide_preview, loop_cut_fractions, loop_cut_preview, loop_slide_fractions, LoopRing, LoopTopology, LOOP_CUT_MAX};
@@ -314,6 +315,7 @@ pub fn registry() -> &'static [NodeSpec] {
         dissolve::DISSOLVE,
         output::OUTPUT,
         output::INPUT,
+        measure_volume::MEASURE_VOLUME,
     ];
     NODES
 }
