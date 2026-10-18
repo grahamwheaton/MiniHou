@@ -999,6 +999,28 @@
    "min": 0.0
   }
  },
+ "bulge": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Centre position of the bulge deformation.",
+   "kind": "vec3"
+  },
+  "radius": {
+   "default": 1.0,
+   "doc": "Radius of influence around the centre.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "strength": {
+   "default": 1.0,
+   "doc": "Displacement distance along the normal at the centre.",
+   "kind": "float"
+  }
+ },
  "cache": {
   "mode": {
    "default": "auto",

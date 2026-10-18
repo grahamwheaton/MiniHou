@@ -1,0 +1,5 @@
+id = "bulge"
+name = "Bulge"
+category = "Deform"
+description = "Displace points along normals around a centre."
+keywords = "bulge deform magnet normal expand inflate"
