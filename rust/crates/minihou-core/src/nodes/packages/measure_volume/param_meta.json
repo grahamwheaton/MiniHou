@@ -1,0 +1,7 @@
+{
+  "group": {
+    "default": "",
+    "doc": "Optional primitive group to measure volume of; empty measures all closed faces.",
+    "kind": "str"
+  }
+}

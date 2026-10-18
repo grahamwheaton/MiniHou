@@ -407,9 +407,6 @@ def meta() -> dict:
     add("copy_point_attributes", "bool", True, "Copy source point attributes to generated points.")
     add("point_attributes", "str", "*", "Space-separated source point attributes to copy; * copies all. Float attributes interpolate, integers use the dominant vertex.")
     out["scatteralign"] = sa
-    out["measure_volume"] = {
-        "group": {"kind": "str", "default": "", "doc": "Optional primitive group to measure volume of; empty measures all closed faces."},
-    }
     out["measure_distance"] = {
         "group": {"kind": "str", "default": "", "doc": "First element group (point or primitive); empty uses point index / seed."},
         "group2": {"kind": "str", "default": "", "doc": "Second element group (point or primitive); empty measures within the first group or point selection."},
