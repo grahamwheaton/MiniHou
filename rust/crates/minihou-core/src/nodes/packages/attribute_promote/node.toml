@@ -1,0 +1,5 @@
+id = "attribute_promote"
+name = "Attribute Promote"
+category = "Attributes"
+description = "Move or aggregate attributes between domains."
+keywords = "attribute attribute promote"
