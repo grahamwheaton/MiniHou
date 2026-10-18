@@ -1,0 +1,5 @@
+id = "unpack"
+name = "Unpack"
+category = "Modify"
+description = "Expand packed primitives and instances back into editable geometry."
+keywords = "unpack packed instance expand convert real geometry"

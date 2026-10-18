@@ -1,0 +1,19 @@
+{
+  "group": {
+    "kind": "str",
+    "default": "",
+    "doc": "Primitive group to pack into one packed primitive when Mode is group; the other primitives stay unpacked."
+  },
+  "mode": {
+    "kind": "enum",
+    "default": "all",
+    "options": ["all", "group", "connectivity"],
+    "doc": "all: pack everything into one packed primitive; group: pack the primitives in Group; connectivity: pack each connected piece separately."
+  },
+  "pivot": {
+    "kind": "enum",
+    "default": "centroid",
+    "options": ["centroid", "origin"],
+    "doc": "Where each packed primitive's transform sits: the centre of the piece's bounding box, or the world origin."
+  }
+}

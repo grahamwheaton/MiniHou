@@ -1,0 +1,12 @@
+{
+  "group": {
+    "kind": "str",
+    "default": "",
+    "doc": "Point group of packed primitives or instances to expand; empty expands all. Others stay packed."
+  },
+  "recursive": {
+    "kind": "bool",
+    "default": false,
+    "doc": "Also expand packed primitives nested inside the expanded ones; off expands one level."
+  }
+}
