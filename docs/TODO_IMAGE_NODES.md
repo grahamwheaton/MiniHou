@@ -319,3 +319,10 @@ Features:
 - Every input group parameter on every node gets the purple selector arrow, applied from the metadata generator (tools/dump_rust_param_meta.py) by a rule on the parameter name and type (group, group_name, pattern, edges, points, faces and similar selection fields), not per node.
 - Every output group parameter (for example outgrp_* and output_group names) gets a target button next to it. Hovering shows that output's elements on the mesh (a float output can show as a strength level). Clicking selects the group. Suggested colour: teal or cyan (purple is the input selection colour).
 - Implement as one shared rule in the UI (ui/params.rs), reading the metadata kind, so new nodes get both automatically.
+
+## Node editor and linking (requested 2026-10-18)
+
+- **Remove the "Rs" badge** from nodes in the node editor (the Rust-backend marker is no longer needed on each node).
+- **External link icon:** replace the Blender icon on externally linked parameters with the same style as the linked-parameter icon (screenshot 80: a green arrow with the link count), in orange. If a parameter is both externally linked and linked in MiniHou, keep it orange.
+- **Edit expression:** when a parameter already has a link, "Edit expression" should open with the existing relationship filled in, not empty.
+- **Per-channel link menus:** right-clicking a single channel of a vector (X, Y or Z) should link just that channel. Clicking the label still links all channels (X, Y and Z together).
