@@ -837,6 +837,19 @@ mod channel_document_tests {
         assert!(session.last_stats().cached.contains(&"a".to_string()));
     }
     #[test]
+    fn cook_ui_only_and_undo_edits_cook_nothing() {
+        let value=json!({"display":"t","nodes":{"g":{"type":"grid"},"t":{"type":"transform","inputs":{"geo":"g"}}}});
+        let doc=Document::parse(value.to_string()).unwrap();
+        let mut session=doc.session().unwrap();
+        let mut target="t".to_string();
+        let first=cook_batch(&mut session,&mut target,vec![CookRequest{revision:1,edit:Edit::Time{frame:1.,fps:24.}}],|_|());
+        assert_eq!(first.stats.cooked.len(),2);
+        for (revision,edit) in [(2,Edit::Exposed(vec![])),(3,Edit::Replace(value.clone())),(4,Edit::Display("t".into()))] {
+            let r=cook_batch(&mut session,&mut target,vec![CookRequest{revision,edit}],|_|());
+            assert!(r.error.is_none()&&r.stats.cooked.is_empty(),"{:?}",r.stats);
+        }
+    }
+    #[test]
     fn existing_python_compatible_graph_needs_no_channel_fields() {
         let doc=Document::parse(include_str!("default_graph.json").into()).unwrap();
         let graph=Graph::from_value(doc.value()).unwrap();
@@ -902,6 +915,8 @@ pub struct CookWorker<T> {
     sender: mpsc::Sender<CookRequest>,
     queries: mpsc::Sender<http_geometry::Query>,
     latest: Arc<Mutex<Option<CookResponse<T>>>>,
+    /// Newest revision sent; the worker abandons a cook once a newer one is queued.
+    sent: Arc<std::sync::atomic::AtomicU64>,
 }
 /// A short quiet period folds a drag's frame events into one cook. Playback's
 /// 24 fps ticks are farther apart, so each displayed frame still gets a cook.
@@ -929,12 +944,19 @@ impl<T: Send + 'static> CookWorker<T> {
         let (queries, query_rx) = mpsc::channel();
         let latest = Arc::new(Mutex::new(None));
         let output = latest.clone();
+        let sent = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let sent_worker = sent.clone();
         std::thread::Builder::new().name("minihou-cook".into()).spawn(move || {
             loop {
                 match receiver.recv_timeout(std::time::Duration::from_millis(10)) {
                     Ok(first) => {
                         let batch = collect_cook_batch(&receiver, first);
+                        // A newer request abandons this cook between nodes; finished nodes stay cached for it.
+                        let revision = batch.last().map_or(0, |r| r.revision);
+                        let newest = sent_worker.clone();
+                        session.set_cancel(Some(Arc::new(move || newest.load(std::sync::atomic::Ordering::Relaxed) > revision)));
                         let response = cook_batch(&mut session, &mut target, batch, &prepare);
+                        session.set_cancel(None);
                         *output.lock().unwrap() = Some(response);
                     }
                     Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -943,9 +965,11 @@ impl<T: Send + 'static> CookWorker<T> {
                 for query in query_rx.try_iter() { http_geometry::run(&mut session, &target, query); }
             }
         })?;
-        Ok(Self { sender, queries, latest })
+        Ok(Self { sender, queries, latest, sent })
     }
-    pub fn send(&self, request: CookRequest) -> Result<()> { self.sender.send(request).map_err(|_| "cook worker stopped".into()) }
+    pub fn send(&self, request: CookRequest) -> Result<()> {
+        self.sent.fetch_max(request.revision, std::sync::atomic::Ordering::Relaxed);
+        self.sender.send(request).map_err(|_| "cook worker stopped".into()) }
     pub fn poll(&self) -> Option<CookResponse<T>> { self.latest.lock().unwrap().take() }
     pub fn query(&self, query: http_geometry::Query) -> Result<()> { self.queries.send(query).map_err(|_| "cook worker stopped".into()) }
 }
