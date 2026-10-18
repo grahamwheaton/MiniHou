@@ -228,3 +228,7 @@ For nodes with output groups, show an "Output Groups" section like Houdini: one 
 
 - **Boundary of selection node:** select the boundary of the current selection, with the same behaviour as Blender's boundary select.
 - **Select sharp edges node:** select edges above a sharp angle threshold, with the same behaviour as Blender's select sharp edges.
+
+## Future bug: Loop Cut slide direction sometimes backwards (reported 2026-10-18)
+
+The slide direction sometimes flips and the user can't tell what triggers it. Likely causes to check: the sign is taken from the drag vector against the edge direction (mesh_cut.rs, the `sign` in the loop slide), so a drag that is nearly perpendicular to the edge, or an edge whose vertex order differs between the two ends, could flip it. Needs a repro from the user (which edge, drag direction, view angle).
