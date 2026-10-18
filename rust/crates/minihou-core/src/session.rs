@@ -64,11 +64,20 @@ pub struct Session {
     time: (f64, f64),
     /// Permission for `python` nodes; None (the default) denies them.
     python: Option<Arc<crate::python_bridge::PythonGate>>,
+    /// Asked before each node that has to run: true abandons the cook (a newer request superseded it). Nodes already
+    /// finished stay cached, so the next cook picks up where this one stopped.
+    cancel: Option<CancelCheck>,
 }
+
+/// See [`Session::set_cancel`].
+pub type CancelCheck = Arc<dyn Fn() -> bool + Send + Sync>;
+
+/// The error text of a cook abandoned through [`Session::set_cancel`].
+pub const SUPERSEDED: &str = "cook superseded by a newer edit";
 
 impl Session {
     pub fn new(graph: Graph) -> Session {
-        Session { graph, external: Default::default(), external_versions: Default::default(), external_revision:0, cache: HashMap::new(), bytes: 0, budget: None, keep_versions: 2, clock: 0, last: CookStats::default(), time: (1.0, crate::timectx::DEFAULT_FPS), python: None }
+        Session { graph, external: Default::default(), external_versions: Default::default(), external_revision:0, cache: HashMap::new(), bytes: 0, budget: None, keep_versions: 2, clock: 0, last: CookStats::default(), time: (1.0, crate::timectx::DEFAULT_FPS), python: None, cancel: None }
     }
 
     pub fn from_json(text: &str) -> Result<Session> {
@@ -76,7 +85,20 @@ impl Session {
     }
 
     /// Keep live inputs across graph edits, undo and timeline recooks.
-    pub fn replace_graph(&mut self, graph: Graph) { self.graph=graph; self.clear(); }
+    /// The cache is content keyed, so it stays valid: a structural edit, undo or redo recooks only the nodes whose recipe
+    /// changed. Entries of nodes that no longer exist are dropped.
+    pub fn replace_graph(&mut self, graph: Graph) {
+        self.graph = graph;
+        let (graph, bytes) = (&self.graph, &mut self.bytes);
+        self.cache.retain(|_, e| {
+            let keep = graph.node(&e.node).is_some();
+            if !keep { *bytes -= e.bytes; }
+            keep
+        });
+    }
+
+    /// Install (or remove) the check a cook asks before running each node; see [`SUPERSEDED`].
+    pub fn set_cancel(&mut self, cancel: Option<CancelCheck>) { self.cancel = cancel; }
     pub fn set_external(&mut self, name: String, input: nodes::blender_input::ExternalInput) {
         self.external_revision+=1;
         self.external_versions.insert(name.clone(),self.external_revision);
@@ -180,7 +202,7 @@ impl Session {
         key_of(&self.graph, &resolved, &self.external_versions, &target, &mut keys, &mut HashSet::new())?;
         self.clock += 1;
         let mut stats = CookStats { param_diags: resolved.diagnostics.clone(), ..Default::default() };
-        let mut run = Run { graph: &self.graph, resolved: &resolved, plan: &plan, budget: nodes::r#loop::budget(), external: &self.external, cache: &mut self.cache, bytes: &mut self.bytes, clock: self.clock, keys: &keys, stats: &mut stats };
+        let mut run = Run { cancel: self.cancel.as_deref(), graph: &self.graph, resolved: &resolved, plan: &plan, budget: nodes::r#loop::budget(), external: &self.external, cache: &mut self.cache, bytes: &mut self.bytes, clock: self.clock, keys: &keys, stats: &mut stats };
         let result = nodes::usd_nodes::with_context(&self.graph, &self.external, || run.get(&target));
         stats.waiting = self.waiting(&resolved);
         self.last = stats;
@@ -423,6 +445,7 @@ mod channel_cache_tests {
 }
 
 struct Run<'a> {
+    cancel: Option<&'a (dyn Fn() -> bool + Send + Sync)>,
     graph: &'a Graph,
     resolved: &'a crate::channels::ResolvedChannels,
     plan: &'a nodes::r#loop::Plan,
@@ -442,6 +465,9 @@ impl Run<'_> {
             e.used = self.clock;
             self.stats.cached.push(id.to_string());
             return Ok(e.geo.clone());
+        }
+        if self.cancel.is_some_and(|c| c()) {
+            return Err(Error::new(SUPERSEDED));
         }
         let def = self.graph.node(id).expect("validated by key_of");
         let spec = nodes::get(&def.node_type).expect("validated by key_of");
@@ -474,14 +500,16 @@ impl Run<'_> {
             else if def.node_type == "blender_object" { Some(nodes::blender_input::cook_object(id,&p,self.external)) }
             else { nodes::blender_input::cook_external(&def.node_type,&p,self.external) }
         };
-        let geo = Arc::new(match external {
+        // A bypassed node hands its input on as is: the same shared geometry, no copy.
+        let passed = if def.bypass { inputs.first().and_then(|i| i.first()).cloned() } else { None };
+        let geo = if let Some(g) = passed { g } else { Arc::new(match external {
             // Waiting for external data: empty geometry, so downstream nodes still cook (see CookStats::waiting).
             Some(result)=>match result.and_then(|g|g.validate().map(|_|g)) {
                 Err(e) if e.waiting_text().is_some() => Geometry::default(),
                 other => other.map_err(|e|e.in_node(id,&def.node_type))?,
             },
             None=>run_node(id, def, spec, &inputs, self.resolved.params.get(id))?,
-        });
+        }) };
         let mut side: Option<Arc<dyn Any + Send + Sync>> = None;
         let mut side_bytes = 0;
         if def.node_type == "lod_bake" && !def.bypass {
