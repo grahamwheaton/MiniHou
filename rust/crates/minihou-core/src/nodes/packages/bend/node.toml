@@ -1,0 +1,5 @@
+id = "bend"
+name = "Bend"
+category = "Deform"
+description = "Bend, twist and taper geometry along an axis."
+keywords = "curve warp"
