@@ -45,7 +45,7 @@ fn inherited(g: &Geometry) {
 fn copy_and_blast_keep_corner_sets_and_slots() {
     let src = quad();
     let targets = Geometry::points_only(vec![0.,0.,0., 2.,0.,0.]).unwrap();
-    let copied = cook("copy_to_points", vec![vec![Arc::new(src.clone())],vec![Arc::new(targets)]], json!({}));
+    let copied = cook("copy_to_points", vec![vec![Arc::new(src.clone())],vec![Arc::new(targets)]], json!({"pack_instances":false}));
     assert_eq!(copied.nprims(), 2);
     inherited(&copied);
     assert_eq!(copied.vertex["uv"].as_f32().unwrap()[..8], copied.vertex["uv"].as_f32().unwrap()[8..]);
