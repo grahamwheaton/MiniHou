@@ -43,6 +43,16 @@ pub fn modifier_scale(mods: egui::Modifiers, integer: bool) -> f64 {
     scale
 }
 
+/// Multiplier for a sideways drag: grows with the value's magnitude (10 per decade from 10 up, so 500 drags 100x faster than 5),
+/// Shift is fine (x0.1), Ctrl or Alt coarse (x10).
+pub fn drag_multiplier(mods: egui::Modifiers, value: f64) -> f64 {
+    let magnitude = if value.is_finite() && value.abs() >= 10. { pow10_floor(value.abs()) } else { 1. };
+    let mut scale = magnitude;
+    if mods.shift { scale *= 0.1; }
+    if mods.ctrl || mods.command || mods.alt { scale *= 10.; }
+    scale
+}
+
 /// `value + steps * step`, clamped to `range`, rounded to integers or away from float noise.
 pub fn apply_step(value: f64, step: f64, steps: f64, range: &std::ops::RangeInclusive<f64>, integer: bool) -> f64 {
     let next = value + step * steps;
@@ -180,5 +190,16 @@ mod tests {
         assert!(wheel_steps_value(true, true, false));
         assert!(wheel_steps_value(true, false, true));
         assert!(!wheel_steps_value(false, true, true));
+    }
+    #[test]
+    fn params_drag_multiplier_scales_with_magnitude_and_modifiers() {
+        let none = egui::Modifiers::NONE;
+        assert_eq!(drag_multiplier(none, 5.), 1.);
+        assert_eq!(drag_multiplier(none, 0.), 1.);
+        assert_eq!(drag_multiplier(none, -500.), 100.);
+        assert!(drag_multiplier(egui::Modifiers::SHIFT, 500.) < drag_multiplier(none, 500.));
+        assert_eq!(drag_multiplier(egui::Modifiers::CTRL, 5.), 10.);
+        assert_eq!(drag_multiplier(egui::Modifiers::ALT, 5.), 10.);
+        assert!((drag_multiplier(egui::Modifiers::SHIFT, 5.) - 0.1).abs() < 1e-12);
     }
 }

@@ -1583,6 +1583,7 @@ fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: 
         let response = ui.interact(rect, id, Sense::click_and_drag());
         if response.hovered() || response.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal); }
         if response.dragged() {
+            let speed = speed * number_step::drag_multiplier(ui.input(|i| i.modifiers), *v);
             let step = if let Some(u) = units {
                 response.drag_delta().x as f64 * speed * u.display.metres() / u.unit_scale
             } else {
