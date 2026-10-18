@@ -58,6 +58,11 @@ pub fn pick_domain(meta: Option<&Value>, params: &Value) -> Option<super::Select
     }
 }
 
+/// The element mode a `domain`/`group_type` enum edit switches to, so a viewport selection can be promoted with it.
+pub fn domain_edit_mode(name: &str, value: &Value) -> Option<super::SelectionMode> {
+    if !matches!(name, "domain" | "group_type") { return None; }
+    pick_domain(Some(&json!({"pick_domain": value.as_str()?})), &Value::Null)
+}
 /// Fallback for group fields without registry metadata: follow a sibling domain or group_type parameter.
 pub fn pick_domain_for(typ: &str, name: &str, meta: Option<&Value>, params: &Value) -> Option<super::SelectionMode> {
     if let Some(mode) = pick_domain(meta, params) { return Some(mode); }
@@ -75,6 +80,14 @@ pub fn pick_domain_for(typ: &str, name: &str, meta: Option<&Value>, params: &Val
 mod pick_tests {
     use super::*;
     use super::super::SelectionMode;
+    #[test]
+    fn params_domain_edit_maps_to_selection_mode() {
+        assert_eq!(domain_edit_mode("domain", &json!("faces")), Some(SelectionMode::Faces));
+        assert_eq!(domain_edit_mode("group_type", &json!("edges")), Some(SelectionMode::Edges));
+        assert_eq!(domain_edit_mode("domain", &json!("points")), Some(SelectionMode::Points));
+        assert_eq!(domain_edit_mode("steps", &json!("faces")), None);
+        assert_eq!(domain_edit_mode("domain", &json!(3)), None);
+    }
     #[test]
     fn flood_fill_group_fields_have_pick_arrow_following_domain() {
         for f in ["seed_group","avoid_group","allowed_group","barrier_group","target_group"] {

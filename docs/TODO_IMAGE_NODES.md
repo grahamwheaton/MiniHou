@@ -346,6 +346,7 @@ The Tab node search should match fuzzily: letters in order rather than an exact 
 ## Future: noise and mountain nodes, full Houdini parity (requested 2026-10-18)
 
 Match Houdini's Attribute Noise (https://www.sidefx.com/docs/houdini/nodes/sop/attribnoise.html) and Mountain (screenshot 82): Group and Blend; Attribute Names (Vector, Float, with X, Y, Z channel toggles) and Attribute Class; Noise Along Vector with a Vector Attribute; Operation (Add and others), Range Values (Zero Centered and others), Amplitude, Output Raw Value, Enable Remap Ramp; Noise Type (Simplex and others), Location Attribute, Element Size, Offset (with XYZ), Use VEXpression; Animation; Fractal (type such as Hybrid Terrain, with octaves, roughness, lacunarity and so on); Warping; Post-Process. Build on the current noise and mountain nodes, and match the parameter names and defaults so existing graphs still load.
+<<<<<<< HEAD
 
 ## Fix: promote a viewport selection when the group domain changes (requested 2026-10-18)
 
@@ -354,3 +355,5 @@ If the user selects points in the viewport and then changes a group node's domai
 ## Feature: Split node, Houdini parity (requested 2026-10-18)
 
 Houdini's Split (screenshot 83): splits the input into separate pieces by a group (Group with the purple arrow, Group Type), with Invert Selection and Delete Unused Groups. The selected group becomes its own piece and the rest stays as another, so both can be used downstream. Match the parameter names and defaults.
+=======
+>>>>>>> sonnet/promote-selection

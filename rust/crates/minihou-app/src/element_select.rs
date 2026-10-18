@@ -814,6 +814,21 @@ mod tests {
     }
 
     #[test]
+    fn pick_promote_points_to_face_and_back_is_one_undo_record() {
+        let m = cube();
+        let t = topo(&m);
+        let top = Selection { points: vec![0, 1, 2, 3], ..sel(Points) };
+        let faces = t.convert(&top, Faces);
+        assert_eq!(faces.tris, t.poly_tris(0));
+        assert_eq!(t.convert(&faces, Points).points, vec![0, 1, 2, 3]);
+        // the undo record restores the pre-promotion selection, not a reset
+        let mut records = vec![("doc".to_owned(), top.clone(), Selection::default())];
+        let (restored, _, user) = crate::undo_selection_for(&mut records, "doc", &faces).unwrap();
+        assert_eq!(restored, top);
+        assert!(user.is_some() && records.is_empty());
+    }
+
+    #[test]
     fn conversion_partial_selections_do_not_grow() {
         let m = cube();
         let t = topo(&m);
