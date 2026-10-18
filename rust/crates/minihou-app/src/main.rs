@@ -815,8 +815,19 @@ impl App {
             Edit::Param { node, name, .. } => self.editor.doc.value()["nodes"][node]["params"][name].get("modifier_input").is_some(),
             _ => false,
         };
+        let promote = match &edit {
+            Edit::Param { name, value, .. } if self.editor_state.selection != ui::SelectionMode::Object && !self.selection.is_empty() =>
+                ui::params::domain_edit_mode(name, value).filter(|to| *to != self.selection.mode),
+            _ => None,
+        };
+        let before_selection = promote.map(|_| (self.selection.clone(), self.stashed_selection.clone()));
         match self.editor.history.edit(&mut self.editor.doc, &edit) {
             Ok(()) => {
+                if let (Some(to), Some((selection, stash))) = (promote, before_selection) {
+                    // the selection follows the group domain (converted when the mode changes); undo restores it as it was
+                    self.undo_element_selection.push((self.editor.doc.value().to_string(), selection, stash));
+                    self.editor_state.apply(ui::EditorChange::Selection(to));
+                }
                 if matches!(edit, Edit::ModifierInputs { .. } | Edit::ModifierInputValue { .. }) || was_linked
                     || matches!(&edit, Edit::Param { value, .. } if value.get("modifier_input").is_some()) {
                     self.send(Edit::Replace(self.editor.doc.value().clone()));
@@ -2472,6 +2483,9 @@ impl App {
                         if undo {
                             self.pending_restore_selection=undo_selection_for(&mut self.undo_element_selection,
                                 &previous_text,&self.selection);
+                            if let Some((selection,..))=&self.pending_restore_selection {
+                                if selection.mode!=ui::SelectionMode::Object { self.editor_state.apply(ui::EditorChange::Selection(selection.mode)); }
+                            }
                         } else { self.pending_restore_selection=None; }
                         if ui::network::layout_changed(&previous, self.editor.doc.value()) {
                             ui::network::restore_positions(ctx, &self.editor.path, self.editor.doc.value());
