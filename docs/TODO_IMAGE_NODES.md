@@ -271,3 +271,9 @@ After extruding faces, the original faces should stay selected, as in Blender. C
 ## Future: parameter drag sensitivity (reported 2026-10-18)
 
 Dragging a number parameter (for example a slider or drag field) moves only a few units, so large values take many drags. Tie this to the mouse-wheel adjustment item: use a larger step for drag and wheel, with modifiers for fine steps (Shift for fine, Ctrl or Alt for coarse), and scale the step by the parameter's magnitude where it helps.
+
+## Future: parameter field editing (reported 2026-10-18)
+
+- A single click on a number or text field should start editing it. Today it takes a double click.
+- While editing, the cursor stays in the field. Tab moves to the next logical parameter in the panel (the next field in the layout order, skipping hidden or disabled ones), and Shift+Tab to the previous one. Enter confirms.
+- Group this with the parameter drag sensitivity and mouse-wheel items: they all change how values are entered and adjusted in the parameter panel (params.rs).
