@@ -1,0 +1,23 @@
+{
+  "group": {
+    "default": "",
+    "doc": "Loop edges or points to space; empty uses all edges.",
+    "kind": "str",
+    "pick_domain": "edges"
+  },
+  "influence": {
+    "default": 1.0,
+    "doc": "Blend between original (0.0) and spaced (1.0) positions.",
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "interpolation": {
+    "default": "linear",
+    "doc": "Interpolation mode along the loop ('linear').",
+    "kind": "enum",
+    "options": [
+      "linear"
+    ]
+  }
+}
