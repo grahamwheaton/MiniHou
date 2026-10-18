@@ -1,7 +1,7 @@
 //! `set_material` from minihou/nodes/materials_node.py.
 use std::sync::Arc;
 
-use super::{GEO, InputSpec, Inputs, NodeSpec};
+use crate::nodes::{GEO, Inputs, NodeSpec};
 use crate::error::{Error, Result};
 use crate::geometry::{Attr, AttrData, Geometry};
 use crate::params::Params;
@@ -11,7 +11,7 @@ const ATTR: &str = "material_index";
 const POINT_ATTR: &str = "material_id";
 const MAX_NAME: usize = 63;
 
-pub const SET_MATERIAL: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec {
     name: "set_material",
     inputs: GEO,
     params: crate::params!(
@@ -133,11 +133,11 @@ fn assign_picks(
 }
 
 fn set_material(inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    let geo = SET_MATERIAL.one(inputs, 0)?;
+    let geo = NODE.one(inputs, 0)?;
     let domain_param = p.e("domain", &["primitives", "points"])?;
     let dom = if domain_param == "primitives" { "prim" } else { "point" };
     let group = p.s("group")?;
-    let mask = super::group::mask(&geo, dom, &group)?;
+    let mask = crate::nodes::group::mask(&geo, dom, &group)?;
 
     if !mask.iter().any(|&b| b) {
         return Ok((*geo).clone());
@@ -199,42 +199,5 @@ fn set_material(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_set_material_basic() {
-        let pts = vec![0.0; 12];
-        let vp = vec![0, 1, 2, 0, 2, 3];
-        let offs = vec![0, 3, 6];
-        let geo = Geometry::from_arrays(pts, vp, offs, None).unwrap();
-
-        let p = Params::resolve(SET_MATERIAL.params, serde_json::json!({"material": "Wood"}).as_object()).unwrap();
-        let out = set_material(&[vec![Arc::new(geo)]], &p).unwrap();
-
-        let names = get_names(&out);
-        assert_eq!(names, vec!["", "Wood"]);
-        let idx = get_indices(&out, "prim");
-        assert_eq!(idx, vec![1, 1]);
-    }
-
-    #[test]
-    fn test_set_material_index_attrib() {
-        let pts = vec![0.0; 12];
-        let vp = vec![0, 1, 2, 0, 2, 3];
-        let offs = vec![0, 3, 6];
-        let mut geo = Geometry::from_arrays(pts, vp, offs, None).unwrap();
-        geo.prim.insert("piece".to_string(), Arc::new(Attr::i32(1, vec![0, 1])));
-
-        let p = Params::resolve(SET_MATERIAL.params, serde_json::json!({
-            "index_attrib": "piece",
-            "names": "Wood, Metal, Glass"
-        }).as_object()).unwrap();
-        let out = set_material(&[vec![Arc::new(geo)]], &p).unwrap();
-
-        let names = get_names(&out);
-        assert_eq!(names, vec!["", "Wood", "Metal", "Glass"]);
-        let idx = get_indices(&out, "prim");
-        assert_eq!(idx, vec![1, 2]);
-    }
-}
+#[path = "tests.rs"]
+mod tests;

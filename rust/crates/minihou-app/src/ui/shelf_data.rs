@@ -144,7 +144,6 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "Ray", node_type: "ray", icon: "ray" },
         Tool { label: "Falloff", node_type: "falloff", icon: "falloff" },
         Tool { label: "Occlusion", node_type: "occlusion", icon: "occlusion" },
-        Tool { label: "Set Material", node_type: "set_material", icon: "attr" },
         Tool { label: "Python", node_type: "python", icon: "code" },
     ] },
     Tab { name: "Curves", tools: &[

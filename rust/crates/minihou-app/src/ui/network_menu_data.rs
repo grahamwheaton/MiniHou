@@ -141,7 +141,6 @@ pub(super) const TABS: &[Category] = &[
         Tool { label: "Ray", node_type: "ray" },
         Tool { label: "Falloff", node_type: "falloff" },
         Tool { label: "Occlusion", node_type: "occlusion" },
-        Tool { label: "Set Material", node_type: "set_material" },
         Tool { label: "Python", node_type: "python" },
     ] },
     Category { name: "Curves", tools: &[

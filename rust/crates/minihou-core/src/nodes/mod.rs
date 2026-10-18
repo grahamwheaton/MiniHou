@@ -87,7 +87,6 @@ mod scatter;
 mod scatteralign;
 mod primitives;
 mod transform;
-mod materials_node;
 mod material_tables;
 #[cfg(test)]
 mod stage1_provenance_tests;
@@ -321,7 +320,6 @@ pub fn registry() -> &'static [NodeSpec] {
         attrib_tools::ATTRIBUTE_RANDOMIZE,
         attrib_tools::ATTRIBUTE_TRANSFER,
         attrib_tools::COLOR,
-        materials_node::SET_MATERIAL,
         surface::CONVEX_HULL,
         contour::SLICE,
         dissolve::DISSOLVE,
@@ -352,7 +350,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["bound", "boundary_select", "cache", "example_offset", "facet", "flood_fill", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "peak", "point", "reverse", "select_sharp_edges", "subnet", "unpack"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["bound", "boundary_select", "cache", "example_offset", "facet", "flood_fill", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "peak", "point", "reverse", "select_sharp_edges", "set_material", "subnet", "unpack"]);
     }
 }
 

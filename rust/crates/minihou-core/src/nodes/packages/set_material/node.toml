@@ -1,0 +1,5 @@
+id = "set_material"
+name = "Set Material"
+category = "Attributes"
+description = "Assign named materials to selected primitives or points."
+keywords = "set material assign faces points"

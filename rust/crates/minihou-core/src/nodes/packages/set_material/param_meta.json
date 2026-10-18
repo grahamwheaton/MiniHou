@@ -1,0 +1,33 @@
+{
+  "domain": {
+    "default": "primitives",
+    "doc": "primitives: faces get the material (Blender's material slots, USD's bindings); points: the points do, which Scene Objects reads to give each instance its own material",
+    "kind": "enum",
+    "options": [
+      "primitives",
+      "points"
+    ]
+  },
+  "group": {
+    "default": "",
+    "doc": "Which ones: group names, ranges or '@area > 0.1' (empty: all of them)",
+    "kind": "str",
+    "pick_domain_default": "primitives",
+    "pick_domain_param": "domain"
+  },
+  "index_attrib": {
+    "default": "",
+    "doc": "An integer attribute on the same domain (a piece or id number, or one made by attribute_randomize) that picks from 'names'. Empty: every element gets 'material'",
+    "kind": "str"
+  },
+  "material": {
+    "default": "",
+    "doc": "Material name. In Blender the object's slot is filled with the material of that name (made if missing); in USD it becomes a material binding. Empty: back to whatever the target has",
+    "kind": "str"
+  },
+  "names": {
+    "default": "",
+    "doc": "Several names, separated by commas: with 'index_attrib', element number n gets the name at position n (counting from 0, wrapping around). Used instead of 'material'",
+    "kind": "str"
+  }
+}
