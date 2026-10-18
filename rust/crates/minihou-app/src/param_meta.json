@@ -462,7 +462,7 @@
   },
   "closed": {
    "default": false,
-   "doc": "",
+   "doc": "Connect the last control point to the first.",
    "kind": "bool"
   },
   "controls": {
