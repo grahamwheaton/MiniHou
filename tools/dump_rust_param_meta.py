@@ -8,12 +8,36 @@ parameter of one of these nodes::
 import json
 import os
 import sys
+import tomllib
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 TYPES = ["grid", "box", "point", "curve", "line", "circle", "sphere", "tube", "torus", "bound", "delete", "transform", "normal", "noise", "match_size", "merge", "null", "output", "blender_object", "modifier_input", "blender_image", "image_file", "image_out", "scene_objects"]
 TARGET = os.path.join(ROOT, "rust", "crates", "minihou-app", "src", "param_meta.json")
+PACKAGES = Path(ROOT) / "rust" / "crates" / "minihou-core" / "src" / "nodes" / "packages"
+
+
+def package_meta() -> dict:
+    """Discover the same package directories and IDs as minihou-core/build.rs."""
+    result = {}
+    if not PACKAGES.exists():
+        return result
+    for package in sorted(path for path in PACKAGES.iterdir() if path.is_dir()):
+        with (package / "node.toml").open("rb") as f:
+            node_id = tomllib.load(f)["id"]
+        if not (package / "node.rs").is_file():
+            raise ValueError(f"{package}: missing node.rs")
+        with (package / "param_meta.json").open(encoding="utf-8") as f:
+            params = json.load(f)
+        for name, metadata in params.items():
+            if not metadata.get("doc"):
+                raise ValueError(f"{node_id}.{name}: missing parameter doc")
+        if node_id in result:
+            raise ValueError(f"duplicate package node id: {node_id}")
+        result[node_id] = params
+    return result
 
 # Repeat regions and scalar expression/deformation ports (metadata generated separately).
 TYPES += ["loop_begin", "loop_end", "input", "object_input", "wrangle", "blend", "exploded_view", "usd_export", "usd_import"]
@@ -389,6 +413,10 @@ def meta() -> dict:
     out["measure_area"] = {
         "group": {"kind": "str", "default": "", "doc": "Optional primitive group to measure area of; empty measures all faces."},
     }
+    for node_id, params in package_meta().items():
+        if node_id in out:
+            raise ValueError(f"package node id conflicts with existing metadata: {node_id}")
+        out[node_id] = params
     return out
 
 

@@ -1,0 +1,12 @@
+{
+  "amount": {
+    "kind": "float",
+    "default": 1.0,
+    "doc": "Distance to move each point along the Y axis."
+  },
+  "enabled": {
+    "kind": "bool",
+    "default": true,
+    "doc": "Apply the Y offset when enabled."
+  }
+}

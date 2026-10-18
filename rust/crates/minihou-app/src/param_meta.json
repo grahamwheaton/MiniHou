@@ -1741,6 +1741,18 @@
    "kind": "str"
   }
  },
+ "example_offset": {
+  "amount": {
+   "default": 1.0,
+   "doc": "Distance to move each point along the Y axis.",
+   "kind": "float"
+  },
+  "enabled": {
+   "default": true,
+   "doc": "Apply the Y offset when enabled.",
+   "kind": "bool"
+  }
+ },
  "exploded_view": {
   "center": {
    "default": [
