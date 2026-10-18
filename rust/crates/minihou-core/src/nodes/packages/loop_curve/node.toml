@@ -1,0 +1,5 @@
+id = "loop_curve"
+name = "Loop Curve"
+category = "Modify"
+description = "Straighten interior points of open loops onto the chord between endpoints."
+keywords = "loop curve straighten chord line align"
