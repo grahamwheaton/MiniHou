@@ -94,7 +94,15 @@ fn selection_in_range(selection:&picking::Selection,scene:&Scene,range:&std::ops
     result
 }
 fn pick_displayed(scene:&Scene,o:[f32;3],d:[f32;3],visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>)->Option<picking::Hit> {
-    picking::pick_triangle_filtered(scene.positions(),scene.triangle_indices(),o,d,|tri| tri.iter().all(|id| point_pickable(visibility,ranges,selected,*id)))
+    pick_displayed_culled(scene,o,d,visibility,ranges,selected,false)
+}
+/// Selection clicks cull back faces unless X-ray is on.
+fn pick_displayed_culled(scene:&Scene,o:[f32;3],d:[f32;3],visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,cull:bool)->Option<picking::Hit> {
+    picking::pick_triangle_culled(scene.positions(),scene.triangle_indices(),o,d,cull,|tri| tri.iter().all(|id| point_pickable(visibility,ranges,selected,*id)))
+}
+/// After an extrude cook the original selection stays when its ids still exist (Blender keeps the faces selected).
+fn keep_extrude_selection(before:&picking::Selection,scene:&Scene)->Option<picking::Selection> {
+    (!before.is_empty() && selection_exists_on_scene(before,scene)).then(||before.clone())
 }
 fn navigation_point(camera:&Camera,scene:Option<&Scene>,hidden:bool,visibility:viewport::ObjectVisibility,
     ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,rect:egui::Rect,pos:egui::Pos2)->Option<[f32;3]> {
@@ -569,6 +577,7 @@ struct App {
     undo_element_selection: Vec<(String, picking::Selection, picking::Selection)>,
     pending_restore_selection: Option<(picking::Selection, picking::Selection, Option<picking::Selection>)>,
     model_before_selection: Option<(picking::Selection, picking::Selection)>,
+    extrude_keep: Option<picking::Selection>,
 }
 impl App {
     /// Load the field's current group text as the live selection (purple), on the topology the ids came from.
@@ -701,7 +710,7 @@ impl App {
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
             display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,param_pick:None,picked_field:None,selection_metrics:Default::default(),coplanar:None,group_preview:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
             clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,embed_conflict:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
-            last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default(),pending_loop_selection:None,undo_element_selection:Vec::new(),pending_restore_selection:None,model_before_selection:None };
+            last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default(),pending_loop_selection:None,undo_element_selection:Vec::new(),pending_restore_selection:None,model_before_selection:None,extrude_keep:None };
         app.prefs = Preferences::load();
         app.prefs.apply_python(&python_gate());
         app.mode=Mode::parse(&app.prefs.viewport.default_shading);
@@ -1385,6 +1394,7 @@ impl App {
             self.file_status=format!("Could not add {}",kind.node()); return;
         };
         self.model_before_selection=Some((self.selection.clone(),self.stashed_selection.clone()));
+        self.extrude_keep=(kind==ModelKind::Extrude && self.editor_state.selection==ui::SelectionMode::Faces).then(||self.selection.clone());
         self.editor.history.finish(&self.editor.doc);
         let before=self.editor.doc.clone();
         self.editor.doc=doc;
@@ -1432,6 +1442,7 @@ impl App {
         self.model_modal=Some((state,before,id,previous));
     }
     fn finish_model_modal(&mut self) {
+        self.extrude_keep=None;
         if let Some((state,before,id,_))=self.model_modal.take() {
             if state.kind==ModelKind::Extrude {
                 self.last_operator=Some(LastOperator::Extrude {params:repeat::extrude_next_params(&self.editor.doc.value()["nodes"][&id]["params"],state.source_points)});
@@ -1444,7 +1455,7 @@ impl App {
     }
     fn cancel_model_modal(&mut self) {
         if let Some((_,before,_,previous))=self.model_modal.take() {
-            self.model_before_selection=None;
+            self.model_before_selection=None; self.extrude_keep=None;
             self.editor.doc=before;
             self.selected=previous.clone(); self.selected_set=std::collections::BTreeSet::from([previous]);
             self.display=Graph::from_value(self.editor.doc.value()).ok().and_then(|g|g.main_output().ok()).unwrap_or_default();
@@ -2778,6 +2789,7 @@ impl eframe::App for App {
                         self.selection = picking::Selection { mode:self.editor_state.selection, ..Default::default() };
                     }
                 }
+                if let Some(keep)=self.extrude_keep.as_ref().and_then(|k|keep_extrude_selection(k,&scene)) { self.selection=keep; }
                 if let Some((selection,stash,user_selection))=self.pending_restore_selection.take() {
                     self.selection=user_selection.filter(|candidate|selection_exists_on_scene(candidate,&scene)).unwrap_or(selection);
                     self.stashed_selection=stash;
@@ -3079,7 +3091,7 @@ impl eframe::App for App {
                         let (o, d) = ui::transform_gizmo::ray(v.camera, rect, pos);
                         let mode = if self.pushpull_pick { ui::SelectionMode::Faces } else { self.editor_state.selection };
                         let mods = ctx.input(|i| i.modifiers);
-                        let surface = pick_displayed(scene,o,d,pick_visibility,&self.display_ranges,&pick_set);
+                        let surface = pick_displayed_culled(scene,o,d,pick_visibility,&self.display_ranges,&pick_set,!self.editor_state.xray);
                         surface
                             .map(|hit| {
                                 if mode == ui::SelectionMode::Object { return picking::element_of(hit, scene.triangle_indices(), mode); }
@@ -3210,7 +3222,7 @@ impl eframe::App for App {
                         let (o, d) = self.camera.ray(nx, ny, rect.width() / rect.height());
                         let mode = self.editor_state.selection;
                         let extend = ctx.input(|i| i.modifiers.shift);
-                        let hit = if self.object_hidden { None } else { pick_displayed(scene,o,d,pick_visibility,&self.display_ranges,&pick_set) };
+                        let hit = if self.object_hidden { None } else { pick_displayed_culled(scene,o,d,pick_visibility,&self.display_ranges,&pick_set,!self.editor_state.xray) };
                         let wire = if self.object_hidden || hit.is_some() { None } else { pick_displayed_wire(scene,v.camera,rect,at,pick_visibility,&self.display_ranges,&pick_set,mode) };
                         if mode == ui::SelectionMode::Object {
                             let ids = hit.and_then(|hit| picked_object(&self.display_ranges, scene.triangle_indices(), hit))

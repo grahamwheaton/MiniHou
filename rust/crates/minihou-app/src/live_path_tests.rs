@@ -201,3 +201,19 @@ fn loop_cut_confirm_keeps_loop_selected_for_single_object() {
     assert!(!selection.edges.is_empty(),"confirm must leave the cooked loop selected");
     assert_eq!(selection.mode,ui::SelectionMode::Edges);
 }
+
+#[test]
+fn extrude_keeps_original_face_selected() {
+    let doc = json!({"version":1,"display":"out","nodes":{
+        "box1":{"type":"box"},
+        "ex1":{"type":"polyextrude","inputs":{"geo":"box1"},"params":{"group":"0","distance":0.5}},
+        "out":{"type":"output","inputs":{"geo":"ex1"}}}});
+    let s0 = Scene::new(&cook(&doc, "box1"));
+    let topo = element_select::Topology::new(s0.positions(), s0.triangle_indices(), s0.edge_indices());
+    let tris: Vec<u32> = (0..s0.triangle_indices().len() as u32 / 3).filter(|&t| topo.poly_of_tri(t) == Some(0)).collect();
+    assert!(!tris.is_empty());
+    let sel = crate::picking::Selection { mode: crate::ui::SelectionMode::Faces, tris: tris.clone(), ..Default::default() };
+    let scene = Scene::new(&cook(&doc, "out"));
+    let kept = crate::keep_extrude_selection(&sel, &scene).expect("selection kept");
+    assert_eq!(kept.tris, tris);
+}

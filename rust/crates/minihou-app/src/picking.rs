@@ -281,12 +281,17 @@ pub fn pick_triangle(p: &[f32], tri: &[u32], origin: [f32; 3], dir: [f32; 3]) ->
     pick_triangle_filtered(p,tri,origin,dir,|_| true)
 }
 /// Filter before ray testing so an unpickable foreground ghost cannot block a selected object.
-pub fn pick_triangle_filtered(p:&[f32],tri:&[u32],origin:[f32;3],dir:[f32;3],mut visible:impl FnMut(&[u32])->bool)->Option<Hit> {
+pub fn pick_triangle_filtered(p:&[f32],tri:&[u32],origin:[f32;3],dir:[f32;3],visible:impl FnMut(&[u32])->bool)->Option<Hit> {
+    pick_triangle_culled(p,tri,origin,dir,false,visible)
+}
+/// As `pick_triangle_filtered`; with `cull` triangles facing away from the viewer (normal . dir >= 0) are skipped.
+pub fn pick_triangle_culled(p:&[f32],tri:&[u32],origin:[f32;3],dir:[f32;3],cull:bool,mut visible:impl FnMut(&[u32])->bool)->Option<Hit> {
     let mut best: Option<Hit> = None;
     for (n, t) in tri.as_chunks::<3>().0.iter().enumerate() {
         if !visible(t) { continue; }
         let (a, b, c) = (at(p, t[0]), at(p, t[1]), at(p, t[2]));
         let (e1, e2) = (sub(b, a), sub(c, a));
+        if cull && dot(cross(e1, e2), dir) >= 0. { continue; }
         let h = cross(dir, e2);
         let det = dot(e1, h);
         if det.abs() < 1e-12 { continue; }
@@ -797,4 +802,17 @@ fn filtered_pick_ignores_foreground_ghost_and_preserves_triangle_id() {
     let hit=pick_triangle_filtered(&p,&tri,[0.2,0.2,3.],[0.,0.,-1.],|t| t.iter().all(|id| (3..6).contains(id))).unwrap();
     assert_eq!(hit.tri,1); assert_eq!(hit.t,3.);
     assert!(pick_triangle_filtered(&p,&tri,[0.2,0.2,3.],[0.,0.,-1.],|_|false).is_none());
+}
+
+#[cfg(test)]
+mod cull_pick_tests {
+    use super::*;
+    #[test]
+    fn backface_pick_needs_xray() {
+        let p=[0.,0.,0.,1.,0.,0.,0.,1.,0.]; let tri=[0u32,1,2];
+        // front (normal +z) seen from +z; back seen from -z
+        assert!(pick_triangle_culled(&p,&tri,[0.2,0.2,3.],[0.,0.,-1.],true,|_|true).is_some());
+        assert!(pick_triangle_culled(&p,&tri,[0.2,0.2,-3.],[0.,0.,1.],true,|_|true).is_none());
+        assert!(pick_triangle_culled(&p,&tri,[0.2,0.2,-3.],[0.,0.,1.],false,|_|true).is_some());
+    }
 }
