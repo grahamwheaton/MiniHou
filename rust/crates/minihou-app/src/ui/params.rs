@@ -1328,6 +1328,9 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
     }
     let flags = v.flags_of(id);
     header(ui, v, out, id, typ, node.bypass, flags.locked, flags.template);
+    if typ == "polysplit" && v.doc["nodes"][id]["params"]["mode"] == "edge_loop" {
+        loop_cut_redo(ui, v, out, id, flags.locked);
+    }
     egui::ScrollArea::vertical().show(ui, |ui| {
         let (r, response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.), Sense::click());
         ui.painter().rect_filled(r, 0., v.theme.panel2);
@@ -1364,6 +1367,80 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
             }
         }
     });
+}
+
+fn redo_param(out: &mut Actions, id: &str, name: &str, value: Value, continuous: bool) {
+    out.push(UiAction::Edit { edit: Edit::Param { node: id.into(), name: name.into(), value }, continuous });
+}
+
+/// The most common Loop Cut adjustments stay visible above the full node parameters.
+fn loop_cut_redo(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, locked: bool) {
+    let params = &v.doc["nodes"][id]["params"];
+    let dragging = ui.ctx().input(|i| i.pointer.primary_down());
+    ui.add_enabled_ui(!locked, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong("Loop Cut redo");
+            let mut cuts = params["loops"].as_u64().unwrap_or(1) as i64;
+            ui.label("Number of Cuts");
+            if ui.add(egui::DragValue::new(&mut cuts).range(1..=64).speed(0.1)).changed() {
+                redo_param(out, id, "loops", json!(cuts), dragging);
+            }
+            let mut smoothness = params["smoothness"].as_f64().unwrap_or(0.);
+            ui.label("Smoothness");
+            if ui.add(egui::DragValue::new(&mut smoothness).range(-1. ..=1.).speed(0.01)).changed() {
+                redo_param(out, id, "smoothness", json!(smoothness), dragging);
+            }
+            let mut falloff = params["falloff"].as_str().unwrap_or("inverse_square").to_owned();
+            ui.label("Falloff");
+            egui::ComboBox::from_id_salt((id,"loop_cut_redo_falloff")).selected_text(&falloff)
+                .show_ui(ui, |ui| { for option in ["inverse_square", "linear", "smooth"] {
+                    ui.selectable_value(&mut falloff, option.into(), option);
+                } });
+            if params["falloff"].as_str().unwrap_or("inverse_square") != falloff {
+                redo_param(out, id, "falloff", json!(falloff), false);
+            }
+            let mut factor = params["factor"].as_f64().unwrap_or(0.);
+            ui.label("Factor");
+            if ui.add(egui::DragValue::new(&mut factor).range(-1. ..=1.).speed(0.01)).changed() {
+                redo_param(out, id, "factor", json!(factor), dragging);
+            }
+            for (label, name, default) in [("Even", "even", false), ("Flipped", "flipped", false), ("Clamp", "clamp", true)] {
+                let mut value = params[name].as_bool().unwrap_or(default);
+                if ui.checkbox(&mut value, label).changed() { redo_param(out, id, name, json!(value), false); }
+            }
+        });
+    });
+    ui.separator();
+}
+
+#[cfg(test)]
+mod mesh_cut_redo_tests {
+    use super::*;
+
+    #[test]
+    fn redo_values_write_to_polysplit_node_params() {
+        let mut doc = minihou_app::Document::parse(json!({"display":"cut1","nodes":{
+            "box1":{"type":"box"},
+            "cut1":{"type":"polysplit","inputs":{"geo":"box1"},"params":{"mode":"edge_loop","split_edges":"p0-1"}}
+        }}).to_string()).unwrap();
+        let mut actions = Actions::default();
+        for (name, value) in [
+            ("loops",json!(4)), ("smoothness",json!(0.25)), ("falloff",json!("linear")),
+            ("factor",json!(-0.4)), ("even",json!(true)), ("flipped",json!(true)), ("clamp",json!(false)),
+        ] { redo_param(&mut actions,"cut1",name,value,false); }
+        for action in actions.0 {
+            let UiAction::Edit { edit, .. } = action else { panic!("expected parameter edit") };
+            doc.edit(&edit).unwrap();
+        }
+        let params = &doc.value()["nodes"]["cut1"]["params"];
+        assert_eq!(params["loops"],4);
+        assert_eq!(params["smoothness"],0.25);
+        assert_eq!(params["falloff"],"linear");
+        assert_eq!(params["factor"],-0.4);
+        assert_eq!(params["even"],true);
+        assert_eq!(params["flipped"],true);
+        assert_eq!(params["clamp"],false);
+    }
 }
 
 fn knife_chains_panel(ui:&mut egui::Ui,v:&View<'_>,out:&mut Actions,id:&str,locked:bool) {
