@@ -107,7 +107,7 @@ fn weld_seams(g: Geometry, n: usize, dist: f64) -> Result<Geometry> {
     for i in 0..g.npoints {
         remap[i] = remap[target[i]];
     }
-    let out = Geometry {
+    let out = Geometry { packed: Default::default(),
         npoints: keep.len(),
         topology: Arc::new(Topology {
             vertex_point: g.topology.vertex_point.iter().map(|&v| remap[v as usize]).collect(),

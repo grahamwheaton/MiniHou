@@ -1386,6 +1386,11 @@
    "doc": "Rotate each copy by the target point's orient (quaternion), rot (Euler, from the instance node), or N (+Z) and up (+Y)",
    "kind": "bool"
   },
+  "pack_instances": {
+   "default": false,
+   "doc": "Output native instances (one point per copy referencing the shared source, with its transform) instead of copying the source geometry; Unpack converts them to real geometry.",
+   "kind": "bool"
+  },
   "use_pscale": {
    "default": true,
    "doc": "Scale each copy by the target point's pscale (if present); 'scale' (a vector) always applies",
@@ -4305,6 +4310,32 @@
    "options": [
     "connected",
     "individual"
+   ]
+  }
+ },
+ "pack": {
+  "group": {
+   "default": "",
+   "doc": "Primitive group to pack into one packed primitive when Mode is group; the other primitives stay unpacked.",
+   "kind": "str"
+  },
+  "mode": {
+   "default": "all",
+   "doc": "all: pack everything into one packed primitive; group: pack the primitives in Group; connectivity: pack each connected piece separately.",
+   "kind": "enum",
+   "options": [
+    "all",
+    "group",
+    "connectivity"
+   ]
+  },
+  "pivot": {
+   "default": "centroid",
+   "doc": "Where each packed primitive's transform sits: the centre of the piece's bounding box, or the world origin.",
+   "kind": "enum",
+   "options": [
+    "centroid",
+    "origin"
    ]
   }
  },
@@ -8099,6 +8130,18 @@
    "kind": "float",
    "soft_max": 360.0,
    "soft_min": -360.0
+  }
+ },
+ "unpack": {
+  "group": {
+   "default": "",
+   "doc": "Point group of packed primitives or instances to expand; empty expands all. Others stay packed.",
+   "kind": "str"
+  },
+  "recursive": {
+   "default": false,
+   "doc": "Also expand packed primitives nested inside the expanded ones; off expands one level.",
+   "kind": "bool"
   }
  },
  "usd_export": {

@@ -73,7 +73,7 @@ pub(super) fn fuse_points(
         .map(|&v| remap[v as usize])
         .collect();
 
-    let mut out = Geometry {
+    let mut out = Geometry { packed: Default::default(),
         npoints: new_npoints,
         topology: Arc::new(Topology {
             vertex_point: new_vp,

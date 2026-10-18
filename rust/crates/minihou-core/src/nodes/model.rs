@@ -212,7 +212,7 @@ pub(super) fn make(
         offsets.push(next as i32);
     }
     let npoints = point.get("P").map_or(0, |a| a.rows());
-    let g = Geometry {
+    let g = Geometry { packed: Default::default(),
         npoints,
         topology: Arc::new(Topology {
             vertex_point: vp,
@@ -1210,7 +1210,7 @@ mod python_oracles {
                 .collect(),
             closed: Some(closed),
         };
-        let g = Geometry {
+        let g = Geometry { packed: Default::default(),
             npoints: point["P"].rows(),
             topology: Arc::new(topo),
             point,

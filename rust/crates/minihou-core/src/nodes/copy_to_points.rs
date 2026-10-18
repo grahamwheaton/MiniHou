@@ -19,7 +19,7 @@ fn limit_from_preferences(v:Option<&serde_json::Value>)->u64{
 }
 pub const COPY_TO_POINTS:NodeSpec=NodeSpec{name:"copy_to_points",inputs:&[
     InputSpec{name:"source",multi:false,optional:false},InputSpec{name:"points",multi:false,optional:false}],
-    params:crate::params!("orient":true;"use_pscale":true),cook:copy};
+    params:crate::params!("orient":true;"use_pscale":true;"pack_instances":false),cook:copy};
 fn row(g:&Geometry,name:&str,i:usize,width:usize)->Option<Vec<f64>>{
     let a=g.point.get(name)?;if a.width!=width{return None;}
     Some(match &a.data{AttrData::F32(v)=>v[i*width..(i+1)*width].iter().map(|&x|x as f64).collect(),AttrData::I32(v)=>v[i*width..(i+1)*width].iter().map(|&x|x as f64).collect()})
@@ -55,6 +55,7 @@ fn copy(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let src=COPY_TO_POINTS.one(inputs,0)?;let targets=COPY_TO_POINTS.one(inputs,1)?;
     let(s,t)=(src.npoints,targets.npoints);let orient=p.b("orient")?;let use_pscale=p.b("use_pscale")?;
     if s==0 || t==0{return Geometry::points_only(Vec::new());}
+    if p.b("pack_instances")?{return instances(&src,&targets,orient,use_pscale);}
     for n in [s,src.nvertices(),src.nprims()] {if n.checked_mul(t).is_none_or(|v|v>MAX_ELEMENTS){return Err(Error::new("Copy to Points exceeds the topology index limit"));}}
     // Match the Python byte estimate before allocating temporary position arrays.
     let bytes=|g:&Geometry|g.point.values().chain(g.vertex.values()).chain(g.prim.values()).map(|a|a.rows()*a.width*4).sum::<usize>();
@@ -88,9 +89,59 @@ fn copy(inputs:&Inputs,p:&Params)->Result<Geometry>{
     out.vertex=super::group::gather_table(&src.vertex,&(0..t).flat_map(|_|0..src.nvertices()).collect::<Vec<_>>());
     out.prim=super::group::gather_table(&src.prim,&(0..t).flat_map(|_|0..src.nprims()).collect::<Vec<_>>());out.detail=src.detail.clone();Ok(out)
 }
+/// Native instances: one point per target sharing `src` (never copied), with its rotation and scale in `packed_xform` and
+/// the target's other point attributes as per-instance attributes. `packed::unpack` turns it into the copy above.
+fn instances(src:&Arc<Geometry>,targets:&Geometry,orient:bool,use_pscale:bool)->Result<Geometry>{
+    let t=targets.npoints;let mut xf=Vec::with_capacity(t);
+    for i in 0..t{
+        let r=rotation(targets,i,orient)?;let scale=row(targets,"scale",i,3).unwrap_or_else(||vec![1.;3]);
+        let ps=if use_pscale {targets.point.get("pscale").map(|a|match &a.data{AttrData::F32(v)=>v[i*a.width] as f64,AttrData::I32(v)=>v[i*a.width] as f64}).unwrap_or(1.)}else{1.};
+        xf.push(std::array::from_fn(|a|std::array::from_fn(|b|r[a][b]*scale[b]*ps)));
+    }
+    let attrs=targets.point.iter().filter(|(n,_)|!TRANSFORM.contains(&n.as_str())).map(|(n,a)|(n.clone(),a.clone())).collect();
+    let mut out=super::packed::instance_geometry(std::slice::from_ref(src),&vec![0;t],targets.p().to_vec(),&xf,attrs)?;
+    out.detail=src.detail.clone();Ok(out)
+}
 #[cfg(test)]
 mod tests{
     use super::*;
+    fn instance_case()->(Arc<Geometry>,Arc<Geometry>){
+        let src=Arc::new(crate::nodes::packed::tests::cube([-0.5;3]));
+        let mut pts=Geometry::points_only((0..5).flat_map(|i|[i as f32*3.,1.,0.]).collect()).unwrap();
+        pts.point.insert("N".into(),Arc::new(Attr::f32(3,(0..5).flat_map(|i|[0.,(i as f32).cos(),(i as f32).sin()]).collect())));
+        pts.point.insert("pscale".into(),Arc::new(Attr::f32(1,vec![1.,2.,0.5,1.5,3.])));
+        pts.point.insert("Cd".into(),Arc::new(Attr::f32(3,vec![0.25;15])));
+        (src,Arc::new(pts))
+    }
+    fn run(src:&Arc<Geometry>,pts:&Arc<Geometry>,pack:Option<bool>)->Geometry{
+        let v=pack.map(|b|serde_json::json!({"pack_instances":b}));
+        copy(&[vec![src.clone()],vec![pts.clone()]],&Params::resolve(COPY_TO_POINTS.params,v.as_ref().and_then(|v|v.as_object())).unwrap()).unwrap()
+    }
+    #[test]
+    fn copy_to_points_output_unchanged_when_instances_off(){
+        let(src,pts)=instance_case();let a=run(&src,&pts,None);let b=run(&src,&pts,Some(false));
+        assert!(a.packed.is_empty()&&!a.point.contains_key(crate::nodes::packed::SOURCE));
+        assert_eq!((a.npoints,a.nprims()),(40,30));crate::nodes::packed::tests::assert_same(&a,&b);
+        assert_eq!(a.p(),b.p());
+    }
+    #[test]
+    fn copy_to_points_instances_convert_to_the_expanded_copy(){
+        let(src,pts)=instance_case();let inst=run(&src,&pts,Some(true));
+        assert_eq!((inst.npoints,inst.nprims(),inst.packed.len()),(5,0,1));assert!(Arc::ptr_eq(&inst.packed[0],&src));
+        let real=crate::nodes::packed::unpack(&inst,None,false).unwrap();
+        crate::nodes::packed::tests::assert_same(&real,&run(&src,&pts,Some(false)));
+    }
+    #[test]
+    fn copy_to_points_instances_pass_through_transform_without_expansion(){
+        let(src,pts)=instance_case();let inst=Arc::new(run(&src,&pts,Some(true)));
+        let spec=crate::nodes::get("transform").unwrap();
+        let p=Params::resolve(spec.params,serde_json::json!({"translate":[1.,2.,3.],"rotate":[0.,90.,0.],"uniform_scale":2.0}).as_object()).unwrap();
+        let moved=(spec.cook)(&[vec![inst.clone()]],&p).unwrap();
+        assert_eq!((moved.npoints,moved.nprims()),(5,0));assert!(Arc::ptr_eq(&moved.packed[0],&src));
+        // transforming the instances then converting equals converting then transforming
+        let expanded=(spec.cook)(&[vec![Arc::new(crate::nodes::packed::unpack(&inst,None,false).unwrap())]],&p).unwrap();
+        crate::nodes::packed::tests::assert_same(&crate::nodes::packed::unpack(&moved,None,false).unwrap(),&expanded);
+    }
     #[test]
     fn memory_preference_matches_python_validation(){
         assert_eq!(limit_from_preferences(None),256*1024*1024);

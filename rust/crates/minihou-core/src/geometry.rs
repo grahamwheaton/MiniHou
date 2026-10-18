@@ -150,6 +150,9 @@ pub struct Geometry {
     pub vertex: AttrTable,
     pub prim: AttrTable,
     pub detail: Map<String, Value>,
+    /// Shared immutable geometry referenced by packed primitives and native instances (`nodes/packed.rs`). A point whose
+    /// `packed_source` attribute is k >= 1 is an instance of `packed[k - 1]`; the sources are never copied per instance.
+    pub packed: Arc<Vec<Arc<Geometry>>>,
 }
 
 impl Geometry {

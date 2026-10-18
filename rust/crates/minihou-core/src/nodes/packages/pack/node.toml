@@ -1,0 +1,5 @@
+id = "pack"
+name = "Pack"
+category = "Modify"
+description = "Turn geometry into packed primitives: shared immutable geometry plus a transform."
+keywords = "pack packed primitive instance share"
