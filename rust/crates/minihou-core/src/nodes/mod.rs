@@ -346,7 +346,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["attribute_delete", "attribute_rename", "bound", "boundary_select", "bulge", "cache", "example_offset", "facet", "fillet", "flood_fill", "fractal", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "peak", "point", "resample", "reverse", "ripple", "select_sharp_edges", "set_material", "subnet", "unpack", "waves"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["attribute_delete", "attribute_rename", "bound", "boundary_select", "bulge", "cache", "example_offset", "facet", "fillet", "flood_fill", "fractal", "line", "loop_flatten", "loop_space", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "peak", "point", "resample", "reverse", "ripple", "select_sharp_edges", "set_material", "subnet", "unpack", "waves"]);
     }
 }
 
