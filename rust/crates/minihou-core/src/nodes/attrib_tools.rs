@@ -41,10 +41,6 @@ pub(super) fn piece_labels(g:&Geometry)->(Vec<i32>,Vec<i32>){
     let labels:Vec<_>=roots.iter().map(|v|keys.binary_search(v).unwrap() as i32).collect();
     let prim=g.topology.prim_offsets.windows(2).map(|r|if r[0]<r[1]{labels[g.topology.vertex_point[r[0] as usize] as usize]}else{-1}).collect();(labels,prim)
 }
-pub const CONNECTIVITY:NodeSpec=NodeSpec{name:"connectivity",inputs:GEO,params:crate::params!("domain":"primitives";"name":"class"),cook:connectivity};
-fn connectivity(inputs:&Inputs,p:&Params)->Result<Geometry>{let g=CONNECTIVITY.one(inputs,0)?;let dom=p.e("domain",&["primitives","points"])?;let name=p.s("name")?;
-    let(a,b)=piece_labels(&g);Ok(set(&g,domain(&dom),name,Attr::i32(1,if dom=="points"{a}else{b})))
-}
 pub const ATTRIBUTE_PROMOTE:NodeSpec=NodeSpec{name:"attribute_promote",inputs:GEO,params:crate::params!("name":"Cd";"to":"points";"method":"average";"keep_original":false),cook:promote};
 fn promote(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let g=ATTRIBUTE_PROMOTE.one(inputs,0)?;let name=p.s("name")?;let dst=p.e("to",&["points","primitives","vertices","detail"])?;let dst=domain(&dst);

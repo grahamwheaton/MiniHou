@@ -1,0 +1,5 @@
+id = "connectivity"
+name = "Connectivity"
+category = "Attributes"
+description = "Label connected geometry pieces."
+keywords = "attribute connectivity"

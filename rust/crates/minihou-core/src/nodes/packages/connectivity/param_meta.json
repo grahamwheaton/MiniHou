@@ -1,0 +1,16 @@
+{
+  "domain": {
+    "default": "primitives",
+    "doc": "Where to write the piece number",
+    "kind": "enum",
+    "options": [
+      "primitives",
+      "points"
+    ]
+  },
+  "name": {
+    "default": "class",
+    "doc": "Name of the integer piece-label attribute.",
+    "kind": "str"
+  }
+}
