@@ -267,3 +267,7 @@ Where: element selection uses `pick_displayed` and the BVH pick in main.rs (abou
 ## Future: keep original faces selected after extrude (requested 2026-10-18)
 
 After extruding faces, the original faces should stay selected, as in Blender. Currently the selection moves or clears. Check the extrude path in main.rs (the extrude tool and its selection restore) and the face selection after the cook. Add a test: extrude a selected face of a cube, and the original face indices remain selected.
+
+## Future: parameter drag sensitivity (reported 2026-10-18)
+
+Dragging a number parameter (for example a slider or drag field) moves only a few units, so large values take many drags. Tie this to the mouse-wheel adjustment item: use a larger step for drag and wheel, with modifiers for fine steps (Shift for fine, Ctrl or Alt for coarse), and scale the step by the parameter's magnitude where it helps.
