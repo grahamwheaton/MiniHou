@@ -257,7 +257,8 @@ impl Selection {
 fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] - b[0], a[1] - b[1], a[2] - b[2]] }
 fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0]] }
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 { a[0]*b[0] + a[1]*b[1] + a[2]*b[2] }
-pub fn at(p: &[f32], i: u32) -> [f32; 3] { let k = i as usize * 3; [p[k], p[k + 1], p[k + 2]] }
+/// Point position; NaN when the id is outside `p` (a stale id must never crash the viewport, and NaN never hits a ray).
+pub fn at(p: &[f32], i: u32) -> [f32; 3] { try_at(p, i).unwrap_or([f32::NAN; 3]) }
 /// Like `at`, but None when the point id is outside `p` (stale element ids after the displayed geometry changed).
 pub fn try_at(p: &[f32], i: u32) -> Option<[f32; 3]> { let k = i as usize * 3; (k + 3 <= p.len()).then(|| [p[k], p[k + 1], p[k + 2]]) }
 #[cfg(test)]
@@ -267,6 +268,11 @@ mod try_at_tests {
         let p = [0f32, 1., 2., 3., 4., 5.];
         assert_eq!(try_at(&p, 1), Some([3., 4., 5.]));
         assert_eq!(try_at(&p, 2), None);
+    }
+    #[test] fn at_out_of_range_is_nan_not_a_panic() {
+        let p = [0f32, 1., 2.];
+        assert!(at(&p, 5).iter().all(|v| v.is_nan()));
+        assert_eq!(at(&p, 0), [0., 1., 2.]);
     }
 }
 
