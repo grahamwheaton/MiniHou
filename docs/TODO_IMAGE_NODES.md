@@ -246,3 +246,7 @@ Likely cause (first press): main.rs `UiAction::PickParameter` clears `self.selec
 ## Future: darker orange for object selection (requested 2026-10-18)
 
 Object selection should use a darker orange than the point, edge and face selection colours, so the two are easy to tell apart in the viewport. Check the selection colour constants in the viewport code and the object outline colour before changing them.
+
+## Future: app icon and top-left logo (requested 2026-10-18)
+
+Use the blue "M" logo (rounded blue square with a white M) as the app icon (window and taskbar, and the exe icon) and in the top-left of the editor, in place of the current icon. Needs the logo as an .ico for the exe and a PNG for the in-app header.
