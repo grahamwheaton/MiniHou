@@ -362,7 +362,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["example_offset", "measure_area", "measure_bounds", "measure_volume", "pack", "subnet", "unpack"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["cache", "example_offset", "measure_area", "measure_bounds", "measure_volume", "pack", "subnet", "unpack"]);
     }
 }
 

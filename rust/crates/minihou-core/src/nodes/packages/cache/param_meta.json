@@ -1,0 +1,8 @@
+{
+  "mode": {
+    "kind": "enum",
+    "default": "auto",
+    "options": ["auto", "off"],
+    "doc": "auto: keep the input's result and reuse it while the input is unchanged; off: pass the input through and cache nothing."
+  }
+}

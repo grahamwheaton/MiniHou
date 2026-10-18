@@ -969,6 +969,17 @@
    "min": 0.0
   }
  },
+ "cache": {
+  "mode": {
+   "default": "auto",
+   "doc": "auto: keep the input's result and reuse it while the input is unchanged; off: pass the input through and cache nothing.",
+   "kind": "enum",
+   "options": [
+    "auto",
+    "off"
+   ]
+  }
+ },
  "carve": {
   "end": {
    "default": 1.0,
