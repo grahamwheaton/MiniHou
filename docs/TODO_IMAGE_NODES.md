@@ -298,7 +298,6 @@ Bugs:
 - **Faces dropped by selection:** selection still drops faces (tested, not fixed).
 - **Field editing:** on click the text should not left-align; the whole value should be selected so typing replaces it (Blender parity).
 - **Re-cook activity:** dragging or wheel-adjusting a value re-cooks many nodes; check the cook path for parameter drags (only the changed node and its downstream should cook, and only on release unless live preview is wanted). Compare with the mouse-wheel path.
-- **Point highlight:** the purple selected points should be a large dot, not a crosshair (see screenshot 75).
 - **Boundary select:** should select only the boundary edges, create an auto-named group, and switch the viewport selection to edges.
 - **Select sharp edges:** tags no edges in testing. When the node is selected, every edge it tags should show purple.
 - **Hover on the purple arrow:** should highlight the selection in the viewport. Also add a demo graph that shows it.
@@ -308,7 +307,6 @@ Bugs:
 
 Features:
 - **Color node:** Houdini parity (Group, Group Type, Delete All Existing Color Attributes, Set Color Attribute, Class, Color Type, Color). Check why nothing shows in the viewport.
-- **Point size x4** in the viewport (points are too small to see).
 - **Asset shelf I/O tab:** Blender object, file image, object input, USD and similar.
 - **Image file default:** a flat image plane by default, renamed "Tessellation", with a height map as an option (no "too dense" error by default).
 - **Output target button:** a target button next to each output parameter. Hover shows the output on the mesh (a float output can show as a strength level); click selects the group. Suggest a colour (not purple, which is the input selection colour).
