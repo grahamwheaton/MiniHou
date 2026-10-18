@@ -41,7 +41,6 @@ pub(super) fn piece_labels(g:&Geometry)->(Vec<i32>,Vec<i32>){
     let labels:Vec<_>=roots.iter().map(|v|keys.binary_search(v).unwrap() as i32).collect();
     let prim=g.topology.prim_offsets.windows(2).map(|r|if r[0]<r[1]{labels[g.topology.vertex_point[r[0] as usize] as usize]}else{-1}).collect();(labels,prim)
 }
-pub const ATTRIBUTE_BLUR:NodeSpec=NodeSpec{name:"attribute_blur",inputs:GEO,params:crate::params!("names":"P";"iterations":5;"strength":0.5;"pin_boundary":true;"group":""),cook:blur};
 pub const SMOOTH:NodeSpec=NodeSpec{name:"smooth",inputs:GEO,params:crate::params!("iterations":10;"strength":0.5;"method":"taubin";"pin_boundary":true;"group":""),cook:smooth};
 pub(super) fn laplacian(g:&Geometry,names:&str,p:&Params,factors:&[f64])->Result<Geometry>{
     let e=crate::topo::edges(&g.topology,g.npoints);let mut neighbours=vec![Vec::new();g.npoints];let mut boundary=vec![false;g.npoints];
@@ -59,7 +58,6 @@ pub(super) fn laplacian(g:&Geometry,names:&str,p:&Params,factors:&[f64])->Result
         out.point.insert(name.into(),Arc::new(Attr::f32(a.width,v.into_iter().map(|x|x as f32).collect())));
     }Ok(out)
 }
-fn blur(inputs:&Inputs,p:&Params)->Result<Geometry>{let g=ATTRIBUTE_BLUR.one(inputs,0)?;let n=p.i("iterations")?;if n<0{return Err(Error::new("iterations must be nonnegative"));}laplacian(&g,&p.s("names")?,p,&vec![p.f("strength")?;n as usize])}
 fn smooth(inputs:&Inputs,p:&Params)->Result<Geometry>{let g=SMOOTH.one(inputs,0)?;let n=p.i("iterations")?;if n<0{return Err(Error::new("iterations must be nonnegative"));}let f=p.f("strength")?;
     let taubin=p.e("method",&["taubin","laplacian"])?=="taubin";let mut factors=Vec::new();for _ in 0..n{factors.push(f);if taubin{factors.push(1./(0.1-1./f.max(1e-6)));}}
     let mut out=laplacian(&g,"P",p,&factors)?;
@@ -774,7 +772,7 @@ mod tests{
     #[test]
     fn blur_pins_curve_ends(){
         let g=Geometry::from_arrays(vec![0.,0.,0.,1.,2.,0.,2.,0.,0.],vec![0,1,2],vec![0,3],Some(vec![false])).unwrap();
-        let out=blur(&[vec![Arc::new(g)]],&Params::resolve(ATTRIBUTE_BLUR.params,serde_json::json!({"iterations":1,"strength":1.}).as_object()).unwrap()).unwrap();assert_eq!(out.p(),[0.,0.,0.,1.,0.,0.,2.,0.,0.]);
+        let out=(crate::nodes::get("attribute_blur").unwrap().cook)(&[vec![Arc::new(g)]],&Params::resolve(crate::nodes::get("attribute_blur").unwrap().params,serde_json::json!({"iterations":1,"strength":1.}).as_object()).unwrap()).unwrap();assert_eq!(out.p(),[0.,0.,0.,1.,0.,0.,2.,0.,0.]);
     }
     #[test]
     fn measure_area_and_open_perimeter(){
