@@ -127,6 +127,8 @@ def meta() -> dict:
     # polybevel group follows its group_type parameter (edges or primitives) when set.
     out["polybevel"]["group"]["pick_domain_param"] = "group_type"
     out["polybevel"]["group"]["pick_domain_default"] = "edges"
+    out["attribute_create"]["group"]["pick_domain_param"] = "domain"
+    out["attribute_create"]["group"]["pick_domain_default"] = "points"
     out["loop_cut"] = out["polysplit"]
     out["edge_slide"] = {
         "group": {"kind":"str","default":"","doc":"Selected edge group or pA-B pairs; empty leaves the mesh unchanged."},
