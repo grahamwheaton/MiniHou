@@ -3101,8 +3101,7 @@ impl eframe::App for App {
                             ui::SelectionMode::Edges => {
                                 if let Some(hov) = &hover_elem {
                                     for &(a, b) in &hov.edges {
-                                        let pa = picking::at(pos, a);
-                                        let pb = picking::at(pos, b);
+                                        let (Some(pa), Some(pb)) = (picking::try_at(pos, a), picking::try_at(pos, b)) else { continue };
                                         if let (Some(sa), Some(sb)) = (
                                             ui::transform_gizmo::project(v.camera, rect, pa),
                                             ui::transform_gizmo::project(v.camera, rect, pb),

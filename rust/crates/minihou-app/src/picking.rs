@@ -258,6 +258,17 @@ fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[0] - b[0], a[1] - b[1], a[2] -
 fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] { [a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0]] }
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 { a[0]*b[0] + a[1]*b[1] + a[2]*b[2] }
 pub fn at(p: &[f32], i: u32) -> [f32; 3] { let k = i as usize * 3; [p[k], p[k + 1], p[k + 2]] }
+/// Like `at`, but None when the point id is outside `p` (stale element ids after the displayed geometry changed).
+pub fn try_at(p: &[f32], i: u32) -> Option<[f32; 3]> { let k = i as usize * 3; (k + 3 <= p.len()).then(|| [p[k], p[k + 1], p[k + 2]]) }
+#[cfg(test)]
+mod try_at_tests {
+    use super::*;
+    #[test] fn out_of_range_point_is_none() {
+        let p = [0f32, 1., 2., 3., 4., 5.];
+        assert_eq!(try_at(&p, 1), Some([3., 4., 5.]));
+        assert_eq!(try_at(&p, 2), None);
+    }
+}
 
 /// Nearest front-most triangle along the ray (Moller-Trumbore, both sides).
 pub fn pick_triangle(p: &[f32], tri: &[u32], origin: [f32; 3], dir: [f32; 3]) -> Option<Hit> {
