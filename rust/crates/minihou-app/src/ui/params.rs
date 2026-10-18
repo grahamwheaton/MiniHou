@@ -73,14 +73,14 @@ mod pick_tests {
     }
 }
 
-fn pick_field(ui: &mut egui::Ui, value: &mut Value, width: f32, active: bool, enabled: bool) -> bool {
+fn pick_field(ui: &mut egui::Ui, value: &mut Value, width: f32, active: bool, enabled: bool) -> (bool, bool) {
     let mut text = value.as_str().unwrap_or_default().to_owned();
     let edit = ui.add_sized([(width - 28.).max(8.), 22.], egui::TextEdit::singleline(&mut text));
     if edit.changed() { *value = json!(text); }
     let arrow = ui.add_enabled(enabled, egui::Button::new(egui::RichText::new("↖").color(PICK_PURPLE))
         .fill(if active { PICK_PURPLE.gamma_multiply(0.27) } else { ui.visuals().widgets.inactive.bg_fill })
         .stroke(Stroke::new(1.0_f32, PICK_PURPLE))).on_hover_text("Pick elements in viewport (Enter to finish, Esc to cancel)");
-    arrow.clicked()
+    (arrow.clicked(), arrow.hovered())
 }
 fn clipboard_id() -> egui::Id { egui::Id::new("value_link_parameter_clipboard") }
 
@@ -1138,7 +1138,13 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
             } else if pick_mode.is_some() && kind == ParamKind::String {
                 let active = ui.ctx().data(|d| d.get_temp::<(String,String)>(egui::Id::new("param_pick_active")))
                     .is_some_and(|(node,name)| node == id && name == param.name);
-                let clicked = pick_field(ui, &mut value, layout.control_rect.width(), active, enabled);
+                let (clicked, hovered) = pick_field(ui, &mut value, layout.control_rect.width(), active, enabled);
+                if hovered && !active {
+                    // viewport previews the field's current group while the arrow is hovered (stamped so a stale hover expires)
+                    let pass = ui.ctx().cumulative_pass_nr();
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("param_pick_hover"),
+                        (id.to_owned(), param.name.to_owned(), pick_mode.unwrap(), meta.is_some_and(|m| m["pick_format"] == "pairs"), pass)));
+                }
                 if clicked {
                     out.push(UiAction::PickParameter { node:id.to_owned(), name:param.name.to_owned(), mode:pick_mode.unwrap(),
                         pairs:meta.is_some_and(|m| m["pick_format"] == "pairs") });

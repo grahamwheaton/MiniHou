@@ -37,6 +37,27 @@ impl Topology {
     pub fn group_string(&self, sel: &Selection) -> String {
         self.tokens(sel.mode, &self.ids(sel)).join(" ")
     }
+    /// Inverse of `group_string`: parse point numbers, `a-b` / `p<a>-<b>` edge pairs, or polygon numbers into a selection.
+    /// Tokens outside this topology (stale or foreign ids) are dropped, never indexed.
+    pub fn parse_group(&self, text: &str, mode: SelectionMode) -> Selection {
+        let mut s = Selection { mode, ..Default::default() };
+        for tok in text.split_whitespace() {
+            let tok = tok.trim_start_matches('p');
+            match mode {
+                SelectionMode::Points => if let Ok(i) = tok.parse::<u32>() { if (i as usize) < self.npoints && !s.points.contains(&i) { s.points.push(i); } },
+                SelectionMode::Edges => if let Some((a, b)) = tok.split_once('-') {
+                    if let (Ok(a), Ok(b)) = (a.parse::<u32>(), b.parse::<u32>()) {
+                        if self.edge_of(a, b).is_some() && !s.edges.contains(&(a, b)) { s.edges.push((a, b)); }
+                    }
+                },
+                SelectionMode::Faces => if let Ok(i) = tok.parse::<u32>() {
+                    if i < self.npolys { for &t in self.poly_tris(i) { if !s.tris.contains(&t) { s.tris.push(t); } } }
+                },
+                SelectionMode::Object => {}
+            }
+        }
+        s
+    }
     /// `positions` xyz per point, `tris` fan triangles, `edge_list` polygon edges as point pairs (the preview layout).
     /// Triangles sharing an edge that is not a polygon edge (a fan diagonal) belong to the same polygon.
     pub fn new(positions: &[f32], tris: &[u32], edge_list: &[u32]) -> Self {

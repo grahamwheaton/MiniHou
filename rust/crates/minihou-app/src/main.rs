@@ -5,7 +5,7 @@ mod node_selection;
 mod coplanar_tool;
 mod group_preview;
 mod param_pick;
-use param_pick::{ParamPick, PickedField, param_pick_end, input_source, source_ready};
+use param_pick::{field_selection, ParamPick, PickedField, param_pick_end, input_source, source_ready};
 mod selection_metrics;
 #[cfg(test)] mod face_mode_profile;
 use minihou_app::graph_edit;
@@ -571,6 +571,19 @@ struct App {
     model_before_selection: Option<(picking::Selection, picking::Selection)>,
 }
 impl App {
+    /// Load the field's current group text as the live selection (purple), on the topology the ids came from.
+    fn pick_load(&mut self) {
+        let (Some(pick), Some(scene)) = (&mut self.param_pick, &self.scene) else { return; };
+        if !pick.ready { return; }
+        pick.load = false;
+        let text = self.editor.doc.value()["nodes"][&pick.node]["params"][&pick.name].as_str().unwrap_or("").to_owned();
+        let topo = element_select::cached(&self.elem_topo, scene);
+        let mode = self.editor_state.selection;
+        let field = field_selection(topo, &text, mode, &pick.node, scene.positions(), scene.triangle_indices(), scene.radius * 0.012);
+        self.selection = field.selection.clone();
+        self.picked_field = Some(field);
+        self.selection_dirty = true;
+    }
     fn finish_param_pick(&mut self, ctx: &egui::Context, cancel: bool) {
         let Some(pick) = self.param_pick.take() else { return; };
         if ctx.input(|i| i.key_pressed(if cancel { egui::Key::Escape } else { egui::Key::Enter })) {
@@ -585,6 +598,16 @@ impl App {
             self.picked_field = None;
             if let Some(gpu) = &mut self.gpu { gpu.set_group_overlay(&self.state.device, &[], &[]); }
             self.group_preview = Default::default();
+        }
+        if !cancel && pick.ready {
+            // Enter writes the selection text into the field (a no-op when the clicks already did).
+            if let Some(scene) = &self.scene {
+                let topo = element_select::cached(&self.elem_topo, scene);
+                let value = pick.text(topo, &self.selection);
+                if value != self.editor.doc.value()["nodes"][&pick.node]["params"][&pick.name].as_str().unwrap_or("") {
+                    self.edit(Edit::Param { node:pick.node.clone(), name:pick.name.clone(), value:serde_json::json!(value) }, true);
+                }
+            }
         }
         self.selection = pick.previous_selection;
         self.editor_state.selection = pick.previous_mode;
@@ -2332,16 +2355,20 @@ impl App {
                     let ready = source_ready(&self.display_ranges, &source);
                     self.param_pick = Some(ParamPick { node:node.clone(), name:name.clone(), original, changed:false,
                         previous_selection:self.selection.clone(), previous_mode:self.editor_state.selection, pairs,
-                        source:source.clone(), previous_display:self.display.clone(), previous_selected_set:self.selected_set.clone(), ready });
+                        source:source.clone(), previous_display:self.display.clone(), previous_selected_set:self.selected_set.clone(), ready, load:false });
                     self.picked_field = None;
                     if let Some(gpu) = &mut self.gpu { gpu.set_group_overlay(&self.state.device, &[], &[]); }
                     self.group_preview = Default::default();
                     if source != self.display || !ready { self.display = source.clone(); self.send(Edit::Display(source.clone())); }
                     self.selected_set.insert(source);
                     self.editor_state.selection = mode;
+                    // Keep the field's group as the live selection (not an empty one); when the display has to switch to
+                    // the pick source first, the parse waits for that scene so ids always match the geometry they came from.
                     self.selection = picking::Selection { mode, ..Default::default() };
                     self.selection_dirty = true;
                     ctx.data_mut(|d| d.insert_temp(egui::Id::new("param_pick_active"), (node, name)));
+                    if let Some(pick) = &mut self.param_pick { pick.load = true; }
+                    if ready && self.param_pick.as_ref().is_some_and(|p| p.source == self.display) { self.pick_load(); }
                 }
                 UiAction::StartSketch(mode) => self.start_sketch(ctx, mode),
                 UiAction::TransformNode { op } => self.transform_node(op),
@@ -2738,7 +2765,7 @@ impl eframe::App for App {
                 self.stashed_selection = stash;
                 if let Some(pick) = &mut self.param_pick {
                     if !pick.ready && source_ready(&self.display_ranges, &pick.source) {
-                        pick.ready = true;
+                        pick.ready = true; pick.load = true;
                         self.selection = picking::Selection { mode:self.editor_state.selection, ..Default::default() };
                     }
                 }
@@ -2754,6 +2781,7 @@ impl eframe::App for App {
                 }
                 self.scene = Some(scene);
                 self.elem_topo = Default::default();
+                if self.param_pick.as_ref().is_some_and(|p| p.load && p.ready) { self.pick_load(); }
                 if first { self.frame_mesh(); }
             }
         }
@@ -2999,6 +3027,24 @@ impl eframe::App for App {
                     let ranges = self.display_ranges.iter().filter(|(id, _)| !self.object_hidden && self.selected_set.contains(id))
                         .map(|(_, range)| range.clone()).collect();
                     self.group_preview.update(gpu,&self.state.device,if self.cooking.error.is_none(){self.cooking.geometry.as_deref()}else{None},self.editor.doc.value(),&self.selected,self.cooking.completed);
+                    // Hovering the purple arrow previews the field's current group (only on the geometry its ids belong to).
+                    let hover = ctx.data(|d| d.get_temp::<(String,String,ui::SelectionMode,bool,u64)>(egui::Id::new("param_pick_hover")))
+                        .filter(|h| h.4 + 1 >= ctx.cumulative_pass_nr());
+                    if self.param_pick.is_none() {
+                        match hover {
+                            Some((node,name,mode,_,_)) if source_ready(&self.display_ranges, &input_source(self.editor.doc.value(), &node, &self.display)) => {
+                                let text = self.editor.doc.value()["nodes"][&node]["params"][&name].as_str().unwrap_or("").to_owned();
+                                let topo = element_select::cached(&self.elem_topo, scene);
+                                if self.picked_field.as_ref().is_none_or(|f| f.node != node || f.selection.mode != mode || f.selection != topo.parse_group(&text, mode)) {
+                                    self.picked_field = Some(field_selection(topo, &text, mode, &node, scene.positions(), scene.triangle_indices(), scene.radius * 0.012));
+                                }
+                            }
+                            _ => if self.picked_field.take().is_some() {
+                                gpu.set_group_overlay(&self.state.device, &[], &[]);
+                                self.group_preview = Default::default();
+                            },
+                        }
+                    }
                     if let Some(field) = &self.picked_field {
                         if field.node == self.selected {
                             gpu.set_group_overlay(&self.state.device, &field.faces, &field.lines);

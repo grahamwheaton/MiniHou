@@ -26,7 +26,7 @@ pub(super) struct ParamPick {
     pub(super) node: String, pub(super) name: String, pub(super) original: String, pub(super) changed: bool,
     pub(super) previous_selection: picking::Selection, pub(super) previous_mode: ui::SelectionMode, pub(super) pairs: bool,
     pub(super) source: String, pub(super) previous_display: String,
-    pub(super) previous_selected_set: BTreeSet<String>, pub(super) ready: bool,
+    pub(super) previous_selected_set: BTreeSet<String>, pub(super) ready: bool, pub(super) load: bool,
 }
 impl ParamPick {
     pub(super) fn text(&self, topo: &element_select::Topology, selection: &picking::Selection) -> String {
@@ -47,6 +47,13 @@ impl ParamPick {
         PickedField { node:self.node.clone(), selection:selection.clone(), faces, lines }
     }
 }
+/// Parse a group field into a selection on `topo` plus its purple highlight (shared by the arrow hover and the pick start).
+pub(super) fn field_selection(topo: &element_select::Topology, text: &str, mode: ui::SelectionMode, node: &str,
+        positions: &[f32], triangles: &[u32], size: f32) -> PickedField {
+    let selection = topo.parse_group(text, mode);
+    let (faces, lines) = picking::highlight(positions, triangles, &selection, size);
+    PickedField { node:node.to_owned(), selection, faces, lines }
+}
 pub(super) fn param_pick_end(ctx: &egui::Context, viewport: egui::Rect) -> Option<bool> {
     ctx.input(|i| {
         if i.key_pressed(egui::Key::Escape) { Some(true) }
@@ -59,6 +66,39 @@ pub(super) fn param_pick_end(ctx: &egui::Context, viewport: egui::Rect) -> Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn quad() -> (Vec<f32>, Vec<u32>, Vec<u32>) {
+        (vec![0.,0.,0., 1.,0.,0., 1.,1.,0., 0.,1.,0.], vec![0,1,2,0,2,3], vec![0,1,1,2,2,3,3,0])
+    }
+    #[test]
+    fn group_text_round_trips_through_selection() {
+        let (p, t, e) = quad();
+        let topo = element_select::Topology::new(&p, &t, &e);
+        for (mode, text, pairs) in [(ui::SelectionMode::Points, "0 2 3", false), (ui::SelectionMode::Edges, "0-1 2-3", true), (ui::SelectionMode::Faces, "0", false)] {
+            let sel = topo.parse_group(text, mode);
+            assert!(!sel.is_empty(), "{text}");
+            let pick = ParamPick { node:"n".into(), name:"group".into(), original:text.into(), changed:false, previous_selection:Default::default(),
+                previous_mode:ui::SelectionMode::Object, pairs, source:"s".into(), previous_display:"d".into(), previous_selected_set:Default::default(), ready:true, load:false };
+            assert_eq!(pick.text(&topo, &sel), text);
+        }
+        assert!(topo.parse_group("9 0", ui::SelectionMode::Points).points == vec![0]); // out-of-range ids dropped
+        assert!(topo.parse_group("0-2", ui::SelectionMode::Edges).is_empty()); // not a polygon edge
+    }
+    #[test]
+    fn hover_and_arrow_click_keep_the_field_selection() {
+        let (p, t, e) = quad();
+        let topo = element_select::Topology::new(&p, &t, &e);
+        let hover = field_selection(&topo, "0 1", ui::SelectionMode::Points, "n", &p, &t, 0.01);
+        assert_eq!(hover.selection.points, vec![0, 1]);
+        assert!(!hover.lines.is_empty());
+        // Arrow click loads the same parse into the live selection; a toggle then edits it and Enter would write the text.
+        let mut live = field_selection(&topo, "0 1", ui::SelectionMode::Points, "n", &p, &t, 0.01).selection;
+        assert_eq!(live.points, vec![0, 1]);
+        assert!(topo.apply_click(&p, element_select::ClickKind::Toggle, Some((picking::Selection { mode:ui::SelectionMode::Points, points:vec![2], ..Default::default() }, 0, [0.;3])), ui::SelectionMode::Points, &mut live));
+        let pick = ParamPick { node:"n".into(), name:"group".into(), original:"0 1".into(), changed:false, previous_selection:Default::default(),
+            previous_mode:ui::SelectionMode::Object, pairs:false, source:"s".into(), previous_display:"d".into(), previous_selected_set:Default::default(), ready:true, load:false };
+        assert_eq!(pick.text(&topo, &live), "0 1 2");
+        assert!(matches!(pick.cancel_edit(), Edit::Param { value, .. } if value == "0 1"));
+    }
     #[test]
     fn subdivide_picks_input_topology() {
         let doc = json!({"nodes":{"box1":{"type":"box"},"subdivide1":{"type":"subdivide","inputs":{"geo":"box1"}}}});
@@ -80,7 +120,7 @@ mod tests {
         assert_eq!(end, Some(true));
         let original = ParamPick { node:"n".into(), name:"group".into(), original:"3 5".into(),
             changed:true, previous_selection:Default::default(), previous_mode:ui::SelectionMode::Object, pairs:false,
-            source:"input".into(), previous_display:"output".into(), previous_selected_set:Default::default(), ready:false };
+            source:"input".into(), previous_display:"output".into(), previous_selected_set:Default::default(), ready:false, load:false };
         assert!(matches!(original.cancel_edit(), Edit::Param {value,..} if value=="3 5"));
     }
 
@@ -97,7 +137,7 @@ mod tests {
             Some((picked, 0, [0.7,0.4,0.])), ui::SelectionMode::Faces, &mut selection));
         let mut field = ParamPick { node:"extrude1".into(), name:"group".into(), original:"old".into(),
             changed:false, previous_selection:Default::default(), previous_mode:ui::SelectionMode::Object, pairs:false,
-            source:"input".into(), previous_display:"output".into(), previous_selected_set:Default::default(), ready:false };
+            source:"input".into(), previous_display:"output".into(), previous_selected_set:Default::default(), ready:false, load:false };
         assert!(matches!(field.clicked(&topo, &selection), Edit::Param { value, .. } if value == "0"));
         assert_eq!(field.original, "old"); // Esc restores this snapshot.
         let (faces, lines) = picking::highlight(&positions, &tris, &selection, 0.01);
