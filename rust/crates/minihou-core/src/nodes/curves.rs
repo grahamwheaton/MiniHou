@@ -1,6 +1,6 @@
 //! Arc-length curves and Bezier sources, matching nodes/curves.py.
 use std::sync::Arc;
-use super::{InputSpec, Inputs, NodeSpec, GEO, linspace};
+use super::{InputSpec, Inputs, NodeSpec, GEO};
 use super::group::{gather_table, keep_prims};
 use crate::{error::{Error, Result}, geometry::{Attr, AttrData, Geometry, Topology, MAX_ELEMENTS}, params::Params};
 
@@ -13,19 +13,8 @@ pub(crate) fn curve(p: Vec<f32>, closed: bool) -> Result<Geometry> {
     g.prim.insert("__viewport_curve".into(),Arc::new(Attr::i32(1,vec![1])));
     Ok(g)
 }
-pub const HELIX: NodeSpec = NodeSpec { name: "helix", inputs: &[], params: crate::params!(
-    "radius": 1.0; "radius_end": -1.0; "height": 2.0; "turns": 3.0; "points": 120), cook: helix };
-fn helix(_: &Inputs,p: &Params) -> Result<Geometry> {
-    let n=p.i("points")?; if n<2 { return Err(Error::new("points must be at least 2")); } count(n as usize)?;
-    let (r,h,turns)=(p.f("radius")?,p.f("height")?,p.f("turns")?);
-    let end=p.f("radius_end")?; let end=if end<0.0 {r} else {end};
-    let mut out=Vec::new();
-    for t in linspace(0.0,1.0,n as usize) {
-        let rad=r+(end-r)*t; let a=t*turns*2.0*std::f64::consts::PI;
-        out.extend([(rad*a.cos()) as f32,(rad*a.sin()) as f32,(t*h) as f32]);
-    }
-    curve(out,false)
-}
+pub(crate) fn norm(v: [f64;3]) -> f64 { v.iter().map(|x| x*x).sum::<f64>().sqrt() }
+pub(crate) fn sub(a:[f64;3],b:[f64;3])->[f64;3] { std::array::from_fn(|i| a[i]-b[i]) }
 /// Exactly the edge order and branch/loop traversal of Python chain_segments.
 pub(super) fn chains(n:usize,edges:&[[i32;2]]) -> (Vec<Vec<i32>>,Vec<bool>) {
     let mut adj=vec![Vec::<(i32,usize)>::new();n];

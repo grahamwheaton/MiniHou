@@ -1,11 +1,10 @@
 use std::sync::Arc;
 use crate::{nodes::{InputSpec, Inputs, NodeSpec}, error::{Error, Result}, geometry::Geometry, params::Params};
+use crate::nodes::curves::{norm, sub};
 
 const CONTROLS: &str = r#"[{"p": [-1, 0, 0], "left": [-1.5, 0, 0], "right": [-0.5, 0, 0], "mode": "AUTO"}, {"p": [0, 0, 1], "left": [-0.5, 0, 1], "right": [0.5, 0, 1], "mode": "AUTO"}, {"p": [1, 0, 0], "left": [0.5, 0, 0], "right": [1.5, 0, 0], "mode": "AUTO"}]"#;
 pub(super) const NODE: NodeSpec = NodeSpec { name: "bezier", inputs: &[InputSpec{name:"geo",multi:false,optional:true}],
     params: crate::params!("controls": CONTROLS; "closed": false; "resolution": 24; "as_mesh": false), cook: bezier };
-fn norm(v: [f64;3]) -> f64 { v.iter().map(|x| x*x).sum::<f64>().sqrt() }
-fn sub(a:[f64;3],b:[f64;3])->[f64;3] { std::array::from_fn(|i| a[i]-b[i]) }
 fn bezier(inputs:&Inputs,p:&Params)->Result<Geometry> {
     let value:serde_json::Value=serde_json::from_str(&p.s("controls")?).map_err(|e| Error::new(e.to_string()))?;
     let cs=value.as_array().ok_or_else(|| Error::new("Bezier curves need 2 to 10000 control points"))?;
