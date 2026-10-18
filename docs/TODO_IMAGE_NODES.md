@@ -297,3 +297,7 @@ The domain option shown as "primitives" (group_create, blast, and other nodes wi
 ## Later: rename the "primitives" domain value properly (requested 2026-10-18)
 
 The UI now shows "faces" (display label only, in ui/params.rs). The stored value is still "primitives" in about 50 places (node code, metadata, tests). Do a proper rename to "faces": accept "primitives" as a legacy alias when loading saved graphs, regenerate the param metadata, and update the Python reference and its tests. Keep the alias until saved graphs are migrated.
+
+## Queued: deformer parity and gizmos (requested 2026-10-18)
+
+Plan from Argon (argon-deform-45cb8b): (1) add missing lattice, path and point deform params to capture_deform.rs and curves.rs; (2) a shared capture gizmo in a new deform_gizmo.rs (capture box wireframe, origin, direction and up handles, pure drag tests); (3) per-deformer handles: Bend arc, Twist ring, Taper squares and centre, Squish pivot, lattice/path/point handles; (4) keys F/G/H/B/N/M only when a capture deformer is selected and no modal or gizmo is active, plus the HUD legend and parameter grouping. Acceptance: numerical parity test against a Houdini reference within 1e-4.
