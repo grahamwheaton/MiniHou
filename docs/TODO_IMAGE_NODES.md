@@ -291,3 +291,25 @@ Migrate the legacy nodes to the self-registering package system, following docs/
 ## Bug: group_create silently fails on an expression pattern (reported 2026-10-18)
 
 The pattern `@P.z >1` is not valid for group_create's pattern field, which takes numbers, ranges and names (like Houdini). But the node shows "not cooked" with no error message, which is confusing. Fix: report "unrecognised pattern: ..." in the node status. Later: add a method `expression` to group_create that takes an Attribute Wrangle-style expression (after Wrangle parity).
+
+## Testing feedback on ce2c51c36 (2026-10-18)
+
+Bugs:
+- **Faces dropped by selection:** selection still drops faces (tested, not fixed).
+- **Field editing:** on click the text should not left-align; the whole value should be selected so typing replaces it (Blender parity).
+- **Re-cook activity:** dragging or wheel-adjusting a value re-cooks many nodes; check the cook path for parameter drags (only the changed node and its downstream should cook, and only on release unless live preview is wanted). Compare with the mouse-wheel path.
+- **Point highlight:** the purple selected points should be a large dot, not a crosshair (see screenshot 75).
+- **Boundary select:** should select only the boundary edges, create an auto-named group, and switch the viewport selection to edges.
+- **Select sharp edges:** tags no edges in testing. When the node is selected, every edge it tags should show purple.
+- **Hover on the purple arrow:** should highlight the selection in the viewport. Also add a demo graph that shows it.
+- **Auto group selection and purple arrows:** the new select nodes, and relax points, need an auto group name and the purple arrow on their group fields.
+- **Image file / image plane:** the Blender image plane does not render (screenshot 79). Image file shows no image preview; the height map is correct but the image is not displayed (screenshots 77 and 78).
+- **Input group selector:** an input group selector with a purple arrow (item 11).
+
+Features:
+- **Color node:** Houdini parity (Group, Group Type, Delete All Existing Color Attributes, Set Color Attribute, Class, Color Type, Color). Check why nothing shows in the viewport.
+- **Point size x4** in the viewport (points are too small to see).
+- **Asset shelf I/O tab:** Blender object, file image, object input, USD and similar.
+- **Image file default:** a flat image plane by default, renamed "Tessellation", with a height map as an option (no "too dense" error by default).
+- **Output target button:** a target button next to each output parameter. Hover shows the output on the mesh (a float output can show as a strength level); click selects the group. Suggest a colour (not purple, which is the input selection colour).
+- **Dissolve flat edges and Clean parity** (Flash, in progress); if the Clean/dissolve nodes cannot be found in the Tab menu, add them to the shelf.
