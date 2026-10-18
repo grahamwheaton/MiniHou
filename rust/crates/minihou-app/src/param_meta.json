@@ -6974,6 +6974,38 @@
    "soft_min": -360.0
   }
  },
+ "ripple": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Centre position of the concentric ripples.",
+   "kind": "vec3"
+  },
+  "decay": {
+   "default": 0.0,
+   "doc": "Exponential decay rate with distance from the centre (0 disables decay).",
+   "kind": "float",
+   "min": 0.0
+  },
+  "frequency": {
+   "default": 1.0,
+   "doc": "Spatial frequency of the concentric ripples.",
+   "kind": "float"
+  },
+  "offset": {
+   "default": 0.0,
+   "doc": "Phase offset of the ripples in radians.",
+   "kind": "float"
+  },
+  "strength": {
+   "default": 1.0,
+   "doc": "Displacement amplitude along the surface normal.",
+   "kind": "float"
+  }
+ },
  "scatter": {
   "count": {
    "default": 1000,
