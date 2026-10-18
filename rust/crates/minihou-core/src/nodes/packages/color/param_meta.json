@@ -1,0 +1,58 @@
+{
+  "color": {
+    "default": [
+      1.0,
+      0.5,
+      0.2
+    ],
+    "doc": "Base color for constant and ramp modes.",
+    "kind": "vec3"
+  },
+  "color2": {
+    "default": [
+      0.1,
+      0.3,
+      1.0
+    ],
+    "doc": "ramp end color",
+    "kind": "vec3"
+  },
+  "domain": {
+    "default": "points",
+    "doc": "Geometry domain receiving Cd.",
+    "kind": "enum",
+    "options": [
+      "points",
+      "primitives",
+      "vertices"
+    ]
+  },
+  "group": {
+    "default": "",
+    "doc": "Only these points or primitives",
+    "kind": "str",
+    "pick_domain_default": "points",
+    "pick_domain_param": "domain"
+  },
+  "mode": {
+    "default": "constant",
+    "doc": "ramp: from color to color2 along an attribute's range",
+    "kind": "enum",
+    "options": [
+      "constant",
+      "random",
+      "random_by_piece",
+      "ramp"
+    ]
+  },
+  "ramp_attrib": {
+    "default": "P.z",
+    "doc": "ramp: attribute (with .x/.y/.z for a component), mapped from its min to its max",
+    "kind": "str"
+  },
+  "seed": {
+    "default": 0,
+    "doc": "Seed for repeatable random colors.",
+    "kind": "int"
+  }
+}

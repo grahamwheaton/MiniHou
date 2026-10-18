@@ -1,0 +1,32 @@
+{
+  "group": {
+    "default": "",
+    "doc": "Only these points",
+    "kind": "str",
+    "pick_domain": "points"
+  },
+  "iterations": {
+    "default": 5,
+    "doc": "Number of blur passes.",
+    "kind": "int",
+    "min": 0,
+    "soft_max": 100
+  },
+  "names": {
+    "default": "P",
+    "doc": "Point attributes to smooth along edges (P smooths the shape), space separated",
+    "kind": "str"
+  },
+  "pin_boundary": {
+    "default": true,
+    "doc": "Keep points on open edges, and the ends of curves, in place",
+    "kind": "bool"
+  },
+  "strength": {
+    "default": 0.5,
+    "doc": "How far each step moves towards the neighbours' average",
+    "kind": "float",
+    "max": 1.0,
+    "min": 0.0
+  }
+}

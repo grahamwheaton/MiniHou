@@ -1,0 +1,5 @@
+id = "sort"
+name = "Sort"
+category = "Attributes"
+description = "Reorder points or primitives by a chosen key."
+keywords = "attribute sort"

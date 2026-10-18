@@ -1,0 +1,34 @@
+{
+  "attribute": {
+    "default": "",
+    "doc": "key = attribute: sort by this attribute (first component)",
+    "kind": "str"
+  },
+  "domain": {
+    "default": "points",
+    "doc": "Reorder points or primitives.",
+    "kind": "enum",
+    "options": [
+      "points",
+      "primitives"
+    ]
+  },
+  "key": {
+    "default": "random",
+    "doc": "Rule used to order elements.",
+    "kind": "enum",
+    "options": [
+      "random",
+      "x",
+      "y",
+      "z",
+      "attribute",
+      "reverse"
+    ]
+  },
+  "seed": {
+    "default": 0,
+    "doc": "Seed used when sorting randomly.",
+    "kind": "int"
+  }
+}

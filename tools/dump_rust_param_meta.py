@@ -43,9 +43,8 @@ def package_meta() -> dict:
 TYPES += ["loop_begin", "loop_end", "input", "object_input", "wrangle", "blend", "exploded_view", "usd_export", "usd_import"]
 
 # Procedural / instancing ports; retain the other workers' type lists above.
-TYPES += ["lsystem", "convert_line", "polypath", "carve", "copy_to_points", "instance", "for_each",
-          "attribute_create", "attribute_promote", "attribute_blur"]
-TYPES += ["connectivity", "smooth", "falloff", "uv_project", "uv_flatten", "uv_transform", "curve_simplify", "group_create", "blast", "measure"]
+TYPES += ["lsystem", "convert_line", "polypath", "carve", "copy_to_points", "instance", "for_each"]
+TYPES += ["falloff", "uv_project", "uv_flatten", "uv_transform", "curve_simplify", "group_create", "blast"]
 
 
 # Modeling ports. loop_cut is the native keymap alias for Python's polysplit.
@@ -70,9 +69,9 @@ TYPES += ["delaunay", "bridge", "revolve", "sweep", "skin", "lattice",
           "contour", "remesh", "heightfield_erode"]
 
 # Ported nodes: scatter, deform, primitives, transform, attributes, materials, surface, contour.
-TYPES += ["scatter", "sort", "switch",
-          "fuse", "soft_transform", "copy_transform", "attribute_randomize",
-          "attribute_transfer", "convex_hull", "slice", "dissolve", "color", "attrib_paint"]
+TYPES += ["scatter", "switch",
+          "fuse", "soft_transform", "copy_transform",
+          "convex_hull", "slice", "dissolve", "attrib_paint"]
 
 
 # Time / physics ports (docs/RUST_SOLVER_DESIGN.md).
@@ -121,8 +120,6 @@ def meta() -> dict:
     # polybevel group follows its group_type parameter (edges or primitives) when set.
     out["polybevel"]["group"]["pick_domain_param"] = "group_type"
     out["polybevel"]["group"]["pick_domain_default"] = "edges"
-    out["attribute_create"]["group"]["pick_domain_param"] = "domain"
-    out["attribute_create"]["group"]["pick_domain_default"] = "points"
     # Remaining group fields: fixed element domain, or follow the node's own domain parameter.
     _pts = "bend lattice linear_taper mirror noise peak point_deform point_jitter pushpull smooth soft_peak soft_transform squash_stretch twist attribute_blur attribute_transfer attribute_randomize resample wrangle instance convex_hull blend goal_pin goal_surface occlusion measure_bounds measure_distance measure_length skin_profiles scatteralign voronoi_fracture rbd_constraint_properties".split()
     _faces = "dissolve divide inset outset tris_to_quads slice reverse recalc_normals solidify uv_project uv_transform unpack pack polyfill polyexpand2d measure_area measure_volume contour assemble".split()

@@ -1,0 +1,5 @@
+id = "attribute_blur"
+name = "Attribute Blur"
+category = "Attributes"
+description = "Blur point attributes along mesh edges."
+keywords = "attribute attribute blur"

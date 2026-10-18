@@ -1,0 +1,5 @@
+id = "attribute_create"
+name = "Attribute Create"
+category = "Attributes"
+description = "Create a named attribute on a geometry domain."
+keywords = "attribute attribute create"

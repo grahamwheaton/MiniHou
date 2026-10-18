@@ -1,0 +1,19 @@
+{
+  "measure": {
+    "default": "area",
+    "doc": "area / perimeter per primitive (an open curve's perimeter is its length); curvature per point (mean curvature, 1/radius: + convex, - concave); piece_area / piece_volume per primitive, summed over its connected piece",
+    "kind": "enum",
+    "options": [
+      "area",
+      "perimeter",
+      "curvature",
+      "piece_area",
+      "piece_volume"
+    ]
+  },
+  "name": {
+    "default": "",
+    "doc": "Attribute name (default: the measure's name)",
+    "kind": "str"
+  }
+}

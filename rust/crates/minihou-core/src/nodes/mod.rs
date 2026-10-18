@@ -201,13 +201,7 @@ pub fn registry() -> &'static [NodeSpec] {
         recalc_normals::RECALC_NORMALS,
         tris_to_quads::TRIS_TO_QUADS,
         group::BLAST,
-        attrib_tools::ATTRIBUTE_CREATE,
         attrib_paint::ATTRIB_PAINT,
-        attrib_tools::ATTRIBUTE_PROMOTE,
-        attrib_tools::ATTRIBUTE_BLUR,
-        attrib_tools::CONNECTIVITY,
-        attrib_tools::SMOOTH,
-        attrib_tools::MEASURE,
         falloff::FALLOFF,
         uv::UV_PROJECT,
         uv::UV_FLATTEN,
@@ -282,14 +276,10 @@ pub fn registry() -> &'static [NodeSpec] {
         heightfield::HEIGHTFIELD_ERODE,
         scatter::SCATTER,
         scatteralign::SCATTERALIGN,
-        attrib_tools::SORT,
         merge::SWITCH,
         primitives::FUSE,
         capture_deform::SOFT_TRANSFORM,
         transform::COPY_TRANSFORM,
-        attrib_tools::ATTRIBUTE_RANDOMIZE,
-        attrib_tools::ATTRIBUTE_TRANSFER,
-        attrib_tools::COLOR,
         surface::CONVEX_HULL,
         contour::SLICE,
         dissolve::DISSOLVE,
@@ -320,7 +310,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["attribute_delete", "attribute_rename", "bend", "bezier", "bound", "boundary_select", "bulge", "cache", "clean", "example_offset", "facet", "fillet", "flood_fill", "fractal", "group_expand", "group_promote", "helix", "line", "loop_flatten", "loop_space", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "pcg_bounds", "pcg_copy_points", "pcg_debug", "pcg_density_filter", "pcg_density_noise", "pcg_difference", "pcg_distance", "pcg_intersection", "pcg_points", "pcg_projection", "pcg_self_prune", "pcg_spawner", "pcg_spline_sampler", "pcg_surface_sampler", "pcg_transform", "pcg_union", "pcg_volume_sampler", "peak", "point", "point_jitter", "point_relax", "resample", "reverse", "ripple", "select_sharp_edges", "set_material", "subnet", "unpack", "waves"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["attribute_blur", "attribute_create", "attribute_delete", "attribute_promote", "attribute_randomize", "attribute_rename", "attribute_transfer", "bend", "bezier", "bound", "boundary_select", "bulge", "cache", "clean", "color", "connectivity", "example_offset", "facet", "fillet", "flood_fill", "fractal", "group_expand", "group_promote", "helix", "line", "loop_flatten", "loop_space", "measure", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "pcg_bounds", "pcg_copy_points", "pcg_debug", "pcg_density_filter", "pcg_density_noise", "pcg_difference", "pcg_distance", "pcg_intersection", "pcg_points", "pcg_projection", "pcg_self_prune", "pcg_spawner", "pcg_spline_sampler", "pcg_surface_sampler", "pcg_transform", "pcg_union", "pcg_volume_sampler", "peak", "point", "point_jitter", "point_relax", "resample", "reverse", "ripple", "select_sharp_edges", "set_material", "smooth", "sort", "subnet", "unpack", "waves"]);
     }
 }
 

@@ -1,0 +1,5 @@
+id = "smooth"
+name = "Smooth"
+category = "Attributes"
+description = "Smooth point positions along mesh edges."
+keywords = "attribute smooth"

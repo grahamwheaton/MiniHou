@@ -1,0 +1,5 @@
+id = "attribute_randomize"
+name = "Attribute Randomize"
+category = "Attributes"
+description = "Fill an attribute with deterministic random values."
+keywords = "attribute attribute randomize"

@@ -1,0 +1,35 @@
+{
+  "keep_original": {
+    "default": false,
+    "doc": "Keep the source attribute after promotion.",
+    "kind": "bool"
+  },
+  "method": {
+    "default": "average",
+    "doc": "How several values combine into one",
+    "kind": "enum",
+    "options": [
+      "average",
+      "min",
+      "max",
+      "sum",
+      "first"
+    ]
+  },
+  "name": {
+    "default": "Cd",
+    "doc": "Attribute to move (wildcards promote several)",
+    "kind": "str"
+  },
+  "to": {
+    "default": "points",
+    "doc": "Destination geometry domain.",
+    "kind": "enum",
+    "options": [
+      "points",
+      "primitives",
+      "vertices",
+      "detail"
+    ]
+  }
+}
