@@ -80,7 +80,7 @@ impl Plan {
     }
 
     pub(crate) fn cook_end(&self, graph: &Graph, resolved: &crate::channels::ResolvedChannels, id: &str, budget: Budget,
-        fetch: &mut dyn FnMut(&str) -> Result<Arc<Geometry>>) -> Result<(Geometry,Vec<(String,f64)>)> {
+        fetch: &mut dyn FnMut(&str) -> Result<Arc<Geometry>>) -> Result<(Geometry,Vec<(String,f64,usize,usize)>)> {
         let mut cook = Region { graph, resolved, plan: self, budget, fetch, frames: Vec::new(), times:Vec::new() };
         let geometry=(*cook.end(id)?).clone();Ok((geometry,cook.times))
     }
@@ -89,7 +89,7 @@ impl Plan {
 struct Frame { scope: Vec<String>, done: HashMap<String, Arc<Geometry>> }
 struct Region<'a> {
     graph: &'a Graph, resolved: &'a crate::channels::ResolvedChannels, plan: &'a Plan, budget: Budget,
-    fetch: &'a mut dyn FnMut(&str) -> Result<Arc<Geometry>>, frames: Vec<Frame>, times:Vec<(String,f64)>,
+    fetch: &'a mut dyn FnMut(&str) -> Result<Arc<Geometry>>, frames: Vec<Frame>, times:Vec<(String,f64,usize,usize)>,
 }
 impl Region<'_> {
     fn node(&mut self, id: &str) -> Result<Arc<Geometry>> {
@@ -109,7 +109,7 @@ impl Region<'_> {
             }
             Arc::new(run_node(id, def, spec, &inputs, self.resolved.params.get(id))?)
         };
-        self.times.push((id.into(),start.elapsed().as_secs_f64()*1000.));
+        self.times.push((id.into(),start.elapsed().as_secs_f64()*1000.,out.npoints,out.nprims()));
         self.frames[slot].done.insert(id.into(), out.clone()); Ok(out)
     }
     fn end(&mut self, id: &str) -> Result<Arc<Geometry>> {
