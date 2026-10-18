@@ -219,3 +219,7 @@ Parked by user: inset on non-planar regions. Tri to Quad: user will test.
 - **Blender attribute transport:** a cube from Blender lost its `bevel_weight_edge` attribute on the way through MiniHou. Make sure all attributes and creases (bevel weight, crease, sharp, seam, UVs, colours) survive a round trip.
 - **Scene Objects, option B:** each object is its own mesh with its empty as parent, so moving the empty moves the object. Rename "pieces" to "objects" in UI and code (see memory rule).
 - **Copy to Points:** pack is the default now (done 2026-10-18).
+
+## Future: Houdini-style output groups UI (requested 2026-10-18)
+
+For nodes with output groups, show an "Output Groups" section like Houdini: one row per output group, with a checkbox (enable that group), a label (for example "Point Fillet Polygons") and a group-name field (for example `pointfilletpolys`). The name field is greyed when the checkbox is off. Applies to every node with output groups, for example polyfillet and similar nodes.
