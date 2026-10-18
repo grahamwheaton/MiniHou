@@ -1,0 +1,54 @@
+{
+  "frequency": {
+    "default": 0.2,
+    "doc": "perlin: patches per metre",
+    "kind": "float",
+    "min": 0.0,
+    "soft_max": 5.0
+  },
+  "high": {
+    "default": 1.0,
+    "doc": "Range of the noise values",
+    "kind": "float",
+    "max": 1.0,
+    "min": 0.0
+  },
+  "invert": {
+    "default": false,
+    "doc": "",
+    "kind": "bool"
+  },
+  "low": {
+    "default": 0.0,
+    "doc": "",
+    "kind": "float",
+    "max": 1.0,
+    "min": 0.0
+  },
+  "mode": {
+    "default": "set",
+    "doc": "How the noise combines with the density",
+    "kind": "enum",
+    "options": [
+      "set",
+      "multiply",
+      "add",
+      "minimum",
+      "maximum"
+    ]
+  },
+  "noise": {
+    "default": "random",
+    "doc": "random: per point (from its seed); perlin: smooth patches in space",
+    "kind": "enum",
+    "options": [
+      "random",
+      "perlin"
+    ]
+  },
+  "seed": {
+    "default": 0,
+    "doc": "",
+    "kind": "int"
+  }
+}

@@ -198,7 +198,6 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "PCG Union", node_type: "pcg_union", icon: "boolean" },
         Tool { label: "PCG Difference", node_type: "pcg_difference", icon: "boolean" },
         Tool { label: "PCG Intersection", node_type: "pcg_intersection", icon: "boolean" },
-        Tool { label: "PCG Density Noise", node_type: "pcg_density_noise", icon: "noise" },
         Tool { label: "PCG Distance", node_type: "pcg_distance", icon: "measure" },
         Tool { label: "PCG Copy Points", node_type: "pcg_copy_points", icon: "copy_to_points" },
         Tool { label: "PCG Self Prune", node_type: "pcg_self_prune", icon: "clean" },

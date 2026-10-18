@@ -1,0 +1,5 @@
+id = "pcg_density_noise"
+name = "PCG Density Noise"
+category = "PCG"
+description = "Set or modify point density with noise."
+keywords = "pcg density noise"

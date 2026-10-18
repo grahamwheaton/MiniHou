@@ -249,7 +249,6 @@ pub fn registry() -> &'static [NodeSpec] {
         pcg::PCG_UNION,
         pcg::PCG_DIFFERENCE,
         pcg::PCG_INTERSECTION,
-        pcg::PCG_DENSITY_NOISE,
         pcg::PCG_DISTANCE,
         pcg::PCG_COPY_POINTS,
         pcg::PCG_SELF_PRUNE,
