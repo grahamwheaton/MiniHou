@@ -208,7 +208,9 @@
   "group": {
    "default": "",
    "doc": "Only set it on these elements (others get 0); points or primitives",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain_default": "points",
+   "pick_domain_param": "domain"
   },
   "name": {
    "default": "attrib1",
