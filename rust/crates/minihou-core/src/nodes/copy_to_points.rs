@@ -19,7 +19,7 @@ fn limit_from_preferences(v:Option<&serde_json::Value>)->u64{
 }
 pub const COPY_TO_POINTS:NodeSpec=NodeSpec{name:"copy_to_points",inputs:&[
     InputSpec{name:"source",multi:false,optional:false},InputSpec{name:"points",multi:false,optional:false}],
-    params:crate::params!("orient":true;"use_pscale":true;"pack_instances":false),cook:copy};
+    params:crate::params!("orient":true;"use_pscale":true;"pack_instances":true),cook:copy};
 fn row(g:&Geometry,name:&str,i:usize,width:usize)->Option<Vec<f64>>{
     let a=g.point.get(name)?;if a.width!=width{return None;}
     Some(match &a.data{AttrData::F32(v)=>v[i*width..(i+1)*width].iter().map(|&x|x as f64).collect(),AttrData::I32(v)=>v[i*width..(i+1)*width].iter().map(|&x|x as f64).collect()})
@@ -118,11 +118,11 @@ mod tests{
         copy(&[vec![src.clone()],vec![pts.clone()]],&Params::resolve(COPY_TO_POINTS.params,v.as_ref().and_then(|v|v.as_object())).unwrap()).unwrap()
     }
     #[test]
-    fn copy_to_points_output_unchanged_when_instances_off(){
-        let(src,pts)=instance_case();let a=run(&src,&pts,None);let b=run(&src,&pts,Some(false));
-        assert!(a.packed.is_empty()&&!a.point.contains_key(crate::nodes::packed::SOURCE));
-        assert_eq!((a.npoints,a.nprims()),(40,30));crate::nodes::packed::tests::assert_same(&a,&b);
-        assert_eq!(a.p(),b.p());
+    fn copy_to_points_default_packs_and_off_expands(){
+        let(src,pts)=instance_case();let a=run(&src,&pts,None);let off=run(&src,&pts,Some(false));
+        assert_eq!((a.npoints,a.packed.len()),(5,1));crate::nodes::packed::tests::assert_same(&a,&run(&src,&pts,Some(true)));
+        assert!(off.packed.is_empty()&&!off.point.contains_key(crate::nodes::packed::SOURCE));
+        assert_eq!((off.npoints,off.nprims()),(40,30));
     }
     #[test]
     fn copy_to_points_instances_convert_to_the_expanded_copy(){
@@ -158,7 +158,7 @@ mod tests{
         pts.point.insert("rot".into(),Arc::new(Attr::f32(3,vec![0.,0.,std::f32::consts::FRAC_PI_2])));
         pts.point.insert("scale".into(),Arc::new(Attr::f32(3,vec![2.,1.,1.])));pts.point.insert("pscale".into(),Arc::new(Attr::f32(1,vec![3.])));
         pts.point.insert("id".into(),Arc::new(Attr::i32(1,vec![9])));
-        let out=copy(&[vec![Arc::new(src)],vec![Arc::new(pts)]],&Params::resolve(COPY_TO_POINTS.params,None).unwrap()).unwrap();
+        let out=copy(&[vec![Arc::new(src)],vec![Arc::new(pts)]],&Params::resolve(COPY_TO_POINTS.params,serde_json::json!({"pack_instances":false}).as_object()).unwrap()).unwrap();
         assert!(out.p()[0].abs()<1e-5);assert!((out.p()[1]-6.).abs()<1e-5);assert!((out.p()[4]-12.).abs()<1e-5);
         assert_eq!(out.point["id"].data,AttrData::I32(vec![9,9]));assert!(out.topology.has_open());out.validate().unwrap();
     }

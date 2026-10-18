@@ -1392,7 +1392,7 @@
    "kind": "bool"
   },
   "pack_instances": {
-   "default": false,
+   "default": true,
    "doc": "Output native instances (one point per copy referencing the shared source, with its transform) instead of copying the source geometry; Unpack converts them to real geometry.",
    "kind": "bool"
   },
