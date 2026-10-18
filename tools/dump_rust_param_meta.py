@@ -416,9 +416,6 @@ def meta() -> dict:
     out["measure_length"] = {
         "group": {"kind": "str", "default": "", "doc": "Optional primitive group to measure length of; empty measures all primitives."},
     }
-    out["measure_area"] = {
-        "group": {"kind": "str", "default": "", "doc": "Optional primitive group to measure area of; empty measures all faces."},
-    }
     # Rust-only native instances for Copy to Points (nodes/packed.rs); off keeps the Python-identical copy.
     out["copy_to_points"]["pack_instances"] = {"kind": "bool", "default": False, "doc": "Output native instances (one point per copy referencing the shared source, with its transform) instead of copying the source geometry; Unpack converts them to real geometry."}
     for node_id, params in package_meta().items():

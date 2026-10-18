@@ -100,7 +100,6 @@ mod tris_to_quads;
 mod inset_ext;
 mod measure_distance;
 mod measure_length;
-mod measure_area;
 
 pub use modify::{match_size_points, MatchSizeOut};
 pub use modeling_tools::{edge_slide_preview, loop_cut_fractions, loop_cut_preview, loop_slide_fractions, LoopRing, LoopTopology, LOOP_CUT_MAX};
@@ -338,7 +337,6 @@ pub fn registry() -> &'static [NodeSpec] {
         output::INPUT,
         measure_distance::MEASURE_DISTANCE,
         measure_length::MEASURE_LENGTH,
-        measure_area::MEASURE_AREA,
     ];
     static MERGED: OnceLock<Vec<NodeSpec>> = OnceLock::new();
     MERGED.get_or_init(|| {
@@ -364,7 +362,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["example_offset", "measure_bounds", "measure_volume", "pack", "unpack"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["example_offset", "measure_area", "measure_bounds", "measure_volume", "pack", "unpack"]);
     }
 }
 

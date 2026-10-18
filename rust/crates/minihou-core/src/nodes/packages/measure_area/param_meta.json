@@ -1,0 +1,7 @@
+{
+  "group": {
+    "default": "",
+    "doc": "Optional primitive group to measure area of; empty measures all faces.",
+    "kind": "str"
+  }
+}

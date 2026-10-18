@@ -173,6 +173,10 @@ mod tests {
         // This was once "example_offset last"; pack and unpack were added by the instancing work.
         let package_tools: Vec<_> = modify.tools.iter().skip(modify.tools.len() - 3).map(|t| t.node_type).collect();
         assert_eq!(package_tools, ["example_offset", "pack", "unpack"]);
+        let measure = tabs().iter().find(|t| t.name == "Measure").unwrap();
+        for id in ["measure_volume", "measure_bounds", "measure_area"] {
+            assert_eq!(measure.tools.iter().filter(|t| t.node_type == id).count(), 1, "{id}");
+        }
     }
     #[test] fn labels_and_initials() { assert_eq!(wrap_label("Blender Object"), "Blender\nObject"); assert_eq!(initials("Blender Object"), "BO"); }
     #[test] fn draws_a_frame() { assert!(Fixture::new().run(show).is_empty()); }
