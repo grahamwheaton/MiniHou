@@ -5,7 +5,7 @@ mod shelf_data;
 
 use super::{Actions, UiAction, View};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2};
-use shelf_data::{TABS, Tool};
+use shelf_data::{tabs, Tool};
 
 fn drag_payload(tool: &Tool) -> super::ToolDrag { super::ToolDrag(tool.node_type.to_owned()) }
 pub fn dropped_tool(tool: &super::ToolDrag, pos: Pos2) -> UiAction {
@@ -65,10 +65,10 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
     let tab_id = tab_id(ui);
     let folded_id = folded_id(ui);
     let visible_id = visible_id(ui);
-    let all_tabs = (1_u32 << TABS.len()) - 1;
+    let all_tabs = (1_u32 << tabs().len()) - 1;
     let mut visible = ui.ctx().data_mut(|d| d.get_persisted::<u32>(visible_id)).unwrap_or(all_tabs);
-    let mut active = ui.ctx().data_mut(|d| d.get_persisted::<usize>(tab_id)).unwrap_or(0).min(TABS.len() - 1);
-    if visible & (1 << active) == 0 { active = (0..TABS.len()).find(|i| visible & (1 << i) != 0).unwrap_or(0); }
+    let mut active = ui.ctx().data_mut(|d| d.get_persisted::<usize>(tab_id)).unwrap_or(0).min(tabs().len() - 1);
+    if visible & (1 << active) == 0 { active = (0..tabs().len()).find(|i| visible & (1 << i) != 0).unwrap_or(0); }
     let mut folded = ui.ctx().data_mut(|d| d.get_persisted::<bool>(folded_id)).unwrap_or(false);
     let (tabs_rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 26.), Sense::hover());
     ui.painter().rect_filled(tabs_rect, 0., v.theme.panel);
@@ -83,7 +83,7 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
                 egui::ScrollArea::horizontal().id_salt("shelf.tabs.scroll").show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 2.;
-                        for (idx, tab) in TABS.iter().enumerate() {
+                        for (idx, tab) in tabs().iter().enumerate() {
                             if visible & (1 << idx) == 0 { continue; }
                             let w = tab.name.len() as f32 * 6.3 + 18.;
                             let (r, response) = ui.allocate_exact_size(Vec2::new(w, 24.), Sense::click());
@@ -95,12 +95,12 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
                 });
             });
             ui.allocate_ui_with_layout(Vec2::new(26., 24.), egui::Layout::left_to_right(egui::Align::Center), |ui| { ui.menu_button("+", |ui| {
-                for (idx, tab) in TABS.iter().enumerate() {
+                for (idx, tab) in tabs().iter().enumerate() {
                     let mut shown = visible & (1 << idx) != 0;
                     if ui.checkbox(&mut shown, tab.name).changed() {
                         if shown { visible |= 1 << idx; }
                         else if visible.count_ones() > 1 { visible &= !(1 << idx); }
-                        if visible & (1 << active) == 0 { active = (0..TABS.len()).find(|i| visible & (1 << i) != 0).unwrap_or(0); }
+                        if visible & (1 << active) == 0 { active = (0..tabs().len()).find(|i| visible & (1 << i) != 0).unwrap_or(0); }
                     }
                 }
             }); });
@@ -122,7 +122,7 @@ pub fn show(ui: &mut egui::Ui, v: &View, out: &mut Actions) {
         egui::ScrollArea::horizontal().id_salt("shelf.tools.scroll").show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.;
-                for tool in TABS[active].tools {
+                for tool in tabs()[active].tools {
                     let (r, response) = ui.allocate_exact_size(Vec2::new(54., 50.), Sense::click_and_drag());
                     response.dnd_set_drag_payload(drag_payload(tool));
                     if response.hovered() { ui.painter().rect_filled(r, 5., v.theme.input); ui.painter().rect_stroke(r, 5., Stroke::new(1.0_f32, v.theme.stroke), StrokeKind::Inside); }
@@ -160,11 +160,21 @@ fn wrap_label(label: &str) -> String {
 mod tests {
     use super::*;
     use crate::ui::testing::Fixture;
-    #[test] fn shelf_lists_are_complete() { assert_eq!(TABS.len(), 20); assert_eq!(TABS[0].name, "Create"); assert!(TABS[0].tools.iter().any(|t| t.node_type == "box")); }
+    #[test] fn shelf_lists_are_complete() { assert_eq!(tabs().len(), 20); assert_eq!(tabs()[0].name, "Create"); assert!(tabs()[0].tools.iter().any(|t| t.node_type == "box")); }
+    #[test] fn package_is_in_shelf_without_changing_legacy_order() {
+        for (legacy, merged) in shelf_data::TABS.iter().zip(tabs()) {
+            assert_eq!(legacy.name, merged.name);
+            assert_eq!(legacy.tools.iter().map(|t| (t.label, t.node_type, t.icon)).collect::<Vec<_>>(),
+                merged.tools.iter().take(legacy.tools.len()).map(|t| (t.label, t.node_type, t.icon)).collect::<Vec<_>>());
+        }
+        let modify = tabs().iter().find(|t| t.name == "Modify").unwrap();
+        assert_eq!(modify.tools[0].node_type, "lod_bake");
+        assert_eq!(modify.tools.last().unwrap().node_type, "example_offset");
+    }
     #[test] fn labels_and_initials() { assert_eq!(wrap_label("Blender Object"), "Blender\nObject"); assert_eq!(initials("Blender Object"), "BO"); }
     #[test] fn draws_a_frame() { assert!(Fixture::new().run(show).is_empty()); }
     #[test] fn drag_payload_requests_the_same_tool_on_drop() {
-        let payload = drag_payload(&TABS[0].tools[0]);
+        let payload = drag_payload(&tabs()[0].tools[0]);
         assert!(matches!(dropped_tool(&payload, Pos2::new(320., -64.)), UiAction::AddNetworkNode { node_type, pos, .. }
             if node_type == "box" && pos == [320., -64.]));
     }
@@ -172,7 +182,7 @@ mod tests {
         let ctx = egui::Context::default();
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                for tool in TABS.iter().flat_map(|tab| tab.tools) {
+                for tool in tabs().iter().flat_map(|tab| tab.tools) {
                     let built_in = matches!(tool.icon, "box" | "point" | "sphere" | "tube" | "torus" | "grid" | "null" |
                         "line" | "circle" | "curve" | "bezier" | "helix" | "lsystem" | "lattice" | "points_to_surface" | "file" | "host");
                     let fallback = matches!(tool.icon, "clean" | "clip" | "curve_simplify" | "falloff" | "occlusion" | "sdf_shape");

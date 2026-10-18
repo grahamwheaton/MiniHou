@@ -4,7 +4,7 @@ mod shelf_data;
 
 use super::{Actions, UiAction, View};
 use eframe::egui::{self, pos2, Color32, FontId, Id, Key, Order, Pos2, RichText, Stroke};
-use shelf_data::TABS;
+use shelf_data::tabs;
 use std::{collections::HashSet, sync::{Mutex, OnceLock}};
 
 #[derive(Default)]
@@ -19,6 +19,12 @@ fn web_data() -> &'static serde_json::Value {
     DATA.get_or_init(|| serde_json::from_str(include_str!("network_menu_web.json")).expect("web node menu metadata"))
 }
 fn meta(ty: &str, field: &str) -> &'static str {
+    if let Some(node) = minihou_core::nodes::package_catalogue().iter().find(|node| node.id == ty) {
+        return match field {
+            "label" => node.name, "menu" | "category" => node.category,
+            "doc" => node.description, "keywords" => node.keywords, _ => "",
+        };
+    }
     web_data()[ty][field].as_str().unwrap_or("")
 }
 fn words(s: &str) -> Vec<String> {
@@ -91,7 +97,7 @@ fn entries(menu: &MenuState) -> Vec<(String, Entry)> {
     if !menu.query.trim().is_empty() {
         let query = menu.query.trim();
         let mut seen = HashSet::new();
-        let mut ranked: Vec<_> = TABS.iter().flat_map(|tab| tab.tools.iter())
+        let mut ranked: Vec<_> = tabs().iter().flat_map(|tab| tab.tools.iter())
             .filter(|tool| seen.insert(tool.node_type) && accepts(menu, tool.node_type))
             .filter_map(|tool| search_score(tool.node_type, query).map(|score| (score, tool))).collect();
         ranked.sort_by(|a,b| a.0.cmp(&b.0).then_with(|| meta(a.1.node_type, "label").cmp(meta(b.1.node_type, "label"))));
@@ -102,7 +108,7 @@ fn entries(menu: &MenuState) -> Vec<(String, Entry)> {
         return matches;
     }
     if let Some(index) = menu.category {
-        if let Some(tab) = TABS.get(index) {
+        if let Some(tab) = tabs().get(index) {
             return tab.tools.iter().filter(|tool| accepts(menu, tool.node_type)).map(|tool| (tool.label.to_owned(), Entry::Tool(tool.node_type))).collect();
         }
     }
@@ -110,7 +116,7 @@ fn entries(menu: &MenuState) -> Vec<(String, Entry)> {
         return ["Adjust", "Deform", "Polygons", "Group", "Create", "Build", "Edges", "Modify"].into_iter().enumerate()
             .map(|(slot, name)| {
                 let catalog = ["Model", "Deform", "Polygon", "Groups", "Create", "Model", "Edges", "Modify"][slot];
-                let index = TABS.iter().position(|tab| tab.name == catalog).unwrap_or(0);
+                let index = tabs().iter().position(|tab| tab.name == catalog).unwrap_or(0);
                 (format!("{}  {name}", slot + 1), Entry::Category(index))
             }).collect();
     }
@@ -118,12 +124,12 @@ fn entries(menu: &MenuState) -> Vec<(String, Entry)> {
     let saved = prefs().lock().unwrap();
     for (names, hint) in [(&saved.favs, "★ Favourites"), (&saved.recent, "Recent")] {
         for ty in names.iter().take(6).filter(|ty| accepts(menu, ty)) {
-            if let Some(tool) = TABS.iter().flat_map(|tab| tab.tools.iter()).find(|tool| tool.node_type == ty) {
+            if let Some(tool) = tabs().iter().flat_map(|tab| tab.tools.iter()).find(|tool| tool.node_type == ty) {
                 if hint != "Recent" || !saved.favs.contains(ty) { result.push((format!("{} · {hint}", tool.label), Entry::Tool(tool.node_type))); }
             }
         }
     }
-    for (index, tab) in TABS.iter().enumerate().filter(|(_, tab)| !tab.tools.is_empty()) {
+    for (index, tab) in tabs().iter().enumerate().filter(|(_, tab)| !tab.tools.is_empty()) {
         result.push((format!("{}  {}", tab.name, if menu.open.contains(&index) { "▾" } else { "▸" }), Entry::Category(index)));
         if menu.open.contains(&index) {
             result.extend(tab.tools.iter().filter(|tool| accepts(menu, tool.node_type)).map(|tool| (tool.label.to_owned(), Entry::Tool(tool.node_type))));
@@ -342,6 +348,20 @@ mod tests {
         let mut menu = MenuState::new(Pos2::ZERO, None, true);
         menu.query = "grid".into();
         assert!(entries(&menu).iter().any(|(_, entry)| matches!(entry, Entry::Tool("grid"))));
+    }
+    #[test] fn package_is_in_tab_menu_and_legacy_contents_remain() {
+        for (legacy, merged) in shelf_data::TABS.iter().zip(tabs()) {
+            assert_eq!(legacy.name, merged.name);
+            assert_eq!(legacy.tools.iter().map(|t| (t.label, t.node_type)).collect::<Vec<_>>(),
+                merged.tools.iter().take(legacy.tools.len()).map(|t| (t.label, t.node_type)).collect::<Vec<_>>());
+        }
+        let modify = tabs().iter().find(|t| t.name == "Modify").unwrap();
+        assert_eq!(modify.tools[0].node_type, "transform");
+        assert!(modify.tools.iter().any(|t| t.node_type == "example_offset"));
+        let mut menu = MenuState::new(Pos2::ZERO, None, true);
+        menu.query = "example offset".into();
+        assert!(entries(&menu).iter().any(|(_, e)| matches!(e, Entry::Tool("example_offset"))));
+        assert_eq!(meta("example_offset", "doc"), "Offset geometry points along Y when enabled.");
     }
     #[test] fn pie_number_slots_follow_web_main_page() {
         let menu = MenuState::pie(Pos2::ZERO);

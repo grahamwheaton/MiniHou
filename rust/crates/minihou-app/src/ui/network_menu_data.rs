@@ -1,5 +1,7 @@
 //! Node menu labels and types copied from the shelf catalogue.
+#[derive(Clone, Copy)]
 pub(super) struct Tool { pub label: &'static str, pub node_type: &'static str }
+#[derive(Clone, Copy)]
 pub(super) struct Category { pub name: &'static str, pub tools: &'static [Tool] }
 pub(super) const TABS: &[Category] = &[
     Category { name: "Create", tools: &[
@@ -251,3 +253,14 @@ pub(super) const TABS: &[Category] = &[
     Category { name: "Library", tools: &[
     ] },
 ];
+
+pub(super) fn tabs() -> &'static [Category] {
+    static MERGED: std::sync::OnceLock<Vec<Category>> = std::sync::OnceLock::new();
+    MERGED.get_or_init(|| TABS.iter().map(|tab| {
+        let mut tools = tab.tools.to_vec();
+        for node in minihou_core::nodes::package_catalogue().iter().filter(|node| node.category == tab.name) {
+            tools.push(Tool { label: node.name, node_type: node.id });
+        }
+        Category { name: tab.name, tools: Box::leak(tools.into_boxed_slice()) }
+    }).collect())
+}
