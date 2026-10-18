@@ -35,6 +35,15 @@ mod pick_tests {
         assert_eq!(pick_domain(param_meta("transform", "group"), &json!({})), Some(SelectionMode::Points));
         assert_eq!(pick_domain(param_meta("polybevel", "group"), &json!({"group_type":"edges"})), Some(SelectionMode::Edges));
         assert_eq!(pick_domain(param_meta("polybevel", "group"), &json!({"group_type":"primitives"})), Some(SelectionMode::Faces));
+        assert_eq!(pick_domain(param_meta("attribute_create", "group"), &json!({})), Some(SelectionMode::Points));
+        assert_eq!(pick_domain(param_meta("attribute_create", "group"), &json!({"domain":"points"})), Some(SelectionMode::Points));
+        assert_eq!(pick_domain(param_meta("attribute_create", "group"), &json!({"domain":"primitives"})), Some(SelectionMode::Faces));
+    }
+    #[test]
+    fn attribute_create_group_field_gets_picker() {
+        assert_eq!(pick_domain(param_meta("attribute_create", "group"), &json!({})), Some(SelectionMode::Points));
+        assert_eq!(pick_domain(param_meta("attribute_create", "group"), &json!({"domain":"points"})), Some(SelectionMode::Points));
+        assert_eq!(pick_domain(param_meta("attribute_create", "group"), &json!({"domain":"primitives"})), Some(SelectionMode::Faces));
     }
     #[test]
     fn arrow_ink_is_purple() {
