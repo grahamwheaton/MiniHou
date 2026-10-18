@@ -1,0 +1,36 @@
+{
+  "group": {
+    "default": "",
+    "doc": "Only these points",
+    "kind": "str",
+    "pick_domain": "points"
+  },
+  "iterations": {
+    "default": 10,
+    "doc": "Number of smoothing passes.",
+    "kind": "int",
+    "min": 0,
+    "soft_max": 200
+  },
+  "method": {
+    "default": "taubin",
+    "doc": "taubin: alternating shrink/inflate steps that keep the volume; laplacian: plain averaging (shrinks)",
+    "kind": "enum",
+    "options": [
+      "taubin",
+      "laplacian"
+    ]
+  },
+  "pin_boundary": {
+    "default": true,
+    "doc": "Keep points on open edges, and the ends of curves, in place",
+    "kind": "bool"
+  },
+  "strength": {
+    "default": 0.5,
+    "doc": "Amount of each smoothing step.",
+    "kind": "float",
+    "max": 1.0,
+    "min": 0.0
+  }
+}

@@ -202,7 +202,6 @@ pub fn registry() -> &'static [NodeSpec] {
         tris_to_quads::TRIS_TO_QUADS,
         group::BLAST,
         attrib_paint::ATTRIB_PAINT,
-        attrib_tools::SMOOTH,
         falloff::FALLOFF,
         uv::UV_PROJECT,
         uv::UV_FLATTEN,
@@ -328,7 +327,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["attribute_blur", "attribute_create", "attribute_delete", "attribute_promote", "attribute_rename", "bend", "bezier", "bound", "boundary_select", "bulge", "cache", "clean", "connectivity", "example_offset", "facet", "fillet", "flood_fill", "fractal", "group_expand", "group_promote", "helix", "line", "loop_flatten", "loop_space", "measure", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "pcg_bounds", "pcg_density_filter", "pcg_points", "pcg_transform", "peak", "point", "point_jitter", "point_relax", "resample", "reverse", "ripple", "select_sharp_edges", "set_material", "subnet", "unpack", "waves"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["attribute_blur", "attribute_create", "attribute_delete", "attribute_promote", "attribute_rename", "bend", "bezier", "bound", "boundary_select", "bulge", "cache", "clean", "connectivity", "example_offset", "facet", "fillet", "flood_fill", "fractal", "group_expand", "group_promote", "helix", "line", "loop_flatten", "loop_space", "measure", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "pcg_bounds", "pcg_density_filter", "pcg_points", "pcg_transform", "peak", "point", "point_jitter", "point_relax", "resample", "reverse", "ripple", "select_sharp_edges", "set_material", "smooth", "subnet", "unpack", "waves"]);
     }
 }
 

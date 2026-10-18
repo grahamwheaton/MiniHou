@@ -41,7 +41,6 @@ pub(super) fn piece_labels(g:&Geometry)->(Vec<i32>,Vec<i32>){
     let labels:Vec<_>=roots.iter().map(|v|keys.binary_search(v).unwrap() as i32).collect();
     let prim=g.topology.prim_offsets.windows(2).map(|r|if r[0]<r[1]{labels[g.topology.vertex_point[r[0] as usize] as usize]}else{-1}).collect();(labels,prim)
 }
-pub const SMOOTH:NodeSpec=NodeSpec{name:"smooth",inputs:GEO,params:crate::params!("iterations":10;"strength":0.5;"method":"taubin";"pin_boundary":true;"group":""),cook:smooth};
 pub(super) fn laplacian(g:&Geometry,names:&str,p:&Params,factors:&[f64])->Result<Geometry>{
     let e=crate::topo::edges(&g.topology,g.npoints);let mut neighbours=vec![Vec::new();g.npoints];let mut boundary=vec![false;g.npoints];
     // Only polygon edges mark polygon boundary; curve ends are pinned by degree.
@@ -58,12 +57,6 @@ pub(super) fn laplacian(g:&Geometry,names:&str,p:&Params,factors:&[f64])->Result
         out.point.insert(name.into(),Arc::new(Attr::f32(a.width,v.into_iter().map(|x|x as f32).collect())));
     }Ok(out)
 }
-fn smooth(inputs:&Inputs,p:&Params)->Result<Geometry>{let g=SMOOTH.one(inputs,0)?;let n=p.i("iterations")?;if n<0{return Err(Error::new("iterations must be nonnegative"));}let f=p.f("strength")?;
-    let taubin=p.e("method",&["taubin","laplacian"])?=="taubin";let mut factors=Vec::new();for _ in 0..n{factors.push(f);if taubin{factors.push(1./(0.1-1./f.max(1e-6)));}}
-    let mut out=laplacian(&g,"P",p,&factors)?;
-    if out.point.contains_key("N") && out.nprims()>0{let spec=super::get("normal").unwrap();out=(spec.cook)(&[vec![Arc::new(out)]],&Params::resolve(spec.params,None)?)?;}Ok(out)
-}
-
 pub const SORT: NodeSpec = NodeSpec {
     name: "sort",
     inputs: GEO,
