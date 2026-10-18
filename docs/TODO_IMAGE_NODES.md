@@ -165,7 +165,7 @@ Full handoff: docs/TODO_PERSISTENT_OVERRIDES.md (from the user's HANDOFF.md, 202
 
 # Added 2026-10-17: items raised in conversation, not yet on the list
 
-- **Stage 1: self-registering node architecture.** Brief supplied by the user. Node packages with build-time registration, a shared catalogue for Tab menu and shelf, and a node development guide (docs/NODE_DEVELOPMENT.md). Not started. High value: it stops every new node touching shared registry files.
+- **Stage 1: self-registering node architecture.** Largely done (2026-10-18): standard nodes live in nodes/packages/<name>/ and are discovered at build time; shared Tab menu and shelf catalogue; guide in docs/NODE_DEVELOPMENT.md; packages example_offset, pack, unpack. Remaining: older nodes still have hand-written registry and param metadata in tools/dump_rust_param_meta.py, so adding one still touches shared files. Migrating them to packages is the open part (plan first).
 - **Ctrl+G grouping** (node grouping into subnets). Not started.
 - **Loop Cut extras:** numeric entry, E (even) and F (flip) keys, and the redo strip. Not started.
 - **Inference Phase 2 and Move-tool integration:** multi-reference, through-point locks, guides, bounding-box and object-origin snapping; Move gizmo using the shared engine. Not started.
