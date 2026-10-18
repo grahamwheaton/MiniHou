@@ -21,8 +21,8 @@ fn grid_2x2() -> Geometry {
 fn line_3() -> Geometry {
     let mut map = serde_json::Map::new();
     map.insert("length".into(), serde_json::json!(3.0));
-    let p = Params::resolve(crate::nodes::generate::LINE.params, Some(&map)).unwrap();
-    (crate::nodes::generate::LINE.cook)(&[vec![]], &p).unwrap()
+    let p = Params::resolve(crate::nodes::registry().iter().find(|spec| spec.name == "line").unwrap().params, Some(&map)).unwrap();
+    (crate::nodes::registry().iter().find(|spec| spec.name == "line").unwrap().cook)(&[vec![]], &p).unwrap()
 }
 
 #[test]

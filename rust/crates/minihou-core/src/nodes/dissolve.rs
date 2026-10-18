@@ -499,11 +499,11 @@ mod tests {
     #[test]
     fn test_open_curves_are_refused() {
         let line_p = Params::resolve(
-            super::super::generate::LINE.params,
+            crate::nodes::registry().iter().find(|spec| spec.name == "line").unwrap().params,
             serde_json::json!({"points": 5}).as_object(),
         )
         .unwrap();
-        let line_geo = (super::super::generate::LINE.cook)(&[], &line_p).unwrap();
+        let line_geo = (crate::nodes::registry().iter().find(|spec| spec.name == "line").unwrap().cook)(&[], &line_p).unwrap();
         assert!(dissolve(&line_geo, "", 1.0).is_err());
     }
 }

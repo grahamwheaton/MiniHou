@@ -11,7 +11,6 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "Torus", node_type: "torus", icon: "torus" },
         Tool { label: "Grid", node_type: "grid", icon: "grid" },
         Tool { label: "Null", node_type: "null", icon: "null" },
-        Tool { label: "Line", node_type: "line", icon: "line" },
         Tool { label: "Circle", node_type: "circle", icon: "circle" },
         Tool { label: "Bezier", node_type: "bezier", icon: "curve" },
         Tool { label: "Polyline", node_type: "curve", icon: "curve" },
@@ -155,7 +154,6 @@ pub(super) const TABS: &[Tab] = &[
     Tab { name: "Curves", tools: &[
         Tool { label: "Bezier", node_type: "bezier", icon: "curve" },
         Tool { label: "Polyline", node_type: "curve", icon: "curve" },
-        Tool { label: "Line", node_type: "line", icon: "line" },
         Tool { label: "Helix", node_type: "helix", icon: "helix" },
         Tool { label: "Resample", node_type: "resample", icon: "resample" },
         Tool { label: "Simplify Curve", node_type: "curve_simplify", icon: "curve_simplify" },

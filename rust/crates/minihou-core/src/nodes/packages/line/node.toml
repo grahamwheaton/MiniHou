@@ -1,0 +1,5 @@
+id = "line"
+name = "Line"
+category = "Create"
+description = "Create an open line of evenly spaced points."
+keywords = "line geometry"

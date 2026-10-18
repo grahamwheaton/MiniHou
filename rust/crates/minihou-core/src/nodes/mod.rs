@@ -168,7 +168,6 @@ pub fn registry() -> &'static [NodeSpec] {
         generate::BOX,
         generate::CURVE,
         fence::FENCE,
-        generate::LINE,
         generate::CIRCLE,
         generate::SPHERE,
         generate::TUBE,
@@ -357,7 +356,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["cache", "example_offset", "flood_fill", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "point", "subnet", "unpack"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["cache", "example_offset", "flood_fill", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "point", "subnet", "unpack"]);
     }
 }
 

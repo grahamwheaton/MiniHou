@@ -1,0 +1,34 @@
+{
+  "direction": {
+    "default": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "doc": "Direction of the line.",
+    "kind": "vec3"
+  },
+  "length": {
+    "default": 1.0,
+    "doc": "Length of the line.",
+    "kind": "float",
+    "soft_max": 10.0,
+    "soft_min": 0.0
+  },
+  "origin": {
+    "default": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "doc": "Start position of the line.",
+    "kind": "vec3"
+  },
+  "points": {
+    "default": 10,
+    "doc": "Number of points along the line.",
+    "kind": "int",
+    "min": 2,
+    "soft_max": 1000
+  }
+}
