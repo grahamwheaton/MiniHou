@@ -1,0 +1,71 @@
+{
+  "by": {
+    "default": "",
+    "doc": "Optional int attribute (e.g. 'class' from connectivity): equal values get equal random values",
+    "kind": "str"
+  },
+  "distribution": {
+    "default": "uniform",
+    "doc": "normal: mean (min+max)/2, 99.7% within min..max",
+    "kind": "enum",
+    "options": [
+      "uniform",
+      "normal"
+    ]
+  },
+  "domain": {
+    "default": "points",
+    "doc": "Geometry domain receiving random values.",
+    "kind": "enum",
+    "options": [
+      "points",
+      "primitives",
+      "vertices"
+    ]
+  },
+  "group": {
+    "default": "",
+    "doc": "Only these elements (points or primitives)",
+    "kind": "str",
+    "pick_domain": "points"
+  },
+  "max": {
+    "default": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "doc": "Upper bound for each generated component.",
+    "kind": "vec3"
+  },
+  "min": {
+    "default": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "doc": "Lower bound for each generated component.",
+    "kind": "vec3"
+  },
+  "name": {
+    "default": "Cd",
+    "doc": "Name of the attribute to fill.",
+    "kind": "str"
+  },
+  "seed": {
+    "default": 0,
+    "doc": "Seed for repeatable random values.",
+    "kind": "int"
+  },
+  "type": {
+    "default": "color",
+    "doc": "int: whole numbers from min to max inclusive",
+    "kind": "enum",
+    "options": [
+      "color",
+      "float",
+      "vector",
+      "int"
+    ]
+  }
+}
