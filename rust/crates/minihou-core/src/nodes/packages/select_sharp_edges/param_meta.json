@@ -1,0 +1,19 @@
+{
+  "angle": {
+    "kind": "float",
+    "default": 30.0,
+    "range": [0.0, 180.0],
+    "doc": "Dihedral angle threshold in degrees; edges with face angle above this are selected."
+  },
+  "domain": {
+    "kind": "enum",
+    "default": "edges",
+    "options": ["edges"],
+    "doc": "Domain of selection; fixed to edges."
+  },
+  "output_group_name": {
+    "kind": "str",
+    "default": "sharp_edges",
+    "doc": "Name of the output edge group containing sharp edges."
+  }
+}

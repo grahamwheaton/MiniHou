@@ -782,6 +782,29 @@
    "min": 0.0
   }
  },
+ "boundary_select": {
+  "domain": {
+   "default": "faces",
+   "doc": "Element domain of the input selection (faces, edges, or points).",
+   "kind": "enum",
+   "options": [
+    "faces",
+    "edges",
+    "points",
+    "primitives"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Input selection group name or pattern; empty selects all elements in domain.",
+   "kind": "str"
+  },
+  "output_group_name": {
+   "default": "boundary",
+   "doc": "Name of the output group containing the boundary elements.",
+   "kind": "str"
+  }
+ },
  "box": {
   "add_vertex_normals": {
    "default": false,
@@ -7399,6 +7422,30 @@
   "seeds": {
    "default": "",
    "doc": "Seed edges: edge ids, p<a>-<b> point pairs, edge group names or wildcards (empty: nothing selected)",
+   "kind": "str"
+  }
+ },
+ "select_sharp_edges": {
+  "angle": {
+   "default": 30.0,
+   "doc": "Dihedral angle threshold in degrees; edges with face angle above this are selected.",
+   "kind": "float",
+   "range": [
+    0.0,
+    180.0
+   ]
+  },
+  "domain": {
+   "default": "edges",
+   "doc": "Domain of selection; fixed to edges.",
+   "kind": "enum",
+   "options": [
+    "edges"
+   ]
+  },
+  "output_group_name": {
+   "default": "sharp_edges",
+   "doc": "Name of the output edge group containing sharp edges.",
    "kind": "str"
   }
  },
