@@ -313,9 +313,3 @@ Features:
 - **Image file default:** a flat image plane by default, renamed "Tessellation", with a height map as an option (no "too dense" error by default).
 - **Output target button:** a target button next to each output parameter. Hover shows the output on the mesh (a float output can show as a strength level); click selects the group. Suggest a colour (not purple, which is the input selection colour).
 - **Dissolve flat edges and Clean parity** (Flash, in progress); if the Clean/dissolve nodes cannot be found in the Tab menu, add them to the shelf.
-
-## Global rule: purple input arrows and output target buttons (requested 2026-10-18)
-
-- Every input group parameter on every node gets the purple selector arrow, applied from the metadata generator (tools/dump_rust_param_meta.py) by a rule on the parameter name and type (group, group_name, pattern, edges, points, faces and similar selection fields), not per node.
-- Every output group parameter (for example outgrp_* and output_group names) gets a target button next to it. Hovering shows that output's elements on the mesh (a float output can show as a strength level). Clicking selects the group. Suggested colour: teal or cyan (purple is the input selection colour).
-- Implement as one shared rule in the UI (ui/params.rs), reading the metadata kind, so new nodes get both automatically.

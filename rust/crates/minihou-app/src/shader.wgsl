@@ -324,3 +324,7 @@ fn fs_group_line()->@location(0) vec4<f32> {return vec4(out_color(vec3(0.72,0.32
 fn fs_barrier_fill()->@location(0) vec4<f32> {return vec4(out_color(vec3(0.95,0.45,0.08)).rgb,0.24);}
 @fragment
 fn fs_barrier_line()->@location(0) vec4<f32> {return vec4(out_color(vec3(1.,0.55,0.12)).rgb,1.);}
+@fragment
+fn fs_target_fill()->@location(0) vec4<f32> {return vec4(out_color(vec3(0.10,0.80,0.80)).rgb,0.26);}
+@fragment
+fn fs_target_line()->@location(0) vec4<f32> {return vec4(out_color(vec3(0.20,0.92,0.90)).rgb,1.);}

@@ -570,7 +570,7 @@ struct App {
     lod_uploaded: bool, last_lod_view: Option<([[f32;4];4], [u32;2], bool)>, last_lod_select: Instant,
     blender_paths: Vec<PathBuf>, blender_bar: bool,
     selection: picking::Selection, selection_dirty: bool,
-    param_pick: Option<ParamPick>, barrier_key: Option<(String,ui::SelectionMode,String,u64)>, picked_field: Option<PickedField>,
+    param_pick: Option<ParamPick>, barrier_key: Option<(String,ui::SelectionMode,String,u64)>, target_key: Option<(String,String,u64)>, picked_field: Option<PickedField>,
     selection_metrics: selection_metrics::Cache,
     coplanar: Option<coplanar_tool::State>, group_preview:group_preview::State,
     /// Polygon/edge adjacency of `scene` for loops, rings, paths and mode conversion (built on first use).
@@ -729,7 +729,7 @@ impl App {
             http:http_ui::HttpUi::default(),http_time:(1.,24.),
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),link:None,blender_job:None,
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
-            display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,param_pick:None,barrier_key:None,picked_field:None,selection_metrics:Default::default(),coplanar:None,group_preview:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
+            display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,param_pick:None,barrier_key:None,target_key:None,picked_field:None,selection_metrics:Default::default(),coplanar:None,group_preview:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
             clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,embed_conflict:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
             last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default(),pending_loop_selection:None,undo_element_selection:Vec::new(),pending_restore_selection:None,model_before_selection:None,extrude_keep:None };
         app.prefs = Preferences::load();
@@ -2389,6 +2389,13 @@ impl App {
         for action in actions {
             if matches!(&action,UiAction::Select(_) | UiAction::ToggleSelect(_) | UiAction::SelectSet { .. }) { self.selection_dirty=true; }
             match action {
+                UiAction::SelectOutputGroup { node, name } => {
+                    if node == self.display {
+                        if let Some(g) = self.cooking.geometry.as_deref().filter(|_| self.cooking.error.is_none()) {
+                            if let Some(sel) = group_preview::selection(g, &name) { self.editor_state.selection = sel.mode; self.selection = sel; self.selection_dirty = true; }
+                        }
+                    }
+                }
                 UiAction::PickParameter { node, name, mode, pairs } => {
                     let original = self.editor.doc.value()["nodes"][&node]["params"][&name].as_str().unwrap_or("").to_owned();
                     let mode = infer_mode(&original, mode); // an edge group stays edges whatever the node's default domain
@@ -3090,6 +3097,17 @@ impl eframe::App for App {
                                 self.group_preview = Default::default();
                             },
                         }
+                    }
+                    // Hovering an output group's teal target button shows that group on the node's own output.
+                    let target = ctx.data(|d| d.get_temp::<(String,String,u64)>(egui::Id::new("param_target_hover")))
+                        .filter(|h| h.2 + 1 >= ctx.cumulative_pass_nr() && h.0 == self.display && self.cooking.error.is_none());
+                    let key = target.map(|(n,g,_)| (n,g,self.cooking.completed));
+                    if key != self.target_key {
+                        let (f,l) = match (&key, self.cooking.geometry.as_deref()) {
+                            (Some((_,g,_)), Some(geo)) => group_preview::geometry(geo, g),
+                            _ => Default::default(),
+                        };
+                        gpu.set_target_overlay(&self.state.device,&f,&l);self.target_key=key;
                     }
                     // Flood Fill's barrier group is drawn in orange beside the purple picked field.
                     let flood=&self.editor.doc.value()["nodes"][&self.selected];
