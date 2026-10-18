@@ -58,6 +58,10 @@ impl Scene {
     /// Polygon edges as point pairs (no fan diagonals): element selection rebuilds polygons from these.
     pub fn edge_indices(&self) -> &[u32] { &self.edge }
     pub fn new(g: &Geometry) -> Self {
+        // Packed primitives / native instances: drawn at their transforms, CPU-batched into this scene's one buffer.
+        if minihou_core::nodes::packed::instance_count(g) > 0 {
+            if let Ok(shown) = minihou_core::nodes::packed::display_geometry(g) { return Self::new(&shown); }
+        }
         let (p,t) = (g.p(), &g.topology);
         let l = preview::layout(p, &t.vertex_point, &t.prim_offsets, t.closed.as_deref(), g.npoints, usize::MAX, usize::MAX, 100_000,8192);
         let n = match g.point.get("N").and_then(|a| a.as_f32()) {
