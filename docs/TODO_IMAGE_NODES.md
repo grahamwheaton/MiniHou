@@ -296,7 +296,6 @@ The pattern `@P.z >1` is not valid for group_create's pattern field, which takes
 
 Bugs:
 - **Faces dropped by selection:** selection still drops faces (tested, not fixed).
-- **Field editing:** on click the text should not left-align; the whole value should be selected so typing replaces it (Blender parity).
 - **Re-cook activity:** dragging or wheel-adjusting a value re-cooks many nodes; check the cook path for parameter drags (only the changed node and its downstream should cook, and only on release unless live preview is wanted). Compare with the mouse-wheel path.
 - **Boundary select:** should select only the boundary edges, create an auto-named group, and switch the viewport selection to edges.
 - **Select sharp edges:** tags no edges in testing. When the node is selected, every edge it tags should show purple.
