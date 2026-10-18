@@ -257,3 +257,9 @@ Use the blue "M" logo (rounded blue square with a white M) as the app icon (wind
 - **Node editor:** Shift+D copies the selected nodes. Alt+D copies them with linked parameters, so a change to one copy's parameter changes the others.
 
 Check the key table in rust/crates/minihou-app/docs/NATIVE_EDITOR.md and the keymap test when adding the keys.
+
+## Bug: selection goes through the mesh (reported 2026-10-18)
+
+Selections pick triangles on both sides, so a click can select something behind the surface. Wanted: back-face culling for selection unless X-ray is on.
+
+Where: element selection uses `pick_displayed` and the BVH pick in main.rs (about lines 97 and 105). `picking::pick_triangle` tests both sides; the snap path already culls with `backface_culling` (picking.rs line 17). Fix: when X-ray is off, skip triangles whose normal faces the same way as the ray direction (dot(normal, dir) >= 0), in the selection pick only. Pass the X-ray flag from `editor_state.xray` into the selection call sites. Add a test: a click on a single-sided quad from behind selects nothing unless X-ray is on.
