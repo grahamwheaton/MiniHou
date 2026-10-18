@@ -5150,10 +5150,169 @@
   }
  },
  "polyfill": {
+  "append_groups": {
+   "default": false,
+   "doc": "Alias for append_to_groups.",
+   "kind": "bool"
+  },
+  "append_to_groups": {
+   "default": false,
+   "doc": "Append new faces to existing groups rather than replacing them.",
+   "kind": "bool"
+  },
+  "auto_complete_boundaries": {
+   "default": true,
+   "doc": "Walk remaining boundary edges to close open boundary selections.",
+   "kind": "bool"
+  },
+  "autocomplete": {
+   "default": true,
+   "doc": "Alias for auto_complete_boundaries.",
+   "kind": "bool"
+  },
+  "boundary_group": {
+   "default": "",
+   "doc": "Boundary edges or curves to fill (empty: fill all holes).",
+   "kind": "str"
+  },
+  "corner_offset": {
+   "default": 0,
+   "doc": "Shift the starting corner index around the boundary loop.",
+   "kind": "int"
+  },
+  "custom_corners": {
+   "default": "",
+   "doc": "Point group specifying custom corner locations for patch layout.",
+   "kind": "str"
+  },
+  "deform": {
+   "default": true,
+   "doc": "Alias for deform_patch.",
+   "kind": "bool"
+  },
+  "deform_patch": {
+   "default": true,
+   "doc": "Project and deform patch interior according to boundary curvature and surface offset.",
+   "kind": "bool"
+  },
+  "edge_loop": {
+   "default": 0.25,
+   "doc": "Fractional width of transitional quad strip along open boundaries.",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "edge_loop_group": {
+   "default": "loopgroup",
+   "doc": "Primitive group name for transitional edge loop faces.",
+   "kind": "str"
+  },
+  "edgeloop": {
+   "default": 0.25,
+   "doc": "Alias for edge_loop.",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "edgeloopgroup": {
+   "default": "loopgroup",
+   "doc": "Alias for edge_loop_group.",
+   "kind": "str"
+  },
   "fill_group": {
    "default": "",
    "doc": "Optional name of a primitive group for the new faces",
    "kind": "str"
+  },
+  "fill_mode": {
+   "default": "quadrilaterals",
+   "doc": "Alias for mode.",
+   "kind": "enum",
+   "options": [
+    "quadrilaterals",
+    "triangles",
+    "triangle_fan",
+    "single_polygon",
+    "quadrilateral_fan",
+    "quadrilateral_grid"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Alias for boundary_group.",
+   "kind": "str"
+  },
+  "mode": {
+   "default": "quadrilaterals",
+   "doc": "Hole filling pattern (quadrilaterals, triangles, triangle_fan, single_polygon, quadrilateral_fan, quadrilateral_grid).",
+   "kind": "enum",
+   "options": [
+    "quadrilaterals",
+    "triangles",
+    "triangle_fan",
+    "single_polygon",
+    "quadrilateral_fan",
+    "quadrilateral_grid"
+   ]
+  },
+  "patch_group": {
+   "default": "",
+   "doc": "Primitive group name for newly created patch faces.",
+   "kind": "str"
+  },
+  "patchgroup": {
+   "default": "",
+   "doc": "Alias for patch_group.",
+   "kind": "str"
+  },
+  "reverse": {
+   "default": false,
+   "doc": "Alias for reverse_patches.",
+   "kind": "bool"
+  },
+  "reverse_patches": {
+   "default": false,
+   "doc": "Flip the normal orientation of newly generated patch faces.",
+   "kind": "bool"
+  },
+  "smooth": {
+   "default": 50.0,
+   "doc": "Laplacian smoothing iterations applied to interior patch points.",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 100.0
+  },
+  "surface_offset": {
+   "default": 0.0,
+   "doc": "Offset distance along normal for patch interior vertices.",
+   "kind": "float"
+  },
+  "tangent_strength": {
+   "default": 0.4,
+   "doc": "Influence of boundary tangent vectors on interior patch bulge.",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 2.0
+  },
+  "unique_points": {
+   "default": false,
+   "doc": "Duplicate boundary points so patch geometry is disconnected from the input mesh.",
+   "kind": "bool"
+  },
+  "uniquepoints": {
+   "default": false,
+   "doc": "Alias for unique_points.",
+   "kind": "bool"
+  },
+  "update_point_normals": {
+   "default": true,
+   "doc": "Recompute point normals along the boundary and new patch vertices.",
+   "kind": "bool"
+  },
+  "updatenormals": {
+   "default": true,
+   "doc": "Alias for update_point_normals.",
+   "kind": "bool"
   }
  },
  "polypath": {},

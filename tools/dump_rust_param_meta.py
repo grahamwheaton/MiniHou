@@ -140,6 +140,36 @@ def meta() -> dict:
         "cut": {"kind": "bool", "default": False, "doc": "Bisect first: remove geometry behind the plane so only the kept side is mirrored (Blender-style)."},
         "unshared_only": {"kind": "bool", "default": False, "enabled_if": {"consolidate_seam": True}, "doc": "Only consolidate points on unshared (boundary) edges lying in the plane."},
     })
+    # Rust PolyFill SOP extensions (Houdini parity); the defaults reproduce the Python node.
+    out["polyfill"].update({
+        "boundary_group": {"kind": "str", "default": "", "doc": "Boundary edges or curves to fill (empty: fill all holes)."},
+        "group": {"kind": "str", "default": "", "doc": "Alias for boundary_group."},
+        "mode": {"kind": "enum", "default": "quadrilaterals", "options": ["quadrilaterals", "triangles", "triangle_fan", "single_polygon", "quadrilateral_fan", "quadrilateral_grid"], "doc": "Hole filling pattern (quadrilaterals, triangles, triangle_fan, single_polygon, quadrilateral_fan, quadrilateral_grid)."},
+        "fill_mode": {"kind": "enum", "default": "quadrilaterals", "options": ["quadrilaterals", "triangles", "triangle_fan", "single_polygon", "quadrilateral_fan", "quadrilateral_grid"], "doc": "Alias for mode."},
+        "auto_complete_boundaries": {"kind": "bool", "default": True, "doc": "Walk remaining boundary edges to close open boundary selections."},
+        "autocomplete": {"kind": "bool", "default": True, "doc": "Alias for auto_complete_boundaries."},
+        "reverse_patches": {"kind": "bool", "default": False, "doc": "Flip the normal orientation of newly generated patch faces."},
+        "reverse": {"kind": "bool", "default": False, "doc": "Alias for reverse_patches."},
+        "unique_points": {"kind": "bool", "default": False, "doc": "Duplicate boundary points so patch geometry is disconnected from the input mesh."},
+        "uniquepoints": {"kind": "bool", "default": False, "doc": "Alias for unique_points."},
+        "update_point_normals": {"kind": "bool", "default": True, "doc": "Recompute point normals along the boundary and new patch vertices."},
+        "updatenormals": {"kind": "bool", "default": True, "doc": "Alias for update_point_normals."},
+        "edge_loop": {"kind": "float", "default": 0.25, "min": 0.0, "max": 1.0, "doc": "Fractional width of transitional quad strip along open boundaries."},
+        "edgeloop": {"kind": "float", "default": 0.25, "min": 0.0, "max": 1.0, "doc": "Alias for edge_loop."},
+        "smooth": {"kind": "float", "default": 50.0, "min": 0.0, "soft_max": 100.0, "doc": "Laplacian smoothing iterations applied to interior patch points."},
+        "corner_offset": {"kind": "int", "default": 0, "doc": "Shift the starting corner index around the boundary loop."},
+        "custom_corners": {"kind": "str", "default": "", "doc": "Point group specifying custom corner locations for patch layout."},
+        "deform_patch": {"kind": "bool", "default": True, "doc": "Project and deform patch interior according to boundary curvature and surface offset."},
+        "deform": {"kind": "bool", "default": True, "doc": "Alias for deform_patch."},
+        "surface_offset": {"kind": "float", "default": 0.0, "doc": "Offset distance along normal for patch interior vertices."},
+        "tangent_strength": {"kind": "float", "default": 0.4, "min": 0.0, "soft_max": 2.0, "doc": "Influence of boundary tangent vectors on interior patch bulge."},
+        "patch_group": {"kind": "str", "default": "", "doc": "Primitive group name for newly created patch faces."},
+        "patchgroup": {"kind": "str", "default": "", "doc": "Alias for patch_group."},
+        "edge_loop_group": {"kind": "str", "default": "loopgroup", "doc": "Primitive group name for transitional edge loop faces."},
+        "edgeloopgroup": {"kind": "str", "default": "loopgroup", "doc": "Alias for edge_loop_group."},
+        "append_to_groups": {"kind": "bool", "default": False, "doc": "Append new faces to existing groups rather than replacing them."},
+        "append_groups": {"kind": "bool", "default": False, "doc": "Alias for append_to_groups."},
+    })
     # Rust-only nodes (no Python counterpart to introspect)
     out["lod_bake"] = {
         "cluster_size": {"default": 128, "doc": "Maximum triangles per cluster (16 to 128)", "kind": "int", "min": 16, "max": 128},

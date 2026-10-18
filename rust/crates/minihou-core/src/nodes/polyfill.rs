@@ -32,8 +32,8 @@ pub const PARAMS: &[ParamSpec] = crate::params!(
     "deform": true;
     "surface_offset": 0.0;
     "tangent_strength": 0.4;
-    "patch_group": "patch";
-    "patchgroup": "patch";
+    "patch_group": "";
+    "patchgroup": "";
     "edge_loop_group": "loopgroup";
     "edgeloopgroup": "loopgroup";
     "append_to_groups": false;
@@ -261,6 +261,7 @@ fn extract_loops(g: &Geometry, boundary_mask: &[bool], auto_complete: bool) -> R
     let mut succ: BTreeMap<usize, (usize, usize)> = BTreeMap::new();
     let mut indeg: BTreeMap<usize, usize> = BTreeMap::new();
     let mut all_succ: BTreeMap<usize, (usize, usize)> = BTreeMap::new();
+    let mut starts = Vec::new();
 
     for v in 0..g.nvertices() {
         let edge_id = e.of_vertex[v];
@@ -273,6 +274,7 @@ fn extract_loops(g: &Geometry, boundary_mask: &[bool], auto_complete: bool) -> R
                 succ.insert(b, (a, v));
                 *indeg.entry(a).or_insert(0) += 1;
                 indeg.entry(b).or_insert(0);
+                starts.push(b);
             }
         }
     }
@@ -347,7 +349,7 @@ fn extract_loops(g: &Geometry, boundary_mask: &[bool], auto_complete: bool) -> R
         }
     }
 
-    for &start in succ.keys() {
+    for &start in starts.iter().chain(succ.keys()) {
         if visited_edges.contains(&(start, succ[&start].0)) {
             continue;
         }
@@ -683,8 +685,9 @@ pub(crate) fn polyfill(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 
         match mode.as_str() {
             "single" | "single_polygon" => {
+                let cnt = active_pts.len();
                 patch_faces.push(active_pts.clone());
-                all_srcs.push(active_corners.iter().map(|&c| vec![c]).collect());
+                all_srcs.push(vec![vec![]; cnt]);
             }
             "triangles" => {
                 let tris = ear_clip_triangles(&active_pts, &pos, inner_norm);
@@ -861,7 +864,7 @@ pub(crate) fn polyfill(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                 // Default: "quadrilaterals"
                 if m == 4 {
                     patch_faces.push(active_pts.clone());
-                    all_srcs.push(active_corners.iter().map(|&c| vec![c]).collect());
+                    all_srcs.push(vec![vec![]; 4]);
                 } else if m % 2 == 0 {
                     new_pts.push(NewPoint {
                         pos: active_center,
