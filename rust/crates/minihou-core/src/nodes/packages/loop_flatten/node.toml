@@ -1,0 +1,5 @@
+id = "loop_flatten"
+name = "Loop Flatten"
+category = "Modify"
+description = "Flatten selected vertices or loops onto a best-fit or normal plane."
+keywords = "loop flatten plane pca normal projection"

@@ -1,0 +1,24 @@
+{
+  "group": {
+    "default": "",
+    "doc": "Points or loop edges to flatten onto a plane; empty uses all points.",
+    "kind": "str",
+    "pick_domain": "points"
+  },
+  "influence": {
+    "default": 1.0,
+    "doc": "Blend between original (0.0) and flattened (1.0) positions.",
+    "kind": "float",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "plane": {
+    "default": "best_fit",
+    "doc": "Plane calculation method ('best_fit' from PCA or 'normal' from average normal).",
+    "kind": "enum",
+    "options": [
+      "best_fit",
+      "normal"
+    ]
+  }
+}
