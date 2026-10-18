@@ -233,7 +233,8 @@ def dash(html):
                                     for i, v in enumerate(x)) + "</tr>" for x in r)
     page = ("<meta charset=utf-8><meta http-equiv=refresh content=5><title>Agents</title>"
             "<body style='font:14px sans-serif;background:#161b22;color:#c9d1d9;padding:16px'><table cellpadding=6>"
-            f"<tr>{''.join(f'<th align=left>{h}</th>' for h in hdr)}</tr>{body}</table><p>{note}</p>")
+            f"<tr>{''.join(f'<th align=left>{h}</th>' for h in hdr)}</tr>{body}</table><p>{note}</p>"
+            + "".join(f"<p>{line}</p>" for line in extra_lines()))
     f = ROOT / "dash.html"
     f.write_text(page, encoding="utf-8")
     print(f)
