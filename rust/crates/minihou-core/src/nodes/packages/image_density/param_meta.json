@@ -1,0 +1,8 @@
+{
+  "channel": {"kind": "enum", "default": "luminance", "options": ["luminance", "red", "green", "blue", "alpha"], "doc": "Colour channel to convert; luminance uses Rec.709 weights."},
+  "invert": {"kind": "bool", "default": true, "doc": "Make dark pixels dense instead of light pixels."},
+  "contrast": {"kind": "float", "default": 1.0, "doc": "Contrast around the midpoint before inversion."},
+  "brightness": {"kind": "float", "default": 0.0, "doc": "Offset added before inversion."},
+  "threshold": {"kind": "float", "default": 0.0, "doc": "Hard cutoff after inversion; zero disables the cutoff."},
+  "output_attribute": {"kind": "str", "default": "density", "doc": "Name of the output point float attribute."}
+}

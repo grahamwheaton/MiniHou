@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "nodes": {
+    "image": {"type": "image_file", "params": {"file": "tests/fixtures/image_file_test.png", "colorspace": "stored"}},
+    "density": {"type": "image_density", "inputs": {"geometry": "image"}, "params": {"invert": true}},
+    "scatter_points": {"type": "scatter", "inputs": {"geo": "density"}, "params": {"count": 200, "seed": 7, "density_attribute": "density"}},
+    "source": {"type": "box"},
+    "copies": {"type": "copy_to_points", "inputs": {"source": "source", "points": "scatter_points"}},
+    "output1": {"type": "output", "inputs": {"geo": "copies"}}
+  },
+  "display": "output1"
+}
