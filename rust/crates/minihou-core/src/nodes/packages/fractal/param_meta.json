@@ -1,0 +1,28 @@
+{
+  "frequency": {
+    "kind": "float",
+    "default": 1.0,
+    "doc": "Spatial frequency of the fractal noise."
+  },
+  "octaves": {
+    "kind": "int",
+    "default": 3,
+    "min": 1,
+    "doc": "Number of fractal noise octaves to sum."
+  },
+  "offset": {
+    "kind": "vec3",
+    "default": [0.0, 0.0, 0.0],
+    "doc": "Spatial coordinate offset for noise sampling."
+  },
+  "seed": {
+    "kind": "int",
+    "default": 0,
+    "doc": "Random seed for the procedural noise."
+  },
+  "strength": {
+    "kind": "float",
+    "default": 1.0,
+    "doc": "Displacement distance scale along surface normals."
+  }
+}

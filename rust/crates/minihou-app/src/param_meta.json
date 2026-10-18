@@ -2262,6 +2262,38 @@
    ]
   }
  },
+ "fractal": {
+  "frequency": {
+   "default": 1.0,
+   "doc": "Spatial frequency of the fractal noise.",
+   "kind": "float"
+  },
+  "octaves": {
+   "default": 3,
+   "doc": "Number of fractal noise octaves to sum.",
+   "kind": "int",
+   "min": 1
+  },
+  "offset": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Spatial coordinate offset for noise sampling.",
+   "kind": "vec3"
+  },
+  "seed": {
+   "default": 0,
+   "doc": "Random seed for the procedural noise.",
+   "kind": "int"
+  },
+  "strength": {
+   "default": 1.0,
+   "doc": "Displacement distance scale along surface normals.",
+   "kind": "float"
+  }
+ },
  "fuse": {
   "distance": {
    "default": 0.001,

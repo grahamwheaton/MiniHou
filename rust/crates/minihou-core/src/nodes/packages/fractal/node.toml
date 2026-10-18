@@ -1,0 +1,5 @@
+id = "fractal"
+name = "Fractal"
+category = "Deform"
+description = "Displace points along surface normals using fractal noise."
+keywords = "fractal noise deform displace perlin terrain"
