@@ -1,0 +1,5 @@
+id = "loop_circle"
+name = "Loop Circle"
+category = "Modify"
+description = "Turn selected loops into planar circles with equal angle point spacing."
+keywords = "loop circle planar regularize circularize"

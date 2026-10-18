@@ -1,0 +1,20 @@
+{
+  "fit_inside": {
+    "default": false,
+    "doc": "Fit circle inside loop using minimum radius instead of average radius.",
+    "kind": "bool"
+  },
+  "group": {
+    "default": "",
+    "doc": "Loop edges or points to circularize; empty uses all edges.",
+    "kind": "str",
+    "pick_domain": "edges"
+  },
+  "influence": {
+    "default": 1.0,
+    "doc": "Blend between original (0.0) and circular (1.0) positions.",
+    "kind": "float",
+    "max": 1.0,
+    "min": 0.0
+  }
+}
