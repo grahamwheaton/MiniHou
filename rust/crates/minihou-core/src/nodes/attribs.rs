@@ -1,7 +1,7 @@
 //! Attribute Delete and Attribute Rename (nodes/attribs.py).
 
 /// Python fnmatchcase's *, ?, [abc], [!abc], and ranges, with literal unmatched [.
-pub(super) fn matches(pattern:&str,name:&str)->bool{
+pub(crate) fn matches(pattern:&str,name:&str)->bool{
     fn go(p:&[char],s:&[char])->bool{
         if p.is_empty(){return s.is_empty();}
         match p[0]{
