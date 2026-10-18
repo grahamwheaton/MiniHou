@@ -139,7 +139,6 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "Attribute Blur", node_type: "attribute_blur", icon: "attr" },
         Tool { label: "Attribute Rename", node_type: "attribute_rename", icon: "attr" },
         Tool { label: "Attribute Paint", node_type: "attrib_paint", icon: "attr" },
-        Tool { label: "Attribute Delete", node_type: "attribute_delete", icon: "attr" },
         Tool { label: "Measure", node_type: "measure", icon: "measure" },
         Tool { label: "Connectivity", node_type: "connectivity", icon: "connectivity" },
         Tool { label: "Ray", node_type: "ray", icon: "ray" },

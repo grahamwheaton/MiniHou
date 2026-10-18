@@ -136,7 +136,6 @@ pub(super) const TABS: &[Category] = &[
         Tool { label: "Attribute Blur", node_type: "attribute_blur" },
         Tool { label: "Attribute Rename", node_type: "attribute_rename" },
         Tool { label: "Attribute Paint", node_type: "attrib_paint" },
-        Tool { label: "Attribute Delete", node_type: "attribute_delete" },
         Tool { label: "Measure", node_type: "measure" },
         Tool { label: "Connectivity", node_type: "connectivity" },
         Tool { label: "Ray", node_type: "ray" },

@@ -1,0 +1,7 @@
+{
+  "names": {
+    "default": "",
+    "doc": "Attributes to delete, space separated; wildcards work (e.g. 'N uv tmp_*'). P is never deleted",
+    "kind": "str"
+  }
+}

@@ -22,13 +22,6 @@ pub(super) fn matches(pattern:&str,name:&str)->bool{
         }
     }go(&pattern.chars().collect::<Vec<_>>(),&name.chars().collect::<Vec<_>>())
 }
-pub const ATTRIBUTE_DELETE:NodeSpec=NodeSpec{name:"attribute_delete",inputs:GEO,params:crate::params!("names":""),cook:delete};
-fn delete(inputs:&Inputs,p:&Params)->Result<Geometry>{
-    let g=ATTRIBUTE_DELETE.one(inputs,0)?;let text=p.s("names")?;let pats:Vec<_>=text.split(|c:char|c==',' || c.is_whitespace()).filter(|s|!s.is_empty()).collect();
-    let mut out=(*g).clone();
-    for table in [&mut out.point,&mut out.vertex,&mut out.prim]{table.retain(|n,_|n=="P" || !pats.iter().any(|pat|matches(pat,n)));}
-    out.detail.retain(|n,_|!pats.iter().any(|pat|matches(pat,n)));Ok(out)
-}
 pub const ATTRIBUTE_RENAME:NodeSpec=NodeSpec{name:"attribute_rename",inputs:GEO,params:crate::params!("from_name":"";"to_name":""),cook:rename};
 fn rename(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let g=ATTRIBUTE_RENAME.one(inputs,0)?;let from=p.s("from_name")?;let to=p.s("to_name")?;
@@ -41,13 +34,6 @@ fn rename(inputs:&Inputs,p:&Params)->Result<Geometry>{
 #[cfg(test)]
 mod tests{
     use super::*;use crate::geometry::Attr;use std::sync::Arc;
-    #[test]
-    fn wildcard_and_protected_position(){
-        assert!(matches("tmp_[!a-c]?","tmp_z0"));assert!(!matches("tmp_[!a-c]?","tmp_b0"));assert!(matches("[","["));
-        let mut g=Geometry::points_only(vec![0.;3]).unwrap();g.point.insert("N".into(),Arc::new(Attr::f32(3,vec![1.;3])));g.detail.insert("P".into(),serde_json::json!(9));
-        let out=delete(&[vec![Arc::new(g)]],&Params::resolve(ATTRIBUTE_DELETE.params,serde_json::json!({"names":"*"}).as_object()).unwrap()).unwrap();
-        assert_eq!(out.point.len(),1);assert!(out.point.contains_key("P"));assert!(out.detail.is_empty());
-    }
     #[test]
     fn rename_replaces_other_domains(){
         let mut g=Geometry::points_only(vec![0.;3]).unwrap();g.point.insert("weight".into(),Arc::new(Attr::f32(1,vec![2.])));g.prim.insert("pscale".into(),Arc::new(Attr::f32(1,vec![])));

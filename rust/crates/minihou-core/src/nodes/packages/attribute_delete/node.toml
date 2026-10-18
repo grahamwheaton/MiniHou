@@ -1,0 +1,5 @@
+id = "attribute_delete"
+name = "Attribute Delete"
+category = "Attributes"
+description = "Delete named attributes from geometry."
+keywords = "attribute delete remove wildcard"
