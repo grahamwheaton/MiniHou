@@ -41,6 +41,8 @@ impl Graph {
         let bad = || Error::new("graph JSON must be an object with a 'nodes' object");
         let obj = v.as_object().ok_or_else(bad)?;
         let nodes_v = obj.get("nodes").and_then(Value::as_object).ok_or_else(bad)?;
+        let expanded = expand_subnets(nodes_v)?;
+        let nodes_v = expanded.as_ref().unwrap_or(nodes_v);
         if let Some(ver) = obj.get("version") {
             if ver.as_i64() != Some(GRAPH_VERSION) {
                 return Err(Error::new(format!("unsupported graph version {ver} (this build reads {GRAPH_VERSION})")));
@@ -104,6 +106,8 @@ impl Graph {
         let nodes = value["nodes"].as_object_mut().expect("validated graph");
         nodes.retain(|id, _| self.nodes.iter().any(|(n, _)| n == id));
         for (id, def) in &self.nodes {
+            // Subnets are expanded at load time: their inner nodes ("a/b") and the subnet itself stay as written.
+            if id.contains('/') || def.node_type == "subnet" { continue; }
             let nd = nodes.entry(id.clone()).or_insert_with(|| serde_json::json!({}));
             nd["type"] = Value::String(def.node_type.clone());
             let mut params = def.params.clone();
@@ -248,4 +252,53 @@ impl Cook<'_> {
         self.done.insert(id.to_string(), geo.clone());
         Ok(geo)
     }
+}
+
+/// Expand `subnet` nodes (a node of type "subnet" carrying `inner: {nodes, output}`) into prefixed `<subnet>/<inner>` nodes.
+/// Inner nodes read the subnet's external inputs as "$in0", "$in1" (the order of the subnet's `geo` wires). The subnet node
+/// itself stays as a pass-through of the inner output. `None` when the graph has no subnet.
+pub fn expand_subnets(nodes: &Map<String, Value>) -> Result<Option<Map<String, Value>>> {
+    if !nodes.values().any(|n| n["type"] == "subnet") { return Ok(None); }
+    let mut out = Map::new();
+    flatten_subnets(nodes, "", &[], &mut out, 0)?;
+    Ok(Some(out))
+}
+
+fn flatten_subnets(nodes: &Map<String, Value>, prefix: &str, ext: &[String], out: &mut Map<String, Value>, depth: usize) -> Result<()> {
+    if depth > 16 { return Err(Error::new("subnets are nested too deeply")); }
+    let map = |r: &str| -> Result<String> {
+        match r.strip_prefix("$in") {
+            Some(k) => k.parse::<usize>().ok().and_then(|k| ext.get(k)).cloned()
+                .ok_or_else(|| Error::new(format!("subnet input '{r}' is not connected"))),
+            None => Ok(format!("{prefix}{r}")),
+        }
+    };
+    for (id, nd) in nodes {
+        let full = format!("{prefix}{id}");
+        let mut nd = nd.clone();
+        if let Some(inputs) = nd.get_mut("inputs").and_then(Value::as_object_mut) {
+            for r in inputs.values_mut() {
+                match r {
+                    Value::String(s) => *s = map(s)?,
+                    Value::Array(a) => for x in a { if let Some(s) = x.as_str() { *x = Value::String(map(s)?); } },
+                    _ => {}
+                }
+            }
+        }
+        if nd["type"] == "subnet" {
+            let ext2: Vec<String> = match &nd["inputs"]["geo"] {
+                Value::String(s) => vec![s.clone()],
+                Value::Array(a) => a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect(),
+                _ => Vec::new(),
+            };
+            let inner = nd["inner"]["nodes"].as_object().ok_or_else(|| Error::new(format!("node '{full}': subnet needs inner.nodes")))?;
+            let output = nd["inner"]["output"].as_str().filter(|o| inner.contains_key(*o))
+                .ok_or_else(|| Error::new(format!("node '{full}': subnet inner.output must name an inner node")))?;
+            flatten_subnets(inner, &format!("{full}/"), &ext2, out, depth + 1)?;
+            out.insert(full.clone(), serde_json::json!({"type": "subnet", "inputs": {"geo": format!("{full}/{output}")}}));
+        } else {
+            out.insert(full, nd);
+        }
+    }
+    Ok(())
 }

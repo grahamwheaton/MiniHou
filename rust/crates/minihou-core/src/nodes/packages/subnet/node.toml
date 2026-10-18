@@ -1,0 +1,5 @@
+id = "subnet"
+name = "Subnet"
+category = "Library"
+description = "A group of nodes collapsed into one. Created with Ctrl+G; Ctrl+G on it ungroups."
+keywords = "subnet group collapse ctrl+g"
