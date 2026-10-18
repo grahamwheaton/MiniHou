@@ -210,3 +210,12 @@ Order:
 9. When the MCP works and the queue has no runnable jobs: archviz asset generators (wall, fence, road, tree scatter, roof), each with a demo; check pre-Rust examples for reference.
 
 Parked by user: inset on non-planar regions. Tri to Quad: user will test.
+
+## Requested 2026-10-18 (not started)
+
+- **Attribute create node:** add the purple group-picker arrow to the attribute name, like group fields have.
+- **Attribute create, run from the Tab menu in the 3D view:** auto-fill the selection as context (selected points, edges or faces) instead of an empty node.
+- **Attribute and group fields dropdown:** when existing attributes or groups are detected on the input, show a dropdown of them; choosing one sets the domain automatically (for example point, edge, face).
+- **Blender attribute transport:** a cube from Blender lost its `bevel_weight_edge` attribute on the way through MiniHou. Make sure all attributes and creases (bevel weight, crease, sharp, seam, UVs, colours) survive a round trip.
+- **Scene Objects, option B:** each object is its own mesh with its empty as parent, so moving the empty moves the object. Rename "pieces" to "objects" in UI and code (see memory rule).
+- **Copy to Points:** pack is the default now (done 2026-10-18).
