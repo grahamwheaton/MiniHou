@@ -14,6 +14,7 @@ pub const SCATTER: NodeSpec = NodeSpec {
         "count": 1000;
         "seed": 0;
         "mode": "surface";
+        "density_attribute": "";
     ),
     cook: scatter,
 };
@@ -46,19 +47,30 @@ fn scatter(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let count = count as usize;
     let seed = p.i("seed")?;
     let mode = p.e("mode", &["surface", "volume"])?;
+    let density_attribute = p.s("density_attribute")?;
 
     if count == 0 || geo.nprims() == 0 {
         return Ok(empty_scatter());
     }
 
     if mode == "volume" {
+        if !density_attribute.is_empty() { return Err(Error::new("density_attribute is supported only in surface mode")); }
         return scatter_volume(&geo, count, seed);
     }
 
-    scatter_surface(&geo, count, seed)
+    scatter_surface_with_density(&geo, count, seed, &density_attribute)
 }
 
 pub(super) fn scatter_surface(geo: &Geometry, count: usize, seed: i64) -> Result<Geometry> {
+    scatter_surface_with_density(geo, count, seed, "")
+}
+
+fn scatter_surface_with_density(geo: &Geometry, count: usize, seed: i64, density_attribute: &str) -> Result<Geometry> {
+    let density = if density_attribute.is_empty() { None } else {
+        let attr = geo.point.get(density_attribute).ok_or_else(|| Error::new(format!("scatter: missing point density attribute {density_attribute:?}")))?;
+        if attr.width != 1 || attr.rows() != geo.npoints { return Err(Error::new("scatter: density attribute must have one scalar value per point")); }
+        Some(super::blender_input::numbers(attr))
+    };
     let topo = &geo.topology;
     let p_slice = geo.p();
     let nprims = geo.nprims();
@@ -70,6 +82,7 @@ pub(super) fn scatter_surface(geo: &Geometry, count: usize, seed: i64) -> Result
         b: [f64; 3],
         c: [f64; 3],
         prim: i32,
+        points: [usize; 3],
     }
 
     let mut triangles = Vec::new();
@@ -107,6 +120,7 @@ pub(super) fn scatter_surface(geo: &Geometry, count: usize, seed: i64) -> Result
                 b,
                 c,
                 prim: prim as i32,
+                points: [v0, v1, v2],
             });
             areas.push(area);
         }
@@ -131,6 +145,7 @@ pub(super) fn scatter_surface(geo: &Geometry, count: usize, seed: i64) -> Result
     let r: Vec<f64> = (0..count).map(|_| rng.random()).collect();
     let r1: Vec<f64> = (0..count).map(|_| rng.random()).collect();
     let r2: Vec<f64> = (0..count).map(|_| rng.random()).collect();
+    let accept: Option<Vec<f64>> = density.as_ref().map(|_| (0..count).map(|_| rng.random()).collect());
 
     let mut out_pos = Vec::with_capacity(count * 3);
     let mut out_n = Vec::with_capacity(count * 3);
@@ -149,6 +164,14 @@ pub(super) fn scatter_surface(geo: &Geometry, count: usize, seed: i64) -> Result
         if u + v > 1.0 {
             u = 1.0 - u;
             v = 1.0 - v;
+        }
+        if let (Some(density), Some(accept)) = (&density, &accept) {
+            let [a,b,c] = tri.points.map(|point| {
+                let x = density[point];
+                if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 }
+            });
+            let probability = a * (1.0 - u - v) + b * u + c * v;
+            if accept[s] >= probability { continue; }
         }
         let e1 = [tri.b[0] - tri.a[0], tri.b[1] - tri.a[1], tri.b[2] - tri.a[2]];
         let e2 = [tri.c[0] - tri.a[0], tri.c[1] - tri.a[1], tri.c[2] - tri.a[2]];
@@ -351,5 +374,35 @@ mod tests {
         let p = Params::resolve(SCATTER.params, None).unwrap();
         let res = (SCATTER.cook)(&[vec![Arc::new(g)]], &p).unwrap();
         assert_eq!(res.npoints, 0);
+    }
+
+    #[test]
+    fn scatter_density_zero_one_and_default() {
+        let mut g = Geometry::from_arrays(
+            vec![0.,0.,0., 1.,0.,0., 1.,1.,0., 0.,1.,0.],
+            vec![0,1,2,3], vec![0,4], None).unwrap();
+        let p = Params::resolve(SCATTER.params, serde_json::json!({"count":100,"seed":7}).as_object()).unwrap();
+        let unweighted = (SCATTER.cook)(&[vec![Arc::new(g.clone())]], &p).unwrap();
+        assert_eq!(unweighted.npoints, 100);
+        let weighted = Params::resolve(SCATTER.params, serde_json::json!({"count":100,"seed":7,"density_attribute":"density"}).as_object()).unwrap();
+        g.point.insert("density".into(), Arc::new(Attr::f32(1, vec![0.;4])));
+        assert_eq!((SCATTER.cook)(&[vec![Arc::new(g.clone())]], &weighted).unwrap().npoints, 0);
+        g.point.insert("density".into(), Arc::new(Attr::f32(1, vec![1.;4])));
+        let full = (SCATTER.cook)(&[vec![Arc::new(g.clone())]], &weighted).unwrap();
+        assert_eq!(full.npoints, 100);
+        assert_eq!(full.p(), unweighted.p());
+        assert_eq!((SCATTER.cook)(&[vec![Arc::new(g)]], &p).unwrap().p(), unweighted.p());
+    }
+
+    #[test]
+    fn scatter_density_favors_dark_half() {
+        let mut g = Geometry::from_arrays(
+            vec![-1.,-1.,0., 0.,-1.,0., 1.,-1.,0., -1.,1.,0., 0.,1.,0., 1.,1.,0.],
+            vec![0,1,4,3, 1,2,5,4], vec![0,4,8], None).unwrap();
+        g.point.insert("density".into(), Arc::new(Attr::f32(1, vec![1.,0.,0.,1.,0.,0.])));
+        let p = Params::resolve(SCATTER.params, serde_json::json!({"count":2000,"seed":11,"density_attribute":"density"}).as_object()).unwrap();
+        let out = (SCATTER.cook)(&[vec![Arc::new(g)]], &p).unwrap();
+        let left = out.p().chunks_exact(3).filter(|xyz| xyz[0] < 0.).count();
+        assert!(left > out.npoints * 3 / 4, "left {left} of {}", out.npoints);
     }
 }

@@ -3210,6 +3210,45 @@
    "soft_max": 20.0
   }
  },
+ "image_density": {
+  "brightness": {
+   "default": 0.0,
+   "doc": "Offset added before inversion.",
+   "kind": "float"
+  },
+  "channel": {
+   "default": "luminance",
+   "doc": "Colour channel to convert; luminance uses Rec.709 weights.",
+   "kind": "enum",
+   "options": [
+    "luminance",
+    "red",
+    "green",
+    "blue",
+    "alpha"
+   ]
+  },
+  "contrast": {
+   "default": 1.0,
+   "doc": "Contrast around the midpoint before inversion.",
+   "kind": "float"
+  },
+  "invert": {
+   "default": true,
+   "doc": "Make dark pixels dense instead of light pixels.",
+   "kind": "bool"
+  },
+  "output_attribute": {
+   "default": "density",
+   "doc": "Name of the output point float attribute.",
+   "kind": "str"
+  },
+  "threshold": {
+   "default": 0.0,
+   "doc": "Hard cutoff after inversion; zero disables the cutoff.",
+   "kind": "float"
+  }
+ },
  "image_file": {
   "center": {
    "default": [
@@ -7023,6 +7062,11 @@
    "kind": "int",
    "min": 0,
    "soft_max": 1000000
+  },
+  "density_attribute": {
+   "default": "",
+   "doc": "Optional point float attribute controlling each surface sample's acceptance probability; empty disables density.",
+   "kind": "str"
   },
   "mode": {
    "default": "surface",
