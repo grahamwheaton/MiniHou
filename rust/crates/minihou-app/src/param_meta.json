@@ -8218,6 +8218,34 @@
    "min": 0
   }
  },
+ "split": {
+  "delete_unused_groups": {
+   "default": false,
+   "doc": "Remove group attributes with no members from each split piece.",
+   "kind": "bool"
+  },
+  "group": {
+   "default": "",
+   "doc": "Group name, pattern, or viewport selection to split. Empty or unmatched selection leaves the input unchanged.",
+   "kind": "str"
+  },
+  "group_type": {
+   "default": "primitives",
+   "doc": "Domain of the selection. A face is a primitive; point or edge selections retain faces whose every point or edge is selected.",
+   "kind": "enum",
+   "options": [
+    "primitives",
+    "faces",
+    "points",
+    "edges"
+   ]
+  },
+  "invert_selection": {
+   "default": false,
+   "doc": "Swap the selected and remaining pieces when the group contains elements.",
+   "kind": "bool"
+  }
+ },
  "squash_stretch": {
   "amount": {
    "default": 1.5,
