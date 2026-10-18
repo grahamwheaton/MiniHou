@@ -330,3 +330,7 @@ Features:
 ## Feature: Match Size node, Houdini parity (requested 2026-10-18)
 
 Match Size (https://www.sidefx.com/docs/houdini/nodes/sop/matchsize.html): translate and scale the input so its bounding box matches a target. Parameters: Group (with the purple arrow), Group Type, Justify With (Input If Wired, Target, and so on), Use Groups to Determine Justification Bounds, Target Position (x, y, z), Target Size (x, y, z), Translate, Justify X/Y/Z (Center, Min, Max, and so on) to Same/Target with Offset By, Scale to Fit, Uniform Scale, Restore Transform, and Stash Transform (with Replace Existing).
+
+## Feature: Subnet, Houdini parity (requested 2026-10-18)
+
+Bug seen: Ctrl+G groups a box and a subdivide, but both inner nodes show in the main graph as subnet1/box1 and subnet1/subdivide1 (the group is expanded at load, subnet_edit.rs and graph.rs expand_subnets). Wanted, like Houdini: the selected nodes collapse into one subnet node that shows as one node. Double-click opens it to show the inner graph. The subnet has input and output nodes inside; the user can add and remove extra inputs and outputs. Inputs can carry parameters (promoted from inside); outside the group, clicking the subnet shows those parameters with sliders and can take driver links, like any node. Plan with Argon first, then Codex implements.
