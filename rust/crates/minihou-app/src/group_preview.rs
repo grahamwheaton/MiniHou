@@ -26,6 +26,9 @@ pub fn geometry(g:&minihou_core::Geometry,name:&str)->(Vec<f32>,Vec<f32>) {
             for (i,&a) in ids.iter().enumerate() {if i+1<ids.len()||g.topology.is_closed(prim) {let b=ids[(i+1)%ids.len()];edges.insert((a.min(b),a.max(b)));}}
         }}
         for (a,b) in edges {for id in [a,b] {lines.extend_from_slice(&g.p()[id as usize*3..id as usize*3+3]);}}
+    }else if let Some(a)=g.edge.get(&key) {
+        let e=minihou_core::topo::edges(&g.topology,g.npoints);
+        for (i,on) in member(a).into_iter().enumerate() {if on&&i*2+1<e.points.len() {for k in 0..2 {let id=e.points[i*2+k] as usize;lines.extend_from_slice(&g.p()[id*3..id*3+3]);}}}
     }else if let Some(a)=g.point.get(&key) {
         let selection=picking::Selection {mode:ui::SelectionMode::Points,points:member(a).into_iter().enumerate().filter(|(_,v)|*v).map(|(i,_)|i as u32).collect(),..Default::default()};
         (_,lines)=picking::highlight(g.p(),&[],&selection,0.01);
@@ -40,5 +43,10 @@ pub fn geometry(g:&minihou_core::Geometry,name:&str)->(Vec<f32>,Vec<f32>) {
         let g=Graph::from_value(&doc).unwrap().cook(Some("group")).unwrap();
         let (faces,lines)=geometry(&g,"tip");assert!(faces.is_empty());assert_eq!(lines.len(),18);
         assert_eq!(geometry(&g,"missing"),(vec![],vec![]));
+    }
+    #[test] fn edge_groups_preview_their_edges() {
+        let doc=json!({"nodes":{"box":{"type":"box"},"group":{"type":"group_create","inputs":{"geo":"box"},"params":{"domain":"edges","name":"e","pattern":"0"}}},"display":"group"});
+        let g=Graph::from_value(&doc).unwrap().cook(Some("group")).unwrap();
+        let (faces,lines)=geometry(&g,"e");assert!(faces.is_empty());assert_eq!(lines.len(),6);
     }
 }

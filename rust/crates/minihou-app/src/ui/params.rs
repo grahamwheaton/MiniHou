@@ -41,6 +41,10 @@ mod pick_tests {
     use super::*;
     use super::super::SelectionMode;
     #[test]
+    fn group_create_edges_domain_picks_edges() {
+        assert_eq!(pick_domain_for("group_create", "pattern", param_meta("group_create", "pattern"), &json!({"domain":"edges"})), Some(SelectionMode::Edges));
+    }
+    #[test]
     fn registry_maps_group_and_crease_fields() {
         assert_eq!(pick_domain(param_meta("subdivide", "creases"), &json!({})), Some(SelectionMode::Edges));
         assert_eq!(pick_domain(param_meta("polyextrude", "group"), &json!({})), Some(SelectionMode::Faces));
@@ -1556,7 +1560,26 @@ fn boxed(ui: &mut egui::Ui, width: f32, t: &Theme) -> (Rect, Rect) {
     ui.painter().rect(r, 4., bg, Stroke::new(1.0_f32, stroke), StrokeKind::Inside);
     (r, r.shrink2(Vec2::new(2., 1.)))
 }
-/// A number you drag sideways to change and double-click to type, painted in `rect` (the design's mono 12 px value).
+const TAB_REQUEST: egui::Id = egui::Id::NULL;
+/// Number fields drawn this pass in layout order (the previous pass's list is what Tab navigates).
+fn register_field(ctx: &egui::Context, id: egui::Id, enabled: bool) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| {
+        let cur = d.get_temp_mut_or_default::<(u64, Vec<egui::Id>, Vec<egui::Id>)>(egui::Id::new("field_order"));
+        if cur.0 != pass { cur.0 = pass; cur.2 = std::mem::take(&mut cur.1); }
+        if enabled { cur.1.push(id); }
+    });
+}
+fn last_field_order(ctx: &egui::Context) -> Vec<egui::Id> {
+    // mid-pass the current list is partial, so navigate by the previous pass's complete one
+    ctx.data(|d| d.get_temp::<(u64, Vec<egui::Id>, Vec<egui::Id>)>(egui::Id::new("field_order"))).map(|(_, _, prev)| prev).unwrap_or_default()
+}
+/// The field Tab (`dir` 1) or Shift+Tab (-1) moves to from `current`; none past either end.
+fn tab_target(order: &[egui::Id], current: egui::Id, dir: i32) -> Option<egui::Id> {
+    let i = order.iter().position(|x| *x == current)? as i32 + dir;
+    usize::try_from(i).ok().and_then(|i| order.get(i)).copied()
+}
+/// A number you drag sideways to change and click to type, painted in `rect` (the design's mono 12 px value).
 #[allow(clippy::too_many_arguments)] // painter-style helper, called from three places
 fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: f64, range: &std::ops::RangeInclusive<f64>, integer: bool, align: Align2, t: &Theme, units: Option<crate::units::UnitSettings>) -> bool {
     let edit_id = id.with("edit");
@@ -1564,10 +1587,23 @@ fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: 
     let mut changed = false;
     let clamp = |x: f64| { let x = x.clamp(*range.start(), *range.end()); if integer { x.round() } else { x } };
     let anchor = match align { Align2::LEFT_CENTER => Pos2::new(rect.left() + 2., rect.center().y), Align2::RIGHT_CENTER => Pos2::new(rect.right() - 2., rect.center().y), _ => rect.center() };
+    register_field(ui.ctx(), id, ui.is_enabled());
+    let editing = editing.or_else(|| {
+        // Tab from the neighbouring field asked for this one to start editing
+        if ui.ctx().data(|d| d.get_temp::<egui::Id>(TAB_REQUEST)) != Some(id) { return None; }
+        ui.ctx().data_mut(|d| d.remove::<egui::Id>(TAB_REQUEST));
+        Some(if let Some(u) = units { u.format(*v) } else if integer { format!("{}", *v as i64) } else { format!("{v}") })
+    });
     if let Some(mut text) = editing {
+        // Tab / Shift+Tab commit this field and start editing the next / previous one in layout order
+        let tab = ui.input_mut(|i| if i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab) { Some(-1) }
+            else if i.consume_key(egui::Modifiers::NONE, egui::Key::Tab) { Some(1) } else { None });
         let response = ui.put(rect, egui::TextEdit::singleline(&mut text).font(egui::FontId::monospace(12.)).frame(false).margin(Vec2::new(2., 0.)).id(id.with("text")));
         if !response.has_focus() && !response.lost_focus() { response.request_focus(); }
-        if response.lost_focus() {
+        if let Some(dir) = tab {
+            if let Some(next) = tab_target(&last_field_order(ui.ctx()), id, dir) { ui.ctx().data_mut(|d| d.insert_temp(TAB_REQUEST, next)); }
+        }
+        if response.lost_focus() || tab.is_some() {
             if let Some(u) = units {
                 if let Some(x) = u.parse(&text) { *v = clamp(x); changed = true; }
             } else if let Ok(x) = text.trim().parse::<f64>() {
@@ -1579,6 +1615,7 @@ fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: 
         let response = ui.interact(rect, id, Sense::click_and_drag());
         if response.hovered() || response.dragged() { ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal); }
         if response.dragged() {
+            let speed = speed * number_step::drag_multiplier(ui.input(|i| i.modifiers), *v);
             let step = if let Some(u) = units {
                 response.drag_delta().x as f64 * speed * u.display.metres() / u.unit_scale
             } else {
@@ -1593,7 +1630,7 @@ fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: 
                 if whole != 0. { let next = clamp(*v + whole); if next != *v { *v = next; changed = true; } }
             } else if step != 0. { let next = clamp(*v + step); if next != *v { *v = next; changed = true; } }
         } else if integer { ui.ctx().data_mut(|d| d.remove::<f64>(id.with("drag_acc"))); }
-        if response.double_clicked() {
+        if response.clicked() {
             let text = if let Some(u) = units {
                 u.format(*v)
             } else if integer {
@@ -2261,6 +2298,32 @@ mod tests {
     use super::*;
     use crate::ui::testing::Fixture;
 
+    #[test] fn params_tab_moves_editing_to_the_next_and_previous_number_field() {
+        let order=[egui::Id::new("a"),egui::Id::new("b"),egui::Id::new("c")];
+        assert_eq!(tab_target(&order,order[0],1),Some(order[1]));
+        assert_eq!(tab_target(&order,order[1],-1),Some(order[0]));
+        assert_eq!(tab_target(&order,order[2],1),None);
+        assert_eq!(tab_target(&order,order[0],-1),None);
+        let ctx=egui::Context::default(); let theme=Theme::dark();
+        let (a,b)=(egui::Id::new("fa"),egui::Id::new("fb"));
+        let (mut va,mut vb)=(1.0f64,2.0f64);
+        let frame=|ctx:&egui::Context,events:Vec<egui::Event>,va:&mut f64,vb:&mut f64| {
+            let _=ctx.run(egui::RawInput{events,..Default::default()},|ctx| { egui::CentralPanel::default().show(ctx,|ui| {
+                let r=1.0..=100.0; let range=std::ops::RangeInclusive::new(*r.start(),*r.end());
+                let ra=ui.allocate_space(egui::vec2(80.,20.)).1; drag_number(ui,ra,a,va,0.1,&range,false,Align2::LEFT_CENTER,&theme,None);
+                let rb=ui.allocate_space(egui::vec2(80.,20.)).1; drag_number(ui,rb,b,vb,0.1,&range,false,Align2::LEFT_CENTER,&theme,None);
+            });});
+        };
+        frame(&ctx,vec![],&mut va,&mut vb); frame(&ctx,vec![],&mut va,&mut vb);
+        ctx.data_mut(|d| d.insert_temp(a.with("edit"),"7".to_string()));
+        let tab=|shift:bool| vec![egui::Event::Key{key:egui::Key::Tab,physical_key:None,pressed:true,repeat:false,modifiers:if shift{egui::Modifiers::SHIFT}else{egui::Modifiers::NONE}}];
+        frame(&ctx,tab(false),&mut va,&mut vb); frame(&ctx,vec![],&mut va,&mut vb);
+        assert_eq!(va,7.0); // committed on Tab
+        assert!(ctx.data(|d| d.get_temp::<String>(a.with("edit"))).is_none());
+        assert!(ctx.data(|d| d.get_temp::<String>(b.with("edit"))).is_some()); // next field is now editing
+        frame(&ctx,tab(true),&mut va,&mut vb); frame(&ctx,vec![],&mut va,&mut vb);
+        assert!(ctx.data(|d| d.get_temp::<String>(a.with("edit"))).is_some()); // Shift+Tab went back
+    }
     #[test] fn linked_row_context_menu_opens_in_egui() {
         let mut f=Fixture::new();
         f.doc=minihou_app::Document::parse(json!({"display":"b","nodes":{"a":{"type":"box"},"b":{"type":"box","channels":{"size.x":"ch('../a/size.x')"}}}}).to_string()).unwrap();
