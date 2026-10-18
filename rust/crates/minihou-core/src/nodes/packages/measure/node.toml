@@ -1,0 +1,5 @@
+id = "measure"
+name = "Measure"
+category = "Attributes"
+description = "Measure area, perimeter, curvature, or connected pieces."
+keywords = "attribute measure"
