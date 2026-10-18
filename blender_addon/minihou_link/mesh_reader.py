@@ -13,7 +13,7 @@ What is sent (evaluated mesh: modifiers applied), keyed like ``geo`` messages:
 * loose edges (edges no face uses, e.g. from a curve object) as open 2-point primitives -- curves in the engine; their
   vertex and primitive attributes are zero
 
-Edge attributes (e.g. ``sharp_edge``) are skipped: the engine has no edge domain.
+Edge attributes are keyed by ``topo/edge_pairs`` (sorted vertex-index pairs), never by Blender edge order.
 
 Curves and point clouds. An object's evaluated geometry can hold a mesh, curves and a point cloud at once (a legacy curve object, a
 hair-curves object, a point-cloud object, the output of Geometry Nodes); each component that is there is read and they are joined into
@@ -30,7 +30,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 
 from . import geometry_parts
-from .protocol import TOPO_PRIM_CLOSED, TOPO_PRIM_OFFSETS, TOPO_VERTEX_POINT, attr_key
+from .protocol import TOPO_EDGE_PAIRS, TOPO_PRIM_CLOSED, TOPO_PRIM_OFFSETS, TOPO_VERTEX_POINT, attr_key
 
 _DOMAIN = {"POINT": "point", "CORNER": "vertex", "FACE": "prim"}
 # data_type -> (foreach property, components, numpy dtype)
@@ -257,21 +257,22 @@ def _read_mesh(obj, me) -> Tuple[Dict[str, np.ndarray], dict]:
         pass
     names: List[str] = []
     skipped: List[str] = []
-    sizes = {"POINT": n, "CORNER": nl, "FACE": nf}
+    ne = len(me.edges)
+    sizes = {"POINT": n, "CORNER": nl, "FACE": nf, "EDGE": ne}
     for a in me.attributes:
         if a.name.startswith(".") or a.name in SKIP:
             continue
         spec = _TYPES.get(a.data_type)
-        if spec is None or a.domain not in _DOMAIN:
+        if spec is None or a.domain not in sizes:
             skipped.append(f"{a.name} ({a.domain} {a.data_type})")
             continue
         prop, width, dtype = spec
         data = _get(a.data, prop, sizes[a.domain], width, dtype)
-        dom = _DOMAIN[a.domain]
-        name = a.name
-        if a.name == render_uv:
+        dom = "edge" if a.domain == "EDGE" else _DOMAIN[a.domain]
+        name = "seam" if a.domain == "EDGE" and a.name == "uv_seam" else a.name
+        if a.domain != "EDGE" and a.name == render_uv:
             name = "uv"
-        elif a.name == render_color and width == 4:
+        elif a.domain != "EDGE" and a.name == render_color and width == 4:
             if not np.allclose(data[:, 3], 1.0):
                 arrays[attr_key(dom, "Alpha")] = np.ascontiguousarray(data[:, 3])
             data, name = np.ascontiguousarray(data[:, :3]), "Cd"
@@ -279,6 +280,11 @@ def _read_mesh(obj, me) -> Tuple[Dict[str, np.ndarray], dict]:
             data = data.astype(np.int32)                     # the engine keeps flags as ints (sharp_face, ...)
         arrays[attr_key(dom, name)] = data
         names.append(name)
+    if any(key.startswith("edge/") for key in arrays):
+        edge_pairs = np.empty(ne * 2, np.int32)
+        if ne:
+            me.edges.foreach_get("vertices", edge_pairs)
+        arrays[TOPO_EDGE_PAIRS] = np.sort(edge_pairs.reshape(ne, 2), axis=1)
     groups = _vertex_groups(obj, me, n, set(names))
     if n > MAX_GROUP_POINTS and len(getattr(obj, "vertex_groups", [])):
         skipped.append(f"vertex groups (over {MAX_GROUP_POINTS:,} points: store them as attributes with Geometry Nodes)")
