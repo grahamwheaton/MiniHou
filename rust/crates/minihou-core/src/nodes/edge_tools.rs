@@ -98,7 +98,7 @@ pub(super) fn wildcard(p: &[u8], n: &[u8]) -> bool {
         [c, rest @ ..] => n.first() == Some(c) && wildcard(rest, &n[1..]),
     }
 }
-pub(super) fn edge_mask(g: &Geometry, pattern: &str) -> Result<Vec<bool>> {
+pub(crate) fn edge_mask(g: &Geometry, pattern: &str) -> Result<Vec<bool>> {
     let e = topo::edges(&g.topology, g.npoints);
     let tokens: Vec<_> = pattern
         .split(|c: char| c == ',' || c.is_whitespace())
@@ -209,7 +209,7 @@ pub(super) fn remap(
     }
     Ok(())
 }
-pub(super) fn rebuild_edges(
+pub(crate) fn rebuild_edges(
     g: &Geometry,
     faces: &[Vec<usize>],
     sources: &[usize],

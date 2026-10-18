@@ -1082,21 +1082,90 @@
   }
  },
  "clean": {
-  "fuse_distance": {
-   "default": 0.0,
-   "doc": "Weld points closer than this first (0 = off)",
+  "consolidate_distance": {
+   "default": 0.001,
+   "doc": "Maximal distance for points to be consolidated",
    "kind": "float",
    "min": 0.0,
    "soft_max": 0.1
   },
+  "consolidate_points": {
+   "default": false,
+   "doc": "Fuse together points with similar positions within distance",
+   "kind": "bool"
+  },
+  "degenerate_tolerance": {
+   "default": 0.0001,
+   "doc": "Tolerance below which primitives are considered degenerate",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 0.1
+  },
+  "delete_unused_groups": {
+   "default": false,
+   "doc": "Remove any groups that are empty after degenerates are removed",
+   "kind": "bool"
+  },
+  "fix_overlaps": {
+   "default": false,
+   "doc": "Delete duplicate overlapping polygons sharing the same vertices",
+   "kind": "bool"
+  },
+  "fuse_distance": {
+   "default": 0.0,
+   "doc": "Legacy alias for consolidate_distance (weld points closer than this; 0 = off)",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 0.1
+  },
+  "manifold_only_topology": {
+   "default": false,
+   "doc": "Ensure polygon topology consists of manifold patches (alias, not implemented in clean yet)",
+   "kind": "bool"
+  },
+  "manifold_topology": {
+   "default": false,
+   "doc": "Ensure polygon topology consists of manifold patches (not implemented in clean yet)",
+   "kind": "bool"
+  },
+  "orient_polygons": {
+   "default": false,
+   "doc": "Orient polygons so they all face consistent direction (not implemented in clean yet; use recalc_normals)",
+   "kind": "bool"
+  },
+  "remove_attribs": {
+   "default": "",
+   "doc": "Alias for remove_attributes (patterns of attribute names to delete)",
+   "kind": "str"
+  },
+  "remove_attributes": {
+   "default": "",
+   "doc": "Remove attributes matching wildcard patterns (separated by spaces or commas; P is never removed)",
+   "kind": "str"
+  },
   "remove_degenerate": {
    "default": true,
-   "doc": "Drop repeated corners, then faces with < 3 corners and curves with < 2",
+   "doc": "Delete degenerate primitives such as zero-area faces or zero-length curves",
+   "kind": "bool"
+  },
+  "remove_groups": {
+   "default": "",
+   "doc": "Remove point or primitive groups matching wildcard patterns",
+   "kind": "str"
+  },
+  "remove_nans": {
+   "default": false,
+   "doc": "Delete points with NaN coordinates in P and primitives that reference them",
    "kind": "bool"
   },
   "remove_unused_points": {
    "default": true,
    "doc": "Discard points unused by any remaining primitive",
+   "kind": "bool"
+  },
+  "reverse_winding": {
+   "default": false,
+   "doc": "Reverse vertex winding order of all primitives",
    "kind": "bool"
   }
  },
@@ -1661,6 +1730,20 @@
    "default": true,
    "doc": "Reject merges across differing corner data or primitive attributes/materials",
    "kind": "bool"
+  }
+ },
+ "dissolve_flat_edges": {
+  "group": {
+   "default": "",
+   "doc": "Optional edge group or pattern to restrict which edges may be dissolved; empty dissolves all coplanar edges",
+   "kind": "str"
+  },
+  "tolerance": {
+   "default": 0.01,
+   "doc": "Coplanar tolerance angle in degrees (default 0.01). Edges between faces whose normals differ by at most this angle are dissolved",
+   "kind": "float",
+   "min": 0.0,
+   "soft_max": 180.0
   }
  },
  "divide": {

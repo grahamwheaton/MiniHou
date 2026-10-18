@@ -51,7 +51,7 @@ pub(super) fn positions(g: &Geometry) -> Vec<[f64; 3]> {
 pub(super) fn range(g: &Geometry, p: usize) -> std::ops::Range<usize> {
     g.topology.prim_offsets[p] as usize..g.topology.prim_offsets[p + 1] as usize
 }
-pub(super) fn corners(g: &Geometry) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
+pub(crate) fn corners(g: &Geometry) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
     let mut pv = vec![0; g.nvertices()];
     let mut nx = pv.clone();
     let mut pr = pv.clone();
@@ -65,7 +65,7 @@ pub(super) fn corners(g: &Geometry) -> (Vec<usize>, Vec<usize>, Vec<usize>) {
     }
     (pv, nx, pr)
 }
-pub(super) fn polygons(g: &Geometry, what: &str) -> Result<()> {
+pub(crate) fn polygons(g: &Geometry, what: &str) -> Result<()> {
     if g.topology.has_open() {
         return Err(Error::new(format!(
             "{what} works on polygons, but the input has open curves; remove them first"
@@ -244,7 +244,7 @@ pub(super) fn rebuild(
         closed,
     )
 }
-pub(super) fn compact(g: Geometry) -> Result<Geometry> {
+pub(crate) fn compact(g: Geometry) -> Result<Geometry> {
     let used: BTreeSet<_> = g
         .topology
         .vertex_point
