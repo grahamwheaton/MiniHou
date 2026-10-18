@@ -382,3 +382,7 @@ Houdini's Attribute Create (screenshots 86 and 87): Group (purple arrow) and Gro
 ## Feature: middle-mouse scale bar slider, Houdini parity (requested 2026-10-18)
 
 In Houdini, a middle-mouse click on a number field opens a vertical scale bar with preset steps (for example 100, 10, 1, .1, 0, .01, .001, .0001). Dragging the mouse up or down along it moves the value, and releasing sets it. Add this to number fields (ui/params.rs), with the same step behaviour as the drag sensitivity work.
+
+## Feature: copy and paste parameter values with the mouse (requested 2026-10-18)
+
+Hover over a parameter value and press Ctrl+C to copy it. Hover over another parameter and press Ctrl+V to paste it. Works for number, vector (all channels), text and enum values, and for group fields. Keep the copied value in the app (not the system clipboard only), so it works between nodes.
