@@ -186,6 +186,32 @@ fn element_indices(g:&Geometry, triangles:&[u32]) -> (Vec<u32>,Vec<u32>) {
 struct Element { a:[f32;3], b:[f32;3], kind:u32, selected:u32 }
 /// Instance data is expanded from stable point/segment indices, never from the LOD triangles.
 struct Elements { buffer:wgpu::Buffer, selected:u32, total:u32 }
+/// Point previews arrive as three axis-aligned segments per point. Keep real edges
+/// as lines and turn only that recognisable cross geometry into disc instances.
+fn split_point_crosses(lines:&[f32]) -> (Vec<f32>,Vec<f32>) {
+    let mut points=Vec::new(); let mut outlines=Vec::new();
+    let mut offset=0;
+    while offset+18<=lines.len() {
+        let chunk=&lines[offset..offset+18];
+        let centers:Vec<[f32;3]>=(0..3).map(|axis| std::array::from_fn(|k| (chunk[axis*6+k]+chunk[axis*6+3+k])*0.5)).collect();
+        let cross=centers.iter().all(|c| c.iter().zip(centers[0]).all(|(a,b)| (a-b).abs()<1e-5))
+            && (0..3).all(|axis| (0..3).all(|k| ((chunk[axis*6+k]-chunk[axis*6+3+k]).abs()>1e-6) == (k==axis)));
+        if cross { points.extend_from_slice(&centers[0]); offset+=18; }
+        else { outlines.extend_from_slice(&lines[offset..offset+6]); offset+=6; }
+    }
+    outlines.extend_from_slice(&lines[offset..]);
+    (points,outlines)
+}
+#[cfg(test)]
+#[test]
+fn viewport_point_highlights_become_discs_without_losing_edges() {
+    let edge=[0.,0.,0.,1.,0.,0.];
+    let cross=[0.9,2.,3.,1.1,2.,3.,1.,1.9,3.,1.,2.1,3.,1.,2.,2.9,1.,2.,3.1];
+    let mut lines=edge.to_vec(); lines.extend_from_slice(&cross);
+    let (points,outlines)=split_point_crosses(&lines);
+    assert_eq!(points,vec![1.,2.,3.]);
+    assert_eq!(outlines,edge);
+}
 impl Elements {
     fn new(device:&wgpu::Device, scene:&Scene, ranges:&[std::ops::Range<u32>], selected_points:&[u32]) -> Self {
         let mut instances=Vec::new(); let mut count=0;
@@ -272,8 +298,8 @@ pub struct Gpu {
     matcap: wgpu::Texture, matcap_loaded: std::sync::atomic::AtomicU8,
     pipe_mask: wgpu::RenderPipeline, pipe_outline: wgpu::RenderPipeline, bgl_outline: wgpu::BindGroupLayout,
     /// Selection highlight: face triangles and line segments (positions, with a zero normal buffer of the same length).
-    group_face:wgpu::Buffer,group_face_n:u32,group_line:wgpu::Buffer,group_line_n:u32,
-    pipe_group_face:wgpu::RenderPipeline,pipe_group_line:wgpu::RenderPipeline,
+    group_face:wgpu::Buffer,group_face_n:u32,group_line:wgpu::Buffer,group_line_n:u32,group_point:wgpu::Buffer,group_point_n:u32,
+    pipe_group_face:wgpu::RenderPipeline,pipe_group_line:wgpu::RenderPipeline,pipe_group_point:wgpu::RenderPipeline,
     barrier_face:wgpu::Buffer,barrier_face_n:u32,barrier_line:wgpu::Buffer,barrier_line_n:u32,
     pipe_barrier_face:wgpu::RenderPipeline,pipe_barrier_line:wgpu::RenderPipeline,
     target_face:wgpu::Buffer,target_face_n:u32,target_line:wgpu::Buffer,target_line_n:u32,
@@ -508,6 +534,8 @@ impl Gpu {
         let group_bufs=[vb(&POS)];
         let pipe_group_face=mk("group fill","vs_group","fs_group_fill",&group_bufs,T::TriangleList,-3,true,C::LessEqual,false,W::ALL);
         let pipe_group_line=mk("group outline","vs_group","fs_group_line",&group_bufs,T::LineList,-4,true,C::LessEqual,false,W::ALL);
+        let point_bufs=[wgpu::VertexBufferLayout {array_stride:12,step_mode:wgpu::VertexStepMode::Instance,attributes:&POS}];
+        let pipe_group_point=mk("group points","vs_group_point","fs_group_point",&point_bufs,T::TriangleList,-4,true,C::LessEqual,false,W::ALL);
         let pipe_barrier_face=mk("barrier fill","vs_group","fs_barrier_fill",&group_bufs,T::TriangleList,-3,true,C::LessEqual,false,W::ALL);
         let pipe_barrier_line=mk("barrier outline","vs_group","fs_barrier_line",&group_bufs,T::LineList,-4,true,C::LessEqual,false,W::ALL);
         let pipe_target_face=mk("target fill","vs_group","fs_target_fill",&group_bufs,T::TriangleList,-3,true,C::LessEqual,false,W::ALL);
@@ -606,6 +634,7 @@ impl Gpu {
 
         let group_face=buf("group faces",bytemuck::cast_slice(&[0f32;3]),wgpu::BufferUsages::VERTEX);
         let group_line=buf("group outline",bytemuck::cast_slice(&[0f32;3]),wgpu::BufferUsages::VERTEX);
+        let group_point=buf("group points",bytemuck::cast_slice(&[0f32;3]),wgpu::BufferUsages::VERTEX);
         let barrier_face=buf("barrier faces",bytemuck::cast_slice(&[0f32;3]),wgpu::BufferUsages::VERTEX);
         let barrier_line=buf("barrier outline",bytemuck::cast_slice(&[0f32;3]),wgpu::BufferUsages::VERTEX);
         let target_face=buf("target faces",bytemuck::cast_slice(&[0f32;3]),wgpu::BufferUsages::VERTEX);
@@ -639,7 +668,7 @@ impl Gpu {
             pipe_mask,
             pipe_outline,
             bgl_outline,
-            group_face,group_face_n:0,group_line,group_line_n:0,pipe_group_face,pipe_group_line,barrier_face,barrier_face_n:0,barrier_line,barrier_line_n:0,pipe_barrier_face,pipe_barrier_line,target_face,target_face_n:0,target_line,target_line_n:0,pipe_target_face,pipe_target_line,
+            group_face,group_face_n:0,group_line,group_line_n:0,group_point,group_point_n:0,pipe_group_face,pipe_group_line,pipe_group_point,barrier_face,barrier_face_n:0,barrier_line,barrier_line_n:0,pipe_barrier_face,pipe_barrier_line,target_face,target_face_n:0,target_line,target_line_n:0,pipe_target_face,pipe_target_line,
             sel_face,
             sel_face_n: 0,
             sel_line,
@@ -828,7 +857,9 @@ impl Gpu {
             label:Some(label),contents:if data.is_empty(){&[0u8;12]}else{bytemuck::cast_slice(data)},usage:wgpu::BufferUsages::VERTEX,
         });
         self.group_face=buffer("group faces",faces);self.group_face_n=(faces.len()/3) as u32;
-        self.group_line=buffer("group outline",lines);self.group_line_n=(lines.len()/3) as u32;
+        let (points, outlines)=split_point_crosses(lines);
+        self.group_point=buffer("group points",&points);self.group_point_n=(points.len()/3) as u32;
+        self.group_line=buffer("group outline",&outlines);self.group_line_n=(outlines.len()/3) as u32;
     }
     /// Barrier-group overlay (orange), drawn beside the purple group overlay.
     pub fn set_barrier_overlay(&mut self,device:&wgpu::Device,faces:&[f32],lines:&[f32]) {
@@ -912,7 +943,7 @@ impl Gpu {
             flat_shading:(mode.flat() || (mode.matcap() && overlay.matcap_flat)) as u32,wire_fade:fade,_pad:[1,if sketchup_clean {2} else {mode.matcap() as u32}],
             object_color:(overlay.object_color==ObjectColor::Random || use_cd) as u32,_pad_color:[0;3],
             floor:[10f32.powf((cam.distance().max(0.01)*0.1).log10().floor()),overlay.grid as u32 as f32,overlay.axes as u32 as f32,cam.distance().max(0.01)],
-            element_size:[target.size[0] as f32,target.size[1] as f32,overlay.geometry.point_size,overlay.geometry.line_width],
+            element_size:[target.size[0] as f32,target.size[1] as f32,overlay.geometry.point_size*if selection_mode==crate::ui::SelectionMode::Points {4.} else {1.},overlay.geometry.line_width],
             element_flags:[overlay.geometry.points as u32,overlay.geometry.lines as u32,overlay.geometry.enabled as u32,(selection_mode==crate::ui::SelectionMode::Points) as u32],
             element_color:if overlay.light_background {[0.025,0.03,0.04,1.]} else {[0.72,0.75,0.8,1.]} };
         queue.write_buffer(&self.ubuf,0,bytemuck::bytes_of(&u));
@@ -1014,6 +1045,7 @@ impl Gpu {
             if !mode.bounds() && overlay.geometry.enabled {
                 if self.group_face_n>0 {pass.set_pipeline(&self.pipe_group_face);pass.set_vertex_buffer(0,self.group_face.slice(..));pass.draw(0..self.group_face_n,0..1);}
                 if self.group_line_n>0 {pass.set_pipeline(&self.pipe_group_line);pass.set_vertex_buffer(0,self.group_line.slice(..));pass.draw(0..self.group_line_n,0..1);}
+                if self.group_point_n>0 {pass.set_pipeline(&self.pipe_group_point);pass.set_vertex_buffer(0,self.group_point.slice(..));pass.draw(0..6,0..self.group_point_n);}
                 if self.barrier_face_n>0 {pass.set_pipeline(&self.pipe_barrier_face);pass.set_vertex_buffer(0,self.barrier_face.slice(..));pass.draw(0..self.barrier_face_n,0..1);}
                 if self.barrier_line_n>0 {pass.set_pipeline(&self.pipe_barrier_line);pass.set_vertex_buffer(0,self.barrier_line.slice(..));pass.draw(0..self.barrier_line_n,0..1);}
                 if self.target_face_n>0 {pass.set_pipeline(&self.pipe_target_face);pass.set_vertex_buffer(0,self.target_face.slice(..));pass.draw(0..self.target_face_n,0..1);}

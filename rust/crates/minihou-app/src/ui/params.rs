@@ -1752,18 +1752,28 @@ fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: 
     let clamp = |x: f64| { let x = x.clamp(*range.start(), *range.end()); if integer { x.round() } else { x } };
     let anchor = match align { Align2::LEFT_CENTER => Pos2::new(rect.left() + 2., rect.center().y), Align2::RIGHT_CENTER => Pos2::new(rect.right() - 2., rect.center().y), _ => rect.center() };
     register_field(ui.ctx(), id, ui.is_enabled());
+    let mut started = ui.ctx().data(|d| d.get_temp::<bool>(id.with("select_on_edit"))).unwrap_or(false);
+    if started { ui.ctx().data_mut(|d| d.remove::<bool>(id.with("select_on_edit"))); }
     let editing = editing.or_else(|| {
         // Tab from the neighbouring field asked for this one to start editing
         if ui.ctx().data(|d| d.get_temp::<egui::Id>(TAB_REQUEST)) != Some(id) { return None; }
         ui.ctx().data_mut(|d| d.remove::<egui::Id>(TAB_REQUEST));
+        started = true;
         Some(if let Some(u) = units { u.format(*v) } else if integer { format!("{}", *v as i64) } else { format!("{v}") })
     });
     if let Some(mut text) = editing {
         // Tab / Shift+Tab commit this field and start editing the next / previous one in layout order
         let tab = ui.input_mut(|i| if i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab) { Some(-1) }
             else if i.consume_key(egui::Modifiers::NONE, egui::Key::Tab) { Some(1) } else { None });
-        let response = ui.put(rect, egui::TextEdit::singleline(&mut text).font(egui::FontId::monospace(12.)).frame(false).margin(Vec2::new(2., 0.)).id(id.with("text")));
+        let text_id = id.with("text");
+        let horizontal_align = match align { Align2::RIGHT_CENTER => egui::Align::Max, Align2::LEFT_CENTER => egui::Align::Min, _ => egui::Align::Center };
+        let response = ui.put(rect, egui::TextEdit::singleline(&mut text).font(egui::FontId::monospace(12.)).frame(false).margin(Vec2::new(2., 0.)).horizontal_align(horizontal_align).id(text_id));
         if !response.has_focus() && !response.lost_focus() { response.request_focus(); }
+        if started {
+            let mut state = egui::TextEdit::load_state(ui.ctx(), text_id).unwrap_or_default();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(text.chars().count()))));
+            state.store(ui.ctx(), text_id);
+        }
         if let Some(dir) = tab {
             if let Some(next) = tab_target(&last_field_order(ui.ctx()), id, dir) { ui.ctx().data_mut(|d| d.insert_temp(TAB_REQUEST, next)); }
         }
@@ -1803,6 +1813,7 @@ fn drag_number(ui: &mut egui::Ui, rect: Rect, id: egui::Id, v: &mut f64, speed: 
                 format!("{v}")
             };
             ui.ctx().data_mut(|d| d.insert_temp(edit_id, text));
+            ui.ctx().data_mut(|d| d.insert_temp(id.with("select_on_edit"), true));
         }
         let text = if let Some(u) = units {
             u.format(*v)

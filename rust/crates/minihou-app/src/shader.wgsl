@@ -320,6 +320,25 @@ fn vs_group(@location(0) p:vec3<f32>)->@builtin(position) vec4<f32> {return u.vi
 fn fs_group_fill()->@location(0) vec4<f32> {return vec4(out_color(vec3(0.64,0.22,0.95)).rgb,0.24);}
 @fragment
 fn fs_group_line()->@location(0) vec4<f32> {return vec4(out_color(vec3(0.72,0.32,1.)).rgb,1.);}
+struct GroupPointOut {
+    @builtin(position) pos:vec4<f32>,
+    @location(0) uv:vec2<f32>,
+};
+@vertex
+fn vs_group_point(@builtin(vertex_index) vertex:u32,@location(0) center:vec3<f32>)->GroupPointOut {
+    let corners=array<vec2<f32>,6>(vec2(-1.,-1.),vec2(1.,-1.),vec2(1.,1.),vec2(-1.,-1.),vec2(1.,1.),vec2(-1.,1.));
+    let corner=corners[vertex];
+    let clip=u.view_proj*vec4(center,1.);
+    var o:GroupPointOut;
+    o.pos=vec4(2.,2.,2.,1.);
+    if (clip.z>=0. && clip.w>0.) { o.pos=vec4(clip.xy+corner*9./u.element_size.xy*clip.w,clip.zw); }
+    o.uv=corner;
+    return o;
+}
+@fragment
+fn fs_group_point(i:GroupPointOut)->@location(0) vec4<f32> {
+    return vec4(out_color(vec3(0.72,0.32,1.)).rgb,1.-smoothstep(0.78,1.,length(i.uv)));
+}
 @fragment
 fn fs_barrier_fill()->@location(0) vec4<f32> {return vec4(out_color(vec3(0.95,0.45,0.08)).rgb,0.24);}
 @fragment
