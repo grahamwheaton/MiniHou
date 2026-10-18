@@ -257,7 +257,8 @@ fn noise_node(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 }
 
 pub const MATCH_SIZE: NodeSpec = NodeSpec {
-    name: "match_size",
+    // Retained for the Python fast path; the package owns the public match_size ID.
+    name: "match_size_legacy",
     inputs: &[
         InputSpec { name: "geo", multi: false, optional: false },
         InputSpec { name: "target", multi: false, optional: true },
