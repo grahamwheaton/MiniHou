@@ -566,6 +566,41 @@
     "label": "Measure",
     "keywords": "area volume perimeter curvature"
   },
+  "measure_area": {
+    "category": "measure",
+    "doc": "Measure polygon face areas and total surface area.",
+    "menu": "Measure",
+    "label": "Measure Area",
+    "keywords": "measure area surface face"
+  },
+  "measure_bounds": {
+    "category": "measure",
+    "doc": "Measure bounding box size and centre.",
+    "menu": "Measure",
+    "label": "Measure Bounds",
+    "keywords": "measure bounds bbox size center"
+  },
+  "measure_distance": {
+    "category": "measure",
+    "doc": "Measure Euclidean distance between two points or element groups.",
+    "menu": "Measure",
+    "label": "Measure Distance",
+    "keywords": "measure distance points groups length"
+  },
+  "measure_length": {
+    "category": "measure",
+    "doc": "Measure curve or polyline length per primitive and total.",
+    "menu": "Measure",
+    "label": "Measure Length",
+    "keywords": "measure length curve polyline perimeter"
+  },
+  "measure_volume": {
+    "category": "measure",
+    "doc": "Measure closed-mesh volume using the divergence theorem.",
+    "menu": "Measure",
+    "label": "Measure Volume",
+    "keywords": "measure volume closed divergence mesh"
+  },
   "merge": {
     "category": "combine",
     "doc": "Concatenate any number of geometries. Attributes missing on an input are zero-filled.",

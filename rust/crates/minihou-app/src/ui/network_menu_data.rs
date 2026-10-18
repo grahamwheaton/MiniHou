@@ -241,6 +241,13 @@ pub(super) const TABS: &[Category] = &[
         Tool { label: "Solver", node_type: "solver" },
         Tool { label: "Switch", node_type: "switch" },
     ] },
+    Category { name: "Measure", tools: &[
+        Tool { label: "Measure Volume", node_type: "measure_volume" },
+        Tool { label: "Measure Distance", node_type: "measure_distance" },
+        Tool { label: "Measure Bounds", node_type: "measure_bounds" },
+        Tool { label: "Measure Length", node_type: "measure_length" },
+        Tool { label: "Measure Area", node_type: "measure_area" },
+    ] },
     Category { name: "Library", tools: &[
     ] },
 ];
