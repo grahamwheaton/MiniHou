@@ -577,14 +577,10 @@ fn canvas_ui(ui: &egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mut St
                     }
                 }
             }
-            card_ui(&p, card, node_id, node, v, state.zoom);
             let count = ref_links.iter().filter(|l| &l.source == node_id || &l.target == node_id).count();
-            if count > 0 {
-                let broken = ref_links.iter().any(|l| l.broken && &l.target == node_id);
-                p.text(card.right_top() + vec2(-25., 4.) * state.zoom, Align2::RIGHT_TOP,
-                    if broken { format!("⚠ {count}") } else { format!("↗ {count}") }, FontId::proportional(10. * state.zoom),
-                    if broken { Color32::from_rgb(235,80,80) } else { Color32::from_rgb(62,190,110) });
-            }
+            let external_count = v.doc["exposed"].as_array().into_iter().flatten().filter(|entry| entry["node"] == node_id.as_str()).count();
+            let broken = ref_links.iter().any(|l| l.broken && &l.target == node_id);
+            card_ui(&p, card, node_id, node, v, state.zoom, count + external_count, exposed_to_blender(v.doc, node_id), broken);
         }
         if let Some(lines) = guide {
             if let Some(x) = lines.x { let x = screen(r, state, pos2(x, 0.0)).x; p.line_segment([pos2(x, r.top()), pos2(x, r.bottom())], Stroke::new(1.0_f32, v.theme.accent)); }
@@ -1005,19 +1001,7 @@ fn exposed_to_blender(doc: &serde_json::Value, id: &str) -> bool {
     minihou_app::exposed_nodes(doc).contains(id)
 }
 
-fn blender_badge(p: &egui::Painter, center: Pos2, v: &View, zoom: f32) {
-    let orange = Color32::from_rgb(234, 118, 0);
-    let eye = center + vec2(1.5, 1.0) * zoom;
-    let stroke = Stroke::new(2.0 * zoom, orange);
-    p.circle_stroke(eye, 4.2 * zoom, stroke);
-    for (a, b) in [((-7.0, -2.0), (0.0, -2.0)), ((-4.5, -6.0), (4.0, -2.0)), ((-7.0, 3.5), (-1.0, -1.5))] {
-        p.line_segment([center + vec2(a.0, a.1) * zoom, center + vec2(b.0, b.1) * zoom], stroke);
-    }
-    p.circle_filled(eye, 2.5 * zoom, v.theme.card);
-    p.circle_filled(eye, 1.8 * zoom, Color32::from_rgb(38, 139, 210));
-}
-
-fn card_ui(p: &egui::Painter, r: Rect, id: &str, node: &NodeDef, v: &View, zoom: f32) {
+fn card_ui(p: &egui::Painter, r: Rect, id: &str, node: &NodeDef, v: &View, zoom: f32, link_count: usize, external: bool, broken_link: bool) {
     let t = v.theme;
     let flags = v.flags_of(id);
     let unsupported = !v.runs_on_rust(&node.node_type);
@@ -1046,18 +1030,23 @@ fn card_ui(p: &egui::Painter, r: Rect, id: &str, node: &NodeDef, v: &View, zoom:
     let text = if node.bypass { t.faint } else { t.text };
     let dim = if node.bypass { t.faint } else { t.dim };
     let cat = if node.bypass || unsupported { t.faint } else { t.category_color(&node.node_type) };
-    let exposed = exposed_to_blender(v.doc, id);
+    let link_width = if link_count > 0 { 29.0 * zoom } else { 0.0 };
+    let link_color = if external { Color32::from_rgb(234, 118, 0) }
+        else if broken_link { Color32::from_rgb(235, 80, 80) } else { Color32::from_rgb(62, 190, 110) };
     if zoom >= 0.7 {
         p.rect_filled(Rect::from_min_size(pos2(face.left(), face.top() + 2.0 * zoom), vec2(10.0 * zoom, 10.0 * zoom)), 2.0 * zoom, cat);
-        let cooked = v.cooking.stats.cooked.iter().chain(v.cooking.stats.cached.iter()).any(|n| n == id);
-        let backend_width = if cooked && !node.bypass && !unsupported { 24.0 * zoom } else { 0.0 };
-        let tag_width = backend_width + if exposed { 18.0 * zoom } else { 0.0 };
-        if exposed { blender_badge(p, pos2(face.right() - backend_width - 9.0 * zoom, face.top() + 7.5 * zoom), v, zoom); }
-        if backend_width > 0.0 {
-            let tag = Rect::from_min_size(pos2(face.right() - backend_width, face.top()), vec2(backend_width, 15.0 * zoom));
+        let lod_width = if node.node_type == "lod_bake" { 24.0 * zoom } else { 0.0 };
+        let tag_width = lod_width + link_width;
+        if link_count > 0 {
+            p.text(pos2(face.right(), face.top()), Align2::RIGHT_TOP,
+                if broken_link && !external { format!("⚠ {link_count}") } else { format!("↗ {link_count}") },
+                FontId::proportional(10.0 * zoom), link_color);
+        }
+        if lod_width > 0.0 {
+            let tag = Rect::from_min_size(pos2(face.right() - link_width - lod_width, face.top()), vec2(lod_width, 15.0 * zoom));
             p.rect_filled(tag, 3.0 * zoom, t.ok_bg);
             p.rect_stroke(tag, 3.0 * zoom, Stroke::new(1.0_f32, t.ok), StrokeKind::Inside);
-            p.text(tag.center(), Align2::CENTER_CENTER, if node.node_type == "lod_bake" { "LOD" } else { "Rs" }, FontId::monospace(10.0 * zoom), t.ok);
+            p.text(tag.center(), Align2::CENTER_CENTER, "LOD", FontId::monospace(10.0 * zoom), t.ok);
         }
         p.text(pos2(face.left() + 17.0 * zoom, face.top()), Align2::LEFT_TOP, ellipsis(id, face.width() - 17.0 * zoom - tag_width, 12.5 * zoom), FontId::monospace(12.5 * zoom), text);
         let (status, status_color) = node_status(v, id, node.bypass, unsupported, error.is_some());
@@ -1074,8 +1063,8 @@ fn card_ui(p: &egui::Painter, r: Rect, id: &str, node: &NodeDef, v: &View, zoom:
         }
     } else if zoom >= 0.4 {
         p.rect_filled(Rect::from_min_size(pos2(face.left(), r.center().y - 5.0 * zoom), vec2(10.0 * zoom, 10.0 * zoom)), 2.0, cat);
-        p.text(pos2(face.left() + 16.0 * zoom, r.center().y), Align2::LEFT_CENTER, ellipsis(id, face.width() - (16.0 + if exposed { 18.0 } else { 0.0 }) * zoom, 12.0), FontId::monospace(12.0), text);
-        if exposed { blender_badge(p, pos2(face.right() - 7.0 * zoom, r.center().y), v, zoom); }
+        p.text(pos2(face.left() + 16.0 * zoom, r.center().y), Align2::LEFT_CENTER, ellipsis(id, face.width() - 16.0 * zoom - link_width, 12.0), FontId::monospace(12.0), text);
+        if link_count > 0 { p.text(pos2(face.right(), r.center().y), Align2::RIGHT_CENTER, format!("↗ {link_count}"), FontId::proportional(10.0 * zoom), link_color); }
     } else { p.rect_filled(r.shrink(2.0), 3.0, cat); }
     let inputs = input_slots(node);
     for index in 0..inputs.len() {
