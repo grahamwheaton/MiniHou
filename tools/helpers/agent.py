@@ -197,6 +197,26 @@ def codex_usage():
     return "Codex: no usage snapshot found"
 
 
+
+def extra_lines():
+    """Rows the dash cannot read from local job files: Claude, Opus/Sonnet subagents (kept by hand), and Bob."""
+    out = []
+    claude = ROOT / "claude_usage.txt"
+    out.append("Claude (coordinator): " + (claude.read_text(encoding="utf-8").strip() if claude.exists() else "usage not recorded"))
+    manual = ROOT / "subagents.txt"
+    if manual.exists():
+        for line in manual.read_text(encoding="utf-8").splitlines():
+            if line.strip() and not line.startswith("#"):
+                out.append("Subagent: " + line.strip())
+    try:
+        import subprocess as sp
+        r = sp.run(["ssh", "-i", str(Path.home() / ".ssh/id_ed25519_minihou"), "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+                    "graham@100.84.79.93", "dir /b C:/Users/Graham/minihou_bench"], capture_output=True, text=True, timeout=12)
+        out.append("Bob (work PC): " + ("reachable, " + str(len([l for l in r.stdout.split() if l.endswith('-wt')])) + " worktrees" if r.returncode == 0 else "unreachable"))
+    except Exception:
+        out.append("Bob (work PC): unreachable")
+    return out
+
 def dash(html):
     hdr = ("agent/id", "cli", "task", "status", "tokens", "updated")
     r = rows()
@@ -206,6 +226,7 @@ def dash(html):
         for x in [hdr, *r]:
             print("  ".join(str(v).ljust(w[i]) for i, v in enumerate(x)))
         print(note)
+        for line in extra_lines(): print(line)
         return
     col = {"running": "#d29922", "completed": "#3fb950", "failed": "#f85149", "died": "#f85149", "blocked": "#f85149"}
     body = "".join("<tr>" + "".join(f"<td style='color:{col.get(v, '')}'>{v}</td>" if i == 3 else f"<td>{v}</td>"
