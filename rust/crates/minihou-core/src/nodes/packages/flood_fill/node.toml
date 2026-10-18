@@ -1,0 +1,5 @@
+id = "flood_fill"
+name = "Advanced Flood Fill"
+category = "Groups"
+description = "Grow point, edge, or face selections across connected geometry with barriers and limits."
+keywords = "flood fill grow region connected geodesic group"
