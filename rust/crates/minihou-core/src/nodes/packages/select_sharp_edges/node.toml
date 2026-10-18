@@ -1,0 +1,5 @@
+id = "select_sharp_edges"
+name = "Select Sharp Edges"
+category = "Groups"
+description = "Select edges whose dihedral angle exceeds an angle threshold."
+keywords = "sharp edges angle dihedral threshold crease select"

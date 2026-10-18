@@ -1,0 +1,5 @@
+id = "boundary_select"
+name = "Boundary Select"
+category = "Groups"
+description = "Select the boundary elements of an input selection group."
+keywords = "boundary select region loop border outer edge"
