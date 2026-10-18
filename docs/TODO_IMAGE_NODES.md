@@ -242,3 +242,7 @@ After a Loop Cut slide, the whole loop is not selected; only part of the ring st
 Repro (user): make a box, add Loop Cut, make a group of edges, click the purple arrow on the group field. Expected: the group's edges highlight in purple. Actual: the selection is cleared. Pressing the arrow again crashes the app.
 
 Likely cause (first press): main.rs `UiAction::PickParameter` clears `self.selection` and `group_preview` and does not load the field's current value into the highlight, so the existing group is not shown. Second press: `self.param_pick` is overwritten and `previous_display` is saved while `display` already points at the pick source, so the restore on exit is wrong; a panic in the pick path is the probable crash. Needs the panic text (run the exe from a terminal) to confirm.
+
+## Future: darker orange for object selection (requested 2026-10-18)
+
+Object selection should use a darker orange than the point, edge and face selection colours, so the two are easy to tell apart in the viewport. Check the selection colour constants in the viewport code and the object outline colour before changing them.
