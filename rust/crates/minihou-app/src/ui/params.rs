@@ -2122,10 +2122,13 @@ fn widget_styled(ui: &mut egui::Ui, kind: ParamKind, meta: Option<&Value>, value
         if meta["kind"] == "enum" {
             let before = value.clone();
             let combo_w = width.min(180.0).max(50.0);
-            egui::ComboBox::from_id_salt("enum").width(combo_w).selected_text(value.as_str().unwrap_or(""))
+            // A domain dropdown shows "primitives" as "faces"; the stored value stays "primitives" (saved graphs use it).
+            let is_domain = meta["options"].as_array().is_some_and(|o| o.iter().any(|v| v == "points") && o.iter().any(|v| v == "edges"));
+            let label = |v: &'_ str| -> String { if is_domain && v == "primitives" { "faces".into() } else { v.to_owned() } };
+            egui::ComboBox::from_id_salt("enum").width(combo_w).selected_text(label(value.as_str().unwrap_or("")))
                 .show_ui(ui, |ui| {
                     if let Some(options) = meta["options"].as_array() {
-                        for option in options { ui.selectable_value(value, option.clone(), option.as_str().unwrap_or("")); }
+                        for option in options { let text = label(option.as_str().unwrap_or("")); ui.selectable_value(value, option.clone(), text); }
                     }
                 });
             return *value != before;

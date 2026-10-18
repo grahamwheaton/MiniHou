@@ -293,3 +293,7 @@ With group_create set to edges and a pattern like `p12-18 p12-43`: after Enter t
 ## Future: call the "primitives" domain "faces" (requested 2026-10-18)
 
 The domain option shown as "primitives" (group_create, blast, and other nodes with a domain param) should read "faces" in the UI. Saved graphs store "primitives", so the parser must keep accepting it as an alias (map it to faces), and the metadata options and param meta regenerated. Check every `p.e("domain", ...)` list in rust/crates/minihou-core/src/nodes for the "primitives" value, and the Python parity tests that use the name.
+
+## Later: rename the "primitives" domain value properly (requested 2026-10-18)
+
+The UI now shows "faces" (display label only, in ui/params.rs). The stored value is still "primitives" in about 50 places (node code, metadata, tests). Do a proper rename to "faces": accept "primitives" as a legacy alias when loading saved graphs, regenerate the param metadata, and update the Python reference and its tests. Keep the alias until saved graphs are migrated.
