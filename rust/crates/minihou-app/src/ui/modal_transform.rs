@@ -97,7 +97,7 @@ impl Modal {
                 let mut v = view_plane_motion(delta / pixels_per_unit, camera);
                 match self.constraint {
                     Constraint::Axis(axis, _) => {
-                        let direction = projected_axis(basis[axis], camera);
+                        let direction = rightward_axis(basis[axis], camera);
                         let amount = delta.dot(direction) / pixels_per_unit;
                         v = basis[axis].map(|c| c * amount);
                     }
@@ -183,6 +183,12 @@ impl Modal {
 /// Blender GG: pressing G again during an edge-mode move switches to Edge Slide on the selected edges.
 pub fn double_g_slides(kind: Kind, mode: super::SelectionMode) -> bool { kind == Kind::Move && mode == super::SelectionMode::Edges }
 pub fn snap_value(value: f32, step: f32) -> f32 { if step <= 0. { value } else { (value / step).round() * step } }
+/// The axis' screen direction, flipped so a mouse move to the right (or up, for an axis pointing along the view) is positive
+/// whichever way the camera faces.
+pub fn rightward_axis(axis: [f32; 3], camera: CameraInfo) -> Vec2 {
+    let d = projected_axis(axis, camera);
+    if d.x < -0.05 || (d.x.abs() <= 0.05 && d.y > 0.) { -d } else { d }
+}
 pub fn projected_axis(axis: [f32; 3], camera: CameraInfo) -> Vec2 {
     let x = dot(axis, camera.ray_right); let y = -dot(axis, camera.ray_up);
     let v=Vec2::new(x,y); if v.length_sq()>1e-8 { v.normalized() } else { Vec2::X }
@@ -279,6 +285,14 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         assert_eq!(m.desired(pos2(0.,0.),100.,frame,camera,false,1.,false).0,[0.5,0.,0.]);
         m.toggle_axis(0,false);m.pointer=pos2(50.,-100.);
         assert_eq!(m.desired(pos2(0.,0.),100.,frame,camera,false,1.,false).0,[0.5,0.,0.], "X still locks");
+    }
+    #[test] fn axis_move_is_positive_when_the_mouse_moves_right_in_any_view() {
+        let mut camera = perspective();
+        for sign in [1.0_f32, -1.0] {
+            camera.ray_right = [sign, 0., 0.];
+            let d = rightward_axis([1., 0., 0.], camera);
+            assert!(d.x > 0., "mouse right must be +X for right={sign}");
+        }
     }
     #[test] fn middle_click_locks_the_axis_closest_to_the_view() {
         let camera=perspective();let frame=[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]];

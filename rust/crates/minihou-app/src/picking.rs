@@ -192,10 +192,17 @@ pub enum WireHit { Point(u32), Edge(u32, u32) }
 
 pub fn pick_wire(p: &[f32], lines: &[u32], pointer: eframe::egui::Pos2,
     mut project: impl FnMut([f32; 3]) -> Option<(eframe::egui::Pos2, f32)>,
-    mut visible: impl FnMut(u32) -> bool, points: bool, edges: bool) -> Option<WireHit> {
+    visible: impl FnMut(u32) -> bool, points: bool, edges: bool) -> Option<WireHit> {
+    pick_wire_occluded(p,lines,pointer,project,visible,points,edges,f32::INFINITY)
+}
+/// As `pick_wire`; elements deeper than `max_depth` (the mesh surface under the pointer) are hidden behind it.
+#[allow(clippy::too_many_arguments)]
+pub fn pick_wire_occluded(p: &[f32], lines: &[u32], pointer: eframe::egui::Pos2,
+    mut project: impl FnMut([f32; 3]) -> Option<(eframe::egui::Pos2, f32)>,
+    mut visible: impl FnMut(u32) -> bool, points: bool, edges: bool, max_depth: f32) -> Option<WireHit> {
     let mut best: Option<(f32, f32, WireHit)> = None;
     let mut consider = |distance: f32, depth: f32, hit| {
-        if depth <= 0. || !depth.is_finite() { return; }
+        if depth <= 0. || !depth.is_finite() || depth > max_depth { return; }
         if best.as_ref().is_none_or(|(d,z,_)| distance < *d - 0.001 ||
             ((distance-*d).abs() <= 0.001 && depth < *z)) { best = Some((distance,depth,hit)); }
     };
@@ -234,6 +241,12 @@ pub fn pick_wire(p: &[f32], lines: &[u32], pointer: eframe::egui::Pos2,
         assert!(!stroke.contains(pos2(50.,5.1)));
         assert!(RegionShape::CircleStroke {points:vec![pos2(0.,0.);2],radius:5.}.contains(pos2(3.,4.)));
         assert!(!RegionShape::CircleStroke {points:vec![],radius:5.}.contains(pos2(0.,0.)));
+    }
+    #[test] fn wire_behind_the_surface_is_not_picked() {
+        let p=[0.,0.,5., 100.,0.,5.];
+        let project=|p:[f32;3]|Some((pos2(p[0],p[1]),p[2]));
+        assert_eq!(pick_wire_occluded(&p,&[0,1],pos2(50.,2.),project,|_|true,false,true,4.),None);
+        assert_eq!(pick_wire_occluded(&p,&[0,1],pos2(50.,2.),project,|_|true,false,true,5.1),Some(WireHit::Edge(0,1)));
     }
     #[test] fn wire_pixels_and_visibility() {
         let p=[0.,0.,1., 100.,0.,1.];

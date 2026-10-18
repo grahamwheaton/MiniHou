@@ -37,6 +37,10 @@ pub fn selection_canvas_contains(rect: Rect, p: Pos2) -> bool {
         && !(p.x < rect.left() + 52. && p.y < rect.top() + HEADER_H + 12. + TOOLS.len() as f32 * 28. + 28.)
         && !(p.x > rect.right() - 110. && p.y < rect.top() + HEADER_H + 115.)
 }
+/// The part of the viewport not covered by the header and the timeline.
+pub fn cursor_clip(rect: Rect) -> Rect {
+    Rect::from_min_max(egui::pos2(rect.left(), rect.top() + HEADER_H), egui::pos2(rect.right(), (rect.bottom() - TIMELINE_H).max(rect.top() + HEADER_H)))
+}
 const DENSE_PRIMS: usize = 40_000;
 const FRAME_START: u32 = 0;
 const FRAME_END: u32 = 240;
