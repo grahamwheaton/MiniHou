@@ -229,25 +229,6 @@ fn blast(inputs:&Inputs,p:&Params)->Result<Geometry>{
     if m.iter().all(|&v|v){return Ok((*g).clone());}
     if dom=="point"{super::modify::keep_points(&g,&m)}else{keep_prims(&g,&m,!p.b("keep_unused_points")?)}
 }
-pub const GROUP_EXPAND:NodeSpec=NodeSpec{name:"group_expand",inputs:GEO,params:crate::params!(
-    "group":"group1";"name":"";"domain":"primitives";"mode":"expand";"steps":1;"connectivity":"points"),cook:expand};
-fn expand(inputs:&Inputs,p:&Params)->Result<Geometry>{
-    let g=GROUP_EXPAND.one(inputs,0)?;let dom=p.e("domain",&["primitives","points"])?;let dom=if dom=="points"{"point"}else{"prim"};
-    let pattern=p.s("group")?;let name=p.s("name")?;let name=if name.is_empty(){pattern.clone()}else{name};valid_name(&name)?;
-    let mut m=mask(&g,dom,&pattern)?;let contract=p.e("mode",&["expand","contract"])?=="contract";let edges=p.e("connectivity",&["points","edges"])?=="edges";
-    let steps=p.i("steps")?;if !(1..=1000).contains(&steps){return Err(Error::new("steps must be 1..1000"));}
-    let e=crate::topo::edges(&g.topology,g.npoints);let mut pv=Vec::new();for i in 0..g.nprims(){pv.extend(std::iter::repeat_n(i,(g.topology.prim_offsets[i+1]-g.topology.prim_offsets[i]) as usize));}
-    for _ in 0..steps{
-        let old:Vec<_>=m.iter().map(|&v|if contract{!v}else{v}).collect();let mut grown=old.clone();
-        if dom=="point"{for pair in e.points.chunks_exact(2){let(a,b)=(pair[0] as usize,pair[1] as usize);grown[a]|=old[b];grown[b]|=old[a];}}
-        else if edges{let mut hit=vec![false;e.len()];for(v,&i)in e.of_vertex.iter().enumerate(){if i>=0 && old[pv[v]]{hit[i as usize]=true;}}for(v,&i)in e.of_vertex.iter().enumerate(){if i>=0 && hit[i as usize]{grown[pv[v]]=true;}}}
-        else{let mut hit=vec![false;g.npoints];for(v,&pt)in g.topology.vertex_point.iter().enumerate(){if old[pv[v]]{hit[pt as usize]=true;}}for(v,&pt)in g.topology.vertex_point.iter().enumerate(){if hit[pt as usize]{grown[pv[v]]=true;}}}
-        m=grown.into_iter().map(|v|if contract{!v}else{v}).collect();
-    }
-    let mut out=(*g).clone();let key=format!("group_{name}");let a=Arc::new(Attr::i32(1,m.into_iter().map(i32::from).collect()));
-    if dom=="point"{out.prim.remove(&key);out.point.insert(key,a);}else{out.point.remove(&key);out.prim.insert(key,a);}Ok(out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,12 +246,6 @@ mod tests {
         let g=Arc::new(Geometry::from_arrays(vec![0.;15],vec![0,1,2,3,4],vec![0,5],Some(vec![false])).unwrap());
         let p=Params::resolve(BLAST.params,None).unwrap();assert_eq!(blast(&[vec![g.clone()]],&p).unwrap().npoints,5);
         let p=Params::resolve(BLAST.params,serde_json::json!({"domain":"points","group":"2"}).as_object()).unwrap();let out=blast(&[vec![g]],&p).unwrap();assert_eq!(out.topology.prim_offsets,[0,2,4]);assert_eq!(out.npoints,4);out.validate().unwrap();
-    }
-    #[test]
-    fn group_expand_one_ring_and_promote_wildcards(){
-        let mut g=Geometry::from_arrays(vec![0.;12],vec![0,1,2,3],vec![0,4],Some(vec![false])).unwrap();g.point.insert("group_tip".into(),Arc::new(Attr::i32(1,vec![1,0,0,0])));
-        let p=Params::resolve(GROUP_EXPAND.params,serde_json::json!({"domain":"points","group":"tip"}).as_object()).unwrap();let out=expand(&[vec![Arc::new(g)]],&p).unwrap();assert_eq!(out.point["group_tip"].data,AttrData::I32(vec![1,1,0,0]));
-        let p=Params::resolve(GROUP_PROMOTE.params,serde_json::json!({"name":"t*","to":"primitives"}).as_object()).unwrap();let out=promote(&[vec![Arc::new(out)]],&p).unwrap();assert_eq!(out.prim["group_tip"].data,AttrData::I32(vec![0]));assert!(!out.point.contains_key("group_tip"));
     }
     #[test]
     fn create_uses_bounds_input_and_combines_on_one_domain(){
