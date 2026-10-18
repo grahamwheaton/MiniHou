@@ -122,15 +122,24 @@ fn zoom_under_cursor(camera:&mut Camera,delta:f32,enabled:bool,rect:egui::Rect,p
 }
 
 fn pick_displayed_wire(scene:&Scene, camera:CameraInfo, rect:egui::Rect, pointer:egui::Pos2,
-    visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,mode:ui::SelectionMode)->Option<picking::WireHit> {
-    picking::pick_wire(scene.positions(),scene.line_primitive_indices(),pointer,
+    visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,mode:ui::SelectionMode,xray:bool)->Option<picking::WireHit> {
+    // without X-ray, points and edges behind the mesh surface under the pointer are not pickable
+    let max_depth=if xray {f32::INFINITY} else {
+        let (o,d)=ui::transform_gizmo::ray(camera,rect,pointer);
+        pick_displayed(scene,o,d,visibility,ranges,selected).map_or(f32::INFINITY,|hit|{
+            let depth=hit.t*(0..3).map(|k|d[k]*camera.ray_forward[k]).sum::<f32>();
+            let depth=if camera.ortho {depth.max(0.001)} else {depth};
+            depth*1.002+scene.radius*1e-4
+        })
+    };
+    picking::pick_wire_occluded(scene.positions(),scene.line_primitive_indices(),pointer,
         |p| ui::transform_gizmo::project(camera,rect,p).map(|screen| {
             let depth=(0..3).map(|k|(p[k]-camera.ray_origin[k])*camera.ray_forward[k]).sum::<f32>();
             (screen, if camera.ortho { depth.max(0.001) } else { depth })
         }),
         |id| point_pickable(visibility,ranges,selected,id),
         matches!(mode,ui::SelectionMode::Object|ui::SelectionMode::Points),
-        matches!(mode,ui::SelectionMode::Object|ui::SelectionMode::Edges))
+        matches!(mode,ui::SelectionMode::Object|ui::SelectionMode::Edges),max_depth)
 }
 
 fn wire_selection(hit:picking::WireHit,mode:ui::SelectionMode)->picking::Selection {
@@ -333,6 +342,18 @@ fn pushpull_starts_now(mode: ui::SelectionMode, selection: &picking::Selection) 
 /// The active node after undo/redo: kept when it still exists, else the displayed node.
 fn surviving_selection(value: &Value, selected: &str, display: &str) -> String {
     if value["nodes"].get(selected).is_some() { selected.to_owned() } else { display.to_owned() }
+}
+/// As `surviving_selection`, but a selected node the undo removed hands the selection to the node that fed it
+/// (the one a push/pull was inserted after), not to whatever the display shows.
+fn surviving_selection_from(old:&Value,new:&Value,selected:&str,display:&str)->String {
+    let mut node=selected.to_owned();
+    for _ in 0..64 {
+        if new["nodes"].get(&node).is_some() { return node; }
+        let source=old["nodes"][&node]["inputs"].as_object().and_then(|inputs|inputs.values().find_map(|input|
+            input.as_str().map(str::to_owned).or_else(||input.as_array().and_then(|a|a.first()).and_then(Value::as_str).map(str::to_owned))));
+        match source { Some(source) => node=source, None => break }
+    }
+    surviving_selection(new,selected,display)
 }
 fn feeds_displayed_node(value: &Value, selected: &str) -> bool {
     let mut pending = minihou_app::display_nodes(value);
@@ -2405,6 +2426,7 @@ impl App {
                     if let Some((value, id)) = graph_edit::add_viewport_cut(self.editor.doc.value(), &source, &node_type, params) {
                         if self.commit_document(value, "viewport cut") {
                             self.pending_loop_selection=(node_type=="polysplit").then(||id.clone());
+                            if ctx.input(|i|i.pointer.primary_down()) { ctx.data_mut(|d|d.insert_temp(egui::Id::new("mesh_cut_swallow_click"),true)); }
                             self.selected = id.clone(); self.selected_set = std::collections::BTreeSet::from([id.clone()]);
                             self.display = Graph::from_value(self.editor.doc.value()).ok().and_then(|g| g.main_output().ok()).unwrap_or(id);
                         }
@@ -2451,7 +2473,7 @@ impl App {
                         self.selected_set.retain(|id| self.editor.doc.value()["nodes"].get(id).is_some());
                         // Undo can remove the node the last action created and selected: per-action state must not
                         // point at it, or the next action hangs its node off a missing source (live report 8).
-                        self.selected = surviving_selection(self.editor.doc.value(), &self.selected, &self.display);
+                        self.selected = surviving_selection_from(&previous, self.editor.doc.value(), &self.selected, &self.display);
                         if self.selected_set.is_empty() && !self.selected.is_empty() { self.selected_set.insert(self.selected.clone()); }
                         self.transform_target = None; self.transform_before = None; self.transform_delta = None;
                         self.pushpull_pick = false;
@@ -2891,7 +2913,7 @@ impl eframe::App for App {
                 if self.last_viewport.contains(at) {
                     if let Some(scene)=self.scene.as_ref() {
                         let (o,d)=ui::transform_gizmo::ray(self.camera_info(),self.last_viewport,at);
-                        if let Some(hit)=pick_displayed(scene,o,d,viewport::ObjectVisibility::HideOthers,&self.display_ranges,&self.active_pick_set()) {
+                        if let Some(hit)=pick_displayed_culled(scene,o,d,viewport::ObjectVisibility::HideOthers,&self.display_ranges,&self.active_pick_set(),!self.editor_state.xray) {
                             let picked=element_select::cached(&self.elem_topo,scene).pick(scene.positions(),scene.triangle_indices(),hit,[0,1,2].map(|k|o[k]+d[k]*hit.t),ui::SelectionMode::Faces);
                             self.selection=picked; self.editor_state.selection=ui::SelectionMode::Faces;
                             self.selection_dirty=true; self.pushpull_pick=false; self.file_status.clear();
@@ -3117,7 +3139,7 @@ impl eframe::App for App {
                                     _ => topo.pick(scene.positions(), scene.triangle_indices(), hit, point, mode),
                                 }
                             }).or_else(|| {
-                                let wire=pick_displayed_wire(scene,v.camera,rect,pos,pick_visibility,&self.display_ranges,&pick_set,mode)?;
+                                let wire=pick_displayed_wire(scene,v.camera,rect,pos,pick_visibility,&self.display_ranges,&pick_set,mode,self.editor_state.xray)?;
                                 let topo=element_select::cached(&self.elem_topo,scene);
                                 let mut selected=wire_selection(wire,mode);
                                 if mode==ui::SelectionMode::Edges && mods.alt && self.prefs.viewport.navigation==ui::keymap::Navigation::Blender {
@@ -3228,7 +3250,10 @@ impl eframe::App for App {
                     // Tab is the node menu in every mode; Ctrl+Tab (keymap ToggleEdit) switches object / edit mode
                     out.push(UiAction::Command("add_menu".into()));
                 }
-                if !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && !(response.double_clicked() && ctx.input(|i|i.modifiers.shift) && matches!(v.doc["nodes"][v.selected]["type"].as_str(),Some("curve"|"bezier"))) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::curve_tool::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::curve_tool::hit(rect, &v, p, ctx)) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| !ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) && matches!(self.editor_state.tool, ui::Tool::Select | ui::Tool::Move | ui::Tool::Rotate | ui::Tool::Scale | ui::Tool::Transform)
+                // the release of the click that confirmed a loop cut must not re-select under the cursor
+                let swallow_click=ctx.data(|d|d.get_temp::<bool>(egui::Id::new("mesh_cut_swallow_click"))).unwrap_or(false);
+                if swallow_click && !ctx.input(|i|i.pointer.primary_down()) { ctx.data_mut(|d|d.remove::<bool>(egui::Id::new("mesh_cut_swallow_click"))); }
+                if !swallow_click && !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && !(response.double_clicked() && ctx.input(|i|i.modifiers.shift) && matches!(v.doc["nodes"][v.selected]["type"].as_str(),Some("curve"|"bezier"))) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::curve_tool::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::curve_tool::hit(rect, &v, p, ctx)) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| !ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) && matches!(self.editor_state.tool, ui::Tool::Select | ui::Tool::Move | ui::Tool::Rotate | ui::Tool::Scale | ui::Tool::Transform)
                     && self.param_pick.as_ref().is_none_or(|pick| pick.ready && source_ready(&self.display_ranges, &pick.source)) {
                     if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {
                         let (nx, ny) = (((at.x - rect.left()) / rect.width()) * 2. - 1., 1. - ((at.y - rect.top()) / rect.height()) * 2.);
@@ -3236,7 +3261,7 @@ impl eframe::App for App {
                         let mode = self.editor_state.selection;
                         let extend = ctx.input(|i| i.modifiers.shift);
                         let hit = if self.object_hidden { None } else { pick_displayed_culled(scene,o,d,pick_visibility,&self.display_ranges,&pick_set,!self.editor_state.xray) };
-                        let wire = if self.object_hidden || hit.is_some() { None } else { pick_displayed_wire(scene,v.camera,rect,at,pick_visibility,&self.display_ranges,&pick_set,mode) };
+                        let wire = if self.object_hidden || hit.is_some() { None } else { pick_displayed_wire(scene,v.camera,rect,at,pick_visibility,&self.display_ranges,&pick_set,mode,self.editor_state.xray) };
                         if mode == ui::SelectionMode::Object {
                             let ids = hit.and_then(|hit| picked_object(&self.display_ranges, scene.triangle_indices(), hit))
                                 .or_else(|| wire.and_then(|w| { let id=match w { picking::WireHit::Point(i)|picking::WireHit::Edge(i,_)=>i }; self.display_ranges.iter().find(|(_,r)|r.contains(&id)).map(|(name,_)|name.as_str()) }))

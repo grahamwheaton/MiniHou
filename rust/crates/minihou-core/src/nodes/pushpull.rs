@@ -937,6 +937,26 @@ mod tests {
         (o, inner, area)
     }
     #[test]
+    fn through_hole_on_rotated_box_has_no_unpunched_band() {
+        let (g, inner, area) = inset_top(&unit_box(), 0.25);
+        let pos = positions(&g);
+        let faces: Vec<Vec<usize>> = (0..g.nprims())
+            .map(|f| range(&g, f).map(|v| g.topology.vertex_point[v] as usize).collect())
+            .collect();
+        for (ax, angle) in [([1., 1., 0.], 0.7_f64), ([0., 1., 1.], 0.4), ([1., 2., 3.], 1.1)] {
+            let k = mul(ax, 1. / len(ax));
+            let rot = |p: [f64; 3]| {
+                let (c, s) = (angle.cos(), angle.sin());
+                add(add(mul(p, c), mul(cross(k, p), s)), mul(k, dot(k, p) * (1. - c)))
+            };
+            let pts: Vec<_> = pos.iter().map(|&p| rot(p)).collect();
+            let r = mk(&pts, &faces);
+            let out = apply_through(&r, &inner.to_string(), -1., Through::Auto).unwrap();
+            check(&out, 0);
+            assert!((volume(&out) - (1. - area)).abs() < 1e-4, "volume {} axis {ax:?}", volume(&out));
+        }
+    }
+    #[test]
     fn through_hole_on_box_snaps_to_far_face() {
         let (g, inner, area) = inset_top(&unit_box(), 0.25);
         let thickness = 1.;

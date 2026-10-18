@@ -191,7 +191,9 @@ fn pivot(v: &View) -> [f32; 3] {
 }
 pub fn cursor(ui: &egui::Ui, rect: Rect, v: &View) {
     let Some(at) = project(v.camera, rect, v.editor.cursor) else { return; };
-    let p = ui.painter_at(rect);
+    // the viewport UI (toolbars, header, timeline, overlay menus) sits above the cursor
+    if !super::viewport_ui::selection_canvas_contains(rect, at) { return; }
+    let p = ui.painter_at(super::viewport_ui::cursor_clip(rect));
 
     // Crosshair extending through the ring with dark outline for contrast
     let ch_len = 14.0;
