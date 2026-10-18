@@ -359,7 +359,7 @@ mod tests {
         assert_eq!(modify.tools[0].node_type, "transform");
         assert!(modify.tools.iter().any(|t| t.node_type == "example_offset"));
         let measure = tabs().iter().find(|t| t.name == "Measure").unwrap();
-        for id in ["measure_volume", "measure_bounds", "measure_area", "measure_length"] {
+        for id in ["measure_volume", "measure_bounds", "measure_area", "measure_length", "measure_distance"] {
             assert_eq!(measure.tools.iter().filter(|t| t.node_type == id).count(), 1, "{id}");
         }
         let mut menu = MenuState::new(Pos2::ZERO, None, true);

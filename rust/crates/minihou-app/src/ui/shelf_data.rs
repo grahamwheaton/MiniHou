@@ -246,7 +246,6 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "Switch", node_type: "switch", icon: "switch" },
     ] },
     Tab { name: "Measure", tools: &[
-        Tool { label: "Measure Distance", node_type: "measure_distance", icon: "measure" },
     ] },
     Tab { name: "Library", tools: &[
     ] },
