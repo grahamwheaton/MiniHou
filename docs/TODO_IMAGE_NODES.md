@@ -374,3 +374,11 @@ Geometry with a Cd colour attribute (point, vertex or face, as the Color node an
 ## Feature: Scatter node, Houdini parity (requested 2026-10-18)
 
 Houdini's Scatter (screenshots 84 and 85, and https://www.sidefx.com/docs/houdini/nodes/sop/scatter.html). Options tab: Group (purple arrow), Generate (By Density, By Area, By Count, and others), Scatter on Voxels Independently, Force Total Count, Density Scale, Density Attribute, Override Prim Area, Use Area for 2D Volumes, Max Point Limit, Global Seed, Primitive Seed Attribute, Randomize Point Order, Relax Iterations, Use Geometric Normals, Scale Radii By, Max Relax Radius. Output Attributes tab: Prim Num Attribute (sourceprim), Prim UVW Attribute (sourceprimuv), Output Density Attribute, Output Radius Attribute (pscale), Output ID Attribute (id), Output Radius and Density in Texture Space, Point Attributes (* by default), Vertex Attributes (N uv*), Primitive Attributes, Detail Attributes, Detail as Detail. The current scatter node has a density option; bring the rest over and match names and defaults.
+
+## Feature: Attribute Create, Houdini parity (requested 2026-10-18)
+
+Houdini's Attribute Create (screenshots 86 and 87): Group (purple arrow) and Group Type; Encode Invalid Attribute Names; Number of Attributes with add and remove, and Clear; for each attribute: enable checkbox, Name, Existing Name (Use the better type, size and precision, and others), Local Variable, Class (Point, Vertex, Primitive, Detail), Save to Info Block, Type (Float, Int, String and others, Guess from name), Precision (Auto), Size, Default (per component), Write Values, Allow Local Vars, Value (per component). Match names and defaults; keep the current attribute_create node behaviour working.
+
+## Feature: middle-mouse scale bar slider, Houdini parity (requested 2026-10-18)
+
+In Houdini, a middle-mouse click on a number field opens a vertical scale bar with preset steps (for example 100, 10, 1, .1, 0, .01, .001, .0001). Dragging the mouse up or down along it moves the value, and releasing sets it. Add this to number fields (ui/params.rs), with the same step behaviour as the drag sensitivity work.
