@@ -45,7 +45,7 @@ TYPES += ["loop_begin", "loop_end", "input", "object_input", "wrangle", "blend",
 # Procedural / instancing ports; retain the other workers' type lists above.
 TYPES += ["bezier", "helix", "lsystem", "convert_line", "polypath", "resample", "carve",
           "copy_to_points", "instance", "for_each", "group_promote",
-          "attribute_rename", "attribute_create", "attribute_promote", "attribute_blur",
+          "attribute_create", "attribute_promote", "attribute_blur",
           "connectivity", "smooth", "falloff", "bend", "uv_project", "uv_flatten", "uv_transform",
           "fillet", "curve_simplify", "group_create", "group_expand", "blast", "measure"]
 

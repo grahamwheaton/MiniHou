@@ -209,7 +209,6 @@ pub fn registry() -> &'static [NodeSpec] {
         recalc_normals::RECALC_NORMALS,
         tris_to_quads::TRIS_TO_QUADS,
         group::BLAST,
-        attribs::ATTRIBUTE_RENAME,
         attrib_tools::ATTRIBUTE_CREATE,
         attrib_paint::ATTRIB_PAINT,
         attrib_tools::ATTRIBUTE_PROMOTE,
@@ -352,7 +351,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["attribute_delete", "bound", "boundary_select", "cache", "example_offset", "facet", "flood_fill", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "point", "reverse", "select_sharp_edges", "subnet", "unpack"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["attribute_delete", "attribute_rename", "bound", "boundary_select", "cache", "example_offset", "facet", "flood_fill", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "point", "reverse", "select_sharp_edges", "subnet", "unpack"]);
     }
 }
 

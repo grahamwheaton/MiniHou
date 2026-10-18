@@ -1,0 +1,12 @@
+{
+  "from_name": {
+    "default": "",
+    "doc": "Existing attribute (any domain)",
+    "kind": "str"
+  },
+  "to_name": {
+    "default": "",
+    "doc": "New name; replaces an attribute of that name on any domain",
+    "kind": "str"
+  }
+}

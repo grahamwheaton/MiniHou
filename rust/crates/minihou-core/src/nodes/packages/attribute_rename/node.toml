@@ -1,0 +1,5 @@
+id = "attribute_rename"
+name = "Attribute Rename"
+category = "Attributes"
+description = "Rename a geometry attribute across domains."
+keywords = "attribute rename change name"
