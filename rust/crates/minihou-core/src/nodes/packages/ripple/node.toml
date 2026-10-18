@@ -1,0 +1,5 @@
+id = "ripple"
+name = "Ripple"
+category = "Deform"
+description = "Displace points with concentric sinusoidal ripples from a centre."
+keywords = "ripple waves deform concentric sine center water"

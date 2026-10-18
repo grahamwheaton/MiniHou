@@ -1,0 +1,18 @@
+{
+  "center": {
+    "kind": "vec3",
+    "default": [0.0, 0.0, 0.0],
+    "doc": "Centre position of the bulge deformation."
+  },
+  "radius": {
+    "kind": "float",
+    "default": 1.0,
+    "min": 0.0,
+    "doc": "Radius of influence around the centre."
+  },
+  "strength": {
+    "kind": "float",
+    "default": 1.0,
+    "doc": "Displacement distance along the normal at the centre."
+  }
+}

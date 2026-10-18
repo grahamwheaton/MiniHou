@@ -1,0 +1,28 @@
+{
+  "center": {
+    "kind": "vec3",
+    "default": [0.0, 0.0, 0.0],
+    "doc": "Centre position of the concentric ripples."
+  },
+  "decay": {
+    "kind": "float",
+    "default": 0.0,
+    "min": 0.0,
+    "doc": "Exponential decay rate with distance from the centre (0 disables decay)."
+  },
+  "frequency": {
+    "kind": "float",
+    "default": 1.0,
+    "doc": "Spatial frequency of the concentric ripples."
+  },
+  "offset": {
+    "kind": "float",
+    "default": 0.0,
+    "doc": "Phase offset of the ripples in radians."
+  },
+  "strength": {
+    "kind": "float",
+    "default": 1.0,
+    "doc": "Displacement amplitude along the surface normal."
+  }
+}

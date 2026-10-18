@@ -999,6 +999,28 @@
    "min": 0.0
   }
  },
+ "bulge": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Centre position of the bulge deformation.",
+   "kind": "vec3"
+  },
+  "radius": {
+   "default": 1.0,
+   "doc": "Radius of influence around the centre.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "strength": {
+   "default": 1.0,
+   "doc": "Displacement distance along the normal at the centre.",
+   "kind": "float"
+  }
+ },
  "cache": {
   "mode": {
    "default": "auto",
@@ -2248,6 +2270,38 @@
     "attribute",
     "primitive"
    ]
+  }
+ },
+ "fractal": {
+  "frequency": {
+   "default": 1.0,
+   "doc": "Spatial frequency of the fractal noise.",
+   "kind": "float"
+  },
+  "octaves": {
+   "default": 3,
+   "doc": "Number of fractal noise octaves to sum.",
+   "kind": "int",
+   "min": 1
+  },
+  "offset": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Spatial coordinate offset for noise sampling.",
+   "kind": "vec3"
+  },
+  "seed": {
+   "default": 0,
+   "doc": "Random seed for the procedural noise.",
+   "kind": "int"
+  },
+  "strength": {
+   "default": 1.0,
+   "doc": "Displacement distance scale along surface normals.",
+   "kind": "float"
   }
  },
  "fuse": {
@@ -6930,6 +6984,38 @@
    "soft_min": -360.0
   }
  },
+ "ripple": {
+  "center": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Centre position of the concentric ripples.",
+   "kind": "vec3"
+  },
+  "decay": {
+   "default": 0.0,
+   "doc": "Exponential decay rate with distance from the centre (0 disables decay).",
+   "kind": "float",
+   "min": 0.0
+  },
+  "frequency": {
+   "default": 1.0,
+   "doc": "Spatial frequency of the concentric ripples.",
+   "kind": "float"
+  },
+  "offset": {
+   "default": 0.0,
+   "doc": "Phase offset of the ripples in radians.",
+   "kind": "float"
+  },
+  "strength": {
+   "default": 1.0,
+   "doc": "Displacement amplitude along the surface normal.",
+   "kind": "float"
+  }
+ },
  "scatter": {
   "count": {
    "default": 1000,
@@ -9083,6 +9169,33 @@
    "default": "piece",
    "doc": "Primitive int attribute with each face's cell (the index of its point)",
    "kind": "str"
+  }
+ },
+ "waves": {
+  "axis": {
+   "default": "x",
+   "doc": "Axis along which the waves propagate.",
+   "kind": "enum",
+   "options": [
+    "x",
+    "y",
+    "z"
+   ]
+  },
+  "frequency": {
+   "default": 1.0,
+   "doc": "Spatial frequency of the sinusoidal waves.",
+   "kind": "float"
+  },
+  "offset": {
+   "default": 0.0,
+   "doc": "Phase offset of the waves in radians.",
+   "kind": "float"
+  },
+  "strength": {
+   "default": 1.0,
+   "doc": "Displacement amplitude along the surface normal.",
+   "kind": "float"
   }
  },
  "wrangle": {

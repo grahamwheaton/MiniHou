@@ -1,0 +1,23 @@
+{
+  "axis": {
+    "kind": "enum",
+    "default": "x",
+    "options": ["x", "y", "z"],
+    "doc": "Axis along which the waves propagate."
+  },
+  "frequency": {
+    "kind": "float",
+    "default": 1.0,
+    "doc": "Spatial frequency of the sinusoidal waves."
+  },
+  "offset": {
+    "kind": "float",
+    "default": 0.0,
+    "doc": "Phase offset of the waves in radians."
+  },
+  "strength": {
+    "kind": "float",
+    "default": 1.0,
+    "doc": "Displacement amplitude along the surface normal."
+  }
+}
