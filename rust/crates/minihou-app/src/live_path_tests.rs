@@ -217,3 +217,12 @@ fn extrude_keeps_original_face_selected() {
     let kept = crate::keep_extrude_selection(&sel, &scene).expect("selection kept");
     assert_eq!(kept.tris, tris);
 }
+
+#[test]
+fn undo_of_a_removed_node_selects_the_node_that_fed_it() {
+    let old=json!({"nodes":{"box1":{"type":"box"},"pp":{"type":"pushpull","inputs":{"geo":"box1"}},"other":{"type":"box"},"out":{"type":"output","inputs":{"geo":"pp"}}}});
+    let new=json!({"nodes":{"box1":{"type":"box"},"other":{"type":"box"},"out":{"type":"output","inputs":{"geo":"box1"}}}});
+    assert_eq!(surviving_selection_from(&old,&new,"pp","other"),"box1");
+    assert_eq!(surviving_selection_from(&old,&new,"box1","other"),"box1");
+    assert_eq!(surviving_selection_from(&old,&new,"gone","other"),"other");
+}
