@@ -1,0 +1,14 @@
+{
+  "group": {
+    "default": "",
+    "doc": "Optional edge group or pattern to restrict which edges may be dissolved; empty dissolves all coplanar edges",
+    "kind": "str"
+  },
+  "tolerance": {
+    "default": 0.01,
+    "doc": "Coplanar tolerance angle in degrees (default 0.01). Edges between faces whose normals differ by at most this angle are dissolved",
+    "kind": "float",
+    "min": 0.0,
+    "soft_max": 180.0
+  }
+}

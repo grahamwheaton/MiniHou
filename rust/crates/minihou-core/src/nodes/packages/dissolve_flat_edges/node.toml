@@ -1,0 +1,5 @@
+id = "dissolve_flat_edges"
+name = "Dissolve Flat Edges"
+category = "Polygon"
+description = "Remove edges whose two faces are coplanar within a tolerance, merging the faces into one polygon."
+keywords = "dissolve coplanar flat edges planar"
