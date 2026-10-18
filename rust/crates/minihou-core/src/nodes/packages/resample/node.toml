@@ -1,0 +1,5 @@
+id = "resample"
+name = "Resample"
+category = "Curves"
+description = "Even spacing along curves."
+keywords = "points along curve spacing"

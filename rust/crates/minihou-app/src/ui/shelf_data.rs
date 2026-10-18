@@ -152,7 +152,6 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "Bezier", node_type: "bezier", icon: "curve" },
         Tool { label: "Polyline", node_type: "curve", icon: "curve" },
         Tool { label: "Helix", node_type: "helix", icon: "helix" },
-        Tool { label: "Resample", node_type: "resample", icon: "resample" },
         Tool { label: "Simplify Curve", node_type: "curve_simplify", icon: "curve_simplify" },
         Tool { label: "Contour", node_type: "contour", icon: "curve" },
         Tool { label: "Slice", node_type: "slice", icon: "curve" },

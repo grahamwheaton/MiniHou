@@ -4,10 +4,10 @@ use super::{InputSpec, Inputs, NodeSpec, GEO, linspace};
 use super::group::{gather_table, keep_prims};
 use crate::{error::{Error, Result}, geometry::{Attr, AttrData, Geometry, Topology, MAX_ELEMENTS}, params::Params};
 
-fn count(n: usize) -> Result<()> {
+pub(crate) fn count(n: usize) -> Result<()> {
     if n > MAX_ELEMENTS.min(20_000_000) { Err(Error::new("curve output exceeds the 20,000,000 generated-element safety limit")) } else { Ok(()) }
 }
-fn curve(p: Vec<f32>, closed: bool) -> Result<Geometry> {
+pub(crate) fn curve(p: Vec<f32>, closed: bool) -> Result<Geometry> {
     let n=p.len()/3; count(n)?;
     let mut g=Geometry::from_arrays(p,(0..n as i32).collect(),vec![0,n as i32],Some(vec![closed]))?;
     g.prim.insert("__viewport_curve".into(),Arc::new(Attr::i32(1,vec![1])));
@@ -121,7 +121,7 @@ fn polypath(inputs:&Inputs,_:&Params)->Result<Geometry> {
     topo.closed=Some(closed);out.topology=Arc::new(topo);Ok(out)
 }
 
-fn lengths(g:&Geometry,i:usize)->(Vec<usize>,Vec<f64>,f64) {
+pub(crate) fn lengths(g:&Geometry,i:usize)->(Vec<usize>,Vec<f64>,f64) {
     let ids:Vec<_>=g.topology.vertex_point[g.topology.prim_offsets[i] as usize..g.topology.prim_offsets[i+1] as usize].iter().map(|&i|i as usize).collect();
     let mut cum=vec![0.];let mut total=0.;
     for j in 0..ids.len(){let next=if j+1<ids.len(){j+1}else{0};
@@ -129,7 +129,7 @@ fn lengths(g:&Geometry,i:usize)->(Vec<usize>,Vec<f64>,f64) {
         total+=d;cum.push(total);
     } (ids,cum,total)
 }
-fn sample(g:&Geometry,prims:&[usize],lists:&[Vec<f64>])->Result<Geometry> {
+pub(crate) fn sample(g:&Geometry,prims:&[usize],lists:&[Vec<f64>])->Result<Geometry> {
     let n:usize=lists.iter().map(Vec::len).sum();count(n)?;
     let mut pa=Vec::new();let mut pb=Vec::new();let mut ts=Vec::new();let mut positions=Vec::new();let mut u=Vec::new();let mut offs=vec![0];
     for (&i,list) in prims.iter().zip(lists){let(ids,cum,total)=lengths(g,i);
@@ -146,18 +146,6 @@ fn sample(g:&Geometry,prims:&[usize],lists:&[Vec<f64>])->Result<Geometry> {
         }} out.point.insert(name.clone(),Arc::new(b));
     }
     out.point.insert("curveu".into(),Arc::new(Attr::f32(1,u)));out.prim=gather_table(&g.prim,prims);out.detail=g.detail.clone();Ok(out)
-}
-pub const RESAMPLE:NodeSpec=NodeSpec{name:"resample",inputs:GEO,params:crate::params!("by":"length";"length":0.1;"segments":20;"group":""),cook:resample};
-fn resample(inputs:&Inputs,p:&Params)->Result<Geometry>{
-    let g=RESAMPLE.one(inputs,0)?;let sel=super::group::mask(&g,"prim",&p.s("group")?)?;
-    let by=p.e("by",&["length","count"])?;let length=p.f("length")?;let segments=p.i("segments")?;
-    if length<=0. || segments<1{return Err(Error::new("length must be positive and segments at least 1"));}
-    let mut prims=Vec::new();let mut lists=Vec::new();let mut count_out=0usize;
-    for (i,&selected) in sel.iter().enumerate(){if !selected || g.topology.prim_offsets[i+1]-g.topology.prim_offsets[i]<2{continue;}
-        let (_,_,total)=lengths(&g,i);let n=if by=="count"{segments as usize}else{(total/length-1e-9).ceil().max(1.) as usize};
-        count_out=count_out.checked_add(n).and_then(|v|v.checked_add(1)).ok_or_else(||Error::new("resample count overflow"))?;count(count_out)?;
-        let mut s=linspace(0.,total,n+1);if g.topology.is_closed(i){s.pop();}prims.push(i);lists.push(s);
-    }sample(&g,&prims,&lists)
 }
 pub const CARVE:NodeSpec=NodeSpec{name:"carve",inputs:GEO,params:crate::params!("start":0.0;"end":1.0),cook:carve};
 fn carve(inputs:&Inputs,p:&Params)->Result<Geometry>{
@@ -927,18 +915,13 @@ mod tests {
     use super::*;
     fn cook(spec:&NodeSpec,g:Geometry,v:serde_json::Value)->Geometry{(spec.cook)(&[vec![Arc::new(g)]],&Params::resolve(spec.params,v.as_object()).unwrap()).unwrap()}
     #[test]
-    fn resample_interpolation_and_carve_keep_original_knots(){
+    fn carve_keeps_original_knots(){
         let mut g=curve(vec![0.,0.,0.,0.,0.,1.,0.,0.,2.,0.,0.,3.,0.,0.,4.],false).unwrap();
         g.point.insert("id".into(),Arc::new(Attr::i32(1,vec![10,11,12,13,14])));
-        let r=cook(&RESAMPLE,g.clone(),serde_json::json!({"length":0.5}));assert_eq!(r.npoints,9);
-        assert_eq!(r.point["curveu"].as_f32().unwrap(),[0.,0.125,0.25,0.375,0.5,0.625,0.75,0.875,1.]);
-        assert_eq!(r.point["id"].data,AttrData::I32(vec![10,10,11,11,12,12,13,13,14]));
         let c=cook(&CARVE,g,serde_json::json!({"start":0.25,"end":0.6}));assert_eq!(c.p(),[0.,0.,1.,0.,0.,2.,0.,0.,2.4]);c.validate().unwrap();
     }
     #[test]
-    fn closed_resample_and_branch_chains(){
-        let g=curve(vec![0.,0.,0.,1.,0.,0.,1.,1.,0.,0.,1.,0.],true).unwrap();
-        let r=cook(&RESAMPLE,g,serde_json::json!({"length":0.25}));assert_eq!(r.npoints,16);assert!(r.topology.is_closed(0));
+    fn branch_chains(){
         let (paths,cl)=chains(4,&[[0,1],[1,2],[1,3]]);assert_eq!(paths,vec![vec![0,1],vec![1,2],vec![1,3]]);assert_eq!(cl,[false;3]);
     }
     #[test]
