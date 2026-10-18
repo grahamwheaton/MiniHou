@@ -202,6 +202,11 @@ class PiecesManifestTests(unittest.TestCase):
         geo = self.fractured()
         header, arrays = build_manifest("so", params(mode="pieces", prefix="Chunk"), geo, "k")
         self.assertEqual((header["mode"], header["prefix"]), ("pieces", "Chunk"))
+        renamed, renamed_arrays = build_manifest("so", params(mode="objects", prefix="Chunk"), geo, "k")
+        self.assertEqual(renamed["mode"], "objects")
+        self.assertEqual(renamed["id"], header["id"])
+        for key in arrays:
+            np.testing.assert_array_equal(renamed_arrays[key], arrays[key])
         import json
         json.dumps(header, allow_nan=False)
         self.assertEqual(set(arrays), {"P", "vp", "sizes"})

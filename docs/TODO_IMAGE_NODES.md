@@ -217,7 +217,7 @@ Parked by user: inset on non-planar regions. Tri to Quad: user will test.
 - **Attribute create, run from the Tab menu in the 3D view:** auto-fill the selection as context (selected points, edges or faces) instead of an empty node.
 - **Attribute and group fields dropdown:** when existing attributes or groups are detected on the input, show a dropdown of them; choosing one sets the domain automatically (for example point, edge, face).
 - **Blender attribute transport:** a cube from Blender lost its `bevel_weight_edge` attribute on the way through MiniHou. Make sure all attributes and creases (bevel weight, crease, sharp, seam, UVs, colours) survive a round trip.
-- **Scene Objects, option B:** each object is its own mesh with its empty as parent, so moving the empty moves the object. Rename "pieces" to "objects" in UI and code (see memory rule).
+- **Scene Objects, option B (done 2026-10-18):** each object has its own mesh parented to a placement empty, so moving the empty moves the object. The mode is named `objects`; saved `pieces` values remain accepted.
 - **Copy to Points:** pack is the default now (done 2026-10-18).
 
 ## Future: Houdini-style output groups UI (requested 2026-10-18)

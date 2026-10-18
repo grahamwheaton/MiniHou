@@ -4,7 +4,7 @@
 cook) turns what it receives into a **manifest** the add-on realises as ordinary scene objects:
 
 * ``instances``: one linked duplicate of a Blender object per point, placed with the point's position, ``rot`` and ``scale``;
-* ``pieces``: one mesh object per piece of the geometry (a ``piece`` primitive attribute, or connected pieces), each with its origin
+* ``objects``: one mesh object per piece of the geometry (a ``piece`` primitive attribute, or connected pieces), each with its origin
   at the piece's centre;
 * ``curves``: one Blender curves object holding every curve of the geometry (open primitives; polygons as cyclic outlines);
 * ``points``: one Blender point-cloud object holding every point.
@@ -22,9 +22,9 @@ MAX_OBJECTS_LIMIT = 10_000
 
 
 @node("scene_objects", inputs=["geo"], category="output", params=[
-    Enum("mode", ["instances", "pieces", "curves", "points"],
+    Enum("mode", ["instances", "objects", "curves", "points"],
          doc="instances: one Blender object per point (a linked duplicate of the object the point names), placed with the point's "
-             "position, rot and scale; pieces: one mesh object per piece of the geometry (fracture pieces, say), origin at its centre; "
+             "position, rot and scale; objects: one mesh object per piece of the geometry (fracture pieces, say), origin at its centre; "
              "curves: a Blender curves object with every curve (poly curves, with radius and tilt); points: a Blender point cloud "
              "with every point (and its radius)"),
     Str("prefix", "MiniHou", doc="Object names start with this (Prefix_0001, ...)"),
@@ -33,10 +33,10 @@ MAX_OBJECTS_LIMIT = 10_000
                           "points from the instance node name their objects themselves"),
     Str("id_attrib", "id", doc="instances: integer point attribute that gives each object a stable identity; without it the point "
                                "number is used (so changing how many points there are can hand objects to other points)"),
-    Str("piece_attrib", "piece", doc="pieces: integer primitive attribute that numbers the pieces (it is the objects' identity); "
+    Str("piece_attrib", "piece", label="Object ID Attribute", doc="objects: integer primitive attribute that numbers the pieces (it is the objects' identity); "
                                      "when the geometry has none, connected pieces are used, numbered in order"),
-    Str("attributes", "uv Cd N material_index", doc="pieces, curves, points: attributes to carry onto the objects (space separated; the ones "
-                                                  "that exist are sent; * is all of them): for pieces uv, Cd and N become Blender's UV map, "
+    Str("attributes", "uv Cd N material_index", doc="objects, curves, points: attributes to carry onto the objects (space separated; the ones "
+                                                  "that exist are sent; * is all of them): for objects uv, Cd and N become Blender's UV map, "
                                                   "colour attribute and custom normals and material_index the face material; Cd on curves and "
                                                   "points becomes a colour attribute; anything else a generic attribute. radius and tilt always go"),
     Int("max_objects", 2000, min=1, max=MAX_OBJECTS_LIMIT, doc="Safety limit: more points than this is refused, not truncated"),
@@ -51,8 +51,8 @@ def scene_objects(geo, mode, prefix, collection, source, id_attrib, piece_attrib
 
 def plan(geo: Geometry, mode: str, source: str, id_attrib: str, max_objects: int, piece_attrib: str = "piece", attributes: str = ""):
     """The manifest columns for ``mode`` and the binary arrays that go with it (none for instances)."""
-    if mode == "pieces":
-        return plan_pieces(geo, piece_attrib, max_objects, attributes)
+    if mode in ("objects", "pieces"):
+        return plan_objects(geo, piece_attrib, max_objects, attributes)
     if mode == "curves":
         return plan_curves(geo, attributes)
     if mode == "points":
@@ -63,7 +63,7 @@ def plan(geo: Geometry, mode: str, source: str, id_attrib: str, max_objects: int
 MAX_PIECE_POINTS = 2_000_000
 
 
-def plan_pieces(geo: Geometry, piece_attrib: str, max_objects: int, attributes: str = ""):
+def plan_objects(geo: Geometry, piece_attrib: str, max_objects: int, attributes: str = ""):
     """One mesh per piece. Columns (JSON): ``id`` (piece numbers), ``loc`` (each piece's centre), ``npts`` / ``ncorner`` / ``nprim``
     (counts per piece). Arrays: ``P`` float32 (points of all pieces, relative to their centres), ``vp`` int32 (corner -> point,
     local to the piece) and ``sizes`` int32 (corners per face), all pieces one after the other. Each wanted attribute that exists
@@ -75,11 +75,11 @@ def plan_pieces(geo: Geometry, piece_attrib: str, max_objects: int, attributes: 
     sizes = np.diff(offs)
     mesh = np.flatnonzero(t.closed_mask() & (sizes >= 3))
     if not len(mesh):
-        raise ValueError("pieces mode needs faces: there are none in the input")
+        raise ValueError("objects mode needs faces: there are none in the input")
     attr = geo.prim.get(piece_attrib) if piece_attrib else None
     if attr is not None:
         if attr.ndim != 1 or attr.dtype.kind not in "iu":
-            raise ValueError(f"primitive attribute {piece_attrib!r} must be an integer to number the pieces")
+            raise ValueError(f"primitive attribute {piece_attrib!r} must be an integer to number the objects")
         labels = attr[mesh].astype(np.int64)
     else:
         from .attrib_tools import piece_labels
@@ -87,8 +87,8 @@ def plan_pieces(geo: Geometry, piece_attrib: str, max_objects: int, attributes: 
     uniq, inv = np.unique(labels, return_inverse=True)
     inv = inv.astype(np.int64).reshape(-1)
     if len(uniq) > max_objects:
-        raise ValueError(f"{len(uniq):,} pieces is more than max_objects ({max_objects:,}); raise the limit (at most "
-                         f"{MAX_OBJECTS_LIMIT:,}) or make fewer pieces")
+        raise ValueError(f"{len(uniq):,} objects is more than max_objects ({max_objects:,}); raise the limit (at most "
+                         f"{MAX_OBJECTS_LIMIT:,}) or make fewer objects")
     order = np.argsort(inv, kind="stable")
     prims = mesh[order]
     piece_of_prim = inv[order]
@@ -103,7 +103,7 @@ def plan_pieces(geo: Geometry, piece_attrib: str, max_objects: int, attributes: 
     local = local.astype(np.int64).reshape(-1)
     piece_of_point = ukey // n
     if len(ukey) > MAX_PIECE_POINTS:
-        raise ValueError(f"the pieces have {len(ukey):,} points in all (limit {MAX_PIECE_POINTS:,})")
+        raise ValueError(f"the objects have {len(ukey):,} points in all (limit {MAX_PIECE_POINTS:,})")
     P = np.asarray(geo.P, np.float64)[ukey % n]
     npts = np.bincount(piece_of_point, minlength=len(uniq))
     centre = np.stack([np.bincount(piece_of_point, weights=P[:, k], minlength=len(uniq)) for k in range(3)], 1) / npts[:, None]
@@ -240,10 +240,10 @@ def plan_instances(geo: Geometry, source: str, id_attrib: str, max_objects: int)
 
 def build_manifest(node_id: str, params: dict, geo: Geometry, key: str):
     """``(header, arrays)``: the message the add-on realises, ``{"type": "scene_objects", "node", "key", "mode", "prefix",
-    "collection", ...columns}`` plus binary arrays for ``pieces``. Instance columns: ``sources`` (Blender object names), and per
+    "collection", ...columns}`` plus binary arrays for ``objects``. Instance columns: ``sources`` (Blender object names), and per
     object ``id``, ``src`` (index into sources), ``loc``, ``rot`` (Euler XYZ radians), ``scale`` and, when ``set_material`` ran on the
     points, ``material`` (a name, ``""`` for none). Piece columns: see
-    :func:`plan_pieces`."""
+    :func:`plan_objects`."""
     body, arrays = plan(geo, params["mode"], params["source"], params["id_attrib"], params["max_objects"], params["piece_attrib"],
                         params["attributes"])
     prefix = str(params["prefix"]).strip() or "MiniHou"

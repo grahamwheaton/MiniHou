@@ -48,7 +48,7 @@ class Inbox:
                     self._geo = merge_updates(self._geo, u)
         else:
             if header.get("type") == "scene_objects" and arrays:
-                header = dict(header, _arrays=arrays)           # pieces mode: the meshes travel as arrays
+                header = dict(header, _arrays=arrays)           # objects mode: the meshes travel as arrays
             with self._lock:
                 self._events.append(header)
 

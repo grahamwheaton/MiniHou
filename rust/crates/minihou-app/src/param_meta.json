@@ -7096,7 +7096,7 @@
  "scene_objects": {
   "attributes": {
    "default": "uv Cd N material_index",
-   "doc": "pieces, curves, points: attributes to carry onto the objects (space separated; the ones that exist are sent; * is all of them): for pieces uv, Cd and N become Blender's UV map, colour attribute and custom normals and material_index the face material; Cd on curves and points becomes a colour attribute; anything else a generic attribute. radius and tilt always go",
+   "doc": "objects, curves, points: attributes to carry onto the objects (space separated; the ones that exist are sent; * is all of them): for objects uv, Cd and N become Blender's UV map, colour attribute and custom normals and material_index the face material; Cd on curves and points becomes a colour attribute; anything else a generic attribute. radius and tilt always go",
    "kind": "str"
   },
   "collection": {
@@ -7118,18 +7118,18 @@
   },
   "mode": {
    "default": "instances",
-   "doc": "instances: one Blender object per point (a linked duplicate of the object the point names), placed with the point's position, rot and scale; pieces: one mesh object per piece of the geometry (fracture pieces, say), origin at its centre; curves: a Blender curves object with every curve (poly curves, with radius and tilt); points: a Blender point cloud with every point (and its radius)",
+   "doc": "instances: one Blender object per point (a linked duplicate of the object the point names), placed with the point's position, rot and scale; objects: one mesh object per piece of the geometry (fracture pieces, say), origin at its centre; curves: a Blender curves object with every curve (poly curves, with radius and tilt); points: a Blender point cloud with every point (and its radius)",
    "kind": "enum",
    "options": [
     "instances",
-    "pieces",
+    "objects",
     "curves",
     "points"
    ]
   },
   "piece_attrib": {
    "default": "piece",
-   "doc": "pieces: integer primitive attribute that numbers the pieces (it is the objects' identity); when the geometry has none, connected pieces are used, numbered in order",
+   "doc": "objects: integer primitive attribute that numbers the pieces (it is the objects' identity); when the geometry has none, connected pieces are used, numbered in order",
    "kind": "str"
   },
   "prefix": {
