@@ -12,7 +12,7 @@ struct U {
     // 1 when the target is a plain (non-sRGB) texture that is shown as it is, as in the editor: the shader then encodes
     // its linear result to sRGB itself so it matches a window whose surface is an sRGB format.
     encode_srgb: u32,
-    matcap: u32,
+    matcap: u32, // 0: off, 1: existing captures, 2: SketchUp clean
     object_color: u32,
     _pad0: u32,
     _pad1: u32,
@@ -146,6 +146,9 @@ fn vs_wire(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) co
 
 @fragment
 fn fs_wire(i: WOut) -> @location(0) vec4<f32> {
+    if (u.matcap == 2u && u.wire.a > 0.5) {
+        return vec4<f32>(out_color(vec3<f32>(0.34)).rgb, u.wire_fade);
+    }
     var n = vec3<f32>(0.0,0.0,1.0);
     if (dot(i.vnorm,i.vnorm)>1e-20) { n = normalize(i.vnorm); }
     if (dot(n, normalize(-i.vpos)) < 0.0) { n = -n; }

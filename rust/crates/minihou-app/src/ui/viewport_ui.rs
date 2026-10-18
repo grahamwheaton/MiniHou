@@ -399,7 +399,7 @@ fn falloff_samples(f: Falloff) -> [f32; 13] { std::array::from_fn(|i| falloff_va
 fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover, v: &View, out: &mut Actions) -> Rect {
     let th = v.theme;
     let ed = v.editor;
-    let rows = match which { Popover::Orientation => 6, Popover::Pivot => 5, Popover::Snap => 11, Popover::Proportional => 12, Popover::Overlays => 19, Popover::Shading => 18, Popover::Visibility => 3 };
+    let rows = match which { Popover::Orientation => 6, Popover::Pivot => 5, Popover::Snap => 11, Popover::Proportional => 12, Popover::Overlays => 19, Popover::Shading => 19, Popover::Visibility => 3 };
     let height = 30. + rows as f32 * 24. + 10.;
     let x = (anchor.right() - 232.).clamp(viewport.left() + 6., (viewport.right() - 238.).max(viewport.left() + 6.));
     let pop = Rect::from_min_size(Pos2::new(x, anchor.bottom() + 4.), Vec2::new(232., height));
@@ -421,14 +421,14 @@ fn show_popover(ui: &mut egui::Ui, viewport: Rect, anchor: Rect, which: Popover,
                 }
                 matcap_swatch(ui,r,matcap);
             }
-            if pop_row(ui,row(15),"matcap_flat","Flat normals",ed.matcap_flat,true,"",th) {
+            if pop_row(ui,row(16),"matcap_flat","Flat normals",ed.matcap_flat,true,"",th) {
                 out.push(UiAction::Editor(EditorChange::MatCapFlat(!ed.matcap_flat)));
             }
             let active=matches!(v.mode,Mode::FlatShaded|Mode::FlatWireShaded|Mode::SmoothShaded|Mode::SmoothWireShaded);
-            if pop_row(ui,row(16),"materials_textures","Materials / Textures",ed.textures,true,if active {""}else{"Shaded modes only"},th) {
+            if pop_row(ui,row(17),"materials_textures","Materials / Textures",ed.textures,true,if active {""}else{"Shaded modes only"},th) {
                 out.push(UiAction::Editor(EditorChange::Textures(!ed.textures)));
             }
-            if pop_row(ui,row(17),"texture_inspector","Texture inspector",ed.texture_inspector,true,"",th) {
+            if pop_row(ui,row(18),"texture_inspector","Texture inspector",ed.texture_inspector,true,"",th) {
                 out.push(UiAction::Editor(EditorChange::TextureInspector(!ed.texture_inspector)));
             }
         },
@@ -509,9 +509,11 @@ fn matcap_swatch(ui:&egui::Ui, row:Rect, matcap:crate::viewport::MatCap) {
         let r=ring as f32/rings as f32;
         let angle=std::f32::consts::TAU*sector as f32/sectors as f32;
         let (x,y)=(r*angle.cos(),r*angle.sin());
-        let rgb=if matcap==crate::viewport::MatCap::Normal {
-            crate::viewport::display_modes::normal_color([x,-y,(1.-r*r).sqrt()])
-        } else { let v=0.68+0.23*(1.-r*r).sqrt()-0.14*y; [v*0.99,v*0.95,v*0.9] };
+        let rgb=match matcap {
+            crate::viewport::MatCap::Normal => crate::viewport::display_modes::normal_color([x,-y,(1.-r*r).sqrt()]),
+            crate::viewport::MatCap::SketchUpClean => { let v=(0.76+0.19*(-0.35*x-0.55*y+0.76*(1.-r*r).sqrt()).max(0.)-0.04*y).clamp(0.,1.); [v;3] },
+            crate::viewport::MatCap::Clay => { let v=0.68+0.23*(1.-r*r).sqrt()-0.14*y; [v*0.99,v*0.95,v*0.9] },
+        };
         mesh.vertices.push(egui::epaint::Vertex {pos:centre+Vec2::new(x*radius,y*radius),uv:egui::epaint::WHITE_UV,color:Color32::from_rgb((rgb[0]*255.) as u8,(rgb[1]*255.) as u8,(rgb[2]*255.) as u8)});
     } }
     for ring in 0..rings { for sector in 0..sectors {

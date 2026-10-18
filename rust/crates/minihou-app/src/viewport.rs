@@ -851,22 +851,23 @@ impl Gpu {
         let t = ((self.edge_world * px_per_unit - 1.5) / 8.5).clamp(0.0, 1.0);
         let fade = t * t * (3.0 - 2.0 * t);
         let editing = selection_mode != crate::ui::SelectionMode::Object;
-        let is_shaded_wire = (mode.wire_shaded() && (editing || overlay.wireframe))
+        let sketchup_clean = mode.matcap() && overlay.matcap==MatCap::SketchUpClean;
+        let is_shaded_wire = sketchup_clean || (mode.wire_shaded() && (editing || overlay.wireframe))
             || (overlay.wireframe && mode.shaded() && !mode.bounds())
             || (editing && !mode.bounds());
         let show_wire = mode.wire() || is_shaded_wire || (overlay.xray && editing);
         let u = Uniforms { view_proj,view,inv_view_proj:inverse_projection(view_proj),base:[0.72,0.74,0.78,1.],wire:[0.,0.,0.,if is_shaded_wire {1.} else {0.}],
-            flat_shading:(mode.flat() || (mode.matcap() && overlay.matcap_flat)) as u32,wire_fade:fade,_pad:[1,mode.matcap() as u32],
+            flat_shading:(mode.flat() || (mode.matcap() && overlay.matcap_flat)) as u32,wire_fade:fade,_pad:[1,if sketchup_clean {2} else {mode.matcap() as u32}],
             object_color:(overlay.object_color==ObjectColor::Random) as u32,_pad_color:[0;3],
             floor:[10f32.powf((cam.distance().max(0.01)*0.1).log10().floor()),overlay.grid as u32 as f32,overlay.axes as u32 as f32,cam.distance().max(0.01)],
             element_size:[target.size[0] as f32,target.size[1] as f32,overlay.geometry.point_size,overlay.geometry.line_width],
             element_flags:[overlay.geometry.points as u32,overlay.geometry.lines as u32,overlay.geometry.enabled as u32,(selection_mode==crate::ui::SelectionMode::Points) as u32],
             element_color:if overlay.light_background {[0.025,0.03,0.04,1.]} else {[0.72,0.75,0.8,1.]} };
         queue.write_buffer(&self.ubuf,0,bytemuck::bytes_of(&u));
-        let matcap_id=if overlay.matcap==MatCap::Clay {1} else {2};
+        let matcap_id=overlay.matcap.texture_id();
         if self.matcap_loaded.swap(matcap_id,std::sync::atomic::Ordering::Relaxed)!=matcap_id {
             queue.write_texture(wgpu::TexelCopyTextureInfo { texture:&self.matcap,mip_level:0,origin:wgpu::Origin3d::ZERO,aspect:wgpu::TextureAspect::All },
-                &if overlay.matcap==MatCap::Clay {display_modes::clay_matcap(128)} else {display_modes::normal_matcap(128)},wgpu::TexelCopyBufferLayout { offset:0,bytes_per_row:Some(128*4),rows_per_image:Some(128) },
+                &overlay.matcap.pixels(128),wgpu::TexelCopyBufferLayout { offset:0,bytes_per_row:Some(128*4),rows_per_image:Some(128) },
                 wgpu::Extent3d { width:128,height:128,depth_or_array_layers:1 });
         }
         // Boxes are full object bounds, never the bounds of a decimated cluster.

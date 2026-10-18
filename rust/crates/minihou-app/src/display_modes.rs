@@ -54,11 +54,13 @@ impl ObjectVisibility {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-pub enum MatCap { #[default] Clay, Normal }
+pub enum MatCap { #[default] Clay, Normal, SketchUpClean }
 impl MatCap {
-    pub const ALL: [Self; 2] = [Self::Clay, Self::Normal];
-    pub fn label(self) -> &'static str { match self { Self::Clay => "Clay", Self::Normal => "Normal" } }
+    pub const ALL: [Self; 3] = [Self::Clay, Self::Normal, Self::SketchUpClean];
+    pub fn label(self) -> &'static str { match self { Self::Clay => "Clay", Self::Normal => "Normal", Self::SketchUpClean => "SketchUp clean" } }
     pub fn parse(s: &str) -> Self { Self::ALL.into_iter().find(|v| v.label()==s).unwrap_or_default() }
+    pub fn texture_id(self) -> u8 { match self { Self::Clay => 1, Self::Normal => 2, Self::SketchUpClean => 3 } }
+    pub fn pixels(self, size:u32) -> Vec<u8> { match self { Self::Clay => clay_matcap(size), Self::Normal => normal_matcap(size), Self::SketchUpClean => sketchup_clean_matcap(size) } }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -90,6 +92,21 @@ pub fn normal_matcap(size: u32) -> Vec<u8> {
         let nz = (1.-nx*nx-ny*ny).max(0.).sqrt();
         pixels.extend(normal_color([nx,ny,nz]).map(|v| (v.clamp(0.,1.)*255.).round() as u8));
         pixels.push(if nx*nx+ny*ny<=1. {255} else {0});
+    } }
+    pixels
+}
+
+/// Neutral paper-white capture with a broad, restrained change in value across face normals.
+pub fn sketchup_clean_matcap(size: u32) -> Vec<u8> {
+    let mut pixels = Vec::with_capacity((size*size*4) as usize);
+    for y in 0..size { for x in 0..size {
+        let nx = 2.*(x as f32+0.5)/size as f32-1.;
+        let ny = 1.-2.*(y as f32+0.5)/size as f32;
+        let nz = (1.-nx*nx-ny*ny).max(0.).sqrt();
+        let key = (-0.35*nx + 0.55*ny + 0.76*nz).max(0.);
+        let value = (0.76 + 0.19*key + 0.04*ny).clamp(0.,1.);
+        let grey = (value*255.).round() as u8;
+        pixels.extend_from_slice(&[grey,grey,grey,255]);
     } }
     pixels
 }
@@ -142,6 +159,14 @@ pub fn clay_matcap(size: u32) -> Vec<u8> {
         let p=clay_matcap(128); assert_eq!(p.len(),128*128*4);
         assert!(p.chunks_exact(4).all(|c| c[3]==255));
         assert!(p.chunks_exact(4).map(|c| c[0]).max().unwrap() > 200);
+    }
+    #[test] fn matcap_menu_includes_sketchup_clean_capture() {
+        assert_eq!(MatCap::ALL.map(MatCap::label), ["Clay", "Normal", "SketchUp clean"]);
+        for matcap in MatCap::ALL { assert_eq!(MatCap::parse(matcap.label()), matcap); }
+        let pixels=MatCap::SketchUpClean.pixels(128);
+        assert_eq!(pixels.len(),128*128*4);
+        assert!(pixels.chunks_exact(4).all(|p| p[0]==p[1] && p[1]==p[2] && p[3]==255));
+        assert_ne!(&pixels[(64*128+64)*4..(64*128+64)*4+3],&pixels[(8*128+64)*4..(8*128+64)*4+3]);
     }
     #[test] fn normal_capture_directions_and_object_hash() {
         assert_eq!(normal_color([0.,0.,1.]),[0.5,0.5,1.]);
