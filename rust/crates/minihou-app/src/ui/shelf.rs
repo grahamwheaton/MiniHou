@@ -169,7 +169,10 @@ mod tests {
         }
         let modify = tabs().iter().find(|t| t.name == "Modify").unwrap();
         assert_eq!(modify.tools[0].node_type, "lod_bake");
-        assert_eq!(modify.tools.last().unwrap().node_type, "example_offset");
+        // Packages in Modify come after the legacy tools in catalogue order (example_offset, pack, unpack).
+        // This was once "example_offset last"; pack and unpack were added by the instancing work.
+        let package_tools: Vec<_> = modify.tools.iter().skip(modify.tools.len() - 3).map(|t| t.node_type).collect();
+        assert_eq!(package_tools, ["example_offset", "pack", "unpack"]);
     }
     #[test] fn labels_and_initials() { assert_eq!(wrap_label("Blender Object"), "Blender\nObject"); assert_eq!(initials("Blender Object"), "BO"); }
     #[test] fn draws_a_frame() { assert!(Fixture::new().run(show).is_empty()); }
