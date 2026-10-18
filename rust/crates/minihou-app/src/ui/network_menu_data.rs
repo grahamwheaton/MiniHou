@@ -98,7 +98,6 @@ pub(super) const TABS: &[Category] = &[
         Tool { label: "Squash and Stretch", node_type: "squash_stretch" },
         Tool { label: "Soft Transform", node_type: "soft_transform" },
         Tool { label: "Soft Peak", node_type: "soft_peak" },
-        Tool { label: "Peak", node_type: "peak" },
         Tool { label: "Smooth", node_type: "smooth" },
         Tool { label: "Mountain", node_type: "noise" },
         Tool { label: "Lattice", node_type: "lattice" },
@@ -142,7 +141,6 @@ pub(super) const TABS: &[Category] = &[
         Tool { label: "Ray", node_type: "ray" },
         Tool { label: "Falloff", node_type: "falloff" },
         Tool { label: "Occlusion", node_type: "occlusion" },
-        Tool { label: "Set Material", node_type: "set_material" },
         Tool { label: "Python", node_type: "python" },
     ] },
     Category { name: "Curves", tools: &[

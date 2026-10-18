@@ -101,7 +101,6 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "Squash and Stretch", node_type: "squash_stretch", icon: "squash" },
         Tool { label: "Soft Transform", node_type: "soft_transform", icon: "transform" },
         Tool { label: "Soft Peak", node_type: "soft_peak", icon: "peak" },
-        Tool { label: "Peak", node_type: "peak", icon: "peak" },
         Tool { label: "Smooth", node_type: "smooth", icon: "smooth" },
         Tool { label: "Mountain", node_type: "noise", icon: "noise" },
         Tool { label: "Lattice", node_type: "lattice", icon: "lattice" },
@@ -145,7 +144,6 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "Ray", node_type: "ray", icon: "ray" },
         Tool { label: "Falloff", node_type: "falloff", icon: "falloff" },
         Tool { label: "Occlusion", node_type: "occlusion", icon: "occlusion" },
-        Tool { label: "Set Material", node_type: "set_material", icon: "attr" },
         Tool { label: "Python", node_type: "python", icon: "code" },
     ] },
     Tab { name: "Curves", tools: &[

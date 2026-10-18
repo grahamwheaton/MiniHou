@@ -1,0 +1,5 @@
+id = "peak"
+name = "Peak"
+category = "Modify"
+description = "Move selected points along their normals."
+keywords = "peak displace normals points"

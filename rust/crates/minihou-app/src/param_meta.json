@@ -5053,7 +5053,7 @@
  "peak": {
   "distance": {
    "default": 0.1,
-   "doc": "",
+   "doc": "Distance to move selected points along their normals.",
    "kind": "float",
    "soft_max": 1.0,
    "soft_min": -1.0
