@@ -138,6 +138,15 @@ fn slide_factor(raw: f64, snap: bool) -> f64 {
     let x = if snap { (raw * 10.).round() / 10. } else { raw };
     (x.clamp(-1., 1.) * 1e4).round() / 1e4
 }
+/// Whole numbers choose the number of cuts; signed and decimal numbers slide the cuts.
+fn numeric_slide(s: &mut State) {
+    if s.numeric.is_empty() { return; }
+    if s.tool == Some(Tool::LoopCut) && !s.numeric.chars().any(|c| c == '.' || c == '-') {
+        if let Ok(count) = s.numeric.parse::<usize>() { s.count = count.clamp(1, LOOP_CUT_MAX); }
+    } else if let Ok(factor) = s.numeric.parse::<f64>() {
+        if let Some(slide) = s.slide.as_mut() { slide.raw = factor.clamp(-1., 1.); }
+    }
+}
 fn loop_params(edge: Edge, count: usize, factor: f64, even: bool, flipped: bool, clamp: bool) -> Value {
     json!({"mode":"edge_loop","split_edges":format!("p{}-{}",edge.0,edge.1),"loops":count,
         "position":0.5,"factor":factor,"even":even,"flipped":flipped,"clamp":clamp,"correct_uvs":true,
@@ -309,7 +318,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
                 cancel(&ctx); out.push(UiAction::Editor(EditorChange::Tool(Tool::Select))); return;
             }
             egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } if (loop_cut || edge_slide) && s.slide.is_some() => {
-                s.numeric.pop(); if let Ok(f)=s.numeric.parse::<f64>() { if let Some(sl)=s.slide.as_mut() { sl.raw=f.clamp(-1.,1.); } }
+                s.numeric.pop(); numeric_slide(&mut s);
             }
             egui::Event::Key { key: egui::Key::Backspace, pressed: true, .. } => { s.points.pop(); }
             egui::Event::Key { key: egui::Key::Enter | egui::Key::Space, pressed: true, .. } if ready && tool == Tool::Knife => confirm_knife(&mut s,v.camera,rect,out),
@@ -324,7 +333,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
             egui::Event::Key { key: egui::Key::F, pressed: true, .. } if (loop_cut || edge_slide) && s.slide.is_some() => s.flipped=!s.flipped,
             egui::Event::Key { key: egui::Key::C, pressed: true, .. } if (loop_cut || edge_slide) && s.slide.is_some() => s.clamp=!s.clamp,
             egui::Event::Text(ref value) if (loop_cut || edge_slide) && s.slide.is_some() && value.chars().all(|c| c.is_ascii_digit() || c=='.' || c=='-') => {
-                s.numeric.push_str(value); if let Ok(f)=s.numeric.parse::<f64>() { if let Some(sl)=s.slide.as_mut() { sl.raw=f.clamp(-1.,1.); } }
+                s.numeric.push_str(value); numeric_slide(&mut s);
             }
             egui::Event::Key { key: key @ (egui::Key::PageUp | egui::Key::PageDown | egui::Key::Plus | egui::Key::Minus), pressed: true, .. } if loop_cut && s.slide.is_none() => {
                 s.count = step_count(s.count, if matches!(key, egui::Key::PageUp | egui::Key::Plus) { 1 } else { -1 });
@@ -342,6 +351,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
                 } else if let Some(sl) = s.slide {
                     s.slide = None; commit(&s, sl.edge, slide_factor(sl.raw, modifiers.ctrl), out);
                 } else if let Some(edge) = s.hover {
+                    s.numeric.clear();
                     s.slide = Some(Slide { edge, raw: 0., press: pos, held: true, dragged: false });
                 }
             }
@@ -415,7 +425,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
 fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
     let cuts = format!("{count} cut{}", if count == 1 { "" } else { "s" });
     match slide {
-        Some(f) => format!("Loop Cut | {cuts} | Factor {f:.3} | Shift precision, Ctrl snap, E Even, F Flip, C Clamp, type factor | LMB/Enter confirm | RMB: keep centred | Esc: keep centred"),
+        Some(f) => format!("Loop Cut | {cuts} | Factor {f:.3} | Shift precision, Ctrl snap, E Even, F Flip, C Clamp, type cuts or decimal factor | LMB/Enter confirm | RMB: keep centred | Esc: keep centred"),
         None if hovering => format!("Loop Cut | {cuts} | wheel/PgUp/PgDn/+/- count | LMB to slide | Esc/RMB cancel"),
         None => format!("Loop Cut | {cuts} | hover a quad edge | Esc/RMB exit"),
     }
@@ -689,6 +699,19 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
             egui::Event::Text("-0.4".into()),key(egui::Key::Enter)])).unwrap();
         assert_eq!(params["factor"],-0.4);
         assert_eq!((params["even"].as_bool(),params["flipped"].as_bool(),params["clamp"].as_bool()),(Some(true),Some(true),Some(false)));
+    }
+    #[test] fn typed_digits_set_cut_count_during_slide() {
+        let h=Harness::new(); let p=h.at(1.,0.5);
+        h.frame(vec![egui::Event::PointerMoved(p)]);
+        h.frame(vec![button(p,egui::PointerButton::Primary,true),button(p,egui::PointerButton::Primary,false)]);
+        h.frame(vec![egui::Event::Text("1".into()),egui::Event::Text("2".into())]);
+        let state=h.ctx.data(|d|d.get_temp::<State>(id()).unwrap());
+        assert_eq!(state.count,12);
+        assert_eq!(state.slide.unwrap().raw,0.);
+        let params=committed(&h.frame(vec![key(egui::Key::E),key(egui::Key::F),key(egui::Key::Enter)])).unwrap();
+        assert_eq!(params["loops"],12);
+        assert_eq!(params["even"],true);
+        assert_eq!(params["flipped"],true);
     }
     #[test] fn edge_slide_selected_edges_confirm_and_cancel() {
         let mut h=Harness::new(); h.fixture.editor.tool=Tool::EdgeSlide;
