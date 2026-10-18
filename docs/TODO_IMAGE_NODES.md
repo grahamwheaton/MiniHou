@@ -346,3 +346,7 @@ The Tab node search should match fuzzily: letters in order rather than an exact 
 ## Future: noise and mountain nodes, full Houdini parity (requested 2026-10-18)
 
 Match Houdini's Attribute Noise (https://www.sidefx.com/docs/houdini/nodes/sop/attribnoise.html) and Mountain (screenshot 82): Group and Blend; Attribute Names (Vector, Float, with X, Y, Z channel toggles) and Attribute Class; Noise Along Vector with a Vector Attribute; Operation (Add and others), Range Values (Zero Centered and others), Amplitude, Output Raw Value, Enable Remap Ramp; Noise Type (Simplex and others), Location Attribute, Element Size, Offset (with XYZ), Use VEXpression; Animation; Fractal (type such as Hybrid Terrain, with octaves, roughness, lacunarity and so on); Warping; Post-Process. Build on the current noise and mountain nodes, and match the parameter names and defaults so existing graphs still load.
+
+## Fix: promote a viewport selection when the group domain changes (requested 2026-10-18)
+
+If the user selects points in the viewport and then changes a group node's domain to faces (or edges), the current selection should be promoted to that domain automatically: points to the faces (or edges) they fully surround, and the reverse, so the field shows the right group. The promotion should be one undo step and survive undo (the selection itself is restored on undo, not reset). Check the domain change path in params.rs and the selection restore in main.rs.
