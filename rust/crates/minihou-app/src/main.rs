@@ -275,6 +275,27 @@ fn ensure_transform_target(value: &mut Value, source: &str, object_mode: bool, a
     forward_measurement_refs(value, source, &id);
     Some(id)
 }
+/// Adds a transform target to the display list unless something displayed already leads to it.
+fn show_transform_target(value: &mut Value, target: &str) {
+    if feeds_displayed_node(value, target) { return; }
+    let mut shown = minihou_app::display_nodes(value);
+    shown.push(target.to_owned());
+    value["display"] = if shown.len() == 1 { json!(shown[0]) } else { json!(shown) };
+}
+#[cfg(test)]
+mod show_transform_target_tests {
+    use super::*;
+    #[test] fn adds_unshown_target_and_keeps_existing_display() {
+        let mut doc=json!({"display":"box","nodes":{"box":{"type":"box"},"t":{"type":"transform","inputs":{"geo":"box"}},"o":{"type":"output","inputs":{"geo":"box"}}}});
+        show_transform_target(&mut doc,"t");
+        assert_eq!(doc["display"],json!(["box","t"]));
+    }
+    #[test] fn leaves_display_alone_when_an_output_already_shows_the_target() {
+        let mut doc=json!({"display":"o","nodes":{"box":{"type":"box"},"t":{"type":"transform","inputs":{"geo":"box"}},"o":{"type":"output","inputs":{"geo":"t"}}}});
+        show_transform_target(&mut doc,"t");
+        assert_eq!(doc["display"],"o");
+    }
+}
 fn forward_measurement_refs(value:&mut Value,source:&str,target:&str) {
     let identity=value["nodes"][source]["measurement_identity"].clone();
     if !identity.is_string() {return;}
@@ -1021,6 +1042,8 @@ impl App {
                 transform_math::ScaleResult::ShearNeedsSecondNode { .. }));
         let Some(target) = ensure_transform_target(&mut value, &source, group.is_empty() && !shear_second,
             self.transform_target.as_deref()) else { return; };
+        // A transform on a node nothing displays (no Output, or an Output elsewhere) would move off-screen: show it.
+        if first { show_transform_target(&mut value, &target); }
         let target_existed = before_doc.value()["nodes"].get(&target).is_some();
         let mut initial = if target_existed {
             transform_math::TrsParams::from_params(&before_doc.value()["nodes"][&target]["params"])
