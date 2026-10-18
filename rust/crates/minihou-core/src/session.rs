@@ -35,10 +35,27 @@ pub struct CookStats {
     pub cooked: Vec<String>,
     pub cached: Vec<String>,
     pub node_ms: Vec<(String, f64)>,
+    /// One record per evaluated node (including cache hits), in evaluation order.
+    pub nodes: Vec<NodeCookDiagnostic>,
     pub param_diags: Vec<crate::channels::ParamDiag>,
     /// Nodes waiting for external data (no Blender object picked, Blender not connected): (node, message).
     /// They cook empty geometry; this is a neutral state, not an error.
     pub waiting: Vec<(String, String)>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NodeCookDiagnostic {
+    pub node_id: String,
+    pub cache_hit: bool,
+    pub cook_ms: f64,
+    pub point_count: usize,
+    pub primitive_count: usize,
+}
+
+impl NodeCookDiagnostic {
+    fn new(id: &str, cache_hit: bool, cook_ms: f64, geo: &Geometry) -> Self {
+        Self { node_id: id.into(), cache_hit, cook_ms, point_count: geo.npoints, primitive_count: geo.nprims() }
+    }
 }
 
 struct Entry {
@@ -461,27 +478,37 @@ struct Run<'a> {
 impl Run<'_> {
     fn get(&mut self, id: &str) -> Result<Arc<Geometry>> {
         let key = self.keys[id];
-        if let Some(e) = self.cache.get_mut(&key).filter(|_| self.graph.node(id).is_none_or(|n| n.node_type != "usd_export")) {
+        let t0 = Instant::now();
+        let def = self.graph.node(id).expect("validated by key_of");
+        let cache_off = def.node_type == "cache" && !def.bypass &&
+            self.resolved.params.get(id).or(def.params.as_ref())
+                .and_then(|p| p.get("mode")).and_then(Value::as_str) == Some("off");
+        if let Some(e) = self.cache.get_mut(&key).filter(|_| def.node_type != "usd_export" && !cache_off) {
             e.used = self.clock;
             self.stats.cached.push(id.to_string());
+            self.stats.nodes.push(NodeCookDiagnostic::new(id, true, t0.elapsed().as_secs_f64()*1000.0, &e.geo));
             return Ok(e.geo.clone());
         }
         if self.cancel.is_some_and(|c| c()) {
             return Err(Error::new(SUPERSEDED));
         }
-        let def = self.graph.node(id).expect("validated by key_of");
         let spec = nodes::get(&def.node_type).expect("validated by key_of");
         if def.node_type == "loop_end" {
             let t0 = Instant::now();
             let (plan, graph, budget, resolved) = (self.plan, self.graph, self.budget.clone(), self.resolved);
             let (geo,times) = plan.cook_end(graph, resolved, id, budget, &mut |src| self.get(src))?;
             let geo = Arc::new(geo);
-            for (node,ms) in times { self.stats.cooked.push(node.clone()); self.stats.node_ms.push((node,ms)); }
+            for (node,ms,points,primitives) in times {
+                self.stats.cooked.push(node.clone()); self.stats.node_ms.push((node.clone(),ms));
+                self.stats.nodes.push(NodeCookDiagnostic { node_id: node, cache_hit: false, cook_ms: ms, point_count: points, primitive_count: primitives });
+            }
             let bytes = geometry_bytes(&geo);
             if let Some(old) = self.cache.insert(key, Entry { node: id.into(), geo: geo.clone(), side: None, bytes, used: self.clock }) { *self.bytes -= old.bytes; }
             *self.bytes += bytes;
             self.stats.cooked.push(id.into());
-            self.stats.node_ms.push((id.into(), t0.elapsed().as_secs_f64()*1000.0));
+            let ms = t0.elapsed().as_secs_f64()*1000.0;
+            self.stats.node_ms.push((id.into(), ms));
+            self.stats.nodes.push(NodeCookDiagnostic::new(id, false, ms, &geo));
             return Ok(geo);
         }
         let mut inputs: Vec<Vec<Arc<Geometry>>> = Vec::with_capacity(spec.inputs.len());
@@ -501,7 +528,12 @@ impl Run<'_> {
             else { nodes::blender_input::cook_external(&def.node_type,&p,self.external) }
         };
         // A bypassed node hands its input on as is: the same shared geometry, no copy.
-        let passed = if def.bypass { inputs.first().and_then(|i| i.first()).cloned() } else { None };
+        let passed = if def.bypass { inputs.first().and_then(|i| i.first()).cloned() }
+            else if def.node_type == "cache" {
+                let p = Params::resolve(spec.params, self.resolved.params.get(id).or(def.params.as_ref())).map_err(|e| e.in_node(id, &def.node_type))?;
+                p.e("mode", &["auto", "off"]).map_err(|e| e.in_node(id, &def.node_type))?;
+                Some(inputs[0].first().ok_or_else(|| Error::new("geo is not connected").in_node(id, &def.node_type))?.clone())
+            } else { None };
         let geo = if let Some(g) = passed { g } else { Arc::new(match external {
             // Waiting for external data: empty geometry, so downstream nodes still cook (see CookStats::waiting).
             Some(result)=>match result.and_then(|g|g.validate().map(|_|g)) {
@@ -535,7 +567,10 @@ impl Run<'_> {
             }
         }
         self.stats.cooked.push(id.to_string());
-        self.stats.node_ms.push((id.to_string(), t0.elapsed().as_secs_f64() * 1000.0));
+        let ms = t0.elapsed().as_secs_f64() * 1000.0;
+        self.stats.node_ms.push((id.to_string(), ms));
+        self.stats.nodes.push(NodeCookDiagnostic::new(id, false, ms, &geo));
+        if cache_off { return Ok(geo); }
         let bytes = geometry_bytes(&geo) + side_bytes;
         if let Some(old) = self.cache.insert(key, Entry { node: id.to_string(), geo: geo.clone(), side, bytes, used: self.clock }) {
             *self.bytes -= old.bytes;
