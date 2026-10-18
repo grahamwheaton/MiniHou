@@ -3,7 +3,7 @@
 //! * Points carry attributes, `P` (float32 x 3) among them.
 //! * Primitives are a CSR topology: `vertex_point` (one entry per corner, the point it uses) and `prim_offsets`
 //!   (`nprims + 1` entries, the first 0). `closed` marks polygons (true) and open curves (false); `None` means all closed.
-//! * Attributes live in four tables (point, vertex, prim, detail). Arrays are shared (`Arc`) between geometries, so a node
+//! * Attributes live in point, vertex, edge, and prim tables, plus detail values. Arrays are shared (`Arc`) between geometries, so a node
 //!   that changes one attribute copies only that one, as in Python.
 //!
 //! Indices are `i32`, as in Python and Blender: [`MAX_ELEMENTS`] is the limit and building past it is an error.
@@ -103,6 +103,30 @@ impl Topology {
         self.vertex_point.len()
     }
 
+    /// Unique undirected pairs from primitive loops, ordered by (lower point, higher point).
+    /// Open curves omit their closing segment, matching [`crate::topo::edges`].
+    pub fn nedges(&self) -> usize {
+        let mut pairs = Vec::new();
+        for prim in 0..self.nprims() {
+            let start = self.prim_offsets[prim] as usize;
+            let end = self.prim_offsets[prim + 1] as usize;
+            for vertex in start..end {
+                let next = if vertex + 1 < end {
+                    vertex + 1
+                } else if self.is_closed(prim) {
+                    start
+                } else {
+                    continue;
+                };
+                let (a, b) = (self.vertex_point[vertex], self.vertex_point[next]);
+                pairs.push((a.min(b), a.max(b)));
+            }
+        }
+        pairs.sort_unstable();
+        pairs.dedup();
+        pairs.len()
+    }
+
     pub fn is_closed(&self, prim: usize) -> bool {
         self.closed.as_ref().is_none_or(|c| c[prim])
     }
@@ -148,6 +172,7 @@ pub struct Geometry {
     pub topology: Arc<Topology>,
     pub point: AttrTable,
     pub vertex: AttrTable,
+    pub edge: AttrTable,
     pub prim: AttrTable,
     pub detail: Map<String, Value>,
     /// Shared immutable geometry referenced by packed primitives and native instances (`nodes/packed.rs`). A point whose
@@ -193,10 +218,15 @@ impl Geometry {
         self.topology.nvertices()
     }
 
+    pub fn nedges(&self) -> usize {
+        self.topology.nedges()
+    }
+
     pub fn table(&self, domain: &str) -> &AttrTable {
         match domain {
             "point" => &self.point,
             "vertex" => &self.vertex,
+            "edge" => &self.edge,
             _ => &self.prim,
         }
     }
@@ -225,6 +255,7 @@ impl Geometry {
             }
         }
         for (domain, table, n) in [("point", &self.point, self.npoints), ("vertex", &self.vertex, self.nvertices()),
+                                   ("edge", &self.edge, self.nedges()),
                                    ("prim", &self.prim, self.nprims())] {
             for (name, a) in table {
                 if a.rows() != n {
@@ -233,5 +264,53 @@ impl Geometry {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn quad() -> Geometry {
+        Geometry::from_arrays(vec![0.0; 12], vec![0, 1, 2, 3], vec![0, 4], None).unwrap()
+    }
+
+    fn cube() -> Geometry {
+        Geometry::from_arrays(
+            vec![0.0; 24],
+            vec![0, 3, 2, 1, 4, 5, 6, 7, 0, 1, 5, 4, 1, 2, 6, 5,
+                 2, 3, 7, 6, 3, 0, 4, 7],
+            vec![0, 4, 8, 12, 16, 20, 24],
+            None,
+        ).unwrap()
+    }
+
+    #[test]
+    fn edge_attribute_rows_validate() {
+        let mut g = quad();
+        assert!(g.edge.is_empty());
+        g.validate().unwrap();
+        assert!(std::ptr::eq(g.table("edge"), &g.edge));
+
+        g.edge.insert("crease".into(), Arc::new(Attr::f32(1, vec![0.0; 4])));
+        g.validate().unwrap();
+
+        g.edge.insert("crease".into(), Arc::new(Attr::f32(1, vec![0.0; 3])));
+        let err = g.validate().unwrap_err();
+        assert!(err.to_string().contains("edge attribute \"crease\" has 3 rows, expected 4"));
+    }
+
+    #[test]
+    fn unique_edge_counts_and_order_are_stable() {
+        let quad = quad();
+        let cube = cube();
+        assert_eq!(quad.topology.nedges(), 4);
+        assert_eq!(cube.topology.nedges(), 12);
+        let expected = crate::topo::edges(&cube.topology, cube.npoints).points;
+        assert_eq!(expected.len() / 2, cube.nedges());
+        for _ in 0..3 {
+            assert_eq!(crate::topo::edges(&cube.topology, cube.npoints).points, expected);
+            assert_eq!(cube.topology.nedges(), 12);
+        }
     }
 }
