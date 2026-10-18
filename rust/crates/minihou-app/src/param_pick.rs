@@ -6,7 +6,10 @@ use serde_json::json;
 use std::collections::BTreeSet;
 
 pub(super) fn input_source(doc: &serde_json::Value, node: &str, display: &str) -> String {
-    doc["nodes"][node]["inputs"]["geo"].as_str().unwrap_or(display).to_owned()
+    let inputs = &doc["nodes"][node]["inputs"];
+    inputs["geo"].as_str()
+        .or_else(|| inputs.as_object().and_then(|m| m.values().find_map(|v| v.as_str().filter(|s| !s.is_empty()))))
+        .unwrap_or(display).to_owned()
 }
 pub(super) fn source_ready(ranges: &[(String, std::ops::Range<u32>)], source: &str) -> bool {
     ranges.len() == 1 && ranges[0].0 == source
@@ -60,6 +63,9 @@ mod tests {
     fn subdivide_picks_input_topology() {
         let doc = json!({"nodes":{"box1":{"type":"box"},"subdivide1":{"type":"subdivide","inputs":{"geo":"box1"}}}});
         assert_eq!(input_source(&doc,"subdivide1","subdivide1"),"box1");
+        let doc2 = json!({"nodes":{"b":{"type":"box"},"n":{"type":"blast","inputs":{"input":"b"}}}});
+        assert_eq!(input_source(&doc2,"n","n"),"b");
+        assert_eq!(input_source(&json!({"nodes":{"n":{"type":"blast"}}}),"n","disp"),"disp");
         assert!(!source_ready(&[("subdivide1".into(), 0..8)], "box1"));
         assert!(source_ready(&[("box1".into(), 0..8)], "box1"));
     }

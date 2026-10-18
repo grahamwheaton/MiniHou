@@ -129,6 +129,30 @@ def meta() -> dict:
     out["polybevel"]["group"]["pick_domain_default"] = "edges"
     out["attribute_create"]["group"]["pick_domain_param"] = "domain"
     out["attribute_create"]["group"]["pick_domain_default"] = "points"
+    # Remaining group fields: fixed element domain, or follow the node's own domain parameter.
+    _pts = "bend lattice linear_taper mirror noise peak point_deform point_jitter pushpull smooth soft_peak soft_transform squash_stretch twist attribute_blur attribute_transfer attribute_randomize resample wrangle instance convex_hull blend goal_pin goal_surface occlusion measure_bounds measure_distance measure_length skin_profiles scatteralign voronoi_fracture rbd_constraint_properties".split()
+    _faces = "dissolve divide inset outset tris_to_quads slice reverse recalc_normals solidify uv_project uv_transform unpack pack polyfill polyexpand2d measure_area measure_volume contour assemble".split()
+    _edges = "dissolve_edges edge_collapse edge_cusp edge_flip edge_slide grid_fill fillet".split()
+    for _nodes, _dom in ((_pts, "points"), (_faces, "faces"), (_edges, "edges")):
+        for _n in _nodes:
+            if "group" in out.get(_n, {}) and "pick_domain" not in out[_n]["group"]:
+                out[_n]["group"]["pick_domain"] = _dom
+    for _n, _f in [("blast","group"), ("group_create","pattern"), ("color","group"), ("crease","group"),
+                   ("falloff","group"), ("group_expand","group"), ("grow","group"), ("set_material","group"),
+                   ("select_loop","group_name"), ("select_path","group_name"), ("select_ring","group_name")]:
+        if _f in out.get(_n, {}):
+            out[_n][_f]["pick_domain_param"] = "domain"
+            out[_n][_f]["pick_domain_default"] = "primitives" if _n in ("blast","set_material","group_expand","falloff") else ("edges" if _n in ("crease","select_loop","select_path","select_ring","grow") else "points")
+    if "points" in out.get("polyextrude", {}):
+        out["polyextrude"]["points"]["pick_domain"] = "points"
+    if "edges" in out.get("polyextrude", {}):
+        out["polyextrude"]["edges"]["pick_domain"] = "edges"
+    for _f in ("edges", "exclude_edges"):
+        if _f in out.get("polybevel", {}):
+            out["polybevel"][_f]["pick_domain"] = "edges"
+    for _n in ("polysplit", "loop_cut"):
+        if "split_edges" in out.get(_n, {}):
+            out[_n]["split_edges"]["pick_domain"] = "edges"
     out["loop_cut"] = out["polysplit"]
     out["edge_slide"] = {
         "group": {"kind":"str","default":"","doc":"Selected edge group or pA-B pairs; empty leaves the mesh unchanged."},
@@ -143,6 +167,7 @@ def meta() -> dict:
     }
     # modifier_input owns an ordered interface schema rather than fixed node parameters.
     # Keep this description with the generated native parameter metadata for the editor.
+    out["edge_slide"]["group"]["pick_domain"] = "edges"
     out["modifier_input"]["__dynamic_inputs__"] = {
         "kind": "interface", "doc": "Ordered Blender inputs with stable ids, names, defaults and optional ranges/subtypes.",
         "types": ["float", "int", "bool", "vector", "color", "rotation", "matrix", "string", "menu",
