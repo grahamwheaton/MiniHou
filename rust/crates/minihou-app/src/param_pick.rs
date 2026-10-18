@@ -47,6 +47,12 @@ impl ParamPick {
         PickedField { node:self.node.clone(), selection:selection.clone(), faces, lines }
     }
 }
+/// The element type of a field's text: edge pairs (`0-1`, `p0-1`) mean edges whatever the node's default domain says
+/// (faces keep their default, where `a-b` may be a range).
+pub(super) fn infer_mode(text: &str, default: ui::SelectionMode) -> ui::SelectionMode {
+    let pair = |t: &str| t.trim_start_matches('p').split_once('-').is_some_and(|(a, b)| a.parse::<u32>().is_ok() && b.parse::<u32>().is_ok());
+    if default != ui::SelectionMode::Faces && text.split_whitespace().any(pair) { ui::SelectionMode::Edges } else { default }
+}
 /// Parse a group field into a selection on `topo` plus its purple highlight (shared by the arrow hover and the pick start).
 pub(super) fn field_selection(topo: &element_select::Topology, text: &str, mode: ui::SelectionMode, node: &str,
         positions: &[f32], triangles: &[u32], size: f32) -> PickedField {
@@ -82,6 +88,22 @@ mod tests {
         }
         assert!(topo.parse_group("9 0", ui::SelectionMode::Points).points == vec![0]); // out-of-range ids dropped
         assert!(topo.parse_group("0-2", ui::SelectionMode::Edges).is_empty()); // not a polygon edge
+    }
+    #[test]
+    fn edge_text_previews_as_edges_even_when_the_domain_says_points() {
+        let (p, t, e) = quad();
+        let topo = element_select::Topology::new(&p, &t, &e);
+        for text in ["0-1", "p0-1 p1-2"] {
+            let mode = infer_mode(text, ui::SelectionMode::Points);
+            assert_eq!(mode, ui::SelectionMode::Edges);
+            let hover = field_selection(&topo, text, mode, "n", &p, &t, 0.01);
+            assert!(!hover.selection.edges.is_empty() && hover.selection.points.is_empty());
+            // the arrow click loads the same parse as the live selection, in the field's element type, with a matching count
+            assert_eq!(hover.selection.count(), text.split_whitespace().count());
+            assert_eq!(hover.selection.mode, ui::SelectionMode::Edges);
+        }
+        assert_eq!(infer_mode("0 1", ui::SelectionMode::Points), ui::SelectionMode::Points);
+        assert_eq!(infer_mode("0-3", ui::SelectionMode::Faces), ui::SelectionMode::Faces);
     }
     #[test]
     fn hover_and_arrow_click_keep_the_field_selection() {

@@ -2358,6 +2358,8 @@ mod tests {
         assert!(click.is_some(), "purple arrow must be drawn");
         assert!(actions.0.iter().any(|a| matches!(a, UiAction::PickParameter {node,name,mode,..}
             if node=="subdivide1" && name=="creases" && *mode==super::super::SelectionMode::Edges)));
+        // the arrow click must not touch the node selection (no Select / ToggleSelect / SelectSet / Display actions)
+        assert!(!actions.0.iter().any(|a| matches!(a, UiAction::Select(_) | UiAction::ToggleSelect(_) | UiAction::SelectSet { .. })));
     }
 
     fn arrow_click_mode(typ: &str, field: &str) -> Option<super::super::SelectionMode> {

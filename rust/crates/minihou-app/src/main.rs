@@ -5,7 +5,7 @@ mod node_selection;
 mod coplanar_tool;
 mod group_preview;
 mod param_pick;
-use param_pick::{field_selection, ParamPick, PickedField, param_pick_end, input_source, source_ready};
+use param_pick::{field_selection, infer_mode, ParamPick, PickedField, param_pick_end, input_source, source_ready};
 mod selection_metrics;
 #[cfg(test)] mod face_mode_profile;
 use minihou_app::graph_edit;
@@ -971,12 +971,20 @@ impl App {
         if let Err(e)=self.prefs.save() { self.file_status=format!("Could not save preferences: {e}"); }
     }
     fn active_object(&self) -> Option<&str> {
+        // while a field is being picked the displayed pick source is the active object (the selected node is not displayed)
+        if let Some(pick) = &self.param_pick { return active_range(&pick.source, &self.display_ranges).map(|_| pick.source.as_str()); }
         (!self.object_hidden && self.selected_set.contains(&self.selected)
             && active_range(&self.selected,&self.display_ranges).is_some()
             && feeds_displayed_node(self.editor.doc.value(), &self.selected)).then_some(self.selected.as_str())
     }
     fn active_selection(&self) -> Option<picking::Selection> {
         Some(selection_in_range(&self.selection,self.scene.as_ref()?,active_range(self.active_object()?,&self.display_ranges)?))
+    }
+    /// Objects whose points can be picked/highlighted: the node selection plus the pick source while a field pick is active.
+    fn pick_set(&self) -> std::collections::BTreeSet<String> {
+        let mut set = self.selected_set.clone();
+        if let Some(pick) = &self.param_pick { set.insert(pick.source.clone()); }
+        set
     }
     fn active_pick_set(&self) -> std::collections::BTreeSet<String> {
         self.active_object().map(|id|std::collections::BTreeSet::from([id.to_owned()])).unwrap_or_default()
@@ -2351,6 +2359,8 @@ impl App {
             match action {
                 UiAction::PickParameter { node, name, mode, pairs } => {
                     let original = self.editor.doc.value()["nodes"][&node]["params"][&name].as_str().unwrap_or("").to_owned();
+                    let mode = infer_mode(&original, mode); // an edge group stays edges whatever the node's default domain
+                    let pairs = pairs || (mode == ui::SelectionMode::Edges && !original.contains('p') && original.contains('-'));
                     let source = input_source(self.editor.doc.value(), &node, &self.display);
                     let ready = source_ready(&self.display_ranges, &source);
                     self.param_pick = Some(ParamPick { node:node.clone(), name:name.clone(), original, changed:false,
@@ -2360,8 +2370,7 @@ impl App {
                     if let Some(gpu) = &mut self.gpu { gpu.set_group_overlay(&self.state.device, &[], &[]); }
                     self.group_preview = Default::default();
                     if source != self.display || !ready { self.display = source.clone(); self.send(Edit::Display(source.clone())); }
-                    self.selected_set.insert(source);
-                    self.editor_state.selection = mode;
+                    self.editor_state.selection = mode; // the node-editor selection (selected_set) is left alone; picking uses pick_set()
                     // Keep the field's group as the live selection (not an empty one); when the display has to switch to
                     // the pick source first, the parse waits for that scene so ids always match the geometry they came from.
                     self.selection = picking::Selection { mode, ..Default::default() };
@@ -2817,10 +2826,11 @@ impl eframe::App for App {
             self.selection_dirty = true;
         }
         if self.selection_dirty {
+            let pick_set=self.pick_set();
             if let (Some(gpu), Some(scene)) = (&mut self.gpu, &self.scene) {
                 let size = scene.radius * 0.012;
                 let mut selection=self.selection.clone();
-                let pickable=|id| point_pickable(self.editor_state.object_visibility,&self.display_ranges,&self.selected_set,id);
+                let pickable=|id| point_pickable(self.editor_state.object_visibility,&self.display_ranges,&pick_set,id);
                 selection.points.retain(|id| pickable(*id));
                 selection.edges.retain(|(a,b)| pickable(*a) && pickable(*b));
                 selection.tris.retain(|i| scene.triangle_indices().get(*i as usize*3..*i as usize*3+3).is_some_and(|tri| tri.iter().all(|id| pickable(*id))));
@@ -2910,7 +2920,7 @@ impl eframe::App for App {
             let transform_node = if self.editor_state.selection == ui::SelectionMode::Object { &self.selected } else { &self.display };
             let display_trs = transform_math::TrsParams::from_params(&self.editor.doc.value()["nodes"][transform_node]["params"]);
             let normal_frame = self.selection_normal_frame(&display_trs).axes.map(|axis| axis.map(|x| x as f32));
-            let active_pick_set=self.active_pick_set();
+            let active_pick_set=self.active_pick_set(); let node_pick_set=self.pick_set();
             let active_cut_range=self.active_object().and_then(|id|active_range(id,&self.display_ranges).map(|range|(id.to_owned(),range.clone())));
             let v = View { graph: &graph, doc: self.editor.doc.value(), path: &self.editor.path, dirty: self.editor.dirty(),
                 can_undo: self.editor.history.can_undo(), can_redo: self.editor.history.can_redo(),
@@ -3032,8 +3042,9 @@ impl eframe::App for App {
                         .filter(|h| h.4 + 1 >= ctx.cumulative_pass_nr());
                     if self.param_pick.is_none() {
                         match hover {
-                            Some((node,name,mode,_,_)) if source_ready(&self.display_ranges, &input_source(self.editor.doc.value(), &node, &self.display)) => {
+                            Some((node,name,default_mode,_,_)) if source_ready(&self.display_ranges, &input_source(self.editor.doc.value(), &node, &self.display)) => {
                                 let text = self.editor.doc.value()["nodes"][&node]["params"][&name].as_str().unwrap_or("").to_owned();
+                                let mode = infer_mode(&text, default_mode);
                                 let topo = element_select::cached(&self.elem_topo, scene);
                                 if self.picked_field.as_ref().is_none_or(|f| f.node != node || f.selection.mode != mode || f.selection != topo.parse_group(&text, mode)) {
                                     self.picked_field = Some(field_selection(topo, &text, mode, &node, scene.positions(), scene.triangle_indices(), scene.radius * 0.012));
@@ -3060,7 +3071,7 @@ impl eframe::App for App {
                     && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing())
                     && !ui::selection_region::active(ctx);
                 let modal_pick=self.pushpull_pick || self.editor_state.selection!=ui::SelectionMode::Object;
-                let pick_set=if modal_pick {active_pick_set.clone()} else {self.selected_set.clone()};
+                let pick_set=if modal_pick {active_pick_set.clone()} else {node_pick_set.clone()};
                 let pick_visibility=if modal_pick {viewport::ObjectVisibility::HideOthers} else {self.editor_state.object_visibility};
 
                 let hover_elem = if hover_in_viewport {
