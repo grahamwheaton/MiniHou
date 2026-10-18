@@ -160,7 +160,7 @@ fn wrap_label(label: &str) -> String {
 mod tests {
     use super::*;
     use crate::ui::testing::Fixture;
-    #[test] fn shelf_lists_are_complete() { assert_eq!(TABS.len(), 19); assert_eq!(TABS[0].name, "Create"); assert!(TABS[0].tools.iter().any(|t| t.node_type == "box")); }
+    #[test] fn shelf_lists_are_complete() { assert_eq!(TABS.len(), 20); assert_eq!(TABS[0].name, "Create"); assert!(TABS[0].tools.iter().any(|t| t.node_type == "box")); }
     #[test] fn labels_and_initials() { assert_eq!(wrap_label("Blender Object"), "Blender\nObject"); assert_eq!(initials("Blender Object"), "BO"); }
     #[test] fn draws_a_frame() { assert!(Fixture::new().run(show).is_empty()); }
     #[test] fn drag_payload_requests_the_same_tool_on_drop() {
