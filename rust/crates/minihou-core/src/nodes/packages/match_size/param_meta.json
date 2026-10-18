@@ -1,0 +1,15 @@
+{
+  "group": {"default": "", "doc": "Point group to transform; empty selects all points", "kind": "str", "pick_domain": "points"},
+  "target_position": {"default": [0.0, 0.0, 0.0], "doc": "Centre of the target bounds when no target geometry is wired", "kind": "vec3"},
+  "target_size": {"default": [1.0, 1.0, 1.0], "doc": "Size of the target bounds when no target geometry is wired", "kind": "vec3"},
+  "translate": {"default": true, "doc": "Move the selected points to the justified target anchor", "kind": "bool"},
+  "justify_x": {"default": "center", "doc": "Source and target anchor on X", "kind": "enum", "options": ["center", "min", "max"]},
+  "justify_y": {"default": "center", "doc": "Source and target anchor on Y", "kind": "enum", "options": ["center", "min", "max"]},
+  "justify_z": {"default": "center", "doc": "Source and target anchor on Z", "kind": "enum", "options": ["center", "min", "max"]},
+  "justify_to": {"default": "target", "doc": "Target aligns anchors to target bounds; same preserves the source anchor", "kind": "enum", "options": ["target", "same"]},
+  "offset_by": {"default": [0.0, 0.0, 0.0], "doc": "Extra translation added after justification", "kind": "vec3"},
+  "scale_to_fit": {"default": false, "doc": "Scale selected points to the target bounding box size", "kind": "bool"},
+  "uniform_scale": {"default": false, "doc": "Use the smallest nondegenerate axis scale on all axes", "kind": "bool"},
+  "restore_transform": {"default": false, "doc": "Reserved; restoring a stored transform is not supported", "kind": "bool"},
+  "stash_transform": {"default": false, "doc": "Reserved; storing the transform is not supported", "kind": "bool"}
+}

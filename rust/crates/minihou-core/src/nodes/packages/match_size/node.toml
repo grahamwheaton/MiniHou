@@ -1,0 +1,5 @@
+id = "match_size"
+name = "Match Size"
+category = "Modify"
+description = "Scale and position geometry to match target bounds."
+keywords = "match size bounds justify fit"
