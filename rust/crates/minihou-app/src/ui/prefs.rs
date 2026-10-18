@@ -181,9 +181,10 @@ impl Preferences {
     }
     #[test] fn matcap_and_object_color_round_trip() {
         let mut p=Preferences::default();
-        p.viewport.matcap=crate::viewport::MatCap::Normal;
+        p.viewport.matcap=crate::viewport::MatCap::SketchUpClean;
         p.viewport.matcap_flat=true;
         p.viewport.object_color=crate::viewport::ObjectColor::Random;
+        assert_eq!(p.to_json()["viewport"]["matcap"],"SketchUp clean");
         assert_eq!(Preferences::from_json(&p.to_json()),p);
         assert_eq!(Preferences::from_json(&json!({})).viewport.object_color,crate::viewport::ObjectColor::Single);
     }

@@ -170,6 +170,22 @@ fn random_objects_and_normal_matcap_headless() {
 }
 
 #[test]
+fn sketchup_clean_matcap_uses_greyscale_faces_and_dark_edges_headless() {
+    let Some((device,queue))=adapter() else { eprintln!("No adapter: skipping SketchUp clean MatCap render test"); return; };
+    let scene=scene(); let gpu=Gpu::new(&device,&scene);
+    let options=Overlay {matcap:MatCap::SketchUpClean,geometry:crate::ui::Overlays {points:false,..Default::default()},..Default::default()};
+    let clean=render(&device,&queue,&gpu,Mode::MatCapShaded,options,false);
+    let random=render(&device,&queue,&gpu,Mode::MatCapShaded,Overlay {object_color:ObjectColor::Random,..options},false);
+    assert_eq!(clean,random,"object colours leaked into clean MatCap");
+    let clay=render(&device,&queue,&gpu,Mode::MatCapShaded,Overlay {matcap:MatCap::Clay,..options},false);
+    assert!(changed(&clean,&clay)>100,"clean MatCap capture was not selected");
+    let no_edges=render(&device,&queue,&gpu,Mode::MatCapShaded,Overlay {geometry:crate::ui::Overlays {lines:false,points:false,..Default::default()},..options},false);
+    assert!(changed(&clean,&no_edges)>10,"clean MatCap did not draw mesh edges");
+    assert!(clean.iter().zip(&no_edges).any(|(edge,face)| edge[0]<face[0] && edge[1]<face[1] && edge[2]<face[2]
+        && edge[0]==edge[1] && edge[1]==edge[2]),"clean edge shader did not produce neutral dark lines");
+}
+
+#[test]
 fn textured_two_slots_factor_checker_and_diagnostic_modes_headless() {
     let Some((device,queue))=adapter() else {eprintln!("No adapter: skipping texture render test");return;};
     use std::sync::Arc;
