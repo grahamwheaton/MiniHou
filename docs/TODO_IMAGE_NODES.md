@@ -370,3 +370,7 @@ Houdini's PolyExtrude (screenshots 84 to 87): Group (purple arrow), Divide Into 
 ## Urgent: show Cd colours in the viewport (requested 2026-10-18)
 
 Geometry with a Cd colour attribute (point, vertex or face, as the Color node and Image File write) should show those colours in the solid viewport, not grey. Check the display path (viewport.rs, the shader, the Scene build for the colour buffer) and whether the Color node output reaches it.
+
+## Feature: Scatter node, Houdini parity (requested 2026-10-18)
+
+Houdini's Scatter (screenshots 84 and 85, and https://www.sidefx.com/docs/houdini/nodes/sop/scatter.html). Options tab: Group (purple arrow), Generate (By Density, By Area, By Count, and others), Scatter on Voxels Independently, Force Total Count, Density Scale, Density Attribute, Override Prim Area, Use Area for 2D Volumes, Max Point Limit, Global Seed, Primitive Seed Attribute, Randomize Point Order, Relax Iterations, Use Geometric Normals, Scale Radii By, Max Relax Radius. Output Attributes tab: Prim Num Attribute (sourceprim), Prim UVW Attribute (sourceprimuv), Output Density Attribute, Output Radius Attribute (pscale), Output ID Attribute (id), Output Radius and Density in Texture Space, Point Attributes (* by default), Vertex Attributes (N uv*), Primitive Attributes, Detail Attributes, Detail as Detail. The current scatter node has a density option; bring the rest over and match names and defaults.
