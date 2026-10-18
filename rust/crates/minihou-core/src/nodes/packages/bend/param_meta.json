@@ -1,0 +1,63 @@
+{
+  "bend": {
+    "default": 90.0,
+    "doc": "Degrees over the capture length",
+    "kind": "float",
+    "soft_max": 360.0,
+    "soft_min": -360.0
+  },
+  "direction": {
+    "default": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "doc": "Axis of the capture region",
+    "kind": "vec3"
+  },
+  "group": {
+    "default": "",
+    "doc": "Only these points",
+    "kind": "str",
+    "pick_domain": "points"
+  },
+  "length": {
+    "default": 1.0,
+    "doc": "Length of the capture region along the axis",
+    "kind": "float",
+    "min": 1e-06,
+    "soft_max": 10.0
+  },
+  "origin": {
+    "default": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "doc": "Start of the capture region",
+    "kind": "vec3"
+  },
+  "taper": {
+    "default": 1.0,
+    "doc": "Scale across the axis at the end of the region",
+    "kind": "float",
+    "min": 0.0,
+    "soft_max": 3.0
+  },
+  "twist": {
+    "default": 0.0,
+    "doc": "Degrees of twist about the axis over the length",
+    "kind": "float",
+    "soft_max": 720.0,
+    "soft_min": -720.0
+  },
+  "up": {
+    "default": [
+      0.0,
+      1.0,
+      0.0
+    ],
+    "doc": "The bend turns about this direction (made perpendicular to the axis)",
+    "kind": "vec3"
+  }
+}

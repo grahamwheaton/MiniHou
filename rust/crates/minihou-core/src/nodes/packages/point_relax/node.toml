@@ -1,0 +1,5 @@
+id = "point_relax"
+name = "Point Relax"
+category = "Deform"
+description = "Push points apart to an even spacing and keep them on a surface."
+keywords = "spread even"

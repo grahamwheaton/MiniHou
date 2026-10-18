@@ -1,0 +1,5 @@
+id = "clean"
+name = "Clean"
+category = "Polygon"
+description = "Weld points and remove degenerate primitives and unused points."
+keywords = "cleanup remove degenerate"

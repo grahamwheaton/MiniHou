@@ -1,0 +1,19 @@
+{
+  "fuse_distance": {
+    "default": 0.0,
+    "doc": "Weld points closer than this first (0 = off)",
+    "kind": "float",
+    "min": 0.0,
+    "soft_max": 0.1
+  },
+  "remove_degenerate": {
+    "default": true,
+    "doc": "Drop repeated corners, then faces with < 3 corners and curves with < 2",
+    "kind": "bool"
+  },
+  "remove_unused_points": {
+    "default": true,
+    "doc": "Discard points unused by any remaining primitive",
+    "kind": "bool"
+  }
+}

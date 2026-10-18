@@ -24,7 +24,6 @@ mod attribs;
 mod attrib_tools;
 pub mod attrib_paint;
 mod falloff;
-mod deform;
 mod uv;
 mod merge;
 pub mod packed;
@@ -210,7 +209,6 @@ pub fn registry() -> &'static [NodeSpec] {
         attrib_tools::SMOOTH,
         attrib_tools::MEASURE,
         falloff::FALLOFF,
-        deform::BEND,
         uv::UV_PROJECT,
         uv::UV_FLATTEN,
         uv::UV_TRANSFORM,
@@ -297,11 +295,8 @@ pub fn registry() -> &'static [NodeSpec] {
         heightfield::HEIGHTFIELD_ERODE,
         scatter::SCATTER,
         scatteralign::SCATTERALIGN,
-        deform::POINT_JITTER,
-        deform::POINT_RELAX,
         attrib_tools::SORT,
         merge::SWITCH,
-        deform::CLEAN,
         primitives::FUSE,
         capture_deform::SOFT_TRANSFORM,
         transform::COPY_TRANSFORM,
@@ -338,7 +333,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["attribute_delete", "attribute_rename", "bezier", "bound", "boundary_select", "bulge", "cache", "example_offset", "facet", "fillet", "flood_fill", "fractal", "group_expand", "group_promote", "helix", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "pcg_bounds", "pcg_density_filter", "pcg_points", "pcg_transform", "peak", "point", "resample", "reverse", "ripple", "select_sharp_edges", "set_material", "subnet", "unpack", "waves"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["attribute_delete", "attribute_rename", "bend", "bezier", "bound", "boundary_select", "bulge", "cache", "clean", "example_offset", "facet", "fillet", "flood_fill", "fractal", "group_expand", "group_promote", "helix", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "pcg_bounds", "pcg_density_filter", "pcg_points", "pcg_transform", "peak", "point", "point_jitter", "point_relax", "resample", "reverse", "ripple", "select_sharp_edges", "set_material", "subnet", "unpack", "waves"]);
     }
 }
 
