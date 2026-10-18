@@ -46,6 +46,7 @@ fn measure_volume(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use super::*;
     use crate::geometry::Geometry;
     use crate::params::Params;
