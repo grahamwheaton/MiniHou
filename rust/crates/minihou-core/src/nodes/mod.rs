@@ -100,6 +100,7 @@ mod measure_volume;
 mod measure_distance;
 mod measure_bounds;
 mod measure_length;
+mod measure_area;
 
 pub use modify::{match_size_points, MatchSizeOut};
 pub use modeling_tools::{edge_slide_preview, loop_cut_fractions, loop_cut_preview, loop_slide_fractions, LoopRing, LoopTopology, LOOP_CUT_MAX};
@@ -322,6 +323,7 @@ pub fn registry() -> &'static [NodeSpec] {
         measure_distance::MEASURE_DISTANCE,
         measure_bounds::MEASURE_BOUNDS,
         measure_length::MEASURE_LENGTH,
+        measure_area::MEASURE_AREA,
     ];
     NODES
 }
