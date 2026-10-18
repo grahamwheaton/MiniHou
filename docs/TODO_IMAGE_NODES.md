@@ -276,3 +276,19 @@ Source: https://extensions.blender.org/add-ons/looptools/ (Blender's LoopTools a
 ## Queued: migrate older nodes to packages (requested 2026-10-18)
 
 Migrate the legacy nodes to the self-registering package system, following docs/NODE_MIGRATION_PLAN.md (Bob's plan) and the pilot (measure_volume, measure_bounds, measure_area, measure_distance, measure_length, flood_fill). Argon to plan the order and batches; Flash to move each batch with unchanged ids, parameters and output, plus the registry list update.
+
+## Bugs from testing b35cd5767 (reported 2026-10-18)
+
+1. **Loop Cut completion:** right-click completes with the loop selected. Left-click completes without the proper loop selected. Both should select the loop.
+2. **Group create from the Tab menu:** the edge selection stays orange while the domain is points. The purple group highlight should show whenever the node is selected (not only on hover of the arrow), and follow the node's domain (edges when edges).
+3. **Selections pass through the mesh** even with X-ray off. The culling added in 3103bd2d is not reached by this click path. Find the click path that is still unculled (probably the BVH path in pick_bvh or the hover/preview path) and cull there too.
+4. **3D cursor draws on top of UI elements** (toolbar and overlay menus). The cursor should be clipped to the viewport area under the UI.
+5. **Transform axes should match mouse direction** (Blender parity): G, X, then sliding the mouse right should always move positive, whatever direction the camera faces. Currently it feels back-to-front depending on view direction.
+7. **Push/pull undo selects a node from another stream.** After undoing a push/pull, the selection should stay on the node that was pushed.
+8. **Push/pull does not always punch through** (see screenshot 72.png: a diagonal band of faces stays unpunched on the cube).
+
+## Features from testing (reported 2026-10-18)
+
+6. **Vertex bevel** node (Blender bevel of vertices, with the same options as edge bevel where they apply).
+9. **Dissolve flat edges** node, as Houdini's Dissolve Flat Edges (https://www.sidefx.com/docs/houdini/nodes/sop/labs--dissolve_flat_edges-1.0.html): remove edges between coplanar faces, merging the faces, with a tolerance.
+10. **Clean node parity** with Houdini's Clean (https://www.sidefx.com/docs/houdini/nodes/sop/clean.html): Consolidate Points with distance, Remove Degenerate Primitives with tolerance, Delete Unused Groups, Orient Polygons, Reverse Winding, Fix Overlaps, Remove Unused Points, Remove Attribs and Groups (patterns), Remove NaNs, Manifold-Only Topology. Screenshot 73.png shows the Houdini parameter layout to match.
