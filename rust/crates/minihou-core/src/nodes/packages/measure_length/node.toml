@@ -1,0 +1,5 @@
+id = "measure_length"
+name = "Measure Length"
+category = "Measure"
+description = "Measure geometry and write result attributes."
+keywords = "measure geometry length"
