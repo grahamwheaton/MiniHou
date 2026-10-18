@@ -268,12 +268,6 @@ Where: element selection uses `pick_displayed` and the BVH pick in main.rs (abou
 
 After extruding faces, the original faces should stay selected, as in Blender. Currently the selection moves or clears. Check the extrude path in main.rs (the extrude tool and its selection restore) and the face selection after the cook. Add a test: extrude a selected face of a cube, and the original face indices remain selected.
 
-## Future: parameter field editing (reported 2026-10-18)
-
-- A single click on a number or text field should start editing it. Today it takes a double click.
-- While editing, the cursor stays in the field. Tab moves to the next logical parameter in the panel (the next field in the layout order, skipping hidden or disabled ones), and Shift+Tab to the previous one. Enter confirms.
-- Group this with the parameter drag sensitivity and mouse-wheel items: they all change how values are entered and adjusted in the parameter panel (params.rs).
-
 ## Future: group highlight on any selected node (requested 2026-10-18)
 
 Any node with a group field should show its group members in purple when that node is selected in the node editor, even if the node is not the displayed one. Needs the selected node's own cooked geometry (its input is cooked, not displayed), so the viewport overlay can show the group from that node's output.
