@@ -1,0 +1,4 @@
+{
+  "name": {"default": "group1", "doc": "Group to convert (wildcards convert several)", "kind": "str"},
+  "to": {"default": "points", "doc": "Points of a primitive group: the points its primitives use. Primitives of a point group: those whose points are all in it", "kind": "enum", "options": ["points", "primitives"]}
+}

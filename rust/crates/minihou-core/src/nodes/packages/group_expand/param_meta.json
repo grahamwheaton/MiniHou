@@ -1,0 +1,8 @@
+{
+  "connectivity": {"default": "points", "doc": "primitives: neighbours share a point, or an edge", "kind": "enum", "options": ["points", "edges"]},
+  "domain": {"default": "primitives", "doc": "What the group holds", "kind": "enum", "options": ["primitives", "points"]},
+  "group": {"default": "group1", "doc": "Group (or pattern) to grow or shrink", "kind": "str", "pick_domain_param": "domain", "pick_domain_default": "primitives"},
+  "mode": {"default": "expand", "doc": "expand: add the neighbours of members; contract: drop members that touch a non-member", "kind": "enum", "options": ["expand", "contract"]},
+  "name": {"default": "", "doc": "Name for the result (empty: replace the group, if it is a plain group name)", "kind": "str"},
+  "steps": {"default": 1, "doc": "How many neighbour rings", "kind": "int", "min": 1, "max": 1000, "soft_max": 10}
+}

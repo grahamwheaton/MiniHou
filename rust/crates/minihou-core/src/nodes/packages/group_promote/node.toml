@@ -1,0 +1,5 @@
+id = "group_promote"
+name = "Group Promote"
+category = "Groups"
+description = "Convert groups between points and primitives."
+keywords = "group promote convert points primitives"

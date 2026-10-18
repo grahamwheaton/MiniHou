@@ -195,9 +195,7 @@ pub fn registry() -> &'static [NodeSpec] {
         copy_to_points::COPY_TO_POINTS,
         instance::INSTANCE,
         foreach::FOR_EACH,
-        group::GROUP_PROMOTE,
         group::GROUP_CREATE,
-        group::GROUP_EXPAND,
         select_nodes::GROW,
         select_nodes::SELECT_PATH,
         select_nodes::SELECT_LOOP,
@@ -342,7 +340,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["attribute_delete", "attribute_rename", "bound", "boundary_select", "bulge", "cache", "example_offset", "facet", "fillet", "flood_fill", "fractal", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "pcg_bounds", "pcg_density_filter", "pcg_points", "pcg_transform", "peak", "point", "resample", "reverse", "ripple", "select_sharp_edges", "set_material", "subnet", "unpack", "waves"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["attribute_delete", "attribute_rename", "bound", "boundary_select", "bulge", "cache", "example_offset", "facet", "fillet", "flood_fill", "fractal", "group_expand", "group_promote", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "pcg_bounds", "pcg_density_filter", "pcg_points", "pcg_transform", "peak", "point", "resample", "reverse", "ripple", "select_sharp_edges", "set_material", "subnet", "unpack", "waves"]);
     }
 }
 

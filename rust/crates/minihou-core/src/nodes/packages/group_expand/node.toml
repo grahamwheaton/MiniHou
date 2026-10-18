@@ -1,0 +1,5 @@
+id = "group_expand"
+name = "Group Expand"
+category = "Groups"
+description = "Grow or shrink a group by neighbour rings."
+keywords = "group expand contract grow shrink"
