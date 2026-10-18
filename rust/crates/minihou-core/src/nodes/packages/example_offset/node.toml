@@ -1,0 +1,5 @@
+id = "example_offset"
+name = "Example Offset"
+category = "Modify"
+description = "Offset geometry points along Y when enabled."
+keywords = "offset move translate y geometry"

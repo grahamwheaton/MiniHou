@@ -2,7 +2,7 @@
 //! output (exact topology and attribute names; floats within rounding). Parameters it does not implement yet are declared
 //! `unsupported`, so a graph that sets one fails loudly instead of cooking something different.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::error::{Error, Result};
 use crate::geometry::Geometry;
@@ -118,6 +118,7 @@ pub struct InputSpec {
 /// a multi input any number).
 pub type Inputs = [Vec<Arc<Geometry>>];
 
+#[derive(Clone, Copy)]
 pub struct NodeSpec {
     pub name: &'static str,
     pub inputs: &'static [InputSpec],
@@ -134,9 +135,24 @@ impl NodeSpec {
 
 const GEO: &[InputSpec] = &[InputSpec { name: "geo", multi: false, optional: false }];
 
+/// Display information supplied by a self-registering package.
+pub struct NodeCatalogueEntry {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub category: &'static str,
+    pub description: &'static str,
+    pub keywords: &'static str,
+}
+
+mod packages {
+    include!(concat!(env!("OUT_DIR"), "/node_packages.rs"));
+}
+
+pub fn package_catalogue() -> &'static [NodeCatalogueEntry] { packages::CATALOGUE }
+
 /// Every node type, by name.
 pub fn registry() -> &'static [NodeSpec] {
-    static NODES: &[NodeSpec] = &[
+    static LEGACY: &[NodeSpec] = &[
         blender_input::BLENDER_OBJECT,
         blender_input::MODIFIER_INPUT,
         blender_input::OBJECT_INPUT,
@@ -325,11 +341,32 @@ pub fn registry() -> &'static [NodeSpec] {
         measure_length::MEASURE_LENGTH,
         measure_area::MEASURE_AREA,
     ];
-    NODES
+    static MERGED: OnceLock<Vec<NodeSpec>> = OnceLock::new();
+    MERGED.get_or_init(|| {
+        let mut nodes = LEGACY.to_vec();
+        for (spec, info) in packages::SPECS.iter().zip(packages::CATALOGUE) {
+            assert_eq!(spec.name, info.id, "package node.rs NODE.name differs from node.toml id");
+            assert!(!nodes.iter().any(|n| n.name == spec.name), "duplicate node id: {}", spec.name);
+            nodes.push(*spec);
+        }
+        nodes
+    })
 }
 
 pub fn get(name: &str) -> Option<&'static NodeSpec> {
     registry().iter().find(|n| n.name == name)
+}
+
+#[cfg(test)]
+mod package_registry_tests {
+    use super::*;
+    #[test]
+    fn legacy_and_package_nodes_are_registered() {
+        assert!(get("box").is_some());
+        assert!(get("transform").is_some());
+        assert!(get("example_offset").is_some());
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["example_offset"]);
+    }
 }
 
 /// Node types whose result depends on the current frame whatever their parameters (Python: `key_extra` uses `timectx.key()`).
