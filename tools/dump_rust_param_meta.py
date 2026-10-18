@@ -333,6 +333,17 @@ def meta() -> dict:
         "output_inner_group": {"kind": "bool", "default": False, "doc": "Write the inner (inset) faces to a group."},
         "output_inner_group_name": {"kind": "str", "default": "inset_inner", "enabled_if": {"output_inner_group": True}, "doc": "Name of the inner face group."},
     })
+    # Rust-only fence generator (nodes/fence.rs): posts, rails, slats and X battens along a curve.
+    out["fence"] = {
+        "path": {"kind": "geometry", "default": "", "doc": "Curve or polyline the fence follows"},
+        "bay_width": {"kind": "float", "default": 2.0, "min": 0.1, "soft_max": 6.0, "doc": "Distance between posts along the path"},
+        "height": {"kind": "float", "default": 1.8, "min": 0.1, "soft_max": 4.0, "doc": "Overall panel height"},
+        "rail_height": {"kind": "float", "default": 0.85, "min": 0.0, "soft_max": 3.0, "doc": "Height of the lower rail above the ground"},
+        "slat_width": {"kind": "float", "default": 0.10, "min": 0.01, "soft_max": 0.5, "doc": "Width of each vertical slat"},
+        "slat_gap": {"kind": "float", "default": 0.05, "min": 0.0, "soft_max": 0.5, "doc": "Gap between slats"},
+        "batten_thickness": {"kind": "float", "default": 0.07, "min": 0.01, "soft_max": 0.3, "doc": "Thickness of the X battens in the top band"},
+        "post_size": {"kind": "float", "default": 0.12, "min": 0.01, "soft_max": 0.5, "doc": "Width and depth of each post"},
+    }
     out["grid_fill"] = {
         "group": {"kind": "str", "default": "", "doc": "Boundary edges to fill: edge ids, pA-B point pairs or edge group names (empty: every boundary loop)."},
         "span": {"kind": "int", "default": 1, "min": 1, "soft_max": 32, "enabled_if": {"auto_span": False}, "doc": "Number of grid columns, the length of the first side in edges (Blender Span)."},
