@@ -316,7 +316,6 @@ pub fn registry() -> &'static [NodeSpec] {
         merge::SWITCH,
         deform::CLEAN,
         primitives::FUSE,
-        transform::PEAK,
         capture_deform::SOFT_TRANSFORM,
         transform::COPY_TRANSFORM,
         attrib_tools::ATTRIBUTE_RANDOMIZE,
@@ -353,7 +352,7 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["bound", "boundary_select", "cache", "example_offset", "facet", "flood_fill", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "point", "reverse", "select_sharp_edges", "subnet", "unpack"]);
+        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["bound", "boundary_select", "cache", "example_offset", "facet", "flood_fill", "line", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "pack", "peak", "point", "reverse", "select_sharp_edges", "subnet", "unpack"]);
     }
 }
 

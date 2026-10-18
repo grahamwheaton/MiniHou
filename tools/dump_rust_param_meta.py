@@ -77,7 +77,7 @@ TYPES += ["delaunay", "bridge", "revolve", "sweep", "skin", "lattice",
 
 # Ported nodes: scatter, deform, primitives, transform, attributes, materials, surface, contour.
 TYPES += ["scatter", "point_jitter", "point_relax", "sort", "switch", "clean",
-          "fuse", "peak", "soft_transform", "copy_transform", "attribute_randomize",
+          "fuse", "soft_transform", "copy_transform", "attribute_randomize",
           "attribute_transfer", "set_material", "convex_hull", "slice", "dissolve", "color", "attrib_paint"]
 
 
