@@ -1,0 +1,5 @@
+id = "loop_relax"
+name = "Loop Relax"
+category = "Modify"
+description = "Smooth vertices iteratively along selected loops or edge paths."
+keywords = "loop relax smooth laplacian vertices"
