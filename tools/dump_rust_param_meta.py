@@ -43,8 +43,8 @@ def package_meta() -> dict:
 TYPES += ["loop_begin", "loop_end", "input", "object_input", "wrangle", "blend", "exploded_view", "usd_export", "usd_import"]
 
 # Procedural / instancing ports; retain the other workers' type lists above.
-TYPES += ["lsystem", "convert_line", "polypath", "carve", "copy_to_points", "instance", "for_each"]
-          "attribute_create", "attribute_promote", "attribute_blur",
+TYPES += ["lsystem", "convert_line", "polypath", "carve", "copy_to_points", "instance", "for_each",
+          "attribute_create", "attribute_promote", "attribute_blur"]
 TYPES += ["connectivity", "smooth", "falloff", "uv_project", "uv_flatten", "uv_transform", "curve_simplify", "group_create", "blast", "measure"]
 
 
