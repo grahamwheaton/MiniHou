@@ -1,0 +1,6 @@
+{
+  "group": {"kind": "str", "default": "", "doc": "Group name, pattern, or viewport selection to split. Empty or unmatched selection leaves the input unchanged."},
+  "group_type": {"kind": "enum", "default": "primitives", "options": ["primitives", "faces", "points", "edges"], "doc": "Domain of the selection. A face is a primitive; point or edge selections retain faces whose every point or edge is selected."},
+  "invert_selection": {"kind": "bool", "default": false, "doc": "Swap the selected and remaining pieces when the group contains elements."},
+  "delete_unused_groups": {"kind": "bool", "default": false, "doc": "Remove group attributes with no members from each split piece."}
+}

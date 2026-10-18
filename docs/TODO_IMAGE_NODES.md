@@ -350,7 +350,3 @@ Match Houdini's Attribute Noise (https://www.sidefx.com/docs/houdini/nodes/sop/a
 ## Fix: promote a viewport selection when the group domain changes (requested 2026-10-18)
 
 If the user selects points in the viewport and then changes a group node's domain to faces (or edges), the current selection should be promoted to that domain automatically: points to the faces (or edges) they fully surround, and the reverse, so the field shows the right group. The promotion should be one undo step and survive undo (the selection itself is restored on undo, not reset). Check the domain change path in params.rs and the selection restore in main.rs.
-
-## Feature: Split node, Houdini parity (requested 2026-10-18)
-
-Houdini's Split (screenshot 83): splits the input into separate pieces by a group (Group with the purple arrow, Group Type), with Invert Selection and Delete Unused Groups. The selected group becomes its own piece and the rest stays as another, so both can be used downstream. Match the parameter names and defaults.
