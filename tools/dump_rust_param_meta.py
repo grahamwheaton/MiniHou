@@ -442,6 +442,16 @@ def meta() -> dict:
         if node_id in out:
             raise ValueError(f"package node id conflicts with existing metadata: {node_id}")
         out[node_id] = params
+    # The legacy Match Size spec (kept for the Python fast path) shares the package parameters.
+    if "match_size" in out:
+        legacy = dict(out["match_size"])
+        legacy.setdefault("translate", {"kind": "bool", "default": True, "doc": "Translate the input so it matches the target position."})
+        legacy.setdefault("center", {"kind": "vec3", "default": [0.0, 0.0, 0.0], "doc": "Target centre (legacy Match Size)."})
+        legacy.setdefault("justify_z", {"kind": "enum", "default": "center", "options": ["center", "min", "max"], "doc": "Vertical justification (legacy Match Size)."})
+        legacy.setdefault("scale", {"kind": "bool", "default": False, "doc": "Scale the input to the target size (legacy Match Size)."})
+        legacy.setdefault("size", {"kind": "vec3", "default": [1.0, 1.0, 1.0], "doc": "Target size (legacy Match Size)."})
+        legacy.setdefault("uniform", {"kind": "bool", "default": True, "doc": "Scale uniformly (legacy Match Size)."})
+        out["match_size_legacy"] = legacy
     return out
 
 

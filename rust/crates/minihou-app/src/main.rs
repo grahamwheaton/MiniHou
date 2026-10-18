@@ -1570,7 +1570,7 @@ impl App {
     }
     fn finish_modal(&mut self, modal: Modal) {
         if modal.cage && self.editor_state.selection == ui::SelectionMode::Object
-            && minihou_core::nodes::get("match_size").is_some()
+            && minihou_core::nodes::get("match_size_legacy").is_some()
             && self.editor.doc.display_nodes().len()==1
             && modal.last.iter().all(|v| *v >= 0.) {
             if let Some(target) = &self.transform_target {
@@ -1582,7 +1582,7 @@ impl App {
                     .and_then(Value::as_f64).unwrap_or(modal.pivot[i] as f64) as f32);
                 let (center,size)=ui::modal_transform::cage_target(modal.bounds,pivot,modal.last);
                 let mut value=self.editor.doc.value().clone();
-                value["nodes"][target]["type"]=json!("match_size");
+                value["nodes"][target]["type"]=json!("match_size_legacy");
                 value["nodes"][target]["params"]=json!({"translate":true,"center":center,"justify_z":"center",
                     "scale":true,"size":size,"uniform":false});
                 if let Ok(doc)=Document::parse(value.to_string()) { self.editor.doc=doc; self.send(Edit::Replace(value)); }

@@ -240,7 +240,7 @@ fn match_size_places_and_scales() {
     // a unit box scaled (non-uniformly) to size [2, 1, 4] with its centre at [1, 2, 3]
     let g = cook(json!({"nodes": {
         "b": {"type": "box"},
-        "m": {"type": "match_size", "inputs": {"geo": "b"},
+        "m": {"type": "match_size_legacy", "inputs": {"geo": "b"},
               "params": {"translate": true, "center": [1.0, 2.0, 3.0], "scale": true,
                          "size": [2.0, 1.0, 4.0], "uniform": false}}}, "display": "m"})).unwrap();
     let (lo, hi) = extents(&g);
@@ -249,7 +249,7 @@ fn match_size_places_and_scales() {
     // uniform keeps proportions: the largest fitting scale of [2, 2, 4] on a unit box is 2
     let u = cook(json!({"nodes": {
         "b": {"type": "box"},
-        "m": {"type": "match_size", "inputs": {"geo": "b"},
+        "m": {"type": "match_size_legacy", "inputs": {"geo": "b"},
               "params": {"center": [0.0, 0.0, 0.0], "scale": true, "size": [2.0, 2.0, 4.0], "uniform": true}}}, "display": "m"})).unwrap();
     let (lo, hi) = extents(&u);
     assert!(close(lo, [-1.0, -1.0, -1.0]) && close(hi, [1.0, 1.0, 1.0]), "{lo:?} {hi:?}");
@@ -257,7 +257,7 @@ fn match_size_places_and_scales() {
     // justify_z = min sits the box bottom on the target z
     let j = cook(json!({"nodes": {
         "b": {"type": "box"},
-        "m": {"type": "match_size", "inputs": {"geo": "b"},
+        "m": {"type": "match_size_legacy", "inputs": {"geo": "b"},
               "params": {"center": [0.0, 0.0, 5.0], "justify_z": "min"}}}, "display": "m"})).unwrap();
     let (lo, hi) = extents(&j);
     assert!((lo[2] - 5.0).abs() < 1e-6 && (hi[2] - 6.0).abs() < 1e-6, "{lo:?} {hi:?}");
@@ -269,7 +269,7 @@ fn match_size_uses_the_second_input_as_the_target() {
     let g = cook(json!({"nodes": {
         "b": {"type": "box"},
         "c": {"type": "curve", "params": {"points": "0,0,0 2,4,6"}},
-        "m": {"type": "match_size", "inputs": {"geo": "b", "target": "c"},
+        "m": {"type": "match_size_legacy", "inputs": {"geo": "b", "target": "c"},
               "params": {"scale": true, "size": [1.0, 1.0, 1.0], "uniform": false}}}, "display": "m"})).unwrap();
     let (lo, hi) = extents(&g);
     assert!(close(lo, [0.0, 0.0, 0.0]) && close(hi, [2.0, 4.0, 6.0]), "{lo:?} {hi:?}");

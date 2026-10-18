@@ -304,10 +304,10 @@ fn modal_g_x_r_y_numeric_and_s_cage_cook_through_incremental_edits() {
     let (scaled_lo,scaled_hi,_)=cooked(&worker,&mut state);
     assert!((scaled_lo[0]-lo[0]).abs()<1e-3);
     assert!(scaled_hi[0]>hi[0]);
-    assert!(minihou_core::nodes::get("match_size").is_some());
+    assert!(minihou_core::nodes::get("match_size_legacy").is_some());
     let (center,size)=ui::modal_transform::cage_target((lo,hi),cage_pivot,values);
     let mut matched=doc.value().clone();
-    matched["nodes"][&target]["type"]=json!("match_size");
+    matched["nodes"][&target]["type"]=json!("match_size_legacy");
     matched["nodes"][&target]["params"]=json!({"translate":true,"center":center,"justify_z":"center",
         "scale":true,"size":size,"uniform":false});
     send(&worker,&mut state,Edit::Replace(matched));
