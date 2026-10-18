@@ -1,0 +1,22 @@
+{
+  "group": {
+    "default": "",
+    "doc": "First element group (point or primitive); empty uses point index / seed.",
+    "kind": "str"
+  },
+  "group2": {
+    "default": "",
+    "doc": "Second element group (point or primitive); empty measures within the first group or point selection.",
+    "kind": "str"
+  },
+  "point1": {
+    "default": 0,
+    "doc": "First point seed index (default: first point 0; negative indices count from the end).",
+    "kind": "int"
+  },
+  "point2": {
+    "default": -1,
+    "doc": "Second point seed index (default: last point -1; negative indices count from the end).",
+    "kind": "int"
+  }
+}

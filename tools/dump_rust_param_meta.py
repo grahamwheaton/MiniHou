@@ -434,15 +434,6 @@ def meta() -> dict:
     add("copy_point_attributes", "bool", True, "Copy source point attributes to generated points.")
     add("point_attributes", "str", "*", "Space-separated source point attributes to copy; * copies all. Float attributes interpolate, integers use the dominant vertex.")
     out["scatteralign"] = sa
-    out["measure_distance"] = {
-        "group": {"kind": "str", "default": "", "doc": "First element group (point or primitive); empty uses point index / seed."},
-        "group2": {"kind": "str", "default": "", "doc": "Second element group (point or primitive); empty measures within the first group or point selection."},
-        "point1": {"kind": "int", "default": 0, "doc": "First point seed index (default: first point 0; negative indices count from the end)."},
-        "point2": {"kind": "int", "default": -1, "doc": "Second point seed index (default: last point -1; negative indices count from the end)."},
-    }
-    out["measure_length"] = {
-        "group": {"kind": "str", "default": "", "doc": "Optional primitive group to measure length of; empty measures all primitives."},
-    }
     # Rust-only native instances for Copy to Points (nodes/packed.rs); off keeps the Python-identical copy.
     out["copy_to_points"]["pack_instances"] = {"kind": "bool", "default": True, "doc": "Output native instances (one point per copy referencing the shared source, with its transform) instead of copying the source geometry; Unpack converts them to real geometry."}
     for node_id, params in package_meta().items():

@@ -174,7 +174,7 @@ mod tests {
         let package_tools: Vec<_> = modify.tools.iter().skip(modify.tools.len() - 3).map(|t| t.node_type).collect();
         assert_eq!(package_tools, ["example_offset", "pack", "unpack"]);
         let measure = tabs().iter().find(|t| t.name == "Measure").unwrap();
-        for id in ["measure_volume", "measure_bounds", "measure_area"] {
+        for id in ["measure_volume", "measure_bounds", "measure_area", "measure_length", "measure_distance"] {
             assert_eq!(measure.tools.iter().filter(|t| t.node_type == id).count(), 1, "{id}");
         }
     }
