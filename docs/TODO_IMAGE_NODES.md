@@ -365,13 +365,14 @@ Bugs:
 - Deleting nodes from an embedded Blender graph can make Blender unresponsive.
 - Inset needs to auto-merge (parity with Blender). Vertex bevel needs parity with Blender and must flow correctly.
 - Cannot double-click to open a subnet node. (Not built: nested subnet navigation, plan step 3; double-click currently sets display.)
+- Ctrl+click shortest route works on simple meshes only; it breaks with split edges.
+- Cannot double-click to open a subnet node.
 
 Selection to node (UI):
 - Ctrl+G with a viewport selection under the mouse creates a Group Create node with the selection applied (domain from the selection type).
 - X or Delete with a viewport selection creates a Blast node with the selection applied (domain aware).
 
 Nodes and parameters:
-- Outset: optional output nodes.
 - All output groups optional: checkbox, label, then group name with target select.
 - PolyExtrude: offset-even checkbox (Blender parity).
 - Delete node: full Houdini parity.

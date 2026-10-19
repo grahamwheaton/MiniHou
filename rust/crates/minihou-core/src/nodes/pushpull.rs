@@ -789,7 +789,8 @@ pub const INSET: NodeSpec = NodeSpec {
 pub const OUTSET: NodeSpec = NodeSpec {
     name: "outset",
     inputs: GEO,
-    params: crate::params!("group":"";"amount":0.1;"mode":"connected"),
+    params: crate::params!("group":"";"amount":0.1;"mode":"connected";
+        "output_group":false;"output_group_name":"outset_ring";"output_inner_group":false;"output_inner_group_name":"outset_boundary"),
     cook: outset,
 };
 fn inset(i: &Inputs, p: &Params) -> Result<Geometry> {
@@ -807,32 +808,86 @@ fn inset(i: &Inputs, p: &Params) -> Result<Geometry> {
     } else {
         model::extrude(&g, &p.s("group")?, depth, amount, mode, false, None)?
     };
+    out = auto_merge(&out, g.npoints)?;
+    write_output_groups(&mut out, p)?;
+    Ok(out)
+}
+fn write_output_groups(out: &mut Geometry, p: &Params) -> Result<()> {
     for (flag, name, src) in [("output_group", "output_group_name", "group_extrudeSide"), ("output_inner_group", "output_inner_group_name", "group_extrudeFront")] {
         if p.b(flag)? {
             let n = p.s(name)?;
             model::group_name(n.trim()).map_err(|_| Error::new(format!("invalid {name} {n:?}")))?;
             let mask: Vec<bool> = out.prim.get(src).map_or(vec![false; out.nprims()], |a| super::group::flags(a));
-            model::write_group(&mut out, "prim", n.trim(), &mask)?;
+            model::write_group(out, "prim", n.trim(), &mask)?;
         }
     }
+    Ok(())
+}
+/// Blender-style auto-merge: points created by the inset (index >= `first_new`) that land on another point are welded to it,
+/// repeated corners are dropped, and faces left with fewer than 3 corners disappear.
+pub(super) fn auto_merge(g: &Geometry, first_new: usize) -> Result<Geometry> {
+    if g.npoints <= first_new { return Ok(g.clone()); }
+    let pos = model::positions(g);
+    let key = |q: [f64; 3]| q.map(|x| (x * 1e5).round() as i64);
+    let mut seen = std::collections::HashMap::<[i64; 3], usize>::new();
+    let mut map: Vec<usize> = (0..g.npoints).collect();
+    for q in 0..first_new.min(g.npoints) { seen.entry(key(pos[q])).or_insert(q); }
+    let mut any = false;
+    for q in first_new..g.npoints {
+        match seen.get(&key(pos[q])) { Some(&r) => { map[q] = r; any = true; } None => { seen.insert(key(pos[q]), q); } }
+    }
+    if !any { return Ok(g.clone()); }
+    let vp = &g.topology.vertex_point;
+    let (mut ovp, mut sizes, mut vsrc, mut psrc) = (vec![], vec![], vec![], vec![]);
+    for f in 0..g.nprims() {
+        let mut c: Vec<(usize, usize)> = vec![];
+        for v in model::range(g, f) {
+            let p = map[vp[v] as usize];
+            if c.last().is_none_or(|l| l.0 != p) { c.push((p, v)); }
+        }
+        while c.len() > 1 && c[0].0 == c[c.len() - 1].0 { c.pop(); }
+        if c.len() < 3 { continue; }
+        sizes.push(c.len());
+        psrc.push(f);
+        for (p, v) in c { ovp.push(p as i32); vsrc.push(v); }
+    }
+    let out = model::make(g.point.clone(), ovp, &sizes, model::gather(&g.vertex, &vsrc), model::gather(&g.prim, &psrc), g.detail.clone(), None)?;
+    let mut out = model::compact(out)?;
+    out.point.remove("N");
     Ok(out)
 }
 fn outset(i: &Inputs, p: &Params) -> Result<Geometry> {
     let g = OUTSET.one(i, 0)?;
-    model::extrude(
-        &g,
-        &p.s("group")?,
-        0.,
-        -p.f("amount")?,
-        &p.e("mode", &["connected", "individual"])?,
-        false,
-        None,
-    )
+    let out = model::extrude(&g, &p.s("group")?, 0., -p.f("amount")?, &p.e("mode", &["connected", "individual"])?, false, None)?;
+    let mut out = auto_merge(&out, g.npoints)?;
+    write_output_groups(&mut out, p)?;
+    Ok(out)
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
+    fn quad(s: f32) -> Geometry {
+        Geometry::from_arrays(vec![0., 0., 0., s, 0., 0., s, s, 0., 0., s, 0.], vec![0, 1, 2, 3], vec![0, 4], None).unwrap()
+    }
+    #[test]
+    fn inset_auto_merges_collapsed_inner_face() {
+        // inset by half the width: the inner quad collapses to one point, merged with itself; ring becomes triangles
+        let p = Params::resolve(INSET.params, serde_json::json!({"amount": std::f64::consts::SQRT_2, "use_even_offset": false}).as_object()).unwrap();
+        let o = inset(&[vec![Arc::new(quad(2.))]], &p).unwrap();
+        o.validate().unwrap();
+        assert_eq!((o.npoints, o.nprims()), (5, 4));
+    }
+    #[test]
+    fn outset_output_groups_are_optional() {
+        let p = Params::resolve(OUTSET.params, None).unwrap();
+        let o = outset(&[vec![Arc::new(quad(2.))]], &p).unwrap();
+        assert!(!o.prim.contains_key("group_outset_ring"));
+        let p = Params::resolve(OUTSET.params, serde_json::json!({"output_group": true, "output_inner_group": true}).as_object()).unwrap();
+        let o = outset(&[vec![Arc::new(quad(2.))]], &p).unwrap();
+        assert_eq!(o.prim["group_outset_ring"].as_i32().unwrap().iter().sum::<i32>(), 4);
+        assert_eq!(o.prim["group_outset_boundary"].as_i32().unwrap().iter().sum::<i32>(), 1);
+    }
     #[test]
     fn inset_has_no_height_and_python_groups() {
         let g = Geometry::from_arrays(
