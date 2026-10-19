@@ -153,6 +153,20 @@ pub(crate) fn edge_mask(g: &Geometry, pattern: &str) -> Result<Vec<bool>> {
             hit.fill(true);
         } else {
             let mut found = false;
+            // Group Create stores edge groups on the derived-edge domain.
+            for (key, attr) in g.edge.iter().filter(|(k, _)| k.starts_with("group_")) {
+                if wildcard(token.as_bytes(), key[6..].as_bytes()) {
+                    found = true;
+                    let members = super::group::flags(attr);
+                    if attr.width != 1 || members.len() != e.len() {
+                        return Err(Error::new(format!("edge group {key:?} has invalid dimensions")));
+                    }
+                    for (b, selected) in hit.iter_mut().zip(members) {
+                        *b |= selected;
+                    }
+                }
+            }
+            // Older Edge Group nodes store membership on outgoing corners.
             for key in g.vertex.keys().filter(|k| k.starts_with("edge_group_")) {
                 if wildcard(token.as_bytes(), key[11..].as_bytes()) {
                     found = true;
@@ -791,7 +805,11 @@ mod tests {
     #[test]
     fn polybridge_uses_two_group_create_edge_loops_on_box() {
         let box_params = Params::resolve(super::super::generate::BOX.params, None).unwrap();
-        let mut g = (super::super::generate::BOX.cook)(&[vec![]], &box_params).unwrap();
+        let box_geo = (super::super::generate::BOX.cook)(&[vec![]], &box_params).unwrap();
+        // Open the two caps so the selected loops are bridgeable boundaries.
+        let keep = super::super::group::centroids(&box_geo).chunks_exact(3)
+            .map(|p| p[2].abs() < 0.25).collect::<Vec<_>>();
+        let mut g = super::super::group::keep_prims(&box_geo, &keep, false).unwrap();
         let edges = topo::edges(&g.topology, g.npoints);
         for (name, z) in [("group1", -0.5), ("group2", 0.5)] {
             let pattern = edges.points.chunks_exact(2).filter_map(|pair| {
@@ -808,7 +826,7 @@ mod tests {
         let params = Params::resolve(POLYBRIDGE.params,
             json!({"source":"group1","destination":"group2"}).as_object()).unwrap();
         let out = polybridge(&[vec![Arc::new(g)]], &params).unwrap();
-        assert_eq!(out.nprims(), 10);
+        assert_eq!(out.nprims(), 8);
         out.validate().unwrap();
     }
     #[test]
