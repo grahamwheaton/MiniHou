@@ -191,8 +191,20 @@ mod tests {
                 for tool in tabs().iter().flat_map(|tab| tab.tools) {
                     let built_in = matches!(tool.icon, "box" | "point" | "sphere" | "tube" | "torus" | "grid" | "null" |
                         "line" | "circle" | "curve" | "bezier" | "helix" | "lsystem" | "lattice" | "points_to_surface" | "file" | "host");
-                    let fallback = matches!(tool.icon, "clean" | "clip" | "curve_simplify" | "falloff" | "occlusion" | "sdf_shape");
+                    let fallback = matches!(tool.icon, "clip" | "curve_simplify" | "falloff" | "occlusion" | "sdf_shape");
                     assert!(built_in || fallback || shelf_icons::draw(ui.painter(), Pos2::ZERO, tool.icon, Color32::WHITE, Color32::WHITE), "{}", tool.icon);
+                }
+                for node in minihou_core::nodes::package_catalogue() {
+                    let tab = tabs().iter().find(|tab| tab.name == node.category).unwrap();
+                    let tool = tab.tools.iter().rev().find(|tool| tool.node_type == node.id && tool.label == node.name).unwrap();
+                    assert_eq!(tool.icon, node.id, "{}", node.id);
+                    let built_in = matches!(node.id, "point" | "line" | "helix" | "bezier");
+                    assert!(built_in || shelf_icons::draw(ui.painter(), Pos2::ZERO, node.id, Color32::WHITE, Color32::YELLOW), "{}", node.id);
+                }
+                for id in ["loop_space", "loop_circle", "loop_flatten", "loop_relax", "loop_curve", "pack", "unpack", "split",
+                    "match_size", "vertex_bevel", "peak", "reverse", "facet", "bend", "clean", "dissolve_flat_edges",
+                    "boundary_select", "select_sharp_edges"] {
+                    assert!(shelf_icons::draw(ui.painter(), Pos2::ZERO, id, Color32::WHITE, Color32::YELLOW), "{id}");
                 }
             });
         });
