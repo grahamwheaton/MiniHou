@@ -620,9 +620,10 @@ impl Document {
 
 #[derive(Default)]
 pub struct History {
-    undo: Vec<(Document, Document)>,
-    redo: Vec<(Document, Document)>,
+    undo: Vec<(Document, Document, bool)>,
+    redo: Vec<(Document, Document, bool)>,
     pending: Option<Document>,
+    last_selection_step: bool,
 }
 impl History {
     pub fn edit(&mut self, doc: &mut Document, edit: &Edit) -> Result<()> {
@@ -638,7 +639,7 @@ impl History {
     pub fn replace(&mut self, doc: &mut Document, new: Document) {
         self.finish(doc);
         if doc.text != new.text {
-            self.undo.push((doc.clone(), new.clone()));
+            self.undo.push((doc.clone(), new.clone(), false));
             self.redo.clear();
             *doc = new;
         }
@@ -647,16 +648,24 @@ impl History {
     pub fn record(&mut self, before: Document, after: &Document) {
         self.finish(after);
         if before.text != after.text {
-            self.undo.push((before, after.clone()));
+            self.undo.push((before, after.clone(), false));
             self.redo.clear();
         }
     }
     /// Called at the end of a drag, or immediately for discrete edits.
     pub fn finish(&mut self, doc: &Document) {
         if let Some(before) = self.pending.take() {
-            if before.text != doc.text { self.undo.push((before, doc.clone())); }
+            if before.text != doc.text { self.undo.push((before, doc.clone(), false)); }
         }
     }
+    /// A viewport selection change: one undo step that leaves the document as it is (the caller keeps the selections).
+    pub fn record_selection(&mut self, doc: &Document) {
+        self.finish(doc);
+        self.undo.push((doc.clone(), doc.clone(), true));
+        self.redo.clear();
+    }
+    /// Whether the step the last undo or redo moved over was a selection change.
+    pub fn last_was_selection(&self) -> bool { self.last_selection_step }
     /// Forget an in-progress edit without recording it (a modal tool records its own single step).
     pub fn drop_pending(&mut self) { self.pending = None; }
     pub fn can_undo(&self) -> bool { !self.undo.is_empty() || self.pending.is_some() }
@@ -664,6 +673,7 @@ impl History {
     pub fn undo(&mut self, doc: &mut Document) -> Option<Edit> {
         self.finish(doc);
         let pair = self.undo.pop()?;
+        self.last_selection_step = pair.2;
         *doc = pair.0.clone();
         self.redo.push(pair);
         Some(Edit::Replace(doc.value.clone()))
@@ -671,6 +681,7 @@ impl History {
     pub fn redo(&mut self, doc: &mut Document) -> Option<Edit> {
         self.finish(doc);
         let pair = self.redo.pop()?;
+        self.last_selection_step = pair.2;
         *doc = pair.1.clone();
         self.undo.push(pair);
         Some(Edit::Replace(doc.value.clone()))
@@ -899,6 +910,27 @@ mod channel_document_tests {
             let r=cook_batch(&mut session,&mut target,vec![CookRequest{revision,edit}],|_|());
             assert!(r.error.is_none()&&r.stats.cooked.is_empty(),"{:?}",r.stats);
         }
+    }
+    #[test]
+    fn history_selection_steps_interleave_with_graph_edits_in_order() {
+        let mut doc=Document::parse("{
+  \"nodes\": {\"out\": {\"type\": \"box\", \"params\": {\"size\": [1,2,3]}}},
+  \"display\": \"out\"
+}".into()).unwrap();
+        let mut history=History::default();
+        history.record_selection(&doc);
+        history.edit(&mut doc,&Edit::Param{node:"out".into(),name:"size".into(),value:json!([4,5,6])}).unwrap();
+        history.finish(&doc);
+        history.record_selection(&doc);
+        let edited=doc.text().to_string();
+        assert!(history.undo(&mut doc).is_some()&&history.last_was_selection()&&doc.text()==edited);
+        assert!(history.undo(&mut doc).is_some()&&!history.last_was_selection()&&doc.text()!=edited);
+        assert!(history.undo(&mut doc).is_some()&&history.last_was_selection());
+        assert!(!history.can_undo());
+        assert!(history.redo(&mut doc).is_some()&&history.last_was_selection());
+        assert!(history.redo(&mut doc).is_some()&&!history.last_was_selection()&&doc.text()==edited);
+        history.record_selection(&doc);
+        assert!(!history.can_redo());
     }
     #[test]
     fn existing_python_compatible_graph_needs_no_channel_fields() {
