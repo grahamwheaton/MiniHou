@@ -501,9 +501,51 @@ def meta() -> dict:
         out[node_id] = params
     # Noise gained a Blend strength (mix between the input and the noisy value, 0 to 1).
     out.setdefault("noise", {})["blend"] = {"kind": "float", "default": 1.0, "soft_min": 0.0, "soft_max": 1.0, "doc": "Mix between the input value (0) and the noisy value (1)."}
-    # Noise and Mountain: every parameter declared in their NodeSpec gets metadata (kind from the default; doc to refine later).
+    # Noise and Mountain: every NodeSpec parameter gets its declared kind/default and a specific help line.
+    noise_docs = {
+        "attrib": "Attribute to write; P displaces point positions.",
+        "mode": "Scalar uses one noise sample; Vector uses three decorrelated samples.",
+        "amplitude": "Multiplier for each component of the sampled noise.",
+        "frequency": "Spatial frequency of the noise samples.",
+        "offset": "Offset added to the noise sample coordinates.",
+        "octaves": "Number of fractal noise layers, from 1 to 12.",
+        "lacunarity": "Frequency multiplier between successive fractal layers.",
+        "gain": "Amplitude multiplier between successive fractal layers.",
+        "seed": "Random seed used to vary the noise pattern.",
+        "group": "Point or primitive group receiving noise; empty selects all elements.",
+        "blend": "Mix between the original attribute (0) and the noisy result (1).",
+        "class": "Attribute domain to modify: point, primitive, vertex, or detail.",
+        "channel_x": "Apply noise to the first attribute component.",
+        "channel_y": "Apply noise to the second attribute component.",
+        "channel_z": "Apply noise to the third attribute component.",
+        "noise_along_vector": "Displace along Vector Attribute instead of using separate component noise.",
+        "vector_attribute": "Vector attribute used as the displacement direction; N falls back to geometric normals.",
+        "operation": "Combine noise with the existing value by setting, adding, multiplying, or subtracting.",
+        "range_values": "Keep noise centered around zero or shift it into a positive range.",
+        "output_raw": "Write sampled noise without applying Amplitude or Vector Attribute.",
+        "enable_remap": "Normalize sampled noise between Remap Min and Remap Max.",
+        "remap_min": "Lower input value of the noise remapping interval.",
+        "remap_max": "Upper input value of the noise remapping interval.",
+        "noise_type": "Noise algorithm: Perlin, Simplex, Periodic, or Worley.",
+        "location_attribute": "Position attribute sampled instead of P when present.",
+        "element_size": "Inverse noise frequency when Frequency remains at its default.",
+        "use_vexpression": "Reserved expression toggle; the Rust noise cook does not evaluate VEX expressions yet.",
+        "vexpression": "Reserved VEX expression text; the Rust noise cook does not evaluate it yet.",
+        "animate": "Shift the sample position over Animation Time.",
+        "animation_speed": "Speed of the animated sample-position shift.",
+        "animation_time": "Time used for the animated sample-position shift.",
+        "fractal_type": "Fractal combination style: standard, terrain, or hybrid terrain.",
+        "warping": "Distort sample positions with a second Perlin noise field.",
+        "warp_amplitude": "Strength of the position distortion before noise sampling.",
+        "warp_frequency": "Spatial frequency of the position-distortion field.",
+        "clamp_min": "Limit the computed noise value to at least Min Value.",
+        "clamp_max": "Limit the computed noise value to at most Max Value.",
+        "min_value": "Minimum computed value when Clamp Min is enabled.",
+        "max_value": "Maximum computed value when Clamp Max is enabled.",
+    }
     import re as _re
-    _src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rust", "crates", "minihou-core", "src", "nodes", "modify.rs"), encoding="utf-8").read()
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rust", "crates", "minihou-core", "src", "nodes", "modify.rs"), encoding="utf-8") as _file:
+        _src = _file.read()
     for _node in ("noise", "mountain"):
         if ('name: "%s"' % _node) not in _src:
             continue
@@ -511,8 +553,6 @@ def meta() -> dict:
         _block = _block[_block.index('params: crate::params!('):]
         _block = _block[:_block.index(");")]
         for _key, _val in _re.findall(r'"([a-z_0-9]+)"\s*:\s*([^;\n]+?)\s*[;\n]', _block):
-            if _key in out.get(_node, {}):
-                continue
             _v = _val.strip().rstrip(";").strip()
             if _v in ("true", "false"):
                 _kind, _default = "bool", _v == "true"
@@ -524,7 +564,10 @@ def meta() -> dict:
                 _kind, _default = "int", int(_v)
             else:
                 _kind, _default = "float", float(_v)
-            out.setdefault(_node, {})[_key] = {"kind": _kind, "default": _default, "doc": "Attribute Noise parameter " + _key.replace("_", " ") + " (Houdini parity, to refine)."}
+            if _key not in noise_docs:
+                raise ValueError("missing noise parameter doc: " + _key)
+            entry = out.setdefault(_node, {}).setdefault(_key, {"kind": _kind, "default": _default})
+            entry["doc"] = noise_docs[_key]
     # Outset shares the output-group parameters of inset, with its own default group names.
     for key, default in (("output_group", False), ("output_group_name", "outset_ring"), ("output_inner_group", False), ("output_inner_group_name", "outset_boundary")):
         if key in out["inset"]:
