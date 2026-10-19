@@ -355,3 +355,4 @@ In object mode, points are still drawn even when they belong to a face or an edg
 - **Todo: null draws a crosshair in the viewport (parity with Blender).** Add a size parameter for the crosshair.
 - **Future todo: parent constraint.** Not scheduled yet.
 - **Todo: adding a lattice from the viewport Tab menu auto-fits the lattice grid to the object.** The lattice grid should be set up to match the bounds of the object it is added to.
+- **Todo: snap distance measurements to the nearest mm.** Round the measured distance to the nearest millimetre in the measurement readout.
