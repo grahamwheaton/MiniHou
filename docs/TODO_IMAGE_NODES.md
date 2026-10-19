@@ -377,3 +377,4 @@ In object mode, points are still drawn even when they belong to a face or an edg
 - **Todo: Color node domain should offer Points, Edges and Faces.** The node package is the place to change it; no shared UI files.
 - **Todo: Clip node needs a viewport gizmo to move the clip plane.** Viewport gizmo work, so it waits for Bob's split to merge (`viewport.rs` and `main.rs`).
 - **Bug: selection shows through mesh (no occlusion or backface culling) when X-ray is off.** Selection should only ignore occlusion and show backfaces when X-ray mode is on. Otherwise selection should be occluded by the mesh as normal. Viewport and picking code (`viewport.rs`, `picking.rs`), so it waits for Bob's split to merge.
+- **Todo: with two nodes selected, Tab > Merge should connect both into the new Merge node.** Currently only one is connected. Likely in the Tab menu add path (`add_node_at` in `main.rs`), so it waits for Bob's split to merge.
