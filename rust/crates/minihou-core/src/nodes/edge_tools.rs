@@ -789,6 +789,29 @@ mod tests {
     use super::*;
     use serde_json::json;
     #[test]
+    fn polybridge_uses_two_group_create_edge_loops_on_box() {
+        let box_params = Params::resolve(super::super::generate::BOX.params, None).unwrap();
+        let mut g = (super::super::generate::BOX.cook)(&[vec![]], &box_params).unwrap();
+        let edges = topo::edges(&g.topology, g.npoints);
+        for (name, z) in [("group1", -0.5), ("group2", 0.5)] {
+            let pattern = edges.points.chunks_exact(2).filter_map(|pair| {
+                let a = pair[0] as usize;
+                let b = pair[1] as usize;
+                (g.p()[3*a+2] == z && g.p()[3*b+2] == z)
+                    .then(|| format!("{}-{}", a, b))
+            }).collect::<Vec<_>>().join(" ");
+            let params = Params::resolve(super::super::group::GROUP_CREATE.params,
+                json!({"name":name,"domain":"edges","pattern":pattern}).as_object()).unwrap();
+            g = (super::super::group::GROUP_CREATE.cook)(&[vec![Arc::new(g)],vec![]], &params).unwrap();
+            assert_eq!(g.edge[&format!("group_{name}")].as_i32().unwrap().iter().filter(|&&v| v != 0).count(), 4);
+        }
+        let params = Params::resolve(POLYBRIDGE.params,
+            json!({"source":"group1","destination":"group2"}).as_object()).unwrap();
+        let out = polybridge(&[vec![Arc::new(g)]], &params).unwrap();
+        assert_eq!(out.nprims(), 10);
+        out.validate().unwrap();
+    }
+    #[test]
     fn edge_groups_and_crease_live_on_outgoing_corners() {
         let g = Geometry::from_arrays(
             vec![0., 0., 0., 1., 0., 0., 1., 1., 0., 0., 1., 0.],
