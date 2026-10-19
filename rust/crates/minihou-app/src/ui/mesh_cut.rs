@@ -115,6 +115,15 @@ fn slide_step(raw: f64, delta: Vec2, a: Pos2, b: Pos2, fine: bool) -> f64 {
     let (along, span) = if len >= 4. { (delta.dot(ab) / len, len.max(20.)) } else { (delta.x, 100.) };
     (raw + 2. * along as f64 / span as f64 * if fine { 0.1 } else { 1. }).clamp(-1., 1.)
 }
+/// Screen axis for a Loop Cut drag: it points the way a positive factor moves the loop on screen (`motion`),
+/// at the seed edge's screen length, so the sign never depends on how the drag lies against the edge or on the edge's vertex order.
+fn loop_slide_axis(pa: Pos2, pb: Pos2, motion: Option<Vec2>) -> (Pos2, Pos2) {
+    let ab = pb - pa;
+    match motion.filter(|d| d.length() > 0.01) {
+        Some(d) => (pa, pa + d.normalized() * ab.length().max(1e-3)),
+        None => (pa, pb),
+    }
+}
 /// Project a small positive cooked slide to find the side chosen by topology winding.
 fn slide_screen_motion(v: &super::View, rect: Rect, s: &State, edge: Edge) -> Option<Vec2> {
     let g = v.cooking.geometry.as_deref()?;
@@ -291,8 +300,7 @@ pub fn show(ui: &mut egui::Ui, rect: Rect, v: &View, active:Option<(&str,&std::o
                 motion.filter(|d|d.length()>0.01).map(|d|(pa,pa+d*20.)).unwrap_or((pa,pb))
             }else{
                 // Slide along the seed edge's own direction, signed by where the pointer moves across it, so the loop follows the mouse on every orientation.
-                let sign=motion.map(|d|if d.dot(pb-pa)<0. {-1.} else {1.}).unwrap_or(1.);
-                (pa,pa+(pb-pa)*sign)
+                loop_slide_axis(pa,pb,motion)
             };
             sl.raw = slide_step(sl.raw, delta, from, to, modifiers.shift);
         } }
@@ -470,6 +478,21 @@ fn loop_hint(count: usize, slide: Option<f64>, hovering: bool) -> String {
         assert_eq!(slide_factor(0., false), 0.);
         assert_eq!(slide_factor(0.437, true), 0.4);
         assert_eq!(slide_factor(0.43712, false), 0.4371);
+    }
+    #[test] fn loop_slide_direction_follows_cooked_motion_at_any_view_angle() {
+        let (a, b) = (pos2(10., 10.), pos2(110., 10.));
+        for deg in [0., 30., 80., 89., 91., 120., 180., 250., 330.] {
+            let r = f32::to_radians(deg);
+            let motion = vec2(r.cos(), r.sin()) * 3.;
+            for (pa, pb) in [(a, b), (b, a)] {
+                let (from, to) = loop_slide_axis(pa, pb, Some(motion));
+                let dir = (to - from).normalized();
+                assert!((dir - motion.normalized()).length() < 1e-4, "axis follows motion at {deg} deg");
+                // dragging along the motion always raises the factor, whichever way the edge is stored
+                assert!(slide_step(0., motion, from, to, false) > 0.);
+            }
+        }
+        assert_eq!(loop_slide_axis(a, b, None), (a, b));
     }
     #[test] fn hover_preview_is_the_node_ring_and_ignores_hidden_edges() {
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(200., 200.));

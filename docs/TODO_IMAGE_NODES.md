@@ -222,10 +222,6 @@ Parked by user: inset on non-planar regions. Tri to Quad: user will test.
 
 For nodes with output groups, show an "Output Groups" section like Houdini: one row per output group, with a checkbox (enable that group), a label (for example "Point Fillet Polygons") and a group-name field (for example `pointfilletpolys`). The name field is greyed when the checkbox is off. Applies to every node with output groups, for example polyfillet and similar nodes.
 
-## Future bug: Loop Cut slide direction sometimes backwards (reported 2026-10-18)
-
-The slide direction sometimes flips and the user can't tell what triggers it. Likely causes to check: the sign is taken from the drag vector against the edge direction (mesh_cut.rs, the `sign` in the loop slide), so a drag that is nearly perpendicular to the edge, or an edge whose vertex order differs between the two ends, could flip it. Needs a repro from the user (which edge, drag direction, view angle).
-
 ## Future bug: full ring not selected after Loop Cut slide (reported 2026-10-18)
 
 After a Loop Cut slide, the whole loop is not selected; only part of the ring stays selected. Related to the Loop Cut selection work (mesh_cut.rs, the loop_cut viewport selection restore). Needs a repro from the user: which mesh, which edge, and whether it happens after slide only or also after confirming without sliding.
