@@ -389,19 +389,19 @@ impl Topology {
     /// as its group, `select_loop` / `select_ring` the selected edges as seeds (other modes converted to edges),
     /// `select_path` the first two selected elements as waypoints. `None` for other nodes or an empty selection.
     pub fn node_params(&self, node_type: &str, sel: &Selection) -> Option<serde_json::Value> {
-        if !(SELECTION_NODES.contains(&node_type) || matches!(node_type, "edge_slide" | "group_create" | "boundary_select" | "select_sharp_edges")) || sel.is_empty() { return None; }
+        if !(SELECTION_NODES.contains(&node_type) || matches!(node_type, "edge_slide" | "group_create" | "blast" | "boundary_select" | "select_sharp_edges")) || sel.is_empty() { return None; }
         let name = match sel.mode { SelectionMode::Points => "points", SelectionMode::Edges => "edges", SelectionMode::Faces => "primitives", SelectionMode::Object => return None };
         let ids = self.ids(sel);
         if ids.is_empty() { return None; }
         let join = |mode: SelectionMode, ids: &[u32]| self.tokens(mode, ids).join(" ");
+        let group_pattern = || if sel.mode == SelectionMode::Edges {
+            ids.iter().map(|&i| { let (a, b) = self.edges[i as usize]; format!("{a}-{b}") }).collect::<Vec<_>>().join(" ")
+        } else { join(sel.mode, &ids) };
         Some(match node_type {
-            // Edge groups are not supported by group_create yet: an edge selection tags its points.
             "group_create" => {
-                let (domain, mode) = if sel.mode == SelectionMode::Faces { ("primitives", SelectionMode::Faces) } else { ("points", SelectionMode::Points) };
-                let ids = if sel.mode == SelectionMode::Edges { self.ids(&self.convert(sel, SelectionMode::Points)) } else { ids };
-                if ids.is_empty() { return None; }
-                serde_json::json!({"domain": domain, "method": "pattern", "pattern": join(mode, &ids)})
+                serde_json::json!({"domain": name, "method": "pattern", "pattern": group_pattern()})
             }
+            "blast" => serde_json::json!({"domain": name, "group": group_pattern()}),
             "boundary_select" => {
                 let dom = match sel.mode { SelectionMode::Faces => "faces", SelectionMode::Points => "points", _ => "edges" };
                 serde_json::json!({"group": join(sel.mode, &ids), "domain": dom})
@@ -959,7 +959,7 @@ mod tests {
     }
 
     #[test]
-    fn group_create_tags_the_selection_with_a_free_name() {
+    fn pick_group_create_tags_the_selection_with_a_free_name() {
         let m = grid(4, 3);
         let t = topo(&m);
         let faces = Selection { tris: vec![0, 1, 2, 3], ..sel(Faces) };
@@ -968,7 +968,8 @@ mod tests {
         let points = Selection { points: vec![2, 5], ..sel(Points) };
         assert_eq!(t.node_params("group_create", &points).unwrap()["pattern"], "2 5");
         let edges = Selection { edges: vec![(6, 7)], ..sel(Edges) };
-        assert_eq!(t.node_params("group_create", &edges).unwrap()["domain"], "points");
+        assert_eq!(t.node_params("group_create", &edges).unwrap(),
+            serde_json::json!({"domain": "edges", "method": "pattern", "pattern": "6-7"}));
         assert!(t.node_params("group_create", &sel(Faces)).is_none(), "an empty selection creates nothing");
         let mut doc = serde_json::json!({"nodes": {"a": {"type": "box"}}});
         assert_eq!(free_group_name(&doc), "group1");
@@ -985,7 +986,7 @@ mod tests {
     }
 
     #[test]
-    fn selection_nodes_take_their_seeds_from_the_selection() {
+    fn pick_selection_nodes_take_their_seeds_from_the_selection() {
         let m = grid(4, 3);
         let t = topo(&m);
         let points = Selection { points: vec![7, 3, 9], ..sel(Points) };
@@ -998,7 +999,9 @@ mod tests {
         assert_eq!(t.node_params("grow", &face).unwrap(), serde_json::json!({"group": "0", "domain": "primitives"}));
         // faces convert to their edges as loop seeds
         assert_eq!(t.node_params("select_ring", &face).unwrap()["seeds"].as_str().unwrap().split(' ').count(), 4);
-        assert!(t.node_params("blast", &points).is_none());
+        assert_eq!(t.node_params("blast", &points).unwrap(), serde_json::json!({"domain": "points", "group": "7 3 9"}));
+        assert_eq!(t.node_params("blast", &edges).unwrap(), serde_json::json!({"domain": "edges", "group": "6-7 7-8"}));
+        assert_eq!(t.node_params("blast", &face).unwrap(), serde_json::json!({"domain": "primitives", "group": "0"}));
         // Tab > Edge Slide and GG take the selected edges as the node's group
         assert_eq!(t.node_params("edge_slide", &edges).unwrap(), serde_json::json!({"group": "p6-7 p7-8"}));
         assert_eq!(t.node_params("boundary_select", &edges).unwrap(), serde_json::json!({"group": "p6-7 p7-8", "domain": "edges"}));

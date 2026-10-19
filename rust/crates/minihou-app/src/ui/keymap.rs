@@ -39,10 +39,10 @@ pub enum Command {
     ResetCursor,
     RepeatLast,
     SketchLine, SketchPolyline, SketchPolygon, SketchRectangle, SketchCircle,
-    SelectMore, SelectLess, GoToLinkSource, GoToLinkTarget, ToggleDepLinks, GroupNodes,
+    SelectMore, SelectLess, GoToLinkSource, GoToLinkTarget, ToggleDepLinks, GroupNodes, GroupCreate,
 }
 impl Command {
-    pub const ALL: [Self; 94] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::SelectLinked, Self::InvertSelection, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
+    pub const ALL: [Self; 95] = [Self::Points, Self::Edges, Self::Faces, Self::Object, Self::ToggleEdit, Self::SelectAll, Self::SelectNone, Self::SelectLinked, Self::InvertSelection, Self::Hide, Self::Reveal, Self::AddMenu, Self::ToggleParams,
         Self::ToolSelect, Self::ToolMove, Self::ToolRotate, Self::ToolScale, Self::ToolTransform,
         Self::FrameAll, Self::FrameSelected, Self::Front, Self::Back, Self::Right, Self::Left,
         Self::Top, Self::Bottom, Self::ToggleProjection, Self::OrbitDown, Self::OrbitLeft,
@@ -53,7 +53,7 @@ impl Command {
         Self::TidyNetwork, Self::Preferences, Self::BoxSelect, Self::CircleSelect, Self::LassoSelect, Self::Paint, Self::Extrude, Self::Inset, Self::Bevel, Self::PushPull, Self::LoopCut, Self::EdgeSlide, Self::Knife, Self::FlipFaces, Self::Mirror, Self::OppositeView, Self::NetworkBox, Self::PieMenu, Self::DisplayFlag, Self::MuteFlag, Self::TemplateFlag, Self::SelectableTemplateFlag, Self::FindNode,
         Self::TimelineToggle, Self::TimelinePrevious, Self::TimelineNext, Self::TimelineStart, Self::TimelineEnd,
         Self::ResetCursor, Self::RepeatLast,
-        Self::SketchLine, Self::SketchPolyline, Self::SketchPolygon, Self::SketchRectangle, Self::SketchCircle, Self::ShadePie, Self::SelectMore, Self::SelectLess, Self::GoToLinkSource, Self::GoToLinkTarget, Self::ToggleDepLinks, Self::GroupNodes];
+        Self::SketchLine, Self::SketchPolyline, Self::SketchPolygon, Self::SketchRectangle, Self::SketchCircle, Self::ShadePie, Self::SelectMore, Self::SelectLess, Self::GoToLinkSource, Self::GoToLinkTarget, Self::ToggleDepLinks, Self::GroupNodes, Self::GroupCreate];
     pub fn label(self) -> &'static str { match self {
         Self::Points => "Points", Self::Edges => "Edges", Self::Faces => "Faces", Self::Object => "Object", Self::ToggleEdit => "Toggle Object / edit mode",
         Self::SelectLinked => "Select linked", Self::InvertSelection => "Invert selection",
@@ -69,7 +69,7 @@ impl Command {
         Self::Proportional => "Proportional editing", Self::ShadeNext => "Next shading", Self::ShadePrevious => "Previous shading",
         Self::Undo => "Undo", Self::Redo => "Redo", Self::Save => "Save", Self::SaveAs => "Save as", Self::Open => "Open",
         Self::Copy => "Copy nodes", Self::Paste => "Paste nodes",
-        Self::DeleteNode => "Delete nodes", Self::DissolveNode => "Dissolve nodes", Self::DuplicateNode => "Duplicate nodes", Self::GroupNodes => "Group / ungroup nodes", Self::TidyNetwork => "Tidy network",
+        Self::DeleteNode => "Delete nodes", Self::DissolveNode => "Dissolve nodes", Self::DuplicateNode => "Duplicate nodes", Self::GroupNodes => "Group / ungroup nodes", Self::GroupCreate => "Group Create from selection", Self::TidyNetwork => "Tidy network",
         Self::Preferences => "Preferences",
         Self::BoxSelect => "Box select", Self::CircleSelect => "Circle select", Self::LassoSelect => "Lasso select", Self::Paint => "Paint",
         Self::Extrude => "Extrude (modal)", Self::Inset => "Inset", Self::Bevel => "Bevel (modal)", Self::PushPull => "Push / pull (modal)",
@@ -99,7 +99,7 @@ impl Command {
         Self::PanUp => "pan_up", Self::PanDown => "pan_down", Self::ZoomIn => "zoom_in", Self::ZoomOut => "zoom_out",
         Self::Xray => "xray", Self::Snap => "snap", Self::Proportional => "proportional", Self::ShadeNext => "shade_next",
         Self::ShadePrevious => "shade_previous", Self::Undo => "undo", Self::Redo => "redo", Self::Save => "save",
-        Self::SaveAs => "save_as", Self::Open => "open", Self::Copy => "copy", Self::Paste => "paste", Self::DeleteNode => "delete_node", Self::DissolveNode => "dissolve_node", Self::DuplicateNode => "duplicate_node", Self::GroupNodes => "group_nodes",
+        Self::SaveAs => "save_as", Self::Open => "open", Self::Copy => "copy", Self::Paste => "paste", Self::DeleteNode => "delete_node", Self::DissolveNode => "dissolve_node", Self::DuplicateNode => "duplicate_node", Self::GroupNodes => "group_nodes", Self::GroupCreate => "group_create",
         Self::TidyNetwork => "tidy_network", Self::Preferences => "preferences",
         Self::BoxSelect => "box_select", Self::CircleSelect => "circle_select", Self::LassoSelect => "lasso_select", Self::Paint => "paint",
         Self::Extrude => "extrude", Self::Inset => "inset", Self::Bevel => "bevel", Self::PushPull => "pushpull",
@@ -147,6 +147,7 @@ impl Command {
         Self::DissolveNode => UiAction::Command("dissolve_selection".into()),
         Self::DuplicateNode => UiAction::Command("duplicate_selection".into()),
         Self::GroupNodes => UiAction::Command("group_selection".into()),
+        Self::GroupCreate => UiAction::Command("group_selection".into()),
         Self::Copy | Self::Paste => UiAction::Command(self.id().to_owned()),
         Self::TidyNetwork => UiAction::TidyNetwork, Self::Preferences => UiAction::OpenPreferences,
         Self::RepeatLast => UiAction::RepeatLast,
@@ -207,6 +208,7 @@ impl Keymap {
         }
         add(K::D,true,false,false,C::DuplicateNode,X::Network);
         add(K::G,true,false,false,C::GroupNodes,X::Network);
+        add(K::G,true,false,false,C::GroupCreate,X::Viewport);
         add(K::X,true,false,false,C::DissolveNode,X::Network);
         for (key,cmd) in [(K::C,C::Copy),(K::V,C::Paste),(K::A,C::SelectAll),
             (K::F,C::FindNode)] { add(key,true,false,false,cmd,X::Network); }
@@ -413,6 +415,26 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
             let _ = ctx.run(egui::RawInput { events: vec![egui::Event::Key { key, physical_key: None,
                 pressed: true, repeat: false, modifiers: Modifiers::NONE }], ..Default::default() }, |ctx| {
                 assert!(matches!(Keymap::blender().poll(ctx, &KeyContext { network_hovered: true, ..Default::default() }).as_slice(), [UiAction::TidyNetwork]));
+            });
+        }
+    }
+    #[test] fn selection_to_node_shortcuts_follow_the_hovered_editor() {
+        let map = Keymap::blender();
+        for (key, modifiers, network, command) in [
+            (Key::G, Modifiers::CTRL, false, Command::GroupCreate),
+            (Key::G, Modifiers::CTRL, true, Command::GroupNodes),
+            (Key::X, Modifiers::NONE, false, Command::DeleteNode),
+            (Key::Delete, Modifiers::NONE, false, Command::DeleteNode),
+        ] {
+            assert!(map.bindings.iter().any(|b| b.chord == Chord::new(key, modifiers.ctrl, modifiers.shift, modifiers.alt)
+                && b.context == (if network { Context::Network } else { Context::Viewport }) && b.command == command));
+            let ctx = egui::Context::default();
+            let _ = ctx.run(egui::RawInput { modifiers, events: vec![egui::Event::Key {
+                key, physical_key: None, pressed: true, repeat: false, modifiers,
+            }], ..Default::default() }, |ctx| {
+                let actions = map.poll(ctx, &KeyContext { viewport_hovered: !network, network_hovered: network, ..Default::default() });
+                let expected = if key == Key::G { "group_selection" } else { "delete_selection" };
+                assert!(matches!(actions.as_slice(), [UiAction::Command(name)] if name == expected));
             });
         }
     }

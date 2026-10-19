@@ -364,10 +364,6 @@ Bugs:
 - Ctrl+click shortest route works on simple meshes only; it breaks with split edges.
 - Cannot double-click to open a subnet node.
 
-Selection to node (UI):
-- Ctrl+G with a viewport selection under the mouse creates a Group Create node with the selection applied (domain from the selection type).
-- X or Delete with a viewport selection creates a Blast node with the selection applied (domain aware).
-
 Nodes and parameters:
 - Outset: optional output nodes.
 - All output groups optional: checkbox, label, then group name with target select.
