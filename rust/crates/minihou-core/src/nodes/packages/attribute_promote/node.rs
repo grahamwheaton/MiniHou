@@ -4,7 +4,7 @@ use crate::error::{Error, Result};
 use crate::geometry::{AttrData, Geometry};
 use crate::params::{Params};
 use crate::nodes::attrib_tools::{table_mut, domain, size};
-pub(super) const NODE:NodeSpec=NodeSpec{name:"attribute_promote",inputs:GEO,params:crate::params!("name":"Cd";"to":"points";"method":"average";"keep_original":false),cook:promote};
+pub(super) const NODE:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"attribute_promote",inputs:GEO,params:crate::params!("name":"Cd";"to":"points";"method":"average";"keep_original":false),cook:promote};
 fn promote(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let g=NODE.one(inputs,0)?;let name=p.s("name")?;let dst=p.e("to",&["points","primitives","vertices","detail"])?;let dst=domain(&dst);
     let method=p.e("method",&["average","min","max","sum","first"])?;let keep=p.b("keep_original")?;

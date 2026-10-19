@@ -11,15 +11,15 @@ pub enum ExternalInput {
     Missing(String),
 }
 pub type ExternalInputs = HashMap<String, ExternalInput>;
-pub const BLENDER_OBJECT: NodeSpec = NodeSpec { name:"blender_object", inputs:&[], params:crate::params!("object":""; "space":"world"; "join_edges":true; "reset_transform":false), cook:waiting_object };
+pub const BLENDER_OBJECT: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name:"blender_object", inputs:&[], params:crate::params!("object":""; "space":"world"; "join_edges":true; "reset_transform":false), cook:waiting_object };
 /// Dynamic Blender interface schema stored on modifier_input graph nodes.
 /// Geometry is the node's regular output; scalar values resolve through parameter links.
 pub const MODIFIER_INPUT_KINDS: &[&str] = &[
     "float", "int", "bool", "vector", "color", "rotation", "matrix", "string", "menu",
     "object", "collection", "material", "image", "texture", "geometry", "bundle", "closure",
 ];
-pub const MODIFIER_INPUT: NodeSpec = NodeSpec { name:"modifier_input", inputs:&[], params:&[], cook:modifier_input };
-pub const OBJECT_INPUT: NodeSpec = NodeSpec { name:"object_input", inputs:&[], params:crate::params!("binding":""), cook:object_input };
+pub const MODIFIER_INPUT: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name:"modifier_input", inputs:&[], params:&[], cook:modifier_input };
+pub const OBJECT_INPUT: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name:"object_input", inputs:&[], params:crate::params!("binding":""), cook:object_input };
 fn object_input(_: &Inputs, _: &Params) -> Result<Geometry> { Err(Error::waiting("Choose an object in this modifier's Object input picker in Blender")) }
 /// What a Blender Object node tells the user while nothing is picked.
 pub const PICK_HINT: &str = "Pick an object in the MiniHou group in Blender, or connect Blender";

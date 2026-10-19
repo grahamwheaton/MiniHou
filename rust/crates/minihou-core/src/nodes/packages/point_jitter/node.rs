@@ -1,6 +1,6 @@
 use crate::nodes::{Inputs, NodeSpec, GEO};
 use crate::{error::Result, geometry::Geometry, params::Params};
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "point_jitter",
     inputs: GEO,
     params: crate::params!(

@@ -63,7 +63,7 @@ fn to_mask(n: usize, ids: impl IntoIterator<Item = u32>) -> Vec<bool> {
 /// A plain group name (not a pattern, range or id list).
 fn plain(name: &str) -> bool { model::group_name(name.trim()).is_ok() }
 
-pub const GROW: NodeSpec = NodeSpec { name: "grow", inputs: GEO, params: crate::params!(
+pub const GROW: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "grow", inputs: GEO, params: crate::params!(
     "group": ""; "domain": "primitives"; "mode": "grow"; "steps": 1; "face_step": true;
     "keep_selection": true; "result_group_name": ""; "output_group": false; "output_group_name": "grown"), cook: grow };
 fn grow(inputs: &Inputs, p: &Params) -> Result<Geometry> {
@@ -91,7 +91,7 @@ fn grow(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     Ok(out)
 }
 
-pub const SELECT_PATH: NodeSpec = NodeSpec { name: "select_path", inputs: GEO, params: crate::params!(
+pub const SELECT_PATH: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "select_path", inputs: GEO, params: crate::params!(
     "domain": "points"; "start": 0; "end": 1; "waypoints": ""; "method": "shortest_distance"; "closed": false;
     "group_name": "path"; "combine": "replace"), cook: select_path };
 /// The ordered elements of `text`: ids (and `p<a>-<b>` point pairs for edges) keep their order; group names and other
@@ -140,9 +140,9 @@ fn select_path(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     Ok(out)
 }
 
-pub const SELECT_LOOP: NodeSpec = NodeSpec { name: "select_loop", inputs: GEO, params: crate::params!(
+pub const SELECT_LOOP: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "select_loop", inputs: GEO, params: crate::params!(
     "seeds": ""; "domain": "edges"; "mode": "edge_loop"; "direction": "both"; "group_name": "loop"; "combine": "replace"), cook: select_loop };
-pub const SELECT_RING: NodeSpec = NodeSpec { name: "select_ring", inputs: GEO, params: crate::params!(
+pub const SELECT_RING: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "select_ring", inputs: GEO, params: crate::params!(
     "seeds": ""; "domain": "edges"; "direction": "both"; "group_name": "ring"; "combine": "replace"), cook: select_ring };
 fn select_loop(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let boundary = p.e("mode", &["edge_loop", "boundary_loop"])? == "boundary_loop";

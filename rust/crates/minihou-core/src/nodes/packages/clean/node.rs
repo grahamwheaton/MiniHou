@@ -3,7 +3,7 @@ use crate::nodes::attribs::matches;
 use crate::{error::Result, geometry::Geometry, params::Params};
 use std::collections::BTreeSet;
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "clean",
     inputs: GEO,
     params: crate::params!(

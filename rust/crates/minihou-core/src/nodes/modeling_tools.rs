@@ -11,50 +11,50 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-pub const SOFT_PEAK: NodeSpec = NodeSpec {
+pub const SOFT_PEAK: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "soft_peak",
     inputs: GEO,
     params: crate::params!("distance":0.3;"radius":1.;"falloff":"smooth";"group":""),
     cook: soft_peak,
 };
-pub const GROUP_RANGE: NodeSpec = NodeSpec {
+pub const GROUP_RANGE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "group_range",
     inputs: GEO,
     params: crate::params!("name":"group1";"domain":"primitives";"start":0;"end":-1;"select":1;"every":1;"offset":0;"invert":false;"combine":"replace"),
     cook: group_range,
 };
-pub const EDGE_COLLAPSE: NodeSpec = NodeSpec {
+pub const EDGE_COLLAPSE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "edge_collapse",
     inputs: GEO,
     params: crate::params!("group":"";"outgrp_collapsed":false;"outgrp_collapsed_name":"collapsedpoints"),
     cook: edge_collapse,
 };
-pub const EDGE_FLIP: NodeSpec = NodeSpec {
+pub const EDGE_FLIP: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "edge_flip",
     inputs: GEO,
     params: crate::params!("group":"";"outgrp_flipped":false;"outgrp_flipped_name":"flippededges"),
     cook: edge_flip,
 };
-pub const EDGE_CUSP: NodeSpec = NodeSpec {
+pub const EDGE_CUSP: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "edge_cusp",
     inputs: GEO,
     params: crate::params!("group":"";"cusp_angle":180.),
     cook: edge_cusp,
 };
-pub const POLYSPLIT: NodeSpec = NodeSpec {
+pub const POLYSPLIT: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "polysplit",
     inputs: GEO,
     params: crate::params!("mode":"edge_loop";"split_edges":"";"loops":1;"position":0.5;"factor":0.;"smoothness":0.;"falloff":"inverse_square";"even":false;"flipped":false;"clamp":true;"correct_uvs":true;"split_points":"";"outgrp_points":false;"outgrp_points_name":"splitpoints";"outgrp_edges":false;"outgrp_edges_name":"splitedges"),
     cook: polysplit,
 };
 // Native keymap calls this tool loop_cut; Python's node type is polysplit.
-pub const LOOP_CUT: NodeSpec = NodeSpec {
+pub const LOOP_CUT: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "loop_cut",
     inputs: GEO,
     params: POLYSPLIT.params,
     cook: polysplit,
 };
-pub const EDGE_SLIDE: NodeSpec = NodeSpec {
+pub const EDGE_SLIDE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "edge_slide",
     inputs: GEO,
     params: crate::params!("group":"";"factor":0.;"even":false;"flipped":false;"clamp":true;"mirror_editing":true;"correct_uvs":true;"output_group":false;"output_group_name":"slid_edges"),
@@ -393,19 +393,19 @@ fn edge_cusp(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     out.prim.remove("N");
     Ok(out)
 }
-pub const TWIST: NodeSpec = NodeSpec {
+pub const TWIST: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "twist",
     inputs: GEO,
     params: crate::params!("strength":90.;"origin":[0.,0.,0.];"direction":[0.,1.,0.];"group":""),
     cook: twist,
 };
-pub const LINEAR_TAPER: NodeSpec = NodeSpec {
+pub const LINEAR_TAPER: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "linear_taper",
     inputs: GEO,
     params: crate::params!("taper_x":0.5;"taper_y":0.5;"length":1.;"dropoff":1.;"origin":[0.,0.,0.];"direction":[0.,1.,0.];"up":[0.,0.,1.];"symmetric":false;"group":""),
     cook: taper,
 };
-pub const SQUASH_STRETCH: NodeSpec = NodeSpec {
+pub const SQUASH_STRETCH: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "squash_stretch",
     inputs: GEO,
     params: crate::params!("amount":1.5;"preserve_volume":true;"center":[0.,0.,0.];"direction":[0.,1.,0.];"group":""),

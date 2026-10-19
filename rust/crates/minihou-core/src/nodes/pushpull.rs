@@ -7,7 +7,7 @@ use crate::{
     params::Params,
 };
 use std::{collections::{BTreeMap, BTreeSet, HashMap}, sync::Arc};
-pub const PUSHPULL: NodeSpec = NodeSpec {
+pub const PUSHPULL: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "pushpull",
     inputs: GEO,
     params: crate::params!("group":"";"distance":0.25;"through":"auto"),
@@ -777,7 +777,7 @@ fn merge_coplanar(g: &Geometry, tol: f64) -> Result<Geometry> {
     solid(&out, "Push/Pull result")?;
     Ok(out)
 }
-pub const INSET: NodeSpec = NodeSpec {
+pub const INSET: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "inset",
     inputs: GEO,
     params: crate::params!("group":"";"amount":0.1;"mode":"connected";
@@ -786,7 +786,7 @@ pub const INSET: NodeSpec = NodeSpec {
         "output_group":false;"output_group_name":"inset_ring";"output_inner_group":false;"output_inner_group_name":"inset_inner"),
     cook: inset,
 };
-pub const OUTSET: NodeSpec = NodeSpec {
+pub const OUTSET: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "outset",
     inputs: GEO,
     params: crate::params!("group":"";"amount":0.1;"mode":"connected";

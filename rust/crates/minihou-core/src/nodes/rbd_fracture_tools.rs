@@ -12,7 +12,7 @@ use crate::error::{Error, Result};
 use crate::geometry::{Attr, AttrData, Geometry};
 use crate::params::Params;
 
-pub const RBD_CONSTRAINT_PROPERTIES: NodeSpec = NodeSpec {
+pub const RBD_CONSTRAINT_PROPERTIES: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "rbd_constraint_properties",
     inputs: &[InputSpec { name: "constraints", multi: false, optional: false }],
     params: crate::params!("group": ""; "mode": "set"; "strength": 1.0e6; "per_area": true; "variation": 0.0; "seed": 0;

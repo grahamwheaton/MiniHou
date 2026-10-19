@@ -10,7 +10,7 @@ use crate::geometry::{Attr, AttrData, AttrTable, Geometry};
 use crate::normals;
 use crate::params::Params;
 
-pub const RECALC_NORMALS: NodeSpec = NodeSpec { name: "recalc_normals", inputs: GEO, params: crate::params!(
+pub const RECALC_NORMALS: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "recalc_normals", inputs: GEO, params: crate::params!(
     "group": ""; "inside": false; "output_group": false; "output_group_name": "flipped"), cook: recalc };
 
 fn negate_rows(t: &mut AttrTable, name: &str, mask: &[bool]) {

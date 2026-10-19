@@ -3,9 +3,9 @@ use std::sync::Arc;
 use serde_json::{json,Value};
 use crate::{Geometry, Attr, Error, Result, params::Params};
 use super::{Inputs,NodeSpec,blender_input::{ExternalInput,ExternalInputs,numbers}};
-pub const BLENDER_IMAGE: NodeSpec=NodeSpec{name:"blender_image",inputs:&[],params:crate::params!("image":"";"max_size":1024;"colorspace":"auto";"size":10.;"center":[0.,0.,0.];"height":"none";"height_scale":1.),cook:waiting};
-pub const IMAGE_FILE: NodeSpec=NodeSpec{name:"image_file",inputs:&[],params:crate::params!("file":"";"max_size":1024;"colorspace":"auto";"size":10.;"center":[0.,0.,0.];"height":"none";"height_scale":1.),cook:image_file};
-pub const IMAGE_OUT: NodeSpec=NodeSpec{name:"image_out",inputs:super::GEO,params:crate::params!("image":"MiniHou";"mode":"lattice";"source":"Cd";"width":512;"height":512;"normalize":false;"encoding":"linear";"file":"",unsupported),cook:image_out};
+pub const BLENDER_IMAGE: NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"blender_image",inputs:&[],params:crate::params!("image":"";"max_size":1024;"colorspace":"auto";"size":10.;"center":[0.,0.,0.];"height":"none";"height_scale":1.),cook:waiting};
+pub const IMAGE_FILE: NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"image_file",inputs:&[],params:crate::params!("file":"";"max_size":1024;"colorspace":"auto";"size":10.;"center":[0.,0.,0.];"height":"none";"height_scale":1.),cook:image_file};
+pub const IMAGE_OUT: NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"image_out",inputs:super::GEO,params:crate::params!("image":"MiniHou";"mode":"lattice";"source":"Cd";"width":512;"height":512;"normalize":false;"encoding":"linear";"file":"",unsupported),cook:image_out};
 fn waiting(_: &Inputs,p: &Params)->Result<Geometry>{blender_image(p,&ExternalInputs::new())}
 pub fn srgb_to_linear(x:f32)->f32{if x<=0.04045{x/12.92}else{((x+0.055)/1.055).powf(2.4)}}
 pub fn linear_to_srgb(x:f32)->f32{let x=x.max(0.);if x<=0.0031308{x*12.92}else{1.055*x.powf(1./2.4)-0.055}}

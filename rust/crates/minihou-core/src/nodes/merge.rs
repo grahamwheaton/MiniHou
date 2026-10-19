@@ -7,7 +7,7 @@ use crate::error::{Error, Result};
 use crate::geometry::{Attr, AttrData, AttrTable, Geometry, Topology, MAX_ELEMENTS};
 use crate::params::Params;
 
-pub const MERGE: NodeSpec = NodeSpec {
+pub const MERGE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "merge",
     inputs: &[InputSpec { name: "geos", multi: true, optional: false }],
     params: &[],
@@ -97,7 +97,7 @@ fn concat_tables(parts: Vec<(&AttrTable, usize)>, domain: &str) -> Result<AttrTa
     Ok(out)
 }
 
-pub const SWITCH: NodeSpec = NodeSpec {
+pub const SWITCH: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "switch",
     inputs: &[InputSpec { name: "geos", multi: true, optional: false }],
     params: crate::params!(

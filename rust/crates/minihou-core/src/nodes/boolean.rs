@@ -12,7 +12,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
-pub const BOOLEAN: NodeSpec = NodeSpec {
+pub const BOOLEAN: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "boolean",
     inputs: &[
         InputSpec {

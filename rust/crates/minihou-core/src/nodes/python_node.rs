@@ -13,7 +13,7 @@ out = geo.copy()
 out.point["P"] = P.astype(np.float32)
 "#;
 
-pub const PYTHON:NodeSpec=NodeSpec{name:"python",inputs:&[
+pub const PYTHON:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"python",inputs:&[
     InputSpec{name:"geo",multi:false,optional:true},InputSpec{name:"input1",multi:false,optional:true},
     InputSpec{name:"input2",multi:false,optional:true},InputSpec{name:"input3",multi:false,optional:true}],
     params:crate::params!("code":DEFAULT_CODE;"a":0.;"b":1.;"c":0.;"d":0.;"i":0;"j":0;

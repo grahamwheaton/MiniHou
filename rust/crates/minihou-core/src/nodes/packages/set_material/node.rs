@@ -11,7 +11,7 @@ const ATTR: &str = "material_index";
 const POINT_ATTR: &str = "material_id";
 const MAX_NAME: usize = 63;
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "set_material",
     inputs: GEO,
     params: crate::params!(

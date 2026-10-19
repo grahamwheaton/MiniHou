@@ -2,7 +2,7 @@
 use super::{InputSpec, Inputs, NodeSpec};
 use crate::{error::{Error, Result}, geometry::Geometry, params::Params};
 
-pub const FENCE: NodeSpec = NodeSpec {
+pub const FENCE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "fence", inputs: &[InputSpec { name: "path", multi: false, optional: false }],
     params: crate::params!("bay_width": 2.0; "height": 1.8; "rail_height": 0.85;
         "slat_width": 0.10; "slat_gap": 0.05; "batten_thickness": 0.07; "post_size": 0.12),

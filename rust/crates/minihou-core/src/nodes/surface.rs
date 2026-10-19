@@ -9,7 +9,7 @@ use crate::{
     topo,
 };
 
-pub const CONVEX_HULL: NodeSpec = NodeSpec {
+pub const CONVEX_HULL: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "convex_hull",
     inputs: GEO,
     params: crate::params!(
@@ -23,7 +23,7 @@ pub const CONVEX_HULL: NodeSpec = NodeSpec {
     cook: convex_hull,
 };
 
-pub const BRIDGE: NodeSpec = NodeSpec {
+pub const BRIDGE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "bridge",
     inputs: GEO,
     params: crate::params!(
@@ -36,7 +36,7 @@ pub const BRIDGE: NodeSpec = NodeSpec {
     cook: bridge,
 };
 
-pub const REVOLVE: NodeSpec = NodeSpec {
+pub const REVOLVE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "revolve",
     inputs: GEO,
     params: crate::params!(
@@ -52,7 +52,7 @@ pub const REVOLVE: NodeSpec = NodeSpec {
     cook: revolve,
 };
 
-pub const SKIN: NodeSpec = NodeSpec {
+pub const SKIN: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "skin",
     inputs: GEO,
     params: crate::params!(

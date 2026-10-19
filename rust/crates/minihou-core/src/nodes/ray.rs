@@ -7,7 +7,7 @@ use crate::{
     params::Params,
 };
 use std::sync::Arc;
-pub const RAY: NodeSpec = NodeSpec {
+pub const RAY: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "ray",
     inputs: &[
         InputSpec {

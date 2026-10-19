@@ -1,6 +1,6 @@
 use crate::{error::Result, geometry::Geometry, nodes::{InputSpec, Inputs, NodeSpec}, params::Params};
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "controller",
     inputs: &[InputSpec { name: "geo", multi: false, optional: true }],
     params: &[],

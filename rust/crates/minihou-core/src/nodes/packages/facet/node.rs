@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use crate::{nodes::{Inputs, NodeSpec, GEO}, error::Result, geometry::{Attr, Geometry}, params::Params, normals};
 use crate::nodes::model::{gather, corners};
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "facet",
     inputs: GEO,
     params: crate::params!("unique_points":true;"compute_normals":false),

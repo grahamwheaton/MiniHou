@@ -10,7 +10,7 @@ use std::{
     cell::{Cell, RefCell},
     path::PathBuf,
 };
-pub const USD_EXPORT: NodeSpec = NodeSpec {
+pub const USD_EXPORT: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "usd_export",
     inputs: super::GEO,
     params: crate::params!(
@@ -20,7 +20,7 @@ pub const USD_EXPORT: NodeSpec = NodeSpec {
     ),
     cook: usd_export,
 };
-pub const USD_IMPORT: NodeSpec = NodeSpec {
+pub const USD_IMPORT: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "usd_import",
     inputs: &[],
     params: crate::params!(

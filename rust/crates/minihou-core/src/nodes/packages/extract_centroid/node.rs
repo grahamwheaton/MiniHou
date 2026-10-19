@@ -6,7 +6,7 @@ use crate::geometry::{Attr, AttrData, Geometry};
 use crate::nodes::{model, InputSpec, Inputs, NodeSpec, GEO};
 use crate::params::Params;
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "extract_centroid",
     inputs: GEO,
     params: crate::params!(

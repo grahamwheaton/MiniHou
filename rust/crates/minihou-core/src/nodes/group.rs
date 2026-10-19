@@ -81,7 +81,7 @@ pub(super) fn keep_prims(g: &Geometry, keep: &[bool], compact: bool) -> Result<G
         prim: gather_table(&g.prim, &prims), detail: g.detail.clone() })
 }
 
-pub const GROUP_CREATE:NodeSpec=NodeSpec{name:"group_create",inputs:&[InputSpec{name:"geo",multi:false,optional:false},InputSpec{name:"bounds",multi:false,optional:true}],params:crate::params!(
+pub const GROUP_CREATE:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"group_create",inputs:&[InputSpec{name:"geo",multi:false,optional:false},InputSpec{name:"bounds",multi:false,optional:true}],params:crate::params!(
     "name":"group1";"domain":"points";"method":"pattern";"pattern":"*";"box_center":[0.,0.,0.];"box_size":[1.,1.,1.];"direction":[0.,0.,1.];"angle":45.;"planes":"";"plane_offset":0.;"plane_tolerance":0.0001;"percent":50.;"seed":0;"combine":"replace";
     "base_enable":true,unsupported;"bounds_enable":false,unsupported;"bounds_type":"box",unsupported;"bounds_partial":false,unsupported;
     "normals_enable":false,unsupported;"backface_from":"",unsupported;"normals_opposite":false,unsupported;"edges_enable":false,unsupported;
@@ -176,7 +176,7 @@ fn create_edges(g:&Geometry,inputs:&Inputs,p:&Params,name:&str)->Result<Geometry
     let mut out=g.clone();out.edge.insert(key,Arc::new(Attr::i32(1,m.into_iter().map(i32::from).collect())));Ok(out)
 }
 
-pub const BLAST: NodeSpec = NodeSpec { name: "blast", inputs: GEO, params: crate::params!(
+pub const BLAST: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "blast", inputs: GEO, params: crate::params!(
     "group":"";"domain":"primitives";"delete_non_selected":false;"keep_unused_points":false), cook: blast };
 fn blast(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let g=BLAST.one(inputs,0)?;let dom=p.e("domain",&["primitives","points","edges"])?;

@@ -2,7 +2,7 @@
 use std::sync::Arc;
 use super::{Inputs,NodeSpec,GEO};
 use crate::{error::{Error, Result},geometry::{Attr, AttrData, Geometry},math,params::Params};
-pub const UV_PROJECT:NodeSpec=NodeSpec{name:"uv_project",inputs:GEO,params:crate::params!(
+pub const UV_PROJECT:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"uv_project",inputs:GEO,params:crate::params!(
     "method":"box";"center":[0.,0.,0.];"rotate":[0.,0.,0.];"scale":[1.,1.,1.];"rotate_uv":0.;"group":""),cook:project};
 fn project(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let g=UV_PROJECT.one(inputs,0)?;let method=p.e("method",&["box","planar","cylindrical","spherical"])?;
@@ -40,7 +40,7 @@ fn project(inputs:&Inputs,p:&Params)->Result<Geometry>{
     }}
     let mut out=(*g).clone();out.point.remove("uv");out.prim.remove("uv");out.vertex.insert("uv".into(),Arc::new(Attr::f32(2,values)));Ok(out)
 }
-pub const UV_TRANSFORM: NodeSpec = NodeSpec {
+pub const UV_TRANSFORM: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "uv_transform",
     inputs: GEO,
     params: crate::params!(
@@ -417,7 +417,7 @@ fn transform_uv(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     Ok(out)
 }
 
-pub const UV_FLATTEN: NodeSpec = NodeSpec {
+pub const UV_FLATTEN: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "uv_flatten",
     inputs: GEO,
     params: crate::params!(

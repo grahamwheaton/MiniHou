@@ -12,7 +12,7 @@ use crate::geometry::{Attr, Geometry};
 use crate::math;
 use crate::params::Params;
 
-pub const CURVE: NodeSpec = NodeSpec {
+pub const CURVE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "curve",
     inputs: &[InputSpec { name: "geo", multi: false, optional: true }],
     params: crate::params!("points": "0,0,0  1,0,0  1,1,0  2,1,1"; "closed": false; "split": false; "as_mesh": false;),
@@ -52,7 +52,7 @@ fn curve(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     }
 }
 
-pub const CIRCLE: NodeSpec = NodeSpec {
+pub const CIRCLE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "circle", inputs: &[],
     params: crate::params!("radius": 1.0; "center": [0.0, 0.0, 0.0]; "rotate": [0.0, 0.0, 0.0]; "divisions": 32;),
     cook: circle,
@@ -88,7 +88,7 @@ mod sketch_mesh_tests {
     }
 }
 
-pub const GRID: NodeSpec = NodeSpec {
+pub const GRID: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "grid",
     inputs: &[],
     params: crate::params!(
@@ -152,7 +152,7 @@ fn grid(_inputs: &Inputs, p: &Params) -> Result<Geometry> {
     Ok(g)
 }
 
-pub const BOX: NodeSpec = NodeSpec {
+pub const BOX: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "box",
     inputs: &[InputSpec { name: "geo", multi: false, optional: true }],
     params: crate::params!(
@@ -355,7 +355,7 @@ pub fn drop_degenerate(geo: &Geometry) -> Geometry {
     out
 }
 
-pub const SPHERE: NodeSpec = NodeSpec {
+pub const SPHERE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "sphere",
     inputs: &[],
     params: crate::params!(
@@ -449,7 +449,7 @@ fn sphere(_inputs: &Inputs, p: &Params) -> Result<Geometry> {
     Geometry::from_arrays(pts, vp, offs, None)
 }
 
-pub const TUBE: NodeSpec = NodeSpec {
+pub const TUBE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "tube",
     inputs: &[],
     params: crate::params!(
@@ -556,7 +556,7 @@ fn tube(_inputs: &Inputs, p: &Params) -> Result<Geometry> {
     Ok(g)
 }
 
-pub const TORUS: NodeSpec = NodeSpec {
+pub const TORUS: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "torus",
     inputs: &[],
     params: crate::params!(

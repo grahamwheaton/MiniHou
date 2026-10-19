@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::{GEO, InputSpec, Inputs, NodeSpec};
 use crate::{error::{Error, Result}, geometry::Geometry, params::Params};
 
-pub const DELAUNAY: NodeSpec = NodeSpec {
+pub const DELAUNAY: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "delaunay",
     inputs: GEO,
     params: crate::params!("axis": "z"; "max_edge": 0.0),

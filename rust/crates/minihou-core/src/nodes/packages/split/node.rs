@@ -6,7 +6,7 @@ use crate::{
     params::Params,
 };
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "split",
     inputs: &[InputSpec { name: "geo", multi: false, optional: false }],
     params: crate::params!("group": ""; "group_type": "primitives"; "invert_selection": false; "delete_unused_groups": false),

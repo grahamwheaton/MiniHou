@@ -13,7 +13,7 @@ use std::{
     sync::Arc,
 };
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "vertex_bevel",
     inputs: GEO,
     params: crate::params!("group": ""; "width": 0.1; "segments": 1; "profile": 0.5),

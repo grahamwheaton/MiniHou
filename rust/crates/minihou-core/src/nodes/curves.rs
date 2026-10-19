@@ -33,7 +33,7 @@ pub(super) fn chains(n:usize,edges:&[[i32;2]]) -> (Vec<Vec<i32>>,Vec<bool>) {
     for e in 0..edges.len() {if !used[e] {let mut pts=walk(edges[e][0],e,&adj,edges,&mut used);pts.pop();paths.push(pts);closed.push(true);}}
     (paths,closed)
 }
-pub const CONVERT_LINE:NodeSpec=NodeSpec{name:"convert_line",inputs:GEO,params:crate::params!("join":true),cook:convert_line};
+pub const CONVERT_LINE:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"convert_line",inputs:GEO,params:crate::params!("join":true),cook:convert_line};
 fn convert_line(inputs:&Inputs,p:&Params)->Result<Geometry> {
     let g=CONVERT_LINE.one(inputs,0)?; let e=crate::topo::edges(&g.topology,g.npoints);
     let edges:Vec<_>=e.points.chunks_exact(2).map(|e|[e[0] as i32,e[1] as i32]).collect();
@@ -42,7 +42,7 @@ fn convert_line(inputs:&Inputs,p:&Params)->Result<Geometry> {
     for path in paths {vp.extend(path);offs.push(vp.len() as i32);}
     out.topology=Arc::new(Topology{vertex_point:vp,prim_offsets:offs,closed:Some(cl)});out.vertex.clear();out.prim.clear();Ok(out)
 }
-pub const POLYPATH:NodeSpec=NodeSpec{name:"polypath",inputs:GEO,params:&[],cook:polypath};
+pub const POLYPATH:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"polypath",inputs:GEO,params:&[],cook:polypath};
 fn polypath(inputs:&Inputs,_:&Params)->Result<Geometry> {
     let g=POLYPATH.one(inputs,0)?;if !g.topology.has_open(){return Ok((*g).clone());}
     let mut edges=Vec::new();
@@ -85,7 +85,7 @@ pub(crate) fn sample(g:&Geometry,prims:&[usize],lists:&[Vec<f64>])->Result<Geome
     }
     out.point.insert("curveu".into(),Arc::new(Attr::f32(1,u)));out.prim=gather_table(&g.prim,prims);out.detail=g.detail.clone();Ok(out)
 }
-pub const CARVE:NodeSpec=NodeSpec{name:"carve",inputs:GEO,params:crate::params!("start":0.0;"end":1.0),cook:carve};
+pub const CARVE:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"carve",inputs:GEO,params:crate::params!("start":0.0;"end":1.0),cook:carve};
 fn carve(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let g=CARVE.one(inputs,0)?;let a=p.f("start")?;let b=p.f("end")?;let(lo,hi)=(a.min(b),a.max(b));let mut prims=Vec::new();let mut lists=Vec::new();
     for i in 0..g.nprims(){if g.topology.is_closed(i) || g.topology.prim_offsets[i+1]-g.topology.prim_offsets[i]<2{continue;}
@@ -101,7 +101,7 @@ fn carve(inputs:&Inputs,p:&Params)->Result<Geometry>{
 
 
 
-pub const CURVE_SIMPLIFY:NodeSpec=NodeSpec{name:"curve_simplify",inputs:GEO,params:crate::params!(
+pub const CURVE_SIMPLIFY:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"curve_simplify",inputs:GEO,params:crate::params!(
     "method":"distance";"tolerance":0.01;"angle":10.;"smooth":0;"keep":""),cook:simplify};
 fn dot(a:[f64;3],b:[f64;3])->f64{(0..3).map(|i|a[i]*b[i]).sum()}
 fn rdp(q:&[[f64;3]],lo:usize,hi:usize,tol:f64,keep:&mut[bool]){
@@ -230,7 +230,7 @@ const SWEEP_INPUTS: &[InputSpec] = &[
     InputSpec { name: "section", multi: false, optional: true },
 ];
 
-pub const SWEEP: NodeSpec = NodeSpec {
+pub const SWEEP: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "sweep",
     inputs: SWEEP_INPUTS,
     params: crate::params!(
@@ -597,7 +597,7 @@ const PATH_DEFORM_INPUTS: &[InputSpec] = &[
     InputSpec { name: "curve", multi: false, optional: false },
 ];
 
-pub const PATH_DEFORM: NodeSpec = NodeSpec {
+pub const PATH_DEFORM: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "path_deform",
     inputs: PATH_DEFORM_INPUTS,
     params: crate::params!(

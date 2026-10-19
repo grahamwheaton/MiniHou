@@ -13,7 +13,7 @@ use crate::params::Params;
 use crate::{math, noise, normals, topo, xform};
 use super::groups;
 
-pub const TRANSFORM: NodeSpec = NodeSpec {
+pub const TRANSFORM: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "transform",
     inputs: GEO,
     params: crate::params!(
@@ -187,7 +187,7 @@ fn proportional_transform(geo: &Geometry, p: &Params, selected: &[bool]) -> Resu
     Ok(out)
 }
 
-pub const NOISE: NodeSpec = NodeSpec {
+pub const NOISE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "noise",
     inputs: GEO,
     params: crate::params!(
@@ -225,7 +225,7 @@ pub const NOISE: NodeSpec = NodeSpec {
     cook: noise_node,
 };
 
-pub const MOUNTAIN: NodeSpec = NodeSpec {
+pub const MOUNTAIN: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "mountain",
     inputs: GEO,
     params: crate::params!(
@@ -602,7 +602,7 @@ fn noise_node(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     Ok(out)
 }
 
-pub const MATCH_SIZE: NodeSpec = NodeSpec {
+pub const MATCH_SIZE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     // Retained for the Python fast path; the package owns the public match_size ID.
     name: "match_size_legacy",
     inputs: &[
@@ -750,7 +750,7 @@ fn numpy_min(v: &[f64]) -> f64 {
     m
 }
 
-pub const DELETE: NodeSpec = NodeSpec {
+pub const DELETE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "delete",
     inputs: GEO,
     params: crate::params!("expr": "@P.z < 0"; "invert": false;),

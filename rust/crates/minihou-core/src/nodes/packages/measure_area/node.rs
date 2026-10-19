@@ -7,7 +7,7 @@ use crate::error::Result;
 use crate::geometry::{Attr, Geometry};
 use crate::params::Params;
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "measure_area",
     inputs: &[InputSpec { name: "geo", multi: false, optional: false }],
     params: crate::params!("group": ""),

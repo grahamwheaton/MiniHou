@@ -5,7 +5,7 @@ use crate::params::Params;
 use crate::nodes::attrib_tools::{domain, size, set};
 use serde_json::{json, Value};
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "attribute_create",
     inputs: GEO,
     params: crate::params!(

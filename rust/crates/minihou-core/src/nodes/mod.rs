@@ -113,18 +113,56 @@ pub struct InputSpec {
 /// a multi input any number).
 pub type Inputs = [Vec<Arc<Geometry>>];
 
+/// Ordered geometry sockets produced by a single node cook.
+#[derive(Clone, Debug)]
+pub struct NodeOutputs(pub Vec<Geometry>);
+
+impl From<Geometry> for NodeOutputs {
+    fn from(geometry: Geometry) -> Self { Self(vec![geometry]) }
+}
+impl From<Vec<Geometry>> for NodeOutputs {
+    fn from(geometries: Vec<Geometry>) -> Self { Self(geometries) }
+}
+impl std::ops::Index<usize> for NodeOutputs {
+    type Output = Geometry;
+    fn index(&self, index: usize) -> &Geometry { &self.0[index] }
+}
+
 #[derive(Clone, Copy)]
 pub struct NodeSpec {
     pub name: &'static str,
     pub inputs: &'static [InputSpec],
+    pub outputs: &'static [&'static str],
     pub params: &'static [ParamSpec],
     pub cook: fn(&Inputs, &Params) -> Result<Geometry>,
+    pub cook_multi: Option<fn(&Inputs, &Params) -> Result<NodeOutputs>>,
 }
 
 impl NodeSpec {
+    pub fn cook_outputs(&self, inputs: &Inputs, params: &Params) -> Result<NodeOutputs> {
+        match self.cook_multi {
+            Some(cook) => cook(inputs, params),
+            None => (self.cook)(inputs, params).map(Into::into),
+        }
+    }
     /// The single geometry on input port `i` (an error naming the port when nothing is connected).
     pub fn one(&self, inputs: &Inputs, i: usize) -> Result<Arc<Geometry>> {
         inputs[i].first().cloned().ok_or_else(|| Error::new(format!("input '{}' is not connected", self.inputs[i].name)))
+    }
+}
+
+#[cfg(test)]
+mod output_wrapper_tests {
+    use super::*;
+    #[test]
+    fn nodes_single_output_adapter() {
+        let geometry = Geometry::points_only(vec![0., 0., 0.]).unwrap();
+        let outputs: NodeOutputs = geometry.clone().into();
+        assert_eq!(outputs.0.len(), 1);
+        assert_eq!(outputs[0].npoints, 1);
+        let spec = get("null").unwrap();
+        let params = Params::resolve(spec.params, None).unwrap();
+        assert_eq!(spec.cook_outputs(&[vec![Arc::new(geometry)]], &params).unwrap().0.len(), 1);
     }
 }
 
@@ -257,8 +295,8 @@ pub fn registry() -> &'static [NodeSpec] {
         rbd_material_fracture::RBD_MATERIAL_FRACTURE,
         convex_decomposition::CONVEX_DECOMPOSITION,
         python_node::PYTHON,
-        NodeSpec { name: "lod_bake", inputs: GEO, params: crate::params!("cluster_size": 128; "error_px": 1.0; "enabled": true; "min_triangles": 50000), cook: lod_bake },
-        NodeSpec { name: "null", inputs: GEO, params: crate::params!("label": ""), cook: pass_through },
+        NodeSpec { outputs: &["geometry"], cook_multi: None, name: "lod_bake", inputs: GEO, params: crate::params!("cluster_size": 128; "error_px": 1.0; "enabled": true; "min_triangles": 50000), cook: lod_bake },
+        NodeSpec { outputs: &["geometry"], cook_multi: None, name: "null", inputs: GEO, params: crate::params!("label": ""), cook: pass_through },
         delaunay::DELAUNAY,
         surface::BRIDGE,
         surface::REVOLVE,
@@ -282,8 +320,8 @@ pub fn registry() -> &'static [NodeSpec] {
         dissolve::DISSOLVE,
         output::OUTPUT,
         output::INPUT,
-        NodeSpec { name: "subnet_input", inputs: &[], params: &[], cook: empty_subnet_input },
-        NodeSpec { name: "subnet_output", inputs: GEO, params: &[], cook: pass_through },
+        NodeSpec { outputs: &["geometry"], cook_multi: None, name: "subnet_input", inputs: &[], params: &[], cook: empty_subnet_input },
+        NodeSpec { outputs: &["geometry"], cook_multi: None, name: "subnet_output", inputs: GEO, params: &[], cook: pass_through },
     ];
     static MERGED: OnceLock<Vec<NodeSpec>> = OnceLock::new();
     MERGED.get_or_init(|| {

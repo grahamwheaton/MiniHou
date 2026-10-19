@@ -1,8 +1,8 @@
 //! Python output.py: named outputs use the same validated pass-through cook as the main output.
 use super::{InputSpec,Inputs,NodeSpec};
 use crate::{Geometry,Error,Result,params::Params};
-pub const OUTPUT:NodeSpec=NodeSpec{name:"output",inputs:super::GEO,params:crate::params!("object":""),cook:output};
-pub const INPUT:NodeSpec=NodeSpec{name:"input",inputs:&[InputSpec{name:"preview",multi:false,optional:true}],params:crate::params!("index":0;"name":"geo"),cook:input};
+pub const OUTPUT:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"output",inputs:super::GEO,params:crate::params!("object":""),cook:output};
+pub const INPUT:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"input",inputs:&[InputSpec{name:"preview",multi:false,optional:true}],params:crate::params!("index":0;"name":"geo"),cook:input};
 fn input(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let index=p.f("index")?;
     if index.fract()!=0. || !(0.0..=15.0).contains(&index){return Err(Error::new("index must be an integer from 0 to 15"));}

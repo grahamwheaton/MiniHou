@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use crate::{error::{Error, Result}, geometry::{Attr, AttrData, Geometry}, nodes::{InputSpec, Inputs, NodeSpec}, params::Params};
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "image_density",
     inputs: &[InputSpec { name: "geometry", multi: false, optional: false }],
     params: crate::params!("channel": "luminance"; "invert": true; "contrast": 1.0; "brightness": 0.0; "threshold": 0.0; "output_attribute": "density"),

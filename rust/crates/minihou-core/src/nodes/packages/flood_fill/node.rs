@@ -1,9 +1,9 @@
 //! Deterministic topology flood fill on points, edges, or faces.
 use std::{cmp::{Ordering, Reverse}, collections::{BinaryHeap, VecDeque}, sync::Arc};
 
-use crate::{error::{Error, Result}, geometry::{Attr, AttrData, Geometry}, nodes::{InputSpec, Inputs, NodeSpec}, params::Params};
+use crate::{error::{Error, Result}, geometry::{Attr, AttrData, Geometry}, nodes::{InputSpec, Inputs, NodeOutputs, NodeSpec}, params::Params};
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry", "frontier"], cook_multi: Some(cook_multi),
     name: "flood_fill",
     inputs: &[InputSpec { name: "geometry", multi: false, optional: false }],
     params: crate::params!(
@@ -118,6 +118,10 @@ fn angle(a: &[f64;3], b: &[f64;3]) -> f64 {
 }
 
 fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    Ok(cook_multi(inputs, p)?.0.remove(0))
+}
+
+fn cook_multi(inputs: &Inputs, p: &Params) -> Result<NodeOutputs> {
     let g=inputs.first().and_then(|v|v.first()).ok_or_else(||Error::new("geometry is not connected"))?;
     let domain=p.e("domain", &["points","edges","faces"])?;
     let mode=p.e("mode", &["flood","flood_to_target","regions"])?;
@@ -181,7 +185,49 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     if p.b("store_step_distance")? { dst.insert("step_distance".into(),Arc::new(Attr::i32(1,steps))); }
     if p.b("store_surface_distance")? { dst.insert("surface_distance".into(),Arc::new(Attr::f32(1,surface))); }
     if mode=="regions" { dst.insert("region_id".into(),Arc::new(Attr::i32(1,region))); }
-    Ok(out)
+    let mut frontier_edges = Vec::new();
+    match domain.as_str() {
+        "points" => {
+            for &(a, b) in &edge_pairs {
+                if selected[a as usize] != selected[b as usize] { frontier_edges.push((a,b)); }
+            }
+        }
+        "edges" => {
+            for (i, &pair) in edge_pairs.iter().enumerate() {
+                if selected[i] && (adj[i].iter().any(|&j| !selected[j]) || boundary[i]) { frontier_edges.push(pair); }
+            }
+        }
+        _ => {
+            let mut owners: std::collections::BTreeMap<(i32,i32), Vec<usize>> = std::collections::BTreeMap::new();
+            for face in 0..g.nprims() {
+                let s = g.topology.prim_offsets[face] as usize;
+                let e = g.topology.prim_offsets[face+1] as usize;
+                for v in s..e {
+                    let next = if v+1<e {v+1} else if g.topology.is_closed(face) {s} else {continue};
+                    let a=g.topology.vertex_point[v]; let b=g.topology.vertex_point[next];
+                    owners.entry((a.min(b),a.max(b))).or_default().push(face);
+                }
+            }
+            for (edge, faces) in owners {
+                if faces.iter().any(|&i|selected[i]) && (faces.len()==1 || faces.iter().any(|&i|!selected[i])) {
+                    frontier_edges.push(edge);
+                }
+            }
+        }
+    }
+    let mut points = Vec::with_capacity(frontier_edges.len()*6);
+    let mut vertices = Vec::with_capacity(frontier_edges.len()*2);
+    let mut offsets = vec![0];
+    for (a,b) in frontier_edges {
+        let base = (points.len()/3) as i32;
+        points.extend_from_slice(&g.p()[a as usize*3..a as usize*3+3]);
+        points.extend_from_slice(&g.p()[b as usize*3..b as usize*3+3]);
+        vertices.extend([base,base+1]);
+        offsets.push(vertices.len() as i32);
+    }
+    let closed = vec![false; offsets.len()-1];
+    let frontier_geo = Geometry::from_arrays(points,vertices,offsets,Some(closed))?;
+    Ok(vec![out,frontier_geo].into())
 }
 
 #[allow(clippy::too_many_arguments)]
