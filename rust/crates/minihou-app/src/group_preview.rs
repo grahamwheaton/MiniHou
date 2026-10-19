@@ -17,6 +17,7 @@ pub fn node_group_name(def: &Value) -> Option<&str> {
         "group_create" => Some(def["params"]["name"].as_str().unwrap_or("group1")),
         "boundary_select" => Some(def["params"]["output_group_name"].as_str().or_else(|| def["params"]["group_name"].as_str()).unwrap_or("boundary")),
         "select_sharp_edges" => Some(def["params"]["output_group_name"].as_str().or_else(|| def["params"]["group_name"].as_str()).unwrap_or("sharp_edges")),
+        "edge_group" | "edge_group_promote" => Some(def["params"]["name"].as_str().unwrap_or("edges")),
         "select_loop" => Some(def["params"]["group_name"].as_str().unwrap_or("loop")),
         "select_ring" => Some(def["params"]["group_name"].as_str().unwrap_or("ring")),
         "select_path" => Some(def["params"]["group_name"].as_str().unwrap_or("path")),
@@ -108,6 +109,12 @@ pub fn selection(g:&minihou_core::Geometry,name:&str)->Option<picking::Selection
         let doc=json!({"nodes":{"box":{"type":"box"},"group":{"type":"group_create","inputs":{"geo":"box"},"params":{"domain":"edges","name":"e","pattern":"0"}}},"display":"group"});
         let g=Graph::from_value(&doc).unwrap().cook(Some("group")).unwrap();
         let (faces,lines)=geometry(&g,"e");assert!(faces.is_empty());assert_eq!(lines.len(),6);
+    }
+    #[test] fn edge_group_node_previews_its_named_group() {
+        let doc=json!({"nodes":{"box":{"type":"box"},"eg":{"type":"edge_group","inputs":{"geo":"box"},"params":{"name":"e","pattern":"0"}}},"display":"eg"});
+        assert_eq!(node_group_name(&doc["nodes"]["eg"]),Some("e"));
+        let g=Graph::from_value(&doc).unwrap().cook(Some("eg")).unwrap();
+        assert_eq!(geometry(&g,"e").1.len(),6);
     }
     #[test] fn select_sharp_edges_previews_sharp_edges() {
         let doc=json!({"nodes":{"box":{"type":"box"},"sharp":{"type":"select_sharp_edges","inputs":{"geo":"box"},"params":{"angle":30.0,"output_group_name":"sharp_edges"}}},"display":"sharp"});
