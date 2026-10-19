@@ -3107,7 +3107,15 @@ impl eframe::App for App {
             self.network_hover = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| net.response.rect.contains(p));
             if self.params_open { egui::SidePanel::right("parameters").default_width(460.).show(ctx, |ui| {
                 egui::TopBottomPanel::bottom("geometry_info").resizable(true).default_height(220.).show_inside(ui, |ui| ui::geo_info::show(ui, &v, &mut out));
-                ui::params::show(ui, &v, &mut out);
+                if let Some((path,inner,selected,selected_set))=ui::network::current_scope(ctx,&self.editor.path,self.editor.doc.value()) {
+                    if let Ok(inner_graph)=Graph::from_value(&inner) {
+                        let mut scoped=v.clone(); scoped.graph=&inner_graph; scoped.doc=&inner;
+                        scoped.selected=&selected; scoped.selected_set=&selected_set;
+                        let mut actions=Actions::default();
+                        ui::params::show(ui,&scoped,&mut actions);
+                        for action in actions.0 {if let Some(edit)=ui::network::scoped_edit(self.editor.doc.value(),&path,action) {out.push(edit);}}
+                    }
+                } else {ui::params::show(ui, &v, &mut out);}
             }); }
             egui::CentralPanel::default().show(ctx, |ui| {
                 let size = ui.available_size().max(egui::vec2(1., 1.));

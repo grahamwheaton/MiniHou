@@ -177,6 +177,7 @@ impl BlenderStatus { pub fn connected(&self) -> bool { self.clients.iter().any(|
 pub struct CameraInfo { pub yaw: f32, pub pitch: f32, pub ortho: bool,
     pub projection: [[f32; 4]; 4], pub ray_origin: [f32; 3], pub ray_forward: [f32; 3], pub ray_right: [f32; 3], pub ray_up: [f32; 3] }
 
+#[derive(Clone)]
 pub struct View<'a> {
     pub graph: &'a Graph,
     /// The document JSON (parameter values, node positions if the file has them).
