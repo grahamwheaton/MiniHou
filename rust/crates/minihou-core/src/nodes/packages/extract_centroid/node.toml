@@ -1,0 +1,5 @@
+id = "extract_centroid"
+name = "Extract Centroid"
+category = "Modify"
+description = "Extract geometric center or center of mass as points or attribute (Houdini Extract Centroid parity)."
+keywords = "extract centroid center piece mass bounding box"

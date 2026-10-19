@@ -1,0 +1,50 @@
+{
+  "attrib_name": {
+    "default": "centroid",
+    "doc": "Attribute name to write when output is set to attribute",
+    "kind": "str"
+  },
+  "class": {
+    "default": "detail",
+    "doc": "Calculate centroid for whole geometry (detail), per piece (pieces), or per primitive (primitives)",
+    "kind": "enum",
+    "options": [
+      "detail",
+      "pieces",
+      "primitives"
+    ]
+  },
+  "group": {
+    "default": "",
+    "doc": "Subset of geometry to process",
+    "kind": "str"
+  },
+  "method": {
+    "default": "center_of_mass",
+    "doc": "Calculation method: area-weighted center of mass or bounding box center",
+    "kind": "enum",
+    "options": [
+      "center_of_mass",
+      "bounding_box"
+    ]
+  },
+  "output": {
+    "default": "points",
+    "doc": "Output mode: create new points at centroid locations, or add a centroid attribute to input geometry",
+    "kind": "enum",
+    "options": [
+      "points",
+      "attribute"
+    ]
+  },
+  "piece_attrib": {
+    "default": "piece",
+    "doc": "Primitive or point attribute identifying pieces (empty uses connectivity)",
+    "kind": "str"
+  },
+  "transfer_attribs": {
+    "default": "",
+    "doc": "Space-separated names or wildcard pattern of attributes to transfer from pieces to centroid points",
+    "kind": "str"
+  }
+}
