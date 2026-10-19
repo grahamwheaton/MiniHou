@@ -87,14 +87,14 @@ const DEFORM_INPUTS: &[InputSpec] = &[
 pub const LATTICE: NodeSpec = NodeSpec {
     name: "lattice",
     inputs: DEFORM_INPUTS,
-    params: crate::params!("group": ""; "outside": "clamp"),
+    params: crate::params!("group": ""; "outside": "clamp"; "strength": 1.0),
     cook: lattice,
 };
 
 pub const POINT_DEFORM: NodeSpec = NodeSpec {
     name: "point_deform",
     inputs: DEFORM_INPUTS,
-    params: crate::params!("radius": 0.0; "max_points": 16; "group": ""),
+    params: crate::params!("radius": 0.0; "max_points": 16; "group": ""; "strength": 1.0),
     cook: point_deform,
 };
 
@@ -124,6 +124,8 @@ fn lattice(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     }
 
     let outside = p.e("outside", &["clamp", "unchanged"])?;
+    let strength = p.f("strength")?;
+    if !strength.is_finite() { return Err(Error::new("lattice strength must be finite")); }
     let sel = super::group::mask(&geo, "point", &p.s("group")?)?;
 
     let rp = rest.p();
@@ -211,7 +213,7 @@ fn lattice(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                 }
             }
         }
-        [pt[0] + d[0], pt[1] + d[1], pt[2] + d[2]]
+        [pt[0] + strength * d[0], pt[1] + strength * d[1], pt[2] + strength * d[2]]
     };
 
     apply_deformation(&geo, &sel, map_pt)
@@ -323,6 +325,8 @@ fn point_deform(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     }
 
     let radius = p.f("radius")?;
+    let strength = p.f("strength")?;
+    if !strength.is_finite() { return Err(Error::new("point_deform strength must be finite")); }
     let max_points = p.i("max_points")? as usize;
     let sel = super::group::mask(&geo, "point", &p.s("group")?)?;
 
@@ -420,7 +424,7 @@ fn point_deform(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             }
         }
 
-        [pt[0] + disp[0], pt[1] + disp[1], pt[2] + disp[2]]
+        [pt[0] + strength * disp[0], pt[1] + strength * disp[1], pt[2] + strength * disp[2]]
     };
 
     apply_deformation(&geo, &sel, map_pt)
@@ -657,6 +661,21 @@ mod tests {
         let p = Params::resolve(POINT_DEFORM.params, None).unwrap();
         let out = point_deform(&[vec![Arc::new(g)], vec![Arc::new(one)], vec![Arc::new(moved)]], &p).unwrap();
         assert_eq!(out.p(), &[1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn capture_deform_strength_blends_displacement() {
+        let rest = lattice_grid(&[], &Params::resolve(LATTICE_GRID.params, None).unwrap()).unwrap();
+        let mut moved = rest.clone();
+        let mut positions = moved.p().to_vec();
+        for xyz in positions.chunks_exact_mut(3) { xyz[0] += 2.0; }
+        moved.set_p(positions);
+        let geo = Geometry::points_only(vec![0., 0., 0.]).unwrap();
+        let inputs = [vec![Arc::new(geo)], vec![Arc::new(rest)], vec![Arc::new(moved)]];
+        let p = Params::resolve(LATTICE.params, serde_json::json!({"strength":0.5}).as_object()).unwrap();
+        assert!((lattice(&inputs, &p).unwrap().p()[0] - 1.0).abs() < 1e-6);
+        let p = Params::resolve(POINT_DEFORM.params, serde_json::json!({"strength":0.5}).as_object()).unwrap();
+        assert!((point_deform(&inputs, &p).unwrap().p()[0] - 1.0).abs() < 1e-5);
     }
 
     #[test]

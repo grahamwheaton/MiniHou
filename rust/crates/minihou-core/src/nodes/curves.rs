@@ -606,7 +606,9 @@ pub const PATH_DEFORM: NodeSpec = NodeSpec {
         "up": [0.0, 0.0, 1.0];
         "offset": 0.0;
         "stretch": false;
-        "twist": 0.0
+        "twist": 0.0;
+        "group": "";
+        "strength": 1.0
     ),
     cook: path_deform,
 };
@@ -691,6 +693,9 @@ fn path_deform(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let stretch = p.b("stretch")?;
     let offset = p.f("offset")?;
     let twist = p.f("twist")?;
+    let strength = p.f("strength")?;
+    if !strength.is_finite() { return Err(Error::new("path_deform strength must be finite")); }
+    let selected = super::group::mask(&geo, "point", &p.s("group")?)?;
 
     let p_slice = geo.p();
     let mut min_k = f64::INFINITY;
@@ -712,6 +717,13 @@ fn path_deform(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             p_slice[pt_idx * 3 + 1] as f64,
             p_slice[pt_idx * 3 + 2] as f64,
         ];
+        if !selected[pt_idx] || strength == 0.0 {
+            new_p.extend(orig.map(|v| v as f32));
+            if let (Some(n_src), Some(n_dst)) = (n_slice, &mut new_normals) {
+                n_dst.extend_from_slice(&n_src[pt_idx * 3..pt_idx * 3 + 3]);
+            }
+            continue;
+        }
         let mut along = orig[k] - min_k;
         if stretch {
             along *= total_len / ptp_k;
@@ -787,9 +799,7 @@ fn path_deform(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             base[1] + col0[1] * local[0] + col1[1] * local[1] + col2[1] * local[2],
             base[2] + col0[2] * local[0] + col1[2] * local[1] + col2[2] * local[2],
         ];
-        new_p.push(res_pt[0] as f32);
-        new_p.push(res_pt[1] as f32);
-        new_p.push(res_pt[2] as f32);
+        for k in 0..3 { new_p.push((orig[k] + strength * (res_pt[k] - orig[k])) as f32); }
 
         if let (Some(n_src), Some(n_dst)) = (n_slice, &mut new_normals) {
             let norm_orig = [
@@ -802,9 +812,7 @@ fn path_deform(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                 col0[1] * norm_orig[0] + col1[1] * norm_orig[1] + col2[1] * norm_orig[2],
                 col0[2] * norm_orig[0] + col1[2] * norm_orig[1] + col2[2] * norm_orig[2],
             ];
-            n_dst.push(res_norm[0] as f32);
-            n_dst.push(res_norm[1] as f32);
-            n_dst.push(res_norm[2] as f32);
+            for k in 0..3 { n_dst.push((norm_orig[k] + strength * (res_norm[k] - norm_orig[k])) as f32); }
         }
     }
 
@@ -849,6 +857,16 @@ mod tests {
         let p = Params::resolve(PATH_DEFORM.params, serde_json::json!({"axis": "x"}).as_object()).unwrap();
         let out = path_deform(&[vec![Arc::new(pts)], vec![Arc::new(crv)]], &p).unwrap();
         assert_eq!(out.npoints, 2);
+    }
+    #[test]
+    fn path_deform_group_and_strength() {
+        let mut pts = Geometry::points_only(vec![0.5, 0., 0., 1.5, 0., 0.]).unwrap();
+        pts.point.insert("group_pick".into(), Arc::new(Attr::i32(1, vec![1, 0])));
+        let crv = curve(vec![0., 0., 0., 10., 0., 0.], false).unwrap();
+        let p = Params::resolve(PATH_DEFORM.params, serde_json::json!({"group":"pick","strength":0.5}).as_object()).unwrap();
+        let out = path_deform(&[vec![Arc::new(pts)], vec![Arc::new(crv)]], &p).unwrap();
+        assert!((out.p()[0] - 0.25).abs() < 1e-6);
+        assert!((out.p()[3] - 1.5).abs() < 1e-6);
     }
 }
 

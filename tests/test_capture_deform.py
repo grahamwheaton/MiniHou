@@ -4,6 +4,13 @@ from tests.test_edge_tools import mesh,run
 
 
 class CaptureTests(unittest.TestCase):
+    def test_lattice_and_point_strength(self):
+        rest = run('lattice_grid')
+        moved = run('transform', rest, translate=[2, 0, 0])
+        geo = mesh([[0, 0, 0]], [])
+        np.testing.assert_allclose(run('lattice', geo, rest, moved, strength=.5).P, [[1, 0, 0]])
+        np.testing.assert_allclose(run('point_deform', geo, rest, moved, strength=.5).P, [[1, 0, 0]], atol=1e-5)
+
     def test_soft_falloff_group_and_immutable_attributes(self):
         g = mesh([[0,0,0],[.5,0,0],[1,0,0],[2,0,0]],[[0,1,2,3]],[False])
         g.point['group_move']=[1,1,1,0]

@@ -108,8 +108,9 @@ def _controls(rest,deformed):
 
 @node('lattice', inputs=['geo','rest','deformed'], category='deform', params=[
     Str('group',''), Enum('outside',['clamp','unchanged'],doc='Outside rest bounds: clamp displacement lookup or leave points unchanged'),
+    Float('strength',1.0,doc='Blend the lattice displacement; 0 leaves geometry unchanged'),
 ])
-def lattice(geo,rest,deformed,group,outside):
+def lattice(geo,rest,deformed,group,outside,strength):
     """Trilinear displacement from a complete axis-aligned rectilinear rest grid. Deformed controls retain point order."""
     A,B = _controls(rest,deformed)
     axes = [np.unique(A[:,k]) for k in range(3)]
@@ -139,7 +140,7 @@ def lattice(geo,rest,deformed,group,outside):
             D += w[:,None]*delta[tuple(indices[k]+corner[k] for k in range(3))]
         if outside == 'unchanged':
             D[~inside] = 0
-        return P+D
+        return P+strength*D
     return _apply(geo,mapping,group)
 
 
@@ -147,8 +148,9 @@ def lattice(geo,rest,deformed,group,outside):
     Float('radius',0,min=0,doc='0: nearest controls without a radius cutoff; otherwise uncaptured points stay unchanged'),
     Int('max_points',16,min=1,max=128,doc='Nearest control samples per point; at least four noncoplanar samples for full affine reproduction'),
     Str('group',''),
+    Float('strength',1.0,doc='Blend the fitted displacement; 0 leaves geometry unchanged'),
 ])
-def point_deform(geo,rest,deformed,radius,max_points,group):
+def point_deform(geo,rest,deformed,radius,max_points,group,strength):
     """Weighted local affine displacement fit to corresponding control clouds. NumPy-only; no stored capture or piece matching."""
     A,B = _controls(rest,deformed)
     if geo.npoints*len(A)>50_000_000:
@@ -173,6 +175,6 @@ def point_deform(geo,rest,deformed,radius,max_points,group):
             Y = delta[ix]-mean
             # Minimum-norm displacement gradient: unconstrained directions keep identity.
             grad = np.linalg.pinv(X*np.sqrt(w[:,None]),rcond=1e-8)@(Y*np.sqrt(w[:,None]))
-            Q[i] += mean+(p-center)@grad
+            Q[i] += strength*(mean+(p-center)@grad)
         return Q
     return _apply(geo,mapping,group)

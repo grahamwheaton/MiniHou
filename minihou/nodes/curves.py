@@ -615,8 +615,10 @@ def sweep(geo, section=None, *, radius, section_scale, divisions, caps, twist, *
     Float("offset", 0.0, soft_min=-10.0, soft_max=10.0, doc="Slide along the curve (distance)"),
     Bool("stretch", False, doc="Scale the length to fit the whole curve"),
     Float("twist", 0.0, soft_min=-720.0, soft_max=720.0, doc="Degrees of twist over the curve's length"),
+    Str("group", "", doc="Points to deform"),
+    Float("strength", 1.0, doc="Blend between the input and path deformation"),
 ])
-def path_deform(geo, curve, axis, frame, up, offset, stretch, twist):
+def path_deform(geo, curve, axis, frame, up, offset, stretch, twist, group, strength):
     """Bend geometry along a curve (Houdini's Path Deform, Blender's Curve modifier). Cross-sections follow
     rotation-minimising frames, so nothing twists unless asked; beyond the ends the geometry continues straight.
     Uses the first primitive of the curve input; rotates N."""
@@ -672,9 +674,15 @@ def path_deform(geo, curve, axis, frame, up, offset, stretch, twist):
     local = P.copy()
     local[:, k] = 0.0
     out = geo.copy()
-    out.point["P"] = (base + np.einsum("nij,nj->ni", F, local)).astype(np.float32)
+    selected = groups.mask(geo, 'point', group)
+    selected = np.ones(geo.npoints, bool) if selected is None else selected
+    factor = np.where(selected, strength, 0.0)[:, None]
+    target = base + np.einsum("nij,nj->ni", F, local)
+    out.point["P"] = (P + factor * (target - P)).astype(np.float32)
     if "N" in geo.point:
-        out.point["N"] = np.einsum("nij,nj->ni", F, geo.point["N"].astype(np.float64)).astype(np.float32)
+        normals = geo.point["N"].astype(np.float64)
+        target_normals = np.einsum("nij,nj->ni", F, normals)
+        out.point["N"] = (normals + factor * (target_normals - normals)).astype(np.float32)
     return out
 
 
