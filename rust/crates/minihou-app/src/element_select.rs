@@ -309,6 +309,21 @@ impl Topology {
     }
 }
 
+fn minihou_app_meta(node_type: &str, name: &str) -> Option<&'static serde_json::Value> { minihou_app::param_meta(node_type, name) }
+
+/// The input group field a new node takes the viewport selection in, plus its domain parameter (`domain` / `group_type`)
+/// when it has one. `None` for generators (no inputs), output group fields and nodes without a group field.
+pub fn find_input_group_field(node_type: &str) -> Option<(&'static str, Option<&'static str>)> {
+    use crate::ui::params::is_input_group_field;
+    let spec = minihou_core::nodes::get(node_type)?;
+    if spec.inputs.is_empty() { return None; }
+    let field = spec.params.iter().map(|p| p.name)
+        .filter(|n| is_input_group_field(n, minihou_app_meta(node_type, n)))
+        .min_by_key(|n| (*n != "group", *n != "pattern"))?;
+    let domain = ["domain", "group_type"].into_iter().find(|d| spec.params.iter().any(|p| p.name == *d));
+    Some((field, domain))
+}
+
 /// Selection nodes that take their seeds from the viewport selection when added from the Tab menu (docs/RUST_SELECT_NODES.md).
 pub const SELECTION_NODES: [&str; 4] = ["grow", "select_path", "select_loop", "select_ring"];
 
@@ -389,7 +404,8 @@ impl Topology {
     /// as its group, `select_loop` / `select_ring` the selected edges as seeds (other modes converted to edges),
     /// `select_path` the first two selected elements as waypoints. `None` for other nodes or an empty selection.
     pub fn node_params(&self, node_type: &str, sel: &Selection) -> Option<serde_json::Value> {
-        if !(SELECTION_NODES.contains(&node_type) || matches!(node_type, "edge_slide" | "group_create" | "boundary_select" | "select_sharp_edges")) || sel.is_empty() { return None; }
+        let special = SELECTION_NODES.contains(&node_type) || matches!(node_type, "edge_slide" | "group_create" | "boundary_select" | "select_sharp_edges");
+        if !(special || find_input_group_field(node_type).is_some()) || sel.is_empty() { return None; }
         let name = match sel.mode { SelectionMode::Points => "points", SelectionMode::Edges => "edges", SelectionMode::Faces => "primitives", SelectionMode::Object => return None };
         let ids = self.ids(sel);
         if ids.is_empty() { return None; }
@@ -418,6 +434,27 @@ impl Topology {
             }
             "grow" => serde_json::json!({"group": join(sel.mode, &ids), "domain": name}),
             "select_path" => serde_json::json!({"waypoints": join(sel.mode, &ids[..ids.len().min(2)]), "domain": name}),
+            other if !SELECTION_NODES.contains(&other) => {
+                let (field, domain_param) = find_input_group_field(other)?;
+                let meta = minihou_app_meta(other, field);
+                let fixed = meta.filter(|m| m.get("pick_domain_param").is_none()).and_then(|m| crate::ui::params::pick_domain(Some(m), &serde_json::Value::Null));
+                let options: Vec<&str> = domain_param.and_then(|d| minihou_app_meta(other, d)).and_then(|m| m["options"].as_array())
+                    .map(|o| o.iter().filter_map(|v| v.as_str()).collect()).unwrap_or_default();
+                let (target, domain_value) = match (fixed, domain_param) {
+                    (Some(mode), _) => (mode, None),
+                    (None, Some(d)) => {
+                        let value = match sel.mode { SelectionMode::Points => "points", SelectionMode::Edges => "edges", _ => if options.contains(&"faces") { "faces" } else { "primitives" } };
+                        if !options.contains(&value) { return None; }
+                        (sel.mode, Some((d, value)))
+                    }
+                    (None, None) => (SelectionMode::Points, None),
+                };
+                let ids = if target == sel.mode { ids } else { self.ids(&self.convert(sel, target)) };
+                if ids.is_empty() { return None; }
+                let mut params = serde_json::json!({ field: join(target, &ids) });
+                if let Some((d, v)) = domain_value { params[d] = serde_json::json!(v); }
+                params
+            }
             _ => {
                 let edges = if sel.mode == SelectionMode::Edges { ids } else { self.ids(&self.convert(sel, SelectionMode::Edges)) };
                 if edges.is_empty() { return None; }
@@ -959,6 +996,24 @@ mod tests {
     }
 
     #[test]
+    fn generic_nodes_take_the_selection_as_group_input() {
+        let t = topo(&grid(3, 3));
+        let points = Selection { mode: Points, points: vec![1, 2], ..Default::default() };
+        let b = t.node_params("blast", &points).unwrap();
+        assert_eq!(b, serde_json::json!({"group": "1 2", "domain": "points"}));
+        assert_eq!(t.node_params("polybevel", &points).unwrap(), serde_json::json!({"group": "1 2", "group_type": "points"}));
+        assert_eq!(t.node_params("transform", &points).unwrap(), serde_json::json!({"group": "1 2"}));
+        let edges = Selection { mode: Edges, edges: vec![(0, 1)], ..Default::default() };
+        assert_eq!(t.node_params("subdivide", &edges).unwrap(), serde_json::json!({"creases": "p0-1"}));
+        assert_eq!(t.node_params("blast", &edges).unwrap()["domain"], "edges");
+        assert_eq!(t.node_params("transform", &edges).unwrap()["group"], "0 1");
+        for gen in ["box", "grid"] { assert!(t.node_params(gen, &points).is_none(), "{gen}"); assert!(find_input_group_field(gen).is_none()); }
+        assert!(t.node_params("blast", &sel(Points)).is_none());
+        assert!(t.node_params("blast", &sel(SelectionMode::Object)).is_none());
+        assert_eq!(find_input_group_field("blast"), Some(("group", Some("domain"))));
+    }
+
+    #[test]
     fn group_create_tags_the_selection_with_a_free_name() {
         let m = grid(4, 3);
         let t = topo(&m);
@@ -998,7 +1053,7 @@ mod tests {
         assert_eq!(t.node_params("grow", &face).unwrap(), serde_json::json!({"group": "0", "domain": "primitives"}));
         // faces convert to their edges as loop seeds
         assert_eq!(t.node_params("select_ring", &face).unwrap()["seeds"].as_str().unwrap().split(' ').count(), 4);
-        assert!(t.node_params("blast", &points).is_none());
+        assert!(t.node_params("box", &points).is_none());
         // Tab > Edge Slide and GG take the selected edges as the node's group
         assert_eq!(t.node_params("edge_slide", &edges).unwrap(), serde_json::json!({"group": "p6-7 p7-8"}));
         assert_eq!(t.node_params("boundary_select", &edges).unwrap(), serde_json::json!({"group": "p6-7 p7-8", "domain": "edges"}));
