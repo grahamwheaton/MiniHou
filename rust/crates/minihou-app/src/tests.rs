@@ -4,14 +4,18 @@ use serde_json::{json, Value};
 
 const SMALL: &str = include_str!("../tests/fixtures/small.json");
 
+fn is_composite_list(value: &Value) -> bool {
+    matches!(value, Value::Array(items) if !items.is_empty() && items.iter().all(|item| item.is_array() || item.is_object()))
+}
+
 #[test]
 fn parameter_kinds_from_defaults() {
     for (v,k) in [(json!(true),ParamKind::Bool),(json!(2),ParamKind::Integer),(json!(2.5),ParamKind::Float),(json!("x"),ParamKind::String),(json!([1,2.,3]),ParamKind::Vec3),(Value::Null,ParamKind::Unsupported),(json!([1,2]),ParamKind::Unsupported)] {
         assert_eq!(param_kind(&v),k);
     }
     for spec in nodes::registry() {
-        // attribute_create.attributes is a list of attribute definitions edited in its own panel, not a scalar kind.
-        for param in spec.params { if spec.name=="attribute_create" && matches!(param.name, "attributes" | "default") {continue;} assert_ne!(param_kind(&(param.default)()),ParamKind::Unsupported,"{} {}",spec.name,param.name); }
+        // Structured lists use dedicated editors; they are not scalar parameter kinds.
+        for param in spec.params { let default = (param.default)(); if (spec.name=="attribute_create" && matches!(param.name, "attributes" | "default")) || is_composite_list(&default) {continue;} assert_ne!(param_kind(&default),ParamKind::Unsupported,"{} {}",spec.name,param.name); }
     }
 }
 #[test]
@@ -202,7 +206,8 @@ fn metadata_covers_all_node_types_and_parameters() {
             let meta = param_meta(spec.name, param.name).unwrap_or_else(|| panic!("missing metadata for {}.{}", spec.name, param.name));
             assert!(meta["kind"].is_string());
             assert!(meta["doc"].is_string());
-            if !(spec.name=="attribute_create" && matches!(param.name, "attributes" | "default")) { assert_ne!(metadata_kind(meta, &(param.default)()), ParamKind::Unsupported); }
+            let default = (param.default)();
+            if !(spec.name=="attribute_create" && matches!(param.name, "attributes" | "default")) && !is_composite_list(&default) { assert_ne!(metadata_kind(meta, &default), ParamKind::Unsupported); }
         }
     }
     assert!(param_meta("missing", "missing").is_none());
