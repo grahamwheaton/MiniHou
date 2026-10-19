@@ -347,3 +347,49 @@ Hover over a parameter value and press Ctrl+C to copy it. Hover over another par
 ## Feature: silhouette outline for a selected object (requested 2026-10-18)
 
 When an object is selected, show only its silhouette outline (the outer edge seen from the camera) in orange, not the internal faces and edges. Screenshot 86 shows the current internal edges on a selected object.
+
+## Testing feedback round 3 (2026-10-19)
+
+Bugs:
+- Edge groups are still not tagged purple in the viewport.
+- Transforming a selection only works with an Output node at the end of the stream (should work without it; see the display fix fix A).
+- Scale cage 'C' keymap is lost: it triggers circle select. Remove the conflict or choose another key. Add a toolbar icon for scale cage and a dedicated node (or check whether Match Size covers it).
+- Ctrl+B with bevels selected should trigger the vertex bevel node, with an auto group.
+- Mirror gizmo has gone; restore it.
+- Copy to Points: with pack on, nothing reaches Blender (it looks right in MiniHou).
+- Blender Object: clicking reset transform has no effect in MiniHou (Blender changes the result).
+- Scene Objects: after a reload, moved objects jump back to their MiniHou positions. Overridden empty positions must persist.
+- Deleting nodes from an embedded Blender graph can make Blender unresponsive.
+- Inset needs to auto-merge (parity with Blender). Vertex bevel needs parity with Blender and must flow correctly.
+- Ctrl+click shortest route works on simple meshes only; it breaks with split edges.
+- Cannot double-click to open a subnet node.
+
+Selection to node (UI):
+- Ctrl+G with a viewport selection under the mouse creates a Group Create node with the selection applied (domain from the selection type).
+- X or Delete with a viewport selection creates a Blast node with the selection applied (domain aware).
+
+Nodes and parameters:
+- Outset: optional output nodes.
+- All output groups optional: checkbox, label, then group name with target select.
+- PolyExtrude: offset-even checkbox (Blender parity).
+- Delete node: full Houdini parity.
+- Grid primitive defaults to 3x3.
+- New node: Extract Centroid (Houdini parity). New node: Normal (Houdini parity). New node: Fuse (Houdini parity).
+- Blender curves input (support).
+- Controller node (thought done; verify).
+- Array: full Blender parity.
+- Boolean parameters not working when exposed to Blender (check supported parameter types).
+
+Icons:
+- Proper shelf icons for the new loop tools, Pack, Split, Unpack and the others.
+
+Future:
+- Extrude and push/pull as one node.
+- Input slots need tooltips.
+- Gizmos for all deformers.
+- SVG to curves input and output.
+- Pivot control.
+- Auto-merge checkbox (adds a Fuse node automatically).
+- Transform UVs; transform origin.
+- Audit the Maya modelling tools.
+- File > New and the whole File menu; should the Blender link icon be in one unified menu?
