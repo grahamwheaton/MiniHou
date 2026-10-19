@@ -41,8 +41,6 @@ impl Graph {
         let bad = || Error::new("graph JSON must be an object with a 'nodes' object");
         let obj = v.as_object().ok_or_else(bad)?;
         let nodes_v = obj.get("nodes").and_then(Value::as_object).ok_or_else(bad)?;
-        let expanded = expand_subnets(nodes_v)?;
-        let nodes_v = expanded.as_ref().unwrap_or(nodes_v);
         if let Some(ver) = obj.get("version") {
             if ver.as_i64() != Some(GRAPH_VERSION) {
                 return Err(Error::new(format!("unsupported graph version {ver} (this build reads {GRAPH_VERSION})")));
@@ -106,7 +104,7 @@ impl Graph {
         let nodes = value["nodes"].as_object_mut().expect("validated graph");
         nodes.retain(|id, _| self.nodes.iter().any(|(n, _)| n == id));
         for (id, def) in &self.nodes {
-            // Subnets are expanded at load time: their inner nodes ("a/b") and the subnet itself stay as written.
+            // The inner graph is stored on the subnet node in the original document.
             if id.contains('/') || def.node_type == "subnet" { continue; }
             let nd = nodes.entry(id.clone()).or_insert_with(|| serde_json::json!({}));
             nd["type"] = Value::String(def.node_type.clone());
@@ -176,6 +174,18 @@ impl Graph {
 
     /// Cook `target` (default: the main output).
     pub fn cook(&self, target: Option<&str>) -> Result<Arc<Geometry>> {
+        if !self.nodes.iter().any(|(_, def)| def.node_type == "subnet") {
+            return self.cook_expanded(target);
+        }
+        let mut value = self.to_value();
+        if let Some(expanded) = expand_subnets(value["nodes"].as_object().expect("validated graph"))? {
+            value["nodes"] = Value::Object(expanded);
+            return Graph::from_value(&value)?.cook_expanded(target);
+        }
+        self.cook_expanded(target)
+    }
+
+    fn cook_expanded(&self, target: Option<&str>) -> Result<Arc<Geometry>> {
         let target = match target {
             Some(t) => t.to_string(),
             None => self.main_output()?,
@@ -301,4 +311,44 @@ fn flatten_subnets(nodes: &Map<String, Value>, prefix: &str, ext: &[String], out
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod subnet_graph_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn grouped_box() -> Value {
+        json!({"version": 1, "display": "out", "nodes": {
+            "subnet1": {"type": "subnet", "inner": {"nodes": {
+                "box1": {"type": "box"},
+                "subdivide1": {"type": "subdivide", "inputs": {"geo": "box1"},
+                    "params": {"depth": 1, "algorithm": "linear"}}
+            }, "output": "subdivide1"}},
+            "out": {"type": "output", "inputs": {"geo": "subnet1"}}
+        }})
+    }
+
+    #[test]
+    fn graph_from_value_keeps_one_subnet_node() {
+        let graph = Graph::from_value(&grouped_box()).unwrap();
+        assert_eq!(graph.nodes.len(), 2);
+        assert_eq!(graph.node("subnet1").unwrap().node_type, "subnet");
+        assert!(graph.node("subnet1/box1").is_none());
+        assert!(graph.node("subnet1/subdivide1").is_none());
+        assert_eq!(graph.to_value(), grouped_box());
+    }
+
+    #[test]
+    fn graph_cook_subnet_matches_flattened_box_subdivide() {
+        let grouped = grouped_box();
+        let mut flattened = grouped.clone();
+        flattened["nodes"] = Value::Object(expand_subnets(grouped["nodes"].as_object().unwrap()).unwrap().unwrap());
+        let actual = Graph::from_value(&grouped).unwrap().cook(None).unwrap();
+        let old = Graph::from_value(&flattened).unwrap().cook_expanded(None).unwrap();
+        assert_eq!(actual.p(), old.p());
+        assert_eq!(actual.topology.vertex_point, old.topology.vertex_point);
+        assert_eq!(actual.topology.prim_offsets, old.topology.prim_offsets);
+        assert_eq!(actual.nprims(), old.nprims());
+    }
 }

@@ -1,5 +1,5 @@
 //! Subnet: a collapsed group of nodes. The inner graph lives in the node's `inner` field and is expanded into
-//! `<subnet>/<inner>` nodes when the graph is loaded (see `graph::expand_subnets`); this node just passes the inner output on.
+//! `<subnet>/<inner>` nodes when the graph is cooked (see `graph::expand_subnets`); this node just passes the inner output on.
 use crate::{error::{Error, Result}, geometry::Geometry, nodes::{InputSpec, Inputs, NodeSpec}, params::Params};
 
 pub(super) const NODE: NodeSpec = NodeSpec {
