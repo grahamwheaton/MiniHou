@@ -283,6 +283,8 @@ pub fn registry() -> &'static [NodeSpec] {
         dissolve::DISSOLVE,
         output::OUTPUT,
         output::INPUT,
+        NodeSpec { name: "subnet_input", inputs: &[], params: &[], cook: empty_subnet_input },
+        NodeSpec { name: "subnet_output", inputs: GEO, params: &[], cook: pass_through },
     ];
     static MERGED: OnceLock<Vec<NodeSpec>> = OnceLock::new();
     MERGED.get_or_init(|| {
@@ -325,6 +327,10 @@ pub fn is_time_dependent(node_type: &str, params: Option<&serde_json::Map<String
 
 fn pass_through(inputs: &Inputs, _p: &Params) -> Result<Geometry> {
     inputs[0].first().map(|g| (**g).clone()).ok_or_else(|| Error::new("input 'geo' is not connected"))
+}
+
+fn empty_subnet_input(_inputs: &Inputs, _p: &Params) -> Result<Geometry> {
+    Geometry::points_only(Vec::new())
 }
 
 fn lod_bake(inputs: &Inputs, p: &Params) -> Result<Geometry> {

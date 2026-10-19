@@ -60,11 +60,20 @@ impl Graph {
                     if matches!(node_type.as_str(), "loop_begin" | "loop_end") && r.is_array() {
                         return Err(Error::new(format!("node '{id}': {port} input must be a single node")));
                     }
+                    let parse = |r: &Value| -> Result<String> {
+                        if let Some(s) = r.as_str() { return Ok(s.to_owned()); }
+                        let Some(o) = r.as_object() else { return Err(Error::new(format!("node '{id}': input '{port}' must name a node"))); };
+                        let name = o.get("node").and_then(Value::as_str).ok_or_else(|| Error::new(format!("node '{id}': input '{port}' endpoint needs a node")))?;
+                        let index = o.get("output").and_then(Value::as_u64).ok_or_else(|| Error::new(format!("node '{id}': input '{port}' endpoint needs an output index")))?;
+                        if index > 0 && nodes_v.get(name).is_none_or(|n| n["type"] != "subnet") {
+                            return Err(Error::new(format!("node '{id}': output {index} of '{name}' is unavailable")));
+                        }
+                        Ok(name.to_owned())
+                    };
                     let refs = match r {
-                        Value::String(s) => vec![s.clone()],
-                        Value::Array(a) => a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect(),
                         Value::Null => Vec::new(),
-                        _ => return Err(Error::new(format!("node '{id}': input '{port}' must name a node"))),
+                        Value::Array(a) => a.iter().map(parse).collect::<Result<Vec<_>>>()?,
+                        _ => vec![parse(r)?],
                     };
                     inputs.push((port.clone(), refs));
                 }
@@ -105,7 +114,7 @@ impl Graph {
         nodes.retain(|id, _| self.nodes.iter().any(|(n, _)| n == id));
         for (id, def) in &self.nodes {
             // The inner graph is stored on the subnet node in the original document.
-            if id.contains('/') || def.node_type == "subnet" { continue; }
+            if id.contains('/') { continue; }
             let nd = nodes.entry(id.clone()).or_insert_with(|| serde_json::json!({}));
             nd["type"] = Value::String(def.node_type.clone());
             let mut params = def.params.clone();
@@ -129,11 +138,8 @@ impl Graph {
             }
             if nd["bypass"].as_bool().unwrap_or(false) != def.bypass { nd["bypass"] = Value::Bool(def.bypass); }
             let old_inputs = nd.get("inputs").and_then(Value::as_object);
-            let same = old_inputs.map_or(def.inputs.is_empty(), |m| m.len() == def.inputs.len() && def.inputs.iter().all(|(port, refs)| {
-                let Some(old) = m.get(port) else { return false; };
-                if let Some(s) = old.as_str() { refs.len() == 1 && refs[0] == s }
-                else { old.as_array().is_some_and(|a| a.len() == refs.len() && a.iter().zip(refs).all(|(v,r)| v.as_str() == Some(r.as_str()))) }
-            }));
+            let same = baseline.as_ref().and_then(|g| g.node(id)).is_some_and(|original| original.inputs == def.inputs)
+                && old_inputs.is_some() || old_inputs.is_none() && def.inputs.is_empty();
             if !same { nd["inputs"] = Value::Object(def.inputs.iter().map(|(port,refs)|(port.clone(),if refs.len()==1 { Value::String(refs[0].clone()) } else { serde_json::json!(refs) })).collect()); }
         }
         if value["display"].as_str() != self.display.as_deref() {
@@ -264,9 +270,8 @@ impl Cook<'_> {
     }
 }
 
-/// Expand `subnet` nodes (a node of type "subnet" carrying `inner: {nodes, output}`) into prefixed `<subnet>/<inner>` nodes.
-/// Inner nodes read the subnet's external inputs as "$in0", "$in1" (the order of the subnet's `geo` wires). The subnet node
-/// itself stays as a pass-through of the inner output. `None` when the graph has no subnet.
+/// Expand subnet boundaries into temporary, single-output nodes for the evaluator.
+/// Persisted graphs retain their hierarchy and output-aware endpoints.
 pub fn expand_subnets(nodes: &Map<String, Value>) -> Result<Option<Map<String, Value>>> {
     if !nodes.values().any(|n| n["type"] == "subnet") { return Ok(None); }
     let mut out = Map::new();
@@ -274,14 +279,43 @@ pub fn expand_subnets(nodes: &Map<String, Value>) -> Result<Option<Map<String, V
     Ok(Some(out))
 }
 
-fn flatten_subnets(nodes: &Map<String, Value>, prefix: &str, ext: &[String], out: &mut Map<String, Value>, depth: usize) -> Result<()> {
+fn endpoint(v: &Value) -> Result<(String, usize)> {
+    if let Some(s) = v.as_str() { return Ok((s.to_owned(), 0)); }
+    let name = v.get("node").and_then(Value::as_str).ok_or_else(|| Error::new("endpoint needs a node"))?;
+    let index = v.get("output").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok())
+        .ok_or_else(|| Error::new("endpoint needs a nonnegative output index"))?;
+    Ok((name.to_owned(), index))
+}
+
+fn sockets(node: &Value, direction: &str) -> Result<Vec<(usize, String)>> {
+    let Some(list) = node.get(direction) else { return Ok(Vec::new()); };
+    let list = list.as_array().ok_or_else(|| Error::new(format!("subnet {direction} must be an array")))?;
+    let mut seen = HashSet::new();
+    list.iter().map(|v| {
+        let index = v.get("index").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok())
+            .ok_or_else(|| Error::new(format!("subnet {direction} socket needs a nonnegative index")))?;
+        if !seen.insert(index) { return Err(Error::new(format!("duplicate subnet {direction} index {index}"))); }
+        let name = v.get("name").and_then(Value::as_str).unwrap_or("").to_owned();
+        Ok((index, name))
+    }).collect()
+}
+
+fn flatten_subnets(nodes: &Map<String, Value>, prefix: &str, ext: &[Option<String>], out: &mut Map<String, Value>, depth: usize) -> Result<()> {
     if depth > 16 { return Err(Error::new("subnets are nested too deeply")); }
-    let map = |r: &str| -> Result<String> {
-        match r.strip_prefix("$in") {
-            Some(k) => k.parse::<usize>().ok().and_then(|k| ext.get(k)).cloned()
-                .ok_or_else(|| Error::new(format!("subnet input '{r}' is not connected"))),
-            None => Ok(format!("{prefix}{r}")),
+    let map = |r: &Value| -> Result<String> {
+        let (name, index) = endpoint(r)?;
+        if let Some(k) = name.strip_prefix("$in") {
+            if index != 0 { return Err(Error::new(format!("subnet input '{name}' has no output {index}"))); }
+            let k = k.parse::<usize>().map_err(|_| Error::new(format!("invalid subnet input '{name}'")))?;
+            return Ok(ext.get(k).and_then(Clone::clone).unwrap_or_else(|| format!("{prefix}$empty{k}")));
         }
+        if index != 0 {
+            let node = nodes.get(&name).ok_or_else(|| Error::new(format!("no such node '{name}'")))?;
+            if node["type"] != "subnet" || !sockets(node, "outputs")?.iter().any(|(i, _)| *i == index) {
+                return Err(Error::new(format!("subnet '{name}' has no output {index}")));
+            }
+        }
+        Ok(if index == 0 { format!("{prefix}{name}") } else { format!("{prefix}{name}/$out{index}") })
     };
     for (id, nd) in nodes {
         let full = format!("{prefix}{id}");
@@ -289,23 +323,51 @@ fn flatten_subnets(nodes: &Map<String, Value>, prefix: &str, ext: &[String], out
         if let Some(inputs) = nd.get_mut("inputs").and_then(Value::as_object_mut) {
             for r in inputs.values_mut() {
                 match r {
-                    Value::String(s) => *s = map(s)?,
-                    Value::Array(a) => for x in a { if let Some(s) = x.as_str() { *x = Value::String(map(s)?); } },
-                    _ => {}
+                    Value::String(_) | Value::Object(_) => *r = Value::String(map(r)?),
+                    Value::Array(a) => for x in a { *x = Value::String(map(x)?); },
+                    Value::Null => {},
+                    _ => return Err(Error::new(format!("node '{full}': invalid input endpoint"))),
                 }
             }
         }
         if nd["type"] == "subnet" {
-            let ext2: Vec<String> = match &nd["inputs"]["geo"] {
-                Value::String(s) => vec![s.clone()],
-                Value::Array(a) => a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect(),
-                _ => Vec::new(),
-            };
+            let input_desc = sockets(&nd, "input_sockets")?;
+            let output_desc = sockets(&nd, "output_sockets")?;
+            let mut ext2 = Vec::new();
+            if input_desc.is_empty() {
+                ext2 = match &nd["inputs"]["geo"] {
+                    Value::String(s) => vec![Some(s.clone())],
+                    Value::Array(a) => a.iter().map(|x| x.as_str().map(str::to_owned)).collect(),
+                    _ => Vec::new(),
+                };
+            } else {
+                ext2.resize(input_desc.iter().map(|(i,_)| *i).max().unwrap_or(0)+1, None);
+                for (index, _) in &input_desc {
+                    ext2[*index] = nd["inputs"].get(format!("in{index}")).and_then(Value::as_str).map(str::to_owned);
+                }
+            }
             let inner = nd["inner"]["nodes"].as_object().ok_or_else(|| Error::new(format!("node '{full}': subnet needs inner.nodes")))?;
-            let output = nd["inner"]["output"].as_str().filter(|o| inner.contains_key(*o))
-                .ok_or_else(|| Error::new(format!("node '{full}': subnet inner.output must name an inner node")))?;
             flatten_subnets(inner, &format!("{full}/"), &ext2, out, depth + 1)?;
-            out.insert(full.clone(), serde_json::json!({"type": "subnet", "inputs": {"geo": format!("{full}/{output}")}}));
+            if output_desc.is_empty() {
+                let output = nd["inner"]["output"].as_str().filter(|o| inner.contains_key(*o))
+                    .ok_or_else(|| Error::new(format!("node '{full}': subnet inner.output must name an inner node")))?;
+                out.insert(full.clone(), serde_json::json!({"type": "subnet", "inputs": {"geo": format!("{full}/{output}")}}));
+            } else {
+                for (index, _) in output_desc {
+                    let boundary = inner.iter().filter(|(_, node)| node["type"] == "subnet_output" && node["port_index"].as_u64() == Some(index as u64))
+                        .map(|(id, _)| id).collect::<Vec<_>>();
+                    if boundary.len() != 1 { return Err(Error::new(format!("subnet '{full}' output {index} needs one boundary node"))); }
+                    let alias = if index == 0 { full.clone() } else { format!("{full}/$out{index}") };
+                    out.insert(alias, serde_json::json!({"type": "subnet", "inputs": {"geo": format!("{full}/{}", boundary[0])}}));
+                }
+            }
+        } else if nd["type"] == "subnet_input" {
+            let index = nd["port_index"].as_u64().and_then(|n| usize::try_from(n).ok()).ok_or_else(|| Error::new(format!("node '{full}': subnet_input needs port_index")))?;
+            if let Some(Some(source)) = ext.get(index) {
+                out.insert(full, serde_json::json!({"type": "subnet", "inputs": {"geo": source}}));
+            } else {
+                out.insert(full, serde_json::json!({"type": "subnet_input"}));
+            }
         } else {
             out.insert(full, nd);
         }
