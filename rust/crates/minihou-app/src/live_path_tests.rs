@@ -21,6 +21,21 @@ fn loop_cut_confirm_selects_the_cooked_loop() {
 }
 
 #[test]
+fn loop_cut_slide_keeps_the_whole_ring_selected_at_any_factor() {
+    let base=stepped_doc();
+    let mut counts=Vec::new();
+    for factor in [0.,0.4,-0.7,1.] {
+        let (value,_)=graph_edit::add_viewport_cut(base.value(),"out","polysplit",json!({
+            "mode":"edge_loop","split_edges":"p0-1","loops":1,"position":0.5,"factor":factor,
+            "outgrp_edges":true,"outgrp_edges_name":"viewport_loop_cut"})).unwrap();
+        let g=cook(&value,"out");
+        assert!(loop_cut_has_marks(&g));
+        counts.push(loop_cut_selection(&g,&(0..g.npoints as u32)).edges.len());
+    }
+    assert!(counts.iter().all(|&c|c==counts[0]&&c>0),"ring size must not depend on the slide factor: {counts:?}");
+}
+
+#[test]
 fn undo_restores_face_selection_for_another_extrude() {
     let mut doc=stepped_doc();
     let original=cook(doc.value(),"out");

@@ -59,6 +59,7 @@ fn point_pickable(visibility:viewport::ObjectVisibility,ranges:&[(String,std::op
 fn active_range<'a>(active:&str,ranges:&'a [(String,std::ops::Range<u32>)])->Option<&'a std::ops::Range<u32>> {
     ranges.iter().find(|(id,_)|id==active).map(|(_,range)|range)
 }
+fn loop_cut_has_marks(g:&minihou_core::Geometry)->bool { g.vertex.get("edge_group_viewport_loop_cut").is_some() }
 fn loop_cut_selection(g:&minihou_core::Geometry,range:&std::ops::Range<u32>)->picking::Selection {
     let topo_edges=minihou_core::topo::edges(&g.topology,g.npoints);
     let marks=g.vertex.get("edge_group_viewport_loop_cut").and_then(|attr|attr.as_i32());
@@ -96,7 +97,7 @@ fn selection_in_range(selection:&picking::Selection,scene:&Scene,range:&std::ops
 fn pick_displayed(scene:&Scene,o:[f32;3],d:[f32;3],visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>)->Option<picking::Hit> {
     pick_displayed_culled(scene,o,d,visibility,ranges,selected,false)
 }
-/// Selection clicks cull back faces unless X-ray is on.
+/// Back-face culling is off for selection: the renderer draws both sides, so a visible face with the opposite winding (open meshes, flipped normals) must stay pickable. The nearest hit already hides faces behind it.
 fn pick_displayed_culled(scene:&Scene,o:[f32;3],d:[f32;3],visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,cull:bool)->Option<picking::Hit> {
     picking::pick_triangle_culled(scene.positions(),scene.triangle_indices(),o,d,cull,|tri| tri.iter().all(|id| point_pickable(visibility,ranges,selected,*id)))
 }
@@ -2837,10 +2838,14 @@ impl eframe::App for App {
                     self.selection=user_selection.filter(|candidate|selection_exists_on_scene(candidate,&scene)).unwrap_or(selection);
                     self.stashed_selection=stash;
                 }
-                if self.pending_loop_selection.take().is_some() {
+                if self.pending_loop_selection.is_some() {
+                    // Wait for the cook that carries the loop marks; an earlier or stale scene must not consume the request and leave a partial ring.
                     if let (Some(range),Some(g))=(active_range(&self.display,&self.display_ranges),self.cooking.geometry.as_deref()) {
-                        self.selection=loop_cut_selection(g,range);
-                        self.editor_state.apply(ui::EditorChange::Selection(ui::SelectionMode::Edges));
+                        if loop_cut_has_marks(g) {
+                            self.pending_loop_selection=None;
+                            self.selection=loop_cut_selection(g,range);
+                            self.editor_state.apply(ui::EditorChange::Selection(ui::SelectionMode::Edges));
+                        }
                     }
                 }
                 self.scene = Some(scene);
@@ -2934,7 +2939,7 @@ impl eframe::App for App {
                 if self.last_viewport.contains(at) {
                     if let Some(scene)=self.scene.as_ref() {
                         let (o,d)=ui::transform_gizmo::ray(self.camera_info(),self.last_viewport,at);
-                        if let Some(hit)=pick_displayed_culled(scene,o,d,viewport::ObjectVisibility::HideOthers,&self.display_ranges,&self.active_pick_set(),!self.editor_state.xray) {
+                        if let Some(hit)=pick_displayed_culled(scene,o,d,viewport::ObjectVisibility::HideOthers,&self.display_ranges,&self.active_pick_set(),false) {
                             let picked=element_select::cached(&self.elem_topo,scene).pick(scene.positions(),scene.triangle_indices(),hit,[0,1,2].map(|k|o[k]+d[k]*hit.t),ui::SelectionMode::Faces);
                             self.selection=picked; self.editor_state.selection=ui::SelectionMode::Faces;
                             self.selection_dirty=true; self.pushpull_pick=false; self.file_status.clear();
@@ -3158,7 +3163,7 @@ impl eframe::App for App {
                         let (o, d) = ui::transform_gizmo::ray(v.camera, rect, pos);
                         let mode = if self.pushpull_pick { ui::SelectionMode::Faces } else { self.editor_state.selection };
                         let mods = ctx.input(|i| i.modifiers);
-                        let surface = pick_displayed_culled(scene,o,d,pick_visibility,&self.display_ranges,&pick_set,!self.editor_state.xray);
+                        let surface = pick_displayed_culled(scene,o,d,pick_visibility,&self.display_ranges,&pick_set,false);
                         surface
                             .map(|hit| {
                                 if mode == ui::SelectionMode::Object { return picking::element_of(hit, scene.triangle_indices(), mode); }
@@ -3292,7 +3297,7 @@ impl eframe::App for App {
                         let (o, d) = self.camera.ray(nx, ny, rect.width() / rect.height());
                         let mode = self.editor_state.selection;
                         let extend = ctx.input(|i| i.modifiers.shift);
-                        let hit = if self.object_hidden { None } else { pick_displayed_culled(scene,o,d,pick_visibility,&self.display_ranges,&pick_set,!self.editor_state.xray) };
+                        let hit = if self.object_hidden { None } else { pick_displayed_culled(scene,o,d,pick_visibility,&self.display_ranges,&pick_set,false) };
                         let wire = if self.object_hidden || hit.is_some() { None } else { pick_displayed_wire(scene,v.camera,rect,at,pick_visibility,&self.display_ranges,&pick_set,mode,self.editor_state.xray) };
                         if mode == ui::SelectionMode::Object {
                             let ids = hit.and_then(|hit| picked_object(&self.display_ranges, scene.triangle_indices(), hit))

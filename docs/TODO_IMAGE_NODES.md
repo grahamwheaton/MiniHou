@@ -222,10 +222,6 @@ Parked by user: inset on non-planar regions. Tri to Quad: user will test.
 
 For nodes with output groups, show an "Output Groups" section like Houdini: one row per output group, with a checkbox (enable that group), a label (for example "Point Fillet Polygons") and a group-name field (for example `pointfilletpolys`). The name field is greyed when the checkbox is off. Applies to every node with output groups, for example polyfillet and similar nodes.
 
-## Future bug: full ring not selected after Loop Cut slide (reported 2026-10-18)
-
-After a Loop Cut slide, the whole loop is not selected; only part of the ring stays selected. Related to the Loop Cut selection work (mesh_cut.rs, the loop_cut viewport selection restore). Needs a repro from the user: which mesh, which edge, and whether it happens after slide only or also after confirming without sliding.
-
 ## Bug: purple group arrow clears selection, then crashes on second press (reported 2026-10-18)
 
 Repro (user): make a box, add Loop Cut, make a group of edges, click the purple arrow on the group field. Expected: the group's edges highlight in purple. Actual: the selection is cleared. Pressing the arrow again crashes the app.
