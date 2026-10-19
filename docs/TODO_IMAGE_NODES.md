@@ -371,3 +371,6 @@ In object mode, points are still drawn even when they belong to a face or an edg
 - **Todo: a newly placed subnet should not show cook failed.** It should cook cleanly with its default contents.
 - **Todo: double-click a subnet to enter it.** Inside, the default contents are an input node piped into an output node.
 - **Bug: Boundary Select lists faces twice in its domain output.** Also, it does not appear to store the output group. Check the boundary select node package for both the duplicate domain entries and the missing output group.
+- **Priority todo: group parameter fields get a dropdown and accept wildcards.** Every group parameter field should offer a dropdown listing the groups detected on its input. The field should also accept wildcard patterns: `*` (zero or more characters), `?` (exactly one character), `[abc]` (one listed character, ranges like `[0-9]` allowed), `^pattern` (exclude), and a space to union several patterns (for example `leg_* arm_*`). Example: `* ^debris_*` selects all groups except those starting with `debris_`.
+  - The UI dropdown is in `ui/params.rs` (wait for Bob's split to merge first).
+  - The wildcard matching in group parsing (`element_select.rs` `parse_group` and the core group handling) can be done separately.
