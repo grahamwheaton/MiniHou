@@ -361,3 +361,5 @@ In object mode, points are still drawn even when they belong to a face or an edg
 - **Future todo: Metaballs / Points to Surface node needs a rework.** Not scheduled yet.
 - **Bug: Controller node parameters are not displayed.** The parameter panel for controller1 shows only the header, the "Add section" button and the ch() hint. Its own parameters should appear below.
 - **Todo: empty network shows an empty viewport, not a cook-failed error.** With no nodes in the network editor, do not show the cook failed error. The viewport should just be empty.
+- **Todo: Switch node needs multiple input slots.**
+- **Todo: new Switch-If node with parity to Houdini.** The Houdini reference (2026-10-19) has: Use Second Input If (All Conditions True or similar), Test Input selector, Number of Tests with +/- and Clear, and per-test rows with an enable checkbox, Test Type (Expression), and an Enable value slider.
