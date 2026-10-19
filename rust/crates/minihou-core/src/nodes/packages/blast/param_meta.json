@@ -1,0 +1,30 @@
+{
+  "delete_non_selected": {
+    "default": false,
+    "doc": "Keep the selection and delete everything else",
+    "kind": "bool"
+  },
+  "domain": {
+    "default": "primitives",
+    "doc": "Delete faces, points, or faces touching selected edges",
+    "kind": "enum",
+    "options": [
+      "primitives",
+      "points",
+      "edges"
+    ]
+  },
+  "group": {
+    "default": "",
+    "doc": "What to delete: group names, ^exclusions, numbers/ranges, or an expression like '@P.z < 0'",
+    "kind": "str",
+    "pick_domain_default": "primitives",
+    "pick_domain_param": "domain",
+    "section": "Selection"
+  },
+  "keep_unused_points": {
+    "default": false,
+    "doc": "primitives: keep points no remaining primitive uses",
+    "kind": "bool"
+  }
+}

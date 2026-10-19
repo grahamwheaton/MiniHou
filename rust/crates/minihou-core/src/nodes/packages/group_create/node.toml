@@ -1,0 +1,5 @@
+id = "group_create"
+name = "Group Create"
+category = "Groups"
+description = "Create a named geometry group."
+keywords = "group selection pattern"

@@ -21,15 +21,21 @@ fn deformer_section(typ:&str,name:&str)->Option<&'static str> {
         else if matches!(name,"origin"|"center"|"direction"|"up"|"length"|"radius"|"axis"|"frame"|"offset"|"stretch"|"symmetric"|"up_vector_angle") {"Capture"}
         else {"Deformation"})
 }
+fn param_section<'a>(typ: &str, name: &str, meta: Option<&'a Value>) -> Option<&'a str> {
+    meta.and_then(|m| m["section"].as_str()).or_else(|| deformer_section(typ, name))
+}
 #[cfg(test)]
 mod deformer_group_tests {
-    use super::deformer_section;
+    use super::{deformer_section, param_section};
+    use serde_json::json;
     #[test]
     fn capture_and_deformation_fields_are_grouped() {
         assert_eq!(deformer_section("bend","origin"),Some("Capture"));
         assert_eq!(deformer_section("linear_taper","taper_x"),Some("Deformation"));
         assert_eq!(deformer_section("point_deform","group"),Some("Selection"));
         assert_eq!(deformer_section("box","size"),None);
+        assert_eq!(param_section("bend", "origin", Some(&json!({"section":"Manifest"}))), Some("Manifest"));
+        assert_eq!(param_section("bend", "origin", None), Some("Capture"));
     }
 }
 #[cfg(test)]
@@ -134,12 +140,13 @@ pub fn domain_edit_mode(name: &str, value: &Value) -> Option<super::SelectionMod
 }
 /// Fallback for group fields without registry metadata: follow a sibling domain or group_type parameter.
 pub fn pick_domain_for(typ: &str, name: &str, meta: Option<&Value>, params: &Value) -> Option<super::SelectionMode> {
+    let declared = pick_domain(meta, params);
     if typ == "attribute_create" && name == "group" {
         if let Some(class) = params["attributes"].as_array().and_then(|a| a.first()).and_then(|a| a["class"].as_str()) {
             return pick_domain(Some(&json!({"pick_domain":class})), params);
         }
     }
-    if let Some(mode) = pick_domain(meta, params) { return Some(mode); }
+    if let Some(mode) = declared { return Some(mode); }
     if !is_input_group_field(name, meta) { return None; }
     if !matches!(name, "group" | "group_name" | "pattern") { return Some(name_domain(name, meta)); }
     for sibling in ["domain", "group_type"] {
@@ -172,7 +179,20 @@ mod pick_tests {
     }
     #[test]
     fn group_create_edges_domain_picks_edges() {
-        assert_eq!(pick_domain_for("group_create", "pattern", param_meta("group_create", "pattern"), &json!({"domain":"edges"})), Some(SelectionMode::Edges));
+        let meta = param_meta("group_create", "pattern");
+        assert_eq!(meta.unwrap()["pick_domain_param"], "domain");
+        assert_eq!(pick_domain_for("group_create", "pattern", meta, &json!({"domain":"edges"})), Some(SelectionMode::Edges));
+        assert_eq!(param_meta("blast", "group").unwrap()["pick_domain_default"], "primitives");
+        assert_eq!(pick_domain_for("blast", "group", param_meta("blast", "group"), &json!({"domain":"points"})), Some(SelectionMode::Points));
+    }
+    #[test]
+    fn declared_picker_domain_precedes_name_and_sibling_heuristics() {
+        let declared = json!({"kind":"str", "pick_domain":"edges"});
+        assert!(is_input_group_field("selection", Some(&declared)));
+        assert_eq!(pick_domain_for("blast", "group", Some(&declared), &json!({"domain":"points"})), Some(SelectionMode::Edges));
+        let undeclared = json!({"kind":"str"});
+        assert_eq!(pick_domain_for("blast", "group", Some(&undeclared), &json!({"domain":"points"})), Some(SelectionMode::Points));
+        assert_eq!(pick_domain_for("other", "edge_group", Some(&undeclared), &json!({})), Some(SelectionMode::Edges));
     }
     #[test]
     fn registry_maps_group_and_crease_fields() {
@@ -1709,7 +1729,7 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
                     if typ == "knife" && param.name == "cuts" { continue; }
                     if typ == "attribute_create" && param.name != "group" { continue; }
                     if outputs.iter().any(|output| output.name == param.name) || output_toggles.contains(&param.name) { continue; }
-                    let next=deformer_section(typ,param.name);
+                    let next=param_section(typ,param.name,param_meta(typ,param.name));
                     if next.is_some() && next!=section {
                         section=next;
                         ui.add_space(5.);

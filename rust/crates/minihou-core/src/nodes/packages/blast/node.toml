@@ -1,0 +1,5 @@
+id = "blast"
+name = "Blast"
+category = "Groups"
+description = "Delete selected geometry elements."
+keywords = "delete group faces points edges"

@@ -1,0 +1,224 @@
+{
+  "angle": {
+    "default": 45.0,
+    "doc": "normal method, in degrees",
+    "kind": "float",
+    "max": 180.0,
+    "min": 0.0
+  },
+  "backface_from": {
+    "default": "",
+    "doc": "filters: a position 'x y z'; drops what faces away from it",
+    "kind": "str"
+  },
+  "base_enable": {
+    "default": true,
+    "doc": "filters: start from the base group in 'pattern' (empty: everything)",
+    "kind": "bool"
+  },
+  "boundary_groups": {
+    "default": false,
+    "doc": "filters: also make '<name>_boundary', the edge group around what was selected",
+    "kind": "bool"
+  },
+  "bounds_enable": {
+    "default": false,
+    "doc": "filters: Keep in Bounding Regions",
+    "kind": "bool"
+  },
+  "bounds_partial": {
+    "default": false,
+    "doc": "filters: include entities that are only partly inside (otherwise all of their points must be)",
+    "kind": "bool"
+  },
+  "bounds_type": {
+    "default": "box",
+    "doc": "filters: the region's shape; box_size is its full size (a sphere is the ellipsoid inside it)",
+    "kind": "enum",
+    "options": [
+      "box",
+      "sphere"
+    ]
+  },
+  "box_center": {
+    "default": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "doc": "bounding_box method",
+    "kind": "vec3"
+  },
+  "box_size": {
+    "default": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "doc": "bounding_box method",
+    "kind": "vec3"
+  },
+  "combine": {
+    "default": "replace",
+    "doc": "How to merge with an existing group of the name (Initial Merge)",
+    "kind": "enum",
+    "options": [
+      "replace",
+      "union",
+      "intersect",
+      "subtract"
+    ]
+  },
+  "direction": {
+    "default": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "doc": "Reference normal for Normal/Coplanar. Explicit Planes overrides Direction and Plane Offset when populated.",
+    "kind": "vec3"
+  },
+  "domain": {
+    "default": "points",
+    "doc": "What the group holds (an edge group is stored like the edge_group node's)",
+    "kind": "enum",
+    "options": [
+      "points",
+      "primitives",
+      "edges"
+    ]
+  },
+  "edges_enable": {
+    "default": false,
+    "doc": "filters: Include by Edges (angle and length apply to edge groups; unshared edges to all)",
+    "kind": "bool"
+  },
+  "max_edge_angle": {
+    "default": 20.0,
+    "doc": "Maximum edge angle in degrees for edge filtering.",
+    "kind": "float",
+    "max": 180.0,
+    "min": 0.0
+  },
+  "max_edge_angle_on": {
+    "default": false,
+    "doc": "filters: only edges at most this many degrees off flat",
+    "kind": "bool"
+  },
+  "max_edge_length": {
+    "default": 1.0,
+    "doc": "Maximum edge length for edge filtering.",
+    "kind": "float",
+    "min": 0.0,
+    "soft_max": 10.0
+  },
+  "max_edge_length_on": {
+    "default": false,
+    "doc": "Enable the maximum edge length filter.",
+    "kind": "bool"
+  },
+  "method": {
+    "default": "pattern",
+    "doc": "pattern: groups, ranges or an expression like '@P.z > 1'; bounding_box: inside a box; normal: facing a direction; random: a percentage; boundary: on open edges; filters: Houdini's combinable sections (base group, bounding region, normals, edges, random chance: an element must pass every enabled one)",
+    "kind": "enum",
+    "options": [
+      "pattern",
+      "bounding_box",
+      "normal",
+      "random",
+      "boundary",
+      "filters",
+      "coplanar"
+    ]
+  },
+  "min_edge_angle": {
+    "default": 20.0,
+    "doc": "Minimum edge angle in degrees for edge filtering.",
+    "kind": "float",
+    "max": 180.0,
+    "min": 0.0
+  },
+  "min_edge_angle_on": {
+    "default": false,
+    "doc": "filters: only edges at least this many degrees off flat",
+    "kind": "bool"
+  },
+  "min_edge_length": {
+    "default": 0.0,
+    "doc": "Minimum edge length for edge filtering.",
+    "kind": "float",
+    "min": 0.0,
+    "soft_max": 10.0
+  },
+  "min_edge_length_on": {
+    "default": false,
+    "doc": "Enable the minimum edge length filter.",
+    "kind": "bool"
+  },
+  "name": {
+    "default": "group1",
+    "doc": "Group name; wrangles read it as @group_<name>",
+    "kind": "str"
+  },
+  "normals_enable": {
+    "default": false,
+    "doc": "filters: Keep by Normals (direction and angle above)",
+    "kind": "bool"
+  },
+  "normals_opposite": {
+    "default": false,
+    "doc": "filters: also keep normals matching the opposite direction",
+    "kind": "bool"
+  },
+  "pattern": {
+    "default": "*",
+    "doc": "pattern method: group names, ^exclusions, numbers/ranges ('0-9'), or '@P.z > 1'",
+    "kind": "str",
+    "pick_domain_default": "points",
+    "pick_domain_param": "domain",
+    "section": "Selection"
+  },
+  "percent": {
+    "default": 50.0,
+    "doc": "random method",
+    "kind": "float",
+    "max": 100.0,
+    "min": 0.0
+  },
+  "plane_offset": {
+    "default": 0.0,
+    "doc": "Coplanar plane distance along the normalized Direction. Used when Planes is empty.",
+    "kind": "float"
+  },
+  "plane_tolerance": {
+    "default": 0.0001,
+    "doc": "Maximum distance from each reference plane in internal length units.",
+    "kind": "float",
+    "min": 0.0
+  },
+  "planes": {
+    "default": "",
+    "doc": "Reference plane normals and offsets: nx ny nz offset; one plane per semicolon.",
+    "kind": "string"
+  },
+  "random_enable": {
+    "default": false,
+    "doc": "filters: Keep by Random Chance (percent and seed above)",
+    "kind": "bool"
+  },
+  "seed": {
+    "default": 0,
+    "doc": "random method",
+    "kind": "int"
+  },
+  "seed_attrib": {
+    "default": "",
+    "doc": "filters: a point or primitive attribute that seeds each element separately (empty: by element number)",
+    "kind": "str"
+  },
+  "unshared_edges": {
+    "default": false,
+    "doc": "filters: only edges used by one face (open borders); for points and primitives, those on a border",
+    "kind": "bool"
+  }
+}

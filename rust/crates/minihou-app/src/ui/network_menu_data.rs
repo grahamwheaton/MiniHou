@@ -225,6 +225,7 @@ pub(super) fn tabs() -> &'static [Category] {
     MERGED.get_or_init(|| TABS.iter().map(|tab| {
         let mut tools = tab.tools.to_vec();
         for node in minihou_core::nodes::package_catalogue().iter().filter(|node| node.category == tab.name) {
+            if tools.iter().any(|tool| tool.node_type == node.id) { continue; }
             tools.push(Tool { label: node.name, node_type: node.id });
         }
         Category { name: tab.name, tools: Box::leak(tools.into_boxed_slice()) }

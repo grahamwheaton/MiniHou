@@ -55,7 +55,7 @@ TYPES += ["loop_begin", "loop_end", "input", "object_input", "wrangle", "blend",
 
 # Procedural / instancing ports; retain the other workers' type lists above.
 TYPES += ["lsystem", "convert_line", "polypath", "carve", "copy_to_points", "instance", "for_each"]
-TYPES += ["falloff", "uv_project", "uv_flatten", "uv_transform", "curve_simplify", "group_create", "blast"]
+TYPES += ["falloff", "uv_project", "uv_flatten", "uv_transform", "curve_simplify"]
 
 
 # Modeling ports. loop_cut is the native keymap alias for Python's polysplit.
@@ -139,12 +139,12 @@ def meta() -> dict:
         for _n in _nodes:
             if "group" in out.get(_n, {}) and "pick_domain" not in out[_n]["group"]:
                 out[_n]["group"]["pick_domain"] = _dom
-    for _n, _f in [("blast","group"), ("group_create","pattern"), ("color","group"), ("crease","group"),
+    for _n, _f in [("color","group"), ("crease","group"),
                    ("falloff","group"), ("group_expand","group"), ("grow","group"), ("set_material","group"),
                    ("select_loop","group_name"), ("select_path","group_name"), ("select_ring","group_name")]:
         if _f in out.get(_n, {}):
             out[_n][_f]["pick_domain_param"] = "domain"
-            out[_n][_f]["pick_domain_default"] = "primitives" if _n in ("blast","set_material","group_expand","falloff") else ("edges" if _n in ("crease","select_loop","select_path","select_ring","grow") else "points")
+            out[_n][_f]["pick_domain_default"] = "primitives" if _n in ("set_material","group_expand","falloff") else ("edges" if _n in ("crease","select_loop","select_path","select_ring","grow") else "points")
     if "points" in out.get("polyextrude", {}):
         out["polyextrude"]["points"]["pick_domain"] = "points"
     if "edges" in out.get("polyextrude", {}):
@@ -390,11 +390,6 @@ def meta() -> dict:
         "reverse_rays": "Cast rays in the opposite direction.",
     }.items():
         out["ray"][_name].setdefault("doc", _doc)
-    out["group_create"]["method"]["options"].append("coplanar")
-    out["group_create"]["plane_offset"] = {"kind": "float", "default": 0.0, "doc": "Coplanar plane distance along the normalized Direction. Used when Planes is empty."}
-    out["group_create"]["direction"]["doc"] = "Reference normal for Normal/Coplanar. Explicit Planes overrides Direction and Plane Offset when populated."
-    out["group_create"]["planes"] = {"kind": "string", "default": "", "doc": "Reference plane normals and offsets: nx ny nz offset; one plane per semicolon."}
-    out["group_create"]["plane_tolerance"] = {"kind": "float", "default": 0.0001, "min": 0.0, "doc": "Maximum distance from each reference plane in internal length units."}
     # Blender-audit mesh nodes (docs/RUST_MESH_NODES.md): Inset options and three Rust-only nodes.
     out["inset"]["amount"]["doc"] = "Inset thickness (Blender Thickness); negative values outset."
     out["inset"]["mode"]["doc"] = "connected: inset the selected region as one; individual: inset every face on its own (same as Use Individual)."

@@ -174,7 +174,7 @@ mod tests {
             // The legacy shelf prefix has a deliberate user-facing order.
             assert_eq!(legacy.tools.iter().map(|t| (t.label, t.node_type, t.icon)).collect::<Vec<_>>(),
                 merged.tools.iter().take(legacy.tools.len()).map(|t| (t.label, t.node_type, t.icon)).collect::<Vec<_>>());
-            let package_ids: Vec<_> = catalogue.iter().filter(|node| node.category == merged.name).map(|node| node.id).collect();
+            let package_ids: Vec<_> = catalogue.iter().filter(|node| node.category == merged.name && !legacy.tools.iter().any(|tool| tool.node_type == node.id)).map(|node| node.id).collect();
             let appended: Vec<_> = merged.tools.iter().skip(legacy.tools.len()).map(|tool| tool.node_type).collect();
             assert_eq!(appended, package_ids, "{} package tools", merged.name);
         }
@@ -205,9 +205,13 @@ mod tests {
                 for node in minihou_core::nodes::package_catalogue() {
                     let tab = tabs().iter().find(|tab| tab.name == node.category).unwrap();
                     let tool = tab.tools.iter().rev().find(|tool| tool.node_type == node.id && tool.label == node.name).unwrap();
-                    assert_eq!(tool.icon, node.id, "{}", node.id);
-                    let built_in = matches!(node.id, "point" | "line" | "helix" | "bezier");
-                    assert!(built_in || shelf_icons::draw(ui.painter(), Pos2::ZERO, node.id, Color32::WHITE, Color32::YELLOW), "{}", node.id);
+                    let legacy = shelf_data::TABS.iter().find(|legacy| legacy.name == node.category).unwrap()
+                        .tools.iter().any(|legacy| legacy.node_type == node.id);
+                    if !legacy {
+                        assert_eq!(tool.icon, node.id, "{}", node.id);
+                        let built_in = matches!(node.id, "point" | "line" | "helix" | "bezier");
+                        assert!(built_in || shelf_icons::draw(ui.painter(), Pos2::ZERO, node.id, Color32::WHITE, Color32::YELLOW), "{}", node.id);
+                    }
                 }
                 for id in ["loop_space", "loop_circle", "loop_flatten", "loop_relax", "loop_curve", "pack", "unpack", "split",
                     "match_size", "vertex_bevel", "peak", "reverse", "facet", "bend", "clean", "dissolve_flat_edges",

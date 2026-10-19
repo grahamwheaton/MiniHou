@@ -599,7 +599,8 @@
    "doc": "What to delete: group names, ^exclusions, numbers/ranges, or an expression like '@P.z < 0'",
    "kind": "str",
    "pick_domain_default": "primitives",
-   "pick_domain_param": "domain"
+   "pick_domain_param": "domain",
+   "section": "Selection"
   },
   "keep_unused_points": {
    "default": false,
@@ -3048,7 +3049,7 @@
   },
   "max_edge_angle": {
    "default": 20.0,
-   "doc": "",
+   "doc": "Maximum edge angle in degrees for edge filtering.",
    "kind": "float",
    "max": 180.0,
    "min": 0.0
@@ -3060,14 +3061,14 @@
   },
   "max_edge_length": {
    "default": 1.0,
-   "doc": "",
+   "doc": "Maximum edge length for edge filtering.",
    "kind": "float",
    "min": 0.0,
    "soft_max": 10.0
   },
   "max_edge_length_on": {
    "default": false,
-   "doc": "",
+   "doc": "Enable the maximum edge length filter.",
    "kind": "bool"
   },
   "method": {
@@ -3086,7 +3087,7 @@
   },
   "min_edge_angle": {
    "default": 20.0,
-   "doc": "",
+   "doc": "Minimum edge angle in degrees for edge filtering.",
    "kind": "float",
    "max": 180.0,
    "min": 0.0
@@ -3098,14 +3099,14 @@
   },
   "min_edge_length": {
    "default": 0.0,
-   "doc": "",
+   "doc": "Minimum edge length for edge filtering.",
    "kind": "float",
    "min": 0.0,
    "soft_max": 10.0
   },
   "min_edge_length_on": {
    "default": false,
-   "doc": "",
+   "doc": "Enable the minimum edge length filter.",
    "kind": "bool"
   },
   "name": {
@@ -3128,7 +3129,8 @@
    "doc": "pattern method: group names, ^exclusions, numbers/ranges ('0-9'), or '@P.z > 1'",
    "kind": "str",
    "pick_domain_default": "points",
-   "pick_domain_param": "domain"
+   "pick_domain_param": "domain",
+   "section": "Selection"
   },
   "percent": {
    "default": 50.0,
