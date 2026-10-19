@@ -376,3 +376,4 @@ In object mode, points are still drawn even when they belong to a face or an edg
   - The wildcard matching in group parsing (`element_select.rs` `parse_group` and the core group handling) can be done separately.
 - **Todo: Color node domain should offer Points, Edges and Faces.** The node package is the place to change it; no shared UI files.
 - **Todo: Clip node needs a viewport gizmo to move the clip plane.** Viewport gizmo work, so it waits for Bob's split to merge (`viewport.rs` and `main.rs`).
+- **Bug: selection shows through mesh (no occlusion or backface culling) when X-ray is off.** Selection should only ignore occlusion and show backfaces when X-ray mode is on. Otherwise selection should be occluded by the mesh as normal. Viewport and picking code (`viewport.rs`, `picking.rs`), so it waits for Bob's split to merge.
