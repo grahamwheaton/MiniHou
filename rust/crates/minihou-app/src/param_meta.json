@@ -4915,19 +4915,39 @@
  "normal": {
   "cusp_angle": {
    "default": 60.0,
-   "doc": "vertex: faces meeting at more than this many degrees stay sharp",
+   "doc": "Angle in degrees above which vertex normals are cusped to create sharp edges",
    "kind": "float",
    "max": 180.0,
    "min": 0.0
   },
   "domain": {
    "default": "point",
-   "doc": "point: area-weighted average of adjacent faces; prim: face normals; vertex: averages that stop at edges sharper than the cusp angle (hard edges, smooth elsewhere)",
+   "doc": "Target element domain to compute normals on (point, prim, or vertex)",
    "kind": "enum",
    "options": [
     "point",
     "prim",
     "vertex"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Subset of geometry to process",
+   "kind": "str"
+  },
+  "reverse": {
+   "default": false,
+   "doc": "Reverse normal directions",
+   "kind": "bool"
+  },
+  "weighting": {
+   "default": "area",
+   "doc": "Method to weight face contributions: area, angle, or equal",
+   "kind": "enum",
+   "options": [
+    "area",
+    "angle",
+    "equal"
    ]
   }
  },

@@ -179,7 +179,6 @@ pub fn registry() -> &'static [NodeSpec] {
         ray::RAY,
         occlusion::OCCLUSION,
         modify::TRANSFORM,
-        modify::NORMAL,
         modify::NOISE,
         modify::MATCH_SIZE,
         modify::DELETE,
