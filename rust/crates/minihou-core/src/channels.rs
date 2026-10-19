@@ -47,9 +47,15 @@ pub fn resolve_graph(graph: &Graph) -> ResolvedChannels {
             let value=r.resolve(&address).unwrap_or_else(|_|r.literal(&address).unwrap_or_else(||(p.default)()));
             values.insert(p.name.into(),value);
         }
+        if def.node_type == "subnet" {
+            for name in graph.to_value()["nodes"][id]["promoted_params"].as_array().into_iter().flatten().filter_map(|p| p["name"].as_str()) {
+                let address=Address{node:id.clone(),param:name.into(),component:None};
+                if let Ok(value)=r.resolve(&address) { values.insert(name.into(),value); }
+            }
+        }
         if let Some(channels)=&def.channels {
             for name in channels.keys() {
-                if !valid_address(spec.params,name) {
+                if !valid_address(spec.params,name) && graph.promoted_param(id,split_component(name).0).is_none() {
                     r.result.diagnostics.push(ParamDiag{node:id.clone(),param:name.clone(),kind:ParamDiagKind::BadReference,message:format!("unknown channel target {name:?}")});
                 }
             }
@@ -70,8 +76,9 @@ pub(crate) fn split_component(name:&str)->(&str,Option<usize>) {
 impl Resolver<'_> {
     fn literal(&self,a:&Address)->Option<Value> {
         let def=self.graph.node(&a.node)?;
-        let spec=nodes::get(&def.node_type)?.params.iter().find(|s|s.name==a.param)?;
-        let value=def.params.as_ref().and_then(|m|m.get(&a.param)).cloned().unwrap_or_else(||(spec.default)());
+        let default=nodes::get(&def.node_type)?.params.iter().find(|s|s.name==a.param).map(|s|(s.default)())
+            .or_else(||self.graph.promoted_param(&a.node,&a.param).map(|p|p["default"].clone()))?;
+        let value=def.params.as_ref().and_then(|m|m.get(&a.param)).cloned().unwrap_or(default);
         match a.component {Some(i)=>value.as_array()?.get(i).cloned(),None=>Some(value)}
     }
     fn expression(&self,a:&Address)->Option<&str> {
@@ -86,7 +93,8 @@ impl Resolver<'_> {
         }
         if !self.active.insert(a.clone()) {return Err(ParamDiagKind::CycleDetected);}
         let fallback=match self.literal(a){Some(v)=>v,None=>{self.active.remove(a);return Err(ParamDiagKind::BadReference)}};
-        let expected=self.graph.node(&a.node).and_then(|d|nodes::get(&d.node_type)).and_then(|s|s.params.iter().find(|p|p.name==a.param)).map(|p|(p.default)()).unwrap_or(Value::Null);
+        let expected=self.graph.node(&a.node).and_then(|d|nodes::get(&d.node_type)).and_then(|s|s.params.iter().find(|p|p.name==a.param)).map(|p|(p.default)())
+            .or_else(||self.graph.promoted_param(&a.node,&a.param).map(|p|p["default"].clone())).unwrap_or(Value::Null);
         let expr=self.expression(a).map(str::to_owned);
         let has_expr=expr.is_some();
         let result=if let Some(expr)=expr {
@@ -164,7 +172,7 @@ impl Resolver<'_> {
         let target=Address{node:parts.join("/"),param:param.into(),component};
         let def=self.graph.node(&target.node)?;
         let spec=nodes::get(&def.node_type)?;
-        valid_address(spec.params,&target.label()).then_some(target)
+        (valid_address(spec.params,&target.label()) || self.graph.promoted_param(&target.node,&target.param).is_some()).then_some(target)
     }
 }
 
