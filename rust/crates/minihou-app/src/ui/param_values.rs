@@ -521,4 +521,3 @@ pub fn is_ramp_param(param_name: &str, meta: Option<&Value>, value: &Value) -> b
     }
     RampData::is_ramp_value(value)
 }
-
