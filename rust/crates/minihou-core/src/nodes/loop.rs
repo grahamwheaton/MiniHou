@@ -1,6 +1,6 @@
 //! Paired DAG repeat regions, mirroring nodes/loop.py and loops.py.
 use std::{cell::Cell, collections::{HashMap, HashSet}, rc::Rc, sync::Arc, time::Instant};
-use crate::{Error, Geometry, Graph, Result, graph::run_node, params::Params};
+use crate::{Error, Geometry, Graph, Result, graph::run_node_outputs, params::Params};
 use super::{InputSpec, Inputs, NodeSpec};
 
 pub const LOOP_BEGIN: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "loop_begin", inputs: super::GEO, params: &[], cook: begin };
@@ -22,6 +22,10 @@ fn one<'a>(graph: &'a Graph, id: &str, port: &str) -> Result<&'a str> {
     let refs = d.inputs.iter().find(|(p, _)| p == port).map(|(_, r)| r.as_slice()).unwrap_or(&[]);
     if refs.len() != 1 { return Err(Error::new(format!("node '{id}': {port} input must be a single node"))); }
     Ok(&refs[0])
+}
+fn one_output(graph: &Graph, id: &str, port: &str) -> Result<usize> {
+    let source = one(graph, id, port)?;
+    Ok(graph.node(id).unwrap().output_for(port, 0, source).output)
 }
 
 impl Plan {
@@ -80,44 +84,50 @@ impl Plan {
     }
 
     pub(crate) fn cook_end(&self, graph: &Graph, resolved: &crate::channels::ResolvedChannels, id: &str, budget: Budget,
-        fetch: &mut dyn FnMut(&str) -> Result<Arc<Geometry>>) -> Result<(Geometry,Vec<(String,f64,usize,usize)>)> {
+        fetch: &mut dyn FnMut(&str, usize) -> Result<Arc<Geometry>>) -> Result<(Geometry,Vec<(String,f64,usize,usize)>)> {
         let mut cook = Region { graph, resolved, plan: self, budget, fetch, frames: Vec::new(), times:Vec::new() };
         let geometry=(*cook.end(id)?).clone();Ok((geometry,cook.times))
     }
 }
 
-struct Frame { scope: Vec<String>, done: HashMap<String, Arc<Geometry>> }
+struct Frame { scope: Vec<String>, done: HashMap<String, Vec<Arc<Geometry>>> }
 struct Region<'a> {
     graph: &'a Graph, resolved: &'a crate::channels::ResolvedChannels, plan: &'a Plan, budget: Budget,
-    fetch: &'a mut dyn FnMut(&str) -> Result<Arc<Geometry>>, frames: Vec<Frame>, times:Vec<(String,f64,usize,usize)>,
+    fetch: &'a mut dyn FnMut(&str, usize) -> Result<Arc<Geometry>>, frames: Vec<Frame>, times:Vec<(String,f64,usize,usize)>,
 }
 impl Region<'_> {
     fn node(&mut self, id: &str) -> Result<Arc<Geometry>> {
+        self.node_output(id, 0)
+    }
+    fn node_output(&mut self, id: &str, output: usize) -> Result<Arc<Geometry>> {
         let scope = &self.plan.scopes[id];
-        let Some(slot) = self.frames.iter().rposition(|f| &f.scope == scope) else { return (self.fetch)(id); };
-        if let Some(g) = self.frames[slot].done.get(id) { return Ok(g.clone()); }
+        let Some(slot) = self.frames.iter().rposition(|f| &f.scope == scope) else { return (self.fetch)(id, output); };
+        if let Some(g) = self.frames[slot].done.get(id) { return g.get(output).cloned().ok_or_else(||Error::new(format!("node '{id}' has no output {output}"))); }
         let def = self.graph.node(id).unwrap();
         let spec = super::get(&def.node_type).ok_or_else(|| Error::new(format!("node '{id}': node type '{}' is not in the Rust backend yet", def.node_type)))?;
         let start=Instant::now();
-        let out = if def.node_type == "loop_end" { self.end(id)? } else {
+        let outputs = if def.node_type == "loop_end" { vec![self.end(id)?] } else {
             for (port, _) in &def.inputs { if !spec.inputs.iter().any(|p| p.name == port) { return Err(Error::new(format!("node '{id}': '{}' has no input '{port}'", def.node_type))); } }
             let mut inputs = Vec::new();
             for port in spec.inputs {
                 let refs = def.inputs.iter().find(|(p, _)| p == port.name).map(|(_, r)| r.as_slice()).unwrap_or(&[]);
                 if !port.multi && refs.len() > 1 { return Err(Error::new(format!("node '{id}': input '{}' takes one connection", port.name))); }
-                let mut got = Vec::new(); for src in refs { got.push(self.node(src)?); } inputs.push(got);
+                let mut got = Vec::new(); for (index,src) in refs.iter().enumerate() { got.push(self.node_output(src,def.output_for(port.name,index,src).output)?); } inputs.push(got);
             }
-            Arc::new(run_node(id, def, spec, &inputs, self.resolved.params.get(id))?)
+            run_node_outputs(id, def, spec, &inputs, self.resolved.params.get(id))?.0.into_iter().map(Arc::new).collect()
         };
-        self.times.push((id.into(),start.elapsed().as_secs_f64()*1000.,out.npoints,out.nprims()));
-        self.frames[slot].done.insert(id.into(), out.clone()); Ok(out)
+        let out = outputs.get(output).cloned().ok_or_else(||Error::new(format!("node '{id}' has no output {output}")))?;
+        self.times.push((id.into(),start.elapsed().as_secs_f64()*1000.,outputs[0].npoints,outputs[0].nprims()));
+        self.frames[slot].done.insert(id.into(), outputs); Ok(out)
     }
     fn end(&mut self, id: &str) -> Result<Arc<Geometry>> {
         let def = self.graph.node(id).unwrap();
         let b = one(self.graph, id, "begin")?.to_owned();
         let source = one(self.graph, &b, "geo")?.to_owned();
+        let source_output = one_output(self.graph, &b, "geo")?;
         let body = one(self.graph, id, "geo")?.to_owned();
-        let initial = self.node(&source)?;
+        let body_output = one_output(self.graph, id, "geo")?;
+        let initial = self.node_output(&source, source_output)?;
         let p = Params::resolve(LOOP_END.params, self.resolved.params.get(id).or(def.params.as_ref())).map_err(|e| e.in_node(id, "loop_end"))?;
         // Int bounds are enforced here because Params deliberately has no UI range coercion.
         let n = p.f("iterations")?;
@@ -133,8 +143,8 @@ impl Region<'_> {
             self.budget.set(left - 1);
             let mut incoming = (*state).clone();
             incoming.detail.insert("iteration".into(), i.into()); incoming.detail.insert("numiterations".into(), count.into());
-            self.frames.push(Frame { scope: self.plan.scopes[&b].clone(), done: HashMap::from([(b.clone(), Arc::new(incoming))]) });
-            let result = self.node(&body); self.frames.pop(); state = result?;
+            self.frames.push(Frame { scope: self.plan.scopes[&b].clone(), done: HashMap::from([(b.clone(), vec![Arc::new(incoming)])]) });
+            let result = self.node_output(&body, body_output); self.frames.pop(); state = result?;
         }
         if count > 0 {
             let mut out = (*state).clone();
@@ -150,6 +160,17 @@ impl Region<'_> {
 #[cfg(test)] mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn loop_body_reads_second_output() {
+        let graph=Graph::from_value(&json!({"display":"end","nodes":{
+            "box":{"type":"box"},
+            "begin":{"type":"loop_begin","inputs":{"geo":"box"}},
+            "fill":{"type":"flood_fill","inputs":{"geometry":"begin"},"params":{"seed_group":"0","max_steps":0}},
+            "end":{"type":"loop_end","inputs":{"begin":"begin","geo":{"node":"fill","output":1}},"params":{"iterations":1}}
+        }})).unwrap();
+        assert!(graph.cook(None).unwrap().nprims()>0);
+        assert!(crate::session::Session::new(graph).cook(None).unwrap().nprims()>0);
+    }
     fn graph(n: usize) -> Graph { Graph::from_value(&json!({"display":"end", "nodes":{
         "p":{"type":"point"}, "begin":{"type":"loop_begin","inputs":{"geo":"p"}},
         "step":{"type":"transform","inputs":{"geo":"begin"},"params":{"translate":[0.5,0,0]}},
@@ -188,7 +209,7 @@ impl Region<'_> {
         let out=session.cook(None).unwrap();assert_eq!(out.detail,initial.detail);assert_eq!(out.p()[0],1.);
         assert_eq!(session.last_stats().cooked.iter().filter(|id|id.as_str()=="step").count(),2);
         let g=graph(2);let plan=Plan::analyze(&g,"end").unwrap();let b=budget();b.set(1);
-        assert!(plan.cook_end(&g,&crate::channels::resolve_graph(&g),"end",b,&mut |src|g.cook(Some(src))).unwrap_err().to_string().contains("budget exceeded"));
+        assert!(plan.cook_end(&g,&crate::channels::resolve_graph(&g),"end",b,&mut |src, _|g.cook(Some(src))).unwrap_err().to_string().contains("budget exceeded"));
         assert!(g.cook(None).is_ok());
     }
     #[test] fn nested_feedback() {

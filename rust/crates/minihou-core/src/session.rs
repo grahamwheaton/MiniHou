@@ -25,7 +25,7 @@ use serde_json::Value;
 
 use crate::error::{Error, Result};
 use crate::geometry::{AttrData, Geometry};
-use crate::graph::{run_node, Graph};
+use crate::graph::{run_node_outputs, Graph};
 use crate::{lod::{ClusterLod, BuildError}, params::Params, preview};
 use crate::nodes;
 
@@ -61,6 +61,7 @@ impl NodeCookDiagnostic {
 struct Entry {
     node: String,
     geo: Arc<Geometry>,
+    outputs: Vec<Arc<Geometry>>,
     side: Option<Arc<dyn Any + Send + Sync>>,
     bytes: usize,
     used: u64,
@@ -396,8 +397,9 @@ fn key_of(graph: &Graph, resolved: &crate::channels::ResolvedChannels, external_
         }
         port.name.hash(&mut h);
         refs.len().hash(&mut h);
-        for r in refs {
+        for (index, r) in refs.iter().enumerate() {
             key_of(graph, resolved, external_versions, r, keys, active)?.hash(&mut h);
+            def.output_for(port.name, index, r).output.hash(&mut h);
         }
     }
     active.remove(id);
@@ -474,6 +476,32 @@ mod channel_cache_tests {
     }
 }
 
+#[cfg(test)]
+mod multi_output_cache_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn cache_shares_one_cook_across_output_ports() {
+        let graph = Graph::from_value(&json!({"nodes": {
+            "shape": {"type":"box"},
+            "fill": {"type":"flood_fill", "inputs":{"geometry":"shape"},
+                "params":{"seed_group":"0", "max_steps":0}},
+            "pieces": {"type":"null", "inputs":{"geo":"fill"}},
+            "frontier": {"type":"null", "inputs":{"geo":{"node":"fill","output":1}}}
+        }})).unwrap();
+        let mut session = Session::new(graph);
+        let a = session.cook(Some("pieces")).unwrap();
+        assert!(a.nprims() > 0);
+        assert_eq!(session.last_stats().cooked.iter().filter(|id| *id == "fill").count(), 1);
+        let b = session.cook(Some("frontier")).unwrap();
+        assert!(b.nprims() > 0);
+        assert!(session.last_stats().cached.contains(&"fill".into()));
+        assert!(!session.last_stats().cooked.contains(&"fill".into()));
+        assert!(session.cache_bytes() >= geometry_bytes(&a) + geometry_bytes(&b));
+    }
+}
+
 struct Run<'a> {
     cancel: Option<&'a (dyn Fn() -> bool + Send + Sync)>,
     graph: &'a Graph,
@@ -490,6 +518,9 @@ struct Run<'a> {
 
 impl Run<'_> {
     fn get(&mut self, id: &str) -> Result<Arc<Geometry>> {
+        self.get_output(id, 0)
+    }
+    fn get_output(&mut self, id: &str, output: usize) -> Result<Arc<Geometry>> {
         let key = self.keys[id];
         let t0 = Instant::now();
         let def = self.graph.node(id).expect("validated by key_of");
@@ -500,7 +531,7 @@ impl Run<'_> {
             e.used = self.clock;
             self.stats.cached.push(id.to_string());
             self.stats.nodes.push(NodeCookDiagnostic::new(id, true, t0.elapsed().as_secs_f64()*1000.0, &e.geo));
-            return Ok(e.geo.clone());
+            return e.outputs.get(output).cloned().ok_or_else(|| Error::new(format!("node '{id}' has no output {output}")));
         }
         if self.cancel.is_some_and(|c| c()) {
             return Err(Error::new(SUPERSEDED));
@@ -509,27 +540,27 @@ impl Run<'_> {
         if def.node_type == "loop_end" {
             let t0 = Instant::now();
             let (plan, graph, budget, resolved) = (self.plan, self.graph, self.budget.clone(), self.resolved);
-            let (geo,times) = plan.cook_end(graph, resolved, id, budget, &mut |src| self.get(src))?;
+            let (geo,times) = plan.cook_end(graph, resolved, id, budget, &mut |src, output| self.get_output(src, output))?;
             let geo = Arc::new(geo);
             for (node,ms,points,primitives) in times {
                 self.stats.cooked.push(node.clone()); self.stats.node_ms.push((node.clone(),ms));
                 self.stats.nodes.push(NodeCookDiagnostic { node_id: node, cache_hit: false, cook_ms: ms, point_count: points, primitive_count: primitives });
             }
             let bytes = geometry_bytes(&geo);
-            if let Some(old) = self.cache.insert(key, Entry { node: id.into(), geo: geo.clone(), side: None, bytes, used: self.clock }) { *self.bytes -= old.bytes; }
+            if let Some(old) = self.cache.insert(key, Entry { node: id.into(), geo: geo.clone(), outputs: vec![geo.clone()], side: None, bytes, used: self.clock }) { *self.bytes -= old.bytes; }
             *self.bytes += bytes;
             self.stats.cooked.push(id.into());
             let ms = t0.elapsed().as_secs_f64()*1000.0;
             self.stats.node_ms.push((id.into(), ms));
             self.stats.nodes.push(NodeCookDiagnostic::new(id, false, ms, &geo));
-            return Ok(geo);
+            return if output == 0 { Ok(geo) } else { Err(Error::new(format!("node '{id}' has no output {output}"))) };
         }
         let mut inputs: Vec<Vec<Arc<Geometry>>> = Vec::with_capacity(spec.inputs.len());
         for port in spec.inputs {
             let refs = def.inputs.iter().find(|(p, _)| p == port.name).map(|(_, r)| r.as_slice()).unwrap_or(&[]);
             let mut got = Vec::with_capacity(refs.len());
-            for r in refs {
-                got.push(self.get(r)?);
+            for (index, r) in refs.iter().enumerate() {
+                got.push(self.get_output(r, def.output_for(port.name, index, r).output)?);
             }
             inputs.push(got);
         }
@@ -547,14 +578,19 @@ impl Run<'_> {
                 p.e("mode", &["auto", "off"]).map_err(|e| e.in_node(id, &def.node_type))?;
                 Some(inputs[0].first().ok_or_else(|| Error::new("geo is not connected").in_node(id, &def.node_type))?.clone())
             } else { None };
-        let geo = if let Some(g) = passed { g } else { Arc::new(match external {
+        let outputs: Vec<Arc<Geometry>> = if let Some(g) = passed {
+            let mut outputs = vec![g];
+            outputs.resize_with(spec.outputs.len(), || Arc::new(Geometry::default()));
+            outputs
+        } else { match external {
             // Waiting for external data: empty geometry, so downstream nodes still cook (see CookStats::waiting).
             Some(result)=>match result.and_then(|g|g.validate().map(|_|g)) {
-                Err(e) if e.waiting_text().is_some() => Geometry::default(),
-                other => other.map_err(|e|e.in_node(id,&def.node_type))?,
+                Err(e) if e.waiting_text().is_some() => vec![Arc::new(Geometry::default())],
+                other => vec![Arc::new(other.map_err(|e|e.in_node(id,&def.node_type))?)],
             },
-            None=>run_node(id, def, spec, &inputs, self.resolved.params.get(id))?,
-        }) };
+            None=>run_node_outputs(id, def, spec, &inputs, self.resolved.params.get(id))?.0.into_iter().map(Arc::new).collect(),
+        } };
+        let geo = outputs.first().cloned().ok_or_else(|| Error::new(format!("node '{id}' produced no outputs")))?;
         let mut side: Option<Arc<dyn Any + Send + Sync>> = None;
         let mut side_bytes = 0;
         if def.node_type == "lod_bake" && !def.bypass {
@@ -583,13 +619,14 @@ impl Run<'_> {
         let ms = t0.elapsed().as_secs_f64() * 1000.0;
         self.stats.node_ms.push((id.to_string(), ms));
         self.stats.nodes.push(NodeCookDiagnostic::new(id, false, ms, &geo));
-        if cache_off { return Ok(geo); }
-        let bytes = geometry_bytes(&geo) + side_bytes;
-        if let Some(old) = self.cache.insert(key, Entry { node: id.to_string(), geo: geo.clone(), side, bytes, used: self.clock }) {
+        if cache_off { return outputs.get(output).cloned().ok_or_else(|| Error::new(format!("node '{id}' has no output {output}"))); }
+        let bytes = outputs.iter().map(|g| geometry_bytes(g)).sum::<usize>() + side_bytes;
+        let selected = outputs.get(output).cloned().ok_or_else(|| Error::new(format!("node '{id}' has no output {output}")))?;
+        if let Some(old) = self.cache.insert(key, Entry { node: id.to_string(), geo: geo.clone(), outputs, side, bytes, used: self.clock }) {
             *self.bytes -= old.bytes;
         }
         *self.bytes += bytes;
-        Ok(geo)
+        Ok(selected)
     }
 }
 
