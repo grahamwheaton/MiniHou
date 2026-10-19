@@ -407,7 +407,7 @@ fn relax_samples(pos: &mut [f32], samples: &mut [(usize, [f64; 3])], tris: &[Tri
     for _ in 0..iterations {
         let mut delta = vec![[0.0;3]; n];
         for i in 0..n { for j in i+1..n {
-            if !neighbours[samples[i].0].contains(&samples[j].0) { continue; }
+            if neighbours[samples[i].0].binary_search(&samples[j].0).is_err() { continue; }
             let mut d = [pos[3*i] as f64-pos[3*j] as f64,pos[3*i+1] as f64-pos[3*j+1] as f64,pos[3*i+2] as f64-pos[3*j+2] as f64];
             if let Some(normals) = &source_normals {
                 if normals.len() >= 3*n {
