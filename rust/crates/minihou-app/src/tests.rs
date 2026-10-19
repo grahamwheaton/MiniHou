@@ -10,7 +10,8 @@ fn parameter_kinds_from_defaults() {
         assert_eq!(param_kind(&v),k);
     }
     for spec in nodes::registry() {
-        for param in spec.params { assert_ne!(param_kind(&(param.default)()),ParamKind::Unsupported,"{} {}",spec.name,param.name); }
+        // attribute_create.attributes is a list of attribute definitions edited in its own panel, not a scalar kind.
+        for param in spec.params { if spec.name=="attribute_create" && param.name=="attributes" {continue;} assert_ne!(param_kind(&(param.default)()),ParamKind::Unsupported,"{} {}",spec.name,param.name); }
     }
 }
 #[test]
@@ -201,7 +202,7 @@ fn metadata_covers_all_node_types_and_parameters() {
             let meta = param_meta(spec.name, param.name).unwrap_or_else(|| panic!("missing metadata for {}.{}", spec.name, param.name));
             assert!(meta["kind"].is_string());
             assert!(meta["doc"].is_string());
-            assert_ne!(metadata_kind(meta, &(param.default)()), ParamKind::Unsupported);
+            if !(spec.name=="attribute_create" && param.name=="attributes") { assert_ne!(metadata_kind(meta, &(param.default)()), ParamKind::Unsupported); }
         }
     }
     assert!(param_meta("missing", "missing").is_none());
