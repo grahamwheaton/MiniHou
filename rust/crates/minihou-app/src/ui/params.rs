@@ -65,6 +65,11 @@ pub fn domain_edit_mode(name: &str, value: &Value) -> Option<super::SelectionMod
 }
 /// Fallback for group fields without registry metadata: follow a sibling domain or group_type parameter.
 pub fn pick_domain_for(typ: &str, name: &str, meta: Option<&Value>, params: &Value) -> Option<super::SelectionMode> {
+    if typ == "attribute_create" && name == "group" {
+        if let Some(class) = params["attributes"].as_array().and_then(|a| a.first()).and_then(|a| a["class"].as_str()) {
+            return pick_domain(Some(&json!({"pick_domain":class})), params);
+        }
+    }
     if let Some(mode) = pick_domain(meta, params) { return Some(mode); }
     if !is_input_group_field(name, meta) { return None; }
     if !matches!(name, "group" | "group_name" | "pattern") { return Some(name_domain(name, meta)); }
@@ -126,6 +131,8 @@ mod pick_tests {
         assert_eq!(pick_domain(param_meta("attribute_create", "group"), &json!({})), Some(SelectionMode::Points));
         assert_eq!(pick_domain(param_meta("attribute_create", "group"), &json!({"domain":"points"})), Some(SelectionMode::Points));
         assert_eq!(pick_domain(param_meta("attribute_create", "group"), &json!({"domain":"primitives"})), Some(SelectionMode::Faces));
+        assert_eq!(pick_domain_for("attribute_create", "group", param_meta("attribute_create", "group"),
+            &json!({"attributes":[{"class":"primitives"}]})), Some(SelectionMode::Faces));
     }
     #[test]
     fn input_rule_adds_arrow_to_group_fields_only() {
@@ -1556,8 +1563,10 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
                 for param in spec.params {
                     if typ == "bezier" && param.name == "controls" { continue; }
                     if typ == "knife" && param.name == "cuts" { continue; }
+                    if typ == "attribute_create" && param.name != "group" { continue; }
                     ui.push_id(param.name, |ui| row(ui, v, out, id, typ, param, flags.locked, &mut errors));
                 }
+                if typ == "attribute_create" { attribute_create_panel(ui,v,out,id,flags.locked); }
                 if typ == "bezier" { bezier_controls_panel(ui,v,out,id,flags.locked); }
                 if typ == "knife" { knife_chains_panel(ui,v,out,id,flags.locked); }
             }
@@ -1576,6 +1585,64 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
 
 fn redo_param(out: &mut Actions, id: &str, name: &str, value: Value, continuous: bool) {
     out.push(UiAction::Edit { edit: Edit::Param { node: id.into(), name: name.into(), value }, continuous });
+}
+
+fn attribute_create_panel(ui:&mut egui::Ui,v:&View<'_>,out:&mut Actions,id:&str,locked:bool){
+    let params=&v.doc["nodes"][id]["params"];
+    let mut attrs=params["attributes"].as_array().cloned().unwrap_or_else(||vec![json!({
+        "name":params["name"].as_str().unwrap_or("attrib1"),
+        "class":params["domain"].as_str().unwrap_or("points"),
+        "type":params["type"].as_str().unwrap_or("float"),
+        "size":match params["type"].as_str().unwrap_or("float") {"vector2"=>2,"vector"|"color"=>3,"vector4"=>4,_=>1},
+        "default":[0.0,0.0,0.0,0.0],
+        "value":params["value"].as_array().map_or(vec![json!(0.0),json!(0.0),json!(0.0),json!(1.0)],|a|{let mut a=a.clone();a.push(json!(1.0));a})
+    })]);
+    let before=attrs.clone();
+    ui.add_enabled_ui(!locked,|ui|{
+        ui.horizontal(|ui|{
+            ui.label("Number of Attributes");
+            let mut count=attrs.len() as u32;
+            if ui.add(egui::DragValue::new(&mut count).range(0..=64)).changed(){
+                while attrs.len() < count as usize { attrs.push(json!({"name":format!("attrib{}",attrs.len()+1),"class":"points","type":"float","size":1,"default":[0.,0.,0.,0.],"value":[0.,0.,0.,0.]})); }
+                attrs.truncate(count as usize);
+            }
+            if ui.button("+").clicked(){attrs.push(json!({"name":format!("attrib{}",attrs.len()+1),"class":"points","type":"float","size":1,"default":[0.,0.,0.,0.],"value":[0.,0.,0.,0.]}));}
+            if ui.button("Clear").clicked(){attrs.clear();}
+        });
+        let mut remove=None;
+        for (i,a) in attrs.iter_mut().enumerate(){
+            ui.push_id(i,|ui|{
+                ui.separator();
+                ui.horizontal(|ui|{ui.strong(format!("Attribute {}",i+1));if ui.button("Remove").clicked(){remove=Some(i);}});
+                let mut name=a["name"].as_str().unwrap_or("").to_owned();
+                ui.horizontal(|ui|{ui.label("Name");if ui.text_edit_singleline(&mut name).changed(){a["name"]=json!(name);}});
+                for (key,label,options) in [("class","Class",&["points","vertices","primitives","detail"][..]),("type","Type",&["float","int","string","vector2","vector","color","vector4"][..])]{
+                    let mut current=a[key].as_str().unwrap_or(options[0]).to_owned();
+                    ui.horizontal(|ui|{ui.label(label);egui::ComboBox::from_id_salt(key).selected_text(&current).show_ui(ui,|ui|{for option in options{ui.selectable_value(&mut current,(*option).to_owned(),*option);}});});
+                    if key=="type" && a[key]!=current {
+                        a["size"]=json!(match current.as_str(){"vector2"=>2,"vector"|"color"=>3,"vector4"=>4,_=>1});
+                        if current=="string" { a["value"]=json!(""); a["default"]=json!(""); }
+                        else if a["value"].is_string() { a["value"]=json!([0.,0.,0.,0.]); a["default"]=json!([0.,0.,0.,0.]); }
+                    }
+                    a[key]=json!(current);
+                }
+                let mut size=a["size"].as_u64().unwrap_or(1) as u32;
+                ui.horizontal(|ui|{ui.label("Size");ui.add(egui::DragValue::new(&mut size).range(1..=4));});a["size"]=json!(size);
+                if a["type"]=="string"{
+                    let mut value=a["value"].as_str().unwrap_or("").to_owned();
+                    ui.horizontal(|ui|{ui.label("Value");if ui.text_edit_singleline(&mut value).changed(){a["value"]=json!(value);}});
+                }else{
+                    for key in ["default","value"]{
+                        let mut values=a[key].as_array().cloned().unwrap_or_default();values.resize(4,json!(0.0));
+                        ui.horizontal(|ui|{ui.label(if key=="default"{"Default"}else{"Value"});for component in values.iter_mut().take(size as usize){let mut x=component.as_f64().unwrap_or(0.);if ui.add(egui::DragValue::new(&mut x).speed(0.1)).changed(){*component=json!(x);}}});
+                        a[key]=json!(values);
+                    }
+                }
+            });
+        }
+        if let Some(i)=remove{attrs.remove(i);}
+    });
+    if attrs!=before{redo_param(out,id,"attributes",json!(attrs),false);}
 }
 
 /// The most common Loop Cut adjustments stay visible above the full node parameters.
