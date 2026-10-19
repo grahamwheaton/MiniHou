@@ -524,9 +524,27 @@ pub fn duplicate(value: &Value, id: &str) -> Option<(Value, String)> {
 }
 
 pub fn connect(value: &Value, from: &str, to: &str, port: Option<&str>) -> Option<Value> {
+    connect_output(value, from, 0, to, port)
+}
+
+fn endpoint_node(value: &Value) -> Option<&str> {
+    value.as_str().or_else(|| value.get("node")?.as_str())
+}
+
+fn endpoint_output(value: &Value) -> Option<usize> {
+    if value.is_string() { Some(0) }
+    else { value.get("output")?.as_u64().and_then(|n| usize::try_from(n).ok()) }
+}
+
+pub fn connect_output(value: &Value, from: &str, output: usize, to: &str, port: Option<&str>) -> Option<Value> {
     if from == to { return None; }
     let all = nodes(value)?;
-    if !all.contains_key(from) { return None; }
+    let source = all.get(from)?;
+    let source_type = source.get("type")?.as_str()?;
+    let native = output < nodes::get(source_type)?.outputs.len();
+    let subnet = source_type == "subnet" && source.get("output_sockets").and_then(Value::as_array)
+        .is_some_and(|sockets| sockets.iter().any(|socket| socket.get("index").and_then(Value::as_u64) == Some(output as u64)));
+    if !native && !subnet { return None; }
     let ty = all.get(to)?.get("type")?.as_str()?;
     let spec = nodes::get(ty)?;
     let input = match port { Some(name) => spec.inputs.iter().find(|p| p.name == name)?, None => spec.inputs.first()? };
@@ -534,11 +552,12 @@ pub fn connect(value: &Value, from: &str, to: &str, port: Option<&str>) -> Optio
     let target = nodes_mut(&mut value)?.get_mut(to)?;
     if target.get("inputs").is_none() { target["inputs"] = json!({}); }
     let inputs = target.get_mut("inputs")?.as_object_mut()?;
+    let endpoint = if output == 0 { json!(from) } else { json!({"node":from,"output":output}) };
     if input.multi {
         let list = inputs.entry(input.name).or_insert_with(|| json!([]));
-        if let Some(a) = list.as_array_mut() { if !a.iter().any(|x| x.as_str() == Some(from)) { a.push(json!(from)); } }
-        else { *list = json!([from]); }
-    } else { inputs.insert(input.name.to_owned(), json!(from)); }
+        if let Some(a) = list.as_array_mut() { if !a.contains(&endpoint) { a.push(endpoint); } }
+        else { *list = json!([endpoint]); }
+    } else { inputs.insert(input.name.to_owned(), endpoint); }
     Some(value)
 }
 
@@ -553,7 +572,7 @@ pub fn insert_existing(value: &Value, id: &str, wire: &WireRef) -> Option<Value>
     let node = all.get(id)?;
     if id == wire.from || id == wire.to || node["type"] == "output" || all.get(&wire.from)?["type"] == "output" { return None; }
     if node.get("inputs").and_then(Value::as_object).is_some_and(|inputs|
-        inputs.values().any(|v| v.as_str().is_some() || v.as_array().is_some_and(|a| !a.is_empty()))) { return None; }
+        inputs.values().any(|v| endpoint_node(v).is_some() || v.as_array().is_some_and(|a| !a.is_empty()))) { return None; }
     nodes::get(all.get(&wire.from)?["type"].as_str()?)?;
     let spec = nodes::get(node["type"].as_str()?)?;
     let input = spec.inputs.iter().find(|p| !p.optional).or_else(|| spec.inputs.first())?;
@@ -568,19 +587,21 @@ pub fn insert_existing(value: &Value, id: &str, wire: &WireRef) -> Option<Value>
         if !seen.insert(source) { continue; }
         for (target, def) in all {
             if def.get("inputs").and_then(Value::as_object).is_some_and(|i| i.values().any(|v|
-                v.as_str() == Some(source) || v.as_array().is_some_and(|a| a.iter().any(|r| r.as_str() == Some(source))))) {
+                endpoint_node(v) == Some(source) || v.as_array().is_some_and(|a| a.iter().any(|r| endpoint_node(r) == Some(source))))) {
                 pending.push(target.as_str());
             }
         }
     }
-    let mut next = connect(value, &wire.from, id, Some(input.name))?;
+    let original = all.get(&wire.to)?.get("inputs")?.get(&wire.port)?;
+    let original = if let Some(a) = original.as_array() { a.iter().find(|r| endpoint_node(r)==Some(&wire.from))? } else { original };
+    let mut next = connect_output(value, &wire.from, endpoint_output(original)?, id, Some(input.name))?;
     let edge = next.get_mut("nodes")?.get_mut(&wire.to)?.get_mut("inputs")?.get_mut(&wire.port)?;
     if let Some(refs) = edge.as_array_mut() {
-        if refs.iter().any(|r| r.as_str() == Some(id)) { return None; }
-        let index = refs.iter().position(|r| r.as_str() == Some(&wire.from))?;
+        if refs.iter().any(|r| endpoint_node(r) == Some(id)) { return None; }
+        let index = refs.iter().position(|r| endpoint_node(r) == Some(&wire.from))?;
         refs[index] = json!(id);
-        refs.retain(|r| r.as_str() != Some(&wire.from));
-    } else if edge.as_str() == Some(&wire.from) { *edge = json!(id); }
+        refs.retain(|r| endpoint_node(r) != Some(&wire.from));
+    } else if endpoint_node(edge) == Some(&wire.from) { *edge = json!(id); }
     else { return None; }
     Some(next)
 }
@@ -591,15 +612,18 @@ pub struct WirePickup { pub original: WireRef }
 impl WirePickup {
     pub fn begin(value: &Value, node: &str, port: &str) -> Option<Self> {
         let refs = value.get("nodes")?.get(node)?.get("inputs")?.get(port)?;
-        let from = refs.as_str().or_else(|| refs.as_array()?.last()?.as_str())?;
+        let from = endpoint_node(refs).or_else(|| refs.as_array()?.last().and_then(endpoint_node))?;
         Some(Self { original: WireRef { from: from.into(), to: node.into(), port: port.into() } })
     }
     pub fn release(&self, value: &Value, target: Option<(&str, &str)>) -> Option<Value> {
         if target == Some((self.original.to.as_str(), self.original.port.as_str())) { return None; }
+        let original = value.get("nodes")?.get(&self.original.to)?.get("inputs")?.get(&self.original.port)?;
+        let original = if let Some(a)=original.as_array() { a.iter().find(|r| endpoint_node(r)==Some(&self.original.from))? } else { original };
+        let output = endpoint_output(original)?;
         let next = disconnect_wires(value, &std::collections::BTreeSet::from([self.original.clone()]))?;
         if let Some((node, port)) = target {
             if value["nodes"][&self.original.from]["type"] == "output" { return None; }
-            let next = connect(&next, &self.original.from, node, Some(port))?;
+            let next = connect_output(&next, &self.original.from, output, node, Some(port))?;
             // Reject cycles, including those outside the displayed branch.
             let mut pending = vec![self.original.from.as_str()];
             let mut seen = HashSet::new();
@@ -608,8 +632,8 @@ impl WirePickup {
                 if !seen.insert(id) { continue; }
                 if let Some(inputs) = next["nodes"][id]["inputs"].as_object() {
                     for refs in inputs.values() {
-                        if let Some(source) = refs.as_str() { pending.push(source); }
-                        else if let Some(refs) = refs.as_array() { pending.extend(refs.iter().filter_map(Value::as_str)); }
+                        if let Some(source) = endpoint_node(refs) { pending.push(source); }
+                        else if let Some(refs) = refs.as_array() { pending.extend(refs.iter().filter_map(endpoint_node)); }
                     }
                 }
             }
@@ -628,10 +652,10 @@ pub fn disconnect_wires(value: &Value, wires: &std::collections::BTreeSet<WireRe
         let Some(input) = inputs.get_mut(&wire.port) else { continue };
         if let Some(refs) = input.as_array_mut() {
             let before = refs.len();
-            refs.retain(|r| r.as_str() != Some(wire.from.as_str()));
+            refs.retain(|r| endpoint_node(r) != Some(wire.from.as_str()));
             changed |= before != refs.len();
             if refs.is_empty() { inputs.remove(&wire.port); }
-        } else if input.as_str() == Some(wire.from.as_str()) {
+        } else if endpoint_node(input) == Some(wire.from.as_str()) {
             inputs.remove(&wire.port);
             changed = true;
         }
@@ -1282,6 +1306,23 @@ mod tests {
 mod noodle_tests {
     use super::*;
     use std::collections::BTreeSet;
+    #[test]
+    fn graph_multi_output_wire_reconnection() {
+        let base=json!({"nodes":{
+            "box":{"type":"box"},
+            "fill":{"type":"flood_fill","inputs":{"geometry":"box"}},
+            "pass":{"type":"null"},
+            "out":{"type":"output"}
+        }});
+        assert!(connect_output(&base,"fill",2,"out",Some("geo")).is_none());
+        let connected=connect_output(&base,"fill",1,"out",Some("geo")).unwrap();
+        assert_eq!(connected["nodes"]["out"]["inputs"]["geo"],json!({"node":"fill","output":1}));
+        let spliced=insert_existing(&connected,"pass",&wire("fill","out","geo")).unwrap();
+        assert_eq!(spliced["nodes"]["pass"]["inputs"]["geo"],json!({"node":"fill","output":1}));
+        assert_eq!(spliced["nodes"]["out"]["inputs"]["geo"],"pass");
+        let cut=disconnect_wires(&connected,&BTreeSet::from([wire("fill","out","geo")])).unwrap();
+        assert!(cut["nodes"]["out"]["inputs"].get("geo").is_none());
+    }
     fn wire(from: &str, to: &str, port: &str) -> WireRef {
         WireRef { from: from.into(), to: to.into(), port: port.into() }
     }

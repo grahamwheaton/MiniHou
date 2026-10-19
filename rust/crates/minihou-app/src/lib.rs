@@ -754,7 +754,7 @@ fn cook_batch_preview<T>(session: &mut Session, target: &mut String, requests: V
                     let displayed = display_nodes(&value);
                     *target = if displayed.len() > 1 {
                         let id = (0..).map(|i| format!("__display_merge_{i}")).find(|id| !graph.nodes.iter().any(|(name, _)| name == id)).unwrap();
-                        graph.nodes.push((id.clone(), minihou_core::graph::NodeDef { node_type: "merge".into(), inputs: vec![("geos".into(), displayed)], params: None, channels: None, locked_params: None, bypass: false }));
+                        graph.nodes.push((id.clone(), minihou_core::graph::NodeDef { node_type: "merge".into(), inputs: vec![("geos".into(), displayed)], endpoints: Vec::new(), params: None, channels: None, locked_params: None, bypass: false }));
                         id
                     } else { graph.main_output()? };
                     session.replace_graph(graph);
