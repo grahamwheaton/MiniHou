@@ -585,6 +585,8 @@ struct App {
     transform_pivot: Option<[f32; 3]>,
     transform_orientation: Option<ui::Orientation>,
     modal: Option<Modal>,
+    pending_duplicate_move: Option<String>,
+    duplicate_move_peers: Vec<String>,
     /// graph_embed_v1: a pushed Blender graph waiting for the user's answer (modal).
     embed_conflict: Option<Value>,
     model_modal: Option<(ModelState, Document, String, String)>,
@@ -763,7 +765,7 @@ impl App {
             theme:Theme::dark(),flags:HashMap::new(),themed:false,editor_state:EditorState::default(),geo:None,blender:BlenderStatus::default(),link:None,blender_job:None,
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
             display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,param_pick:None,barrier_key:None,target_key:None,picked_field:None,selection_metrics:Default::default(),coplanar:None,group_preview:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
-            clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,embed_conflict:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
+            clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,pending_duplicate_move:None,duplicate_move_peers:Vec::new(),embed_conflict:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
             last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default(),pending_loop_selection:None,undo_element_selection:Vec::new(),pending_restore_selection:None,model_before_selection:None,sel_undo:Vec::new(),sel_redo:Vec::new(),sel_baseline:Default::default(),extrude_keep:None };
         app.prefs = Preferences::load();
         app.prefs.apply_python(&python_gate());
@@ -862,7 +864,8 @@ impl App {
                     self.undo_element_selection.push((self.editor.doc.value().to_string(), selection, stash));
                     self.editor_state.apply(ui::EditorChange::Selection(to));
                 }
-                if matches!(edit, Edit::ModifierInputs { .. } | Edit::ModifierInputValue { .. }) || was_linked
+                if matches!(&edit, Edit::Param { node, .. } if self.editor.doc.value()["nodes"][node]["linked_params_group"].is_string())
+                    || matches!(edit, Edit::ModifierInputs { .. } | Edit::ModifierInputValue { .. }) || was_linked
                     || matches!(&edit, Edit::Param { value, .. } if value.get("modifier_input").is_some()) {
                     self.send(Edit::Replace(self.editor.doc.value().clone()));
                 } else { self.send(edit); }
@@ -1222,6 +1225,15 @@ impl App {
             proportional_params(params, &self.editor_state);
         }
         let param_value = params[name].clone();
+        if let TransformOp::Move(delta) = op {
+            for peer in &self.duplicate_move_peers {
+                if peer == &target { continue; }
+                let base = transform_math::TrsParams::from_params(&before_doc.value()["nodes"][peer]["params"]);
+                value["nodes"][peer]["params"]["translate"] = json!(transform_math::compose_translate(&base, delta.map(f64::from)).translate);
+            }
+        }
+        let peer_translates: Vec<_> = self.duplicate_move_peers.iter().filter(|peer| *peer != &target)
+            .map(|peer| (peer.clone(), value["nodes"][peer]["params"]["translate"].clone())).collect();
         match apply_transform_step(&mut self.editor.doc, first, value, &target, name, param_value) {
             Ok(edits) => {
                 if self.editor_state.selection == ui::SelectionMode::Object {
@@ -1230,6 +1242,12 @@ impl App {
                     self.selected = target.clone();
                 }
                 self.transform_target = Some(target.clone()); self.display = target.clone(); for edit in edits { self.send(edit); }
+                if !first {
+                    for (peer, translate) in peer_translates {
+                        let edit = Edit::Param {node:peer, name:"translate".into(), value:translate};
+                        if self.editor.doc.edit(&edit).is_ok() { self.send(edit); }
+                    }
+                }
                 if !first {
                     let mut desired=self.editor.doc.value()["nodes"][&target]["params"].clone();
                     desired["translate"] = json!(new_trs.translate);
@@ -1266,6 +1284,7 @@ impl App {
         }
         self.transform_pivot = None;
         self.transform_orientation = None;
+        self.duplicate_move_peers.clear();
     }
     fn cancel_transform(&mut self) {
         if let Some(before) = self.transform_before.take() {
@@ -1283,6 +1302,7 @@ impl App {
         self.transform_delta = None;
         self.transform_pivot = None;
         self.transform_orientation = None;
+        self.duplicate_move_peers.clear();
     }
     /// Alt+M: start the Mirror tool on the selected node (or adopt a selected mirror node). See ui/mirror_tool.rs.
     fn start_mirror(&mut self, ctx: &egui::Context) {
@@ -1871,6 +1891,29 @@ impl App {
             self.last_operator = Some(LastOperator::Duplicate);
         }
     }
+    fn duplicate_linked_nodes(&mut self) {
+        let ids: Vec<_> = self.selected_set.iter().cloned().collect();
+        let Some((value, copies)) = graph_edit::duplicate_linked(self.editor.doc.value(), &ids) else { return };
+        if self.commit_document(value, "duplicate linked nodes") {
+            self.selected = copies[0].clone();
+            self.selected_set = copies.into_iter().collect();
+            self.last_operator = Some(LastOperator::Duplicate);
+        }
+    }
+    fn duplicate_viewport_objects(&mut self) {
+        if self.editor_state.selection != ui::SelectionMode::Object { return; }
+        let ids: Vec<_> = self.selected_set.iter().filter(|id| active_range(id, &self.display_ranges).is_some())
+            .cloned().collect();
+        let Some((value, copies)) = graph_edit::duplicate_objects(self.editor.doc.value(), &ids) else { return };
+        if self.commit_document(value, "duplicate viewport objects") {
+            self.selected = copies[0].clone();
+            self.selected_set = copies.into_iter().collect();
+            self.display = self.selected.clone();
+            self.pending_duplicate_move = Some(self.selected.clone());
+            self.duplicate_move_peers = self.selected_set.iter().cloned().collect();
+            self.last_operator = Some(LastOperator::Duplicate);
+        }
+    }
     /// Dissolve a node, rewiring its inputs to consumers.
     fn dissolve_node(&mut self, id: &str) {
         let ids = if self.selected_set.contains(id) { self.selected_set.iter().cloned().collect::<Vec<_>>() } else { vec![id.to_owned()] };
@@ -2388,6 +2431,8 @@ impl App {
                 }
             }
             "duplicate_selection" => { if let Some(id) = self.selected_set.iter().next().cloned() { self.duplicate_node(&id); } }
+            "duplicate_linked_selection" => self.duplicate_linked_nodes(),
+            "duplicate_objects" => self.duplicate_viewport_objects(),
             "dissolve_selection" => {
                 if self.remove_selected_wires(ctx, true) { return; }
                 if let Some(id) = self.selected_set.iter().next().cloned() {
@@ -2971,6 +3016,10 @@ impl eframe::App for App {
                     }
                 }
                 self.scene = Some(scene);
+                if self.pending_duplicate_move.as_ref().is_some_and(|id| active_range(id, &self.display_ranges).is_some()) {
+                    self.pending_duplicate_move = None;
+                    self.start_modal(ctx, ModalKind::Move);
+                }
                 self.sync_selection_baseline();
                 self.elem_topo = Default::default();
                 if self.param_pick.as_ref().is_some_and(|p| p.load && p.ready) { self.pick_load(); }

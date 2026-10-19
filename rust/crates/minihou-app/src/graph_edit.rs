@@ -682,6 +682,7 @@ pub fn paste(value: &Value, clipboard: &Value) -> Option<(Value, Vec<String>)> {
     }
     for (old, src) in copied {
         let mut node = src.clone();
+        node.as_object_mut()?.remove("linked_params_group");
         if let Some(channels) = node.get_mut("channels").and_then(Value::as_object_mut) {
             for expr in channels.values_mut() {
                 if let Some(source) = expr.as_str() {
@@ -702,6 +703,93 @@ pub fn paste(value: &Value, clipboard: &Value) -> Option<(Value, Vec<String>)> {
     }
     let new_ids = copied.keys().map(|old| ids[old.as_str()].clone()).collect();
     Some((value, new_ids))
+}
+
+/// Copy displayed objects with their upstream graphs so later source edits do not alter the copies.
+pub fn duplicate_objects(value: &Value, ids: &[String]) -> Option<(Value, Vec<String>)> {
+    let all = nodes(value)?;
+    let mut closure = HashSet::new();
+    let mut pending = ids.to_vec();
+    while let Some(id) = pending.pop() {
+        if !closure.insert(id.clone()) { continue; }
+        let inputs = all.get(&id)?.get("inputs").and_then(Value::as_object);
+        if let Some(inputs) = inputs {
+            for source in inputs.values() {
+                if let Some(id) = source.as_str() { pending.push(id.to_owned()); }
+                if let Some(list) = source.as_array() {
+                    pending.extend(list.iter().filter_map(Value::as_str).map(str::to_owned));
+                }
+            }
+        }
+    }
+    let mut old_ids: Vec<_> = closure.into_iter().collect();
+    old_ids.sort();
+    let clip = copy(value, &old_ids)?;
+    let (mut next, new_ids) = paste(value, &clip)?;
+    let mapping: HashMap<_, _> = old_ids.iter().cloned().zip(new_ids).collect();
+    let roots: Vec<_> = ids.iter().map(|id| mapping.get(id).cloned()).collect::<Option<_>>()?;
+    let all = nodes_mut(&mut next)?;
+    let mut copies = Vec::new();
+    for root in roots {
+        let wrapper = fresh_id(all, "transform");
+        all.insert(wrapper.clone(), json!({"type":"transform","inputs":{"geo":root}}));
+        copies.push(wrapper);
+    }
+    let mut shown = minihou_app::display_nodes(value);
+    shown.extend(copies.iter().cloned());
+    next["display"] = json!(shown);
+    Some((next, copies))
+}
+
+/// Copies nodes and joins each pair's parameter edits, including non-numeric parameters.
+pub fn duplicate_linked(value: &Value, ids: &[String]) -> Option<(Value, Vec<String>)> {
+    let clip = copy(value, ids)?;
+    let (mut next, copies) = paste(value, &clip)?;
+    for (source, copy) in ids.iter().zip(&copies) {
+        let group = next["nodes"][source]["linked_params_group"].as_str()
+            .map(str::to_owned).unwrap_or_else(|| source.clone());
+        next["nodes"][source]["linked_params_group"] = json!(group);
+        next["nodes"][copy]["linked_params_group"] = json!(group);
+    }
+    Some((next, copies))
+}
+
+#[cfg(test)]
+mod duplicate_tests {
+    use super::*;
+    #[test]
+    fn network_linked_duplicates_share_groups_but_regular_copies_do_not() {
+        let doc = json!({"nodes":{"box1":{"type":"box","params":{"size":[1,2,3]}}}});
+        let (linked, copies) = duplicate_linked(&doc, &["box1".into()]).unwrap();
+        assert_eq!(linked["nodes"]["box1"]["linked_params_group"], "box1");
+        assert_eq!(linked["nodes"][&copies[0]]["linked_params_group"], "box1");
+        let (regular, regular_ids) = paste(&linked, &copy(&linked, &["box1".into()]).unwrap()).unwrap();
+        assert!(regular["nodes"][&regular_ids[0]].get("linked_params_group").is_none());
+    }
+    #[test]
+    fn pick_viewport_duplicate_copies_upstream_nodes_and_displays_both() {
+        let doc = json!({"display":"transform1","nodes":{
+            "box1":{"type":"box"},
+            "transform1":{"type":"transform","inputs":{"geo":"box1"}}
+        }});
+        let (copy, ids) = duplicate_objects(&doc, &["transform1".into()]).unwrap();
+        assert!(crate::Document::parse(copy.to_string()).is_ok());
+        let root = copy["nodes"][&ids[0]]["inputs"]["geo"].as_str().unwrap();
+        let upstream = copy["nodes"][root]["inputs"]["geo"].as_str().unwrap();
+        assert_ne!(upstream, "box1");
+        assert!(copy["nodes"].get(upstream).is_some());
+        assert_eq!(copy["display"], json!(["transform1", ids[0]]));
+    }
+    #[test]
+    fn pick_viewport_duplicate_of_output_is_valid() {
+        let doc = json!({"display":"out","nodes":{
+            "box1":{"type":"box"},
+            "out":{"type":"output","inputs":{"geo":"box1"}}
+        }});
+        let (copy, ids) = duplicate_objects(&doc, &["out".into()]).unwrap();
+        assert!(crate::Document::parse(copy.to_string()).is_ok());
+        assert_eq!(copy["display"], json!(["out", ids[0]]));
+    }
 }
 
 /// Rename a node and preserve every channel's resolved target in one graph edit.
