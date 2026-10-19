@@ -327,7 +327,9 @@ Houdini's PolyExtrude (screenshots 84 to 87): Group (purple arrow), Divide Into 
 
 ## Feature: Scatter node, Houdini parity (requested 2026-10-18)
 
-Houdini's Scatter (screenshots 84 and 85, and https://www.sidefx.com/docs/houdini/nodes/sop/scatter.html). Options tab: Group (purple arrow), Generate (By Density, By Area, By Count, and others), Scatter on Voxels Independently, Force Total Count, Density Scale, Density Attribute, Override Prim Area, Use Area for 2D Volumes, Max Point Limit, Global Seed, Primitive Seed Attribute, Randomize Point Order, Relax Iterations, Use Geometric Normals, Scale Radii By, Max Relax Radius. Output Attributes tab: Prim Num Attribute (sourceprim), Prim UVW Attribute (sourceprimuv), Output Density Attribute, Output Radius Attribute (pscale), Output ID Attribute (id), Output Radius and Density in Texture Space, Point Attributes (* by default), Vertex Attributes (N uv*), Primitive Attributes, Detail Attributes, Detail as Detail. The current scatter node has a density option; bring the rest over and match names and defaults.
+Surface sampling now has the Houdini parameter names and opt-in output attributes: primitive Group, Generate modes, density from point/vertex/primitive/detail, count and area controls, seed and point order, triangle-local relaxation, texture-space sampling, sourceprim/sourceprimuv/density/pscale/id, and numeric attribute transfer. The legacy count, seed, and default P/N/primnum output remain available.
+
+Remaining: true volume primitives and voxel-independent/2D-volume options (the current volume mode samples polygon interiors), primitive-attribute Override Prim Area, relaxation across primitive boundaries, and string detail-to-point attributes. Keep this section until those cases work; current polygon-interior mode explicitly rejects unsupported voxel and relaxation settings.
 
 ## Feature: Attribute Create, Houdini parity (requested 2026-10-18)
 
