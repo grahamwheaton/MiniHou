@@ -283,9 +283,9 @@ pub(super) fn show(ctx: &egui::Context, id: Id, menu: &mut MenuState, v: &View, 
 mod tests {
     use super::*;
     #[test] fn web_ranked_queries_match_original_node_menu() {
-        for (query, expected) in [("box", "box"), ("extrude", "polyextrude"), ("bevel", "polybevel"),
+        for (query, expected) in [("box", "box"), ("extrude", "polyextrude"), ("polybevel", "polybevel"),
             ("move", "transform"), ("rotate", "twist"), ("scale", "transform"),
-            ("loop", "loop_end"), ("python", "python"), ("donut", "torus"), ("image", "image_out")] {
+            ("loop", "loop_end"), ("python", "python"), ("donut", "torus"), ("image", "image_out"), ("polybevel", "polybevel")] {
             let mut menu = MenuState::new(Pos2::ZERO, None, true);
             menu.query = query.into();
             assert!(matches!(entries(&menu).first(), Some((_, Entry::Tool(ty))) if *ty == expected), "{query}");
@@ -293,7 +293,7 @@ mod tests {
     }
     #[test] fn search_navigation_wraps_and_resets_on_query_edit() {
         let mut menu = MenuState::new(Pos2::ZERO, None, true);
-        menu.query = "bevel".into();
+        menu.query = "polybevel".into();
         let rows = entries(&menu);
         assert!(matches!(rows.first(), Some((_, Entry::Tool("polybevel")))));
         menu.active = (menu.active + 1) % rows.len();
@@ -373,7 +373,7 @@ mod tests {
         assert_eq!(labels, ["1  Adjust", "2  Deform", "3  Polygons", "4  Group", "5  Create", "6  Build", "7  Edges", "8  Modify"]);
     }
     #[test] fn search_popup_result_rows_show_only_node_names() {
-        for (query, expected_name) in [("box", "Box"), ("bevel", "PolyBevel"), ("extrude", "PolyExtrude"), ("select coplanar", "Select Coplanar")] {
+        for (query, expected_name) in [("box", "Box"), ("polybevel", "PolyBevel"), ("extrude", "PolyExtrude"), ("select coplanar", "Select Coplanar")] {
             let mut menu = MenuState::new(Pos2::ZERO, None, true);
             menu.query = query.into();
             let rows = entries(&menu);
