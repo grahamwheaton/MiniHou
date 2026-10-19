@@ -360,7 +360,6 @@ Bugs:
 - Blender Object: clicking reset transform has no effect in MiniHou (Blender changes the result).
 - Scene Objects: after a reload, moved objects jump back to their MiniHou positions. Overridden empty positions must persist.
 - Deleting nodes from an embedded Blender graph can make Blender unresponsive.
-- Inset needs to auto-merge (parity with Blender). Vertex bevel needs parity with Blender and must flow correctly.
 - Ctrl+click shortest route works on simple meshes only; it breaks with split edges.
 - Cannot double-click to open a subnet node.
 
@@ -369,7 +368,6 @@ Selection to node (UI):
 - X or Delete with a viewport selection creates a Blast node with the selection applied (domain aware).
 
 Nodes and parameters:
-- Outset: optional output nodes.
 - All output groups optional: checkbox, label, then group name with target select.
 - PolyExtrude: offset-even checkbox (Blender parity).
 - Delete node: full Houdini parity.
