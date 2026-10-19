@@ -367,3 +367,4 @@ In object mode, points are still drawn even when they belong to a face or an edg
 - **Future todo: Cache node with parity to Houdini (2026-10-19 reference).** Controls: Cache Any Frame, Max Frames to Cache (default 2500), Clear Cache When Change Upstream, Clear Cache, Clear Current Frame Cache.
 - **Todo: Extract Centroid parameters should be exactly: Group, Domain, Method, Output, Attribute Name, Transfer Attribute.** Rework the node's parameter list to these six, in this order.
 - **Future todo: proper description tooltips when hovering shelf items.** Not scheduled yet.
+- **Fixed (confirmed by user live test 2026-10-19, build 25d48825d):** transform with the output node unselected in object and point/edge/face modes; adding a node in a stream pushes the output node down.
