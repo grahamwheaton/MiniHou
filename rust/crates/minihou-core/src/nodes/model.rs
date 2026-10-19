@@ -1283,7 +1283,7 @@ fn extrude_with_direction(
             if !name.starts_with("group_") {continue;}
             if let AttrData::I32(data)=&attr.data {
                 let mut values=data.clone();
-                for (i,value) in values.iter_mut().enumerate() {if is_side[i] || is_front[i] && !copy_prims {*value=0;}}
+                for (i,value) in values.iter_mut().enumerate() {if (is_side[i] || is_front[i]) && !copy_prims {*value=0;}}
                 out.prim.insert(name,Arc::new(Attr::i32(1,values)));
             }
         }
