@@ -22,7 +22,7 @@ pub use repeat::LastOperator;
 #[cfg(test)] mod live_path_tests;
 use eframe::{egui, egui_wgpu};
 pub use minihou_app::units;
-use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, CookRequest, CookState, StandardView};
+use minihou_app::{Camera, Document, Result, Edit, EditorDocument, CookWorker, CookRequest, CookState, StandardView, SelectionState, SelectionSnapshot, HistoryOutcome};
 use minihou_core::Graph;
 use serde_json::{json, Value};
 use std::{collections::HashMap, path::PathBuf, time::{Duration, Instant}};
@@ -78,14 +78,16 @@ fn selection_exists_on_scene(selection:&picking::Selection,scene:&Scene)->bool {
         && selection.edges.iter().all(|&(a,b)|scene.edge_indices().chunks_exact(2)
             .any(|edge|(edge[0]==a && edge[1]==b)||(edge[0]==b && edge[1]==a)))
 }
-fn undo_selection_for(records:&mut Vec<(String,picking::Selection,picking::Selection)>,
-    previous:&str,current:&picking::Selection)
-    ->Option<(picking::Selection,picking::Selection,Option<picking::Selection>)> {
-    let matches=records.last().is_some_and(|(text,_,_)|text==previous);
-    if !matches { return None; }
-    let (_,selection,stash)=records.pop().unwrap();
-    let user=(!current.is_empty() && *current!=selection).then(||current.clone());
-    Some((selection,stash,user))
+fn snapshot(selection:&picking::Selection)->SelectionSnapshot {
+    SelectionSnapshot { mode: match selection.mode { ui::SelectionMode::Object=>0, ui::SelectionMode::Points=>1, ui::SelectionMode::Edges=>2, ui::SelectionMode::Faces=>3 },
+        points:selection.points.clone(), edges:selection.edges.clone(), tris:selection.tris.clone() }
+}
+fn restore(snapshot:SelectionSnapshot)->picking::Selection {
+    picking::Selection { mode:match snapshot.mode { 1=>ui::SelectionMode::Points, 2=>ui::SelectionMode::Edges, 3=>ui::SelectionMode::Faces, _=>ui::SelectionMode::Object },
+        points:snapshot.points, edges:snapshot.edges, tris:snapshot.tris }
+}
+fn selection_state(selection:&picking::Selection,stash:&picking::Selection)->SelectionState {
+    SelectionState { selection:snapshot(selection), stashed:snapshot(stash) }
 }
 fn selection_in_range(selection:&picking::Selection,scene:&Scene,range:&std::ops::Range<u32>)->picking::Selection {
     let mut result=selection.clone();
@@ -626,12 +628,8 @@ struct App {
     /// Element selection (and the Object-mode stash) per cooked topology, see element_select::SelectionMemory.
     selection_memory: element_select::SelectionMemory<(picking::Selection, picking::Selection)>,
     pending_loop_selection: Option<String>,
-    undo_element_selection: Vec<(String, picking::Selection, picking::Selection)>,
     pending_restore_selection: Option<(picking::Selection, picking::Selection, Option<picking::Selection>)>,
     model_before_selection: Option<(picking::Selection, picking::Selection)>,
-    /// Viewport selection steps: the selection (and stash) before each step on the undo stack, and those undone.
-    sel_undo: Vec<(picking::Selection, picking::Selection)>,
-    sel_redo: Vec<(picking::Selection, picking::Selection)>,
     sel_baseline: (picking::Selection, picking::Selection),
     extrude_keep: Option<picking::Selection>,
 }
@@ -690,7 +688,7 @@ impl App {
             self.display = pick.previous_display.clone();
             self.send(Edit::Display(pick.previous_display));
         }
-        self.editor.history.finish(&self.editor.doc);
+        self.finish_history();
     }
     /// Finish the current edit before transferring pointer/keyboard ownership to selection.
     fn finish_for_selection(&mut self, ctx: &egui::Context) {
@@ -759,23 +757,27 @@ impl App {
     }
 
     fn sync_selection_baseline(&mut self) { self.sel_baseline = (self.selection.clone(), self.stashed_selection.clone()); }
+    fn selection_state(&self)->SelectionState { selection_state(&self.selection,&self.stashed_selection) }
+    fn finish_history(&mut self) {
+        let selection=self.selection_state();
+        self.editor.history.finish_with_selection(&self.editor.doc,Some(selection));
+    }
+    fn record_history(&mut self,before:Document) {
+        let selection=self.selection_state();
+        self.editor.history.record_with_selection(before,&self.editor.doc,Some(selection.clone()),Some(selection));
+    }
+    fn apply_selection_state(&mut self,state:SelectionState) {
+        self.selection=restore(state.selection); self.stashed_selection=restore(state.stashed);
+        if self.selection.mode!=ui::SelectionMode::Object { self.editor_state.apply(ui::EditorChange::Selection(self.selection.mode)); }
+        self.sync_selection_baseline(); self.selection_dirty=true;
+    }
     /// A viewport selection change becomes one step on the shared undo stack.
     fn record_selection_step(&mut self) {
         if self.selection == self.sel_baseline.0 { return; }
         let before = std::mem::replace(&mut self.sel_baseline, (self.selection.clone(), self.stashed_selection.clone()));
-        self.editor.history.record_selection(&self.editor.doc);
-        self.sel_undo.push(before);
-        self.sel_redo.clear();
-    }
-    /// Undo or redo one selection step; the document is untouched.
-    fn step_selection(&mut self, undo: bool) {
-        let (from, to) = if undo { (&mut self.sel_undo, &mut self.sel_redo) } else { (&mut self.sel_redo, &mut self.sel_undo) };
-        let Some(target) = from.pop() else { return };
-        to.push((self.selection.clone(), self.stashed_selection.clone()));
-        self.selection = target.0; self.stashed_selection = target.1;
-        if self.selection.mode != ui::SelectionMode::Object { self.editor_state.apply(ui::EditorChange::Selection(self.selection.mode)); }
-        self.sync_selection_baseline();
-        self.selection_dirty = true;
+        let before=selection_state(&before.0,&before.1);
+        let after=self.selection_state();
+        self.editor.history.record_selection_state(&self.editor.doc,Some(before),Some(after));
     }
 
     fn new(doc: Document, path: PathBuf, state: egui_wgpu::RenderState) -> Result<Self> {
@@ -794,7 +796,7 @@ impl App {
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
             display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,param_pick:None,barrier_key:None,target_key:None,picked_field:None,selection_metrics:Default::default(),coplanar:None,group_preview:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
             clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,pending_duplicate_move:None,duplicate_move_peers:Vec::new(),embed_conflict:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
-            last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default(),pending_loop_selection:None,undo_element_selection:Vec::new(),pending_restore_selection:None,model_before_selection:None,sel_undo:Vec::new(),sel_redo:Vec::new(),sel_baseline:Default::default(),extrude_keep:None };
+            last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default(),pending_loop_selection:None,pending_restore_selection:None,model_before_selection:None,sel_baseline:Default::default(),extrude_keep:None };
         app.prefs = Preferences::load();
         app.prefs.apply_python(&python_gate());
         app.mode=Mode::parse(&app.prefs.viewport.default_shading);
@@ -884,12 +886,11 @@ impl App {
                 ui::params::domain_edit_mode(name, value).filter(|to| *to != self.selection.mode),
             _ => None,
         };
-        let before_selection = promote.map(|_| (self.selection.clone(), self.stashed_selection.clone()));
-        match self.editor.history.edit(&mut self.editor.doc, &edit) {
+        let history_selection=self.selection_state();
+        match self.editor.history.edit_with_selection(&mut self.editor.doc, &edit, Some(history_selection)) {
             Ok(()) => {
-                if let (Some(to), Some((selection, stash))) = (promote, before_selection) {
+                if let Some(to) = promote {
                     // the selection follows the group domain (converted when the mode changes); undo restores it as it was
-                    self.undo_element_selection.push((self.editor.doc.value().to_string(), selection, stash));
                     self.editor_state.apply(ui::EditorChange::Selection(to));
                 }
                 if matches!(&edit, Edit::Param { node, .. } if self.editor.doc.value()["nodes"][node]["linked_params_group"].is_string())
@@ -897,7 +898,7 @@ impl App {
                     || matches!(&edit, Edit::Param { value, .. } if value.get("modifier_input").is_some()) {
                     self.send(Edit::Replace(self.editor.doc.value().clone()));
                 } else { self.send(edit); }
-                if !continuous { self.editor.history.finish(&self.editor.doc); }
+                if !continuous { self.finish_history(); }
             }
             Err(e) => self.file_status = e.to_string(),
         }
@@ -960,7 +961,7 @@ impl App {
         }
     }
     fn save_to(&mut self, path: PathBuf) {
-        self.editor.history.finish(&self.editor.doc);
+        self.finish_history();
         match self.editor.save_to(path) {
             Ok(()) => { self.file_status = "Saved".into(); }
             Err(e) => self.file_status = format!("Save failed: {e}"),
@@ -1046,7 +1047,7 @@ impl App {
             merge_params(&mut value, &id, params);
         } else if let Some(params) = params { merge_params(&mut value, &id, params); }
         let before = ui::network::position_add(ctx, &self.editor.path, self.editor.doc.value(), &mut value, after);
-        self.editor.history.finish(&self.editor.doc);
+        self.finish_history();
         let original = self.editor.doc.clone();
         if let Some(before) = before { self.editor.doc = before; }
         if self.commit_document(value, &format!("add {node_type}")) {
@@ -1161,7 +1162,7 @@ impl App {
             return;
         }
         let first = self.transform_before.is_none();
-        if first { self.editor.history.finish(&self.editor.doc); self.transform_before = Some(self.editor.doc.clone()); }
+        if first { self.finish_history(); self.transform_before = Some(self.editor.doc.clone()); }
         let before_doc = self.transform_before.as_ref().unwrap();
         let mut value = self.editor.doc.value().clone();
         // The displayed node changes to the new node during a drag. Keep reading
@@ -1311,7 +1312,7 @@ impl App {
     fn finish_transform_from(&mut self, is_modal: bool) {
         if let Some(before) = self.transform_before.take() {
             if let Some(delta) = self.transform_delta.take() { self.last_operator = Some(delta); }
-            self.editor.history.record(before, &self.editor.doc);
+            self.record_history(before);
         }
         let _ = is_modal;
         if let Some(target) = self.transform_target.take() {
@@ -1374,7 +1375,7 @@ impl App {
         let wire: Vec<_> = scene.edge_indices().chunks_exact(2).filter(|e| in_object(e[0])).take(mt::WIRE_LIMIT)
             .map(|e| (point(e[0] as usize), point(e[1] as usize))).collect();
         let source = owner;
-        self.editor.history.finish(&self.editor.doc);
+        self.finish_history();
         let mut session = mt::Session::new(self.editor.doc.clone(), self.selected.clone(), source.clone(), bounds, extra);
         session.wire = wire;
         if self.editor.doc.value()["nodes"][&source]["type"] == "mirror" {
@@ -1438,7 +1439,7 @@ impl App {
     fn finish_mirror(&mut self) {
         if let Some(s) = self.mirror.take() {
             self.editor.history.drop_pending();
-            self.editor.history.record(s.before, &self.editor.doc);
+            self.record_history(s.before);
         }
     }
     fn cancel_mirror(&mut self) {
@@ -1539,7 +1540,7 @@ impl App {
         };
         self.model_before_selection=Some((self.selection.clone(),self.stashed_selection.clone()));
         self.extrude_keep=(kind==ModelKind::Extrude && self.editor_state.selection==ui::SelectionMode::Faces).then(||self.selection.clone());
-        self.editor.history.finish(&self.editor.doc);
+        self.finish_history();
         let before=self.editor.doc.clone();
         self.editor.doc=doc;
         self.send(Edit::Replace(self.editor.doc.value().clone()));
@@ -1591,10 +1592,9 @@ impl App {
             if state.kind==ModelKind::Extrude {
                 self.last_operator=Some(LastOperator::Extrude {params:repeat::extrude_next_params(&self.editor.doc.value()["nodes"][&id]["params"],state.source_points)});
             }
-            self.editor.history.record(before,&self.editor.doc);
-            if let Some((selection,stash))=self.model_before_selection.take() {
-                self.undo_element_selection.push((self.editor.doc.value().to_string(),selection,stash));
-            }
+            let before_selection=self.model_before_selection.take().map(|(selection,stash)|selection_state(&selection,&stash));
+            let after_selection=self.selection_state();
+            self.editor.history.record_with_selection(before,&self.editor.doc,before_selection,Some(after_selection));
         }
     }
     fn cancel_model_modal(&mut self) {
@@ -1896,11 +1896,8 @@ impl App {
     fn commit_document(&mut self, value: serde_json::Value, what: &str) -> bool {
         match graph_edit::validated(value) {
             Ok(new) => {
-                let selection=self.selection.clone();
-                let stash=self.stashed_selection.clone();
-                let changed=self.editor.doc.value()!=new.value();
-                self.editor.history.replace(&mut self.editor.doc, new);
-                if changed { self.undo_element_selection.push((self.editor.doc.value().to_string(),selection,stash)); }
+                let selection=self.selection_state();
+                self.editor.history.replace_with_selection(&mut self.editor.doc, new,Some(selection.clone()),Some(selection));
                 self.send(Edit::Replace(self.editor.doc.value().clone()));
                 true
             }
@@ -2018,7 +2015,7 @@ impl App {
                     self.file_status = "Select points, edges, or faces to transform".into();
                     return;
                 }
-                self.editor.history.finish(&self.editor.doc);
+                self.finish_history();
                 let before = self.editor.doc.clone();
                 let source = self.display.clone();
                 let mut value = self.editor.doc.value().clone();
@@ -2057,8 +2054,8 @@ impl App {
                     Ok(doc) => {
                         self.editor.doc = doc;
                         self.send(Edit::Replace(value));
-                        self.editor.history.record(before, &self.editor.doc);
-                        self.editor.history.finish(&self.editor.doc);
+                        self.record_history(before);
+                        self.finish_history();
                         self.display = target.clone();
                         self.selected = target.clone();
                         self.selected_set = std::collections::BTreeSet::from([target]);
@@ -2073,7 +2070,7 @@ impl App {
                     self.file_status = "Select points, edges, or faces to transform".into();
                     return;
                 }
-                self.editor.history.finish(&self.editor.doc);
+                self.finish_history();
                 let before = self.editor.doc.clone();
                 let source = self.display.clone();
                 let mut value = self.editor.doc.value().clone();
@@ -2124,8 +2121,8 @@ impl App {
                 match repeat::apply_repeat_transform(&mut self.editor.doc, &target, &op) {
                     Ok(edit) => {
                         self.send(edit);
-                        self.editor.history.record(before, &self.editor.doc);
-                        self.editor.history.finish(&self.editor.doc);
+                        self.record_history(before);
+                        self.finish_history();
                         self.selected = target.clone();
                         self.selected_set = std::collections::BTreeSet::from([target.clone()]);
                         self.display = target;
@@ -2636,20 +2633,24 @@ impl App {
                 UiAction::Undo | UiAction::Redo => {
                     let undo = matches!(action, UiAction::Undo);
                     self.record_selection_step();
+                    self.finish_history();
                     let previous = self.editor.doc.value().clone();
-                    let previous_text = previous.to_string();
-                    let command = if undo { self.editor.history.undo(&mut self.editor.doc) } else { self.editor.history.redo(&mut self.editor.doc) };
-                    if command.is_some() && self.editor.history.last_was_selection() {
-                        self.step_selection(undo);
-                    } else if let Some(command) = command {
+                    let outcome = if undo { self.editor.history.undo_outcome(&mut self.editor.doc) } else { self.editor.history.redo_outcome(&mut self.editor.doc) };
+                    if let Some(HistoryOutcome::Selection(selection))=outcome {
+                        self.apply_selection_state(selection);
+                    } else if let Some(HistoryOutcome::DocEdit { edit:command, selection }) = outcome {
                         self.pending_loop_selection=None;
+                        self.pending_restore_selection=selection.map(|state| {
+                            let selection=restore(state.selection);
+                            let stash=restore(state.stashed);
+                            let user=(undo && !self.selection.is_empty() && self.selection!=selection).then(||self.selection.clone());
+                            (selection,stash,user)
+                        });
                         if undo {
-                            self.pending_restore_selection=undo_selection_for(&mut self.undo_element_selection,
-                                &previous_text,&self.selection);
                             if let Some((selection,..))=&self.pending_restore_selection {
                                 if selection.mode!=ui::SelectionMode::Object { self.editor_state.apply(ui::EditorChange::Selection(selection.mode)); }
                             }
-                        } else { self.pending_restore_selection=None; }
+                        }
                         if ui::network::layout_changed(&previous, self.editor.doc.value()) {
                             ui::network::restore_positions(ctx, &self.editor.path, self.editor.doc.value());
                         }
@@ -2683,7 +2684,7 @@ impl App {
                 UiAction::SelectSet { ids, extend } => select_active_nodes(&mut self.selected, &mut self.selected_set, ids, extend, false),
                 UiAction::SetDisplay(id) => {
                     self.display = id.clone();
-                    self.editor.history.finish(&self.editor.doc);
+                    self.finish_history();
                     self.edit(Edit::Display(id), false);
                 }
                 UiAction::ToggleDisplay(id) => {
@@ -2694,7 +2695,7 @@ impl App {
                     }
                 }
                 UiAction::Edit { edit, continuous } => {
-                    if !continuous { self.editor.history.finish(&self.editor.doc); }
+                    if !continuous { self.finish_history(); }
                     if let Edit::Replace(value) = edit { self.commit_document(value, "edit linked parameter"); }
                     else { self.edit(edit, continuous); }
                 }
@@ -2717,7 +2718,7 @@ impl App {
                         let before = ui::network::position_add(ctx, &self.editor.path, self.editor.doc.value(), &mut value, None);
                         value["nodes"][&id]["pos"] = json!(pos);
                         let inserted = ui::network::insert_added(ctx, &self.editor.path, self.editor.doc.value(), &mut value, &id, pos, wire.as_ref());
-                        self.editor.history.finish(&self.editor.doc);
+                        self.finish_history();
                         let original = self.editor.doc.clone();
                         if let Some(before) = before { self.editor.doc = before; }
                         if self.commit_document(value, &format!("add {node_type}")) {
@@ -2835,7 +2836,7 @@ impl App {
                 UiAction::NetworkGesture { expected, before, next } => {
                     if self.editor.doc.value() == &expected {
                         if let Ok(before) = graph_edit::validated(before) {
-                            self.editor.history.finish(&self.editor.doc);
+                            self.finish_history();
                             let original = std::mem::replace(&mut self.editor.doc, before);
                             if self.commit_document(next, "network gesture") {
                                 ui::network::restore_positions(ctx, &self.editor.path, self.editor.doc.value());
@@ -2950,7 +2951,7 @@ impl eframe::App for App {
                 },
                 Some("set_param") => minihou_app::link_param_edit(self.editor.doc.value(), &request.message)
                     .map(|edit| {
-                        self.editor.history.finish(&self.editor.doc);
+                        self.finish_history();
                         self.edit(edit, false);
                     }),
                 Some("object_geo" | "object_missing" | "image_data" | "image_missing") => {
@@ -3704,7 +3705,7 @@ impl eframe::App for App {
         if ctx.input(|i| i.pointer.primary_released()) {
             ctx.data_mut(|d| d.remove::<bool>(egui::Id::new("modal_confirm_click")));
         }
-        if self.modal.is_none() && self.model_modal.is_none() && self.mirror.is_none() && !ctx.input(|i| i.pointer.primary_down()) { self.editor.history.finish(&self.editor.doc); }
+        if self.modal.is_none() && self.model_modal.is_none() && self.mirror.is_none() && !ctx.input(|i| i.pointer.primary_down()) { self.finish_history(); }
         self.apply(ctx, out.0);
         if (self.modal.is_none() && self.model_modal.is_none()) && !ctx.input(|i| i.pointer.primary_down()) { self.finish_transform(); }
         if self.cooking.cooking() { ctx.request_repaint_after(Duration::from_millis(16)); }

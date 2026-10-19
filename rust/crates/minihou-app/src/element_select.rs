@@ -876,11 +876,13 @@ mod tests {
         let faces = t.convert(&top, Faces);
         assert_eq!(faces.tris, t.poly_tris(0));
         assert_eq!(t.convert(&faces, Points).points, vec![0, 1, 2, 3]);
-        // the undo record restores the pre-promotion selection, not a reset
-        let mut records = vec![("doc".to_owned(), top.clone(), Selection::default())];
-        let (restored, _, user) = crate::undo_selection_for(&mut records, "doc", &faces).unwrap();
-        assert_eq!(restored, top);
-        assert!(user.is_some() && records.is_empty());
+        let mut doc = crate::Document::parse("{\"nodes\":{}}".into()).unwrap();
+        let mut history = minihou_app::History::default();
+        let before = crate::selection_state(&top, &Selection::default());
+        let after = crate::selection_state(&faces, &Selection::default());
+        history.record_selection_state(&doc, Some(before), Some(after));
+        let crate::HistoryOutcome::Selection(restored) = history.undo_outcome(&mut doc).unwrap() else { panic!("expected selection step") };
+        assert_eq!(crate::restore(restored.selection), top);
     }
 
     #[test]
