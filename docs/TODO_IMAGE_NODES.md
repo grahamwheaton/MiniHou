@@ -365,3 +365,4 @@ In object mode, points are still drawn even when they belong to a face or an edg
 - **Todo: new Switch-If node with parity to Houdini.** The Houdini reference (2026-10-19) has: Use Second Input If (All Conditions True or similar), Test Input selector, Number of Tests with +/- and Clear, and per-test rows with an enable checkbox, Test Type (Expression), and an Enable value slider.
 - **Future todo: look at the LOD node.** Not scheduled yet.
 - **Future todo: Cache node with parity to Houdini (2026-10-19 reference).** Controls: Cache Any Frame, Max Frames to Cache (default 2500), Clear Cache When Change Upstream, Clear Cache, Clear Current Frame Cache.
+- **Todo: Extract Centroid parameters should be exactly: Group, Domain, Method, Output, Attribute Name, Transfer Attribute.** Rework the node's parameter list to these six, in this order.
