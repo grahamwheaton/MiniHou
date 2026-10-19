@@ -1953,6 +1953,56 @@
    "soft_min": 0.0
   }
  },
+ "extract_centroid": {
+  "attrib_name": {
+   "default": "centroid",
+   "doc": "Attribute name to write when output is set to attribute",
+   "kind": "str"
+  },
+  "class": {
+   "default": "detail",
+   "doc": "Calculate centroid for whole geometry (detail), per piece (pieces), or per primitive (primitives)",
+   "kind": "enum",
+   "options": [
+    "detail",
+    "pieces",
+    "primitives"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Subset of geometry to process",
+   "kind": "str"
+  },
+  "method": {
+   "default": "center_of_mass",
+   "doc": "Calculation method: area-weighted center of mass or bounding box center",
+   "kind": "enum",
+   "options": [
+    "center_of_mass",
+    "bounding_box"
+   ]
+  },
+  "output": {
+   "default": "points",
+   "doc": "Output mode: create new points at centroid locations, or add a centroid attribute to input geometry",
+   "kind": "enum",
+   "options": [
+    "points",
+    "attribute"
+   ]
+  },
+  "piece_attrib": {
+   "default": "piece",
+   "doc": "Primitive or point attribute identifying pieces (empty uses connectivity)",
+   "kind": "str"
+  },
+  "transfer_attribs": {
+   "default": "",
+   "doc": "Space-separated names or wildcard pattern of attributes to transfer from pieces to centroid points",
+   "kind": "str"
+  }
+ },
  "facet": {
   "compute_normals": {
    "default": false,
@@ -2397,30 +2447,68 @@
  "fuse": {
   "distance": {
    "default": 0.001,
-   "doc": "",
+   "doc": "Maximum distance within which points are snapped and fused",
    "kind": "float",
    "min": 0.0,
    "soft_max": 1.0
   },
+  "fuse_points": {
+   "default": true,
+   "doc": "Consolidate and weld merged points into a single point (false snaps positions only)",
+   "kind": "bool"
+  },
+  "group": {
+   "default": "",
+   "doc": "Subset of points to snap or fuse",
+   "kind": "str"
+  },
   "outgrp_fused": {
    "default": false,
-   "doc": "Points that stand for two or more welded points",
+   "doc": "Create a point group containing fused points",
    "kind": "bool"
   },
   "outgrp_fused_name": {
    "default": "fusedpoints",
-   "doc": "Name of the fused points group",
+   "doc": "Name of the group for fused points",
    "kind": "str"
   },
   "outgrp_unique": {
    "default": false,
-   "doc": "Points that were not welded to anything",
+   "doc": "Create a point group containing unique points",
    "kind": "bool"
   },
   "outgrp_unique_name": {
    "default": "uniquepoints",
-   "doc": "Name of the unique points group",
+   "doc": "Name of the group for unique points",
    "kind": "str"
+  },
+  "output_positions": {
+   "default": "first",
+   "doc": "Position for fused points: position of first point or average of cluster",
+   "kind": "enum",
+   "options": [
+    "first",
+    "average"
+   ]
+  },
+  "remove_degenerate": {
+   "default": true,
+   "doc": "Drop degenerate primitives after fusing",
+   "kind": "bool"
+  },
+  "remove_unused_points": {
+   "default": true,
+   "doc": "Discard points not referenced by any primitive after fusing",
+   "kind": "bool"
+  },
+  "snap_to": {
+   "default": "near_points",
+   "doc": "Snap method: cluster near points or snap to 3D grid",
+   "kind": "enum",
+   "options": [
+    "near_points",
+    "grid"
+   ]
   }
  },
  "glue_cluster": {
@@ -2666,7 +2754,7 @@
    "kind": "vec3"
   },
   "columns": {
-   "default": 10,
+   "default": 3,
    "doc": "",
    "kind": "int",
    "max": 20000,
@@ -2683,7 +2771,7 @@
    "kind": "vec3"
   },
   "rows": {
-   "default": 10,
+   "default": 3,
    "doc": "",
    "kind": "int",
    "max": 20000,
@@ -4865,19 +4953,39 @@
  "normal": {
   "cusp_angle": {
    "default": 60.0,
-   "doc": "vertex: faces meeting at more than this many degrees stay sharp",
+   "doc": "Angle in degrees above which vertex normals are cusped to create sharp edges",
    "kind": "float",
    "max": 180.0,
    "min": 0.0
   },
   "domain": {
    "default": "point",
-   "doc": "point: area-weighted average of adjacent faces; prim: face normals; vertex: averages that stop at edges sharper than the cusp angle (hard edges, smooth elsewhere)",
+   "doc": "Target element domain to compute normals on (point, prim, or vertex)",
    "kind": "enum",
    "options": [
     "point",
     "prim",
     "vertex"
+   ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Subset of geometry to process",
+   "kind": "str"
+  },
+  "reverse": {
+   "default": false,
+   "doc": "Reverse normal directions",
+   "kind": "bool"
+  },
+  "weighting": {
+   "default": "area",
+   "doc": "Method to weight face contributions: area, angle, or equal",
+   "kind": "enum",
+   "options": [
+    "area",
+    "angle",
+    "equal"
    ]
   }
  },

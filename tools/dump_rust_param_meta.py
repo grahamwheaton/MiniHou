@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-TYPES = ["grid", "box", "curve", "circle", "sphere", "tube", "torus", "delete", "transform", "normal", "noise", "merge", "null", "output", "blender_object", "modifier_input", "blender_image", "image_file", "image_out", "scene_objects"]
+TYPES = ["grid", "box", "curve", "circle", "sphere", "tube", "torus", "delete", "transform", "noise", "merge", "null", "output", "blender_object", "modifier_input", "blender_image", "image_file", "image_out", "scene_objects"]
 TARGET = os.path.join(ROOT, "rust", "crates", "minihou-app", "src", "param_meta.json")
 PACKAGES = Path(ROOT) / "rust" / "crates" / "minihou-core" / "src" / "nodes" / "packages"
 
@@ -81,7 +81,7 @@ TYPES += ["delaunay", "bridge", "revolve", "sweep", "skin", "lattice",
 
 # Ported nodes: scatter, deform, primitives, transform, attributes, materials, surface, contour.
 TYPES += ["scatter", "switch",
-          "fuse", "soft_transform", "copy_transform",
+          "soft_transform", "copy_transform",
           "convex_hull", "slice", "dissolve", "attrib_paint"]
 
 

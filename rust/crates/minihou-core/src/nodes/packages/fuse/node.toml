@@ -1,0 +1,5 @@
+id = "fuse"
+name = "Fuse"
+category = "Modify"
+description = "Snap and weld points within distance or to target geometry (Houdini Fuse parity)."
+keywords = "fuse weld snap merge consolidate points"

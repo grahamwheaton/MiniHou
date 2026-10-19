@@ -1,0 +1,5 @@
+id = "normal"
+name = "Normal"
+category = "Modify"
+description = "Compute normals on points, primitives, or vertices with cusp angle (Houdini Normal parity)."
+keywords = "normal normals cusp angle vertex point primitive"

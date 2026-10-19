@@ -187,31 +187,6 @@ fn proportional_transform(geo: &Geometry, p: &Params, selected: &[bool]) -> Resu
     Ok(out)
 }
 
-pub const NORMAL: NodeSpec = NodeSpec {
-    name: "normal",
-    inputs: GEO,
-    params: crate::params!("domain": "point"; "cusp_angle": 60.0;),
-    cook: normal,
-};
-
-fn normal(inputs: &Inputs, p: &Params) -> Result<Geometry> {
-    let geo = NORMAL.one(inputs, 0)?;
-    let domain = p.e("domain", &["point", "prim", "vertex"])?;
-    let mut out = (*geo).clone();
-    match domain.as_str() {
-        "point" => {
-            let n = normals::point_normals(geo.p(), &geo.topology, geo.npoints);
-            out.point.insert("N".into(), Arc::new(Attr::f32(3, n)));
-        }
-        "prim" => {
-            let n = normals::normalize_to_f32(&normals::prim_normals(geo.p(), &geo.topology));
-            out.prim.insert("N".into(), Arc::new(Attr::f32(3, n)));
-        }
-        _ => return Err(Error::new("domain 'vertex' (cusped vertex normals) is not supported by the Rust backend yet")),
-    }
-    Ok(out)
-}
-
 pub const NOISE: NodeSpec = NodeSpec {
     name: "noise",
     inputs: GEO,
