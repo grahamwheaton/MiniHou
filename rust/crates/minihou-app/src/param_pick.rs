@@ -14,6 +14,10 @@ pub(super) fn input_source(doc: &serde_json::Value, node: &str, display: &str) -
 pub(super) fn source_ready(ranges: &[(String, std::ops::Range<u32>)], source: &str) -> bool {
     ranges.len() == 1 && ranges[0].0 == source
 }
+/// Display ranges describe the last accepted scene, which can lag behind a display switch.
+pub(super) fn pick_source_ready(display: &str, ranges: &[(String, std::ops::Range<u32>)], source: &str) -> bool {
+    display == source && source_ready(ranges, source)
+}
 
 pub(super) struct PickedField {
     pub(super) node: String,
@@ -81,6 +85,13 @@ pub(super) fn param_pick_end(ctx: &egui::Context, viewport: egui::Rect) -> Optio
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn old_display_ranges_do_not_make_a_new_pick_ready() {
+        let ranges = vec![("box".to_owned(), 0..8)];
+        assert!(super::pick_source_ready("box", &ranges, "box"));
+        assert!(!super::pick_source_ready("loop_cut", &ranges, "box"));
+        assert!(!super::pick_source_ready("box", &ranges, "loop_cut"));
+    }
     #[test]
     fn barrier_overlay_colour_differs_from_seed_overlay() {
         let shader = include_str!("shader.wgsl");

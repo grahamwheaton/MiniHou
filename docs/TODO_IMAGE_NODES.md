@@ -222,12 +222,6 @@ Parked by user: inset on non-planar regions. Tri to Quad: user will test.
 
 For nodes with output groups, show an "Output Groups" section like Houdini: one row per output group, with a checkbox (enable that group), a label (for example "Point Fillet Polygons") and a group-name field (for example `pointfilletpolys`). The name field is greyed when the checkbox is off. Applies to every node with output groups, for example polyfillet and similar nodes.
 
-## Bug: purple group arrow clears selection, then crashes on second press (reported 2026-10-18)
-
-Repro (user): make a box, add Loop Cut, make a group of edges, click the purple arrow on the group field. Expected: the group's edges highlight in purple. Actual: the selection is cleared. Pressing the arrow again crashes the app.
-
-Likely cause (first press): main.rs `UiAction::PickParameter` clears `self.selection` and `group_preview` and does not load the field's current value into the highlight, so the existing group is not shown. Second press: `self.param_pick` is overwritten and `previous_display` is saved while `display` already points at the pick source, so the restore on exit is wrong; a panic in the pick path is the probable crash. Needs the panic text (run the exe from a terminal) to confirm.
-
 ## Future: app icon and top-left logo (requested 2026-10-18)
 
 Use the blue "M" logo (rounded blue square with a white M) as the app icon (window and taskbar, and the exe icon) and in the top-left of the editor, in place of the current icon. Needs the logo as an .ico for the exe and a PNG for the in-app header.
