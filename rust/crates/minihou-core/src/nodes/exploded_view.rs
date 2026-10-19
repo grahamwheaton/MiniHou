@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 use crate::{Error,Geometry,Result,params::Params};
 use super::{Inputs,NodeSpec};
-pub const EXPLODED_VIEW:NodeSpec=NodeSpec{name:"exploded_view",inputs:super::GEO,params:crate::params!("piece_attrib":"piece";"scale":0.5;"center":[0.,0.,0.]),cook:exploded_view};
+pub const EXPLODED_VIEW:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"exploded_view",inputs:super::GEO,params:crate::params!("piece_attrib":"piece";"scale":0.5;"center":[0.,0.,0.]),cook:exploded_view};
 fn exploded_view(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let g=EXPLODED_VIEW.one(inputs,0)?;let name=p.s("piece_attrib")?;
     let a=g.prim.get(&name).ok_or_else(||Error::new(format!("no primitive attribute {name:?} (fracture first, or use connectivity)")))?;

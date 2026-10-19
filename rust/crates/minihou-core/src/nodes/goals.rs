@@ -14,17 +14,17 @@ use crate::params::{same_value, Params};
 const GOALS: &str = "geometric_goals";
 const TOPOLOGY: &str = "geometric_goal_topology";
 
-pub const GOAL_LENGTH: NodeSpec = NodeSpec { name: "goal_length", inputs: GEO, params: crate::params!("scale": 1.0; "strength": 1.0), cook: goal_length };
-pub const GOAL_COLLISION: NodeSpec = NodeSpec { name: "goal_collision", inputs: GEO, params: crate::params!("radius": 0.25; "strength": 1.0), cook: goal_collision };
-pub const GOAL_SURFACE: NodeSpec = NodeSpec {
+pub const GOAL_LENGTH: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "goal_length", inputs: GEO, params: crate::params!("scale": 1.0; "strength": 1.0), cook: goal_length };
+pub const GOAL_COLLISION: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "goal_collision", inputs: GEO, params: crate::params!("radius": 0.25; "strength": 1.0), cook: goal_collision };
+pub const GOAL_SURFACE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "goal_surface",
     inputs: &[InputSpec { name: "geo", multi: false, optional: false }, InputSpec { name: "target", multi: false, optional: false }],
     params: crate::params!("group": ""; "strength": 1.0),
     cook: goal_surface,
 };
-pub const GOAL_GRAVITY: NodeSpec = NodeSpec { name: "goal_gravity", inputs: GEO, params: crate::params!("acceleration": [0.0, 0.0, -9.81]), cook: goal_gravity };
-pub const GOAL_PIN: NodeSpec = NodeSpec { name: "goal_pin", inputs: GEO, params: crate::params!("group": "0"), cook: goal_pin };
-pub const GOAL_SOLVE: NodeSpec = NodeSpec {
+pub const GOAL_GRAVITY: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "goal_gravity", inputs: GEO, params: crate::params!("acceleration": [0.0, 0.0, -9.81]), cook: goal_gravity };
+pub const GOAL_PIN: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "goal_pin", inputs: GEO, params: crate::params!("group": "0"), cook: goal_pin };
+pub const GOAL_SOLVE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "goal_solve",
     inputs: GEO,
     params: crate::params!("steps": 60; "iterations": 12; "timestep": 0.02; "damping": 0.9; "tolerance": 0.0001),

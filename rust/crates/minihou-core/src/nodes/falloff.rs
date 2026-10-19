@@ -2,7 +2,7 @@
 use std::sync::Arc;
 use super::{InputSpec,Inputs,NodeSpec};
 use crate::{error::{Error,Result},geometry::{Attr,Geometry},params::Params};
-pub const FALLOFF:NodeSpec=NodeSpec{name:"falloff",inputs:&[InputSpec{name:"geo",multi:false,optional:false},InputSpec{name:"shape_mesh",multi:false,optional:true}],params:crate::params!(
+pub const FALLOFF:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"falloff",inputs:&[InputSpec{name:"geo",multi:false,optional:false},InputSpec{name:"shape_mesh",multi:false,optional:true}],params:crate::params!(
     "name":"mask";"domain":"points";"shape":"sphere";"center":[0.,0.,0.];"direction":[0.,0.,1.];"size":1.;"blend":1.;"offset":0.;"narrowness":1.;"every":0;"range":10.;"inside":false;"smooth":true;"mirror":false;"flip":false;"min":0.;"max":1.;"group":""),cook:falloff};
 fn dot(a:[f64;3],b:[f64;3])->f64{(0..3).map(|i|a[i]*b[i]).sum()}
 fn falloff(inputs:&Inputs,p:&Params)->Result<Geometry>{

@@ -7,7 +7,7 @@ use crate::error::{Error, Result};
 use crate::geometry::{Attr, AttrData, Geometry};
 use crate::params::Params;
 
-pub const SCATTER: NodeSpec = NodeSpec {
+pub const SCATTER: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "scatter",
     inputs: GEO,
     params: crate::params!(

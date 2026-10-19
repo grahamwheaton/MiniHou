@@ -345,31 +345,31 @@ pub(super) fn outgroup(
     Ok(())
 }
 
-pub const DIVIDE: NodeSpec = NodeSpec {
+pub const DIVIDE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "divide",
     inputs: GEO,
     params: crate::params!("group":""),
     cook: divide,
 };
-pub const POLYFILL: NodeSpec = NodeSpec {
+pub const POLYFILL: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "polyfill",
     inputs: GEO,
     params: super::polyfill::PARAMS,
     cook: super::polyfill::polyfill,
 };
-pub const MIRROR: NodeSpec = NodeSpec {
+pub const MIRROR: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "mirror",
     inputs: GEO,
     params: crate::params!("origin":[0.,0.,0.];"normal":[1.,0.,0.];"keep_original":true;"consolidate_seam":true;"distance":0.001;"outgrp_mirrored":false;"outgrp_mirrored_name":"mirrored";"outgrp_mirroredpoints":false;"outgrp_mirroredpoints_name":"mirroredpoints";"outgrp_seam":false;"outgrp_seam_name":"seampoints";"group":"";"operation":"mirror_all";"offset":0.0;"reverse":false;"cut":false;"unshared_only":false),
     cook: super::mirror::mirror,
 };
-pub const CLIP: NodeSpec = NodeSpec {
+pub const CLIP: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "clip",
     inputs: GEO,
     params: crate::params!("origin":[0.,0.,0.];"normal":[0.,0.,1.];"keep":"above";"outgrp_above":true;"outgrp_above_name":"above";"outgrp_below":false;"outgrp_below_name":"below";"outgrp_cutpolys":false;"outgrp_cutpolys_name":"cutpolys";"outgrp_cutpoints":false;"outgrp_cutpoints_name":"cutpoints";"outgrp_cutedges":false;"outgrp_cutedges_name":"cutedges"),
     cook: clip,
 };
-pub const POLYEXTRUDE: NodeSpec = NodeSpec {
+pub const POLYEXTRUDE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "polyextrude",
     inputs: &[super::InputSpec{name:"geo",multi:false,optional:false},super::InputSpec{name:"spine",multi:false,optional:true}],
     params: crate::params!("group":"";"edges":"";"points":"";"distance":0.5;"direction":[0.,0.,0.];"inset":0.;"mode":"connected";"output_back":false;"outgrp_front":true;"outgrp_front_name":"extrudeFront";"outgrp_back":false;"outgrp_back_name":"extrudeBack";"outgrp_side":true;"outgrp_side_name":"extrudeSide";"divide_into":"connected";"split_group":"";"extrusion_mode":"primitive_normal";"twist":0.;"divisions":1;"spine_shape":"straight";"transform_front":true;"output_front":true;"output_side":true;"outgrp_front_boundary":false;"outgrp_front_boundary_name":"extrudeFrontBoundary";"outgrp_back_boundary":false;"outgrp_back_boundary_name":"extrudeBackBoundary";"preserve_groups":true;"copy_edge_groups":true;"copy_point_groups":true;"copy_primitive_groups":true;"limit_insetting":false;"use_common_limit":false;"offset_even":true;"add_vertex_normals":false;"cusp_angle":60.;"generate_sides_uvs":false;"uv_style":"proportional";"uv_scaling":"match_incident";

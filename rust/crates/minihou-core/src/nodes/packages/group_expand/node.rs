@@ -2,7 +2,7 @@ use std::sync::Arc;
 use crate::{nodes::{Inputs, NodeSpec, GEO}, error::{Error, Result}, geometry::{Attr, Geometry}, params::Params};
 use crate::nodes::group::{mask, valid_name};
 
-pub(super) const NODE:NodeSpec=NodeSpec{name:"group_expand",inputs:GEO,params:crate::params!(
+pub(super) const NODE:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"group_expand",inputs:GEO,params:crate::params!(
     "group":"group1";"name":"";"domain":"primitives";"mode":"expand";"steps":1;"connectivity":"points"),cook:expand};
 fn expand(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let g=NODE.one(inputs,0)?;let dom=p.e("domain",&["primitives","points"])?;let dom=if dom=="points"{"point"}else{"prim"};

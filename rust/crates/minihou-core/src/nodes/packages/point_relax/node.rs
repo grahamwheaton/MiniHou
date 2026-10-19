@@ -3,7 +3,7 @@ use crate::nodes::{InputSpec, Inputs, NodeSpec};
 use crate::{error::Result, geometry::{Attr, Geometry}, params::Params};
 fn dot(a:[f64;3],b:[f64;3])->f64{(0..3).map(|i|a[i]*b[i]).sum()}
 fn cross(a:[f64;3],b:[f64;3])->[f64;3]{[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]}
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "point_relax",
     inputs: &[
         InputSpec {

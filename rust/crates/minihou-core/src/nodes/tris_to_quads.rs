@@ -8,7 +8,7 @@ use crate::error::{Error, Result};
 use crate::geometry::Geometry;
 use crate::params::Params;
 
-pub const TRIS_TO_QUADS: NodeSpec = NodeSpec { name: "tris_to_quads", inputs: GEO, params: crate::params!(
+pub const TRIS_TO_QUADS: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "tris_to_quads", inputs: GEO, params: crate::params!(
     "group": ""; "face_threshold": 40.0; "shape_threshold": 40.0; "uvs": false; "vcols": false; "seam": false;
     "sharp": false; "materials": false; "output_group": true; "output_group_name": "quads"), cook: tris_to_quads };
 

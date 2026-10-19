@@ -6,7 +6,7 @@ use crate::{
     params::Params,
 };
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "waves",
     inputs: GEO,
     params: crate::params!(

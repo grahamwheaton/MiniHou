@@ -99,7 +99,7 @@ impl KdTree {
     }
 }
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "attribute_transfer",
     inputs: &[
         InputSpec { name: "geo", multi: false, optional: false },

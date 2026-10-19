@@ -8,7 +8,7 @@ use crate::{
     params::Params,
 };
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "select_sharp_edges",
     inputs: &[InputSpec { name: "geo", multi: false, optional: false }],
     params: crate::params!("angle": 30.0; "output_group_name": "sharp_edges"; "domain": "edges"; "group": ""),

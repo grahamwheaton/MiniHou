@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use crate::nodes::{InputSpec, Inputs, NodeSpec};
 use crate::{error::{Error, Result}, geometry::{Attr, Geometry}, params::Params};
-pub(super) const NODE:NodeSpec=NodeSpec{name:"bend",inputs:&[InputSpec{name:"geo",multi:false,optional:false},InputSpec{name:"rest",multi:false,optional:true}],params:crate::params!(
+pub(super) const NODE:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"bend",inputs:&[InputSpec{name:"geo",multi:false,optional:false},InputSpec{name:"rest",multi:false,optional:true}],params:crate::params!(
     "origin":[0.,0.,0.];"direction":[0.,0.,1.];"length":1.;"up":[0.,1.,0.];"bend":90.;"twist":0.;"taper":1.;"group":""),cook:bend};
 fn dot(a:[f64;3],b:[f64;3])->f64{(0..3).map(|i|a[i]*b[i]).sum()}
 fn cross(a:[f64;3],b:[f64;3])->[f64;3]{[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]}

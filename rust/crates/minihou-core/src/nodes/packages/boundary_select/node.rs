@@ -8,7 +8,7 @@ use crate::{
     params::Params,
 };
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "boundary_select",
     inputs: &[InputSpec { name: "geo", multi: false, optional: false }],
     params: crate::params!("domain": "edges"; "group": ""; "output_group_name": "boundary"),

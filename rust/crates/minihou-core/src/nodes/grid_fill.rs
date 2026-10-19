@@ -8,7 +8,7 @@ use crate::geometry::Geometry;
 use crate::params::Params;
 use crate::topo;
 
-pub const GRID_FILL: NodeSpec = NodeSpec { name: "grid_fill", inputs: GEO, params: crate::params!(
+pub const GRID_FILL: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "grid_fill", inputs: GEO, params: crate::params!(
     "group": ""; "span": 1; "auto_span": true; "offset": 0; "use_interp_simple": false;
     "output_group": true; "output_group_name": "grid_fill"), cook: grid_fill };
 

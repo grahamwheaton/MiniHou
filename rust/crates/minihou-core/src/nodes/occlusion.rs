@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::{InputSpec, Inputs, NodeSpec, model::{add, cross, len, mul, positions, sub}, ray::RayMesh};
 use crate::{error::{Error, Result}, geometry::{Attr, Geometry}, params::Params};
 
-pub const OCCLUSION: NodeSpec = NodeSpec { name: "occlusion", inputs: &[
+pub const OCCLUSION: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "occlusion", inputs: &[
     InputSpec{name:"geo",multi:false,optional:false}, InputSpec{name:"occluders",multi:false,optional:true}],
     params: crate::params!("mode":"ambient_occlusion";"name":"";"rays":32;"spread":90.;"max_distance":0.;"bias":0.0001;"seed":0;"self_occlusion":true;"normalize":false;"invert":false;"blur":0;"group":""), cook: occlusion };
 

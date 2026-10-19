@@ -6,13 +6,13 @@ use crate::{
     params::Params,
 };
 use std::{collections::BTreeSet, sync::Arc};
-pub const SKIN_PROFILES: NodeSpec = NodeSpec {
+pub const SKIN_PROFILES: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "skin_profiles",
     inputs: GEO,
     params: crate::params!("group":"";"keep_profiles":false;"close_loft":false),
     cook: skin,
 };
-pub const POLYEXPAND2D: NodeSpec = NodeSpec {
+pub const POLYEXPAND2D: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "polyexpand2d",
     inputs: GEO,
     params: crate::params!("distance":0.1;"group":"";"mode":"single";"output_inside":true;"output_outside":true;"keep_input":false;"tolerance":0.000001;"miter_limit":10.;"outgrp_inside":false;"outgrp_inside_name":"inside";"outgrp_outside":false;"outgrp_outside_name":"outside";"outattr_edgedist":false;"outattr_edgedist_name":"edgedist";"outattr_edgespeed":false;"outattr_edgespeed_name":"edgespeed"),

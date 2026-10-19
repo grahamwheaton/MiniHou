@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use crate::{nodes::{Inputs, NodeSpec, GEO}, error::Result, geometry::{AttrData, AttrTable, Geometry}, params::Params};
 use crate::nodes::model::{prim_mask, range, rebuild, corners};
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "reverse",
     inputs: GEO,
     params: crate::params!("group":"";"reverse_normals":true),

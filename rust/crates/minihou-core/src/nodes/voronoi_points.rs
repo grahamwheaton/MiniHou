@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::{InputSpec, Inputs, NodeSpec, model::{add,sub,mul,len,cross,positions,outgroup}, np_random::Rng, ray::RayMesh, volume::triangulation};
 use crate::{error::{Error,Result}, geometry::{Attr,Geometry}, params::Params};
 
-pub const VORONOI_FRACTURE_POINTS:NodeSpec=NodeSpec{name:"voronoi_fracture_points",inputs:&[
+pub const VORONOI_FRACTURE_POINTS:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"voronoi_fracture_points",inputs:&[
     InputSpec{name:"geo",multi:false,optional:false},InputSpec{name:"points",multi:false,optional:true}],params:crate::params!(
     "count":20;"seed":0;"surface_fraction":0.;"min_distance":0.;"relax":0;"cluster_amount":0.;"clusters":3;
     "cluster_radius":0.25;"piece_attrib":"piece";"source":"scatter";"impact_radius":0.4;"impact_share":0.7;"merge_clusters":0;

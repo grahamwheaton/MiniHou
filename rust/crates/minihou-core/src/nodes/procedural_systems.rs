@@ -6,7 +6,7 @@ use crate::error::{Error, Result};
 use crate::geometry::{Attr, AttrData, Geometry};
 use crate::params::Params;
 
-pub const BUILDING_RULES: NodeSpec = NodeSpec {
+pub const BUILDING_RULES: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "building_rules",
     inputs: GEO,
     params: crate::params!(
@@ -482,7 +482,7 @@ fn building_rules(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     Ok(out)
 }
 
-pub const REGION_IDENTIFY: NodeSpec = NodeSpec {
+pub const REGION_IDENTIFY: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "region_identify",
     inputs: GEO,
     params: crate::params!(
@@ -493,7 +493,7 @@ pub const REGION_IDENTIFY: NodeSpec = NodeSpec {
     cook: region_identify,
 };
 
-pub const REGION_TRANSFORM: NodeSpec = NodeSpec {
+pub const REGION_TRANSFORM: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "region_transform",
     inputs: GEO,
     params: crate::params!(

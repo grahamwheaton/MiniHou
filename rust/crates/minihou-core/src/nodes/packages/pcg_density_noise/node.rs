@@ -4,7 +4,7 @@ use crate::{error::{Error, Result}, geometry::{Attr, AttrData, Geometry}, params
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "pcg_density_noise",
     inputs: &[InputSpec {
         name: "points",

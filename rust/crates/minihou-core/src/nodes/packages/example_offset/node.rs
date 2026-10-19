@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use crate::{error::{Error, Result}, geometry::Geometry, nodes::{InputSpec, Inputs, NodeSpec}, params::Params};
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "example_offset",
     inputs: &[InputSpec { name: "geo", multi: false, optional: false }],
     params: crate::params!("amount": 1.0; "enabled": true),

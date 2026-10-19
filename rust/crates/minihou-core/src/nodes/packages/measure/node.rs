@@ -3,7 +3,7 @@ use crate::error::{Error, Result};
 use crate::geometry::{Attr, Geometry};
 use crate::params::{Params};
 use crate::nodes::attrib_tools::{set, piece_labels};
-pub(super) const NODE:NodeSpec=NodeSpec{name:"measure",inputs:GEO,params:crate::params!("measure":"area";"name":""),cook:measure};
+pub(super) const NODE:NodeSpec=NodeSpec{ outputs: &["geometry"], cook_multi: None,name:"measure",inputs:GEO,params:crate::params!("measure":"area";"name":""),cook:measure};
 fn measure(inputs:&Inputs,p:&Params)->Result<Geometry>{
     let g=NODE.one(inputs,0)?;let mode=p.e("measure",&["area","perimeter","curvature","piece_area","piece_volume"])?;let name=p.s("name")?;let name=if name.is_empty(){mode.clone()}else{name};
     let face=crate::normals::prim_normals(g.p(),&g.topology);let norm=|v:&[f64;3]|v.iter().map(|x|x*x).sum::<f64>().sqrt();

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use super::{np_random::Rng, Inputs, NodeSpec, GEO};
 use crate::{error::{Error, Result}, geometry::{Attr, AttrData, Geometry}, params::Params};
 
-pub const SCATTERALIGN: NodeSpec = NodeSpec { name: "scatteralign", inputs: GEO, params: crate::params!(
+pub const SCATTERALIGN: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None, name: "scatteralign", inputs: GEO, params: crate::params!(
     "mode":"surface"; "group":""; "tag_name":"$OS"; "global_seed":0; "coverage":1.0;
     "point_count_method":"by_size"; "point_count":100; "scaling_mode":"uniform";
     "min_radius":0.1; "max_radius":0.1; "uniform_scale":1.0;

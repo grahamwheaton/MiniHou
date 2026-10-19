@@ -4,7 +4,7 @@ use crate::error::Result;
 use crate::geometry::Geometry;
 use crate::params::Params;
 
-pub(super) const NODE: NodeSpec = NodeSpec {
+pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "peak",
     inputs: GEO,
     params: crate::params!(

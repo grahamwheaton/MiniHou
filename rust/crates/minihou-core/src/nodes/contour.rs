@@ -8,7 +8,7 @@ use crate::{
     params::Params,
 };
 
-pub const CONTOUR: NodeSpec = NodeSpec {
+pub const CONTOUR: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "contour",
     inputs: GEO,
     params: crate::params!(
@@ -27,7 +27,7 @@ pub const CONTOUR: NodeSpec = NodeSpec {
     cook: contour,
 };
 
-pub const SLICE: NodeSpec = NodeSpec {
+pub const SLICE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "slice",
     inputs: GEO,
     params: crate::params!(
