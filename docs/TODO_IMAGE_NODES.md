@@ -265,16 +265,6 @@ Implemented in the Rust editor: double-click enters a subnet, Escape/U and bread
 Add frames (comment boxes) to the node editor, created with the O key. A frame has a name label and one of five colours to choose from. Frames move with the nodes inside them. Add the O key to the keymap table in rust/crates/minihou-app/docs/NATIVE_EDITOR.md (the keymap test compares it with Command::ALL).
 
 
-## Feature: PolyExtrude, Houdini parity (requested 2026-10-18)
-
-Extrusion parameters implemented: Divide Into, Split Group, Extrusion Mode, Distance, Inset, Twist, Divisions, Spine Shape, Transform Extruded Front, Output Front, Output Back, Output Side, Front/Back/Side groups, Front and Back Boundary Groups, Preserve Groups, Limit Insetting, Use Common Limit, Add Vertex Normals with Cusp Angle, and Generate UVs for sides.
-
-Remaining:
-Spine Control tab: Front and Back Magnitude and Stiffness, Interpolation (Rotating Frame and others), Division Spacing, External Spine (Reverse Direction, Axial Rotation, Front and Back Blend), Thickness Scale and Thickness Ramp, Twist and Local Twist Ramp with Range Half-Width.
-Local Control tab: attribute overrides for distance (zscale), inset (insetscale), twist (twistscale), divisions (divsscale), and local frames (localx, localz, localctr).
-
----
-
 # Added 2026-10-18: viewport should display Cd
 
 - The viewport ignores the point/vertex colour attribute `Cd` (only Single and Random colour exist, in Overlays -> Color).
@@ -314,7 +304,6 @@ Bugs:
 
 Nodes and parameters:
 - All output groups optional: checkbox, label, then group name with target select.
-- PolyExtrude: offset-even checkbox (Blender parity).
 - Delete node: full Houdini parity.
 - Blender curves input (support).
 - Array: full Blender parity.

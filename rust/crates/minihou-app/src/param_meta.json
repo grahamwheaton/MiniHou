@@ -1497,6 +1497,7 @@
    "soft_max": 10.0
   }
  },
+ "controller": {},
  "convert_line": {
   "join": {
    "default": true,
@@ -6516,6 +6517,45 @@
    "doc": "Compute and add vertex normals with cusp angle.",
    "kind": "bool"
   },
+  "axial_rotation": {
+   "default": 0.0,
+   "doc": "Rotate the external spine around the line through its endpoints, in degrees.",
+   "kind": "float"
+  },
+  "back_blend": {
+   "default": 0.0,
+   "doc": "Blend the start of the external spine towards the back direction.",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "back_magnitude": {
+   "default": 1.0,
+   "doc": "Influence of the back orientation on a curved spine.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "back_stiffness": {
+   "default": 1.0,
+   "doc": "How far the spine follows the back orientation.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "copy_edge_groups": {
+   "default": true,
+   "doc": "Copy existing edge groups onto the corresponding new front edges.",
+   "kind": "bool"
+  },
+  "copy_point_groups": {
+   "default": true,
+   "doc": "Copy existing point groups onto newly extruded points.",
+   "kind": "bool"
+  },
+  "copy_primitive_groups": {
+   "default": true,
+   "doc": "Copy existing primitive groups onto new front faces.",
+   "kind": "bool"
+  },
   "cusp_angle": {
    "default": 60.0,
    "doc": "Cusp angle for vertex normals in degrees.",
@@ -6539,6 +6579,11 @@
    "soft_max": 2.0,
    "soft_min": -2.0
   },
+  "distance_scale_attribute": {
+   "default": "zscale",
+   "doc": "Primitive or point attribute scaling extrusion distance (zscale).",
+   "kind": "str"
+  },
   "divide_into": {
    "default": "connected",
    "doc": "Divide connected components or individual elements.",
@@ -6548,11 +6593,25 @@
     "individual"
    ]
   },
+  "division_spacing": {
+   "default": "uniform",
+   "doc": "Space bridge divisions uniformly or towards higher curvature.",
+   "kind": "enum",
+   "options": [
+    "uniform",
+    "curvature_sensitive"
+   ]
+  },
   "divisions": {
    "default": 1,
    "doc": "Number of subdivisions along the extrusion height.",
    "kind": "int",
    "min": 1
+  },
+  "divisions_scale_attribute": {
+   "default": "divsscale",
+   "doc": "Primitive or point attribute scaling divisions (divsscale).",
+   "kind": "str"
   },
   "edges": {
    "default": "",
@@ -6569,6 +6628,34 @@
     "edge_normal",
     "direction"
    ]
+  },
+  "front_blend": {
+   "default": 0.0,
+   "doc": "Blend the end of the external spine towards the front direction.",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "front_magnitude": {
+   "default": 1.0,
+   "doc": "Influence of the front orientation on a curved spine.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "front_stiffness": {
+   "default": 1.0,
+   "doc": "How far the spine follows the front orientation.",
+   "kind": "float",
+   "min": 0.0
+  },
+  "front_translate": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Translation of the extruded front in its local X, Y and Z axes.",
+   "kind": "vec3"
   },
   "generate_sides_uvs": {
    "default": false,
@@ -6588,10 +6675,54 @@
    "soft_max": 1.0,
    "soft_min": 0.0
   },
+  "inset_scale_attribute": {
+   "default": "insetscale",
+   "doc": "Primitive or point attribute scaling inset (insetscale).",
+   "kind": "str"
+  },
+  "interpolation": {
+   "default": "rotating_frame",
+   "doc": "Interpolation of a curved bridge between back and front.",
+   "kind": "enum",
+   "options": [
+    "rotating_frame",
+    "linear",
+    "smooth"
+   ]
+  },
   "limit_insetting": {
    "default": false,
    "doc": "Limit insetting to prevent self-intersection.",
    "kind": "bool"
+  },
+  "local_center_attribute": {
+   "default": "localctr",
+   "doc": "Primitive or point vector attribute overriding the local center.",
+   "kind": "str"
+  },
+  "local_twist_ramp": {
+   "default": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     1.0,
+     0.5
+    ]
+   ],
+   "doc": "Local twist along the bridge; 0.5 adds no twist.",
+   "kind": "float_ramp"
+  },
+  "local_x_attribute": {
+   "default": "localx",
+   "doc": "Primitive or point vector attribute overriding the local X axis.",
+   "kind": "str"
+  },
+  "local_z_attribute": {
+   "default": "localz",
+   "doc": "Primitive or point vector attribute overriding the local Z axis.",
+   "kind": "str"
   },
   "mode": {
    "default": "connected",
@@ -6601,6 +6732,11 @@
     "connected",
     "individual"
    ]
+  },
+  "offset_even": {
+   "default": true,
+   "doc": "Keep the inset width even around corners, as in Blender's Offset Even.",
+   "kind": "bool"
   },
   "outgrp_back": {
    "default": false,
@@ -6677,12 +6813,19 @@
    "doc": "Preserve input primitive and point groups on extruded elements.",
    "kind": "bool"
   },
+  "reverse_spine_direction": {
+   "default": false,
+   "doc": "Reverse the external spine curve direction.",
+   "kind": "bool"
+  },
   "spine_shape": {
    "default": "straight",
-   "doc": "Shape of spine curve between base and extruded front.",
+   "doc": "Straight, Curved, or Curve from second input spine.",
    "kind": "enum",
    "options": [
     "straight",
+    "curved",
+    "curve_from_second_input",
     "spline"
    ]
   },
@@ -6690,6 +6833,30 @@
    "default": "",
    "doc": "Split extrusion into separate pieces along boundary.",
    "kind": "str"
+  },
+  "thickness_attribute": {
+   "default": "",
+   "doc": "Optional external spine point attribute controlling bridge thickness.",
+   "kind": "str"
+  },
+  "thickness_ramp": {
+   "default": [
+    [
+     0.0,
+     0.5
+    ],
+    [
+     1.0,
+     0.5
+    ]
+   ],
+   "doc": "Bridge thickness by length; 0.5 leaves the width unchanged.",
+   "kind": "float_ramp"
+  },
+  "thickness_scale": {
+   "default": 1.0,
+   "doc": "Scale the thickness ramp along the bridge.",
+   "kind": "float"
   },
   "transform_front": {
    "default": true,
@@ -6700,6 +6867,21 @@
    "default": 0.0,
    "doc": "Twist angle in degrees applied to extruded front faces.",
    "kind": "float"
+  },
+  "twist_attribute": {
+   "default": "",
+   "doc": "Optional external spine point attribute controlling local twist.",
+   "kind": "str"
+  },
+  "twist_range_half_width": {
+   "default": 1.0,
+   "doc": "Angle range of the local twist ramp, in degrees.",
+   "kind": "float"
+  },
+  "twist_scale_attribute": {
+   "default": "twistscale",
+   "doc": "Primitive or point attribute scaling twist (twistscale).",
+   "kind": "str"
   },
   "use_common_limit": {
    "default": false,

@@ -71,6 +71,7 @@ pub(super) fn offset_selected(
     sel: &[bool],
     amount: f64,
     individual: bool,
+    even: bool,
 ) -> Result<Vec<[f64; 3]>> {
     let p = positions(g);
     let vp = &g.topology.vertex_point;
@@ -216,7 +217,8 @@ pub(super) fn offset_selected(
                 if den < 1e-10 {
                     return Err(Error::new("Inset boundary has an unstable reversing miter"));
                 }
-                let d = [amount * (a[0] + b[0]) / den, amount * (a[1] + b[1]) / den];
+                let d = if even { [amount * (a[0] + b[0]) / den, amount * (a[1] + b[1]) / den] }
+                    else {let v=[a[0]+b[0],a[1]+b[1]];let l=len2(v).max(1e-12);[amount*v[0]/l,amount*v[1]/l]};
                 if len2(d) > (amount.abs() * 1000.).max(tol) {
                     return Err(Error::new(
                         "Inset boundary miter is too sharp; bevel the corner first",
@@ -268,7 +270,7 @@ mod tests {
             None,
         )
         .unwrap();
-        let q = offset_selected(&g, &[true], 0.25, false).unwrap();
+        let q = offset_selected(&g, &[true], 0.25, false, true).unwrap();
         assert_eq!(
             q,
             vec![
@@ -278,6 +280,6 @@ mod tests {
                 [0.25, 1.75, 0.]
             ]
         );
-        assert!(offset_selected(&g, &[true], 1., false).is_err());
+        assert!(offset_selected(&g, &[true], 1., false, true).is_err());
     }
 }

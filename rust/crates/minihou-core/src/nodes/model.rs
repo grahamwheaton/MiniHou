@@ -371,8 +371,14 @@ pub const CLIP: NodeSpec = NodeSpec {
 };
 pub const POLYEXTRUDE: NodeSpec = NodeSpec {
     name: "polyextrude",
-    inputs: GEO,
-    params: crate::params!("group":"";"edges":"";"points":"";"distance":0.5;"direction":[0.,0.,0.];"inset":0.;"mode":"connected";"output_back":false;"outgrp_front":true;"outgrp_front_name":"extrudeFront";"outgrp_back":false;"outgrp_back_name":"extrudeBack";"outgrp_side":true;"outgrp_side_name":"extrudeSide";"divide_into":"connected";"split_group":"";"extrusion_mode":"primitive_normal";"twist":0.;"divisions":1;"spine_shape":"straight";"transform_front":true;"output_front":true;"output_side":true;"outgrp_front_boundary":false;"outgrp_front_boundary_name":"extrudeFrontBoundary";"outgrp_back_boundary":false;"outgrp_back_boundary_name":"extrudeBackBoundary";"preserve_groups":true;"limit_insetting":false;"use_common_limit":false;"add_vertex_normals":false;"cusp_angle":60.;"generate_sides_uvs":false;"uv_style":"proportional";"uv_scaling":"match_incident"),
+    inputs: &[super::InputSpec{name:"geo",multi:false,optional:false},super::InputSpec{name:"spine",multi:false,optional:true}],
+    params: crate::params!("group":"";"edges":"";"points":"";"distance":0.5;"direction":[0.,0.,0.];"inset":0.;"mode":"connected";"output_back":false;"outgrp_front":true;"outgrp_front_name":"extrudeFront";"outgrp_back":false;"outgrp_back_name":"extrudeBack";"outgrp_side":true;"outgrp_side_name":"extrudeSide";"divide_into":"connected";"split_group":"";"extrusion_mode":"primitive_normal";"twist":0.;"divisions":1;"spine_shape":"straight";"transform_front":true;"output_front":true;"output_side":true;"outgrp_front_boundary":false;"outgrp_front_boundary_name":"extrudeFrontBoundary";"outgrp_back_boundary":false;"outgrp_back_boundary_name":"extrudeBackBoundary";"preserve_groups":true;"copy_edge_groups":true;"copy_point_groups":true;"copy_primitive_groups":true;"limit_insetting":false;"use_common_limit":false;"offset_even":true;"add_vertex_normals":false;"cusp_angle":60.;"generate_sides_uvs":false;"uv_style":"proportional";"uv_scaling":"match_incident";
+        "front_magnitude":1.;"back_magnitude":1.;"front_stiffness":1.;"back_stiffness":1.;"interpolation":"rotating_frame";"division_spacing":"uniform";
+        "reverse_spine_direction":false;"axial_rotation":0.;"front_blend":0.;"back_blend":0.;
+        "thickness_scale":1.;"thickness_ramp":[[0.,0.5],[1.,0.5]];"thickness_attribute":"";
+        "twist_range_half_width":1.;"local_twist_ramp":[[0.,0.5],[1.,0.5]];"twist_attribute":"";
+        "distance_scale_attribute":"zscale";"inset_scale_attribute":"insetscale";"twist_scale_attribute":"twistscale";"divisions_scale_attribute":"divsscale";
+        "local_x_attribute":"localx";"local_z_attribute":"localz";"local_center_attribute":"localctr";"front_translate":[0.,0.,0.]),
     cook: polyextrude,
 };
 pub(super) fn ear_clip(xy: &[[f64; 2]]) -> Vec<[usize; 3]> {
@@ -645,7 +651,78 @@ fn polyextrude(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         p.b("output_back")?,
         Some(p),
         direction,
+        inputs.get(1).and_then(|port|port.first()).map(|g| g.as_ref()),
     )
+}
+
+fn extrude_scalar(g: &Geometry, name: &str, prim: usize, point: usize) -> Option<f64> {
+    if name.is_empty() { return None; }
+    for (table, index) in [(&g.prim, prim), (&g.point, point)] {
+        let Some(attr)=table.get(name) else {continue};
+        if attr.width != 1 { continue; }
+        if let Some(data)=attr.as_f32() { return data.get(index).map(|v|*v as f64); }
+        if let AttrData::I32(data)=&attr.data { return data.get(index).map(|v|*v as f64); }
+    }
+    None
+}
+
+fn extrude_vector(g: &Geometry, name: &str, prim: usize, point: usize) -> Option<[f64;3]> {
+    if name.is_empty() { return None; }
+    for (table,index) in [(&g.prim,prim),(&g.point,point)] {
+        let Some(attr)=table.get(name) else {continue};
+        if attr.width != 3 {continue;}
+        if let Some(data)=attr.as_f32() {return Some([data[3*index] as f64,data[3*index+1] as f64,data[3*index+2] as f64]);}
+    }
+    None
+}
+
+fn extrude_ramp(value: &serde_json::Value, t: f64) -> Result<f64> {
+    let Some(points)=value.as_array() else {return Err(Error::new("extrusion ramp must be an array of [position, value] pairs"))};
+    if points.len()<2 {return Err(Error::new("extrusion ramp needs at least two points"));}
+    let mut previous=(-1.,0.);
+    for point in points {
+        let (Some(x),Some(y))=(point[0].as_f64(),point[1].as_f64()) else {return Err(Error::new("invalid extrusion ramp point"))};
+        if !(0.0..=1.0).contains(&x) || !y.is_finite() || x<=previous.0 {return Err(Error::new("extrusion ramp positions must increase from 0 to 1"));}
+        if t<=x {return Ok(if previous.0<0. {y} else {previous.1+(y-previous.1)*(t-previous.0)/(x-previous.0)});}
+        previous=(x,y);
+    }
+    Ok(previous.1)
+}
+
+fn rotate_around(point:[f64;3],center:[f64;3],axis:[f64;3],angle:f64)->[f64;3] {
+    let w=sub(point,center);let axis=unit(axis);let (s,c)=angle.sin_cos();
+    add(center,add(mul(w,c),add(mul(cross(axis,w),s),mul(axis,dot(axis,w)*(1.-c)))))
+}
+
+fn spine_position(spine:&Geometry,t:f64,reverse:bool)->Result<[f64;3]> {
+    if spine.npoints<2 {return Err(Error::new("external spine needs at least two points"));}
+    let u=(if reverse {1.-t} else {t}).clamp(0.,1.)*(spine.npoints-1) as f64;
+    let i=(u.floor() as usize).min(spine.npoints-2);let f=u-i as f64;
+    let p=spine.p();
+    Ok(std::array::from_fn(|k|p[3*i+k] as f64*(1.-f)+p[3*(i+1)+k] as f64*f))
+}
+fn spine_scalar(spine:Option<&Geometry>,name:&str,t:f64,reverse:bool)->Option<f64> {
+    let spine=spine?;if name.is_empty() || spine.npoints<2 {return None;}
+    let attr=spine.point.get(name)?;if attr.width!=1 {return None;}
+    let u=(if reverse {1.-t} else {t}).clamp(0.,1.)*(spine.npoints-1) as f64;
+    let i=(u.floor() as usize).min(spine.npoints-2);let f=u-i as f64;
+    let get=|i:usize|match &attr.data {AttrData::F32(xs)=>xs.get(i).map(|v|*v as f64),AttrData::I32(xs)=>xs.get(i).map(|v|*v as f64),_=>None};
+    Some(get(i)?*(1.-f)+get(i+1)?*f)
+}
+fn curvature_fraction(samples:&[[f64;3]],fraction:f64)->f64 {
+    if samples.len()<3 {return fraction;}
+    let mut cumulative=vec![0.;samples.len()];
+    for i in 1..samples.len() {
+        let curvature=if i+1<samples.len() {
+            let before=unit(sub(samples[i],samples[i-1]));let after=unit(sub(samples[i+1],samples[i]));
+            len(sub(after,before))
+        } else {0.};
+        cumulative[i]=cumulative[i-1]+1.+8.*curvature;
+    }
+    let wanted=fraction*cumulative.last().copied().unwrap_or(0.);
+    let i=cumulative.partition_point(|&v|v<wanted).clamp(1,cumulative.len()-1);
+    let segment=(wanted-cumulative[i-1])/(cumulative[i]-cumulative[i-1]).max(1e-12);
+    (i as f64-1.+segment)/(samples.len()-1) as f64
 }
 fn component_extrude(g: &Geometry, edges: &str, points: &str, distance: f64, direction: [f64; 3]) -> Result<Geometry> {
     if distance == 0. { return Ok(g.clone()); }
@@ -732,7 +809,7 @@ pub(super) fn extrude(
     back: bool,
     params: Option<&Params>,
 ) -> Result<Geometry> {
-    extrude_with_direction(g, group, distance, inset, mode, back, params, [0.; 3])
+    extrude_with_direction(g, group, distance, inset, mode, back, params, [0.; 3], None)
 }
 fn compute_vertex_normals(geo: &Geometry, cusp_angle: f64) -> Vec<f32> {
     let p_slice = geo.p();
@@ -787,15 +864,32 @@ fn compute_vertex_normals(geo: &Geometry, cusp_angle: f64) -> Vec<f32> {
 
 fn extrude_with_direction(
     g: &Geometry, group: &str, distance: f64, inset: f64, mode: &str,
-    back: bool, params: Option<&Params>, direction: [f64; 3],
+    back: bool, params: Option<&Params>, direction: [f64; 3], spine: Option<&Geometry>,
 ) -> Result<Geometry> {
     polygons(g, "polyextrude")?;
     let sel = prim_mask(g, group)?;
     let output_front = params.map_or(Ok(true), |p| p.b("output_front"))?;
     let output_side = params.map_or(Ok(true), |p| p.b("output_side"))?;
     let output_back = params.map_or(Ok(back), |p| p.b("output_back"))?;
-    let divisions = params.map_or(Ok(1), |p| p.i("divisions"))?.max(1) as usize;
+    let mut divisions = params.map_or(Ok(1), |p| p.i("divisions"))?.max(1) as usize;
     let twist = params.map_or(Ok(0.0), |p| p.f("twist"))?;
+    let offset_even = params.map_or(Ok(true), |p| p.b("offset_even"))?;
+    let shape = params.map_or(Ok("straight".to_owned()), |p| p.e("spine_shape", &["straight","spline","curved","curve_from_second_input"]))?;
+    let interpolation = params.map_or(Ok("rotating_frame".to_owned()), |p| p.e("interpolation", &["rotating_frame","linear","smooth"]))?;
+    let spacing = params.map_or(Ok("uniform".to_owned()), |p| p.e("division_spacing", &["uniform","curvature_sensitive"]))?;
+    let spine = if shape=="curve_from_second_input" {Some(spine.ok_or_else(||Error::new("Curve from second input requires a spine curve"))?)} else {None};
+    let reverse_spine=params.map_or(Ok(false),|p|p.b("reverse_spine_direction"))?;
+    let axial_rotation=params.map_or(Ok(0.),|p|p.f("axial_rotation"))?.to_radians();
+    let front_blend=params.map_or(Ok(0.),|p|p.f("front_blend"))?.clamp(0.,1.);
+    let back_blend=params.map_or(Ok(0.),|p|p.f("back_blend"))?.clamp(0.,1.);
+    let front_magnitude=params.map_or(Ok(1.),|p|p.f("front_magnitude"))?;
+    let back_magnitude=params.map_or(Ok(1.),|p|p.f("back_magnitude"))?;
+    let front_stiffness=params.map_or(Ok(1.),|p|p.f("front_stiffness"))?;
+    let back_stiffness=params.map_or(Ok(1.),|p|p.f("back_stiffness"))?;
+    let thickness_scale=params.map_or(Ok(1.),|p|p.f("thickness_scale"))?;
+    let twist_half_width=params.map_or(Ok(1.),|p|p.f("twist_range_half_width"))?;
+    let thickness_attr=params.map_or(Ok(String::new()),|p|p.s("thickness_attribute"))?;
+    let spine_twist_attr=params.map_or(Ok(String::new()),|p|p.s("twist_attribute"))?;
     let add_vertex_normals = params.map_or(Ok(false), |p| p.b("add_vertex_normals"))?;
     let cusp_angle = params.map_or(Ok(60.0), |p| p.f("cusp_angle"))?;
     let generate_sides_uvs = params.map_or(Ok(false), |p| p.b("generate_sides_uvs"))?;
@@ -803,9 +897,16 @@ fn extrude_with_direction(
     let apply_groups =
         |out: &mut Geometry, front: &[bool], back: &[bool], side: &[bool]| -> Result<()> {
             if let Some(p) = params {
-                outgroup(out, p, "front", "prim", front)?;
-                outgroup(out, p, "back", "prim", back)?;
-                outgroup(out, p, "side", "prim", side)?;
+                for (key,mask) in [("front",front),("back",back),("side",side)] {
+                    let mut values=mask.to_vec();
+                    if p.b("preserve_groups")? && p.b(&format!("outgrp_{key}"))? {
+                        let group=p.s(&format!("outgrp_{key}_name"))?;
+                        if let Some(existing)=out.prim.get(&format!("group_{group}")).and_then(|a|match &a.data {AttrData::I32(v)=>Some(v.as_slice()),_=>None}) {
+                            for (value,&old) in values.iter_mut().zip(existing) {*value|=old!=0;}
+                        }
+                    }
+                    outgroup(out,p,key,"prim",&values)?;
+                }
             } else {
                 write_group(out, "prim", "extrudeFront", front)?;
                 write_group(out, "prim", "extrudeSide", side)?;
@@ -813,7 +914,7 @@ fn extrude_with_direction(
             Ok(())
         };
 
-    if !sel.iter().any(|&b| b) || (distance == 0. && inset == 0. && !output_back && twist == 0. && output_front && divisions == 1) {
+    if !sel.iter().any(|&b| b) || (distance == 0. && inset == 0. && shape=="straight" && !output_back && twist == 0. && output_front && divisions == 1) {
         let mut out = g.clone();
         apply_groups(
             &mut out,
@@ -829,10 +930,26 @@ fn extrude_with_direction(
     let fn_ = normals::prim_normals(g.p(), &g.topology);
     let fu: Vec<_> = fn_.iter().map(|&v| unit32(v)).collect();
     let selected: Vec<_> = (0..g.nvertices()).filter(|&v| sel[pv[v]]).collect();
+    if let Some(p)=params {
+        let name=p.s("divisions_scale_attribute")?;
+        let scale=selected.iter().filter_map(|&v|extrude_scalar(g,&name,pv[v],vp[v] as usize)).fold(1.,f64::max);
+        divisions=((divisions as f64*scale).round() as usize).clamp(1,256);
+        extrude_ramp(p.value("thickness_ramp"),0.)?;
+        extrude_ramp(p.value("local_twist_ramp"),0.)?;
+    }
     let individual = mode == "individual";
+    let distance_attr=params.map_or(Ok(String::new()),|p|p.s("distance_scale_attribute"))?;
+    let inset_attr=params.map_or(Ok(String::new()),|p|p.s("inset_scale_attribute"))?;
+    let twist_attr=params.map_or(Ok(String::new()),|p|p.s("twist_scale_attribute"))?;
+    let local_z_attr=params.map_or(Ok(String::new()),|p|p.s("local_z_attribute"))?;
+    let local_x_attr=params.map_or(Ok(String::new()),|p|p.s("local_x_attribute"))?;
+    let local_center_attr=params.map_or(Ok(String::new()),|p|p.s("local_center_attribute"))?;
+    let extrusion_mode=params.map_or(Ok("primitive_normal".to_owned()),|p|p.e("extrusion_mode", &["primitive_normal","point_normal","edge_normal","direction"]))?;
+    let point_normals=if extrusion_mode=="point_normal" {Some(normals::point_normals(g.p(),&g.topology,g.npoints))} else {None};
+    let spine_translation=if let Some(spine)=spine {sub(spine_position(spine,1.,reverse_spine)?,spine_position(spine,0.,reverse_spine)?)} else {[0.;3]};
     let shifted = if inset != 0. {
         Some(super::planar_offset::offset_selected(
-            g, &sel, inset, individual,
+            g, &sel, inset, individual, offset_even,
         )?)
     } else {
         None
@@ -847,13 +964,22 @@ fn extrude_with_direction(
             .into_iter()
             .collect()
     };
+    let mut owner=vec![0usize;g.npoints];
+    for &v in &selected {owner[vp[v] as usize]=v;}
+    let source_corner:Vec<usize>=if individual {selected.clone()} else {src.iter().map(|&q|owner[q]).collect()};
     let mut nv = vec![0; g.nvertices()];
     let mut newp = Vec::new();
     if individual {
         for (i, &v) in selected.iter().enumerate() {
             nv[v] = g.npoints + i;
-            let base = shifted.as_ref().map_or(pos[vp[v] as usize], |q| q[v]);
-            newp.push(add(base, mul(if len(direction) > 0. { direction } else { fu[pv[v]] }, distance)));
+            let q=vp[v] as usize;
+            let scale=extrude_scalar(g,&inset_attr,pv[v],q).unwrap_or(1.);
+            let base=shifted.as_ref().map_or(pos[q],|s|add(pos[q],mul(sub(s[v],pos[q]),scale)));
+            let normal=extrude_vector(g,&local_z_attr,pv[v],q).filter(|n|len(*n)>1e-12).map(unit)
+                .or_else(||point_normals.as_ref().map(|pn|[pn[3*q] as f64,pn[3*q+1] as f64,pn[3*q+2] as f64]))
+                .unwrap_or_else(||if len(direction)>0. {unit(direction)} else {fu[pv[v]]});
+            let amount=distance*extrude_scalar(g,&distance_attr,pv[v],q).unwrap_or(1.);
+            newp.push(add(add(base,mul(normal,amount)),spine_translation));
         }
     } else {
         let mut map = vec![0; g.npoints];
@@ -875,25 +1001,36 @@ fn extrude_with_direction(
             mincos[q] = mincos[q].min(dot(pn[q], fu[pv[v]]).max(0.25));
         }
         for &q in &src {
-            let mut point = add(pos[q], if len(direction) > 0. { mul(direction, distance) } else { mul(pn[q], distance / mincos[q]) });
+            let v=repr[q];
+            let normal=extrude_vector(g,&local_z_attr,pv[v],q).filter(|n|len(*n)>1e-12).map(unit)
+                .or_else(||point_normals.as_ref().map(|normals|[normals[3*q] as f64,normals[3*q+1] as f64,normals[3*q+2] as f64]))
+                .unwrap_or_else(||if len(direction)>0. {unit(direction)} else {pn[q]});
+            let amount=distance*extrude_scalar(g,&distance_attr,pv[v],q).unwrap_or(1.);
+            let mut point = add(add(pos[q],mul(normal,if offset_even && len(direction)==0. && extrusion_mode=="primitive_normal" {amount/mincos[q]} else {amount})),spine_translation);
             if let Some(sh) = &shifted {
-                point = add(point, sub(sh[repr[q]], pos[q]));
+                point = add(point, mul(sub(sh[v], pos[q]),extrude_scalar(g,&inset_attr,pv[v],q).unwrap_or(1.)));
             }
             newp.push(point);
         }
     }
 
+    if let Some(p)=params {
+        if p.b("transform_front")? {
+            let translation=p.v3("front_translate")?;
+            if len(translation)>0. {
+                for (i,point) in newp.iter_mut().enumerate() {
+                    let q=src[i];let v=source_corner[i];
+                    let z=extrude_vector(g,&local_z_attr,pv[v],q).filter(|n|len(*n)>1e-12).map(unit).unwrap_or(fu[pv[v]]);
+                    let fallback=sub(pos[vp[nx[v]] as usize],pos[q]);
+                    let x=extrude_vector(g,&local_x_attr,pv[v],q).filter(|n|len(*n)>1e-12).unwrap_or(fallback);
+                    let x=unit(sub(x,mul(z,dot(x,z))));let y=unit(cross(z,x));
+                    *point=add(*point,add(mul(x,translation[0]),add(mul(y,translation[1]),mul(z,translation[2]))));
+                }
+            }
+        }
+    }
+
     if twist.abs() > 1e-6 {
-        let twist_rad = twist.to_radians();
-        let cos_t = twist_rad.cos();
-        let sin_t = twist_rad.sin();
-        let rotate_pt = |p: [f64; 3], center: [f64; 3], axis: [f64; 3]| -> [f64; 3] {
-            let w = sub(p, center);
-            let cross_aw = cross(axis, w);
-            let dot_aw = dot(axis, w);
-            let rot_w = add(mul(w, cos_t), add(mul(cross_aw, sin_t), mul(axis, dot_aw * (1.0 - cos_t))));
-            add(center, rot_w)
-        };
         if individual {
             for i in 0..g.nprims() {
                 if !sel[i] { continue; }
@@ -908,7 +1045,11 @@ fn extrude_with_direction(
                 ];
                 for &v in &verts {
                     let idx = nv[v] - g.npoints;
-                    newp[idx] = rotate_pt(newp[idx], center, axis);
+                    let q=vp[v] as usize;
+                    let center=extrude_vector(g,&local_center_attr,i,q).unwrap_or(center);
+                    let axis=extrude_vector(g,&local_z_attr,i,q).filter(|n|len(*n)>1e-12).map(unit).unwrap_or(axis);
+                    let angle=twist.to_radians()*extrude_scalar(g,&twist_attr,i,q).unwrap_or(1.);
+                    newp[idx] = rotate_around(newp[idx], center, axis, angle);
                 }
             }
         } else if !newp.is_empty() {
@@ -927,9 +1068,25 @@ fn extrude_with_direction(
                 }
                 unit(acc)
             };
-            for p in &mut newp {
-                *p = rotate_pt(*p, center, avg_norm);
+            for (i,p) in newp.iter_mut().enumerate() {
+                let q=src[i];let v=source_corner[i];
+                let pivot=extrude_vector(g,&local_center_attr,pv[v],q).unwrap_or(center);
+                let angle=twist.to_radians()*extrude_scalar(g,&twist_attr,pv[v],q).unwrap_or(1.);
+                let axis=extrude_vector(g,&local_z_attr,pv[v],q).filter(|n|len(*n)>1e-12).map(unit).unwrap_or(avg_norm);
+                *p = rotate_around(*p, pivot, axis, angle);
             }
+        }
+    }
+
+    let back_center=if src.is_empty(){[0.;3]}else{mul(src.iter().fold([0.;3],|acc,&q|add(acc,pos[q])),1./src.len() as f64)};
+    let front_center=if newp.is_empty(){[0.;3]}else{mul(newp.iter().fold([0.;3],|acc,&q|add(acc,q)),1./newp.len() as f64)};
+    if let Some(p)=params {
+        let thick=1.+2.*(extrude_ramp(p.value("thickness_ramp"),1.)? - 0.5 + spine_scalar(spine,&thickness_attr,1.,reverse_spine).unwrap_or(0.))*thickness_scale;
+        let local_twist=2.*(extrude_ramp(p.value("local_twist_ramp"),1.)? - 0.5 + spine_scalar(spine,&spine_twist_attr,1.,reverse_spine).unwrap_or(0.))*twist_half_width.to_radians();
+        for (i,q) in newp.iter_mut().enumerate() {
+            let center=extrude_vector(g,&local_center_attr,pv[source_corner[i]],src[i]).unwrap_or(front_center);
+            *q=add(center,mul(sub(*q,center),thick));
+            if local_twist.abs()>1e-12 {*q=rotate_around(*q,center,if len(direction)>0. {direction} else {fu[pv[source_corner[i]]]},local_twist);}
         }
     }
 
@@ -947,6 +1104,17 @@ fn extrude_with_direction(
             .filter(|&v| cnt[e.of_vertex[v] as usize] == 1)
             .collect()
     };
+    let layer_t:Vec<f64>=if spacing=="curvature_sensitive" && divisions>1 && (spine.is_some() || shape=="curved" || shape=="spline") {
+        let samples=(0..=64).map(|i| {
+            let t=i as f64/64.;
+            if let Some(spine)=spine {spine_position(spine,t,reverse_spine)} else {
+                let base=pos[src[0]];let front=newp[0];let normal=if len(direction)>0. {unit(direction)} else {fu[pv[source_corner[0]]]};
+                let h10=t*(1.-t)*(1.-t);let h11=t*t*(t-1.);
+                Ok(add(add(base,mul(sub(front,base),t)),mul(normal,distance*(h10*(back_magnitude*back_stiffness-1.)+h11*(front_magnitude*front_stiffness-1.)))))
+            }
+        }).collect::<Result<Vec<_>>>()?;
+        (0..=divisions).map(|d|curvature_fraction(&samples,d as f64/divisions as f64)).collect()
+    } else {(0..=divisions).map(|d|d as f64/divisions as f64).collect()};
 
     let mut point = concat(&g.point, &gather(&g.point, &src));
     let mut p = g.p().to_vec();
@@ -969,12 +1137,29 @@ fn extrude_with_direction(
                     newp[b - g.npoints][2],
                 ];
                 for d in 1..divisions {
-                    let frac = d as f64 / divisions as f64;
-                    let interp = [
-                        pos_a[0] + (pos_b[0] - pos_a[0]) * frac,
-                        pos_a[1] + (pos_b[1] - pos_a[1]) * frac,
-                        pos_a[2] + (pos_b[2] - pos_a[2]) * frac,
-                    ];
+                    let t=layer_t[d];
+                    let mut interp=add(pos_a,mul(sub(pos_b,pos_a),t));
+                    if (shape=="spline" || shape=="curved") && interpolation!="linear" {
+                        let n=if len(direction)>0. {unit(direction)} else {fu[pv[v]]};
+                        let h10=t*(1.-t)*(1.-t);let h11=t*t*(t-1.);
+                        interp=add(interp,mul(n,distance*(h10*(back_magnitude*back_stiffness-1.)+h11*(front_magnitude*front_stiffness-1.))));
+                        if interpolation=="smooth" {interp=add(pos_a,mul(sub(interp,pos_a),t*t*(3.-2.*t)/t.max(1e-12)));}
+                    }
+                    if let Some(spine)=spine {
+                        let start=spine_position(spine,0.,reverse_spine)?;
+                        let path=spine_position(spine,t,reverse_spine)?;
+                        let straight=add(start,mul(spine_translation,t));
+                        let deviation=rotate_around(sub(path,straight),[0.;3],spine_translation,axial_rotation);
+                        let blend=1.-back_blend*(1.-t)-front_blend*t;
+                        interp=add(interp,mul(deviation,blend));
+                    }
+                    if let Some(p)=params {
+                        let thick=1.+2.*(extrude_ramp(p.value("thickness_ramp"),t)? - 0.5 + spine_scalar(spine,&thickness_attr,t,reverse_spine).unwrap_or(0.))*thickness_scale;
+                        let center=add(back_center,mul(sub(front_center,back_center),t));
+                        interp=add(center,mul(sub(interp,center),thick));
+                        let angle=2.*(extrude_ramp(p.value("local_twist_ramp"),t)? - 0.5 + spine_scalar(spine,&spine_twist_attr,t,reverse_spine).unwrap_or(0.))*twist_half_width.to_radians();
+                        if angle.abs()>1e-12 {interp=rotate_around(interp,center,if len(direction)>0. {direction} else {fu[pv[v]]},angle);}
+                    }
                     let pt_idx = g.npoints + newp.len() + extra_pts.len();
                     pt_map.insert((d, a, b), pt_idx);
                     extra_pts.push(interp);
@@ -1082,6 +1267,36 @@ fn extrude_with_direction(
         g.detail.clone(),
         None,
     )?;
+
+    if let Some(p)=params {
+        let copy_points=p.b("copy_point_groups")?;
+        for (name,attr) in out.point.clone() {
+            if !name.starts_with("group_") {continue;}
+            if let AttrData::I32(data)=&attr.data {
+                let mut values=data.clone();
+                if !copy_points {values[g.npoints..].fill(0);}
+                out.point.insert(name,Arc::new(Attr::i32(1,values)));
+            }
+        }
+        let copy_prims=p.b("copy_primitive_groups")?;
+        for (name,attr) in out.prim.clone() {
+            if !name.starts_with("group_") {continue;}
+            if let AttrData::I32(data)=&attr.data {
+                let mut values=data.clone();
+                for (i,value) in values.iter_mut().enumerate() {if is_side[i] || is_front[i] && !copy_prims {*value=0;}}
+                out.prim.insert(name,Arc::new(Attr::i32(1,values)));
+            }
+        }
+        let copy_edges=p.b("copy_edge_groups")?;
+        for (name,attr) in out.vertex.clone() {
+            if !name.starts_with("edge_group_") {continue;}
+            if let AttrData::I32(data)=&attr.data {
+                let mut values=data.clone();let mut offset=0;
+                for (i,&size) in sizes.iter().enumerate() {if is_side[i] || is_front[i] && !copy_edges {values[offset..offset+size].fill(0);}offset+=size;}
+                out.vertex.insert(name,Arc::new(Attr::i32(1,values)));
+            }
+        }
+    }
 
     apply_groups(&mut out, &is_front, &is_back, &is_side)?;
 
@@ -1274,6 +1489,72 @@ mod tests {
             "outgrp_front_boundary_name": "front_edges"
         }));
         assert!(with_bounds.vertex.contains_key("edge_group_front_edges") || with_bounds.edge.contains_key("group_front_edges"));
+    }
+    #[test]
+    fn polyextrude_spine_controls_change_bridge_and_follow_second_input() {
+        let g=quad();
+        let baseline=cook(&POLYEXTRUDE,g.clone(),json!({"distance":1.0,"divisions":4}));
+        let curved=cook(&POLYEXTRUDE,g.clone(),json!({"distance":1.0,"divisions":4,"spine_shape":"curved","front_magnitude":2.0,"back_stiffness":0.5}));
+        assert_ne!(curved.p(),baseline.p());
+        let curved_translated=json!({"distance":1.0,"divisions":4,"spine_shape":"curved","front_magnitude":2.0,"front_translate":[0.3,0.0,0.0]});
+        let uniform=cook(&POLYEXTRUDE,g.clone(),curved_translated.clone());
+        let mut spaced_params=curved_translated;spaced_params["division_spacing"]=json!("curvature_sensitive");
+        let spaced=cook(&POLYEXTRUDE,g.clone(),spaced_params);
+        assert_ne!(spaced.p(),uniform.p());
+        let mut spine=Geometry::from_arrays(vec![0.,0.,0.,0.5,0.,0.5,0.,0.,1.],vec![0,1,2],vec![0,3],Some(vec![false])).unwrap();
+        spine.point.insert("thick".into(),Arc::new(Attr::f32(1,vec![0.,0.1,0.])));
+        spine.point.insert("bend".into(),Arc::new(Attr::f32(1,vec![0.,0.2,0.])));
+        let p=Params::resolve(POLYEXTRUDE.params,json!({"distance":1.0,"divisions":4,"spine_shape":"curve_from_second_input"}).as_object()).unwrap();
+        let along=(POLYEXTRUDE.cook)(&[vec![Arc::new(g.clone())],vec![Arc::new(spine.clone())]],&p).unwrap();
+        assert_ne!(along.p(),baseline.p());
+        let attributes=Params::resolve(POLYEXTRUDE.params,json!({"distance":1.0,"divisions":4,"spine_shape":"curve_from_second_input","thickness_attribute":"thick","twist_attribute":"bend","twist_range_half_width":90.0}).as_object()).unwrap();
+        let attributed=(POLYEXTRUDE.cook)(&[vec![Arc::new(g.clone())],vec![Arc::new(spine.clone())]],&attributes).unwrap();
+        assert_ne!(attributed.p(),along.p());
+        let reversed=Params::resolve(POLYEXTRUDE.params,json!({"distance":1.0,"divisions":4,"spine_shape":"curve_from_second_input","reverse_spine_direction":true,"axial_rotation":30.0,"front_blend":0.5,"back_blend":0.5}).as_object()).unwrap();
+        let other=(POLYEXTRUDE.cook)(&[vec![Arc::new(g)],vec![Arc::new(spine)]],&reversed).unwrap();
+        assert_ne!(along.p(),other.p());
+    }
+    #[test]
+    fn polyextrude_thickness_and_twist_ramps_affect_bridge() {
+        let g=quad();
+        let base=cook(&POLYEXTRUDE,g.clone(),json!({"distance":1.0,"divisions":3}));
+        let thick=cook(&POLYEXTRUDE,g.clone(),json!({"distance":1.0,"divisions":3,"thickness_scale":2.0,"thickness_ramp":[[0.0,0.5],[1.0,0.75]]}));
+        assert_ne!(base.p(),thick.p());
+        let twisted=cook(&POLYEXTRUDE,g,json!({"distance":1.0,"divisions":3,"twist_range_half_width":90.0,"local_twist_ramp":[[0.0,0.5],[1.0,1.0]]}));
+        assert_ne!(base.p(),twisted.p());
+    }
+    #[test]
+    fn polyextrude_local_control_attributes_and_frames() {
+        let mut g=quad();
+        g.prim.insert("zscale".into(),Arc::new(Attr::f32(1,vec![2.])));
+        g.prim.insert("insetscale".into(),Arc::new(Attr::f32(1,vec![0.5])));
+        g.prim.insert("twistscale".into(),Arc::new(Attr::f32(1,vec![0.])));
+        g.prim.insert("divsscale".into(),Arc::new(Attr::f32(1,vec![2.])));
+        g.prim.insert("localz".into(),Arc::new(Attr::f32(3,vec![1.,0.,0.])));
+        g.prim.insert("localx".into(),Arc::new(Attr::f32(3,vec![0.,1.,0.])));
+        g.prim.insert("localctr".into(),Arc::new(Attr::f32(3,vec![5.,0.,0.])));
+        let out=cook(&POLYEXTRUDE,g.clone(),json!({"distance":1.0,"inset":0.1,"twist":45.0,"divisions":2,"front_translate":[1.,0.,0.]}));
+        assert_eq!(out.nprims(),17); // 4 edges * (2 divisions * divsscale 2) + front
+        let unscaled=cook(&POLYEXTRUDE,g.clone(),json!({"distance":1.0,"inset":0.1,"twist":45.0,"divisions":2,"front_translate":[1.,0.,0.],"distance_scale_attribute":"missing","divisions_scale_attribute":"missing"}));
+        assert_ne!(out.p(),unscaled.p());
+        let no_frame=cook(&POLYEXTRUDE,g,json!({"distance":1.0,"inset":0.1,"twist":45.0,"divisions":2,"front_translate":[1.,0.,0.],"local_x_attribute":"missing","local_z_attribute":"missing","local_center_attribute":"missing"}));
+        assert_ne!(out.p(),no_frame.p());
+    }
+    #[test]
+    fn polyextrude_offset_even_and_houdini_output_group_options() {
+        let mut g=quad();
+        g.point.insert("group_seed".into(),Arc::new(Attr::i32(1,vec![1,0,0,0])));
+        g.prim.insert("group_source".into(),Arc::new(Attr::i32(1,vec![1])));
+        g.vertex.insert("edge_group_source".into(),Arc::new(Attr::i32(1,vec![1,0,0,0])));
+        let even=cook(&POLYEXTRUDE,g.clone(),json!({"distance":1.0,"inset":0.15,"offset_even":true}));
+        let uneven=cook(&POLYEXTRUDE,g.clone(),json!({"distance":1.0,"inset":0.15,"offset_even":false}));
+        assert_ne!(even.p(),uneven.p());
+        let out=cook(&POLYEXTRUDE,g,json!({"distance":1.0,"copy_point_groups":false,"copy_primitive_groups":false,"copy_edge_groups":false,
+            "outgrp_front_name":"HoudiniFront","outgrp_side_name":"HoudiniSide","outgrp_back":true,"output_back":true}));
+        assert!(out.prim.contains_key("group_HoudiniFront") && out.prim.contains_key("group_HoudiniSide") && out.prim.contains_key("group_extrudeBack"));
+        assert!(out.point["group_seed"].as_i32().unwrap().iter().skip(4).all(|v|*v==0));
+        assert!(out.prim["group_source"].as_i32().unwrap().iter().take(5).all(|v|*v==0));
+        assert!(out.vertex["edge_group_source"].as_i32().unwrap().iter().take(20).all(|v|*v==0));
     }
     #[test]
     fn clip_shared_intersections_and_int_sources() {

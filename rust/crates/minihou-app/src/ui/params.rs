@@ -9,6 +9,13 @@ use minihou_app::value_link_ui::{self, CopiedParam, PasteMode};
 
 const DISABLED: &str = "The Rust backend does not support it yet";
 fn deformer_section(typ:&str,name:&str)->Option<&'static str> {
+    if typ=="polyextrude" {
+        return Some(if matches!(name,"group"|"edges"|"points"|"divide_into"|"split_group") {"Selection"}
+            else if name.starts_with("outgrp_") || matches!(name,"output_front"|"output_back"|"output_side"|"preserve_groups"|"copy_edge_groups"|"copy_point_groups"|"copy_primitive_groups") {"Output Geometry and Groups"}
+            else if matches!(name,"front_magnitude"|"back_magnitude"|"front_stiffness"|"back_stiffness"|"interpolation"|"division_spacing"|"reverse_spine_direction"|"axial_rotation"|"front_blend"|"back_blend"|"thickness_scale"|"thickness_ramp"|"thickness_attribute"|"twist_range_half_width"|"local_twist_ramp"|"twist_attribute") {"Spine Control"}
+            else if name.ends_with("_attribute") {"Local Control"}
+            else {"Extrusion"});
+    }
     if !super::deform_gizmo::is_deformer(typ) { return None; }
     Some(if matches!(name,"group"|"outside"|"max_points") {"Selection"}
         else if matches!(name,"origin"|"center"|"direction"|"up"|"length"|"radius"|"axis"|"frame"|"offset"|"stretch"|"symmetric"|"up_vector_angle") {"Capture"}
@@ -23,6 +30,20 @@ mod deformer_group_tests {
         assert_eq!(deformer_section("linear_taper","taper_x"),Some("Deformation"));
         assert_eq!(deformer_section("point_deform","group"),Some("Selection"));
         assert_eq!(deformer_section("box","size"),None);
+    }
+}
+#[cfg(test)]
+mod polyextrude_panel_tests {
+    use super::*;
+    #[test]
+    fn polyextrude_metadata_has_spine_local_and_houdini_output_group_names() {
+        assert_eq!(deformer_section("polyextrude","thickness_ramp"),Some("Spine Control"));
+        assert_eq!(deformer_section("polyextrude","distance_scale_attribute"),Some("Local Control"));
+        assert_eq!(deformer_section("polyextrude","outgrp_front_name"),Some("Output Geometry and Groups"));
+        assert_eq!(param_meta("polyextrude","offset_even").unwrap()["default"],json!(true));
+        assert_eq!(param_meta("polyextrude","outgrp_front_name").unwrap()["default"],json!("extrudeFront"));
+        assert_eq!(param_meta("polyextrude","outgrp_back_name").unwrap()["default"],json!("extrudeBack"));
+        assert_eq!(param_meta("polyextrude","outgrp_side_name").unwrap()["default"],json!("extrudeSide"));
     }
 }
 pub const PICK_PURPLE: Color32 = Color32::from_rgb(184, 82, 245);
@@ -1264,7 +1285,20 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     let is_length = crate::units::is_length_param(typ, param.name);
     let units_opt = if is_length { Some(v.units) } else { None };
     let ink = if !enabled { v.theme.faint } else if modified { v.theme.text } else { v.theme.dim };
-    let label_text = if output_group { output_group_label(param.name) }
+    let label_text = if typ=="polyextrude" {
+        match param.name {
+            "outgrp_front"=>"Front Group".into(),"outgrp_back"=>"Back Group".into(),"outgrp_side"=>"Side Group".into(),
+            "outgrp_front_name"=>"Front Group Name".into(),"outgrp_back_name"=>"Back Group Name".into(),"outgrp_side_name"=>"Side Group Name".into(),
+            "outgrp_front_boundary"=>"Front Boundary Group".into(),"outgrp_back_boundary"=>"Back Boundary Group".into(),
+            "outgrp_front_boundary_name"=>"Front Boundary Group Name".into(),"outgrp_back_boundary_name"=>"Back Boundary Group Name".into(),
+            "generate_sides_uvs"=>"Generate Unwrapped Texture Coordinates for Sides".into(),
+            "local_twist_ramp"=>"Local Twist Ramp".into(),"twist_range_half_width"=>"Range Half-Width".into(),
+            "distance_scale_attribute"=>"Distance Scale".into(),"inset_scale_attribute"=>"Inset Scale".into(),
+            "twist_scale_attribute"=>"Twist Scale".into(),"divisions_scale_attribute"=>"Divisions Scale".into(),
+            "local_x_attribute"=>"X Direction".into(),"local_z_attribute"=>"Z Direction".into(),"local_center_attribute"=>"Center".into(),
+            _=>title(param.name)
+        }
+    } else if output_group { output_group_label(param.name) }
         else if typ == "scene_objects" && param.name == "piece_attrib" { "Object ID Attribute".to_owned() }
         else if is_length { format!("{} ({})", title(param.name), v.units.display.symbol()) } else { title(param.name) };
 
