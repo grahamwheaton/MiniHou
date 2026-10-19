@@ -901,6 +901,11 @@
    "pick_domain_default": "edges",
    "pick_domain_param": "domain"
   },
+  "output_group": {
+   "default": "",
+   "doc": "Output edge group name. When set, it overrides output_group_name; when empty, output_group_name is used.",
+   "kind": "str"
+  },
   "output_group_name": {
    "default": "boundary",
    "doc": "Name of the output edge group containing boundary edges.",
