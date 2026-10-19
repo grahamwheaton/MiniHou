@@ -357,7 +357,7 @@ When an object is selected, show only its silhouette outline (the outer edge see
 
 Bugs:
 - Transforming a selection only works with an Output node at the end of the stream (should work without it; see the display fix fix A).
-- Scale cage 'C' keymap is lost: it triggers circle select. Remove the conflict or choose another key. Add a toolbar icon for scale cage and a dedicated node (or check whether Match Size covers it).
+- Add a toolbar icon for scale cage and a dedicated node (or check whether Match Size covers it).
 - Ctrl+B with bevels selected should trigger the vertex bevel node, with an auto group.
 - Copy to Points: with pack on, nothing reaches Blender (it looks right in MiniHou).
 - Blender Object: clicking reset transform has no effect in MiniHou (Blender changes the result).
@@ -367,10 +367,6 @@ Bugs:
 - Cannot double-click to open a subnet node. (Not built: nested subnet navigation, plan step 3; double-click currently sets display.)
 - Ctrl+click shortest route works on simple meshes only; it breaks with split edges.
 - Cannot double-click to open a subnet node.
-
-Selection to node (UI):
-- Ctrl+G with a viewport selection under the mouse creates a Group Create node with the selection applied (domain from the selection type).
-- X or Delete with a viewport selection creates a Blast node with the selection applied (domain aware).
 
 Nodes and parameters:
 - All output groups optional: checkbox, label, then group name with target select.

@@ -101,6 +101,7 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Ctrl+O | Open | Everywhere |
 | Ctrl+D | Duplicate nodes | Network |
 | Ctrl+G | Group / ungroup nodes | Network |
+| Ctrl+G | Group Create from selection | Viewport |
 | Ctrl+X | Dissolve nodes | Network |
 | Ctrl+C | Copy nodes | Network |
 | Ctrl+V | Paste nodes | Network |
@@ -161,6 +162,8 @@ In edit mode, E starts PolyExtrude on selected faces, edges, or points. Faces pr
 
 Alt+M (or the shelf's Mirror button) starts the Mirror tool (Houdini's Mirror tool state plus a HardOps-style axis gizmo; details in `src/ui/mirror_tool.rs`). Six cubes surround the selected object (+X/-X red, +Y/-Y green, +Z/-Z blue). Clicking a cube adds a `mirror` node after the selected node (before the output) that keeps that side (Cut) and mirrors it across the bounds centre; Shift+click mirrors about the world origin. The negative cube sets Reverse. A second axis chains another mirror node; clicking the other cube of an axis already mirrored flips its side, clicking the same cube again removes that node. The plane of the active node is drawn with an origin dot (drag: move the plane in the view), an arrow on the kept side (drag: slide along it; Shift finer) and a ring (drag: rotate the direction; Shift snaps to 15 degrees). F then drag draws the plane (direction along the drawn line, through the start point; F then click on a face uses its normal). G toggles the input wireframe, H the plane. The Parameters panel edits the same node live. Enter or a click on empty viewport confirms the whole session as one undo step; Esc or RMB restores the graph exactly. In edit mode with faces selected the node uses Mirror Selected on those faces. Selecting an existing mirror node and pressing Alt+M edits it.
 
+In point, edge, or face mode, Ctrl+G over the viewport inserts Group Create from the selected elements, and X or Delete inserts Blast from them. The node uses the selection's domain and is placed after the selected displayed stream. Edge groups use the selected edges, not their endpoints. V toggles the scale cage during a modal scale; C starts circle selection.
+
 <!-- modal:start -->
 | Input | During modal transform |
 | --- | --- |
@@ -180,6 +183,7 @@ Alt+M (or the shelf's Mirror button) starts the Mirror tool (Houdini's Mirror to
 | A / Alt+A | Confirm transform and select all / none |
 | Ctrl+Shift+LMB while moving | Pick snap reference point |
 | R while rotating | Toggle trackball |
+| V while scaling | Toggle scale cage |
 | Alt while scaling | Individual origins is not yet supported for multiple displayed objects |
 <!-- modal:end -->
 

@@ -977,6 +977,9 @@ impl App {
             let Some(mut params) = params else { self.file_status = "Select points, edges or faces to create a group".into(); return; };
             params["name"] = json!(element_select::free_group_name(self.editor.doc.value()));
             merge_params(&mut value, &id, params);
+        } else if node_type == "blast" && self.editor_state.selection != ui::SelectionMode::Object {
+            let Some(params) = params else { self.file_status = "Select points, edges or faces to blast".into(); return; };
+            merge_params(&mut value, &id, params);
         } else if let Some(params) = params { merge_params(&mut value, &id, params); }
         let before = ui::network::position_add(ctx, &self.editor.path, self.editor.doc.value(), &mut value, after);
         self.editor.history.finish(&self.editor.doc);
@@ -1664,7 +1667,7 @@ impl App {
                         egui::Key::B if modal.kind==ModalKind::Move => { modal.cycle_snap(); if modal.reference.is_none() { modal.reference=Some(modal.pivot); } },
                         egui::Key::B if modal.kind==ModalKind::Rotate => { modal.sketch=SketchStage::Pivot; modal.sketch_reference=None; },
                         egui::Key::R if modal.kind==ModalKind::Rotate => modal.trackball = !modal.trackball,
-                        egui::Key::C if modal.kind==ModalKind::Scale => { modal.cage = !modal.cage; modal.cage_handle=None; },
+                        egui::Key::V if modal.kind==ModalKind::Scale => { modal.cage = !modal.cage; modal.cage_handle=None; },
                         _=>{}
                     }
                 }
@@ -2301,29 +2304,24 @@ impl App {
                     if let Some(cs)=ui::curve_tool::parse(&ui::curve_tool::node_controls(self.editor.doc.value(),&self.selected)) {
                         let index=ui::curve_tool::selected(ctx,&self.selected).index;
                         let next=ui::curve_tool::delete(&cs,index);
-                        if next.len()!=cs.len() {self.edit(Edit::Param{node:self.selected.clone(),name:"controls".into(),value:ui::curve_tool::write(&next)},false);}
-                        return;
+                        if next.len()!=cs.len() {
+                            self.edit(Edit::Param{node:self.selected.clone(),name:"controls".into(),value:ui::curve_tool::write(&next)},false);
+                            return;
+                        }
                     }
                 }
                 if self.remove_selected_wires(ctx, false) { return; }
                 if self.viewport_hover && self.editor_state.selection != ui::SelectionMode::Object {
-                    if self.editor_state.selection == ui::SelectionMode::Points {
-                        let Some(source)=self.active_object().map(str::to_owned) else {self.file_status="Select a displayed curve".into();return;};
-                        let offset=active_range(&source,&self.display_ranges).unwrap().start;
-                        let points = self.selected_points().into_iter().map(|p|p-offset).collect::<Vec<_>>();
-                        if let Some((next, id)) = graph_edit::add_curve_blast(self.editor.doc.value(), &source, &points) {
-                            if self.commit_document(next, "delete curve points") {
-                                self.selected = id.clone();
-                                self.selected_set = std::collections::BTreeSet::from([id.clone()]);
-                                self.display = minihou_app::display_nodes(self.editor.doc.value()).first().cloned().unwrap_or(id);
-                                self.selection.clear();
-                                self.selection_dirty = true;
-                            }
-                        } else { self.file_status = "Select points on a displayed curve to delete".into(); }
-                    } else { self.file_status = "Curve component deletion supports points only".into(); }
+                    let Some(source) = self.active_object().map(str::to_owned) else { self.file_status = "Select displayed elements to blast".into(); return; };
+                    self.add_node(ctx, "blast", Some(&source));
                 } else if let Some(id) = self.selected_set.iter().next().cloned() { self.delete_node(&id); }
             }
             "group_selection" => {
+                if self.viewport_hover && self.editor_state.selection != ui::SelectionMode::Object {
+                    let Some(source) = self.active_object().map(str::to_owned) else { self.file_status = "Select displayed elements to group".into(); return; };
+                    self.add_node(ctx, "group_create", Some(&source));
+                    return;
+                }
                 let ids: Vec<String> = if self.selected_set.is_empty() { vec![self.selected.clone()] } else { self.selected_set.iter().cloned().collect() };
                 match subnet_edit::toggle(self.editor.doc.value(), &ids) {
                     Some((value, sel)) => if self.commit_document(value, "group nodes") {
