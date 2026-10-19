@@ -195,7 +195,8 @@ mod tests {
                     assert!(built_in || fallback || shelf_icons::draw(ui.painter(), Pos2::ZERO, tool.icon, Color32::WHITE, Color32::WHITE), "{}", tool.icon);
                 }
                 for node in minihou_core::nodes::package_catalogue() {
-                    let tool = tabs().iter().flat_map(|tab| tab.tools).filter(|tool| tool.node_type == node.id && tool.label == node.name).last().unwrap();
+                    let tab = tabs().iter().find(|tab| tab.name == node.category).unwrap();
+                    let tool = tab.tools.iter().rev().find(|tool| tool.node_type == node.id && tool.label == node.name).unwrap();
                     assert_eq!(tool.icon, node.id, "{}", node.id);
                     let built_in = matches!(node.id, "point" | "line" | "helix" | "bezier");
                     assert!(built_in || shelf_icons::draw(ui.painter(), Pos2::ZERO, node.id, Color32::WHITE, Color32::YELLOW), "{}", node.id);
