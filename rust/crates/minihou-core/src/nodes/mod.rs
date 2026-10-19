@@ -180,6 +180,7 @@ pub fn registry() -> &'static [NodeSpec] {
         occlusion::OCCLUSION,
         modify::TRANSFORM,
         modify::NOISE,
+        modify::MOUNTAIN,
         modify::MATCH_SIZE,
         modify::DELETE,
         merge::MERGE,

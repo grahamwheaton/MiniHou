@@ -315,9 +315,6 @@ Add frames (comment boxes) to the node editor, created with the O key. A frame h
 
 The Tab node search should match fuzzily: letters in order rather than an exact substring, ranked by match quality (exact name first, then word starts, then scattered letters). For example "sbd" finds "subdivide". Keep the current search on node names and keywords, and keep the existing keyword list in the node catalogue.
 
-## Future: noise and mountain nodes, full Houdini parity (requested 2026-10-18)
-
-Match Houdini's Attribute Noise (https://www.sidefx.com/docs/houdini/nodes/sop/attribnoise.html) and Mountain (screenshot 82): Group and Blend; Attribute Names (Vector, Float, with X, Y, Z channel toggles) and Attribute Class; Noise Along Vector with a Vector Attribute; Operation (Add and others), Range Values (Zero Centered and others), Amplitude, Output Raw Value, Enable Remap Ramp; Noise Type (Simplex and others), Location Attribute, Element Size, Offset (with XYZ), Use VEXpression; Animation; Fractal (type such as Hybrid Terrain, with octaves, roughness, lacunarity and so on); Warping; Post-Process. Build on the current noise and mountain nodes, and match the parameter names and defaults so existing graphs still load.
 
 ## Feature: PolyExtrude, Houdini parity (requested 2026-10-18)
 
