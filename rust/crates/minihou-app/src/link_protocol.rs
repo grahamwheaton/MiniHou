@@ -121,6 +121,11 @@ pub fn geometry_arrays(geo: &Geometry) -> Arrays {
     arrays
 }
 
+/// Blender's mesh receiver needs real vertices; packed source pointers are local to the core.
+pub fn output_geometry(geo: &Geometry) -> crate::Result<std::borrow::Cow<'_, Geometry>> {
+    Ok(minihou_core::nodes::packed::display_geometry(geo)?)
+}
+
 pub fn attr_array(a:&minihou_core::Attr)->Array {
     let (dtype,bytes)=match &a.data {
         AttrData::F32(v)=>("<f4",v.iter().flat_map(|x|x.to_le_bytes()).collect()),
@@ -293,6 +298,15 @@ impl DiffState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn packed_output_contains_expanded_vertices_for_blender() {
+        use minihou_core::nodes::packed::instance_geometry;
+        let source = Arc::new(Geometry::points_only(vec![1., 2., 3.]).unwrap());
+        let packed = instance_geometry(&[source], &[0], vec![10., 0., 0.], &[[[1.,0.,0.],[0.,1.,0.],[0.,0.,1.]]], Default::default()).unwrap();
+        let shown = output_geometry(&packed).unwrap();
+        let decoded = decode_object(&json!({}), &geometry_arrays(&shown)).unwrap();
+        assert_eq!(decoded.p(), &[11., 2., 3.]);
+    }
     #[test]
     fn edge_pairs_match_shuffled_rows_and_drop_unknown_pairs() {
         let g = Geometry::from_arrays(vec![0.; 12], vec![0, 1, 2, 3], vec![0, 4], None).unwrap();

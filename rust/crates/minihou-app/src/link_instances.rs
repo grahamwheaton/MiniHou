@@ -193,6 +193,7 @@ impl InstanceManager {
             if live.input != *arrays
                 || live.header["materials"] != h["materials"]
                 || live.header["material_bindings"] != h["material_bindings"]
+                || live.header["references"] != h["references"]
                 || time(&live.header)? != (frame, fps)
             {
                 live.input = arrays.clone();
@@ -294,8 +295,9 @@ impl InstanceManager {
         }
         let stats = entry.session.last_stats().clone();
         let cook = json!({"ms":start.elapsed().as_secs_f64()*1000.,"cooked":stats.cooked,"cached":stats.cached,"node_ms":stats.node_ms.into_iter().collect::<BTreeMap<_,_>>(),"waiting":stats.waiting.into_iter().collect::<BTreeMap<_,_>>(),"frame":frame,"fps":fps});
+        let shown = link_protocol::output_geometry(&result)?;
         let (mut header, mut output) =
-            DiffState::default().build(&link_protocol::geometry_arrays(&result), &result, 1, &cook);
+            DiffState::default().build(&link_protocol::geometry_arrays(&shown), &shown, 1, &cook);
         header["type"] = json!("instance_result");
         header["interface"] = link_interface(&graph)["params"].clone();
         if h["references"].is_object() { header["input_references"] = h["references"].clone(); }
@@ -475,7 +477,7 @@ impl InstanceManager {
             );
         }
         let (frame, fps) = time(&live.header)?;
-        let mut h = json!({"type":typ,"path":live.path,"label":live.header["label"],"graph":live.graph,"sources":sources.keys().collect::<Vec<_>>(),"materials":live.header["materials"],"frame":frame,"fps":fps,"overrides":overrides});
+        let mut h = json!({"type":typ,"path":live.path,"label":live.header["label"],"graph":live.graph,"sources":sources.keys().collect::<Vec<_>>(),"references":live.header["references"],"materials":live.header["materials"],"frame":frame,"fps":fps,"overrides":overrides});
         if let Some(bindings) = live.header.get("material_bindings").filter(|v| !v.is_null()) {
             h["material_bindings"] = bindings.clone();
         }
@@ -607,6 +609,25 @@ fn same_param(a: &Value, b: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn packed_copy_to_points_reaches_instance_result_as_meshes() {
+        let graph = json!({"display":"copies","nodes":{
+            "source":{"type":"box"},
+            "targets":{"type":"grid","params":{"columns":2,"rows":2}},
+            "copies":{"type":"copy_to_points","inputs":{"source":"source","points":"targets"},"params":{"pack_instances":true}}
+        }});
+        let doc = Document::parse(graph.to_string()).unwrap();
+        let server = LinkServer::bind("127.0.0.1:0", &doc, Path::new("packed.json")).unwrap();
+        let (sender, _requests) = mpsc::sync_channel(4);
+        let mut manager = InstanceManager::new(1, server.shared.clone(), sender);
+        let input = link_protocol::geometry_arrays(&Geometry::default());
+        let (header, arrays) = manager.handle(&json!({"type":"instance_cook","request_id":1,
+            "instance_id":"packed","graph":graph}), &input);
+        assert_eq!(header["type"], "instance_result", "{header}");
+        let decoded = link_protocol::decode_object(&header, &arrays).unwrap();
+        assert!(decoded.nprims() > 1, "the copied box faces must reach Blender");
+    }
 
     fn push(id: &str, graph: &Value) -> Value {
         let text = graph_embed::canonical_text(graph);

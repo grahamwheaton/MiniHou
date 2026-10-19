@@ -356,8 +356,6 @@ Bugs:
 - Scale cage 'C' keymap is lost: it triggers circle select. Remove the conflict or choose another key. Add a toolbar icon for scale cage and a dedicated node (or check whether Match Size covers it).
 - Ctrl+B with bevels selected should trigger the vertex bevel node, with an auto group.
 - Mirror gizmo has gone; restore it.
-- Copy to Points: with pack on, nothing reaches Blender (it looks right in MiniHou).
-- Blender Object: clicking reset transform has no effect in MiniHou (Blender changes the result).
 - Scene Objects: after a reload, moved objects jump back to their MiniHou positions. Overridden empty positions must persist.
 - Deleting nodes from an embedded Blender graph can make Blender unresponsive.
 - Inset needs to auto-merge (parity with Blender). Vertex bevel needs parity with Blender and must flow correctly.
