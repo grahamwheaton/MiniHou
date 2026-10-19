@@ -3742,6 +3742,11 @@
     "clamp",
     "unchanged"
    ]
+  },
+  "strength": {
+   "default": 1.0,
+   "doc": "Blend the lattice displacement; 0 leaves geometry unchanged",
+   "kind": "float"
   }
  },
  "lattice_grid": {
@@ -5183,12 +5188,22 @@
     "up_vector"
    ]
   },
+  "group": {
+   "default": "",
+   "doc": "Points to deform",
+   "kind": "str"
+  },
   "offset": {
    "default": 0.0,
    "doc": "Slide along the curve (distance)",
    "kind": "float",
    "soft_max": 10.0,
    "soft_min": -10.0
+  },
+  "strength": {
+   "default": 1.0,
+   "doc": "Blend between the input and path deformation",
+   "kind": "float"
   },
   "stretch": {
    "default": false,
@@ -5695,6 +5710,11 @@
    "doc": "0: nearest controls without a radius cutoff; otherwise uncaptured points stay unchanged",
    "kind": "float",
    "min": 0
+  },
+  "strength": {
+   "default": 1.0,
+   "doc": "Blend the fitted displacement; 0 leaves geometry unchanged",
+   "kind": "float"
   }
  },
  "point_jitter": {

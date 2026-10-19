@@ -69,6 +69,7 @@ pub fn handle(ctx: &egui::Context, viewport: Rect, v: &View, out: &mut Actions) 
                         s = State { armed: true, kind: Kind::Lasso, ..Default::default() };
                     } else if *button == PointerButton::Primary && matches!(v.editor.tool, super::Tool::Select | super::Tool::Move | super::Tool::Rotate | super::Tool::Scale | super::Tool::Transform)
                         && !super::transform_gizmo::hit(viewport, v, *pos) && !super::prim_handles::hit(viewport, v, *pos)
+                        && !super::deform_gizmo::hit(viewport, v, *pos) && !super::deform_gizmo::armed(ctx)
                         && !super::curve_tool::hit(viewport, v, *pos, ctx) && !super::curve_tool::active(ctx) {
                         s = State { armed: true, implicit: true, kind: options.kind, ..Default::default() };
                     }
@@ -94,7 +95,7 @@ pub fn handle(ctx: &egui::Context, viewport: Rect, v: &View, out: &mut Actions) 
                 used.push(index);
             }
             egui::Event::PointerButton { pos, button, pressed: true, modifiers }
-                if canvas(pos) && s.button.is_none() && (button != PointerButton::Primary || !super::transform_gizmo::hit(viewport,v,pos))
+                if canvas(pos) && s.button.is_none() && (button != PointerButton::Primary || (!super::transform_gizmo::hit(viewport,v,pos) && !super::deform_gizmo::hit(viewport,v,pos) && !super::deform_gizmo::armed(ctx)))
                     && (button == PointerButton::Primary || button == PointerButton::Middle || (s.kind == Kind::Lasso && button == PointerButton::Secondary && modifiers.ctrl)) => {
                     s.start = Some(pos); s.last = Some(pos); s.points = vec![pos]; s.button = Some(button);
                     // Ctrl initiates the Blender RMB lasso; Shift modifies that gesture to add.

@@ -10,6 +10,7 @@ pub mod network;
 pub mod params;
 pub mod number_step;
 pub mod prim_handles;
+pub mod deform_gizmo;
 pub mod curve_tool;
 pub mod proxy_ui;
 pub mod selection_region;
