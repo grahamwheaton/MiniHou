@@ -43,7 +43,38 @@ pub fn is_output_group_field(name: &str, meta: Option<&Value>) -> bool {
     let named = (name.starts_with("outgrp_") && name.ends_with("_name"))
         || matches!(name, "output_group" | "output_group_name" | "output_inner_group_name" | "result_group_name" | "patch_group" | "patchgroup"
             | "edge_loop_group" | "edgeloopgroup" | "fill_group" | "ray_hit_group" | "inside_group");
-    named || meta.is_some_and(|m| m["doc"].as_str().is_some_and(|d| d.contains("receives")))
+    named || meta.is_some_and(|m| m["doc"].as_str().is_some_and(|d| d.to_lowercase().contains("group that receives")))
+}
+/// Find the existing Boolean that controls a named output group, if the node has one.
+/// String-only outputs use an empty name as their off state.
+fn output_group_toggle(typ: &str, name: &str, meta: Option<&Value>) -> Option<&'static str> {
+    let spec = nodes::get(typ)?;
+    let by_name = name.strip_suffix("_name").filter(|candidate| candidate.starts_with("outgrp_") || candidate.starts_with("output_"));
+    let by_meta = meta.and_then(|m| m["enabled_if"].as_object()).and_then(|conditions| {
+        conditions.iter().find(|(key, value)| value.as_bool() == Some(true)
+            && (key.contains("group") || key.as_str() == "create_point_group"))
+            .map(|(key, _)| key.as_str())
+    });
+    by_name.into_iter().chain(by_meta).find_map(|candidate| {
+        spec.params.iter().find(|param| param.name == candidate && (param.default)().is_boolean()).map(|param| param.name)
+    })
+}
+
+fn output_group_label(name: &str) -> String {
+    let name = name.strip_prefix("outgrp_").unwrap_or(name);
+    let name = name.strip_suffix("_name").unwrap_or(name);
+    if let Some(stem) = name.strip_suffix("polys") {
+        return format!("{} Polygons", output_group_label(stem));
+    }
+    for (suffix, word) in [("points", "Points"), ("edges", "Edges"), ("caps", "Caps"), ("cap", "Cap")] {
+        if let Some(stem) = name.strip_suffix(suffix).filter(|stem| !stem.is_empty()) {
+            return format!("{} {word}", output_group_label(stem));
+        }
+    }
+    if let Some(stem) = name.strip_suffix("fillet") {
+        return format!("{} Fillet", output_group_label(stem));
+    }
+    title(name)
 }
 /// One rule for input group fields: string fields that select elements by group, pattern, or an element list.
 pub fn is_input_group_field(name: &str, meta: Option<&Value>) -> bool {
@@ -164,12 +195,26 @@ mod pick_tests {
     }
     #[test]
     fn output_rule_adds_target_to_output_group_names() {
-        for (n, f) in [("flood_fill","output_group"),("polyfill","patch_group"),("polyfill","fill_group"),("ray","ray_hit_group"),("grow","result_group_name"),("voronoi_fracture","inside_group")] {
+        for (n, f) in [("flood_fill","output_group"),("polyfill","patch_group"),("polyfill","fill_group"),("ray","ray_hit_group"),("grow","result_group_name"),("voronoi_fracture","inside_group"),("select_loop","group_name")] {
             assert!(is_output_group_field(f, param_meta(n, f)), "{n}.{f} needs the target");
         }
         assert!(is_output_group_field("outgrp_shared_name", Some(&json!({"kind":"str"}))));
         assert!(!is_output_group_field("group", param_meta("blast", "group")));
         assert!(!is_output_group_field("outgrp_cap", Some(&json!({"kind":"bool"}))));
+        assert!(!is_output_group_field("leaf_param_a", param_meta("lsystem", "leaf_param_a")));
+    }
+    #[test]
+    fn output_group_rows_use_existing_enable_parameters() {
+        for (node, field, toggle) in [
+            ("polybevel", "outgrp_pointfilletpolys_name", "outgrp_pointfilletpolys"),
+            ("outset", "output_group_name", "output_group"),
+            ("outset", "output_inner_group_name", "output_inner_group"),
+            ("ray", "ray_hit_group", "create_point_group"),
+        ] {
+            assert_eq!(output_group_toggle(node, field, param_meta(node, field)), Some(toggle));
+        }
+        assert_eq!(output_group_toggle("polybevel", "output_group", param_meta("polybevel", "output_group")), None);
+        assert_eq!(output_group_label("outgrp_pointfilletpolys_name"), "Point Fillet Polygons");
     }
     #[test]
     fn target_colour_differs_from_purple_and_orange() {
@@ -1178,8 +1223,9 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     let is_color = !is_ramp && is_color_param(param.name, meta, &value);
     let is_file = !is_ramp && !is_color && is_file_param(param.name, meta);
 
+    let output_group = is_output_group_field(param.name, meta);
     let row_height = if is_ramp { 76.0 } else { 28.0 };
-    let (r, row_response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), Sense::click());
+    let (r, row_response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), if output_group { Sense::hover() } else { Sense::click() });
     let layout = ParamRowLayout::compute(r);
     if ui.ctx().data(|d| d.get_temp::<(String,String,f64)>(egui::Id::new("link_flash")))
         .is_some_and(|(node,name,time)| node == id && (name == param.name || name.starts_with(&format!("{}.",param.name))) && ui.ctx().input(|i|i.time) - time < 1.5) {
@@ -1190,7 +1236,17 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     let param_locked = v.doc["nodes"][id]["locked_params"].as_array().is_some_and(|a| a.iter().any(|x| x == param.name));
     let channels = v.doc["nodes"][id]["channels"].as_object();
     let linked = channels.is_some_and(|c| c.keys().any(|key| key == param.name || key.starts_with(&format!("{}.",param.name))));
+    let group_toggle = output_group_toggle(typ, param.name, meta);
+    let group_on = group_toggle.map_or_else(|| !old.as_str().unwrap_or("").is_empty(), |name| {
+        let fallback = nodes::get(typ).and_then(|spec| spec.params.iter().find(|p| p.name == name))
+            .map(|p| (p.default)()).unwrap_or(Value::Bool(false));
+        value_of(v, id, name, &fallback).as_bool().unwrap_or(false)
+    });
     let enabled = param.supported && !locked && !param_locked && !linked && condition_enabled;
+    let checkbox_enabled = param.supported && !locked && !param_locked && !linked && group_toggle.is_none_or(|name| {
+        !v.doc["nodes"][id]["locked_params"].as_array().is_some_and(|a| a.iter().any(|value| value == name))
+            && !channels.is_some_and(|c| c.contains_key(name))
+    });
     if linked {
         ui.painter().rect_filled(layout.control_rect, 4., Color32::from_rgba_unmultiplied(48, 164, 102, 42));
         ui.painter().rect_stroke(layout.control_rect, 4., Stroke::new(1., Color32::from_rgb(62, 190, 110)), StrokeKind::Inside);
@@ -1208,7 +1264,8 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
     let is_length = crate::units::is_length_param(typ, param.name);
     let units_opt = if is_length { Some(v.units) } else { None };
     let ink = if !enabled { v.theme.faint } else if modified { v.theme.text } else { v.theme.dim };
-    let label_text = if typ == "scene_objects" && param.name == "piece_attrib" { "Object ID Attribute".to_owned() }
+    let label_text = if output_group { output_group_label(param.name) }
+        else if typ == "scene_objects" && param.name == "piece_attrib" { "Object ID Attribute".to_owned() }
         else if is_length { format!("{} ({})", title(param.name), v.units.display.symbol()) } else { title(param.name) };
 
     let is_bool = kind == ParamKind::Bool;
@@ -1216,12 +1273,34 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
 
     let font = FontId::proportional(12.);
     let displayed_label = if !is_bool {
-        truncate_with_ellipsis(ui, &label_text, &font, layout.label_rect.width())
+        truncate_with_ellipsis(ui, &label_text, &font, (layout.label_rect.width() - if output_group { 26. } else { 0. }).max(10.))
     } else {
         String::new()
     };
 
     if !is_bool {
+        if output_group {
+            let mut checked = group_on;
+            let checkbox_rect = Rect::from_min_size(layout.label_rect.min + Vec2::new(2., 3.), Vec2::splat(22.));
+            let response = ui.add_enabled_ui(checkbox_enabled, |ui| ui.put(checkbox_rect, egui::Checkbox::without_text(&mut checked))).inner;
+            if response.changed() && checkbox_enabled {
+                if let Some(toggle) = group_toggle {
+                    out.push(UiAction::Edit { edit: Edit::Param { node: id.to_owned(), name: toggle.to_owned(), value: json!(checked) }, continuous: false });
+                } else if !checked {
+                    let cache = egui::Id::new(("output_group_name", id, param.name));
+                    if let Some(name) = value.as_str().filter(|name| !name.is_empty()) {
+                        ui.ctx().data_mut(|d| d.insert_persisted(cache, name.to_owned()));
+                    }
+                    value = json!("");
+                } else {
+                    let cache = egui::Id::new(("output_group_name", id, param.name));
+                    let name = ui.ctx().data_mut(|d| d.get_persisted::<String>(cache))
+                        .filter(|name| !name.is_empty())
+                        .unwrap_or_else(|| default.as_str().filter(|name| !name.is_empty()).unwrap_or(param.name).to_owned());
+                    value = json!(name);
+                }
+            }
+        }
         // Houdini layout: labels are RIGHT-aligned and vertically centred against the row
         let label_pos_y = if is_ramp { r.top() + 14. } else { r.center().y };
         paint_text(
@@ -1230,12 +1309,15 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
             &displayed_label,
             12.,
             false,
-            ink,
+            if output_group && !group_on { v.theme.faint } else { ink },
             Align2::RIGHT_CENTER,
         );
 
         let label_sense = if is_vector && enabled { Sense::click_and_drag() } else { Sense::click() };
-        let label_response = ui.interact(layout.label_rect, ui.id().with((id, param.name, "label")), label_sense);
+        let label_rect = if output_group {
+            Rect::from_min_max(Pos2::new(layout.label_rect.left() + 26., layout.label_rect.top()), layout.label_rect.max)
+        } else { layout.label_rect };
+        let label_response = ui.interact(label_rect, ui.id().with((id, param.name, "label")), label_sense);
         let doc = meta.and_then(|m| m["doc"].as_str()).unwrap_or("");
         if !param.supported {
             label_response.clone().on_hover_text(DISABLED);
@@ -1305,7 +1387,7 @@ fn row(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str, typ: &str, 
         } else {
             None
         };
-        let response = child.add_enabled_ui(enabled, |ui| {
+        let response = child.add_enabled_ui(enabled && (!output_group || group_on), |ui| {
             if is_ramp {
                 ramp_widget(ui, &mut value, meta, v.theme, layout.control_rect.width(), id, param.name)
             } else if is_color {
@@ -1581,11 +1663,14 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
             ui.add_space(6.);
             let mut errors = Vec::new();
             if let Some(spec) = nodes::get(typ) {
+                let outputs: Vec<_> = spec.params.iter().filter(|param| is_output_group_field(param.name, param_meta(typ, param.name))).collect();
+                let output_toggles: Vec<_> = outputs.iter().filter_map(|param| output_group_toggle(typ, param.name, param_meta(typ, param.name))).collect();
                 let mut section=None;
                 for param in spec.params {
                     if typ == "bezier" && param.name == "controls" { continue; }
                     if typ == "knife" && param.name == "cuts" { continue; }
                     if typ == "attribute_create" && param.name != "group" { continue; }
+                    if outputs.iter().any(|output| output.name == param.name) || output_toggles.contains(&param.name) { continue; }
                     let next=deformer_section(typ,param.name);
                     if next.is_some() && next!=section {
                         section=next;
@@ -1593,6 +1678,13 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
                         ui.label(egui::RichText::new(next.unwrap()).strong().color(v.theme.accent));
                     }
                     ui.push_id(param.name, |ui| row(ui, v, out, id, typ, param, flags.locked, &mut errors));
+                }
+                if !outputs.is_empty() {
+                    ui.add_space(5.);
+                    ui.label(egui::RichText::new("Output Groups").strong().color(v.theme.accent));
+                    for param in outputs {
+                        ui.push_id(param.name, |ui| row(ui, v, out, id, typ, param, flags.locked, &mut errors));
+                    }
                 }
                 if typ == "attribute_create" { attribute_create_panel(ui,v,out,id,flags.locked); }
                 if typ == "bezier" { bezier_controls_panel(ui,v,out,id,flags.locked); }
@@ -2848,6 +2940,36 @@ mod tests {
             if node=="subdivide1" && name=="creases" && *mode==super::super::SelectionMode::Edges)));
         // the arrow click must not touch the node selection (no Select / ToggleSelect / SelectSet / Display actions)
         assert!(!actions.0.iter().any(|a| matches!(a, UiAction::Select(_) | UiAction::ToggleSelect(_) | UiAction::SelectSet { .. })));
+    }
+
+    #[test]
+    fn outgroup_checkbox_edits_outset_enable_parameter() {
+        let mut f = Fixture::new();
+        f.doc = minihou_app::Document::parse(json!({"display":"outset1","nodes":{
+            "box1":{"type":"box"},"outset1":{"type":"outset","inputs":{"geo":"box1"}}
+        }}).to_string()).unwrap();
+        f.graph = minihou_core::Graph::from_value(f.doc.value()).unwrap();
+        f.selected = "outset1".into(); f.display = "outset1".into();
+        let ctx = egui::Context::default(); f.theme.apply(&ctx);
+        let mut actions = Actions::default();
+        let mut click = None;
+        for phase in 0..3 {
+            let events = match (phase, click) {
+                (1, Some(pos)) => vec![egui::Event::PointerMoved(pos), egui::Event::PointerButton { pos, button:egui::PointerButton::Primary, pressed:true, modifiers:egui::Modifiers::NONE }],
+                (2, Some(pos)) => vec![egui::Event::PointerButton { pos, button:egui::PointerButton::Primary, pressed:false, modifiers:egui::Modifiers::NONE }],
+                _ => vec![],
+            };
+            let input = egui::RawInput { screen_rect:Some(Rect::from_min_size(Pos2::ZERO,Vec2::new(800.,600.))), events, ..Default::default() };
+            let v = f.view();
+            let _ = ctx.run(input, |ctx| { egui::CentralPanel::default().show(ctx, |ui| {
+                let param = minihou_core::nodes::get("outset").unwrap().params.iter().find(|p| p.name == "output_group_name").unwrap();
+                let row_rect = Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), 28.));
+                click = Some(ParamRowLayout::compute(row_rect).label_rect.min + Vec2::new(13., 14.));
+                row(ui, &v, &mut actions, "outset1", "outset", param, false, &mut vec![]);
+            }); });
+        }
+        assert!(actions.0.iter().any(|action| matches!(action, UiAction::Edit { edit: Edit::Param { node, name, value }, .. }
+            if node == "outset1" && name == "output_group" && *value == json!(true))), "actions: {:?}; click: {:?}", actions.0, click);
     }
 
     fn arrow_click_mode(typ: &str, field: &str) -> Option<super::super::SelectionMode> {

@@ -218,10 +218,6 @@ Parked by user: inset on non-planar regions. Tri to Quad: user will test.
 - **Scene Objects, option B (done 2026-10-18):** each object has its own mesh parented to a placement empty, so moving the empty moves the object. The mode is named `objects`; saved `pieces` values remain accepted.
 - **Copy to Points:** pack is the default now (done 2026-10-18).
 
-## Future: Houdini-style output groups UI (requested 2026-10-18)
-
-For nodes with output groups, show an "Output Groups" section like Houdini: one row per output group, with a checkbox (enable that group), a label (for example "Point Fillet Polygons") and a group-name field (for example `pointfilletpolys`). The name field is greyed when the checkbox is off. Applies to every node with output groups, for example polyfillet and similar nodes.
-
 ## Future: app icon and top-left logo (requested 2026-10-18)
 
 Use the blue "M" logo (rounded blue square with a white M) as the app icon (window and taskbar, and the exe icon) and in the top-left of the editor, in place of the current icon. Needs the logo as an .ico for the exe and a PNG for the in-app header.
