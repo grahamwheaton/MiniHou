@@ -30,28 +30,49 @@ def attribute(name, data_type, domain, values):
                                  data=Collection(types.SimpleNamespace(value=v) for v in values))
 
 
+def custom_attribute_object():
+    def make_mesh(attributes):
+        return types.SimpleNamespace(
+            vertices=Collection(types.SimpleNamespace(co=p) for p in [(0, 0, 0), (1, 0, 0), (0, 1, 0)]),
+            loops=Collection(types.SimpleNamespace(vertex_index=i, edge_index=i) for i in range(3)),
+            polygons=Collection([types.SimpleNamespace(loop_start=0)]), edges=Collection(),
+            attributes=Attributes(attributes), uv_layers=[],
+            color_attributes=types.SimpleNamespace(render_color_index=-1), has_custom_normals=False)
+
+    custom = [attribute("temperature", "FLOAT", "POINT", [1.5, 2.5, 3.5]),
+              attribute("region", "INT", "FACE", [7])]
+    graph = object()
+    # Model Blender's to_mesh default: generic data layers are omitted unless requested.
+    evaluated = types.SimpleNamespace(
+        to_mesh=lambda preserve_all_data_layers=False, depsgraph=None: make_mesh(custom if preserve_all_data_layers and depsgraph is graph else []),
+        to_mesh_clear=lambda: None, material_slots=[])
+    obj = types.SimpleNamespace(name="Cube", type="MESH", vertex_groups=[],
+                                matrix_world=np.eye(4), evaluated_get=lambda depsgraph: evaluated)
+    return obj, graph
+
+
 class EdgeLinkTests(unittest.TestCase):
     def test_read_object_preserves_custom_mesh_attributes(self):
-        def make_mesh(attributes):
-            return types.SimpleNamespace(
-                vertices=Collection(types.SimpleNamespace(co=p) for p in [(0, 0, 0), (1, 0, 0), (0, 1, 0)]),
-                loops=Collection(types.SimpleNamespace(vertex_index=i, edge_index=i) for i in range(3)),
-                polygons=Collection([types.SimpleNamespace(loop_start=0)]), edges=Collection(),
-                attributes=Attributes(attributes), uv_layers=[],
-                color_attributes=types.SimpleNamespace(render_color_index=-1), has_custom_normals=False)
-
-        custom = [attribute("temperature", "FLOAT", "POINT", [1.5, 2.5, 3.5]),
-                  attribute("region", "INT", "FACE", [7])]
-        # Model Blender's to_mesh default: generic data layers are omitted unless requested.
-        evaluated = types.SimpleNamespace(
-            to_mesh=lambda preserve_all_data_layers=False, depsgraph=None: make_mesh(custom if preserve_all_data_layers and depsgraph is graph else []),
-            to_mesh_clear=lambda: None, material_slots=[])
-        obj = types.SimpleNamespace(name="Cube", type="MESH", vertex_groups=[],
-                                    matrix_world=np.eye(4), evaluated_get=lambda depsgraph: evaluated)
-        graph = object()
+        obj, graph = custom_attribute_object()
         _, arrays = reader.read_object(obj, graph)
         np.testing.assert_allclose(arrays["point/temperature"], [1.5, 2.5, 3.5])
         np.testing.assert_array_equal(arrays["prim/region"], [7])
+
+    def test_custom_mesh_attributes_reach_rust_blender_object(self):
+        graph = {"nodes": {"source": {"type": "blender_object", "params": {"object": "Cube", "space": "object"}}},
+                 "display": "source"}
+        host = test_rust_link.Host(graph)
+        self.addCleanup(host.close)
+        client = host.client()
+        client.wait("watch_objects")
+        client.wait("interface")
+        client.geo()  # initial waiting geometry
+        obj, depsgraph = custom_attribute_object()
+        fields, arrays = reader.read_object(obj, depsgraph)
+        client.link.send({"type": "object_geo", "object": "Cube", **fields}, arrays)
+        _, result = client.geo()
+        np.testing.assert_allclose(result["point/temperature"], [1.5, 2.5, 3.5])
+        np.testing.assert_array_equal(result["prim/region"], [7])
 
     def test_reader_sends_pairs_and_edge_values_in_blender_edge_order(self):
         me = types.SimpleNamespace(
