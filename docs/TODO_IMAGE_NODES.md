@@ -293,8 +293,6 @@ Migrate the legacy nodes to the self-registering package system, following docs/
 Bugs:
 - **Faces dropped by selection:** selection still drops faces (tested, not fixed).
 - **Re-cook activity:** dragging or wheel-adjusting a value re-cooks many nodes; check the cook path for parameter drags (only the changed node and its downstream should cook, and only on release unless live preview is wanted). Compare with the mouse-wheel path.
-- **Boundary select:** should select only the boundary edges, create an auto-named group, and switch the viewport selection to edges.
-- **Select sharp edges:** tags no edges in testing. When the node is selected, every edge it tags should show purple.
 - **Hover on the purple arrow:** should highlight the selection in the viewport. Also add a demo graph that shows it.
 - **Auto group selection and purple arrows:** the new select nodes, and relax points, need an auto group name and the purple arrow on their group fields.
 - **Image file / image plane:** the Blender image plane does not render (screenshot 79). Image file shows no image preview; the height map is correct but the image is not displayed (screenshots 77 and 78).

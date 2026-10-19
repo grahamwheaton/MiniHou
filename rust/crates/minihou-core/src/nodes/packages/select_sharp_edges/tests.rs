@@ -89,3 +89,18 @@ fn test_domain_fixed_to_edges_and_errors() {
     assert!(run(&c, serde_json::json!({"output_group_name": "123invalid"})).is_err());
     assert!(cook(&[vec![]], &Params::resolve(NODE.params, None).unwrap()).is_err());
 }
+
+#[test]
+fn test_sharp_edges_tags_and_group_filter() {
+    let c = cube();
+    let out = run(&c, serde_json::json!({"angle": 30.0, "output_group_name": "sharp_edges"})).unwrap();
+    assert_eq!(edge_group_count(&out, "sharp_edges"), 12);
+    // Tags also written to edge_group_sharp
+    assert_eq!(edge_group_count(&out, "sharp"), 12);
+    // Group in out.edge
+    assert!(out.edge.contains_key("group_sharp_edges"));
+
+    // Filter to only 1 edge via group pattern
+    let out_filt = run(&c, serde_json::json!({"angle": 30.0, "group": "0"})).unwrap();
+    assert_eq!(edge_group_count(&out_filt, "sharp_edges"), 1);
+}

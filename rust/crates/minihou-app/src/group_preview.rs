@@ -1,4 +1,4 @@
-//! Cached overlay geometry from the cooked membership of the active Group Create.
+//! Cached overlay geometry from the cooked membership of the active Group Create and selection nodes.
 use super::*;
 #[derive(Default)]
 pub struct State {key:Option<(u64,String)>}
@@ -7,8 +7,20 @@ impl State {
         let key=(revision,selected.to_owned());if self.key.as_ref()==Some(&key){return;}
         self.key=Some(key);
         let def=&doc["nodes"][selected];
-        let buffers=if def["type"]=="group_create" {g.map(|g|geometry(g,def["params"]["name"].as_str().unwrap_or("group1")))}else{None};
+        let group_name = node_group_name(def);
+        let buffers = group_name.and_then(|name| g.map(|g| geometry(g, name)));
         let (faces,lines)=buffers.unwrap_or_default();gpu.set_group_overlay(device,&faces,&lines);
+    }
+}
+pub fn node_group_name(def: &Value) -> Option<&str> {
+    match def["type"].as_str()? {
+        "group_create" => Some(def["params"]["name"].as_str().unwrap_or("group1")),
+        "boundary_select" => Some(def["params"]["output_group_name"].as_str().or_else(|| def["params"]["group_name"].as_str()).unwrap_or("boundary")),
+        "select_sharp_edges" => Some(def["params"]["output_group_name"].as_str().or_else(|| def["params"]["group_name"].as_str()).unwrap_or("sharp_edges")),
+        "select_loop" => Some(def["params"]["group_name"].as_str().unwrap_or("loop")),
+        "select_ring" => Some(def["params"]["group_name"].as_str().unwrap_or("ring")),
+        "select_path" => Some(def["params"]["group_name"].as_str().unwrap_or("path")),
+        _ => def["params"]["output_group_name"].as_str().or_else(|| def["params"]["group_name"].as_str()),
     }
 }
 pub fn geometry(g:&minihou_core::Geometry,name:&str)->(Vec<f32>,Vec<f32>) {
@@ -26,9 +38,27 @@ pub fn geometry(g:&minihou_core::Geometry,name:&str)->(Vec<f32>,Vec<f32>) {
             for (i,&a) in ids.iter().enumerate() {if i+1<ids.len()||g.topology.is_closed(prim) {let b=ids[(i+1)%ids.len()];edges.insert((a.min(b),a.max(b)));}}
         }}
         for (a,b) in edges {for id in [a,b] {lines.extend_from_slice(&g.p()[id as usize*3..id as usize*3+3]);}}
-    }else if let Some(a)=g.edge.get(&key) {
+    }else if let Some(a)=g.edge.get(&key).or_else(|| g.edge.get(&format!("edge_group_{name}"))) {
         let e=minihou_core::topo::edges(&g.topology,g.npoints);
         for (i,on) in member(a).into_iter().enumerate() {if on&&i*2+1<e.points.len() {for k in 0..2 {let id=e.points[i*2+k] as usize;lines.extend_from_slice(&g.p()[id*3..id*3+3]);}}}
+    }else if let Some(a)=g.vertex.get(&format!("edge_group_{name}")) {
+        let e=minihou_core::topo::edges(&g.topology,g.npoints);
+        let on = member(a);
+        let mut edge_on = vec![false; e.len()];
+        for (v, &is_on) in on.iter().enumerate() {
+            if is_on {
+                let ed = e.of_vertex[v];
+                if ed >= 0 { edge_on[ed as usize] = true; }
+            }
+        }
+        for (i, is_on) in edge_on.into_iter().enumerate() {
+            if is_on && i*2+1 < e.points.len() {
+                for k in 0..2 {
+                    let id = e.points[i*2+k] as usize;
+                    lines.extend_from_slice(&g.p()[id*3..id*3+3]);
+                }
+            }
+        }
     }else if let Some(a)=g.point.get(&key) {
         let selection=picking::Selection {mode:ui::SelectionMode::Points,points:member(a).into_iter().enumerate().filter(|(_,v)|*v).map(|(i,_)|i as u32).collect(),..Default::default()};
         (_,lines)=picking::highlight(g.p(),&[],&selection,0.01);
@@ -48,9 +78,19 @@ pub fn selection(g:&minihou_core::Geometry,name:&str)->Option<picking::Selection
         let tris=layout.tri_prim.iter().enumerate().filter(|(_,p)|members.contains(p)).map(|(t,_)|t as u32).collect();
         return Some(picking::Selection {mode:ui::SelectionMode::Faces,tris,..Default::default()});
     }
-    if let Some(a)=g.edge.get(&key) {
+    if let Some(a)=g.edge.get(&key).or_else(|| g.edge.get(&format!("edge_group_{name}"))) {
         let e=minihou_core::topo::edges(&g.topology,g.npoints);
         let edges=on(a).into_iter().filter(|&i|(i as usize)*2+1<e.points.len()).map(|i|(e.points[i as usize*2] as u32,e.points[i as usize*2+1] as u32)).collect();
+        return Some(picking::Selection {mode:ui::SelectionMode::Edges,edges,..Default::default()});
+    }
+    if let Some(a)=g.vertex.get(&format!("edge_group_{name}")) {
+        let e=minihou_core::topo::edges(&g.topology,g.npoints);
+        let mut edge_set = std::collections::BTreeSet::new();
+        for v in on(a) {
+            let ed = e.of_vertex[v as usize];
+            if ed >= 0 { edge_set.insert(ed as usize); }
+        }
+        let edges = edge_set.into_iter().filter(|&i| i*2+1 < e.points.len()).map(|i|(e.points[i*2] as u32, e.points[i*2+1] as u32)).collect();
         return Some(picking::Selection {mode:ui::SelectionMode::Edges,edges,..Default::default()});
     }
     g.point.get(&key).map(|a|picking::Selection {mode:ui::SelectionMode::Points,points:on(a),..Default::default()})
@@ -68,5 +108,29 @@ pub fn selection(g:&minihou_core::Geometry,name:&str)->Option<picking::Selection
         let doc=json!({"nodes":{"box":{"type":"box"},"group":{"type":"group_create","inputs":{"geo":"box"},"params":{"domain":"edges","name":"e","pattern":"0"}}},"display":"group"});
         let g=Graph::from_value(&doc).unwrap().cook(Some("group")).unwrap();
         let (faces,lines)=geometry(&g,"e");assert!(faces.is_empty());assert_eq!(lines.len(),6);
+    }
+    #[test] fn select_sharp_edges_previews_sharp_edges() {
+        let doc=json!({"nodes":{"box":{"type":"box"},"sharp":{"type":"select_sharp_edges","inputs":{"geo":"box"},"params":{"angle":30.0,"output_group_name":"sharp_edges"}}},"display":"sharp"});
+        let g=Graph::from_value(&doc).unwrap().cook(Some("sharp")).unwrap();
+        let (faces,lines)=geometry(&g,"sharp_edges");
+        assert!(faces.is_empty());
+        // 12 edges * 2 points * 3 coordinates = 72 floats
+        assert_eq!(lines.len(), 72);
+        assert_eq!(node_group_name(&doc["nodes"]["sharp"]), Some("sharp_edges"));
+        let sel = selection(&g, "sharp_edges").unwrap();
+        assert_eq!(sel.mode, ui::SelectionMode::Edges);
+        assert_eq!(sel.edges.len(), 12);
+    }
+    #[test] fn boundary_select_previews_boundary_edges() {
+        let doc=json!({"nodes":{"grid":{"type":"grid","params":{"rows":2,"columns":2}},"boundary":{"type":"boundary_select","inputs":{"geo":"grid"},"params":{"output_group_name":"boundary"}}},"display":"boundary"});
+        let g=Graph::from_value(&doc).unwrap().cook(Some("boundary")).unwrap();
+        let (faces,lines)=geometry(&g,"boundary");
+        assert!(faces.is_empty());
+        // A single quad (2x2 grid) has 4 boundary edges = 4 * 2 * 3 = 24 floats
+        assert_eq!(lines.len(), 24);
+        assert_eq!(node_group_name(&doc["nodes"]["boundary"]), Some("boundary"));
+        let sel = selection(&g, "boundary").unwrap();
+        assert_eq!(sel.mode, ui::SelectionMode::Edges);
+        assert_eq!(sel.edges.len(), 4);
     }
 }

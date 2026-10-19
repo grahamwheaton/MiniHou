@@ -389,7 +389,7 @@ impl Topology {
     /// as its group, `select_loop` / `select_ring` the selected edges as seeds (other modes converted to edges),
     /// `select_path` the first two selected elements as waypoints. `None` for other nodes or an empty selection.
     pub fn node_params(&self, node_type: &str, sel: &Selection) -> Option<serde_json::Value> {
-        if !(SELECTION_NODES.contains(&node_type) || matches!(node_type, "edge_slide" | "group_create")) || sel.is_empty() { return None; }
+        if !(SELECTION_NODES.contains(&node_type) || matches!(node_type, "edge_slide" | "group_create" | "boundary_select" | "select_sharp_edges")) || sel.is_empty() { return None; }
         let name = match sel.mode { SelectionMode::Points => "points", SelectionMode::Edges => "edges", SelectionMode::Faces => "primitives", SelectionMode::Object => return None };
         let ids = self.ids(sel);
         if ids.is_empty() { return None; }
@@ -401,6 +401,15 @@ impl Topology {
                 let ids = if sel.mode == SelectionMode::Edges { self.ids(&self.convert(sel, SelectionMode::Points)) } else { ids };
                 if ids.is_empty() { return None; }
                 serde_json::json!({"domain": domain, "method": "pattern", "pattern": join(mode, &ids)})
+            }
+            "boundary_select" => {
+                let dom = match sel.mode { SelectionMode::Faces => "faces", SelectionMode::Points => "points", _ => "edges" };
+                serde_json::json!({"group": join(sel.mode, &ids), "domain": dom})
+            }
+            "select_sharp_edges" => {
+                let edges = if sel.mode == SelectionMode::Edges { ids } else { self.ids(&self.convert(sel, SelectionMode::Edges)) };
+                if edges.is_empty() { return None; }
+                serde_json::json!({"group": join(SelectionMode::Edges, &edges)})
             }
             "edge_slide" => {
                 let edges = if sel.mode == SelectionMode::Edges { ids } else { self.ids(&self.convert(sel, SelectionMode::Edges)) };
@@ -418,12 +427,21 @@ impl Topology {
     }
 }
 
-/// The first free `group<N>` name (group1, group2, ...) among the document's group_create nodes, so each viewport Group create
-/// gets its own name.
-pub fn free_group_name(doc: &serde_json::Value) -> String {
+/// The first free `<prefix><N>` name (group1, group2, boundary1, boundary2, ...) among the document's nodes, so each viewport
+/// group or selection node gets its own unique name.
+pub fn free_group_name_with_prefix(doc: &serde_json::Value, prefix: &str) -> String {
     let used: std::collections::BTreeSet<&str> = doc["nodes"].as_object().into_iter().flat_map(|m| m.values())
-        .filter(|n| n["type"] == "group_create").map(|n| n["params"]["name"].as_str().unwrap_or("group1")).collect();
-    (1..).map(|i| format!("group{i}")).find(|n| !used.contains(n.as_str())).unwrap_or_default()
+        .flat_map(|n| {
+            let p = &n["params"];
+            [p["name"].as_str(), p["output_group_name"].as_str(), p["group_name"].as_str()]
+        })
+        .flatten()
+        .collect();
+    (1..).map(|i| format!("{prefix}{i}")).find(|n| !used.contains(n.as_str())).unwrap_or_default()
+}
+
+pub fn free_group_name(doc: &serde_json::Value) -> String {
+    free_group_name_with_prefix(doc, "group")
 }
 
 /// The topology of `scene`, built on first use and kept in `cell` until the scene changes (the caller resets it).
@@ -958,6 +976,12 @@ mod tests {
         assert_eq!(free_group_name(&doc), "group2");
         doc["nodes"]["h"] = serde_json::json!({"type": "group_create", "params": {"name": "group3"}});
         assert_eq!(free_group_name(&doc), "group2");
+        assert_eq!(free_group_name_with_prefix(&doc, "boundary"), "boundary1");
+        doc["nodes"]["b"] = serde_json::json!({"type": "boundary_select", "params": {"output_group_name": "boundary1"}});
+        assert_eq!(free_group_name_with_prefix(&doc, "boundary"), "boundary2");
+        assert_eq!(free_group_name_with_prefix(&doc, "sharp_edges"), "sharp_edges1");
+        doc["nodes"]["s"] = serde_json::json!({"type": "select_sharp_edges", "params": {"output_group_name": "sharp_edges1"}});
+        assert_eq!(free_group_name_with_prefix(&doc, "sharp_edges"), "sharp_edges2");
     }
 
     #[test]
@@ -977,6 +1001,8 @@ mod tests {
         assert!(t.node_params("blast", &points).is_none());
         // Tab > Edge Slide and GG take the selected edges as the node's group
         assert_eq!(t.node_params("edge_slide", &edges).unwrap(), serde_json::json!({"group": "p6-7 p7-8"}));
+        assert_eq!(t.node_params("boundary_select", &edges).unwrap(), serde_json::json!({"group": "p6-7 p7-8", "domain": "edges"}));
+        assert_eq!(t.node_params("select_sharp_edges", &edges).unwrap(), serde_json::json!({"group": "p6-7 p7-8"}));
         assert!(t.node_params("edge_slide", &sel(Edges)).is_none());
         assert!(t.node_params("grow", &sel(Points)).is_none());
     }
