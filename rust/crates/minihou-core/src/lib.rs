@@ -12,6 +12,7 @@ pub mod error;
 mod boolean_kernel;
 pub mod geometry;
 pub mod graph;
+pub mod group_pattern;
 pub mod channels;
 pub mod controller;
 pub mod coplanar;
