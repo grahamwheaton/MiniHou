@@ -101,9 +101,48 @@ fn test_edge_and_point_domains() {
 }
 
 #[test]
+fn test_domain_options_no_duplicate_faces() {
+    let raw = include_str!("param_meta.json");
+    let meta: serde_json::Value = serde_json::from_str(raw).unwrap();
+    let options = meta["domain"]["options"].as_array().unwrap();
+    let opt_strs: Vec<&str> = options.iter().map(|v| v.as_str().unwrap()).collect();
+    assert_eq!(opt_strs, vec!["edges", "faces", "points"]);
+    let mut deduped = opt_strs.clone();
+    deduped.sort_unstable();
+    deduped.dedup();
+    assert_eq!(deduped.len(), opt_strs.len());
+    assert!(!opt_strs.contains(&"primitives"));
+}
+
+#[test]
+fn test_output_group_is_stored() {
+    let q = open_quad();
+    // Default output group name is "boundary"
+    let out = run(&q, serde_json::json!({})).unwrap();
+    assert!(out.edge.contains_key("group_boundary"), "out.edge should contain group_boundary");
+    assert!(out.edge.contains_key("edge_group_boundary"), "out.edge should contain edge_group_boundary");
+    assert_eq!(out.edge["group_boundary"].rows(), out.nedges());
+    assert_eq!(edge_group_count(&out, "boundary"), 4);
+
+    // Custom output_group_name
+    let out_custom = run(&q, serde_json::json!({"output_group_name": "border"})).unwrap();
+    assert!(out_custom.edge.contains_key("group_border"), "out.edge should contain group_border");
+    assert!(out_custom.edge.contains_key("edge_group_border"), "out.edge should contain edge_group_border");
+    assert_eq!(edge_group_count(&out_custom, "border"), 4);
+
+    // Support output_group parameter alias
+    let out_alias = run(&q, serde_json::json!({"output_group": "perimeter"})).unwrap();
+    assert!(out_alias.edge.contains_key("group_perimeter"), "out.edge should contain group_perimeter");
+    assert!(out_alias.edge.contains_key("edge_group_perimeter"), "out.edge should contain edge_group_perimeter");
+    assert_eq!(edge_group_count(&out_alias, "perimeter"), 4);
+    out_alias.validate().unwrap();
+}
+
+#[test]
 fn test_errors_and_missing_input() {
     assert!(cook(&[vec![]], &Params::resolve(NODE.params, None).unwrap()).is_err());
     let q = open_quad();
     assert!(run(&q, serde_json::json!({"output_group_name": "123invalid"})).is_err());
     assert!(run(&q, serde_json::json!({"domain": "unknown_domain"})).is_err());
 }
+
