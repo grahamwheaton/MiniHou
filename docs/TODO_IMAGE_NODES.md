@@ -395,3 +395,14 @@ Future:
 - Transform UVs; transform origin.
 - Audit the Maya modelling tools.
 - File > New and the whole File menu; should the Blender link icon be in one unified menu?
+
+## Future: Maya modelling gaps (audit 2026-10-19)
+
+From the Maya polygon tools audit, the items the user picked:
+1. Triangulate: split n-gons into triangles (needed for export and engine targets).
+2. Conform: snap vertices onto a target surface (fitting clothing or props).
+3. Append to Polygon / Quad Draw: grow faces from a selected border edge, and draw quads on a mesh.
+5. Offset edge loop: loop_cut needs an offset parameter.
+6. Connect: edge-to-edge connection (polysplit covers only part of this).
+9. Wrap: shrink-wrap to a target surface (retopology).
+10. Blend shape: morph targets.
