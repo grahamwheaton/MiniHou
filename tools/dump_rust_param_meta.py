@@ -499,6 +499,32 @@ def meta() -> dict:
         if node_id in out:
             raise ValueError(f"package node id conflicts with existing metadata: {node_id}")
         out[node_id] = params
+    # Noise gained a Blend strength (mix between the input and the noisy value, 0 to 1).
+    out.setdefault("noise", {})["blend"] = {"kind": "float", "default": 1.0, "soft_min": 0.0, "soft_max": 1.0, "doc": "Mix between the input value (0) and the noisy value (1)."}
+    # Noise and Mountain: every parameter declared in their NodeSpec gets metadata (kind from the default; doc to refine later).
+    import re as _re
+    _src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "rust", "crates", "minihou-core", "src", "nodes", "modify.rs"), encoding="utf-8").read()
+    for _node in ("noise", "mountain"):
+        if ('name: "%s"' % _node) not in _src:
+            continue
+        _block = _src[_src.index('name: "%s"' % _node):]
+        _block = _block[_block.index('params: crate::params!('):]
+        _block = _block[:_block.index(");")]
+        for _key, _val in _re.findall(r'"([a-z_0-9]+)"\s*:\s*([^;\n]+?)\s*[;\n]', _block):
+            if _key in out.get(_node, {}):
+                continue
+            _v = _val.strip().rstrip(";").strip()
+            if _v in ("true", "false"):
+                _kind, _default = "bool", _v == "true"
+            elif _v.startswith('"'):
+                _kind, _default = "str", _v.strip('"')
+            elif _v.startswith("["):
+                _kind, _default = "vec3", [float(x) for x in _v.strip("[]").split(",")]
+            elif _re.fullmatch(r"-?\d+", _v):
+                _kind, _default = "int", int(_v)
+            else:
+                _kind, _default = "float", float(_v)
+            out.setdefault(_node, {})[_key] = {"kind": _kind, "default": _default, "doc": "Attribute Noise parameter " + _key.replace("_", " ") + " (Houdini parity, to refine)."}
     # Outset shares the output-group parameters of inset, with its own default group names.
     for key, default in (("output_group", False), ("output_group_name", "outset_ring"), ("output_inner_group", False), ("output_inner_group_name", "outset_boundary")):
         if key in out["inset"]:

@@ -4954,6 +4954,211 @@
    ]
   }
  },
+ "mountain": {
+  "amplitude": {
+   "default": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "doc": "Attribute Noise parameter amplitude (Houdini parity, to refine).",
+   "kind": "vec3"
+  },
+  "animate": {
+   "default": false,
+   "doc": "Attribute Noise parameter animate (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "animation_speed": {
+   "default": 1.0,
+   "doc": "Attribute Noise parameter animation speed (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "animation_time": {
+   "default": 0.0,
+   "doc": "Attribute Noise parameter animation time (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "attrib": {
+   "default": "P",
+   "doc": "Attribute Noise parameter attrib (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "blend": {
+   "default": 1.0,
+   "doc": "Attribute Noise parameter blend (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "channel_x": {
+   "default": true,
+   "doc": "Attribute Noise parameter channel x (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "channel_y": {
+   "default": true,
+   "doc": "Attribute Noise parameter channel y (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "channel_z": {
+   "default": true,
+   "doc": "Attribute Noise parameter channel z (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "clamp_max": {
+   "default": false,
+   "doc": "Attribute Noise parameter clamp max (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "clamp_min": {
+   "default": false,
+   "doc": "Attribute Noise parameter clamp min (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "class": {
+   "default": "point",
+   "doc": "Attribute Noise parameter class (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "element_size": {
+   "default": 1.0,
+   "doc": "Attribute Noise parameter element size (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "enable_remap": {
+   "default": false,
+   "doc": "Attribute Noise parameter enable remap (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "fractal_type": {
+   "default": "standard",
+   "doc": "Attribute Noise parameter fractal type (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "frequency": {
+   "default": 1.0,
+   "doc": "Attribute Noise parameter frequency (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "gain": {
+   "default": 0.5,
+   "doc": "Attribute Noise parameter gain (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "group": {
+   "default": "",
+   "doc": "Attribute Noise parameter group (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "lacunarity": {
+   "default": 2.0,
+   "doc": "Attribute Noise parameter lacunarity (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "location_attribute": {
+   "default": "P",
+   "doc": "Attribute Noise parameter location attribute (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "max_value": {
+   "default": 1.0,
+   "doc": "Attribute Noise parameter max value (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "min_value": {
+   "default": 0.0,
+   "doc": "Attribute Noise parameter min value (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "mode": {
+   "default": "scalar",
+   "doc": "Attribute Noise parameter mode (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "noise_along_vector": {
+   "default": true,
+   "doc": "Attribute Noise parameter noise along vector (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "noise_type": {
+   "default": "perlin",
+   "doc": "Attribute Noise parameter noise type (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "octaves": {
+   "default": 3,
+   "doc": "Attribute Noise parameter octaves (Houdini parity, to refine).",
+   "kind": "int"
+  },
+  "offset": {
+   "default": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "doc": "Attribute Noise parameter offset (Houdini parity, to refine).",
+   "kind": "vec3"
+  },
+  "operation": {
+   "default": "add",
+   "doc": "Attribute Noise parameter operation (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "output_raw": {
+   "default": false,
+   "doc": "Attribute Noise parameter output raw (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "range_values": {
+   "default": "zero_centered",
+   "doc": "Attribute Noise parameter range values (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "remap_max": {
+   "default": 1.0,
+   "doc": "Attribute Noise parameter remap max (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "remap_min": {
+   "default": 0.0,
+   "doc": "Attribute Noise parameter remap min (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "seed": {
+   "default": 0,
+   "doc": "Attribute Noise parameter seed (Houdini parity, to refine).",
+   "kind": "int"
+  },
+  "use_vexpression": {
+   "default": false,
+   "doc": "Attribute Noise parameter use vexpression (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "vector_attribute": {
+   "default": "N",
+   "doc": "Attribute Noise parameter vector attribute (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "vexpression": {
+   "default": "",
+   "doc": "Attribute Noise parameter vexpression (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "warp_amplitude": {
+   "default": 1.0,
+   "doc": "Attribute Noise parameter warp amplitude (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "warp_frequency": {
+   "default": 1.0,
+   "doc": "Attribute Noise parameter warp frequency (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "warping": {
+   "default": false,
+   "doc": "Attribute Noise parameter warping (Houdini parity, to refine).",
+   "kind": "bool"
+  }
+ },
  "noise": {
   "amplitude": {
    "default": [
@@ -4964,9 +5169,76 @@
    "doc": "",
    "kind": "vec3"
   },
+  "animate": {
+   "default": false,
+   "doc": "Attribute Noise parameter animate (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "animation_speed": {
+   "default": 1.0,
+   "doc": "Attribute Noise parameter animation speed (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "animation_time": {
+   "default": 0.0,
+   "doc": "Attribute Noise parameter animation time (Houdini parity, to refine).",
+   "kind": "float"
+  },
   "attrib": {
    "default": "P",
    "doc": "Point attribute to write. 'P' displaces; any other name is set (not added).",
+   "kind": "str"
+  },
+  "blend": {
+   "default": 1.0,
+   "doc": "Mix between the input value (0) and the noisy value (1).",
+   "kind": "float",
+   "soft_max": 1.0,
+   "soft_min": 0.0
+  },
+  "channel_x": {
+   "default": true,
+   "doc": "Attribute Noise parameter channel x (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "channel_y": {
+   "default": true,
+   "doc": "Attribute Noise parameter channel y (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "channel_z": {
+   "default": true,
+   "doc": "Attribute Noise parameter channel z (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "clamp_max": {
+   "default": false,
+   "doc": "Attribute Noise parameter clamp max (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "clamp_min": {
+   "default": false,
+   "doc": "Attribute Noise parameter clamp min (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "class": {
+   "default": "point",
+   "doc": "Attribute Noise parameter class (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "element_size": {
+   "default": 1.0,
+   "doc": "Attribute Noise parameter element size (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "enable_remap": {
+   "default": false,
+   "doc": "Attribute Noise parameter enable remap (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "fractal_type": {
+   "default": "standard",
+   "doc": "Attribute Noise parameter fractal type (Houdini parity, to refine).",
    "kind": "str"
   },
   "frequency": {
@@ -4996,6 +5268,21 @@
    "min": 1.0,
    "soft_max": 4.0
   },
+  "location_attribute": {
+   "default": "P",
+   "doc": "Attribute Noise parameter location attribute (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "max_value": {
+   "default": 1.0,
+   "doc": "Attribute Noise parameter max value (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "min_value": {
+   "default": 0.0,
+   "doc": "Attribute Noise parameter min value (Houdini parity, to refine).",
+   "kind": "float"
+  },
   "mode": {
    "default": "scalar",
    "doc": "scalar: one noise value times 'amplitude'. vector: three decorrelated values times 'amplitude'.",
@@ -5004,6 +5291,16 @@
     "scalar",
     "vector"
    ]
+  },
+  "noise_along_vector": {
+   "default": false,
+   "doc": "Attribute Noise parameter noise along vector (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "noise_type": {
+   "default": "perlin",
+   "doc": "Attribute Noise parameter noise type (Houdini parity, to refine).",
+   "kind": "str"
   },
   "octaves": {
    "default": 1,
@@ -5021,10 +5318,65 @@
    "doc": "Added to the sample position after frequency scaling",
    "kind": "vec3"
   },
+  "operation": {
+   "default": "default",
+   "doc": "Attribute Noise parameter operation (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "output_raw": {
+   "default": false,
+   "doc": "Attribute Noise parameter output raw (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "range_values": {
+   "default": "zero_centered",
+   "doc": "Attribute Noise parameter range values (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "remap_max": {
+   "default": 1.0,
+   "doc": "Attribute Noise parameter remap max (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "remap_min": {
+   "default": 0.0,
+   "doc": "Attribute Noise parameter remap min (Houdini parity, to refine).",
+   "kind": "float"
+  },
   "seed": {
    "default": 0,
    "doc": "",
    "kind": "int"
+  },
+  "use_vexpression": {
+   "default": false,
+   "doc": "Attribute Noise parameter use vexpression (Houdini parity, to refine).",
+   "kind": "bool"
+  },
+  "vector_attribute": {
+   "default": "N",
+   "doc": "Attribute Noise parameter vector attribute (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "vexpression": {
+   "default": "",
+   "doc": "Attribute Noise parameter vexpression (Houdini parity, to refine).",
+   "kind": "str"
+  },
+  "warp_amplitude": {
+   "default": 1.0,
+   "doc": "Attribute Noise parameter warp amplitude (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "warp_frequency": {
+   "default": 1.0,
+   "doc": "Attribute Noise parameter warp frequency (Houdini parity, to refine).",
+   "kind": "float"
+  },
+  "warping": {
+   "default": false,
+   "doc": "Attribute Noise parameter warping (Houdini parity, to refine).",
+   "kind": "bool"
   }
  },
  "normal": {
