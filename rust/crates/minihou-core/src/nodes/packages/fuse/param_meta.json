@@ -1,0 +1,67 @@
+{
+  "distance": {
+    "default": 0.001,
+    "doc": "Maximum distance within which points are snapped and fused",
+    "kind": "float",
+    "min": 0.0,
+    "soft_max": 1.0
+  },
+  "fuse_points": {
+    "default": true,
+    "doc": "Consolidate and weld merged points into a single point (false snaps positions only)",
+    "kind": "bool"
+  },
+  "group": {
+    "default": "",
+    "doc": "Subset of points to snap or fuse",
+    "kind": "str"
+  },
+  "outgrp_fused": {
+    "default": false,
+    "doc": "Create a point group containing fused points",
+    "kind": "bool"
+  },
+  "outgrp_fused_name": {
+    "default": "fusedpoints",
+    "doc": "Name of the group for fused points",
+    "kind": "str"
+  },
+  "outgrp_unique": {
+    "default": false,
+    "doc": "Create a point group containing unique points",
+    "kind": "bool"
+  },
+  "outgrp_unique_name": {
+    "default": "uniquepoints",
+    "doc": "Name of the group for unique points",
+    "kind": "str"
+  },
+  "output_positions": {
+    "default": "first",
+    "doc": "Position for fused points: position of first point or average of cluster",
+    "kind": "enum",
+    "options": [
+      "first",
+      "average"
+    ]
+  },
+  "remove_degenerate": {
+    "default": true,
+    "doc": "Drop degenerate primitives after fusing",
+    "kind": "bool"
+  },
+  "remove_unused_points": {
+    "default": true,
+    "doc": "Discard points not referenced by any primitive after fusing",
+    "kind": "bool"
+  },
+  "snap_to": {
+    "default": "near_points",
+    "doc": "Snap method: cluster near points or snap to 3D grid",
+    "kind": "enum",
+    "options": [
+      "near_points",
+      "grid"
+    ]
+  }
+}

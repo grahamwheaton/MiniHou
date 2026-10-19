@@ -276,7 +276,6 @@ pub fn registry() -> &'static [NodeSpec] {
         scatter::SCATTER,
         scatteralign::SCATTERALIGN,
         merge::SWITCH,
-        primitives::FUSE,
         capture_deform::SOFT_TRANSFORM,
         transform::COPY_TRANSFORM,
         surface::CONVEX_HULL,
