@@ -9,6 +9,17 @@
     "doc": "Repeatable attribute entries with Name, Class, Type, Size, Default, and Value.",
     "kind": "json"
   },
+  "class": {
+    "default": "points",
+    "doc": "Class of geometry elements receiving the attribute.",
+    "kind": "enum",
+    "options": ["points", "primitives", "vertices", "detail"]
+  },
+  "default": {
+    "default": null,
+    "doc": "Default value per component for unselected elements or when Write Values is off; null uses zero.",
+    "kind": "json"
+  },
   "domain": {
     "default": "points",
     "doc": "Geometry domain receiving the new attribute.",
@@ -84,6 +95,13 @@
     "default": false,
     "doc": "Save attribute metadata to node info block.",
     "kind": "bool"
+  },
+  "size": {
+    "default": 0,
+    "doc": "Number of value components (1 to 4); zero uses the size implied by Type.",
+    "kind": "int",
+    "min": 0,
+    "max": 4
   },
   "type": {
     "default": "float",

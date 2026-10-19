@@ -299,7 +299,7 @@ Local Control tab: attribute overrides for distance (zscale), inset (insetscale)
 
 Surface sampling now has the Houdini parameter names and opt-in output attributes: primitive Group, Generate modes, density from point/vertex/primitive/detail, count and area controls, seed and point order, triangle-local relaxation, texture-space sampling, sourceprim/sourceprimuv/density/pscale/id, and numeric attribute transfer. The legacy count, seed, and default P/N/primnum output remain available.
 
-Remaining: true volume primitives and voxel-independent/2D-volume options (the current volume mode samples polygon interiors), relaxation across primitive boundaries, and string detail-to-point attributes. Keep this section until those cases work; current polygon-interior mode explicitly rejects unsupported voxel and relaxation settings. (Primitive-attribute Override Prim Area is now supported).
+Remaining: true volume primitives and voxel-independent/2D-volume options (the current volume mode samples polygon interiors), and string detail-to-point attributes. Keep this section until those cases work; current polygon-interior mode explicitly rejects unsupported voxel and relaxation settings. Relaxation now crosses shared polygon edges; primitive-attribute Override Prim Area is supported.
 
 
 ## Feature: middle-mouse scale bar slider, Houdini parity (requested 2026-10-18)

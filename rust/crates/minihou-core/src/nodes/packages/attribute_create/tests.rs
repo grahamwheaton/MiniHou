@@ -93,3 +93,31 @@ fn advanced_attribute_create_options() {
     let out = (NODE.cook)(&[vec![std::sync::Arc::new(g)]], &p).unwrap();
     assert_eq!(out.point["from_prim_group"].as_f32().unwrap(), &[1.0, 1.0, 1.0]);
 }
+
+#[test]
+fn single_attribute_size_default_and_precision() {
+    let g = Geometry::points_only(vec![0.; 9]).unwrap();
+    let run = |args: Value| {
+        let p = Params::resolve(NODE.params, args.as_object()).unwrap();
+        (NODE.cook)(&[vec![std::sync::Arc::new(g.clone())]], &p)
+    };
+    let legacy = run(json!({"value":[3.,0.,0.]})).unwrap();
+    assert_eq!(legacy.point["attrib1"].width, 1);
+    assert_eq!(legacy.point["attrib1"].as_f32().unwrap(), &[3.,3.,3.]);
+    let sized = run(json!({"name":"test","size":2,"default":[-1.,-2.],
+        "value":[4.,5.,6.],"group":"1","precision":"32"})).unwrap();
+    assert_eq!(sized.point["test"].width, 2);
+    assert_eq!(sized.point["test"].as_f32().unwrap(), &[-1.,-2.,4.,5.,-1.,-2.]);
+    let defaults = run(json!({"name":"test","size":2,"default":[7.,8.],
+        "value":[4.,5.,6.],"write_values":false})).unwrap();
+    assert_eq!(defaults.point["test"].as_f32().unwrap(), &[7.,8.,7.,8.,7.,8.]);
+    assert!(run(json!({"precision":"64"})).unwrap_err().to_string().contains("storage type"));
+    let primitive = Geometry::from_arrays(vec![0.;9], vec![0,1,2], vec![0,3], None).unwrap();
+    let p = Params::resolve(NODE.params, json!({"name":"flag","class":"primitives","type":"int",
+        "value":[5,0,0]}).as_object()).unwrap();
+    let out = (NODE.cook)(&[vec![std::sync::Arc::new(primitive)]], &p).unwrap();
+    assert_eq!(out.prim["flag"].as_i32().unwrap(), &[5]);
+    let locals = run(json!({"name":"index","value":["$PT",0,0]})).unwrap();
+    assert_eq!(locals.point["index"].as_f32().unwrap(), &[0.,1.,2.]);
+    assert!(run(json!({"value":["$PT",0,0],"allow_local":false})).unwrap_err().to_string().contains("disabled"));
+}

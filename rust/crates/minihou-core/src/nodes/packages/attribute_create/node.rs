@@ -11,6 +11,7 @@ pub(super) const NODE: NodeSpec = NodeSpec {
     params: crate::params!(
         "name": "attrib1";
         "domain": "points";
+        "class": "points";
         "type": "float";
         "value": [0., 0., 0.];
         "group": "";
@@ -23,6 +24,8 @@ pub(super) const NODE: NodeSpec = NodeSpec {
         "save_to_info_block": false;
         "guess_from_name": false;
         "precision": "auto";
+        "size": 0;
+        "default": Value::Null;
         "write_values": true;
         "allow_local": true
     ),
@@ -87,21 +90,27 @@ fn create(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         let write_values = p.b("write_values").unwrap_or(true);
         let raw_name = p.s("name")?;
         let name = sanitize_name(&raw_name, encode_invalid)?;
-        let class = p.s("domain")?;
+        let class = p.s("class")?;
+        let class = if class == "points" { p.s("domain")? } else { class };
         let raw_type = p.s("type")?;
         let kind = if guess_from_name { infer_type_from_name(&name) } else { raw_type.as_str() };
+        let size = p.i("size")?;
+        let size_value = if size == 0 { None } else { Some(p.value("size")) };
+        let default = (!p.value("default").is_null()).then_some(p.value("default"));
         return create_one(
             &g,
             &name,
             &class,
             kind,
-            None,
-            None,
+            size_value,
+            default,
             p.value("value"),
             &group,
             &group_type,
             &existing,
             write_values,
+            &p.s("precision")?,
+            p.b("allow_local")?,
         );
     };
 
@@ -136,6 +145,8 @@ fn create(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             item_group_type,
             existing,
             write_values,
+            a.get("precision").and_then(Value::as_str).unwrap_or("auto"),
+            a.get("allow_local").and_then(Value::as_bool).unwrap_or(true),
         )?;
     }
     Ok(out)
@@ -147,6 +158,25 @@ fn components(value: &Value, w: usize, label: &str) -> Result<Vec<f64>> {
         return Err(Error::new(format!("{label} needs {w} components")));
     }
     a.iter().take(w).map(|v| v.as_f64().ok_or_else(|| Error::new(format!("{label} components must be numbers")))).collect()
+}
+
+fn evaluated_components(value: &Value, width: usize, row: usize, class: &str, allow_local: bool, legacy: bool) -> Result<Vec<f64>> {
+    let values = value.as_array().ok_or_else(|| Error::new("value must be an array"))?;
+    let required = if legacy { 3 } else { width };
+    if values.len() < required { return Err(Error::new(format!("value needs {required} components"))); }
+    (0..width).map(|component| {
+        if legacy && component == 3 { return Ok(1.0); }
+        let value = &values[component];
+        if let Some(number) = value.as_f64() { return Ok(number); }
+        let Some(variable) = value.as_str() else { return Err(Error::new("value components must be numbers or local variables")); };
+        if !allow_local { return Err(Error::new("local variables are disabled by Allow Local Vars")); }
+        match (variable, class) {
+            ("$PT" | "$PTNUM" | "$ID", "point") |
+            ("$PR" | "$PRIMNUM" | "$ID", "prim") |
+            ("$VTX" | "$VTXNUM" | "$ID", "vertex") => Ok(row as f64),
+            _ => Err(Error::new(format!("unsupported local variable {variable:?} for {class}"))),
+        }
+    }).collect()
 }
 
 fn create_one(
@@ -161,7 +191,15 @@ fn create_one(
     group_type: &str,
     existing: &str,
     write_values: bool,
+    precision: &str,
+    allow_local: bool,
 ) -> Result<Geometry> {
+    if !["auto", "32"].contains(&precision) {
+        return Err(Error::new(format!("attribute precision {precision:?} requires a storage type unavailable in core geometry")));
+    }
+    if !["overwrite", "keep", "never"].contains(&existing) {
+        return Err(Error::new(format!("invalid Existing Name mode {existing:?}")));
+    }
     if !["points", "primitives", "vertices", "detail"].contains(&class) {
         return Err(Error::new(format!("invalid attribute class {class:?}")));
     }
@@ -223,11 +261,8 @@ fn create_one(
     };
     let v = if !write_values {
         d.clone()
-    } else if width.is_none() {
-        let a = components(value, 3, "value")?;
-        vec![a[0], a[1], a[2], 1.][..w].to_vec()
     } else {
-        components(value, w, "value")?
+        evaluated_components(value, w, 0, dom, allow_local, width.is_none())?
     };
     if dom == "detail" {
         let mut out = g.clone();
@@ -280,17 +315,19 @@ fn create_one(
 
     let arr = if kind == "int" || kind == "index" {
         let mut data = Vec::with_capacity(n * w);
-        for selected in &sel {
+        for (row, selected) in sel.iter().enumerate() {
+            let row_value = if *selected && write_values { evaluated_components(value, w, row, dom, allow_local, width.is_none())? } else { v.clone() };
             for k in 0..w {
-                data.push(if *selected { v[k] as i32 } else { d[k] as i32 });
+                data.push(if *selected { row_value[k] as i32 } else { d[k] as i32 });
             }
         }
         Attr::i32(w, data)
     } else {
         let mut data = Vec::with_capacity(n * w);
-        for selected in &sel {
+        for (row, selected) in sel.iter().enumerate() {
+            let row_value = if *selected && write_values { evaluated_components(value, w, row, dom, allow_local, width.is_none())? } else { v.clone() };
             for k in 0..w {
-                data.push(if *selected { v[k] as f32 } else { d[k] as f32 });
+                data.push(if *selected { row_value[k] as f32 } else { d[k] as f32 });
             }
         }
         Attr::f32(w, data)
