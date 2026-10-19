@@ -88,7 +88,7 @@ def read_object(obj, depsgraph) -> Tuple[dict, Dict[str, np.ndarray]]:
     # the mesh component: for mesh-like objects always (as before), for the rest only when it is there (a bevelled curve, text)
     if obj.type in _MESH_TYPES or gmesh is not None or (cv is None and pc is None):
         try:
-            me = ev.to_mesh()
+            me = ev.to_mesh(preserve_all_data_layers=True, depsgraph=depsgraph)
         except RuntimeError as e:
             if cv is None and pc is None:
                 raise ValueError(f"cannot be converted to a mesh ({e})") from None
