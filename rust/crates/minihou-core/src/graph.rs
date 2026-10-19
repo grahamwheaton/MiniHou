@@ -386,7 +386,8 @@ fn flatten_subnets(nodes: &Map<String, Value>, prefix: &str, ext: &[Option<Strin
                         .map(|(id, _)| id).collect::<Vec<_>>();
                     if boundary.len() != 1 { return Err(Error::new(format!("subnet '{full}' output {index} needs one boundary node"))); }
                     let alias = if index == 0 { full.clone() } else { format!("{full}/$out{index}") };
-                    out.insert(alias, subnet_alias(&nd,format!("{full}/{}", boundary[0])));
+                    let source=format!("{full}/{}", boundary[0]);
+                    out.insert(alias, if index==0 {subnet_alias(&nd,source)} else {serde_json::json!({"type":"subnet","inputs":{"geo":source}})});
                 }
             }
         } else if nd["type"] == "subnet_input" {
