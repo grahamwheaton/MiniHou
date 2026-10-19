@@ -8,6 +8,23 @@ use serde_json::{json, Value};
 use minihou_app::value_link_ui::{self, CopiedParam, PasteMode};
 
 const DISABLED: &str = "The Rust backend does not support it yet";
+fn deformer_section(typ:&str,name:&str)->Option<&'static str> {
+    if !super::deform_gizmo::is_deformer(typ) { return None; }
+    Some(if matches!(name,"group"|"outside"|"max_points") {"Selection"}
+        else if matches!(name,"origin"|"center"|"direction"|"up"|"length"|"radius"|"axis"|"frame"|"offset"|"stretch"|"symmetric"|"up_vector_angle") {"Capture"}
+        else {"Deformation"})
+}
+#[cfg(test)]
+mod deformer_group_tests {
+    use super::deformer_section;
+    #[test]
+    fn capture_and_deformation_fields_are_grouped() {
+        assert_eq!(deformer_section("bend","origin"),Some("Capture"));
+        assert_eq!(deformer_section("linear_taper","taper_x"),Some("Deformation"));
+        assert_eq!(deformer_section("point_deform","group"),Some("Selection"));
+        assert_eq!(deformer_section("box","size"),None);
+    }
+}
 pub const PICK_PURPLE: Color32 = Color32::from_rgb(184, 82, 245);
 /// Output group target button and its viewport highlight: teal, distinct from purple (input) and orange (object selection).
 pub const TARGET_TEAL: Color32 = Color32::from_rgb(38, 205, 200);
@@ -1560,10 +1577,17 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
             ui.add_space(6.);
             let mut errors = Vec::new();
             if let Some(spec) = nodes::get(typ) {
+                let mut section=None;
                 for param in spec.params {
                     if typ == "bezier" && param.name == "controls" { continue; }
                     if typ == "knife" && param.name == "cuts" { continue; }
                     if typ == "attribute_create" && param.name != "group" { continue; }
+                    let next=deformer_section(typ,param.name);
+                    if next.is_some() && next!=section {
+                        section=next;
+                        ui.add_space(5.);
+                        ui.label(egui::RichText::new(next.unwrap()).strong().color(v.theme.accent));
+                    }
                     ui.push_id(param.name, |ui| row(ui, v, out, id, typ, param, flags.locked, &mut errors));
                 }
                 if typ == "attribute_create" { attribute_create_panel(ui,v,out,id,flags.locked); }

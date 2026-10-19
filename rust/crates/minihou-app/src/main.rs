@@ -3021,12 +3021,15 @@ impl eframe::App for App {
         if !ctx.input(|i| i.pointer.primary_down()) {
             ui::transform_gizmo::finish_input(ctx);
             ui::prim_handles::finish_input(ctx);
+            ui::deform_gizmo::finish_input(ctx);
         }
         let graph = Graph::from_value(self.editor.doc.value()).expect("validated document");
         let mut out = Actions::default();
         let kctx = KeyContext { viewport_hovered: self.viewport_hover, network_hovered: self.network_hover,
             in_edit_mode: self.editor_state.selection != ui::SelectionMode::Object, selected: Some(&self.selected) };
-        if !fly_frame && !busy && !ui::viewport_ui::popup_open(ctx) && self.modal.is_none() && self.model_modal.is_none() && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) { for action in self.keymap.poll(ctx, &kctx) { out.push(action); } }
+        ui::deform_gizmo::keyboard(ctx,&graph,&self.selected,self.editor_state.tool,self.viewport_hover,
+            fly_frame || busy || ui::selection_region::active(ctx) || ui::transform_gizmo::active(ctx) || ui::prim_handles::active(ctx) || ui::curve_tool::active(ctx) || ui::viewport_ui::popup_open(ctx),&mut out);
+        if !fly_frame && !busy && !ui::viewport_ui::popup_open(ctx) && self.modal.is_none() && self.model_modal.is_none() && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::deform_gizmo::active(ctx) { for action in self.keymap.poll(ctx, &kctx) { out.push(action); } }
         ctx.data_mut(|d| d.insert_temp(ui::sketch::settings_id(), self.prefs.inference.clone()));
         {
             let repeat_desc = self.last_operator.as_ref().map(LastOperator::description);
@@ -3071,8 +3074,8 @@ impl eframe::App for App {
                 } else { false };
                 let mut delta = ctx.input(|i| i.pointer.delta());
                 if !response.dragged() { self.orbit_drag=None; }
-                if !fly_frame && !region_frame && response.dragged() && (self.modal.is_none() && self.model_modal.is_none()) && !ui::sketch::blocks_navigation(ctx) && !ui::mesh_cut::blocks_navigation(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::curve_tool::active(ctx)
-                    && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| (!ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) || ui::prim_handles::hit(rect, &v, p) || ui::curve_tool::hit(rect, &v, p, ctx)) {
+                if !fly_frame && !region_frame && response.dragged() && (self.modal.is_none() && self.model_modal.is_none()) && !ui::sketch::blocks_navigation(ctx) && !ui::mesh_cut::blocks_navigation(ctx) && !ui::transform_gizmo::active(ctx) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::deform_gizmo::active(ctx) && !ui::deform_gizmo::armed(ctx) && !ui::curve_tool::active(ctx)
+                    && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| (!ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) || ui::prim_handles::hit(rect, &v, p) || ui::deform_gizmo::hit(rect, &v, p) || ui::curve_tool::hit(rect, &v, p, ctx)) {
                     let modifiers = ctx.input(|i| i.modifiers);
                     let orbiting = match self.prefs.viewport.navigation {
                         ui::keymap::Navigation::Blender => response.dragged_by(egui::PointerButton::Middle) && !modifiers.ctrl && !modifiers.shift,
@@ -3343,7 +3346,7 @@ impl eframe::App for App {
                 // the release of the click that confirmed a loop cut must not re-select under the cursor
                 let swallow_click=ctx.data(|d|d.get_temp::<bool>(egui::Id::new("mesh_cut_swallow_click"))).unwrap_or(false);
                 if swallow_click && !ctx.input(|i|i.pointer.primary_down()) { ctx.data_mut(|d|d.remove::<bool>(egui::Id::new("mesh_cut_swallow_click"))); }
-                if !swallow_click && !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && !(response.double_clicked() && ctx.input(|i|i.modifiers.shift) && matches!(v.doc["nodes"][v.selected]["type"].as_str(),Some("curve"|"bezier"))) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::curve_tool::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::curve_tool::hit(rect, &v, p, ctx)) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| !ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) && matches!(self.editor_state.tool, ui::Tool::Select | ui::Tool::Move | ui::Tool::Rotate | ui::Tool::Scale | ui::Tool::Transform)
+                if !swallow_click && !fly_frame && !region_frame && !model_modal_frame && !mirror_frame && self.mirror.is_none() && !ui::viewport_ui::popup_open(ctx) && response.clicked_by(egui::PointerButton::Primary) && !(response.double_clicked() && ctx.input(|i|i.modifiers.shift) && matches!(v.doc["nodes"][v.selected]["type"].as_str(),Some("curve"|"bezier"))) && (self.modal.is_none() && self.model_modal.is_none()) && !(ui::sketch::active(ctx) || self.editor_state.tool.drawing()) && !ui::selection_region::active(ctx) && !ui::prim_handles::active(ctx) && !ui::deform_gizmo::active(ctx) && !ui::deform_gizmo::armed(ctx) && !ui::curve_tool::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::curve_tool::hit(rect, &v, p, ctx)) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| ui::prim_handles::hit(rect, &v, p) || ui::deform_gizmo::hit(rect,&v,p)) && !ui::transform_gizmo::active(ctx) && !ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| !ui::curve_tool::is_active_node(&v) && ui::transform_gizmo::hit(rect, &v, p)) && matches!(self.editor_state.tool, ui::Tool::Select | ui::Tool::Move | ui::Tool::Rotate | ui::Tool::Scale | ui::Tool::Transform)
                     && self.param_pick.as_ref().is_none_or(|pick| pick.ready && source_ready(&self.display_ranges, &pick.source)) {
                     if let (Some(at), Some(scene)) = (response.interact_pointer_pos(), &self.scene) {
                         let (nx, ny) = (((at.x - rect.left()) / rect.width()) * 2. - 1., 1. - ((at.y - rect.top()) / rect.height()) * 2.);
@@ -3477,6 +3480,7 @@ impl eframe::App for App {
                         if !ui::curve_tool::is_active_node(&v) { ui::transform_gizmo::show_with_snap(ui, rect, &v, &mut out,
                             self.scene.as_ref().map(|scene|(scene.positions(),scene.triangle_indices()))); }
                         ui::prim_handles::show(ui, rect, &v, &mut out);
+                        ui::deform_gizmo::show(ui, rect, &v, &mut out);
                         ui::curve_tool::show(ui, rect, &v, &mut out, response.double_clicked());
                         ui::sketch::show(ui, rect, &v, &mut out,
                             self.scene.as_ref().map(|scene|(scene.positions(),scene.triangle_indices())));
