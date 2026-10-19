@@ -25,6 +25,19 @@ fn curve()->Geometry {
 }
 
 #[test]
+fn flood_fill_frontier_output_is_isolated_curves() {
+    let g=curve();
+    let p=Params::resolve(NODE.params,json!({"seed_group":"0","max_steps":1}).as_object()).unwrap();
+    let outputs=NODE.cook_outputs(&[vec![Arc::new(g)]],&p).unwrap();
+    assert_eq!(outputs.0.len(),2);
+    assert_eq!(values(&outputs[0],"points","group_flood"),vec![1,1,0,0]);
+    assert_eq!(outputs[1].nprims(),1);
+    assert_eq!(outputs[1].npoints,2);
+    assert!(!outputs[1].topology.is_closed(0));
+    assert!(!outputs[1].point.contains_key("group_flood"));
+}
+
+#[test]
 fn grid_domains_and_cube_faces() {
     let g=grid();
     let points=run(&g,json!({"seed_group":"0","max_steps":1,"store_step_distance":true}));

@@ -1,9 +1,9 @@
 //! Material fracture composes the existing Rust fracture, assemble and glue nodes.
 use std::sync::Arc;
-use super::{GEO, Inputs, NodeSpec};
+use super::{GEO, Inputs, NodeOutputs, NodeSpec};
 use crate::{error::{Error, Result}, geometry::{Attr, AttrData, Geometry}, params::Params};
 
-pub const RBD_MATERIAL_FRACTURE: NodeSpec = NodeSpec {
+pub const RBD_MATERIAL_FRACTURE: NodeSpec = NodeSpec { outputs: &["pieces", "constraints"], cook_multi: Some(cook_multi),
     name: "rbd_material_fracture", inputs: GEO,
     params: crate::params!(
         "material":"concrete"; "density":1000.; "friction":0.6; "restitution":0.1; "glue_strength":1.0e7;
@@ -66,6 +66,9 @@ fn glue(g: Geometry, p: &Params, strength: f64, output: &str) -> Result<Geometry
             "clusters":p.i("clusters")?,"weak":0.5}))
 }
 fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
+    Ok(cook_multi(inputs, p)?.0.remove(0))
+}
+fn cook_multi(inputs: &Inputs, p: &Params) -> Result<NodeOutputs> {
     let source = RBD_MATERIAL_FRACTURE.one(inputs,0)?;
     let count=p.i("pieces")?; let levels=p.i("fracture_level")?; let sub=p.i("sub_pieces")?;
     if count<2 || sub<2 || !(1..=4).contains(&levels) { return Err(Error::new("invalid material fracture piece counts or level")); }
@@ -102,10 +105,8 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     for k in 0..n { let part=super::group::keep_prims(&split,&ids.iter().map(|&id|id==k as i32).collect::<Vec<_>>(),false)?;
         masses[k]=(volume(&part)*density*p.f("mass_scale")?).max(1e-6); }
     let strength=strength*p.f("strength_scale")?;
-    if p.s("output")?=="constraints" {
-        if !p.b("glue")? {return Err(Error::new("output = constraints needs glue switched on"));}
-        return glue(split,p,strength,"constraints");
-    }
+    let glue_geo = if p.b("glue")? { glue(split.clone(),p,strength,"constraints")? }
+        else { Geometry::default() };
     let mut out=if p.b("glue")? && p.i("clusters")?>0 {glue(split,p,strength,"pieces")?} else {split};
     let mut compound=false;
     if p.b("convex_parts")? {
@@ -155,12 +156,42 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     out.prim.insert("rbd_v".into(),Arc::new(Attr::f32(3,vec![0.;np*3])));
     out.prim.insert("rbd_w".into(),Arc::new(Attr::f32(3,vec![0.;np*3])));
     out.detail.insert("rbd_material".into(),serde_json::json!(material));
-    Ok(out)
+    Ok(vec![out, glue_geo].into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn material_fracture_returns_pieces_and_constraints() {
+        let box_params=Params::resolve(super::super::generate::BOX.params,None).unwrap();
+        let box_geo=(super::super::generate::BOX.cook)(&[vec![]],&box_params).unwrap();
+        let p=Params::resolve(RBD_MATERIAL_FRACTURE.params,
+            serde_json::json!({"pieces":2,"seed":2,"surface_fraction":0,"relax":0}).as_object()).unwrap();
+        let outputs=RBD_MATERIAL_FRACTURE.cook_outputs(&[vec![Arc::new(box_geo)]],&p).unwrap();
+        assert_eq!(outputs.0.len(),2);
+        assert!(outputs[0].nprims()>0);
+        assert!(outputs[0].prim.contains_key("rbd_mass"));
+        outputs[1].validate().unwrap();
+        assert!(outputs[1].nprims()>0);
+        assert!(outputs[1].prim.contains_key("rbd_a"));
+    }
+    #[test]
+    fn material_fracture_caches_both_ports_after_one_cook() {
+        let graph=crate::graph::Graph::from_value(&serde_json::json!({"nodes":{
+            "box":{"type":"box"},
+            "fracture":{"type":"rbd_material_fracture","inputs":{"geo":"box"},
+                "params":{"pieces":2,"seed":2,"surface_fraction":0,"relax":0}},
+            "pieces":{"type":"null","inputs":{"geo":"fracture"}},
+            "constraints":{"type":"null","inputs":{"geo":{"node":"fracture","output":1}}}
+        }})).unwrap();
+        let mut session=crate::session::Session::new(graph);
+        session.cook(Some("pieces")).unwrap();
+        assert_eq!(session.last_stats().cooked.iter().filter(|id|*id=="fracture").count(),1);
+        assert!(session.cook(Some("constraints")).unwrap().nprims()>0);
+        assert!(session.last_stats().cached.contains(&"fracture".into()));
+        assert!(!session.last_stats().cooked.contains(&"fracture".into()));
+    }
     #[test]
     fn python_two_piece_box_golden() {
         // Python Evaluator: box -> rbd_material_fracture(pieces=2,seed=2,
