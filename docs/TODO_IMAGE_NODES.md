@@ -339,3 +339,13 @@ From the Maya polygon tools audit, the items the user picked:
 ## Bug: object-mode display shows points that belong to faces or edges (reported 2026-10-19)
 
 In object mode, points are still drawn even when they belong to a face or an edge. Wanted: points that are part of a face or an edge are hidden; edges that are not attached to a face are shown; points that are not attached to any face or edge (stray points) are shown. So in object mode you see faces, stray edges and stray points, and nothing that is only a corner of a face.
+
+## Bugs and todos from live testing (reported 2026-10-19)
+
+- **Bug: extrude is uneven even when Offset Even is set.** Polyextrude shows an uneven offset regardless of the Offset Even checkbox.
+- **Bug: viewport extrude selects the face under the mouse on left click.** Applying the extrude in the viewport should keep the original selected face selected.
+- **Bug: transform of points, edges or faces does nothing without an output node at the end of the stream.** Transform should work on the selection regardless of downstream output.
+- **Todo: F2 renames a node.**
+- **Bug: U closes the subnet while inside it.** Remove the U keymap.
+- **Todo: Ctrl+G subnet creation adds an input and an output node to the stream automatically.**
+- **Todo: subnet inputs and outputs take custom parameters.** Parameters on an input or output are exposed outside the subnet. Outputs can also add custom parameters, and can add new stream nodes. Dragging a noodle onto a subnet adds a new input or output automatically.
