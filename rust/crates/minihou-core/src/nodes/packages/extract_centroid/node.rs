@@ -10,13 +10,12 @@ pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi:
     name: "extract_centroid",
     inputs: GEO,
     params: crate::params!(
-        "class": "detail";
-        "piece_attrib": "piece";
+        "group": "";
+        "domain": "detail";
         "method": "center_of_mass";
         "output": "points";
-        "attrib_name": "centroid";
-        "transfer_attribs": "";
-        "group": "";
+        "attribute_name": "centroid";
+        "transfer_attribute": "";
     ),
     cook,
 };
@@ -132,20 +131,19 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         return Ok((*geo).clone());
     }
 
-    let class = p.e("class", &["detail", "pieces", "primitives"])?;
+    let group = p.s("group")?;
+    let domain = p.e("domain", &["detail", "pieces", "primitives"])?;
     let method = p.e("method", &["center_of_mass", "bounding_box"])?;
     let output = p.e("output", &["points", "attribute"])?;
-    let piece_attrib = p.s("piece_attrib")?;
-    let attrib_name = p.s("attrib_name")?;
-    let transfer_attribs = p.s("transfer_attribs")?;
-    let group = p.s("group")?;
+    let attribute_name = p.s("attribute_name")?;
+    let transfer_attribute = p.s("transfer_attribute")?;
 
     let p_slice = geo.p();
     let vp = &geo.topology.vertex_point;
     let offsets = &geo.topology.prim_offsets;
     let nprims = geo.nprims();
 
-    match class.as_str() {
+    match domain.as_str() {
         "primitives" => {
             let mask = if group.trim().is_empty() {
                 vec![true; nprims]
@@ -178,7 +176,7 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                     attr_data[f * 3 + 1] = c[1] as f32;
                     attr_data[f * 3 + 2] = c[2] as f32;
                 }
-                out.prim.insert(attrib_name, Arc::new(Attr::f32(3, attr_data)));
+                out.prim.insert(attribute_name, Arc::new(Attr::f32(3, attr_data)));
                 Ok(out)
             } else {
                 let mut pts = Vec::with_capacity(centroids.len() * 3);
@@ -189,24 +187,26 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                 }
                 let mut out = Geometry::points_only(pts)?;
                 // Transfer primitive attributes if requested
-                let transfer_names: Vec<&str> = transfer_attribs.split_whitespace().collect();
-                for (name, attr) in &geo.prim {
-                    if transfer_names.contains(&name.as_str()) || transfer_names.contains(&"*") {
-                        let w = attr.width;
-                        match &attr.data {
-                            AttrData::F32(v) => {
-                                let mut new_data = Vec::with_capacity(matching_prims.len() * w);
-                                for &f in &matching_prims {
-                                    new_data.extend_from_slice(&v[f * w..(f + 1) * w]);
+                let transfer_names: Vec<&str> = transfer_attribute.split_whitespace().collect();
+                if !transfer_names.is_empty() {
+                    for (name, attr) in &geo.prim {
+                        if transfer_names.contains(&name.as_str()) || transfer_names.contains(&"*") {
+                            let w = attr.width;
+                            match &attr.data {
+                                AttrData::F32(v) => {
+                                    let mut new_data = Vec::with_capacity(matching_prims.len() * w);
+                                    for &f in &matching_prims {
+                                        new_data.extend_from_slice(&v[f * w..(f + 1) * w]);
+                                    }
+                                    out.point.insert(name.clone(), Arc::new(Attr::f32(w, new_data)));
                                 }
-                                out.point.insert(name.clone(), Arc::new(Attr::f32(w, new_data)));
-                            }
-                            AttrData::I32(v) => {
-                                let mut new_data = Vec::with_capacity(matching_prims.len() * w);
-                                for &f in &matching_prims {
-                                    new_data.extend_from_slice(&v[f * w..(f + 1) * w]);
+                                AttrData::I32(v) => {
+                                    let mut new_data = Vec::with_capacity(matching_prims.len() * w);
+                                    for &f in &matching_prims {
+                                        new_data.extend_from_slice(&v[f * w..(f + 1) * w]);
+                                    }
+                                    out.point.insert(name.clone(), Arc::new(Attr::i32(w, new_data)));
                                 }
-                                out.point.insert(name.clone(), Arc::new(Attr::i32(w, new_data)));
                             }
                         }
                     }
@@ -216,40 +216,35 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         }
         "pieces" => {
             // Find piece labels for each primitive (or point)
-            let (prim_pieces, point_pieces): (Vec<i64>, Vec<i64>) = if !piece_attrib.trim().is_empty() {
-                if let Some(attr) = geo.prim.get(&piece_attrib) {
-                    let pr: Vec<i64> = match &attr.data {
-                        AttrData::I32(v) => v.iter().map(|&x| x as i64).collect(),
-                        AttrData::F32(v) => v.iter().map(|&x| x as i64).collect(),
-                    };
-                    let mut pt = vec![-1i64; geo.npoints];
-                    for f in 0..nprims {
-                        let label = pr[f];
-                        for v in offsets[f] as usize..offsets[f + 1] as usize {
-                            pt[vp[v] as usize] = label;
-                        }
+            let (prim_pieces, point_pieces): (Vec<i64>, Vec<i64>) = if let Some(attr) = geo.prim.get("piece") {
+                let pr: Vec<i64> = match &attr.data {
+                    AttrData::I32(v) => v.iter().map(|&x| x as i64).collect(),
+                    AttrData::F32(v) => v.iter().map(|&x| x as i64).collect(),
+                };
+                let mut pt = vec![-1i64; geo.npoints];
+                for f in 0..nprims {
+                    let label = pr[f];
+                    for v in offsets[f] as usize..offsets[f + 1] as usize {
+                        pt[vp[v] as usize] = label;
                     }
-                    (pr, pt)
-                } else if let Some(attr) = geo.point.get(&piece_attrib) {
-                    let pt: Vec<i64> = match &attr.data {
-                        AttrData::I32(v) => v.iter().map(|&x| x as i64).collect(),
-                        AttrData::F32(v) => v.iter().map(|&x| x as i64).collect(),
-                    };
-                    let pr: Vec<i64> = (0..nprims)
-                        .map(|f| {
-                            let s = offsets[f] as usize;
-                            if s < offsets[f + 1] as usize {
-                                pt[vp[s] as usize]
-                            } else {
-                                -1
-                            }
-                        })
-                        .collect();
-                    (pr, pt)
-                } else {
-                    let (pt, pr) = crate::nodes::attrib_tools::piece_labels(&geo);
-                    (pr.into_iter().map(|x| x as i64).collect(), pt.into_iter().map(|x| x as i64).collect())
                 }
+                (pr, pt)
+            } else if let Some(attr) = geo.point.get("piece") {
+                let pt: Vec<i64> = match &attr.data {
+                    AttrData::I32(v) => v.iter().map(|&x| x as i64).collect(),
+                    AttrData::F32(v) => v.iter().map(|&x| x as i64).collect(),
+                };
+                let pr: Vec<i64> = (0..nprims)
+                    .map(|f| {
+                        let s = offsets[f] as usize;
+                        if s < offsets[f + 1] as usize {
+                            pt[vp[s] as usize]
+                        } else {
+                            -1
+                        }
+                    })
+                    .collect();
+                (pr, pt)
             } else {
                 let (pt, pr) = crate::nodes::attrib_tools::piece_labels(&geo);
                 (pr.into_iter().map(|x| x as i64).collect(), pt.into_iter().map(|x| x as i64).collect())
@@ -399,7 +394,7 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                         prim_attr[f * 3 + 2] = c[2] as f32;
                     }
                 }
-                out.prim.insert(attrib_name.clone(), Arc::new(Attr::f32(3, prim_attr)));
+                out.prim.insert(attribute_name.clone(), Arc::new(Attr::f32(3, prim_attr)));
 
                 let mut pt_attr = vec![0.0f32; geo.npoints * 3];
                 for i in 0..geo.npoints {
@@ -411,7 +406,7 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                         pt_attr[i * 3 + 2] = c[2] as f32;
                     }
                 }
-                out.point.insert(attrib_name, Arc::new(Attr::f32(3, pt_attr)));
+                out.point.insert(attribute_name, Arc::new(Attr::f32(3, pt_attr)));
                 Ok(out)
             } else {
                 let mut pts = Vec::with_capacity(centroids.len() * 3);
@@ -422,13 +417,54 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
                 }
                 let mut out = Geometry::points_only(pts)?;
                 // Write piece attribute
-                let piece_name = if piece_attrib.trim().is_empty() {
-                    "piece".to_string()
-                } else {
-                    piece_attrib.clone()
-                };
                 let piece_i32: Vec<i32> = sorted_pieces.iter().map(|&x| x as i32).collect();
-                out.point.insert(piece_name, Arc::new(Attr::i32(1, piece_i32)));
+                out.point.insert("piece".to_string(), Arc::new(Attr::i32(1, piece_i32)));
+
+                // Transfer primitive attributes if requested
+                let transfer_names: Vec<&str> = transfer_attribute.split_whitespace().collect();
+                if !transfer_names.is_empty() {
+                    for (name, attr) in &geo.prim {
+                        if transfer_names.contains(&name.as_str()) || transfer_names.contains(&"*") {
+                            let w = attr.width;
+                            match &attr.data {
+                                AttrData::F32(v) => {
+                                    let mut new_data = Vec::with_capacity(sorted_pieces.len() * w);
+                                    for &pid in &sorted_pieces {
+                                        let mut found = false;
+                                        for f in 0..nprims {
+                                            if prim_pieces[f] == pid {
+                                                new_data.extend_from_slice(&v[f * w..(f + 1) * w]);
+                                                found = true;
+                                                break;
+                                            }
+                                        }
+                                        if !found {
+                                            new_data.extend(std::iter::repeat(0.0).take(w));
+                                        }
+                                    }
+                                    out.point.insert(name.clone(), Arc::new(Attr::f32(w, new_data)));
+                                }
+                                AttrData::I32(v) => {
+                                    let mut new_data = Vec::with_capacity(sorted_pieces.len() * w);
+                                    for &pid in &sorted_pieces {
+                                        let mut found = false;
+                                        for f in 0..nprims {
+                                            if prim_pieces[f] == pid {
+                                                new_data.extend_from_slice(&v[f * w..(f + 1) * w]);
+                                                found = true;
+                                                break;
+                                            }
+                                        }
+                                        if !found {
+                                            new_data.extend(std::iter::repeat(0).take(w));
+                                        }
+                                    }
+                                    out.point.insert(name.clone(), Arc::new(Attr::i32(w, new_data)));
+                                }
+                            }
+                        }
+                    }
+                }
                 Ok(out)
             }
         }
@@ -515,12 +551,12 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             if output == "attribute" {
                 let mut out = (*geo).clone();
                 let c_f32 = [centroid[0] as f32, centroid[1] as f32, centroid[2] as f32];
-                out.detail.insert(attrib_name.clone(), serde_json::json!(c_f32));
+                out.detail.insert(attribute_name.clone(), serde_json::json!(c_f32));
                 let mut pt_data = Vec::with_capacity(geo.npoints * 3);
                 for _ in 0..geo.npoints {
                     pt_data.extend_from_slice(&c_f32);
                 }
-                out.point.insert(attrib_name, Arc::new(Attr::f32(3, pt_data)));
+                out.point.insert(attribute_name, Arc::new(Attr::f32(3, pt_data)));
                 Ok(out)
             } else {
                 let out = Geometry::points_only(vec![

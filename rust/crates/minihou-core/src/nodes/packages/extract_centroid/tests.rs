@@ -56,7 +56,7 @@ fn run(g: Geometry, opt: serde_json::Value) -> Geometry {
 #[test]
 fn test_detail_centroid_of_unit_cube() {
     let cube = unit_cube();
-    let out = run(cube, json!({"class": "detail", "method": "center_of_mass", "output": "points"}));
+    let out = run(cube, json!({"domain": "detail", "method": "center_of_mass", "output": "points"}));
     assert_eq!(out.npoints, 1);
     let p = out.p();
     assert!((p[0].abs() < 1e-5) && (p[1].abs() < 1e-5) && (p[2].abs() < 1e-5));
@@ -72,7 +72,7 @@ fn test_detail_bbox_centroid_offset() {
         xyz[2] += -1.0;
     }
     cube.set_p(p);
-    let out = run(cube, json!({"class": "detail", "method": "bounding_box", "output": "points"}));
+    let out = run(cube, json!({"domain": "detail", "method": "bounding_box", "output": "points"}));
     assert_eq!(out.npoints, 1);
     let p = out.p();
     assert!((p[0] - 5.0).abs() < 1e-5);
@@ -83,7 +83,7 @@ fn test_detail_bbox_centroid_offset() {
 #[test]
 fn test_primitive_centroids_grid() {
     let g = grid_2x2();
-    let out = run(g, json!({"class": "primitives", "method": "center_of_mass", "output": "points"}));
+    let out = run(g, json!({"domain": "primitives", "method": "center_of_mass", "output": "points"}));
     assert_eq!(out.npoints, 4);
     let p = out.p();
     // Cell centers: (0.5, 0.5), (1.5, 0.5), (0.5, 1.5), (1.5, 1.5)
@@ -96,7 +96,7 @@ fn test_primitive_centroids_grid() {
 #[test]
 fn test_output_attribute_mode() {
     let g = grid_2x2();
-    let out = run(g.clone(), json!({"class": "primitives", "output": "attribute", "attrib_name": "cen"}));
+    let out = run(g.clone(), json!({"domain": "primitives", "output": "attribute", "attribute_name": "cen"}));
     assert_eq!(out.nprims(), 4);
     assert!(out.prim.contains_key("cen"));
     let cen = out.prim["cen"].as_f32().unwrap();
@@ -120,9 +120,39 @@ fn test_pieces_mode_by_connectivity() {
     let vp = vec![0, 1, 2, 3, 4, 5, 6, 7];
     let offs = vec![0, 4, 8];
     let g = Geometry::from_arrays(p, vp, offs, None).unwrap();
-    let out = run(g, json!({"class": "pieces", "piece_attrib": "", "output": "points"}));
+    let out = run(g, json!({"domain": "pieces", "output": "points"}));
     assert_eq!(out.npoints, 2);
     let pts = out.p();
     assert!((pts[0] - 0.5).abs() < 1e-5 && (pts[1] - 0.5).abs() < 1e-5);
     assert!((pts[3] - 10.5).abs() < 1e-5 && (pts[4] - 10.5).abs() < 1e-5);
+}
+
+#[test]
+fn test_transfer_attribute_primitives() {
+    let mut g = grid_2x2();
+    let prim_class = vec![10, 20, 30, 40];
+    g.prim.insert("tag".into(), Arc::new(Attr::i32(1, prim_class)));
+    let out = run(g, json!({"domain": "primitives", "transfer_attribute": "tag"}));
+    assert_eq!(out.npoints, 4);
+    assert!(out.point.contains_key("tag"));
+    let tag = out.point["tag"].as_i32().unwrap();
+    assert_eq!(tag, &[10, 20, 30, 40]);
+}
+
+#[test]
+fn test_extract_centroid_parameter_order_and_defaults() {
+    let expected = &[
+        "group",
+        "domain",
+        "method",
+        "output",
+        "attribute_name",
+        "transfer_attribute",
+    ];
+    let names: Vec<&str> = NODE.params.iter().map(|p| p.name).collect();
+    assert_eq!(names, expected);
+
+    let cube = unit_cube();
+    let out = run(cube, json!({}));
+    assert_eq!(out.npoints, 1);
 }
