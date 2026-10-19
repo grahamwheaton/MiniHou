@@ -807,6 +807,37 @@ pub fn cook_batch<T>(session: &mut Session, target: &mut String, requests: Vec<C
     CookResponse { revision, geometry, lod, prepared, display_ranges, extras, scene, stats, error, milliseconds }
 }
 #[cfg(test)]
+mod param_drag_cook_tests {
+    use super::*;
+
+    /// A drag of one parameter re-cooks only that node and what is downstream of it, once per step; the upstream node stays cached.
+    #[test]
+    fn dragging_one_parameter_cooks_the_edited_node_and_downstream_once_per_step() {
+        let value = json!({"nodes": {
+            "a": {"type": "box"},
+            "b": {"type": "transform", "inputs": {"geo": "a"}, "params": {"translate": [0., 0., 0.]}},
+            "c": {"type": "transform", "inputs": {"geo": "b"}, "params": {"translate": [0., 1., 0.]}},
+            "other": {"type": "box"}}, "display": "c"});
+        let doc = Document::parse(value.to_string()).unwrap();
+        let mut session = doc.session().unwrap();
+        let mut target = session.graph().main_output().unwrap();
+        let first = cook_batch(&mut session, &mut target, vec![CookRequest { revision: 1, edit: Edit::Replace(value.clone()) }], |_| ());
+        assert!(first.error.is_none(), "{:?}", first.error);
+        for step in 1..=5u64 {
+            let edit = Edit::Param { node: "b".into(), name: "translate".into(), value: json!([step as f64, 0., 0.]) };
+            let r = cook_batch(&mut session, &mut target, vec![CookRequest { revision: step + 1, edit }], |_| ());
+            assert!(r.error.is_none(), "{:?}", r.error);
+            let mut cooked = r.stats.cooked.clone(); cooked.sort();
+            assert_eq!(cooked, vec!["b".to_string(), "c".to_string()], "step {step}");
+        }
+        // Several queued steps fold into a single cook of the same two nodes.
+        let batch = (6..=10u64).map(|step| CookRequest { revision: step, edit: Edit::Param { node: "b".into(), name: "translate".into(), value: json!([step as f64, 0., 0.]) } }).collect();
+        let r = cook_batch(&mut session, &mut target, batch, |_| ());
+        let mut cooked = r.stats.cooked.clone(); cooked.sort();
+        assert_eq!(cooked, vec!["b".to_string(), "c".to_string()]);
+    }
+}
+#[cfg(test)]
 mod display_selection_tests {
     use super::*;
 
