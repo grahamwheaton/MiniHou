@@ -138,7 +138,8 @@ fn create(inputs:&Inputs,p:&Params)->Result<Geometry>{
 fn edge_mask(g:&Geometry,e:&crate::topo::Edges,pattern:&str)->Result<Vec<bool>>{
     let n=e.len();let tokens:Vec<_>=pattern.split(|c:char|c==','||c.is_whitespace()).filter(|s|!s.is_empty()).collect();
     if tokens.is_empty(){return Ok(vec![true;n]);}
-    let mut sel=vec![tokens[0].starts_with('^');n];
+    let mut sel=vec![tokens.iter().all(|t|t.starts_with('^'));n];
+    let mut excluded=vec![false;n];
     for t in tokens{
         let ex=t.starts_with('^');let t=t.strip_prefix('^').unwrap_or(t);if t.is_empty(){continue;}
         let mut hit=vec![false;n];
@@ -148,8 +149,9 @@ fn edge_mask(g:&Geometry,e:&crate::topo::Edges,pattern:&str)->Result<Vec<bool>>{
             for i in 0..n{if e.points[i*2]==a&&e.points[i*2+1]==b{hit[i]=true;}}
         }else if let Ok(i)=t.parse::<usize>(){if i<n{hit[i]=true;}}
         else{for(k,a)in g.edge.iter(){if let Some(nm)=k.strip_prefix("group_"){if super::attribs::matches(t,nm){for(h,f)in hit.iter_mut().zip(flags(a)){*h|=f;}}}}}
-        for(s,h)in sel.iter_mut().zip(hit){if h{*s=!ex;}}
+        for((s,x),h)in sel.iter_mut().zip(&mut excluded).zip(hit){if ex{*x|=h;}else{*s|=h;}}
     }
+    for(s,x)in sel.iter_mut().zip(excluded){*s &= !x;}
     Ok(sel)
 }
 fn create_edges(g:&Geometry,inputs:&Inputs,p:&Params,name:&str)->Result<Geometry>{
