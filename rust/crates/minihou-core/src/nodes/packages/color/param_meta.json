@@ -23,13 +23,13 @@
     "kind": "enum",
     "options": [
       "points",
-      "primitives",
-      "vertices"
+      "edges",
+      "faces"
     ]
   },
   "group": {
     "default": "",
-    "doc": "Only these points or primitives",
+    "doc": "Only these points, edges, or faces",
     "kind": "str",
     "pick_domain_default": "points",
     "pick_domain_param": "domain"

@@ -110,6 +110,51 @@ fn read_domain_attr(g: &Geometry, dom: &str, name: &str) -> Option<(Vec<f64>, us
             }
             return Some((out, width));
         }
+    } else if dom == "edge" {
+        if let Some(attr) = g.point.get(name) {
+            let width = attr.width;
+            let vals: Vec<f64> = match &attr.data {
+                AttrData::F32(v) => v.iter().map(|&x| x as f64).collect(),
+                AttrData::I32(v) => v.iter().map(|&x| x as f64).collect(),
+            };
+            let e = crate::topo::edges(&g.topology, g.npoints);
+            let mut out = Vec::with_capacity(e.len() * width);
+            for i in 0..e.len() {
+                let pa = e.points[2 * i] as usize;
+                let pb = e.points[2 * i + 1] as usize;
+                for c in 0..width {
+                    out.push((vals[pa * width + c] + vals[pb * width + c]) * 0.5);
+                }
+            }
+            return Some((out, width));
+        }
+        if let Some(attr) = g.vertex.get(name) {
+            let width = attr.width;
+            let vals: Vec<f64> = match &attr.data {
+                AttrData::F32(v) => v.iter().map(|&x| x as f64).collect(),
+                AttrData::I32(v) => v.iter().map(|&x| x as f64).collect(),
+            };
+            let e = crate::topo::edges(&g.topology, g.npoints);
+            let mut out = vec![0.0f64; e.len() * width];
+            let mut count = vec![0usize; e.len()];
+            for v in 0..g.nvertices() {
+                let ed = e.of_vertex[v];
+                if ed >= 0 {
+                    let ed = ed as usize;
+                    for c in 0..width {
+                        out[ed * width + c] += vals[v * width + c];
+                    }
+                    count[ed] += 1;
+                }
+            }
+            for i in 0..e.len() {
+                let cnt = count[i].max(1) as f64;
+                for c in 0..width {
+                    out[i * width + c] /= cnt;
+                }
+            }
+            return Some((out, width));
+        }
     }
     if let Some(val) = g.detail.get(name) {
         let n = size(g, dom);
@@ -134,7 +179,7 @@ fn read_domain_attr(g: &Geometry, dom: &str, name: &str) -> Option<(Vec<f64>, us
 fn color_node(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let g = NODE.one(inputs, 0)?;
     let mode = p.e("mode", &["constant", "random", "random_by_piece", "ramp"])?;
-    let dom = p.e("domain", &["points", "primitives", "vertices"])?;
+    let dom = p.e("domain", &["points", "edges", "faces", "primitives", "vertices"])?;
     let dom = domain(&dom);
     let color = p.v3("color")?;
     let color2 = p.v3("color2")?;
@@ -168,6 +213,15 @@ fn color_node(inputs: &Inputs, p: &Params) -> Result<Geometry> {
             let lab: Vec<i32> = match dom {
                 "point" => pts,
                 "prim" => prim,
+                "edge" => {
+                    let e = crate::topo::edges(&g.topology, g.npoints);
+                    (0..e.len())
+                        .map(|i| {
+                            let pa = e.points[2 * i] as usize;
+                            pts.get(pa).copied().unwrap_or(0)
+                        })
+                        .collect()
+                }
                 "vertex" => {
                     let mut pv = Vec::with_capacity(g.nvertices());
                     for i in 0..g.nprims() {

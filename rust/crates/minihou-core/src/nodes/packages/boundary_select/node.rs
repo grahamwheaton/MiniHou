@@ -11,7 +11,7 @@ use crate::{
 pub(super) const NODE: NodeSpec = NodeSpec { outputs: &["geometry"], cook_multi: None,
     name: "boundary_select",
     inputs: &[InputSpec { name: "geo", multi: false, optional: false }],
-    params: crate::params!("domain": "edges"; "group": ""; "output_group_name": "boundary"),
+    params: crate::params!("domain": "edges"; "group": ""; "output_group_name": "boundary"; "output_group": ""),
     cook,
 };
 
@@ -19,7 +19,14 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     let source = inputs.first().and_then(|v| v.first()).ok_or_else(|| Error::new("geo is not connected"))?;
     let domain = p.e("domain", &["edges", "faces", "points", "primitives"])?;
     let group_pattern = p.s("group")?;
-    let output_group_name = p.s("output_group_name")?;
+    let output_group_name = {
+        let og = p.s("output_group").unwrap_or_default();
+        if !og.trim().is_empty() {
+            og
+        } else {
+            p.s("output_group_name").unwrap_or_else(|_| "boundary".into())
+        }
+    };
     let output_group_name = if output_group_name.trim().is_empty() { "boundary" } else { output_group_name.trim() };
     crate::nodes::group::valid_name(output_group_name)?;
 
@@ -108,16 +115,43 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         _ => unreachable!(),
     };
 
+    let edge_attr = Arc::new(Attr::i32(1, edge_mask.iter().map(|&b| b as i32).collect()));
     crate::nodes::edge_tools::write_values(
         &mut out,
         &format!("edge_group_{output_group_name}"),
         &edge_mask.iter().map(|&b| b as u8 as f32).collect::<Vec<_>>(),
         true,
     )?;
+    crate::nodes::edge_tools::write_values(
+        &mut out,
+        &format!("group_{output_group_name}"),
+        &edge_mask.iter().map(|&b| b as u8 as f32).collect::<Vec<_>>(),
+        true,
+    )?;
     out.edge.insert(
         format!("group_{output_group_name}"),
-        Arc::new(Attr::i32(1, edge_mask.iter().map(|&b| b as i32).collect())),
+        edge_attr.clone(),
     );
+    out.edge.insert(
+        format!("edge_group_{output_group_name}"),
+        edge_attr.clone(),
+    );
+    if output_group_name != "boundary" {
+        let _ = crate::nodes::edge_tools::write_values(
+            &mut out,
+            "edge_group_boundary",
+            &edge_mask.iter().map(|&b| b as u8 as f32).collect::<Vec<_>>(),
+            true,
+        );
+        let _ = crate::nodes::edge_tools::write_values(
+            &mut out,
+            "group_boundary",
+            &edge_mask.iter().map(|&b| b as u8 as f32).collect::<Vec<_>>(),
+            true,
+        );
+        out.edge.insert("group_boundary".into(), edge_attr.clone());
+        out.edge.insert("edge_group_boundary".into(), edge_attr);
+    }
 
     Ok(out)
 }

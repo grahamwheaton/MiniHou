@@ -2,7 +2,7 @@
   "domain": {
     "kind": "enum",
     "default": "edges",
-    "options": ["edges", "faces", "points", "primitives"],
+    "options": ["edges", "faces", "points"],
     "doc": "Element domain of the input selection (edges, faces, or points); outputs boundary edges."
   },
   "group": {

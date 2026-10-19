@@ -1,18 +1,19 @@
 //! Deterministic attribute tools from nodes/attrib_tools.py.
 use std::{collections::BTreeMap,sync::Arc};
 use crate::{error::{Error,Result},geometry::{Attr,AttrData,AttrTable,Geometry},params::Params};
-pub(super) fn table_mut<'a>(g:&'a mut Geometry,dom:&str)-> &'a mut AttrTable{match dom{"point"=>&mut g.point,"vertex"=>&mut g.vertex,_=>&mut g.prim}}
-pub(super) fn domain(s:&str)->&str{match s{"points"=>"point","vertices"=>"vertex","detail"=>"detail",_=>"prim"}}
-pub(super) fn size(g:&Geometry,d:&str)->usize{match d{"point"=>g.npoints,"vertex"=>g.nvertices(),_=>g.nprims()}}
+pub(super) fn table_mut<'a>(g:&'a mut Geometry,dom:&str)-> &'a mut AttrTable{match dom{"point"=>&mut g.point,"vertex"=>&mut g.vertex,"edge"=>&mut g.edge,_=>&mut g.prim}}
+pub(super) fn domain(s:&str)->&str{match s{"points"|"point"=>"point","vertices"|"vertex"=>"vertex","edges"|"edge"=>"edge","detail"=>"detail",_=>"prim"}}
+pub(super) fn size(g:&Geometry,d:&str)->usize{match d{"point"=>g.npoints,"vertex"=>g.nvertices(),"edge"=>g.nedges(),_=>g.nprims()}}
 pub(super) fn set(g:&Geometry,dom:&str,name:String,arr:Attr)->Geometry{
-    let mut out=g.clone();for d in ["point","vertex","prim"]{if d!=dom{table_mut(&mut out,d).remove(&name);}}
+    let mut out=g.clone();for d in ["point","vertex","edge","prim"]{if d!=dom{table_mut(&mut out,d).remove(&name);}}
     table_mut(&mut out,dom).insert(name,Arc::new(arr));out
 }
 pub(super) fn set_with_group(g:&Geometry,dom:&str,name:&str,arr:Attr,group:&str)->Result<Geometry>{
     super::group::valid_name(name)?;
-    let mut out=g.clone();for d in ["point","vertex","prim"]{if d!=dom{table_mut(&mut out,d).remove(name);}}
-    let arr=if !group.is_empty() && (dom=="point" || dom=="prim"){
-        let sel=super::group::mask(g,dom,group)?;let old=g.table(dom).get(name);let n=size(g,dom);let w=arr.width;
+    let mut out=g.clone();for d in ["point","vertex","edge","prim"]{if d!=dom{table_mut(&mut out,d).remove(name);}}
+    let arr=if !group.is_empty() && (dom=="point" || dom=="prim" || dom=="edge"){
+        let sel=if dom=="edge" { super::edge_tools::edge_mask(g,group)? } else { super::group::mask(g,dom,group)? };
+        let old=g.table(dom).get(name);let n=size(g,dom);let w=arr.width;
         match &arr.data{
             AttrData::F32(new_v)=>{
                 let old_v=old.and_then(|a|if a.width==w{match &a.data{AttrData::F32(v)=>Some(v.as_slice()),_=>None}}else{None});
