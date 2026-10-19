@@ -13,6 +13,7 @@ mod boolean_kernel;
 pub mod geometry;
 pub mod graph;
 pub mod channels;
+pub mod controller;
 pub mod coplanar;
 pub mod heightfield;
 pub mod lod;

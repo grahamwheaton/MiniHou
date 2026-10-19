@@ -51,6 +51,7 @@ impl Graph {
             let nd = nd.as_object().ok_or_else(|| Error::new(format!("node '{id}': expected an object with a 'type'")))?;
             let node_type = nd.get("type").and_then(Value::as_str)
                 .ok_or_else(|| Error::new(format!("node '{id}': expected an object with a 'type'")))?.to_string();
+            if node_type == "controller" { crate::controller::validate(&Value::Object(nd.clone())).map_err(|e| e.in_node(id, &node_type))?; }
             if nd.contains_key("locked_geometry") {
                 return Err(Error::new(format!("node '{id}': locked geometry is not supported by the Rust backend yet")));
             }
@@ -154,6 +155,10 @@ impl Graph {
     }
     pub fn node_channels(&self,id:&str)->Option<&Map<String,Value>> {self.node(id)?.channels.as_ref()}
     pub fn node_locks(&self,id:&str)->Option<&Vec<String>> {self.node(id)?.locked_params.as_ref()}
+    pub fn controller_param(&self, id: &str, name: &str) -> Option<&Value> {
+        let node = self.source["nodes"].get(id)?;
+        (node["type"] == "controller").then(|| crate::controller::parameter(node, name)).flatten()
+    }
 
     /// Promoted names are declared on a subnet and stored as ordinary outer params.
     pub fn promoted_param(&self, id: &str, name: &str) -> Option<&Value> {
@@ -224,7 +229,7 @@ pub(crate) fn run_node(id: &str, def: &NodeDef, spec: &nodes::NodeSpec, inputs: 
     let result = if def.bypass {
         Ok(inputs.first().and_then(|i| i.first()).map(|g| (**g).clone()).unwrap_or_else(|| Geometry::points_only(Vec::new()).expect("empty geometry")))
     } else {
-        Params::resolve(spec.params, if def.node_type == "subnet" {None} else {resolved.or(def.params.as_ref())})
+        Params::resolve_node(&def.node_type, spec.params, if def.node_type == "subnet" {None} else {resolved.or(def.params.as_ref())})
             .and_then(|p| if def.node_type == "usd_export" { nodes::usd_nodes::cook_named(inputs, &p, id) } else { (spec.cook)(inputs, &p) })
             .and_then(|g| g.validate().map(|_| g))
     };

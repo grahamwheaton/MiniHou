@@ -1,0 +1,5 @@
+id = "controller"
+name = "Controller"
+category = "Library"
+description = "Ordered sections of typed controls for driving a network."
+keywords = "controller driver parameters sections expose blender"

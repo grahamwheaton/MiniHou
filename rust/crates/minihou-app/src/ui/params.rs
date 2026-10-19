@@ -1637,6 +1637,10 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
         promoted_panel(ui, v, out, id);
         return;
     }
+    if typ == "controller" {
+        controller_panel(ui, v, out, id);
+        return;
+    }
     if nodes::get(typ).is_none() {
         unsupported(ui, v, id, typ);
         return;
@@ -1701,6 +1705,129 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
             }
         }
     });
+}
+
+fn controller_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str) {
+    let node = &v.doc["nodes"][id];
+    let mut sections = node["controller_sections"].as_array().cloned().unwrap_or_default();
+    let mut changed = false;
+    ui.heading(format!("Controller: {id}"));
+    ui.small("Use ch('../controller/parameter') to drive another node.");
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        let section_drag_key=egui::Id::new(("controller_section_drag",id));
+        let mut section_dragging=ui.ctx().data(|d|d.get_temp::<usize>(section_drag_key));
+        let mut section_move=None;
+        for si in 0..sections.len() {
+            ui.push_id(si, |ui| {
+                ui.separator();
+                let mut title = sections[si]["name"].as_str().unwrap_or("").to_owned();
+                let heading=ui.horizontal(|ui| {
+                    let handle=ui.add(egui::Label::new("☰").sense(Sense::drag()));
+                    if handle.drag_started() {section_dragging=Some(si);}
+                    if ui.text_edit_singleline(&mut title).changed() && !title.trim().is_empty() {
+                        sections[si]["name"] = json!(title.trim()); changed = true;
+                    }
+                    if ui.add_enabled(si > 0, egui::Button::new("↑")).clicked() { sections.swap(si, si-1); changed = true; }
+                    if ui.add_enabled(si+1 < sections.len(), egui::Button::new("↓")).clicked() { sections.swap(si, si+1); changed = true; }
+                    if ui.button("Remove section").clicked() { sections.remove(si); changed = true; }
+                });
+                if ui.ctx().input(|i|i.pointer.any_released()) && heading.response.hovered() {
+                    if let Some(from)=section_dragging {if from!=si {section_move=Some((from,si));}}
+                }
+                if si >= sections.len() { return; }
+                let mut entries = sections[si]["parameters"].as_array().cloned().unwrap_or_default();
+                let drag_key=egui::Id::new(("controller_drag",id,si));
+                let mut dragging=ui.ctx().data(|d|d.get_temp::<usize>(drag_key));
+                let mut move_to=None;
+                for pi in 0..entries.len() {
+                    ui.push_id(pi, |ui| {
+                        let name = entries[pi]["name"].as_str().unwrap_or("").to_owned();
+                        let kind = entries[pi]["kind"].as_str().unwrap_or("float").to_owned();
+                        let row=ui.horizontal(|ui| {
+                            let handle=ui.add(egui::Label::new("☰").sense(Sense::drag()));
+                            if handle.drag_started() {dragging=Some(pi);}
+                            ui.label(&name);
+                            ui.small(&kind);
+                            let old = node["params"].get(&name).unwrap_or(&entries[pi]["default"]);
+                            let mut value = old.clone();
+                            let edited = match kind.as_str() {
+                                "float" => { let mut n=value.as_f64().unwrap_or(0.); let yes=ui.add(egui::DragValue::new(&mut n).speed(0.01)).changed(); value=json!(n); yes },
+                                "int" => { let mut n=value.as_i64().unwrap_or(0); let yes=ui.add(egui::DragValue::new(&mut n)).changed(); value=json!(n); yes },
+                                "bool" => { let mut b=value.as_bool().unwrap_or(false); let yes=ui.checkbox(&mut b, "").changed(); value=json!(b); yes },
+                                "vector" | "color" => { let mut any=false; let count=if kind=="vector" {3} else {4}; let mut xs=(0..count).map(|i|value[i].as_f64().unwrap_or(0.)).collect::<Vec<_>>(); for x in &mut xs {any|=ui.add(egui::DragValue::new(x).speed(0.01)).changed();} value=json!(xs); any },
+                                "menu" => { let mut s=value.as_str().unwrap_or("").to_owned(); let before=s.clone(); egui::ComboBox::from_id_salt("choice").selected_text(&s).show_ui(ui, |ui| {for option in entries[pi]["options"].as_array().into_iter().flatten().filter_map(Value::as_str) {ui.selectable_value(&mut s,option.into(),option);}}); value=json!(s); s!=before },
+                                _ => {let mut s=value.as_str().unwrap_or("").to_owned(); let yes=ui.text_edit_singleline(&mut s).changed(); value=json!(s); yes},
+                            };
+                            if edited { out.push(UiAction::Edit {edit: Edit::Param {node:id.into(),name:name.clone(),value},continuous:true}); }
+                            let mut expose = entries[pi]["expose_to_blender"].as_bool().unwrap_or(false);
+                            if matches!(kind.as_str(),"float"|"int"|"bool"|"vector"|"color") && ui.checkbox(&mut expose,"Expose to Blender").changed() {
+                                entries[pi]["expose_to_blender"]=json!(expose); changed=true;
+                            }
+                            if ui.add_enabled(pi>0,egui::Button::new("↑")).clicked() {entries.swap(pi,pi-1);changed=true;}
+                            if ui.add_enabled(pi+1<entries.len(),egui::Button::new("↓")).clicked() {entries.swap(pi,pi+1);changed=true;}
+                            if ui.button("×").clicked() {entries.remove(pi);changed=true;}
+                        });
+                        if ui.ctx().input(|i|i.pointer.any_released()) && row.response.hovered() {
+                            if let Some(from)=dragging {if from!=pi {move_to=Some((from,pi));}}
+                        }
+                        if pi < entries.len() && kind == "menu" {
+                            let mut options=entries[pi]["options"].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join(", ");
+                            ui.horizontal(|ui| {ui.label("Choices");
+                                if ui.text_edit_singleline(&mut options).lost_focus() {
+                                    let choices=options.split(',').map(str::trim).filter(|s|!s.is_empty()).collect::<Vec<_>>();
+                                    if !choices.is_empty() {
+                                        entries[pi]["options"]=json!(choices);
+                                        if !choices.iter().any(|s|entries[pi]["default"]==*s) {entries[pi]["default"]=json!(choices[0]);}
+                                        changed=true;
+                                    }
+                                }
+                            });
+                        }
+                    });
+                    if pi>=entries.len() {break;}
+                }
+                if let Some((from,to))=move_to {let entry=entries.remove(from);entries.insert(to,entry);changed=true;}
+                if ui.ctx().input(|i|i.pointer.any_released()) {dragging=None;}
+                ui.ctx().data_mut(|d|if let Some(from)=dragging {d.insert_temp(drag_key,from)} else {d.remove::<usize>(drag_key)});
+                sections[si]["parameters"]=json!(entries);
+                let key=egui::Id::new(("controller_draft",id,si));
+                let mut draft=ui.ctx().data_mut(|d|d.get_persisted::<String>(key)).unwrap_or_default();
+                let kind_key=key.with("kind");
+                let mut kind=ui.ctx().data_mut(|d|d.get_persisted::<String>(kind_key)).unwrap_or_else(||"float".into());
+                ui.horizontal(|ui| {
+                    ui.text_edit_singleline(&mut draft);
+                    egui::ComboBox::from_id_salt("new_kind").selected_text(&kind).show_ui(ui,|ui|for option in minihou_core::controller::KINDS {ui.selectable_value(&mut kind,(*option).into(),*option);});
+                    if ui.button("Add parameter").clicked() {
+                        let name=draft.trim();
+                        if !name.is_empty() && !sections.iter().any(|s|s["parameters"].as_array().into_iter().flatten().any(|p|p["name"]==name)) {
+                            let options=if kind=="menu" {json!(["Option"])} else {json!([])};
+                            let default=if kind=="menu" {json!("Option")} else {minihou_core::controller::default(&kind)};
+                            sections[si]["parameters"].as_array_mut().unwrap().push(json!({"name":name,"kind":kind,"default":default,"options":options,"expose_to_blender":false}));
+                            changed=true; draft.clear();
+                        }
+                    }
+                });
+                ui.ctx().data_mut(|d|{d.insert_persisted(key,draft);d.insert_persisted(kind_key,kind);});
+            });
+        }
+        if let Some((from,to))=section_move {let entry=sections.remove(from);sections.insert(to,entry);changed=true;}
+        if ui.ctx().input(|i|i.pointer.any_released()) {section_dragging=None;}
+        ui.ctx().data_mut(|d|if let Some(from)=section_dragging {d.insert_temp(section_drag_key,from)} else {d.remove::<usize>(section_drag_key)});
+        if ui.button("Add section").clicked() {
+            let mut i=sections.len()+1;
+            while sections.iter().any(|s|s["name"]==format!("Section {i}")) {i+=1;}
+            sections.push(json!({"name":format!("Section {i}"),"parameters":[]}));changed=true;
+        }
+    });
+    if changed {
+        let mut next=v.doc.clone();next["nodes"][id]["controller_sections"]=json!(sections);
+        let kept:std::collections::HashSet<String>=minihou_core::controller::parameters(&next["nodes"][id]).iter().filter_map(|e|e["name"].as_str().map(str::to_owned)).collect();
+        if let Some(values)=next["nodes"][id]["params"].as_object_mut() {values.retain(|name,_|kept.contains(name));}
+        if let Some(channels)=next["nodes"][id]["channels"].as_object_mut() {channels.retain(|name,_|kept.contains(name.split('.').next().unwrap_or("")));}
+        if minihou_core::controller::validate(&next["nodes"][id]).is_ok() {
+            out.push(UiAction::Edit {edit:Edit::Replace(next),continuous:false});
+        }
+    }
 }
 
 /// A subnet's public numeric controls live in its own `params`, with a mapping

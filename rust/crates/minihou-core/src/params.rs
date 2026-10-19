@@ -19,6 +19,10 @@ pub struct Params {
 }
 
 impl Params {
+    pub fn resolve_node(node_type: &str, specs: &[ParamSpec], given: Option<&Map<String, Value>>) -> Result<Params> {
+        if node_type == "controller" { return Ok(Params { values: given.cloned().unwrap_or_default() }); }
+        Self::resolve(specs, given)
+    }
     /// The node's defaults overlaid with the graph's values; unknown names and unsupported non-defaults are errors.
     pub fn resolve(specs: &[ParamSpec], given: Option<&Map<String, Value>>) -> Result<Params> {
         let mut values = Map::new();

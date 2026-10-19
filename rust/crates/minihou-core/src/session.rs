@@ -133,12 +133,13 @@ impl Session {
     /// Set (or add) one parameter of a node. Unknown nodes and parameter names are errors here; a value the node refuses is
     /// an error at cook time, as in a graph file.
     pub fn set_param(&mut self, node: &str, name: &str, value: Value) -> Result<()> {
+        let controller = self.graph.controller_param(node, name).is_some();
         let def = self.graph.nodes.iter_mut().find(|(n, _)| n == node).map(|(_, d)| d)
             .ok_or_else(|| Error::new(format!("no such node '{node}'")))?;
         let spec = nodes::get(&def.node_type).ok_or_else(|| {
             Error::new(format!("node '{node}': node type '{}' is not in the Rust backend yet", def.node_type))
         })?;
-        if !spec.params.iter().any(|p| p.name == name) {
+        if !spec.params.iter().any(|p| p.name == name) && !controller {
             return Err(Error::new(format!("node '{node}' ({}): unknown parameter {name:?}", def.node_type)));
         }
         def.params.get_or_insert_with(Default::default).insert(name.to_string(), value);
@@ -146,12 +147,13 @@ impl Session {
     }
 
     pub fn set_channel(&mut self, node: &str, path: &str, expression: Option<String>) -> Result<()> {
+        let (base, component) = crate::channels::split_component(path);
+        let controller = self.graph.controller_param(node, base).map(|p| p["default"].clone());
         let def = self.graph.nodes.iter_mut().find(|(n, _)| n == node).map(|(_, d)| d)
             .ok_or_else(|| Error::new(format!("no such node '{node}'")))?;
         let spec = nodes::get(&def.node_type).ok_or_else(|| Error::new("unsupported node"))?;
-        let (base, component) = crate::channels::split_component(path);
-        let target = spec.params.iter().find(|p| p.name == base).ok_or_else(|| Error::new(format!("unknown parameter {path:?}")))?;
-        if component.is_some() && !(target.default)().as_array().is_some_and(|a| a.len()==3) {
+        let target = spec.params.iter().find(|p| p.name == base).map(|p| (p.default)()).or(controller).ok_or_else(|| Error::new(format!("unknown parameter {path:?}")))?;
+        if component.is_some() && !target.as_array().is_some_and(|a| a.len()==3) {
             return Err(Error::new(format!("parameter {path:?} has no vector component")));
         }
         let channels = def.channels.get_or_insert_with(Default::default);
@@ -533,7 +535,7 @@ impl Run<'_> {
         }
         let t0 = Instant::now();
         let external = if def.bypass { None } else {
-            let p=Params::resolve(spec.params,if def.node_type=="subnet" {None} else {self.resolved.params.get(id).or(def.params.as_ref())}).map_err(|e|e.in_node(id,&def.node_type))?;
+            let p=Params::resolve_node(&def.node_type,spec.params,if def.node_type=="subnet" {None} else {self.resolved.params.get(id).or(def.params.as_ref())}).map_err(|e|e.in_node(id,&def.node_type))?;
             if def.node_type == "object_input" { Some(nodes::blender_input::cook_binding(id,&p,self.external)) }
             else if def.node_type == "blender_object" { Some(nodes::blender_input::cook_object(id,&p,self.external)) }
             else { nodes::blender_input::cook_external(&def.node_type,&p,self.external) }

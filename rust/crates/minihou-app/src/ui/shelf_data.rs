@@ -25,6 +25,7 @@ pub(super) const TABS: &[Tab] = &[
         Tool { label: "Image File", node_type: "image_file", icon: "file" },
         Tool { label: "USD Import", node_type: "usd_import", icon: "file" },
         Tool { label: "Host Mesh", node_type: "modifier_input", icon: "host" },
+        Tool { label: "Controller", node_type: "controller", icon: "null" },
         Tool { label: "Object Input", node_type: "object_input", icon: "host" },
     ] },
     Tab { name: "Modify", tools: &[

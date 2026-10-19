@@ -4,8 +4,7 @@
 2. **Advanced Flood Fill** (`flood_fill`).
 3. **Full Array parity** (shapes, count methods, gizmos).
 4. **Image-based nodes** (Image Density + Scatter option first).
-5. **Controller node** (section-grouped driver panel, optional Blender exposure).
-6. **Low priority:** L-system is 2D (match the Python fix).
+5. **Low priority:** L-system is 2D (match the Python fix).
 
 ---
 
@@ -36,19 +35,6 @@ Report in 6 lines: what each node does, params, tests, the demo graph path, what
 # Queued node-editor fix (not the image work)
 
 - **Tab with nothing selected places the new node at the mouse position** in the node editor (not at the default spot). Attach to the next node-editor fix; check the existing Tab-menu insertion path (ui/network.rs, network_menu.rs) so a node created with a selection still follows its current rule.
-
----
-
-# Queued feature: Controller node
-
-A "Controller" node that acts as a control panel for top-level driver parameters.
-
-- **Add parameters of any type** (float, int, bool, vector, colour, string, menu, and so on) from the node's own panel.
-- **Drag to rearrange** parameters, and **group them into sections** that can be named and reordered.
-- **Purpose:** one place to hold the top-level drivers that other nodes reference, so a whole network can be tuned from one panel.
-- **Link to existing work:** it should reuse the Add Input machinery (dynamic typed inputs) and the value-linking references (`ch(...)`), so other nodes can link to its parameters.
-- **Sections are saved in the graph file** (decided by the user).
-- **Parameters can optionally be exposed to Blender** (decided by the user): each Controller parameter has an 'Expose to Blender' flag. Exposed parameters appear in the Blender modifier panel, inside a section that matches the Controller's section, and reuse the Add Input socket machinery. Unexposed parameters stay inside MiniHou.
 
 ---
 
@@ -203,7 +189,7 @@ Order:
 4. Attribute Wrangle parity.
 5. Polyfill full parity, then Houdini shelf gap nodes (Flash batches).
 6. Statistics nodes (volume, distance, bounding box, curve length).
-7. Loop Cut extras, Controller node.
+7. Loop Cut extras.
 8. Image nodes, Flood Fill, Array parity, rest of list.
 9. When the MCP works and the queue has no runnable jobs: archviz asset generators (wall, fence, road, tree scatter, roof), each with a demo; check pre-Rust examples for reference.
 
@@ -331,7 +317,6 @@ Nodes and parameters:
 - PolyExtrude: offset-even checkbox (Blender parity).
 - Delete node: full Houdini parity.
 - Blender curves input (support).
-- Controller node (thought done; verify).
 - Array: full Blender parity.
 - Boolean parameters not working when exposed to Blender (check supported parameter types).
 

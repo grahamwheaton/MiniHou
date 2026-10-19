@@ -544,7 +544,7 @@ impl Document {
             Edit::Param { node, name, value } => {
                 let typ = self.value["nodes"][node]["type"].as_str().ok_or("no such node")?.to_owned();
                 let spec = minihou_core::nodes::get(&typ).ok_or("unsupported node")?;
-                if !spec.params.iter().any(|p| p.name == name) { return Err("unknown parameter".into()); }
+                if !spec.params.iter().any(|p| p.name == name) && !(typ == "controller" && minihou_core::controller::parameter(&self.value["nodes"][node], name).is_some()) { return Err("unknown parameter".into()); }
                 self.set(&["nodes", node, "params", name], value.clone());
                 if let Some(group) = self.value["nodes"][node]["linked_params_group"].as_str().map(str::to_owned) {
                     let peers: Vec<String> = self.value["nodes"].as_object().into_iter().flatten()
@@ -1194,6 +1194,10 @@ pub fn link_interface(doc: &Value) -> Value {
         p["value"] = doc["nodes"][node]["params"].get(param).unwrap_or(&default).clone();
         params.push(p);
     }
+    for p in controller_entries(doc) {
+        let Some(name) = p["name"].as_str() else { continue };
+        if names.insert(name.to_owned()) { params.push(p); }
+    }
     for mut p in modifier_inputs::interface_entries(doc) {
         let Some(name) = p["name"].as_str().map(str::to_owned) else { continue };
         if !names.insert(name) { continue; }
@@ -1206,6 +1210,49 @@ pub fn link_interface(doc: &Value) -> Value {
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     serde_json::to_string(&structure).unwrap().hash(&mut hash);
     json!({"type":"interface","structure":format!("{:016x}",hash.finish()),"params":params})
+}
+
+/// Controller controls use their saved section order; each exposed control becomes one Blender input.
+pub fn controller_entries(doc: &Value) -> Vec<Value> {
+    let mut out = Vec::new();
+    for (node_id, node) in doc["nodes"].as_object().into_iter().flatten() {
+        if node["type"] != "controller" { continue; }
+        for section in node["controller_sections"].as_array().into_iter().flatten() {
+            let section_name = section["name"].as_str().unwrap_or("");
+            for entry in section["parameters"].as_array().into_iter().flatten() {
+                if entry["expose_to_blender"] != true { continue; }
+                let name = entry["name"].as_str().unwrap_or("");
+                let kind = match entry["kind"].as_str().unwrap_or("") { "vector" => "vec3", "color" => "color", k => k };
+                let default = &entry["default"];
+                out.push(json!({"name":format!("{node_id}_{name}"),"label":name,"node":node_id,"param":name,
+                    "kind":kind,"default":default,"value":node["params"].get(name).unwrap_or(default),"section":section_name}));
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod controller_tests {
+    use super::*;
+    #[test]
+    fn controller_exposes_only_flagged_controls_in_saved_sections() {
+        let original=json!({"version":1,"display":"driver","nodes":{"driver":{"type":"controller",
+            "controller_sections":[
+                {"name":"Shape","parameters":[{"name":"size","kind":"float","default":1.0,"expose_to_blender":true},{"name":"note","kind":"string","default":"hello"}]},
+                {"name":"Flags","parameters":[{"name":"enabled","kind":"bool","default":true,"expose_to_blender":true}]}],
+            "params":{"size":2.0}}}});
+        let doc=Document::parse(original.to_string()).unwrap();
+        let restored=Document::parse(doc.text().to_owned()).unwrap();
+        assert_eq!(restored.value()["nodes"]["driver"]["controller_sections"],original["nodes"]["driver"]["controller_sections"]);
+        let iface=link_interface(restored.value());
+        assert_eq!(iface["params"].as_array().unwrap().len(),2);
+        assert_eq!(iface["params"][0]["section"],"Shape");
+        assert_eq!(iface["params"][1]["section"],"Flags");
+        assert_eq!(iface["params"][0]["value"],json!(2.0));
+        let edit=link_param_edit(restored.value(),&json!({"name":"driver_size","value":3.0})).unwrap();
+        assert!(matches!(edit,Edit::Param{node,name,value} if node=="driver" && name=="size" && value==json!(3.0)));
+    }
 }
 
 /// Match Python snap_float32: preserve arbitrary doubles, shorten exact float32 inputs.
@@ -1224,6 +1271,14 @@ pub fn snap_float32(value: &Value) -> Value {
 
 pub fn link_param_edit(doc: &Value, message: &Value) -> Result<Edit> {
     if let Some(name) = message["name"].as_str() {
+        if let Some(entry) = controller_entries(doc).into_iter().find(|e| e["name"] == name) {
+            let node = entry["node"].as_str().unwrap().to_owned();
+            let param = entry["param"].as_str().unwrap().to_owned();
+            let value = snap_float32(message.get("value").ok_or("missing value")?);
+            let definition = minihou_core::controller::parameter(&doc["nodes"][&node], &param).ok_or("unknown controller parameter")?;
+            if !minihou_core::controller::valid_value(definition["kind"].as_str().unwrap(), &value, &definition["options"]) { return Err("invalid controller value".into()); }
+            return Ok(Edit::Param { node, name:param, value });
+        }
         if let Some(entry) = modifier_inputs::interface_entries(doc).into_iter().find(|e| e["name"] == name) {
             if entry["implicit"] == true {
                 // A picked Blender object names the node's object param (standalone use); the live feed wins.

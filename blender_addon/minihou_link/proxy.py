@@ -603,6 +603,22 @@ def sync_interface(ng, output_obj, params: List[dict], structure: str) -> None:
         target = geo_in.position + 1 + k
         if item.position != target:
             iface.move(item, target)
+    # Controller sections are real Geometry Nodes interface panels. Moving an existing
+    # socket keeps its identifier and the modifier value (including drivers) intact.
+    section_panels = {i.name: i for i in iface.items_tree if i.item_type == "PANEL"}
+    for p, item in zip(params, chosen):
+        section = p.get("section")
+        if not section:
+            continue
+        panel = section_panels.get(section)
+        if panel is None:
+            panel = iface.new_panel(section)
+            section_panels[section] = panel
+        if getattr(item, "parent", None) != panel:
+            iface.move_to_parent(item, panel, len([i for i in iface.items_tree if getattr(i, "parent", None) == panel]))
+    for panel in section_panels.values():
+        if not any(getattr(i, "parent", None) == panel for i in iface.items_tree):
+            iface.remove(panel)
     _sync_usage_chain(ng, params, ids)
     # Menu choices are defined by the linked Menu Switch inside the plumbing tree.
     # Only after that link exists can Blender accept a nonempty menu default.
