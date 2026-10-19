@@ -30,17 +30,85 @@ fn meta(ty: &str, field: &str) -> &'static str {
 fn words(s: &str) -> Vec<String> {
     s.to_ascii_lowercase().split(|c: char| !c.is_ascii_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_owned).collect()
 }
+fn word_starts(s: &str) -> Vec<(usize, char)> {
+    let mut starts = Vec::new();
+    let mut prev: Option<char> = None;
+    for (i, c) in s.char_indices() {
+        let is_start = match prev {
+            None => c.is_ascii_alphanumeric(),
+            Some(p) => (!p.is_ascii_alphanumeric() && c.is_ascii_alphanumeric())
+                || (p.is_ascii_lowercase() && c.is_ascii_uppercase()),
+        };
+        if is_start {
+            starts.push((i, c.to_ascii_lowercase()));
+        }
+        prev = Some(c);
+    }
+    starts
+}
+fn matches_word_starts(s: &str, tok: &str) -> bool {
+    let starts = word_starts(s);
+    if starts.len() < tok.len() || tok.is_empty() {
+        return false;
+    }
+    let mut starts_iter = starts.into_iter();
+    for tc in tok.chars() {
+        let mut matched = false;
+        for (_, sc) in starts_iter.by_ref() {
+            if sc == tc {
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
+            return false;
+        }
+    }
+    true
+}
+fn fuzzy_subseq(s: &str, tok: &str) -> Option<u32> {
+    if tok.is_empty() { return None; }
+    let s_lower = s.to_ascii_lowercase();
+    let mut first_idx = None;
+    let mut last_idx = 0;
+    let mut s_chars = s_lower.char_indices();
+    for tc in tok.chars() {
+        let mut found = false;
+        for (idx, sc) in s_chars.by_ref() {
+            if sc == tc {
+                if first_idx.is_none() {
+                    first_idx = Some(idx);
+                }
+                last_idx = idx;
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return None;
+        }
+    }
+    let first = first_idx?;
+    let span = (last_idx - first + 1) as u32;
+    let start_penalty = if first == 0 { 0 } else { 10 };
+    Some(start_penalty + span.min(20))
+}
 fn token_score(label: &str, name: &str, keywords: &str, category: &str, doc: &str, tok: &str) -> Option<u32> {
-    let label = label.to_ascii_lowercase();
-    let name = name.replace('_', " ").to_ascii_lowercase();
-    if label == tok || name == tok { Some(0) }
-    else if label.starts_with(tok) || name.starts_with(tok) { Some(1) }
-    else if words(&label).iter().chain(words(&name).iter()).any(|w| w.starts_with(tok)) { Some(2) }
-    else if label.contains(tok) || name.contains(tok) { Some(3) }
+    let label_lower = label.to_ascii_lowercase();
+    let name_clean = name.replace('_', " ").to_ascii_lowercase();
+    let name_lower = name.to_ascii_lowercase();
+    if label_lower == tok || name_lower == tok || name_clean == tok { Some(0) }
+    else if label_lower.starts_with(tok) || name_lower.starts_with(tok) || name_clean.starts_with(tok) { Some(1) }
+    else if words(label).iter().chain(words(name).iter()).any(|w| w.starts_with(tok))
+        || matches_word_starts(label, tok) || matches_word_starts(name, tok) { Some(2) }
+    else if label_lower.contains(tok) || name_lower.contains(tok) || name_clean.contains(tok) { Some(3) }
     else if words(keywords).iter().any(|w| w == tok) { Some(4) }
     else if words(keywords).iter().any(|w| w.starts_with(tok)) { Some(5) }
-    else if category.to_ascii_lowercase().contains(tok) { Some(6) }
-    else if doc.to_ascii_lowercase().contains(tok) { Some(7) }
+    else if let Some(q) = [fuzzy_subseq(label, tok), fuzzy_subseq(name, tok)].into_iter().flatten().min() {
+        Some(60 + q)
+    }
+    else if category.to_ascii_lowercase().contains(tok) { Some(100) }
+    else if doc.to_ascii_lowercase().contains(tok) { Some(110) }
     else { None }
 }
 fn search_score(ty: &str, query: &str) -> Option<u32> {
@@ -398,5 +466,24 @@ mod tests {
         let _ = ctx.run(egui::RawInput::default(), |ctx| { show(ctx, Id::new("search_harness"), &mut menu, &f.view(), &mut actions); });
         let shown = entries(&menu);
         assert_eq!(footer_text(shown.get(menu.active).map(|(_, e)| e)), "Polygon box or surface points; optional input fits an axis-aligned bounding box before rotation.");
+    }
+    #[test] fn fuzzy_search_matches_in_order_and_ranks_by_quality() {
+        // "sbd" finds "subdivide" via scattered letters in order
+        let mut menu = MenuState::new(Pos2::ZERO, None, true);
+        menu.query = "sbd".into();
+        let rows = entries(&menu);
+        assert!(matches!(rows.first(), Some((_, Entry::Tool("subdivide")))), "expected sbd to find subdivide");
+
+        // Quality ranking: exact name first, then word starts, then scattered letters
+        let exact_score = search_score("subdivide", "subdivide").unwrap();
+        let word_start_score = search_score("subdivide", "sub").unwrap();
+        let scattered_score = search_score("subdivide", "sbd").unwrap();
+        assert!(exact_score < word_start_score, "exact name ({exact_score}) should beat word start ({word_start_score})");
+        assert!(word_start_score < scattered_score, "word start ({word_start_score}) should beat scattered ({scattered_score})");
+
+        // Word starts via acronym/initials: "pb" finds "polybevel"
+        menu.query = "pb".into();
+        let rows = entries(&menu);
+        assert!(matches!(rows.first(), Some((_, Entry::Tool("polybevel")))), "expected pb to find polybevel");
     }
 }
