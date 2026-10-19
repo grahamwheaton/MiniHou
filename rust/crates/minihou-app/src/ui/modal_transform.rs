@@ -1,6 +1,10 @@
 //! Input and maths for viewport modal transforms. No document or renderer state lives here.
 use eframe::egui::{Key, Pos2, Vec2};
 use super::{CameraInfo, Orientation, SnapTo, SnapTargets, TransformOp};
+use crate::{transform_math, ui, App};
+use eframe::egui;
+use serde_json::json;
+use Kind as ModalKind;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind { Move, Rotate, Scale }
@@ -349,5 +353,118 @@ pub fn orientation_frame(orientation: Orientation, camera: CameraInfo, rotation:
         rotate.trackball=true; rotate.pointer=pos2(30.,20.);
         let values=rotate.desired(pos2(10.,10.),100.,frame,camera,false,0.25,false).0;
         assert!(values[0]!=0. && values[1]!=0.);
+    }
+}
+
+impl App {
+    pub(crate) fn update_modal(&mut self, ctx: &egui::Context) {
+        let Some(mut modal)=self.modal.take() else { return; };
+        let input=ctx.input(|i|(i.events.clone(),i.pointer.hover_pos(),i.modifiers,i.raw_scroll_delta.y));
+        let (events,pointer,modifiers,scroll)=input;
+        if let Some(pointer)=pointer { modal.pointer=pointer; }
+        let mut confirm=false; let mut cancel=false; let mut gg=false;
+        let camera=self.camera_info();
+        let orientation=if matches!(modal.constraint,Constraint::Axis(_,true)|Constraint::Plane(_,true))
+            { ui::Orientation::Local } else { self.editor_state.orientation };
+        let frame=if orientation == ui::Orientation::Cursor {
+            transform_math::Frame::from_rotation(&transform_math::euler_xyz(self.editor_state.cursor_rotation.map(f64::from)))
+                .axes.map(|axis| axis.map(|x| x as f32))
+        } else if orientation == ui::Orientation::Normal {
+            let trs = transform_math::TrsParams::from_params(&self.editor.doc.value()["nodes"][&self.display]["params"]);
+            self.selection_normal_frame(&trs).axes.map(|axis| axis.map(|x| x as f32))
+        } else { ui::modal_transform::orientation_frame(orientation,camera,modal.rotation) };
+        for event in events {
+            match event {
+                egui::Event::Key { key, pressed:true, modifiers:m, .. } => {
+                    if modal.type_key(key,m.shift) { continue; }
+                    match key {
+                        egui::Key::Escape => cancel=true,
+                        egui::Key::Enter | egui::Key::Space => confirm=true,
+                        egui::Key::G if ui::modal_transform::double_g_slides(modal.kind,self.editor_state.selection) => gg=true,
+                        egui::Key::X | egui::Key::Y | egui::Key::Z => modal.toggle_axis(match key { egui::Key::X=>0,egui::Key::Y=>1,_=>2 },m.shift),
+                        egui::Key::O => modal.proportional = !modal.proportional,
+                        egui::Key::PageUp => modal.wheel(1.), egui::Key::PageDown => modal.wheel(-1.),
+                        egui::Key::B if modal.kind==ModalKind::Move => { modal.cycle_snap(); if modal.reference.is_none() { modal.reference=Some(modal.pivot); } },
+                        egui::Key::B if modal.kind==ModalKind::Rotate => { modal.sketch=SketchStage::Pivot; modal.sketch_reference=None; },
+                        egui::Key::R if modal.kind==ModalKind::Rotate => modal.trackball = !modal.trackball,
+                        egui::Key::V if modal.kind==ModalKind::Scale => { modal.cage = !modal.cage; modal.cage_handle=None; },
+                        _=>{}
+                    }
+                }
+                egui::Event::PointerButton { pos, button:egui::PointerButton::Primary, pressed:true, .. } => {
+                    if modal.sketch==SketchStage::Pivot {
+                        let to=if !modal.snap_to.geometry() {ui::SnapTo::Face.into()} else {modal.snap_to};
+                        modal.sketch_pivot=self.modal_snap_point(pos,to).or(Some(modal.pivot));
+                        modal.pivot=modal.sketch_pivot.unwrap(); modal.sketch=SketchStage::Reference;
+                    } else if modal.sketch==SketchStage::Reference { modal.sketch_reference=Some(pos); modal.sketch=SketchStage::Angle; }
+                    else if modal.cage && modal.cage_handle.is_none() {
+                        modal.cage_handle=ui::transform_overlay::cage_hit(self.last_viewport,camera,&modal,pos);
+                        modal.cage_start=pos;
+                        if modal.cage_handle.is_none() { confirm=true; }
+                    } else if modifiers.ctrl && modifiers.shift && modal.kind==ModalKind::Move {
+                        modal.reference=self.modal_snap_point(pos,ui::SnapTo::Vertex);
+                    } else { confirm=true; }
+                }
+                egui::Event::PointerButton { button:egui::PointerButton::Secondary, pressed:true, .. } => cancel=true,
+                egui::Event::PointerButton { pos, button:egui::PointerButton::Middle, pressed:true, .. } => {
+                    if modal.constraint!=Constraint::Free { modal.constraint=Constraint::Free; } else { modal.mmb_start=Some(pos); }
+                }
+                egui::Event::PointerButton { pos, button:egui::PointerButton::Middle, pressed:false, .. } => {
+                    modal.middle_release(pos,frame,camera);
+                }
+                _=>{}
+            }
+        }
+        if let Some(start)=modal.mmb_start {
+            if (modal.pointer-start).length()>4. {
+                modal.constraint=Constraint::Axis(ui::modal_transform::closest_axis(modal.pointer-start,frame,camera),false);
+            }
+        }
+        if modal.proportional && scroll!=0. { modal.wheel(scroll.signum()); }
+        if gg { self.cancel_transform(); self.command("edge_slide",ctx); return; }
+        if cancel {
+            self.editor_state.proportional.enabled=modal.initial_proportional;
+            self.editor_state.proportional.radius=modal.initial_radius;
+            self.cancel_transform(); return;
+        }
+        self.editor_state.proportional.enabled=modal.proportional;
+        self.editor_state.proportional.radius=modal.radius;
+        let snap=self.editor_state.snap.enabled ^ modifiers.ctrl;
+        if modal.kind==ModalKind::Move && snap && modal.snap_to.geometry() {
+            let feature=self.modal_snap_feature(modal.pointer,modal.snap_to);
+            modal.target=feature.map(|f|f.point);
+            modal.target_kind=feature.map(|f|f.kind);
+            modal.target_shape=feature.map(|f|f.triangle);
+        } else { modal.target=None; modal.target_shape=None; modal.target_kind=None; }
+        let center=ui::transform_gizmo::project(camera,self.last_viewport,modal.pivot).unwrap_or(self.last_viewport.center());
+        let unit=ui::transform_gizmo::project(camera,self.last_viewport,[modal.pivot[0]+1.,modal.pivot[1],modal.pivot[2]])
+            .map(|p|(p-center).length()).unwrap_or(80.).max(1.);
+        let orientation=if matches!(modal.constraint,Constraint::Axis(_,true)|Constraint::Plane(_,true))
+            { ui::Orientation::Local } else { self.editor_state.orientation };
+        let frame=if orientation == ui::Orientation::Cursor {
+            transform_math::Frame::from_rotation(&transform_math::euler_xyz(self.editor_state.cursor_rotation.map(f64::from)))
+                .axes.map(|axis| axis.map(|x| x as f32))
+        } else if orientation == ui::Orientation::Normal {
+            let trs = transform_math::TrsParams::from_params(&self.editor.doc.value()["nodes"][&self.display]["params"]);
+            self.selection_normal_frame(&trs).axes.map(|axis| axis.map(|x| x as f32))
+        } else { ui::modal_transform::orientation_frame(orientation,camera,modal.rotation) };
+        if snap && modal.kind==ModalKind::Move && modal.snap_to.contains(ui::SnapTo::Increment) {
+            if let Some(target)=modal.target.take() {
+                let (grid,_) = modal.desired(center,unit,frame,camera,true,self.editor_state.snap.increment,modifiers.shift);
+                let reference=modal.reference.unwrap_or(modal.pivot);
+                let grid_point=[0,1,2].map(|k|reference[k]+grid[k]);
+                let distance=|p|ui::transform_gizmo::project(camera,self.last_viewport,p).map(|p|p.distance(modal.pointer)).unwrap_or(f32::INFINITY);
+                if distance(target) <= distance(grid_point) { modal.target=Some(target); }
+                else { modal.target_shape=None; modal.target_kind=None; }
+            }
+        }
+        let (values,pivot)=modal.desired(center,unit,frame,camera,snap,self.editor_state.snap.increment,modifiers.shift);
+        let pivot_changed=self.transform_target.as_ref().is_some_and(|target|
+            self.editor.doc.value()["nodes"][target]["params"]["pivot"]!=json!(pivot));
+        if values!=modal.last || pivot_changed {
+            let op=modal.step(values);
+            self.transform_node_at(op,Some(pivot),Some(orientation));
+        }
+        if confirm { self.finish_modal(modal); } else { self.modal=Some(modal); ctx.request_repaint(); }
     }
 }
