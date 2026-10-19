@@ -46,6 +46,8 @@ impl Params {
         self.values.get(name).unwrap_or(&Value::Null)
     }
 
+    pub fn value(&self, name: &str) -> &Value { self.get(name) }
+
     pub fn f(&self, name: &str) -> Result<f64> {
         let v = self.get(name);
         match v {
