@@ -186,7 +186,12 @@ fn element_indices(g:&Geometry, triangles:&[u32]) -> (Vec<u32>,Vec<u32>) {
 struct Element { a:[f32;3], b:[f32;3], kind:u32, selected:u32 }
 /// Instance data is expanded from stable point/segment indices, never from the LOD triangles.
 /// Surface points (kind 2) draw in point selection mode, or when the overlays are on and the points overlay is on.
-fn points_visible(o:&crate::ui::Overlays, mode:crate::ui::SelectionMode) -> bool { mode==crate::ui::SelectionMode::Points || (o.enabled && o.points) }
+fn points_visible(o:&crate::ui::Overlays, mode:crate::ui::SelectionMode) -> bool { match mode { crate::ui::SelectionMode::Points=>true, crate::ui::SelectionMode::Object=>false, _=>o.enabled && o.points } }
+/// Object-mode rule, in one place: points that are a face corner or an edge end are kind 2 (hidden in object mode);
+/// only points used by no face and no edge are kind 1 (stray). Stray edges are the kind 0 segments.
+fn point_kind(id:u32, loose:&std::collections::HashSet<u32>, edge_ends:&std::collections::HashSet<u32>) -> u32 {
+    if loose.contains(&id) && !edge_ends.contains(&id) {1} else {2}
+}
 
 struct Elements { buffer:wgpu::Buffer, selected:u32, total:u32 }
 /// Point previews arrive as three axis-aligned segments per point. Keep real edges
@@ -217,23 +222,29 @@ fn viewport_point_highlights_become_discs_without_losing_edges() {
 }
 impl Elements {
     fn new(device:&wgpu::Device, scene:&Scene, ranges:&[std::ops::Range<u32>], selected_points:&[u32]) -> Self {
+        let instances=Self::instances(scene,ranges,selected_points);
+        let count=instances.1; let instances=instances.0;
+        let buffer=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label:Some("point and curve instances"),contents:if instances.is_empty() { &[0u8;32] } else { bytemuck::cast_slice(&instances) },usage:wgpu::BufferUsages::VERTEX });
+        Self {buffer,selected:count,total:instances.len() as u32}
+    }
+    fn instances(scene:&Scene, ranges:&[std::ops::Range<u32>], selected_points:&[u32]) -> (Vec<Element>,u32) {
         let mut instances=Vec::new(); let mut count=0;
+        let edge_ends:std::collections::HashSet<u32>=scene.line_primitive_indices().iter().copied().collect();
         let loose:std::collections::HashSet<_>=scene.point_indices().iter().copied().collect();
         let picked:std::collections::HashSet<_>=selected_points.iter().copied().collect();
         let at=|id:u32| { let k=id as usize*3; [scene.p[k],scene.p[k+1],scene.p[k+2]] };
         for selected in [true,false] {
             let belongs=|ids:&[u32]| ranges.iter().any(|r| ids.iter().all(|id| r.contains(id)))==selected;
             for id in 0..(scene.p.len()/3) as u32 { if belongs(&[id]) {
-                instances.push(Element { a:at(id), b:at(id), kind:if loose.contains(&id) {1} else {2}, selected:picked.contains(&id) as u32 });
+                instances.push(Element { a:at(id), b:at(id), kind:point_kind(id,&loose,&edge_ends), selected:picked.contains(&id) as u32 });
             } }
             for pair in scene.line_primitive_indices().chunks_exact(2) { if belongs(pair) {
                 instances.push(Element { a:at(pair[0]), b:at(pair[1]), kind:0, selected:0 });
             } }
             if selected { count=instances.len() as u32; }
         }
-        let buffer=device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label:Some("point and curve instances"),contents:if instances.is_empty() { &[0u8;32] } else { bytemuck::cast_slice(&instances) },usage:wgpu::BufferUsages::VERTEX });
-        Self {buffer,selected:count,total:instances.len() as u32}
+        (instances,count)
     }
 }
 
@@ -1210,8 +1221,36 @@ mod tests {
         let off=Overlays{enabled:false,..Default::default()};
         assert!(!super::points_visible(&off,SelectionMode::Object));
         assert!(super::points_visible(&off,SelectionMode::Points));
-        assert!(super::points_visible(&Overlays::default(),SelectionMode::Object));
-        assert!(!super::points_visible(&Overlays{points:false,..Default::default()},SelectionMode::Object));
+        assert!(!super::points_visible(&Overlays::default(),SelectionMode::Object));
+        assert!(super::points_visible(&Overlays::default(),SelectionMode::Edges));
+        assert!(!super::points_visible(&Overlays{points:false,..Default::default()},SelectionMode::Edges));
+    }
+
+fn cube(extra:bool) -> Geometry {
+        let mut p=vec![0.,0.,0.,1.,0.,0.,1.,1.,0.,0.,1.,0.,0.,0.,1.,1.,0.,1.,1.,1.,1.,0.,1.,1.];
+        if extra { p.extend([5.,5.,5.]); }
+        let v=vec![0,3,2,1,4,5,6,7,0,1,5,4,2,3,7,6,0,4,7,3,1,2,6,5];
+        Geometry::from_arrays(p,v,vec![0,4,8,12,16,20,24],Some(vec![true;6])).unwrap()
+    }
+    fn kinds(g:&Geometry) -> (Vec<u32>,Vec<u32>) {
+        let (inst,_)=Elements::instances(&Scene::new(g),&[],&[]);
+        let k=|n| inst.iter().filter(|e| e.kind==n).count() as u32;
+        // stray points (kind 1) visible in object mode; kind 2 hidden there; kind 0 are stray edges
+        (vec![k(0),k(1)],vec![k(2)])
+    }
+    #[test] fn object_mode_cube_points_all_hidden() {
+        let g=cube(false);
+        assert_eq!(kinds(&g),(vec![0,0],vec![8]));
+    }
+    #[test] fn object_mode_shows_only_stray_point() {
+        let g=cube(true);
+        assert_eq!(kinds(&g),(vec![0,1],vec![8]));
+    }
+    #[test] fn object_mode_shows_only_stray_edge() {
+        let p=vec![0.,0.,0.,1.,0.,0.,1.,1.,0.,0.,1.,0.,3.,0.,0.,4.,0.,0.];
+        let g=Geometry::from_arrays(p,vec![0,1,2,3,4,5],vec![0,4,6],Some(vec![true,false])).unwrap();
+        // the edge's two ends are attached to it, so they are hidden; the quad's corners too
+        assert_eq!(kinds(&g),(vec![1,0],vec![6]));
     }
 
     use super::*;
