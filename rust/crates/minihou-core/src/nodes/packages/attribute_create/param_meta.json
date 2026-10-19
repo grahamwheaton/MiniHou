@@ -1,4 +1,9 @@
 {
+  "attributes": {
+    "default": null,
+    "doc": "Repeatable attribute entries with Name, Class, Type, Size, Default, and Value.",
+    "kind": "json"
+  },
   "domain": {
     "default": "points",
     "doc": "Geometry domain receiving the new attribute.",
