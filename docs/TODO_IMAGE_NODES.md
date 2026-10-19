@@ -276,7 +276,6 @@ Migrate the legacy nodes to the self-registering package system, following docs/
 
 ## Features from testing (reported 2026-10-18)
 
-6. **Vertex bevel** node (Blender bevel of vertices, with the same options as edge bevel where they apply).
 9. **Dissolve flat edges** node, as Houdini's Dissolve Flat Edges (https://www.sidefx.com/docs/houdini/nodes/sop/labs--dissolve_flat_edges-1.0.html): remove edges between coplanar faces, merging the faces, with a tolerance.
 10. **Clean node parity** with Houdini's Clean (https://www.sidefx.com/docs/houdini/nodes/sop/clean.html): Consolidate Points with distance, Remove Degenerate Primitives with tolerance, Delete Unused Groups, Orient Polygons, Reverse Winding, Fix Overlaps, Remove Unused Points, Remove Attribs and Groups (patterns), Remove NaNs, Manifold-Only Topology. Screenshot 73.png shows the Houdini parameter layout to match.
 

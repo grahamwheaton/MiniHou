@@ -1,0 +1,6 @@
+{
+  "group": {"kind": "str", "default": "", "pick_domain": "points", "doc": "Point group or point numbers to bevel; empty selects all eligible points."},
+  "width": {"kind": "float", "default": 0.1, "min": 0.0, "doc": "Distance from each selected point along its incident edges."},
+  "segments": {"kind": "int", "default": 1, "min": 1, "max": 16, "doc": "Number of rings across each vertex cap; one makes a flat chamfer."},
+  "profile": {"kind": "float", "default": 0.5, "min": 0.0, "max": 1.0, "doc": "Curvature of additional cap rings: zero gives even spacing and one rounds toward the old corner."}
+}
