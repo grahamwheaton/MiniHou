@@ -373,6 +373,34 @@ fn feeds_displayed_node(value: &Value, selected: &str) -> bool {
     }
     false
 }
+fn feeds_node(value: &Value, selected: &str, target: &str) -> bool {
+    if selected.is_empty() || target.is_empty() { return false; }
+    let mut pending = vec![target.to_owned()];
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id.clone()) { continue; }
+        if id == selected { return true; }
+        if let Some(inputs) = value["nodes"][&id]["inputs"].as_object() {
+            for input in inputs.values() {
+                if let Some(source) = input.as_str() { pending.push(source.to_owned()); }
+                else if let Some(sources) = input.as_array() {
+                    pending.extend(sources.iter().filter_map(Value::as_str).map(str::to_owned));
+                }
+            }
+        }
+    }
+    false
+}
+pub(crate) fn resolve_displayed_node<'a>(value: &Value, selected: &str, display_ranges: &'a [(String, std::ops::Range<u32>)]) -> Option<&'a str> {
+    if selected.is_empty() { return None; }
+    if let Some((id, _)) = display_ranges.iter().find(|(id, _)| id == selected) {
+        if feeds_displayed_node(value, selected) {
+            return Some(id.as_str());
+        }
+    }
+    display_ranges.iter().find(|(id, _)| feeds_node(value, selected, id)).map(|(id, _)| id.as_str())
+}
+
 /// Where a viewport modelling node (extrude, push/pull, bevel...) is inserted. Element ids come from the displayed
 /// scene, so the node must take the displayed geometry: the selected node only when it exists and is what the
 /// display shows (itself, or the node feeding a displayed output); otherwise the display (e.g. after an undo removed
@@ -1069,9 +1097,8 @@ impl App {
     fn active_object(&self) -> Option<&str> {
         // while a field is being picked the displayed pick source is the active object (the selected node is not displayed)
         if let Some(pick) = &self.param_pick { return active_range(&pick.source, &self.display_ranges).map(|_| pick.source.as_str()); }
-        (!self.object_hidden && self.selected_set.contains(&self.selected)
-            && active_range(&self.selected,&self.display_ranges).is_some()
-            && feeds_displayed_node(self.editor.doc.value(), &self.selected)).then_some(self.selected.as_str())
+        if self.object_hidden || !self.selected_set.contains(&self.selected) { return None; }
+        resolve_displayed_node(self.editor.doc.value(), &self.selected, &self.display_ranges)
     }
     fn active_selection(&self) -> Option<picking::Selection> {
         Some(selection_in_range(&self.selection,self.scene.as_ref()?,active_range(self.active_object()?,&self.display_ranges)?))
@@ -1236,12 +1263,21 @@ impl App {
             .map(|peer| (peer.clone(), value["nodes"][peer]["params"]["translate"].clone())).collect();
         match apply_transform_step(&mut self.editor.doc, first, value, &target, name, param_value) {
             Ok(edits) => {
+                let active_is_output = self.editor.doc.value()["nodes"].get(&active).is_some_and(|n| n["type"] == "output");
                 if self.editor_state.selection == ui::SelectionMode::Object {
-                    self.selected_set.remove(&self.selected);
-                    self.selected_set.insert(target.clone());
-                    self.selected = target.clone();
+                    if active_is_output {
+                        self.selected_set.remove(&self.selected);
+                        self.selected_set.insert(active.clone());
+                        self.selected = active.clone();
+                    } else {
+                        self.selected_set.remove(&self.selected);
+                        self.selected_set.insert(target.clone());
+                        self.selected = target.clone();
+                    }
                 }
-                self.transform_target = Some(target.clone()); self.display = target.clone(); for edit in edits { self.send(edit); }
+                self.transform_target = Some(target.clone());
+                self.display = if active_is_output { active.clone() } else { target.clone() };
+                for edit in edits { self.send(edit); }
                 if !first {
                     for (peer, translate) in peer_translates {
                         let edit = Edit::Param {node:peer, name:"translate".into(), value:translate};
@@ -1279,8 +1315,12 @@ impl App {
         }
         let _ = is_modal;
         if let Some(target) = self.transform_target.take() {
-            if self.editor_state.selection != ui::SelectionMode::Object { self.selected_set = std::collections::BTreeSet::from([target.clone()]); }
-            self.selected = target;
+            if self.editor_state.selection != ui::SelectionMode::Object {
+                self.selected_set = std::collections::BTreeSet::from([target.clone()]);
+                self.selected = target;
+            } else if !self.editor.doc.value()["nodes"].get(&self.selected).is_some_and(|n| n["type"] == "output") {
+                self.selected = target;
+            }
         }
         self.transform_pivot = None;
         self.transform_orientation = None;

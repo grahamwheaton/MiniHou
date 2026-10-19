@@ -474,3 +474,46 @@ fn shearing_scale_appends_one_transform_node_and_cooks() {
     assert!((lo[0] + hi[0]).abs() < 1e-4);
     assert!((hi[0] - lo[0] - 2.0_f32.sqrt() * 2.).abs() < 1e-4);
 }
+
+#[test]
+fn output_node_selection_resolves_to_displayed_output() {
+    let value: Value = serde_json::from_str(include_str!("default_graph.json")).unwrap();
+    let display_ranges = vec![("output1".to_string(), 0..1000)];
+
+    // When the output node itself is selected
+    assert_eq!(resolve_displayed_node(&value, "output1", &display_ranges), Some("output1"));
+
+    // When upstream nodes feeding output1 are selected
+    assert_eq!(resolve_displayed_node(&value, "normal1", &display_ranges), Some("output1"));
+    assert_eq!(resolve_displayed_node(&value, "transform1", &display_ranges), Some("output1"));
+    assert_eq!(resolve_displayed_node(&value, "noise1", &display_ranges), Some("output1"));
+    assert_eq!(resolve_displayed_node(&value, "grid1", &display_ranges), Some("output1"));
+
+    // When an unconnected node or empty string is selected
+    assert_eq!(resolve_displayed_node(&value, "nonexistent", &display_ranges), None);
+    assert_eq!(resolve_displayed_node(&value, "", &display_ranges), None);
+
+    // Multi-output graph resolution
+    let multi = json!({
+        "display": ["out1", "out2"],
+        "nodes": {
+            "box1": {"type": "box"},
+            "out1": {"type": "output", "inputs": {"geo": "box1"}},
+            "sphere1": {"type": "sphere"},
+            "trans2": {"type": "transform", "inputs": {"geo": "sphere1"}},
+            "out2": {"type": "output", "inputs": {"geo": "trans2"}},
+            "orphan": {"type": "box"}
+        }
+    });
+    let multi_ranges = vec![
+        ("out1".to_string(), 0..24),
+        ("out2".to_string(), 24..66),
+    ];
+    assert_eq!(resolve_displayed_node(&multi, "out1", &multi_ranges), Some("out1"));
+    assert_eq!(resolve_displayed_node(&multi, "box1", &multi_ranges), Some("out1"));
+    assert_eq!(resolve_displayed_node(&multi, "out2", &multi_ranges), Some("out2"));
+    assert_eq!(resolve_displayed_node(&multi, "trans2", &multi_ranges), Some("out2"));
+    assert_eq!(resolve_displayed_node(&multi, "sphere1", &multi_ranges), Some("out2"));
+    assert_eq!(resolve_displayed_node(&multi, "orphan", &multi_ranges), None);
+}
+
