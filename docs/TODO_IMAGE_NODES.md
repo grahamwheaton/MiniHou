@@ -375,3 +375,4 @@ In object mode, points are still drawn even when they belong to a face or an edg
   - The UI dropdown is in `ui/params.rs` (wait for Bob's split to merge first).
   - The wildcard matching in group parsing (`element_select.rs` `parse_group` and the core group handling) can be done separately.
 - **Todo: Color node domain should offer Points, Edges and Faces.** The node package is the place to change it; no shared UI files.
+- **Todo: Clip node needs a viewport gizmo to move the clip plane.** Viewport gizmo work, so it waits for Bob's split to merge (`viewport.rs` and `main.rs`).
