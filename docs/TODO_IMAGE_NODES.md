@@ -1,3 +1,8 @@
+## PRIORITY (bumped 2026-10-19): silhouette outline and darker object orange
+
+- Silhouette outline: when an object is selected, show only its silhouette outline in orange, not internal faces and edges (screenshot 86).
+- Darker orange for object selection, distinct from the point, edge and face selection colours.
+
 # QUEUE (ordered, highest priority first)
 
 1. **Viewport select arrow on group and element fields** (purple highlight). Shared widget, see below.
