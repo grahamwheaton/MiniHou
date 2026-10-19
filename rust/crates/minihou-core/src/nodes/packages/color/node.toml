@@ -1,5 +1,5 @@
 id = "color"
 name = "Color"
 category = "Attributes"
-description = "Set point or primitive colors by mode."
+description = "Set point, edge, or face colors by mode."
 keywords = "attribute color"
