@@ -599,6 +599,10 @@ struct App {
     undo_element_selection: Vec<(String, picking::Selection, picking::Selection)>,
     pending_restore_selection: Option<(picking::Selection, picking::Selection, Option<picking::Selection>)>,
     model_before_selection: Option<(picking::Selection, picking::Selection)>,
+    /// Viewport selection steps: the selection (and stash) before each step on the undo stack, and those undone.
+    sel_undo: Vec<(picking::Selection, picking::Selection)>,
+    sel_redo: Vec<(picking::Selection, picking::Selection)>,
+    sel_baseline: (picking::Selection, picking::Selection),
     extrude_keep: Option<picking::Selection>,
 }
 impl App {
@@ -716,6 +720,26 @@ impl App {
         self.selection_dirty |= element_select::apply_region(&mut self.selection, found, op);
     }
 
+    fn sync_selection_baseline(&mut self) { self.sel_baseline = (self.selection.clone(), self.stashed_selection.clone()); }
+    /// A viewport selection change becomes one step on the shared undo stack.
+    fn record_selection_step(&mut self) {
+        if self.selection == self.sel_baseline.0 { return; }
+        let before = std::mem::replace(&mut self.sel_baseline, (self.selection.clone(), self.stashed_selection.clone()));
+        self.editor.history.record_selection(&self.editor.doc);
+        self.sel_undo.push(before);
+        self.sel_redo.clear();
+    }
+    /// Undo or redo one selection step; the document is untouched.
+    fn step_selection(&mut self, undo: bool) {
+        let (from, to) = if undo { (&mut self.sel_undo, &mut self.sel_redo) } else { (&mut self.sel_redo, &mut self.sel_undo) };
+        let Some(target) = from.pop() else { return };
+        to.push((self.selection.clone(), self.stashed_selection.clone()));
+        self.selection = target.0; self.stashed_selection = target.1;
+        if self.selection.mode != ui::SelectionMode::Object { self.editor_state.apply(ui::EditorChange::Selection(self.selection.mode)); }
+        self.sync_selection_baseline();
+        self.selection_dirty = true;
+    }
+
     fn new(doc: Document, path: PathBuf, state: egui_wgpu::RenderState) -> Result<Self> {
         Self::new_document(doc, path, state, true)
     }
@@ -732,7 +756,7 @@ impl App {
             prefs:Preferences::default(),keymap:Keymap::blender(),prefs_open:false,viewport_hover:false,network_hover:false,
             display_ranges:Vec::new(),scene:None,shown_level:1.0,geo_rev:u64::MAX,lod_uploaded:false,last_lod_view:None,last_lod_select:Instant::now(),blender_paths:Vec::new(),blender_bar:false,selection:picking::Selection::default(),selection_dirty:false,param_pick:None,barrier_key:None,target_key:None,picked_field:None,selection_metrics:Default::default(),coplanar:None,group_preview:Default::default(),elem_topo:Default::default(),stashed_selection:picking::Selection::default(),
             clipboard:None,transform_before:None,transform_target:None,transform_delta:None,transform_pivot:None,transform_orientation:None,modal:None,embed_conflict:None,model_modal:None,mirror:None,pushpull_pick:false,last_operator:None,last_viewport:egui::Rect::NOTHING,
-            last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default(),pending_loop_selection:None,undo_element_selection:Vec::new(),pending_restore_selection:None,model_before_selection:None,extrude_keep:None };
+            last_edit_selection:ui::SelectionMode::Points,params_open:true,object_hidden:false,held_keys:Vec::new(),selection_memory:Default::default(),pending_loop_selection:None,undo_element_selection:Vec::new(),pending_restore_selection:None,model_before_selection:None,sel_undo:Vec::new(),sel_redo:Vec::new(),sel_baseline:Default::default(),extrude_keep:None };
         app.prefs = Preferences::load();
         app.prefs.apply_python(&python_gate());
         app.mode=Mode::parse(&app.prefs.viewport.default_shading);
@@ -2490,10 +2514,13 @@ impl App {
                 }
                 UiAction::Undo | UiAction::Redo => {
                     let undo = matches!(action, UiAction::Undo);
+                    self.record_selection_step();
                     let previous = self.editor.doc.value().clone();
                     let previous_text = previous.to_string();
                     let command = if undo { self.editor.history.undo(&mut self.editor.doc) } else { self.editor.history.redo(&mut self.editor.doc) };
-                    if let Some(command) = command {
+                    if command.is_some() && self.editor.history.last_was_selection() {
+                        self.step_selection(undo);
+                    } else if let Some(command) = command {
                         self.pending_loop_selection=None;
                         if undo {
                             self.pending_restore_selection=undo_selection_for(&mut self.undo_element_selection,
@@ -2904,6 +2931,7 @@ impl eframe::App for App {
                     }
                 }
                 self.scene = Some(scene);
+                self.sync_selection_baseline();
                 self.elem_topo = Default::default();
                 if self.param_pick.as_ref().is_some_and(|p| p.load && p.ready) { self.pick_load(); }
                 if first { self.frame_mesh(); }
@@ -2939,8 +2967,10 @@ impl eframe::App for App {
                 _ => picking::Selection { mode: to, ..Default::default() },
             };
             self.selection_dirty = true;
+            self.sync_selection_baseline();
         }
         if self.selection_dirty {
+            self.record_selection_step();
             let pick_set=self.pick_set();
             if let (Some(gpu), Some(scene)) = (&mut self.gpu, &self.scene) {
                 let size = scene.radius * 0.012;
