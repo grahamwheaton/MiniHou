@@ -185,6 +185,9 @@ fn element_indices(g:&Geometry, triangles:&[u32]) -> (Vec<u32>,Vec<u32>) {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Element { a:[f32;3], b:[f32;3], kind:u32, selected:u32 }
 /// Instance data is expanded from stable point/segment indices, never from the LOD triangles.
+/// Surface points (kind 2) draw in point selection mode, or when the overlays are on and the points overlay is on.
+fn points_visible(o:&crate::ui::Overlays, mode:crate::ui::SelectionMode) -> bool { mode==crate::ui::SelectionMode::Points || (o.enabled && o.points) }
+
 struct Elements { buffer:wgpu::Buffer, selected:u32, total:u32 }
 /// Point previews arrive as three axis-aligned segments per point. Keep real edges
 /// as lines and turn only that recognisable cross geometry into disc instances.
@@ -944,7 +947,7 @@ impl Gpu {
             object_color:(overlay.object_color==ObjectColor::Random || use_cd) as u32,_pad_color:[0;3],
             floor:[10f32.powf((cam.distance().max(0.01)*0.1).log10().floor()),overlay.grid as u32 as f32,overlay.axes as u32 as f32,cam.distance().max(0.01)],
             element_size:[target.size[0] as f32,target.size[1] as f32,overlay.geometry.point_size*if selection_mode==crate::ui::SelectionMode::Points {4.} else {1.},overlay.geometry.line_width],
-            element_flags:[overlay.geometry.points as u32,overlay.geometry.lines as u32,overlay.geometry.enabled as u32,(selection_mode==crate::ui::SelectionMode::Points) as u32],
+            element_flags:[(overlay.geometry.points || selection_mode==crate::ui::SelectionMode::Points) as u32,overlay.geometry.lines as u32,points_visible(&overlay.geometry,selection_mode) as u32,(selection_mode==crate::ui::SelectionMode::Points) as u32],
             element_color:if overlay.light_background {[0.025,0.03,0.04,1.]} else {[0.72,0.75,0.8,1.]} };
         queue.write_buffer(&self.ubuf,0,bytemuck::bytes_of(&u));
         let matcap_id=overlay.matcap.texture_id();
@@ -1201,6 +1204,16 @@ impl Target {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn points_pass_follows_mode_and_overlay() {
+        use crate::ui::{Overlays,SelectionMode};
+        let off=Overlays{enabled:false,..Default::default()};
+        assert!(!super::points_visible(&off,SelectionMode::Object));
+        assert!(super::points_visible(&off,SelectionMode::Points));
+        assert!(super::points_visible(&Overlays::default(),SelectionMode::Object));
+        assert!(!super::points_visible(&Overlays{points:false,..Default::default()},SelectionMode::Object));
+    }
+
     use super::*;
     use minihou_core::lod::{Cluster, Sphere};
 
