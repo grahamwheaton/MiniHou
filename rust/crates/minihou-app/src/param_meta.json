@@ -195,6 +195,11 @@
   }
  },
  "attribute_create": {
+  "allow_local": {
+   "default": true,
+   "doc": "Allow local variables when evaluating parameter expressions.",
+   "kind": "bool"
+  },
   "attributes": {
    "default": null,
    "doc": "Repeatable attribute entries with Name, Class, Type, Size, Default, and Value.",
@@ -211,6 +216,25 @@
     "detail"
    ]
   },
+  "enable": {
+   "default": true,
+   "doc": "Enable creating this attribute.",
+   "kind": "bool"
+  },
+  "encode_invalid": {
+   "default": false,
+   "doc": "Encode/sanitize invalid characters in attribute names instead of failing.",
+   "kind": "bool"
+  },
+  "existing": {
+   "default": "overwrite",
+   "doc": "Action if attribute already exists: overwrite or keep.",
+   "kind": "enum",
+   "options": [
+    "overwrite",
+    "keep"
+   ]
+  },
   "group": {
    "default": "",
    "doc": "Only set it on these elements (others get 0); points or primitives",
@@ -218,10 +242,44 @@
    "pick_domain_default": "points",
    "pick_domain_param": "domain"
   },
+  "group_type": {
+   "default": "guess",
+   "doc": "Element domain used for group evaluation (guess follows attribute domain).",
+   "kind": "enum",
+   "options": [
+    "guess",
+    "points",
+    "primitives",
+    "vertices",
+    "detail"
+   ]
+  },
+  "guess_from_name": {
+   "default": false,
+   "doc": "Guess attribute type and component size from its name.",
+   "kind": "bool"
+  },
   "name": {
    "default": "attrib1",
    "doc": "Name of the attribute to create.",
    "kind": "str"
+  },
+  "precision": {
+   "default": "auto",
+   "doc": "Storage bit precision (auto, 32, 64, 16, 8).",
+   "kind": "enum",
+   "options": [
+    "auto",
+    "32",
+    "64",
+    "16",
+    "8"
+   ]
+  },
+  "save_to_info_block": {
+   "default": false,
+   "doc": "Save attribute metadata to node info block.",
+   "kind": "bool"
   },
   "type": {
    "default": "float",
@@ -233,7 +291,11 @@
     "vector",
     "vector2",
     "color",
-    "vector4"
+    "vector4",
+    "string",
+    "index",
+    "array",
+    "dict"
    ]
   },
   "value": {
@@ -244,6 +306,16 @@
    ],
    "doc": "Value (float/int use the first component; vector4 adds w = 1)",
    "kind": "vec3"
+  },
+  "varname": {
+   "default": "",
+   "doc": "Local variable name for expressions.",
+   "kind": "str"
+  },
+  "write_values": {
+   "default": true,
+   "doc": "Write evaluated values to the attribute (false fills default only).",
+   "kind": "bool"
   }
  },
  "attribute_delete": {

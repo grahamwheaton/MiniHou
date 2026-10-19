@@ -338,9 +338,6 @@ Surface sampling now has the Houdini parameter names and opt-in output attribute
 
 Remaining: true volume primitives and voxel-independent/2D-volume options (the current volume mode samples polygon interiors), primitive-attribute Override Prim Area, relaxation across primitive boundaries, and string detail-to-point attributes. Keep this section until those cases work; current polygon-interior mode explicitly rejects unsupported voxel and relaxation settings.
 
-## Feature: Attribute Create advanced options (remaining)
-
-Add Group Type and Encode Invalid Attribute Names. Per-attribute controls still needed: enable checkbox, Existing Name, Local Variable, Save to Info Block, additional types and Guess from name, Precision, Write Values, and Allow Local Vars. String attributes on geometry domains need storage support.
 
 ## Feature: middle-mouse scale bar slider, Houdini parity (requested 2026-10-18)
 
