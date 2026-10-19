@@ -42,6 +42,6 @@ fn fs_outline(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
         discard;
     }
 
-    // #ffa028 in sRGB: (1.0, 160.0/255.0, 40.0/255.0, 1.0)
-    return vec4<f32>(1.0, 160.0 / 255.0, 40.0 / 255.0, 1.0);
+    // Object selection is darker than the #ffa028 element selection.
+    return vec4<f32>(217.0 / 255.0, 120.0 / 255.0, 18.0 / 255.0, 1.0);
 }

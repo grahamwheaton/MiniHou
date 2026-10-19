@@ -1,8 +1,3 @@
-## PRIORITY (bumped 2026-10-19): silhouette outline and darker object orange
-
-- Silhouette outline: when an object is selected, show only its silhouette outline in orange, not internal faces and edges (screenshot 86).
-- Darker orange for object selection, distinct from the point, edge and face selection colours.
-
 # QUEUE (ordered, highest priority first)
 
 1. **Viewport select arrow on group and element fields** (purple highlight). Shared widget, see below.
@@ -233,10 +228,6 @@ Repro (user): make a box, add Loop Cut, make a group of edges, click the purple 
 
 Likely cause (first press): main.rs `UiAction::PickParameter` clears `self.selection` and `group_preview` and does not load the field's current value into the highlight, so the existing group is not shown. Second press: `self.param_pick` is overwritten and `previous_display` is saved while `display` already points at the pick source, so the restore on exit is wrong; a panic in the pick path is the probable crash. Needs the panic text (run the exe from a terminal) to confirm.
 
-## Future: darker orange for object selection (requested 2026-10-18)
-
-Object selection should use a darker orange than the point, edge and face selection colours, so the two are easy to tell apart in the viewport. Check the selection colour constants in the viewport code and the object outline colour before changing them.
-
 ## Future: app icon and top-left logo (requested 2026-10-18)
 
 Use the blue "M" logo (rounded blue square with a white M) as the app icon (window and taskbar, and the exe icon) and in the top-left of the editor, in place of the current icon. Needs the logo as an .ico for the exe and a PNG for the in-app header.
@@ -348,10 +339,6 @@ In Houdini, a middle-mouse click on a number field opens a vertical scale bar wi
 ## Feature: copy and paste parameter values with the mouse (requested 2026-10-18)
 
 Hover over a parameter value and press Ctrl+C to copy it. Hover over another parameter and press Ctrl+V to paste it. Works for number, vector (all channels), text and enum values, and for group fields. Keep the copied value in the app (not the system clipboard only), so it works between nodes.
-
-## Feature: silhouette outline for a selected object (requested 2026-10-18)
-
-When an object is selected, show only its silhouette outline (the outer edge seen from the camera) in orange, not the internal faces and edges. Screenshot 86 shows the current internal edges on a selected object.
 
 ## Testing feedback round 3 (2026-10-19)
 
