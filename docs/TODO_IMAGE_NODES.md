@@ -288,10 +288,6 @@ Migrate the legacy nodes to the self-registering package system, following docs/
 9. **Dissolve flat edges** node, as Houdini's Dissolve Flat Edges (https://www.sidefx.com/docs/houdini/nodes/sop/labs--dissolve_flat_edges-1.0.html): remove edges between coplanar faces, merging the faces, with a tolerance.
 10. **Clean node parity** with Houdini's Clean (https://www.sidefx.com/docs/houdini/nodes/sop/clean.html): Consolidate Points with distance, Remove Degenerate Primitives with tolerance, Delete Unused Groups, Orient Polygons, Reverse Winding, Fix Overlaps, Remove Unused Points, Remove Attribs and Groups (patterns), Remove NaNs, Manifold-Only Topology. Screenshot 73.png shows the Houdini parameter layout to match.
 
-## Bug: group_create silently fails on an expression pattern (reported 2026-10-18)
-
-The pattern `@P.z >1` is not valid for group_create's pattern field, which takes numbers, ranges and names (like Houdini). But the node shows "not cooked" with no error message, which is confusing. Fix: report "unrecognised pattern: ..." in the node status. Later: add a method `expression` to group_create that takes an Attribute Wrangle-style expression (after Wrangle parity).
-
 ## Testing feedback on ce2c51c36 (2026-10-18)
 
 Bugs:
@@ -311,22 +307,6 @@ Features:
 - **Output target button:** a target button next to each output parameter. Hover shows the output on the mesh (a float output can show as a strength level); click selects the group. Suggest a colour (not purple, which is the input selection colour).
 - **Dissolve flat edges and Clean parity** (Flash, in progress); if the Clean/dissolve nodes cannot be found in the Tab menu, add them to the shelf.
 
-## Global rule: purple input arrows and output target buttons (requested 2026-10-18)
-
-- Every input group parameter on every node gets the purple selector arrow, applied from the metadata generator (tools/dump_rust_param_meta.py) by a rule on the parameter name and type (group, group_name, pattern, edges, points, faces and similar selection fields), not per node.
-- Every output group parameter (for example outgrp_* and output_group names) gets a target button next to it. Hovering shows that output's elements on the mesh (a float output can show as a strength level). Clicking selects the group. Suggested colour: teal or cyan (purple is the input selection colour).
-- Implement as one shared rule in the UI (ui/params.rs), reading the metadata kind, so new nodes get both automatically.
-
-## Feature: Match Size node, Houdini parity (requested 2026-10-18)
-
-Match Size (https://www.sidefx.com/docs/houdini/nodes/sop/matchsize.html): translate and scale the input so its bounding box matches a target. Parameters: Group (with the purple arrow), Group Type, Justify With (Input If Wired, Target, and so on), Use Groups to Determine Justification Bounds, Target Position (x, y, z), Target Size (x, y, z), Translate, Justify X/Y/Z (Center, Min, Max, and so on) to Same/Target with Offset By, Scale to Fit, Uniform Scale, Restore Transform, and Stash Transform (with Replace Existing).
-## Node editor and linking (requested 2026-10-18)
-
-- **Remove the "Rs" badge** from nodes in the node editor (the Rust-backend marker is no longer needed on each node).
-- **External link icon:** replace the Blender icon on externally linked parameters with the same style as the linked-parameter icon (screenshot 80: a green arrow with the link count), in orange. If a parameter is both externally linked and linked in MiniHou, keep it orange.
-- **Edit expression:** when a parameter already has a link, "Edit expression" should open with the existing relationship filled in, not empty.
-- **Per-channel link menus:** right-clicking a single channel of a vector (X, Y or Z) should link just that channel. Clicking the label still links all channels (X, Y and Z together).
-
 ## Feature: Subnet, Houdini parity (requested 2026-10-18)
 
 Bug seen: Ctrl+G groups a box and a subdivide, but both inner nodes show in the main graph as subnet1/box1 and subnet1/subdivide1 (the group is expanded at load, subnet_edit.rs and graph.rs expand_subnets). Wanted, like Houdini: the selected nodes collapse into one subnet node that shows as one node. Double-click opens it to show the inner graph. The subnet has input and output nodes inside; the user can add and remove extra inputs and outputs. Inputs can carry parameters (promoted from inside); outside the group, clicking the subnet shows those parameters with sliders and can take driver links, like any node. Plan with Argon first, then Codex implements.
@@ -343,14 +323,6 @@ The Tab node search should match fuzzily: letters in order rather than an exact 
 
 Match Houdini's Attribute Noise (https://www.sidefx.com/docs/houdini/nodes/sop/attribnoise.html) and Mountain (screenshot 82): Group and Blend; Attribute Names (Vector, Float, with X, Y, Z channel toggles) and Attribute Class; Noise Along Vector with a Vector Attribute; Operation (Add and others), Range Values (Zero Centered and others), Amplitude, Output Raw Value, Enable Remap Ramp; Noise Type (Simplex and others), Location Attribute, Element Size, Offset (with XYZ), Use VEXpression; Animation; Fractal (type such as Hybrid Terrain, with octaves, roughness, lacunarity and so on); Warping; Post-Process. Build on the current noise and mountain nodes, and match the parameter names and defaults so existing graphs still load.
 
-## Fix: promote a viewport selection when the group domain changes (requested 2026-10-18)
-
-If the user selects points in the viewport and then changes a group node's domain to faces (or edges), the current selection should be promoted to that domain automatically: points to the faces (or edges) they fully surround, and the reverse, so the field shows the right group. The promotion should be one undo step and survive undo (the selection itself is restored on undo, not reset). Check the domain change path in params.rs and the selection restore in main.rs.
-
-## Feature: Split node, Houdini parity (requested 2026-10-18)
-
-Houdini's Split (screenshot 83): splits the input into separate pieces by a group (Group with the purple arrow, Group Type), with Invert Selection and Delete Unused Groups. The selected group becomes its own piece and the rest stays as another, so both can be used downstream. Match the parameter names and defaults.
-
 ## Feature: PolyExtrude, Houdini parity (requested 2026-10-18)
 
 Houdini's PolyExtrude (screenshots 84 to 87): Group (purple arrow), Divide Into (Connected Components and others), Split Group, Extrusion Mode (Primitive/Edge Normal and others), Distance, Inset, Twist, Divisions, Spine Shape (Straight and others). Extrusion tab: Transform Extruded Front, Output Front, Output Back, Output Side, Front, Back and Side groups, Front and Back Boundary Groups, Preserve Groups, Limit Insetting, Use Common Limit, Add Vertex Normals, Cusp Angle, Generate Unwrapped Texture Coordinates for Sides (Style Proportional, Scaling Match Incident UV Scale). Spine Control tab: Front and Back Magnitude and Stiffness, Interpolation (Rotating Frame and others), Division Spacing, External Spine (Reverse Direction, Axial Rotation, Front and Back Blend), Thickness Scale and Thickness Ramp, Twist and Local Twist Ramp with Range Half-Width. Local Control tab: attribute overrides for distance (zscale), inset (insetscale), twist (twistscale), divisions (divsscale), and local frames (localx, localz, localctr).
@@ -362,10 +334,6 @@ Houdini's PolyExtrude (screenshots 84 to 87): Group (purple arrow), Divide Into 
 - The viewport ignores the point/vertex colour attribute `Cd` (only Single and Random colour exist, in Overlays -> Color).
 - Add a **Cd** option to that menu: interpolate Cd across each face when the geometry has it; default to Cd when present, else Single.
 - Affects Image File, Image Density and any node that writes Cd. Small, self-contained viewport change. Not started.
-
-## Urgent: show Cd colours in the viewport (requested 2026-10-18)
-
-Geometry with a Cd colour attribute (point, vertex or face, as the Color node and Image File write) should show those colours in the solid viewport, not grey. Check the display path (viewport.rs, the shader, the Scene build for the colour buffer) and whether the Color node output reaches it.
 
 ## Feature: Scatter node, Houdini parity (requested 2026-10-18)
 
