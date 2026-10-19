@@ -374,3 +374,4 @@ In object mode, points are still drawn even when they belong to a face or an edg
 - **Priority todo: group parameter fields get a dropdown and accept wildcards.** Every group parameter field should offer a dropdown listing the groups detected on its input. The field should also accept wildcard patterns: `*` (zero or more characters), `?` (exactly one character), `[abc]` (one listed character, ranges like `[0-9]` allowed), `^pattern` (exclude), and a space to union several patterns (for example `leg_* arm_*`). Example: `* ^debris_*` selects all groups except those starting with `debris_`.
   - The UI dropdown is in `ui/params.rs` (wait for Bob's split to merge first).
   - The wildcard matching in group parsing (`element_select.rs` `parse_group` and the core group handling) can be done separately.
+- **Todo: Color node domain should offer Points, Edges and Faces.** The node package is the place to change it; no shared UI files.
