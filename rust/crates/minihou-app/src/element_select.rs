@@ -41,13 +41,29 @@ impl Topology {
     /// Tokens outside this topology (stale or foreign ids) are dropped, never indexed.
     pub fn parse_group(&self, text: &str, mode: SelectionMode) -> Selection {
         let mut s = Selection { mode, ..Default::default() };
-        for tok in text.split_whitespace() {
+        let tokens: Vec<_> = text.split_whitespace().collect();
+        if !tokens.is_empty() && tokens.iter().all(|tok| tok.starts_with('^')) {
+            s = self.parse_group("*", mode);
+        }
+        for tok in tokens.iter().copied().filter(|tok| !tok.starts_with('^')) {
             let tok = tok.trim_start_matches('p');
+            let wildcard = tok.contains(['*', '?', '[']);
             match mode {
+                SelectionMode::Points if wildcard => for i in 0..self.npoints as u32 {
+                    if minihou_core::group_pattern::matches(tok, &i.to_string()) && !s.points.contains(&i) { s.points.push(i); }
+                },
                 SelectionMode::Points => if let Ok(i) = tok.parse::<u32>() { if (i as usize) < self.npoints && !s.points.contains(&i) { s.points.push(i); } },
+                SelectionMode::Edges if wildcard => for &(a, b) in &self.edges {
+                    if minihou_core::group_pattern::matches(tok, &format!("{a}-{b}")) && !s.edges.contains(&(a, b)) { s.edges.push((a, b)); }
+                },
                 SelectionMode::Edges => if let Some((a, b)) = tok.split_once('-') {
                     if let (Ok(a), Ok(b)) = (a.parse::<u32>(), b.parse::<u32>()) {
                         if self.edge_of(a, b).is_some() && !s.edges.contains(&(a, b)) { s.edges.push((a, b)); }
+                    }
+                },
+                SelectionMode::Faces if wildcard => for i in 0..self.npolys {
+                    if minihou_core::group_pattern::matches(tok, &i.to_string()) {
+                        for &t in self.poly_tris(i) { if !s.tris.contains(&t) { s.tris.push(t); } }
                     }
                 },
                 SelectionMode::Faces => if let Ok(i) = tok.parse::<u32>() {
@@ -55,6 +71,12 @@ impl Topology {
                 },
                 SelectionMode::Object => {}
             }
+        }
+        for tok in tokens.iter().filter_map(|tok| tok.strip_prefix('^')).filter(|tok| !tok.is_empty()) {
+            let excluded = self.parse_group(tok, mode);
+            s.points.retain(|i| !excluded.points.contains(i));
+            s.edges.retain(|e| !excluded.edges.iter().any(|x| key(x.0, x.1) == key(e.0, e.1)));
+            s.tris.retain(|t| !excluded.tris.contains(t));
         }
         s
     }
@@ -682,6 +704,28 @@ mod tests {
         mesh(p, &[&[0, 2, 3, 1], &[4, 5, 7, 6], &[0, 1, 5, 4], &[2, 6, 7, 3], &[0, 4, 6, 2], &[1, 3, 7, 5]])
     }
     fn topo((p, t, e): &(Vec<f32>, Vec<u32>, Vec<u32>)) -> Topology { Topology::new(p, t, e) }
+
+    #[test]
+    fn parse_group_wildcards_union_exclusion_and_plain_tokens() {
+        let t = topo(&grid(3, 2));
+        let points = |text| t.parse_group(text, Points).points;
+        assert_eq!(points("1"), vec![1]);
+        assert_eq!(points("1*"), vec![1, 10, 11]);
+        assert_eq!(points("?"), (0..10).collect::<Vec<_>>());
+        assert_eq!(points("[0-2]"), vec![0, 1, 2]);
+        assert_eq!(points("[013]"), vec![0, 1, 3]);
+        assert_eq!(points("1* 2*"), vec![1, 10, 11, 2]);
+        assert_eq!(points("* ^1*"), (0..12).filter(|i| !i.to_string().starts_with('1')).collect::<Vec<_>>());
+        assert_eq!(points("^1*"), points("* ^1*"));
+        assert_eq!(points("^1* 1"), Vec::<u32>::new());
+
+        let edges = t.parse_group("p0-* ^p0-1", Edges).edges;
+        assert!(!edges.contains(&(0, 1)));
+        assert!(!edges.is_empty());
+        assert_eq!(t.parse_group("p1-0", Edges).edges, vec![(1, 0)]);
+        assert_eq!(t.parse_group("[0-2]", Faces).tris,
+            t.parse_group("0 1 2", Faces).tris);
+    }
     fn sorted(mut v: Vec<(u32, u32)>) -> Vec<(u32, u32)> { v.sort(); v }
     fn edge_walk(m: &(Vec<f32>, Vec<u32>, Vec<u32>), a: u32, b: u32, ring: bool) -> Vec<(u32, u32)> {
         let t = topo(m);
