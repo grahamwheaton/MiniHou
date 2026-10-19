@@ -318,7 +318,11 @@ The Tab node search should match fuzzily: letters in order rather than an exact 
 
 ## Feature: PolyExtrude, Houdini parity (requested 2026-10-18)
 
-Houdini's PolyExtrude (screenshots 84 to 87): Group (purple arrow), Divide Into (Connected Components and others), Split Group, Extrusion Mode (Primitive/Edge Normal and others), Distance, Inset, Twist, Divisions, Spine Shape (Straight and others). Extrusion tab: Transform Extruded Front, Output Front, Output Back, Output Side, Front, Back and Side groups, Front and Back Boundary Groups, Preserve Groups, Limit Insetting, Use Common Limit, Add Vertex Normals, Cusp Angle, Generate Unwrapped Texture Coordinates for Sides (Style Proportional, Scaling Match Incident UV Scale). Spine Control tab: Front and Back Magnitude and Stiffness, Interpolation (Rotating Frame and others), Division Spacing, External Spine (Reverse Direction, Axial Rotation, Front and Back Blend), Thickness Scale and Thickness Ramp, Twist and Local Twist Ramp with Range Half-Width. Local Control tab: attribute overrides for distance (zscale), inset (insetscale), twist (twistscale), divisions (divsscale), and local frames (localx, localz, localctr).
+Extrusion parameters implemented: Divide Into, Split Group, Extrusion Mode, Distance, Inset, Twist, Divisions, Spine Shape, Transform Extruded Front, Output Front, Output Back, Output Side, Front/Back/Side groups, Front and Back Boundary Groups, Preserve Groups, Limit Insetting, Use Common Limit, Add Vertex Normals with Cusp Angle, and Generate UVs for sides.
+
+Remaining:
+Spine Control tab: Front and Back Magnitude and Stiffness, Interpolation (Rotating Frame and others), Division Spacing, External Spine (Reverse Direction, Axial Rotation, Front and Back Blend), Thickness Scale and Thickness Ramp, Twist and Local Twist Ramp with Range Half-Width.
+Local Control tab: attribute overrides for distance (zscale), inset (insetscale), twist (twistscale), divisions (divsscale), and local frames (localx, localz, localctr).
 
 ---
 

@@ -372,7 +372,7 @@ pub const CLIP: NodeSpec = NodeSpec {
 pub const POLYEXTRUDE: NodeSpec = NodeSpec {
     name: "polyextrude",
     inputs: GEO,
-    params: crate::params!("group":"";"edges":"";"points":"";"distance":0.5;"direction":[0.,0.,0.];"inset":0.;"mode":"connected";"output_back":false;"outgrp_front":true;"outgrp_front_name":"extrudeFront";"outgrp_back":false;"outgrp_back_name":"extrudeBack";"outgrp_side":true;"outgrp_side_name":"extrudeSide"),
+    params: crate::params!("group":"";"edges":"";"points":"";"distance":0.5;"direction":[0.,0.,0.];"inset":0.;"mode":"connected";"output_back":false;"outgrp_front":true;"outgrp_front_name":"extrudeFront";"outgrp_back":false;"outgrp_back_name":"extrudeBack";"outgrp_side":true;"outgrp_side_name":"extrudeSide";"divide_into":"connected";"split_group":"";"extrusion_mode":"primitive_normal";"twist":0.;"divisions":1;"spine_shape":"straight";"transform_front":true;"output_front":true;"output_side":true;"outgrp_front_boundary":false;"outgrp_front_boundary_name":"extrudeFrontBoundary";"outgrp_back_boundary":false;"outgrp_back_boundary_name":"extrudeBackBoundary";"preserve_groups":true;"limit_insetting":false;"use_common_limit":false;"add_vertex_normals":false;"cusp_angle":60.;"generate_sides_uvs":false;"uv_style":"proportional";"uv_scaling":"match_incident"),
     cook: polyextrude,
 };
 pub(super) fn ear_clip(xy: &[[f64; 2]]) -> Vec<[usize; 3]> {
@@ -630,12 +630,18 @@ fn polyextrude(inputs: &Inputs, p: &Params) -> Result<Geometry> {
     if !p.s("edges")?.is_empty() || !p.s("points")?.is_empty() {
         return component_extrude(&g, &p.s("edges")?, &p.s("points")?, p.f("distance")?, direction);
     }
+    let divide_into = p.s("divide_into").unwrap_or_else(|_| "connected".to_string());
+    let mode = if divide_into == "individual" {
+        "individual".to_string()
+    } else {
+        p.e("mode", &["connected", "individual"])?
+    };
     extrude_with_direction(
         &g,
         &p.s("group")?,
         p.f("distance")?,
         p.f("inset")?,
-        &p.e("mode", &["connected", "individual"])?,
+        &mode,
         p.b("output_back")?,
         Some(p),
         direction,
@@ -728,12 +734,72 @@ pub(super) fn extrude(
 ) -> Result<Geometry> {
     extrude_with_direction(g, group, distance, inset, mode, back, params, [0.; 3])
 }
+fn compute_vertex_normals(geo: &Geometry, cusp_angle: f64) -> Vec<f32> {
+    let p_slice = geo.p();
+    let vp = &geo.topology.vertex_point;
+    let offs = &geo.topology.prim_offsets;
+    let nprims = geo.nprims();
+    let nverts = geo.nvertices();
+    let npoints = geo.npoints;
+    let fnorm = normals::prim_normals(p_slice, &geo.topology);
+    let funit_f32 = normals::normalize_to_f32(&fnorm);
+    let funit: Vec<[f64; 3]> = (0..nprims)
+        .map(|f| [
+            funit_f32[f * 3] as f64,
+            funit_f32[f * 3 + 1] as f64,
+            funit_f32[f * 3 + 2] as f64,
+        ])
+        .collect();
+    let cos_cusp = (cusp_angle.to_radians()).cos() - 1e-9;
+    let (start, prims) = normals::point_prims(vp, offs, npoints);
+    let mut n_data = vec![0.0f32; nverts * 3];
+    for f in 0..nprims {
+        let u_f = funit[f];
+        let s = offs[f] as usize;
+        let e = offs[f + 1] as usize;
+        for v in s..e {
+            let q = vp[v] as usize;
+            let mut acc = [0.0f64; 3];
+            for &nbr_u32 in &prims[start[q] as usize..start[q + 1] as usize] {
+                let nbr = nbr_u32 as usize;
+                let u_nbr = funit[nbr];
+                let dot = u_f[0] * u_nbr[0] + u_f[1] * u_nbr[1] + u_f[2] * u_nbr[2];
+                if dot >= cos_cusp {
+                    acc[0] += fnorm[nbr][0];
+                    acc[1] += fnorm[nbr][1];
+                    acc[2] += fnorm[nbr][2];
+                }
+            }
+            let len = (acc[0] * acc[0] + acc[1] * acc[1] + acc[2] * acc[2]).sqrt();
+            if len > 1e-12 {
+                n_data[v * 3] = (acc[0] / len) as f32;
+                n_data[v * 3 + 1] = (acc[1] / len) as f32;
+                n_data[v * 3 + 2] = (acc[2] / len) as f32;
+            } else {
+                n_data[v * 3] = u_f[0] as f32;
+                n_data[v * 3 + 1] = u_f[1] as f32;
+                n_data[v * 3 + 2] = u_f[2] as f32;
+            }
+        }
+    }
+    n_data
+}
+
 fn extrude_with_direction(
     g: &Geometry, group: &str, distance: f64, inset: f64, mode: &str,
     back: bool, params: Option<&Params>, direction: [f64; 3],
 ) -> Result<Geometry> {
     polygons(g, "polyextrude")?;
     let sel = prim_mask(g, group)?;
+    let output_front = params.map_or(Ok(true), |p| p.b("output_front"))?;
+    let output_side = params.map_or(Ok(true), |p| p.b("output_side"))?;
+    let output_back = params.map_or(Ok(back), |p| p.b("output_back"))?;
+    let divisions = params.map_or(Ok(1), |p| p.i("divisions"))?.max(1) as usize;
+    let twist = params.map_or(Ok(0.0), |p| p.f("twist"))?;
+    let add_vertex_normals = params.map_or(Ok(false), |p| p.b("add_vertex_normals"))?;
+    let cusp_angle = params.map_or(Ok(60.0), |p| p.f("cusp_angle"))?;
+    let generate_sides_uvs = params.map_or(Ok(false), |p| p.b("generate_sides_uvs"))?;
+
     let apply_groups =
         |out: &mut Geometry, front: &[bool], back: &[bool], side: &[bool]| -> Result<()> {
             if let Some(p) = params {
@@ -746,7 +812,8 @@ fn extrude_with_direction(
             }
             Ok(())
         };
-    if !sel.iter().any(|&b| b) || (distance == 0. && inset == 0. && !back) {
+
+    if !sel.iter().any(|&b| b) || (distance == 0. && inset == 0. && !output_back && twist == 0. && output_front && divisions == 1) {
         let mut out = g.clone();
         apply_groups(
             &mut out,
@@ -815,6 +882,57 @@ fn extrude_with_direction(
             newp.push(point);
         }
     }
+
+    if twist.abs() > 1e-6 {
+        let twist_rad = twist.to_radians();
+        let cos_t = twist_rad.cos();
+        let sin_t = twist_rad.sin();
+        let rotate_pt = |p: [f64; 3], center: [f64; 3], axis: [f64; 3]| -> [f64; 3] {
+            let w = sub(p, center);
+            let cross_aw = cross(axis, w);
+            let dot_aw = dot(axis, w);
+            let rot_w = add(mul(w, cos_t), add(mul(cross_aw, sin_t), mul(axis, dot_aw * (1.0 - cos_t))));
+            add(center, rot_w)
+        };
+        if individual {
+            for i in 0..g.nprims() {
+                if !sel[i] { continue; }
+                let verts: Vec<usize> = range(g, i).collect();
+                let axis = if len(direction) > 0. { unit(direction) } else { fu[i] };
+                let pts: Vec<[f64; 3]> = verts.iter().map(|&v| newp[nv[v] - g.npoints]).collect();
+                let count = pts.len() as f64;
+                let center = [
+                    pts.iter().map(|p| p[0]).sum::<f64>() / count,
+                    pts.iter().map(|p| p[1]).sum::<f64>() / count,
+                    pts.iter().map(|p| p[2]).sum::<f64>() / count,
+                ];
+                for &v in &verts {
+                    let idx = nv[v] - g.npoints;
+                    newp[idx] = rotate_pt(newp[idx], center, axis);
+                }
+            }
+        } else if !newp.is_empty() {
+            let count = newp.len() as f64;
+            let center = [
+                newp.iter().map(|p| p[0]).sum::<f64>() / count,
+                newp.iter().map(|p| p[1]).sum::<f64>() / count,
+                newp.iter().map(|p| p[2]).sum::<f64>() / count,
+            ];
+            let avg_norm = if len(direction) > 0. {
+                unit(direction)
+            } else {
+                let mut acc = [0.; 3];
+                for &v in &selected {
+                    acc = add(acc, fn_[pv[v]]);
+                }
+                unit(acc)
+            };
+            for p in &mut newp {
+                *p = rotate_pt(*p, center, avg_norm);
+            }
+        }
+    }
+
     let boundary: Vec<_> = if individual {
         selected.clone()
     } else {
@@ -829,25 +947,115 @@ fn extrude_with_direction(
             .filter(|&v| cnt[e.of_vertex[v] as usize] == 1)
             .collect()
     };
+
     let mut point = concat(&g.point, &gather(&g.point, &src));
     let mut p = g.p().to_vec();
     p.extend(newp.iter().flat_map(|q| q.map(|x| x as f32)));
-    point.insert("P".into(), Arc::new(Attr::f32(3, p)));
-    let mut outvp: Vec<_> = vp
-        .iter()
-        .enumerate()
-        .map(|(v, &q)| if sel[pv[v]] { nv[v] as i32 } else { q })
-        .collect();
-    let mut vs: Vec<_> = (0..g.nvertices()).collect();
-    let mut ps: Vec<_> = (0..g.nprims()).collect();
-    let mut sizes: Vec<_> = (0..g.nprims()).map(|i| range(g, i).len()).collect();
-    for &v in &boundary {
-        outvp.extend([vp[v], vp[nx[v]], nv[nx[v]] as i32, nv[v] as i32]);
-        vs.extend([v, nx[v], nx[v], v]);
-        ps.push(pv[v]);
-        sizes.push(4);
+
+    let mut pt_map = BTreeMap::new();
+    if divisions > 1 {
+        let mut extra_pts = Vec::new();
+        let mut extra_src = Vec::new();
+        for &v in &boundary {
+            for &corner in &[v, nx[v]] {
+                let (a, b) = (vp[corner] as usize, nv[corner]);
+                if pt_map.contains_key(&(1, a, b)) {
+                    continue;
+                }
+                let pos_a = pos[a];
+                let pos_b = [
+                    newp[b - g.npoints][0],
+                    newp[b - g.npoints][1],
+                    newp[b - g.npoints][2],
+                ];
+                for d in 1..divisions {
+                    let frac = d as f64 / divisions as f64;
+                    let interp = [
+                        pos_a[0] + (pos_b[0] - pos_a[0]) * frac,
+                        pos_a[1] + (pos_b[1] - pos_a[1]) * frac,
+                        pos_a[2] + (pos_b[2] - pos_a[2]) * frac,
+                    ];
+                    let pt_idx = g.npoints + newp.len() + extra_pts.len();
+                    pt_map.insert((d, a, b), pt_idx);
+                    extra_pts.push(interp);
+                    extra_src.push(a);
+                }
+            }
+        }
+        let extra_gather = gather(&g.point, &extra_src);
+        point = concat(&point, &extra_gather);
+        for pt in extra_pts {
+            p.extend([pt[0] as f32, pt[1] as f32, pt[2] as f32]);
+        }
     }
-    if back {
+    point.insert("P".into(), Arc::new(Attr::f32(3, p)));
+
+    let step_pt = |d: usize, corner: usize| -> i32 {
+        if d == 0 {
+            vp[corner]
+        } else if d == divisions {
+            nv[corner] as i32
+        } else {
+            *pt_map.get(&(d, vp[corner] as usize, nv[corner])).unwrap() as i32
+        }
+    };
+
+    let mut outvp: Vec<i32> = Vec::new();
+    let mut vs: Vec<usize> = Vec::new();
+    let mut ps: Vec<usize> = Vec::new();
+    let mut sizes: Vec<usize> = Vec::new();
+
+    let mut is_front = Vec::new();
+    let mut is_side = Vec::new();
+    let mut is_back = Vec::new();
+
+    for i in 0..g.nprims() {
+        let r = range(g, i);
+        if sel[i] {
+            if output_front {
+                sizes.push(r.len());
+                ps.push(i);
+                is_front.push(true);
+                is_side.push(false);
+                is_back.push(false);
+                for v in r {
+                    outvp.push(nv[v] as i32);
+                    vs.push(v);
+                }
+            }
+        } else {
+            sizes.push(r.len());
+            ps.push(i);
+            is_front.push(false);
+            is_side.push(false);
+            is_back.push(false);
+            for v in r {
+                outvp.push(vp[v]);
+                vs.push(v);
+            }
+        }
+    }
+
+    if output_side {
+        for &v in &boundary {
+            for d in 0..divisions {
+                outvp.extend([
+                    step_pt(d, v),
+                    step_pt(d, nx[v]),
+                    step_pt(d + 1, nx[v]),
+                    step_pt(d + 1, v),
+                ]);
+                vs.extend([v, nx[v], nx[v], v]);
+                ps.push(pv[v]);
+                sizes.push(4);
+                is_front.push(false);
+                is_side.push(true);
+                is_back.push(false);
+            }
+        }
+    }
+
+    if output_back {
         for i in 0..g.nprims() {
             if !sel[i] {
                 continue;
@@ -855,12 +1063,16 @@ fn extrude_with_direction(
             let r = range(g, i);
             sizes.push(r.len());
             ps.push(i);
+            is_front.push(false);
+            is_side.push(false);
+            is_back.push(true);
             for v in r.rev() {
                 outvp.push(vp[v]);
                 vs.push(v);
             }
         }
     }
+
     let mut out = make(
         point,
         outvp,
@@ -870,20 +1082,71 @@ fn extrude_with_direction(
         g.detail.clone(),
         None,
     )?;
-    let total = sizes.len();
-    apply_groups(
-        &mut out,
-        &(0..total)
-            .map(|i| i < g.nprims() && sel[i])
-            .collect::<Vec<_>>(),
-        &(0..total)
-            .map(|i| i >= g.nprims() + boundary.len())
-            .collect::<Vec<_>>(),
-        &(0..total)
-            .map(|i| i >= g.nprims() && i < g.nprims() + boundary.len())
-            .collect::<Vec<_>>(),
-    )?;
-    out.point.remove("N");
+
+    apply_groups(&mut out, &is_front, &is_back, &is_side)?;
+
+    if let Some(p) = params {
+        let front_boundary_set: BTreeSet<(i64, i64)> = boundary.iter().map(|&v| {
+            let a = nv[v] as i64;
+            let b = nv[nx[v]] as i64;
+            (a.min(b), a.max(b))
+        }).collect();
+        let back_boundary_set: BTreeSet<(i64, i64)> = boundary.iter().map(|&v| {
+            let a = vp[v] as i64;
+            let b = vp[nx[v]] as i64;
+            (a.min(b), a.max(b))
+        }).collect();
+        let ed = topo::edges(&out.topology, out.npoints);
+        let front_edge_mask: Vec<bool> = ed.points.chunks_exact(2)
+            .map(|q| front_boundary_set.contains(&(q[0].min(q[1]), q[0].max(q[1]))))
+            .collect();
+        let back_edge_mask: Vec<bool> = ed.points.chunks_exact(2)
+            .map(|q| back_boundary_set.contains(&(q[0].min(q[1]), q[0].max(q[1]))))
+            .collect();
+        outgroup(&mut out, p, "front_boundary", "edge", &front_edge_mask)?;
+        outgroup(&mut out, p, "back_boundary", "edge", &back_edge_mask)?;
+    }
+
+    if generate_sides_uvs && output_side {
+        let mut uv_data = vec![0.0f32; out.nvertices() * 2];
+        if let Some(existing) = out.vertex.get("uv").and_then(|a| a.as_f32()) {
+            let len = existing.len().min(uv_data.len());
+            uv_data[..len].copy_from_slice(&existing[..len]);
+        }
+        let mut side_quad_idx = 0;
+        let mut prim_vert_offset = 0;
+        for (i, &size) in sizes.iter().enumerate() {
+            if is_side[i] {
+                let d = side_quad_idx % divisions;
+                let v0 = d as f32 / divisions as f32;
+                let v1 = (d + 1) as f32 / divisions as f32;
+                let wall_idx = side_quad_idx / divisions;
+                let u0 = wall_idx as f32 / boundary.len().max(1) as f32;
+                let u1 = (wall_idx + 1) as f32 / boundary.len().max(1) as f32;
+                let idx = prim_vert_offset * 2;
+                uv_data[idx] = u0;
+                uv_data[idx + 1] = v0;
+                uv_data[idx + 2] = u1;
+                uv_data[idx + 3] = v0;
+                uv_data[idx + 4] = u1;
+                uv_data[idx + 5] = v1;
+                uv_data[idx + 6] = u0;
+                uv_data[idx + 7] = v1;
+                side_quad_idx += 1;
+            }
+            prim_vert_offset += size;
+        }
+        out.vertex.insert("uv".into(), Arc::new(Attr::f32(2, uv_data)));
+    }
+
+    if add_vertex_normals {
+        let n_data = compute_vertex_normals(&out, cusp_angle);
+        out.vertex.insert("N".into(), Arc::new(Attr::f32(3, n_data)));
+        out.point.remove("N");
+    } else {
+        out.point.remove("N");
+    }
+
     compact(out)
 }
 
@@ -971,6 +1234,46 @@ mod tests {
         assert_eq!(point.npoints,g.npoints+1);
         assert_eq!(point.topology.closed.as_ref().unwrap(),&vec![true,false]);
         point.validate().unwrap();
+    }
+    #[test]
+    fn polyextrude_houdini_parity_extrusion_options() {
+        let g = quad();
+        // 1. Divisions
+        let div = cook(&POLYEXTRUDE, g.clone(), json!({"distance": 1.0, "divisions": 3}));
+        // Quad has 4 boundary edges * 3 divisions = 12 side quads + 1 front = 13 prims
+        assert_eq!(div.nprims(), 13);
+        div.validate().unwrap();
+
+        // 2. Output toggles
+        let no_front = cook(&POLYEXTRUDE, g.clone(), json!({"distance": 1.0, "output_front": false}));
+        assert_eq!(no_front.nprims(), 4);
+        assert!(!no_front.prim.contains_key("group_extrudeFront") || no_front.prim["group_extrudeFront"].data == AttrData::I32(vec![0, 0, 0, 0]));
+
+        let no_side = cook(&POLYEXTRUDE, g.clone(), json!({"distance": 1.0, "output_side": false}));
+        assert_eq!(no_side.nprims(), 1);
+
+        // 3. Twist
+        let straight = cook(&POLYEXTRUDE, g.clone(), json!({"distance": 1.0}));
+        let twisted = cook(&POLYEXTRUDE, g.clone(), json!({"distance": 1.0, "twist": 45.0}));
+        assert_ne!(straight.p(), twisted.p());
+
+        // 4. Vertex normals
+        let with_n = cook(&POLYEXTRUDE, g.clone(), json!({"distance": 1.0, "add_vertex_normals": true, "cusp_angle": 60.0}));
+        assert!(with_n.vertex.contains_key("N"));
+        assert_eq!(with_n.vertex["N"].width, 3);
+
+        // 5. Generate sides UVs
+        let with_uv = cook(&POLYEXTRUDE, g.clone(), json!({"distance": 1.0, "generate_sides_uvs": true}));
+        assert!(with_uv.vertex.contains_key("uv"));
+        assert_eq!(with_uv.vertex["uv"].width, 2);
+
+        // 6. Boundary edge groups
+        let with_bounds = cook(&POLYEXTRUDE, g.clone(), json!({
+            "distance": 1.0,
+            "outgrp_front_boundary": true,
+            "outgrp_front_boundary_name": "front_edges"
+        }));
+        assert!(with_bounds.vertex.contains_key("edge_group_front_edges") || with_bounds.edge.contains_key("group_front_edges"));
     }
     #[test]
     fn clip_shared_intersections_and_int_sources() {
