@@ -353,7 +353,7 @@ When an object is selected, show only its silhouette outline (the outer edge see
 Bugs:
 - Edge groups are still not tagged purple in the viewport.
 - Transforming a selection only works with an Output node at the end of the stream (should work without it; see the display fix fix A).
-- Scale cage 'C' keymap is lost: it triggers circle select. Remove the conflict or choose another key. Add a toolbar icon for scale cage and a dedicated node (or check whether Match Size covers it).
+- Add a toolbar icon for scale cage and a dedicated node (or check whether Match Size covers it).
 - Ctrl+B with bevels selected should trigger the vertex bevel node, with an auto group.
 - Mirror gizmo has gone; restore it.
 - Copy to Points: with pack on, nothing reaches Blender (it looks right in MiniHou).

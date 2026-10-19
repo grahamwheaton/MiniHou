@@ -1664,7 +1664,7 @@ impl App {
                         egui::Key::B if modal.kind==ModalKind::Move => { modal.cycle_snap(); if modal.reference.is_none() { modal.reference=Some(modal.pivot); } },
                         egui::Key::B if modal.kind==ModalKind::Rotate => { modal.sketch=SketchStage::Pivot; modal.sketch_reference=None; },
                         egui::Key::R if modal.kind==ModalKind::Rotate => modal.trackball = !modal.trackball,
-                        egui::Key::C if modal.kind==ModalKind::Scale => { modal.cage = !modal.cage; modal.cage_handle=None; },
+                        egui::Key::V if modal.kind==ModalKind::Scale => { modal.cage = !modal.cage; modal.cage_handle=None; },
                         _=>{}
                     }
                 }

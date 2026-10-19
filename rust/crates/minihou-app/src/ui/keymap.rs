@@ -367,6 +367,7 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
     ("A / Alt+A", "Confirm transform and select all / none"),
     ("Ctrl+Shift+LMB while moving", "Pick snap reference point"),
     ("R while rotating", "Toggle trackball"),
+    ("V while scaling", "Toggle scale cage"),
     ("Alt while scaling", "Individual origins is not yet supported for multiple displayed objects"),
 ];
 
@@ -384,7 +385,7 @@ pub const MODAL_KEYS: &[(&str,&str)] = &[
                 assert!(!ctx.input(|i| i.key_pressed(key)));
             });
         }
-        for key in [Key::Escape, Key::X, Key::R, Key::S] {
+        for key in [Key::Escape, Key::X, Key::R, Key::S, Key::V] {
             let ctx = egui::Context::default();
             let _ = ctx.run(egui::RawInput { events: vec![egui::Event::Key { key, physical_key: None,
                 pressed: true, repeat: false, modifiers: Modifiers::NONE }], ..Default::default() }, |ctx| {

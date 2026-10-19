@@ -180,6 +180,7 @@ Alt+M (or the shelf's Mirror button) starts the Mirror tool (Houdini's Mirror to
 | A / Alt+A | Confirm transform and select all / none |
 | Ctrl+Shift+LMB while moving | Pick snap reference point |
 | R while rotating | Toggle trackball |
+| V while scaling | Toggle scale cage |
 | Alt while scaling | Individual origins is not yet supported for multiple displayed objects |
 <!-- modal:end -->
 
