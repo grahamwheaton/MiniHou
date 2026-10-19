@@ -351,18 +351,15 @@ When an object is selected, show only its silhouette outline (the outer edge see
 ## Testing feedback round 3 (2026-10-19)
 
 Bugs:
-- Edge groups are still not tagged purple in the viewport.
 - Transforming a selection only works with an Output node at the end of the stream (should work without it; see the display fix fix A).
 - Scale cage 'C' keymap is lost: it triggers circle select. Remove the conflict or choose another key. Add a toolbar icon for scale cage and a dedicated node (or check whether Match Size covers it).
 - Ctrl+B with bevels selected should trigger the vertex bevel node, with an auto group.
-- Mirror gizmo has gone; restore it.
 - Copy to Points: with pack on, nothing reaches Blender (it looks right in MiniHou).
 - Blender Object: clicking reset transform has no effect in MiniHou (Blender changes the result).
 - Scene Objects: after a reload, moved objects jump back to their MiniHou positions. Overridden empty positions must persist.
 - Deleting nodes from an embedded Blender graph can make Blender unresponsive.
 - Inset needs to auto-merge (parity with Blender). Vertex bevel needs parity with Blender and must flow correctly.
-- Ctrl+click shortest route works on simple meshes only; it breaks with split edges.
-- Cannot double-click to open a subnet node.
+- Cannot double-click to open a subnet node. (Not built: nested subnet navigation, plan step 3; double-click currently sets display.)
 
 Selection to node (UI):
 - Ctrl+G with a viewport selection under the mouse creates a Group Create node with the selection applied (domain from the selection type).
