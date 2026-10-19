@@ -242,10 +242,52 @@ impl SelectTopology {
         let n = self.count(domain);
         if start as usize >= n || target as usize >= n { return Vec::new(); }
         if start == target { return vec![start]; }
-        match method {
+        let route = match method {
             PathMethod::FewestSteps => self.fewest_hops(domain, start, target),
             PathMethod::MostDirect => self.most_direct(p, domain, start, target),
             PathMethod::ShortestDistance => self.shortest_distance(p, domain, start, target),
+        };
+        if route.is_empty() { self.welded_path(p, domain, start, target, method) } else { route }
+    }
+    /// Split edges leave coincident points unconnected; route over the topology with coincident points merged and
+    /// return every original element that lies on the merged route.
+    fn welded_path(&self, p: &[f32], domain: Domain, start: u32, target: u32, method: PathMethod) -> Vec<u32> {
+        let mut first: HashMap<[i64; 3], u32> = HashMap::new();
+        let canon: Vec<u32> = (0..self.npoints as u32).map(|i| {
+            let q = at(p, i);
+            *first.entry(q.map(|x| (x as f64 * 1e5).round() as i64)).or_insert(i)
+        }).collect();
+        if canon.iter().enumerate().all(|(i, &c)| c == i as u32) { return Vec::new(); }
+        let mut edges: Vec<(u32, u32)> = self.edges.iter().map(|&(a, b)| key(canon[a as usize], canon[b as usize])).filter(|e| e.0 != e.1).collect();
+        edges.sort_unstable(); edges.dedup();
+        let wid: HashMap<(u32, u32), u32> = edges.iter().enumerate().map(|(i, &e)| (e, i as u32)).collect();
+        let (mut vp, mut ep) = (Vec::new(), Vec::new());
+        for poly in 0..self.npolys {
+            for &v in self.poly_verts.get(poly) { vp.push((poly, canon[v as usize])); }
+            for &e in self.poly_edges.get(poly) {
+                let (a, b) = self.edges[e as usize];
+                if let Some(&w) = wid.get(&key(canon[a as usize], canon[b as usize])) { ep.push((poly, w)); }
+            }
+        }
+        let welded = Self::from_parts(self.npoints, edges, vp, ep, self.npolys);
+        let edge_to_w = |e: u32| { let (a, b) = self.edges[e as usize]; wid.get(&key(canon[a as usize], canon[b as usize])).copied() };
+        let (s, t) = match domain {
+            Domain::Points => (Some(canon[start as usize]), Some(canon[target as usize])),
+            Domain::Edges => (edge_to_w(start), edge_to_w(target)),
+            Domain::Faces => (Some(start), Some(target)),
+        };
+        let (Some(s), Some(t)) = (s, t) else { return Vec::new(); };
+        let route = welded.path(p, domain, s, t, method);
+        match domain {
+            Domain::Faces => route,
+            Domain::Points => {
+                let on: HashSet<u32> = route.into_iter().collect();
+                (0..self.npoints as u32).filter(|&i| on.contains(&canon[i as usize])).collect()
+            }
+            Domain::Edges => {
+                let on: HashSet<u32> = route.into_iter().collect();
+                (0..self.edges.len() as u32).filter(|&e| edge_to_w(e).is_some_and(|w| on.contains(&w))).collect()
+            }
         }
     }
     fn fewest_hops(&self, domain: Domain, start: u32, target: u32) -> Vec<u32> {
@@ -427,6 +469,17 @@ mod tests {
             for k in 0..f.len() { vp.push((i as u32, f[k])); ep.push((i as u32, ids[&key(f[k], f[(k + 1) % f.len()])])); }
         }
         SelectTopology::from_parts(p.len() / 3, edges, vp, ep, polys.len() as u32)
+    }
+    #[test] fn paths_cross_split_edges_by_merging_coincident_points() {
+        let p = [0.,0.,0., 1.,0.,0., 1.,1.,0., 0.,1.,0.,  1.,0.,0., 2.,0.,0., 2.,1.,0., 1.,1.,0.];
+        let polys = vec![vec![0, 1, 2, 3], vec![4, 5, 6, 7]];
+        let t = topo(&p, &polys);
+        let route = t.path(&p, Points, 0, 5, PathMethod::FewestSteps);
+        assert!(route.contains(&0) && route.contains(&5) && (route.contains(&1) || route.contains(&4)), "{route:?}");
+        let faces = t.path(&p, Faces, 0, 1, PathMethod::FewestSteps);
+        assert_eq!(faces, Vec::<u32>::new().into_iter().chain([0, 1]).collect::<Vec<_>>());
+        let e0 = t.edge_of(0, 1).unwrap(); let e1 = t.edge_of(5, 6).unwrap();
+        assert!(!t.path(&p, Edges, e0, e1, PathMethod::FewestSteps).is_empty());
     }
     fn mask(n: usize, on: &[u32]) -> Vec<bool> { let mut m = vec![false; n]; for &i in on { m[i as usize] = true; } m }
     fn ids(m: &[bool]) -> Vec<u32> { m.iter().enumerate().filter(|x| *x.1).map(|x| x.0 as u32).collect() }
