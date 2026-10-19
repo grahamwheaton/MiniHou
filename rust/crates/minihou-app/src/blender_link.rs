@@ -1623,6 +1623,7 @@ mod tests {
         let error = minihou_app::CookResponse::<()> {
             revision: 2,
             geometry: None,
+            preview: None,
             lod: None,
             prepared: None,
             extras: Default::default(),

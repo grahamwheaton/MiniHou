@@ -235,10 +235,6 @@ Check the key table in rust/crates/minihou-app/docs/NATIVE_EDITOR.md and the key
 
 
 
-## Future: group highlight on any selected node (requested 2026-10-18)
-
-Any node with a group field should show its group members in purple when that node is selected in the node editor, even if the node is not the displayed one. Needs the selected node's own cooked geometry (its input is cooked, not displayed), so the viewport overlay can show the group from that node's output.
-
 ## Future: call the "primitives" domain "faces" (requested 2026-10-18)
 
 The domain option shown as "primitives" (group_create, blast, and other nodes with a domain param) should read "faces" in the UI. Saved graphs store "primitives", so the parser must keep accepting it as an alias (map it to faces), and the metadata options and param meta regenerated. Check every `p.e("domain", ...)` list in rust/crates/minihou-core/src/nodes for the "primitives" value, and the Python parity tests that use the name.
@@ -261,7 +257,6 @@ Migrate the legacy nodes to the self-registering package system, following docs/
 
 ## Bugs from testing b35cd5767 (reported 2026-10-18)
 
-2. **Group create from the Tab menu:** the edge selection stays orange while the domain is points. The purple group highlight should show whenever the node is selected (not only on hover of the arrow), and follow the node's domain (edges when edges).
 8. **Push/pull does not always punch through** (see screenshot 72.png: a diagonal band of faces stays unpunched on the cube). Not reproduced in the node: a rotated box with an inset top punches cleanly (regression test through_hole_on_rotated_box_has_no_unpunched_band); needs the scene from 72.png.
 
 ## Features from testing (reported 2026-10-18)

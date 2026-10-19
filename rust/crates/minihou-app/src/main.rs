@@ -791,6 +791,7 @@ impl App {
         app.blender.addon_installed = false;
         if start_link { app.restart_blender_link(); }
         app.send(Edit::Replace(app.editor.doc.value().clone()));
+        app.send(Edit::Preview(app.selected.clone()));
         Ok(app)
     }
     fn send(&mut self, edit: Edit) {
@@ -2755,6 +2756,7 @@ impl App {
             }
         }
         if self.selected != prev_selected {
+            self.send(Edit::Preview(self.selected.clone()));
             if self.editor.doc.value()["nodes"][&self.selected]["type"] == "boundary_select" {
                 self.editor_state.apply(ui::EditorChange::Selection(ui::SelectionMode::Edges));
                 if self.selection.mode != ui::SelectionMode::Edges {
@@ -3211,7 +3213,12 @@ impl eframe::App for App {
                 if let (Some(gpu), Some(scene)) = (&mut self.gpu, &self.scene) {
                     let ranges = self.display_ranges.iter().filter(|(id, _)| !self.object_hidden && self.selected_set.contains(id))
                         .map(|(_, range)| range.clone()).collect();
-                    self.group_preview.update(gpu,&self.state.device,if self.cooking.error.is_none(){self.cooking.geometry.as_deref()}else{None},self.editor.doc.value(),&self.selected,self.cooking.completed);
+                    let preview_geo = if self.cooking.error.is_none() {
+                        self.cooking.preview.as_ref().filter(|(id,_,_)| id == &self.selected).map(|(_,g,_)| g.as_ref())
+                            .or_else(|| (self.selected == self.display).then(|| self.cooking.geometry.as_deref()).flatten())
+                    } else { None };
+                    let preview_input = self.cooking.preview.as_ref().filter(|(id,_,_)| id == &self.selected).and_then(|(_,_,g)| g.as_deref());
+                    self.group_preview.update(gpu,&self.state.device,preview_geo,preview_input,self.editor.doc.value(),&self.selected,self.cooking.completed);
                     // Hovering the purple arrow previews the field's current group (only on the geometry its ids belong to).
                     let hover = ctx.data(|d| d.get_temp::<(String,String,ui::SelectionMode,bool,u64)>(egui::Id::new("param_pick_hover")))
                         .filter(|h| h.4 + 1 >= ctx.cumulative_pass_nr());
