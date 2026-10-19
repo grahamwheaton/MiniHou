@@ -2563,6 +2563,8 @@ impl App {
                         } else if node_type == "select_sharp_edges" {
                             let name = element_select::free_group_name_with_prefix(self.editor.doc.value(), "sharp_edges");
                             merge_params(&mut value, &id, json!({"output_group_name": name}));
+                        } else if let Some(p) = self.selection_node_params(&node_type) {
+                            merge_params(&mut value, &id, p);
                         }
                         let before = ui::network::position_add(ctx, &self.editor.path, self.editor.doc.value(), &mut value, None);
                         value["nodes"][&id]["pos"] = json!(pos);
@@ -2595,6 +2597,8 @@ impl App {
                         } else if node_type == "select_sharp_edges" {
                             let name = element_select::free_group_name_with_prefix(self.editor.doc.value(), "sharp_edges");
                             merge_params(&mut value, &id, json!({"output_group_name": name}));
+                        } else if let Some(p) = self.selection_node_params(&node_type) {
+                            merge_params(&mut value, &id, p);
                         }
                         if self.commit_document(value, &format!("add {node_type} and connect")) {
                             ui::network::place_connected(ctx, &self.editor.path, &id, pos);

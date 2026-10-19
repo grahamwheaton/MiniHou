@@ -402,3 +402,5 @@ From the Maya polygon tools audit, the items the user picked:
 6. Connect: edge-to-edge connection (polysplit covers only part of this).
 9. Wrap: shrink-wrap to a target surface (retopology).
 10. Blend shape: morph targets.
+
+- **Done: new nodes take the viewport selection as group input.** Tab menu, shelf, network add and connected add all call `selection_node_params`; `element_select::find_input_group_field` picks the group field and the domain comes from the selection type. Generators and object mode are unchanged.
