@@ -478,6 +478,11 @@ def meta() -> dict:
         if node_id in out:
             raise ValueError(f"package node id conflicts with existing metadata: {node_id}")
         out[node_id] = params
+    # Outset shares the output-group parameters of inset, with its own default group names.
+    for key, default in (("output_group", False), ("output_group_name", "outset_ring"), ("output_inner_group", False), ("output_inner_group_name", "outset_boundary")):
+        if key in out["inset"]:
+            entry = dict(out["inset"][key]); entry["default"] = default
+            out.setdefault("outset", {})[key] = entry
     # The legacy Match Size spec (kept for the Python fast path) shares the package parameters.
     if "match_size" in out:
         legacy = dict(out["match_size"])

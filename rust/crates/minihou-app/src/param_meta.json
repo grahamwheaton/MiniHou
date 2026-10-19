@@ -5001,6 +5001,32 @@
     "connected",
     "individual"
    ]
+  },
+  "output_group": {
+   "default": false,
+   "doc": "Write the ring faces to a group.",
+   "kind": "bool"
+  },
+  "output_group_name": {
+   "default": "outset_ring",
+   "doc": "Name of the ring face group.",
+   "enabled_if": {
+    "output_group": true
+   },
+   "kind": "str"
+  },
+  "output_inner_group": {
+   "default": false,
+   "doc": "Write the inner (inset) faces to a group.",
+   "kind": "bool"
+  },
+  "output_inner_group_name": {
+   "default": "outset_boundary",
+   "doc": "Name of the inner face group.",
+   "enabled_if": {
+    "output_inner_group": true
+   },
+   "kind": "str"
   }
  },
  "pack": {
