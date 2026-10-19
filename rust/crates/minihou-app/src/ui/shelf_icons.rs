@@ -30,6 +30,7 @@ pub fn draw(p: &egui::Painter, o: Pos2, kind: &str, ink: Color32, accent: Color3
         "copy_to_points" => { for (x,y) in [(4.,6.),(12.,4.),(20.,7.)] { dot(p,o,x,y,2.,a); rect(p,o,x-3.,y+6.,6.,6.,c,false); } }
         "instance" => { for (x,y) in [(2.,2.),(16.,2.),(9.,16.)] { rect(p,o,x,y,7.,7.,c,false); } line(p,o,&[(9.,6.),(16.,6.)],a); line(p,o,&[(6.,9.),(12.,16.),(19.,9.)],a); }
         "switch" => { rect(p,o,3.,9.,18.,7.,c,false); dot(p,o,17.,12.5,3.,a); }
+        "controller" => { rect(p,o,3.,3.,18.,18.,c,false); for (y,x) in [(7.,10.),(12.,16.),(17.,8.)] { line(p,o,&[(6.,y),(18.,y)],c); dot(p,o,x,y,2.,a); } }
         "match_size" => { rect(p,o,2.,2.,20.,20.,a,false); rect(p,o,7.,7.,10.,10.,c,false); }
         "bound" => { line(p,o,&[(12.,2.),(21.,7.),(21.,18.),(12.,22.),(3.,18.),(3.,7.),(12.,2.),(12.,12.),(21.,7.)],a); line(p,o,&[(3.,7.),(12.,12.),(12.,22.)],a); }
         "blast" | "delete" => { if kind == "blast" { rect(p,o,4.,6.,15.,14.,c,false); } line(p,o,&[(7.,4.),(21.,20.)],a); line(p,o,&[(21.,4.),(7.,20.)],a); }
