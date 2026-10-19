@@ -1,6 +1,8 @@
 mod picking;
 mod subnet_edit;
 mod element_select;
+mod element_pick_glue;
+use element_pick_glue::{point_pickable, active_range, navigation_point, loop_cut_has_marks, loop_cut_selection, selection_exists_on_scene, selection_in_range, pick_displayed, pick_displayed_culled, keep_extrude_selection, pick_displayed_wire, wire_selection};
 mod node_selection;
 mod coplanar_tool;
 mod group_preview;
@@ -28,7 +30,7 @@ use serde_json::{json, Value};
 use std::{collections::HashMap, path::PathBuf, time::{Duration, Instant}};
 use ui::keymap::{KeyContext, Keymap, Preferences, ThemePref};
 use ui::{theme::Theme, Actions, BlenderStatus, CameraInfo, EditorState, GeoSummary, NodeFlags, TransformOp, UiAction, View};
-use ui::modal_transform::{Modal, Kind as ModalKind, SketchStage, Constraint};
+use ui::modal_transform::{Modal, Kind as ModalKind, Constraint};
 use ui::modal_model::{State as ModelState, Kind as ModelKind, Outcome as ModelOutcome};
 use viewport::{Gpu, Mode, Overlay, Scene, Target};
 use minihou_core::python_bridge::PythonGate;
@@ -53,31 +55,6 @@ fn python_gate() -> std::sync::Arc<PythonGate> {
     GATE.get_or_init(|| std::sync::Arc::new(PythonGate::denied())).clone()
 }
 
-fn point_pickable(visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,id:u32)->bool {
-    visibility==viewport::ObjectVisibility::ShowAll || ranges.iter().any(|(owner,range)| selected.contains(owner) && range.contains(&id))
-}
-fn active_range<'a>(active:&str,ranges:&'a [(String,std::ops::Range<u32>)])->Option<&'a std::ops::Range<u32>> {
-    ranges.iter().find(|(id,_)|id==active).map(|(_,range)|range)
-}
-fn loop_cut_has_marks(g:&minihou_core::Geometry)->bool { g.vertex.get("edge_group_viewport_loop_cut").is_some() }
-fn loop_cut_selection(g:&minihou_core::Geometry,range:&std::ops::Range<u32>)->picking::Selection {
-    let topo_edges=minihou_core::topo::edges(&g.topology,g.npoints);
-    let marks=g.vertex.get("edge_group_viewport_loop_cut").and_then(|attr|attr.as_i32());
-    let mut selected=vec![false;topo_edges.len()];
-    if let Some(marks)=marks { for (vertex,&edge) in topo_edges.of_vertex.iter().enumerate() {
-        if edge>=0 && marks.get(vertex).is_some_and(|&mark|mark!=0) { selected[edge as usize]=true; }
-    } }
-    let edges=topo_edges.points.chunks_exact(2).enumerate()
-        .filter(|(i,pair)|selected[*i] && range.contains(&(pair[0] as u32)) && range.contains(&(pair[1] as u32)))
-        .map(|(_,pair)|(pair[0] as u32,pair[1] as u32)).collect();
-    picking::Selection { mode:ui::SelectionMode::Edges,edges,..Default::default() }
-}
-fn selection_exists_on_scene(selection:&picking::Selection,scene:&Scene)->bool {
-    selection.points.iter().all(|&p|(p as usize)<scene.positions().len()/3)
-        && selection.tris.iter().all(|&t|(t as usize)<scene.triangle_indices().len()/3)
-        && selection.edges.iter().all(|&(a,b)|scene.edge_indices().chunks_exact(2)
-            .any(|edge|(edge[0]==a && edge[1]==b)||(edge[0]==b && edge[1]==a)))
-}
 fn snapshot(selection:&picking::Selection)->SelectionSnapshot {
     SelectionSnapshot { mode: match selection.mode { ui::SelectionMode::Object=>0, ui::SelectionMode::Points=>1, ui::SelectionMode::Edges=>2, ui::SelectionMode::Faces=>3 },
         points:selection.points.clone(), edges:selection.edges.clone(), tris:selection.tris.clone() }
@@ -89,70 +66,12 @@ fn restore(snapshot:SelectionSnapshot)->picking::Selection {
 fn selection_state(selection:&picking::Selection,stash:&picking::Selection)->SelectionState {
     SelectionState { selection:snapshot(selection), stashed:snapshot(stash) }
 }
-fn selection_in_range(selection:&picking::Selection,scene:&Scene,range:&std::ops::Range<u32>)->picking::Selection {
-    let mut result=selection.clone();
-    result.points.retain(|id|range.contains(id));
-    result.edges.retain(|(a,b)|range.contains(a)&&range.contains(b));
-    result.tris.retain(|id|scene.triangle_indices().get(*id as usize*3).is_some_and(|p|range.contains(p)));
-    result
-}
-fn pick_displayed(scene:&Scene,o:[f32;3],d:[f32;3],visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>)->Option<picking::Hit> {
-    pick_displayed_culled(scene,o,d,visibility,ranges,selected,false)
-}
-/// Back-face culling is off for selection: the renderer draws both sides, so a visible face with the opposite winding (open meshes, flipped normals) must stay pickable. The nearest hit already hides faces behind it.
-fn pick_displayed_culled(scene:&Scene,o:[f32;3],d:[f32;3],visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,cull:bool)->Option<picking::Hit> {
-    picking::pick_triangle_culled(scene.positions(),scene.triangle_indices(),o,d,cull,|tri| tri.iter().all(|id| point_pickable(visibility,ranges,selected,*id)))
-}
-/// After an extrude cook the original selection stays when its ids still exist (Blender keeps the faces selected).
-fn keep_extrude_selection(before:&picking::Selection,scene:&Scene)->Option<picking::Selection> {
-    (!before.is_empty() && selection_exists_on_scene(before,scene)).then(||before.clone())
-}
-fn navigation_point(camera:&Camera,scene:Option<&Scene>,hidden:bool,visibility:viewport::ObjectVisibility,
-    ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,rect:egui::Rect,pos:egui::Pos2)->Option<[f32;3]> {
-    let nx=(pos.x-rect.left())/rect.width()*2.-1.; let ny=1.-(pos.y-rect.top())/rect.height()*2.;
-    let (origin,dir)=camera.ray(nx,ny,rect.width()/rect.height());
-    if hidden {return None;}
-    let scene=scene?;
-    let hit=scene.pick_bvh.pick(scene.positions(),scene.triangle_indices(),origin,dir,|ids| ids.iter().all(|id| point_pickable(visibility,ranges,selected,*id)))?;
-    Some([0,1,2].map(|k|origin[k]+dir[k]*hit.t))
-}
 fn zoom_under_cursor(camera:&mut Camera,delta:f32,enabled:bool,rect:egui::Rect,pos:Option<egui::Pos2>,point:Option<[f32;3]>) {
     if delta==0. {return;}
     let Some(pos)=pos.filter(|_|enabled) else {camera.zoom(delta);return;};
     let nx=(pos.x-rect.left())/rect.width()*2.-1.; let ny=1.-(pos.y-rect.top())/rect.height()*2.;
     let point=point.unwrap_or_else(||camera.view_plane_point(nx,ny,rect.width()/rect.height()));
     camera.zoom_at(delta,point,nx,ny,rect.width()/rect.height());
-}
-
-fn pick_displayed_wire(scene:&Scene, camera:CameraInfo, rect:egui::Rect, pointer:egui::Pos2,
-    visibility:viewport::ObjectVisibility,ranges:&[(String,std::ops::Range<u32>)],selected:&std::collections::BTreeSet<String>,mode:ui::SelectionMode,xray:bool)->Option<picking::WireHit> {
-    // without X-ray, points and edges behind the mesh surface under the pointer are not pickable
-    let max_depth=if xray {f32::INFINITY} else {
-        let (o,d)=ui::transform_gizmo::ray(camera,rect,pointer);
-        pick_displayed(scene,o,d,visibility,ranges,selected).map_or(f32::INFINITY,|hit|{
-            let depth=hit.t*(0..3).map(|k|d[k]*camera.ray_forward[k]).sum::<f32>();
-            let depth=if camera.ortho {depth.max(0.001)} else {depth};
-            depth*1.002+scene.radius*1e-4
-        })
-    };
-    picking::pick_wire_occluded(scene.positions(),scene.line_primitive_indices(),pointer,
-        |p| ui::transform_gizmo::project(camera,rect,p).map(|screen| {
-            let depth=(0..3).map(|k|(p[k]-camera.ray_origin[k])*camera.ray_forward[k]).sum::<f32>();
-            (screen, if camera.ortho { depth.max(0.001) } else { depth })
-        }),
-        |id| point_pickable(visibility,ranges,selected,id),
-        matches!(mode,ui::SelectionMode::Object|ui::SelectionMode::Points),
-        matches!(mode,ui::SelectionMode::Object|ui::SelectionMode::Edges),max_depth)
-}
-
-fn wire_selection(hit:picking::WireHit,mode:ui::SelectionMode)->picking::Selection {
-    let mut out=picking::Selection {mode,..Default::default()};
-    match (mode,hit) {
-        (ui::SelectionMode::Points,picking::WireHit::Point(id)) => out.points.push(id),
-        (ui::SelectionMode::Edges,picking::WireHit::Edge(a,b)) => out.edges.push((a,b)),
-        _ => {}
-    }
-    out
 }
 
 #[allow(dead_code)]
@@ -1729,116 +1648,6 @@ impl App {
             },
         });
         self.finish_transform_from(true);
-    }
-    fn update_modal(&mut self, ctx: &egui::Context) {
-        let Some(mut modal)=self.modal.take() else { return; };
-        let input=ctx.input(|i|(i.events.clone(),i.pointer.hover_pos(),i.modifiers,i.raw_scroll_delta.y));
-        let (events,pointer,modifiers,scroll)=input;
-        if let Some(pointer)=pointer { modal.pointer=pointer; }
-        let mut confirm=false; let mut cancel=false; let mut gg=false;
-        let camera=self.camera_info();
-        let orientation=if matches!(modal.constraint,Constraint::Axis(_,true)|Constraint::Plane(_,true))
-            { ui::Orientation::Local } else { self.editor_state.orientation };
-        let frame=if orientation == ui::Orientation::Cursor {
-            transform_math::Frame::from_rotation(&transform_math::euler_xyz(self.editor_state.cursor_rotation.map(f64::from)))
-                .axes.map(|axis| axis.map(|x| x as f32))
-        } else if orientation == ui::Orientation::Normal {
-            let trs = transform_math::TrsParams::from_params(&self.editor.doc.value()["nodes"][&self.display]["params"]);
-            self.selection_normal_frame(&trs).axes.map(|axis| axis.map(|x| x as f32))
-        } else { ui::modal_transform::orientation_frame(orientation,camera,modal.rotation) };
-        for event in events {
-            match event {
-                egui::Event::Key { key, pressed:true, modifiers:m, .. } => {
-                    if modal.type_key(key,m.shift) { continue; }
-                    match key {
-                        egui::Key::Escape => cancel=true,
-                        egui::Key::Enter | egui::Key::Space => confirm=true,
-                        egui::Key::G if ui::modal_transform::double_g_slides(modal.kind,self.editor_state.selection) => gg=true,
-                        egui::Key::X | egui::Key::Y | egui::Key::Z => modal.toggle_axis(match key { egui::Key::X=>0,egui::Key::Y=>1,_=>2 },m.shift),
-                        egui::Key::O => modal.proportional = !modal.proportional,
-                        egui::Key::PageUp => modal.wheel(1.), egui::Key::PageDown => modal.wheel(-1.),
-                        egui::Key::B if modal.kind==ModalKind::Move => { modal.cycle_snap(); if modal.reference.is_none() { modal.reference=Some(modal.pivot); } },
-                        egui::Key::B if modal.kind==ModalKind::Rotate => { modal.sketch=SketchStage::Pivot; modal.sketch_reference=None; },
-                        egui::Key::R if modal.kind==ModalKind::Rotate => modal.trackball = !modal.trackball,
-                        egui::Key::V if modal.kind==ModalKind::Scale => { modal.cage = !modal.cage; modal.cage_handle=None; },
-                        _=>{}
-                    }
-                }
-                egui::Event::PointerButton { pos, button:egui::PointerButton::Primary, pressed:true, .. } => {
-                    if modal.sketch==SketchStage::Pivot {
-                        let to=if !modal.snap_to.geometry() {ui::SnapTo::Face.into()} else {modal.snap_to};
-                        modal.sketch_pivot=self.modal_snap_point(pos,to).or(Some(modal.pivot));
-                        modal.pivot=modal.sketch_pivot.unwrap(); modal.sketch=SketchStage::Reference;
-                    } else if modal.sketch==SketchStage::Reference { modal.sketch_reference=Some(pos); modal.sketch=SketchStage::Angle; }
-                    else if modal.cage && modal.cage_handle.is_none() {
-                        modal.cage_handle=ui::transform_overlay::cage_hit(self.last_viewport,camera,&modal,pos);
-                        modal.cage_start=pos;
-                        if modal.cage_handle.is_none() { confirm=true; }
-                    } else if modifiers.ctrl && modifiers.shift && modal.kind==ModalKind::Move {
-                        modal.reference=self.modal_snap_point(pos,ui::SnapTo::Vertex);
-                    } else { confirm=true; }
-                }
-                egui::Event::PointerButton { button:egui::PointerButton::Secondary, pressed:true, .. } => cancel=true,
-                egui::Event::PointerButton { pos, button:egui::PointerButton::Middle, pressed:true, .. } => {
-                    if modal.constraint!=Constraint::Free { modal.constraint=Constraint::Free; } else { modal.mmb_start=Some(pos); }
-                }
-                egui::Event::PointerButton { pos, button:egui::PointerButton::Middle, pressed:false, .. } => {
-                    modal.middle_release(pos,frame,camera);
-                }
-                _=>{}
-            }
-        }
-        if let Some(start)=modal.mmb_start {
-            if (modal.pointer-start).length()>4. {
-                modal.constraint=Constraint::Axis(ui::modal_transform::closest_axis(modal.pointer-start,frame,camera),false);
-            }
-        }
-        if modal.proportional && scroll!=0. { modal.wheel(scroll.signum()); }
-        if gg { self.cancel_transform(); self.command("edge_slide",ctx); return; }
-        if cancel {
-            self.editor_state.proportional.enabled=modal.initial_proportional;
-            self.editor_state.proportional.radius=modal.initial_radius;
-            self.cancel_transform(); return;
-        }
-        self.editor_state.proportional.enabled=modal.proportional;
-        self.editor_state.proportional.radius=modal.radius;
-        let snap=self.editor_state.snap.enabled ^ modifiers.ctrl;
-        if modal.kind==ModalKind::Move && snap && modal.snap_to.geometry() {
-            let feature=self.modal_snap_feature(modal.pointer,modal.snap_to);
-            modal.target=feature.map(|f|f.point);
-            modal.target_kind=feature.map(|f|f.kind);
-            modal.target_shape=feature.map(|f|f.triangle);
-        } else { modal.target=None; modal.target_shape=None; modal.target_kind=None; }
-        let center=ui::transform_gizmo::project(camera,self.last_viewport,modal.pivot).unwrap_or(self.last_viewport.center());
-        let unit=ui::transform_gizmo::project(camera,self.last_viewport,[modal.pivot[0]+1.,modal.pivot[1],modal.pivot[2]])
-            .map(|p|(p-center).length()).unwrap_or(80.).max(1.);
-        let orientation=if matches!(modal.constraint,Constraint::Axis(_,true)|Constraint::Plane(_,true))
-            { ui::Orientation::Local } else { self.editor_state.orientation };
-        let frame=if orientation == ui::Orientation::Cursor {
-            transform_math::Frame::from_rotation(&transform_math::euler_xyz(self.editor_state.cursor_rotation.map(f64::from)))
-                .axes.map(|axis| axis.map(|x| x as f32))
-        } else if orientation == ui::Orientation::Normal {
-            let trs = transform_math::TrsParams::from_params(&self.editor.doc.value()["nodes"][&self.display]["params"]);
-            self.selection_normal_frame(&trs).axes.map(|axis| axis.map(|x| x as f32))
-        } else { ui::modal_transform::orientation_frame(orientation,camera,modal.rotation) };
-        if snap && modal.kind==ModalKind::Move && modal.snap_to.contains(ui::SnapTo::Increment) {
-            if let Some(target)=modal.target.take() {
-                let (grid,_) = modal.desired(center,unit,frame,camera,true,self.editor_state.snap.increment,modifiers.shift);
-                let reference=modal.reference.unwrap_or(modal.pivot);
-                let grid_point=[0,1,2].map(|k|reference[k]+grid[k]);
-                let distance=|p|ui::transform_gizmo::project(camera,self.last_viewport,p).map(|p|p.distance(modal.pointer)).unwrap_or(f32::INFINITY);
-                if distance(target) <= distance(grid_point) { modal.target=Some(target); }
-                else { modal.target_shape=None; modal.target_kind=None; }
-            }
-        }
-        let (values,pivot)=modal.desired(center,unit,frame,camera,snap,self.editor_state.snap.increment,modifiers.shift);
-        let pivot_changed=self.transform_target.as_ref().is_some_and(|target|
-            self.editor.doc.value()["nodes"][target]["params"]["pivot"]!=json!(pivot));
-        if values!=modal.last || pivot_changed {
-            let op=modal.step(values);
-            self.transform_node_at(op,Some(pivot),Some(orientation));
-        }
-        if confirm { self.finish_modal(modal); } else { self.modal=Some(modal); ctx.request_repaint(); }
     }
     fn sketch_commit(&mut self, name: &str, points: &[[f32; 3]], closed: bool, refs: Vec<Option<Value>>) {
         let res = if name == "Bezier" {
