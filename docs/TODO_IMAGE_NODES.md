@@ -349,3 +349,4 @@ In object mode, points are still drawn even when they belong to a face or an edg
 - **Bug: U closes the subnet while inside it.** Remove the U keymap.
 - **Todo: Ctrl+G subnet creation adds an input and an output node to the stream automatically.**
 - **Todo: subnet inputs and outputs take custom parameters.** Parameters on an input or output are exposed outside the subnet. Outputs can also add custom parameters, and can add new stream nodes. Dragging a noodle onto a subnet adds a new input or output automatically.
+- **Todo: Ctrl+U on a subnet ungroups it.** Add this as a keymap that expands the selected subnet back into its inner nodes.
