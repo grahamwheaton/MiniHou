@@ -162,16 +162,24 @@ mod tests {
     use crate::ui::testing::Fixture;
     #[test] fn shelf_lists_are_complete() { assert_eq!(tabs().len(), 20); assert_eq!(tabs()[0].name, "Create"); assert!(tabs()[0].tools.iter().any(|t| t.node_type == "box")); }
     #[test] fn package_is_in_shelf_without_changing_legacy_order() {
+        let catalogue = minihou_core::nodes::package_catalogue();
+        let ids: Vec<_> = catalogue.iter().map(|node| node.id).collect();
+        assert!(!ids.is_empty());
+        assert!(ids.windows(2).all(|pair| pair[0] < pair[1]), "package ids must be strictly sorted and unique");
+        for id in ["box", "transform", "example_offset"] {
+            assert!(tabs().iter().any(|tab| tab.tools.iter().any(|tool| tool.node_type == id)), "missing {id}");
+        }
         for (legacy, merged) in shelf_data::TABS.iter().zip(tabs()) {
             assert_eq!(legacy.name, merged.name);
+            // The legacy shelf prefix has a deliberate user-facing order.
             assert_eq!(legacy.tools.iter().map(|t| (t.label, t.node_type, t.icon)).collect::<Vec<_>>(),
                 merged.tools.iter().take(legacy.tools.len()).map(|t| (t.label, t.node_type, t.icon)).collect::<Vec<_>>());
+            let package_ids: Vec<_> = catalogue.iter().filter(|node| node.category == merged.name).map(|node| node.id).collect();
+            let appended: Vec<_> = merged.tools.iter().skip(legacy.tools.len()).map(|tool| tool.node_type).collect();
+            assert_eq!(appended, package_ids, "{} package tools", merged.name);
         }
         let modify = tabs().iter().find(|t| t.name == "Modify").unwrap();
         assert_eq!(modify.tools[0].node_type, "lod_bake");
-        // Packages in Modify come after the legacy tools in catalogue order (example_offset, facet, loop_circle, loop_curve, loop_flatten, loop_relax, loop_space, match_size, pack, peak, reverse, unpack).
-        let package_tools: Vec<_> = modify.tools.iter().skip(modify.tools.len() - 12).map(|t| t.node_type).collect();
-        assert_eq!(package_tools, ["loop_curve", "loop_flatten", "loop_relax", "loop_space", "match_size", "normal", "pack", "peak", "reverse", "split", "unpack", "vertex_bevel"]);
         let measure = tabs().iter().find(|t| t.name == "Measure").unwrap();
         for id in ["measure_volume", "measure_bounds", "measure_area", "measure_length", "measure_distance"] {
             assert_eq!(measure.tools.iter().filter(|t| t.node_type == id).count(), 1, "{id}");

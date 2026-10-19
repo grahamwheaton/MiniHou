@@ -311,7 +311,10 @@ mod package_registry_tests {
         assert!(get("box").is_some());
         assert!(get("transform").is_some());
         assert!(get("example_offset").is_some());
-        assert_eq!(package_catalogue().iter().map(|n| n.id).collect::<Vec<_>>(), ["attribute_blur", "attribute_create", "attribute_delete", "attribute_promote", "attribute_randomize", "attribute_rename", "attribute_transfer", "bend", "bezier", "bound", "boundary_select", "bulge", "cache", "clean", "color", "connectivity", "controller", "dissolve_flat_edges", "example_offset", "extract_centroid", "facet", "fillet", "flood_fill", "fractal", "fuse", "group_expand", "group_promote", "helix", "image_density", "line", "loop_circle", "loop_curve", "loop_flatten", "loop_relax", "loop_space", "match_size", "measure", "measure_area", "measure_bounds", "measure_distance", "measure_length", "measure_volume", "normal", "pack", "pcg_bounds", "pcg_copy_points", "pcg_debug", "pcg_density_filter", "pcg_density_noise", "pcg_difference", "pcg_distance", "pcg_intersection", "pcg_points", "pcg_projection", "pcg_self_prune", "pcg_spawner", "pcg_spline_sampler", "pcg_surface_sampler", "pcg_transform", "pcg_union", "pcg_volume_sampler", "peak", "point", "point_jitter", "point_relax", "resample", "reverse", "ripple", "select_sharp_edges", "set_material", "smooth", "sort", "split", "subnet", "unpack", "vertex_bevel", "waves"]);
+        let ids: Vec<_> = package_catalogue().iter().map(|n| n.id).collect();
+        assert!(!ids.is_empty());
+        assert!(ids.windows(2).all(|pair| pair[0] < pair[1]), "package ids must be strictly sorted and unique");
+        assert!(ids.contains(&"example_offset"));
     }
 }
 

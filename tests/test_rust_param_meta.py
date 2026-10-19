@@ -17,6 +17,13 @@ class ParamMetaTests(unittest.TestCase):
         spec.loader.exec_module(mod)
         with open(FILE, encoding="utf-8") as f:
             on_disk = json.load(f)
+        catalogue_ids = list(mod.package_meta())
+        self.assertTrue(catalogue_ids)
+        self.assertTrue(all(a < b for a, b in zip(catalogue_ids, catalogue_ids[1:])),
+                        "package ids must be strictly sorted and unique")
+        self.assertEqual(len(catalogue_ids), len(set(catalogue_ids)))
+        for node_id in ("box", "transform", "example_offset"):
+            self.assertIn(node_id, on_disk)
         self.assertEqual(json.loads(json.dumps(mod.meta())), on_disk,
                          "rust/crates/minihou-app/src/param_meta.json is out of date: run `py tools/dump_rust_param_meta.py`")
 
