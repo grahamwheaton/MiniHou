@@ -3007,6 +3007,19 @@ impl eframe::App for App {
         if modal_frame { self.update_modal(ctx); }
         let model_modal_frame=self.model_modal.is_some();
         if model_modal_frame && !started_pushpull { self.update_model_modal(ctx); }
+        // Selecting a mirror node brings its gizmo back (once per selection; Enter or an empty click dismisses it).
+        if self.mirror.is_none() && self.modal.is_none() && self.model_modal.is_none() && self.scene.is_some() && self.selected_set.len()==1
+            && self.editor.doc.value()["nodes"][&self.selected]["type"]=="mirror" && !ctx.wants_keyboard_input() {
+            let seen_id=egui::Id::new("mirror_gizmo_seen");
+            let seen:Option<(String,u64)>=ctx.data(|d|d.get_temp(seen_id));
+            let key=(self.selected.clone(),self.cooking.completed);
+            if seen.as_ref().map(|s|&s.0)!=Some(&key.0) && self.cooking.error.is_none() {
+                ctx.data_mut(|d|d.insert_temp(seen_id,key));
+                self.start_mirror(ctx);
+            }
+        } else if self.editor.doc.value()["nodes"][&self.selected]["type"]!="mirror" {
+            ctx.data_mut(|d|d.remove::<(String,u64)>(egui::Id::new("mirror_gizmo_seen")));
+        }
         let mirror_frame = self.mirror.is_some();
         if mirror_frame { self.update_mirror(ctx); }
         if (modal_frame || model_modal_frame) && self.modal.is_none() && self.model_modal.is_none() && ctx.input(|i| i.pointer.primary_pressed()) {
