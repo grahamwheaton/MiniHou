@@ -350,3 +350,5 @@ In object mode, points are still drawn even when they belong to a face or an edg
 - **Todo: Ctrl+G subnet creation adds an input and an output node to the stream automatically.**
 - **Todo: subnet inputs and outputs take custom parameters.** Parameters on an input or output are exposed outside the subnet. Outputs can also add custom parameters, and can add new stream nodes. Dragging a noodle onto a subnet adds a new input or output automatically.
 - **Todo: Ctrl+U on a subnet ungroups it.** Add this as a keymap that expands the selected subnet back into its inner nodes.
+- **Todo: point mode points can be half size.** Let the point display size go down to 0.5 in point mode.
+- **Bug: a point is missing in point mode.** In the screenshot (2026-10-19), a point is expected at the inner corner where the three visible faces meet near the grid origin, but none is drawn. Check whether the corner vertex is being hidden by the object-mode point rule or by the picking/draw filter.
