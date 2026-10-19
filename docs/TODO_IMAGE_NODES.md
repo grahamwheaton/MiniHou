@@ -353,3 +353,4 @@ In object mode, points are still drawn even when they belong to a face or an edg
 - **Todo: point mode points can be half size.** Let the point display size go down to 0.5 in point mode.
 - **Bug: a point is missing in point mode.** In the screenshot (2026-10-19), a point is expected at the inner corner where the three visible faces meet near the grid origin, but none is drawn. Check whether the corner vertex is being hidden by the object-mode point rule or by the picking/draw filter.
 - **Todo: null draws a crosshair in the viewport (parity with Blender).** Add a size parameter for the crosshair.
+- **Future todo: parent constraint.** Not scheduled yet.
