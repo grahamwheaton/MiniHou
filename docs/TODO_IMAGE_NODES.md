@@ -408,3 +408,7 @@ From the Maya polygon tools audit, the items the user picked:
 ## Bug: object-mode display shows points that belong to faces or edges (reported 2026-10-19)
 
 In object mode, points are still drawn even when they belong to a face or an edge. Wanted: points that are part of a face or an edge are hidden; edges that are not attached to a face are shown; points that are not attached to any face or edge (stray points) are shown. So in object mode you see faces, stray edges and stray points, and nothing that is only a corner of a face.
+
+## Feature: viewport selections as undo steps (requested 2026-10-19)
+
+Viewport selection changes (click, box select, add or remove from the selection, select all, select none) should be undo steps, so Ctrl+Z steps back through selection changes as well as graph edits. Keep one undo record per selection change (a drag-select is one step). Check how element selection history is recorded today (undo_element_selection in main.rs) and merge it into the main undo stack so the order of graph edits and selection changes is preserved.
