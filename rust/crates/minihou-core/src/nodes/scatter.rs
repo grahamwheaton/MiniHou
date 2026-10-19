@@ -220,12 +220,23 @@ fn scatter_surface_with_options(geo: &Geometry, count: usize, seed: i64, density
 
     let override_area = options.map(|p| p.f("override_prim_area")).transpose()?.unwrap_or(0.0);
     if !override_area.is_finite() || override_area < 0.0 { return Err(Error::new("scatter: override_prim_area must be finite and non-negative")); }
-    if override_area > 0.0 {
+    let prim_override = geo.prim.get("override_prim_area")
+        .or_else(|| geo.prim.get("area"))
+        .filter(|a| a.width == 1)
+        .map(|a| super::blender_input::numbers(a));
+    if override_area > 0.0 || prim_override.is_some() {
         let mut prim_areas = vec![0.0; nprims];
         for (tri, &area) in triangles.iter().zip(&areas) { prim_areas[tri.prim as usize] += area; }
         for (tri, area) in triangles.iter().zip(&mut areas) {
-            let total = prim_areas[tri.prim as usize];
-            *area = if total > 0.0 { *area * override_area / total } else { 0.0 };
+            let p_idx = tri.prim as usize;
+            let target_area = prim_override.as_ref()
+                .and_then(|po| po.get(p_idx).copied())
+                .filter(|&v| v > 0.0)
+                .unwrap_or(override_area);
+            if target_area > 0.0 {
+                let total = prim_areas[p_idx];
+                *area = if total > 0.0 { *area * target_area / total } else { 0.0 };
+            }
         }
     }
     if force_total_count && (density.is_some() || vertex_density.is_some() || primitive_density.is_some()) {
@@ -807,5 +818,29 @@ mod tests {
         assert_eq!(out.npoints, 10);
         for name in ["sourceprim", "sourceprimuv", "id", "density", "pscale"] { assert_eq!(out.point[name].rows(), 10); }
         assert!(out.point["sourceprim"].as_i32().unwrap().iter().all(|&v| v == -1));
+    }
+
+    #[test]
+    fn scatter_primitive_attribute_override_area() {
+        // Two triangles: prim 0 has physical area 2.0, prim 1 has physical area 2.0
+        let mut g = Geometry::from_arrays(
+            vec![0.,0.,0., 2.,0.,0., 0.,2.,0., 10.,0.,0., 12.,0.,0., 10.,2.,0.],
+            vec![0,1,2, 3,4,5],
+            vec![0,3,6],
+            None,
+        ).unwrap();
+        // Prim 0 has override area 0.001, Prim 1 has override area 10.0
+        g.prim.insert("override_prim_area".into(), Arc::new(Attr::f32(1, vec![0.001, 10.0])));
+        let p = Params::resolve(SCATTER.params, serde_json::json!({
+            "count": 100,
+            "generate": "by_count",
+            "prim_num_attribute": true
+        }).as_object()).unwrap();
+        let out = (SCATTER.cook)(&[vec![Arc::new(g)]], &p).unwrap();
+        assert_eq!(out.npoints, 100);
+        let src_prims = out.point["sourceprim"].as_i32().unwrap();
+        let count_p1 = src_prims.iter().filter(|&&p| p == 1).count();
+        // Vast majority should be scattered on prim 1 due to area override
+        assert!(count_p1 > 90);
     }
 }
