@@ -404,3 +404,7 @@ From the Maya polygon tools audit, the items the user picked:
 10. Blend shape: morph targets.
 
 - **Done: new nodes take the viewport selection as group input.** Tab menu, shelf, network add and connected add all call `selection_node_params`; `element_select::find_input_group_field` picks the group field and the domain comes from the selection type. Generators and object mode are unchanged.
+
+## Bug: object-mode display shows points that belong to faces or edges (reported 2026-10-19)
+
+In object mode, points are still drawn even when they belong to a face or an edge. Wanted: points that are part of a face or an edge are hidden; edges that are not attached to a face are shown; points that are not attached to any face or edge (stray points) are shown. So in object mode you see faces, stray edges and stray points, and nothing that is only a corner of a face.
