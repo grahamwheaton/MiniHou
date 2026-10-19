@@ -39,13 +39,6 @@ fn edge_group_count(g: &Geometry, name: &str) -> usize {
         .count()
 }
 
-fn point_group_count(g: &Geometry, name: &str) -> usize {
-    crate::nodes::group::flags(&g.point[&format!("group_{name}")])
-        .into_iter()
-        .filter(|&x| x)
-        .count()
-}
-
 #[test]
 fn test_cube_and_open_quad_boundary() {
     // A cube box with all faces selected gives no boundary
@@ -85,19 +78,26 @@ fn test_preserve_existing_groups_and_custom_name() {
 
 #[test]
 fn test_edge_and_point_domains() {
-    // Open quad: 4 edges in a loop. With all 4 edges selected, each vertex has degree 2, so 0 boundary points
+    // Open quad: 4 edges in a loop. With all 4 edges selected, all 4 are boundary edges of the quad
     let q = open_quad();
     let out_e_all = run(&q, serde_json::json!({"domain": "edges", "group": ""})).unwrap();
-    assert_eq!(point_group_count(&out_e_all, "boundary"), 0);
+    assert_eq!(edge_group_count(&out_e_all, "boundary"), 4);
+    assert!(!out_e_all.point.contains_key("group_boundary"));
 
-    // If 1 edge of quad is selected, both of its endpoints have degree 1 in selection
+    // If 1 edge of quad is selected, that edge is on the boundary
     let out_e_one = run(&q, serde_json::json!({"domain": "edges", "group": "0"})).unwrap();
-    assert_eq!(point_group_count(&out_e_one, "boundary"), 2);
     assert_eq!(edge_group_count(&out_e_one, "boundary"), 1);
+    assert!(!out_e_one.point.contains_key("group_boundary"));
 
-    // Points domain: on an open quad, all 4 points are on the mesh boundary
+    // Points domain: on an open quad, all 4 points are on the mesh boundary, so all 4 boundary edges are output
     let out_pts = run(&q, serde_json::json!({"domain": "points", "group": ""})).unwrap();
-    assert_eq!(point_group_count(&out_pts, "boundary"), 4);
+    assert_eq!(edge_group_count(&out_pts, "boundary"), 4);
+    assert!(!out_pts.point.contains_key("group_boundary"));
+
+    // Default domain is edges: running without parameters selects all 4 boundary edges
+    let out_default = run(&q, serde_json::json!({})).unwrap();
+    assert_eq!(edge_group_count(&out_default, "boundary"), 4);
+    assert!(!out_default.point.contains_key("group_boundary"));
 }
 
 #[test]

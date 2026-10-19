@@ -11,7 +11,7 @@ use crate::{
 pub(super) const NODE: NodeSpec = NodeSpec {
     name: "select_sharp_edges",
     inputs: &[InputSpec { name: "geo", multi: false, optional: false }],
-    params: crate::params!("angle": 30.0; "output_group_name": "sharp_edges"; "domain": "edges"),
+    params: crate::params!("angle": 30.0; "output_group_name": "sharp_edges"; "domain": "edges"; "group": ""),
     cook,
 };
 
@@ -23,9 +23,17 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         return Err(Error::new("angle must be a non-negative finite number"));
     }
     let output_group_name = p.s("output_group_name")?;
-    crate::nodes::group::valid_name(&output_group_name)?;
+    let output_group_name = if output_group_name.trim().is_empty() { "sharp_edges" } else { output_group_name.trim() };
+    crate::nodes::group::valid_name(output_group_name)?;
+    let group_pattern = p.s("group").unwrap_or_default();
 
     let mut out = (**source).clone();
+    let filter_mask = if group_pattern.trim().is_empty() {
+        None
+    } else {
+        Some(crate::nodes::edge_tools::edge_mask(&out, &group_pattern)?)
+    };
+
     let fn_ = crate::normals::prim_normals(out.p(), &out.topology);
     let un: Vec<[f64; 3]> = fn_
         .iter()
@@ -58,6 +66,9 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
 
     let mut sharp_mask = vec![false; e.len()];
     for (i, faces) in edge_faces.iter().enumerate() {
+        if filter_mask.as_ref().is_some_and(|m| !m[i]) {
+            continue;
+        }
         if faces.len() < 2 {
             continue;
         }
@@ -94,6 +105,14 @@ fn cook(inputs: &Inputs, p: &Params) -> Result<Geometry> {
         &sharp_mask.iter().map(|&b| b as u8 as f32).collect::<Vec<_>>(),
         true,
     )?;
+    if output_group_name != "sharp" {
+        let _ = crate::nodes::edge_tools::write_values(
+            &mut out,
+            "edge_group_sharp",
+            &sharp_mask.iter().map(|&b| b as u8 as f32).collect::<Vec<_>>(),
+            true,
+        );
+    }
     out.edge.insert(
         format!("group_{output_group_name}"),
         Arc::new(Attr::i32(1, sharp_mask.iter().map(|&b| b as i32).collect())),

@@ -789,12 +789,12 @@
  },
  "boundary_select": {
   "domain": {
-   "default": "faces",
-   "doc": "Element domain of the input selection (faces, edges, or points).",
+   "default": "edges",
+   "doc": "Element domain of the input selection (edges, faces, or points); outputs boundary edges.",
    "kind": "enum",
    "options": [
-    "faces",
     "edges",
+    "faces",
     "points",
     "primitives"
    ]
@@ -802,11 +802,13 @@
   "group": {
    "default": "",
    "doc": "Input selection group name or pattern; empty selects all elements in domain.",
-   "kind": "str"
+   "kind": "str",
+   "pick_domain_default": "edges",
+   "pick_domain_param": "domain"
   },
   "output_group_name": {
    "default": "boundary",
-   "doc": "Name of the output group containing the boundary elements.",
+   "doc": "Name of the output edge group containing boundary edges.",
    "kind": "str"
   }
  },
@@ -8121,6 +8123,12 @@
    "options": [
     "edges"
    ]
+  },
+  "group": {
+   "default": "",
+   "doc": "Edge group or pattern to filter; empty checks all edges.",
+   "kind": "str",
+   "pick_domain": "edges"
   },
   "output_group_name": {
    "default": "sharp_edges",

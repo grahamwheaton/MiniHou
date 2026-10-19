@@ -11,6 +11,12 @@
     "options": ["edges"],
     "doc": "Domain of selection; fixed to edges."
   },
+  "group": {
+    "kind": "str",
+    "default": "",
+    "doc": "Edge group or pattern to filter; empty checks all edges.",
+    "pick_domain": "edges"
+  },
   "output_group_name": {
     "kind": "str",
     "default": "sharp_edges",

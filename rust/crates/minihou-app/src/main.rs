@@ -965,7 +965,15 @@ impl App {
         };
         // grow / select_path / select_loop / select_ring / edge_slide / group_create start from the viewport's element selection
         let params = self.selection_node_params(node_type);
-        if node_type == "group_create" && self.editor_state.selection != ui::SelectionMode::Object {
+        if node_type == "boundary_select" {
+            let mut p = params.unwrap_or_else(|| json!({}));
+            p["output_group_name"] = json!(element_select::free_group_name_with_prefix(self.editor.doc.value(), "boundary"));
+            merge_params(&mut value, &id, p);
+        } else if node_type == "select_sharp_edges" {
+            let mut p = params.unwrap_or_else(|| json!({}));
+            p["output_group_name"] = json!(element_select::free_group_name_with_prefix(self.editor.doc.value(), "sharp_edges"));
+            merge_params(&mut value, &id, p);
+        } else if node_type == "group_create" && self.editor_state.selection != ui::SelectionMode::Object {
             let Some(mut params) = params else { self.file_status = "Select points, edges or faces to create a group".into(); return; };
             params["name"] = json!(element_select::free_group_name(self.editor.doc.value()));
             merge_params(&mut value, &id, params);
@@ -979,6 +987,13 @@ impl App {
             self.selected = id.clone();
             self.selected_set = std::collections::BTreeSet::from([id.clone()]);
             self.display = id;
+            if node_type == "boundary_select" {
+                self.editor_state.apply(ui::EditorChange::Selection(ui::SelectionMode::Edges));
+                if self.selection.mode != ui::SelectionMode::Edges {
+                    self.selection = picking::Selection { mode: ui::SelectionMode::Edges, ..Default::default() };
+                }
+                self.selection_dirty = true;
+            }
             self.last_operator = Some(LastOperator::AddNode {
                 node_type: node_type.to_string(),
                 after_selection: after.is_some(),
@@ -2398,6 +2413,7 @@ impl App {
     }
     /// Apply what the panels asked for this frame.
     fn apply(&mut self, ctx: &egui::Context, actions: Vec<UiAction>) {
+        let prev_selected = self.selected.clone();
         for action in actions {
             if matches!(&action,UiAction::Select(_) | UiAction::ToggleSelect(_) | UiAction::SelectSet { .. }) { self.selection_dirty=true; }
             match action {
@@ -2543,6 +2559,13 @@ impl App {
                 UiAction::AddNode { node_type, after } => self.add_node(ctx, &node_type, after.as_deref()),
                 UiAction::AddNetworkNode { node_type, pos, wire } => {
                     if let Some((mut value, id)) = graph_edit::add(self.editor.doc.value(), &node_type, None) {
+                        if node_type == "boundary_select" {
+                            let name = element_select::free_group_name_with_prefix(self.editor.doc.value(), "boundary");
+                            merge_params(&mut value, &id, json!({"output_group_name": name}));
+                        } else if node_type == "select_sharp_edges" {
+                            let name = element_select::free_group_name_with_prefix(self.editor.doc.value(), "sharp_edges");
+                            merge_params(&mut value, &id, json!({"output_group_name": name}));
+                        }
                         let before = ui::network::position_add(ctx, &self.editor.path, self.editor.doc.value(), &mut value, None);
                         value["nodes"][&id]["pos"] = json!(pos);
                         let inserted = ui::network::insert_added(ctx, &self.editor.path, self.editor.doc.value(), &mut value, &id, pos, wire.as_ref());
@@ -2556,16 +2579,37 @@ impl App {
                             self.display = if inserted {
                                 Graph::from_value(self.editor.doc.value()).ok().and_then(|g| g.main_output().ok()).unwrap_or(id)
                             } else { id };
+                            if node_type == "boundary_select" {
+                                self.editor_state.apply(ui::EditorChange::Selection(ui::SelectionMode::Edges));
+                                if self.selection.mode != ui::SelectionMode::Edges {
+                                    self.selection = picking::Selection { mode: ui::SelectionMode::Edges, ..Default::default() };
+                                }
+                                self.selection_dirty = true;
+                            }
                         } else { self.editor.doc = original; }
                     } else { self.file_status = format!("The Rust core has no {node_type} node yet"); }
                 }
                 UiAction::AddConnectedNode { node_type, connection, pos } => {
-                    if let Some((value, id)) = graph_edit::add_connected(self.editor.doc.value(), &node_type, &connection, pos) {
+                    if let Some((mut value, id)) = graph_edit::add_connected(self.editor.doc.value(), &node_type, &connection, pos) {
+                        if node_type == "boundary_select" {
+                            let name = element_select::free_group_name_with_prefix(self.editor.doc.value(), "boundary");
+                            merge_params(&mut value, &id, json!({"output_group_name": name}));
+                        } else if node_type == "select_sharp_edges" {
+                            let name = element_select::free_group_name_with_prefix(self.editor.doc.value(), "sharp_edges");
+                            merge_params(&mut value, &id, json!({"output_group_name": name}));
+                        }
                         if self.commit_document(value, &format!("add {node_type} and connect")) {
                             ui::network::place_connected(ctx, &self.editor.path, &id, pos);
                             self.selected = id.clone();
                             self.selected_set = std::collections::BTreeSet::from([id.clone()]);
                             self.display = Graph::from_value(self.editor.doc.value()).ok().and_then(|g| g.main_output().ok()).unwrap_or(id);
+                            if node_type == "boundary_select" {
+                                self.editor_state.apply(ui::EditorChange::Selection(ui::SelectionMode::Edges));
+                                if self.selection.mode != ui::SelectionMode::Edges {
+                                    self.selection = picking::Selection { mode: ui::SelectionMode::Edges, ..Default::default() };
+                                }
+                                self.selection_dirty = true;
+                            }
                         }
                     }
                 }
@@ -2666,6 +2710,15 @@ impl App {
                     | UiAction::BlenderDetect | UiAction::BlenderRestartLink) => self.blender_action(action, ctx),
                 UiAction::ToggleLocked(id) => { let f = self.flags.entry(id).or_default(); f.locked = !f.locked; }
                 UiAction::ToggleTemplate(id) => { let f = self.flags.entry(id).or_default(); f.template = !f.template; }
+            }
+        }
+        if self.selected != prev_selected {
+            if self.editor.doc.value()["nodes"][&self.selected]["type"] == "boundary_select" {
+                self.editor_state.apply(ui::EditorChange::Selection(ui::SelectionMode::Edges));
+                if self.selection.mode != ui::SelectionMode::Edges {
+                    self.selection = picking::Selection { mode: ui::SelectionMode::Edges, ..Default::default() };
+                }
+                self.selection_dirty = true;
             }
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(self.editor.title()));
