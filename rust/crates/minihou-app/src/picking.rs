@@ -821,6 +821,13 @@ fn filtered_pick_ignores_foreground_ghost_and_preserves_triangle_id() {
 mod cull_pick_tests {
     use super::*;
     #[test]
+    fn nearest_visible_face_is_picked_whatever_its_winding() {
+        // two triangles facing away from the viewer; the nearer one must win without culling
+        let p=[0.,0.,0.,0.,1.,0.,1.,0.,0., 0.,0.,-1.,0.,1.,-1.,1.,0.,-1.]; let tri=[0u32,1,2,3,4,5];
+        let hit=pick_triangle_filtered(&p,&tri,[0.2,0.2,3.],[0.,0.,-1.],|_|true).unwrap();
+        assert_eq!(hit.tri,0);
+    }
+    #[test]
     fn backface_pick_needs_xray() {
         let p=[0.,0.,0.,1.,0.,0.,0.,1.,0.]; let tri=[0u32,1,2];
         // front (normal +z) seen from +z; back seen from -z

@@ -283,7 +283,6 @@ Migrate the legacy nodes to the self-registering package system, following docs/
 ## Testing feedback on ce2c51c36 (2026-10-18)
 
 Bugs:
-- **Faces dropped by selection:** selection still drops faces (tested, not fixed).
 - **Re-cook activity:** dragging or wheel-adjusting a value re-cooks many nodes; check the cook path for parameter drags (only the changed node and its downstream should cook, and only on release unless live preview is wanted). Compare with the mouse-wheel path.
 - **Boundary select:** should select only the boundary edges, create an auto-named group, and switch the viewport selection to edges.
 - **Select sharp edges:** tags no edges in testing. When the node is selected, every edge it tags should show purple.
