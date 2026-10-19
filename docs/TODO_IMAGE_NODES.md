@@ -358,3 +358,4 @@ In object mode, points are still drawn even when they belong to a face or an edg
 - **Todo: snap distance measurements to the nearest mm.** Round the measured distance to the nearest millimetre in the measurement readout.
 - **Future todo: viewport gizmo for the Helix node.** Not scheduled yet.
 - **Future todo: L-System should generate 3D output, not 2D.** Not scheduled yet.
+- **Future todo: Metaballs / Points to Surface node needs a rework.** Not scheduled yet.
