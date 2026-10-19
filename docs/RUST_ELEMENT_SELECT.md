@@ -48,7 +48,7 @@ work per polygon; `Selection.tris` still stores triangle numbers, always whole p
 * Ctrl+click with nothing selected selects the clicked element (Blender). Pre-rust did a
   no-op subtract; that was an accident of the modifier mapping.
 * Holding Alt (Blender navigation) previews the loop (Ctrl+Alt: ring) under the pointer.
-* There is no selection undo in the Rust app, so none is recorded.
+* Selection changes are recorded alongside document edits in the shared undo history.
 
 ## Loop walk (`quadStrip(edge, false)`)
 
