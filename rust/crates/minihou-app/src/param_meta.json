@@ -9310,6 +9310,34 @@
    "kind": "str"
   }
  },
+ "vertex_bevel": {
+  "group": {
+   "default": "",
+   "doc": "Point group or point numbers to bevel; empty selects all eligible points.",
+   "kind": "str",
+   "pick_domain": "points"
+  },
+  "profile": {
+   "default": 0.5,
+   "doc": "Curvature of additional cap rings: zero gives even spacing and one rounds toward the old corner.",
+   "kind": "float",
+   "max": 1.0,
+   "min": 0.0
+  },
+  "segments": {
+   "default": 1,
+   "doc": "Number of rings across each vertex cap; one makes a flat chamfer.",
+   "kind": "int",
+   "max": 16,
+   "min": 1
+  },
+  "width": {
+   "default": 0.1,
+   "doc": "Distance from each selected point along its incident edges.",
+   "kind": "float",
+   "min": 0.0
+  }
+ },
  "voronoi_adjacency": {
   "max_gap": {
    "default": 0.0,

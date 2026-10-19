@@ -1,0 +1,5 @@
+id = "vertex_bevel"
+name = "Vertex Bevel"
+category = "Modify"
+description = "Cut selected manifold polygon corners into beveled caps."
+keywords = "vertex bevel point corner chamfer"
