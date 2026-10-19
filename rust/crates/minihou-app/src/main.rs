@@ -2328,6 +2328,17 @@ impl App {
             "template_flag" => { for id in &self.selected_set { let f = self.flags.entry(id.clone()).or_default(); f.template = !f.template; } }
             "selectable_template_flag" => self.file_status = "Selectable template flags are not supported yet".into(),
             "delete_selection" => {
+                if self.network_hover {
+                    if let Some((path,inner,selected,set))=ui::network::current_scope(ctx,&self.editor.path,self.editor.doc.value()) {
+                        let wires=ui::network::take_selected_wires(ctx,&self.editor.path,&inner);
+                        let changed=if !wires.is_empty(){graph_edit::disconnect_wires(&inner,&wires)}
+                            else {let ids:Vec<String>=if set.is_empty(){vec![selected]}else{set.into_iter().collect()};graph_edit::delete_set(&inner,&ids)};
+                        if let Some(changed)=changed.and_then(|doc|ui::network::embed_scope(self.editor.doc.value(),&path,doc)) {
+                            if self.commit_document(changed,"delete inner nodes") {ui::network::select_inner(ctx,&self.editor.path,Vec::new());}
+                        }
+                        return;
+                    }
+                }
                 if let Some(index)=ui::sketch::selected_measurement(ctx) {
                     self.delete_measurement(index);
                     ui::sketch::clear_measurement_selection(ctx);
@@ -2354,6 +2365,17 @@ impl App {
                     let Some(source) = self.active_object().map(str::to_owned) else { self.file_status = "Select displayed elements to group".into(); return; };
                     self.add_node(ctx, "group_create", Some(&source));
                     return;
+                }
+                if self.network_hover {
+                    if let Some((path,inner,selected,set))=ui::network::current_scope(ctx,&self.editor.path,self.editor.doc.value()) {
+                        let ids:Vec<String>=if set.is_empty(){vec![selected]}else{set.into_iter().collect()};
+                        if let Some((changed,ids))=subnet_edit::toggle(&inner,&ids) {
+                            if let Some(root)=ui::network::embed_scope(self.editor.doc.value(),&path,changed) {
+                                if self.commit_document(root,"group inner nodes") {ui::network::select_inner(ctx,&self.editor.path,ids);}
+                            }
+                        } else {self.file_status="Select inner nodes to group".into();}
+                        return;
+                    }
                 }
                 let ids: Vec<String> = if self.selected_set.is_empty() { vec![self.selected.clone()] } else { self.selected_set.iter().cloned().collect() };
                 match subnet_edit::toggle(self.editor.doc.value(), &ids) {
@@ -2744,7 +2766,9 @@ impl App {
                     }
                 },
                 UiAction::TidyNetwork => {
-                    ui::network::tidy(ctx, &self.editor.path, self.editor.doc.value(), &self.flags);
+                    if let Some((_,inner,_,_))=ui::network::current_scope(ctx,&self.editor.path,self.editor.doc.value()) {
+                        ui::network::tidy(ctx, &self.editor.path, &inner, &self.flags);
+                    } else {ui::network::tidy(ctx, &self.editor.path, self.editor.doc.value(), &self.flags);}
                     self.last_operator = Some(LastOperator::Tidy);
                 }
                 UiAction::RepeatLast => self.repeat_last(ctx),
@@ -3123,7 +3147,15 @@ impl eframe::App for App {
             self.network_hover = ctx.input(|i| i.pointer.hover_pos()).is_some_and(|p| net.response.rect.contains(p));
             if self.params_open { egui::SidePanel::right("parameters").default_width(460.).show(ctx, |ui| {
                 egui::TopBottomPanel::bottom("geometry_info").resizable(true).default_height(220.).show_inside(ui, |ui| ui::geo_info::show(ui, &v, &mut out));
-                ui::params::show(ui, &v, &mut out);
+                if let Some((path,inner,selected,selected_set))=ui::network::current_scope(ctx,&self.editor.path,self.editor.doc.value()) {
+                    if let Ok(inner_graph)=Graph::from_value(&inner) {
+                        let mut scoped=v.clone(); scoped.graph=&inner_graph; scoped.doc=&inner;
+                        scoped.selected=&selected; scoped.selected_set=&selected_set;
+                        let mut actions=Actions::default();
+                        ui::params::show(ui,&scoped,&mut actions);
+                        for action in actions.0 {if let Some(edit)=ui::network::scoped_edit(self.editor.doc.value(),&path,action) {out.push(edit);}}
+                    }
+                } else {ui::params::show(ui, &v, &mut out);}
             }); }
             egui::CentralPanel::default().show(ctx, |ui| {
                 let size = ui.available_size().max(egui::vec2(1., 1.));

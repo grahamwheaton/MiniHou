@@ -1551,6 +1551,10 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
         return;
     };
     let typ = &node.node_type;
+    if typ == "subnet" {
+        promoted_panel(ui, v, out, id);
+        return;
+    }
     if nodes::get(typ).is_none() {
         unsupported(ui, v, id, typ);
         return;
@@ -1605,6 +1609,100 @@ pub fn show(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions) {
             }
         }
     });
+}
+
+/// A subnet's public numeric controls live in its own `params`, with a mapping
+/// to the target node inside `inner.nodes`.
+fn promoted_panel(ui: &mut egui::Ui, v: &View<'_>, out: &mut Actions, id: &str) {
+    ui.heading(format!("Subnet: {id}"));
+    let subnet=&v.doc["nodes"][id];
+    let mut candidates=Vec::<(String,String,Value)>::new();
+    if let Some(inner)=subnet["inner"]["nodes"].as_object() {
+        for (target,node) in inner {
+            if let Some(spec)=node["type"].as_str().and_then(nodes::get) {
+                for param in spec.params {
+                    let value=node["params"].get(param.name).cloned().unwrap_or_else(||(param.default)());
+                    if value.is_number() {candidates.push((target.clone(),param.name.into(),value));}
+                    else if let Some(xs)=value.as_array().filter(|xs|xs.len()==3 && xs.iter().all(Value::is_number)) {
+                        for (i,axis) in ["x","y","z"].iter().enumerate() {candidates.push((target.clone(),format!("{}.{}",param.name,axis),xs[i].clone()));}
+                    }
+                }
+            }
+        }
+    }
+    let choice_id=egui::Id::new(("promote_choice",id));
+    let mut choice=ui.ctx().data(|d|d.get_temp::<usize>(choice_id)).unwrap_or(0).min(candidates.len().saturating_sub(1));
+    ui.horizontal(|ui| {
+        egui::ComboBox::from_id_salt(choice_id).selected_text(candidates.get(choice).map(|(node,param,_)|format!("{node}.{param}")).unwrap_or_else(||"No numeric parameters".into()))
+            .show_ui(ui,|ui|for (i,(node,param,_)) in candidates.iter().enumerate(){ui.selectable_value(&mut choice,i,format!("{node}.{param}"));});
+        if ui.add_enabled(!candidates.is_empty(),egui::Button::new("Promote")).clicked() {
+            let (target,param,value)=&candidates[choice];
+            let mut next=v.doc.clone();
+            let node=&mut next["nodes"][id];
+            let mut name=param.replace('.',"_");
+            if node["promoted_params"].as_array().is_some_and(|entries|entries.iter().any(|e|e["name"]==name)) {
+                let base=name.clone(); let mut i=2;
+                while node["promoted_params"].as_array().is_some_and(|entries|entries.iter().any(|e|e["name"]==name)) {name=format!("{base}_{i}");i+=1;}
+            }
+            if !node["promoted_params"].is_array(){node["promoted_params"]=json!([]);}
+            node["promoted_params"].as_array_mut().unwrap().push(json!({"name":name.clone(),"node":target,"param":param,"default":value,"min":0.0,"max":10.0}));
+            node["params"][&name]=value.clone();
+            out.push(UiAction::Edit {edit:Edit::Replace(next),continuous:false});
+        }
+    });
+    ui.ctx().data_mut(|d|d.insert_temp(choice_id,choice));
+    let Some(entries)=subnet["promoted_params"].as_array() else {return};
+    for entry in entries {
+        let Some(name)=entry["name"].as_str() else {continue};
+        let default=entry.get("default").cloned().unwrap_or(json!(0.0));
+        let old=subnet["params"].get(name).unwrap_or(&default);
+        let Some(mut number)=old.as_f64() else {continue};
+        let min=entry["min"].as_f64().unwrap_or(0.0);
+        let max=entry["max"].as_f64().unwrap_or(10.0).max(min+f64::EPSILON);
+        ui.horizontal(|ui| {
+            ui.label(entry["label"].as_str().unwrap_or(name));
+            let slider=ui.add(egui::Slider::new(&mut number,min..=max).show_value(false));
+            let field=ui.add(egui::DragValue::new(&mut number).speed((max-min)/200.0));
+            if slider.changed() || field.changed() {
+                out.push(promoted_value_edit(v.doc,id,name,number,slider.dragged() || field.dragged()));
+            }
+            let channel=&subnet["channels"][name];
+            let key=egui::Id::new(("promoted_expression",id,name));
+            if ui.button(if channel.is_string() {"ƒx ●"} else {"ƒx"}).on_hover_text("Channel expression").clicked() {
+                ui.ctx().data_mut(|d|d.insert_temp(key,channel.as_str().unwrap_or("").to_owned()));
+            }
+            if let Some(mut expr)=ui.ctx().data(|d|d.get_temp::<String>(key)) {
+                let mut open=true;
+                let mut applied=false;
+                egui::Window::new(format!("Expression: {id}.{name}")).id(key.with("window")).open(&mut open).show(ui.ctx(),|ui| {
+                    ui.text_edit_singleline(&mut expr);
+                    if ui.button("Apply").clicked() {
+                        let mut next=v.doc.clone();
+                        if expr.trim().is_empty() {next["nodes"][id]["channels"].as_object_mut().map(|c|c.remove(name));}
+                        else {next["nodes"][id]["channels"][name]=json!(expr);}
+                        out.push(UiAction::Edit {edit:Edit::Replace(next),continuous:false});
+                        applied=true;
+                    }
+                });
+                if open && !applied {ui.ctx().data_mut(|d|d.insert_temp(key,expr));}else{ui.ctx().data_mut(|d|d.remove::<String>(key));}
+            }
+        });
+    }
+}
+fn promoted_value_edit(doc:&Value,id:&str,name:&str,value:f64,continuous:bool)->UiAction {
+    let mut next=doc.clone(); next["nodes"][id]["params"][name]=json!(value);
+    UiAction::Edit {edit:Edit::Replace(next),continuous}
+}
+#[cfg(test)]
+mod subnet_parameter_tests {
+    use super::*;
+    #[test]
+    fn promoted_slider_edit_writes_outer_param() {
+        let doc=json!({"nodes":{"subnet1":{"type":"subnet","params":{"width":1.0},"inner":{"nodes":{"box1":{"type":"box"}},"output":"box1"}}}});
+        let UiAction::Edit {edit:Edit::Replace(next),continuous:true}=promoted_value_edit(&doc,"subnet1","width",4.0,true) else {panic!("expected continuous document edit")};
+        assert_eq!(next["nodes"]["subnet1"]["params"]["width"],json!(4.0));
+        assert_eq!(doc["nodes"]["subnet1"]["params"]["width"],json!(1.0));
+    }
 }
 
 fn redo_param(out: &mut Actions, id: &str, name: &str, value: Value, continuous: bool) {

@@ -207,6 +207,17 @@ impl Session {
     }
 
     fn cook_now(&mut self, target: Option<&str>) -> Result<Arc<Geometry>> {
+        if self.graph.nodes.iter().any(|(_,n)|n.node_type=="subnet") {
+            let source=self.graph.to_value();
+            if source["nodes"].as_object().is_some_and(|nodes|nodes.values().any(|n|n["type"]=="subnet" && n["inner"].is_object())) {
+            let mut expanded=source.clone();
+            expanded["nodes"]=Value::Object(crate::graph::expand_subnets(source["nodes"].as_object().unwrap())?.unwrap());
+            let cooked_graph=std::mem::replace(&mut self.graph,Graph::from_value(&expanded)?);
+            let result=self.cook_now(target);
+            self.graph=cooked_graph;
+            return result;
+            }
+        }
         let target = match target {
             Some(t) => t.to_string(),
             None => self.graph.main_output()?,
@@ -522,7 +533,7 @@ impl Run<'_> {
         }
         let t0 = Instant::now();
         let external = if def.bypass { None } else {
-            let p=Params::resolve(spec.params,self.resolved.params.get(id).or(def.params.as_ref())).map_err(|e|e.in_node(id,&def.node_type))?;
+            let p=Params::resolve(spec.params,if def.node_type=="subnet" {None} else {self.resolved.params.get(id).or(def.params.as_ref())}).map_err(|e|e.in_node(id,&def.node_type))?;
             if def.node_type == "object_input" { Some(nodes::blender_input::cook_binding(id,&p,self.external)) }
             else if def.node_type == "blender_object" { Some(nodes::blender_input::cook_object(id,&p,self.external)) }
             else { nodes::blender_input::cook_external(&def.node_type,&p,self.external) }

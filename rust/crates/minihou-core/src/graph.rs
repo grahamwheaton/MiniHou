@@ -155,6 +155,20 @@ impl Graph {
     pub fn node_channels(&self,id:&str)->Option<&Map<String,Value>> {self.node(id)?.channels.as_ref()}
     pub fn node_locks(&self,id:&str)->Option<&Vec<String>> {self.node(id)?.locked_params.as_ref()}
 
+    /// Promoted names are declared on a subnet and stored as ordinary outer params.
+    pub fn promoted_param(&self, id: &str, name: &str) -> Option<&Value> {
+        if let Some(node) = self.source["nodes"].get(id) {
+            return node["promoted_params"].as_array()?.iter().find(|p| p["name"] == name);
+        }
+        let mut node = &self.source["nodes"];
+        let mut parts = id.split('/').peekable();
+        while let Some(part) = parts.next() {
+            node = &node[part];
+            if parts.peek().is_some() { node = &node["inner"]["nodes"]; }
+        }
+        node["promoted_params"].as_array()?.iter().find(|p| p["name"] == name)
+    }
+
     /// The display node, else the first `output` node without its own Blender object, else the first `output`.
     pub fn main_output(&self) -> Result<String> {
         if let Some(d) = &self.display {
@@ -210,7 +224,7 @@ pub(crate) fn run_node(id: &str, def: &NodeDef, spec: &nodes::NodeSpec, inputs: 
     let result = if def.bypass {
         Ok(inputs.first().and_then(|i| i.first()).map(|g| (**g).clone()).unwrap_or_else(|| Geometry::points_only(Vec::new()).expect("empty geometry")))
     } else {
-        Params::resolve(spec.params, resolved.or(def.params.as_ref()))
+        Params::resolve(spec.params, if def.node_type == "subnet" {None} else {resolved.or(def.params.as_ref())})
             .and_then(|p| if def.node_type == "usd_export" { nodes::usd_nodes::cook_named(inputs, &p, id) } else { (spec.cook)(inputs, &p) })
             .and_then(|g| g.validate().map(|_| g))
     };
@@ -299,6 +313,13 @@ fn sockets(node: &Value, direction: &str) -> Result<Vec<(usize, String)>> {
         Ok((index, name))
     }).collect()
 }
+fn subnet_alias(node: &Value, source: String) -> Value {
+    let mut alias=serde_json::json!({"type":"subnet","inputs":{"geo":source}});
+    for field in ["params","channels","promoted_params"] {
+        if let Some(value)=node.get(field) {alias[field]=value.clone();}
+    }
+    alias
+}
 
 fn flatten_subnets(nodes: &Map<String, Value>, prefix: &str, ext: &[Option<String>], out: &mut Map<String, Value>, depth: usize) -> Result<()> {
     if depth > 16 { return Err(Error::new("subnets are nested too deeply")); }
@@ -346,19 +367,27 @@ fn flatten_subnets(nodes: &Map<String, Value>, prefix: &str, ext: &[Option<Strin
                     ext2[*index] = nd["inputs"].get(format!("in{index}")).and_then(Value::as_str).map(str::to_owned);
                 }
             }
-            let inner = nd["inner"]["nodes"].as_object().ok_or_else(|| Error::new(format!("node '{full}': subnet needs inner.nodes")))?;
-            flatten_subnets(inner, &format!("{full}/"), &ext2, out, depth + 1)?;
+            let mut inner = nd["inner"]["nodes"].as_object().ok_or_else(|| Error::new(format!("node '{full}': subnet needs inner.nodes")))?.clone();
+            if let Some(promoted) = nd["promoted_params"].as_array() {
+                for entry in promoted {
+                    let (Some(name),Some(target),Some(param)) = (entry["name"].as_str(),entry["node"].as_str(),entry["param"].as_str()) else { return Err(Error::new(format!("node '{full}': invalid promoted parameter"))); };
+                    let target_node = inner.get_mut(target).ok_or_else(|| Error::new(format!("node '{full}': promoted target '{target}' is missing")))?;
+                    target_node["channels"][param] = Value::String(format!("ch('../../{id}/{name}')"));
+                }
+            }
+            flatten_subnets(&inner, &format!("{full}/"), &ext2, out, depth + 1)?;
             if output_desc.is_empty() {
                 let output = nd["inner"]["output"].as_str().filter(|o| inner.contains_key(*o))
                     .ok_or_else(|| Error::new(format!("node '{full}': subnet inner.output must name an inner node")))?;
-                out.insert(full.clone(), serde_json::json!({"type": "subnet", "inputs": {"geo": format!("{full}/{output}")}}));
+                out.insert(full.clone(), subnet_alias(&nd,format!("{full}/{output}")));
             } else {
                 for (index, _) in output_desc {
                     let boundary = inner.iter().filter(|(_, node)| node["type"] == "subnet_output" && node["port_index"].as_u64() == Some(index as u64))
                         .map(|(id, _)| id).collect::<Vec<_>>();
                     if boundary.len() != 1 { return Err(Error::new(format!("subnet '{full}' output {index} needs one boundary node"))); }
                     let alias = if index == 0 { full.clone() } else { format!("{full}/$out{index}") };
-                    out.insert(alias, serde_json::json!({"type": "subnet", "inputs": {"geo": format!("{full}/{}", boundary[0])}}));
+                    let source=format!("{full}/{}", boundary[0]);
+                    out.insert(alias, if index==0 {subnet_alias(&nd,source)} else {serde_json::json!({"type":"subnet","inputs":{"geo":source}})});
                 }
             }
         } else if nd["type"] == "subnet_input" {
@@ -412,5 +441,37 @@ mod subnet_graph_tests {
         assert_eq!(actual.topology.vertex_point, old.topology.vertex_point);
         assert_eq!(actual.topology.prim_offsets, old.topology.prim_offsets);
         assert_eq!(actual.nprims(), old.nprims());
+    }
+    #[test]
+    fn subnet_promoted_slider_value_recooks_inner_geometry() {
+        let mut doc=json!({"display":"subnet1","nodes":{"subnet1":{"type":"subnet",
+            "params":{"width":2.0},"promoted_params":[{"name":"width","node":"box1","param":"size.x","default":1.0}],
+            "inner":{"nodes":{"box1":{"type":"box","params":{"size":[1.0,1.0,1.0]}}},"output":"box1"}}}});
+        let first=Graph::from_value(&doc).unwrap().cook(None).unwrap();
+        let mut session=crate::session::Session::new(Graph::from_value(&doc).unwrap());
+        assert_eq!(session.cook(None).unwrap().p(),first.p());
+        doc["nodes"]["subnet1"]["params"]["width"]=json!(4.0);
+        let second=Graph::from_value(&doc).unwrap().cook(None).unwrap();
+        session.replace_graph(Graph::from_value(&doc).unwrap());
+        assert_eq!(session.cook(None).unwrap().p(),second.p());
+        assert_ne!(first.p(),second.p());
+        assert_eq!(second.p().chunks_exact(3).map(|p|p[0]).fold(f32::NEG_INFINITY,f32::max),2.0);
+    }
+    #[test]
+    fn subnet_promoted_channel_resolves_into_inner_node() {
+        let doc=json!({"display":"subnet1","nodes":{
+            "driver":{"type":"box","params":{"size":[3.0,1.0,1.0]}},
+            "follower":{"type":"box","params":{"size":[1.0,1.0,1.0]},"channels":{"size.x":"ch('../subnet1/width')"}},
+            "subnet1":{"type":"subnet","params":{"width":1.0},"channels":{"width":"ch('../driver/size.x') * 2"},
+                "promoted_params":[{"name":"width","node":"box1","param":"size.x","default":1.0}],
+                "inner":{"nodes":{"box1":{"type":"box","params":{"size":[1.0,1.0,1.0]}}},"output":"box1"}}
+        }});
+        let mut expanded=doc.clone();
+        expanded["nodes"]=Value::Object(expand_subnets(doc["nodes"].as_object().unwrap()).unwrap().unwrap());
+        let resolved=crate::channels::resolve_graph(&Graph::from_value(&expanded).unwrap());
+        assert!(resolved.diagnostics.is_empty(),"{:?}",resolved.diagnostics);
+        assert_eq!(resolved.params["subnet1"]["width"],json!(6.0));
+        assert_eq!(resolved.params["subnet1/box1"]["size"][0],json!(6.0));
+        assert_eq!(resolved.params["follower"]["size"][0],json!(6.0));
     }
 }

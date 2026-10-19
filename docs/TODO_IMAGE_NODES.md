@@ -285,7 +285,7 @@ Features:
 
 ## Feature: Subnet, Houdini parity (requested 2026-10-18)
 
-Next: Double-click opens the subnet's inner graph. Add input and output nodes inside, including the ability to add and remove extra ports. Promote inner parameters to the outer subnet so its parameter pane shows sliders and accepts driver links, like any node. Plan the remaining work with Argon before implementation.
+Implemented in the Rust editor: double-click enters a subnet, Escape/U and breadcrumbs return to parent scopes; inner canvas edits and promoted numeric controls cook through the outer subnet. Live editor interaction still needs a host-app smoke test before this TODO can be closed.
 
 ## Feature (non-urgent): node frames (requested 2026-10-18)
 
@@ -339,9 +339,9 @@ Bugs:
 - Mirror gizmo has gone; restore it.
 - Deleting nodes from an embedded Blender graph can make Blender unresponsive.
 - Inset needs to auto-merge (parity with Blender). Vertex bevel needs parity with Blender and must flow correctly.
-- Cannot double-click to open a subnet node. (Not built: nested subnet navigation, plan step 3; double-click currently sets display.)
+- Subnet double-click navigation is implemented; live editor smoke test pending.
 - Ctrl+click shortest route works on simple meshes only; it breaks with split edges.
-- Cannot double-click to open a subnet node.
+- Promoted subnet control editing is implemented; live editor smoke test pending.
 
 Nodes and parameters:
 - All output groups optional: checkbox, label, then group name with target select.
