@@ -222,15 +222,6 @@ Parked by user: inset on non-planar regions. Tri to Quad: user will test.
 
 Use the blue "M" logo (rounded blue square with a white M) as the app icon (window and taskbar, and the exe icon) and in the top-left of the editor, in place of the current icon. Needs the logo as an .ico for the exe and a PNG for the in-app header.
 
-## Future: Shift+D and Alt+D duplicate, like Blender (requested 2026-10-18)
-
-- **3D viewport:** Shift+D duplicates the selection as Blender does and starts a move, so the copy can be placed. Alt+D makes linked duplicates (instances that share the source), which can then be moved. Depends on the native-instance work (stage 4, Pack/Unpack) for the instance case.
-- **Node editor:** Shift+D copies the selected nodes. Alt+D copies them with linked parameters, so a change to one copy's parameter changes the others.
-
-Check the key table in rust/crates/minihou-app/docs/NATIVE_EDITOR.md and the keymap test when adding the keys.
-
-
-
 ## Future: call the "primitives" domain "faces" (requested 2026-10-18)
 
 The domain option shown as "primitives" (group_create, blast, and other nodes with a domain param) should read "faces" in the UI. Saved graphs store "primitives", so the parser must keep accepting it as an alias (map it to faces), and the metadata options and param meta regenerated. Check every `p.e("domain", ...)` list in rust/crates/minihou-core/src/nodes for the "primitives" value, and the Python parity tests that use the name.

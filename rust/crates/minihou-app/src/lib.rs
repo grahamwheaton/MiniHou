@@ -542,10 +542,16 @@ impl Document {
     pub fn edit(&mut self, edit: &Edit) -> Result<()> {
         match edit {
             Edit::Param { node, name, value } => {
-                let typ = self.value["nodes"][node]["type"].as_str().ok_or("no such node")?;
-                let spec = minihou_core::nodes::get(typ).ok_or("unsupported node")?;
+                let typ = self.value["nodes"][node]["type"].as_str().ok_or("no such node")?.to_owned();
+                let spec = minihou_core::nodes::get(&typ).ok_or("unsupported node")?;
                 if !spec.params.iter().any(|p| p.name == name) { return Err("unknown parameter".into()); }
                 self.set(&["nodes", node, "params", name], value.clone());
+                if let Some(group) = self.value["nodes"][node]["linked_params_group"].as_str().map(str::to_owned) {
+                    let peers: Vec<String> = self.value["nodes"].as_object().into_iter().flatten()
+                        .filter(|(id, data)| *id != node && data["linked_params_group"] == group && data["type"] == typ)
+                        .map(|(id, _)| id.clone()).collect();
+                    for peer in peers { self.set(&["nodes", &peer, "params", name], value.clone()); }
+                }
             }
             Edit::Channel { node, path, expression } => {
                 let mut check=self.session()?;
@@ -1275,6 +1281,23 @@ pub fn link_param_edit(doc: &Value, message: &Value) -> Result<Edit> {
 #[cfg(test)]
 mod link_tests {
     use super::*;
+    #[test]
+    fn network_linked_parameter_edits_follow_both_directions_and_undo_together() {
+        let original = json!({"display":"a","nodes":{
+            "a":{"type":"box","linked_params_group":"a"},
+            "b":{"type":"box","linked_params_group":"a"}
+        }});
+        let mut doc = Document::parse(original.to_string()).unwrap();
+        let mut history = History::default();
+        history.edit(&mut doc, &Edit::Param {node:"b".into(), name:"size".into(), value:json!([2,3,4])}).unwrap();
+        history.finish(&doc);
+        assert_eq!(doc.value()["nodes"]["a"]["params"]["size"], json!([2,3,4]));
+        assert_eq!(doc.value()["nodes"]["b"]["params"]["size"], json!([2,3,4]));
+        history.undo(&mut doc);
+        assert!(doc.value()["nodes"]["a"]["params"].get("size").is_none());
+        history.redo(&mut doc);
+        assert_eq!(doc.value()["nodes"]["a"]["params"]["size"], json!([2,3,4]));
+    }
     #[test]
     fn exposure_is_saved_undoable_and_has_stable_structure_on_value_changes() {
         let mut doc = Document::parse(r#"{"nodes":{"b":{"type":"box"}},"display":"b","unknown":42}"#.into()).unwrap();

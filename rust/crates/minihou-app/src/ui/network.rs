@@ -359,7 +359,7 @@ fn header_ui(ui: &mut egui::Ui, r: Rect, v: &View, out: &mut Actions, state: &mu
     p.text(pos2(r.left()+10.,r.center().y),Align2::LEFT_CENTER,"Network",FontId::proportional(12.),v.theme.text);
     let links_rect=Rect::from_min_size(pos2(r.right()-226.,r.top()+5.),vec2(28.,22.));
     let snap_rect=Rect::from_min_size(pos2(r.right()-194.,r.top()+5.),vec2(28.,22.));
-    if header_toggle(ui,links_rect,"links",state.show_links,"Show parameter references (Shift+D)",v) {
+    if header_toggle(ui,links_rect,"links",state.show_links,"Show parameter references (Ctrl+Shift+D)",v) {
         state.show_links=!state.show_links; out.push(UiAction::LinkVisibility(state.show_links));
     }
     let ink=if state.show_links {v.theme.accent}else{v.theme.dim};

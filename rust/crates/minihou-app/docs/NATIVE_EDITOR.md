@@ -92,7 +92,7 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | W | Selectable template flag | Network |
 | Shift+J | Go to link source | Network |
 | Shift+K | Go to link target | Network |
-| Shift+D | Toggle parameter links | Network |
+| Ctrl+Shift+D | Toggle parameter links | Network |
 | Ctrl+Z | Undo | Everywhere |
 | Ctrl+Y | Redo | Everywhere |
 | Ctrl+Shift+Z | Redo | Everywhere |
@@ -100,6 +100,10 @@ The table below is checked against `Keymap::blender()` by a unit test. Shortcuts
 | Ctrl+Shift+S | Save as | Everywhere |
 | Ctrl+O | Open | Everywhere |
 | Ctrl+D | Duplicate nodes | Network |
+| Shift+D | Duplicate nodes | Network |
+| Alt+D | Duplicate linked parameters | Network |
+| Shift+D | Duplicate objects and move | Viewport |
+| Alt+D | Duplicate objects and move | Viewport |
 | Ctrl+G | Group / ungroup nodes | Network |
 | Ctrl+G | Group Create from selection | Viewport |
 | Ctrl+X | Dissolve nodes | Network |
