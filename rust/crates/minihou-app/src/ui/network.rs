@@ -913,7 +913,7 @@ pub fn position_add(ctx: &egui::Context, path: &Path, old: &serde_json::Value,
             if before { next_graph.nodes.iter().any(|(target, def)| target == anchor &&
                 def.inputs.iter().any(|(_, refs)| refs.contains(id))) }
             else { node.inputs.iter().any(|(_, refs)| refs.iter().any(|source| source == anchor)) });
-        if let Some((id, _)) = inserted.filter(|(id, _)| live_override || json_pos(next, id).is_none()) {
+        if let Some((id, _)) = inserted {
             positions = network_layout::insert_position(&graph, &positions, anchor, id, before);
         }
     }
@@ -1381,6 +1381,19 @@ mod tests {
             assert_eq!(cached().moved[&id], pos2(320.,256.));
             assert_eq!(cached().moved["out"], pos2(320.,416.));
         }
+    }
+
+    #[test]
+    fn stream_add_without_live_override_pushes_output_node_down() {
+        let ctx = egui::Context::default();
+        let path = Path::new("downstream-push-test.json");
+        let old = serde_json::json!({"version":1,"display":"out","nodes":{
+            "a":{"type":"normal","pos":[320.,96.]},"out":{"type":"output","inputs":{"geo":"a"},"pos":[320.,256.]}
+        }});
+        let (mut next, id) = crate::graph_edit::add(&old, "normal", Some("out")).unwrap();
+        let _ = position_add(&ctx, path, &old, &mut next, Some("out")).unwrap();
+        assert_eq!(next["nodes"][&id]["pos"], serde_json::json!([320.,256.]));
+        assert_eq!(next["nodes"]["out"]["pos"], serde_json::json!([320.,416.]));
     }
 
     #[test]
